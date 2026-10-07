@@ -3,7 +3,7 @@
 //   readState(surface, args)   `thimble state <surface> --cwd <dir> [args]`, which prints the JSON the server's GET route
 //                              for that surface gives the browser; `{error}` and exit 1 when it fails
 //   act(kind, payload)         `thimble act <kind> --cwd <dir> <json>`, which calls what the browser's POST route calls
-//                              and prints `{ok, …}`
+//                              and prints `{ok, …}`; actLong the same for an act that runs until a label's run ends
 //
 // The renderer keeps no data of its own: what these print is drawn, and read again when the workspace changes. To see
 // that it changed without starting Python, `signature` lists the workspace's folders (names, sizes and times only).
@@ -84,6 +84,19 @@ export async function readState<T = unknown>(cx: Ctx, sc: Scope, surface: string
 export async function act<T = Record<string, unknown>>(cx: Ctx, sc: Scope, kind: string, payload: Record<string, unknown>): Promise<Got<T>> {
   try {
     const r = await cx.run([sc.bin, 'act', kind, '--cwd', sc.cwd, JSON.stringify(payload)], { cwd: sc.cwd, env: sc.env, timeoutMs: ACT_TIMEOUT_MS })
+    const got = parsePrinted(r)
+    if (got.ok && (got.value as { ok?: unknown })?.ok === false) return { ok: false, error: String((got.value as { error?: unknown }).error ?? 'refused') }
+    return got as Got<T>
+  } catch (err) {
+    return { ok: false, error: String(err).slice(0, 300) }
+  }
+}
+
+/** An act that may run longer than a run allows (`label-run` on every record): started beside the session, which it ends
+ *  with, its answer read once it exits. */
+export async function actLong<T = Record<string, unknown>>(cx: Ctx, sc: Scope, kind: string, payload: Record<string, unknown>): Promise<Got<T>> {
+  try {
+    const r = await cx.runLong([sc.bin, 'act', kind, '--cwd', sc.cwd, JSON.stringify(payload)], { cwd: sc.cwd, env: sc.env })
     const got = parsePrinted(r)
     if (got.ok && (got.value as { ok?: unknown })?.ok === false) return { ok: false, error: String((got.value as { error?: unknown }).error ?? 'refused') }
     return got as Got<T>

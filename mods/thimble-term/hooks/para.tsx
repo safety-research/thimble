@@ -1,8 +1,8 @@
 // A paragraph (or a table) of a reply that holds citations: a Client surface module, drawn on Claude Code's drawing
 // thread (no `$`). It wraps the block to its region, draws each citation as a link (cite.ts), ◌ beside a citation a
-// fix round or a verification is working on, shows the hovered citation's tip in inverse beside it, and hands each
-// press to gestures.tsx with what is under the pointer: a citation, a table row, or the sentence of the word there.
-// While the right-click menu is open on one of its passages, that passage is shaded.
+// fix round or a verification is working on, draws the citation under the pointer in inverse with its tip on a quiet
+// box beside it, and hands each press to gestures.tsx with what is under the pointer: a citation, a table row, or the
+// sentence of the word there. A right-click does what a click does.
 //
 // A Client holds the pointer from press to release, so the terminal cannot select its text: the paragraph selects it
 // itself. A drag lights the cells it covers and, on release, the text goes to the clipboard (register.tsx copies it);
@@ -17,7 +17,7 @@ import type { ClientModule, ClientSurface, RenderElement } from 'claude-code'
 import { blockLayout, passageAt } from './cite'
 import type { ChipView } from './cite'
 import { lineWidth, shade, width } from './draw'
-import { menuLines, onPointer, send } from './gestures'
+import { onPointer, send } from './gestures'
 import type { Target } from './gestures'
 import type { Run, TableRuns } from './lib'
 import { COLORS, paintLine } from './paint'
@@ -29,7 +29,6 @@ type Props = {
   /** each citation's claim key (cite.ts claimKey) */
   ids: string[]
   raws: string[]
-  menu?: Target | null
 }
 /** A selection, from the cell pressed to the cell the drag is on (either order). */
 type Sel = { y0: number; x0: number; y1: number; x1: number }
@@ -144,16 +143,16 @@ const Para: ClientModule<Props, S> = (props, surface) => {
   if (surface.state === undefined) surface.setState(st)
 
   const sel = st.cols === cols ? st.sel : null
-  const lit = sel ? shade(menuLines(lay, props.raws, props.menu), selCells(sel, lay.lines.length), COLORS.selected) : menuLines(lay, props.raws, props.menu)
+  const lit = sel ? shade(lay.lines, selCells(sel, lay.lines.length), COLORS.selected) : lay.lines
   const rows: RenderElement[] = lit.map(l => paintLine(Text, l))
   const span = hover >= 0 ? lay.spans.find(s => s.chip === hover) : undefined
   const tip = hover >= 0 ? props.chips[hover]?.tip : undefined
-  // a tip in inverse over the line above the citation, or below it on a first line, or on a one-line paragraph after
-  // its text (an absolute Box is clipped to the region, which is one row tall then); no box behind it
+  // the tip on a quiet box on the row below the citation, or above it on the paragraph's last row; on a one-line
+  // paragraph after its text (an absolute Box is clipped to the region, which is one row tall then)
   if (span && tip) {
     const room = Math.max(10, cols - 3)
     let text = width(tip) > room ? `${tip.slice(0, room - 1)}…` : tip
-    let top = span.line > 0 ? span.line - 1 : lay.lines.length > 1 ? span.line + 1 : 0
+    let top = span.line < lay.lines.length - 1 ? span.line + 1 : Math.max(0, span.line - 1)
     let left = Math.max(0, Math.min(span.x0, cols - width(text) - 2))
     if (lay.lines.length === 1) {
       const end = lineWidth(lay.lines[0]!) + 2
@@ -162,7 +161,7 @@ const Para: ClientModule<Props, S> = (props, surface) => {
       left = end
       top = 0
     }
-    if (text) rows.push(Box({ position: 'absolute', top, left, children: Text({ inverse: true, children: ` ${text} ` }) }))
+    if (text) rows.push(Box({ position: 'absolute', top, left, children: Text({ backgroundColor: COLORS.tip, children: ` ${text} ` }) }))
   }
   // a released selection: "ask about this" on the line below its end, or at the right of its last line
   askAt.delete(surface)

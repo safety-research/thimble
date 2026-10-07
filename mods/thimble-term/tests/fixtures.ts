@@ -66,13 +66,14 @@ export const LABEL = {
   id: 'd9b51617',
   name: 'links through a fetch proxy',
   description: 'A revision whose text links through a fetch proxy or reader service.',
+  spec: 'r\\.jina\\.ai|proxy\\.',
   kind: 'regex',
   unit: 'record',
   glob: 'revisions.jsonl',
   labels: ['proxy-link', 'none'],
   trial: false,
   label_stats: { n_labeled: 14591, counts: { none: 9400, 'proxy-link': 5191 } },
-  last_run: { total: 14591, labeled: 14591, status: 'done', paths: ['revisions.jsonl'] },
+  last_run: { total: 14591, matched_total: 14591, labeled: 14591, status: 'done', paths: ['revisions.jsonl'], limit: null },
   rows: [
     { ref: 'revisions.jsonl#L10566', label: 'proxy-link', rationale: 'r.jina.ai link', analyst: null, text: 'SEC download https://r.jina.ai/https://www.sec.gov/files/county.json' },
     { ref: 'revisions.jsonl#L1510', label: 'none', rationale: '', analyst: 'none', text: 'Welcome to the wiki' },
@@ -247,6 +248,18 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       default:
         return out({ error: `no surface ${what}` }, 1)
     }
+  })
+  // an act that runs until a label's run ends (actLong): started beside the session, its answer read once it exits
+  // (the test's own hook is the bottom: it yields the chunks and returns `{ value }` with how the child ended)
+  on('process.spawn', async function* ($, e, next) {
+    void next
+    const argv = [...e.argv]
+    w.calls.push(argv)
+    const [, , what, , , payload] = argv
+    w.acts.push({ kind: what!, payload: JSON.parse(payload ?? '{}') as Record<string, unknown> })
+    const answer = what === 'label-run' ? { ok: true, label: LABEL.id, summary: { status: 'done', labeled: 30, failed: 0, counts: { 'proxy-link': 12, none: 18 } } } : { ok: true }
+    yield { stream: 'stdout' as const, text: JSON.stringify(answer) }
+    return { value: { code: 0, signal: null } } as never
   })
   on('ui.open', ($, e) => {
     w.opened.push(e.id)

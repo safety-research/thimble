@@ -295,6 +295,47 @@ async def test_act_makes_what_the_browser_makes(term, monkeypatch):
     assert concepts.find_concept(ws, "bash")
 
 
+async def test_act_edits_and_runs_a_label_as_the_label_editor_does(term):
+    """The label panel's edits: `label` saves the kind, the prompt (or pattern or code) and the files as the browser's
+    label editor saves them; `label-run` runs the label on a sample or on every record and answers with the run's
+    summary once it ends; a code label's run waits for `thimble-run label` in main's Bash, whose command it gives."""
+    from app import concepts
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    ws = config.workspace_dir(CORPUS)
+    before = concepts.find_concept(ws, "bash")
+    got = await local.act(CORPUS, "label", {"label": "bash", "body": "Read", "glob": "agents/agent-01.jsonl"})
+    after = concepts.find_concept(ws, "bash")
+    assert got["ok"] and got["label"] == before["id"] and got["concept"]["spec"] == "Read"
+    assert after["spec"] == "Read" and after["glob"] == "agents/agent-01.jsonl" and after["version"] == before["version"] + 1
+    # a prompt label's prompt is its description, as the editor saves it (patchOf)
+    await local.act(CORPUS, "label", {"label": "bash", "kind": "prompt", "body": "Does the record run a tool?"})
+    k = concepts.find_concept(ws, "bash")
+    assert (k["kind"], k["description"], k["spec"]) == ("prompt", "Does the record run a tool?", "")
+    await local.act(CORPUS, "label", {"label": "bash", "kind": "regex", "body": "Bash"})
+    ran = await local.act(CORPUS, "label-run", {"label": "bash", "limit": 3})
+    s = ran["summary"]
+    assert ran["ok"] and s["status"] == "done" and s["limit"] == 3 and s["labeled"] <= 3
+    whole = await local.act(CORPUS, "label-run", {"label": "bash"})
+    assert whole["summary"]["status"] == "done" and whole["summary"]["limit"] is None
+    assert concepts.find_concept(ws, "bash")["applications"][-1]["paths"] == ["agents/agent-01.jsonl"]
+    # a code label's code runs only where main's Bash runs it
+    await local.act(CORPUS, "label", {"label": "bash", "kind": "code", "body": "def label(unit):\n    return 'yes', 1.0"})
+    deferred = await local.act(CORPUS, "label-run", {"label": "bash", "limit": 5})
+    assert deferred["deferred"] is True and deferred["command"].endswith(f"label {before['id']}")
+    pending = concepts.find_concept(ws, "bash")[concepts.PENDING_RUN]
+    assert pending["args"]["predicate"]["kind"] == "code" and pending["args"]["limit"] == 5
+    await local.act(CORPUS, "label", {"label": "bash", "values": ["tool", "no tool"]})
+    assert concepts.find_concept(ws, "bash")["labels"] == ["tool", "no tool"]
+    with pytest.raises(local.StateError, match="two values"):
+        await local.act(CORPUS, "label", {"label": "bash", "values": ["one"]})
+    with pytest.raises(local.StateError, match="nothing to change"):
+        await local.act(CORPUS, "label", {"label": "bash"})
+    with pytest.raises(local.StateError, match="no label"):
+        await local.act(CORPUS, "label-run", {"label": "nope"})
+
+
 def _cli(*argv: str, env: dict | None = None, cwd: Path | None = None) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-m", "app.local", *argv], cwd=cwd or BACKEND, env=env or dict(os.environ),
                           capture_output=True, text=True, timeout=120)

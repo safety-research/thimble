@@ -3,11 +3,11 @@
 // panel.tsx draw.
 //
 // Nothing here writes the workspace: a read is `thimble state`, a change is `thimble act` (hooks/data.ts).
-import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermPanel, TermThreadRow } from '../types'
+import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermLabelUi, TermPanel, TermThreadRow } from '../types'
 import { busyWords, cardOfCell } from './cell'
 import type { ThimbleCell, ThimbleLabel } from './cell'
 import type { Ctx, SurfaceGot } from './ctx'
-import { act, changed, readState, signature } from './data'
+import { act, actLong, changed, readState, signature } from './data'
 import type { Area, Scope, Signature } from './data'
 import { cid, citations } from './lib'
 import type { Citation } from './lib'
@@ -16,8 +16,13 @@ import { NAV_EMPTY, backTarget, moved, nextTrail } from './nav'
 import { withSignal } from './signal'
 
 export const P = 'thimble-term'
+export const LABEL_UI_EMPTY: TermLabelUi = { open: [], kind: {}, runs: {}, said: {} }
+export const FILES_UI_EMPTY: TermFilesUi = { folded: [], unfolded: [], pick: '' }
 /** The one pane thimble-term opens: home, a card, a citation, a thread, a label, a document, the files, an agent. */
 export const PANEL = 'thimble-term'
+
+/** The threads whose chats the threads panel reads, the newest. */
+const THREADS_READ = 30
 
 /** The panel's width: 96 columns, or what leaves main 70 beside it. */
 const PANEL_COLS = 96
@@ -219,6 +224,8 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
     }
     case 'label':
       if (p.label) await readSurface(cx, `label:${p.label}`, 'label', [p.label])
+      // the cards that use it: its own label card and every card that read it
+      await readSurface(cx, 'canvas', 'cards', ['--since', iso(0)])
       return
     case 'labels':
       await readSurface(cx, 'labels', 'labels')
@@ -234,19 +241,27 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
         await loadCards(cx, ids)
       }
       return
-    case 'files':
+    case 'files': {
       await readSurface(cx, 'files', 'files')
+      // the chosen file's first lines, shown under the list
+      const pick = (await cx.filesUi()).pick
+      if (pick) await readSurface(cx, `file:${pick}:1`, 'files', [pick])
       return
+    }
     case 'file':
       if (p.path) await readSurface(cx, `file:${p.path}:${p.start ?? 1}`, 'files', [p.path, ...(p.start && p.start > 1 ? ['--start', String(p.start)] : [])])
       return
-    case 'thread':
     case 'agent':
       if (p.thread) await readThread(cx, p.thread)
-      if (p.view === 'thread' && p.thread) await markSeen(cx, p.thread)
       return
+    case 'thread':
     case 'threads':
+      // the tree shows each thread's latest answer: every thread's chat is read (from where the last read stopped)
       await refreshThreads(cx)
+      for (const t of (await cx.threads()).slice(-THREADS_READ)) await readThread(cx, t.id)
+      // the one shown, though the list may not hold it yet (one just asked)
+      if (p.view === 'thread' && p.thread && !(await cx.threads()).slice(-THREADS_READ).some(t => t.id === p.thread)) await readThread(cx, p.thread)
+      if (p.view === 'thread' && p.thread) await markSeen(cx, p.thread)
       return
     default:
   }
@@ -295,7 +310,6 @@ export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
   rt.navFrom = null
   await cx.setNav(nav)
   await cx.setPanel(p)
-  if (p.view !== 'menu') await cx.setMenu(null)
   void loadPanel(cx, p).then(() => cx.bumpPanel())
   try {
     const r = await cx.open({ id: PANEL, title: p.title || 'thimble', focus: true, columns: panelColumns() })
@@ -314,7 +328,7 @@ export async function closePanel(cx: Ctx): Promise<void> {
 export async function navGo(cx: Ctx, nav: ChatNav): Promise<void> {
   const s = nav.trail.at(-1)
   const p = s ? panelOfStep(s) : null
-  if (!p || p.view === 'menu') return
+  if (!p) return
   rt.navTo = nav
   await openPanel(cx, p)
 }
@@ -418,6 +432,65 @@ export async function threadMessage(cx: Ctx, thread: string, message: string): P
   return ''
 }
 
+// ------------------------------------------------------------------------------------------------ labels
+
+/** What the label panel changes of a label (`thimble act label`): its kind, its prompt (or pattern or code), its files,
+ *  its values. */
+export type LabelPatch = { kind?: string; body?: string; glob?: string; values?: string[] }
+
+async function labelSaid(cx: Ctx, id: string, words: string, run?: { limit: number; at: number } | null): Promise<void> {
+  const ui = await cx.labelUi()
+  const runs = { ...ui.runs }
+  if (run === null) delete runs[id]
+  else if (run) runs[id] = run
+  await cx.setLabelUi({ ...ui, runs, said: { ...ui.said, [id]: words } })
+  await cx.bumpPanel()
+}
+
+/** Save the label panel's edits (`thimble act label`), then read the label again. '' when saved, else why not. */
+export async function saveLabel(cx: Ctx, id: string, patch: LabelPatch): Promise<string> {
+  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+  const got = await act(cx, rt.sc, 'label', { label: id, ...patch })
+  await readSurface(cx, `label:${id}`, 'label', [id])
+  if (!got.ok) {
+    await labelSaid(cx, id, `× not saved: ${got.error}`)
+    return got.error
+  }
+  const ui = await cx.labelUi()
+  const kind = { ...ui.kind }
+  delete kind[id]
+  await cx.setLabelUi({ ...ui, kind })
+  await labelSaid(cx, id, 'saved')
+  return ''
+}
+
+const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`
+
+/** Run a label from its panel on a sample of `limit` records, or on every record (`limit` 0), with `thimble act
+ *  label-run`, which answers once the run ends: the panel says `◌ labeling` meanwhile and the counts after. A code
+ *  label's code runs only in main's Bash: main is asked to run the command the act gives. */
+export async function runLabel(cx: Ctx, id: string, name: string, limit: number): Promise<void> {
+  if (!rt.sc) return
+  await labelSaid(cx, id, '', { limit, at: await cx.now() })
+  const got = await actLong<{ deferred?: boolean; command?: string; summary?: { counts?: Record<string, number>; labeled?: number; failed?: number; message?: string | null } }>(cx, rt.sc, 'label-run', { label: id, ...(limit ? { limit } : {}) })
+  if (!got.ok) {
+    await labelSaid(cx, id, `× ${got.error}`, null)
+    return
+  }
+  if (got.value.deferred && got.value.command) {
+    await cx.submit(`Run the code label "${name}" ${limit ? `on a sample of ${limit} records` : 'on every record'}, as I changed it in its panel. Run this with Bash: ${got.value.command}`)
+    await labelSaid(cx, id, 'its code runs in main\'s Bash: main was asked to run it', null)
+    return
+  }
+  const s = got.value.summary ?? {}
+  const counts = Object.entries(s.counts ?? {}).map(([v, n]) => `${v} ${n.toLocaleString('en-US')}`).join(' · ')
+  const failed = s.failed ? ` · ${plural(s.failed, 'record')} failed` : ''
+  await readSurface(cx, `label:${id}`, 'label', [id])
+  // the label cards that count it are read again
+  for (const [card, lid] of rt.labelOf) if (lid === id) await loadCards(cx, [card])
+  await labelSaid(cx, id, `ran on ${limit ? `a sample of ${(s.labeled ?? limit).toLocaleString('en-US')}` : `all ${(s.labeled ?? 0).toLocaleString('en-US')}`}${counts ? `: ${counts}` : ''}${failed}`, null)
+}
+
 // ------------------------------------------------------------------------------------------------ the refresh loop
 
 async function refreshAgents(cx: Ctx): Promise<void> {
@@ -452,7 +525,7 @@ async function followUi(cx: Ctx, apply: UiApply): Promise<void> {
 }
 
 /** The areas a panel view reads. */
-const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats'], labels: ['labels'], label: ['labels'], docs: ['docs'], doc: ['docs', 'cards'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'] }
+const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs'], doc: ['docs', 'cards'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'], thread: ['chats'] }
 
 /** One pass: what changed in the workspace since the last pass, read again where some drawing shows it. */
 export async function tick(cx: Ctx, ui: UiApply): Promise<void> {

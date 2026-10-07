@@ -549,7 +549,8 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 
 
 ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
-             "verdict {label, ref, value}, seen {thread}, stop {agent}")
+             "verdict {label, ref, value}, label {label, kind?, body?, glob?, values?}, label-run {label, limit?}, seen {thread}, "
+             "stop {agent}")
 
 
 async def act(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -611,6 +612,75 @@ async def _act_verdict(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"label": found["id"], **out}
 
 
+async def _act_label(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The analyst's edit of a label in the terminal's label panel, saved as the browser's label editor saves it (PUT
+    /concepts/{id}, concepts.update_concept_route; LabelCard's patchOf): `kind` (prompt, regex or code), `body` (a prompt
+    label's prompt, else its pattern or code), `glob` (the files it applies to) and `values`. A field left out stays as it
+    is."""
+    from . import concepts  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    found = concepts.find_concept(ws, _text(payload, "label"))
+    if found is None:
+        raise StateError(f"no label {payload.get('label')!r}")
+    patch: dict[str, Any] = {}
+    kind = str(payload["kind"]).strip().lower() if payload.get("kind") is not None else found["kind"]
+    if payload.get("kind") is not None:
+        patch["kind"] = kind
+    if payload.get("body") is not None:
+        body = str(payload["body"]).strip()
+        if not body:
+            raise StateError("`body` is empty")
+        patch.update({"description": body, "spec": ""} if kind == "prompt" else {"spec": body})
+    if payload.get("glob") is not None:
+        patch["glob"] = _text(payload, "glob")
+    if payload.get("values") is not None:
+        values = [" ".join(str(v).split()) for v in payload["values"]] if isinstance(payload["values"], list) else []
+        if len([v for v in values if v]) < 2:
+            raise StateError("`values` needs two values or more")
+        patch["labels"] = [v for v in values if v]
+    if not patch:
+        raise StateError("nothing to change: give kind, body, glob or values")
+    out = await asyncio.to_thread(concepts.update_concept_route, c, str(found["id"]), concepts.ConceptPatch(**patch))
+    return {"label": found["id"], "concept": out}
+
+
+async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Run a label on a sample of `limit` records, or on every record with no `limit`, as the browser's Re-run does
+    (concepts.apply_route): a label that never ran gets its card, and main hears of a version it has not heard of
+    (tell_main). The run goes on in this process until it ends and its summary is the answer, so the renderer starts it
+    beside the session, which it ends with. A code label's code runs only in main's sandbox: as apply_label does, the run
+    waits for `thimble-run label` (concepts.PENDING_RUN), and the answer gives its command (`deferred`)."""
+    from . import cardrun, concepts  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    found = concepts.find_concept(ws, _text(payload, "label"))
+    if found is None:
+        raise StateError(f"no label {payload.get('label')!r}")
+    cid = str(found["id"])
+    limit = _int(str(payload["limit"]), 0, "limit") if payload.get("limit") not in (None, "") else 0
+    if limit < 0:
+        raise StateError("limit must be 1 or more, or left out for every record")
+    files = found["unit"] in concepts.FILE_UNITS
+    paths = concepts.glob_patterns(found["glob"]) if files else []
+    if found["kind"] == "code" and cardrun.defers(c):
+        args: dict[str, Any] = {"scope": concepts.SCOPE_OF_UNIT.get(found["unit"], "files"), "name": found["name"],
+                                "predicate": {"kind": "code", "text": found["spec"]}, "values": found["labels"],
+                                **({"paths": paths} if files else {}), **({"limit": limit} if limit else {})}
+        concepts.set_pending_run(c, cid, args, None)
+        cardrun.mirror(c)
+        return {"label": cid, "deferred": True, "command": cardrun.command("label", cid)}
+    ran_before = bool(found["applications"])
+    await concepts.start_apply(c, cid, paths, limit or None, "user")
+    cards = await asyncio.to_thread(concepts._label_cards, ws, cid)
+    card = dict(cards[0][1]) if cards else None
+    if card is None and not ran_before:
+        card = await asyncio.to_thread(concepts.label_card, c, found, None, "user")
+    concepts.tell_main(c, found, card)
+    summary = await concepts.wait_apply(c, cid, float("inf"))
+    return {"label": cid, "summary": summary}
+
+
 async def _act_seen(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """The analyst opened a thread: its answers so far are seen (threads.mark_seen)."""
     from . import threads  # noqa: PLC0415
@@ -633,8 +703,8 @@ async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"stopped": True, **({"done": True} if ans.get("done") else {})}
 
 
-_ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "seen": _act_seen,
-         "stop": _act_stop}
+_ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "label": _act_label,
+         "label-run": _act_label_run, "seen": _act_seen, "stop": _act_stop}
 
 
 # --------------------------------------------------------------------------- the command line

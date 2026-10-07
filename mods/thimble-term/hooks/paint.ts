@@ -16,22 +16,33 @@ type BoxC = ElementConstructor<BoxProps>
 export const SERIES = ['#1d7fc0', '#b77300', '#00946a', '#b96895', '#8c65e8', '#927543', '#87861a'] as const
 
 // What each colour means (views/SPEC.md, "The visual system", section 4): letters in the text colour or dim; lines in
-// the rule grey; a palette hue only on the glyphs and marks of a region's one colour field; red only for a problem; the
-// selection background on the current or chosen one. No other colour: no link, code, success, warning or accent colour.
+// the rule grey; links in blue; a panel's title and its selected row in the accent; the word "new" in green; a palette
+// hue only on the glyphs and marks of a region's one colour field; red only for a problem; the selection background on
+// a choice in use. No other colour: no warning amber, and no green but "new".
 export const COLORS = {
   series: [...SERIES] as string[],
   text: 'text',
   /** secondary: read after the thing it belongs to */
   dim: 'inactive',
-  /** lines only: rules, tracks, axes, tree guides, a diagram's boxes and edges */
+  /** lines only: rules, card borders, tracks, axes, tree guides, a diagram's boxes and edges */
   rule: 'subtle',
   /** the background Claude Code draws a docked pane on, the whole panel */
   panel: 'composerSidebarBackground',
-  /** the current or chosen one: a selected row or mark, the active tab, a filter that is on, a cited value, the open
-   *  menu's target, text being dragged; clear on the panel in light and dark themes */
+  /** a choice in use among those shown: a card's parameter, a filter that is on, a cited value in its lines, text
+   *  being dragged; clear on the panel in light and dark themes */
   selected: 'selectionBg',
   /** a problem, and only a problem */
   problem: 'error',
+  /** a link, underlined: a citation's value, the place after ↗, a label's name on a card; the "?" and "↳" margins */
+  link: 'remember',
+  /** where you are: a panel's title, the selected row */
+  accent: 'suggestion',
+  /** the word "new" and "N new" */
+  fresh: 'success',
+  /** the background of the tip of the citation under the pointer */
+  tip: 'userMessageBackground',
+  /** inline code in the mod's own paragraphs */
+  code: 'permission',
 }
 
 function seg(Text: TextC, s: Seg): RenderElement {

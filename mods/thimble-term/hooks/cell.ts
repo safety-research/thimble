@@ -26,6 +26,10 @@ export type ThimbleCell = {
   regenerating_for?: string[]
 }
 
+/** One run of a label as the concept keeps it: the records it ran over (`total`), those its scope holds
+ *  (`matched_total`), those labeled, its sample size (`limit`, none for every record), when it began. */
+export type LabelRun = { total?: number; matched_total?: number | null; labeled?: number; status?: string; paths?: string[]; limit?: number | null; ts?: string }
+
 /** A label (`thimble state label <id>`, the concept route's shape), with a page of its rows when the backend gives
  *  one (`rows`, as GET /concepts/<id>/rows?text=1 answers). */
 export type ThimbleLabel = {
@@ -37,8 +41,10 @@ export type ThimbleLabel = {
   labels?: string[]
   trial?: boolean
   label_stats?: { counts?: Record<string, number>; n_labeled?: number }
-  applications?: { total?: number; labeled?: number; status?: string; paths?: string[] }[]
-  last_run?: { total?: number; labeled?: number; status?: string; paths?: string[] } | null
+  description?: string
+  spec?: string
+  applications?: LabelRun[]
+  last_run?: LabelRun | null
   rows?: { ref?: string; label?: string; rationale?: string; analyst?: unknown; text?: string; confidence?: number }[]
 }
 

@@ -69,7 +69,7 @@ test("a card whose run failed says why; one waiting for its run says so", () => 
   expect(busyWords(of('ff73e071'))).toBe('')
 })
 
-test("a label card: its counts in the label's order, its records with their value, words and the analyst's verdict", () => {
+test("a label card: its counts as bars in the label's order; the records it carries are drawn in the label panel, not on it", () => {
   const card = labelCard(of('l0label0'), LABEL as never)
   expect(card.kind).toBe('label')
   expect((card.rows as BarRow[]).map(r => [r.label, r.value])).toEqual([['proxy-link', 5191], ['none', 9400]])
@@ -78,7 +78,8 @@ test("a label card: its counts in the label's order, its records with their valu
   expect(card.examples![1]).toMatchObject({ value: 'none', set: true })
   const lines = text('l0label0', 90)
   expect(lines.some(l => /proxy-link .*5,191/.test(l))).toBe(true)
-  expect(lines.some(l => l.includes('agree') && l.includes('disagree'))).toBe(true)
+  // a label card is a bar card of its counts: its records and their verdicts are the label panel's
+  expect(lines.some(l => l.includes('agree'))).toBe(false)
   // before the label is read, a line that says so
   expect(labelCard(of('l0label0'), null).kind).toBe('note')
 })
