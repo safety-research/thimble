@@ -126,8 +126,13 @@ load()
   the frame's top and bottom to the lens's. The lens stands as far down the zoomed track as the frame stands down the
   overview, so the two move together.
 - Hovering the overview shows the records under the pointer in a preview, each a row with its color as a bar on its
-  left edge, its time and first line, without scrolling. A click goes there, a click on a mark goes to its record, and
-  a drag scrubs, on either track.
+  left edge, its time and first line, without scrolling. A click on the overview sends the frame there (a click on a
+  mark, to its record), and a drag of the frame, or from where a press sent it, scrubs the list.
+- A drag on the zoomed track scrolls the list at the zoomed track's scale, as a scrollbar's thumb does: the lens
+  follows the pointer over records that hold still, and a pixel of the track is a few of the list. A press off the lens
+  brings the lens there first. Let go, the lens glides back to where the frame puts it.
+- The tracks move in the browser's animation frames with transforms alone, so they follow a scroll or a drag frame by
+  frame; once still, every edge goes onto the device's pixel grid.
 
 For a list that draws only the rows in view, give every row's value in order: `colour.strip('#list', {rows: values})`,
 with `preview(i)` (what the preview says of row `i`: a string, or `{when, text}`; `refs`, each row's record, is

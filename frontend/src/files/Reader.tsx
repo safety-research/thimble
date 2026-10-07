@@ -25,7 +25,7 @@ import { findColumn, rulerColumns, useRuler, type RulerTick, type Seen, type Sho
 import { ColorBy } from './ColorBy'
 import { keyColor, KEY_COLORS, OTHER, recordObject } from './colorChoice'
 import { ColorContext } from './colorContext'
-import { followOf, labelPaint, ReaderTracks, zoomWindow, type OverviewPaint, type PreviewRecord, type ZoomView } from './Tracks'
+import { labelPaint, PlaceFeed, ReaderTracks, ZOOM_SPAN, type DrawnRecord, type OverviewPaint, type PreviewRecord } from './Tracks'
 import { useColorBy } from './useColorBy'
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
@@ -45,11 +45,20 @@ const CAP = 2000
 const SAMPLE = 20
 /** px from either end of the records at which the next page loads */
 const LOAD_AHEAD_PX = 400
-/** the records a drag of the scrollbar loads before and after its line while the thumb is held */
+/** the records a drag of the frame shows before and after its line while the frame is held */
 const DRAG_BEFORE = 5
 const DRAG_AFTER = 30
-/** ms after a page lands before a held drag loads the next, so the thumb keeps moving between them */
-const DRAG_LOAD_MS = 150
+/** a held drag of the frame reads ahead when it has not read this many lines past its place in its direction: a read
+ * takes AHEAD_READ lines that way and AHEAD_BEHIND the other (the server gives at most 250 a side), and the drag keeps
+ * AHEAD_MAX of them */
+const AHEAD_NEAR = 120
+const AHEAD_READ = 240
+const AHEAD_BEHIND = 40
+const AHEAD_MAX = 3000
+/** ms between the records a held drag of the frame shows from what it read ahead: every other frame at least, and at
+ * most DRAG_SHOW_MAX_MS twice over where drawing them takes longer than a frame */
+const DRAG_SHOW_MS = 30
+const DRAG_SHOW_MAX_MS = 60
 /** ms between asks for the line count while the server's is an estimate (a big file whose line index is being built) */
 const LINES_POLL_MS = 1000
 /** the order of the built-in views in the mode switch */
@@ -625,50 +634,45 @@ export function useRecordLines(ws: string, ref: string | undefined, path: string
   return { at: mine?.at ?? null, pending: asks && !mine }
 }
 
-/** The stretch of the body the zoomed track shows, and where each record drawn in it stands, px of the body's content. */
-interface ZoomGeom {
-  from: number
-  to: number
-  viewTop: number
-  viewBottom: number
-  recs: { line: number; top: number; bottom: number }[]
-}
-
 /** records the zoomed track draws at most */
 const ZOOM_RECORDS = 400
 
-/** The zoomed track's stretch of the body (Tracks zoomWindow) for a reader `f` through the file (Tracks followOf),
- * whose records run from the file's first (`start`) or to its last (`end`), and the records in it; null when the body
- * draws none. */
-export function zoomGeomOf(body: HTMLElement, f: number, start: boolean, end: boolean): ZoomGeom | null {
+/** The records the body draws for the zoomed track around its scroll: those within three ZOOM_SPAN heights of the body
+ * that hold every stretch the zoomed track can show at this scroll, on a grid of those heights so that they change only
+ * as the reader scrolls past a step of it, and at most ZOOM_RECORDS, those nearest the view. Null when the body draws
+ * none. */
+export function zoomRecordsOf(body: HTMLElement): DrawnRecord[] | null {
   const cards = body.querySelectorAll<HTMLElement>('.reader-card[data-line]')
   if (!cards.length) return null
   const st = body.scrollTop
-  const h = body.clientHeight
-  const [from, to] = zoomWindow(st, h, body.scrollHeight, f, start, end)
+  const unit = Math.max(1, body.clientHeight * ZOOM_SPAN)
+  const from = (Math.floor(st / unit) - 1) * unit
+  const to = from + 3 * unit
   const base = body.getBoundingClientRect().top - st
-  let lo = 0
-  let hi = cards.length - 1
-  let first = cards.length
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1
-    if (cards[mid].getBoundingClientRect().bottom - base > from) {
-      first = mid
-      hi = mid - 1
-    } else lo = mid + 1
+  const firstBelow = (y: number) => {
+    let lo = 0
+    let hi = cards.length - 1
+    let at = cards.length
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      if (cards[mid].getBoundingClientRect().bottom - base > y) {
+        at = mid
+        hi = mid - 1
+      } else lo = mid + 1
+    }
+    return at
   }
-  const recs: ZoomGeom['recs'] = []
+  // past ZOOM_RECORDS, those from half of them above the view on
+  const first = Math.max(firstBelow(from), firstBelow(st) - ZOOM_RECORDS / 2)
+  const recs: DrawnRecord[] = []
   for (let i = first; i < cards.length && recs.length < ZOOM_RECORDS; i++) {
     const r = cards[i].getBoundingClientRect()
     const top = r.top - base
     if (top >= to) break
     recs.push({ line: Number(cards[i].dataset.line), top, bottom: r.bottom - base })
   }
-  return { from, to, viewTop: st, viewBottom: st + h, recs }
+  return recs
 }
-
-const sameZoom = (x: ZoomGeom | null, y: ZoomGeom | null) =>
-  x === y || (!!x && !!y && x.from === y.from && x.to === y.to && x.viewTop === y.viewTop && x.viewBottom === y.viewBottom && x.recs.length === y.recs.length && x.recs.every((r, i) => r.line === y.recs[i].line && r.top === y.recs[i].top && r.bottom === y.recs[i].bottom))
 
 /** A record as the overview's hover shows it: its index, who and when (the sniff's keys, else those the record
  * carries), and its first two lines of words. */
@@ -691,8 +695,6 @@ export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color:
 
 const NO_LANES: Concept[] = []
 
-const sameShown = (x: Shown, y: Shown) =>
-  x.top === y.top && x.height === y.height && x.seen.length === y.seen.length && x.seen.every((s, i) => s.line === y.seen[i].line && s.top === y.seen[i].top && s.bottom === y.seen[i].bottom)
 
 function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only, onMode, findAsk }: ReaderProps) {
   const isDatabase = kind === 'forge'
@@ -734,8 +736,9 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // the record the find or go to line moved to, which the view scrolls to and flashes as it does a followed ref's
   const [findRef, setFindRef] = useState<string | null>(null)
   const [cursor, setCursor] = useState<MatchAt>(NO_MATCH)
-  const [shown, setShown] = useState<Shown>({ top: 0, height: 1, seen: [] })
-  const [zoomGeom, setZoomGeom] = useState<ZoomGeom | null>(null)
+  // where the reader stands and the records around it, which the tracks hear of each frame it scrolls without a render
+  // of the reader
+  const feed = useMemo(() => new PlaceFeed(), [])
   // columns lie past the right edge of the body (a wide table): a fade at the edge says so
   const [moreRight, setMoreRight] = useState(false)
   const bodyRef = useRef<HTMLDivElement | null>(null)
@@ -838,11 +841,9 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     const next =
       (total ? shownIn(el, total) : null) ??
       (!total || first == null || last == null ? { top: a, height: b - a, seen: [] } : { top: (first - 1 + a * (last - first + 1)) / total, height: ((b - a) * (last - first + 1)) / total, seen: [] })
-    setShown((cur) => (sameShown(cur, next) ? cur : next))
-    // the zoomed track follows the overview's frame: its lens stands as far down it as the frame stands down the file
-    const z = zoomGeomOf(el, followOf(next), first == null || first <= 1, total == null || (last != null && last >= total))
-    setZoomGeom((cur) => (sameZoom(cur, z) ? cur : z))
-  }, [total, first, last])
+    feed.set({ top: next.top, height: next.height, scroll: el.scrollTop, h: el.clientHeight, content: el.scrollHeight, start: first == null || first <= 1, end: total == null || (last != null && last >= total) })
+    feed.setRecords(zoomRecordsOf(el))
+  }, [total, first, last, feed])
 
   // the record at the top of the reader keeps its place while records above it change height: as they are drawn near
   // the view, and across a page loaded above or records dropped above (hold, in loadMore)
@@ -876,49 +877,112 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     measure()
   }, [jumpAt, records, first, last, measure])
 
-  // a scrollbar drag's target top, a fraction of the file. A place already loaded is scrolled to at once; another
-  // loads around its line first, one page at a time (DRAG_LOAD_MS apart while the thumb is held)
+  // a drag of the frame's target top, a fraction of the file. A place already loaded is scrolled to at once. While the
+  // frame is held the drag reads the file ahead of the pointer, in its direction, into `ahead`, and the records around
+  // each place it reaches show from there at once (DRAG_BEFORE and DRAG_AFTER of them), so that the reader follows
+  // every move of the pointer; a place not read yet shows once its read lands. Let go, a place not loaded loads as a
+  // jump does.
   const seeking = useRef<{ f: number; held: boolean } | null>(null)
   const loadingNow = useRef(loading)
   loadingNow.current = loading
-  const landedAt = useRef(0)
-  const seekTimer = useRef<number | null>(null)
-  const settleSeek = useCallback(() => {
+  const ahead = useRef(new Map<number, SourceRecord>())
+  const shownAt = useRef(0)
+  const showCost = useRef(0)
+  const showTimer = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (showTimer.current != null) window.clearTimeout(showTimer.current)
+  }, [])
+  const aheadAsk = useRef(false)
+  const aheadDir = useRef<{ line: number | null; dir: number }>({ line: null, dir: 1 })
+  const aheadOf = (line: number) => {
+    const lo = Math.max(1, line - DRAG_BEFORE)
+    const hi = Math.min(total ?? line, line + DRAG_AFTER)
+    const out: SourceRecord[] = []
+    for (let l = lo; l <= hi; l++) {
+      const r = ahead.current.get(l)
+      if (!r) return null
+      out.push(r)
+    }
+    return out.length ? out : null
+  }
+  const readAhead = (line: number) => {
+    const d = aheadDir.current
+    if (d.line != null && line !== d.line) d.dir = Math.sign(line - d.line)
+    d.line = line
+    if (aheadAsk.current || !total) return
+    const down = d.dir >= 0
+    const lo = Math.max(1, line - (down ? DRAG_BEFORE : AHEAD_NEAR))
+    const hi = Math.min(total, line + (down ? AHEAD_NEAR : DRAG_AFTER))
+    let missing = false
+    for (let l = lo; l <= hi && !missing; l++) missing = !ahead.current.has(l)
+    if (!missing) return
+    aheadAsk.current = true
+    api
+      .sourceAround(workspace, path, line, down ? AHEAD_BEHIND : AHEAD_READ, down ? AHEAD_READ : AHEAD_BEHIND, true)
+      .then((page) => {
+        const got = ahead.current
+        for (const r of page.records) got.set(r.line, r)
+        // the oldest reads go first past AHEAD_MAX
+        for (const k of got.keys()) {
+          if (got.size <= AHEAD_MAX) break
+          got.delete(k)
+        }
+        takeTotal(page.total_lines, page.total_estimated)
+      })
+      .catch(() => {})
+      .finally(() => {
+        aheadAsk.current = false
+        if (seeking.current) settleNow.current()
+      })
+  }
+  const settleSeek = () => {
     const s = seeking.current
     const el = bodyRef.current
     const recs = recordsRef.current
     if (!s || !el || !total || !recs.length) return
     const a = s.f * total
+    const line = Math.max(1, Math.min(total, Math.floor(a) + 1))
+    if (s.held) readAhead(line)
     if (a >= recs[0].line - 1 && (a < recs[recs.length - 1].line || recs[recs.length - 1].line >= total)) {
       const t = scrollTopFor(el, a)
       if (t != null) el.scrollTop = t
       if (!s.held) seeking.current = null
       return
     }
-    if (loadingNow.current || seekTimer.current != null) return
-    const wait = s.held ? landedAt.current + DRAG_LOAD_MS - performance.now() : 0
-    if (wait > 0) {
-      seekTimer.current = window.setTimeout(() => {
-        seekTimer.current = null
-        settleNow.current()
-      }, wait)
+    // read ahead already: those records show now, and the reader settles on the place once they are drawn; while the
+    // frame is held, at most every DRAG_SHOW_MS, or twice as long as the frame that last drew them took where that is
+    // longer, so that drawing them leaves the tracks their frames
+    const near = aheadOf(line)
+    if (near) {
+      const wait = s.held ? shownAt.current + Math.max(DRAG_SHOW_MS, 2 * showCost.current) - performance.now() : 0
+      if (wait > 0) {
+        if (showTimer.current == null)
+          showTimer.current = window.setTimeout(() => {
+            showTimer.current = null
+            settleNow.current()
+          }, wait)
+        return
+      }
+      shownAt.current = performance.now()
+      setRecords(near)
+      requestAnimationFrame((t0) => requestAnimationFrame((t1) => (showCost.current = Math.min(DRAG_SHOW_MAX_MS, t1 - t0))))
       return
     }
-    setJumpLine(Math.max(1, Math.min(total, Math.floor(a) + 1)), s.held)
-    if (!s.held) seeking.current = null
-  }, [total, setJumpLine])
+    if (s.held || loadingNow.current) return
+    setJumpLine(line)
+    seeking.current = null
+  }
   const settleNow = useRef(settleSeek)
   settleNow.current = settleSeek
   useLayoutEffect(() => {
-    landedAt.current = performance.now()
-    settleSeek()
-  }, [records, settleSeek])
-  useEffect(() => () => {
-    if (seekTimer.current != null) window.clearTimeout(seekTimer.current)
-  }, [])
-  const wheel = useCallback((px: number) => {
+    settleNow.current()
+  }, [records])
+  const scrollBy = useCallback((px: number) => {
     const el = bodyRef.current
-    if (el) el.scrollTop += px
+    if (!el) return 0
+    const was = el.scrollTop
+    el.scrollTop = was + px
+    return el.scrollTop - was
   }, [])
 
   const loadMore = useCallback(
@@ -981,6 +1045,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     seeking.current = { f, held }
     settleSeek()
     if (held || !total) return
+    ahead.current.clear()
+    aheadDir.current = { line: null, dir: 1 }
     // the pages a held drag left unloaded around the place it let go of load as a scroll there would load them
     onScroll()
     track('reader-find', { target: `${path}#L${Math.max(1, Math.min(total, Math.floor(f * total) + 1))}`, detail: { from: 'scrollbar' } })
@@ -1152,18 +1218,15 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // overview is one lane in the choice's colors
   const markers = useMemo(() => rulerCols.filter((c) => c.id === 'find'), [rulerCols])
   const recordAtLine = useMemo(() => new Map(records.map((r) => [r.line, r])), [records])
-  const zoom = useMemo<ZoomView | null>(() => {
-    if (!zoomGeom) return null
+  // a record's color on the zoomed track, and its value of the choice for its hover
+  const zoomColor = useMemo(() => {
     const names = new Map(color.values.map((v) => [v.id, v.name]))
-    return {
-      ...zoomGeom,
-      records: zoomGeom.recs.map((r) => {
-        const rec = recordAtLine.get(r.line)
-        const chip = rec ? color.chipOf(rec) : undefined
-        return { line: r.line, top: r.top, bottom: r.bottom, color: color.colors?.get(r.line)?.color ?? null, marks: [], title: (chip != null ? names.get(chip) : null) ?? '' }
-      }),
+    return (line: number) => {
+      const rec = recordAtLine.get(line)
+      const chip = rec ? color.chipOf(rec) : undefined
+      return { color: color.colors?.get(line)?.color ?? null, title: (chip != null ? names.get(chip) : null) ?? '' }
     }
-  }, [zoomGeom, color, recordAtLine])
+  }, [color, recordAtLine])
   const hint = builtins.transcript
   const preview = useCallback(
     (line: number) =>
@@ -1175,10 +1238,6 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
       ),
     [workspace, path, color, hint],
   )
-  const scrollToLine = (line: number) => {
-    track('reader-find', { target: `${path}#L${line}`, detail: { from: 'ruler' } })
-    setJumpLine(line)
-  }
   // the record a mark of the ruler stands for: its line when it stands for one, else the first of its lines whose value
   // of the label is the mark's, read from the server once per mark
   const markLines = useMemo(() => new Map<string, Promise<number | null>>(), [ruler, on])
@@ -1341,7 +1400,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
                 {moreRight && <div className="reader-edge" aria-hidden />}
               </div>
               {!isDatabase && !binary && (
-                <ReaderTracks total={total} view={shown} paint={paint} markers={markers} zoom={zoom} onJump={jump} onSeek={seek} onWheel={wheel} onLine={scrollToLine} onMark={onMark} preview={preview} />
+                <ReaderTracks total={total} feed={feed} paint={paint} markers={markers} colorOf={zoomColor} onJump={jump} onSeek={seek} onScrollBy={scrollBy} onMark={onMark} preview={preview} />
               )}
             </div>
           </>

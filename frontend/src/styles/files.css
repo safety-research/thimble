@@ -1710,6 +1710,7 @@
   border-radius: 0;
   box-shadow: inset 0 0 0 1px var(--surface-card);
   cursor: grab;
+  will-change: transform;
 }
 .tracks[data-drag] .track-frame-over {
   cursor: grabbing;
@@ -1731,24 +1732,45 @@
   stroke-width: 1;
   shape-rendering: crispEdges;
 }
+/* a drag on the zoomed track scrolls the reader, as a scrollbar's thumb does */
 .track-zoom {
-  cursor: pointer;
+  cursor: grab;
+}
+.tracks[data-drag='zoom'],
+.tracks[data-drag='zoom'] * {
+  cursor: grabbing;
+}
+.tracks[data-drag='frame'],
+.tracks[data-drag='frame'] * {
+  cursor: grabbing;
 }
 .track-zoom-faded,
 .track-zoom-shown {
   position: absolute;
+  top: 0;
   left: 0;
   right: 0;
   overflow: hidden;
 }
 .track-zoom-faded {
-  top: 0;
   bottom: 0;
+}
+/* the records at their place in the reader's content, moved as one by the tracks' animation frame */
+.track-zoom-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  will-change: transform;
+}
+.track-zoom-shown {
+  will-change: transform;
 }
 /* the lens: a raised box of the paper, framed, over what the reader shows on the zoomed track, a margin of the paper
    around the part shown (LENS_OUT_PX); the records it holds are drawn over it in full */
 .track-lens {
   position: absolute;
+  top: 0;
   left: -3px;
   right: -3px;
   box-sizing: border-box;
@@ -1756,6 +1778,7 @@
   background: var(--surface-card);
   box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.3);
   pointer-events: none;
+  will-change: transform;
 }
 .tracks[data-drag] .track-lens {
   border-color: rgba(var(--ink-rgb), 0.8);

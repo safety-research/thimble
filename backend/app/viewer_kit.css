@@ -874,8 +874,17 @@ select.field {
   border-radius: 0;
   box-shadow: inset 0 0 0 1px var(--surface-card);
   cursor: grab;
+  will-change: transform;
 }
 .thimble-colour-strip[data-drag] .thimble-colour-thumb {
+  cursor: grabbing;
+}
+/* a drag on the zoomed track scrolls the list, as a scrollbar's thumb does */
+.thimble-colour-zoom {
+  cursor: grab;
+}
+.thimble-colour-strip[data-drag],
+.thimble-colour-strip[data-drag] * {
   cursor: grabbing;
 }
 /* the lens over the part in view on the zoomed track, a little wider than the track: its paper and float under the
@@ -888,6 +897,7 @@ select.field {
   box-sizing: border-box;
   border-radius: 4px; /* LENS_R: the lines meet the lens's left edge where its corners' curves end */
   pointer-events: none;
+  will-change: transform;
 }
 .thimble-colour-lens {
   position: absolute;
@@ -897,7 +907,6 @@ select.field {
 .thimble-colour-zoom .thimble-colour-thumb {
   border: 1px solid rgba(var(--ink-rgb), 0.55);
   box-shadow: none;
-  cursor: default;
 }
 .thimble-colour-strip[data-drag] .thimble-colour-zoom .thimble-colour-thumb {
   border-color: rgba(var(--ink-rgb), 0.8);

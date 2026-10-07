@@ -47,7 +47,7 @@
 // long list adds the zoomed track at the outer edge, which magnifies the frame: the part around the view at a finer
 // scale, its colours faded beyond the part in view, which lies under a lens joined to the frame by two lines. The lens stands as far down the zoomed track
 // as the frame stands down the overview, so the two move together. Hovering the overview shows the records there, a
-// click goes there and a drag scrubs. thimble keeps the choice, the values turned off and the colours per view (the bridge's `colour` message),
+// click goes there and a drag scrubs; a drag on the zoomed track scrolls the list at its scale. thimble keeps the choice, the values turned off and the colours per view (the bridge's `colour` message),
 // with the time ranges viewer_range.js keeps, and hands them back as window.__thimbleColour when the page loads.
 //
 // Reset, at the row's end, shows while the view is not as it opens: a value turned off, a time range zoomed in, a search
@@ -87,6 +87,9 @@
   var MIN_MARK = 2 // px, a mark's least height on a track
   var HIT = 3 // px either side of a mark within which a click goes to its record
   var THUMB_MIN = 8 // px, the least height of the box around the part in view
+  var DRAG_PX = 3 // px the pointer moves before a press on a track becomes a drag
+  var GLIDE_MS = 160 // ms the tracks take to go from where a drag left them to the list's place
+  var SETTLE_MS = 60 // ms the tracks stay still before every edge on them goes onto the device's pixel grid
   var PEEK = 6 // records the hover preview lists
   var MAX_KEPT = 200 // values whose colour is kept per field
   var DEF_FOR = 60000 // ms what a label's values mean is kept before it is asked for again
@@ -1360,8 +1363,11 @@
   // finer scale, its colours faded beyond the part in view, which lies under a lens (a raised box of the paper, framed),
   // and two lines join the frame's top and bottom to the lens's. The zoomed track's span follows the view, the lens as
   // far down it as the frame is down the overview, so that the two move together. Hovering the overview shows the
-  // records there in a preview, without scrolling; a click goes there, a click on a mark to its record, and a drag
-  // scrubs, on either track; a drag of the frame moves the view; a wheel over them scrolls the list. `rows`, for a list
+  // records there in a preview, without scrolling; a click on it goes there, a click on a mark to its record, and a drag
+  // of the frame, or from where a press sent it, scrubs. A drag on the zoomed track scrolls the list at its scale, as a
+  // scrollbar's thumb: the lens follows the pointer over records that hold still, a press off the lens brings it there
+  // first, and let go it glides back to where the frame puts it. A wheel over them scrolls the list. The tracks move in
+  // the browser's animation frames with transforms alone, and go onto the device's pixel grid once still. `rows`, for a list
   // that draws only the rows in view, gives every row's value in order, which the lanes draw in place of the rows on
   // the page (`refs`, each row's record, is taken and not drawn), and `preview(i)` what the preview says of row i; for a
   // list of elements `preview(el)` may say it instead of each record's own time and first line.
@@ -1374,7 +1380,14 @@
     this.recs = [] // each record: [top, bottom] as fractions of the list's height, its colour or null, its element or row
     this.stale = true
     this.zoomed = false
-    this.frozen = null // the zoomed track's span while a drag on it lasts
+    // what a drag holds, in px of the tracks: the frame's top on the overview, the top of the part in view on the zoomed
+    // track; the px the pointer moved on the zoomed track since the list last scrolled for it; from where the tracks
+    // glide back to the list's place once a hold ends
+    this.hold = { frame: null, lens: null, pull: 0, seek: false, glide: null }
+    this.drawn = null // the geometry last drawn, and whether on the pixel grid
+    this.snapped = false
+    this.movedAt = 0
+    this.raf = null
     this.el = document.createElement('div')
     this.el.className = 'thimble-colour-strip'
     this.el.setAttribute('data-thimble-chrome', '')
@@ -1401,8 +1414,9 @@
     this.width = -1
     this.fitWidth()
     this.box.classList.add('thimble-colour-scrolled')
+    // the list's scroll moves the tracks in the next animation frame, with transforms
     this.onScroll = function () {
-      self.place()
+      self.kick()
     }
     ;(this.page ? window : this.box).addEventListener('scroll', this.onScroll, { passive: true })
     this.onResize = function () {
@@ -1564,7 +1578,6 @@
   // the list (as a scrollbar's thumb stands), so that the lens moves down the zoomed track as the frame moves down the
   // overview
   Strip.prototype.zoomSpan = function () {
-    if (this.frozen) return this.frozen
     var v = this.view()
     var vh = v[1] - v[0]
     var s = Math.min(1, ZOOM_SPAN * vh)
@@ -1604,7 +1617,9 @@
       this.stale = false
     }
     this.paint(this.whole, [0, 1], null)
-    this.place()
+    this.drawn = null
+    this.place(typeof performance !== 'undefined' ? performance.now() : Date.now())
+    this.kick()
   }
   // a track's canvas: the records within `span` (fractions of the list), each pixel row in the one colour most of it
   // takes (the records' share of the row), grey where its records take no value, faded outside `bright`, where the
@@ -1706,41 +1721,112 @@
     }
     ctx.globalAlpha = 1
   }
-  // the frame around the part in view on the overview, the zoomed track drawn for where it now looks with its lens
-  // over the part in view, and the lines from the frame to the lens
-  Strip.prototype.place = function () {
+  // where the tracks stand, in px of them: the frame's top and height on the overview and how far through the list that
+  // is (as a scrollbar's thumb), and on the zoomed track its scale (`k`, px per share of the list), the share of the
+  // list at its top (`z0`) and the part in view (`vTop`, `vH`). A held frame puts the part in view as far down the
+  // zoomed track as the frame stands down the overview; a held lens keeps the part in view where it is held, and the
+  // list moves under it; otherwise the part in view stands as zoomSpan puts it
+  Strip.prototype.geom = function () {
     var h = this.h || 0
-    var v = this.drag && this.drag.view ? this.drag.view : this.view()
-    var dpr = window.devicePixelRatio || 1
-    // each edge on the device's pixel grid
-    var span = function (a, b, min) {
-      var y0 = a * h
-      var y1 = b * h
-      if (y1 - y0 < min) {
-        var m = (y0 + y1) / 2
-        y0 = Math.max(0, Math.min(h - min, m - min / 2))
-        y1 = y0 + min
+    var v = this.view()
+    var vh = Math.max(0, v[1] - v[0])
+    var frameH = Math.min(h, Math.max(THUMB_MIN, vh * h))
+    var room = Math.max(0, h - frameH)
+    var hold = this.hold
+    var f = hold.frame != null ? (room > 0 ? Math.max(0, Math.min(1, hold.frame / room)) : 0) : vh < 1 ? Math.max(0, Math.min(1, v[0] / (1 - vh))) : 0
+    var s = Math.max(1e-9, Math.min(1, ZOOM_SPAN * vh))
+    var k = h / s
+    var vH = vh * k
+    var vTop
+    if (hold.lens != null) vTop = Math.max(0, Math.min(Math.max(0, h - vH), hold.lens))
+    else if (hold.frame != null) vTop = f * Math.max(0, h - vH)
+    else vTop = (v[0] - Math.max(0, Math.min(1 - s, v[0] - f * (s - vh)))) * k
+    return { v: v, f: f, frameTop: f * room, frameH: frameH, k: k, s: s, z0: v[0] - vTop / k, vTop: vTop, vH: vH }
+  }
+  // the next animation frame moves the tracks, and the next after it while they move
+  Strip.prototype.kick = function () {
+    var self = this
+    if (this.raf != null) return
+    var go = function (now) {
+      self.raf = null
+      if (self.place(now)) self.kick()
+    }
+    this.raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(go) : setTimeout(function () { go(Date.now()) }, 16)
+  }
+  // one frame of the tracks: the list scrolled for what a drag asks, then the frame around the part in view on the
+  // overview, the zoomed track drawn for where it now looks with its lens over the part in view, and the lines from the
+  // frame to the lens, with transforms alone. While they move they stand where they are computed; once still, every
+  // edge goes onto the device's pixel grid. Whether they still move.
+  Strip.prototype.place = function (now) {
+    var h = this.h || 0
+    if (!h || this.el.style.display === 'none') return false
+    var box = this.box
+    var hold = this.hold
+    var H = Math.max(1, box.scrollHeight)
+    var free = Math.max(0, box.scrollHeight - box.clientHeight)
+    // a held frame: the list goes to the place it frames
+    if (hold.seek && hold.frame != null) {
+      hold.seek = false
+      var g0 = this.geom()
+      box.scrollTop = Math.max(0, Math.min(free, g0.f * free))
+    }
+    // a drag on the zoomed track: the list scrolls by what the pointer moved there, at its scale, and the part in view
+    // moves on the track by as much as the list went
+    if (hold.pull && hold.lens != null) {
+      var g1 = this.geom()
+      var was = box.scrollTop
+      box.scrollTop = Math.max(0, Math.min(free, was + (hold.pull / g1.k) * H))
+      hold.lens += ((box.scrollTop - was) / H) * g1.k
+      hold.pull = 0
+    }
+    var g = this.geom()
+    if (hold.lens != null) hold.lens = g.vTop
+    var shown = g
+    if (hold.glide) {
+      var e = Math.min(1, (now - hold.glide.at) / GLIDE_MS)
+      e = 1 - Math.pow(1 - e, 3)
+      if (e >= 1) hold.glide = null
+      else {
+        var vTop = g.vTop + (hold.glide.vTop - g.vTop) * (1 - e)
+        shown = { v: g.v, f: g.f, frameTop: g.frameTop + (hold.glide.frameTop - g.frameTop) * (1 - e), frameH: g.frameH, k: g.k, s: g.s, z0: g.v[0] - vTop / g.k, vTop: vTop, vH: g.vH }
       }
-      return [Math.round(Math.max(0, y0) * dpr) / dpr, Math.round(Math.min(h, y1) * dpr) / dpr]
+    }
+    var d = this.drawn
+    var moved = !d || Math.abs(d.frameTop - shown.frameTop) > 1e-3 || Math.abs(d.frameH - shown.frameH) > 1e-3 || Math.abs(d.vTop - shown.vTop) > 1e-3 || Math.abs(d.vH - shown.vH) > 1e-3 || Math.abs((d.z0 - shown.z0) * shown.k) > 1e-3
+    if (moved) this.movedAt = now
+    var still = !moved && !hold.glide && hold.frame == null && hold.lens == null && now - this.movedAt >= SETTLE_MS
+    if (moved || (still && !this.snapped)) this.write(shown, still)
+    this.drawn = shown
+    this.snapped = still
+    return !still
+  }
+  // the tracks written for a geometry, on the device's pixel grid when `grid`
+  Strip.prototype.write = function (g, grid) {
+    var h = this.h || 0
+    var dpr = window.devicePixelRatio || 1
+    var q = function (v) {
+      return grid ? Math.round(v * dpr) / dpr : v
     }
     var put = function (el, at) {
       el.style.display = at[1] > at[0] ? '' : 'none'
       el.style.height = Math.max(0, at[1] - at[0]) + 'px'
       el.style.transform = 'translateY(' + at[0] + 'px)'
     }
-    this.thumbAt = span(v[0], v[1], THUMB_MIN)
+    var f0 = q(g.frameTop)
+    this.thumbAt = [f0, q(g.frameTop + g.frameH)]
     put(this.whole.thumb, this.thumbAt)
     if (!this.zoomed) return
-    var z = this.zoomSpan()
-    this.zspan = z
-    var s = Math.max(1e-9, z[1] - z[0])
-    var shown = span((v[0] - z[0]) / s, (v[1] - z[0]) / s, 4)
+    var span = [g.z0, g.z0 + g.s]
+    this.zspan = span
+    var v0 = q(g.vTop)
+    var shown = [v0, Math.max(v0 + 4, q(g.vTop + g.vH))]
     // the lens LENS_OUT outside the part in view, so that its edge and its margin of the paper cover none of it
     var lens = [shown[0] - LENS_OUT, shown[1] + LENS_OUT]
     put(this.zoom.lens, lens)
     put(this.zoom.thumb, lens)
     this.lensAt = lens
-    this.paint(this.zoom, z, v)
+    // the part in view as the zoomed track paints it: where the lens stands over it
+    this.paint(this.zoom, span, [span[0] + (shown[0] / h) * g.s, span[0] + (shown[1] / h) * g.s])
     // each line from a corner of the frame to the lens's left edge where its corner's curve ends; at a pixel ratio where a
     // 1px line is an odd number of device pixels wide, its ends move half a device pixel into the frame's and the lens's
     // edges, so that it lies on whole device pixels there. The wedge reaches the edges themselves.
@@ -1760,10 +1846,15 @@
     this.link.querySelector('polygon').setAttribute('points', '0,' + f[0] + ' ' + x1 + ',' + (lens[0] + r) + ' ' + x1 + ',' + (lens[1] - r) + ' 0,' + f[1])
     this.link.style.height = h + 'px'
   }
-  // the list scrolled so that the place `at` (a fraction of it) is in the middle of the box
-  Strip.prototype.centre = function (at) {
-    var box = this.box
-    box.scrollTop = Math.max(0, Math.min(box.scrollHeight - box.clientHeight, at * box.scrollHeight - box.clientHeight / 2))
+  // a hold ends: the tracks glide from where they stand to the list's place
+  Strip.prototype.release = function () {
+    var now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    if (this.drawn) this.hold.glide = { at: now, frameTop: this.drawn.frameTop, vTop: this.drawn.vTop }
+    this.hold.frame = null
+    this.hold.lens = null
+    this.hold.pull = 0
+    this.hold.seek = false
+    this.kick()
   }
   // the track under the pointer and the place there, as a fraction of the list
   Strip.prototype.at = function (e) {
@@ -1773,7 +1864,7 @@
     var r = t.el.getBoundingClientRect()
     var y = Math.max(0, Math.min(this.h || 0, e.clientY - r.top))
     var h = this.h || 1
-    var span = onZoom ? this.zspan || this.zoomSpan() : [0, 1]
+    var span = onZoom ? this.zspan || [0, 1] : [0, 1]
     return { track: t, y: y, x: e.clientX - r.left, at: span[0] + (y / h) * (span[1] - span[0]), span: span }
   }
   Strip.prototype.recAt = function (p) {
@@ -1803,50 +1894,71 @@
       box.scrollTop += r.top - top0 - box.clientHeight / 3
     }
   }
+  // a press on a track: on the overview, on the frame a drag of it moves the list, off it a click sends the frame there
+  // (or to a mark's record) and a drag from there scrubs, once the pointer has moved DRAG_PX; on the zoomed track a drag
+  // scrolls the list at its scale, as a scrollbar's thumb, and a press off the lens brings the lens's middle there first
   Strip.prototype.down = function (e) {
     if (e.button !== 0) return
     e.preventDefault()
     var p = this.at(e)
     var whole = p.track === this.whole
-    var onThumb = whole && this.thumbAt && p.y >= this.thumbAt[0] - 1 && p.y <= this.thumbAt[1] + 1
-    if (!whole) this.frozen = p.span.slice()
-    this.drag = { track: p.track, dy: onThumb ? p.y - this.thumbAt[0] : null, y0: e.clientY, moved: false, onThumb: onThumb }
-    if (!onThumb) this.centre(p.at)
+    var g = this.drawn || this.geom()
+    var onThumb = whole && p.y >= g.frameTop - 1 && p.y <= g.frameTop + g.frameH + 1
+    this.drag = { track: p.track, dy: onThumb ? p.y - g.frameTop : g.frameH / 2, y0: e.clientY, last: p.y, moved: false, onThumb: onThumb }
+    if (!whole) {
+      this.hold.glide = null
+      this.hold.lens = g.vTop
+      if (p.y < g.vTop - LENS_OUT || p.y > g.vTop + g.vH + LENS_OUT) this.hold.pull += p.y - (g.vTop + g.vH / 2)
+      this.el.setAttribute('data-drag', 'zoom')
+      this.kick()
+    }
     this.unpeek()
-    if (this.el.setPointerCapture) this.el.setPointerCapture(e.pointerId)
-    this.el.setAttribute('data-drag', '')
+    try {
+      if (this.el.setPointerCapture) this.el.setPointerCapture(e.pointerId)
+    } catch (err) {}
+  }
+  // the frame held with its top at `top` px of the overview, and the list sent there in the next frame
+  Strip.prototype.holdFrame = function (top) {
+    var g = this.drawn || this.geom()
+    this.hold.glide = null
+    this.hold.frame = Math.max(0, Math.min(Math.max(0, (this.h || 0) - g.frameH), top))
+    this.hold.seek = true
+    this.kick()
   }
   Strip.prototype.move = function (e) {
     var d = this.drag
     if (!d) return this.hovered(e)
-    if (!d.moved && Math.abs(e.clientY - d.y0) < 3) return
-    d.moved = true
+    if (!d.moved && Math.abs(e.clientY - d.y0) < DRAG_PX) return
     var r = d.track.el.getBoundingClientRect()
-    var h = this.h || 1
     var y = e.clientY - r.top
-    if (d.onThumb) {
-      // the box follows the pointer where it was taken
-      var box = this.box
-      var top = Math.max(0, y - d.dy) / h
-      box.scrollTop = Math.max(0, Math.min(box.scrollHeight - box.clientHeight, top * box.scrollHeight))
-    } else {
-      var span = d.track === this.whole ? [0, 1] : this.frozen || [0, 1]
-      this.centre(span[0] + (Math.max(0, Math.min(h, y)) / h) * (span[1] - span[0]))
+    if (!d.moved) {
+      d.moved = true
+      if (d.track === this.whole) this.el.setAttribute('data-drag', 'frame')
     }
-    this.place()
+    if (d.track === this.whole) this.holdFrame(y - d.dy)
+    else {
+      this.hold.pull += y - d.last
+      d.last = y
+      this.kick()
+    }
   }
   Strip.prototype.up = function (e) {
     var d = this.drag
     this.drag = null
     this.el.removeAttribute('data-drag')
-    if (d && !d.moved) {
+    if (!d) return
+    if (d.track === this.whole && !d.moved && !d.onThumb) {
+      // a click: on a mark, its record; elsewhere the frame's middle comes under the pointer
       var p = this.at(e)
-      if (d.track !== this.whole) p.span = this.frozen || p.span
       var t = this.recAt(p)
       if (t) this.go(t)
+      else {
+        this.holdFrame(p.y - d.dy)
+        this.place(typeof performance !== 'undefined' ? performance.now() : Date.now())
+      }
     }
-    this.frozen = null
-    this.place()
+    if (this.hold.seek) this.place(typeof performance !== 'undefined' ? performance.now() : Date.now())
+    this.release()
   }
   // hovering a track: the preview lists the records there, without scrolling
   Strip.prototype.hovered = function (e) {
