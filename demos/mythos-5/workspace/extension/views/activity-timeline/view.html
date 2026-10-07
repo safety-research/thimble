@@ -193,9 +193,9 @@ const colour = thimble.colorBy({
   mount: '#colour',
   fields: [
     // Exploit and Infra name their palette colours (olive, teal), so neither takes the sky blue that sits beside Captcha's blue
-    { name: 'activity', title: 'Activity', values: ['Captcha', 'Signup', 'Money', { name: 'Exploit', colour: 4 }, { name: 'Infra', colour: 5 }], value: (i) => (C && typeof i === 'number' ? ACT_VALUE[actOf(i)] : null) },
+    { name: 'activity', title: 'Activity', values: ['Captcha', 'Signup', 'Money', { name: 'Exploit', colour: 5 }, { name: 'Infra', colour: 6 }], value: (i) => (C && typeof i === 'number' ? ACT_VALUE[actOf(i)] : null) },
     // create and str_replace name olive and teal, so neither takes the sky blue that sits beside terminal's blue
-    { name: 'tool', title: 'Tool', values: ['terminal', 'Reasoning', 'view', { name: 'create', colour: 4 }, { name: 'str_replace', colour: 5 }], value: (i) => (C && typeof i === 'number' ? TOOL_LABEL[toolName(i)] || null : null) },
+    { name: 'tool', title: 'Tool', values: ['terminal', 'Reasoning', 'view', { name: 'create', colour: 5 }, { name: 'str_replace', colour: 6 }], value: (i) => (C && typeof i === 'number' ? TOOL_LABEL[toolName(i)] || null : null) },
   ],
   chips: 'filter',
   strip: '#list',

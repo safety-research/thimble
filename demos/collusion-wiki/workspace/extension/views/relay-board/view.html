@@ -347,7 +347,7 @@ const colour = thimble.colorBy({
   fields: [
     { name: 'kind', title: 'Kind', values: ['Text only', 'With links'], value: (i) => (isMsg(i) ? D.kinds[C.k[i]] : null) },
     // dorfwiki names olive, so it does not take the sky blue that sits beside dse's blue
-    { name: 'wiki', title: 'Wiki', values: ['dse', 'probier', 'fractal', { name: 'dorfwiki', colour: 4 }], value: (i) => (isMsg(i) ? D.wikis[(D.pages[C.pg[i]] || [])[3]] : null) },
+    { name: 'wiki', title: 'Wiki', values: ['dse', 'probier', 'fractal', { name: 'dorfwiki', colour: 5 }], value: (i) => (isMsg(i) ? D.wikis[(D.pages[C.pg[i]] || [])[3]] : null) },
     { name: 'signed', title: 'Signature', values: SIGNED, value: (i) => (isMsg(i) ? sigOf(i) : null) },
   ],
   chips: 'filter',
