@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -221,6 +222,55 @@ async def test_the_view_head_counts_the_records_the_reader_left_out_for_the_filt
     assert "hidden" not in (await app.post(route, json={"query": {}})).json()
 
 
+ODD_READER = '''
+import datetime
+import thimble
+
+
+def build_index(paths):
+    for path in paths:
+        open(path).read()
+    return {}
+
+
+def records(index, query):
+    if query.get("fail"):
+        raise ValueError("no such page")
+    return {"kept": [n for n in range(1, 13) if thimble.kept(f"board.jsonl#L{n}")], "nan": float("nan"),
+            "inf": [float("inf"), -float("inf"), 1.5], "text": "café ✓\\n\\x1f\\u2028end", "day": datetime.date(2026, 10, 7),
+            "nested": {"a": [None, True, {"b": 2 ** 70}]}}
+
+
+def resolve(index, locator):
+    return None
+'''
+
+
+async def test_the_records_route_sends_the_kernels_json_text_unread(app):
+    """The records route sends the reader's result as the JSON text the kernel wrote, beside the fields the server adds,
+    rather than reading and writing it again, and it reads as the route's answer did: a value that is not JSON as its
+    str, NaN and the infinities as null, a string's control characters escaped. Other callers get the result read."""
+    k = await _asks(app)
+    views.write_view(CORPUS, "odd", reader=ODD_READER, html=HTML, **{**VIEW, "name": "Odd"})
+    route = f"/api/ws/{CORPUS}/views/odd/records"
+    want = {"kept": list(range(1, 13)), "nan": None, "inf": [None, None, 1.5], "text": "café ✓\n\x1f end",
+            "day": "2026-10-07", "nested": {"a": [None, True, {"b": 2 ** 70}]}}
+    r = await app.post(route, json={"query": {}})
+    assert r.status_code == 200 and r.headers["content-type"] == "application/json", r.text
+    assert r.json() == {"data": want}
+    concepts.set_filter(CORPUS, "files", k["id"], "asks")
+    raw = await views.reader_call(CORPUS, "odd", "records", {}, raw=True)
+    assert isinstance(raw, views.RawJSON)
+    r = await app.post(route, json={"query": {}})
+    assert r.text == '{"data":' + raw.text + ',"hidden":9}'
+    assert r.json() == {"data": {**want, "kept": [1, 4, 8]}, "hidden": 9}
+    got = await views.reader_call(CORPUS, "odd", "records", {})
+    assert math.isnan(got.pop("nan")) and got.pop("inf") == [math.inf, -math.inf, 1.5], "other callers read it as before"
+    assert got == {**{k: x for k, x in want.items() if k not in ("nan", "inf")}, "kept": [1, 4, 8]}
+    r = await app.post(route, json={"query": {"fail": True}})
+    assert r.status_code == 502 and r.json()["detail"]["message"] == "ValueError: no such page", r.text
+
+
 def test_a_count_of_what_the_filter_left_out_is_given_only_when_exact():
     key = ("asks-id", "asks", (1, 2))
     views._left_out.clear()
@@ -329,6 +379,77 @@ def test_a_labels_members_are_kept_compact_and_read_as_every_row_says(tmp_path, 
     assert isinstance(values._lines["turns.jsonl"], bytes), "a dense file: one byte per line"
     assert isinstance(values._lines["notes.jsonl"], tuple), "a sparse file: its lines alone"
     assert kernel_thimble._value_of({"_members": (values, spans, paths)}, "other.jsonl#L9") == "quiet"
+
+
+def _old_marked(ctx: dict, ref: str) -> list[dict]:
+    """kernel_thimble._marked as it was: each label's highlighted values scanned, and the PDF page regex run, per call."""
+    out = []
+    for k in ctx["labels"]:
+        values, spans, _paths = kernel_thimble._label_members(k)
+        m = kernel_thimble._PDF_PAGE.match(ref)
+        v = values.get(ref)
+        if v is None:
+            v = values.get(f"{m[1]}#p{int(m[2])}" if m else ref)
+        if v is None:
+            path, line = kernel_thimble._ref_parts(ref)
+            if path is not None and line is not None:
+                v = next((value for a, b, value in spans.get(path, ()) if a <= line <= b), None)
+        hit = next((x for x in k.get("values") or [] if x.get("highlight") and x.get("name") == v), None)
+        if hit is not None:
+            out.append({"label": k.get("name"), "value": v, "colour": hit.get("colour") or k.get("colour"), "id": k.get("id")})
+    return out
+
+
+def test_a_records_marks_read_the_labels_highlighted_values_once_per_context(tmp_path, monkeypatch):
+    """thimble.marked gives each record the marks it gave when it scanned the label's values on every call, while it
+    reads the highlighted values once per labels context, reads no members of a label that highlights none, and runs
+    the PDF page regex only on a ref that could name a page."""
+    from app import labels_store  # noqa: PLC0415
+
+    rows = [{"ref": f"a.jsonl#L{n}", "label": ("x" if n % 2 else "y"), "source": "code"} for n in range(1, 40)]
+    rows += [{"ref": "doc.pdf#p2", "label": "x", "source": "code"}, {"ref": "forge.db#prs/7", "label": "y", "source": "code"},
+             labels_store.cover_row("b.jsonl", 3, 9, "z", "regex", "t")]
+    jsonl = tmp_path / "k.jsonl"
+    jsonl.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    kernel_thimble._MEMBERS.clear()
+
+    def ctx() -> dict:
+        return {"labels": [
+            {"id": "k1", "name": "first", "colour": "#111", "jsonl": str(jsonl),
+             "values": [{"name": "x", "colour": "#aaa", "highlight": True}, {"name": "y", "colour": "#bbb", "highlight": False},
+                        {"name": "x", "colour": "#ccc", "highlight": True}, {"name": "z", "colour": None, "highlight": True}]},
+            {"id": "k2", "name": "dark", "colour": "#222", "jsonl": str(jsonl),
+             "values": [{"name": "x", "colour": "#ddd", "highlight": False}]},
+            {"id": "k3", "name": "second", "colour": "#333", "jsonl": str(jsonl),
+             "values": [{"name": "y", "colour": "#eee", "highlight": True}]}], "filter": None}
+
+    refs = [f"a.jsonl#L{n}" for n in range(0, 42)] + ["doc.pdf#p2", "doc.pdf#page=2", "doc.pdf#page2", "doc.pdf#p02",
+                                                      "doc.pdf#p3", "forge.db#prs/7", "forge.db#prs/8", "b.jsonl#L2",
+                                                      "b.jsonl#L3", "b.jsonl#L9", "b.jsonl#L10", "card:abc", "a.jsonl"]
+    old = ctx()
+    want = [_old_marked(old, r) for r in refs]
+    got = ctx()
+    assert [kernel_thimble._marked(got, r) for r in refs] == want
+    by_ref = dict(zip(refs, want))
+    assert sum(map(bool, want)) > 30 and by_ref["doc.pdf#page=2"] == [{"label": "first", "value": "x", "colour": "#aaa", "id": "k1"}]
+    assert by_ref["forge.db#prs/7"] == [{"label": "second", "value": "y", "colour": "#eee", "id": "k3"}] and not by_ref["b.jsonl#L10"]
+    assert kernel_thimble._marked(got, "b.jsonl#L4")[0]["colour"] == "#111", "a value with no colour takes the label's"
+    assert "_members" not in got["labels"][1], "a label that highlights no value reads no members"
+
+    seen = []
+    pattern = kernel_thimble._PDF_PAGE
+
+    class Counted:
+        def match(self, ref):
+            seen.append(ref)
+            return pattern.match(ref)
+
+    monkeypatch.setattr(kernel_thimble, "_PDF_PAGE", Counted())
+    for r in refs:
+        kernel_thimble._marked(got, r)
+    assert seen and all("#p" in r for r in seen), seen
+    assert views._wire(got)["labels"][0].keys() == {"id", "name", "colour", "jsonl", "values"}, "the kernel gets no lookups"
+    kernel_thimble._MEMBERS.clear()
 
 
 def test_the_kernel_keeps_the_members_of_a_few_labels_at_once(tmp_path, monkeypatch):

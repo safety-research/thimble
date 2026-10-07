@@ -348,7 +348,7 @@ def _note_answer(w: Worker, outputs: list[dict]) -> None:
     """Keep what the kernel said it holds (view_host's `held`) and read its resident size."""
     from .views import _answer_from  # noqa: PLC0415 — views imports this module
 
-    ans = _answer_from(outputs)
+    ans = _answer_from(outputs, raw=True)  # the result left unread
     if ans is None and any(_error_name(b) in STUCK for b in outputs):
         w.holds.clear()  # the kernel died or did not settle, and holds nothing now
     ans = ans or {}

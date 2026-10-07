@@ -728,8 +728,10 @@ def _value_of(label: dict, ref: str):
     values, spans, _paths = _label_members(label)
     v = values.get(ref)
     if v is None:
-        v = values.get(_canon(ref))
-    if v is not None:
+        c = _canon(ref)
+        if c != ref:
+            v = values.get(c)
+    if v is not None or not spans:
         return v
     path, line = _ref_parts(ref)
     if path is None or line is None:
@@ -742,6 +744,8 @@ _PDF_PAGE = re.compile(r"^(.+\.[Pp][Dd][Ff])#(?:p|page=?)(\d+)$")
 
 def _canon(ref: str) -> str:
     """A record's ref as label rows key it (records.canon): a PDF's `#page=<n>` as `#p<n>`."""
+    if "#p" not in ref:  # names no PDF page: skip the regex, which a view's reader runs on each record it marks
+        return ref
     m = _PDF_PAGE.match(ref)
     return f"{m[1]}#p{int(m[2])}" if m else ref
 
@@ -894,11 +898,29 @@ def _marked(ctx, ref) -> list:
         return [{"label": PROBE_NAME, "value": PROBE_NAME, "colour": PROBE_COLOUR, "id": PROBE_ID}] if _probed(ref, ctx["probe"]) else []
     out = []
     for k in ctx.get("labels") or []:
+        lit = _label_lit(k)
+        if not lit:
+            continue
         v = _value_of(k, ref)
-        hit = next((x for x in k.get("values") or [] if x.get("highlight") and x.get("name") == v), None)
-        if hit is not None:
-            out.append({"label": k.get("name"), "value": v, "colour": hit.get("colour") or k.get("colour"), "id": k.get("id")})
+        if v in lit:
+            out.append({"label": k.get("name"), "value": v, "colour": lit[v], "id": k.get("id")})
     return out
+
+
+def _label_lit(label: dict) -> dict:
+    """{value: colour} of the label's highlighted values, the first of a name winning, looked up once per labels context
+    as _label_members is: _marked runs on every record a view's reader marks."""
+    lit = label.get("_lit")
+    if lit is None:
+        lit = {}
+        for x in label.get("values") or []:
+            if x.get("highlight"):
+                try:
+                    lit.setdefault(x.get("name"), x.get("colour") or label.get("colour"))
+                except TypeError:  # an unhashable name equals no value
+                    pass
+        label["_lit"] = lit
+    return lit
 
 
 def _kept(ctx, ref) -> bool:
