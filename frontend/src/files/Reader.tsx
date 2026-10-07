@@ -25,6 +25,9 @@ import { findColumn, rulerColumns, useRuler, type RulerTick, type Seen, type Sho
 import { ColorBy } from './ColorBy'
 import { keyColor, KEY_COLORS, keyValue, OTHER, recordObject } from './colorChoice'
 import { ColorContext } from './colorContext'
+import { FilterBy } from './FilterBy'
+import { FilterContext, useFilterBy } from './useFilterBy'
+import { FoldContext, useFold } from './fold'
 import { labelPaint, PlaceFeed, ReaderTracks, ZOOM_SPAN, type DrawnRecord, type OverviewPaint, type PreviewRecord, type TrackLane } from './Tracks'
 import { useColorBy } from './useColorBy'
 import { fmtSize } from './Tree'
@@ -1189,7 +1192,11 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const rulerCols = useMemo(() => (found && found.total && total ? [...columns, findColumn(found.lines, total, findText)] : columns), [columns, found, total, findText])
 
   // ---- Color by and the tracks
-  const color = useColorBy(workspace, path, isTranscript && !binary && !isDatabase, labels, records, readerLabels.rows, total)
+  // the labels Filter by turns on, which Color by leaves to it
+  const quiet = useRef(new Set<string>())
+  const color = useColorBy(workspace, path, isTranscript && !binary && !isDatabase, labels, records, readerLabels.rows, total, quiet)
+  const filter = useFilterBy(workspace, path, isTranscript && !binary && !isDatabase, labels, color.fileLabels, color.keys, records, readerLabels.rows, total, quiet)
+  const fold = useFold(workspace, path)
   const colorChoice = color.choice
   // the overview's colors: the chosen key's commonest value per bin, the chosen label's value most records have per
   // bin, else the density
@@ -1422,7 +1429,11 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
           <>
             {isTranscript && !binary && !isDatabase && loaded && !noViewReason && (
               <div className="reader-colorbar">
+                <FilterBy choice={filter.choice} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={filter.values} off={filter.off} onChoose={filter.choose} onToggle={filter.toggle} countsOf={fileOf} />
                 <ColorBy choice={color.choice} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={color.values} off={color.off} onChoose={color.choose} onToggle={color.toggle} countsOf={fileOf} onColor={color.recolor} onResetColors={color.resetColors ?? undefined} pickedOf={color.pickedOf} />
+                <Button size="sm" className="reader-foldall" onClick={() => fold.setAll(fold.all === 'fold' ? 'open' : 'fold')}>
+                  {fold.all === 'fold' ? 'Expand all' : 'Collapse all'}
+                </Button>
               </div>
             )}
             <div className="reader-main">
@@ -1437,9 +1448,13 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
                   )}
                   {ViewComponent && loaded && !noViewReason && (
                     <ColorContext.Provider value={isTranscript ? color.colors : null}>
-                      <ViewBoundary key={`${view!.type}|${path}`} viewType={view!.type} onFallback={() => onPick('raw')}>
-                        {viewEl}
-                      </ViewBoundary>
+                      <FilterContext.Provider value={isTranscript ? filter.verdict : null}>
+                        <FoldContext.Provider value={isTranscript ? fold : null}>
+                          <ViewBoundary key={`${view!.type}|${path}`} viewType={view!.type} onFallback={() => onPick('raw')}>
+                            {viewEl}
+                          </ViewBoundary>
+                        </FoldContext.Provider>
+                      </FilterContext.Provider>
                     </ColorContext.Provider>
                   )}
                   {loading && (

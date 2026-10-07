@@ -1,8 +1,8 @@
 // Color by's state in Files' Transcript mode (colorChoice.ts): the file's keys from the server, the choice and the values
 // turned off kept per file, the labels that mark the file, each value's chip, and per record loaded its color and
 // whether it is hidden. A label the analyst turns on, here or anywhere in thimble, takes the color, as in a view's Color
-// by; choosing a label that is off turns it on.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+// by, but for one Filter by turns on (`quiet`), which keeps its own; choosing a label that is off turns it on.
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import type { Concept, LabelRow, SourceKeys, SourceRecord } from '../lib/types'
@@ -65,7 +65,7 @@ export function useSourceKeys(ws: string, path: string, on: boolean): SourceKeys
   return got?.path === path ? got.keys : null
 }
 
-export function useColorBy(ws: string, path: string, on: boolean, labels: FilesLabels, records: readonly SourceRecord[], rows: ReadonlyMap<string, ReadonlyMap<string, LabelRow>>, total: number | null): ColorBy {
+export function useColorBy(ws: string, path: string, on: boolean, labels: FilesLabels, records: readonly SourceRecord[], rows: ReadonlyMap<string, ReadonlyMap<string, LabelRow>>, total: number | null, quiet?: RefObject<Set<string>>): ColorBy {
   const keys = useSourceKeys(ws, path, on)
   const [kept, setKept] = useState<ColorKept>(() => readColor(ws, path))
   const keep = useCallback(
@@ -95,7 +95,9 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
     const before = seenOn.current
     seenOn.current = onIds
     if (!before || !on) return
-    const fresh = labels.on.filter((k) => !before.has(k.id) && fileLabels.some((f) => f.id === k.id))
+    const held = quiet?.current
+    const fresh = labels.on.filter((k) => !before.has(k.id) && fileLabels.some((f) => f.id === k.id) && !held?.has(k.id))
+    held?.forEach((id) => onIds.has(id) && held.delete(id))
     if (fresh.length) keep({ ...kept, by: `l:${fresh[fresh.length - 1].id}` })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onIds, loaded])
