@@ -1051,6 +1051,10 @@ Filtered to the test label, the page shows {records} records, and the filter kee
 
 The claims expect files the corpus lacks, which the analyst sees above the view as missing: {files}.
 
+## view-choice-error
+
+{count} choices of the view's controls gave a script error when chosen: {choices}. Every choice the analyst can make must draw the view, None and Off among them: guard what the page reads of a choice that can be null (`rows.by`, `colour.by`, `filter.by`), and draw the records in one group, or uncolored, for it.
+
 ## view-term-error
 
 The view's program failed {where}: {what}. It must draw the view with no error, also when a fetch fails or a file is missing.
