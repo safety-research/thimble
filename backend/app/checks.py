@@ -258,7 +258,9 @@ def fingerprint(kind: str, keys: list[str]) -> str:
 
 def passages(slug: str, doc: dict[str, Any] | None) -> list[dict[str, Any]]:
     """The passages of a written document in its order: {ref, kind, fp, locked, anchor, ids}, `anchor` the id a comment on
-    the whole passage goes on and `ids` every id that names the passage or a sentence in it."""
+    the whole passage goes on and `ids` every id that names the passage or a sentence in it. The title comes first, at
+    `report:<slug>#title`, since it states the document's main claim (live check term-fix8: a wrong span of time in the
+    title, which no check read)."""
     from . import report_types as rt  # noqa: PLC0415
 
     if not doc:
@@ -266,6 +268,10 @@ def passages(slug: str, doc: dict[str, Any] | None) -> list[dict[str, Any]]:
     key = rt.sentence_key
     out: list[dict[str, Any]] = []
     in_units: set[str] = set()
+    title = _collapse(doc.get("title"))
+    if title:
+        out.append({"ref": f"report:{slug}#{rt.TITLE_BLOCK}", "kind": "title", "fp": fingerprint("t", [key(title)]),
+                    "locked": doc.get("title_locked") is True, "anchor": rt.TITLE_BLOCK, "ids": [rt.TITLE_BLOCK]})
 
     def sentence(x: dict[str, Any]) -> None:  # a story's answer or a page's claim, which no lock holds
         sid = str(x.get("id"))

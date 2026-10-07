@@ -276,7 +276,8 @@ def test_server_for_launch_starts_and_waits_for_the_server_and_never_stops_the_l
 
 
 def test_launch_json_names_the_launchers_pid_where_kernels_and_mains_edits_cannot_change_it(corpus):
-    """The launcher passes its own pid (--launcher-pid $$), which `exec claude` keeps, and launch.json records it, so the
+    """The launcher passes its own pid (--launcher-pid $$), which launch.json records until the launcher writes main's
+    `claude` process there as it starts it, so the
     module's bridge can read main's fence from that process's command line before /thimble attaches main. launch.json
     stays a file the hooks trust: written where kernels see it read-only and main's Edit is denied, in no folder main's
     Bash may write."""

@@ -1694,8 +1694,8 @@ def main_name(cwd: Path) -> str:
 # a machine where it cannot run) main starts without the fence, and the launch says so (NO_FENCE_LINES).
 #
 # The launch also writes launch.json in the workspace (LAUNCH_FILE, launch_record): main's session id, whether main is
-# fenced, the switches the launcher exports, the variables it unsets, and the launcher's own pid, which is main's
-# `claude` process once the launcher execs it. The hooks module's bridge accepts a hello only from that session
+# fenced, the switches the launcher exports, the variables it unsets, and the launcher's own pid, which the launcher
+# replaces with main's `claude` process as it starts it (the mode line names the file). The hooks module's bridge accepts a hello only from that session
 # (module_bridge), reading from that pid's command line whether main is fenced, and `doctor` reads it. It also records
 # the mode the folder starts in (launch_mode.resolve), which every other process of the session reads from there
 # (launch_mode.session_mode).
@@ -2071,8 +2071,8 @@ class LaunchRefused(Exception):
 
 
 def live_launch(rec: Mapping[str, Any]) -> bool:
-    """Whether the process a launch.json record names (`pid`: the launcher's own, which `exec claude` made main's
-    `claude`) runs now as Claude Code's `claude` (its program, or the script node runs, is named claude), naming the
+    """Whether the process a launch.json record names (`pid`: main's `claude`, which the launcher wrote there as it
+    started it) runs now as Claude Code's `claude` (its program, or the script node runs, is named claude), naming the
     record's session when it names one (`--session-id <sid>` or `--resume <sid>`, as the launcher passes it). False
     for a pid that is gone, unreadable, or another process that took the pid later."""
     pid = rec.get("pid")
@@ -2101,8 +2101,8 @@ def open_elsewhere(c: str, mode: str | None = None) -> str | None:
 
 def launch_record(c: str, session: str | None, fenced: bool, switches: dict[str, str], unset: list[str],
                   pid: int | None = None, modules_off: str = "", mode: str = launch_mode.BROWSER) -> None:
-    """Write launch.json in workspace `c` (module note, main's fence), with `pid`, the launcher's own process, which
-    becomes main's `claude` when the launcher execs it, when the launcher names it, `modules_off`, why the launch
+    """Write launch.json in workspace `c` (module note, main's fence), with `pid`, the launcher's own process, when the
+    launcher names it, which the launcher then replaces with main's `claude` process as it starts it, `modules_off`, why the launch
     found Claude Code's hooks modules off (modules_off), which the browser and the doctor give as the reason, and
     `mode`, the mode the session starts in, which the session's other processes read (launch_mode.session_mode). Never
     raises: a launch that cannot write it starts main, whose hooks module then stays idle."""
@@ -2161,16 +2161,17 @@ def launch_args(cwd: Path, resume: bool = False, settings: str = "", own_session
     pass with `--session-id` ('' when the analyst's own flags name the session, `own_session`, or `resume` continues
     one), the env line (NAME=VALUE words to export: SWITCHES), the unset line (the names of UNSET_VARS the analyst's
     environment sets), the note line (tab-separated lines to print before Claude Code starts), the mode line (the mode
-    the folder starts in, launch_mode.resolve, and in terminal mode a tab and the renderer plugin's folder to load with
-    `--plugin-dir`, when it can load), the export line (tab-separated NAME=VALUE pairs to export: terminal_env and a PATH
+    the folder starts in, launch_mode.resolve, then a tab and in terminal mode the renderer plugin's folder to load with
+    `--plugin-dir`, when it can load, then a tab and the workspace's launch.json, whose `pid` the launcher sets to main's
+    `claude` process; the empty fields at its end are left out), the export line (tab-separated NAME=VALUE pairs to export: terminal_env and a PATH
     with the plugin copy's bin/ first in terminal mode, else none), with `resume` the session to resume, then main's prompt, whose turn ending follows that
     value.
 
     Before it prints, it registers the folder (register_here), refuses with LaunchRefused when the workspace is open in
     the other mode (open_elsewhere), starts thimble's server and waits for it (server_for_launch; not in terminal mode),
     finds the workspace's extensions again (refresh_extensions; in terminal mode local_extensions) and writes
-    launch.json (launch_record), with `launcher_pid`, the launcher's own pid, which becomes main's `claude` process when
-    the launcher execs it, and in terminal mode the hooks module's roles file (write_roles). Main's effort is explicit:
+    launch.json (launch_record), with `launcher_pid`, the launcher's own pid, until the launcher writes main's `claude`
+    process there, and in terminal mode the hooks module's roles file (write_roles). Main's effort is explicit:
     models.main's, else the CLAUDE_CODE_EFFORT_LEVEL it unsets, else cc_settings.main_effort_flag; a stored ultracode
     runs at its level."""
     installed = installed_copy(cwd)
@@ -2245,13 +2246,17 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     if safe_mode or os.environ.get(SAFE_MODE_ENV, "").strip() not in ("", "0", "false"):
         notes.append(SAFE_MODE_LINE)
     exports = terminal_env(c) if terminal else {}
-    mode_line = mode
+    renderer = ""
     if terminal:
         why_no_renderer = renderer_problem()
         if why_no_renderer:
             notes.append(NO_RENDERER_LINE.format(why=why_no_renderer))
         else:
-            mode_line += "\t" + str(renderer_root())
+            renderer = str(renderer_root())
+    # the launcher writes main's `claude` pid into launch.json itself, since it outlives `claude` in both modes to say
+    # how to come back with thimble (plugin/bin/thimble)
+    launch_file = str(config.workspace_dir(c) / LAUNCH_FILE) if c else ""
+    mode_line = "\t".join([mode, renderer, launch_file]) if launch_file else "\t".join([mode, renderer]).rstrip("\t")
     settings_value = launch_settings(cwd, settings, fence, env=exports)
     if c:  # fenced as main's command line will show it (an unreadable --settings of the analyst's carries no fence)
         launch_record(c, session, cc_plugin.fenced_argv(["claude", "--settings", settings_value], cwd), switches, unset,
@@ -4117,8 +4122,8 @@ def build_parser() -> argparse.ArgumentParser:
     la.add_argument("--own-session", help="the analyst's own flags name main's session (-r, --session-id or "
                                           "--fork-session): its id, or '' when it is not known")
     la.add_argument("--safe-mode", action="store_true", help="the analyst passed Claude Code's --safe-mode")
-    la.add_argument("--launcher-pid", type=int, help="the launcher's own pid ($$), which is main's `claude` process "
-                                                     "once it execs claude; launch.json records it")
+    la.add_argument("--launcher-pid", type=int, help="the launcher's own pid ($$), which launch.json records until the "
+                                                     "launcher writes main's `claude` process there")
     la.set_defaults(fn=cmd_launch_args)
     pr = sub.add_parser("prompt", help="for a plugin skill's injected command: prompt files rendered for a session in --cwd")
     pr.add_argument("names", nargs="+", help="prompt names under prompts/, such as shared")

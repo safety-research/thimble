@@ -180,6 +180,9 @@ The rows below, if there are any, come from this corpus's viewers. A viewer of o
     Analyst   How many refund requests were approved?
     Good      [[352|card:<id>#outcome/approved]] of the 410 refund requests were approved.
     Bad       352 of the 410 refund requests were approved, see the approvals card.
+    Bad       352 of the 410 refund requests were approved [[352|card:<id>#outcome/approved]].
+
+A link shows its words where it stands. So the second bad answer reads "352 of the 410 refund requests were approved 352.", and "made by one account [[1|<ref>]]" reads "made by one account 1."
 
     Analyst   Show me a customer who gave up.
     Good      One customer wrote three times over nine days, got only the auto-reply, and then disputed the charge [[view:inbox/c-4471]].

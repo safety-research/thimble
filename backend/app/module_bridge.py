@@ -15,7 +15,7 @@ module sees the new id within tens of milliseconds of the SessionStart hook (spi
 main yet is held up to HELLO_HOLD_S for a rekey that names it. Main must also run inside thimble's fence
 (cc_plugin.main_fenced), so a THIMBLE_LAUNCHED that a child session inherited gets no requests; that is read from main's
 command line, never from anything the module or main reports. At session start, before /thimble attaches main, the
-command line is that of the process launch.json names (`pid`: the launcher's own, which `exec claude` keeps, _launched):
+command line is that of the process launch.json names (`pid`: main's `claude`, which the launcher writes, _launched):
 the hello is accepted when its session is launch.json's and that process's command line is a fenced `claude` that names
 the session, so the module registers thimble's types inside session.start, in time for main's first agent listing.
 Where that check cannot be made (no pid in launch.json, the process gone, a command line that is not that `claude`, or a
@@ -357,9 +357,9 @@ def _names(argv: list[str], sid: str) -> bool:
 
 
 def _launched(c: str, sid: str) -> bool:
-    """Whether main's session `sid` is the one launch.json names, and the process launch.json names (`pid`: the
-    launcher's own, which `exec claude` made main's `claude`) runs now as `claude` (_is_claude) with a command line that
-    names `sid` (_names) and is fenced (cc_plugin.fenced_argv, the check main_fenced makes). False when the check cannot
+    """Whether main's session `sid` is the one launch.json names, and the process launch.json names (`pid`: main's
+    `claude`, which the launcher writes there as it starts it) runs now as `claude` (_is_claude) with a command line
+    that names `sid` (_names) and is fenced (cc_plugin.fenced_argv, the check main_fenced makes). False when the check cannot
     be made: no pid, the process gone, or a command line that is not that `claude`, such as another process that took
     the pid later."""
     from . import cc_plugin, procs  # noqa: PLC0415

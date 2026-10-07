@@ -323,6 +323,8 @@ async def _links_job(c: str, cid: str, version: str) -> None:
         if cite.is_card_ref(ref) or (display, ref) in external:
             continue
         why = await _ref_check(corpus, ref, display, decrease=cite.says_decrease(text, start, end))
+        if why == WHY_VALUE and not cite.shows_value(display):
+            why = None  # the place resolves and the words show no value, so they only name the link: never red
         if why == WHY_VALUE:
             external[(display, ref)] = {"why": why, "source": await _source_at(corpus, ref)}
         else:

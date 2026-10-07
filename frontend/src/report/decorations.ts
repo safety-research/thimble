@@ -134,10 +134,11 @@ function build(pmDoc: PMNode, ctx: MarksCtx): DecorationSet {
     if (type === 'heading') {
       if (id === TITLE_ID) {
         if (content.content.size > 0) decos.push(Decoration.node(pos + 1, pos + 1 + content.nodeSize, cellAttrs(`report:${ctx.slug}`, readableText(content.textContent))))
-        return true
+      } else {
+        if (!idx.sections.has(id)) return true
+        decos.push(Decoration.node(pos + 1, pos + 1 + content.nodeSize, cellAttrs(`report:${ctx.slug}#${id}`, readableText(content.textContent))))
       }
-      if (!idx.sections.has(id)) return true
-      decos.push(Decoration.node(pos + 1, pos + 1 + content.nodeSize, cellAttrs(`report:${ctx.slug}#${id}`, readableText(content.textContent))))
+      // a check's comment on the title or on a section's heading tints it (the report checks read the title as a passage)
       const flag = ctx.flags.get(id)
       if (flag && content.content.size > 0) {
         decos.push(Decoration.inline(start, start + content.content.size, { ...flagAttrs(flag), 'data-sid': id }))
