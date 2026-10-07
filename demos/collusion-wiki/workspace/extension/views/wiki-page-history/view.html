@@ -4,7 +4,7 @@
 <style>
   /* thimble's parts (.field, .chip, .btn, .seg, .list-row), its Color by control, its time range selector and the
      theme's tokens come with the frame; this page lays out the control row, the range and its chart, the list of pages
-     and the open page's history */
+     and the open page's history, read as diffs or as messages */
   :root { --add-bg: color-mix(in oklab, var(--status-positive) 13%, transparent); --rem-bg: color-mix(in oklab, var(--status-negative) 12%, transparent); }
   html, body { margin: 0; height: 100%; }
   body { display: flex; flex-direction: column; overflow: hidden; background: var(--surface-card); color: var(--text-primary); font: 400 var(--text-ui-sm) / 1.4 var(--font-body); }
@@ -24,7 +24,7 @@
   .fbtn .clr { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -3px; border-radius: 4px; color: var(--text-tertiary); }
   .fbtn .clr:hover { background: var(--track-bg); color: var(--text-primary); }
   .chip > .ico { width: 10px; height: 10px; }
-  #colour { flex: 1 1 360px; min-width: 300px; }
+  #colour { flex: 1 1 360px; min-width: 0; }
   .sw { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
   .sw.none { background: none; }
 
@@ -48,12 +48,17 @@
 
   /* the two panes */
   #main { flex: 1; min-height: 0; display: flex; }
-  #left { flex: 0 0 clamp(290px, 36%, 440px); min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border-hairline); }
+  #left { flex: 0 0 clamp(220px, 36%, 440px); min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border-hairline); }
   #lh { flex: none; display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--border-hairline); }
   #count { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: var(--text-xs); }
   #count b { color: var(--text-primary); font: 500 var(--text-mono-sm) / 1 var(--font-mono); }
   #sort { flex: none; width: 168px; }
-  #list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; outline: none; }
+  /* the list of pages holds groups, which take no colour, so it keeps a plain scrollbar (the view's own, until the
+     kit's plain track takes its place) */
+  #list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; outline: none; scrollbar-width: thin; scrollbar-color: rgba(var(--ink-rgb), 0.28) transparent; }
+  #list::-webkit-scrollbar { width: 8px; }
+  #list::-webkit-scrollbar-thumb { border-radius: 4px; background: rgba(var(--ink-rgb), 0.24); }
+  #list::-webkit-scrollbar-track { background: transparent; }
   #vl { position: relative; }
   .chunk { position: absolute; left: 0; right: 0; }
   .row { position: relative; box-sizing: border-box; height: 50px; padding: 7px 12px 6px 14px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
@@ -69,6 +74,12 @@
   .row .dl .ico { width: 11px; height: 11px; }
   .row .meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font-size: var(--text-xs); line-height: 1.2; }
   .row svg { flex: none; display: block; }
+  /* a page's mix of its revisions' colours in the range, the values in the chips' order: a page is a group, so it
+     takes no bar of its own (the view's own helper, until the kit's proportion bar takes its place) */
+  .row .r1 > * { order: 2; }
+  .row .r1 > .nm { order: 1; }
+  .pbar { flex: none; display: flex; width: 36px; height: 6px; overflow: hidden; border-radius: 1px; background: rgba(var(--ink-rgb), 0.08); }
+  .pbar i { display: block; flex: var(--n) 1 0; min-width: 2px; height: 100%; background: var(--c); }
   .row .nu { flex: none; display: inline-flex; align-items: center; gap: 2px; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
   .row .nu .ico { width: 11px; height: 11px; }
   .empty { padding: 28px 14px; color: var(--text-tertiary); font-size: var(--text-xs); }
@@ -81,21 +92,35 @@
   #ph .sp { flex: 1; }
   #ph .h2 { margin: 2px 0 0 2px; color: var(--text-secondary); font-size: var(--text-xs); }
   #ph .h2 b { font: 500 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-primary); }
-  .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 3px 18px; margin: 8px 0 4px 2px; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); gap: 3px 18px; margin: 8px 0 4px 2px; }
   .fact.wide { grid-column: span 2; }
   .fact { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0; }
   .fact dt { flex: none; width: 92px; color: var(--text-tertiary); font-size: var(--text-xs); }
   .fact dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
   .unames { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 4px 0 8px 2px; }
   .unames.all { max-height: 168px; overflow-y: auto; padding: 6px; border-radius: var(--radius-ui); box-shadow: inset 0 0 0 1px var(--border-hairline); }
-  #pst { position: relative; flex: none; padding: 4px 16px 8px; border-bottom: 1px solid var(--border-hairline); }
-  #ps { display: block; cursor: pointer; }
-  #blocks { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+  /* the open page over time: its revisions in the colour's values (deletes below the line), and under them each bin's
+     lines added (above) and removed (below), with their key in the gutter */
+  #pst { position: relative; flex: none; display: flex; gap: 10px; padding: 4px 16px 8px; border-bottom: 1px solid var(--border-hairline); }
+  #pgut { flex: none; width: 104px; display: flex; flex-direction: column; justify-content: space-between; padding: 1px 0; font: 400 var(--text-xs) / 1.2 var(--font-body); color: var(--text-secondary); }
+  #pgut .k { display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; }
+  #pgut b { font: 500 var(--text-mono-sm) / 1.2 var(--font-mono); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  #pgut .gap { flex: 1; }
+  #ps { flex: 1; min-width: 0; display: block; cursor: pointer; }
+  #pst.none #pgut { display: none; }
+  .rd { flex: none; }
+  #bwrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #blocks { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overflow-anchor: none; }
+  /* the day of the item at the top of the view, over the pane */
+  #dayhead { position: absolute; top: 0; left: 0; right: 0; z-index: 3; }
+  #dayhead:empty { display: none; }
 
   /* a page's history: revisions, deletes and requests */
-  .day { position: sticky; top: 0; z-index: 2; padding: 6px 16px 5px; background: var(--surface-card); border-bottom: 1px solid var(--border-hairline); color: var(--text-secondary); font: 500 var(--text-xs) / 1.2 var(--font-body); }
+  .day { box-sizing: border-box; height: 27px; padding: 6px 16px 5px; background: var(--surface-card); border-bottom: 1px solid var(--border-hairline); color: var(--text-secondary); font: 500 var(--text-xs) / 1.2 var(--font-body); }
   /* an item out of view is not laid out or painted until it comes near the view, at the height it last had (or a guess) */
-  .blk { position: relative; border-bottom: 1px solid var(--border-hairline); scroll-margin-top: 30px; content-visibility: auto; contain-intrinsic-size: auto 220px; }
+  .blk { position: relative; border-bottom: 1px solid var(--border-hairline); }
+  /* an item not read yet: its header from what the page's history says of it, its body's room held */
+  .blk .skb { margin: 0 16px 8px 28px; border-radius: 3px; background: rgba(var(--ink-rgb), 0.04); }
   .blk.flash { background: var(--surface-selected); }
   .bh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px; min-width: 0; padding: 8px 16px 6px; }
   .bh .seq { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
@@ -126,6 +151,11 @@
   .diff .dl.full { color: var(--text-primary); }
   .diff .dl.wh .tx, .whs { color: var(--text-tertiary); font-style: italic; opacity: 0.75; }
   .nob { padding: 0 16px 8px 28px; color: var(--text-tertiary); font-size: var(--text-xs); }
+  /* a revision read as a message: the lines it added, as text */
+  .mtx { margin: 0; padding: 0 16px 8px 28px; font: 400 var(--text-ui-sm) / 1.5 var(--font-body); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); }
+  .mtx .whs { font-style: italic; }
+  .more-msg { margin: -4px 0 8px 22px; }
+  .bh .sig b { font-weight: 600; }
   .more-lines { margin: 0 0 8px 22px; }
   .diff.clip { position: relative; max-height: 560px; overflow: hidden; }
   .diff.clip::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 26px; background: linear-gradient(transparent, var(--surface-card)); pointer-events: none; }
@@ -212,26 +242,30 @@
   </section>
   <section id="right">
     <div id="ph"></div>
-    <div id="pst"><svg id="ps"></svg></div>
-    <div id="blocks" tabindex="-1"></div>
+    <div id="pst"><div id="pgut"></div><svg id="ps"></svg></div>
+    <div id="bwrap"><div id="dayhead" class="day"></div><div id="blocks" tabindex="-1"></div></div>
   </section>
 </div>
 <div id="tip"></div>
 <script>
 'use strict'
 // Wiki Page History. The control row narrows the pages by name and username, and holds thimble's Color by control: a
-// revision's wiki, its kind of save, its page's status (deleted or never deleted), or any label, each value a chip that
-// filters. Below it, thimble's time range selector is the one control for time: its overview holds every
-// revision over the whole span and its viewfinder frames the range the view shows. The chart of the range counts the
-// revisions (above the line, stacked by the colour's values) and deletes (below it) of those pages per bin, on the
-// chart's one axis, and a drag on it sets the range. The list on the left holds the pages in the range, each with its
-// revisions and deletes on the same bins as the chart, and the list's tracks beside it; the page picked opens on the
-// right as its history in the range and of the username filtered by, revision by revision, each a row with the colour's
-// bar on its edge, a link to its line and its diff against the revision before, with its delete events and requests in
-// place, more as the history scrolls, under the browser's own scrollbar.
+// revision's wiki, its kind of save, its page's status (deleted or never deleted), its kind of message and its
+// signature, or any label, each value a chip that filters. Below it, thimble's time range selector is the one control
+// for time: its overview holds every revision over the whole span and its viewfinder frames the range the view shows.
+// The chart of the range counts the revisions (above the line, stacked by the colour's values) and deletes (below it)
+// of those pages per bin, on the chart's one axis, and a drag on it sets the range. The list on the left holds the
+// pages in the range, each with the mix of its revisions' colours and its revisions and deletes on the same bins as
+// the chart, under a plain scrollbar: a page is a group of revisions, so only its revisions take the colour. The page
+// picked opens on the right: its revisions over time and, under them, the lines each bin added and removed; then its
+// history in the range and of the username filtered by, every item in place, revision by revision, each with the
+// colour's bar on its edge and a link to its line, read as diffs against the revision before or, on a page used as a
+// message thread, as the messages its saves left, with its delete events and requests in place. The history's tracks
+// beside it hold every item's colour, and a band on the range's overview follows the items in view.
 // Labels: the reader keeps only the pages, revisions and events the label filter keeps, and hands every revision the
-// marks of the labels that are on, from which the page reads the value of the label colored by; a page's row carries
-// the page as its data-anchor (view:<slug>/<page_id>), each revision and event its line, so thimble marks them.
+// marks of the labels that are on, from which the page reads the value of the label colored by; each revision and
+// event carries its line as data-anchor, so thimble marks them, and a page's row and title carry the page
+// (view:<slug>/<page_id>) unmarked, since a group takes no colour.
 const SLUG = (thimble.view && thimble.view.slug) || 'wiki-page-history'
 const unitRef = (key) => `view:${SLUG}/${key}`
 const WITHHELD = '[pre-2026 line withheld]'
@@ -304,6 +338,7 @@ const S = {
   pinfo: false, // the open page's details shown
   keepPage: null, // a page a citation opened, shown whatever the label filter keeps
   event: null, // an event no page holds, shown on the right
+  read: null, // how the open page's revisions read when the analyst chose ('messages' or 'diff'), null for its own way
 }
 
 // The labels as an overview read them: the values of the labels that were on (its `marks`, at most the reader's
@@ -407,11 +442,11 @@ function clearFilters() {
 }
 
 // ---------------------------------------------------------------- colour
-// thimble's Color by control, in the control row: a revision's wiki, its kind of save (the base its diff is against)
-// or its page's status, deleted or never deleted, or any label, in one menu; the values as chips, each with its
-// revisions in the chart, that filter their records when turned off. A record the control is handed is {wiki, save,
-// status} for a revision or a page (a page takes no save); a label's value is that label's among the record's marks,
-// which the reader sends.
+// thimble's Color by control, in the control row: a revision's wiki, its kind of save (the base its diff is against),
+// its page's status, deleted or never deleted, its kind of message (whether the text it added holds a link) or its
+// signature, or any label, in one menu; the values as chips, each with its revisions in the chart, that filter their
+// records when turned off. A record the control is handed is {wiki, save, status, kind, signed} for a revision, {wiki,
+// status} for a page; a label's value is that label's among the record's marks, which the reader sends.
 const NONE = () => token('--viz-ink-3') || '#a19d94'
 const BASE_NAME = ['New page', 'Edit', 'After a delete', 'First stored'] // the reader's BASES: new, prev, deleted, withheld
 const BASE_MEANS = [
@@ -422,6 +457,14 @@ const BASE_MEANS = [
 ]
 const STATUS = ['deleted', 'never deleted']
 const STATUS_MEANS = ['At least one delete event in events.jsonl names the page', 'No delete event names the page']
+const KIND_NAME = [null, 'Text only', 'With links'] // the reader's KINDS: 0 for a revision that adds no new text
+const KIND_MEANS = ['The text the revision added holds no link', 'The text the revision added holds http://, https:// or www.']
+const SIGNED = ['Own username', 'Another name', 'Unsigned'] // the reader's SIGNED
+const SIGNED_MEANS = [
+  "The text the revision added ends in a signature (-- name) that is the revision's username, ignoring case",
+  "The text the revision added ends in a signature that is not the revision's username",
+  'The text the revision added ends in no signature',
+]
 const colour = thimble.colorBy({
   mount: '#colour',
   fields: [
@@ -435,10 +478,19 @@ const colour = thimble.colorBy({
       name: 'status', title: 'Status', description: 'Whether a delete event names the page',
       values: STATUS.map((name, j) => ({ name, meaning: STATUS_MEANS[j] })),
     },
+    {
+      name: 'kind', title: 'Kind of message',
+      description: 'What the text a revision added holds, once blanks, the stock new-page line and withheld placeholders are dropped; a revision that adds none takes no kind',
+      values: KIND_NAME.slice(1).map((name, j) => ({ name, meaning: KIND_MEANS[j] })),
+    },
+    {
+      name: 'signed', title: 'Signature', description: "Whether the text a revision added ends in a signature (-- name), and whether that name is the revision's username",
+      values: SIGNED.map((name, j) => ({ name, meaning: SIGNED_MEANS[j] })),
+    },
   ],
   chips: 'filter',
   // the open page's history is drawn again from what was read: what the reader answers does not depend on the colour
-  onChange: () => { if (O) { compute(); renderAll(); if (!dropGone() && PG && S.sel != null) { renderPageStrip(); recolourBlocks() } } },
+  onChange: () => { if (O) { compute(); renderAll(); if (!dropGone() && PG && S.sel != null) { renderHead(); renderPageStrip(); rerenderBlocks() } } },
 })
 // whether the colour is a field of the page itself, which a page's row takes and is filtered by
 const pageLevel = () => colour.field === 'wiki' || colour.field === 'status'
@@ -452,28 +504,32 @@ function labelValue(bits, marks) {
 }
 const pageStatus = (r) => (O.pages.d[r] ? STATUS[0] : STATUS[1])
 // revision k of the overview, on row r
+const signedName = (j) => (j >= 0 ? SIGNED[j] : null)
 function revValue(k, r) {
   if (colour.label) return labelValue(O.revs.rb[k], O.marks)
   const f = colour.field
-  return f === 'wiki' ? O.wikis[O.pages.w[r]] : f === 'save' ? BASE_NAME[O.revs.rk[k]] : f === 'status' ? pageStatus(r) : null
+  return f === 'wiki' ? O.wikis[O.pages.w[r]] : f === 'save' ? BASE_NAME[O.revs.rk[k]] : f === 'status' ? pageStatus(r)
+    : f === 'kind' ? KIND_NAME[O.revs.rg[k]] : f === 'signed' ? signedName(O.revs.rs[k]) : null
 }
-// a page's record, and a revision's of the open page
-const pageRec = (r) => ({ wiki: O.wikis[O.pages.w[r]], status: pageStatus(r) })
 const openStatus = () => { const r = rowOf.get(S.sel); return r != null ? pageStatus(r) : PG.page.deletes ? STATUS[0] : STATUS[1] }
-function blockRec(b) {
-  return { ref: b.ref, wiki: PG.page.wiki, save: BASE_NAME[['new', 'prev', 'deleted', 'withheld'].indexOf(b.base)], status: openStatus() }
+// item i of the open page's strip, as the control reads it: a revision's fields, an event's ref alone
+function itemRec(st, i) {
+  const ref = itemRef(st, i)
+  if (st.k[i] !== 'r') return { ref }
+  return { ref, wiki: PG.page.wiki, save: BASE_NAME[st.kb[i]], status: openStatus(), kind: KIND_NAME[st.g[i]], signed: signedName(st.sg[i]) }
 }
+const itemRef = (st, i) => `${st.k[i] === 'r' ? PG.files.revisions : PG.files.events}#L${st.ln[i]}`
 // item i of the open page's strip
 function stripValue(st, i) {
   if (colour.label) return labelValue(st.b[i], PG.marks)
   if (st.k[i] !== 'r') return null
   const f = colour.field
-  return f === 'wiki' ? PG.page.wiki : f === 'save' ? BASE_NAME[st.kb[i]] : f === 'status' ? openStatus() : null
+  return f === 'wiki' ? PG.page.wiki : f === 'save' ? BASE_NAME[st.kb[i]] : f === 'status' ? openStatus()
+    : f === 'kind' ? KIND_NAME[st.g[i]] : f === 'signed' ? signedName(st.sg[i]) : null
 }
-// a page's value, for its row and the list's tracks: its wiki, its status, or the label's value among its records'
-// marks; a kind of save belongs to a revision, so a page takes none
+// a page's own value, which its row is filtered by: its wiki or its status; the other fields and the labels belong to
+// its records
 function pageValue(r) {
-  if (colour.label) return labelValue(O.pages.pm[r], O.marks)
   const f = colour.field
   return f === 'wiki' ? O.wikis[O.pages.w[r]] : f === 'status' ? pageStatus(r) : null
 }
@@ -497,15 +553,26 @@ function pop(anchor, html, { align = 'left', cls = '' } = {}) {
   openPop = p
   return p
 }
-// below its anchor, or above it when there is more room there, inside the page
+// the right edge popovers and tips keep to: left of the history's tracks, which they never cover
+function rightEdge() {
+  let x = innerWidth
+  for (const el of document.querySelectorAll('.thimble-colour-strip')) {
+    const r = el.getBoundingClientRect()
+    if (r.width && r.height) x = Math.min(x, r.left)
+  }
+  return x
+}
+// below its anchor, or above it when there is more room there, inside the page and left of the tracks
 function place(p) {
   p.style.maxHeight = ''
+  const edge = rightEdge()
+  p.style.maxWidth = Math.max(200, Math.min(edge - 12, 360)) + 'px'
   const r = p.anchor.getBoundingClientRect(), w = p.offsetWidth, h = p.offsetHeight
   const below = innerHeight - r.bottom - 10, above = r.top - 10
   const top = h <= below || below >= above ? r.bottom + 4 : r.top - 4 - Math.min(h, above)
   p.style.maxHeight = Math.max(160, Math.floor(h <= below || below >= above ? below : above)) + 'px'
   p.style.top = Math.max(6, top) + 'px'
-  p.style.left = Math.max(6, Math.min(innerWidth - w - 6, p.align === 'right' ? r.right - w : r.left)) + 'px'
+  p.style.left = Math.max(6, Math.min(edge - w - 6, p.align === 'right' ? r.right - w : r.left)) + 'px'
 }
 document.addEventListener('mousedown', (e) => { if (openPop && !openPop.contains(e.target) && !(openPop.anchor && openPop.anchor.contains(e.target))) closePop() })
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePop() })
@@ -637,7 +704,7 @@ function renderHist() {
   const slot = new Map(vals.map((v, j) => [v, j])), NS = vals.length + 1
   const ink = NONE(), red = delInk()
   const fills = [...vals.map((v) => colour.colourOf(v) || ink), ink]
-  H = { x0, x1, sc, bins, slot, NS, fills, base }
+  H = { x0, x1, sc, bins, slot, NS, fills, base, vals }
   const revs = new Int32Array(nb), dels = new Int32Array(nb), gone = new Int32Array(nb), by = Array.from({ length: nb }, () => new Int32Array(NS))
   let nr = 0, nd = 0
   for (const r of charted) {
@@ -755,16 +822,21 @@ const tip = $('tip')
 function showTip(e, html) {
   tip.innerHTML = html
   tip.style.display = 'block'
-  tip.style.left = Math.max(4, Math.min(innerWidth - tip.offsetWidth - 8, e.clientX + 12)) + 'px'
+  // to the pointer's right, or its left where that would cover the tracks or pass the edge
+  const edge = rightEdge(), w = tip.offsetWidth
+  const x = e.clientX + 12 + w <= edge - 6 ? e.clientX + 12 : e.clientX - 12 - w
+  tip.style.left = Math.max(4, Math.min(edge - w - 6, x)) + 'px'
   tip.style.top = Math.min(innerHeight - tip.offsetHeight - 8, e.clientY + 14) + 'px'
 }
 function hideTip() { tip.style.display = 'none' }
 
 // ---------------------------------------------------------------- the list of pages
 // Only the rows in view and around it are drawn, LIST_CHUNK rows at a time: a scroll adds a chunk as it comes near the
-// view and takes away one far from it, and leaves the rest of the list as it is. Each row shows its page's name, wiki,
-// time span, deletes, usernames and revisions, and its revisions and deletes in the range on the chart's bins, drawn as
-// the chart draws them: the revisions above the line in the colour's values, the deletes below it.
+// view and takes away one far from it, and leaves the rest of the list as it is. Each row shows its page's name, the
+// mix of its revisions' colours in the range, its wiki, time span, deletes, usernames and revisions, and its revisions
+// and deletes in the range on the chart's bins, drawn as the chart draws them: the revisions above the line in the
+// colour's values, the deletes below it. A page is a group of revisions, so it takes no colour bar of its own, and the
+// list keeps a plain scrollbar.
 function renderListHead() {
   $('count').innerHTML = `<b>${fmt(rows.length)}</b> ${rows.length === 1 ? 'page' : 'pages'}`
 }
@@ -828,24 +900,56 @@ function nameHtml(r) {
   return esc(name.slice(0, i)) + `<b>${esc(name.slice(i, i + S.q.length))}</b>` + esc(name.slice(i + S.q.length))
 }
 const anchorOf = (r) => (O.keys[r] ? unitRef(O.keys[r]) : O.pages.ln[r] ? `pages.jsonl#L${O.pages.ln[r]}` : '')
+// A group's mix of its records' colours: the share of each value that is on among `n` (a count per slot, in H.slot's
+// order, the last for no value), as a bar of its parts; nothing with Color by Off. The view's own helper until the
+// kit's proportion bar takes its place.
+function proportionBar(n, title, attrs = '') {
+  if (!H || colour.off || !n) return ''
+  let all = 0
+  for (const x of n) all += x
+  if (!all) return ''
+  let h = ''
+  // each part as wide as its share, and at least 2 px, so a value a few records take still shows
+  for (let j = 0; j < n.length; j++) if (n[j]) h += `<i style="--n:${n[j]};--c:${esc(H.fills[j])}"></i>`
+  return `<span class="pbar" title="${esc(title)}"${attrs}>${h}</span>`
+}
+// a page's records by the colour's values that are on, as proportionBar counts them: its revisions and deletes in the
+// range, and its own line; a delete and the page's line take a label's value, or the page's wiki or status, and no
+// value of a revision's own fields
+function rowMix(r) {
+  if (!H || colour.off) return null
+  const n = new Int32Array(H.NS)
+  const add = (v) => { if (colour.isOn(v)) n[v == null || !H.slot.has(v) ? H.NS - 1 : H.slot.get(v)]++ }
+  for (let k = RS[r]; k < RE[r]; k++) if (inR(O.revs.rt[k])) add(revValue(k, r))
+  const own = colour.label ? null : pageValue(r)
+  for (let k = DS[r]; k < DE[r]; k++) if (inR(O.dels.dt[k])) add(colour.label ? labelValue(O.dels.db[k], O.marks) : own)
+  if (O.pages.ln[r]) {
+    const v = colour.label ? labelValue(O.pages.pb[r], O.marks) : own
+    if (v != null) add(v)
+  }
+  return n
+}
+function mixTitle(n) {
+  const parts = []
+  for (let j = 0; j < n.length; j++) if (n[j]) parts.push(`${j < H.NS - 1 ? H.vals[j] : 'No value'} ${fmt(n[j])}`)
+  return parts.join(' · ')
+}
+// a label colored by with a value turned off: the rows are not anchored, since thimble hides an anchored element whose
+// unit takes a value turned off, and a page takes none of its own
+const unitsAnchored = () => !(colour.label && colour.values.some((v) => !v.on))
 function rowHtml(r) {
   const P = O.pages, p = P.p[r]
-  const anchor = anchorOf(r)
+  const anchor = unitsAnchored() ? anchorOf(r) : ''
   const d = P.d[r]
   const meta = `${esc(O.wikis[P.w[r]])} · ${esc(shortSpan(O.t0 + P.f[r], O.t0 + P.l[r]))}`
+  const mix = rowMix(r)
   // three counts that read alike, each after its icon: deletes, usernames, revisions
-  return `<div class="row${S.sel === p ? ' sel' : ''}" data-p="${p}"${anchor ? ` data-anchor="${esc(anchor)}" data-anchor-text="${esc(P.name[r])}"` : ''}${pageLevel() ? colour.attr(pageRec(r)) : ''}>` +
-    `<div class="r1"><span class="nm">${nameHtml(r)}</span>${d ? `<span class="dl" title="${plural(d, 'delete')}">${ico('trash')}${fmt(d)}</span>` : ''}<span class="nu" title="${plural(P.u[r], 'username')}">${ico('user')}${fmt(P.u[r])}</span><span class="nr" title="${plural(P.n[r], 'revision')}">${ico('edit')}${fmt(P.n[r])}</span></div>` +
+  // the page is anchored on its mix, which comes first so that thimble takes it for the page's element, and on its
+  // name, which a ⌘-click asks about; the mix stands after the name
+  const a = anchor ? ` data-anchor="${esc(anchor)}" data-anchor-text="${esc(P.name[r])}" data-anchor-unmarked` : ''
+  return `<div class="row${S.sel === p ? ' sel' : ''}" data-p="${p}">` +
+    `<div class="r1">${mix ? proportionBar(mix, mixTitle(mix), a) : ''}<span class="nm"${a}>${nameHtml(r)}</span>${d ? `<span class="dl" title="${plural(d, 'delete')}">${ico('trash')}${fmt(d)}</span>` : ''}<span class="nu" title="${plural(P.u[r], 'username')}">${ico('user')}${fmt(P.u[r])}</span><span class="nr" title="${plural(P.n[r], 'revision')}">${ico('edit')}${fmt(P.n[r])}</span></div>` +
     `<div class="r2"><span class="meta">${meta}</span>${stripSvg(r)}</div></div>`
-}
-// the list's tracks: every listed page's value in the list's order, though only the rows in view are drawn, each row's
-// record for the labels' ticks, and what the preview says of a row
-function renderListStrip() {
-  colour.strip($('list'), {
-    rows: rows.map(pageValue),
-    refs: rows.map(anchorOf),
-    preview: (i) => { const r = rows[i]; return r == null ? '' : { when: shortSpan(O.t0 + O.pages.f[r], O.t0 + O.pages.l[r]), text: O.pages.name[r] } },
-  })
 }
 // the list drawn whole, as when the rows, their order or what they show changed; its width and height are read here
 // only, so a scroll reads no layout but its own place
@@ -904,56 +1008,77 @@ function scrollListTo(i) {
 $('sort').onchange = (e) => { const [k, d] = e.target.value.split(':'); S.sort = k; S.dir = +d; rescope() }
 
 // ---------------------------------------------------------------- the open page
-// Its header, a strip of its history in the range (a click goes to the item), and its history in the range, of the
-// username the top row filters by: CHUNK items at a time, more as either end comes into view.
-let PG = null // the reader's answer for the open page
-let blocks = [], bFrom = 0, bTotal = 0
+// Its header, its history in the range over time (a click goes to the item), and its history in the range, of the
+// username the top row filters by: every item in place, each drawn from what the page's history says of it until it
+// comes near the view, when CHUNK items are read in full at a time. So the history's tracks hold every item's colour,
+// and the band on the range's overview follows the items in view.
+let PG = null // the reader's answer for the open page: its head, its history as columns (strip), its usernames
+let LP = [] // the strip's items the pane lists, in order: an item's place in the pane is its index here
+let posOf = new Map() // `${kind}${x}` -> its place
+const got = new Map() // place -> the item read in full
 let pageSeq = 0
 const bodies = new Map() // revision -> its whole body
 const fullOn = new Set(), infoOn = new Set(), longOn = new Set()
 let flashRef = null
+// how the open page's revisions read: as messages (the text each added) or as diffs; null for the page's own way,
+// messages on a page used as a message thread
+const readMode = () => S.read || (PG && PG.page.thread ? 'messages' : 'diff')
 
 function pageQuery(extra) {
   return { op: 'page', p: S.sel, n: CHUNK, ...(S.user != null ? { user: S.user } : {}), ...(S.range ? { since: O.t0 + S.range[0], until: O.t0 + S.range[1] } : {}), ...extra }
+}
+// the items the pane lists: in the range, and a revision by the username filtered by
+const listed = (st, i) => inR(st.t[i]) && !(S.user != null && st.k[i] === 'r' && O.users[st.u[i]] !== S.user)
+const keyOf = (kind, x) => `${kind}${x}`
+const blockKind = (b) => (b.kind === 'delete' ? 'd' : b.kind === 'request' ? 'q' : 'r')
+function computeListed() {
+  const st = PG.strip
+  LP = []; posOf = new Map()
+  for (let i = 0; i < st.k.length; i++) if (listed(st, i)) { posOf.set(keyOf(st.k[i], st.x[i]), LP.length); LP.push(i) }
+}
+function keepBlocks(list) {
+  for (const b of list || []) {
+    const pos = posOf.get(keyOf(blockKind(b), b.kind === 'delete' || b.kind === 'request' ? b.x : b.i))
+    if (pos != null) got.set(pos, b)
+  }
 }
 async function openPage(p, focus, keepScroll) {
   if (p == null) return
   const my = ++pageSeq
   const changed = S.sel !== p
+  const at = keepScroll && PG ? anchorNow() : null
   S.sel = p; S.event = null
-  if (changed) { S.pinfo = false; S.allNames = false; fullOn.clear(); infoOn.clear(); longOn.clear(); delAt = -1 }
+  if (changed) { S.pinfo = false; S.allNames = false; S.read = null; fullOn.clear(); infoOn.clear(); longOn.clear(); delAt = -1 }
   for (const el of document.querySelectorAll('.row')) el.classList.toggle('sel', +el.dataset.p === p)
   if (changed && !PG) $('blocks').innerHTML = '<div class="empty">Reading the page</div>'
   let res
   try {
-    res = await thimble.fetch(pageQuery(focus ? { focus } : keepScroll ? { from: bFrom, n: Math.max(CHUNK, blocks.length) } : { n: FIRST_CHUNK }), { key: 'page' })
+    res = await thimble.fetch(pageQuery(focus ? { focus } : at ? { from: Math.max(0, at.pos - 2) } : { n: FIRST_CHUNK }), { key: 'page' })
   } catch (e) {
     if (e && e.name === 'AbortError') return
     throw e
   }
   if (my !== pageSeq) return
-  if (!res) { PG = null; $('ph').innerHTML = ''; $('ps').innerHTML = ''; $('blocks').innerHTML = '<div class="empty">The page is not in the files</div>'; return }
-  const top = $('blocks').scrollTop
-  PG = res; blocks = res.blocks; bFrom = res.from; bTotal = res.total
+  if (!res) { PG = null; LP = []; $('ph').innerHTML = ''; $('ps').innerHTML = ''; $('pgut').innerHTML = ''; $('blocks').innerHTML = '<div class="empty">The page is not in the files</div>'; return }
+  PG = res
+  got.clear(); measured.clear()
+  computeListed()
+  keepBlocks(res.blocks)
   // a revision a citation opened shows its whole diff, so the passage quoted is on the page
-  if (focus && focus.rev != null) { const b = blocks.find((x) => x.i === focus.rev); if (b) longOn.add(b.ref) }
-  renderPage()
-  const box = $('blocks')
+  if (focus && focus.rev != null) { const b = res.blocks.find((x) => x.i === focus.rev); if (b) longOn.add(b.ref) }
+  renderPage(at)
   if (focus) {
-    const want = focus.rev != null ? `[data-i="${focus.rev}"]` : null
-    const el = want ? box.querySelector(want) : box.querySelector(`[data-pos="${bFrom + Math.min(1, blocks.length - 1)}"]`)
-    if (el) { flash(el); el.scrollIntoView({ block: 'start' }) }
-  } else if (keepScroll) box.scrollTop = top
-  else box.scrollTop = 0
-  watchEnd()
+    const k = focus.rev != null ? keyOf('r', focus.rev) : focus.del != null ? keyOf('d', focus.del) : keyOf('q', focus.req)
+    if (posOf.has(k)) jumpTo(posOf.get(k))
+  }
 }
 function flash(el) {
   el.classList.add('flash')
   flashRef = el.dataset.anchor
   setTimeout(() => { const x = flashRef && document.querySelector(`.blk[data-anchor="${CSS.escape(flashRef)}"]`); if (x) x.classList.remove('flash'); flashRef = null }, 1600)
 }
-function renderPage() {
-  renderHead(); renderPageStrip(); renderBlocks()
+function renderPage(a) {
+  renderHead(); renderPageStrip(); renderBlocks(a)
 }
 const lineOf = (ref) => String(ref).split('#L')[1] || ''
 // a quiet link to a record's line in the File browser
@@ -965,9 +1090,13 @@ function renderHead() {
   const anchor = g.key ? unitRef(g.key) : g.ref || ''
   const users = PG.users.length
   const del = g.deletes
-  let h = `<div class="h1"${anchor ? ` data-anchor="${esc(anchor)}" data-anchor-text="${esc(g.name)}"` : ''}><h2 title="${esc(g.page_id)}">${esc(g.name)}</h2><span class="chip chip-sans chip-tone-neutral">${esc(g.wiki)}</span>` +
+  const mode = readMode()
+  // the page is a group: its title is anchored, so it can be asked about, and takes no colour
+  const r = rowOf.get(S.sel), mix = r != null ? rowMix(r) : null
+  let h = `<div class="h1"${anchor ? ` data-anchor="${esc(anchor)}" data-anchor-text="${esc(g.name)}" data-anchor-unmarked` : ''}><h2 title="${esc(g.page_id)}">${esc(g.name)}</h2>${mix ? proportionBar(mix, mixTitle(mix)) : ''}<span class="chip chip-sans chip-tone-neutral">${esc(g.wiki)}</span>` +
     (del ? `<button class="chip chip-sans chip-tone-neutral chip-act" type="button" data-jump="d">${ico('trash')}${del > 1 ? `Deleted ${del} times` : 'Deleted'}</button>` : '') +
-    `<span class="sp"></span><button class="btn btn-ghost btn-sm${S.pinfo ? ' active' : ''}" type="button" id="pinfo">${ico('info')}Details</button>` +
+    `<span class="sp"></span><div class="seg seg-track rd" role="tablist" aria-label="Read the revisions as" data-thimble-chrome>${[['messages', 'Messages', 'Each revision as the text it added'], ['diff', 'Diff', 'Each revision as its diff against the revision before']].map(([k, t, tip]) => `<button class="seg-opt${mode === k ? ' active' : ''}" type="button" role="tab" aria-selected="${mode === k}" data-read="${k}" title="${tip}">${t}</button>`).join('')}</div>` +
+    `<button class="btn btn-ghost btn-sm${S.pinfo ? ' active' : ''}" type="button" id="pinfo">${ico('info')}Details</button>` +
     (g.ref ? `<button class="chip chip-tone-evidence chip-act flink" type="button" id="pfile" title="Open the page's line in the File browser">${ico('file')}pages.jsonl L${esc(lineOf(g.ref))}</button>` : '') + `</div>`
   h += `<div class="h2"><b>${fmt(g.n_revs)}</b> ${g.n_revs === 1 ? 'revision' : 'revisions'} · <b>${fmt(users)}</b> ${users === 1 ? 'username' : 'usernames'} · ${esc(spanText(isoT(g.first_write), isoT(g.last_write)))}</div>`
   if (S.pinfo) {
@@ -986,46 +1115,59 @@ $('ph').addEventListener('click', (e) => {
   if (e.target.closest('#allnames')) { S.allNames = !S.allNames; renderHead(); return }
   if (e.target.closest('#pfile')) { thimble.navigate(PG.page.ref, { browser: true }); return }
   if (e.target.closest('[data-jump]')) { nextDelete(); return }
+  const rd = e.target.closest('[data-read]')
+  if (rd) {
+    if (rd.dataset.read === readMode()) return
+    S.read = rd.dataset.read === (PG.page.thread ? 'messages' : 'diff') ? null : rd.dataset.read
+    measured.clear()
+    renderHead(); rerenderBlocks()
+    return
+  }
   const u = e.target.closest('[data-user]')
   if (u) userPop(u.dataset.user, u)
 })
 
-// the strip: the page's history in the range on the chart's bins, drawn as the chart and the rows draw theirs (its
-// revisions, of the username filtered by, above the line in the colour's values, its deletes below it); a click goes to
-// the first item of the bin clicked. The chart's axis is the one axis, so the strip carries none.
-// whether item i of the strip is in the history the pane lists: in the range, and a revision by the username filtered by
-const listed = (st, i) => inR(st.t[i]) && !(S.user != null && st.k[i] === 'r' && O.users[st.u[i]] !== S.user)
+// The open page over time, on the chart's bins: its revisions in the range, of the username filtered by, above the line
+// in the colour's values, its deletes below it, as the chart and the rows draw theirs; and under them, on the same bins,
+// the lines its revisions added (above the line) and removed (below it). A click goes to the first item of the bin
+// clicked. The chart's axis is the one axis, so the strip carries none; the key in its gutter marks each series.
 let PS = null
+const DIFF_TOP = 38 // px: where the plot of lines added and removed starts, under the revisions
 function renderPageStrip() {
-  const svg = $('ps'), w = Math.max(100, $('pst').clientWidth - 32), h = 30, base = 20, up = 18, down = 9
+  const svg = $('ps'), gut = $('pgut')
+  const w = Math.max(100, $('pst').clientWidth - 32 - 114), base = 20, up = 18, down = 9
+  const dbase = DIFF_TOP + 14, dup = 13, ddown = 8, h = dbase + ddown + 2
   const st = PG.strip, n = st.k.length
-  if (!n || !H) { svg.setAttribute('width', w); svg.setAttribute('height', 6); svg.innerHTML = ''; PS = null; return }
+  if (!n || !H) { $('pst').classList.add('none'); svg.setAttribute('width', w); svg.setAttribute('height', 6); svg.innerHTML = ''; gut.innerHTML = ''; PS = null; return }
+  $('pst').classList.remove('none')
   const sc = range.scale(w), NS = H.NS
-  const revs = new Map(), dels = new Map(), reqs = new Map(), first = new Map()
-  let pos = 0
-  for (let i = 0; i < n; i++) {
-    if (!listed(st, i)) continue
+  const revs = new Map(), dels = new Map(), reqs = new Map(), first = new Map(), adds = new Map(), rems = new Map()
+  let nr = 0, nd = 0, na = 0, nm = 0
+  for (let pos = 0; pos < LP.length; pos++) {
+    const i = LP[pos]
     const b = H.sc.binOf(O.t0 + st.t[i])
-    if (b >= 0) {
-      if (!first.has(b)) first.set(b, pos)
-      if (st.k[i] === 'd') dels.set(b, (dels.get(b) || 0) + 1)
-      else if (st.k[i] === 'q') reqs.set(b, (reqs.get(b) || 0) + 1)
-      else {
-        const v = stripValue(st, i)
-        if (colour.isOn(v)) {
-          let a = revs.get(b)
-          if (!a) revs.set(b, (a = new Int32Array(NS)))
-          a[v == null || !H.slot.has(v) ? NS - 1 : H.slot.get(v)]++
-        }
-      }
+    if (b < 0) continue
+    if (!first.has(b)) first.set(b, pos)
+    if (st.k[i] === 'd') { dels.set(b, (dels.get(b) || 0) + 1); nd++ }
+    else if (st.k[i] === 'q') reqs.set(b, (reqs.get(b) || 0) + 1)
+    else {
+      const v = stripValue(st, i)
+      if (!colour.isOn(v)) continue
+      let a = revs.get(b)
+      if (!a) revs.set(b, (a = new Int32Array(NS)))
+      a[v == null || !H.slot.has(v) ? NS - 1 : H.slot.get(v)]++
+      nr++
+      if (st.a[i]) { adds.set(b, (adds.get(b) || 0) + st.a[i]); na += st.a[i] }
+      if (st.r[i]) { rems.set(b, (rems.get(b) || 0) + st.r[i]); nm += st.r[i] }
     }
-    pos++
   }
-  let maxR = 1, maxD = 1
+  let maxR = 1, maxD = 1, maxL = 1
   for (const a of revs.values()) { let m = 0; for (const x of a) m += x; maxR = Math.max(maxR, m) }
   for (const m of dels.values()) maxD = Math.max(maxD, m)
+  for (const m of adds.values()) maxL = Math.max(maxL, m)
+  for (const m of rems.values()) maxL = Math.max(maxL, m)
   const span = (b) => { const xa = Math.max(0, sc.x(H.bins[b][0])), xb = Math.min(w, sc.x(H.bins[b][1])); return [xa, Math.max(0.8, xb - xa - (xb - xa > 4 ? 1 : 0.3)), xb > xa] }
-  let s = `<line class="rule" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/>`
+  let s = `<line class="rule" x1="0" x2="${w}" y1="${base + 0.5}" y2="${base + 0.5}"/><line class="rule" x1="0" x2="${w}" y1="${dbase + 0.5}" y2="${dbase + 0.5}"/>`
   for (const [b, a] of revs) {
     const [x, bw, ok] = span(b)
     if (!ok) continue
@@ -1045,9 +1187,27 @@ function renderPageStrip() {
     const [x, bw, ok] = span(b)
     if (ok) s += `<rect x="${x.toFixed(2)}" y="${base + 1}" width="${bw.toFixed(2)}" height="${Math.max(1.5, Math.sqrt(m / maxD) * down).toFixed(2)}" fill="${red}"/>`
   }
+  // the lines added and removed, in the two grays the chart gives revisions and deletes, on one square-root scale
+  const ink = NONE()
+  for (const [b, m] of adds) {
+    const [x, bw, ok] = span(b)
+    if (!ok) continue
+    const hh = Math.max(1.5, Math.sqrt(m / maxL) * dup)
+    s += `<rect x="${x.toFixed(2)}" y="${(dbase - hh).toFixed(2)}" width="${bw.toFixed(2)}" height="${hh.toFixed(2)}" fill="${ink}"/>`
+  }
+  for (const [b, m] of rems) {
+    const [x, bw, ok] = span(b)
+    if (ok) s += `<rect x="${x.toFixed(2)}" y="${dbase + 1}" width="${bw.toFixed(2)}" height="${Math.max(1.5, Math.sqrt(m / maxL) * ddown).toFixed(2)}" fill="${red}"/>`
+  }
   svg.setAttribute('width', w); svg.setAttribute('height', h)
   svg.innerHTML = s
-  PS = { sc, w, revs, dels, reqs, first }
+  const vals = colour.values.filter((v) => v.value != null && v.on).map((v) => v.value)
+  const sw = vals.length ? vals.slice(0, 8).map((v) => `<i style="--c:${esc(colour.colourOf(v) || ink)}"></i>`).join('') : `<i style="--c:${esc(ink)}"></i>`
+  gut.innerHTML = `<span class="k"><span class="msw">${sw}</span><b>${fmt(nr)}</b>${nr === 1 ? 'revision' : 'revisions'}</span>` +
+    `<span class="k"><span class="sw" style="--c:${red}"></span><b>${fmt(nd)}</b>${nd === 1 ? 'delete' : 'deletes'}</span><span class="gap"></span>` +
+    `<span class="k"><span class="sw" style="--c:${ink}"></span><b>+${fmt(na)}</b>${na === 1 ? 'line' : 'lines'}</span>` +
+    `<span class="k"><span class="sw" style="--c:${red}"></span><b>−${fmt(nm)}</b>${nm === 1 ? 'line' : 'lines'}</span>`
+  PS = { sc, w, revs, dels, reqs, first, adds, rems }
 }
 function stripBinAt(e) {
   if (!PS || !PG || !H) return -1
@@ -1062,41 +1222,19 @@ $('ps').addEventListener('mousemove', (e) => {
   const a = PS.revs.get(b)
   let nr = 0
   if (a) for (const x of a) nr += x
-  const nd = PS.dels.get(b) || 0, nq = PS.reqs.get(b) || 0
+  const nd = PS.dels.get(b) || 0, nq = PS.reqs.get(b) || 0, la = PS.adds.get(b) || 0, lr = PS.rems.get(b) || 0
   const when = binText(t0, t1)
-  showTip(e, `<div class="h">${when}</div>${[nr ? plural(nr, 'revision') : '', nd ? plural(nd, 'delete') : '', nq ? plural(nq, 'request') : ''].filter(Boolean).join(' · ')}`)
+  showTip(e, `<div class="h">${when}</div>${[nr ? plural(nr, 'revision') : '', nd ? plural(nd, 'delete') : '', nq ? plural(nq, 'request') : ''].filter(Boolean).join(' · ')}${la || lr ? `<div>+${fmt(la)} −${fmt(lr)} lines</div>` : ''}`)
 })
 $('ps').addEventListener('mouseleave', hideTip)
 $('ps').addEventListener('click', (e) => {
   const b = stripBinAt(e)
   if (b >= 0) jumpTo(PS.first.get(b))
 })
-async function jumpTo(pos) {
-  const box = $('blocks')
-  if (pos >= bFrom && pos < bFrom + blocks.length) {
-    const el = box.querySelector(`[data-pos="${pos}"]`)
-    if (el) { el.scrollIntoView({ block: 'start' }); flash(el) }
-    return
-  }
-  const my = ++pageSeq
-  const res = await thimble.fetch(pageQuery({ from: Math.max(0, pos - 6) }), { key: 'page' })
-  if (my !== pageSeq || !res) return
-  PG = res; blocks = res.blocks; bFrom = res.from; bTotal = res.total
-  renderPageStrip(); renderBlocks()
-  const el = box.querySelector(`[data-pos="${pos}"]`)
-  if (el) { el.scrollIntoView({ block: 'start' }); flash(el) }
-  watchEnd()
-}
-
-// the positions of the history's items of one kind, in the history the pane lists
+// the places of the history's items of one kind
 function positions(kind) {
-  const st = PG.strip, out = []
-  let pos = 0
-  for (let i = 0; i < st.k.length; i++) {
-    if (!listed(st, i)) continue
-    if (st.k[i] === kind) out.push(pos)
-    pos++
-  }
+  const out = []
+  for (let pos = 0; pos < LP.length; pos++) if (PG.strip.k[LP[pos]] === kind) out.push(pos)
   return out
 }
 let delAt = -1
@@ -1126,6 +1264,7 @@ function lineHtml(l, full) {
 // shorter diff's wrapped lines pass the clip is worked out from its characters and the characters a line of the pane
 // holds, so the page is never laid out to find out; a diff that may pass it is clipped with the button too.
 const CLIP_H = 560 // px, .diff.clip's height
+const MSG_LINES = 12 // lines of a long message drawn before its Show all button
 const moreLines = (n) => `<button class="btn btn-ghost btn-sm more-lines" type="button" data-long>Show all ${plural(n, 'line')}</button>`
 let lineChars = 60, lineH = 18 // characters a diff line of the pane holds, and its height, as the pane last measured
 ;(() => {
@@ -1158,6 +1297,22 @@ function diffHtml(b) {
   for (const l of shown) h += lineHtml(l, b.base === 'withheld') // a first stored body is the page as it stood, not a change
   return h + '</div>' + (clip ? moreLines(n) : '')
 }
+// the wiki's bold markup, three quotes on each side, drawn bold; a last marker with no partner left as it is
+const BOLD = "'''"
+function wikiHtml(text) {
+  if (!text.includes(BOLD)) return textHtml(text)
+  const parts = text.split(BOLD)
+  if (parts.length % 2 === 0) parts.push(parts.splice(-2, 2).join(BOLD))
+  return parts.map((p, k) => (k % 2 ? `<b>${textHtml(p)}</b>` : textHtml(p))).join('')
+}
+// a revision read as a message: the text it added, its first MSG_LINES lines until Show all
+function messageHtml(b) {
+  if (!b.message) return `<div class="nob">${b.rem ? `Removed ${plural(b.rem, 'line')} and added no new text` : 'No new text'}</div>`
+  const lines = b.message.split('\n')
+  const cut = !longOn.has(b.ref) && lines.length > MSG_LINES + 2
+  return `<div class="mtx">${wikiHtml(cut ? lines.slice(0, MSG_LINES).join('\n') : b.message)}</div>` +
+    (cut ? `<button class="btn btn-ghost btn-sm more-msg" type="button" data-long>Show all ${plural(lines.length, 'line')}</button>` : '')
+}
 function bodyHtml(i) {
   if (!bodies.has(i)) return '<div class="nob">Reading the revision</div>'
   const body = bodies.get(i)
@@ -1168,116 +1323,299 @@ function ipHtml(v) { return v ? `<span class="ip" title="IP prefix, its first tw
 function who(name) {
   return name ? `<button class="who" type="button" data-user="${esc(name)}">${esc(name)}</button>` : `<button class="who anon" type="button" data-user="">anonymous</button>`
 }
+const statHtml = (base, a, r) => (base === 'withheld' ? '' : `<span class="stat">${a ? `<b class="a">+${fmt(a)}</b>` : ''}${r ? `<b class="r">−${fmt(r)}</b>` : ''}${!a && !r ? '<b class="z">±0</b>' : ''}</span>`)
+const BASE_KEY = ['new', 'prev', 'deleted', 'withheld']
+// what an item's element carries for thimble and the tracks: its place, its time, its line, its colour
+function itemAttrs(pos, extra = '') {
+  const i = LP[pos], st = PG.strip
+  return `data-pos="${pos}" data-t="${st.t[i]}" data-anchor="${esc(itemRef(st, i))}"${extra}${st.k[i] === 'r' ? colour.attr(itemRec(st, i)) : ''}`
+}
 function revHtml(b, pos) {
   const T = isoT(b.time)
-  const full = fullOn.has(b.i), info = infoOn.has(b.i)
+  const full = fullOn.has(b.i), info = infoOn.has(b.i), msg = readMode() === 'messages'
   const tag = b.base === 'withheld' ? '<span class="chip chip-tone-neutral" title="The first revision the files hold: earlier revisions of the page were withheld, so this shows the page as it stood">first stored</span>'
     : b.base === 'deleted' ? '<span class="chip chip-tone-neutral" title="The page was deleted before this save, so every line of it counts as added">after a delete</span>'
     : b.base === 'new' ? '<span class="chip chip-tone-neutral" title="The page\'s first revision: every line counts as added">new page</span>' : ''
-  const stat = b.base === 'withheld' ? '' : `<span class="stat">${b.add ? `<b class="a">+${fmt(b.add)}</b>` : ''}${b.rem ? `<b class="r">−${fmt(b.rem)}</b>` : ''}${!b.add && !b.rem ? '<b class="z">±0</b>' : ''}</span>`
-  const text = b.change_summary || (b.diff || []).find((l) => l[0] === '+' && String(l[1]).trim())?.[1] || ''
-  let h = `<article class="blk rev" data-pos="${pos}" data-i="${b.i}" data-anchor="${esc(b.ref)}" data-anchor-text="${esc(String(text).slice(0, 300))}"${colour.attr(blockRec(b))}>` +
+  // a message's signature: the name its text ends in, said when it is not the username
+  const sig = !msg || !b.signature ? '' : b.signature.toLowerCase() === String(b.label || '').toLowerCase() ? '<span class="chip chip-tone-neutral sig" title="The text ends in a signature that is the username">signed</span>'
+    : `<span class="chip chip-tone-neutral sig" title="The text ends in a signature that is not the username">signed <b>${esc(b.signature)}</b></span>`
+  const text = b.change_summary || (msg ? b.message : (b.diff || []).find((l) => l[0] === '+' && String(l[1]).trim())?.[1]) || ''
+  let h = `<article class="blk rev" ${itemAttrs(pos, ` data-i="${b.i}" data-anchor-text="${esc(String(text).slice(0, 300))}"`)}>` +
     `<div class="bh" data-thimble-chrome><span class="seq">r${esc(b.seq)}</span><span class="tm">${T != null ? hms(T) : esc(b.time)}</span>${who(b.label)}${b.admin ? '<span class="chip chip-tone-neutral">admin</span>' : ''}${ipHtml(b.ip16)}` +
-    `${b.change_summary ? `<span class="cs">${esc(b.change_summary)}</span>` : ''}<span class="br">${tag}${stat}` +
+    `${b.change_summary ? `<span class="cs">${esc(b.change_summary)}</span>` : ''}<span class="br">${sig}${tag}${statHtml(b.base, b.add, b.rem)}` +
     `<button class="btn btn-ghost btn-sm${full ? ' active' : ''}" type="button" data-full title="The page as this revision left it">${ico('text')}Full text</button><button class="btn btn-ghost btn-sm${info ? ' active' : ''}" type="button" data-info aria-label="Details" title="Details">${ico('info')}</button>${fileLink(b.ref)}</span></div>`
   if (info) {
     const base = { prev: `r${b.seq - 1}`, new: 'an empty page, the first revision', deleted: 'an empty page, after a delete', withheld: 'none, earlier revisions withheld' }[b.base] || b.base
     h += `<dl class="facts bfacts thimble-details">${fact('rev_id', b.rev_id, true)}${fact('time', whenUTC(b.time))}${fact('write_date', whenUTC(b.write_date))}${fact('body_len', fmt(b.body_len))}${fact('lines', fmt(b.lines))}${fact('request_action', b.request_action == null ? 'null' : b.request_action)}${fact('compared with', base)}<div class="fact"><button class="btn btn-ghost btn-sm" type="button" data-file>${ico('file')}Open in the File browser</button></div></dl>`
   }
-  h += full ? bodyHtml(b.i) : diffHtml(b)
+  h += full ? bodyHtml(b.i) : msg ? messageHtml(b) : diffHtml(b)
   return h + '</article>'
 }
 function delHtml(b, pos) {
   const T = isoT(b.time)
-  return `<div class="blk ev del" data-pos="${pos}" data-anchor="${esc(b.ref)}" data-anchor-text="${esc(b.change_summary || '')}">${ico('trash')}<b>Deleted</b><span class="tm">${T != null ? hms(T) : esc(b.time)}</span>${who(b.actor_label)}${ipHtml(b.ip16)}${b.change_summary ? `<span class="cs">${esc(b.change_summary)}</span>` : ''}${fileLink(b.ref)}</div>`
+  return `<div class="blk ev del" ${itemAttrs(pos, ` data-anchor-text="${esc(b.change_summary || '')}"`)}>${ico('trash')}<b>Deleted</b><span class="tm">${T != null ? hms(T) : esc(b.time)}</span>${who(b.actor_label)}${ipHtml(b.ip16)}${b.change_summary ? `<span class="cs">${esc(b.change_summary)}</span>` : ''}${fileLink(b.ref)}</div>`
 }
 function reqHtml(b, pos) {
   const T = isoT(b.time)
-  return `<div class="blk ev req" data-pos="${pos}" data-anchor="${esc(b.ref)}" data-anchor-text="${esc(b.request || b.request_action || '')}">${ico('globe')}<b>Request</b><span class="tm">${T != null ? hms(T) : esc(b.time)}</span>${b.label ? who(b.label) : ''}${ipHtml(b.ip16)}${b.request_action ? `<span class="chip chip-tone-neutral">${esc(b.request_action)}</span>` : ''}${b.request ? `<code>${esc(b.request)}</code>` : ''}${fileLink(b.ref)}</div>`
+  return `<div class="blk ev req" ${itemAttrs(pos, ` data-anchor-text="${esc(b.request || b.request_action || '')}"`)}>${ico('globe')}<b>Request</b><span class="tm">${T != null ? hms(T) : esc(b.time)}</span>${b.label ? who(b.label) : ''}${ipHtml(b.ip16)}${b.request_action ? `<span class="chip chip-tone-neutral">${esc(b.request_action)}</span>` : ''}${b.request ? `<code>${esc(b.request)}</code>` : ''}${fileLink(b.ref)}</div>`
 }
 function blockHtml(b, pos) { return b.kind === 'delete' ? delHtml(b, pos) : b.kind === 'request' ? reqHtml(b, pos) : revHtml(b, pos) }
+// The room an item not read yet takes, worked out from what the history says of it: a diff's lines (clipped as a diff
+// is), a message's lines (cut as a message is), so the history keeps its height as the items are read.
+function estBody(i) {
+  const st = PG.strip, a = st.a[i], r = st.r[i], withheld = st.kb[i] === 3
+  if (readMode() === 'messages') {
+    if (!st.g[i]) return 26
+    const n = withheld ? 8 : Math.max(1, a)
+    return Math.min(n, MSG_LINES) * 21 + 8 + (n > MSG_LINES + 2 ? 30 : 0)
+  }
+  const n = withheld ? 12 : a + r ? Math.min(DIFF_LINES, a + r + 3) : 0
+  if (!n) return 26
+  const px = n * lineH * 1.2
+  return Math.min(CLIP_H, px) + 8 + (px > CLIP_H - 6 || a + r + 3 > DIFF_LINES ? 30 : 0)
+}
+// an item not read yet: its header from the history's columns, its body's room held
+function skelHtml(pos) {
+  const st = PG.strip, i = LP[pos], k = st.k[i], t = O.t0 + st.t[i], u = st.u[i] >= 0 ? O.users[st.u[i]] : null
+  if (k === 'd') return `<div class="blk ev del sk" ${itemAttrs(pos)}>${ico('trash')}<b>Deleted</b><span class="tm">${hms(t)}</span>${u != null ? who(u) : ''}</div>`
+  if (k === 'q') return `<div class="blk ev req sk" ${itemAttrs(pos)}>${ico('globe')}<b>Request</b><span class="tm">${hms(t)}</span></div>`
+  const body = estBody(i)
+  return `<article class="blk rev sk" ${itemAttrs(pos, ` data-i="${st.x[i]}"`)}>` +
+    `<div class="bh" data-thimble-chrome><span class="seq">r${st.s[i]}</span><span class="tm">${hms(t)}</span>${who(u || '')}<span class="br">${statHtml(BASE_KEY[st.kb[i]], st.a[i], st.r[i])}</span></div>` +
+    `<div class="skb" style="height:${body - 8}px"></div></article>`
+}
 // whether the Color by chips keep an item of the history: a revision by its value; a delete or a request, which takes no
 // field's value, always under a field, and by its label value under a label
-function keptItem(b) {
-  if (b.kind === 'delete' || b.kind === 'request') return !colour.label || colour.keeps({ ref: b.ref })
-  return colour.keeps(blockRec(b))
+function keptAt(pos) {
+  const st = PG.strip, i = LP[pos]
+  if (st.k[i] !== 'r') return !colour.label || colour.keeps({ ref: itemRef(st, i) })
+  return colour.keeps(itemRec(st, i))
 }
-// The history read so far, with a heading for each day. It loads as it scrolls, so it keeps the browser's own
-// scrollbar: Color by's tracks would show only the part read so far, as if it were the whole history.
-let hDay = null, hKept = 0 // the day of the last item drawn, and the items drawn
-function itemsHtml(list, from) {
-  let h = ''
-  list.forEach((b, k) => {
-    if (!keptItem(b)) return
-    hKept++
-    const T = isoT(b.time)
-    const d = T != null ? dayKey(T) : ''
-    if (d !== hDay) { hDay = d; h += `<div class="day">${T != null ? `${weekday(T)} ${dm(T)}` : ''}</div>` }
-    h += blockHtml(b, from + k)
-  })
-  return h
-}
-function renderBlocks() {
-  hDay = null; hKept = 0
-  let h = bFrom > 0 ? '<div class="edge" id="top"></div>' : ''
-  h += itemsHtml(blocks, bFrom)
-  if (bFrom + blocks.length < bTotal) h += '<div class="edge" id="end"></div>'
-  else if (!hKept) h += `<div class="empty">No revision of this page meets these filters</div>`
-  $('blocks').innerHTML = h
-}
-// the items read next drawn after those on the page, which stay as they are
-function appendBlocks(list, from) {
-  const box = $('blocks'), end = $('end')
-  const t = document.createElement('template')
-  t.innerHTML = itemsHtml(list, from)
-  box.insertBefore(t.content, end)
-  if (bFrom + blocks.length >= bTotal) {
-    if (end) end.remove()
-    if (!hKept) box.insertAdjacentHTML('beforeend', `<div class="empty">No revision of this page meets these filters</div>`)
+// The whole history in the range, with a line for each day: a model of every item the chips keep, each with its height
+// (as drawn, or worked out from what the history says of it until it is), and the items drawn only around the part in
+// view, between two spacers that hold the room of the rest. The items drawn are read in full, CHUNK at a time, and
+// drawn in place, the item at the top of the view kept where it stands. The day of the item at the top stands over the
+// pane. So a page of thousands of revisions opens and scrolls as fast as one of a few.
+const DAY_H = 27 // px, a day's line (.day), until one is measured
+const M = { pos: [], top: new Float64Array(0), h: new Float64Array(0), day: [], total: 0, at: new Map() }
+const measured = new Map() // place -> the height an item was drawn at, its day's line included
+let dayH = DAY_H
+let win = [0, 0] // the items of M drawn, [from, to)
+// the model: the places the chips keep, each one's day line, its height and where it stands
+function buildModel() {
+  const pos = [], day = []
+  let d = null
+  for (let p = 0; p < LP.length; p++) {
+    if (!keptAt(p)) continue
+    const k = dayKey(O.t0 + PG.strip.t[LP[p]])
+    day.push(k !== d)
+    d = k
+    pos.push(p)
   }
+  M.pos = pos; M.day = day
+  M.h = new Float64Array(pos.length)
+  for (let k = 0; k < pos.length; k++) M.h[k] = measured.get(pos[k]) ?? (estItem(pos[k]) + (day[k] ? dayH : 0))
+  M.at = new Map(pos.map((p, k) => [p, k]))
+  tops(0)
 }
-// the history drawn again where it is, as when the labels change
+// where each item stands from item k on, and the whole height
+function tops(k) {
+  if (M.top.length !== M.pos.length) { M.top = new Float64Array(M.pos.length); k = 0 }
+  let y = k > 0 ? M.top[k - 1] + M.h[k - 1] : 0
+  for (let j = k; j < M.pos.length; j++) { M.top[j] = y; y += M.h[j] }
+  M.total = y
+}
+// the item at height y of the history
+function itemAt(y) {
+  let lo = 0, hi = M.pos.length - 1
+  if (hi < 0) return -1
+  while (lo < hi) {
+    const m = (lo + hi + 1) >> 1
+    if (M.top[m] <= y) lo = m
+    else hi = m - 1
+  }
+  return lo
+}
+const estItem = (pos) => {
+  const st = PG.strip, i = LP[pos]
+  return st.k[i] === 'r' ? estBody(i) + 36 : 34
+}
+// an item with its day's line, as the pane draws it
+function itemHtml(k) {
+  const pos = M.pos[k], b = got.get(pos)
+  const day = M.day[k] ? (() => { const T = O.t0 + PG.strip.t[LP[pos]]; return `<div class="day">${weekday(T)} ${dm(T)}</div>` })() : ''
+  return `<div class="vi" data-k="${k}">${day}${b ? blockHtml(b, pos) : skelHtml(pos)}</div>`
+}
+// the item at the top of the view and how far above the view's top it starts, to keep it there across a change
+function anchorNow() {
+  const top = $('blocks').scrollTop, k = itemAt(top)
+  return k < 0 ? null : { pos: M.pos[k], dy: top - M.top[k] }
+}
+function keepAnchor(a) {
+  if (!a) return
+  const k = M.at.get(a.pos)
+  if (k != null) setScroll(M.top[k] + a.dy)
+}
+// the pane scrolled to y by the page, which the scroll handler then lets be
+function setScroll(y) {
+  const box = $('blocks')
+  y = Math.max(0, Math.min(y, box.scrollHeight - box.clientHeight))
+  if (Math.abs(box.scrollTop - y) < 1) return
+  ignoreScroll = true
+  box.scrollTop = y
+}
+// The history drawn from scratch, as when the page, the colour or the labels change: the items around `a` (the item
+// kept at the top) or from the top.
+function renderBlocks(a) {
+  const box = $('blocks')
+  buildModel()
+  if (!M.pos.length) {
+    box.innerHTML = `<div class="empty">No revision of this page meets these filters</div>`
+    win = [0, 0]
+    $('dayhead').textContent = ''
+    stripSoon()
+    return
+  }
+  box.innerHTML = `<div id="vtop" style="height:${M.total}px"></div><div id="vwin"></div><div id="vbot"></div>`
+  win = [0, 0]
+  setScroll(a && M.at.has(a.pos) ? M.top[M.at.get(a.pos)] + a.dy : 0)
+  update(a && M.at.has(a.pos) ? a : null)
+}
+// the items around the view drawn, those far from it taken away, the spacers sized, and what was drawn measured; again
+// while what was drawn, as measured, no longer covers the part around the view
+function update(a, again = 3) {
+  const box = $('blocks')
+  if (!PG || !M.pos.length || !$('vwin')) return
+  const H0 = box.clientHeight || 600, top = box.scrollTop
+  let k0 = Math.max(0, itemAt(top - H0)), k1 = Math.min(M.pos.length, itemAt(top + 2 * H0) + 1)
+  const vw = $('vwin')
+  const [c0, c1] = win
+  if (c1 <= k0 || k1 <= c0 || c0 === c1) {
+    let h = ''
+    for (let k = k0; k < k1; k++) h += itemHtml(k)
+    vw.innerHTML = h
+  } else {
+    for (let k = c0; k < k0; k++) vw.firstElementChild && vw.firstElementChild.remove()
+    for (let k = k1; k < c1; k++) vw.lastElementChild && vw.lastElementChild.remove()
+    if (k0 < c0) { let h = ''; for (let k = k0; k < c0; k++) h += itemHtml(k); vw.insertAdjacentHTML('afterbegin', h) }
+    if (c1 < k1) { let h = ''; for (let k = c1; k < k1; k++) h += itemHtml(k); vw.insertAdjacentHTML('beforeend', h) }
+  }
+  win = [k0, k1]
+  const kept = a || anchorNow()
+  measure(kept)
+  const t2 = box.scrollTop
+  if (again > 0 && ((win[0] > 0 && M.top[win[0]] > t2 - H0 / 2) || (win[1] < M.pos.length && M.top[win[1] - 1] + M.h[win[1] - 1] < t2 + 1.5 * H0))) return update(kept, again - 1)
+  wantDrawn()
+}
+// the items drawn measured into the model, the spacers sized to the rest, the item at the top kept where it was
+function measure(a) {
+  const vw = $('vwin')
+  if (!vw) return
+  let first = -1
+  const d = vw.querySelector('.day')
+  if (d) dayH = d.offsetHeight || dayH
+  for (const el of vw.children) {
+    const k = +el.dataset.k, h = el.offsetHeight
+    if (Math.abs(M.h[k] - h) >= 0.5) { M.h[k] = h; if (first < 0 || k < first) first = k }
+    measured.set(M.pos[k], h)
+  }
+  if (first >= 0) { tops(first); stripSoon() }
+  $('vtop').style.height = (win[0] < M.pos.length ? M.top[win[0]] : M.total) + 'px'
+  $('vbot').style.height = Math.max(0, M.total - (win[1] > 0 ? M.top[win[1] - 1] + M.h[win[1] - 1] : 0)) + 'px'
+  keepAnchor(a)
+  dayHead()
+}
+// the day of the item at the top of the view, over the pane; none while that item's own day line shows at the top
+function dayHead() {
+  const top = $('blocks').scrollTop, k = itemAt(top)
+  const el = $('dayhead')
+  if (k < 0 || (M.day[k] && top - M.top[k] < dayH)) { el.textContent = ''; return }
+  const T = O.t0 + PG.strip.t[LP[M.pos[k]]]
+  const s = `${weekday(T)} ${dm(T)}`
+  if (el.textContent !== s) el.textContent = s
+}
+let ignoreScroll = false, scrollRaf = 0
+$('blocks').addEventListener('scroll', () => {
+  if (ignoreScroll) { ignoreScroll = false; return }
+  cancelAnimationFrame(scrollRaf)
+  scrollRaf = requestAnimationFrame(() => update())
+}, { passive: true })
+new ResizeObserver(() => { if (PG && M.pos.length) update() }).observe($('blocks'))
+// the history drawn again where it is, as when the colour or the labels change
 function rerenderBlocks() {
-  const box = $('blocks'), top = box.scrollTop
-  renderBlocks()
-  box.scrollTop = top
-  watchEnd()
+  if (!PG) return
+  renderBlocks(anchorNow())
 }
-// After a Color by change: while the chips keep the same items, each revision's value is set on it in place, so the
-// history is not drawn again; else it is.
-function recolourBlocks() {
-  const want = []
-  blocks.forEach((b, k) => { if (keptItem(b)) want.push(bFrom + k) })
-  const els = [...$('blocks').querySelectorAll('.blk')]
-  if (want.length !== els.length || want.some((pos, j) => +els[j].dataset.pos !== pos)) return rerenderBlocks()
-  for (const el of els) {
-    const b = blocks[+el.dataset.pos - bFrom]
-    if (!b || b.kind === 'delete' || b.kind === 'request') continue
-    if (!colour.field) { el.removeAttribute('data-colour'); continue }
-    const v = colour.valueOf(blockRec(b))
-    el.setAttribute('data-colour', v == null ? '' : String(v))
+// items drawn again in place and measured; `keep` keeps the item at the top where it is (not inside thimble.expand,
+// which keeps the item clicked under the pointer itself)
+function redrawAt(list, keep = true) {
+  const a = keep ? anchorNow() : null
+  const vw = $('vwin')
+  if (!vw) return
+  for (const pos of list) {
+    const k = M.at.get(pos)
+    if (k == null || k < win[0] || k >= win[1]) continue
+    const el = vw.children[k - win[0]]
+    if (el) el.outerHTML = itemHtml(k)
   }
+  measure(a)
 }
-function rerender(b) {
-  const k = blocks.indexOf(b)
-  const el = $('blocks').querySelector(`[data-pos="${bFrom + k}"]`)
-  if (el) el.outerHTML = blockHtml(b, bFrom + k)
+function rerender(b, keep = true) {
+  for (const [pos, x] of got) if (x === b) return redrawAt([pos], keep)
+}
+// the item at a place brought to the top of the pane
+function jumpTo(pos, flashIt = true) {
+  const k = M.at.get(pos)
+  if (k == null) return
+  // the item's header under the day over the pane, unless the item starts its day
+  const box = $('blocks'), dy = M.day[k] ? 0 : -dayH
+  setScroll(M.top[k] + dy)
+  update({ pos, dy })
+  const el = box.querySelector(`.vi[data-k="${k}"] > .blk`)
+  if (el && flashIt) flash(el)
+}
+// the items drawn that are not read yet, read CHUNK at a time
+const want = new Set()
+let reading = false
+function wantDrawn() {
+  for (let k = win[0]; k < win[1]; k++) if (!got.has(M.pos[k])) want.add(M.pos[k])
+  if (want.size && !reading) setTimeout(readWanted, 0)
+}
+async function readWanted() {
+  if (reading || !PG) return
+  reading = true
+  const my = pageSeq
+  try {
+    for (;;) {
+      const todo = [...want].filter((pos) => !got.has(pos) && pos < LP.length).sort((a, b) => a - b).slice(0, CHUNK)
+      want.clear()
+      if (!todo.length) break
+      const st = PG.strip
+      const res = await thimble.fetch(pageQuery({ items: todo.map((pos) => [st.k[LP[pos]], st.x[LP[pos]]]) }), { key: 'page-more' })
+      if (my !== pageSeq || !res) return
+      keepBlocks(res.blocks)
+      redrawAt(todo)
+      for (let k = win[0]; k < win[1]; k++) if (!got.has(M.pos[k])) want.add(M.pos[k])
+    }
+  } catch (e) {
+    if (!(e && e.name === 'AbortError')) throw e
+  } finally { reading = false }
 }
 $('blocks').addEventListener('click', async (e) => {
   const u = e.target.closest('[data-user]')
   if (u) return userPop(u.dataset.user, u)
   const el = e.target.closest('.blk')
   if (!el) return
-  const b = blocks[+el.dataset.pos - bFrom]
+  const b = got.get(+el.dataset.pos)
   if (!b) return
-  if (e.target.closest('[data-long]')) { longOn.add(b.ref); return rerender(b) }
+  if (e.target.closest('[data-long]')) { longOn.add(b.ref); return thimble.expand(el, () => rerender(b, false)) }
   if (e.target.closest('[data-file]')) return thimble.navigate(b.ref, { browser: true })
   // a revision's details and its full text open in place under its line, the line kept where it is
-  if (e.target.closest('[data-info]')) { infoOn.has(b.i) ? infoOn.delete(b.i) : infoOn.add(b.i); return thimble.expand(el, () => rerender(b)) }
+  if (e.target.closest('[data-info]')) { infoOn.has(b.i) ? infoOn.delete(b.i) : infoOn.add(b.i); return thimble.expand(el, () => rerender(b, false)) }
   if (e.target.closest('[data-full]')) {
-    if (fullOn.has(b.i)) { fullOn.delete(b.i); return thimble.expand(el, () => rerender(b)) }
+    if (fullOn.has(b.i)) { fullOn.delete(b.i); return thimble.expand(el, () => rerender(b, false)) }
     fullOn.add(b.i)
-    thimble.expand(el, () => rerender(b))
+    thimble.expand(el, () => rerender(b, false))
     if (!bodies.has(b.i)) {
       const res = await thimble.fetch({ op: 'body', i: b.i })
       if (res) bodies.set(b.i, res.body)
@@ -1285,51 +1623,49 @@ $('blocks').addEventListener('click', async (e) => {
     }
   }
 })
-let moreBusy = false
-async function more() {
-  if (moreBusy || !PG || bFrom + blocks.length >= bTotal) return
-  moreBusy = true
-  const my = pageSeq
-  try {
-    const res = await thimble.fetch(pageQuery({ from: bFrom + blocks.length }), { key: 'page-more' })
-    if (my !== pageSeq || !res) return
-    const from = bFrom + blocks.length
-    blocks = blocks.concat(res.blocks); bTotal = res.total
-    appendBlocks(res.blocks, from)
-  } catch (e) {
-    if (!(e && e.name === 'AbortError')) throw e
-  } finally { moreBusy = false }
-  watchEnd()
+// The history's tracks: every item's colour, though only the items around the view are drawn, as slices of the
+// history of one height each, each slice the item at its middle; and the band on the range's overview over the items
+// in view.
+const SLICES_MAX = 20000
+let stripRaf = 0
+function stripSoon() { cancelAnimationFrame(stripRaf); stripRaf = requestAnimationFrame(feedStrip) }
+let sliceItem = new Int32Array(0)
+function feedStrip() {
+  const rows = [], refs = []
+  if (PG && M.pos.length && M.total > 0) {
+    const n = Math.max(1, Math.min(SLICES_MAX, Math.ceil(M.total / 4))), step = M.total / n, st = PG.strip
+    sliceItem = new Int32Array(n)
+    let k = 0
+    for (let j = 0; j < n; j++) {
+      const y = (j + 0.5) * step
+      while (k < M.pos.length - 1 && M.top[k + 1] <= y) k++
+      sliceItem[j] = k
+      const i = LP[M.pos[k]]
+      rows.push(stripValue(st, i))
+      refs.push(itemRef(st, i))
+    }
+  } else sliceItem = new Int32Array(0)
+  colour.strip('#blocks', { rows, refs, preview: slicePreview })
 }
-async function earlier() {
-  if (!PG || bFrom <= 0) return
-  const my = pageSeq
-  const from = Math.max(0, bFrom - CHUNK)
-  const res = await thimble.fetch(pageQuery({ from, n: bFrom - from }), { key: 'page-more' })
-  if (my !== pageSeq || !res) return
-  const box = $('blocks'), before = box.scrollHeight - box.scrollTop
-  blocks = res.blocks.concat(blocks); bFrom = from; bTotal = res.total
-  renderBlocks()
-  box.scrollTop = box.scrollHeight - before
-  watchEnd()
+function slicePreview(j) {
+  const k = sliceItem[j]
+  if (!PG || k == null || k < 0 || k >= M.pos.length) return ''
+  const pos = M.pos[k], st = PG.strip, i = LP[pos], b = got.get(pos), t = O.t0 + st.t[i]
+  const u = st.u[i] >= 0 ? O.users[st.u[i]] || 'anonymous' : ''
+  const what = st.k[i] === 'd' ? 'deleted the page' : st.k[i] === 'q' ? 'request' : b ? (b.change_summary || (b.message || '').split('\n').find((x) => x.trim()) || `+${b.add} −${b.rem}`) : `r${st.s[i]} +${st.a[i]} −${st.r[i]}`
+  return { when: `${dm(t)} ${hm(t)}`, text: `${u ? `${u}: ` : ''}${what}` }
 }
-// more of the history as either end comes near the view
-const endSeen = new IntersectionObserver((es) => {
-  for (const x of es) if (x.isIntersecting) x.target.id === 'top' ? earlier() : more()
-}, { root: $('blocks'), rootMargin: '400px 0px 400px 0px' })
-function watchEnd() {
-  endSeen.disconnect()
-  for (const id of ['end', 'top']) { const el = $(id); if (el) endSeen.observe(el) }
-}
+colour.strip('#blocks', { rows: [], refs: [], preview: slicePreview })
+range.follow('#blocks', (el) => O.t0 + Number(el.dataset.t), '.blk')
 
 // an event no page holds: a delete of a page with no stored revision, or a request that names none
 async function showEvent(line) {
   const my = ++pageSeq
   const res = await thimble.fetch({ op: 'event', line }, { key: 'page' })
   if (my !== pageSeq) return
-  S.event = line; S.sel = null; PG = null
+  S.event = line; S.sel = null; PG = null; LP = []
   for (const el of document.querySelectorAll('.row.sel')) el.classList.remove('sel')
-  $('ps').innerHTML = ''; $('ps').setAttribute('height', 0); $('ph').innerHTML = ''
+  $('ps').innerHTML = ''; $('ps').setAttribute('height', 0); $('pgut').innerHTML = ''; $('pst').classList.add('none'); $('ph').innerHTML = ''
   if (!res) { $('blocks').innerHTML = '<div class="empty">The event is not in the files</div>'; return }
   const T = isoT(res.time)
   const kind = res.event_type === 'delete' ? `Deleted ${res.page || res.page_key || 'page'}` : res.event_type === 'request' ? 'Request' : res.event_type
@@ -1351,7 +1687,7 @@ async function userPop(name, anchor) {
   p.innerHTML = `<div${res.ref ? ` data-anchor="${esc(res.ref)}" data-anchor-text="${esc(name)}"` : ''}><div class="uh"><b>${esc(name || 'anonymous')}</b>${O.admins.includes(name) ? '<span class="chip chip-tone-neutral">admin</span>' : ''}${res.role ? `<span class="chip chip-tone-neutral">${esc(res.role)}</span>` : ''}</div>` +
     `<dl class="facts">${fact('revisions', fmt(res.stored_revisions ?? pages.reduce((a, x) => a + (x.edits || 0), 0)))}${fact('pages', fmt(pages.length))}${fact('first write', T(res.first_write))}${fact('last write', T(res.last_write))}${res.stored_revision_ips != null ? fact('IPs', fmt(res.stored_revision_ips)) : ''}${res.stored_revision_ip16 != null ? fact('IP prefixes', fmt(res.stored_revision_ip16)) : ''}${fact('wikis', (res.wikis || []).join(', '))}${res.deletes ? fact('deletes', fmt(res.deletes)) : ''}</dl>` +
     `<div class="acts"><button class="btn btn-secondary btn-sm" type="button" data-act="list">${S.user === name ? 'Every username' : 'Only this username'}</button></div>` +
-    `<div class="pages"><div class="up uhd"><span class="nm">${plural(pages.length, 'page')}</span><span class="n">revisions / page total</span></div>${pages.map((x) => x.p == null ? `<div class="up"><span class="nm">${esc(x.page_id)}</span></div>` : `<div class="up" data-p="${x.p}"${x.key ? ` data-anchor="${esc(unitRef(x.key))}" data-anchor-text="${esc(x.name)}"` : ''}><span class="nm">${esc(x.name)}</span><span class="wk">${esc(x.wiki)}</span>${x.deletes ? ico('trash') : ''}<span class="n">${fmt(x.edits)} / ${fmt(x.n_revs)}</span></div>`).join('')}</div></div>`
+    `<div class="pages"><div class="up uhd"><span class="nm">${plural(pages.length, 'page')}</span><span class="n">revisions / page total</span></div>${pages.map((x) => x.p == null ? `<div class="up"><span class="nm">${esc(x.page_id)}</span></div>` : `<div class="up" data-p="${x.p}"${x.key ? ` data-anchor="${esc(unitRef(x.key))}" data-anchor-text="${esc(x.name)}" data-anchor-unmarked` : ''}><span class="nm">${esc(x.name)}</span>${(() => { const r = rowOf.get(x.p), mix = r != null ? rowMix(r) : null; return mix ? proportionBar(mix, mixTitle(mix)) : '' })()}<span class="wk">${esc(x.wiki)}</span>${x.deletes ? ico('trash') : ''}<span class="n">${fmt(x.edits)} / ${fmt(x.n_revs)}</span></div>`).join('')}</div></div>`
   p.onclick = (e) => {
     const a = e.target.closest('[data-act]')
     if (a && a.dataset.act === 'list') { S.user = S.user === name ? null : name; closePop(); rescope(); if (S.sel != null) openPage(S.sel); return }
@@ -1372,7 +1708,7 @@ async function userPop(name, anchor) {
 // the range's overview first: the range thimble kept for the view, which it opens on, decides the rows
 function renderAll() { if (!O) return; renderTop(); renderRest() }
 function renderTop() { renderCtl(); if (renderRange()) compute() }
-function renderRest() { renderCounts(); renderHist(); renderListHead(); renderList(); renderListStrip() }
+function renderRest() { renderCounts(); renderHist(); renderListHead(); renderList() }
 // the rows decided and drawn, with the list's first page asked for in between when none is open, so its history is
 // read while the rest is drawn: the rest is drawn in a task of its own, so that thimble, which shares this thread in
 // Safari, sends the fetch on first
@@ -1389,7 +1725,8 @@ function renderOpening() {
 function dropGone() {
   if (S.sel == null || rows.some((r) => O.pages.p[r] === S.sel)) return false
   S.sel = null; S.picked = false; PG = null
-  $('ph').innerHTML = ''; $('ps').innerHTML = ''; $('ps').setAttribute('height', 6)
+  LP = []
+  $('ph').innerHTML = ''; $('ps').innerHTML = ''; $('ps').setAttribute('height', 6); $('pgut').innerHTML = ''; $('pst').classList.add('none')
   $('blocks').innerHTML = rows.length ? '' : '<div class="empty">No page meets these filters</div>'
   if (S.event == null && rows.length) openPage(O.pages.p[rows[0]])
   return true
@@ -1401,13 +1738,13 @@ function rescope() {
   renderAll()
   dropGone()
 }
-// Reset, in Color by's row: the username, the sort and the page picked go back to how the view opens (the
-// first page of the list); the kit puts back the search field, the chips and the range itself
+// Reset, in Color by's row: the username, the sort, the page picked and how its revisions read go back to how the view
+// opens (the first page of the list); the kit puts back the search field, the chips and the range itself
 thimble.onReset({
-  changed: () => S.user != null || S.sort !== 'n' || S.dir !== -1 || S.picked || S.pinfo || S.event != null,
+  changed: () => S.user != null || S.sort !== 'n' || S.dir !== -1 || S.picked || S.pinfo || S.event != null || S.read != null,
   reset: () => {
     S.user = null; S.q = ''; S.sort = 'n'; S.dir = -1; $('sort').value = 'n:-1'
-    S.picked = false; S.pinfo = false; S.event = null; S.sel = null; S.range = null
+    S.picked = false; S.pinfo = false; S.event = null; S.sel = null; S.range = null; S.read = null
     if (!O) return
     compute(); $('list').scrollTop = 0; renderOpening()
   },
@@ -1477,7 +1814,7 @@ thimble.onLabels(async (st) => {
   labelState = { labels: st.labels || [], filter: st.filter || null, all: st.all || null, palette: st.palette || null }
   const first = !labelsHeard
   labelsHeard = true
-  const redraw = () => { if (O) { compute(); renderAll(); if (PG) { renderPageStrip(); rerenderBlocks() } } }
+  const redraw = () => { if (O) { compute(); renderAll(); if (PG) { renderHead(); renderPageStrip(); rerenderBlocks() } } }
   if (JSON.stringify([labelState.labels, labelState.filter]) === was) return redraw()
   // the first word of the labels: the overview being read is checked against them when it comes, and one already read
   // that read them so is kept

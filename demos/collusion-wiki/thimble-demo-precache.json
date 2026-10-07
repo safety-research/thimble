@@ -31,7 +31,7 @@
  "counts": {
   "cards": 8,
   "labels": 5,
-  "views": 2,
+  "views": 1,
   "documents": 1
  },
  "corpus": [
@@ -110,34 +110,24 @@
    "sha256": "e42d8b8316752dbaa8c0b8cae7bfa0fb0e50182112e69f3edbba28bc07df8623"
   },
   {
-   "path": "extension/views/relay-board/reader.py",
-   "bytes": 24353,
-   "sha256": "377a483b1242ec6cbe608e253c02f7515e0a102cdf1b6d1bb492d5cb3ff7be30"
-  },
-  {
-   "path": "extension/views/relay-board/view.html",
-   "bytes": 68779,
-   "sha256": "174110a0dc13a2108179e6cedbcd7af7a75f7e52596b6127570ce71a97cf1e9e"
-  },
-  {
-   "path": "extension/views/relay-board/view.json",
-   "bytes": 4963,
-   "sha256": "2bbae5cbb427e99ec6a44f8121c54ee38b6602ba35475c0f631572ee2f5078b1"
-  },
-  {
    "path": "extension/views/wiki-page-history/reader.py",
-   "bytes": 42796,
-   "sha256": "05c77b61a16c53ea132f5a695677ce52655684469080baf28b1a0e7bd5f460aa"
+   "bytes": 48045,
+   "sha256": "ba32cf9110ff999d854e3800883074b085611420a2baa70510065a5d356d21b7"
   },
   {
    "path": "extension/views/wiki-page-history/view.html",
-   "bytes": 86627,
-   "sha256": "d291cc36894ab09d6ee430aa4e6a4e4c210904718e88f02a6e6f8d0e71cb6256"
+   "bytes": 108175,
+   "sha256": "d18163f74c4e0d61432760782e6a43cb98b05bb67ff2b15c536389bdd8faaae4"
   },
   {
    "path": "extension/views/wiki-page-history/view.json",
-   "bytes": 4883,
-   "sha256": "25d2fbb833b8721be20b6b279026b377a067707207ac23b294ffa33ba35d1a03"
+   "bytes": 6540,
+   "sha256": "d61cddc1509b48c17e719ed799e5c307291432054b424a6f8e090f274afaa69b"
+  },
+  {
+   "path": "extension/views/wiki-page-history/view.term.js",
+   "bytes": 26981,
+   "sha256": "a43c64acd4983bd2e29461aebab86f57352e8b9c48603446a799dbe400a63a0f"
   },
   {
    "path": "investigations/main/investigation.json",
@@ -191,8 +181,8 @@
   },
   {
    "path": "views/proposals.json",
-   "bytes": 10496,
-   "sha256": "49b447f04ccc82608d1bbf52c6d47da92010a5e553397770ab5a9e613ba5f071"
+   "bytes": 5160,
+   "sha256": "3c6408db95b78e46c261e0444ec9fad608fce22cd89c47a37ace7968e5f1ed28"
   }
  ],
  "cited_calls": [
@@ -1746,20 +1736,12 @@
  "flagged": [],
  "views": [
   {
-   "slug": "relay-board",
-   "name": "Relay Board",
-   "version": "cde705885e1f",
-   "from": "relay-board",
-   "from_version": "cde705885e1f",
-   "picked": "live at cde705885e1f"
-  },
-  {
    "slug": "wiki-page-history",
    "name": "Wiki Page History",
-   "version": "d79f527af743",
+   "version": "fe4ef13faaf9",
    "from": "wiki-page-history",
-   "from_version": "d79f527af743",
-   "picked": "live at d79f527af743"
+   "from_version": "fe4ef13faaf9",
+   "picked": "live at fe4ef13faaf9"
   }
  ]
 }

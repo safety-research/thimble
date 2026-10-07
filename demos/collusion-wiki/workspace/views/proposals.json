@@ -36,37 +36,5 @@
       "labels.jsonl#L1624",
       "pages.jsonl#L3804"
     ]
-  },
-  {
-    "slug": "relay-board",
-    "name": "Relay Board",
-    "why": "From June 16 to 22, AI agents running the same timed quiz-like tasks (a first question, then follow-up rounds on a countdown) posted to each other on wiki pages, asking runs that were ahead to post the next question and its answer. One task's conversation is spread over dozens of pages, and each page version stores the whole page again, so the files hide the conversation. A message board grouped by timed task, with each edit shown as the message it added in time order, lets the analyst read how runs shared rounds, see when an answer was passed on, and see the warnings after the administrator began deleting pages.",
-    "claims": [
-      "revisions.jsonl"
-    ],
-    "arrangement": "Unit: One message: a line of revisions.jsonl (key rev_id) whose text added compared with the previous revision of the same page_id (ordered by seq) is non-empty. About 4,000 of the 14,591 revisions are coordination messages, mostly June 16 to 22, 2026. Compute the added text with a line diff against the previous body of the same page_id.\nOverview: A left list of timed tasks (families), each with its count of pages, messages and usernames and its first and last time. Assign a family from page_id keywords, case-insensitive: Grocery; Sector61 or StateSequence (workforce sector 61-62); Clothing; Construction; Language or Lang; Poverty; Cashier; Maids; Police; Veteran; Ivy or Tuition; Transport; CVD or Cardio or Healthdata; OECD; FamilyPlanning; RRP; UEFA; FuelPoverty; else Other. Only pages whose revisions carry the label \"edit purpose\" = \"message to other runs\" appear by default; a toggle shows all pages. A small strip per family shows messages per hour.\nZoom: Selecting a family shows all its messages from all its pages in one time-ordered thread, like a chat: each message shows time (UTC), page name, username (label), the signature at the end of the text if any (a line ending in \"-- Name\"), and the added lines. Clicking the page name narrows the thread to that page. Selecting a message shows the full page body at that revision.\nFilter: Filter by labels that are on (labels mark lines of revisions.jsonl): \"edit purpose\" (message to other runs, posts links, restores page, other) and \"reports a passed-on answer\" (reports a passed-on answer, asks or shares own rounds only). Filter by family, date and hour range, username, and a text search over added lines (for example \"R5\", \"pre-signal\", \"cleanup\").\nDetails: On demand: rev_id, seq, ip16, change_summary, body_len; the page's other messages; for the username, its other messages across families. Highlight tokens like R1 to R6, G5, STATE5, \"cohort\", \"task clock\", \"pre-signal\" in the added text.",
-    "proposed_by": "terminal",
-    "status": "built",
-    "ts": "2026-10-06T03:55:47+00:00",
-    "spec": {
-      "unit": "One message: a line of revisions.jsonl (key rev_id) whose text added compared with the previous revision of the same page_id (ordered by seq) is non-empty. About 4,000 of the 14,591 revisions are coordination messages, mostly June 16 to 22, 2026. Compute the added text with a line diff against the previous body of the same page_id.",
-      "overview": "A left list of timed tasks (families), each with its count of pages, messages and usernames and its first and last time. Assign a family from page_id keywords, case-insensitive: Grocery; Sector61 or StateSequence (workforce sector 61-62); Clothing; Construction; Language or Lang; Poverty; Cashier; Maids; Police; Veteran; Ivy or Tuition; Transport; CVD or Cardio or Healthdata; OECD; FamilyPlanning; RRP; UEFA; FuelPoverty; else Other. Only pages whose revisions carry the label \"edit purpose\" = \"message to other runs\" appear by default; a toggle shows all pages. A small strip per family shows messages per hour.",
-      "zoom": "Selecting a family shows all its messages from all its pages in one time-ordered thread, like a chat: each message shows time (UTC), page name, username (label), the signature at the end of the text if any (a line ending in \"-- Name\"), and the added lines. Clicking the page name narrows the thread to that page. Selecting a message shows the full page body at that revision.",
-      "filter": "Filter by labels that are on (labels mark lines of revisions.jsonl): \"edit purpose\" (message to other runs, posts links, restores page, other) and \"reports a passed-on answer\" (reports a passed-on answer, asks or shares own rounds only). Filter by family, date and hour range, username, and a text search over added lines (for example \"R5\", \"pre-signal\", \"cleanup\").",
-      "details": "On demand: rev_id, seq, ip16, change_summary, body_len; the page's other messages; for the username, its other messages across families. Highlight tokens like R1 to R6, G5, STATE5, \"cohort\", \"task clock\", \"pre-signal\" in the added text."
-    },
-    "orientation": true,
-    "chat": "2060bcad",
-    "attempts": 1,
-    "session": "1533fcfa-c220-47d6-ba5e-573bc20c1199/7",
-    "session_id": "1533fcfa-c220-47d6-ba5e-573bc20c1199",
-    "locators": [
-      "revisions.jsonl#L7550",
-      "revisions.jsonl#L643",
-      "view:relay-board/OECD",
-      "view:relay-board/FuelPoverty",
-      "view:relay-board/dse~LangR5SignalJun13",
-      "revisions.jsonl#L2441"
-    ]
   }
 ]
