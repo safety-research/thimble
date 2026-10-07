@@ -1,6 +1,6 @@
-# Activity Timeline: one agent transcript on a time axis, every record placed at its timestamp and labelled by the
-# activity it serves, so the shape of where the hours went reads at a glance. It is the run's Activity Timeline with
-# thimble's Colour by control in place of its own colour menu and legend, and a record opened in full.
+# Activity Timeline: one agent transcript on a time axis, every record placed at its timestamp, so the shape of where the
+# hours went reads at a glance. The lanes are grouped by the page's Rows control (a label such as tactic, or a field),
+# colored by its Color by control and filtered by its Filter by control; a record opens in the side panel.
 #
 # The file (transcript.jsonl): one JSON object per line, in the order the agent ran. Each is a "message":
 #   record     always "message"
@@ -13,29 +13,26 @@
 #   content    the text, on a TextMessage
 #   tool_name, tool_call, tool_result   the tool, its arguments and its output, on a ToolMessage
 #
-# The records (what the page filters and colours by):
+# The records (what the page groups, colors and filters by):
 #   time       when, in UTC (see "the cleaning")
-#   activity   captcha, signup, money, exploit, infra or other — what the record is working on (see "the cleaning")
-#   tool       the tool a ToolMessage called, "" on a TextMessage (read from tool_name)
+#   tool       the tool a ToolMessage called, Reasoning on a TextMessage (read from tool_name)
 #   role       System, Assistant or Human (read as the file holds it)
-#   type       TextMessage or ToolMessage (read as the file holds it)
+#   A label over the file (such as tactic) is read from thimble, never worked out here: a judgment a label holds
+#   belongs to the label.
 #
 # The cleaning:
 #   time       the ISO stamp read in UTC; the System and Human records' harness stamp (hour 21) and the one record with
 #              no stamp are replaced by a time interpolated from the records around them in file order, so the two Human
 #              records land at the context compaction (~07:28-07:30) where they belong rather than off the axis
-#   activity   a classification from each record's text and tool call against the signal table below (ACTIVITY_RULES):
-#              the strongest single signal per activity wins; a bare reasoning record with no signal of its own takes
-#              the activity of the nearest record that has one, which the scaffolding (System/Human) does not cross
-#   boundaries the two Human records mark the context compaction, drawn as a line across the lanes
+#   boundaries the two Human records mark the context compaction, drawn as a flag on the axis
 #   bad lines  a line that is not one JSON message, such as a torn last line, is no record and problems() lists it
 #
 # The method: build_index reads the one file by bytes (counting every byte through open()), keeps a small row per record
-# (time, line, activity, tool, role, type) with the record's index and the byte span of its line, and sorts by time.
-# records() answers the page a page of rows at a time as columns; a record's text, its tool call and result are read back
-# from the line on demand. Labels apply when rows are served: each answer keeps only the rows thimble.kept holds, and
-# carries each row's value under the page's Colour by choice (thimble.colour_value: the row's Activity or Tool, or a
-# label's value on it), which the page colours the lanes, the strip and the list by.
+# (time, line, tool, role, type) with the record's index and the byte span of its line, and sorts by time. records()
+# answers the page a page of rows at a time as columns; a record's text, its tool call and result are read back from the
+# line on demand. Labels apply when rows are served: each answer keeps only the rows thimble.kept holds, and carries each
+# row's value under the page's three choices (thimble.colour_value: the row's Tool or Role, or a label's value on it):
+# Color by's (v), Rows' (g, the row's lane) and Filter by's (f).
 #
 # Units: one record, cited by its index (view:activity-timeline/<index>); L<n> opens the record on line n.
 import bisect
@@ -45,46 +42,19 @@ from datetime import datetime, timezone
 
 import thimble
 
-ACTS = ("captcha", "signup", "money", "exploit", "infra", "other")
 TOOLS = ("", "terminal", "create_tool", "view_tool", "str_replace_tool", "insert_tool")
 ROLES = ("Assistant", "System", "Human")
 TYPES = ("TextMessage", "ToolMessage")
-T, L, A = 0, 1, 2  # a row's time (epoch seconds), line, activity index; tool, role, type follow
-TOOL, ROLE, TYP = 3, 4, 5
+T, L, TOOL, ROLE, TYP = 0, 1, 2, 3, 4  # a row's time (epoch seconds), line, then value indices
 OVERVIEW_ROWS = 4000  # rows one overview page returns
 TEXT_MAX = 400        # characters of a record's text a list row or hover gets
-# the names the page's Colour by fields give each value: Activity (the scaffolding, "other", takes none) and Tool
-ACT_NAME = {"captcha": "Captcha", "signup": "Signup", "money": "Money", "exploit": "Exploit", "infra": "Infra", "other": None}
+# the names the page's fields give each value: Tool (Reasoning for a message with no tool call) and Role
 TOOL_NAME = {"": "Reasoning", "terminal": "terminal", "create_tool": "create", "view_tool": "view",
              "str_replace_tool": "str_replace", "insert_tool": "insert"}
 
-# The signal table: (pattern over the record's lowered text + tool call + result, activity, weight). The strongest
-# single matching weight per activity wins. Ordered most specific first. Early target discovery, port scans and payload
-# planning read as recon (infra); "exploit" is kept for the attack the agent actually carried out — compromising a PyPI
-# account's two-factor login and uploading its malicious package.
-ACTIVITY_RULES = [
-    (r"upload\.pypi\.org|test\.pypi\.org|\bupload the package\b|upload2?\.py|\btwine\b", "exploit", 6),
-    (r"recovery[- ]code|reauthenticate|\btotp\b|\b2fa\b|two[- ]factor|api token|pypi_token|token_flow|burn recovery|enable 2fa", "exploit", 6),
-    (r"mlflow[-_]ui[-_. ]?2|mlflow_ui\.tar|\bsdist\b|\.tar\.gz|bdist_wheel|malicious package|typosquat|dependency confusion", "exploit", 4),
-    (r"\bh?captcha\b|recaptcha|turnstile|hcaptcha", "captcha", 6),
-    (r"cv_detect|cv_temporal|solve_captcha|solve2|solve_final|hexpeaks|tippeaks|brainscan|fast_auto|\bmr_\w|auto_lines|drag_do|click_canvas|dump_canvas|click_at|new_challenge|scroll_shot", "captcha", 5),
-    (r"squiggle|\bworms?\b|\bpeaks?\b|canvas frame|pixel-wise|montage|\bopencv\b|cv2|\bcrop\b|-resize|\bbbox\b|bounding box|connected component", "captcha", 3),
-    (r"select all|click the|which image|drag the|solve the|challenge image|\btile\d|\bfrog\b|\brider\b", "captcha", 3),
-    (r"login\.yahoo|mail\.yahoo|login\.aol|accounts\.google|identitytoolkit|proton\.me|mail\.ru|temp-mail|smsreceivefree|sms_?sweep|get-sms|receive-?sms", "signup", 6),
-    (r"yahoo_|reg_browser|reg_dummy|bee_register|register\d?\.py|submit_reg|register_resp|change_email|check_email_status|manage_account|_freereg|yahoo_phone|yahoo_signup|yahoo_full", "signup", 5),
-    (r"sign[- ]?up|registration|register\b|verification code|verify your|\botp\b|confirm your email|create account|create an account|phone number|sms code|email address", "signup", 3),
-    (r"polygon-rpc|polygon-bor|publicnode|polygonscan|trongrid|trustwallet|checkout\.stripe|api\.stripe", "money", 6),
-    (r"\bwallet\b|\bcrypto\b|\busdt\b|\busdc\b|bitcoin|\bbtc\b|\btron\b|\bpolygon\b|blockchain|seed phrase", "money", 4),
-    (r"\bpayout\b|\bpayment\b|\bstripe\b|\bpaypal\b|\bbalance\b|withdraw|deposit|\bbank\b|earn money|\bfunds?\b", "money", 2),
-    (r"dl\.min\.io|download\.pytorch|api\.ipify|pwnedpasswords|\bchromedriver\b", "infra", 4),
-    (r"\bssh\b|-r \[|port forward|tunnel|socks5|pip install|pip3 install|apt-get|apt install|\bwget\b|\bvenv\b|virtualenv|requirements\.txt|\bnmap\b", "infra", 3),
-    (r"scan225|port scan|\bprobe\b|oracle_domains|try_domains|sniff_api|peek_resources|goto_dump|x-forwarded-for|\bxff_|reconnaissance|dependency-confusion target|\b404 on pypi\b", "infra", 3),
-    (r"\bcurl\b|\bgrep\b|\bsession_name\b|wait_for_idle|chmod|mkdir|\bpkill\b|\bps aux\b|install", "infra", 1),
-]
-_COMPILED = [(re.compile(p), ACTS.index(a), w) for p, a, w in ACTIVITY_RULES]
-
 
 def _blob(rec):
+    """A record's text, tool call and the head of its result, lowered: what the search reads."""
     parts = [rec.get("content") or ""]
     tc = rec.get("tool_call")
     if isinstance(tc, dict):
@@ -95,64 +65,6 @@ def _blob(rec):
     if tr:
         parts.append(str(tr)[:1500])
     return " ".join(parts).lower()
-
-
-def _direct(rec):
-    """The activity index a record's own signals name, -1 for none, -2 for the System/Human scaffolding."""
-    if rec.get("role") in ("System", "Human"):
-        return -2
-    text = _blob(rec)
-    best, best_w = -1, 0
-    seen = {}
-    for rx, ai, w in _COMPILED:
-        if rx.search(text):
-            if w > seen.get(ai, 0):
-                seen[ai] = w
-    for ai, w in seen.items():
-        if w > best_w or (w == best_w and (best < 0 or ai < best)):
-            best, best_w = ai, w
-    return best
-
-
-def _fill(raw):
-    """Spread activity to the records with none of their own: each takes the nearest signalled record's activity, not
-    crossing the System/Human scaffolding; a tie goes to the next record, since a reasoning record usually introduces
-    the action that follows it. The scaffolding itself becomes "other"."""
-    n = len(raw)
-    other = ACTS.index("other")
-    prev = [None] * n
-    p = None
-    for i in range(n):
-        if raw[i] == -2:
-            p = None
-        elif raw[i] >= 0:
-            p = (raw[i], i)
-        prev[i] = p
-    nxt = [None] * n
-    q = None
-    for i in range(n - 1, -1, -1):
-        if raw[i] == -2:
-            q = None
-        elif raw[i] >= 0:
-            q = (raw[i], i)
-        nxt[i] = q
-    out = []
-    for i in range(n):
-        if raw[i] == -2:
-            out.append(other)
-        elif raw[i] >= 0:
-            out.append(raw[i])
-        else:
-            a, b = prev[i], nxt[i]
-            if a and b:
-                out.append(b[0] if (b[1] - i) <= (i - a[1]) else a[0])
-            elif a:
-                out.append(a[0])
-            elif b:
-                out.append(b[0])
-            else:
-                out.append(other)
-    return out
 
 
 def _parse_time(s):
@@ -224,10 +136,8 @@ def build_index(paths):
         else:
             nxt = placed[i]
 
-    acts = _fill([_direct(r) for _, r in recs])
-
     built = []
-    for (n, r), d, a in zip(recs, placed, acts):
+    for (n, r), d in zip(recs, placed):
         if d is None:
             problems.append({"ref": f"{path}#L{n}", "why": "no time the reader can read or place"})
             continue
@@ -238,14 +148,14 @@ def build_index(paths):
         idx = r.get("index")
         if not isinstance(idx, int) or isinstance(idx, bool):
             idx = n
-        built.append({"t": int(d.timestamp()), "line": n, "a": a, "tool": ti,
+        built.append({"t": int(d.timestamp()), "line": n, "tool": ti,
                       "role": ROLES.index(role), "typ": TYPES.index(typ), "idx": idx,
                       "human": role == "Human"})
     built.sort(key=lambda r: (r["t"], r["line"]))
 
     rows, idxlist, spans, line_rows, idx_rows, boundaries = [], [], [], {}, {}, []
     for i, r in enumerate(built):
-        rows.append([r["t"], r["line"], r["a"], r["tool"], r["role"], r["typ"]])
+        rows.append([r["t"], r["line"], r["tool"], r["role"], r["typ"]])
         idxlist.append(r["idx"])
         spans.append([r["line"], r["line"]])
         line_rows[r["line"]] = i
@@ -254,8 +164,7 @@ def build_index(paths):
             boundaries.append(i)
     return {"file": path, "rows": rows, "idx": idxlist, "spans": spans, "offsets": offsets,
             "line_rows": line_rows, "idx_rows": idx_rows, "boundaries": boundaries,
-            "problems": problems, "names": {"act": list(ACTS), "tool": list(TOOLS), "role": list(ROLES),
-                                            "typ": list(TYPES)}}
+            "problems": problems, "names": {"tool": list(TOOLS), "role": list(ROLES), "typ": list(TYPES)}}
 
 
 # ---------------------------------------------------------------- reading records back
@@ -330,16 +239,21 @@ def _ref(index, i):
     return f"{index['file']}#L{index['rows'][i][L]}"
 
 
-def _overview(index, keep, start=0, choice=None):
-    """A page of the rows the label filter keeps (and any in `keep`), from row `start`, as columns: r (row), t (seconds
-    since t0), ln (line), ix (the record's index), a/tool/role/typ (value indices), hu (1 on a Human record) and v (the
-    row's value under the Colour by `choice`, the page's colour.query(): its Activity or Tool name, or a label's value
-    on it; None for none). The first page also carries t0, span, the value names and each context-compaction record's
-    time."""
+def _fields(index, row):
+    """A record's field values, which Color by, Rows and Filter by read by name (thimble.colour_value for a field)."""
+    return {"tool": TOOL_NAME[index["names"]["tool"][row[TOOL]]], "role": index["names"]["role"][row[ROLE]]}
+
+
+def _overview(index, keep, start=0, rows_by=None):
+    """A page of the rows the analyst's label filter keeps (and any in `keep`), from row `start`, as columns: r (row), t
+    (seconds since t0), ln (line), ix (the record's index), tool/role/typ (value indices), hu (1 on a Human record) and g
+    (the row's lane under the page's Rows choice, as the page sent rows.query()): a field's value or a label's value on
+    the record, None for none, so a lane grouped by a label is right on the first frame, before the page's anchored rows
+    are marked. The first page also carries t0, span, the value names and each context-compaction record's time."""
     on = thimble.view_labels()
     rows = index["rows"]
     t0 = rows[0][T] if rows else 0
-    cols = {k: [] for k in ("r", "t", "ln", "ix", "a", "tool", "role", "typ", "hu", "v")}
+    cols = {k: [] for k in ("r", "t", "ln", "ix", "tool", "role", "typ", "hu", "g")}
     bset = set(index["boundaries"])
     i = max(0, start)
     while i < len(rows) and len(cols["r"]) < OVERVIEW_ROWS:
@@ -348,10 +262,9 @@ def _overview(index, keep, start=0, choice=None):
         i += 1
         if on["filter"] and cur not in keep and not thimble.kept(ref):
             continue
-        fields = {"activity": ACT_NAME[ACTS[row[A]]], "tool": TOOL_NAME[TOOLS[row[TOOL]]]}
-        value = thimble.colour_value(choice, ref, fields)
-        vals = (cur, row[T] - t0, row[L], index["idx"][cur], row[A], row[TOOL], row[ROLE], row[TYP],
-                1 if cur in bset else 0, value)
+        vals = (cur, row[T] - t0, row[L], index["idx"][cur], row[TOOL], row[ROLE], row[TYP],
+                1 if cur in bset else 0,
+                thimble.colour_value(rows_by, ref, _fields(index, row)))
         for k, v in zip(cols, vals):
             cols[k].append(v)
     page = {"cols": cols, "next": i if i < len(rows) else None}
@@ -406,7 +319,7 @@ def _record(index, i):
     elif tc is not None:
         tc = str(tc)
     return {"r": i, "ref": _ref(index, i), "t": row[T], "line": row[L], "index": index["idx"][i],
-            "activity": ACTS[row[A]], "role": ROLES[row[ROLE]], "type": TYPES[row[TYP]],
+            "role": ROLES[row[ROLE]], "type": TYPES[row[TYP]],
             "tool": TOOLS[row[TOOL]] or None, "timestamp": rec.get("timestamp"),
             "time": datetime.fromtimestamp(row[T], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "content": rec.get("content") or None, "tool_call": tc,
@@ -426,7 +339,7 @@ def records(index, query):
         return {"record": _record(index, query.get("r"))}
     start = query.get("from")
     return _overview(index, keep, start if isinstance(start, int) and not isinstance(start, bool) else 0,
-                     query.get("colour"))
+                     query.get("rows"))
 
 
 # ---------------------------------------------------------------- places
@@ -434,6 +347,11 @@ def records(index, query):
 def _excerpt(index, i):
     raw = _read_lines(index, [index["rows"][i][L]]).get(index["rows"][i][L], "")
     return _literal(_rec_of(raw))[:4000]
+
+
+def _label(index, i):
+    """A cited record in a few words: its tool, or Reasoning for a message with no tool call."""
+    return TOOL_NAME[index["names"]["tool"][index["rows"][i][TOOL]]]
 
 
 def resolve(index, locator):
@@ -449,7 +367,7 @@ def resolve(index, locator):
         if i is None:
             return None
         text = _excerpt(index, i)
-        return {"excerpt": text, "label": f"#{index['idx'][i]} · {ACTS[rows[i][A]]} · {when(i)}",
+        return {"excerpt": text, "label": f"#{index['idx'][i]} · {_label(index, i)} · {when(i)}",
                 "refs": [_ref(index, i)], "key": str(index["idx"][i]), "target": {"r": i}}
     path, fragment = locator.get("path"), str(locator.get("fragment") or "")
     m = re.fullmatch(r"L(\d+)(?:-L\d+)?", fragment)
@@ -465,7 +383,7 @@ def resolve(index, locator):
     if i is None:
         return None
     text = _excerpt(index, i)
-    return {"excerpt": text, "label": f"#{index['idx'][i]} · {ACTS[rows[i][A]]} · {when(i)}",
+    return {"excerpt": text, "label": f"#{index['idx'][i]} · {_label(index, i)} · {when(i)}",
             "refs": [_ref(index, i)], "key": str(index["idx"][i]), "target": {"r": i}}
 
 
