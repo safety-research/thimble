@@ -380,8 +380,10 @@
 .thimble-side-body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 10px 16px 16px;
+  overflow-wrap: anywhere;
 }
 
 /* -------- a transcript's turns, as the File browser's Transcript mode draws them (files.css .reader-record) -------- */

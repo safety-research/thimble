@@ -38,7 +38,8 @@ const LABEL = {
 }
 
 const ROWS = Array.from({ length: 30 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i % 3 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
-const VIEW = `<!doctype html><html><head><script>window.__thimbleView = {"slug":"board","name":"Board"}</script>
+// the view kept on Off with the label seen already, so that checking the label makes it the one choice
+const VIEW = `<!doctype html><html><head><script>window.__thimbleView = {"slug":"board","name":"Board"}; window.__thimbleColour = {"v":1,"by":"off","picks":[],"seen":["k1"],"off":{}}</script>
 <script>${inline(read('viewer_bridge.js'))}</script><script>window.__thimbleLabelOrder = ${read('label_order.json')}</script><script>${inline(read('viewer_colour.js'))}</script><style>${read('viewer_kit.css')}</style>
 <style>body{margin:0;font:12px sans-serif} .top{display:flex;align-items:center;gap:8px;padding:8px} #list{height:320px;overflow:auto} .msg{height:28px;padding:6px 12px 0}</style></head><body>
 <div class="top"><span id="colour"></span></div><div id="list">${ROWS}</div>
@@ -145,12 +146,12 @@ test("Escape closes the editor with the focus back in the view on the label's ro
   assert.match(String((await focus()).frame), /thimble-colour-by/)
 })
 
-test('choosing a field opens no editor', async () => {
+test('choosing a field opens no editor: it is checked as a track after the label, and the menu stays open', async () => {
   await frame().locator('.thimble-colour-by').click()
   await frame().locator('.thimble-colour-menu [data-by="f:kind"]').click()
   await page.waitForTimeout(400)
   assert.equal(await popOpen(), false)
-  assert.equal(await menuOpen(), false)
-  assert.equal(await frame().evaluate(() => document.querySelector('.thimble-colour-by b')!.textContent), 'Kind')
+  assert.equal(await menuOpen(), true)
+  assert.equal(await frame().evaluate(() => document.querySelector('.thimble-colour-by')!.textContent), 'Color by:activity type+1')
   assert.deepEqual(await page.evaluate(() => (window as any).__acts), [['edit', 'k1']])
 })

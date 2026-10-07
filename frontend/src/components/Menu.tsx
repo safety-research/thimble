@@ -41,11 +41,14 @@ export function placeBeside(rect: { left: number; right: number; top: number; bo
 }
 
 /** Where a tip of `w`×`h` goes beside `rect` (the menu's sides, the item's top and bottom): to its right when it fits,
- * else to its left, level with the item's middle, clamped to the viewport. Pure. */
-export function placeAside(rect: { left: number; right: number; top: number; bottom: number }, w: number, h: number, vw: number, vh: number): { left: number; top: number } {
+ * else to its left (with `leftFirst`, to its left when it fits, else to its right), level with the item's middle,
+ * clamped to the viewport. Pure. */
+export function placeAside(rect: { left: number; right: number; top: number; bottom: number }, w: number, h: number, vw: number, vh: number, leftFirst = false): { left: number; top: number } {
   const right = rect.right + GAP
   const leftSide = rect.left - GAP - w
-  const left = right + w <= vw - MARGIN ? right : leftSide >= MARGIN ? leftSide : Math.max(MARGIN, vw - MARGIN - w)
+  const fitsRight = right + w <= vw - MARGIN
+  const fitsLeft = leftSide >= MARGIN
+  const left = leftFirst && fitsLeft ? leftSide : fitsRight ? right : fitsLeft ? leftSide : Math.max(MARGIN, vw - MARGIN - w)
   const top = Math.max(MARGIN, Math.min((rect.top + rect.bottom - h) / 2, vh - MARGIN - h))
   return { left, top }
 }
@@ -58,8 +61,9 @@ export interface PopoverProps {
   onClose: (how: 'escape' | 'outside') => void
   /** which edge of the anchor the sheet's edge lines up with (default start, the left) */
   align?: Align
-  /** `aside`: to the anchor's right, else its left, level with its middle (placeAside), rather than below or above it */
-  side?: 'below' | 'aside'
+  /** `aside`: to the anchor's right, else its left, level with its middle (placeAside), rather than below or above it;
+   * `left`: the same to its left first, as a view asks for beside its scrollbar's tracks */
+  side?: 'below' | 'aside' | 'left'
   /** a fixed width in px; without one the sheet takes its content's width */
   width?: number
   role?: string
@@ -84,7 +88,7 @@ export function Popover({ anchor, open, onClose, align = 'start', side = 'below'
     was.current = r
     const w = sheet.offsetWidth
     const h = sheet.offsetHeight
-    setPos(side === 'aside' ? placeAside(r, w, h, window.innerWidth, window.innerHeight) : placeBeside(r, w, h, window.innerWidth, window.innerHeight, align))
+    setPos(side === 'aside' || side === 'left' ? placeAside(r, w, h, window.innerWidth, window.innerHeight, side === 'left') : placeBeside(r, w, h, window.innerWidth, window.innerHeight, align))
   }, [anchor, align, side])
 
   useLayoutEffect(() => {

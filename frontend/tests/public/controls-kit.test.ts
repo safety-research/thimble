@@ -406,3 +406,31 @@ describe('the side panel and the transcript', () => {
     expect(doc().querySelector('.thimble-turn-hit')!.getAttribute('data-anchor')).toBe('s.jsonl#L2')
   })
 })
+
+describe("every choice of the kit's controls draws", () => {
+  test('Color by, Rows and Filter by, Off and None among them, each chosen in turn with the lanes drawn: no script error', async () => {
+    await load()
+    const w = win()
+    const colour = w.thimble.colorBy({ mount: '#colour', fields: FIELDS, strip: '#list', onChange: () => draw() })
+    const filter = w.thimble.filterBy({ mount: '#filter', fields: FIELDS, onChange: () => draw() })
+    const rows = w.thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session', parentOf: (k: string) => PARENT[k] }, ...FIELDS], onChange: () => draw() })
+    const lanes = w.thimble.lanes({ mount: '#lanes', rows, colour, range: { scale: () => ({ x: (t: number) => t - T0, t0: T0, t1: T0 + 300 }) }, problem: (c: any) => c.outcome !== 'ok' })
+    function draw() {
+      const shown = CALLS.filter((c) => filter.keeps(c))
+      lanes.draw(shown)
+      doc().getElementById('list')!.innerHTML = shown.map((c) => `<div data-anchor="${c.ref}"${colour.attr(c)}>${c.tool}</div>`).join('')
+      for (const g of rows.groups(shown)) void g.name
+    }
+    draw()
+    labels()
+    await wait()
+    const list = w.thimble.__choices() as { control: string; choice: string; go: () => void }[]
+    expect(list.map((x) => `${x.control}: ${x.choice}`)).toEqual(expect.arrayContaining(['Color by: Off', 'Rows: None', 'Filter by: None', 'Rows: Tactic', 'Color by: Tactic', 'Filter by: Tactic']))
+    for (const x of [...list, ...list.slice().reverse()]) {
+      x.go()
+      await wait(20)
+    }
+    await wait()
+    expect(of('error').map((m) => m.message), 'the kit reported no error').toEqual([])
+  })
+})

@@ -417,7 +417,8 @@
     },
     /** open thimble's label editor on the label with this id, or on a new label without one, in a popover over the page.
      *  opts.anchor, the element or rect {left, top, width, height} it stands beside (default: inside the page's top-left
-     *  corner); opts.side, 'aside' (the default, to its right, else its left) or 'below'; opts.onClose(focused) runs
+     *  corner); opts.side, 'aside' (the default, to its right, else its left), 'left' (to its left, else its right) or
+     *  'below'; opts.onClose(focused) runs
      *  when the editor closes, `focused` when it closed from inside (Escape, Cancel, Re-run) and the focus came back to
      *  the frame, onto the element that had it */
     editLabel: function (id, opts) {
@@ -425,7 +426,7 @@
       var args = { id: id == null ? null : String(id) }
       var at = anchorRect(opts.anchor)
       if (at) args.anchor = at
-      if (opts.side === 'aside' || opts.side === 'below') args.side = opts.side
+      if (opts.side === 'aside' || opts.side === 'below' || opts.side === 'left') args.side = opts.side
       var onClose = typeof opts.onClose === 'function' ? opts.onClose : null
       var had = document.activeElement
       return labelCall('edit', args, function (focus) {
@@ -1033,10 +1034,11 @@
     return true
   }
   // With the view kit's Colour by in the page (colourHook, viewer_colour.js), the bar shows the one thing the analyst
-  // colours by. For a label, the outermost element of each anchored record that label highlights takes the bar in its
-  // value's colour, with data-thimble-label as before. For a field of the view, every element that says its value in
-  // data-colour, anchored or not, takes the bar in that value's colour, with data-thimble-colour (an SVG shape the page
-  // colours itself); the labels that are on then draw no bar, and their texts stay highlighted. An element whose value
+  // colours by, on the records alone (the anchored elements). For a label, the outermost element of each anchored record
+  // that label highlights takes the bar in its value's colour, with data-thimble-label as before. For a field of the
+  // view, every anchored element that says its value in data-colour takes the bar in that value's colour, with
+  // data-thimble-colour (an SVG shape the page colours itself), and a group's row, which has no anchor, takes none; the
+  // labels that are on then draw no bar, and their texts stay highlighted. An element whose value
   // the analyst turned off is hidden or dimmed (data-thimble-off), as the hook says. With Color by Off (mode 'off') no
   // element takes a bar. One colour encoding: with Colour by in the page, only the chosen label's texts are highlighted in
   // its colours; the texts of the other labels that are on, and every label's with a field or Off chosen, are
@@ -1184,7 +1186,8 @@
           if (v === '') v = null
           if (own) offs.push([el, hook.off(v)])
           if (m && !unmarked && outermost(el, ref)) spanned.push([el, m])
-          if (!own || v == null || unmarked || el instanceof SVGElement) continue
+          // the bar marks a record, the element the view anchors: a group's row (no anchor) takes none
+          if (!own || v == null || !ref || unmarked || el instanceof SVGElement) continue
           bar = hook.colourOf(v)
           shows = v
           kind = 'colour'

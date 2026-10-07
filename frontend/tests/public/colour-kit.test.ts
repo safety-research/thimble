@@ -98,24 +98,46 @@ describe('Colour by', () => {
     expect(doc().querySelector('[data-anchor="a.jsonl#L2"]')!.getAttribute('data-thimble-off')).toBe('dim')
   })
 
-  test('one menu lists the fields and every label, each label with its switch; a field picked colours by it', async () => {
+  test('one menu lists Off, the fields and every label, any checked together: the first the colour, each other a track', async () => {
     await load()
     let changed = 0
     const c = mount({ onChange: () => changed++ })
     labels(false)
     await wait()
     ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
-    const menu = doc().querySelector('.thimble-colour-menu')!
-    expect([...menu.querySelectorAll('.thimble-colour-head')].map((h) => h.textContent)).toEqual(['Color by', 'Labels over these files'])
-    expect([...menu.querySelectorAll('.thimble-colour-item .thimble-colour-nm')].map((n) => n.textContent)).toEqual(['Off', 'Kind', 'Channel', 'Deadline', 'New label'])
-    expect(menu.querySelector('[data-switch="k1"]')!.getAttribute('data-label')).toBe('k1')
-    ;(menu.querySelector('[data-by="f:channel"]') as HTMLElement).click()
+    const menu = () => doc().querySelector('.thimble-colour-menu')!
+    expect([...menu().querySelectorAll('.thimble-colour-head')].map((h) => h.textContent)).toEqual(['Color by', 'Fields', 'Labels'])
+    expect([...menu().querySelectorAll('.thimble-colour-item .thimble-colour-nm')].map((n) => n.textContent)).toEqual(['Off', 'Kind', 'Channel', 'Deadline', 'New label'])
+    // a label is a choice as a field is: no switch of its own, a box checked while it is chosen
+    expect(menu().querySelector('[data-switch], .thimble-colour-switch')).toBeNull()
+    expect(menu().querySelector('[data-by="l:k1"]')!.getAttribute('data-label')).toBe('k1')
+    expect([...menu().querySelectorAll('[data-by^="f:"], [data-by^="l:"]')].map((r) => [r.getAttribute('data-by'), r.getAttribute('aria-checked')])).toEqual([
+      ['f:kind', 'true'],
+      ['f:channel', 'false'],
+      ['l:k1', 'false'],
+    ])
+    // a second field checked: the menu stays open, Kind still colours, Channel is a track
+    ;(menu().querySelector('[data-by="f:channel"]') as HTMLElement).click()
     await wait()
-    expect(doc().querySelector('.thimble-colour-menu')).toBeNull()
-    expect(c.by).toEqual({ field: 'channel', title: 'Channel' })
+    expect(menu()).not.toBeNull()
+    expect(c.by).toEqual({ field: 'kind', title: 'Kind' })
+    expect(c.picks).toEqual([{ field: 'kind', title: 'Kind' }, { field: 'channel', title: 'Channel' }])
+    expect(doc().querySelector('.thimble-colour-by')!.textContent).toBe('Color by:Kind+1')
+    expect(menu().querySelector('[data-by="f:channel"] .thimble-colour-track-n')!.textContent).toBe('track')
+    expect(c.attr({ kind: 'Text only', channel: 'ops' })).toBe(' data-colour="Text only" data-colour-tracks="[&quot;ops&quot;]"')
     expect(changed).toBe(1)
+    // the first unchecked: the next one colours
+    ;(menu().querySelector('[data-by="f:kind"]') as HTMLElement).click()
+    await wait()
+    expect(c.by).toEqual({ field: 'channel', title: 'Channel' })
+    expect(c.picks).toEqual([{ field: 'channel', title: 'Channel' }])
     expect(c.attr({ channel: 'ops' })).toBe(' data-colour="ops"')
-    expect(of('colour').at(-1)!.state).toMatchObject({ by: 'f:channel', field: 'channel' })
+    expect(changed).toBe(2)
+    expect(of('colour').at(-1)!.state).toMatchObject({ by: 'f:channel', picks: ['f:channel'], field: 'channel' })
+    // the last unchecked: Color by is Off
+    ;(menu().querySelector('[data-by="f:channel"]') as HTMLElement).click()
+    await wait()
+    expect(c.off).toBe(true)
   })
 
   test("a label turned on takes the colour: its values are the chips, each record's mark its bar, its id their data-label", async () => {
@@ -176,6 +198,7 @@ describe('Colour by', () => {
     ])
     ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
     ;(doc().querySelector('[data-by="f:channel"]') as HTMLElement).click()
+    ;(doc().querySelector('[data-by="f:kind"]') as HTMLElement).click()
     // the kinds the page drew for Kind are no values of Channel: they are taken off the page until it draws again
     expect(doc().querySelectorAll('.msg[data-colour]')).toHaveLength(0)
     c.counts([['wiki', 40], ['ops', 7], ['press', 90]])
@@ -270,8 +293,9 @@ describe('Reset', () => {
 describe('a label chosen in the menu', () => {
   // the analyst's click as the bridge reads it, which jsdom has no notion of: transient activation held throughout
   const ACTIVE = script('class Activation { get isActive() { return true } }; Object.defineProperty(navigator, "userActivation", { value: new Activation() })')
+  // the view kept on Off, the label seen already: checking it makes it the one choice
   const ready = async (on: boolean) => {
-    await load(undefined, 'kind', ACTIVE)
+    await load({ v: 1, by: 'off', picks: [], field: 'kind', off: {}, seen: ['k1'], colours: {} }, 'kind', ACTIVE)
     const c = mount()
     labels(on)
     fromPage({ type: 'thimble:key', key: 'key' })
@@ -282,7 +306,7 @@ describe('a label chosen in the menu', () => {
   const row = () => doc().querySelector<HTMLElement>('.thimble-colour-menu [data-by="l:k1"]')!
   const calls = () => of('labelCall').map((m) => [m.op, m.args])
 
-  test('colours by it and asks for its editor beside the menu, which stays open with the label checked', async () => {
+  test('checked, it colours by it and asks for its editor beside the menu, which stays open with the label checked', async () => {
     const c = await ready(true)
     row().click()
     await wait()
@@ -321,16 +345,29 @@ describe('a label chosen in the menu', () => {
     ])
   })
 
+  test('unchecked, it leaves the choices and is turned off in Files, with no editor', async () => {
+    const c = await ready(true)
+    row().click()
+    await wait()
+    expect(c.by).toEqual({ label: 'k1', title: 'Deadline' })
+    row().click()
+    await wait()
+    expect(c.off).toBe(true)
+    expect(calls().map((x) => x[0])).toEqual(['edit', 'on'])
+    expect(calls()[1]).toEqual(['on', { id: 'k1', on: false }])
+    expect(row().getAttribute('aria-checked')).toBe('false')
+  })
+
   test('a field or Off asks for no editor, and there is no button for a definition, beside Color by or in the menu', async () => {
     const c = await ready(true)
     expect(doc().querySelector('.thimble-colour-menu [data-info], .thimble-colour-menu .thimble-def')).toBeNull()
     ;(doc().querySelector('.thimble-colour-menu [data-by="f:channel"]') as HTMLElement).click()
     await wait()
     expect(c.by).toEqual({ field: 'channel', title: 'Channel' })
-    expect(doc().querySelector('.thimble-colour-menu')).toBeNull()
-    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
+    expect(doc().querySelector('.thimble-colour-menu'), 'a field checked keeps the menu open').not.toBeNull()
     ;(doc().querySelector('.thimble-colour-menu [data-by="off"]') as HTMLElement).click()
     await wait()
+    expect(doc().querySelector('.thimble-colour-menu'), 'Off closes it').toBeNull()
     expect(calls()).toEqual([])
     // the label as the colour has no button beside Color by
     ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
@@ -466,5 +503,90 @@ describe('the choice thimble keeps for a view', () => {
     expect(html.match(/<\/script>/g)).toHaveLength(1)
     expect(html).toContain('\\u003c/script>')
     expect(colourScript(null)).toBe('')
+  })
+})
+
+describe('color marks the records alone', () => {
+  test("a group's row, which carries no anchor, takes no bar, and is no record the chips count", async () => {
+    await load()
+    doc().getElementById('list')!.insertAdjacentHTML('afterbegin', '<div class="group" data-colour="Text only">a page</div>')
+    mount()
+    await wait()
+    expect(doc().querySelector('.group')!.hasAttribute('data-thimble-bar')).toBe(false)
+    expect(chips()[0]).toEqual(['Text only', '2', 'true'])
+  })
+
+  test("thimble.mix draws a group's share of each value in its colour, the values off left out, nothing for Off", async () => {
+    await load()
+    const c = mount()
+    await wait()
+    const el = doc().body.appendChild(doc().createElement('span'))
+    win().thimble.mix(el, { 'With links': 1, 'Text only': 3, '': 2 })
+    const parts = () => [...el.querySelectorAll('.thimble-mix > span')].map((s) => (s as HTMLElement).style.flexGrow)
+    // the chips' order, the records with no value last
+    expect(parts()).toEqual(['3', '1', '2'])
+    expect(el.querySelector('.thimble-mix')!.getAttribute('title')).toBe('Kind: Text only 3 · With links 1 · No kind 2')
+    expect(win().thimble.mix({ 'Text only': 1 })).toContain('class="thimble-mix"')
+    doc().querySelectorAll<HTMLElement>('.thimble-colour-chip')[0].click()
+    await wait()
+    win().thimble.mix(el, { 'With links': 1, 'Text only': 3 })
+    expect(parts()).toEqual(['1'])
+    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
+    ;(doc().querySelector('.thimble-colour-menu [data-by="off"]') as HTMLElement).click()
+    await wait()
+    expect(c.off).toBe(true)
+    win().thimble.mix(el, { 'Text only': 3 })
+    expect(el.querySelector('.thimble-mix')!.hasAttribute('hidden')).toBe(true)
+  })
+})
+
+describe('the color picker', () => {
+  const WHEEL = JSON.parse(readFileSync(path.join(APP, 'label_wheel.json'), 'utf8')) as number[][]
+  test('shows every hue around the color wheel, a light and a dark of each, red, purple and pink among them', async () => {
+    await load(undefined, 'kind', `<script>window.__thimbleLabelWheel = ${JSON.stringify(WHEEL)}</script>`)
+    const c = mount()
+    await wait()
+    ;(doc().querySelector('.thimble-colour-chip .chip-sw[data-palette]') as HTMLElement).click()
+    const picks = [...doc().querySelectorAll('.thimble-colour-palette [data-pick]')].map((b) => Number(b.getAttribute('data-pick')) + 1)
+    expect(picks).toEqual(WHEEL.flat())
+    expect(picks).toHaveLength(18)
+    // red first, then around the wheel to pink
+    expect(picks.slice(0, 2)).toEqual([13, 14])
+    expect(picks.slice(-4)).toEqual([15, 16, 17, 18])
+    // red picked for a value: it takes it, and keeps a chip of its own
+    ;(doc().querySelector('.thimble-colour-palette [data-pick="12"]') as HTMLElement).click()
+    await wait()
+    expect(c.colourOf('Text only')).toBe('var(--label-13)')
+    expect(of('colour').at(-1)!.state).toMatchObject({ picked: { kind: { 'Text only': 12 } } })
+    expect(chips()[0][0]).toBe('Text only')
+  })
+
+  test('red, purple and pink are never given by themselves: new values take the twelve, past them "Other"', async () => {
+    await load()
+    doc().getElementById('list')!.innerHTML = ''
+    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }] })
+    const names = Array.from({ length: 18 }, (_, i) => `v${i}`)
+    c.counts(Object.fromEntries(names.map((v, i) => [v, 100 - i])))
+    await wait()
+    const given = names.map((v) => c.colourOf(v))
+    expect(given.slice(0, 12).every((x: string) => /var\(--label-([1-9]|1[0-2])\)$/.test(x))).toBe(true)
+    expect(given.slice(12).every((x: string) => x === 'var(--label-none)')).toBe(true)
+  })
+})
+
+describe("every choice of the kit's controls", () => {
+  test('is listed for the checks, each one a go() that chooses it: Off, the fields, the labels on, and two together', async () => {
+    await load()
+    const c = mount()
+    labels(true)
+    await wait()
+    const list = win().thimble.__choices() as { control: string; choice: string; go: () => void }[]
+    expect(list.map((x) => `${x.control}: ${x.choice}`)).toEqual(['Color by: Off', 'Color by: Kind', 'Color by: Channel', 'Color by: Deadline', 'Color by: Kind + Channel'])
+    list[0].go()
+    await wait()
+    expect(c.off).toBe(true)
+    list[4].go()
+    await wait()
+    expect(c.picks.map((p: { title: string }) => p.title)).toEqual(['Kind', 'Channel'])
   })
 })

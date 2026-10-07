@@ -36,7 +36,8 @@ const label = (id: string, name: string, values: string[]) => ({
 let LABELS = [label('k1', 'activity type', ['reading', 'writing']), label('k2', 'asks', ['asks', 'other'])]
 
 const ROWS = Array.from({ length: 20 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i % 3 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
-const VIEW = `<!doctype html><html><head><script>window.__thimbleView = {"slug":"board","name":"Board"}</script>
+// the view kept on Off with the label seen already, so that checking the label makes it the one choice
+const VIEW = `<!doctype html><html><head><script>window.__thimbleView = {"slug":"board","name":"Board"}; window.__thimbleColour = {"v":1,"by":"off","picks":[],"seen":["k1","k2"],"off":{}}</script>
 <script>${inline(read('viewer_bridge.js'))}</script><script>window.__thimbleLabelOrder = ${read('label_order.json')}</script><script>${inline(read('viewer_colour.js'))}</script><style>${read('viewer_kit.css')}</style>
 <style>body{margin:0;font:12px sans-serif} .top{display:flex;align-items:center;gap:8px;padding:8px} #list{height:320px;overflow:auto} .msg{height:28px;padding:6px 12px 0}</style></head><body>
 <div class="top"><span id="colour"></span></div><div id="list">${ROWS}</div>
