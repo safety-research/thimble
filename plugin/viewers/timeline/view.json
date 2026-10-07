@@ -1,6 +1,6 @@
 {
   "name": "Timeline",
-  "description": "A ferry operator's alerts, deploys, chat, support tickets and automated agents' actions on one time axis: a lane per source under the time range's viewfinder, narrowed to an incident or a search and colored by any field or label, and the events in the range in a list where each opens in place with the event it answers and those that answer it.",
+  "description": "Events on a time axis, from five sources of a ferry operator (alerts, deploys, chat, support tickets and automated agents' actions): the base layout of a view, with Filter by, Rows and Color by in the top row, the lanes Rows groups under the time range's viewfinder, the events in the range in a table with its columns' headings, and an event in the side panel with the event it answers and those that answer it.",
   "scope": ["agents.log", "alerts/*.jsonl", "chat/*.json", "deploys.csv", "tickets/*.txt", "tickets/index.csv"],
   "records": [
     {"name": "event", "one": "one alert, deploy step, chat message, ticket message or agent action", "fields": [
@@ -16,12 +16,12 @@
     ]}
   ],
   "accepts": [
-    {"form": "L<n>", "means": "the event on line <n>, or the nearest event when the line holds none, opened in place in the list"},
-    {"form": "/messages/<i>", "means": "a chat file's message <i>, counted from 0, the record thimble's labels mark, opened in place in the list"},
-    {"form": "row=<n>", "means": "deploys.csv's row <n> after the header, the record thimble's labels mark, opened in place in the list"}
+    {"form": "L<n>", "means": "the event on line <n>, or the nearest event when the line holds none, opened in the side panel"},
+    {"form": "/messages/<i>", "means": "a chat file's message <i>, counted from 0, the record thimble's labels mark, opened in the side panel"},
+    {"form": "row=<n>", "means": "deploys.csv's row <n> after the header, the record thimble's labels mark, opened in the side panel"}
   ],
   "units": [
-    {"form": "<incident>", "means": "one incident's events, such as INC-312, narrowed to it with the viewfinder on its main burst of events"},
+    {"form": "<incident>", "means": "one incident's events, such as INC-312: Filter by narrowed to it and the viewfinder on its main burst of events"},
     {"form": "<YYYY-MM-DD>", "means": "one day's events in UTC, the viewfinder on that day"},
     {"form": "<from>..<to>", "means": "the events between two UTC times written YYYY-MM-DDTHH:MM, the viewfinder on that window"}
   ]
