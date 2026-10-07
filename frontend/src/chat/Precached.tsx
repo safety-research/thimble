@@ -5,7 +5,8 @@
 // was kept (the mark's `kept`) and a message in its thread continues it: the card says the orientation ran in advance and,
 // while no session is attached, offers an "Attach a fresh session" button that shows what a fresh session is, the
 // command with a Copy button, and how to continue it later. Once a session is attached the card says so. The same
-// steps stand in for the composer while no session was ever attached, since nothing would read a message sent from it.
+// steps stand in for the composer while no session was ever attached, since nothing would read a message sent from it;
+// under a frozen demo session's card, that bar gives the card's title alone, so the sentence and the command show once.
 import { useState } from 'react'
 import { Button } from '../components/Button'
 import { Card } from '../components/Card'
@@ -140,12 +141,13 @@ export function PrecachedCard({ mark, attached }: { mark: PrecachedMark; attache
 }
 
 /** In place of the composer while no session was ever attached to a pre-cached workspace: a frozen demo session's
- * sentence and command, else the attach button. */
-export function AttachBar({ mark }: { mark: PrecachedMark }) {
+ * sentence and command, or its title alone while the card above (`card`, the orientation's thread on screen) gives
+ * them, so they show once; else the attach button. */
+export function AttachBar({ mark, card = false }: { mark: PrecachedMark; card?: boolean }) {
   if (isFrozen(mark, false)) {
     return (
       <div className="precached-bar" data-precached-bar="">
-        <FrozenSteps mark={mark} />
+        {card ? <p className="precached-title">{FROZEN_TITLE}</p> : <FrozenSteps mark={mark} />}
       </div>
     )
   }

@@ -11,7 +11,7 @@ import path from 'node:path'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { AGENT_EFFORTS, agentEffort } from '../../src/chat/ModelLine.tsx'
-import { DEFAULT_ON, PLAN_MODE_LINE, StartGate, modeLine, noModuleLine, restoreOf, startBlocked, startBody, startGateOpen, startGateShown, startedChat } from '../../src/chat/StartGate.tsx'
+import { DEFAULT_ON, NO_SESSION_LINE, PLAN_MODE_LINE, StartGate, modeLine, noModuleLine, restoreOf, startBlocked, startBody, startGateOpen, startGateShown, startedChat } from '../../src/chat/StartGate.tsx'
 import { UNFENCED_LINE } from '../../src/shell/UnfencedBanner.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -108,6 +108,22 @@ describe('the Start gate', () => {
     expect(el.querySelector('.chat-gate-mode')!.textContent).toBe(UNFENCED_LINE)
     expect(startBlocked(main)?.kind).toBe('not-launched')
     expect(startBlocked({ ...main, launched: true, fenced: true })?.kind).toBe('no-module')
+  })
+
+  test("with no session attached, as in a worked example's workspace, Start is off and the line says so plainly, not the modules-off line", async () => {
+    // a worked example's workspace is read without a session: main's meta says attached null and module false, since
+    // nothing runs the module, and the modules-off line gave the wrong reason in red
+    const main = { attached: null, module: false, module_why: "Claude Code did not load thimble's hooks module" }
+    const el = await mount(<StartGate ws="mini" model="claude-opus-5-5" effort="high" main={main} />)
+    await settle()
+    expect(startButton(el).disabled).toBe(true)
+    const line = el.querySelector('.chat-gate-mode')!
+    expect(line.textContent).toBe(NO_SESSION_LINE)
+    expect(line.classList.contains('chat-gate-blocked')).toBe(false)
+    expect(line.getAttribute('role')).toBeNull()
+    expect(startBlocked(main)?.kind).toBe('no-session')
+    // a meta that does not say leaves Start on, as before
+    expect(startBlocked({ module: true })).toBeNull()
   })
 
   test('a refused start fills the gate with its request, switches, model and effort', async () => {

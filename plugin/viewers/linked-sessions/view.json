@@ -1,6 +1,6 @@
 {
   "name": "Linked sessions",
-  "description": "Runs of agent teams on one clock: a lane per session with each subagent under the session that spawned it, and every message and tool call in one list in time order, colored by speaker, tool, file type or any label, a call's whole input and output opened in place.",
+  "description": "Runs of agent teams on one clock: a lane per session with each subagent under the session that spawned it, and every message and tool call in one list in time order, colored by speaker, tool, file type, outcome or any label, a call's whole input and output opened in place.",
   "scope": ["runs/*.jsonl", "runs/*/sessions-index.json"],
   "records": [
     {"name": "call", "one": "one tool call, its tool_use line and its tool_result line", "fields": [
@@ -12,7 +12,7 @@
       {"name": "result", "type": "text", "derived": "cleaned", "from": "the tool_result's text", "how": "its first line, a denial's or an error's prefix dropped"},
       {"name": "exit", "type": "number", "derived": "cleaned", "from": "the result's text", "how": "the number after Exit code"},
       {"name": "output", "type": "text", "derived": "cleaned", "from": "the tool_result's text", "how": "the text without its Exit code and agentId lines"},
-      {"name": "file type", "type": "category", "derived": "computed", "from": "file_path, or a Bash command and its result", "how": "the first path's extension, test files apart"},
+      {"name": "file type", "type": "category", "derived": "computed", "from": "file_path, or a Bash command and its result", "how": "the first path's extension, test files apart, none for a call with no file"},
       {"name": "child", "type": "text", "derived": "computed", "from": "the Task result's agentId, else the prompt a session got", "how": "the session the Task call spawned"},
       {"name": "speaker", "type": "category", "derived": "computed", "from": "the session's agent", "how": "the agent whose transcript holds the call"}
     ]},

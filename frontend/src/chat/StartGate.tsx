@@ -142,13 +142,19 @@ export function noModuleLine(reason: string | null | undefined): string {
   return `thimble's agents can't start in this session: Claude Code's hooks modules are off (${why}). Main, its threads, cards and labels still work. ${noModuleFix(why)}, then run \`thimble -c\`.`
 }
 
+/** Why Start is off while no Claude Code session is attached to main, as in a workspace read without one (a worked
+ * example's): the plain fact, not a fault. */
+export const NO_SESSION_LINE = 'No Claude Code session is connected. Run `thimble` in this folder to start one.'
+
 /** Why Start is off now, or null: main not started by `thimble` or outside thimble's sandbox (the banner's warning, as
  * the server refuses such a start: not-launched; its module is idle for that reason, so the modules-off line would
- * send the analyst the wrong way), no hooks module in main's session (`module: false`; a meta that does not say leaves
- * Start on, and the server refuses a start that cannot happen), then plan mode. Pure. */
-export function startBlocked(main: Pick<ChatMeta, 'module' | 'module_why' | 'attached' | 'launched' | 'fenced'> | null | undefined): { kind: 'not-launched' | 'no-module' | 'plan'; line: string } | null {
+ * send the analyst the wrong way), no session attached to main at all (no-session: the module is off because nothing
+ * runs it, so the modules-off line would give the wrong reason), no hooks module in main's session (`module: false`; a
+ * meta that does not say leaves Start on, and the server refuses a start that cannot happen), then plan mode. Pure. */
+export function startBlocked(main: Pick<ChatMeta, 'module' | 'module_why' | 'attached' | 'launched' | 'fenced'> | null | undefined): { kind: 'not-launched' | 'no-session' | 'no-module' | 'plan'; line: string } | null {
   const unfenced = unfencedLine(main)
   if (unfenced) return { kind: 'not-launched', line: unfenced }
+  if (main && main.attached === null) return { kind: 'no-session', line: NO_SESSION_LINE }
   if (main?.module === false) return { kind: 'no-module', line: noModuleLine(main.module_why) }
   if (main?.attached?.permission_mode === 'plan') return { kind: 'plan', line: PLAN_MODE_LINE }
   return null
@@ -199,6 +205,8 @@ export function StartGate({ ws, main, model: rowModel, effort: rowEffort, restor
   // every block turns Start off, plan mode too: the module reports main's mode within seconds of a shift+tab made while
   // main is idle (plugin/hooks/thimble.ts watchPlan), so the line is not stale for long
   const off = !!blocked
+  // a block that something went wrong for, drawn as a warning; no session at all is only a state
+  const fault = !!blocked && blocked.kind !== 'no-session'
   const toggle = (id: OrientPass) => {
     const next = togglePass(on, id)
     track('start-toggle', { target: `orient:${id}`, detail: { on: next[id] } })
@@ -298,8 +306,8 @@ export function StartGate({ ws, main, model: rowModel, effort: rowEffort, restor
           </span>
         </div>
       </div>
-      <p className={`chat-gate-mode${blocked ? ' chat-gate-blocked' : ''}`} data-mode={mode ?? undefined} role={blocked ? 'alert' : undefined}>
-        {blocked && <Icon name="warning" size={13} className="chat-gate-warn-ico" />}
+      <p className={`chat-gate-mode${fault ? ' chat-gate-blocked' : ''}`} data-mode={mode ?? undefined} role={fault ? 'alert' : undefined}>
+        {fault && <Icon name="warning" size={13} className="chat-gate-warn-ico" />}
         <span>{blocked ? blocked.line : modeLine(mode)}</span>
       </p>
       <div className="chat-gate-foot">

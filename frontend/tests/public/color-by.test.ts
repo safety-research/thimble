@@ -3,9 +3,10 @@
 // one Other, the records with none their own chip; a label's chips are its highlighted values with their counts and the
 // meanings its definition gives, then Not marked; the default choice is the file's first key with few values, else Off;
 // a record's value is read from a JSON line the server pages as text; the choice and the values off are kept per file.
+// A key whose values are nearly unique per record (an id, a page) is not offered.
 // The tracks' geometry is tracks.test.ts.
 import { afterEach, describe, expect, test } from 'vitest'
-import { chipOfKeyValue, choiceId, defaultChoice, definitionLead, keyChips, keyValue, labelChips, NONE, OTHER, parseChoice, pickedChips, readColor, valueMeaning, writeColor } from '../../src/files/colorChoice'
+import { chipOfKeyValue, choiceId, colorKeys, defaultChoice, definitionLead, keyChips, keyValue, labelChips, nearlyUnique, NONE, OTHER, parseChoice, pickedChips, readColor, valueMeaning, writeColor } from '../../src/files/colorChoice'
 import type { Concept, SourceKey, SourceRecord } from '../../src/lib/types'
 
 afterEach(() => window.localStorage.clear())
@@ -135,4 +136,20 @@ test("a record's value is read from its object or from a JSON line's text, and f
   expect(chipOfKeyValue(k, 'v3')).toBe('v3')
   expect(chipOfKeyValue(k, 'v13')).toBe(OTHER)
   expect(chipOfKeyValue(k, null)).toBe(NONE)
+})
+
+test('a key whose values are nearly unique per record is not offered, one with few values or many records each is', () => {
+  // collusion-wiki's revisions.jsonl: 4,579 page ids over 14,591 records, about 3 each
+  const pageId: SourceKey = { key: 'page_id', values: Array.from({ length: 60 }, (_, i) => ({ value: `p${i}`, n: 10 })), more: { values: 4519, n: 13991 }, none: 0, at: [] }
+  const wiki: SourceKey = { key: 'wiki', values: [{ value: 'dse', n: 9000 }, { value: 'probier', n: 5591 }], more: { values: 0, n: 0 }, none: 0, at: [] }
+  // two hundred users with fifty records each colors by the commonest twelve
+  const user: SourceKey = { key: 'user', values: Array.from({ length: 60 }, (_, i) => ({ value: `u${i}`, n: 50 })), more: { values: 140, n: 7000 }, none: 0, at: [] }
+  // a small file whose few values are each on one record keeps them: no more than the palette's colors
+  const few: SourceKey = { key: 'type', values: Array.from({ length: 5 }, (_, i) => ({ value: `t${i}`, n: 1 })), more: { values: 0, n: 0 }, none: 0, at: [] }
+  expect(nearlyUnique(pageId)).toBe(true)
+  expect(nearlyUnique(wiki)).toBe(false)
+  expect(nearlyUnique(user)).toBe(false)
+  expect(nearlyUnique(few)).toBe(false)
+  expect(colorKeys([pageId, wiki, user, few]).map((k) => k.key)).toEqual(['wiki', 'user', 'type'])
+  expect(defaultChoice(colorKeys([pageId, wiki]))).toEqual({ by: 'key', key: 'wiki' })
 })

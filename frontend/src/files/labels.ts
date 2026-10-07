@@ -279,8 +279,13 @@ export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'las
 /** An outcome as the label row says it: "468 of 2,392,002 records", or "468 records" without a total, with "· 3 failed"
  * when units failed; the time follows it on the row. */
 export function outcomeText(s: Extract<LabelStatus, { state: 'done' }>): string {
-  const text = s.total == null ? `${s.matches.toLocaleString()} ${unitWord(s.unit, s.matches)}` : `${s.matches.toLocaleString()} of ${s.total.toLocaleString()} ${unitWord(s.unit, s.total)}`
-  return s.failed > 0 ? `${text} · ${s.failed.toLocaleString()} failed` : text
+  return s.total == null ? `${s.matches.toLocaleString()} ${unitWord(s.unit, s.matches)}` : `${s.matches.toLocaleString()} of ${s.total.toLocaleString()} ${unitWord(s.unit, s.total)}`
+}
+
+/** How many records a finished apply could not label, as the label row says it after the outcome: "230 failed"; ''
+ * when none did. */
+export function failedText(s: Extract<LabelStatus, { state: 'done' }>): string {
+  return s.failed > 0 ? `${s.failed.toLocaleString()} failed` : ''
 }
 
 /** A running apply as the label row says it: "1,204/2,392,002 records"; '' before any total is known. */

@@ -5,7 +5,7 @@
   "records": [
     {"name": "event", "one": "one alert, deploy step, chat message, ticket message or agent action", "fields": [
       {"name": "time", "type": "time", "derived": "cleaned", "from": "ts, time or Date", "how": "read in UTC, a deploys.csv time without an offset as UTC+1"},
-      {"name": "kind", "type": "category", "derived": "cleaned", "from": "state, event, Status or action", "how": "firing read as fired, a ticket's first message as opened"},
+      {"name": "kind", "type": "category", "derived": "cleaned", "from": "state, event, Status or action", "how": "firing read as fired, a ticket's first message as opened, an agent's open and close as opened and closed"},
       {"name": "actor", "type": "category", "derived": "cleaned", "from": "by, user, From or the agent", "how": "a login or chat id as chat/users.json names it"},
       {"name": "service", "type": "category", "derived": "computed", "from": "svc or service, the summary, tickets/index.csv", "how": "a missing service from the summary's first word"},
       {"name": "severity", "type": "category", "derived": "cleaned", "from": "severity, or a ticket's priority in tickets/index.csv", "how": "the priority word in free text"},
@@ -16,10 +16,12 @@
     ]}
   ],
   "accepts": [
-    {"form": "L<n>", "means": "the event on line <n>, or the nearest event when the line holds none, opened in place in the list"}
+    {"form": "L<n>", "means": "the event on line <n>, or the nearest event when the line holds none, opened in place in the list"},
+    {"form": "/messages/<i>", "means": "a chat file's message <i>, counted from 0, the record thimble's labels mark, opened in place in the list"},
+    {"form": "row=<n>", "means": "deploys.csv's row <n> after the header, the record thimble's labels mark, opened in place in the list"}
   ],
   "units": [
-    {"form": "<incident>", "means": "one incident's events, such as INC-312, narrowed to it with the viewfinder on its span"},
+    {"form": "<incident>", "means": "one incident's events, such as INC-312, narrowed to it with the viewfinder on its main burst of events"},
     {"form": "<YYYY-MM-DD>", "means": "one day's events in UTC, the viewfinder on that day"},
     {"form": "<from>..<to>", "means": "the events between two UTC times written YYYY-MM-DDTHH:MM, the viewfinder on that window"}
   ]

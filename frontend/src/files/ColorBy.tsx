@@ -1,6 +1,7 @@
 // The Color by control of Files' Transcript mode (colorChoice.ts): thimble's bordered button "Color by: <choice> ▾", then
 // a chip per value of the choice (a square swatch of its color, its name and its count, in thimble's small bordered box)
-// that turns its records off and on; Alt-click keeps that value alone. The menu lists Off, the records' keys and the
+// that turns its records off and on, on one line: the chips that do not fit go behind "N more", which lists every value,
+// as a view's Color by does (viewer_colour.js fit); Alt-click keeps that value alone. The menu lists Off, the records' keys and the
 // labels that mark the file, each with how many values it has and, on a second line, its values as chips (cut off with
 // … where they do not fit); a label that is off turns on when chosen. Choosing a label also opens its editor in a
 // popover under the button (LabelEditor), and Escape there gives the focus back to the button. A chip of a label's value
@@ -8,7 +9,7 @@
 // of thimble's twelve label colors (ValuePalette): the one picked recolors the value on the records, the chips and the
 // tracks; a label's value keeps it as the label's color (Files and every view), a key's value per file, and Reset colors
 // gives the key's values their own colors back.
-import { useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { Popover } from '../components/Menu'
@@ -50,14 +51,57 @@ export function ColorBy({ choice, keys, labels, values, off, onChoose, onToggle,
   const [open, setOpen] = useState(false)
   const [painting, setPainting] = useState<string | null>(null)
   const painted = painting != null ? values.find((v) => v.id === painting) : undefined
+  const root = useRef<HTMLDivElement>(null)
+  const chipsBox = useRef<HTMLDivElement>(null)
+  const more = useRef<HTMLButtonElement>(null)
+  const moreN = useRef<HTMLSpanElement>(null)
+  const [listOpen, setListOpen] = useState(false)
+  // the chips that do not fit the line go behind "N more", the last first (viewer_colour.js fit)
+  const fit = useCallback(() => {
+    const box = chipsBox.current
+    const btn = more.current
+    if (!box || !btn) return
+    const chips = box.querySelectorAll<HTMLElement>('.colorby-chip')
+    chips.forEach((c) => (c.hidden = false))
+    btn.hidden = true
+    if (box.scrollWidth <= box.clientWidth + 1) return
+    btn.hidden = false
+    let hid = 0
+    for (let j = chips.length - 1; j >= 0 && box.scrollWidth > box.clientWidth + 1; j--) {
+      chips[j].hidden = true
+      hid++
+      if (moreN.current) moreN.current.textContent = `${hid.toLocaleString()} more`
+    }
+  }, [])
+  useLayoutEffect(fit, [fit, values, off, choice])
+  useEffect(() => {
+    const el = root.current
+    if (!el || typeof ResizeObserver !== 'function') return
+    let frame: number | null = null
+    let width = -1
+    const ro = new ResizeObserver(() => {
+      if (frame != null) return
+      frame = requestAnimationFrame(() => {
+        frame = null
+        if (el.clientWidth === width) return
+        width = el.clientWidth
+        fit()
+      })
+    })
+    ro.observe(el.parentElement ?? el)
+    return () => {
+      ro.disconnect()
+      if (frame != null) cancelAnimationFrame(frame)
+    }
+  }, [fit])
   return (
-    <div className="colorby">
+    <div className="colorby" ref={root}>
       <Button ref={trigger} variant="secondary" size="sm" className="colorby-trigger" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <span className="colorby-k">Color by:</span> <b>{choiceName(choice, labels)}</b>
         <Icon name="chevron-down" size={12} className="colorby-caret" />
       </Button>
       {choice.by !== 'off' && (
-        <div className="colorby-chips" role="group" aria-label="Values">
+        <div className="colorby-chips" role="group" aria-label="Values" ref={chipsBox}>
           {values.map((v) => (
             <ValueChip
               key={v.id}
@@ -75,8 +119,19 @@ export function ColorBy({ choice, keys, labels, values, off, onChoose, onToggle,
               }
             />
           ))}
+          <Button ref={more} variant="ghost" size="sm" className="colorby-more" aria-haspopup="dialog" aria-expanded={listOpen} onClick={() => setListOpen((o) => !o)}>
+            <span ref={moreN} />
+            <Icon name="chevron-down" size={12} className="colorby-caret" />
+          </Button>
         </div>
       )}
+      <Popover anchor={more} open={listOpen && choice.by !== 'off'} onClose={() => setListOpen(false)} label="Values" className="colorby-values">
+        <div className="colorby-values-list" role="group" aria-label="Values">
+          {values.map((v) => (
+            <ValueChip key={v.id} v={v} on={!off.includes(v.id)} onToggle={onToggle} />
+          ))}
+        </div>
+      </Popover>
       <Popover anchor={trigger} open={open} onClose={() => setOpen(false)} role="menu" label="Color by" className="colorby-menu" width={300}>
         <ColorMenu
           choice={choice}

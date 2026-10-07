@@ -20,8 +20,11 @@
   .key { display: flex; align-items: center; gap: 12px; padding-left: 8px; color: var(--text-tertiary); font: 400 var(--text-xs) / 1 var(--font-body); }
   .key i { display: inline-block; width: 12px; margin-right: 5px; vertical-align: middle; }
   .key .k-span { height: 10px; background: rgba(var(--ink-rgb), 0.07); }
-  .key .k-err { height: 2px; background: var(--status-negative); }
-  #lanes { flex: 0 1 auto; max-height: 40%; overflow-y: auto; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
+  .key .k-err { height: 2px; background: var(--text-primary); }
+  /* the lanes take their height up to the share of the page fitLanes gives them, ending on a whole lane; a fade at the
+     bottom while more lanes lie below */
+  #lanes { flex: 0 1 auto; overflow-y: auto; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
+  #lanes.more { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
   .run + .run { border-top: 1px solid var(--border-hairline); }
   .nm { padding: 0 10px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 400 var(--text-ui-sm) / 18px var(--font-body); cursor: pointer; }
   .nm.head { color: var(--text-secondary); font-weight: 500; line-height: 26px; }
@@ -29,7 +32,8 @@
   .lane svg { display: block; }
   .span { fill: rgba(var(--ink-rgb), 0.07); }
   .tick { fill: var(--viz-ink-3); cursor: pointer; }
-  .err { fill: var(--status-negative); }
+  /* a failed call underlined in the ink, since only Color by's choice takes a color */
+  .err { fill: var(--text-primary); }
   .sep { stroke: var(--border-hairline); }
   /* the list: one row per message or call, its details opened in place under its line */
   #list { flex: 1; min-height: 0; overflow: auto; padding-bottom: 12px; }
@@ -42,7 +46,7 @@
   .row .what { color: var(--text-tertiary); }
   .row .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 400 var(--text-sm) / 1.5 var(--font-body); }
   .row.call .text { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
-  .row .bad { margin-right: 8px; color: var(--status-negative); }
+  .row .bad { margin-right: 8px; color: var(--text-primary); }
   .thimble-details { padding: 4px 0 8px var(--indent); cursor: auto; }
   .thimble-details pre { max-height: 240px; margin: 0 0 6px; padding: 6px 8px; overflow: auto; border-radius: var(--radius-ui); background: var(--bg-sub); color: var(--text-primary); font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
   .thimble-details .full { margin-bottom: 6px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); font: 400 var(--text-sm) / 1.5 var(--font-body); }
@@ -83,7 +87,7 @@ const ready = new Promise((ok) => { loaded = ok })
 // a bar on each row's left edge, the list's two tracks, and Reset at the row's end
 const colour = thimble.colorBy({
   mount: '#colour',
-  fields: [{ name: 'speaker', title: 'Speaker' }, { name: 'tool', title: 'Tool' }, { name: 'file type', title: 'File type' }],
+  fields: [{ name: 'speaker', title: 'Speaker' }, { name: 'tool', title: 'Tool' }, { name: 'file type', title: 'File type' }, { name: 'outcome', title: 'Outcome' }],
   chips: 'filter',
   strip: '#list',
   onChange: load,
@@ -140,13 +144,34 @@ function draw() {
 
 // a lane per session in scope under its run's name, each subagent under the session that spawned it: the time it ran
 // as a gray band, and each message and call a mark in its Color by color, as wide as the call took, a failed call
-// underlined in red. A run's name and a session's lane are the view's units, which a label marks where it marks
+// underlined in the ink. A run's name and a session's lane are the view's units, which a label marks where it marks
 // one of their records
 function lanes(scale) {
   const scope = new Set(data.scope), by = {}, runs = {}
   for (const it of items) (by[it.session] ||= []).push(it)
   for (const s of data.sessions) if (scope.has(s.id)) (runs[s.run] ||= []).push(lane(s, by[s.id] || [], scale))
   $('lanes').innerHTML = data.runs.filter((r) => runs[r.id]).map((r) => `<div class="run"><div class="nm head" data-scope="r:${esc(r.id)}" data-anchor="view:${slug}/${esc(r.id)}">${esc(runName(r.id))} · ${esc(r.team)}</div>${runs[r.id].join('')}</div>`).join('')
+  fitLanes()
+}
+// the lanes' box takes up to two fifths of the page and ends on a whole lane, never on a run's name alone, so no row is
+// cut in half; a fade shows that more lie below
+const LANES_SHARE = 0.4
+function fitLanes() {
+  const box = $('lanes'), cap = $('view').clientHeight * LANES_SHARE
+  box.style.maxHeight = ''
+  const rows = [...box.querySelectorAll('.nm.head, .lane')]
+  if (!rows.length || box.scrollHeight <= cap) return box.classList.remove('more')
+  const top = box.getBoundingClientRect().top - box.scrollTop
+  let end = 0
+  for (const [i, el] of rows.entries()) {
+    const bottom = el.getBoundingClientRect().bottom - top
+    if (bottom > cap) break
+    if (!el.classList.contains('head') || i === rows.length - 1) end = bottom
+  }
+  box.style.maxHeight = `${Math.ceil(Math.max(end, rows[0].getBoundingClientRect().bottom - top)) + 8}px`
+  const more = () => box.classList.toggle('more', box.scrollTop + box.clientHeight < box.scrollHeight - 1)
+  box.onscroll = more
+  more()
 }
 function lane(s, calls, scale) {
   const a = Math.max(0, scale.x(s.start)), b = Math.min(scale.width, scale.x(s.end))
@@ -162,15 +187,15 @@ function lane(s, calls, scale) {
 }
 
 // the messages and calls in the range, in time order: each row its time, its session, its tool or kind and its first
-// line, a call that failed saying so in red
+// line, a call that failed saying so after a ✕
 function list() {
   const shown = items.filter((i) => range.has(i.time))
   several = new Set(data.scope.map((id) => S[id].run)).size > 1
   $('list').innerHTML = shown.length ? shown.map(row).join('') : '<div class="empty">No message or call</div>'
 }
 function row(it) {
-  const s = S[it.session], who = several ? `${s.run} · ${names[s.id]}` : names[s.id]
-  const bad = it.outcome && it.outcome !== 'ok' ? `<span class="bad">${esc(it.outcome)}</span>` : ''
+  const s = S[it.session], who = several ? `${runName(s.run)} · ${names[s.id]}` : names[s.id]
+  const bad = it.outcome && it.outcome !== 'ok' ? `<span class="bad">✕ ${esc(it.outcome)}</span>` : ''
   return `<div class="row ${it.tool ? 'call' : 'msg'}" data-anchor="${esc(it.ref)}"${colour.attr(it)}><div class="line"><time>${hms(it.time)}</time><span class="who">${esc(who)}</span><span class="what">${esc(it.tool || KIND[it.kind])}</span><span class="text">${esc(it.input ?? it.text)}</span><span class="end">${bad}${it.tool ? secs(it.duration) : ''}</span></div>${it.ref === open ? details(it) : ''}</div>`
 }
 // a row opened in place: a call's whole input and what came back, or a message's whole text, and the file it is in
@@ -202,6 +227,7 @@ async function reveal(ref) {
 }
 
 let typing = null
+addEventListener('resize', fitLanes)
 $('q').addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(load, 250) })
 $('scope').addEventListener('change', load)
 // a session's or a run's name narrows the view to it through the menu in the top row; a lane's mark opens its row
