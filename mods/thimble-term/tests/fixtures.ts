@@ -175,6 +175,9 @@ export type World = {
   focused: string[]
   /** each pane opened: its id, title and columns */
   panes: { id: string; title: string; columns?: number }[]
+  /** a promise a spawned act waits for before it answers (a label's run that goes on), and what label-run answers */
+  hold: Promise<void> | null
+  labelRun: Record<string, unknown> | null
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
@@ -198,6 +201,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     draft: '',
     focused: [],
     panes: [],
+    hold: null,
+    labelRun: null,
   }
   const ws = opts.ws === undefined ? WS : opts.ws
   mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI })
@@ -276,7 +281,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     w.calls.push(argv)
     const [, , what, , , payload] = argv
     w.acts.push({ kind: what!, payload: JSON.parse(payload ?? '{}') as Record<string, unknown> })
-    const answer = what === 'label-run' ? { ok: true, label: LABEL.id, summary: { status: 'done', labeled: 30, failed: 0, counts: { 'proxy-link': 12, none: 18 } } } : { ok: true }
+    if (w.hold) await w.hold
+    const answer = what === 'label-run' ? (w.labelRun ?? { ok: true, label: LABEL.id, summary: { status: 'done', labeled: 30, failed: 0, counts: { 'proxy-link': 12, none: 18 } } }) : { ok: true }
     yield { stream: 'stdout' as const, text: JSON.stringify(answer) }
     return { value: { code: 0, signal: null } } as never
   })

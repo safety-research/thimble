@@ -618,7 +618,7 @@ const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n =
 export async function runLabel(cx: Ctx, id: string, name: string, limit: number): Promise<void> {
   if (!rt.sc) return
   await labelSaid(cx, id, '', { limit, at: await cx.now() })
-  const got = await actLong<{ deferred?: boolean; command?: string; summary?: { counts?: Record<string, number>; labeled?: number; failed?: number; message?: string | null } }>(cx, rt.sc, 'label-run', { label: id, ...(limit ? { limit } : {}) })
+  const got = await actLong<{ deferred?: boolean; command?: string; summary?: { counts?: Record<string, number>; labeled?: number; failed?: number; message?: string | null; stopped?: boolean } }>(cx, rt.sc, 'label-run', { label: id, ...(limit ? { limit } : {}) })
   if (!got.ok) {
     await labelSaid(cx, id, `× ${got.error}`, null)
     return
@@ -634,7 +634,18 @@ export async function runLabel(cx: Ctx, id: string, name: string, limit: number)
   await readSurface(cx, `label:${id}`, 'label', [id])
   // the label cards that count it are read again
   for (const [card, lid] of rt.labelOf) if (lid === id) await loadCards(cx, [card])
-  await labelSaid(cx, id, `ran on ${limit ? `a sample of ${(s.labeled ?? limit).toLocaleString('en-US')}` : `all ${(s.labeled ?? 0).toLocaleString('en-US')}`}${counts ? `: ${counts}` : ''}${failed}`, null)
+  const how = s.stopped ? `stopped after ${(s.labeled ?? 0).toLocaleString('en-US')}` : `ran on ${limit ? `a sample of ${(s.labeled ?? limit).toLocaleString('en-US')}` : `all ${(s.labeled ?? 0).toLocaleString('en-US')}`}`
+  // a run with failures says the first error on a row of its own, `!` in red
+  const err = s.failed && s.message && !s.stopped ? `\n! ${s.message}` : ''
+  await labelSaid(cx, id, `${how}${counts ? `: ${counts}` : ''}${failed}${err}`, null)
+}
+
+/** Stop a label's run started from its panel, after its current record (`thimble act label-stop`). */
+export async function stopLabel(cx: Ctx, id: string): Promise<void> {
+  if (!rt.sc) return
+  const got = await act(cx, rt.sc, 'label-stop', { label: id })
+  if (!got.ok) cx.toast(`thimble: the label's run was not stopped: ${got.error}`)
+  else await labelSaid(cx, id, '◌ stopping after the current record')
 }
 
 // ------------------------------------------------------------------------------------------------ the refresh loop

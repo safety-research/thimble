@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -575,7 +576,7 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 
 
 ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
-             "verdict {label, ref, value}, label {label, kind?, body?, glob?, values?}, label-run {label, limit?}, seen {thread}, "
+             "verdict {label, ref, value}, label {label, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, seen {thread}, "
              "stop {agent}")
 
 
@@ -697,14 +698,54 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         cardrun.mirror(c)
         return {"label": cid, "deferred": True, "command": cardrun.command("label", cid)}
     ran_before = bool(found["applications"])
+    stop = _label_stop_file(c, cid)
+    stop.unlink(missing_ok=True)
     await concepts.start_apply(c, cid, paths, limit or None, "user")
     cards = await asyncio.to_thread(concepts._label_cards, ws, cid)
     card = dict(cards[0][1]) if cards else None
     if card is None and not ran_before:
         card = await asyncio.to_thread(concepts.label_card, c, found, None, "user")
     concepts.tell_main(c, found, card)
-    summary = await concepts.wait_apply(c, cid, float("inf"))
+    # `label-stop` from another process asks this run to stop after its current unit, as the browser's Stop does
+    ended = threading.Event()
+
+    def watch() -> None:
+        while not ended.wait(LABEL_STOP_POLL_S):
+            if stop.exists():
+                concepts._cancel_event(c, cid).set()
+                stop.unlink(missing_ok=True)
+                return
+
+    threading.Thread(target=watch, name=f"label-stop-{cid}", daemon=True).start()
+    try:
+        summary = await concepts.wait_apply(c, cid, float("inf"))
+    finally:
+        ended.set()
     return {"label": cid, "summary": summary}
+
+
+LABEL_STOP_POLL_S = 0.5
+
+
+def _label_stop_file(c: str, cid: str) -> Path:
+    """The file that asks a running `label-run` of label `cid` to stop (`label-stop`); the run's process watches for it."""
+    return config.workspace_dir(c) / "concepts" / f"{cid}.stop"
+
+
+async def _act_label_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Stop a label's run that `label-run` started, after its current unit; the rows written so far stay (the browser's
+    Stop, concepts.cancel_apply_route). The run lives in that act's own process, which watches for the stop file."""
+    from . import concepts  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    found = concepts.find_concept(ws, _text(payload, "label"))
+    if found is None:
+        raise StateError(f"no label {payload.get('label')!r}")
+    cid = str(found["id"])
+    stop = _label_stop_file(c, cid)
+    stop.parent.mkdir(parents=True, exist_ok=True)
+    stop.write_text(_now(), "utf-8")
+    return {"label": cid, "stopping": True}
 
 
 async def _act_seen(c: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -732,7 +773,7 @@ async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "label": _act_label,
-         "label-run": _act_label_run, "seen": _act_seen, "stop": _act_stop}
+         "label-run": _act_label_run, "label-stop": _act_label_stop, "seen": _act_seen, "stop": _act_stop}
 
 
 # --------------------------------------------------------------------------- the command line

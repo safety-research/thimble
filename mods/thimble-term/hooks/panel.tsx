@@ -39,7 +39,7 @@ import { docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
 import { NAV_EMPTY, backTarget, crumbSteps, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimSentence, drawReply, placeName, plainWhy, scrubIds } from './reply'
-import { closePanel, inPanelNow, navBack, navGo, openHome, openPanel, panelOfStep, readSurface, rt, runLabel, saveLabel, startThread, surfaceValue, threadMessage } from './term'
+import { closePanel, inPanelNow, navBack, navGo, openHome, openPanel, panelOfStep, readSurface, rt, runLabel, saveLabel, startThread, stopLabel, surfaceValue, threadMessage } from './term'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -1143,7 +1143,10 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       'type:',
       <Box flexDirection="row" columnGap={2}>
         {(['prompt', 'regex', 'code'] as const).map(k =>
-          k === kind ? (
+          running ? (
+            // while a run goes, the type is plain text, as the fields are
+            <Text key={`lk-${k}`} {...(k === kind ? { backgroundColor: COLORS.selected } : { dimColor: true })}>{k}</Text>
+          ) : k === kind ? (
             <Text key={`lk-${k}`} backgroundColor={COLORS.selected}>{k}</Text>
           ) : (
             <Button
@@ -1206,8 +1209,14 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   }
   // run it: on a sample, or on every record; they save what was typed first
   const lastWords = last ? (l.trial || last.limit ? `last run on a sample of ${num(last.labeled ?? 0)}` : `last run on all ${num(last.labeled ?? 0)}`) : 'not run yet'
+  const stop = () => void stopLabel(cx, id)
   if (running)
-    rows.push(<Text key="lb-running" wrap="wrap">{`◌ labeling ${running.limit ? `a sample of ${num(running.limit)}` : `all ${scopeN !== null ? num(scopeN) : ''} ${unit}`.replace(/\s+/g, ' ')}`}</Text>)
+    rows.push(
+      <Box key="lb-running" flexDirection="row" columnGap={2} flexWrap="wrap">
+        <Text>{`◌ labeling ${running.limit ? `a sample of ${num(running.limit)}` : `all ${scopeN !== null ? num(scopeN) : ''} ${unit}`.replace(/\s+/g, ' ')}`}</Text>
+        <Button key="lb-stop" label="stop" plain onPress={stop} />
+      </Box>,
+    )
   else
     rows.push(
       <Box key="lb-runs" flexDirection="row" columnGap={2} flexWrap="wrap">
@@ -1216,8 +1225,10 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
         <Text dimColor>{lastWords}</Text>
       </Box>,
     )
-  if (said) rows.push(<Text key="lb-said" wrap="wrap" {...(said.startsWith('×') ? { color: COLORS.problem } : { dimColor: true })}>{said}</Text>)
+  // what the last save or run said: `×` and `!` rows in red
+  said.split('\n').filter(Boolean).forEach((line, i) => rows.push(<Text key={`lb-said-${i}`} wrap="wrap" {...(/^[×!]/.test(line) ? { color: COLORS.problem } : { dimColor: true })}>{line}</Text>))
   if (!running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() })
+  else keys.push({ key: 'stop', hotkey: 's', onPress: stop })
   // the counts, the examples and the cards, folded
   const toggle = (part: string, words: string, n: number | null) => (
     <Box key={`lb-t-${part}`} flexDirection="row">
@@ -1328,11 +1339,13 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   rows.push(toggle('cards', 'cards', cards.length))
   keys.push({ key: 'cards', hotkey: 'd', onPress: () => void flip('cards')() })
   if (opened('cards')) {
-    for (const c of cards) rows.push(<Box key={`lb-card-${c.id}`} flexDirection="row" marginLeft={2}><Button key={`lb-card-open-${c.id}`} label={`${clip(c.question, Math.max(20, cols - 6))} ›`} plain onPress={() => void openCard(cx, c.id)} /></Box>)
+    for (const c of cards.slice(0, 8)) rows.push(<Box key={`lb-card-${c.id}`} flexDirection="row" marginLeft={2}><Button key={`lb-card-open-${c.id}`} label={`${clip(c.question, Math.max(20, cols - 6))} ›`} plain onPress={() => void openCard(cx, c.id)} /></Box>)
+    if (cards.length > 8) rows.push(<Text key="lb-cards-more" dimColor>{`  … ${num(cards.length - 8)} more`}</Text>)
     if (!cards.length) rows.push(<Text key="lb-cards-none" dimColor>{'  none'}</Text>)
   }
   keys.push({ key: 'list', hotkey: 'l', onPress: () => void openPanel(cx, { view: 'labels', title: 'Labels' }) })
-  rows.push(hintsRow(els, [kind === 'code' ? 'click the code, ctrl+s to save' : `click the ${defName}, Enter to save`, ...(running ? [] : ['r to run on a sample']), 'c for counts', 'e for examples', 'd for cards', 'b to go back', 'x to close'], cols))
+  // the keys that fit one row: the field says how to save it (its placeholder), the folded parts open with c, e, d
+  rows.push(hintsRow(els, [running ? 's to stop' : 'r to run on a sample', 'c, e or d to open', 'l for all labels'], cols))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...rows]}</Box>
 }
@@ -1367,7 +1380,7 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   body.push(linesEl(cx, e, marginKey('labels-list'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openLabel(cx, pick, ls.find(x => x.id === pick)?.name ?? pick) : undefined)))
   body.unshift(
     <Box key="label-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
-      {ls.map((l, i) => <Button key={`label-open-${i}`} label={l.name ?? l.id} plain onPress={() => void openLabel(cx, l.id, l.name ?? l.id)} />)}
+      {ls.map((l, i) => <Button key={`label-open-${i}`} label={l.name ?? l.id} plain {...(i < 9 ? { hotkey: String(i + 1) } : {})} onPress={() => void openLabel(cx, l.id, l.name ?? l.id)} />)}
     </Box>,
   )
   const field = e.surface === 'mobile' ? null : fieldRow(cx, e, 'describe a new label', <Input key="lbs-describe" submitLabel="make it" onSubmit={v => void (v.trim() ? cx.submit(`Make a label with apply_label and try it on a sample of 30: ${v.trim()}`) : undefined)} />, 'lbs-new')

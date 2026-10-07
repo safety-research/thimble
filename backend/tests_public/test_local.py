@@ -308,7 +308,7 @@ async def test_act_makes_what_the_browser_makes(term, monkeypatch):
     assert concepts.find_concept(ws, "bash")
 
 
-async def test_act_edits_and_runs_a_label_as_the_label_editor_does(term):
+async def test_act_edits_and_runs_a_label_as_the_label_editor_does(term, monkeypatch):
     """The label panel's edits: `label` saves the kind, the prompt (or pattern or code) and the files as the browser's
     label editor saves them; `label-run` runs the label on a sample or on every record and answers with the run's
     summary once it ends; a code label's run waits for `thimble-run label` in main's Bash, whose command it gives."""
@@ -332,6 +332,24 @@ async def test_act_edits_and_runs_a_label_as_the_label_editor_does(term):
     assert ran["ok"] and s["status"] == "done" and s["limit"] == 3 and s["labeled"] <= 3
     whole = await local.act(CORPUS, "label-run", {"label": "bash"})
     assert whole["summary"]["status"] == "done" and whole["summary"]["limit"] is None
+    # `label-stop` from another process: the running label-run sees its stop file and stops after its current unit
+    stop_seen: list[bool] = []
+    real_wait = concepts.wait_apply
+
+    async def wait_apply(c, cid, timeout=None, enough=None):
+        await local.act(CORPUS, "label-stop", {"label": "bash"})
+        for _ in range(100):
+            if concepts._cancel_event(c, cid).is_set():
+                break
+            await asyncio.sleep(0.02)
+        stop_seen.append(concepts._cancel_event(c, cid).is_set())
+        return await real_wait(c, cid, timeout, enough)
+
+    monkeypatch.setattr(local, "LABEL_STOP_POLL_S", 0.02)
+    monkeypatch.setattr(concepts, "wait_apply", wait_apply)
+    stopped = await local.act(CORPUS, "label-run", {"label": "bash"})
+    monkeypatch.setattr(concepts, "wait_apply", real_wait)
+    assert stop_seen == [True] and stopped["ok"] and not local._label_stop_file(CORPUS, before["id"]).exists()
     assert concepts.find_concept(ws, "bash")["applications"][-1]["paths"] == ["agents/agent-01.jsonl"]
     # a code label's code runs only where main's Bash runs it
     await local.act(CORPUS, "label", {"label": "bash", "kind": "code", "body": "def label(unit):\n    return 'yes', 1.0"})
