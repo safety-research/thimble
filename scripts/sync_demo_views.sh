@@ -4,8 +4,9 @@
 #
 #   scripts/sync_demo_views.sh --from HOME [--dry-run] [DATASET...]
 #
-#   --from HOME   the THIMBLE_HOME whose workspaces/<dataset>/ hold the reviewed views (the "… (v2)" views); each
-#                 dataset's folder is read from HOME/data/<dataset>.corpus.json, for the check against long stretches
+#   --from HOME   the THIMBLE_HOME whose workspaces/demo-<dataset>/ (as `thimble demo` names them; else
+#                 workspaces/<dataset>/) hold the reviewed views (the "… (v2)" views); each dataset's folder is read from
+#                 that workspace's registration, HOME/data/<name>.corpus.json, for the check against long stretches
 #                 copied from the dataset
 #   --dry-run     check and list what would change; write nothing
 #   DATASET       the pre-caches to sync (default: every dataset below)
@@ -51,8 +52,9 @@ done
 
 failed=0
 for ds in $names; do
-  ws="$home/workspaces/$ds"
-  side="$home/data/$ds.corpus.json"
+  ws="$home/workspaces/demo-$ds"
+  side="$home/data/demo-$ds.corpus.json"
+  [ -d "$ws" ] || { ws="$home/workspaces/$ds"; side="$home/data/$ds.corpus.json"; }
   [ -d "$ws" ] || { echo "sync_demo_views.sh: $ws is missing" >&2; failed=1; continue; }
   corpus="$("$py" -c 'import json, sys; print(json.load(open(sys.argv[1]))["path"])' "$side" 2>/dev/null)" || {
     echo "sync_demo_views.sh: $side names no dataset folder" >&2; failed=1; continue; }

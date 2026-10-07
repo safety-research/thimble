@@ -25,6 +25,28 @@ export function groupWorkspaces(rows: readonly WorkspaceRow[]): { kind: Workspac
   return WORKSPACE_GROUPS.map((g) => ({ ...g, rows: rows.filter((r) => r.kind === g.kind) })).filter((g) => g.rows.length > 0)
 }
 
+/** What a row of the start page and the switcher shows: the server's label (a demo by its dataset's name, not its
+ * workspace's demo-<dataset>), else a folder's own name, a demo's dataset or the workspace's name. Pure. */
+export function workspaceLabel(row: Pick<WorkspaceRow, 'name' | 'kind' | 'label' | 'folder' | 'dataset'>): string {
+  if (row.label) return row.label
+  if (row.kind === 'folder') return row.folder || row.name
+  if (row.kind === 'demo') return row.dataset || row.name
+  return row.name
+}
+
+/** The workspace that `name` was renamed to, by the rows' `renamed_from`, or null. Pure. */
+export function renamedTo(rows: readonly Pick<WorkspaceRow, 'name' | 'renamed_from'>[], name: string): string | null {
+  return rows.find((r) => r.name !== name && r.renamed_from?.includes(name))?.name ?? null
+}
+
+/** The address `search` and `hash` at `pathname` with its workspace `to` in place of the one it names, the rest kept.
+ * Pure. */
+export function withWorkspace(to: string, pathname: string, search: string, hash: string): string {
+  const q = new URLSearchParams(search)
+  q.set('ws', to)
+  return `${pathname}?${q.toString()}${hash}`
+}
+
 /** Where a row of the start page goes: the page at `pathname` with its workspace, an example opened at its view, and the
  * page key when the address still holds one (`hash`: a claim the server has not answered yet). Pure. */
 export function workspaceHref(row: Pick<WorkspaceRow, 'name' | 'kind' | 'view'>, pathname = '/', hash = ''): string {
@@ -135,6 +157,25 @@ export function syncInstance(ws: string, stamp: string | null): boolean {
     }
   }
   return cleared
+}
+
+/** Moves workspace `from`'s keys in this browser's storage (localStorage and this tab's sessionStorage) to workspace
+ * `to`, after a rename: its layout and its other state follow it. A key `to` holds already is kept. */
+export function moveWorkspaceStorage(from: string, to: string): void {
+  const prefix = storageKey(from, '')
+  for (const get of [() => window.localStorage, () => window.sessionStorage]) {
+    try {
+      const store = get()
+      for (const k of workspaceKeys(from, storageKeys(store))) {
+        const dest = storageKey(to, k.slice(prefix.length))
+        const v = store.getItem(k)
+        if (v != null && store.getItem(dest) == null) store.setItem(dest, v)
+        store.removeItem(k)
+      }
+    } catch {
+      /* storage is a convenience */
+    }
+  }
 }
 
 /** The folder a corpus shows as: the path the analyst opened it by (`shown`, through a symlink), else its folder. */

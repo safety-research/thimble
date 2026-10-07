@@ -126,8 +126,9 @@ each one written (backend/app/precached.py).
    Wait until it is done: its views built and its report written. Claude's cyber safeguards flag mythos-5 under Opus
    5.5. On 2026-10-05, an earlier demo dataset ran to the end on claude-opus-4-8, but the same safeguard stopped its
    critic, two verification agents and one view build (the orientation's thread says so).
-3. Export it from the checkout: `thimble demo --export collusion-wiki demos/ --outputs-only` (the workspace's name, or
-   its folder). This writes `demos/collusion-wiki/`, replacing an earlier pre-cache there. The export refuses, listing
+3. Export it from the checkout: `thimble demo --export demo-collusion-wiki demos/ --outputs-only` (the workspace's name,
+   which `thimble demo` makes demo-<dataset>, or its folder). This writes `demos/collusion-wiki/`, replacing an earlier
+   pre-cache there. The export refuses, listing
    each finding, when a file copies a long stretch of the dataset, and while it finds your user name, another
    absolute path or a gitleaks finding.
    - `--scrub-user` writes `user` in place of your user name.

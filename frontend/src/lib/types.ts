@@ -1274,6 +1274,8 @@ export interface CorpusInfo {
 export interface WorkspaceRow {
   name: string
   kind: 'demo' | 'example' | 'folder'
+  /** what the page shows for it: a demo's dataset name, an example's workspace name, a folder's own name */
+  label?: string
   /** the folder's own name */
   folder: string
   /** the folder as the analyst opened it */
@@ -1283,6 +1285,8 @@ export interface WorkspaceRow {
   blurb?: string
   ready?: boolean
   view?: { slug: string; name: string } | null
+  /** the names the workspace was renamed from (`thimble demo` renames a demo workspace demo-<dataset>) */
+  renamed_from?: string[]
 }
 
 export type SourceKind = 'agent' | 'board' | 'events' | 'forge' | 'prompt' | 'text' | 'dir'
