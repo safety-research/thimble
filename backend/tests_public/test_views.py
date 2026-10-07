@@ -1043,7 +1043,8 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     tried = {(c["control"], c["choice"]) for s in rep["shots"] if s["state"] == "choices" for c in s.get("choices") or []}
     assert ("Color by", "Off") in tried, tried
     if name != "pdf":
-        by = {s["state"]: s["shown"] for s in rep["shots"]}
+        # the `choices` state is no state of its own the checks read (views.check), so it carries no `shown`
+        by = {s["state"]: s["shown"] for s in rep["shots"] if s["state"] != "choices"}
         # the repository's overview lists its items, each standing for its records, so it takes no mark of its own and
         # shows their mix; its records show on an item's page
         shown = by["detail" if name == "repository" else "overview"]
