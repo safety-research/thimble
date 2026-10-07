@@ -6,7 +6,9 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { HOME_LINE } from '../hooks/register'
-import { CLI, CWD, LABEL, SLIDES, WS, shown, world } from './fixtures'
+import { RELAY, relayValue } from '../hooks/panel'
+import { PANEL } from '../hooks/term'
+import { CLI, CWD, LABEL, SLIDES, WS, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -14,7 +16,8 @@ type E = Engine
 
 const MESSAGE = (requestId: string, text: string, first = true) =>
   ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: first } }) as never
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
+// a pane tall enough for home whole: keys.test.ts draws the lists in a pane shorter than they are
+const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 124 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 120 }, view: {} } } as never
 const ABOVE = { plugin: 'thimble-term', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 130, scroll: { bodyRows: 10 }, view: {} } } as never
 
 async function start($: E, w: World): Promise<void> {
@@ -226,8 +229,9 @@ test('the one row above the prompt is a toast: what is new since home was opened
   await above.unmount()
 })
 
-test("home opened from the toast without the keys asks for them once more, and names none of its keys until it has them", async ($, on) => {
-  // live check term-fix6, new quirk 4: home opened from `open ›` named its keys while a `q` went to the prompt
+test("home opened from the toast without the keys asks for them once more, and names none of its keys until a ui.focus says its ring rests on them", async ($, on) => {
+  // live check term-fix6, new quirk 4: home opened from `open ›` named its keys while a `q` went to the prompt; live
+  // check term-fix7, quirk 2: given the keys, ↓ moved the pane's ring to `show all threads` while the hint named ↑↓
   const w = world(on)
   await start($, w)
   w.states.home = { ...w.states.home, cards: 14 }
@@ -244,19 +248,73 @@ test("home opened from the toast without the keys asks for them once more, and n
   expect(text).toContain('click the panel for its keys')
   expect(text).not.toContain('Enter to open')
   await pane.unmount()
-  // a moment later it asked for them again, as an open with `focus`
+  // a moment later, once the press is over, it asked for them again, as an open with `focus`
   await w.clock.advance(200)
   expect(w.focusAsked.filter(Boolean).length).toBe(2)
-  // given them, it names its keys
+  // given them, but with its ring elsewhere, it names only the keys the pane binds itself
   w.paneFocused = true
+  await $.ui.focus({ requestId: PANEL, component: 'Pane', element: 'threads', origin: { kind: 'person' } } as never)
   pane = (await $.ui.mount(PANE)) as unknown as M
   text = shown(await pane.drawn({ in: 'm:home' }))
-  expect(text).toContain('↑↓ to choose · Enter to open')
+  expect(text).not.toContain('↑↓')
+  expect(text).toContain('x to close')
   await pane.unmount()
-  // a panel that holds the keys asks for nothing more
+  // ↓ from there lands on the list's keys (the relay's middle Button), and the hint names them
+  await $.ui.focus({ requestId: PANEL, component: 'Pane', element: RELAY.down, origin: { kind: 'person' } } as never)
+  await w.clock.settle()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  text = shown(await pane.drawn({ in: 'm:home' }))
+  expect(text).toContain('↑↓ to choose · Enter to open · Space to fold · x to close')
+  await pane.unmount()
+  // a panel that holds the keys asks for them no more
   w.focusAsked.length = 0
   await $.command.run({ command: 'thimble:thimble', args: 'threads' } as never)
   await w.clock.advance(200)
+  expect(w.focusAsked).toEqual([true])
+})
+
+test("home's list takes ↑, ↓ and Enter from the pane's own keys; a click on an empty part of it hands the keys back to the pane", async ($, on) => {
+  // live check term-fix7, quirk 2: a list's keys reach its Client only after a click, so ↓ walked the pane's buttons
+  const w = world(on)
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  const picked = async () => {
+    const pane = (await $.ui.mount(PANE)) as unknown as M
+    const rows = (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
+    await pane.unmount()
+    return rows.find(r => r.startsWith('❯'))?.trim() ?? ''
+  }
+  const first = await picked()
+  // the ring rests on the relay's field: a move onto the Button below it is ↓ for the list, and the ring stays
+  const r = await $.ui.focus({ requestId: PANEL, component: 'Pane', element: RELAY.down, origin: { kind: 'person' } } as never)
+  expect(r).toEqual({})
+  await w.clock.settle()
+  const second = await picked()
+  expect(second).not.toBe(first)
+  await $.ui.focus({ requestId: PANEL, component: 'Pane', element: RELAY.up, origin: { kind: 'person' } } as never)
+  await w.clock.settle()
+  expect(await picked()).toBe(first)
+  // Enter submits the relay's field: the chosen row opens (the first row is a document)
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  await pane.input({ key: RELAY.pick, text: relayValue() })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.drawn())).toMatch(/^‹ back {2}home › documents › "Agents used the dse wiki as a…"/)
+  await pane.unmount()
+  // a click on an empty row of a list gives its Client the keys; the panel asks for them back, as an open with `focus`
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  w.focusAsked.length = 0
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  const rows = ((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []
+  const blank = rows.findIndex(x => shown(x).trim() === '')
+  expect(blank).toBeGreaterThan(0)
+  await pane.pointer({ type: 'down', x: 30, y: blank, button: 'left', in: 'm:home' } as never)
+  await w.clock.settle()
+  await pane.unmount()
   expect(w.focusAsked).toEqual([true])
 })
 
@@ -282,6 +340,8 @@ test('/thimble opens the home panel with no model turn: one column, the title Ho
   await row.unmount()
   expect(w.opened).toEqual(['thimble-term'])
   await w.clock.settle()
+  // its ring rests on its list's keys as it takes the keys, so the hint row names them
+  await takesKeys($)
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const drawn = await pane.drawn({ in: 'm:home' })
   const home = shown(drawn)
@@ -375,7 +435,8 @@ test("a side thread asked about a card: the ask field posts the thread, and the 
   expect(text).toContain('Threads')
   expect(text).toContain('"a question"')
   expect(shown(await pane.drawn({ in: 'm:threads-tree' }))).toContain('main')
-  expect((await pane.findAll({ type: 'Input' })).length).toBe(1)
+  // one field for a question, beside the list's keys (panel.tsx RELAY)
+  expect(((await pane.findAll({ type: 'Input' })) as { key?: string }[]).filter(i => i.key !== RELAY.pick).length).toBe(1)
   await pane.unmount()
 })
 

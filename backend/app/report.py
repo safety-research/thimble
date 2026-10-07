@@ -352,8 +352,9 @@ def _cell_of(ref: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _better_span_for_value(ws: Path, ref: str, display: str) -> str | None:
-    """A span of the same cell that shows `display` when `ref` does not, else None."""
+def _better_span_for_value(ws: Path, ref: str, display: str, text: str = "") -> str | None:
+    """A span of the same cell that shows `display` when `ref` does not, else None; never a td of another row when the
+    sentence `text` names the row `ref` cites (cite.off_named_row)."""
     cid = _cell_of(ref)
     if not cid:
         return None
@@ -386,6 +387,8 @@ def _better_span_for_value(ws: Path, ref: str, display: str) -> str | None:
                         matches.append((c_, r_))
         if len(matches) == 1:
             new_ref = cite.td_ref(cid, *matches[0])
+            if new_ref and cite.off_named_row(ref, new_ref, text):
+                return None
             return new_ref if new_ref and new_ref != ref else None
     return None
 
@@ -398,7 +401,7 @@ def repair_span_refs(ws: Path, sentences: Iterable[dict[str, Any]]) -> int:
         text = str(x.get("text") or "")
         refs_list = list(x.get("refs") or [])
         for display, r in _value_refs(text):
-            new_ref = _better_span_for_value(ws, r, display)
+            new_ref = _better_span_for_value(ws, r, display, text)
             if not new_ref:
                 continue
             marker = f"[[{display}|{r}]]"
@@ -611,7 +614,9 @@ async def verify_and_tag(c: str, sentences: list[dict[str, Any]]) -> dict[str, A
             if f.get("was"):
                 rec["said"].append(str(f["was"]))
         else:
-            item = str(f.get("value") or f.get("ref") or "") if f.get("quiet") else str(f["ref"])
+            # a value its cited place does not show is named with the place, so the note says which value is meant
+            item = (str(f.get("value") or f.get("ref") or "") if f.get("quiet")
+                    else f"{f['ref']} (for “{f['value']}”)" if f.get("value") else str(f["ref"]))
             if item and item not in rec["quiet"]:
                 rec["quiet"].append(item)
     for x in sentences:

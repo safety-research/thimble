@@ -74,3 +74,72 @@ async def test_write_document_reads_a_citation_written_in_one_pair_of_brackets(c
     doc = report_types.read_doc(CORPUS, MAIN, "report")
     [first] = report_types.unit_sentences(doc["sections"][0])
     assert first["text"] == f"Bob issued [[9|card:{tid}#count/bob]] deletions, all [[27|card:{cid}]] came from one account [[card:{tid}]]."
+
+
+@pytest.fixture()
+def hours(workspaces_tmp):
+    """A card of deletions per hour, its rows named by the hour, and a card that printed the first deletion's time."""
+    from app import frames
+
+    ws = config.workspace_dir(CORPUS)
+    nb = notebook.create_notebook(ws, "Your work", role="analyst")
+    table = notebook.new_cell("table", "terminal", "Deletions per hour on 23 June", nb["id"], code="df")
+    table["status"] = "ok"
+    f = frames.normalize({"columns": ["hour (UTC)", "deletions"], "index": "hour (UTC)",
+                          "rows": [["20:00", 174], ["21:00", 0], ["22:00", 40], ["23:00", 89]]})
+    table["outputs"] = [frames.bundle(f)]
+    first = notebook.new_cell("code", "terminal", "When was the first deletion?", nb["id"], code="print(first)")
+    first["status"], first["outputs"] = "ok", [{"text/plain": "2026-06-04T10:53:40Z TestFoobaAgent", "_stream": True}]
+    nb["cells"] += [table, first]
+    notebook.write_notebook(ws, nb)
+    return table["id"], first["id"]
+
+
+async def test_a_date_with_a_time_cites_a_time_stamp_and_a_flagged_sentence_is_quoted_with_why(hours):
+    """Live check term-fix7, new quirk 1: `[[4 June 2026 at 10:53:40 UTC|…#L1]]` against a line holding
+    2026-06-04T10:53:40Z was tagged unverified, and the save's result named the sentence by its id alone, so the writer
+    replaced the sentence before it. A date with a time cites the time stamp that writes both; each flagged sentence is
+    named with its words and why, in write_document's result and in edit_document's."""
+    tid, fid = hours
+    text = (f"# First\n\n## The first deletion\n\nThe first deletion was on [[4 June 2026 at 10:53:40 UTC|card:{fid}@out0#L1]]. "
+            f"The busiest hour had [[174|card:{tid}#deletions/20:00]] deletions.\n\n"
+            f"## Later\n\nA second one came at [[4 June 2026 at 11:00 UTC|card:{fid}@out0#L1]].\n")
+    r = await call("write_document", doc="report", text=text)
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    first, second = report_types.unit_sentences(doc["sections"][0])[0], report_types.unit_sentences(doc["sections"][1])[0]
+    assert "unverified" not in (first.get("tags") or []), first
+    assert "unverified" in second["tags"]
+    lines = _body(r).splitlines()
+    i = lines.index("the citation check tagged 1 sentence unverified:")
+    assert lines[i + 1] == (f"- [[report:report#{second['id']}]] “A second one came at 4 June 2026 at 11:00 UTC.” Not verified by "
+                            f"execution: card:{fid}@out0#L1 did not resolve to what this sentence states. The cited place "
+                            "shows 2026-06-04T10:53:40Z.")
+    # an edit that leaves the time wrong names the new sentence by its words, after the passage it wrote
+    r = await call("edit_document", span=f"report:report#{second['id']}", text=f"Then [[4 June 2026 at 10:54 UTC|card:{fid}@out0#L1]] came.")
+    assert not r.is_error, r.text
+    body = _body(r).splitlines()
+    assert body[0].startswith("replaced [[report:report#") and body[0].endswith(f": Then [[4 June 2026 at 10:54 UTC|card:{fid}@out0#L1]] came.")
+    assert body[1] == "the citation check tagged 1 sentence unverified:"
+    assert body[2].startswith("- [[report:report#") and body[2].endswith("“Then 4 June 2026 at 10:54 UTC came.” Not verified by "
+                                                                       f"execution: card:{fid}@out0#L1 did not resolve to "
+                                                                       "what this sentence states. The cited place shows "
+                                                                       "2026-06-04T10:53:40Z.")
+
+
+async def test_a_value_cited_at_the_row_its_sentence_names_stays_there(hours):
+    """Live check term-fix7, new quirk 1: the writer cited `[[89|…#deletions/22:00]]` "in the 22:00 hour", the 22:00 row
+    showed 40, and the save moved the citation to 23:00, the one row showing 89, so a wrong hour stood under a blue
+    link. A value whose sentence names the row it cites stays at that row, and the sentence is tagged with what the row
+    shows; one whose sentence names no row still moves to the one place that shows it."""
+    tid, _ = hours
+    text = (f"# Hours\n\n## Hours\n\nA last [[89|card:{tid}#deletions/22:00]] came in the 22:00 hour.\n\n"
+            f"## Other\n\nThe evening ended with [[89|card:{tid}#deletions/22:00]] deletions.\n")
+    r = await call("write_document", doc="report", text=text)
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    named, other = report_types.unit_sentences(doc["sections"][0])[0], report_types.unit_sentences(doc["sections"][1])[0]
+    assert f"[[89|card:{tid}#deletions/22:00]]" in named["text"] and "unverified" in named["tags"]
+    assert "The cited place shows 40." in named["tag_notes"]["unverified"]
+    assert f"[[89|card:{tid}#deletions/23:00]]" in other["text"] and "unverified" not in (other.get("tags") or [])
+    assert f"“A last 89 came in the 22:00 hour.” Not verified by execution" in r.text

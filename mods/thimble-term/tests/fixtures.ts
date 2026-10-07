@@ -3,6 +3,7 @@
 // The cells and the label are cut from a real workspace (collusion-wiki); the rest is made to fit them.
 import type { On } from 'claude-code'
 import { mock } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 export const WS = '/home/a/.thimble/app/workspaces/wiki'
 export const CWD = '/corpus/wiki'
@@ -197,6 +198,8 @@ export type World = {
   grantOnReopen?: boolean
   /** each open's `focus` */
   focusAsked: boolean[]
+  /** the text typed into the prompt box by `$.prompt.fill` (a key the panel does not bind) */
+  filled: string[]
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
@@ -228,6 +231,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     pages: {},
     opens: {},
     focusAsked: [],
+    filled: [],
   }
   const ws = opts.ws === undefined ? WS : opts.ws
   mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI })
@@ -280,8 +284,10 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
         return w.cells[rest[0]!] ? out(w.cells[rest[0]!]) : out({ error: `no card ${rest[0]}` }, 1)
       case 'labels':
         return out(w.states.labels)
-      case 'label':
-        return rest[0] === LABEL.id ? out(w.states.labels[0]) : out({ error: 'no label' }, 1)
+      case 'label': {
+        const l = (w.states.labels as { id: string }[]).find(x => x.id === rest[0])
+        return l ? out(l) : out({ error: 'no label' }, 1)
+      }
       case 'docs':
         return out(w.states.docs)
       case 'doc':
@@ -362,6 +368,12 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     return { value: {} } as never
   })
   on('prompt.read', () => ({ value: { text: w.draft, cursor: w.draft.length } }) as never)
+  on('prompt.fill', ($, e) => {
+    const text = String((e as { text?: unknown }).text ?? '')
+    w.filled.push(text)
+    w.draft += text
+    return { isFilled: true, text: w.draft, cursor: w.draft.length } as never
+  })
   on('prompt.edit', ($, e) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }) as never)
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -392,4 +404,10 @@ export function shown(tree: unknown): string {
   }
   walk(tree)
   return out.join('')
+}
+
+/** The panel taking the keys as Claude Code gives them to a pane opened with `focus`: the relay's `autoFocus` Button
+ *  (panel.tsx RELAY) takes the focus ring, which raises `ui.focus` with origin the plugin. */
+export async function takesKeys($: Engine): Promise<void> {
+  await $.ui.focus({ requestId: 'thimble-term', component: 'Pane', element: 'keys-pick', origin: { kind: 'plugin', name: 'thimble-term' } } as never)
 }

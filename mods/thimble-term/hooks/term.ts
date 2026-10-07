@@ -3,16 +3,17 @@
 // panel.tsx draw.
 //
 // Nothing here writes the workspace: a read is `thimble state`, a change is `thimble act` (hooks/data.ts).
-import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermLabelUi, TermPanel, TermThreadRow } from '../types'
-import { busyWords, cardOfCell, checkOf, linksOf, printed } from './cell'
+import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermThreadRow } from '../types'
+import { busyWords, cardOfCell, checkOf, fixOf, linksOf, printed } from './cell'
 import type { ThimbleCell, ThimbleLabel } from './cell'
 import type { CardData, CardLabel } from './draw'
 import type { Ctx, SurfaceGot } from './ctx'
 import { act, actLong, changed, readState, signature } from './data'
 import type { Area, Scope, Signature } from './data'
-import { cid, citations, clip, labelRef, noteQuestion, questionOf, quoted } from './lib'
+import { cid, citations, clip, labelRef, noteDocPlace, noteLabelName, noteQuestion, questionOf, quoted } from './lib'
 import type { Citation } from './lib'
-import { agentsOf, cellOf, cellsOf, chatOf, docUnits, homeOf, labelIdOf, labelOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
+import { agentsOf, cellOf, cellsOf, chatOf, docUnits, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
+import { keepSeen, keptSeen } from './kept'
 import { NAV_EMPTY, backTarget, moved, nextTrail } from './nav'
 import { signalEnd, withSignal } from './signal'
 
@@ -41,6 +42,13 @@ export const rt = {
   // the key of the panel's element that holds its focus ring (ui.focus), '' for none: while a text field holds it, the
   // letters a hint names go into the field
   panelFocus: '',
+  // a key the panel does not bind went to the prompt (panel.tsx typeThrough): until the prompt has the keys the panel
+  // draws neither its list's keys nor its hotkeys, so the next key reaches the prompt
+  typeThrough: false,
+  // when home was last seen before the open that shows it now (ms): a card made since is new on it
+  homeSince: 0,
+  // a link to a label whose name no read gave yet was drawn (reply.tsx chipOf): the session's timer reads the labels
+  wantLabels: false,
   sc: null as Scope | null,
   sig: null as Signature | null,
   busy: false,
@@ -163,6 +171,7 @@ export function termCard(cell: ThimbleCell, label: ThimbleLabel | null, rev: num
     ...(out ? { printed: out } : {}),
     ran: error || cell.status === 'error' ? 'error' : cell.status === 'ok' ? 'ok' : '',
     ...(checkOf(cell).state ? { check: checkOf(cell) } : {}),
+    ...(fixOf(cell) ? { fixed: fixOf(cell)! } : {}),
   }
 }
 
@@ -173,6 +182,7 @@ async function labelFor(cx: Ctx, id: string): Promise<ThimbleLabel | null> {
   const got = await readState(cx, rt.sc, 'label', [id])
   const l = got.ok ? labelOf(got.value) : null
   rt.labelRead.set(id, l)
+  if (l) noteLabelName(l.id, l.name)
   return l
 }
 
@@ -311,7 +321,14 @@ export async function resolveCitations(cx: Ctx, cs: readonly Citation[]): Promis
   const got = await readState(cx, rt.sc, 'resolve', [JSON.stringify(refs)])
   if (!got.ok) return
   const at = await cx.now()
-  for (const c of cs) await cx.setVerdict(cid(c.raw), verdictOf(c, resolutionOf(got.value, c.ref), at))
+  for (const c of cs) {
+    const res = resolutionOf(got.value, c.ref)
+    // a label's name and a document's title and passage, for a link to it that has no words (lib.ts chipLabel)
+    const meta = (res?.meta ?? {}) as { name?: unknown; title?: unknown }
+    if (res?.kind === 'concept') noteLabelName(String(res.concept_id ?? labelRef(c.ref)?.id ?? ''), typeof meta.name === 'string' ? meta.name : undefined)
+    if (res?.kind === 'report') noteDocPlace(c.ref, typeof meta.title === 'string' ? meta.title : undefined, typeof res.excerpt === 'string' ? res.excerpt : '')
+    await cx.setVerdict(cid(c.raw), verdictOf(c, res, at))
+  }
 }
 
 /** The verdicts of the cards' takeaways checked again, and of every citation of a card's value seen anywhere (main's
@@ -333,6 +350,9 @@ async function recheckCards(cx: Ctx, ids: readonly string[]): Promise<void> {
 export async function readSurface(cx: Ctx, key: string, surface: string, args: readonly string[] = []): Promise<void> {
   if (!rt.sc) return
   const got = await readState(cx, rt.sc, surface, args)
+  // the labels' names and the documents' titles, for a link to one that has no words (lib.ts chipLabel)
+  if (got.ok && key === 'labels') for (const l of labelsOf(got.value)) noteLabelName(l.id, l.name)
+  if (got.ok && key === 'docs') for (const d of docsOf(got.value)) noteDocPlace(`report:${d.slug}`, d.title)
   await cx.setSurface(key, got.ok ? { ok: true, value: got.value } : { ok: false, error: got.error })
 }
 
@@ -484,7 +504,10 @@ export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
     nav = moved(cur, nextTrail(cur.trail, step, await inPanel(cx), p.view === 'thread' ? await threadChain(cx, p, step) : [step]))
   }
   rt.navFrom = null
-  rt.panelFocus = '' // the view drawn next puts the focus ring where it starts (an autoFocus field), or nowhere
+  // the view drawn next puts the focus ring where it starts (an autoFocus field), or nowhere; a ring on the list's keys
+  // stays there while the next view draws them too (the file view drawn again at the line ↓ chose), so its hint row
+  // keeps them; giveKeys checks it
+  if (rt.panelFocus !== RELAY_PICK || p.view === 'ask') rt.panelFocus = ''
   await cx.setNav(nav)
   await cx.setPanel(p)
   void loadPanel(cx, p).then(() => cx.bumpPanel())
@@ -495,28 +518,65 @@ export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
     await cx.setPending(r.isPlaced ? null : { title })
     // with a draft in the prompt the keys stay there (Claude Code keeps the person's typing)
     if (r.isPlaced && (await cx.promptText().catch(() => '')).trim()) cx.toast('the prompt holds a draft, so it keeps the keys: click the panel to use its keys')
-    else if (r.isPlaced) giveKeys(cx, title)
+    else if (r.isPlaced) giveKeys(cx, title, p.view === 'ask' ? ASK_FIELD : RELAY_PICK)
   } catch (err) {
     cx.log(`thimble-term: could not open the panel: ${String(err).slice(0, 200)}`)
   }
 }
 
-/** The panel asks for the keys once more, a moment after it opened without them: an open from a press on the row above
- *  the prompt (the toast's `open ›`) is refused the keys while that row holds them, which go back to the prompt after
- *  the press (live check term-fix6, new quirk 4: home named its keys while a `q` went to the prompt). Asked again while
- *  the prompt holds them over an empty composer, Claude Code gives them; else the panel's hint row says how to give them
- *  (panel.tsx endHints). */
-function giveKeys(cx: Ctx, title: string): void {
-  cx.later(KEYS_AGAIN_MS, () => {
-    void (async () => {
-      const pane = (await cx.panes()).find(p => p.id === PANEL)
-      if (!pane?.isPlaced || pane.isFocused !== false || (await cx.promptText().catch(() => '')).trim()) return
-      const p = await cx.panel()
-      await cx.open({ id: PANEL, title: p ? paneTitle(p) : title, focus: true, columns: panelColumns() }).catch(() => undefined)
-      await cx.bumpPanel()
-    })()
-  })
+/** The panel asks for the keys once more a moment after it opened, once the press that opened it is over: an open from
+ *  a press on the row above the prompt (the toast's `open ›`) is refused the keys while that row holds them (live check
+ *  term-fix6, new quirk 4). Given them, its ring goes onto its list's keys (panel.tsx RELAY), which raises the
+ *  `ui.focus` that lets its hint row name them (live check term-fix7, quirk 2: ↓ moved the ring to `show all threads`
+ *  while the hint named ↑↓). Asked again while the prompt holds them over an empty composer, Claude Code gives them;
+ *  else the panel's hint row says how to give them (panel.tsx endHints). */
+function giveKeys(cx: Ctx, title: string, ringOn = RELAY_PICK): void {
+  const ask = async (last: boolean) => {
+    const pane = (await cx.panes()).find(p => p.id === PANEL)
+    if (!pane?.isPlaced) return
+    if (pane.isFocused !== false) {
+      // the ring onto the list's keys (a ring there already stays, and the call says so); a view that draws none leaves
+      // the ring where it is, off them. Neither raises a ui.focus (live check term-fix8, quirk 7)
+      // a new thread's field likewise: an open of a pane that holds the keys already is no take, so its `autoFocus` puts
+      // no ring there
+      if (rt.panelFocus && rt.panelFocus !== NO_RING && rt.panelFocus !== RELAY_PICK && rt.panelFocus !== ringOn) return
+      if ((await cx.focus(ringOn)) && rt.panelFocus !== ringOn) {
+        rt.panelFocus = ringOn
+        await cx.bumpPanel()
+      }
+      return
+    }
+    if (last || (await cx.promptText().catch(() => '')).trim()) return
+    const p = await cx.panel()
+    await cx.open({ id: PANEL, title: p ? paneTitle(p) : title, focus: true, columns: panelColumns() }).catch(() => undefined)
+    await cx.bumpPanel()
+    cx.later(KEYS_AGAIN_MS, () => void ask(true))
+  }
+  cx.later(KEYS_AGAIN_MS, () => void ask(false))
 }
+
+/** The keys back to the panel after a click on an empty part of a list, which gave them to the list's Client: its keys
+ *  then reach the list through the pane's own (panel.tsx RELAY), and the hint row can say so (live check term-fix7,
+ *  quirk 2: after such a click the list took ↓ while the hint said to click the panel). */
+export async function takeKeys(cx: Ctx): Promise<void> {
+  const p = await cx.panel()
+  if (!p) return
+  // typing that went to the prompt ends with a click on the panel: its list's keys are drawn again, and the ring goes
+  // onto them as after an open (giveKeys)
+  if (rt.typeThrough) {
+    rt.typeThrough = false
+    rt.panelFocus = NO_RING
+  }
+  await cx.open({ id: PANEL, title: paneTitle(p), focus: true, columns: panelColumns() }).catch(() => undefined)
+  await cx.bumpPanel()
+  giveKeys(cx, paneTitle(p))
+}
+
+// the relay's field (panel.tsx RELAY.pick), a new thread's question field (panel.tsx drawAsk) and the ring off every
+// element (register.tsx NO_FOCUS)
+const RELAY_PICK = 'keys-pick'
+const ASK_FIELD = 'ask-new'
+const NO_RING = '-'
 
 /** How long after an open the panel asks for the keys again (giveKeys). */
 const KEYS_AGAIN_MS = 120
@@ -562,10 +622,20 @@ export async function navBack(cx: Ctx): Promise<void> {
 }
 
 export async function openHome(cx: Ctx): Promise<void> {
+  // the cards made since home was last seen are new on it while it shows
+  rt.homeSince = (await cx.homeSeen())?.at ?? 0
   await openPanel(cx, { view: 'home', title: 'Home' })
   // what home holds now is seen: the row above the prompt shows only what arrives after
   const home = await cx.home()
-  if (home) await cx.setHomeSeen(home)
+  if (home) await seeHome(cx, home)
+}
+
+/** What home holds as seen: the row above the prompt counts what arrives after, in this session and after a relaunch
+ *  (kept.ts keeps it in the workspace: live check term-fix8, low quirk: the slides made before a quit and never opened
+ *  had no toast after the relaunch). */
+export async function seeHome(cx: Ctx, home: TermHome): Promise<void> {
+  await cx.setHomeSeen(home)
+  if (rt.sc) await keepSeen(cx, rt.sc.ws, home)
 }
 
 // ------------------------------------------------------------------------------------------------ threads
@@ -796,8 +866,14 @@ async function refreshHome(cx: Ctx): Promise<void> {
   if (rt.viewsBuiltBefore === null) rt.viewsBuiltBefore = new Set(views.filter(v => v?.status === 'built').map(v => String(v.slug)))
   const home = homeOf(got.value, await cx.now())
   await cx.setHome(home)
-  // the session's first count is what was there already: the row above the prompt shows only what comes after
-  if (home && !(await cx.homeSeen())) await cx.setHomeSeen(home)
+  if (!home) return
+  // what the workspace held when home was last seen, in this session or the one before a relaunch (kept.ts), else the
+  // session's first count: the row above the prompt shows only what comes after
+  const seen = (await cx.homeSeen()) ?? keptSeen()
+  // while home shows, what it holds is seen (the row above the prompt is hidden then)
+  const showing = (await cx.panel())?.view === 'home' && (await cx.panes()).some(x => x.id === PANEL && x.isPlaced)
+  if (!seen || showing) await seeHome(cx, home)
+  else if (!(await cx.homeSeen())) await cx.setHomeSeen(seen)
 }
 
 /** The ui.jsonl records past the last one followed, handed to `apply` in order. The first read follows none. */
@@ -827,7 +903,12 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
   }
   rt.busy = true
   try {
-    // the cards a drawing named and could not read while it drew (a drawing writes no state): read now
+    // the labels a link with no words names (reply.tsx chipOf), and the cards a drawing named and could not read while
+    // it drew (a drawing writes no state): read now
+    if (rt.wantLabels) {
+      rt.wantLabels = false
+      await readSurface(cx, 'labels', 'labels')
+    }
     if (rt.wanted.size) {
       const ids = [...rt.wanted]
       rt.wanted.clear()

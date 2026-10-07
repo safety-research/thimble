@@ -363,6 +363,20 @@ async def test_state_label_keeps_a_record_the_analyst_set_under_the_value_they_g
     assert f"no: {no_now}, yes: {yes_now}" in whole["excerpt"] and "1 record(s) the analyst set to another value" in whole["excerpt"]
     read = text(await call(term, "read_ref", ref=f"concept:{cid}"))
     assert f"no: {no_now}, yes: {yes_now}" in read and f"no: {given['no']}," not in read
+    # thimble.labels() says how many records the analyst set to another value, and its docstring that their verdicts
+    # override the label (live check term-fix8, quirk 5: a thread called the one row a verdict moved a thimble bug)
+    from app import kernel_thimble as kt
+
+    was = kt.WS
+    kt.WS = str(config.workspace_dir(CORPUS))
+    try:
+        listed_k = kt.labels()
+        assert list(listed_k.loc[listed_k["id"] == cid, "set_by_analyst"]) == [1]
+        df = kt.labels("bash")
+        assert df.attrs["set_by_analyst"] == 1 and len(df) == yes_now and moved in set(df["ref"])
+        assert "verdicts override the label" in (kt.labels.__doc__ or "")
+    finally:
+        kt.WS = was
 
 
 async def test_state_opens_says_which_files_open_as_a_transcript(term):

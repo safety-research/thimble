@@ -25,8 +25,43 @@ export type TableRuns = { rows: Run[][][]; align: ('left' | 'right' | 'center')[
 const FENCE_RE = /```[\s\S]*?```|`[^`\n]*`/g
 const LINK_RE = /(?<![\[!])\[([^\[\]\n]*)\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)/g
 const WEB_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|tel:)/i
-const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|card:[A-Za-z0-9_-]+(?:@[A-Za-z0-9_]+)?(?:#.*)?|concept:[A-Za-z0-9_-]+(?:\/[^\s()]+)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
+const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|card:[A-Za-z0-9_-]+(?:@[A-Za-z0-9_]+)?(?:#.*)?|concept:[A-Za-z0-9_-]+(?:\/[^\s()]+)?|report:[A-Za-z0-9_-]+(?:#p?[A-Za-z0-9_-]+)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
 const LABEL_REF = /^concept:([A-Za-z0-9_-]+)(?:\/(.+))?$/
+const REPORT_REF = /^report:([A-Za-z0-9_-]+)(?:#(p?[A-Za-z0-9_-]+))?$/
+
+/** A link to a document, or to one of its paragraphs (`p<id>`), sentences or headings (`report:<slug>#<unit>`): the
+ *  document's slug and the unit; null for any other ref. */
+export function reportRef(ref: string): { slug: string; unit: string } | null {
+  const m = REPORT_REF.exec(ref.trim())
+  return m ? { slug: m[1]!, unit: m[2] ?? '' } : null
+}
+
+// what names a label and a document's passage a reply links to without words, as their resolution (term.ts
+// resolveCitations) and the lists read named them: a label's name by its id; a document's title by its slug and a
+// passage's words by its ref
+const labelNames = new Map<string, string>()
+const docTitles = new Map<string, string>()
+const passages = new Map<string, string>()
+
+/** Whether thimble's agents list a running chat that follows a run of the label named `name` (a `labels` agent titled
+ *  `label <name>`): a run the session's own process holds, which `thimble state` does not show as the label's run. */
+export function labelRunning(agents: readonly { label: string; state: string; role: string }[], name: string): boolean {
+  return Boolean(name) && agents.some(a => a.role === 'labels' && a.state === 'running' && a.label === `label ${name}`)
+}
+
+/** A label's name, noted when the labels are read or a link to it resolves, so a link to it names it in words. */
+export function noteLabelName(id: string, name: string | undefined): void {
+  if (id && name) labelNames.set(id, name)
+}
+
+/** A document's title (by its slug) and a passage's words (by its ref), noted when a link to it resolves or the documents
+ *  are read, so a link to it names it in words. */
+export function noteDocPlace(ref: string, title: string | undefined, words = ''): void {
+  const r = reportRef(ref)
+  if (!r) return
+  if (title) docTitles.set(r.slug, title)
+  if (r.unit && words.trim()) passages.set(`report:${r.slug}#${r.unit}`, words.replace(/\s+/g, ' ').trim())
+}
 
 /** The kinds of a thread's `error` record that end its run as a stop, not a failure: the analyst's stop, and the Claude
  *  Code session that ended under it (backend threads.SESSION_ENDED, as when the analyst quits). */
@@ -115,7 +150,10 @@ export function citeSpans(text: string): { at: number; end: number }[] {
 }
 
 function linkCitation(shown: string, target: string): Citation | null {
-  const ref = target.trim().replaceAll('%20', ' ')
+  // a file's place with its spaces encoded (`my%20file.md#L3`) as the file names it; a label's value keeps its encoding,
+  // which labelRef decodes (`concept:<id>/mentions%20June`: live check term-fix9, it drew as its raw words)
+  const raw = target.trim()
+  const ref = raw.startsWith('concept:') ? raw : raw.replaceAll('%20', ' ')
   if (!ref || WEB_RE.test(ref) || shown.includes('|') || !REF_SHAPE.test(ref)) return null
   const s = shown.trim()
   return make(s === '' || s === '↗' ? null : s, ref)
@@ -222,6 +260,20 @@ export function outputLine(ref: string): { card: string; first: number; last: nu
  *  its question. */
 export function chipLabel(c: Citation): string {
   if (c.display !== null) return clip(c.display, 40)
+  // a label's link and a document's by their names, never their ids (live check term-fix8, quirk 3: `concept:eb534ca4`
+  // and `↗ (report:report#4255ef27)` showed in a reply)
+  const lr = labelRef(c.ref)
+  if (lr) {
+    const name = labelNames.get(lr.id)
+    return name ? `label ${quoted(clip(name, 32))}${lr.value ? ` ${lr.value}` : ''}` : `a label${lr.value ? `'s ${lr.value}` : ''}`
+  }
+  const rr = reportRef(c.ref)
+  if (rr) {
+    const words = rr.unit ? passages.get(`report:${rr.slug}#${rr.unit}`) : ''
+    if (words) return quoted(clip(words, 40))
+    const title = docTitles.get(rr.slug)
+    return title ? `${rr.slug === 'slides' ? 'slides' : rr.slug === 'story' ? 'story' : 'report'} ${quoted(clip(title, 32))}` : `the ${rr.slug}`
+  }
   const [base = '', frag = ''] = c.ref.split('#', 2)
   const card = bareCard(c)
   if (card) return cardWords(questionOf(card))
@@ -725,24 +777,55 @@ const MONTHS: Record<string, number> = Object.fromEntries(
   [['jan', 'january'], ['feb', 'february'], ['mar', 'march'], ['apr', 'april'], ['may'], ['jun', 'june'], ['jul', 'july'], ['aug', 'august'], ['sep', 'sept', 'september'], ['oct', 'october'], ['nov', 'november'], ['dec', 'december']].flatMap((names, i) => names.map(n => [n, i + 1])),
 )
 // a day and a month in words, as prose writes a date (`23 June`, `June 23`, `23rd June`, `Jun. 23`), with or without a
-// year; a date as an output writes it, ISO (`2026-06-23`, also at a time stamp's head) or month and day (`06-23`)
-const DAY_MONTH_RE = /^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?|([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?)(?:,?\s+(\d{4}))?$/i
+// year and a time after it (`4 June 2026 at 10:53:40 UTC`); a date as an output writes it, ISO (`2026-06-23`, also at a
+// time stamp's head) or month and day (`06-23`), and the time a stamp writes right after its date
+const DAY_MONTH_RE = /^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?|([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?)(?:,?\s+(\d{4}))?(?:,?\s+(?:at\s+)?(\d{1,2}:\d{2}(?::\d{2})?)(?:\s*(?:UTC|GMT|Z))?)?$/i
 const ISO_DATE_RE = /(?<![\d-])(?:(\d{4})-)?(\d{2})-(\d{2})(?![\d-])/g
+const STAMP_CLOCK_RE = /^[T ](\d{1,2}:\d{2}(?::\d{2})?)(?![\d:])/
+const CLOCK_RE = /(?<![\d:])(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?![\d:])/g
+
+/** The month, day, year and time of a shown value that is a day and a month in words (`23 June`, `4 June 2026 at
+ *  10:53:40 UTC`), or null for any other words (backend cite._date_words). */
+export function dayMonth(display: string): { month: number; day: number; year: number | null; clock: string | null } | null {
+  const m = DAY_MONTH_RE.exec(display.trim())
+  if (!m) return null
+  const [day, word] = m[1] ? [m[1], m[2]!] : [m[4]!, m[3]!]
+  const month = MONTHS[word.toLowerCase()]
+  if (!month || Number(day) < 1 || Number(day) > 31) return null
+  return { month, day: Number(day), year: m[5] ? Number(m[5]) : null, clock: m[6] ?? null }
+}
+
+/** Whether every clock time the shown value writes is one the text writes: the same hour and minute, the same second
+ *  when the value gives one (backend cite.clocks_in). */
+export function clocksIn(display: string, text: string): boolean {
+  const have = [...text.matchAll(CLOCK_RE)].map(c => [Number(c[1]), c[2], c[3] ?? ''] as const)
+  return [...display.matchAll(CLOCK_RE)].every(c => have.some(([h, mi, se]) => h === Number(c[1]) && mi === c[2] && (!c[3] || c[3] === se)))
+}
 
 /** Whether a shown value that is a day and a month in words (`23 June`) names a date the text writes as ISO
  *  (`2026-06-23`) or as month and day (`06-23`): the same month and day, the year too when both give one (backend
- *  cite.date_in; live check term-fix6, new quirk 7: `23 June` citing a cell `06-23` was red). */
+ *  cite.date_in; live check term-fix6, new quirk 7: `23 June` citing a cell `06-23` was red). A time after the date is
+ *  the time the stamp writes after that date, or with none there, a clock time of the text (live check term-fix7, new
+ *  quirk 1: `4 June 2026 at 10:53:40 UTC` against 2026-06-04T10:53:40Z was not found). */
 export function dateIn(display: string, text: string): boolean {
-  const m = DAY_MONTH_RE.exec(display.trim())
-  if (!m) return false
-  const [day, word] = m[1] ? [m[1], m[2]!] : [m[4]!, m[3]!]
-  const month = MONTHS[word.toLowerCase()]
-  if (!month || Number(day) < 1 || Number(day) > 31) return false
-  const year = m[5] ? Number(m[5]) : null
+  const want = dayMonth(display)
+  if (!want) return false
   for (const d of text.matchAll(ISO_DATE_RE)) {
-    if (Number(d[2]) === month && Number(d[3]) === Number(day) && (year === null || !d[1] || Number(d[1]) === year)) return true
+    if (Number(d[2]) !== want.month || Number(d[3]) !== want.day || (want.year !== null && d[1] && Number(d[1]) !== want.year)) continue
+    if (want.clock === null) return true
+    const stamp = STAMP_CLOCK_RE.exec(text.slice(d.index! + d[0].length))
+    if (clocksIn(want.clock, stamp ? stamp[1]! : text)) return true
   }
   return false
+}
+
+const STAMP_RE = /(?<![\d-])(?:\d{4}-)?\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?(?![\d-])/g
+
+/** Where a line writes in digits the date a shown value names in words (`23 June` at `2026-06-23`): each stamp dateIn
+ *  accepts, as [start, end], so a citation's panel marks the date it cites. */
+export function dateSpans(display: string, line: string): number[][] {
+  if (!dayMonth(display)) return []
+  return [...line.matchAll(STAMP_RE)].filter(m => dateIn(display, m[0])).map(m => [m.index!, m.index! + m[0].length])
 }
 
 /** Whether a shown value is in a text: a number must match a whole number of it, a day and a month in words a date it

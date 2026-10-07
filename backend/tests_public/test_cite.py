@@ -56,3 +56,79 @@ def test_a_citation_whose_value_is_the_link_arrow_is_a_bare_ref():
     assert cite.normalise_markup("on line 1063 of events.jsonl [[↗|events.jsonl#L1063]].") == "on line 1063 of events.jsonl [[events.jsonl#L1063]]."
     assert cite.normalise_markup("in [↗](events.jsonl#L3) and [[4|events.jsonl#L4]]") == "in [[events.jsonl#L3]] and [[4|events.jsonl#L4]]"
     assert cite.normalise_markup("[[a↗|x.jsonl#L1]]") == "[[a↗|x.jsonl#L1]]"
+
+
+def test_a_date_with_a_time_cites_the_time_stamp_that_writes_both():
+    """Live check term-fix7, new quirk 1: `4 June 2026 at 10:53:40 UTC` against a line holding 2026-06-04T10:53:40Z was
+    not found. A day and a month with a time after it is at a time stamp of that date with that time; another time, or a
+    time with no stamp of that date, is not."""
+    from app import verify
+
+    stamp = "2026-06-04T10:53:40Z TestFoobaAgent deleted"
+    for display, line in [("4 June 2026 at 10:53:40 UTC", stamp), ("4 June at 10:53", stamp), ("June 4, 2026, 10:53 UTC", stamp),
+                          ("4 June 2026 at 10:53:40", "2026-06-04 10:53:40"), ("4 June 2026, 10:53 GMT", "06-04 | 10:53:00")]:
+        assert verify._value_matches(display, line), (display, line)
+    for display, line in [("4 June 2026 at 10:53:41 UTC", stamp), ("4 June 2026 at 11:53 UTC", stamp),
+                          ("5 June 2026 at 10:53:40 UTC", stamp), ("4 June 2025 at 10:53 UTC", stamp),
+                          ("4 June 2026 at 10:53 UTC", "2026-06-04T09:00:00Z, then 2026-06-05T10:53:00Z")]:
+        assert not verify._value_matches(display, line), (display, line)
+
+
+def test_edit_card_keeps_a_date_in_words_its_cited_line_writes_in_digits():
+    """Live check term-fix7, new quirk 4: main cited `[[23 June|…@out0#L2]]` and `[[13 July|…#L6]]` in a takeaway, the
+    result said "NOT found in this card's outputs, 23, 13", and both links were dropped. A date in words is kept at a
+    line or a cell that writes the date in digits."""
+    from app import frames
+
+    out = [{"text/plain": "busiest days\n2026-06-23  602\n2026-07-13  512 at 2026-07-13T21:04:00Z"}]
+    r = cite.resolve("c1", "The busiest day was [[23 June|card:c1@out0#L2]], then [[13 July|card:c1@out0#L3]] at "
+                           "[[13 July 2026 at 21:04 UTC|card:c1@out0#L3]].", out)
+    assert r.annotated == ("The busiest day was [[23 June|card:c1@out0#L2]], then [[13 July|card:c1@out0#L3]] at "
+                           "[[13 July 2026 at 21:04 UTC|card:c1@out0#L3]].")
+    assert r.unresolved == []
+    f = frames.normalize({"columns": ["day", "n"], "rows": [["06-23", 602]], "index": "day"})
+    r = cite.resolve("c2", "On [[23 June|card:c2#day/06-23]].", [frames.bundle(f)])
+    assert r.annotated == "On [[23 June|card:c2#day/06-23]]." and r.unresolved == []
+    # a date the line does not write is still not found there
+    r = cite.resolve("c1", "On [[24 June|card:c1@out0#L2]].", out)
+    assert "[[24 June|" not in r.annotated
+
+
+def test_a_takeaways_value_at_the_row_its_words_name_stays_there():
+    """Live check term-fix7, new quirk 1, in a takeaway: a value cited at the row its words name, which shows another
+    value, stays at that row (named in `misplaced`), never moved to the one row that shows it."""
+    from app import frames
+
+    f = frames.normalize({"columns": ["hour", "deletions"], "rows": [["22:00", 40], ["23:00", 89]], "index": "hour"})
+    out = [frames.bundle(f)]
+    r = cite.resolve("c1", "A last [[89|card:c1#deletions/22:00]] in the 22:00 hour.", out)
+    assert r.annotated == "A last [[89|card:c1#deletions/22:00]] in the 22:00 hour."
+    assert [(l.token, l.ref) for l in r.misplaced] == [("89", "card:c1#deletions/22:00")]
+    r = cite.resolve("c1", "A last [[89|card:c1#deletions/22:00]] deletions.", out)
+    assert r.annotated == "A last [[89|card:c1#deletions/23:00]] deletions." and not r.misplaced
+
+
+def test_an_uncited_date_in_words_is_linked_whole_or_left_plain():
+    """Live check term-fix8, quirk 4: main wrote plain "On 23 June", and the check linked its `23` alone, with `June` as
+    its unit, to the agent's answer at 23:41 ("On 23 ✓ June"). A day and a month in words is one value: linked whole to
+    the one line or cell that writes that date in digits, else left plain; its day and its year are never numbers."""
+    from app import frames
+
+    out = [{"_stream": "stdout", "text/plain": "2026-06-22 deletes 40\n23 runs at 23:41 answered\n2026-06-24 deletes 7\n"}]
+    r = cite.resolve("c1", "On 23 June there were 40 deletes.", out)
+    assert r.annotated == "On 23 June there were 40 deletes." and "23 June" in r.unresolved and "23" not in r.unresolved
+    assert all("23" != link.token for link in r.links)
+    r = cite.resolve("c1", "By 24 June 2026 the deletes fell.", out)
+    assert r.annotated == "By [[24 June 2026|card:c1@out0#L3]] the deletes fell." and r.unresolved == []
+    r = cite.resolve("c1", "From June 22 on, and 4 June 2026 at 10:53 UTC.", out)
+    assert "[[June 22|card:c1@out0#L1]]" in r.annotated and "[[4|" not in r.annotated and "[[10|" not in r.annotated
+    # two places write the date: left plain, as an ambiguous number is, and not called missing
+    twice = [{"text/plain": "2026-06-23 20:00 deletes\n2026-06-23 23:41 answer\n"}]
+    r = cite.resolve("c1", "On 23 June they deleted.", twice)
+    assert r.annotated == "On 23 June they deleted." and r.unresolved == [] and not r.links
+    # a table's cell that writes the date
+    f = frames.normalize({"columns": ["day", "n"], "rows": [["06-23", 602], ["07-07", 522]], "index": "day"})
+    r = cite.resolve("c2", "The busiest was 23 June.", [frames.bundle(f)])
+    assert r.annotated == "The busiest was [[23 June|card:c2#day/06-23]]."
+    # `may` in lower case is the verb
+    assert [d[2] for d in cite.dates_in_text("3 may fail; May 3rd; 10 marches")] == ["May 3rd"]

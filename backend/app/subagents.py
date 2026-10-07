@@ -1499,6 +1499,8 @@ def hook_end(c: str, hook: dict[str, Any]) -> dict[str, Any]:
         return {"closed": []}
     closed = close_running(c, STOPPED_QUIT)
     session.main_quit(c, sid)
+    # the chats that followed its label runs, which the session's process ran (agents.end_left_label_chats)
+    closed += agents.end_left_label_chats(c)
     return {"closed": closed}
 
 

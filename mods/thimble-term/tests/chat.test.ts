@@ -560,3 +560,38 @@ test("a thimble tool's row draws a takeaway's own quotation marks curly, so Clau
   expect(drawn).toContain('"code":"print(\\"a\\")"')
   await row.unmount()
 })
+
+test("a takeaway's link to a label turns red once the label counts another number, its tip the count now with the verdicts", async ($, on) => {
+  // live check term-fix7, quirk 8: after one verdict the takeaway's 180 and 4,399 stayed blue beside bars of 179 / 4,400
+  const w = world(on)
+  Object.assign(w.cells.l0label0!, { takeaway: '[[5191|concept:d9b51617/proxy-link]] of [[14591|concept:d9b51617]] revisions link through a proxy.' })
+  Object.assign(w.states.labels[0]!, { verdicts: { counts: { none: 9401, 'proxy-link': 5190 }, set: 1 } })
+  await start($, w)
+  await turn($, w, [['r0', 'Labelled.']], { tool: 'mcp__plugin_thimble_thimble__apply_label', text: "The label's card is [[card:l0label0]].", input: {} })
+  const ui = (await $.ui.mount(MESSAGE('r0', 'Labelled.'))) as unknown as M
+  const chips = await chipsOf(ui, 'para-tk-t0-1')
+  expect(chips[0]).toMatchObject({ label: '5191', state: 'problem', mark: '' })
+  expect(chips[0]!.tip).toBe('the label counts 5,190 now, with your verdicts · opens the label at its value "proxy-link"')
+  // the records it labeled are still 14,591: blue
+  expect(chips[1]).toMatchObject({ label: '14591', state: 'link' })
+  await ui.unmount()
+})
+
+test("a date in words in main's reply is checked: one its place does not write is red, one it writes is found", async ($, on) => {
+  // live check term-fix7, new quirk 3: a wrong `[24 June](card:…#day/06-23)` was blue, "its value is not checked"
+  const w = world(on)
+  await start($, w)
+  w.resolve = { ...w.resolve, 'card:ff73e071#day/06-23': { ref: 'card:ff73e071#day/06-23', kind: 'cell', cell_id: 'ff73e071', excerpt: 'day × 06-23 = 06-23', meta: { span: { col: 'day', row: '06-23', value: '06-23' } } } }
+  const text = 'The busiest day was [24 June](card:ff73e071#day/06-23), not [23 June](card:ff73e071#day/06-23).'
+  await turn($, w, [['r1', text]])
+  let ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
+  await w.clock.advance(1100)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
+  const chips = await chipsOf(ui, 'para-1')
+  expect(chips[0]).toMatchObject({ label: '24 June', state: 'problem' })
+  expect(chips[0]!.tip).toContain('not found on the card')
+  expect(chips[1]).toMatchObject({ label: '23 June', state: 'link' })
+  expect(chips[1]!.tip).toBe('found on the card')
+  await ui.unmount()
+})

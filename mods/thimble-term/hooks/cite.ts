@@ -16,7 +16,7 @@
 import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from '../types'
 import { lineWidth, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, asReference, chipLabel, cid, citations, citeEnd, citeSpans, linksAsSpans, parseReply, placeOnly, plainLinks, prefix, shownMatches, valueIn, windowAt } from './lib'
+import { EMBED_RE, asReference, chipLabel, cid, citations, citeEnd, citeSpans, dayMonth, linksAsSpans, parseReply, placeOnly, plainLinks, prefix, shownMatches, valueIn, windowAt } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -76,10 +76,12 @@ export function chipSegs(c: ChipView, hover: boolean, _frame = 0): Seg[] {
 
 const NUMBER_RE = /^[-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?$/
 
-/** Whether a citation's words are a value its place can show, a number or a quote, as the resolver (refs.py) reads
- *  them. Other words, as in [[its revisions|revisions.jsonl#L5603-L5625]], name the place and show no value. */
+/** Whether a citation's words are a value its place can show, a number, a quote or a date in words (`23 June`, `4 June
+ *  2026 at 10:53 UTC`, which dateIn checks), as the resolver (refs.py) reads them; live check term-fix7, new quirk 3: a
+ *  wrong `[24 June](card:…#day/06-23)` was blue, "its value is not checked". Other words, as in
+ *  [[its revisions|revisions.jsonl#L5603-L5625]], name the place and show no value. */
 export function showsValue(display: string | null): boolean {
-  return display !== null && (NUMBER_RE.test(display.trim()) || quotedWords(display) !== '')
+  return display !== null && (NUMBER_RE.test(display.trim()) || quotedWords(display) !== '' || dayMonth(display) !== null)
 }
 
 /** The place a file citation names after its "#" (L5603-L5625, row=12, a JSON pointer, table/key), or '' for a whole

@@ -6,7 +6,7 @@
 // is left out rather than failing the drawing.
 import type { ChatThread, ChatThreadTurn, TermAgent, TermHome, TermThreadRow, TermVerdict } from '../types'
 import type { ThimbleCell, ThimbleLabel } from './cell'
-import { STOP_KINDS, clip, curlyQuotes, quoted, shownMatches, valueIn } from './lib'
+import { STOP_KINDS, clip, curlyQuotes, dateSpans, quoted, shownMatches, valueIn } from './lib'
 import type { Citation } from './lib'
 import { quotedWords, showsValue } from './cite'
 
@@ -48,6 +48,27 @@ export function labelOf(v: unknown): ThimbleLabel | null {
 export function labelsOf(v: unknown): ThimbleLabel[] {
   const list = Array.isArray(v) ? v : isObj(v) && Array.isArray(v.labels) ? v.labels : isObj(v) && Array.isArray(v.concepts) ? v.concepts : []
   return list.filter((c): c is Obj => isObj(c) && typeof c.id === 'string').map(withStats)
+}
+
+/** The count a link to a label shows now (`concept:<id>/<value>`; the label whole, `value` '', for the records it
+ *  labeled), with the analyst's verdicts, as the label card's bars read it; null when the label or the value is not
+ *  known. */
+export function labelCountNow(l: ThimbleLabel | null | undefined, value: string): number | null {
+  if (!l) return null
+  const counts = l.verdicts?.counts ?? l.label_stats?.counts
+  if (!counts) return null
+  if (!value) return l.label_stats?.n_labeled ?? Object.values(counts).reduce((a, b) => a + b, 0)
+  return value in counts ? counts[value]! : (l.labels ?? []).includes(value) ? 0 : null
+}
+
+/** What a takeaway's link to a label says when the label no longer counts its number (a verdict, or a run, changed the
+ *  counts): the count now, and that the verdicts are in it; '' when the number is the count, or no number (live check
+ *  term-fix7, quirk 8: after a verdict the takeaway's 180 and 4,399 stayed blue beside bars reading 179 and 4,400). */
+export function labelLinkStale(display: string | null, l: ThimbleLabel | null | undefined, value: string): string {
+  const now = labelCountNow(l, value)
+  if (now === null || display === null || !/^[-−]?(?:\d{1,3}(?:,\d{3})+|\d+)$/.test(display.trim())) return ''
+  if (shownMatches(display.trim(), String(now))) return ''
+  return `the label counts ${now.toLocaleString('en-US')} now${l?.verdicts?.set ? ', with your verdicts' : ''}`
 }
 
 /** The label a label card counts: its payload's concept, else the first label it carries. */
@@ -246,6 +267,9 @@ function spansIn(line: string, display: string | null): number[][] {
   const w = words.toLowerCase()
   for (let i = lower.indexOf(w); i >= 0 && out.length < 4; i = lower.indexOf(w, i + w.length)) out.push([i, i + w.length])
   if (out.length) return out
+  // a date in words (`23 June`) where the line writes it in digits (2026-06-23)
+  const dates = dateSpans(words, line)
+  if (dates.length) return dates.slice(0, 4)
   // a number written another way (3,908 against 3908): each number of the line that matches it
   for (const m of line.matchAll(/[-−]?\d[\d,]*(?:\.\d+)?%?/g)) if (shownMatches(m[0], words)) out.push([m.index!, m.index! + m[0].length])
   return out.slice(0, 4)

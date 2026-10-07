@@ -4,11 +4,12 @@
 import { expect, test } from 'claude-code/testing'
 
 import { changed, cliOf, launchMode, parsePrinted } from '../hooks/data'
-import { citations, stoppedTurn, valueIn } from '../hooks/lib'
+import { citations, dateIn, dateSpans, stoppedTurn, valueIn } from '../hooks/lib'
+import { showsValue } from '../hooks/cite'
 import { signalEnd } from '../hooks/signal'
 import { threadState } from '../hooks/nav'
 import { labelCard } from '../hooks/cell'
-import { agentsOf, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelIdOf, labelOf, labelsOf, namedForks, namedThreads, recordLine, resolutionOf, runShown, saysWriter, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from '../hooks/model'
+import { agentsOf, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelCountNow, labelIdOf, labelLinkStale, labelOf, labelsOf, namedForks, namedThreads, recordLine, resolutionOf, runShown, saysWriter, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from '../hooks/model'
 import { turnTimes, wrapRows } from '../hooks/draw'
 import { AGENTS, CELLS, RESOLVE, STATES, THREAD_T1, THREADS } from './fixtures'
 
@@ -277,4 +278,33 @@ test("main's fork of a thread runs with the thread's question as its description
 
 test("a thread about a whole answer is told the answer without main's own `↳` lines", () => {
   expect(withoutNotes('↳ The writer finished. You can read the report in thimble.\n\nThe page with the most revisions is A.')).toBe('The page with the most revisions is A.')
+})
+
+test("a day and a month with a time cite the time stamp that writes both; such a date is a value a citation shows", () => {
+  // live check term-fix7, new quirk 1: `4 June 2026 at 10:53:40 UTC` against 2026-06-04T10:53:40Z was not found
+  const stamp = '{"ts": "2026-06-04T10:53:40Z", "text": "Deleted TestFoobaAgent."}'
+  for (const d of ['4 June 2026 at 10:53:40 UTC', '4 June at 10:53', 'June 4, 2026, 10:53 UTC']) expect(dateIn(d, stamp)).toBe(true)
+  for (const d of ['4 June 2026 at 10:53:41 UTC', '4 June 2026 at 11:53 UTC', '5 June 2026 at 10:53:40 UTC']) expect(dateIn(d, stamp)).toBe(false)
+  expect(valueIn('4 June 2026 at 10:53:40 UTC', stamp)).toBe(true)
+  // the date marked where the line writes it
+  expect(dateSpans('4 June 2026 at 10:53:40 UTC', stamp)).toEqual([[8, 28]])
+  // live check term-fix7, new quirk 3: a date in words is a value, so main's replies check it (verdictOf)
+  for (const d of ['23 June', '4 June 2026 at 10:53 UTC', 'June 23']) expect(showsValue(d)).toBe(true)
+  expect(showsValue('its revisions')).toBe(false)
+  const v = verdictOf(citations('[[24 June|card:c1#day/06-23]]')[0]!, { ref: 'card:c1#day/06-23', kind: 'cell', cell_id: 'c1', excerpt: 'day × 06-23 = 06-23', meta: { span: { col: 'day', row: '06-23', value: '06-23' } } } as never)
+  expect(v.status).toBe('differs')
+  expect(v.why).toBe('the place shows 06-23')
+})
+
+test("a link to a label says when the label counts another number now: the count with the verdicts", () => {
+  const label = { id: 'k1', labels: ['yes', 'no'], label_stats: { n_labeled: 4579, counts: { yes: 180, no: 4399 } }, verdicts: { counts: { yes: 179, no: 4400 }, set: 1 } } as never
+  expect(labelCountNow(label, 'yes')).toBe(179)
+  expect(labelCountNow(label, '')).toBe(4579)
+  expect(labelCountNow(label, 'maybe')).toBeNull()
+  expect(labelLinkStale('180', label, 'yes')).toBe('the label counts 179 now, with your verdicts')
+  expect(labelLinkStale('4,400', label, 'no')).toBe('')
+  expect(labelLinkStale('4,579', label, '')).toBe('')
+  // words, or a label it does not know, say nothing
+  expect(labelLinkStale('most', label, 'yes')).toBe('')
+  expect(labelLinkStale('3', null, 'yes')).toBe('')
 })

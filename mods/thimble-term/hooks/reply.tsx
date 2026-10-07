@@ -24,12 +24,14 @@ import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
 import type { Target } from './gestures'
-import { asReference, bareCard, cardWords, chipLabel, cid, citations, clip, curlyQuotes, embeddedCards, labelRef, mdPieces, noteQuestion, outputLine, parseReply, placeOnly, questionOf, quoted, sectionsOf } from './lib'
+import { asReference, bareCard, cardWords, chipLabel, cid, citations, clip, curlyQuotes, embeddedCards, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, placeOnly, questionOf, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, paintLines } from './paint'
+import { labelLinkStale, labelsOf } from './model'
 import { loadCards, queueCitations, rt } from './term'
 import type { Ctx } from './ctx'
+import type { ThimbleLabel } from './cell'
 
 /** The columns left of a reply's blocks: ⏺, a space, the reply's margin ("?" on hover, a passage's ↳), a space. */
 export const MARGIN = 4
@@ -170,9 +172,18 @@ export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefine
 /** A citation as its link draws: its label, red with a problem, ◌ ✓ or × after it from thimble's links check of the
  *  card whose takeaway it is in (`card`), and its tip (its status in plain words, and why for a problem). */
 export async function chipOf(cx: Ctx, c: Citation, card?: string): Promise<ChipView> {
-  // a label's link (`[33](concept:<id>/yes)`): blue, no check, a click opens the label at its value
+  // a label's link (`[33](concept:<id>/yes)`): blue, no check, a click opens the label at its value; in a card's
+  // takeaway, red once the label counts another number (a verdict changed the counts), its tip the count now
   const lr = labelRef(c.ref)
-  if (lr) return { label: citeLabel(c), state: 'link', mark: '', spin: false, tip: lr.value ? `opens the label at its value ${quoted(lr.value)}` : 'opens the label' }
+  if (lr) {
+    const opens = lr.value ? `opens the label at its value ${quoted(lr.value)}` : 'opens the label'
+    // its name, for a link with no words of its own (lib.ts chipLabel); the labels read when no drawing read them yet
+    const now = await labelNow(cx, lr.id)
+    if (now?.name) noteLabelName(lr.id, now.name)
+    else if (!now) rt.wantLabels = true
+    const stale = card ? labelLinkStale(c.display, now, lr.value) : ''
+    return { label: citeLabel(c), state: stale ? 'problem' : 'link', mark: '', spin: false, tip: stale ? `${stale} · ${opens}` : opens }
+  }
   const v = await cx.verdict(cid(c.raw))
   const check = card ? linkCheck((await cx.card(card))?.links, c) : {}
   const look = chipLook(v?.status ?? 'pending', undefined, check.state)
@@ -180,6 +191,14 @@ export async function chipOf(cx: Ctx, c: Citation, card?: string): Promise<ChipV
   const why = problem ? await plainWhy(cx, v?.why ?? '') : check.state === 'refuted' && check.why ? await plainWhy(cx, check.why) : ''
   const tip = [await citeStatus(cx, c, v, check), why].filter(Boolean).join(' · ')
   return { label: citeLabel(c), ...look, tip }
+}
+
+/** A label as thimble-term last read it: the one a label card read (term.ts labelFor), else the labels list's. */
+async function labelNow(cx: Ctx, id: string): Promise<ThimbleLabel | null> {
+  const read = rt.labelRead.get(id)
+  if (read) return read
+  const list = (await cx.surface('labels')) as { ok: boolean; value?: unknown } | undefined
+  return list?.ok ? (labelsOf(list.value).find(l => l.id === id) ?? null) : null
 }
 
 /** A file URL for a citation's place: a file of the folder, or the group file that holds a card. */
@@ -519,7 +538,9 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
     const name = opts.in === 'report' ? 'this card' : opts.order ? `card ${opts.order}` : 'the card'
     return <Text color={COLORS.problem} wrap="wrap">{`× ${name} cannot be drawn: ${tc.error || 'the card is not in this workspace'}`}</Text>
   }
-  const data = await withQuotes(cx, tc.data as CardData)
+  let data = await withQuotes(cx, tc.data as CardData)
+  // a label with no run yet whose run is going (a chat follows it): `◌ labeling`, not `not run yet`
+  if (data.kind === 'label' && !(data.rows ?? []).length && data.note && data.label && labelRunning((await cx.agents()) ?? [], data.label.name)) data = { ...data, note: '◌ labeling' }
   const meta = { ...(tc.busy ? { busy: tc.busy } : {}), ...(tc.error ? { error: tc.error } : {}) }
   const inner = Math.max(10, w - 4)
   const rows: RenderElement[] = []
@@ -534,11 +555,23 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
     rows.push(<Box flexDirection="column">{paintLines(Box, Text, [...(opts.pane ? [] : [[{ s: cut(data.question, inner), b: true }], []]), ...body, ...state, ...labelHead(data, inner).lines])}</Box>)
   }
   if (opts.takeaway !== false && tc.takeaway.trim()) rows.push(<Box flexDirection="column" width={inner}>{await drawReply(cx, e, tc.takeaway, inner, { margin: 0, prefix: `tk-${key}-`, card: id })}</Box>)
+  // the card check rewrote it: a dim note says which parts and why (live check term-fix8, low quirk: it rewrote a
+  // takeaway with nothing in the chat saying so)
+  if (tc.fixed) rows.push(<Text key={`fixed-${key}`} dimColor wrap="wrap">{fixedNote(tc.fixed)}</Text>)
   return (
     <Box flexDirection="column" width={w} borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
       {rows}
     </Box>
   )
+}
+
+/** What the card check's rewrite of a card changed, in words, and why: `the card check rewrote its takeaway: …`. */
+export function fixedNote(f: { fields: string[]; why: string }): string {
+  const names: Record<string, string> = { takeaway: 'takeaway', title: 'question', code: 'code' }
+  const parts = f.fields.map(x => names[x] ?? x)
+  const which = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]!
+  const why = f.why.replace(/\s+/g, ' ').trim().replace(/[.]$/, '')
+  return `the card check rewrote its ${which}${why ? `: ${why}` : ''}`
 }
 
 /** The cards a turn made, under its last reply, on the reply's text column (4), border to border: the border stands in

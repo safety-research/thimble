@@ -406,6 +406,10 @@ export function labelCard(cell: ThimbleCell, label: ThimbleLabel | null): CardDa
       return { ref: r.ref!, quote: String(r.text ?? ''), note: '', value, why: String(r.rationale ?? ''), set, ...(set && r.label && r.label !== value ? { was: String(r.label) } : {}) }
     })
   const paths = run?.paths ?? (label.glob ? label.glob.split(/,\s*/).filter(Boolean) : [])
+  const info = { slug: label.id, name: label.name ?? label.id, kind: label.kind ?? '', values, labeled, total, trial: Boolean(label.trial), paths }
+  // a label with no run says so, as home and its panel do, with no bars and no counts (live check term-fix8, quirk 8:
+  // the card a stopped thread left showed yes 0, no 0 and all 0)
+  if (!run) return { ...card, question: card.question || label.name || '', x: 'value', y: label.unit ?? 'record', rows: [], examples: [], note: 'not run yet', label: info }
   return {
     ...card,
     question: card.question || label.name || '',
@@ -414,7 +418,7 @@ export function labelCard(cell: ThimbleCell, label: ThimbleLabel | null): CardDa
     rows,
     total: labeled,
     examples,
-    label: { slug: label.id, name: label.name ?? label.id, kind: label.kind ?? '', values, labeled, total, trial: Boolean(label.trial), paths },
+    label: info,
   }
 }
 
@@ -446,6 +450,17 @@ export function busyWords(cell: ThimbleCell): string {
 
 /** How the card's latest check stands: `pending`, `ok`, `fixed`, `error` or `stopped` ('' when none ran), and why it
  *  ended in an error or a stop. */
+/** The card check's latest rewrite of a card that stands (its last `fixes` entry, `applied`): the parts it rewrote and
+ *  why; null when it rewrote none. */
+export function fixOf(cell: ThimbleCell): { fields: string[]; why: string } | null {
+  const fixes = (cell as { fixes?: unknown }).fixes
+  const last = Array.isArray(fixes) ? fixes.filter(f => f && typeof f === 'object' && (f as { state?: unknown }).state === 'applied').at(-1) : null
+  if (!last) return null
+  const f = last as { fields?: unknown; reason?: unknown }
+  const fields = Array.isArray(f.fields) ? f.fields.filter((x): x is string => typeof x === 'string') : []
+  return fields.length ? { fields, why: typeof f.reason === 'string' ? f.reason.trim() : '' } : null
+}
+
 export function checkOf(cell: ThimbleCell): { state: string; why: string } {
   const c = cell.check
   if (typeof c === 'string') return { state: c, why: '' }

@@ -1960,7 +1960,9 @@ export function cardLayout(card: CardData, cols: number, hover: number, plotRows
     case 'bar':
       return barLayout(card, cols, hover)
     case 'label':
-      // a label card is a bar card of its label's counts; its records live in the label panel
+      // a label card is a bar card of its label's counts; its records live in the label panel; a label with no run says
+      // so, dim after the not-started glyph, as home draws it
+      if (!(card.rows ?? []).length && card.note) return { lines: [card.note.startsWith('◌') ? [{ s: card.note }] : [{ s: '○ ', fg: COLORS.dim }, { s: card.note, fg: COLORS.dim }]], items: [], hit: () => -1 }
       return barLayout(card, cols, hover)
     case 'line':
       return lineLayout(card, cols, hover, plotRows)

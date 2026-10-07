@@ -29,11 +29,11 @@ import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
-import { HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
+import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, outputLine, quoted, recordFields, stoppedTurn, windowAt } from './lib'
+import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, labelRunning, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
-import { linesEl } from './lines'
+import { linesEl, takeListKeys } from './lines'
 import type { LineHit } from './lines'
 import { docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
 import type { DocFigure, DocSection, DocSentence } from './model'
@@ -41,7 +41,7 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, closePanel, inPanelNow, navBack, navGo, openHome, openPanel, panelOfStep, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
+import { PANEL, closePanel, inPanelNow, loadCards, navBack, navGo, openHome, openPanel, panelOfStep, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -112,6 +112,20 @@ export async function openDoc(cx: Ctx, slug: string, title: string): Promise<voi
   await openPanel(cx, { view: 'doc', title: d?.title || title || slug, slug })
 }
 
+/** A document opened at the section, slide or beat that holds `unit` (a sentence's, a heading's or a paragraph's id,
+ *  `p<id>`), from a link to it (`report:<slug>#<unit>`). */
+async function openDocAt(cx: Ctx, slug: string, unit: string): Promise<void> {
+  await readSurface(cx, `doc:${slug}`, 'doc', [slug])
+  const got = await surfaceValue<Obj>(cx, `doc:${slug}`)
+  const doc = got?.ok ? got.value : {}
+  const holds = (u: DocSection) => u.id === unit || (u.paragraphs ?? []).some(p => p.id === unit || `p${p.id}` === unit || (p.sentences ?? []).some(x => x.id === unit))
+  const at = unit ? docUnits(doc).units.findIndex(holds) : -1
+  const docs = await surfaceValue(cx, 'docs')
+  const d = docs?.ok ? docsOf(docs.value).find(x => x.slug === slug) : undefined
+  if (d) rt.docsKnown.set(slug, d.generation)
+  await openPanel(cx, { view: 'doc', title: d?.title || str(doc.title) || slug, slug, ...(at > 0 ? { start: at } : {}) })
+}
+
 /** A view's line in the panel: the browser draws views. Opened, it is no longer new. */
 export async function openView(cx: Ctx, slug: string, name: string): Promise<void> {
   rt.viewsSeen.add(slug)
@@ -133,6 +147,9 @@ export async function openCite(cx: Ctx, ref: string, display: string | null, mor
   // a label's link: the label's panel at the value it names (live check term-fix5, new quirk 2)
   const lr = labelRef(ref)
   if (lr) return openLabelAt(cx, lr.id, lr.value)
+  // a document's link: the document, from the section that holds the passage
+  const rr = reportRef(ref)
+  if (rr) return openDocAt(cx, rr.slug, rr.unit)
   // its step in the path: its words cut at a word; for a place cited with no words, the short place the reply draws
   // (`agent-chat:2`), since the path row has no room for the place in words
   const c = { raw: '', ref, display }
@@ -141,6 +158,9 @@ export async function openCite(cx: Ctx, ref: string, display: string | null, mor
 }
 
 export async function openCard(cx: Ctx, id: string, mode = ''): Promise<void> {
+  // its step named by its question: a card no drawing read yet (one a side thread made) is read first (live check
+  // term-fix8, low quirk: the path read `card "Card"` on its first open)
+  if (!(await cx.card(id))?.data) await loadCards(cx, [id]).catch(() => undefined)
   const tc = await cx.card(id)
   await openPanel(cx, { view: 'card', title: clip((tc?.data as CardData | undefined)?.question ?? 'Card', 60), card: id, ...(mode ? { mode } : {}) })
 }
@@ -200,9 +220,12 @@ export async function onGesture(cx: Ctx, _gesture: Gesture, t: Target): Promise<
 
 // ------------------------------------------------------------------------------------------------ the frame
 
-/** Hotkeys with no label of their own (rule 26: the key-hint row says them): plain Buttons in a Box no row tall. */
+/** Hotkeys with no label of their own (rule 26: the key-hint row says them): plain Buttons in a Box no row tall. Each
+ *  is kept by its letter too, for the list's keys (listKeysEl), whose field takes the letters while it holds the ring;
+ *  none is drawn while the panel's typing goes to the prompt (typeThrough), so the next letter reaches it. */
 function hiddenKeys(cx: Ctx, e: PaneEvent, keys: Key[]): RenderElement | null {
-  if (!keys.length || e.surface === 'mobile') return null
+  for (const k of keys) hotkeysDrawing.set(k.hotkey, k.onPress)
+  if (!keys.length || e.surface === 'mobile' || rt.typeThrough) return null
   const { Box, Button } = cx.els(e)
   return (
     <Box key="hidden-keys" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
@@ -211,6 +234,14 @@ function hiddenKeys(cx: Ctx, e: PaneEvent, keys: Key[]): RenderElement | null {
       ))}
     </Box>
   )
+}
+
+/** A Button's hotkey prop (`hotkey` for its key), kept by its letter for the list's keys as hiddenKeys keeps one: none
+ *  for a Button past the first nine, or while the panel's typing goes to the prompt. */
+function hotkeyOf(hotkey: string | null, onPress: () => void): { hotkey?: string } {
+  if (!hotkey) return {}
+  hotkeysDrawing.set(hotkey, onPress)
+  return rt.typeThrough ? {} : { hotkey }
 }
 
 /** What a step of the path says: a lower-case kind word and its name, or the name alone after the list it is in. */
@@ -272,7 +303,9 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
     const upTrail = nav.trail.slice(0, i + skipped)
     if (up) crumbs.push({ text: up.view === 'docs' ? 'documents' : up.view, mark: '', up: true, go: () => void navGo(cx, { trail: [...upTrail, stepOf(up)], back: withBack(nav.back, nav.trail) }) })
     const t = s.view === 'thread' ? threads.find(x => x.id === s.thread) : undefined
-    crumbs.push({ text: crumbText(s), mark: t?.running ? '◌' : t?.unread ? 'new' : '', go: () => void navGo(cx, { trail: nav.trail.slice(0, i + 1 + skipped), back: withBack(nav.back, nav.trail) }), here: i === steps.length - 1 })
+    // a card's step taken before the card was read names it by its question once it is
+    const card = s.view === 'card' && s.title === 'Card' ? ((await cx.card(panelOfStep(s)?.card ?? ''))?.data as CardData | null | undefined) : null
+    crumbs.push({ text: crumbText(card?.question ? { ...s, title: clip(card.question, 60) } : s), mark: t?.running ? '◌' : t?.unread ? 'new' : '', go: () => void navGo(cx, { trail: nav.trail.slice(0, i + 1 + skipped), back: withBack(nav.back, nav.trail) }), here: i === steps.length - 1 })
   }
   const marksW = crumbs.reduce((n, c) => n + (c.mark ? c.mark.length + 1 : 0), 0)
   const fitted = fitCrumbs(['home', ...crumbs.map(c => c.text)], Math.max(12, cols - (back ? 8 : 0) - tailW - marksW))
@@ -301,6 +334,7 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
       {inThreads ? null : <Button key="threads" label="show all threads" plain onPress={showAll} />}
       {!inThreads && fresh ? <Text color={FRESH}>{`  ${fresh} new`}</Text> : null}
       {hiddenKeys(cx, e, [...(back ? [{ key: 'back', hotkey: 'b', onPress: () => void navBack(cx) }] : []), ...(inThreads ? [] : [{ key: 'threads', hotkey: 't', onPress: showAll }]), { key: 'close', hotkey: 'x', onPress: () => void closePanel(cx) }])}
+      {listKeysEl(cx, e)}
     </Box>
   )
 }
@@ -351,6 +385,223 @@ function codeRows(cx: Ctx, e: PaneEvent, source: string, max = 400, language = '
 let wayHints: string[] = ['x to close']
 // whether the pane holds the keys as it is drawn (its `isFocused`)
 let paneFocused = true
+// the key handler of the list the view draws (lines.tsx takeListKeys), which the panel's own keys reach (listKeysEl)
+let listRelay: ((k: string) => Promise<void> | void) | null = null
+// the panel's hotkeys by their letters, as the drawing shown last bound them (hiddenKeys, hotkeyOf), and as the one being
+// drawn does
+let hotkeys = new Map<string, () => void>()
+let hotkeysDrawing = new Map<string, () => void>()
+// the list's own keys besides ↑↓ and Enter, as the view's hint row names them (endHints): Space folds, Backspace goes
+// back; as the drawing shown last named them, and as the one being drawn does
+let listExtra = { space: false, backspace: false }
+let listExtraDrawing = { space: false, backspace: false }
+
+/** The panel's own keys for the list a view draws (live checks term-fix7, quirk 2, and term-fix8, quirks 1, 2 and 7). A
+ *  list is drawn by a Client, and a Client takes keys only from a click, which leaves the pane without them, so the
+ *  list's keys are the pane's: an Input between two Buttons, all no row tall, the ring on the Input (`autoFocus`). While
+ *  an Input holds the ring Claude Code moves the ring at ↑ and ↓ and never scrolls the pane, so the `ui.focus` hook
+ *  (register.tsx) turns a move onto either Button into ↑ or ↓ for the list and keeps the ring where it is; Enter submits
+ *  the Input; a letter, a digit or Space goes into it, and its change is that key (relayInput): the panel's hotkey by its
+ *  letter, Space for the list where its hint names it, any other key typing for the prompt (typeThrough). ←, →, the page
+ *  keys, Home and End reach no element while an Input holds the ring, so the hint row never names them. The Input holds
+ *  a mark of its own, drawn anew after each key, so a Backspace changes it too. */
+export const RELAY = { up: 'keys-up', pick: 'keys-pick', down: 'keys-down' } as const
+const RELAY_KEYS: readonly string[] = Object.values(RELAY)
+// the two marks the relay's Input holds in turn: drawing the other one gives it that text again (Claude Code keeps
+// what the person typed until the hook draws another value)
+const MARKS = ['\u200b', '\u200c'] as const
+// the mark drawn last, whether a key came since (the next drawing draws the other one), and the text last seen
+let relayMark = 0
+let relayFlip = false
+let relayLast = ''
+
+/** The key a move of the panel's focus ring onto `element` stands for while it rests on the relay's Input (`up`,
+ *  `down`), `park` for a move onto a neighbour from elsewhere (the ring goes to the Input), or '' for any other move. */
+export function relayMove(from: string, element: string | undefined): 'up' | 'down' | 'park' | '' {
+  if (element !== RELAY.up && element !== RELAY.down) return ''
+  if (from !== RELAY.pick) return 'park'
+  return element === RELAY.up ? 'up' : 'down'
+}
+
+/** A key for the list the panel shows now, from the panel's own keys (the relay); false when it shows none. */
+export async function relayKey(k: string): Promise<boolean> {
+  if (!listRelay) return false
+  await listRelay(k)
+  return true
+}
+
+/** What the person typed into the relay's Input, from its text now (`value`) and the text seen last (`last`): each
+ *  character, or `backspace` when the text got shorter. Its text starts as the mark drawn; a key typed before the next
+ *  drawing adds to what is there. */
+export function relayTyped(value: string, last: string): string[] {
+  const mark = (v: string) => (v && (MARKS as readonly string[]).includes(v[0]!) ? v[0]! : '')
+  const m = mark(value)
+  const before = mark(last) === m && m ? last : m
+  if (value.length < before.length || (!m && !value)) return ['backspace']
+  return [...value.slice(before.length)]
+}
+
+/** The mark the relay's Input holds as drawn now, for the tests. */
+export function relayValue(): string {
+  return MARKS[relayMark]!
+}
+
+/** A change of the relay's Input: each key typed is the panel's hotkey by its letter or digit, Space or Backspace for
+ *  the list where its hint names them, else typing meant for the prompt (typeThrough). The Input is drawn again with
+ *  the other mark, so its next change starts afresh. */
+export async function relayInput(cx: Ctx, value: string): Promise<void> {
+  const typed = relayTyped(value, relayLast)
+  relayLast = value
+  relayFlip = true
+  for (const ch of typed) {
+    if (rt.typeThrough) {
+      if (ch !== 'backspace') await cx.fill(ch)
+      continue
+    }
+    if (ch === 'backspace') {
+      if (listExtra.backspace) await relayKey('backspace')
+      continue
+    }
+    if (ch === ' ' && listExtra.space) {
+      await relayKey('space')
+      continue
+    }
+    const run = hotkeys.get(ch)
+    if (run) {
+      run()
+      continue
+    }
+    await typeThrough(cx, ch)
+  }
+  await cx.bumpPanel()
+}
+
+/** Enter on the relay's Input: Enter for the list. */
+export async function relaySubmit(cx: Ctx): Promise<void> {
+  relayLast = ''
+  relayFlip = true
+  if (!rt.typeThrough) await relayKey('return')
+  await cx.bumpPanel()
+}
+
+/** A key the panel does not bind, typed while its list held the keys: it goes to the prompt, as Claude Code sends a
+ *  pane's unbound letter there. Until the prompt has the keys (the next key the person types, which no element and no
+ *  hotkey of the panel takes now) the panel draws neither the relay nor its hotkeys, and its hint row says to click it
+ *  for its keys; a move of its ring or a click gives them back (register.tsx, term.ts takeKeys). */
+async function typeThrough(cx: Ctx, ch: string): Promise<void> {
+  rt.typeThrough = true
+  rt.panelFocus = NO_RING
+  await cx.fill(ch)
+}
+
+// the ring on no element (register.tsx NO_FOCUS)
+const NO_RING = '-'
+
+// the pane's body rows as the drawing measured them (0: not known, and no list is cut)
+let bodyRows = 0
+// the list the drawing cut to the pane's rows (windowList), and the one the drawing shown last cut, which the wheel moves
+let windowed = ''
+let shownWindow = ''
+// each cut list's first row shown, the row the keys chose then, how many rows it has and shows, and whether the wheel
+// or a click on a count row moved it since the choice last moved (`free`), by the list's key
+const windowTops = new Map<string, { top: number; at: number; len: number; room: number; free: boolean }>()
+
+/** The rows of a cut list that `top` leaves for the list's own lines: a dim row counts the lines above, another those
+ *  below. */
+function windowFit(top: number, len: number, room: number): { up: number; down: number; n: number } {
+  const up = top > 0 ? 1 : 0
+  let n = room - up
+  const down = top + n < len ? 1 : 0
+  n -= down
+  return { up, down, n }
+}
+
+/** A list's lines cut to `room` rows so that its chosen line (`at`, -1 for none) shows, the hits moved with them: a
+ *  list taller than its pane pushed the chosen row and the hint row out of view, and ↑↓ scrolled the pane instead of
+ *  choosing (live check term-fix8, quirk 1). The wheel and a click on a count row move the rows shown (wheelWindow)
+ *  until the choice moves again; the lines cut off above and below are counted on a dim row each, which a click moves
+ *  by a page. A list that fits, or a pane whose rows are not known, is drawn whole. */
+export function windowList(key: string, lines: Line[], hits: LineHit[], at: number, room: number, bump: () => Promise<void>): { lines: Line[]; hits: LineHit[] } {
+  windowed = key
+  const len = lines.length
+  if (room < 5 || len <= room) {
+    windowTops.delete(key)
+    return { lines, hits }
+  }
+  const last = len - room + 1
+  const prev = windowTops.get(key)
+  const free = Boolean(prev?.free && prev.at === at)
+  let top = Math.max(0, Math.min(prev?.top ?? 0, last))
+  if (at >= 0 && !free) {
+    for (let i = 0; i < 3; i++) {
+      const f = windowFit(top, len, room)
+      if (at < top) top = at
+      else if (at >= top + f.n) top = at - f.n + 1
+      else break
+      top = Math.max(0, Math.min(top, last))
+    }
+  }
+  windowTops.set(key, { top, at, len, room, free })
+  const f = windowFit(top, len, room)
+  const page = Math.max(1, f.n - 1)
+  const move = (to: number) => async () => {
+    const cur = windowTops.get(key)
+    if (cur) windowTops.set(key, { ...cur, top: Math.max(0, Math.min(to, last)), free: true })
+    await bump()
+  }
+  const out: Line[] = []
+  const outHits: LineHit[] = []
+  if (f.up) {
+    const words = `↑ ${num(top)} more`
+    outHits.push({ y: 0, x0: MARGIN_W + 2, x1: MARGIN_W + 2 + width(words), row: false, run: move(top - page) })
+    out.push(pointed([{ s: '  ' }, dim(words)], false))
+  }
+  out.push(...lines.slice(top, top + f.n))
+  for (const h of hits) if (h.y >= top && h.y < top + f.n) outHits.push({ ...h, y: h.y - top + f.up })
+  if (f.down) {
+    const words = `↓ ${num(len - top - f.n)} more`
+    outHits.push({ y: out.length, x0: MARGIN_W + 2, x1: MARGIN_W + 2 + width(words), row: false, run: move(top + page) })
+    out.push(pointed([{ s: '  ' }, dim(words)], false))
+  }
+  return { lines: out, hits: outHits }
+}
+
+/** The wheel over the panel while it shows a cut list: the list's rows move by `by`, the choice where it is; false when
+ *  the panel shows no cut list. */
+export function wheelWindow(by: number): boolean {
+  const cur = shownWindow ? windowTops.get(shownWindow) : undefined
+  if (!cur || !by) return false
+  const top = Math.max(0, Math.min(cur.top + by, cur.len - cur.room + 1))
+  windowTops.set(shownWindow, { ...cur, top, free: true })
+  return true
+}
+
+function listKeysEl(cx: Ctx, e: PaneEvent): RenderElement | null {
+  if (!listRelay || e.surface === 'mobile' || rt.typeThrough) return null
+  const { Box, Button, Input } = cx.els(e)
+  const key = (k: string) => () => void relayKey(k)
+  if (relayFlip) {
+    relayMark = 1 - relayMark
+    relayFlip = false
+  }
+  return (
+    <Box key="list-keys" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
+      <Button key={RELAY.up} label="↑" plain onPress={key('up')} />
+      <Input key={RELAY.pick} value={MARKS[relayMark]} autoFocus onInput={v => void relayInput(cx, v)} onSubmit={() => void relaySubmit(cx)} />
+      <Button key={RELAY.down} label="↓" plain onPress={key('down')} />
+    </Box>
+  )
+}
+
+/** Whether the panel's focus ring rests on its list's keys (the relay), as the last `ui.focus` put it. */
+function listKeysHeld(): boolean {
+  return paneFocused && !rt.typeThrough && RELAY_KEYS.includes(rt.panelFocus)
+}
+
+// a list's keys, which the relay passes on while the ring rests on it: ↑↓, Enter, Space and Backspace; ← and → reach no
+// element of a pane, nor do the page keys while the relay's Input holds the ring
+const LIST_HINT = /^(?:↑↓|←|→|Enter |Space |Backspace |PgUp|PgDn)/
+const UNRELAYED_HINT = /^(?:←|→|PgUp|PgDn)/
 
 // the panel's text fields by their keys, with what Enter does in each
 const FIELD_KEYS: [RegExp, string][] = [
@@ -366,15 +617,23 @@ export function focusedField(key: string): string {
 
 /** A view's key hints with the way's after them, as bound now (rule 26: the hint row names only keys bound on it).
  *  While a text field holds the focus a letter goes into the field, so the hints are what Enter does there and that
- *  Esc leaves it. */
+ *  Esc leaves it. The list's Space and Backspace are bound as the view names them. */
 function endHints(hints: readonly string[], autoFocus = ''): string[] {
+  listExtraDrawing = { space: hints.some(h => h.startsWith('Space ')), backspace: hints.some(h => h.startsWith('Backspace ')) }
   // while the prompt holds the keys (Esc left a field, or a click on the prompt), a letter or Enter goes to the prompt,
-  // and Enter would send it to main: no key of the panel's is named, only how to give the panel the keys
-  if (!paneFocused) return [UNFOCUSED_HINT]
+  // and Enter would send it to main: no key of the panel's is named, only how to give the panel the keys; so too while
+  // the panel's typing goes to the prompt (typeThrough)
+  if (!paneFocused || rt.typeThrough) return [UNFOCUSED_HINT]
   // `autoFocus`: the view's field that takes the ring as it opens, before any ui.focus says where the ring is
   const field = focusedField(rt.panelFocus || autoFocus)
   if (field) return [field, 'Esc to leave the field']
-  return [...hints.filter(h => h !== 'b to go back' && h !== 'x to close'), ...wayHints]
+  // a list's keys only while the ring rests on them (listKeysHeld): until a ui.focus says so, ↑↓ walk the panel's
+  // buttons and Enter presses the one the ring is on
+  const held = listKeysHeld()
+  const own = hints
+    .map(h => (h === 'Enter or a to ask' && !held ? 'a to ask' : h))
+    .filter(h => h !== 'b to go back' && h !== 'x to close' && !(held ? UNRELAYED_HINT : LIST_HINT).test(h))
+  return [...own, ...wayHints]
 }
 
 /** The hint row while the panel does not hold the keys. */
@@ -445,8 +704,8 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
   const canvas = await surfaceValue<Obj>(cx, 'canvas')
   const groups = canvas?.ok && Array.isArray(canvas.value.groups) ? (canvas.value.groups as unknown[]).filter(isObj) : []
   const cells = canvas?.ok && Array.isArray(canvas.value.cells) ? (canvas.value.cells as unknown[]).filter(isObj) : []
-  // a group by what it holds: a side thread's cards, a document's figures, or a group main named
-  const cardOf = (c: Obj) => ({ id: str(c.id), kind: str(c.kind) || 'code', question: str(c.title) || 'a card' })
+  // a card made since home was last seen is new on it (openHome)
+  const cardOf = (c: Obj) => ({ id: str(c.id), kind: str(c.kind) || 'code', question: str(c.title) || 'a card', ...(rt.homeSince && madeAt(c) > rt.homeSince ? { fresh: true } : {}) })
   // a group by what it holds: a side thread's cards, a document's figures, or a group main named; a card no listed
   // group holds under `other cards`, last
   // a side thread's group by the thread's first question, as everywhere a thread is named (its title is a slug)
@@ -465,6 +724,8 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
     cells.map(cardOf),
   )
   const labelsRaw = await surfaceValue(cx, 'labels')
+  // a run the session's own process holds shows only as the chat that follows it (lib.ts labelRunning)
+  const agents = (await cx.agents()) ?? []
   const labels: HomeLabel[] = labelsRaw?.ok
     ? labelsOf(labelsRaw.value).map(l => ({
         slug: l.id,
@@ -475,12 +736,49 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
         counts: l.verdicts?.counts ?? l.label_stats?.counts ?? {},
         values: l.labels ?? Object.keys(l.label_stats?.counts ?? {}),
         paths: (l.glob ?? '').split(/,\s*/).filter(Boolean),
-        running: (l.last_run?.status ?? '') === 'running',
+        running: (l.last_run?.status ?? '') === 'running' || labelRunning(agents, l.name ?? ''),
+        // the panel's rule (`not run yet` with no last run and no application)
+        ran: Boolean(l.last_run ?? l.applications?.at(-1)),
       }))
     : []
   const files: HomeFile[] = filesOf(await surfaceValue(cx, 'files')).map(f => ({ file: f.path, records: null, size: f.size, seen: 0, state: 'listed', ranges: [], kind: fileType(f.path, f.kind, rt.opens.get(f.path)?.as) }))
   const root = (await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'
   return { views, reports, threads, cardGroups, labels, files, coverage: homeRaw?.ok ? str(homeRaw.value.coverage) : '', root }
+}
+
+/** When a card was made (ms), as the canvas lists it. */
+function madeAt(c: Obj): number {
+  return Date.parse(str(c.created_ts) || str(c.ts)) || 0
+}
+
+/** Home opened from the row above the prompt (its `open ›`): the group that holds the first new card unfolded (its
+ *  section shown whole when the group is past the first few), the choice on that card; with no new card, on the first
+ *  new document, view or label (live check term-fix8, quirk 6: the new card stood folded, the choice on an old row). */
+export async function openHomeNew(cx: Ctx): Promise<void> {
+  const seen = await cx.homeSeen()
+  const since = seen?.at ?? 0
+  await Promise.all([readSurface(cx, 'canvas', 'cards', ['--since', new Date(0).toISOString()]), readSurface(cx, 'labels', 'labels'), readSurface(cx, 'docs', 'docs')])
+  const canvas = await surfaceValue<Obj>(cx, 'canvas')
+  const cells = canvas?.ok && Array.isArray(canvas.value.cells) ? (canvas.value.cells as unknown[]).filter(isObj) : []
+  const fresh = new Set(cells.filter(c => since && madeAt(c) > since).map(c => str(c.id)))
+  const d = await homeData(cx)
+  let ui = (await cx.homeUi()) as HomeUi
+  const without = (xs: string[], x: string) => xs.filter(y => y !== x)
+  const gi = d.cardGroups.findIndex(g => g.cards.some(c => fresh.has(c.id)))
+  if (gi >= 0) {
+    const g = d.cardGroups[gi]!
+    const fold = `cards:${g.from}:${g.head}`
+    ui = { ...ui, folded: without(ui.folded, fold), unfolded: [...without(ui.unfolded, fold), fold], pick: `card:${g.cards.find(c => fresh.has(c.id))!.id}`, more: gi >= HOME_FIRST && !ui.more.includes('cards') ? [...ui.more, 'cards'] : ui.more }
+  } else {
+    const r = d.reports.find(x => x.fresh)
+    const v = d.views.find(x => x.fresh)
+    const newLabels = seen ? Math.max(0, d.labels.length - seen.labels) : 0
+    const l = newLabels ? d.labels[d.labels.length - newLabels] : undefined
+    const pick = v ? `view:${v.slug}` : r ? `report:${r.slug}` : l ? `label:${l.slug}` : ''
+    if (pick) ui = { ...ui, pick }
+  }
+  await cx.setHomeUi(ui)
+  await openHome(cx)
 }
 
 // the home panel's last layout, which a key steps through
@@ -495,13 +793,13 @@ async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const ui = (await cx.homeUi()) as HomeUi
   // its keys named only while it holds them, as every view's (endHints; live check term-fix6, new quirk 4: home opened
   // from the toast named its keys while they went to the prompt)
-  const lay = homeLayout(await homeData(cx), ui, cols, paneFocused ? HOME_HINTS : [UNFOCUSED_HINT])
+  const lay = homeLayout(await homeData(cx), ui, cols, endHints(HOME_HINTS))
   homeLast = lay
   const run = (a: HomeAct) => async () => {
     if (a.op === 'open') await homeOpen(cx, a.open)
     else await cx.setHomeUi(homeReduce((await cx.homeUi()) as HomeUi, a))
   }
-  const hits: LineHit[] = lay.hits.map(h => ({
+  const allHits: LineHit[] = lay.hits.map(h => ({
     y: h.y,
     x0: h.x0,
     x1: h.x1,
@@ -511,6 +809,14 @@ async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       await run(h.act)()
     },
   }))
+  // the sections cut to the pane's rows around the chosen row, the title, its rule and the hint row kept (windowList):
+  // the path row, the title, the rule and the hint row take four rows
+  const pick = ui.pick || lay.picks[0]?.key || ''
+  const pickY = lay.hits.find(h => h.pick === pick)?.y ?? -1
+  const last = lay.lines.length - 1
+  const win = windowList('home', lay.lines.slice(2, last), allHits.filter(h => h.y >= 2 && h.y < last).map(h => ({ ...h, y: h.y - 2 })), pickY - 2, bodyRows - 4, () => cx.bumpPanel())
+  const lines = [...lay.lines.slice(0, 2), ...win.lines, lay.lines[last]!]
+  const hits: LineHit[] = [...allHits.filter(h => h.y < 2), ...win.hits.map(h => ({ ...h, y: h.y + 2 })), ...allHits.filter(h => h.y === last).map(h => ({ ...h, y: lines.length - 1 }))]
   const onKey = async (k: string) => {
     const cur = (await cx.homeUi()) as HomeUi
     const l = homeLast
@@ -522,7 +828,7 @@ async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     const next = homePick(l, cur, k)
     if (next !== cur.pick) await cx.setHomeUi({ ...cur, pick: next })
   }
-  return <Box flexDirection="column">{linesEl(cx, e, marginKey('home'), lay.lines, hits, cols + MARGIN_W, onKey)}</Box>
+  return <Box flexDirection="column">{linesEl(cx, e, marginKey('home'), lines, hits, cols + MARGIN_W, onKey)}</Box>
 }
 
 async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
@@ -1095,7 +1401,13 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
   const t = selected ? threads.find(x => x.id === selected) : undefined
   const running = t?.turns.at(-1)?.state === 'running'
   const askKey = t ? `ask-${cid(t.id)}` : ''
-  const focusAsk = () => (askKey ? cx.focus(askKey) : undefined)
+  // the module's own move of the ring raises no ui.focus: the hint row names the field's keys once the ring is there
+  // (live check term-fix8, quirk 7: the hint still named b while a typed b went into the field)
+  const focusAsk = async () => {
+    if (!askKey || !(await cx.focus(askKey))) return
+    rt.panelFocus = askKey
+    await cx.bumpPanel()
+  }
   const step = async (d: number) => {
     if (!order.length) return
     const at = order.findIndex(x => x.id === selected)
@@ -1538,8 +1850,10 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const { lines, hits } = listLines(
     ls.map(l => {
       const n = Object.values(l.label_stats?.counts ?? {}).reduce((a, b) => a + b, 0)
-      const run = l.trial ? `a sample of ${num(n)}` : `all ${num(n)}`
-      return { key: l.id, glyph: { s: (l.last_run?.status ?? '') === 'running' ? '◌' : '●' }, name: l.name ?? l.id, right: [dim(`${l.kind ?? ''} · ${run}`)], run: () => openLabel(cx, l.id, l.name ?? l.id) }
+      // a label with no run says so, as home, its panel and its card do
+      const ran = Boolean(l.last_run ?? l.applications?.at(-1))
+      const run = !ran ? 'not run yet' : l.trial ? `a sample of ${num(n)}` : `all ${num(n)}`
+      return { key: l.id, glyph: (l.last_run?.status ?? '') === 'running' ? { s: '◌' } : ran ? { s: '●' } : dim('○'), name: l.name ?? l.id, right: [dim(`${l.kind ?? ''} · ${run}`)], run: () => openLabel(cx, l.id, l.name ?? l.id) }
     }),
     pick,
     cols,
@@ -1549,10 +1863,14 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     labelPick = ls[Math.max(0, Math.min(ls.length - 1, at + d))]?.id ?? ''
     return cx.bumpPanel()
   }
-  body.push(linesEl(cx, e, marginKey('labels-list'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openLabel(cx, pick, ls.find(x => x.id === pick)?.name ?? pick) : undefined)))
+  const win = windowList('labels-list', lines, hits, ls.findIndex(x => x.id === pick), bodyRows - 4 - body.length, () => cx.bumpPanel())
+  body.push(linesEl(cx, e, marginKey('labels-list'), win.lines, win.hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openLabel(cx, pick, ls.find(x => x.id === pick)?.name ?? pick) : undefined)))
   body.unshift(
     <Box key="label-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
-      {ls.map((l, i) => <Button key={`label-open-${i}`} label={l.name ?? l.id} plain {...(i < 9 ? { hotkey: String(i + 1) } : {})} onPress={() => void openLabel(cx, l.id, l.name ?? l.id)} />)}
+      {ls.map((l, i) => {
+        const go = () => void openLabel(cx, l.id, l.name ?? l.id)
+        return <Button key={`label-open-${i}`} label={l.name ?? l.id} plain {...hotkeyOf(i < 9 ? String(i + 1) : null, go)} onPress={go} />
+      })}
     </Box>,
   )
   const field = e.surface === 'mobile' ? null : fieldRow(cx, e, 'describe a new label', <Input key="lbs-describe" submitLabel="make it" onSubmit={v => void (v.trim() ? cx.submit(`Make a label with apply_label and try it on a sample of 30: ${v.trim()}`) : undefined)} />, 'lbs-new')
@@ -1587,11 +1905,12 @@ async function drawDocs(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     docPick = docs[Math.max(0, Math.min(docs.length - 1, at + k))]?.slug ?? ''
     return cx.bumpPanel()
   }
-  body.push(linesEl(cx, e, marginKey('docs-list'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? open(docs.find(d => d.slug === pick)!) : undefined)))
+  const win = windowList('docs-list', lines, hits, docs.findIndex(d => d.slug === pick), bodyRows - 2 - body.length, () => cx.bumpPanel())
+  body.push(linesEl(cx, e, marginKey('docs-list'), win.lines, win.hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? open(docs.find(d => d.slug === pick)!) : undefined)))
   body.unshift(
     <Box key="doc-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
       {docs.map((d, i) => (
-        <Button key={`doc-open-${i}`} label={d.title} plain {...(i < 9 ? { hotkey: String(i + 1) } : {})} onPress={() => void open(d)} />
+        <Button key={`doc-open-${i}`} label={d.title} plain {...hotkeyOf(i < 9 ? String(i + 1) : null, () => void open(d))} onPress={() => void open(d)} />
       ))}
     </Box>,
   )
@@ -1701,12 +2020,12 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
     body.push(<Box key={marginKey(`doc-unit-${i}`)} flexDirection="column">{await drawUnit(u, i, form === 'story' ? stepFocus(u) : undefined)}</Box>)
     const notes = str((u as { notes?: unknown }).notes)
     if (form === 'slides' && notes && p.mode === 'notes') body.push(<Box key="doc-notes" flexDirection="column" marginTop={1}><Text bold>Notes</Text><Text wrap="wrap">{notes}</Text></Box>)
-    // the page row: ‹ and › a click away, ← → once it has the keys
+    // the page row: ‹ and › a click away (p and n are its keys)
     const pageWords = `${i + 1} of ${units.length}`
     const pageLine: Line = [{ s: '‹', fg: i > 0 ? LINK : COLORS.dim }, { s: `  ${pageWords}  ` }, { s: '›', fg: i < units.length - 1 ? LINK : COLORS.dim }]
     const prev = () => (i > 0 ? at(i - 1) : undefined)
     const next = () => (i < units.length - 1 ? at(i + 1) : undefined)
-    body.push(<Box key="doc-page" marginTop={1}>{linesEl(cx, e, 'doc-page', [pageLine], [{ y: 0, x0: 0, x1: 1, row: false, run: prev }, { y: 0, x0: width(pageWords) + 5, x1: width(pageWords) + 6, row: false, run: next }], cols, k => (k === 'left' || k === 'pageup' ? prev() : k === 'right' || k === 'pagedown' || k === 'space' || k === ' ' ? next() : undefined))}</Box>)
+    body.push(<Box key="doc-page" marginTop={1}>{linesEl(cx, e, 'doc-page', [pageLine], [{ y: 0, x0: 0, x1: 1, row: false, run: prev }, { y: 0, x0: width(pageWords) + 5, x1: width(pageWords) + 6, row: false, run: next }], cols)}</Box>)
     controls.push(i > 0 ? <Button key="doc-prev" label="previous" plain onPress={() => void prev()} /> : null, i < units.length - 1 ? <Button key="doc-next" label="next" plain onPress={() => void next()} /> : null)
     keys.push({ key: 'prev', hotkey: 'p', onPress: () => void prev() }, { key: 'next', hotkey: 'n', onPress: () => void next() })
     hints.push('p n to step')
@@ -1896,6 +2215,7 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const order: string[] = []
   const dirOf = new Map<string, string>()
   const pick = ui.pick && files.some(f => f.path === ui.pick) ? ui.pick : ''
+  let pickY = -1
   const choose = (path: string) => async () => {
     const cur = await cx.filesUi()
     if (cur.pick === path) return openFile(cx, path)
@@ -1926,6 +2246,7 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     // each file's name at A4, with no dot, as home lists it: the type column names its type
     for (const f of shown) {
       const name = middleCut(f.path.slice(dir.length), Math.max(8, cols - 4 - kindW - sizeW - 6))
+      if (f.path === pick) pickY = lines.length
       hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(f.path) })
       lines.push(pointed(spread([{ s: '    ' }, { s: name }], right(f), cols), f.path === pick, true))
       order.push(f.path)
@@ -1961,26 +2282,32 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     }
     return undefined
   }
-  body.push(linesEl(cx, e, marginKey('files-tree'), lines, hits, cols + MARGIN_W, onKey))
+  // the chosen file: its name, what it opens as, its first lines, as many of six as leave the tree eight rows in a
+  // short pane (the path row, the header, the column names, the rule, the name and the hint row aside)
+  const preview: RenderElement[] = []
+  const firstLines = bodyRows ? Math.max(0, Math.min(6, bodyRows - 1 - body.length - 2 - 2 - 8)) : 6
+  if (pick) {
+    const page = await surfaceValue<Obj>(cx, `file:${pick}:1`)
+    const as = page?.ok ? opensAs(page.value) : page && !page.ok ? '' : ''
+    preview.push(ruleEl(els, cols, 'rule-preview'))
+    preview.push(lineEl(els, spread([{ s: pick }], as ? [dim(`opens as ${as}`)] : [], cols), 'preview-name'))
+    if (page?.ok && !page.value.binary) {
+      const ls = rawLines(page.value).slice(0, firstLines)
+      const gw = Math.max(1, ...ls.map(l => String(l.n).length))
+      for (const l of ls) preview.push(<Text key={`preview-${l.n}`} wrap="truncate-end"><Text dimColor>{`${String(l.n).padStart(gw + 2)}  `}</Text><Text>{cutLine(l.text, Math.min(160, cols - gw - 4)) || ' '}</Text></Text>)
+    }
+    if (page && !page.ok) preview.push(<Text key="preview-err" color={COLORS.problem} wrap="truncate-end">{`× ${page.error}`}</Text>)
+    if (!page) preview.push(<Text key="preview-wait" dimColor>◌ reading</Text>)
+  }
+  // the tree cut to the rows the path row, the header, the preview and the hint row leave, its column names kept
+  const win = windowList('files', lines.slice(1), hits.map(h => ({ ...h, y: h.y - 1 })).filter(h => h.y >= 0), pickY - 1, bodyRows - 1 - body.length - preview.length - 2, () => cx.bumpPanel())
+  body.push(linesEl(cx, e, marginKey('files-tree'), [lines[0]!, ...win.lines], win.hits.map(h => ({ ...h, y: h.y + 1 })), cols + MARGIN_W, onKey))
   body.unshift(
     <Box key="file-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
       {files.map((f, i) => <Button key={`file-open-${i}`} label={f.path} plain onPress={() => void openFile(cx, f.path)} />)}
     </Box>,
   )
-  // the chosen file: its name, what it opens as, its first lines
-  if (pick) {
-    const page = await surfaceValue<Obj>(cx, `file:${pick}:1`)
-    const as = page?.ok ? opensAs(page.value) : page && !page.ok ? '' : ''
-    body.push(ruleEl(els, cols, 'rule-preview'))
-    body.push(lineEl(els, spread([{ s: pick }], as ? [dim(`opens as ${as}`)] : [], cols), 'preview-name'))
-    if (page?.ok && !page.value.binary) {
-      const ls = rawLines(page.value).slice(0, 6)
-      const gw = Math.max(1, ...ls.map(l => String(l.n).length))
-      for (const l of ls) body.push(<Text key={`preview-${l.n}`} wrap="truncate-end"><Text dimColor>{`${String(l.n).padStart(gw + 2)}  `}</Text><Text>{cutLine(l.text, Math.min(160, cols - gw - 4)) || ' '}</Text></Text>)
-    }
-    if (page && !page.ok) body.push(<Text key="preview-err" color={COLORS.problem} wrap="wrap">{`× ${page.error}`}</Text>)
-    if (!page) body.push(<Text key="preview-wait" dimColor>◌ reading</Text>)
-  }
+  body.push(...preview)
   body.push(hintsRow(els, ['↑↓ to choose', 'Enter to open', 'Space to fold'], cols))
   return <Box flexDirection="column">{body}</Box>
 }
@@ -2062,7 +2389,7 @@ function cellText(v: unknown): string {
 /** A file (SPEC.md, "The file browser", a file): its name as the title; under it its kind, its records and the
  *  lines shown of how many, `earlier  later` at R; the tabs `Table  Transcript  Raw` as its records read (1 2 3); the
  *  record chosen (a citation's, a click's, ↑↓) on the selection background, its place a link and a blue `?` under the
- *  view; ← or Backspace back to the file browser. Raw: each line's number right-aligned in a dim column, a Markdown
+ *  view; Backspace back to the file browser. Raw: each line's number right-aligned in a dim column, a Markdown
  *  file's headings bold. Transcript: per turn its time dim, a ● in the speaker's hue, the speaker bold, the words under
  *  the name up to three rows, a tool call one dim line. Table: the records' keys as columns, a click on one sorts. */
 async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
@@ -2127,6 +2454,8 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const lineNs: number[] = []
   const lines: Line[] = []
   const hits: LineHit[] = []
+  // the first line of the chosen record, which the cut keeps in view (windowList)
+  let chosenY = -1
   const gw = Math.max(1, ...ls.map(l => String(l.n).length))
   if (!ls.length) {
     if (!page.binary) body.push(none(cx, e))
@@ -2140,12 +2469,14 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       if (when.day) lines.push(pointed([dim(when.day)], false))
       const y = lines.length
       if (t.tool) {
+        if (t.n === chosen) chosenY = y
         lines.push(pointed([...(tw ? [{ s: ' '.repeat(tw + 2) }] : []), dim(`  ⎿ ${cut(t.text, Math.max(10, cols - tw - 8))}`)], false))
         hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(t.n) })
         lineNs.push(t.n)
         continue
       }
       const hue = COLORS.series[speakers.indexOf(t.who) % COLORS.series.length]!
+      if (t.n === chosen) chosenY = y
       lines.push(pointed([...(tw ? [dim(`${cut(when.clock, tw).padEnd(tw)}  `)] : []), { s: '●', fg: hue }, { s: ' ' }, { s: t.who, b: true }], t.n === chosen, true))
       const room = Math.max(10, cols - (tw ? tw + 2 : 0) - 2)
       // the words under the name, up to three rows
@@ -2191,6 +2522,7 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     })
     lines.push(pointed(headLine, false))
     for (const r of rows) {
+      if (r.n === chosen) chosenY = lines.length
       hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(r.n) })
       lines.push(pointed(r.cells.flatMap((v, k): Seg[] => [...(k ? [{ s: '  ' }] : []), { s: cellSeg(cellText(v), k) }]), r.n === chosen, true))
       lineNs.push(r.n)
@@ -2203,6 +2535,7 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       if (md && !l.text.trim()) continue
       const head = md && /^#{1,6}\s/.test(l.text)
       const text = cutLine(l.text, Math.max(10, cols - gw - 2)) || ' '
+      if (l.n === chosen) chosenY = lines.length
       hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(l.n) })
       const line: Line = [dim(`${String(l.n).padStart(gw)}  `), l.n === chosen ? { s: text, bg: COLORS.selected } : { s: text, ...(head ? { b: true } : {}) }]
       lines.push(pointed(line, false))
@@ -2221,7 +2554,7 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   if (lines.length) {
     const at = chosen ? lineNs.indexOf(chosen) : -1
     const onKey = (k: string) => {
-      if (k === 'left' || k === 'backspace' || k === 'delete') return back()
+      if (k === 'backspace' || k === 'left' || k === 'delete') return back()
       if ((k === 'up' || k === 'k' || k === 'down' || k === 'j') && lineNs.length) {
         const d = k === 'up' || k === 'k' ? -1 : 1
         return choose(lineNs[Math.max(0, Math.min(lineNs.length - 1, at < 0 ? 0 : at + d))]!)()
@@ -2230,11 +2563,16 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       if (k === 'tab') return openPanel(cx, { ...p, mode: modes[(modes.indexOf(mode) + 1) % modes.length]! })
       return undefined
     }
-    body.push(linesEl(cx, e, marginKey('file-body'), lines, hits, cols + MARGIN_W, onKey))
+    // the lines cut to the rows the path row, the header, the chosen record's row and the hint row leave (live check
+    // term-fix8, quirk 1: ↓ scrolled the header away and chose no line), a table's column names kept
+    const fixed = mode === 'table' ? 1 : 0
+    const win = windowList(`file:${path}`, lines.slice(fixed), hits.map(h => ({ ...h, y: h.y - fixed })).filter(h => h.y >= 0), chosenY - fixed, bodyRows - 2 - body.length - fixed, () => cx.bumpPanel())
+    body.push(linesEl(cx, e, marginKey('file-body'), [...lines.slice(0, fixed), ...win.lines], [...hits.filter(h => h.y < fixed), ...win.hits.map(h => ({ ...h, y: h.y + fixed }))], cols + MARGIN_W, onKey))
   }
   // the tabs by their digits
   const keys: Key[] = modes.length > 1 ? modes.map((m, i) => ({ key: `tab${i}`, hotkey: String(i + 1), onPress: () => void openPanel(cx, { ...p, mode: m }) })) : []
-  body.push(...bottomRows(cx, e, cols, [], [], [...(modes.length > 1 ? [`${modes.map((_m, i) => i + 1).join(' ')} for the tabs`] : []), '↑↓ to choose', '← for the files']))
+  // Backspace goes back to the file browser: ← reaches no element of a pane (listKeysEl)
+  body.push(...bottomRows(cx, e, cols, [], [], [...(modes.length > 1 ? [`${modes.map((_m, i) => i + 1).join(' ')} for the tabs`] : []), '↑↓ to choose', 'Enter to open', 'Backspace for the files']))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
@@ -2302,7 +2640,8 @@ async function drawViews(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     viewPick = vs[Math.max(0, Math.min(vs.length - 1, at + d))]?.slug ?? ''
     return cx.bumpPanel()
   }
-  body.push(linesEl(cx, e, marginKey('views-list'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? open(vs.find(v => v.slug === pick)!) : undefined)))
+  const win = windowList('views-list', lines, hits, vs.findIndex(v => v.slug === pick), bodyRows - 2 - body.length, () => cx.bumpPanel())
+  body.push(linesEl(cx, e, marginKey('views-list'), win.lines, win.hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? open(vs.find(v => v.slug === pick)!) : undefined)))
   // each view a press away by its key too, for a surface that draws no Client: no row of its own
   body.unshift(
     <Box key="view-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
@@ -2343,6 +2682,15 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   // the keys as the pane's props and the engine's record say: a pane either says is without them names none of its keys
   // (an open the engine refused the keys, live check term-fix6, new quirk 4)
   paneFocused = pe.props.isFocused !== false && (await cx.panes()).find(x => x.id === PANEL)?.isFocused !== false
+  // typing meant for the prompt ends once the prompt has the keys: the relay is drawn again for the next time the pane
+  // takes them (relayInput, typeThrough)
+  if (!paneFocused) rt.typeThrough = false
+  bodyRows = pe.props.scroll?.bodyRows || 0
+  // the list this drawing draws, read off its drawing (lines.tsx), for the relay in its path row (listKeysEl)
+  takeListKeys()
+  hotkeysDrawing = new Map()
+  listExtraDrawing = { space: false, backspace: false }
+  windowed = ''
   const body = await (async () => {
     switch (p.view) {
       case 'home':
@@ -2379,6 +2727,11 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
         return none(cx, e)
     }
   })()
-  return withWay(cx, e, p.view, body)
+  listRelay = takeListKeys()
+  const tree = await withWay(cx, e, p.view, body)
+  hotkeys = hotkeysDrawing
+  listExtra = listExtraDrawing
+  shownWindow = windowed
+  return tree
 }
 

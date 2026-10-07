@@ -44,10 +44,13 @@ export const HOME_UI_EMPTY: HomeUi = { folded: [], unfolded: [], more: [], pick:
 export type HomeView = { slug: string; name: string; state: string; words: string; files: string[]; unit: string; drawable: boolean; left: number; at: number; fresh?: boolean }
 export type HomeReport = { slug: string; title: string; form: string; state: string; cards: number; tools: number; at: number; fresh?: boolean }
 export type HomeThread = { id: string; title: string; about: string; words: string; tone: string; unread: number; earlier: boolean; at: number }
-export type HomeCard = { id: string; kind: string; question: string }
+/** `fresh`: made since home was last opened, `new` in green at R as every new item. */
+export type HomeCard = { id: string; kind: string; question: string; fresh?: boolean }
 /** Cards by the question they answered: an answer's prompt, a side thread's question, a report's title, or none. */
 export type HomeCardGroup = { head: string; from: 'answer' | 'thread' | 'report' | 'other'; cards: HomeCard[]; at: number }
-export type HomeLabel = { slug: string; name: string; kind: string; trial: boolean; counts: Record<string, number>; values: string[]; paths: string[]; running: boolean }
+/** `ran`: whether the label has a run, as its panel's `last run on …` or `not run yet` says (a label a stopped thread
+ *  left is none); absent is true. */
+export type HomeLabel = { slug: string; name: string; kind: string; trial: boolean; counts: Record<string, number>; values: string[]; paths: string[]; running: boolean; ran?: boolean }
 /** thimble-term: a file whose reading thimble does not count (`listed`) has no state glyph and shows its kind. */
 export type HomeFile = { file: string; records: number | null; size: number; seen: number; state: 'read' | 'scanned' | 'untouched' | 'listed'; ranges: number[][]; kind?: string }
 export type HomeData = {
@@ -251,6 +254,7 @@ function cardsSection(groups: readonly HomeCardGroup[], ui: HomeUi): HomeSection
     id: 'cards',
     name: 'Cards',
     count: n,
+    news: groups.reduce((k, g) => k + g.cards.filter(c => c.fresh).length, 0),
     summary: joined([by('answer') ? `${num(by('answer'))} in answers` : '', by('thread') ? `${num(by('thread'))} in side threads` : '', by('report') ? `${num(by('report'))} in reports` : '']),
     rows: groups.map((g, i) => {
       const fold = `cards:${g.from}:${g.head}`
@@ -262,7 +266,7 @@ function cardsSection(groups: readonly HomeCardGroup[], ui: HomeUi): HomeSection
         right: [dim(plural(g.cards.length, 'card'))],
         fold,
         open,
-        kids: g.cards.map(c => ({ key: `card:${c.id}`, glyph: null, title: c.question, right: [dim(c.kind)], act: { op: 'open', open: { kind: 'card', id: c.id } } })),
+        kids: g.cards.map(c => ({ key: `card:${c.id}`, glyph: null, title: c.question, fresh: c.fresh, right: rightOf([c.kind], c.fresh), act: { op: 'open', open: { kind: 'card', id: c.id } } })),
         act: { op: 'fold', key: fold, open },
       }
     }),
@@ -294,9 +298,21 @@ function labelsSection(ls: readonly HomeLabel[]): HomeSection {
     id: 'labels',
     name: 'Labels',
     count: ls.length,
-    summary: joined(countBy(ls.map(l => (l.running ? 'running' : l.trial ? 'on a sample' : 'on every record')), ['on every record', 'on a sample', 'running'])),
+    summary: joined(countBy(ls.map(l => (l.running ? 'running' : l.ran === false ? 'not run yet' : l.trial ? 'on a sample' : 'on every record')), ['on every record', 'on a sample', 'running', 'not run yet'])),
     pane: { kind: 'pane', view: 'labels', title: 'Labels' },
     rows: ls.map(l => {
+      // a label with no run says so, as its panel does, with no bar and no counts (live check term-fix7, new quirk 6:
+      // home showed `yes 0 · no 0` and 0 for a label a stopped thread left)
+      // one whose first run is going says so (no counts yet)
+      if (l.ran === false)
+        return {
+          key: `label:${l.slug}`,
+          glyph: l.running ? WORKING : NOT_STARTED,
+          title: l.name,
+          right: [dim(l.running ? 'labeling' : 'not run yet')],
+          meta: joined([l.kind, l.paths.join(', ')]),
+          act: { op: 'open', open: { kind: 'label', name: l.name } },
+        }
       const labeled = l.values.reduce((k, v) => k + (l.counts[v] ?? 0), 0)
       // a legend: each value's ● in its hue, its word and count dim as the rest of the secondary row
       const legend: Seg[] = []
@@ -403,7 +419,7 @@ export type HomeHit = { y: number; x0: number; x1: number; row: boolean; act: Ho
 export type HomeLayout = { lines: Line[]; hits: HomeHit[]; picks: { key: string; act: HomeAct }[] }
 
 /** The items a section shows before `… N more` (card groups and folders count as items). */
-const FIRST = 5
+export const FIRST = 5
 
 export const HOME_HINTS = ['↑↓ to choose', 'Enter to open', 'Space to fold', 'x to close']
 

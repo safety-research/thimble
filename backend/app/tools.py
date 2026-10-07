@@ -1797,6 +1797,11 @@ def _attach_takeaway(c: str, cid: str, raw: Any, cell: dict | None, *, author: s
             parts.append("linked " + ", ".join(f"{l.token}→{l.ref.split(cid, 1)[-1] or l.ref}" for l in resolved.links[:8]))
         if resolved.unresolved:
             parts.append(hint("not-found-in-outputs", values=", ".join(resolved.unresolved[:10])))
+        for l in resolved.misplaced[:5]:  # a value cited at the row the takeaway names, which shows another (cite.off_named_row)
+            td = cite._ANY_TD.match(l.ref)
+            at = cite.find_td(cell.get("outputs"), td[2], td[3]) if td else None
+            parts.append(f"{l.token} is not at {l.ref.split(cid, 1)[-1]}, the row the takeaway names"
+                         + (f", which shows {at[0]}" if at else "") + "; kept there, so it shows as wrong until you correct it")
         note = (" (" + "; ".join(p for p in parts if p) + ")") if parts else ""
     text = re.sub(r"\s+([,;:)]|\.(?!\w))", r"\1", text).strip()  # not before a period that starts a word (".yardopts", ".5")
     if not text:

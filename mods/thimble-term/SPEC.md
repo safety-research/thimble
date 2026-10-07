@@ -254,7 +254,19 @@ while thimble's links check runs.
     a letter goes into the field, so the row reads `Enter to ask · Esc to leave the field`; Esc gives the keys back to
     the prompt, and while the prompt holds them the row names none of the panel's keys (a letter or Enter would go to
     the prompt, and Enter to main), only `click the panel for its keys`; so does every panel that opened without the
-    keys (home from the toast's `open ›`), which asks for them once more a moment after it opened.
+    keys (home from the toast's `open ›`), which asks for them once more a moment after it opened. A list (home, the
+    threads tree, the lists, the file browser, a file's lines) is drawn by a Client, which takes keys only after a
+    click, so the pane's own keys reach it: an Input between two Buttons, all no row tall (`RELAY`), the focus ring on
+    the Input (`autoFocus`). While an Input holds the ring, ↑ and ↓ move the ring and never scroll the pane, so a move
+    onto either Button is turned into ↑ or ↓ for the list; Enter submits the Input; a letter, a digit or Space goes into
+    it and is the panel's hotkey by its letter, Space for the list where the row names it (`Space to fold`), and
+    Backspace shortens it (`Backspace for the files` in a file's view). ←, →, the page keys, Home and End reach no
+    element then, so no row names them. A letter the panel does not bind goes to the prompt; the panel then draws
+    neither the relay nor its hotkeys until the prompt has the keys, and its row says `click the panel for its keys`.
+    The row names the list's keys only once a `ui.focus` says the ring rests there. A click on a list, on a row or on
+    an empty part, hands the keys back to the pane. A list taller than its pane is cut to the rows the pane leaves it
+    around the chosen row, `↑ N more` and `↓ N more` dim above and below (a click moves a page, the wheel a row), so
+    the chosen row and the hint row always show.
 27. A field: its label dim and lower case on the label column, the field on L, no colon (`ask`, `follow-up`,
     `describe a new label`, the label panel's `prompt`). A field that shows all of its text (the label's prompt) has a
     border in the rule gray; a click gives it the keyboard.
@@ -466,7 +478,7 @@ colored is said under each.
   ▾ collusion-wiki/  4                                                                     41.6 MB
       events.jsonl                                                                events     5.4 MB
       revisions.jsonl                                                             text      33.5 MB
-  ↑↓ to choose · Enter to open · Space to fold · x to close
+  ↑↓ to choose · Enter to open · x to close
 ```
 
 - One layout, a single column. The title is `Home` alone.
@@ -483,7 +495,8 @@ colored is said under each.
   thread's group is named by the thread's first question (`in the thread "…"`), never its title, which is a slug. A group's
   cards are at A2 with their kind word at R.
 - Labels: each label's `●` in its color (as the label panel's), its name, a bar of its values' shares in their hues
-  with the total, and a dim secondary row of its kind, run and values.
+  with the total, and a dim secondary row of its kind, run and values. A label with no run (one a stopped thread left)
+  has a dim `○`, `not run yet` at R and no bar, as its panel says.
 - Files by folder, the corpus's own first, each folder's files in natural order: a folder row named as the file browser
   names it (its path, `collusion-wiki/`; the corpus's own files under the corpus folder's name), with its file count dim
   after its name and its size under `size`; when it is unfolded, its files at A4 with their type, then their size. A
@@ -586,19 +599,19 @@ it in browser mode.
   events.jsonl                                                                 opens as lines
      1  {"time": "2026-05-18T06:02:11Z", "event_type": "save", "wiki": "dse", …}
      2  {"time": "2026-05-18T06:02:40Z", "event_type": "save", "wiki": "dse", …}
-  ↑↓ to choose · Enter to open · Space to fold · x to close
+  ↑↓ to choose · Enter to open · x to close
 ```
 
 - A folder per group, foldable, its file count dim after its name and its size under `size`, as home's; an open folder
   shows its first 20 files, then `… N more`. A file has no dot, as on home: its name at A4, the type column names its
   type. A long name is cut in its middle.
-- The chosen file's first lines show under the second rule (at most 6) as the file holds them, with dim line numbers,
+- The chosen file's first lines show under the second rule (at most 6, fewer in a short pane, so the tree keeps eight rows) as the file holds them, with dim line numbers,
   and what it opens as, on
   the tab its view opens on (`transcript`, or `lines` for Raw); Enter or a second click opens it.
 - A file: path `home › files › labels.jsonl`, title its name, subtitle its type (as the file browser's), its records and the lines shown,
   `earlier  later` at R, tabs `Table  Transcript  Raw` as its records read. The chosen record (a citation's, a click's)
-  is on the selection background, with its place as a link and a blue `?` under the header. ← or Backspace goes back
-  to the file browser.
+  is on the selection background, with its place as a link and a blue `?` under the header. Backspace goes back to
+  the file browser (`Backspace for the files`; ← reaches no element of a pane).
 - The Table tab: the records' keys as columns, names dim on the row above, `▼` or `▲` after the sorted one, a click on
   a name sorts by it; numbers right-aligned with separators; free text last.
 - Raw draws each line as the file holds it (a JSON record as its JSON line, never a transcript's words), its number
@@ -641,7 +654,9 @@ it in browser mode.
   share (`7%` beside `93%`; one decimal under 1%); the values to edit. The counts apply the analyst's verdicts, as
   thimble.labels() reads the rows: a record set to another value counts under that value, and the toggle row says how
   many (`▸ counts  500 · 1 set by you`). A link to the label in a reply (`[33](concept:<id>/yes)`) opens the panel with
-  its counts and examples open and the value on the selection background, its examples first.
+  its counts and examples open and the value on the selection background, its examples first. In a card's takeaway
+  such a link is red once the label counts another number (a verdict or a run changed the counts), its tip the count
+  now (`the label counts 179 now, with your verdicts`).
   Examples: grouped by value (a record the analyst set or agreed with under the value they gave), each record with `↗`
   and its place, `agree` or another value, the record's words in quotation marks and italic, `why` dim; a JSON record
   shows the field the rule reads first (a code label's `unit['name']`, the field a pattern matches, a field the prompt

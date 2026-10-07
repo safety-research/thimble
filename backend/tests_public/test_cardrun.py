@@ -369,3 +369,36 @@ async def test_a_card_type_card_draws_the_same_in_both(workspaces_tmp, tmp_path,
     finally:
         cardrun.CardWatch.stop_all()
         local._started.clear()
+
+
+async def test_a_label_runs_chat_ends_stopped_at_the_quit_and_one_left_running_at_the_next_start(term, monkeypatch):
+    """Live check term-fix8, low quirk: the `label …` agent record that follows a label's run stayed `running` after
+    the analyst quit. The shim's end stops its task, which ends the chat `stopped`; a chat an earlier process left
+    running (it was killed) ends `stopped` when the next session's shim starts."""
+    from app import agents, concepts, render
+
+    for mod, name in ((concepts, "_pool_shutdown"), (notebook, "shutdown_all"), (render, "shutdown")):
+        async def nothing(*a, **k):
+            return None
+        monkeypatch.setattr(mod, name, nothing if asyncio.iscoroutinefunction(getattr(mod, name)) else (lambda *a, **k: None))
+
+    async def forever(rec):
+        await asyncio.sleep(3600)
+
+    assert local.begin(str(term)) == CORPUS
+    meta = agents.start_agent(CORPUS, "labels", "label test-or-probe", forever)
+    await asyncio.sleep(0)
+    await local.close()
+    assert agents.meta_or_none(CORPUS, meta["id"])["status"] == "stopped"
+    left = agents.new_agent(CORPUS, "labels", "label left", announce=False)
+    other = agents.new_agent(CORPUS, "writer", "writer: report", announce=False)
+    local._started.clear()
+    assert local.begin(str(term)) == CORPUS
+    assert agents.meta_or_none(CORPUS, left["id"])["status"] == "stopped"
+    assert agents.meta_or_none(CORPUS, other["id"])["status"] == "running", "only a label run's chat, which is the shim's own task"
+    # main's SessionEnd hook (its own process, which holds no run) ends one at the quit, before any next start
+    from app import subagents
+
+    quit_left = agents.new_agent(CORPUS, "labels", "label at the quit", announce=False)
+    assert quit_left["id"] in subagents.hook_end(CORPUS, {"reason": "prompt_input_exit", "session_id": ""})["closed"]
+    assert agents.meta_or_none(CORPUS, quit_left["id"])["status"] == "stopped"

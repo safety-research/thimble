@@ -33,20 +33,24 @@ import { bareCard, cardWords, cid, citeSpans, citations, clip, cut, embeddedCard
 import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThreads, runIds, runShown, saysWriter, threadOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from './model'
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
-import { linesMessage } from './lines'
-import { ANSWER_ELEMENT, drawPanel, fieldMessage, focusedField, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView } from './panel'
+import { linesMessage, onListClick } from './lines'
+import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, homeViews, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, relayKey, relayMove, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './reply'
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
 import { NAV_EMPTY } from './nav'
-import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, paneTitle, panelColumns, readSurface, readThread, rt, surfaceValue, threadsNow, tick } from './term'
+import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, paneTitle, panelColumns, readSurface, readThread, rt, surfaceValue, takeKeys, threadsNow, tick } from './term'
 import type { UiApply } from './term'
 import { turns } from './turns'
 
 type Dollar = EngineInterface
 
+/** /thimble's description and argument hint in terminal mode (the command.describe hook). */
+export const THIMBLE_DESCRIPTION =
+  "Opens thimble's home panel in this terminal: documents, side threads, cards, labels and files. `/thimble threads`, `cite <n>`, `card <n>`, `files [path[:line]]` and `documents` open those."
+export const THIMBLE_ARGS = '[threads | cite <n> | card <n> | files [path[:line]] | documents]'
 /** What `/thimble` says in terminal mode: the home panel is open, and how to reach the browser instead. */
 export const HOME_LINE = 'thimble: terminal mode. The home panel is open. For the browser workspace, quit, run `thimble mode browser`, and start `thimble` again.'
 
@@ -140,7 +144,11 @@ function cxOf($: Dollar): Ctx {
     },
     command: async (name, args) => void (await $.command.run({ command: name, args })),
     promptText: async () => (await $.prompt.read().catch(() => ({ text: '' }))).text,
-    focus: async key => void (await $.ui.focus({ requestId: PANEL, key }).catch(() => undefined)),
+    fill: async text => void (await $.prompt.fill({ text, mode: 'insert' }).catch(() => undefined)),
+    focus: async key => {
+      const r = await $.ui.focus({ requestId: PANEL, key }).catch(() => ({ deny: 'failed' }))
+      return !r.deny
+    },
     els: e => $.ui.resolve(e as ResolveInput<'Pane', 'terminal'>),
     card: async id => (await $.state.get({ ...CARDS, id })).value,
     setCard: async (id, v) => void (await $.state.set({ ...CARDS, id }, v)),
@@ -496,6 +504,8 @@ async function restoreKept($: Dollar, cx: Ctx): Promise<void> {
 }
 
 export const register: Register = on => {
+  // a click on an empty part of a list hands the keys back to the pane (term.ts takeKeys)
+  onListClick(takeKeys)
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     const cx = cxOf($)
@@ -514,8 +524,10 @@ export const register: Register = on => {
     $.clock.every(1000, () => void tick(cx, applyUi))
     $.clock.every(250, () => void checkQueued(cx))
     void tick(cx, applyUi)
-    // what drew before the scope was known (the band above the prompt) draws again, now reading thimble-term's state
+    // what drew before the scope was known (the band above the prompt) draws again, now reading thimble-term's state;
+    // the typeahead lists /thimble again with its terminal description
     $.ui.invalidate('ui.render')
+    $.ui.invalidate('command.describe')
     return started
   })
 
@@ -532,6 +544,12 @@ export const register: Register = on => {
       return { text: HOME_LINE }
     }
     return next(e)
+  })
+  // /thimble as the typeahead and /help describe it in terminal mode: what it does here, never the browser's server and
+  // URL (live check term-fix7, quirk 8: the skill's description, written for both modes, named those first)
+  on('command.describe', async ($, e, next) => {
+    if (!rt.sc || (e.command !== 'thimble:thimble' && e.command !== 'thimble')) return next(e)
+    return next({ ...e, description: THIMBLE_DESCRIPTION, argumentHint: THIMBLE_ARGS })
   })
   // where Claude Code routes the skill past command.run, its prompt opens the panel and main says the skill's line
   on('skill.prompt', async ($, e, next) => {
@@ -859,9 +877,11 @@ export const register: Register = on => {
         </Box>,
       )
     }
-    // what is new in the workspace since home was last opened, like a toast: open › opens home and the row goes
+    // what is new in the workspace since home was last opened, like a toast: open › opens home on the first new item
+    // and the row goes; none while home shows (live check term-fix8, quirk 6: it stayed beside home, which showed them)
     const home = await cx.home()
-    if (home) {
+    const homeShown = (await cx.panel())?.view === 'home' && panes.some(p => p.id === PANEL && p.isPlaced)
+    if (home && !homeShown) {
       // the first count of a session (refreshHome keeps it) is what was there already, so nothing is new yet
       const seen = (await cx.homeSeen()) ?? home
       const fresh = (k: 'cards' | 'labels' | 'docs' | 'views') => Math.max(0, home[k] - (seen as typeof home)[k])
@@ -874,7 +894,7 @@ export const register: Register = on => {
             <Box flexDirection="row" columnGap={2} flexShrink={1}>
               {/* the word `new` in green, as wherever it shows (SPEC.md, rule 8) */}
               <Text wrap="truncate-end">{words.split(/( new )/).map((w, i) => (w === ' new ' ? <Text key={`new-${i}`}>{' '}<Text color={COLORS.fresh}>new</Text>{' '}</Text> : w))}</Text>
-              <Button key="above-home-open" label="open ›" plain onPress={() => void openHome(cx)} />
+              <Button key="above-home-open" label="open ›" plain onPress={() => void openHomeNew(cx)} />
             </Box>
           </Box>,
         )
@@ -944,18 +964,37 @@ export const register: Register = on => {
   // the panel's focus ring: while a text field holds it the hint row names Enter and Esc alone (panel.tsx endHints),
   // since a letter goes into the field; off every element, NO_FOCUS (not '', which is a view just opened)
   const NO_FOCUS = '-'
+  // A list's keys reach it through the relay's three Buttons (panel.tsx RELAY): a move of the ring from the middle one
+  // onto a neighbour (↑, ↓, Tab) is that key for the list, and the ring stays; a move onto a neighbour from elsewhere
+  // lands on the middle one. Every move draws the panel again, so its hint row names the keys where the ring is.
   on('ui.focus', { requestId: PANEL }, async ($, e, next) => {
-    const moved = await next(e)
+    // the person moving the ring while the panel's typing went to the prompt (panel.tsx typeThrough): the panel has its
+    // keys again
+    if (rt.sc && rt.typeThrough && e.origin.kind === 'person') rt.typeThrough = false
+    const how = rt.sc ? relayMove(rt.panelFocus, e.element) : ''
+    if (how === 'up' || how === 'down') {
+      await relayKey(how).catch(() => undefined)
+      void cxOf($).bumpPanel()
+      return {}
+    }
+    const moved = await next(how === 'park' ? { ...e, element: RELAY.pick } : e)
     try {
-      if (rt.sc) {
-        const was = focusedField(rt.panelFocus)
-        rt.panelFocus = e.element ?? NO_FOCUS
-        if (focusedField(rt.panelFocus) !== was) void cxOf($).bumpPanel()
+      if (rt.sc && !moved.deny) {
+        rt.panelFocus = (how === 'park' ? RELAY.pick : e.element) ?? NO_FOCUS
+        void cxOf($).bumpPanel()
       }
     } catch {
       // the ring moves whatever thimble-term makes of it
     }
     return moved
+  })
+
+  // the wheel over a list the panel cut to its rows (panel.tsx windowList) moves the list's rows, the choice where it is;
+  // over any other panel the pane scrolls
+  on('ui.scroll', { requestId: PANEL }, async ($, e, next) => {
+    if (!rt.sc || !e.pointer || e.origin.kind !== 'person' || !wheelWindow(e.by)) return next(e)
+    void cxOf($).bumpPanel()
+    return {}
   })
 
   // ---------------------------------------------------------------------------------------------- clicks

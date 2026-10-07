@@ -205,9 +205,23 @@ def _start(c: str) -> None:
     except Exception:  # noqa: BLE001 — never fails the call
         log.exception("%s: marking interrupted cards failed", c)
     try:
+        stopped = _end_left_agents(c)
+        if stopped:
+            log.info("label runs' chats left running by an earlier session, marked stopped: %s", ", ".join(stopped))
+    except Exception:  # noqa: BLE001 — never fails the call
+        log.exception("%s: marking left label chats stopped failed", c)
+    try:
         cardrun.CardWatch.start(c)
     except RuntimeError:  # no running loop: a one-call process (tests, the CLI) checks no cards
         pass
+
+
+def _end_left_agents(c: str) -> list[str]:
+    """The chats of label runs an earlier session left `running` (a label run is a task of the session's own process,
+    so none of them runs now), each ended `stopped` (agents.end_left_label_chats): the ids."""
+    from . import agents  # noqa: PLC0415
+
+    return agents.end_left_label_chats(c)
 
 
 async def close() -> None:
@@ -225,6 +239,20 @@ async def close() -> None:
         if "app.concepts" in mods:
             with contextlib.suppress(Exception):
                 mods["app.concepts"].stop_workspace(c)
+    # the chats that follow those runs (a label's `label …` agent) end `stopped`, as a stopped agent's does, before this
+    # process goes: else they stayed `running` after the quit
+    if "app.agents" in mods:
+        ag = mods["app.agents"]
+        tasks = {k: t for k, t in list(ag._agent_tasks.items()) if k[0] in _started}
+        for t in tasks.values():
+            t.cancel()
+        if tasks:
+            with contextlib.suppress(Exception):
+                await asyncio.wait(list(tasks.values()), timeout=2)
+        for (c, chat), t in tasks.items():
+            if not t.done():
+                with contextlib.suppress(Exception):
+                    ag.finish_agent(c, chat, "stopped", ag.STOPPED_LINE)
     # the regex scan pool's spawned workers, as the server's shutdown ends them: once this process has gone, nothing
     # ends a worker that waits on its queue, and it stays after Claude Code quits
     if "app.concepts" in mods:
