@@ -14,6 +14,7 @@ import { cid, citations, clip, labelRef, noteDocPlace, noteLabelName, noteQuesti
 import type { Citation } from './lib'
 import { agentsOf, cellOf, cellsOf, chatOf, docUnits, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
 import { firstChoice, turnsRead, wholeJson } from './files'
+import { classColors, labelArgs, setLabelGone } from './labels'
 import { keepSeen, keptSeen } from './kept'
 import { NAV_EMPTY, backTarget, moved, nextTrail, withBack } from './nav'
 import { signalEnd, withSignal } from './signal'
@@ -199,7 +200,8 @@ export function cardLabelsOf(cell: ThimbleCell, labels: readonly ThimbleLabel[])
       const v = typeof r.analyst === 'string' && r.analyst ? r.analyst : String(r.label ?? '')
       if (r.ref && v) marks[r.ref] = v
     }
-    return { slug: l.id, name: l.name ?? l.id, values: l.labels ?? [], marks, ...(typeof read === 'number' && typeof l.rev === 'number' && l.rev > read ? { stale: true } : {}) }
+    const colors = classColors(l.classes)
+    return { slug: l.id, name: l.name ?? l.id, values: l.labels ?? [], marks, ...(typeof read === 'number' && typeof l.rev === 'number' && l.rev > read ? { stale: true } : {}), ...(colors ? { colors } : {}) }
   })
 }
 
@@ -409,7 +411,7 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
       return
     }
     case 'label':
-      if (p.label) await readSurface(cx, `label:${p.label}`, 'label', [p.label])
+      if (p.label) await readSurface(cx, `label:${p.label}`, 'label', labelArgs(p.label))
       // the cards that use it: its own label card and every card that read it
       await readSurface(cx, 'canvas', 'cards', ['--since', iso(0)])
       return
@@ -869,9 +871,9 @@ export async function handBack(cx: Ctx, thread: string): Promise<string> {
 
 // ------------------------------------------------------------------------------------------------ labels
 
-/** What the label panel changes of a label (`thimble act label`): its kind, its prompt (or pattern or code), its files,
- *  its values. */
-export type LabelPatch = { kind?: string; body?: string; glob?: string; values?: string[] }
+/** What the label panel changes of a label (`thimble act label`): its name, its kind, its prompt (or pattern or code),
+ *  its files, its values. */
+export type LabelPatch = { name?: string; kind?: string; body?: string; glob?: string; values?: string[] }
 
 async function labelSaid(cx: Ctx, id: string, words: string, run?: { limit: number; at: number } | null): Promise<void> {
   const ui = await cx.labelUi()
@@ -886,7 +888,7 @@ async function labelSaid(cx: Ctx, id: string, words: string, run?: { limit: numb
 export async function saveLabel(cx: Ctx, id: string, patch: LabelPatch): Promise<string> {
   if (!rt.sc) return 'thimble is not in terminal mode in this session'
   const got = await act(cx, rt.sc, 'label', { label: id, ...patch })
-  await readSurface(cx, `label:${id}`, 'label', [id])
+  await readSurface(cx, `label:${id}`, 'label', labelArgs(id))
   if (!got.ok) {
     await labelSaid(cx, id, `× not saved: ${got.error}`)
     return got.error
@@ -920,7 +922,7 @@ export async function runLabel(cx: Ctx, id: string, name: string, limit: number)
   const s = got.value.summary ?? {}
   const counts = Object.entries(s.counts ?? {}).map(([v, n]) => `${v} ${n.toLocaleString('en-US')}`).join(' · ')
   const failed = s.failed ? ` · ${plural(s.failed, 'record')} failed` : ''
-  await readSurface(cx, `label:${id}`, 'label', [id])
+  await readSurface(cx, `label:${id}`, 'label', labelArgs(id))
   // the label cards that count it are read again
   for (const [card, lid] of rt.labelOf) if (lid === id) await loadCards(cx, [card])
   const how = s.stopped ? `stopped after ${(s.labeled ?? 0).toLocaleString('en-US')}` : `ran on ${limit ? `a sample of ${(s.labeled ?? limit).toLocaleString('en-US')}` : `all ${(s.labeled ?? 0).toLocaleString('en-US')}`}`
@@ -953,7 +955,65 @@ export async function deleteLabel(cx: Ctx, id: string, name: string): Promise<st
   await readSurface(cx, 'labels', 'labels')
   await refreshHome(cx)
   cx.toast(`thimble: deleted the label "${name}"`)
+  // the labels list offers to undo it, as the browser's top bar does
+  setLabelGone({ id, name })
   await openList(cx, { view: 'labels', title: 'Labels' })
+  return ''
+}
+
+/** A label's change seen everywhere it shows: its panel, the labels list, home, its card and the cards that read it. */
+async function relabel(cx: Ctx, id: string): Promise<void> {
+  await readSurface(cx, `label:${id}`, 'label', labelArgs(id))
+  await readSurface(cx, 'labels', 'labels')
+  rt.labelRead.delete(id)
+  for (const card of new Set([...rt.labelOf.keys(), ...rt.readers])) if (rt.shown.has(card)) await loadCards(cx, [card])
+  await refreshHome(cx)
+  await cx.bumpPanel()
+}
+
+/** Turn a label over files on or off in Files and the views, or give a value a color by its name (`thimble act
+ *  label-show`, as the Labels pane's toggle and palette do). '' when done, else why not, which the panel says on a `×`
+ *  row. */
+export async function showLabel(cx: Ctx, id: string, change: { on?: boolean; colors?: Record<string, string> }): Promise<string> {
+  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+  const got = await act(cx, rt.sc, 'label-show', { label: id, ...(change.on !== undefined ? { on: change.on } : {}), ...(change.colors ? { colours: change.colors } : {}) })
+  if (!got.ok) {
+    await labelSaid(cx, id, `× not changed: ${got.error}`)
+    return got.error
+  }
+  await relabel(cx, id)
+  return ''
+}
+
+/** Keep only the units a label gives `value` in its scope (Files, the canvas or the report), or with null clear that
+ *  filter (`thimble act label-filter`, as a label card's value does). '' when done, else why not. */
+export async function filterLabel(cx: Ctx, id: string, value: string | null): Promise<string> {
+  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+  const got = await act(cx, rt.sc, 'label-filter', { label: id, ...(value ? { value } : {}) })
+  if (!got.ok) {
+    await labelSaid(cx, id, `× the filter was not set: ${got.error}`)
+    return got.error
+  }
+  await relabel(cx, id)
+  return ''
+}
+
+/** Undo the delete of the label deleted last (`thimble act label-undelete`): the label back with its marks, its card
+ *  and its filters, its panel open. '' when done, else why not. */
+export async function undeleteLabel(cx: Ctx, id: string, name: string): Promise<string> {
+  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+  const got = await act<{ name?: string }>(cx, rt.sc, 'label-undelete', { label: id })
+  if (!got.ok) {
+    // the labels list says why on a red `×` row in place of `undo`
+    setLabelGone({ id, name, error: got.error })
+    await cx.bumpPanel()
+    return got.error
+  }
+  setLabelGone(null)
+  await readSurface(cx, 'labels', 'labels')
+  await refreshHome(cx)
+  cx.toast(`thimble: restored the label "${got.value.name || name}"`)
+  await openPanel(cx, { view: 'label', title: got.value.name || name, label: id })
   return ''
 }
 

@@ -15,6 +15,11 @@ type BoxC = ElementConstructor<BoxProps>
 // left out for problems, each hue's lightness moved so it keeps 3:1 on white, the light panel, black and the dark panel
 export const SERIES = ['#1d7fc0', '#b77300', '#00946a', '#b96895', '#8c65e8', '#927543', '#87861a'] as const
 
+// the label colors a label's values take (the browser's --label-1..12, backend concepts.COLOUR_NAMES, in that order),
+// each hue's lightness moved so it keeps 3:1 on white, the light panel, black and the dark panel; 0, a value with no
+// color (a label's negative), is dim
+export const LABEL_HUES = ['#0373fa', '#cc730a', '#09803e', '#1288c6', '#927802', '#00947f', '#b45e00', '#026bd3', '#299b2a', '#037aa8', '#af4d02', '#038aa1'] as const
+
 // What each colour means (SPEC.md, "The visual system", section 4): letters in the text colour or dim; lines in
 // the rule grey; links in blue; a panel's title and its selected row in the accent; the word "new" in green; a palette
 // hue only on the glyphs and marks of a region's one colour field; red only for a problem; the selection background on

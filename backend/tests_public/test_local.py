@@ -564,6 +564,120 @@ async def test_act_label_delete_deletes_the_label_its_marks_its_card_and_its_fil
         await local.act(CORPUS, "label-delete", {})
 
 
+async def test_act_label_undelete_restores_the_label_while_its_delete_is_the_last_change(term):
+    """The labels list's `undo` after a delete: `label-undelete` restores the label with its marks, its card and its
+    filter, as the top bar's Undo does; once a later change stands above the delete, it is refused and nothing changes."""
+    from app import concepts
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    ws = config.workspace_dir(CORPUS)
+    cid = concepts.find_concept(ws, "bash")["id"]
+    concepts.set_filter(CORPUS, "files", cid, "yes")
+    counts = (await local.state(CORPUS, "label", [cid]))["counts"]
+    await local.act(CORPUS, "label-delete", {"label": cid})
+    got = await local.act(CORPUS, "label-undelete", {"label": cid})
+    assert got == {"ok": True, "label": cid, "name": "bash", "restored": True}
+    assert (await local.state(CORPUS, "label", [cid]))["counts"] == counts
+    assert concepts._label_cards(ws, cid)
+    assert concepts.read_filters(ws)["files"] == {"concept": cid, "value": "yes"}
+    # deleted again, then another change after it: the undo would revert that one, so it is refused
+    await local.act(CORPUS, "label-delete", {"label": cid})
+    await call(term, "add_card", question="Posts again?", kind="note", text="Eight.")
+    with pytest.raises(local.StateError, match="no longer the last change"):
+        await local.act(CORPUS, "label-undelete", {"label": cid})
+    assert concepts.find_concept(ws, cid) is None
+
+
+async def test_act_label_show_turns_a_label_on_or_off_and_colors_its_values_by_name(term):
+    """The label panel's `in files` and its colors: `label-show` turns a label over files on or off in Files and the
+    views and gives a value a color by the names show_label takes, the value that had it taking the old one; it runs
+    nothing. A color with no name, a value the label lacks and a call that changes nothing are refused."""
+    from app import concepts
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    ws = config.workspace_dir(CORPUS)
+    k = concepts.find_concept(ws, "bash")
+    runs = len(k["applications"])
+    on = await local.act(CORPUS, "label-show", {"label": "bash", "on": True})
+    assert on["shown"] is True and concepts.find_concept(ws, "bash")["shown"] is True
+    yes = next(cl for cl in on["classes"] if cl["name"] == "yes")["color"]
+    got = await local.act(CORPUS, "label-show", {"label": "bash", "colours": {"no": "teal"}})
+    by = {cl["name"]: cl["color"] for cl in got["classes"]}
+    assert by["no"] == concepts.COLOUR_NAMES["teal"] and got["shown"] is True
+    # the color another value has: the two swap
+    got = await local.act(CORPUS, "label-show", {"label": "bash", "colours": {"no": next(n for n, i in concepts.COLOUR_NAMES.items() if i == yes)}})
+    by = {cl["name"]: cl["color"] for cl in got["classes"]}
+    assert (by["no"], by["yes"]) == (yes, concepts.COLOUR_NAMES["teal"])
+    off = await local.act(CORPUS, "label-show", {"label": "bash", "on": False})
+    assert off["shown"] is False
+    assert len(concepts.find_concept(ws, "bash")["applications"]) == runs, "it runs nothing"
+    with pytest.raises(local.StateError, match="no label colour is named"):
+        await local.act(CORPUS, "label-show", {"label": "bash", "colours": {"no": "purple"}})
+    with pytest.raises(local.StateError, match="has no value"):
+        await local.act(CORPUS, "label-show", {"label": "bash", "colours": {"maybe": "teal"}})
+    with pytest.raises(local.StateError, match="nothing to change"):
+        await local.act(CORPUS, "label-show", {"label": "bash"})
+    with pytest.raises(local.StateError, match="true or false"):
+        await local.act(CORPUS, "label-show", {"label": "bash", "on": "yes"})
+
+
+async def test_act_label_filter_keeps_one_value_and_state_label_says_which(term):
+    """The label panel's `filter` by a value: `label-filter` sets its scope's filter to the value, as a label card's value
+    does (Files for a label over files, which turns it on), `thimble state label` gives the value the filter keeps, and
+    no value clears it; a filter that names another label is left alone. A value the label lacks is refused."""
+    from app import concepts
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    ws = config.workspace_dir(CORPUS)
+    cid = concepts.find_concept(ws, "bash")["id"]
+    assert (await local.state(CORPUS, "label", [cid]))["filter"] is None
+    got = await local.act(CORPUS, "label-filter", {"label": "bash", "value": "no"})
+    assert got == {"ok": True, "label": cid, "scope": "files", "filter": "no"}
+    assert concepts.read_filters(ws)["files"] == {"concept": cid, "value": "no"}
+    label = await local.state(CORPUS, "label", [cid])
+    assert label["filter"] == "no" and label["shown"] is True
+    cleared = await local.act(CORPUS, "label-filter", {"label": "bash"})
+    assert cleared["filter"] is None and "files" not in concepts.read_filters(ws)
+    with pytest.raises(local.StateError, match="has no value"):
+        await local.act(CORPUS, "label-filter", {"label": "bash", "value": "maybe"})
+    # another label's filter stays when this one clears its own
+    await call(term, "apply_label", scope="files", name="read", predicate={"kind": "regex", "text": "Read"},
+               paths=["agents/*.jsonl"])
+    other = concepts.find_concept(ws, "read")["id"]
+    concepts.set_filter(CORPUS, "files", other, "yes")
+    await local.act(CORPUS, "label-filter", {"label": "bash"})
+    assert concepts.read_filters(ws)["files"]["concept"] == other
+    assert (await local.state(CORPUS, "label", [cid]))["filter"] is None
+
+
+async def test_act_label_renames_and_state_label_pages_its_records(term):
+    """The label panel's `rename`: `label {name}` renames the label as the label editor's name field does. `state label
+    --rows` gives more records of one value, as the browser's examples page through them, with `totals` saying how many
+    records have each value."""
+    from app import concepts
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    ws = config.workspace_dir(CORPUS)
+    cid = concepts.find_concept(ws, "bash")["id"]
+    got = await local.act(CORPUS, "label", {"label": cid, "name": "  runs   bash "})
+    assert got["concept"]["name"] == "runs bash" and concepts.find_concept(ws, cid)["name"] == "runs bash"
+    first = await local.state(CORPUS, "label", [cid])
+    yes = [r for r in first["rows"] if r["label"] == "yes"]
+    assert len(yes) == local.LABEL_ROWS and first["totals"]["yes"] > local.LABEL_ROWS
+    more = await local.state(CORPUS, "label", [cid, "--rows", json.dumps({"yes": local.LABEL_ROWS + 2})])
+    assert len([r for r in more["rows"] if r["label"] == "yes"]) == min(local.LABEL_ROWS + 2, first["totals"]["yes"])
+    assert len([r for r in more["rows"] if r["label"] == "no"]) == len([r for r in first["rows"] if r["label"] == "no"])
+    assert more["totals"] == first["totals"] and sum(first["totals"].values()) == sum(first["counts"].values())
+    with pytest.raises(local.StateError, match="--rows"):
+        await local.state(CORPUS, "label", [cid, "--rows", "[1]"])
+    with pytest.raises(local.StateError, match="nothing to change"):
+        await local.act(CORPUS, "label", {"label": cid})
+
+
 async def test_a_label_run_stops_when_another_process_deletes_its_label(term, monkeypatch):
     """`label-run` watches the label's file as it watches its stop file: a `label-delete` in another process removes the
     file, and the run stops after its current unit."""

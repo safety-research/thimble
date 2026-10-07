@@ -36,10 +36,11 @@ test("the label panel's header reads `name:`, `type:`, `scope:`, and its pattern
   const pane = await labelPanel($, w)
   const text = shown(await pane.drawn())
   for (const s of ['name:', 'type:', 'scope:', 'pattern:']) expect(text).toContain(s)
-  // each label in a column 10 cells wide (`pattern:` and a gutter), the field after it
-  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Box","props":{"key":"lf-pattern:","flexDirection":"row"},"children":[{"type":"Box","props":{"width":10,"flexShrink":0}')
+  // each label in a column 11 cells wide (a label over files' `in files:` and a gutter), the field after it
+  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Box","props":{"key":"lf-pattern:","flexDirection":"row"},"children":[{"type":"Box","props":{"width":11,"flexShrink":0}')
   // each folded part's key by what it opens (live check New 11)
-  expect(text).toContain('r to run a sample · k to delete · c counts, e examples, d cards · l for labels')
+  expect(text).toContain('r to run a sample · n to rename · k to delete · o to show in files')
+  expect(text).toContain('c counts, e examples, d cards · l for labels')
   await pane.unmount()
 })
 
@@ -120,7 +121,10 @@ test('`delete` (k) asks once in the panel; n keeps the label, y deletes it (`thi
   text = shown(await pane.drawn())
   expect(text).toContain('Labels')
   expect(text).toContain('0 labels')
-  expect(text).not.toContain(LABEL.name)
+  // no row of it, only the offer to undo its delete (labeledit.test.ts)
+  expect(await pane.find({ type: 'Button', key: 'label-open-0' })).toBeUndefined()
+  expect(text.split(LABEL.name).length - 1).toBe(1)
+  expect(text).toContain(`deleted the label "${LABEL.name}"  undo`)
   await pane.unmount()
 })
 

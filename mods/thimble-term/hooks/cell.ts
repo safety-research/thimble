@@ -8,6 +8,8 @@
 import type { TermLinks } from '../types'
 import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode } from './draw'
 import { labelState, labelStateWords } from './lib'
+import { classColors } from './labels'
+import type { LabelClass } from './labels'
 
 /** A cell as the workspace stores it: the fields the drawing reads. */
 export type ThimbleCell = {
@@ -59,6 +61,16 @@ export type ThimbleLabel = {
   rev?: number
   /** the records its scope holds, given for a label with rows and no run that ended (backend local._scope_total) */
   scope_total?: number
+  /** its values in order with their color (1 to 12, 0 for none) and whether Files marks them while it is on */
+  classes?: LabelClass[]
+  /** on in Files and the views (a label over files) */
+  shown?: boolean
+  /** its agreement with the values the analyst set, the values its runs took as examples apart */
+  calibration?: { n?: number; agreed?: number; taught?: number } | null
+  /** how many records have each value (`thimble state label`), so its examples say how many more there are */
+  totals?: Record<string, number>
+  /** the value of it its scope's filter keeps, null for none (`thimble state label`) */
+  filter?: string | null
 }
 
 export const FRAME = 'application/vnd.thimble.frame+json'
@@ -409,7 +421,8 @@ export function labelCard(cell: ThimbleCell, label: ThimbleLabel | null): CardDa
       return { ref: r.ref!, quote: String(r.text ?? ''), note: '', value, why: String(r.rationale ?? ''), set, ...(set && r.label && r.label !== value ? { was: String(r.label) } : {}) }
     })
   const paths = run?.paths ?? (label.glob ? label.glob.split(/,\s*/).filter(Boolean) : [])
-  const info = { slug: label.id, name: label.name ?? label.id, kind: label.kind ?? '', values, labeled, total, trial: Boolean(label.trial), paths }
+  const colors = classColors(label.classes)
+  const info = { slug: label.id, name: label.name ?? label.id, kind: label.kind ?? '', values, labeled, total, trial: Boolean(label.trial), paths, ...(colors ? { colors } : {}) }
   // a label with no run says so, as home and its panel do, with no bars and no counts (live check term-fix8, quirk 8:
   // the card a stopped thread left showed yes 0, no 0 and all 0); one whose first run stopped part way shows the counts
   // it has, and says where it stopped (live check term-fix9, quirk 4)

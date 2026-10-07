@@ -160,7 +160,7 @@ the type area runs from A0 to R.
 | new | `success` | the word `new` and `N new` | new |
 | tip | `userMessageBackground`, a background | the tip of the citation under the pointer | |
 | inline code | `permission` | inline code in thimble-term's own paragraphs | code |
-| palette | `SERIES`, seven hues that keep 3:1 on both panels | `●`, marks, bars, swatches | a value of the color field |
+| palette | `SERIES`, seven hues that keep 3:1 on both panels; `LABEL_HUES`, the browser's twelve label colors moved to keep it too | `●`, marks, bars, swatches | a value of the color field |
 | red | `error` | a problem's words and its `×` or `!` | a problem |
 | selection | `selectionBg`, a background | a choice in use (rule 21) | |
 | panel | `composerSidebarBackground`, a background | the whole panel | |
@@ -172,8 +172,11 @@ and, given `startLine`, its dim gutter of line numbers.
     While a card reads a label, the label is its field. Its hues go on glyphs and marks; a value's word stays in the
     text color (`● dse 3,908`). A chart with no color field is one series, drawn in the first hue. The bar or mark
     under the pointer turns the text color and its readout stays plain. A field colors at most six values, past which
-    its marks take the text color (transcripts cycle the hues). A label's catch-all value ("other") takes dim marks. A
-    field with one value draws dim marks.
+    its marks take the text color (transcripts cycle the hues). A label's values take the colors their classes have,
+    the browser's label colors (`LABEL_HUES`, which the analyst picks in the label panel by the names show_label
+    takes), wherever they show: the label panel, home, a label card and a card that read the label; a label with no
+    classes takes the series in its values' order. A label's catch-all value ("other", a class with no color) takes dim
+    marks. A field with one value draws dim marks.
 21. **The selection background** marks a choice in use among choices shown together: a card's parameter, a label's
     type (`prompt  regex  code`), the cited value in the citation panel, the chosen record of a file, text being
     dragged. Selected rows use `❯` and the accent instead (rule 13 of "The rules"), and the selected tab uses inverse.
@@ -686,42 +689,64 @@ typing, every key. A view built in browser mode is one line that says so, and ho
 
 ```
   ‹ back  home › labels › edit purpose
-  name:   ● edit purpose
-  type:   prompt  regex  code
-  scope:  revisions.jsonl                                                        14,591 records
+  name:      ● edit purpose
+  type:      prompt  regex  code
+  scope:     revisions.jsonl                                                     14,591 records
+  in files:  on  off
   ──────────────────────────────────────────────────────────────────────────────────────────────
-  prompt
-  ╭────────────────────────────────────────────────────────────────────────────────────────────╮
-  │ Decide what the revision's body is mainly for. 'message to agents': the body speaks to     │
-  │ other agents, runs or cohorts, such as asking them to post, relay, confirm or coordinate…  │
-  ╰────────────────────────────────────────────────────────────────────────────────────────────╯
-  run on a sample  run on all 14,591  delete  last run on a sample of 30
+  prompt:    ╭─────────────────────────────────────────────────────────────────────────────────╮
+             │ Decide what the revision's body is mainly for. 'message to agents': the body    │
+             │ speaks to other agents, runs or cohorts, such as asking them to post, relay,…   │
+             ╰─────────────────────────────────────────────────────────────────────────────────╯
+  run on a sample  run on all 14,591  rename  delete  last run on a sample of 30
 
-  ▸ counts  30
-  ▸ examples  12
+  ▾ counts  30 · filtered to links or data
+    ● links or data       ████████████████████────────────────   15    50%  color  clear filter
+      ● blue  ● orange  ● green  ● sky blue  ● olive  ● teal  ● brown  ● navy  ● grass green
+      ● cerulean  ● chestnut  ● cyan
+    ● message to agents   ██████████──────────────────────────    8    27%  color  filter
+    ● other               █████████───────────────────────────    7    23%  color  filter
+    values  links or data · message to agents · other
+
+  ▸ examples  12 · 80% agreed on 10 values you set, not counting the 4 given as examples
   ▸ cards  2
-  r to run a sample · k to delete · c counts, e examples, d cards · l for labels · x to close
+  r to run a sample · n to rename · k to delete · o to show in files · c counts, e examples, d cards
+  l for labels · x to close
 ```
 
 - The header: `name:` the label's name in the accent and bold after a `●` in its color; `type:` the kinds, the one in
   use on the selection background, the others a click away; `scope:` its files, a field, and how many records against
-  R. Then the rule.
+  R; for a label over files, `in files:` whether it is on in Files and the views (`on  off`, the one in use on the
+  selection background, the other a click or `o` away, `thimble act label-show`), which a view opens colored by, as in
+  the browser. Then the rule.
 - The definition whole in a field to edit, under its kind's name (`prompt`, `pattern` or `code`; code through the
   `Code` element), on the same column as the header's values. A click gives it the keyboard; Enter saves it.
 - `run on a sample` and `run on all N`, which save what was typed first and run it, then the last run dim; `stop`
-  while it runs, and the type as plain text. A run's first error is a red `!` row under them. `delete` (k), not offered
-  while a run goes, asks once in their place: `delete label "…"? its marks and card go too · y to delete · n to keep`;
-  y deletes the label with its marks, its card and any filter that uses it (`thimble act label-delete`) and opens the
-  labels list.
+  while it runs, and the type as plain text. A run's first error is a red `!` row under them. `rename` (n) puts the
+  name in a field in their place (`new name`, Enter renames, `thimble act label`; `keep the name` leaves it). `delete`
+  (k), not offered while a run goes, asks once in their place: `delete label "…"? its marks and card go too · y to
+  delete · n to keep`; y deletes the label with its marks, its card and any filter that uses it (`thimble act
+  label-delete`) and opens the labels list, which offers to undo it until another label opens: `deleted the label
+  "…"  undo` under its second rule (u, `thimble act label-undelete`, the browser's Undo), which puts it back with its
+  marks, card and filters and opens it; once a later change stands above the delete, a red `×` row says why.
 - `▸ counts`, `▸ examples` and `▸ cards` are folded, and nothing of them shows until one is opened. Counts: each
   value's `●` in its hue, its name, a bar on a track to the whole, its count and its share dim, in whole percent as every
   share (`7%` beside `93%`; one decimal under 1%); the values to edit. The counts apply the analyst's verdicts, as
   thimble.labels() reads the rows: a record set to another value counts under that value, and the toggle row says how
-  many (`▸ counts  500 · 1 set by you`). A link to the label in a reply (`[33](concept:<id>/yes)`) opens the panel with
+  many (`▸ counts  500 · 1 set by you`). After each value's share, its controls: `color` (a label over files) shows the
+  label colors under it at A4, each `●` in its hue and its name as show_label names it, the one it has on the
+  selection background, a click giving it that color (`thimble act label-show`, a value that had it taking the old
+  one); `filter` keeps only the units of that value in the label's scope (Files, the canvas or the report, `thimble
+  act label-filter`, as a label card's value does), the value then on the selection background, its control `clear
+  filter` and the toggle row saying `filtered to <value>`. In a pane too narrow for them beside a bar of 8 cells, the
+  controls stand on a row of their own under each value. A link to the label in a reply (`[33](concept:<id>/yes)`) opens the panel with
   its counts and examples open and the value on the selection background, its examples first. In a card's takeaway
   such a link is red once the label counts another number (a verdict or a run changed the counts), its tip the count
   now (`the label counts 179 now, with your verdicts`).
-  Examples: grouped by value (a record the analyst set or agreed with under the value they gave), each record with `↗`
+  Examples: its toggle row gives the label's held-out agreement in the browser's words (`80% agreed on 10 values you
+  set, not counting the 4 given as examples`); grouped by value (a record the analyst set or agreed with under the
+  value they gave), each value's row with how many records have it, then its records, then `… N more`, which reads
+  the next ten of that value (`thimble state label --rows`), each record with `↗`
   and its place, `agree` or another value, the record's words in quotation marks and italic, `why` dim; a JSON record
   shows the field the rule reads first (a code label's `unit['name']`, the field a pattern matches, a field the prompt
   names) as a label/value row, its words in quotation marks and italic, then its other fields on one dim row, never its

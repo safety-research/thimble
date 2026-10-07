@@ -85,12 +85,17 @@ Claude Code's panel chrome, no right-click menu.
   line that says so).
 - **The label panel**, as Matt laid it out: `name:` its name in the accent and bold after a `●` in its colour, `type:`
   (`prompt  regex  code`, the one in use on the selection background, the others a click away), `scope:` (its files, a
-  field, and how many records), then a rule; the prompt (or pattern, or code) whole in a field to edit, on the same
+  field, and how many records), for a label over files `in files:` (`on  off`, o, `thimble act label-show`), then a
+  rule; the prompt (or pattern, or code) whole in a field to edit, on the same
   column (`hooks/field.tsx`: a click gives it the keyboard, Enter saves it, `thimble act label`); `run on a sample` and
   `run on all N`, which save what was typed first and run it (`thimble act label-run`), and `stop` (s) while it runs
-  (`thimble act label-stop`); then `▸ counts` (with the values to edit), `▸ examples` (each record under its value,
-  `agree` or another value, `thimble act verdict`; a JSON record's other fields on one dim row cut at whole pairs) and
-  `▸ cards` (the cards that use it, each a click away), folded.
+  (`thimble act label-stop`), `rename` (n) and `delete` (k), whose undo the labels list then offers (u, `thimble act
+  label-undelete`); then `▸ counts` (with the values to edit, and each value's `color`, the label colors by the names
+  show_label takes, and `filter`, `thimble act label-show` and `label-filter`), `▸ examples` (the held-out agreement;
+  each record under its value, `agree` or another value, `thimble act verdict`; `… N more` per value, `thimble state
+  label --rows`; a JSON record's other fields on one dim row cut at whole pairs) and
+  `▸ cards` (the cards that use it, each a click away), folded. A label's values take their classes' colors wherever
+  they show (`hooks/labels.ts`, `paint.ts` `LABEL_HUES`).
   Nothing else shows until it is opened. A code label's code runs only in main's Bash: its run asks main to run the
   `thimble-run label` command it gives.
 - **Side threads.** The `?` beside a passage or a card, a press on a card's title or mark, a selection's "ask", or `ask
@@ -110,7 +115,7 @@ route for it:
 | `thimble state home --cwd <dir>` | the workspace's counts: `cards`, `labels`, `docs`, `threads`, `views`, `files` (a number or a list each); `views`, each with its `status` (built, building, proposed, failed), `ts` and claimed `files`; and the orientation's `coverage` line |
 | `thimble state cards --cwd <dir> --since <iso>` | the canvas route's `{groups, cells}`, the cells changed since |
 | `thimble state card --cwd <dir> <id>` | the cell route's cell |
-| `thimble state labels --cwd <dir>` / `label --cwd <dir> <id>` | the concepts route's list / one concept, with a page of its rows per value (`rows`, as `/rows?text=1` answers) after the records the analyst gave that value |
+| `thimble state labels --cwd <dir>` / `label --cwd <dir> <id> [--rows <json>]` | the concepts route's list / one concept, with a page of its rows per value (`rows`, as `/rows?text=1` answers; `--rows {"<value>": n}` n of that value) after the records the analyst gave that value, how many records have each value (`totals`) and the value its scope's filter keeps (`filter`) |
 | `thimble state docs --cwd <dir>` / `doc --cwd <dir> <slug>` | the document types route's `{slug: {exists, title, …}}` / one document |
 | `thimble state threads --cwd <dir>` / `thread --cwd <dir> <id> [--after n]` | the chats route's metas (each with `answers` and `seen`, or `unread`) / `{meta, events}` past `n` |
 | `thimble state agents --cwd <dir>` | the agents route's `{rows}` |
@@ -122,7 +127,10 @@ route for it:
 | `thimble act thread --cwd <dir> {anchor, anchor_text?, message}` | a new side thread: `{ok, thread}` |
 | `thimble act thread-message --cwd <dir> {thread, message}` | a question in a thread |
 | `thimble act verdict --cwd <dir> {label, ref, value}` | the analyst's value for a record |
-| `thimble act label --cwd <dir> {label, kind?, body?, glob?, values?}` | the label panel's edit, saved as the browser's label editor saves it |
+| `thimble act label --cwd <dir> {label, name?, kind?, body?, glob?, values?}` | the label panel's edit, saved as the browser's label editor saves it |
+| `thimble act label-show --cwd <dir> {label, on?, values?, colours?}` | a label over files on or off in Files and the views, or its values given colors by name, as the Labels pane and show_label do |
+| `thimble act label-filter --cwd <dir> {label, value?}` | the label's scope's filter set to `value`, or cleared when it names the label and no value is given |
+| `thimble act label-delete --cwd <dir> {label}` / `label-undelete --cwd <dir> {label}` | a label deleted with its marks, card and filters / its delete undone while it is the last change |
 | `thimble act label-run --cwd <dir> {label, limit?}` | a run on a sample (`limit`) or on every record; it answers once the run ends, so the renderer starts it beside the session (`$.process.spawn`), which it ends with; a code label's answer is the `thimble-run label` command (`deferred`) |
 | `thimble act label-stop --cwd <dir> {label}` | stop a run `label-run` started, after its current record (the run's process watches for the stop file this writes) |
 | `thimble act seen --cwd <dir> {thread}` | the thread's answers read |

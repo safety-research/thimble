@@ -51,7 +51,7 @@ export type HomeCard = { id: string; kind: string; question: string; fresh?: boo
 export type HomeCardGroup = { head: string; from: 'answer' | 'thread' | 'report' | 'other'; cards: HomeCard[]; at: number }
 /** `ran`: whether the label has a run, as its panel's `last run on …` or `not run yet` says (a label a stopped thread
  *  left is none); absent is true. */
-export type HomeLabel = { slug: string; name: string; kind: string; trial: boolean; counts: Record<string, number>; values: string[]; paths: string[]; running: boolean; ran?: boolean; state?: string; fresh?: boolean }
+export type HomeLabel = { slug: string; name: string; kind: string; trial: boolean; counts: Record<string, number>; values: string[]; paths: string[]; running: boolean; ran?: boolean; state?: string; fresh?: boolean; colors?: Record<string, number> }
 /** thimble-term: a file whose reading thimble does not count (`listed`) has no state glyph and shows its kind. */
 export type HomeFile = { file: string; records: number | null; size: number; seen: number; state: 'read' | 'scanned' | 'untouched' | 'listed'; ranges: number[][]; kind?: string }
 export type HomeData = {
@@ -301,8 +301,8 @@ const NAME_KEEP = 24
 
 /** A label's counts, each value with its colour as the label panel draws it (draw.ts valueColour): the bar's parts,
  *  their cells set when the row is laid out at its width (barCells). */
-function countBar(values: readonly string[], counts: Record<string, number>): { n: number; fg: string }[] {
-  return values.map(v => ({ n: counts[v] ?? 0, fg: valueColour(values, v)! })).filter(x => x.n > 0)
+function countBar(values: readonly string[], counts: Record<string, number>, colors?: Record<string, number>): { n: number; fg: string }[] {
+  return values.map(v => ({ n: counts[v] ?? 0, fg: valueColour(values, v, colors)! })).filter(x => x.n > 0)
 }
 
 /** A bar's parts in `w` cells by their counts, the cells left over given to the largest remainders, so the bar is `w`
@@ -317,9 +317,10 @@ function barCells(parts: readonly { n: number; fg: string }[], w: number): { n: 
   return parts.map((p, i) => ({ n: out[i]!, fg: p.fg })).filter(x => x.n > 0)
 }
 
-/** A label's color, as the label panel's ● beside its name shows it: its first value's, else the first series hue. */
-export function labelHue(values: readonly string[]): string {
-  const hue = values.length ? valueColour(values, values[0]!) : undefined
+/** A label's color, as the label panel's ● beside its name shows it: its first value's (its class's color when it has
+ *  `colors`), else the first series hue. */
+export function labelHue(values: readonly string[], colors?: Record<string, number>): string {
+  const hue = values.length ? valueColour(values, values[0]!, colors) : undefined
   return hue && hue !== COLORS.dim ? hue : COLORS.series[0]!
 }
 
@@ -351,7 +352,7 @@ function labelsSection(ls: readonly HomeLabel[]): HomeSection {
       const legend: Seg[] = []
       l.values.forEach((v, i) => {
         if (i) legend.push(dim('  '))
-        legend.push({ s: '● ', fg: valueColour(l.values, v) }, dim(`${v} ${num(l.counts[v] ?? 0)}`))
+        legend.push({ s: '● ', fg: valueColour(l.values, v, l.colors) }, dim(`${v} ${num(l.counts[v] ?? 0)}`))
       })
       // what its runs say: a run going (`◌ labeling 3,000 of 4,579`), a first run stopped part way (`stopped at 3,150 of
       // 4,579`), else what the last run covered (live check term-fix9, quirk 4)
@@ -359,10 +360,10 @@ function labelsSection(ls: readonly HomeLabel[]): HomeSection {
       return {
         key: `label:${l.slug}`,
         // its ● in the label's color, as the label panel draws it beside its name
-        glyph: l.running ? WORKING : { mark: '●', fg: labelHue(l.values) },
+        glyph: l.running ? WORKING : { mark: '●', fg: labelHue(l.values, l.colors) },
         title: l.name,
         fresh: l.fresh,
-        bar: countBar(l.values, l.counts),
+        bar: countBar(l.values, l.counts, l.colors),
         right: [{ s: num(labeled) }, ...(l.fresh ? [{ s: '  ' }, { s: 'new', fg: FRESH }] : [])],
         meta: [...joined([l.kind, runWords, l.paths.join(', ')]), dim('  '), ...legend],
         act: { op: 'open', open: { kind: 'label', name: l.name } },

@@ -625,15 +625,20 @@ def _apply(c: str, step: dict[str, Any], forward: bool) -> None:
             _set_card(c, cid, step["after"] if forward else step["before"])
 
 
-def undo(c: str) -> dict[str, Any]:
+def undo(c: str, expect: tuple[str, str] | None = None) -> dict[str, Any]:
     """Revert the top step of the undo stack, or its batch, passing over the steps of a running session; 409 when there
     is
-    none, a running session holds it, or nothing of it can be reverted (then it is dropped)."""
+    none, a running session holds it, or nothing of it can be reverted (then it is dropped). With `expect` (kind,
+    target), only when that step is the one it reverts, else 409 and nothing changes: the terminal's undo of a label's
+    delete (`thimble act label-undelete`), which must not revert a later change."""
     with _lock:
         stack, redo = _load(c)
         if not stack:
             raise HTTPException(409, "nothing to undo")
         group, held = _pick(c, stack)
+        if expect is not None and not (group and (group[0].get("kind"), str(group[0].get("target"))) == expect):
+            what = "delete" if expect[0] == "label" else "change"
+            raise HTTPException(409, f"the {expect[0]}'s {what} is no longer the last change, so it is not undone here")
         if held:
             raise HTTPException(409, held)
         label, failure, applied = _label(group[0]), None, 0
