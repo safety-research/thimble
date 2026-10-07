@@ -1067,10 +1067,6 @@ The view's program did not end its draw {where} within {s} s: {what}. Draw when 
 
 The view's program draws past the panel {where}: {what}. The panel cuts a row at its right edge and drops the rows below its last row. Fit each row in `d.cols` and the rows in `d.left`, with `cut`, `columns` and the list.
 
-## view-choice-error
-
-The page gave a script error for {count} of the choices of the view's controls: {choices}. Each choice the analyst can make must draw the view, None and Off too. Guard what the page reads of a choice that can be null (rows.by, colour.by, filter.by), and for it draw the records in one group, or with no color.
-
 ## view-robust-reader
 
 With {what}, the reader failed: {error}. A real corpus can lack a file or hold a line cut short, so read what is there, and report each line you cannot parse with problems().
