@@ -12,9 +12,6 @@
   .search .ico { position: absolute; left: 8px; top: 50%; margin-top: -7px; color: var(--text-tertiary); pointer-events: none; }
   /* thimble's parts (.field, .btn, .seg, .chip), its Color by control, its time range selector and the theme's tokens
      come with the frame; this page only lays them out */
-  #f-tool { flex: none; padding: 0 7px 0 9px; }
-  #f-tool .ico { width: 12px; height: 12px; color: var(--text-tertiary); }
-  #f-tool .v { font-weight: 500; }
   #mode { flex: none; }
   .chip .ico { width: 10px; height: 10px; }
   .sw { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
@@ -90,7 +87,6 @@
 <body>
 <div id="ctl">
   <label class="search"><svg class="ico" viewBox="0 0 24 24"><path d="M4 10.5a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0M15.2 15.2L20 20"/></svg><input id="q" class="field" type="search" placeholder="Search" aria-label="Search records" autocomplete="off" spellcheck="false"></label>
-  <button id="f-tool" class="field" type="button" aria-expanded="false" aria-haspopup="menu"></button>
   <span id="mode" class="seg seg-track" role="group" aria-label="Lanes show"><button class="seg-opt active" type="button" data-mode="events" aria-pressed="true">Events</button><button class="seg-opt" type="button" data-mode="density" aria-pressed="false">Density</button></span>
   <span id="colour"></span>
 </div>
@@ -154,7 +150,6 @@ const texts = new Map()
 
 const S = {
   q: '', found: null,
-  tools: new Set(), // tool value indices kept; empty = all
   density: false, // the lanes as Density (bars per bin) rather than Events (a mark per record)
   open: null, detail: null, raw: false,
   keepRow: null,
@@ -199,7 +194,8 @@ const colour = thimble.colorBy({
   fields: [
     // Exploit and Infra name their palette colours (olive, teal), so neither takes the sky blue that sits beside Captcha's blue
     { name: 'activity', title: 'Activity', values: ['Captcha', 'Signup', 'Money', { name: 'Exploit', colour: 5 }, { name: 'Infra', colour: 6 }], value: (i) => (C && typeof i === 'number' ? ACT_VALUE[actOf(i)] : null) },
-    { name: 'tool', title: 'Tool', values: ['terminal', 'Reasoning', 'view', 'create', 'str_replace'], value: (i) => (C && typeof i === 'number' ? TOOL_LABEL[toolName(i)] || null : null) },
+    // create and str_replace name olive and teal, so neither takes the sky blue that sits beside terminal's blue
+    { name: 'tool', title: 'Tool', values: ['terminal', 'Reasoning', 'view', { name: 'create', colour: 5 }, { name: 'str_replace', colour: 6 }], value: (i) => (C && typeof i === 'number' ? TOOL_LABEL[toolName(i)] || null : null) },
   ],
   chips: 'filter',
   strip: '#list',
@@ -231,9 +227,7 @@ const inWin = (i) => range.has(T[i])
 
 // ---------------------------------------------------------------- scope + colour
 function passes(i) {
-  if (S.found && !S.found.has(C.r[i])) return false
-  if (S.tools.size && !S.tools.has(C.tool[i])) return false
-  return true
+  return !(S.found && !S.found.has(C.r[i]))
 }
 let scoped = []
 function compute() {
@@ -278,26 +272,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close() })
 const toggled = (anchor) => (openPop && openPop.anchor === anchor ? (close(), true) : false)
 
 // ---------------------------------------------------------------- control row
-function toolCounts() {
-  const n = new Map()
-  for (let i = 0; i < N; i++) if (S.found ? S.found.has(C.r[i]) : true) n.set(C.tool[i], (n.get(C.tool[i]) || 0) + 1)
-  return [...n].sort((a, b) => b[1] - a[1])
-}
-function toolMenu() {
-  const b = document.getElementById('f-tool')
-  if (toggled(b)) return
-  const rows = toolCounts().map(([v, n]) => {
-    const name = D.names.tool[v] ?? ''
-    return `<button class="item" data-v="${v}"><span class="box${S.tools.has(v) ? ' on' : ''}"></span><span class="lab">${esc(TOOL_LABEL[name] || name)}</span><span class="n">${n}</span></button>`
-  }).join('')
-  const p = pop(b, rows)
-  p.onclick = (ev) => { const it = ev.target.closest('[data-v]'); if (!it) return; const v = +it.dataset.v; S.tools.has(v) ? S.tools.delete(v) : S.tools.add(v); it.querySelector('.box').classList.toggle('on'); rescope() }
-}
 function renderCtl() {
-  const b = document.getElementById('f-tool')
-  const v = S.tools.size === 1 ? (TOOL_LABEL[D.names.tool[[...S.tools][0]]] || '') : S.tools.size ? `${S.tools.size}` : ''
-  b.classList.toggle('active', S.tools.size > 0)
-  b.innerHTML = `Tool${v ? `: <span class="v">${esc(v)}</span>` : ''}${ico('down')}`
   for (const o of document.querySelectorAll('#mode .seg-opt')) {
     const on = (o.dataset.mode === 'density') === S.density
     o.classList.toggle('active', on)
@@ -444,7 +419,8 @@ function binTip(ev) {
   lanesSvg.style.cursor = 'pointer'
   const hov = document.getElementById('hov'), bx0 = Math.max(dens.x0, G + laneScale.x(b0)), bx1 = Math.min(dens.x1, G + laneScale.x(b1))
   if (hov) for (const [k, v] of [['x', bx0], ['width', Math.max(1, bx1 - bx0)], ['y', dens.top + li * dens.LH + 1], ['height', dens.LH], ['display', 'inline']]) hov.setAttribute(k, v)
-  const when = `${range.format(b0, step)}–${step >= 86400 ? range.format(b1, step) : hhmm(b1, step < 60)}`
+  const end = step >= 86400 ? range.format(b1 - 1, step) : hhmm(b1, step < 60).replace(/^00:00/, new Date(b1 * 1000).getUTCDate() !== new Date(b0 * 1000).getUTCDate() ? '24:00' : '00:00')
+  const when = step === 86400 ? range.format(b0, step) : `${range.format(b0, step)}–${end}`
   let rows = ''
   if (!colour.off) for (let k = 0; k < dens.K; k++) if (bin.n[k]) rows += `<div class="r"><span class="sw" style="--c:${dens.colours[k]}"></span>${esc(dens.names[k])}<span class="n">${bin.n[k].toLocaleString('en-US')}</span></div>`
   tip.innerHTML = `<div class="h">${esc(when)} · ${esc(ACT_LABEL[LANES[li]])} · ${bin.total.toLocaleString('en-US')} ${bin.total === 1 ? 'record' : 'records'}</div>${rows}`
@@ -583,7 +559,7 @@ async function pick(r, scroll) {
   S.open = r
   S.detail = null
   if (!inWin(i)) range.set(null)
-  if (!passes(i)) { S.tools.clear(); S.found = null; S.q = ''; document.getElementById('q').value = ''; compute(); renderCtl() }
+  if (!passes(i)) { S.found = null; S.q = ''; document.getElementById('q').value = ''; compute(); renderCtl() }
   await fetchTexts([r])
   const el = rowEl()
   if (el && !scroll) thimble.expand(el, drawList)
@@ -601,7 +577,6 @@ async function pick(r, scroll) {
 function renderView() { counts(); renderLanes(); renderList() }
 function render() { if (!D) return; compute(); renderCtl(); renderLanes(); renderList() }
 function rescope() { document.getElementById('list').scrollTop = 0; render() }
-document.getElementById('f-tool').onclick = () => toolMenu()
 // Events | Density: how the lanes draw the range's records
 document.getElementById('mode').onclick = (ev) => {
   const o = ev.target.closest('[data-mode]')
@@ -624,11 +599,11 @@ document.getElementById('q').addEventListener('input', (e) => {
 })
 let resizeTimer = null
 addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 120) })
-// what Reset puts back of this page's own state: the Tool filter and the record opened (the kit puts back the search
-// field, the chips and the range)
+// what Reset puts back of this page's own state: the record opened (the kit puts back the search field, the chips and
+// the range)
 thimble.onReset({
-  changed: () => S.tools.size > 0 || S.open != null,
-  reset: () => { S.tools.clear(); S.open = null; S.detail = null; S.found = null; S.q = ''; rescope() },
+  changed: () => S.open != null,
+  reset: () => { S.open = null; S.detail = null; S.found = null; S.q = ''; rescope() },
 })
 
 // ---------------------------------------------------------------- places

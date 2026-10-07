@@ -25,25 +25,6 @@
     "locators": [
       "transcript.jsonl#L41",
       "view:activity-timeline/1310"
-    ],
-    "review": {
-      "state": "done",
-      "round": 2,
-      "revised": [
-        "picture 2: the opened record's detail shows its source as \"Lundefined\" and its header as \"Other # ·\" with no index numb…",
-        "picture 1: Captcha and Infra are drawn in the same blue, in both the legend swatches at the top and the stacked whole-r…",
-        "picture 1: the TIME column truncates every timestamp to \"01:02…\" and stays truncated even at 1528 px wide (picture 4),…",
-        "picture 2: clicking a mark opens the record inline inside the table and its \"Result\" block sits at the pane's bottom ed…",
-        "picture 1 and 3: the \"context compaction\" annotation text is drawn on top of the Captcha lane's dense blue marks, so th…"
-      ],
-      "left": [
-        "picture 1: the chronological record table fills more than half the pane's height while the six activity lanes — the tim…",
-        "picture 1: the hour axis (01:00–11:00) is drawn as two identical rows, one directly below the other, between the \"Whole…"
-      ],
-      "note": "",
-      "undo": false,
-      "shots": 10,
-      "ts": "2026-10-06T04:55:26+00:00"
-    }
+    ]
   }
 ]

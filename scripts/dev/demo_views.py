@@ -22,7 +22,9 @@ Each file is checked as the export checks the files it writes (backend/app/demo.
 (demo_scrub.workspace_kind), with no absolute path of the workspace or the machine and not the user name
 (demo_scrub.findings), with no placeholder to fill in on install (which would change its bytes after the stamp), and,
 with `--corpus`, sharing no stretch of demo_verbatim.LONG characters or more with the dataset. It refuses, writing
-nothing, when one fails. views/proposals.json keeps the proposals of the slugs still there. The manifest's `files`,
+nothing, when one fails. views/proposals.json keeps the proposals of the slugs still there, without the record of the
+review home's reviewer (REVIEW_KEY), whose notes name pictures the analyst never saw and whose mark the view's head would
+show as a flag. The manifest's `files`,
 `counts`, `verbatim` and `views` (where each view came from) and README.md follow.
 """
 from __future__ import annotations
@@ -52,6 +54,7 @@ VERSIONS = Path("views") / ".versions"  # in the source workspace: the copies th
 SKIPPED = {"cache", "__pycache__"}  # a view's check pictures and Python's bytecode, which view_digest leaves out
 # the gate's record beside a view's code in a review home: not the view's, and a copy of it would change the digest
 NOT_COPIED = {"gate.json"}
+REVIEW_KEY = "review"  # a proposal's record of the view's reviewer (view_review), left out of a pre-cache's proposals
 
 
 class Refused(Exception):
@@ -194,7 +197,8 @@ def sync(pc: Path, src_ws: Path, pairs: list[tuple[str, str]], corpus: Path | No
     prop_path = ws / PROPOSALS
     if prop_path.is_file():
         props = json.loads(prop_path.read_text("utf-8"))
-        keep = [p for p in props if isinstance(p, dict) and p.get("slug") in {dst for _, dst in pairs}]
+        keep = [{k: v for k, v in p.items() if k != REVIEW_KEY} for p in props
+                if isinstance(p, dict) and p.get("slug") in {dst for _, dst in pairs}]
         dropped = sorted({str(p.get("slug")) for p in props if isinstance(p, dict)} - {str(p.get("slug")) for p in keep})
         if dropped:
             say(f"  views/proposals.json: dropped the proposals of {', '.join(dropped)}")

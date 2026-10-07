@@ -34,34 +34,6 @@
       "view:activity-timeline/unctad/2026-05-11",
       "view:activity-timeline/2026-05-11T14:00..2026-05-11T15:00",
       "view:activity-timeline/thrill-data/2026-05-17T12:00..2026-05-17T18:00"
-    ],
-    "review": {
-      "state": "done",
-      "round": 2,
-      "revised": [
-        "Picture 2: the detail panel at top right is squeezed into the space above the report list, so after the report_id (whic…",
-        "Pictures 1 and 3: the month ticks on the overview strip don't line up with the month ticks on the lanes below it, altho…",
-        "Picture 3 (and 2), 798 px: the lane axis shows only three ticks (2026, Apr, Jul) across eleven months, while the strip…",
-        "Picture 3 (and 2), 798 px: lane names lose the part that identifies them ('Woodlands House ...', 'MAX budget docume...'…",
-        "Picture 1: the list header reads '37,912 reports' and the Review required lane reads 201, but the catalog has 38,160 re…",
-        "Picture 4: the More menu has groups for Disposition, Source basis, Catalog and Data source but none for Confidence (sig…",
-        "Picture 4: the Data source group in the More menu shows only UNCTAD, Thrill Data and AIHW, with nothing to show that th…",
-        "Pictures 1–3: list rows give dates without a year ('2 Nov 16:05:42'), which turns ambiguous once 'Since Sep 2023' adds…",
-        "Picture 1: the first eleven list rows have the same title, 'Review required', and the same why_included text, cut off a…",
-        "Picture 4: the detail panel takes up almost the whole right column at 798 px. Only about three list rows are left below…",
-        "Picture 4 compared with picture 1: when a label is on, the label's legend row pushes Fedresurs out of its own lane and…",
-        "Picture 3: at 798 px the time axis drops the 'Feb' and 'Sep' ticks, so the last label reads 'Aug' even though the range…"
-      ],
-      "left": [
-        "Picture 3: the report detail panel at the top right lists why_included, data_source, source_basis, matched_sources, rep…",
-        "Picture 4: the More menu's Disposition counts are review_required 201 and background 73, while the lanes in picture 1 r…",
-        "Pictures 1 and 2: the lane caption says 'per day, at most 2,028' (in picture 2, 'per 2 days, at most 3,033'), but small…",
-        "Picture 3: after a click, the report list under the detail panel jumps to 'Sat 20 Jun 2026 2,124 reports', and its firs…"
-      ],
-      "note": "",
-      "undo": false,
-      "shots": 12,
-      "ts": "2026-10-06T04:40:04+00:00"
-    }
+    ]
   }
 ]

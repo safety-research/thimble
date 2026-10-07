@@ -130,9 +130,9 @@
   .bfacts { margin: 0; padding: 2px 16px 10px 28px; }
   .bfacts .fact dd { white-space: normal; overflow-wrap: anywhere; }
   .ev { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px; padding: 7px 16px; }
-  .ev.del { background: var(--rem-bg); }
+  .ev.del { background: rgba(var(--ink-rgb), 0.035); }
   .ev .flink { margin-left: auto; }
-  .ev.del > .ico, .ev.del > b { color: var(--status-negative); }
+  .ev.del > .ico { color: var(--text-secondary); }
   .ev > b { font-weight: 500; }
   .ev .tm, .ev .ip { color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
   .ev .cs { color: var(--text-primary); }
@@ -168,8 +168,8 @@
   .upop { width: 360px; max-width: calc(100vw - 16px); padding: 0; }
   .upop .uh { display: flex; align-items: center; gap: 8px; padding: 10px 12px 2px 12px; }
   .upop .uh b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 var(--text-sm) / 1.3 var(--font-body); }
-  .upop .facts { grid-template-columns: 1fr 1fr; margin: 6px 12px 4px; }
-  .upop .fact dt { width: 70px; }
+  .upop .facts { grid-template-columns: 1fr; margin: 6px 12px 4px; }
+  .upop .fact dt { width: 84px; }
   .upop .acts { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px 8px; }
   .upop .pages { max-height: 240px; overflow-y: auto; padding: 0 4px 4px; border-top: 1px solid var(--border-hairline); }
   .up { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 8px 0 10px; border-radius: 4px; cursor: pointer; }
@@ -189,7 +189,6 @@
 <body>
 <div id="ctl">
   <label class="search"><svg class="ico" viewBox="0 0 24 24"><path d="M4 10.5a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0M15.2 15.2L20 20"/></svg><input id="q" class="field" type="search" placeholder="Page name" autocomplete="off" spellcheck="false"></label>
-  <button id="f-wiki" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
   <button id="f-user" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
   <span id="colour"></span>
 </div>
@@ -218,9 +217,9 @@
 <div id="tip"></div>
 <script>
 'use strict'
-// Wiki Page History. The control row narrows the pages by name, wiki and username, and holds thimble's Color by
-// control: a revision's wiki, its kind of save, its page's status (deleted or never deleted), or any label, each value a
-// chip that filters. Below it, thimble's time range selector is the one control for time: its overview holds every
+// Wiki Page History. The control row narrows the pages by name and username, and holds thimble's Color by control: a
+// revision's wiki, its kind of save, its page's status (deleted or never deleted), or any label, each value a chip that
+// filters. Below it, thimble's time range selector is the one control for time: its overview holds every
 // revision over the whole span and its viewfinder frames the range the view shows. The chart of the range counts the
 // revisions (above the line, stacked by the colour's values) and deletes (below it) of those pages per bin, on the
 // chart's one axis, and a drag on it sets the range. The list on the left holds the pages in the range, each with its
@@ -271,6 +270,10 @@ function spanText(a, b) {
   if (dayKey(a) === dayKey(b)) return `${dm(a)} ${hm(a)}–${hm(b)}`
   return `${dm(a)} ${hm(a)} – ${dm(b)} ${hm(b)}`
 }
+function binText(t0, t1) {
+  if (t1 - t0 >= 86400) return t1 - t0 === 86400 ? `${weekday(t0).slice(0, 3)} ${dm(t0)}` : `${dm(t0)} – ${dm(t1 - 1)}`
+  return `${weekday(t0).slice(0, 3)} ${dm(t0)} ${hm(t0)}–${dayKey(t1) !== dayKey(t0) && hm(t1) === '00:00' ? '24:00' : hm(t1)}`
+}
 function shortSpan(a, b) {
   if (b - a < 60) return `${dm(a)} ${hm(a)}`
   if (dayKey(a) === dayKey(b)) return `${dm(a)} ${hm(a)}–${hm(b)}`
@@ -290,7 +293,7 @@ let labelState = { labels: [], filter: null, all: null, palette: null }
 let labelsV = 0
 
 const S = {
-  q: '', wiki: null, user: null, sort: 'n', dir: -1,
+  q: '', user: null, sort: 'n', dir: -1,
   range: null, // the range the time range selector frames, [from, to) in seconds since O.t0, null for the whole span
   sel: null, // the open page (reader page index)
   picked: false, // the analyst picked the open page, rather than the view opening the first
@@ -358,7 +361,6 @@ function inRange(r) {
 // turned off in Color by meets none
 function passes(r, skip) {
   const sk = (k) => skip === k || (Array.isArray(skip) && skip.includes(k))
-  if (!sk('wiki') && S.wiki != null && O.wikis[O.pages.w[r]] !== S.wiki) return false
   if (S.q && !LN[r].includes(S.q)) return false
   if (!sk('colour') && pageLevel() && !colour.isOn(pageValue(r))) return false
   if (!sk('user') && S.user != null && !(userAt.has(S.user) && userRows(userAt.get(S.user)).has(r))) return false
@@ -382,7 +384,7 @@ function compute() {
   rows.sort(by)
 }
 function clearFilters() {
-  S.q = ''; $('q').value = ''; S.wiki = null; S.user = null
+  S.q = ''; $('q').value = ''; S.user = null
   S.range = null
   range.set(null)
 }
@@ -399,12 +401,13 @@ const STATUS = ['deleted', 'never deleted']
 const colour = thimble.colorBy({
   mount: '#colour',
   fields: [
-    { name: 'wiki', title: 'Wiki', values: ['dse', 'probier', 'fractal', 'dorfwiki'] },
-    { name: 'save', title: 'Save', values: BASE_NAME },
+    // a fourth value names olive, so it does not take the sky blue that sits beside the first value's blue
+    { name: 'wiki', title: 'Wiki', values: ['dse', 'probier', 'fractal', { name: 'dorfwiki', colour: 5 }] },
+    { name: 'save', title: 'Kind of save', values: [...BASE_NAME.slice(0, 3), { name: BASE_NAME[3], colour: 5 }] },
     { name: 'status', title: 'Status', values: STATUS },
   ],
   chips: 'filter',
-  onChange: () => { if (O) { compute(); renderAll(); if (S.sel != null) openPage(S.sel, null, true) } },
+  onChange: () => { if (O) { compute(); renderAll(); if (!dropGone() && S.sel != null) openPage(S.sel, null, true) } },
 })
 // whether the colour is a field of the page itself, which a page's row takes and is filtered by
 const pageLevel = () => colour.field === 'wiki' || colour.field === 'status'
@@ -478,42 +481,15 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePop()
 const toggled = (anchor) => (openPop && openPop.anchor === anchor ? (closePop(), true) : false)
 
 // ---------------------------------------------------------------- the control row
-function wikiCounts() {
-  const n = new Map()
-  for (let r = 0; r < N; r++) if (passes(r, 'wiki')) { const w = O.wikis[O.pages.w[r]]; n.set(w, (n.get(w) || 0) + 1) }
-  return n
-}
-let wikiOrder = []
 function renderCtl() {
-  if (!wikiOrder.length || wikiOrder.length !== O.wikis.length) {
-    const all = new Map()
-    for (let r = 0; r < N; r++) { const w = O.wikis[O.pages.w[r]]; all.set(w, (all.get(w) || 0) + 1) }
-    wikiOrder = [...all].sort((a, b) => b[1] - a[1]).map((x) => x[0])
-  }
-  const wk = $('f-wiki')
-  wk.classList.toggle('active', S.wiki != null)
-  wk.innerHTML = S.wiki != null ? `Wiki <span class="v">${esc(S.wiki)}</span><span class="clr" data-clear="wiki" role="button" aria-label="Every wiki">${ico('x')}</span>` : `Wiki${ico('down')}`
   const u = $('f-user')
   u.classList.toggle('active', S.user != null)
   u.innerHTML = S.user != null ? `Username <span class="v">${esc(S.user || 'anonymous')}</span><span class="clr" data-clear="user" role="button" aria-label="Every username">${ico('x')}</span>` : `Username${ico('down')}`
 }
 function clearOne(what) {
-  if (what === 'wiki') S.wiki = null
   if (what === 'user') S.user = null
   closePop(); rescope()
   if (what === 'user' && S.sel != null) openPage(S.sel)
-}
-// the wiki: every wiki with its pages in the other filters
-$('f-wiki').onclick = (e) => {
-  const b = $('f-wiki')
-  if (e.target.closest('[data-clear]')) return clearOne('wiki')
-  if (toggled(b)) return
-  const n = wikiCounts()
-  let total = 0
-  for (const v of n.values()) total += v
-  const p = pop(b, `<button class="item${S.wiki == null ? ' cur' : ''}" type="button" data-w=""><span class="lab">Every wiki</span><span class="n">${fmt(total)}</span></button><div class="sep"></div>` +
-    wikiOrder.map((w) => `<button class="item${S.wiki === w ? ' cur' : ''}" type="button" data-w="${esc(w)}"><span class="lab">${esc(w)}</span><span class="n">${fmt(n.get(w) || 0)}</span></button>`).join(''))
-  p.onclick = (e2) => { const it = e2.target.closest('[data-w]'); if (it) { S.wiki = it.dataset.w || null; closePop(); rescope() } }
 }
 let typing = null
 $('q').addEventListener('input', (e) => { clearTimeout(typing); typing = setTimeout(() => { S.q = e.target.value.trim().toLowerCase(); rescope() }, 120) })
@@ -594,7 +570,6 @@ function renderRange() {
     const G2 = O.gone
     for (let k = 0; k < G2.ot.length; k++) {
       const wk = O.wikis[G2.ow[k]]
-      if (S.wiki != null && wk !== S.wiki) continue
       if (S.q && !String(G2.on[k]).toLowerCase().includes(S.q)) continue
       const v = colour.field === 'wiki' ? wk : colour.field === 'status' ? STATUS[0] : null
       if (lvl && !colour.isOn(v)) continue
@@ -616,7 +591,9 @@ function renderRange() {
 let H = null // the chart's geometry: {x0, x1, sc, bins, slot, fills, ...}
 let stripW = 120
 const stripWidth = () => Math.round(clamp($('list').clientWidth * 0.36, 70, 200))
-const delInk = () => token('--status-negative') || '#c93a28'
+// deletes are drawn below the line in one gray ink, so the Color by choice stays the page's one color
+const DEL_INK = 'rgba(var(--ink-rgb), 0.45)'
+const delInk = () => DEL_INK
 function renderHist() {
   const box = $('chart'), svg = $('hs'), w = box.clientWidth, h = box.clientHeight
   const x0 = G, x1 = Math.max(G + 40, w - 16), up = 36, down = 14, base = 5 + up
@@ -650,14 +627,13 @@ function renderHist() {
       dels[i]++; nd++
     }
   }
-  // deletes of pages with no stored revision, which no row holds: counted where the name, wiki and Color by filters let
+  // deletes of pages with no stored revision, which no row holds: counted where the name and Color by filters let
   // them (each is a deleted page), and while no username is filtered by, since a delete has no author's revisions
   if (S.user == null) {
     const G2 = O.gone
     const lvl = pageLevel()
     for (let k = 0; k < G2.ot.length; k++) {
       const wk = O.wikis[G2.ow[k]]
-      if (S.wiki != null && wk !== S.wiki) continue
       if (S.q && !String(G2.on[k]).toLowerCase().includes(S.q)) continue
       if (lvl && !colour.isOn(colour.field === 'wiki' ? wk : STATUS[0])) continue
       const t = G2.ot[k]
@@ -686,7 +662,7 @@ function renderHist() {
         s += `<rect x="${xa.toFixed(2)}" y="${y.toFixed(2)}" width="${bw.toFixed(2)}" height="${part.toFixed(2)}" fill="${esc(fills[j])}"/>`
       }
     }
-    if (dels[i] || gone[i]) s += `<rect x="${xa.toFixed(2)}" y="${base + 1}" width="${bw.toFixed(2)}" height="${dy(dels[i] + gone[i]).toFixed(2)}" fill="${red}" opacity="0.85"/>`
+    if (dels[i] || gone[i]) s += `<rect x="${xa.toFixed(2)}" y="${base + 1}" width="${bw.toFixed(2)}" height="${dy(dels[i] + gone[i]).toFixed(2)}" fill="${red}"/>`
   }
   s += `<line class="rule" x1="${x0}" x2="${x1}" y1="${base + 0.5}" y2="${base + 0.5}"/>`
   s += `<rect id="brush" x="0" y="1" width="0" height="${base + down + 2}" rx="2" fill="rgba(var(--ink-rgb),.06)" stroke="var(--text-primary)" stroke-width="1.2" display="none"/>`
@@ -737,12 +713,11 @@ function hoverHist(e) {
   const t = H.sc.t(x - H.x0), i = H.sc.binOf(t)
   if (i < 0) return hideTip()
   const [t0, t1] = H.bins[i]
-  const when = t1 - t0 >= 86400 ? `${weekday(t0).slice(0, 3)} ${dm(t0)}${t1 - t0 > 86400 ? ` – ${dm(t1 - 1)}` : ''}` : `${dm(t0)} ${hm(t0)}–${hm(t1)}`
+  const when = binText(t0, t1)
   const parts = []
   if (B.by[i]) for (let j = 0; j < B.by[i].length; j++) if (B.by[i][j]) parts.push(`<div><span class="sw" style="--c:${esc(B.fills[j])}"></span> ${esc(j < B.vals.length ? B.vals[j] : 'No value')}: ${fmt(B.by[i][j])}</div>`)
   const nd = (B.dels[i] || 0) + (B.gone[i] || 0)
-  const gone = B.gone[i] ? ` (${fmt(B.gone[i])} of ${B.gone[i] === 1 ? 'a page' : 'pages'} known only from ${B.gone[i] === 1 ? 'its delete' : 'their deletes'})` : ''
-  showTip(e, `<div class="h">${when}</div>${plural(B.revs[i] || 0, 'revision')}${nd ? ` · ${plural(nd, 'delete')}${gone}` : ''}${parts.length > 1 ? parts.join('') : ''}`)
+  showTip(e, `<div class="h">${when}</div>${plural(B.revs[i] || 0, 'revision')}${nd ? ` · ${plural(nd, 'delete')}` : ''}${parts.length > 1 ? parts.join('') : ''}`)
 }
 const tip = $('tip')
 function showTip(e, html) {
@@ -808,7 +783,7 @@ function stripSvg(r) {
     const xa = Math.max(0, X(i, 0)), xb = Math.min(w, X(i, 1))
     if (xb <= xa) continue
     const bw = Math.max(0.8, xb - xa - (xb - xa > 4 ? 1 : 0.3))
-    s += `<rect x="${xa.toFixed(2)}" y="${base + 1}" width="${bw.toFixed(2)}" height="${Math.max(1.5, Math.sqrt(n / maxD) * down).toFixed(2)}" fill="${red}" opacity="0.85"/>`
+    s += `<rect x="${xa.toFixed(2)}" y="${base + 1}" width="${bw.toFixed(2)}" height="${Math.max(1.5, Math.sqrt(n / maxD) * down).toFixed(2)}" fill="${red}"/>`
   }
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${s}</svg>`
 }
@@ -1011,7 +986,7 @@ function renderPageStrip() {
   const red = delInk()
   for (const [b, m] of dels) {
     const [x, bw, ok] = span(b)
-    if (ok) s += `<rect x="${x.toFixed(2)}" y="${base + 1}" width="${bw.toFixed(2)}" height="${Math.max(1.5, Math.sqrt(m / maxD) * down).toFixed(2)}" fill="${red}" opacity="0.85"/>`
+    if (ok) s += `<rect x="${x.toFixed(2)}" y="${base + 1}" width="${bw.toFixed(2)}" height="${Math.max(1.5, Math.sqrt(m / maxD) * down).toFixed(2)}" fill="${red}"/>`
   }
   svg.setAttribute('width', w); svg.setAttribute('height', h)
   svg.innerHTML = s
@@ -1031,7 +1006,7 @@ $('ps').addEventListener('mousemove', (e) => {
   let nr = 0
   if (a) for (const x of a) nr += x
   const nd = PS.dels.get(b) || 0, nq = PS.reqs.get(b) || 0
-  const when = t1 - t0 >= 86400 ? `${weekday(t0).slice(0, 3)} ${dm(t0)}` : `${dm(t0)} ${hm(t0)}–${hm(t1)}`
+  const when = binText(t0, t1)
   showTip(e, `<div class="h">${when}</div>${[nr ? plural(nr, 'revision') : '', nd ? plural(nd, 'delete') : '', nq ? plural(nq, 'request') : ''].filter(Boolean).join(' · ')}`)
 })
 $('ps').addEventListener('mouseleave', hideTip)
@@ -1119,18 +1094,20 @@ function who(name) {
 function revHtml(b, pos) {
   const T = isoT(b.time)
   const full = fullOn.has(b.i), info = infoOn.has(b.i)
-  const tag = b.base === 'withheld' ? '<span class="chip chip-tone-neutral">first stored</span>' : b.base === 'deleted' ? '<span class="chip chip-tone-negative">after a delete</span>' : b.base === 'new' ? '<span class="chip chip-tone-neutral">new page</span>' : ''
+  const tag = b.base === 'withheld' ? '<span class="chip chip-tone-neutral" title="The first revision the files hold: earlier revisions of the page were withheld, so this shows the page as it stood">first stored</span>'
+    : b.base === 'deleted' ? '<span class="chip chip-tone-neutral" title="The page was deleted before this save, so every line of it counts as added">after a delete</span>'
+    : b.base === 'new' ? '<span class="chip chip-tone-neutral" title="The page\'s first revision: every line counts as added">new page</span>' : ''
   const stat = b.base === 'withheld' ? '' : `<span class="stat">${b.add ? `<b class="a">+${fmt(b.add)}</b>` : ''}${b.rem ? `<b class="r">−${fmt(b.rem)}</b>` : ''}${!b.add && !b.rem ? '<b class="z">±0</b>' : ''}</span>`
   const text = b.change_summary || (b.diff || []).find((l) => l[0] === '+' && String(l[1]).trim())?.[1] || ''
   let h = `<article class="blk rev" data-pos="${pos}" data-i="${b.i}" data-anchor="${esc(b.ref)}" data-anchor-text="${esc(String(text).slice(0, 300))}"${colour.attr(blockRec(b))}>` +
     `<div class="bh" data-thimble-chrome><span class="seq">r${esc(b.seq)}</span><span class="tm">${T != null ? hms(T) : esc(b.time)}</span>${who(b.label)}${b.admin ? '<span class="chip chip-tone-neutral">admin</span>' : ''}${ipHtml(b.ip16)}` +
     `${b.change_summary ? `<span class="cs">${esc(b.change_summary)}</span>` : ''}<span class="br">${tag}${stat}` +
-    `<button class="btn btn-ghost btn-sm${full ? ' active' : ''}" type="button" data-full>${ico('text')}Full text</button><button class="btn btn-ghost btn-sm${info ? ' active' : ''}" type="button" data-info aria-label="Details">${ico('info')}</button>${fileLink(b.ref)}</span></div>`
-  h += full ? bodyHtml(b.i) : diffHtml(b)
+    `<button class="btn btn-ghost btn-sm${full ? ' active' : ''}" type="button" data-full title="The page as this revision left it">${ico('text')}Full text</button><button class="btn btn-ghost btn-sm${info ? ' active' : ''}" type="button" data-info aria-label="Details" title="Details">${ico('info')}</button>${fileLink(b.ref)}</span></div>`
   if (info) {
     const base = { prev: `r${b.seq - 1}`, new: 'an empty page, the first revision', deleted: 'an empty page, after a delete', withheld: 'none, earlier revisions withheld' }[b.base] || b.base
     h += `<dl class="facts bfacts thimble-details">${fact('rev_id', b.rev_id, true)}${fact('time', whenUTC(b.time))}${fact('write_date', whenUTC(b.write_date))}${fact('body_len', fmt(b.body_len))}${fact('lines', fmt(b.lines))}${fact('request_action', b.request_action == null ? 'null' : b.request_action)}${fact('compared with', base)}<div class="fact"><button class="btn btn-ghost btn-sm" type="button" data-file>${ico('file')}Open in the File browser</button></div></dl>`
   }
+  h += full ? bodyHtml(b.i) : diffHtml(b)
   return h + '</article>'
 }
 function delHtml(b, pos) {
@@ -1142,18 +1119,26 @@ function reqHtml(b, pos) {
   return `<div class="blk ev req" data-pos="${pos}" data-anchor="${esc(b.ref)}" data-anchor-text="${esc(b.request || b.request_action || '')}">${ico('globe')}<b>Request</b><span class="tm">${T != null ? hms(T) : esc(b.time)}</span>${b.label ? who(b.label) : ''}${ipHtml(b.ip16)}${b.request_action ? `<span class="chip chip-tone-neutral">${esc(b.request_action)}</span>` : ''}${b.request ? `<code>${esc(b.request)}</code>` : ''}${fileLink(b.ref)}</div>`
 }
 function blockHtml(b, pos) { return b.kind === 'delete' ? delHtml(b, pos) : b.kind === 'request' ? reqHtml(b, pos) : revHtml(b, pos) }
+// whether the Color by chips keep an item of the history: a revision by its value; a delete or a request, which takes no
+// field's value, always under a field, and by its label value under a label
+function keptItem(b) {
+  if (b.kind === 'delete' || b.kind === 'request') return !colour.label || colour.keeps({ ref: b.ref })
+  return colour.keeps(blockRec(b))
+}
 function renderBlocks() {
   let h = ''
   if (bFrom > 0) h += '<div class="edge" id="top"></div>'
-  let day = null
+  let day = null, kept = 0
   blocks.forEach((b, k) => {
+    if (!keptItem(b)) return
+    kept++
     const T = isoT(b.time)
     const d = T != null ? dayKey(T) : ''
     if (d !== day) { day = d; h += `<div class="day">${T != null ? `${weekday(T)} ${dm(T)}` : ''}</div>` }
     h += blockHtml(b, bFrom + k)
   })
   if (bFrom + blocks.length < bTotal) h += '<div class="edge" id="end"></div>'
-  if (!blocks.length) h += `<div class="empty">No revision of this page passes these filters</div>`
+  else if (!kept) h += `<div class="empty">No revision of this page meets these filters</div>`
   $('blocks').innerHTML = h
   fitClips($('blocks'))
   renderBlocksStrip()
@@ -1274,7 +1259,7 @@ async function userPop(name, anchor) {
   p.innerHTML = `<div${res.ref ? ` data-anchor="${esc(res.ref)}" data-anchor-text="${esc(name)}"` : ''}><div class="uh"><b>${esc(name || 'anonymous')}</b>${O.admins.includes(name) ? '<span class="chip chip-tone-neutral">admin</span>' : ''}${res.role ? `<span class="chip chip-tone-neutral">${esc(res.role)}</span>` : ''}</div>` +
     `<dl class="facts">${fact('revisions', fmt(res.stored_revisions ?? pages.reduce((a, x) => a + (x.edits || 0), 0)))}${fact('pages', fmt(pages.length))}${fact('first write', T(res.first_write))}${fact('last write', T(res.last_write))}${res.stored_revision_ips != null ? fact('IPs', fmt(res.stored_revision_ips)) : ''}${res.stored_revision_ip16 != null ? fact('IP prefixes', fmt(res.stored_revision_ip16)) : ''}${fact('wikis', (res.wikis || []).join(', '))}${res.deletes ? fact('deletes', fmt(res.deletes)) : ''}</dl>` +
     `<div class="acts"><button class="btn btn-secondary btn-sm" type="button" data-act="list">${S.user === name ? 'Every username' : 'Only this username'}</button></div>` +
-    `<div class="pages"><div class="up uhd"><span class="nm">${plural(pages.length, 'page')}</span><span class="n">its revisions of all</span></div>${pages.map((x) => x.p == null ? `<div class="up"><span class="nm">${esc(x.page_id)}</span></div>` : `<div class="up" data-p="${x.p}"${x.key ? ` data-anchor="${esc(unitRef(x.key))}" data-anchor-text="${esc(x.name)}"` : ''}><span class="nm">${esc(x.name)}</span><span class="wk">${esc(x.wiki)}</span>${x.deletes ? ico('trash') : ''}<span class="n">${fmt(x.edits)} of ${fmt(x.n_revs)}</span></div>`).join('')}</div></div>`
+    `<div class="pages"><div class="up uhd"><span class="nm">${plural(pages.length, 'page')}</span><span class="n">revisions / page total</span></div>${pages.map((x) => x.p == null ? `<div class="up"><span class="nm">${esc(x.page_id)}</span></div>` : `<div class="up" data-p="${x.p}"${x.key ? ` data-anchor="${esc(unitRef(x.key))}" data-anchor-text="${esc(x.name)}"` : ''}><span class="nm">${esc(x.name)}</span><span class="wk">${esc(x.wiki)}</span>${x.deletes ? ico('trash') : ''}<span class="n">${fmt(x.edits)} / ${fmt(x.n_revs)}</span></div>`).join('')}</div></div>`
   p.onclick = (e) => {
     const a = e.target.closest('[data-act]')
     if (a && a.dataset.act === 'list') { S.user = S.user === name ? null : name; closePop(); rescope(); if (S.sel != null) openPage(S.sel); return }
@@ -1294,17 +1279,27 @@ async function userPop(name, anchor) {
 // ---------------------------------------------------------------- render
 // the range's overview first: the range thimble kept for the view, which it opens on, decides the rows
 function renderAll() { if (!O) return; renderCtl(); if (renderRange()) compute(); renderCounts(); renderHist(); renderListHead(); renderList(); renderListStrip() }
+// the open page, once the filters no longer keep it, gives way to the list's first page (or to none); true when it did
+function dropGone() {
+  if (S.sel == null || rows.some((r) => O.pages.p[r] === S.sel)) return false
+  S.sel = null; S.picked = false; PG = null
+  $('ph').innerHTML = ''; $('ps').innerHTML = ''; $('ps').setAttribute('height', 6)
+  $('blocks').innerHTML = rows.length ? '' : '<div class="empty">No page meets these filters</div>'
+  if (S.event == null && rows.length) openPage(O.pages.p[rows[0]])
+  return true
+}
 function rescope() {
   if (!O) return
   compute(); $('list').scrollTop = 0; renderAll()
+  if (dropGone()) return
   if (S.sel == null && S.event == null && rows.length) openPage(O.pages.p[rows[0]])
 }
-// Reset, in Color by's row: the wiki, the username, the sort and the page picked go back to how the view opens (the
+// Reset, in Color by's row: the username, the sort and the page picked go back to how the view opens (the
 // first page of the list); the kit puts back the search field, the chips and the range itself
 thimble.onReset({
-  changed: () => S.wiki != null || S.user != null || S.sort !== 'n' || S.dir !== -1 || S.picked || S.pinfo || S.event != null,
+  changed: () => S.user != null || S.sort !== 'n' || S.dir !== -1 || S.picked || S.pinfo || S.event != null,
   reset: () => {
-    S.wiki = null; S.user = null; S.q = ''; S.sort = 'n'; S.dir = -1; $('sort').value = 'n:-1'
+    S.user = null; S.q = ''; S.sort = 'n'; S.dir = -1; $('sort').value = 'n:-1'
     S.picked = false; S.pinfo = false; S.event = null; S.sel = null; S.range = null
     if (!O) return
     compute(); $('list').scrollTop = 0; renderAll()
@@ -1379,7 +1374,7 @@ thimble.onLabels(async (st) => {
   if (!O) return
   if (!(await loadOverview())) return
   compute(); renderAll()
-  if (S.sel != null) openPage(S.sel, null, true)
+  if (!dropGone() && S.sel != null) openPage(S.sel, null, true)
 })
 boot().then(() => { if (!opened && O && S.sel == null && rows.length) openPage(O.pages.p[rows[0]]) })
 </script>

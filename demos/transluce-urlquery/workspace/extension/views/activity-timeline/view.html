@@ -18,7 +18,8 @@
   .fbtn .ico { width: 12px; height: 12px; color: var(--text-tertiary); }
   .fbtn .v { font-weight: 500; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
   .fbtn .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  .fbtn .sws { display: inline-flex; gap: 2px; }
+  .fbtn .clr { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -3px; border-radius: 4px; color: var(--text-tertiary); }
+  .fbtn .clr:hover { background: var(--track-bg); color: var(--text-primary); }
   #chips { display: contents; }
   /* the Color by control takes the row's free width, and a line of its own when less than its least is left */
   #colour { flex: 1 1 320px; min-width: 260px; margin-left: 4px; }
@@ -81,7 +82,6 @@
   .url .ib { margin-top: -3px; }
   .det-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .det-acts .ico { width: 12px; height: 12px; }
-  .caveat { margin: 10px 0 0; color: var(--text-tertiary); font-size: var(--text-2xs); line-height: 1.45; }
   .marks { display: flex; flex-wrap: wrap; gap: 4px; }
 
   #listhead { flex: none; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--border-hairline); }
@@ -111,10 +111,7 @@
   .pop { position: fixed; z-index: 60; min-width: 200px; max-width: 320px; max-height: 72vh; overflow: auto; padding: 4px; border-radius: var(--radius-ui); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), 0.14); font: 400 var(--text-ui-sm) / 1.3 var(--font-body); }
   .pop .head { padding: 8px 8px 4px; font: 500 var(--text-xs) / 1 var(--font-body); color: var(--text-tertiary); }
   .pop .head .n { margin-left: 6px; font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  .pop.more { display: flex; width: min(560px, calc(100vw - 12px)); max-width: none; height: min(500px, calc(100vh - 60px)); max-height: none; overflow: hidden; padding: 0; }
-  .more-grid { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .more-grid .col { min-height: 0; overflow-y: auto; padding: 4px; scrollbar-width: thin; }
-  .more-grid .col.src { display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border-hairline); }
+  .pop.lanes { display: flex; flex-direction: column; width: min(320px, calc(100vw - 12px)); height: min(500px, calc(100vh - 60px)); max-height: none; overflow: hidden; padding: 4px; }
   /* a box that scrolls shows a shadow at the edge it can scroll past */
   .scrolls { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin;
     background: linear-gradient(var(--raised-bg) 30%, transparent) top / 100% 28px no-repeat local,
@@ -146,8 +143,7 @@
 <body>
 <div id="ctl">
   <label class="search"><svg class="ico" viewBox="0 0 24 24"><path d="M4 10.5a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0M15.2 15.2L20 20"/></svg><input id="q" class="field" type="search" placeholder="Search reports" autocomplete="off" spellcheck="false"></label>
-  <button id="f-broad_class" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
-  <button id="f-more" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
+  <button id="f-lane" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
   <span id="chips"></span>
   <span id="colour"></span>
 </div>
@@ -189,9 +185,7 @@ const LANE_H = 18, SEP = 10 // a lane's height, and the space before the lanes o
 const RH = 46 // list row
 const NONINC = new Set(['Review required', 'Background control'])
 const COLS = ['r', 't', 'ln', 'sl', 'lane', 'confidence', 'disposition', 'broad_class', 'source_basis', 'catalog', 'why_included', 'mb']
-const FILTERS = ['confidence', 'disposition', 'broad_class', 'source_basis', 'catalog']
-const FNAME = { confidence: 'Confidence', disposition: 'Disposition', broad_class: 'Class', source_basis: 'Source basis', catalog: 'Catalog', lane: 'Data source' }
-const MORE = ['disposition', 'source_basis', 'catalog']
+const NO_CONF = 'No confidence' // a report with no confidence, named as its Color by chip names it
 const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const BINS = [1, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, DAY, 2 * DAY, 7 * DAY]
@@ -230,7 +224,8 @@ function spanWords(a, b) {
   }
   const sec = a % 60 || b % 60
   const tm = (t) => (sec ? hms(t) : hm(t))
-  if (isoDay(a) === isoDay(b - 1)) return `${dmy(a)}, ${tm(a)}–${tm(b)}`
+  // a span that ends at midnight ends at 24:00 of its day
+  if (isoDay(a) === isoDay(b - 1)) return `${dmy(a)}, ${tm(a)}–${b % DAY === 0 ? (sec ? '24:00:00' : '24:00') : tm(b)}`
   return `${dm(a)} ${tm(a)} – ${dm(b)} ${tm(b)}`
 }
 const binStart = (t, b) => (b === 7 * DAY ? Math.floor((t - 4 * DAY) / b) * b + 4 * DAY : Math.floor(t / b) * b) // weeks from Monday
@@ -248,7 +243,6 @@ let EXT = [0, DAY] // the whole span of the data: the first report's UTC day to 
 
 const S = {
   lanes: new Set(), // lane codes shown alone; empty for all
-  f: Object.fromEntries(FILTERS.map((k) => [k, new Set()])), // field -> the value codes kept
   q: '', found: null, // the search and the reader rows that hold it
   sel: null, detail: null, // the report opened in place: its reader row and its fetched details
   keep: null, // a row a citation opened, kept whatever the label filter keeps
@@ -319,7 +313,6 @@ const isWhole = () => range.full
 function lowerBound(t) { let lo = 0, hi = N; while (lo < hi) { const m = (lo + hi) >> 1; if (T[m] < t) lo = m + 1; else hi = m } return lo }
 function passes(i, skip) {
   if (S.found && !S.found.has(C.r[i])) return false
-  for (const k of FILTERS) if (k !== skip && S.f[k].size && !S.f[k].has(C[k][i])) return false
   if (skip !== 'lane' && S.lanes.size && !S.lanes.has(C.lane[i])) return false
   if (skip !== 'colour' && !VON[VAL[i]]) return false
   return true
@@ -348,19 +341,22 @@ const colour = thimble.colorBy({
   strip: '#list',
   onChange: () => { if (D) { assignValues(); rescope() } },
 })
+// the range a search widened to the whole span, since none of its hits was in it: put back when the search is cleared
+let searchWin
 // thimble's time range selector: the whole span with its reports in the Color by colors, and the viewfinder that
 // frames the range the lanes and the list show; its readout stands in the lanes' gutter. It opens on the whole span.
 const range = thimble.timeRange({
   mount: '#range',
   readout: '#rread',
   onInput: () => { if (D) schedule() },
-  onChange: () => { if (D) { listReset = true; draw() } },
+  // a range the analyst sets after a search widened it is theirs, kept when the search is cleared
+  onChange: () => { if (!range.full) searchWin = undefined; if (D) { listReset = true; draw() } },
 })
-// what Reset puts back of the page's own state: the menus' values, the lanes shown alone and the open report; the kit
-// puts back the search field, the chips and the range
+// what Reset puts back of the page's own state: the lanes shown alone and the open report; the kit puts back the search
+// field, the chips and the range
 thimble.onReset({
-  changed: () => FILTERS.some((k) => S.f[k].size) || S.lanes.size > 0 || S.sel != null || !!S.found,
-  reset: () => { for (const k of FILTERS) S.f[k].clear(); S.lanes.clear(); S.sel = null; S.detail = null; S.found = null; S.q = ''; listReset = true; rescope() },
+  changed: () => S.lanes.size > 0 || S.sel != null || !!S.found,
+  reset: () => { S.lanes.clear(); S.sel = null; S.detail = null; S.found = null; S.q = ''; searchWin = undefined; listReset = true; rescope() },
 })
 // the range selector's records: every report that passes the filters, at its time, in its Color by value
 function overview() {
@@ -457,88 +453,56 @@ document.addEventListener('mousedown', (e) => { if (openPop && !openPop.contains
 const toggled = (anchor) => (openPop && openPop.anchor === anchor ? (close(), true) : false)
 
 // ---------------------------------------------------------------- the control row
-function counts(k) {
-  // each value of field k with the reports of the window that pass every other filter
+// the data sources with the reports of the range that pass every other filter, in the lanes' order
+function laneCounts() {
   const [a, b] = W(), n = new Map()
-  for (let i = lowerBound(a), z = lowerBound(b); i < z; i++) if (passes(i, k)) n.set(C[k][i], (n.get(C[k][i]) || 0) + 1)
-  for (const v of (k === 'lane' ? S.lanes : S.f[k])) if (!n.has(v)) n.set(v, 0)
-  const order = k === 'lane' ? D.lanes : null
-  return [...n].sort((p, q) => (order ? order.indexOf(p[0]) - order.indexOf(q[0]) : q[1] - p[1]))
+  for (let i = lowerBound(a), z = lowerBound(b); i < z; i++) if (passes(i, 'lane')) n.set(C.lane[i], (n.get(C.lane[i]) || 0) + 1)
+  for (const v of S.lanes) if (!n.has(v)) n.set(v, 0)
+  return [...n].sort((p, q) => D.lanes.indexOf(p[0]) - D.lanes.indexOf(q[0]))
 }
-const valueName = (k, v) => (k === 'lane' ? laneName(v) : name(k, v)) || 'blank'
-function checklist(k, max = 99, keep = null) {
-  const all = counts(k).filter(([v]) => !keep || keep(v)), sel = k === 'lane' ? S.lanes : S.f[k]
-  const rows = all.slice(0, max).map(([v, n]) => `<button class="item" data-k="${k}" data-v="${v}"><span class="box${sel.has(v) ? ' on' : ''}"></span><span class="lab${name(k, v) || k === 'lane' ? '' : ' none'}">${esc(valueName(k, v))}</span><span class="n">${fmt(n)}</span></button>`).join('')
-  return rows + (all.length > max ? `<button class="more-link" data-all="${k}">${all.length - max} more</button>` : '')
+function checklist(keep) {
+  return laneCounts().filter(([v]) => keep(v)).map(([v, n]) => `<button class="item" data-v="${v}"><span class="box${S.lanes.has(v) ? ' on' : ''}"></span><span class="lab">${esc(laneName(v))}</span><span class="n">${fmt(n)}</span></button>`).join('')
 }
-function toggleValue(k, v) {
-  const s = k === 'lane' ? S.lanes : S.f[k]
-  s.has(v) ? s.delete(v) : s.add(v)
-  rescope()
-}
-function filterMenu(k) {
-  const b = $('f-' + k)
-  if (toggled(b)) return
-  const p = pop(b, `<div class="head">${FNAME[k]}</div>${checklist(k)}`)
-  p.onclick = (ev) => { const it = ev.target.closest('[data-v]'); if (it) { toggleValue(k, +it.dataset.v); repop(`<div class="head">${FNAME[k]}</div>${checklist(k)}`) } }
-}
-// More: confidence, disposition, source basis and catalog on the left; every data source on the right, in a column of
-// its own that scrolls, its shadow showing there is more below
-function moreMenu() {
-  const b = $('f-more')
+// Data source: every data source, the reports under review and the background controls last, in a column that scrolls,
+// its shadow showing there is more below; the lanes it keeps are the lanes a click on a lane's name shows alone
+function laneMenu() {
+  const b = $('f-lane')
   if (toggled(b)) return
   const html = () => {
-    const isSrc = (c) => !NONINC.has(laneName(c)), src = counts('lane').filter(([c]) => isSrc(c))
-    const non = checklist('lane', 99, (c) => !isSrc(c))
-    return `<div class="more-grid"><div class="col">${['confidence', ...MORE].map((k) => `<div class="head">${FNAME[k]}</div>${checklist(k)}`).join('')}</div><div class="col src"><div class="head">${FNAME.lane}<span class="n">${src.length}</span></div><div class="scrolls">${checklist('lane', 99, isSrc)}${non ? `<div class="head">Not included</div>${non}` : ''}</div></div></div>`
+    const isSrc = (c) => !NONINC.has(laneName(c))
+    const non = checklist((c) => !isSrc(c))
+    return `<div class="scrolls">${checklist(isSrc)}${non ? `<div class="sep"></div>${non}` : ''}</div>`
   }
   const p = pop(b, html())
-  p.classList.add('more')
+  p.classList.add('lanes')
   place(p, b, 'left')
   p.relabel = () => repop(html())
   p.onclick = (ev) => {
     const it = ev.target.closest('[data-v]')
-    if (it) { toggleValue(it.dataset.k, +it.dataset.v); repop(html()) }
+    if (!it) return
+    const v = +it.dataset.v
+    S.lanes.has(v) ? S.lanes.delete(v) : S.lanes.add(v)
+    rescope()
+    repop(html())
   }
 }
-function fbtn(k) {
-  const b = $('f-' + k), set = S.f[k]
-  const v = set.size === 1 ? valueName(k, [...set][0]) : set.size ? `${set.size}` : ''
-  b.classList.toggle('active', set.size > 0)
-  b.innerHTML = `${FNAME[k]}${v ? `: <span class="v">${esc(v)}</span>` : ''}${ico('down')}`
-}
-// a filter that is set: thimble's active filter chip, its name and value, × at its end; the whole chip clears it
+// a filter that is set and that no control in the row shows: thimble's active filter chip, × at its end
 const fchip = (text, attrs) => `<button type="button" class="chip chip-tone-neutral chip-act active"${attrs} title="Clear this filter" aria-label="Clear the filter ${esc(text)}"><span class="chip-text">${esc(text)}</span>${ico('x')}</button>`
 function renderCtl() {
-  fbtn('broad_class')
-  const n = MORE.reduce((s, k) => s + S.f[k].size, 0) + (S.lanes.size ? 1 : 0)
-  const more = $('f-more')
-  more.innerHTML = `More${n ? ` <span class="n">${n}</span>` : ''}${ico('down')}`
-  more.classList.toggle('active', n > 0)
+  const b = $('f-lane'), n = S.lanes.size
+  b.classList.toggle('active', n > 0)
+  b.innerHTML = n === 1 ? `Data source: <span class="v">${esc(laneName([...S.lanes][0]))}</span><span class="clr" data-clear role="button" aria-label="Every data source">${ico('x')}</span>`
+    : n ? `Data sources <span class="n">${n}</span><span class="clr" data-clear role="button" aria-label="Every data source">${ico('x')}</span>` : `Data source${ico('down')}`
   const chips = []
   if (labelState.filter) {
     const f = labelState.filter, l = (labelState.all || labelState.labels || []).find((x) => x.name === f.label)
     chips.push(fchip(f.label === f.value ? f.label : `${f.label} · ${f.value}`, ` data-unfilter data-label="${esc(l ? l.id : '')}"`))
   }
-  if (S.lanes.size) {
-    const t = S.lanes.size === 1 ? laneName([...S.lanes][0]) : `${S.lanes.size} lanes`
-    chips.push(fchip(`Lane · ${t}`, ' data-k="lane"'))
-  }
-  for (const k of [...MORE, 'confidence']) if (S.f[k].size) {
-    const t = S.f[k].size === 1 ? valueName(k, [...S.f[k]][0]) : `${S.f[k].size} values`
-    chips.push(fchip(`${FNAME[k]} · ${t}`, ` data-k="${k}"`))
-  }
-  if (S.found) chips.push(fchip(`Search · ${S.q}`, ' data-q'))
   $('chips').innerHTML = chips.join('')
 }
 $('chips').onclick = (ev) => {
   const b = ev.target.closest('button')
-  if (!b) return
-  if (b.dataset.unfilter != null) return thimble.setFilter(null, null).catch(() => {})
-  if (b.dataset.q != null) { S.q = ''; S.found = null; $('q').value = '' }
-  else if (b.dataset.k === 'lane') S.lanes.clear()
-  else S.f[b.dataset.k].clear()
-  rescope()
+  if (b && b.dataset.unfilter != null) thimble.setFilter(null, null).catch(() => {})
 }
 // ---------------------------------------------------------------- layout: the lanes, one height each
 let G = 150 // the gutter of lane names, px
@@ -582,13 +546,14 @@ function textWidth(text, font) {
   measure.font = font
   return measure.measureText(text).width
 }
-function sizes(lay) {
+function sizes() {
   const w = $('tl').clientWidth - 14
   const body = getComputedStyle(document.body).fontFamily, mono = token('--font-mono') || 'monospace'
+  // as wide as every lane's name and the widest count need, whichever lanes show, so the plot stays where it is when a
+  // lane is shown alone
+  const most = textWidth(fmt(N), `400 11px ${mono}`)
   let need = 0
-  for (const r of lay ? lay.rows : []) {
-    need = Math.max(need, textWidth(laneName(r.c), `400 12px ${body}`) + 8 + textWidth(laneCount(r).text, `400 11px ${mono}`))
-  }
+  for (const c of D.lanes) need = Math.max(need, textWidth(laneName(c), `400 12px ${body}`) + 8 + most)
   G = Math.round(clamp(need + 18, 140, Math.min(280, w * 0.46)))
   document.documentElement.style.setProperty('--gut', G + 'px')
   PW = Math.max(160, w - G - 14 - ($('lanes').offsetWidth - $('lanes').clientWidth))
@@ -685,7 +650,7 @@ function renderLanes() {
         const i = list[q], x = X(T[i]) - MW / 2, y = r.y + r.h - 2 - (at[q] + 1) * (mh + 1) + 1
         const c = colourOf(i), ref = refOf(i)
         const isMarked = VAL[i] === ORD[0] && VALS[VAL[i]] != null
-        const el = `<rect class="mk" data-i="${i}" data-anchor="${esc(ref)}" data-anchor-unmarked data-anchor-text="${esc(laneName(C.lane[i]))} · ${dmy(T[i])} ${hms(T[i])} UTC · ${esc(name('confidence', C.confidence[i]) || 'blank')}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${MW.toFixed(2)}" height="${mh.toFixed(2)}" rx="1" fill="${c}"${i === sel ? ' stroke="var(--text-primary)" stroke-width="1.5"' : ''}/>`
+        const el = `<rect class="mk" data-i="${i}" data-anchor="${esc(ref)}" data-anchor-unmarked data-anchor-text="${esc(laneName(C.lane[i]))} · ${dmy(T[i])} ${hms(T[i])} UTC · ${esc(name('confidence', C.confidence[i]) || NO_CONF)}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${MW.toFixed(2)}" height="${mh.toFixed(2)}" rx="1" fill="${c}"${i === sel ? ' stroke="var(--text-primary)" stroke-width="1.5"' : ''}/>`
         ;(i === sel ? sels : isMarked ? marked : plain).push(el)
       }
       s += plain.join('') + marked.join('') + sels.join('')
@@ -843,7 +808,7 @@ function hover(ev) {
     const i = +mk.dataset.i
     let same = 0
     for (let q = lowerBound(T[i]); q < N && T[q] === T[i]; q++) if (C.lane[q] === C.lane[i] && passes(q)) same++
-    return showTip(`<div class="h">${esc(laneName(C.lane[i]))}</div><div class="w">${dmy(T[i])} ${hms(T[i])} UTC</div><div class="k"><span class="sw" style="--c:${colourOf(i)}"></span>${esc(name('confidence', C.confidence[i]) || 'blank')} · ${esc(name('broad_class', C.broad_class[i]))}</div>${same > 1 ? `<div class="x">${same} reports in this lane at this second</div>` : ''}<div class="x">${esc(name('why_included', C.why_included[i]).slice(0, 160))}</div>`, ev)
+    return showTip(`<div class="h">${esc(laneName(C.lane[i]))}</div><div class="w">${dmy(T[i])} ${hms(T[i])} UTC</div>${colour.off ? '' : `<div class="k"><span class="sw" style="--c:${colourOf(i)}"></span>${esc(catName(VAL[i]))}</div>`}<div class="x">${esc(name('confidence', C.confidence[i]) || NO_CONF)} · ${esc(name('broad_class', C.broad_class[i]))}</div>${same > 1 ? `<div class="x">${same} reports in this lane at this second</div>` : ''}<div class="x">${esc(name('why_included', C.why_included[i]).slice(0, 160))}</div>`, ev)
   }
   hideTip()
 }
@@ -907,7 +872,7 @@ function dayHtml(k, top, anchored) {
 }
 function rowHtml(i, top) {
   const ref = refOf(i), sref = srcRefOf(i), lane = laneName(C.lane[i])
-  const conf = name('confidence', C.confidence[i]) || 'blank', cls = name('broad_class', C.broad_class[i])
+  const conf = name('confidence', C.confidence[i]) || NO_CONF, cls = name('broad_class', C.broad_class[i])
   const why = name('why_included', C.why_included[i]), id = idOf(i)
   const src = sref ? `<span class="src" data-anchor="${esc(sref)}" data-anchor-text="${esc(lane)}">${esc(lane)}</span>` : `<span class="src">${esc(lane)}</span>`
   const open = C.r[i] === S.sel
@@ -961,7 +926,7 @@ function scrollListTo(i, centre) {
 // ---------------------------------------------------------------- a report opened in place
 function detailHtml(i) {
   const d = S.detail && S.detail.row === S.sel ? S.detail : null
-  const conf = name('confidence', C.confidence[i]) || 'blank'
+  const conf = name('confidence', C.confidence[i]) || NO_CONF
   const tag = (t) => `<span class="chip chip-tone-neutral">${esc(t)}</span>`
   const tags = `${tag(conf)}${tag(name('disposition', C.disposition[i]))}${name('catalog', C.catalog[i]) === 'supplemental' ? tag('supplemental catalog') : ''}`
   const when = `${WEEKDAY[dt(T[i]).getUTCDay()]} ${dmy(T[i])} · ${hms(T[i])} UTC`
@@ -970,7 +935,7 @@ function detailHtml(i) {
     const s = d.source
     const src = s ? `<div class="det-sec srcbox" data-anchor="${esc(s.ref)}" data-anchor-text="${esc(s.data_source)}"><dl class="facts"><dt>data_source</dt><dd>${esc(s.data_source)}</dd><dt>source_basis</dt><dd class="mono">${esc(s.source_basis || '—')}</dd><dt>matched_sources</dt><dd>${esc(s.matched_sources || '—')}</dd></dl></div>` : ''
     const marks = (d.marks || []).length ? `<div class="det-sec"><div class="h">Labels</div><div class="marks">${d.marks.map((m) => { const l = (labelState.all || labelState.labels || []).find((x) => x.name === m.label); return `<span class="chip chip-key" data-label="${esc(l ? l.id : '')}" style="--c:${esc(m.colour)}"><span class="chip-sw"></span><span class="chip-text">${esc(m.label === m.value ? m.label : `${m.label}: ${m.value}`)}</span></span>` }).join('')}</div></div>` : ''
-    body = `<div class="det-sec"><div class="h">why_included</div><p class="det-why">${esc(d.why_included || '')}</p></div>${src}${marks}<div class="det-sec"><div class="kv"><div class="k">report_id</div><div class="v">${esc(d.report_id || '')}</div></div><div class="kv"><div class="k">report_date_utc</div><div class="v">${esc(d.report_date_utc || '')}</div></div><div class="kv"><div class="k">report_url</div><div class="url"><a href="${esc(d.report_url || '')}" data-url title="${esc(d.report_url || '')}, an outside page: a click copies it">${esc(d.report_url || '')}</a><button class="btn btn-ghost btn-sm ib" type="button" data-copy title="Copy the address" aria-label="Copy the address">${ico('copy')}</button></div></div></div>${d.caveat ? `<p class="caveat">${esc(d.caveat)}</p>` : ''}`
+    body = `<div class="det-sec"><div class="h">why_included</div><p class="det-why">${esc(d.why_included || '')}</p></div>${src}${marks}<div class="det-sec"><div class="kv"><div class="k">report_id</div><div class="v">${esc(d.report_id || '')}</div></div><div class="kv"><div class="k">report_date_utc</div><div class="v">${esc(d.report_date_utc || '')}</div></div><div class="kv"><div class="k">report_url</div><div class="url"><a href="${esc(d.report_url || '')}" data-url title="${esc(d.report_url || '')}, an outside page: a click copies it">${esc(d.report_url || '')}</a><button class="btn btn-ghost btn-sm ib" type="button" data-copy title="Copy the address" aria-label="Copy the address">${ico('copy')}</button></div></div></div>`
   }
   return `<div class="thimble-details" data-thimble-chrome><div class="det-tags">${tags}</div><div class="det-when">${when}</div>${body}<div class="det-acts"><button class="btn btn-secondary btn-sm" type="button" data-near>${ico('zoom')}The hour around it</button><button class="btn btn-secondary btn-sm" type="button" data-file>${ico('file')}Its row in the file</button></div></div>`
 }
@@ -1031,7 +996,7 @@ function draw() {
   if (!D) return
   chipCounts()
   layout = laneLayout()
-  sizes(layout)
+  sizes()
   renderAxis(); renderLanes()
   computeList(); renderListHead()
   if (listReset) {
@@ -1050,24 +1015,28 @@ function render() {
 // a change of what is in scope starts the list again at its top
 function rescope() { $('list').scrollTop = 0; render(); if (openPop && openPop.relabel) openPop.relabel() }
 // the control row is drawn before the reports arrive, so the page has its controls while it loads
-$('f-broad_class').innerHTML = `${FNAME.broad_class}${ico('down')}`
-$('f-more').innerHTML = `More${ico('down')}`
-$('f-broad_class').onclick = () => filterMenu('broad_class')
-$('f-more').onclick = () => moreMenu()
+$('f-lane').innerHTML = `Data source${ico('down')}`
+$('f-lane').onclick = (ev) => {
+  if (ev.target.closest('[data-clear]')) { close(); S.lanes.clear(); return rescope() }
+  laneMenu()
+}
 let typing = null
 $('q').addEventListener('input', (e) => {
   clearTimeout(typing)
   typing = setTimeout(async () => {
     const q = e.target.value.trim()
     S.q = q
-    if (!q) S.found = null
-    else {
+    if (!q) {
+      S.found = null
+      if (searchWin !== undefined) { const w = searchWin; searchWin = undefined; range.set(w[0], w[1]) }
+    } else {
       let res
       try { res = await thimble.fetch({ op: 'search', q }, { key: 'search' }) } catch (err) { if (err && err.name === 'AbortError') return; throw err }
       if (S.q !== q) return
       S.found = new Set(res.rows)
+      // a search whose hits all lie outside the range shows the whole span; one with no hit keeps the range
       const inside = (w) => res.rows.some((r) => { const i = rowAt.get(r); return i != null && T[i] >= w[0] && T[i] < w[1] })
-      if (!isWhole() && !inside(W())) range.set(null)
+      if (res.rows.length && !isWhole() && !inside(W())) { const w = [range.from, range.to]; range.set(null); searchWin = w }
     }
     rescope()
   }, 220)
@@ -1086,7 +1055,7 @@ addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setT
 // ---------------------------------------------------------------- places
 // A report opens in place in the list, its lane in view and the filters that would drop it cleared; a lane shows alone;
 // a day or a window opens zoomed to it; a lane within a day or a window shows alone and zoomed.
-function clearFilters() { for (const k of FILTERS) S.f[k].clear(); S.lanes.clear(); S.found = null; S.q = ''; $('q').value = '' }
+function clearFilters() { S.lanes.clear(); S.found = null; S.q = ''; searchWin = undefined; $('q').value = '' }
 async function openPlace(t) {
   if (t.r != null) return pick(t.r)
   if (t.lane != null || t.from != null) {
