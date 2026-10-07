@@ -1038,6 +1038,9 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     assert rep["page"]["fetches"] >= 1 and Path(rep["page"]["png"]).is_file()
     assert [s["state"] for s in rep["shots"]] == list(views.CHECK_STATES)
     assert [s["state"] for s in rep["shots"] if s.get("png")] == ["opened"], "only the picture asked for is taken"
+    # every choice of the kit's controls the example mounts was tried, and drew
+    tried = {(c["control"], c["choice"]) for s in rep["shots"] if s["state"] == "choices" for c in s.get("choices") or []}
+    assert ("Color by", "Off") in tried, tried
     if name != "pdf":
         shown = rep["shots"][0]["shown"]
         assert shown["due"] and shown["drawn"] == shown["due"], "the test label shows on the records a worked example shows"
@@ -1080,6 +1083,47 @@ async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control
     notes = views.layout_notes([{**plain, "state": "wide"}])
     assert len(notes) == 1 and "overlaps other text in 1 place," in notes[0] and "rest of the pane is empty" in notes[0]
 
+
+
+# a page with the kit's three controls whose Rows draws a heading from the choice's title, so Rows: None (no title)
+# throws in its onChange; every other choice draws
+CHOICES_HTML = """<!doctype html><html><head></head><body><div class="top"><span id="filter"></span><span id="rows"></span>
+<span id="colour"></span></div><div id="list"></div>
+<script>
+const posts = [{ ref: 'board.jsonl#L1', kind: 'ask' }, { ref: 'board.jsonl#L2', kind: 'answer' }]
+const colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], strip: '#list', onChange: draw })
+const filter = thimble.filterBy({ mount: '#filter', fields: [{ name: 'kind', title: 'Kind' }], onChange: draw })
+const rows = thimble.rows({ mount: '#rows', fields: [{ name: 'kind', title: 'Kind' }], onChange: draw })
+function draw() {
+  const head = rows.by.title
+  document.getElementById('list').innerHTML = '<h3>' + head + '</h3>' + posts.filter((p) => filter.keeps(p)).map((p) => '<div data-anchor="' + p.ref + '"' + colour.attr(p) + '>' + p.kind + '</div>').join('')
+}
+draw()
+</script></body></html>"""
+
+
+async def test_the_gate_tries_every_choice_of_the_kit_s_controls_and_names_the_one_that_gives_a_script_error(ws, inproc,
+                                                                                                          bound):
+    """The checks' `choices` state tries each choice of Color by, Rows and Filter by the page mounted, Off and None
+    among them, and fails the view on the choice whose drawing throws, naming it (choice_problems)."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "choices", reader=THREADS_READER, html=CHOICES_HTML, **{**VIEW, "name": "Choices"})
+    (s,) = await views.shoot_states(CORPUS, "choices", [{"open": {}, "sweep": True, "labels": views.probe_context()}])
+    tried = [(c["control"], c["choice"]) for c in s["choices"]]
+    for want in [("Color by", "Off"), ("Color by", "Kind"), ("Rows", "None"), ("Rows", "Kind"), ("Filter by", "None"),
+                 ("Filter by", "Kind")]:
+        assert want in tried, tried
+    # each control's first choice is tried again after the others, as the analyst comes back to it
+    assert ("Rows", "None (after the others)") in tried and ("Color by", "Off (after the others)") in tried, tried
+    bad = [(c["control"], c["choice"]) for c in s["choices"] if c["errors"]]
+    assert bad == [("Rows", "None"), ("Rows", "None (after the others)")], s["choices"]
+    assert s["ok"], "the errors of a choice are its own, not the state's"
+    (problem,) = views.choice_problems([{**s, "state": "choices"}])
+    assert "Rows: None" in problem and "title" in problem, problem
+    assert not views.choice_problems([{**s, "state": "choices", "choices": [c for c in s["choices"] if not c["errors"]]}])
 
 
 async def test_the_headless_page_waits_for_a_slow_answer_and_its_run_gets_the_time_the_answer_took(ws, inproc, bound,

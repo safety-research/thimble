@@ -172,6 +172,9 @@ PARTS_CSS = Path(__file__).with_name("viewer_parts.css")
 # the order new values take the label palette's places, which the kit's Color by reads as window.__thimbleLabelOrder
 # (the frontend imports the same file; kernel_thimble.LABEL_ORDER is the server's)
 LABEL_ORDER_JSON = Path(__file__).with_name("label_order.json")
+# the label palette's places around the colour wheel, as the kit's picker (window.__thimbleLabelWheel) and the app's
+# show them
+LABEL_WHEEL_JSON = Path(__file__).with_name("label_wheel.json")
 HOST_PY = Path(__file__).with_name("view_host.py")
 KERNEL_THIMBLE = Path(__file__).with_name("kernel_thimble.py")  # the `thimble` module a reader imports (view_host)
 # The test label of the checks and the review: it marks every record whose line is a multiple of PROBE_EVERY, about one
@@ -3226,7 +3229,8 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     head = [f'<meta http-equiv="Content-Security-Policy" content="{csp}">',
             '<meta charset="utf-8">',
             f"<script>window.__thimbleView = {_script_text(who)}; "
-            f"window.__thimbleLabelOrder = {_script_text(LABEL_ORDER_JSON.read_text('utf-8').strip())}</script>",
+            f"window.__thimbleLabelOrder = {_script_text(LABEL_ORDER_JSON.read_text('utf-8').strip())}; "
+            f"window.__thimbleLabelWheel = {_script_text(LABEL_WHEEL_JSON.read_text('utf-8').strip())}</script>",
             f"<script>{_script_text(BRIDGE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(COLOUR_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(CONTROLS_JS.read_text('utf-8'))}</script>",
@@ -3394,7 +3398,8 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
             return {"error": str(getattr(e, "detail", e))}
 
     shot_states = [{"out": s.get("out"), "open": s.get("open") or {}, "actions": [str(a) for a in s.get("actions") or []],
-                    **({"viewport": {"width": s["size"][0], "height": s["size"][1]}} if s.get("size") else {})}
+                    **({"viewport": {"width": s["size"][0], "height": s["size"][1]}} if s.get("size") else {}),
+                    **({"sweep": True} if s.get("sweep") else {})}
                    for s in states]
     doc = frame_document(view, media, derived=await derived_fields(c, slug, view))
     out = await shoot_page(doc, shot_states, answer, width=width, height=height, media=media)
@@ -3501,7 +3506,8 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
                     results = [{"ok": False, "errors": [launch_error.splitlines()[0][:400]]} for _ in states]
                 return
 
-    limit = SHOT_TIMEOUT_S + SHOT_STATE_S * len(states)
+    # a state that tries every choice of the kit's controls (`sweep`) takes the time of another two
+    limit = SHOT_TIMEOUT_S + SHOT_STATE_S * (len(states) + 2 * sum(1 for s in states if s.get("sweep")))
     talk = asyncio.ensure_future(converse())
     start = time.monotonic()
     timed_out = ""
@@ -3813,7 +3819,7 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
     else:
         report["shots"], report["page"] = shots, _page_of(shots)
     problems, notes = label_problems(view, files, shots, switch=label_controls(view))
-    report["problems"] += problems + self_label_problems(shots)
+    report["problems"] += problems + self_label_problems(shots) + choice_problems(shots)
     report["notes"] += notes
     page = report["page"]
     if not report["problems"] and all(r["ok"] for r in report["checks"]) and (page.get("ok") or page.get("unavailable")):
@@ -3926,7 +3932,7 @@ def draw_problems(draws: list[dict[str, Any]]) -> list[str]:
 # the states the checks load the page in: with the test label on, in the pane beside the Labels pane, the page as the
 # Views bar opens it, the same filtered to the test label, and the first place that resolved; then with no label, the
 # page as it opens in its pane and in the pane of a 1920 px window
-CHECK_STATES = ("overview", "filtered", "detail", "opened", "wide")
+CHECK_STATES = ("overview", "filtered", "detail", "opened", "wide", "choices")
 LABELLED_STATES = ("overview", "filtered", "detail")
 ANSWERS_KEPT = 2  # reader answers per state the checks keep, for unlisted_derived and the review
 
@@ -3946,8 +3952,10 @@ async def shoot_checks(c: str, slug: str, view: dict[str, Any], files: list[tupl
                        checks: list[dict[str, Any]], base: Path, stem: str, *, picture: bool = False) -> list[dict[str, Any]]:
     """The page loaded in CHECK_STATES: with the test label on, at PANE_NARROW, the overview, opened on its first claimed
     file as the Views bar opens it, the same filtered to the test label, and the detail, the first place that resolved;
-    then with no label the overview at PANE_SIZE and at PANE_WIDE. Only with `picture` is anything pictured: the
-    overview at PANE_SIZE, as the review's first picture shows it. Each result carries its `state` name."""
+    then with no label the overview at PANE_SIZE and at PANE_WIDE; then with the test label on, at PANE_SIZE, every
+    choice of the view kit's controls the page mounted tried in turn (`choices`, choice_problems), whose page is no state
+    the other checks read. Only with `picture` is anything pictured: the overview at PANE_SIZE, as the review's first
+    picture shows it. Each result carries its `state` name."""
     overview = {"ref": None, "path": files[0][0]} if files else {"ref": None}
     detail = await first_place(c, slug, checks) or overview
     states = [{"out": None, "open": overview, "labels": probe_context(), "size": PANE_NARROW},
@@ -3955,9 +3963,35 @@ async def shoot_checks(c: str, slug: str, view: dict[str, Any], files: list[tupl
               {"out": None, "open": detail, "labels": probe_context(), "size": PANE_NARROW},
               {"out": base / f"{stem}-overview.png" if picture else None, "open": overview, "labels": NO_LABELS,
                "size": PANE_SIZE},
-              {"out": None, "open": overview, "labels": NO_LABELS, "size": PANE_WIDE}]
+              {"out": None, "open": overview, "labels": NO_LABELS, "size": PANE_WIDE},
+              # every choice of the kit's controls the page mounted, in turn (choice_problems)
+              {"out": None, "open": overview, "labels": probe_context(), "size": PANE_SIZE, "sweep": True}]
     shots = await shoot_states(c, slug, states, answers=ANSWERS_KEPT)
-    return [{**s, "state": name} for s, name in zip(shots, CHECK_STATES)]
+    out = [{**s, "state": name} for s, name in zip(shots, CHECK_STATES)]
+    # what the page shows after the last choice is no state of its own: the other checks read the states before it
+    for s in out:
+        if s["state"] == "choices":
+            for k in ("shown", "layout", "painted", "label_controls", "controls"):
+                s.pop(k, None)
+    return out
+
+
+CHOICE_ERRORS_NAMED = 3  # the choices with a script error a check names
+
+
+def choice_problems(shots: list[dict[str, Any]]) -> list[str]:
+    """The problem of the choices of the kit's controls that gave a script error when the `choices` state tried them
+    (view_shot.mjs `sweep`): each choice the analyst can make, Rows: None and Color by: Off among them, must draw."""
+    bad = [ch for s in shots if s.get("state") == "choices" for ch in s.get("choices") or [] if ch.get("errors")]
+    if not bad:
+        return []
+    named = "; ".join(f"{ch.get('control')}: {ch.get('choice')} ({str(ch['errors'][0])[:200]})" for ch in bad[:CHOICE_ERRORS_NAMED])
+    more = f" and {len(bad) - CHOICE_ERRORS_NAMED} more" if len(bad) > CHOICE_ERRORS_NAMED else ""
+    return [_hint("view-choice-error", count=len(bad), choices=named + more)
+            or f"{_plural(len(bad), 'choice')} of the view's controls gave a script error when chosen: {named}{more}. "
+               "Every choice the analyst can make must draw the view, None and Off among them: guard what the page "
+               "reads of a choice that can be null (rows.by, colour.by, filter.by) and draw the records in one group, "
+               "or uncolored, for it."]
 
 
 def _page_of(shots: list[dict[str, Any]]) -> dict[str, Any]:
