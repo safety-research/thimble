@@ -493,96 +493,138 @@ LEAD1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576.jsonl"
 PORT1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576/subagents/agent-a07a4da7.jsonl"
 
 
-def _lanes(body: list[str]) -> list[str]:
-    """The lanes' names, from the row under the strip to the axis, the row above the blank one."""
-    end = body.index("", 3) - 1
-    return [re.match(r"\s*\S+(?: \S+)*", x[2:])[0] for x in body[3:end]]
+def _tree(body: list[str]) -> list[str]:
+    """The lanes' names, from the row under the time range's strip to the axis, whose key starts `× failed`."""
+    top = next(i for i, x in enumerate(body) if re.match(r"\s+\d+ \w{3} \d\d:\d\d", x)) + 2
+    end = next(i for i, x in enumerate(body) if x.startswith("  × failed"))
+    return [re.match(r"\s*\S+(?: \S+)*", x[2:])[0] for x in body[top:end]]
+
+
+def _pane(rows: list[str], title: str) -> list[str]:
+    """The side pane's rows beside the transcript whose title starts `title`, at the right of the `│` between them."""
+    t = next(i for i, x in enumerate(rows) if x.startswith(f"  {title}"))
+    return [x[x.index("│") + 1:].strip() for x in rows[t + 1:] if "│" in x]
 
 
 @needs_node
 @pytest.mark.parametrize("cols", [120, 200])
 async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
-    """The worked example at 120 and 200 columns: the top row (search, the sessions menu, Color by with its chips), the
-    time range's readout and its strip broken where the runs lie hours apart, a lane per session under its run with each
-    subagent under the session that spawned it, the axis with its breaks, then the messages and calls under each run's
-    name, each with its time, session, tool or kind, first line and how long a call took; its hint row names only keys
-    the pane passes on."""
+    """The worked example at 120 and 200 columns: the top row (search, Filter by, Rows, Color by with its chips), the
+    time range's readout and its strip broken where the runs lie hours apart, each run's sessions as a tree of lanes (a
+    lead, the subagents it started under it with their guides), the axis with the key of the failed calls, what links
+    the lead read to the others, then its transcript under a title that names it and counts its turns: the user's
+    prompt, each tool call on one line, a Task call naming the subagent it started; its hint row names only keys the pane
+    passes on."""
     out = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP)
     lines = out.splitlines()
-    assert lines[:2] == ["  Linked sessions", "  3 runs · 17 sessions · 316 calls · 36 messages"]
+    assert lines[:2] == ["  Linked sessions", "  3 runs · 17 sessions · 352 turns"]
     body, hints = _split(lines, 3, 40)
     assert all(len(x) <= cols + 2 for x in body)
-    assert body[0].startswith("  / search  sessions  all  Color by  Speaker  ● client-port 100  ● lead 63  ● webhooks 63")
+    assert body[0].startswith("  / search  Filter by  none  Rows  Session  Color by  Speaker  ● client-port 100  ● lead 63")
     assert body[1] == "  12 Sep 14:02 – 13 Sep 09:53 · 19h 51m"
     assert body[2].count(" // ") == 2
-    assert _lanes(body) == [
-        "▾ Run 1 · nested team", "  lead", "  ├ survey", "  ├ client-port", "  │ ├ pagination", "  │ └ auth-headers",
-        "  ├ webhooks", "  └ test-runner", "▾ Run 2 · flat team", "  lead", "  ├ client-port", "  ├ webhooks",
-        "  └ test-runner", "▾ Run 3 · with reviewer", "  lead", "  ├ survey", "  ├ client-port", "  ├ webhooks",
-        "  ├ reviewer", "  └ reviewer 2"]
+    assert _tree(body) == [
+        "▾ Run 1 · lead", "  ├ survey", "  ├ client-port", "  │ ├ pagination", "  │ └ auth-headers", "  ├ webhooks",
+        "  └ test-runner", "▾ Run 2 · lead", "  ├ client-port", "  ├ webhooks", "  └ test-runner", "▾ Run 3 · lead",
+        "  ├ survey", "  ├ client-port", "  ├ webhooks", "  ├ reviewer", "  └ reviewer 2"]
     # each run's lanes stand in its own stretch of the axis: Run 2's start after the first break, Run 3's after the second
     breaks = [i for i in range(len(body[2])) if body[2][i:i + 4] == " // "]
-    assert body[4][27:breaks[0]].strip() and not body[13][27:breaks[0]].strip() and body[13][breaks[0]:breaks[1]].strip()
-    axis_row = body[23]
-    assert axis_row.startswith("  ─ running  × failed"), "the key of the lanes' own marks, in the names' column"
-    assert axis_row.count("//") == 2 and "12 Sep 14:15" in axis_row and "12 Sep 16:45" in axis_row and "13 Sep 09:15" in axis_row
-    assert body[24] == ""
-    assert body[25].startswith("  Run 1 · nested team")
-    assert body[26].startswith("❯ ● 14:02:00  lead          Prompt     Upgrade invoicer from Brambleway API v2 to v3.")
-    assert re.match(r"  ● 14:03:10  lead          Task       Find every v2 call site +292 s", body[31])
-    assert re.match(r"  ● 14:04:31  survey        WebSearch  Brambleway API v3 changelog +× error  30 s", body[38])
-    assert hints == ("↑↓ to choose · Enter to open · c to color by · / to search · s for sessions · [ ] to "
-                                 "pan · + - to zoom · a to ask · b to go back · x to close")
+    assert body[3][22:breaks[0]].strip() and not body[10][22:breaks[0]].strip() and body[10][breaks[0]:breaks[1]].strip()
+    axis = next(i for i, x in enumerate(body) if x.startswith("  × failed"))
+    assert body[axis].count("//") == 2 and "12 Sep 14:15" in body[axis] and "13 Sep 09:15" in body[axis]
+    assert body[axis + 1] == ""
+    assert body[axis + 2].startswith("  lead of Run 1 · nested team · subagents survey 14:03:10, client-port 14:09:05, webhooks 14:09:06")
+    assert body[axis + 3].startswith("  lead · Run 1 · nested team  20 turns · 14:02:00 – 14:46:10")
+    rows = [re.sub(r"\s*▌*$", "", x) for x in body[axis + 4:]]
+    assert rows[:2] == ["  12 Sep 2026", "❯ 14:02:00  ● user"]
+    assert rows[2].strip().startswith("Upgrade invoicer from Brambleway API v2 to v3.")
+    assert "  14:03:10  ⎿ Task → survey Find every v2 call site" in rows
+    assert hints.startswith("↑↓ to choose · Enter to open · c to color by · / to search · f to filter by · g for rows")
+    for k in ("{ } to resize the overview", "[ ] to pan", "+ - to zoom", "a to ask", "n p for the next or previous lane",
+              "b to go back · x to close"):
+        assert k in hints, k
 
 
 @needs_node
 async def test_linked_sessions_folds_a_run_where_the_lanes_have_no_room(linked):
-    """In a short panel the largest run folds to one lane of all its sessions, so the list keeps its rows; ▸ unfolds it,
-    and another run folds in its place."""
+    """In a short panel the largest run folds to one lane of all its sessions, so the transcript keeps its rows; ▸
+    unfolds it, and another run folds in its place."""
     out = await term_views.draw_text(linked, "linked-sessions", cols=92, rows=36, wrap=DRAW_WRAP, panel=False)
     body = out.splitlines()
-    assert _lanes(body)[:2] == ["▸ Run 1 · nested team", "▾ Run 2 · flat team"]
-    assert body[3][25:].strip(), "a folded run draws its sessions' records in one lane"
+    assert _tree(body)[:2] == ["▸ Run 1 · lead", "▾ Run 2 · lead"]
+    assert body[3][22:].strip(), "a folded run draws its sessions' turns in one lane"
     out = await term_views.draw_text(linked, "linked-sessions", cols=92, rows=36, wrap=DRAW_WRAP, panel=False, keys=["click:▸"])
-    lanes = _lanes(out.splitlines())
-    assert lanes[:3] == ["▾ Run 1 · nested team", "  lead", "  ├ survey"] and lanes[-1].startswith("▸ Run 3")
+    lanes = _tree(out.splitlines())
+    assert lanes[:3] == ["▾ Run 1 · lead", "  ├ survey", "  ├ client-port"] and lanes[-1] == "▸ Run 3 · lead"
 
 
 @needs_node
-async def test_linked_sessions_opens_a_call_in_place_narrows_to_a_run_and_follows_a_citation(linked):
-    """Enter opens the chosen call in place: what came back, the subagent its Task spawned (a click shows that session
-    alone) and its place; an Edit opened from its citation shows its change; a run's name in the lanes narrows the view
-    to it, as the sessions menu does, and a citation of a run opens the view narrowed to it."""
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP,
-                                     keys=["down"] * 5 + ["return"], panel=False)
-    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
-    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "14:03:10  lead          Task       Find every v2 call site" in rows[at]
-    assert rows[at + 1].strip().startswith("14 call sites in 9 files.")
-    assert rows[at + 2].strip() == "Subagent"
-    assert rows[at + 3].strip() == "14:03:12  survey  Find every v2 call site in invoicer/ and summarise the v3 changes that affect them."
-    assert rows[at + 4].strip() == f"↗ {LEAD1} line 10  ask about it"
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP,
-                                     keys=["down"] * 5 + ["return", "click:Find every v2 call site in invoicer/ and"], panel=False)
-    rows = out.splitlines()
-    assert "sessions  survey" in rows[0] and rows[0].rstrip().endswith("reset")
-    assert _lanes(rows) == ["▾ Run 1 · nested team", "  survey"]
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref=f"{PORT1}#L13", panel=False)
-    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
-    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "14:10:20  client-port   Edit       invoicer/client/http.py" in rows[at]
-    assert rows[at + 1].strip() == '− BASE_URL = "https://api.brambleway.example/v2"'
-    assert rows[at + 2].strip() == '+ BASE_URL = "https://api.brambleway.example/v3"'
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, keys=["click:Run 2 · flat team"],
+async def test_linked_sessions_reads_a_subagent_and_the_session_that_started_it(linked):
+    """n reads the next lane, client-port: over its transcript, when lead's Task call started it, when its result came
+    back and the subagents it started; its first turn is the prompt lead gave it. u reads lead at that Task call, chosen
+    and opened in the side pane beside the transcript (the subagent it started, its whole prompt, what came back, its
+    place); s on that call reads client-port again."""
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, keys=["n", "n"])
+    body, hints = _split(out.splitlines(), 3, 40)
+    at = next(i for i, x in enumerate(body) if x.startswith("  started by"))
+    assert body[at] == ("  started by lead 14:09:05 · result back to lead 14:29:35 · subagents pagination 14:12:40, "
+                        "auth-headers 14:12:41")
+    assert body[at + 1].startswith("  client-port · Run 1 · nested team  40 turns · 14:09:08 – 14:29:35")
+    assert re.sub(r"\s*▌*$", "", body[at + 3]) == "❯ 14:09:08  ● lead"
+    assert "u to read lead" in hints
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, keys=["n", "n", "u"],
                                      panel=False)
     rows = out.splitlines()
-    assert "sessions  Run 2 · flat team" in rows[0]
-    assert rows[1].startswith("  12 Sep 16:4")
-    assert _lanes(rows) == ["▾ Run 2 · flat team", "  lead", "  ├ client-port", "  ├ webhooks", "  └ test-runner"]
-    assert not any(x.startswith("  Run ") for x in rows), "one run in view needs no heading"
+    assert "14:09:05  ⎿ Task → client-port Port invoicer/client to v3" in next(x for x in rows if x.startswith("❯"))
+    pane = _pane(rows, "lead · Run 1 · nested team")
+    assert pane[0].startswith("lead · Task · 14:09:05") and pane[0].endswith("close")
+    assert pane[1] == "→ client-port  Port invoicer/client to v3"
+    assert pane[3].startswith("Port invoicer/client to Brambleway v3")
+    assert pane[4].startswith("Client on v3 with its interface kept")
+    assert pane[5].startswith("↗ …/36fe6b9d") and pane[5].endswith("line 14")
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP,
+                                     keys=["n", "n", "u", "s"], panel=False)
+    assert any(x.startswith("  client-port · Run 1 · nested team  40 turns") for x in out.splitlines())
+
+
+@needs_node
+async def test_linked_sessions_opens_a_cited_call_beside_its_transcript_and_filters_to_a_cited_run(linked):
+    """A citation of an Edit reads its session, the call chosen and opened in the side pane: the lines it took out and
+    put in, what came back and its place. A citation of a run turns Filter by to Run with that run alone on, reads its
+    lead and leaves only its lanes; Reset turns every run back on."""
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref=f"{PORT1}#L13", panel=False)
+    rows = out.splitlines()
+    assert "14:10:20  ⎿ Edit invoicer/client/http.py" in next(x for x in rows if x.startswith("❯"))
+    pane = _pane(rows, "client-port · Run 1 · nested team")
+    assert pane[0].startswith("client-port · Edit · 14:10:20")
+    assert pane[1:5] == ["invoicer/client/http.py", '− BASE_URL = "https://api.brambleway.example/v2"',
+                         '+ BASE_URL = "https://api.brambleway.example/v3"', "The file invoicer/client/http.py has been updated."]
+    assert pane[5].startswith("↗ …/agent-a07a4da7.jsonl line 13")
     out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref="view:linked-sessions/r3",
                                      panel=False)
-    assert "sessions  Run 3 · with reviewer" in out.splitlines()[0]
+    rows = out.splitlines()
+    assert rows[0].startswith("  / search  Filter by  Run  ○ Run 1 166  ○ Run 2 95  ● Run 3 91  Rows  Session")
+    assert rows[0].rstrip().endswith("reset")
+    assert _tree(rows) == ["▾ Run 3 · lead", "  ├ survey", "  ├ client-port", "  ├ webhooks", "  ├ reviewer", "  └ reviewer 2"]
+    assert any(x.startswith("  lead · Run 3 · with reviewer  17 turns") for x in rows)
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref="view:linked-sessions/r3",
+                                     keys=["r"], panel=False)
+    rows = out.splitlines()
+    assert "● Run 1 166  ● Run 2 95  ● Run 3 91" in rows[0]
+    assert _tree(rows)[0] == "▾ Run 1 · lead"
+
+
+@needs_node
+async def test_linked_sessions_groups_its_lanes_by_agent_and_reads_a_lane_across_its_sessions(linked):
+    """Rows by Agent: a lane per agent across the runs, and the transcript of a lane read holds its turns in every session
+    in time order, its title naming the lane and counting its turns and sessions."""
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP,
+                                     keys=["g", "click:Agent", "n", "n"], panel=False)
+    rows = out.splitlines()
+    assert "Rows  Agent" in rows[0]
+    assert [x.strip() for x in _tree(rows)] == ["lead", "survey", "client-port", "webhooks", "pagination", "auth-headers",
+                                                "test-runner", "reviewer"]
+    assert any(x.startswith("  Agent: client-port  101 turns · 3 sessions") for x in rows)
 
 
 # ------------------------------------------------------------------------------------------------------ Repository
@@ -797,23 +839,24 @@ async def test_timeline_details_and_menu_read_in_a_narrow_panel(timeline):
 
 @needs_node
 async def test_linked_sessions_opens_as_its_browser_page_does_and_reads_at_every_width(linked):
-    """Colored by the label that is on; each run's name whole on its row; list rows cut with …; every key in the hint
-    row; zoomed into one run, the lanes of the sessions that did not run then fold away."""
+    """Colored by the label that is on; each run's lead whole on its lane; every key in the hint row; zoomed into one
+    run, the lanes of the sessions that did not run then go, and the transcript reads a session that did."""
     await _labels_on(linked, "linked-sessions")
     for cols in WIDTHS:
         out = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP)
         body, hints = _split(out.splitlines(), 3, 40)
         assert all(len(x) <= cols + 2 for x in body), cols
-        top = "\n".join(body[:3])
+        top = "\n".join(body[:4])
         assert "Color by  Pagination ↗" in top and "● pagination 20" in top, cols
-        assert "▾ Run 3 · with reviewer" in "\n".join(body), cols
-        for k in ("c to color by", "s for sessions", "[ ] to pan", "+ - to zoom"):
+        assert "Run 3 · lead" in "\n".join(body), cols
+        for k in ("c to color by", "f to filter by", "g for rows", "[ ] to pan", "+ - to zoom"):
             assert k in hints, (cols, k)
-        assert all(len(x) <= cols for x in _list_rows(body))
     out = await term_views.draw_text(linked, "linked-sessions", cols=47, rows=40, wrap=DRAW_WRAP, keys=["+", "+", "]"],
                                      panel=False)
-    lanes = "\n".join(out.splitlines()[:16])
-    assert "Run 2 · flat team" in lanes and "Run 1" not in lanes
+    rows = out.splitlines()
+    lanes = "\n".join(_tree(rows))
+    assert "Run 2 · lead" in lanes and "Run 1" not in lanes
+    assert any(x.startswith("  lead · Run 2") for x in rows), "\n".join(rows)
 
 
 @needs_node
