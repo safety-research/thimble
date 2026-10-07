@@ -4,11 +4,10 @@
 // The orientation, a writer and a report check, each one of thimble's agents run as a subagent of the analyst's Claude
 // Code session (backend subagents.py), are a tool-call card whose steps are that agent's own subagents (sessionSteps).
 // Its header names the model and effort the run used. While it runs the card shows Stop (in its own thread the
-// composer's stop square is its Stop instead, ChatPanel), which stops it through thimble's plugin, and says where the
-// terminal shows it; while the orientation waits for its critic, "Waiting for the critique". Its permission requests
-// wait on the one permission card above the composer (PermissionCard), which the terminal answers. A run stopped by the
-// analyst's quit says so, with Write again on a writer's card. In main, a finished orientation's card follows one line
-// counting what it left for review. A follow-up of the orientation is the same card for that run alone (`run`), with
+// composer's stop square is its Stop instead, ChatPanel), which stops it through thimble's plugin; while the orientation
+// waits for its critic, "Waiting for the critique". Its permission requests wait on the one permission card above the
+// composer (PermissionCard), which the terminal answers. A run stopped by the analyst's quit says so, with Write again
+// on a writer's card. In main, a finished orientation's card follows one line counting what it left for review. A follow-up of the orientation is the same card for that run alone (`run`), with
 // what it changed and Undo while the last undo step is that follow-up's (backend undo.py).
 import { useContext, useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
@@ -33,7 +32,7 @@ import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { RefText } from './markdown'
-import { NO_STOP_LINE, PAUSED_LINE, STOP_DONE_LINE, continueOf, isSubagent, runValues, stopFailedLine, stoppedLine, terminalLine, valuesText } from './subagent'
+import { NO_STOP_LINE, PAUSED_LINE, STOP_DONE_LINE, isSubagent, runValues, stopFailedLine, stoppedLine, valuesText } from './subagent'
 
 const REFETCH_DEBOUNCE_MS = 150
 /** The roles of thimble's agents whose card lists their own subagents as steps and carries Stop: the orientation, a
@@ -272,27 +271,36 @@ function WriteAgain({ ws, request }: { ws: string; request: string }) {
   )
 }
 
-/** What a subagent's card says under its steps: that the orientation waits for its critic, where the terminal shows
- * it, why it stopped (with Write again on a writer that main's quit stopped), and, while thimble's module is not in
- * main's session, how to stop it in the terminal. */
-export function SubagentNotes({ ws, meta, running, noModule = false, back = false, mainSid = null }: { ws: string; meta: ChatMeta | null; running: boolean; noModule?: boolean; back?: boolean; mainSid?: string | null }) {
+/** What a subagent's card says under its steps, or null when it says nothing: that the orientation waits for its critic
+ * (`paused`), why it stopped (`stopped`), Write again on a writer that main's quit stopped (`again`, its request), and,
+ * while thimble's module is not in main's session, how to stop it in the terminal (`noStop`). Nothing says where the
+ * terminal shows the agent, in any state. Pure. */
+export function subagentNotes(meta: ChatMeta | null, running: boolean, noModule = false, back = false): { paused: boolean; stopped: string; again: string | null; noStop: boolean } | null {
   if (!isSubagent(meta)) return null
-  // the terminal shows it only in the Claude Code session it ran in
-  const here = running || continueOf(meta, mainSid) === 'here'
-  const stopped = stoppedLine(meta, back && meta?.continue === 'here')
-  const again = meta?.role === 'writer' && meta.stopped_by === 'quit' && !running && meta.request
+  const n = {
+    paused: running && meta?.paused === 'critique',
+    stopped: stoppedLine(meta, back && meta?.continue === 'here'),
+    again: (meta?.role === 'writer' && meta.stopped_by === 'quit' && !running && meta.request) || null,
+    noStop: running && noModule,
+  }
+  return n.paused || n.stopped || n.again || n.noStop ? n : null
+}
+
+/** The notes of a subagent's card (subagentNotes), drawn; nothing when there are none. */
+export function SubagentNotes({ ws, meta, running, noModule = false, back = false }: { ws: string; meta: ChatMeta | null; running: boolean; noModule?: boolean; back?: boolean }) {
+  const n = subagentNotes(meta, running, noModule, back)
+  if (!n) return null
   return (
     <div className="chat-sub-notes" data-paused={meta?.paused ?? undefined}>
-      {running && meta?.paused === 'critique' && (
+      {n.paused && (
         <p className="chat-sub-paused" role="status">
           <Spinner size={10} label={PAUSED_LINE} />
           <span>{PAUSED_LINE}</span>
         </p>
       )}
-      {stopped && <p className="chat-sub-stopped" data-by={meta?.stopped_by ?? undefined}>{stopped}</p>}
-      {again && <WriteAgain ws={ws} request={meta!.request!} />}
-      {here && <p className="chat-sub-terminal">{terminalLine(meta, running)}</p>}
-      {running && noModule && <p className="chat-sub-nostop">{NO_STOP_LINE}</p>}
+      {n.stopped && <p className="chat-sub-stopped" data-by={meta?.stopped_by ?? undefined}>{n.stopped}</p>}
+      {n.again && <WriteAgain ws={ws} request={n.again} />}
+      {n.noStop && <p className="chat-sub-nostop">{NO_STOP_LINE}</p>}
     </div>
   )
 }
@@ -447,8 +455,8 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
     setStopping(true)
     void stopSession(ws, chat, role).finally(() => setStopping(false))
   }
-  // what the card says of the agent besides its steps: its critic's wait, the terminal, why it stopped
-  const notes = own && !followUp && isSubagent(meta) ? <SubagentNotes ws={ws} meta={meta} running={running} noModule={noModule} back={!!main?.attached} mainSid={main?.attached?.session ?? null} /> : null
+  // what the card says of the agent besides its steps: its critic's wait, why it stopped
+  const notes = own && !followUp && subagentNotes(meta, running, noModule, !!main?.attached) ? <SubagentNotes ws={ws} meta={meta} running={running} noModule={noModule} back={!!main?.attached} /> : null
   // waiting for the analyst: on its own prompt, or on its critique's (chat/waiting.ts)
   const waitingFor = useMemo(() => {
     if (!running) return null
@@ -501,6 +509,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
       title={<span className="chat-task-title">{role === 'orient' ? 'Orientation' : taskTitle(meta?.title || title)}</span>}
       meta={metaText || undefined}
       state={status}
+      flush
       lead={brief && !briefAbove ? <span className="chat-task-brief">{brief}</span> : undefined}
       steps={steps}
       body={error ? <div className="chat-error">{error}</div> : undefined}

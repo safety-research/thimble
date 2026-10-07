@@ -1,6 +1,6 @@
 // What the browser says about one of thimble's agents run as a subagent of the analyst's Claude Code session (its chat's
-// meta, backend subagents.ensure_chat): the model and effort its run actually used, where the terminal shows it, why
-// it stopped, and whether a follow-up can still continue it. Pure.
+// meta, backend subagents.ensure_chat): the model and effort its run actually used, why it stopped, and whether a
+// follow-up can still continue it. Pure.
 import { modelLabel } from '../lib/models'
 import type { ChatMeta, RunValues } from '../lib/types'
 
@@ -19,20 +19,6 @@ export function runValues(m: Pick<ChatMeta, 'values' | 'ran' | 'run'> | null | u
 export function valuesText(v: RunValues | null | undefined): string {
   if (!v?.model) return ''
   return [modelLabel(v.model), v.effort || ''].filter(Boolean).join(' · ')
-}
-
-/** The agent's type as Claude Code's agent tray names it (`thimble:orientation`). */
-export function trayName(m: Pick<ChatMeta, 'agent_type' | 'role'> | null | undefined): string {
-  if (m?.agent_type) return m.agent_type
-  const role = m?.role === 'orient' ? 'orientation' : m?.role ?? 'agent'
-  return `thimble:${role}`
-}
-
-/** Where the analyst finds the agent in their terminal: ↓ to its row while it runs; once it finished, `/tasks` and
- * Enter, since a finished agent leaves the ↓ tray (U16). */
-export function terminalLine(m: Pick<ChatMeta, 'agent_type' | 'role'> | null | undefined, running: boolean): string {
-  const name = trayName(m)
-  return running ? `In your terminal: ↓ to ${name} in the agent tray, then Enter.` : `In your terminal: /tasks, then Enter on ${name}.`
 }
 
 /** Why the agent's card says it stopped, or ''. An orientation main's quit stopped says how to continue it while no

@@ -1,7 +1,8 @@
 // The tool-call card: what the agent did, as one tonal card. The head is the chevron, an optional icon, the name, the
 // meta in mono and, at the right edge, the spinner (and a Stop button after it with `stop`) or ✓ once done. The chevron opens the
-// lead, the steps and any body the caller hands over. Under the head, always shown: the chips of what it made, and a
-// section row per surface the work landed on.
+// lead, the steps and any body the caller hands over; with none of them the head keeps the chevron's place, so the
+// names of a list of cards line up, except on a `flush` card, whose name then starts at the card's edge. Under the
+// head, always shown: the chips of what it made, and a section row per surface the work landed on.
 import { useState, type HTMLAttributes, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from './Button'
 import { Chip } from './Chip'
@@ -53,6 +54,9 @@ export interface ToolCardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'tit
   open?: boolean
   defaultOpen?: boolean
   onToggle?: (open: boolean) => void
+  /** with nothing to open, no empty place for the chevron: the title starts at the card's edge, where a session's card
+   * (chat/AgentCard) starts the notes and chips under it */
+  flush?: boolean
 }
 
 const STEP_GLYPH: Record<Exclude<StepState, 'running'>, string> = { done: '✓', pending: '·', failed: '✕', skipped: '–' }
@@ -66,7 +70,7 @@ export function StepGlyph({ state }: { state: StepState }) {
   )
 }
 
-export function ToolCard({ icon, title, meta, state = null, lead, steps, body, chips, sections, stop, open: openProp, defaultOpen = false, onToggle, className, ...rest }: ToolCardProps) {
+export function ToolCard({ icon, title, meta, state = null, lead, steps, body, chips, sections, stop, open: openProp, defaultOpen = false, onToggle, flush = false, className, ...rest }: ToolCardProps) {
   const [own, setOwn] = useState(defaultOpen)
   const open = openProp ?? own
   const expandable = lead != null || (steps?.length ?? 0) > 0 || body != null
@@ -86,9 +90,11 @@ export function ToolCard({ icon, title, meta, state = null, lead, steps, body, c
   return (
     <div className={cls} data-state={state ?? undefined} {...rest}>
       <div className={`toolcard-head${expandable ? ' toolcard-head-act' : ''}${stop && state === 'running' ? ' toolcard-head-stop' : ''}`} role={expandable ? 'button' : undefined} tabIndex={expandable ? 0 : undefined} aria-expanded={expandable ? open : undefined} onClick={toggle} onKeyDown={expandable ? onKey : undefined}>
-        <span className="toolcard-caret" aria-hidden="true">
-          {expandable && <Icon name="chevron-right" size={10} strokeWidth={2.7} />}
-        </span>
+        {(expandable || !flush) && (
+          <span className="toolcard-caret" aria-hidden="true">
+            {expandable && <Icon name="chevron-right" size={10} strokeWidth={2.7} />}
+          </span>
+        )}
         {icon && <Icon name={icon} size={12} className="toolcard-ico" />}
         <span className="toolcard-title">{title}</span>
         {meta != null && meta !== '' && <span className="toolcard-meta">{meta}</span>}
