@@ -34,16 +34,16 @@
 #                                        terminal mode's renderer: the JSON a surface's GET route gives the browser, or
 #                                        what a click's POST route does, with no server and no port (backend/app/local.py)
 #   thimble demo [name…] [--yes] [--dir <d>] [--attach] | --export <workspace> <out> [--outputs-only]
-#                                        download the demo datasets from their public sources (asking first), open each
-#                                        in the browser, on its pre-cached orientation where demos/ has one, ask on a
-#                                        terminal whether to attach a session and print how to attach one later;
+#                                        download the demo datasets from their public sources (asking first), each on
+#                                        its pre-cached orientation where demos/ has one, open thimble's start page,
+#                                        which lists them, in the browser, and print how to attach a session later;
 #                                        --export writes a workspace whole, with its sessions' transcripts, and lists
 #                                        what it holds (--outputs-only: the outputs alone, for demos/)
 #                                        (backend/app/demo.py)
 #   thimble demo --examples [--refresh]  for development and review: the worked examples of custom views
 #                                        (plugin/viewers) as workspaces example-<name> on the same server, each on a copy
-#                                        of its sample in $THIMBLE_HOME/examples with its view built, printing their URLs;
-#                                        --refresh copies them again (backend/app/demo_examples.py)
+#                                        of its sample in $THIMBLE_HOME/examples with its view built, and open the start
+#                                        page; --refresh copies them again (backend/app/demo_examples.py)
 #   thimble launch-args [--cwd <p>] [--settings <s>]
 #                                        what a session starts with: the plugin folder, the --allowedTools, --effort and
 #                                        --settings values, the tools that end a turn without text, main's --name, then
@@ -96,8 +96,8 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
        thimble -r, --resume [value]       resume a conversation by session ID, or pick one
        thimble demo [name...] [--yes] [--dir <d>] [--attach]
                                           download public datasets (collusion-wiki, mythos-5,
-                                          transluce-urlquery), asking first, open each, and ask whether to
-                                          attach a session
+                                          transluce-urlquery), asking first, and open the start page that
+                                          lists them
        thimble demo --export <workspace> <out> [--outputs-only]
                                           write a workspace whole, with its sessions' transcripts;
                                           --outputs-only writes the outputs alone

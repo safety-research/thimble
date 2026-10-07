@@ -1,5 +1,7 @@
-// The workspace the page shows: `?ws=<name>` in the URL, which /thimble prints. A URL without one opens the workspace the
-// server holds (pickWorkspace); thimble has no page for choosing among corpora.
+// The workspace the page shows: `?ws=<name>` in the URL, which /thimble prints. A URL without one, or with one this server
+// does not hold, is thimble's start page (shell/StartPage), which lists the server's workspaces (GET /workspaces) in
+// groups, as the top bar's switcher does (shell/WorkspaceList).
+import type { WorkspaceRow } from './types'
 
 const NAME_RE = /^[A-Za-z0-9._-]+$/
 
@@ -9,38 +11,27 @@ export function workspaceFromUrl(): string | null {
   return v && NAME_RE.test(v) ? v : null
 }
 
-export function urlForWorkspace(name: string): string {
-  const u = new URL(window.location.href)
-  u.searchParams.set('ws', name)
-  return u.pathname + u.search
+export type WorkspaceKind = WorkspaceRow['kind']
+
+/** The start page's groups in order, with their titles. */
+export const WORKSPACE_GROUPS: readonly { kind: WorkspaceKind; title: string }[] = [
+  { kind: 'demo', title: 'Demo' },
+  { kind: 'example', title: 'Examples' },
+  { kind: 'folder', title: 'Your folders' },
+]
+
+/** `rows` in the start page's groups, in the order the server gave them; a group with no row is left out. Pure. */
+export function groupWorkspaces(rows: readonly WorkspaceRow[]): { kind: WorkspaceKind; title: string; rows: WorkspaceRow[] }[] {
+  return WORKSPACE_GROUPS.map((g) => ({ ...g, rows: rows.filter((r) => r.kind === g.kind) })).filter((g) => g.rows.length > 0)
 }
 
-const LAST_KEY = 'thimble:last-ws'
-
-/** The workspace this browser opened last, if any. */
-export function lastWorkspace(): string | null {
-  try {
-    const v = window.localStorage.getItem(LAST_KEY)
-    return v && NAME_RE.test(v) ? v : null
-  } catch {
-    return null
-  }
-}
-
-/** Keeps the workspace a page opened, for a later URL that names none. */
-export function rememberWorkspace(name: string): void {
-  try {
-    window.localStorage.setItem(LAST_KEY, name)
-  } catch {
-    /* storage is a convenience */
-  }
-}
-
-/** The workspace a URL that names none opens: of the server's (`names`, in the order GET /corpora lists them) the one
- * this browser opened last, else the first; null when the server holds none. Pure. */
-export function pickWorkspace(names: readonly string[], last: string | null): string | null {
-  if (last && names.includes(last)) return last
-  return names[0] ?? null
+/** Where a row of the start page goes: the page at `pathname` with its workspace, an example opened at its view, and the
+ * page key when the address still holds one (`hash`: a claim the server has not answered yet). Pure. */
+export function workspaceHref(row: Pick<WorkspaceRow, 'name' | 'kind' | 'view'>, pathname = '/', hash = ''): string {
+  const q = new URLSearchParams({ ws: row.name })
+  if (row.kind === 'example' && row.view?.slug) q.set('ref', `view:${row.view.slug}`)
+  const key = new URLSearchParams(hash.replace(/^#/, '')).get('k')
+  return `${pathname}?${q.toString()}${key ? `#k=${encodeURIComponent(key)}` : ''}`
 }
 
 /** A key in browser storage, per workspace. */

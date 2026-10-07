@@ -1,18 +1,22 @@
-// The top bar: at the left the thimble mark and the corpus's folder in mono; the surfaces' tabs over the main area
+// The top bar: at the left the thimble mark and the corpus's folder in mono, which opens the switcher, the server's
+// workspaces as the start page lists them (WorkspaceList), this one marked; the surfaces' tabs over the main area
 // (a click shows the surface, a drag takes it to a pane); at the right Undo and Redo (shell/undo.ts), Report a problem,
 // the links toggle, the theme popover and the settings gear.
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
 import { Icon } from '../components/Icon'
+import { Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
 import { bus, type ProblemPrefill, type Tab } from '../lib/bus'
 import { toggleLinks, useLinksVisible } from '../lib/links'
+import type { WorkspaceRow } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
 import { ProblemReportPopover } from './ProblemReport'
 import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
 import { undoTip, useUndo } from './undo'
+import { WorkspaceList } from './WorkspaceList'
 
 export interface SurfaceTab extends TabOption<Tab> {
   /** `focus`: the focused pane shows it; `shown`: another pane does; `hidden`: no pane does */
@@ -61,10 +65,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
       <span className="shell-brand">
         <Icon name="thimble" size={18} className="shell-mark" />
         <span className="shell-word">thimble</span>
-        {/* right to left so a long path is cut at its start and keeps the corpus folder's name */}
-        <span className="shell-corpus-name" dir="rtl">
-          <span dir="ltr">{path ? shortPath(path) : ws}</span>
-        </span>
+        <WorkspaceSwitcher ws={ws} label={path ? shortPath(path) : ws} />
       </span>
       <nav className="tabs shell-tabs" role="tablist" aria-label="Surfaces">
         {tabs.map((t) => (
@@ -116,5 +117,49 @@ export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
         }} />
       <SettingsPopover ws={ws} anchor={gear} open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </header>
+  )
+}
+
+/** The corpus's folder in the top bar, a button that opens the server's workspaces (WorkspaceList), loaded each time it
+ * opens, this one marked; a row opens its workspace in this tab. */
+export function WorkspaceSwitcher({ ws, label }: { ws: string; label: string }) {
+  const [open, setOpen] = useState(false)
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
+  const [rows, setRows] = useState<WorkspaceRow[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    setError(null)
+    api
+      .workspaces()
+      .then((r) => alive && setRows(r))
+      .catch((e) => alive && setError((e as Error).message))
+    return () => {
+      alive = false
+    }
+  }, [open])
+  return (
+    <>
+      <button
+        ref={setAnchor}
+        type="button"
+        className="shell-corpus-name"
+        title="Switch workspace"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        data-tel="switch-workspace"
+      >
+        {/* right to left so a long path is cut at its start and keeps the corpus folder's name */}
+        <span className="shell-corpus-path" dir="rtl">
+          <span dir="ltr">{label}</span>
+        </span>
+        <Icon name="chevron-down" size={12} className="shell-corpus-caret" />
+      </button>
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} label="Workspaces" className="ws-switcher" width={480}>
+        {error ? <p className="ws-switcher-error">{error}</p> : rows == null ? <Spinner size={12} label="Loading" className="ws-switcher-wait" /> : <WorkspaceList rows={rows} current={ws} compact />}
+      </Popover>
+    </>
   )
 }

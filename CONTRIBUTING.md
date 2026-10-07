@@ -43,8 +43,8 @@ live one, set `THIMBLE_HOME`, `THIMBLE_WORKSPACES_DIR`, `THIMBLE_DATA_DIR` and `
 `THIMBLE_PORT` above 8400 (`THIMBLE_UI_PORT` above 5400 with Vite). `scripts/dev/make_toy_corpus.py` writes a synthetic
 corpus to try it on, and `scripts/dev/examples.py <folder>` opens the worked examples of custom views there, each on its
 sample with its sample labels (`labels.json`) on. `thimble demo --examples` opens them on the server `thimble demo` uses,
-as the workspaces `example-<name>` on copies of their samples in `$THIMBLE_HOME/examples`, and prints a URL for each;
-`--refresh` copies the views and samples again after you edit them.
+as the workspaces `example-<name>` on copies of their samples in `$THIMBLE_HOME/examples`, and opens the start page,
+whose rows open each at its view; `--refresh` copies the views and samples again after you edit them.
 
 ## Run the tests
 

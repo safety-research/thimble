@@ -1267,6 +1267,24 @@ export interface CorpusInfo {
   shown?: string
 }
 
+/** One row of `GET /workspaces` (backend start_page.py): a workspace as the start page and the top bar's switcher list
+ * it. `demo`: a dataset `thimble demo` downloaded, with its one-sentence blurb, `ready` when its pre-cached orientation
+ * is installed; `example`: a worked example `thimble demo --examples` opened, with the view it shows; `folder`: any
+ * other folder. */
+export interface WorkspaceRow {
+  name: string
+  kind: 'demo' | 'example' | 'folder'
+  /** the folder's own name */
+  folder: string
+  /** the folder as the analyst opened it */
+  path: string
+  dataset?: string
+  title?: string
+  blurb?: string
+  ready?: boolean
+  view?: { slug: string; name: string } | null
+}
+
 export type SourceKind = 'agent' | 'board' | 'events' | 'forge' | 'prompt' | 'text' | 'dir'
 
 export interface SourceInfo {

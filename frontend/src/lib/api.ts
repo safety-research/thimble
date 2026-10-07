@@ -48,6 +48,7 @@ import type {
   ViewQuery,
   ViewProblems,
   ViewShown,
+  WorkspaceRow,
   Writeup,
 } from './types'
 import { heavy } from './limit'
@@ -175,6 +176,8 @@ export const api = {
   tourSeen: () => j<{ seen: boolean }>(`${BASE}/tour/seen`, { method: 'POST' }),
   // ---- corpora and files ----
   corpora: () => j<CorpusInfo[]>(`${BASE}/corpora`),
+  /** `GET /workspaces`: every workspace this server knows, as the start page lists them (backend start_page.py). */
+  workspaces: () => j<WorkspaceRow[]>(`${BASE}/workspaces`),
   sources: (c: string) => j<SourceInfo[]>(`${BASE}/corpora/${enc(c)}/sources`),
   source: (c: string, path: string, start = 1, count = 100) => j<SourcePage>(`${BASE}/corpora/${enc(c)}/source${q({ path, start, count })}`),
   /** `clamp`: a line past the end answers with the file's last lines, not a 404 (a move made while the count is an estimate) */

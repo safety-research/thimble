@@ -10,10 +10,11 @@ The command lists the datasets (demo_data.DATASETS) with their sources, credits 
 and checks it against the copy the orientations ran on. thimble redistributes none of the data: each dataset comes from
 its publisher, and DIR/SOURCES.md says from where. It then registers the folder as a corpus, installs that dataset's
 pre-cache as its workspace when demos/ (or --precaches DIR) has one (a dataset without one opens with no analysis yet,
-with a line saying so), and opens the workspace in the browser without a Claude Code session (as `thimble up` does).
---examples opens the worked examples of custom views on the same server instead (demo_examples.py).
+with a line saying so), and prints and opens one URL without a Claude Code session: thimble's start page, which lists
+every dataset downloaded (start_page.py), one run's or an earlier one's. --examples opens the worked examples of custom
+views on the same server instead (demo_examples.py), and the same start page.
 
-Attaching. The demo is static: it opens the workspace and starts no Claude Code session. --attach starts one (`thimble`
+Attaching. The demo is static: it opens the start page and starts no Claude Code session. --attach starts one (`thimble`
 in the dataset's folder), after `claude auth status` says a login is configured (when it says none, it says how to log
 in). Either way it prints how to attach later: `cd <folder> && thimble`, and `thimble
 -c` there continues the last session. A session attached to a pre-cached workspace starts fresh, with the canvas and
@@ -1634,11 +1635,12 @@ def start_session(folder: Path) -> None:
     os.execve(str(launcher), [str(launcher)], env)
 
 
-def page_url(name: str) -> str:
-    """The workspace's page, with the key that lets it answer permission requests when it goes to a terminal."""
+def start_url(key: bool | None = None) -> str:
+    """thimble's start page (the page with no workspace in its URL, which lists every workspace: start_page.py), with
+    the key that lets it answer permission requests: when it goes to a terminal, unless `key` says."""
     from . import cli  # noqa: PLC0415
 
-    return cli.ui_url(name, key=sys.stdout.isatty())
+    return cli.ui_url(None, key=sys.stdout.isatty() if key is None else key)
 
 
 def open_page(url: str) -> bool:
@@ -1733,7 +1735,7 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
     if getattr(args, "examples", False):
         from . import demo_examples  # noqa: PLC0415
 
-        return demo_examples.run(args, say, server)
+        return demo_examples.run(args, say, server, show=show)
     if args.export:
         return run_export(args, say)
     names = list(args.names or DATASETS)
@@ -1794,11 +1796,12 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
             name = None
         opened.append((ds, folder, name))
     say("")
-    pages = [(ds, page_url(name)) for ds, _, name in opened if name and url]
-    for ds, page in pages:
-        say(f"  {ds.name} is open at {page}" if len(pages) > 1 else f"  Open at {page}")
-    if pages and show(pages[0][1]):
-        say(f"  (opened {pages[0][0].name} in your browser)")
+    # one URL whatever the run opened: the start page, which lists every dataset downloaded (start_page.py)
+    if url and any(name for _, _, name in opened):
+        page = start_url()
+        say(f"  Open at {page}")
+        if show(page):
+            say("  (opened in your browser)")
     if not url:
         say("  the server is not running, so nothing is open; `thimble` in a folder below starts it")
     pick, login_said = attach_choice(args, [f for _, f, _ in opened], say, auth)
@@ -1914,8 +1917,8 @@ def add_parser(sub: Any) -> None:
                    help="with --export: write `user` in place of your user name where it stands as a word")
     p.add_argument("--examples", action="store_true",
                    help="for development and review: open each worked example of custom views (plugin/viewers) as the "
-                        "workspace example-<name> on its sample, with its view built and its sample labels on, and print "
-                        "their URLs")
+                        "workspace example-<name> on its sample, with its view built and its sample labels on, and open "
+                        "the start page that lists them")
     p.add_argument("--refresh", action="store_true",
                    help="with --examples: copy each example's sample and view again and redefine its labels, so edits "
                         "in plugin/viewers show")

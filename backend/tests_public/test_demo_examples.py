@@ -1,10 +1,11 @@
 """`thimble demo --examples` (app/demo_examples.py): each worked example of custom views opens as the workspace
 example-<name> on a copy of its sample in THIMBLE_HOME, its view installed built so readers see it at once, its sample
-labels defined and applied through the server, and a URL per workspace with the page key; a second run adds only what
-is missing, and --refresh copies the views and samples again. The server is stubbed."""
+labels defined and applied through the server, and one URL, the start page with the page key, opened; a second run adds
+only what is missing, and --refresh copies the views and samples again. The server is stubbed."""
 import argparse
 import filecmp
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -49,16 +50,17 @@ def world(tmp_path, monkeypatch):
     env = {"home": str(tmp_path / "home"), "workspaces_dir": str(config.WORKSPACES_DIR), "data_dir": str(tmp_path / "data")}
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(demo, "register", lambda folder, url: str(config.register_corpus(folder, exact=True)["name"]))
-    monkeypatch.setattr(cli, "ui_url", lambda name, key=True: f"http://127.0.0.1:1/?ws={name}" + (f"#k={KEY}" if key else ""))
+    monkeypatch.setattr(cli, "ui_url", lambda name, key=True: f"http://127.0.0.1:1/{f'?ws={name}' if name else ''}"
+                                                              + (f"#k={KEY}" if key else ""))
     views._folder_cache.clear()
     monkeypatch.setattr(views, "FOLDER_CACHE_S", 0.0)
-    return {"env": env, "server": FakeServer(), "lines": []}
+    return {"env": env, "server": FakeServer(), "lines": [], "shown": []}
 
 
 def run(w, root: Path | None = None, **kw) -> int:
     a = argparse.Namespace(**{"examples": True, "refresh": False, **kw})
     return demo_examples.run(a, w["lines"].append, lambda say: ("http://127.0.0.1:1", w["env"]), request=w["server"],
-                             root=root)
+                             root=root, show=lambda url: w["shown"].append(url) or True)
 
 
 def said(w) -> str:
@@ -79,7 +81,7 @@ def installed(name: str, slug: str) -> dict:
 def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_labels_on(world):
     """Each example of plugin/viewers: its sample copied into THIMBLE_HOME (not the repository) as the corpus of the
     workspace example-<name>, its view built so read_built serves it, each sample label defined, turned on and applied,
-    and a URL at its view with the page key."""
+    and one URL printed and opened, the start page with the page key."""
     w = world
     found = demo_examples.examples()
     assert [p.name for p in found] == sorted(p.name for p in views.EXAMPLES_DIR.iterdir() if (p / "view.json").is_file())
@@ -93,7 +95,6 @@ def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_l
         v = views.read_built(name, src.name)
         assert v is not None and v["built"] and views.passed_as_is(name, src.name), name
         assert (views.views_dir(name) / src.name / views.VIEW_HTML).read_bytes() == (src / views.VIEW_HTML).read_bytes()
-        assert f"{name} is open at http://127.0.0.1:1/?ws={name}&ref=view:{src.name}#k={KEY}" in out
         specs = json.loads((src / "labels.json").read_text("utf-8"))
         made = w["server"].labels[name]
         assert sorted(k["name"] for k in made.values()) == sorted(s["name"] for s in specs)
@@ -101,6 +102,9 @@ def test_every_worked_example_opens_as_a_workspace_with_its_view_built_and_its_l
         applied = [b for m, u, b in w["server"].calls if u.endswith("/apply") and f"/ws/{name}/" in u]
         assert sorted(json.dumps(b["paths"]) for b in applied) == sorted(json.dumps(s["paths"]) for s in specs)
     assert not (config.REPO_ROOT / "examples").exists()
+    # one URL, opened: the start page with the page key, whose rows open each example at its view (start_page.py)
+    assert re.findall(r"http://\S+", out) == [f"http://127.0.0.1:1/#k={KEY}"]
+    assert w["shown"] == [f"http://127.0.0.1:1/#k={KEY}"]
 
 
 def test_a_second_run_adds_only_what_is_missing(world):

@@ -8,7 +8,8 @@ view is left out. For each, the command copies the sample to $THIMBLE_HOME/examp
 repository), registers that folder as the workspace example-<name>, installs the example's view in it as a built view
 (views.install_view, as a pre-cache's views are installed), so it shows at once without its checks running, and
 defines the sample labels its labels.json lists, turned on in Files and applied (regex labels: no model is called).
-It ends with one URL per workspace, opened at the view, with the page key.
+It ends with one URL, which it opens in the browser: thimble's start page with the page key, where each example's row
+opens its workspace at its view (start_page.py).
 
 A second run adds only what is missing: a sample already copied, a view already installed and a label already defined
 stay as they are. --refresh copies each example's sample and view again and redefines its labels, so edits in
@@ -76,14 +77,6 @@ def ensure_workspace(ws: Path) -> None:
         config.private_dir(ws.parent)
         ws.mkdir(mode=0o700)
     subagent_files.ensure(ws)
-
-
-def page(name: str, slug: str) -> str:
-    """The workspace's page opened at its view, with the page key (cli.ui_url)."""
-    from . import cli  # noqa: PLC0415
-
-    base, sep, key = cli.ui_url(name, key=True).partition("#")
-    return f"{base}&ref={urllib.parse.quote('view:' + slug, safe=':')}{sep}{key}"
 
 
 def label_specs(src: Path) -> list[dict[str, Any]]:
@@ -158,7 +151,7 @@ def open_example(src: Path, url: str, env: dict[str, Any], refresh: bool, say: C
 
 def run(args: argparse.Namespace, say: Callable[[str], None],
         server: Callable[[Callable[[str], None]], tuple[str | None, dict[str, Any]]],
-        request: Request | None = None, root: Path | None = None) -> int:
+        request: Request | None = None, root: Path | None = None, show: Callable[[str], bool] | None = None) -> int:
     from . import cli, demo  # noqa: PLC0415
 
     request = request or cli._request
@@ -181,8 +174,10 @@ def run(args: argparse.Namespace, say: Callable[[str], None],
             say(f"  {PREFIX}{src.name}: not opened: {e}")
             failed += 1
     say("")
-    for name, slug in opened:
-        say(f"  {name} is open at {page(name, slug)}")
     if opened:
+        page = demo.start_url(key=True)
+        say(f"  Open at {page}")
+        if (show or demo.open_page)(page):
+            say("  (opened in your browser)")
         say("Reload a page after `thimble demo --examples --refresh` to see edits to plugin/viewers.")
     return 1 if failed else 0

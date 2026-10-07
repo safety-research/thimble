@@ -778,17 +778,31 @@ def test_demo_attach_and_no_attach_answer_without_asking(fake_world, monkeypatch
     assert w["started"] == [w["root"] / "one"] and "needs a terminal" in said(w)
 
 
-def test_demo_opens_the_page_with_a_server(tmp_path, fake_world, monkeypatch):
+def test_demo_prints_and_opens_one_url_the_start_page(tmp_path, fake_world, monkeypatch):
+    """Two datasets or one, the command prints one URL and opens it: the start page (no workspace in the URL), with the
+    page key when it prints to a terminal; the attach lines follow as before."""
     w = fake_world
     pre = precache_for(tmp_path, "one")
     from app import cli
 
     monkeypatch.setattr(demo, "register", lambda folder, url: folder.name)
-    monkeypatch.setattr(cli, "ui_url", lambda name, key=True: f"http://127.0.0.1:1/?ws={name}")
+    monkeypatch.setattr(cli, "ui_url", lambda name, key=True: f"http://127.0.0.1:1/{f'?ws={name}' if name else ''}"
+                                                              + ("#k=pagekey" if key else ""))
     w["server"] = lambda say: ("http://127.0.0.1:1", w["env"])
-    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
-    assert w["shown"] == ["http://127.0.0.1:1/?ws=one"] and "Open at http://127.0.0.1:1/?ws=one" in said(w)
+    assert run(w, args(names=["one", "two"], dir=str(w["root"]), precaches=str(pre))) == 0
+    text = said(w)
+    assert w["shown"] == ["http://127.0.0.1:1/"]
+    assert re.findall(r"http://\S+", text) == ["http://127.0.0.1:1/"] and "Open at http://127.0.0.1:1/" in text
+    assert "?ws=" not in text and "is open at" not in text
+    assert f"cd {w['root'] / 'one'} && thimble # one" in text and "No Claude Code session is attached" in text
     assert w["started"] == []
+    # one dataset: still the start page; on a terminal, with the key
+    terminal(monkeypatch, [])
+    w["shown"].clear()
+    w["lines"].clear()
+    assert run(w, args(names=["two"], dir=str(w["root"]))) == 0
+    assert w["shown"] == ["http://127.0.0.1:1/#k=pagekey"]
+    assert re.findall(r"http://\S+", said(w)) == ["http://127.0.0.1:1/#k=pagekey"]
 
 
 def test_demo_asks_before_downloading_and_needs_a_terminal_to_ask(fake_world, monkeypatch):
