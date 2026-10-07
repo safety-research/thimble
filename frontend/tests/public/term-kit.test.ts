@@ -53,6 +53,9 @@ describe('text', () => {
     expect(kit.wrap('one two three four five', 9)).toEqual(['one two', 'three', 'four five'])
     expect(kit.wrap('one two three four five six', 9, 2)).toEqual(['one two', 'three…'])
     expect(kit.num(14591)).toBe('14,591')
+    // a cut keeps the cells it is padded to, so the column after it keeps its place
+    expect(kit.pad('Brambleway API v3 migration guide', 20)).toBe('Brambleway API v3…  ')
+    expect(kit.padStart('Brambleway API v3 migration guide', 20)).toBe('  Brambleway API v3…')
     expect(kit.dur(130)).toBe('2m 10s')
     expect(kit.when(Date.UTC(2026, 4, 16, 4, 31) / 1000)).toBe('16 May 04:31')
     expect(kit.placeWords('alerts/x.jsonl#L12')).toBe('alerts/x.jsonl line 12')
@@ -359,6 +362,24 @@ describe('the time range', () => {
     expect(rows[2].slice(2 + 32, 2 + 34)).toBe('//')
     expect(rows[2]).toContain('17 May 09:00')
     expect(last().lines[2].find((s: any) => s.s === '//').fg).toBe('subtle')
+    // a stretch with no room for a time and its date gives the date alone
+    init({ cols: 40 })
+    const narrow = kit.timeRange({ gap: 1200 })
+    narrow.data({ times: ts })
+    kit.draw((d: any) => kit.axis(d, narrow.scale(d.cols), { gap: 4 }))
+    await tick()
+    expect(text()[0].split(/\s+/).filter(Boolean)).toEqual(['16', 'May', '//', '16', 'May', '//', '17', 'May'])
+  })
+
+  test('data with no record keeps the span and its breaks, as the browser does, so the axis does not jump to 1970', () => {
+    const burst = (t: number) => Array.from({ length: 41 }, (_, i) => t + i * 60)
+    const range = kit.timeRange({ gap: 1200 })
+    range.data({ times: [...burst(T0), ...burst(T0 + 5 * 3600)] })
+    const span = range.span
+    range.data({ times: [] })
+    expect(range.span).toEqual(span)
+    expect(range.scale(80).broken).toBe(true)
+    expect(range.readout()).toMatch(/^16 May 00:00 – 05:40/)
   })
 
   test('on a broken scale an edge never stays in a break, and the keys move the window on the strip\'s cells', async () => {
@@ -566,6 +587,16 @@ describe('details', () => {
     expect(last().lines[0].find((s: any) => s.s.startsWith('pytest')).fg).toBe('permission')
     await click('… 3 more')
     expect(text().slice(1, 7)).toEqual(['  line 1', '  line 2', '  line 3', '  line 4', '  line 5', '  line 6'])
+  })
+
+  test('a place too long for its row beside ask about it drops its folders, so both show', async () => {
+    init({ cols: 60, rows: 4 })
+    const place = 'runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576/subagents/agent-a1e955cf.jsonl#L20'
+    kit.draw((d: any) => kit.details(d, { place, ask: { ref: place, text: 'x' } }))
+    await tick()
+    expect(text()[0]).toBe('  ↗ …/agent-a1e955cf.jsonl line 20  ask about it')
+    await click('agent-a1e955cf')
+    expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'open', ref: place })
   })
 })
 

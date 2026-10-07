@@ -93,18 +93,18 @@ export function oneLine(s) {
   return String(s ?? '').replace(/\s+/g, ' ').trim()
 }
 
-/** `s` padded with spaces to `n` cells (cut first when longer). */
+/** `s` padded with spaces to `n` cells (cut first when longer, and the cut padded, since it may end short of `n`). */
 export function pad(s, n) {
   s = String(s)
-  const w = width(s)
-  return w >= n ? cut(s, n) : s + ' '.repeat(n - w)
+  if (width(s) > n) s = cut(s, n)
+  return s + ' '.repeat(Math.max(0, n - width(s)))
 }
 
 /** `s` right-aligned in `n` cells. */
 export function padStart(s, n) {
   s = String(s)
-  const w = width(s)
-  return w >= n ? cut(s, n) : ' '.repeat(n - w) + s
+  if (width(s) > n) s = cut(s, n)
+  return ' '.repeat(Math.max(0, n - width(s))) + s
 }
 
 /** Words wrapped to rows of at most `w` cells, at most `max` rows, the last cut with `…` when more is left. */
@@ -1323,7 +1323,13 @@ export function timeRange(opts = {}) {
           if (t < a) a = t
           if (t > b) b = t
         }
-        r.span = Number.isFinite(a) ? [a, b > a ? b : a + 1] : null
+        // no record (a search that matches none): the span and its breaks stay as they were, as in the browser
+        if (Number.isFinite(a)) r.span = [a, b > a ? b : a + 1]
+      }
+      if (!r.times.length && !d.span) {
+        if (r.from !== null) [r.from, r.to] = clamp(r.from, r.to)
+        redraw()
+        return
       }
       r.segs = null
       if (r.gap && r.span && r.times.length) {
@@ -1673,8 +1679,10 @@ export function axis(d, scale, o = {}) {
       dated = false
       continue
     }
-    const label = !dated && gaps.length && tk.full ? tk.full : tk.label
-    if (tk.x < end || tk.x + width(label) > scale.cols || gaps.some(([g0, g1]) => tk.x < g1 && tk.x + width(label) + 1 > g0)) continue
+    // where the time with its date has no room, the date alone, as the browser's axis does
+    const fits = (l) => tk.x >= end && tk.x + width(l) <= scale.cols && !gaps.some(([g0, g1]) => tk.x < g1 && tk.x + width(l) > g0)
+    const label = !dated && gaps.length && tk.full ? [tk.full, tk.full.split(' ').slice(0, 2).join(' ')].find(fits) : fits(tk.label) ? tk.label : null
+    if (!label) continue
     row.at(gutter + tk.x).add(label, tk.style)
     end = tk.x + width(label) + 2
     dated = true
@@ -2025,8 +2033,12 @@ export function details(d, o = {}) {
   if (o.place || o.ask) {
     const r = d.row()
     if (o.place) {
+      // a place too long for the row, beside `ask about it`, drops its folders, then is cut
+      const room = d.cols - 2 - (o.ask ? width('ask about it') + 2 : 0)
+      let words = placeWords(o.place)
+      if (width(words) > room) words = `…/${placeWords(String(o.place).replace(/^[^#]*\//, ''))}`
       r.add('↗ ', { fg: COLORS.link }, { on: () => open(o.place), tip: 'open its lines' })
-      r.add(placeWords(o.place), { fg: COLORS.link, u: true }, { on: () => open(o.place), tip: 'open its lines' })
+      r.add(clip(words, room), { fg: COLORS.link, u: true }, { on: () => open(o.place), tip: 'open its lines' })
     }
     if (o.ask) {
       if (o.place) r.gap()
