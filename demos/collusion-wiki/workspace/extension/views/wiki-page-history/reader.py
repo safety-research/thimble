@@ -23,6 +23,13 @@
 #   save        a revision's kind as the history reads it, the base its diff is against: a new page (the page's first
 #               revision), an edit (against the revision before), after a delete (against an empty page) or the first
 #               stored (earlier revisions withheld); the page colours saves by it
+#   message     a revision read as the message it left: the lines its diff adds (the whole body for the first stored),
+#               a message when they hold text other than blanks, the wiki's stock new-page line and the withheld
+#               placeholder; `kind` With links when that text holds http://, https:// or www., else Text only;
+#               `signed` whether its last line that ends in "-- name" names the revision's username (ignoring case),
+#               another name, or none
+#   thread      a page reads as a message thread when two or more usernames left messages on it and at least half
+#               its revisions are messages; the page opens its history as messages then, else as diffs
 #   placement   a request names a page by the id or keywords in its URL; a delete of a page pages.jsonl does not list,
 #               a request that names no listed page and a save whose revision is missing are read but not placed, and
 #               unplaced() lists them
@@ -54,6 +61,11 @@ EXCERPT_LINES = 30  # lines a revision's citation quotes
 PAIR_RATIO = 0.45  # how alike a removed and an added line must be for the characters that changed to be marked
 SAFE_KEY = re.compile(r"[A-Za-z0-9_.~/-]+")
 REQUEST_PAGE = re.compile(r"(?:[?&;]id=|[?&;]keywords=)([^&;#\s]+)")
+STOCK = {"Beschreibe hier die neue Seite.", "Describe the new page here."}
+URL = re.compile(r"https?://|\bwww\.", re.I)
+SIGNATURE = re.compile(r"(?:^|\s)--\s+([^\s-][^\n]{0,59}?)(?:\s+\?)?\s*$")
+KINDS = (None, "Text only", "With links")  # a revision's kind, sent as its index in `rg`: 0 for no new text
+SIGNED = ("Own username", "Another name", "Unsigned")  # a message's signature, sent as its index in `rs`
 
 
 def _epoch(v):
@@ -112,13 +124,40 @@ def _split(body):
 
 
 def _counts(a, b):
-    """(lines added, lines removed) from a to b."""
+    """(lines added, lines removed, the lines added) from a to b."""
     add = rem = 0
+    added = []
     for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
         if op != "equal":
             rem += i2 - i1
             add += j2 - j1
-    return add, rem
+            added += b[j1:j2]
+    return add, rem, added
+
+
+def _message(lines, user):
+    """(kind, signed) of a revision whose diff adds `lines`: kind 0 for no new text, 1 Text only, 2 With links; signed
+    an index into SIGNED, -1 for no new text."""
+    clean = [s for s in lines if s.strip() and s.strip() not in STOCK and s.strip() != WITHHELD]
+    if not clean:
+        return 0, -1
+    kind = 2 if URL.search("\n".join(clean)) else 1
+    sig = ""
+    for s in reversed(lines):
+        m = SIGNATURE.search(s.rstrip())
+        if m:
+            sig = m.group(1).strip()
+            break
+    return kind, (2 if not sig else 0 if sig.lower() == _str(user).lower() else 1)
+
+
+def _signature(lines):
+    """The name after "-- " at the end of the last of `lines` that ends in one, '' for none."""
+    for s in reversed(lines):
+        m = SIGNATURE.search(s.rstrip())
+        if m:
+            return m.group(1).strip()
+    return ""
 
 
 def _spans(a, b):
@@ -328,6 +367,7 @@ def build_index(paths):
     # the diffs' counts, against the revision before, or an empty page after a delete
     thimble.progress(3, 4, "comparing revisions")
     r_add, r_rem, r_base = [0] * len(bodies), [0] * len(bodies), [""] * len(bodies)
+    r_kind, r_signed = [0] * len(bodies), [-1] * len(bodies)
     items = []
     for p, revs in enumerate(page_revs):
         dels = sorted(page_dels[p], key=lambda d: deletes[d][0])
@@ -347,10 +387,16 @@ def build_index(paths):
                 base = "deleted" if gone else "prev"
             r_base[i] = base
             if base != "withheld":
-                r_add[i], r_rem[i] = _counts(_split(bodies[prev]) if base == "prev" else [], _split(bodies[i]))
+                r_add[i], r_rem[i], added = _counts(_split(bodies[prev]) if base == "prev" else [], _split(bodies[i]))
+            else:
+                added = _split(bodies[i])  # the page as it stood: its whole body is the message
+            r_kind[i], r_signed[i] = _message(added, users[cols["r_user"][i]])
             prev = i
         page_items += [(k, x) for _, k, x in evs[e:]]
         items.append(page_items)
+        # a message thread: two usernames or more left messages, and at least half the revisions are messages
+        msgs = [i for i in revs if r_kind[i]]
+        pages[p]["thread"] = len({cols["r_user"][i] for i in msgs}) >= 2 and 2 * len(msgs) >= len(revs) > 0
     del bodies
 
     # labels.jsonl
@@ -373,7 +419,8 @@ def build_index(paths):
     page_at = {pg["line"]: i for i, pg in enumerate(pages) if pg["line"]}
     all_t = [t for t in cols["r_t"]] + [d[0] for d in deletes]
     return {"files": files, "offsets": offsets, "pages": pages, "page_of": page_of, "page_by_key": page_by_key,
-            **cols, "r_add": r_add, "r_rem": r_rem, "r_base": r_base, "r_pos": r_pos, "page_revs": page_revs, "deletes": deletes,
+            **cols, "r_add": r_add, "r_rem": r_rem, "r_base": r_base, "r_pos": r_pos, "r_kind": r_kind,
+            "r_signed": r_signed, "page_revs": page_revs, "deletes": deletes,
             "page_dels": page_dels, "requests": requests, "page_reqs": page_reqs, "items": items,
             "event_at": event_at, "rev_at": rev_at, "page_at": page_at, "users": users, "user_at": user_at,
             "user_line": user_line, "ips": ips, "admins": admins, "made": sorted(made),
@@ -469,25 +516,38 @@ def _bits(ref, mark_at):
 # ---------------------------------------------------------------- answers
 
 
-def _overview(index, keep):
+def _overview(index, keep, start=0, count=None):
     """Every page the label filter keeps, as columns: `p` its index, `ln` its pages.jsonl line, `w` its wiki (an index
     into `wikis`), `name`, `n` n_revs, `f` and `l` its first and last write in seconds since `t0`, `u` n_labels, `d` its
-    deletes, `pm` the marks of its records as bits; its kept revisions as columns `rp` (page), `rt` (seconds since
-    `t0`), `ru` (an index into `users`), `rk` (its base, an index into BASES) and `rb` (its marks as bits); its deletes
-    as `dp` and `dt`; and the
-    deletes of pages with no stored revision, which pages.jsonl does not list, as `ot` (seconds since `t0`), `ow`
-    (wiki, an index into `wikis`) and `on` (page name). `marks` lists the values of the labels that are on, `admins`
-    the usernames that deleted pages."""
+    deletes, `pm` the marks of its records as bits, `pb` those of its own line; its kept revisions as columns `rp`
+    (page), `rt` (seconds since `t0`), `ru` (an index into `users`), `rk` (its base, an index into BASES), `rg` (its
+    kind, an index into KINDS), `rs` (its signature, an index into SIGNED, -1 for no new text) and `rb` (its marks as
+    bits); its deletes as `dp`, `dt` and `db` (marks as bits); and the deletes of pages with no stored revision, which
+    pages.jsonl does not list, as `ot` (seconds since `t0`), `ow` (wiki, an index into `wikis`) and `on` (page name).
+    `marks` lists the values of the labels that are on, `admins` the usernames that deleted pages. With `count`, the
+    pages from `start` to `start + count` alone, and `next` the start of the rest (None at the end); the deletes of
+    pages with no stored revision come with the first part."""
     marks, mark_at, filtering = _labels_on()
     t0 = index["t0"]
     wikis, wiki_at = [], {}
-    P = {k: [] for k in ("p", "ln", "w", "name", "n", "f", "l", "u", "d", "pm")}
-    R = {k: [] for k in ("rp", "rt", "ru", "rk", "rb")}
-    D = {k: [] for k in ("dp", "dt")}
-    for p, pg in enumerate(index["pages"]):
+    for pg in index["pages"]:
+        if pg["wiki"] not in wiki_at:
+            wiki_at[pg["wiki"]] = len(wikis)
+            wikis.append(pg["wiki"])
+    for d in index["deletes"]:
+        if d[5] not in wiki_at:
+            wiki_at[d[5]] = len(wikis)
+            wikis.append(d[5])
+    end = len(index["pages"]) if count is None else min(len(index["pages"]), start + count)
+    P = {k: [] for k in ("p", "ln", "w", "name", "n", "f", "l", "u", "d", "pm", "pb")}
+    R = {k: [] for k in ("rp", "rt", "ru", "rk", "rg", "rs", "rb")}
+    D = {k: [] for k in ("dp", "dt", "db")}
+    for p in range(start, end):
+        pg = index["pages"][p]
         if filtering and p not in keep and not thimble.kept_unit(_page_refs(index, p)):
             continue
         _, pm = _bits(_page_ref(index, p), mark_at)
+        pb = pm
         for i in index["page_revs"][p]:
             ref = _rev_ref(index, i)
             if filtering and p not in keep and not thimble.kept(ref):
@@ -495,7 +555,8 @@ def _overview(index, keep):
             _, b = _bits(ref, mark_at)
             pm |= b
             for k, v in (("rp", p), ("rt", index["r_t"][i] - t0), ("ru", index["r_user"][i]),
-                         ("rk", BASES.index(index["r_base"][i])), ("rb", b)):
+                         ("rk", BASES.index(index["r_base"][i])), ("rg", index["r_kind"][i]), ("rs", index["r_signed"][i]),
+                         ("rb", b)):
                 R[k].append(v)
         nd = 0
         for d in index["page_dels"][p]:
@@ -506,27 +567,21 @@ def _overview(index, keep):
             _, b = _bits(ref, mark_at)
             pm |= b
             nd += 1
-            for k, v in (("dp", p), ("dt", t - t0)):
+            for k, v in (("dp", p), ("dt", t - t0), ("db", b)):
                 D[k].append(v)
-        if pg["wiki"] not in wiki_at:
-            wiki_at[pg["wiki"]] = len(wikis)
-            wikis.append(pg["wiki"])
         for k, v in (("p", p), ("ln", pg["line"]), ("w", wiki_at[pg["wiki"]]), ("name", pg["name"]), ("n", pg["n_revs"]),
                      ("f", (pg["first"] or t0) - t0), ("l", (pg["last"] or t0) - t0), ("u", pg["n_labels"]), ("d", nd),
-                     ("pm", pm)):
+                     ("pm", pm), ("pb", pb)):
             P[k].append(v)
     G = {k: [] for k in ("ot", "ow", "on")}
-    for d in index["deletes"]:
+    for d in index["deletes"] if start == 0 else ():
         if d[2] >= 0 or (filtering and not thimble.kept(_event_ref(index, d[1]))):
             continue
-        if d[5] not in wiki_at:
-            wiki_at[d[5]] = len(wikis)
-            wikis.append(d[5])
         for k, v in (("ot", d[0] - t0), ("ow", wiki_at[d[5]]), ("on", d[6])):
             G[k].append(v)
     return {"t0": t0, "span": [0, index["t1"] - t0], "wikis": wikis, "users": index["users"], "pages": P, "revs": R,
             "dels": D, "gone": G, "marks": marks, "admins": index["admins"], "total": len(index["pages"]),
-            "keys": [_unit_key(index, p) for p in P["p"]]}
+            "keys": [_unit_key(index, p) for p in P["p"]], "next": end if end < len(index["pages"]) else None}
 
 
 def _history(index, p, user, keep, filtering):
@@ -556,19 +611,22 @@ def _block_rev(index, i, row, bodies, mark_at):
             revs = index["page_revs"][index["r_page"][i]]
             before = _split(bodies.get(revs[index["r_pos"][i] - 1], ""))
         diff = _diff(before, _split(body))
+    added = [d[1] for d in diff if d[0] == "+"] if base != "withheld" else _split(body)
     ref = _rev_ref(index, i)
     return {"ref": ref, "i": i, "rev_id": row.get("rev_id"), "seq": row.get("seq"), "time": row.get("time"),
             "label": row.get("label"), "ip16": row.get("ip16"), "change_summary": row.get("change_summary"),
             "body_len": row.get("body_len"), "lines": row.get("lines"), "write_date": row.get("write_date"),
             "request_action": row.get("request_action"), "base": base, "add": index["r_add"][i],
             "rem": index["r_rem"][i], "diff": diff, "admin": _str(row.get("label")) in index["admins"],
+            "message": "\n".join(added).strip("\n") if index["r_kind"][i] else "", "kind": KINDS[index["r_kind"][i]],
+            "signature": _signature(added) if index["r_kind"][i] else "",
             "marks": [x for x in thimble.marked(ref)] if mark_at else []}
 
 
 def _block_event(index, kind, i, row, mark_at):
     line = (index["deletes"] if kind == "d" else index["requests"])[i][1]
     ref = _event_ref(index, line)
-    out = {"ref": ref, "event_id": row.get("event_id"), "kind": row.get("event_type"), "time": row.get("time"),
+    out = {"ref": ref, "x": i, "event_id": row.get("event_id"), "kind": row.get("event_type"), "time": row.get("time"),
            "ip16": row.get("ip16"), "request_action": row.get("request_action"),
            "marks": [x for x in thimble.marked(ref)] if mark_at else []}
     if kind == "d":
@@ -581,15 +639,23 @@ def _block_event(index, kind, i, row, mark_at):
 def _page(index, q):
     """One page: `page` its pages.jsonl fields with its ref and its delete count; `strip` every history item the label
     filter keeps, as columns `k` (r, d or q), `x` (the revision's or event's index), `t` (seconds since t0), `u`
-    (username), `a` and `r` (lines added and removed), `m` (first mark), `s` (seq), `b` (marks as bits) and `kb` (a
-    revision's base, an index into BASES, -1 for an event); `users` [[username index,
+    (username), `a` and `r` (lines added and removed), `m` (first mark), `s` (seq), `b` (marks as bits), `kb` (a
+    revision's base, an index into BASES, -1 for an event), `g` and `sg` (a revision's kind and signature, indices
+    into KINDS and SIGNED) and `ln` (the record's line in revisions.jsonl or events.jsonl); `users` [[username index,
     revisions]] of the page; `total` the items the username filter `user` and the time range [`since`, `until`) (seconds
     since 1970, either left out for no bound) also keep; and `blocks`, those items from `from` (or from just before
-    `focus`, a cited record kept whatever the label filter says) read in full."""
+    `focus`, a cited record kept whatever the label filter says) read in full; `files` the paths of revisions.jsonl and
+    events.jsonl, which the strip's lines are lines of. With `items`, [[kind, x]] of the page's history (as the strip
+    names them), the answer is `blocks` alone: those items read in full, at most BLOCKS_MAX."""
     p = q.get("p")
     if not isinstance(p, int) or not 0 <= p < len(index["pages"]):
         return None
     marks, mark_at, filtering = _labels_on()
+    if isinstance(q.get("items"), list):
+        mine = set(index["items"][p])
+        asked = [(k, i) for k, i in (x for x in q["items"] if isinstance(x, list) and len(x) == 2)
+                 if isinstance(i, int) and (k, i) in mine]
+        return {"blocks": _blocks(index, p, asked[:BLOCKS_MAX], mark_at)}
     keep = {str(x) for x in q.get("keep") or []}
     user = q.get("user") if isinstance(q.get("user"), str) else None
     focus = q.get("focus") if isinstance(q.get("focus"), dict) else {}
@@ -608,16 +674,18 @@ def _page(index, q):
             return index["r_t"][i] if kind == "r" else (index["deletes"] if kind == "d" else index["requests"])[i][0]
         hist = [x for x in hist if x == want or ((since is None or _t(x) >= since) and (until is None or _t(x) < until))]
     t0 = index["t0"]
-    S = {k: [] for k in ("k", "x", "t", "u", "a", "r", "m", "s", "b", "kb")}
+    S = {k: [] for k in ("k", "x", "t", "u", "a", "r", "m", "s", "b", "kb", "g", "sg", "ln")}
     for kind, i in every:
         if kind == "r":
             m, b = _bits(_rev_ref(index, i), mark_at)
             vals = ("r", i, index["r_t"][i] - t0, index["r_user"][i], index["r_add"][i], index["r_rem"][i],
-                    m, index["r_seq"][i], b, BASES.index(index["r_base"][i]))
+                    m, index["r_seq"][i], b, BASES.index(index["r_base"][i]), index["r_kind"][i],
+                    index["r_signed"][i], index["r_line"][i])
         else:
             e = (index["deletes"] if kind == "d" else index["requests"])[i]
             m, b = _bits(_event_ref(index, e[1]), mark_at)
-            vals = (kind, i, e[0] - t0, index["user_at"].get(e[3], -1) if kind == "d" else -1, 0, 0, m, 0, b, -1)
+            vals = (kind, i, e[0] - t0, index["user_at"].get(e[3], -1) if kind == "d" else -1, 0, 0, m, 0, b, -1, 0, -1,
+                    e[1])
         for k, v in zip(S, vals):
             S[k].append(v)
     start = q.get("from") if isinstance(q.get("from"), int) else 0
@@ -626,6 +694,29 @@ def _page(index, q):
     n = q.get("n") if isinstance(q.get("n"), int) else 40
     start = max(0, min(start, max(0, len(hist) - 1)))
     window = hist[start:start + max(1, min(n, BLOCKS_MAX))]
+    blocks = _blocks(index, p, window, mark_at)
+    revs = index["page_revs"][p]
+    pg = index["pages"][p]
+    head = {"p": p, "page_id": pg["id"], "wiki": pg["wiki"], "name": pg["name"], "n_revs": pg["n_revs"],
+            "n_revs_before": pg["n_before"], "first_write": None, "last_write": None, "n_labels": pg["n_labels"],
+            "deletes": len(index["page_dels"][p]), "listed": bool(pg["line"]), "key": _unit_key(index, p),
+            "thread": bool(pg.get("thread"))}
+    if pg["line"]:
+        row = _lines_of(index, "pages.jsonl", [pg["line"]]).get(pg["line"]) or {}
+        head.update({k: row.get(k) for k in ("page_key", "first_write", "last_write", "body_bytes", "labels",
+                                              "n_ips", "n_ip16") if k in row})
+        head["ref"] = _page_ref(index, p)
+    per_user = {}
+    for i in revs:
+        per_user[index["r_user"][i]] = per_user.get(index["r_user"][i], 0) + 1
+    return {"page": head, "strip": S, "from": start, "total": len(hist), "blocks": blocks, "marks": marks,
+            "users": sorted(per_user.items(), key=lambda x: -x[1]), "t0": t0,
+            "files": {"revisions": index["files"].get("revisions.jsonl", "revisions.jsonl"),
+                      "events": index["files"].get("events.jsonl", "events.jsonl")}}
+
+
+def _blocks(index, p, window, mark_at):
+    """The items `window` ([(kind, i)] of page p's history) read in full, in its order."""
     revs = index["page_revs"][p]
     want_revs = set()
     for kind, i in window:
@@ -648,20 +739,7 @@ def _page(index, q):
             row = erows.get(line)
             if row is not None:
                 blocks.append(_block_event(index, kind, i, row, mark_at))
-    pg = index["pages"][p]
-    head = {"p": p, "page_id": pg["id"], "wiki": pg["wiki"], "name": pg["name"], "n_revs": pg["n_revs"],
-            "n_revs_before": pg["n_before"], "first_write": None, "last_write": None, "n_labels": pg["n_labels"],
-            "deletes": len(index["page_dels"][p]), "listed": bool(pg["line"]), "key": _unit_key(index, p)}
-    if pg["line"]:
-        row = _lines_of(index, "pages.jsonl", [pg["line"]]).get(pg["line"]) or {}
-        head.update({k: row.get(k) for k in ("page_key", "first_write", "last_write", "body_bytes", "labels",
-                                              "n_ips", "n_ip16") if k in row})
-        head["ref"] = _page_ref(index, p)
-    per_user = {}
-    for i in revs:
-        per_user[index["r_user"][i]] = per_user.get(index["r_user"][i], 0) + 1
-    return {"page": head, "strip": S, "from": start, "total": len(hist), "blocks": blocks, "marks": marks,
-            "users": sorted(per_user.items(), key=lambda x: -x[1]), "t0": t0}
+    return blocks
 
 
 def _body(index, i):
@@ -715,8 +793,9 @@ def _event(index, n):
 
 
 def records(index, query):
-    """{op: overview, keep?}: every page the label filter keeps (_overview), `keep` page indices kept whatever it says.
-    {op: page, p, from?, n?, user?, focus?, keep?}: one page's history (_page). {op: body, i}: a revision's whole body.
+    """{op: overview, keep?, from?, n?}: every page the label filter keeps (_overview), `keep` page indices kept whatever
+    it says, with `n` the pages from `from` alone.
+    {op: page, p, from?, n?, user?, focus?, keep?, items?}: one page's history (_page). {op: body, i}: a revision's whole body.
     {op: user, name}: one username and its pages (_user). {op: event, line}: an event no page holds."""
     query = query or {}
     op = query.get("op")
@@ -729,6 +808,10 @@ def records(index, query):
     if op == "event":
         return _event(index, query.get("line"))
     keep = {x for x in query.get("keep") or [] if isinstance(x, int)}
+    n = query.get("n")
+    if isinstance(n, int) and n > 0:
+        start = query.get("from") if isinstance(query.get("from"), int) else 0
+        return _overview(index, keep, max(0, start), n)
     return _overview(index, keep)
 
 

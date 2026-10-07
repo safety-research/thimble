@@ -27,7 +27,7 @@ py="$repo/backend/.venv/bin/python"
 # <dataset> <reviewed slug>=<slug in the pre-cache>…
 views_of() {
   case "$1" in
-    collusion-wiki) echo "relay-board-v2=relay-board wiki-page-history-v2=wiki-page-history";;
+    collusion-wiki) echo "wiki-page-history-v2=wiki-page-history";;
     mythos-5) echo "activity-timeline-v2=activity-timeline";;
     transluce-urlquery) echo "activity-timeline-v2=activity-timeline";;
     *) return 1;;

@@ -1,6 +1,6 @@
 {
   "name": "Wiki Page History",
-  "description": "Every wiki page with its revisions over time, colored by wiki, kind of save, the page's status (deleted or never deleted) or any label, filtered by wiki, username, name and the time range, and one page's edit history in the range read as a wiki shows it: each revision a diff against the one before, by which username and IP prefix, with a link to its line and the administrator's deletes in place.",
+  "description": "Every wiki page with its revisions over time, colored by wiki, kind of save, the page's status (deleted or never deleted), kind of message, signature or any label, filtered by wiki, username, name and the time range; one page's revisions over time with the lines they added and removed, and its edit history in the range read as a wiki shows it: each revision a diff against the one before or, on a page used as a message thread, the message it left, by which username and IP prefix, with a link to its line and the administrator's deletes in place.",
   "claims": [
     "pages.jsonl",
     "revisions.jsonl",
@@ -45,6 +45,13 @@
           "derived": "computed",
           "from": "the page's delete events in events.jsonl",
           "how": "deleted when at least one delete event names the page, else never deleted"
+        },
+        {
+          "name": "thread",
+          "type": "category",
+          "derived": "computed",
+          "from": "the kind of each of the page's revisions and their usernames",
+          "how": "true when two usernames or more left messages and at least half the revisions are messages; the history then opens as messages"
         }
       ]
     },
@@ -100,6 +107,34 @@
           "derived": "computed",
           "from": "seq, n_revs_before and the page's delete events",
           "how": "New page for a page's first revision, Edit against the revision before, After a delete against an empty page, First stored when the corpus holds no earlier revision"
+        },
+        {
+          "name": "message",
+          "type": "text",
+          "derived": "computed",
+          "from": "the diff, or the body for the first stored revision",
+          "how": "the lines the diff adds, the whole body when earlier revisions are withheld"
+        },
+        {
+          "name": "kind",
+          "type": "category",
+          "derived": "computed",
+          "from": "message",
+          "how": "With links when the text holds http:// or https:// or www., Text only when it holds none, after blanks and the stock new-page line and withheld placeholders are dropped; none when nothing is left"
+        },
+        {
+          "name": "signature",
+          "type": "text",
+          "derived": "cleaned",
+          "from": "message",
+          "how": "the name after -- at the end of the last added line that ends in one"
+        },
+        {
+          "name": "signed",
+          "type": "category",
+          "derived": "computed",
+          "from": "signature and label",
+          "how": "Own username when the signature is the username ignoring case, Another name when it is not, Unsigned when the text ends in no signature"
         }
       ]
     },
@@ -137,6 +172,6 @@
       ]
     }
   ],
-  "built": "2026-10-07T17:59:19+00:00",
-  "version": "d79f527af743"
+  "built": "2026-10-07T23:20:43+00:00",
+  "version": "fe4ef13faaf9"
 }
