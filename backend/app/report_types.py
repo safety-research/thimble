@@ -1663,6 +1663,11 @@ def carry_comments(prev: dict[str, Any] | None, doc: dict[str, Any], generation:
             continue
         cm = dict(cm)
         anchored = False
+        if str(cm.get("sentence_id")) == TITLE_BLOCK:  # a comment on the title stays on it while its words do
+            cm.setdefault("was_on", _collapse(prev.get("title")))
+            out.append(settle_carried_comment(cm, anchored=_collapse(prev.get("title")) == _collapse(doc.get("title")),
+                                              generation=generation))
+            continue
         try:
             t = find_target(prev, str(cm.get("sentence_id")))
             was_on = str(t["sentence"].get("text") or "") if t["kind"] == "sentence" else str(t["unit"].get("heading") or "")
@@ -1683,7 +1688,8 @@ def open_comments(doc: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 def anchor_ids(doc: dict[str, Any] | None) -> set[str]:
     d = doc or {}
-    return {str(x.get("id")) for x in all_sentences(d)} | {str(u.get("id")) for u in units(d)}
+    return ({str(x.get("id")) for x in all_sentences(d)} | {str(u.get("id")) for u in units(d)}
+            | ({TITLE_BLOCK} if _collapse(d.get("title")) else set()))
 
 
 def anchored_open_comments(doc: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -1900,6 +1906,10 @@ def replace_title(c: str, slug: str, text: str, actor: str, *, span: str | None 
         raise HTTPException(400, "a title is replaced by one line of text")
     reverted: list[str] = []
     if title != _collapse(doc.get("title")):
+        for cm in doc.get("comments") or []:  # a check's comment on the title it replaces is settled, as on a sentence
+            if isinstance(cm, dict) and str(cm.get("sentence_id")) == TITLE_BLOCK:
+                cm.setdefault("was_on", _collapse(doc.get("title")))
+                settle_carried_comment(cm, anchored=False, generation=int(doc.get("generation") or 1))
         _replace_text(doc, "title", title, "edit", history="title_history", actor=actor)
         if doc.get("renderer") == "document":
             doc["title_ok"] = _title_ok(title)
@@ -2469,6 +2479,8 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
         line += "\n" + reverted_line(refused)
     if flagged := flagged_lines(slug, all_sentences(doc)):
         line += "\n" + flagged
+    if loose := loose_lines(slug, doc):
+        line += "\n" + loose
     return tools.ok(line)
 
 
@@ -2492,6 +2504,119 @@ def flagged_lines(slug: str, sentences: list[dict[str, Any]], ids: list[str] | N
         rows.append(f"- [[report:{slug}#{x['id']}]] “{words}”" + (f" {note}" if note else ""))
     if len(flagged) > FLAGGED_MAX:
         rows.append(f"- … and {len(flagged) - FLAGGED_MAX} more")
+    return "\n".join(rows)
+
+
+# --------------------------------------------------------------------------- numbers in the title and the headings
+# The citation check reads sentences, and the writer's title and headings carry claims too: live check term-fix8 had a
+# title saying "for seven weeks" (40 days in the data) and a slide heading "seven weeks before the busiest days", which
+# no card stated and no check read. A save's result names each title or heading that writes a number, or a span of
+# time, that no link shows: a link in the heading's own section and its subsections, or anywhere in the document for
+# the title. The analyst's locked title or heading, and a heading of the analyst's own frame, are left out, since they
+# are the analyst's words.
+
+# a unit of time after a number, which makes the number a span of time (`seven weeks`, `40-day`, `three more days`)
+_TIME_UNIT_RE = re.compile(r"[ -](?:(?:more|other|full|straight|whole|consecutive)\s+)?"
+                           r"(?:seconds?|minutes?|hours?|days?|nights?|weeks?|months?|years?)\b", re.I)
+_TIME_WORD_RE = re.compile(r"(?<![A-Za-z])(?:second|minute|hour|day|night|week|month|year)s?(?![A-Za-z])", re.I)
+_YEAR_RE = re.compile(r"^(?:19|20)\d\d$")
+LOOSE_MAX = 12  # the titles and headings a save's result names
+
+
+def _claims_of(heading: str) -> list[tuple[str, str, Any]]:
+    """(kind, words, value) of each claim a title or heading writes: a day and a month in words (`date`, the words), a
+    span of time, a number in digits or in words before a unit of time (`span`, the number's key), and any other number
+    in digits (`number`, its key; a year alone is left out, as a date's part)."""
+    text = plain_text(heading)
+    out: list[tuple[str, str, Any]] = []
+    taken: list[tuple[int, int]] = []
+    for start, end, words in cite.dates_in_text(text):
+        out.append(("date", words, words))
+        taken.append((start, end))
+    numbers = sorted([(m.start(), m.end(), cite._norm(m.group()), True) for m in cite._NUM_RE.finditer(text)]
+                     + [(a, b, str(v), False) for a, b, v in cite.number_words(text)])
+    for a, b, key, digits in numbers:
+        if any(x <= a < y for x, y in taken):
+            continue
+        unit = _TIME_UNIT_RE.match(text, b)
+        if unit:
+            out.append(("span", text[a:unit.end()], key))
+            taken.append((a, unit.end()))
+        elif digits and not _YEAR_RE.match(text[a:b]):
+            out.append(("number", text[a:b], key))
+    return out
+
+
+def _shown_by(claim: tuple[str, str, Any], sentences: list[dict[str, Any]]) -> bool:
+    """Whether a link among `sentences` shows a claim of a heading: its words the claim's number, in digits or in words
+    (for a span of time with a unit of time in its words or its place), or for a date the same day and month, in a
+    link's words or its place, or in a sentence that cites."""
+    import urllib.parse  # noqa: PLC0415
+
+    kind, words, key = claim
+    for x in sentences:
+        text = str(x.get("text") or "")
+        links = [(m.group(1).partition("|")[0].strip(), m.group(1).partition("|")[2].strip())
+                 for m in cite._SPAN_RE.finditer(text) if "|" in m.group(1)]
+        if kind == "date":
+            if any(cite.date_in(words, d) or cite.date_in(words, urllib.parse.unquote(r)) for d, r in links):
+                return True
+            if (links or x.get("refs")) and cite.date_in(words, plain_text(text)):
+                return True
+            continue
+        for d, r in links:
+            if key not in {cite._norm(t) for t in cite._NUM_RE.findall(d)} | {str(v) for _, _, v in cite.number_words(d)}:
+                continue
+            # a span's number counts where the link's words or its place name a unit of time too (`[[40 days|…]]`,
+            # `[[40|card:…#days/…]]`), not where the same number counts something else
+            if kind != "span" or _TIME_WORD_RE.search(d) or _TIME_WORD_RE.search(urllib.parse.unquote(r)):
+                return True
+    return False
+
+
+def loose_headings(doc: dict[str, Any], only: set[str] | None = None) -> list[tuple[str, str, list[str]]]:
+    """(id, words, the claims no link shows) of the title (`title`) and of each heading that writes a number or a span
+    of time no link shows (module note above), of `only` when given; the analyst's locked ones and the headings of the
+    analyst's frame left out."""
+    out: list[tuple[str, str, list[str]]] = []
+    title = _collapse(doc.get("title"))
+    if title and doc.get("title_locked") is not True and (only is None or TITLE_BLOCK in only):
+        missing = [w for k, w, v in _claims_of(title) if not _shown_by((k, w, v), all_sentences(doc))]
+        if missing:
+            out.append((TITLE_BLOCK, title, missing))
+    us = units(doc)
+    for i, u in enumerate(us):
+        heading = _collapse(u.get("heading"))
+        uid = str(u.get("id"))
+        if not heading or u.get("locked") is True or (u.get("pinned") and u.get("by") == ANALYST) \
+                or (only is not None and uid not in only):
+            continue
+        level = _level(u.get("level"))
+        scope = list(unit_sentences(u))
+        for sub in us[i + 1:]:
+            if not isinstance(sub.get("paragraphs"), list) or _level(sub.get("level")) <= level:
+                break
+            scope += unit_sentences(sub)
+        missing = [w for k, w, v in _claims_of(heading) if not _shown_by((k, w, v), scope)]
+        if missing:
+            out.append((uid, heading, missing))
+    return out
+
+
+def loose_lines(slug: str, doc: dict[str, Any], only: set[str] | None = None) -> str:
+    """The titles and headings loose_headings finds, as a save's result names them, in the form of the flagged
+    sentences (flagged_lines); '' when there are none."""
+    loose = loose_headings(doc, only)
+    if not loose:
+        return ""
+    rows = [f"the citation check found a number or a span of time that no link shows in {_plural(len(loose), 'heading')}:"]
+    for uid, words, missing in loose[:LOOSE_MAX]:
+        what = " or ".join(f"“{m}”" for m in missing)
+        where, whose = ("the document", "the title") if uid == TITLE_BLOCK else ("its section", "the heading")
+        rows.append(f"- [[report:{slug}#{uid}]] “{_cut(words, FLAGGED_CHARS)}” No link in {where} shows {what}. Cite it "
+                    f"in a sentence, compute it in a card first if no card states it, or reword {whose}, before you end.")
+    if len(loose) > LOOSE_MAX:
+        rows.append(f"- … and {len(loose) - LOOSE_MAX} more")
     return "\n".join(rows)
 
 
@@ -2828,6 +2953,9 @@ async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
                         or "the citation check tagged unverified " + " ".join(f"[[report:{slug}#{i}]]" for i in ids))
     if out.get("reverted"):
         line += "\n" + reverted_line(out["reverted"])
+    if chip in ("edited the title", "edited a heading") and (loose := loose_lines(
+            slug, read_doc(ctx.c, investigation.MAIN, slug) or {}, {str(i) for i in out.get("ids") or []})):
+        line += "\n" + loose
     return tools.ok(line)
 
 

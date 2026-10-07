@@ -519,7 +519,8 @@ async def heal_sentences(c: str, sentences: list[dict[str, Any]], *, unwrap: boo
                 external[(display, ref)] = "the cited span is gone"
                 continue
             excerpt = str(out.get("excerpt") or "")
-            external[(display, ref)] = None if _value_matches(display, excerpt) else {"why": "the value is not at this reference", "source": _source_numbers(excerpt)}
+            holds = _value_matches(display, excerpt) or not cite.shows_value(display)  # words that show no value name the link
+            external[(display, ref)] = None if holds else {"why": "the value is not at this reference", "source": _source_numbers(excerpt)}
 
         prior = x.get("healed") if isinstance(x.get("healed"), list) else ()
         res = await heal.heal(text, load=load, notebook=whole, analyst=x.get("edited_by") == "analyst",
@@ -582,6 +583,8 @@ async def verify_and_tag(c: str, sentences: list[dict[str, Any]]) -> dict[str, A
             continue
         out = outs.get(r)
         exc = None if out is None else str(out.get("excerpt") or "")
+        if exc is not None and not cite.is_card_ref(r) and not cite.shows_value(display):
+            continue  # a file place that resolves, cited by words that show no value: they name the link (heal_sentences)
         if exc is None or not _value_matches(display, exc):
             failed.append({"sentence_id": sid, "ref": r, "value": display})
     value_pairs = {(sid, r) for sid, r, _ in values}

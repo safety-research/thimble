@@ -154,6 +154,26 @@ def clocks_in(display: str, text: str) -> bool:
 
 QUOTE_MARKS = "\"'“”‘’"
 
+# a whole number written in words, zero to ninety-nine (`seven`, `Twelve`, `twenty-one`), as prose and an agent's
+# message write a small count (number_words)
+_ONES = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+         "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen")
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+_WORD_VALUES = {w: i for i, w in enumerate(_ONES)} | _TENS
+_NUMBER_WORDS_RE = re.compile(r"(?<![\w-])(" + "|".join(sorted(_TENS, key=len, reverse=True)) + r")(?:[- ](one|two|three|four|five|six|"
+                              r"seven|eight|nine)(?![\w-]))?|(?<![\w-])(" + "|".join(sorted(_ONES, key=len, reverse=True)) + r")(?![\w-])", re.I)
+
+
+def number_words(text: str) -> list[tuple[int, int, int]]:
+    """(start, end, value) of each whole number from zero to ninety-nine that `text` writes in words, any case."""
+    out: list[tuple[int, int, int]] = []
+    for m in _NUMBER_WORDS_RE.finditer(text or ""):
+        if m[1]:
+            out.append((m.start(), m.end(), _TENS[m[1].lower()] + (_WORD_VALUES[m[2].lower()] if m[2] else 0)))
+        else:
+            out.append((m.start(), m.end(), _WORD_VALUES[m[3].lower()]))
+    return out
+
 
 _MONTHS = {m: i for i, names in enumerate((("jan", "january"), ("feb", "february"), ("mar", "march"), ("apr", "april"),
                                             ("may",), ("jun", "june"), ("jul", "july"), ("aug", "august"),
@@ -1309,6 +1329,16 @@ def whole_output_cell(ref: str) -> str | None:
 def is_label_display(display: str) -> bool:
     """Whether a value-ref's display names the link rather than a value — no number in it (`chart`, `per-run table`)."""
     return not _NUM_RE.search(display or "")
+
+
+def shows_value(display: str) -> bool:
+    """Whether a value-ref's display shows a value its place can be checked for: a number, quoted words or a day and a
+    month in words (mods/thimble-term/hooks/cite.ts showsValue). Other words, such as `its record` or `had the answer
+    cached`, only name the place they link to (live check term-fix6: `[[its record|pages.jsonl#L2]]` was marked red
+    because the line holds no such words)."""
+    d = (display or "").strip()
+    quoted = len(d) > 2 and d[0] in QUOTE_MARKS and d[-1] in QUOTE_MARKS
+    return bool(_NUM_RE.search(d)) or quoted or day_month(d) is not None
 
 
 def _canonical_token(token: str) -> str:
