@@ -161,8 +161,9 @@ _ONES = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
          "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen")
 _TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
 _WORD_VALUES = {w: i for i, w in enumerate(_ONES)} | _TENS
+# (a hyphen may follow, as in `six-week`, but not come before: `twenty-one` is one number)
 _NUMBER_WORDS_RE = re.compile(r"(?<![\w-])(" + "|".join(sorted(_TENS, key=len, reverse=True)) + r")(?:[- ](one|two|three|four|five|six|"
-                              r"seven|eight|nine)(?![\w-]))?|(?<![\w-])(" + "|".join(sorted(_ONES, key=len, reverse=True)) + r")(?![\w-])", re.I)
+                              r"seven|eight|nine)(?!\w))?|(?<![\w-])(" + "|".join(sorted(_ONES, key=len, reverse=True)) + r")(?!\w)", re.I)
 
 
 def number_words(text: str) -> list[tuple[int, int, int]]:

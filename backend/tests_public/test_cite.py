@@ -179,7 +179,8 @@ def test_a_number_an_output_writes_in_words_is_found_and_words_match_in_any_case
 
     assert [v for _, _, v in cite.number_words("Twelve pages; seven of the twelve; twenty-one, Ninety nine, zero")] == \
         [12, 7, 12, 21, 99, 0]
-    assert cite.number_words("someone, oneself, seventeenth, one-off") == []
+    assert cite.number_words("someone, oneself, seventeenth, x-one") == []
+    assert [v for _, _, v in cite.number_words("a six-week span")] == [6]
     for display, place in [("12", "alpha: Twelve pages are up."), ("7", "seven of the twelve pages are gone"),
                            ("21", "twenty-one runs")]:
         assert cite.value_in(display, place) and verify._value_matches(display, place), (display, place)

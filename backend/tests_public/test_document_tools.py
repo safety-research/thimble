@@ -208,11 +208,14 @@ async def test_a_number_or_a_span_of_time_in_the_title_or_a_heading_that_no_link
     i = lines.index("the citation check found a number or a span of time that no link shows in 3 headings:")
     assert lines[i + 1:] == [
         "- [[report:report#title]] “The account deleted for seven weeks, 27 times” No link in the document shows “seven "
-        "weeks”. Cite it in a sentence, compute it in a card first if no card states it, or reword the title, before you end.",
+        "weeks”. Cite it in a sentence, compute it in a card first if no card states it, or reword the title, before you end. "
+        "A link in the title itself is not checked.",
         f"- [[report:report#{bob['id']}]] “Bob issued 9 deletions on 23 June” No link in its section shows “23 June”. Cite "
-        "it in a sentence, compute it in a card first if no card states it, or reword the heading, before you end.",
+        "it in a sentence, compute it in a card first if no card states it, or reword the heading, before you end. A link "
+        "in the heading itself is not checked.",
         f"- [[report:report#{gap['id']}]] “A gap of 40 days” No link in its section shows “40 days”. Cite it in a sentence, "
-        "compute it in a card first if no card states it, or reword the heading, before you end."]
+        "compute it in a card first if no card states it, or reword the heading, before you end. A link in the heading "
+        "itself is not checked."]
     assert all(alice["id"] not in ln for ln in lines), "27 and two weeks are shown by its links"
     # an edit of the title that still says what no link shows is named again; a heading made plain is not
     r = await call("edit_document", span="report:report#title", text="The account deleted for 40 days")
@@ -225,6 +228,9 @@ async def test_a_number_or_a_span_of_time_in_the_title_or_a_heading_that_no_link
     assert [x[0] for x in report_types.loose_headings(doc)] == ["title"]
     doc["title_locked"] = True
     assert report_types.loose_headings(doc) == [], "the analyst's locked title"
+    # live check dec-back: a span written with a hyphen, as the writer's title "… in a six-week span, June 4 to July 14"
+    assert report_types._claims_of("All in a six-week span, June 4 to July 14, 2026") == [
+        ("date", "June 4", "June 4"), ("date", "July 14, 2026", "July 14, 2026"), ("span", "six-week", "6")]
 
 
 async def test_the_report_checks_read_the_title_as_a_passage_and_its_comment_stays_while_its_words_do(cells):

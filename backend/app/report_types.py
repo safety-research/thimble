@@ -2642,7 +2642,8 @@ def loose_lines(slug: str, doc: dict[str, Any], only: set[str] | None = None) ->
         what = " or ".join(f"“{m}”" for m in missing)
         where, whose = ("the document", "the title") if uid == TITLE_BLOCK else ("its section", "the heading")
         rows.append(f"- [[report:{slug}#{uid}]] “{_cut(words, FLAGGED_CHARS)}” No link in {where} shows {what}. Cite it "
-                    f"in a sentence, compute it in a card first if no card states it, or reword {whose}, before you end.")
+                    f"in a sentence, compute it in a card first if no card states it, or reword {whose}, before you end. "
+                    f"A link in {whose} itself is not checked.")
     if len(loose) > LOOSE_MAX:
         rows.append(f"- … and {len(loose) - LOOSE_MAX} more")
     return "\n".join(rows)
