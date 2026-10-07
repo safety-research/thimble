@@ -407,9 +407,10 @@ def timeline(workspaces_tmp, tmp_path, monkeypatch, inproc) -> str:
 @pytest.mark.parametrize("cols", [120, 200])
 async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
     """The worked example at 120 and 200 columns: the search and Filter by on Incident with its values as toggles; Rows
-    on Source, then Color by with its chips; the time range's readout and strip, a lane per source, the axis with the
-    key's toggle of failed events and the incidents' flags; then what the list shows and how many, its columns'
-    headings, and the events by day, each with its time, source, kind, actor, incident and text; its hint row names
+    on Source, then Color by with its chips; the time range's readout and strip, a lane per source, and the axis alone
+    (no key of failed events, no incidents' flags); then what the list shows and how many, its columns' headings, and
+    the events with no day's heading between them, each with its time (a day's first with its date), source, kind,
+    actor, incident and text; its hint row names
     ↑↓, Enter and `?`, which lists the keys of the controls the top row shows."""
     out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=36, wrap=DRAW_WRAP)
     lines = out.splitlines()
@@ -420,16 +421,17 @@ async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
     assert body[1].startswith("  Rows  Source  Color by  Service  ● payments 79  ● web 45")
     assert body[2] == "  16 May 01:14 – 19 May 14:25 · 3d 13h"
     assert [x[2:12].strip() for x in body[4:9]] == ["alert", "deploy", "agent", "chat", "ticket"]
-    assert body[9].startswith("  × failed") and "17 May 00:00" in body[9] and "18 May 00:00" in body[9]
-    assert body[10].split() == ["INC-311", "INC-312", "INC-313"]
-    assert body[11] == ""
-    assert body[12] == "  In the range  198 events"
-    assert body[13].split() == ["time", "source", "kind", "actor", "incident", "text"]
-    assert body[14].startswith("  Sat 16 May 2026")
-    assert body[15].startswith("❯ ● 01:40:12  chat    message      Oona")
-    assert "02:57:20  alert   fired        monitor     INC-311   payments: database connections at 181 of 200 for 5 min" in body[22]
+    assert body[9].startswith(" " * 12) and "17 May 00:00" in body[9] and "18 May 00:00" in body[9]
+    assert "failed" not in "\n".join(body[:11]) and "INC-311" not in "\n".join(body[2:11])
+    assert body[10] == ""
+    assert body[11] == "  In the range  198 events"
+    assert body[12].split() == ["time", "source", "kind", "actor", "incident", "text"]
+    assert body[13].startswith("❯ ● 16 May 01:40:12  chat    message      Oona")
+    assert body[14].startswith("  ●        02:00:05  deploy  started      deploybot")
+    assert not any(re.match(r"\s*(Sat|Sun|Mon|Tue) \d+ May", x) for x in body[13:]), "no day's heading breaks the list"
+    assert "02:57:20  alert   fired        monitor     INC-311   payments: database connections at 181 of 200 for 5 min" in body[20]
     if cols == 200:
-        assert "Tonight's release train: web 2.31.0 and payments 4.12.0. deploybot starts at 02:00." in body[15]
+        assert "Tonight's release train: web 2.31.0 and payments 4.12.0. deploybot starts at 02:00." in body[13]
     assert hints == "↑↓ to choose · Enter to open · ? for all keys · b to go back · x to close"
     out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=36, wrap=DRAW_WRAP, keys=["?"], panel=False)
     assert out.splitlines()[0].startswith("  ╭─ keys ─")
@@ -452,7 +454,7 @@ async def test_timeline_opens_an_event_in_the_side_pane_filters_and_picks_a_lane
                                      keys=["down"] * 8 + ["return"], panel=False)
     rows = out.splitlines()
     at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "03:00:48  alert   fired" in rows[at] and rows[at + 1].startswith("  ● 03:01:05  agent"), "nothing opens under the row"
+    assert "03:00:48  alert   fired" in rows[at] and rows[at + 1].startswith("  ●        03:01:05  agent"), "nothing opens under the row"
     pane = _timeline_pane(rows)
     assert pane[0].startswith("alert fired · 03:00:48") and pane[0].endswith("close")
     assert pane[1:5] == ["payments: health check failing on 2 of 3 replicas", "service payments · severity critical",
@@ -469,7 +471,7 @@ async def test_timeline_opens_an_event_in_the_side_pane_filters_and_picks_a_lane
     out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, keys=["click:alert"],
                                      panel=False)
     assert "  Source: alert  34 events" in out.splitlines()
-    assert {x[14:22].strip() for x in _list_rows(out.splitlines())} == {"alert"}
+    assert {x[21:29].strip() for x in _list_rows(out.splitlines())} == {"alert"}
     out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, ref="view:timeline/INC-313",
                                      panel=False)
     rows = out.splitlines()

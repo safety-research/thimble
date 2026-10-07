@@ -3,14 +3,13 @@
 // strip picks the time the lanes and the list show; an event opens in the side pane with the event it answers, those
 // that answer it, and its place. One fetch gives the events the search and Filter by keep, each with its Color by value
 // and its Rows group.
-import { COLORS, axis, colorBy, columns, dayName, dayOf, details, divider, draw, dur, fetch, filterBy, hms, lanes, list, onLabels, onOpen, onReset, plural, rows as rowsBy, search, side, timeRange } from 'thimble-term'
+import { COLORS, axis, colorBy, columns, dayOf, details, divider, draw, dur, fetch, filterBy, hms, lanes, list, onLabels, onOpen, onReset, plural, rows as rowsBy, search, side, timeRange, when } from 'thimble-term'
 
 const GUTTER = 12 // the lanes' names, which the strip, the axis and the lanes leave room for
 const BURST_GAP = 6 * 3600
 
 let E = [] // the events shown, in time order: {r, t, ref, source, kind, actor, service, severity, outcome, incident, text, value, group}
 let span = null
-let flags = [] // each incident's first time: [{t, label}]
 let picked = null // the lane chosen, whose events the list shows: {key, value, name}
 let keep = [] // the row a citation opened, kept whatever the filters
 let narrowTo = null // an incident a citation narrows Filter by to, once its values are in
@@ -73,13 +72,14 @@ const rows = rowsBy({ fields: FIELDS, initial: 'source', onChange: () => { pick(
 const range = timeRange({ onChange: () => {} })
 const q = search({ words: 'search events', onChange: load })
 // the lanes draw each event in the value the reader gave it, which holds for a label too; a cell where most events
-// failed is `×` in red, and its key entry hides or shows them
+// failed is `×` in red, always shown (there is no key that hides them)
 const painted = { keeps: () => true, valueOf: (e) => e.value, colourOf: (v) => colour.colourOf(v) }
 const ln = lanes({
   rows, colour: painted, problem: (e) => e.outcome === 'failed', words: { problem: 'failed', record: 'event' },
   onPick: (lane) => pick(picked && picked.key === lane.key ? null : lane),
   onMark: (e) => show(e.r),
 })
+if (!ln.isOn('problem')) ln.toggle('problem')
 const pane = side({ key: 'event' })
 const split = divider()
 const events = list({ key: (e) => e.r })
@@ -98,10 +98,7 @@ async function load() {
     do {
       const page = await fetch({ ...query, from }, { key: 'events' })
       if (my !== seq) return
-      if (page.span) {
-        span = page.span
-        flags = Object.entries(page.starts).map(([label, t]) => ({ t, label }))
-      }
+      if (page.span) span = page.span
       for (const k in page.cols) (cols[k] = cols[k] || []).push(...page.cols[k])
       for (const k in page.counts) counts[k] = (counts[k] || 0) + page.counts[k]
       for (const k in page.fcounts) fcounts[k] = (fcounts[k] || 0) + page.fcounts[k]
@@ -116,7 +113,7 @@ async function load() {
   filter.counts(fcounts)
   // the overview keeps the whole span whatever the filters keep, so the window stays where it was
   const pad = (span[1] - span[0]) * 0.005
-  range.data({ times: E.map((e) => e.t), values: E.map((e) => e.value), span: [span[0] - pad, span[1] + pad], marks: flags })
+  range.data({ times: E.map((e) => e.t), values: E.map((e) => e.value), span: [span[0] - pad, span[1] + pad] })
   loaded = true
   markLoaded()
   if (narrowTo !== null && filter.field === 'incident') narrowNow()
@@ -197,12 +194,14 @@ onOpen(async (place) => {
 })
 
 // the list's columns in the width it draws in: the kind from 60 cells (in a narrower list Color by and the details give
-// it), the actor from 88 and the incident from 110 (Filter by and the details have it too)
-const WIDTHS = { time: 8, source: 6, kind: 11, actor: 10, incident: 8 }
+// it), the actor from 88 and the incident from 110 (Filter by and the details have it too); the time right-aligned, a
+// day's first event with its date before it, to the minute in a list narrower than 60
+const WIDTHS = { time: 15, source: 6, kind: 11, actor: 10, incident: 8 }
 const HEADINGS = { time: 'time', source: 'source', kind: 'kind', actor: 'actor', incident: 'incident', text: 'text' }
 function columnsFor(w) {
   const keys = ['time', 'source', ...(w >= 60 ? ['kind'] : []), ...(w >= 88 ? ['actor'] : []), ...(w >= 110 ? ['incident'] : []), 'text']
-  return { keys, cols: columns(keys.map((k) => (k === 'text' ? { grow: true } : { w: WIDTHS[k] })), w - 6) }
+  const time = w >= 60 ? WIDTHS.time : 12
+  return { keys, step: w >= 60 ? 1 : 60, cols: columns(keys.map((k) => (k === 'text' ? { grow: true } : k === 'time' ? { w: time, align: 'right' } : { w: WIDTHS[k] })), w - 6) }
 }
 const ID = { alert: 'alert id', deploy: 'deploy id', chat: 'message id', ticket: 'ticket message' }
 
@@ -218,28 +217,23 @@ draw((d) => {
     return
   }
   // the overview, in the rows the divider gives it: the readout and the strip, a lane per group of Rows with
-  // the events in the range, and the axis with the incidents' flags and the key
+  // the events in the range, and the axis
   const shown = E.filter((e) => range.has(e.t))
   // the reader filters, so Filter by counts the events here for its menu's words
   for (const e of E) filter.tally(e)
   const n = split.rows(d, Math.min(4 + rows.groups(shown).length, Math.max(7, Math.floor(d.left / 2))))
   range.draw(d, { gutter: GUTTER })
   const scale = range.scale(d.cols - GUTTER)
-  const flagged = flags.some((m) => m.t >= scale.from && m.t <= scale.to)
-  ln.draw(d, { items: shown, scale, gutter: GUTTER, room: Math.max(1, n - 3 - (flagged ? 1 : 0)), span: events })
-  axis(d, scale, { gutter: GUTTER, marks: flags, legend: ln.legend(), onMark: (m) => frame(m.label) })
+  ln.draw(d, { items: shown, scale, gutter: GUTTER, room: Math.max(1, n - 3), span: events })
+  axis(d, scale, { gutter: GUTTER })
   d.blank()
-  // the events in the range and in the lane chosen, a heading for each day, each row its mark in its Color by hue
-  const items = []
-  let day = ''
-  for (const e of shown) {
-    if (!inLane(e)) continue
-    if (dayOf(e.t) !== day) items.push({ heading: dayName(((day = dayOf(e.t)), e.t)) })
-    items.push(e)
-  }
+  // the events in the range and in the lane chosen, each row its mark in its Color by hue; a day's first event gives
+  // the date, so no heading row breaks the list
+  const items = shown.filter(inLane)
+  const dated = new Set(items.filter((e, i) => !i || dayOf(items[i - 1].t) !== dayOf(e.t)))
   events.draw(d, {
     title: picked ? `${rows.by ? `${rows.by.title}: ` : ''}${picked.name}` : 'In the range',
-    count: plural(items.length - items.filter((x) => x.heading).length, 'event'),
+    count: plural(items.length, 'event'),
     items,
     colour,
     value: (e) => e.value,
@@ -252,11 +246,11 @@ draw((d) => {
       cols.header(r, keys.map((k) => HEADINGS[k]))
     },
     row: (e, r) => {
-      const { keys, cols } = columnsFor(r.d.cols + 3)
+      const { keys, step, cols } = columnsFor(r.d.cols + 3)
       // a failed outcome as `×` before its kind (before its text where the kind has no column), in the problem red as
       // the lanes draw it
       const failed = e.outcome === 'failed'
-      const value = { time: hms(e.t), source: e.source, kind: `${failed ? '× ' : ''}${e.kind}`, actor: e.actor, incident: e.incident, text: `${failed && !keys.includes('kind') ? '× ' : ''}${e.text}` }
+      const value = { time: dated.has(e) ? when(e.t, step) : hms(e.t), source: e.source, kind: `${failed ? '× ' : ''}${e.kind}`, actor: e.actor, incident: e.incident, text: `${failed && !keys.includes('kind') ? '× ' : ''}${e.text}` }
       cols.cells(r, keys.map((k) => value[k]), keys.map((k) => (failed && (k === 'kind' || (k === 'text' && !keys.includes('kind'))) ? { fg: COLORS.problem } : k === 'kind' || k === 'text' ? {} : { d: true })))
     },
     onOpen: (e) => readRecord(e.r),
