@@ -355,7 +355,7 @@ function gutterOf(on: readonly OnLabel[], marks: Map<number, Map<string, string>
     const vs = n === null ? undefined : marks.get(n)
     return [...on.flatMap((l, i): Seg[] => {
       const v = vs?.get(l.id)
-      return [...(i ? [{ s: ' ' }] : []), v ? { s: '●', fg: valueColour(l.values, v) ?? COLORS.text } : { s: ' ' }]
+      return [...(i ? [{ s: ' ' }] : []), v ? { s: '●', fg: valueColour(l.values, v, l.colors) ?? COLORS.text } : { s: ' ' }]
     }), { s: '  ' }]
   }
 }
@@ -620,7 +620,7 @@ type Listed = { lines: Line[]; hits: LineHit[]; fixed: number; pickY: number; ch
  *  the file, a space between them. */
 function fileDots(on: readonly OnLabel[], path: string): Seg[] {
   const ls = on.filter(l => labelCovers(l, path))
-  return ls.length ? [{ s: '  ' }, ...ls.flatMap((l, i): Seg[] => [...(i ? [{ s: ' ' }] : []), { s: '●', fg: labelHue(l.values) }])] : []
+  return ls.length ? [{ s: '  ' }, ...ls.flatMap((l, i): Seg[] => [...(i ? [{ s: ' ' }] : []), { s: '●', fg: labelHue(l.values, l.colors) }])] : []
 }
 
 /** The tree: a folder's row (its fold marker at its depth's edge, its name, its file count dim, its size against R),
@@ -1208,8 +1208,8 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
 function labelRow(cx: Ctx, e: PaneEvent, l: OnLabel, fileValue: string | undefined, cols: number, i: number): RenderElement {
   const line: Line = [dim('label  '), linkSeg(l.name), { s: ' ' }, { s: '↗', fg: LINK }]
   const x1 = lineWidth(line)
-  for (const v of l.values) line.push({ s: '  ' }, { s: '●', fg: valueColour(l.values, v) ?? COLORS.text }, { s: ` ${v}` })
-  if (fileValue) line.push(dim('  ·  file  '), { s: '●', fg: valueColour(l.values, fileValue) ?? COLORS.text }, { s: ` ${fileValue}` })
+  for (const v of l.values) line.push({ s: '  ' }, { s: '●', fg: valueColour(l.values, v, l.colors) ?? COLORS.text }, { s: ` ${v}` })
+  if (fileValue) line.push(dim('  ·  file  '), { s: '●', fg: valueColour(l.values, fileValue, l.colors) ?? COLORS.text }, { s: ` ${fileValue}` })
   const open = () => openLabel(cx, l.id, l.name)
   return linesEl(cx, e, `file-label-${i}`, [cutLineSegs(line, cols)], [{ y: 0, x0: width('label  '), x1, row: false, run: open }], cols)
 }

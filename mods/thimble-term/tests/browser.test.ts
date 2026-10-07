@@ -9,6 +9,7 @@ import type { Engine, Mounted } from 'claude-code/testing'
 
 import { csvCells, fileTree, fileType, firstChoice, globTest, grepOf, isDatabase, jsonOf, labelCovers, onLabels, recordMarks, tableScore, treeRows, unfoldTo } from '../hooks/files'
 import { CWD, LABEL, WS, takesKeys, world } from './fixtures'
+import { LABEL_HUES } from '../hooks/paint'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -285,6 +286,28 @@ test('the labels that are on: a `●` in the label\'s hue after each file it lab
   expect(r[0]).toContain(`labels › ${LABEL.name}`)
 })
 
+test("the file browser's marks take the colors the analyst chose for the label's values, as the label panel draws them", async ($, on) => {
+  const w = world(on)
+  w.states.files = [{ path: 'revisions.jsonl', kind: 'records', size_bytes: 52_000_000 }]
+  w.states.labels = [{ ...LABEL, shown: true, classes: [{ name: 'proxy-link', color: 10, highlight: true }, { name: 'none', color: 0, highlight: false }] }] as never
+  w.pages['revisions.jsonl'] = { path: 'revisions.jsonl', kind: 'records', total_lines: 2, start: 1, records: [{ line: 1, record: { wiki: 'dse', body: 'see https://r.jina.ai/x' } }, { line: 2, record: { wiki: 'dse', body: 'Welcome' } }] }
+  w.marks['revisions.jsonl'] = [{ concept_id: LABEL.id, name: LABEL.name, labels: LABEL.labels, unit: 'record', rows: [{ ref: 'revisions.jsonl#L1', label: 'proxy-link', analyst: null }, { ref: 'revisions.jsonl#L2', label: 'none', analyst: null }] }]
+  await start($, w)
+  await browser($, w)
+  let pane = (await $.ui.mount(PANE())) as unknown as M
+  expect(JSON.stringify(await pane.drawn({ in: 'm:files-tree' }))).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[9]}"},"children":["●"]}`)
+  await pane.unmount()
+  await $.command.run({ command: 'thimble:thimble', args: 'files revisions.jsonl' } as never)
+  await w.clock.settle()
+  await rows($, w)
+  pane = (await $.ui.mount(PANE())) as unknown as M
+  const drawn = JSON.stringify(await pane.drawn({ in: 'm:file-body' }))
+  expect(drawn).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[9]}"},"children":["●"]}`)
+  expect(drawn).toContain('{"type":"Text","props":{"color":"inactive"},"children":["●"]}')
+  expect(drawn).not.toContain('#1d7fc0')
+  await pane.unmount()
+})
+
 test('a file in the mode that fits it: a CSV file as a table under its first line\'s names, Markdown as text, one record as JSON; the preview in that mode', async ($, on) => {
   const w = world(on)
   w.states.files = NESTED
@@ -428,6 +451,9 @@ test("a file's modes as files.ts reads them: CSV cells, the browser's table scor
   expect(globTest('runs/*.jsonl')('runs/a/b.jsonl')).toBe(false)
   const on = onLabels([{ id: 'k', name: 'note', labels: ['yes', 'no'], shown: true, unit: 'record', last_run: { paths: ['a.jsonl'] } }, { id: 'off', labels: ['x'], unit: 'record' }, { id: 'cards', shown: true, unit: 'cell' }])
   expect(on.map(l => l.id)).toEqual(['k'])
+  // each value's color is its class's, as the label panel draws it (labels.ts classColors); none when it has no classes
+  expect(on[0]!.colors).toBeUndefined()
+  expect(onLabels([{ id: 'c', labels: ['yes', 'no'], shown: true, classes: [{ name: 'yes', color: 10 }, { name: 'no', color: 0 }] }])[0]!.colors).toEqual({ yes: 10, no: 0 })
   expect(labelCovers(on[0]!, 'a.jsonl')).toBe(true)
   expect(labelCovers(on[0]!, 'b.jsonl')).toBe(false)
   const m = recordMarks([{ concept_id: 'k', rows: [{ ref: 'a.jsonl#L3', label: 'yes', analyst: 'no' }, { ref: 'a.jsonl#L4.b0:c1-5', label: 'yes' }, { ref: 'a.jsonl', label: 'yes' }] }, { concept_id: 'off', rows: [{ ref: 'a.jsonl#L3', label: 'x' }] }], on, 'a.jsonl')

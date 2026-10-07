@@ -1,6 +1,8 @@
 // The file browser's pure parts: which refs name a file of the folder and the record they cite, the folder tree and
 // its rows, which turns a whole-file JSON transcript's view reads, the modes a file's records read in, the labels that
 // are on and the values they gave a file's records, and what a search found. filesview.tsx draws them.
+import { classColors } from './labels'
+import type { LabelClass } from './labels'
 
 /** The file a ref cites and the record in it: a line (`#L<n>`, a range's first), a JSON list's item (`#/<i>` or
  *  `#/<key>/<i>`, counted from 1 as the file's view counts them), or the whole file. Null for a ref of no file of the
@@ -276,8 +278,9 @@ export function jsonOf(text: string): unknown {
 
 // ------------------------------------------------------------------------------------------------ labels on records
 
-/** A label that is on in Files (`shown`, show_label) over a corpus's records or files: its id, name and values. */
-export type OnLabel = { id: string; name: string; values: string[]; paths: string[]; glob: string }
+/** A label that is on in Files (`shown`, show_label) over a corpus's records or files: its id, name and values, and
+ *  each value's color from its classes (labels.ts classColors), as the label panel draws them. */
+export type OnLabel = { id: string; name: string; values: string[]; paths: string[]; glob: string; colors?: Record<string, number> }
 
 /** The labels over files that are on, in the order the labels list gives them. */
 export function onLabels(labels: readonly Obj[]): OnLabel[] {
@@ -285,7 +288,8 @@ export function onLabels(labels: readonly Obj[]): OnLabel[] {
     .filter(l => l.shown === true && (!l.unit || ['record', 'agent', 'run'].includes(str(l.unit))))
     .map(l => {
       const run = isObj(l.last_run) ? l.last_run : null
-      return { id: str(l.id), name: str(l.name) || str(l.id), values: Array.isArray(l.labels) ? (l.labels as unknown[]).map(String) : [], paths: run && Array.isArray(run.paths) ? (run.paths as unknown[]).map(String) : [], glob: str(l.glob) }
+      const colors = classColors(l.classes as LabelClass[] | undefined)
+      return { id: str(l.id), name: str(l.name) || str(l.id), values: Array.isArray(l.labels) ? (l.labels as unknown[]).map(String) : [], paths: run && Array.isArray(run.paths) ? (run.paths as unknown[]).map(String) : [], glob: str(l.glob), ...(colors ? { colors } : {}) }
     })
 }
 
