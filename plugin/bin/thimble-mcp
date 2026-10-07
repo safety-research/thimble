@@ -29,11 +29,12 @@ Protocol: the shim serves only the initialize-handshake protocol (2025-11-25 and
 
 Terminal mode (app/local.py): when the workspace of the shim's folder records that its session runs in terminal mode
 (`mode` in trusted/launch.json, read once at start), no server runs. A call runs `tools.call` in this process
-(call_local, local.call), the backend loaded on the first call; the jobs a call leaves running (a prompt label's run,
-the card check of a card `thimble-run` wrote) run on this process's loop and end with it; there is no subscription; and
-fd 1 is pointed at stderr once the MCP stream has its own copy of it (terminal_stdout), so a library or a child process
-that writes to stdout cannot corrupt the protocol. A folder of no workspace stays in browser mode, whose calls reach no
-server here, so a process that lost its environment does nothing.
+(call_local, local.call), the backend loaded on the first call; the card watch starts with the shim (local.begin), so
+a card `thimble-run` writes before the session's first call is checked too; the jobs a call leaves running (a prompt
+label's run, the card check of a card `thimble-run` wrote) run on this process's loop and end with it; there is no
+subscription; and fd 1 is pointed at stderr once the MCP stream has its own copy of it (terminal_stdout), so a library
+or a child process that writes to stdout cannot corrupt the protocol. A folder of no workspace stays in browser mode,
+whose calls reach no server here, so a process that lost its environment does nothing.
 
 `thimble-mcp --list` prints the tool list as JSON and `thimble-mcp --instructions` the instructions, without MCP.
 """
@@ -421,6 +422,11 @@ async def serve(server: MCPServer) -> None:
     # the parent is the `claude` process; a session thimble starts itself hears no browser events (its main does), and
     # in terminal mode no server sends any (module note)
     route = None if own_session()[0] or terminal() else cc_plugin.route(cwd(), HERE.parents[1])
+    if terminal():
+        try:  # the card watch from the session's start, not its first call (local.begin)
+            local.begin(cwd())
+        except Exception:  # noqa: BLE001 — the tools still serve without it
+            log.exception("the card watch did not start")
     options = low.create_initialization_options()
     try:
         async with stdio_server() as (read_stream, write_stream):

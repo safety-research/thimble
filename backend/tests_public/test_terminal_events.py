@@ -127,6 +127,21 @@ def test_a_thread_event_server_code_sends_goes_to_the_queue(ws):
     assert events.queued_line(CORPUS, MAIN) == "thimble · queued: thread bots: Which bot replied?"
 
 
+def test_a_thread_s_line_names_it_by_its_first_question_never_its_fork_name(ws):
+    """Main's terminal shows a thread's question as `› new thread: <question>`, and a follow-up under the thread's first
+    question in quotation marks; the fork's name (a slug of the anchor's words) is Claude Code's agent tray's."""
+    from app import agents, threads
+
+    meta = agents.new_thread(CORPUS, "card:abc#n/all", "Nearly all revisions are on one wiki: 2994 of 3000.")
+    events.post(CORPUS, "thread", {"thread": meta["id"], "text": "Is 2994 all of the dse revisions in this file?"})
+    [first] = event_files.waiting(ws)
+    assert first["line"] == "› new thread: Is 2994 all of the dse revisions in this file?"
+    assert meta["title"] not in first["line"]
+    # a follow-up (sent once the fork is known, threads.flush), under the first question
+    name = threads.line_name(CORPUS, meta["id"], ["And dorfwiki?"])
+    assert events.terminal_line("thread", "And dorfwiki?", {"name": name}) == '› thread "Is 2994 all of the dse revisions in…": And dorfwiki?'
+
+
 def test_browser_mode_is_unchanged_when_launch_json_names_no_mode(workspaces_tmp):
     ws = config.workspace_dir(CORPUS)
     write_launch(ws, mode="")

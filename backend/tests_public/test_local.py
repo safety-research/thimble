@@ -228,6 +228,18 @@ async def test_state_gives_what_the_routes_give(term):
     [row] = [t for t in await local.state(CORPUS, "threads") if t["id"] == meta["id"]]
     assert row["answers"] == 2 and row["unread"] is True
     assert row["question"] == "Why?", "its first question names the thread in the terminal"
+    # main often answers with reply_in_thread alone (a `text` record marked `reply`, no `done`): that counts too, and a
+    # reply and a `done` of one question count once
+    agents.append(log_path, {"type": "user", "text": "And the rest?"})
+    agents.append(log_path, {"type": "tool_use", "name": "Bash"})
+    agents.append(log_path, {"type": "text", "delta": "All of it.", "reply": True})
+    [row] = [t for t in await local.state(CORPUS, "threads") if t["id"] == meta["id"]]
+    assert row["answers"] == 3
+    agents.append(log_path, {"type": "text", "delta": "Also this.", "reply": True})
+    agents.append(log_path, {"type": "done", "result": None})
+    agents.append(log_path, {"type": "user", "text": "Still there?"})
+    [row] = [t for t in await local.state(CORPUS, "threads") if t["id"] == meta["id"]]
+    assert row["answers"] == 3, "one answer per question; the last question has none yet"
     assert (await local.state(CORPUS, "files"))[0]["path"]
     assert [f["path"] for f in (await local.state(CORPUS, "files", ["agents"]))["files"]][0] == "agents/agent-01.jsonl"
     # a file: a page of its records from --start, as GET /source gives it, for the renderer's file view

@@ -5,10 +5,10 @@ text, surface, selector, and a PNG under `anchors/`). Each message typed in it i
 (`event`) naming the thread and its card group `thread:<id>`; the first one carries the anchor and what its refs
 hold.
 Main answers by forking with description `thread:<name>`, the thread's fork name (fork_name: its title as a slug, which
-the terminal shows); the mirror (session.py) matches the fork's transcript, copies
-its tool calls and its text into the thread's chat, with the messages the analyst typed to it in Claude Code's agent
-view and those main sent it for a question typed in the terminal, and calls fork_finished when it stops. The fork
-replies with `reply_in_thread` or its text.
+Claude Code's agent tray shows; the event's line in main's terminal names the thread by its first question, line_name);
+the mirror (session.py) matches the fork's transcript, copies its tool calls and its text into the thread's chat, with
+the messages the analyst typed to it in Claude Code's agent view and those main sent it for a question typed in the
+terminal, and calls fork_finished when it stops. The fork replies with `reply_in_thread` or its text.
 
 A fork lives only as long as its session: after that, the next event forks anew and carries the earlier turns. A
 message typed while the first event waits for its fork is queued (`queued`) and sent once the fork is known (flush)."""
@@ -306,6 +306,26 @@ def build(c: str, thread_id: str, questions: list[str]) -> tuple[str, dict[str, 
     return cite.canon_text("\n".join(ln for ln in lines if ln)), fields, thread_id
 
 
+LINE_NAME_CHARS = 40  # of the first question that names a thread in main's terminal (line_name)
+
+
+def line_name(c: str, thread_id: str, questions: list[str]) -> str:
+    """What names the thread in its event's line in main's terminal (events.terminal_line): its first question in
+    quotation marks, cut at LINE_NAME_CHARS; '' when the questions asked are its first, which the line shows whole
+    (`› new thread: …`). Never the fork's name, which is a slug of the anchor's words."""
+    records = agents.read_events(agents.paths(c, thread_id)[1])
+    first = next((" ".join(str(r.get("text") or "").split()) for r in records
+                  if r.get("type") == "user" and str(r.get("text") or "").strip()), "")
+    asked = " ".join(" ".join(questions).split())
+    if not first or asked.startswith(first):
+        return ""
+    if len(first) > LINE_NAME_CHARS:
+        cut = first[: LINE_NAME_CHARS - 1]
+        word = cut.rsplit(" ", 1)[0]
+        first = (word if len(word) > LINE_NAME_CHARS // 2 else cut).rstrip(" ,;:.") + "…"
+    return f'"{first}"'
+
+
 def earlier(c: str, thread_id: str, asking: int = 1) -> str:
     """The thread's turns before the `asking` questions at the end of its log, as `analyst:` and `reply:` lines, cut to
     the newest EARLIER_CHARS; empty when there were none (a first question)."""
@@ -353,7 +373,7 @@ def flush(c: str, thread_id: str) -> bool:
     questions = [str(q["text"]) for q in queued]
     body, fields, _ = build(c, thread_id, questions)
     events.send(c, events.THREAD, body, fields, thread=thread_id,
-                 line=events.terminal_line(events.THREAD, " ".join(questions), fields))
+                 line=events.terminal_line(events.THREAD, " ".join(questions), {"name": line_name(c, thread_id, questions)}))
     agents.set_running(c, thread_id, True)
     return True
 
@@ -395,7 +415,7 @@ def ask_again(c: str, thread_id: str, *, hand: bool = False) -> dict[str, Any]:
         out = {"text": events.hand(c, event_id, body, fields, thread=thread_id)}
     else:
         posted = events.send(c, events.THREAD, body, fields, thread=thread_id,
-                              line=events.terminal_line(events.THREAD, " ".join(questions), fields))
+                              line=events.terminal_line(events.THREAD, " ".join(questions), {"name": line_name(c, thread_id, questions)}))
         event_id, out = posted["id"], {}
     _, log_path = agents.paths(c, thread_id)
     agents.append(log_path, {"type": "again", "ts": _now(), "event": event_id, "questions": len(questions)})

@@ -177,9 +177,22 @@ async def call(name: str, args: dict[str, Any], *, cwd: str, session: str | None
     return res.as_dict()
 
 
+def begin(cwd: str | None) -> str | None:
+    """The shim's start in terminal mode, on its event loop: _start for the workspace of `cwd`, before any tool call.
+    A session resumed with `--continue` may run cards with `thimble-run` before it calls a tool, and their card checks
+    wait for the card watch, which would otherwise start only with the first call. The workspace, or None for a folder
+    of no terminal-mode workspace."""
+    c = workspace(cwd)
+    if not c or not terminal(c):
+        return None
+    _start(c)
+    return c
+
+
 def _start(c: str) -> None:
-    """The first call for workspace `c` in this process: the cards an earlier session left `running` are marked
-    interrupted, and the watch that starts the card check of each card `thimble-run` writes begins (cardrun.CardWatch)."""
+    """The shim's start (begin), or the first call for workspace `c` in this process: the cards an earlier session left
+    `running` are marked interrupted, and the watch that starts the card check of each card `thimble-run` writes begins
+    (cardrun.CardWatch)."""
     if c in _started:
         return
     _started.add(c)
@@ -447,10 +460,25 @@ def _unread(c: str, meta: dict[str, Any]) -> bool:
     return threads.unread(c, meta)
 
 
+def answered(events: list[dict[str, Any]]) -> int:
+    """How many of a thread's questions have an answer: each question (a `user` record and the records after it) counts
+    once, at its first `done` record or its first reply (the `text` record `reply_in_thread` writes, threads.reply). In
+    terminal mode main often answers with `reply_in_thread` alone, and no `done` record follows."""
+    n, got = 0, False
+    for r in events:
+        kind = r.get("type")
+        if kind == "user":
+            got = False
+        elif not got and (kind == "done" or (kind == "text" and r.get("reply"))):
+            got = True
+            n += 1
+    return n
+
+
 def _answers(c: str, meta: dict[str, Any]) -> tuple[int, str]:
-    """How many of a thread's runs ended with an answer: the `done` records of its log, one per question answered,
-    which the renderer counts to put a row under main's latest reply when a new one comes; and its first question,
-    which names the thread in the terminal (its title is a slug)."""
+    """How many of a thread's questions have an answer (answered), which the renderer counts to put a row under main's
+    latest reply when a new one comes; and its first question, which names the thread in the terminal (its title is a
+    slug)."""
     from . import agents  # noqa: PLC0415
 
     try:
@@ -458,7 +486,7 @@ def _answers(c: str, meta: dict[str, Any]) -> tuple[int, str]:
     except Exception:  # noqa: BLE001 — a thread that cannot be read shows nothing new
         return 0, ""
     first = next((str(r.get("text") or "").strip() for r in events if r.get("type") == "user" and str(r.get("text") or "").strip()), "")
-    return sum(1 for r in events if r.get("type") == "done"), first[:QUESTION_CHARS]
+    return answered(events), first[:QUESTION_CHARS]
 
 
 QUESTION_CHARS = 300
