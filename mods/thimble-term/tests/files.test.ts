@@ -297,3 +297,32 @@ test("the Raw tab shows a file's lines as the file holds them: a transcript's re
   expect(body).toContain('{"type": "tool_use", "name": "Read", "at": "10:02"}')
   await pane.unmount()
 })
+
+test("a click on the path's `files` step goes back to the file browser, never a step pushed after the file", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  let ui = (await $.ui.mount(MESSAGE('m1', 'The README says [4,579](README.md#L3) pages.'))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('m1', 'The README says [4,579](README.md#L3) pages.'))) as unknown as M
+  await ui.pointer({ type: 'down', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.unmount()
+  await w.clock.settle()
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  await pane.press({ key: 'hk-files' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.find({ key: 'way' }))).toMatch(/home › citation 4,579 › files › README\.md/)
+  const up = ((await pane.findAll({ type: 'Button' })) as { key?: string }[]).find(b => String(b.key).startsWith('crumb-up-'))!
+  await pane.press({ key: up.key! })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  const way = shown(await pane.find({ key: 'way' }))
+  expect(way).toMatch(/home › citation 4,579 › files(?! ›)/)
+  expect(way).not.toContain('README.md')
+  expect(await pane.find({ type: 'Client', key: 'm:files-tree' })).toBeDefined()
+  await pane.unmount()
+})

@@ -146,6 +146,9 @@ async def test_list_agents_counts_a_side_threads_running_fork_in_terminal_mode(t
     assert 'thread "How many posts does the board hold? One number."' in out and "working" in out, out
     assert [r["chat"] for r in tray.agent_rows(CORPUS)] == [tid]
     agents.append(log_path, {"type": "text", "delta": "12 posts.", "reply": True, "by": "terminal"})
+    # replied and still at work: done, as the thread's `↳` row in main's chat says it answered
+    assert [r["state"] for r in tray.thread_rows_files(CORPUS)] == ["done"]
+    assert "done" in text(await call(term, "list_agents"))
     agents.append(log_path, {"type": "done", "ts": "2026-10-07T05:22:35Z", "result": None})
     assert tray.thread_rows_files(CORPUS) == [], "its run ended"
     # a follow-up while its fork runs on in main's session (launch.json names the session)

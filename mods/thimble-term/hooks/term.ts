@@ -38,6 +38,9 @@ export type UiApply = (cx: Ctx, kind: string, args: Record<string, unknown>) => 
 
 /** What thimble-term holds while the module runs (a reload starts it over; session.start reads the scope again). */
 export const rt = {
+  // the key of the panel's element that holds its focus ring (ui.focus), '' for none: while a text field holds it, the
+  // letters a hint names go into the field
+  panelFocus: '',
   sc: null as Scope | null,
   sig: null as Signature | null,
   busy: false,
@@ -473,6 +476,7 @@ export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
     nav = moved(cur, nextTrail(cur.trail, step, await inPanel(cx), p.view === 'thread' ? await threadChain(cx, p, step) : [step]))
   }
   rt.navFrom = null
+  rt.panelFocus = '' // the view drawn next puts the focus ring where it starts (an autoFocus field), or nowhere
   await cx.setNav(nav)
   await cx.setPanel(p)
   void loadPanel(cx, p).then(() => cx.bumpPanel())
@@ -564,6 +568,14 @@ async function showingThread(cx: Ctx, id: string): Promise<boolean> {
   if (shown?.view !== 'thread' || shown.thread !== id) return false
   if ((await cx.pending()) !== null) return false
   return (await cx.panes()).some(p => p.id === PANEL && p.isPlaced)
+}
+
+/** The threads as `thimble state threads` lists them now, read past what the session holds (a thread asked a moment
+ *  ago, whose fork's name its meta holds once its question went to main). */
+export async function threadsNow(cx: Ctx): Promise<TermThreadRow[]> {
+  if (!rt.sc) return []
+  const got = await readState(cx, rt.sc, 'threads')
+  return got.ok ? threadRowsOf(got.value) : []
 }
 
 /** The threads list read again: the counts above the prompt, and a row in main's chat for each turn that ended (an

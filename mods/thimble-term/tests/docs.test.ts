@@ -189,8 +189,29 @@ test("a document's sentence that cites one of its figures whole leaves the refer
   pane = (await $.ui.mount(PANE)) as unknown as M
   const para = shown(await pane.drawn({ in: 'para-d0-2' }))
   // live check New 1: `the check was done card.`
-  expect(para).toContain('The export holds four wikis. The check was done card "How many records does each file hold?".')
+  expect(para).toContain('The export holds four wikis. The check was done (card "How many records does each file hold?").')
   // the figure itself is drawn as a card
   expect(JSON.stringify(await pane.drawn())).toContain('"question":"What does the export hold per wiki?"')
+  await pane.unmount()
+})
+
+test("a figure's caption stands under its card, then a blank row before the next paragraph; the retell keys say what each retells as", async ($, on) => {
+  const w = world(on)
+  w.docs.report = {
+    ...DOC,
+    sections: [{ ...DOC.sections[0]!, paragraphs: [{ id: 'p1', sentences: [{ id: 'x1', text: 'The export holds four wikis.' }] }, { id: 'p2', sentences: [{ id: 'x2', text: 'Then the second paragraph.' }] }] }],
+  }
+  await start($, w)
+  let pane = await fromHome($, w, DOC.title)
+  await w.clock.advance(1100)
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  const tree = JSON.stringify(await pane.drawn())
+  const at = tree.indexOf('The export per wiki.')
+  const next = tree.indexOf('Then the second paragraph.', at)
+  expect(at).toBeGreaterThan(0)
+  expect(next).toBeGreaterThan(at)
+  expect(tree.slice(at, next)).toContain('"marginTop":1')
+  expect(shown(await pane.drawn())).toContain('s slides, y story · l for all documents')
   await pane.unmount()
 })

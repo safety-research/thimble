@@ -2,9 +2,9 @@
 of the session that posts an event (the MCP shim, the hooks' backend calls, the renderer's acts) writes it to a file in
 the workspace, and main's watcher (plugin/bin/.thimble-watch, the asyncRewake hook) takes it from there:
 
-  events/queue.jsonl   one line per event, as the model reads it: {id, kind, text, line, at}; then, once main's watcher
-                       took it, {taken: id, session, at}, which wakes main with `text`; once main's held hook printed
-                       its `line` in the terminal, {shown: id}. A line for main's terminal that sends main no event
+  events/queue.jsonl   one line per event, as the model reads it: {id, kind, text, line, said, at}; then, once main's
+                       watcher took it, {taken: id, session, at}, which wakes main with `text`; once main's held hook
+                       printed its `said` in the terminal, {shown: id}. A line for main's terminal that sends main no event
                        (events.show) is {show: line, at}. Trimmed to the lines still needed once it grows past
                        TRIM_BYTES.
   held-events.json     the quiet events (events.QUIET_KINDS) as notes, which ask main for nothing: they ride along with
@@ -36,6 +36,10 @@ TRIM_BYTES = 256 * 1024
 KEEP_S = 24 * 3600.0  # a taken event's lines are dropped this long after it was posted, once the file is trimmed
 MEANWHILE = "meanwhile:"  # events.MEANWHILE
 SAID = "› "  # events.SAID: opens the analyst's own words in an event's line
+# the kinds of event whose line main's terminal leaves out (said): Claude Code draws a hook's systemMessage under the
+# hook's name (`UserPromptSubmit says: …`), a row no render hook reaches, and the terminal's own rows already say these:
+# a thread's question in its fork's row and its `↳` row (thimble-term), a writer's end in its hand-back's row
+TOLD_IN_CHAT = ("thread", "written")
 
 
 def queue_path(ws: Path) -> Path:
@@ -179,6 +183,11 @@ def joined(notes: list[dict[str, Any]]) -> str:
     return "\n".join(str(n.get("terminal") or "") for n in notes if n.get("terminal"))
 
 
+def said(notes: list[dict[str, Any]]) -> str:
+    """The lines main's held hook prints in the terminal for these events: joined, less those of TOLD_IN_CHAT."""
+    return joined([n for n in notes if str((n.get("meta") or {}).get("kind") or "") not in TOLD_IN_CHAT])
+
+
 # --------------------------------------------------------------------------- the queue
 
 
@@ -188,12 +197,13 @@ def append(ws: Path, note: dict[str, Any], render: Callable[[dict[str, Any]], st
     path = queue_path(ws)
     with locked(path):
         riders = pop_held(ws)
+        shown = said([note, *riders])
         if riders:
             note = {**note, "content": f"{note.get('content') or ''}\n\n{meanwhile(riders)}",
                     "terminal": joined([note, *riders])}
         meta = note.get("meta") or {}
         rec = {"id": str(meta.get("event") or secrets.token_hex(4)), "kind": str(meta.get("kind") or ""),
-               "text": render(note), "line": str(note.get("terminal") or ""), "at": time.time()}
+               "text": render(note), "line": str(note.get("terminal") or ""), "said": shown, "at": time.time()}
         _append(path, rec)
     return rec
 
@@ -240,7 +250,8 @@ def unshown(ws: Path, session: str) -> list[str]:
         out, marks = [], []
         for r in recs:
             if r.get("taken") and r.get("session") == session and str(r["taken"]) not in shown:
-                line = str((by_id.get(str(r["taken"])) or {}).get("line") or "")
+                ev = by_id.get(str(r["taken"])) or {}
+                line = str(ev.get("said") if "said" in ev else ev.get("line") or "")
                 marks.append({"shown": str(r["taken"])})
                 shown.add(str(r["taken"]))
                 if line:

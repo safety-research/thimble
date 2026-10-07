@@ -608,3 +608,18 @@ def test_a_scan_worker_ends_once_the_process_that_made_its_pool_is_killed(tmp_pa
         time.sleep(0.2)
         left = [p for p in left if os.path.exists(f"/proc/{p}") and "Z" not in open(f"/proc/{p}/stat").read().split()[2]]
     assert not left, f"the pool's workers {left} still run after the process that made the pool was killed"
+
+
+def test_a_json_record_s_example_quotes_the_fields_the_label_read_never_the_first_line_of_its_json():
+    """The label tool quoted every example of a code label over pages.jsonl as `{` (live check New 13): the first line
+    of the record's pretty-printed JSON. It quotes the fields the rule reads, else its words field, else the record on
+    one line of JSON."""
+    rec = {"page_id": "dse/AgentJune", "name": "AgentJune2026", "wiki": "dse", "n_revs": 19, "tags": ["a"]}
+    code = {"kind": "code", "spec": "def label(unit):\n    return ('yes' if 'June' in unit['name'] else 'no', 1.0)"}
+    assert concepts.record_words(rec, code) == "name: AgentJune2026"
+    both = {"kind": "code", "spec": "w = unit.get('wiki'); n = unit['n_revs']"}
+    assert concepts.record_words(rec, both) == "wiki: dse · n_revs: 19"
+    prompt = {"kind": "prompt", "spec": "Is the page's name about June? Read the n revs too."}
+    assert concepts.record_words(rec, prompt) == "name: AgentJune2026 · n_revs: 19"
+    assert concepts.record_words({"text": "a post\nover two lines", "id": 3}, {"kind": "prompt", "spec": "A post?"}) == "text: a post over two lines"
+    assert concepts.record_words({"id": 3, "ok": True}, {"kind": "regex", "spec": "x"}) == '{"id": 3, "ok": true}'

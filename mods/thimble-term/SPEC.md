@@ -224,8 +224,12 @@ Not drawn: `▶`, `✗ ◇ ■ □ ━ ┃ • ✕ ❚❚ ⓘ ✦ ❢ ⚠ ≡ �
 **Words that recur.** Plain, short words. A place reads `revisions.jsonl line 10566` or `lines 3-8`, never `#L`. Every
 cut is one cut (`hooks/lib.ts` `cut`): at the last word that fits, mid-word only when a word fills more than half the
 room, `…` right against the last word kept, with no space or punctuation before it; a row, a title, a path step, a
-preview, a context line (cut at a word at each end) and a tip all cut that way. Someone's words in quotation marks take
-straight ones, curly ones (`“…”`) when they hold straight ones of their own, and none when they hold both. A count
+preview, a context line (cut at a word at each end) and a tip all cut that way. Words in quotation marks that end what
+is cut are cut inside the marks, and the closing mark stays (`thread "Which line of…"`). An inline list of facts parted
+by ` · ` (a label example's other fields) keeps whole items and ends `…` after the last one that fits, never `·…` or a
+key without its value. A file's line of code or data (JSON, a tag) is cut at the cell edge, so a file's rows end
+together; prose is cut at a word. Someone's words in quotation marks take straight ones, curly ones (`“…”`) when they
+hold straight ones of their own, and none when they hold both. A count
 reads with thousands separators from 1,000 wherever thimble-term draws it; a number that names a thing (a line, a year,
 an id) reads as written. No hex or hash ids: a card is named by its question, a thread by its first question, a script
 by its file name. A citation's status reads `found on the card`, `found in revisions.jsonl line 10566`, `found in the
@@ -244,7 +248,10 @@ while thimble's links check runs.
     ` · ` (`↑↓ to choose · Enter to open · a to ask · b to go back · x to close`), in one order on every panel: choosing,
     Enter, Space, the panel's own keys, going back, closing. It names only keys that are bound on that panel (`b to go
     back` only where there is a way back). Nothing else in a panel or the chat says which key does
-    what. The keys are Buttons with no label of their own, in a Box no row tall (`hiddenKeys`).
+    what. The keys are Buttons with no label of their own, in a Box no row tall (`hiddenKeys`). While a text field
+    holds the panel's focus (the new thread's field, which takes it as the view opens; a follow-up field once clicked),
+    a letter goes into the field, so the row reads `Enter to ask · Esc to leave the field`; Esc gives the keys back to
+    the prompt, and the row then names the panel's keys, which a click on the panel gives back.
 27. A field: its label dim and lower case on the label column, the field on L, no colon (`ask`, `follow-up`,
     `describe a new label`, the label panel's `prompt`). A field that shows all of its text (the label's prompt) has a
     border in the rule gray; a click gives it the keyboard.
@@ -267,7 +274,8 @@ colored is said under each.
 ```
 
 - The path row: `‹ back` (only where there is a way back), a gutter, then each step as a lower-case kind word and its
-  name (`thread "how many…"`, `citation 5884`, `card "How many pages…"`, `label edit purpose`, `files`,
+  name (a click on a step goes back to it; a click on the list a step stands in, such as `files` before a file opened
+  from a citation, goes to that list in its place) (`thread "how many…"`, `citation 5884`, `card "How many pages…"`, `label edit purpose`, `files`,
   `events.jsonl`), parted by a dim `›`, a long step cut with `…`. A step whose thread has new answers is followed by
   `new` in green; one whose thread is answering starts with `◌`. At R: `show all threads`, which opens the threads
   panel, then `N new` in green while answers wait. The threads panel itself leaves it out.
@@ -310,7 +318,8 @@ colored is said under each.
   color, headings bold.
 - A card cited whole (`[[card:<id>]]`, at a sentence's end) where the card is drawn with the text, under the turn's last
   reply, under a thread's answer or as a document's figure, is left out with the space before it; elsewhere it reads
-  `card "<its question>"`, cut at a word, as the citation's link. The footer does not count it.
+  ` (card "<its question>")`, cut at a word, the words in the parentheses the citation's link, so that it reads as a
+  reference and not as words of the sentence. The footer does not count it.
 - A citation is its value in blue, underlined; a value not at its place is red. In a card's takeaway, one cell after
   the value, `◌` while thimble's links check runs, `✓` once it found the value, a red `×` when it found another. The
   citation under the pointer is inverse, and its tip (its place and status in plain words, and why for a problem) sits
@@ -340,13 +349,25 @@ colored is said under each.
   `thimble-run` command's row is `thimble-run card "<question>"` (each card of a loop by its question), never the install
   path; each question cut at a word. A side thread's fork row and the notice that it finished name the thread by its
   first question (`thread "How many of the 2,994…"`), never the fork's slug, and so do the fork's prompt and result in
-  ctrl+o (`Prompt:`). A thimble tool's words (a question, a takeaway) draw their straight quotation marks curly, which
+  ctrl+o (`Prompt:`). Main's Agent call for a fork runs with the thread's question as its description
+  (`thread “How many of the 2,994…”`, thimble-term's `tool.call`; its prompt keeps `thread:<name>`, by which thimble
+  knows the fork), and the fork's name is a slug of that question, so Claude Code's agent tray (`◯ how-many-of-the-2994
+  thread “How many of the 2,994…”`) and its exit dialog (`subagent · thread “…”`) name the thread by its question too. A
+  second fork call that thimble refuses names the thread by its question in its error row. A thimble tool's words (a question, a takeaway) draw their straight quotation marks curly, which
   Claude Code does not escape (`“Agent”`, never `\"Agent\"`); code stays as written. The running `thimble-run` row
   (`⎿ $ thimble-run card <id>`), which no hook reaches, has no install path: the tools give the command by its name and
   the launcher puts the plugin copy's bin/ first on the session's PATH. thimble's tool results keep their card ids:
   main cites cards by them. Main's own `↳ thread <name>:` line names the thread by its first question in quotation
   marks, never its fork's slug, and is not drawn for a thread whose `↳` row thimble-term drew, which says the same
   (ctrl+o's view still draws the reply's time and model over the hidden line: no hook reaches that header).
+- Claude Code draws a hook's `systemMessage` as its own row under the hook's name (`⎿ UserPromptSubmit says: …`), which
+  no render hook reaches. thimble's held hook prints there the lines of the events that reached main, so in terminal
+  mode it leaves out those the chat's own rows already say: a thread's question (its fork's row and its `↳` row) and a
+  writer's end (its hand-back's row). The other events' lines (a label run finished, a view built, the orientation's
+  coverage line) still show in that row.
+- After `claude` exits, the launcher (not thimble-term) prints `Resume this session with thimble: thimble --continue` under
+  Claude Code's own `Resume this session with: claude --resume …`, which would resume the session without thimble; and
+  `thimble --continue` says `continuing the last thimble session in this folder`, with no session id.
 
 **Cards**, alike in the chat, the card pane, the citation panel and a document (rule 11 for the frame):
 
@@ -489,7 +510,12 @@ colored is said under each.
   fork writes after the reply, as it makes a card, is its working and is not drawn, and two texts a tool call parts are
   two paragraphs. The cards the thread made stand under its answer, each in its frame, as under main's reply.
 - A new thread (one with no question yet): `about <what>` as its dim subtitle, the first sentence of its passage dim on
-  one row, then the question's field alone, its placeholder dim.
+  one row, then the question's field alone, its placeholder dim. `<what>` is a card by its question (`card "…"`), a
+  citation's words in quotation marks (a value alone, `4579`, and a citation with no words, `agent-chat:2`, as they
+  show), a passage's words in quotation marks, or `this answer` for a whole answer (its footer's `ask about this
+  answer ›`), which the thread keeps. The field is Claude Code's Input, one row that shows the start of a long question:
+  no hook scrolls it to the cursor, and its placeholder is drawn dim with the terminal's reset, which drops the panel's
+  background behind it in a light theme.
 
 **The citation panel:**
 
@@ -520,7 +546,8 @@ colored is said under each.
 - Label/value rows: `from`, `source` (the reply's sentence in quotation marks, the cited value in it blue and
   underlined), `quoted` for a passage an example quotes. No `why`.
 - The lines: nested at A2, their numbers right-aligned in a dim column, the cited line's number in the text color and
-  the cited value on the selection background; a cited line wrapped over 3 to 8 rows by the pane's height, with two
+  the cited value on the selection background; each record around the cited one on one dim row, as Raw draws it (a JSON
+  record as its line of JSON), the cited record over its rows, and never a record cut after its first rows; a cited line wrapped over 3 to 8 rows by the pane's height, with two
   lines of context when it wraps. A card value's citation draws the card in its frame, the cited mark on the
   selection background.
 - The bottom: `ask about it`, then the `follow-up` field when the citation was opened from a side thread.
@@ -614,9 +641,10 @@ with a heading numbered in a dim column at A0, each a click or a digit away (an 
 listed, and starts with its words); then each section drawn as main's chat draws a reply, at A0: its heading bold, its
 bullets a list, one item a row, its prose filling the type area, its cards in their frames, a caption dim under each. A callout:
 its kind (`note`, `tip`, `important`, `warning`, `caution`) as a dim label and its text on L, `warning` and `caution`
-red. A deck steps one slide at a time (`‹ 3 of 9 ›`, `previous  next`, its `notes`); a story one beat at a time, its
+red. A figure's caption stands dim under its card, then a blank row before the words after it. A deck steps one slide at a time (`‹ 3 of 9 ›`, `previous  next`, its `notes`); a story one beat at a time, its
 figure lit at the beat's step, or `read as a page`. At the bottom `all documents ›` and the retell controls, `as slides`
-and `as a story`, which ask main to write it again in that form. No stats row and no file path.
+and `as a story`, which ask main to write it again in that form, their keys hinted by what each retells as (`s slides,
+y story`). No stats row and no file path.
 
 ### 8. Checks
 

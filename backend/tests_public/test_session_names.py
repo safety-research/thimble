@@ -429,6 +429,39 @@ def test_the_launcher_starts_terminal_mode_with_the_renderer_the_exports_and_no_
     assert done.returncode == 1 and "could not render the session prompt" in done.stderr, "the control"
 
 
+def test_after_claude_exits_in_terminal_mode_the_launcher_says_how_to_come_back_with_thimble(tmp_path):
+    """Claude Code's own last line names `claude --resume`, which resumes the session without thimble, so in terminal
+    mode the launcher outlives `claude` and says `thimble --continue`. launch.json still names main's `claude` process:
+    the subshell that execs it writes its own pid there first. A failed `claude` gets no such line, and browser mode
+    execs `claude` as before. `--continue` names no session id."""
+    import subprocess  # noqa: PLC0415
+
+    ws = tmp_path / "ws"
+    (ws / "trusted").mkdir(parents=True)
+    (ws / "trusted" / "launch.json").write_text(json.dumps({"session": "s1", "pid": 1, "mode": "terminal"}))
+    head = [str(tmp_path / "plugin"), "mcp__x", "", "{}", "", "thimble:main · logs", "", "", "", ""]
+    exports = f"THIMBLE_MODE=terminal\tTHIMBLE_WS={ws}\tTHIMBLE_HOME=/h"
+    launcher, path = _launcher(tmp_path, [*head, "terminal\t/tree/mods/thimble-term", exports, "the prompt"])
+    (tmp_path / "launch-args.txt.resume").write_text("\n".join([*head, "terminal\t/tree/mods/thimble-term", exports,
+                                                                "5e55e55e-0000-4000-8000-000000000001", "the prompt"]))
+    py = tmp_path / "plugin" / "bin" / "thimble-python"
+    py.write_text(py.read_text().replace("case \" $* \" in", 'case " $* " in *" -I -S - "*) exec python3 "$@";;', 1))
+    (path / "claude").write_text('#!/bin/sh\necho $$ > "$ARGV_OUT.pid"\nexit "${CLAUDE_EXIT:-0}"\n')
+    argv_out = tmp_path / "argv.txt"
+    env = {"PATH": f"{path}:/usr/bin:/bin", "HOME": str(tmp_path), "ARGV_OUT": str(argv_out)}
+    done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env=env)
+    assert done.returncode == 0 and done.stderr.splitlines()[-1] == "Resume this session with thimble: thimble --continue"
+    assert json.loads((ws / "trusted" / "launch.json").read_text())["pid"] == int(Path(f"{argv_out}.pid").read_text())
+    done = subprocess.run(["bash", str(launcher), "--continue"], capture_output=True, text=True, cwd=tmp_path, env=env)
+    assert done.stderr.splitlines()[0] == "thimble: continuing the last thimble session in this folder"
+    assert "5e55e55e" not in done.stderr
+    done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env={**env, "CLAUDE_EXIT": "1"})
+    assert done.returncode == 1 and "thimble --continue" not in done.stderr
+    (tmp_path / "launch-args.txt").write_text("\n".join([*head, "browser", "", "the prompt"]))
+    done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env=env)
+    assert done.returncode == 0 and "thimble --continue" not in done.stderr
+
+
 async def test_the_statusline_shows_the_orientation_and_its_cards_and_the_listing_plain_words(monkeypatch):
     """thimble's statusline shows the orientation's state and its cards, the other agents being rows of Claude Code's
     own tray; /thimble:agents lists every running agent of thimble's by what it does."""

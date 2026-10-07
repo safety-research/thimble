@@ -30,12 +30,72 @@ DATA = Path(tempfile.mkdtemp(prefix="thimble-tests-data-")).resolve()
 MINI = write_mini(DATA / "mini")
 atexit.register(shutil.rmtree, DATA, True)
 os.environ["THIMBLE_DATA_DIR"] = str(DATA)
+# The suite's thimble home is a temporary folder, always: each test gets its own (_thimble_home_off_the_user), and what
+# runs outside a test's fixtures (a background thread that ends after its test, a test that undoes its monkeypatch, a
+# subprocess) finds this one, never the user's ~/.thimble, which THIMBLE_HOME unset would name (corpus.INDEX_DIR and the
+# other files "in thimble's home").
+REAL_HOMES = tuple(dict.fromkeys(os.path.abspath(os.path.expanduser(h)) for h in
+                                 ("~/.thimble", os.environ.get("THIMBLE_HOME") or "~/.thimble")))
+SUITE_HOME = Path(tempfile.mkdtemp(prefix="thimble-tests-home-")).resolve()
+atexit.register(shutil.rmtree, SUITE_HOME, True)
+os.environ["THIMBLE_HOME"] = str(SUITE_HOME)
+
+
+class RealHomeWrite(PermissionError):
+    """A write under the user's thimble home (REAL_HOMES), which the suite's audit hook refuses."""
+
+
+REAL_HOME_WRITES: list[tuple[str, str]] = []  # (audit event, path) of each write refused, which fails the session
+_WRITE_EVENTS = ("open", "os.mkdir", "os.rename", "os.remove", "os.rmdir", "os.chmod", "os.truncate", "os.utime",
+                 "os.symlink", "os.link", "shutil.rmtree", "shutil.copyfile", "shutil.move")
+_WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+
+
+def _under_real_home(path: object) -> str | None:
+    if isinstance(path, int) or path is None:
+        return None
+    try:
+        full = os.path.abspath(os.fsdecode(path))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return full if any(full == h or full.startswith(h + os.sep) for h in REAL_HOMES) else None
+
+
+def _guard(event: str, args: tuple) -> None:
+    """The suite's audit hook (sys.addaudithook): a write, a move, a removal or a mode change under the user's thimble
+    home is refused (RealHomeWrite) and recorded, so no test leaves a file there or removes one of the user's."""
+    if event not in _WRITE_EVENTS:
+        return
+    if event == "open":
+        path, mode, flags = (tuple(args) + (None, None, None))[:3]
+        writes = any(c in mode for c in "wax+") if isinstance(mode, str) else isinstance(flags, int) and bool(flags & _WRITE_FLAGS)
+        paths = [path] if writes else []
+    elif event in ("os.rename", "os.symlink", "os.link", "shutil.copyfile", "shutil.move"):
+        paths = list(args[:2])
+    else:
+        paths = list(args[:1])
+    for p in paths:
+        hit = _under_real_home(p)
+        if hit:
+            REAL_HOME_WRITES.append((event, hit))
+            raise RealHomeWrite(f"thimble's tests never write under the user's thimble home: {event} {hit}")
+
+
+sys.addaudithook(_guard)
 # The suite tests the default model speed; a test that wants another value sets it with monkeypatch.
 os.environ.pop("THIMBLE_MODEL_SPEED", None)
 # The Host names httpx.ASGITransport and TestClient send (main.ALLOWED_HOSTS is read at import).
 os.environ.setdefault("THIMBLE_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver,test,t")
 
 import pytest  # noqa: E402
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """A write the audit hook refused under the user's thimble home fails the run, naming each one."""
+    if REAL_HOME_WRITES:
+        lines = "\n".join(f"  {event} {path}" for event, path in dict.fromkeys(REAL_HOME_WRITES))
+        print(f"\nthimble's tests tried to write under the user's thimble home (refused):\n{lines}", file=sys.stderr)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 @pytest.fixture()

@@ -235,7 +235,7 @@ async function threadAbout(cx: Ctx, words: string): Promise<string> {
 
 /** A rich block's runs with each card it cites whole (`[[card:<id>]]`, at a sentence's end) as the reader needs it: left
  *  out, with the space before it, where the card is drawn under the reply or as a figure (`drawn`); elsewhere named by
- *  its question (`card "…"`), as the citation's link. */
+ *  its question in parentheses (` (card "…")`), the name the citation's link. */
 async function cardRuns(cx: Ctx, block: Extract<Block, { type: 'rich' }>, drawn: ReadonlySet<string>): Promise<Extract<Block, { type: 'rich' }>> {
   if (block.table || !block.runs.some(r => r.cite && bareCard(r.cite))) return block
   const runs: Run[] = []
@@ -259,7 +259,17 @@ async function cardRuns(cx: Ctx, block: Extract<Block, { type: 'rich' }>, drawn:
     if (!tc && !rt.shown.has(id)) rt.wanted.add(id)
     const q = (tc?.data as CardData | null | undefined)?.question ?? ''
     noteQuestion(id, q)
-    runs.push({ ...r, text: cardWords(q) })
+    // in parentheses, so that it reads as a reference and not as words of the sentence: `… (card "How many…").`
+    // (none when main put it in parentheses itself)
+    const prev = runs.at(-1)
+    const own = Boolean(prev && !prev.cite && /\(\s*$/.test(prev.text))
+    if (own) runs.push({ ...r, text: cardWords(q) })
+    else {
+      if (prev && !prev.cite && !prev.b && !prev.i && !prev.code && !prev.u) runs[runs.length - 1] = { ...prev, text: `${prev.text.replace(/\s+$/, '')} (` }
+      else runs.push({ text: prev ? ' (' : '(' })
+      runs.push({ ...r, text: cardWords(q) })
+      runs.push({ text: ')' })
+    }
   }
   return { ...block, runs }
 }
@@ -361,11 +371,11 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     )
   }
   // a blank row before a block that had a blank line before it; none under a heading (it belongs to what follows it),
-  // and none next to a card, whose border stands in for one (SPEC.md, rule 11)
+  // and none next to a card, whose border stands in for one (SPEC.md, rule 11), unless a caption stands under the card
   const gapBefore = (i: number): boolean => {
     const b = blocks[i]!
     const before = blocks[i - 1]
-    if (i === 0 || !b.gap || b.type === 'card' || before?.type === 'card') return false
+    if (i === 0 || !b.gap || b.type === 'card' || (before?.type === 'card' && !before.caption)) return false
     const underHead = (before?.type === 'rich' && before.heading > 0) || (before?.type === 'md' && /^#{1,6}\s/.test(before.text.split('\n').at(-1)!.trim()))
     return !underHead
   }

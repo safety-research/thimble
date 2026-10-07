@@ -143,10 +143,15 @@ test("the footer under a turn's answer: its citations and cards dim, its problem
   await ui.press({ key: 'ask-answer-r1' })
   await ui.unmount()
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('about this answer')
+  const asking = shown(await pane.drawn())
+  expect(asking).toContain('about this answer')
+  // the field holds the keys as the view opens, so a letter goes into the question: no `b` or `x` among the hints
+  expect(asking).toContain('Enter to ask · Esc to leave the field')
+  expect(asking).not.toContain('b to go back')
   await pane.input({ key: 'ask-new', text: 'Is it right?' })
   await w.clock.settle()
-  expect(w.acts.find(a => a.kind === 'thread')!.payload).toMatchObject({ anchor: null, anchor_text: 'The export holds 4579 pages and 14592 revisions.' })
+  // a thread about the whole answer is marked so (its element), and keeps `about this answer` in the threads panel
+  expect(w.acts.find(a => a.kind === 'thread')!.payload).toMatchObject({ anchor: null, anchor_text: 'The export holds 4579 pages and 14592 revisions.', element: 'answer' })
   await pane.unmount()
 })
 
@@ -341,6 +346,17 @@ test("main's own `↳ thread <slug>:` line names the thread by its first questio
   await ui.unmount()
 })
 
+test("main's fork of a thread runs with the thread's question as its description, which Claude Code's agent tray and exit dialog show; its prompt keeps `thread:<name>`", async ($, on) => {
+  const w = world(on)
+  Object.assign(w.states.threads[1]!, { fork_name: 'why-is-events-jsonl-so-much', question: 'why is events.jsonl so much bigger than the other files?' })
+  await start($, w)
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'u8', subagent_type: 'fork', name: 'why-is-events-jsonl-so-much', description: 'thread:why-is-events-jsonl-so-much', prompt: 'thread:why-is-events-jsonl-so-much' } as never)
+  expect(w.toolCalls.at(-1)).toMatchObject({ name: 'why-is-events-jsonl-so-much', description: 'thread “why is events.jsonl so much bigger than…”', prompt: 'thread:why-is-events-jsonl-so-much' })
+  // any other Agent call runs as main wrote it
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'u9', subagent_type: 'general-purpose', description: 'Count the pages', prompt: 'Count them.' } as never)
+  expect(w.toolCalls.at(-1)).toMatchObject({ description: 'Count the pages', prompt: 'Count them.' })
+})
+
 const ROW = (tool: string, input: Record<string, unknown>) =>
   ({ plugin: 'thimble-term', component: 'ToolUse', requestId: 'u9', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u9', tool, input, isRunning: false, isErrored: false, isInterrupted: false } }) as never
 
@@ -433,7 +449,8 @@ test('a sentence that cites a card the turn draws under the reply leaves the ref
   // the turn's card stands under the reply: no `card` at the sentence's end, and no space before its full stop
   expect(para).toContain('four wikis. The files')
   // a card of another turn: named by its question, as its citation's link (live check New 1)
-  expect(para).toContain('card "How many records does each file hold?".')
+  // in parentheses, so that it reads as a reference and not as words of the sentence
+  expect(para).toContain('(card "How many records does each file hold?").')
   expect(para).not.toMatch(/\bcard\./)
   const chips = await chipsOf(ui, 'para-1')
   expect(chips.map(c => c.label)).toEqual(['card "How many records does each file hold?"'])

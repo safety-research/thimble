@@ -45,7 +45,7 @@ test("a thread that answers: what it is about, dim, before its first question; `
   let pane = await home($, w)
   pane = await homeClick($, w, pane, '"which pages were deleted?"')
   const text = shown(await pane.drawn())
-  expect(text).toContain('about the deletions')
+  expect(text).toContain('about "the deletions"')
   expect(text).toContain('◌ 1 tool call')
   expect(text).toContain('stop')
   expect(text).toContain('↑↓ to choose · Enter or a to ask · s to stop · b to go back · x to close')

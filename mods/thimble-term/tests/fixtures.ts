@@ -163,6 +163,8 @@ export type World = {
   clock: ReturnType<typeof mock.clock>
   /** what the next tool call of main answers */
   toolText: string
+  /** each tool call as it reached the engine, after thimble-term's tool.call hook */
+  toolCalls: Record<string, unknown>[]
   /** a thread's chat by its id, over the fixtures' */
   chats: Record<string, unknown>
   /** a ref's resolution, over the fixtures' */
@@ -205,6 +207,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     launch: JSON.stringify({ session: 's1', mode: opts.mode ?? 'terminal', fenced: true }),
     clock: undefined as never,
     toolText: 'card:ff73e071\n[out0: table]',
+    toolCalls: [],
     chats: {},
     resolve: {},
     submitted: [],
@@ -335,7 +338,10 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     w.commands.push(`/${e.command} ${e.args}`.trim())
     return { text: '(the engine command)' }
   })
-  on('tool.call', () => ({ result: w.toolText, text: w.toolText }) as never)
+  on('tool.call', ($, e) => {
+    w.toolCalls.push({ ...(e as unknown as Record<string, unknown>) })
+    return { result: w.toolText, text: w.toolText } as never
+  })
   on('ui.copy', () => ({ value: { isCopied: true } }) as never)
   on('prompt.submit', ($, e) => {
     w.submitted.push(String((e as { text?: unknown }).text ?? ''))

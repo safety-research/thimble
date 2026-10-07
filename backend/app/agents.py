@@ -343,7 +343,11 @@ def new_thread(c: str, anchor: str | None, anchor_text: str | None, title: str |
     ensure_main(c)
     cid = secrets.token_hex(4)
     clean = lambda v, n=200: (str(v or "").strip()[:n] or None)  # noqa: E731
-    meta = _defaults({"id": cid, "kind": KIND_THREAD, "role": "thread", "title": _unique_title(c, (title or "").strip() or _title_from(anchor, anchor_text)),
+    named = (title or "").strip() or _title_from(anchor, anchor_text)
+    # the terminal names a thread by its first question and its subject by the citation's or the passage's words, which
+    # a -2 would change; its fork's name is kept apart from other threads' all the same (threads.fork_name)
+    named = named if surface == "terminal" else _unique_title(c, named)
+    meta = _defaults({"id": cid, "kind": KIND_THREAD, "role": "thread", "title": named,
                       "created_at": _now(), "parent": thread_parent(c, parent, anchor, element), "anchor": clean(anchor, 4000),
                       "anchor_text": clean(anchor_text, ANCHOR_TEXT_CHARS), "anchor_surface": clean(surface, 40),
                       "anchor_element": clean(element, 80), "anchor_selector": clean(selector, 400)})

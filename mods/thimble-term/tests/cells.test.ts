@@ -5,7 +5,7 @@ import { expect, test } from 'claude-code/testing'
 import { busyWords, cardOfCell, htmlTable, labelCard, linksOf, sortedBars } from '../hooks/cell'
 import type { ThimbleCell } from '../hooks/cell'
 import { cardLayout, cut, placeWords, share } from '../hooks/draw'
-import { citations, clip, formatted, quoted, recordFields, windowAt } from '../hooks/lib'
+import { citations, clip, cutLine, formatted, itemsRow, quoted, recordFields, windowAt } from '../hooks/lib'
 import { plainCites } from '../hooks/cite'
 import { fitCrumbs } from '../hooks/nav'
 import type { BarRow, Cell } from '../hooks/draw'
@@ -242,4 +242,24 @@ test("the path row's steps are cut at a word", () => {
   const words = '"How many delete events does events.jsonl have on 16 June? One number." citation "I counted 3,898 pages deleted on 16 June"'.split(/\s+/)
   // each cut step ends with a whole word of its own
   for (const s of steps) if (s && s.endsWith('…')) expect(words.some(x => x.replace(/[?.,]+$/, '') === s.slice(0, -1).split(' ').at(-1))).toBe(true)
+})
+
+test('a cut keeps the closing quotation mark of the words it cuts: a path step, a card by its question', () => {
+  expect(cut('thread "Which line of events.jsonl is the first delete event after the reviewer wrote this?"', 40)).toBe('thread "Which line of events.jsonl is…"')
+  expect(cut('card “How many pages in pages.jsonl have "June" in their name?”', 30)).toBe('card “How many pages in…”')
+  // too little room for the quoted words: cut as any words are
+  expect(cut('documents › "The reviewer\'s claim"', 14)).toBe('documents ›…')
+  const steps = fitCrumbs(['home', 'threads', '"Which line of events.jsonl is the first delete event after the reviewer wrote this?"'], 50)
+  expect(steps.at(-1)).toMatch(/^"Which line of[^"]*…"$/)
+})
+
+test("a label example's fields cut at whole pairs, never `·…` or a key without its value; a file's JSON line at the cell edge", () => {
+  const pairs = ['n_revs 19', 'n_revs_before 0', 'page_key dorfwiki/AgentDataUSAProbeFebX2']
+  expect(itemsRow(pairs, 30)).toBe('n_revs 19 · n_revs_before 0…')
+  expect(itemsRow(pairs, 200)).toBe(pairs.join(' · '))
+  expect(itemsRow(['page_key dorfwiki/AgentDataUSAProbeFebX2'], 20)).toBe('page_key dorfwiki/A…')
+  expect(cut('n_revs 19 · n_revs_before 0 · page_key x', 30)).not.toMatch(/·…$/)
+  const json = '{"page_id": "dorfwiki/AgentDataUSAProbeFebX2", "page_key": "dorfwiki/AgentDataUSAProbeFebX2", "n_revs": 19}'
+  expect(cutLine(json, 60)).toBe(`${json.slice(0, 59)}…`)
+  expect(cutLine('Words of a Markdown file run on past the room they have here', 30)).toBe(cut('Words of a Markdown file run on past the room they have here', 30))
 })

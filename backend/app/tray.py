@@ -137,8 +137,11 @@ def thread_rows_files(c: str) -> list[dict[str, Any]]:
             continue
         question = next((str(r.get("text") or "") for r in records if r.get("type") == "user" and str(r.get("text") or "").strip()), "")
         name = f"fork {meta.get(threads.FORK_NAME_KEY) or meta.get('title') or tid}"
+        # a fork that replied to the last question has answered, as the thread's row in main's chat says, though it may
+        # still be finishing its turn
+        replied = any(r.get("type") == "text" and r.get("reply") for r in records[last_user + 1:])
         rows.append({"name": name, "label": f'thread "{_words(question)}"' if question.strip() else name,
-                     "state": "working", "kind": "subagent", "chat": tid})
+                     "state": "done" if replied else "working", "kind": "subagent", "chat": tid})
     return rows
 
 

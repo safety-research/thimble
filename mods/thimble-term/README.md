@@ -5,7 +5,9 @@ thimble's terminal-mode renderer: a Claude Code plugin of function hooks that dr
 (`--plugin-dir <tree>/mods/thimble-term`), with no server, no port and no browser. Browser mode does not load it.
 
 It only draws. It registers no model tools, agents, guidance or commands, and it keeps no data except what is on
-screen: what it draws comes from `thimble state`, and every change it makes goes through `thimble act`. The one file it
+screen; the one call it changes is main's Agent call for a side thread's fork, which runs with the thread's question as
+its description, so that Claude Code's agent tray and exit dialog name the thread by it (its prompt keeps
+`thread:<name>`, by which thimble knows the fork): what it draws comes from `thimble state`, and every change it makes goes through `thimble act`. The one file it
 writes is the workspace's `terminal/chat.json` (`hooks/kept.ts`): what main's chat drew under each of its rows (the
 turn's cards, the answer's footer, the `↳` rows), by the row's uuid, which Claude Code keeps across `--continue` and
 `--resume`, so a resumed session draws it again. It writes to
@@ -82,7 +84,8 @@ Claude Code's panel chrome, no right-click menu.
   column (`hooks/field.tsx`: a click gives it the keyboard, Enter saves it, `thimble act label`); `run on a sample` and
   `run on all N`, which save what was typed first and run it (`thimble act label-run`), and `stop` (s) while it runs
   (`thimble act label-stop`); then `▸ counts` (with the values to edit), `▸ examples` (each record under its value,
-  `agree` or another value, `thimble act verdict`) and `▸ cards` (the cards that use it, each a click away), folded.
+  `agree` or another value, `thimble act verdict`; a JSON record's other fields on one dim row cut at whole pairs) and
+  `▸ cards` (the cards that use it, each a click away), folded.
   Nothing else shows until it is opened. A code label's code runs only in main's Bash: its run asks main to run the
   `thimble-run label` command it gives.
 - **Side threads.** The `?` beside a passage or a card, a press on a card's title or mark, a selection's "ask", or `ask

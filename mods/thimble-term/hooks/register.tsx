@@ -30,18 +30,18 @@ import { chipState, claimsIn, streamLink, streamStep, streaming } from './cite'
 import type { StreamLook, Streaming } from './cite'
 import type { CardData } from './draw'
 import { bareCard, cardWords, cid, citeSpans, citations, clip, cut, embeddedCards, needsDrawing, quoted } from './lib'
-import { cardsOfCall, docsOf, labelsOf, namedForks, namedThreads, runIds, runShown, threadOf, withoutEnd, withoutToldThreads } from './model'
+import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThreads, runIds, runShown, threadOf, withoutEnd, withoutNotes, withoutToldThreads } from './model'
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage } from './lines'
-import { drawPanel, fieldMessage, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView } from './panel'
+import { ANSWER_ELEMENT, drawPanel, fieldMessage, focusedField, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView } from './panel'
 import type { PaneEvent } from './panel'
 import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './reply'
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
 import { NAV_EMPTY } from './nav'
-import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, paneTitle, panelColumns, readSurface, readThread, rt, surfaceValue, tick } from './term'
+import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, paneTitle, panelColumns, readSurface, readThread, rt, surfaceValue, threadsNow, tick } from './term'
 import type { UiApply } from './term'
 import { turns } from './turns'
 
@@ -417,7 +417,7 @@ async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promi
         ) : null}
       </Box>
       <Box flexShrink={0}>
-        <Button key={`ask-answer-${e.requestId}`} label="ask about this answer ›" plain onPress={() => void openAsk(cx, { kind: 'sentence', text: ans.text.slice(0, 6000), label: 'this answer' })} />
+        <Button key={`ask-answer-${e.requestId}`} label="ask about this answer ›" plain onPress={() => void openAsk(cx, { kind: 'sentence', text: withoutNotes(ans.text).slice(0, 6000), label: 'this answer' }, { element: ANSWER_ELEMENT })} />
       </Box>
     </Box>
   )
@@ -535,8 +535,22 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // main's fork of a side thread runs with the thread's question as its description, which Claude Code's agent tray and
+  // its exit dialog show beside the fork's name (never `thread:<slug>`); the prompt keeps `thread:<name>`, by which
+  // thimble knows the fork (backend threads.fork_ref)
   on('tool.call', async ($, e, next) => {
-    const ran = await next(e)
+    let call = e
+    try {
+      if (rt.sc && e.agentId === undefined && e.tool === 'Agent') {
+        const input = e as unknown as Record<string, unknown>
+        const rows = await cxOf($).threads()
+        const description = forkDescription(input, rows) ?? (input.subagent_type === 'fork' ? forkDescription(input, await threadsNow(cxOf($))) : null)
+        if (description) call = { ...e, description } as typeof e
+      }
+    } catch {
+      // the call runs as main wrote it
+    }
+    const ran = await next(call)
     try {
       if (!rt.sc || e.agentId !== undefined || ran.deny !== undefined) return ran
       const ids = cardsOfCall(String(e.tool), e, String(ran.text ?? ''))
@@ -897,10 +911,28 @@ export const register: Register = on => {
   on('ui.close', async ($, e, next) => {
     const closed = await next(e)
     if (e.id === PANEL) {
+      rt.panelFocus = ''
       await $.state.set(pendingRef, null).catch(() => undefined)
       await $.state.set(panelA, null).catch(() => undefined)
     }
     return closed
+  })
+
+  // the panel's focus ring: while a text field holds it the hint row names Enter and Esc alone (panel.tsx endHints),
+  // since a letter goes into the field; off every element, NO_FOCUS (not '', which is a view just opened)
+  const NO_FOCUS = '-'
+  on('ui.focus', { requestId: PANEL }, async ($, e, next) => {
+    const moved = await next(e)
+    try {
+      if (rt.sc) {
+        const was = focusedField(rt.panelFocus)
+        rt.panelFocus = e.element ?? NO_FOCUS
+        if (focusedField(rt.panelFocus) !== was) void cxOf($).bumpPanel()
+      }
+    } catch {
+      // the ring moves whatever thimble-term makes of it
+    }
+    return moved
   })
 
   // ---------------------------------------------------------------------------------------------- clicks

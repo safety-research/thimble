@@ -904,18 +904,72 @@ def end_module_request(state: dict[str, Any], rid: str, how: str) -> None:
         r.update(module=how, state="done" if how == "answered" else "expired", at=now())
 
 
-FORKING = "forking"  # subagents.json: the forks of threads that are starting, by the Agent call's description
+FORKING = "forking"  # subagents.json: the forks of threads that are starting, by the call's `thread:<name>` (fork_ref)
 FORK_DEDUPE_S = 600.0  # subagents.FORK_DEDUPE_S
+FORK_REF_RE = re.compile(r"^\s*thread:([A-Za-z0-9_-]{1,64})\s*$")  # threads.FORK_DESCRIPTION_RE
+# the refusal of a second fork of a thread, which main reads as the call's error and the analyst sees in its row
+FORK_RUNNING = "The fork of thread {thread} is running already and answers in the thread, so this turn needs nothing more."
+QUESTION_CHARS = 60  # of the first question that names a thread in FORK_RUNNING
 
 
-def fork_check(state: dict[str, Any], tool_input: dict[str, Any]) -> str | None:
+def fork_ref(tool_input: dict[str, Any]) -> str | None:
+    """threads.fork_ref: the `thread:<name>` of an Agent call for a thread's fork, its description or else its prompt
+    (thimble-term gives the call the thread's question as its description in terminal mode)."""
+    for key in ("description", "prompt"):
+        value = str(tool_input.get(key) or "")
+        if FORK_REF_RE.match(value):
+            return value.strip()
+    return None
+
+
+def thread_question(ws: Path | None, name: str) -> str:
+    """The first question of the thread whose forks run under `name` (or whose id it is) in workspace `ws`, on one line
+    and cut at a word; '' when none is found."""
+    chats = ws / "chats" if ws is not None else None
+    if chats is None or not name:
+        return ""
+    for meta_path in sorted(chats.glob("*.meta.json")):
+        try:
+            meta = json.loads(meta_path.read_text("utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(meta, dict) or meta.get("kind") != "thread" or name not in (meta.get("fork_name"), meta.get("id")):
+            continue
+        try:
+            lines = meta_path.with_name(f"{meta.get('id')}.jsonl").read_text("utf-8").splitlines()
+        except OSError:
+            return ""
+        for line in lines:
+            with contextlib.suppress(ValueError):
+                r = json.loads(line)
+                if isinstance(r, dict) and r.get("type") == "user" and str(r.get("text") or "").strip():
+                    return cut_words(" ".join(str(r["text"]).split()), QUESTION_CHARS)
+        return ""
+    return ""
+
+
+def cut_words(text: str, n: int) -> str:
+    """`text` cut to `n` characters at a word, with an ellipsis right after the last word kept."""
+    if len(text) <= n:
+        return text
+    cut = text[: n - 1]
+    word = cut.rsplit(" ", 1)[0]
+    return (word if len(word) > n // 2 else cut).rstrip(" ,;:.") + "…"
+
+
+def fork_refusal(name: str, question: str) -> str:
+    """FORK_RUNNING for the thread whose fork runs under `name`, named by its first question when it has one."""
+    return FORK_RUNNING.format(thread=f"\u201c{question}\u201d" if question else name)
+
+
+def fork_check(state: dict[str, Any], tool_input: dict[str, Any], ws: Path | None = None) -> str | None:
     """Terminal mode's dedupe of a thread's fork (subagents.fork_check in browser mode): main's Agent call that would
-    start a second fork of the thread its description names (`thread:<name>`) while the first starts or runs: why it
-    must not run; else None, and the call is recorded."""
+    start a second fork of the thread it names (`thread:<name>`, fork_ref) while the first starts or runs: why it must
+    not run, naming the thread by its first question in workspace `ws`; else None, and the call is recorded."""
     if str(tool_input.get("subagent_type") or "") != FORK_TYPE:
         return None
-    desc = str(tool_input.get("description") or "")
-    if not desc.startswith("thread:"):
+    desc = fork_ref(tool_input)
+    if not desc:
         return None
     table = state.setdefault(FORKING, {})
     if not isinstance(table, dict):
@@ -923,7 +977,8 @@ def fork_check(state: dict[str, Any], tool_input: dict[str, Any]) -> str | None:
     t = now()
     at = table.get(desc)
     if isinstance(at, (int, float)) and t - float(at) < FORK_DEDUPE_S:
-        return f"The fork of thread {desc.removeprefix('thread:')} is running already; it answers in the thread."
+        name = desc.removeprefix("thread:")
+        return fork_refusal(name, thread_question(ws, name))
     table[desc] = t
     for k in [k for k, v in table.items() if not isinstance(v, (int, float)) or t - float(v) >= FORK_DEDUPE_S]:
         table.pop(k, None)

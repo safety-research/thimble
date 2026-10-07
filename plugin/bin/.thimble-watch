@@ -496,14 +496,15 @@ def stream_files(args: list[str], ws: Path) -> int:
 
 def held_files(inp: dict, ws: Path) -> int:
     """The held hook in terminal mode: the held events as the prompt's added context, and as its systemMessage the lines
-    of the events the waker wrote out, the held events' and those that send main no event."""
+    of the events the waker wrote out, the held events' and those that send main no event, less those the terminal's
+    own rows already say (app/event_files.py TOLD_IN_CHAT)."""
     session = str(inp.get("session_id") or "")
     if inp.get("agent_id") or not session or not is_main(ws, session):
         return 0
     ef = events()
     riders = ef.pop_held(ws)
     text = ef.meanwhile(riders)
-    lines = [*ef.unshown(ws, session), ef.joined(riders)]
+    lines = [*ef.unshown(ws, session), ef.said(riders)]
     said = "\n".join(dict.fromkeys(x for x in lines if x))
     out: dict = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else {}
     if said:
@@ -640,7 +641,7 @@ def agent_check(inp: dict) -> int:
         with sf.update(ws) as state:
             reason = sf.check_call(state, inp)
             if reason is None and term and not inp.get("agent_id") and str(inp.get("tool_name") or "") in sf.AGENT_TOOLS:
-                reason = sf.fork_check(state, tool_input)  # a second fork of a thread (the server's fork_check)
+                reason = sf.fork_check(state, tool_input, ws)  # a second fork of a thread (the server's fork_check)
         if reason is not None:
             reason = reason or sf.hint("agent-check-exact") or "thimble did not ask for this call"
     except Exception:  # noqa: BLE001 — fail closed for a start of one of thimble's roles, open for anything else

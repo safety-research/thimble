@@ -567,3 +567,85 @@ def test_the_module_s_plan_mode_report_moves_main_s_mode_and_back(workspaces_tmp
     assert s.main_mode("mini") == "auto", "out of plan mode already: nothing changes"
     s.note_plan("mini", "other-sid", True)
     assert s.main_mode("mini") == "auto", "another session's report counts for nothing"
+
+
+# ----------------------------------------------------------------------------- a thread's fork called twice
+
+
+def _refused(tool_use_id: str, text: str) -> dict:
+    return {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tool_use_id, "content": text, "is_error": True}]}}
+
+
+def test_a_second_fork_call_a_hook_refused_leaves_the_thread_its_own_forks_answer(cwd, project, quits):
+    """Main forks a thread twice (live check: after --continue); the agent-check hook refuses the second call. The
+    refused call is never the thread's fork: the meta keeps the first call's, and its error ends nothing, so the
+    answered thread ends `done`, not `failed`."""
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_plugin.HOOK)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
+    tid = thread["id"]
+    events.post(CORPUS, "thread", {"thread": tid, "text": "On which days did the page change?"})
+    name = agents.read_meta(CORPUS, tid)[threads.FORK_NAME_KEY]
+    assert name == "on-which-days-did-the", "the fork's name is its first question's words, which the tray shows whole"
+    call = {"subagent_type": "fork", "name": name, "description": f"thread:{name}", "prompt": f"thread:{name}"}
+    _append(p, lv, [
+        _human("Look into the thread"),
+        _assistant(_use("toolu_f1", "Agent", call)),
+        _result("toolu_f1", "Async agent launched successfully.\nagentId: f0e1d2c3"),
+        _assistant(_use("toolu_f2", "Agent", call)),
+        _refused("toolu_f2", "PreToolUse:Agent hook error: The fork of thread “On which days did the page change?” is "
+                             "running already and answers in the thread, so this turn needs nothing more."),
+        END,
+    ])
+    fork = agents.read_meta(CORPUS, tid)["fork"]
+    assert fork["tool_use_id"] == "toolu_f1" and fork["agent_id"] == "f0e1d2c3"
+    assert agents.running(CORPUS, tid)
+    assert not [r for r in _log(tid) if r["type"] in ("done", "error")]
+    threads.reply(CORPUS, tid, "On 16 and 18 June.", by="terminal")
+    note = ("<task-notification>\n<task-id>f0e1d2c3</task-id>\n<tool-use-id>toolu_f1</tool-use-id>\n"
+            "<status>completed</status>\n<summary>Agent finished</summary>\n</task-notification>")
+    _append(p, lv, [{"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": note}},
+                    _assistant(_say("↳ thread answered.")), END])
+    assert not agents.running(CORPUS, tid)
+    assert [r["type"] for r in _log(tid) if r["type"] in ("done", "error")] == ["done"]
+
+
+def test_a_forks_end_from_another_call_or_a_refused_one_changes_nothing_and_a_failure_after_the_reply_is_no_error(cwd):
+    thread = agents.new_thread(CORPUS, None, None, "Days")
+    tid = thread["id"]
+    agents.append(agents.paths(CORPUS, tid)[1], {"type": "user", "text": "Which days?"})
+    threads.fork_started(CORPUS, tid, agent_id="a1", tool_use_id="toolu_f1", session=SID)
+    assert agents.running(CORPUS, tid)
+    threads.fork_finished(CORPUS, tid, "failed", tool_use_id="toolu_f2")
+    threads.fork_finished(CORPUS, tid, "failed", tool_use_id="toolu_f3", refused=True)
+    assert agents.running(CORPUS, tid) and not [r for r in _log(tid) if r["type"] in ("done", "error")]
+    threads.reply(CORPUS, tid, "Mondays.", by="terminal")
+    threads.fork_finished(CORPUS, tid, "failed", tool_use_id="toolu_f1", agent_id="a1")
+    assert not agents.running(CORPUS, tid)
+    assert [r["type"] for r in _log(tid) if r["type"] in ("done", "error")] == ["done"]
+    # with no reply since the question, a failure is the thread's error
+    agents.append(agents.paths(CORPUS, tid)[1], {"type": "user", "text": "And Tuesdays?"})
+    threads.fork_finished(CORPUS, tid, "failed", tool_use_id="toolu_f1", agent_id="a1")
+    assert [r["type"] for r in _log(tid) if r["type"] in ("done", "error")] == ["done", "error"]
+
+
+def test_a_fork_that_ends_with_its_session_may_be_forked_again_at_once(cwd, monkeypatch):
+    """--continue resumes main under the same session id: the fork the ended session ran is gone, so a new Agent call
+    for the thread is not refused as a second fork (subagents.json `forking` loses the thread)."""
+    from app import subagent_files as files
+    from app import subagents
+
+    monkeypatch.setattr(files, "terminal", lambda ws: True)
+    thread = agents.new_thread(CORPUS, None, None, "Days")
+    tid = thread["id"]
+    agents.update_agent(CORPUS, tid, **{threads.FORK_NAME_KEY: "which-days"})
+    with subagents.update(CORPUS) as state:
+        assert files.fork_check(state, {"subagent_type": "fork", "description": "thread:which-days", "prompt": "thread:which-days"}) is None
+    threads.fork_started(CORPUS, tid, agent_id="a1", tool_use_id="toolu_f1", session=SID)
+    threads.session_ended(CORPUS, SID)
+    with subagents.update(CORPUS) as state:
+        assert files.fork_check(state, {"subagent_type": "fork", "description": "thread:which-days", "prompt": "thread:which-days"}) is None

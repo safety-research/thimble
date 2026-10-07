@@ -1539,15 +1539,18 @@ def fork_check(c: str, tool_input: dict[str, Any]) -> str | None:
     run, else None (the --agent-check hook asks the server this, since it needs the threads)."""
     from . import session  # noqa: PLC0415
 
+    from . import threads  # noqa: PLC0415
+
     if str(tool_input.get("subagent_type") or "") != "fork":
         return None
-    tid = session.thread_for(c, tool_input.get("description"))
+    ref = threads.fork_ref(tool_input)
+    tid = session.thread_for(c, ref)
     if not tid:
         return None
     started = _forking.get((c, tid))
     if started is not None and time.monotonic() - started < FORK_DEDUPE_S:
-        name = str(tool_input.get("description") or "").removeprefix("thread:")
-        return f"The fork of thread {name} is running already; it answers in the thread."
+        return files.fork_refusal(str(ref).removeprefix("thread:"),
+                                  files.cut_words(threads.first_question(c, tid), files.QUESTION_CHARS))
     _forking[(c, tid)] = time.monotonic()
     return None
 

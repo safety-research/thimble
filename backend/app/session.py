@@ -67,6 +67,8 @@ CELL_TOOLS = ("add_card", "edit_card", "add_cell", "edit_cell")  # the card tool
 LABEL_TOOL = "apply_label"
 LABEL_CARD_RE = re.compile(r"The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]")
 AGENT_TOOLS = ("Agent", "Task")  # the CLI's subagent tool, by either of its names
+# a tool result saying a PreToolUse hook denied the call (subagents.HOOK_ERROR_RE), so it never ran
+REFUSED_RE = re.compile(r"^\s*(?:Error:\s*)?PreToolUse:[A-Za-z]+ hook error:")
 WORKFLOW_TOOL = "Workflow"  # Claude Code's dynamic workflows (module note, workflows)
 WORKFLOW_TITLE = "workflow"  # when the script's meta names nothing
 WORKFLOW_DIR_RE = re.compile(r"^Transcript dir:[ \t]*(\S.*?)[ \t]*$", re.M)  # in the Workflow call's result
@@ -1415,11 +1417,12 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
         lv.watch_calls.add(tool_use_id)
         return
     if name in AGENT_TOOLS:
-        tid = thread_for(lv.c, inp.get("description"))
+        ref = threads.fork_ref(inp)
+        tid = thread_for(lv.c, ref)
         if tid:
             lv.hidden.add(tool_use_id)
             lv.forked.add(tid)
-            _spawn(lv, tool_use_id, None, str(inp.get("description") or ""), inp.get("subagent_type"))
+            _spawn(lv, tool_use_id, None, str(ref), inp.get("subagent_type"))
             return
     if name == SEND_TOOL:
         sub = _sub_by(lv, agent_id=str(inp.get("to") or inp.get("recipient") or ""))
@@ -1784,6 +1787,14 @@ def _sub_by(lv: Live, *, tool_use_id: str | None = None, agent_id: str | None = 
     return None
 
 
+def _fork_runs(lv: Live, thread_id: str, tool_use_id: str | None) -> bool:
+    """Whether the thread has a fork in this session that another Agent call started and that has not ended, so a
+    second call for it (fork_check refuses it) is not recorded as its fork before it shows that it started one."""
+    fork = (agents.meta_or_none(lv.c, thread_id) or {}).get("fork") or {}
+    return bool(fork.get("agent_id") and not fork.get("ended") and fork.get("session") == lv.sid
+                and fork.get("tool_use_id") not in (None, tool_use_id))
+
+
 def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, agent_type: Any,
            prompt: Any = None, parent: str | None = None) -> Sub:
     """The Sub for an Agent call, made on its first sighting (the tool_use, or the file's meta json) and completed by
@@ -1799,7 +1810,8 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
         if tid:
             sub = Sub(lv.c, tid, tool_use_id, agent_id, thread=True)
             lv.subs.append(sub)
-            threads.fork_started(lv.c, tid, agent_id=agent_id, tool_use_id=tool_use_id, session=lv.sid)
+            if agent_id or not _fork_runs(lv, tid, tool_use_id):
+                threads.fork_started(lv.c, tid, agent_id=agent_id, tool_use_id=tool_use_id, session=lv.sid)
             return sub
         title = " ".join(title.split()) or SUBAGENT_TITLE
         meta = agents.new_agent(lv.c, SUBAGENT_ROLE, title, by=TERMINAL, session=lv.sid, tool_use_id=tool_use_id,
@@ -1871,6 +1883,13 @@ def _agent_result(lv: Live, sub: Sub, content: Any, is_error: bool) -> None:
     notification. A foreground agent's is its outcome, and its chat ends once its file has been quiet (the CLI writes
     its last text moments later)."""
     text = response_text(content)
+    if is_error and sub.thread and REFUSED_RE.match(text):
+        # a hook denied the call, so it started no fork (fork_check: the thread's fork runs already): the thread is its
+        # own fork's to end
+        sub.done = True
+        lv.subs.remove(sub)
+        threads.fork_finished(lv.c, sub.chat, "failed", tool_use_id=sub.tool_use_id, refused=True)
+        return
     m = AGENT_ID_RE.search(text)
     if m and not sub.agent_id:
         _spawn(lv, sub.tool_use_id, m.group(1), "", None)
@@ -1910,7 +1929,7 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
     sub.finish = None
     try:
         if sub.thread:
-            threads.fork_finished(lv.c, sub.chat, status, kind=kind)
+            threads.fork_finished(lv.c, sub.chat, status, kind=kind, tool_use_id=sub.tool_use_id, agent_id=sub.agent_id)
         else:
             agents.finish_agent(lv.c, sub.chat, status, (sub.report or result or "")[:RESULT_LIMIT] or None)
     except Exception:  # noqa: BLE001 — a chat deleted under the mirror
@@ -1958,7 +1977,12 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
         lv.sub_paths.add(key)
         use = str(meta.get("toolUseId") or "") or None
         followed = _sub_by(lv, tool_use_id=use) or _sub_by(lv, agent_id=agent_id)
-        sub = _spawn(lv, use, agent_id, str(meta.get("description") or ""), meta.get("agentType"),
+        # a fork's file names its thread by its description, or by its name when thimble-term gave the call the
+        # thread's question as its description (threads.fork_ref)
+        title = str(meta.get("description") or "")
+        if meta.get("isFork") and not threads.thread_of(title) and meta.get("name"):
+            title = f"thread:{meta['name']}" if thread_for(lv.c, f"thread:{meta['name']}") else title
+        sub = _spawn(lv, use, agent_id, title, meta.get("agentType"),
                      parent=str(meta.get("parentAgentId") or "") or None)
         sub.path = path
         if not replay:

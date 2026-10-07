@@ -242,7 +242,7 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
                 elif b["type"] == "tool_use" and isinstance(b.get("id"), str):
                     name = session._short(str(b.get("name") or ""))
                     inp = b.get("input") if isinstance(b.get("input"), dict) else {}
-                    thread = threads.thread_of(inp.get("description")) if name in session.AGENT_TOOLS else \
+                    thread = threads.thread_of(threads.fork_ref(inp)) if name in session.AGENT_TOOLS else \
                         fork_agents.get(str(inp.get("to") or "")) if name == session.SEND_TOOL else None
                     if thread:
                         fork_calls[b["id"]] = thread

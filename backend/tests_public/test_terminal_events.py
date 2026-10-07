@@ -88,6 +88,39 @@ def test_the_watcher_takes_each_event_once_in_order_and_the_held_hook_prints_eac
     assert event_files.unshown(ws, MAIN) == []
 
 
+def test_two_terminal_threads_on_one_citation_keep_its_words_as_their_title_and_their_forks_two_names(ws):
+    """The terminal names a thread's subject by the citation's words (its title): a second thread on the same citation
+    is titled by the same words, never `raises the 3,898 count-2`; the forks' names stay two (threads.fork_name)."""
+    from app import agents, threads
+
+    a = agents.new_thread(CORPUS, "agent-chat.jsonl#L2", "The reviewer raises the 3,898 count.", "raises the 3,898 count", surface="terminal")
+    b = agents.new_thread(CORPUS, "agent-chat.jsonl#L2", "The reviewer raises the 3,898 count.", "raises the 3,898 count", surface="terminal")
+    assert a["title"] == b["title"] == "raises the 3,898 count"
+    names = {threads.fork_name(CORPUS, agents.read_meta(CORPUS, m["id"]), "Who wrote line 2?") for m in (a, b)}
+    assert names == {"who-wrote-line-2", "who-wrote-line-2-2"}
+    # the browser keeps its two names in the tree
+    assert agents.new_thread(CORPUS, "agent-chat.jsonl#L2", "x", "raises the 3,898 count")["title"] == "raises the 3,898 count-2"
+
+
+def test_the_held_hook_leaves_out_a_thread_s_line_which_the_terminal_s_own_rows_say(ws):
+    """A thread's question shows in its fork's row and its `↳` row (thimble-term), so main's terminal does not show it
+    again as `UserPromptSubmit says: › new thread: …`; a quiet event riding along still shows its line, and the
+    statusline still counts the question while it waits."""
+    from app import agents
+
+    meta = agents.new_thread(CORPUS, "card:abc#n/all", "Nearly all revisions are on one wiki.", surface="terminal")
+    events.post(CORPUS, "label_done", {"text": "x", "name": "refunds"}, check_kind=False)
+    event_files.take(ws, MAIN)
+    assert event_files.unshown(ws, MAIN) == ["label finished: refunds"]
+    events.post(CORPUS, "written", {"text": "Saved.", "doc": "report"}, check_kind=False)
+    events.post(CORPUS, "thread", {"thread": meta["id"], "text": "Is that all of them?"})
+    assert event_files.queued_words(ws)[0].startswith("new thread: Is that all of them?")
+    event_files.take(ws, MAIN)
+    assert event_files.unshown(ws, MAIN) == []
+    assert event_files.said([{"terminal": "view built: pages", "meta": {"kind": "view"}},
+                             {"terminal": "the report writer ended", "meta": {"kind": "written"}}]) == "view built: pages"
+
+
 def test_a_take_from_two_processes_at_once_hands_each_event_to_one(ws):
     for i in range(20):
         events.post(CORPUS, "label_done", {"text": str(i)}, check_kind=False)
@@ -129,7 +162,7 @@ def test_a_thread_event_server_code_sends_goes_to_the_queue(ws):
 
 def test_a_thread_s_line_names_it_by_its_first_question_never_its_fork_name(ws):
     """Main's terminal shows a thread's question as `› new thread: <question>`, and a follow-up under the thread's first
-    question in quotation marks; the fork's name (a slug of the anchor's words) is Claude Code's agent tray's."""
+    question in quotation marks; the fork's name (a slug) is Claude Code's agent tray's."""
     from app import agents, threads
 
     meta = agents.new_thread(CORPUS, "card:abc#n/all", "Nearly all revisions are on one wiki: 2994 of 3000.")

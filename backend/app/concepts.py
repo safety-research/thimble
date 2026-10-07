@@ -1483,6 +1483,7 @@ def examples(c: str, concept_id: str, value: str, n: int = EXAMPLES_SHOWN) -> li
                    key=lambda u: rank.get(u.ref, len(rank)))
     out: list[tuple[str, str]] = []
     docs: set = set()
+    concept = read_concept(ws, concept_id) or {}
     for u in picked_as_changes(corpus_dir, units, header=False):
         key = _save_key(u.record)
         doc = (labels_store.ref_parts(u.ref)[0], key[0]) if key else u.ref
@@ -1491,6 +1492,14 @@ def examples(c: str, concept_id: str, value: str, n: int = EXAMPLES_SHOWN) -> li
         docs.add(doc)
         hits = matched.get(u.ref) or set()
         lines = [x.strip() for x in u.text(UNIT_TEXT_MAX).splitlines() if x.strip()] or [""]
+        if not hits and isinstance(u.record, dict) and u.record and lines[0] in ("{", "["):
+            # a record read as its JSON, with no match to quote by: the fields the label read, else the record on one
+            # line, never the first line of its pretty-printed form (`{`)
+            words = record_words(u.record, concept)
+            out.append((u.ref, words[:EXAMPLE_CHARS] + ("…" if len(words) > EXAMPLE_CHARS else "")))
+            if len(out) >= n:
+                break
+            continue
         at = max(lines, key=lambda x: sum(h in x.casefold() for h in hits))
         first = min((i for h in hits if (i := at.casefold().find(h)) >= 0), default=0)
         start = max(0, first - EXAMPLE_CHARS // 3)
@@ -1498,6 +1507,32 @@ def examples(c: str, concept_id: str, value: str, n: int = EXAMPLES_SHOWN) -> li
         if len(out) >= n:
             break
     return out
+
+
+_CODE_FIELD_RE = re.compile(r"""\[\s*(['"])([^'"\n]+)\1\s*\]|\.get\(\s*(['"])([^'"\n]+)\3""")
+WORD_FIELDS = ("text", "content", "message", "body", "msg", "comment", "title", "name", "summary")
+
+
+def record_words(record: dict, concept: dict) -> str:
+    """A JSON record as a label's example quotes it: the fields the label's rule reads as `key: value` (a code label's
+    `unit['name']` or `.get('name')`, the fields a prompt or a pattern names), parted by ` · `, else its words field
+    (`text`, `name` …), else the record as one line of JSON (the renderer's lib.ts recordFields reads the same way)."""
+    spec = str(concept.get("spec") or "")
+    keys = [k for k in record if isinstance(k, str)]
+    if concept.get("kind") == "code":
+        read = list(dict.fromkeys(k for m in _CODE_FIELD_RE.finditer(spec) if (k := m.group(2) or m.group(4)) in keys))
+    else:
+        low = spec.lower()
+        read = [k for k in keys if re.search(rf"\b{re.escape(k.lower()).replace('_', '[_ ]')}\b", low)][:2]
+    if not read:
+        read = [k for k in keys if k.lower() in WORD_FIELDS and isinstance(record[k], str)][:1]
+
+    def value(v: Any) -> str:
+        return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+
+    if read:
+        return " · ".join(f"{k}: {' '.join(value(record[k]).split())}" for k in read)
+    return json.dumps(record, ensure_ascii=False)
 
 
 REASONS_SHOWN = 3  # reasons an apply's result quotes of each value (reasons)

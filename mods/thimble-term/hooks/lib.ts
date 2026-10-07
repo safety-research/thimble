@@ -215,15 +215,34 @@ export function prefix(s: string, n: number): string {
   return out
 }
 
-// what a cut leaves out before its `…`: the space and the punctuation that ended the last word kept
-const CUT_TAIL = /[\s,;:.!?\-–—]+$/
+// what a cut leaves out before its `…`: the space and the punctuation that ended the last word kept, and the `·` of a
+// list of facts whose next item it leaves out
+const CUT_TAIL = /[\s,;:.!?\-–—·]+$/
+
+/** Where the words in quotation marks that end `s` open (`"…"`, or `“…”`), when they open after its first cell; -1
+ *  when `s` does not end in quoted words. */
+function quoteOpens(s: string): number {
+  const close = s.at(-1)
+  if (close !== '"' && close !== '”') return -1
+  const at = close === '”' ? s.lastIndexOf('“') : s.lastIndexOf('"', s.length - 2)
+  return at >= 0 && at < s.length - 2 ? at : -1
+}
 
 /** `s` in at most `n` cells: whole when it fits, else cut at the last word that fits, mid-word only when that keeps
  *  less than half of the room, with no space or punctuation before the `…` (SPEC.md, section 5, "Words that recur").
+ *  Words in quotation marks that end `s` are cut inside the marks, which stay: `thread "Which line of…"`.
  *  The one cut of thimble-term: every row, title, preview and path step that shortens prose shortens it here. */
 export function cut(s: string, n: number): string {
   if (width(s) <= n) return s
   if (n <= 1) return n === 1 ? '…' : ''
+  const open = quoteOpens(s)
+  if (open >= 0) {
+    // the words before the quotation and its opening mark whole, the quoted words cut, then the closing mark; when the
+    // room keeps fewer than 4 cells of the quoted words, the whole is cut as any words are
+    const head = s.slice(0, open + 1)
+    const room = n - width(head) - 1
+    if (room >= 4) return `${head}${cut(s.slice(open + 1, -1), room)}${s.at(-1)}`
+  }
   let head = ''
   let w = 0
   for (const ch of s) {
@@ -235,6 +254,22 @@ export function cut(s: string, n: number): string {
   const at = /\s/.test(s[head.length] ?? '') ? head.length : head.search(/\s\S*$/)
   const keep = at > 0 && width(head.slice(0, at)) * 2 > n ? head.slice(0, at) : head
   return `${keep.replace(CUT_TAIL, '') || keep.trimEnd()}…`
+}
+
+/** A file's line in at most `n` cells: a line of code or data (JSON, a tag) cut at the cell edge, so the rows of a file
+ *  end together; prose cut at a word, as `cut` cuts. */
+export function cutLine(s: string, n: number): string {
+  if (width(s) <= n || !/^\s*[{[<]/.test(s)) return cut(s, n)
+  return n <= 1 ? (n === 1 ? '…' : '') : `${prefix(s, n - 1)}…`
+}
+
+/** Items of an inline list of facts parted by ` · ` in at most `n` cells: as many whole items as fit, then `…` right
+ *  against the last when some are left out; the first item cut as `cut` cuts when not even it fits whole. */
+export function itemsRow(items: readonly string[], n: number): string {
+  let k = items.length
+  const row = (m: number) => `${items.slice(0, m).join(' · ')}${m < items.length ? '…' : ''}`
+  while (k > 0 && width(row(k)) > n) k--
+  return k > 0 ? row(k) : cut(items[0] ?? '', n)
 }
 
 /** `s` on one line in `n` cells, cut as `cut` cuts. */
