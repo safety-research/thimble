@@ -8,22 +8,24 @@
 // find's matches leave ticks in the ink, like cue points on a timeline, which say what is found on hover and go to the
 // first match on a click (a marker lane of another kind is drawn in grey, never in a color). Over the lane, a dark
 // frame exactly as wide as the track outlines what the reader shows; a drag of it scrubs the reader, a click elsewhere
-// on the track sends the frame there, and a drag from there scrubs on (a press moves nothing until the pointer has moved
-// DRAG_PX or let go). A click within SNAP_PX of a thin patch of a color (THIN_PX tall at most, a lone record of a value
-// that the overview shows) snaps to it: the reader goes to the patch's first record and chooses it as the find does.
-// Hovering the track shows, beside it, the first records at that point of the file (their index, who and when, their
-// first lines), as a video scrubber's hover shows its frame, without scrolling. A jump of the reader (a click, the find)
-// makes the tracks glide to its new place.
+// on the track sends the frame there, and a drag from there scrubs on (a press moves nothing until the pointer has
+// moved DRAG_PX or let go). A click within SNAP_PX of a thin patch of a color (THIN_PX tall at most, a lone record of a
+// value that the overview shows) snaps to it: the reader goes to the patch's first record and chooses it as the find
+// does. Hovering the track shows, beside it, the first records at that point of the file (their index, who and when,
+// their first lines), as a video scrubber's hover shows its frame, without scrolling. A jump of the reader (a click,
+// the find) makes the tracks glide to its new place.
 //
-// The zoomed track, at the outer edge, magnifies the frame: the stretch of the reader around what it shows, larger,
-// each record a block of its height in its color, grey with Color by off, past what the reader shows faded. What the
-// reader shows lies under a lens (a raised box of the paper, framed), and two lines join the frame's top and bottom on
-// the overview to the lens's, so the lens reads as the frame magnified. The lens stands as far down the zoomed track
-// as the frame stands down the overview (both as a scrollbar's thumb does), so the two move together: in the middle of
-// the file the lens is in the middle, at its top and end the lens goes to the track's top and end. A drag on the
-// zoomed track scrolls the reader at its scale, as a scrollbar's thumb: the lens follows the pointer over the records,
-// which hold still, and a pixel of the track is a few of the reader; a press off the lens brings the lens's middle
-// there first. Let go, the lens glides back to where the frame puts it. The wheel over either track scrolls the reader.
+// The zoomed track, at the outer edge, shows only on a file ZOOM_AT times what the reader shows, where the overview no
+// longer tells its records apart (it goes again below ZOOM_OFF). It magnifies the frame: the stretch of the reader
+// around what it shows, larger, each record a block of its height in its color, grey with Color by off, past what the
+// reader shows faded. What the reader shows lies under a lens (a raised box of the paper, framed), and two lines join
+// the frame's top and bottom on the overview to the lens's, so the lens reads as the frame magnified. The lens stands
+// as far down the zoomed track as the frame stands down the overview (both as a scrollbar's thumb does), so the two
+// move together: in the middle of the file the lens is in the middle, at its top and end the lens goes to the track's
+// top and end. A drag on the zoomed track scrolls the reader at its scale, as a scrollbar's thumb: the lens follows the
+// pointer over the records, which hold still, and a pixel of the track is a few of the reader; a press off the lens
+// brings the lens's middle there first. Let go, the lens glides back to where the frame puts it. The wheel over either
+// track scrolls the reader.
 //
 // The reader publishes where it stands each frame it scrolls (PlaceFeed), and one animation frame moves the frame, the
 // lens, the zoomed track's records and the lines between them, with transforms alone: nothing renders in React while
@@ -62,6 +64,9 @@ const DRAG_PX = 3
 const PREVIEW_DELAY_MS = 90
 /** how much of the reader the zoomed track spans: this many of its heights, what it shows in the middle */
 export const ZOOM_SPAN = 5
+/** the zoomed track shows once the file is this many times what the reader shows, and goes again below ZOOM_OFF */
+export const ZOOM_AT = 12
+export const ZOOM_OFF = 10
 /** the opacity of the colors past what the reader shows, on the zoomed track */
 export const FADE = 0.28
 
@@ -639,7 +644,13 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
   scale$.current = scale
   const calls = useRef({ onSeek, onScrollBy })
   calls.current = { onSeek, onScrollBy }
-  const hasZoom = records != null
+  // the zoomed track shows only where the overview cannot tell the file's records apart: a file ZOOM_AT times what the
+  // reader shows, until it is less than ZOOM_OFF times (a reader resized, a file grown); with records drawn to zoom
+  const longOf = (h: number, was: boolean) => h <= 1 / (was ? ZOOM_OFF : ZOOM_AT)
+  const [long, setLong] = useState(true)
+  const long$ = useRef(long)
+  long$.current = long
+  const hasZoom = records != null && long
 
   const write = (g: TrackGeom, grid: boolean) => {
     const dpr = window.devicePixelRatio || 1
@@ -766,6 +777,8 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
   useEffect(
     () =>
       feed.on(() => {
+        const want = longOf(feed.place.height, long$.current)
+        if (want !== long$.current) setLong(want)
         // the place measured now holds every scroll the zoomed track asked for; drawn in the frame the reader scrolled in
         m.current.adj = 0
         if (!m.current.busy) draw$.current(performance.now(), true)
@@ -1019,7 +1032,7 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
           [paintName ?? '', ...lanes.map((l) => l.name)].map((name, i) => <span key={i} className="track-lane" style={{ left: lanesPx + i * (laneW + LANE_GAP_PX), width: laneW }} title={name || undefined} />)}
         <div ref={frameEl} className="track-frame-over" />
       </div>
-      <svg className="track-link" width={LINK_PX}>
+      <svg className="track-link" width={LINK_PX} style={hasZoom ? undefined : { display: 'none' }}>
         {hasZoom && px > 0 && (
           <>
             <polygon ref={wedge} />
@@ -1028,7 +1041,7 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
           </>
         )}
       </svg>
-      <div ref={zoomEl} className="track track-zoom" style={{ width: ZOOM_PX + (zLanes ? zLanes * (MARKER_PX + MARKER_GAP_PX) : 0) }} onPointerDown={onZDown} onPointerMove={onZMove} onPointerUp={onZUp} onPointerCancel={onZUp}>
+      <div ref={zoomEl} className="track track-zoom" style={{ width: ZOOM_PX + (zLanes ? zLanes * (MARKER_PX + MARKER_GAP_PX) : 0), ...(hasZoom ? {} : { display: 'none' }) }} onPointerDown={onZDown} onPointerMove={onZMove} onPointerUp={onZUp} onPointerCancel={onZUp}>
         {hasZoom && (
           <>
             <div className="track-zoom-faded" style={{ opacity: FADE }}>

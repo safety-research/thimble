@@ -19,7 +19,8 @@ the view as text, a glyph or a gray pattern, never in a second palette.
   close the editor and put the focus back on the label's row; a click in the view closes it too. Choosing a field or
   Off opens nothing.
 - Color by is thimble's small secondary button, with the choice in it: "Color by: Kind".
-- Off colors nothing: no chips, no bars, and the tracks and the time range's overview draw every record in gray.
+- Off colors nothing: no chips, no bars, the tracks a plain scrollbar, and the time range's overview draws every record
+  in gray.
 - The values of the chosen field show as key chips in the top row (`chip chip-key` in the view kit): a square of the
   value's color, its name and its count. The chip of the records with no value ("Not marked", "No kind") has the gray
   square the marks draw those records in. A click turns a value off or on. An Alt-click, or a double click, shows that
@@ -113,20 +114,22 @@ load()
 
 ## A long list's tracks
 
-`strip: '#list'`, or `colour.strip('#list')` for another list, puts the list's scrollbar in tracks at its right edge:
+`strip: '#list'`, or `colour.strip('#list', {rows})` or `{whole: true}` for another list (see below), puts the list's
+scrollbar in tracks at its right edge:
 
-- The overview track is the whole list in one lane for the choice: each pixel row in the color of the value that is
-  on which most of the records there take, never two colors side by side. The records with no value ("No kind", "Not
-  marked") are the gray their chip has, as every record is with Off, and only where no record of the pixel row takes a
-  value, so a value is never hidden under them; turned off, they leave the tracks as any value does. Each other label
-  that is on has a lane of its own beside it, in the label's colors, so that one choice is one lane and two labels on
-  are two; each lane names its label on hover, and the lanes narrow as more come (one is 12 px; more share 24 px, 3 px
-  each at least). Only the choice colors the zoomed track and the records' bars. A dark frame as wide as the lanes
-  outlines the part in view; drag it to move the view.
-- A list many times the height of its box adds the zoomed track at the outer edge, which magnifies the frame: the part
-  around the view at a finer scale, its colors faded beyond the part in view, which lies under a lens. Two lines join
-  the frame's top and bottom to the lens's. The lens stands as far down the zoomed track as the frame stands down the
-  overview, so the two move together.
+- The overview track is the whole list in one lane for the choice: each pixel row in the color of the value that is on
+  which most of the records there take, never two colors side by side. The records with no value ("No kind", "Not
+  marked") are the gray their chip has, and only where no record of the pixel row takes a value, so a value is never
+  hidden under them; turned off, they leave the tracks as any value does. Each other label that is on has a lane of its
+  own beside it, in the label's colors, so that one choice is one lane and two labels on are two; each lane names its
+  label on hover, and the lanes narrow as more come (one is 12 px; more share 24 px, 3 px each at least). Only the
+  choice colors the zoomed track and the records' bars. A dark frame as wide as the lanes outlines the part in view;
+  drag it to move the view.
+- A list at least 12 times the height of its box adds the zoomed track at the outer edge (it goes again below 10
+  times), where the overview cannot tell the list's rows apart. It magnifies the frame: the part around the view at a
+  finer scale, its colors faded beyond the part in view, which lies under a lens. Two lines join the frame's top and
+  bottom to the lens's. The lens stands as far down the zoomed track as the frame stands down the overview, so the two
+  move together.
 - Hovering the overview shows the records under the pointer in a preview, each a row with its color as a bar on its
   left edge, its time and first line, without scrolling. A click on the overview sends the frame there, its middle
   under the pointer; a click within 4 px of a thin patch of a color (8 px tall at most, such as a lone record of a
@@ -139,9 +142,15 @@ load()
   frame; once still, every edge goes onto the device's pixel grid.
 
 For a list that draws only the rows in view, give every row's value in order: `colour.strip('#list', {rows: values})`,
-with `preview(i)` (what the preview says of row `i`: a string, or `{when, text}`; `refs`, each row's record, is
-taken). For a list of elements the preview reads each record's `<time>` and its text, or
+with `preview(i)` (what the preview says of row `i`: a string, or `{when, text}`; `refs`, each row's record, which the
+labels' lanes read). For a list of elements the preview reads each record's `<time>` and its text, or
 `preview(element)`. Call `strip` again with the same list when they change.
+
+The tracks show colors only where they reflect the whole list: Color by's own `strip`, a list given `rows`, or another
+list whose elements are all of its records, which says so with `colour.strip('#other', {whole: true})`. Any other pane,
+such as a view's second list or one that loads its records in pieces, gets a plain track: a scrollbar in the kit's
+style with no colors, no lanes and no zoomed track. So does a list none of whose records takes a color (Off, or every
+value turned off). A secondary pane is plain unless the page asks for its colors this way.
 
 ## Details in place
 

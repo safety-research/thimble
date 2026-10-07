@@ -67,7 +67,9 @@ beforeAll(async () => {
       `const preview = (line) => { w.__asked.push(line); return Promise.resolve([{ line, who: 'AgentRelent', when: '2026-06-18 20:15', text: 'SEC county variants for pretty lines', color: 'var(--label-1)' }, { line: line + 1, who: 'AgentMapCite8x', when: '2026-06-18 20:16', text: 'MINETHROUGH PERSIST 777', color: 'var(--label-2)' }]) }`,
       // the middle of the file (the reader at 800 to 1200 of the 2000 px the zoomed track spans, in a stretch of the
       // file's records), or near its end (1500 to 1900 of the last 2000 px)
-      `const at = { middle: { place: { top: 0.45, height: 0.1, scroll: 800, h: 400, content: 4000, start: false, end: false }, records: records(100) }, end: { place: { top: 0.88, height: 0.1, scroll: 1500, h: 400, content: 2000, start: true, end: true }, records: records(900) } }`,
+      // (the file twenty times what the reader shows, so that the zoomed track shows; "short" five times, so that it
+      // does not)
+      `const at = { middle: { place: { top: 0.475, height: 0.05, scroll: 800, h: 400, content: 4000, start: false, end: false }, records: records(100) }, end: { place: { top: 0.93, height: 0.05, scroll: 1500, h: 400, content: 2000, start: true, end: true }, records: records(900) }, short: { place: { top: 0.4, height: 0.2, scroll: 800, h: 400, content: 2000, start: true, end: true }, records: records(1) } }`,
       `root.render(<div style={{ height: 600, display: 'flex', justifyContent: 'flex-end' }}><ReaderTracks total={1000} feed={feed} paint={{ kind: 'counts', counts, colors: ['var(--label-1)', 'var(--label-2)', 'var(--label-3)'], faded: [false, false, false] }} markers={markers} colorOf={colorOf} onJump={() => {}} onSeek={(f, held) => w.__seeks.push([f, held])} onScrollBy={(px) => { w.__scrolled.push(px); const p = feed.place; feed.set({ ...p, scroll: p.scroll + px, top: p.top + px / 40000 }); return px }} onMark={() => {}} preview={preview} /></div>)`,
       `w.__scrolled = []`,
       // the place published, then once the tracks have gone still and onto the pixel grid
@@ -326,5 +328,17 @@ test('a press on the zoomed track off the lens brings the lens there, and a drag
   assert.ok(Math.abs(scrolled - (y + 10 - (lens.y + lens.height / 2)) / k) <= 2 / k, `scrolled ${scrolled}`)
   await page.mouse.up()
   await page.waitForTimeout(300)
+})
+
+test('the zoomed track shows only on a file at least twelve times what the reader shows', async () => {
+  const shows = () => page.evaluate(() => getComputedStyle(document.querySelector('.track-zoom')!).display !== 'none' && getComputedStyle(document.querySelector('.track-link')!).display !== 'none')
+  await page.evaluate(() => (window as any).__render('middle'))
+  assert.equal(await shows(), true, 'twenty times: the zoomed track')
+  await page.evaluate(() => (window as any).__render('short'))
+  assert.equal(await shows(), false, 'five times: the overview alone')
+  const over = await page.evaluate(() => document.querySelector('.tracks')!.getBoundingClientRect().width)
+  await page.evaluate(() => (window as any).__render('middle'))
+  assert.equal(await shows(), true)
+  assert.ok((await page.evaluate(() => document.querySelector('.tracks')!.getBoundingClientRect().width)) > over + 30, 'the tracks narrower without it')
 })
 
