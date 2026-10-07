@@ -1,8 +1,11 @@
 // The view kit's time range selector (backend/app/viewer_range.js) and a list's two tracks (viewer_colour.js) in a real
 // browser, a page holding the view in a sandboxed frame: the viewfinder's edge zooms, its middle pans, a double click
 // shows the whole span and Ctrl with the wheel zooms around the pointer; the overview draws its records in the Color by
-// colours, grey with Off; a long list gets the zoomed track beside the overview, its colours faded beyond the part in
-// view, and hovering the overview previews the records there. Through the real ViewerFrame, a label's definition opens
+// colours, grey with Off, one colour per pixel row; a long list gets the zoomed track at the outer edge beside the
+// overview, its colours faded beyond the part in view, which lies under a lens joined to the overview's frame by two
+// lines, the lens going down the zoomed track with the frame; hovering the overview previews the records there in plain
+// rows with a straight bar. Through the real ViewerFrame, a colour picked for a label's value from its chip's swatch
+// goes to thimble as the label's colour, and a label's definition opens
 // in Color by's menu from thimble's own answer, and Open label opens thimble's label editor. What the selector decides
 // without layout is tests/public/range-kit.test.ts.
 import assert from 'node:assert/strict'
@@ -140,46 +143,107 @@ describe('the time range selector in a frame', () => {
 })
 
 describe("a long list's two tracks", () => {
-  test('the zoomed track stands beside the overview, faded beyond the part in view, and the overview frames that part', async () => {
-    const { page, frame } = await framed()
-    const s = await frame().evaluate(() => {
+  /** the tracks as laid out in the frame: each part's box, the lines' ends, and the frame's border */
+  const tracks = (frame: () => Frame) =>
+    frame().evaluate(() => {
+      const box = (el: Element) => {
+        const r = el.getBoundingClientRect()
+        return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }
+      }
       const strip = document.querySelector('.thimble-colour-strip') as HTMLElement
       const whole = strip.querySelector('.thimble-colour-whole') as HTMLElement
       const zoom = strip.querySelector('.thimble-colour-zoom') as HTMLElement
       const thumb = whole.querySelector('.thimble-colour-thumb') as HTMLElement
+      const lens = zoom.querySelector('.thimble-colour-lens') as HTMLElement
+      const svg = strip.querySelector('.thimble-colour-link') as SVGSVGElement
+      const sr = svg.getBoundingClientRect()
+      const line = (edge: string) => {
+        const l = svg.querySelector(`line[data-edge="${edge}"]`)!
+        const n = (a: string) => Number(l.getAttribute(a))
+        return { x1: sr.left + n('x1'), y1: sr.top + n('y1'), x2: sr.left + n('x2'), y2: sr.top + n('y2') }
+      }
       const cv = zoom.querySelector('canvas') as HTMLCanvasElement
       const ctx = cv.getContext('2d')!
-      const alpha = (f: number) => ctx.getImageData(Math.floor(cv.width * 0.3), Math.floor(cv.height * f), 1, 1).data[3]
+      const lensBox = box(lens)
+      const zr = box(zoom)
+      // the zoomed track's lane in the lens's middle and far from it
+      const alpha = (y: number) => ctx.getImageData(Math.floor(cv.width * 0.3), Math.max(0, Math.min(cv.height - 1, Math.floor(y * (cv.height / zr.height)))), 1, 1).data[3]
+      const mid = (lensBox.top + lensBox.bottom) / 2 - zr.top
       const list = document.getElementById('list')!
       return {
         zoom: getComputedStyle(zoom).display,
-        order: whole.getBoundingClientRect().left > zoom.getBoundingClientRect().left,
+        whole: box(whole),
+        zoomBox: zr,
+        thumb: box(thumb),
+        lens: lensBox,
+        lensBg: getComputedStyle(lens).backgroundColor,
+        frameBorder: parseFloat(getComputedStyle(thumb).borderTopWidth),
+        top: line('top'),
+        bottom: line('bottom'),
         right: Math.round(list.getBoundingClientRect().right - strip.getBoundingClientRect().right),
-        thumb: [thumb.offsetWidth, whole.offsetWidth],
-        inView: alpha(0.04),
-        beyond: alpha(0.9),
+        inView: alpha(mid),
+        beyond: alpha(mid > zr.height / 2 ? 4 : zr.height - 4),
       }
     })
+  const near = (a: number, b: number, tol = 1) => Math.abs(a - b) <= tol
+
+  test('the overview at the left, the zoomed track at the edge, faded beyond the part in view under its lens, the lines joining frame and lens', async () => {
+    const { page, frame } = await framed()
+    const s = await tracks(frame)
     assert.equal(s.zoom, 'block')
-    assert.ok(s.order, 'the overview at the right, the zoomed track at its left')
-    assert.ok(s.right >= 0 && s.right <= 4)
-    assert.equal(s.thumb[0], s.thumb[1], 'the frame around the part in view is as wide as the track')
+    assert.ok(s.whole.right < s.zoomBox.left, 'the overview at the left, the zoomed track at the outer edge')
+    // at the list's right edge, the lens (3px past the zoomed track) still inside it
+    assert.ok(s.right >= 3 && s.right <= 6, `the tracks ${s.right}px in from the list's right edge`)
+    assert.equal(s.thumb.width, s.whole.width, 'the frame around the part in view is as wide as the track')
+    assert.ok(s.frameBorder >= 2, `the frame stands out: ${s.frameBorder}`)
+    assert.ok(s.lens.left < s.zoomBox.left && s.lens.right > s.zoomBox.right, 'the lens a little wider than the zoomed track')
+    assert.notEqual(s.lensBg, 'rgba(0, 0, 0, 0)')
     assert.ok(s.inView > 200 && s.beyond < 120, `faded beyond the part in view: ${s.inView} ${s.beyond}`)
+    assert.ok(near(s.top.x1, s.whole.right) && near(s.top.y1, s.thumb.top) && near(s.top.x2, s.lens.left) && near(s.top.y2, s.lens.top), `top line ${JSON.stringify([s.top, s.thumb, s.lens])}`)
+    assert.ok(near(s.bottom.x1, s.whole.right) && near(s.bottom.y1, s.thumb.bottom) && near(s.bottom.x2, s.lens.left) && near(s.bottom.y2, s.lens.bottom), `bottom line ${JSON.stringify([s.bottom, s.thumb, s.lens])}`)
     await page.close()
   })
 
-  test('hovering the overview previews the records there without scrolling, and a click goes there', async () => {
+  test("the lens goes down the zoomed track with the frame: at the list's top at the top, in its middle in the middle, at its end at the end", async () => {
+    const { page, frame } = await framed()
+    const at = async (f: number) => {
+      await frame().evaluate((x) => {
+        const l = document.getElementById('list')!
+        l.scrollTop = x * (l.scrollHeight - l.clientHeight)
+      }, f)
+      await page.waitForTimeout(80)
+      const s = await tracks(frame)
+      return { lens: (s.lens.top + 3 - s.zoomBox.top) / (s.zoomBox.height - (s.lens.height - 6)), frame: (s.thumb.top - s.whole.top) / (s.whole.height - s.thumb.height), s }
+    }
+    const top = await at(0)
+    const mid = await at(0.5)
+    const end = await at(1)
+    assert.ok(near(top.lens, 0, 0.03) && near(top.frame, 0, 0.03), JSON.stringify(top))
+    assert.ok(near(mid.lens, 0.5, 0.05) && near(mid.frame, 0.5, 0.05), JSON.stringify(mid))
+    assert.ok(near(end.lens, 1, 0.03) && near(end.frame, 1, 0.03), JSON.stringify(end))
+    assert.ok(near(end.s.top.y2, end.s.lens.top) && near(end.s.bottom.y2, end.s.lens.bottom) && near(end.s.bottom.y1, end.s.thumb.bottom), JSON.stringify(end.s))
+    await page.close()
+  })
+
+  test('hovering the overview previews the records there in plain rows without scrolling, and a click goes there', async () => {
     const { page, frame } = await framed()
     const tr = (await frame().locator('.thimble-colour-whole').boundingBox())!
+    const zoomBefore = await tracks(frame)
     await page.mouse.move(tr.x + tr.width / 2, tr.y + tr.height * 0.75)
     await page.waitForTimeout(150)
     const peek = await frame().evaluate(() => {
       const p = document.querySelector('.thimble-colour-peek') as HTMLElement
-      return { shown: getComputedStyle(p).display, rows: [...p.querySelectorAll('.thimble-peek-row')].map((r) => r.textContent), top: document.getElementById('list')!.scrollTop }
+      const row = p.querySelector('.thimble-peek-row') as HTMLElement
+      return { shown: getComputedStyle(p).display, rows: [...p.querySelectorAll('.thimble-peek-row')].map((r) => r.textContent), top: document.getElementById('list')!.scrollTop, bar: getComputedStyle(row).boxShadow, radius: getComputedStyle(row).borderTopLeftRadius, swatches: p.querySelectorAll('.thimble-colour-sw').length }
     })
     assert.equal(peek.shown, 'block')
     assert.equal(peek.top, 0, 'nothing scrolls')
     assert.ok(peek.rows.length >= 3, JSON.stringify(peek))
+    assert.match(peek.bar, /inset/, "a record's colour is a bar on its row's left edge")
+    assert.equal(peek.radius, '0px')
+    assert.equal(peek.swatches, 0)
+    const zoomHover = await tracks(frame)
+    assert.ok(near(zoomHover.lens.top, zoomBefore.lens.top), 'the zoomed track stays on the part in view while the overview is hovered')
     const n = Number(/message (\d+)/.exec(peek.rows[0] ?? '')?.[1])
     assert.ok(n > N * 0.65 && n < N * 0.85, `the records three quarters down: ${peek.rows}`)
     await page.mouse.down()
@@ -187,6 +251,47 @@ describe("a long list's two tracks", () => {
     await page.waitForTimeout(100)
     const top = await frame().evaluate(() => { const l = document.getElementById('list')!; return (l.scrollTop + l.clientHeight / 2) / l.scrollHeight })
     assert.ok(Math.abs(top - 0.75) < 0.05, `the list goes there: ${top}`)
+    await page.close()
+  })
+})
+
+describe("a label's value's colour through ViewerFrame", () => {
+  test("a colour picked from the chip's swatch of a label's value is the label's colour, given through thimble", async () => {
+    const script = await bundle('view-range-colour', [
+      `import { createElement } from 'react'`,
+      `import { createRoot } from 'react-dom/client'`,
+      `import { ViewerFrame } from '${src('files/ViewerFrame.tsx')}'`,
+      `const w = window`,
+      `w.__acts = []`,
+      `const k = { id: 'k1', name: 'asks', description: '', unit: 'record', kind: 'prompt', spec: '', labels: ['yes', 'no'], created_by: 'analyst', ts: '', classes: [{ name: 'yes', color: 2, highlight: true }, { name: 'no', color: 0, highlight: false }], shown: false }`,
+      `const root = document.body.appendChild(document.createElement('div'))`,
+      `root.style.cssText = 'width:800px;height:420px'`,
+      `createRoot(root).render(createElement(ViewerFrame, { ws: 'w', slug: 'board', title: 'Board', byId: new Map([[k.id, k]]), labels: [k], labelActions: { setOn: () => {}, setColour: (id, value, n) => w.__acts.push(['colour', id, value, n]) } }))`,
+    ])
+    const page = await browser.newPage({ viewport: { width: 900, height: 600 } })
+    await page.route('**/*', async (route) => {
+      const url = new URL(route.request().url())
+      if (url.pathname === '/api/ws/w/views/board/frame') return route.fulfill({ status: 200, contentType: 'text/html', body: VIEW })
+      if (url.pathname.startsWith('/api/')) return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+      return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>' })
+    })
+    await page.goto(`${ORIGIN}/`)
+    // thimble's palette, which the page hears and names a colour by
+    await page.addStyleTag({ content: 'iframe{width:800px;height:420px;border:0} :root{' + Array.from({ length: 12 }, (_, i) => `--label-${i + 1}:#${(0x204060 + i * 0x0b0907).toString(16).slice(-6)};`).join('') + '--label-none:#a09c93}' })
+    await page.addScriptTag({ path: script })
+    const frame = () => page.frames().find((f) => f !== page.mainFrame())!
+    await page.waitForFunction(() => document.querySelector('iframe'))
+    await page.waitForTimeout(500)
+    await frame().waitForSelector('.thimble-colour-chip[data-label="k1"]')
+    await frame().locator('.thimble-colour-chip').first().locator('.chip-sw').click()
+    await frame().waitForSelector('.thimble-colour-palette')
+    assert.equal(await frame().locator('.thimble-colour-palette .thimble-colour-pick').count(), 12)
+    const on = await frame().evaluate(() => [...document.querySelectorAll('.thimble-colour-palette .thimble-colour-pick')].findIndex((b) => b.classList.contains('on')))
+    assert.equal(on, 1, "the value's own colour, thimble's second, is ringed")
+    assert.equal(await frame().locator('.thimble-colour-palette [data-reset-colours]').count(), 0, "a label's colours are the label's own, with no Reset here")
+    await frame().locator('.thimble-colour-palette .thimble-colour-pick').nth(4).click()
+    await page.waitForFunction(() => (window as any).__acts.length > 0)
+    assert.deepEqual(await page.evaluate(() => (window as any).__acts), [['colour', 'k1', 'yes', 5]])
     await page.close()
   })
 })

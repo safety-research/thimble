@@ -1,13 +1,11 @@
 // @vitest-environment jsdom
-// Color by in Files' Transcript mode (src/files/colorChoice.ts) and the tracks' geometry (src/files/Tracks.tsx): a key's
-// values take the palette by frequency, the rest one Other, the records with none their own chip; a label's chips are
-// its highlighted values with their counts and the meanings its definition gives, then Not marked; the default choice
-// is the file's first key with few values, else Off; a record's value is read from a JSON line the server pages as
-// text; the choice and the values off are kept per file; the zoomed track spans five heights of the reader with what
-// it shows in the middle, and the overview's frame is at least FRAME_MIN_PX tall.
+// Color by in Files' Transcript mode (src/files/colorChoice.ts): a key's values take the palette by frequency, the rest
+// one Other, the records with none their own chip; a label's chips are its highlighted values with their counts and the
+// meanings its definition gives, then Not marked; the default choice is the file's first key with few values, else Off;
+// a record's value is read from a JSON line the server pages as text; the choice and the values off are kept per file.
+// The tracks' geometry is tracks.test.ts.
 import { afterEach, describe, expect, test } from 'vitest'
-import { chipOfKeyValue, choiceId, defaultChoice, definitionLead, keyChips, keyValue, labelChips, NONE, OTHER, parseChoice, readColor, valueMeaning, writeColor } from '../../src/files/colorChoice'
-import { binOfRow, frameOf, FRAME_MIN_PX, lineAt, markerText, zoomWindow, ZOOM_SPAN } from '../../src/files/Tracks'
+import { chipOfKeyValue, choiceId, defaultChoice, definitionLead, keyChips, keyValue, labelChips, NONE, OTHER, parseChoice, pickedChips, readColor, valueMeaning, writeColor } from '../../src/files/colorChoice'
 import type { Concept, SourceKey, SourceRecord } from '../../src/lib/types'
 
 afterEach(() => window.localStorage.clear())
@@ -107,6 +105,19 @@ describe('the choice', () => {
     })
     expect(readColor('ws', 'b.jsonl')).toEqual({ by: null, off: {} })
   })
+
+  test("the colors picked for a key's values are kept per file, and its chips take them", () => {
+    writeColor('ws', 'a.jsonl', { by: 'k:wiki', off: {}, colors: { 'k:wiki': { dse: 7, bad: 99 } } })
+    const kept = readColor('ws', 'a.jsonl')
+    expect(kept.colors).toEqual({ 'k:wiki': { dse: 7 } })
+    expect(readColor('ws', 'b.jsonl').colors).toBeUndefined()
+    const chips = pickedChips(keyChips({ key: 'wiki', values: [{ value: 'dse', n: 9 }, { value: 'probier', n: 3 }], more: { values: 0, n: 0 }, none: 2, at: [] }), kept.colors?.['k:wiki'])
+    expect(chips.map((c) => [c.id, c.color])).toEqual([
+      ['dse', 'var(--label-7)'],
+      ['probier', 'var(--label-2)'],
+      [NONE, null],
+    ])
+  })
 })
 
 test("a record's value is read from its object or from a JSON line's text, and falls under its chip", () => {
@@ -124,37 +135,4 @@ test("a record's value is read from its object or from a JSON line's text, and f
   expect(chipOfKeyValue(k, 'v3')).toBe('v3')
   expect(chipOfKeyValue(k, 'v13')).toBe(OTHER)
   expect(chipOfKeyValue(k, null)).toBe(NONE)
-})
-
-describe("the tracks' geometry", () => {
-  test('the zoomed track spans five heights of the reader with what it shows in the middle, inside the content', () => {
-    expect(zoomWindow(5000, 400, 20000)).toEqual([5000 + 200 - (400 * ZOOM_SPAN) / 2, 5000 + 200 + (400 * ZOOM_SPAN) / 2])
-    expect(zoomWindow(0, 400, 20000)).toEqual([0, 400 * ZOOM_SPAN])
-    expect(zoomWindow(19600, 400, 20000)).toEqual([20000 - 400 * ZOOM_SPAN, 20000])
-    expect(zoomWindow(0, 400, 300)).toEqual([0, 400])
-  })
-
-  test("the overview's frame stands for what the reader shows, at least FRAME_MIN_PX tall, on the track", () => {
-    expect(frameOf({ top: 0.5, height: 0.25 }, 800)).toEqual({
-      top: 400,
-      height: 200,
-    })
-    expect(frameOf({ top: 0.999, height: 0.0001 }, 800)).toEqual({
-      top: 800 - FRAME_MIN_PX,
-      height: FRAME_MIN_PX,
-    })
-  })
-
-  test('a point of the overview names its line and its bin', () => {
-    expect(lineAt(0, 100)).toBe(1)
-    expect(lineAt(0.5, 100)).toBe(51)
-    expect(lineAt(1, 100)).toBe(100)
-    expect(binOfRow(0, 100, 1000)).toBe(5)
-    expect(binOfRow(99, 100, 1000)).toBe(995)
-  })
-
-  test("a marker says the label's name, with its value when the label has several", () => {
-    expect(markerText({ id: 'a', name: 'edit purpose', valued: true, total: 10, ticks: [] }, { from: 1, to: 1, colour: '', value: 'posts links' })).toBe('edit purpose: posts links')
-    expect(markerText({ id: 'b', name: 'says so', total: 10, ticks: [] }, { from: 1, to: 1, colour: '', value: 'says so' })).toBe('says so')
-  })
 })

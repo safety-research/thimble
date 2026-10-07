@@ -722,6 +722,65 @@ select.field {
   width: min(360px, calc(100vw - 16px));
   max-width: min(360px, calc(100vw - 16px));
 }
+/* a chip's swatch opens the palette: the press lands a little around it */
+.thimble-colour-chip .chip-sw[data-palette] {
+  position: relative;
+  cursor: pointer;
+}
+.thimble-colour-chip .chip-sw[data-palette]::after {
+  content: '';
+  position: absolute;
+  inset: -6px -4px -6px -5px;
+}
+.thimble-colour-chip .chip-sw[data-palette]:hover {
+  box-shadow: inset 0 0 0 1.5px var(--c), 0 0 0 1.5px var(--surface-card), 0 0 0 2.5px var(--c);
+}
+/* the palette of a value's colours: thimble's twelve label colours, the value's own ringed, then Reset colors */
+.thimble-colour-menu.thimble-colour-palette {
+  min-width: 0;
+  padding: 6px 8px 8px;
+  border-radius: var(--radius-ui);
+}
+.thimble-colour-palette .thimble-colour-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 8px;
+  color: var(--text-primary);
+  font: 500 var(--text-ui-sm, 12px) / 1.2 var(--font-body);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.thimble-colour-picks {
+  display: grid;
+  grid-template-columns: repeat(6, 20px);
+  gap: 6px;
+}
+.thimble-colour-pick {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-chip, 4px);
+  background: var(--c);
+  cursor: pointer;
+}
+.thimble-colour-pick:hover {
+  box-shadow: 0 0 0 2px var(--overlay-bg, var(--surface-card)), 0 0 0 3px rgba(var(--ink-rgb), 0.35);
+}
+.thimble-colour-pick.on {
+  box-shadow: 0 0 0 2px var(--overlay-bg, var(--surface-card)), 0 0 0 3.5px var(--text-primary);
+}
+.thimble-colour-pick:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--overlay-bg, var(--surface-card)), 0 0 0 3.5px var(--accent);
+}
+.thimble-colour-repick.btn {
+  gap: 5px;
+  margin-top: 8px;
+  padding: 0 6px;
+}
 .thimble-def {
   display: flex;
   flex-direction: column;
@@ -849,9 +908,10 @@ select.field {
   color: var(--text-secondary);
 }
 
-/* a list's two tracks: the overview at the list's right edge, the zoomed track beside it, over the list's own hidden
-   scrollbar; each track a lane of the records' colours with the labels' ticks at its edge, and a box around the part
-   in view */
+/* a list's two tracks, as Files' Transcript mode draws them: the overview (one lane of the records' colours, a dark frame
+   around the part in view), then at the list's right edge the zoomed track, which
+   magnifies the frame: the part in view under a lens, two lines and a light wedge joining the frame to the lens; over
+   the list's own hidden scrollbar */
 .thimble-colour-scrolled {
   scrollbar-width: none;
 }
@@ -872,7 +932,7 @@ select.field {
   bottom: 0;
   left: 0;
   width: 12px;
-  border-radius: var(--radius-hl, 3px);
+  border-radius: 2px;
   background: rgba(var(--ink-rgb), 0.05);
 }
 .thimble-colour-track canvas {
@@ -881,35 +941,60 @@ select.field {
   left: 0;
   pointer-events: none;
 }
-/* the part in view: a frame as wide as the track, outlining the records in view over their colours, as an editor's
-   minimap frames its viewport; a drag of it moves the view */
+/* the part in view on the overview: a frame as wide as the track in the full ink, a line of the paper inside it, so
+   that it stands out over any colour; a drag of it moves the view */
 .thimble-colour-thumb {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   box-sizing: border-box;
-  border: 1.5px solid rgba(var(--ink-rgb), 0.78);
+  border: 2px solid var(--text-primary, rgb(var(--ink-rgb)));
   border-radius: 2px;
-  background: rgba(var(--ink-rgb), 0.06);
-  box-shadow: 0 0 0 1px var(--surface-card);
+  box-shadow: inset 0 0 0 1px var(--surface-card);
   cursor: grab;
 }
-.thimble-colour-zoom .thimble-colour-thumb {
-  background: transparent;
-  cursor: default;
-}
 .thimble-colour-strip[data-drag] .thimble-colour-thumb {
-  border-color: rgba(var(--ink-rgb), 0.75);
   cursor: grabbing;
 }
-/* where on the overview the zoomed track looks */
-.thimble-colour-span {
-  position: absolute;
-  left: -2px;
-  width: 1px;
-  background: rgba(var(--ink-rgb), 0.35);
+/* the lens over the part in view on the zoomed track, a little wider than the track: its paper and float under the
+   records, its edge over them */
+.thimble-colour-lens,
+.thimble-colour-zoom .thimble-colour-thumb {
+  top: 0;
+  left: -3px;
+  right: -3px;
+  box-sizing: border-box;
+  border-radius: var(--radius-chip, 4px);
   pointer-events: none;
+}
+.thimble-colour-lens {
+  position: absolute;
+  background: var(--surface-card);
+  box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.3);
+}
+.thimble-colour-zoom .thimble-colour-thumb {
+  border: 1px solid rgba(var(--ink-rgb), 0.55);
+  box-shadow: none;
+  cursor: default;
+}
+.thimble-colour-strip[data-drag] .thimble-colour-zoom .thimble-colour-thumb {
+  border-color: rgba(var(--ink-rgb), 0.8);
+}
+/* the lines from the frame's top and bottom to the lens's, and the wedge between them */
+.thimble-colour-link {
+  position: absolute;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.thimble-colour-link polygon {
+  fill: rgba(var(--ink-rgb), 0.08);
+}
+.thimble-colour-link line {
+  stroke: rgba(var(--ink-rgb), 0.62);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
 }
 /* the preview of the records under the pointer on a track */
 .thimble-colour-peek {
@@ -927,13 +1012,14 @@ select.field {
   font: 400 var(--text-xs) / 1.35 var(--font-body);
   pointer-events: none;
 }
-.thimble-peek-row,
-.thimble-peek-mark {
+/* each record a plain row, its colour a straight bar on its left edge as a record's row carries it */
+.thimble-peek-row {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  padding: 2px 4px;
+  padding: 3px 6px 3px 9px;
+  box-shadow: inset 3px 0 0 var(--c, transparent);
 }
 .thimble-peek-row time {
   flex: none;
@@ -947,15 +1033,6 @@ select.field {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.thimble-peek-mark {
-  border-bottom: 1px solid var(--border-hairline);
-}
-.thimble-peek-mark b {
-  font-weight: 500;
-}
-.thimble-peek-mark span:last-child {
-  color: var(--text-secondary);
 }
 
 /* -------- the time range selector (viewer_range.js): the readout, then the overview of the whole span with the

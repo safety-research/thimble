@@ -3,7 +3,10 @@
 // color, its name and its count, in thimble's small bordered box) that turns its records off and on; Alt-click keeps
 // that value alone. The menu lists Off, the records' keys and the labels that mark the file, each label with an info
 // button that opens its definition in place (LabelInfo); a label that is off turns on when chosen. A chip of a label's
-// value says what the value means on hover, where the label's definition says it.
+// value says what the value means on hover, where the label's definition says it. A click on a chip's swatch opens the
+// palette of thimble's twelve label colors (ValuePalette): the one picked recolors the value on the records, the chips
+// and the tracks; a label's value keeps it as the label's color (Files and every view), a key's value per file, and
+// Reset colors gives the key's values their own colors back.
 import { useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -12,7 +15,7 @@ import { useTooltip } from '../components/Tooltip'
 import { bus } from '../lib/bus'
 import type { Concept, SourceKey } from '../lib/types'
 import { choiceId, definitionLead, valueMeaning, type ColorChoice, type ColorValue } from './colorChoice'
-import { classesOf, colourVar, globPatterns, mainColour, marksWord, unitWord } from './labels'
+import { classesOf, colourVar, globPatterns, LABEL_COLOURS, mainColour, marksWord, unitWord } from './labels'
 
 interface Props {
   choice: ColorChoice
@@ -25,6 +28,10 @@ interface Props {
   onToggle: (value: string, alone: boolean) => void
   /** a label's value counts on this file */
   countsOf: (id: string) => Readonly<Record<string, number>> | undefined
+  /** give a value one of the palette's colors, 1 to LABEL_COLOURS; no palette without it */
+  onColor?: (value: string, color: number) => void
+  /** give the choice's values their own colors back; no Reset colors without it */
+  onResetColors?: () => void
 }
 
 /** The letter i in a circle, the info button's glyph. */
@@ -44,11 +51,14 @@ export function choiceName(c: ColorChoice, labels: readonly Concept[]): string {
   return labels.find((k) => k.id === c.id)?.name ?? 'label'
 }
 
-export function ColorBy({ choice, keys, labels, values, off, onChoose, onToggle, countsOf }: Props) {
+export function ColorBy({ choice, keys, labels, values, off, onChoose, onToggle, countsOf, onColor, onResetColors }: Props) {
   const trigger = useRef<HTMLButtonElement>(null)
   const infoAt = useRef<HTMLButtonElement>(null)
+  const paletteAt = useRef<HTMLElement | null>(null)
   const [open, setOpen] = useState(false)
   const [info, setInfo] = useState(false)
+  const [painting, setPainting] = useState<string | null>(null)
+  const painted = painting != null ? values.find((v) => v.id === painting) : undefined
   const label = choice.by === 'label' ? labels.find((k) => k.id === choice.id) : undefined
   return (
     <div className="colorby">
@@ -64,7 +74,21 @@ export function ColorBy({ choice, keys, labels, values, off, onChoose, onToggle,
       {choice.by !== 'off' && (
         <div className="colorby-chips" role="group" aria-label="Values">
           {values.map((v) => (
-            <ValueChip key={v.id} v={v} on={!off.includes(v.id)} onToggle={onToggle} />
+            <ValueChip
+              key={v.id}
+              v={v}
+              on={!off.includes(v.id)}
+              onToggle={onToggle}
+              quiet={painting != null}
+              onPalette={
+                onColor && v.color
+                  ? (el) => {
+                      paletteAt.current = el
+                      setPainting((p) => (p === v.id ? null : v.id))
+                    }
+                  : undefined
+              }
+            />
           ))}
         </div>
       )}
@@ -85,12 +109,59 @@ export function ColorBy({ choice, keys, labels, values, off, onChoose, onToggle,
           <LabelInfo label={label} counts={countsOf(label.id)} onOpen={() => setInfo(false)} />
         </Popover>
       )}
+      {onColor && (
+        <Popover anchor={paletteAt} open={!!painted} onClose={() => setPainting(null)} label={painted ? `Color of ${painted.name}` : 'Color'} className="colorby-palette">
+          {painted && (
+            <ValuePalette
+              value={painted}
+              onPick={(n) => {
+                setPainting(null)
+                onColor(painted.id, n)
+              }}
+              onReset={
+                onResetColors
+                  ? () => {
+                      setPainting(null)
+                      onResetColors()
+                    }
+                  : undefined
+              }
+            />
+          )}
+        </Popover>
+      )}
     </div>
   )
 }
 
-function ValueChip({ v, on, onToggle }: { v: ColorValue; on: boolean; onToggle: (value: string, alone: boolean) => void }) {
-  const { props: tip, tip: tipEl } = useTooltip(v.meaning ?? null)
+/** A value's colors: thimble's twelve label colors (no purple, the agents' color), the value's own ringed, then Reset
+ * colors when the choice's values have colors picked for them. */
+function ValuePalette({ value, onPick, onReset }: { value: ColorValue; onPick: (color: number) => void; onReset?: () => void }) {
+  return (
+    <>
+      <div className="colorby-palette-head">
+        <span className="colorby-sw" style={{ '--c': value.color ?? undefined } as CSSProperties} />
+        {value.name}
+      </div>
+      <div className="colorby-palette-grid">
+        {Array.from({ length: LABEL_COLOURS }, (_, i) => i + 1).map((n) => {
+          const now = value.color === colourVar(n)
+          return <button key={n} type="button" className={'colorby-pick' + (now ? ' on' : '')} style={{ '--c': colourVar(n) } as CSSProperties} aria-label={`Color ${n}`} aria-pressed={now} onClick={() => onPick(n)} />
+        })}
+      </div>
+      {onReset && (
+        <Button variant="ghost" size="sm" className="colorby-repick" onClick={onReset}>
+          <Icon name="reset" size={12} />
+          Reset colors
+        </Button>
+      )}
+    </>
+  )
+}
+
+function ValueChip({ v, on, onToggle, onPalette, quiet }: { v: ColorValue; on: boolean; onToggle: (value: string, alone: boolean) => void; onPalette?: (chip: HTMLElement) => void; quiet?: boolean }) {
+  // no meaning beside the chip while the palette is open over it
+  const { props: tip, tip: tipEl } = useTooltip(quiet ? null : (v.meaning ?? null))
   return (
     <>
       <button
@@ -99,10 +170,14 @@ function ValueChip({ v, on, onToggle }: { v: ColorValue; on: boolean; onToggle: 
         aria-pressed={on}
         data-value={v.id}
         style={v.color ? ({ '--c': v.color } as CSSProperties) : undefined}
-        onClick={(e: MouseEvent) => onToggle(v.id, e.altKey)}
+        onClick={(e: MouseEvent) => {
+          // the swatch: the palette, to pick the value's color
+          if (onPalette && (e.target as HTMLElement).closest?.('[data-palette]')) return onPalette(e.currentTarget as HTMLElement)
+          onToggle(v.id, e.altKey)
+        }}
         {...(tip as object)}
       >
-        <span className="colorby-sw" />
+        <span className="colorby-sw" {...(onPalette ? { 'data-palette': '', title: `Color of ${v.name}` } : {})} />
         <span className="colorby-name">{v.name}</span>
         {v.n != null && <span className="colorby-n">{v.n.toLocaleString()}</span>}
       </button>

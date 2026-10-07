@@ -1,7 +1,10 @@
 // The reader's two tracks (src/files/Tracks.tsx ReaderTracks) with the app's stylesheets in headless Chromium, light
-// and dark: the overview's frame is exactly as wide as its track; on the zoomed track the records past what the reader
-// shows fade and those it shows are full, framed; hovering the overview shows the records at that point beside the
-// tracks, without scrolling, and a marker says its label's name and value; a press on the overview scrubs the reader.
+// and dark: the overview at the left with a dark frame exactly as wide as its track, the zoomed track at the outer
+// edge; on the zoomed track the records past what the reader shows fade and those it shows are full, under a lens of
+// the paper; two lines join the frame's top and bottom to the lens's; at the file's end the lens goes down the zoomed
+// track with the frame; each pixel row of the overview is one color; the find's matches leave ticks in the ink, no
+// color; hovering the overview shows the records at that point beside the tracks, without scrolling, in plain rows
+// with a straight bar, and a find's tick says what is found; a press on the overview scrubs the reader.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -24,11 +27,16 @@ beforeAll(async () => {
       `w.__seeks = []`,
       `w.__asked = []`,
       `const root = createRoot(document.getElementById('root')!)`,
-      `const at = Array.from({ length: 100 }, (_, i) => (i < 50 ? 0 : 1))`,
-      `const records = Array.from({ length: 20 }, (_, i) => ({ line: 100 + i, top: i * 100, bottom: i * 100 + 90, color: i % 2 ? 'var(--label-2)' : 'var(--label-1)', marks: [i === 9 ? 'var(--label-3)' : null], title: 'v' }))`,
-      `const markers = [{ id: 'k', name: 'edit purpose', valued: true, total: 1000, ticks: [{ from: 400, to: 420, colour: 'var(--label-3)', value: 'posts links' }] }]`,
-      `const preview = (line) => { w.__asked.push(line); return Promise.resolve([{ line, who: 'AgentRelent', when: '2026-06-18 20:15', text: 'SEC county variants for pretty lines', color: 'var(--label-1)' }]) }`,
-      `flushSync(() => root.render(<div style={{ height: 600, display: 'flex', justifyContent: 'flex-end' }}><ReaderTracks total={1000} view={{ top: 0.5, height: 0.1, seen: [] }} paint={{ kind: 'bins', at, colors: ['var(--label-1)', 'var(--label-2)'], faded: [false, true] }} markers={markers} zoom={{ from: 0, to: 2000, viewTop: 800, viewBottom: 1200, records }} onJump={() => {}} onSeek={(f, held) => w.__seeks.push([f, held])} onWheel={() => {}} onLine={() => {}} onMark={() => {}} preview={preview} /></div>))`,
+      // three values over 100 bins: the first two thirds mostly the first value, the second beside it in every bin, the
+      // last third the third value
+      `const counts = [Array.from({ length: 100 }, (_, i) => (i < 66 ? 5 : 0)), Array.from({ length: 100 }, (_, i) => (i < 66 ? 2 : 1)), Array.from({ length: 100 }, (_, i) => (i < 66 ? 0 : 6))]`,
+      `const records = (base) => Array.from({ length: 20 }, (_, i) => ({ line: base + i, top: i * 100, bottom: i * 100 + 90, color: i % 2 ? 'var(--label-2)' : 'var(--label-1)', marks: [], title: 'v' }))`,
+      `const markers = [{ id: 'find', name: '"county"', total: 1000, ticks: [{ from: 400, to: 420, colour: 'var(--text-primary)' }] }]`,
+      `const preview = (line) => { w.__asked.push(line); return Promise.resolve([{ line, who: 'AgentRelent', when: '2026-06-18 20:15', text: 'SEC county variants for pretty lines', color: 'var(--label-1)' }, { line: line + 1, who: 'AgentMapCite8x', when: '2026-06-18 20:16', text: 'MINETHROUGH PERSIST 777', color: 'var(--label-2)' }]) }`,
+      // the middle of the file (the reader at 800 to 1200 of the 2000 px the zoomed track spans), or near its end
+      `const at = { middle: { view: { top: 0.45, height: 0.1, seen: [] }, zoom: { from: 0, to: 2000, viewTop: 800, viewBottom: 1200, records: records(100) } }, end: { view: { top: 0.88, height: 0.1, seen: [] }, zoom: { from: 0, to: 2000, viewTop: 1500, viewBottom: 1900, records: records(900) } } }`,
+      `w.__render = (where) => flushSync(() => root.render(<div style={{ height: 600, display: 'flex', justifyContent: 'flex-end' }}><ReaderTracks total={1000} view={at[where].view} paint={{ kind: 'counts', counts, colors: ['var(--label-1)', 'var(--label-2)', 'var(--label-3)'], faded: [false, false, false] }} markers={markers} zoom={at[where].zoom} onJump={() => {}} onSeek={(f, held) => w.__seeks.push([f, held])} onWheel={() => {}} onLine={() => {}} onMark={() => {}} preview={preview} /></div>))`,
+      `w.__render('middle')`,
     ],
     {
       loader: { '.css': 'css', '.woff2': 'empty', '.woff': 'empty' },
@@ -57,6 +65,7 @@ beforeAll(async () => {
   })
   await page.goto(`${ORIGIN}/`)
   await page.waitForSelector('.track-over')
+  await page.waitForTimeout(100)
 })
 
 afterAll(async () => {
@@ -64,40 +73,117 @@ afterAll(async () => {
   cleanup()
 })
 
+/** The tracks as laid out: each part's box, the lines' ends in the page, and what the lens and frame are drawn in. */
+const layout = () =>
+  page.evaluate(() => {
+    const box = (sel: string) => {
+      const r = document.querySelector(sel)!.getBoundingClientRect()
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }
+    }
+    const svg = document.querySelector('.track-link') as SVGSVGElement
+    const sr = svg.getBoundingClientRect()
+    const line = (edge: string) => {
+      const l = svg.querySelector(`line[data-edge="${edge}"]`)!
+      const n = (a: string) => Number(l.getAttribute(a))
+      return { x1: sr.left + n('x1'), y1: sr.top + n('y1'), x2: sr.left + n('x2'), y2: sr.top + n('y2'), stroke: getComputedStyle(l).stroke }
+    }
+    const frame = document.querySelector('.track-frame-over')!
+    const lens = document.querySelector('.track-lens')!
+    return {
+      over: box('.track-over'),
+      zoom: box('.track-zoom'),
+      frame: box('.track-frame-over'),
+      lens: box('.track-lens'),
+      shown: box('.track-zoom-shown'),
+      top: line('top'),
+      bottom: line('bottom'),
+      polygon: svg.querySelector('polygon')!.getAttribute('points'),
+      frameBorder: getComputedStyle(frame).borderTopColor,
+      frameWidth: parseFloat(getComputedStyle(frame).borderTopWidth),
+      lensBg: getComputedStyle(lens).backgroundColor,
+      lensBorder: getComputedStyle(lens).borderTopColor,
+      faded: getComputedStyle(document.querySelector('.track-zoom-faded')!).opacity,
+      full: [...document.querySelectorAll('.track-zoom-shown [data-line]')].map((e) => Number((e as HTMLElement).dataset.line)),
+    }
+  })
+
+const near = (a: number, b: number, tol = 1) => Math.abs(a - b) <= tol
+
 for (const theme of ['light', 'dark']) {
-  test(`the frame is as wide as the overview, and the zoomed track fades past what the reader shows, in the ${theme} theme`, async () => {
+  test(`the overview at the left, the zoomed track at the edge, the lines joining the frame to the lens, in the ${theme} theme`, async () => {
     await page.evaluate((t) => document.documentElement.setAttribute('data-paper', t === 'dark' ? 'dark' : 'warm'), theme)
-    const got = await page.evaluate(() => {
-      const over = document.querySelector('.track-over')!.getBoundingClientRect()
-      const frame = document.querySelector('.track-frame-over')!.getBoundingClientRect()
-      const faded = getComputedStyle(document.querySelector('.track-zoom-faded')!).opacity
-      const shown = document.querySelector('.track-zoom-shown')!.getBoundingClientRect()
-      const zoom = document.querySelector('.track-zoom')!.getBoundingClientRect()
-      const full = [...document.querySelectorAll('.track-zoom-shown [data-line]')].map((e) => Number((e as HTMLElement).dataset.line))
-      const border = getComputedStyle(document.querySelector('.track-frame-over')!).borderTopColor
-      return {
-        overW: over.width,
-        frameW: frame.width,
-        frameL: frame.left - over.left,
-        faded,
-        shownTop: shown.top - zoom.top,
-        shownH: shown.height,
-        zoomH: zoom.height,
-        full,
-        border,
-      }
-    })
-    assert.equal(got.frameW, got.overW)
-    assert.equal(got.frameL, 0)
-    assert.ok(Math.abs(Number(got.faded) - 0.28) < 0.01, `faded at ${got.faded}`)
-    // the reader shows 800 to 1200 of the 2000 px the zoomed track spans: the middle fifth, full
-    assert.ok(Math.abs(got.shownTop - got.zoomH * 0.4) <= 1 && Math.abs(got.shownH - got.zoomH * 0.2) <= 1, JSON.stringify(got))
-    assert.ok(got.full.includes(108) && got.full.includes(111), `full records ${got.full}`)
-    assert.notEqual(got.border, 'rgba(0, 0, 0, 0)')
+    await page.evaluate(() => (window as any).__render('middle'))
+    const g = await layout()
+    // the order: the overview, then the zoomed track at the outer edge
+    assert.ok(g.over.right < g.zoom.left, `the overview left of the zoomed track: ${JSON.stringify([g.over, g.zoom])}`)
+    // the overview's frame: exactly as wide as its track, in the full ink
+    assert.equal(g.frame.width, g.over.width)
+    assert.equal(g.frame.left, g.over.left)
+    assert.ok(g.frameWidth >= 2, `frame border ${g.frameWidth}`)
+    const ink = g.frameBorder.match(/[\d.]+/g)!.map(Number)
+    assert.ok(ink.length === 3 || ink[3] > 0.9, `the frame in the full ink: ${g.frameBorder}`)
+    // the zoomed track: faded past what the reader shows, which is full under the lens (800 to 1200 of 2000 px)
+    assert.ok(Math.abs(Number(g.faded) - 0.28) < 0.01, `faded at ${g.faded}`)
+    assert.ok(near(g.shown.top - g.zoom.top, g.zoom.height * 0.4) && near(g.shown.height, g.zoom.height * 0.2), JSON.stringify(g))
+    assert.ok(g.full.includes(108) && g.full.includes(111), `full records ${g.full}`)
+    // the lens: a margin outside the part shown, wider than the track, of the paper, framed
+    assert.ok(near(g.lens.top, g.shown.top - 3) && near(g.lens.bottom, g.shown.bottom + 3), JSON.stringify([g.lens, g.shown]))
+    assert.ok(g.lens.left < g.zoom.left && g.lens.right > g.zoom.right)
+    assert.notEqual(g.lensBg, 'rgba(0, 0, 0, 0)')
+    assert.notEqual(g.lensBorder, 'rgba(0, 0, 0, 0)')
+    // the lines: from the frame's right edge at its top and bottom to the lens's left edge at its top and bottom
+    assert.ok(near(g.top.x1, g.frame.right) && near(g.top.y1, g.frame.top) && near(g.top.x2, g.lens.left) && near(g.top.y2, g.lens.top), `top line ${JSON.stringify([g.top, g.frame, g.lens])}`)
+    assert.ok(near(g.bottom.x1, g.frame.right) && near(g.bottom.y1, g.frame.bottom) && near(g.bottom.x2, g.lens.left) && near(g.bottom.y2, g.lens.bottom), `bottom line ${JSON.stringify([g.bottom, g.frame, g.lens])}`)
+    assert.notEqual(g.top.stroke, 'none')
+    assert.ok(g.polygon && g.polygon.split(' ').length === 4)
   })
 }
 
-test('hovering the overview shows the records at that point, and a marker its label', async () => {
+test("near the file's end the lens goes down the zoomed track with the frame, and the lines follow both", async () => {
+  await page.evaluate(() => (window as any).__render('middle'))
+  const mid = await layout()
+  await page.evaluate(() => (window as any).__render('end'))
+  const end = await layout()
+  // in the middle both stand in the middle; near the end both stand near the bottom of their tracks
+  const frameAt = (g: typeof mid) => (g.frame.top - g.over.top) / (g.over.height - g.frame.height)
+  const lensAt = (g: typeof mid) => (g.shown.top - g.zoom.top) / (g.zoom.height - g.shown.height)
+  assert.ok(near(frameAt(mid), 0.5, 0.02) && near(lensAt(mid), 0.5, 0.02), `${frameAt(mid)} ${lensAt(mid)}`)
+  assert.ok(lensAt(end) > 0.9 && frameAt(end) > 0.9, `${frameAt(end)} ${lensAt(end)}`)
+  assert.ok(end.lens.top - mid.lens.top > 150, 'the lens moved down the zoomed track')
+  assert.ok(near(end.top.y2, end.lens.top) && near(end.bottom.y2, end.lens.bottom) && near(end.top.y1, end.frame.top) && near(end.bottom.y1, end.frame.bottom), JSON.stringify(end))
+  await page.evaluate(() => (window as any).__render('middle'))
+})
+
+test("each pixel row of the overview is one color, and the find's matches leave ticks in the ink, no color", async () => {
+  await page.evaluate(() => document.documentElement.setAttribute('data-paper', 'warm'))
+  await page.waitForTimeout(50)
+  const rows = await page.evaluate(() => {
+    const cv = document.querySelector('.track-over canvas') as HTMLCanvasElement
+    const ctx = cv.getContext('2d')!
+    const data = ctx.getImageData(0, 0, cv.width, cv.height).data
+    const px = (x: number, y: number) => Array.from(data.slice((y * cv.width + x) * 4, (y * cv.width + x) * 4 + 4))
+    const dpr = window.devicePixelRatio || 1
+    // the column after the one marker lane (3px, a 1px gap, then 1px)
+    const x0 = Math.round(5 * dpr)
+    let mixed = 0
+    const colours = new Set<string>()
+    for (let y = 0; y < cv.height; y++) {
+      const row = new Set<string>()
+      for (let x = x0; x < cv.width; x++) row.add(px(x, y).join(','))
+      if (row.size > 1) mixed++
+      colours.add([...row][0])
+    }
+    // the find's tick over lines 400 to 420 of 1000, in its lane
+    const tick = px(1, Math.round(cv.height * 0.41))
+    return { mixed, colours: colours.size, tick }
+  })
+  assert.equal(rows.mixed, 0, 'no row holds two colors side by side')
+  assert.equal(rows.colours, 2, 'the first two thirds the first value, the last third the third')
+  const [r, g, b, a] = rows.tick
+  assert.ok(a > 0 && Math.max(r, g, b) - Math.min(r, g, b) < 12, `the find's tick has no color: ${rows.tick}`)
+})
+
+test("hovering the overview shows the records at that point in plain rows with a straight bar, and a find's tick what is found", async () => {
   const over = (await page.locator('.track-over').boundingBox())!
   await page.mouse.move(over.x + over.width - 3, over.y + over.height * 0.3)
   await page.mouse.move(over.x + over.width - 2, over.y + over.height * 0.3 + 1)
@@ -105,15 +191,23 @@ test('hovering the overview shows the records at that point, and a marker its la
   const text = await page.locator('.track-preview').innerText()
   assert.match(text, /AgentRelent/)
   assert.match(text, /SEC county variants/)
+  const style = await page.evaluate(() => {
+    const p = document.querySelector('.track-preview')!
+    const rec = document.querySelector('.track-preview-rec')!
+    return { box: parseFloat(getComputedStyle(p).borderTopLeftRadius), rec: getComputedStyle(rec).borderTopLeftRadius, bar: getComputedStyle(rec).boxShadow, ui: parseFloat(getComputedStyle(document.body).getPropertyValue('--radius-ui')) }
+  })
+  assert.ok(style.box <= style.ui, `the popover's corners at most a control's: ${style.box}`)
+  assert.equal(style.rec, '0px', 'each record a plain row')
+  assert.match(style.bar, /inset/, 'its color a bar on its left edge')
   const asked = await page.evaluate(() => (window as any).__asked as number[])
   assert.ok(
     asked.every((l) => l >= 290 && l <= 310),
     `asked ${asked}`,
   )
-  // the marker lane at the overview's left: the tick over lines 400 to 420
+  // the find's lane at the overview's left: the tick over lines 400 to 420
   await page.mouse.move(over.x + 1.5, over.y + over.height * 0.41)
   await page.waitForSelector('.reader-ruler-tip')
-  assert.equal(await page.locator('.reader-ruler-tip').innerText(), 'edit purpose: posts links')
+  assert.equal(await page.locator('.reader-ruler-tip').innerText(), '"county"')
   assert.equal(await page.locator('.track-preview').count(), 0)
 })
 

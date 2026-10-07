@@ -4718,9 +4718,10 @@ def presence_route(c: str) -> list[dict]:
 
 @router.get("/ws/{c}/labels/ruler")
 def ruler_route(c: str, path: str, bins: int = RULER_BINS) -> dict:
-    """{path, total, bins, labels: [{concept_id, bins: {value: [bin, ...]}}]}: where on one file each label's values
-    fall, its `total` lines cut into `bins`, for the reader's overview ruler. Labels without rows on the file are left
-    out."""
+    """{path, total, bins, labels: [{concept_id, bins: {value: [bin, ...]}, counts: {value: [n, ...]}}]}: where on one
+    file each label's values fall, its `total` lines cut into `bins`, for the reader's overview ruler and tracks: the bins
+    that hold a value and, in `counts` in the same order, how many records of that value each holds (the overview draws
+    each part of the file in the value most of its records have). Labels without rows on the file are left out."""
     ws = _ws(c)
     bins = max(1, min(int(bins), 2_000))
     try:
@@ -4737,9 +4738,10 @@ def ruler_route(c: str, path: str, bins: int = RULER_BINS) -> dict:
         if k["unit"] != "record":
             continue
         st, _building_now = _store(ws, k["id"])
-        got = st.line_bins(path, total, bins) if st is not None else {}
+        got = st.line_counts(path, total, bins) if st is not None else {}
         if got:
-            out.append({"concept_id": k["id"], "bins": got})
+            at = {v: sorted(per) for v, per in got.items()}
+            out.append({"concept_id": k["id"], "bins": at, "counts": {v: [got[v][b] for b in bs] for v, bs in at.items()}})
     return {"path": path, "total": total, "bins": bins, "labels": out}
 
 

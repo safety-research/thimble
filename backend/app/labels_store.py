@@ -808,29 +808,37 @@ class Store:
     def line_bins(self, path: str, total: int, bins: int) -> dict[str, list[int]]:
         """{effective value: [bin, ...]}: the bins of `total` lines cut into `bins` holding at least one record of that
         value on `path` (the reader's overview ruler), covers included. Whole-file rows are left out."""
+        return {v: sorted(got) for v, got in self.line_counts(path, total, bins).items()}
+
+    def line_counts(self, path: str, total: int, bins: int) -> dict[str, dict[int, int]]:
+        """{effective value: {bin: records}}: per bin of `total` lines cut into `bins`, how many records on `path` have
+        that value, the records of covers without a row of their own included, for the bins that hold at least one. The
+        reader's overview draws each part of the file in the value most of its records have. Whole-file rows are left
+        out."""
         total, bins = max(1, int(total)), max(1, int(bins))
-        found: dict[str, set[int]] = {}
+        found: dict[str, dict[int, int]] = {}
         conn = self.connect()
         try:
-            for value, b in conn.execute("SELECT effective, MIN(?, ((line - 1) * ?) / ?) AS b FROM current "
-                                         "WHERE path = ? AND line IS NOT NULL AND effective IS NOT NULL GROUP BY effective, b",
-                                         (bins - 1, bins, total, path)):
-                found.setdefault(str(value), set()).add(int(b))
+            for value, b, n in conn.execute("SELECT effective, MIN(?, ((line - 1) * ?) / ?) AS b, COUNT(*) FROM current "
+                                            "WHERE path = ? AND line IS NOT NULL AND effective IS NOT NULL GROUP BY effective, b",
+                                            (bins - 1, bins, total, path)):
+                found.setdefault(str(value), {})[int(b)] = int(n)
             covers = conn.execute("SELECT first, last, value FROM covers WHERE path = ? ORDER BY first", (path,)).fetchall()
             if covers:
                 have = sorted(int(n) for (n,) in conn.execute("SELECT line FROM current WHERE path = ? AND line IS NOT NULL", (path,)))
                 for first, last, value in covers:
-                    got = found.setdefault(str(value), set())
+                    got = found.setdefault(str(value), {})
                     for b in range(min(bins - 1, (first - 1) * bins // total), min(bins - 1, (last - 1) * bins // total) + 1):
                         # the lines the query above puts in bin b: from ceil(b·total/bins) + 1 to ceil((b+1)·total/bins),
-                        # and every line after that in the last bin
+                        # and every line after that in the last bin; those with a row of their own are counted above
                         lo = max(first, -(-b * total // bins) + 1)
                         hi = last if b == bins - 1 else min(last, -(-(b + 1) * total // bins))
-                        if hi >= lo and hi - lo + 1 > bisect.bisect_right(have, hi) - bisect.bisect_left(have, lo):
-                            got.add(b)
+                        n = hi - lo + 1 - (bisect.bisect_right(have, hi) - bisect.bisect_left(have, lo)) if hi >= lo else 0
+                        if n > 0:
+                            got[b] = got.get(b, 0) + n
         finally:
             conn.close()
-        return {v: sorted(bs) for v, bs in found.items() if bs}
+        return {v: got for v, got in found.items() if got}
 
     def verdicts(self, limit: int | None = None) -> list[dict]:
         """The analyst's verdicts, latest first: {ref, analyst, analyst_note, label} per ref they judged."""

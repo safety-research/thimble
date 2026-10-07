@@ -132,10 +132,12 @@ export function defaultChoice(keys: readonly SourceKey[]): ColorChoice {
   return k ? { by: 'key', key: k.key } : { by: 'off' }
 }
 
-/** What the reader keeps of Color by per file: the choice (null for the default) and, per choice, the values off. */
+/** What the reader keeps of Color by per file: the choice (null for the default), per choice the values off, and per
+ * choice the palette color (1 to 12) picked for a value. */
 export interface ColorKept {
   by: string | null
   off: Record<string, string[]>
+  colors?: Record<string, Record<string, number>>
 }
 
 export const colorKey = (ws: string, path: string): string => storageKey(ws, `colorBy:${path}`)
@@ -144,8 +146,19 @@ export function readColor(ws: string, path: string): ColorKept {
   const got = readStorage<Partial<ColorKept> | null>(colorKey(ws, path), null)
   const off: Record<string, string[]> = {}
   if (got?.off && typeof got.off === 'object') for (const [k, v] of Object.entries(got.off)) if (Array.isArray(v)) off[k] = v.filter((x) => typeof x === 'string')
-  return { by: typeof got?.by === 'string' ? got.by : null, off }
+  const colors: Record<string, Record<string, number>> = {}
+  if (got?.colors && typeof got.colors === 'object')
+    for (const [k, m] of Object.entries(got.colors)) {
+      if (!m || typeof m !== 'object') continue
+      const kept = Object.entries(m).filter(([, n]) => typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= KEY_COLORS)
+      if (kept.length) colors[k] = Object.fromEntries(kept)
+    }
+  return { by: typeof got?.by === 'string' ? got.by : null, off, ...(Object.keys(colors).length ? { colors } : {}) }
 }
+
+/** A key's chips with the colors picked for its values (`picked`, a palette color 1 to 12 by value). Pure. */
+export const pickedChips = (chips: readonly ColorValue[], picked: Readonly<Record<string, number>> | undefined): ColorValue[] =>
+  chips.map((v) => (v.color && picked?.[v.id] ? { ...v, color: `var(--label-${picked[v.id]})` } : v))
 
 export const writeColor = (ws: string, path: string, kept: ColorKept): void => writeStorage(colorKey(ws, path), kept)
 

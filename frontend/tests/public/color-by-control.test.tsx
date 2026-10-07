@@ -3,7 +3,8 @@
 // menu offers Off, the records' keys and the labels that mark the file; Off draws no chips; a chip turns its value off
 // and on (Alt keeps it alone); a label's info button in the menu opens its definition in place, its question and each
 // value with its meaning, and Open label opens it in the Labels pane; while a label is the choice an info button beside
-// the trigger opens the same.
+// the trigger opens the same; a click on a chip's swatch opens the palette of the twelve label colors, its own ringed,
+// without turning the value off, and a pick or Reset colors goes to the reader.
 import { act } from 'react'
 import { afterEach, beforeAll, expect, test } from 'vitest'
 import { ColorBy } from '../../src/files/ColorBy'
@@ -52,7 +53,7 @@ const label: Concept = {
 }
 const counts = { 'posts links': 8, other: 4 }
 
-async function draw(choice: ColorChoice, picked: ColorChoice[] = [], toggled: [string, boolean][] = []) {
+async function draw(choice: ColorChoice, picked: ColorChoice[] = [], toggled: [string, boolean][] = [], colored?: [string, number][], reset?: () => void) {
   const values =
     choice.by === 'label'
       ? labelChips(label, counts, 20)
@@ -62,7 +63,7 @@ async function draw(choice: ColorChoice, picked: ColorChoice[] = [], toggled: [s
             { id: 'probier', name: 'probier', n: 3, color: 'var(--label-2)' },
           ]
         : []
-  return mount(<ColorBy choice={choice} keys={keys} labels={[label]} values={values} off={['probier']} onChoose={(c) => picked.push(c)} onToggle={(v, alone) => toggled.push([v, alone])} countsOf={() => counts} />)
+  return mount(<ColorBy choice={choice} keys={keys} labels={[label]} values={values} off={['probier']} onChoose={(c) => picked.push(c)} onToggle={(v, alone) => toggled.push([v, alone])} countsOf={() => counts} onColor={colored ? (v, n) => colored.push([v, n]) : undefined} onResetColors={reset} />)
 }
 
 const click = async (el: Element, init: MouseEventInit = {}) => act(async () => void el.dispatchEvent(new MouseEvent('click', { bubbles: true, ...init })))
@@ -124,4 +125,37 @@ test('while a label is the choice, the info button beside the trigger opens its 
   expect([...el.querySelectorAll('.colorby-chip')].map((c) => c.querySelector('.colorby-name')?.textContent)).toEqual(['posts links', 'other', 'Not marked'])
   await click(el.querySelector('.colorby > .colorby-info')!)
   expect(document.querySelector('.colorby-infopop .colorby-def-name')?.textContent).toBe('edit purpose')
+})
+
+test("a chip's swatch opens the palette of the twelve label colors, its own ringed, and a pick goes to the reader", async () => {
+  const toggled: [string, boolean][] = []
+  const colored: [string, number][] = []
+  let resets = 0
+  const el = await draw({ by: 'key', key: 'wiki' }, [], toggled, colored, () => resets++)
+  const chips = [...el.querySelectorAll('.colorby-chip')]
+  await click(chips[0].querySelector('.colorby-sw')!)
+  expect(toggled).toEqual([])
+  const picks = [...document.querySelectorAll('.colorby-palette .colorby-pick')]
+  expect(picks).toHaveLength(12)
+  expect(picks.map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', ...Array(11).fill('false')])
+  expect(document.querySelector('.colorby-palette .colorby-palette-head')?.textContent).toBe('dse')
+  await click(picks[6])
+  expect(colored).toEqual([['dse', 7]])
+  expect(document.querySelector('.colorby-palette .colorby-pick')).toBeNull()
+  // Reset colors
+  await click(chips[1].querySelector('.colorby-sw')!)
+  await click([...document.querySelectorAll('.colorby-palette button')].find((b) => b.textContent === 'Reset colors')!)
+  expect(resets).toBe(1)
+  // the chip itself still turns its value off and on
+  await click(chips[1])
+  expect(toggled).toEqual([['probier', false]])
+})
+
+test("the records a label does not mark have no color to pick, and without a reader's recolor there is no palette", async () => {
+  const el = await draw({ by: 'label', id: 'c1' }, [], [], [])
+  const swatches = [...el.querySelectorAll('.colorby-chip')].map((c) => c.querySelector('.colorby-sw')!.hasAttribute('data-palette'))
+  expect(swatches).toEqual([true, true, false])
+  unmountAll()
+  const plain = await draw({ by: 'key', key: 'wiki' })
+  expect(plain.querySelector('.colorby-sw[data-palette]')).toBeNull()
 })

@@ -25,7 +25,7 @@ import { findColumn, rulerColumns, useRuler, type RulerTick, type Seen, type Sho
 import { ColorBy } from './ColorBy'
 import { keyColor, KEY_COLORS, OTHER, recordObject } from './colorChoice'
 import { ColorContext } from './colorContext'
-import { ReaderTracks, zoomWindow, type OverviewPaint, type PreviewRecord, type ZoomView } from './Tracks'
+import { followOf, labelPaint, ReaderTracks, zoomWindow, type OverviewPaint, type PreviewRecord, type ZoomView } from './Tracks'
 import { useColorBy } from './useColorBy'
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
@@ -631,13 +631,15 @@ interface ZoomGeom {
 /** records the zoomed track draws at most */
 const ZOOM_RECORDS = 400
 
-/** The zoomed track's stretch of the body (Tracks zoomWindow) and the records in it; null when the body draws none. */
-export function zoomGeomOf(body: HTMLElement): ZoomGeom | null {
+/** The zoomed track's stretch of the body (Tracks zoomWindow) for a reader `f` through the file (Tracks followOf),
+ * whose records run from the file's first (`start`) or to its last (`end`), and the records in it; null when the body
+ * draws none. */
+export function zoomGeomOf(body: HTMLElement, f: number, start: boolean, end: boolean): ZoomGeom | null {
   const cards = body.querySelectorAll<HTMLElement>('.reader-card[data-line]')
   if (!cards.length) return null
   const st = body.scrollTop
   const h = body.clientHeight
-  const [from, to] = zoomWindow(st, h, body.scrollHeight)
+  const [from, to] = zoomWindow(st, h, body.scrollHeight, f, start, end)
   const base = body.getBoundingClientRect().top - st
   let lo = 0
   let hi = cards.length - 1
@@ -831,7 +833,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
       (total ? shownIn(el, total) : null) ??
       (!total || first == null || last == null ? { top: a, height: b - a, seen: [] } : { top: (first - 1 + a * (last - first + 1)) / total, height: ((b - a) * (last - first + 1)) / total, seen: [] })
     setShown((cur) => (sameShown(cur, next) ? cur : next))
-    const z = zoomGeomOf(el)
+    // the zoomed track follows the overview's frame: its lens stands as far down it as the frame stands down the file
+    const z = zoomGeomOf(el, followOf(next), first == null || first <= 1, total == null || (last != null && last >= total))
     setZoomGeom((cur) => (sameZoom(cur, z) ? cur : z))
   }, [total, first, last])
 
@@ -1113,8 +1116,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // ---- Color by and the tracks
   const color = useColorBy(workspace, path, isTranscript && !binary && !isDatabase, labels, records, readerLabels.rows, total)
   const colorChoice = color.choice
-  const chosenLabel = colorChoice.by === 'label' ? colorChoice.id : null
-  // the overview's colors: the chosen key's commonest value per bin, the chosen label's values, else the density
+  // the overview's colors: the chosen key's commonest value per bin, the chosen label's value most records have per
+  // bin, else the density
   const paint = useMemo<OverviewPaint>(() => {
     if (!isTranscript) return { kind: 'none' }
     if (colorChoice.by === 'key') {
@@ -1122,23 +1125,26 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
       if (k) {
         const ranks = Math.max(1, k.values.length)
         const offSet = new Set(color.off)
+        // a value's rank's color, or the one picked for it
+        const pickedOf = (r: number) => color.picked[r < KEY_COLORS ? k.values[r]?.value ?? '' : OTHER]
         return {
           kind: 'bins',
           at: k.at,
-          colors: Array.from({ length: ranks }, (_, r) => keyColor(r)),
+          colors: Array.from({ length: ranks }, (_, r) => (pickedOf(r) ? `var(--label-${pickedOf(r)})` : keyColor(r))),
           faded: Array.from({ length: ranks }, (_, r) => offSet.has(r < KEY_COLORS ? k.values[r].value : OTHER)),
         }
       }
     }
     if (colorChoice.by === 'label') {
-      const col = columns.find((c) => c.id === colorChoice.id)
-      if (col) return { kind: 'ticks', total: col.total, ticks: col.ticks, off: new Set(color.off) }
+      const k = lanes.find((x) => x.id === colorChoice.id)
+      const got = k ? labelPaint(k, ruler, new Set(color.off)) : null
+      if (got) return got
     }
     return color.keys?.bytes.length ? { kind: 'density', bytes: color.keys.bytes } : { kind: 'none' }
-  }, [isTranscript, colorChoice, color.keys, color.off, columns])
-  // the markers: a lane per label that is on but the one colored by, and the find's matches
-  const markers = useMemo(() => rulerCols.filter((c) => c.id !== chosenLabel), [rulerCols, chosenLabel])
-  const markerLabels = useMemo(() => on.filter((k) => k.id !== chosenLabel), [on, chosenLabel])
+  }, [isTranscript, colorChoice, color.keys, color.off, color.picked, lanes, ruler])
+  // the markers: the find's matches; a label that is on but is not the choice draws nothing on the tracks, so that the
+  // overview is one lane in the choice's colors
+  const markers = useMemo(() => rulerCols.filter((c) => c.id === 'find'), [rulerCols])
   const recordAtLine = useMemo(() => new Map(records.map((r) => [r.line, r])), [records])
   const zoom = useMemo<ZoomView | null>(() => {
     if (!zoomGeom) return null
@@ -1146,19 +1152,12 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     return {
       ...zoomGeom,
       records: zoomGeom.recs.map((r) => {
-        const mine = readerLabels.rows.get(`${path}#L${r.line}`)
-        const valued = markerLabels.map((k) => {
-          const row = mine?.get(k.id)
-          const c = row ? litClass(k, valueOf(row)) : undefined
-          return c ? { colour: colourVar(c.color), text: `${k.name}: ${c.name}` } : null
-        })
         const rec = recordAtLine.get(r.line)
         const chip = rec ? color.chipOf(rec) : undefined
-        const title = [chip != null ? names.get(chip) : null, ...valued.map((v) => v?.text)].filter(Boolean).join(' · ')
-        return { line: r.line, top: r.top, bottom: r.bottom, color: color.colors?.get(r.line)?.color ?? null, marks: valued.map((v) => v?.colour ?? null), title }
+        return { line: r.line, top: r.top, bottom: r.bottom, color: color.colors?.get(r.line)?.color ?? null, marks: [], title: (chip != null ? names.get(chip) : null) ?? '' }
       }),
     }
-  }, [zoomGeom, color, readerLabels.rows, path, markerLabels, recordAtLine])
+  }, [zoomGeom, color, recordAtLine])
   const hint = builtins.transcript
   const preview = useCallback(
     (line: number) =>
@@ -1305,7 +1304,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
           <>
             {isTranscript && !binary && !isDatabase && loaded && !noViewReason && (
               <div className="reader-colorbar">
-                <ColorBy choice={color.choice} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={color.values} off={color.off} onChoose={color.choose} onToggle={color.toggle} countsOf={fileOf} />
+                <ColorBy choice={color.choice} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={color.values} off={color.off} onChoose={color.choose} onToggle={color.toggle} countsOf={fileOf} onColor={color.recolor} onResetColors={color.resetColors ?? undefined} />
               </div>
             )}
             <div className="reader-main">

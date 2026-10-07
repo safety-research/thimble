@@ -1,23 +1,29 @@
 // The reader's two tracks at its right edge, after a music or video editor's navigator and zoom bar (ReaderTracks).
 //
-// The overview track, at the edge, is the whole file: its lines top to bottom, colored by the Color by choice (a key's
-// most frequent value per bin, a label's values where they fall), or, with Color by off or no choice to make, the
-// file's density (each bin's bytes) in grey. At its left, a thin lane per label that is on (and one for the find's
-// matches) holds the label's markers, like cue points on a timeline: a tick where the label marks its highlighted
-// values, which says the label's name and value on hover and goes to its first record on a click. Over the colors, a
+// The overview track, at the left, is the whole file: its lines top to bottom in one lane, each pixel row in the color
+// of the Color by choice that most of its records take (a key's commonest value, a label's value most of the records
+// there have), or, with Color by off or no choice to make, the file's density (each bin's bytes) in grey; never two
+// colors side by side. A label that is on but is not the choice draws nothing on the tracks; at the overview's left the
+// find's matches leave ticks in the ink, like cue points on a timeline, which say what is found on hover and go to the
+// first match on a click (a marker lane of another kind is drawn in grey, never in a color). Over the lane, a dark
 // frame exactly as wide as the track outlines what the reader shows; a drag of it scrubs the reader, a press elsewhere
 // on the track sends the frame there and goes on scrubbing. Hovering the track shows, beside it, the first records at
 // that point of the file (their index, who and when, their first lines), as a video scrubber's hover shows its frame,
 // without scrolling.
 //
-// The zoomed track, beside it, is the stretch of the reader around what it shows, larger: each record drawn there as
-// a block of its height, in its color, with the labels' markers of each record at its left. The part the reader shows
-// is framed and full; past it the colors fade, as an editor dims what lies outside its visible region. A click on a
-// record scrolls it to the top of the reader; a drag or the wheel scrolls the reader.
+// The zoomed track, at the outer edge, magnifies the frame: the stretch of the reader around what it shows, larger,
+// each record a block of its height in its color, grey with Color by off, past what the reader shows faded. What the
+// reader shows lies under a lens (a raised box of the paper, framed), and two lines join the frame's top and bottom on
+// the overview to the lens's, so the lens reads as the frame magnified. The lens stands as far down the zoomed track
+// as the frame stands down the overview (both as a scrollbar's thumb does), so the two move together: in the middle of
+// the file the lens is in the middle, at its top and end the lens goes to the track's top and end. A click on a record
+// scrolls it to the top of the reader; a drag or the wheel scrolls the reader.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type RefObject, type WheelEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Tip } from '../components/Tooltip'
 import { useTheme } from '../lib/theme'
+import type { Concept, LabelRuler } from '../lib/types'
+import { classesOf, colourVar } from './labels'
 import { laneAt, laneBoxes, nearestTick, type LaneGeometry, type RulerColumn, type RulerTick, type Shown } from './Ruler'
 
 /** px: the overview's colored column, a marker lane and the gap after it, the zoomed track */
@@ -25,8 +31,14 @@ export const OVER_PX = 12
 export const MARKER_PX = 3
 const MARKER_GAP_PX = 1
 export const ZOOM_PX = 20
+/** px between the overview and the zoomed track, which the lines from the frame to the lens cross */
+export const LINK_PX = 16
+/** px the lens stands out past the part it shows at every side: its edge and a margin of the paper inside it */
+export const LENS_OUT_PX = 3
 /** px: the frame's least height on the overview */
-export const FRAME_MIN_PX = 6
+export const FRAME_MIN_PX = 8
+/** the grey of a marker's tick other than the find's: nothing but the Color by choice takes a color on the tracks */
+const MARKER_INK = 'rgba(var(--ink-rgb), 0.45)'
 /** a mark's least height, px */
 const MIN_MARK_PX = 2
 /** px either side of a marker within which the pointer is on it */
@@ -41,8 +53,8 @@ export const ZOOM_SPAN = 5
 export const FADE = 0.28
 
 /** What colors the overview: a key's most frequent value's rank per bin (each rank's color, and whether it is turned
- * off, which fades it), a label's ticks (the values of a bin side by side, those turned off faded), or the file's
- * density. */
+ * off, which fades it), a label's records per value per bin (each pixel row in the value most of its records have,
+ * its color, faded when it is turned off), or the file's density. */
 export type OverviewPaint =
   | {
       kind: 'bins'
@@ -51,10 +63,11 @@ export type OverviewPaint =
       faded: readonly boolean[]
     }
   | {
-      kind: 'ticks'
-      total: number
-      ticks: readonly RulerTick[]
-      off: ReadonlySet<string>
+      kind: 'counts'
+      /** per value, its records in each bin, every value over the same bins */
+      counts: readonly (readonly number[])[]
+      colors: readonly string[]
+      faded: readonly boolean[]
     }
   | { kind: 'density'; bytes: readonly number[] }
   | { kind: 'none' }
@@ -90,12 +103,24 @@ export interface PreviewRecord {
   color: string | null
 }
 
-/** The stretch the zoomed track shows for a reader `h` px tall scrolled to `top` of `content` px: ZOOM_SPAN heights
- * with what it shows in the middle, moved inside the content at either end. Pure. */
-export function zoomWindow(top: number, h: number, content: number): [number, number] {
-  const span = Math.max(h, Math.min(content, h * ZOOM_SPAN))
-  let from = top + h / 2 - span / 2
-  from = Math.max(0, Math.min(Math.max(0, content - span), from))
+/** How far through the file the reader stands, 0 at its top to 1 at its end: its top through the part of the file it
+ * can scroll over, as a scrollbar's thumb stands. The overview's frame and the zoomed track's lens both stand there.
+ * Pure. */
+export function followOf(view: { top: number; height: number }): number {
+  const free = 1 - view.height
+  return free > 0 ? Math.max(0, Math.min(1, view.top / free)) : 0
+}
+
+/** The stretch the zoomed track shows for a reader `h` px tall scrolled to `top` of `content` px, `f` through the file
+ * (followOf): ZOOM_SPAN heights, with what the reader shows as far down the stretch as `f`, so that the lens moves
+ * down the zoomed track as the frame moves down the overview. While the reader holds the file's first record (`start`)
+ * or its last (`end`) the stretch stays inside the content at that end; while it holds the whole file the stretch is
+ * at most the content. Pure. */
+export function zoomWindow(top: number, h: number, content: number, f: number, start = true, end = true): [number, number] {
+  const span = start && end ? Math.max(h, Math.min(content, h * ZOOM_SPAN)) : h * ZOOM_SPAN
+  let from = top - Math.max(0, Math.min(1, f)) * (span - h)
+  if (end) from = Math.min(from, content - span)
+  if (start) from = Math.max(0, from)
   return [from, from + span]
 }
 
@@ -105,6 +130,64 @@ export function frameOf(view: { top: number; height: number }, px: number): { to
   const height = Math.min(px, Math.max(FRAME_MIN_PX, view.height * px))
   const top = Math.max(0, Math.min(px - height, view.top * px))
   return { top, height }
+}
+
+/** The lens over what the reader shows on the zoomed track, px of it: the box LENS_OUT_PX outside the part shown (`top`
+ * to `bottom`), so that its edge and its margin of the paper cover none of it. Pure. */
+export const lensOf = (top: number, bottom: number): { top: number; height: number } => ({ top: top - LENS_OUT_PX, height: Math.max(2, bottom - top) + 2 * LENS_OUT_PX })
+
+/** The two lines that join the overview's frame to the lens, across the LINK_PX between the tracks (x from the
+ * overview's right edge to the lens's left), and the wedge between them, px of the tracks' height: the frame's top to
+ * the lens's top, its bottom to the lens's bottom. Pure. */
+export function linkOf(frame: { top: number; height: number }, lens: { top: number; height: number }): { top: [number, number, number, number]; bottom: [number, number, number, number]; points: string } {
+  const x1 = LINK_PX - LENS_OUT_PX
+  const top: [number, number, number, number] = [0, frame.top, x1, lens.top]
+  const bottom: [number, number, number, number] = [0, frame.top + frame.height, x1, lens.top + lens.height]
+  return { top, bottom, points: `${top[0]},${top[1]} ${top[2]},${top[3]} ${bottom[2]},${bottom[3]} ${bottom[0]},${bottom[1]}` }
+}
+
+/** Per device pixel row of a track `h` rows tall, the value most records in it have: of `counts` (per value, its
+ * records in each bin, every value over the same bins), the one with the most records in the bins the row covers, the
+ * first of those as many; -1 for a row whose bins hold none. Pure. */
+export function majorityRows(counts: readonly (ArrayLike<number>)[], h: number): Int32Array {
+  const out = new Int32Array(Math.max(0, h)).fill(-1)
+  const bins = counts.length ? counts[0].length : 0
+  if (!bins) return out
+  for (let y = 0; y < h; y++) {
+    const a = Math.min(bins - 1, Math.floor((y * bins) / h))
+    const b = Math.min(bins, Math.max(a + 1, Math.floor(((y + 1) * bins) / h)))
+    let best = -1
+    let most = 0
+    for (let v = 0; v < counts.length; v++) {
+      let n = 0
+      for (let i = a; i < b; i++) n += counts[v][i] || 0
+      if (n > most) {
+        most = n
+        best = v
+      }
+    }
+    out[y] = best
+  }
+  return out
+}
+
+/** The overview's paint for a label that is the Color by choice: per highlighted value of `k`, in its order, its
+ * records in each bin of the ruler (its counts; 1 for a bin that holds the value when the ruler gives none), its color,
+ * and whether it is turned off (`off`). Null when the ruler has nothing of the label. Pure. */
+export function labelPaint(k: Pick<Concept, 'id' | 'labels' | 'classes'>, ruler: LabelRuler | null, off: ReadonlySet<string>): OverviewPaint | null {
+  const got = ruler?.labels.find((l) => l.concept_id === k.id)
+  if (!ruler || !got || ruler.bins <= 0) return null
+  const lit = classesOf(k).filter((c) => c.highlight)
+  const counts = lit.map((c) => {
+    const row = new Array<number>(ruler.bins).fill(0)
+    const at = got.bins[c.name] ?? []
+    const n = got.counts?.[c.name]
+    at.forEach((b, i) => {
+      if (b >= 0 && b < ruler.bins) row[b] += n?.[i] ?? 1
+    })
+    return row
+  })
+  return { kind: 'counts', counts, colors: lit.map((c) => colourVar(c.color)), faded: lit.map((c) => off.has(c.name)) }
 }
 
 /** The line of a file of `total` lines at a fraction of it. Pure. */
@@ -167,17 +250,15 @@ const OverviewCanvas = memo(function OverviewCanvas({ paint, markers }: { paint:
       return v
     }
     const H = el.height
-    // the marker lanes
+    // the markers: grey ticks, no lane drawn under them and no color of the label's (the find's matches in the ink)
     const boxes = laneBoxes(markers.length, MARKER_LANES, dpr)
-    ctx.fillStyle = colourOf('rgba(var(--ink-rgb), 0.05)')
-    for (const [x, cw] of boxes) ctx.fillRect(x, 0, cw, H)
     markers.forEach((col, i) => {
       const [x, cw] = boxes[i]
       const k = h / Math.max(1, col.total)
+      ctx.fillStyle = colourOf(col.id === 'find' ? 'var(--text-primary)' : MARKER_INK)
       for (const t of col.ticks) {
         const [y0, y1] = drawnSpan(t.from - 1, t.to, k, h)
         const a = Math.round(y0 * dpr)
-        ctx.fillStyle = colourOf(t.colour)
         ctx.fillRect(x, a, cw, Math.max(1, Math.round(y1 * dpr) - a))
       }
     })
@@ -212,39 +293,18 @@ const OverviewCanvas = memo(function OverviewCanvas({ paint, markers }: { paint:
         }
       }
       flush(H)
-    } else if (paint.kind === 'ticks') {
-      // per row, the values whose bins it shows, side by side in the column in the label's order of its values
-      const k = h / Math.max(1, paint.total)
-      const order = new Map<string, number>()
-      const colourOfValue: string[] = []
-      for (const t of paint.ticks) {
-        const v = t.value ?? ''
-        if (!order.has(v)) {
-          order.set(v, order.size)
-          colourOfValue.push(t.colour)
-        }
-      }
-      const rows: number[] = new Array(H).fill(0)
-      for (const t of paint.ticks) {
-        const [y0, y1] = drawnSpan(t.from - 1, t.to, k, h)
-        const bit = 1 << Math.min(30, order.get(t.value ?? '')!)
-        for (let y = Math.max(0, Math.floor(y0 * dpr)); y < Math.min(H, Math.max(Math.floor(y0 * dpr) + 1, Math.round(y1 * dpr))); y++) rows[y] |= bit
-      }
-      const values = [...order.keys()]
+    } else if (paint.kind === 'counts' && paint.counts.length) {
+      // each row in the one value most of its records have
+      const at = majorityRows(paint.counts, H)
       let y = 0
       while (y < H) {
-        const set = rows[y]
+        const v = at[y]
         let end = y + 1
-        while (end < H && rows[end] === set) end++
-        if (set) {
-          const here = values.map((v, i) => [v, i] as const).filter(([, i]) => set & (1 << Math.min(30, i)))
-          const step = cw / here.length
-          here.forEach(([v, i], j) => {
-            ctx.globalAlpha = paint.off.has(v) ? 0.18 : 1
-            ctx.fillStyle = colourOf(colourOfValue[i])
-            const a = Math.round(x0 + j * step)
-            ctx.fillRect(a, y, Math.round(x0 + (j + 1) * step) - a, end - y)
-          })
+        while (end < H && at[end] === v) end++
+        if (v >= 0) {
+          ctx.globalAlpha = paint.faded[v] ? 0.18 : 1
+          ctx.fillStyle = colourOf(paint.colors[v])
+          ctx.fillRect(x0, y, cw, end - y)
         }
         y = end
       }
@@ -271,7 +331,7 @@ interface TracksProps {
   total: number | null
   view: Shown
   paint: OverviewPaint
-  /** a lane each: the labels that are on but the one colored by, then the find's matches */
+  /** a lane each, in grey or for the find's matches the ink: the reader gives the find's matches alone */
   markers: readonly RulerColumn[]
   zoom: ZoomView | null
   onJump: (fraction: number) => void
@@ -493,78 +553,49 @@ export function ReaderTracks({ total, view, paint, markers, zoom, onJump, onSeek
   }
   const zy = (v: number) => (zoom && zpx > 0 ? ((v - zoom.from) / Math.max(1, zoom.to - zoom.from)) * zpx : 0)
   const zLanes = zoom?.records.find((r) => r.marks.length)?.marks.length ?? 0
-  const blocks = (opaque: boolean) =>
+  // a record's block, in its color or grey, with a grey tick at its left for each marker lane that marks it
+  const blocks = (layer: 'faded' | 'shown') =>
     zoom?.records.map((r) => {
       const top = zy(r.top)
       const h = Math.max(1, zy(r.bottom) - top - 1)
       return (
-        <i
-          key={r.line}
-          className={'track-rec' + (r.color ? '' : ' plain')}
-          data-line={opaque ? r.line : undefined}
-          title={opaque ? r.title : undefined}
-          style={
-            {
-              top,
-              height: h,
-              ...(r.color ? { background: r.color } : {}),
-            } as CSSProperties
-          }
-        >
-          {r.marks.map((m, i) =>
-            m ? (
-              <b
-                key={i}
-                style={
-                  {
-                    left: i * (MARKER_PX + MARKER_GAP_PX),
-                    background: m,
-                  } as CSSProperties
-                }
-              />
-            ) : null,
-          )}
+        <i key={r.line} className={'track-rec' + (r.color ? '' : ' plain')} data-line={r.line} title={layer === 'shown' ? r.title : undefined} style={{ top, height: h, ...(r.color ? { background: r.color } : {}) } as CSSProperties}>
+          {r.marks.map((m, i) => (m ? <b key={i} style={{ left: i * (MARKER_PX + MARKER_GAP_PX) }} /> : null))}
         </i>
       )
     })
   const vTop = zoom ? zy(zoom.viewTop) : 0
   const vH = zoom ? Math.max(2, zy(zoom.viewBottom) - vTop) : 0
+  const lens = lensOf(vTop, vTop + vH)
   const frameTop = drag ? drag.top : frame.top
+  const link = zoom && px > 0 ? linkOf({ top: frameTop, height: frame.height }, lens) : null
   return (
-    <div className="tracks" data-drag={drag?.held || undefined} aria-hidden>
-      <div
-        ref={zoomEl}
-        className="track track-zoom"
-        style={{
-          width: ZOOM_PX + (zLanes ? zLanes * (MARKER_PX + MARKER_GAP_PX) : 0),
-        }}
-        onPointerDown={onZDown}
-        onPointerMove={onZMove}
-        onPointerUp={onZUp}
-        onPointerCancel={onZUp}
-        onWheel={wheel}
-      >
+    <div className="tracks" data-drag={drag?.held || undefined} onWheel={wheel} aria-hidden>
+      <div ref={over} className="track track-over" style={{ width: lanesPx + OVER_PX }} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onPointerLeave={leave}>
+        <OverviewCanvas paint={paint} markers={markers} />
+        <div className="track-frame-over" style={{ transform: `translateY(${frameTop}px)`, height: frame.height }} />
+      </div>
+      <svg className="track-link" width={LINK_PX}>
+        {link && (
+          <>
+            <polygon points={link.points} />
+            <line data-edge="top" x1={link.top[0]} y1={link.top[1]} x2={link.top[2]} y2={link.top[3]} />
+            <line data-edge="bottom" x1={link.bottom[0]} y1={link.bottom[1]} x2={link.bottom[2]} y2={link.bottom[3]} />
+          </>
+        )}
+      </svg>
+      <div ref={zoomEl} className="track track-zoom" style={{ width: ZOOM_PX + (zLanes ? zLanes * (MARKER_PX + MARKER_GAP_PX) : 0) }} onPointerDown={onZDown} onPointerMove={onZMove} onPointerUp={onZUp} onPointerCancel={onZUp}>
         {zoom && (
           <>
             <div className="track-zoom-faded" style={{ opacity: FADE }}>
-              {blocks(false)}
+              {blocks('faded')}
             </div>
+            <div className="track-lens" style={{ top: lens.top, height: lens.height }} />
             <div className="track-zoom-shown" style={{ top: vTop, height: vH }}>
-              <div style={{ position: 'absolute', left: 0, right: 0, top: -vTop }}>{blocks(true)}</div>
+              <div style={{ position: 'absolute', left: 0, right: 0, top: -vTop }}>{blocks('shown')}</div>
             </div>
-            <div className="track-frame" style={{ top: vTop, height: vH }} />
           </>
         )}
-      </div>
-      <div ref={over} className="track track-over" style={{ width: lanesPx + OVER_PX }} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onPointerLeave={leave} onWheel={wheel}>
-        <OverviewCanvas paint={paint} markers={markers} />
-        <div
-          className="track-frame track-frame-over"
-          style={{
-            transform: `translateY(${frameTop}px)`,
-            height: frame.height,
-          }}
-        />
       </div>
       {tip && <Tip text={tip.text} place={tipPlace} className="reader-ruler-tip" />}
       {shown && <Preview at={shown} anchor={over} />}
