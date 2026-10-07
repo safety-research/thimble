@@ -116,13 +116,13 @@
   },
   {
    "path": "extension/views/relay-board/view.html",
-   "bytes": 68495,
-   "sha256": "67fd49d6f1ac280f03b26678e76b0a382f08be3d8868c26b53b5f8c690580560"
+   "bytes": 68779,
+   "sha256": "174110a0dc13a2108179e6cedbcd7af7a75f7e52596b6127570ce71a97cf1e9e"
   },
   {
    "path": "extension/views/relay-board/view.json",
    "bytes": 4963,
-   "sha256": "b687cf7382da7cc0a944339f177b7932863ddc9a42aa62b829fe6e4ba1cf3d35"
+   "sha256": "2bbae5cbb427e99ec6a44f8121c54ee38b6602ba35475c0f631572ee2f5078b1"
   },
   {
    "path": "extension/views/wiki-page-history/reader.py",
@@ -1748,10 +1748,10 @@
   {
    "slug": "relay-board",
    "name": "Relay Board",
-   "version": "77dddf826cff",
+   "version": "cde705885e1f",
    "from": "relay-board",
-   "from_version": "77dddf826cff",
-   "picked": "live at 77dddf826cff"
+   "from_version": "cde705885e1f",
+   "picked": "live at cde705885e1f"
   },
   {
    "slug": "wiki-page-history",
