@@ -96,6 +96,19 @@ export function hintLine(hints: readonly string[], w: number): Line {
   return fitTo([{ s: orderedHints(hints).join(' · '), fg: COLORS.dim, i: true }], w)
 }
 
+/** The key hints as rows of `w` cells, whole hints parted by ` · ` on each: a hint row that does not fit goes on to a
+ *  second row, never cut (live check term-fix9, quirk 5: `b to go back…` at 210 columns, `Space to fold…` at 120); only
+ *  a hint wider than the row alone is cut. */
+export function hintLines(hints: readonly string[], w: number): Line[] {
+  const rows: string[] = []
+  for (const h of orderedHints(hints)) {
+    const last = rows.at(-1)
+    if (last !== undefined && width(`${last} · ${h}`) <= w) rows[rows.length - 1] = `${last} · ${h}`
+    else rows.push(h)
+  }
+  return (rows.length ? rows : ['']).map(r => fitTo([{ s: r, fg: COLORS.dim, i: true }], w))
+}
+
 /** `new` in green, the word that follows a new item's name; `N new` after a count. */
 export function freshSeg(n?: number): Seg {
   return { s: n === undefined ? 'new' : `${n.toLocaleString('en-US')} new`, fg: FRESH }
@@ -169,9 +182,11 @@ export function ruleEl(els: El, cols: number, key: string): RenderElement {
   return els.Box({ key, flexDirection: 'row', children: [els.Text({ color: COLORS.rule, children: '─'.repeat(Math.max(1, cols)) })] })
 }
 
-/** The key-hint row, the panel's last. */
+/** The key-hint rows, the panel's last (hintLines). */
 export function hintsEl(els: El, hints: readonly string[], cols: number): RenderElement {
-  return lineEl(els, hintLine(hints, cols), 'h-hints')
+  const rows = hintLines(hints, cols)
+  if (rows.length === 1) return lineEl(els, rows[0]!, 'h-hints')
+  return els.Box({ key: 'h-hints', flexDirection: 'column', children: rows.map((l, i) => lineEl(els, l, `h-hints-${i}`)) })
 }
 
 /** Label/value rows and fields (rule 27): each label dim and lower case in a column as wide as the longest label plus

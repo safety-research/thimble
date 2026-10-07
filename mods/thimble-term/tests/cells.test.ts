@@ -5,9 +5,10 @@ import { expect, test } from 'claude-code/testing'
 import { busyWords, cardOfCell, htmlTable, labelCard, linksOf, sortedBars } from '../hooks/cell'
 import type { ThimbleCell } from '../hooks/cell'
 import { cardLayout, cut, placeWords, share } from '../hooks/draw'
-import { chipLabel, citations, clip, cutLine, formatted, itemsRow, noteQuestion, quoted, recordFields, windowAt } from '../hooks/lib'
+import { chipLabel, citations, clip, cutLine, cutMiddle, dateIn, dateSpans, formatted, itemsRow, labelState, labelStateWords, noteQuestion, quoted, recordFields, valueIn, windowAt } from '../hooks/lib'
 import { plainCites } from '../hooks/cite'
-import { fitCrumbs } from '../hooks/nav'
+import { crumbsWidth, fitCrumbs } from '../hooks/nav'
+import { hintLines } from '../hooks/chrome'
 import type { BarRow, Cell } from '../hooks/draw'
 import { CELLS, LABEL } from './fixtures'
 
@@ -272,7 +273,11 @@ test("a label example's fields cut at whole pairs, never `·…` or a key withou
   expect(itemsRow(['page_key dorfwiki/AgentDataUSAProbeFebX2'], 20)).toBe('page_key dorfwiki/A…')
   expect(cut('n_revs 19 · n_revs_before 0 · page_key x', 30)).not.toMatch(/·…$/)
   const json = '{"page_id": "dorfwiki/AgentDataUSAProbeFebX2", "page_key": "dorfwiki/AgentDataUSAProbeFebX2", "n_revs": 19}'
-  expect(cutLine(json, 60)).toBe(`${json.slice(0, 59)}…`)
+  // at the cell edge, never a space or a sentence's punctuation right before the `…` (live check term-fix9, low quirk:
+  // `Some …`, `alone.…`)
+  expect(cutLine(json, 60)).toBe(`${json.slice(0, 58)}…`)
+  expect(cutLine('{"text": "Some words stand alone. Others go on and on"}', 15)).toBe('{"text": "Some…')
+  expect(cutLine('{"text": "It stood alone. Then more"}', 26)).toBe('{"text": "It stood alone…')
   expect(cutLine('Words of a Markdown file run on past the room they have here', 30)).toBe(cut('Words of a Markdown file run on past the room they have here', 30))
 })
 
@@ -280,7 +285,10 @@ test("a place cited with a passage of its line reads as its line; a card's print
   // live check term-fix5, new quirks 3 and 4: `↗ agent-chat.jsonl#L2.b0:c0-120`, and `card L1`
   expect(placeWords('collusion-wiki/agent-chat.jsonl#L2.b0:c0-120')).toBe('collusion-wiki/agent-chat.jsonl line 2')
   expect(placeWords('collusion-wiki/agent-chat.jsonl#L2.b1')).toBe('collusion-wiki/agent-chat.jsonl line 2')
-  expect(chipLabel({ raw: '[[agent-chat.jsonl#L2.b0:c0-120]]', ref: 'agent-chat.jsonl#L2.b0:c0-120', display: null })).toBe('agent-chat:2')
+  // a file's place in words, never `agent-chat:2`, which reads as an id (live check term-fix9, low quirk)
+  expect(chipLabel({ raw: '[[agent-chat.jsonl#L2.b0:c0-120]]', ref: 'agent-chat.jsonl#L2.b0:c0-120', display: null })).toBe('agent-chat line 2')
+  expect(chipLabel({ raw: '[[agent-chat.jsonl#L1-L2]]', ref: 'agent-chat.jsonl#L1-L2', display: null })).toBe('agent-chat lines 1-2')
+  expect(chipLabel({ raw: '[[a/collusion-wiki-revisions-of-every-page.jsonl#L10879]]', ref: 'a/collusion-wiki-revisions-of-every-page.jsonl#L10879', display: null })).toMatch(/^collusion-wiki-\S*… line 10879$/)
   expect(chipLabel({ raw: '[[card:c0ffee00@out0#L1]]', ref: 'card:c0ffee00@out0#L1', display: null })).toBe("a card's output line 1")
   noteQuestion('c0ffee00', 'How many saves and deletions per day?')
   expect(chipLabel({ raw: '[[card:c0ffee00@out0#L1]]', ref: 'card:c0ffee00@out0#L1', display: null })).toBe('card "How many saves and deletions per day?" output line 1')
@@ -300,4 +308,63 @@ test('a card cited whole reads as a reference in parentheses in plain words, as 
   noteQuestion('c0ffee00', 'What is the first deletion?')
   expect(plainCites('It began on 18 June [↗](card:c0ffee00@out0#L1). That is all.')).toBe('It began on 18 June (card "What is the first deletion?" output line 1). That is all.')
   expect(plainCites('It has [3](card:ab12cd34#n/all) rows and [33](concept:9e40be16/yes) yes.')).toBe('It has 3 rows and 33 yes.')
+})
+
+
+test('a date in words is in a text that writes it in words too, as the backend reads it: the same day and month, the year and the time when both give one', () => {
+  // live check term-fix9, quirk 11 (backend cite.date_in)
+  for (const [display, text] of [['23 June', '23 June'], ['June 23', 'busiest on 23 June'], ['30 June', 'last delete on 30 June'], ['30 June 2026 at 22:47 UTC', '30 June 2026 at 22:47:51 UTC'], ['23 June', '2026-06-23']]) {
+    expect(dateIn(display!, text!)).toBe(true)
+    expect(valueIn(display!, text!)).toBe(true)
+  }
+  for (const [display, text] of [['23 June', '24 June'], ['30 June 2025', '30 June 2026'], ['30 June 2026 at 21:00', '30 June 2026 at 22:47:51 UTC'], ['3 May', 'it 3 may fail']]) expect(dateIn(display!, text!)).toBe(false)
+  // the citation panel marks the date in words where the line writes it
+  expect(dateSpans('23 June', 'alpha started on 23 June at 10:53')).toEqual([[17, 33]])
+  expect(dateSpans('23 June', 'gamma, 24 June; alpha, 23 June.')).toEqual([[23, 30]])
+})
+
+test('a row cut in its middle keeps its end; a quoted name with a short tail cut inside its marks, the tail kept; a line of data cut at the cell edge', () => {
+  // live check term-fix9, quirk 8 and low quirks
+  const q = 'How many deletes does events.jsonl record in each hour (UTC) of 27 June?'
+  expect(cutMiddle(q, 40)).toBe('How many deletes does… (UTC) of 27 June?')
+  expect(cutMiddle(q, 200)).toBe(q)
+  expect(cutMiddle(q, 20)).toBe(cut(q, 20))
+  expect(cut('card "How many deletes does events.jsonl record on each day?" · code', 34)).toBe('card "How many deletes…" · code')
+  const json = '{"label": "A2Research17817720", "stored_revisions": 12, "first": "2026-06-23"}'
+  const a = windowAt(json, 40, 30)
+  const b = windowAt(json, 60, 30)
+  expect(a.text.length).toBe(30)
+  expect(b.text.length).toBe(30)
+  expect(json.slice(a.shift + 1, a.shift + 5)).toBe(a.text.slice(1, 5))
+})
+
+test('key hints wrap at whole hints, never cut; the path fits its room', () => {
+  // live check term-fix9, quirks 3 and 5
+  const rows = hintLines(['↑↓ to choose', 'Enter to open', 'Space to fold', 'b to go back', 'x to close'], 41).map(l => l.map(x => x.s).join(''))
+  expect(rows).toEqual(['↑↓ to choose · Enter to open', 'Space to fold · b to go back · x to close'])
+  expect(hintLines(['x to close'], 40)).toHaveLength(1)
+  for (const room of [4, 8, 14, 20, 30]) {
+    const fitted = fitCrumbs(['home', 'files', 'collusion-wiki/labels.jsonl'], room)
+    expect(crumbsWidth(fitted)).toBeLessThanOrEqual(room)
+    expect(fitted[0]).toBe('home')
+  }
+})
+
+test("a label's state in words: a run going, a first run stopped part way, none, or a run that ended", () => {
+  // live check term-fix9, quirk 4
+  const agents = [{ label: 'label says probe', state: 'running', role: 'labels' }]
+  const midway = { name: 'says probe', last_run: null, applications: [], label_stats: { n_labeled: 3000, counts: { yes: 1000, no: 2000 } }, scope_total: 4579 }
+  expect(labelStateWords(labelState(midway, agents))).toBe('◌ labeling 3,000 of 4,579')
+  expect(labelStateWords(labelState(midway, []))).toBe('stopped at 3,000 of 4,579')
+  expect(labelStateWords(labelState({ ...midway, scope_total: undefined }, []))).toBe('stopped at 3,000')
+  expect(labelStateWords(labelState({ ...midway, label_stats: { n_labeled: 0, counts: {} } }, []))).toBe('not run yet')
+  expect(labelStateWords(labelState({ ...midway, label_stats: { n_labeled: 0, counts: {} } }, agents))).toBe('◌ labeling')
+  const ran = { ...midway, last_run: { total: 4579, matched_total: 4579, labeled: 4579, status: 'done' } }
+  expect(labelState(ran, []).ran).toBe(true)
+  expect(labelStateWords(labelState(ran, []))).toBe('')
+  // the label card of one stopped part way: its counts, and where it stopped
+  const card = labelCard({ ...(CELLS.l0label0 as unknown as ThimbleCell) }, { ...LABEL, last_run: null, applications: [], label_stats: { n_labeled: 3150, counts: { none: 2100, 'proxy-link': 1050 } }, scope_total: 4579 } as never)
+  expect(card.note).toBe('stopped at 3,150 of 4,579')
+  expect((card.rows ?? []).length).toBe(2)
+  expect(cardLayout(card, 60, -1).lines.map(l => l.map(x => x.s).join('')).at(-1)).toBe('stopped at 3,150 of 4,579')
 })

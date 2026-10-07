@@ -176,7 +176,9 @@ test("home: views by state, the glyph alone saying it; documents under that word
   expect(at('"Is 4579 every page?"')).toMatch(/"Is 4579 every page\?" +about 4579 {2}new$/)
   expect(at('"why is events.jsonl bigger?"')).toMatch(/"why is events\.jsonl bigger\?" +about What does the export hold per… · earlier session {2}new$/)
   // the question cut at a word so that a short subject stands at R
-  expect(at('"Would 23 June')).toMatch(/"Would 23 June still have the most deletions[^"]*…" +about 3908$/)
+  // its subject where the rows without `new` end theirs, before the cells `new` takes on the row beside it (live check
+  // term-fix9, low quirk)
+  expect(at('"Would 23 June')).toMatch(/"Would 23 June still have the most deletions[^"]*…" +about 3908 {5}$/)
   // a thread asked about a passage has no subject at R: its sentence would cut the question beside it
   expect(at('"which pages were deleted?"')).not.toContain('about')
   expect(at('Files (3)')).toMatch(/type {9}size$/)

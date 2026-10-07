@@ -22,26 +22,26 @@ import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderEle
 
 import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermVerdict } from '../types'
 import type { ThimbleLabel } from './cell'
-import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, freshSeg, hasMargin, headerEls, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
+import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
 import { chipLook, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
-import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, demojibake, labelHead, lineWidth, placeWords, shade, share, turnTimes, valueColour, width, wrapRows } from './draw'
+import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
-import { fileRef } from './files'
+import { dirOf, fileRef, firstChoice, folderOpen, sortPaths } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
 import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, labelRunning, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
+import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, labelState, labelStateWords, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, takeListKeys } from './lines'
 import type { LineHit } from './lines'
 import { docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
 import type { DocFigure, DocSection, DocSentence } from './model'
 import type { Focus } from './anim'
-import { NAV_EMPTY, backTarget, crumbSteps, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
+import { NAV_EMPTY, backTarget, crumbSteps, crumbsWidth, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, closePanel, inPanelNow, loadCards, navBack, navGo, openHome, openPanel, panelOfStep, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
+import { PANEL, closePanel, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, readDoc, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -115,7 +115,7 @@ export async function openDoc(cx: Ctx, slug: string, title: string): Promise<voi
 /** A document opened at the section, slide or beat that holds `unit` (a sentence's, a heading's or a paragraph's id,
  *  `p<id>`), from a link to it (`report:<slug>#<unit>`). */
 async function openDocAt(cx: Ctx, slug: string, unit: string): Promise<void> {
-  await readSurface(cx, `doc:${slug}`, 'doc', [slug])
+  await readDoc(cx, slug)
   const got = await surfaceValue<Obj>(cx, `doc:${slug}`)
   const doc = got?.ok ? got.value : {}
   const holds = (u: DocSection) => u.id === unit || (u.paragraphs ?? []).some(p => p.id === unit || `p${p.id}` === unit || (p.sentences ?? []).some(x => x.id === unit))
@@ -167,11 +167,11 @@ export async function openCard(cx: Ctx, id: string, mode = ''): Promise<void> {
 
 /** A thread opens in the threads panel, selected under the tree; its step named by its first question (`question` when
  *  it was just asked), never thimble's slug of it. */
-export async function openThread(cx: Ctx, id: string, question = ''): Promise<void> {
+export async function openThread(cx: Ctx, id: string, question = '', opts: { replace?: boolean } = {}): Promise<void> {
   const row = (await cx.threads()).find(t => t.id === id)
   const tt = await cx.thread(id)
   const q = question || (tt?.events.length ? threadOf(tt.meta, tt.events).turns[0]?.q : '') || row?.question || row?.title || ''
-  await openPanel(cx, { view: 'thread', title: q ? quoted(clip(plainCites(q), 60)) : 'thread', thread: id })
+  await openPanel(cx, { view: 'thread', title: q ? quoted(clip(plainCites(q), 60)) : 'thread', thread: id }, opts)
 }
 
 /** A file in the panel from line `start`, `line` the record a citation or a click chose, lit there. */
@@ -252,8 +252,8 @@ function crumbText(s: ChatNavStep): string {
     case 'cite':
       return `citation ${s.title === 'Citation' ? '' : s.title}`.trim()
     case 'card':
-      // its code view's step keeps ` · code` whole: the question is cut first
-      return panelOfStep(s)?.mode === 'code' ? `card ${quoted(clip(s.title, 22))} · code` : `card ${quoted(s.title)}`
+      // its code view's step keeps ` · code` whole: the question inside its marks is cut, once (lib.ts cut)
+      return panelOfStep(s)?.mode === 'code' ? `card ${quoted(s.title)} · code` : `card ${quoted(s.title)}`
     case 'label':
     case 'file':
     case 'agent':
@@ -281,18 +281,21 @@ function upOf(s: ChatNavStep, earlier: readonly ChatNavStep[]): TermPanel | null
   return null
 }
 
+// the cells of the path row's separator (` › `)
+const SEP_W = 3
+
 /** The path row (SPEC.md, "A panel's header"): `‹ back`, the steps from home, each a lower-case kind word and its
  *  name parted by a dim ›, each a click away, a thread's step followed by `new` in green while answers wait; at R `show
  *  all threads` and `N new` in green. The threads panel leaves those out. */
 async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElement> {
   const { Box, Text, Button } = cx.els(e)
-  const cols = Math.max(30, e.props.bodyColumns)
+  // the row's own width: never more than the pane gives it, or it wraps (live check term-fix9, quirk 3)
+  const cols = Math.max(10, e.props.bodyColumns)
   const nav = (await cx.nav()) ?? NAV_EMPTY
   const back = backTarget(nav) !== null
   const inThreads = view === 'threads' || view === 'thread'
   const threads = (await cx.threads()) ?? []
   const fresh = ((await cx.news()) ?? { n: 0 }).n
-  const tailW = inThreads ? 0 : 'show all threads'.length + (fresh ? `  ${fresh} new`.length : 0) + 2
   const { steps, skipped } = crumbSteps(nav.trail)
   type Crumb = { text: string; mark: string; go: () => void; here?: boolean; up?: boolean }
   const crumbs: Crumb[] = []
@@ -308,7 +311,17 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
     crumbs.push({ text: crumbText(card?.question ? { ...s, title: clip(card.question, 60) } : s), mark: t?.running ? '◌' : t?.unread ? 'new' : '', go: () => void navGo(cx, { trail: nav.trail.slice(0, i + 1 + skipped), back: withBack(nav.back, nav.trail) }), here: i === steps.length - 1 })
   }
   const marksW = crumbs.reduce((n, c) => n + (c.mark ? c.mark.length + 1 : 0), 0)
-  const fitted = fitCrumbs(['home', ...crumbs.map(c => c.text)], Math.max(12, cols - (back ? 8 : 0) - tailW - marksW))
+  // at R `show all threads` and `N new`, while the steps keep the room they need beside them (home, the last step at
+  // up to 12 cells); else `N new` alone, else neither (`t` still shows all threads)
+  const labels = ['home', ...crumbs.map(c => c.text)]
+  const room = cols - (back ? 8 : 0) - marksW
+  const newW = fresh ? `${fresh} new`.length : 0
+  const tails: { all: boolean; fresh: boolean; w: number }[] = inThreads
+    ? [{ all: false, fresh: false, w: 0 }]
+    : [{ all: true, fresh: Boolean(fresh), w: 2 + 'show all threads'.length + (fresh ? 2 + newW : 0) }, ...(fresh ? [{ all: false, fresh: true, w: 2 + newW }] : []), { all: false, fresh: false, w: 0 }]
+  const need = Math.min(crumbsWidth(labels.map(l => clip(l, 34))), 4 + (labels.length > 2 ? 4 : 0) + (labels.length > 1 ? SEP_W + Math.min(12, width(labels.at(-1)!)) : 0))
+  const tail = tails.find(t => room - t.w >= need) ?? tails.at(-1)!
+  const fitted = fitCrumbs(labels, Math.max(4, room - tail.w))
   const parts: RenderElement[] = []
   fitted.forEach((text, i) => {
     if (text === null) {
@@ -331,8 +344,8 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
       {back ? <Text>{'  '}</Text> : null}
       {parts}
       <Box flexGrow={1} />
-      {inThreads ? null : <Button key="threads" label="show all threads" plain onPress={showAll} />}
-      {!inThreads && fresh ? <Text color={FRESH}>{`  ${fresh} new`}</Text> : null}
+      {tail.all ? <Button key="threads" label="show all threads" plain onPress={showAll} /> : null}
+      {tail.fresh ? <Text color={FRESH}>{`${tail.all ? '  ' : ''}${fresh} new`}</Text> : null}
       {hiddenKeys(cx, e, [...(back ? [{ key: 'back', hotkey: 'b', onPress: () => void navBack(cx) }] : []), ...(inThreads ? [] : [{ key: 'threads', hotkey: 't', onPress: showAll }]), { key: 'close', hotkey: 'x', onPress: () => void closePanel(cx) }])}
       {listKeysEl(cx, e)}
     </Box>
@@ -421,6 +434,11 @@ export function relayMove(from: string, element: string | undefined): 'up' | 'do
   if (element !== RELAY.up && element !== RELAY.down) return ''
   if (from !== RELAY.pick) return 'park'
   return element === RELAY.up ? 'up' : 'down'
+}
+
+/** Whether the panel shows a list whose keys the relay passes on. */
+export function hasList(): boolean {
+  return listRelay !== null
 }
 
 /** A key for the list the panel shows now, from the panel's own keys (the relay); false when it shows none. */
@@ -603,6 +621,15 @@ function listKeysHeld(): boolean {
 const LIST_HINT = /^(?:↑↓|←|→|Enter |Space |Backspace |PgUp|PgDn)/
 const UNRELAYED_HINT = /^(?:←|→|PgUp|PgDn)/
 
+// the text fields the drawing being made draws, by their keys (rt.fields once it is shown)
+let fieldsDrawing = new Set<string>()
+
+/** A text field's key, noted as drawn by the drawing being made: its ring's hint is named only while it is drawn. */
+function fieldKey(key: string): string {
+  fieldsDrawing.add(key)
+  return key
+}
+
 // the panel's text fields by their keys, with what Enter does in each
 const FIELD_KEYS: [RegExp, string][] = [
   [/^(?:ask-new|ask-|follow-)/, 'Enter to ask'],
@@ -624,8 +651,9 @@ function endHints(hints: readonly string[], autoFocus = ''): string[] {
   // and Enter would send it to main: no key of the panel's is named, only how to give the panel the keys; so too while
   // the panel's typing goes to the prompt (typeThrough)
   if (!paneFocused || rt.typeThrough) return [UNFOCUSED_HINT]
-  // `autoFocus`: the view's field that takes the ring as it opens, before any ui.focus says where the ring is
-  const field = focusedField(rt.panelFocus || autoFocus)
+  // `autoFocus`: the view's field that takes the ring as it opens, before any ui.focus says where the ring is; a ring
+  // on a field this drawing does not draw (one of the view before, live check term-fix9, quirk 1) is on none
+  const field = rt.panelFocus ? (fieldsDrawing.has(rt.panelFocus) ? focusedField(rt.panelFocus) : '') : focusedField(autoFocus)
   if (field) return [field, 'Esc to leave the field']
   // a list's keys only while the ring rests on them (listKeysHeld): until a ui.focus says so, ↑↓ walk the panel's
   // buttons and Enter presses the one the ring is on
@@ -641,6 +669,11 @@ export const UNFOCUSED_HINT = 'click the panel for its keys'
 
 function hintsRow(els: El, hints: readonly string[], cols: number, autoFocus = ''): RenderElement {
   return hintsEl(els, endHints(hints, autoFocus), cols)
+}
+
+/** The rows a view's key hints take as the panel draws them now (hintLines): what a list cut to the pane leaves them. */
+function hintHeight(hints: readonly string[], cols: number, autoFocus = ''): number {
+  return hintLines(endHints(hints, autoFocus), cols).length
 }
 
 /** The panel's bottom part (rule 25): the second rule, the actions 2 cells apart, the fields under them; then the
@@ -727,19 +760,26 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
   // a run the session's own process holds shows only as the chat that follows it (lib.ts labelRunning)
   const agents = (await cx.agents()) ?? []
   const labels: HomeLabel[] = labelsRaw?.ok
-    ? labelsOf(labelsRaw.value).map(l => ({
-        slug: l.id,
-        name: l.name ?? l.id,
-        kind: l.kind ?? '',
-        trial: Boolean(l.trial),
-        // as thimble.labels() reads the rows: a record the analyst set to another value under that value
-        counts: l.verdicts?.counts ?? l.label_stats?.counts ?? {},
-        values: l.labels ?? Object.keys(l.label_stats?.counts ?? {}),
-        paths: (l.glob ?? '').split(/,\s*/).filter(Boolean),
-        running: (l.last_run?.status ?? '') === 'running' || labelRunning(agents, l.name ?? ''),
-        // the panel's rule (`not run yet` with no last run and no application)
-        ran: Boolean(l.last_run ?? l.applications?.at(-1)),
-      }))
+    ? labelsOf(labelsRaw.value).map(l => {
+        // its runs as the labels list, its panel and its card say them (lib.ts labelState)
+        const st = labelState(l, agents)
+        // made since home was last seen, as a card is new (openHome)
+        const made = Date.parse(str((l as { ts?: unknown }).ts)) || 0
+        return {
+          slug: l.id,
+          name: l.name ?? l.id,
+          kind: l.kind ?? '',
+          trial: Boolean(l.trial),
+          // as thimble.labels() reads the rows: a record the analyst set to another value under that value
+          counts: l.verdicts?.counts ?? l.label_stats?.counts ?? {},
+          values: l.labels ?? Object.keys(l.label_stats?.counts ?? {}),
+          paths: (l.glob ?? '').split(/,\s*/).filter(Boolean),
+          running: st.running,
+          ran: st.ran,
+          state: labelStateWords(st),
+          ...(rt.homeSince && made > rt.homeSince ? { fresh: true } : {}),
+        }
+      })
     : []
   const files: HomeFile[] = filesOf(await surfaceValue(cx, 'files')).map(f => ({ file: f.path, records: null, size: f.size, seen: 0, state: 'listed', ranges: [], kind: fileType(f.path, f.kind, rt.opens.get(f.path)?.as) }))
   const root = (await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'
@@ -796,8 +836,11 @@ async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const lay = homeLayout(await homeData(cx), ui, cols, endHints(HOME_HINTS))
   homeLast = lay
   const run = (a: HomeAct) => async () => {
-    if (a.op === 'open') await homeOpen(cx, a.open)
-    else await cx.setHomeUi(homeReduce((await cx.homeUi()) as HomeUi, a))
+    if (a.op === 'open') return homeOpen(cx, a.open)
+    const cur = (await cx.homeUi()) as HomeUi
+    const next = homeReduce(cur, a)
+    // a section shown whole: the choice moves from its `… N more` onto the first row it showed
+    await cx.setHomeUi(a.op === 'more' && a.next && cur.pick === `more:${a.sec}` ? { ...next, pick: a.next } : next)
   }
   const allHits: LineHit[] = lay.hits.map(h => ({
     y: h.y,
@@ -809,14 +852,14 @@ async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       await run(h.act)()
     },
   }))
-  // the sections cut to the pane's rows around the chosen row, the title, its rule and the hint row kept (windowList):
-  // the path row, the title, the rule and the hint row take four rows
+  // the sections cut to the pane's rows around the chosen row, the title, its rule and the hint rows kept (windowList):
+  // the path row, the title, the rule and the hint rows take the rest
   const pick = ui.pick || lay.picks[0]?.key || ''
   const pickY = lay.hits.find(h => h.pick === pick)?.y ?? -1
-  const last = lay.lines.length - 1
-  const win = windowList('home', lay.lines.slice(2, last), allHits.filter(h => h.y >= 2 && h.y < last).map(h => ({ ...h, y: h.y - 2 })), pickY - 2, bodyRows - 4, () => cx.bumpPanel())
-  const lines = [...lay.lines.slice(0, 2), ...win.lines, lay.lines[last]!]
-  const hits: LineHit[] = [...allHits.filter(h => h.y < 2), ...win.hits.map(h => ({ ...h, y: h.y + 2 })), ...allHits.filter(h => h.y === last).map(h => ({ ...h, y: lines.length - 1 }))]
+  const last = lay.lines.length - lay.hintRows
+  const win = windowList('home', lay.lines.slice(2, last), allHits.filter(h => h.y >= 2 && h.y < last).map(h => ({ ...h, y: h.y - 2 })), pickY - 2, bodyRows - 3 - lay.hintRows, () => cx.bumpPanel())
+  const lines = [...lay.lines.slice(0, 2), ...win.lines, ...lay.lines.slice(last)]
+  const hits: LineHit[] = [...allHits.filter(h => h.y < 2), ...win.hits.map(h => ({ ...h, y: h.y + 2 }))]
   const onKey = async (k: string) => {
     const cur = (await cx.homeUi()) as HomeUi
     const l = homeLast
@@ -824,7 +867,7 @@ async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     const pick = cur.pick || l.picks[0]?.key || ''
     const at = l.picks.find(x => x.key === pick)
     if (k === 'return' || k === 'enter') return at ? run(at.act)() : undefined
-    if (k === 'space' || k === ' ') return at?.act.op === 'fold' ? run(at.act)() : undefined
+    if (k === 'space' || k === ' ') return at?.act.op === 'fold' || at?.act.op === 'more' ? run(at.act)() : undefined
     const next = homePick(l, cur, k)
     if (next !== cur.pick) await cx.setHomeUi({ ...cur, pick: next })
   }
@@ -1110,7 +1153,7 @@ async function followUpField(cx: Ctx, e: PaneEvent, about: string): Promise<Rend
     e,
     'follow-up',
     <Input
-      key={`follow-${cid(tid)}`}
+      key={fieldKey(`follow-${cid(tid)}`)}
       submitLabel="ask"
       onSubmit={v => {
         const q = v.trim()
@@ -1227,7 +1270,7 @@ async function drawAsk(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
   const field = (
     <Box key="ask-row" flexDirection="row">
       <Input
-        key="ask-new"
+        key={fieldKey('ask-new')}
         autoFocus
         placeholder="type your question"
         submitLabel="ask"
@@ -1242,7 +1285,9 @@ async function drawAsk(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
             const title = p.target?.kind === 'citation' && p.about ? p.about : ''
             const got = await startThread(cx, p.anchor ?? null, p.anchorText ?? '', q, { ...(p.parent ? { parent: p.parent } : {}), ...(p.element ? { element: p.element } : {}), ...(title ? { title } : {}) })
             asking = 'error' in got ? `× ${got.error}` : ''
-            if ('id' in got) await openThread(cx, got.id, q)
+            // the thread takes the form's place on the way, so back leads where the form was asked from (live check
+            // term-fix9, quirk 12: back from a thread just asked showed an empty form)
+            if ('id' in got) await openThread(cx, got.id, q, { replace: true })
             else await cx.bumpPanel()
           })()
         }}
@@ -1451,7 +1496,7 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
     body.push(
       <Box key="ask-row" flexDirection="row" marginTop={1}>
         <Input
-          key={askKey}
+          key={fieldKey(askKey)}
           placeholder="ask a follow-up question"
           submitLabel="ask"
           onSubmit={v => {
@@ -1636,7 +1681,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       files && !running && e.surface !== 'mobile' ? (
         <Box flexDirection="row">
           <Box flexGrow={1} flexShrink={1}>
-            <Input key={`lb-glob-${id}`} value={drafts.get(`${id}:glob`) ?? l.glob ?? ''} submitLabel="save" onInput={v => void drafts.set(`${id}:glob`, v)} onSubmit={v => void (v.trim() ? save({ glob: v.trim() }) : undefined)} />
+            <Input key={fieldKey(`lb-glob-${id}`)} value={drafts.get(`${id}:glob`) ?? l.glob ?? ''} submitLabel="save" onInput={v => void drafts.set(`${id}:glob`, v)} onSubmit={v => void (v.trim() ? save({ glob: v.trim() }) : undefined)} />
           </Box>
           {scopeCount ? <Text dimColor>{`  ${scopeCount}`}</Text> : null}
         </Box>
@@ -1667,14 +1712,27 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       ),
     )
   }
-  // run it: on a sample, or on every record; they save what was typed first
-  const lastWords = last ? (l.trial || last.limit ? `last run on a sample of ${num(last.labeled ?? 0)}` : `last run on all ${num(last.labeled ?? 0)}`) : 'not run yet'
-  const stop = () => void stopLabel(cx, id)
+  // run it: on a sample, or on every record; they save what was typed first. Its state as home, the list and its card
+  // say it (lib.ts labelState): a run main's chat follows is `◌ labeling 3,000 of 4,579` here too, and a first run
+  // stopped part way `stopped at 3,150 of 4,579`, never `not run yet` beside its counts (live check term-fix9, quirk 4)
+  const agents = (await cx.agents()) ?? []
+  const st = labelState(l, agents)
+  const lastWords = last ? (l.trial || last.limit ? `last run on a sample of ${num(last.labeled ?? 0)}` : `last run on all ${num(last.labeled ?? 0)}`) : labelStateWords(st)
+  // the run main's chat follows, which a stop of that chat stops (as the agent panel's stop)
+  const follower = !running && st.running ? agents.find(a => a.role === 'labels' && a.state === 'running' && a.label === `label ${name}`) : undefined
+  const stop = follower && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: follower.chat || follower.name, name: follower.name }) : () => void stopLabel(cx, id)
   if (running)
     rows.push(
       <Box key="lb-running" flexDirection="row" columnGap={2} flexWrap="wrap">
         <Text>{`◌ labeling ${running.limit ? `a sample of ${num(running.limit)}` : `all ${scopeN !== null ? num(scopeN) : ''} ${unit}`.replace(/\s+/g, ' ')}`}</Text>
         <Button key="lb-stop" label="stop" plain onPress={stop} />
+      </Box>,
+    )
+  else if (st.running)
+    rows.push(
+      <Box key="lb-running" flexDirection="row" columnGap={2} flexWrap="wrap">
+        <Text>{labelStateWords(st)}</Text>
+        {follower ? <Button key="lb-stop" label="stop" plain onPress={stop} /> : null}
       </Box>,
     )
   else
@@ -1687,8 +1745,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     )
   // what the last save or run said: `×` and `!` rows in red
   said.split('\n').filter(Boolean).forEach((line, i) => rows.push(<Text key={`lb-said-${i}`} wrap="wrap" {...(/^[×!]/.test(line) ? { color: COLORS.problem } : { dimColor: true })}>{line}</Text>))
-  if (!running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() })
-  else keys.push({ key: 'stop', hotkey: 's', onPress: stop })
+  if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() })
+  else if (running || follower) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
   // the counts, the examples and the cards, folded
   const toggle = (part: string, words: string, n: number | null, note = '') => (
     <Box key={`lb-t-${part}`} flexDirection="row">
@@ -1703,6 +1761,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   if (opened('counts')) {
     const vw = Math.min(Math.max(12, Math.floor(cols / 3)), Math.max(4, ...values.map(v => width(v))))
     const cs = values.map(v => num(counts[v] ?? 0))
+    const pcts = shares(values.map(v => counts[v] ?? 0), total)
     const cw = Math.max(1, ...cs.map(c => c.length))
     const barW = Math.max(8, cols - 2 - 2 - vw - 2 - 2 - cw - 7)
     values.forEach((v, i) => {
@@ -1720,7 +1779,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
           <Text {...tone}>{'█'.repeat(w)}</Text>
           <Text color={COLORS.rule}>{'─'.repeat(Math.max(0, barW - w))}</Text>
           <Text>{`  ${cs[i]!.padStart(cw)}`}</Text>
-          <Text dimColor>{total ? `  ${share(n, total).padStart(5)}` : ''}</Text>
+          <Text dimColor>{total ? `  ${pcts[i]!.padStart(5)}` : ''}</Text>
         </Text>,
       )
     })
@@ -1732,7 +1791,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
           <Text dimColor>{'values  '}</Text>
           <Box flexGrow={1} flexShrink={1}>
             <Input
-              key={`lb-values-${id}`}
+              key={fieldKey(`lb-values-${id}`)}
               value={values.join(' · ')}
               submitLabel="save"
               onSubmit={v => {
@@ -1827,9 +1886,9 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     if (cards.length > 8) rows.push(<Text key="lb-cards-more" dimColor>{`  … ${num(cards.length - 8)} more`}</Text>)
     if (!cards.length) rows.push(<Text key="lb-cards-none" dimColor>{'  none'}</Text>)
   }
-  keys.push({ key: 'list', hotkey: 'l', onPress: () => void openPanel(cx, { view: 'labels', title: 'Labels' }) })
+  keys.push({ key: 'list', hotkey: 'l', onPress: () => void openList(cx, { view: 'labels', title: 'Labels' }) })
   // the keys that fit one row: the field says how to save it (its placeholder); each folded part's key by what it opens
-  rows.push(hintsRow(els, [running ? 's to stop' : 'r to run a sample', 'c counts, e examples, d cards', 'l for labels'], cols))
+  rows.push(hintsRow(els, [...(running || follower ? ['s to stop'] : st.running ? [] : ['r to run a sample']), 'c counts, e examples, d cards', 'l for labels'], cols))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...rows]}</Box>
 }
@@ -1847,13 +1906,15 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const ls = (got?.ok ? labelsOf(got.value) : []) as LabelFull[]
   const body: RenderElement[] = [...headerEls(els, { title: 'Labels', cols, sub: subLine([plural(ls.length, 'label')]) })]
   const pick = ls.find(x => x.id === labelPick)?.id ?? ls[0]?.id ?? ''
+  const agents = (await cx.agents()) ?? []
   const { lines, hits } = listLines(
     ls.map(l => {
       const n = Object.values(l.label_stats?.counts ?? {}).reduce((a, b) => a + b, 0)
-      // a label with no run says so, as home, its panel and its card do
-      const ran = Boolean(l.last_run ?? l.applications?.at(-1))
-      const run = !ran ? 'not run yet' : l.trial ? `a sample of ${num(n)}` : `all ${num(n)}`
-      return { key: l.id, glyph: (l.last_run?.status ?? '') === 'running' ? { s: '◌' } : ran ? { s: '●' } : dim('○'), name: l.name ?? l.id, right: [dim(`${l.kind ?? ''} · ${run}`)], run: () => openLabel(cx, l.id, l.name ?? l.id) }
+      // its runs as home, its panel and its card say them (lib.ts labelState): `◌ labeling 3,000 of 4,579` while a run
+      // goes, `stopped at 3,150 of 4,579`, `not run yet`, else what its last run covered (live check term-fix9, quirk 4)
+      const st = labelState(l, agents)
+      const run = labelStateWords(st).replace(/^◌ /, '') || (l.trial ? `a sample of ${num(n)}` : `all ${num(n)}`)
+      return { key: l.id, glyph: st.running ? { s: '◌' } : st.ran || st.stopped ? { s: '●' } : dim('○'), name: l.name ?? l.id, right: [dim(`${l.kind ?? ''} · ${run}`)], run: () => openLabel(cx, l.id, l.name ?? l.id) }
     }),
     pick,
     cols,
@@ -1863,7 +1924,9 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     labelPick = ls[Math.max(0, Math.min(ls.length - 1, at + d))]?.id ?? ''
     return cx.bumpPanel()
   }
-  const win = windowList('labels-list', lines, hits, ls.findIndex(x => x.id === pick), bodyRows - 4 - body.length, () => cx.bumpPanel())
+  const listHints = ['↑↓ to choose', 'Enter to open', 'b to go back', 'x to close']
+  // the path row, the header, the rule under the list, the field and the hint rows aside
+  const win = windowList('labels-list', lines, hits, ls.findIndex(x => x.id === pick), bodyRows - 3 - hintHeight(listHints, cols) - body.length, () => cx.bumpPanel())
   body.push(linesEl(cx, e, marginKey('labels-list'), win.lines, win.hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openLabel(cx, pick, ls.find(x => x.id === pick)?.name ?? pick) : undefined)))
   body.unshift(
     <Box key="label-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
@@ -1873,8 +1936,8 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       })}
     </Box>,
   )
-  const field = e.surface === 'mobile' ? null : fieldRow(cx, e, 'describe a new label', <Input key="lbs-describe" submitLabel="make it" onSubmit={v => void (v.trim() ? cx.submit(`Make a label with apply_label and try it on a sample of 30: ${v.trim()}`) : undefined)} />, 'lbs-new')
-  body.push(...bottomRows(cx, e, cols, [], [field], ['↑↓ to choose', 'Enter to open', 'b to go back', 'x to close']))
+  const field = e.surface === 'mobile' ? null : fieldRow(cx, e, 'describe a new label', <Input key={fieldKey('lbs-describe')} submitLabel="make it" onSubmit={v => void (v.trim() ? cx.submit(`Make a label with apply_label and try it on a sample of 30: ${v.trim()}`) : undefined)} />, 'lbs-new')
+  body.push(...bottomRows(cx, e, cols, [], [field], listHints))
   return <Box flexDirection="column">{body}</Box>
 }
 
@@ -1905,7 +1968,8 @@ async function drawDocs(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     docPick = docs[Math.max(0, Math.min(docs.length - 1, at + k))]?.slug ?? ''
     return cx.bumpPanel()
   }
-  const win = windowList('docs-list', lines, hits, docs.findIndex(d => d.slug === pick), bodyRows - 2 - body.length, () => cx.bumpPanel())
+  const listHints = docs.length ? ['↑↓ to choose', 'Enter to open'] : []
+  const win = windowList('docs-list', lines, hits, docs.findIndex(d => d.slug === pick), bodyRows - 1 - hintHeight(listHints, cols) - body.length, () => cx.bumpPanel())
   body.push(linesEl(cx, e, marginKey('docs-list'), win.lines, win.hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? open(docs.find(d => d.slug === pick)!) : undefined)))
   body.unshift(
     <Box key="doc-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
@@ -1914,7 +1978,7 @@ async function drawDocs(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       ))}
     </Box>,
   )
-  body.push(hintsRow(els, docs.length ? ['↑↓ to choose', 'Enter to open'] : [], cols))
+  body.push(hintsRow(els, listHints, cols))
   return <Box flexDirection="column">{body}</Box>
 }
 
@@ -2004,7 +2068,8 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
   const body: RenderElement[] = [...headerEls(els, { title, cols, ...(sub ? { sub } : {}) })]
   if (writing && !units.length && writing.request) body.push(<Text key="doc-request" dimColor wrap="wrap">{`the request: ${clip(writing.request, 600)}`}</Text>)
   const keys: Key[] = []
-  const at = (k: number) => openPanel(cx, { ...p, start: k })
+  // a slide, a beat or a section chosen in place: back leads where the document was opened from
+  const at = (k: number) => openPanel(cx, { ...p, start: k }, { replace: true })
   // a passage's thread is told the document, its section and the passage
   const askIn = (u: DocSection) => (tgt: Target) =>
     void openAsk(cx, tgt, tgt.kind === 'sentence' ? { anchor: `report:${slug}${u.id ? `#${u.id}` : ''}`, anchorText: `${quoted(title)} › ${plainCites(str(u.heading))}: ${plainCites(tgt.text ?? '')}`, element: `report:${slug}${u.id ? `#${u.id}` : ''}` } : { element: `report:${slug}${u.id ? `#${u.id}` : ''}` })
@@ -2030,13 +2095,13 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
     keys.push({ key: 'prev', hotkey: 'p', onPress: () => void prev() }, { key: 'next', hotkey: 'n', onPress: () => void next() })
     hints.push('p n to step')
     if (form === 'slides' && units.some(x => str((x as { notes?: unknown }).notes))) {
-      const flip = () => void openPanel(cx, { ...p, mode: p.mode === 'notes' ? '' : 'notes' })
+      const flip = () => void openPanel(cx, { ...p, mode: p.mode === 'notes' ? '' : 'notes' }, { replace: true })
       controls.push(<Button key="doc-notes-flip" label={p.mode === 'notes' ? 'hide notes' : 'notes'} plain onPress={flip} />)
       keys.push({ key: 'notes', hotkey: 'o', onPress: flip })
       hints.push('o for notes')
     }
     if (form === 'story') {
-      const page = () => void openPanel(cx, { ...p, mode: 'page', start: 0 })
+      const page = () => void openPanel(cx, { ...p, mode: 'page', start: 0 }, { replace: true })
       controls.push(<Button key="doc-page-read" label="read as a page" plain onPress={page} />)
       keys.push({ key: 'page', hotkey: 'a', onPress: page })
       hints.push('a for the page')
@@ -2080,7 +2145,7 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
     }
     hints.push(forms.join(', '))
   }
-  const all = () => void openPanel(cx, { view: 'docs', title: 'Documents' })
+  const all = () => void openList(cx, { view: 'docs', title: 'Documents' })
   controls.push(<Button key="doc-all" label="all documents ›" plain onPress={all} />)
   keys.push({ key: 'all', hotkey: 'l', onPress: all })
   hints.push('l for all documents')
@@ -2109,9 +2174,6 @@ export function fileType(path: string, kind: string, opens = ''): string {
   const dot = name.lastIndexOf('.')
   return dot > 0 && name.length - dot <= 9 ? name.slice(dot + 1).toLowerCase() : 'text'
 }
-
-/** Paths in natural order (`run-2` before `run-10`), as home lists them. */
-const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true })
 
 function fmtSize(n: number): string {
   return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`
@@ -2182,9 +2244,10 @@ function opensAs(page: Obj | undefined): string {
 
 /** The file browser (SPEC.md, section 7, "The file browser"): a folder per group, which folds; an open folder
  *  shows its first 20 files (`… N more` shows them all), each by its name at A4, cut in its middle, its folder's row with
- *  the folder's size; `❯` and the
- *  accent on the chosen file, whose name, what it opens as and its first lines show
- *  under the second rule; Enter or a second click opens it, Space folds its folder. */
+ *  the folder's size; `❯` and the accent on the chosen row, a folder's or a file's (a row is chosen as it opens: the
+ *  first file of the first open folder), the chosen file's name, what it opens as and its first lines under the second
+ *  rule; Enter or a second click opens a file and folds a folder, Space folds the chosen row's folder and the choice
+ *  moves onto the folder's row (live check term-fix9, quirk 7). */
 async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button } = cx.els(e)
@@ -2193,64 +2256,64 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   if (!got) return none(cx, e, '◌ reading the files')
   if (!got.ok) return <Box flexDirection="column"><Text color={COLORS.problem} wrap="wrap">{`× ${got.error}`}</Text></Box>
   // each folder's files in natural order, as home lists them; the folder of the corpus's own files first
-  const files = filesOf(got)
-    .map(f => ({ ...f, kind: fileType(f.path, f.kind, rt.opens.get(f.path)?.as) }))
-    .sort((a, b) => {
-      const da = a.path.includes('/') ? a.path.slice(0, a.path.lastIndexOf('/') + 1) : ''
-      const db = b.path.includes('/') ? b.path.slice(0, b.path.lastIndexOf('/') + 1) : ''
-      return da === db ? natural(a.path, b.path) : !da ? -1 : !db ? 1 : natural(da, db)
-    })
+  const files = sortPaths(filesOf(got).map(f => ({ ...f, kind: fileType(f.path, f.kind, rt.opens.get(f.path)?.as) })))
   const ui = await cx.filesUi()
   const byDir = new Map<string, FileEntry[]>()
-  for (const f of files) {
-    const d = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/') + 1) : ''
-    byDir.set(d, [...(byDir.get(d) ?? []), f])
-  }
+  for (const f of files) byDir.set(dirOf(f.path), [...(byDir.get(dirOf(f.path)) ?? []), f])
+  const dirs = [...byDir.keys()]
   const root = `${(await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'}/`
   const kindW = Math.max(4, ...files.map(f => width(f.kind)))
   const sizeW = Math.max(4, ...files.map(f => fmtSize(f.size).length))
   const body: RenderElement[] = [...headerEls(els, { title: 'Files', cols, sub: subLine([plural(files.length, 'file')]) })]
   const lines: Line[] = []
   const hits: LineHit[] = []
+  // the rows the keys step through, in order: each folder's (`dir:<folder>`), then its files shown
   const order: string[] = []
-  const dirOf = new Map<string, string>()
-  const pick = ui.pick && files.some(f => f.path === ui.pick) ? ui.pick : ''
+  const opened = new Map(dirs.map((d, i) => [d, folderOpen(ui, d, i === 0)]))
+  // the row chosen: the analyst's (a file in a folded folder by its folder's row), else the first file of the first open
+  // folder
+  const known = (k: string) => (k.startsWith('dir:') ? byDir.has(k.slice(4)) : files.some(f => f.path === k))
+  let pick = ui.pick && known(ui.pick) ? ui.pick : firstChoice(files, ui)
+  if (pick && !pick.startsWith('dir:') && !opened.get(dirOf(pick))) pick = `dir:${dirOf(pick)}`
+  const pickFile = pick && !pick.startsWith('dir:') ? pick : ''
   let pickY = -1
-  const choose = (path: string) => async () => {
+  const choose = (key: string) => async () => {
     const cur = await cx.filesUi()
-    if (cur.pick === path) return openFile(cx, path)
-    await cx.setFilesUi({ ...cur, pick: path })
-    await readSurface(cx, `file:${path}:1`, 'files', [path])
+    await cx.setFilesUi({ ...cur, pick: key })
+    if (!key.startsWith('dir:')) await readSurface(cx, `file:${key}:1`, 'files', [key])
     await cx.bumpPanel()
   }
+  // a click on a file: chosen, and opened when it is chosen already
+  const clickFile = (path: string) => async () => (pickFile === path ? openFile(cx, path) : choose(path)())
   const right = (f: FileEntry): Line => [dim(f.kind.padEnd(kindW)), { s: '  ' }, dim(fmtSize(f.size).padStart(sizeW))]
   lines.push(pointed(spread([{ s: '    ' }, dim('name')], [dim('type'.padEnd(kindW)), { s: '  ' }, dim('size'.padStart(sizeW))], cols), false))
-  const flipOf = (dir: string, open: boolean) => async () => {
+  // a folder folded or unfolded, the choice on its row
+  const flip = (dir: string) => async () => {
     const key = `dir:${dir}`
+    const open = opened.get(dir) ?? false
     const cur = await cx.filesUi()
     const without = (xs: string[]) => xs.filter(x => x !== key)
-    await cx.setFilesUi(open ? { ...cur, folded: [...without(cur.folded), key], unfolded: without(cur.unfolded) } : { ...cur, folded: without(cur.folded), unfolded: [...without(cur.unfolded), key] })
+    await cx.setFilesUi(open ? { ...cur, pick: key, folded: [...without(cur.folded), key], unfolded: without(cur.unfolded) } : { ...cur, pick: key, folded: without(cur.folded), unfolded: [...without(cur.unfolded), key] })
     await cx.bumpPanel()
   }
-  const opened = new Map<string, boolean>()
-  ;[...byDir.entries()].forEach(([dir, fs], i) => {
+  for (const [dir, fs] of byDir) {
     const key = `dir:${dir}`
-    const open = i === 0 ? !ui.folded.includes(key) : ui.unfolded.includes(key)
-    opened.set(dir, open)
-    hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: flipOf(dir, open) })
+    const open = opened.get(dir) ?? false
+    if (key === pick) pickY = lines.length
+    hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: flip(dir) })
     // its files' count after its name, as home shows it, and their size under `size`
-    lines.push(pointed(spread([{ s: open ? '▾' : '▸' }, { s: ' ' }, { s: dir || root }, dim(`  ${num(fs.length)}`)], [dim(''.padEnd(kindW)), { s: '  ' }, dim(fmtSize(fs.reduce((k, f) => k + f.size, 0)).padStart(sizeW))], cols), false))
-    if (!open) return
+    lines.push(pointed(spread([{ s: open ? '▾' : '▸' }, { s: ' ' }, { s: dir || root }, dim(`  ${num(fs.length)}`)], [dim(''.padEnd(kindW)), { s: '  ' }, dim(fmtSize(fs.reduce((k, f) => k + f.size, 0)).padStart(sizeW))], cols), key === pick))
+    order.push(key)
+    if (!open) continue
     const whole = (ui.whole ?? []).includes(dir)
     const shown = !whole && fs.length > FOLDER_FILES + 1 ? fs.slice(0, FOLDER_FILES) : fs
     // each file's name at A4, with no dot, as home lists it: the type column names its type
     for (const f of shown) {
       const name = middleCut(f.path.slice(dir.length), Math.max(8, cols - 4 - kindW - sizeW - 6))
       if (f.path === pick) pickY = lines.length
-      hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(f.path) })
+      hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: clickFile(f.path) })
       lines.push(pointed(spread([{ s: '    ' }, { s: name }], right(f), cols), f.path === pick, true))
       order.push(f.path)
-      dirOf.set(f.path, dir)
     }
     if (fs.length > shown.length) {
       // `… N more` shows the folder whole
@@ -2262,35 +2325,32 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       } })
       lines.push(pointed([{ s: '    ' }, dim(more)], false))
     }
-  })
+  }
   if (!files.length) lines.push(pointed([{ s: '  ' }, dim('none')], false))
   const step = async (d: number) => {
     if (!order.length) return
     const at = order.indexOf(pick)
-    const next = order[Math.max(0, Math.min(order.length - 1, at < 0 ? 0 : at + d))]!
-    await cx.setFilesUi({ ...(await cx.filesUi()), pick: next })
-    await readSurface(cx, `file:${next}:1`, 'files', [next])
+    await choose(order[Math.max(0, Math.min(order.length - 1, at < 0 ? 0 : at + d))]!)()
   }
   const onKey = (k: string) => {
     if (k === 'up' || k === 'k') return step(-1)
     if (k === 'down' || k === 'j') return step(1)
-    if ((k === 'return' || k === 'enter') && pick) return openFile(cx, pick)
-    // Space folds the chosen file's folder
-    if ((k === 'space' || k === ' ') && pick) {
-      const dir = dirOf.get(pick) ?? ''
-      return flipOf(dir, opened.get(dir) ?? true)()
-    }
+    // Enter opens the chosen file, or folds the chosen folder; Space folds the chosen row's folder
+    if ((k === 'return' || k === 'enter') && pick) return pickFile ? openFile(cx, pickFile) : flip(pick.slice(4))()
+    if ((k === 'space' || k === ' ') && pick) return flip(pickFile ? dirOf(pickFile) : pick.slice(4))()
     return undefined
   }
   // the chosen file: its name, what it opens as, its first lines, as many of six as leave the tree eight rows in a
   // short pane (the path row, the header, the column names, the rule, the name and the hint row aside)
+  const hintKeys = ['↑↓ to choose', 'Enter to open', 'Space to fold']
+  const hintH = hintHeight(hintKeys, cols)
   const preview: RenderElement[] = []
-  const firstLines = bodyRows ? Math.max(0, Math.min(6, bodyRows - 1 - body.length - 2 - 2 - 8)) : 6
-  if (pick) {
-    const page = await surfaceValue<Obj>(cx, `file:${pick}:1`)
-    const as = page?.ok ? opensAs(page.value) : page && !page.ok ? '' : ''
+  const firstLines = bodyRows ? Math.max(0, Math.min(6, bodyRows - 1 - body.length - 2 - 1 - hintH - 8)) : 6
+  if (pickFile) {
+    const page = await surfaceValue<Obj>(cx, `file:${pickFile}:1`)
+    const as = page?.ok ? opensAs(page.value) : ''
     preview.push(ruleEl(els, cols, 'rule-preview'))
-    preview.push(lineEl(els, spread([{ s: pick }], as ? [dim(`opens as ${as}`)] : [], cols), 'preview-name'))
+    preview.push(lineEl(els, spread([{ s: pickFile }], as ? [dim(`opens as ${as}`)] : [], cols), 'preview-name'))
     if (page?.ok && !page.value.binary) {
       const ls = rawLines(page.value).slice(0, firstLines)
       const gw = Math.max(1, ...ls.map(l => String(l.n).length))
@@ -2299,8 +2359,8 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     if (page && !page.ok) preview.push(<Text key="preview-err" color={COLORS.problem} wrap="truncate-end">{`× ${page.error}`}</Text>)
     if (!page) preview.push(<Text key="preview-wait" dimColor>◌ reading</Text>)
   }
-  // the tree cut to the rows the path row, the header, the preview and the hint row leave, its column names kept
-  const win = windowList('files', lines.slice(1), hits.map(h => ({ ...h, y: h.y - 1 })).filter(h => h.y >= 0), pickY - 1, bodyRows - 1 - body.length - preview.length - 2, () => cx.bumpPanel())
+  // the tree cut to the rows the path row, the header, the column names, the preview and the hint row leave
+  const win = windowList('files', lines.slice(1), hits.map(h => ({ ...h, y: h.y - 1 })).filter(h => h.y >= 0), pickY - 1, bodyRows - 1 - body.length - 1 - preview.length - hintH, () => cx.bumpPanel())
   body.push(linesEl(cx, e, marginKey('files-tree'), [lines[0]!, ...win.lines], win.hits.map(h => ({ ...h, y: h.y + 1 })), cols + MARGIN_W, onKey))
   body.unshift(
     <Box key="file-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
@@ -2308,7 +2368,7 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     </Box>,
   )
   body.push(...preview)
-  body.push(hintsRow(els, ['↑↓ to choose', 'Enter to open', 'Space to fold'], cols))
+  body.push(hintsRow(els, hintKeys, cols))
   return <Box flexDirection="column">{body}</Box>
 }
 
@@ -2418,6 +2478,8 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const wanted = p.mode === 'lines' ? 'raw' : p.mode
   const mode = wanted && modes.includes(wanted) ? wanted : firstMode(page)
   const tabName: Record<string, string> = { table: 'Table', transcript: 'Transcript', raw: 'Raw' }
+  // Backspace goes back to the file browser: ← reaches no element of a pane (listKeysEl)
+  const fileHints = [...(modes.length > 1 ? [`${modes.map((_m, i) => i + 1).join(' ')} for the tabs`] : []), '↑↓ to choose', 'Enter to open', 'Backspace for the files']
   // each tab's name with a cell of space at each side, selected or not, the selected one inverse (SPEC.md, "A panel's
   // header"), so choosing a tab moves none; the row brings its own margin and starts one cell left of the edge, so the
   // first tab's left cell hangs in the margin and its name starts at the edge, where the title starts
@@ -2425,32 +2487,54 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     m === mode ? (
       <Text key={`tab-${m}`} inverse>{` ${tabName[m]} `}</Text>
     ) : (
-      <Button key={`tab-${m}`} label={` ${tabName[m]} `} plain onPress={() => void openPanel(cx, { ...p, mode: m })} />
+      <Button key={`tab-${m}`} label={` ${tabName[m]} `} plain onPress={() => void openPanel(cx, { ...p, mode: m }, { replace: true })} />
     )
-  const earlier = first > 1 ? () => void openPanel(cx, { ...p, start: Math.max(1, first - 200) }) : null
-  const later = total && last < total ? () => void openPanel(cx, { ...p, start: last + 1 }) : null
+  // a page, a tab, a sort or a line chosen in place: back leads where the file was opened from (live check term-fix9,
+  // quirk 12: after a click on a line, b went back to the line clicked before)
+  const here = (q: TermPanel) => openPanel(cx, q, { replace: true })
+  const earlier = first > 1 ? () => void here({ ...p, start: Math.max(1, first - 200) }) : null
+  const later = total && last < total ? () => void here({ ...p, start: last + 1 }) : null
   const subWords = [fileType(path, str(page.kind), firstMode(page) === 'transcript' ? 'transcript' : ''), recs.length ? plural(recs.length, 'record') : '', ls.length ? `lines ${num(first)}-${num(last)}${total ? ` of ${num(total)}` : ''}` : page.binary ? 'raw bytes: not shown' : '']
-  const subRow = (
-    <Box key="file-sub" flexDirection="row">
-      <Box flexShrink={1}>{lineEl(els, subLine(subWords))}</Box>
-      <Box flexGrow={1} />
-      <Box flexShrink={0} flexDirection="row" columnGap={2}>
-        {earlier ? <Button key="file-earlier" label="earlier" plain onPress={earlier} /> : null}
-        {later ? <Button key="file-later" label="later" plain onPress={later} /> : null}
-      </Box>
+  // the facts and `earlier  later` on one row, 2 cells apart, when they fit; else the facts wrapped, the pages on a row
+  // of their own (live check term-fix9, quirk 3: `lines 1…later` ran together in a narrow pane)
+  const subW = lineWidth(subLine(subWords))
+  const navW = (earlier ? 7 : 0) + (later ? 5 : 0) + (earlier && later ? 2 : 0)
+  const pagesEl = (
+    <Box key="file-pages" flexShrink={0} flexDirection="row" columnGap={2}>
+      {earlier ? <Button key="file-earlier" label="earlier" plain onPress={earlier} /> : null}
+      {later ? <Button key="file-later" label="later" plain onPress={later} /> : null}
     </Box>
   )
+  const oneRow = !navW || subW + 2 + navW <= cols
+  const subRows: RenderElement[] = oneRow
+    ? [
+        <Box key="file-sub" flexDirection="row">
+          <Box flexShrink={1}>{lineEl(els, subLine(subWords))}</Box>
+          <Box flexGrow={1} minWidth={navW ? 2 : 0} />
+          {navW ? pagesEl : null}
+        </Box>,
+      ]
+    : [<Box key="file-sub">{lineEl(els, subLine(subWords), undefined, true)}</Box>, <Box key="file-sub-pages" flexDirection="row">{pagesEl}</Box>]
+  // the rows the header takes: its title wrapped, the facts, the pages, the tabs and the rule
+  const headRows = Math.max(1, Math.ceil(width(p.title || path) / cols)) + (oneRow ? 1 : Math.max(1, Math.ceil(subW / cols)) + 1)
   const tabsRow = (
     <Box key={marginKey('file-tabs')} flexDirection="row" paddingLeft={MARGIN_W - 1}>
       {modes.map(m => tab(m))}
     </Box>
   )
-  const more = [subRow, ...(modes.length > 1 ? [tabsRow] : [])]
+  const more = [...subRows, ...(modes.length > 1 ? [tabsRow] : [])]
   const body: RenderElement[] = [...headerEls(els, { title: p.title || path, cols, more })]
   // the record chosen, by its line; a click or ↑↓ chooses another
   const chosen = p.line && p.line >= first && p.line <= last ? p.line : 0
-  const choose = (n: number) => () => openPanel(cx, { ...p, line: n })
-  const back = () => openPanel(cx, { view: 'files', title: 'Files' })
+  const choose = (n: number) => () => here({ ...p, line: n })
+  // Backspace: the file browser in place of the file, the file chosen there and its folder open (live check term-fix9,
+  // quirk 7: after Backspace from a file /thimble files opened, no row was chosen)
+  const back = async () => {
+    const ui = await cx.filesUi()
+    const key = `dir:${path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : ''}`
+    await cx.setFilesUi({ ...ui, pick: path, folded: ui.folded.filter(x => x !== key), unfolded: [...ui.unfolded.filter(x => x !== key), key] })
+    return openList(cx, { view: 'files', title: 'Files' })
+  }
   const lineNs: number[] = []
   const lines: Line[] = []
   const hits: LineHit[] = []
@@ -2517,7 +2601,7 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       const name = cellSeg(`${h}${mark}`, k)
       headLine.push(dim(name))
       const next = sortKey === h && sortDir !== 'desc' ? `${h}:desc` : `${h}:asc`
-      hits.push({ y: 0, x0: MARGIN_W + x, x1: MARGIN_W + x + ws[k]!, row: false, run: () => openPanel(cx, { ...p, sort: next }) })
+      hits.push({ y: 0, x0: MARGIN_W + x, x1: MARGIN_W + x + ws[k]!, row: false, run: () => here({ ...p, sort: next }) })
       x += ws[k]!
     })
     lines.push(pointed(headLine, false))
@@ -2560,19 +2644,20 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
         return choose(lineNs[Math.max(0, Math.min(lineNs.length - 1, at < 0 ? 0 : at + d))]!)()
       }
       if ((k === 'return' || k === 'enter') && chosen) return openCite(cx, `${path}#L${chosen}`, null)
-      if (k === 'tab') return openPanel(cx, { ...p, mode: modes[(modes.indexOf(mode) + 1) % modes.length]! })
+      if (k === 'tab') return here({ ...p, mode: modes[(modes.indexOf(mode) + 1) % modes.length]! })
       return undefined
     }
     // the lines cut to the rows the path row, the header, the chosen record's row and the hint row leave (live check
     // term-fix8, quirk 1: ↓ scrolled the header away and chose no line), a table's column names kept
     const fixed = mode === 'table' ? 1 : 0
-    const win = windowList(`file:${path}`, lines.slice(fixed), hits.map(h => ({ ...h, y: h.y - fixed })).filter(h => h.y >= 0), chosenY - fixed, bodyRows - 2 - body.length - fixed, () => cx.bumpPanel())
+    // the path row, the header's rows, the chosen record's row, the column names and the hint rows aside
+    const used = 1 + headRows + (modes.length > 1 ? 1 : 0) + 1 + (chosen ? 1 : 0) + fixed + hintHeight(fileHints, cols)
+    const win = windowList(`file:${path}`, lines.slice(fixed), hits.map(h => ({ ...h, y: h.y - fixed })).filter(h => h.y >= 0), chosenY - fixed, bodyRows - used, () => cx.bumpPanel())
     body.push(linesEl(cx, e, marginKey('file-body'), [...lines.slice(0, fixed), ...win.lines], [...hits.filter(h => h.y < fixed), ...win.hits.map(h => ({ ...h, y: h.y + fixed }))], cols + MARGIN_W, onKey))
   }
   // the tabs by their digits
-  const keys: Key[] = modes.length > 1 ? modes.map((m, i) => ({ key: `tab${i}`, hotkey: String(i + 1), onPress: () => void openPanel(cx, { ...p, mode: m }) })) : []
-  // Backspace goes back to the file browser: ← reaches no element of a pane (listKeysEl)
-  body.push(...bottomRows(cx, e, cols, [], [], [...(modes.length > 1 ? [`${modes.map((_m, i) => i + 1).join(' ')} for the tabs`] : []), '↑↓ to choose', 'Enter to open', 'Backspace for the files']))
+  const keys: Key[] = modes.length > 1 ? modes.map((m, i) => ({ key: `tab${i}`, hotkey: String(i + 1), onPress: () => void here({ ...p, mode: m }) })) : []
+  body.push(...bottomRows(cx, e, cols, [], [], fileHints))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
@@ -2640,7 +2725,8 @@ async function drawViews(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     viewPick = vs[Math.max(0, Math.min(vs.length - 1, at + d))]?.slug ?? ''
     return cx.bumpPanel()
   }
-  const win = windowList('views-list', lines, hits, vs.findIndex(v => v.slug === pick), bodyRows - 2 - body.length, () => cx.bumpPanel())
+  const listHints = vs.length ? ['↑↓ to choose', 'Enter to open'] : []
+  const win = windowList('views-list', lines, hits, vs.findIndex(v => v.slug === pick), bodyRows - 1 - hintHeight(listHints, cols) - body.length, () => cx.bumpPanel())
   body.push(linesEl(cx, e, marginKey('views-list'), win.lines, win.hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? open(vs.find(v => v.slug === pick)!) : undefined)))
   // each view a press away by its key too, for a surface that draws no Client: no row of its own
   body.unshift(
@@ -2650,7 +2736,7 @@ async function drawViews(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       ))}
     </Box>,
   )
-  body.push(hintsRow(els, vs.length ? ['↑↓ to choose', 'Enter to open'] : [], cols))
+  body.push(hintsRow(els, listHints, cols))
   const hk = hiddenKeys(cx, e, vs.slice(0, 9).map((v, i) => ({ key: `v${i}`, hotkey: String(i + 1), onPress: () => void open(v) })))
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
@@ -2690,6 +2776,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   takeListKeys()
   hotkeysDrawing = new Map()
   listExtraDrawing = { space: false, backspace: false }
+  fieldsDrawing = new Set()
   windowed = ''
   const body = await (async () => {
     switch (p.view) {
@@ -2732,6 +2819,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   hotkeys = hotkeysDrawing
   listExtra = listExtraDrawing
   shownWindow = windowed
+  rt.fields = fieldsDrawing
   return tree
 }
 

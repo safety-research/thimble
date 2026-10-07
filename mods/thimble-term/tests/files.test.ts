@@ -55,10 +55,21 @@ async function browser($: E, w: World): Promise<M> {
   return (await $.ui.mount(PANE)) as unknown as M
 }
 
-/** A click on the tree's row that shows `text`, twice (the first chooses, the second opens). */
+/** The tree's row that shows `text` chosen: a click on it, unless it is chosen already (the first file is, as the
+ *  browser opens: live check term-fix9, quirk 7), where a click would open it. */
+async function chooseRow($: E, w: World, pane: M, text: string): Promise<M> {
+  const rows = ((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []
+  if (shown(rows.find(r => shown(r).includes(text))).startsWith('❯')) return pane
+  return openRow($, w, pane, text, 1)
+}
+
+/** A click on the tree's row that shows `text`, twice (the first chooses, the second opens); a row chosen already (the
+ *  first file, chosen as the browser opens) opens at the first. */
 async function openRow($: E, w: World, pane: M, text: string, times = 2): Promise<M> {
   for (let i = 0; i < times; i++) {
-    const rows = ((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []
+    const tree = await pane.drawn({ in: 'm:files-tree' }).catch(() => null)
+    if (!tree) break
+    const rows = (tree as { children?: unknown[] }).children ?? []
     await pane.pointer({ type: 'down', x: 6, y: rows.findIndex(r => shown(r).includes(text)), button: 'left', in: 'm:files-tree' } as never)
     await w.clock.settle()
     await pane.redraw()
@@ -77,7 +88,7 @@ test("the file browser: a long name cut in its middle, its extension kept; no do
   w.pages['chat.jsonl'] = CHAT
   await start($, w)
   let pane = await browser($, w)
-  pane = await openRow($, w, pane, 'chat.jsonl', 1)
+  pane = await chooseRow($, w, pane, 'chat.jsonl')
   const tree = ((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []
   const chosen = tree.find(r => shown(r).includes('chat.jsonl'))
   // the chosen row in the accent across, `❯` before it
@@ -208,8 +219,10 @@ test('the file browser lists each folder in natural order, as home does; a folde
   await start($, w)
   const pane = await browser($, w)
   const tree = ((((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []) as unknown[]).map(r => shown(r))
-  const names = tree.filter(r => /\.jsonl/.test(r)).map(r => r.trim().split(/\s+/)[0])
+  const names = tree.filter(r => /\.jsonl/.test(r)).map(r => r.replace(/^❯/, '').trim().split(/\s+/)[0])
   expect(names).toEqual(['events.jsonl', 'pages.jsonl', 'run-2.jsonl', 'run-10.jsonl'])
+  // the first file is chosen as the browser opens (live check term-fix9, quirk 7)
+  expect(tree.find(r => r.includes('events.jsonl'))).toMatch(/^❯/)
   expect(tree.find(r => r.includes('run-2.jsonl'))).toMatch(/jsonl +10 B$/)
   await pane.unmount()
 })
@@ -267,7 +280,7 @@ test("a file thimble knows only as text that opens as a transcript says `transcr
   expect(shown(tree.find(r => shown(r).includes('agent-chat.jsonl')))).toMatch(/agent-chat\.jsonl +transcript +10 B$/)
   expect(shown(tree.find(r => shown(r).includes('pages.jsonl')))).toMatch(/pages\.jsonl +jsonl +10 B$/)
   expect(w.calls.some(c => c[2] === 'opens' && JSON.parse(c[5]!).includes('agent-chat.jsonl'))).toBe(true)
-  pane = await openRow($, w, pane, 'agent-chat.jsonl', 1)
+  pane = await chooseRow($, w, pane, 'agent-chat.jsonl')
   expect(shown(await pane.drawn())).toContain('opens as transcript')
   await pane.unmount()
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
@@ -284,9 +297,10 @@ test("the Raw tab shows a file's lines as the file holds them: a transcript's re
   w.pages['chat.jsonl'] = CHAT
   await start($, w)
   let pane = await browser($, w)
-  pane = await openRow($, w, pane, 'chat.jsonl', 1)
+  pane = await chooseRow($, w, pane, 'chat.jsonl')
   // the preview: the file's first lines, not its turns' words
   expect(shown(await pane.drawn())).toContain('{"author": "alice", "body": "Who saved the page?", "at": "10:00"}')
+  // a second click on the chosen file opens it
   pane = await openRow($, w, pane, 'chat.jsonl', 1)
   await pane.press({ key: 'hk-tab2' })
   await w.clock.settle()

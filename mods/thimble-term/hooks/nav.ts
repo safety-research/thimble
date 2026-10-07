@@ -85,12 +85,18 @@ export function threadOnTrail(trail: readonly ChatNavStep[]): string {
 const SEP = 3 // " › "
 const MIN_CRUMB = 12
 
+/** The cells a fitted breadcrumb takes, separators and the "…" of folded crumbs included. */
+export function crumbsWidth(fitted: readonly (string | null)[], w: (s: string) => number = width): number {
+  return fitted.reduce<number>((n, s, i) => n + (s === null ? (fitted[i - 1] === null ? 0 : 1 + SEP) : w(s) + (i ? SEP : 0)), 0)
+}
+
 /** The breadcrumb's words in `room` columns, separators included: each crumb at most 34 columns; the crumbs after the
  *  first folded, oldest first, into one "…" (null marks a folded crumb) while they would not fit at 12 columns each;
- *  then the longest shortened a column at a time; the last cut to what is left. */
+ *  then the longest shortened a column at a time; the last cut to what is left, so the words never take more than
+ *  `room` while it holds the first crumb and one cell of the last (live check term-fix9, quirk 3). */
 export function fitCrumbs(labels: readonly string[], room: number): (string | null)[] {
   const out: (string | null)[] = labels.map(l => clip(l, 34))
-  const total = (w: (s: string) => number) => out.reduce<number>((n, s, i) => n + (s === null ? (out[i - 1] === null ? 0 : 1 + SEP) : w(s) + (i ? SEP : 0)), 0)
+  const total = (w: (s: string) => number) => crumbsWidth(out, w)
   const least = (s: string) => Math.min(width(s), MIN_CRUMB)
   for (let i = 1; total(least) > room && i < out.length - 1; i++) out[i] = null
   for (let guard = 0; total(width) > room && guard < 400; guard++) {
@@ -102,8 +108,11 @@ export function fitCrumbs(labels: readonly string[], room: number): (string | nu
     out[top] = cut(out[top]!, width(out[top]!) - 1)
   }
   const last = out.length - 1
-  if (total(width) > room && last >= 0 && out[last] !== null) out[last] = cut(out[last]!, Math.max(4, width(out[last]!) - (total(width) - room)))
-  return out
+  if (total(width) > room && last >= 0 && out[last] !== null) out[last] = cut(out[last]!, Math.max(1, width(out[last]!) - (total(width) - room)))
+  if (total(width) <= room || out.length < 2) return out
+  // no room for one cell of the last step: every step after the first folded into the "…", else the first alone
+  const folded = [out[0]!, ...out.slice(1).map(() => null)]
+  return crumbsWidth(folded) <= room ? folded : [out[0]!]
 }
 
 // ------------------------------------------------------------------------------------------------ the threads tree

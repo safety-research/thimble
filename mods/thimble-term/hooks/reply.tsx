@@ -539,8 +539,13 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
     return <Text color={COLORS.problem} wrap="wrap">{`× ${name} cannot be drawn: ${tc.error || 'the card is not in this workspace'}`}</Text>
   }
   let data = await withQuotes(cx, tc.data as CardData)
-  // a label with no run yet whose run is going (a chat follows it): `◌ labeling`, not `not run yet`
-  if (data.kind === 'label' && !(data.rows ?? []).length && data.note && data.label && labelRunning((await cx.agents()) ?? [], data.label.name)) data = { ...data, note: '◌ labeling' }
+  // a label whose run is going (a chat follows it): `◌ labeling`, with the records labeled so far once its bars show
+  // them, never `not run yet` or `stopped at` (live check term-fix9, quirk 4)
+  if (data.kind === 'label' && data.label && labelRunning((await cx.agents()) ?? [], data.label.name)) {
+    const lb = data.label
+    const n = (x: number) => x.toLocaleString('en-US')
+    data = { ...data, note: (data.rows ?? []).length && lb.labeled ? `◌ labeling ${n(lb.labeled)}${lb.total > lb.labeled ? ` of ${n(lb.total)}` : ''}` : '◌ labeling' }
+  }
   const meta = { ...(tc.busy ? { busy: tc.busy } : {}), ...(tc.error ? { error: tc.error } : {}) }
   const inner = Math.max(10, w - 4)
   const rows: RenderElement[] = []

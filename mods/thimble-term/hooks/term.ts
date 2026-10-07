@@ -13,8 +13,9 @@ import type { Area, Scope, Signature } from './data'
 import { cid, citations, clip, labelRef, noteDocPlace, noteLabelName, noteQuestion, questionOf, quoted } from './lib'
 import type { Citation } from './lib'
 import { agentsOf, cellOf, cellsOf, chatOf, docUnits, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
+import { firstChoice } from './files'
 import { keepSeen, keptSeen } from './kept'
-import { NAV_EMPTY, backTarget, moved, nextTrail } from './nav'
+import { NAV_EMPTY, backTarget, moved, nextTrail, withBack } from './nav'
 import { signalEnd, withSignal } from './signal'
 
 export const P = 'thimble-term'
@@ -42,6 +43,10 @@ export const rt = {
   // the key of the panel's element that holds its focus ring (ui.focus), '' for none: while a text field holds it, the
   // letters a hint names go into the field
   panelFocus: '',
+  // the text fields the panel's last drawing drew, by their keys: a ring a field held stays there only while the panel
+  // draws that field (live check term-fix9, quirk 1: back from a new thread's form, the citation panel's hint still said
+  // `Enter to ask · Esc to leave the field`)
+  fields: new Set<string>(),
   // a key the panel does not bind went to the prompt (panel.tsx typeThrough): until the prompt has the keys the panel
   // draws neither its list's keys nor its hotkeys, so the next key reaches the prompt
   typeThrough: false,
@@ -403,18 +408,25 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
         await readSurface(cx, 'docs', 'docs')
         const writer = (await cx.agents()).find(a => a.role === 'writer' && a.state === 'running')
         if (writer?.chat) await readThread(cx, writer.chat)
-        await readSurface(cx, `doc:${p.slug}`, 'doc', [p.slug])
-        const doc = await surfaceValue<Record<string, unknown>>(cx, `doc:${p.slug}`)
-        const ids = doc?.ok ? docUnits(doc.value).units.flatMap(s => (s.figures ?? []).map(f => String(f.cell ?? '').replace(/^(?:card|cell):/, ''))).filter(Boolean) : []
-        await loadCards(cx, ids)
+        await readDoc(cx, p.slug)
       }
       return
     case 'files': {
       await readSurface(cx, 'files', 'files')
       await readOpens(cx)
-      // the chosen file's first lines, shown under the list
-      const pick = (await cx.filesUi()).pick
-      if (pick) await readSurface(cx, `file:${pick}:1`, 'files', [pick])
+      // the row chosen: the analyst's, else the first file of the first open folder (live check term-fix9, quirk 7: no
+      // row was chosen as the browser opened); the chosen file's first lines, shown under the list
+      let ui = await cx.filesUi()
+      if (!ui.pick) {
+        const got = (await cx.surface('files')) as SurfaceGot | undefined
+        const list = got?.ok ? (Array.isArray(got.value) ? got.value : (got.value as { files?: unknown })?.files) : []
+        const first = firstChoice((Array.isArray(list) ? list : []).filter((f): f is { path: string } => typeof (f as { path?: unknown })?.path === 'string'), ui)
+        if (first) {
+          ui = { ...ui, pick: first }
+          await cx.setFilesUi(ui)
+        }
+      }
+      if (ui.pick && !ui.pick.startsWith('dir:')) await readSurface(cx, `file:${ui.pick}:1`, 'files', [ui.pick])
       return
     }
     case 'file':
@@ -440,6 +452,24 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
       return
     default:
   }
+}
+
+/** A document read for the panel, with the cards it draws as figures and those its words cite read first, so its
+ *  first drawing names each card by its question (live check term-fix9, quirk 9: a sentence read `(a card)` until the
+ *  panel drew again). */
+export async function readDoc(cx: Ctx, slug: string): Promise<void> {
+  if (!rt.sc) return
+  const got = await readState(cx, rt.sc, 'doc', [slug])
+  if (got.ok) {
+    const card = (ref: string) => /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(ref.trim())?.[1] ?? ''
+    const { units } = docUnits(got.value as Record<string, unknown>)
+    const figures = units.flatMap(u => [...(u.figures ?? []), ...(u.figure ? [u.figure] : [])].map(f => card(String(f.cell ?? '')))).filter(Boolean)
+    const words = units.flatMap(u => [String(u.heading ?? ''), ...[...(u.paragraphs ?? []).flatMap(q => q.sentences ?? []), ...(u.sentences ?? [])].map(x => String(x.text ?? '')), ...(u.figures ?? []).map(f => String(f.caption ?? ''))])
+    const cited = [...new Set(words.flatMap(w => citations(w).map(c => card(c.ref)).filter(Boolean)))].filter(id => !figures.includes(id) && !questionOf(id) && !rt.named.has(id))
+    await loadCards(cx, figures)
+    await nameCards(cx, cited)
+  }
+  await cx.setSurface(`doc:${slug}`, got.ok ? { ok: true, value: got.value } : { ok: false, error: got.error })
 }
 
 /** What a panel's step remembers: its view, what names it, and the panel whole (in `mode`), so back shows it again. */
@@ -494,11 +524,17 @@ async function threadChain(cx: Ctx, p: TermPanel, step: ChatNavStep): Promise<Ch
 }
 
 /** Show `p` in the panel: its step on the panel's way, its data read, the pane opened with the keys. A pane opened
- *  from a click on a narrow terminal waits undrawn: the row above the prompt offers it (`pending`). */
-export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
+ *  from a click on a narrow terminal waits undrawn: the row above the prompt offers it (`pending`). `replace`: `p` takes
+ *  the place of the step the panel shows, and back leads where it led (a line chosen in a file, a tab, a slide; the
+ *  thread a new thread's form asked). */
+export async function openPanel(cx: Ctx, p: TermPanel, opts: { replace?: boolean } = {}): Promise<void> {
   const step = stepOf(p)
   let nav = rt.navTo
   rt.navTo = null
+  if (!nav && opts.replace) {
+    const cur = (await cx.nav()) ?? NAV_EMPTY
+    if (cur.trail.length) nav = { trail: [...cur.trail.slice(0, -1), step], back: cur.back.slice() }
+  }
   if (!nav) {
     const cur = (await cx.nav()) ?? NAV_EMPTY
     nav = moved(cur, nextTrail(cur.trail, step, await inPanel(cx), p.view === 'thread' ? await threadChain(cx, p, step) : [step]))
@@ -531,28 +567,33 @@ export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
  *  while the hint named ↑↓). Asked again while the prompt holds them over an empty composer, Claude Code gives them;
  *  else the panel's hint row says how to give them (panel.tsx endHints). */
 function giveKeys(cx: Ctx, title: string, ringOn = RELAY_PICK): void {
-  const ask = async (last: boolean) => {
+  // `left`: how many more times the ring is asked onto the keys while the view that draws them may not be drawn yet;
+  // `reopened`: the pane was opened again to take the keys from the prompt
+  const ask = async (left: number, reopened: boolean) => {
     const pane = (await cx.panes()).find(p => p.id === PANEL)
     if (!pane?.isPlaced) return
     if (pane.isFocused !== false) {
       // the ring onto the list's keys (a ring there already stays, and the call says so); a view that draws none leaves
       // the ring where it is, off them. Neither raises a ui.focus (live check term-fix8, quirk 7)
       // a new thread's field likewise: an open of a pane that holds the keys already is no take, so its `autoFocus` puts
-      // no ring there
-      if (rt.panelFocus && rt.panelFocus !== NO_RING && rt.panelFocus !== RELAY_PICK && rt.panelFocus !== ringOn) return
-      if ((await cx.focus(ringOn)) && rt.panelFocus !== ringOn) {
-        rt.panelFocus = ringOn
-        await cx.bumpPanel()
-      }
+      // no ring there. Only a text field the panel draws keeps the ring from them; a button's ring (the hotkey pressed,
+      // `t` for the threads) or a field the view no longer draws does not (live check term-fix9, quirks 1 and 12)
+      if (rt.panelFocus !== ringOn && rt.fields.has(rt.panelFocus)) return
+      if (await cx.focus(ringOn)) {
+        if (rt.panelFocus !== ringOn) {
+          rt.panelFocus = ringOn
+          await cx.bumpPanel()
+        }
+      } else if (left > 0) cx.later(KEYS_AGAIN_MS, () => void ask(left - 1, reopened))
       return
     }
-    if (last || (await cx.promptText().catch(() => '')).trim()) return
+    if (reopened || (await cx.promptText().catch(() => '')).trim()) return
     const p = await cx.panel()
     await cx.open({ id: PANEL, title: p ? paneTitle(p) : title, focus: true, columns: panelColumns() }).catch(() => undefined)
     await cx.bumpPanel()
-    cx.later(KEYS_AGAIN_MS, () => void ask(true))
+    cx.later(KEYS_AGAIN_MS, () => void ask(left, true))
   }
-  cx.later(KEYS_AGAIN_MS, () => void ask(false))
+  cx.later(KEYS_AGAIN_MS, () => void ask(KEYS_TRIES - 1, false))
 }
 
 /** The keys back to the panel after a click on an empty part of a list, which gave them to the list's Client: its keys
@@ -578,8 +619,10 @@ const RELAY_PICK = 'keys-pick'
 const ASK_FIELD = 'ask-new'
 const NO_RING = '-'
 
-/** How long after an open the panel asks for the keys again (giveKeys). */
+/** How long after an open the panel asks for the keys again (giveKeys), and how many times it asks while the ring does
+ *  not go onto them (the list's keys not drawn yet). */
 const KEYS_AGAIN_MS = 120
+const KEYS_TRIES = 4
 
 /** The title Claude Code shows on the pane for what the panel shows: `Citation`, a card's question, `Threads`, `Home`,
  *  a view's name, `Label: <name>`, a document's title, the lists by their names. The path names each step itself. */
@@ -613,6 +656,16 @@ export async function navGo(cx: Ctx, nav: ChatNav): Promise<void> {
   const p = s ? panelOfStep(s) : null
   if (!p) return
   rt.navTo = nav
+  await openPanel(cx, p)
+}
+
+/** A list (`labels`, `docs`) from the step it holds, as the path's list step opens it: in place of that step, back
+ *  leading to the step (live check term-fix9, quirk 10: `l` pushed `home › documents › "…" › documents`). */
+export async function openList(cx: Ctx, p: TermPanel): Promise<void> {
+  const nav = (await cx.nav()) ?? NAV_EMPTY
+  const at = nav.trail.findIndex(s => s.view === p.view)
+  const keep = at >= 0 ? nav.trail.slice(0, at) : nav.trail.slice(0, -1)
+  rt.navTo = { trail: [...keep, stepOf(p)], back: withBack(nav.back, nav.trail) }
   await openPanel(cx, p)
 }
 

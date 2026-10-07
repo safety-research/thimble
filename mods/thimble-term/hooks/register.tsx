@@ -34,7 +34,7 @@ import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThread
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, homeViews, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, relayKey, relayMove, wheelWindow } from './panel'
+import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, relayKey, relayMove, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './reply'
 import { COLORS } from './paint'
@@ -54,6 +54,8 @@ export const THIMBLE_ARGS = '[threads | cite <n> | card <n> | files [path[:line]
 /** What `/thimble` says in terminal mode: the home panel is open, and how to reach the browser instead. */
 export const HOME_LINE = 'thimble: terminal mode. The home panel is open. For the browser workspace, quit, run `thimble mode browser`, and start `thimble` again.'
 
+// the text Claude Code stores as the reply of a turn that ended with none (its `<synthetic>` model's)
+const SYNTHETIC_RE = /^\s*No response requested\.\s*$/
 const THIMBLE_TOOL = /^mcp__plugin_thimble_thimble__/
 const CARD_TOOL = /^mcp__plugin_thimble_thimble__(add_card|edit_card|apply_label)$/
 const VIEW_TOOL = /^mcp__plugin_thimble_thimble__propose_view$/
@@ -736,7 +738,10 @@ export const register: Register = on => {
     // without main's end token, and a `↳ thread` line naming its thread by its first question, not its fork's slug; no
     // such line for a thread whose `↳ thread` row thimble-term drew, which says the same
     const rows = await cx.threads()
-    const text = await withoutSaidWriter(cx, e.requestId, namedThreads(withoutToldThreads(withoutEnd(e.props.text), rows, rt.told), rows))
+    // Claude Code's own stand-in for a reply that never came (its `<synthetic>` text, as after a quit stopped a thread),
+    // which main never wrote: not drawn (live check term-fix9, quirk 13)
+    const said = SYNTHETIC_RE.test(e.props.text) ? '' : e.props.text
+    const text = await withoutSaidWriter(cx, e.requestId, namedThreads(withoutToldThreads(withoutEnd(said), rows, rt.told), rows))
     const live = e.surface === 'terminal' || e.surface === 'desktop'
     if (!ids.length && !told && !views && !footer && text === e.props.text && !live && !needsDrawing(text)) return next(e)
     const { Box } = $.ui.resolve(e)
@@ -977,10 +982,14 @@ export const register: Register = on => {
       void cxOf($).bumpPanel()
       return {}
     }
-    const moved = await next(how === 'park' ? { ...e, element: RELAY.pick } : e)
+    // a ring put back on a text field the panel no longer draws (the new thread's form left by back, live check
+    // term-fix9, quirk 1) is on none of its elements: onto the list's keys when it draws a list
+    const stale = Boolean(rt.sc && e.element && focusedField(e.element) && !rt.fields.has(e.element))
+    const park = how === 'park' || (stale && hasList())
+    const moved = await next(park ? { ...e, element: RELAY.pick } : e)
     try {
       if (rt.sc && !moved.deny) {
-        rt.panelFocus = (how === 'park' ? RELAY.pick : e.element) ?? NO_FOCUS
+        rt.panelFocus = park ? RELAY.pick : stale ? NO_FOCUS : (e.element ?? NO_FOCUS)
         void cxOf($).bumpPanel()
       }
     } catch {

@@ -269,6 +269,21 @@ export function share(a: number, b: number): string {
   return r >= 100 && a < b ? '>99%' : `${r}%`
 }
 
+/** The shares of parts of a whole, each in whole percent as `share` writes it, those of 1% or more rounded so they add
+ *  up to 100% when the parts make the whole (largest remainders; live check term-fix9, low quirk: a label card showed
+ *  38% and 63%). */
+export function shares(parts: readonly number[], total: number): string[] {
+  const out = parts.map(a => share(a, total))
+  if (!total || parts.reduce((a, b) => a + b, 0) !== total) return out
+  // only parts all written in whole percent: a share under 1% or over 99% keeps its own words (`0.4%`, `>99%`)
+  const ps = parts.map(a => (100 * a) / total)
+  if (ps.some(p => p > 0 && (p < 1 || p >= 99.5))) return out
+  const r = ps.map(p => Math.floor(p))
+  const order = ps.map((p, i) => ({ i, rest: p - Math.floor(p) })).filter(x => x.rest > 0).sort((a, b) => b.rest - a.rest)
+  for (let k = 0, left = 100 - r.reduce((a, b) => a + b, 0); k < order.length && left > 0; k++, left--) r[order[k]!.i]!++
+  return ps.map((p, i) => (p > 0 ? `${r[i]}%` : out[i]!))
+}
+
 /** The colour of a label's value, as the label panel draws it: the categorical palette in the label's order, and the
  *  last value of two or more, the one that is not the category, dim. */
 export function valueColour(values: readonly string[], value: string): string | undefined {
@@ -373,7 +388,8 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
   const sum = own ? (card.total ?? rows.reduce((a, r) => a + r.value, 0)) : 0
   // a count reads with thousands separators from 1,000, as everywhere the mod draws one
   const shown = (v: number) => (own || (Number.isInteger(v) && Math.abs(v) >= 1000) ? count(v) : fmt(v))
-  const shareW = own ? Math.max(...rows.map(r => share(r.value, sum).length)) + 2 : 0
+  const parts = own ? shares(rows.map(r => r.value), sum) : []
+  const shareW = own ? Math.max(...parts.map(x => x.length)) + 2 : 0
   const valueW = Math.max(...rows.map(r => shown(r.value).length), 1)
   // 2-cell gutters after the names and before the numbers (rule 3)
   const room = cols - valueW - 4 - shareW
@@ -408,7 +424,7 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
       ...(track ? [{ s: track, fg: COLORS.rule }] : []),
       { s: ' '.repeat(Math.max(2, barW - width(b) - width(track) + 2)) },
       { s: pad(shown(r.value), valueW, true) },
-      ...(own ? [{ s: pad(share(r.value, sum), shareW, true), fg: COLORS.dim }] : []),
+      ...(own ? [{ s: pad(parts[i]!, shareW, true), fg: COLORS.dim }] : []),
     ])
     owner.push(i)
     if (second) {
@@ -418,6 +434,8 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
   })
   if (more > 0) lines.push([{ s: `… ${more} more`, fg: COLORS.dim }])
   if (card.total !== undefined) lines.push([{ s: 'all  ', fg: COLORS.dim }, { s: shown(card.total) }])
+  // a label card's state while no run of it ended: `◌ labeling 3,000 of 4,579`, `stopped at 3,150 of 4,579`
+  if (own && card.note) lines.push(card.note.startsWith('◌') ? [{ s: card.note }] : [{ s: card.note, fg: COLORS.dim }])
   // the legend on its own row under the chart; none when a label it read names the groups on its label row
   const named = new Set(cardLabels(card).flatMap(l => l.values))
   if (groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map((g, j) => [{ s: '● ', fg: classColour(card, g) ?? COLORS.series[j % COLORS.series.length] }, { s: g }]), cols))

@@ -505,13 +505,11 @@ test("a tool's layout record opens the file browser: folders that fold, a file c
   const tree = shown(await pane.drawn({ in: 'm:files-tree' }))
   for (const s of ['▾ wiki/', 'README.md', '▸ data/', 'markdown', '52.0 MB']) expect(tree).toContain(s)
   expect(shown(await pane.drawn())).toContain('3 files')
-  // a click on a file chooses it: its first lines under the second rule
+  // the first file is chosen as the browser opens (live check term-fix9, quirk 7): its first lines under the second rule
   const y = await rowOf(pane, 'm:files-tree', 'README.md')
-  await pane.pointer({ type: 'down', x: 6, y, button: 'left', in: 'm:files-tree' } as never)
-  await w.clock.settle()
-  await pane.redraw()
+  expect((((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []).map(r => shown(r)).find(r => r.includes('README.md'))).toMatch(/^❯/)
   expect(shown(await pane.drawn())).toContain('Collusion wiki')
-  // a second click opens it on its lines
+  // a click on the chosen file opens it on its lines
   await pane.pointer({ type: 'down', x: 6, y, button: 'left', in: 'm:files-tree' } as never)
   await w.clock.settle()
   await pane.redraw()

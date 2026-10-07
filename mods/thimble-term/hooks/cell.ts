@@ -7,6 +7,7 @@
 // HTML card draws as its text. A label card's counts and records come from the label (`thimble state label`).
 import type { TermLinks } from '../types'
 import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode } from './draw'
+import { labelState, labelStateWords } from './lib'
 
 /** A cell as the workspace stores it: the fields the drawing reads. */
 export type ThimbleCell = {
@@ -56,6 +57,8 @@ export type ThimbleLabel = {
   rows?: { ref?: string; label?: string; rationale?: string; analyst?: unknown; text?: string; confidence?: number; match?: string }[]
   /** its revision, which steps whenever its rows or its definition change (concepts.note_change) */
   rev?: number
+  /** the records its scope holds, given for a label with rows and no run that ended (backend local._scope_total) */
+  scope_total?: number
 }
 
 export const FRAME = 'application/vnd.thimble.frame+json'
@@ -408,8 +411,11 @@ export function labelCard(cell: ThimbleCell, label: ThimbleLabel | null): CardDa
   const paths = run?.paths ?? (label.glob ? label.glob.split(/,\s*/).filter(Boolean) : [])
   const info = { slug: label.id, name: label.name ?? label.id, kind: label.kind ?? '', values, labeled, total, trial: Boolean(label.trial), paths }
   // a label with no run says so, as home and its panel do, with no bars and no counts (live check term-fix8, quirk 8:
-  // the card a stopped thread left showed yes 0, no 0 and all 0)
-  if (!run) return { ...card, question: card.question || label.name || '', x: 'value', y: label.unit ?? 'record', rows: [], examples: [], note: 'not run yet', label: info }
+  // the card a stopped thread left showed yes 0, no 0 and all 0); one whose first run stopped part way shows the counts
+  // it has, and says where it stopped (live check term-fix9, quirk 4)
+  const st = labelState(label, [])
+  if (!run && !st.stopped) return { ...card, question: card.question || label.name || '', x: 'value', y: label.unit ?? 'record', rows: [], examples: [], note: 'not run yet', label: { ...info, total: st.total ?? labeled } }
+  if (!run) return { ...card, question: card.question || label.name || '', x: 'value', y: label.unit ?? 'record', rows, total: labeled, examples, note: labelStateWords(st), label: { ...info, total: st.total ?? labeled } }
   return {
     ...card,
     question: card.question || label.name || '',

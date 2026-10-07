@@ -13,9 +13,9 @@
 // row the keys chose.
 import type { Line, Seg } from './draw'
 import { lineWidth, share as pct, valueColour, width, wrapRows } from './draw'
-import { ACCENT, FRESH, MARGIN_W, fitTo, headingLine, hintLine, pointed, ruleLine, spread } from './chrome'
+import { ACCENT, FRESH, MARGIN_W, fitTo, headingLine, hintLines, pointed, ruleLine, spread } from './chrome'
 import { COLORS } from './paint'
-import { quoted } from './lib'
+import { cutMiddle, quoted } from './lib'
 
 export type SectionId = 'views' | 'reports' | 'threads' | 'cards' | 'labels' | 'files'
 
@@ -31,7 +31,7 @@ export type HomeOpen =
 
 /** A click's act: open something, fold or unfold a card group or a folder (`key`, `open` as it is drawn now), show a
  *  section whole. */
-export type HomeAct = { op: 'open'; open: HomeOpen } | { op: 'fold'; key: string; open: boolean } | { op: 'more'; sec: SectionId }
+export type HomeAct = { op: 'open'; open: HomeOpen } | { op: 'fold'; key: string; open: boolean } | { op: 'more'; sec: SectionId; next?: string }
 
 /** What the analyst chose: the groups and folders folded or unfolded against their default (the newest group and the
  *  first folder open), the sections shown whole, and the row the keys chose (its key). */
@@ -50,7 +50,7 @@ export type HomeCard = { id: string; kind: string; question: string; fresh?: boo
 export type HomeCardGroup = { head: string; from: 'answer' | 'thread' | 'report' | 'other'; cards: HomeCard[]; at: number }
 /** `ran`: whether the label has a run, as its panel's `last run on …` or `not run yet` says (a label a stopped thread
  *  left is none); absent is true. */
-export type HomeLabel = { slug: string; name: string; kind: string; trial: boolean; counts: Record<string, number>; values: string[]; paths: string[]; running: boolean; ran?: boolean }
+export type HomeLabel = { slug: string; name: string; kind: string; trial: boolean; counts: Record<string, number>; values: string[]; paths: string[]; running: boolean; ran?: boolean; state?: string; fresh?: boolean }
 /** thimble-term: a file whose reading thimble does not count (`listed`) has no state glyph and shows its kind. */
 export type HomeFile = { file: string; records: number | null; size: number; seen: number; state: 'read' | 'scanned' | 'untouched' | 'listed'; ranges: number[][]; kind?: string }
 export type HomeData = {
@@ -97,6 +97,8 @@ export type HomeRow = {
   after?: Seg[]
   /** what stands at R in place of `right` when `right` would cut the title (a thread's row without its subject) */
   short?: Seg[]
+  /** cut in its middle, so its end shows: a card of a group whose questions share their first words (lib.ts cutMiddle) */
+  middle?: boolean
   fresh?: boolean
   right?: Seg[]
   bar?: { n: number; fg: string }[]
@@ -247,6 +249,20 @@ function groupName(g: HomeCardGroup): string {
   return head
 }
 
+/** The fewest characters of first words a group's questions share before its rows are cut in their middle. */
+const SHARED_HEAD = 16
+
+/** Whether two or more questions share their first SHARED_HEAD characters or more, whole words, and differ after. */
+function sharedHead(qs: readonly string[]): boolean {
+  if (qs.length < 2) return false
+  let n = 0
+  const first = qs[0]!
+  while (n < first.length && qs.every(q => q[n] === first[n])) n++
+  const head = first.slice(0, n)
+  const words = head.includes(' ') ? head.slice(0, head.lastIndexOf(' ')) : ''
+  return words.length >= SHARED_HEAD && qs.some(q => q !== first)
+}
+
 function cardsSection(groups: readonly HomeCardGroup[], ui: HomeUi): HomeSection {
   const n = groups.reduce((k, g) => k + g.cards.length, 0)
   const by = (from: HomeCardGroup['from']) => groups.filter(g => g.from === from).reduce((k, g) => k + g.cards.length, 0)
@@ -266,7 +282,7 @@ function cardsSection(groups: readonly HomeCardGroup[], ui: HomeUi): HomeSection
         right: [dim(plural(g.cards.length, 'card'))],
         fold,
         open,
-        kids: g.cards.map(c => ({ key: `card:${c.id}`, glyph: null, title: c.question, fresh: c.fresh, right: rightOf([c.kind], c.fresh), act: { op: 'open', open: { kind: 'card', id: c.id } } })),
+        kids: g.cards.map(c => ({ key: `card:${c.id}`, glyph: null, title: c.question, fresh: c.fresh, right: rightOf([c.kind], c.fresh), ...(sharedHead(g.cards.map(x => x.question)) ? { middle: true } : {}), act: { op: 'open', open: { kind: 'card', id: c.id } } })),
         act: { op: 'fold', key: fold, open },
       }
     }),
@@ -298,36 +314,43 @@ function labelsSection(ls: readonly HomeLabel[]): HomeSection {
     id: 'labels',
     name: 'Labels',
     count: ls.length,
-    summary: joined(countBy(ls.map(l => (l.running ? 'running' : l.ran === false ? 'not run yet' : l.trial ? 'on a sample' : 'on every record')), ['on every record', 'on a sample', 'running', 'not run yet'])),
+    // the labels new since home was last seen, as the toast counts them (live check term-fix9, low quirk)
+    news: ls.filter(l => l.fresh).length,
+    summary: joined(countBy(ls.map(l => (l.running ? 'running' : l.ran === false ? (l.state?.startsWith('stopped') ? 'stopped' : 'not run yet') : l.trial ? 'on a sample' : 'on every record')), ['on every record', 'on a sample', 'running', 'stopped', 'not run yet'])),
     pane: { kind: 'pane', view: 'labels', title: 'Labels' },
     rows: ls.map(l => {
+      const labeled = l.values.reduce((k, v) => k + (l.counts[v] ?? 0), 0)
       // a label with no run says so, as its panel does, with no bar and no counts (live check term-fix7, new quirk 6:
       // home showed `yes 0 · no 0` and 0 for a label a stopped thread left)
       // one whose first run is going says so (no counts yet)
-      if (l.ran === false)
+      if (l.ran === false && !labeled)
         return {
           key: `label:${l.slug}`,
           glyph: l.running ? WORKING : NOT_STARTED,
           title: l.name,
-          right: [dim(l.running ? 'labeling' : 'not run yet')],
+          fresh: l.fresh,
+          right: rightOf([l.running ? 'labeling' : 'not run yet'], l.fresh),
           meta: joined([l.kind, l.paths.join(', ')]),
           act: { op: 'open', open: { kind: 'label', name: l.name } },
         }
-      const labeled = l.values.reduce((k, v) => k + (l.counts[v] ?? 0), 0)
       // a legend: each value's ● in its hue, its word and count dim as the rest of the secondary row
       const legend: Seg[] = []
       l.values.forEach((v, i) => {
         if (i) legend.push(dim('  '))
         legend.push({ s: '● ', fg: valueColour(l.values, v) }, dim(`${v} ${num(l.counts[v] ?? 0)}`))
       })
+      // what its runs say: a run going (`◌ labeling 3,000 of 4,579`), a first run stopped part way (`stopped at 3,150 of
+      // 4,579`), else what the last run covered (live check term-fix9, quirk 4)
+      const runWords = l.state || (l.trial ? `a sample of ${num(labeled)}` : 'every record')
       return {
         key: `label:${l.slug}`,
         // its ● in the label's color, as the label panel draws it beside its name
         glyph: l.running ? WORKING : { mark: '●', fg: labelHue(l.values) },
         title: l.name,
+        fresh: l.fresh,
         bar: countBar(l.values, l.counts),
-        right: [{ s: num(labeled) }],
-        meta: [...joined([l.kind, l.trial ? `a sample of ${num(labeled)}` : 'every record', l.paths.join(', ')]), dim('  '), ...legend],
+        right: [{ s: num(labeled) }, ...(l.fresh ? [{ s: '  ' }, { s: 'new', fg: FRESH }] : [])],
+        meta: [...joined([l.kind, runWords, l.paths.join(', ')]), dim('  '), ...legend],
         act: { op: 'open', open: { kind: 'label', name: l.name } },
       }
     }),
@@ -416,7 +439,8 @@ export function homeSections(d: HomeData, ui: HomeUi = HOME_UI_EMPTY): HomeSecti
 /** A region a click acts on: its line, its cells, and whether the pointer lights its row (else it is a control, which
  *  the pointer inverts). `pick`: the key of the row it stands for, which the keys step through. */
 export type HomeHit = { y: number; x0: number; x1: number; row: boolean; act: HomeAct; pick?: string }
-export type HomeLayout = { lines: Line[]; hits: HomeHit[]; picks: { key: string; act: HomeAct }[] }
+/** `hintRows`: how many of its last lines are the key hints (chrome.ts hintLines). */
+export type HomeLayout = { lines: Line[]; hits: HomeHit[]; picks: { key: string; act: HomeAct }[]; hintRows: number }
 
 /** The items a section shows before `… N more` (card groups and folders count as items). */
 export const FIRST = 5
@@ -460,6 +484,11 @@ function itemLine(row: HomeRow, x: number, w: number): Line {
   const full: Line = [...bar, ...(row.right ?? [])]
   const room = w - lineWidth(full) - 2 - (lineWidth(left) - width(row.title))
   const right = row.short && lineWidth(left) + 2 + lineWidth(full) > w && room < Math.min(TITLE_MIN, width(row.title)) ? [...bar, ...row.short] : full
+  // a row whose end tells it from the rows beside it, cut in its middle
+  if (row.middle) {
+    const fit = w - lineWidth(right) - 2 - (lineWidth(left) - width(row.title))
+    if (fit > 0 && width(row.title) > fit) return spread([...lead, { s: cutMiddle(row.title, fit) }, ...(row.after ?? [])], right, w)
+  }
   return spread(left, right, w)
 }
 
@@ -486,8 +515,17 @@ function alignRight(sec: HomeSection): void {
   sec.heads = [dim(textFirst ? first.padEnd(recW) : first.padStart(recW)), { s: '  ' }, dim(last.padStart(readW))]
 }
 
+/** A row without `new` in a section where some row has it: its right part ends where the others' words end, before the
+ *  cells `new` takes (live check term-fix9, low quirk: `table  new` beside `table` put the kinds in two columns). */
+function besideNew(r: HomeRow): HomeRow {
+  const pad = (xs: Seg[] | undefined) => (xs?.length ? [...xs, { s: ' '.repeat(NEW_W) }] : xs)
+  return r.fresh ? r : { ...r, right: pad(r.right), short: pad(r.short) }
+}
+const NEW_W = '  new'.length
+
 function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void {
   alignRight(sec)
+  if (sec.rows.some(r => r.fresh || (r.open && r.kids?.some(k => k.fresh)))) sec = { ...sec, rows: sec.rows.map(r => ({ ...besideNew(r), ...(r.kids ? { kids: r.kids.map(besideNew) } : {}) })) }
   const head = headingLine(sec.name, sec.count, sec.news ?? 0)
   out.push(spread(head, sec.heads ?? [], w), sec.pane ? { x0: 0, x1: lineWidth(head), row: false, act: { op: 'open', open: sec.pane } } : undefined)
   // the orientation's coverage line, dim under the Files heading, whole up to four rows
@@ -504,11 +542,14 @@ function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void
     if (r.kids && r.open) {
       // a group's cards at A2 under its name; a folder's files with their glyphs at A2 and their names at A4
       for (const k of r.kids) out.push(itemLine(k, k.glyph ? 2 : 0, w), { x0: 2, x1: w, row: true, act: k.act, pick: k.key })
-      if (r.more) out.push([{ s: '    ' }, dim(`… ${num(r.more)} more`)], { x0: 4, x1: 4 + width(`… ${num(r.more)} more`), row: false, act: { op: 'open', open: { kind: 'pane', view: 'coverage', title: 'Coverage', folder: r.title } } })
+      // a folder's `… N more` is a row the keys choose too: Enter shows the folder whole in the file browser
+      if (r.more) out.push([{ s: '    ' }, dim(`… ${num(r.more)} more`)], { x0: 4, x1: 4 + width(`… ${num(r.more)} more`), row: false, act: { op: 'open', open: { kind: 'pane', view: 'coverage', title: 'Coverage', folder: r.title } }, pick: `more:${r.key}` })
     }
   }
+  // the section's `… N more` is a row the keys choose: Enter or Space shows the section whole, the choice on its first
+  // row shown then (live check term-fix9, quirk 6: ↑↓ skipped it, so two groups of 18 cards could not be reached)
   const left = sec.rows.length - shown.length
-  if (left > 0) out.push([{ s: '  ' }, dim(`… ${num(left)} more`)], { x0: 2, x1: 2 + width(`… ${num(left)} more`), row: false, act: { op: 'more', sec: sec.id } })
+  if (left > 0) out.push([{ s: '  ' }, dim(`… ${num(left)} more`)], { x0: 2, x1: 2 + width(`… ${num(left)} more`), row: false, act: { op: 'more', sec: sec.id, next: sec.rows[shown.length]!.key }, pick: `more:${sec.id}` })
 }
 
 /** The whole panel below its path row: the title `Home`, the rule, every section, the key hints (`hints`: HOME_HINTS
@@ -524,8 +565,9 @@ export function homeLayout(d: HomeData, ui: HomeUi, w: number, hints: readonly s
     if (i) out.blank()
     sectionLines(out, sec, ui, w)
   })
-  out.push(hintLine(hints, w))
-  return { lines: out.lines, hits: out.hits, picks: out.picks }
+  const hintRows = hintLines(hints, w)
+  for (const l of hintRows) out.push(l)
+  return { lines: out.lines, hits: out.hits, picks: out.picks, hintRows: hintRows.length }
 }
 
 /** The UI state after an act that changes it (an act that opens something leaves it as it is). */

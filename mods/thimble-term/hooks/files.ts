@@ -19,3 +19,34 @@ export function fileRef(ref: string): { path: string; line?: number; item?: numb
   // `<db>#<table>/<key>`: a database's row, which the file browser does not open
   return null
 }
+
+/** The folder a path stands in, with its slash (`logs/`), '' for the corpus's own files. */
+export function dirOf(path: string): string {
+  return path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : ''
+}
+
+/** Paths in the file browser's order: the corpus's own files first, then each folder in natural order (`run-2` before
+ *  `run-10`), each folder's files in natural order. */
+export function sortPaths<T extends { path: string }>(files: readonly T[]): T[] {
+  const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true })
+  return [...files].sort((a, b) => {
+    const da = dirOf(a.path)
+    const db = dirOf(b.path)
+    return da === db ? natural(a.path, b.path) : !da ? -1 : !db ? 1 : natural(da, db)
+  })
+}
+
+/** Whether the file browser shows a folder open: the first folder unless folded, any other once unfolded. */
+export function folderOpen(ui: { folded: readonly string[]; unfolded: readonly string[] }, dir: string, first: boolean): boolean {
+  return first ? !ui.folded.includes(`dir:${dir}`) : ui.unfolded.includes(`dir:${dir}`)
+}
+
+/** The row the file browser chooses when the analyst chose none: the first file of the first open folder, else the
+ *  first folder's row (`dir:<folder>`); '' for no files (live check term-fix9, quirk 7: no row was chosen as it opened). */
+export function firstChoice(files: readonly { path: string }[], ui: { folded: readonly string[]; unfolded: readonly string[] }): string {
+  const sorted = sortPaths(files)
+  const dirs = [...new Set(sorted.map(f => dirOf(f.path)))]
+  const open = dirs.find((d, i) => folderOpen(ui, d, i === 0))
+  if (open !== undefined) return sorted.find(f => dirOf(f.path) === open)?.path ?? `dir:${open}`
+  return dirs.length ? `dir:${dirs[0]}` : ''
+}

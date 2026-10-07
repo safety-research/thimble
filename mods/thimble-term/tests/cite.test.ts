@@ -173,10 +173,10 @@ test('a file citation written without words names its place once: no `from` row,
   const text = shown(tree)
   // the title, in its Client, is the place in words; the path row has the short place the reply draws (live check New 3)
   expect(JSON.stringify(await pane.find({ type: 'Client', key: 'cite-title' }))).toContain('"s":"README.md line 5"')
-  expect(shown(await pane.find({ type: 'Box', key: 'way' }))).toContain('citation README:5')
+  expect(shown(await pane.find({ type: 'Box', key: 'way' }))).toContain('citation README line 5')
   expect(text).not.toContain('from')
-  expect(JSON.stringify(tree)).toMatch(/"See [^"]*"[^]*"README:5"/)
-  expect(text).toContain('"See README:5 for the format."')
+  expect(JSON.stringify(tree)).toMatch(/"See [^"]*"[^]*"README line 5"/)
+  expect(text).toContain('"See README line 5 for the format."')
   // the title is the place: no subtitle names it again (`found in README.md line 5`), and none while it is there
   expect(text).not.toContain('found in')
   expect(await pane.find({ key: 'cite-sub' })).toBeUndefined()

@@ -49,6 +49,36 @@ export function labelRunning(agents: readonly { label: string; state: string; ro
   return Boolean(name) && agents.some(a => a.role === 'labels' && a.state === 'running' && a.label === `label ${name}`)
 }
 
+/** How a label's runs stand, as every place that names it says it (home, the labels list, its panel, its card; live
+ *  check term-fix9, quirk 4: the list and the panel said `not run yet` while home said `◌ labeling`): `running` while a
+ *  run goes on (thimble's, or main's that a chat follows: labelRunning), `ran` once a run ended, `stopped` for records
+ *  labeled with no run that ended (a quit stopped its first run part way), `labeled` the records labeled so far, and
+ *  `total` its run's size (the run's own, else the scope's size `thimble state` counted). */
+export type LabelState = { running: boolean; ran: boolean; stopped: boolean; labeled: number; total: number | null }
+
+type LabelRunLike = { status?: string; total?: number; matched_total?: number | null; stopped?: boolean; labeled?: number } | null | undefined
+
+export function labelState(
+  l: { name?: string; last_run?: LabelRunLike; applications?: LabelRunLike[]; label_stats?: { counts?: Record<string, number>; n_labeled?: number } | null; scope_total?: number },
+  agents: readonly { label: string; state: string; role: string }[],
+): LabelState {
+  const last = l.last_run ?? l.applications?.at(-1) ?? null
+  const running = (l.last_run?.status ?? '') === 'running' || labelRunning(agents, l.name ?? '')
+  const labeled = l.label_stats?.n_labeled ?? Object.values(l.label_stats?.counts ?? {}).reduce((a, b) => a + b, 0)
+  const total = typeof last?.matched_total === 'number' ? last.matched_total : typeof last?.total === 'number' ? last.total : typeof l.scope_total === 'number' ? l.scope_total : null
+  return { running, ran: Boolean(last) && last?.status !== 'running', stopped: !running && !last && labeled > 0, labeled, total }
+}
+
+/** A label's state in words while it has no run that ended: `◌ labeling`, with the records labeled so far and of how
+ *  many when known (`◌ labeling 3,000 of 4,579`); `stopped at 3,150 of 4,579`; `not run yet`. '' once a run ended. */
+export function labelStateWords(st: LabelState): string {
+  const n = (x: number) => x.toLocaleString('en-US')
+  const of = st.total !== null && st.total >= st.labeled ? ` of ${n(st.total)}` : ''
+  if (st.running) return st.labeled ? `◌ labeling ${n(st.labeled)}${of}` : '◌ labeling'
+  if (st.ran) return ''
+  return st.stopped ? `stopped at ${n(st.labeled)}${of}` : 'not run yet'
+}
+
 /** A label's name, noted when the labels are read or a link to it resolves, so a link to it names it in words. */
 export function noteLabelName(id: string, name: string | undefined): void {
   if (id && name) labelNames.set(id, name)
@@ -281,10 +311,14 @@ export function chipLabel(c: Citation): string {
   if (out) return out.words
   if (base.startsWith('card:')) return frag ? `card ${frag.split('/').at(-1)}` : 'card'
   if (base.startsWith('call:')) return frag ? `output ${frag}` : 'output'
+  // a file's place in words, its name without its extension (`events line 1063`, `agent-chat lines 1-2`), never
+  // `events:1063`, which reads as an id (live check term-fix9, low quirk); a long name cut, its line kept
   const name = base.split('/').at(-1) ?? base
   const short = name.replace(/\.(jsonl|json|csv|tsv|txt|md|log)$/, '')
-  const where = frag.startsWith('L') ? `:${frag.slice(1).replace(/\.b\d+(?::c\d+-\d+)?$/, '').replace('-L', '-')}` : frag ? `#${frag}` : ''
-  return cut(`${short}${where}`, 24)
+  const lines = /^L(\d+)(?:-L?(\d+)|\.b\d+(?::c\d+-\d+)?)?$/.exec(frag)
+  const row = /^row=(\d+)$/.exec(frag)
+  const where = lines ? (lines[2] && lines[2] !== lines[1] ? ` lines ${lines[1]}-${lines[2]}` : ` line ${lines[1]}`) : row ? ` row ${row[1]}` : frag ? `#${frag}` : ''
+  return width(`${short}${where}`) <= 28 || !where ? cut(`${short}${where}`, 28) : `${cut(short, Math.max(4, 28 - width(where)))}${where}`
 }
 
 // ---------------------------------------------------------------------------------------- text width and cuts
@@ -339,6 +373,10 @@ function quoteOpens(s: string): number {
 export function cut(s: string, n: number): string {
   if (width(s) <= n) return s
   if (n <= 1) return n === 1 ? '…' : ''
+  // quoted words with a short tail after them (`card "How many…" · code`): the words inside the marks cut, the marks and
+  // the tail kept (live check term-fix9, low quirk: the code view's step read `card "How many deletes does…"…`)
+  const tailed = /^(.*?["“])([^"“”]+)(["”] · [^"“”]{1,16})$/.exec(s)
+  if (tailed && n - width(tailed[1]!) - width(tailed[3]!) >= 5) return `${tailed[1]}${cut(tailed[2]!, n - width(tailed[1]!) - width(tailed[3]!))}${tailed[3]}`
   const open = quoteOpens(s)
   if (open >= 0) {
     // the words before the quotation and its opening mark whole, the quoted words cut, then the closing mark; when the
@@ -381,7 +419,11 @@ function unclosed(s: string): string {
  *  end together; prose cut at a word, as `cut` cuts. */
 export function cutLine(s: string, n: number): string {
   if (width(s) <= n || !/^\s*[{[<]/.test(s)) return cut(s, n)
-  return n <= 1 ? (n === 1 ? '…' : '') : `${prefix(s, n - 1)}…`
+  if (n <= 1) return n === 1 ? '…' : ''
+  // no space or sentence punctuation right before the `…` (live check term-fix9, low quirk: `Some …`, `alone.…`); a
+  // JSON key's colon stays, so a cut value reads as one (`"page_key":…`)
+  const head = prefix(s, n - 1)
+  return `${head.replace(/[\s.,;!?]+$/, '') || head}…`
 }
 
 /** Items of an inline list of facts parted by ` · ` in at most `n` cells: as many whole items as fit, then ` · +N` for
@@ -397,15 +439,44 @@ export function itemsRow(items: readonly string[], n: number): string {
   return n - width(tail) >= 8 ? `${cut(items[0] ?? '', n - width(tail))}${tail}` : cut(items[0] ?? '', n)
 }
 
+/** `s` in at most `n` cells, cut in its middle at words so its end shows: `How many deletes… of 27 June?`, for rows
+ *  that share their first words and differ at their ends (live check term-fix9, quirk 8: fifteen card rows read `How
+ *  many deletes does…`). As `cut` when the room keeps fewer than 12 cells of the end. */
+export function cutMiddle(s: string, n: number): string {
+  if (width(s) <= n) return s
+  const tailRoom = Math.floor((n - 2) / 2)
+  if (tailRoom < 12) return cut(s, n)
+  // the end: the last words that fit its half, whole
+  const words = s.split(' ')
+  let tail = ''
+  for (let i = words.length - 1; i > 0; i--) {
+    const next = tail ? `${words[i]} ${tail}` : words[i]!
+    if (width(next) > tailRoom) break
+    tail = next
+  }
+  if (!tail) return cut(s, n)
+  const head = cut(s.slice(0, s.length - tail.length).trimEnd(), n - width(tail) - 1)
+  return `${head.endsWith('…') ? head : `${head}…`} ${tail}`
+}
+
 /** `s` on one line in `n` cells, cut as `cut` cuts. */
 export function clip(s: string, n: number): string {
   return cut(s.replace(/\s+/g, ' ').trim(), n)
 }
 
 /** About `room` characters of a long line around position `at` (a third of the room before it), each end cut at a word
- *  with `…` right against the words; `shift` is how far a position of `text` moved to the left. */
+ *  with `…` right against the words; `shift` is how far a position of `text` moved to the left. A line of data (JSON, a
+ *  tag) is cut at the cell edge instead, `room` characters exactly, so the lines of a file end together (live check
+ *  term-fix9, low quirk: a citation's context lines were cut to uneven widths). */
 export function windowAt(text: string, at: number, room: number): { text: string; shift: number } {
   if (text.length <= room) return { text, shift: 0 }
+  if (/^\s*[{[<]/.test(text) && room >= 4) {
+    const lo = Math.max(0, Math.min(at - Math.floor(room / 3), text.length - room + 1))
+    const late = lo > 0
+    const hi = Math.min(text.length, lo + room - (late ? 1 : 0) - 1)
+    const body = text.slice(lo, hi)
+    return { text: `${late ? '…' : ''}${body}${hi < text.length ? '…' : ''}`, shift: lo - (late ? 1 : 0) }
+  }
   let lo = Math.max(0, Math.min(at - Math.floor(room / 3), text.length - room))
   const late = lo > 0
   let hi = Math.min(text.length, lo + room - (late ? 2 : 1))
@@ -816,16 +887,43 @@ export function dateIn(display: string, text: string): boolean {
     const stamp = STAMP_CLOCK_RE.exec(text.slice(d.index! + d[0].length))
     if (clocksIn(want.clock, stamp ? stamp[1]! : text)) return true
   }
-  return false
+  // a date the text writes in words (`23 June`, a row named `last delete on 30 June`; backend cite.date_in, live check
+  // term-fix9, quirk 11)
+  return datesInWords(text).some(d => sameDate(want, d.date, text))
+}
+
+/** Whether a date in words (`got`, at its place in `text`) is the day and month `want` names, the year too when both
+ *  give one, and its clock time among the text's when `want` gives one. */
+function sameDate(want: NonNullable<ReturnType<typeof dayMonth>>, got: NonNullable<ReturnType<typeof dayMonth>>, text: string): boolean {
+  if (got.month !== want.month || got.day !== want.day || (want.year !== null && got.year !== null && got.year !== want.year)) return false
+  return want.clock === null || clocksIn(want.clock, got.clock ?? text)
+}
+
+const MONTH_WORD = `(?:${Object.keys(MONTHS).sort((a, b) => b.length - a.length).join('|')})`
+// a day and a month in words inside a text, with its year and time when it has them (backend cite._DATE_IN_TEXT_RE)
+const DATE_IN_TEXT_RE = new RegExp(`(?<![\\w.])(?:\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH_WORD}\\b\\.?|${MONTH_WORD}\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?(?![\\d:]))(?:,?\\s+\\d{4}(?!\\d))?(?:,?\\s+(?:at\\s+)?\\d{1,2}:\\d{2}(?::\\d{2})?(?:\\s*(?:UTC|GMT|Z)\\b)?)?`, 'gi')
+
+/** Each day and month a text writes in words, where it stands and what it names; `may` in lower case is the verb. */
+export function datesInWords(text: string): { at: number; end: number; date: NonNullable<ReturnType<typeof dayMonth>> }[] {
+  const out: { at: number; end: number; date: NonNullable<ReturnType<typeof dayMonth>> }[] = []
+  for (const m of text.matchAll(DATE_IN_TEXT_RE)) {
+    const words = m[0].replace(/[,\s]+$/, '').replace(/\.$/, '')
+    const date = dayMonth(words)
+    if (date && !/\bmay\b/.test(words)) out.push({ at: m.index!, end: m.index! + words.length, date })
+  }
+  return out
 }
 
 const STAMP_RE = /(?<![\d-])(?:\d{4}-)?\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?(?![\d-])/g
 
-/** Where a line writes in digits the date a shown value names in words (`23 June` at `2026-06-23`): each stamp dateIn
- *  accepts, as [start, end], so a citation's panel marks the date it cites. */
+/** Where a line writes the date a shown value names in words, in digits (`23 June` at `2026-06-23`) or in words: each
+ *  stamp dateIn accepts, and each date in words of the same day, as [start, end], so a citation's panel marks the date
+ *  it cites. */
 export function dateSpans(display: string, line: string): number[][] {
-  if (!dayMonth(display)) return []
-  return [...line.matchAll(STAMP_RE)].filter(m => dateIn(display, m[0])).map(m => [m.index!, m.index! + m[0].length])
+  const want = dayMonth(display)
+  if (!want) return []
+  const stamps = [...line.matchAll(STAMP_RE)].filter(m => dateIn(display, m[0])).map(m => [m.index!, m.index! + m[0].length])
+  return [...stamps, ...datesInWords(line).filter(d => sameDate(want, d.date, line)).map(d => [d.at, d.end])].sort((a, b) => a[0]! - b[0]!)
 }
 
 /** Whether a shown value is in a text: a number must match a whole number of it, a day and a month in words a date it

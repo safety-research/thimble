@@ -15,11 +15,20 @@
 //   file         a row click, /thimble files <path>            ↑↓ Enter Backspace 1-3 x, short and tall; never ←
 //   views        a heading click                               ↑↓ Enter 1-9 b x
 //   card, label, document, ask: no list                      their letters; no ↑↓, Enter, Space or ← named
+//   back from a new thread's form   a card, a file's line, after Esc   the view's own hints, never the field's; the list's
+//                                                              keys where it draws a list
+//   home's `… N more`                ↓ until it is chosen               Space and Enter show the section, the choice on
+//                                                              its first row shown then
+//   l, t                            a document, a label, home           the list in place of the step; t's threads take
+//                                                              the list's keys though the ring was on the key
+//   back                            a line chosen in a file, a thread   where the file or the form was opened from
+//                                   just asked
 //
 // `claude plugin test mods/thimble-term`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
+import { width } from '../hooks/lib'
 import { RELAY, UNFOCUSED_HINT } from '../hooks/panel'
 import { CWD, WS, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
@@ -473,19 +482,32 @@ for (const rows of [SHORT, TALL]) {
     let s = await seen($, rows, 'files-tree')
     // Space folds (restored: the relay's field takes it)
     named(s.hint, ['↑↓ to choose', 'Enter to open', 'Space to fold', 'x to close'])
-    await down($, w)
-    expect((await seen($, rows, 'files-tree')).chosen).toContain('log.txt')
-    await down($, w)
+    // a row is chosen as the browser opens, the first file of the first folder; the folder's row is a row the keys
+    // choose too (live check term-fix9, quirk 7)
+    expect(s.chosen).toContain('log.txt')
+    await up($, w)
+    expect((await seen($, rows, 'files-tree')).chosen).toMatch(/^▾ wiki\//)
+    await down($, w, 2)
     expect((await seen($, rows, 'files-tree')).chosen).toContain('README.md')
-    // the logs/ folder unfolded by a click on its row: its files
+    // the logs/ folder unfolded by a click on its row: its files, the choice on the folder's row
     await click($, w, rows, 'files-tree', 'logs/')
     await takesKeys($)
+    expect((await seen($, rows, 'files-tree')).chosen).toMatch(/^▾ logs\//)
     await down($, w, 12)
     s = await seen($, rows, 'files-tree')
     expect(s.chosen).toContain('run-12.jsonl')
     expect(s.hint).toContain('Space to fold')
     if (rows === TALL) expect(s.rows.some(r => /↑ \d+ more/.test(r))).toBe(true)
-    // Space folds the chosen file's folder
+    // Space folds the chosen file's folder, and the choice goes onto the folder's row, never a hidden file
+    await type($, w, rows, ' ')
+    s = await seen($, rows, 'files-tree')
+    expect(s.rows.join('\n')).not.toContain('run-12.jsonl')
+    expect(s.chosen).toMatch(/^▸ logs\//)
+    // Enter on a folder's row unfolds it, Space folds it again; neither opens a file
+    await enter($, w, rows)
+    s = await seen($, rows, 'files-tree')
+    expect(s.rows.join('\n')).toContain('run-1.jsonl')
+    expect(s.chosen).toMatch(/^▾ logs\//)
     await type($, w, rows, ' ')
     expect((await seen($, rows, 'files-tree')).rows.join('\n')).not.toContain('run-12.jsonl')
     // an empty click (the column names' row is no hit) hands the keys back
@@ -497,6 +519,8 @@ for (const rows of [SHORT, TALL]) {
     expect(w.focusAsked).toEqual([true])
     await takesKeys($)
     await up($, w, 30)
+    expect((await seen($, rows, 'files-tree')).chosen).toMatch(/^▾ wiki\//)
+    await down($, w)
     await enter($, w, rows)
     await takesKeys($)
     expect((await seen($, rows, 'file-body')).rows.join('\n')).toContain('line 1 of the log')
@@ -510,7 +534,8 @@ for (const rows of [SHORT, TALL]) {
     await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
     await w.clock.settle()
     await takesKeys($)
-    await click($, w, rows, 'files-tree', 'log.txt')
+    // the one file is chosen as the browser opens: a click on it opens it
+    expect((await seen($, rows, 'files-tree')).chosen).toContain('log.txt')
     await click($, w, rows, 'files-tree', 'log.txt')
     await takesKeys($)
     let s = await seen($, rows, 'file-body')
@@ -534,15 +559,23 @@ for (const rows of [SHORT, TALL]) {
     expect((await seen($, rows)).text).toMatch(/citation/)
     await hotkey($, w, 'back')
     await takesKeys($)
-    // Backspace goes back to the file browser
+    // Backspace goes back to the file browser, the file chosen there
     await backspace($, w, rows)
-    expect((await seen($, rows, 'files-tree')).text).toContain('Files')
-    // from /thimble files <path>:<line>, the line chosen
+    s = await seen($, rows, 'files-tree')
+    expect(s.text).toContain('Files')
+    expect(s.chosen).toContain('log.txt')
+    // from /thimble files <path>:<line>, the line chosen; Backspace: the browser, the file chosen there (live check
+    // term-fix9, quirk 7: no row was chosen)
     await $.command.run({ command: 'thimble:thimble', args: 'files log.txt:30' } as never)
     await w.clock.settle()
     await takesKeys($)
     s = await seen($, rows, 'file-body')
     expect(s.rows.some(r => r.includes('line 30 of the log'))).toBe(true)
+    await backspace($, w, rows)
+    await takesKeys($)
+    s = await seen($, rows, 'files-tree')
+    expect(s.chosen).toContain('log.txt')
+    expect(s.text).toMatch(/‹ back {2}home › files(?! ›)/)
     await type($, w, rows, 'x')
     expect(w.closed).toContain(PANEL)
   })
@@ -609,4 +642,185 @@ test('keys · card, label, document and a new thread: no relay; their letters wo
   const ask = await seen($, SHORT)
   expect(ask.relay).toBe(false)
   expect(ask.hint).toBe('Enter to ask · Esc to leave the field')
+})
+
+// ------------------------------------------------------------------------------------------------ the way: back, lists, rows
+
+test('keys · back from a new thread\'s form: the view shown names its own keys, never those of the field it left; a list takes the ring', async ($, on) => {
+  // live check term-fix9, quirk 1: after Esc and ‹ back from the form, the card read `Enter to ask · Esc to leave the
+  // field` though it draws no field
+  const w = world(on)
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
+  await w.clock.settle()
+  await hotkey($, w, 'ask')
+  await $.ui.focus({ requestId: PANEL, component: 'Pane', element: 'ask-new', origin: { kind: 'plugin', name: PANEL } } as never)
+  expect((await seen($, SHORT)).hint).toBe('Enter to ask · Esc to leave the field')
+  // Esc, then a click on ‹ back; Claude Code puts the ring back where it was in the pane, on the form's field
+  w.paneFocused = false
+  expect((await seen($, SHORT)).hint).toBe(UNFOCUSED_HINT)
+  let pane = await look($, SHORT)
+  await pane.press({ key: 'nav-back' })
+  await w.clock.settle()
+  await pane.unmount()
+  w.paneFocused = true
+  await ring($, 'ask-new')
+  await w.clock.advance(300)
+  let s = await seen($, SHORT)
+  expect(s.text).toContain('What does the export hold per wiki?')
+  expect(s.text).not.toContain('New thread')
+  expect(s.hint).not.toContain('Enter to ask')
+  named(s.hint, ['c for its code', 'a to ask', 'x to close'])
+  // from a file's chosen line, whose view draws a list: back from the form, the ring goes onto the list's keys
+  w.states.files = [{ path: 'log.txt', kind: 'text', size_bytes: 600 }]
+  w.pages['log.txt'] = LONG
+  await $.command.run({ command: 'thimble:thimble', args: 'files log.txt:3' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  pane = await look($, SHORT)
+  await pane.pointer({ type: 'down', x: width('↗ log.txt line 3  '), y: 0, button: 'left', in: 'file-detail' } as never)
+  await w.clock.settle()
+  await pane.unmount()
+  expect((await seen($, SHORT)).text).toContain('New thread')
+  w.paneFocused = false
+  pane = await look($, SHORT)
+  await pane.press({ key: 'nav-back' })
+  await w.clock.settle()
+  await pane.unmount()
+  w.paneFocused = true
+  await ring($, 'ask-new')
+  await w.clock.advance(300)
+  s = await seen($, SHORT, 'file-body')
+  expect(s.relay).toBe(true)
+  named(s.hint, ['↑↓ to choose', 'Enter to open', 'Backspace for the files'])
+  await down($, w)
+  expect((await seen($, SHORT, 'file-body')).rows.find(r => r.includes('line 4 of the log'))).toBeDefined()
+})
+
+test('keys · home · a section\'s `… N more` is a row ↑↓ reach; Enter or Space shows the section whole, the choice on its first row shown then', async ($, on) => {
+  // live check term-fix9, quirk 6: ↑↓ skipped `… 2 more`, so two groups of 18 cards could not be reached
+  const w = world(on)
+  const more = Array.from({ length: 14 }, (_, i) => ({ ...w.states.labels[0]!, id: `lab${String(i).padStart(5, '0')}`, name: `label number ${i + 2}` }))
+  w.states.labels = [...w.states.labels, ...more] as typeof w.states.labels
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  let s = await seen($, SHORT, 'home')
+  for (let i = 0; i < 40 && !/^… 10 more/.test(s.chosen); i++) {
+    await down($, w)
+    s = await seen($, SHORT, 'home')
+  }
+  expect(s.chosen).toBe('… 10 more')
+  expect(s.rows.join('\n')).not.toContain('label number 6')
+  await type($, w, SHORT, ' ')
+  s = await seen($, SHORT, 'home')
+  expect(s.rows.join('\n')).toContain('label number 15')
+  expect(s.rows.join('\n')).not.toContain('10 more')
+  expect(s.chosen).toContain('label number 6')
+  await down($, w)
+  expect((await seen($, SHORT, 'home')).chosen).toContain('label number 7')
+  // Enter on another section's `… N more` (the cards of a big group fold into none: threads here)
+  for (let i = 0; i < 6; i++) w.states.threads.push({ ...w.states.threads[1]!, id: `t${i + 10}`, title: `thread number ${i + 10}`, created_at: '2026-10-06T09:00:00+00:00' } as never)
+  w.stamps.set(`${WS}/chats`, 9)
+  await w.clock.advance(1100)
+  await up($, w, 60)
+  s = await seen($, SHORT, 'home')
+  for (let i = 0; i < 20 && !/^… \d+ more/.test(s.chosen); i++) {
+    await down($, w)
+    s = await seen($, SHORT, 'home')
+  }
+  expect(s.chosen).toMatch(/^… 3 more/)
+  await enter($, w, SHORT)
+  s = await seen($, SHORT, 'home')
+  expect(s.rows.join('\n')).not.toMatch(/… 3 more/)
+  expect(s.chosen).toContain('thread number')
+})
+
+test('keys · `l` and `t`: the list in place of the step that holds it, and the threads with their list\'s keys whatever the ring was on', async ($, on) => {
+  // live check term-fix9, quirk 10: `l` pushed `home › documents › "…" › documents`; quirk 12: threads opened with `t`
+  // had no list keys, the ring on the pressed key
+  const w = world(on)
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  await click($, w, SHORT, 'home', 'Agents used the dse wiki as a relay')
+  const way = async () => {
+    const pane = await look($, SHORT)
+    const t = shown(await pane.find({ type: 'Box', key: 'way' }))
+    await pane.unmount()
+    return t
+  }
+  expect(await way()).toMatch(/home › documents › "Agents used the dse wiki/)
+  await hotkey($, w, 'all')
+  expect(await way()).toMatch(/home › documents(?! ›)/)
+  await takesKeys($)
+  expect((await seen($, SHORT, 'docs-list')).chosen).toContain('Agents used the dse wiki')
+  // back leads to the document
+  await type($, w, SHORT, 'b')
+  expect(await way()).toMatch(/home › documents › "Agents used/)
+  // a label's `l`
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  await click($, w, SHORT, 'home', 'links through a fetch proxy', '█')
+  await hotkey($, w, 'list')
+  expect(await way()).toMatch(/home › labels(?! ›)/)
+  // `t` from home, its key pressed and the ring left on that key by Claude Code: the threads take the list's keys
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  const pane = await look($, SHORT)
+  await pane.press({ key: 'hk-threads' })
+  await w.clock.settle()
+  await pane.unmount()
+  await ring($, 'hk-threads')
+  await w.clock.advance(600)
+  // the panel asks the ring onto the list's keys though a button holds it (term.ts giveKeys; this kit plays Claude
+  // Code's move as it makes it)
+  await takesKeys($)
+  const s = await seen($, SHORT, 'threads-tree')
+  expect(s.relay).toBe(true)
+  named(s.hint, ['↑↓ to choose', 'x to close'])
+  await down($, w)
+  expect((await seen($, SHORT)).text).toMatch(/home › threads › (◌ )?"/)
+})
+
+test('keys · back after a line chosen in a file, and after a thread asked: where the file or the form was opened from', async ($, on) => {
+  // live check term-fix9, quirk 12: after a click on a file's line, b returned to the line clicked before; back from a
+  // thread just asked showed an empty form
+  const w = world(on)
+  w.states.files = [{ path: 'log.txt', kind: 'text', size_bytes: 600 }]
+  w.pages['log.txt'] = LONG
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  await click($, w, SHORT, 'files-tree', 'log.txt')
+  await takesKeys($)
+  await click($, w, SHORT, 'file-body', 'line 3 of the log')
+  await click($, w, SHORT, 'file-body', 'line 7 of the log')
+  await takesKeys($)
+  await down($, w)
+  await hotkey($, w, 'back')
+  let s = await seen($, SHORT, 'files-tree')
+  expect(s.text).toContain('Files')
+  expect(s.chosen).toContain('log.txt')
+  // a thread asked about a card: back from it shows the card
+  await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
+  await w.clock.settle()
+  await hotkey($, w, 'ask')
+  const pane = await look($, SHORT)
+  await pane.input({ key: 'ask-new', text: 'Why so many pages?' })
+  await w.clock.settle()
+  await pane.unmount()
+  s = await seen($, SHORT)
+  expect(s.text).toMatch(/home|card "What does the export hold per wiki\?" › "Why so many pages\?"|"Why so many pages\?"/)
+  expect(s.text).not.toContain('New thread')
+  await hotkey($, w, 'back')
+  s = await seen($, SHORT)
+  expect(s.text).toContain('What does the export hold per wiki?')
+  expect(s.text).not.toContain('New thread')
+  expect(s.text).toContain('c for its code')
 })

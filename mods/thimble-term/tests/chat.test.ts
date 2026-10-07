@@ -425,7 +425,7 @@ test("a thimble tool's row names a card by its question, without straight quotat
   const drawn = shown(await row.drawn())
   // the card key: its question alone; the takeaway: each citation its words, the card it embeds in curly quotation marks
   expect(drawn).toContain('"card":"Which five pages have the most revisions in the corpus?"')
-  expect(drawn).toContain('"takeaway":"The most edited page has 60 revisions; see README:3 and card “Which five pages have the most…”."')
+  expect(drawn).toContain('"takeaway":"The most edited page has 60 revisions; see README line 3 and card “Which five pages have the most…”."')
   expect(drawn).not.toMatch(/ff73e071|\[\[|\\"/)
   await row.unmount()
   // a Bash row that runs the card: its question cut at a word
