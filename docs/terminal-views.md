@@ -39,6 +39,12 @@ draws what its `view.html` draws: the search, the incident and Color by in the t
 source, and the events by day, each opening in place. `thimble view text timeline --cwd <its sample> --width 120` draws
 it as text (below).
 
+[plugin/viewers/repository/view.term.js](../plugin/viewers/repository/view.term.js), the second, draws a table over a
+time range: the kind of item picked in the top row (`choice` with `all: false`), the runs' days with the nights between
+them as breaks (`timeRange({gap})`), each row its item's columns and its records as marks on the range's scale under the
+runs' names in the table's header, and an item opened in place with its records in time order, the one a citation
+opened kept in view (`d.focus()`).
+
 ## The program's life
 
 The program runs sandboxed, one process per open view, alive while the view shows and ended when the panel shows
