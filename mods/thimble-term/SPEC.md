@@ -293,7 +293,9 @@ colored is said under each.
   from a citation, goes to that list in its place) (`thread "how many…"`, `citation 5884`, `card "How many pages…"`, `label edit purpose`, `files`,
   `events.jsonl`), parted by a dim `›`, a long step cut with `…`. A step whose thread has new answers is followed by
   `new` in green; one whose thread is answering starts with `◌`. At R: `show all threads`, which opens the threads
-  panel, then `N new` in green while answers wait. The threads panel itself leaves it out.
+  panel, then `N new` in green while answers wait. The threads panel itself leaves it out. The row never wraps: in a
+  narrow pane `show all threads`, then `N new`, give way to the steps (`t` still shows all threads), and the steps fold
+  into `…` and are cut to the room left.
 - The title row: the subject's name in the accent color and bold; navigation against R. The subtitle under it: the
   subject's facts, dim, parted by ` · `, with a problem in red. A panel with no facts worth a row has no subtitle.
 - Tabs, where the subject has them: each tab's name with a cell of space at each side, selected or not, the selected one
@@ -496,7 +498,9 @@ colored is said under each.
   cards are at A2 with their kind word at R.
 - Labels: each label's `●` in its color (as the label panel's), its name, a bar of its values' shares in their hues
   with the total, and a dim secondary row of its kind, run and values. A label with no run (one a stopped thread left)
-  has a dim `○`, `not run yet` at R and no bar, as its panel says.
+  has a dim `○`, `not run yet` at R and no bar, as its panel says. A run going says `◌ labeling 3,000 of 4,579`, and a
+  first run that stopped part way (a quit) `stopped at 3,150 of 4,579`, alike on home, the labels list, the label panel
+  and the label card.
 - Files by folder, the corpus's own first, each folder's files in natural order: a folder row named as the file browser
   names it (its path, `collusion-wiki/`; the corpus's own files under the corpus folder's name), with its file count dim
   after its name and its size under `size`; when it is unfolded, its files at A4 with their type, then their size. A
@@ -604,7 +608,9 @@ it in browser mode.
 
 - A folder per group, foldable, its file count dim after its name and its size under `size`, as home's; an open folder
   shows its first 20 files, then `… N more`. A file has no dot, as on home: its name at A4, the type column names its
-  type. A long name is cut in its middle.
+  type. A long name is cut in its middle. A row is chosen as the browser opens (the first file of the first open
+  folder, or the file Backspace came back from); a folder's row is chosen like a file's, Enter folds it, and Space on a
+  file folds its folder with the choice moving onto the folder's row.
 - The chosen file's first lines show under the second rule (at most 6, fewer in a short pane, so the tree keeps eight rows) as the file holds them, with dim line numbers,
   and what it opens as, on
   the tab its view opens on (`transcript`, or `lines` for Raw); Enter or a second click opens it.
