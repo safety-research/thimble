@@ -843,3 +843,14 @@ def test_a_fork_whose_answer_is_only_its_closing_note_answers_the_thread_with_it
     # without the clause that says what it made, a capital first (live check term-fix6, new quirk 3)
     assert [r["delta"] for r in _log(tid) if r["type"] == "text" and r.get("reply")] == ["It changed on 16 and 18 June."]
     assert [r["type"] for r in _log(tid) if r["type"] in ("done", "error")] == ["done"]
+
+
+def test_a_workflow_s_title_keeps_the_quotation_marks_its_script_escapes():
+    """Live check term-fix9, low quirk: a workflow whose meta said `description: 'Re-verify main\\'s answer'` was titled
+    `Re-verify main`, since the meta's string ended at the escaped quotation mark. An escaped mark is one of the string's
+    characters, and the title reads as the string does."""
+    script = ("export const meta = {name: 'reverify', description: 'Re-verify main\\'s answer: \"23 June\"\\nagain'}\n"
+              "export default async () => {}")
+    assert session.workflow_meta(script) == {"name": "reverify", "description": "Re-verify main's answer: \"23 June\" again"}
+    assert session.workflow_meta('export const meta = {name: "read", description: `the "board"`}') == \
+        {"name": "read", "description": 'the "board"'}

@@ -225,7 +225,10 @@ def date_in(display: str, excerpt: str) -> bool:
     check term-fix6, new quirk 7: `23 June` citing a cell `06-23` was marked red). A time after the date
     (`4 June 2026 at 10:53:40 UTC`) is the time the time stamp writes after that date, or with no time there, a clock
     time of the excerpt (clocks_in); live check term-fix7, new quirk 1: the citation check tagged it unverified against a
-    line holding 2026-06-04T10:53:40Z."""
+    line holding 2026-06-04T10:53:40Z. A date the excerpt writes in words holds it too (`23 June`, `June 23, 2026`, a
+    row named `last delete on 30 June`): the same day and month, the same year when both give one, and the clock time
+    among the excerpt's (live check term-fix9, quirk 11: edit_card reported `23 June` missing from a table whose row is
+    named `23 June`)."""
     want = _date_words(display)
     if want is None:
         return False
@@ -237,6 +240,12 @@ def date_in(display: str, excerpt: str) -> bool:
             return True
         stamp = _STAMP_CLOCK_RE.match(excerpt, m.end())
         if clocks_in(clock, stamp[1] if stamp else excerpt):
+            return True
+    for _, _, words in dates_in_text(excerpt):
+        got = _date_words(words)
+        if got is None or (got[0], got[1]) != (month, day) or (year is not None and got[2] is not None and got[2] != year):
+            continue
+        if clock is None or clocks_in(clock, got[3] or excerpt):
             return True
     return False
 
@@ -1148,8 +1157,8 @@ class _Sources:
         return self.only is not None and _norm(tok) == self.only
 
     def date_places(self, display: str) -> list[str]:
-        """The table cells and text lines of the outputs that write a day and a month in words (`23 June`) in digits
-        (date_in), each once."""
+        """The table cells, row names and text lines of the outputs that write a day and a month in words (`23 June`),
+        in digits or in words (date_in), each once."""
         refs: list[str] = []
         for i, b in iter_outputs(self.outputs):
             cells = bundle_cells(b)

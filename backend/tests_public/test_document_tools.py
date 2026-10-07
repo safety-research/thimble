@@ -143,3 +143,46 @@ async def test_a_value_cited_at_the_row_its_sentence_names_stays_there(hours):
     assert "The cited place shows 40." in named["tag_notes"]["unverified"]
     assert f"[[89|card:{tid}#deletions/23:00]]" in other["text"] and "unverified" not in (other.get("tags") or [])
     assert f"“A last 89 came in the 22:00 hour.” Not verified by execution" in r.text
+
+
+async def test_the_title_has_an_id_the_writer_edits_and_no_section_takes_a_headline(cells):
+    """Live check term-fix9, quirk 2: asked to change the headline, the writer called edit_document on the first section
+    (no heading) with `# …`, and the report showed two headlines, since read_ref gave the title no id. The title's line
+    names it `#title`; edit_document replaces it there (its marks dropped, the former title in its history), refuses
+    any other edit of it, refuses a `# ` line on a section or a passage, and leaves a locked title as it was."""
+    cid, _ = cells
+    text = (f"Opening words without a heading, with [[27|card:{cid}]] deletions.\n\n"
+            "## One account\n\nOne account did it.\n")
+    r = await call("write_document", doc="report", text=f"# One account issued every deletion\n\n{text}")
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    lines = report_types.document_lines(doc)
+    assert lines[0] == "# One account issued every deletion · #title"
+    first = doc["sections"][0]
+    # a `# ` line on the first section (a heading) or on a sentence: refused, pointing to the title
+    for span in (f"report:report#{first['id']}", f"report:report#{report_types.unit_sentences(first)[0]['id']}"):
+        r = await call("edit_document", span=span, text="# A sharper headline")
+        assert r.is_error and "report:report#title" in r.text, r.text
+    assert len(report_types.document_lines(report_types.read_doc(CORPUS, MAIN, "report"))) == len(lines)
+    # the title, by its id, with the marks read_ref writes copied back
+    r = await call("edit_document", span="report:report#title", text="# A sharper headline · #title")
+    assert not r.is_error and "replaced the title [[report:report#title]]: A sharper headline" in r.text, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    assert doc["title"] == "A sharper headline" and doc["title_history"][-1]["text"] == "One account issued every deletion"
+    assert [s.get("heading") for s in doc["sections"]] == [first.get("heading"), "One account"]
+    assert report_types.document_lines(doc)[0] == "# A sharper headline · #title"
+    for extra in ({"delete": True}, {"insert": True}, {"layout": "title"}):
+        r = await call("edit_document", span="report:report#title", text="x", **extra)
+        assert r.is_error and "is the title" in r.text, (extra, r.text)
+    # a locked title is refused, and read_ref's lines say so
+    report_types.set_block_lock(CORPUS, MAIN, "report", report_types.TITLE_BLOCK, True)
+    r = await call("edit_document", span="report:report#title", text="Another headline")
+    assert r.is_error and "locked" in r.text.lower(), r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    assert doc["title"] == "A sharper headline"
+    assert report_types.document_lines(doc)[0] == "# A sharper headline · #title · locked"
+    # a whole document saved with read_ref's title line copied keeps the title's words alone
+    report_types.set_block_lock(CORPUS, MAIN, "report", report_types.TITLE_BLOCK, False)
+    r = await call("write_document", doc="report", text=f"# Copied headline · #title\n\n{text}")
+    assert not r.is_error, r.text
+    assert report_types.read_doc(CORPUS, MAIN, "report")["title"] == "Copied headline"

@@ -1264,7 +1264,9 @@ def set_block_lock(c: str, inv_id: str, slug: str, bid: str, locked: bool) -> di
 def locked_block_ref(doc: dict[str, Any], slug: str, uid: str, *, whole: bool = False) -> str | None:
     """The ref of the locked block that holds the passage `uid` names (a sentence, a paragraph, a heading or a figure),
     None when that block is not locked: edit_document's check. With `whole` (a delete), a section's id names the
-    section with all it holds, so a locked block inside it counts too."""
+    section with all it holds, so a locked block inside it counts too. The title's id (`title`) names the title."""
+    if uid == TITLE_BLOCK and uid not in _ids(doc):
+        return block_ref(slug, "title", None) if doc.get("title_locked") is True else None
     for u in units(doc):
         if str(u.get("id")) == uid:
             if u.get("locked") is True:
@@ -1625,7 +1627,7 @@ def locked_block_lines(doc: dict[str, Any]) -> list[str]:
     the writer to see where each stands. Empty when nothing is locked."""
     lines: list[str] = []
     if doc.get("title_locked") is True:
-        lines.append(f"# {doc.get('title') or ''} · locked")
+        lines.append(f"# {doc.get('title') or ''} · #{TITLE_BLOCK} · locked")
     for u in units(doc):
         paras = [p for p in u.get("paragraphs") or [] if isinstance(p, dict)]
         figs = [f for f in u.get("figures") or [] if isinstance(f, dict) and f.get("locked") is True]
@@ -1854,6 +1856,8 @@ def replace_heading(c: str, slug: str, uid: str, text: str, actor: str, *, span:
         return None
     if target["kind"] != "heading" or "heading" not in target["unit"]:
         return None
+    if _TITLE_MARK_RE.match(text.strip()):
+        raise HTTPException(400, title_mark_refusal(slug))
     heading = _collapse(re.sub(r"^#+[ \t]+", "", text.strip()))
     if not heading or "\n" in text.strip():
         raise HTTPException(400, "a heading is replaced by one line of text")
@@ -1864,6 +1868,44 @@ def replace_heading(c: str, slug: str, uid: str, text: str, actor: str, *, span:
         reverted = _save_edit(c, inv_id, slug, doc, before, actor)
         _emit(c, {"type": "report", "slug": slug, "status": "rewritten", "span": span or f"report:{slug}#{uid}"})
     return {"text": heading, "ids": [uid], "unverified": [], "reverted": reverted}
+
+
+# a line opening with one `#`: the title's mark in the document's markdown (a section's heading takes `##` or more)
+_TITLE_MARK_RE = re.compile(r"^#[ \t]+\S")
+# read_ref's id after the title (`# The title · #title`), which a writer may copy back with the words
+_TITLE_ID_RE = re.compile(r"\s+·\s+#" + TITLE_BLOCK + r"\b.*$")
+
+
+def title_mark_refusal(slug: str) -> str:
+    """edit_document's refusal of a `# ` line anywhere but the title: the document has one title, at
+    `report:<slug>#title` (live check term-fix9, quirk 2: a section's heading took the headline, so the report showed
+    two)."""
+    return (f"a `# ` line is the document's title, and a document has one: to change the title, edit "
+            f"report:{slug}#{TITLE_BLOCK} with the new words; a section's heading takes `## `")
+
+
+def replace_title(c: str, slug: str, text: str, actor: str, *, span: str | None = None,
+                  inv_id: str = investigation.MAIN) -> dict[str, Any]:
+    """The document's title replaced by `text`, one line, its `# ` mark and the marks read_ref writes after it
+    (`· #title`, `· locked`) dropped; the former title in `title_history`, as the analyst's edit keeps it (edit_title).
+    A locked title is put back by _save_edit (hold_locks). Returns {text, ids, unverified, reverted, ref}; 400 for no
+    words or more than one line."""
+    doc = _load(c, inv_id, slug)
+    before = copy.deepcopy(doc)
+    if "\n" in text.strip():
+        raise HTTPException(400, "a title is replaced by one line of text")
+    words, _ = strip_marks(re.sub(r"^#+[ \t]+", "", text.strip()))
+    title = _collapse(_TITLE_ID_RE.sub("", words))
+    if not title:
+        raise HTTPException(400, "a title is replaced by one line of text")
+    reverted: list[str] = []
+    if title != _collapse(doc.get("title")):
+        _replace_text(doc, "title", title, "edit", history="title_history", actor=actor)
+        if doc.get("renderer") == "document":
+            doc["title_ok"] = _title_ok(title)
+        reverted = _save_edit(c, inv_id, slug, doc, before, actor)
+        _emit(c, {"type": "report", "slug": slug, "status": "rewritten", "span": span or f"report:{slug}#{TITLE_BLOCK}"})
+    return {"text": title, "ids": [TITLE_BLOCK], "unverified": [], "reverted": reverted, "ref": f"report:{slug}#{TITLE_BLOCK}"}
 
 
 # --------------------------------------------------------------------------- a document written as markdown
@@ -1900,7 +1942,7 @@ def _md_sections(text: str, *, headlines: bool = False) -> tuple[str, list[dict[
     for line in str(text or "").replace("\r\n", "\n").split("\n"):
         st = line.strip()
         if not title and not sections and not "".join(cur["lines"]).strip() and (m := _MD_TITLE_RE.match(st)):
-            title = m.group(1)
+            title = _TITLE_ID_RE.sub("", m.group(1))
             continue
         if (m := _MD_HEADING_RE.match(st)) and not (headlines and st.startswith("###")):
             close()
@@ -2069,7 +2111,9 @@ def document_lines(doc: dict[str, Any]) -> list[str]:
     locked. A deck's slides carry their number as shown in the rail, since the deck's title is no slide."""
     from . import story  # noqa: PLC0415
 
-    lines = [f"# {doc.get('title') or '(no title)'}" + (" · locked" if doc.get("title_locked") is True else "")]
+    # the title with its block's id, so a writer asked to change the headline edits `report:<slug>#title` (live check
+    # term-fix9, quirk 2: with no id it set the first section's heading to the headline, and the report had two)
+    lines = [f"# {doc.get('title') or '(no title)'} · #{TITLE_BLOCK}" + (" · locked" if doc.get("title_locked") is True else "")]
     if doc.get("renderer") == "video":
         from . import video  # noqa: PLC0415
 
@@ -2725,6 +2769,12 @@ async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
     try:
         slug, _ = parse_span(span)
         slug, uid = parse_span(span, read_doc(ctx.c, investigation.MAIN, slug) if SLUG_RE.match(slug) else None)
+        title = uid == TITLE_BLOCK and TITLE_BLOCK not in _ids(read_doc(ctx.c, investigation.MAIN, slug) or {})
+        if title and (args.get("delete") or args.get("insert") or layout or block_type or card or not text):
+            return tools.err(f"edit_document: report:{slug}#{TITLE_BLOCK} is the title, which takes new `text` alone")
+        # a `# ` line is the title's mark: on any other passage it would make a second headline
+        if not title and text and _TITLE_MARK_RE.match(text):
+            return tools.err(f"edit_document: {title_mark_refusal(slug)}")
         # a passage inside a block the analyst locked is refused; a passage inserted after it leaves it as it is
         held = None if args.get("insert") else locked_block_ref(read_doc(ctx.c, investigation.MAIN, slug) or {}, slug, uid,
                                                                 whole=bool(args.get("delete")))
@@ -2751,6 +2801,9 @@ async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
         elif args.get("insert"):
             out = await insert_passage(ctx.c, slug, uid, text, ctx.cell_author)
             chip, line = "added a passage", f"inserted [[{out['ref']}]] after [[{span}]]"
+        elif title:
+            out = replace_title(ctx.c, slug, text, ctx.cell_author, span=span)
+            chip, line = "edited the title", f"replaced the title [[{span}]]"
         elif _MD_FIGURE_RE.match(text):
             return tools.err("edit_document: a figure is a new passage, so pass `insert`")
         elif (out := replace_heading(ctx.c, slug, uid, text, ctx.cell_author, span=span)) is not None:

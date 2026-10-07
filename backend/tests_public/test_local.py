@@ -314,6 +314,27 @@ async def test_state_gives_what_the_routes_give(term):
     assert concepts.find_concept(config.workspace_dir(CORPUS), "bash")
 
 
+async def test_state_label_gives_the_scope_s_size_for_a_label_whose_run_never_ended(term):
+    """Live check term-fix9, quirk 4: a label whose first run Claude Code's quit stopped part way read `not run yet`
+    beside its counts, and its run's size was nowhere. `state label` and `state labels` give its scope's size
+    (`scope_total`) for a label with rows and no run that ended; a label whose run ended gives none."""
+    from app import concepts
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    done = await local.state(CORPUS, "label", ["bash"])
+    total = done["last_run"]["matched_total"] if done.get("last_run") else done["applications"][-1]["matched_total"]
+    assert "scope_total" not in done and all("scope_total" not in k for k in await local.state(CORPUS, "labels"))
+    # the run that ended forgotten, as a run stopped before its end leaves the label: rows, no run
+    ws = config.workspace_dir(CORPUS)
+    concept = concepts.load_concept(CORPUS, done["id"])[1]
+    concepts.write_concept(ws, {**concept, "applications": []})
+    stopped = await local.state(CORPUS, "label", ["bash"])
+    assert stopped["n_labeled"] > 0 and stopped["scope_total"] == total
+    [listed] = await local.state(CORPUS, "labels")
+    assert listed["scope_total"] == total
+
+
 async def test_state_label_keeps_a_record_the_analyst_set_under_the_value_they_gave(term):
     """A record the analyst set to another value in the label panel stays among its examples, under the value they gave,
     with the value the label gave it and its words (live check New 10: its row came past the page each value shows, so it
@@ -426,6 +447,15 @@ async def test_act_makes_what_the_browser_makes(term, monkeypatch):
     assert threads.unread(CORPUS, agents.read_meta(CORPUS, made["thread"]))
     seen = await local.act(CORPUS, "seen", {"thread": made["thread"]})
     assert seen["seen"] >= 1 and not threads.unread(CORPUS, agents.read_meta(CORPUS, made["thread"]))
+    # the fork's `done` after the reply seen is the same answer, never news again (live check term-fix9, low quirk: such
+    # a thread read `new` after a relaunch); the next question's answer is
+    log_path = agents.paths(CORPUS, made["thread"])[1]
+    agents.append(log_path, {"type": "done", "result": "answered"})
+    assert not threads.unread(CORPUS, agents.read_meta(CORPUS, made["thread"]))
+    agents.append(log_path, {"type": "user", "text": "And after?"})
+    agents.append(log_path, {"type": "done", "result": "answered"})
+    assert threads.unread(CORPUS, agents.read_meta(CORPUS, made["thread"]))
+    await local.act(CORPUS, "seen", {"thread": made["thread"]})
     # a stop goes through the module, as the browser's Stop does
     asked: list[str] = []
 

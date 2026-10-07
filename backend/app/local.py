@@ -447,15 +447,44 @@ async def _labels(c: str, args: list[str], pos: list[str]) -> Any:
 
     def listed() -> list[dict]:
         """The concepts route's list, each label the analyst set a record of to another value with `verdicts` as
-        `state label` gives them (home's label rows count as thimble.labels() reads the rows)."""
+        `state label` gives them (home's label rows count as thimble.labels() reads the rows), and one with rows and no
+        run that ended with its scope's size (`scope_total`, _scope_total)."""
         out = concepts.list_concepts_route(c)
         for k in out:
             applied, moved = concepts.verdicts_applied(ws, str(k.get("id") or ""), dict(k.get("counts") or {}))
             if moved:
                 k["verdicts"] = {"counts": applied, "set": moved}
+            if (n := _scope_total(c, k)) is not None:
+                k["scope_total"] = n
         return out
 
     return await asyncio.to_thread(listed)
+
+
+SCOPE_COUNT_MAX = 10_000_000  # the records _scope_total counts a label's scope to
+
+
+def _scope_total(c: str, label: dict[str, Any]) -> int | None:
+    """How many records (or files, or runs) a label's scope holds, for a label with labeled rows and no run that ended:
+    one whose first run goes on, in main's process, or stopped part way, as when Claude Code quit under it. Its run
+    record would say it, and none was kept; the renderer says `3,150 of 4,579` (live check term-fix9, quirk 4: such a
+    label read `not run yet` beside its counts). None for any other label. Blocking."""
+    from . import concepts  # noqa: PLC0415
+
+    if label.get("applications") or label.get("last_run") or label.get("unit") not in concepts.FILE_UNITS:
+        return None
+    labeled = label.get("n_labeled")
+    if not isinstance(labeled, int):
+        labeled = sum(v for v in (label.get("counts") or {}).values() if isinstance(v, int))
+    if not labeled:
+        return None
+    try:
+        corpus_dir = config.corpus_dir(c)
+        sources = concepts.match_paths(corpus_dir, concepts.glob_patterns(label.get("glob")))
+        return concepts.units_at_least(corpus_dir, sources, str(label["unit"]), SCOPE_COUNT_MAX)[0] if sources else None
+    except Exception:  # noqa: BLE001 — a scope that cannot be counted is said without its size
+        log.debug("scope not counted", exc_info=True)
+        return None
 
 
 async def _label(c: str, args: list[str], pos: list[str]) -> Any:
@@ -486,7 +515,9 @@ async def _label(c: str, args: list[str], pos: list[str]) -> Any:
     # the counts as thimble.labels() reads the rows, each record the analyst set to another value under that value, and
     # how many records that is (the label panel's counts, and its `set by you`)
     applied, moved = await asyncio.to_thread(concepts.verdicts_applied, ws, str(found["id"]), dict(out.get("counts") or {}))
-    return {**out, "examples": ex, "rows": rows, "verdicts": {"counts": applied, "set": moved}}
+    scope = await asyncio.to_thread(_scope_total, c, out)
+    return {**out, "examples": ex, "rows": rows, "verdicts": {"counts": applied, "set": moved},
+            **({"scope_total": scope} if scope is not None else {})}
 
 
 def _verdict_rows(c: str, concept_id: str) -> list[dict[str, Any]]:

@@ -72,8 +72,10 @@ REFUSED_RE = re.compile(r"^\s*(?:Error:\s*)?PreToolUse:[A-Za-z]+ hook error:")
 WORKFLOW_TOOL = "Workflow"  # Claude Code's dynamic workflows (module note, workflows)
 WORKFLOW_TITLE = "workflow"  # when the script's meta names nothing
 WORKFLOW_DIR_RE = re.compile(r"^Transcript dir:[ \t]*(\S.*?)[ \t]*$", re.M)  # in the Workflow call's result
-# `export const meta = {name: '…', description: '…'}`, the literal every workflow script opens with
-WORKFLOW_META_RE = re.compile(r"\b(name|description)\s*:\s*(['\"`])(.*?)\2", re.S)
+# `export const meta = {name: '…', description: '…'}`, the literal every workflow script opens with; a quotation mark
+# the string escapes (`main\'s answer`) is one of its characters, never its end (live check term-fix9, low quirk: a
+# workflow's chat was titled `Re-verify main`)
+WORKFLOW_META_RE = re.compile(r"\b(name|description)\s*:\s*(['\"`])((?:\\.|(?!\2)[^\\])*)\2", re.S)
 SCRIPT_READ_CHARS = 64_000  # of a workflow run by its scriptPath, read for its meta
 SEND_TOOL = "SendMessage"
 REPLY_TOOL = "reply_in_thread"
@@ -2136,6 +2138,13 @@ def _scan_workflow(lv: Live, owner: Sub, replay: bool, places: dict[str, dict] |
         lv.subs.append(member)
 
 
+def workflow_meta(script: str) -> dict[str, str]:
+    """The `name` and `description` a workflow script's `meta` literal gives, each as it reads (a JavaScript string's
+    escapes taken out: `\\'` a quotation mark, `\\n` a space)."""
+    unescape = lambda v: re.sub(r"\\(.)", lambda m: " " if m.group(1) in "nrt" else m.group(1), v)  # noqa: E731
+    return {k: unescape(v).strip() for k, _, v in WORKFLOW_META_RE.findall(script.split("}", 1)[0])}
+
+
 def _spawn_workflow(lv: Live, tool_use_id: str, inp: dict) -> Sub:
     """The agent chat of a Workflow call of main's, titled by its script's meta, running until the workflow's task
     notification."""
@@ -2146,7 +2155,7 @@ def _spawn_workflow(lv: Live, tool_use_id: str, inp: dict) -> Sub:
     if not script and inp.get("scriptPath"):
         with contextlib.suppress(OSError, UnicodeDecodeError):
             script = Path(str(inp["scriptPath"])).read_text("utf-8")[:SCRIPT_READ_CHARS]
-    meta = {k: v.strip() for k, _, v in WORKFLOW_META_RE.findall(script.split("}", 1)[0])}
+    meta = workflow_meta(script)
     name = meta.get("name") or str(inp.get("name") or "").strip()
     title = " ".join((meta.get("description") or name).split()) or WORKFLOW_TITLE
     chat = agents.new_agent(lv.c, SUBAGENT_ROLE, title, by=TERMINAL, session=lv.sid, tool_use_id=tool_use_id,

@@ -132,3 +132,38 @@ def test_an_uncited_date_in_words_is_linked_whole_or_left_plain():
     assert r.annotated == "The busiest was [[23 June|card:c2#day/06-23]]."
     # `may` in lower case is the verb
     assert [d[2] for d in cite.dates_in_text("3 may fail; May 3rd; 10 marches")] == ["May 3rd"]
+
+
+def test_a_date_in_words_is_found_where_a_cell_a_row_name_or_a_line_writes_it_in_words():
+    """Live check term-fix9, quirk 11: edit_card said "NOT found in this card's outputs, 23 June" for a table whose row is
+    named `23 June`, and "30 June" for an output that writes `30 June 2026 at 22:47:51 UTC`; main rewrote correct
+    takeaways twice because of it. A day and a month in words is at a cell, a row's name or a line that gives the same
+    day and month in words, the year and the time compared when both give one."""
+    from app import frames, verify
+
+    for display, place in [("23 June", "23 June"), ("June 23", "23 June"), ("23 June", "last delete on 23 June"),
+                           ("30 June", "30 June 2026 at 22:47:51 UTC"), ("30 June 2026", "June 30, 2026"),
+                           ("30 June 2026 at 22:47 UTC", "30 June 2026 at 22:47:51 UTC")]:
+        assert cite.date_in(display, place) and verify._value_matches(display, place), (display, place)
+    for display, place in [("23 June", "24 June"), ("23 June", "23 July"), ("30 June 2025", "30 June 2026 at 22:47"),
+                           ("30 June 2026 at 21:00 UTC", "30 June 2026 at 22:47:51 UTC"), ("23 June", "it may 23 fail")]:
+        assert not cite.date_in(display, place), (display, place)
+    # a frame whose rows are named by their day in words: the date is linked to its row's name, and found
+    f = frames.normalize({"columns": ["day (UTC)", "deletes"], "rows": [["22 June", 11], ["23 June", 602], ["total", 613]],
+                          "index": "day (UTC)"})
+    r = cite.resolve("d5", "23 June had the most, [[602|card:d5#deletes/23%20June]].", [frames.bundle(f)])
+    assert r.annotated.startswith("[[23 June|card:d5#day%20(UTC)/23%20June]] had the most") and r.unresolved == []
+    r = cite.resolve("d5", "On [[23 June|card:d5#day%20(UTC)/23%20June]].", [frames.bundle(f)])
+    assert r.annotated == "On [[23 June|card:d5#day%20(UTC)/23%20June]]." and r.unresolved == []
+    # a date the output writes in words in two cells and a row's name: found, left plain as an ambiguous value is
+    g = frames.normalize({"columns": ["event", "when"], "index": "event",
+                          "rows": [["gamma cleanup post", "30 June 2026 at 22:47:51 UTC"],
+                                   ["last delete on 30 June", "30 June 2026 at 21:17:24 UTC"]]})
+    r = cite.resolve("e1", "The last delete on 30 June came earlier.", [frames.bundle(g)])
+    assert r.annotated == "The last delete on 30 June came earlier." and r.unresolved == []
+    # a line of text that writes it in words
+    r = cite.resolve("e2", "Alpha started on 23 June.", [{"text/plain": "alpha  started on 23 June at 10:53\nbeta  watched"}])
+    assert r.annotated == "Alpha started on [[23 June|card:e2@out0#L1]]." and r.unresolved == []
+    # a date the output does not write is still missing
+    r = cite.resolve("d5", "On 27 June there were none.", [frames.bundle(f)])
+    assert "27 June" in r.unresolved

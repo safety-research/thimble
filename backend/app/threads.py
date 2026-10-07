@@ -669,7 +669,20 @@ SEEN_KEY = "seen"  # on a thread's meta: how many of its log's records the analy
 
 
 def _answers_after(records: list[dict[str, Any]], start: int) -> bool:
-    return any(r.get("type") == "done" or (r.get("type") == "text" and r.get("reply")) for r in records[start:])
+    """Whether a question's answer came at or after record `start`: each question (a `user` record and the records after
+    it) answers once, at its first reply or `done` record, as local.answered counts them. A `done` record after a reply
+    the analyst saw is the same answer, not a new one (live check term-fix9, low quirk: a thread answered while its panel
+    showed it read `new` again after a relaunch, its fork's `done` coming after the reply)."""
+    got = False
+    for i, r in enumerate(records):
+        kind = r.get("type")
+        if kind == "user":
+            got = False
+        elif not got and (kind == "done" or (kind == "text" and r.get("reply"))):
+            got = True
+            if i >= start:
+                return True
+    return False
 
 
 def unread(c: str, meta: dict[str, Any]) -> bool:
