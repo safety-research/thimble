@@ -196,7 +196,8 @@ for a record the label does not mark.
 - With a label chosen, the label's value is the bar on each anchored record, as in the File browser, and the texts it
   matches are highlighted in its colors; the other labels' texts in gray.
 - With Off, no element takes a bar, and the labels' texts are highlighted in gray.
-- A label the analyst turns on, in the menu or anywhere in thimble, takes the color. When it is turned off again, the
+- A label the analyst turns on, in the menu or anywhere in thimble, takes the color, unless Rows groups the lanes by it
+  ([rows-and-filters.md](rows-and-filters.md)). When it is turned off again, the
   field chosen last is the color.
 - A field's values take the label palette's colors: the declared `values` in their order, each in the color it
   names or else the next free one, then the others the first time they show, the most frequent first. A declared

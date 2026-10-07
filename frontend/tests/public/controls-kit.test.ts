@@ -202,6 +202,43 @@ describe('Rows', () => {
     expect((of('colour').at(-1)!.state as any).parts.rows).toEqual({ by: 'l:k1' })
   })
 
+  test("it opens on a label named in `initial` while that label is on, else on the field after it; the label it groups by takes no colour", async () => {
+    await load()
+    const w = win()
+    w.CALLS = CALLS
+    w.eval(`
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }, { name: 'outcome', title: 'Outcome' }], initial: 'tool' })
+      window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session' }, { name: 'tool', title: 'Tool' }], initial: [{ label: 'tactic' }, 'tool'] })
+    `)
+    await wait()
+    // no label yet: the field after it
+    expect(texts('.thimble-rows-by')).toEqual(['Rows:Tool'])
+    expect(w.rows.query()).toEqual({ field: 'tool' })
+    // the label is on when the view first hears of the labels: Rows groups by it (found by its name, the case aside)
+    // and Color by keeps its field, though a label turned on takes the colour otherwise
+    labels()
+    await wait()
+    expect(texts('.thimble-rows-by')).toEqual(['Rows:Tactic'])
+    expect(w.rows.query()).toEqual({ label: 'k1', name: 'Tactic' })
+    expect(w.colour.by).toEqual({ field: 'tool', title: 'Tool' })
+    // nothing was chosen, so nothing of Rows is kept: the view opens the same way again
+    expect((of('colour').at(-1)?.state as any)?.parts?.rows?.by).toBe(undefined)
+    // turned off, the label gives way to the field; on again, it is Rows' again, still not the colour
+    labels(undefined, undefined, false)
+    await wait()
+    expect(texts('.thimble-rows-by')).toEqual(['Rows:Tool'])
+    labels()
+    await wait()
+    expect(texts('.thimble-rows-by')).toEqual(['Rows:Tactic'])
+    expect(w.colour.by).toEqual({ field: 'tool', title: 'Tool' })
+    // a label no part holds still takes the colour when it is turned on
+    const other = { id: 'k2', name: 'Phase', on: true, here: true, colour: '#b77300', values: [{ name: 'early', colour: '#b77300', highlight: true }], count: 1 }
+    fromPage({ type: 'thimble:labels', marks: {}, on: [{ id: 'k1', name: 'Tactic', colour: '#025ac3', values: TACTIC(['explore', 'verify']).values }, { id: 'k2', name: 'Phase', colour: '#b77300', values: other.values }], filter: null, all: [TACTIC(['explore', 'verify']), other], palette: ['#025ac3'] })
+    await wait()
+    expect(w.colour.by).toEqual({ label: 'k2', title: 'Phase' })
+    expect(texts('.thimble-rows-by')).toEqual(['Rows:Tactic'])
+  })
+
   test('a record the reader gave its group keeps it, for the records the page does not anchor', async () => {
     await load()
     const w = win()
@@ -237,6 +274,46 @@ describe('the lanes and their key', () => {
     await wait()
     expect(w.lanes.isOn('problem')).toBe(true)
     expect(doc().querySelectorAll('.thimble-lane-bad')).toHaveLength(2)
+  })
+
+  test('with density each lane is bars on the bins, stacked by the Color by values, one height for every lane; a click on a bar opens its first record', async () => {
+    await load()
+    const w = win()
+    w.CALLS = CALLS
+    w.eval(`
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'outcome', title: 'Outcome', values: ['ok', 'error', 'denied'] }] })
+      window.range = thimble.timeRange({ mount: '#range', times: window.CALLS.map((c) => c.t) })
+      window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session' }] })
+      window.dense = false
+      window.marked = []
+      window.lanes = thimble.lanes({ mount: '#lanes', rows: window.rows, range: window.range, density: () => window.dense, onMark: (c) => window.marked.push(c.ref) })
+      window.lanes.draw(window.CALLS)
+    `)
+    await wait()
+    expect(doc().querySelectorAll('.thimble-lane-mark[data-i]')).toHaveLength(6)
+    expect(doc().querySelector('#lanes')!.classList.contains('is-density')).toBe(false)
+    w.dense = true
+    w.lanes.draw()
+    await wait()
+    expect(doc().querySelector('#lanes')!.classList.contains('is-density')).toBe(true)
+    expect(doc().querySelectorAll('.thimble-lane-mark[data-i]')).toHaveLength(0)
+    const bars = [...doc().querySelectorAll('.thimble-lane-bar')]
+    expect(bars.length).toBeGreaterThanOrEqual(5)
+    // the lane of explore's two calls in one bin holds two values stacked, ok under error, in their chips' colours
+    const explore = doc().querySelector('.thimble-lane[data-key="explore"]')!
+    const fills = [...explore.querySelectorAll('.thimble-lane-bar')].map((b) => (b as HTMLElement).style.fill)
+    expect(new Set(fills).size).toBe(fills.length)
+    expect(fills.every(Boolean)).toBe(true)
+    expect(explore.querySelector('svg')!.getAttribute('height')).toBe('36')
+    // a click on a bar opens the first record of its bin
+    ;(explore.querySelector('.thimble-lane-bar') as unknown as HTMLElement).dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, clientX: 200 + Number(explore.querySelector('.thimble-lane-bar')!.getAttribute('x')) + 1 }))
+    expect(w.marked).toEqual(['r1/explore.jsonl#L2'])
+    // a value turned off leaves the bars
+    ;(doc().querySelectorAll('.thimble-colour-chip')[1] as HTMLElement).click()
+    await wait()
+    expect(w.colour.isOn('error')).toBe(false)
+    w.lanes.draw()
+    expect(doc().querySelector('.thimble-lane[data-key="explore"]')!.querySelectorAll('.thimble-lane-bar')).toHaveLength(1)
   })
 
   test("a click on a lane's name chooses it and tells the page; ▾ folds a parent's lanes into its own", async () => {

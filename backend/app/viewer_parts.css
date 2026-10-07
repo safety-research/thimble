@@ -230,6 +230,24 @@
 .thimble-lane-bad {
   fill: var(--status-negative);
 }
+/* Density: taller lanes, so that the bars read; a bin's tip names its records per value */
+.thimble-lanes.is-density .thimble-lane {
+  height: 36px;
+}
+.thimble-tip-m.thimble-lanes-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.thimble-lanes-rn {
+  flex: 1;
+  min-width: 0;
+}
+.thimble-lanes-rc {
+  padding-left: 14px;
+  font: 400 var(--text-mono-sm) / 1.4 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
 /* the detail list's rows in view: a light tint across the lanes, with faint edges */
 .thimble-lanes-span {
   position: absolute;
