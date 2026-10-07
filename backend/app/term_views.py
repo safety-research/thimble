@@ -686,7 +686,8 @@ async def draw_check(c: str, slug: str, *, cols: int, theme: str, rows: int = CH
         except TermViewError as e:
             out["error"] = str(e)
             return out
-        out.update(text=panel_text(p.name, frame), answers=p.answers, fetches=p.fetches)
+        # the hint row wrapped to the panel's columns, as the panel and draw_text wrap it
+        out.update(text=panel_text(p.name, frame, cols=cols), answers=p.answers, fetches=p.fetches)
         if p.failed:
             out["error"] = f"a fetch failed: {p.failed[0]}"
         elif frame.get("error"):

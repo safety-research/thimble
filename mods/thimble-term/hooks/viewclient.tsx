@@ -1,6 +1,9 @@
 // A terminal view's frame (hooks/viewhost.ts), drawn by a Client surface module (no `$`): the rows its program drew
 // and its hot regions. A region under the pointer that is not a whole row is drawn in inverse, and its tip (what it
-// does, a value's meaning) on the tip background on the row below it, or above it on the last row. A press on a region
+// does, a value's meaning) on the tip background on the row below it, or above it on the last row. A chart's region
+// (`cursor`: a strip, a lane) is never inverse, which would turn the chart into a band: only the pointer's column is
+// marked, `┊` in an empty cell and a bar in the text color, on every chart region over the same columns (the lanes and
+// the range's strip), and the tip is that cell's (`tips`). A press on a region
 // posts a click with the cell it landed on, counted from the region's start; on a region the program lets drag, the
 // release posts a drag from the cell pressed to the cell let go, or a click when the pointer did not move. A press on
 // no region posts a click of none, which gives the pane its keys back (lines.tsx CLIENT_CLICK). Each post carries the
@@ -11,12 +14,13 @@ import { width } from './draw'
 import type { Line } from './draw'
 import { paintLine } from './paint'
 
-type Hit = { y: number; x0: number; x1: number; row?: boolean; tip?: string; drag?: boolean }
+type Hit = { y: number; x0: number; x1: number; row?: boolean; tip?: string; drag?: boolean; cursor?: boolean; tips?: string[] }
 type Props = { lines: Line[]; hits: Hit[]; seq: number; cols: number }
-type S = { hover: number; down: { i: number; x: number } | null }
+type S = { hover: number; x?: number; down: { i: number; x: number } | null }
 type Out = { n: number; seq: number; i: number; x?: number; x0?: number; x1?: number; drag?: boolean }
 
 const TIP_BG = 'userMessageBackground'
+const RULE = 'subtle'
 // every post carries the clicks not yet seen, under this instance's name
 const vorigin = Math.random().toString(36).slice(2, 10)
 let n = 0
@@ -82,20 +86,34 @@ const ViewClient: ClientModule<Props, S> = (props, surface) => {
     }
     if (st.down) return
     const i = ev.type === 'leave' ? -1 : at(ev.x, ev.y)
-    if (i !== st.hover) surface.setState({ ...st, hover: i })
+    // on a chart's region the pointer's column matters too
+    const x = i >= 0 && hits[i]?.cursor ? ev.x : undefined
+    if (i !== st.hover || x !== st.x) surface.setState({ ...st, hover: i, x })
   })
   if (surface.state === undefined) surface.setState(st)
   let lines = Array.isArray(props.lines) ? props.lines : []
   const h = st.hover >= 0 ? hits[st.hover] : undefined
-  if (h && !h.row) {
+  const cx = h?.cursor && typeof st.x === 'number' && st.x >= h.x0 && st.x < h.x1 ? st.x : -1
+  if (h && h.cursor && cx >= 0) {
+    // the pointer's column on each chart region over the same cells: `┊` where nothing is drawn, a bar in the text color
+    const mark = (seg: Line[number]): Line[number] => {
+      if (!seg.s.trim()) return { s: '┊', fg: RULE, ...(seg.bg ? { bg: seg.bg } : {}) }
+      const { fg: _fg, d: _d, ...rest } = seg
+      return rest
+    }
+    const cols = new Set(hits.filter(g => g.cursor && g.x0 === h.x0 && g.x1 === h.x1).map(g => g.y))
+    lines = lines.map((l, y) => (cols.has(y) ? overlay(l, cx, cx + 1, mark) : l))
+  } else if (h && !h.row) {
     lines = lines.map((l, y) => (y === h.y ? overlay(l, h.x0, h.x1, s => ({ ...s, inv: true })) : l))
   }
-  if (h?.tip) {
+  const tipWords = cx >= 0 ? h?.tips?.[cx - h.x0] || h?.tip : h?.tip
+  if (h && tipWords) {
     const ty = h.y + 1 < lines.length ? h.y + 1 : h.y - 1
     if (ty >= 0) {
-      const words = ` ${h.tip} `
+      const words = ` ${tipWords} `
       const w = Math.min(width(words), props.cols)
-      const x0 = Math.max(0, Math.min(h.x0, props.cols - w))
+      const at0 = cx >= 0 ? Math.max(h.x0, cx - 1) : h.x0
+      const x0 = Math.max(0, Math.min(at0, props.cols - w))
       lines = lines.map((l, y) => (y === ty ? overlay(l, x0, x0 + w, s => s, words.slice(0, w)) : l))
     }
   }

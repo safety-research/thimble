@@ -2930,7 +2930,9 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const rows = Math.max(6, (bodyRows || 34) - VIEW_CHROME - (sub.length ? 1 : 0) - (hintsN - 1))
   const ov = viewFor(rt.sc, slug, cols, rows, p.ref)
   const f: ViewFrame | null = ov.frame
-  const head = headerEls(els, { title: p.title || v.name || slug, cols, ...(sub.length ? { sub: subLine(sub) } : {}) })
+  // `◌ loading…` against R on the title's row while a reader query of the program is out, so the rows stay put
+  const right = f?.loading && f.lines.length ? <Text key="view-loading-r" dimColor>◌ loading…</Text> : null
+  const head = headerEls(els, { title: p.title || v.name || slug, cols, right, ...(sub.length ? { sub: subLine(sub) } : {}) })
   const body: RenderElement[] = [...head]
   // the relay is drawn from the first drawing on, while the view opens too, so the open gives it the ring (term.ts
   // giveKeys) and the view's keys work as soon as its frame comes
@@ -2942,7 +2944,8 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     return <Box flexDirection="column">{body}</Box>
   }
   if (!f) {
-    body.push(<Text key="view-opening" dimColor>◌ opening the view</Text>)
+    // from the moment the view opens until its program draws its first frame: the host starting, the program reading
+    body.push(<Text key="view-opening" dimColor>◌ starting the view…</Text>)
     body.push(hintsRow(els, [], cols))
     return <Box flexDirection="column">{body}</Box>
   }
@@ -2960,6 +2963,8 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     const text = viewField && viewField.slug === slug ? viewField.text : f.field?.text ?? ''
     viewField = { slug, text, send: t => sendEvent(cx, { t: 'text', value: t }), enter: () => key('return') }
   }
+  // a first frame with no rows yet, while its first query is out
+  if (!f.lines.length && f.loading) body.push(<Text key="view-loading" dimColor>◌ loading…</Text>)
   // the frame's rows bring their margin (`❯`)
   body.push(<Client key={marginKey('view-frame')} module="./viewclient.tsx" width={cols + MARGIN_W} height={Math.max(1, f.lines.length)} props={JSON.parse(JSON.stringify({ lines: f.lines, hits: f.hits, seq: f.seq, cols: cols + MARGIN_W })) as never} />)
   if (ov.error) body.push(<Text key="view-error" color={COLORS.problem} wrap="truncate-end">{`× ${ov.error}`}</Text>)

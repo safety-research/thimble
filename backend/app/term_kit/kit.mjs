@@ -450,14 +450,16 @@ export class Row {
   }
 
   /** Text in a style, cut to `max` cells; `opts.on(x)` makes it a control (inverse under the pointer), `opts.tip`
-   *  words the pointer shows under it, `opts.row` a hit as wide as the row. */
+   *  words the pointer shows under it, `opts.row` a hit as wide as the row. `opts.cursor` marks a chart's cells: under
+   *  the pointer only its cell is marked, never inverse (thimble-term draws `┊` there, or the bar in the text color),
+   *  with `opts.tips[i]` the words for cell i where they differ from `tip`. */
   add(text, style = {}, opts = {}) {
     let s = String(text ?? '')
     if (opts.max !== undefined) s = cut(s, opts.max)
     if (!s) return this
     const w = width(s)
     this.runs.push({ ...style, s })
-    if (opts.on || opts.tip || opts.drag) this.hits.push({ x0: this.x, x1: this.x + w, on: opts.on, tip: opts.tip, drag: opts.drag, row: opts.row })
+    if (opts.on || opts.tip || opts.drag) this.hits.push({ x0: this.x, x1: this.x + w, on: opts.on, tip: opts.tip, drag: opts.drag, row: opts.row, cursor: opts.cursor, tips: opts.tips })
     this.x += w
     return this
   }
@@ -538,11 +540,12 @@ const state = {
   wheelFns: [],
   error: null,
   textMode: '',
-  colourLabels: () => [],
   colorBys: [],
   colour: null, // the view's Color by, whose hues a time range and a strip take by default
   lastOpen: null,
   drawNo: 0, // the drawings made, so a count made while drawing (Color by's tally) knows a new one began
+  answered: 0, // the reader's answers the program has had
+  labelWants: [], // each part's labels a query names, so the reader reads them though they are not on in Files
 }
 
 function send(msg) {
@@ -608,6 +611,7 @@ export function frame() {
   state.typer = d.typer
   const lines = d.lines.slice(0, state.rows)
   const hits = d.hits.filter((h) => h.y < lines.length && h.x1 > h.x0)
+  for (const h of hits) if (h.cursor === undefined && !h.row && chartCells(lines[h.y], h.x0, h.x1)) h.cursor = true
   state.hits.set(seq, hits)
   for (const k of [...state.hits.keys()]) if (k < seq - 4) state.hits.delete(k)
   const keys = [...new Set(state.binds.flatMap((b) => b.keys))]
@@ -617,7 +621,7 @@ export function frame() {
     seq,
     ack: state.ack,
     lines: lines.map(wireLine),
-    hits: hits.map((h) => ({ y: h.y, x0: h.x0 + 2, x1: Math.min(h.x1, state.cols) + 2, ...(h.row ? { row: true } : {}), ...(h.tip ? { tip: String(h.tip) } : {}), ...(h.drag ? { drag: true } : {}) })),
+    hits: hits.map((h) => ({ y: h.y, x0: h.x0 + 2, x1: Math.min(h.x1, state.cols) + 2, ...(h.row ? { row: true } : {}), ...(h.tip ? { tip: String(h.tip) } : {}), ...(h.drag ? { drag: true } : {}), ...(h.cursor ? { cursor: true } : {}), ...(h.cursor && Array.isArray(h.tips) ? { tips: h.tips.slice(0, h.x1 - h.x0).map((t) => (t ? String(t).slice(0, 160) : '')) } : {}) })),
     hints,
     // each hint's keys, so the panel names a sign's key only while its relay holds the ring (a Button's hotkey is a
     // letter or a digit; a sign reaches the view through the relay's field alone)
@@ -628,6 +632,8 @@ export function frame() {
     field: d.typer ? { text: d.typer.text } : null,
     sub: [...new Set(d.facts)],
   }
+  // a reader query out long enough to say so, or the first one out before any came back: the panel says `◌ loading…`
+  if (loading()) out.loading = true
   // what the panel cuts: rows past its height, and rows wider than its columns (with the first one's text)
   const past = d.lines.length - lines.length
   if (past > 0 || d.cutAt.n) out.overflow = { rows: past, cols: d.cutAt.n, first: d.cutAt.first.slice(0, 300) }
@@ -646,6 +652,18 @@ function overlay(d) {
     d.hits = d.hits.filter((h) => h.y < o.y || h.y >= y1)
     d.hits.push(...o.hits)
   }
+}
+
+// the glyphs of a chart's cells: a strip's bars, a lane's lines and marks, a break, a range's edges
+const CHART = new Set([...' ▁▂▃▄▅▆▇█▏▎▍▌▋▊▉─│┊×◆/[]|·'])
+
+// whether the cells [x0, x1) of a line are a chart's alone (at least four of them), whose hit is marked by its cell under
+// the pointer rather than drawn inverse, which would turn the chart into a band
+function chartCells(line, x0, x1) {
+  if (!line || x1 - x0 < 4) return false
+  const text = line.runs.map((r) => r.s).join('')
+  const part = [...text].slice(x0, x1)
+  return part.length > 0 && part.every((ch) => CHART.has(ch)) && part.some((ch) => ch !== ' ')
 }
 
 function wireLine(l) {
@@ -713,9 +731,30 @@ export function fetch(query, opts = {}) {
     const id = ++state.fetchId
     const key = opts.key == null ? null : String(opts.key)
     if (key !== null) for (const [k, p] of state.pending) if (p.key === key) drop(k)
-    state.pending.set(id, { resolve, reject, key })
-    send({ t: 'query', id, q: query === undefined ? null : query, labels: state.colourLabels() })
+    // the kit's own queries ({$thimble: ...}) thimble answers itself; a reader query out a while is the view loading
+    const kit = Boolean(query && typeof query === 'object' && '$thimble' in query)
+    state.pending.set(id, { resolve, reject, key, kit, at: Date.now() })
+    send({ t: 'query', id, q: query === undefined ? null : query, labels: wantedLabels() })
+    if (!kit) setTimeout(redraw, LOADING_MS + 5)
   })
+}
+
+// ms a reader query is out before the view says it loads, so a quick one draws no flicker
+const LOADING_MS = 150
+
+/** Whether the view is loading: a reader query has been out LOADING_MS or more, or the first is out before any came
+ *  back. The panel says `◌ loading…` then; a view may draw it too, such as in place of an empty list. */
+export function loading() {
+  const now = Date.now()
+  for (const p of state.pending.values()) if (!p.kit && (!state.answered || now - p.at >= LOADING_MS)) return true
+  return false
+}
+
+// the labels the program's parts read, which each query names (Color by's, Filter by's, Rows')
+function wantedLabels() {
+  const out = new Set()
+  for (const f of state.labelWants) for (const id of f() || []) out.add(String(id))
+  return [...out]
 }
 
 function drop(id) {
@@ -832,6 +871,7 @@ export function handle(msg) {
       const p = state.pending.get(msg.id)
       if (!p) break
       state.pending.delete(msg.id)
+      if (!p.kit) state.answered += 1
       if (msg.error) {
         const e = new Error(String(msg.error))
         e.name = 'ReaderError'
@@ -842,6 +882,9 @@ export function handle(msg) {
     case 'labels':
       state.labels = Array.isArray(msg.labels) ? msg.labels : state.labels
       state.filter = msg.filter || null
+      // a label ran or changed: its values on the records are read again
+      marks.got.clear()
+      marks.asked.clear()
       for (const cb of state.colorBys) cb()
       for (const fn of state.labelFns) fn({ labels: state.labels.slice(), filter: state.filter })
       break
@@ -872,10 +915,13 @@ export const __driver = {
       out: null, cols: 120, rows: 30, theme: 'dark', view: { slug: '', name: '' }, kept: {}, labels: [], filter: null, drawFn: null,
       frameSeq: 0, ack: 0, gesture: null, binds: [], hits: new Map(), typer: null, pending: new Map(), fetchId: 0, scheduled: false,
       lastSent: '', openers: [], labelFns: [], resets: [], pageReset: null, stateTimer: false, wheelFns: [], error: null, textMode: '',
-      lastOpen: null, colourLabels: () => [], colorBys: [], colour: null, drawNo: 0,
+      lastOpen: null, colorBys: [], colour: null, drawNo: 0, answered: 0, labelWants: [],
     })
     openMenu = null
     openBlocks.clear()
+    marks.got.clear()
+    marks.asked.clear()
+    marks.batch.clear()
   },
   fail(why) {
     state.error = String(why)
@@ -1023,8 +1069,6 @@ export function colorBy(opts = {}) {
     seen: keptBy && Array.isArray(keptBy.seen) ? keptBy.seen.map(String) : onIds(),
     counts: null,
     hues: new Map(), // field -> value -> hue
-    marks: new Map(), // ref -> {label id: value}, from {$thimble: 'marks'}
-    asked: new Set(),
     // the values the records the list draws take, for each field: the menu's words for a field that declares none
     tally: new Map(),
     tallied: new Map(),
@@ -1059,14 +1103,12 @@ export function colorBy(opts = {}) {
     save()
     if (moved) onChange(api)
   })
-  state.colourLabels = () => (labelOf(c.choice) ? [labelOf(c.choice).id] : [])
+  state.labelWants.push(() => (labelOf(c.choice) ? [labelOf(c.choice).id] : []))
 
   // a label's values that color, as the browser's chips: those it highlights (a regex label's `other` is not one); the
   // records with none are `not marked`
   function labelValues(l) {
-    const vs = l.values || []
-    const known = vs.some((v) => v && 'highlight' in v)
-    return (known ? vs.filter((v) => v.highlight !== false) : vs.length > 1 ? vs.slice(0, -1) : vs).map((v) => v.name)
+    return labelClasses(l)
   }
   function labelHue(l, v) {
     const i = labelValues(l).indexOf(v)
@@ -1140,15 +1182,8 @@ export function colorBy(opts = {}) {
       }
       const l = labelOf(c.choice)
       if (!l) return null
-      if ('value' in record) return record.value === undefined || record.value === '' ? null : record.value
-      const ref = typeof record === 'string' ? record : record.ref
-      if (!ref) return null
-      const m = c.marks.get(ref)
-      if (!m) {
-        need(ref)
-        return null
-      }
-      return m[l.id] ?? null
+      if (typeof record === 'object' && 'value' in record) return record.value === undefined || record.value === '' ? null : record.value
+      return labelValue(l.id, record)
     },
     /** A value's hue (a palette color), dim for a value past six and a label's value that does not color, null for Off
      *  and for no value. */
@@ -1239,21 +1274,6 @@ export function colorBy(opts = {}) {
       onChange(api)
       redraw()
     },
-  }
-
-  function need(ref) {
-    if (c.asked.has(ref)) return
-    c.asked.add(ref)
-    const batch = (c.batch = c.batch || [])
-    batch.push(ref)
-    if (batch.length > 1) return
-    queueMicrotask(() => {
-      const refs = c.batch.splice(0)
-      fetch({ $thimble: 'marks', refs }).then((got) => {
-        for (const r of refs) c.marks.set(r, (got && got[r]) || {})
-        redraw()
-      }, () => {})
-    })
   }
 
   function noValueName() {
@@ -1468,6 +1488,43 @@ export function colorBy(opts = {}) {
 // the cells Reset takes against R, with its gutter, whether it shows or not
 const RESET_W = 7
 
+// ------------------------------------------------------------------------------------------------ the labels' marks
+
+// each record's values of the labels the parts read ({$thimble: 'marks'}, which thimble answers for the labels a query
+// names): ref -> {label id: value}, and the labels each ref was asked for, so a label a part reads later is asked again
+const marks = { got: new Map(), asked: new Map(), batch: new Map() }
+
+/** A label's value on a record (`record.ref`, or a ref given as a string) once thimble answered for it, else null and
+ *  asked for; Color by, Filter by and Rows read a label this way. */
+export function labelValue(id, record) {
+  const ref = typeof record === 'string' ? record : record && record.ref
+  if (!ref) return null
+  const got = marks.got.get(ref)
+  const asked = marks.asked.get(ref)
+  if (!asked || !asked.has(String(id))) needMarks(ref, String(id))
+  return got ? got[String(id)] ?? null : null
+}
+
+function needMarks(ref, id) {
+  const first = !marks.batch.size
+  const want = marks.batch.get(ref) || new Set()
+  want.add(id)
+  marks.batch.set(ref, want)
+  if (!first) return
+  queueMicrotask(() => {
+    const batch = [...marks.batch]
+    marks.batch.clear()
+    const refs = batch.map(([r]) => r)
+    const ids = wantedLabels()
+    // asked once for each label, though thimble may hold no value of one that no part reads any more
+    for (const [r, w] of batch) marks.asked.set(r, new Set([...(marks.asked.get(r) || []), ...ids, ...w]))
+    fetch({ $thimble: 'marks', refs }).then((got) => {
+      for (const r of refs) marks.got.set(r, { ...(marks.got.get(r) || {}), ...((got && got[r]) || {}) })
+      redraw()
+    }, () => {})
+  })
+}
+
 // ------------------------------------------------------------------------------------------------ the time range
 
 const BARS = ' ▁▂▃▄▅▆▇█'
@@ -1648,9 +1705,14 @@ export function timeRange(opts = {}) {
       const sx = ov ? (x) => ov.t(x) : (x) => span()[0] + ((x + 0.5) / w) * (span()[1] - span()[0])
       // a cell's left edge in time, for a drag that frames whole cells
       const edge = ov ? (x) => ov.at(x) : (x) => span()[0] + (x / w) * (span()[1] - span()[0])
+      // under the pointer, a cell's time and its records: the strip is a chart, so only its cell is marked (cursor)
+      const cellStep = (span()[1] - span()[0]) / w
+      const tips = cells.map((cell, i) => (cell.brk ? 'no records in this break' : `${api.format(sx(i), cellStep)}${cell.n ? ` · ${plural(cell.n, 'record')}` : ''}`))
       row.hits.push({
         x0,
         x1: x0 + w,
+        cursor: true,
+        tips,
         tip: r.from === null ? 'drag to frame a range; + zooms in' : 'drag an edge [ ] or the window, or drag to frame a new range; a click moves the window there',
         on: (x) => {
           const len = api.to - api.from
@@ -1697,7 +1759,7 @@ export function timeRange(opts = {}) {
       let best = ''
       let bn = 0
       for (const [v, m] of by[x]) if (v !== '' && m > bn) [best, bn] = [v, m]
-      return { glyph: bar(k, max), colour: best ? colourOf(best) : null }
+      return { glyph: bar(k, max), colour: best ? colourOf(best) : null, n: k }
     })
   }
 
@@ -1907,15 +1969,41 @@ function brokenScale(from, to, cols, unit, parts) {
   }
 }
 
-/** The chart's axis under it: the ticks' labels dim at their cells, `gutter` cells in, none overlapping; `legend`, runs
- *  in the gutter before them, the key of the marks the chart draws other than Color by's (`─ running  × failed`); then,
- *  with `marks` ([{t, label}]), their labels on a row of their own, each a control when `onMark(mark)` is given. */
+/** The chart's axis under it: the ticks' labels dim at their cells, `gutter` cells in, none overlapping; `legend`, in
+ *  the gutter before them, the key of the marks the chart draws other than Color by's (`─ running  × failed`): runs, or
+ *  entries `{glyph, fg, name, on, toggle, tip}`, each a control that hides or shows its series (dim while off), as a
+ *  lanes part gives them (`legend()`); then, with `marks` ([{t, label}]), their labels on a row of their own, each a
+ *  control when `onMark(mark)` is given. */
 export function axis(d, scale, o = {}) {
   const gutter = o.gutter || 0
+  const given = o.legend ? (Array.isArray(o.legend) ? o.legend : [o.legend]) : []
+  const toggles = given.filter((e) => e && typeof e === 'object' && 'name' in e)
+  // a key whose entries are toggles: in the gutter where all of them fit, else on a row of their own over the axis, so
+  // no series loses its entry
+  const keyW = toggles.reduce((n, e, i) => n + (i ? 2 : 0) + width(`${e.glyph || '●'} ${e.name}`), 0)
+  const own = toggles.length && keyW > gutter - 2
+  const keyRow = (row) => {
+    toggles.forEach((e, i) => {
+      if (i) row.gap()
+      const on = e.on !== false
+      const x0 = row.x
+      row.add(e.glyph || '●', on ? (e.fg ? { fg: e.fg } : {}) : { d: true }).add(` ${e.name}`, { d: true })
+      if (e.toggle) row.hits.push({ x0, x1: row.x, on: () => e.toggle(), tip: e.tip || `${on ? 'hide' : 'show'} ${e.name}` })
+    })
+  }
+  if (own) {
+    const kr = d.row()
+    keyRow(kr)
+    kr.end()
+  }
   const row = d.row()
-  // the legend whole, or none where the gutter has no room for it (the lanes' tips say it too)
-  const legend = o.legend ? merged((Array.isArray(o.legend) ? o.legend : [o.legend]).map(segOf).filter(Boolean)) : []
-  if (legend.length && lineWidth(legend) <= gutter - 2) row.runsOf(legend)
+  if (toggles.length) {
+    if (!own) keyRow(row)
+  } else {
+    // the legend whole, or none where the gutter has no room for it (the lanes' tips say it too)
+    const legend = merged(given.map(segOf).filter(Boolean))
+    if (legend.length && lineWidth(legend) <= gutter - 2) row.runsOf(legend)
+  }
   row.at(gutter)
   let end = 0
   // a broken scale's breaks are `//` in the rule gray, and no label runs into one
@@ -2002,15 +2090,16 @@ export function maxBin(scale, groups, time = (it) => it.t) {
 // ------------------------------------------------------------------------------------------------ the list
 
 /**
- * A list of records with a chosen row (`❯` and the accent), its details in place under it, and the colored track at
- * its right edge when it is taller than its room (docs/terminal-views.md, "The list"). ↑↓ choose, Enter or a click opens
- * and closes the chosen row's details, `a` asks a side thread about it; the wheel moves the rows.
+ * A list of records with a chosen row (`❯` and the accent), its details in place under it or in a side pane beside it,
+ * and the colored track at its right edge when it is taller than its room (docs/terminal-views.md, "The list"). ↑↓
+ * choose, Enter or a click opens and closes the chosen row's details, `a` asks a side thread about it; the wheel moves
+ * the rows. `span(time)` gives the times of the rows in view, which a lanes part marks on the overview.
  *
  * opts: key(item) its identity; enter (the hint's words, `to open`).
  */
 export function list(opts = {}) {
   const keyOf = opts.key || ((it) => it.ref ?? it.id)
-  const s = { chosen: null, open: null, top: 0, free: false, items: [], rows: 0 }
+  const s = { chosen: null, open: null, top: 0, free: false, items: [], rows: 0, shown: [], shownKey: '' }
   onWheel((by) => {
     s.top = Math.max(0, s.top + by)
     s.free = true
@@ -2039,6 +2128,16 @@ export function list(opts = {}) {
     item() {
       return s.items.find((it) => !it.heading && keyOf(it) === s.chosen) || null
     },
+    /** The first and last times of the items in view, `[t0, t1]`, by `time(item)` (`item.t` or `item.time`); null
+     *  when none shows. */
+    span(time = (it) => (it.t ?? it.time)) {
+      const ts = s.shown.map((it) => Number(time(it))).filter((t) => Number.isFinite(t))
+      return ts.length ? [Math.min(...ts), Math.max(...ts)] : null
+    },
+    /** The items in view, as last drawn. */
+    get shown() {
+      return s.shown.slice()
+    },
     /**
      * Draw the list in the rows left (or `o.height`): `o.items` (an item with `heading` is a bold heading row no key
      * chooses), `o.row(item, r, {chosen, open})` adds the item's row to a Row started after its mark, `o.detail(item,
@@ -2050,6 +2149,25 @@ export function list(opts = {}) {
     draw(d, o = {}) {
       const items = o.items || []
       s.items = items
+      // what the list shows, named over it: the run, the session or the selection, and how many
+      if (o.title) {
+        const tr = d.row()
+        const count = o.count === undefined || o.count === null ? '' : typeof o.count === 'number' ? num(o.count) : String(o.count)
+        tr.add(cut(String(o.title), Math.max(4, d.cols - width(count) - 2)), { b: true })
+        if (count) tr.gap().add(count, { d: true })
+        tr.end()
+      }
+      // a side pane open on one of the items: the list at the left, the item's details beside it (or under it in a
+      // narrow panel)
+      if (o.side && o.side.isOpen) {
+        const open = items.find((it) => !it.heading && keyOf(it) === o.side.key)
+        if (open) {
+          const rest = { ...o, title: null, side: null, sideOpen: o.side }
+          o.side.draw(d, (dl) => api.draw(dl, rest), (ds) => (o.detail ? o.detail(open, ds) : null), { title: o.sideTitle ? o.sideTitle(open) : open.ref ? placeWords(open.ref) : '' })
+          return
+        }
+      }
+      const pane = o.side || o.sideOpen || null
       // a header row (the columns' names) stands above the rows and does not scroll with them
       if (o.header) {
         const hr = d.row()
@@ -2074,15 +2192,15 @@ export function list(opts = {}) {
       const spans = [] // [first line, last line, item index]
       items.forEach((it, i) => {
         const y0 = inner.y
-        if (it.heading) inner.line([{ s: String(it.heading), b: true }])
+        if (it.heading) inner.line([{ s: String(it.heading), ...(it.dim ? { d: true } : { b: true }) }])
         else {
           const key = keyOf(it)
           const ch = key === s.chosen
-          const op = key === s.open
+          const op = pane ? pane.key === key : key === s.open
           const r = inner.row()
           if (ch) r.margin({ s: '❯', fg: COLORS.accent })
           const v = valueOf ? valueOf(it) : null
-          if (valueOf) r.add(colour ? colour.dot(v).s : '●', colour ? colour.dot(v) : mark(hueOf(v))).gap(1)
+          if (valueOf && o.mark !== false) r.add(colour ? colour.dot(v).s : '●', colour ? colour.dot(v) : mark(hueOf(v))).gap(1)
           const before = r.runs.length
           if (o.row) o.row(it, r, { chosen: ch, open: op })
           if (colour && colour.tally) colour.tally(it)
@@ -2095,7 +2213,13 @@ export function list(opts = {}) {
             toggle(it)
           } })
           r.end()
-          if (op && o.detail) {
+          // lines every item has under its row (a turn's words), at `bodyIndent` cells
+          if (o.body) {
+            const bd = inner.inner(o.bodyIndent ?? 2, 100000)
+            o.body(it, bd, { chosen: ch, open: op })
+            inner.put(bd)
+          }
+          if (op && o.detail && !pane) {
             const dd = inner.inner(2, 100000)
             o.detail(it, dd)
             inner.put(dd)
@@ -2119,6 +2243,13 @@ export function list(opts = {}) {
         if (f !== null && f > at[0] && f <= at[1] && f >= top + height) top = f - at[0] < height ? at[0] : f - Math.floor(height / 3)
       }
       s.top = top = Math.max(0, Math.min(top, last))
+      // the items in view, which a lanes part drawn above marks on the overview: a change draws again, so it follows
+      s.shown = spans.filter(([a, b, i]) => !items[i].heading && b >= top && a < top + height).map(([, , i]) => items[i])
+      const shownKey = s.shown.length ? `${keyOf(s.shown[0])}\u0000${keyOf(s.shown[s.shown.length - 1])}` : ''
+      if (shownKey !== s.shownKey) {
+        s.shownKey = shownKey
+        redraw()
+      }
       const y0 = d.y
       for (let y = top; y < Math.min(total, top + height); y++) d.lines.push({ margin: inner.lines[y].margin, runs: inner.lines[y].runs })
       for (const h of inner.hits) if (h.y >= top && h.y < top + height) d.hits.push({ ...h, y: h.y - top + y0 })
@@ -2137,7 +2268,8 @@ export function list(opts = {}) {
         s.free = false
       }
       d.key(['up', 'down'], 'to choose', (k) => step(k === 'up' ? -1 : 1))
-      d.key('return', s.open !== null && s.open === s.chosen ? 'to close' : opts.enter || 'to open', () => {
+      const isOpen = pane ? pane.key !== null && pane.key === s.chosen : s.open !== null && s.open === s.chosen
+      d.key('return', isOpen ? 'to close' : opts.enter || 'to open', () => {
         const it = api.item()
         if (it) toggle(it)
       })
@@ -2148,6 +2280,14 @@ export function list(opts = {}) {
       })
       function toggle(it) {
         const key = keyOf(it)
+        if (pane) {
+          // in a side pane, never under the row
+          const was = pane.key === key
+          if (was) pane.hide()
+          else pane.show(key)
+          if (!was && o.onOpen) o.onOpen(it)
+          return
+        }
         s.open = s.open === key ? null : key
         if (s.open !== null && o.onOpen) o.onOpen(it)
       }
@@ -2248,7 +2388,7 @@ export function columns(specs, cols) {
  * A record's details, drawn into the inner drawing a list's `detail` gives (A2): `text` its words, wrapped (at most
  * `maxRows`); `blocks` [{text, code, max}] text as the record holds it, such as a command and what it printed or a
  * diff: its lines upright, each cut at the cell edge, at most `max` (8) rows and then `… N more`, which a click opens,
- * `code` in the code color (a command, a query, a path); `facts` [[label, value]] on one row, the labels dim; `groups`
+ * `code` in the code color (a command, a query, a path), `problem` in red (what a failed call printed); `facts` [[label, value]] on one row, the labels dim; `groups`
  * [{title, rows: [{when, words, text, on}]}], each row a link to another record; `raw` [[line, text]] its lines as the
  * file holds them; `place` its ref, a link with `↗`; `ask` {ref, text}, `ask about it`.
  */
@@ -2260,7 +2400,7 @@ export function details(d, o = {}) {
     const key = `${d.y}:${lines.length}:${lines[0]}`
     const max = openBlocks.has(key) ? lines.length : Math.max(1, b.max || 8)
     const shown = lines.length > max + 1 ? lines.slice(0, max) : lines
-    for (const l of shown) d.line(b.code ? { s: clip(l, d.cols), fg: COLORS.code } : clip(l, d.cols))
+    for (const l of shown) d.line(b.code ? { s: clip(l, d.cols), fg: COLORS.code } : b.problem ? { s: clip(l, d.cols), fg: COLORS.problem } : clip(l, d.cols))
     if (shown.length < lines.length) {
       const more = `… ${num(lines.length - shown.length)} more`
       d.row().add(more, { d: true }, { on: () => { openBlocks.add(key); redraw() }, tip: 'show every line' }).end()
@@ -2419,6 +2559,856 @@ export function choice(opts = {}) {
     },
   }
   state.resets.push({ changed: () => s.value !== first, reset: () => { s.value = first }, after: () => onChange(first) })
+  return api
+}
+
+// ------------------------------------------------------------------------------------------------ the side pane
+
+/**
+ * A side pane for a record or a row's children (docs/terminal-views.md, "The side pane"): beside the list where the
+ * panel is wide enough for both, a `│` in the rule gray between them, else under the list. A list drawn with `side`
+ * opens its items here, never under the row. `<` `>` narrow and widen it (thimble keeps its width per view), Backspace
+ * or `close` closes it.
+ *
+ * opts: key (the name it is kept under), width (its share of the panel's width, 0.42 by default), min (its least cells).
+ */
+export function side(opts = {}) {
+  const name = opts.key || 'side'
+  const keptShare = (kept('side') || {})[name]
+  const st = { open: null, share: typeof keptShare === 'number' ? keptShare : Number(opts.width) > 0 && Number(opts.width) < 1 ? Number(opts.width) : 0.42 }
+  const min = Math.max(24, Number(opts.min) || 34)
+  const LIST_MIN = 40 // the list keeps this many cells beside the pane, else the pane goes under it
+  const api = {
+    /** Whether the pane shows. */
+    get isOpen() {
+      return st.open !== null
+    },
+    /** The key of the item it shows, or null. */
+    get key() {
+      return st.open
+    },
+    show(key) {
+      st.open = key === undefined ? null : key
+      redraw()
+    },
+    hide() {
+      st.open = null
+      redraw()
+    },
+    /** The rows left laid out: `left(dl)` draws the list, `right(ds)` the item's details under the pane's title row
+     *  (`o.title`, bold, and `close` against R). */
+    draw(d, left, right, o = {}) {
+      if (st.open === null) return left(d)
+      const rows = d.left
+      const w = Math.max(min, Math.min(d.cols - LIST_MIN - 3, Math.round(d.cols * st.share)))
+      const head = (dr) => {
+        const hr = dr.row()
+        hr.add(cut(String(o.title || 'details'), Math.max(4, dr.cols - 7)), { b: true })
+        hr.right('close', {}, { on: () => api.hide(), tip: 'close the details' })
+        hr.end()
+      }
+      if (d.cols - w - 3 >= LIST_MIN) {
+        const L = new Drawing(d.cols - w - 3, rows, d, 0)
+        const R = new Drawing(w, rows, d, 0)
+        left(L)
+        head(R)
+        right(R)
+        const y0 = d.y
+        const n = Math.min(rows, Math.max(L.lines.length, R.lines.length))
+        for (let y = 0; y < n; y++) {
+          const l = L.lines[y]
+          const r = R.lines[y]
+          const lr = l ? clipLine(l.runs, L.cols) : []
+          const rr = r ? fitLine(r.runs, R.cols) : []
+          d.lines.push({ margin: l ? l.margin : null, runs: merged([...lr, { s: ' '.repeat(L.cols - lineWidth(lr) + 1) }, { s: '│', fg: COLORS.rule }, { s: ' ' }, ...rr]) })
+        }
+        for (const h of L.hits) if (h.y < n) d.hits.push({ ...h, y: h.y + y0 })
+        for (const h of R.hits) if (h.y < n) d.hits.push({ ...h, y: h.y + y0, x0: h.x0 + L.cols + 3, x1: Math.min(h.x1, R.cols) + L.cols + 3 })
+        d.key(['<', '>'], 'to resize the details', (k) => {
+          st.share = Math.max(0.2, Math.min(0.75, st.share + (k === '<' ? 0.05 : -0.05)))
+          keep('side', { ...(kept('side') || {}), [name]: Math.round(st.share * 100) / 100 })
+        })
+      } else {
+        // too narrow for both: the list over the pane, a rule between them
+        const top = Math.max(3, Math.floor((rows - 1) * 0.45))
+        const L = new Drawing(d.cols, top, d, 0)
+        left(L)
+        d.put(L, 0, Math.min(top, L.lines.length))
+        d.rule()
+        const R = d.inner(0, Math.max(1, rows - top - 1))
+        head(R)
+        right(R)
+        d.put(R, 0, Math.min(R.rows, R.lines.length))
+      }
+      d.key('backspace', 'to close the details', () => api.hide())
+    },
+  }
+  state.resets.push({ changed: () => st.open !== null, reset: () => { st.open = null } })
+  return api
+}
+
+// ------------------------------------------------------------------------------------------------ the divider
+
+/**
+ * The divider between the overview and the detail list: `{` `}` give the overview fewer or more rows, and thimble keeps
+ * its share per view. `rows(d, fallback)` gives the overview's rows of the rows left (`fallback` until a key moved it)
+ * and binds the keys.
+ *
+ * opts: key (the name it is kept under), min (the least rows of each side, 3).
+ */
+export function divider(opts = {}) {
+  const name = opts.key || 'overview'
+  const keptShare = (kept('divider') || {})[name]
+  const st = { share: typeof keptShare === 'number' ? keptShare : null }
+  const min = Math.max(1, Number(opts.min) || 3)
+  return {
+    get share() {
+      return st.share
+    },
+    rows(d, fallback) {
+      const total = d.left
+      const fit = (n) => Math.max(Math.min(min, total), Math.min(total - min, Math.round(n)))
+      const n = fit(st.share === null ? fallback : st.share * total)
+      d.key(['{', '}'], 'to resize the overview', (k) => {
+        st.share = Math.max(0.05, Math.min(0.95, (fit(n + (k === '}' ? 2 : -2))) / Math.max(1, total)))
+        keep('divider', { ...(kept('divider') || {}), [name]: Math.round(st.share * 1000) / 1000 })
+      })
+      return n
+    },
+  }
+}
+
+// ------------------------------------------------------------------------------------------------ Filter by and Rows
+
+// the classes of a label that color or group, as Color by's chips (a regex label's `other` is not one)
+function labelClasses(l) {
+  const vs = (l && l.values) || []
+  const known = vs.some((v) => v && 'highlight' in v)
+  return (known ? vs.filter((v) => v.highlight !== false) : vs.length > 1 ? vs.slice(0, -1) : vs).map((v) => String(v.name))
+}
+
+// a tally's counts as one string, to tell whether they changed
+const tallySig = (t) => JSON.stringify([...t].map(([k, m]) => [k, [...m]]))
+
+// What Filter by and Rows share: the view's fields and every label, the one chosen (`field:<name>`, `label:<id>` or
+// `none`), kept per view under `name`, a record's value under it, read as Color by reads it, and the values the records
+// drawn take, counted per drawing for the menu's words.
+function chooser(opts, name, initial) {
+  const fields = (opts.fields || []).map((f) => ({ ...f, title: f.title || f.name }))
+  const keptC = kept(name) || {}
+  const c = {
+    choice: typeof keptC.by === 'string' ? keptC.by : initial,
+    off: keptC.off && typeof keptC.off === 'object' ? { ...keptC.off } : {},
+    counts: null,
+    tally: new Map(),
+    tallied: new Map(),
+    tallyAt: -1,
+    seen: new Set(),
+    drawnSig: null, // the counts the toggles last drew, null while none drew any
+  }
+  const fieldOf = (key) => fields.find((f) => `field:${f.name}` === key) || null
+  const labelOf = (key) => state.labels.find((l) => `label:${l.id}` === key) || null
+  const settle = () => {
+    if (c.choice === 'none' || fieldOf(c.choice) || labelOf(c.choice)) return
+    c.choice = initial
+  }
+  settle()
+  state.labelWants.push(() => (labelOf(c.choice) ? [labelOf(c.choice).id] : []))
+  const ch = {
+    c,
+    fields,
+    fieldOf,
+    labelOf,
+    settle,
+    save(extra = {}) {
+      keep(name, { by: c.choice, ...extra })
+    },
+    /** {field, title} or {label, title}, or null for none */
+    by() {
+      const f = fieldOf(c.choice)
+      if (f) return { field: f.name, title: f.title }
+      const l = labelOf(c.choice)
+      return l ? { label: l.id, title: l.name } : null
+    },
+    valueOf(record, key = c.choice) {
+      if (record === null || record === undefined) return null
+      const f = fieldOf(key)
+      if (f) {
+        const v = typeof f.value === 'function' ? f.value(record) : record[f.name]
+        return v === undefined || v === null || v === '' || typeof v === 'object' ? null : String(v)
+      }
+      const l = labelOf(key)
+      return l ? labelValue(l.id, record) : null
+    },
+    tally(record) {
+      if (!record || typeof record !== 'object') return
+      if (c.tallyAt !== state.drawNo) {
+        if (c.tally.size) c.tallied = c.tally
+        c.tally = new Map()
+        c.seen = new Set()
+        c.tallyAt = state.drawNo
+        // the toggles drew the counts of the drawing before: once this one is drawn, a change draws again
+        queueMicrotask(() => {
+          if (c.drawnSig !== null && tallySig(c.tally) !== c.drawnSig) {
+            c.drawnSig = null
+            redraw()
+          }
+        })
+      }
+      if (c.seen.has(record)) return
+      c.seen.add(record)
+      for (const f of fields) {
+        const k = ch.valueOf(record, `field:${f.name}`) ?? ''
+        const m = c.tally.get(f.name) || new Map()
+        m.set(k, (m.get(k) || 0) + 1)
+        c.tally.set(f.name, m)
+      }
+      const l = labelOf(c.choice)
+      if (l) {
+        const k = ch.valueOf(record) ?? ''
+        const m = c.tally.get(`label:${l.id}`) || new Map()
+        m.set(k, (m.get(k) || 0) + 1)
+        c.tally.set(`label:${l.id}`, m)
+      }
+    },
+    // the records of the last whole drawing, counted: while a drawing counts, the one before it
+    lastTally() {
+      return c.tallyAt === state.drawNo ? c.tallied : c.tally
+    },
+    // the counts of the choice's values: the reader's (counts()), else those of the records last drawn
+    counts() {
+      if (c.counts) return c.counts
+      const f = fieldOf(c.choice)
+      const l = labelOf(c.choice)
+      const last = ch.lastTally()
+      c.drawnSig = tallySig(last)
+      const t = last.get(f ? f.name : l ? `label:${l.id}` : '')
+      return t ? Object.fromEntries(t) : {}
+    },
+    // the choice's values in order: a label's classes, else the field's declared values and those its records take,
+    // the commonest first; then '' for no value where a record takes none
+    values(counts = ch.counts()) {
+      const l = labelOf(c.choice)
+      const f = fieldOf(c.choice)
+      const out = []
+      if (l) out.push(...labelClasses(l))
+      else if (f) {
+        out.push(...(f.values || []).map((v) => String(typeof v === 'object' ? v.name : v)))
+        for (const v of Object.keys(counts).filter((k) => k !== '' && !out.includes(k)).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b))) out.push(v)
+      }
+      if (counts[''] || (l && !Object.keys(counts).length)) out.push('')
+      return out
+    },
+    nameOf(v) {
+      if (v === '' || v === null || v === undefined) {
+        const f = fieldOf(c.choice)
+        return f ? `no ${f.title.toLowerCase()}` : 'not marked'
+      }
+      const f = fieldOf(c.choice)
+      return f && typeof f.nameOf === 'function' ? String(f.nameOf(v) ?? v) : String(v)
+    },
+    meaningOf(v) {
+      const f = fieldOf(c.choice)
+      if (f) return (f.meanings && f.meanings[v]) || f.description || ''
+      const l = labelOf(c.choice)
+      const lv = l && (l.values || []).find((x) => x.name === v)
+      return (lv && lv.meaning) || ''
+    },
+    // the menu: none, the fields with their values in words, the labels with theirs and their definition one step away
+    menuItems() {
+      const words = (names) => (names.length ? [{ s: names.slice(0, 16).join(' · '), d: true }] : [])
+      const items = [{ key: 'none', name: 'none', chips: [] }]
+      for (const f of fields) {
+        const t = ch.lastTally().get(f.name)
+        const seen = t ? [...t.entries()].filter(([v]) => v !== '').sort((a, b) => b[1] - a[1]).map(([v]) => v) : []
+        const declared = (f.values || []).map((v) => String(typeof v === 'object' ? v.name : v))
+        const names = [...new Set([...declared, ...seen])].map((v) => (typeof f.nameOf === 'function' ? String(f.nameOf(v) ?? v) : v))
+        items.push({ key: `field:${f.name}`, name: f.title, chips: words(names), about: (w) => wrap(f.description || '', w, 2).filter(Boolean).map((s) => [{ s, d: true }]) })
+      }
+      const ls = [...state.labels].sort((a, b) => Number(Boolean(b.here)) - Number(Boolean(a.here)))
+      if (ls.length) items.push({ heading: true, name: 'labels' })
+      for (const l of ls) {
+        items.push({
+          key: `label:${l.id}`,
+          name: l.name,
+          chips: words([...labelClasses(l), 'not marked']),
+          right: l.kind || '',
+          about: (w) => {
+            const text = l.text || l.spec || ''
+            const rows = text ? wrap(`${l.kind ? `${l.kind} · ` : ''}"${oneLine(text)}"`, w, 2).map((s) => [{ s, d: true }]) : []
+            const row = []
+            row.push({ s: 'definition', fg: COLORS.link, u: true }, { s: ' ↗', fg: COLORS.link })
+            row.hits = [{ x0: 0, x1: width('definition ↗'), on: () => openLabel(l.id), tip: "the label's panel: its definition, its runs and its records" }]
+            rows.push(row)
+            return rows
+          },
+        })
+      }
+      return items
+    },
+  }
+  return ch
+}
+
+/**
+ * Filter by: which rows show, by a field of the view or a label (docs/terminal-views.md, "Filter by and Rows"). In the
+ * top row, `Filter by  Outcome` and the chosen one's values as toggles, `●` while a value shows and `○` while it is off,
+ * never in a hue (only Color by colors); `f`, or a click on the choice, opens its menu. The page hides a record whose
+ * value is off (`keeps`), or sends `query()` to its reader, which takes it as Color by's.
+ *
+ * opts: fields [{name, title, description?, values?, meanings?, value?(record), nameOf?(value)}], initial (a field's
+ * name; none by default), key (the name it is kept under), onChange(filter).
+ */
+export function filterBy(opts = {}) {
+  const name = opts.key ? `filter:${opts.key}` : 'filter'
+  const ch = chooser(opts, name, opts.initial ? `field:${opts.initial}` : 'none')
+  const c = ch.c
+  const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {}
+  const offOf = () => new Set((c.off[c.choice] || []).map((v) => (v === null ? '' : String(v))))
+  const save = () => ch.save({ off: c.off })
+  const changed = () => {
+    save()
+    onChange(api)
+    redraw()
+  }
+  const api = {
+    get by() {
+      return ch.by()
+    },
+    get field() {
+      const b = ch.by()
+      return b && b.field ? b.field : null
+    },
+    get label() {
+      const b = ch.by()
+      return b && b.label ? b.label : null
+    },
+    /** The toggles: `[{value, name, on, n}]`, value null for no value. */
+    get values() {
+      const counts = ch.counts()
+      const off = offOf()
+      return ch.values(counts).map((v) => ({ value: v === '' ? null : v, name: ch.nameOf(v), on: !off.has(v), n: counts[v] || 0 }))
+    },
+    valueOf(record) {
+      ch.tally(record)
+      return ch.valueOf(record)
+    },
+    isOn(value) {
+      return !offOf().has(value === null || value === undefined ? '' : String(value))
+    },
+    /** Whether a record shows: its value is on (every record with none). */
+    keeps(record) {
+      ch.tally(record)
+      if (c.choice === 'none') return true
+      return api.isOn(ch.valueOf(record))
+    },
+    tally(record) {
+      ch.tally(record)
+    },
+    /** The choice for the reader, as Color by's: `{field, off}`, `{label, name, off}`, or null for none. */
+    query() {
+      const b = ch.by()
+      if (!b) return null
+      const off = [...offOf()].map((v) => (v === '' ? null : v))
+      return b.label ? { label: b.label, name: b.title, off } : { field: b.field, off }
+    },
+    /** The reader's counts of the choice's values (`''` for no value); null counts the records drawn again. */
+    counts(map) {
+      c.counts = map && typeof map === 'object' ? { ...map } : null
+      redraw()
+    },
+    /** Choose a field by name, a label (`{label}`), or none (null). */
+    choose(to) {
+      const key = to === null ? 'none' : typeof to === 'object' ? `label:${to.label}` : `field:${to}`
+      if (key === c.choice) return
+      c.choice = key
+      c.counts = null
+      ch.settle()
+      changed()
+    },
+    /** Turn a value off or on. */
+    toggle(value) {
+      const k = value === null || value === undefined ? '' : String(value)
+      const off = offOf()
+      if (off.has(k)) off.delete(k)
+      else off.add(k)
+      c.off[c.choice] = [...off]
+      changed()
+    },
+    /** Filter by on a row: its name, the choice, and the values that fit in `o.max` cells (the row's room), `+N` for
+     *  the rest, which opens the menu. */
+    add(r, o = {}) {
+      const room = Math.min(r.room, o.max ?? r.room)
+      const x0 = r.x
+      const b = ch.by()
+      const open = () => toggleMenu(api, Math.max(0, ch.menuItems().findIndex((it) => it.key === c.choice)))
+      r.add('Filter by', { d: true }).gap()
+      r.add(b ? b.title : 'none', {}, { on: open, tip: 'choose which rows show: a field or a label', max: Math.max(4, room - 12) })
+      if (b && b.label) r.add(' ').add('↗', { fg: COLORS.link }, { on: () => openLabel(b.label), tip: "the label's panel: its definition, its runs and its records" })
+      const vals = b ? api.values : []
+      const chipRuns = (v) => [v.on ? { s: '●' } : { s: '○', d: true }, { s: ' ' }, v.on ? { s: v.name } : { s: v.name, d: true }, ...(v.n ? [{ s: ` ${num(v.n)}`, d: true }] : [])]
+      let k = 0
+      let used = r.x - x0
+      for (const v of vals) {
+        const w = 2 + lineWidth(chipRuns(v)) + (k < vals.length - 1 ? 2 + width(`+${vals.length - k - 1}`) : 0)
+        if (used + w > room) break
+        r.gap()
+        const cx = r.x
+        for (const run of chipRuns(v)) r.add(run.s, run)
+        const m = ch.meaningOf(v.value ?? '')
+        r.hits.push({ x0: cx, x1: r.x, on: () => api.toggle(v.value), tip: `${v.name}${m ? `: ${m}` : ''}${v.on ? ': a click hides its rows' : ' (hidden): a click shows its rows'}` })
+        used = r.x - x0
+        k++
+      }
+      if (k < vals.length) r.gap().add(`+${vals.length - k}`, { d: true }, { on: open, tip: `${plural(vals.length - k, 'more value')}: open Filter by` })
+      r.d.key('f', 'to filter by', open, false, 1)
+      r.menus.push((dd) => drawMenu(dd, api, ch.menuItems(), (it) => it && api.choose(it.key === 'none' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'f', 'to filter by', 'Filter by'))
+      return r
+    },
+  }
+  state.colorBys.push(() => {
+    ch.settle()
+    if (ch.by() && ch.by().label) onChange(api)
+  })
+  state.resets.push({
+    changed: () => offOf().size > 0,
+    reset: () => {
+      c.off = {}
+      save()
+    },
+    after: () => onChange(api),
+  })
+  return api
+}
+
+/**
+ * Rows: what the lanes or rows are grouped by, a field of the view or a label (docs/terminal-views.md, "Filter by and
+ * Rows"). In the top row, `Rows  Session`; `g`, or a click, opens its menu. `groups(items)` gives the groups in order:
+ * a label's classes (each one, so a class added to the label is a new lane), else the field's values, then the records
+ * with no value; a field with `parentOf(key)` is a tree, each group under its parent with its guide (`├ ` `└ ` `│ `),
+ * a parent no record takes a heading.
+ *
+ * opts: fields [{name, title, value?(record), nameOf?(key), parentOf?(key)}], initial (the first field by default),
+ * key (the name it is kept under), onChange(rows).
+ */
+export function rows(opts = {}) {
+  const name = opts.key ? `rows:${opts.key}` : 'rows'
+  const first = opts.initial ? `field:${opts.initial}` : opts.fields && opts.fields.length ? `field:${opts.fields[0].name}` : 'none'
+  const ch = chooser(opts, name, first)
+  const c = ch.c
+  const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {}
+  // a record the reader gave its group under the choice keeps it (`group`)
+  const groupOf = (record) => (record && typeof record === 'object' && 'group' in record ? (record.group === null || record.group === undefined || record.group === '' ? null : String(record.group)) : ch.valueOf(record))
+  const api = {
+    get by() {
+      return ch.by()
+    },
+    get field() {
+      const b = ch.by()
+      return b && b.field ? b.field : null
+    },
+    get label() {
+      const b = ch.by()
+      return b && b.label ? b.label : null
+    },
+    groupOf(record) {
+      ch.tally(record)
+      return groupOf(record)
+    },
+    /** The groups of the items, in order: `[{key, value, name, depth, guide, last, heading, parent, children, items}]`. */
+    groups(items = []) {
+      if (c.choice === 'none') return [{ key: '*', value: null, name: 'all', depth: 0, guide: '', last: true, heading: false, parent: null, children: 0, items: items.slice() }]
+      const by = new Map()
+      for (const it of items) {
+        ch.tally(it)
+        const k = groupOf(it) ?? ''
+        if (!by.has(k)) by.set(k, [])
+        by.get(k).push(it)
+      }
+      const node = (k, depth, heading = false) => ({ key: k, value: k === '' ? null : k, name: ch.nameOf(k), depth, guide: '', last: true, heading, parent: null, children: 0, items: by.get(k) || [] })
+      const l = ch.labelOf(c.choice)
+      if (l) {
+        const out = labelClasses(l).map((k) => node(k, 0))
+        for (const k of by.keys()) if (k !== '' && !out.some((n) => n.key === k)) out.push(node(k, 0))
+        if (by.has('') || !out.length) out.push(node('', 0))
+        return out
+      }
+      const f = ch.fieldOf(c.choice)
+      if (!f || typeof f.parentOf !== 'function') {
+        const order = (f && f.values ? f.values.map((v) => String(typeof v === 'object' ? v.name : v)) : []).filter((k) => by.has(k))
+        for (const k of by.keys()) if (k !== '' && !order.includes(k)) order.push(k)
+        const out = order.map((k) => node(k, 0))
+        if (by.has('')) out.push(node('', 0))
+        return out
+      }
+      // a tree: the groups with records and the parents above them, siblings in the order their records first come
+      const parent = new Map()
+      const rank = new Map([...by.keys()].map((k, i) => [k, i]))
+      for (const k0 of by.keys()) {
+        let k = k0
+        const seen = new Set()
+        while (k !== null && !seen.has(k)) {
+          seen.add(k)
+          const p = k === '' ? null : f.parentOf(k)
+          const pk = p === null || p === undefined || p === '' ? null : String(p)
+          parent.set(k, pk)
+          k = pk
+        }
+      }
+      const kids = new Map()
+      const roots = []
+      for (const [k, p] of parent) {
+        if (p !== null && parent.has(p) && p !== k) kids.set(p, [...(kids.get(p) || []), k])
+        else roots.push(k)
+      }
+      const place = (k, seen = new Set()) => {
+        if (rank.has(k)) return rank.get(k)
+        if (seen.has(k)) return Infinity
+        seen.add(k)
+        return Math.min(Infinity, ...(kids.get(k) || []).map((x) => place(x, seen)))
+      }
+      const order = (a, b) => (a === '' ? 1 : b === '' ? -1 : place(a) - place(b))
+      const out = []
+      const walk = (k, depth, lead, last, p) => {
+        const n = node(k, depth, !by.has(k))
+        n.parent = p
+        n.last = last
+        n.guide = depth ? `${lead}${last ? '└ ' : '├ '}` : ''
+        const ks = (kids.get(k) || []).slice().sort(order)
+        n.children = ks.length
+        out.push(n)
+        ks.forEach((x, i) => walk(x, depth + 1, depth ? `${lead}${last ? '  ' : '│ '}` : '', i === ks.length - 1, k))
+      }
+      for (const k of roots.sort(order)) walk(k, 0, '', true, null)
+      return out
+    },
+    /** The choice for the reader: `{field}`, `{label, name}`, or null; thimble.colour_value(rows, ref, record) gives a
+     *  record's group there. */
+    query() {
+      const b = ch.by()
+      return b ? (b.label ? { label: b.label, name: b.title } : { field: b.field }) : null
+    },
+    choose(to) {
+      const key = to === null ? 'none' : typeof to === 'object' ? `label:${to.label}` : `field:${to}`
+      if (key === c.choice) return
+      c.choice = key
+      ch.settle()
+      ch.save()
+      onChange(api)
+      redraw()
+    },
+    /** Rows on a row: its name and the choice, which opens the menu. */
+    add(r) {
+      const b = ch.by()
+      const open = () => toggleMenu(api, Math.max(0, ch.menuItems().findIndex((it) => it.key === c.choice)))
+      r.add('Rows', { d: true }).gap()
+      r.add(b ? b.title : 'none', {}, { on: open, tip: 'choose what the lanes are grouped by: a field or a label', max: Math.max(4, r.room - 2) })
+      if (b && b.label) r.add(' ').add('↗', { fg: COLORS.link }, { on: () => openLabel(b.label), tip: "the label's panel: its definition, its runs and its records" })
+      r.d.key('g', 'for rows', open, false, 1)
+      r.menus.push((dd) => drawMenu(dd, api, ch.menuItems(), (it) => it && api.choose(it.key === 'none' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'g', 'to group by', 'Rows'))
+      return r
+    },
+  }
+  // a label's classes or its values changed: its lanes are grouped again
+  state.colorBys.push(() => {
+    ch.settle()
+    if (ch.by() && ch.by().label) onChange(api)
+  })
+  return api
+}
+
+// ------------------------------------------------------------------------------------------------ lanes
+
+/**
+ * The overview as lanes on the time range's scale (docs/terminal-views.md, "Lanes"): a lane per group of Rows, its name
+ * in the gutter at the left with its tree guide (a top group's `▾` `▸` folds the lanes under it into its own), its
+ * records' bars in the Color by hues on one height, `─` in the rule gray where it ran (`band`) and in a record's hue
+ * while that record ran (`end`), and `×` in red where most of a cell's records failed (`problem`). Under the pointer a
+ * lane marks only its cell, `┊` or the bar in the text color, with the cell's time and records in the tip; a click opens
+ * the record nearest there (`onMark`), a click on a name chooses the lane (`onPick`). The list's rows in view are on the
+ * selection background across the lanes (`span`, or a list's `span()`). `legend()` is the key for `axis`, each entry a
+ * toggle that hides or shows its series.
+ *
+ * opts: rows (a Rows control) or groups(items), colour (Color by; the view's by default), time(item), end(item),
+ * band(lane) [[start, end]], problem(item), onPick(lane), onMark(item), words {band, problem, record}, key.
+ */
+export function lanes(opts = {}) {
+  const name = opts.key ? `lanes:${opts.key}` : 'lanes'
+  const keptL = kept(name) || {}
+  const st = {
+    chosen: null,
+    off: new Set(Array.isArray(keptL.off) ? keptL.off : []),
+    folded: new Map(Array.isArray(keptL.folded) ? keptL.folded : []), // key -> true (folded by hand) or false (unfolded)
+    top: 0,
+    shown: [],
+    counts: { band: 0, problem: 0 },
+  }
+  const words = { band: 'running', problem: 'failed', record: 'record', ...(opts.words || {}) }
+  const time = typeof opts.time === 'function' ? opts.time : (it) => (it.t ?? it.time)
+  const save = () => keep(name, { off: [...st.off], folded: [...st.folded] })
+  const isOn = (series) => !st.off.has(series)
+  const toggle = (series) => {
+    if (st.off.has(series)) st.off.delete(series)
+    else st.off.add(series)
+    save()
+    redraw()
+  }
+  // the lanes in `room` rows: a top group with children folds by itself, the largest first, until they fit, the
+  // analyst's ▸ ▾ first; then the rows past the room wait behind `… N more`
+  function layout(items, room) {
+    const nodes = typeof opts.groups === 'function' ? opts.groups(items) : opts.rows ? opts.rows.groups(items) : [{ key: '*', name: 'all', depth: 0, guide: '', items: items.slice(), children: 0 }]
+    const tops = nodes.filter((n) => n.depth === 0 && n.children)
+    const below = (n) => {
+      const i = nodes.indexOf(n)
+      let k = i + 1
+      while (k < nodes.length && nodes[k].depth > 0) k++
+      return nodes.slice(i + 1, k)
+    }
+    const fold = new Map(tops.map((n) => [n.key, st.folded.get(n.key) === true]))
+    const need = () => nodes.filter((n) => n.depth === 0 || !fold.get(topOf(n))).length
+    const topOf = (n) => {
+      let i = nodes.indexOf(n)
+      while (i > 0 && nodes[i].depth > 0) i--
+      return nodes[i].key
+    }
+    for (const t of [...tops].sort((a, b) => below(b).length - below(a).length)) {
+      if (need() <= room) break
+      if (st.folded.get(t.key) !== false) fold.set(t.key, true)
+    }
+    const out = []
+    for (const n of nodes) {
+      if (n.depth > 0 && fold.get(topOf(n))) continue
+      const folded = n.depth === 0 && Boolean(fold.get(n.key))
+      out.push({ ...n, folded, items: folded ? [...(n.items || []), ...below(n).flatMap((x) => x.items || [])] : n.items || [] })
+    }
+    return out
+  }
+  function cells(scale, n, max, span, colour) {
+    const out = Array.from({ length: scale.cols }, () => ({ s: ' ' }))
+    const gaps = scale.gaps ? scale.gaps() : []
+    const inGap = (x) => gaps.some(([g0, g1]) => x >= g0 && x < g1)
+    const fill = (a, b, run) => {
+      if (b < scale.from || a > scale.to) return
+      for (let x = scale.x(Math.max(a, scale.from)); x <= scale.x(Math.min(b, scale.to)); x++) if (!inGap(x)) out[x] = run
+    }
+    if (typeof opts.band === 'function' && !(n.heading && !n.folded)) {
+      const spans = opts.band(n) || []
+      if (spans.length) st.counts.band++
+      if (isOn('band')) for (const [a, b] of spans) fill(a, b, { s: '─', fg: COLORS.rule })
+    }
+    const its = n.items.filter((it) => !colour || colour.keeps(it))
+    if (typeof opts.end === 'function')
+      for (const it of its) {
+        const e = opts.end(it)
+        if (!(e > time(it)) || e - time(it) < scale.step) continue
+        const hue = colour ? colour.colourOf(colour.valueOf(it)) : null
+        fill(time(it), e, hue && hue !== COLORS.dim ? { s: '─', fg: hue } : { s: '─', d: true })
+      }
+    strip(scale, its, { value: (it) => (colour ? colour.valueOf(it) : null), colour, max, time }).forEach((run, x) => {
+      if (run.s !== ' ') out[x] = run
+    })
+    const per = new Map()
+    for (const it of its) {
+      const x = scale.binOf(time(it))
+      if (x < 0) continue
+      const [k, bad] = per.get(x) || [0, 0]
+      per.set(x, [k + 1, bad + (typeof opts.problem === 'function' && opts.problem(it) ? 1 : 0)])
+    }
+    for (const [x, [k, bad]] of per) {
+      if (!bad) continue
+      st.counts.problem += bad
+      if (isOn('problem') && bad * 2 >= k) out[x] = { s: '×', fg: COLORS.problem }
+    }
+    if (span) {
+      const a = scale.binOf(Math.max(span[0], scale.from))
+      const b = scale.binOf(Math.min(span[1], scale.to))
+      if (span[1] >= scale.from && span[0] <= scale.to) for (let x = Math.max(0, a); x <= Math.max(a, b); x++) out[x] = { ...out[x], bg: COLORS.selected }
+    }
+    const tips = Array.from({ length: scale.cols }, (_, x) => {
+      const [k, bad] = per.get(x) || [0, 0]
+      const t = scale.t(x)
+      return `${n.name} · ${when(t, Math.max(1, scale.step))}${k ? ` · ${plural(k, words.record)}` : ''}${bad ? ` · ${num(bad)} ${words.problem}` : ''}`
+    })
+    return { runs: out, tips, its }
+  }
+  const api = {
+    get chosen() {
+      return st.chosen
+    },
+    choose(key) {
+      st.chosen = key === undefined ? null : key
+      redraw()
+    },
+    isOn,
+    toggle,
+    /** The lanes as last drawn. */
+    get lanes() {
+      return st.shown.slice()
+    },
+    /** The key for `axis`: each series the lanes drew beside Color by's, a toggle. */
+    legend() {
+      const out = []
+      if (typeof opts.band === 'function' && st.counts.band) out.push({ id: 'band', glyph: '─', fg: COLORS.rule, name: words.band, on: isOn('band'), toggle: () => toggle('band') })
+      if (typeof opts.problem === 'function' && st.counts.problem) out.push({ id: 'problem', glyph: '×', fg: COLORS.problem, name: words.problem, on: isOn('problem'), toggle: () => toggle('problem') })
+      return out
+    },
+    /** Draw the lanes: `o.items` (those of the range), `o.scale` (range.scale), `o.gutter` (the names' cells), `o.room`
+     *  (rows, the rows left by default), `o.span` ([t0, t1] or a list whose rows in view it marks). */
+    draw(d, o = {}) {
+      const items = o.items || []
+      const scale = o.scale
+      const gutter = o.gutter || 14
+      const room = Math.max(1, Math.min(o.room ?? d.left, d.left))
+      const colour = opts.colour || state.colour
+      const span = o.span && typeof o.span.span === 'function' ? o.span.span(time) : Array.isArray(o.span) ? o.span : null
+      const all = layout(items, room)
+      st.counts = { band: 0, problem: 0 }
+      const groups = all.map((n) => n.items.filter((it) => !colour || colour.keeps(it)))
+      const max = maxBin(scale, groups, time)
+      // the rows past the room wait behind `… N more`, which shows the next of them
+      const fits = all.length <= room ? all.length : Math.max(1, room - 1)
+      if (st.top >= all.length || all.length <= room) st.top = 0
+      const shown = all.slice(st.top, st.top + fits)
+      st.shown = shown
+      for (const n of shown) {
+        const r = d.row()
+        const own = n.depth === 0
+        if (own && n.children) r.add(n.folded ? '▸' : '▾', {}, { on: () => { st.folded.set(n.key, !n.folded); save(); redraw() }, tip: n.folded ? 'show the lanes under it' : 'fold the lanes under it into its own' }).gap(1)
+        else r.gap(2)
+        if (n.guide) r.add(n.guide, { fg: COLORS.rule })
+        const nameStyle = st.chosen === n.key ? { fg: COLORS.accent } : n.heading ? { b: true } : {}
+        r.add(n.name, nameStyle, {
+          on: () => {
+            st.chosen = n.key
+            if (typeof opts.onPick === 'function') opts.onPick(n)
+            redraw()
+          },
+          tip: `${n.name}: ${plural(n.items.length, words.record)}`,
+          max: Math.max(3, gutter - 2 - r.x),
+        })
+        r.at(gutter)
+        if (!(n.heading && !n.folded)) {
+          const x0 = r.x
+          const lane = cells(scale, n, max, span, colour)
+          r.runsOf(lane.runs)
+          r.hits.push({
+            x0,
+            x1: x0 + scale.cols,
+            cursor: true,
+            tips: lane.tips,
+            tip: `${n.name}: a click opens the ${words.record} nearest that time`,
+            on: (x) => {
+              const t = scale.t(x)
+              const near = lane.its.filter((it) => Math.abs(time(it) - t) <= scale.step * 3).sort((a, b) => Math.abs(time(a) - t) - Math.abs(time(b) - t))[0]
+              if (near && typeof opts.onMark === 'function') opts.onMark(near)
+            },
+          })
+        }
+        r.end()
+      }
+      if (fits < all.length) {
+        const left = all.length - st.top - fits
+        const words2 = left > 0 ? `… ${num(left)} more` : '… back to the first'
+        d.row().gap(2).add(words2, { d: true }, { on: () => { st.top = left > 0 ? st.top + fits : 0; redraw() }, tip: left > 0 ? 'show the next lanes' : 'show the first lanes' }).end()
+      }
+    },
+  }
+  state.resets.push({ changed: () => st.off.size > 0, reset: () => { st.off.clear(); save() } })
+  return api
+}
+
+// ------------------------------------------------------------------------------------------------ the transcript
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * A transcript's turns as thimble-term's file view draws a transcript (docs/terminal-views.md, "The transcript"): per
+ * turn its clock dim in a column, `●` and the speaker bold, the words under the name up to three rows, a tool call one
+ * dim line `⎿ Bash  pytest -q`; the day on a dim row of its own where it changes. It is a list: ↑↓ choose a turn, Enter
+ * opens it (a turn's words whole, a tool call's input and what came back, an error in red), in place or in a side
+ * pane (`side`), `a` asks about it, and its track shows where the Color by values are.
+ *
+ * opts: key (the list's), enter. draw(d, {turns, title, count, colour, side, onOpen, empty}): turns [{ref, t, speaker,
+ * kind (text | prompt | tool | thinking | system), tool, text, input, output, error}].
+ */
+export function transcript(opts = {}) {
+  const items = list({ key: (t) => t.ref, enter: opts.enter || 'to open' })
+  const clockOf = (t) => (typeof t.t === 'number' && Number.isFinite(t.t) ? hms(t.t) : '')
+  const dayOf2 = (t) => {
+    if (typeof t.t !== 'number' || !Number.isFinite(t.t)) return ''
+    const d = new Date(t.t * 1000)
+    return `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+  }
+  const firstLine = (s) => oneLine(String(s ?? '').split('\n').find((l) => l.trim()) || '')
+  const api = {
+    /** The list under it (`choose`, `show`, `span`). */
+    list: items,
+    get chosen() {
+      return items.chosen
+    },
+    draw(d, o = {}) {
+      const turns = o.turns || []
+      const colour = o.colour || null
+      const withTime = turns.some((t) => clockOf(t))
+      const tw = withTime ? 8 : 0
+      const rows = []
+      let day = ''
+      for (const t of turns) {
+        const dd = dayOf2(t)
+        if (dd && dd !== day) rows.push({ heading: dd, dim: true })
+        if (dd) day = dd
+        rows.push(t)
+      }
+      const indent = (tw ? tw + 2 : 0) + 2
+      items.draw(d, {
+        items: rows,
+        title: o.title,
+        count: o.count ?? (o.title ? plural(turns.length, 'turn') : undefined),
+        side: o.side,
+        mark: false,
+        value: colour ? (t) => colour.valueOf(t) : null,
+        colour,
+        empty: o.empty || 'no turn',
+        onOpen: o.onOpen,
+        sideTitle: (t) => `${t.speaker || ''}${t.tool ? ` · ${t.tool}` : ''}${clockOf(t) ? ` · ${clockOf(t)}` : ''}`,
+        ask: (t) => ({ ref: t.ref, text: t.kind === 'tool' ? `${t.tool || ''} ${t.input || ''}` : t.text || '' }),
+        row: (t, r) => {
+          if (tw) r.add(pad(clockOf(t), tw), { d: true }).gap()
+          if (t.kind === 'tool' || t.kind === 'system') {
+            r.add(`⎿ ${t.kind === 'tool' ? `${t.tool || 'tool'}  ${firstLine(t.input)}` : firstLine(t.text)}`, { d: true }, { max: Math.max(6, r.room) })
+            return
+          }
+          const v = colour ? colour.valueOf(t) : null
+          r.runsOf(colour ? colour.dot(v) : { s: '●' })
+          r.add(' ').add(t.speaker || '(unsigned)', { b: true }, { max: Math.max(4, r.room) })
+        },
+        bodyIndent: indent,
+        body: (t, bd, ctx) => {
+          if (t.kind === 'tool' || t.kind === 'system') return
+          const text = String(t.text ?? '')
+          if (!text.trim()) return
+          const open = ctx.open && !o.side
+          const style = t.kind === 'thinking' ? { d: true, i: true } : t.error ? { fg: COLORS.problem } : {}
+          for (const line of wrap(oneLine(text), bd.cols, open ? 40 : 3)) bd.line({ s: line, ...style })
+        },
+        detail: (t, dd) => {
+          if (t.kind === 'tool') {
+            details(dd, {
+              blocks: [
+                { text: t.input, code: true },
+                { text: t.output ?? t.result ?? '', problem: Boolean(t.error) },
+              ],
+              place: t.ref,
+              ask: { ref: t.ref, text: `${t.tool || ''} ${t.input || ''}` },
+            })
+            return
+          }
+          if (o.side) details(dd, { text: t.text, maxRows: Math.max(4, dd.left - 3), place: t.ref, ask: { ref: t.ref, text: t.text || '' } })
+          else details(dd, { place: t.ref, ask: { ref: t.ref, text: t.text || '' } })
+        },
+      })
+    },
+  }
   return api
 }
 

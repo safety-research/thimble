@@ -621,8 +621,11 @@ at R, `new` in green until a built one is opened.
 the rows its program draws (`view.term.js` on the terminal view kit, docs/terminal-views.md), with their margin; then
 the hint row, the keys the program binds and `b to go back · x to close`, on the rows it needs where it is longer than
 the panel is wide (whole hints on each row; the program's rows are fewer by them), so no key it binds goes unnamed. The
-program hears Claude Code's theme, `light` or `dark`. A region under the pointer that is not a
-whole row is inverse, and its tip shows on the tip background on the row below it. Its keys reach it through the list's
+program hears Claude Code's theme, `light` or `dark`. From the moment it opens until its program's first frame the
+view says `◌ starting the view…`, and `◌ loading…` stands dim against R on the title's row while a reader query of its is
+out. A region under the pointer that is not a whole row is inverse, and its tip shows on the tip background on the row
+below it; a chart's region (a strip, a lane) is never inverse: only the pointer's column is marked, `┊` in an empty cell
+and a bar in the text color, on every chart region over the same columns, with that cell's tip. Its keys reach it through the list's
 relay (↑↓, Enter, Space, Backspace, a sign typed) and as hotkeys (a letter, a digit); while a field of the view takes
 typing, every key. A view built in browser mode is one line that says so, and how to open it in browser mode.
 

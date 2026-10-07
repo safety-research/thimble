@@ -596,6 +596,74 @@ test('keys · view · a click on a row, a drag on a strip and the wheel are the 
   expect(w.viewHost.requests.filter(r => r.path === '/close').length).toBeGreaterThanOrEqual(1)
 })
 
+test('keys · view · from the moment it opens until its first frame the view says it is starting; a reader query out says loading against R', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, views: TERM_VIEWS } as never
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  await click($, w, SHORT, 'home', 'Views (1)')
+  await takesKeys($)
+  await enter($, w, SHORT)
+  // the host has not answered yet: no frame
+  expect((await seen($, SHORT)).text).toContain('◌ starting the view…')
+  // a first frame drawn while its first query is out
+  w.viewHost.frame = n => viewFrame(n, { loading: true })
+  await (await look($, SHORT)).unmount()
+  await w.clock.advance(300)
+  await w.clock.advance(300)
+  const s = await seen($, SHORT)
+  expect(s.text).not.toContain('starting the view')
+  expect(s.text).toContain('Timeline')
+  expect(s.text).toContain('◌ loading…')
+  expect((await viewRows($)).join('\n')).toContain('first row')
+})
+
+test('keys · view · a chart\'s region under the pointer marks its column on every chart over the same cells, never an inverse band, with that cell\'s tip', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, views: TERM_VIEWS } as never
+  // a strip and a lane over the same six cells, each a chart region with a tip per cell
+  w.viewHost.frame = n => viewFrame(n, {
+    lines: [
+      [{ s: '  ' }, { s: 'Color by', d: true }, { s: '  ' }, { s: 'Kind' }],
+      [{ s: '  ' }, { s: '▁▃█ ▃▁', fg: '#1d7fc0' }],
+      [{ s: '  ' }, { s: '─▆  ▆─', fg: '#1d7fc0' }],
+      [{ s: '  ' }, { s: 'a row under the lanes' }],
+    ],
+    hits: [
+      { y: 0, x0: 12, x1: 16, tip: 'choose what colors the view' },
+      { y: 1, x0: 2, x1: 8, cursor: true, tip: 'drag to frame a range', tips: ['09:00', '09:01', '09:02 · 4 records', '09:03', '09:04', '09:05'] },
+      { y: 2, x0: 2, x1: 8, cursor: true, tips: ['lead · 09:00', 'lead · 09:01 · 1 record', 'lead · 09:02', 'lead · 09:03', 'lead · 09:04', 'lead · 09:05'] },
+    ],
+  })
+  await openTermView($, w)
+  const pane = await look($, SHORT)
+  // the pointer over the lane's fourth cell, which is empty
+  await pane.pointer({ type: 'move', x: 5, y: 2, in: 'm:view-frame' } as never)
+  await w.clock.settle()
+  const tree = await pane.drawn({ in: 'm:view-frame' })
+  const rows = (((tree as { children?: unknown[] }).children ?? []).map(r => shown(r)))
+  expect(rows[1]).toBe('  ▁▃█┊▃▁')
+  expect(rows[2]).toBe('  ─▆ ┊▆─')
+  // the cell's own tip on the row under the lane
+  expect(rows[3]).toContain('lead · 09:03')
+  expect(JSON.stringify(tree)).not.toContain('"inverse":true')
+  // over a bar: the bar stays, in the text color, and its cell's tip shows
+  await pane.pointer({ type: 'move', x: 3, y: 2, in: 'm:view-frame' } as never)
+  await w.clock.settle()
+  const tree2 = await pane.drawn({ in: 'm:view-frame' })
+  const rows2 = (((tree2 as { children?: unknown[] }).children ?? []).map(r => shown(r)))
+  expect(rows2[2]).toBe('  ─▆  ▆─')
+  expect(rows2[3]).toContain('lead · 09:01 · 1 record')
+  expect(JSON.stringify(tree2)).not.toContain('"inverse":true')
+  // a control that is no chart is still inverse under the pointer
+  await pane.pointer({ type: 'move', x: 13, y: 0, in: 'm:view-frame' } as never)
+  await w.clock.settle()
+  expect(JSON.stringify(await pane.drawn({ in: 'm:view-frame' }))).toContain('"inverse":true')
+  await pane.unmount()
+})
+
 test('keys · view · while its field takes typing, the relay\'s field holds its text and sends each change whole, x and b among them; Enter ends it', async ($, on) => {
   const w = world(on)
   w.states.home = { ...w.states.home, views: TERM_VIEWS } as never
