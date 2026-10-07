@@ -85,6 +85,41 @@ def test_up_gives_a_new_session_the_precached_context_once(home, data, monkeypat
     assert asked == ["s9", "s9"]
 
 
+def test_a_server_that_runs_but_does_not_answer_is_named_with_the_command_that_restarts_it(home, monkeypatch):
+    """thimble's own server alive on its port but not answering (out of file descriptors, as on a Mac whose views'
+    kernels took its 256): start_failure, the doctor's port line and `thimble demo` name it and say
+    `thimble server restart`, rather than "see the log" or "another program". Its own new server is still starting,
+    and server.json's server that started moments ago is not called stuck."""
+    from app import demo  # noqa: PLC0415
+
+    p = cli.port()
+    monkeypatch.setattr(cli, "listening", lambda q: q == p)
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
+    monkeypatch.setattr(procs, "listener", lambda q: 4242 if q == p else None)
+    monkeypatch.setattr(cli, "is_server", lambda pid, q, repo=None: pid == 4242 and q == p)
+    monkeypatch.setattr(cli, "refuse_foreign", lambda url: False)
+    monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)
+    monkeypatch.setattr(cli, "ensure_running", lambda wait: False)
+    cli.write_state({"port": p, "pid": 4242, "started": "2026-01-01T00:00:00+00:00"})
+    cli.LAST_START.clear()
+    line = cli.STUCK_LINE.format(pid=4242)
+    assert "thimble server restart" in line
+    assert cli.stuck_server() == 4242 and cli.start_failure(cli.api_url()) == line
+    assert cli.port_line(p, False).startswith(f"{p} is held by thimble's server (pid 4242)")
+    assert "thimble server restart" in cli.port_line(p, False)
+    said: list[str] = []
+    assert demo._server(said.append)[0] is None and said == [f"  no thimble server answers: {line}"]
+
+    cli.LAST_START.update(pid=4242, port=p)
+    monkeypatch.setattr(cli, "spawned_exited", lambda pid: False)
+    assert "is still starting" in cli.start_failure(cli.api_url())
+    cli.LAST_START.clear()
+    monkeypatch.setattr(cli, "listening", lambda q: False)
+    assert cli.stuck_server() == 4242, "server.json names it though the port's holder cannot be seen"
+    cli.write_state({"port": p, "pid": 4242, "started": cli._now()})
+    assert cli.stuck_server() is None and cli.start_failure(cli.api_url()) == ""
+
+
 def test_two_concurrent_ups_start_one_uvicorn(fake, home):
     results: list[bool] = []
 

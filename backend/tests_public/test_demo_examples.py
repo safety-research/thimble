@@ -157,6 +157,6 @@ def test_the_command_needs_the_server_and_the_cli_takes_its_flags(world):
     w = world
     a = argparse.Namespace(examples=True, refresh=False)
     assert demo_examples.run(a, w["lines"].append, lambda say: (None, w["env"]), request=w["server"]) == 1
-    assert "server is not running" in said(w) and not (Path(w["env"]["home"]) / "examples").exists()
+    assert "no server answers" in said(w) and not (Path(w["env"]["home"]) / "examples").exists()
     got = cli.build_parser().parse_args(["demo", "--examples", "--refresh"])
     assert got.examples and got.refresh and got.cmd == "demo"
