@@ -1497,6 +1497,11 @@
     return { el: t, canvas: cv, thumb: thumb, lens: lens, name: name, w: w }
   }
   Strip.prototype.remove = function () {
+    if (this.raf != null) {
+      if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(this.raf)
+      else clearTimeout(this.raf)
+    }
+    this.raf = null
     ;(this.page ? window : this.box).removeEventListener('scroll', this.onScroll)
     window.removeEventListener('resize', this.onResize)
     if (this.ro) this.ro.disconnect()
@@ -1964,9 +1969,13 @@
     var q = function (v) {
       return grid ? Math.round(v * dpr) / dpr : v
     }
+    // each part written only where it changed, its height and its place
     var put = function (el, at) {
+      var was = el.__thimbleAt
+      if (was && was[0] === at[0] && was[1] === at[1]) return
+      el.__thimbleAt = [at[0], at[1]]
       el.style.display = at[1] > at[0] ? '' : 'none'
-      el.style.height = Math.max(0, at[1] - at[0]) + 'px'
+      if (!was || was[1] - was[0] !== at[1] - at[0]) el.style.height = Math.max(0, at[1] - at[0]) + 'px'
       el.style.transform = 'translateY(' + at[0] + 'px)'
     }
     var f0 = q(g.frameTop)
