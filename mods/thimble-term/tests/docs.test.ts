@@ -148,3 +148,30 @@ test("a story steps one beat at a time, its figure lit at the beat's step; `read
   await pane.unmount()
   void WS
 })
+
+// a report as the writer stored it in the live run: an opening section with no heading whose sentences are bullets
+const OPENING = {
+  ...DOC,
+  sections: [
+    { id: 's0', heading: '', paragraphs: [{ id: 'p0', sentences: [{ id: 'b1', text: 'summary: [[4579|card:ff73e071#pages/TOTAL]] pages in all', bullet: '-' }, { id: 'b2', text: 'plot: revisions per wiki, dse far above the others', bullet: '-' }] }], figures: [] },
+    ...LONG.sections,
+  ],
+}
+
+test("a report's bullets stay a list, one item a row; an opening section with no heading is not in `Contents` and starts with its words", async ($, on) => {
+  const w = world(on)
+  w.docs.report = OPENING
+  await start($, w)
+  const pane = await fromHome($, w, DOC.title)
+  const toc = shown(await pane.drawn({ in: 'doc-toc' }))
+  // the three headed sections, numbered from 1; no row for the opening one
+  expect(toc).toBe('1  The data2  The main claim3  What it leaves open')
+  const tree = JSON.stringify(await pane.drawn())
+  // each bullet its own block: the one with a citation a list item's paragraph, the other a Markdown list item
+  expect(tree).toContain('"text":"- plot: revisions per wiki, dse far above the others"')
+  expect(tree).toMatch(/"prefix":"- "[^]*"text":"summary: "/)
+  expect(tree).not.toContain('pages in all plot:')
+  // no empty heading line before the opening words
+  expect(tree).not.toContain('"text":"## "')
+  await pane.unmount()
+})

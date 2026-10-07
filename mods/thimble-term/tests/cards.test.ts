@@ -118,12 +118,17 @@ test("a card whose script read a label shows the label's row, its values in thei
   await ui.unmount()
 })
 
-test("a timeline's start time is said once: the first event's row says it, not the axis above it too", () => {
+test("a timeline's axis names both its ends or neither: neither when the list under it starts and ends with them", () => {
   const { card } = cardOfCell(CELLS.e0time00 as unknown as ThimbleCell)
   const lines = cardLayout(card, 60, -1).lines.map(l => l.map(s => s.s).join(''))
   expect(lines.filter(l => l.includes('24 May')).length).toBe(1)
-  expect(lines[1]!.trim()).toBe('18 Jun')
-  expect(lines[2]).toMatch(/^24 May {2}● first saves/)
+  expect(lines.filter(l => l.includes('18 Jun')).length).toBe(1)
+  expect(lines[1]).toMatch(/^24 May {2}● first saves/)
+  // listed in another order (by size), the list does not name the ends where an axis's reader looks: both under it
+  const sorted = cardOfCell({ ...(CELLS.e0time00 as object), outputs: [{ 'application/vnd.thimble.timeline+json': { events: [{ time: '2026-06-02', label: 'most' }, { time: '2026-05-24', label: 'first saves' }, { time: '2026-06-18', label: 'peak afternoon' }] } }] } as unknown as ThimbleCell).card
+  const axis = cardLayout(sorted, 60, -1).lines.map(l => l.map(s => s.s).join(''))
+  expect(axis[1]).toMatch(/^24 May +18 Jun$/)
+  expect(axis[1]!.length).toBe(60)
 })
 
 test('a press on a label that is not in the workspace says so in a toast and opens nothing', async ($, on) => {
@@ -134,7 +139,25 @@ test('a press on a label that is not in the workspace says so in a toast and ope
   await ui.post({ type: 'label-open', slug: 'gone0000', origin: 'y', gestures: [] }, { in: 'card-t0-l0label0' })
   await ui.unmount()
   await w.clock.settle()
-  expect(w.toasts).toContain('thimble: no label "gone0000" in this workspace')
+  expect(w.toasts).toContain('thimble: that label is no longer in this workspace')
+  expect(w.toasts.join(' ')).not.toContain('gone0000')
   expect(w.opened).toEqual([])
   void WS
+})
+
+test("a press on a label made after the labels were read opens it: the list is read again before it says the label is gone", async ($, on) => {
+  const w = world(on)
+  const made = w.states.labels.splice(0)
+  await start($, w)
+  // home reads the labels while there are none
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  w.states.labels.push(...made)
+  await turn($, w, 'l0label0')
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  await ui.post({ type: 'label-open', slug: 'd9b51617', origin: 'y', gestures: [] }, { in: 'card-t0-l0label0' })
+  await ui.unmount()
+  await w.clock.settle()
+  expect(w.toasts.filter(t => t.includes('label'))).toEqual([])
+  expect(w.panes.at(-1)?.title).toBe('Label: links through a fetch proxy')
 })

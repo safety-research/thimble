@@ -442,7 +442,9 @@ test("a label's panel: its name, type and scope, a rule, its pattern to edit; ru
   let text = shown(drawn)
   // the header block: the name in the accent and bold after a ● in its colour, the type in use on the selection
   // background, the scope (its files, a field, and how many records); then the rule and the pattern, a field
-  for (const s of ['name', 'links through a fetch proxy', 'type', 'prompt', 'regex', 'code', 'scope', '· 14,591 records', '──', 'pattern', 'run on a sample', 'run on all 14,591', '▸ counts', '▸ examples', '▸ cards']) expect(text).toContain(s)
+  for (const s of ['name', 'links through a fetch proxy', 'type', 'prompt', 'regex', 'code', 'scope', '14,591 records', '──', 'pattern', 'run on a sample', 'run on all 14,591', '▸ counts', '▸ examples', '▸ cards']) expect(text).toContain(s)
+  // the scope's count with no leading dot
+  expect(text).not.toContain('· 14,591')
   const json = JSON.stringify(drawn)
   expect(json).toMatch(/"color":"suggestion","bold":true\},"children":\["links through a fetch proxy"\]/)
   expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["regex"]}')
@@ -461,6 +463,11 @@ test("a label's panel: its name, type and scope, a rule, its pattern to edit; ru
   pane = (await $.ui.mount(PANE)) as unknown as M
   text = shown(await pane.drawn())
   for (const s of ['▾ examples', 'SEC download', 'agree', 'it is', '✓ agreed', 'why  r.jina.ai link', '▾ counts', '9,400', '5,191', '▾ cards', 'links through a fetch proxy ›']) expect(text).toContain(s)
+  // a value's button as wide as the longest value, so `agree  it is  …` stands in one place under every value
+  expect((await pane.find({ type: 'Button', key: 'lb-set-revisions.jsonl#L10566-none' }))?.props).toMatchObject({ label: 'none      ' })
+  // a blank row between an opened part and the next toggle
+  const rowsNow = ((((await pane.drawn()) as { children?: unknown[] }).children ?? []) as unknown[]).map(r => shown(r))
+  for (const t of ['▾ examples', '▾ cards']) expect(rowsNow[rowsNow.findIndex(r => r.startsWith(t)) - 1]!.trim()).toBe('')
   await pane.press({ key: 'lb-agree-revisions.jsonl#L10566' })
   await w.clock.settle()
   expect(w.acts).toContainEqual({ kind: 'verdict', payload: { label: 'd9b51617', ref: 'revisions.jsonl#L10566', value: 'proxy-link' } })

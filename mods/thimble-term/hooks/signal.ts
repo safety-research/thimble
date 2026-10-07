@@ -58,12 +58,6 @@ export function signalQuestion(t: Pick<ChatThread, 'turns' | 'label'>, turn: num
   return q ? `"${firstWords(plainCites(q), n)}"` : `about ${firstWords(plainCites(t.label), n)}`
 }
 
-/** Whether the turn a row reports is read: the analyst has seen as many answers as it was. */
-export function signalRead(t: Pick<ChatThread, 'turns'>, turn: number, seen: number | undefined): boolean {
-  const answeredBy = t.turns.slice(0, turn).filter(x => x.state === 'done').length
-  return seen !== undefined && seen >= answeredBy
-}
-
 /** What signals.json holds: the session it was written in (an anchor names a row of that session's transcript), the
  *  latest anchor, the answers seen of each thread, the thread rows each anchor carries (`waiting`: rows waiting for the
  *  first anchor, when a thread answered before main's chat held one), the views whose `↳ view` row each carries, and

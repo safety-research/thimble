@@ -135,12 +135,64 @@ test("a transcript by thimble's sniff: per turn the speaker bold and the words u
   let pane = await browser($, w)
   pane = await openRow($, w, pane, 'chat.jsonl')
   const text = shown(await pane.drawn())
-  for (const s of [' Table ', ' Transcript ', ' Raw ', '1 2 3 for the tabs']) expect(text).toContain(s)
+  for (const s of [' Transcript ', ' Raw ', '1 2 3 for the tabs']) expect(text).toContain(s)
+  // the selected tab inverse with a cell of space at each side; the first, not selected, starts at the edge
+  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"inverse":true},"children":[" Transcript "]}')
+  expect((await pane.find({ type: 'Button', key: 'tab-table' }))?.props).toMatchObject({ label: 'Table ' })
   // the tabs' digits are hidden keys: a Button's hotkey would draw `1:` before its name
   expect(((await pane.find({ type: 'Button', key: 'tab-table' })) as { props?: Record<string, unknown> } | undefined)?.props?.hotkey).toBeUndefined()
   expect(await pane.find({ type: 'Button', key: 'hk-tab0' })).toBeDefined()
   const body = shown(await pane.drawn({ in: 'm:file-body' }))
   for (const s of ['alice', 'Who saved the page?', 'bob', 'An agent did, twice.', '⎿ Read', 'Which one?']) expect(body).toContain(s)
+  await pane.unmount()
+})
+
+test("a transcript's turn shows its words in up to three rows; its time column the clock alone, the day on a row where it changes", async ($, on) => {
+  const w = world(on)
+  const long = 'It looks like the agents used the wiki as a relay: each page saved held a note for the next agent, and the notes ran on for days, one after another, with no reply from anyone outside. '.repeat(3)
+  w.states.files = [{ path: 'agent-chat.jsonl', kind: 'text', size_bytes: 10 }]
+  w.pages['agent-chat.jsonl'] = {
+    ...CHAT,
+    path: 'agent-chat.jsonl',
+    kind: 'text',
+    records: [
+      { line: 1, record: { author: 'alice', body: long, at: '2026-06-18T07:40:01Z' } },
+      { line: 2, record: { author: 'bob', body: 'Yes.', at: '2026-06-18T07:41:30Z' } },
+      { line: 3, record: { author: 'alice', body: 'And the next day?', at: '2026-06-19T09:00:00Z' } },
+    ],
+  }
+  await start($, w)
+  let pane = await browser($, w)
+  pane = await openRow($, w, pane, 'agent-chat.jsonl')
+  const rows = ((((await pane.drawn({ in: 'm:file-body' })) as { children?: unknown[] }).children ?? []) as unknown[]).map(r => shown(r).replace(/\s+$/, ''))
+  expect(rows[0]!.trim()).toBe('18 Jun 2026')
+  expect(rows[1]).toMatch(/^ {2}07:40:01 {2}● alice$/)
+  // the long words: three rows, the last cut with `…`
+  const words = rows.slice(2, 5)
+  expect(words.every(r => r.startsWith(' '.repeat(2 + 8 + 2 + 2)))).toBe(true)
+  expect(words[2]).toMatch(/…$/)
+  expect(rows[5]).toMatch(/^ {2}07:41:30 {2}● bob$/)
+  expect(rows).toContain('  19 Jun 2026')
+  expect(rows.join('\n')).not.toContain('T07:40')
+  // its type: the file's format, not `text`, which its Transcript tab would contradict
+  expect(shown(await pane.drawn())).toContain('jsonl · 3 records')
+  await pane.unmount()
+})
+
+test('the file browser lists each folder in natural order, as home does; a folder\'s count after its name', async ($, on) => {
+  const w = world(on)
+  w.states.files = [
+    { path: 'pages.jsonl', kind: 'text', size_bytes: 10 },
+    { path: 'run-10.jsonl', kind: 'text', size_bytes: 10 },
+    { path: 'run-2.jsonl', kind: 'text', size_bytes: 10 },
+    { path: 'events.jsonl', kind: 'events', size_bytes: 10 },
+  ]
+  await start($, w)
+  const pane = await browser($, w)
+  const tree = ((((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []) as unknown[]).map(r => shown(r))
+  const names = tree.filter(r => /\.jsonl/.test(r)).map(r => r.trim().split(/\s+/)[1])
+  expect(names).toEqual(['events.jsonl', 'pages.jsonl', 'run-2.jsonl', 'run-10.jsonl'])
+  expect(tree.find(r => r.includes('run-2.jsonl'))).toMatch(/jsonl +10 B$/)
   await pane.unmount()
 })
 

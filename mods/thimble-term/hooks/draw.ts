@@ -135,6 +135,55 @@ export function fold(s: string, n: number): string[] {
   return [t.slice(0, sp), cut(t.slice(sp + 1), n)]
 }
 
+/** `s` in at most `max` lines of `n` columns, each broken at the last space that fits (a word wider than a line broken
+ *  where the line ends); the last line cut with `…` when words are left. */
+export function wrapRows(s: string, n: number, max: number): string[] {
+  if (max <= 1) return [cut(s.replace(/\s+/g, ' ').trim(), n)]
+  const words = s.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+  const lines: string[] = []
+  let cur = ''
+  for (let i = 0; i < words.length; i++) {
+    let word = words[i]!
+    const next = cur ? `${cur} ${word}` : word
+    if (width(next) <= n) {
+      cur = next
+      continue
+    }
+    if (cur) {
+      lines.push(cur)
+      cur = ''
+    }
+    // a word wider than a line: its cells up to the line's end, the rest on the next
+    while (width(word) > n && lines.length < max - 1) {
+      let k = 0
+      let w = 0
+      for (const ch of word) {
+        if (w + cw(ch) > n) break
+        w += cw(ch)
+        k += ch.length
+      }
+      lines.push(word.slice(0, k))
+      word = word.slice(k)
+    }
+    cur = word
+    if (lines.length >= max - 1) {
+      // the last line takes the rest
+      cur = [cur, ...words.slice(i + 1)].join(' ')
+      break
+    }
+  }
+  if (cur) lines.push(lines.length >= max - 1 ? cutAtWord(cur, n) : cur)
+  return lines.slice(0, max)
+}
+
+/** `s` cut to `n` cells with `…`, at the last space that keeps half of it, else mid-word. */
+function cutAtWord(s: string, n: number): string {
+  if (width(s) <= n) return s
+  const head = cut(s, n).slice(0, -1)
+  const sp = head.lastIndexOf(' ')
+  return `${(sp > n / 2 ? head.slice(0, sp) : head).replace(/[\s,;:.]+$/, '')}…`
+}
+
 export function pad(s: string, n: number, right = false): string {
   const c = cut(s, n)
   const fill = ' '.repeat(Math.max(0, n - width(c)))
@@ -550,6 +599,26 @@ export function shortTimes(times: readonly string[]): string[] {
   })
 }
 
+/**
+ * Times of a transcript's turns as its time column shows them: the clock alone (`07:40:01`; seconds only when a time
+ * has them), and the day (`18 Jun 2026`) on each turn where it changes, which the column shows on a row of its own. Times
+ * that are not all ISO stamps stay as written, with no day. An empty time stays empty.
+ */
+export function turnTimes(times: readonly string[]): { clock: string; day: string }[] {
+  const parts = times.map(t => (t.trim() ? STAMP.exec(t.trim()) : null))
+  if (times.some((t, i) => t.trim() && !parts[i]) || !parts.some(Boolean)) return times.map(t => ({ clock: t, day: '' }))
+  const secs = parts.some(p => p && (p[6] ?? '00') !== '00')
+  let last = ''
+  return parts.map(p => {
+    if (!p) return { clock: '', day: '' }
+    const key = `${p[1]}-${p[2]}-${p[3]}`
+    const day = key === last ? '' : `${Number(p[3])} ${MONTHS[Number(p[2]) - 1] ?? p[2]} ${p[1]}`
+    last = key
+    const clock = p[4] === undefined ? '' : `${p[4]}:${p[5] ?? '00'}${secs ? `:${p[6] ?? '00'}` : ''}`
+    return { clock, day }
+  })
+}
+
 function timelineLayout(card: CardData, cols: number, hover: number): Layout {
   const evs = (card.events ?? []).slice(0, 30)
   const times = evs.map(e => Date.parse(e.time.replace(' ', 'T')))
@@ -586,10 +655,12 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
     lines.push(cells.map((c): Seg => (c >= 0 ? { s: '●', fg: mark(evs[c]!), ...(c === hover ? { inv: true } : {}) } : { s: '─', fg: COLORS.rule })))
     const a = shown[times.indexOf(t0)]!
     const b = shown[times.indexOf(t1)]!
-    // the start time under the axis's start, unless the first event's row right under it says the same time
-    const start = times[0] === t0 ? '' : a
-    lines.push([{ s: `${start}${' '.repeat(Math.max(start ? 2 : 0, aw - width(start) - width(b)))}${b}`, fg: COLORS.dim }])
-    axisRows = 2
+    // the axis's two ends named under them, both or neither: the list right under the axis already names them when its
+    // first row is the start and its last the end
+    if (!(times[0] === t0 && times[times.length - 1] === t1)) {
+      lines.push([{ s: `${a}${' '.repeat(Math.max(2, aw - width(a) - width(b)))}${b}`, fg: COLORS.dim }])
+      axisRows = 2
+    } else axisRows = 1
   }
   // one row per event: its time dim at the content's edge, under the axis's start time (in inverse under the
   // pointer), its ● in hue, its words, and a blue ↗ when it has a record a click opens

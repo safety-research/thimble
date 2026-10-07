@@ -1,7 +1,8 @@
 // thimble-term: thimble's terminal-mode renderer. The `thimble` command loads this plugin in terminal mode only
 // (`thimble mode terminal`), so browser mode loads nothing new. It registers no model tools, agents, guidance or
 // commands, and keeps no data except what is on screen: what it draws comes from `thimble state`, and every change it
-// makes goes through `thimble act` (hooks/data.ts). Its scope check: THIMBLE_WS names a workspace whose
+// makes goes through `thimble act` (hooks/data.ts). What main's chat drew under its rows is kept in the workspace's
+// terminal/chat.json for a resumed session (hooks/kept.ts). Its scope check: THIMBLE_WS names a workspace whose
 // trusted/launch.json has `mode: "terminal"`; anywhere else every hook passes through.
 //
 // What it draws (its look is SPEC.md's "The visual system"):
@@ -29,17 +30,18 @@ import { chipState, claimsIn, streamLink, streamStep, streaming } from './cite'
 import type { StreamLook, Streaming } from './cite'
 import type { CardData } from './draw'
 import { cid, citeSpans, citations, clip, embeddedCards, needsDrawing } from './lib'
-import { cardsOfCall, docsOf, labelsOf, threadOf, withoutEnd } from './model'
+import { cardsOfCall, docsOf, labelsOf, namedThreads, runIds, runShown, threadOf, withoutEnd } from './model'
 import { HOME_UI_EMPTY } from './home'
+import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage } from './lines'
 import { drawPanel, fieldMessage, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView } from './panel'
 import type { PaneEvent } from './panel'
 import { MARGIN, chipOf, drawCards, drawReply, placeUrl, scrubIds } from './reply'
 import { COLORS } from './paint'
-import { isAnchor, signalEnd, signalQuestion, signalRead } from './signal'
+import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
 import { NAV_EMPTY } from './nav'
-import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, navOrigin, openHome, openPanel, paneTitle, panelColumns, readSurface, rt, surfaceValue, tick } from './term'
+import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, paneTitle, panelColumns, readSurface, readThread, rt, surfaceValue, tick } from './term'
 import type { UiApply } from './term'
 import { turns } from './turns'
 
@@ -86,6 +88,9 @@ const panelTickA = atom(panelTickRef, 0)
 
 /** The context the other files take, bound to this hook's `$`. */
 function cxOf($: Dollar): Ctx {
+  // what main's chat draws under a row is kept in the workspace too, so a resumed session draws it again (kept.ts)
+  const io = { read: (path: string) => $.fs.read(path), write: (path: string, text: string) => $.fs.write(path, text) }
+  const keep = async (row: string, part: Parameters<typeof keepRow>[3]) => (rt.sc ? keepRow(io, rt.sc.ws, row, part) : undefined)
   return {
     now: () => $.clock.now().catch(() => Date.now()),
     run: (argv, init) => $.process.run(argv, init),
@@ -101,6 +106,7 @@ function cxOf($: Dollar): Ctx {
       return { exitCode: end.code ?? 1, stdout, stderr }
     },
     read: path => $.fs.read(path),
+    write: (path, text) => $.fs.write(path, text),
     stat: path => $.fs.stat(path),
     list: path => $.fs.list(path),
     // each variable by its literal name, so `claude plugin validate` lists what the module reads
@@ -138,17 +144,29 @@ function cxOf($: Dollar): Ctx {
     card: async id => (await $.state.get({ ...CARDS, id })).value,
     setCard: async (id, v) => void (await $.state.set({ ...CARDS, id }, v)),
     turnCards: async row => (await $.state.get({ ...TURN_CARDS, id: row })).value ?? [],
-    setTurnCards: async (row, ids) => void (await $.state.set({ ...TURN_CARDS, id: row }, ids)),
+    setTurnCards: async (row, ids) => {
+      await $.state.set({ ...TURN_CARDS, id: row }, ids)
+      await keep(row, { cards: ids })
+    },
     verdict: async id => (await $.state.get({ ...VERDICTS, id })).value,
     setVerdict: async (id, v) => void (await $.state.set({ ...VERDICTS, id }, v)),
     thread: async id => (await $.state.get({ ...THREAD, id })).value,
     setThread: async (id, v) => void (await $.state.set({ ...THREAD, id }, v)),
     threadRows: async row => (await $.state.get({ ...THREAD_ROWS, id: row })).value ?? [],
-    setThreadRows: async (row, rows) => void (await $.state.set({ ...THREAD_ROWS, id: row }, rows)),
+    setThreadRows: async (row, rows) => {
+      await $.state.set({ ...THREAD_ROWS, id: row }, rows)
+      await keep(row, { threads: rows })
+    },
     answer: async row => (await $.state.get({ ...ANSWERS, id: row })).value,
-    setAnswer: async (row, a) => void (await $.state.set({ ...ANSWERS, id: row }, a)),
+    setAnswer: async (row, a) => {
+      await $.state.set({ ...ANSWERS, id: row }, a)
+      await keep(row, { answer: a })
+    },
     viewRows: async row => (await $.state.get({ ...VIEW_ROWS, id: row })).value ?? [],
-    setViewRows: async (row, slugs) => void (await $.state.set({ ...VIEW_ROWS, id: row }, slugs)),
+    setViewRows: async (row, slugs) => {
+      await $.state.set({ ...VIEW_ROWS, id: row }, slugs)
+      await keep(row, { views: slugs })
+    },
     surface: async key => (await $.state.get({ ...SURFACE, id: key })).value as never,
     setSurface: async (key, v) => void (await $.state.set({ ...SURFACE, id: key }, v)),
     panel: async () => (await $.state.get(panelA)).value ?? null,
@@ -296,7 +314,9 @@ async function signalRows(cx: Ctx, e: ResolveInput & { requestId: string; viewpo
     const label = row?.anchorText || (row?.anchor ? await anchorName(cx, row.anchor) : '') || row?.title || 'the side thread'
     const q = th ? signalQuestion({ turns: th.turns, label }, s.turn, n) : `"${clip((row?.question || row?.title || label).replace(/\s+/g, ' '), n)}"`
     const end = th ? signalEnd(th, s.turn) ?? 'answered' : 'answered'
-    const fresh = th ? !signalRead(th, s.turn, row?.seen) : Boolean(row?.unread)
+    // `new` while the thread holds an answer the analyst has not opened (thimble's `unread`), on its latest answer's row
+    const latest = th ? th.turns.map((x, i) => (x.state === 'done' ? i + 1 : 0)).reduce((a, b) => Math.max(a, b), 0) : s.turn
+    const fresh = Boolean(row?.unread) && s.turn >= latest
     out.push(
       <Box key={`signal-${k}`} flexDirection="row" {...(out.length ? {} : { marginTop: 1 })}>
         <Text dimColor>{'↳ '}</Text>
@@ -318,6 +338,17 @@ async function anchorName(cx: Ctx, anchor: string): Promise<string> {
     return q ? `card "${clip(q, 40)}"` : 'a card'
   }
   return anchor
+}
+
+/** A Bash command that runs `thimble-run`, as its row shows it (model.ts runShown), the cards it names by their
+ *  questions as read. */
+async function runWords(cx: Ctx, command: string): Promise<string> {
+  const questions = new Map<string, string>()
+  for (const id of runIds(command)) {
+    const q = ((await cx.card(id))?.data as CardData | null | undefined)?.question
+    if (q) questions.set(id, q)
+  }
+  return runShown(command, id => questions.get(id))
 }
 
 /** The `↳ view` rows under a row of main's chat (SPEC.md, "Main's chat"): a view main proposed, `↳` dim at 0,
@@ -359,7 +390,7 @@ async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promi
     if (st === 'problem' || st === 'failed') red++
   }
   const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`
-  const facts = [plural(cls.length, 'citation'), ...(ans.cards.length ? [plural(ans.cards.length, 'card')] : [])].join(' · ')
+  const facts = [...(cls.length ? [plural(cls.length, 'citation')] : []), ...(ans.cards.length ? [plural(ans.cards.length, 'card')] : [])].join(' · ')
   return (
     <Box key={`footer-${e.requestId}`} marginTop={1} marginLeft={MARGIN} flexDirection="row" columnGap={2}>
       <Box flexShrink={1} flexDirection="row">
@@ -398,6 +429,32 @@ async function underRow(cx: Ctx, e: ResolveInput & { requestId: string; viewport
   )
 }
 
+/** What main's chat drew under its rows in earlier processes of this conversation (kept.ts), put in the state where
+ *  it holds none (a file read, awaited at the session's start); then, beside the session, the cards those rows draw,
+ *  read in one call, and the threads their `↳ thread` rows name. */
+async function restoreKept($: Dollar, cx: Ctx): Promise<void> {
+  if (!rt.sc) return
+  resetKept()
+  const k = await loadKept(cx, rt.sc.ws)
+  const ids = new Set<string>()
+  for (const [row, r] of Object.entries(k.rows)) {
+    if (r.cards?.length && !(await $.state.get({ ...TURN_CARDS, id: row })).value?.length) await $.state.set({ ...TURN_CARDS, id: row }, r.cards)
+    if (r.answer && !(await $.state.get({ ...ANSWERS, id: row })).value) await $.state.set({ ...ANSWERS, id: row }, r.answer)
+    if (r.threads?.length && !(await $.state.get({ ...THREAD_ROWS, id: row })).value?.length) await $.state.set({ ...THREAD_ROWS, id: row }, r.threads)
+    if (r.views?.length && !(await $.state.get({ ...VIEW_ROWS, id: row })).value?.length) await $.state.set({ ...VIEW_ROWS, id: row }, r.views)
+    for (const id of [...(r.cards ?? []), ...(r.answer?.cards ?? []), ...embeddedCards(r.answer?.text ?? '')]) ids.add(id)
+    for (const v of r.views ?? []) rt.viewsTold.add(v)
+  }
+  if (!rt.lastReply && k.last.reply) rt.lastReply = k.last.reply
+  if (!rt.lastCards.length && k.last.cards.length) rt.lastCards = k.last.cards
+  const threads = new Set(Object.values(k.rows).flatMap(r => (r.threads ?? []).map(t => t.thread)))
+  void (async () => {
+    await loadCardsBatch(cx, [...ids])
+    // each `↳ thread` row names its turn's question, from the thread's chat
+    for (const id of threads) await readThread(cx, id)
+  })().catch(err => $.ui.log(`thimble-term: the cards main's chat drew before could not be read: ${String(err).slice(0, 200)}`))
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -406,7 +463,14 @@ export const register: Register = on => {
     if (!rt.sc) return started
     rt.sig = null
     rt.uiN = -1
-    rt.startedAt = await $.clock.now().catch(() => Date.now())
+    // when this conversation began: its first launch, so a thread asked before a `--continue` is not an earlier one's
+    rt.startedAt = await $.session
+      .usage()
+      .then(u => u.startedAt)
+      .catch(() => $.clock.now())
+      .catch(() => Date.now())
+    // what main's chat drew under its rows before a resume, and the cards it drew
+    await restoreKept($, cx).catch(err => $.ui.log(`thimble-term: what main's chat drew before could not be read: ${String(err).slice(0, 200)}`))
     $.clock.every(1000, () => void tick(cx, applyUi))
     $.clock.every(250, () => void checkQueued(cx))
     void tick(cx, applyUi)
@@ -556,27 +620,29 @@ export const register: Register = on => {
       const t = rt.turn
       rt.turn = null
       const row = t.row || rt.anchor
+      const cx = cxOf($)
       if (t.cards.length && row) {
-        const cur = (await $.state.get({ ...TURN_CARDS, id: row })).value ?? []
-        await $.state.set({ ...TURN_CARDS, id: row }, [...cur, ...t.cards.filter(id => !cur.includes(id))])
+        const cur = await cx.turnCards(row)
+        await cx.setTurnCards(row, [...cur, ...t.cards.filter(id => !cur.includes(id))])
       }
       // what `/thimble cite` and `/thimble card` open: the turn's citations and cards
       const all = t.parts.flat().map(r => r.text).join('\n\n')
       if (all.trim()) rt.lastReply = all
       if (all.trim() || t.cards.length) rt.lastCards = [...new Set([...embeddedCards(all), ...t.cards])]
+      if ((all.trim() || t.cards.length) && rt.sc) await keepLast(cx, rt.sc.ws, rt.lastReply, rt.lastCards)
       // the answer: its last part that cites or embeds a card, else its last; the footer stands under its last row
       const part = answerPart(t.parts)
       const last = part?.at(-1)?.uuid ?? ''
       if (part && last && !t.own) {
         const text = part.map(r => r.text).join('\n\n')
         const shows = [...new Set([...embeddedCards(text), ...(last === row ? t.cards : [])])]
-        if (citations(text).length || shows.length) await $.state.set({ ...ANSWERS, id: last }, { rows: part.map(r => r.uuid), text, cards: shows })
+        if (citations(text).length || shows.length) await cx.setAnswer(last, { rows: part.map(r => r.uuid), text, cards: shows })
       }
       // the views this turn proposed: their rows under the answer
       const vrow = last || row
       if (t.views.length && vrow) {
-        const cur = (await $.state.get({ ...VIEW_ROWS, id: vrow })).value ?? []
-        await $.state.set({ ...VIEW_ROWS, id: vrow }, [...cur, ...t.views.filter(v => !cur.includes(v))])
+        const cur = await cx.viewRows(vrow)
+        await cx.setViewRows(vrow, [...cur, ...t.views.filter(v => !cur.includes(v))])
         for (const v of t.views) rt.viewsTold.add(v)
       }
     }
@@ -592,7 +658,8 @@ export const register: Register = on => {
     const told = await signalRows(cx, e)
     const views = await viewRowsEl(cx, e)
     const footer = await footerEl(cx, e)
-    const text = withoutEnd(e.props.text)
+    // without main's end token, and a `↳ thread` line naming its thread by its first question, not its fork's slug
+    const text = namedThreads(withoutEnd(e.props.text), await cx.threads())
     const live = e.surface === 'terminal' || e.surface === 'desktop'
     if (!ids.length && !told && !views && !footer && text === e.props.text && !live && !needsDrawing(text)) return next(e)
     const { Box } = $.ui.resolve(e)
@@ -634,17 +701,15 @@ export const register: Register = on => {
       let changed = false
       const out: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(input)) {
-        const s = typeof v === 'string' ? await scrubIds(cx, v) : v
+        // a card named by its bare id (edit_card's `card: "65cc2a70"`) is a card too
+        const s = typeof v === 'string' ? await scrubIds(cx, k === 'card' && /^[A-Za-z0-9_-]{6,}$/.test(v) ? `card:${v}` : v) : v
         if (s !== v) changed = true
         out[k] = s
       }
       return changed ? next({ ...e, props: { ...e.props, input: out } }) : next(e)
     }
-    if (tool === 'Bash' && typeof input.command === 'string' && /thimble-run\s+(card|label|stale)/.test(input.command)) {
-      const m = /(?:^|\s)\S*thimble-run\s+(card|label|stale)\s*'?"?([A-Za-z0-9_-]*)/.exec(input.command)
-      let shown = m ? `thimble-run ${m[1]}` : 'thimble-run'
-      if (m?.[1] === 'card' && m[2]) shown = await scrubIds(cx, `thimble-run card:${m[2]}`)
-      return next({ ...e, props: { ...e.props, input: { ...input, command: shown } } })
+    if (tool === 'Bash' && typeof input.command === 'string' && /thimble-run\b/.test(input.command)) {
+      return next({ ...e, props: { ...e.props, input: { ...input, command: await runWords(cx, input.command) } } })
     }
     return next(e)
   })
@@ -828,10 +893,17 @@ export const register: Register = on => {
     } else if (d.type === 'label-open' && typeof d.slug === 'string') {
       // a press on a card's label row (its name or its ↗): the label's panel, under its name
       await navOrigin(cx, inPanel)
-      if (!(await surfaceValue(cx, 'labels'))?.ok) await readSurface(cx, 'labels', 'labels')
-      const got = await surfaceValue(cx, 'labels')
-      const hit = got?.ok ? labelsOf(got.value).find(l => l.id === d.slug || l.name === d.slug) : undefined
-      if (!hit) cx.toast(`thimble: no label "${d.slug}" in this workspace`)
+      const find = async () => {
+        const got = await surfaceValue(cx, 'labels')
+        return got?.ok ? labelsOf(got.value).find(l => l.id === d.slug || l.name === d.slug) : undefined
+      }
+      // the labels as last read may be older than the label (home read them before main made it): read them again
+      let hit = await find()
+      if (!hit) {
+        await readSurface(cx, 'labels', 'labels')
+        hit = await find()
+      }
+      if (!hit) cx.toast('thimble: that label is no longer in this workspace')
       else await openLabel(cx, hit.id, hit.name ?? hit.id)
     } else if (d.type === 'field' && typeof d.name === 'string' && typeof d.text === 'string') {
       // a field's words (field.tsx): a draft, or a save

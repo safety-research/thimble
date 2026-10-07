@@ -138,3 +138,40 @@ test("a citation opened from a side thread has a `follow-up` field: its question
   expect(shown(await pane.drawn())).toContain('Threads')
   await pane.unmount()
 })
+
+test("a takeaway's citation opens a panel that agrees with the chat: ✓ after its title, and `a script got the same number`", async ($, on) => {
+  const w = world(on)
+  Object.assign(w.cells.ff73e071!, { verification: { status: 'ok', links: { status: 'ok', checked: true, resolved: [{ value: '4579', ref: 'card:ff73e071#pages/TOTAL' }], broken: [] } } })
+  await start($, w)
+  w.toolText = 'card:ff73e071\n[out0: table]'
+  await $.turn.start({ text: 'How big?', turnId: 't1' } as never)
+  await $.session.append({ door: 'response', origin: { kind: 'model', model: 'm' }, uuid: 'r1', message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Here.' }] } } as never).catch(() => undefined)
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u1' } as never)
+  await $.turn.complete({ turnId: 't1', answer: 'Here.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.advance(300)
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  // the takeaway: `The export holds 4579 ✓ pages …`, the value at column 17
+  await ui.pointer({ type: 'down', x: 18, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
+  await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-tk-t0-1' } as never)
+  await ui.unmount()
+  await w.clock.settle()
+  const pane = (await $.ui.mount(PANE)) as unknown as M
+  const tree = await pane.drawn()
+  // the title (a link, drawn in a Client): the value, then ✓ in the text color
+  expect(JSON.stringify(tree)).toContain('{"s":"4579","b":true,"fg":"remember","u":true},{"s":" ✓"}')
+  expect(shown(tree)).toContain('found on the card, and a script got the same number')
+  await pane.unmount()
+})
+
+test('a file citation written without words names its place once: no `from` row, and its label marked in the sentence', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  const pane = await clickCite($, w, 'See [[README.md#L5]] for the format.', 5)
+  const tree = await pane.drawn()
+  const text = shown(tree)
+  expect(text).toContain('README.md line 5')
+  expect(text).not.toContain('from')
+  expect(JSON.stringify(tree)).toMatch(/"See [^"]*"[^]*"README:5"/)
+  expect(text).toContain('"See README:5 for the format."')
+  await pane.unmount()
+})

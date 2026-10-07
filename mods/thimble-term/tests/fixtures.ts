@@ -184,6 +184,8 @@ export type World = {
   commands: string[]
   /** a file's page by its path, over the fixtures' (null: it cannot be read) */
   pages: Record<string, unknown>
+  /** when the conversation began, as Claude Code's session figures say it (a resumed one began before its process) */
+  startedAt?: number
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
@@ -225,6 +227,13 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     if (t === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: t }
   })
+  // a file the renderer writes (the workspace's terminal/chat.json) is kept, and read back
+  on('fs.write', ($, e) => {
+    w.files.set(e.path, e.text)
+    return { value: undefined } as never
+  })
+  // the session's figures: it began when the test's clock starts, unless a test says it began earlier (a resume)
+  on('session.usage', () => ({ value: { startedAt: w.startedAt ?? 1_790_000_000_000, context: {}, rateLimits: [] } }) as never)
   on('fs.stat', ($, e) => {
     const t = w.stamps.get(e.path)
     if (t === undefined) return { deny: `ENOENT: ${e.path}` } as never

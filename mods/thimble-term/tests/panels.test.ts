@@ -5,6 +5,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
+import { labelHue } from '../hooks/home'
 import { CWD, WS, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -154,6 +155,8 @@ test("home: views by state, the glyph alone saying it; documents under that word
   const w = world(on)
   w.states.home = { ...w.states.home, views: [{ slug: 'edit-bursts', name: 'Edit Bursts', status: 'proposed', ts: '2026-10-07T01:00:00Z', files: ['revisions.jsonl'] }, { slug: 'board', name: 'Board', status: 'built', ts: '2026-10-07T02:00:00Z', files: ['board.jsonl'] }], coverage: 'Coverage: 2 of 3 files opened; data/ never.' } as never
   w.states.threads[1]!.created_at = '2020-01-01T00:00:00+00:00'
+  // a thread about a citation, titled by its words (as openAsk asks for it)
+  w.states.threads.push({ id: 't3', kind: 'thread', role: 'thread', title: '4579', anchor: 'card:ff73e071#pages/TOTAL', anchor_text: 'The export holds 4579 pages and 14592 revisions.', parent: 'main', created_at: '2026-10-06T10:05:00+00:00', running: false, answers: 1, seen: 0, question: 'Is 4579 every page?' } as never)
   await start($, w)
   const pane = await home($, w)
   const lines = (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
@@ -163,10 +166,32 @@ test("home: views by state, the glyph alone saying it; documents under that word
   expect(at('Edit Bursts')).not.toContain('proposed')
   expect(lines.indexOf(at('Board'))).toBeLessThan(lines.indexOf(at('Edit Bursts')))
   expect(lines.some(l => l.includes('Documents (1)'))).toBe(true)
-  expect(at('"why is events.jsonl bigger?"')).toMatch(/about What does the export ho… · earlier session {2}new$/)
+  // a thread's subject at R by its citation's words; a subject that would cut the question is left out, the question whole
+  expect(at('"Is 4579 every page?"')).toMatch(/"Is 4579 every page\?" +about 4579 {2}new$/)
+  expect(at('"why is events.jsonl bigger?"')).toMatch(/"why is events\.jsonl bigger\?" +earlier session {2}new$/)
+  // a thread asked about a passage has no subject at R: its sentence would cut the question beside it
+  expect(at('"which pages were deleted?"')).not.toContain('about')
   expect(at('Files (3)')).toMatch(/type {9}size$/)
   expect(at('README.md')).toMatch(/markdown {5}2 KB$/)
+  // a folder's count after its name, dim, as the file browser shows it; only its size under `size`
+  expect(at('wiki/')).toMatch(/▾ wiki\/ {2}2 +52\.0 MB$/)
+  expect(lines.find(l => /▸ wiki\/data\//.test(l))).toMatch(/▸ wiki\/data\/ {2}1 +2\.1 MB$/)
   expect(lines.some(l => l.includes('Coverage: 2 of 3 files opened; data/ never.'))).toBe(true)
+  // a label's ● in the label's color, as the label panel draws it beside its name
+  const homeTree = JSON.stringify(await pane.drawn({ in: 'm:home' }))
+  expect(homeTree).toContain(`{"type":"Text","props":{"color":"${labelHue(['proxy-link', 'none'])}"},"children":["●"]},{"type":"Text","children":[" links through a fetch proxy`)
+  await pane.unmount()
+})
+
+test('after a resume, a thread asked earlier in the same conversation is not an earlier session\'s', async ($, on) => {
+  const w = world(on)
+  w.states.threads[1]!.created_at = '2020-01-01T00:00:00+00:00'
+  // the conversation began before the thread: Claude Code's session figures count from its first launch
+  w.startedAt = Date.parse('2019-12-31T00:00:00Z')
+  await start($, w)
+  const pane = await home($, w)
+  const lines = (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
+  expect(lines.find(l => l.includes('"why is events.jsonl bigger?"'))).not.toContain('earlier session')
   await pane.unmount()
 })
 
@@ -207,5 +232,49 @@ test('the views pane: each view by its glyph and name, its files at R, `new` onc
   pane = (await $.ui.mount(PANE)) as unknown as M
   expect(shown(await pane.drawn())).toContain('Board')
   expect(w.panes.at(-1)!.title).toBe('Board')
+  await pane.unmount()
+})
+
+test("a thread about a citation names its subject by the citation's words in the ask view, the thread and home; the ask fields say what they take", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  const text = 'The export holds [[4579|card:ff73e071#pages/TOTAL]] pages.'
+  let ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  await ui.pointer({ type: 'down', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.unmount()
+  await w.clock.settle()
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  await pane.press({ key: 'cite-ask' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  let drawn = shown(await pane.drawn())
+  expect(drawn).toContain('about 4579')
+  // the field alone, its placeholder saying what it takes; `ask` is only Enter's word
+  expect((await pane.find({ type: 'Input', key: 'ask-new' }))?.props).toMatchObject({ placeholder: 'type your question', submitLabel: 'ask' })
+  expect(drawn).not.toMatch(/(^|[^a-z])ask {2}/)
+  await pane.input({ key: 'ask-new', text: 'Is 4579 every page?' })
+  await w.clock.settle()
+  expect(w.acts.find(a => a.kind === 'thread')!.payload).toMatchObject({ anchor: 'card:ff73e071#pages/TOTAL', title: '4579', message: 'Is 4579 every page?' })
+  await pane.unmount()
+  // the thread as thimble lists it: titled by the words, its anchor's sentence kept for the fork
+  w.states.threads.push({ id: 't9', kind: 'thread', role: 'thread', title: '4579', anchor: 'card:ff73e071#pages/TOTAL', anchor_text: 'The export holds 4579 pages.', parent: 'main', created_at: '2026-10-06T10:05:00+00:00', running: false, answers: 1, seen: 1, question: 'Is 4579 every page?' } as never)
+  w.chats.t9 = { meta: w.states.threads.at(-1), events: [{ type: 'user', text: 'Is 4579 every page?' }, { type: 'text', delta: 'Yes.', reply: true }] }
+  w.stamps.set(`${WS}/chats`, 11)
+  await w.clock.advance(1100)
+  pane = await home($, w)
+  pane = await homeClick($, w, pane, '"Is 4579 every page?"')
+  drawn = shown(await pane.drawn())
+  expect(drawn).toContain('about 4579')
+  expect(drawn).not.toContain('about The export holds')
+  // the next question's field: a blank row under the answer, a placeholder
+  const row = (await pane.find({ type: 'Box', key: 'ask-row' })) as { props?: Record<string, unknown> } | undefined
+  expect(row?.props).toMatchObject({ marginTop: 1 })
+  const field = ((await pane.findAll({ type: 'Input' })) as { key?: string; props?: Record<string, unknown> }[]).find(i => String(i.key).startsWith('ask-'))
+  expect(field?.props).toMatchObject({ placeholder: 'ask a follow-up question' })
   await pane.unmount()
 })

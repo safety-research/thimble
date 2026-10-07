@@ -5,7 +5,10 @@ thimble's terminal-mode renderer: a Claude Code plugin of function hooks that dr
 (`--plugin-dir <tree>/mods/thimble-term`), with no server, no port and no browser. Browser mode does not load it.
 
 It only draws. It registers no model tools, agents, guidance or commands, and it keeps no data except what is on
-screen: what it draws comes from `thimble state`, and every change it makes goes through `thimble act`. It writes to
+screen: what it draws comes from `thimble state`, and every change it makes goes through `thimble act`. The one file it
+writes is the workspace's `terminal/chat.json` (`hooks/kept.ts`): what main's chat drew under each of its rows (the
+turn's cards, the answer's footer, the `↳` rows), by the row's uuid, which Claude Code keeps across `--continue` and
+`--resume`, so a resumed session draws it again. It writes to
 main only when the analyst asks it to: a code label's run and a card's `run again` (code runs only in main's Bash) and a
 new label described in the labels list go to main as the analyst's prompt, and a document's `as slides` or `as a story`
 runs `/thimble:write`. It is idle in any session whose `THIMBLE_WS` does not name a workspace with `mode: "terminal"` in
@@ -122,7 +125,8 @@ drawing's, its title a hot spot, everything but the title below the plot), `cite
 tips, `home.ts` and `homeview.tsx` home, `chrome.tsx` the panel's chrome, `paint.ts` the colors, `gestures.tsx` what a
 press does, `anim.ts` the mark a citation lights on a card, `nav.ts` the path from home and the threads tree,
 `signal.ts` the `↳` rows' rules, `files.ts` the file a ref cites, `turns.ts` one drawing of a pane at a time, `lib.ts`
-the pure helpers, and `field.tsx` the text field that shows all of its text (a label's prompt).
+the pure helpers, `field.tsx` the text field that shows all of its text (a label's prompt), and `kept.ts` what main's
+chat drew under its rows, kept for a resume.
 
 ## Tests
 

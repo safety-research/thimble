@@ -12,7 +12,7 @@
 // with `▸ ▾`, the newest group and the first folder open. Each line starts with the 2-cell margin, where `❯` marks the
 // row the keys chose.
 import type { Line, Seg } from './draw'
-import { fold, lineWidth, valueColour, width } from './draw'
+import { lineWidth, valueColour, width, wrapRows } from './draw'
 import { ACCENT, FRESH, MARGIN_W, fitTo, headingLine, hintLine, pointed, ruleLine, spread } from './chrome'
 import { COLORS } from './paint'
 
@@ -89,6 +89,10 @@ export type HomeRow = {
   key: string
   glyph: Glyph | null
   title: string
+  /** dim words right after the title (a folder's count of files) */
+  after?: Seg[]
+  /** what stands at R in place of `right` when `right` would cut the title (a thread's row without its subject) */
+  short?: Seg[]
   fresh?: boolean
   right?: Seg[]
   bar?: { n: number; fg: string }[]
@@ -221,8 +225,10 @@ function threadsSection(ts: readonly HomeThread[]): HomeSection {
       glyph: t.tone === 'run' ? WORKING : t.tone === 'problem' ? { mark: '×', fg: COLORS.problem } : t.tone === 'ok' || t.unread ? DONE : NOT_STARTED,
       title: t.title,
       fresh: t.unread > 0,
-      // what it is about, then `earlier session`, dim at R (on its one row)
+      // what it is about, then `earlier session`, dim at R (on its one row); without its subject when that would cut
+      // its question
       right: rightOf([t.about, t.earlier ? 'earlier session' : ''], t.unread > 0),
+      short: rightOf([t.earlier ? 'earlier session' : ''], t.unread > 0),
       act: { op: 'open', open: { kind: 'thread', id: t.id } },
     })),
   }
@@ -276,6 +282,12 @@ function countBar(values: readonly string[], counts: Record<string, number>): { 
   return values.map((v, i) => ({ n: out[i]!, fg: valueColour(values, v)! })).filter(x => x.n > 0)
 }
 
+/** A label's color, as the label panel's ● beside its name shows it: its first value's, else the first series hue. */
+export function labelHue(values: readonly string[]): string {
+  const hue = values.length ? valueColour(values, values[0]!) : undefined
+  return hue && hue !== COLORS.dim ? hue : COLORS.series[0]!
+}
+
 function labelsSection(ls: readonly HomeLabel[]): HomeSection {
   return {
     id: 'labels',
@@ -293,7 +305,8 @@ function labelsSection(ls: readonly HomeLabel[]): HomeSection {
       })
       return {
         key: `label:${l.slug}`,
-        glyph: l.running ? WORKING : DONE,
+        // its ● in the label's color, as the label panel draws it beside its name
+        glyph: l.running ? WORKING : { mark: '●', fg: labelHue(l.values) },
         title: l.name,
         bar: countBar(l.values, l.counts),
         right: [{ s: num(labeled) }],
@@ -326,7 +339,9 @@ function filesSection(fs: readonly HomeFile[], root: string, ui: HomeUi): HomeSe
     const folder = `${root}/${cut < 0 ? '' : `${f.file.slice(0, cut)}/`}`
     by.set(folder, [...(by.get(folder) ?? []), f])
   }
-  const folders = [...by.entries()]
+  // the corpus's own folder first, the others in natural order, as the file browser lists them
+  const top = `${root}/`
+  const folders = [...by.entries()].sort(([a], [b]) => (a === b ? 0 : a === top ? -1 : b === top ? 1 : a.localeCompare(b, undefined, { numeric: true })))
   const recs = (xs: readonly HomeFile[]) => xs.reduce((k, f) => k + (f.records ?? 0), 0)
   const seen = (xs: readonly HomeFile[]) => xs.reduce((k, f) => k + Math.min(f.seen, f.records ?? 0), 0)
   const cols = (records: string, read: string): Seg[] => [{ s: records }, { s: '  ' }, dim(read)]
@@ -347,7 +362,9 @@ function filesSection(fs: readonly HomeFile[], root: string, ui: HomeUi): HomeSe
         key: `folder:${folder}`,
         glyph: { mark: open ? '▾' : '▸' },
         title: folder,
-        right: [dim(plural(files.length, 'file')), { s: '  ' }, ...(listed ? [{ s: '' }, { s: '  ' }, dim(sizeWords(files.reduce((k, f) => k + f.size, 0)))] : cols(num(recs(files)), share(seen(files), recs(files)) || '0%'))],
+        // its count of files dim after its name, as the file browser shows it; under the columns only what they head
+        after: [dim(`  ${num(files.length)}`)],
+        right: listed ? [{ s: '' }, { s: '  ' }, dim(sizeWords(files.reduce((k, f) => k + f.size, 0)))] : cols(num(recs(files)), share(seen(files), recs(files)) || '0%'),
         fold,
         open,
         // a folder of 21 shows all 21: `… 1 more` would take the row the file takes
@@ -413,9 +430,13 @@ function glyphSeg(g: Glyph | null): Seg[] {
 
 /** An item's line at `x`: its glyph hanging, its name, its bar and figure against the right edge. */
 function itemLine(row: HomeRow, x: number, w: number): Line {
-  const right: Line = [...(row.bar?.length ? [...row.bar.map(b => ({ s: '█'.repeat(b.n), fg: b.fg })), { s: '  ' }] : []), ...(row.right ?? [])]
+  const bar: Line = row.bar?.length ? [...row.bar.map(b => ({ s: '█'.repeat(b.n), fg: b.fg })), { s: '  ' }] : []
   const lead: Line = [...(x ? [{ s: ' '.repeat(x) }] : []), ...glyphSeg(row.glyph)]
-  return spread([...lead, { s: row.title }], right, w)
+  const left: Line = [...lead, { s: row.title }, ...(row.after ?? [])]
+  // the title stays whole where it can: the shorter right part when the full one would cut it
+  const full: Line = [...bar, ...(row.right ?? [])]
+  const right = row.short && lineWidth(left) + 2 + lineWidth(full) > w ? [...bar, ...row.short] : full
+  return spread(left, right, w)
 }
 
 /** The figures of a section's rows set in shared columns: each row's right part padded so its last column ends on R
@@ -445,8 +466,8 @@ function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void
   alignRight(sec)
   const head = headingLine(sec.name, sec.count, sec.news ?? 0)
   out.push(spread(head, sec.heads ?? [], w), sec.pane ? { x0: 0, x1: lineWidth(head), row: false, act: { op: 'open', open: sec.pane } } : undefined)
-  // the orientation's coverage line, dim under the Files heading
-  if (sec.coverage) for (const l of fold(sec.coverage, Math.max(10, w - 2))) out.push([{ s: '  ' }, dim(l)])
+  // the orientation's coverage line, dim under the Files heading, whole up to four rows
+  if (sec.coverage) for (const l of wrapRows(sec.coverage, Math.max(10, w - 2), 4)) out.push([{ s: '  ' }, dim(l)])
   if (!sec.rows.length) {
     out.push([{ s: '  ' }, dim('none')])
     return

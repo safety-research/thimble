@@ -189,6 +189,24 @@ export async function loadCards(cx: Ctx, ids: readonly string[]): Promise<void> 
   }
 }
 
+/** These cards read in one call (`cards --since` the epoch), each it does not list on its own (said so in red): the cards
+ *  a resumed session's rows draw (register.tsx restoreKept). */
+export async function loadCardsBatch(cx: Ctx, ids: readonly string[]): Promise<void> {
+  if (!rt.sc || !ids.length) return
+  const want = new Set(ids)
+  const got = await readState(cx, rt.sc, 'cards', ['--since', iso(0)])
+  const read = new Set<string>()
+  if (got.ok) {
+    for (const cell of cellsOf(got.value)) {
+      if (!want.has(cell.id)) continue
+      rt.shown.add(cell.id)
+      read.add(cell.id)
+      await putCard(cx, cell)
+    }
+  }
+  await loadCards(cx, ids.filter(id => !read.has(id)))
+}
+
 /** The cards some drawing shows, read again: those the notebooks changed since the last read, and the label cards
  *  whose label changed. */
 async function refreshCards(cx: Ctx, labels: boolean): Promise<void> {
@@ -566,9 +584,9 @@ export async function signalsAt(cx: Ctx, row: string): Promise<ChatSignal[]> {
 
 /** A new side thread about `anchor` (a ref) or `anchorText` (words on screen), with its first question: main forks
  *  `thread:<name>` for it, as for the browser's. Its id, or why it was refused. */
-export async function startThread(cx: Ctx, anchor: string | null, anchorText: string, message: string, more: { parent?: string; element?: string } = {}): Promise<{ id: string } | { error: string }> {
+export async function startThread(cx: Ctx, anchor: string | null, anchorText: string, message: string, more: { parent?: string; element?: string; title?: string } = {}): Promise<{ id: string } | { error: string }> {
   if (!rt.sc) return { error: 'thimble is not in terminal mode in this session' }
-  const got = await act(cx, rt.sc, 'thread', { anchor, message, ...(anchorText ? { anchor_text: anchorText } : {}), ...(more.parent ? { parent: more.parent } : {}), ...(more.element ? { element: more.element } : {}) })
+  const got = await act(cx, rt.sc, 'thread', { anchor, message, ...(anchorText ? { anchor_text: anchorText } : {}), ...(more.parent ? { parent: more.parent } : {}), ...(more.element ? { element: more.element } : {}), ...(more.title ? { title: more.title } : {}) })
   if (!got.ok) return { error: got.error }
   const v = got.value as { thread?: unknown; id?: unknown; meta?: { id?: unknown } }
   const id = String(v.thread ?? v.id ?? v.meta?.id ?? '')

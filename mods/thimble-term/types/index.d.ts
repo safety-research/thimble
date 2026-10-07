@@ -134,9 +134,11 @@ export type TermPanel = {
   /** a new thread's: the thread it is asked from, and where it was asked (a document's passage) */
   parent?: string
   element?: string
-  /** a citation panel's: the sentence the citation stands in, and the passage an example's record quotes */
+  /** a citation panel's: the sentence the citation stands in, and the passage an example's record quotes; `of` the card
+   *  whose takeaway holds the citation, whose links check the panel shows as the chat does */
   sentence?: string
   quote?: string
+  of?: string
 }
 
 /** A turn's answer (its last text part that cites or embeds a card, else its last), kept under its last row for the
@@ -154,10 +156,10 @@ export type TermAgent = { name: string; label: string; state: string; kind: stri
  *  count, is passed back as `--after`). */
 export type TermThread = { id: string; meta: Record<string, unknown>; events: Record<string, unknown>[]; n: number; rev: number }
 
-/** A row of the threads list (`thimble state threads`): a side thread with what the rows need. */
 /** A row of the threads list (`thimble state threads`): a side thread with what the rows need; `element` where it was
- *  asked (a document's passage, `report:<slug>#<unit>`). */
-export type TermThreadRow = { id: string; title: string; anchor: string; anchorText: string; running: boolean; answers: number; seen: number; unread: number; at: string; parent: string; created?: string; element?: string; question?: string }
+ *  asked (a document's passage, `report:<slug>#<unit>`), `fork` the name its forks run under (a slug, which main's
+ *  `↳ thread` line names and the chat shows as its first question). */
+export type TermThreadRow = { id: string; title: string; anchor: string; anchorText: string; running: boolean; answers: number; seen: number; unread: number; at: string; parent: string; created?: string; element?: string; question?: string; fork?: string }
 
 /** The label panel's state: the parts opened, by `<label>:<part>`; the kind picked in `type` and not yet saved, by
  *  label; and each label's run started from the panel (its size, 0 for every record) and its last word. */

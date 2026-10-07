@@ -16,6 +16,8 @@ export type Ctx = {
    *  it ends with, its whole output read once it exits */
   runLong: (argv: readonly string[], init?: { cwd?: string; env?: Record<string, string> }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
   read: (path: string) => Promise<string>
+  /** a file written whole, its folders made (the workspace's terminal/chat.json, kept.ts) */
+  write: (path: string, text: string) => Promise<void>
   stat: (path: string) => Promise<FsStat>
   list: (path: string) => Promise<FsEntry[]>
   env: (name: string) => Promise<string | undefined>

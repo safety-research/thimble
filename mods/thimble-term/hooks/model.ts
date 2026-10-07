@@ -61,10 +61,12 @@ export function labelIdOf(cell: ThimbleCell): string {
 
 const CARD_TOOLS = /^mcp__plugin_thimble_thimble__(add_card|edit_card|add_cell|edit_cell)$/
 const LABEL_TOOL = /^mcp__plugin_thimble_thimble__apply_label$/
-const RUN_RE = /(?:^|[\s/'"])thimble-run['"]?\s+(card|label|stale)\b\s*['"]?([A-Za-z0-9_-]*)/
+const RUN_RE = /(?:^|[\s/'"])thimble-run['"]?\s+(card|label|stale)\b\s*['"]?([A-Za-z0-9_-]*)/g
 
-/** The cards a call of main's names as its own: add_card's and edit_card's card, apply_label's label card, the card a
- *  `thimble-run card <id>` ran (each card a code label's `thimble-run label` made or reran, named in its output). */
+/** The cards a call of main's names as its own: add_card's and edit_card's card, apply_label's label card; for a Bash
+ *  command that runs `thimble-run` (`thimble-run card <id>`, or several in a shell loop), each card it names and each
+ *  card its output names on a line of its own (`card:<id>`, as add_card prints it), the label card of a code label's
+ *  `thimble-run label`. */
 export function cardsOfCall(tool: string, input: unknown, text: string): string[] {
   const inp = isObj(input) ? input : {}
   if (CARD_TOOLS.test(tool)) {
@@ -77,13 +79,48 @@ export function cardsOfCall(tool: string, input: unknown, text: string): string[
     return card ? [card] : []
   }
   if (tool === 'Bash') {
-    const m = RUN_RE.exec(str(inp.command))
-    if (!m) return []
-    if (m[1] === 'card' && m[2]) return [m[2]]
+    const cmd = str(inp.command)
+    if (!/thimble-run\b/.test(cmd)) return []
+    const out = new Set<string>()
+    for (const m of cmd.matchAll(RUN_RE)) if (m[1] === 'card' && m[2]) out.add(m[2])
+    for (const m of text.matchAll(/^card:([A-Za-z0-9_-]+)\s*$/gm)) out.add(m[1]!)
     const card = /The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]/.exec(text)?.[1]
-    return card ? [card] : []
+    if (card) out.add(card)
+    return [...out]
   }
   return []
+}
+
+/** The card ids a Bash command that runs `thimble-run card` names: after `thimble-run card`, or in a shell loop's list
+ *  (`for c in 2d10d7f3 9b4bb0cb; do $B card $c; done`). */
+export function runIds(command: string): string[] {
+  if (!/thimble-run\b/.test(command) || !/\bcard\b/.test(command)) return []
+  return [...new Set([...command.matchAll(/(?:card:)?\b([0-9a-f]{8})\b/g)].map(m => m[1]!))]
+}
+
+/** A Bash command that runs `thimble-run`, as its row shows it: the verb, and for `card` each card by its question
+ *  (`questionOf`), never the install path or an id; a shell loop's cards too. Cards not read yet are counted. */
+export function runShown(command: string, questionOf: (id: string) => string | undefined): string {
+  const verb = /(?:thimble-run|\$\{?\w+\}?)['"]?\s+['"]?(card|label|stale)\b/.exec(command)?.[1]
+  if (verb !== 'card') return verb ? `thimble-run ${verb}` : 'thimble-run'
+  const ids = runIds(command)
+  const named = ids.map(questionOf).filter((q): q is string => Boolean(q))
+  const short = (q: string) => (q.length > 40 ? `${q.slice(0, 39)}…` : q)
+  if (named.length && named.length === ids.length) return `thimble-run card ${named.map(q => `"${short(q)}"`).join(', ')}`
+  return ids.length > 1 ? `thimble-run card · ${ids.length} cards` : 'thimble-run card'
+}
+
+/** main's `↳ thread <name>: …` lines (main.md's form, `<name>` the fork's slug) with each thread named by its first
+ *  question in quotation marks, as the chat names a thread everywhere else. */
+export function namedThreads(text: string, rows: readonly { id: string; title: string; question?: string; fork?: string }[]): string {
+  if (!/↳\s*thread\s+[A-Za-z0-9_-]/.test(text)) return text
+  return text.replace(/(↳\s*thread\s+)([A-Za-z0-9_-]+)(\s*:)/g, (m, lead: string, name: string, colon: string) => {
+    const r = rows.find(x => x.fork === name || x.title === name || x.id === name)
+    const q = (r?.question ?? '').replace(/\[\[([^|\]]*)\|[^\]]*\]\]/g, '$1').replace(/\s+/g, ' ').trim()
+    if (!q) return m
+    const cut = q.length > 40 ? `${(q.slice(0, 39).match(/^(.*\S)\s/)?.[1] ?? q.slice(0, 39)).replace(/[\s,;:.]+$/, '')}…` : q
+    return `${lead}"${cut.replace(/"/g, "'")}"${colon}`
+  })
 }
 
 /** main's end token: what it ends a turn with when it has nothing for the analyst, which no chat shows (session.py). */
@@ -194,7 +231,8 @@ export function chatOf(v: unknown): { meta: Obj; events: Obj[] } {
 }
 
 /** A chat as a side thread's turns: each analyst message a question, the text after it its answer, its tool calls
- *  counted, closed by `done` (answered) or `error` (failed, or stopped). */
+ *  counted, answered by its first reply (`reply_in_thread`'s `text` record, marked `reply`) or `done`, failed (or
+ *  stopped) by `error`. In terminal mode main often answers with `reply_in_thread` alone, and no `done` follows. */
 export function threadOf(meta: Obj, events: readonly Obj[]): ChatThread {
   const turns: ChatThreadTurn[] = []
   let cur: ChatThreadTurn | null = null
@@ -212,8 +250,15 @@ export function threadOf(meta: Obj, events: readonly Obj[]): ChatThread {
     if (!cur) open(str(meta.anchor_text) || str(meta.title))
     const c = cur as unknown as ChatThreadTurn
     if (t === 'text') {
+      // words after an end that said the turn went unanswered (main's turn ended before its fork replied): the
+      // answer, which replaces what the end said
+      if (c.state === 'error') {
+        c.state = 'running'
+        c.a = ''
+      }
       c.a += str(e.delta ?? e.text)
       c.partial = c.a
+      if (e.reply === true && c.state === 'running') c.state = 'done'
     } else if (t === 'tool_use') c.tools++
     else if (t === 'done') {
       c.state = 'done'
@@ -271,6 +316,7 @@ export function threadRowsOf(v: unknown): TermThreadRow[] {
         created: str(m.created_at),
         element: str(m.anchor_element),
         question: str(m.question),
+        fork: str(m.fork_name),
       }
     })
 }

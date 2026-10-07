@@ -163,6 +163,15 @@ export function claimSentence(key: string | undefined): string {
   return key ? (claimSentences.get(key) ?? '') : ''
 }
 
+// the card whose takeaway holds each citation drawn there, by its claim's key: its citation panel shows that card's links
+// check, as the chat does
+const claimCards = new Map<string, string>()
+
+/** The card whose takeaway holds a citation drawn, by its claim's key; '' for a citation of a reply's prose. */
+export function claimCard(key: string | undefined): string {
+  return key ? (claimCards.get(key) ?? '') : ''
+}
+
 // ------------------------------------------------------------------------------------------------ threads asked
 
 const flat = (s: string) => plainCites(s).replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
@@ -323,8 +332,11 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
       raws.push(cl.c.raw)
       claimSentences.delete(cl.key)
       claimSentences.set(cl.key, cl.sentence)
+      claimCards.delete(cl.key)
+      if (opts.card) claimCards.set(cl.key, opts.card)
     }
     for (const k of [...claimSentences.keys()].slice(0, Math.max(0, claimSentences.size - 2000))) claimSentences.delete(k)
+    for (const k of [...claimCards.keys()].slice(0, Math.max(0, claimCards.size - 2000))) claimCards.delete(k)
     const words = `${block.heading ? `${'#'.repeat(block.heading)} ` : ''}${block.runs.map(r => (r.cite ? r.cite.raw : r.text)).join('')}`
     const press = askOf(words)
     const ask: Ask = { key, words, ...(press ? { press } : {}) }

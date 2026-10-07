@@ -313,3 +313,30 @@ test("a citation of a card's value in main's prose is checked again when the car
   expect(chip.tip).toBe('not found on the card · the place shows 4000')
   await ui.unmount()
 })
+
+test("a thread main answered with reply_in_thread alone (no `done`): its `↳ thread` row says answered", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await turn($, w, [['r1', 'Asked.']])
+  const t2 = w.states.threads.find(t => t.id === 't2')! as Record<string, unknown>
+  // thimble counts the reply as the question's answer (local.py answered)
+  Object.assign(t2, { running: false, answers: 1, seen: 0 })
+  w.chats.t2 = { meta: { ...t2 }, events: [{ type: 'user', text: 'which pages were deleted?' }, { type: 'tool_use', name: 'Bash' }, { type: 'text', delta: 'Forty.', reply: true }] }
+  w.stamps.set(`${WS}/chats`, 5)
+  await w.clock.advance(1100)
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Asked.'))) as unknown as M
+  expect(shown(await ui.drawn())).toContain('↳ thread · "which pages were deleted?" · answered · new')
+  await ui.unmount()
+})
+
+test("main's own `↳ thread <slug>:` line names the thread by its first question, never the fork's slug", async ($, on) => {
+  const w = world(on)
+  Object.assign(w.states.threads[1]!, { fork_name: 'what-does-the-export', question: 'why is events.jsonl so much bigger?' })
+  await start($, w)
+  const line = '↳ thread what-does-the-export: answered that events.jsonl holds one row per event.'
+  const ui = (await $.ui.mount(MESSAGE('r7', line))) as unknown as M
+  const text = shown(await ui.drawn())
+  expect(text).toContain('↳ thread "why is events.jsonl so much bigger?": answered that events.jsonl holds one row per event.')
+  expect(text).not.toContain('what-does-the-export')
+  await ui.unmount()
+})
