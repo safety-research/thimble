@@ -66,7 +66,14 @@
 //                          frame to page, answered by labelDone {id, error?}: the page's label controls (window.thimble
 //                          setLabel, setLabelColour, editLabel, mark and setFilter), each sent only while the frame has
 //                          the analyst's transient user activation, which thimble checks again on its side; ops on,
-//                          colour, edit, mark and filter
+//                          colour, edit, mark and filter. edit's args are {id, anchor?, side?}: thimble opens the label
+//                          editor in a popover over the page, beside `anchor` {left, top, width, height} (the control
+//                          that asked, in the frame's coordinates) on `side` aside or below, or inside the page's
+//                          top-left corner without one
+//   labelEditorClosed {id, focus}
+//                          page to frame: the editor that the edit call `id` opened closed, `focus` when thimble gave
+//                          the focus back to the frame, which then puts it back on the element that had it when the
+//                          page asked (editLabel's onClose runs after)
 //   labelRefused {op}      frame to page: a label call the bridge refused because the analyst made no gesture in the view
 //   hidden {n, self}       frame to page: how many anchored refs the bridge hides or dims for the label filter, null
 //                          while thimble has not answered for every anchored ref, and whether the page filters its
@@ -134,8 +141,10 @@
     err.thimbleRefused = true
     return Promise.reject(err)
   }
-  // a label change, sent to thimble only during the analyst's gesture; the promise rejects with thimble's reason
-  function labelCall(op, args) {
+  // a label change, sent to thimble only during the analyst's gesture; the promise rejects with thimble's reason.
+  // `closed(focus)` runs when the editor an edit call opened closes
+  var editorClosers = {}
+  function labelCall(op, args, closed) {
     if (!gesture()) {
       post({ type: P + 'labelRefused', op: op })
       return refusal(NO_GESTURE)
@@ -144,8 +153,17 @@
     return new Promise(function (resolve, reject) {
       var id = ++seq
       calls[id] = { resolve: resolve, reject: reject }
+      if (closed) editorClosers[id] = closed
       post({ type: P + 'labelCall', id: id, key: callKey, op: op, args: args })
     })
+  }
+  // where the label editor stands: beside an element of the page, or a rect {left, top, width, height} in the frame's
+  // coordinates (a DOMRect is one); null for anything else
+  function anchorRect(a) {
+    if (!a) return null
+    if (a.nodeType === 1 && typeof a.getBoundingClientRect === 'function') return rectOf(a)
+    var r = { left: Number(a.left), top: Number(a.top), width: Number(a.width), height: Number(a.height) }
+    return isFinite(r.left) && isFinite(r.top) && isFinite(r.width) && isFinite(r.height) && r.width >= 0 && r.height >= 0 ? r : null
   }
   var WAIT_SHOWN_MS = 1000
   var waitBox = null
@@ -360,9 +378,31 @@
     setLabelColour: function (id, value, colour) {
       return labelCall('colour', { id: String(id), value: String(value), colour: String(colour) })
     },
-    /** open thimble's label editor on the label with this id, or on a new label without one */
-    editLabel: function (id) {
-      return labelCall('edit', { id: id == null ? null : String(id) })
+    /** open thimble's label editor on the label with this id, or on a new label without one, in a popover over the page.
+     *  opts.anchor, the element or rect {left, top, width, height} it stands beside (default: inside the page's top-left
+     *  corner); opts.side, 'aside' (the default, to its right, else its left) or 'below'; opts.onClose() runs when the
+     *  editor closes. Closed from inside (Escape, Cancel, Re-run), the focus comes back to the element that had it */
+    editLabel: function (id, opts) {
+      opts = opts || {}
+      var args = { id: id == null ? null : String(id) }
+      var at = anchorRect(opts.anchor)
+      if (at) args.anchor = at
+      if (opts.side === 'aside' || opts.side === 'below') args.side = opts.side
+      var onClose = typeof opts.onClose === 'function' ? opts.onClose : null
+      var had = document.activeElement
+      return labelCall('edit', args, function (focus) {
+        if (focus && had && had !== document.body && document.contains(had) && typeof had.focus === 'function') {
+          try {
+            had.focus({ preventScroll: true })
+          } catch (e) {}
+        }
+        if (!onClose) return
+        try {
+          onClose()
+        } catch (e) {
+          report(e)
+        }
+      })
     },
     newLabel: function () {
       return labelCall('edit', { id: null })
@@ -488,11 +528,16 @@
       if (!c) return
       delete calls[d.id]
       if (d.error) {
+        delete editorClosers[d.id]
         var err = new Error(String(d.error))
         err.name = 'ThimbleRefused'
         err.thimbleRefused = true
         c.reject(err)
       } else c.resolve(true)
+    } else if (d.type === P + 'labelEditorClosed') {
+      var closed = editorClosers[d.id]
+      delete editorClosers[d.id]
+      if (closed) closed(d.focus === true)
     } else if (d.type === P + 'open') {
       last = d.open || {}
       picked = null

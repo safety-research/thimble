@@ -2,7 +2,8 @@
 // a label over files what it marks (Span, Record or File) and its glob, the classifier (Prompt, Regex or Code) with its
 // body, and the classes with colour and highlight switch. Colours and highlights save as they change; the rest is a
 // draft that Re-run (Run for a new label) saves before applying the label (backend concepts.apply_route). Cancel, × or
-// Escape drops the draft. LabelSheet is the same card in a popover on a canvas card (LabelFields, with each class's
+// Escape drops the draft. The card stands at the Labels pane's edge, or in the popover a view or Files opens beside a
+// control (LabelEditor). LabelSheet is the same card in a popover on a canvas card (LabelFields, with each class's
 // count); its draft outlasts the popover (canvas/labelDrafts) and its foot offers Discard and Re-run.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button, Segmented } from '../components/Button'
@@ -33,6 +34,8 @@ interface Props {
   draft?: LabelDraft | null
   /** the row above the head, which then holds the card's × (a new label's Label from prompt, LabelPrompt) */
   lead?: ReactNode
+  /** in a popover (LabelEditor), which is then the card's paper, its place and its dialog */
+  inPopover?: boolean
   onClose: () => void
   /** an apply started for this label, with the run record the server answered (the Labels pane shows its progress) */
   onRun: (id: string, run: ConceptRun) => void
@@ -173,7 +176,10 @@ export function editsOf(k: Concept, d: Draft): string[] {
   return out
 }
 
-export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null, lead, onClose, onRun }: Props) {
+/** The accessible name of a label's edit card. */
+export const labelCardName = (label: Concept | null): string => (label ? `Edit ${label.name}` : 'New label')
+
+export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null, lead, inPopover, onClose, onRun }: Props) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(label, appliesTo, nextFreeColour(labels.all), drafted, usedColours(labels.all)))
   const [saving, setSaving] = useState(false)
   const isNew = label == null
@@ -210,9 +216,9 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
 
   return (
     <div
-      className="label-card overlay"
-      role="dialog"
-      aria-label={isNew ? 'New label' : `Edit ${label!.name}`}
+      className={'label-card' + (inPopover ? ' in-popover' : ' overlay')}
+      role={inPopover ? undefined : 'dialog'}
+      aria-label={inPopover ? undefined : labelCardName(label)}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation()

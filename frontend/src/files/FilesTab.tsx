@@ -308,9 +308,9 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const searchRef = useRef<HTMLInputElement>(null)
   const [findAsk, setFindAsk] = useState<FindAsk>({ mode: 'find', n: 0 })
   // Sidebars (shell/dock.tsx) dock only while the body holds them beside the view or reader at a readable width. A
-  // view draws its own label controls, so its Labels sidebar starts hidden and shows when those controls open a label's
-  // editor; beside a view built without label controls it also shows while a label is on or a label marks the view's
-  // files, so turning the last label off there keeps it. The analyst's hide or show holds for the tab's session, apart
+  // view draws its own label controls, which open the label editor in a popover over the view (ViewPane), so its Labels
+  // sidebar starts hidden; beside a view built without label controls it shows while a label is on or a label marks the
+  // view's files, so turning the last label off there keeps it. The analyst's hide or show holds for the tab's session, apart
   // for views with label controls and views without, so hiding it beside one kind leaves the other's as it was. When it
   // cannot dock it lies over the view's left edge. The File browser's sidebar folds to its show button when it cannot
   // dock.
@@ -613,15 +613,6 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   // what a new label applies to: the files the view in front claims, else the file open in the reader
   const appliesTo = useMemo(() => (shownView ? shownView.claims ?? (shownPath ? [shownPath] : []) : open?.path ? [open.path] : []), [shownView, shownPath, open?.path])
   useViewDefaults(ws, shownView, labels)
-  // a view's label controls open the editor, on a label or on a new one, in the Labels sidebar beside it
-  const editLabel = useCallback(
-    (id: string | null) => {
-      setViewSideChoice(true)
-      setLabelsOpen(true)
-      edit(id ?? 'new')
-    },
-    [setViewSideChoice, setLabelsOpen, edit],
-  )
   const fillNew = useCallback((draft: LabelDraft) => {
     setEditing('new')
     setDrafted(draft)
@@ -700,7 +691,6 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             labels={labels}
             onMode={setMode}
             first={marking ?? undefined}
-            onEditLabel={editLabel}
           />
           {viewSideOpen && labelCard}
         </div>
