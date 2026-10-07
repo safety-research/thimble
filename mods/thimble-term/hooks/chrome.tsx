@@ -154,23 +154,31 @@ export function lineEl(els: El, l: Line, key?: string, wrap = false): RenderElem
   return key ? els.Box({ key, flexDirection: 'row', children: [line] }) : line
 }
 
-/** A panel's header under its path row: the title row (accent, bold; navigation against the right edge), the dim
- *  subtitle when it has facts, then any rows the panel adds (tabs, a search box), then the rule. */
+/** What a view's header gives the panel's title row, which is its path (panel.tsx wayRow: `home › threads › "…"`, the
+ *  current step last, in the accent and bold): the subject's name as the view names it, or the words it draws in its
+ *  place (`line`, a citation's link, `press` what a click on them does, `key` the key of the list that draws them), and
+ *  what stands against R (`right`). A view sets it as it draws (headerEls, setHead); the title row takes it once. */
+export type Head = { title?: string; line?: Line; press?: () => void; key?: string; right?: RenderElement | null }
+let head: Head = {}
+
+export function setHead(h: Head): void {
+  head = h
+}
+
+/** The head the view drawn last set, once: a view that set none gets the step's own words. */
+export function takeHead(): Head {
+  const h = head
+  head = {}
+  return h
+}
+
+/** A panel's header under its title row (Matt, 2026-10-07: one row for the path and the title, `home › Threads`): the
+ *  dim subtitle when it has facts, then any rows the panel adds (tabs, a search box), then the rule. The title, its
+ *  own line and what stands against R go to the title row (setHead). */
 export function headerEls(els: El, o: { title: string; cols: number; right?: RenderElement | null; sub?: Line; titleLine?: Line; more?: RenderElement[]; rule?: boolean }): RenderElement[] {
   const { Box, Text } = els
   const out: RenderElement[] = []
-  const title = o.titleLine ?? [{ s: o.title, fg: ACCENT, b: true }]
-  out.push(
-    o.right ? (
-      <Box key="h-title" flexDirection="row">
-        <Box flexShrink={1}>{lineEl(els, title)}</Box>
-        <Box flexGrow={1} />
-        <Box flexShrink={0}>{o.right}</Box>
-      </Box>
-    ) : (
-      <Box key="h-title" flexDirection="row">{lineEl(els, title, undefined, true)}</Box>
-    ),
-  )
+  setHead({ title: o.title, ...(o.titleLine ? { line: o.titleLine } : {}), ...(o.right ? { right: o.right } : {}) })
   if (o.sub?.length) out.push(<Box key="h-sub">{lineEl(els, o.sub, undefined, true)}</Box>)
   out.push(...(o.more ?? []))
   if (o.rule !== false) out.push(<Text key="h-rule" color={COLORS.rule}>{'─'.repeat(Math.max(1, o.cols))}</Text>)

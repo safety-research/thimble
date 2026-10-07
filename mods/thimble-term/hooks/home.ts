@@ -1,4 +1,4 @@
-// The home panel (/thimble-home, and the path row's first step): one panel listing what this folder's sessions made,
+// The home panel (/thimble-home, and the title row's first step): one panel listing what this folder's sessions made,
 // as thimble's workbench lists them in its tabs: views (built, building, proposed), reports, side threads (those with
 // answers not yet read first), cards grouped by the question that made them, labels with their counts, and the files
 // by folder with what this session read of them. Each is a click away from the panel that opens it. A file in the
@@ -6,14 +6,14 @@
 //
 // This file lays the panel out as styled lines and their hit regions, without `$`; register.tsx gathers the data
 // (homeData), draws the lines in the Client homeview.tsx and acts on a click or a key. It follows the visual system
-// (SPEC.md, section 7, "Home"): one column; the title `Home`; a section heading bold with its count dim in
+// (SPEC.md, section 7, "Home"): one column under the title row's `Home`; a section heading bold with its count dim in
 // parentheses and `N new` in green, a blank row above it; an item's state glyph at A0 and its name at A2, regular,
 // its metadata dim against the right edge and `new` in green there while it is new; card groups and folders that fold
 // with `▸ ▾`, the newest group and the first folder open. Each line starts with the 2-cell margin, where `❯` marks the
 // row the keys chose.
 import type { Line, Seg } from './draw'
 import { lineWidth, share as pct, valueColour, width, wrapRows } from './draw'
-import { ACCENT, FRESH, MARGIN_W, fitTo, headingLine, hintLines, pointed, ruleLine, spread } from './chrome'
+import { FRESH, MARGIN_W, fitTo, headingLine, hintLines, pointed, ruleLine, spread } from './chrome'
 import { COLORS } from './paint'
 import { cutMiddle, quoted } from './lib'
 
@@ -592,14 +592,13 @@ function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void
   if (left > 0) out.push([{ s: '  ' }, dim(`… ${num(left)} more`)], { x0: 2, x1: 2 + width(`… ${num(left)} more`), row: false, act: { op: 'more', sec: sec.id, next: sec.rows[shown.length]!.key }, pick: `more:${sec.id}` })
 }
 
-/** The whole panel below its path row: the title `Home`, the rule, every section, the key hints (`hints`: HOME_HINTS
- *  while the panel holds the keys, else what gives it them). */
+/** The whole panel below its title row (`Home`, the path's one step): the rule, every section, the key hints
+ *  (`hints`: HOME_HINTS while the panel holds the keys, else what gives it them). */
 export function homeLayout(d: HomeData, ui: HomeUi, w: number, hints: readonly string[] = HOME_HINTS): HomeLayout {
   const sections = homeSections(d, ui)
   // the row the keys chose: the one named, else the first
   const first = sections.flatMap(s => s.rows.slice(0, 1).map(r => r.key))[0] ?? ''
   const out = new Lines(ui.pick || first)
-  out.push([{ s: 'Home', fg: ACCENT, b: true }])
   out.push(ruleLine(w))
   const heads: number[] = []
   sections.forEach((sec, i) => {

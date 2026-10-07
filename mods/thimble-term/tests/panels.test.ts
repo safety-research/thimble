@@ -130,7 +130,8 @@ test('a new thread shows the first sentence of its passage, dim; one asked from 
   await pane.unmount()
 })
 
-test("a new thread's passage longer than its subtitle: its first sentence, dim, on one row", async ($, on) => {
+test("a new thread's passage longer than its subtitle: the passage whole above the field, wrapped, in the text color", async ($, on) => {
+  // Matt, 2026-10-07: "keep that thing above the chat so I know what I'm referencing"
   const w = world(on)
   await start($, w)
   const ui = (await $.ui.mount(MESSAGE('m1', 'Most saves came in June, when the agents were busiest on the dse wiki and its board. Few came later.'))) as unknown as M
@@ -138,8 +139,13 @@ test("a new thread's passage longer than its subtitle: its first sentence, dim, 
   await ui.unmount()
   await w.clock.settle()
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  const words = (await pane.find({ type: 'Text', text: /^Most saves came in June, when the agents were busiest on the dse wiki and its board\.$/ })) as { props?: Record<string, unknown> } | undefined
-  expect(words?.props).toMatchObject({ dimColor: true, wrap: 'truncate-end' })
+  const text = shown(await pane.drawn())
+  expect(text).toContain('about "Most saves came in June')
+  // both sentences, the last on the row the first wraps onto
+  expect(text).toContain('Most saves came in June, when the agents were busiest on the dse wiki and its board.')
+  expect(text).toContain('came later.')
+  const last = (await pane.find({ type: 'Text', text: /came later\.$/ })) as { props?: Record<string, unknown> } | undefined
+  expect(last?.props?.dimColor).toBeUndefined()
   await pane.unmount()
 })
 

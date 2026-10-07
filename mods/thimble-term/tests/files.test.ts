@@ -337,7 +337,8 @@ test("a click on the path's `files` step goes back to the file browser, never a 
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
   const way = shown(await pane.find({ key: 'way' }))
-  expect(way).toMatch(/home › citation 4,579 › files(?! ›)/)
+  // the list is the current step, by its title
+  expect(way).toMatch(/home › citation 4,579 › Files(?! ›)/)
   expect(way).not.toContain('README.md')
   expect(await pane.find({ type: 'Client', key: 'm:files-tree' })).toBeDefined()
   await pane.unmount()

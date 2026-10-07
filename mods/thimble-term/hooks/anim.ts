@@ -1,6 +1,6 @@
 // A card's focus: the value a citation or a report's caption names on a card, as the item cardLayout draws for it. Pure.
-import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS } from './draw'
-import type { BarRow, CardData, Cell, Item } from './draw'
+import { MAX_NODES, MAX_TABLE_ROWS, barRows } from './draw'
+import type { CardData, Cell, Item } from './draw'
 import { fmt } from './lib'
 
 /** A value a caption cites, by the names its card uses: a line's series and x, a bar's or a table's row (and a
@@ -37,7 +37,7 @@ export function focusItem(card: CardData, items: readonly Item[], f: Focus): num
       const key = f.row ?? f.x
       if (key === undefined) return -1
       // a label card is a bar card of its counts: its records are the label panel's
-      return ((card.rows ?? []) as BarRow[]).slice(0, MAX_BARS).findIndex(r => same(r.label, key))
+      return barRows(card).rows.findIndex(r => same(r.label, key))
     }
     case 'table': {
       const key = f.row ?? f.x

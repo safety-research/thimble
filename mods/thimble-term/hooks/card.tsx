@@ -21,8 +21,10 @@ import { onPointer, send } from './gestures'
 import type { Target } from './gestures'
 import { COLORS, paintLine } from './paint'
 
-/** `focus`: a mark to light while nothing is hovered, such as the step a story's beat names. */
-type Props = { card: CardData; cols: number; plotRows?: number; debug?: boolean; meta?: CardMeta; pane?: boolean; focus?: Focus }
+/** `focus`: a mark to light while nothing is hovered, such as the step a story's beat names. `clip`: the rows of the
+ *  plot or body drawn, the rest and the label and params rows left out (a side thread's subject, whose `… N more` is
+ *  the drawing's). */
+type Props = { card: CardData; cols: number; plotRows?: number; debug?: boolean; meta?: CardMeta; pane?: boolean; focus?: Focus; clip?: number }
 /** `cols`: the width the hover was set at; after a reflow it is stale. `act`: the param choice or label under the
  *  pointer. */
 type S = { hover: number; act: string; cols: number }
@@ -107,13 +109,15 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   let lay = cardLayout(card, inner, hover, props.plotRows)
   const shown = hover >= 0 ? hover : props.focus ? focusItem(card, lay.items, props.focus) : -1
   if (shown !== hover) lay = cardLayout(card, inner, shown, props.plotRows)
-  const prow = paramRow(card, stale ? '' : st.act)
-  const head = labelHead(card, inner, !stale && st.act.startsWith('label:') ? st.act.slice(6) : '')
+  const clipped = props.clip !== undefined
+  const body = clipped ? lay.lines.slice(0, props.clip) : lay.lines
+  const prow = clipped ? null : paramRow(card, stale ? '' : st.act)
+  const head = clipped ? { lines: [], slugs: [], hots: [] } : labelHead(card, inner, !stale && st.act.startsWith('label:') ? st.act.slice(6) : '')
   // rows of the region: the title and the blank row under it (none in the pane), the body, then the readout row (where
   // the card has marks to point at or a state to say), the label rows, the params row
   const top = pane ? 0 : 2
   const readout = lay.items.length > 0 || Boolean(meta.busy) || Boolean(meta.error)
-  const headTop = top + lay.lines.length + (readout ? 1 : 0)
+  const headTop = top + body.length + (readout ? 1 : 0)
   const prowY = headTop + head.lines.length
   const rowsTall = surface.rows || Infinity
 
@@ -135,7 +139,7 @@ const Card: ClientModule<Props, S> = (props, surface) => {
     const li = ev.y - headTop
     const lhot = li >= 0 && li < head.lines.length ? head.hots[li] : undefined
     const slug = lhot && cx >= lhot.x0 && cx < lhot.x1 ? head.slugs[li] : undefined
-    const i = hot || slug ? -1 : lay.hit(cx, ev.y - top)
+    const i = hot || slug || ev.y - top >= body.length ? -1 : lay.hit(cx, ev.y - top)
     // the title is a hot spot: in inverse under the pointer, a press asks a side thread about the card
     const onTitle = !pane && ev.y === 0 && cx >= 0 && cx < width(cut(card.question, inner))
     const act = hot ? `${hot.param}=${hot.value}` : slug ? `label:${slug}` : onTitle ? 'title' : ''
@@ -190,7 +194,7 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   // the title in bold, then one blank row (in the pane the question is the panel's title)
   if (!pane) rows.push(paintLine(Text, [{ s: cut(card.question, inner), b: true, ...(st.act === 'title' && !stale ? { inv: true } : {}) }]), paintLine(Text, []))
   // the plot or body, directly
-  rows.push(...lay.lines.map(l => paintLine(Text, l)))
+  rows.push(...body.map(l => paintLine(Text, l)))
   // below it: the readout against the right edge, the label rows, the params row
   if (readout) rows.push(paintLine(Text, right ? [{ s: ' '.repeat(Math.max(0, inner - width(right.s))) }, right] : []))
   rows.push(...head.lines.map(l => paintLine(Text, l)))

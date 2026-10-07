@@ -8,7 +8,7 @@ import { cardLayout, cut, placeWords, share } from '../hooks/draw'
 import { CHIP_MAX, chipLabel, citations, clip, cutLine, cutMiddle, dateIn, dateSpans, formatted, itemsRow, labelState, labelStateWords, noteLabelName, noteQuestion, quoted, recordFields, valueIn, width, windowAt } from '../hooks/lib'
 import { chipName, plainCites } from '../hooks/cite'
 import { targetLabel } from '../hooks/gestures'
-import { crumbsWidth, fitCrumbs } from '../hooks/nav'
+import { fitPath, pathWidth } from '../hooks/nav'
 import { hintLines } from '../hooks/chrome'
 import type { BarRow, Cell } from '../hooks/draw'
 import { CELLS, LABEL } from './fixtures'
@@ -243,7 +243,7 @@ test("a table card's numbers take its columns' formats, as the browser's table w
 })
 
 test("the path row's steps are cut at a word", () => {
-  const steps = fitCrumbs(['home', 'threads', '"How many delete events does events.jsonl have on 16 June? One number."', 'citation "I counted 3,898 pages deleted on 16 June"'], 70)
+  const steps = fitPath(['home', 'threads', '"How many delete events does events.jsonl have on 16 June? One number."', 'citation "I counted 3,898 pages deleted on 16 June"'], 70)
   for (const s of steps) if (s && s.endsWith('…')) expect(s).toMatch(/[A-Za-z0-9,"]…$/)
   const words = '"How many delete events does events.jsonl have on 16 June? One number." citation "I counted 3,898 pages deleted on 16 June"'.split(/\s+/)
   // each cut step ends with a whole word of its own
@@ -255,11 +255,11 @@ test('a cut keeps the closing quotation mark of the words it cuts: a path step, 
   expect(cut('card “How many pages in pages.jsonl have "June" in their name?”', 30)).toBe('card “How many pages in…”')
   // too little room for the quoted words: cut as any words are
   expect(cut('documents › "The reviewer\'s claim"', 14)).toBe('documents ›…')
-  const steps = fitCrumbs(['home', 'threads', '"Which line of events.jsonl is the first delete event after the reviewer wrote this?"'], 50)
+  const steps = fitPath(['home', 'threads', '"Which line of events.jsonl is the first delete event after the reviewer wrote this?"'], 50)
   expect(steps.at(-1)).toMatch(/^"Which line of[^"]*…"$/)
   // quoted words inside a step's words, which go on after the closing mark, keep that mark (live check term-fix5, new
   // quirk 10: `… › citation card "How…`)
-  const deep = fitCrumbs(['home', 'documents', '"The reviewer\'s count of 3,898…"', 'citation card "How many saves and deletions does…" output line 1'], 60)
+  const deep = fitPath(['home', 'documents', '"The reviewer\'s count of 3,898…"', 'citation card "How many saves and deletions does…" output line 1'], 60)
   expect(deep.at(-1)).toMatch(/^citation card "How[^"]*…"$/)
   expect(cut('card “How many saves and deletions” output line 1', 20)).toBe('card “How many…”')
 })
@@ -380,10 +380,12 @@ test('key hints wrap at whole hints, never cut; the path fits its room', () => {
   expect(rows).toEqual(['↑↓ to choose · Enter to open', 'Space to fold · b to go back · x to close'])
   expect(hintLines(['x to close'], 40)).toHaveLength(1)
   for (const room of [4, 8, 14, 20, 30]) {
-    const fitted = fitCrumbs(['home', 'files', 'collusion-wiki/labels.jsonl'], room)
-    expect(crumbsWidth(fitted)).toBeLessThanOrEqual(room)
-    expect(fitted[0]).toBe('home')
+    const fitted = fitPath(['home', 'files', 'collusion-wiki/labels.jsonl'], room)
+    expect(pathWidth(fitted)).toBeLessThanOrEqual(room)
+    // the current step stays, cut where it must be
+    expect(fitted.at(-1)).toBeTruthy()
   }
+  for (const room of [14, 20, 30]) expect(fitPath(['home', 'files', 'collusion-wiki/labels.jsonl'], room)[0]).toBe('home')
 })
 
 test("a label's state in words: a run going, a first run stopped part way, none, or a run that ended", () => {

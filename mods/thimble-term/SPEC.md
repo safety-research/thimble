@@ -20,12 +20,15 @@ them. Colors are in `hooks/paint.ts`; `hooks/chrome.tsx` draws the panel's chrom
 
 ### The rules
 
-1. One left edge: the reply's text column (4) in the chat, A0 in a panel; indent only to nest (an item, an output, a child).
-2. Marks hang in a 2-cell margin left of that edge: `❯` on the selected row, `?` or `↳` by a passage.
+1. One left edge: the reply's text column (2, Claude Code's own) in the chat, A0 in a panel; indent only to nest (an item,
+   an output, a child).
+2. Marks hang in a 2-cell margin left of that edge: `❯` on the selected row, `?` or `↳` by a passage; in the chat the
+   margin is the ⏺'s, and a mark takes the ⏺'s cell on the row where both fall.
 3. Thimble's text fills its column, with no fixed measure; cards take the same width as the text.
 4. Every card has a full round border in the rule gray; inside it, its title in bold, a blank row, then its plot or
    body, and everything else (the readout, the label rows, the params, the takeaway) below the plot.
-5. Every panel opens with the path row, its title in the accent color and bold, a dim subtitle, a rule; key hints end it.
+5. Every panel opens with its title row, the path from home with the current step last in the accent color and bold, then
+   a dim subtitle, a rule; key hints end it.
 6. A panel's actions sit at its bottom, after a rule, where their result appears; the title row holds only navigation.
 7. Bold is for titles and headings: panel titles, a card's title, section headings, a card table's header, speakers,
    the model's Markdown.
@@ -73,10 +76,9 @@ The horizontal unit is the cell and the indent step is 2 cells. The vertical uni
 
 | column | holds |
 | --- | --- |
-| 0 | Claude Code's `❯ ⏺ ✻`; the `↳` that starts a `↳` row |
-| 2 | the reply's margin: the `?` of the passage under the pointer, a passage's `↳`; the words of a `↳` row; the toast above the prompt |
-| 4 | the reply's edge: prose, headings, a list's `-`, a card's left border, the footer |
-| 6 | nested: a list item's text, a quote block, a card's content (inside its border and padding) |
+| 0 | Claude Code's `❯ ⏺ ✻`; the reply's margin: the `?` of the passage under the pointer, a passage's `↳`, each in the ⏺'s cell on the row where both fall; the `↳` that starts a `↳` row |
+| 2 | the reply's edge, where Claude Code's own reply text starts: prose, headings, a list's `-`, a card's left border, the footer; the words of a `↳` row; the toast above the prompt |
+| 4 | nested: a list item's text, a quote block, a card's content (inside its border and padding) |
 
 **A panel's columns.** The pane has 1 cell of padding at each side; the margin M is the 2 cells after the left padding;
 the type area runs from A0 to R.
@@ -84,11 +86,11 @@ the type area runs from A0 to R.
 | axis | column | holds |
 | --- | --- | --- |
 | M | the 2 cells left of A0 | the margin: `❯`, a passage's `?` or `↳` |
-| A0 | the type area's first cell | the edge: the path row, title, subtitle, tabs, rules, headings, prose, field labels, a card's border, a state glyph, a fold marker, a tree's guides, the key-hint row |
+| A0 | the type area's first cell | the edge: the title row, subtitle, tabs, rules, headings, prose, field labels, a card's border, a state glyph, a fold marker, a tree's guides, the key-hint row |
 | A2 | A0 + 2 | an item's name after its glyph, marker or guide; a secondary row; nested content (a command's output, a list item's text) |
 | A4 | A0 + 4 | a second level: the name of a folder's file or of an unfolded group's item after its own glyph at A2 |
 | L | the label column's width (its longest label + 2) | the values of label/value rows and fields |
-| R | the type area's last cell | numbers, metadata (dim), the title row's navigation (`earlier  later`) |
+| R | the type area's last cell | numbers, metadata (dim), navigation (`earlier  later`, `show all threads`) |
 
 1. **Axes.** A run that opens a row starts on M, A0, A2, A4, L or a table's column. A tree deeper than A4 goes on with
    guides `├ └ │`, 2 cells a level; the file browser's folders go on 2 cells a level with no guides, as the browser's
@@ -118,7 +120,7 @@ the type area runs from A0 to R.
     actions). A panel has two at most. A rule spans the type area in the rule gray, and no blank row is ever next to it.
 11. **A card** has a full border with round corners in the rule gray and 1 cell of padding: in Ink, a `Box` with
     `borderStyle="round"`, `borderColor` the rule gray and `paddingX={1}`. Its left border sits on the stream's edge
-    (column 4 in the chat, A0 in a panel). Inside: the title row in bold, a blank row, then the plot or body; below the
+    (column 2 in the chat, A0 in a panel). Inside: the title row in bold, a blank row, then the plot or body; below the
     plot, the readout row (the value under the pointer, plain, or what thimble is doing to the card), the label rows,
     the params row and the takeaway. In the card pane the question is the panel's title, so the box starts with the
     plot. In a stream a card's border stands in for blank rows next to it; a document's caption is dim on the row under
@@ -208,7 +210,7 @@ outside this table.
 | `↳` | a side thread was asked here (in a reply's margin, a click opens it); the start of a `↳` row | link in the margin; dim on a row |
 | **navigation** | | |
 | `›` | into: opens one level in (`open ›`, `all documents ›`); between the steps of the path | text; dim between steps |
-| `‹` | back one level (`‹ back`, a slide's `‹ 3 of 9 ›`) | text |
+| `‹` | back one level (a slide's `‹ 3 of 9 ›`) | text |
 | `↗` | opens what it points at: a place in the corpus (the place after it), a label (its name before it) | link |
 | `▸` `▾` | a folded or unfolded group or folder; a click toggles it | text |
 | **data** | | |
@@ -295,26 +297,33 @@ colored is said under each.
 **A panel's header**, the same on every panel:
 
 ```
-  ‹ back  home › files › events.jsonl
-  events.jsonl                                                                  earlier  later
-  jsonl · 19,931 records · lines 201-400 of 19,931
+  home › files › events.jsonl
+  jsonl · 19,931 records · lines 201-400 of 19,931                                    earlier  later
   Table   Transcript   Raw
   ──────────────────────────────────────────────────────────────────────────────────────────────
 ```
 
-- The path row: `‹ back` (only where there is a way back), a gutter, then each step as a lower-case kind word and its
-  name (a click on a step goes back to it; a click on the list a step stands in, such as `files` before a file opened
-  from a citation, goes to that list in its place) (`thread "how many…"`, `citation 5884`, `card "How many pages…"`, `label edit purpose`, `files`,
-  `events.jsonl`), parted by a dim `›`, a long step cut with `…`. A step whose thread has new answers is followed by
-  `new` in green; one whose thread is answering starts with `◌`. On home, at R: `show all threads`, which opens the
-  threads panel, then `N new` in green while answers wait. Every other panel leaves them out (Matt, 2026-10-07: "does
-  'show all threads' really need to be there when you're not in a thread?"): the threads panel is the threads, and on
-  a view, a file, a card, a citation, a label or a document they are not the subject, and home is one click away. The
-  row never wraps: in a narrow pane `show all threads` shortens to `threads` (with `N new`, then alone), so the threads
-  stay one click away, then gives way to the steps, and the steps fold into `…` and are cut to the room left. No key
-  shows all threads.
-- The title row: the subject's name in the accent color and bold; navigation against R. The subtitle under it: the
-  subject's facts, dim, parted by ` · `, with a problem in red. A panel with no facts worth a row has no subtitle.
+- The title row, one row for the path and the title (Matt, 2026-10-07: "If we show Home > Threads (where threads is
+  bold & colored) where home is clickable, we don't need to show < back and home > threads above. can just be one line
+  for title. it already says 'b to go back'"): the steps from home parted by a dim ` › `, each earlier step dim and a
+  click away (a click on a step goes back to it; a click on the list a step stands in, such as `files` before a file
+  opened from a citation, goes to that list in its place), each as a lower-case kind word and its name (`thread "how
+  many…"`, `citation 5884`, `card "How many pages…"`, `edit purpose`, `files`, `events.jsonl`); then the current step,
+  its title in the accent color and bold: a list's title (`home › Threads`, `home › Documents`, `Home` alone on home), a
+  subject by its step's words with its whole name (`home › card "How many pages does each wiki have?"`, `home ›
+  documents › "Agents used the dse wiki…"`, `home › threads › "How many delete events…"` for a thread chosen in the
+  threads panel), a citation's value as its link after `citation` (section 7, "The citation panel"). No `‹ back` and no
+  row of its own for the path: b goes back, and the hint row says so. A step whose thread has new answers is followed by
+  `new` in green; one whose thread is answering starts with `◌`. Navigation stands against R (`◌ loading…` on a view).
+  On home, at R: `show all threads`, which opens the threads panel, then `N new` in green while answers wait. Every
+  other panel leaves them out (Matt, 2026-10-07: "does 'show all threads' really need to be there when you're not in a
+  thread?"): the threads panel is the threads, and on a view, a file, a card, a citation, a label or a document they are
+  not the subject, and home is one click away. The row never wraps: in a narrow pane `show all threads` shortens to
+  `threads` (with `N new`, then alone), so the threads stay one click away, then gives way to the steps; where the path
+  does not fit, the earlier steps shorten first (each to 34 cells, then down to 12, then folded, oldest first, into one
+  `…` after home), then the current step is cut with `…`. No key shows all threads.
+- The subtitle under the title row: the subject's facts, dim, parted by ` · `, with a problem in red. A panel with no
+  facts worth a row has no subtitle.
 - Tabs, where the subject has them: each tab's name with a cell of space at each side, selected or not, the selected one
   inverse, so choosing a tab moves none; the row starts one cell left of A0, so the first tab's left cell hangs in the
   margin and its name starts at A0 with the title.
@@ -325,29 +334,38 @@ colored is said under each.
 **Main's chat:**
 
 ```
-⏺   The dse wiki holds most of the corpus [ card ], and most of its edits came on one day, 18 June.
-    ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-    │ How many pages does each wiki have?                                                                          │
-    │                                                                                                              │
-    │ dse       █████████████████████████████████████████████████████████████████████████████████████████   3,908  │
-    │ probier   ██████████████▎                                                                               601  │
-    │ dorfwiki  ▏                                                                                               2  │
-    │ all  4,579                                                                                                   │
-    │                                                                                                              │
-    │ dse has 3,908 ✓ of the 4,579 ✓ pages, about 85%. probier comes next with 601 ✓.                              │
-    ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-  ↳ The chart counts by the day in each revision's time field.
+⏺ The dse wiki holds most of the corpus [ card ], and most of its edits came on one day, 18 June.
+  ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ How many pages does each wiki have?                                                                            │
+  │                                                                                                                │
+  │ dse       ███████████████████████████████████████████████████████████████████████████████████████████   3,908  │
+  │ probier   ██████████████▎                                                                                 601  │
+  │ dorfwiki  ▏                                                                                                 2  │
+  │ all  4,579                                                                                                     │
+  │                                                                                                                │
+  │ dse has 3,908 ✓ of the 4,579 ✓ pages, about 85%. probier comes next with 601 ✓.                                │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+↳ The chart counts by the day in each revision's time field.
 
-    13 citations · 2 cards  ask about this answer ›
+  13 citations · 2 cards  ask about this answer ›
 
 ↳ thread · "How many delete events are in events.jsonl? One number." · answered · new
 ↳ view · Wiki Pages · built · new
   thimble   3 new cards  open ›
 ```
 
-- Everything of the reply starts on column 4: prose, headings, a list's `-`, a card's border, the footer. A heading is
-  bold, with a blank row above it and none under it, as the model wrote it. A list item's text and a quote block are at
-  6. Prose wraps at the terminal's width, and cards take the same width.
+The same reply's first row under the pointer, and a passage a thread was asked about:
+
+```
+? The dse wiki holds most of the corpus [ card ], and most of its edits came on one day, 18 June.
+↳ Most of the deletions came later.
+```
+
+- Everything of the reply starts on column 2, where Claude Code's own reply text starts after its ⏺ (Matt,
+  2026-10-07: "can we keep the same left indent for thimble content while keeping our ability to show the question
+  mark? we could still indent 2 chars and replace the dot with ? when they overlap"): prose, headings, a list's `-`, a
+  card's border, the footer. A heading is bold, with a blank row above it and none under it, as the model wrote it. A
+  list item's text and a quote block are at 4. Prose wraps at the terminal's width, and cards take the same width.
 - The model's Markdown is drawn as Claude Code draws it: `**bold**` bold, `*italic*` italic, inline code in its code
   color, headings bold.
 - **A chip** is a citation that names only its place, with no words of its own (`[[card:<id>]]`, `[↗](<ref>)`), which
@@ -376,11 +394,12 @@ colored is said under each.
 - The cards a turn added or changed stand under the turn's last reply, each once, in its last state: those a
   `thimble-run` command ran too, a shell loop over several cards included. They, the footer and the `↳` rows are drawn
   again after `thimble --continue` or `--resume`.
-- The margin at column 2: the `?` (blue) of the passage under the pointer (a heading's asks about its whole section, a
-  card's about the card); a blue `↳` beside a passage or a card a thread was asked about (a passage also when the
-  thread was asked about a citation of a value or a place in it; a card also when the thread
-  was asked about a value it shows or a passage of its takeaway, a citation in it), which stays, and a click on it opens
-  that thread in the threads panel.
+- The margin at column 0, the ⏺'s: the `?` (blue) of the passage under the pointer (a heading's asks about its whole
+  section, a card's about the card); a blue `↳` beside a passage or a card a thread was asked about (a passage also
+  when the thread was asked about a citation of a value or a place in it; a card also when the thread was asked about a
+  value it shows or a passage of its takeaway, a citation in it), which stays, and a click on it opens that thread in
+  the threads panel. On the reply's first row the mark takes the ⏺'s cell: the `?` drawn over it under the pointer, a
+  `↳` in its place. A mark never adds indent.
 - The footer, one blank row under the turn's answer (its last part that cites or embeds a card): its facts dim
   (`· N problems` in red), its control after a gutter, no file path. No footer for the prompts thimble-term gives main
   itself.
@@ -455,7 +474,12 @@ colored is said under each.
   chart's label axis sorts them (its `sort`: `-y` by the value high to low, a list, `descending`), A to Z with none, as
   the browser draws the chart. The bars are in
   the first hue (or their value's hue); the bar under the pointer turns the text color and its label is inverse. A part
-  of a whole runs on a `─` track to the whole. The total has its own row (`all  4,579`).
+  of a whole runs on a `─` track to the whole. The total has its own row (`all  4,579`). A chart with a color field
+  (two series or more) has one row per label, its series stacked on it in their hues in the data's order, the label's
+  total against the right edge, and its key on a row under the bars (`● page saved  ● page deleted`); the readout names
+  the part under the pointer and its series (`24 May · page deleted  14 events`). Labels that are timestamps read as the
+  browser's date axis writes them, all in one form: `24 May`, the time only when one is not midnight (`24 May 12:30`),
+  the year only when they span more than one, never an ISO stamp.
 - A line chart: y labels right-aligned in a column, axes in the rule gray, x labels dim at the ends and the middle, a
   legend row of `● series` entries; the pointer's column `┊` with its readout on the readout row.
 - A table: the column names bold, a `─` rule under each name as wide as its column, the rows right under it; numbers
@@ -482,8 +506,7 @@ colored is said under each.
 **Home:**
 
 ```
-  home                                                                          show all threads  1 new
-  Home
+  Home                                                                          show all threads  1 new
   ──────────────────────────────────────────────────────────────────────────────────────────────
   Views (1)
   ● Wiki Pages                                                                     pages.jsonl  new
@@ -513,7 +536,7 @@ colored is said under each.
   ↑↓ to choose · Enter to open · x to close
 ```
 
-- One layout, a single column. The title is `Home` alone.
+- One layout, a single column. The title row is `Home` alone, the path's one step.
 - A section heading: its name bold, its count dim in parentheses, `N new` in green after it; a blank row above it; a
   click on it opens the section's own panel. A section shows its first five items, then `… N more` (never for one
   row). An empty section shows `none`.
@@ -545,8 +568,7 @@ colored is said under each.
 **The threads panel** (what `show all threads` opens, and where a thread opens):
 
 ```
-  ‹ back  home › threads › "How many delete events…"
-  Threads
+  home › threads › "How many delete events are in events.jsonl? One number."
   2 threads · 1 new
   ──────────────────────────────────────────────────────────────────────────────────────────────
   main
@@ -555,6 +577,10 @@ colored is said under each.
   └ "Which wiki got the most revisions on 18 June, and from how many labels?"
     dse got the most revisions on 18 June: 5,884 of the 6,543.
   ──────────────────────────────────────────────────────────────────────────────────────────────
+  about events.jsonl line 12
+     11  {"event": "save", "page": "Welcome", "ts": "2026-06-16T08:59:58Z"}
+     12  {"event": "delete", "page": "Probe 1", "ts": "2026-06-16T09:00:02Z"}
+     13  {"event": "delete", "page": "Probe 2", "ts": "2026-06-16T09:00:05Z"}
   "How many delete events are in events.jsonl? One number."
   There are 5,217 delete events in events.jsonl.
 
@@ -567,8 +593,8 @@ colored is said under each.
   quotation marks; its secondary row is the first line of its latest answer, dim (`stopped` dim for a stop, the
   analyst's or the end of the Claude Code session; a failure `×` in red; before its answer is read, only what its
   record says, never `answered`); `N questions` dim at R when there is more than one.
-- The selected thread (`❯`, accent) shows under the second rule: what it is about (named as home names it), its
-  questions and answers, drawn as main's chat draws a reply, `stop` while it answers, then, a blank row under the
+- The selected thread (`❯`, accent) shows under the second rule: what it is about (named as home names it), dim, then
+  the thing itself (its subject, below), then its questions and answers, drawn as main's chat draws a reply, `stop` while it answers, then, a blank row under the
   answer, the field for the next question, its placeholder dim (`ask a follow-up question`); Enter's word is `ask`.
   Once its run ended with an answer, `hand back to main` (h, named in the hint row) stands where `stop` stood: it sends
   main `From thread "<question>": <answer>` as the analyst's message (`thimble act hand-back`), which main answers as
@@ -576,19 +602,25 @@ colored is said under each.
   1-9 open the first nine threads. A thread's answer is its first reply (`reply_in_thread`) or its run's end: what its
   fork writes after the reply, as it makes a card, is its working and is not drawn, and two texts a tool call parts are
   two paragraphs. The cards the thread made stand under its answer, each in its frame, as under main's reply.
-- A new thread (one with no question yet): `about <what>` as its dim subtitle, the first sentence of its passage dim on
-  one row, then the question's field alone, its placeholder dim. `<what>` is a card by its question (`card "…"`), a
+- A new thread (one with no question yet): `about <what>` as its dim subtitle, its subject (below), then the question's
+  field alone, its placeholder dim. `<what>` is a card by its question (`card "…"`), a
   citation's words in quotation marks (a value alone, `4579`, as it shows; a chip by its place in full words, which
   no tip names here: `card "How many pages…"`, `agent-chat.jsonl line 2`), a passage's words in quotation marks, or `this answer` for a whole answer (its footer's `ask about this
   answer ›`), which the thread keeps. The field is Claude Code's Input, one row that shows the start of a long question:
   no hook scrolls it to the cursor, and its placeholder is drawn dim with the terminal's reset, which drops the panel's
   background behind it in a light theme.
+- A thread's subject, the thing it is about, stands above its chat and its field, in a new thread and in the thread as
+  its chat grows (Matt, 2026-10-07: "keep that thing above the chat so I know what I'm referencing"): a card in its
+  frame (section 2, rule 11), a value the thread was asked about lit on it; a file's cited line with up to two lines on
+  each side, as the citation panel draws lines (the cited one in the text color, the value or the whole line on the
+  selection background, the others dim, their numbers in a dim column at A2); a passage or a quote as its words,
+  wrapped, a heading bold, unless `about` holds them whole. At most 6 rows of it (a card's plot or body, the rows under
+  it then left out), then `… N more` dim, which shows it whole; never `… 1 more`.
 
 **The citation panel:**
 
 ```
-  ‹ back  home › citation 14591
-  14591
+  home › citation 14591
   found in the command's output, line 1
   ──────────────────────────────────────────────────────────────────────────────────────────────
   from    a command's output · line 1
@@ -601,12 +633,12 @@ colored is said under each.
   a to ask · b to go back · x to close
 ```
 
-- The title is the cited value, bold, in blue and underlined (a link to its place, in place of the accent), `◌` after
-  it while it is checked; red, with a red `×`, when it is not at its place. A citation in a card's takeaway takes the
+- The title, the title row's current step after `citation` (in the accent and bold), is the cited value, bold, in blue
+  and underlined (a link to its place, in place of the accent), `◌` after it while it is checked; red, with a red `×`, when it is not at its place. A citation in a card's takeaway takes the
   card's links check as the chat does: `◌` while it runs, `✓` and `, and a script got the same number` once it ran, a
   red `×` when it got another value. A citation with no value is titled by its place in words, and then has no `from`
   row and no subtitle while its place is there (`not found` and why when it is not), so the place is named once; its
-  `source` marks its chip in the sentence (blue, `[ agent-chat.jsonl line 2 ]`), and its step in the path row is its
+  `source` marks its chip in the sentence (blue, `[ agent-chat.jsonl line 2 ]`), and its step on the title row is its
   chip's words (`citation agent-chat.jsonl line 2`). Under a `from` row, which names the place, a citation found says `found` alone (then what thimble's
   links check says). Any other citation's subtitle is its status in plain words (section 5) and
   why for a problem.
@@ -634,7 +666,7 @@ colored is said under each.
 **The views pane:** `N views · N built`; one row per view, newest first: its glyph, its name, the files it claims dim
 at R, `new` in green until a built one is opened.
 
-**A view:** the path row, the view's name as the title, the facts its program gives as the subtitle, the rule; then
+**A view:** the title row, the view's name its current step, the facts its program gives as the subtitle, the rule; then
 the rows its program draws (`view.term.js` on the terminal view kit, docs/terminal-views.md), with their margin; then
 the hint row, the keys the program binds and `b to go back · x to close`, on the rows it needs where it is longer than
 the panel is wide (whole hints on each row; the program's rows are fewer by them), so no key it binds goes unnamed. The
@@ -649,8 +681,7 @@ typing, every key. A view built in browser mode is one line that says so, and ho
 **The file browser**, after the browser's Files (`frontend/src/files`: its tree, its search, its reader's modes):
 
 ```
-  ‹ back  home › files
-  Files
+  home › Files
   7 files · 1 label on
   ──────────────────────────────────────────────────────────────────────────────────────────────
       name                                                                       type       size
@@ -701,8 +732,8 @@ typing, every key. A view built in browser mode is one line that says so, and ho
   that mode: a transcript's turns one row each (its clock, its speaker bold, its words after a gutter), a table's column
   names and first rows, text wrapped, lines as the file holds them, a database's tables with their rows at R; a
   matching line's file from that line, wrapped, the line lit.
-- A file: path `home › files › labels.jsonl`, title its name, subtitle its type (as the file browser's), its records
-  (a CSV file's `rows`) and the lines shown, `earlier  later` at R; the tabs of the modes it reads in, as the browser's
+- A file: its title row `home › files › labels.jsonl`, its name the current step; subtitle its type (as the file
+  browser's), its records (a CSV file's `rows`) and the lines shown, `earlier  later` at R; the tabs of the modes it reads in, as the browser's
   Files offers them, and it opens in the best by the browser's scores (`frontend/src/files/views/registry.ts`): a
   transcript the sniff is sure of, then a text file, then records that share their keys or a CSV file as a table, else
   Raw. The chosen record (a citation's, a click's) is on the selection background or `❯` in the accent, with its place
@@ -745,7 +776,7 @@ typing, every key. A view built in browser mode is one line that says so, and ho
 **The label panel**, as Matt laid it out, after the browser's label editor (`frontend/src/files/LabelCard.tsx`):
 
 ```
-  ‹ back  home › labels › edit purpose
+  home › labels › edit purpose
   name:      ● edit purpose
   type:      prompt  regex  code
   scope:     revisions.jsonl                                                     14,591 records
@@ -818,7 +849,7 @@ typing, every key. A view built in browser mode is one line that says so, and ho
   counts for a label whose first run never ended.
 
 **Documents:** the documents list (`home › documents`) has one row per document, `◌` while its writer writes, `●`
-written, its title, its kind dim at R, at most 40. **A document:** the title in the accent and bold, wrapped; while its
+written, its title, its kind dim at R, at most 40. **A document:** its title in quotation marks the title row's current step (`home › documents › "…"`), in the accent and bold, cut with `…` where the row ends; while its
 writer writes, `◌ writing · N tool calls · <its latest words>`. A report: `Contents` as a bold heading, the sections
 with a heading numbered in a dim column at A0, each a click or a digit away (an opening section with no heading is not
 listed, and starts with its words); then each section drawn as main's chat draws a reply, at A0: its heading bold, its
@@ -872,8 +903,8 @@ session):
 8. Columns are parted by 2 spaces or more.
 9. No background but the panel's, the selection's and the tip's; no inverse but on the selected tab and under the pointer.
 10. No prose is cut at a fixed measure.
-11. Every panel starts with the path row and a bold title in the accent (the citation panel's is a blue link), and ends
-    with its key-hint row.
+11. Every panel starts with its one title row, the path with its current step bold in the accent (the citation panel's
+    value a blue link), and ends with its key-hint row; no `‹ back`.
 12. Every non-ASCII character thimble-term draws, outside the corpus's and the model's words, is in section 5's table.
 13. A right-click opens no menu.
 14. No centered row.

@@ -14,6 +14,7 @@ import { cid, citations, clip, labelRef, noteDocPlace, noteLabelName, noteQuesti
 import type { Citation } from './lib'
 import { agentsOf, cellOf, cellsOf, chatOf, docUnits, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
 import { classColors, labelArgs, setLabelGone } from './labels'
+import { fileRef } from './files'
 import { keepSeen, keptSeen } from './kept'
 import { NAV_EMPTY, backTarget, moved, nextTrail, withBack } from './nav'
 import { signalEnd, withSignal } from './signal'
@@ -434,6 +435,9 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
     case 'agent':
       if (p.thread) await readThread(cx, p.thread)
       return
+    case 'ask':
+      await loadSubject(cx, p.anchor ?? '', p.target?.kind === 'card' ? (p.target.cardId ?? '') : '')
+      return
     case 'thread':
     case 'threads':
       // the tree shows each thread's latest answer: every thread's chat is read (from where the last read stopped)
@@ -442,16 +446,34 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
       // the one shown, though the list may not hold it yet (one just asked)
       if (p.view === 'thread' && p.thread && !(await cx.threads()).slice(-THREADS_READ).some(t => t.id === p.thread)) await readThread(cx, p.thread)
       if (p.view === 'thread' && p.thread && (await showingThread(cx, p.thread))) await markSeen(cx, p.thread)
-      // the cards the shown thread made, drawn under its answers
+      // the cards the shown thread made, drawn under its answers, and what it is about, drawn above them
       if (p.view === 'thread' && p.thread) {
         const tt = await cx.thread(p.thread)
         const ids = tt?.events.length ? [...new Set(threadOf(tt.meta, tt.events).turns.flatMap(t => t.cards ?? []))] : []
         if (ids.length) await loadCards(cx, ids)
+        const row = (await cx.threads()).find(t => t.id === p.thread)
+        if (row) await loadSubject(cx, row.anchor)
       }
       return
     default:
       await loaders.get(p.view)?.(cx, p)
   }
+}
+
+/** The place a side thread is about (its anchor, `card` a card asked about), as the panel shows it above the thread's
+ *  chat (panel.tsx subjectEls), read: the card, or the cited lines of a file. */
+async function loadSubject(cx: Ctx, anchor: string, card = ''): Promise<void> {
+  const a = (anchor ?? '').split(',')[0] ?? ''
+  const id = card || /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(a)?.[1] || ''
+  if (id) return void (await loadCards(cx, [id]))
+  if (subjectFile(a)) await resolveCitations(cx, [{ raw: `[[${a}]]`, ref: a, display: null }])
+}
+
+/** Whether a thread's anchor is a line or an item of a file of the folder, whose lines its subject shows. */
+export function subjectFile(anchor: string): boolean {
+  if (!anchor || /^[a-z]+:/i.test(anchor)) return false
+  const f = fileRef(anchor)
+  return Boolean(f && (f.line !== undefined || f.item !== undefined))
 }
 
 /** The reads of a panel view drawn by a module of its own (filesview.tsx: the file browser and a file), by its name. */

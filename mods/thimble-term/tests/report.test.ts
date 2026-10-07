@@ -261,14 +261,14 @@ test('comments stand under the passages they are on: the check\'s name and hue, 
   await openReport($, w)
   const pane = await look($)
   const rows = await screen(pane)
-  // the subtitle counts them; the resolved one and the check that is off are not shown
-  expect(rows[2]).toBe('   4 open comments · 1 resolved')
+  // the subtitle, under the title row, counts them; the resolved one and the check that is off are not shown
+  expect(rows[1]).toBe('   4 open comments · 1 resolved')
   expect(rows.join('\n')).not.toContain('Found on the card.')
   expect(rows.join('\n')).not.toContain('README.md line 3 says four wikis.')
   // the title's comment right under the header's rule
-  expect(rows[3]!.trim()).toMatch(/^─+$/)
-  expect(rows[4]).toMatch(/^ {5}● Judgment calls +check$/)
-  expect(rows[5]).toBe('       The title claims a relay; the report shows saves, not messages passed on.')
+  expect(rows[2]!.trim()).toMatch(/^─+$/)
+  expect(rows[3]).toMatch(/^ {5}● Judgment calls +check$/)
+  expect(rows[4]).toBe('       The title claims a relay; the report shows saves, not messages passed on.')
   // the check's comment under its sentence's paragraph, before the paragraph's card
   const para = rowOf(rows, 'The corpus is an export of four wikis')
   const c1 = rowOf(rows, 'The card counts 4,579 pages')
@@ -325,7 +325,7 @@ test('↑↓ choose a comment (`❯`, the accent), its chips under it; r resolve
   await w.clock.advance(1100)
   pane = await look($)
   rows = await screen(pane)
-  expect(rows[2]).toBe('   3 open comments · 2 resolved')
+  expect(rows[1]).toBe('   3 open comments · 2 resolved')
   expect(rows.join('\n')).not.toContain('The card counts 4,579 pages')
   expect(rows[rows.findIndex(r => r.startsWith(' ❯'))]).toMatch(/● Claude +comment$/)
   await pane.unmount()
@@ -394,7 +394,7 @@ test('while a check runs on the document its subtitle says so', async ($, on) =>
   await start($, w)
   await openReport($, w)
   const pane = await look($)
-  expect((await screen(pane))[2]).toBe('   4 open comments · 1 resolved · ◌ Judgment calls checking')
+  expect((await screen(pane))[1]).toBe('   4 open comments · 1 resolved · ◌ Judgment calls checking')
   await pane.unmount()
 })
 
@@ -409,7 +409,7 @@ test('e edits the report as Markdown, its cards as their lines; a save sends the
   let pane = await look($)
   let rows = await screen(pane)
   expect(rows[0]).toMatch(/home › documents › "Agents used the dse wiki[^"]*" · edit$/)
-  expect(rows[2]).toBe('   editing as Markdown · a card is its line ![caption](card:<id>)')
+  expect(rows[1]).toBe('   editing as Markdown · a card is its line ![caption](card:<id>)')
   const editor = rowOf(rows, '# Agents used the dse wiki as a relay')
   expect(rows[editor - 1]).toMatch(/^ {3}╭─+╮$/)
   expect(rows.slice(editor, editor + 9).map(r => r.replace(/^ {3}│ /, '').replace(/ *│$/, ''))).toEqual([
@@ -430,7 +430,7 @@ test('e edits the report as Markdown, its cards as their lines; a save sends the
   await pane.unmount()
   pane = await look($)
   rows = await screen(pane)
-  expect(rows[2]).toContain('unsaved edits')
+  expect(rows[1]).toContain('unsaved edits')
   expect(shown(await pane.find({ key: 'h-hints' }))).toBe('ctrl+s or s to save · d to discard · b to go back · x to close')
   await pane.unmount()
   await hotkey($, w, 'save')
@@ -526,7 +526,8 @@ test('the report with its comments at 120 columns, a comment chosen, and its edi
   // every row within the pane's 120 columns; the type area's edge, A0, at column 3 after the pane's padding and the
   // margin; the chosen comment's `❯` in the margin; the editor's border as wide as the rules
   for (const rows of [read, chosen, edit]) expect(rows.every(r => wide(r) <= 120)).toBe(true)
-  expect(read[1]).toBe('   Agents used the dse wiki as a relay')
+  // one title row: the path, the document last in the accent and bold
+  expect(read[0]).toBe('   home › documents › "Agents used the dse wiki as a relay"')
   expect(chosen.filter(r => r.startsWith(' ❯'))).toEqual([expect.stringMatching(/^ ❯ {3}● Judgment calls {80,}check$/)])
   const rule = edit.find(r => /^ {3}─+$/.test(r))!
   expect(edit.find(r => /^ {3}╭─+╮$/.test(r))!.length).toBe(rule.length)
