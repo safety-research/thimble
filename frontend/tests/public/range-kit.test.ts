@@ -13,7 +13,8 @@ import { afterEach, describe, expect, test } from 'vitest'
 const APP = path.resolve(__dirname, '../../../backend/app')
 const read = (n: string) => readFileSync(path.join(APP, n), 'utf8')
 const script = (js: string) => `<script>${js.replace(/<\/script/gi, '<\\/script')}</script>`
-const KIT = script(read('viewer_bridge.js')) + script(read('viewer_colour.js')) + script(read('viewer_range.js'))
+// the kit as views.frame_document loads it: the bridge, the order new values take the palette in, Color by and the range
+const KIT = script(read('viewer_bridge.js')) + script(`window.__thimbleLabelOrder = ${read('label_order.json')}`) + script(read('viewer_colour.js')) + script(read('viewer_range.js'))
 
 type Msg = { type: string; [k: string]: unknown }
 let dom: JSDOM

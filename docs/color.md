@@ -76,7 +76,7 @@ load()
 | option | what it is |
 |---|---|
 | `mount` | an element or a selector in the view's top row. The control fills it and takes the row's free width. |
-| `fields` | the view's own fields it can color by, in menu order: `{name, title, description?, values?, value?}`. `name` is the field as the records hold it. `description` says what the field is, on its chips' hover and its menu row. `values` fixes the order of the values and their colors. A value given as `{name, colour}` takes the label palette's color `colour` (1 to 12), for example so that two values that often sit side by side do not take two blues; `{name, meaning}` says what the value means, on its chip's hover. `value(record)` gives a record's value when it is not `record[name]`. |
+| `fields` | the view's own fields it can color by, in menu order: `{name, title, description?, values?, value?}`. `name` is the field as the records hold it. `description` says what the field is, on its chips' hover and its menu row. `values` fixes the order of the values and their colors. A value given as `{name, colour}` takes the label palette's color `colour` (1 to 12: 1 blue, 2 orange, 3 green, 4 sky, 5 gold, 6 teal, 7 brown, 8 navy, 9 grass, 10 cerulean, 11 chestnut, 12 cyan), for example so that two values that often sit side by side do not take two blues; `{name, meaning}` says what the value means, on its chip's hover. `value(record)` gives a record's value when it is not `record[name]`. |
 | `initial` | the field chosen before the analyst picks one; the first field by default |
 | `chips` | `'highlight'` (the default) dims the records of a value turned off; `'filter'` hides them |
 | `strip` | the list that gets the tracks: an element, a selector, or `true` for the page |
@@ -199,8 +199,10 @@ for a record the label does not mark.
   field chosen last is the color.
 - A field's values take the label palette's colors: the declared `values` in their order, each in the color it
   names or else the next free one, then the others the first time they show, the most frequent first. A declared
-  value always has its declared color; another value keeps its color after it first shows. The palette's first five
-  colors are five hues, blue, orange, green, gold and teal, with no second blue among them, in Dark as well.
+  value always has its declared color; another value keeps its color after it first shows. Free colors go in the
+  order new values take them everywhere in thimble: blue, orange, green, gold, teal, brown, sky, then navy, grass,
+  cerulean, chestnut and cyan, so the first five are five hues with no second blue among them, in Dark as well. A
+  color's number is its place in the palette, so `colour: 4` is always sky, whatever the order.
 - A value turned off is hidden (`chips: 'filter'`) or dimmed (`'highlight'`) wherever its records show on the page.
   A page that leaves those records out itself, as the reader above does, loses nothing.
 - What a label's values mean comes from thimble itself: the control asks with `thimble.fetch({$thimble: 'label',

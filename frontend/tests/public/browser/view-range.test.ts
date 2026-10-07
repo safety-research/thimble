@@ -19,7 +19,7 @@ import { bundle, cleanup, FRONTEND, launch, ORIGIN, src } from './page.ts'
 const APP = path.join(FRONTEND, '..', 'backend', 'app')
 const read = (name: string) => readFileSync(path.join(APP, name), 'utf8')
 const inline = (js: string) => js.replace(/<\/script/g, '<\\/script')
-const KIT = `<script>${inline(read('viewer_bridge.js'))}</script><script>${inline(read('viewer_colour.js'))}</script><script>${inline(read('viewer_range.js'))}</script><style>${read('viewer_kit.css')}</style>`
+const KIT = `<script>${inline(read('viewer_bridge.js'))}</script><script>window.__thimbleLabelOrder = ${read('label_order.json')}</script><script>${inline(read('viewer_colour.js'))}</script><script>${inline(read('viewer_range.js'))}</script><style>${read('viewer_kit.css')}</style>`
 const TOKENS =
   ':root{--label-1:#025ac3;--label-2:#d0750a;--label-3:#08632f;--label-none:#a09c93;--ink-rgb:27,26,24;--surface-card:#fffdf8;' +
   '--text-primary:#000;--text-secondary:#4a4844;--text-tertiary:#726f69;--accent:#5135ff;--radius-chip:4px;--radius-ui:6px;' +

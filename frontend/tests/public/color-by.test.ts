@@ -42,7 +42,8 @@ const label: Concept = {
 describe('the chips of a choice', () => {
   test("a key's commonest values take the palette, the rest one Other, and the records with none their own", () => {
     const chips = keyChips(key('type', 14, 3, 7))
-    expect(chips.slice(0, 12).map((c) => c.color)).toEqual(Array.from({ length: 12 }, (_, i) => `var(--label-${i + 1})`))
+    // in the order new values take the palette's places: sky (4) after the first five, so they hold no second blue
+    expect(chips.slice(0, 12).map((c) => c.color)).toEqual([1, 2, 3, 5, 6, 7, 4, 8, 9, 10, 11, 12].map((n) => `var(--label-${n})`))
     expect(chips[12]).toMatchObject({
       id: OTHER,
       name: 'Other',

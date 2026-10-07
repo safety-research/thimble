@@ -59,6 +59,7 @@ from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from . import capture, cite, concept_scan, config, corpus, labels_store, ledger, records, refs
+from .kernel_thimble import LABEL_ORDER, palette_from
 from .ledger import append_jsonl, append_jsonl_many, atomic_write_text, read_json
 
 log = logging.getLogger("thimble.concepts")
@@ -259,25 +260,26 @@ def classes_of(labels: list[str], stored: Any) -> list[dict]:
 
 
 def own_colour(want: int, taken: set[int]) -> int:
-    """`want`, or the first palette colour after it that no other class of the label has (`taken`); `want` itself when
-    every colour is taken or it is the grey."""
+    """`want`, or the first palette color after it in LABEL_ORDER that no other class of the label has (`taken`); `want`
+    itself when every color is taken or it is the gray."""
     if not want or want not in taken:
         return want
-    return next((m for m in ((want - 1 + j) % PALETTE + 1 for j in range(1, PALETTE)) if m not in taken), want)
+    return next((m for m in palette_from(want)[1:] if m not in taken), want)
 
 
 def free_colour(start: int, used: set[int]) -> int | None:
-    """The first palette colour from `start` on, round the palette, that `used` does not hold; None when it holds every
-    one."""
-    return next((m for m in ((start - 1 + j) % PALETTE + 1 for j in range(PALETTE)) if m not in used), None)
+    """The first palette color from `start` on, in LABEL_ORDER and round it, that `used` does not hold; None when it
+    holds every one."""
+    return next((m for m in palette_from(start) if m not in used), None)
 
 
 def fill_colours(concepts: list[dict]) -> list[dict]:
-    """Give every class without a colour one, in place, and return the list. While a palette colour is free, one no class
-    of any label has, a label's first class takes the first free one; when none is free, the colours in turn. A further
-    class takes the free colour, else any, that looks most unlike its label's colours (kernel_thimble.most_distinct). A
-    negative class takes the grey, and a label's classes do not repeat a colour while one is free (own_colour)."""
-    from .kernel_thimble import most_distinct  # noqa: PLC0415
+    """Give every class without a color one, in place, and return the list, taking the palette's places in LABEL_ORDER
+    (blue, orange, green, gold, teal, brown, sky, ...). While a color is free, one no class of any label has, a label's
+    first class takes the first free one; when none is free, the colors in turn. A further class, i places after the
+    first, takes the first free color from the one i places after the first class's, else that one, as the label
+    editor's draftClasses does. A negative class takes the gray, and a label's classes do not repeat a color while one
+    is free (own_colour). The mirror in the kernel is kernel_thimble._fill_colours."""
     used = {c["color"] for x in concepts for c in x.get("classes") or [] if c["color"]}
     k = 0
     for concept in concepts:
@@ -286,17 +288,17 @@ def fill_colours(concepts: list[dict]) -> list[dict]:
             continue
         n = len(classes)
         if classes[0]["color"] is None:
-            classes[0]["color"] = free_colour(1, used)
+            classes[0]["color"] = free_colour(LABEL_ORDER[0], used)
             if classes[0]["color"] is None:
-                classes[0]["color"] = k % PALETTE + 1
+                classes[0]["color"] = LABEL_ORDER[k % PALETTE]
                 k += 1
             used.add(classes[0]["color"])
-        base = classes[0]["color"] or 1
+        base = classes[0]["color"] or LABEL_ORDER[0]
         taken = {base} if classes[0]["color"] else set()
         for i, c in enumerate(classes[1:], 1):
             if c["color"] is None:
-                mine = [m for m in range(1, PALETTE + 1) if m not in taken]
-                c["color"] = 0 if is_negative(c["name"], i, n) else most_distinct(taken, [m for m in mine if m not in used] or mine or [base])
+                at = palette_from(base)[i % PALETTE]
+                c["color"] = 0 if is_negative(c["name"], i, n) else (free_colour(at, used | taken) or at)
             c["color"] = own_colour(c["color"], taken)
             if c["color"]:
                 taken.add(c["color"])

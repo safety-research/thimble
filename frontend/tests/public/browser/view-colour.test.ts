@@ -16,7 +16,8 @@ const APP = path.join(FRONTEND, '..', 'backend', 'app')
 const read = (name: string) => readFileSync(path.join(APP, name), 'utf8')
 const inline = (js: string) => js.replace(/<\/script/g, '<\\/script')
 const BRIDGE = inline(read('viewer_bridge.js'))
-const COLOUR = inline(read('viewer_colour.js'))
+// the kit's Color by, after the order new values take the palette in, which views.frame_document puts before it
+const COLOUR = `window.__thimbleLabelOrder = ${read('label_order.json')}\n` + inline(read('viewer_colour.js'))
 const KIT = read('viewer_kit.css')
 const TOKENS =
   ':root{--label-1:#025ac3;--label-2:#d0750a;--label-3:#08632f;--label-none:#a09c93;--ink-rgb:27,26,24;--surface-card:#fffdf8;' +

@@ -15,7 +15,8 @@ import { colourScript } from '../../src/files/ViewerFrame.tsx'
 
 const APP = path.resolve(__dirname, '../../../backend/app')
 const BRIDGE = readFileSync(path.join(APP, 'viewer_bridge.js'), 'utf8')
-const COLOUR = readFileSync(path.join(APP, 'viewer_colour.js'), 'utf8')
+// the kit's Color by, after the order new values take the palette in, which views.frame_document puts before it
+const COLOUR = `window.__thimbleLabelOrder = ${readFileSync(path.join(APP, 'label_order.json'), 'utf8')}\n` + readFileSync(path.join(APP, 'viewer_colour.js'), 'utf8')
 const script = (js: string) => `<script>${js.replace(/<\/script/gi, '<\\/script')}</script>`
 
 type Msg = { type: string; [k: string]: unknown }
@@ -349,6 +350,26 @@ describe('a declared value that names its colour', () => {
     // jsdom resolves no CSS variable, so a colour reads as the palette token it is
     expect(['Text only', 'With links', 'Quote', 'Other'].map((v) => c.colourOf(v))).toEqual(['var(--label-1)', 'var(--label-6)', 'var(--label-2)', 'var(--label-3)'])
     expect(chips().map((x) => x[0])).toEqual(['Text only', 'With links', 'Quote', 'Other'])
+  })
+})
+
+describe("a field's values without a colour of their own", () => {
+  test('take the palette in the order new values take it, so the first five hold no second blue', async () => {
+    await load()
+    // the page's own records say the first two, the commonest, whichever counts the control reads first
+    const values = ['Text only', 'With links', 'c', 'd', 'e', 'f', 'g', 'h']
+    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }] })
+    c.counts(Object.fromEntries(values.map((v, i) => [v, 100 - i])))
+    await wait()
+    expect(values.map((v) => c.colourOf(v))).toEqual([1, 2, 3, 5, 6, 7, 4, 8].map((n) => `var(--label-${n})`))
+  })
+
+  test('take the places in that order around the colours declared values name, and a named place is its hue', async () => {
+    await load()
+    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['a', 'b', { name: 'c', colour: 4 }, 'd', 'e'] }] })
+    c.counts({ a: 1, b: 1, c: 1, d: 1, e: 1 })
+    await wait()
+    expect(['a', 'b', 'c', 'd', 'e'].map((v) => c.colourOf(v))).toEqual([1, 2, 4, 3, 5].map((n) => `var(--label-${n})`))
   })
 })
 

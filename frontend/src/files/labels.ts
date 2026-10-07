@@ -2,6 +2,7 @@
 // stripes a file row carries, the marks over the columns of the labels that are on and the focused one, a record's
 // gutter cells and marks, the marks a custom view's records take, and a text cut into segments at its spans. A class's
 // colour is an index into the label palette, --label-1..LABEL_COLOURS; 0 is --label-none, the grey of "no match".
+import labelOrder from '../../../backend/app/label_order.json'
 import { recordKey, recordOf } from '../lib/refs'
 import type { Concept, ConceptPatch, ConceptRun, ConceptUnit, LabelClass, LabelDraft, LabelMarks, LabelRow } from '../lib/types'
 
@@ -35,6 +36,18 @@ export const globPatterns = (glob: string | null | undefined): string[] => (glob
 
 /** How many colours the label palette has, --label-1..12 (tokens.css; the server's concepts.PALETTE). */
 export const LABEL_COLOURS = 12
+
+/** The order new values take the palette's places: blue, orange, green, gold, teal, brown, sky, then navy, grass,
+ * cerulean, chestnut and cyan, so the first five are five hues with no second blue. A stored color is a place, which
+ * keeps its hue; only the order new values take the places in differs. One list for the frontend and the view kit
+ * (backend/app/label_order.json, which views.frame_document hands the kit); the server's is kernel_thimble.LABEL_ORDER. */
+export const LABEL_ORDER: readonly number[] = labelOrder
+
+/** The palette's places in LABEL_ORDER from `at` on, round the order; from the first when `at` is no place. Pure. */
+export function paletteFrom(at: number): number[] {
+  const i = Math.max(0, LABEL_ORDER.indexOf(at))
+  return [...LABEL_ORDER.slice(i), ...LABEL_ORDER.slice(0, i)]
+}
 
 /** The name of the token that carries a class colour. */
 export const colourToken = (n: number | null | undefined): string => (n != null && n >= 1 && n <= LABEL_COLOURS ? `--label-${n}` : '--label-none')
@@ -70,10 +83,10 @@ export function turnedOnOrder<T extends { id: string }>(on: readonly T[], order:
   return [...known, ...on.filter((k) => !at.has(k.id))]
 }
 
-/** A label's classes: the server's, else one per value with the positive highlighted in the first colour. */
+/** A label's classes: the server's, else one per value in LABEL_ORDER, with the positive highlighted in the first color. */
 export function classesOf(k: Pick<Concept, 'labels' | 'classes'>): LabelClass[] {
   if (k.classes && k.classes.length) return k.classes
-  return k.labels.map((name, i) => ({ name, color: isNegative(name, i, k.labels.length) ? 0 : (i % LABEL_COLOURS) + 1, highlight: !isNegative(name, i, k.labels.length) }))
+  return k.labels.map((name, i) => ({ name, color: isNegative(name, i, k.labels.length) ? 0 : LABEL_ORDER[i % LABEL_COLOURS], highlight: !isNegative(name, i, k.labels.length) }))
 }
 
 /** Whether classes are a multi-class label's: more than one of them takes a colour (a negative's grey aside). Such a
@@ -574,15 +587,11 @@ export function nextColour(n: number, others: readonly number[] = []): number {
   return 0
 }
 
-/** `want`, or the first palette colour after it that no class in `taken` has; `want` when every colour is taken or it
- * is the grey (the server's own_colour). Pure. */
+/** `want`, or the first palette color after it in LABEL_ORDER that no class in `taken` has; `want` when every color is
+ * taken or it is the gray (the server's own_colour). Pure. */
 export function ownColour(want: number, taken: readonly number[]): number {
   if (!want || !taken.includes(want)) return want
-  for (let j = 1; j < LABEL_COLOURS; j++) {
-    const m = ((want - 1 + j) % LABEL_COLOURS) + 1
-    if (!taken.includes(m)) return m
-  }
-  return want
+  return paletteFrom(want).slice(1).find((m) => !taken.includes(m)) ?? want
 }
 
 /** Every palette colour a class of the labels has (the grey aside). Pure. */
@@ -590,25 +599,22 @@ export function usedColours(labels: readonly Pick<Concept, 'labels' | 'classes'>
   return [...new Set(labels.flatMap((k) => classesOf(k).map((c) => c.color)).filter((c) => !!c))]
 }
 
-/** The first palette colour from `at` on, round the palette, that `used` does not hold; null when it holds every one
- * (the server's free_colour). Pure. */
+/** The first palette color from `at` on, in LABEL_ORDER and round it, that `used` does not hold; null when it holds
+ * every one (the server's free_colour). Pure. */
 export function freeColour(at: number, used: readonly number[]): number | null {
-  for (let j = 0; j < LABEL_COLOURS; j++) {
-    const m = ((at - 1 + j) % LABEL_COLOURS) + 1
-    if (!used.includes(m)) return m
-  }
-  return null
+  return paletteFrom(at).find((m) => !used.includes(m)) ?? null
 }
 
 /** The classes a drafted label is created with: the first value highlighted in `colour`, a negative value (isNegative)
- * in the grey and not highlighted, any other highlighted in the first colour after `colour` that neither `used` (the
- * other labels' colours) nor an earlier value has, while one is free, else the colour at its place after `colour`. Pure. */
+ * in the gray and not highlighted, any other highlighted in the first color from the one its place after `colour` in
+ * LABEL_ORDER that neither `used` (the other labels' colors) nor an earlier value has, while one is free, else the color
+ * at that place (the server's fill_colours). Pure. */
 export function draftClasses(values: readonly string[], colour: number, used: readonly number[] = []): LabelClass[] {
   const taken = [...used, colour]
   return values.map((name, i) => {
     if (i === 0) return { name, color: colour, highlight: true }
     if (isNegative(name, i, values.length)) return { name, color: 0, highlight: false }
-    const at = ((colour - 1 + i) % LABEL_COLOURS) + 1
+    const at = paletteFrom(colour)[i % LABEL_COLOURS]
     const color = freeColour(at, taken) ?? at
     taken.push(color)
     return { name, color, highlight: true }

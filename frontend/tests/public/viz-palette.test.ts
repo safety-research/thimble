@@ -1,10 +1,13 @@
 // The nominal chart colours (--viz-1 to --viz-7 in src/styles/tokens.css), which views, cards and charts take for
 // their categories: on every paper none is a red, which reads as an error, or a purple, the agents' colour, each reads
 // at 3:1 on the paper's grounds, and neighbours and the first three stay apart, also under protan and deutan vision.
-// The label colours (--label-1 to --label-12) hold to the same, all twelve stay apart pairwise, the first five are five
-// hues, and Dark's chestnut, brown and navy, which a dark paper lightens, stay apart from orange and sky.
+// The label colours (--label-1 to --label-12) hold to the same, all twelve stay apart pairwise, each place is on every
+// paper the hue show_label's name for it says (a stored color is a place, so a place never changes hue), the first five
+// new values take (LABEL_ORDER) are five hues, and Dark's chestnut, brown and navy, which a dark paper lightens, stay
+// apart from orange and sky.
 import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
+import { LABEL_ORDER } from '../../src/files/labels.ts'
 import { MPL_CYCLE, restyle } from '../../src/lib/svg.ts'
 import { token } from '../../src/lib/vizTheme.ts'
 
@@ -93,6 +96,25 @@ const chromaHue = (hex: string): [number, number] => {
   return [Math.hypot(a, b), ((Math.atan2(b, a) * 180) / Math.PI + 360) % 360]
 }
 
+/** OKLCH lightness */
+const lightness = (hex: string): number => oklab(linear(hex))[0]
+
+/** show_label's color names by palette place (backend concepts.COLOUR_NAMES), the names of the places a stored color takes */
+const NAMES: Record<string, number> = JSON.parse(/^COLOUR_NAMES = (\{[^}]*\})/m.exec(readFileSync(new URL('../../../backend/app/concepts.py', import.meta.url), 'utf8'))![1])
+const place = (name: string): string => `--label-${NAMES[name]}`
+
+/** Each name's family: the OKLCH hues (degrees) only that family takes on any paper. Within a family, `apart` says what
+ * tells its members apart on every paper (Dark lightens some of them, so lightness alone does not). */
+const FAMILY: Record<string, [number, number]> = {
+  orange: [40, 85], chestnut: [40, 85], brown: [40, 85],
+  olive: [85, 120],
+  green: [130, 168], 'grass green': [130, 168],
+  teal: [170, 200],
+  cyan: [205, 227],
+  'sky blue': [228, 247], cerulean: [228, 247],
+  blue: [248, 275], navy: [248, 275],
+}
+
 test("matplotlib's colour cycle is the light paper's chart colours, and an inlined figure takes each as its token", () => {
   const rc = readFileSync(new URL('../../../backend/app/matplotlibrc', import.meta.url), 'utf8')
   const cycle = [...(/axes\.prop_cycle:.*/.exec(rc)?.[0] ?? '').matchAll(/'([0-9a-fA-F]{6})'/g)].map((m) => `#${m[1].toLowerCase()}`)
@@ -178,8 +200,26 @@ describe.each(Object.keys(PAPERS))('the label colours on the %s paper', (paper) 
     for (let i = 0; i < colours.length; i++) for (let j = i + 1; j < colours.length; j++) expect(apart(colours[i], colours[j]), `${colours[i]} and ${colours[j]}`).toBeGreaterThanOrEqual(7.5)
   })
 
-  test('the first five, which a field of five values shows side by side, are five hues with no second blue, about 30 apart in CIELAB', () => {
-    const five = colours.slice(0, 5)
+  test('each place is the hue its name says: show_label names the place a stored color takes, so a place keeps its hue', () => {
+    expect(Object.keys(NAMES).sort()).toEqual(Object.keys(FAMILY).sort())
+    expect(Object.values(NAMES).sort((a, b) => a - b)).toEqual(Array.from({ length: 12 }, (_, i) => i + 1))
+    for (const [name, [lo, hi]] of Object.entries(FAMILY)) {
+      const c = t[place(name)]
+      const hue = chromaHue(c)[1]
+      expect(hue >= lo && hue < hi, `${place(name)} ${c} is not ${name} (hue ${hue.toFixed(0)})`).toBe(true)
+    }
+    const [chroma, hue, light] = [(n: string) => chromaHue(t[place(n)])[0], (n: string) => chromaHue(t[place(n)])[1], (n: string) => lightness(t[place(n)])]
+    expect(chroma('orange'), 'orange is the vivid one of its family').toBeGreaterThan(Math.max(chroma('brown'), chroma('chestnut')))
+    expect(hue('brown'), 'brown is yellower than chestnut').toBeGreaterThan(hue('chestnut'))
+    expect(chroma('grass green'), 'grass is more vivid than green').toBeGreaterThan(chroma('green'))
+    expect(light('sky blue'), 'sky is lighter than cerulean').toBeGreaterThan(light('cerulean'))
+    expect(chroma('sky blue'), 'sky is more vivid than cerulean').toBeGreaterThan(chroma('cerulean'))
+    expect(chroma('blue'), 'blue is more vivid than navy').toBeGreaterThan(chroma('navy'))
+  })
+
+  test('the first five new values take (LABEL_ORDER), which a field of five values shows side by side, are five hues with no second blue, about 30 apart in CIELAB', () => {
+    const five = LABEL_ORDER.slice(0, 5).map((n) => t[`--label-${n}`])
+    expect(LABEL_ORDER.slice(0, 5).map((n) => Object.keys(NAMES).find((k) => NAMES[k] === n))).toEqual(['blue', 'orange', 'green', 'olive', 'teal'])
     for (let i = 0; i < 5; i++)
       for (let j = i + 1; j < 5; j++) {
         const [a, b] = [five[i], five[j]]
@@ -191,7 +231,7 @@ describe.each(Object.keys(PAPERS))('the label colours on the %s paper', (paper) 
   })
 
   test('chestnut and brown stay apart from orange, and navy from sky', () => {
-    const [orange, sky, brown, navy, chestnut] = ['--label-2', '--label-7', '--label-6', '--label-8', '--label-11'].map((s) => t[s])
+    const [orange, sky, brown, navy, chestnut] = ['orange', 'sky blue', 'brown', 'navy', 'chestnut'].map((n) => t[place(n)])
     expect(cielab(chestnut, orange), `${chestnut} and ${orange}`).toBeGreaterThanOrEqual(30)
     expect(cielab(brown, orange), `${brown} and ${orange}`).toBeGreaterThanOrEqual(28)
     expect(cielab(navy, sky), `${navy} and ${sky}`).toBeGreaterThanOrEqual(23)

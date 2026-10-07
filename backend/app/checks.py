@@ -41,6 +41,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from . import config, investigation, prompts, tools, userconf, work_files
+from .kernel_thimble import LABEL_ORDER
 from .ledger import read_json, write_json, write_under
 
 log = logging.getLogger("thimble.checks")
@@ -55,7 +56,8 @@ WORK_DIR = "check-work"  # workspaces/<c>/check-work/<id>-<doc>/, a run's own fo
 TASK_FILE = "task.md"  # in a run's own folder: what its agent reads first
 OWN_TOOLS = ("read_ref", "list_cards", "add_comment")  # a check's thimble tools
 BUILTINS = ("unverified", "verified", "judgment")  # prompts/checks/<id>.md, listed first in this order
-COLOURS = tuple(range(1, 9))
+COLOURS = tuple(range(1, 9))  # the label palette's places a check's color may take (kernel_thimble.LABEL_COLOURS)
+NEW_COLOURS = tuple(m for m in LABEL_ORDER if m in COLOURS)  # the order new checks take them, as new label values do
 CONTEXT_CHARS = 400_000  # of the context engine's part of a run's first message
 WAITING_QUEUED = "queued"  # a run's `waiting` while it waits for a place (MAX_SESSIONS)
 WAITING_PLAN = "plan"  # a run's `waiting` while main is in plan mode, where a writer's end holds the runs it starts
@@ -131,7 +133,7 @@ def from_extensions(c: str) -> dict[str, dict[str, Any]]:
             if not slug or not prompt or not ID_RE.match(cid) or cid in BUILTINS:
                 continue
             out[cid] = {"id": cid, "name": _collapse(raw.get("name") or slug)[:NAME_CHARS], "prompt": prompt,
-                        "colour": colour if colour in COLOURS else COLOURS[len(out) % len(COLOURS)], "shown": False,
+                        "colour": colour if colour in COLOURS else NEW_COLOURS[len(out) % len(NEW_COLOURS)], "shown": False,
                         "builtin": True, "created_by": str(e["name"]), "ts": "", "version": 1, "runs": {}}
     return out
 
@@ -195,9 +197,9 @@ def _new_id(c: str, name: str) -> str:
 
 
 def _free_colour(c: str) -> int:
-    """The first colour no check has, else the one fewest have."""
+    """The first color no check has, else the one fewest have, in the order new checks take them (NEW_COLOURS)."""
     used = [x.get("colour") for x in list_checks(c)]
-    return next((k for k in COLOURS if k not in used), min(COLOURS, key=used.count))
+    return next((k for k in NEW_COLOURS if k not in used), min(NEW_COLOURS, key=used.count))
 
 
 def create(c: str, name: str, prompt: str, *, created_by: str) -> dict[str, Any]:

@@ -39,7 +39,7 @@ const LABEL = {
 
 const ROWS = Array.from({ length: 30 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i % 3 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
 const VIEW = `<!doctype html><html><head><script>window.__thimbleView = {"slug":"board","name":"Board"}</script>
-<script>${inline(read('viewer_bridge.js'))}</script><script>${inline(read('viewer_colour.js'))}</script><style>${read('viewer_kit.css')}</style>
+<script>${inline(read('viewer_bridge.js'))}</script><script>window.__thimbleLabelOrder = ${read('label_order.json')}</script><script>${inline(read('viewer_colour.js'))}</script><style>${read('viewer_kit.css')}</style>
 <style>body{margin:0;font:12px sans-serif} .top{display:flex;align-items:center;gap:8px;padding:8px} #list{height:320px;overflow:auto} .msg{height:28px;padding:6px 12px 0}</style></head><body>
 <div class="top"><span id="colour"></span></div><div id="list">${ROWS}</div>
 <script>window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })</script>

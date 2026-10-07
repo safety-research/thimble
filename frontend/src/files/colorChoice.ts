@@ -1,13 +1,14 @@
 // Color by in Files' Transcript mode: what colors the records' left edge and the reader's tracks (Tracks.tsx). The
 // choice is Off, a key of the records (one of those the server finds naming a kind or a who over the whole file,
 // GET /source/keys, the fields Table view shows), or a label over files that is on. A key's values take the label
-// palette by frequency (--label-1 to --label-12, the rest one Other in --label-none); a label's values take the label's
-// own colors, its highlighted values only. A key whose values are nearly unique per record (an id) is not offered. Each
-// value is a chip that turns its records off (hides them) and on. The choice and the values turned off are kept per file
-// in this browser. Pure, but for the storage.
+// palette by frequency, in the order new values take its colors (labels.ts LABEL_ORDER: blue, orange, green, gold,
+// teal, ...), the rest one Other in --label-none; a label's values take the label's own colors, its highlighted values
+// only. A key whose values are nearly unique per record (an id) is not offered. Each value is a chip that turns its
+// records off (hides them) and on. The choice and the values turned off are kept per file in this browser. Pure, but
+// for the storage.
 import type { Concept, LabelRow, SourceKey, SourceRecord } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
-import { classesOf, colourVar, litClass, valueOf } from './labels'
+import { classesOf, colourVar, LABEL_ORDER, litClass, valueOf } from './labels'
 
 export type ColorChoice = { by: 'off' } | { by: 'key'; key: string } | { by: 'label'; id: string }
 
@@ -38,7 +39,8 @@ export interface ColorValue {
   meaning?: string | null
 }
 
-export const keyColor = (rank: number): string => (rank < KEY_COLORS ? `var(--label-${rank + 1})` : 'var(--label-none)')
+/** The color of a key's value by its rank, the commonest first: the palette's places in LABEL_ORDER, then the gray. */
+export const keyColor = (rank: number): string => (rank >= 0 && rank < KEY_COLORS ? colourVar(LABEL_ORDER[rank]) : 'var(--label-none)')
 
 /** A key's chips: its commonest values in the palette, then Other for the rest, then the records with none. */
 export function keyChips(k: SourceKey): ColorValue[] {

@@ -78,8 +78,13 @@ _COLUMNS = ["path", "line", "effective", "label", "source", "verdict", "confiden
 
 # A label class's colour by index (concepts.PALETTE): 0 is --label-none, the grey of a negative class; 1..12 are
 # --label-1..12 (styles/tokens.css).
-LABEL_COLOURS = ["#a09c93", "#025ac3", "#d0750a", "#08632f", "#897301", "#009c85", "#844500", "#1392d4", "#013c77", "#2aa02b", "#025a7c",
+LABEL_COLOURS = ["#a09c93", "#025ac3", "#d0750a", "#08632f", "#1392d4", "#897301", "#009c85", "#844500", "#013c77", "#2aa02b", "#025a7c",
                  "#622b01", "#0389a0"]
+# The order new values take the palette's places (indices into LABEL_COLOURS): blue, orange, green, gold, teal, brown,
+# sky, then navy, grass, cerulean, chestnut and cyan, so a label's first five values are five hues with no second blue.
+# A stored place keeps its hue; only the order new values take the places in differs. The frontend and the view kit
+# read the same order from label_order.json, which test_label_order holds equal to this.
+LABEL_ORDER = (1, 2, 3, 5, 6, 7, 4, 8, 9, 10, 11, 12)
 # A value a label does not define: --viz-ink-1, -2 and -4 in turn (the third step is the label grey's near twin).
 NEUTRAL_COLOURS = ["#1b1a18", "#6b675f", "#cfcbc2"]
 _QUIET = frozenset({"no", "none", "other", "no match", "not", "neither", "n/a", "unknown"})  # concepts.QUIET_VALUES
@@ -92,27 +97,10 @@ def _negative(value: str, index: int, n: int) -> bool:
     return v in _QUIET or (n == 2 and index == 1) or (n > 2 and index == n - 1 and v.split(" ", 1)[0] in _LEFTOVER)
 
 
-def _oklab(hex_colour: str) -> tuple:
-    """A colour's place in OKLab, where distance is how different two colours look."""
-    def lin(x: int) -> float:
-        c = x / 255
-        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-    r, g, b = (lin(int(hex_colour[i:i + 2], 16)) for i in (1, 3, 5))
-    lms = [(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3),
-           (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3),
-           (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b) ** (1 / 3)]
-    return tuple(sum(w * x for w, x in zip(row, lms)) for row in ((0.2104542553, 0.7936177850, -0.0040720468),
-                                                                  (1.9779984951, -2.4285922050, 0.4505937099),
-                                                                  (0.0259040371, 0.7827717662, -0.8086757660)))
-
-
-_LAB = [_oklab(h) for h in LABEL_COLOURS]
-
-
-def most_distinct(taken, candidates) -> int:
-    """The candidate colour index that looks most unlike the nearest of `taken`; the lowest index on a tie."""
-    return max(candidates, key=lambda m: (min((math.dist(_LAB[m], _LAB[t]) for t in taken), default=0.0), -m))
+def palette_from(start: int) -> tuple:
+    """The palette's places in LABEL_ORDER from `start` on, round the order; from the first when `start` is no place."""
+    i = LABEL_ORDER.index(start) if start in LABEL_ORDER else 0
+    return LABEL_ORDER[i:] + LABEL_ORDER[:i]
 
 
 def _ws() -> Path:
@@ -165,35 +153,32 @@ def _classes(k: dict) -> list:
 
 
 def _fill_colours(ks: list) -> list:
-    """Give every class without a colour the one concepts.fill_colours gives it, in place: while a colour is free, one no
-    class of any label has, a label's first class takes the first free one; else the colours in turn. A further class
-    takes the free colour, else any, that looks most unlike its label's colours (most_distinct). A negative class takes
-    the grey, and a label's classes do not repeat a colour while one remains."""
-    n_colours = len(LABEL_COLOURS) - 1
+    """Give every class without a color the one concepts.fill_colours gives it, in place, taking the places in
+    LABEL_ORDER: while a color is free, one no class of any label has, a label's first class takes the first free one;
+    else the colors in turn. A further class, i places after the first, takes the first free color from the one i
+    places after the first class's, else that one. A negative class takes the gray, and a label's classes do not repeat
+    a color while one remains."""
     used = {c[1] for k in ks for c in k["classes"] if c[1]}
-
-    def free(start: int):
-        return next((m for m in ((start - 1 + i) % n_colours + 1 for i in range(n_colours)) if m not in used), None)
-
     j = 0
     for k in ks:
         cs = k["classes"]
         if not cs:
             continue
         if cs[0][1] is None:
-            cs[0][1] = free(1)
+            cs[0][1] = next((m for m in LABEL_ORDER if m not in used), None)
             if cs[0][1] is None:
-                cs[0][1] = j % n_colours + 1
+                cs[0][1] = LABEL_ORDER[j % len(LABEL_ORDER)]
                 j += 1
             used.add(cs[0][1])
-        base = cs[0][1] or 1
+        base = cs[0][1] or LABEL_ORDER[0]
         taken = {base} if cs[0][1] else set()
         for i, c in enumerate(cs[1:], 1):
             if c[1] is None:
-                mine = [m for m in range(1, n_colours + 1) if m not in taken]
-                c[1] = 0 if _negative(c[0], i, len(cs)) else most_distinct(taken, [m for m in mine if m not in used] or mine or [base])
+                at = palette_from(base)[i % len(LABEL_ORDER)]
+                busy = used | taken
+                c[1] = 0 if _negative(c[0], i, len(cs)) else next((m for m in palette_from(at) if m not in busy), at)
             if c[1] and c[1] in taken:
-                c[1] = next((m for m in ((c[1] - 1 + j) % n_colours + 1 for j in range(1, n_colours)) if m not in taken), c[1])
+                c[1] = next((m for m in palette_from(c[1])[1:] if m not in taken), c[1])
             if c[1]:
                 taken.add(c[1])
                 used.add(c[1])
@@ -491,9 +476,9 @@ _view_paths: list = []  # the claimed files of the view whose reader call is run
 _left_out = None
 PROBE_NAME = "test label"
 PROBE_ID = "test-label"
-# the colour the analyst's first label takes (--label-1), so the pictures show a view's own colour that clashes with a
-# label where the analyst would see it
-PROBE_COLOUR = LABEL_COLOURS[1]
+# the colour the analyst's first label takes (--label-1, the first of LABEL_ORDER), so the pictures show a view's own
+# colour that clashes with a label where the analyst would see it
+PROBE_COLOUR = LABEL_COLOURS[LABEL_ORDER[0]]
 # labels file -> (the files' signature, (_Values, {path: [(first, last, value)]}, {path})), the most recently used last
 _MEMBERS: dict = {}
 # above the labels any context holds: labels that do not all fit here are read again on every call

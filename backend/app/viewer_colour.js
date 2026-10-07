@@ -20,7 +20,10 @@
 // the focus back on the label's row, and a click in the view closes it too. A field colors by the values its records
 // take, each in a palette colour of its own (the label palette, --label-1 to --label-12, in the order the values come:
 // the declared `values`, each in the colour it names or else the next free one, then the most frequent first, kept per
-// view so a value keeps its colour). A label colors by its values on each anchored record, in the label's own colours;
+// view so a value keeps its colour). Free places go in the order new values take them, blue, orange, green, gold,
+// teal, brown, sky, then the rest (backend/app/label_order.json, which views.frame_document puts in the frame as
+// window.__thimbleLabelOrder), so the first five are five hues with no second blue; a place a value names or keeps is
+// the same hue whatever the order. A label colors by its values on each anchored record, in the label's own colours;
 // choosing one turns it on, and a label the analyst turns on, here or anywhere in thimble, takes the colour. Off colors
 // nothing: no chips, no bars, grey tracks.
 // Color by is thimble's small secondary button with the choice in it. The chosen field's values are key chips in the
@@ -55,6 +58,16 @@
   var NONE = '\u0000none' // the key of the records that take no value
   var OFF = 'off' // what thimble keeps for Color by: Off
   var PALETTE = 12 // --label-1 .. --label-12; a value past them takes --label-none
+  // the palette's places (0 for --label-1) in the order new values take them: label_order.json, which the frame gets as
+  // window.__thimbleLabelOrder; without a whole one, the palette's own order, and the page hears of it
+  var ORDER = (function (o) {
+    var out = []
+    if (Array.isArray(o)) for (var i = 0; i < o.length; i++) if (o[i] >= 1 && o[i] <= PALETTE && Math.floor(o[i]) === o[i] && out.indexOf(o[i] - 1) < 0) out.push(o[i] - 1)
+    if (out.length === PALETTE) return out
+    kit.report(new Error('thimble.colorBy: the label order is missing, so new values take the palette in its own order'))
+    for (out = [], i = 0; i < PALETTE; i++) out.push(i)
+    return out
+  })(window.__thimbleLabelOrder)
   var TRACK_W = 12 // px: the overview track, its lane as wide as it, as the frame is
   var ZOOM_W = 18 // px: the zoomed track, its lane as wide as it, so that the lens's margin is the same on every side
   var LANE_X = 0
@@ -256,8 +269,15 @@
     if (tipEl) tipEl.style.display = 'none'
   }
 
+  // the first palette place `taken` does not hold, in ORDER; past the palette (--label-none) when it holds all twelve
+  function freePlace(taken) {
+    for (var i = 0; i < ORDER.length; i++) if (!taken[ORDER[i]]) return ORDER[i]
+    var p = PALETTE
+    while (taken[p]) p++
+    return p
+  }
   // A field's declared values and the palette place of each: a value given as {name, colour} takes the colour it names
-  // (1 to 12, as a label's value names its colour); the others take the free places in their order
+  // (1 to 12, as a label's value names its colour); the others take the free places in ORDER, in their order
   function declare(list) {
     if (!Array.isArray(list)) return null
     var values = []
@@ -276,12 +296,11 @@
       values.push(name)
       named.push(at)
     }
-    var next = 0
     var slots = named.map(function (at) {
       if (at >= 0) return at
-      while (taken[next]) next++
-      taken[next] = true
-      return next
+      var free = freePlace(taken)
+      taken[free] = true
+      return free
     })
     return { values: values, slots: slots, meanings: meanings }
   }
@@ -442,14 +461,10 @@
       if (da >= 0 || db >= 0) return (da < 0 ? 1e9 : da) - (db < 0 ? 1e9 : db)
       return (counts[b] || 0) - (counts[a] || 0) || (a < b ? -1 : a > b ? 1 : 0)
     })
-    var next = 0
     for (var i = 0; i < fresh.length && n < MAX_KEPT; i++) {
       var v = fresh[i]
       var at = slotOf(f, v)
-      if (at < 0) {
-        while (used[next]) next++
-        at = next
-      }
+      if (at < 0) at = freePlace(used)
       map[v] = at
       used[at] = true
       n++

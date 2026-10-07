@@ -95,16 +95,17 @@
   --viz-5: #9e8901;
   --viz-6: #0b9a9e;
   --viz-7: #ab691c;
-  /* the label colours (below) stepped for Dark. A dark hue cannot keep 3:1 here, so brown and chestnut are a muted
-     khaki and a light tan, apart from orange, and navy is a pale periwinkle, apart from sky; gold and teal are lighter
-     than orange and green, so the first five stay apart */
+  /* the label colors (below) stepped for Dark, each place the same hue as on the light papers. A dark hue cannot keep
+     3:1 here, so brown (7) and chestnut (11) are a muted khaki and a light tan, apart from orange, and navy (8) is a
+     pale periwinkle, apart from sky (4); gold (5) and teal (6) are lighter than orange and green, so the first five
+     colors new values take (blue, orange, green, gold, teal) stay apart */
   --label-1: #2275e8;
   --label-2: #da7306;
   --label-3: #17a973;
-  --label-4: #beb222;
-  --label-5: #5bcec6;
-  --label-6: #9b7239;
-  --label-7: #0c9edc;
+  --label-4: #0c9edc;
+  --label-5: #beb222;
+  --label-6: #5bcec6;
+  --label-7: #9b7239;
   --label-8: #9ebdff;
   --label-9: #50c14d;
   --label-10: #0985b4;
@@ -274,18 +275,20 @@
   --viz-7: #844500;
   --viz-8: var(--viz-ink-1);
   --viz-9: var(--viz-ink-3);
-  /* a label's colour, in the order the analyst's labels take them, and the colour of "no match". Like the nominal
-     hues, no red and no purple: blue, orange, green, gold, teal, brown, sky, then navy, grass, cerulean, chestnut and
-     cyan, so a label with more than eight values still gets a distinct colour for each, and the first five are five
-     hues with no second blue among them. Each reads at 3:1 or more on every paper, and Dark has its own steps of the
-     same hues. */
+  /* a label's colors by place, and the color of "no match". A label's value stores its color as a place, so
+     --label-N is always the same hue: 1 blue, 2 orange, 3 green, 4 sky, 5 gold, 6 teal, 7 brown, 8 navy, 9 grass,
+     10 cerulean, 11 chestnut, 12 cyan (show_label's color names, concepts.COLOUR_NAMES). Like the nominal hues, no red
+     and no purple, and twelve so that a label with more than eight values still gets a distinct color for each. New
+     values take the places in another order, blue, orange, green, gold, teal, brown, sky, then 8 to 12
+     (backend/app/label_order.json), so the first five are five hues with no second blue among them. Each reads at 3:1
+     or more on every paper, and Dark has its own steps of the same hues. */
   --label-1: #025ac3;
   --label-2: #d0750a;
   --label-3: #08632f;
-  --label-4: #897301;
-  --label-5: #009c85;
-  --label-6: #844500;
-  --label-7: #1392d4;
+  --label-4: #1392d4;
+  --label-5: #897301;
+  --label-6: #009c85;
+  --label-7: #844500;
   --label-8: #013c77;
   --label-9: #2aa02b;
   --label-10: #025a7c;

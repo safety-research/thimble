@@ -24,7 +24,7 @@ import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptKind, ConceptPatch, ConceptRun, LabelClass, LabelDraft, LabelMarks } from '../lib/types'
 import { examplesNote } from '../canvas/details'
-import { classesOf, colourVar, draftClasses, freeColour, globPatterns, isFilesLabel, isMultiClass, LABEL_COLOURS, MULTI_COLOUR, labelStatus, marksOf, outcomeText, overOf, ownColour, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
+import { classesOf, colourVar, draftClasses, freeColour, globPatterns, isFilesLabel, isMultiClass, LABEL_COLOURS, LABEL_ORDER, MULTI_COLOUR, labelStatus, marksOf, outcomeText, overOf, ownColour, paletteFrom, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
 import { useFilesLabels, type FilesLabels } from './useLabels'
 import { ValuePalette } from './ValuePalette'
 
@@ -85,10 +85,10 @@ function LabelSwatch({ classes }: { classes: readonly LabelClass[] }) {
   return <span className="label-card-swatch" style={{ '--c': colourVar(classes[0]?.color) } as CSSProperties} />
 }
 
-/** The colour a new label takes: the first no class of any label has, else the next in turn (the server's rule,
- * fill_colours). */
+/** The color a new label takes: the first in LABEL_ORDER no class of any label has, else the next in turn (the
+ * server's rule, fill_colours). */
 export function nextFreeColour(labels: Concept[]): number {
-  return freeColour(1, usedColours(labels)) ?? (labels.length % LABEL_COLOURS) + 1
+  return freeColour(LABEL_ORDER[0], usedColours(labels)) ?? LABEL_ORDER[labels.length % LABEL_COLOURS]
 }
 
 export const draftOf = (k: Concept | null, appliesTo: string[], colour = 1, drafted: LabelDraft | null = null, used: readonly number[] = []): Draft =>
@@ -349,7 +349,7 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact }
       labels.setClasses(label.id, next)
   }
   const addClass = () => {
-    const at = (((classes[0]?.color || 1) - 1 + classes.length) % LABEL_COLOURS) + 1
+    const at = paletteFrom(classes[0]?.color || LABEL_ORDER[0])[classes.length % LABEL_COLOURS]
     const own = classes.map((x) => x.color)
     const others = usedColours(labels.all.filter((k) => k.id !== label?.id))
     set({ classes: [...classes, { name: '', color: freeColour(at, [...others, ...own]) ?? ownColour(at, own), highlight: true }] })

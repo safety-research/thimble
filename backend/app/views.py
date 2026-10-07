@@ -154,6 +154,9 @@ BRIDGE_JS = Path(__file__).with_name("viewer_bridge.js")
 KIT_CSS = Path(__file__).with_name("viewer_kit.css")  # thimble's chips, buttons, segmented controls, tables and list rows
 COLOUR_JS = Path(__file__).with_name("viewer_colour.js")  # the view kit's Color by control, thimble.colorBy
 RANGE_JS = Path(__file__).with_name("viewer_range.js")  # the view kit's time range selector, thimble.timeRange
+# the order new values take the label palette's places, which the kit's Color by reads as window.__thimbleLabelOrder
+# (the frontend imports the same file; kernel_thimble.LABEL_ORDER is the server's)
+LABEL_ORDER_JSON = Path(__file__).with_name("label_order.json")
 HOST_PY = Path(__file__).with_name("view_host.py")
 KERNEL_THIMBLE = Path(__file__).with_name("kernel_thimble.py")  # the `thimble` module a reader imports (view_host)
 # The test label of the checks and the review: it marks every record whose line is a multiple of PROBE_EVERY, about one
@@ -3131,7 +3134,8 @@ def _style_text(css: str) -> str:
 def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool = False,
                    derived: list[dict[str, str]] | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
-    (viewer_bridge.js), the kit's Color by control (viewer_colour.js) and time range selector (viewer_range.js),
+    (viewer_bridge.js), the order new values take the label palette (label_order.json, for Color by), the kit's Color by
+    control (viewer_colour.js) and time range selector (viewer_range.js),
     thimble's parts (viewer_kit.css), the vendored
     libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
@@ -3150,7 +3154,8 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     csp = FRAME_CSP.format(media=f" {media}" if media else "")
     head = [f'<meta http-equiv="Content-Security-Policy" content="{csp}">',
             '<meta charset="utf-8">',
-            f"<script>window.__thimbleView = {_script_text(who)}</script>",
+            f"<script>window.__thimbleView = {_script_text(who)}; "
+            f"window.__thimbleLabelOrder = {_script_text(LABEL_ORDER_JSON.read_text('utf-8').strip())}</script>",
             f"<script>{_script_text(BRIDGE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(COLOUR_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(RANGE_JS.read_text('utf-8'))}</script>",
