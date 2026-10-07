@@ -64,7 +64,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
 from . import config, corpus_tree, headless, investigation, refs, userconf, view_calls, view_indexes, view_libs
@@ -219,6 +219,16 @@ class ReaderError(Exception):
         super().__init__(message)
         self.message = message
         self.detail = detail
+
+
+class RawJSON:
+    """A reader call's result as the JSON text the kernel wrote (view_host._result_json), which the records route sends
+    to the page without reading it."""
+
+    __slots__ = ("text",)
+
+    def __init__(self, text: str) -> None:
+        self.text = text
 
 
 def _now() -> str:
@@ -1511,15 +1521,20 @@ def _current(c: str, slug: str) -> dict[str, Any] | None:
     return read_view(c, slug) if _live.get() else read_built(c, slug)
 
 
-def _answer_from(outputs: list[dict]) -> dict[str, Any] | None:
-    """The host's answer: the last stdout line after the sentinel."""
-    from .view_host import SENTINEL
+def _answer_from(outputs: list[dict], raw: bool = False) -> dict[str, Any] | None:
+    """The host's answer: the last stdout line after the sentinel, its result read from the JSON after RESULT_SEP, or
+    with `raw` kept as that text (RawJSON) unread."""
+    from .view_host import RESULT_SEP, SENTINEL
 
     text = "".join(b.get("text/plain", "") for b in outputs if b.get("_stream") == "stdout")
     for line in reversed(text.split("\n")):  # not splitlines, which also breaks at the sentinel's \x1e
         if line.startswith(SENTINEL):
+            head, sep, result = line[len(SENTINEL):].partition(RESULT_SEP)
             try:
-                return json.loads(line[len(SENTINEL):])
+                ans = json.loads(head)
+                if sep and isinstance(ans, dict):
+                    ans["result"] = RawJSON(result) if raw else json.loads(result)
+                return ans
             except ValueError:
                 return None
     return None
@@ -1580,17 +1595,20 @@ def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, 
 
 
 async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: str | None = None,
-                sink: dict[str, Any] | None = None) -> Any:
+                sink: dict[str, Any] | None = None, raw: bool = False) -> Any:
     """One reader operation, with no time limit but within the checks (_call_limit); ReaderError when it raised, ran
     past that limit or the kernel did not answer. `call` is the id of a call the page named (view_calls.begin), whose
     progress the kernel writes to its file. Cancelling the awaiting task interrupts the call. `sink` gets the refs a
-    records call's thimble.kept refused (`left_out`, `left_out_n`)."""
+    records call's thimble.kept refused (`left_out`, `left_out_n`). With `raw` the result is the kernel's JSON text
+    (RawJSON)."""
     _bind_loop()
     key = (c, req["slug"], req["fp"])
     by_built = bool(req.get("built"))  # a built view's request (_prepared): pruning keeps its index longest
     req = {**{k: x for k, x in req.items() if k != "built"}, "memory": view_calls.memory_budget()}
     if call is not None:
         req["progress"] = str(view_calls.progress_path(indexes_dir(c), call).resolve())
+    if raw:
+        req["raw"] = True  # the kernel writes the result as the page gets it (view_host._result_json)
     paths = req.get("paths") or []
     if len(paths) > PATHS_SENT:
         req.pop("paths")
@@ -1599,10 +1617,10 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: 
     token = view_calls.REQUEST.set({"slug": req["slug"], "fp": req["fp"], "cache": req.get("cache"), "call": call})
     try:
         outputs, status = await _runner(c, snippet({**req, "op": op, "arg": arg}), _call_limit.get())
-        ans = _answer_from(outputs)
+        ans = _answer_from(outputs, raw)
         if ans is not None and ans.get("need_paths"):
             outputs, status = await _runner(c, snippet({**req, "paths": paths, "op": op, "arg": arg}), _call_limit.get())
-            ans = _answer_from(outputs)
+            ans = _answer_from(outputs, raw)
     except asyncio.CancelledError:
         raise
     except Exception as e:  # noqa: BLE001 — the kernel did not start
@@ -1628,20 +1646,21 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: 
 
 
 async def reader_call(c: str, slug: str, op: str, arg: Any = None, *, labels: dict[str, Any] | None = None,
-                      version: str | None = None, call: str | None = None, sink: dict[str, Any] | None = None) -> Any:
+                      version: str | None = None, call: str | None = None, sink: dict[str, Any] | None = None,
+                      raw: bool = False) -> Any:
     """reader.<op>(index, arg) for the view, op being index, records or resolve (resolve goes through resolve_locator,
     which cleans and memoises the answer). A records call runs with `labels` as the labels context thimble.marked and
     thimble.kept read, by default the workspace's (labels_context); labels apply when records are served, so they are no
     part of the index's fingerprint. `version` is the version a page was loaded at (read_version), `call` the id of a
     call the page named (_call). `sink` gets what the records call's filter left out (_call) and the filter's key
-    (filter_key)."""
+    (filter_key). With `raw` the result is the kernel's JSON text (RawJSON)."""
     _, req = await asyncio.to_thread(_prepare, c, slug, version)
     if op == "records":
         ctx = labels if labels is not None else await asyncio.to_thread(labels_context, c)
         req = {**req, "labels": _wire(ctx)}
         if sink is not None:
             sink["filter_key"] = await asyncio.to_thread(filter_key, ctx)
-    return await _call(c, req, op, arg, call=call, sink=sink)
+    return await _call(c, req, op, arg, call=call, sink=sink, raw=raw)
 
 
 def clean_problems(raw: Any) -> dict[str, Any]:
@@ -3232,9 +3251,16 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     return "<!doctype html><head>" + "".join(head) + "</head>" + body
 
 
+# the derived fields of a view whose reader defines derived(), by (workspace, slug, version, the fingerprint of its
+# claimed files and reader, view.json's derived fields): what each open of the view's page would otherwise ask the
+# reader again (derived_fields)
+_derived_kept: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = {}
+DERIVED_KEPT = 64
+
+
 async def derived_fields(c: str, slug: str, view: dict[str, Any], version: str | None = None) -> list[dict[str, str]]:
-    """The view's derived fields: view.json's, and when reader.py defines derived() those it adds too (shown); only
-    view.json's when the reader fails."""
+    """The view's derived fields: view.json's, and when reader.py defines derived() those it adds too (shown), kept
+    while the claimed files, the reader and view.json's list stay the same; only view.json's when the reader fails."""
     try:
         src = (Path(view["dir"]) / READER_PY).read_text("utf-8")
     except (OSError, TypeError):
@@ -3242,9 +3268,17 @@ async def derived_fields(c: str, slug: str, view: dict[str, Any], version: str |
     if not re.search(r"^def derived\s*\(", src, re.M):
         return view.get("derived") or []
     try:
-        return (await shown(c, slug, version))["derived"]
+        _, req = await asyncio.to_thread(_prepare, c, slug, version)
+        key = (c, slug, version or "", str(req["fp"]), json.dumps(view.get("derived") or [], sort_keys=True))
+        if (kept := _derived_kept.get(key)) is not None:
+            return kept
+        got = (await shown(c, slug, version))["derived"]
     except ReaderError:
         return view.get("derived") or []
+    _derived_kept[key] = got
+    while len(_derived_kept) > DERIVED_KEPT:
+        del _derived_kept[next(iter(_derived_kept))]
+    return got
 
 
 # ----------------------------------------------------------------------------------------------------------
@@ -5183,11 +5217,12 @@ async def delete_view_route(c: str, slug: str, request: Request) -> dict[str, An
 
 @router.get("/ws/{c}/views/{slug}/frame")
 async def frame_route(c: str, slug: str, request: Request, origin: str | None = None,
-                      v: str | None = None) -> HTMLResponse:
+                      v: str | None = None) -> Response:
     """The page as a frame loads it (frame_document), as srcdoc text, at version `v` when given (VERSIONS_SUBDIR): the
     records, marks and resolve routes then answer for the same version, so the page stays as loaded while the view
     changes. `origin` is the page's location.origin, since through Vite's proxy the request's host may not be one the
-    browser can reach; without it, the request's host."""
+    browser can reach; without it, the request's host. The answer carries an ETag of the document, and a request whose
+    If-None-Match names it gets 304 with no body, so a view opened again is not sent again."""
     view = _view_or_404(c, slug, v)
     if not view["ok"]:
         raise HTTPException(409, f"the view {slug!r} has no reader.py, view.html or claims")
@@ -5196,7 +5231,13 @@ async def frame_route(c: str, slug: str, request: Request, origin: str | None = 
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     derived = await derived_fields(c, slug, view, v)
-    return HTMLResponse(await asyncio.to_thread(functools.partial(frame_document, view, media, derived=derived)))
+    doc = await asyncio.to_thread(functools.partial(frame_document, view, media, derived=derived))
+    # a validator, so the browser asks again on every open but gets the document again only when it changed
+    tag = f'"{hashlib.sha256(doc.encode("utf-8")).hexdigest()[:32]}"'
+    headers = {"ETag": tag, "Cache-Control": "no-cache"}
+    if tag in (x.strip().removeprefix("W/") for x in (request.headers.get("if-none-match") or "").split(",")):
+        return Response(status_code=304, headers=headers)
+    return HTMLResponse(doc, headers=headers)
 
 
 @router.get("/ws/{c}/views/{slug}/media")
@@ -5286,12 +5327,13 @@ class RecordsBody(BaseModel):
     turn: int = 0
 
 
-@router.post("/ws/{c}/views/{slug}/records")
-async def records_route(c: str, slug: str, body: RecordsBody, request: Request, v: str | None = None) -> dict[str, Any]:
+@router.post("/ws/{c}/views/{slug}/records", response_model=dict[str, Any])
+async def records_route(c: str, slug: str, body: RecordsBody, request: Request,
+                        v: str | None = None) -> dict[str, Any] | Response:
     """reader.records(index, query): what the view's page, loaded at version `v`, asked for with thimble.fetch, with no
-    time limit. `call` names the call, so the page can cancel it (cancel_route) and read its progress (call_route); a
-    request the page drops (a reload, a closed tab) cancels it too. 502 with the reader's error, 409 {cancelled} when it
-    was cancelled."""
+    time limit, as {data, hidden?}, `data` the kernel's JSON text sent as it is (RawJSON). `call` names the call, so the
+    page can cancel it (cancel_route) and read its progress (call_route); a request the page drops (a reload, a closed
+    tab) cancels it too. 502 with the reader's error, 409 {cancelled} when it was cancelled."""
     from .tools import until_dropped  # noqa: PLC0415 — tools imports this module
 
     _view_or_404(c, slug, v)
@@ -5301,7 +5343,7 @@ async def records_route(c: str, slug: str, body: RecordsBody, request: Request, 
     if view_calls.cancelled_before(c, cid):
         raise HTTPException(409, {"message": "the call was cancelled", "cancelled": True})
     sink: dict[str, Any] = {}
-    work = asyncio.ensure_future(reader_call(c, slug, "records", body.query, version=v, call=cid, sink=sink))
+    work = asyncio.ensure_future(reader_call(c, slug, "records", body.query, version=v, call=cid, sink=sink, raw=True))
     call = view_calls.begin(c, slug, cid, indexes_dir(c))
     if call is not None:
         call.task = work
@@ -5311,7 +5353,10 @@ async def records_route(c: str, slug: str, body: RecordsBody, request: Request, 
         out = {"data": work.result()}
         if sink.get("filter_key") is not None:
             out["hidden"] = note_left_out(c, slug, v, sink, frame=body.frame, turn=body.turn, part=body.key)
-        return out
+        if not isinstance(out["data"], RawJSON):
+            return out
+        rest = "".join(f",{json.dumps(k)}:{json.dumps(x)}" for k, x in out.items() if k != "data")
+        return Response('{"data":' + out["data"].text + rest + "}", media_type="application/json")
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
     except asyncio.CancelledError:

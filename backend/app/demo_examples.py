@@ -163,7 +163,7 @@ def run(args: argparse.Namespace, say: Callable[[str], None],
         f"sample" + (" (--refresh: copied again)" if args.refresh else ""))
     url, env = server(say)
     if not url:
-        say("thimble demo --examples: the server is not running, so nothing was opened")
+        say("thimble demo --examples: no server answers, so nothing was opened")
         return 1
     opened: list[tuple[str, str]] = []
     failed = 0

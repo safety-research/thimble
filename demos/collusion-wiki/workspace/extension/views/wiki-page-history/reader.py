@@ -126,7 +126,8 @@ def _spans(a, b):
     if len(a) > 4000 or len(b) > 4000:
         return None
     sm = difflib.SequenceMatcher(None, a, b, autojunk=False)
-    if sm.ratio() < PAIR_RATIO:
+    # the cheap upper bounds of the ratio first: most lines that do not pair are told apart without matching them
+    if sm.real_quick_ratio() < PAIR_RATIO or sm.quick_ratio() < PAIR_RATIO or sm.ratio() < PAIR_RATIO:
         return None
     sa, sb = [], []
     for op, i1, i2, j1, j2 in sm.get_opcodes():
@@ -472,8 +473,8 @@ def _overview(index, keep):
     """Every page the label filter keeps, as columns: `p` its index, `ln` its pages.jsonl line, `w` its wiki (an index
     into `wikis`), `name`, `n` n_revs, `f` and `l` its first and last write in seconds since `t0`, `u` n_labels, `d` its
     deletes, `pm` the marks of its records as bits; its kept revisions as columns `rp` (page), `rt` (seconds since
-    `t0`), `ru` (an index into `users`), `ra` and `rr` (lines added and removed), `rm` (first mark, -1 for none); and its
-    deletes as `dp`, `dt`, `dm`; `rk` each revision's base (an index into BASES) and `rb` its marks as bits; and the
+    `t0`), `ru` (an index into `users`), `rk` (its base, an index into BASES) and `rb` (its marks as bits); its deletes
+    as `dp` and `dt`; and the
     deletes of pages with no stored revision, which pages.jsonl does not list, as `ot` (seconds since `t0`), `ow`
     (wiki, an index into `wikis`) and `on` (page name). `marks` lists the values of the labels that are on, `admins`
     the usernames that deleted pages."""
@@ -481,8 +482,8 @@ def _overview(index, keep):
     t0 = index["t0"]
     wikis, wiki_at = [], {}
     P = {k: [] for k in ("p", "ln", "w", "name", "n", "f", "l", "u", "d", "pm")}
-    R = {k: [] for k in ("rp", "rt", "ru", "ra", "rr", "rm", "rk", "rb")}
-    D = {k: [] for k in ("dp", "dt", "dm")}
+    R = {k: [] for k in ("rp", "rt", "ru", "rk", "rb")}
+    D = {k: [] for k in ("dp", "dt")}
     for p, pg in enumerate(index["pages"]):
         if filtering and p not in keep and not thimble.kept_unit(_page_refs(index, p)):
             continue
@@ -491,10 +492,10 @@ def _overview(index, keep):
             ref = _rev_ref(index, i)
             if filtering and p not in keep and not thimble.kept(ref):
                 continue
-            m, b = _bits(ref, mark_at)
+            _, b = _bits(ref, mark_at)
             pm |= b
-            for k, v in (("rp", p), ("rt", index["r_t"][i] - t0), ("ru", index["r_user"][i]), ("ra", index["r_add"][i]),
-                         ("rr", index["r_rem"][i]), ("rm", m), ("rk", BASES.index(index["r_base"][i])), ("rb", b)):
+            for k, v in (("rp", p), ("rt", index["r_t"][i] - t0), ("ru", index["r_user"][i]),
+                         ("rk", BASES.index(index["r_base"][i])), ("rb", b)):
                 R[k].append(v)
         nd = 0
         for d in index["page_dels"][p]:
@@ -502,10 +503,10 @@ def _overview(index, keep):
             ref = _event_ref(index, line)
             if filtering and p not in keep and not thimble.kept(ref):
                 continue
-            m, b = _bits(ref, mark_at)
+            _, b = _bits(ref, mark_at)
             pm |= b
             nd += 1
-            for k, v in (("dp", p), ("dt", t - t0), ("dm", m)):
+            for k, v in (("dp", p), ("dt", t - t0)):
                 D[k].append(v)
         if pg["wiki"] not in wiki_at:
             wiki_at[pg["wiki"]] = len(wikis)

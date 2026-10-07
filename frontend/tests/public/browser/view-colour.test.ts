@@ -171,11 +171,12 @@ describe('Colour by in a frame', () => {
     const grey = (await rows()).slice(2, half - 2)
     assert.equal(new Set(grey).size, 1, JSON.stringify([...new Set(grey)]))
     assert.notEqual(grey[0].split(',')[3], '0', 'drawn, not left blank')
-    // the grey of every record with Color by Off
+    // with Color by Off no record takes a colour: a plain track, which draws no record, not even in grey
     await frame().locator('.thimble-colour-by').click()
     await frame().locator('.thimble-colour-menu [data-by="off"]').click()
     await page.waitForTimeout(200)
-    assert.equal((await rows())[half + 10], grey[0], 'the grey the records take with Color by Off')
+    assert.ok(await frame().evaluate(() => document.querySelector('.thimble-colour-strip')!.hasAttribute('data-plain')), 'a plain track with Off')
+    assert.ok((await rows()).slice(2, -2).every((c) => c !== grey[0] && c !== links), 'no record drawn on the plain track')
     await frame().locator('.thimble-colour-by').click()
     await frame().locator('.thimble-colour-menu [data-by="f:kind"]').click()
     await page.waitForTimeout(200)
@@ -539,6 +540,109 @@ describe("a label's texts", () => {
     assert.deepEqual(await lit(frame), { grey: ['charged twice', 'connection pool', 'pool'] })
     const grey = await frame().evaluate(() => [...document.querySelectorAll('style[data-thimble="labels"]')].map((s) => s.textContent).join(''))
     assert.match(grey, /::highlight\(thimble-label-grey\)\{background-color:var\(--hl-bg/)
+    await page.close()
+  })
+})
+
+describe('a lane of the tracks for each label that is on', () => {
+  // sixty messages: "Passed on" (k1, orange) marks messages 5 to 10, "Links" (k2, green) messages 40 to 45
+  const mark = (id: string, name: string, colour: string) => ({ values: [{ id, label: name, value: 'yes', colour }], names: [name], bar: colour })
+  const marks: Record<string, unknown> = {}
+  for (let i = 5; i <= 10; i++) marks[`m.jsonl#L${i}`] = mark('k1', 'Passed on', '#d0750a')
+  for (let i = 40; i <= 45; i++) marks[`m.jsonl#L${i}`] = mark('k2', 'Links', '#08632f')
+  const label = (id: string, name: string, colour: string) => ({ id, name, colour, values: [{ name: 'yes', colour }] })
+  const both = [label('k1', 'Passed on', '#d0750a'), label('k2', 'Links', '#08632f')]
+  const msg = (on: typeof both) => ({ type: 'thimble:labels', marks, on, filter: null, all: both.map((l) => ({ ...l, on: on.some((o) => o.id === l.id), here: true, values: [{ name: 'yes', colour: l.colour, highlight: true }], count: 6 })) })
+  /** the overview's lanes: their names, widths, and the colour each draws a share down the track */
+  const lanes = (frame: () => Frame) =>
+    frame().evaluate(() => {
+      const whole = document.querySelector('.thimble-colour-whole') as HTMLElement
+      const cv = whole.querySelector('canvas') as HTMLCanvasElement
+      const ctx = cv.getContext('2d')!
+      const dpr = window.devicePixelRatio || 1
+      const marks = [...whole.querySelectorAll('.thimble-colour-lane')].map((e) => ({ left: (e as HTMLElement).offsetLeft, width: (e as HTMLElement).offsetWidth, title: e.getAttribute('title') }))
+      const at = (left: number, w: number, f: number) => Array.from(ctx.getImageData(Math.floor((left + w / 2) * dpr), Math.floor(f * cv.height), 1, 1).data.slice(0, 3)).join(',')
+      const cols = marks.length ? marks : [{ left: 0, width: whole.offsetWidth, title: null }]
+      return { width: whole.offsetWidth, marks, at: cols.map((m) => [at(m.left, m.width, 7.5 / 60), at(m.left, m.width, 42.5 / 60)]) }
+    })
+  const ORANGE = '208,117,10'
+  const GREEN = '8,99,47'
+
+  test('two labels on are two lanes, each in its own colours and named on hover; one turned off leaves one lane', async () => {
+    const rows = Array.from({ length: 60 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}">message ${i + 1}</div>`).join('')
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], strip: '#list' })`, 700, { v: 1, by: 'l:k1', seen: ['k1', 'k2'] })
+    const post = (m: unknown) => page.evaluate((x) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage(x, '*'), m)
+    await post(msg(both))
+    await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-lane').length === 2)
+    await page.waitForTimeout(200)
+    const two = await lanes(frame)
+    assert.deepEqual(two.marks.map((m) => m.title), ['Passed on', 'Links'], 'each lane names its label on hover')
+    assert.ok(two.marks.every((m) => m.width >= 3 && m.width <= 12) && two.width <= 25, `the lanes narrower: ${JSON.stringify(two)}`)
+    assert.equal(two.at[0][0], ORANGE, 'the first lane, the choice, orange where "Passed on" marks')
+    assert.equal(two.at[1][1], GREEN, 'the second lane green where "Links" marks')
+    assert.ok(two.at[0][1] !== GREEN && two.at[1][0] !== ORANGE, `each lane only its label: ${JSON.stringify(two.at)}`)
+    // "Links" turned off: one lane, "Passed on"
+    await post(msg([both[0]]))
+    await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-lane').length === 0)
+    await page.waitForTimeout(200)
+    const one = await lanes(frame)
+    assert.equal(one.width, 12, 'one lane, as wide as the track always is')
+    assert.equal(one.at[0][0], ORANGE)
+    assert.notEqual(one.at[0][1], GREEN)
+    await page.close()
+  })
+})
+
+describe('where the tracks show colours and the zoomed track', () => {
+  // n messages, the first half Text only, the second With links
+  const msgs = (n: number, id = 'm') => Array.from({ length: n }, (_, i) => `<div class="msg" data-anchor="${id}.jsonl#L${i + 1}" data-colour="${i < n / 2 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
+  const SCRIPT = `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`
+  /** each strip on the page: whether plain, whether its zoomed track shows, its width and the colours its overview draws */
+  const strips = (frame: () => Frame) =>
+    frame().evaluate(() =>
+      [...document.querySelectorAll('.thimble-colour-strip')].map((el) => {
+        const cv = el.querySelector('.thimble-colour-whole canvas') as HTMLCanvasElement
+        const data = cv.getContext('2d')!.getImageData(Math.floor(cv.width / 2), 0, 1, cv.height).data
+        const colours = new Set<string>()
+        for (let y = 0; y < cv.height; y++) if (data[y * 4] !== data[y * 4 + 2]) colours.add([data[y * 4], data[y * 4 + 1], data[y * 4 + 2]].join(','))
+        return { plain: el.hasAttribute('data-plain'), zoom: getComputedStyle(el.querySelector('.thimble-colour-zoom')!).display !== 'none', width: (el as HTMLElement).offsetWidth, colours: colours.size }
+      }),
+    )
+
+  test('the zoomed track shows on a list twenty times its box, not on one ten times it', async () => {
+    for (const [n, zoom] of [[100, false], [200, true]] as const) {
+      const { page, frame } = await own(msgs(n), SCRIPT)
+      await frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
+      await page.waitForTimeout(250)
+      const [s] = await strips(frame)
+      assert.equal(s.zoom, zoom, `${n} records of 30 px in a box of 300: ${JSON.stringify(s)}`)
+      assert.equal(s.plain, false)
+      assert.ok(s.colours >= 2, 'in the values\' colours')
+      await page.close()
+    }
+  })
+
+  test("a second pane is a plain track unless the page says its records are all there, and so is a pane none of whose records takes a colour", async () => {
+    // a second list of 200 records beside the first, each with a value; the page asks for its strip without saying more
+    const body = `${msgs(200)}</div><div id="side" style="height:300px;overflow:auto">${msgs(200, 's')}`
+    const { page, frame } = await own(body, `${SCRIPT}; colour.strip('#side')`)
+    await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-strip').length === 2)
+    await page.waitForTimeout(250)
+    const [list, side] = await strips(frame)
+    assert.deepEqual([list.plain, list.zoom], [false, true], `Color by's own list: colours and the zoomed track ${JSON.stringify(list)}`)
+    assert.deepEqual([side.plain, side.zoom, side.colours, side.width], [true, false, 0, 12], `the second pane: a plain track ${JSON.stringify(side)}`)
+    // the page says the second pane's elements are all its records: its colours
+    await frame().evaluate(() => (window as any).colour.strip('#side', { whole: true }))
+    await page.waitForTimeout(250)
+    const [, whole] = await strips(frame)
+    assert.deepEqual([whole.plain, whole.zoom], [false, true], JSON.stringify(whole))
+    assert.ok(whole.colours >= 2, JSON.stringify(whole))
+    // a pane whose records take no value under the choice: plain, with no zoomed track
+    await frame().evaluate(() => document.querySelectorAll('#side .msg').forEach((m) => m.removeAttribute('data-colour')))
+    await frame().evaluate(() => (window as any).colour.strip('#side'))
+    await page.waitForTimeout(250)
+    const [, bare] = await strips(frame)
+    assert.deepEqual([bare.plain, bare.zoom, bare.colours], [true, false, 0], JSON.stringify(bare))
     await page.close()
   })
 })

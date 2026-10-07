@@ -44,7 +44,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import config, corpus_tree, hook_auth, refs, transcripts, viewlog
+from . import config, corpus_tree, hook_auth, refs, transcripts, view_calls, viewlog
 
 log = logging.getLogger("thimble.corpus")
 
@@ -1122,9 +1122,11 @@ def register_corpus(body: RegisterBody) -> dict[str, Any]:
     registered already keeps its name; a path inside a corpus returns that corpus unless `exact`."""
     shown = body.shown if "shown" in body.model_fields_set else config.KEEP_SHOWN
     try:
-        return config.register_corpus(body.path, exact=body.exact, shown=shown, name=body.name)
+        rec = config.register_corpus(body.path, exact=body.exact, shown=shown, name=body.name)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    view_calls.registered(str(rec["name"]))
+    return rec
 
 
 @router.get("/corpora/{c}/sources")

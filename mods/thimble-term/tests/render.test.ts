@@ -167,7 +167,9 @@ test("a reply's citation is a link, blue and underlined; a click opens the citat
   // its status says `found` alone: the `from` row names the place (live check New 7)
   expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('found')
   expect(text).toContain('fromREADME.md line 3')
-  expect(text).toContain('An export of 4,579 wiki pages')
+  // the cited lines: a window over the file (panel.tsx citeWindow), drawn by its Client
+  const lines = await pane.drawn({ in: 'm:cite-lines' })
+  expect(shown(lines)).toContain('An export of 4,579 wiki pages')
   expect(text).toContain('ask about it')
   // the sentence it stands in, its value a link; no way back from main, so no `b`; no `in files` (the title opens it)
   expect(text).toContain('source')
@@ -175,7 +177,7 @@ test("a reply's citation is a link, blue and underlined; a click opens the citat
   expect(text).toContain('a to ask · f for its file · x to close')
   expect(text).not.toContain('in files')
   // the cited value on the selection background; no right-click menu anywhere
-  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["4,579"]}')
+  expect(JSON.stringify(lines)).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["4,579"]}')
   expect(text).not.toContain('open its lines')
   await pane.unmount()
 })

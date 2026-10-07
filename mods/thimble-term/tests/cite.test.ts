@@ -5,7 +5,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { wrapAround } from '../hooks/cite'
-import { CWD, shown, world } from './fixtures'
+import { CWD, DOC, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -74,9 +74,10 @@ test("a citation whose place does not exist: its title red with ×, its status a
 test('a value after a tab is lit where it stands', async ($, on) => {
   const w = world(on)
   w.resolve['data.tsv#L2'] = { ref: 'data.tsv#L2', kind: 'record', path: 'data.tsv', line: 2, blocks: [{ text: 'dse\t3908\tpages' }], excerpt: 'dse\t3908\tpages' }
+  w.pages['data.tsv'] = { path: 'data.tsv', kind: 'text', total_lines: 2, start: 1, records: [{ line: 1, record: { text: 'wiki\tpages' } }, { line: 2, record: { text: 'dse\t3908\tpages' } }] }
   await start($, w)
   const pane = await clickCite($, w, 'dse has [3908](data.tsv#L2) pages.', 9)
-  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["3908"]}')
+  expect(JSON.stringify(await pane.drawn({ in: 'm:cite-lines' }))).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["3908"]}')
   await pane.unmount()
 })
 
@@ -103,7 +104,7 @@ test("a click on an example's record opens its place with the passage the card q
     return (await $.ui.mount(PANE)) as unknown as M
   }
   let pane = await open(0)
-  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["4,579 wiki pages"]}')
+  expect(JSON.stringify(await pane.drawn({ in: 'm:cite-lines' }))).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["4,579 wiki pages"]}')
   await pane.unmount()
   pane = await open(1)
   const text = shown(await pane.drawn())
@@ -218,7 +219,7 @@ test("a context line wider than the panel is cut with `…` right against its wo
   w.resolve['README.md#L3'] = { ref: 'README.md#L3', kind: 'record', path: 'README.md', line: 3, blocks: [{ text: 'An export of 4,579 wiki pages and their revisions.' }], excerpt: 'An export of 4,579 wiki pages and their revisions.', context: { before: [{ line: 1, blocks: [{ text: 'a '.repeat(100) }] }, { line: 2, blocks: [{ text: ' a'.repeat(100) }] }], after: [] } }
   await start($, w)
   const pane = await clickCite($, w, 'It has [4,579](README.md#L3) pages.', 8)
-  const box = (await pane.find({ type: 'Box', key: 'cite-lines' })) as unknown as { children?: unknown[] }
+  const box = (await pane.drawn({ in: 'm:cite-lines' })) as unknown as { children?: unknown[] }
   const context = (box.children ?? []).map(r => shown(r)).filter(r => /^\s*[12]\s/.test(r))
   expect(context.length).toBe(2)
   for (const r of context) {
@@ -270,4 +271,117 @@ test("a label's link in a reply (`[33](concept:<id>/<value>)`) is a blue link, n
   expect(words).toContain('▾ examples')
   expect(JSON.stringify(panel)).toMatch(/"backgroundColor":"[^"]+"\},"children":\["proxy-link"\]/)
   await pane.unmount()
+})
+
+// ------------------------------------------------------------------------------------------------ a file citation's window
+
+/** A file of 900 lines, paged as thimble pages it: 200 lines from the line `--start` names. */
+const LOG = (start: number) => ({ path: 'log.txt', kind: 'text', total_lines: 900, start, records: Array.from({ length: Math.max(0, Math.min(200, 901 - start)) }, (_, i) => ({ line: start + i, record: { text: `line ${start + i} of the log` } })) })
+const logLine = (n: number) => ({ line: n, record: { text: `line ${n} of the log` } })
+const LOG_450 = { ref: 'log.txt#L450', kind: 'record', path: 'log.txt', line: 450, record: { text: 'line 450 of the log' }, blocks: [{ text: 'line 450 of the log' }], excerpt: 'line 450 of the log', context: { before: [447, 448, 449].map(logLine), after: [451, 452, 453].map(logLine) } }
+
+/** The rows of a file citation's window as drawn, and its drawing. */
+async function windowRows(pane: M): Promise<{ rows: string[]; json: string }> {
+  const tree = await pane.drawn({ in: 'm:cite-lines' })
+  return { rows: (((tree as { children?: unknown[] }).children ?? []) as unknown[]).map(r => shown(r)), json: JSON.stringify(tree) }
+}
+
+/** A click on `words` where a Client of the drawing shows them. */
+async function clickWords(ui: M, key: string, words: string): Promise<void> {
+  const rows = (((await ui.drawn({ in: key })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
+  const y = rows.findIndex(r => r.includes(words))
+  expect(y).toBeGreaterThanOrEqual(0)
+  const x = rows[y]!.indexOf(words) + 1
+  await ui.pointer({ type: 'down', x, y, button: 'left', in: key } as never)
+  await ui.pointer({ type: 'up', x, y, button: 'left', in: key } as never)
+}
+
+test("a file citation opens on its whole file: the cited line lit whole for a place cited without words, the lines around it dim, the file's lines above and below counted, as tall as the panel leaves it", async ($, on) => {
+  // Matt, 2026-10-07: "when you open a raw file, you can't see beyond the few lines it picks and the part it cited isn't
+  // highlighted"
+  const w = world(on)
+  w.pages['log.txt'] = LOG
+  w.resolve['log.txt#L450'] = LOG_450
+  await start($, w)
+  const pane = await clickCite($, w, 'See [[log.txt#L450]] for the restart.', 5)
+  const { rows, json } = await windowRows(pane)
+  // the panel's 36 rows less the path row, the title, the rule, the source row, the second rule, `ask about it` and the
+  // hint row
+  expect(rows.length).toBe(36 - 7)
+  const nums = rows.map(r => Number(/^\s+(\d+)\s{2}line/.exec(r)?.[1] ?? 0))
+  const firstShown = nums.find(n => n > 0)!
+  const lastShown = [...nums].reverse().find(n => n > 0)!
+  expect(rows[0]!.trim()).toBe(`↑ ${firstShown - 1} more`)
+  expect(rows.at(-1)!.trim()).toBe(`↓ ${900 - lastShown} more`)
+  // every line between them, in order; the cited one a third of the way down, with lines above it
+  expect(nums.filter(n => n > 0)).toEqual(Array.from({ length: lastShown - firstShown + 1 }, (_, i) => firstShown + i))
+  const at = nums.indexOf(450)
+  expect(at).toBeGreaterThan(3)
+  expect(at).toBeLessThan(rows.length / 2)
+  // the cited line lit whole (it names no value), its number in the text colour; the lines around it dim
+  expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["line 450 of the log"]}')
+  expect(json).toMatch(/"color":"inactive"\},"children":\["\s*449 {2}line 449 of the log"\]/)
+  expect(json).toMatch(/"color":"inactive"\},"children":\["\s*460 {2}line 460 of the log"\]/)
+  await pane.unmount()
+})
+
+test('a value cited in a file is lit where it stands, not its whole line; the page read is the one that holds the cited line, not the file\'s first', async ($, on) => {
+  const w = world(on)
+  w.pages['log.txt'] = LOG
+  w.resolve['log.txt#L450'] = LOG_450
+  await start($, w)
+  const pane = await clickCite($, w, 'It names [line 450](log.txt#L450) once.', 10)
+  const { json } = await windowRows(pane)
+  expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["line 450"]}')
+  expect(json).not.toContain('"children":["line 450 of the log"]}')
+  // the page that holds the cited line's lines was read from its start (term.ts citePage), never the file's first page
+  const reads = w.calls.filter(c => c[2] === 'files' && c[5] === 'log.txt').map(c => c.slice(6).join(' '))
+  expect(reads).toContain('--start 401')
+  expect(reads).not.toContain('')
+  await pane.unmount()
+})
+
+test('every file citation opens in the window over its file: from a reply, a card\'s takeaway and a document', async ($, on) => {
+  const w = world(on)
+  w.pages['log.txt'] = LOG
+  w.resolve['log.txt#L450'] = LOG_450
+  w.cells.ff73e071!.takeaway = 'The log names [line 450](log.txt#L450) once.'
+  w.docs.report = { ...DOC, sections: [{ id: 's1', heading: 'The data', paragraphs: [{ id: 'p1', sentences: [{ id: 'x1', text: 'The log names [line 450](log.txt#L450) once.' }] }], figures: [] }] }
+  await start($, w)
+  const lit = async () => {
+    const pane = (await $.ui.mount(PANE)) as unknown as M
+    const { rows, json } = await windowRows(pane)
+    expect(rows.some(r => /^\s+450 {2}line 450 of the log$/.test(r))).toBe(true)
+    expect(rows.at(-1)).toMatch(/↓ \d+ more$/)
+    expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["line 450"]}')
+    await pane.unmount()
+  }
+  // a reply
+  await (await clickCite($, w, 'The log names [line 450](log.txt#L450) once.', 15)).unmount()
+  await lit()
+  // a card's takeaway
+  w.toolText = 'card:ff73e071\n[out0: table]'
+  await $.turn.start({ text: 'How big?', turnId: 't1' } as never)
+  await $.session.append({ door: 'response', origin: { kind: 'model', model: 'm' }, uuid: 'r1', message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Here.' }] } } as never).catch(() => undefined)
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u1' } as never)
+  await $.turn.complete({ turnId: 't1', answer: 'Here.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.advance(300)
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  await clickWords(ui, 'para-tk-t0-1', 'line 450')
+  await ui.unmount()
+  await w.clock.settle()
+  await lit()
+  // a document
+  await $.command.run({ command: 'thimble:thimble', args: 'documents' } as never)
+  await w.clock.settle()
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  await pane.press({ key: 'doc-open-0' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  const para = (await pane.findAll({ type: 'Client' })).map(c => String((c as { key?: string }).key)).find(k => k.startsWith('para-'))!
+  await clickWords(pane, para, 'line 450')
+  await w.clock.settle()
+  await pane.unmount()
+  await lit()
 })

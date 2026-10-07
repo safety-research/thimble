@@ -129,6 +129,7 @@ def _fresh(monkeypatch):
     monkeypatch.setattr(views, "FOLDER_CACHE_S", 0.0)
     views._memo.clear()
     views._ready.clear()
+    views._derived_kept.clear()
     sys.modules.pop("_thimble_views", None)
     yield
     views._memo.clear()
@@ -804,6 +805,29 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
             "vega-lite, vega-embed and the view's own"
     assert views._script_text("a</script>b") == "a<\\/script>b"
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
+
+
+async def test_the_frame_route_sends_the_document_again_only_when_it_changed(ws, inproc, bound):
+    """The frame document carries an ETag, so the browser asks on every open, and a request that names the tag gets
+    304 with no body until the view's page changes."""
+    import httpx  # noqa: PLC0415
+
+    from app.main import app  # noqa: PLC0415
+
+    views.mark_built(CORPUS, "threads")
+    url = f"/api/ws/{CORPUS}/views/threads/frame"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+        r = await client.get(url)
+        assert r.status_code == 200 and "window.thimble" in r.text
+        tag = r.headers["etag"]
+        assert r.headers["cache-control"] == "no-cache"
+        again = await client.get(url, headers={"If-None-Match": tag})
+        assert (again.status_code, again.content, again.headers["etag"]) == (304, b"", tag)
+        assert (await client.get(url, headers={"If-None-Match": '"0"'})).status_code == 200
+        views.write_view(CORPUS, "threads", reader=THREADS_READER, html=THREADS_HTML + "<!-- changed -->", **VIEW)
+        views.mark_built(CORPUS, "threads")
+        changed = await client.get(url, headers={"If-None-Match": tag})
+        assert changed.status_code == 200 and changed.headers["etag"] != tag and "<!-- changed -->" in changed.text
 
 
 async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc, bound):

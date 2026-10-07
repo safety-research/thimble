@@ -5,8 +5,9 @@
 // zooms; the overview draws its records in the Color by
 // colours, grey with Off, one colour per pixel row; a long list gets the zoomed track at the outer edge beside the
 // overview, its colours faded beyond the part in view, which lies under a lens joined to the overview's frame by two
-// lines, the lens going down the zoomed track with the frame; hovering the overview previews the records there in plain
-// rows with a straight bar. Through the real ViewerFrame, a colour picked for a label's value from its chip's swatch
+// lines, the lens going down the zoomed track with the frame; a drag on the zoomed track scrolls the list at its scale,
+// the lens following the pointer over records that hold still, and a press off the lens brings it there; hovering the
+// overview previews the records there in plain rows with a straight bar. Through the real ViewerFrame, a colour picked for a label's value from its chip's swatch
 // goes to thimble as the label's colour, and hovering a chip of a label's value says what the value means from
 // thimble's own answer. What the selector decides without layout is tests/public/range-kit.test.ts.
 import assert from 'node:assert/strict'
@@ -273,6 +274,120 @@ describe('the time range selector in a frame', () => {
     assert.equal(await frame().locator('.thimble-colour-chip').count(), 0)
     await page.close()
   })
+
+  test("the band of the time in view follows the list's rows as it scrolls and changes, under the viewfinder's frame", async () => {
+    const { page, frame, errors } = await framed()
+    // a row's time from its ref: message n is at T0 + (n - 1) * 600
+    await frame().evaluate((t0) => (window as any).range.follow('#list', (el: HTMLElement) => t0 + (Number(el.dataset.anchor!.slice(9)) - 1) * 600, '.msg'), T0)
+    // the band's px on the overview, and where the first and the last row in the list's view stand on the overview
+    const band = () =>
+      frame().evaluate((t0) => {
+        const r = (window as any).range
+        const strip = document.querySelector('.thimble-range-strip') as HTMLElement
+        const vis = document.querySelector('.thimble-range-vis') as HTMLElement
+        const x = (t: number) => ((t - r.span[0]) / (r.span[1] - r.span[0])) * strip.clientWidth
+        const list = document.getElementById('list')!.getBoundingClientRect()
+        const shown = [...document.querySelectorAll<HTMLElement>('#list .msg')].filter((m) => m.getBoundingClientRect().bottom > list.top && m.getBoundingClientRect().top < list.bottom)
+        const times = shown.map((m) => t0 + (Number(m.dataset.anchor!.slice(9)) - 1) * 600)
+        const b = vis.getBoundingClientRect()
+        const s = strip.getBoundingClientRect()
+        return { rows: shown.length, want: [x(Math.min(...times)), x(Math.max(...times))], got: [b.left - s.left, b.right - s.left], display: getComputedStyle(vis).display }
+      }, T0)
+    const near = (b: Awaited<ReturnType<typeof band>>) => b.display !== 'none' && Math.abs(b.got[0] - b.want[0]) <= 1.5 && Math.abs(b.got[1] - Math.max(b.want[1], b.want[0] + 3)) <= 1.5
+    await page.waitForTimeout(100)
+    const b0 = await band()
+    assert.ok(b0.rows >= 10 && near(b0), `the band covers the rows in view at the top: ${JSON.stringify(b0)}`)
+    // scrolled to the middle: the band moves to the rows now in view
+    await frame().evaluate(() => (document.getElementById('list')!.scrollTop = 3000))
+    await page.waitForTimeout(100)
+    const b1 = await band()
+    assert.ok(near(b1) && b1.got[0] > b0.got[1] + 50, `the band moves with the scroll: ${JSON.stringify([b0, b1])}`)
+    // a wheel over the list scrolls it back up a little: the band follows
+    const list = (await frame().locator('#list').boundingBox())!
+    await page.mouse.move(list.x + list.width / 2, list.y + list.height / 2)
+    await page.mouse.wheel(0, -900)
+    await page.waitForTimeout(250)
+    const b2 = await band()
+    assert.ok(near(b2) && b2.got[0] < b1.got[0], `the band follows the wheel: ${JSON.stringify([b1, b2])}`)
+    // the range zoomed in: the list holds other rows, and the band stands on those in view
+    await frame().evaluate((t0) => (window as any).range.set(t0 + 300 * 600, t0 + 360 * 600), T0)
+    await page.waitForTimeout(150)
+    const b3 = await band()
+    assert.ok(near(b3) && b3.got[0] >= b1.got[0], `the band follows the list's new rows: ${JSON.stringify([b2, b3])}`)
+    // the band lies under the viewfinder's frame, filled where the frame is an outline
+    const look = await frame().evaluate(() => {
+      const vis = document.querySelector('.thimble-range-vis')!
+      const win = document.querySelector('.thimble-range-win')!
+      return {
+        under: vis.parentElement === win.parentElement && !!(vis.compareDocumentPosition(win) & Node.DOCUMENT_POSITION_FOLLOWING),
+        fill: getComputedStyle(vis).backgroundColor,
+        frameFill: getComputedStyle(win).backgroundColor,
+        edge: getComputedStyle(vis).borderLeftWidth,
+      }
+    })
+    assert.ok(look.under, 'the frame is drawn over the band')
+    assert.ok(look.fill !== look.frameFill && look.fill !== 'rgba(0, 0, 0, 0)' && look.edge === '1px', JSON.stringify(look))
+    // set by hand: one moment is a band 3 px wide, and null hides it
+    const one = await frame().evaluate((t0) => {
+      const r = (window as any).range
+      r.follow(null).set(null).visible(t0 + 100 * 600, t0 + 100 * 600)
+      const w = document.querySelector('.thimble-range-vis')!.getBoundingClientRect().width
+      r.visible(null)
+      return [w, getComputedStyle(document.querySelector('.thimble-range-vis')!).display]
+    }, T0)
+    assert.deepEqual(one, [3, 'none'])
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
+  test('a labels message that only brings marks for new refs leaves the overview as it is drawn', async () => {
+    const { page, frame, errors } = await framed()
+    const post = (msg: object) => page.evaluate((m) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage({ type: 'thimble:labels', on: [], filter: null, ...m }, '*'), msg)
+    const mark = (id: string, value: string) => ({ bar: '#08632f', names: [id], values: [{ id, label: id, value, colour: '#08632f' }] })
+    const marks = (from: number, to: number, id: string) => Object.fromEntries(Array.from({ length: to - from + 1 }, (_, k) => [`m.jsonl#L${from + k}`, mark(id, 'yes')]))
+    // every paint of the overview's canvas, and every change to the control's elements (its axis, readout, viewfinder)
+    await frame().evaluate(() => {
+      const w = window as any
+      w.__paints = 0
+      w.__dom = 0
+      const clear = CanvasRenderingContext2D.prototype.clearRect
+      CanvasRenderingContext2D.prototype.clearRect = function (this: CanvasRenderingContext2D, x: number, y: number, cw: number, ch: number) {
+        if (this.canvas.closest('.thimble-range-strip')) w.__paints++
+        return clear.call(this, x, y, cw, ch)
+      }
+      new MutationObserver((recs) => (w.__dom += recs.length)).observe(document.querySelector('.thimble-range')!, { childList: true, subtree: true, attributes: true })
+    })
+    const counts = () => frame().evaluate(() => [(window as any).__paints, (window as any).__dom])
+    const zero = () => frame().evaluate(() => ((window as any).__paints = (window as any).__dom = 0))
+    await post({ marks: {} })
+    await page.waitForTimeout(200)
+    await zero()
+    // colored by Kind: marks for refs thimble had not marked before change nothing the overview draws
+    await post({ marks: marks(1, 40, 'k1') })
+    await page.waitForTimeout(200)
+    await post({ marks: marks(1, 80, 'k1') })
+    await page.waitForTimeout(200)
+    assert.deepEqual(await counts(), [0, 0], 'colored by a field, the overview is not drawn again')
+    // the label k1 turned on takes the colour: the overview draws its marked records in it
+    const k1 = { id: 'k1', name: 'k1', colour: '#08632f', values: [{ name: 'yes', colour: '#08632f' }] }
+    const all = (n: number) => [{ ...k1, on: true, here: true, count: n, values: [{ name: 'yes', colour: '#08632f', highlight: true }] }]
+    await post({ marks: marks(1, 80, 'k1'), on: [k1], all: all(80) })
+    await page.waitForTimeout(250)
+    assert.equal(await frame().evaluate(() => (window as any).colour.label), 'k1')
+    assert.ok((await counts())[0] > 0, 'the overview is drawn in the label it is colored by')
+    await zero()
+    // colored by k1: marks of k1 for new refs color more records, so the overview is drawn again
+    await post({ marks: marks(1, 160, 'k1'), on: [k1], all: all(80) })
+    await page.waitForTimeout(250)
+    assert.ok((await counts())[0] > 0, 'new records in the colour are drawn')
+    await zero()
+    // but marks of another label for new refs change nothing it draws
+    await post({ marks: { ...marks(1, 160, 'k1'), ...marks(161, 240, 'k2') }, on: [k1], all: all(80) })
+    await page.waitForTimeout(250)
+    assert.equal((await counts())[0], 0, 'marks that change no value of k1 leave the overview alone')
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
 })
 
 describe("a long list's two tracks", () => {
@@ -346,7 +461,8 @@ describe("a long list's two tracks", () => {
         const l = document.getElementById('list')!
         l.scrollTop = x * (l.scrollHeight - l.clientHeight)
       }, f)
-      await page.waitForTimeout(80)
+      // a jump: the tracks glide there, then stand still
+      await page.waitForTimeout(350)
       const s = await tracks(frame)
       return { lens: (s.lens.top + 3 - s.zoomBox.top) / (s.zoomBox.height - (s.lens.height - 6)), frame: (s.thumb.top - s.whole.top) / (s.whole.height - s.thumb.height), s }
     }
@@ -368,7 +484,8 @@ describe("a long list's two tracks", () => {
           const l = document.getElementById('list')!
           l.scrollTop = x * (l.scrollHeight - l.clientHeight)
         }, f)
-        await page.waitForTimeout(80)
+        // a jump: the tracks glide there, and go onto the pixel grid once they have stood still a few frames
+        await page.waitForTimeout(350)
         const s = await tracks(frame)
         const tol = 0.5 / dpr + 1e-6
         const on = (v: number) => Math.abs(v * dpr - Math.round(v * dpr)) < 1e-3
@@ -412,6 +529,84 @@ describe("a long list's two tracks", () => {
     await page.waitForTimeout(100)
     const top = await frame().evaluate(() => { const l = document.getElementById('list')!; return (l.scrollTop + l.clientHeight / 2) / l.scrollHeight })
     assert.ok(Math.abs(top - 0.75) < 0.05, `the list goes there: ${top}`)
+    await page.close()
+  })
+})
+
+describe("a drag on the zoomed track", () => {
+  /** The lens's top, the row of the zoomed track's canvas where the list's first half gives way to its second, the
+   * list's scroll and the zoomed track's cursor. */
+  const zoomed = (frame: () => Frame) =>
+    frame().evaluate(() => {
+      const zoom = document.querySelector('.thimble-colour-zoom') as HTMLElement
+      const cv = zoom.querySelector('canvas') as HTMLCanvasElement
+      const data = cv.getContext('2d')!.getImageData(Math.floor(cv.width / 2), 0, 1, cv.height).data
+      // the first device row whose colour is more red than blue: the With links records' orange after the blue
+      let edge = -1
+      for (let y = 0; y < cv.height; y++) if (data[y * 4 + 3] > 0 && data[y * 4] > data[y * 4 + 2] + 40) {
+        edge = y / (window.devicePixelRatio || 1)
+        break
+      }
+      const list = document.getElementById('list')!
+      const lens = zoom.querySelector('.thimble-colour-lens')!.getBoundingClientRect()
+      return { lens: lens.top, lensH: lens.height, zoomTop: zoom.getBoundingClientRect().top, zoomH: zoom.getBoundingClientRect().height, edge, top: list.scrollTop, view: list.clientHeight, height: list.scrollHeight, cursor: getComputedStyle(zoom).cursor }
+    })
+
+  test("a drag on the lens scrolls the list at the zoomed track's scale: the lens follows the pointer over records that hold still", async () => {
+    const { page, frame } = await framed()
+    // the list's middle a view and a half below the part in view, so that the zoomed track shows where the first half
+    // gives way to the second, below the lens as it goes up
+    await frame().evaluate(() => {
+      const l = document.getElementById('list')!
+      l.scrollTop = l.scrollHeight / 2 - 2.5 * l.clientHeight
+    })
+    await page.waitForTimeout(250)
+    const before = await zoomed(frame)
+    assert.equal(before.cursor, 'grab', 'the zoomed track says it can be dragged')
+    assert.ok(before.edge > 0, `the zoomed track shows the change of value: ${JSON.stringify(before)}`)
+    const lens = (await frame().locator('.thimble-colour-lens').boundingBox())!
+    const x = lens.x + lens.width / 2
+    const y = lens.y + lens.height / 2
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    for (let i = 1; i <= 15; i++) await page.mouse.move(x, y - 2 * i)
+    await page.waitForTimeout(80)
+    const during = await zoomed(frame)
+    assert.equal(during.cursor, 'grabbing')
+    assert.ok(Math.abs(during.lens - (before.lens - 30)) <= 1, `the lens follows the pointer: ${before.lens} → ${during.lens}`)
+    assert.ok(Math.abs(during.edge - before.edge) <= 1, `the records hold still under it: ${before.edge} → ${during.edge}`)
+    // 30 px of the zoomed track, which holds five of the list's heights: five times 30 px of the list, about
+    const scale = (5 * before.view) / before.zoomH
+    assert.ok(Math.abs(during.top - before.top + 30 * scale) <= 2 * scale, `the list scrolled ${during.top - before.top}, wanted ${-30 * scale}`)
+    await page.mouse.up()
+    // let go, the lens glides back to where the frame puts it: as far down the zoomed track as the list now stands
+    await page.waitForTimeout(400)
+    const after = await zoomed(frame)
+    assert.equal(after.cursor, 'grab')
+    const back = before.lens + ((after.top - before.top) / (before.height - before.view)) * (before.zoomH - (before.lensH - 6))
+    assert.ok(Math.abs(after.lens - back) <= 1.5, `the lens back with the frame: ${before.lens} → ${after.lens}, wanted ${back}`)
+    await page.close()
+  })
+
+  test('a press on the zoomed track off the lens brings the lens there, and a drag goes on from there', async () => {
+    const { page, frame } = await framed()
+    const lens = (await frame().locator('.thimble-colour-lens').boundingBox())!
+    const before = await zoomed(frame)
+    const x = lens.x + lens.width / 2
+    const y = lens.y + lens.height + 50
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await page.waitForTimeout(80)
+    const pressed = (await frame().locator('.thimble-colour-lens').boundingBox())!
+    assert.ok(Math.abs(pressed.y + pressed.height / 2 - y) <= 1, `the lens's middle at ${pressed.y + pressed.height / 2}, the pointer at ${y}`)
+    for (let i = 1; i <= 10; i++) await page.mouse.move(x, y + i)
+    await page.waitForTimeout(80)
+    const dragged = (await frame().locator('.thimble-colour-lens').boundingBox())!
+    assert.ok(Math.abs(dragged.y - (pressed.y + 10)) <= 1, `the drag goes on: ${pressed.y} → ${dragged.y}`)
+    const scale = (5 * before.view) / before.zoomH
+    const top = await frame().evaluate(() => document.getElementById('list')!.scrollTop)
+    assert.ok(Math.abs(top - before.top - (y + 10 - (lens.y + lens.height / 2)) * scale) <= 2 * scale, `the list scrolled ${top - before.top}`)
+    await page.mouse.up()
     await page.close()
   })
 })

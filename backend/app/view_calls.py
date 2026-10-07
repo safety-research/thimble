@@ -52,6 +52,8 @@ KERNEL_BASE = 256 * 1024 * 1024  # a reader kernel's resident size before it hol
 KEEP_FACTOR = 1.5  # a kernel above rss_max() holding more than this times its indexes' bytes is restarted
 MB = 1024 * 1024
 SPARE_AFTER_S = 1.0  # a call running this long starts a spare kernel when none is free
+SPARE_BACKOFF_S = 5.0  # after a spare kernel did not start, none is started for this long, doubled at each failure
+SPARE_BACKOFF_MAX_S = 300.0  # in a row up to this; a start that works ends the wait
 CALL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 CANCELLED_S = 60.0  # how long a cancel that came before its call is kept
 PROGRESS_SUBDIR = ".calls"  # under the workspace's indexes folder: one progress file per running call
@@ -128,6 +130,18 @@ _waiters: list[asyncio.Future] = []
 _calls: dict[tuple[str, str], Call] = {}  # (workspace, call id) -> the call
 _cancelled: dict[tuple[str, str], float] = {}  # (workspace, call id) -> when a cancel came for a call not yet registered
 _reaper: "tuple[asyncio.AbstractEventLoop, asyncio.TimerHandle] | None" = None
+
+
+@dataclass
+class Failing:
+    """A workspace's spare kernels that did not start: how many in a row, until when none is started, and the last
+    error."""
+    n: int
+    until: float
+    error: str
+
+
+_spare_failed: dict[str, Failing] = {}  # workspace -> its spare kernels' failures in a row (_spare)
 
 
 # ------------------------------------------------------------------------------------------------- the kernels' work
@@ -334,7 +348,7 @@ def _note_answer(w: Worker, outputs: list[dict]) -> None:
     """Keep what the kernel said it holds (view_host's `held`) and read its resident size."""
     from .views import _answer_from  # noqa: PLC0415 — views imports this module
 
-    ans = _answer_from(outputs)
+    ans = _answer_from(outputs, raw=True)  # the result left unread
     if ans is None and any(_error_name(b) in STUCK for b in outputs):
         w.holds.clear()  # the kernel died or did not settle, and holds nothing now
     ans = ans or {}
@@ -352,10 +366,33 @@ def _note_answer(w: Worker, outputs: list[dict]) -> None:
                  w.rss // MB, len(w.holds), sum(w.holds.values()) // MB)
 
 
+def _workspace_gone(c: str) -> bool:
+    """Whether the workspace's corpus is no longer registered or its folder is gone (config.corpus_dir), so no kernel of
+    it can start; False while that cannot be read (a process out of file descriptors). Tests replace it."""
+    from . import config  # noqa: PLC0415
+
+    try:
+        config.corpus_dir(c)
+    except ValueError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def _spare(c: str) -> None:
-    """Start a kernel ahead when none is free and the pool has room, so the next call need not wait for one to start."""
+    """Start a kernel ahead when none is free and the pool has room, so the next call need not wait for one to start.
+    After a spare did not start, none is started for SPARE_BACKOFF_S, doubled at each failure in a row up to
+    SPARE_BACKOFF_MAX_S, and the log says so once (_spare_failure). A workspace that is gone gets none, and its kernels
+    are shut down."""
     pool = _pool(c)
     if any(not w.busy for w in pool) or len(pool) >= POOL_MAX:
+        return
+    failing = _spare_failed.get(c)
+    if failing is not None and time.monotonic() < failing.until:
+        return
+    if _workspace_gone(c):
+        _drop_gone(c)
         return
     w = _new_worker(c)
     w.busy = True
@@ -363,14 +400,56 @@ def _spare(c: str) -> None:
     async def warm() -> None:
         try:
             await _start(c, w.name)
-        except Exception:  # noqa: BLE001
-            log.exception("%s: the spare reader kernel %s did not start", c, w.name)
+        except Exception as e:  # noqa: BLE001
             _forget(w)
             _wake()
+            _spare_failure(c, w.name, e)
             return
+        if w not in _pools.get(c, []):  # the workspace's kernels were forgotten while this one started
+            with contextlib.suppress(Exception):
+                await _stop(c, w.name)
+            return
+        done = _spare_failed.pop(c, None)
+        if done is not None:
+            log.info("%s: the spare reader kernel %s started after %d that did not", c, w.name, done.n)
         _release(w)
 
     asyncio.get_running_loop().create_task(warm(), name=f"view-kernel-spare-{w.name}")
+
+
+def _spare_failure(c: str, name: str, e: BaseException) -> None:
+    """A spare kernel of the workspace did not start: wait longer before the next (_spare). The first failure is logged
+    with its traceback, a later one only when its error differs from the one before."""
+    if _workspace_gone(c):
+        _drop_gone(c)
+        return
+    prev = _spare_failed.get(c)
+    n = prev.n + 1 if prev is not None else 1
+    wait = min(SPARE_BACKOFF_MAX_S, SPARE_BACKOFF_S * 2 ** (n - 1))
+    error = f"{type(e).__name__}: {e}"
+    _spare_failed[c] = Failing(n, time.monotonic() + wait, error)
+    if prev is None or prev.error != error:
+        log.warning("%s: the spare reader kernel %s did not start (%s); the next spare waits %.0f s, longer while they "
+                    "keep failing", c, name, error, wait, exc_info=(type(e), e, e.__traceback__) if prev is None else None)
+    else:
+        log.debug("%s: the spare reader kernel %s did not start again (%d in a row); the next waits %.0f s", c, name, n,
+                  wait)
+
+
+def _drop_gone(c: str) -> None:
+    """The workspace is gone: its kernels shut down and its pool and state forgotten (notebook.shutdown_workspace)."""
+    log.info("%s: the workspace is gone, so its reader kernels are shut down and no spare is started", c)
+    forget_workspace(c)
+
+    async def stop() -> None:
+        from . import notebook  # noqa: PLC0415
+
+        try:
+            await notebook.shutdown_workspace(c)
+        except Exception:  # noqa: BLE001
+            log.exception("%s: shutting down the kernels of a workspace that is gone failed", c)
+
+    asyncio.get_running_loop().create_task(stop(), name=f"view-kernels-gone-{c}")
 
 
 async def execute(c: str, code: str, timeout: float | None) -> tuple[list[dict], str]:
@@ -467,11 +546,18 @@ def forget_view(c: str, slug: str) -> None:
 
 
 def forget_workspace(c: str) -> None:
-    """The workspace's kernels were shut down elsewhere (notebook.shutdown_workspace: a reset, a restore): forget them."""
+    """The workspace's kernels were shut down elsewhere (notebook.shutdown_workspace: a reset, a restore, a removal):
+    forget them, and the spare kernels that did not start."""
     _pools.pop(c, None)
+    _spare_failed.pop(c, None)
     for k in [k for k in _affinity if k[0] == c]:
         del _affinity[k]
     _wake()
+
+
+def registered(c: str) -> None:
+    """The workspace's folder was registered (again): a spare kernel that did not start is tried at the next slow call."""
+    _spare_failed.pop(c, None)
 
 
 def kernels(c: str) -> list[dict[str, Any]]:

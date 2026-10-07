@@ -290,7 +290,7 @@ colored is said under each.
 **A panel's header**, the same on every panel:
 
 ```
-  ‹ back  home › files › events.jsonl                                   show all threads  1 new
+  ‹ back  home › files › events.jsonl
   events.jsonl                                                                  earlier  later
   jsonl · 19,931 records · lines 201-400 of 19,931
   Table   Transcript   Raw
@@ -301,10 +301,13 @@ colored is said under each.
   name (a click on a step goes back to it; a click on the list a step stands in, such as `files` before a file opened
   from a citation, goes to that list in its place) (`thread "how many…"`, `citation 5884`, `card "How many pages…"`, `label edit purpose`, `files`,
   `events.jsonl`), parted by a dim `›`, a long step cut with `…`. A step whose thread has new answers is followed by
-  `new` in green; one whose thread is answering starts with `◌`. At R: `show all threads`, which opens the threads
-  panel, then `N new` in green while answers wait. The threads panel itself leaves it out. The row never wraps: in a
-  narrow pane `show all threads` shortens to `threads` (with `N new`, then alone), so the threads stay one click away,
-  then gives way to the steps, and the steps fold into `…` and are cut to the room left. No key shows all threads.
+  `new` in green; one whose thread is answering starts with `◌`. On home, at R: `show all threads`, which opens the
+  threads panel, then `N new` in green while answers wait. Every other panel leaves them out (Matt, 2026-10-07: "does
+  'show all threads' really need to be there when you're not in a thread?"): the threads panel is the threads, and on
+  a view, a file, a card, a citation, a label or a document they are not the subject, and home is one click away. The
+  row never wraps: in a narrow pane `show all threads` shortens to `threads` (with `N new`, then alone), so the threads
+  stay one click away, then gives way to the steps, and the steps fold into `…` and are cut to the room left. No key
+  shows all threads.
 - The title row: the subject's name in the accent color and bold; navigation against R. The subtitle under it: the
   subject's facts, dim, parted by ` · `, with a problem in red. A panel with no facts worth a row has no subtitle.
 - Tabs, where the subject has them: each tab's name with a cell of space at each side, selected or not, the selected one
@@ -578,7 +581,7 @@ colored is said under each.
 **The citation panel:**
 
 ```
-  ‹ back  home › citation 14591                                         show all threads  1 new
+  ‹ back  home › citation 14591
   14591
   found in the command's output, line 1
   ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -604,7 +607,8 @@ colored is said under each.
 - Label/value rows: `from`, `source` (the reply's sentence in quotation marks, the cited value in it blue and
   underlined), `quoted` for a passage an example quotes. No `why`.
 - The lines: nested at A2, their numbers right-aligned in a dim column, the cited line's number in the text color and
-  the cited value on the selection background; each record around the cited one on one dim row, drawn as the cited one
+  the cited value on the selection background (the whole line where the citation shows no value, or the line does not
+  hold it, and no example's quote marks a passage); each record around the cited one on one dim row, drawn as the cited one
   is: its words where thimble reads words in it (a transcript's message, an event's params), else as Raw draws it (a
   JSON record as its line of JSON); the cited record over its rows, and never a record cut after its first rows; a cited line wrapped over 3 to 8 rows by the pane's height, with two
   lines of context when it wraps. A card value's citation draws the card in its frame, the cited mark on the
@@ -612,6 +616,13 @@ colored is said under each.
   on each side, the cited value (the whole line, for a citation with no words) on the selection background, never the
   card's table; it is named `card "<question>" output line 1`, never `card L1`. A place cited with a passage of its line
   (`#L2.b0:c0-120`) reads as its line (`agent-chat.jsonl line 2`).
+- A file's lines are a window over the whole file (Matt, 2026-10-07: "you can't see beyond the few lines it picks"),
+  as tall as the rows the panel's other parts leave: it opens with the cited lines a third of the way down, `↑ N more`
+  and `↓ N more` dim on a row each count the file's lines above and below it, and a click on one moves it a page; ↑↓
+  (`↑↓ to scroll`) and the wheel move it a line, through the whole file, the next page of the file read as the window
+  nears it; at the file's end its last line is on the window's last row. Opened anew, a citation's window starts at its
+  cited lines again; `b` back from its file finds it where it was. `f` (or a click on the title) opens the file view at
+  the cited line.
 - The bottom: `ask about it`, then the `follow-up` field when the citation was opened from a side thread.
 
 **The views pane:** `N views · N built`; one row per view, newest first: its glyph, its name, the files it claims dim
@@ -632,7 +643,7 @@ typing, every key. A view built in browser mode is one line that says so, and ho
 **The file browser:**
 
 ```
-  ‹ back  home › files                                                         show all threads
+  ‹ back  home › files
   Files
   4 files
   ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -674,7 +685,7 @@ typing, every key. A view built in browser mode is one line that says so, and ho
 **The label panel**, as Matt laid it out, after the browser's label editor (`frontend/src/files/LabelCard.tsx`):
 
 ```
-  ‹ back  home › labels › edit purpose                                         show all threads
+  ‹ back  home › labels › edit purpose
   name:   ● edit purpose
   type:   prompt  regex  code
   scope:  revisions.jsonl                                                        14,591 records

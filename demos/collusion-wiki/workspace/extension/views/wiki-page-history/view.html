@@ -55,7 +55,8 @@
   #sort { flex: none; width: 168px; }
   #list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; outline: none; }
   #vl { position: relative; }
-  .row { position: absolute; left: 0; right: 0; box-sizing: border-box; height: 50px; padding: 7px 12px 6px 14px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
+  .chunk { position: absolute; left: 0; right: 0; }
+  .row { position: relative; box-sizing: border-box; height: 50px; padding: 7px 12px 6px 14px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
   .row:hover { background: rgba(var(--ink-rgb), 0.035); }
   .row.sel { background: var(--surface-selected); }
   .row .r1, .row .r2 { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -93,7 +94,8 @@
 
   /* a page's history: revisions, deletes and requests */
   .day { position: sticky; top: 0; z-index: 2; padding: 6px 16px 5px; background: var(--surface-card); border-bottom: 1px solid var(--border-hairline); color: var(--text-secondary); font: 500 var(--text-xs) / 1.2 var(--font-body); }
-  .blk { position: relative; border-bottom: 1px solid var(--border-hairline); scroll-margin-top: 30px; }
+  /* an item out of view is not laid out or painted until it comes near the view, at the height it last had (or a guess) */
+  .blk { position: relative; border-bottom: 1px solid var(--border-hairline); scroll-margin-top: 30px; content-visibility: auto; contain-intrinsic-size: auto 220px; }
   .blk.flash { background: var(--surface-selected); }
   .bh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px; min-width: 0; padding: 8px 16px 6px; }
   .bh .seq { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
@@ -226,7 +228,7 @@
 // revisions and deletes on the same bins as the chart, and the list's tracks beside it; the page picked opens on the
 // right as its history in the range and of the username filtered by, revision by revision, each a row with the colour's
 // bar on its edge, a link to its line and its diff against the revision before, with its delete events and requests in
-// place, more as the list scrolls, and the tracks of the revisions read so far.
+// place, more as the history scrolls, under the browser's own scrollbar.
 // Labels: the reader keeps only the pages, revisions and events the label filter keeps, and hands every revision the
 // marks of the labels that are on, from which the page reads the value of the label colored by; a page's row carries
 // the page as its data-anchor (view:<slug>/<page_id>), each revision and event its line, so thimble marks them.
@@ -235,8 +237,10 @@ const unitRef = (key) => `view:${SLUG}/${key}`
 const WITHHELD = '[pre-2026 line withheld]'
 const ROW_H = 50
 const CHUNK = 30 // history items a fetch reads in full
+const FIRST_CHUNK = 12 // and the first fetch of a page opened, enough to fill the pane: the rest follow as it scrolls
 const FEW_NAMES = 12 // usernames a page's details show before All
-const LIST_PAD = 8 // rows drawn beyond the list's view
+const LIST_CHUNK = 12 // rows the list adds or takes away at a time, as it scrolls
+const DIFF_LINES = 28 // lines of a diff drawn before its Show all button, about the height a diff is clipped to
 const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const G = 214 // the chart's gutter
@@ -302,10 +306,21 @@ const S = {
   event: null, // an event no page holds, shown on the right
 }
 
+// The labels as an overview read them: the values of the labels that were on (its `marks`, at most the reader's
+// MARKS_MAX of them) and the filter the view knew of when it asked. The first word of the labels comes as the view
+// opens, while its overview is being read; when it matches what the overview read, the overview is kept (readAs).
+const MARKS_MAX = 24
+let labelsHeard = false, checkLoad = 0 // whether the labels were heard, and the overview load to check against them
+function readAs(ov) {
+  if (!ov || ov.filterSig !== JSON.stringify(labelState.filter)) return false
+  const now = []
+  for (const l of labelState.labels || []) for (const v of l.values || []) now.push([l.name, v.name])
+  return JSON.stringify(now.slice(0, MARKS_MAX)) === JSON.stringify((ov.marks || []).map((m) => [m.label, m.value]))
+}
 let ovSeq = 0
 async function loadOverview() {
   for (;;) {
-    const my = ++ovSeq, v = labelsV
+    const my = ++ovSeq, v = labelsV, filterSig = JSON.stringify(labelState.filter)
     let res
     try {
       res = await thimble.fetch({ op: 'overview', ...(S.keepPage != null ? { keep: [S.keepPage] } : {}) }, { key: 'overview' })
@@ -315,6 +330,8 @@ async function loadOverview() {
     }
     if (my !== ovSeq) return false
     if (v !== labelsV) continue
+    res.filterSig = filterSig
+    if (checkLoad === my) { checkLoad = 0; if (!readAs(res)) continue }
     O = res
     N = O.pages.p.length
     rowOf = new Map()
@@ -420,7 +437,8 @@ const colour = thimble.colorBy({
     },
   ],
   chips: 'filter',
-  onChange: () => { if (O) { compute(); renderAll(); if (!dropGone() && S.sel != null) openPage(S.sel, null, true) } },
+  // the open page's history is drawn again from what was read: what the reader answers does not depend on the colour
+  onChange: () => { if (O) { compute(); renderAll(); if (!dropGone() && PG && S.sel != null) { renderPageStrip(); recolourBlocks() } } },
 })
 // whether the colour is a field of the page itself, which a page's row takes and is filtered by
 const pageLevel = () => colour.field === 'wiki' || colour.field === 'status'
@@ -743,9 +761,10 @@ function showTip(e, html) {
 function hideTip() { tip.style.display = 'none' }
 
 // ---------------------------------------------------------------- the list of pages
-// Only the rows in view are drawn. Each shows its page's name, wiki, time span, deletes, usernames and revisions, and
-// its revisions and deletes in the range on the chart's bins, drawn as the chart draws them: the revisions above the
-// line in the colour's values, the deletes below it.
+// Only the rows in view and around it are drawn, LIST_CHUNK rows at a time: a scroll adds a chunk as it comes near the
+// view and takes away one far from it, and leaves the rest of the list as it is. Each row shows its page's name, wiki,
+// time span, deletes, usernames and revisions, and its revisions and deletes in the range on the chart's bins, drawn as
+// the chart draws them: the revisions above the line in the colour's values, the deletes below it.
 function renderListHead() {
   $('count').innerHTML = `<b>${fmt(rows.length)}</b> ${rows.length === 1 ? 'page' : 'pages'}`
 }
@@ -809,13 +828,13 @@ function nameHtml(r) {
   return esc(name.slice(0, i)) + `<b>${esc(name.slice(i, i + S.q.length))}</b>` + esc(name.slice(i + S.q.length))
 }
 const anchorOf = (r) => (O.keys[r] ? unitRef(O.keys[r]) : O.pages.ln[r] ? `pages.jsonl#L${O.pages.ln[r]}` : '')
-function rowHtml(r, i) {
+function rowHtml(r) {
   const P = O.pages, p = P.p[r]
   const anchor = anchorOf(r)
   const d = P.d[r]
   const meta = `${esc(O.wikis[P.w[r]])} · ${esc(shortSpan(O.t0 + P.f[r], O.t0 + P.l[r]))}`
   // three counts that read alike, each after its icon: deletes, usernames, revisions
-  return `<div class="row${S.sel === p ? ' sel' : ''}" style="top:${i * ROW_H}px" data-p="${p}"${anchor ? ` data-anchor="${esc(anchor)}" data-anchor-text="${esc(P.name[r])}"` : ''}${pageLevel() ? colour.attr(pageRec(r)) : ''}>` +
+  return `<div class="row${S.sel === p ? ' sel' : ''}" data-p="${p}"${anchor ? ` data-anchor="${esc(anchor)}" data-anchor-text="${esc(P.name[r])}"` : ''}${pageLevel() ? colour.attr(pageRec(r)) : ''}>` +
     `<div class="r1"><span class="nm">${nameHtml(r)}</span>${d ? `<span class="dl" title="${plural(d, 'delete')}">${ico('trash')}${fmt(d)}</span>` : ''}<span class="nu" title="${plural(P.u[r], 'username')}">${ico('user')}${fmt(P.u[r])}</span><span class="nr" title="${plural(P.n[r], 'revision')}">${ico('edit')}${fmt(P.n[r])}</span></div>` +
     `<div class="r2"><span class="meta">${meta}</span>${stripSvg(r)}</div></div>`
 }
@@ -828,20 +847,42 @@ function renderListStrip() {
     preview: (i) => { const r = rows[i]; return r == null ? '' : { when: shortSpan(O.t0 + O.pages.f[r], O.t0 + O.pages.l[r]), text: O.pages.name[r] } },
   })
 }
+// the list drawn whole, as when the rows, their order or what they show changed; its width and height are read here
+// only, so a scroll reads no layout but its own place
+const chunks = new Map() // chunk index -> its element
+let listH = 0
 function renderList() {
   const box = $('list'), vl = $('vl')
   stripW = stripWidth()
   rowSc = H ? range.scale(stripW) : null
+  listH = box.clientHeight
+  chunks.clear()
+  vl.textContent = ''
   vl.style.height = rows.length * ROW_H + 'px'
   if (!rows.length) { vl.innerHTML = '<div class="empty">No page passes these filters</div>'; vl.style.height = 'auto'; return }
-  const a = Math.max(0, Math.floor(box.scrollTop / ROW_H) - LIST_PAD)
-  const b = Math.min(rows.length, Math.ceil((box.scrollTop + box.clientHeight) / ROW_H) + LIST_PAD)
-  let h = ''
-  for (let i = a; i < b; i++) h += rowHtml(rows[i], i)
-  vl.innerHTML = h
+  showChunks()
+}
+// the chunks within half a view of the part in view drawn, the others taken away
+function showChunks() {
+  if (!rows.length) return
+  const vl = $('vl'), top = $('list').scrollTop, span = LIST_CHUNK * ROW_H
+  const c0 = Math.max(0, Math.floor((top - listH / 2) / span))
+  const c1 = Math.min(Math.ceil(rows.length / LIST_CHUNK) - 1, Math.floor((top + listH * 1.5) / span))
+  for (const [c, el] of chunks) if (c < c0 || c > c1) { el.remove(); chunks.delete(c) }
+  for (let c = c0; c <= c1; c++) {
+    if (chunks.has(c)) continue
+    const el = document.createElement('div')
+    el.className = 'chunk'
+    el.style.top = c * span + 'px'
+    let h = ''
+    for (let i = c * LIST_CHUNK; i < Math.min(rows.length, (c + 1) * LIST_CHUNK); i++) h += rowHtml(rows[i])
+    el.innerHTML = h
+    vl.appendChild(el)
+    chunks.set(c, el)
+  }
 }
 let listRaf = 0
-$('list').addEventListener('scroll', () => { cancelAnimationFrame(listRaf); listRaf = requestAnimationFrame(renderList) })
+$('list').addEventListener('scroll', () => { cancelAnimationFrame(listRaf); listRaf = requestAnimationFrame(showChunks) })
 $('vl').addEventListener('click', (e) => { const row = e.target.closest('.row'); if (row) { S.picked = true; openPage(+row.dataset.p) } })
 $('list').addEventListener('keydown', (e) => {
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
@@ -857,8 +898,8 @@ function scrollListTo(i) {
   const box = $('list')
   if (i == null || i < 0) return
   const top = i * ROW_H
-  if (top < box.scrollTop || top + ROW_H > box.scrollTop + box.clientHeight) box.scrollTop = Math.max(0, top - box.clientHeight / 3)
-  renderList()
+  if (top < box.scrollTop || top + ROW_H > box.scrollTop + listH) box.scrollTop = Math.max(0, top - listH / 3)
+  showChunks()
 }
 $('sort').onchange = (e) => { const [k, d] = e.target.value.split(':'); S.sort = k; S.dir = +d; rescope() }
 
@@ -885,7 +926,7 @@ async function openPage(p, focus, keepScroll) {
   if (changed && !PG) $('blocks').innerHTML = '<div class="empty">Reading the page</div>'
   let res
   try {
-    res = await thimble.fetch(pageQuery(focus ? { focus } : keepScroll ? { from: bFrom, n: Math.max(CHUNK, blocks.length) } : {}), { key: 'page' })
+    res = await thimble.fetch(pageQuery(focus ? { focus } : keepScroll ? { from: bFrom, n: Math.max(CHUNK, blocks.length) } : { n: FIRST_CHUNK }), { key: 'page' })
   } catch (e) {
     if (e && e.name === 'AbortError') return
     throw e
@@ -894,6 +935,8 @@ async function openPage(p, focus, keepScroll) {
   if (!res) { PG = null; $('ph').innerHTML = ''; $('ps').innerHTML = ''; $('blocks').innerHTML = '<div class="empty">The page is not in the files</div>'; return }
   const top = $('blocks').scrollTop
   PG = res; blocks = res.blocks; bFrom = res.from; bTotal = res.total
+  // a revision a citation opened shows its whole diff, so the passage quoted is on the page
+  if (focus && focus.rev != null) { const b = blocks.find((x) => x.i === focus.rev); if (b) longOn.add(b.ref) }
   renderPage()
   const box = $('blocks')
   if (focus) {
@@ -1078,22 +1121,42 @@ function lineHtml(l, full) {
   const wh = String(l[1]).trim() === WITHHELD ? ' wh' : ''
   return `<div class="dl ${cls}${wh}"><span class="sg">${op === '+' ? '+' : op === '-' ? '−' : ''}</span><span class="tx">${textHtml(l[1])}</span></div>`
 }
-// a very long diff shows its first lines, and a button opens the rest (fitClips)
+// A long diff draws its first DIFF_LINES lines, clipped to about their height, and a button draws the rest; only the
+// lines drawn are on the page, so a page of long revisions opens and scrolls as fast as one of short ones. Whether a
+// shorter diff's wrapped lines pass the clip is worked out from its characters and the characters a line of the pane
+// holds, so the page is never laid out to find out; a diff that may pass it is clipped with the button too.
+const CLIP_H = 560 // px, .diff.clip's height
+const moreLines = (n) => `<button class="btn btn-ghost btn-sm more-lines" type="button" data-long>Show all ${plural(n, 'line')}</button>`
+let lineChars = 60, lineH = 18 // characters a diff line of the pane holds, and its height, as the pane last measured
+;(() => {
+  let charW = 0
+  new ResizeObserver((es) => {
+    if (!charW) {
+      const s = document.createElement('span')
+      s.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:400 var(--text-mono-sm) / 1.5 var(--font-mono)'
+      s.textContent = '0'.repeat(100)
+      document.body.appendChild(s)
+      const r = s.getBoundingClientRect()
+      s.remove()
+      charW = r.width / 100 || 7.2
+      lineH = r.height || 18
+    }
+    // the text column: the pane less the diff's padding and its sign's column
+    lineChars = Math.max(20, Math.floor((es[0].contentRect.width - 44) / charW))
+  }).observe($('blocks'))
+})()
 function diffHtml(b) {
   const L = b.diff || []
   if (!L.length) return `<div class="nob">${b.body_len ? 'No line changed' : 'Empty page'}</div>`
-  const clip = longOn.has(b.ref) ? '' : ' clip'
-  let h = `<div class="diff${clip}" data-lines="${L.filter((l) => l[0] !== '~').length}">`
-  for (const l of L) h += lineHtml(l, b.base === 'withheld') // a first stored body is the page as it stood, not a change
-  return h + '</div>'
-}
-function fitClips(root) {
-  for (const d of root.querySelectorAll('.diff.clip')) {
-    const over = d.scrollHeight > d.clientHeight + 6
-    if (!over) { d.classList.remove('clip', 'short'); continue }
-    if (d.nextElementSibling && d.nextElementSibling.matches('[data-long]')) continue
-    d.insertAdjacentHTML('afterend', `<button class="btn btn-ghost btn-sm more-lines" type="button" data-long>Show all ${plural(+d.dataset.lines, 'line')}</button>`)
-  }
+  const n = L.filter((l) => l[0] !== '~').length
+  const whole = longOn.has(b.ref), cut = !whole && L.length > DIFF_LINES
+  const shown = cut ? L.slice(0, DIFF_LINES) : L
+  let rowsTall = 0
+  for (const l of shown) rowsTall += l[0] === '~' ? 1 : Math.max(1, Math.ceil(String(l[1]).length / lineChars))
+  const clip = !whole && (cut || rowsTall * lineH > CLIP_H - 6)
+  let h = `<div class="diff${clip ? ' clip' : ''}" data-lines="${n}">`
+  for (const l of shown) h += lineHtml(l, b.base === 'withheld') // a first stored body is the page as it stood, not a change
+  return h + '</div>' + (clip ? moreLines(n) : '')
 }
 function bodyHtml(i) {
   if (!bodies.has(i)) return '<div class="nob">Reading the revision</div>'
@@ -1139,51 +1202,66 @@ function keptItem(b) {
   if (b.kind === 'delete' || b.kind === 'request') return !colour.label || colour.keeps({ ref: b.ref })
   return colour.keeps(blockRec(b))
 }
-function renderBlocks() {
+// The history read so far, with a heading for each day. It loads as it scrolls, so it keeps the browser's own
+// scrollbar: Color by's tracks would show only the part read so far, as if it were the whole history.
+let hDay = null, hKept = 0 // the day of the last item drawn, and the items drawn
+function itemsHtml(list, from) {
   let h = ''
-  if (bFrom > 0) h += '<div class="edge" id="top"></div>'
-  let day = null, kept = 0
-  blocks.forEach((b, k) => {
+  list.forEach((b, k) => {
     if (!keptItem(b)) return
-    kept++
+    hKept++
     const T = isoT(b.time)
     const d = T != null ? dayKey(T) : ''
-    if (d !== day) { day = d; h += `<div class="day">${T != null ? `${weekday(T)} ${dm(T)}` : ''}</div>` }
-    h += blockHtml(b, bFrom + k)
+    if (d !== hDay) { hDay = d; h += `<div class="day">${T != null ? `${weekday(T)} ${dm(T)}` : ''}</div>` }
+    h += blockHtml(b, from + k)
   })
+  return h
+}
+function renderBlocks() {
+  hDay = null; hKept = 0
+  let h = bFrom > 0 ? '<div class="edge" id="top"></div>' : ''
+  h += itemsHtml(blocks, bFrom)
   if (bFrom + blocks.length < bTotal) h += '<div class="edge" id="end"></div>'
-  else if (!kept) h += `<div class="empty">No revision of this page meets these filters</div>`
+  else if (!hKept) h += `<div class="empty">No revision of this page meets these filters</div>`
   $('blocks').innerHTML = h
-  fitClips($('blocks'))
-  renderBlocksStrip()
 }
-// the history's tracks: where each revision read so far stands, and what the preview says of one
-function renderBlocksStrip() {
-  colour.strip($('blocks'), {
-    preview: (el) => {
-      const tm = el.querySelector && el.querySelector('.tm')
-      const day = el.closest && el.previousElementSibling
-      const who = el.querySelector && el.querySelector('.who')
-      const cs = el.querySelector && el.querySelector('.cs')
-      return { when: tm ? tm.textContent : '', text: [who ? who.textContent : '', cs ? cs.textContent : el.getAttribute('data-anchor-text') || ''].filter(Boolean).join(' · ') }
-    },
-  })
+// the items read next drawn after those on the page, which stay as they are
+function appendBlocks(list, from) {
+  const box = $('blocks'), end = $('end')
+  const t = document.createElement('template')
+  t.innerHTML = itemsHtml(list, from)
+  box.insertBefore(t.content, end)
+  if (bFrom + blocks.length >= bTotal) {
+    if (end) end.remove()
+    if (!hKept) box.insertAdjacentHTML('beforeend', `<div class="empty">No revision of this page meets these filters</div>`)
+  }
 }
-// the history drawn again where it is, as when the colour changes
+// the history drawn again where it is, as when the labels change
 function rerenderBlocks() {
   const box = $('blocks'), top = box.scrollTop
   renderBlocks()
   box.scrollTop = top
   watchEnd()
 }
+// After a Color by change: while the chips keep the same items, each revision's value is set on it in place, so the
+// history is not drawn again; else it is.
+function recolourBlocks() {
+  const want = []
+  blocks.forEach((b, k) => { if (keptItem(b)) want.push(bFrom + k) })
+  const els = [...$('blocks').querySelectorAll('.blk')]
+  if (want.length !== els.length || want.some((pos, j) => +els[j].dataset.pos !== pos)) return rerenderBlocks()
+  for (const el of els) {
+    const b = blocks[+el.dataset.pos - bFrom]
+    if (!b || b.kind === 'delete' || b.kind === 'request') continue
+    if (!colour.field) { el.removeAttribute('data-colour'); continue }
+    const v = colour.valueOf(blockRec(b))
+    el.setAttribute('data-colour', v == null ? '' : String(v))
+  }
+}
 function rerender(b) {
   const k = blocks.indexOf(b)
   const el = $('blocks').querySelector(`[data-pos="${bFrom + k}"]`)
-  if (el) {
-    el.outerHTML = blockHtml(b, bFrom + k)
-    const now = $('blocks').querySelector(`[data-pos="${bFrom + k}"]`)
-    if (now) fitClips(now)
-  }
+  if (el) el.outerHTML = blockHtml(b, bFrom + k)
 }
 $('blocks').addEventListener('click', async (e) => {
   const u = e.target.closest('[data-user]')
@@ -1215,9 +1293,9 @@ async function more() {
   try {
     const res = await thimble.fetch(pageQuery({ from: bFrom + blocks.length }), { key: 'page-more' })
     if (my !== pageSeq || !res) return
+    const from = bFrom + blocks.length
     blocks = blocks.concat(res.blocks); bTotal = res.total
-    const box = $('blocks'), top = box.scrollTop
-    renderBlocks(); box.scrollTop = top
+    appendBlocks(res.blocks, from)
   } catch (e) {
     if (!(e && e.name === 'AbortError')) throw e
   } finally { moreBusy = false }
@@ -1292,7 +1370,21 @@ async function userPop(name, anchor) {
 
 // ---------------------------------------------------------------- render
 // the range's overview first: the range thimble kept for the view, which it opens on, decides the rows
-function renderAll() { if (!O) return; renderCtl(); if (renderRange()) compute(); renderCounts(); renderHist(); renderListHead(); renderList(); renderListStrip() }
+function renderAll() { if (!O) return; renderTop(); renderRest() }
+function renderTop() { renderCtl(); if (renderRange()) compute() }
+function renderRest() { renderCounts(); renderHist(); renderListHead(); renderList(); renderListStrip() }
+// the rows decided and drawn, with the list's first page asked for in between when none is open, so its history is
+// read while the rest is drawn: the rest is drawn in a task of its own, so that thimble, which shares this thread in
+// Safari, sends the fetch on first
+function renderOpening() {
+  renderTop()
+  if (!(S.sel == null && S.event == null && rows.length)) return renderRest()
+  openPage(O.pages.p[rows[0]])
+  setTimeout(() => {
+    renderRest()
+    if (PG && !PS) renderPageStrip() // the history came first, before the chart's bins it is drawn on
+  }, 0)
+}
 // the open page, once the filters no longer keep it, gives way to the list's first page (or to none); true when it did
 function dropGone() {
   if (S.sel == null || rows.some((r) => O.pages.p[r] === S.sel)) return false
@@ -1304,9 +1396,10 @@ function dropGone() {
 }
 function rescope() {
   if (!O) return
-  compute(); $('list').scrollTop = 0; renderAll()
-  if (dropGone()) return
-  if (S.sel == null && S.event == null && rows.length) openPage(O.pages.p[rows[0]])
+  compute(); $('list').scrollTop = 0
+  if (S.sel == null) return renderOpening()
+  renderAll()
+  dropGone()
 }
 // Reset, in Color by's row: the username, the sort and the page picked go back to how the view opens (the
 // first page of the list); the kit puts back the search field, the chips and the range itself
@@ -1316,8 +1409,7 @@ thimble.onReset({
     S.user = null; S.q = ''; S.sort = 'n'; S.dir = -1; $('sort').value = 'n:-1'
     S.picked = false; S.pinfo = false; S.event = null; S.sel = null; S.range = null
     if (!O) return
-    compute(); $('list').scrollTop = 0; renderAll()
-    if (rows.length) openPage(O.pages.p[rows[0]])
+    compute(); $('list').scrollTop = 0; renderOpening()
   },
 })
 let resizeT = null
@@ -1327,31 +1419,32 @@ addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout((
 // A page opens with its row in view; a revision, delete or request opens in its page's history, the filters that would
 // hide it cleared; a username narrows the list to its pages; an event no page holds opens by itself.
 let booted = null
+// the overview read, once; whoever waits for it draws the view
 function boot() {
-  if (!booted) booted = (async () => { if (await loadOverview()) { compute(); renderAll() } })()
+  if (!booted) booted = loadOverview()
   return booted
 }
 async function openPlace(t) {
   closePop()
   if (t.user != null) {
     S.user = t.user
-    compute(); renderAll()
-    if (S.sel == null && rows.length) openPage(O.pages.p[rows[0]])
+    compute(); renderOpening()
     return userPop(t.user, $('f-user'))
   }
   if (t.event != null) { compute(); renderAll(); return showEvent(t.event) }
   if (t.p != null && t.p >= 0) {
     const r = rowOf.get(t.p)
     if (r != null && !passes(r)) clearFilters()
-    compute(); renderAll()
-    if (r != null) scrollListTo(rows.indexOf(r))
+    compute()
     const focus = t.rev != null ? { rev: t.rev } : t.del != null ? { del: t.del } : t.req != null ? { req: t.req } : null
     S.picked = true
-    return openPage(t.p, focus)
-
+    renderTop()
+    const opening = openPage(t.p, focus)
+    renderRest()
+    if (r != null) scrollListTo(rows.indexOf(r))
+    return opening
   }
-  compute(); renderAll()
-  if (S.sel == null && rows.length) openPage(O.pages.p[rows[0]])
+  compute(); renderOpening()
 }
 let opened = false
 function pageByKey(key) {
@@ -1382,7 +1475,14 @@ thimble.onOpen(async (place) => {
 thimble.onLabels(async (st) => {
   const was = JSON.stringify([labelState.labels, labelState.filter])
   labelState = { labels: st.labels || [], filter: st.filter || null, all: st.all || null, palette: st.palette || null }
-  if (JSON.stringify([labelState.labels, labelState.filter]) === was) { if (O) { compute(); renderAll(); if (PG) { renderPageStrip(); rerenderBlocks() } } return }
+  const first = !labelsHeard
+  labelsHeard = true
+  const redraw = () => { if (O) { compute(); renderAll(); if (PG) { renderPageStrip(); rerenderBlocks() } } }
+  if (JSON.stringify([labelState.labels, labelState.filter]) === was) return redraw()
+  // the first word of the labels: the overview being read is checked against them when it comes, and one already read
+  // that read them so is kept
+  if (first && !O) { checkLoad = ovSeq; return }
+  if (first && readAs(O)) return redraw()
 
   labelsV++
   if (!O) return
@@ -1390,7 +1490,7 @@ thimble.onLabels(async (st) => {
   compute(); renderAll()
   if (!dropGone() && S.sel != null) openPage(S.sel, null, true)
 })
-boot().then(() => { if (!opened && O && S.sel == null && rows.length) openPage(O.pages.p[rows[0]]) })
+boot().then(() => { if (!opened && O) { compute(); renderOpening() } })
 </script>
 </body>
 </html>

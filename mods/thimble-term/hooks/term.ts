@@ -362,6 +362,23 @@ export async function surfaceValue<T = unknown>(cx: Ctx, key: string): Promise<{
   return (await cx.surface(key)) as SurfaceGot as never
 }
 
+// the step between the starts of the pages of a file the citation panel reads (`thimble state files` gives 200 lines
+// a page), so a window up to 100 rows tall stands within one page
+const CITE_STEP = 100
+
+/** The start of the page of a file that holds `line` in its first hundred lines, as the citation panel reads them. */
+export function citePage(line: number): number {
+  return Math.floor((Math.max(1, line) - 1) / CITE_STEP) * CITE_STEP + 1
+}
+
+/** A page of a file's lines from `start` (`thimble state files <path> --start`), kept under `file:<path>:<start>`,
+ *  the key it returns. */
+export async function readFilePage(cx: Ctx, path: string, start: number): Promise<string> {
+  const key = `file:${path}:${start}`
+  await readSurface(cx, key, 'files', [path, ...(start > 1 ? ['--start', String(start)] : [])])
+  return key
+}
+
 /** The citation a panel names (`ref`, and the value it shows). */
 export function panelCitation(p: TermPanel): Citation | null {
   if (!p.ref) return null
@@ -385,6 +402,9 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
         await resolveCitations(cx, [c])
         const v = await cx.verdict(cid(c.raw))
         if (v?.card) await loadCards(cx, [v.card])
+        // a file citation: the page of its file around the cited line, the start of the window the panel scrolls
+        // through the whole file (panel.tsx citeWindow)
+        else if (v?.path && typeof v.line === 'number' && v.lines.length) await readFilePage(cx, v.path, citePage(v.line - 10))
       }
       return
     }
@@ -428,8 +448,7 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
     }
     case 'file':
       if (p.path) {
-        const key = `file:${p.path}:${p.start ?? 1}`
-        await readSurface(cx, key, 'files', [p.path, ...(p.start && p.start > 1 ? ['--start', String(p.start)] : [])])
+        const key = await readFilePage(cx, p.path, p.start ?? 1)
         // a whole-file JSON transcript: a page of the turns thimble parses from the whole file, for its Transcript tab
         const page = await surfaceValue<Record<string, unknown>>(cx, key)
         if (page?.ok && wholeJson(page.value)) {

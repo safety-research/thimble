@@ -185,7 +185,8 @@ export type World = {
   docs: Record<string, unknown>
   /** the slash commands run, as `/name args` */
   commands: string[]
-  /** a file's page by its path, over the fixtures' (null: it cannot be read) */
+  /** a file's page by its path, over the fixtures' (null: it cannot be read; a function: the page from the line
+   *  `--start` names, as thimble pages a file) */
   pages: Record<string, unknown>
   /** when the conversation began, as Claude Code's session figures say it (a resumed one began before its process) */
   startedAt?: number
@@ -345,6 +346,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       case 'agents':
         return out(w.states.agents)
       case 'files':
+        if (rest[0] && typeof w.pages[rest[0]] === 'function') return out((w.pages[rest[0]] as (start: number) => unknown)(rest[1] === '--start' ? Number(rest[2]) : 1))
         if (rest[0] && w.pages[rest[0]] !== undefined) return w.pages[rest[0]] === null ? out({ error: `could not read ${rest[0]}` }, 1) : out(w.pages[rest[0]])
         return rest[0] ? out(w.states.file) : out(w.states.files)
       case 'turns':
