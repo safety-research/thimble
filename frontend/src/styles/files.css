@@ -723,6 +723,11 @@
   height: 22px;
   color: var(--text-tertiary);
 }
+/* the ⋯'s menu (Edit label, Delete label) wraps it in its trigger's span */
+.files-label-menu {
+  display: inline-flex;
+  flex: none;
+}
 /* a label's status under its name: the run's progress, the last run's outcome and time, or a failure with Retry */
 .files-label-status {
   display: flex;
@@ -1120,6 +1125,14 @@
 }
 .label-card-more-body {
   border-top: 1px solid var(--border-hairline);
+}
+/* Delete label, last in More, in the negative colour */
+.label-card-danger {
+  display: flex;
+  padding: 0 12px 10px;
+}
+.label-card-delete.btn {
+  color: var(--status-negative);
 }
 .label-card-hlname {
   flex: 1;

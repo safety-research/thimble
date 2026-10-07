@@ -6,7 +6,7 @@
 // control (LabelEditor). A label that exists opens compact: its name in its color (a multi-class label's in the ink,
 // after its glyph), its type and scope, a rule, its prompt (pattern or code) clamped to four lines until it has the
 // focus, its classes one line each, and More folded over the rest (what it labels and marks, what it applies to, the
-// classifier, the model, the highlights, + class), open or folded for the page's session; Cancel and Re-run show once
+// classifier, the model, the highlights, + class, Delete label), open or folded for the page's session; Cancel and Re-run show once
 // something changed, until then only ×. A new label shows every field. LabelSheet is the same card in a popover on a canvas card (LabelFields, with each class's
 // count); its draft outlasts the popover (canvas/labelDrafts) and its foot offers Discard and Re-run.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type ReactNode } from 'react'
@@ -24,6 +24,7 @@ import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptKind, ConceptPatch, ConceptRun, LabelClass, LabelDraft, LabelMarks } from '../lib/types'
 import { examplesNote } from '../canvas/details'
+import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
 import { classesOf, colourVar, draftClasses, freeColour, globPatterns, isFilesLabel, isMultiClass, LABEL_COLOURS, LABEL_ORDER, MULTI_COLOUR, labelStatus, marksOf, outcomeText, overOf, ownColour, paletteFrom, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
 import { useFilesLabels, type FilesLabels } from './useLabels'
 import { ValuePalette } from './ValuePalette'
@@ -208,6 +209,7 @@ export const labelCardName = (label: Concept | null): string => (label ? `Edit $
 export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null, lead, inPopover, onClose, onRun }: Props) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(label, appliesTo, nextFreeColour(labels.all), drafted, usedColours(labels.all)))
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState<DeleteLabelAsk | null>(null)
   const isNew = label == null
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }))
   const classes = withSavedColours(label, draft)
@@ -270,7 +272,17 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
         <TextInput bare value={draft.name} onChange={(v) => set({ name: v })} aria-label="Name" className="label-card-name" autoFocus={isNew && !lead} style={compact && !multi ? { color: colourVar(classes[0]?.color) } : undefined} />
         {!lead && <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" onClick={onClose} />}
       </div>
-      <LabelFields ws={ws} label={label} labels={labels} draft={draft} classes={classes} set={set} compact={compact} />
+      <LabelFields ws={ws} label={label} labels={labels} draft={draft} classes={classes} set={set} compact={compact} onDelete={label ? (at) => setDeleting({ id: label.id, name: label.name, at }) : undefined} />
+      <DeleteLabelConfirm
+        asked={deleting}
+        align="start"
+        onClose={() => setDeleting(null)}
+        onDelete={({ id }) => {
+          setDeleting(null)
+          onClose()
+          void labels.remove(id)
+        }}
+      />
       {changed && (
         <div className="label-card-foot">
           {!isNew && examplesNote(draft.kind, label?.n_marked) && <span className="label-card-note">{examplesNote(draft.kind, label?.n_marked)}</span>}
@@ -288,7 +300,7 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
  * switches are saved at once for an existing label. `counts` puts each class's count before its switch. A class's
  * swatch opens the palette Color by's chips open (ValuePalette), with the grey too. `compact`: the type and scope as
  * plain rows, a rule, the body clamped until it has the focus, the classes one line each, and More over the rest. */
-function LabelFields({ ws, label, labels, draft, classes, set, counts, compact }: { ws: string; label: Concept | null; labels: FilesLabels; draft: Draft; classes: LabelClass[]; set: (patch: Partial<Draft>) => void; counts?: Record<string, number>; compact?: boolean }) {
+function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, onDelete }: { ws: string; label: Concept | null; labels: FilesLabels; draft: Draft; classes: LabelClass[]; set: (patch: Partial<Draft>) => void; counts?: Record<string, number>; compact?: boolean; onDelete?: (at: HTMLElement) => void }) {
   const [more, setMore] = useState(moreShown)
   const [bodyFocus, setBodyFocus] = useState(false)
   // whether the clamped body holds more than it shows, which fades its last line
@@ -568,6 +580,13 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact }
               ))}
               {add}
             </div>
+            {onDelete && (
+              <div className="label-card-danger">
+                <Button size="sm" icon="trash" className="label-card-delete" onClick={(e) => onDelete(e.currentTarget)}>
+                  Delete label
+                </Button>
+              </div>
+            )}
           </div>
         )}
         {palette}

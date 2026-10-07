@@ -37,6 +37,7 @@ export const CLIENT_KINDS = [
   'reader-find',
   'search',
   'label-edit',
+  'label-delete',
   'label-apply',
   'card-code-toggle',
   'cell-run',

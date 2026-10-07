@@ -561,6 +561,8 @@ export const labelApi = {
   update: (c: string, id: string, patch: ConceptPatch) => j<ConceptDetail>(`${ws(c)}/concepts/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   /** `POST /concepts`: a new label from the Files pane's edit card, over files, cards (`cell`) or sentences (`span`). */
   create: (c: string, body: ConceptPatch & { name: string; unit?: ConceptUnit }) => j<ConceptDetail>(`${ws(c)}/concepts`, { method: 'POST', body: JSON.stringify(body) }),
+  /** `DELETE /concepts/{id}`: the label with its marks, its card and any filter that uses it; the top bar's Undo restores it. */
+  remove: (c: string, id: string) => j<{ ok: boolean }>(`${ws(c)}/concepts/${enc(id)}`, { method: 'DELETE' }),
   /** `GET /labels/presence`: per label over files, the values it left on each file (the tree's dots). */
   presence: (c: string) => j<LabelPresence[]>(`${ws(c)}/labels/presence`),
   /** `GET /labels/ruler?path=&bins=`: where each label's values fall on one file (the reader's overview ruler). */
