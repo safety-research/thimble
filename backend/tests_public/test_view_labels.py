@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -219,6 +220,55 @@ async def test_the_view_head_counts_the_records_the_reader_left_out_for_the_filt
     assert (await app.post(route, json={"query": {}})).json()["hidden"] == 8
     concepts.clear_filter(CORPUS, "files")
     assert "hidden" not in (await app.post(route, json={"query": {}})).json()
+
+
+ODD_READER = '''
+import datetime
+import thimble
+
+
+def build_index(paths):
+    for path in paths:
+        open(path).read()
+    return {}
+
+
+def records(index, query):
+    if query.get("fail"):
+        raise ValueError("no such page")
+    return {"kept": [n for n in range(1, 13) if thimble.kept(f"board.jsonl#L{n}")], "nan": float("nan"),
+            "inf": [float("inf"), -float("inf"), 1.5], "text": "café ✓\\n\\x1f\\u2028end", "day": datetime.date(2026, 10, 7),
+            "nested": {"a": [None, True, {"b": 2 ** 70}]}}
+
+
+def resolve(index, locator):
+    return None
+'''
+
+
+async def test_the_records_route_sends_the_kernels_json_text_unread(app):
+    """The records route sends the reader's result as the JSON text the kernel wrote, beside the fields the server adds,
+    rather than reading and writing it again, and it reads as the route's answer did: a value that is not JSON as its
+    str, NaN and the infinities as null, a string's control characters escaped. Other callers get the result read."""
+    k = await _asks(app)
+    views.write_view(CORPUS, "odd", reader=ODD_READER, html=HTML, **{**VIEW, "name": "Odd"})
+    route = f"/api/ws/{CORPUS}/views/odd/records"
+    want = {"kept": list(range(1, 13)), "nan": None, "inf": [None, None, 1.5], "text": "café ✓\n\x1f end",
+            "day": "2026-10-07", "nested": {"a": [None, True, {"b": 2 ** 70}]}}
+    r = await app.post(route, json={"query": {}})
+    assert r.status_code == 200 and r.headers["content-type"] == "application/json", r.text
+    assert r.json() == {"data": want}
+    concepts.set_filter(CORPUS, "files", k["id"], "asks")
+    raw = await views.reader_call(CORPUS, "odd", "records", {}, raw=True)
+    assert isinstance(raw, views.RawJSON)
+    r = await app.post(route, json={"query": {}})
+    assert r.text == '{"data":' + raw.text + ',"hidden":9}'
+    assert r.json() == {"data": {**want, "kept": [1, 4, 8]}, "hidden": 9}
+    got = await views.reader_call(CORPUS, "odd", "records", {})
+    assert math.isnan(got.pop("nan")) and got.pop("inf") == [math.inf, -math.inf, 1.5], "other callers read it as before"
+    assert got == {**{k: x for k, x in want.items() if k not in ("nan", "inf")}, "kept": [1, 4, 8]}
+    r = await app.post(route, json={"query": {"fail": True}})
+    assert r.status_code == 502 and r.json()["detail"]["message"] == "ValueError: no such page", r.text
 
 
 def test_a_count_of_what_the_filter_left_out_is_given_only_when_exact():
