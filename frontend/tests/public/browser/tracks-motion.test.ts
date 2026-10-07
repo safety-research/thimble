@@ -8,7 +8,9 @@
 // WebKit's times are logged, its software drawing of the records spilling into the frames around them). Each run logs
 // its numbers: the frames that moved, the largest step, and the frames' times. A click a pixel or two off a lone record
 // that Color by colors snaps to it: the reader goes there and chooses it, in Files and in the kit. In Files, two labels
-// on are two lanes of the overview in their colors, and one turned off leaves one.
+// on are two lanes of the overview in their colors, and one turned off leaves one. In the kit, a list of 4,458 rows
+// drawn again as it scrolls, which gives the strip its rows again each time, is not measured or drawn again while its
+// rows stay the same.
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
@@ -502,3 +504,69 @@ test("Files: two labels on are two lanes of the overview, each in its label's co
   await browser.close()
 })
 
+
+// ---------------------------------------------------------------- a long list given its rows, drawn again as it scrolls
+/** A view's list of 4,458 rows drawn as a virtual list, the rows in view drawn again on each scroll, which gives the
+ * strip every row's value again each time, as Wiki Page History's list does. */
+const VIRTUAL = (n = 4458) => `<!doctype html><html><head><style>${KIT_TOKENS} body{margin:0;font:12px sans-serif} #list{height:560px;overflow:auto;position:relative} .row{position:absolute;left:0;right:0;height:28px;box-sizing:border-box;padding:6px 12px}</style>${KIT()}</head><body><span id="colour"></span><div id="list"><div id="vl"></div></div><script>
+const KINDS = ['create', 'edit', 'revert', 'delete', 'move']
+window.rows = Array.from({ length: ${n} }, (_, i) => ({ kind: KINDS[(i * 7 + (i >> 5)) % 5], ref: 'p.jsonl#L' + (i + 1) }))
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: KINDS }] })
+const list = document.getElementById('list'), vl = document.getElementById('vl')
+window.render = function () {
+  vl.style.height = rows.length * 28 + 'px'
+  const a = Math.max(0, Math.floor(list.scrollTop / 28) - 10), b = Math.min(rows.length, Math.ceil((list.scrollTop + list.clientHeight) / 28) + 10)
+  let h = ''
+  for (let i = a; i < b; i++) h += '<div class="row" style="top:' + i * 28 + 'px" data-anchor="' + rows[i].ref + '"' + colour.attr(rows[i]) + '>row ' + (i + 1) + '</div>'
+  vl.innerHTML = h
+  colour.strip(list, { rows: rows.map((r) => r.kind), refs: rows.map((r) => r.ref) })
+}
+list.addEventListener('scroll', render)
+render()
+</script></body></html>`
+
+test("chromium, the kit's strip: a list of 4,458 rows drawn again as it scrolls is not measured again while its rows stay, and its frames take under 16 ms", async () => {
+  const browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 }, deviceScaleFactor: 2 })
+  await page.setContent(VIRTUAL())
+  await page.waitForSelector('.thimble-colour-lens', { state: 'attached' })
+  await page.waitForTimeout(400)
+  // a pixel of our own on the overview, which a drawing of the overview again would paint over
+  const dot = () =>
+    page.evaluate(() => {
+      const cv = document.querySelector('.thimble-colour-whole canvas') as HTMLCanvasElement
+      return Array.from(cv.getContext('2d')!.getImageData(2, 2, 1, 1).data).join(',')
+    })
+  await page.evaluate(() => {
+    const ctx = (document.querySelector('.thimble-colour-whole canvas') as HTMLCanvasElement).getContext('2d')!
+    ctx.fillStyle = 'rgb(1, 255, 2)'
+    ctx.fillRect(2, 2, 1, 1)
+  })
+  await kitSampling(page.mainFrame())
+  const list = (await page.locator('#list').boundingBox())!
+  await page.mouse.move(list.x + list.width / 2, list.y + list.height / 2)
+  for (let i = 0; i < 80; i++) {
+    await page.mouse.wheel(0, 40)
+    await page.waitForTimeout(8)
+  }
+  await page.waitForTimeout(300)
+  const { samples } = await page.evaluate(() => {
+    const w = window as any
+    w.__sampling = false
+    return { samples: w.__samples as { work: number }[] }
+  })
+  const work = workAt(samples, 0.9)
+  console.log(`\nchromium kit, 4,458 rows drawn again on each scroll: work p50 ${workAt(samples, 0.5).toFixed(1)} p90 ${work.toFixed(1)} ms over ${samples.length} frames`)
+  assert.ok((await page.evaluate(() => document.getElementById('list')!.scrollTop)) > 1000, 'the list scrolled')
+  assert.equal(await dot(), '1,255,2,255', 'the rows the same, the overview is not drawn again')
+  assert.ok(work < 16, `the frames took ${work} ms at p90`)
+  // a row's value changes: measured and drawn again
+  await page.evaluate(() => {
+    const w = window as any
+    w.rows[0].kind = w.rows[0].kind === 'edit' ? 'move' : 'edit'
+    w.render()
+  })
+  await page.waitForTimeout(200)
+  assert.notEqual(await dot(), '1,255,2,255', 'other rows: the overview drawn again')
+  await browser.close()
+})

@@ -144,7 +144,8 @@ scrollbar in tracks at its right edge:
 For a list that draws only the rows in view, give every row's value in order: `colour.strip('#list', {rows: values})`,
 with `preview(i)` (what the preview says of row `i`: a string, or `{when, text}`; `refs`, each row's record, which the
 labels' lanes read). For a list of elements the preview reads each record's `<time>` and its text, or
-`preview(element)`. Call `strip` again with the same list when they change.
+`preview(element)`. Call `strip` again with the same list when they change; rows given again unchanged, as a list
+drawn again on each scroll gives them, are not measured again.
 
 The tracks show colors only where they reflect the whole list: Color by's own `strip`, a list given `rows`, or another
 list whose elements are all of its records, which says so with `colour.strip('#other', {whole: true})`. Any other pane,

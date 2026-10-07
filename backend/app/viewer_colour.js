@@ -174,6 +174,7 @@
   var S = loadState()
 
   var labelState = null
+  var labelsVer = 0 // bumps whenever the labels or their marks change, so that a strip measures its colours again
   var control = null // the one Color by control of the page
 
   // ---------------------------------------------------------------- the labels
@@ -232,6 +233,7 @@
   kit.labels(function (state, labelsChanged) {
     var before = labelState
     labelState = state
+    labelsVer++
     // a page that has not mounted the control keeps nothing: what it sees is noticed once it does
     if (!control) return
     if (!labelsChanged) return control.marksChanged()
@@ -441,12 +443,18 @@
     }
     // the page's own redraws change what is counted and where each value's records are
     new MutationObserver(function (records) {
+      var any = false
       for (var i = 0; i < records.length; i++) {
         var t = records[i].target
         if (t && t.nodeType === 1 && t.closest && t.closest('.thimble-colour-mount,.thimble-colour-menu,.thimble-colour-strip,.thimble-range,.thimble-tip,.thimble-colour-peek')) continue
-        self.soon()
-        return
+        any = true
+        // a strip of a list of elements measures them again only when a change is inside its list
+        for (var j = 0; j < self.strips.length; j++) {
+          var st = self.strips[j]
+          if (!st.touched && (st.page || (t && st.box.contains(t)))) st.touched = true
+        }
       }
+      if (any) self.soon()
     }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-colour', 'data-anchor', 'data-thimble-off'] })
     if (opts.strip) this.strip(opts.strip, { whole: true })
   }
@@ -720,7 +728,7 @@
       this.coloursChanged = false
       save()
     }
-    for (var i = 0; i < this.strips.length; i++) this.strips[i].dirty()
+    for (var i = 0; i < this.strips.length; i++) this.strips[i].refreshed()
   }
   // the hook the bridge draws the marks by
   Control.prototype.hook = function () {
@@ -809,7 +817,7 @@
   // the marks of the label colored by are counted and drawn again, on the chips and the tracks (refresh)
   Control.prototype.marksChanged = function () {
     var c = this.choice()
-    if (c && c.label) this.soon()
+    if ((c && c.label) || onLabels().length) this.soon()
   }
 
   // ---------------------------------------------------------------- the top row: Color by, the values' chips, Reset
@@ -1393,6 +1401,10 @@
     this.set(opts)
     this.recs = [] // each record: [top, bottom] as fractions of the list's height, its colour or null, its element or row
     this.lanes = [] // a lane for each other label that is on: {id, name, label, recs}
+    this.dataVer = 0 // bumps when the page gives other rows, refs or says otherwise of the list
+    this.measured = 0 // how many times the records were measured, which the overview's canvas is drawn for
+    this.sigDone = null // what the records were last measured for (sig)
+    this.touched = true // a change of the page inside the list since its elements were measured
     this.stale = true
     this.zoomed = false
     // what a drag holds, in px of the tracks: the frame's top on the overview, the top of the part in view on the
@@ -1434,8 +1446,10 @@
       self.kick()
     }
     ;(this.page ? window : this.box).addEventListener('scroll', this.onScroll, { passive: true })
+    // a resize moves the records of a list of elements; a list given its rows keeps their places and is drawn again
     this.onResize = function () {
-      self.dirty()
+      if (self.rows) self.relayout()
+      else self.dirty()
     }
     window.addEventListener('resize', this.onResize)
     if (typeof ResizeObserver === 'function') {
@@ -1552,6 +1566,31 @@
     var ch = this.c.choice()
     return ch && !ch.off ? ch.title || '' : ''
   }
+  // what the records' colours depend on besides the page's elements: the choice, the values turned off, the field's
+  // colours, the labels and their marks, and the rows the page gave
+  Strip.prototype.sig = function () {
+    var c = this.c.choice()
+    var f = c && c.field
+    return [c ? c.key : '', this.c.offSet(c).join('\u0001'), f ? JSON.stringify([S.colours[f] || null, S.picked[f] || null]) : '', labelsVer, this.dataVer].join('\u0000')
+  }
+  // the control counted the page again: the records are measured again only when what they depend on changed, or, for
+  // a list of elements, when the page changed inside it; otherwise the tracks are only placed again
+  Strip.prototype.refreshed = function () {
+    var dom = this.touched && !this.rows
+    this.touched = false
+    if (dom || this.sig() !== this.sigDone) this.dirty()
+    else this.relayout()
+  }
+  // drawn again in the next frame, the records as they were measured
+  Strip.prototype.relayout = function () {
+    var self = this
+    if (this.frame != null) return
+    var go = function () {
+      self.frame = null
+      self.draw()
+    }
+    this.frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(go) : setTimeout(go, 16)
+  }
   Strip.prototype.dirty = function () {
     var self = this
     this.stale = true
@@ -1582,7 +1621,22 @@
   // every record of the list: [top, bottom] as fractions of the list's height, its colour (the marks' grey for a record
   // that takes no value, as for every record with Color by Off), its element or its row; a record of a value turned off
   // is left out, the records with no value too when their chip is off
-  Strip.prototype.measure = function () {
+  Strip.prototype.measure = function (peeking) {
+    this.measured++
+    // a list the strip cannot know whole is a plain track, whose records are read only when the preview asks for them
+    if (!this.rows && !this.complete && !peeking) {
+      this.recs = null
+      this.grey = grey()
+      this.lanes = []
+      this.sigDone = this.sig()
+      this.plain = true
+      this.el.setAttribute('data-plain', '')
+      if (this.fitWidth()) {
+        this.stale = true
+        this.dirty()
+      }
+      return
+    }
     var c = this.c
     var ch = c.choice()
     var recs = []
@@ -1686,6 +1740,7 @@
       }
     }
     for (var lq = 0; lq < lanes.length && !coloured; lq++) coloured = lanes[lq].recs.length > 0
+    this.sigDone = this.sig()
     this.plain = !complete || !coloured
     if (this.plain) {
       lanes = []
@@ -1748,7 +1803,12 @@
     this.el.style.top = top + 'px'
     this.el.style.height = h + 'px'
     this.h = h
-    this.paint(this.whole, [0, 1], null)
+    // the overview drawn again only for records measured again or a track of another size
+    var painted = [h, dpr, this.overW, this.measured].join()
+    if (painted !== this.painted) {
+      this.painted = painted
+      this.paint(this.whole, [0, 1], null)
+    }
     this.drawn = null
     this.place(typeof performance !== 'undefined' ? performance.now() : Date.now())
     this.kick()
@@ -1770,7 +1830,7 @@
     if (!ctx) return
     ctx.clearRect(0, 0, cv.width, cv.height)
     if (t !== this.whole) {
-      this.fill(ctx, this.recs, span, bright, Math.round(LANE_X * dpr), Math.max(1, Math.round((t.w - 2 * LANE_X) * dpr)))
+      this.fill(ctx, this.recs || [], span, bright, Math.round(LANE_X * dpr), Math.max(1, Math.round((t.w - 2 * LANE_X) * dpr)))
       return
     }
     // the overview: a lane for the Color by choice, then one for each other label that is on; each keeps its rows'
@@ -1782,7 +1842,7 @@
     var wOf = function (i) {
       return Math.max(1, Math.round((i * (lw + LANE_GAP) + lw) * dpr) - x0(i))
     }
-    this.rowColours = this.fill(ctx, this.plain ? [] : this.recs, span, null, x0(0), wOf(0))
+    this.rowColours = this.fill(ctx, this.plain || !this.recs ? [] : this.recs, span, null, x0(0), wOf(0))
     this.laneRows = []
     for (var i = 0; i < this.lanes.length; i++) this.laneRows.push(this.fill(ctx, this.lanes[i].recs, span, null, x0(i + 1), wOf(i + 1)))
   }
@@ -1882,9 +1942,9 @@
   // list at its top (`z0`) and the part in view (`vTop`, `vH`). A held frame puts the part in view as far down the
   // zoomed track as the frame stands down the overview; a held lens keeps the part in view where it is held, and the
   // list moves under it; otherwise the part in view stands as zoomSpan puts it
-  Strip.prototype.geom = function () {
+  Strip.prototype.geom = function (v) {
     var h = this.h || 0
-    var v = this.view()
+    v = v || this.view()
     var vh = Math.max(0, v[1] - v[0])
     var frameH = Math.min(h, Math.max(THUMB_MIN, vh * h))
     var room = Math.max(0, h - frameH)
@@ -1918,24 +1978,30 @@
     if (!h || this.el.style.display === 'none') return false
     var box = this.box
     var hold = this.hold
+    // the list's height and its box's read once a frame, its scroll once a step
     var H = Math.max(1, box.scrollHeight)
-    var free = Math.max(0, box.scrollHeight - box.clientHeight)
+    var ch = box.clientHeight
+    var free = Math.max(0, H - ch)
+    var viewAt = function () {
+      var t = box.scrollTop
+      return [t / H, Math.min(1, (t + ch) / H)]
+    }
     // a held frame: the list goes to the place it frames
     if (hold.seek && hold.frame != null) {
       hold.seek = false
-      var g0 = this.geom()
+      var g0 = this.geom(viewAt())
       box.scrollTop = Math.max(0, Math.min(free, g0.f * free))
     }
     // a drag on the zoomed track: the list scrolls by what the pointer moved there, at its scale, and the part in view
     // moves on the track by as much as the list went
     if (hold.pull && hold.lens != null) {
-      var g1 = this.geom()
+      var g1 = this.geom(viewAt())
       var was = box.scrollTop
       box.scrollTop = Math.max(0, Math.min(free, was + (hold.pull / g1.k) * H))
       hold.lens += ((box.scrollTop - was) / H) * g1.k
       hold.pull = 0
     }
-    var g = this.geom()
+    var g = this.geom(viewAt())
     if (hold.lens != null) hold.lens = g.vTop
     // a jump of the list (a click, a record gone to) with nothing held, past twice the part in view at once where a
     // scroll goes by frames: the tracks glide there
@@ -2042,7 +2108,7 @@
     var lw = laneWidth(this.lanes.length + 1)
     var lane = Math.max(0, Math.min(this.lanes.length, Math.floor((p.x + LANE_GAP / 2) / (lw + LANE_GAP))))
     var rows = lane ? this.laneRows && this.laneRows[lane - 1] : this.rowColours
-    var recs = lane ? this.lanes[lane - 1].recs : this.recs
+    var recs = (lane ? this.lanes[lane - 1].recs : this.recs) || []
     if (!rows || !rows.length) return null
     var dpr = window.devicePixelRatio || 1
     var g = this.grey
@@ -2193,6 +2259,7 @@
     return { when: when, text: text.slice(0, 160) }
   }
   Strip.prototype.peek = function (p, e) {
+    if (!this.recs) this.measure(true)
     var v = this.view()
     var half = Math.max((v[1] - v[0]) / 2, 0.5 / Math.max(1, this.recs.length))
     var at = p.at
@@ -2237,12 +2304,23 @@
       var s = this.strips[i]
       if (s.box === t || (t === true && s.page)) {
         if (opts) {
-          if ('rows' in opts) s.rows = Array.isArray(opts.rows) ? opts.rows : null
-          if ('whole' in opts) s.complete = !!opts.whole
-          if ('refs' in opts) s.refs = Array.isArray(opts.refs) ? opts.refs : null
+          // rows and refs the same as before, as a page that draws its list again gives them, measure nothing again
+          var same = function (a, b) {
+            if (a === b) return true
+            if (!a || !b || a.length !== b.length) return false
+            for (var k = 0; k < a.length; k++) if (a[k] !== b[k]) return false
+            return true
+          }
+          var rows = 'rows' in opts ? (Array.isArray(opts.rows) ? opts.rows : null) : s.rows
+          var refs = 'refs' in opts ? (Array.isArray(opts.refs) ? opts.refs : null) : s.refs
+          var whole = 'whole' in opts ? !!opts.whole : s.complete
+          if (!same(rows, s.rows) || !same(refs, s.refs) || whole !== s.complete) s.dataVer++
+          s.rows = rows
+          s.refs = refs
+          s.complete = whole
           if ('preview' in opts) s.preview = typeof opts.preview === 'function' ? opts.preview : null
         }
-        s.dirty()
+        s.refreshed()
         return s
       }
     }
