@@ -110,17 +110,23 @@ export function padStart(s, n) {
 /** Words wrapped to rows of at most `w` cells, at most `max` rows, the last cut with `…` when more is left. */
 export function wrap(text, w, max = Infinity) {
   const out = []
-  for (const para of String(text ?? '').split(/\n/)) {
+  // once a row with words stands past `max`, the rows after it change nothing, so the words after them are not read
+  const done = () => out.length > max && out[out.length - 1] !== ''
+  paras: for (const para of String(text ?? '').split(/\n/)) {
     let row = ''
     for (const word of para.split(/\s+/).filter(Boolean)) {
       const next = row ? `${row} ${word}` : word
       if (width(next) <= w) row = next
       else {
-        if (row) out.push(row)
+        if (row) {
+          out.push(row)
+          if (done()) break paras
+        }
         row = width(word) > w ? prefix(word, w) : word
       }
     }
     out.push(row)
+    if (done()) break
   }
   while (out.length > 1 && out.at(-1) === '') out.pop()
   if (out.length > max) {
@@ -134,7 +140,10 @@ export function wrap(text, w, max = Infinity) {
 
 /** A count with thousands separators from 1,000. */
 export function num(n) {
-  return Math.round(Number(n) || 0).toLocaleString('en-US')
+  const r = Math.round(Number(n) || 0)
+  // as toLocaleString('en-US') writes it, which costs far more (a list writes a count or two per row)
+  if (!Number.isSafeInteger(r)) return r.toLocaleString('en-US')
+  return r > -1000 && r < 1000 ? String(r) : String(r).replace(/\B(?=(\d{3})+$)/g, ',')
 }
 
 /** `n word` or `n words`. */
@@ -163,8 +172,17 @@ export function hms(t) {
 
 /** The day a time falls on, `2026-05-16`, in UTC. */
 export function dayOf(t) {
-  return new Date(t * 1000).toISOString().slice(0, 10)
+  // a view asks it of each record as it draws, so each day's words are made once
+  const k = Math.floor(t / 86400)
+  let s = DAYS_SEEN.get(k)
+  if (s === undefined) {
+    s = new Date(t * 1000).toISOString().slice(0, 10)
+    if (DAYS_SEEN.size > 10000) DAYS_SEEN.clear()
+    DAYS_SEEN.set(k, s)
+  }
+  return s
 }
+const DAYS_SEEN = new Map()
 
 /** A day's heading, `Sat 16 May 2026`. */
 export function dayName(t) {
@@ -565,6 +583,9 @@ const state = {
   holds: [], // each part's labels that take no color when turned on (Rows' label: the lanes keep Color by's choice)
   rehome: [], // Color by's look again at how it opens, once a part holds a label it may have opened on
   keysOpen: false, // the list of every key, which `?` opens
+  drawing: false, // a flush is drawing: a redraw asked meanwhile draws again in it (again)
+  again: false,
+  afterDraw: [], // what parts look at once the drawing is done
 }
 
 function send(msg) {
@@ -594,16 +615,43 @@ export function draw(fn) {
 
 /** Draw again soon (once, however often it is asked). */
 export function redraw() {
+  // asked while the view draws (a list's rows in view moved, which the lanes above it mark): drawn again in the same
+  // flush, so the frame sent is the last one
+  if (state.drawing) {
+    state.again = true
+    return
+  }
   if (state.scheduled) return
   state.scheduled = true
   queueMicrotask(flush)
 }
 
+// the drawings one flush makes at most, when a drawing asks for another
+const PASSES = 3
+
 function flush() {
   state.scheduled = false
   // nothing is drawn before the program registered its draw function (or failed)
   if (!state.drawFn && !state.error) return
-  const f = frame()
+  let f
+  for (let pass = 1; ; pass++) {
+    state.again = false
+    state.drawing = true
+    try {
+      f = frame()
+      // what a part looks at once a drawing is done, such as whether the counts it drew changed (chooser)
+      const after = state.afterDraw.splice(0)
+      for (const fn of after) fn()
+    } finally {
+      state.drawing = false
+    }
+    if (!state.again) break
+    if (pass >= PASSES) {
+      state.again = false
+      redraw()
+      break
+    }
+  }
   // the same frame again is not sent, unless it answers an event thimble waits on (its `ack`)
   const text = JSON.stringify({ ...f, seq: 0 })
   if (text === state.lastSent) return
@@ -784,9 +832,10 @@ export function fetch(query, opts = {}) {
     if (key !== null) for (const [k, p] of state.pending) if (p.key === key) drop(k)
     // the kit's own queries ({$thimble: ...}) thimble answers itself; a reader query out a while is the view loading
     const kit = Boolean(query && typeof query === 'object' && '$thimble' in query)
-    state.pending.set(id, { resolve, reject, key, kit, at: Date.now() })
+    // a reader query still out after LOADING_MS draws the view again, to say it loads; one answered by then does not
+    const timer = kit ? null : setTimeout(redraw, LOADING_MS + 5)
+    state.pending.set(id, { resolve, reject, key, kit, at: Date.now(), timer })
     send({ t: 'query', id, q: query === undefined ? null : query, labels: wantedLabels() })
-    if (!kit) setTimeout(redraw, LOADING_MS + 5)
   })
 }
 
@@ -812,6 +861,7 @@ function drop(id) {
   const p = state.pending.get(id)
   if (!p) return
   state.pending.delete(id)
+  if (p.timer) clearTimeout(p.timer)
   send({ t: 'cancel', id })
   const e = new Error('the fetch was dropped')
   e.name = 'AbortError'
@@ -924,6 +974,7 @@ export function handle(msg) {
       const p = state.pending.get(msg.id)
       if (!p) break
       state.pending.delete(msg.id)
+      if (p.timer) clearTimeout(p.timer)
       if (!p.kit) state.answered += 1
       if (msg.error) {
         const e = new Error(String(msg.error))
@@ -971,8 +1022,10 @@ export const __driver = {
       frameSeq: 0, ack: 0, gesture: null, binds: [], hits: new Map(), typer: null, pending: new Map(), fetchId: 0, scheduled: false,
       lastSent: '', openers: [], labelFns: [], resets: [], pageReset: null, stateTimer: false, wheelFns: [], error: null, textMode: '',
       lastOpen: null, colorBys: [], colour: null, drawNo: 0, answered: 0, labelWants: [], holds: [], rehome: [], keysOpen: false,
+      drawing: false, again: false, afterDraw: [],
     })
     openMenu = null
+    labelKeys = { of: null, map: new Map() }
     openBlocks.clear()
     marks.got.clear()
     marks.asked.clear()
@@ -1118,8 +1171,9 @@ export function colorBy(opts = {}) {
   const fields = (opts.fields || []).map((f) => ({ ...f, title: f.title || f.name }))
   const keptBy = kept('colour')
   const startKey = fields.length ? `field:${opts.initial || fields[0].name}` : 'off'
-  const fieldOf = (key) => fields.find((f) => `field:${f.name}` === key)
-  const labelOf = (key) => state.labels.find((l) => `label:${l.id}` === key)
+  const byKey = fieldsByKey(fields)
+  const fieldOf = (key) => byKey.get(key)
+  const labelOf = (key) => labelByKey(key) || undefined
   // the labels on in Files (or filtering) that mark the view's files
   const onIds = () => state.labels.filter((l) => l.on && l.here !== false).map((l) => String(l.id))
   // the labels another part holds (the one Rows groups the lanes by), which take no color
@@ -1146,11 +1200,15 @@ export function colorBy(opts = {}) {
     seen: keptBy && Array.isArray(keptBy.seen) ? keptBy.seen.map(String) : onIds(),
     counts: null,
     hues: new Map(), // field -> value -> hue
-    // the values the records the list draws take, for each field: the menu's words for a field that declares none
-    tally: new Map(),
-    tallied: new Map(),
-    tallyAt: -1,
-    tallySeen: new Set(),
+    // the values the records a list holds take, for each field: the menu's words for a field that declares none. The
+    // records tallied and the lists the lists hold (drew), in this drawing and the last one that had any, counted only
+    // when the menu draws: {singles, lists}
+    recs: { singles: [], lists: [] },
+    lastRecs: { singles: [], lists: [] },
+    recsAt: -1,
+    words: null, // {at, tally}: what the menu's words count, once per drawing
+    // each field's values in hue order, until the counts or the choice change: name -> {counts, choice, out}
+    ordered: new Map(),
   }
   const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {}
   // a label turned on since the view last looked takes the color, the one turned on last
@@ -1210,6 +1268,8 @@ export function colorBy(opts = {}) {
   // a field's values in hue order: those it declares, then the others by their count (the reader counts the field
   // chosen, so only it), each keeping the hue it took
   function fieldValues(f) {
+    const was = c.ordered.get(f.name)
+    if (was && was.counts === c.counts && was.choice === c.choice) return was.out
     const hues = c.hues.get(f.name) || new Map()
     c.hues.set(f.name, hues)
     const declared = (f.values || []).map((v) => (typeof v === 'object' ? v : { name: v }))
@@ -1221,7 +1281,9 @@ export function colorBy(opts = {}) {
     const counts = (fieldOf(c.choice) === f && c.counts) || {}
     const others = Object.keys(counts).filter((v) => v !== '' && !hues.has(v)).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b))
     for (const v of others) hues.set(v, nextHue(hues))
-    return [...hues.keys()]
+    const out = [...hues.keys()]
+    c.ordered.set(f.name, { counts: c.counts, choice: c.choice, out })
+    return out
   }
   function nextHue(hues) {
     const used = new Set(hues.values())
@@ -1232,7 +1294,11 @@ export function colorBy(opts = {}) {
   function hueFor(f, v) {
     fieldValues(f)
     const hues = c.hues.get(f.name)
-    if (!hues.has(v)) hues.set(v, nextHue(hues))
+    if (!hues.has(v)) {
+      hues.set(v, nextHue(hues))
+      // the field's values in hue order hold it from now
+      c.ordered.delete(f.name)
+    }
     return hues.get(v) || COLORS.dim
   }
   // a kept choice as the page reads it
@@ -1373,24 +1439,14 @@ export function colorBy(opts = {}) {
       return api.isOn(api.valueOf(record))
     },
     /** Count a record's values of every field, as the browser's kit counts the records a page hands it: the menu
-     *  shows them for a field that declares none. The list counts the records it draws. */
+     *  shows them for a field that declares none. A list hands over the records it holds (drew). */
     tally(record) {
       if (!record || typeof record !== 'object') return
-      if (c.tallyAt !== state.drawNo) {
-        if (c.tally.size) c.tallied = c.tally
-        c.tally = new Map()
-        c.tallySeen = new Set()
-        c.tallyAt = state.drawNo
-      }
-      if (c.tallySeen.has(record)) return
-      c.tallySeen.add(record)
-      for (const f of fields) {
-        const v = typeof f.value === 'function' ? f.value(record) : record[f.name]
-        if (v === undefined || v === null || v === '' || typeof v === 'object') continue
-        const m = c.tally.get(f.name) || new Map()
-        m.set(String(v), (m.get(String(v)) || 0) + 1)
-        c.tally.set(f.name, m)
-      }
+      tallied().singles.push(record)
+    },
+    /** The records a list holds, which the menu counts as tally does when it opens. */
+    drew(items) {
+      if (Array.isArray(items)) tallied().lists.push(items)
     },
     /** The chips: `[{value, name, colour, on, n}]`, `value` null for no value; none for Off. */
     get values() {
@@ -1517,10 +1573,42 @@ export function colorBy(opts = {}) {
   // first, else those it gives meanings for
   function valueWords(f) {
     const declared = (f.values || []).map((v) => (typeof v === 'object' ? v.name : v))
-    const t = (c.tallyAt === state.drawNo ? c.tallied : c.tally).get(f.name)
+    const t = seenTally().get(f.name)
     const seen = t ? [...t.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([v]) => v) : []
     const names = [...new Set([...declared, ...seen])]
     return names.length ? names : Object.keys(f.meanings || {})
+  }
+  // the values of every field the records of the last whole drawing take: those tally counted, and those of the lists
+  // drawn, each record once; counted the first time the menu asks in a drawing
+  function tallied() {
+    if (c.recsAt !== state.drawNo) {
+      if (c.recs.singles.length || c.recs.lists.length) c.lastRecs = c.recs
+      c.recs = { singles: [], lists: [] }
+      c.recsAt = state.drawNo
+    }
+    return c.recs
+  }
+  function seenTally() {
+    if (c.words && c.words.at === state.drawNo) return c.words.tally
+    const out = new Map()
+    const seen = new Set()
+    const count = (record) => {
+      if (!record || typeof record !== 'object' || seen.has(record)) return
+      seen.add(record)
+      for (const f of fields) {
+        const v = typeof f.value === 'function' ? f.value(record) : record[f.name]
+        if (v === undefined || v === null || v === '' || typeof v === 'object') continue
+        const m = out.get(f.name) || new Map()
+        m.set(String(v), (m.get(String(v)) || 0) + 1)
+        out.set(f.name, m)
+      }
+    }
+    const recs = c.recsAt === state.drawNo ? c.lastRecs : c.recs
+    for (const record of recs.singles) count(record)
+    // a list's headings are no records
+    for (const items of recs.lists) for (const record of items) if (!(record && record.heading)) count(record)
+    c.words = { at: state.drawNo, tally: out }
+    return out
   }
   // the chosen field's or label's values with their dots, in their hues; the others' values in words, dim
   const dotted = (chs) => chs.flatMap((ch, i) => [...(i ? [{ s: '  ' }] : []), ch.on ? mark(ch.colour) : { s: '○', d: true }, { s: ` ${ch.name}` }])
@@ -1648,8 +1736,8 @@ export function colorBy(opts = {}) {
       placeChips(last, all, fitting(all, d.cols - 2))
     }
     kitKey(d, 'c', 'to color by', showMenu, false, 0)
-    last.menus.push((dd) => drawMenu(dd, api, menuItems(), (it) => it && api.choose(it.key === 'off' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'c', 'to color by it alone', 'Color by', { words: 'to check or uncheck', on: (it) => togglePick(it.key) }))
-    last.menus.push((dd) => drawMenu(dd, valuesOwner, valueItems(), (it) => it && toggleChip(it.chip), 'c', 'to turn off or on', by ? by.title : '', { words: 'to turn off or on', on: (it) => toggleChip(it.chip) }))
+    last.menus.push((dd) => menuOf(api) && drawMenu(dd, api, menuItems(), (it) => it && api.choose(it.key === 'off' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'c', 'to color by it alone', 'Color by', { words: 'to check or uncheck', on: (it) => togglePick(it.key) }))
+    last.menus.push((dd) => menuOf(valuesOwner) && drawMenu(dd, valuesOwner, valueItems(), (it) => it && toggleChip(it.chip), 'c', 'to turn off or on', by ? by.title : '', { words: 'to turn off or on', on: (it) => toggleChip(it.chip) }))
     return last
   }
 
@@ -1678,6 +1766,24 @@ export function colorBy(opts = {}) {
 // the cells Reset takes against R, with its gutter, whether it shows or not
 const RESET_W = 7
 
+// a part's fields by `field:<name>` (the first of a name)
+function fieldsByKey(fields) {
+  const out = new Map()
+  for (const f of fields) if (!out.has(`field:${f.name}`)) out.set(`field:${f.name}`, f)
+  return out
+}
+
+// the workspace's labels by `label:<id>` (the first of an id), made again when the labels change
+let labelKeys = { of: null, map: new Map() }
+function labelByKey(key) {
+  if (labelKeys.of !== state.labels) {
+    const map = new Map()
+    for (const l of state.labels) if (!map.has(`label:${l.id}`)) map.set(`label:${l.id}`, l)
+    labelKeys = { of: state.labels, map }
+  }
+  return labelKeys.map.get(key) || null
+}
+
 // ------------------------------------------------------------------------------------------------ the labels' marks
 
 // each record's values of the labels the parts read ({$thimble: 'marks'}, which thimble answers for the labels a query
@@ -1704,16 +1810,22 @@ function needMarks(ref, id) {
   queueMicrotask(() => {
     const batch = [...marks.batch]
     marks.batch.clear()
-    const refs = batch.map(([r]) => r)
     const ids = wantedLabels()
     // asked once for each label, though thimble may hold no value of one that no part reads any more
     for (const [r, w] of batch) marks.asked.set(r, new Set([...(marks.asked.get(r) || []), ...ids, ...w]))
-    fetch({ $thimble: 'marks', refs }).then((got) => {
-      for (const r of refs) marks.got.set(r, { ...(marks.got.get(r) || {}), ...((got && got[r]) || {}) })
-      redraw()
-    }, () => {})
+    // thimble answers MARKS_BATCH refs a query, so a longer list of refs is asked in parts
+    for (let i = 0; i < batch.length; i += MARKS_BATCH) {
+      const refs = batch.slice(i, i + MARKS_BATCH).map(([r]) => r)
+      fetch({ $thimble: 'marks', refs }).then((got) => {
+        for (const r of refs) marks.got.set(r, { ...(marks.got.get(r) || {}), ...((got && got[r]) || {}) })
+        redraw()
+      }, () => {})
+    }
   })
 }
+
+// the refs one marks query asks for: as many as thimble answers one (views.MARKS_MAX)
+const MARKS_BATCH = 2000
 
 // ------------------------------------------------------------------------------------------------ the time range
 
@@ -2224,13 +2336,16 @@ export function strip(scale, items, o = {}) {
 /** The most records any bin of the scale holds among several groups (a lane each), so the lanes share one height. */
 export function maxBin(scale, groups, time = (it) => it.t) {
   let max = 1
+  const n = new Int32Array(Math.max(1, scale.cols | 0))
   for (const items of groups) {
-    const n = new Map()
+    n.fill(0)
+    let past = null // a cell past the scale's columns, which a scale of the view's own may give
     for (const it of items) {
       const x = scale.binOf(time(it))
       if (x < 0) continue
-      const k = (n.get(x) || 0) + 1
-      n.set(x, k)
+      let k
+      if (x < n.length) k = ++n[x]
+      else (past = past || new Map()).set(x, (k = (past.get(x) || 0) + 1))
       if (k > max) max = k
     }
   }
@@ -2249,7 +2364,26 @@ export function maxBin(scale, groups, time = (it) => it.t) {
  */
 export function list(opts = {}) {
   const keyOf = opts.key || ((it) => it.ref ?? it.id)
-  const s = { chosen: null, open: null, top: 0, free: false, items: [], rows: 0, shown: [], shownKey: '' }
+  // last: the last drawing's items, their first lines (off), its height and its chosen row's focus, from which span()
+  // foresees the rows in view before the list draws (foreseen: the drawing and the rows it foresaw)
+  const s = { chosen: null, open: null, top: 0, free: false, items: [], rows: 0, shown: [], shownKey: '', drawnAt: -1, last: null, foreseen: null }
+  // the rows under each item's own row (`body`) as it was last drawn, by item: {cols, ch, op, n}. A list draws only the
+  // rows in view; the others' rows are counted from here, so a long list costs about what its rows in view cost
+  const bodyRows = new WeakMap()
+  const shownKeyOf = (shown) => (shown.length ? `${keyOf(shown[0])}\u0000${keyOf(shown[shown.length - 1])}` : '')
+  // the rows the list will show, from its last drawing: those it showed, the window moved to the row chosen since (or
+  // by the wheel); null where the chosen row is not among them
+  function foresee() {
+    const L = s.last
+    if (!L) return null
+    let c = -1
+    for (let i = 0; i < L.n; i++) if (!L.items[i].heading && keyOf(L.items[i]) === s.chosen) { c = i; break }
+    if (c < 0) return null
+    const top = windowTop(L.off, L.items, L.n, L.height, c, s.top, s.free, L.chosen === s.chosen ? L.focus : null)
+    const out = []
+    for (let i = itemAtLine(L.off, L.n, top); i < L.n && L.off[i] < top + L.height; i++) if (!L.items[i].heading && L.off[i + 1] > top) out.push(L.items[i])
+    return out
+  }
   onWheel((by) => {
     s.top = Math.max(0, s.top + by)
     s.free = true
@@ -2279,9 +2413,16 @@ export function list(opts = {}) {
       return s.items.find((it) => !it.heading && keyOf(it) === s.chosen) || null
     },
     /** The first and last times of the items in view, `[t0, t1]`, by `time(item)` (`item.t` or `item.time`); null
-     *  when none shows. */
+     *  when none shows. A part drawn above the list (the lanes) reads them before the list draws: they are the rows
+     *  the list will show, foreseen from its last drawing and the row chosen since. */
     span(time = (it) => (it.t ?? it.time)) {
-      const ts = s.shown.map((it) => Number(time(it))).filter((t) => Number.isFinite(t))
+      let shown = s.shown
+      if (state.drawing && s.drawnAt !== state.drawNo) {
+        const f = foresee()
+        if (f) shown = f
+        s.foreseen = { at: state.drawNo, key: f ? shownKeyOf(f) : null }
+      }
+      const ts = shown.map((it) => Number(time(it))).filter((t) => Number.isFinite(t))
       return ts.length ? [Math.min(...ts), Math.max(...ts)] : null
     },
     /** The items in view, as last drawn. */
@@ -2338,28 +2479,35 @@ export function list(opts = {}) {
       const hueOf = (v) => (colour ? colour.colourOf(v) : null)
       // Color by's choices past the first, each a column of its own beside the track (at most TRACKS_MAX)
       const tracks = colour && Array.isArray(colour.tracks) ? colour.tracks.slice(0, TRACKS_MAX) : []
-      // every row of the list, laid out: an item's row, its details' rows under it
+      // Color by's menu names the values the records the list holds take: the kit's Color by counts them when its menu
+      // draws; another control's tally counts each of them here
+      if (colour && typeof colour.drew === 'function') colour.drew(items)
+      else if (colour && colour.tally) for (const it of pickable) colour.tally(it)
       const trackW = 3 + tracks.length
-      const inner = new Drawing(d.cols - trackW, 100000, d, 0)
-      const spans = [] // [first line, last line, item index]
-      items.forEach((it, i) => {
-        const y0 = inner.y
-        if (it.heading) inner.line([{ s: String(it.heading), ...(it.dim ? { d: true } : { b: true }) }])
+      const cols = d.cols - trackW
+      const bodyIndent = o.bodyIndent ?? 2
+      const opened = (key) => (pane ? pane.key === key : key === s.open)
+      // one item drawn: its row, the rows under it (`body`) and its details in place, in a drawing of its own
+      const drawn = new Map()
+      const render = (i) => {
+        if (drawn.has(i)) return drawn.get(i)
+        const it = items[i]
+        const di = new Drawing(cols, 100000, d, 0)
+        if (it.heading) di.line([{ s: String(it.heading), ...(it.dim ? { d: true } : { b: true }) }])
         else {
           const key = keyOf(it)
           const ch = key === s.chosen
-          const op = pane ? pane.key === key : key === s.open
-          const r = inner.row()
+          const op = opened(key)
+          const r = di.row()
           if (ch) r.margin({ s: '❯', fg: COLORS.accent })
           const v = valueOf ? valueOf(it) : null
           if (valueOf && o.mark !== false) r.add(colour ? colour.dot(v).s : '●', colour ? colour.dot(v) : mark(hueOf(v))).gap(1)
           const before = r.runs.length
           if (o.row) o.row(it, r, { chosen: ch, open: op })
-          if (colour && colour.tally) colour.tally(it)
           // the chosen row in the accent across its whole width, its dim columns too, as thimble-term's tables mark
           // theirs; a run in a color of its own (a value's hue, a problem, a link) keeps it
           if (ch) for (let k = before; k < r.runs.length; k++) if ((!r.runs[k].fg || r.runs[k].fg === COLORS.text) && r.runs[k].s.trim()) r.runs[k] = { ...r.runs[k], fg: COLORS.accent, d: false }
-          r.hits.push({ x0: 0, x1: inner.cols, row: true, on: () => {
+          r.hits.push({ x0: 0, x1: di.cols, row: true, on: () => {
             s.chosen = key
             s.free = false
             toggle(it)
@@ -2367,47 +2515,82 @@ export function list(opts = {}) {
           r.end()
           // lines every item has under its row (a turn's words), at `bodyIndent` cells
           if (o.body) {
-            const bd = inner.inner(o.bodyIndent ?? 2, 100000)
+            const bd = di.inner(bodyIndent, 100000)
             o.body(it, bd, { chosen: ch, open: op })
-            inner.put(bd)
+            di.put(bd)
+            if (typeof it === 'object') bodyRows.set(it, { cols, ch, op, n: bd.lines.length })
           }
           if (op && o.detail && !pane) {
-            const dd = inner.inner(2, 100000)
+            const dd = di.inner(2, 100000)
             o.detail(it, dd)
-            inner.put(dd)
+            di.put(dd)
           }
         }
-        spans.push([y0, inner.y - 1, i])
-      })
-      const total = inner.lines.length
-      const at = spans.find(([, , i]) => !items[i].heading && keyOf(items[i]) === s.chosen) || spans[0]
-      // the window: the chosen row in view, its details too where they fit, unless the wheel moved it since
-      const last = Math.max(0, total - height)
-      let top = Math.min(s.top, last)
-      if (!s.free) {
-        if (at[0] < top) top = at[0]
-        const end = Math.min(at[1], at[0] + height - 1)
-        if (end >= top + height) top = end - height + 1
-        // a heading right above the chosen row comes with it
-        if (top === at[0] && top > 0 && items[spans.find(([a]) => a === top - 1)?.[2]]?.heading) top -= 1
-        // a row its details keep in view (d.focus) shows, with the chosen row above it where both fit
-        const f = inner.focusY
-        if (f !== null && f > at[0] && f <= at[1] && f >= top + height) top = f - at[0] < height ? at[0] : f - Math.floor(height / 3)
+        drawn.set(i, di)
+        return di
       }
-      s.top = top = Math.max(0, Math.min(top, last))
-      // the items in view, which a lanes part drawn above marks on the overview: a change draws again, so it follows
-      s.shown = spans.filter(([a, b, i]) => !items[i].heading && b >= top && a < top + height).map(([, , i]) => items[i])
-      const shownKey = s.shown.length ? `${keyOf(s.shown[0])}\u0000${keyOf(s.shown[s.shown.length - 1])}` : ''
-      if (shownKey !== s.shownKey) {
-        s.shownKey = shownKey
-        redraw()
+      // an item's rows without drawing it: one, and its body's as it was last drawn at this width (drawn now where it
+      // never was)
+      const rowsOf = (it, ch, op) => {
+        if (!o.body) return 1
+        const was = typeof it === 'object' ? bodyRows.get(it) : null
+        if (was && was.cols === cols && was.ch === ch && was.op === op) return 1 + was.n
+        const bd = new Drawing(cols - bodyIndent, 100000, null, bodyIndent)
+        o.body(it, bd, { chosen: ch, open: op })
+        if (typeof it === 'object') bodyRows.set(it, { cols, ch, op, n: bd.lines.length })
+        return 1 + bd.lines.length
       }
+      // every item's first row in the list's rows (`off`): drawn as text (the view checks) every item is drawn, so a row
+      // too wide anywhere in the list is found; in the panel only the chosen one, the one open in place and those in view
+      const every = Boolean(state.textMode)
+      const n = items.length
+      const off = new Array(n + 1)
+      off[0] = 0
+      let c = -1
+      for (let i = 0; i < n; i++) {
+        const it = items[i]
+        let h = 1
+        if (!it.heading) {
+          const key = keyOf(it)
+          const ch = key === s.chosen
+          if (ch && c < 0) c = i
+          const op = opened(key)
+          h = every || ch || (op && o.detail && !pane) ? render(i).lines.length : rowsOf(it, ch, op)
+        }
+        off[i + 1] = off[i] + h
+      }
+      if (c < 0) c = 0
+      const total = off[n]
+      const itemAt = (y) => itemAtLine(off, n, y)
+      const focus = render(c).focusY
+      const top = (s.top = windowTop(off, items, n, height, c, s.top, s.free, focus))
+      // the rows in view, drawn now; an item's rows drawn differ from those counted only where its body changed since
+      // it was last drawn, and then the rows after it move up or down
       const y0 = d.y
-      for (let y = top; y < Math.min(total, top + height); y++) d.lines.push({ margin: inner.lines[y].margin, runs: inner.lines[y].runs })
-      for (const h of inner.hits) if (h.y >= top && h.y < top + height) d.hits.push({ ...h, y: h.y - top + y0 })
-      if (total > height) drawTrack(d, y0, Math.min(height, total - top), total, top, height, spans, items, valueOf, hueOf, tracks, (line) => {
-        const sp = spans.find(([a, b]) => line >= a && line <= b)
-        const it = sp && items.slice(sp[2]).find((x) => !x.heading)
+      const shown = []
+      let k = 0
+      const i0 = itemAt(top)
+      for (let i = i0; i < n && k < height; i++) {
+        const di = render(i)
+        const from = i === i0 ? Math.max(0, top - off[i]) : 0
+        const to = Math.min(di.lines.length, from + height - k)
+        if (to <= from) continue
+        for (let y = from; y < to; y++) d.lines.push({ margin: di.lines[y].margin, runs: di.lines[y].runs })
+        for (const h of di.hits) if (h.y >= from && h.y < to) d.hits.push({ ...h, y: h.y - from + y0 + k })
+        if (!items[i].heading) shown.push(items[i])
+        k += to - from
+      }
+      // the items in view, which a lanes part drawn above marks on the overview (span): where it read them in this
+      // drawing before the list drew and they moved otherwise than it foresaw, the view draws again, so it follows
+      s.shown = shown
+      const shownKey = shownKeyOf(shown)
+      s.shownKey = shownKey
+      s.drawnAt = state.drawNo
+      if (s.foreseen && s.foreseen.at === state.drawNo && s.foreseen.key !== shownKey) redraw()
+      s.last = { items, off, n, height, chosen: s.chosen, focus }
+      if (total > height) drawTrack(d, y0, total, top, height, off, items, valueOf, hueOf, tracks, (line) => {
+        const i = itemAt(line)
+        const it = items.slice(i).find((x) => !x.heading)
         if (it) s.chosen = keyOf(it)
         s.top = line
         s.free = true
@@ -2448,27 +2631,77 @@ export function list(opts = {}) {
   return api
 }
 
+// the item whose first row is line `y` of a list (or the last before it), `off` holding each item's first line
+function itemAtLine(off, n, y) {
+  let lo = 0
+  let hi = n - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (off[mid] <= y) lo = mid
+    else hi = mid - 1
+  }
+  return lo
+}
+
+// a list's first line in view: the chosen item `c` in view, its details too where they fit, unless the wheel moved it
+// (`free`); `focus` the line of the chosen item that its details keep in view (d.focus), counted from its row
+function windowTop(off, items, n, height, c, top0, free, focus) {
+  const total = off[n]
+  const at = [off[c], off[c + 1] - 1]
+  const last = Math.max(0, total - height)
+  let top = Math.min(top0, last)
+  if (!free) {
+    if (at[0] < top) top = at[0]
+    const end = Math.min(at[1], at[0] + height - 1)
+    if (end >= top + height) top = end - height + 1
+    // a heading right above the chosen row comes with it
+    if (top === at[0] && top > 0) {
+      const j = itemAtLine(off, n, top - 1)
+      if (off[j] === top - 1 && items[j].heading) top -= 1
+    }
+    // a row its details keep in view shows, with the chosen row above it where both fit
+    const f = focus === null || focus === undefined ? null : at[0] + focus
+    if (f !== null && f > at[0] && f <= at[1] && f >= top + height) top = f - at[0] < height ? at[0] : f - Math.floor(height / 3)
+  }
+  return Math.max(0, Math.min(top, last))
+}
+
 // the track beside a list taller than its room (docs/terminal-views.md, "The list"): a column of the whole list, each
 // cell its rows' commonest Color by hue (`▌`), the part in view on the selection background; a list many times its
 // room adds the zoomed track at the outer edge, the part around the view at a finer scale; each of Color by's choices
-// past the first (`tracks`) a column of its own before them, in its own hues. A click goes there.
+// past the first (`tracks`) a column of its own before them, in its own hues. A click goes there. `off` holds each
+// item's first line, so the track reads each item's value once, never a line at a time.
 const TRACKS_MAX = 3
-function drawTrack(d, y0, shownRows, total, top, height, spans, items, valueOf, hueOf, tracks, go) {
+function drawTrack(d, y0, total, top, height, off, items, valueOf, hueOf, tracks, go) {
   const rows = height
-  const valueAtLine = new Array(total).fill(undefined)
-  for (const [a, , i] of spans) if (!items[i].heading) valueAtLine[a] = valueOf ? valueOf(items[i]) ?? null : null
-  const lanes = (tracks || []).map((t) => {
-    const at = new Array(total).fill(undefined)
-    for (const [a, , i] of spans) if (!items[i].heading) at[a] = t.valueOf(items[i]) ?? null
-    return { at, hue: t.colourOf, title: t.title }
-  })
-  const cellIn = (at, hue, from, to) => {
+  // the first line of each item that is not a heading, in order, and its value; each track's value too
+  const starts = []
+  const values = []
+  const lanes = (tracks || []).map((tr) => ({ values: [], valueOf: tr.valueOf, hue: tr.colourOf, title: tr.title }))
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].heading) continue
+    starts.push(off[i])
+    values.push(valueOf ? valueOf(items[i]) ?? null : null)
+    for (const l of lanes) l.values.push(l.valueOf(items[i]) ?? null)
+  }
+  const firstAt = (y) => {
+    let lo = 0
+    let hi = starts.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (starts[mid] < y) lo = mid + 1
+      else hi = mid
+    }
+    return lo
+  }
+  // the lines [from, to) of the list, as a cell: the commonest of `vals` of the items that start on them, in `hue`
+  const cellIn = (vals, hue, from, to) => {
     const counts = new Map()
     let any = false
-    for (let y = Math.floor(from); y < Math.min(total, Math.ceil(to)); y++) {
-      if (at[y] === undefined) continue
+    const end = Math.min(total, Math.ceil(to))
+    for (let j = firstAt(Math.floor(from)); j < starts.length && starts[j] < end; j++) {
       any = true
-      const k = at[y] === null ? '' : String(at[y])
+      const k = vals[j] === null ? '' : String(vals[j])
       counts.set(k, (counts.get(k) || 0) + 1)
     }
     if (!any) return { s: ' ' }
@@ -2478,7 +2711,7 @@ function drawTrack(d, y0, shownRows, total, top, height, spans, items, valueOf, 
     const h = best ? hue(best) : null
     return h && h !== COLORS.dim ? { s: '▌', fg: h } : { s: '▌', d: true }
   }
-  const cellOf = (from, to) => cellIn(valueAtLine, hueOf, from, to)
+  const cellOf = (from, to) => cellIn(values, hueOf, from, to)
   const zoom = total > rows * 16
   const zFrom = Math.max(0, Math.min(total - rows * 4, top + height / 2 - rows * 2))
   const zLen = Math.min(total, rows * 4)
@@ -2498,14 +2731,13 @@ function drawTrack(d, y0, shownRows, total, top, height, spans, items, valueOf, 
       const zb = zFrom + ((k + 1) / rows) * zLen
       cells.unshift({ ...cellOf(za, zb), ...(zb > top && za < top + height ? { bg: COLORS.selected } : {}) })
     }
-    cells.unshift(...lanes.map((l) => ({ ...cellIn(l.at, l.hue, a, b), ...(inView ? { bg: COLORS.selected } : {}) })))
+    cells.unshift(...lanes.map((l) => ({ ...cellIn(l.values, l.hue, a, b), ...(inView ? { bg: COLORS.selected } : {}) })))
     line.runs = merged([...runs, { s: ' '.repeat(Math.max(0, pad)) }, ...cells])
     for (let j = 0; j < n; j++) d.hits.push({ y: y0 + k, x0: d.cols - (zoom ? 2 : 1) - n + j, x1: d.cols - (zoom ? 2 : 1) - n + j + 1, on: () => go(Math.floor(a)), tip: `${lanes[j].title}: rows ${num(Math.floor(a) + 1)}-${num(Math.min(total, Math.ceil(b)))} of ${num(total)}` })
     const x = d.cols - (zoom ? 2 : 1)
     d.hits.push({ y: y0 + k, x0: x + (zoom ? 1 : 0), x1: x + (zoom ? 2 : 1), on: () => go(Math.floor(a)), tip: `rows ${num(Math.floor(a) + 1)}-${num(Math.min(total, Math.ceil(b)))} of ${num(total)}` })
     if (zoom) d.hits.push({ y: y0 + k, x0: x, x1: x + 1, on: () => go(Math.floor(zFrom + (k / rows) * zLen)), tip: 'the rows around the view' })
   }
-  void shownRows
 }
 
 // ------------------------------------------------------------------------------------------------ columns and details
@@ -2706,7 +2938,7 @@ export function choice(opts = {}) {
       const shown = items().find((it) => it.v === s.value)
       r.add(shown ? shown.name : some ? all : String(s.value ?? ''), {}, { on: open, tip: opts.tip || `choose ${opts.title || 'one'}` })
       if (opts.key) kitKey(r.d, opts.key, `for ${opts.title || 'the choice'}`, open)
-      r.menus.push((d) => drawMenu(d, api, items(), (it) => it && api.set(it.v), opts.key || null, 'to select', opts.title || ''))
+      r.menus.push((d) => menuOf(api) && drawMenu(d, api, items(), (it) => it && api.set(it.v), opts.key || null, 'to select', opts.title || ''))
       return r
     },
   }
@@ -2869,14 +3101,23 @@ function chooser(opts, name, initial) {
     chosen: typeof keptC.by === 'string',
     off: keptC.off && typeof keptC.off === 'object' ? { ...keptC.off } : {},
     counts: null,
-    tally: new Map(),
-    tallied: new Map(),
-    tallyAt: -1,
-    seen: new Set(),
+    // the records tallied in this drawing (recs) and in the last one that tallied any (lastRecs), counted only when
+    // the counts or the menu's words are read (counted: the last count, by the list it counted, its length and the
+    // label chosen)
+    recs: [],
+    lastRecs: [],
+    recsAt: -1,
+    counted: { recs: null, n: -1, label: null, tally: new Map() },
     drawnSig: null, // the counts the toggles last drew, null while none drew any
   }
-  const fieldOf = (key) => fields.find((f) => `field:${f.name}` === key) || null
-  const labelOf = (key) => state.labels.find((l) => `label:${l.id}` === key) || null
+  const byKey = fieldsByKey(fields)
+  const fieldOf = (key) => byKey.get(key) || null
+  const labelOf = (key) => labelByKey(key)
+  // a record's value of a field: its own (or value(record)), null for none
+  const fieldValue = (f, record) => {
+    const v = typeof f.value === 'function' ? f.value(record) : record[f.name]
+    return v === undefined || v === null || v === '' || typeof v === 'object' ? null : String(v)
+  }
   const settle = () => {
     if (!c.chosen) c.choice = home()
     if (c.choice === 'none' || fieldOf(c.choice) || labelOf(c.choice)) return
@@ -2904,47 +3145,55 @@ function chooser(opts, name, initial) {
     valueOf(record, key = c.choice) {
       if (record === null || record === undefined) return null
       const f = fieldOf(key)
-      if (f) {
-        const v = typeof f.value === 'function' ? f.value(record) : record[f.name]
-        return v === undefined || v === null || v === '' || typeof v === 'object' ? null : String(v)
-      }
+      if (f) return fieldValue(f, record)
       const l = labelOf(key)
       return l ? labelValue(l.id, record) : null
     },
     tally(record) {
       if (!record || typeof record !== 'object') return
-      if (c.tallyAt !== state.drawNo) {
-        if (c.tally.size) c.tallied = c.tally
-        c.tally = new Map()
-        c.seen = new Set()
-        c.tallyAt = state.drawNo
+      if (c.recsAt !== state.drawNo) {
+        if (c.recs.length) c.lastRecs = c.recs
+        c.recs = []
+        c.recsAt = state.drawNo
         // the toggles drew the counts of the drawing before: once this one is drawn, a change draws again
-        queueMicrotask(() => {
-          if (c.drawnSig !== null && tallySig(c.tally) !== c.drawnSig) {
+        const recs = c.recs
+        state.afterDraw.push(() => {
+          if (c.drawnSig !== null && tallySig(ch.count(recs)) !== c.drawnSig) {
             c.drawnSig = null
             redraw()
           }
         })
       }
-      if (c.seen.has(record)) return
-      c.seen.add(record)
-      for (const f of fields) {
-        const k = ch.valueOf(record, `field:${f.name}`) ?? ''
-        const m = c.tally.get(f.name) || new Map()
-        m.set(k, (m.get(k) || 0) + 1)
-        c.tally.set(f.name, m)
-      }
+      c.recs.push(record)
+    },
+    // the values of the records of a drawing, each record once: every field's, and the label's chosen
+    count(recs) {
       const l = labelOf(c.choice)
-      if (l) {
-        const k = ch.valueOf(record) ?? ''
-        const m = c.tally.get(`label:${l.id}`) || new Map()
-        m.set(k, (m.get(k) || 0) + 1)
-        c.tally.set(`label:${l.id}`, m)
+      if (c.counted.recs === recs && c.counted.n === recs.length && c.counted.label === l) return c.counted.tally
+      const tally = new Map()
+      const seen = new Set()
+      for (const record of recs) {
+        if (seen.has(record)) continue
+        seen.add(record)
+        for (const f of fields) {
+          const k = fieldValue(f, record) ?? ''
+          let m = tally.get(f.name)
+          if (!m) tally.set(f.name, (m = new Map()))
+          m.set(k, (m.get(k) || 0) + 1)
+        }
+        if (l) {
+          const k = ch.valueOf(record) ?? ''
+          let m = tally.get(`label:${l.id}`)
+          if (!m) tally.set(`label:${l.id}`, (m = new Map()))
+          m.set(k, (m.get(k) || 0) + 1)
+        }
       }
+      c.counted = { recs, n: recs.length, label: l, tally }
+      return tally
     },
     // the records of the last whole drawing, counted: while a drawing counts, the one before it
     lastTally() {
-      return c.tallyAt === state.drawNo ? c.tallied : c.tally
+      return ch.count(c.recsAt === state.drawNo ? c.lastRecs : c.recs)
     },
     // the counts of the choice's values: the reader's (counts()), else those of the records last drawn
     counts() {
@@ -3134,7 +3383,7 @@ export function filterBy(opts = {}) {
       }
       if (k < vals.length) r.gap().add(`+${vals.length - k}`, { d: true }, { on: open, tip: `${plural(vals.length - k, 'more value')}: open Filter by` })
       kitKey(r.d, 'f', 'to filter by', open, false, 1)
-      r.menus.push((dd) => drawMenu(dd, api, ch.menuItems(), (it) => it && api.choose(it.key === 'none' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'f', 'to filter by', 'Filter by'))
+      r.menus.push((dd) => menuOf(api) && drawMenu(dd, api, ch.menuItems(), (it) => it && api.choose(it.key === 'none' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'f', 'to filter by', 'Filter by'))
       return r
     },
   }
@@ -3277,7 +3526,7 @@ export function rows(opts = {}) {
       r.add(b ? b.title : 'none', {}, { on: open, tip: 'choose what the lanes are grouped by: a field or a label', max: Math.max(4, r.room - 2) })
       if (b && b.label) r.add(' ').add('↗', { fg: COLORS.link }, { on: () => openLabel(b.label), tip: "the label's panel: its definition, its runs and its records" })
       kitKey(r.d, 'g', 'for rows', open, false, 1)
-      r.menus.push((dd) => drawMenu(dd, api, ch.menuItems(), (it) => it && api.choose(it.key === 'none' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'g', 'to group by', 'Rows'))
+      r.menus.push((dd) => menuOf(api) && drawMenu(dd, api, ch.menuItems(), (it) => it && api.choose(it.key === 'none' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'g', 'to group by', 'Rows'))
       return r
     },
   }
@@ -3361,7 +3610,8 @@ export function lanes(opts = {}) {
     }
     return out
   }
-  function cells(scale, n, max, span, colour, dense) {
+  // a lane's cells: `its` its records Color by keeps, `whens` each cell's time in words (the lanes share them)
+  function cells(scale, n, max, span, colour, dense, its, whens) {
     const out = Array.from({ length: scale.cols }, () => ({ s: ' ' }))
     const gaps = scale.gaps ? scale.gaps() : []
     const inGap = (x) => gaps.some(([g0, g1]) => x >= g0 && x < g1)
@@ -3374,7 +3624,6 @@ export function lanes(opts = {}) {
       if (spans.length) st.counts.band++
       if (isOn('band')) for (const [a, b] of spans) fill(a, b, { s: '─', fg: COLORS.rule })
     }
-    const its = n.items.filter((it) => !colour || colour.keeps(it))
     if (typeof opts.end === 'function')
       for (const it of its) {
         const e = opts.end(it)
@@ -3382,21 +3631,37 @@ export function lanes(opts = {}) {
         const hue = colour ? colour.colourOf(colour.valueOf(it)) : null
         fill(time(it), e, hue && hue !== COLORS.dim ? { s: '─', fg: hue } : { s: '─', d: true })
       }
-    // Density: each cell's bar its records on the lanes' one height; Events: a mark in every cell that holds a record
-    strip(scale, its, { value: (it) => (colour ? colour.valueOf(it) : null), colour, max, time }).forEach((run, x) => {
-      if (run.s !== ' ') out[x] = dense ? run : { ...run, s: EVENT }
-    })
-    const per = new Map()
+    // each cell's records, those that failed and their Color by values, in one pass over the lane's records
+    const counts = new Int32Array(scale.cols)
+    const failed = new Int32Array(scale.cols)
+    const values = new Array(scale.cols)
+    const problem = typeof opts.problem === 'function' ? opts.problem : null
     for (const it of its) {
       const x = scale.binOf(time(it))
       if (x < 0) continue
-      const [k, bad] = per.get(x) || [0, 0]
-      per.set(x, [k + 1, bad + (typeof opts.problem === 'function' && opts.problem(it) ? 1 : 0)])
+      counts[x]++
+      if (problem && problem(it)) failed[x]++
+      const v = colour ? colour.valueOf(it) : null
+      const k = v === null || v === undefined ? '' : String(v)
+      const m = values[x] || (values[x] = new Map())
+      m.set(k, (m.get(k) || 0) + 1)
     }
-    for (const [x, [k, bad]] of per) {
-      if (!bad) continue
-      st.counts.problem += bad
-      if (isOn('problem') && bad * 2 >= k) out[x] = { s: '×', fg: COLORS.problem }
+    // Density: each cell's bar its records on the lanes' one height, in the hue most of them take, as strip draws it;
+    // Events: a mark in every cell that holds a record
+    const hue = hueFn(colour)
+    for (let x = 0; x < scale.cols; x++) {
+      if (!counts[x]) continue
+      let best = ''
+      let bn = 0
+      for (const [v, m] of values[x]) if (v !== '' && m > bn) [best, bn] = [v, m]
+      const c = best ? hue(best) : null
+      const glyph = dense ? bar(counts[x], max) : EVENT
+      out[x] = c && c !== COLORS.dim ? { s: glyph, fg: c } : { s: glyph, d: true }
+    }
+    for (let x = 0; x < scale.cols; x++) {
+      if (!failed[x]) continue
+      st.counts.problem += failed[x]
+      if (isOn('problem') && failed[x] * 2 >= counts[x]) out[x] = { s: '×', fg: COLORS.problem }
     }
     if (span) {
       const a = scale.binOf(Math.max(span[0], scale.from))
@@ -3404,9 +3669,9 @@ export function lanes(opts = {}) {
       if (span[1] >= scale.from && span[0] <= scale.to) for (let x = Math.max(0, a); x <= Math.max(a, b); x++) out[x] = { ...out[x], bg: COLORS.selected }
     }
     const tips = Array.from({ length: scale.cols }, (_, x) => {
-      const [k, bad] = per.get(x) || [0, 0]
-      const t = scale.t(x)
-      return `${n.name} · ${when(t, Math.max(1, scale.step))}${k ? ` · ${plural(k, words.record)}` : ''}${bad ? ` · ${num(bad)} ${words.problem}` : ''}`
+      const k = counts[x]
+      const bad = failed[x]
+      return `${n.name} · ${whens[x]}${k ? ` · ${plural(k, words.record)}` : ''}${bad ? ` · ${num(bad)} ${words.problem}` : ''}`
     })
     return { runs: out, tips, its }
   }
@@ -3446,12 +3711,14 @@ export function lanes(opts = {}) {
       st.counts = { band: 0, problem: 0 }
       const groups = all.map((n) => n.items.filter((it) => !colour || colour.keeps(it)))
       const max = maxBin(scale, groups, time)
+      const whens = Array.from({ length: scale.cols }, (_, x) => when(scale.t(x), Math.max(1, scale.step)))
       // the rows past the room wait behind `… N more`, which shows the next of them
       const fits = all.length <= room ? all.length : Math.max(1, room - 1)
       if (st.top >= all.length || all.length <= room) st.top = 0
       const shown = all.slice(st.top, st.top + fits)
       st.shown = shown
       for (const n of shown) {
+        const its = groups[all.indexOf(n)]
         const r = d.row()
         const own = n.depth === 0
         if (own && n.children) r.add(n.folded ? '▸' : '▾', {}, { on: () => { st.folded.set(n.key, !n.folded); save(); redraw() }, tip: n.folded ? 'show the lanes under it' : 'fold the lanes under it into its own' }).gap(1)
@@ -3470,7 +3737,7 @@ export function lanes(opts = {}) {
         r.at(gutter)
         if (!(n.heading && !n.folded)) {
           const x0 = r.x
-          const lane = cells(scale, n, max, span, colour, dense)
+          const lane = cells(scale, n, max, span, colour, dense, its, whens)
           r.runsOf(lane.runs)
           r.hits.push({
             x0,

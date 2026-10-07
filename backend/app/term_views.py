@@ -61,8 +61,13 @@ NODE_MIN = (20, 11)
 MEMORY_MB = 256  # the program's heap
 EVENT_WAIT_S = 2.0  # how long an event waits for the frame that answers it
 START_WAIT_S = 20.0  # how long a program has to draw its first frame
-SETTLE_QUIET_S = 0.25  # draw_text: no query out and no new frame for this long
+SETTLE_QUIET_S = 0.25  # a ticker of this period or less draws frame after frame: settle waits for this long without one
 SETTLE_MAX_S = 120.0
+IDLE_DUE_S = 0.5  # a timer a program waits on that is due later than this is its clock, not work it is doing
+SYNC_WAIT_S = 2.0  # how long a sync waits for the program's answer
+# the longest message a program takes (runtime.mjs LINE_MAX): a reader answer longer than this reaches the program as an
+# error that says to page it, rather than being dropped, which would leave the view loading for good
+ANSWER_MAX = 16 * 1024 * 1024
 # the view checks' draws of a view built in terminal mode (views.term_draws): its columns and theme as it opens, each
 # CHECK_ROWS tall, as a laptop's terminal and a large screen show the panel
 CHECK_DRAWS = ((120, "light"), (120, "dark"), (200, "light"), (200, "dark"))
@@ -333,6 +338,16 @@ class Program:
         self.closed = False
         self.labels_sig = ""
         self.claimed: list[str] | None = None
+        # settle's view of the program: each frame and query it sent (seen), set on each and on each answer (activity),
+        # the syncs out and when it last answered one, whether the last settle found it idle (settled), and whether it
+        # answered no sync in the last SYNC_WAIT_S of it (unanswered)
+        self.seen = 0
+        self.activity = asyncio.Event()
+        self.syncs: dict[int, asyncio.Future] = {}
+        self.sync_n = 0
+        self.synced_at = 0.0
+        self.settled = False
+        self.unanswered = False
 
     async def start(self, cols: int, rows: int, theme: str = "dark", ref: str | None = None,
                     text: str = "") -> dict[str, Any]:
@@ -374,9 +389,12 @@ class Program:
         return views.live_reads() if self.live else contextlib.nullcontext()
 
     async def _send(self, msg: dict[str, Any]) -> None:
+        await self._send_bytes((json.dumps(msg, ensure_ascii=False, default=str) + "\n").encode("utf-8"))
+
+    async def _send_bytes(self, line: bytes) -> None:
         if self.proc is None or self.proc.stdin is None or self.proc.returncode is not None:
             raise TermViewError("the view's program has ended")
-        self.proc.stdin.write((json.dumps(msg, ensure_ascii=False, default=str) + "\n").encode("utf-8"))
+        self.proc.stdin.write(line)
         with contextlib.suppress(ConnectionError):
             await self.proc.stdin.drain()
 
@@ -411,15 +429,24 @@ class Program:
         why = self.errors[-1] if self.errors else "it ended"
         if not self.first.done():
             self.first.set_exception(TermViewError(f"the view's program ended: {why}"))
-        for f in self.waiting.values():
+        for f in [*self.waiting.values(), *self.syncs.values()]:
             if not f.done():
                 f.set_result(None)
+        self.activity.set()
         if self.push:
             self.push(self.id, {"t": "ended", "error": why})
 
     def _take(self, msg: dict[str, Any]) -> None:
         t = msg.get("t")
-        if t == "frame":
+        if t in ("frame", "query"):
+            self.seen += 1
+            self.activity.set()
+        if t == "synced":
+            self.synced_at = time.monotonic()
+            f = self.syncs.get(msg.get("id"))
+            if f is not None and not f.done():
+                f.set_result(msg)
+        elif t == "frame":
             self.frame = msg
             self.last_frame_at = time.monotonic()
             if not self.first.done():
@@ -474,8 +501,15 @@ class Program:
         finally:
             self.queries.pop(qid, None)
         self.last_frame_at = time.monotonic()  # the frame the answer brings is due: settle waits for it
+        line = (json.dumps(msg, ensure_ascii=False, default=str) + "\n").encode("utf-8")
+        if len(line) > ANSWER_MAX:
+            why = (f"the reader's answer is {len(line) / 1048576:.1f} MB, more than the {ANSWER_MAX // 1048576} MB one fetch "
+                   "takes: answer in pages (a `from` in the query, the next page's start in the answer)")
+            self.failed.append(why)
+            line = (json.dumps({"t": "answer", "id": qid, "error": why}) + "\n").encode("utf-8")
         with contextlib.suppress(TermViewError, ConnectionError):
-            await self._send(msg)
+            await self._send_bytes(line)
+        self.activity.set()
 
     async def _query(self, q: Any, want: list[str]) -> Any:
         """A reader query: the view kit's own ({$thimble: label | labels | marks}), else reader.records(index, q) under
@@ -531,13 +565,55 @@ class Program:
         """Whether the program is quiet: no query out and no new frame for `quiet` seconds."""
         return not self.queries and time.monotonic() - self.last_frame_at >= quiet
 
-    async def settle(self, quiet: float = SETTLE_QUIET_S, timeout: float = SETTLE_MAX_S) -> dict[str, Any] | None:
-        """The frame once the program is quiet (draw_text), or after `timeout` seconds."""
-        end = time.monotonic() + timeout
-        while time.monotonic() < end and not self.closed:
-            if self.quiet(quiet):
+    async def idle(self, wait: float = SYNC_WAIT_S) -> bool | None:
+        """Whether the program is idle: no reader query out, everything sent to it handled and the frames that drew out
+        (it answers a sync only then, runtime.mjs), nothing new from it meanwhile, no timer it waits on due within
+        IDLE_DUE_S, and, while an interval of SETTLE_QUIET_S or less runs (a ticker), no frame for SETTLE_QUIET_S. None
+        when it does not answer within `wait` seconds."""
+        if self.queries:
+            return False
+        self.sync_n += 1
+        n = self.sync_n
+        fut = asyncio.get_running_loop().create_future()
+        self.syncs[n] = fut
+        seen = self.seen
+        try:
+            await self._send({"t": "sync", "id": n})
+            got = await asyncio.wait_for(fut, wait)
+        except (asyncio.TimeoutError, TermViewError, ConnectionError):
+            return None
+        finally:
+            self.syncs.pop(n, None)
+        if not isinstance(got, dict):
+            return None
+        due, every = got.get("due"), got.get("every")
+        ticking = isinstance(every, (int, float)) and every <= SETTLE_QUIET_S * 1000 and not self.quiet()
+        return (not self.queries and self.seen == seen and not ticking
+                and (not isinstance(due, (int, float)) or due > IDLE_DUE_S * 1000))
+
+    async def _activity(self, wait: float) -> None:
+        """Until the program sends a frame or a query, an answer goes to it, or `wait` seconds pass."""
+        self.activity.clear()
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(self.activity.wait(), max(0.0, wait))
+
+    async def settle(self, timeout: float = SETTLE_MAX_S) -> dict[str, Any] | None:
+        """The frame once the program is idle (draw_text, draw_check), or after `timeout` seconds; `settled` says which.
+        It asks the program (idle) as soon as no reader query is out, so a frame drawn quickly is taken at once, and a
+        program still at work after its last answer (decoding it, in chunks between timers, or in one stretch that
+        leaves its sync unanswered) is waited for."""
+        start = time.monotonic()
+        end = start + timeout
+        self.settled = self.unanswered = False
+        while not self.closed and (left := end - time.monotonic()) > 0:
+            if self.queries:
+                await self._activity(min(left, 0.5))
+                continue
+            if await self.idle(min(left, SYNC_WAIT_S)):
+                self.settled = True
                 return self.frame
-            await asyncio.sleep(0.05)
+            await self._activity(min(left, 0.02))
+        self.unanswered = not self.queries and time.monotonic() - max(start, self.synced_at) >= SYNC_WAIT_S
         return self.frame
 
     async def close(self) -> None:
@@ -706,8 +782,9 @@ async def draw_check(c: str, slug: str, *, cols: int, theme: str, rows: int = CH
             out["error"] = str(frame["error"])
         elif p.closed:
             out["error"] = f"the program ended: {p.errors[-1] if p.errors else 'it exited'}"
-        elif not p.quiet():
-            out["timeout"] = "a fetch still waits for the reader" if p.queries else "it draws frame after frame"
+        elif not p.settled:
+            out["timeout"] = ("a fetch still waits for the reader" if p.queries else "it is still at work: it answers no sync"
+                              if p.unanswered else "it draws frame after frame")
         elif isinstance(frame.get("overflow"), dict):
             out["overflow"] = dict(frame["overflow"])
         else:

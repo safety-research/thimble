@@ -60,7 +60,11 @@ frames.
 
 - `draw(fn)` registers the function that draws the view: `fn(d)` gets a Drawing as wide as the panel's type area and as
   tall as its rows under the header. The kit calls it again after every event, every answer and every change a part of
-  the kit makes, so the program keeps its state in variables and draws from them; `redraw()` asks for it too.
+  the kit makes, so the program keeps its state in variables and draws from them; `redraw()` asks for it too, and one
+  asked while the view draws draws it again before the frame goes. A key is answered by one drawing, so a drawing
+  costs what the rows it shows cost: the kit's list draws only its rows in view, and work that walks every record
+  (grouping, counting, building rows) belongs where the records or a control change (`load`, `onChange`), or is one
+  pass in `draw` that touches each record once.
 - `fetch(query, {key})` asks the view's `reader.records(index, query)`, as `thimble.fetch` does in the browser, and
   resolves with its answer; a newer fetch with the same `key` drops the older one, which rejects with an `AbortError`.
 - `onOpen(fn)` hears each place a citation opens the view at, `{ref, target, key, label, excerpt}` as the reader's
@@ -185,7 +189,7 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
 | `counts(map)` | the reader's counts of the choice's values, `''` for no value |
 | `valueOf(record)`, `colourOf(value)`, `dot(value)` | a record's value, a value's hue, its `●` (`○` when off) |
 | `isOn(value)`, `keeps(record)` | whether a value, or a record's value, is on |
-| `tally(record)` | count a record's values of every field for the menu (the list counts the rows it draws) |
+| `tally(record)` | count a record's values of every field for the menu (a list hands over its records, which the menu counts when it opens) |
 | `by`, `field`, `label`, `off`, `values` | the choice and its chips |
 | `choose(field \| {label} \| null)`, `toggle(value)` | change it from the page |
 
@@ -273,6 +277,10 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
 - Each row starts with its mark in its Color by hue. A list taller than its rows has the colored track at its right
   edge: each cell the commonest hue of the rows it stands for, the part in view on the selection background; one many
   times taller adds the zoomed track beside it. A click on the track goes there; the wheel moves the rows.
+- A list draws only its rows in view (and the chosen one): a list of 15,000 rows answers a key as one of 40 does. The
+  rows an item's `body` takes are counted as it last drew them at that width, so `body` draws from the item and its
+  `{chosen, open}` alone. Drawn as text (`thimble view text`, the view checks) a list draws every row, so a row too
+  wide anywhere in it is found.
 - `columns(specs, cols)` lays out columns with 2-cell gutters (`{w}`, `{align: 'right'}`, `{grow: true}`):
   `cells(r, values, styles)` adds a row's values, and `header(r, names, {sorted, desc, onSort})` the names, dim, `▼`
   after the one sorted by, each a click that sorts; a list's `header(r)` stands above its rows and does not scroll.
@@ -288,8 +296,9 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
 - `body(item, dd)` draws lines every item has under its row, at `bodyIndent` cells (a turn's words); `mark: false`
   leaves out the row's leading Color by mark while its track keeps the hues. A heading with `dim` is a dim row.
 - With `side` (a side pane), Enter or a click opens the row's details in the pane, never under the row.
-- `rows.span(time)` gives the first and last times of the rows in view, which a lanes part marks on the overview; a
-  scroll that changes them draws again, so the overview follows.
+- `rows.span(time)` gives the first and last times of the rows in view, which a lanes part marks on the overview. Read
+  above the list, before it draws, it gives the rows the list will show after the key or the wheel being answered; where
+  the list then shows others (its items changed), the view draws again, so the overview follows.
 - `onWheel(fn)` hears the wheel over the view, for a part of the program's own that scrolls.
 
 ## The side pane
@@ -344,7 +353,8 @@ queries; thimble-term starts it the first time a view opens and talks to it over
 |---|---|
 | `init {source, cols, rows, theme, view, state, labels, open}` | the program's source and what it opens on |
 | `resize {cols, rows}`, `key {key}`, `text {value}`, `click {i, seq, x}`, `drag {i, seq, x0, x1}`, `wheel {by}` | the panel's events, each with its number `n`; `text` the whole text of the field that takes typing |
-| `answer {id, data \| error}` | a query's answer |
+| `answer {id, data \| error}` | a query's answer; one longer than 16 MB comes as an error that says to answer in pages |
+| `sync {id}` | asks whether the program is idle (`draw_text`, the view checks) |
 | `labels {labels, filter}`, `open {place}` | the labels changed; a citation opened the view at a place |
 
 | from the program to thimble | |
@@ -353,6 +363,7 @@ queries; thimble-term starts it the first time a view opens and talks to it over
 | `query {id, q, labels}`, `cancel {id}` | a reader query, and one dropped |
 | `act {n, act}` | a place, a thread or a label's panel, made during event `n` |
 | `state {state}`, `error {message}`, `log {text}` | what the view keeps, an error, a line it printed |
+| `synced {id, due, every}` | the answer to a sync, once everything sent before it is handled and the frames it drew are out: the ms until the next timer it waits on and its shortest interval's period (null for none) |
 
 The program runs in Node with its permission model, which lets it read the kit's folder alone and start no process,
 worker or addon, inside Anthropic's sandbox runtime (or bubblewrap where that does not run), which gives it no network
@@ -367,9 +378,12 @@ socket.
 
 `thimble view text <slug> --cwd <folder> --width 120 [--height 40] [--keys 'down return'] [--open <ref>] [--ansi]`
 draws a view as thimble-term's panel shows it, with no Claude Code, as it opens (keeping nothing): what the view
-checks and the reviewer read. `--keys` takes key names, `click:<words>` for a click on the region that shows those
-words, `drag:<x0>-<x1>` for a drag across those cells of the time range's strip, `wheel:<n>`, and `text:<words>` for
-what a field that takes typing holds. `frameText(frame, {ansi})` draws a frame's rows as text in the kit itself.
+checks and the reviewer read. It takes each frame once the program is idle: no reader query out, the program's answer
+to a sync in, nothing drawn meanwhile, no timer due within half a second and no ticker of 250 ms or less drawing; so a
+view still decoding its answer is drawn once it is done, never as it loads. `--keys` takes key names, `click:<words>`
+for a click on the region that shows those words, `drag:<x0>-<x1>` for a drag across those cells of the time range's
+strip, `wheel:<n>`, and `text:<words>` for what a field that takes typing holds. `frameText(frame, {ansi})` draws a
+frame's rows as text in the kit itself.
 
 ```
   / search events  incident  all  Color by  Service  ● payments 79  ● web 45  ● passes 16  ● bookings-db 6  +1

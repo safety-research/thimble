@@ -26,6 +26,25 @@ const vorigin = Math.random().toString(36).slice(2, 10)
 let n = 0
 let outbox: Out[] = []
 
+type Run = Line[number]
+const sameStyle = (a: Run, b: Run) => a.fg === b.fg && a.bg === b.bg && !a.b === !b.b && !a.d === !b.d && !a.i === !b.i && !a.u === !b.u && !a.inv === !b.inv
+// a run whose style shows on spaces too: a background, an underline, inverse
+const shows = (r: Run) => Boolean(r.bg || r.u || r.inv)
+
+/** A line's runs as few as look the same: spaces take the style of the run beside them where neither's style shows on
+ *  a space, and runs of one style are one, so a chart or a row of columns paints as a few Texts rather than one a cell. */
+export function fewer(l: Line): Line {
+  const out: Line = []
+  for (const r of l) {
+    const prev = out.at(-1)
+    if (prev && !shows(prev) && !shows(r) && (!r.s.trim() || !prev.s.trim() || sameStyle(prev, r))) {
+      out[out.length - 1] = !prev.s.trim() && r.s.trim() ? { ...r, s: prev.s + r.s } : { ...prev, s: prev.s + r.s }
+    } else if (prev && sameStyle(prev, r)) out[out.length - 1] = { ...prev, s: prev.s + r.s }
+    else out.push(r)
+  }
+  return out
+}
+
 /** The cells [x0, x1) of a line in a style over its own: inverse, or the tip's words on the tip background. */
 function overlay(l: Line, x0: number, x1: number, f: (s: Line[number]) => Line[number], put?: string): Line {
   const out: Line = []
@@ -42,7 +61,7 @@ function overlay(l: Line, x0: number, x1: number, f: (s: Line[number]) => Line[n
       else seg = f(seg)
     }
     const prev = out.at(-1)
-    if (prev && JSON.stringify({ ...prev, s: '' }) === JSON.stringify({ ...seg, s: '' })) out[out.length - 1] = { ...prev, s: prev.s + seg.s }
+    if (prev && sameStyle(prev, seg)) out[out.length - 1] = { ...prev, s: prev.s + seg.s }
     else out.push(seg)
     x += w
   }
@@ -117,7 +136,7 @@ const ViewClient: ClientModule<Props, S> = (props, surface) => {
       lines = lines.map((l, y) => (y === ty ? overlay(l, x0, x0 + w, s => s, words.slice(0, w)) : l))
     }
   }
-  return Box({ flexDirection: 'column', width: props.cols, children: lines.map(l => paintLine(surface.elements.Text, l.length ? l : [{ s: ' ' }])) })
+  return Box({ flexDirection: 'column', width: props.cols, children: lines.map(l => paintLine(surface.elements.Text, l.length ? fewer(l) : [{ s: ' ' }])) })
 }
 
 export default ViewClient
