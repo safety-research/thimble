@@ -1935,6 +1935,60 @@
 .colorby-item .menu-item-note {
   margin-left: auto;
 }
+/* a key's or a label's row: its name and how many values it has, then its values as chips on one line, cut off with …
+   where they do not fit */
+.colorby-item.menu-item:has(.colorby-choice) {
+  align-items: flex-start;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.colorby-item:has(.colorby-choice) .colorby-tick {
+  height: 16px;
+}
+.colorby-choice {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.colorby-choice-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 16px;
+}
+.colorby-choice-top .menu-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.colorby-choice-top .menu-item-note {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+}
+.colorby-preview {
+  display: block;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font: 400 var(--text-xs) / 18px var(--font-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.colorby-preview-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 18px;
+  margin-right: 4px;
+  padding: 0 5px 0 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-chip);
+  vertical-align: top;
+}
 /* a label's definition, in the menu under its row or in the popover of the info button beside Color by */
 .colorby-def {
   display: flex;

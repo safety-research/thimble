@@ -1,7 +1,8 @@
 // The Color by control of Files' Transcript mode (colorChoice.ts): thimble's bordered button "Color by: <choice> ▾", with an
 // info button beside it while a label is the choice, then a chip per value of the choice (a square swatch of its
 // color, its name and its count, in thimble's small bordered box) that turns its records off and on; Alt-click keeps
-// that value alone. The menu lists Off, the records' keys and the labels that mark the file, each label with an info
+// that value alone. The menu lists Off, the records' keys and the labels that mark the file, each with how many values
+// it has and, on a second line, its values as chips (cut off with … where they do not fit), each label with an info
 // button that opens its definition in place (LabelInfo); a label that is off turns on when chosen. A chip of a label's
 // value says what the value means on hover, where the label's definition says it. A click on a chip's swatch opens the
 // palette of thimble's twelve label colors (ValuePalette): the one picked recolors the value on the records, the chips
@@ -14,7 +15,7 @@ import { Popover } from '../components/Menu'
 import { useTooltip } from '../components/Tooltip'
 import { bus } from '../lib/bus'
 import type { Concept, SourceKey } from '../lib/types'
-import { choiceId, definitionLead, valueMeaning, type ColorChoice, type ColorValue } from './colorChoice'
+import { choiceId, definitionLead, keyChips, labelChips, NONE, pickedChips, valueMeaning, type ColorChoice, type ColorValue } from './colorChoice'
 import { classesOf, colourVar, globPatterns, LABEL_COLOURS, mainColour, marksWord, unitWord } from './labels'
 
 interface Props {
@@ -32,6 +33,8 @@ interface Props {
   onColor?: (value: string, color: number) => void
   /** give the choice's values their own colors back; no Reset colors without it */
   onResetColors?: () => void
+  /** the colors picked for a choice's values, by its id (choiceId), which the menu's previews show */
+  pickedOf?: (id: string) => Readonly<Record<string, number>> | undefined
 }
 
 /** The letter i in a circle, the info button's glyph. */
@@ -51,7 +54,7 @@ export function choiceName(c: ColorChoice, labels: readonly Concept[]): string {
   return labels.find((k) => k.id === c.id)?.name ?? 'label'
 }
 
-export function ColorBy({ choice, keys, labels, values, off, onChoose, onToggle, countsOf, onColor, onResetColors }: Props) {
+export function ColorBy({ choice, keys, labels, values, off, onChoose, onToggle, countsOf, onColor, onResetColors, pickedOf }: Props) {
   const trigger = useRef<HTMLButtonElement>(null)
   const infoAt = useRef<HTMLButtonElement>(null)
   const paletteAt = useRef<HTMLElement | null>(null)
@@ -98,6 +101,7 @@ export function ColorBy({ choice, keys, labels, values, off, onChoose, onToggle,
           keys={keys}
           labels={labels}
           countsOf={countsOf}
+          pickedOf={pickedOf}
           onChoose={(c) => {
             setOpen(false)
             onChoose(c)
@@ -186,7 +190,38 @@ function ValueChip({ v, on, onToggle, onPalette, quiet }: { v: ColorValue; on: b
   )
 }
 
-function ColorMenu({ choice, keys, labels, countsOf, onChoose }: { choice: ColorChoice; keys: readonly SourceKey[]; labels: readonly Concept[]; countsOf: Props['countsOf']; onChoose: (c: ColorChoice) => void }) {
+/** "1 value", "12 values" */
+export const valuesWord = (n: number): string => `${n.toLocaleString()} ${n === 1 ? 'value' : 'values'}`
+
+/** A choice's values in the menu, on one line under its name: each a chip's square swatch and name, cut off with … */
+function ChipPreview({ values }: { values: readonly ColorValue[] }) {
+  return (
+    <span className="colorby-preview" aria-hidden>
+      {values.map((v) => (
+        <span key={v.id} className="colorby-preview-chip" style={v.color ? ({ '--c': v.color } as CSSProperties) : undefined}>
+          <span className="colorby-sw" />
+          {v.name}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** A choice's name with how many values it has, and its values as chips on the line under them. */
+function ChoiceBody({ name, mono, count, values, swatch }: { name: string; mono?: boolean; count: number; values: readonly ColorValue[]; swatch?: string }) {
+  return (
+    <span className="colorby-choice">
+      <span className="colorby-choice-top">
+        {swatch && <span className="colorby-sw" style={{ '--c': swatch } as CSSProperties} />}
+        <span className={'menu-item-label' + (mono ? ' mono' : '')}>{name}</span>
+        <span className="menu-item-note">{valuesWord(count)}</span>
+      </span>
+      {values.length > 0 && <ChipPreview values={values} />}
+    </span>
+  )
+}
+
+function ColorMenu({ choice, keys, labels, countsOf, pickedOf, onChoose }: { choice: ColorChoice; keys: readonly SourceKey[]; labels: readonly Concept[]; countsOf: Props['countsOf']; pickedOf?: Props['pickedOf']; onChoose: (c: ColorChoice) => void }) {
   const [shown, setShown] = useState<string | null>(null)
   const current = choiceId(choice)
   const item = (c: ColorChoice, body: ReactNode, extra?: ReactNode) => {
@@ -210,13 +245,7 @@ function ColorMenu({ choice, keys, labels, countsOf, onChoose }: { choice: Color
         </div>
       )}
       {keys.map((k) =>
-        item(
-          { by: 'key', key: k.key },
-          <>
-            <span className="menu-item-label mono">{k.key}</span>
-            <span className="menu-item-note mono">{(k.values.length + k.more.values).toLocaleString()}</span>
-          </>,
-        ),
+        item({ by: 'key', key: k.key }, <ChoiceBody name={k.key} mono count={k.values.length + k.more.values} values={pickedChips(keyChips(k), pickedOf?.(choiceId({ by: 'key', key: k.key }))).filter((v) => v.id !== NONE)} />),
       )}
       {labels.length > 0 && (
         <div className="menu-heading" role="presentation">
@@ -227,10 +256,7 @@ function ColorMenu({ choice, keys, labels, countsOf, onChoose }: { choice: Color
         <div key={k.id}>
           {item(
             { by: 'label', id: k.id },
-            <>
-              <span className="colorby-sw" style={{ '--c': mainColour(k) } as CSSProperties} />
-              <span className="menu-item-label">{k.name}</span>
-            </>,
+            <LabelBody label={k} counts={countsOf(k.id)} />,
             <button type="button" className="colorby-info" aria-label={`What ${k.name} means`} aria-expanded={shown === k.id} onClick={() => setShown((s) => (s === k.id ? null : k.id))}>
               <InfoGlyph />
             </button>,
@@ -240,6 +266,12 @@ function ColorMenu({ choice, keys, labels, countsOf, onChoose }: { choice: Color
       ))}
     </div>
   )
+}
+
+/** A label's row in the menu: its color, its name, how many values it colors by and those values as chips. */
+function LabelBody({ label: k, counts }: { label: Concept; counts?: Readonly<Record<string, number>> }) {
+  const lit = labelChips(k, counts, null).filter((v) => v.id !== NONE)
+  return <ChoiceBody name={k.name} swatch={mainColour(k)} count={lit.length} values={lit} />
 }
 
 /** A label's definition as thimble's label panel gives it: its question or description, how it decides (a prompt, a

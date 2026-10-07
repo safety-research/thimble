@@ -12,7 +12,9 @@
 //   })
 //
 // One menu lists together Off, the view's own fields it declares colorable and every label over files, those that mark
-// the view's files first, each label with its switch and the button that shows its definition in place. A field colors
+// the view's files first, each label with its switch and the button that shows its definition in place. Each field and
+// label says how many values it colors by and shows them as chips on a line under its name, cut off with … where they
+// do not fit. A field colors
 // by the values its records take, each in a palette colour of its own (the label palette, --label-1 to --label-12, in
 // the order the values come: the declared `values`, each in the colour it names or else the next free one, then the
 // most frequent first, kept per view so a value keeps its colour). A label colors by its values on each anchored record,
@@ -920,6 +922,63 @@
     this.menu.anchor.setAttribute('aria-expanded', 'false')
     this.menu = null
   }
+  // a field's values as the menu shows them: the chips' while it is the choice, else those it declares and those it has
+  // shown before, each in its colour
+  Control.prototype.fieldValues = function (f) {
+    var c = this.choice()
+    if (c && c.field === f.name)
+      return this.values
+        .filter(function (v) {
+          return v.key !== NONE
+        })
+        .map(function (v) {
+          return { name: v.name, colour: v.colour }
+        })
+    var names = (f.values || []).slice()
+    var map = S.colours[f.name] || {}
+    var seen = Object.keys(map).filter(function (k) {
+      return names.indexOf(k) < 0
+    })
+    seen.sort(function (a, b) {
+      return map[a] - map[b]
+    })
+    var self = this
+    return names.concat(seen).map(function (n) {
+      return { name: n, colour: self.fieldColour(f.name, n) }
+    })
+  }
+  // a label's values as the menu shows them: those it colours by
+  function labelValues(l) {
+    return (l.values || [])
+      .filter(function (v) {
+        return v.highlight !== false
+      })
+      .map(function (v) {
+        return { name: v.name, colour: v.colour }
+      })
+  }
+  // a field's or a label's row: its name and how many values it has, then its values as chips on one line, cut off with
+  // … where they do not fit; nothing of its values when none is known
+  function choiceBody(colour, name, values) {
+    var n = values.length
+    return (
+      '<span class="thimble-colour-body"><span class="thimble-colour-top">' +
+      (colour ? '<span class="thimble-colour-sw" style="--c:' + esc(colour) + '"></span>' : '') +
+      '<span class="thimble-colour-nm">' + esc(name) + '</span>' +
+      (n ? '<span class="thimble-colour-n">' + num(n) + (n === 1 ? ' value' : ' values') + '</span>' : '') +
+      '</span>' +
+      (n
+        ? '<span class="thimble-colour-preview">' +
+          values
+            .map(function (v) {
+              return '<span class="thimble-colour-pchip"><span class="thimble-colour-sw"' + (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + '></span>' + esc(v.name) + '</span>'
+            })
+            .join('') +
+          '</span>'
+        : '') +
+      '</span>'
+    )
+  }
   Control.prototype.menuHtml = function (values, defId, paletteKey) {
     var c = this.choice()
     if (paletteKey != null) return this.paletteHtml(paletteKey)
@@ -945,10 +1004,11 @@
     var open = (this.menu && this.menu.open) || {}
     var html = '<div class="thimble-colour-head">Color by</div>'
     html += '<button type="button" class="thimble-colour-item" role="menuitemradio" aria-checked="' + !!(c && c.off) + '" data-by="' + OFF + '">' + tick(!!(c && c.off)) + '<span class="thimble-colour-nm">Off</span></button>'
+    var self = this
     html += this.fields
       .map(function (f) {
         var on = !!(c && c.field === f.name)
-        return '<button type="button" class="thimble-colour-item" role="menuitemradio" aria-checked="' + on + '" data-by="' + esc('f:' + f.name) + '">' + tick(on) + '<span class="thimble-colour-nm">' + esc(f.title) + '</span></button>'
+        return '<button type="button" class="thimble-colour-item thimble-colour-choice" role="menuitemradio" aria-checked="' + on + '" data-by="' + esc('f:' + f.name) + '">' + tick(on) + choiceBody('', f.title, self.fieldValues(f)) + '</button>'
       })
       .join('')
     var all = allLabels()
@@ -957,9 +1017,8 @@
       var lit = !!l.on || isOn(l.id)
       var shown = !!open[l.id]
       return (
-        '<div class="thimble-colour-item thimble-colour-label" role="menuitemradio" tabindex="0" aria-checked="' + on + '" data-by="' + esc('l:' + l.id) + '" data-label="' + esc(l.id) + '">' + tick(on) +
-        '<span class="thimble-colour-sw" style="--c:' + esc(l.colour || '') + '"></span><span class="thimble-colour-nm">' + esc(l.name) + '</span>' +
-        (typeof l.count === 'number' ? '<span class="thimble-colour-n">' + num(l.count) + '</span>' : '') +
+        '<div class="thimble-colour-item thimble-colour-label thimble-colour-choice" role="menuitemradio" tabindex="0" aria-checked="' + on + '" data-by="' + esc('l:' + l.id) + '" data-label="' + esc(l.id) + '">' + tick(on) +
+        choiceBody(l.colour || '', l.name, labelValues(l)) +
         '<button type="button" class="thimble-colour-info' + (shown ? ' on' : '') + '" aria-expanded="' + shown + '" aria-label="' + esc('What ' + l.name + ' means') + '" title="' + esc('What ' + l.name + ' means') + '" data-info="' + esc(l.id) + '" data-label="' + esc(l.id) + '">' + ico('info') + '</button>' +
         '<button type="button" class="thimble-colour-switch' + (lit ? ' on' : '') + '" role="switch" aria-checked="' + lit + '" aria-label="' + esc((lit ? 'Turn off ' : 'Turn on ') + l.name) + '" data-switch="' + esc(l.id) + '" data-label="' + esc(l.id) + '"><span></span></button></div>' +
         (shown ? defHtml(l, knownDef(l.id)) : '')
