@@ -41,7 +41,8 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, crumbsWidth, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, citePage, closePanel, deleteLabel, handBack, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
+import { PANEL, citePage, closePanel, deleteLabel, filterLabel, handBack, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage, undeleteLabel } from './term'
+import { COLOR_NAMES, MORE_ROWS, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, setLabelGone } from './labels'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -186,6 +187,8 @@ export async function openFile(cx: Ctx, path: string, start = 1, line?: number):
 /** A label's panel, as it opens: what a save or a run said there before is gone. With `value`, its counts and examples
  *  open, the value lit in them. */
 export async function openLabel(cx: Ctx, id: string, name: string, value = ''): Promise<void> {
+  // the labels list's `undo` of a delete is offered only until another label opens
+  setLabelGone(null)
   const ui = await cx.labelUi()
   const said = { ...ui.said }
   if (ui.said[id] && !ui.runs[id]) delete said[id]
@@ -672,6 +675,7 @@ const FIELD_KEYS: [RegExp, string][] = [
   [/^(?:ask-new|ask-|follow-)/, 'Enter to ask'],
   [/^(?:lb-glob-|lb-values-)/, 'Enter to save'],
   [/^lbs-describe$/, 'Enter to make it'],
+  [/^lb-name-/, 'Enter to rename'],
 ]
 
 /** What Enter does in the text field that holds the panel's focus ring now; '' when no field holds it. */
@@ -802,6 +806,7 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
         const st = labelState(l, agents)
         // made since home was last seen, as a card is new (openHome)
         const made = Date.parse(str((l as { ts?: unknown }).ts)) || 0
+        const colors = classColors(l.classes)
         return {
           slug: l.id,
           name: l.name ?? l.id,
@@ -815,6 +820,8 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
           ran: st.ran,
           state: labelStateWords(st),
           ...(rt.homeSince && made > rt.homeSince ? { fresh: true } : {}),
+          // its values' colors as its classes have them, as its panel draws them
+          ...(colors ? { colors } : {}),
         }
       })
     : []
@@ -1844,14 +1851,20 @@ export async function fieldMessage(cx: Ctx, name: string, text: string, save: bo
 
 // the label whose delete the label panel asks about (`delete label "…"? … y to delete · n to keep`), '' for none
 let labelDeleting = ''
+// the label whose name the label panel's `rename` field edits, '' for none
+let labelRenaming = ''
+// the value whose colors the label panel's counts show under it (`<label>\n<value>`), '' for none
+let labelPainting = ''
 
 /** The label panel, after the browser's label editor (SPEC.md, section 7, "The label panel"): its header block,
  *  the label's name in the accent and bold after a ● in its colour, its type (prompt, regex or code: the one in use on
  *  the selection background) and its scope (the files, editable, and how many records), then the rule; the prompt (or
  *  pattern or code) in a field to edit, Enter saving it (`thimble act label`); `run on a sample` and `run on all N`,
- *  which save what was typed first and run it (`thimble act label-run`), and `delete`, which asks once in the panel
- *  (y deletes, n keeps; `thimble act label-delete`); then `▸ counts`, `▸ examples` and `▸ cards`, folded. Nothing else
- *  shows until it is opened. */
+ *  which save what was typed first and run it (`thimble act label-run`), `rename` (`thimble act label`) and `delete`,
+ *  which asks once in the panel (y deletes, n keeps; `thimble act label-delete`); a label over files is turned on or off
+ *  in Files and the views (`in files: on off`, `thimble act label-show`). Then `▸ counts`, `▸ examples` and `▸ cards`,
+ *  folded, nothing of them shown until one is opened: each value's `color` (the label colors by name) and `filter`
+ *  (`thimble act label-filter`) in the counts, the held-out agreement and `… N more` records in the examples. */
 async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button, Input } = cx.els(e)
@@ -1863,8 +1876,10 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   if (!l) return none(cx, e)
   const id = l.id
   const name = l.name ?? id
-  // a delete asked about another label is not asked here
+  // a delete asked about another label is not asked here, nor a rename or a value's colors
   if (labelDeleting !== id) labelDeleting = ''
+  if (labelRenaming !== id) labelRenaming = ''
+  if (!labelPainting.startsWith(`${id}\n`)) labelPainting = ''
   const ui = await cx.labelUi()
   const running = ui.runs[id]
   const said = ui.said[id] ?? ''
@@ -1875,6 +1890,10 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   const values = [...(l.labels ?? []), ...Object.keys(counts).filter(k => !(l.labels ?? []).includes(k))]
   const kind = ui.kind[id] ?? l.kind ?? 'prompt'
   const files = !l.unit || ['record', 'agent', 'run'].includes(l.unit)
+  // each value's color as its class has it (the browser's label colors), else in the values' order
+  const colors = classColors(l.classes)
+  const shownOn = Boolean(l.shown)
+  const filtered = typeof l.filter === 'string' && l.filter ? l.filter : ''
   const last = l.last_run ?? l.applications?.at(-1) ?? null
   // the records its scope holds: its last full run's count, else the count `thimble state` gives a label with no run
   // that ended (live check term-fix10, low quirk: `run on all` and `scope: pages.jsonl` showed no number after a first
@@ -1911,8 +1930,29 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   }
   const rows: RenderElement[] = []
   const keys: Key[] = []
-  // the header block: name, type, scope, each on the label column, as Matt wrote them (`name:`), then the definition
-  const L = 'pattern:'.length + 2
+  // rename: a field in the run row's place, Enter saving the name (`thimble act label`)
+  const askRename = async () => {
+    labelRenaming = id
+    labelDeleting = ''
+    await cx.bumpPanel()
+  }
+  const keepName = async () => {
+    labelRenaming = ''
+    await cx.bumpPanel()
+  }
+  const rename = async (v: string) => {
+    const next = v.replace(/\s+/g, ' ').trim()
+    if (!next || next === name) return keepName()
+    labelRenaming = ''
+    await saveLabel(cx, id, { name: next })
+  }
+  // on or off in Files and the views, as the Labels pane's toggle (`thimble act label-show`)
+  const turn = (on: boolean) => async () => {
+    if (on !== shownOn) await showLabel(cx, id, { on })
+  }
+  // the header block: name, type, scope, each on the label column, as Matt wrote them (`name:`), and for a label over
+  // files whether it is on in Files; then the definition
+  const L = (files ? 'in files:' : 'pattern:').length + 2
   const fieldLine = (label: string, el: RenderElement) => (
     <Box key={`lf-${label}`} flexDirection="row">
       <Box width={L} flexShrink={0}>
@@ -1923,7 +1963,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       </Box>
     </Box>
   )
-  rows.push(fieldLine('name:', lineEl(els, [{ s: '●', fg: labelHue(values) }, { s: ' ' }, { s: name, fg: ACCENT, b: true }], undefined, true)))
+  rows.push(fieldLine('name:', lineEl(els, [{ s: '●', fg: labelHue(values, colors) }, { s: ' ' }, { s: name, fg: ACCENT, b: true }], undefined, true)))
   rows.push(
     fieldLine(
       'type:',
@@ -1974,6 +2014,22 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       ),
     ),
   )
+  // on or off in Files and the views: the one in use on the selection background, the other a click away
+  if (files)
+    rows.push(
+      fieldLine(
+        'in files:',
+        <Box flexDirection="row" columnGap={2}>
+          {([true, false] as const).map(on =>
+            on === shownOn ? (
+              <Text key={`lo-${on ? 'on' : 'off'}`} backgroundColor={COLORS.selected}>{on ? 'on' : 'off'}</Text>
+            ) : (
+              <Button key={`lo-${on ? 'on' : 'off'}`} label={on ? 'on' : 'off'} plain onPress={() => void turn(on)()} />
+            ),
+          )}
+        </Box>,
+      ),
+    )
   rows.push(ruleEl(els, cols, 'lb-rule'))
   // the definition, whole, in a field to edit (field.tsx, in a border as the search box is): a click gives it the
   // keyboard, Enter saves it (in code, ctrl+s)
@@ -2016,6 +2072,18 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
         {follower ? <Button key="lb-stop" label="stop" plain onPress={stop} /> : null}
       </Box>,
     )
+  else if (labelRenaming === id && e.surface !== 'mobile')
+    // the name in a field, in the run row's place: Enter renames, `keep the name` leaves it
+    rows.push(
+      <Box key="lb-rename" flexDirection="row">
+        <Text dimColor>{'new name  '}</Text>
+        <Box flexGrow={1} flexShrink={1}>
+          <Input key={fieldKey(`lb-name-${id}`)} value={name} autoFocus submitLabel="rename" onSubmit={v => void rename(v)} />
+        </Box>
+        <Text>{'  '}</Text>
+        <Button key="lb-rename-keep" label="keep the name" plain onPress={() => void keepName()} />
+      </Box>,
+    )
   else if (labelDeleting === id)
     // the delete asks once, in the run row's place: y deletes, n keeps
     rows.push(
@@ -2031,6 +2099,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       <Box key="lb-runs" flexDirection="row" columnGap={2} flexWrap="wrap">
         <Button key="lb-sample" label="run on a sample" plain onPress={() => void run(sample)()} />
         <Button key="lb-all" label={scopeN !== null ? `run on all ${num(scopeN)}` : 'run on all'} plain onPress={() => void run(0)()} />
+        <Button key="lb-rename" label="rename" plain onPress={() => void askRename()} />
         <Button key="lb-delete" label="delete" plain onPress={() => void askDelete()} />
         <Text dimColor>{lastWords}</Text>
       </Box>,
@@ -2038,9 +2107,14 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   // what the last save or run said: `×` and `!` rows in red
   said.split('\n').filter(Boolean).forEach((line, i) => rows.push(<Text key={`lb-said-${i}`} wrap="wrap" {...(/^[×!]/.test(line) ? { color: COLORS.problem } : { dimColor: true })}>{line}</Text>))
   const asking = labelDeleting === id && !running && !st.running
+  const renaming = labelRenaming === id && !running && !st.running
   if (asking) keys.push({ key: 'delete-yes', hotkey: 'y', onPress: () => void deleteIt() }, { key: 'delete-no', hotkey: 'n', onPress: () => void keepIt() })
-  else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
+  else if (renaming) {
+    // the field takes the letters; its Enter renames
+  } else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() }, { key: 'rename', hotkey: 'n', onPress: () => void askRename() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
   else if (running || follower) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
+  // o turns a label over files on or off in Files
+  if (files && !asking && !renaming) keys.push({ key: 'files-on', hotkey: 'o', onPress: () => void turn(!shownOn)() })
   // the counts, the examples and the cards, folded
   const toggle = (part: string, words: string, n: number | null, note = '') => (
     <Box key={`lb-t-${part}`} flexDirection="row">
@@ -2050,32 +2124,76 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   )
   const total = values.reduce((a, v) => a + (counts[v] ?? 0), 0)
   rows.push(<Text key="lb-gap"> </Text>)
-  rows.push(toggle('counts', 'counts', total, setByYou ? `${num(setByYou)} set by you` : ''))
+  rows.push(toggle('counts', 'counts', total, [setByYou ? `${num(setByYou)} set by you` : '', filtered ? `filtered to ${filtered}` : ''].filter(Boolean).join(' · ')))
   keys.push({ key: 'counts', hotkey: 'c', onPress: () => void flip('counts')() })
   if (opened('counts')) {
     const vw = Math.min(Math.max(12, Math.floor(cols / 3)), Math.max(4, ...values.map(v => width(v))))
     const cs = values.map(v => num(counts[v] ?? 0))
     const pcts = shares(values.map(v => counts[v] ?? 0), total)
     const cw = Math.max(1, ...cs.map(c => c.length))
-    const barW = Math.max(8, cols - 2 - 2 - vw - 2 - 2 - cw - 7)
+    // each value's controls after its share: its colors (a label over files, whose colors Files and the views show) and
+    // the filter that keeps its units, `clear filter` on the value the filter keeps, a gutter apart, as wide on every row
+    const ctlW = (files ? 'color'.length + 2 : 0) + 'clear filter'.length
+    // in a pane too narrow for them beside a bar of 8 cells, the controls stand on a row of their own under each value
+    const below = cols - 2 - 2 - vw - 2 - 2 - cw - 7 - 2 - ctlW < 8
+    const barW = Math.max(8, cols - 2 - 2 - vw - 2 - 2 - cw - 7 - (below ? 0 : 2 + ctlW))
+    const paint = (v: string) => async () => {
+      labelPainting = labelPainting === `${id}\n${v}` ? '' : `${id}\n${v}`
+      await cx.bumpPanel()
+    }
+    const pick = (v: string, colorName: string) => async () => {
+      labelPainting = ''
+      await showLabel(cx, id, { colors: { [v]: colorName } })
+    }
     values.forEach((v, i) => {
       const n = counts[v] ?? 0
       const w = total ? Math.round((barW * n) / total) : 0
-      const colour = valueColour(values, v)
+      const colour = valueColour(values, v, colors)
       const tone = colour && colour !== COLORS.dim ? { color: colour } : { dimColor: true }
+      const on = filtered === v
+      const controls = [
+        files ? <Button key={`lb-color-${v}`} label="color" plain onPress={() => void paint(v)()} /> : null,
+        files ? <Text key={`lb-gap-${v}`}>{'  '}</Text> : null,
+        <Button key={`lb-filter-${v}`} label={on ? 'clear filter' : 'filter'} plain onPress={() => void filterLabel(cx, id, on ? null : v)} />,
+      ]
       rows.push(
-        <Text key={`lb-c-${v}`} wrap="truncate-end">
-          <Text>{'  '}</Text>
-          <Text {...tone}>{'● '}</Text>
-          {/* the value a link to the label named, on the selection background */}
-          <Text {...(v === p.value ? { backgroundColor: COLORS.selected } : {})}>{clip(v, vw).padEnd(vw)}</Text>
-          <Text>{'  '}</Text>
-          <Text {...tone}>{'█'.repeat(w)}</Text>
-          <Text color={COLORS.rule}>{'─'.repeat(Math.max(0, barW - w))}</Text>
-          <Text>{`  ${cs[i]!.padStart(cw)}`}</Text>
-          <Text dimColor>{total ? `  ${pcts[i]!.padStart(5)}` : ''}</Text>
-        </Text>,
+        <Box key={`lb-c-${v}`} flexDirection="row">
+          <Text wrap="truncate-end">
+            <Text>{'  '}</Text>
+            <Text {...tone}>{'● '}</Text>
+            {/* the value a link to the label named, or the one the filter keeps, on the selection background */}
+            <Text {...(v === p.value || on ? { backgroundColor: COLORS.selected } : {})}>{clip(v, vw).padEnd(vw)}</Text>
+            <Text>{'  '}</Text>
+            <Text {...tone}>{'█'.repeat(w)}</Text>
+            <Text color={COLORS.rule}>{'─'.repeat(Math.max(0, barW - w))}</Text>
+            <Text>{`  ${cs[i]!.padStart(cw)}`}</Text>
+            <Text dimColor>{total ? `  ${pcts[i]!.padStart(5)}` : '       '}</Text>
+            {below ? null : <Text>{'  '}</Text>}
+          </Text>
+          {below ? null : controls}
+        </Box>,
       )
+      if (below)
+        rows.push(
+          <Box key={`lb-c-${v}-controls`} flexDirection="row" marginLeft={4}>
+            {controls}
+          </Box>,
+        )
+      // the label colors under the value whose `color` was pressed, each `●` in its hue and its name, the one it has
+      // on the selection background (as show_label names them)
+      if (files && labelPainting === `${id}\n${v}`) {
+        const now = colors?.[v]
+        rows.push(
+          <Box key={`lb-colors-${v}`} flexDirection="row" flexWrap="wrap" columnGap={2} marginLeft={4}>
+            {COLOR_NAMES.map((c, k) => (
+              <Box key={`lb-pick-${v}-${c}`} flexDirection="row">
+                <Text color={hueOf(k + 1)}>{'● '}</Text>
+                {now === k + 1 ? <Text backgroundColor={COLORS.selected}>{c}</Text> : <Button key={`lb-pick-${v}-${k + 1}`} label={c} plain onPress={() => void pick(v, c)()} />}
+              </Box>
+            ))}
+          </Box>,
+        )
+      }
     })
     if (!values.length) rows.push(<Text key="lb-c-none" dimColor>{'  none'}</Text>)
     // its values, editable here: Enter saves them
@@ -2101,7 +2219,9 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   const recs = (l.rows ?? []).filter(r => r.ref)
   // a blank row between an opened part and the next toggle
   if (opened('counts')) rows.push(<Text key="lb-gap-examples"> </Text>)
-  rows.push(toggle('examples', 'examples', recs.length))
+  // the label's agreement with the values the analyst set, those its runs took as examples apart (the browser's
+  // agreement line above its examples)
+  rows.push(toggle('examples', 'examples', recs.length, agreementLine(l.calibration)))
   keys.push({ key: 'examples', hotkey: 'e', onPress: () => void flip('examples')() })
   // a record's words: a JSON record as the field the rule reads first, its value in quotation marks and italic, then
   // its other fields on one dim row, never its JSON inside quotation marks; other words in quotation marks, up to three
@@ -2127,9 +2247,9 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       rows.push(
         <Text key={`lb-h-${v}`} wrap="truncate-end">
           <Text>{'  '}</Text>
-          <Text color={valueColour(values, v)}>{'● '}</Text>
+          <Text color={valueColour(values, v, colors)}>{'● '}</Text>
           <Text {...(v === p.value ? { backgroundColor: COLORS.selected } : {})}>{v}</Text>
-          <Text dimColor>{`  ${num(xs.length)}`}</Text>
+          <Text dimColor>{`  ${num(Math.max(xs.length, l.totals?.[v] ?? 0))}`}</Text>
         </Text>,
       )
       for (const x of xs) {
@@ -2167,6 +2287,24 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
           </Box>,
         )
       }
+      // the value's records past those shown, as the browser's examples page through them: a click reads the next
+      // MORE_ROWS (`thimble state label --rows`), and the last one with them rather than leave one behind
+      const all = l.totals?.[v] ?? 0
+      const left = all - xs.length
+      if (left > 1) {
+        const more = async () => {
+          const k = `${id}\n${v}`
+          const next = Math.min(all, (labelRows.get(k) ?? xs.length) + MORE_ROWS)
+          labelRows.set(k, all - next === 1 ? all : next)
+          await readSurface(cx, `label:${id}`, 'label', labelArgs(id))
+          await cx.bumpPanel()
+        }
+        rows.push(
+          <Box key={`lb-more-${v}`} flexDirection="row" marginLeft={4}>
+            <Button key={`lb-more-${v}`} label={`… ${num(left)} more`} plain onPress={() => void more()} />
+          </Box>,
+        )
+      }
     }
     if (!recs.length) rows.push(<Text key="lb-x-none" dimColor>{'  none'}</Text>)
   }
@@ -2186,7 +2324,19 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     void openList(cx, { view: 'labels', title: 'Labels' })
   } })
   // the keys that fit one row: the field says how to save it (its placeholder); each folded part's key by what it opens
-  rows.push(hintsRow(els, [...(running || follower ? ['s to stop'] : st.running || asking ? [] : ['r to run a sample', 'k to delete']), 'c counts, e examples, d cards', 'l for labels'], cols))
+  rows.push(
+    hintsRow(
+      els,
+      [
+        ...(running || follower ? ['s to stop'] : st.running || asking || renaming ? [] : ['r to run a sample', 'n to rename', 'k to delete']),
+        ...(files && !asking && !renaming ? [shownOn ? 'o to hide in files' : 'o to show in files'] : []),
+        'c counts, e examples, d cards',
+        'l for labels',
+      ],
+      cols,
+      renaming ? `lb-name-${id}` : '',
+    ),
+  )
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...rows]}</Box>
 }
@@ -2198,7 +2348,7 @@ let labelPick = ''
  *  `❯` on the chosen one; under the second rule `describe a new label`, whose words go to main. */
 async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const els = cx.els(e) as El
-  const { Box, Button, Input } = cx.els(e)
+  const { Box, Button, Input, Text } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
   const got = await surfaceValue(cx, 'labels')
   const ls = (got?.ok ? labelsOf(got.value) : []) as LabelFull[]
@@ -2222,9 +2372,23 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     labelPick = ls[Math.max(0, Math.min(ls.length - 1, at + d))]?.id ?? ''
     return cx.bumpPanel()
   }
-  const listHints = ['↑↓ to choose', 'Enter to open', 'b to go back', 'x to close']
+  // the label deleted last from its panel: `undo` puts it back with its marks, its card and its filters, as the
+  // browser's top bar's Undo (`thimble act label-undelete`); a refusal says why in red
+  const gone = labelGone && !ls.some(x => x.id === labelGone!.id) ? labelGone : null
+  const undo = gone && !gone.error ? () => void undeleteLabel(cx, gone.id, gone.name) : null
+  const goneRow = gone ? (
+    gone.error ? (
+      <Text key="lbs-gone" color={COLORS.problem} wrap="wrap">{`× the label "${gone.name}" was not restored: ${gone.error}`}</Text>
+    ) : (
+      <Box key="lbs-gone" flexDirection="row">
+        <Text dimColor>{`deleted the label "${gone.name}"  `}</Text>
+        <Button key="lbs-undo" label="undo" plain onPress={undo!} />
+      </Box>
+    )
+  ) : null
+  const listHints = ['↑↓ to choose', 'Enter to open', ...(undo ? ['u to undo'] : []), 'b to go back', 'x to close']
   // the path row, the header, the rule under the list, the field and the hint rows aside
-  const win = windowList('labels-list', lines, hits, ls.findIndex(x => x.id === pick), bodyRows - 3 - hintHeight(listHints, cols) - body.length, () => cx.bumpPanel())
+  const win = windowList('labels-list', lines, hits, ls.findIndex(x => x.id === pick), bodyRows - 3 - (goneRow ? 1 : 0) - hintHeight(listHints, cols) - body.length, () => cx.bumpPanel())
   body.push(linesEl(cx, e, marginKey('labels-list'), win.lines, win.hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openLabel(cx, pick, ls.find(x => x.id === pick)?.name ?? pick) : undefined)))
   body.unshift(
     <Box key="label-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
@@ -2235,8 +2399,9 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     </Box>,
   )
   const field = e.surface === 'mobile' ? null : fieldRow(cx, e, 'describe a new label', <Input key={fieldKey('lbs-describe')} submitLabel="make it" onSubmit={v => void (v.trim() ? cx.submit(`Make a label with apply_label and try it on a sample of 30: ${v.trim()}`) : undefined)} />, 'lbs-new')
-  body.push(...bottomRows(cx, e, cols, [], [field], listHints))
-  return <Box flexDirection="column">{body}</Box>
+  body.push(...bottomRows(cx, e, cols, [], [goneRow, field], listHints))
+  const hk = undo ? hiddenKeys(cx, e, [{ key: 'undo', hotkey: 'u', onPress: undo }]) : null
+  return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
 
 // ------------------------------------------------------------------------------------------------ documents

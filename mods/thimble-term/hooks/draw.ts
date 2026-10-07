@@ -5,6 +5,7 @@
 import { cut, cw, fmt, formatted, quoted, width } from './lib'
 import type { Run, TableRuns } from './lib'
 import { COLORS } from './paint'
+import { hueOf } from './labels'
 
 export { COLORS }
 
@@ -18,9 +19,9 @@ export type DiagramNode = { id: string; label: string; ref?: string; detail?: st
 export type DiagramEdge = { source: string; target: string; label?: string }
 /** A label a card's script read (tcard.label): its values, and the value of each record the card names (`marks`, by
  *  ref). `stale`: the label changed after the card was made (register.tsx sets it). */
-export type CardLabel = { slug: string; name: string; values: string[]; marks?: Record<string, string>; stale?: boolean }
+export type CardLabel = { slug: string; name: string; values: string[]; marks?: Record<string, string>; stale?: boolean; colors?: Record<string, number> }
 /** A label card's own label (cell.ts labelCard, from `thimble state label`): how its records were labeled and how many. */
-export type LabelInfo = { slug: string; name: string; kind: string; values: string[]; labeled: number; total: number; trial: boolean; paths?: string[] }
+export type LabelInfo = { slug: string; name: string; kind: string; values: string[]; labeled: number; total: number; trial: boolean; paths?: string[]; colors?: Record<string, number> }
 /** An example: its record, its words, and on a label card its value now, why, and whether the analyst set or agreed
  *  with it (`set`; `was` the value the label gave). */
 export type CardExample = { ref: string; quote: string; note: string; value?: string; why?: string; set?: boolean; was?: string }
@@ -284,17 +285,19 @@ export function shares(parts: readonly number[], total: number): string[] {
   return ps.map((p, i) => (p > 0 ? `${r[i]}%` : out[i]!))
 }
 
-/** The colour of a label's value, as the label panel draws it: the categorical palette in the label's order, and the
- *  last value of two or more, the one that is not the category, dim. */
-export function valueColour(values: readonly string[], value: string): string | undefined {
+/** The color of a label's value, as the label panel draws it: the color its class has (`colors`, labels.ts hueOf: the
+ *  browser's label colors, the analyst's choice among them, 0 dim), else the categorical palette in the label's order,
+ *  and the last value of two or more, the one that is not the category, dim. */
+export function valueColour(values: readonly string[], value: string, colors?: Record<string, number>): string | undefined {
   const i = values.indexOf(value)
   if (i < 0) return undefined
+  if (colors && typeof colors[value] === 'number') return hueOf(colors[value]!)
   return values.length > 1 && i === values.length - 1 ? COLORS.dim : COLORS.series[i % COLORS.series.length]
 }
 
 /** The labels a card shows: a label card's own, else those its script read. */
 export function cardLabels(card: CardData): CardLabel[] {
-  if (card.kind === 'label' && card.label) return [{ slug: card.label.slug, name: card.label.name, values: card.label.values }]
+  if (card.kind === 'label' && card.label) return [{ slug: card.label.slug, name: card.label.name, values: card.label.values, ...(card.label.colors ? { colors: card.label.colors } : {}) }]
   return card.labels ?? []
 }
 
@@ -302,7 +305,7 @@ export function cardLabels(card: CardData): CardLabel[] {
 function classColour(card: CardData, name?: string, ref?: string): string | undefined {
   for (const l of cardLabels(card)) {
     const v = (ref ? l.marks?.[ref] : undefined) ?? (name !== undefined && l.values.includes(name) ? name : undefined)
-    if (v !== undefined) return valueColour(l.values, v)
+    if (v !== undefined) return valueColour(l.values, v, l.colors)
   }
   return undefined
 }
@@ -366,7 +369,7 @@ export function labelHead(card: CardData, cols: number, hover = ''): { lines: Li
           w = -1
           return
         }
-        tail.push({ s: '  ' }, { s: '●', fg: valueColour(l.values, v) }, { s: ` ${v}` })
+        tail.push({ s: '  ' }, { s: '●', fg: valueColour(l.values, v, l.colors) }, { s: ` ${v}` })
         w += entry
       })
     }

@@ -181,6 +181,8 @@ export type World = {
   /** a promise a spawned act waits for before it answers (a label's run that goes on), and what label-run answers */
   hold: Promise<void> | null
   labelRun: Record<string, unknown> | null
+  /** acts thimble refuses, by kind, with why */
+  refuse?: Record<string, string>
   /** a document by its slug, over the fixtures' */
   docs: Record<string, unknown>
   /** the slash commands run, as `/name args` */
@@ -302,6 +304,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     if (verb === 'act') {
       const payload = JSON.parse(rest[0] ?? '{}') as Record<string, unknown>
       w.acts.push({ kind: what!, payload })
+      if (w.refuse?.[what!]) return out({ error: w.refuse[what!] }, 1)
       if (what === 'thread') return out({ ok: true, thread: 't9' })
       // a thread's answer handed back to main: its meta says so from then on, as thimble's does (threads.hand_back_state)
       if (what === 'hand-back') {

@@ -6,6 +6,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
+import { LABEL_HUES } from '../hooks/paint'
 import { CWD, world } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -16,7 +17,7 @@ const MESSAGE = (requestId: string, text: string) =>
 
 // SPEC.md, section 5: the glyphs thimble-term draws besides the corpus's and the model's words (braille apart)
 const SYMBOLS = new Set([...'○◌●!×✓❯?↳›‹↗▸▾⌕◆█▏▎▍▌▋▊▉▁▂▃▄▅▆▇─│├└┤┬┴╭╮╰╯→←↓↑┊▼▲…·'])
-const PALETTE = new Set(['#1d7fc0', '#b77300', '#00946a', '#b96895', '#8c65e8', '#927543', '#87861a'])
+const PALETTE = new Set(['#1d7fc0', '#b77300', '#00946a', '#b96895', '#8c65e8', '#927543', '#87861a', ...LABEL_HUES])
 
 /** Each Text leaf with the style it inherits: its words, colour, bold, underline, inverse. */
 function leaves(n: unknown, style: Record<string, unknown> = {}, out: { s: string; st: Record<string, unknown> }[] = []): { s: string; st: Record<string, unknown> }[] {
