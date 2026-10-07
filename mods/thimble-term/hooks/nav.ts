@@ -10,7 +10,7 @@
 // trail it left in `back`.
 import type { ChatNav, ChatNavStep, ChatThread } from '../types'
 import { plainCites } from './cite'
-import { clip, cut, quoted, width } from './lib'
+import { clip, cut, quoted, stoppedTurn, width } from './lib'
 
 export const NAV_EMPTY: ChatNav = { trail: [], back: [] }
 const TRAIL_MAX = 12
@@ -139,7 +139,7 @@ export function threadState(t: Pick<ChatThread, 'turns'>): { words: string; tone
   const asked = `${n} question${n === 1 ? '' : 's'}`
   if (!last) return { words: 'nothing asked yet', tone: 'dim' }
   if (last.state === 'running') return { words: `answering · ${last.tools} tool call${last.tools === 1 ? '' : 's'}`, tone: 'run' }
-  if (last.state === 'error') return /^\s*stopped/.test(last.a) ? { words: `stopped · ${asked}`, tone: 'dim' } : { words: `failed · ${asked}`, tone: 'problem' }
+  if (last.state === 'error') return stoppedTurn(last) ? { words: `stopped · ${asked}`, tone: 'dim' } : { words: `failed · ${asked}`, tone: 'problem' }
   return { words: `answered · ${asked}`, tone: 'ok' }
 }
 

@@ -10,7 +10,7 @@ import type { CardData, CardLabel } from './draw'
 import type { Ctx, SurfaceGot } from './ctx'
 import { act, actLong, changed, readState, signature } from './data'
 import type { Area, Scope, Signature } from './data'
-import { cid, citations, clip, labelRef, noteQuestion, quoted } from './lib'
+import { cid, citations, clip, labelRef, noteQuestion, questionOf, quoted } from './lib'
 import type { Citation } from './lib'
 import { agentsOf, cellOf, cellsOf, chatOf, docUnits, homeOf, labelIdOf, labelOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
 import { NAV_EMPTY, backTarget, moved, nextTrail } from './nav'
@@ -106,6 +106,12 @@ export const rt = {
   opens: new Map<string, { size: number; as: string }>(),
   // the threads main's chat has a `↳ thread` row of thimble-term's for: main's own `↳ thread` line about one is hidden
   told: new Set<string>(),
+  // the writer run each row of main's chat with a `↳ The writer …` line reports (its chat), and the row that said each
+  // run's end first: a later row's line about the same run is hidden (model.ts withoutWriterLines)
+  writerOf: new Map<string, string>(),
+  writerSaid: new Map<string, string>(),
+  // the cards read only for their questions (nameCards), each once
+  named: new Set<string>(),
 }
 
 /** The most files one `thimble state opens` reads the head of (backend local.py OPENS_MAX). */
@@ -314,7 +320,8 @@ async function recheckCards(cx: Ctx, ids: readonly string[]): Promise<void> {
   const cs: Citation[] = []
   for (const id of ids) {
     const card = await cx.card(id)
-    if (card) cs.push(...citations(card.takeaway))
+    // a label's link names no place to check (queueCitations)
+    if (card) cs.push(...citations(card.takeaway).filter(c => !labelRef(c.ref)))
   }
   for (const m of rt.cardCites.values()) cs.push(...m.values())
   if (cs.length) await resolveCitations(cx, cs)
@@ -488,10 +495,31 @@ export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
     await cx.setPending(r.isPlaced ? null : { title })
     // with a draft in the prompt the keys stay there (Claude Code keeps the person's typing)
     if (r.isPlaced && (await cx.promptText().catch(() => '')).trim()) cx.toast('the prompt holds a draft, so it keeps the keys: click the panel to use its keys')
+    else if (r.isPlaced) giveKeys(cx, title)
   } catch (err) {
     cx.log(`thimble-term: could not open the panel: ${String(err).slice(0, 200)}`)
   }
 }
+
+/** The panel asks for the keys once more, a moment after it opened without them: an open from a press on the row above
+ *  the prompt (the toast's `open ›`) is refused the keys while that row holds them, which go back to the prompt after
+ *  the press (live check term-fix6, new quirk 4: home named its keys while a `q` went to the prompt). Asked again while
+ *  the prompt holds them over an empty composer, Claude Code gives them; else the panel's hint row says how to give them
+ *  (panel.tsx endHints). */
+function giveKeys(cx: Ctx, title: string): void {
+  cx.later(KEYS_AGAIN_MS, () => {
+    void (async () => {
+      const pane = (await cx.panes()).find(p => p.id === PANEL)
+      if (!pane?.isPlaced || pane.isFocused !== false || (await cx.promptText().catch(() => '')).trim()) return
+      const p = await cx.panel()
+      await cx.open({ id: PANEL, title: p ? paneTitle(p) : title, focus: true, columns: panelColumns() }).catch(() => undefined)
+      await cx.bumpPanel()
+    })()
+  })
+}
+
+/** How long after an open the panel asks for the keys again (giveKeys). */
+const KEYS_AGAIN_MS = 120
 
 /** The title Claude Code shows on the pane for what the panel shows: `Citation`, a card's question, `Threads`, `Home`,
  *  a view's name, `Label: <name>`, a document's title, the lists by their names. The path names each step itself. */
@@ -556,6 +584,29 @@ export async function readThread(cx: Ctx, id: string): Promise<void> {
   const whole = !prev || (typeof total === 'number' && events.length === total)
   const all = whole ? events : [...prev.events, ...events]
   await cx.setThread(id, { id, meta, events: all.slice(-2000), n: whole ? events.length : after + events.length, rev: (prev?.rev ?? 0) + 1 })
+  // the cards its words cite, read so that each is named by its question, as when the thread was asked, also in a
+  // resumed session before the thread is opened (live check term-fix6, new quirk 9: a row read `(a card)`)
+  const cited = new Set<string>()
+  for (const e of events) {
+    if (e.type !== 'text' && e.type !== 'user') continue
+    for (const c of citations(String(e.delta ?? e.text ?? ''))) {
+      const card = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(c.ref)?.[1]
+      if (card && !questionOf(card) && !rt.named.has(card)) cited.add(card)
+    }
+  }
+  if (cited.size) void nameCards(cx, [...cited]).then(() => cx.bumpPanel())
+}
+
+/** The questions of these cards noted (noteQuestion), each read once, so that a citation of one names it: a card a
+ *  thread's words cite, which no drawing reads. */
+async function nameCards(cx: Ctx, ids: readonly string[]): Promise<void> {
+  if (!rt.sc) return
+  for (const id of ids) {
+    rt.named.add(id)
+    const got = await readState(cx, rt.sc, 'card', [id])
+    const cell = got.ok ? cellOf(got.value) : null
+    if (cell) noteQuestion(cell.id, cell.title)
+  }
 }
 
 function newsOf(rows: readonly TermThreadRow[]): { n: number; one: string } {

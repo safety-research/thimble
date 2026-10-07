@@ -85,6 +85,10 @@ test("a label card: its counts as bars in the label's order; the records it carr
   expect(lines.some(l => l.includes('agree'))).toBe(false)
   // before the label is read, a line that says so
   expect(labelCard(of('l0label0'), null).kind).toBe('note')
+  // the counts with the analyst's verdicts, as the label panel shows them (live check term-fix6, new quirk 1: the card
+  // kept the label's own counts after a verdict)
+  const set = labelCard(of('l0label0'), { ...LABEL, verdicts: { counts: { none: 9401, 'proxy-link': 5190 }, set: 1 } } as never)
+  expect((set.rows as BarRow[]).map(r => [r.label, r.value])).toEqual([['proxy-link', 5190], ['none', 9401]])
 })
 
 test('no card drawing shows a hex id', () => {
@@ -290,4 +294,10 @@ test('a card cited whole reads as a reference in parentheses in plain words, as 
   expect(plainCites('See ([[card:ab12cd34]]).')).toBe('See (card "How many deletions per day?").')
   expect(plainCites('[[card:ab12cd34]] says so.')).toBe('(card "How many deletions per day?") says so.')
   expect(plainCites('It has [[3|card:ab12cd34#n/all]] rows.')).toBe('It has 3 rows.')
+  // a place alone, written as main writes it for the terminal (`[↗](ref)`), reads the same way, a card's printed line
+  // too (live check term-fix6, new quirk 5: the New thread preview read `…out of 500 pages card "How many pages…"`)
+  expect(plainCites('That is out of 500 pages [↗](card:ab12cd34).')).toBe('That is out of 500 pages (card "How many deletions per day?").')
+  noteQuestion('c0ffee00', 'What is the first deletion?')
+  expect(plainCites('It began on 18 June [↗](card:c0ffee00@out0#L1). That is all.')).toBe('It began on 18 June (card "What is the first deletion?" output line 1). That is all.')
+  expect(plainCites('It has [3](card:ab12cd34#n/all) rows and [33](concept:9e40be16/yes) yes.')).toBe('It has 3 rows and 33 yes.')
 })

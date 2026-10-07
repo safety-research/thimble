@@ -253,7 +253,8 @@ while thimble's links check runs.
     holds the panel's focus (the new thread's field, which takes it as the view opens; a follow-up field once clicked),
     a letter goes into the field, so the row reads `Enter to ask · Esc to leave the field`; Esc gives the keys back to
     the prompt, and while the prompt holds them the row names none of the panel's keys (a letter or Enter would go to
-    the prompt, and Enter to main), only `click the panel for its keys`.
+    the prompt, and Enter to main), only `click the panel for its keys`; so does every panel that opened without the
+    keys (home from the toast's `open ›`), which asks for them once more a moment after it opened.
 27. A field: its label dim and lower case on the label column, the field on L, no colon (`ask`, `follow-up`,
     `describe a new label`, the label panel's `prompt`). A field that shows all of its text (the label's prompt) has a
     border in the rule gray; a click gives it the keyboard.
@@ -321,7 +322,11 @@ colored is said under each.
 - A card cited whole (`[[card:<id>]]`, at a sentence's end) where the card is drawn with the text, under the turn's last
   reply, under a thread's answer or as a document's figure, is left out with the space before it; elsewhere it reads
   ` (card "<its question>")`, cut at a word, the words in the parentheses the citation's link, so that it reads as a
-  reference and not as words of the sentence. The footer does not count it.
+  reference and not as words of the sentence. The footer does not count it. Another citation that names only its place
+  (`[↗](<ref>)`: a card's printed line, a file's line) reads the same way where it ends a clause (` (card "…" output
+  line 1)`), in the reply and in every line of plain words (the New thread view's passage); where the sentence goes on
+  after it, it reads as its place. A label's link (`[33](concept:<id>/yes)`) is neither a citation nor a problem in
+  the footer.
 - A citation is its value in blue, underlined; a value not at its place is red. In a card's takeaway, one cell after
   the value, `◌` while thimble's links check runs, `✓` once it found the value, a red `×` when it found another. The
   citation under the pointer is inverse, and its tip (its place and status in plain words, and why for a problem) sits
@@ -471,7 +476,8 @@ colored is said under each.
 - An item: its glyph at A0, its name at A2 (regular, even when new), metadata dim against R, `new` in green at R.
 - Views by state, each with the files it claims. Documents under the browser's word, newest first. Threads by their
   first question, with `about <its subject>` at R when a card or a citation names it (a card by its question, a
-  citation by its words; never a passage's sentence, and left out when it would cut the question), `earlier session`
+  citation by its words; never a passage's sentence, and left out when it would leave fewer than 32 cells of the
+  question, which is cut at a word to make room), `earlier session`
   for one from an earlier conversation (a resumed one is the same conversation), a failed one `×`.
 - Card groups by thimble's group, with their card count at R; the newest group is open, the others folded. A side
   thread's group is named by the thread's first question (`in the thread "…"`), never its title, which is a slug. A group's
@@ -507,8 +513,9 @@ colored is said under each.
 
 - A tree: a root per place a thread was asked from (`main`, `report "…"`) at A0, a blank row between roots; its
   threads under it with guides; a thread asked from a thread one level deeper. Each thread's row is its question in
-  quotation marks; its secondary row is the first line of its latest answer, dim; `N questions` dim at R when there is
-  more than one.
+  quotation marks; its secondary row is the first line of its latest answer, dim (`stopped` dim for a stop, the
+  analyst's or the end of the Claude Code session; a failure `×` in red; before its answer is read, only what its
+  record says, never `answered`); `N questions` dim at R when there is more than one.
 - The selected thread (`❯`, accent) shows under the second rule: what it is about (named as home names it), its
   questions and answers, drawn as main's chat draws a reply, `stop` while it answers, then, a blank row under the
   answer, the field for the next question, its placeholder dim (`ask a follow-up question`); Enter's word is `ask`.

@@ -6,7 +6,7 @@
 // is left out rather than failing the drawing.
 import type { ChatThread, ChatThreadTurn, TermAgent, TermHome, TermThreadRow, TermVerdict } from '../types'
 import type { ThimbleCell, ThimbleLabel } from './cell'
-import { clip, curlyQuotes, quoted, shownMatches, valueIn } from './lib'
+import { STOP_KINDS, clip, curlyQuotes, quoted, shownMatches, valueIn } from './lib'
 import type { Citation } from './lib'
 import { quotedWords, showsValue } from './cite'
 
@@ -150,6 +150,23 @@ export function withoutToldThreads(text: string, rows: readonly NamedRow[], told
   })
   if (kept.length === lines.length) return text
   return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+// main's own line about a writer's end (prompts/main.md: `↳ The writer finished; thimble shows it.`, also `↳ The report
+// writer finished, …`), which it writes once for the writer's message and again for Claude Code's task notification
+const WRITER_LINE = /^\s*↳\s*(?:the\s+)?(?:[\w-]+\s+)?writer\b/i
+
+/** Whether a reply holds main's `↳ The writer …` line. */
+export function saysWriter(text: string): boolean {
+  return text.split('\n').some(l => WRITER_LINE.test(l))
+}
+
+/** A reply without main's `↳ The writer …` lines: for a row whose writer's end an earlier row said already (live check
+ *  term-fix6, new quirk 6: `↳ The writer finished the report; thimble shows it.` once after the writer's message and
+ *  again after the task notification). */
+export function withoutWriterLines(text: string): string {
+  if (!saysWriter(text)) return text
+  return text.split('\n').filter(l => !WRITER_LINE.test(l)).join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 /** An Agent call's description or a task notification's words with each thread's fork (`thread:<slug>`, in quotation
@@ -355,6 +372,7 @@ export function threadOf(meta: Obj, events: readonly Obj[]): ChatThread {
       if (c.state === 'error') {
         c.state = 'running'
         c.a = ''
+        delete c.stopped
       }
       // the answer is the turn's first reply: later words are the fork's working
       if (c.state === 'done') continue
@@ -379,6 +397,7 @@ export function threadOf(meta: Obj, events: readonly Obj[]): ChatThread {
     } else if (t === 'error') {
       c.state = 'error'
       c.a = str(e.error ?? e.message ?? e.text) || c.a
+      if (STOP_KINDS.includes(str(e.kind))) c.stopped = true
     }
   }
   const last = turns.at(-1)
@@ -430,6 +449,7 @@ export function threadRowsOf(v: unknown): TermThreadRow[] {
         element: str(m.anchor_element),
         question: str(m.question),
         fork: str(m.fork_name),
+        turn: str(m.turn),
       }
     })
 }

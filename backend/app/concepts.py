@@ -3744,6 +3744,12 @@ def resolve_concept_ref(corpus: Path | str, ref: str) -> dict:
     if concept is None:
         raise refs.RefError(f"no concept {m[1]!r}", 404)
     card = with_stats(ws, concept)
+    # the counts as thimble.labels(), the label's panel and its card read the rows: each record the analyst set to
+    # another value counted under that value (live check term-fix6, new quirk 1: `[32](concept:<id>/yes)` after one
+    # verdict was judged against the label's own 33)
+    applied, moved = verdicts_applied(ws, card["id"], dict(card.get("counts") or {}))
+    if moved:
+        card = {**card, "counts": applied, "verdicts": {"counts": applied, "set": moved}}
     if m[2] and m[2].strip():
         return _resolve_value(name, card, cite.decode_label(m[2].strip()), ref)
     cal = card["calibration"]
@@ -3753,6 +3759,8 @@ def resolve_concept_ref(corpus: Path | str, ref: str) -> dict:
     counts = ", ".join(f"{k}: {v}" for k, v in sorted(card["counts"].items()))
     excerpt = f"{card['name']} ({card['kind']}, per {card['unit']}): {card['description']}".strip()
     excerpt += f"\n{card['n_labeled']} labeled" + (f" ({counts})" if counts else "") + f"; {est}"
+    if moved:
+        excerpt += f"\nthese counts apply the analyst's verdicts: {moved} {card['unit']}(s) the analyst set to another value count under that value"
     if _applying(name, card["id"]):
         run = _runs.get((name, card["id"])) or {}
         total = run.get("total")
@@ -3788,6 +3796,8 @@ def _resolve_value(name: str, card: dict, value: str, ref: str) -> dict:
     share = label_share(n, total)
     excerpt = f"{value}: {n:,} {unit}{'' if n == 1 else 's'}" + (f" ({share}) of the {total:,} labeled" if share else "")
     excerpt += f" by the label {card['name']}"
+    if (card.get("verdicts") or {}).get("set"):
+        excerpt += ", with the analyst's verdicts"
     if _applying(name, card["id"]):
         excerpt += "; an apply is running, so this count is from before it"
     return {"ref": ref, "kind": "concept", "concept_id": card["id"], "excerpt": excerpt[:refs.EXCERPT_MAX],

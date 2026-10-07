@@ -24,7 +24,7 @@ import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
 import type { Target } from './gestures'
-import { bareCard, cardWords, cid, citations, clip, curlyQuotes, embeddedCards, labelRef, mdPieces, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
+import { asReference, bareCard, cardWords, chipLabel, cid, citations, clip, curlyQuotes, embeddedCards, labelRef, mdPieces, noteQuestion, outputLine, parseReply, placeOnly, questionOf, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, paintLines } from './paint'
@@ -113,7 +113,8 @@ export async function toolWords(cx: Ctx, key: string, value: string): Promise<st
     const q = await question((m[1] ?? m[2])!)
     out = out.replace(m[0], q ? named(q) : 'a card')
   }
-  out = plainCites(out)
+  // a tool's own words: a place cited alone reads in them as written, not as a reference in parentheses
+  out = plainCites(out, false)
   for (const m of [...out.matchAll(ID_IN_TEXT)]) {
     const q = await question(m[1]!)
     out = out.replace(m[0], q ? named(q) : 'a card')
@@ -243,19 +244,22 @@ async function threadAbout(cx: Ctx, words: string): Promise<string> {
   return threads.find(x => x.anchor && refs.has(x.anchor.split(',')[0]!) && (!x.anchorText || holds(x.anchorText)))?.id ?? ''
 }
 
-/** A rich block's runs with each card it cites whole (`[[card:<id>]]`, at a sentence's end) as the reader needs it: left
- *  out, with the space before it, where the card is drawn under the reply or as a figure (`drawn`); elsewhere named by
- *  its question in parentheses (` (card "…")`), the name the citation's link. */
+/** A rich block's runs with each citation that names only its place (placeOnly: a card cited whole, `[[card:<id>]]` at a
+ *  sentence's end, or a card's printed line or a file's line, `[↗](<ref>)`) as the reader needs it: a card cited whole
+ *  left out, with the space before it, where the card is drawn under the reply or as a figure (`drawn`); elsewhere named
+ *  in parentheses (` (card "…")`, ` (card "…" output line 1)`), the name the citation's link (live check term-fix6, new
+ *  quirk 5: a printed line's citation read as words of the sentence). */
 async function cardRuns(cx: Ctx, block: Extract<Block, { type: 'rich' }>, drawn: ReadonlySet<string>): Promise<Extract<Block, { type: 'rich' }>> {
-  if (block.table || !block.runs.some(r => r.cite && bareCard(r.cite))) return block
+  if (block.table || !block.runs.some(r => r.cite && placeOnly(r.cite))) return block
   const runs: Run[] = []
-  for (const r of block.runs) {
-    const id = r.cite ? bareCard(r.cite) : ''
-    if (!id) {
+  for (const [i, r] of block.runs.entries()) {
+    const next = block.runs[i + 1]
+    if (!r.cite || !asReference(r.cite, next ? (next.cite ? 'x' : next.text) : '')) {
       runs.push(r)
       continue
     }
-    if (drawn.has(id)) {
+    const id = bareCard(r.cite)
+    if (id && drawn.has(id)) {
       const prev = runs.at(-1)
       if (prev && !prev.cite) {
         const text = prev.text.replace(/\s+$/, '')
@@ -265,19 +269,22 @@ async function cardRuns(cx: Ctx, block: Extract<Block, { type: 'rich' }>, drawn:
       continue
     }
     // a card no drawing read yet is read now, and named once it is (`a card` until then)
-    const tc = await cx.card(id)
-    if (!tc && !rt.shown.has(id)) rt.wanted.add(id)
-    const q = (tc?.data as CardData | null | undefined)?.question ?? ''
-    noteQuestion(id, q)
+    const card = id || outputLine(r.cite.ref)?.card || ''
+    if (card) {
+      const tc = await cx.card(card)
+      if (!tc && !rt.shown.has(card)) rt.wanted.add(card)
+      noteQuestion(card, (tc?.data as CardData | null | undefined)?.question ?? '')
+    }
+    const words = id ? cardWords(questionOf(id)) : chipLabel(r.cite)
     // in parentheses, so that it reads as a reference and not as words of the sentence: `… (card "How many…").`
     // (none when main put it in parentheses itself)
     const prev = runs.at(-1)
     const own = Boolean(prev && !prev.cite && /\(\s*$/.test(prev.text))
-    if (own) runs.push({ ...r, text: cardWords(q) })
+    if (own) runs.push({ ...r, text: words })
     else {
       if (prev && !prev.cite && !prev.b && !prev.i && !prev.code && !prev.u) runs[runs.length - 1] = { ...prev, text: `${prev.text.replace(/\s+$/, '')} (` }
       else runs.push({ text: prev ? ' (' : '(' })
-      runs.push({ ...r, text: cardWords(q) })
+      runs.push({ ...r, text: words })
       runs.push({ text: ')' })
     }
   }

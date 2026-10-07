@@ -1948,6 +1948,10 @@ def parse_markdown(text: str, form: str) -> dict[str, Any]:
             summary = [versions.plain(x) for x in _claims(changed)][:versions.SUMMARY_LINES]
             return video.parse(title, _claims([sec for sec in secs if sec not in changed]), html, summary)
         return {"title": title, "html": html, "claims": _claims(secs)}
+    # the citation forms the grammar does not know put right, as a takeaway's are (`[23 June|card:<id>#day/06-23]`, a
+    # Markdown link to a ref, `[[↗|ref]]`): a writer wrote `[v|ref]` and the document showed it as written (live check
+    # term-fix7)
+    text = cite.normalise_markup(str(text or ""))
     title, secs = _md_sections(text, headlines=form == "story")
     if form == "slides":
         out = []

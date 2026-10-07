@@ -27,7 +27,10 @@ export type Ctx = {
   pluginRoot: string
   open: (args: PaneOpenArgs) => Promise<UiOpenResult>
   close: (id: string) => Promise<void>
-  panes: () => Promise<readonly { id: string; isPlaced: boolean }[]>
+  /** this plugin's open panes as the engine records them: placed, and holding the keyboard */
+  panes: () => Promise<readonly { id: string; isPlaced: boolean; isFocused?: boolean }[]>
+  /** `fn` once, `ms` from now, beside the hook that asked */
+  later: (ms: number, fn: () => void) => void
   log: (text: string) => void
   toast: (text: string) => void
   /** a prompt to main, as the analyst's (a code label's run, which only main's Bash runs; a new label described) */

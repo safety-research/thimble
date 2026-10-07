@@ -389,7 +389,9 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
 export function labelCard(cell: ThimbleCell, label: ThimbleLabel | null): CardData {
   const card = blank(cell, 'label')
   if (!label) return { ...card, kind: 'note', note: 'The label is being read.' }
-  const counts = label.label_stats?.counts ?? {}
+  // the counts as the label panel and thimble.labels() read the rows: each record the analyst set to another value under
+  // that value (live check term-fix6, new quirk 1: the card's bars kept the label's own 33 after a verdict)
+  const counts = label.verdicts?.counts ?? label.label_stats?.counts ?? {}
   const values = [...(label.labels ?? []), ...Object.keys(counts).filter(k => !(label.labels ?? []).includes(k))]
   const rows: BarRow[] = values.map(v => ({ label: v, value: counts[v] ?? 0, group: '' }))
   const run = label.last_run ?? label.applications?.at(-1) ?? null

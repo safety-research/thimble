@@ -798,6 +798,19 @@ def test_a_thread_no_fork_answered_stops_when_the_session_ends_and_an_answered_o
     assert len([r for r in _log(asked) if r["type"] == "error"]) == 1, "stopped once"
 
 
+def test_a_forks_closing_note_as_the_answer_drops_what_it_made_and_starts_with_a_capital():
+    """Live check term-fix6, new quirk 3: the `↳` fallback answer read `added a table card. Yes, 23 June…`."""
+    assert session.note_answer("added a table card. Yes, 23 June still has the most deletions (473).") == \
+        "Yes, 23 June still has the most deletions (473)."
+    assert session.note_answer("added a table card of the 25 deletions from 18:00 to 19:00 UTC on 18 June. MartinHuber "
+                               "made all of them.") == "MartinHuber made all of them."
+    assert session.note_answer("I added a table of the deletions per minute and answered in the thread. The 18:21 "
+                               "deletion is the first of 25.") == "The 18:21 deletion is the first of 25."
+    # a note that is only the clause, or holds none, keeps its words
+    assert session.note_answer("added a table card.") == "Added a table card."
+    assert session.note_answer("the count went from 2.5 to 3. Then it fell.") == "The count went from 2.5 to 3. Then it fell."
+
+
 def test_a_fork_whose_answer_is_only_its_closing_note_answers_the_thread_with_it(cwd, project, quits):
     """Live check term-fix6: a thread's fork wrote its answer only as a `↳ thread <name>: …` line, which only main's
     terminal shows, so the thread said `answered` with no words. Its last such line after its last tool call is the
@@ -819,7 +832,7 @@ def test_a_fork_whose_answer_is_only_its_closing_note_answers_the_thread_with_it
     _write(path, [say(f"↳ thread {name}: counting the saves per day."),
                   {"type": "assistant", "isSidechain": True, "agentId": "f0e1d2c3", "message": {"role": "assistant",
                    "content": [_use("toolu_wc", "Bash", {"command": "wc -l pages.jsonl"})]}},
-                  say(f"↳ Thread {name}: it changed on 16 and 18 June.")])
+                  say(f"↳ Thread {name}: added a table card of the saves per day. it changed on 16 and 18 June.")])
     session._scan_subs(lv)
     session.tail_once(lv)
     assert not [r for r in _log(tid) if r["type"] == "text"], "a note is no line of the thread while the fork works"
@@ -827,5 +840,6 @@ def test_a_fork_whose_answer_is_only_its_closing_note_answers_the_thread_with_it
             "<status>completed</status>\n<summary>Agent finished</summary>\n</task-notification>")
     _append(p, lv, [END, {"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": note}},
                     _assistant(_say("The thread is answered.")), END])
-    assert [r["delta"] for r in _log(tid) if r["type"] == "text" and r.get("reply")] == ["it changed on 16 and 18 June."]
+    # without the clause that says what it made, a capital first (live check term-fix6, new quirk 3)
+    assert [r["delta"] for r in _log(tid) if r["type"] == "text" and r.get("reply")] == ["It changed on 16 and 18 June."]
     assert [r["type"] for r in _log(tid) if r["type"] in ("done", "error")] == ["done"]

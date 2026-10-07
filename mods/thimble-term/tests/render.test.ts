@@ -226,6 +226,40 @@ test('the one row above the prompt is a toast: what is new since home was opened
   await above.unmount()
 })
 
+test("home opened from the toast without the keys asks for them once more, and names none of its keys until it has them", async ($, on) => {
+  // live check term-fix6, new quirk 4: home opened from `open ›` named its keys while a `q` went to the prompt
+  const w = world(on)
+  await start($, w)
+  w.states.home = { ...w.states.home, cards: 14 }
+  w.stamps.set(`${WS}/notebooks`, 2)
+  await w.clock.advance(1100)
+  w.paneFocused = false
+  const above = (await $.ui.mount(ABOVE)) as unknown as M
+  await above.press({ key: 'above-home-open' })
+  await above.unmount()
+  await w.clock.settle()
+  // the pane's props say nothing of the keys (or say it has them); the engine's record says it has not: no key named
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  let text = shown(await pane.drawn({ in: 'm:home' }))
+  expect(text).toContain('click the panel for its keys')
+  expect(text).not.toContain('Enter to open')
+  await pane.unmount()
+  // a moment later it asked for them again, as an open with `focus`
+  await w.clock.advance(200)
+  expect(w.focusAsked.filter(Boolean).length).toBe(2)
+  // given them, it names its keys
+  w.paneFocused = true
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  text = shown(await pane.drawn({ in: 'm:home' }))
+  expect(text).toContain('↑↓ to choose · Enter to open')
+  await pane.unmount()
+  // a panel that holds the keys asks for nothing more
+  w.focusAsked.length = 0
+  await $.command.run({ command: 'thimble:thimble', args: 'threads' } as never)
+  await w.clock.advance(200)
+  expect(w.focusAsked).toEqual([true])
+})
+
 test('no agent is listed above the prompt, whatever its state', async ($, on) => {
   const w = world(on)
   w.states.agents = { ...w.states.agents, rows: [{ ...w.states.agents.rows[0]!, state: 'working' }, { name: 'thimble:writer', label: 'writer: report', state: 'waiting for a permission', kind: 'subagent', chat: 'w1', role: 'writer' }] }

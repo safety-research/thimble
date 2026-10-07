@@ -11,8 +11,9 @@ import type { Ctx } from './ctx'
 /** What the file is read and written with. */
 type Io = Pick<Ctx, 'read' | 'write'>
 
-/** What one row of main's chat carries under it. */
-export type KeptRow = { cards?: string[]; answer?: TermAnswer; threads?: ChatSignal[]; views?: string[] }
+/** What one row of main's chat carries under it; `writer`, the writer run its `↳ The writer …` line reports (its chat)
+ *  and whether it said that run's end first. */
+export type KeptRow = { cards?: string[]; answer?: TermAnswer; threads?: ChatSignal[]; views?: string[]; writer?: { chat: string; first: boolean } }
 
 /** The file: each row's drawings by its uuid, oldest first, and the last turn's text and cards (`/thimble cite` and
  *  `/thimble card` open them by number). */
@@ -54,6 +55,8 @@ export function parseKept(raw: string): Kept {
     const threads = signalsOf(x.threads)
     const views = strings(x.views)
     const answer = answerOf(x.answer)
+    const writer = x.writer as { chat?: unknown; first?: unknown } | null | undefined
+    if (writer && typeof writer === 'object' && typeof writer.chat === 'string' && writer.chat) row.writer = { chat: writer.chat, first: writer.first === true }
     if (cards.length) row.cards = cards
     if (threads.length) row.threads = threads
     if (views.length) row.views = views
