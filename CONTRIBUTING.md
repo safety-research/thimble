@@ -27,6 +27,7 @@ thimble revert                     # undo the last change thimble's dev agent ap
 thimble launch-args | prompt <name>   # what a session starts with, and a prompt as a session gets it
 thimble mode [browser | terminal]  # the mode `thimble` starts this folder in; terminal mode starts no server
 thimble state <surface> | act <kind>  # terminal mode's renderer: a surface's JSON, or a click's effect, with no server
+thimble view text <slug> --width 120  # a view's terminal program (view.term.js) drawn as text (docs/terminal-views.md)
 ```
 
 `thimble help` lists the commands an analyst uses, and in a development install `fix` and `revert` too; the ones above
