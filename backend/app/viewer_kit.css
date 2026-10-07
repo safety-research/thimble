@@ -862,6 +862,12 @@ select.field {
   left: 0;
   pointer-events: none;
 }
+/* a lane of the overview, over its colours, which names its label on hover */
+.thimble-colour-lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
 /* the part in view on the overview: a frame as wide as the track in the full ink, a line of the paper inside it, so
    that it stands out over any colour; square, so that the lines start at its corners; a drag of it moves the view */
 .thimble-colour-thumb {
@@ -874,8 +880,17 @@ select.field {
   border-radius: 0;
   box-shadow: inset 0 0 0 1px var(--surface-card);
   cursor: grab;
+  will-change: transform;
 }
 .thimble-colour-strip[data-drag] .thimble-colour-thumb {
+  cursor: grabbing;
+}
+/* a drag on the zoomed track scrolls the list, as a scrollbar's thumb does */
+.thimble-colour-zoom {
+  cursor: grab;
+}
+.thimble-colour-strip[data-drag],
+.thimble-colour-strip[data-drag] * {
   cursor: grabbing;
 }
 /* the lens over the part in view on the zoomed track, a little wider than the track: its paper and float under the
@@ -888,6 +903,7 @@ select.field {
   box-sizing: border-box;
   border-radius: 4px; /* LENS_R: the lines meet the lens's left edge where its corners' curves end */
   pointer-events: none;
+  will-change: transform;
 }
 .thimble-colour-lens {
   position: absolute;
@@ -897,10 +913,22 @@ select.field {
 .thimble-colour-zoom .thimble-colour-thumb {
   border: 1px solid rgba(var(--ink-rgb), 0.55);
   box-shadow: none;
-  cursor: default;
 }
 .thimble-colour-strip[data-drag] .thimble-colour-zoom .thimble-colour-thumb {
   border-color: rgba(var(--ink-rgb), 0.8);
+}
+/* the record a click on the overview snapped to, highlighted for a moment as a followed ref's record is */
+[data-thimble-snap] {
+  animation: thimble-snap 1.5s ease-out forwards;
+}
+@keyframes thimble-snap {
+  0%,
+  30% {
+    background-color: var(--hl-bg, rgba(255, 214, 0, 0.32));
+  }
+  100% {
+    background-color: transparent;
+  }
 }
 /* the lines from the frame's top and bottom to the lens's, and the wedge between them */
 .thimble-colour-link {

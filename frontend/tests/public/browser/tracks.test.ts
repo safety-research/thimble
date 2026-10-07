@@ -39,8 +39,8 @@ async function open(dpr: number): Promise<Page> {
     return route.fulfill({ status: 404, body: '' })
   })
   await page.goto(`${ORIGIN}/`)
-  await page.waitForSelector('.track-over')
-  await page.waitForTimeout(100)
+  await page.waitForSelector('.track-lens')
+  await page.waitForTimeout(250)
   return page
 }
 
@@ -51,7 +51,7 @@ beforeAll(async () => {
       `import '${src('styles/index.css')}'`,
       `import { createRoot } from 'react-dom/client'`,
       `import { flushSync } from 'react-dom'`,
-      `import { ReaderTracks } from '${src('files/Tracks.tsx')}'`,
+      `import { PlaceFeed, ReaderTracks } from '${src('files/Tracks.tsx')}'`,
       `const w = window as any`,
       `w.__seeks = []`,
       `w.__asked = []`,
@@ -59,12 +59,21 @@ beforeAll(async () => {
       // three values over 100 bins: the first two thirds mostly the first value, the second beside it in every bin, the
       // last third the third value
       `const counts = [Array.from({ length: 100 }, (_, i) => (i < 66 ? 5 : 0)), Array.from({ length: 100 }, (_, i) => (i < 66 ? 2 : 1)), Array.from({ length: 100 }, (_, i) => (i < 66 ? 0 : 6))]`,
-      `const records = (base) => Array.from({ length: 20 }, (_, i) => ({ line: base + i, top: i * 100, bottom: i * 100 + 90, color: i % 2 ? 'var(--label-2)' : 'var(--label-1)', marks: [], title: 'v' }))`,
+      `const records = (base) => Array.from({ length: 20 }, (_, i) => ({ line: base + i, top: i * 100, bottom: i * 100 + 90 }))`,
+      `const colorOf = (line) => ({ color: line % 2 ? 'var(--label-2)' : 'var(--label-1)', title: 'v' })`,
+      `const feed = new PlaceFeed()`,
+      `w.__feed = feed`,
       `const markers = [{ id: 'find', name: '"county"', total: 1000, ticks: [{ from: 400, to: 420, colour: 'var(--text-primary)' }] }]`,
       `const preview = (line) => { w.__asked.push(line); return Promise.resolve([{ line, who: 'AgentRelent', when: '2026-06-18 20:15', text: 'SEC county variants for pretty lines', color: 'var(--label-1)' }, { line: line + 1, who: 'AgentMapCite8x', when: '2026-06-18 20:16', text: 'MINETHROUGH PERSIST 777', color: 'var(--label-2)' }]) }`,
-      // the middle of the file (the reader at 800 to 1200 of the 2000 px the zoomed track spans), or near its end
-      `const at = { middle: { view: { top: 0.45, height: 0.1, seen: [] }, zoom: { from: 0, to: 2000, viewTop: 800, viewBottom: 1200, records: records(100) } }, end: { view: { top: 0.88, height: 0.1, seen: [] }, zoom: { from: 0, to: 2000, viewTop: 1500, viewBottom: 1900, records: records(900) } } }`,
-      `w.__render = (where) => flushSync(() => root.render(<div style={{ height: 600, display: 'flex', justifyContent: 'flex-end' }}><ReaderTracks total={1000} view={at[where].view} paint={{ kind: 'counts', counts, colors: ['var(--label-1)', 'var(--label-2)', 'var(--label-3)'], faded: [false, false, false] }} markers={markers} zoom={at[where].zoom} onJump={() => {}} onSeek={(f, held) => w.__seeks.push([f, held])} onWheel={() => {}} onLine={() => {}} onMark={() => {}} preview={preview} /></div>))`,
+      // the middle of the file (the reader at 800 to 1200 of the 2000 px the zoomed track spans, in a stretch of the
+      // file's records), or near its end (1500 to 1900 of the last 2000 px)
+      // (the file twenty times what the reader shows, so that the zoomed track shows; "short" five times, so that it
+      // does not)
+      `const at = { middle: { place: { top: 0.475, height: 0.05, scroll: 800, h: 400, content: 4000, start: false, end: false }, records: records(100) }, end: { place: { top: 0.93, height: 0.05, scroll: 1500, h: 400, content: 2000, start: true, end: true }, records: records(900) }, short: { place: { top: 0.4, height: 0.2, scroll: 800, h: 400, content: 2000, start: true, end: true }, records: records(1) } }`,
+      `root.render(<div style={{ height: 600, display: 'flex', justifyContent: 'flex-end' }}><ReaderTracks total={1000} feed={feed} paint={{ kind: 'counts', counts, colors: ['var(--label-1)', 'var(--label-2)', 'var(--label-3)'], faded: [false, false, false] }} markers={markers} colorOf={colorOf} onJump={() => {}} onSeek={(f, held) => w.__seeks.push([f, held])} onScrollBy={(px) => { w.__scrolled.push(px); const p = feed.place; feed.set({ ...p, scroll: p.scroll + px, top: p.top + px / 40000 }); return px }} onMark={() => {}} preview={preview} /></div>)`,
+      `w.__scrolled = []`,
+      // the place published, then once the tracks have gone still and onto the pixel grid
+      `w.__render = (where) => { flushSync(() => { feed.set(at[where].place); feed.setRecords(at[where].records) }); return new Promise((r) => setTimeout(r, 250)) }`,
       `w.__render('middle')`,
     ],
     {
@@ -260,3 +269,76 @@ test('a press on the overview sends the frame there and scrubs the reader', asyn
   assert.ok(seeks.length >= 2 && seeks[0][1] === true && seeks[seeks.length - 1][1] === false, JSON.stringify(seeks))
   assert.ok(seeks[seeks.length - 1][0] > seeks[0][0])
 })
+
+/** The lens's top and the first faded record's top on the zoomed track, and the zoomed track's cursor. */
+const zoomState = (pg: Page = page) =>
+  pg.evaluate(() => {
+    const top = (sel: string) => document.querySelector(sel)!.getBoundingClientRect().top
+    return { lens: top('.track-lens'), rec: top('.track-zoom-faded .track-rec'), cursor: getComputedStyle(document.querySelector('.track-zoom')!).cursor, scrolled: ((window as any).__scrolled as number[]).reduce((a, b) => a + b, 0) }
+  })
+
+test("a drag on the lens scrolls the reader at the zoomed track's scale: the lens follows the pointer over records that hold still", async () => {
+  await page.evaluate(() => (window as any).__render('middle'))
+  await page.evaluate(() => ((window as any).__scrolled = []))
+  const zoom = (await page.locator('.track-zoom').boundingBox())!
+  const lens = (await page.locator('.track-lens').boundingBox())!
+  const before = await zoomState()
+  assert.equal(before.cursor, 'grab', 'the zoomed track says it can be dragged')
+  const x = zoom.x + zoom.width / 2
+  const y = lens.y + lens.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  for (let i = 1; i <= 20; i++) await page.mouse.move(x, y - 2 * i)
+  await page.waitForTimeout(50)
+  const during = await zoomState()
+  assert.equal(during.cursor, 'grabbing')
+  // the lens went up with the pointer, the records under it stayed where they were
+  assert.ok(Math.abs(during.lens - (before.lens - 40)) <= 1, `lens ${before.lens} → ${during.lens}`)
+  assert.ok(Math.abs(during.rec - before.rec) <= 0.5, `records ${before.rec} → ${during.rec}`)
+  // and the reader scrolled up by 40 px of the zoomed track: the stretch's 2,000 px over the track's height
+  const k = zoom.height / 2000
+  assert.ok(Math.abs(during.scrolled - -40 / k) <= 2 / k, `scrolled ${during.scrolled}, wanted ${-40 / k}`)
+  await page.mouse.up()
+  // let go, the lens glides back to where the frame puts it, the middle of the track
+  await page.waitForTimeout(400)
+  const after = await zoomState()
+  const back = (after.lens - zoom.y + 3) / (zoom.height - (lens.height - 6))
+  assert.ok(Math.abs(back - 0.5) < 0.02, `the lens back at ${back}`)
+  assert.equal(after.cursor, 'grab')
+})
+
+test('a press on the zoomed track off the lens brings the lens there, and a drag goes on from there', async () => {
+  await page.evaluate(() => (window as any).__render('middle'))
+  await page.evaluate(() => ((window as any).__scrolled = []))
+  const zoom = (await page.locator('.track-zoom').boundingBox())!
+  const lens = (await page.locator('.track-lens').boundingBox())!
+  const x = zoom.x + zoom.width / 2
+  const y = lens.y + lens.height + 60
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.waitForTimeout(80)
+  const pressed = (await page.locator('.track-lens').boundingBox())!
+  assert.ok(Math.abs(pressed.y + pressed.height / 2 - y) <= 1, `the lens's middle at ${pressed.y + pressed.height / 2}, the pointer at ${y}`)
+  for (let i = 1; i <= 10; i++) await page.mouse.move(x, y + i)
+  await page.waitForTimeout(50)
+  const dragged = (await page.locator('.track-lens').boundingBox())!
+  assert.ok(Math.abs(dragged.y - (pressed.y + 10)) <= 1, `the drag went on: ${pressed.y} → ${dragged.y}`)
+  const k = zoom.height / 2000
+  const scrolled = await page.evaluate(() => ((window as any).__scrolled as number[]).reduce((a, b) => a + b, 0))
+  assert.ok(Math.abs(scrolled - (y + 10 - (lens.y + lens.height / 2)) / k) <= 2 / k, `scrolled ${scrolled}`)
+  await page.mouse.up()
+  await page.waitForTimeout(300)
+})
+
+test('the zoomed track shows only on a file at least twelve times what the reader shows', async () => {
+  const shows = () => page.evaluate(() => getComputedStyle(document.querySelector('.track-zoom')!).display !== 'none' && getComputedStyle(document.querySelector('.track-link')!).display !== 'none')
+  await page.evaluate(() => (window as any).__render('middle'))
+  assert.equal(await shows(), true, 'twenty times: the zoomed track')
+  await page.evaluate(() => (window as any).__render('short'))
+  assert.equal(await shows(), false, 'five times: the overview alone')
+  const over = await page.evaluate(() => document.querySelector('.tracks')!.getBoundingClientRect().width)
+  await page.evaluate(() => (window as any).__render('middle'))
+  assert.equal(await shows(), true)
+  assert.ok((await page.evaluate(() => document.querySelector('.tracks')!.getBoundingClientRect().width)) > over + 30, 'the tracks narrower without it')
+})
+
