@@ -163,6 +163,12 @@ BRIDGE_JS = Path(__file__).with_name("viewer_bridge.js")
 KIT_CSS = Path(__file__).with_name("viewer_kit.css")  # thimble's chips, buttons, segmented controls, tables and list rows
 COLOUR_JS = Path(__file__).with_name("viewer_colour.js")  # the view kit's Color by control, thimble.colorBy
 RANGE_JS = Path(__file__).with_name("viewer_range.js")  # the view kit's time range selector, thimble.timeRange
+# the view kit's row controls (thimble.filterBy, rows, lanes, key, divider), its side panel (thimble.side) and its
+# transcript (thimble.transcript), loaded between Color by and the range, which takes the bridge's part away; their styles
+CONTROLS_JS = Path(__file__).with_name("viewer_controls.js")
+SIDE_JS = Path(__file__).with_name("viewer_side.js")
+TRANSCRIPT_JS = Path(__file__).with_name("viewer_transcript.js")
+PARTS_CSS = Path(__file__).with_name("viewer_parts.css")
 # the order new values take the label palette's places, which the kit's Color by reads as window.__thimbleLabelOrder
 # (the frontend imports the same file; kernel_thimble.LABEL_ORDER is the server's)
 LABEL_ORDER_JSON = Path(__file__).with_name("label_order.json")
@@ -3178,8 +3184,9 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
                    derived: list[dict[str, str]] | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
     (viewer_bridge.js), the order new values take the label palette (label_order.json, for Color by), the kit's Color by
-    control (viewer_colour.js) and time range selector (viewer_range.js),
-    thimble's parts (viewer_kit.css), the vendored
+    control (viewer_colour.js), its row controls, side panel and transcript (viewer_controls.js, viewer_side.js,
+    viewer_transcript.js) and its time range selector (viewer_range.js),
+    thimble's parts (viewer_kit.css, viewer_parts.css), the vendored
     libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
     route's absolute URL (media_url), which the policy allows for images, audio and video and thimble.mediaUrl builds
@@ -3203,8 +3210,12 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
             f"window.__thimbleLabelOrder = {_script_text(LABEL_ORDER_JSON.read_text('utf-8').strip())}</script>",
             f"<script>{_script_text(BRIDGE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(COLOUR_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(CONTROLS_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(SIDE_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(TRANSCRIPT_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(RANGE_JS.read_text('utf-8'))}</script>",
-            f"<style>{KIT_CSS.read_text('utf-8')}</style>"]
+            f"<style>{KIT_CSS.read_text('utf-8')}</style>",
+            f"<style>{_style_text(PARTS_CSS.read_text('utf-8'))}</style>"]
     for name in view.get("libs") or []:
         p = LIBS.get(name)
         got = ("js", p.read_text("utf-8")) if p is not None and p.is_file() else \
@@ -4449,11 +4460,12 @@ def purple_note(html: str) -> str:
 
 
 # thimble's parts as a view's styles may touch them: the frame styles .chip, .btn, .seg, .field, the Color by control
-# and the time range selector (viewer_kit.css), and a view lays them out but does not restyle them or draw chips of its
-# own
+# and the time range selector (viewer_kit.css), Filter by, Rows, the lanes, the key, the divider, the side panel and the
+# transcript (viewer_parts.css), and a view lays them out but does not restyle them or draw chips of its own
 _STYLE_RE = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.S | re.I)
 _CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
-_KIT_PART_RE = re.compile(r"\.(?:chip|btn|seg|field|thimble-(?:colour|range|axis|def|peek|reset|tip))(?:-[\w-]+)?(?![\w-])")
+_KIT_PART_RE = re.compile(r"\.(?:chip|btn|seg|field|thimble-(?:colour|range|axis|def|peek|reset|tip|filter|rows|ctl|key|lanes?|"
+                          r"divider|side|transcript|turn))(?:-[\w-]+)?(?![\w-])")
 _CLASS_RE = re.compile(r"\.(-?[_a-zA-Z][\w-]*)")
 # what a part looks like, which the kit sets: its edge, fill, corners, colours, type and height. Its width, margins,
 # padding, flex and place are the page's layout.

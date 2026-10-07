@@ -46,6 +46,20 @@ def test_restyled_parts_and_round_chips_are_named_and_layout_is_not():
     assert views.own_parts("<p>no styles</p>") == []
 
 
+def test_the_row_controls_side_panel_and_transcript_are_thimble_s_parts_too():
+    """A page lays out Filter by, Rows, the lanes, the side panel and the transcript (viewer_parts.css) but does not
+    change how they look."""
+    css = ("<style>#filter { margin-left: auto } .thimble-side { min-width: 300px } .thimble-lanes { flex: 1 }"
+           " .thimble-lane-name { color: red } .thimble-side-head { background: #eee } .thimble-turn-head { font-size: 14px }"
+           " .thimble-filter-chip { border-radius: 999px }</style>")
+    assert views.own_parts(css) == [
+        "`.thimble-lane-name` sets color",
+        "`.thimble-side-head` sets background",
+        "`.thimble-turn-head` sets font-size",
+        "`.thimble-filter-chip` sets border-radius",
+    ]
+
+
 def test_the_note_names_them_and_the_worked_examples_get_none():
     note = views.own_parts_note(PAGE)
     assert "`.chip` sets border-radius" in note and "and 2 more" in note and "chip-key" in note

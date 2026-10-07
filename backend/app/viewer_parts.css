@@ -1,0 +1,566 @@
+/* the view kit's row controls, side panel and transcript (viewer_controls.js, viewer_side.js, viewer_transcript.js),
+   which views.frame_document puts after viewer_kit.css and before view.html's own styles, in the theme's tokens
+   (frontend/src/lib/frame.ts VIEW_TOKENS). A page lays them out but does not restyle them (views.own_parts).
+     .thimble-filter-*      Filter by in the top row: its trigger (Color by's look) and its values as toggles, a box
+                            ticked while the value shows, no colour
+     .thimble-rows-*        Rows in the top row: its trigger
+     .thimble-key-*         a key whose entries are toggles, each swatch drawn as its series is drawn
+     .thimble-lanes-*,      the lanes: a name column with tree guides, a track per lane on the range's scale, the
+     .thimble-lane-*        problem red under a failure, the cursor line on hover, the tint of the list's rows in view
+     .thimble-divider       the bar between the overview and the detail list
+     .thimble-side-*        the side panel at the list's right, its edge a drag resizes
+     .thimble-transcript-*, a transcript's turns, as the File browser's Transcript mode draws them (files.css .reader-*)
+     .thimble-turn-* */
+
+/* -------- Filter by and Rows in the top row -------- */
+.thimble-filter-mount {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+}
+.thimble-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.thimble-rows-mount {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+/* a value's box: ticked in the ink while it shows, empty while it is off; never a colour, which is Color by's */
+.thimble-filter-box {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  color: var(--text-on-inverse);
+}
+.thimble-filter-box.on {
+  border-color: var(--surface-inverse);
+  background: var(--surface-inverse);
+}
+.thimble-filter-box .thimble-colour-ico {
+  width: 9px;
+  height: 9px;
+  stroke-width: 2.5;
+}
+/* a field's or a label's values in words in the controls' menus */
+.thimble-ctl-words {
+  color: var(--text-tertiary);
+}
+/* a label's definition, one click away in the menus */
+.thimble-ctl-def.btn {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: -3px -4px 0 0;
+  color: var(--text-tertiary);
+}
+.thimble-ctl-def .thimble-colour-ico {
+  width: 13px;
+  height: 13px;
+}
+
+/* -------- a key whose entries are toggles -------- */
+.thimble-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.thimble-key-sw {
+  flex: none;
+  box-sizing: border-box;
+}
+.thimble-key-band {
+  width: 12px;
+  height: 8px;
+  background: rgba(var(--ink-rgb), 0.12);
+}
+.thimble-key-mark {
+  width: 4px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--c, var(--viz-ink-3, rgba(var(--ink-rgb), 0.5)));
+}
+.thimble-key-problem {
+  width: 12px;
+  height: 2px;
+  background: var(--status-negative);
+}
+.thimble-key-line {
+  width: 12px;
+  height: 0;
+  border-top: 1.5px solid var(--c, var(--text-secondary));
+}
+.chip.chip-key[aria-pressed='false'] .thimble-key-sw {
+  opacity: 0.35;
+}
+
+/* -------- lanes: the names with their tree guides at the left, a track per lane on the range's scale -------- */
+.thimble-lanes {
+  position: relative;
+  min-width: 0;
+}
+.thimble-lanes-key {
+  display: flex;
+  min-height: 24px;
+  padding: 2px 0 4px 8px;
+}
+.thimble-lanes-key:empty {
+  display: none;
+}
+.thimble-lanes-body {
+  position: relative;
+}
+.thimble-lane {
+  display: grid;
+  grid-template-columns: var(--thimble-names, 200px) minmax(0, 1fr);
+  align-items: center;
+  height: 18px;
+}
+.thimble-lane-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 18px;
+  padding: 0 10px 0 8px;
+  overflow: hidden;
+  color: var(--text-primary);
+  font: 400 var(--text-ui-sm) / 18px var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.thimble-lane-name:hover .thimble-lane-nm {
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 3px;
+}
+/* the tree guides, ├ └ │, a cell a level wide, drawn as lines in the placeholder grey that meet the lanes above and
+   below, left-aligned as a file view draws its folders; the glyphs are the cells' text, unseen */
+.thimble-lane-guide {
+  position: relative;
+  flex: none;
+  align-self: stretch;
+  width: 14px;
+  overflow: hidden;
+  color: transparent;
+  font: 400 1px / 1 var(--font-mono);
+  user-select: none;
+}
+.thimble-lane-g-pipe::before,
+.thimble-lane-g-tee::before,
+.thimble-lane-g-elbow::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  border-left: 1px solid var(--text-placeholder);
+}
+.thimble-lane-g-elbow::before {
+  bottom: 50%;
+}
+.thimble-lane-g-tee::after,
+.thimble-lane-g-elbow::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  width: 7px;
+  border-top: 1px solid var(--text-placeholder);
+}
+.thimble-lane-nm {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thimble-lane.is-heading .thimble-lane-nm {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.thimble-lane.is-chosen > .thimble-lane-name {
+  background: var(--surface-selected);
+  font-weight: 500;
+}
+.thimble-lane-fold {
+  flex: none;
+  width: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: 400 10px / 18px var(--font-body);
+  text-align: left;
+  cursor: pointer;
+}
+.thimble-lane-fold:hover {
+  color: var(--text-primary);
+}
+.thimble-lane-fold-gap {
+  flex: none;
+  width: 12px;
+}
+.thimble-lanes-body:not(.has-tree) .thimble-lane-fold-gap {
+  display: none;
+}
+.thimble-lane-track {
+  display: block;
+  overflow: visible;
+}
+.thimble-lane-band {
+  fill: rgba(var(--ink-rgb), 0.07);
+}
+.thimble-lane-mark {
+  fill: var(--viz-ink-3, rgba(var(--ink-rgb), 0.5));
+  cursor: pointer;
+}
+/* a failure: the problem red under its mark, beside the Color by colours */
+.thimble-lane-bad {
+  fill: var(--status-negative);
+}
+/* the detail list's rows in view: a light tint across the lanes, with faint edges */
+.thimble-lanes-span {
+  position: absolute;
+  top: 0;
+  display: none;
+  background: rgba(var(--ink-rgb), 0.05);
+  box-shadow: inset 1px 0 0 rgba(var(--ink-rgb), 0.22), inset -1px 0 0 rgba(var(--ink-rgb), 0.22);
+  pointer-events: none;
+}
+/* the pointer's time: a thin line across the lanes, never a band over the marks */
+.thimble-lanes-cursor {
+  position: absolute;
+  top: 0;
+  display: none;
+  width: 1px;
+  background: rgba(var(--ink-rgb), 0.45);
+  pointer-events: none;
+}
+.thimble-tip-m.thimble-lanes-bad {
+  color: var(--status-negative);
+}
+
+/* -------- the divider between the overview and the detail list -------- */
+.thimble-divider {
+  position: relative;
+  flex: none;
+  height: 7px;
+  margin: -3px 0;
+  z-index: 3;
+  cursor: row-resize;
+  touch-action: none;
+  outline: none;
+}
+.thimble-divider > span {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border-subtle);
+  transition: var(--transition-color);
+}
+.thimble-divider:hover > span,
+.thimble-divider:focus-visible > span,
+.thimble-divider[data-drag] > span {
+  top: 2px;
+  height: 3px;
+  background: var(--border-strong);
+}
+
+/* -------- the side panel at the list's right -------- */
+.thimble-side-host {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-height: 0;
+}
+.thimble-side-host > :not(.thimble-side) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.thimble-side {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+}
+.thimble-side[hidden] {
+  display: none;
+}
+/* the panel's left edge, which a drag moves */
+.thimble-side-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  z-index: 3;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.thimble-side-grip > span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+}
+.thimble-side-grip:hover > span,
+.thimble-side-grip:focus-visible > span,
+.thimble-side-grip[data-drag] > span {
+  left: 2px;
+  width: 3px;
+  background: var(--border-strong);
+}
+.thimble-side-head {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 8px 8px 16px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+.thimble-side-titles {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.thimble-side-title {
+  overflow: hidden;
+  color: var(--text-primary);
+  font: 500 var(--text-sm) / 1.4 var(--font-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thimble-side-sub {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1.4 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thimble-side-close.btn {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.thimble-side-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 16px 16px;
+}
+
+/* -------- a transcript's turns, as the File browser's Transcript mode draws them (files.css .reader-record) -------- */
+.thimble-transcript {
+  min-width: 0;
+}
+/* what the list shows: the run, the session or the selection, and how many turns */
+.thimble-transcript-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 16px 6px;
+  border-bottom: 1px solid var(--border-hairline);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font: 500 var(--text-sm) / 1.4 var(--font-body);
+}
+.thimble-transcript-n,
+.thimble-transcript-sub {
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1.4 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.thimble-turn {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(28px, max-content) minmax(0, 1fr);
+  gap: 0 12px;
+  padding: 10px 20px 10px 12px;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+.thimble-turn-no {
+  align-self: start;
+  min-width: 3ch;
+  margin: 0;
+  padding: 2px 0 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: 400 10.5px / 1.5 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  cursor: pointer;
+  user-select: none;
+}
+.thimble-turn-no:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+.thimble-turn-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.thimble-turn-head {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thimble-turn-tool {
+  color: var(--text-secondary);
+}
+.thimble-turn-body {
+  min-width: 0;
+  color: var(--text-secondary);
+  font: 400 var(--text-ui-sm) / 1.6 var(--font-body);
+  overflow-wrap: anywhere;
+}
+.thimble-turn-fold {
+  position: relative;
+}
+.thimble-turn-fold + .thimble-turn-fold {
+  margin-top: 4px;
+}
+.thimble-turn-block {
+  position: relative;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* a tool call, what came back, a system record: inset paper, one step down, in mono */
+.thimble-turn-call,
+.thimble-turn-result,
+.thimble-turn-raw {
+  padding: 4px 8px;
+  border-radius: var(--radius-ui);
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
+}
+.thimble-turn-toolname {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+/* an error is what came back: the problem red on the same paper, nothing else changes */
+.thimble-turn-block.is-error {
+  color: var(--status-negative);
+}
+.thimble-turn-thinking {
+  color: var(--text-tertiary);
+}
+.thimble-turn-fold.is-folded > .thimble-turn-block {
+  max-height: calc(6 * 1.5em + 8px);
+  overflow: hidden;
+}
+.thimble-turn-fold.is-folded::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  right: 0;
+  bottom: 26px;
+  height: 20px;
+  background: linear-gradient(transparent, var(--bg-sunken));
+  pointer-events: none;
+}
+.thimble-turn-expand.btn {
+  margin: 2px 0;
+  color: var(--text-tertiary);
+}
+.thimble-turn-dim {
+  margin-left: 4px;
+  font-size: var(--text-mono-sm);
+}
+/* a folded turn's one line: the whole row, its overflow cut; a tool call reads in mono */
+.thimble-turn-line {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: 400 var(--text-ui-sm) / 1.6 var(--font-body);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.thimble-turn-k-tool .thimble-turn-line,
+.thimble-turn-k-system .thimble-turn-line {
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1.6 var(--font-mono);
+}
+.thimble-turn-line:hover {
+  color: var(--text-primary);
+}
+.thimble-turn-line::before {
+  content: '▸ ';
+  color: var(--text-placeholder);
+}
+.thimble-turn-empty {
+  color: var(--text-tertiary);
+}
+.thimble-transcript-none {
+  padding: 28px 16px;
+}
+/* a new session: its name between two hairlines */
+.thimble-transcript-session {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 14px 6px;
+  color: var(--text-tertiary);
+  font: 400 var(--text-eyebrow, 11px) / 1.2 var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.thimble-transcript-session::before,
+.thimble-transcript-session::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--border-hairline);
+}
+/* a cited turn: the evidence highlight, fading by 1.5 s, as Files' (files.css .reader-hit) */
+.thimble-turn-hit::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--hl-bg);
+  pointer-events: none;
+  animation: thimble-hit-fade 1.5s ease-out forwards;
+}
+@keyframes thimble-hit-fade {
+  0%,
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

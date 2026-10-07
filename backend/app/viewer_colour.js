@@ -127,8 +127,11 @@
   // ---------------------------------------------------------------- what is kept per view
   function loadState() {
     var s = window.__thimbleColour
-    var out = { by: null, field: null, off: {}, seen: null, colours: {}, picked: {}, range: {} }
+    var out = { by: null, field: null, off: {}, seen: null, colours: {}, picked: {}, range: {}, parts: {} }
     if (!s || typeof s !== 'object') return out
+    // what the kit's other parts keep (viewer_controls.js, viewer_side.js): each part's own small object, by its name
+    if (s.parts && typeof s.parts === 'object' && !Array.isArray(s.parts))
+      for (var pk in s.parts) if (s.parts[pk] && typeof s.parts[pk] === 'object') out.parts[pk] = s.parts[pk]
     if (typeof s.by === 'string') out.by = s.by
     if (typeof s.field === 'string') out.field = s.field
     if (s.off && typeof s.off === 'object')
@@ -227,7 +230,7 @@
   })
 
   function save() {
-    var keep = { v: 1, by: S.by, field: S.field, off: S.off, seen: S.seen || [], colours: S.colours, picked: S.picked, range: S.range }
+    var keep = { v: 1, by: S.by, field: S.field, off: S.off, seen: S.seen || [], colours: S.colours, picked: S.picked, range: S.range, parts: S.parts }
     try {
       kit.save(JSON.parse(JSON.stringify(keep)))
     } catch (e) {}
@@ -429,7 +432,7 @@
     new MutationObserver(function (records) {
       for (var i = 0; i < records.length; i++) {
         var t = records[i].target
-        if (t && t.nodeType === 1 && t.closest && t.closest('.thimble-colour-mount,.thimble-colour-menu,.thimble-colour-strip,.thimble-range,.thimble-tip,.thimble-colour-peek')) continue
+        if (t && t.nodeType === 1 && t.closest && t.closest('.thimble-colour-mount,.thimble-colour-menu,.thimble-colour-strip,.thimble-range,.thimble-tip,.thimble-colour-peek,.thimble-part')) continue
         self.soon()
         return
       }
@@ -536,10 +539,14 @@
       var v = f && f.value ? f.value(record) : typeof record === 'object' ? record[c.field] : null
       return v == null || v === '' ? null : String(v)
     }
-    var ref = typeof record === 'object' ? record.ref : record
+    return labelValue(c.label, record)
+  }
+  // a label's value on a record (record.ref, or a ref given as a string), from the marks thimble draws; null for none
+  function labelValue(id, record) {
+    var ref = record != null && typeof record === 'object' ? record.ref : record
     var m = ref != null ? thimble.markOf(String(ref)) : null
     var vs = m && Array.isArray(m.values) ? m.values : []
-    for (var i = 0; i < vs.length; i++) if (vs[i] && vs[i].id === c.label) return String(vs[i].value)
+    for (var i = 0; i < vs.length; i++) if (vs[i] && vs[i].id === id) return String(vs[i].value)
     return null
   }
 
@@ -2223,5 +2230,14 @@
     untip: untip,
     esc: esc,
     num: num,
+    // the labels as Color by reads them, for the kit's other parts (viewer_controls.js): every label over files, one by
+    // its id, whether it is on, its value on a record, and what its values mean
+    labels: allLabels,
+    label: labelById,
+    labelOn: isOn,
+    labelValue: labelValue,
+    definition: definition,
+    meaning: meaningOf,
+    ico: ico,
   }
 })()
