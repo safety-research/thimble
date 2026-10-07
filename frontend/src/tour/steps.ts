@@ -95,9 +95,10 @@ const chatContent = (api: Api) => {
   return { x: C.x, y: C.y, width: C.width, height: Math.min(C.y + C.height, F.y + F.height + 14) - C.y }
 }
 
-// ---------- the orientation: the example Start gate over the chat's foot. Its Start starts nothing: the step shows at
-// once what a started orientation looks like (captured from a real run), the note in the chat and the strip over the
-// reply box
+// ---------- the orientation: the example Start gate in the place main's own gate takes, at the chat's foot. While the
+// tour runs main draws no gate (lib/touring, chat/StartGate startGateShown), so only the example's shows, and no other
+// step shows a Start card. Its Start starts nothing: the step shows at once what a started orientation looks like
+// (captured from a real run), the note in the chat and the strip over the reply box, with nothing of the gate left
 const startOf = (g: Element | null | undefined) => [...(g?.querySelectorAll('button') ?? [])].find((b) => b.textContent?.trim() === 'Start') || null
 const orientExample = (api: Api): Example => {
   const chat = api.q(chatSel),
@@ -129,12 +130,16 @@ const orientExample = (api: Api): Example => {
     const C = api.rectOf(api.q(chatSel)),
       L = api.rectOf(api.q(`${chatSel} .chat-list`))
     if (!C) return
-    if (g.isConnected) Object.assign(g.style, { left: `${C.x}px`, width: `${C.width}px`, top: `${C.y + C.height - g.offsetHeight}px` })
-    // over the whole of the gate's place, so nothing of the gate shows above the shorter foot
-    const RF = api.rectOf(api.q(`${chatSel} .chat-foot`))
-    const fh = Math.max(RF ? RF.height : 0, (foot.firstElementChild as HTMLElement | null)?.offsetHeight || 0)
-    Object.assign(foot.style, { left: `${C.x}px`, width: `${C.width}px`, height: `${fh}px`, top: `${C.y + C.height - fh}px`, flexDirection: 'column', justifyContent: 'flex-end' })
+    // the gate's place: as wide as what the chat's foot holds now (main's reply box, which the gate takes the place of),
+    // its bottom on the foot's
+    const F = api.rectOf(api.q(`${chatSel} .chat-foot`)),
+      slot = api.rectOf(api.q(`${chatSel} .chat-foot > :last-child`)) ?? C
+    const bottom = F ? F.y + F.height : C.y + C.height
+    if (g.isConnected) Object.assign(g.style, { left: `${slot.x}px`, width: `${slot.width}px`, top: `${bottom - g.offsetHeight}px` })
+    // the started foot is as tall as what it holds, the strip and the reply box, so no empty box stands above it
+    Object.assign(foot.style, { left: `${slot.x}px`, width: `${slot.width}px`, height: '', flexDirection: 'column' })
     if (foot.style.display !== 'none') foot.style.display = 'flex'
+    foot.style.top = `${bottom - foot.offsetHeight}px`
     if (L) Object.assign(note.style, { left: `${C.x}px`, width: `${C.width}px`, top: `${L.y}px` })
   }
   return { els, layout }

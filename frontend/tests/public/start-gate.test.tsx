@@ -4,8 +4,13 @@
 // permission switcher, since the orientation runs as a subagent of main in main's mode, which one line names. Start is
 // a click to its own route with the switches, model and effort and no mode. Start is off, with the line saying why,
 // while thimble's hooks module is not in main's session or main is in plan mode; a refused start fills the gate again.
+// A stored ultracode reads as xhigh. While the product tour runs, main draws no gate, and the tour's own example of it
+// (src/tour/examples.json) is the gate as it is drawn now, with no Ultracode and no fast mode either.
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { AGENT_EFFORTS, agentEffort } from '../../src/chat/ModelLine.tsx'
 import { DEFAULT_ON, PLAN_MODE_LINE, StartGate, modeLine, noModuleLine, restoreOf, startBlocked, startBody, startGateOpen, startGateShown, startedChat } from '../../src/chat/StartGate.tsx'
 import { UNFENCED_LINE } from '../../src/shell/UnfencedBanner.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
@@ -116,6 +121,46 @@ describe('the Start gate', () => {
     await click(startButton(el))
     expect(sent[0].body).toEqual({ deck: true, views: false, critique: true, report: true, model: 'claude-sonnet-5', effort: 'medium', text: 'the moderators' })
   })
+
+  test('a stored ultracode, a mode of main only, reads as xhigh, with no fast mode, and Start sends xhigh', async () => {
+    expect(agentEffort('ultracode')).toBe('xhigh')
+    expect(agentEffort('max')).toBe('max')
+    expect(agentEffort(undefined)).toBeNull()
+    const el = await mount(<StartGate ws="mini" model="claude-opus-5-5[1m]" effort="ultracode" />)
+    await settle()
+    expect(el.querySelector('button[aria-label="Effort for the orientation"]')?.textContent).toBe('xhigh')
+    expect(el.textContent).not.toMatch(/ultracode/i)
+    expect(el.querySelector('.fast-bolt, [data-fast]')).toBeNull()
+    await click(startButton(el))
+    expect(sent[0].body).toEqual({ deck: true, views: true, critique: false, report: true, model: 'claude-opus-5-5[1m]', effort: 'xhigh' })
+    // a start refused before 0.6.0 may name ultracode as its effort
+    expect(restoreOf({ status: 'refused', query: '', passes: [], model: 'claude-opus-5-5[1m]', effort: 'ultracode' })?.effort).toBe('xhigh')
+  })
+})
+
+describe("the tour's example of the gate", () => {
+  const snap = (JSON.parse(readFileSync(path.resolve(__dirname, '../../src/tour/examples.json'), 'utf8')) as Record<string, string>).gate
+  /** Each element of a tree as `tag.class class`, in document order: what the gate is drawn with, not its text. */
+  const shape = (root: Element) => [root, ...root.querySelectorAll('*')].map((e) => `${e.tagName.toLowerCase()}.${[...e.classList].join(' ')}`)
+
+  test('is the gate as StartGate draws it now, its options closed: the same elements with the same classes', async () => {
+    const el = await mount(<StartGate ws="mini" model="claude-opus-5-5[1m]" effort="xhigh" onSkip={() => undefined} />)
+    await settle()
+    const own = el.querySelector('.chat-gate')!
+    const box = document.createElement('div')
+    box.innerHTML = snap
+    expect(shape(box.firstElementChild!)).toEqual(shape(own))
+  })
+
+  test("offers no Ultracode and no fast mode: its effort is one of the agents' levels", () => {
+    const box = document.createElement('div')
+    box.innerHTML = snap
+    expect(snap).not.toMatch(/ultracode|fast/i)
+    expect(box.querySelector('.fast-bolt, .model-line-fast, [data-fast]')).toBeNull()
+    const effort = box.querySelector('.model-line-effort')
+    expect(AGENT_EFFORTS).toContain(effort?.textContent)
+    expect(AGENT_EFFORTS).toContain(effort?.getAttribute('data-effort'))
+  })
 })
 
 describe('its rules', () => {
@@ -139,6 +184,14 @@ describe('its rules', () => {
     expect(startGateShown({ ...base, again: true })).toBe(true)
     expect(startGateShown({ ...base, again: true, started: true })).toBe(false)
     expect(startGateShown({ ...base, again: true, main: false })).toBe(false)
+  })
+
+  test('while the product tour runs main draws no gate, so its example is the only Start card and no other step shows one', () => {
+    const open = { main: true, skipped: false, started: false, loading: false, error: null, orientation: null, orientChats: 0 }
+    expect(startGateShown(open)).toBe(true)
+    expect(startGateShown({ ...open, tour: true })).toBe(false)
+    expect(startGateShown({ ...open, orientation: 'refused', orientChats: 1, tour: true })).toBe(false)
+    expect(startGateShown({ ...open, again: true, tour: true })).toBe(false)
   })
 
   test("the body leaves out what is not known, and the mode line names Claude Code's modes", () => {

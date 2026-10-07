@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 // The card of one of thimble's agents run as a subagent of main (src/chat/AgentCard.tsx, src/chat/subagent.ts): its
-// header names the model and effort its run used; the orientation waiting for its critic says so; a run main's quit
-// stopped says so, with Write again on a writer's card and no Resume anywhere; the terminal is named as Claude Code
-// shows the agent (↓ while it runs, /tasks once it finished); an orientation of an earlier session or version cannot
-// take a message here, and the composer says how to continue it.
+// header names the model and effort its run used, its title at the card's edge while the card has nothing to open; the
+// orientation waiting for its critic says so; a run main's quit stopped says so, with Write again on a writer's card
+// and no Resume anywhere; no card says where the terminal shows the agent, in any state; an orientation of an earlier
+// session or version cannot take a message here, and the composer says how to continue it.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { AgentCard } from '../../src/chat/AgentCard.tsx'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
-import { STOPPED_CONTINUE_LINE, continueOf, continueText, runValues, stoppedLine, terminalLine, valuesText } from '../../src/chat/subagent.ts'
+import { STOPPED_CONTINUE_LINE, continueOf, continueText, runValues, stoppedLine, valuesText } from '../../src/chat/subagent.ts'
 import type { ChatMeta, ChatRecord } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -29,10 +29,10 @@ afterEach(() => {
 const meta = (extra: Partial<ChatMeta>): ChatMeta =>
   ({ id: 'o1', kind: 'agent', role: 'orient', title: 'Orientation', created_at: '2026-10-06T10:00:00Z', parent: 'main', anchor: null, anchor_text: null, model: null, effort: null, group: null, status: 'running', route: 'subagent', agent_id: 'ag1', agent_type: 'thimble:orientation', values: { model: 'claude-opus-5-5[1m]', effort: 'max' }, session: 's1', sessions: ['s1'], ...extra }) as ChatMeta
 const records: ChatRecord[] = [{ type: 'user', text: 'Orient on the moderators.' }]
-const card = (m: ChatMeta, main: Partial<ChatMeta> | null = null) =>
+const card = (m: ChatMeta, main: Partial<ChatMeta> | null = null, briefAbove = false) =>
   mount(
     <ThreadsContext.Provider value={{ labels: new Map(), main: main as ChatMeta | null }}>
-      <AgentCard ws="mini" chat={m.id} role={m.role} title={m.title} log={{ meta: m, records, error: null }} />
+      <AgentCard ws="mini" chat={m.id} role={m.role} title={m.title} log={{ meta: m, records, error: null }} briefAbove={briefAbove} />
     </ThreadsContext.Provider>,
   )
 
@@ -41,11 +41,6 @@ describe('the words', () => {
     expect(valuesText(runValues(meta({})))).toBe('Opus 5.5 · max')
     expect(valuesText(runValues(meta({ run: 1, ran: { '1': { model: 'claude-sonnet-5', effort: 'high' } } })))).toBe('Sonnet 5 · high')
     expect(valuesText({ model: 'claude-haiku-4-5-20251001', effort: '' })).toBe('Haiku 4.5')
-  })
-
-  test('the terminal: ↓ while it runs, /tasks once it finished', () => {
-    expect(terminalLine(meta({}), true)).toBe('In your terminal: ↓ to thimble:orientation in the agent tray, then Enter.')
-    expect(terminalLine(meta({}), false)).toBe('In your terminal: /tasks, then Enter on thimble:orientation.')
   })
 
   test("a stop by main's quit, and an orientation of an earlier session or version", () => {
@@ -93,6 +88,31 @@ describe('the card', () => {
     expect(posted).toEqual([['/api/ws/mini/subagents/again', { request: 'r9' }]])
     const orient = await card(meta({ status: 'stopped', stopped_by: 'quit' }))
     expect(orient.querySelector('.chat-task-again')).toBeNull()
-    expect(orient.textContent).toContain('In your terminal: /tasks, then Enter on thimble:orientation.')
+  })
+
+  test('says nothing of where the terminal shows the agent, running, finished or stopped, in main or in its thread', async () => {
+    const states: Partial<ChatMeta>[] = [{}, { status: 'done' }, { status: 'stopped', stopped_by: 'quit' }, { status: 'stopped', stopped_by: 'analyst' }, { status: 'stopped', stopped_by: 'user' }]
+    for (const extra of states)
+      for (const above of [false, true]) {
+        const el = await card(meta(extra), { attached: { session: 's1', cwd: '/c', since: '' } }, above)
+        expect(el.textContent, JSON.stringify(extra)).not.toMatch(/In your terminal|agent tray|\/tasks/)
+        expect(el.querySelector('.chat-sub-terminal')).toBeNull()
+      }
+    // a running card with nothing else to say has no empty row under its head
+    const running = await card(meta({}), null, true)
+    expect(running.querySelector('.toolcard-chips, .chat-sub-notes')).toBeNull()
+  })
+
+  test("the title starts at the card's edge while the card has nothing to open, behind the chevron once it has", async () => {
+    // in its own thread the brief shows above the card, so a run with no steps yet has nothing to open
+    const bare = await card(meta({}), null, true)
+    expect(bare.querySelector('.toolcard-head')?.getAttribute('role')).toBeNull()
+    expect(bare.querySelector('.toolcard-caret')).toBeNull()
+    expect(bare.querySelector('.toolcard-head > .chat-task-title, .toolcard-head > .toolcard-title')).not.toBeNull()
+    expect(bare.querySelector('.toolcard-head')?.firstElementChild?.classList.contains('toolcard-title')).toBe(true)
+    // in main the brief is behind the chevron
+    const withBrief = await card(meta({}))
+    expect(withBrief.querySelector('.toolcard-head')?.firstElementChild?.classList.contains('toolcard-caret')).toBe(true)
+    expect(withBrief.querySelector('.toolcard-caret svg')).not.toBeNull()
   })
 })

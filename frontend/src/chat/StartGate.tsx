@@ -3,10 +3,11 @@
 // options opens start_orientation's four switches (Write Orientation deck, Propose views, Critique and revise, the one
 // off by default, Generate report). The field's text is the request (the focus) and may stay empty; its model line
 // (ModelLine) picks the run's model (a menu of lib/models modelChoices) and effort (Claude Code's levels, none for a
-// model that runs with none), which start at Settings' orientation row and apply to this run only. One line under it
-// says how it runs: as a subagent of the analyst's Claude Code session, in that session's permission mode. Start is a
-// click: the server starts the orientation through thimble's plugin with no turn of main (POST /ws/{c}/start), and the
-// answer says whether it started. Start is off, with the reason on that line, while thimble's hooks module is not
+// model that runs with none; a stored ultracode reads as xhigh), which start at Settings' orientation row and apply to
+// this run only, with no fast mode: thimble's agents run on exactly the model and effort Start or Settings name. One
+// line under it says how it runs: as a subagent of the analyst's Claude Code session, in that session's permission
+// mode. Start is a click: the server starts the orientation through thimble's plugin with no turn of main (POST
+// /ws/{c}/start), and the answer says whether it started. Start is off, with the reason on that line, while thimble's hooks module is not
 // running in main's session (main's meta `module: false`), and with the plain-`claude` warning
 // while main is a session `thimble` did not start (`launched: false`), whose module stays idle for that reason, and in
 // plan mode, which thimble's module reports within seconds of a shift+tab while main is idle (the server's
@@ -22,7 +23,7 @@ import { track } from '../lib/telemetry'
 import type { ChatMeta, OrientPass, OrientRun, Settings, StartAnswer, StartBody } from '../lib/types'
 import { toastText } from '../shell/Toasts'
 import { unfencedLine } from '../shell/UnfencedBanner'
-import { AGENT_EFFORTS, ModelLine } from './ModelLine'
+import { AGENT_EFFORTS, ModelLine, agentEffort } from './ModelLine'
 
 export const PASSES: { id: OrientPass; label: string }[] = [
   { id: 'final', label: 'Write Orientation deck' },
@@ -51,11 +52,12 @@ export function startGateOpen(orientation: string | null | undefined, orientChat
 }
 
 /** Whether main's chat shows the gate in place of its composer: main is shown and loaded, the analyst did not press
- * Start in this tab, and either the analyst asked for a new orientation (`again`: New orientation where the latest one
- * cannot be continued) or, not having skipped it, the gate is open. Whether main is running plays no part: Start takes
- * no turn of main. Pure. */
-export function startGateShown(s: { main: boolean; skipped: boolean; started: boolean; loading: boolean; error: unknown; orientation: string | null | undefined; orientChats: number; again?: boolean }): boolean {
-  return s.main && !s.started && !s.loading && !s.error && (!!s.again || (!s.skipped && startGateOpen(s.orientation, s.orientChats)))
+ * Start in this tab, the product tour is not running (`tour`: its orientation step draws its own example in the gate's
+ * place and no other step shows a Start card, lib/touring), and either the analyst asked for a new orientation
+ * (`again`: New orientation where the latest one cannot be continued) or, not having skipped it, the gate is open.
+ * Whether main is running plays no part: Start takes no turn of main. Pure. */
+export function startGateShown(s: { main: boolean; skipped: boolean; started: boolean; loading: boolean; error: unknown; orientation: string | null | undefined; orientChats: number; again?: boolean; tour?: boolean }): boolean {
+  return s.main && !s.started && !s.loading && !s.error && !s.tour && (!!s.again || (!s.skipped && startGateOpen(s.orientation, s.orientChats)))
 }
 
 /** The chat a click start opens: the started agent's (its thread opens on its first steps), else none. Pure. */
@@ -100,7 +102,7 @@ export function restoreOf(run: OrientRun | null | undefined): Restore | null {
     text: run.query ?? '',
     on: { final: passes.includes('final'), views: passes.includes('views'), report: passes.includes('report'), critique: !!run.critique },
     model: run.model ?? null,
-    effort: run.effort ?? null,
+    effort: agentEffort(run.effort),
   }
 }
 
@@ -172,7 +174,7 @@ export function StartGate({ ws, main, model: rowModel, effort: rowEffort, restor
   const [pickedModel, setPickedModel] = useState<string | null>(restore?.model ?? null)
   const [pickedEffort, setPickedEffort] = useState<string | null>(restore?.effort ?? null)
   const model = pickedModel ?? rowModel ?? null
-  const effort = model && !hasEffort(model) ? null : pickedEffort ?? rowEffort ?? null
+  const effort = model && !hasEffort(model) ? null : pickedEffort ?? agentEffort(rowEffort)
   // the model menu's choices: the models the settings name across roles, then the current ones (lib/models)
   const [settings, setSettings] = useState<Settings | null>(null)
   useEffect(() => {

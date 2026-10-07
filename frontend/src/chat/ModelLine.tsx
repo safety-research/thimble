@@ -20,6 +20,10 @@ export const EFFORT_CHOICES: readonly MainEffort[] = ['low', 'medium', 'high', '
  * a mode of main only (cc_settings.EFFORTS). */
 export const AGENT_EFFORTS: readonly OrientEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
+/** A stored effort as an agent's line takes it: Ultracode, a mode of main only, as xhigh, the level it runs at
+ * (config.LEGACY_EFFORTS); nothing as nothing. Pure. */
+export const agentEffort = (e: string | null | undefined): string | null => (e === 'ultracode' ? 'xhigh' : e ?? null)
+
 /** Main's effort when neither the line nor the analyst's settings chose one: the launcher's `--effort` then
  * (cc_settings.MAIN_DEFAULT_EFFORT). */
 export const MAIN_DEFAULT_EFFORT: MainEffort = 'high'
