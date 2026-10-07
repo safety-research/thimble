@@ -517,13 +517,18 @@ def _context(c: str, want: list[str]) -> dict[str, Any]:
     return ctx
 
 
-def own_kernels() -> None:
-    """This process's reader kernels are its own (`term-views`, apart from the shim's), and it starts no spare one
-    beside a slow call: one view is open at a time."""
+@contextlib.contextmanager
+def own_kernels():
+    """While inside, this process's reader kernels are its own (`term-views`, apart from the shim's), and it starts no
+    spare one beside a slow call: one view is open at a time."""
     from . import view_calls  # noqa: PLC0415
 
-    view_calls.KERNEL = KERNEL
-    view_calls.SPARE_AFTER_S = float("inf")
+    was = view_calls.KERNEL, view_calls.SPARE_AFTER_S
+    view_calls.KERNEL, view_calls.SPARE_AFTER_S = KERNEL, float("inf")
+    try:
+        yield
+    finally:
+        view_calls.KERNEL, view_calls.SPARE_AFTER_S = was
 
 
 async def stop_kernels(c: str) -> None:
@@ -560,8 +565,8 @@ async def draw_text(c: str, slug: str, *, cols: int = 120, rows: int = 40, keys:
                     panel: bool = True) -> str:
     """The view `slug` of workspace `c` drawn as text at `cols` × `rows` (the panel's body), as it opens (not on what
     the analyst's last opening kept, and keeping nothing), after `keys` (key names, `click:<words>` for a click on the
-    first hot region whose text holds those words, `wheel:<n>`): what the view checks and the reviewer read, with no
-    Claude Code."""
+    first hot region whose text holds those words, `wheel:<n>`, `text:<words>` for what a field that takes typing
+    holds): what the view checks and the reviewer read, with no Claude Code."""
     from . import views  # noqa: PLC0415
 
     views._bind_loop()
@@ -593,6 +598,8 @@ def _event_of(k: str, frame: dict[str, Any]) -> dict[str, Any] | None:
         return None
     if k.startswith("wheel:"):
         return {"t": "wheel", "by": int(k[6:] or 0)}
+    if k.startswith("text:"):
+        return {"t": "text", "value": k[5:]}
     return {"t": "key", "key": {"enter": "return", " ": "space"}.get(k, k)}
 
 
@@ -619,20 +626,31 @@ class Host:
         self.say({**msg, "id": pid})
 
     async def serve(self) -> None:
+        with own_kernels():
+            await self._serve()
+
+    async def _serve(self) -> None:
         from . import views  # noqa: PLC0415
 
-        own_kernels()
         views._bind_loop()
         self.dir = _short_tmp()
         os.chmod(self.dir, 0o700)
         sock = self.dir / "s"
         server = await asyncio.start_unix_server(self._conn, path=str(sock), limit=LINE_MAX)
         os.chmod(sock, 0o600)
+        # thimble-term ends the host with the session (or a reload of its module): the programs, the kernels and the
+        # socket's folder go with it
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+                loop.add_signal_handler(sig, stop.set)
         self.say({"t": "ready", "socket": str(sock), "token": self.token, "pid": os.getpid()})
         try:
             async with server:
-                while True:
-                    await asyncio.sleep(1.0)
+                while not stop.is_set():
+                    with contextlib.suppress(asyncio.TimeoutError):
+                        await asyncio.wait_for(stop.wait(), 1.0)
                     if os.getppid() != self.parent:
                         break
                     for p in list(self.programs.values()):
@@ -699,7 +717,7 @@ class Host:
             raise TermViewError("the view is not open")
         if path == "/event":
             ev = req.get("event")
-            if not isinstance(ev, dict) or ev.get("t") not in ("resize", "key", "click", "drag", "wheel", "open"):
+            if not isinstance(ev, dict) or ev.get("t") not in ("resize", "key", "text", "click", "drag", "wheel", "open"):
                 raise TermViewError("no such event")
             if ev.get("t") == "open":
                 from . import views  # noqa: PLC0415
@@ -752,9 +770,9 @@ def main(argv: list[str]) -> int:
 
 async def _text_main(c: str, slug: str, cols: int, rows: int, keys: list[str], theme: str, ansi: bool,
                      ref: str | None) -> str:
-    own_kernels()
-    try:
-        return await draw_text(c, slug, cols=cols, rows=rows, keys=keys, theme=theme, ansi=ansi, ref=ref)
-    finally:
-        await stop_kernels(c)
+    with own_kernels():
+        try:
+            return await draw_text(c, slug, cols=cols, rows=rows, keys=keys, theme=theme, ansi=ansi, ref=ref)
+        finally:
+            await stop_kernels(c)
 

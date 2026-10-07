@@ -329,6 +329,9 @@ async def test_the_host_serves_thimble_term_over_its_socket_with_its_token(board
     monkeypatch.setattr(term_views, "Program", lambda *a, **k: real(*a, **{**k, "wrap": DRAW_WRAP}))
     host = term_views.Host(CORPUS)
     task = asyncio.ensure_future(host.serve())
+    from app import view_calls
+
+    kernel = view_calls.KERNEL
     try:
         ready = None
         for _ in range(100):
@@ -365,6 +368,7 @@ async def test_the_host_serves_thimble_term_over_its_socket_with_its_token(board
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+    assert view_calls.KERNEL == kernel, "the host's own kernels' name is its own while it serves"
 
 
 # ------------------------------------------------------------------------------------------------------ Timeline
@@ -407,7 +411,7 @@ async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
     assert "02:57:20  alert   fired       monitor     INC-311  payments: database connections at 181 of 200 for 5 min" in body[19]
     if cols == 200:
         assert "Tonight's release train: web 2.31.0 and payments 4.12.0. deploybot starts at 02:00." in body[12]
-    assert lines[-1].strip() == ("↑↓ to choose · Enter to open · / to search · i for incident · c to color by · [ ] to "
+    assert lines[-1].strip() == ("↑↓ to choose · Enter to open · c to color by · / to search · i for incident · [ ] to "
                                  "pan · + - to zoom · a to ask · b to go back · x to close")
 
 

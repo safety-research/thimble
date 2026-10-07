@@ -72,6 +72,7 @@ with a 2-cell margin left of the type area for `❯`. Lines past the rows or the
 | `d.rule()` | a rule across the type area (a panel has two at most, the header's among them) |
 | `d.key(keys, words, run)` | bind keys for this frame, with the words the hint row says after them |
 | `d.sub(...facts)` | facts for the panel's subtitle under the view's name, dim, parted by ` · ` |
+| `d.typing({text, onText, onKey, hints})` | a part takes typing: the panel's field holds `text` and sends each change to `onText` |
 | `d.inner(indent)`, `d.put(inner)` | a drawing `indent` cells in, put in at the current row (a row's details at A2) |
 | `r.add(text, style, {on, tip, drag, row, max})` | text in a style; `on(x)` makes it a control, `tip` the words the pointer shows under it |
 | `r.gap(n)`, `r.at(col)`, `r.right(text, style)` | space, a column, text against R |
@@ -113,7 +114,7 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
   runs and its records are a step away in every view that uses it.
 - A chip's tip says what its value means: the field's `meanings`, a declared value's `meaning`, a label's value.
 - Reset, against R, shows while a value is off, a range is zoomed, a search or a choice is set, or the page's
-  `onReset({changed})` says so, and puts them back.
+  `onReset({changed})` says so, and puts them back (`r`).
 
 | option | what it is |
 |---|---|
@@ -166,8 +167,9 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 
 ## Search and choices
 
-`search({words, onChange})` adds `/ search` to a row: `/` or a click starts typing, and every key then goes to it
-(Enter ends, Backspace deletes). `choice({title, all, key, values, onChange})` adds `incident  all` to a row, whose menu
+`search({words, onChange})` adds `/ search` to a row: `/` or a click starts typing, and the panel's field then holds
+its text, each change of which reaches the search whole (Enter ends). A part of the program's own takes typing with
+`d.typing({text, onText, onKey})`. `choice({title, all, key, values, onChange})` adds `incident  all` to a row, whose menu
 picks one of its values.
 
 ## Acts
@@ -184,13 +186,13 @@ queries; thimble-term starts it the first time a view opens and talks to it over
 | from thimble to the program | |
 |---|---|
 | `init {source, cols, rows, theme, view, state, labels, open}` | the program's source and what it opens on |
-| `resize {cols, rows}`, `key {key}`, `click {i, seq, x}`, `drag {i, seq, x0, x1}`, `wheel {by}` | the panel's events, each with its number `n` |
+| `resize {cols, rows}`, `key {key}`, `text {value}`, `click {i, seq, x}`, `drag {i, seq, x0, x1}`, `wheel {by}` | the panel's events, each with its number `n`; `text` the whole text of the field that takes typing |
 | `answer {id, data \| error}` | a query's answer |
 | `labels {labels, filter}`, `open {place}` | the labels changed; a citation opened the view at a place |
 
 | from the program to thimble | |
 |---|---|
-| `frame {seq, ack, lines, hits, hints, hintKeys, keys, typing, sub}` | what to draw: rows of runs, hot regions, the keys bound and the hint row; `ack` the last event it answers |
+| `frame {seq, ack, lines, hits, hints, hintKeys, keys, typing, field, sub}` | what to draw: rows of runs, hot regions, the keys bound and the hint row, the text of a field that takes typing; `ack` the last event it answers |
 | `query {id, q, labels}`, `cancel {id}` | a reader query, and one dropped |
 | `act {n, act}` | a place, a thread or a label's panel, made during event `n` |
 | `state {state}`, `error {message}`, `log {text}` | what the view keeps, an error, a line it printed |
@@ -206,7 +208,7 @@ socket.
 `thimble view text <slug> --cwd <folder> --width 120 [--height 40] [--keys 'down return'] [--open <ref>] [--ansi]`
 draws a view as thimble-term's panel shows it, with no Claude Code, as it opens (keeping nothing): what the view
 checks and the reviewer read. `--keys` takes key names, `click:<words>` for a click on the region that shows those
-words, and `wheel:<n>`.
+words, `wheel:<n>`, and `text:<words>` for what a field that takes typing holds.
 
 ```
   / search events  incident  all  Color by  Service  ● payments 79  ● web 45  ● passes 16  ● bookings-db 6  +1

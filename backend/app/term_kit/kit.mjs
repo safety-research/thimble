@@ -344,14 +344,16 @@ export class Drawing {
 
   /** Bind keys (`up`, `down`, `return`, `space`, `backspace` or one character each) to `run(key)`, with the words the
    *  hint row says after them (`to choose`); `strong` keeps them from a later binding of the same key (an open menu's
-   *  ↑↓). Bound for this frame only: a part binds its keys as it draws, so the hints name what is drawn. */
-  key(keys, words, run, strong = false) {
+   *  ↑↓); `rank` orders the view's own keys in the hint row (Color by's is 0, others 1), which the panel cuts from its
+   *  end when it is too long. Bound for this frame only: a part binds its keys as it draws, so the hints name what is
+   *  drawn. */
+  key(keys, words, run, strong = false, rank = 1) {
     const ks = (Array.isArray(keys) ? keys : [keys]).map(checkKey)
     const taken = new Set(this.binds.filter((b) => b.strong).flatMap((b) => b.keys))
     const mine = ks.filter((k) => !taken.has(k))
     if (!mine.length) return
     for (const b of this.binds) b.keys = b.keys.filter((k) => !mine.includes(k))
-    this.binds.push({ keys: mine, words: words ? String(words) : '', run, strong })
+    this.binds.push({ keys: mine, words: words ? String(words) : '', run, strong, rank })
   }
 
   /** Facts for the panel's subtitle under the view's name, dim, parted by ` · `. */
@@ -359,11 +361,13 @@ export class Drawing {
     for (const f of facts.flat()) if (f !== null && f !== undefined && f !== '') this.facts.push(String(f))
   }
 
-  /** While a part takes typing (a search field), every character, Space, Backspace and Enter go to `onKey`. */
-  typing(onKey, hints = ['Enter to finish', 'Backspace to delete']) {
+  /** While a part takes typing (a search field): the panel's field holds `text` and sends each change of it whole to
+   *  `onText(text)`, as the analyst edits it there; Enter goes to `onKey('return')`, and a key sent one at a time (a
+   *  character, Space, Backspace) to `onKey` too. */
+  typing(o = {}) {
     let root = this
     while (root.parent) root = root.parent
-    root.typer = { onKey, hints }
+    root.typer = { onKey: o.onKey || (() => {}), onText: o.onText || null, text: String(o.text ?? ''), hints: o.hints || ['Enter to finish'] }
   }
 
   /** A drawing `cols` wide whose lines stand `indent` cells in from this one's edge (a row's details at A2), to be
@@ -550,7 +554,7 @@ export function frame() {
   state.hits.set(seq, hits)
   for (const k of [...state.hits.keys()]) if (k < seq - 4) state.hits.delete(k)
   const keys = [...new Set(state.binds.flatMap((b) => b.keys))]
-  const shownBinds = d.typer ? [] : [...state.binds].sort((a, b) => keyOrder(a.keys) - keyOrder(b.keys)).filter((b) => b.words)
+  const shownBinds = d.typer ? [] : [...state.binds].sort((a, b) => keyOrder(a.keys) - keyOrder(b.keys) || a.rank - b.rank).filter((b) => b.words)
   const hints = d.typer ? d.typer.hints.slice() : shownBinds.map((b) => `${keyWords(b.keys)} ${b.words}`)
   const out = {
     seq,
@@ -563,6 +567,8 @@ export function frame() {
     hintKeys: d.typer ? d.typer.hints.map(() => []) : shownBinds.map((b) => b.keys.slice()),
     keys,
     typing: Boolean(d.typer),
+    // the text of the field that takes typing, which the panel's field holds while it does
+    field: d.typer ? { text: d.typer.text } : null,
     sub: [...new Set(d.facts)],
   }
   if (state.textMode) out.text = frameText(out, { ansi: state.textMode === 'ansi', cols: state.cols })
@@ -587,7 +593,7 @@ function errorFrame(why) {
   // in red, at most three rows: the error and where in view.term.js it came from
   const rows = wrap(`the view could not be drawn: ${why}`, state.cols - 2, Math.min(3, state.rows))
   const lines = rows.map((r, i) => merged([{ s: '  ' }, { s: i ? '  ' : '× ', fg: COLORS.problem }, { s: r, fg: COLORS.problem }]))
-  const out = { seq, ack: state.ack, lines, hits: [], hints: [], hintKeys: [], keys: [], typing: false, sub: [], error: why }
+  const out = { seq, ack: state.ack, lines, hits: [], hints: [], hintKeys: [], keys: [], typing: false, field: null, sub: [], error: why }
   if (state.textMode) out.text = frameText(out, { ansi: state.textMode === 'ansi', cols: state.cols })
   return out
 }
@@ -742,6 +748,10 @@ export function handle(msg) {
       })
       break
     }
+    case 'text':
+      // the panel's field changed: its whole text, as the analyst edited it
+      if (state.typer && state.typer.onText) gesture(msg.n, () => state.typer.onText(String(msg.value ?? '').slice(0, 2000)))
+      break
     case 'wheel':
       for (const fn of state.wheelFns) fn(Number(msg.by) || 0)
       break
@@ -849,7 +859,7 @@ function drawMenu(d, owner, items, onPick, closeKey, pickWords) {
   }
   d.key(['up', 'down'], 'to choose', (k) => step(k === 'up' ? -1 : 1), true)
   d.key('return', pickWords, () => pick(m.pick), true)
-  if (closeKey) d.key(closeKey, 'to close', () => toggleMenu(owner), true)
+  if (closeKey) d.key(closeKey, 'to close', () => toggleMenu(owner), true, 0)
 }
 
 // ------------------------------------------------------------------------------------------------ Color by
@@ -1182,8 +1192,11 @@ export function colorBy(opts = {}) {
       shown++
     }
     if (shown < all.length) r.gap().add(`+${all.length - shown}`, { d: true }, { on: () => toggleMenu(api, menuItems().findIndex((it) => it.key === c.choice)), tip: `${plural(all.length - shown, 'more value')}: open Color by` })
-    if (changed()) r.right('reset', {}, { on: () => reset(), tip: 'the view as it opens: every value on, the whole time span' })
-    r.d.key('c', 'to color by', () => toggleMenu(api, menuItems().findIndex((it) => it.key === c.choice)))
+    if (changed()) {
+      r.right('reset', {}, { on: () => reset(), tip: 'the view as it opens: every value on, the whole time span' })
+      r.d.key('r', 'to reset', () => reset(), false, 2)
+    }
+    r.d.key('c', 'to color by', () => toggleMenu(api, menuItems().findIndex((it) => it.key === c.choice)), false, 0)
     r.menus.push((d) => drawMenu(d, api, menuItems(), (it) => it && api.choose(it.key === 'off' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'c', 'to color by'))
   }
 
@@ -1788,8 +1801,8 @@ export function details(d, o = {}) {
 // ------------------------------------------------------------------------------------------------ search and choices
 
 /**
- * A search field in a row: `/ search` until it is used; `/` or a click starts typing (every character goes to it, Enter
- * ends, Backspace deletes, Backspace on nothing ends); onChange(text) after each change.
+ * A search field in a row: `/ search` until it is used; `/` or a click starts typing, which the panel's field takes (each
+ * change of its text reaches the search whole; Enter ends); onChange(text) after each change.
  */
 export function search(opts = {}) {
   const s = { text: '', typing: false }
@@ -1821,14 +1834,19 @@ export function search(opts = {}) {
       else r.add(words, { d: true }, { on: start, tip: 'search: type, then Enter' })
       if (s.typing) {
         r.add(' ', { inv: true })
-        r.d.typing((k) => {
-          if (k === 'return') s.typing = false
-          else if (k === 'backspace') {
-            if (!s.text) s.typing = false
-            else set([...s.text].slice(0, -1).join(''))
-          } else if (k.length === 1) set(s.text + k)
-          redraw()
-        }, ['Enter to finish', 'Backspace to delete'])
+        r.d.typing({
+          text: s.text,
+          onText: (t) => set(t),
+          onKey: (k) => {
+            if (k === 'return') s.typing = false
+            else if (k === 'backspace') {
+              if (!s.text) s.typing = false
+              else set([...s.text].slice(0, -1).join(''))
+            } else if (k.length === 1) set(s.text + k)
+            redraw()
+          },
+          hints: ['Enter to finish'],
+        })
       } else r.d.key('/', 'to search', start)
       return r
     },
@@ -1870,7 +1888,7 @@ export function choice(opts = {}) {
       const shown = items().find((it) => it.v === s.value)
       r.add(shown ? shown.name : all, {}, { on: open, tip: opts.tip || `choose ${opts.title || 'one'}` })
       if (opts.key) r.d.key(opts.key, `for ${opts.title || 'the choice'}`, open)
-      r.menus.push((d) => drawMenu(d, api, items(), (it) => it && api.set(it.v), opts.key || null, 'to choose it'))
+      r.menus.push((d) => drawMenu(d, api, items(), (it) => it && api.set(it.v), opts.key || null, 'to select'))
       return r
     },
   }

@@ -236,7 +236,7 @@ async def test_state_gives_what_the_routes_give(term):
         {"slug": "gone", "name": "Gone", "status": "dropped", "ts": "2026-10-07T01:00:00Z", "claims": ["board.jsonl"]},
     ])
     home = await local.state(CORPUS, "home")
-    assert home["views"] == [{"slug": "edit-bursts", "name": "Edit Bursts", "status": "building", "ts": "2026-10-07T01:00:00Z", "files": ["agents/*.jsonl"]}]
+    assert home["views"] == [{"slug": "edit-bursts", "name": "Edit Bursts", "status": "building", "ts": "2026-10-07T01:00:00Z", "files": ["agents/*.jsonl"], "term": False}]
     cards = await local.state(CORPUS, "cards", ["--since", "2000-01-01"])
     assert {c["title"] for c in cards["cells"]} >= {"Posts?"} and cards["groups"]
     assert (await local.state(CORPUS, "cards", ["--since", "2999-01-01"]))["cells"] == []

@@ -385,7 +385,7 @@ describe('the list', () => {
 })
 
 describe('search and choices', () => {
-  test('/ starts typing: every character goes to the field, Backspace deletes, Enter ends; the hint row says so', async () => {
+  test('/ starts typing: the panel\'s field holds the text and sends each change whole; a key sent alone types too; Enter ends', async () => {
     const said: string[] = []
     const q = kit.search({ onChange: (t: string) => said.push(t) })
     kit.draw((d: any) => {
@@ -398,7 +398,15 @@ describe('search and choices', () => {
     expect(last().hints).toEqual(['/ to search'])
     await key('/')
     expect(last().typing).toBe(true)
-    expect(last().hints).toEqual(['Enter to finish', 'Backspace to delete'])
+    expect(last().field).toEqual({ text: '' })
+    expect(last().hints).toEqual(['Enter to finish'])
+    kit.handle({ t: 'text', value: 'refund', n: ++n })
+    await tick()
+    expect(q.text).toBe('refund')
+    expect(last().field).toEqual({ text: 'refund' })
+    expect(said.at(-1)).toBe('refund')
+    kit.handle({ t: 'text', value: '', n: ++n })
+    await tick()
     for (const k of ['d', 'b', 'x', 'space', 'q']) await key(k)
     expect(q.text).toBe('dbx q')
     await key('backspace')
