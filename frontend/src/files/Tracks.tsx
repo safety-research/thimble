@@ -15,17 +15,17 @@
 // their first lines), as a video scrubber's hover shows its frame, without scrolling. A jump of the reader (a click,
 // the find) makes the tracks glide to its new place.
 //
-// The zoomed track, at the outer edge, shows only on a file ZOOM_AT times what the reader shows, where the overview no
-// longer tells its records apart (it goes again below ZOOM_OFF). It magnifies the frame: the stretch of the reader
-// around what it shows, larger, each record a block of its height in its color, grey with Color by off, past what the
-// reader shows faded. What the reader shows lies under a lens (a raised box of the paper, framed), and two lines join
-// the frame's top and bottom on the overview to the lens's, so the lens reads as the frame magnified. The lens stands
-// as far down the zoomed track as the frame stands down the overview (both as a scrollbar's thumb does), so the two
-// move together: in the middle of the file the lens is in the middle, at its top and end the lens goes to the track's
-// top and end. A drag on the zoomed track scrolls the reader at its scale, as a scrollbar's thumb: the lens follows the
-// pointer over the records, which hold still, and a pixel of the track is a few of the reader; a press off the lens
-// brings the lens's middle there first. Let go, the lens glides back to where the frame puts it. The wheel over either
-// track scrolls the reader.
+// The zoomed track, at the outer edge, shows only on a file ZOOM_AT times what the reader shows on average, where the
+// overview no longer tells its records apart (it goes again below ZOOM_OFF); it neither comes nor goes as the reader
+// scrolls. It magnifies the frame: the stretch of the reader around what it shows, larger, each record a block of its
+// height in its color, grey with Color by off, past what the reader shows faded. What the reader shows lies under a
+// lens (a raised box of the paper, framed), and two lines join the frame's top and bottom on the overview to the
+// lens's, so the lens reads as the frame magnified. The lens stands as far down the zoomed track as the frame stands
+// down the overview (both as a scrollbar's thumb does), so the two move together: in the middle of the file the lens is
+// in the middle, at its top and end the lens goes to the track's top and end. A drag on the zoomed track scrolls the
+// reader at its scale, as a scrollbar's thumb: the lens follows the pointer over the records, which hold still, and a
+// pixel of the track is a few of the reader; a press off the lens brings the lens's middle there first. Let go, the
+// lens glides back to where the frame puts it. The wheel over either track scrolls the reader.
 //
 // The reader publishes where it stands each frame it scrolls (PlaceFeed), and one animation frame moves the frame, the
 // lens, the zoomed track's records and the lines between them, with transforms alone: nothing renders in React while
@@ -142,7 +142,9 @@ export function frameOf(view: { top: number; height: number }, px: number): { to
 
 /** Where the reader stands, as it measures it each frame it moves: the share of the file above its top and the share
  * it shows (as Shown), and px of its body: how far it is scrolled, its height and its content's height, and whether the
- * content holds the file's first record and its last. */
+ * content holds the file's first record and its last. `span` is the share of the file a body's height holds on
+ * average over the records loaded, which tells whether the zoomed track shows: unlike `height` it stays the same as
+ * the reader scrolls past records it hides or records much taller than the rest (`height` when not given). */
 export interface TrackPlace {
   top: number
   height: number
@@ -151,9 +153,10 @@ export interface TrackPlace {
   content: number
   start: boolean
   end: boolean
+  span?: number
 }
 
-const samePlace = (a: TrackPlace, b: TrackPlace) => a.top === b.top && a.height === b.height && a.scroll === b.scroll && a.h === b.h && a.content === b.content && a.start === b.start && a.end === b.end
+const samePlace = (a: TrackPlace, b: TrackPlace) => a.top === b.top && a.height === b.height && a.scroll === b.scroll && a.h === b.h && a.content === b.content && a.start === b.start && a.end === b.end && a.span === b.span
 
 /** A record the reader draws, px of its content. */
 export interface DrawnRecord {
@@ -645,7 +648,10 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
   const calls = useRef({ onSeek, onScrollBy })
   calls.current = { onSeek, onScrollBy }
   // the zoomed track shows only where the overview cannot tell the file's records apart: a file ZOOM_AT times what the
-  // reader shows, until it is less than ZOOM_OFF times (a reader resized, a file grown); with records drawn to zoom
+  // reader shows on average (the place's span), until it is less than ZOOM_OFF times (a reader resized, a file grown);
+  // with records drawn to zoom. Never what the reader shows at this place, which a scroll past a run of records the
+  // view hides, or one record taller than the reader, changes many times over: the track would come and go as the
+  // reader scrolls, and the records reflow at each change of the reader's width.
   const longOf = (h: number, was: boolean) => h <= 1 / (was ? ZOOM_OFF : ZOOM_AT)
   const [long, setLong] = useState(true)
   const long$ = useRef(long)
@@ -777,7 +783,7 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
   useEffect(
     () =>
       feed.on(() => {
-        const want = longOf(feed.place.height, long$.current)
+        const want = longOf(feed.place.span ?? feed.place.height, long$.current)
         if (want !== long$.current) setLong(want)
         // the place measured now holds every scroll the zoomed track asked for; drawn in the frame the reader scrolled in
         m.current.adj = 0

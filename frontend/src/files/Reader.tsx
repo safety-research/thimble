@@ -844,7 +844,9 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     const next =
       (total ? shownIn(el, total) : null) ??
       (!total || first == null || last == null ? { top: a, height: b - a, seen: [] } : { top: (first - 1 + a * (last - first + 1)) / total, height: ((b - a) * (last - first + 1)) / total, seen: [] })
-    feed.set({ top: next.top, height: next.height, scroll: el.scrollTop, h: el.clientHeight, content: el.scrollHeight, start: first == null || first <= 1, end: total == null || (last != null && last >= total) })
+    // what a body's height holds of the file on average: its share of the records loaded, as their share of the file
+    const span = total && first != null && last != null ? Math.min(1, (el.clientHeight / el.scrollHeight) * ((last - first + 1) / total)) : next.height
+    feed.set({ top: next.top, height: next.height, scroll: el.scrollTop, h: el.clientHeight, content: el.scrollHeight, start: first == null || first <= 1, end: total == null || (last != null && last >= total), span })
     feed.setRecords(zoomRecordsOf(el))
   }, [total, first, last, feed])
 
