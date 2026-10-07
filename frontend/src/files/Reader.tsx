@@ -39,6 +39,7 @@ import { compact, errMsg, LaneHead, recordExcerpt, targetOf, type ViewDef, type 
 import { messageKeys, nameOf, pick, textOf, timeOf } from './views/transcript'
 import { withoutEscapes } from './views/raw'
 import { pickView, scoreViews, viewByType } from './views/registry'
+import { useDelimited } from './views/table'
 
 const PAGE = 100
 const CAP = 2000
@@ -708,8 +709,10 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const fragment = fragmentIn(targetRef, path)
   const picked = viewByType(only ?? pick)
   const view: ViewDef | undefined = picked && (only || builtins.listed.includes(picked)) ? picked : builtins.auto
-  // the Transcript mode colors its records by Color by and marks the labels on the tracks, with no gutter of lanes
+  // the Transcript and Table modes color their records by Color by and mark the labels on the tracks, with no gutter
+  // of lanes
   const isTranscript = view?.type === 'transcript'
+  const colored = isTranscript || view?.type === 'table'
   const [records, setRecords] = useState<SourceRecord[]>([])
   const [total, setTotal] = useState<number | null>(null)
   // the server estimated `total` (a big file whose line index is being built): it is asked for again until it is exact,
@@ -766,10 +769,10 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     setJumpLine(null)
     setFindRef(null)
   }, [targetRef, setJumpLine])
-  // every label over files that is on has a column in each record's gutter (but in the Transcript mode, where the
-  // tracks mark them); a label over files marks each record of the file with the file's value
+  // every label over files that is on has a column in each record's gutter (but in the Transcript and Table modes,
+  // where the tracks mark them); a label over files marks each record of the file with the file's value
   const lanes = labels.on
-  const gutterLanes = isTranscript ? NO_LANES : lanes
+  const gutterLanes = colored ? NO_LANES : lanes
   const fileOf = useCallback((id: string) => labels.presence.get(id)?.[path], [labels.presence, path])
   const readerLabels = useReaderLabels(workspace, path, on, gutterLanes, labels.focus, fileOf)
   const tags = useMemo(() => laneTags(gutterLanes), [gutterLanes])
@@ -1191,12 +1194,14 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const rulerCols = useMemo(() => (found && found.total && total ? [...columns, findColumn(found.lines, total, findText)] : columns), [columns, found, total, findText])
 
   // ---- Color by and the tracks
-  const color = useColorBy(workspace, path, isTranscript && !binary && !isDatabase, labels, records, readerLabels.rows, total)
+  // a CSV or TSV file's records as the Table mode reads them, by its first line's names
+  const colorRecords = useDelimited(workspace, colored && !isTranscript ? path : '', records)
+  const color = useColorBy(workspace, path, colored && !binary && !isDatabase, labels, colorRecords, readerLabels.rows, total)
   const colorChoice = color.choice
   // the overview's colors: the chosen key's commonest value per bin, the chosen label's value most records have per
   // bin, else the density
   const paint = useMemo<OverviewPaint>(() => {
-    if (!isTranscript) return { kind: 'none' }
+    if (!colored) return { kind: 'none' }
     if (colorChoice.by === 'key') {
       const k = color.keys?.keys.find((x) => x.key === colorChoice.key)
       if (k) {
@@ -1218,13 +1223,13 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
       if (got) return got
     }
     return color.keys?.bytes.length ? { kind: 'density', bytes: color.keys.bytes } : { kind: 'none' }
-  }, [isTranscript, colorChoice, color.keys, color.off, color.picked, lanes, ruler])
+  }, [colored, colorChoice, color.keys, color.off, color.picked, lanes, ruler])
   // the markers: the find's matches. Each other label that is on and marks the file has a lane of its own beside the
   // choice's, in its own colors, so that one choice is one lane and two labels on are two
   const markers = useMemo(() => rulerCols.filter((c) => c.id === 'find'), [rulerCols])
   const choiceLabel = colorChoice.by === 'label' ? colorChoice.id : null
   const trackLanes = useMemo<TrackLane[]>(() => {
-    if (!isTranscript) return []
+    if (!colored) return []
     const out: TrackLane[] = []
     for (const k of lanes) {
       if (k.id === choiceLabel || marksOf(k) === 'file' || !fileOf(k.id)) continue
@@ -1232,9 +1237,9 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
       if (got) out.push({ id: k.id, name: k.name, paint: got })
     }
     return out
-  }, [isTranscript, lanes, choiceLabel, fileOf, ruler])
+  }, [colored, lanes, choiceLabel, fileOf, ruler])
   const paintName = colorChoice.by === 'key' ? colorChoice.key : colorChoice.by === 'label' ? (lanes.find((k) => k.id === choiceLabel)?.name ?? '') : ''
-  const recordAtLine = useMemo(() => new Map(records.map((r) => [r.line, r])), [records])
+  const recordAtLine = useMemo(() => new Map(colorRecords.map((r) => [r.line, r])), [colorRecords])
   // a record's color on the zoomed track, and its value of the choice for its hover
   const zoomColor = useMemo(() => {
     const names = new Map(color.values.map((v) => [v.id, v.name]))
@@ -1422,7 +1427,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
           <ReaderViewer key={viewer.slug} ws={workspace} view={viewer} path={path} targetRef={fragment != null && accepts(viewer, fragment) ? targetRef : undefined} labels={labels} onRaw={() => onPick('raw')} />
         ) : (
           <>
-            {isTranscript && !binary && !isDatabase && loaded && !noViewReason && (
+            {colored && !binary && !isDatabase && loaded && !noViewReason && (
               <div className="reader-colorbar">
                 <ColorBy choice={color.choice} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={color.values} off={color.off} onChoose={color.choose} onToggle={color.toggle} countsOf={fileOf} onColor={color.recolor} onResetColors={color.resetColors ?? undefined} pickedOf={color.pickedOf} />
               </div>
@@ -1438,7 +1443,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
                     </div>
                   )}
                   {ViewComponent && loaded && !noViewReason && (
-                    <ColorContext.Provider value={isTranscript ? color.colors : null}>
+                    <ColorContext.Provider value={colored ? color.colors : null}>
                       <ViewBoundary key={`${view!.type}|${path}`} viewType={view!.type} onFallback={() => onPick('raw')}>
                         {viewEl}
                       </ViewBoundary>

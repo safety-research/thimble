@@ -1,4 +1,4 @@
-// Color by in Files' Transcript mode: what colors the records' left edge and the reader's tracks (Tracks.tsx). The
+// Color by in Files' Transcript and Table modes: what colors the records' left edge and the reader's tracks (Tracks.tsx). The
 // choice is Off, a key of the records (one of those the server finds naming a kind or a who over the whole file,
 // GET /source/keys, the fields Table view shows), or a label over files that is on. A key's values take the label
 // palette by frequency, in the order new values take its colors (labels.ts LABEL_ORDER: blue, orange, green, gold,

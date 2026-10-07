@@ -1,4 +1,4 @@
-// Color by's state in Files' Transcript mode (colorChoice.ts): the file's keys from the server, the choice and the values
+// Color by's state in Files' Transcript and Table modes (colorChoice.ts): the file's keys from the server, the choice and the values
 // turned off kept per file, the labels that mark the file, each value's chip, and per record loaded its color and
 // whether it is hidden. A label the analyst turns on, here or anywhere in thimble, takes the color, as in a view's Color
 // by; choosing a label that is off turns it on.
