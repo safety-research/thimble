@@ -6,7 +6,8 @@ import { busyWords, cardOfCell, htmlTable, labelCard, linksOf, sortedBars } from
 import type { ThimbleCell } from '../hooks/cell'
 import { cardLayout, cut, placeWords, share } from '../hooks/draw'
 import { CHIP_MAX, chipLabel, citations, clip, cutLine, cutMiddle, dateIn, dateSpans, formatted, itemsRow, labelState, labelStateWords, noteLabelName, noteQuestion, quoted, recordFields, valueIn, width, windowAt } from '../hooks/lib'
-import { plainCites } from '../hooks/cite'
+import { chipName, plainCites } from '../hooks/cite'
+import { targetLabel } from '../hooks/gestures'
 import { crumbsWidth, fitCrumbs } from '../hooks/nav'
 import { hintLines } from '../hooks/chrome'
 import type { BarRow, Cell } from '../hooks/draw'
@@ -310,6 +311,18 @@ test("a place cited with a passage of its line reads as its line; a chip names i
   expect(chip('concept:eb534ca4/yes')).toBe('[ edit purpose · yes ]')
   // a citation with words is its words, a chip or not
   expect(chipLabel({ raw: '[[3|card:c0ffee00#n/all]]', ref: 'card:c0ffee00#n/all', display: '3' })).toBe('3')
+})
+
+test('a thread asked about a chip names its subject by the place in full words, not by the chip', () => {
+  // the ask view's `about` and the thread's title: no tip names the place there (`about [ card ]` said nothing)
+  noteQuestion('c4c4c4c4', 'How many pages does each wiki have?')
+  const t = (raw: string) => targetLabel({ kind: 'citation', ref: raw, text: '' } as never, 60)
+  expect(t('[[card:c4c4c4c4]]')).toBe('card "How many pages does each wiki have?"')
+  expect(t('[[card:c4c4c4c4@out0#L2]]')).toBe('card "How many pages does each wiki have?" output line 2')
+  expect(t('[[collusion-wiki/pages.jsonl#L1]]')).toBe('collusion-wiki/pages.jsonl line 1')
+  expect(chipName({ raw: '[[card:d0d0d0d0]]', ref: 'card:d0d0d0d0', display: null })).toBe('card')
+  // a citation with words keeps its words
+  expect(t('[[3,908|card:c4c4c4c4#pages/dse]]')).toBe('3,908')
 })
 
 test('a chip reads as `[ card ]` in plain words too, as the reply draws it, without brackets main put around it', () => {

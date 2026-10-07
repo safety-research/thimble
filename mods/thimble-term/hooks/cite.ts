@@ -14,9 +14,9 @@
 // - Streaming: a reply's text as the engine shows it while it streams, citations as links and card lines as
 //   placeholders, before the mod draws the finished block.
 import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from '../types'
-import { lineWidth, width } from './draw'
+import { lineWidth, placeWords, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, chipLabel, chipText, chipWords, cid, citations, citeEnd, citeSpans, dayMonth, isChip, linksAsSpans, parseReply, plainLinks, prefix, shownMatches, valueIn, windowAt, withoutOwnParens } from './lib'
+import { EMBED_RE, bareCard, cardWords, chipLabel, chipPlace, chipText, chipWords, cid, citations, citeEnd, citeSpans, dayMonth, isChip, labelRef, linksAsSpans, outputLine, parseReply, plainLinks, prefix, questionOf, reportRef, shownMatches, valueIn, windowAt, withoutOwnParens } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -32,6 +32,19 @@ export type ChipView = { label: string; state: ChipState; mark: string; spin: bo
 /** What a citation's link says: its shown value whole, or a short name of the place for one without a value. */
 export function citeLabel(c: Citation): string {
   return c.display ?? chipLabel(c)
+}
+
+/** A chip's place in full words, where a link with a tip is not drawn (a thread's subject): a card by its question
+ *  (`card "How many pages…"`), a line a card printed (`card "…" output line 1`), a file's line (`events.jsonl line 12`),
+ *  a command's output, a label or a document by its name; the chip's words while that name is not known. */
+export function chipName(c: Citation): string {
+  const named = chipPlace(c)
+  if (named) return named
+  const out = outputLine(c.ref)
+  if (out) return out.words
+  const card = bareCard(c) || /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(c.ref)?.[1] || ''
+  if (card) return questionOf(card) ? cardWords(questionOf(card)) : chipWords(c)
+  return labelRef(c.ref) || reportRef(c.ref) ? chipWords(c) : placeWords(c.ref)
 }
 
 /** The glyph of a citation being worked on: running (SPEC.md, "The visual system", section 5). */

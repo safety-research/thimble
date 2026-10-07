@@ -355,8 +355,9 @@ colored is said under each.
   (`([[card:<id>]])` reads `[ card ]`). A click opens its place as any citation's does (the card, the file at its line,
   the label, the document at its passage); under the pointer it is inverse and its tip names the place in full, then
   its status (`card "How many pages does each wiki have?" · found`, `events.jsonl line 12 · ◌ checking`); a place that
-  does not exist is red. The footer does not count a card's chip. Claude Code's tool rows, which draw no link, name a
-  chip's place in words (`events.jsonl line 12`; a card by its question). A label's link with a value
+  does not exist is red. The footer does not count a card's chip. Claude Code's tool rows, which draw no link, and a thread's
+  subject (`about card "How many pages…"`) name a chip's place in words (`events.jsonl line 12`; a card by its
+  question). A label's link with a value
   (`[33](concept:<id>/yes)`) is neither a chip nor a problem in the footer.
 - A citation is its value in blue, underlined; a value not at its place is red. In a card's takeaway, one cell after
   the value, `◌` while thimble's links check runs, `✓` once it found the value, a red `×` when it found another. The
@@ -564,8 +565,8 @@ colored is said under each.
   two paragraphs. The cards the thread made stand under its answer, each in its frame, as under main's reply.
 - A new thread (one with no question yet): `about <what>` as its dim subtitle, the first sentence of its passage dim on
   one row, then the question's field alone, its placeholder dim. `<what>` is a card by its question (`card "…"`), a
-  citation's words in quotation marks (a value alone, `4579`, as it shows; a chip as it shows,
-  `[ agent-chat.jsonl line 2 ]`), a passage's words in quotation marks, or `this answer` for a whole answer (its footer's `ask about this
+  citation's words in quotation marks (a value alone, `4579`, as it shows; a chip by its place in full words, which
+  no tip names here: `card "How many pages…"`, `agent-chat.jsonl line 2`), a passage's words in quotation marks, or `this answer` for a whole answer (its footer's `ask about this
   answer ›`), which the thread keeps. The field is Claude Code's Input, one row that shows the start of a long question:
   no hook scrolls it to the cursor, and its placeholder is drawn dim with the terminal's reset, which drops the panel's
   background behind it in a light theme.

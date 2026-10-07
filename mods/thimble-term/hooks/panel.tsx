@@ -23,7 +23,7 @@ import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderEle
 import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermVerdict } from '../types'
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
-import { chipLook, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
+import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
 import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { dirOf, fileRef, firstChoice, folderOpen, sortPaths } from './files'
@@ -1358,8 +1358,10 @@ export async function anchorName(cx: Ctx, row: AboutRow | undefined): Promise<st
   }
   const slug = slugOf(row.anchorText)
   const t = (row.title ?? '').trim()
-  // a citation's words in quotation marks; one with no words is titled by its place as the reply shows it (`agent-chat:2`)
-  if (t && t !== slug && !t.startsWith(`${slug}-`)) return t === chipLabel({ raw: `[[${a}]]`, ref: a, display: null }) ? t : subjectWords(t)
+  // a citation's words in quotation marks; a chip by its place in words (`agent-chat.jsonl line 2`), as its thread was
+  // titled (gestures.tsx targetLabel)
+  const chip = { raw: `[[${a}]]`, ref: a, display: null }
+  if (t && t !== slug && !t.startsWith(`${slug}-`)) return t === chipName(chip) || t === chipLabel(chip) ? t : subjectWords(t)
   return /^(?:card|cell):/.test(a) ? placeName(cx, a) : placeWords(a)
 }
 
