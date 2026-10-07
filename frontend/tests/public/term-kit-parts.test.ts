@@ -358,7 +358,12 @@ describe('the side pane', () => {
     await key('<')
     expect(text()[0].indexOf('│')).toBeLessThan(bar)
     expect(kit.__driver.state.kept.side).toEqual({ side: 0.47 })
-    expect(last().hints).toContain('Backspace to close the details')
+    // the pane shows `close`, so the hint row leaves its keys to ?, which lists them
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to close', '? for all keys'])
+    expect(last().keys).toEqual(expect.arrayContaining(['<', '>', 'backspace']))
+    await key('?')
+    expect(text().some((r: string) => /│\s+< >\s+to resize the details\s+│/.test(r))).toBe(true)
+    expect(text().some((r: string) => /│\s+Backspace\s+to close the details\s+│/.test(r))).toBe(true)
     await key('backspace')
     expect(side.isOpen).toBe(false)
     expect(text()[1]).toBe('❯ Grep  r1/explore.jsonl#L2')
@@ -377,22 +382,24 @@ describe('the side pane', () => {
 })
 
 describe('the divider', () => {
-  test('{ } give the overview fewer or more rows, kept per view', async () => {
+  test('the overview has the rows the view gives it, at least min on each side; it binds no key, and a share kept before is not read', async () => {
+    init({ rows: 20, state: { divider: { overview: 0.2 } } })
     const div = kit.divider({})
     let got = 0
+    let want = 10
     kit.draw((d: any) => {
-      got = div.rows(d, 10)
+      got = div.rows(d, want)
       for (let i = 0; i < got; i++) d.line(`lane ${i}`)
     })
     await tick()
     expect(got).toBe(10)
-    expect(last().hints).toContain('{ } to resize the overview')
-    await key('}')
-    expect(got).toBe(12)
-    await key('{')
-    await key('{')
-    expect(got).toBe(8)
-    expect(kit.__driver.state.kept.divider).toEqual({ overview: 0.267 })
+    expect(last().keys).toEqual([])
+    for (const k of ['{', '}']) await key(k)
+    expect(got).toBe(10)
+    want = 30
+    kit.redraw()
+    await tick()
+    expect(got).toBe(17)
   })
 })
 

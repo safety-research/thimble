@@ -88,7 +88,7 @@ width asks, as the worked examples do.
 | `d.line(runs, hits?, margin?)` | a row of runs (a string, a run or a list), with its hot regions |
 | `d.blank()` | a blank row, never two in a row and none at the top |
 | `d.rule()` | a rule across the type area (a panel has two at most, the header's among them) |
-| `d.key(keys, words, run)` | bind keys for this frame, with the words the hint row says after them |
+| `d.key(keys, words, run)` | bind keys for this frame, with the words that name them (in the hint row or `?`'s list) |
 | `d.sub(...facts)` | facts for the panel's subtitle under the view's name, dim, parted by ` · ` |
 | `d.typing({text, onText, onKey, hints})` | a part takes typing: the panel's field holds `text` and sends each change to `onText` |
 | `d.inner(indent)`, `d.put(inner)` | a drawing `indent` cells in, put in at the current row (a row's details at A2) |
@@ -121,12 +121,17 @@ and `clipLine` make and measure runs and lines; `HUES` is how many values of a f
 A view's pane passes on ↑↓, Enter, Space and Backspace (`up`, `down`, `return`, `space`, `backspace`) and a lowercase
 letter, a digit or a sign typed. ←, →, the page keys, Home, End, Tab and Esc reach no element of a pane, so `d.key`
 refuses them, and `b`, `t` and `x` are the panel's own (back, the threads, close). The kit's parts bind `c` (Color by),
-`f` (Filter by), `g` (Rows), `r` (Reset), `a` (ask), `/` (search), `[` `]` `+` `-` (the time range), `{` `}` (the divider),
-`<` `>` and Backspace (the side pane) while they are drawn. The hint row names each key bound in
-the frame with its words, in the panel's order: choosing, Enter, Space, the view's own, then `b to go back · x to close`;
-where it is longer than the panel is wide it wraps, whole hints on each row, and the view's rows are fewer by the rows it
-takes. Nothing else in the view says which key does what. A key works only while its part is drawn, since a part binds its keys
-as it draws.
+`f` (Filter by), `g` (Rows), `r` (Reset), `a` (ask), `/` (search), a choice's own letter, and `<` `>` and Backspace (the
+side pane) while they are drawn. The time range and the divider bind no key: the mouse moves the range.
+
+The hint row is one row: the moves the screen cannot show, `↑↓ to choose · Enter to open`, the first two keys the view
+binds of its own (`n p for the next lane`), `? for all keys`, then `b to go back · x to close`. The top row shows Color
+by, Filter by, Rows and the search as controls a click opens, so the row leaves their keys to `?`, which opens a list of
+every key the frame binds with its words, in a frame over the view's top rows; `?` again, any other key or a click
+closes it. Where the row has no room for every hint it keeps whole hints, the most needed first: ↑↓, Enter, `b`, `?`,
+`x`, then the view's own. Nothing else in the view says which key does what. A key works only while its part is drawn,
+since a part binds its keys as it draws, and every key bound works whether or not the hint row names it. A view that
+binds `?` itself keeps it, and the kit then binds none.
 
 ## Color by
 
@@ -187,13 +192,12 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
   opens on the whole span. A chart over the range leaves out a lane with nothing in a range zoomed in. Under the
   pointer the strip marks its cell, with the cell's time and records in the tip.
 - A click on the strip moves the window there; a drag frames a new range, a drag from inside the window moves it, a drag
-  from its edge moves that edge; `[` `]` pan by a quarter and `+` `-` zoom.
+  from its edge moves that edge; Reset gives back the whole span. It binds no key.
 - `range.data({times, values, span, marks, gap})` gives it the records' times, their Color by values and the incidents or
   other point events; `range.has(t)`, `from`, `to`, `full`, `set(a, b)`, `set(null)`, `fit()` read and set it.
 - `gap` (an option of `timeRange` or of `data`): an empty stretch longer than it, in the units, is a break of 4 cells,
   ` // `, on the strip and on the range's scale, so bursts hours apart (runs, sessions, shifts) share one axis and each
-  keeps its share of the cells. An edge of the range never stays in a break, and `[` `]` `+` `-` move the window on the
-  strip's cells, so it keeps its width across a break.
+  keeps its share of the cells. An edge of the range never stays in a break.
 - `range.scale(cols)` lays the range across a chart's cells: `x(t)`, `t(x)`, `binOf(t)`, `step`, `ticks(gap)`, and
   `broken` and `gaps()` (each break's first cell and the cell after it), with the breaks that fall inside the range.
 - `axis(d, scale, {gutter, legend, marks, onMark})` draws the chart's axis under it, `//` at each break with the date on
@@ -291,8 +295,9 @@ and Reset closes it too. `isOpen`, `key`, `show(key)` and `hide()` read and chan
 ## The divider
 
 `divider(opts)` is the divider between the overview and the list: `div.rows(d, fallback)` gives the overview's rows of
-the rows left, `fallback` until the analyst moved it, and binds `{` `}`, which give the overview fewer or more rows.
-thimble keeps its share per view. Give the lanes those rows (`room`).
+the rows left, `fallback` with at least `min` rows (3) on each side. The browser's divider is a bar a drag moves; the
+panel has no drag across its rows, so here the overview has the rows the view gives it. Give the lanes those rows
+(`room`).
 
 ## The transcript
 
@@ -335,7 +340,7 @@ queries; thimble-term starts it the first time a view opens and talks to it over
 
 | from the program to thimble | |
 |---|---|
-| `frame {seq, ack, lines, hits, hints, hintKeys, keys, typing, field, sub, overflow?, loading?}` | what to draw: rows of runs, hot regions (`cursor` on a chart's, with `tips` per cell), the keys bound and the hint row, the text of a field that takes typing; `ack` the last event it answers; `overflow` `{rows, cols, first}` when the kit cut rows past the rows or wider than the columns; `loading` while a reader query is out (`loading()`) |
+| `frame {seq, ack, lines, hits, hints, hintKeys, keys, typing, field, sub, overflow?, loading?}` | what to draw: rows of runs, hot regions (`cursor` on a chart's, with `tips` per cell), every key bound (`keys`) and the hints the hint row may name (`hints`, each one's keys in `hintKeys`), which the panel fits to one row with its own `b` and `x`, the text of a field that takes typing; `ack` the last event it answers; `overflow` `{rows, cols, first}` when the kit cut rows past the rows or wider than the columns; `loading` while a reader query is out (`loading()`) |
 | `query {id, q, labels}`, `cancel {id}` | a reader query, and one dropped |
 | `act {n, act}` | a place, a thread or a label's panel, made during event `n` |
 | `state {state}`, `error {message}`, `log {text}` | what the view keeps, an error, a line it printed |
@@ -354,8 +359,8 @@ socket.
 `thimble view text <slug> --cwd <folder> --width 120 [--height 40] [--keys 'down return'] [--open <ref>] [--ansi]`
 draws a view as thimble-term's panel shows it, with no Claude Code, as it opens (keeping nothing): what the view
 checks and the reviewer read. `--keys` takes key names, `click:<words>` for a click on the region that shows those
-words, `wheel:<n>`, and `text:<words>` for what a field that takes typing holds. `frameText(frame, {ansi})` draws a
-frame's rows as text in the kit itself.
+words, `drag:<x0>-<x1>` for a drag across those cells of the time range's strip, `wheel:<n>`, and `text:<words>` for
+what a field that takes typing holds. `frameText(frame, {ansi})` draws a frame's rows as text in the kit itself.
 
 ```
   / search events  incident  all  Color by  Service  ● payments 79  ● web 45  ● passes 16  ● bookings-db 6  +1

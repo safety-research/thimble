@@ -375,13 +375,17 @@ async def test_the_host_serves_thimble_term_over_its_socket_with_its_token(board
 
 
 def _split(lines: list[str], head: int, rows: int) -> tuple[list[str], str]:
-    """A panel drawn as text: its body (`rows` rows after `head` rows of header) and its hint row, which wraps to the
-    panel's width, as one string."""
+    """A panel drawn as text: its body (`rows` rows after `head` rows of header) and its hint row, one row."""
     body = lines[head:head + rows]
     assert len(body) == rows
     rest = [x.strip() for x in lines[head + rows:]]
-    assert rest and all(rest), "the hint row's rows follow the body"
-    return body, " · ".join(rest)
+    assert len(rest) == 1 and rest[0], "the hint row, one row, follows the body"
+    return body, rest[0]
+
+
+def _key_list(out: str) -> list[list[str]]:
+    """The list `?` opens, drawn as text: each row's keys and their words."""
+    return [re.split(r"\s{2,}", x.strip(" │")) for x in out.splitlines() if x.startswith("  │")]
 
 
 @pytest.fixture()
@@ -406,7 +410,7 @@ async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
     on Source, then Color by with its chips; the time range's readout and strip, a lane per source, the axis with the
     key's toggle of failed events and the incidents' flags; then what the list shows and how many, its columns'
     headings, and the events by day, each with its time, source, kind, actor, incident and text; its hint row names
-    only keys the pane passes on."""
+    ↑↓, Enter and `?`, which lists the keys of the controls the top row shows."""
     out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=36, wrap=DRAW_WRAP)
     lines = out.splitlines()
     assert lines[0] == "  Timeline"
@@ -426,8 +430,11 @@ async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
     assert "02:57:20  alert   fired        monitor     INC-311   payments: database connections at 181 of 200 for 5 min" in body[22]
     if cols == 200:
         assert "Tonight's release train: web 2.31.0 and payments 4.12.0. deploybot starts at 02:00." in body[15]
-    assert hints == ("↑↓ to choose · Enter to open · c to color by · / to search · f to filter by · g for rows · { } to "
-                     "resize the overview · [ ] to pan · + - to zoom · a to ask · b to go back · x to close")
+    assert hints == "↑↓ to choose · Enter to open · ? for all keys · b to go back · x to close"
+    out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=36, wrap=DRAW_WRAP, keys=["?"], panel=False)
+    assert out.splitlines()[0].startswith("  ╭─ keys ─")
+    assert _key_list(out) == [["↑↓", "to choose"], ["Enter", "to open"], ["c", "to color by"], ["/", "to search"],
+                              ["f", "to filter by"], ["g", "for rows"], ["a", "to ask"]]
 
 
 def _timeline_pane(rows: list[str]) -> list[str]:
@@ -513,8 +520,8 @@ async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     time range's readout and its strip broken where the runs lie hours apart, each run's sessions as a tree of lanes (a
     lead, the subagents it started under it with their guides), the axis with the key of the failed calls, what links
     the lead read to the others, then its transcript under a title that names it and counts its turns: the user's
-    prompt, each tool call on one line, a Task call naming the subagent it started; its hint row names only keys the pane
-    passes on."""
+    prompt, each tool call on one line, a Task call naming the subagent it started; its hint row names ↑↓, Enter, its
+    own n p and `?`."""
     out = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP)
     lines = out.splitlines()
     assert lines[:2] == ["  Linked sessions", "  3 runs · 17 sessions · 352 turns"]
@@ -539,10 +546,7 @@ async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     assert rows[:2] == ["  12 Sep 2026", "❯ 14:02:00  ● user"]
     assert rows[2].strip().startswith("Upgrade invoicer from Brambleway API v2 to v3.")
     assert "  14:03:10  ⎿ Task → survey Find every v2 call site" in rows
-    assert hints.startswith("↑↓ to choose · Enter to open · c to color by · / to search · f to filter by · g for rows")
-    for k in ("{ } to resize the overview", "[ ] to pan", "+ - to zoom", "a to ask", "n p for the next or previous lane",
-              "b to go back · x to close"):
-        assert k in hints, k
+    assert hints == "↑↓ to choose · Enter to open · n p for the next or previous lane · ? for all keys · b to go back · x to close"
 
 
 @needs_node
@@ -571,7 +575,11 @@ async def test_linked_sessions_reads_a_subagent_and_the_session_that_started_it(
                         "auth-headers 14:12:41")
     assert body[at + 1].startswith("  client-port · Run 1 · nested team  40 turns · 14:09:08 – 14:29:35")
     assert re.sub(r"\s*▌*$", "", body[at + 3]) == "❯ 14:09:08  ● lead"
-    assert "u to read lead" in hints
+    # the hint row has room for n p alone of the view's own keys at 120 columns; `?` lists u
+    assert "n p for the next or previous lane" in hints and "u to read lead" not in hints
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, keys=["n", "n", "?"],
+                                     panel=False)
+    assert ["u", "to read lead"] in _key_list(out)
     out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, keys=["n", "n", "u"],
                                      panel=False)
     rows = out.splitlines()
@@ -673,8 +681,7 @@ async def test_repository_draws_what_its_browser_page_shows(repository, cols):
     assert body[8].strip().startswith("opened 09:24 by ash · fixes #1 · approved · merged by its author")
     eleven = next(i for i, x in enumerate(body) if x.startswith("  ● #11  Keep wall-clock"))
     assert body[eleven + 1].strip().startswith("opened 09:50 by cedar · fixes #3 · changes requested · merged by its author")
-    for k in ("↑↓ to choose", "Enter to open", "1 2 3 4 for the tabs", "f to filter by", "c to color by", "/ to search", "a to ask"):
-        assert k in hints, k
+    assert hints == "↑↓ to choose · Enter to open · 1 2 3 4 for the tabs · ? for all keys · b to go back · x to close"
 
 
 @needs_node
@@ -789,8 +796,8 @@ WIDTHS = [47, 92, 140]  # the docked panel at 120 and 200 columns, and a wide on
 async def test_timeline_opens_as_its_browser_page_does_and_reads_at_every_width(timeline):
     """Colored by the label that is on, its values as chips with their counts; Color by's name whole on a row of its own
     where the row has no room, its chips under it where they have none beside it; Filter by's values behind `+N` where
-    they do not fit; list rows cut with …; every key in the hint row, which wraps; a zoomed range's window between
-    `[` `]`."""
+    they do not fit; list rows cut with …; the hint row one row, its most needed hints kept; a range a drag framed has
+    its window between `[` `]`."""
     await _labels_on(timeline, "timeline")
     for cols in WIDTHS:
         out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=34, wrap=DRAW_WRAP)
@@ -800,9 +807,9 @@ async def test_timeline_opens_as_its_browser_page_does_and_reads_at_every_width(
         top = "\n".join(body[:4])
         assert "/ search events  Filter by  Incident" in body[0]
         assert "Color by  Database connections ↗" in top and "● connections 22" in top and "● not marked 176" in top, cols
-        for k in ("c to color by", "/ to search", "f to filter by", "g for rows", "{ } to resize the overview", "[ ] to pan",
-                  "+ - to zoom", "a to ask", "b to go back"):
-            assert k in hints, (cols, k)
+        assert len(hints) <= cols, cols
+        assert hints == ("↑↓ to choose · Enter to open · b to go back" if cols < 60 else
+                         "↑↓ to choose · Enter to open · ? for all keys · b to go back · x to close"), cols
         rows = _list_rows(body)
         assert rows and all(len(x) <= cols for x in rows)
         if cols == 47:
@@ -810,19 +817,23 @@ async def test_timeline_opens_as_its_browser_page_does_and_reads_at_every_width(
             assert body[1].strip() == "Rows  Source"
             assert body[2].strip() == "Color by  Database connections ↗" and body[3].strip() == "● connections 22  ● not marked 176"
             assert rows[0].endswith("Tonight's release…"), "a cut row ends in …"
-    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["+", "+"], panel=False)
+    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["drag:10-30"], panel=False)
     strip = next(x for x in out.splitlines() if "[" in x and "]" in x)
     assert strip.index("[") < strip.index("]")
+    # the signs that zoomed and panned it do nothing now
+    again = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["drag:10-30", "+", "]", "{"],
+                                       panel=False)
+    assert again == out
 
 
 @needs_node
 async def test_timeline_details_and_menu_read_in_a_narrow_panel(timeline):
     """At 47 cells the side pane stands under the list, a rule between them: an opened event's words and facts wrap to
-    the panel's width and its place keeps its line; `{` gives the overview fewer rows and the pane more. The Color by
-    menu stands in a frame, the label's values and definition under its name, its ↗ whole."""
+    the panel's width and its place keeps its line. The Color by menu stands in a frame, the label's values and
+    definition under its name, its ↗ whole."""
     await _labels_on(timeline, "timeline")
-    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP,
-                                     keys=["{", "{", "{"] + ["down"] * 8 + ["return"], panel=False)
+    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=40, wrap=DRAW_WRAP,
+                                     keys=["down"] * 8 + ["return"], panel=False)
     rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
     at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
     assert "03:00:48  alert" in rows[at] and set(rows[at + 1].strip()) == {"─"}
@@ -844,8 +855,8 @@ async def test_timeline_details_and_menu_read_in_a_narrow_panel(timeline):
 
 @needs_node
 async def test_linked_sessions_opens_as_its_browser_page_does_and_reads_at_every_width(linked):
-    """Colored by the label that is on; each run's lead whole on its lane; every key in the hint row; zoomed into one
-    run, the lanes of the sessions that did not run then go, and the transcript reads a session that did."""
+    """Colored by the label that is on; each run's lead whole on its lane; the hint row one row; framed on one run, the
+    lanes of the sessions that did not run then go, and the transcript reads a session that did."""
     await _labels_on(linked, "linked-sessions")
     for cols in WIDTHS:
         out = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP)
@@ -854,9 +865,8 @@ async def test_linked_sessions_opens_as_its_browser_page_does_and_reads_at_every
         top = "\n".join(body[:4])
         assert "Color by  Pagination ↗" in top and "● pagination 20" in top, cols
         assert "Run 3 · lead" in "\n".join(body), cols
-        for k in ("c to color by", "f to filter by", "g for rows", "[ ] to pan", "+ - to zoom"):
-            assert k in hints, (cols, k)
-    out = await term_views.draw_text(linked, "linked-sessions", cols=47, rows=40, wrap=DRAW_WRAP, keys=["+", "+", "]"],
+        assert len(hints) <= cols and hints.startswith("↑↓ to choose · Enter to open"), cols
+    out = await term_views.draw_text(linked, "linked-sessions", cols=47, rows=40, wrap=DRAW_WRAP, keys=["drag:9-17"],
                                      panel=False)
     rows = out.splitlines()
     lanes = "\n".join(_tree(rows))
@@ -878,7 +888,7 @@ async def test_repository_opens_as_its_browser_page_does_and_reads_at_every_widt
         assert "Color by  Clock change ↗" in top and "● clock change" in top, cols
         assert any(x.strip().startswith("r1 · 3 agents") for x in body), cols
         assert next(x for x in body if x.split()[:2] == ["pull", "request"]), cols
-        assert "1 2 3 4 for the tabs" in hints and "[ ] to pan" in hints
+        assert len(hints) <= cols and ("1 2 3 4 for the tabs" in hints) == (cols >= 140), cols
     out = await term_views.draw_text(repository, "repository", cols=47, rows=50, wrap=DRAW_WRAP, keys=["down", "down", "return"],
                                      panel=False)
     rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]

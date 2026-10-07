@@ -324,6 +324,20 @@ function keyWords(keys) {
 // the order of the hint row (rule 26): choosing, Enter, Space, the view's own keys
 const keyOrder = (keys) => (keys.includes('up') || keys.includes('down') ? 0 : keys.includes('return') ? 1 : keys.includes('space') ? 2 : 3)
 
+// the moves the screen cannot show, which the hint row names whoever binds them: choosing (↑↓) and Enter
+const isMove = (keys) => keys.includes('up') || keys.includes('down') || keys.includes('return')
+
+// how many keys of the view's own the hint row names beside the moves; `?` lists every key
+const OWN_HINTS = 2
+
+// a kit part's keys (Color by's c, Filter by's f, the side pane's < >): `?` lists them, and the hint row names only their
+// moves, since the top row shows the part itself as a control a click opens
+function kitKey(d, keys, words, run, strong = false, rank = 1) {
+  const b = d.key(keys, words, run, strong, rank)
+  if (b) b.own = false
+  return b
+}
+
 // ------------------------------------------------------------------------------------------------ the drawing
 
 /** What a view's draw function draws into: rows of styled runs on a grid `cols` wide (the type area, A0 to R) and at
@@ -389,18 +403,20 @@ export class Drawing {
     this.line({ s: '─'.repeat(this.cols), fg: COLORS.rule })
   }
 
-  /** Bind keys (`up`, `down`, `return`, `space`, `backspace` or one character each) to `run(key)`, with the words the
-   *  hint row says after them (`to choose`); `strong` keeps them from a later binding of the same key (an open menu's
-   *  ↑↓); `rank` orders the view's own keys in the hint row (Color by's is 0, others 1), which the panel cuts from its
-   *  end when it is too long. Bound for this frame only: a part binds its keys as it draws, so the hints name what is
-   *  drawn. */
+  /** Bind keys (`up`, `down`, `return`, `space`, `backspace` or one character each) to `run(key)`, with the words that
+   *  name them (`to choose`); `strong` keeps them from a later binding of the same key (an open menu's ↑↓); `rank`
+   *  orders the view's own keys (others 1). The hint row names ↑↓, Enter and the first two of the view's own keys; `?`
+   *  lists every key bound with its words. Bound for this frame only: a part binds its keys as it draws, so the hints
+   *  name what is drawn. */
   key(keys, words, run, strong = false, rank = 1) {
     const ks = (Array.isArray(keys) ? keys : [keys]).map(checkKey)
     const taken = new Set(this.binds.filter((b) => b.strong).flatMap((b) => b.keys))
     const mine = ks.filter((k) => !taken.has(k))
-    if (!mine.length) return
+    if (!mine.length) return null
     for (const b of this.binds) b.keys = b.keys.filter((k) => !mine.includes(k))
-    this.binds.push({ keys: mine, words: words ? String(words) : '', run, strong, rank })
+    const b = { keys: mine, words: words ? String(words) : '', run, strong, rank, own: true }
+    this.binds.push(b)
+    return b
   }
 
   /** Facts for the panel's subtitle under the view's name, dim, parted by ` · `. */
@@ -548,6 +564,7 @@ const state = {
   labelWants: [], // each part's labels a query names, so the reader reads them though they are not on in Files
   holds: [], // each part's labels that take no color when turned on (Rows' label: the lanes keep Color by's choice)
   rehome: [], // Color by's look again at how it opens, once a part holds a label it may have opened on
+  keysOpen: false, // the list of every key, which `?` opens
 }
 
 function send(msg) {
@@ -607,6 +624,7 @@ export function frame() {
     }
   }
   if (error) return errorFrame(error)
+  keyList(d)
   overlay(d)
   const seq = ++state.frameSeq
   state.binds = d.binds.filter((b) => b.keys.length)
@@ -617,7 +635,7 @@ export function frame() {
   state.hits.set(seq, hits)
   for (const k of [...state.hits.keys()]) if (k < seq - 4) state.hits.delete(k)
   const keys = [...new Set(state.binds.flatMap((b) => b.keys))]
-  const shownBinds = d.typer ? [] : [...state.binds].sort((a, b) => keyOrder(a.keys) - keyOrder(b.keys) || a.rank - b.rank).filter((b) => b.words)
+  const shownBinds = d.typer ? [] : hintBinds(state.binds)
   const hints = d.typer ? d.typer.hints.slice() : shownBinds.map((b) => `${keyWords(b.keys)} ${b.words}`)
   const out = {
     seq,
@@ -641,6 +659,37 @@ export function frame() {
   if (past > 0 || d.cutAt.n) out.overflow = { rows: past, cols: d.cutAt.n, first: d.cutAt.first.slice(0, 300) }
   if (state.textMode) out.text = frameText(out, { ansi: state.textMode === 'ansi', cols: state.cols })
   return out
+}
+
+// the binds with their words in the hint row's order (rule 26): choosing, Enter, Space, then the rest by rank
+function namedBinds(binds) {
+  return binds.filter((b) => b.keys.length && b.words).sort((a, b) => keyOrder(a.keys) - keyOrder(b.keys) || a.rank - b.rank)
+}
+
+// the binds the hint row names: the moves the screen cannot show (↑↓, Enter), the first two of the view's own keys, and
+// `?` for the rest; the top row shows Color by, Filter by, Rows and the search as controls a click opens, so their keys
+// stand in `?`'s list alone
+function hintBinds(binds) {
+  const named = namedBinds(binds)
+  const own = named.filter((b) => b.own && !isMove(b.keys)).slice(0, OWN_HINTS)
+  return named.filter((b) => isMove(b.keys) || own.includes(b) || b.list)
+}
+
+// `?` and the list it opens: every key the frame binds with its words, in a frame over the view's top rows, while the
+// hint row leaves a key unnamed and the view binds no `?` of its own; any other key or a click closes it
+function keyList(d) {
+  const named = namedBinds(d.binds)
+  const hinted = hintBinds(d.binds)
+  if (d.typer || d.binds.some((b) => b.keys.includes('?')) || named.every((b) => hinted.includes(b))) {
+    state.keysOpen = false
+    return
+  }
+  d.binds.push({ keys: ['?'], words: state.keysOpen ? 'to hide the keys' : 'for all keys', run: () => (state.keysOpen = !state.keysOpen), strong: false, rank: 9, own: false, list: true })
+  if (!state.keysOpen) return
+  const kw = Math.min(14, Math.max(...named.map((b) => width(keyWords(b.keys)))))
+  const box = new Drawing(Math.max(10, d.cols - 6), 100000, d, 0)
+  for (const b of named) box.line(fitLine([{ s: pad(keyWords(b.keys), kw) }, { s: '  ' }, { s: b.words, d: true }], box.cols))
+  frameMenu(d, box, [0, 0], 'keys', 0)
 }
 
 // an open menu's frame over the rows under its control, which keep their places (the chart does not move down)
@@ -855,6 +904,8 @@ export function handle(msg) {
     case 'click':
     case 'drag': {
       const h = (state.hits.get(msg.seq) || state.hits.get(state.frameSeq) || [])[msg.i]
+      // a click closes the list of keys, and acts where the list did not stand over it
+      state.keysOpen = false
       if (!h) break
       gesture(msg.n, () => {
         if (msg.t === 'drag' && h.drag) h.drag(Number(msg.x0) || 0, Number(msg.x1) || 0)
@@ -904,6 +955,8 @@ function pressKey(k) {
     return
   }
   const b = state.binds.find((x) => x.keys.includes(k))
+  // a key other than `?` closes the list of keys, and does what it does
+  if (!(b && b.list)) state.keysOpen = false
   if (b) b.run(k)
 }
 
@@ -917,7 +970,7 @@ export const __driver = {
       out: null, cols: 120, rows: 30, theme: 'dark', view: { slug: '', name: '' }, kept: {}, labels: [], filter: null, drawFn: null,
       frameSeq: 0, ack: 0, gesture: null, binds: [], hits: new Map(), typer: null, pending: new Map(), fetchId: 0, scheduled: false,
       lastSent: '', openers: [], labelFns: [], resets: [], pageReset: null, stateTimer: false, wheelFns: [], error: null, textMode: '',
-      lastOpen: null, colorBys: [], colour: null, drawNo: 0, answered: 0, labelWants: [], holds: [], rehome: [],
+      lastOpen: null, colorBys: [], colour: null, drawNo: 0, answered: 0, labelWants: [], holds: [], rehome: [], keysOpen: false,
     })
     openMenu = null
     openBlocks.clear()
@@ -1004,16 +1057,16 @@ function drawMenu(d, owner, items, onPick, closeKey, pickWords, title = '') {
     openMenu = null
     onPick(items[i], i)
   }
-  d.key(['up', 'down'], 'to choose', (k) => step(k === 'up' ? -1 : 1), true)
-  d.key('return', pickWords, () => pick(m.pick), true)
-  if (closeKey) d.key(closeKey, 'to close', () => toggleMenu(owner), true, 0)
+  kitKey(d, ['up', 'down'], 'to choose', (k) => step(k === 'up' ? -1 : 1), true)
+  kitKey(d, 'return', pickWords, () => pick(m.pick), true)
+  if (closeKey) kitKey(d, closeKey, 'to close', () => toggleMenu(owner), true, 0)
 }
 
-// a menu's rows in a frame in the rule gray, `title` in its top edge, over the rows under the control; the rows
-// around the chosen item where the menu is taller than the rows left
-function frameMenu(d, box, [a, b], title) {
+// a menu's rows in a frame in the rule gray, `title` in its top edge, over the rows under the control (from row `y`);
+// the rows around the chosen item where the menu is taller than the rows left
+function frameMenu(d, box, [a, b], title, y = d.y) {
   const total = box.lines.length
-  const room = Math.max(1, d.rows - d.y - 2)
+  const room = Math.max(1, d.rows - y - 2)
   let from = 0
   if (total > room) {
     from = Math.max(0, Math.min(a, total - room))
@@ -1028,15 +1081,15 @@ function frameMenu(d, box, [a, b], title) {
     return { margin: null, runs: merged([{ s: head, ...rule }, ...(words ? [{ s: words, d: true }, { s: ' ', ...rule }] : []), { s: '─'.repeat(fill), ...rule }, { s: tail, ...rule }]) }
   }
   const lines = [edge('╭', '╮', title, from ? `↑ ${num(from)} more` : '')]
-  for (let y = from; y < to; y++) {
-    const l = box.lines[y]
+  for (let k = from; k < to; k++) {
+    const l = box.lines[k]
     const runs = fitLine(l.runs, box.cols)
     const mk = l.margin ? [{ ...l.margin, s: pad(l.margin.s, 2) }] : [{ s: '  ' }]
     lines.push({ margin: null, runs: merged([{ s: '│ ', ...rule }, ...mk, ...runs, { s: ' '.repeat(Math.max(0, box.cols - lineWidth(runs))) }, { s: ' │', ...rule }]) })
   }
   lines.push(edge('╰', '╯', '', to < total ? `↓ ${num(total - to)} more` : ''))
-  const hits = box.hits.filter((h) => h.y >= from && h.y < to).map((h) => ({ ...h, y: d.y + 1 + h.y - from, x0: h.x0 + 4, x1: Math.min(h.x1, box.cols) + 4, row: false }))
-  d.overlays.push({ y: d.y, lines, hits })
+  const hits = box.hits.filter((h) => h.y >= from && h.y < to).map((h) => ({ ...h, y: y + 1 + h.y - from, x0: h.x0 + 4, x1: Math.min(h.x1, box.cols) + 4, row: false }))
+  d.overlays.push({ y, lines, hits })
 }
 
 // ------------------------------------------------------------------------------------------------ Color by
@@ -1445,7 +1498,7 @@ export function colorBy(opts = {}) {
   function addReset(r) {
     if (!changed()) return
     r.right('reset', {}, { on: () => reset(), tip: 'the view as it opens: its color, every value on, the whole time span' })
-    r.d.key('r', 'to reset', () => reset(), false, 2)
+    kitKey(r.d, 'r', 'to reset', () => reset(), false, 2)
   }
 
   // Color by on row `r`: `Color by` (`Color` where the row has no room for both), the choice whole (cut only where it
@@ -1473,7 +1526,7 @@ export function colorBy(opts = {}) {
       last = d.row().gap(2)
       placeChips(last, all, fitting(all, d.cols - 2))
     }
-    d.key('c', 'to color by', showMenu, false, 0)
+    kitKey(d, 'c', 'to color by', showMenu, false, 0)
     last.menus.push((dd) => drawMenu(dd, api, menuItems(), (it) => it && api.choose(it.key === 'off' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'c', 'to color by', 'Color by'))
     return last
   }
@@ -1567,10 +1620,10 @@ export function bar(n, max) {
  * The time range: the one control for a view's time (docs/terminal-views.md, "Time"). An overview strip of the data's
  * whole span, each cell its records in the Color by hue most of them take, with the window over it on the selection
  * background and the cells outside it dim. A click on the strip moves the window there; a drag frames a new range,
- * moves the window from inside it, or moves an edge from the edge; `[` `]` pan and `+` `-` zoom. The range opens on
+ * moves the window from inside it, or moves an edge from the edge; Reset gives back the whole span. The range opens on
  * the whole span, and thimble keeps a range zoomed in per view. With `gap`, an empty stretch longer than it is a narrow
  * break (` // `) on the strip and on the range's scale, so bursts far apart share one axis, as in the browser; an edge of
- * the range never stays in a break, and `[` `]` `+` `-` move the window on the strip's cells.
+ * the range never stays in a break.
  *
  * opts: onChange(range), unit ('s' seconds since 1970, the default, or 'n' a plain number), key (the name it is kept
  * under), min (the shortest range), gap (in the units).
@@ -1580,7 +1633,7 @@ export function timeRange(opts = {}) {
   const unit = opts.unit === 'n' ? 'n' : 's'
   const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {}
   const keptRange = (kept('ranges') || {})[key]
-  const r = { times: [], values: [], span: null, marks: [], from: null, to: null, valueOf: null, gap: Number(opts.gap) > 0 ? Number(opts.gap) : 0, segs: null, w: 100 }
+  const r = { times: [], values: [], span: null, marks: [], from: null, to: null, valueOf: null, gap: Number(opts.gap) > 0 ? Number(opts.gap) : 0, segs: null }
   if (Array.isArray(keptRange)) [r.from, r.to] = keptRange
   const save = () => keep('ranges', { ...(kept('ranges') || {}), [key]: r.from === null ? undefined : [r.from, r.to] })
   const span = () => r.span || [0, 1]
@@ -1702,7 +1755,6 @@ export function timeRange(opts = {}) {
       d.row().add(api.readout(), { d: true }).end()
       const row = d.row()
       if (gutter) row.gap(gutter)
-      r.w = w
       const cells = overview(w)
       const ov = r.segs ? whole(w) : null
       let lo = r.from === null ? 0 : Math.floor(((api.from - span()[0]) / (span()[1] - span()[0])) * w)
@@ -1728,7 +1780,7 @@ export function timeRange(opts = {}) {
         x1: x0 + w,
         cursor: true,
         tips,
-        tip: r.from === null ? 'drag to frame a range; + zooms in' : 'drag an edge [ ] or the window, or drag to frame a new range; a click moves the window there',
+        tip: r.from === null ? 'drag to frame a range' : 'drag an edge [ ] or the window, or drag to frame a new range; a click moves the window there',
         on: (x) => {
           const len = api.to - api.from
           if (r.from === null) return
@@ -1749,7 +1801,6 @@ export function timeRange(opts = {}) {
         },
       })
       row.end()
-      bindKeys(d)
     },
   }
 
@@ -1776,44 +1827,6 @@ export function timeRange(opts = {}) {
       for (const [v, m] of by[x]) if (v !== '' && m > bn) [best, bn] = [v, m]
       return { glyph: bar(k, max), colour: best ? colourOf(best) : null, n: k }
     })
-  }
-
-  function bindKeys(d) {
-    // on a broken scale the keys move the window on the strip's cells, so it keeps its width there across a break
-    const move = (p0, p1) => {
-      const ov = whole(r.w)
-      const a = Math.max(0, Math.min(r.w, p0))
-      const b = Math.max(0, Math.min(r.w, p1))
-      if (p0 < 0) return api.set(ov.at(0), ov.at(b - p0))
-      if (p1 > r.w) return api.set(ov.at(a - (p1 - r.w)), ov.at(r.w))
-      api.set(ov.at(a), ov.at(b))
-    }
-    const pan = (k) => {
-      if (r.from === null) return
-      if (r.segs) {
-        const ov = whole(r.w)
-        const [p0, p1] = [ov.pos(api.from), ov.pos(api.to)]
-        const by = (k === ']' ? 1 : -1) * Math.max(1, (p1 - p0) / 4)
-        return move(p0 + by, p1 + by)
-      }
-      const len = api.to - api.from
-      const by = (k === ']' ? 1 : -1) * len / 4
-      api.set(api.from + by, api.to + by)
-    }
-    const zoom = (k) => {
-      if (r.segs) {
-        const ov = whole(r.w)
-        const [p0, p1] = [ov.pos(api.from), ov.pos(api.to)]
-        const mid = (p0 + p1) / 2
-        const len = (p1 - p0) * (k === '+' ? 2 / 3 : 1.5)
-        return move(mid - len / 2, mid + len / 2)
-      }
-      const mid = (api.from + api.to) / 2
-      const len = (api.to - api.from) * (k === '+' ? 2 / 3 : 1.5)
-      api.set(mid - len / 2, mid + len / 2)
-    }
-    d.key(['[', ']'], 'to pan', pan)
-    d.key(['+', '-'], 'to zoom', zoom)
   }
 
   state.resets.push({
@@ -2282,13 +2295,13 @@ export function list(opts = {}) {
         s.chosen = keys[Math.max(0, Math.min(keys.length - 1, i + by))]
         s.free = false
       }
-      d.key(['up', 'down'], 'to choose', (k) => step(k === 'up' ? -1 : 1))
+      kitKey(d, ['up', 'down'], 'to choose', (k) => step(k === 'up' ? -1 : 1))
       const isOpen = pane ? pane.key !== null && pane.key === s.chosen : s.open !== null && s.open === s.chosen
-      d.key('return', isOpen ? 'to close' : opts.enter || 'to open', () => {
+      kitKey(d, 'return', isOpen ? 'to close' : opts.enter || 'to open', () => {
         const it = api.item()
         if (it) toggle(it)
       })
-      if (o.ask) d.key('a', 'to ask', () => {
+      if (o.ask) kitKey(d, 'a', 'to ask', () => {
         const it = api.item()
         const q = it && o.ask(it)
         if (q) ask(q.ref, q.text)
@@ -2510,7 +2523,7 @@ export function search(opts = {}) {
           },
           hints: ['Enter to finish'],
         })
-      } else r.d.key('/', 'to search', start)
+      } else kitKey(r.d, '/', 'to search', start)
       return r
     },
   }
@@ -2557,7 +2570,7 @@ export function choice(opts = {}) {
       if (opts.title) r.add(opts.title, { d: true }).gap()
       const shown = items().find((it) => it.v === s.value)
       r.add(shown ? shown.name : some ? all : String(s.value ?? ''), {}, { on: open, tip: opts.tip || `choose ${opts.title || 'one'}` })
-      if (opts.key) r.d.key(opts.key, `for ${opts.title || 'the choice'}`, open)
+      if (opts.key) kitKey(r.d, opts.key, `for ${opts.title || 'the choice'}`, open)
       r.menus.push((d) => drawMenu(d, api, items(), (it) => it && api.set(it.v), opts.key || null, 'to select', opts.title || ''))
       return r
     },
@@ -2628,7 +2641,7 @@ export function side(opts = {}) {
         }
         for (const h of L.hits) if (h.y < n) d.hits.push({ ...h, y: h.y + y0 })
         for (const h of R.hits) if (h.y < n) d.hits.push({ ...h, y: h.y + y0, x0: h.x0 + L.cols + 3, x1: Math.min(h.x1, R.cols) + L.cols + 3 })
-        d.key(['<', '>'], 'to resize the details', (k) => {
+        kitKey(d, ['<', '>'], 'to resize the details', (k) => {
           st.share = Math.max(0.2, Math.min(0.75, st.share + (k === '<' ? 0.05 : -0.05)))
           keep('side', { ...(kept('side') || {}), [name]: Math.round(st.share * 100) / 100 })
         })
@@ -2644,7 +2657,7 @@ export function side(opts = {}) {
         right(R)
         d.put(R, 0, Math.min(R.rows, R.lines.length))
       }
-      d.key('backspace', 'to close the details', () => api.hide())
+      kitKey(d, 'backspace', 'to close the details', () => api.hide())
     },
   }
   state.resets.push({ changed: () => st.open !== null, reset: () => { st.open = null } })
@@ -2654,30 +2667,18 @@ export function side(opts = {}) {
 // ------------------------------------------------------------------------------------------------ the divider
 
 /**
- * The divider between the overview and the detail list: `{` `}` give the overview fewer or more rows, and thimble keeps
- * its share per view. `rows(d, fallback)` gives the overview's rows of the rows left (`fallback` until a key moved it)
- * and binds the keys.
+ * The divider between the overview and the detail list: `rows(d, fallback)` gives the overview's rows of the rows left,
+ * `fallback` with at least `min` rows on each side. The browser's divider is a bar a drag moves; the panel has no drag
+ * across its rows, so here the overview has the rows the view gives it.
  *
- * opts: key (the name it is kept under), min (the least rows of each side, 3).
+ * opts: min (the least rows of each side, 3).
  */
 export function divider(opts = {}) {
-  const name = opts.key || 'overview'
-  const keptShare = (kept('divider') || {})[name]
-  const st = { share: typeof keptShare === 'number' ? keptShare : null }
   const min = Math.max(1, Number(opts.min) || 3)
   return {
-    get share() {
-      return st.share
-    },
     rows(d, fallback) {
       const total = d.left
-      const fit = (n) => Math.max(Math.min(min, total), Math.min(total - min, Math.round(n)))
-      const n = fit(st.share === null ? fallback : st.share * total)
-      d.key(['{', '}'], 'to resize the overview', (k) => {
-        st.share = Math.max(0.05, Math.min(0.95, (fit(n + (k === '}' ? 2 : -2))) / Math.max(1, total)))
-        keep('divider', { ...(kept('divider') || {}), [name]: Math.round(st.share * 1000) / 1000 })
-      })
-      return n
+      return Math.max(Math.min(min, total), Math.min(total - min, Math.round(fallback)))
     },
   }
 }
@@ -2997,7 +2998,7 @@ export function filterBy(opts = {}) {
         k++
       }
       if (k < vals.length) r.gap().add(`+${vals.length - k}`, { d: true }, { on: open, tip: `${plural(vals.length - k, 'more value')}: open Filter by` })
-      r.d.key('f', 'to filter by', open, false, 1)
+      kitKey(r.d, 'f', 'to filter by', open, false, 1)
       r.menus.push((dd) => drawMenu(dd, api, ch.menuItems(), (it) => it && api.choose(it.key === 'none' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'f', 'to filter by', 'Filter by'))
       return r
     },
@@ -3140,7 +3141,7 @@ export function rows(opts = {}) {
       r.add('Rows', { d: true }).gap()
       r.add(b ? b.title : 'none', {}, { on: open, tip: 'choose what the lanes are grouped by: a field or a label', max: Math.max(4, r.room - 2) })
       if (b && b.label) r.add(' ').add('↗', { fg: COLORS.link }, { on: () => openLabel(b.label), tip: "the label's panel: its definition, its runs and its records" })
-      r.d.key('g', 'for rows', open, false, 1)
+      kitKey(r.d, 'g', 'for rows', open, false, 1)
       r.menus.push((dd) => drawMenu(dd, api, ch.menuItems(), (it) => it && api.choose(it.key === 'none' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'g', 'to group by', 'Rows'))
       return r
     },

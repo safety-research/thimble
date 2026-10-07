@@ -23,7 +23,7 @@ import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderEle
 
 import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermVerdict } from '../types'
 import type { ThimbleLabel } from './cell'
-import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
+import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, fitHints, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
 import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
 import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, cutRef, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
@@ -2929,9 +2929,8 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   }
   const shown = openViewState()
   const sub = shown?.slug === slug && shown.frame?.sub?.length ? shown.frame.sub : []
-  // the hint row wraps rather than leave a key out, so the view's rows are what the rows its last hints took leave
-  const hintsN = shown?.slug === slug && shown.frame && !shown.frame.typing ? hintHeight(shown.frame.hints, cols) : 1
-  const rows = Math.max(6, (bodyRows || 34) - VIEW_CHROME - (sub.length ? 1 : 0) - (hintsN - 1))
+  // the hint row is one row (fitHints), so the view's rows are those the header and that row leave
+  const rows = Math.max(6, (bodyRows || 34) - VIEW_CHROME - (sub.length ? 1 : 0))
   const ov = viewFor(rt.sc, slug, cols, rows, p.ref)
   const f: ViewFrame | null = ov.frame
   // `◌ loading…` against R on the title's row while a reader query of the program is out, so the rows stay put
@@ -2980,7 +2979,9 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   if (f.typing) {
     endHints(f.hints)
     body.push(hintsEl(els, paneFocused && !rt.typeThrough ? [...f.hints, 'Esc to leave the field'] : [UNFOCUSED_HINT], cols))
-  } else body.push(hintsRow(els, hints, cols))
+  } else body.push(hintsEl(els, fitHints(endHints(hints), cols), cols))
+  // the list's Space and Backspace reach the view while it binds them, whether or not its one hint row names them
+  listExtraDrawing = { space: f.keys.includes('space'), backspace: f.keys.includes('backspace') }
   // each letter or digit the view binds is a hotkey of the panel, a Button no row tall; a sign is one of the relay's
   // (relayInput finds it among the hotkeys); none while a field of the view takes typing
   const chars = f.typing ? [] : f.keys.filter(k => [...k].length === 1 && !PANEL_KEYS.includes(k))

@@ -510,7 +510,7 @@ async function viewRows($: E): Promise<string[]> {
   return rows
 }
 
-test('keys · view · a terminal view: its rows under the header, its hint row, ↑↓ and Enter through the relay, its letters and signs as hotkeys', async ($, on) => {
+test('keys · view · a terminal view: its rows under the header, its hint row, ↑↓ and Enter through the relay, its letters and signs as hotkeys, Backspace though no hint names it', async ($, on) => {
   const w = world(on)
   w.states.home = { ...w.states.home, views: TERM_VIEWS } as never
   await openTermView($, w)
@@ -521,7 +521,7 @@ test('keys · view · a terminal view: its rows under the header, its hint row, 
   const s = await seen($, SHORT)
   expect(s.text).toContain('Timeline')
   expect((await viewRows($)).join('\n')).toMatch(/Color by\s*Kind\n❯ ● first row\n  ● second row/)
-  named(s.hint, ['↑↓ to choose', 'Enter to open', 'c to color by', '[ ] to pan', 'b to go back', 'x to close'])
+  expect(s.hint).toBe('↑↓ to choose · Enter to open · ? for all keys · b to go back · x to close')
   expect(s.relay).toBe(true)
   // ↓ through the relay is the view's `down`; its next frame chooses the second row
   await down($, w)
@@ -530,8 +530,11 @@ test('keys · view · a terminal view: its rows under the header, its hint row, 
   // a letter and a sign the view binds go to it from the relay's field
   await type($, w, SHORT, 'c')
   expect(events(w).at(-1)).toMatchObject({ t: 'key', key: 'c' })
-  await type($, w, SHORT, ']')
-  expect(events(w).at(-1)).toMatchObject({ t: 'key', key: ']' })
+  await type($, w, SHORT, '?')
+  expect(events(w).at(-1)).toMatchObject({ t: 'key', key: '?' })
+  // Backspace the view binds reaches it through the relay, though its hint row does not name it
+  await backspace($, w, SHORT)
+  expect(events(w).at(-1)).toMatchObject({ t: 'key', key: 'backspace' })
   // Enter is the view's `return`
   await enter($, w, SHORT)
   expect(events(w).at(-1)).toMatchObject({ t: 'key', key: 'return' })
@@ -541,22 +544,21 @@ test('keys · view · a terminal view: its rows under the header, its hint row, 
   expect(events(w).some(e => e.key === 'q')).toBe(false)
 })
 
-test('keys · view · a hint row longer than the panel is wide wraps, whole hints on each row, so no key the view binds goes unnamed; the view hears the theme', async ($, on) => {
+test('keys · view · its hint row is one row of whole hints: ↑↓, Enter, b, ? and x first, then the view\'s own as the row has room; the view\'s rows are all those under the header; the view hears the theme', async ($, on) => {
   const w = world(on)
   w.states.home = { ...w.states.home, views: TERM_VIEWS } as never
-  const hints = ['↑↓ to choose', 'Enter to open', 'c to color by', '/ to search', 'i for incident', '[ ] to pan', '+ - to zoom', 'a to ask', 'r to reset']
-  w.viewHost.frame = n => viewFrame(n, { hints, hintKeys: hints.map(() => []), keys: ['up', 'down', 'return', 'c', '/', 'i', '[', ']', '+', '-', 'a', 'r'] })
+  const hints = ['↑↓ to choose', 'Enter to open', 'n p for lanes', 's to read the spawn', '? for all keys']
+  w.viewHost.frame = n => viewFrame(n, { hints, hintKeys: [['up', 'down'], ['return'], ['n', 'p'], ['s'], ['?']], keys: ['up', 'down', 'return', 'n', 'p', 's', 'c', '/', '?'] })
   await openTermView($, w)
   const open = w.viewHost.requests.find(r => r.path === '/open')
   expect(open?.body.theme).toBe('dark')
+  expect(open?.body.rows).toBe(SHORT - 4)
   const pane = await look($, SHORT)
-  const box = (await pane.find({ key: 'h-hints' })) as { children?: unknown[] }
+  expect(await pane.find({ key: 'h-hints-1' })).toBeUndefined()
+  const row = shown(await pane.find({ key: 'h-hints' })).trim()
   await pane.unmount()
-  const rows = (box.children ?? []).map(r => shown(r).trim())
-  expect(rows.length).toBeGreaterThan(1)
-  named(rows.join(' · '), [...hints, 'b to go back', 'x to close'])
-  // each hint stands whole on one row
-  for (const h of hints) expect(rows.some(r => r.includes(h))).toBe(true)
+  // 92 cells: s to read the spawn has no room; ? lists it
+  expect(row).toBe('↑↓ to choose · Enter to open · n p for lanes · ? for all keys · b to go back · x to close')
 })
 
 test('keys · view · a click on a row, a drag on a strip and the wheel are the view\'s; its acts open a place or a thread; b back ends its program', async ($, on) => {

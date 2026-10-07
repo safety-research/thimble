@@ -81,7 +81,7 @@ const ln = lanes({
   onMark: (e) => show(e.r),
 })
 const pane = side({ key: 'event' })
-const split = divider({ key: 'overview' })
+const split = divider()
 const events = list({ key: (e) => e.r })
 onReset({ changed: () => picked !== null || keep.length > 0, reset: () => { pick(null); keep = []; load() } })
 // the label filter or a label's values changed: fetch again, since the reader keeps only what it keeps
@@ -217,7 +217,7 @@ draw((d) => {
     d.row().add('◌ loading the events…', { d: true }).end()
     return
   }
-  // the overview, in the rows the divider gives it (`{` `}`): the readout and the strip, a lane per group of Rows with
+  // the overview, in the rows the divider gives it: the readout and the strip, a lane per group of Rows with
   // the events in the range, and the axis with the incidents' flags and the key
   const shown = E.filter((e) => range.has(e.t))
   // the reader filters, so Filter by counts the events here for its menu's words

@@ -108,7 +108,7 @@ const overview = lanes({
   onMark: (it) => goTo(it.ref),
 })
 const pane = side({ key: 'turn' })
-const split = divider({ key: 'overview' })
+const split = divider()
 // the transcript: each turn its clock, speaker and words, a tool call one line; Enter opens a turn in the side pane
 const tr = transcript({ key: 'turns' })
 // the label filter changes which records the reader keeps, and a label's values arrive while it runs
@@ -285,8 +285,8 @@ draw((d) => {
   // the names in a column at the left, the time across the rest: the strip, the lanes and the axis share it; a lead's
   // name whole in it at any width
   const gutter = Math.max(16, Math.min(Math.floor(d.cols / 4), 4 + Math.max(...data.sessions.map((s) => 2 * s.depth + width(laneName(s.id))))))
-  // the overview's rows, which `{` `}` change: by default the lanes' rows and the range's, up to a little over half the
-  // rows left, so the transcript keeps the rest
+  // the overview's rows: the lanes' rows and the range's, up to a little over half the rows left, so the transcript
+  // keeps the rest
   const sessionsIn = new Set(items.filter((it) => range.has(it.time)).map((it) => it.session)).size
   const top = split.rows(d, Math.min(Math.floor(d.left * 0.55), 4 + Math.max(3, sessionsIn)))
   const y0 = d.y

@@ -279,8 +279,8 @@ while thimble's links check runs.
     around the chosen row, `↑ N more` and `↓ N more` dim above and below (a click moves a page, the wheel a row), so
     the chosen row and the hint row always show. A choice that moves up to the first row shown, or above it, starts the
     rows shown at the row that leads it: on home its section's heading, and the top for the first row the keys choose,
-    so every row can be reached by keys. No letter is a hotkey unless the hint row names it: a word typed while the
-    panel holds the keys (`table`) then reaches the prompt whole.
+    so every row can be reached by keys. No letter is a hotkey unless the hint row names it, or, in a view, the list
+    its `?` opens: a word typed while the panel holds the keys (`table`) then reaches the prompt whole.
 27. A field: its label dim and lower case on the label column, the field on L, no colon (`ask`, `follow-up`,
     `describe a new label`, the label panel's `prompt`). A field that shows all of its text (the label's prompt) has a
     border in the rule gray; a click gives it the keyboard.
@@ -635,9 +635,11 @@ at R, `new` in green until a built one is opened.
 
 **A view:** the path row, the view's name as the title, the facts its program gives as the subtitle, the rule; then
 the rows its program draws (`view.term.js` on the terminal view kit, docs/terminal-views.md), with their margin; then
-the hint row, the keys the program binds and `b to go back · x to close`, on the rows it needs where it is longer than
-the panel is wide (whole hints on each row; the program's rows are fewer by them), so no key it binds goes unnamed. The
-program hears Claude Code's theme, `light` or `dark`. From the moment it opens until its program's first frame the
+the hint row, one row: `↑↓ to choose · Enter to open`, the program's first two keys of its own, `? for all keys` and
+`b to go back · x to close`, whole hints, the most needed kept where the row has no room (↑↓, Enter, b, ?, x, then the
+program's own). The top row shows the kit's controls (Color by, Filter by, Rows, the search), so their keys stand in
+the list `?` opens, which names every key the program binds; each key it binds works whether the row names it or not.
+The program hears Claude Code's theme, `light` or `dark`. From the moment it opens until its program's first frame the
 view says `◌ starting the view…`, and `◌ loading…` stands dim against R on the title's row while a reader query of its is
 out. A region under the pointer that is not a whole row is inverse, and its tip shows on the tip background on the row
 below it; a chart's region (a strip, a lane) is never inverse: only the pointer's column is marked, `┊` in an empty cell

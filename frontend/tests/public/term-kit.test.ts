@@ -98,17 +98,67 @@ describe('the drawing', () => {
       d.key('/', 'to search', () => {})
       d.key('return', 'to open', () => {})
       d.key(['up', 'down'], 'to choose', () => {})
-      d.key(['[', ']'], 'to pan', () => {})
+      d.key(['n', 'p'], 'for the next lane', () => {})
     })
     await tick()
-    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to open', '/ to search', '[ ] to pan'])
-    expect(last().hintKeys).toEqual([['up', 'down'], ['return'], ['/'], ['[', ']']])
-    expect(last().keys.sort()).toEqual(['/', '[', ']', 'down', 'return', 'up'].sort())
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to open', '/ to search', 'n p for the next lane'])
+    expect(last().hintKeys).toEqual([['up', 'down'], ['return'], ['/'], ['n', 'p']])
+    expect(last().keys.sort()).toEqual(['/', 'down', 'n', 'p', 'return', 'up'].sort())
     const d = new kit.Drawing(40, 5)
     for (const k of ['left', 'right', 'pageup', 'home', 'end', 'tab', 'escape']) expect(() => d.key(k, 'x', () => {})).toThrow(/does not reach a view's pane/)
     for (const k of ['b', 't', 'x']) expect(() => d.key(k, 'x', () => {})).toThrow(/the panel's own/)
     expect(() => d.key('Q', 'x', () => {})).toThrow(/lowercase/)
     expect(() => d.key('ab', 'x', () => {})).toThrow(/one character/)
+  })
+
+  test('the hint row names ↑↓, Enter and the view\'s first two keys of its own, never a kit part\'s; ? lists every key in a frame over the top rows, and any other key closes it and acts', async () => {
+    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind' }] })
+    const rows = kit.list({ key: (m: any) => m.id })
+    const got: string[] = []
+    kit.draw((d: any) => {
+      colour.draw(d)
+      d.key('s', 'to read the spawn', () => got.push('s'))
+      d.key(['n', 'p'], 'for the next lane', () => got.push('n'))
+      d.key('u', 'to read the lead', () => got.push('u'))
+      rows.draw(d, { items: [{ id: 1, t: 'one' }, { id: 2, t: 'two' }], row: (m: any, r: any) => r.add(m.t), ask: (m: any) => ({ ref: String(m.id), text: m.t }) })
+    })
+    await tick()
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to open', 's to read the spawn', 'n p for the next lane', '? for all keys'])
+    expect(last().hintKeys.at(-1)).toEqual(['?'])
+    // the keys the row leaves out still work
+    expect(last().keys).toEqual(expect.arrayContaining(['c', 'a', 'u', '?']))
+    await key('u')
+    expect(got).toEqual(['u'])
+    await key('?')
+    const t = text()
+    expect(t[0]).toMatch(/^ {2}╭─ keys ─+╮$/)
+    const listed = t.slice(1, t.findIndex((r: string) => r.includes('╰'))).map((r: string) => r.replace(/^\s*│\s+/, '').replace(/\s*│$/, '').split(/\s{2,}/))
+    expect(listed).toEqual([['↑↓', 'to choose'], ['Enter', 'to open'], ['c', 'to color by'], ['s', 'to read the spawn'], ['n p', 'for the next lane'], ['u', 'to read the lead'], ['a', 'to ask']])
+    expect(last().hints).toContain('? to hide the keys')
+    // a key other than ? closes the list, and does what it does
+    await key('n')
+    expect(got).toEqual(['u', 'n'])
+    expect(text()[0]).not.toContain('keys')
+    await key('?')
+    await key('?')
+    expect(text()[0]).not.toContain('keys')
+  })
+
+  test('? is bound only where the hint row leaves a key unnamed, and never over a ? of the view\'s own', async () => {
+    let own = false
+    kit.draw((d: any) => {
+      d.key(['up', 'down'], 'to choose', () => {})
+      d.key('return', 'to open', () => {})
+      if (own) d.key('?', 'for help', () => {})
+      else d.key('h', 'for help', () => {})
+    })
+    await tick()
+    expect(last().keys).not.toContain('?')
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to open', 'h for help'])
+    own = true
+    kit.redraw()
+    await tick()
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to open', '? for help'])
   })
 
   test('a key runs what the frame bound it to; a strong binding (an open menu\'s) keeps its keys from a later one', async () => {
@@ -233,7 +283,9 @@ describe('Color by', () => {
     const colour = kit.colorBy({ fields: FIELDS })
     kit.draw((d: any) => colour.draw(d))
     await tick()
-    expect(last().hints).toContain('c to color by')
+    // the top row shows Color by as a control, so the hint row leaves its key to ?
+    expect(last().hints).toEqual(['? for all keys'])
+    expect(last().keys).toContain('c')
     await key('c')
     // in a frame over the rows under the top row, Color by in its edge
     expect(text()[1]).toMatch(/^ {2}╭─ Color by ─+╮$/)
@@ -241,7 +293,8 @@ describe('Color by', () => {
     // under the chosen field, what it is; the others' values in words
     expect(rows.map((r: string) => r.trim().split(/\s{2,}/)[0])).toEqual(['Off', '❯ Kind', 'What happened', 'Source', 'labels', 'Database connections'])
     expect(rows.find((r: string) => r.includes('Source'))).toMatch(/Source\s+alert · deploy$/)
-    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to color by', 'c to close'])
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to color by', '? for all keys'])
+    expect(last().keys).toContain('c')
     for (let i = 0; i < 3; i++) await key('down')
     rows = menu()
     // a label's values named as its chips name them: those it colors by, then `not marked`
@@ -304,7 +357,7 @@ describe('Color by', () => {
     colour.choose('kind')
     await tick()
     expect(text()[0]).toMatch(/reset$/)
-    expect(last().hints).toContain('r to reset')
+    expect(last().keys).toContain('r')
     await key('r')
     expect(colour.by).toEqual({ label: 'k1', title: 'Database connections' })
     expect(text()[0]).not.toMatch(/reset$/)
@@ -379,21 +432,25 @@ describe('the time range', () => {
     expect(range.full).toBe(true)
     expect(text()[0]).toBe('  16 May 00:00 – 20 May 03:00 · 4d 3h')
     expect(text()[1].length).toBe(2 + 8 + 72)
-    expect(last().hints).toEqual(['[ ] to pan', '+ - to zoom'])
+    // the mouse moves it: it binds no key
+    expect(last().keys).toEqual([])
+    expect(last().hints).toEqual([])
   })
 
-  test('+ zooms around the middle, ] pans a quarter, the window is on the selection background and the rest dim; a click moves it; it is kept', async () => {
+  test('zoomed in, the window is on the selection background and the rest dim; a click moves it; it is kept; the signs that panned and zoomed do nothing', async () => {
     const range = kit.timeRange({})
     range.data({ times })
     kit.draw((d: any) => range.draw(d))
     await tick()
-    await key('+')
+    expect(last().hits.find((h: any) => h.drag).tip).toBe('drag to frame a range')
+    const f = last()
+    kit.handle({ t: 'drag', i: f.hits.findIndex((h: any) => h.drag), seq: f.seq, x0: 30, x1: 59, n: ++n })
+    await tick()
     expect(range.full).toBe(false)
-    const len = range.to - range.from
-    expect(len).toBeCloseTo((times.at(-1)! - times[0]!) * (2 / 3), -1)
     const from = range.from
-    await key(']')
-    expect(range.from).toBeCloseTo(from + len / 4, -1)
+    const to = range.to
+    for (const k of ['[', ']', '+', '-', '{', '}']) await key(k)
+    expect([range.from, range.to]).toEqual([from, to])
     const strip = last().lines[1]
     expect(strip.some((s: any) => s.bg === 'selectionBg')).toBe(true)
     expect(strip.some((s: any) => s.d && !s.bg)).toBe(true)
@@ -498,7 +555,7 @@ describe('the time range', () => {
     expect(range.readout()).toMatch(/^16 May 00:00 – 05:40/)
   })
 
-  test('on a broken scale an edge never stays in a break, and the keys move the window on the strip\'s cells', async () => {
+  test('on a broken scale an edge never stays in a break, and a drag moves the window across one', async () => {
     const burst = (t: number) => Array.from({ length: 41 }, (_, i) => t + i * 60)
     const B = [T0 + 14 * 3600, T0 + 17 * 3600, T0 + 33 * 3600]
     const range = kit.timeRange({ gap: 1200 })
@@ -509,11 +566,14 @@ describe('the time range', () => {
     range.set(B[0]! + 3600, B[1]! + 4 * 3600)
     expect(range.from).toBe(B[1])
     expect(range.to).toBe(B[1]! + 2400)
-    // ] pans a quarter of the window's cells; the window keeps its cells across the break into the third burst
-    await key('-')
-    await key('-')
+    // a drag from inside the window moves it right, past the break into the third burst
+    await tick()
     const before = [range.from, range.to]
-    await key(']')
+    const row = text()[1].slice(2)
+    const g = last()
+    const mid = Math.floor((row.indexOf('[') + row.indexOf(']')) / 2)
+    kit.handle({ t: 'drag', i: g.hits.findIndex((h: any) => h.drag), seq: g.seq, x0: mid, x1: mid + 30, n: ++n })
+    await tick()
     expect(range.from).toBeGreaterThan(before[0]!)
     expect(range.to).toBeGreaterThan(before[1]!)
     for (const t of [range.from, range.to]) {
@@ -522,7 +582,7 @@ describe('the time range', () => {
     }
   })
 
-  test('with a gap, bursts a day apart share the strip and the scale, each burst\'s first tick gives its date, and a pan crosses a break', async () => {
+  test('with a gap, bursts a day apart share the strip and the scale, and each burst\'s first tick gives its date', async () => {
     // three bursts of five hours, a day apart
     const bursts = [0, 1, 2].flatMap((day) => Array.from({ length: 6 }, (_, h) => T0 + day * 86400 + (9 + h) * 3600))
     const range = kit.timeRange({ gap: 4 * 3600 })
@@ -549,16 +609,9 @@ describe('the time range', () => {
     const days = sc.ticks(8).filter((t: any) => / May /.test(t.label)).map((t: any) => t.label.split(' ')[0])
     expect(days).toEqual(['16', '17', '18'])
     for (const [g0] of gaps) expect(text()[2].slice(2 + g0 + 1, 2 + g0 + 3)).toBe('//')
-    // zoomed to the first burst, ] pans across the break into the second: four quarters bring the start to the burst's
-    // end, the fifth past the break's cells
+    // zoomed to the first burst, the range's scale has no break
     range.set(bursts[0], bursts[5])
     expect(range.scale(80).broken).toBe(false)
-    for (let i = 0; i < 4; i++) await key(']')
-    expect(range.from).toBe(bursts[5])
-    expect(range.to).toBeGreaterThan(bursts[6])
-    await key(']')
-    expect(range.from).toBeGreaterThan(bursts[5])
-    expect(range.to).toBeLessThan(bursts[11] + 3600)
   })
 })
 
@@ -583,7 +636,8 @@ describe('the list', () => {
     expect(rows[0]).toMatch(/^ {2}Sat 16 May 2026/)
     expect(last().lines[0][1]).toMatchObject({ b: true })
     expect(rows[1]).toMatch(/^❯ ● event 0/)
-    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to open', 'a to ask'])
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to open', '? for all keys'])
+    expect(last().keys).toContain('a')
     for (let i = 0; i < 15; i++) await key('down')
     rows = text()
     expect(rows.length).toBe(12)
@@ -706,7 +760,8 @@ describe('search and choices', () => {
     })
     await tick()
     expect(text()[0]).toBe('  / search')
-    expect(last().hints).toEqual(['/ to search'])
+    expect(last().hints).toEqual(['? for all keys'])
+    expect(last().keys).toContain('/')
     await key('/')
     expect(last().typing).toBe(true)
     expect(last().field).toEqual({ text: '' })
