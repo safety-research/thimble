@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import type { Concept, LabelRow, SourceKeys, SourceRecord } from '../lib/types'
-import { chipOfKeyValue, chipOfLabel, choiceId, defaultChoice, keyChips, keyValue, labelChips, parseChoice, pickedChips, readColor, writeColor, type ColorChoice, type ColorKept, type ColorValue } from './colorChoice'
+import { chipOfKeyValue, chipOfLabel, choiceId, colorKeys, defaultChoice, keyChips, keyValue, labelChips, parseChoice, pickedChips, readColor, writeColor, type ColorChoice, type ColorKept, type ColorValue } from './colorChoice'
 import type { RecordColor } from './colorContext'
 import { isFilesLabel, marksOf } from './labels'
 import type { FilesLabels } from './useLabels'
@@ -33,7 +33,7 @@ export interface ColorBy {
   pickedOf: (id: string) => Readonly<Record<string, number>> | undefined
 }
 
-/** The file's keys (GET /source/keys), asked once per file while `on`. */
+/** The file's keys (GET /source/keys) that Color by offers (colorKeys), asked once per file while `on`. */
 export function useSourceKeys(ws: string, path: string, on: boolean): SourceKeys | null {
   const [got, setGot] = useState<{ path: string; keys: SourceKeys } | null>(null)
   useEffect(() => {
@@ -41,7 +41,7 @@ export function useSourceKeys(ws: string, path: string, on: boolean): SourceKeys
     let alive = true
     api
       .sourceKeys(ws, path)
-      .then((k) => alive && setGot({ path, keys: k }))
+      .then((k) => alive && setGot({ path, keys: { ...k, keys: colorKeys(k.keys) } }))
       .catch(
         () =>
           alive &&

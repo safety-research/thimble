@@ -49,6 +49,10 @@ interface Open {
   quote?: ViewQuote & { span: string }
   /** in a view: the card it was opened from and its arguments (a card type's Open as view) */
   query?: ViewQuery
+  /** in a view: the analyst chose this file (Open in, or a ref that names the whole file), so the view shows it rather
+   * than opening as from its tab; a view opened by name (view:<slug>, a start page's row) is opened on its first file
+   * with this unset */
+  picked?: boolean
 }
 
 /** The open tabs a workspace keeps: their paths and the one shown. */
@@ -342,7 +346,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const ownPane = !!shownSlug && panesShow.includes(viewSurface(shownSlug))
   useEffect(() => {
     if (!ownPane || !shownSlug) return
-    if (viewAt) bus.emit('openInView', { slug: shownSlug, path: viewAt.path, ref: viewAt.ref, quote: viewAt.quote, query: viewAt.query })
+    if (viewAt) bus.emit('openInView', { slug: shownSlug, path: viewAt.path, ref: viewAt.ref, quote: viewAt.quote, query: viewAt.query, picked: viewAt.picked })
     bus.emit('showTab', { tab: viewSurface(shownSlug) })
     setBar(BROWSER)
     setViewAt(null)
@@ -423,7 +427,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const toView = useCallback(
     (slug: string, at: Open | null, from?: string | null) => {
       if (surfaceShown(viewSurface(slug))) {
-        if (at) bus.emit('openInView', { slug, path: at.path, ref: at.ref, quote: at.quote, query: at.query })
+        if (at) bus.emit('openInView', { slug, path: at.path, ref: at.ref, quote: at.quote, query: at.query, picked: at.picked })
         bus.emit('showTab', { tab: viewSurface(slug), from })
         return
       }
@@ -515,7 +519,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
         if (!view) return toBrowser({ path, ref }, from)
         if (view.file_type) return toFileViewer(view.slug, { path, ref }, from)
         const fragment = fragmentIn(ref, path)
-        if (fragment == null) return toView(view.slug, { path }, from)
+        if (fragment == null) return toView(view.slug, { path, picked: true }, from)
         const knows = (s: string, r: string) =>
           api
             .viewOpen(ws, s, r)
@@ -542,7 +546,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
       used(path, slug)
       const at = ref && refPath(ref) === path ? ref : undefined
       track('view-open', { target: slug ? `view:${slug}` : 'panel:files', detail: { from: 'open-in' } })
-      if (slug) toView(slug, { path, ref: at })
+      if (slug) toView(slug, { path, ref: at, picked: true })
       else toBrowser({ path, ref: at })
     },
     [used, toView, toBrowser],
@@ -682,7 +686,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             ws={ws}
             view={shownView}
             path={shownPath}
-            picked={!!viewAt?.path}
+            picked={!!viewAt?.picked}
             targetRef={viewAt?.ref}
             quote={viewAt?.quote}
             query={viewAt?.query}

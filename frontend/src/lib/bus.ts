@@ -40,7 +40,7 @@ export type Events = {
      * pane the request came from (lib/surfaces pressedPane), else the pane pressed last */
   showTab: { tab: Tab | `view:${string}`; from?: string | null }
   /** a ref Files places in a view, opened in the pane that shows that view on its own (files/ViewSurface) */
-  openInView: { slug: string; path: string; ref?: string; quote?: { record: string; text: string; span: string }; query?: ViewQuery }
+  openInView: { slug: string; path: string; ref?: string; quote?: { record: string; text: string; span: string }; query?: ViewQuery; picked?: boolean }
   /** open a view with a card's arguments (a card type's Open as view, canvas/TypeCard, or main's open_view), or with
    * none (null), in Files or in its own pane */
   openView: { slug: string; query: ViewQuery | null }

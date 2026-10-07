@@ -2,8 +2,9 @@
 // choice is Off, a key of the records (one of those the server finds naming a kind or a who over the whole file,
 // GET /source/keys, the fields Table view shows), or a label over files that is on. A key's values take the label
 // palette by frequency (--label-1 to --label-12, the rest one Other in --label-none); a label's values take the label's
-// own colors, its highlighted values only. Each value is a chip that turns its records off (hides them) and on. The
-// choice and the values turned off are kept per file in this browser. Pure, but for the storage.
+// own colors, its highlighted values only. A key whose values are nearly unique per record (an id) is not offered. Each
+// value is a chip that turns its records off (hides them) and on. The choice and the values turned off are kept per file
+// in this browser. Pure, but for the storage.
 import type { Concept, LabelRow, SourceKey, SourceRecord } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { classesOf, colourVar, litClass, valueOf } from './labels'
@@ -124,6 +125,21 @@ export function labelChips(k: Concept, counts: Readonly<Record<string, number>> 
   if (unmarked !== 0) out.push({ id: NONE, name: 'Not marked', n: unmarked, color: null })
   return out
 }
+
+/** Records a key's value holds on average, under which a key with more values than the palette names nearly each record
+ * on its own (an id, a page, a name), so coloring by it would paint almost every record Other. */
+export const NEAR_UNIQUE = 5
+
+/** Whether a key's values are nearly unique per record (NEAR_UNIQUE): more of them than the palette has colors, each on
+ * fewer than NEAR_UNIQUE records on average. Pure. */
+export function nearlyUnique(k: SourceKey): boolean {
+  const values = k.values.length + k.more.values
+  const carried = k.values.reduce((a, v) => a + v.n, 0) + k.more.n
+  return values > KEY_COLORS && carried < values * NEAR_UNIQUE
+}
+
+/** The keys Color by offers: those whose values are not nearly unique per record (nearlyUnique). Pure. */
+export const colorKeys = (keys: readonly SourceKey[]): SourceKey[] => keys.filter((k) => !nearlyUnique(k))
 
 /** The choice when none is kept: the file's first key with at most the palette's values, else its first key, else Off. */
 export function defaultChoice(keys: readonly SourceKey[]): ColorChoice {
