@@ -1,4 +1,4 @@
-// The visual system's checks (thimble-cc-mod views/SPEC.md, section 8) over a reply that carries a card of each kind:
+// The visual system's checks (SPEC.md, section 8) over a reply that carries a card of each kind:
 // bold only on a card's title, a table's column names and the model's Markdown; green only on `new`; blue only on links,
 // `↗`, `?` and `↳`; no letters in a palette hue; one blank row under each card's title; every card in a full round border
 // in the rule grey; non-ASCII glyphs only from the symbol table; no centred row; no inverse at rest.
@@ -14,7 +14,7 @@ type Node = { type?: string; props?: Record<string, unknown>; children?: unknown
 const MESSAGE = (requestId: string, text: string) =>
   ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
 
-// views/SPEC.md, section 5: the glyphs the mod draws besides the corpus's and the model's words (braille apart)
+// SPEC.md, section 5: the glyphs thimble-term draws besides the corpus's and the model's words (braille apart)
 const SYMBOLS = new Set([...'○◌●!×✓❯?↳›‹↗▸▾⌕◆█▏▎▍▌▋▊▉▁▂▃▄▅▆▇─│├└┤┬┴╭╮╰╯→←↓↑┊▼▲…·'])
 const PALETTE = new Set(['#1d7fc0', '#b77300', '#00946a', '#b96895', '#8c65e8', '#927543', '#87861a'])
 

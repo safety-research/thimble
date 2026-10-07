@@ -1,4 +1,4 @@
-// The label panel as thimble-term draws it, the parts ported from thimble-cc-mod's round 8: its header as Matt wrote
+// The label panel as thimble-term draws it: its header as Matt wrote
 // it (`name:`, `type:`, `scope:`, the definition on the same column), `stop` while a run goes, a run's first error in
 // red, the labels list's digits. `claude plugin test mods/thimble-term`.
 import { expect, test } from 'claude-code/testing'

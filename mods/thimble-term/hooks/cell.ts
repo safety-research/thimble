@@ -1,5 +1,5 @@
 // A thimble card (a cell of a group file, workspaces/<c>/notebooks/<group>.json, as `thimble state card` prints it) in
-// thimble-cc-mod's drawing form (hooks/draw.ts CardData), so the mod's layouts draw it in the terminal. No `$`.
+// the drawing form of hooks/draw.ts (CardData), so its layouts draw it in the terminal. No `$`.
 //
 // The map of card kinds (the two-modes study): a table, a timeline, a diagram, an example and a label draw directly; a
 // simple bar or line chart (one Altair layer, x and y fields) draws as text; any other chart draws as a table of its
@@ -302,7 +302,7 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
 }
 
 /** A label card: its count per value in the label's order, with the records of the label's rows (each its value, its
- *  words and why, and whether the analyst set it), as thimble-cc-mod's label card draws them. */
+ *  words and why, and whether the analyst set it), drawn as a bar card with the label's row. */
 export function labelCard(cell: ThimbleCell, label: ThimbleLabel | null): CardData {
   const card = blank(cell, 'label')
   if (!label) return { ...card, kind: 'note', note: 'The label is being read.' }

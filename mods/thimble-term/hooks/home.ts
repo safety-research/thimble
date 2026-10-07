@@ -1,14 +1,12 @@
-// Copied from thimble-cc-mod's hooks/home.ts; thimble-term adds a file's `listed` state (neither its records nor its
-// reading is counted: the file shows its size and its kind where the mod shows its records and the share read).
-//
 // The home panel (/thimble-home, and the path row's first step): one panel listing what this folder's sessions made,
 // as thimble's workbench lists them in its tabs: views (built, building, proposed), reports, side threads (those with
 // answers not yet read first), cards grouped by the question that made them, labels with their counts, and the files
-// by folder with what this session read of them. Each is a click away from the panel that opens it.
+// by folder with what this session read of them. Each is a click away from the panel that opens it. A file in the
+// `listed` state counts neither its records nor its reading: it shows its kind and its size.
 //
 // This file lays the panel out as styled lines and their hit regions, without `$`; register.tsx gathers the data
 // (homeData), draws the lines in the Client homeview.tsx and acts on a click or a key. It follows the visual system
-// (views/SPEC.md, section 7, "Home"): one column; the title `Home`; a section heading bold with its count dim in
+// (SPEC.md, section 7, "Home"): one column; the title `Home`; a section heading bold with its count dim in
 // parentheses and `N new` in green, a blank row above it; an item's state glyph at A0 and its name at A2, regular,
 // its metadata dim against the right edge and `new` in green there while it is new; card groups and folders that fold
 // with `▸ ▾`, the newest group and the first folder open. Each line starts with the 2-cell margin, where `❯` marks the
@@ -107,7 +105,7 @@ export type HomeRow = {
  *  and its rows. `summary` says in words what the glyphs show (for the tests and a thread about the panel). */
 export type HomeSection = { id: SectionId; name: string; count: number; news?: number; heads?: Seg[]; summary: Seg[]; rows: HomeRow[]; pane?: HomeOpen; coverage?: string }
 
-// state glyphs (views/SPEC.md, "The visual system", section 5): done ● and working ◌ in the text colour, not started ○
+// state glyphs (SPEC.md, "The visual system", section 5): done ● and working ◌ in the text colour, not started ○
 // dim, a problem × or ! in red
 const DONE: Glyph = { mark: '●' }
 const WORKING: Glyph = { mark: '◌' }

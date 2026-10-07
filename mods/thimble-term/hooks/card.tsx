@@ -1,7 +1,7 @@
 // A card's insides as an interactive panel: a Client surface module, drawn on Claude Code's drawing thread (no `$`).
-// Copied from thimble-cc-mod's hooks/card.tsx and changed for thimble-term's card layout (Matt, 2026-10-07): the
-// border is the drawing's (reply.tsx cardBlock, a Box with a full round border in the rule grey and a cell of padding),
-// so the card's takeaway can stand inside it too; in it, the card's title in bold, one blank row, then the plot or body
+// The card layout is Matt's (2026-10-07; SPEC.md rule 4 and section 2, rule 11): the border is the drawing's (reply.tsx
+// cardBlock, a Box with a full round border in the rule gray and a cell of padding), so the card's takeaway can stand
+// inside it too; in it, the card's title in bold, one blank row, then the plot or body
 // directly; everything else the card shows below the plot: the readout row (the value under the pointer, plain, or
 // what thimble is doing to the card), the label rows, the params row. In the card pane the question is the panel's
 // title, so the region starts with the plot. The chart is text (block, braille and box-drawing characters), so the

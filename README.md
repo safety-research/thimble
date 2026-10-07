@@ -52,16 +52,16 @@ In a session started with `thimble`, type `/thimble` to start the thimble server
 
 > **Please note:** thimble connects the browser to your Claude Code session through the plugin's [hooks](https://code.claude.com/docs/en/hooks). If your settings or your organization turn the plugin's hooks off, thimble connects through a Monitor instead: permission prompts appear only in the terminal, you say `/thimble` again after `/clear` (in a session `thimble` started, you quit and run `thimble -c` instead, since thimble's sandbox lets out only the `/thimble` of the session it started), and `/thimble` prints a warning that says so. thimble's agents start through the plugin's hooks module, so where Claude Code's hooks modules are off (managed settings with `disableAllHooks` or `allowManagedHooksOnly`, or a folder Claude Code doesn't trust), they can't start. The launcher and the browser say so, and Claude, its threads, cards and labels still work.
 
-## Claude Code Mod (Experimental)
+## Terminal mode
 
-Thimble can also operate as a [Claude Code Mod](https://code.claude.com/docs/en/plugins/mods/overview) that operates directly in the Claude Code terminal UI, with no server or browser. Plots, verification links, and threads are all rendered in the terminal. The `thimble-cc-mod` plugin is experimental and may break.
+In terminal mode, thimble draws its work in the Claude Code terminal, with no server or browser: cards and citations appear under Claude's replies, and home, threads, labels, documents and files open in a panel beside the chat. Views still open in the browser, and `thimble mode browser` switches a folder back ([INSTALL.md](INSTALL.md#terminal-mode)).
 
-![thimble-cc-mod in the Claude Code terminal](docs/assets/thimble-cc-mod.png)
+![terminal mode: cards under a reply, and the citation panel beside the chat](docs/assets/thimble-term.png)
 
 ```
 cd <directory you want to analyze>
-thimble cc-mod on
-claude
+thimble mode terminal
+thimble
 ```
 
 ## Commands
@@ -91,7 +91,7 @@ claude
 | `thimble purge <id>... [-y] [--dry-run]` | delete workspaces or archived runs by id and print what was deleted (`--dry-run` only shows what would go); never your data folder or Claude Code's transcripts |
 | `thimble extension add <folder\|git URL>` | add an extension and switch it on, after showing what it gives |
 | `thimble extension list\|on\|off\|remove [<name>]` | list the extensions, switch one on or off everywhere, or remove it |
-| `thimble cc-mod on\|off\|status` | switch thimble-cc-mod, a single-agent thimble inside Claude Code, on or off in this folder ([INSTALL.md](INSTALL.md#thimble-cc-mod)) |
+| `thimble mode [browser\|terminal] [--default]` | where `thimble` in this folder shows its work: in the browser, or in the terminal with no server (`--default`: every folder without a mode of its own) ([INSTALL.md](INSTALL.md#terminal-mode)) |
 | `thimble plugin on\|off\|status` | thimble in every Claude Code session, or only in the sessions `thimble` starts |
 | `thimble doctor` | what is installed and running, and what is wrong |
 | `thimble feedback ["<what went wrong>"]` | write a problem report (a zip) and say where to send it; the top bar's bug icon does the same |

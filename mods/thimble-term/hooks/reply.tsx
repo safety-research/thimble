@@ -1,8 +1,8 @@
-// Main's chat as thimble-term draws it: a reply's text on the mod's grid (views/SPEC.md, "The visual system", "The
+// Main's chat as thimble-term draws it: a reply's text on the grid (SPEC.md, "The visual system", "The
 // chat column"), each citation a link, blue and underlined (red when its place does not hold its value), and the cards
 // the turn made under the turn's last reply, each once, in its last state and its border, its takeaway under it. Also
-// a side thread's answer and a document in the panel, on the panel's grid. Ported from thimble-cc-mod's register.tsx
-// drawReply (round 8), its data read from thimble-term's state (hooks/term.ts) instead of the mod's files.
+// a side thread's answer and a document in the panel, on the panel's grid. Its data comes from thimble-term's state
+// (hooks/term.ts).
 //
 // The model's Markdown is drawn as Claude Code draws it (bold bold, headings bold, inline code coloured); prose and
 // cards share one left edge (column 4, the ⏺ row's text) and one width (the terminal's), with no measure; a card has
@@ -106,7 +106,7 @@ export function linkCheck(l: TermLinks | undefined, c: Citation): { state?: stri
   return {}
 }
 
-/** A citation's status in plain words (views/SPEC.md, section 5, "Words that recur"): `◌ checking`, `found on the
+/** A citation's status in plain words (SPEC.md, section 5, "Words that recur"): `◌ checking`, `found on the
  *  card`, `found in revisions.jsonl line 10566`, `found in the command's output, line 1`, `found in …; its value is not
  *  checked` for words that show no value, `not found …`; after thimble's links check, `…, and a script got the same
  *  number`, `…, but a script got 5,883` or `…; ◌ being checked`. It agrees with the link's colour and mark. */
@@ -271,7 +271,7 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     )
   }
   // a blank row before a block that had a blank line before it; none under a heading (it belongs to what follows it),
-  // and none next to a card, whose border stands in for one (views/SPEC.md, rule 11)
+  // and none next to a card, whose border stands in for one (SPEC.md, rule 11)
   const gapBefore = (i: number): boolean => {
     const b = blocks[i]!
     const before = blocks[i - 1]

@@ -1,4 +1,4 @@
-// Main's chat as thimble-term draws it, the parts ported from thimble-cc-mod's round 8: a citation's state from
+// Main's chat as thimble-term draws it: a citation's state from
 // thimble's links check (◌, ✓, a red ×) and its tip in plain words, a heading's "?" asking about its section, the `↳`
 // beside a card a thread was asked about, the footer under a turn's answer, the `↳ thread` and `↳ view` rows, a citation
 // typed in the prompt, a reply as it streams, a card that cannot be read, a card's value checked again when the card

@@ -1,4 +1,4 @@
-// Each kind of thimble card in thimble-cc-mod's drawing form (hooks/cell.ts), and how it draws: the map of card kinds.
+// Each kind of thimble card in its drawing form (hooks/cell.ts), and how it draws: the map of card kinds.
 // `claude plugin test mods/thimble-term`.
 import { expect, test } from 'claude-code/testing'
 

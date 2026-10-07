@@ -4,7 +4,7 @@
 // makes goes through `thimble act` (hooks/data.ts). Its scope check: THIMBLE_WS names a workspace whose
 // trusted/launch.json has `mode: "terminal"`; anywhere else every hook passes through.
 //
-// What it draws (its look is views/SPEC.md's "The visual system", from thimble-cc-mod):
+// What it draws (its look is SPEC.md's "The visual system"):
 //   - main's replies on the mod's grid, each citation a link, red when its place does not hold its value (reply.tsx)
 //   - each card a turn of main added or changed, once, under the turn's last reply, in its last state, its takeaway
 //     under it; no hex id, and Claude Code's tool groups left folded
@@ -275,7 +275,7 @@ function hasText(content: unknown): boolean {
   return Array.isArray(content) && content.some(b => b && typeof b === 'object' && (b as { type?: unknown }).type === 'text' && String((b as { text?: unknown }).text ?? '').trim() !== '')
 }
 
-/** The rows a side thread's answer leaves under a row of main's chat (signal.ts, views/SPEC.md "Main's chat"), one
+/** The rows a side thread's answer leaves under a row of main's chat (signal.ts, SPEC.md "Main's chat"), one
  *  blank row above the first: `↳` at column 0 and its words at 2, dim (`thread · "<the turn's question>" · answered`,
  *  `failed` in red), `new` in green until it is read; a press on the question opens the thread. Each turn once. */
 async function signalRows(cx: Ctx, e: ResolveInput & { requestId: string; viewport?: { columns: number } }): Promise<RenderElement | null> {
@@ -320,7 +320,7 @@ async function anchorName(cx: Ctx, anchor: string): Promise<string> {
   return anchor
 }
 
-/** The `↳ view` rows under a row of main's chat (views/SPEC.md, "Main's chat"): a view main proposed, `↳` dim at 0,
+/** The `↳ view` rows under a row of main's chat (SPEC.md, "Main's chat"): a view main proposed, `↳` dim at 0,
  *  `view · <name> · building|built|proposed` dim, `failed` in red, then `new` in green once built and not yet opened;
  *  a press on its name opens its line in the panel. */
 async function viewRowsEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promise<RenderElement | null> {
@@ -344,7 +344,7 @@ async function viewRowsEl(cx: Ctx, e: ResolveInput & { requestId: string }): Pro
   return <Box flexDirection="column">{out}</Box>
 }
 
-/** The footer under a turn's answer (views/SPEC.md, "Main's chat"), one blank row under it at column 4: `N citations ·
+/** The footer under a turn's answer (SPEC.md, "Main's chat"), one blank row under it at column 4: `N citations ·
  *  N cards` dim, ` · N problems` in red (counted from the checks as they stand now), then `ask about this answer ›`. The
  *  facts are cut first; the problems stay whole. */
 async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promise<RenderElement | null> {
@@ -717,7 +717,7 @@ export const register: Register = on => {
           <Box key="above-home" flexDirection="row">
             {label('thimble')}
             <Box flexDirection="row" columnGap={2} flexShrink={1}>
-              {/* the word `new` in green, as wherever it shows (views/SPEC.md, rule 8) */}
+              {/* the word `new` in green, as wherever it shows (SPEC.md, rule 8) */}
               <Text wrap="truncate-end">{words.split(/( new )/).map((w, i) => (w === ' new ' ? <Text key={`new-${i}`}>{' '}<Text color={COLORS.fresh}>new</Text>{' '}</Text> : w))}</Text>
               <Button key="above-home-open" label="open ›" plain onPress={() => void openHome(cx)} />
             </Box>
@@ -725,7 +725,7 @@ export const register: Register = on => {
         )
       }
     }
-    // side threads show as `↳ thread` rows under main's latest row and as `N new` on the panel's path row (views/SPEC.md,
+    // side threads show as `↳ thread` rows under main's latest row and as `N new` on the panel's path row (SPEC.md,
     // "Main's chat"): no row of their own here
     if (!rows.length) return next(e)
     return <Box flexDirection="column">{rows}</Box>

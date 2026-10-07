@@ -33,7 +33,7 @@ export function citeLabel(c: Citation): string {
   return c.display ?? chipLabel(c)
 }
 
-/** The glyph of a citation being worked on: running (views/SPEC.md, "The visual system", section 5). */
+/** The glyph of a citation being worked on: running (SPEC.md, "The visual system", section 5). */
 export const SPIN = '◌'
 
 /** A verification that failed: its script recomputed another value, crashed, printed no result, or was never written. */
@@ -525,20 +525,6 @@ export function fixItems(text: string, problems: Problem[]): ChatFixItem[] {
   return items
 }
 
-/** What the fix round's forked subagent is asked: each passage and its problems, answered with each sentence
- *  rewritten whole, one line per passage. `thread`: the side thread's answer the passages are in, which the fork's
- *  conversation does not hold; absent for main's last reply. */
-export function fixPrompt(items: ChatFixItem[], thread?: string): string {
-  const whose = thread === undefined ? 'your last reply has' : "a side thread's answer, which the analyst reads in the panel, has"
-  return [
-    `thimble-cc-mod: ${whose} problems the analyst sees in red. Fix them here: rerun or fix a card's script, or cite the value the place shows. Do not change the corpus; write only under .thimble-cc-mod/.`,
-    ...(thread === undefined ? [] : ['The answer:', thread, '', 'Its problems:']),
-    ...items.map((it, i) => `${i + 1}. ${it.old}\n   ${it.problems.map(p => (p.raw === it.old ? p.why : `${p.raw}: ${p.why}`)).join('; ')}`),
-    'Then answer with one line per item and nothing else: `<n>: <the corrected item>`, or `<n>: CANNOT <why>`.',
-    'thimble-cc-mod puts each corrected item in place of the old one. Give a sentence whole, rewritten so that every word of it agrees with the corrected values (a comparison, a ranking, a share such as "about a third"), its citations included; a table row whole, its cells between | as before; a card by its embed line.',
-  ].join('\n')
-}
-
 export type FixAnswer = { ok: true; text: string } | { ok: false; why: string }
 
 /** The fix round's answer for each of `n` items: its corrected text, or why it could not be corrected. */
@@ -801,7 +787,7 @@ function runMarkdown(r: Run, n: number, link: (c: Citation, n: number) => string
   return s
 }
 
-/** A block thimble-cc-mod used to draw itself (a paragraph, heading, list item, quote or table holding citations) as
+/** A block that holds citations (a paragraph, heading, list item, quote or table) as
  *  Markdown the engine draws, each citation a link, so its text selects like any reply's and a plain click on a
  *  citation is a press. */
 export function richMarkdown(block: { prefix: string; heading: number; quote: boolean; runs: Run[]; table?: TableRuns }, link: (c: Citation, n: number) => string): string {

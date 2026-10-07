@@ -1,4 +1,4 @@
-// Cards as thimble-term draws them, the parts ported from thimble-cc-mod's round 8: the title a hot spot, the card
+// Cards as thimble-term draws them: the title a hot spot, the card
 // pane's last run, `run again` and its code's output, a card's label rows and colours from the labels it read, a
 // timeline's start time said once, a label that is not in the workspace. `claude plugin test mods/thimble-term`.
 import { expect, test } from 'claude-code/testing'

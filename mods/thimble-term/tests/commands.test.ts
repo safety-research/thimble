@@ -1,5 +1,5 @@
-// `/thimble <what>` in terminal mode: keyboard ways to what the chat and the panel draw (thimble-cc-mod's /thimble-threads,
-// /thimble-cite, /thimble-card, /thimble-files, /thimble-reports). `claude plugin test mods/thimble-term`.
+// `/thimble <what>` in terminal mode: keyboard ways to what the chat and the panel draw (`/thimble threads`, `cite`,
+// `card`, `files` and `documents`). `claude plugin test mods/thimble-term`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 

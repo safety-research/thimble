@@ -1,5 +1,5 @@
-// The panel: thimble-term's one pane, drawn by the view `panel` names (hooks/term.ts), on the panels' look of
-// thimble-cc-mod (views/SPEC.md, "The visual system": rules 1 to 15, sections 2 and 7). A cell of padding at each side,
+// The panel: thimble-term's one pane, drawn by the view `panel` names (hooks/term.ts), on the panel's look in SPEC.md
+// ("The visual system": rules 1 to 15, sections 2 and 7). A cell of padding at each side,
 // then the 2-cell margin where `❯`, `?` and `↳` hang, then the type area. Every view opens with the path row
 // (`‹ back`, the steps from home, `show all threads` and `N new` in green at R), its title in the accent colour and bold
 // with a dim subtitle, a rule; its actions sit at its bottom after a second rule; a dim italic row of key hints ends it.
@@ -230,7 +230,7 @@ function upOf(s: ChatNavStep, earlier: readonly ChatNavStep[]): TermPanel | null
   return null
 }
 
-/** The path row (views/SPEC.md, "A panel's header"): `‹ back`, the steps from home, each a lower-case kind word and its
+/** The path row (SPEC.md, "A panel's header"): `‹ back`, the steps from home, each a lower-case kind word and its
  *  name parted by a dim ›, each a click away, a thread's step followed by `new` in green while answers wait; at R `show
  *  all threads` and `N new` in green. The threads panel leaves those out. */
 async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElement> {
@@ -428,7 +428,7 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
 // the home panel's last layout, which a key steps through
 let homeLast: HomeLayout | null = null
 
-/** The home panel (views/SPEC.md, "Home"), drawn from home.ts's lines: a click on a row opens it, on a heading its
+/** The home panel (SPEC.md, "Home"), drawn from home.ts's lines: a click on a row opens it, on a heading its
  *  section's panel, on a group or folder folds it; ↑↓ choose a row, Enter opens it and Space folds it. */
 async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const { Box, Text } = cx.els(e)
@@ -506,7 +506,7 @@ async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ a card
 
-/** A card in the panel (views/SPEC.md, "Cards", the card pane): its question is the panel's title; its kind, who made
+/** A card in the panel (SPEC.md, "Cards", the card pane): its question is the panel's title; its kind, who made
  *  it and how its last run ended (`last run failed` in red) the dim subtitle; the card in its border, its takeaway
  *  under it; at the bottom `code  run again  ask about it` (`◌ running` while it runs). Its code (`mode: code`)
  *  through the `Code` element with its gutter at A0, then `output`, the last 8 lines its run printed; `card  run again
@@ -574,7 +574,7 @@ function shifted(raw: string, p: number): number {
   return demojibake(raw.slice(0, p)).replace(/\t/g, '  ').length
 }
 
-/** The cited lines nested at A2 (views/SPEC.md, section 7, "The citation panel"): each line's number right-aligned in
+/** The cited lines nested at A2 (SPEC.md, section 7, "The citation panel"): each line's number right-aligned in
  *  a dim column (the cited one's in the text colour), its text after a gutter; a cited line wrapped over 3 to 8 rows
  *  (by the pane's rows) around the value or the quoted passage on the selection background; two lines of context
  *  around the cited ones when a cited line wraps; a long context line cut with `…` around its value. */
@@ -749,7 +749,7 @@ async function followUpField(cx: Ctx, e: PaneEvent, about: string): Promise<Rend
   )
 }
 
-/** The citation panel (views/SPEC.md, section 7, "The citation panel"): the title is the cited value, bold, blue and
+/** The citation panel (SPEC.md, section 7, "The citation panel"): the title is the cited value, bold, blue and
  *  underlined (a link to its place; red when the value is not there), ◌ after it while it is checked and a red × for a
  *  problem; the subtitle its status in plain words; under the rule `from` and `source` (the sentence it stands in, the
  *  value in it a link), then the cited lines nested at A2 with the value (or the passage an example quotes) on the
@@ -812,7 +812,7 @@ function firstSentence(text: string): string {
   return end ? flat.slice(0, end.index + 1) : flat
 }
 
-/** A new side thread (views/SPEC.md, section 7, "The threads panel", a thread with no question yet): `about <what>`
+/** A new side thread (SPEC.md, section 7, "The threads panel", a thread with no question yet): `about <what>`
  *  as its dim subtitle, the first sentence of the passage dim on one row, then the `ask` field, which has the keys. */
 async function drawAsk(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   if (e.surface === 'mobile') return none(cx, e, 'A side thread needs a surface with text fields.')
@@ -884,7 +884,7 @@ function threadLine(t: ChatThread): Seg {
   return dim(first.replace(/\*\*|__|`/g, '').trim() || 'answered')
 }
 
-/** The threads panel (views/SPEC.md, section 7, "The threads panel"): its title and a dim subtitle; under the rule the
+/** The threads panel (SPEC.md, section 7, "The threads panel"): its title and a dim subtitle; under the rule the
  *  tree, a root per place a thread was asked from (`main`, or `report "…"`) with a blank row between them, each thread
  *  under the thread it was asked from, its question in quotation marks with guides, the first line of its latest
  *  answer dim under it, `N questions` dim and `new` in green at R; the selected thread (`❯`, accent) under the second
@@ -1091,7 +1091,7 @@ export async function fieldMessage(cx: Ctx, name: string, text: string, save: bo
   if (save && text.trim()) await saveLabelEdits(cx, m[1]!, { body: text.trim() })
 }
 
-/** The label panel, after the browser's label editor (views/SPEC.md, section 7, "The label panel"): its header block,
+/** The label panel, after the browser's label editor (SPEC.md, section 7, "The label panel"): its header block,
  *  the label's name in the accent and bold after a ● in its colour, its type (prompt, regex or code: the one in use on
  *  the selection background) and its scope (the files, editable, and how many records), then the rule; the prompt (or
  *  pattern or code) in a field to edit, Enter saving it (`thimble act label`); `run on a sample` and `run on all N`,
@@ -1363,7 +1363,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
 // the labels list's chosen row
 let labelPick = ''
 
-/** The labels (views/SPEC.md, "The label panel", the labels list): one row per label, its kind and last run dim at R,
+/** The labels (SPEC.md, "The label panel", the labels list): one row per label, its kind and last run dim at R,
  *  `❯` on the chosen one; under the second rule `describe a new label`, whose words go to main. */
 async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const els = cx.els(e) as El
@@ -1403,7 +1403,7 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
 // the documents list's chosen row
 let docPick = ''
 
-/** The documents (views/SPEC.md, section 7, "Reports"): one row per document, ◌ while its writer writes, ● written,
+/** The documents (SPEC.md, section 7, "Documents"): one row per document, ◌ while its writer writes, ● written,
  *  its title, its kind dim at R; `❯` on the chosen row, ↑↓ or j k choose, Enter or a click opens it, 1-9 the first
  *  nine; at most 40. */
 async function drawDocs(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
@@ -1489,7 +1489,7 @@ function stepFocus(s: DocSection): Record<string, Focus> {
   return out
 }
 
-/** One document (views/SPEC.md, section 7, "A report"): the title in the accent and bold, wrapped; while its writer
+/** One document (SPEC.md, section 7, "A document"): the title in the accent and bold, wrapped; while its writer
  *  writes, `◌ writing · N tool calls · <its latest words>` (and the request until anything is written). A report:
  *  `Contents` from three headings, each a click (or 1-9) away; each section drawn as main's chat draws a reply. A deck
  *  or a story steps one slide or beat at a time: `‹ 3 of 9 ›`, `previous  next` (p, n), a deck's `notes` (o), a
@@ -1641,7 +1641,7 @@ function opensAs(page: Obj | undefined): string {
   return 'lines'
 }
 
-/** The file browser (views/SPEC.md, section 7, "The file browser"): a folder per group, which folds; an open folder
+/** The file browser (SPEC.md, section 7, "The file browser"): a folder per group, which folds; an open folder
  *  shows its first 20 files (`… N more` shows them all), each `●` in its type's hue (dim in a folder of one type), its
  *  name cut in its middle; `❯` and the accent on the chosen file, whose name, what it opens as and its first lines show
  *  under the second rule; Enter or a second click opens it, Space folds its folder. */
@@ -1832,7 +1832,7 @@ function cellText(v: unknown): string {
   return JSON.stringify(v)
 }
 
-/** A file (views/SPEC.md, "The file browser", a file): its name as the title; under it its kind, its records and the
+/** A file (SPEC.md, "The file browser", a file): its name as the title; under it its kind, its records and the
  *  lines shown of how many, `earlier  later` at R; the tabs `Table  Transcript  Raw` as its records read (1 2 3); the
  *  record chosen (a citation's, a click's, ↑↓) on the selection background, its place a link and a blue `?` under the
  *  view; ← or Backspace back to the file browser. Raw: each line's number right-aligned in a dim column, a Markdown
@@ -2038,7 +2038,7 @@ async function drawAgent(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
 // the views list's chosen row
 let viewPick = ''
 
-/** The views pane (views/SPEC.md, section 7, "Views"): `N views · N built`; one row per view, newest first, its glyph
+/** The views pane (SPEC.md, section 7, "The views pane"): `N views · N built`; one row per view, newest first, its glyph
  *  (● built, ◌ building, ○ proposed, × failed in red) and its name, the files it claims dim at R and `new` in green
  *  until a built one is opened (no word that repeats the glyph); `❯` on the chosen row, ↑↓ or j k choose, Enter or a
  *  click opens it, 1-9 the first nine. */

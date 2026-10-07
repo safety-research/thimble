@@ -110,12 +110,8 @@ NO_CLAUDE_FOUND = "the `claude` CLI was not found (not on PATH, not at ~/.local/
 NO_CLAUDE = f"{NO_CLAUDE_FOUND}: install Claude Code, or name its path with THIMBLE_CLAUDE_BIN"
 
 # thimble's marketplace (install.sh registers this tree under its name: thimble in a checkout, thimble-local from a
-# release zip) lists two plugins: thimble and thimble-cc-mod (mods/thimble-cc-mod), a single-agent thimble inside
-# Claude Code. They are switched on independently (`thimble cc-mod on|off` changes only the mod, in the folder's
-# settings). Every session thimble starts, main and its agents' sessions, turns the mod off in its --settings
-# (without_mod), so the two never run in one session; `claude` started in a folder where the mod is on loads it.
+# release zip) lists one plugin, thimble (./plugin)
 MARKETPLACE_FILE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
-MOD_PLUGIN = "thimble-cc-mod"
 
 
 def marketplace_name() -> str:
@@ -125,16 +121,6 @@ def marketplace_name() -> str:
     except (OSError, ValueError, AttributeError):
         return ""
     return name if isinstance(name, str) else ""
-
-
-def without_mod(settings: dict[str, Any]) -> dict[str, Any]:
-    """`settings` (the --settings of a session thimble starts: main's or an agent's) with thimble-cc-mod of
-    this install's marketplace off in `enabledPlugins`, the analyst's other entries kept."""
-    name = marketplace_name()
-    if not name:
-        return settings
-    enabled = settings.get("enabledPlugins")
-    return {**settings, "enabledPlugins": {**(enabled if isinstance(enabled, dict) else {}), f"{MOD_PLUGIN}@{name}": False}}
 
 
 # --------------------------------------------------------------------------- the kernel wrapper

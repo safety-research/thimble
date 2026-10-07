@@ -1,4 +1,4 @@
-// The citation panel as thimble-term draws it, the parts ported from thimble-cc-mod's round 8: the cited mark lit on a
+// The citation panel as thimble-term draws it: the cited mark lit on a
 // card (a cited row past the drawn rows too), the passage an example's record quotes, a tab before the value, a problem's
 // mark and reason, the follow-up field of a citation opened from a side thread. `claude plugin test mods/thimble-term`.
 import { expect, test } from 'claude-code/testing'

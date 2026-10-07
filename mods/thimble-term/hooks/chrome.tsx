@@ -1,7 +1,7 @@
 // The panels' chrome, after Claude Code's own panels (its Artifacts and Background panels): a title in the accent
 // colour and bold with a dim subtitle under it, tabs with the selected one inverse, a bordered search box, bold section
 // headings with a dim count, `❯` and the accent on the selected row, metadata dim against the right edge, and a dim
-// italic row of key hints at the end (views/SPEC.md, "The visual system", rules 5 to 9 and section 7).
+// italic row of key hints at the end (SPEC.md, "The visual system", rules 5 to 9 and section 7).
 //
 // Two forms of each part: as styled lines (Line), for the panels a Client draws from lines and hits (home.ts, the
 // threads tree, the lists), and as elements, for the panels register.tsx, harness.tsx and reports.tsx draw with Box and

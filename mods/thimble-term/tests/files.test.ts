@@ -1,4 +1,4 @@
-// The file browser and a file as thimble-term draws them, the parts ported from thimble-cc-mod's round 8: a name cut in
+// The file browser and a file as thimble-term draws them: a name cut in
 // its middle, a folder of one type's dim dots, what a file opens as, Space to fold; a file opened at a cited record with
 // that record lit and its place and `?` under the view; a transcript by thimble's sniff, its tool calls folded; a table
 // of records sorted by a column; ← back to the files; a file that cannot be read. `claude plugin test mods/thimble-term`.

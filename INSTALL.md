@@ -189,19 +189,15 @@ are checked, and the episodes are drawn as `multiagent-swimlane` cards, the card
 actions main chose. Test builds called it `swarm`: the commands still take that name for this release, and what was
 set for it carries over.
 
-## thimble-cc-mod
+## Terminal mode
 
-thimble-cc-mod is a single-agent thimble inside Claude Code, an exploration that ships with thimble as a second plugin
-of its marketplace. Claude answers with cards drawn in the chat and citations you can check, with no server, browser or
-background agents. Switch it on in a folder with `thimble cc-mod on`, which asks first, then writes the folder's
-`.claude/settings.json` through `claude plugin`; then run `claude` there. When Claude Code does not know thimble's
-marketplace yet (a default install doesn't register it), `on` lists its registration from the install's folder among
-the steps it asks about and runs it first. That adds no plugin to your sessions, and `thimble
-uninstall` takes it back. `thimble cc-mod off` undoes it, and `thimble
-cc-mod status` says whether each of the two plugins is on in the folder. They are switched independently: `on` and `off`
-leave the thimble plugin as it is. Sessions you start with `thimble`, with the agents thimble starts in them, and the jobs thimble's server
-starts (classifier calls, task programs and `thimble fix`), run without the mod; plain `claude` in the folder uses
-it. To use it without installing thimble, see the [mod's README](mods/thimble-cc-mod/README.md).
+`thimble mode terminal` in a folder, then `thimble` there, starts Claude Code with thimble's plugin and its terminal
+renderer ([mods/thimble-term](mods/thimble-term/README.md)), with no server, port or browser. Cards and citations are
+drawn under Claude's replies, and home, threads, cards, citations, labels, documents and files open in a panel beside
+the chat. Views are not drawn in the terminal: a view's line says to open it in browser mode. `thimble mode terminal
+--default` makes terminal mode the default for every folder that has no mode of its own, `thimble mode browser`
+switches a folder back, and `thimble mode` says which mode a folder starts in. A workspace is open in one mode at a
+time.
 
 ## Demo datasets
 
@@ -265,8 +261,8 @@ until `thimble server restart`.
 ## Uninstall
 
 `thimble uninstall` asks, then removes the trust entry an earlier install added, the plugin registration that put
-thimble in every Claude Code session, if there is one (or the marketplace `thimble cc-mod on` registered, which turns
-thimble-cc-mod off in the folders it is on in), `~/.local/bin/thimble`, the lines install.sh added to your shell's
+thimble in every Claude Code session, if there is one (or thimble's marketplace, when an earlier version registered it
+without the plugin), `~/.local/bin/thimble`, the lines install.sh added to your shell's
 startup files (and a startup file it created, once nothing else is in it), and `~/.thimble`, which holds a Global
 install's workspaces. `--keep-home` keeps `~/.thimble`. A clone stays where it is, and so does a downloaded headless Chromium, in
 Playwright's cache folder.

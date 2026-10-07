@@ -1,12 +1,12 @@
-// thimble-term's state contract: every value the hooks module keeps in $.state, and the types the drawing files copied
-// from thimble-cc-mod name (the Chat* types, copied from thimble-cc-mod's types/index.d.ts as they are).
+// thimble-term's state contract: every value the hooks module keeps in $.state, and the types the drawing files name
+// (the Chat* types).
 //
 // thimble-term keeps no data of its own: each value is what one `thimble state` call printed (hooks/data.ts) and what
 // the screen shows now, and it is read again when the workspace changes.
 
-// ------------------------------------------------------------------ copied from thimble-cc-mod (drawing files use them)
+// ------------------------------------------------------------------------------------- the drawing files' types
 
-/** A verification script for one citation (thimble-cc-mod; thimble-term runs none). */
+/** A verification script for one citation (thimble-term runs none). */
 export type ChatVerify = {
   id: string
   state: string
@@ -60,7 +60,7 @@ export type ChatHomeUi = { folded: string[]; unfolded: string[]; more: string[];
 
 // ------------------------------------------------------------------------------------------------- thimble-term's own
 
-/** A card as thimble-term draws it: the card in thimble-cc-mod's drawing form (hooks/draw.ts CardData, as JSON), its
+/** A card as thimble-term draws it: the card in its drawing form (hooks/draw.ts CardData, as JSON), its
  *  takeaway, its state words (`waiting for its run`, `running`, an error), and what the cell carried that the drawing
  *  reads (its group, who made it, its label). `rev` counts the reads, so a drawing reads it again. */
 export type TermCard = {

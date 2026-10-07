@@ -1,4 +1,4 @@
-// Documents as thimble-term draws them, the parts ported from thimble-cc-mod's round 8: a report's contents a click
+// Documents as thimble-term draws them: a report's contents a click
 // away, a passage's thread told the document and its section, the writer's state while it writes, the retell controls,
 // the documents list's keys, a story stepped beat by beat with its figure lit at the beat's step.
 // `claude plugin test mods/thimble-term`.

@@ -15,7 +15,7 @@ type BoxC = ElementConstructor<BoxProps>
 // left out for problems, each hue's lightness moved so it keeps 3:1 on white, the light panel, black and the dark panel
 export const SERIES = ['#1d7fc0', '#b77300', '#00946a', '#b96895', '#8c65e8', '#927543', '#87861a'] as const
 
-// What each colour means (views/SPEC.md, "The visual system", section 4): letters in the text colour or dim; lines in
+// What each colour means (SPEC.md, "The visual system", section 4): letters in the text colour or dim; lines in
 // the rule grey; links in blue; a panel's title and its selected row in the accent; the word "new" in green; a palette
 // hue only on the glyphs and marks of a region's one colour field; red only for a problem; the selection background on
 // a choice in use. No other colour: no warning amber, and no green but "new".

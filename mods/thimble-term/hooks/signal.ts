@@ -8,9 +8,8 @@
 //
 // The row stands under the latest row of main's chat a hook of the mod can draw a line under (its anchor): a text row
 // of main's reply, the analyst's prompt, the line saying how long a turn took, or a command's output. They are drawn by
-// the uuid they were stored under (their `requestId`), which a resumed session keeps, so the rows, the anchor and the
-// answers read are kept in .thimble-cc-mod/signals.json and come back with `claude --resume`. register.tsx keeps the
-// state and draws; this file holds the rules, without `$`.
+// the uuid they were stored under (their `requestId`), which a resumed session keeps. register.tsx keeps the rows by
+// that uuid in the plugin's state (`threadRows`) and draws; this file holds the rules, without `$`.
 import type { ChatSignal, ChatThread } from '../types'
 import { plainCites } from './cite'
 

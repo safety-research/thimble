@@ -1,5 +1,4 @@
-// Which refs name a file of the folder and the record they cite (copied from thimble-cc-mod's hooks/files.ts, without
-// the parts about the mod's own file views, which thimble-term does not draw).
+// Which refs name a file of the folder and the record they cite.
 
 /** The file a ref cites and the record in it: a line (`#L<n>`, a range's first), a JSON list's item (`#/<i>` or
  *  `#/<key>/<i>`, counted from 1 as the file's view counts them), or the whole file. Null for a ref of no file of the

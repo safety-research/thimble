@@ -6,7 +6,7 @@
 # The `thimble` command loads thimble's plugin into the sessions it starts either way. `on` adds it to every Claude Code
 # session, so /thimble works in any `claude` session: it registers this install's folder as a Claude Code marketplace
 # and installs thimble from it at user scope (~/.claude/settings.json and ~/.claude/plugins). `off` takes back what `on`
-# added. thimble-cc-mod is switched on its own (`thimble cc-mod on`), and `off` keeps the marketplace while it is on.
+# added.
 set -euo pipefail
 # How it works (not printed by --help):
 # A registration from another install's folder is never changed unasked: `on` names that install, and only on a
@@ -17,8 +17,7 @@ set -euo pipefail
 
 plugin_regs() {  # the thimble plugins Claude Code lists, a line each: ours or other, the marketplace, and the folder that
   # marketplace was added from (else what its source is). Only a marketplace added from this install's folder is ours.
-  # Also a line "mod", the marketplace and the folder, for each folder where thimble-cc-mod from ours is on.
-  # Fails when the lists can't be read
+  # Fails when the lists can't be read. The lists stay in $tmp (plugins.json, markets.json), which install.sh reads again
   [ "$have_claude" = 1 ] && command -v python3 >/dev/null 2>&1 || return 1
   claude plugin list --json > "$tmp/plugins.json" 2>/dev/null || return 1
   claude plugin marketplace list --json > "$tmp/markets.json" 2>/dev/null || return 1
@@ -48,8 +47,6 @@ for p in plugins:
     if name == "thimble" and market:
         w = where.get(market, "a marketplace Claude Code does not list")
         print("ours" if w == mine else "other", market, w, sep="\t")
-    elif name == "thimble-cc-mod" and market and where.get(market) == mine:
-        print("mod", market, p.get("projectPath") or "a folder", sep="\t")
 PY
 }
 
@@ -57,15 +54,13 @@ plugin_record() {  # the earlier answer ($home/plugin.json) and the thimble plug
   # marketplace of the one added from this install's folder, the only registration changed unasked; other_reg and
   # other_from, one added from anywhere else, which is another install's. Without the record, this install's own
   # registration counts as an earlier yes. When Claude Code's lists can't be read, plugin_kept is the registration the
-  # record names, which is then left as it is, and plugin_known=0. mod_in: the folders where thimble-cc-mod from this
-  # install's marketplace is on, which a `claude plugin marketplace remove` would turn it off in
-  plugin_prev="" plugin_reg="" plugin_kept="" other_reg="" other_from="" mod_in="" plugin_known=1
+  # record names, which is then left as it is, and plugin_known=0
+  plugin_prev="" plugin_reg="" plugin_kept="" other_reg="" other_from="" plugin_known=1
   local regs kind m w
   [ ! -f "$home/plugin.json" ] || plugin_prev="$(json_get "$home/plugin.json" answer)"
   if regs="$(plugin_regs)"; then
     while IFS=$'\t' read -r kind m w; do
-      if [ "$kind" = mod ]; then mod_in="${mod_in:+$mod_in, }$w"
-      elif [ "$kind" = ours ]; then plugin_reg="$m"
+      if [ "$kind" = ours ]; then plugin_reg="$m"
       elif [ "$kind" = other ] && [ -z "$other_reg" ]; then other_reg="$m" other_from="$w"; fi
     done <<< "$regs"
     [ -f "$home/plugin.json" ] || [ -z "$plugin_reg" ] || plugin_prev=yes
@@ -150,12 +145,7 @@ plugin_apply() {  # plugin_apply ANSWER: yes registers the tree as a marketplace
     return 0
   fi
   left="${plugin_reg:-$plugin_kept}"
-  if [ -n "$plugin_reg" ] && [ -n "$mod_in" ]; then  # the marketplace stays: removing it turns thimble-cc-mod off too
-    if run claude plugin uninstall "thimble@$plugin_reg"; then
-      left=""
-      note "kept marketplace \"$plugin_reg\", since thimble-cc-mod from it is on in $mod_in; thimble uninstall removes it"
-    fi
-  elif [ -n "$plugin_reg" ] && run claude plugin uninstall "thimble@$plugin_reg" && run claude plugin marketplace remove "$plugin_reg"; then left=""; fi
+  if [ -n "$plugin_reg" ] && run claude plugin uninstall "thimble@$plugin_reg" && run claude plugin marketplace remove "$plugin_reg"; then left=""; fi
   plugin_write no "$left"
   if [ -n "$left" ]; then
     warn "thimble is still in every Claude Code session: claude plugin uninstall thimble@$left && claude plugin marketplace remove $left takes it out"

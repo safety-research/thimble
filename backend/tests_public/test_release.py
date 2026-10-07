@@ -15,12 +15,8 @@ from app import config
 NEEDS = pytest.mark.skipif(not shutil.which("zip") or not shutil.which("git"), reason="release.sh needs zip and git")
 
 
-# a stand-in for mods/: thimble-cc-mod, the marketplace's second plugin, thimble-term, the terminal-mode renderer, and a
-# file beside them that does not ship
-MOD_FILES = {"mods/thimble-cc-mod/.claude-plugin/plugin.json": '{"name": "thimble-cc-mod", "version": "0.1.0"}\n',
-             "mods/thimble-cc-mod/hooks/hooks.json": "{}\n",
-             "mods/thimble-cc-mod/tests/test_mod.py": "def test_it():\n    pass\n",
-             "mods/thimble-term/.claude-plugin/plugin.json": '{"name": "thimble-term", "version": "0.1.0"}\n',
+# a stand-in for mods/: thimble-term, the terminal-mode renderer, and a file beside it that does not ship
+MOD_FILES = {"mods/thimble-term/.claude-plugin/plugin.json": '{"name": "thimble-term", "version": "0.1.0"}\n',
              "mods/thimble-term/hooks/register.tsx": "export const register = () => {}\n",
              "mods/thimble-term/tests/render.test.ts": "test\n",
              "mods/notes.md": "not shipped\n"}
@@ -144,24 +140,24 @@ def test_the_zip_carries_the_plugin_s_hooks_module_without_its_tests(tmp_path):
 
 
 @NEEDS
-def test_the_zip_carries_thimble_cc_mod_and_its_marketplace_lists_both_plugins_under_the_install_s_name(tmp_path):
-    """mods/thimble-cc-mod and mods/thimble-term ship without their tests, and nothing else under mods/; the zip's
-    marketplace lists thimble and thimble-cc-mod under the --marketplace-name, thimble-local by default (the `thimble`
-    command loads thimble-term from its folder). A plugin the marketplace lists without its folder in the zip stops the
-    release."""
+def test_the_zip_carries_thimble_term_and_its_marketplace_lists_thimble_under_the_install_s_name(tmp_path):
+    """mods/thimble-term ships without its tests, and nothing else under mods/; the zip's marketplace lists the thimble
+    plugin alone under the --marketplace-name, thimble-local by default (the `thimble` command loads thimble-term from
+    its folder), and keeps the marketplace's renames. A plugin the marketplace lists without its folder in the zip stops
+    the release."""
     root = small_repo(tmp_path)
     r, files, meta = release(root, tmp_path / "out", read=(".claude-plugin/marketplace.json",))
     assert r.returncode == 0, r.stderr
-    assert {"mods/thimble-cc-mod/.claude-plugin/plugin.json", "mods/thimble-cc-mod/hooks/hooks.json"} <= files
     assert {"mods/thimble-term/.claude-plugin/plugin.json", "mods/thimble-term/hooks/register.tsx"} <= files
-    assert not {f for f in files if f.startswith("mods/") and not f.startswith(("mods/thimble-cc-mod/", "mods/thimble-term/"))}
-    assert "mods/thimble-cc-mod/tests/test_mod.py" not in files
+    assert not {f for f in files if f.startswith("mods/") and not f.startswith("mods/thimble-term/")}
     assert "mods/thimble-term/tests/render.test.ts" not in files
     market = json.loads(meta[".claude-plugin/marketplace.json"])
     assert market["name"] == "thimble-local"
-    assert {p["name"]: p["source"] for p in market["plugins"]} == {"thimble": "./plugin",
-                                                                  "thimble-cc-mod": "./mods/thimble-cc-mod"}
-    git(root, "rm", "-q", "-r", "mods/thimble-cc-mod")
-    git(root, "commit", "-q", "-m", "no mod")
+    assert {p["name"]: p["source"] for p in market["plugins"]} == {"thimble": "./plugin"}
+    ours = json.loads((config.REPO_ROOT / ".claude-plugin" / "marketplace.json").read_text())
+    assert market.get("renames") == ours.get("renames")
+    listed = root / ".claude-plugin" / "marketplace.json"
+    listed.write_text(json.dumps({**ours, "plugins": [*ours["plugins"], {"name": "gone", "source": "./mods/gone"}]}))
+    git(root, "commit", "-q", "-am", "a plugin without its folder")
     r, files, _ = release(root, tmp_path / "out2")
-    assert r.returncode != 0 and "./mods/thimble-cc-mod" in r.stderr
+    assert r.returncode != 0 and "./mods/gone" in r.stderr

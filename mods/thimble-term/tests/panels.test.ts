@@ -1,4 +1,4 @@
-// The panel as thimble-term draws it, the parts ported from thimble-cc-mod's round 8: the threads panel (roots per
+// The panel as thimble-term draws it: the threads panel (roots per
 // place, what a thread is about, stop, its keys, a question that waits), a new thread's passage, the trail of a thread
 // asked from a thread, the pane's titles, a draft in the prompt, home (views, documents, threads, files, coverage) and
 // the views pane. `claude plugin test mods/thimble-term`.

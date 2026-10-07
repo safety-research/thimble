@@ -136,7 +136,7 @@ async function labelFor(cx: Ctx, id: string): Promise<ThimbleLabel | null> {
   return l
 }
 
-/** The label rows of a card that read labels (views/SPEC.md, "Cards", the label row): each label's name, its values in
+/** The label rows of a card that read labels (SPEC.md, "Cards", the label row): each label's name, its values in
  *  their colours, the value of each record it marked (from the label's rows), and whether it changed since the card ran
  *  (the cell's `label_revs`, concepts.stale_in). */
 export function cardLabelsOf(cell: ThimbleCell, labels: readonly ThimbleLabel[]): CardLabel[] {
