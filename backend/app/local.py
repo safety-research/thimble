@@ -319,12 +319,13 @@ def ui_records(c: str, after: int = 0) -> list[dict[str, Any]]:
 
 
 STATE_USAGE = ("thimble state <surface> --cwd <dir> [args]; surfaces: home, cards [--since <iso>], card <id>, labels, "
-               "label <id>, docs, doc <slug>, threads, thread <id> [--after <n>], agents [--tail <n>], "
+               "label <id> [--rows <json>], docs, doc <slug>, threads, thread <id> [--after <n>], agents [--tail <n>], "
                "files [path] [--start <n>], turns <path> [--start <n>] [--line <n>], opens <paths json>, "
                "resolve <refs json>, ui [--after <n>]")
 
 
 LABEL_ROWS = 3  # records per value `state label` gives with their words (rows)
+LABEL_ROWS_MAX = 200  # records per value `state label --rows` gives at most, the label panel's `… N more` pages
 LABEL_VERDICT_ROWS = 6  # records per value the analyst set or agreed with that `state label` adds to them
 OPENS_MAX = 100  # files one `state opens` reads the head of
 FILE_PAGE = 200  # lines of a file `state files <file>` gives, the renderer's page (its earlier and later steps)
@@ -502,18 +503,31 @@ async def _label(c: str, args: list[str], pos: list[str]) -> Any:
     if found is None:
         raise StateError(f"no label {pos[0]!r}")
     out = await concepts.get_concept_route(c, str(found["id"]))
+    # `--rows {"<value>": n}`: n records of that value in place of LABEL_ROWS, as the browser's examples page through
+    # them (`N more`)
+    raw = _flag(args, "--rows")
+    try:
+        asked = json.loads(raw) if raw else {}
+    except ValueError as e:
+        raise StateError(f"--rows: not JSON ({e})") from None
+    if not isinstance(asked, dict):
+        raise StateError('--rows takes a JSON object of rows per value, such as {"yes": 13}')
     # the examples the label card shows under its bars, per value (the browser asks the rows route for them), and a
     # page of records per value as the rows route gives them with their words (text=1): each with its value, why, and
-    # the analyst's verdict, which the renderer's label card draws with agree and disagree
+    # the analyst's verdict, which the renderer's label card draws with agree and disagree; `totals` how many records
+    # have each value, so the panel says how many more there are
     ex: dict[str, list[dict[str, str]]] = {}
     rows: list[dict[str, Any]] = []
+    totals: dict[str, int] = {}
     # the records the analyst set or agreed with, under the value they gave: a record set to another value stays in the
     # list under that value (its row comes last among the store's, past the page each value shows)
     judged = await asyncio.to_thread(_verdict_rows, c, str(found["id"]))
     for value in out.get("labels") or []:
         pairs = await asyncio.to_thread(concepts.examples, c, str(found["id"]), str(value))
         ex[str(value)] = [{"ref": r, "text": t} for r, t in pairs]
-        page = await concepts.rows_route(c, str(found["id"]), value=str(value), limit=LABEL_ROWS, text=True)
+        n = _int(str(asked[value]), LABEL_ROWS, "--rows") if value in asked else LABEL_ROWS
+        page = await concepts.rows_route(c, str(found["id"]), value=str(value), limit=max(1, min(n, LABEL_ROWS_MAX)), text=True)
+        totals[str(value)] = int(page.get("total") or 0)
         mine = [r for r in judged if r.get("analyst") == value][:LABEL_VERDICT_ROWS]
         refs = {r.get("ref") for r in mine}
         rows += mine + [r for r in page.get("rows") or [] if isinstance(r, dict) and r.get("ref") not in refs]
@@ -521,7 +535,10 @@ async def _label(c: str, args: list[str], pos: list[str]) -> Any:
     # how many records that is (the label panel's counts, and its `set by you`)
     applied, moved = await asyncio.to_thread(concepts.verdicts_applied, ws, str(found["id"]), dict(out.get("counts") or {}))
     scope = await asyncio.to_thread(_scope_total, c, out)
-    return {**out, "examples": ex, "rows": rows, "verdicts": {"counts": applied, "set": moved},
+    # the value of this label its scope's filter keeps (a label card's value, the Labels pane's funnel), else None
+    f = concepts.read_filters(ws).get(concepts.SCOPE_OF_UNIT.get(str(out.get("unit")), "files")) or {}
+    return {**out, "examples": ex, "rows": rows, "totals": totals, "verdicts": {"counts": applied, "set": moved},
+            "filter": f.get("value") if f.get("concept") == found["id"] else None,
             **({"scope_total": scope} if scope is not None else {})}
 
 
@@ -797,7 +814,8 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 
 
 ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
-             "verdict {label, ref, value}, label {label, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, label-delete {label}, seen {thread}, "
+             "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, "
+             "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colours?}, label-filter {label, value?}, seen {thread}, "
              "hand-back {thread}, stop {agent}")
 
 
@@ -862,9 +880,9 @@ async def _act_verdict(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 async def _act_label(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """The analyst's edit of a label in the terminal's label panel, saved as the browser's label editor saves it (PUT
-    /concepts/{id}, concepts.update_concept_route; LabelCard's patchOf): `kind` (prompt, regex or code), `body` (a prompt
-    label's prompt, else its pattern or code), `glob` (the files it applies to) and `values`. A field left out stays as it
-    is."""
+    /concepts/{id}, concepts.update_concept_route; LabelCard's patchOf): `name`, `kind` (prompt, regex or code), `body` (a
+    prompt label's prompt, else its pattern or code), `glob` (the files it applies to) and `values`. A field left out stays
+    as it is."""
     from . import concepts  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -872,6 +890,8 @@ async def _act_label(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     if found is None:
         raise StateError(f"no label {payload.get('label')!r}")
     patch: dict[str, Any] = {}
+    if payload.get("name") is not None:
+        patch["name"] = _text(payload, "name")
     kind = str(payload["kind"]).strip().lower() if payload.get("kind") is not None else found["kind"]
     if payload.get("kind") is not None:
         patch["kind"] = kind
@@ -888,7 +908,7 @@ async def _act_label(c: str, payload: dict[str, Any]) -> dict[str, Any]:
             raise StateError("`values` needs two values or more")
         patch["labels"] = [v for v in values if v]
     if not patch:
-        raise StateError("nothing to change: give kind, body, glob or values")
+        raise StateError("nothing to change: give name, kind, body, glob or values")
     out = await asyncio.to_thread(concepts.update_concept_route, c, str(found["id"]), concepts.ConceptPatch(**patch))
     return {"label": found["id"], "concept": out}
 
@@ -987,6 +1007,69 @@ async def _act_label_delete(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"label": cid, "name": found["name"], "deleted": True}
 
 
+async def _act_label_undelete(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Undo the delete of label `label` (its id), as the top bar's Undo does right after it (POST /undo, undo.undo): the
+    label back with its marks, its card and its filters. Only while that delete is the change an undo reverts next, so
+    no later change is undone with it."""
+    from . import concepts, undo  # noqa: PLC0415
+
+    cid = _text(payload, "label").removeprefix("concept:")
+    # on the loop, as the undo route runs, where the restored card's stream records are emitted
+    undo.undo(c, ("label", cid))
+    k = concepts.read_concept(config.workspace_dir(c), cid)
+    return {"label": cid, "name": (k or {}).get("name") or "", "restored": k is not None}
+
+
+async def _act_label_show(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A label over files turned on or off in Files and the views (`on`), its values highlighted while it is on
+    (`values`), or its values given colors by name (`colours`, concepts.COLOUR_NAMES), as the Labels pane's toggle and
+    palette do and show_label does (concepts.show_concept). It runs nothing."""
+    from . import concepts  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    found = concepts.find_concept(ws, _text(payload, "label"))
+    if found is None:
+        raise StateError(f"no label {payload.get('label')!r}")
+    on = payload.get("on")
+    if on is not None and not isinstance(on, bool):
+        raise StateError("`on` must be true or false")
+    values = payload.get("values")
+    if values is not None and not (isinstance(values, list) and all(isinstance(v, str) for v in values)):
+        raise StateError("`values` must be a list of the label's values")
+    colours = payload.get("colours")
+    if colours is not None and not (isinstance(colours, dict) and all(isinstance(v, str) for v in colours.values())):
+        raise StateError("`colours` must map values to color names")
+    if on is None and not colours:
+        raise StateError("nothing to change: give on or colours")
+    k = await asyncio.to_thread(concepts.show_concept, c, str(found["id"]), on, values, colours)
+    return {"label": k["id"], "shown": bool(k["shown"]), "classes": k["classes"]}
+
+
+async def _act_label_filter(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep only the units label `label` gives `value`, as a label card's value or the Labels pane's funnel does (PUT
+    /filters, concepts.set_filter): the filter of the label's scope, Files for a label over files (which turns it on with
+    that value alone highlighted), the canvas for one over cards, the report for one over sentences. With no `value`, the
+    scope's filter goes when it names this label (DELETE /filters/{scope})."""
+    from . import concepts  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    found = concepts.find_concept(ws, _text(payload, "label"))
+    if found is None:
+        raise StateError(f"no label {payload.get('label')!r}")
+    cid = str(found["id"])
+    scope = concepts.SCOPE_OF_UNIT[found["unit"]]
+    value = " ".join(str(payload.get("value") or "").split())
+    if not value:
+        f = concepts.read_filters(ws).get(scope) or {}
+        if f.get("concept") == cid:
+            await asyncio.to_thread(concepts.clear_filter, c, scope)
+        return {"label": cid, "scope": scope, "filter": None}
+    if value not in found["labels"]:
+        raise StateError(f"the label {found['name']!r} has no value {value!r}; its values are {', '.join(found['labels'])}")
+    await asyncio.to_thread(concepts.set_filter, c, scope, cid, value)
+    return {"label": cid, "scope": scope, "filter": value}
+
+
 async def _act_seen(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """The analyst opened a thread: its answers so far are seen (threads.mark_seen)."""
     from . import threads  # noqa: PLC0415
@@ -1020,8 +1103,9 @@ async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "label": _act_label,
-         "label-run": _act_label_run, "label-stop": _act_label_stop, "label-delete": _act_label_delete, "seen": _act_seen,
-         "hand-back": _act_hand_back, "stop": _act_stop}
+         "label-run": _act_label_run, "label-stop": _act_label_stop, "label-delete": _act_label_delete,
+         "label-undelete": _act_label_undelete, "label-show": _act_label_show, "label-filter": _act_label_filter,
+         "seen": _act_seen, "hand-back": _act_hand_back, "stop": _act_stop}
 
 
 # --------------------------------------------------------------------------- the command line
