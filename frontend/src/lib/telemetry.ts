@@ -26,6 +26,7 @@ export const CLIENT_KINDS = [
   'thread-rename',
   'thread-delete',
   'thread-ask-again',
+  'thread-hand-back',
   'chat-retry',
   'ask-send',
   'notebook-switch',

@@ -1884,6 +1884,9 @@ export interface ChatMeta {
   /** main only: the orientation's status from orient/run.json (requested, starting, running, done, failed, stopped or
    * refused), null before any orientation was asked for */
   orientation?: string | null
+  /** a thread, as the chat route gives it: `offer` once its latest question's run ended with an answer the analyst can
+   * hand back to main, `handed` once they did, '' while it runs or has none (backend threads.hand_back_state) */
+  hand_back?: 'offer' | 'handed' | ''
   /** a dev ticket's agent chat: the ticket it runs (dev.py) */
   ticket?: string | null
   /** a view ticket's agent chat: the slug of the proposal it builds (dev.run_view) */

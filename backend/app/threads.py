@@ -657,12 +657,98 @@ def session_ended(c: str, sid: str) -> None:
             agents.notify(c, tid)
 
 
-def reply(c: str, thread_id: str, text: str, *, by: str) -> None:
+POSTED_KEY = "posted"  # on a reply record: the words the fork posted with `reply_in_thread` (latest_answer)
+
+
+def reply(c: str, thread_id: str, text: str, *, by: str, posted: bool = False) -> None:
     """The thread's visible reply: a `text` record marked `reply`, so the fold shows it as the model's message and
-    fork_finished knows the run answered."""
+    fork_finished knows the run answered. Every reply is this one record, its citations in their chat form
+    (cite.from_links), so the browser and the terminal check them as they check any answer's; `posted` marks one
+    `reply_in_thread` wrote, which is the thread's answer when the fork also wrote other text (latest_answer)."""
     _, log_path = agents.paths(c, thread_id)
-    agents.append(log_path, {"type": "text", "delta": cite.from_links(text), "reply": True, "by": by})
+    agents.append(log_path, {"type": "text", "delta": cite.from_links(text), "reply": True, "by": by,
+                             **({POSTED_KEY: True} if posted else {})})
     agents.notify(c, thread_id)
+
+
+# --------------------------------------------------------------------------- hand back to main
+
+HANDED_KEY = "handed_answer"  # on a thread's meta: the log index of the answer the analyst handed back to main
+HAND_BACK_KEY = "hand_back"  # on a thread's meta as the chat and state routes give it (hand_back_state)
+OFFER, HANDED = "offer", "handed"
+HAND_BACK_QUESTION_CHARS = 300  # of the question the message to main names
+
+
+def latest_answer(records: list[dict[str, Any]]) -> tuple[int, str, str] | None:
+    """The answer to the thread's latest question once its run ended (a `done` record): (the log index of its last
+    reply, the question on one line, the answer's words), or None while it runs, before any question, or when its run
+    ended without a reply. Its words are what the fork posted with `reply_in_thread` (each post, in order), else its last
+    reply: the fork's last text, or its closing `↳` note (session._note_reply)."""
+    question, replies, ended = "", [], False
+    for i, r in enumerate(records):
+        kind = r.get("type")
+        if kind == "user":
+            question, replies, ended = str(r.get("text") or ""), [], False
+        elif kind == "again":  # the question asked again: a new run answers it
+            replies, ended = [], False
+        elif kind == "text" and r.get("reply") and str(r.get("delta") or "").strip():
+            replies.append((i, r))
+        elif kind == "done":
+            ended = True
+    if not replies or not ended:
+        return None
+    posted = [str(r.get("delta") or "").strip() for _, r in replies if r.get(POSTED_KEY)]
+    words = "\n\n".join(posted) if posted else str(replies[-1][1].get("delta") or "").strip()
+    return replies[-1][0], " ".join(question.split()), words
+
+
+def hand_back_state(c: str, meta: dict[str, Any], records: list[dict[str, Any]] | None = None) -> str:
+    """Whether the analyst can hand the thread's answer back to main: `offer` once its latest question has an answer and
+    its run ended, `handed` once they handed that answer back (HANDED_KEY), '' while it runs or has no answer. A later
+    question's answer is offered again."""
+    tid = str(meta.get("id") or "")
+    if meta.get("kind") != agents.KIND_THREAD or not tid or agents.running(c, tid):
+        return ""
+    if records is None:
+        records = agents.read_events(agents.paths(c, tid)[1])
+    got = latest_answer(records)
+    if got is None:
+        return ""
+    return HANDED if meta.get(HANDED_KEY) == got[0] else OFFER
+
+
+def hand_back_text(question: str, answer: str) -> str:
+    """The message to main that hands a thread's answer back, in the analyst's name: `From thread "<question>":
+    <answer>`, the answer with its citations as the thread holds them."""
+    q = question if len(question) <= HAND_BACK_QUESTION_CHARS else question[: HAND_BACK_QUESTION_CHARS - 1].rstrip() + "…"
+    return f'From thread "{q}": {answer}'
+
+
+def hand_back(c: str, thread_id: str) -> dict[str, Any]:
+    """Hand the thread's latest answer back to main: a `main` event in the analyst's name, which main's chat shows as
+    their message (events.post) and main answers as any message; the answer is then `handed` (hand_back_state). 400 for
+    a chat that is no thread or a thread with no answer, 409 while it runs, when that answer was handed back already, or
+    when no session listens."""
+    from . import events, ledger  # noqa: PLC0415
+
+    meta_path, log_path = agents.paths(c, thread_id)
+    with ledger.locked(meta_path):
+        meta = agents.read_meta(c, thread_id)
+        if meta.get("kind") != agents.KIND_THREAD:
+            raise HTTPException(400, f"{thread_id} is not a thread")
+        if agents.running(c, thread_id):
+            raise HTTPException(409, "the thread is still answering; hand its answer back once it ends")
+        got = latest_answer(agents.read_events(log_path))
+        if got is None:
+            raise HTTPException(400, "the thread has no answer to hand back")
+        index, question, words = got
+        if meta.get(HANDED_KEY) == index:
+            raise HTTPException(409, "this answer was handed back to main already")
+        text = hand_back_text(question or str(meta.get("title") or thread_id), words)
+        posted = events.post(c, events.MAIN, {"text": text})
+        agents.update_agent(c, thread_id, **{HANDED_KEY: index})
+    log.info("%s: thread %s: its answer was handed back to main (event %s)", c, thread_id, posted.get("id"))
+    return {"thread": thread_id, "event": posted.get("id"), "text": text, HAND_BACK_KEY: HANDED}
 
 
 SEEN_KEY = "seen"  # on a thread's meta: how many of its log's records the analyst had when they last opened it
@@ -726,7 +812,7 @@ async def tool_reply_in_thread(ctx: Any, args: dict[str, Any]) -> Any:
     if not is_thread(ctx.c, thread_id):
         threads = [m["id"] for m in agents.list_chats(ctx.c) if m.get("kind") == agents.KIND_THREAD]
         return tools.err(f"reply_in_thread: no thread {thread_id!r}; the threads are {', '.join(threads) or '(none)'}")
-    reply(ctx.c, thread_id, text, by=ctx.cell_author)
+    reply(ctx.c, thread_id, text, by=ctx.cell_author, posted=True)
     return tools.ok(f"replied in thread {thread_id}")
 
 
