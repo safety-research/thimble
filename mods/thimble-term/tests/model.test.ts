@@ -9,7 +9,7 @@ import { showsValue } from '../hooks/cite'
 import { signalEnd } from '../hooks/signal'
 import { threadState } from '../hooks/nav'
 import { labelCard } from '../hooks/cell'
-import { agentsOf, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelCountNow, labelIdOf, labelLinkStale, labelOf, labelsOf, namedForks, namedThreads, recordLine, resolutionOf, runShown, saysWriter, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from '../hooks/model'
+import { agentsOf, aroundLine, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelCountNow, labelIdOf, labelLinkStale, labelOf, labelsOf, namedForks, namedThreads, recordLine, resolutionOf, runShown, saysWriter, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from '../hooks/model'
 import { turnTimes, wrapRows } from '../hooks/draw'
 import { AGENTS, CELLS, RESOLVE, STATES, THREAD_T1, THREADS } from './fixtures'
 
@@ -265,6 +265,20 @@ test("a JSON line's citation: the records around it one line each, as Raw draws 
   expect(recordLine({ line: 1, record: { text: 'plain words' } })).toBe('plain words')
   expect(recordLine({ line: 1, record: { _raw: '{not json' } })).toBe('{not json')
   expect(jsonLine({ a: [1, { b: null }], c: 'x' })).toBe('{"a": [1, {"b": null}], "c": "x"}')
+})
+
+test("a citation's lines around the cited one are drawn as the cited one is: a transcript's words beside its words, JSON beside JSON", () => {
+  // live check term-fix10, low quirk: the cited line of agent-chat.jsonl read as its words, the lines around it as JSON
+  const said = (i: number) => ({ speaker: 'beta', ts: `2026-06-2${i}T09:00:00Z`, text: `message ${i} of the chat` })
+  const rec = (line: number, r: Record<string, unknown>) => ({ line, record: r, blocks: [{ kind: 'text', text: String(r.text) }] })
+  const res = { kind: 'span', path: 'agent-chat.jsonl', line: 4, record: said(4), blocks: [{ kind: 'text', text: said(4).text }], excerpt: 'message 4', context: { before: [2, 3].map(i => rec(i, said(i))), after: [5, 6].map(i => rec(i, said(i))) } }
+  const v = verdictOf(citations('[[agent-chat.jsonl#L4.b0:c0-9]]')[0]!, res as never)
+  expect(v.lines.map(l => l.text)).toEqual(['message 2 of the chat', 'message 3 of the chat', 'message 4 of the chat', 'message 5 of the chat', 'message 6 of the chat'])
+  expect(v.lines.map(l => l.hit)).toEqual([false, false, true, false, false])
+  // a record thimble reads no words in (its one block the record itself) stays its line of JSON
+  expect(aroundLine({ line: 1, record: { a: 1 }, blocks: [{ kind: 'raw', text: '{\n  "a": 1\n}' }] })).toBe('{"a": 1}')
+  // words over several rows read on one
+  expect(aroundLine({ line: 1, record: {}, blocks: [{ kind: 'text', text: 'one\ntwo' }, { kind: 'tool_use', text: 'Bash ls' }] })).toBe('one two Bash ls')
 })
 
 test("main's fork of a thread runs with the thread's question as its description; its prompt keeps `thread:<name>`", () => {

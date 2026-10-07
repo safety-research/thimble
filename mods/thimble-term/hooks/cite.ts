@@ -14,9 +14,9 @@
 // - Streaming: a reply's text as the engine shows it while it streams, citations as links and card lines as
 //   placeholders, before the mod draws the finished block.
 import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from '../types'
-import { lineWidth, width } from './draw'
+import { lineWidth, placeWords, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, asReference, chipLabel, cid, citations, citeEnd, citeSpans, dayMonth, linksAsSpans, parseReply, placeOnly, plainLinks, prefix, shownMatches, valueIn, windowAt } from './lib'
+import { EMBED_RE, bareCard, cardWords, chipLabel, chipPlace, chipText, chipWords, cid, citations, citeEnd, citeSpans, dayMonth, isChip, labelRef, linksAsSpans, outputLine, parseReply, plainLinks, prefix, questionOf, reportRef, shownMatches, valueIn, windowAt, withoutOwnParens } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -25,12 +25,26 @@ import { COLORS } from './paint'
  *  could not correct it or its verification failed (another value, a crash, no script). */
 export type ChipState = 'link' | 'problem' | 'fixing' | 'failed'
 /** `mark` is ✓ (a script recomputed the value), × (failed) or nothing; `spin` while a fix round or a verification works
- *  on the citation, drawn as ◌. */
-export type ChipView = { label: string; state: ChipState; mark: string; spin: boolean; tip: string }
+ *  on the citation, drawn as ◌. `chip`: a citation with no words of its own, drawn as `[ card ]` (its label holds the
+ *  brackets), whole on one row and not underlined. */
+export type ChipView = { label: string; state: ChipState; mark: string; spin: boolean; tip: string; chip?: boolean }
 
 /** What a citation's link says: its shown value whole, or a short name of the place for one without a value. */
 export function citeLabel(c: Citation): string {
   return c.display ?? chipLabel(c)
+}
+
+/** A chip's place in full words, where a link with a tip is not drawn (a thread's subject): a card by its question
+ *  (`card "How many pages…"`), a line a card printed (`card "…" output line 1`), a file's line (`events.jsonl line 12`),
+ *  a command's output, a label or a document by its name; the chip's words while that name is not known. */
+export function chipName(c: Citation): string {
+  const named = chipPlace(c)
+  if (named) return named
+  const out = outputLine(c.ref)
+  if (out) return out.words
+  const card = bareCard(c) || /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(c.ref)?.[1] || ''
+  if (card) return questionOf(card) ? cardWords(questionOf(card)) : chipWords(c)
+  return labelRef(c.ref) || reportRef(c.ref) ? chipWords(c) : placeWords(c.ref)
 }
 
 /** The glyph of a citation being worked on: running (SPEC.md, "The visual system", section 5). */
@@ -63,9 +77,10 @@ export function chipLook(status: string | undefined, fix: string | undefined, ve
 }
 
 /** A citation as styled segments: its label blue and underlined (red with a problem), in inverse under the pointer, so
- *  its blue becomes the background; then ◌ while it is worked on or its mark: ✓ in the text colour, × in red. */
+ *  its blue becomes the background; a chip (`[ card ]`) blue with no underline, its brackets marking it; then ◌ while it
+ *  is worked on or its mark: ✓ in the text colour, × in red. */
 export function chipSegs(c: ChipView, hover: boolean, _frame = 0): Seg[] {
-  const segs: Seg[] = [{ s: c.label, fg: c.state === 'link' ? COLORS.link : COLORS.problem, u: true, ...(hover ? { inv: true } : {}) }]
+  const segs: Seg[] = [{ s: c.label, fg: c.state === 'link' ? COLORS.link : COLORS.problem, ...(c.chip ? {} : { u: true }), ...(hover ? { inv: true } : {}) }]
   // the mark a cell apart from the value, as the spinner is: `19,931 ✓`, not `19,931✓`
   if (c.spin) segs.push({ s: ` ${SPIN}`, ...(c.state === 'link' ? {} : { fg: COLORS.problem }) })
   else if (c.mark) segs.push({ s: ` ${c.mark}`, ...(c.mark === '✓' ? {} : { fg: COLORS.problem }) })
@@ -155,9 +170,10 @@ function tokens(runs: Run[], chips: ChipView[], k0: number, hover: number, frame
   let k = k0
   for (const r of runs) {
     if (r.cite) {
-      const c: ChipView = chips[k] ?? { label: citeLabel(r.cite), state: 'link', mark: '', spin: false, tip: '' }
+      const c: ChipView = chips[k] ?? { label: citeLabel(r.cite), state: 'link', mark: '', spin: false, tip: '', ...(isChip(r.cite) ? { chip: true } : {}) }
       const [label, ...after] = chipSegs(c, k === hover, frame)
-      const parts = label!.s.split(/(\s+)/).filter(Boolean)
+      // a chip is one word, kept whole on its row; a value's words wrap like the words around it
+      const parts = c.chip ? [label!.s] : label!.s.split(/(\s+)/).filter(Boolean)
       parts.forEach((part, i) => {
         const space = /^\s+$/.test(part)
         const segs: Seg[] = [{ ...label!, s: space ? ' ' : part }]
@@ -409,25 +425,14 @@ export function claimsIn(text: string, answer: string): Claim[] {
   return out
 }
 
-/** A text with each citation as its shown words, for a line the analyst reads where no link is drawn; `places` false
- *  for a tool's own words, where a citation that names only its place reads as its place, not in parentheses. */
-export function plainCites(text: string, places = true): string {
-  // a citation written as a Markdown link reads as its `[[…]]` spelling; a citation that names only its place (a card
-  // cited whole, a card's printed line: placeOnly) reads as a reference in parentheses, as the reply draws it
-  // (` (card "How…" output line 1)`), unless main put it in parentheses itself (live check term-fix6, new quirk 5)
-  const spans = linksAsSpans(text)
-  return plainLinks(
-    citations(spans).reduce((t, c) => {
-      if (!places || !placeOnly(c)) return t.replaceAll(c.raw, citeLabel(c))
-      return t.split(c.raw).reduce((acc, part, i) => {
-        if (i === 0) return part
-        if (!asReference(c, part)) return `${acc}${citeLabel(c)}${part}`
-        const own = /\(\s*$/.test(acc)
-        const head = own ? acc : acc.replace(/\s+$/, '')
-        return `${head}${own ? '' : head ? ' (' : '('}${citeLabel(c)}${own ? '' : ')'}${part}`
-      }, '')
-    }, spans),
-  )
+/** A text with each citation as its shown words, for a line the analyst reads where no link is drawn (a preview: the
+ *  threads tree's answer row, the New thread view's passage, a caption, a `source` row): a chip (a citation with no
+ *  words of its own) as `[ card ]`, as the reply draws it (Matt, 2026-10-07), without the brackets main put around it;
+ *  `chips` false for a tool's own words in Claude Code's rows, where a chip reads as its words (`events.jsonl line 12`). */
+export function plainCites(text: string, chips = true): string {
+  // a citation written as a Markdown link reads as its `[[…]]` spelling first
+  const spans = withoutOwnParens(linksAsSpans(text))
+  return plainLinks(citations(spans).reduce((t, c) => t.replaceAll(c.raw, c.display ?? (chips ? chipText(c) : chipWords(c))), spans))
 }
 
 // ---------------------------------------------------------------------------------------- a cited record

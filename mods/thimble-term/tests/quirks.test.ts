@@ -6,6 +6,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { KEPT_FILE, parseKept, resetKept } from '../hooks/kept'
+import { fixedNote } from '../hooks/reply'
 import { CWD, DOC, WS, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -34,7 +35,7 @@ async function turn($: E, w: World, uuid: string, text: string): Promise<void> {
   await w.clock.advance(300)
 }
 
-test("a link to a label or to a document's passage with no words of its own names it in words, never by its id; a click opens it", async ($, on) => {
+test("a link to a label or to a document's passage with no words of its own is a chip by its name, never by its id; its tip names it in full; a click opens it", async ($, on) => {
   // live check term-fix8, quirk 3: `[↗](concept:eb534ca4)` drew as `concept:eb534ca4`, `[↗](report:report#4255ef27)` as
   // `↗ (report:report#4255ef27)`
   const w = world(on)
@@ -50,11 +51,14 @@ test("a link to a label or to a document's passage with no words of its own name
   expect(para).not.toMatch(/concept:|report:/)
   const chips = ((await ui.find({ type: 'Client', key: 'para-1' })) as unknown as ChipProps).props.props.chips
   // a label's value with a space, encoded, is a link too (live check term-fix9: `[40](concept:…/mentions%20June)`)
-  expect(chips.map(c => c.label)).toEqual(['label "links through a fetch proxy"', '"One week of June holds most saves."', 'report "Agents used the dse wiki as a…"', '5191'])
+  expect(chips.map(c => c.label)).toEqual(['[ links through a fetch proxy ]', '[ report ]', '[ report ]', '5191'])
+  expect(chips[0]!.tip).toBe('label "links through a fetch proxy" · opens the label')
+  expect(chips[1]!.tip).toMatch(/^report "One week of June holds most saves\." · /)
+  expect(chips[2]!.tip).toMatch(/^report "Agents used the dse wiki as a relay/)
   expect(chips[3]!.tip).toContain('opens the label at its value "proxy link"')
-  expect(para).toContain('The report says so ("One week of June holds most saves.").')
-  // a click on the passage's link opens the document at the section that holds it
-  const at = para.indexOf('"One week')
+  expect(para).toContain('The label [ links through a fetch proxy ] counts the proxy links. The report says so [ report ]. See the report [ report ].')
+  // a click on the passage's chip opens the document at the section that holds it
+  const at = para.indexOf('[ report ]')
   await ui.pointer({ type: 'down', x: at + 2, y: 0, button: 'left', in: 'para-1' } as never)
   await ui.pointer({ type: 'up', x: at + 2, y: 0, button: 'left', in: 'para-1' } as never)
   await ui.unmount()
@@ -148,6 +152,13 @@ test('after a relaunch the toast counts what came before the quit and was never 
   expect(parseKept(w.files.get(`${WS}/${KEPT_FILE}`) ?? '').seen?.cards).toBe(14)
 })
 
+test('the card check\'s note is a sentence whatever its reason looks like', () => {
+  expect(fixedNote({ fields: ['takeaway'], why: 'The takeaway highlights only which day had the most deletes.' })).toBe('The card check rewrote its takeaway: the takeaway highlights only which day had the most deletes.')
+  expect(fixedNote({ fields: ['title', 'takeaway'], why: 'UTC hours were read as local ones' })).toBe('The card check rewrote its question and takeaway: UTC hours were read as local ones.')
+  expect(fixedNote({ fields: ['code'], why: '' })).toBe('The card check rewrote its code.')
+  expect(fixedNote({ fields: ['takeaway'], why: '  the count was off by one..  ' })).toBe('The card check rewrote its takeaway: the count was off by one.')
+})
+
 test('a card the card check rewrote says so under its takeaway: which parts, and why', async ($, on) => {
   // live check term-fix8, low quirk: the card check rewrote takeaways with nothing in the chat saying so
   const w = world(on)
@@ -157,6 +168,7 @@ test('a card the card check rewrote says so under its takeaway: which parts, and
   await w.clock.settle()
   await takesKeys($)
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('the card check rewrote its takeaway: the takeaway named the wrong hour')
+  // a sentence: a capital, the reason after the colon in lower case, a full stop (item e2-card-check-note-format)
+  expect(shown(await pane.drawn())).toContain('The card check rewrote its takeaway: the takeaway named the wrong hour.')
   await pane.unmount()
 })

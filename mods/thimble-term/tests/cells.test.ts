@@ -5,8 +5,9 @@ import { expect, test } from 'claude-code/testing'
 import { busyWords, cardOfCell, htmlTable, labelCard, linksOf, sortedBars } from '../hooks/cell'
 import type { ThimbleCell } from '../hooks/cell'
 import { cardLayout, cut, placeWords, share } from '../hooks/draw'
-import { chipLabel, citations, clip, cutLine, cutMiddle, dateIn, dateSpans, formatted, itemsRow, labelState, labelStateWords, noteQuestion, quoted, recordFields, valueIn, windowAt } from '../hooks/lib'
-import { plainCites } from '../hooks/cite'
+import { CHIP_MAX, chipLabel, citations, clip, cutLine, cutMiddle, dateIn, dateSpans, formatted, itemsRow, labelState, labelStateWords, noteLabelName, noteQuestion, quoted, recordFields, valueIn, width, windowAt } from '../hooks/lib'
+import { chipName, plainCites } from '../hooks/cite'
+import { targetLabel } from '../hooks/gestures'
 import { crumbsWidth, fitCrumbs } from '../hooks/nav'
 import { hintLines } from '../hooks/chrome'
 import type { BarRow, Cell } from '../hooks/draw'
@@ -281,33 +282,67 @@ test("a label example's fields cut at whole pairs, never `·…` or a key withou
   expect(cutLine('Words of a Markdown file run on past the room they have here', 30)).toBe(cut('Words of a Markdown file run on past the room they have here', 30))
 })
 
-test("a place cited with a passage of its line reads as its line; a card's printed line by the card's question and the output's line", () => {
+test("a place cited with a passage of its line reads as its line; a chip names its place short, a card `card`, a file's line by the file's name and the line", () => {
   // live check term-fix5, new quirks 3 and 4: `↗ agent-chat.jsonl#L2.b0:c0-120`, and `card L1`
   expect(placeWords('collusion-wiki/agent-chat.jsonl#L2.b0:c0-120')).toBe('collusion-wiki/agent-chat.jsonl line 2')
   expect(placeWords('collusion-wiki/agent-chat.jsonl#L2.b1')).toBe('collusion-wiki/agent-chat.jsonl line 2')
-  // a file's place in words, never `agent-chat:2`, which reads as an id (live check term-fix9, low quirk)
-  expect(chipLabel({ raw: '[[agent-chat.jsonl#L2.b0:c0-120]]', ref: 'agent-chat.jsonl#L2.b0:c0-120', display: null })).toBe('agent-chat line 2')
-  expect(chipLabel({ raw: '[[agent-chat.jsonl#L1-L2]]', ref: 'agent-chat.jsonl#L1-L2', display: null })).toBe('agent-chat lines 1-2')
-  expect(chipLabel({ raw: '[[a/collusion-wiki-revisions-of-every-page.jsonl#L10879]]', ref: 'a/collusion-wiki-revisions-of-every-page.jsonl#L10879', display: null })).toMatch(/^collusion-wiki-\S*… line 10879$/)
-  expect(chipLabel({ raw: '[[card:c0ffee00@out0#L1]]', ref: 'card:c0ffee00@out0#L1', display: null })).toBe("a card's output line 1")
-  noteQuestion('c0ffee00', 'How many saves and deletions per day?')
-  expect(chipLabel({ raw: '[[card:c0ffee00@out0#L1]]', ref: 'card:c0ffee00@out0#L1', display: null })).toBe('card "How many saves and deletions per day?" output line 1')
-  expect(chipLabel({ raw: '[[card:c0ffee00@out0#L1-L3]]', ref: 'card:c0ffee00@out0#L1-L3', display: null })).toContain('output lines 1-3')
+  // a chip (Matt, 2026-10-07): `[ card ]`, `[ events.jsonl line 12 ]`, `[ label name ]`; never `agent-chat:2`, which
+  // reads as an id (live check term-fix9, low quirk)
+  const chip = (ref: string) => chipLabel({ raw: `[[${ref}]]`, ref, display: null })
+  expect(chip('agent-chat.jsonl#L2.b0:c0-120')).toBe('[ agent-chat.jsonl line 2 ]')
+  expect(chip('events.jsonl#L12')).toBe('[ events.jsonl line 12 ]')
+  expect(chip('agent-chat.jsonl#L1-L2')).toBe('[ agent-chat.jsonl lines 1-2 ]')
+  expect(chip('data/runs.json#/runs/3')).toBe('[ runs.json item 4 ]')
+  expect(chip('README.md')).toBe('[ README.md ]')
+  // a long name cut in its middle, its line kept, the chip short
+  const long = chip('a/collusion-wiki-revisions-of-every-page.jsonl#L10879')
+  expect(long).toMatch(/^\[ collus\S*…\S*-page\.jsonl line 10879 \]$/)
+  expect(width(long)).toBeLessThanOrEqual(CHIP_MAX + 4)
+  expect(chip('card:c0ffee00')).toBe('[ card ]')
+  expect(chip('card:c0ffee00#wiki/dse')).toBe('[ card ]')
+  expect(chip('card:c0ffee00@out0#L1')).toBe('[ card output line 1 ]')
+  expect(chip('card:c0ffee00@out0#L1-L3')).toBe('[ card output lines 1-3 ]')
+  expect(chip('call:a1b2c3#L4')).toBe('[ output line 4 ]')
+  expect(chip('report:report#4255ef27')).toBe('[ report ]')
+  expect(chip('report:slides')).toBe('[ slides ]')
+  expect(chip('concept:eb534ca4')).toBe('[ label ]')
+  noteLabelName('eb534ca4', 'edit purpose')
+  expect(chip('concept:eb534ca4')).toBe('[ edit purpose ]')
+  expect(chip('concept:eb534ca4/yes')).toBe('[ edit purpose · yes ]')
+  // a citation with words is its words, a chip or not
+  expect(chipLabel({ raw: '[[3|card:c0ffee00#n/all]]', ref: 'card:c0ffee00#n/all', display: '3' })).toBe('3')
 })
 
-test('a card cited whole reads as a reference in parentheses in plain words, as the reply draws it', () => {
-  // live check term-fix5, item 6: the New thread preview read `…deletion claim" card "How…`
+test('a thread asked about a chip names its subject by the place in full words, not by the chip', () => {
+  // the ask view's `about` and the thread's title: no tip names the place there (`about [ card ]` said nothing)
+  noteQuestion('c4c4c4c4', 'How many pages does each wiki have?')
+  const t = (raw: string) => targetLabel({ kind: 'citation', ref: raw, text: '' } as never, 60)
+  expect(t('[[card:c4c4c4c4]]')).toBe('card "How many pages does each wiki have?"')
+  expect(t('[[card:c4c4c4c4@out0#L2]]')).toBe('card "How many pages does each wiki have?" output line 2')
+  expect(t('[[collusion-wiki/pages.jsonl#L1]]')).toBe('collusion-wiki/pages.jsonl line 1')
+  expect(chipName({ raw: '[[card:d0d0d0d0]]', ref: 'card:d0d0d0d0', display: null })).toBe('card')
+  // a citation with words keeps its words
+  expect(t('[[3,908|card:c4c4c4c4#pages/dse]]')).toBe('3,908')
+})
+
+test('a chip reads as `[ card ]` in plain words too, as the reply draws it, without brackets main put around it', () => {
+  // Matt, 2026-10-07: a chip is its own kind of citation, alike everywhere; live check term-fix5, item 6: the New thread
+  // preview read `…deletion claim" card "How…`
   noteQuestion('ab12cd34', 'How many deletions per day?')
-  expect(plainCites('The 16 June deletion claim holds up [[card:ab12cd34]].')).toBe('The 16 June deletion claim holds up (card "How many deletions per day?").')
-  expect(plainCites('See ([[card:ab12cd34]]).')).toBe('See (card "How many deletions per day?").')
-  expect(plainCites('[[card:ab12cd34]] says so.')).toBe('(card "How many deletions per day?") says so.')
+  expect(plainCites('The 16 June deletion claim holds up [[card:ab12cd34]].')).toBe('The 16 June deletion claim holds up [ card ].')
+  expect(plainCites('See ([[card:ab12cd34]]).')).toBe('See [ card ].')
+  expect(plainCites('See ( [↗](events.jsonl#L12) ) for it.')).toBe('See [ events.jsonl line 12 ] for it.')
+  expect(plainCites('[[card:ab12cd34]] says so.')).toBe('[ card ] says so.')
+  // words in brackets that hold more than the chip keep them
+  expect(plainCites('(as [[card:ab12cd34]] shows)')).toBe('(as [ card ] shows)')
   expect(plainCites('It has [[3|card:ab12cd34#n/all]] rows.')).toBe('It has 3 rows.')
-  // a place alone, written as main writes it for the terminal (`[↗](ref)`), reads the same way, a card's printed line
-  // too (live check term-fix6, new quirk 5: the New thread preview read `…out of 500 pages card "How many pages…"`)
-  expect(plainCites('That is out of 500 pages [↗](card:ab12cd34).')).toBe('That is out of 500 pages (card "How many deletions per day?").')
-  noteQuestion('c0ffee00', 'What is the first deletion?')
-  expect(plainCites('It began on 18 June [↗](card:c0ffee00@out0#L1). That is all.')).toBe('It began on 18 June (card "What is the first deletion?" output line 1). That is all.')
+  // a place alone, written as main writes it for the terminal (`[↗](ref)`), a card's printed line too
+  expect(plainCites('That is out of 500 pages [↗](card:ab12cd34).')).toBe('That is out of 500 pages [ card ].')
+  expect(plainCites('It began on 18 June [↗](card:c0ffee00@out0#L1). That is all.')).toBe('It began on 18 June [ card output line 1 ]. That is all.')
+  expect(plainCites('See [[README.md#L5]] for the format.')).toBe('See [ README.md line 5 ] for the format.')
   expect(plainCites('It has [3](card:ab12cd34#n/all) rows and [33](concept:9e40be16/yes) yes.')).toBe('It has 3 rows and 33 yes.')
+  // a tool's own words in Claude Code's rows: the chip's words, with no brackets
+  expect(plainCites('as line 12 says [↗](events.jsonl#L12).', false)).toBe('as line 12 says events.jsonl line 12.')
 })
 
 

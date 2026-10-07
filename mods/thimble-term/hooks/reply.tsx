@@ -24,7 +24,7 @@ import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
 import type { Target } from './gestures'
-import { asReference, bareCard, cardWords, chipLabel, cid, citations, clip, curlyQuotes, embeddedCards, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, placeOnly, questionOf, quoted, sectionsOf } from './lib'
+import { bareCard, cardWords, chipPlace, cid, questionOf, citations, clip, curlyQuotes, isChip, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, paintLines } from './paint'
@@ -43,9 +43,10 @@ const CALL_REF = /^call:[A-Za-z0-9_-]+(?:#L(\d+)(?:-L?(\d+))?)?$/
 
 // ------------------------------------------------------------------------------------------------ a citation in words
 
-/** A card by its question, cut at a word, never its id. */
+/** A card by its question, cut at a word, never its id: as its drawing data has it, else as a read of it noted it
+ *  (lib.ts noteQuestion: a document's cards are read before it is drawn). */
 export async function cardName(cx: Ctx, id: string): Promise<string> {
-  const q = ((await cx.card(id))?.data as CardData | undefined)?.question
+  const q = ((await cx.card(id))?.data as CardData | undefined)?.question || questionOf(id)
   return q ? cardWords(q) : 'the card'
 }
 
@@ -170,26 +171,37 @@ export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefine
 }
 
 /** A citation as its link draws: its label, red with a problem, ◌ ✓ or × after it from thimble's links check of the
- *  card whose takeaway it is in (`card`), and its tip (its status in plain words, and why for a problem). */
+ *  card whose takeaway it is in (`card`), and its tip (its status in plain words, and why for a problem). A chip (a
+ *  citation with no words of its own, `[ card ]`) has its place in full words first in its tip (`card "How many pages…"
+ *  · found`), since its brackets name it short. */
 export async function chipOf(cx: Ctx, c: Citation, card?: string): Promise<ChipView> {
+  const chip = isChip(c) ? { chip: true } : {}
   // a label's link (`[33](concept:<id>/yes)`): blue, no check, a click opens the label at its value; in a card's
   // takeaway, red once the label counts another number (a verdict changed the counts), its tip the count now
   const lr = labelRef(c.ref)
   if (lr) {
     const opens = lr.value ? `opens the label at its value ${quoted(lr.value)}` : 'opens the label'
-    // its name, for a link with no words of its own (lib.ts chipLabel); the labels read when no drawing read them yet
+    // its name, for a link with no words of its own (lib.ts chipWords); the labels read when no drawing read them yet
     const now = await labelNow(cx, lr.id)
     if (now?.name) noteLabelName(lr.id, now.name)
     else if (!now) rt.wantLabels = true
     const stale = card ? labelLinkStale(c.display, now, lr.value) : ''
-    return { label: citeLabel(c), state: stale ? 'problem' : 'link', mark: '', spin: false, tip: stale ? `${stale} · ${opens}` : opens }
+    const named = chip.chip && now?.name ? `label ${quoted(clip(now.name, 40))} · ` : ''
+    return { label: citeLabel(c), state: stale ? 'problem' : 'link', mark: '', spin: false, tip: stale ? `${stale} · ${opens}` : `${named}${opens}`, ...chip }
   }
   const v = await cx.verdict(cid(c.raw))
   const check = card ? linkCheck((await cx.card(card))?.links, c) : {}
   const look = chipLook(v?.status ?? 'pending', undefined, check.state)
   const problem = v?.status === 'missing' || v?.status === 'differs'
   const why = problem ? await plainWhy(cx, v?.why ?? '') : check.state === 'refuted' && check.why ? await plainWhy(cx, check.why) : ''
-  const tip = [await citeStatus(cx, c, v, check), why].filter(Boolean).join(' · ')
+  const status = await citeStatus(cx, c, v, check)
+  if (chip.chip) {
+    // the place in full words, then `found`, `◌ checking` or why it is not found
+    const place = chipPlace(c) || (await placeName(cx, c.ref))
+    const said = status.startsWith('found') ? status.replace(/^found (?:on the card|in the command's output(?:, line \d+(?:-\d+)?)?|in .+?)(?=;|,|$)/, 'found') : status
+    return { label: citeLabel(c), ...look, tip: [place, said, why].filter(Boolean).join(' · '), ...chip }
+  }
+  const tip = [status, why].filter(Boolean).join(' · ')
   return { label: citeLabel(c), ...look, tip }
 }
 
@@ -263,51 +275,37 @@ async function threadAbout(cx: Ctx, words: string): Promise<string> {
   return threads.find(x => x.anchor && refs.has(x.anchor.split(',')[0]!) && (!x.anchorText || holds(x.anchorText)))?.id ?? ''
 }
 
-/** A rich block's runs with each citation that names only its place (placeOnly: a card cited whole, `[[card:<id>]]` at a
- *  sentence's end, or a card's printed line or a file's line, `[↗](<ref>)`) as the reader needs it: a card cited whole
- *  left out, with the space before it, where the card is drawn under the reply or as a figure (`drawn`); elsewhere named
- *  in parentheses (` (card "…")`, ` (card "…" output line 1)`), the name the citation's link (live check term-fix6, new
- *  quirk 5: a printed line's citation read as words of the sentence). */
-async function cardRuns(cx: Ctx, block: Extract<Block, { type: 'rich' }>, drawn: ReadonlySet<string>): Promise<Extract<Block, { type: 'rich' }>> {
-  if (block.table || !block.runs.some(r => r.cite && placeOnly(r.cite))) return block
-  const runs: Run[] = []
-  for (const [i, r] of block.runs.entries()) {
-    const next = block.runs[i + 1]
-    if (!r.cite || !asReference(r.cite, next ? (next.cite ? 'x' : next.text) : '')) {
-      runs.push(r)
-      continue
-    }
-    const id = bareCard(r.cite)
-    if (id && drawn.has(id)) {
-      const prev = runs.at(-1)
-      if (prev && !prev.cite) {
-        const text = prev.text.replace(/\s+$/, '')
-        if (text) runs[runs.length - 1] = { ...prev, text }
-        else runs.pop()
-      }
-      continue
-    }
-    // a card no drawing read yet is read now, and named once it is (`a card` until then)
-    const card = id || outputLine(r.cite.ref)?.card || ''
-    if (card) {
-      const tc = await cx.card(card)
-      if (!tc && !rt.shown.has(card)) rt.wanted.add(card)
-      noteQuestion(card, (tc?.data as CardData | null | undefined)?.question ?? '')
-    }
-    const words = id ? cardWords(questionOf(id)) : chipLabel(r.cite)
-    // in parentheses, so that it reads as a reference and not as words of the sentence: `… (card "How many…").`
-    // (none when main put it in parentheses itself)
-    const prev = runs.at(-1)
-    const own = Boolean(prev && !prev.cite && /\(\s*$/.test(prev.text))
-    if (own) runs.push({ ...r, text: words })
-    else {
-      if (prev && !prev.cite && !prev.b && !prev.i && !prev.code && !prev.u) runs[runs.length - 1] = { ...prev, text: `${prev.text.replace(/\s+$/, '')} (` }
-      else runs.push({ text: prev ? ' (' : '(' })
-      runs.push({ ...r, text: words })
-      runs.push({ text: ')' })
-    }
+/** A rich block's runs with each chip (a citation that names only its place: a card cited whole, `[[card:<id>]]`, a
+ *  card's printed line or a file's line, `[↗](<ref>)`) kept as a chip wherever it stands (Matt, 2026-10-07: drawn as
+ *  `[ card ]`, never left out where the card is drawn under the reply, never ` (card "…")`), without the brackets main
+ *  put around it: a chip carries its own. A card a chip names is read now, so its tip names it by its question. */
+async function chipRuns(cx: Ctx, block: Extract<Block, { type: 'rich' }>): Promise<Extract<Block, { type: 'rich' }>> {
+  const all = block.table ? block.table.rows.flat(2) : block.runs
+  if (!all.some(r => r.cite && isChip(r.cite))) return block
+  for (const r of all) {
+    if (!r.cite || !isChip(r.cite)) continue
+    const card = bareCard(r.cite) || outputLine(r.cite.ref)?.card || /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(r.cite.ref)?.[1] || ''
+    if (!card) continue
+    const tc = await cx.card(card)
+    if (!tc && !rt.shown.has(card)) rt.wanted.add(card)
+    noteQuestion(card, (tc?.data as CardData | null | undefined)?.question ?? '')
   }
-  return { ...block, runs }
+  if (block.table) return block
+  const src = block.runs.map(r => ({ ...r }))
+  const runs: Run[] = []
+  for (const [i, r] of src.entries()) {
+    const prev = runs.at(-1)
+    const next = src[i + 1]
+    // `… ([[card:<id>]]).` reads `… [ card ].`: the brackets main wrote around the chip alone are left out
+    if (r.cite && isChip(r.cite) && prev && !prev.cite && /\(\s*$/.test(prev.text) && next && !next.cite && /^\s*\)/.test(next.text)) {
+      const head = prev.text.replace(/\s*\(\s*$/, '')
+      if (head) runs[runs.length - 1] = { ...prev, text: `${head} ` }
+      else runs.pop()
+      next.text = next.text.replace(/^\s*\)/, '')
+    }
+    runs.push(r)
+  }
+  return { ...block, runs: runs.filter(r => r.cite || r.text) }
 }
 
 // ------------------------------------------------------------------------------------------------ a reply
@@ -321,9 +319,6 @@ export type ReplyOpts = {
   prefix?: string
   /** cards not drawn where the text embeds them, since they are drawn under the reply */
   skipCards?: ReadonlySet<string>
-  /** the other cards drawn with the text (a turn's under its last reply, a thread's under its answer, a document's
-   *  figures): a sentence that cites one whole leaves the reference out */
-  drawn?: ReadonlySet<string>
   /** a side thread about a passage of the reply: the "?" beside it */
   ask?: (target: Target) => void
   /** a thread's ↳ beside its passage: a click opens the thread */
@@ -348,7 +343,6 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
   const out: RenderElement[] = []
   const blocks = parseReply(text)
   const secs = sectionsOf(text)
-  const drawn = new Set([...(opts.skipCards ?? []), ...(opts.drawn ?? []), ...embeddedCards(text), ...(opts.card ? [opts.card] : [])])
   let lead = opts.first ? '⏺' : ' '
   let n = 0
   let order = 0 // a card's place among the reply's cards, its name for the analyst ("card 2")
@@ -419,7 +413,7 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
   for (const [i, whole] of blocks.entries()) {
     n++
     const key = `${prefix}${n}`
-    const block = whole.type === 'rich' ? await cardRuns(cx, whole, drawn) : whole
+    const block = whole.type === 'rich' ? await chipRuns(cx, whole) : whole
     if (block.type === 'md') {
       if (!live) {
         push(await row(<Markdown text={block.text} />), gapBefore(i))
@@ -570,13 +564,18 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
   )
 }
 
-/** What the card check's rewrite of a card changed, in words, and why: `the card check rewrote its takeaway: …`. */
+/** What the card check's rewrite of a card changed, in words, and why, as a sentence: `The card check rewrote its
+ *  takeaway: the takeaway named the wrong hour.` (item e2-card-check-note-format: it read as a fragment, lower case with
+ *  no full stop, its reason starting with a capital after the colon). */
 export function fixedNote(f: { fields: string[]; why: string }): string {
   const names: Record<string, string> = { takeaway: 'takeaway', title: 'question', code: 'code' }
   const parts = f.fields.map(x => names[x] ?? x)
   const which = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]!
-  const why = f.why.replace(/\s+/g, ' ').trim().replace(/[.]$/, '')
-  return `the card check rewrote its ${which}${why ? `: ${why}` : ''}`
+  const flat = f.why.replace(/\s+/g, ' ').trim().replace(/[.]+$/, '')
+  // the reason goes on the sentence after its colon: its first letter in lower case, unless the word is a name or an
+  // acronym (a second capital in it, `UTC`, `README`)
+  const why = /^[A-Z][a-z]/.test(flat) && !/^\S*[A-Z]\S*[A-Z]/.test(flat) && !/^I\b/.test(flat) ? `${flat[0]!.toLowerCase()}${flat.slice(1)}` : flat
+  return `The card check rewrote its ${which}${why ? `: ${why}` : ''}.`
 }
 
 /** The cards a turn made, under its last reply, on the reply's text column (4), border to border: the border stands in

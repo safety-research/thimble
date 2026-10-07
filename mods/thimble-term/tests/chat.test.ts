@@ -6,7 +6,9 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
+import { paraLayout } from '../hooks/cite'
 import { KEPT_FILE, parseKept } from '../hooks/kept'
+import { COLORS } from '../hooks/paint'
 import { CWD, WS, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -425,7 +427,7 @@ test("a thimble tool's row names a card by its question, without straight quotat
   const drawn = shown(await row.drawn())
   // the card key: its question alone; the takeaway: each citation its words, the card it embeds in curly quotation marks
   expect(drawn).toContain('"card":"Which five pages have the most revisions in the corpus?"')
-  expect(drawn).toContain('"takeaway":"The most edited page has 60 revisions; see README line 3 and card “Which five pages have the most…”."')
+  expect(drawn).toContain('"takeaway":"The most edited page has 60 revisions; see README.md line 3 and card “Which five pages have the most…”."')
   expect(drawn).not.toMatch(/ff73e071|\[\[|\\"/)
   await row.unmount()
   // a Bash row that runs the card: its question cut at a word
@@ -447,48 +449,74 @@ test("a card whose takeaway holds the passage a thread was asked about (a citati
   await ui.unmount()
 })
 
-test('a sentence that cites a card the turn draws under the reply leaves the reference out; a card drawn elsewhere is named by its question', async ($, on) => {
+test('a sentence that cites a card whole keeps its chip, `[ card ]`, whether the card stands under the reply or not; its tip names the card by its question', async ($, on) => {
+  // Matt, 2026-10-07: a chip is its own kind of citation and looks like one everywhere (it was left out where the card
+  // stood under the reply, and read ` (card "…")` elsewhere)
   const w = world(on)
+  for (const id of ['ff73e071', 'a0frame0']) w.resolve[`card:${id}`] = { ref: `card:${id}`, kind: 'cell', cell_id: id, excerpt: '' } as never
   await start($, w)
-  const text = 'The pages are spread over four wikis [[card:ff73e071]]. The files hold more records [[card:a0frame0]].'
+  const text = 'The pages are spread over four wikis [[card:ff73e071]]. The files hold more records ([[card:a0frame0]]).'
   await turn($, w, [['r1', text]])
   let ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
-  // the card of another turn is read by the session's timer, then named
+  // the card of another turn is read by the session's timer, then named in the tip
   await w.clock.advance(1100)
   await ui.unmount()
   ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
   const para = shown(await ui.drawn({ in: 'para-1' }))
-  // the turn's card stands under the reply: no `card` at the sentence's end, and no space before its full stop
-  expect(para).toContain('four wikis. The files')
-  // a card of another turn: named by its question, as its citation's link (live check New 1)
-  // in parentheses, so that it reads as a reference and not as words of the sentence
-  expect(para).toContain('(card "How many records does each file hold?").')
-  expect(para).not.toMatch(/\bcard\./)
+  // both chips where main wrote them, the brackets main put around the second left out
+  expect(para).toContain('four wikis [ card ]. The files hold more records [ card ].')
+  expect(para).not.toContain('(card')
   const chips = await chipsOf(ui, 'para-1')
-  expect(chips.map(c => c.label)).toEqual(['card "How many records does each file hold?"'])
+  expect(chips.map(c => c.label)).toEqual(['[ card ]', '[ card ]'])
+  expect(chips.every(c => (c as { chip?: boolean }).chip)).toBe(true)
+  expect(chips[0]!.tip).toMatch(/^card "What does the export hold per wiki\?" · found$/)
+  expect(chips.every(c => c.state === 'link')).toBe(true)
+  expect(chips[1]!.tip).toMatch(/^card "How many records does each file hold\?" · /)
   // the footer counts cited values: a card cited whole is none
   expect(shown(await ui.drawn())).not.toMatch(/\d+ citations?/)
   // a thread asked about the whole card (the fixtures' t1) stands beside the card, not beside a passage naming it
   expect(await ui.find({ type: 'Client', key: 'asked-1' })).toBeUndefined()
+  // the card still stands under the reply
+  expect(JSON.stringify(await ui.drawn())).toContain('"question":"What does the export hold per wiki?"')
   await ui.unmount()
 })
 
-test('a citation that names only its place (`[↗](ref)`) reads as a reference in parentheses, as a card cited whole does', async ($, on) => {
+test('a citation that names only its place (`[↗](ref)`) is a chip too: a card\'s printed line, a file\'s line, mid-sentence or at its end', async ($, on) => {
   // live check term-fix6, new quirk 5: `…on 18 June card "What is the first deletion in…" output line 1. That is…`
   const w = world(on)
   await start($, w)
-  const text = 'The files hold 19913 events [↗](card:a0frame0@out0#L1). See also ([↗](card:a0frame0@out0#L2)).'
+  const text = 'The files hold 19913 events [↗](card:a0frame0@out0#L1). See [↗](README.md#L3) for the format.'
   await turn($, w, [['r1', text]])
   let ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
   await w.clock.advance(1100)
   await ui.unmount()
   ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
   const para = shown(await ui.drawn({ in: 'para-1' }))
-  expect(para).toContain('19913 events (card "How many records does each file hold?" output line 1). See also (card "How many')
-  expect(para).toMatch(/hold\?" output line 2\)\.$/)
+  expect(para).toContain('19913 events [ card output line 1 ]. See [ README.md line 3 ] for the format.')
   const chips = await chipsOf(ui, 'para-1')
-  expect(chips.map(c => c.label)).toEqual(['card "How many records does each file hold?" output line 1', 'card "How many records does each file hold?" output line 2'])
+  expect(chips.map(c => c.label)).toEqual(['[ card output line 1 ]', '[ README.md line 3 ]'])
+  expect(chips[0]!.tip).toMatch(/^card "How many records does each file hold\?" output line 1 · /)
+  expect(chips[1]!.tip).toMatch(/^README\.md line 3 · /)
   await ui.unmount()
+})
+
+test('a chip is drawn whole on one row, in the link color with no underline, its brackets its frame; inverse under the pointer', () => {
+  const runs = [{ text: 'The pages are spread over four wikis, as the card shows ' }, { text: '[ card output line 1 ]', cite: { raw: '[[card:a0frame0@out0#L1]]', ref: 'card:a0frame0@out0#L1', display: null } }, { text: '.' }]
+  const chip = { label: '[ card output line 1 ]', state: 'link' as const, mark: '', spin: false, tip: '', chip: true }
+  for (const cols of [40, 60, 64, 80]) {
+    const lay = paraLayout({ prefix: '', heading: 0, quote: false, runs }, [chip], cols, -1)
+    const segs = lay.lines.flat().filter(g => g.s.includes('[') || g.s.includes(']'))
+    // one segment, on one row, never cut at its spaces
+    expect(segs.map(g => g.s)).toEqual(['[ card output line 1 ]'])
+    expect(segs[0]!.fg).toBe(COLORS.link)
+    expect(segs[0]!.u).toBeUndefined()
+    expect(lay.spans.filter(s => s.chip === 0).length).toBe(1)
+  }
+  const hover = paraLayout({ prefix: '', heading: 0, quote: false, runs }, [chip], 80, 0)
+  expect(hover.lines.flat().find(g => g.s.startsWith('['))!.inv).toBe(true)
+  // a citation with words keeps its underline
+  const value = paraLayout({ prefix: '', heading: 0, quote: false, runs: [{ text: '4,579', cite: { raw: '[[4,579|README.md#L3]]', ref: 'README.md#L3', display: '4,579' } }] }, [{ label: '4,579', state: 'link', mark: '', spin: false, tip: '' }], 80, -1)
+  expect(value.lines.flat().find(g => g.s === '4,579')!.u).toBe(true)
 })
 
 test("main's `↳ The writer …` line is said once: a later row about the same writer run leaves it out, after a resume too", async ($, on) => {
