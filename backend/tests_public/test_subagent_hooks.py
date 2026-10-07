@@ -119,6 +119,56 @@ def test_a_second_writer_of_a_document_is_denied():
     assert sf.check_call(state, agent_call("req_0000000004\nwrite", role="writer")) is not None
 
 
+def test_main_s_own_writer_start_made_again_is_refused_with_no_words_asked():
+    """Live checks term-fix4 to 9: main made the same writer start twice in a row, and the refusal asked it to tell the
+    analyst, so it apologized for its own slip. The call made again finds no pending start, so it is main's own repeat,
+    and its refusal says the turn needs nothing more."""
+    state: dict = {}
+    pending_start(state, "req_0000000014", "typed", "req_0000000014\nwrite", role="writer", key="writer:report")
+    assert sf.check_call(state, agent_call("req_0000000014\nwrite", role="writer")) is None
+    sf.registry(state)["w1"] = {"role": "writer", "key": "writer:report", "status": "running"}
+    again = sf.check_call(state, agent_call("req_0000000014\nwrite", role="writer", call="toolu_02"))
+    assert again == sf.hint("start_writing-repeated", doc="report")
+    assert "report" in again and "needs nothing more" in again and "Tell the analyst" not in again
+
+
+def launched(kind: str, *, response: object = None, **hook: object) -> dict:
+    """A PostToolUse hook input for main's Agent call of `kind`, launched in the background as Claude Code 2.1.291
+    reports it (term-fix6's transcript, line 235)."""
+    return {"hook_event_name": "PostToolUse", "tool_name": "Agent", "session_id": MAIN_SID, "tool_use_id": "toolu_01go",
+            "tool_input": {"description": "thread:x", "prompt": "thread:x", "subagent_type": kind},
+            "tool_response": {"isAsync": True, "status": "async_launched", "agentId": "a5a1a436437cc33fa"}
+            if response is None else response, **hook}
+
+
+def test_main_s_start_of_a_fork_or_one_of_thimble_s_agents_ends_its_turn():
+    """Live checks term-fix4 to 9: after 26 of 65 starts main made one more call (`true`, an agent list, the start again)
+    or wrote a line, since Claude Code's launch result asks it to go on. The PostToolUse note after main's own launch
+    says to end the turn; a subagent's call, a click's through the module, a failure, a call that ran in the foreground
+    and any other type get none."""
+    note = sf.launched_note(launched("fork"))
+    assert note == sf.hint("agent-launched", who="This thread's fork")
+    assert note.startswith("This thread's fork runs in the background") and "End the turn now" in note
+    assert "{" not in note
+    assert sf.launched_note(launched("thimble:writer")).startswith("thimble's writer runs in the background")
+    assert sf.launched_note(launched("fork", response="Async agent launched successfully.\nagentId: a1")) == note
+    for quiet in (launched("fork", agent_id=AGENT), launched("fork", tool_use_id=PLUGIN_CALL),
+                  launched("fork", hook_event_name="PostToolUseFailure"), launched("general-purpose"),
+                  launched("thimble:orient-helper"), launched("fork", response={"status": "completed", "content": "done"}),
+                  launched("fork", response="The thread was launched twice, so it stopped."),
+                  {**launched("fork"), "tool_name": "SendMessage"}):
+        assert sf.launched_note(quiet) == "", quiet
+
+
+def test_the_agents_hook_gives_main_the_launch_note_as_context_alone(tmp_path, ws):
+    """The note goes to main as added context, with no systemMessage, so the terminal draws no row for it."""
+    out = run_hook(tmp_path, "--agents", launched("thimble:writer"))
+    got = json.loads(out.stdout)
+    assert set(got) == {"hookSpecificOutput"} and got["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
+    assert got["hookSpecificOutput"]["additionalContext"].startswith("thimble's writer runs in the background")
+    assert run_hook(tmp_path, "--agents", launched("general-purpose")).stdout.strip() == ""
+
+
 def test_a_helper_or_any_other_type_goes_from_any_agent_and_a_subagent_s_call_is_a_nested_start():
     state: dict = {}
     sf.registry(state)["orient1"] = {"role": "orientation", "key": "orient", "status": "running"}

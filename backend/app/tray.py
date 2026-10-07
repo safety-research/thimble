@@ -182,7 +182,7 @@ def listing_text(rows: list[dict[str, Any]]) -> str:
     labels = [str(r.get("label") or r["name"]) for r in rows]
     width = max(len(label) for label in labels)
     lines = [f"{label:<{width}}  {plain_state(r['state'])}" for label, r in zip(labels, rows)]
-    return "\n".join(lines + ["", tools.hint("agents-help")])
+    return "\n".join(lines)
 
 
 async def tool_list_agents(ctx: Any, args: dict[str, Any]) -> Any:

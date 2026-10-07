@@ -313,6 +313,32 @@ def hint(name: str, *, session_mode: str | None = None, **values: Any) -> str:
 # --------------------------------------------------------------------------- what a hook decides and records
 
 
+def launched_note(hook: dict[str, Any]) -> str:
+    """The note for main after its own Agent call launched a thread's fork or one of thimble's agents (`## agent-launched`
+    of prompts/tools.md), which the PostToolUse hook adds as context: end the turn on the call. Claude Code's launch
+    result ends by asking main to continue other work or to respond, and in the live checks term-fix4 to 9 main made a
+    call that does nothing, listed its agents or made the start again after 26 of 65 starts. '' for every other call: a
+    subagent's, a click's through thimble's module (a `toolu_plugin_` id, made while main may be idle), a failed one, one
+    that ran in the foreground, or one of another type."""
+    if hook.get("agent_id") or str(hook.get("tool_name") or "") not in AGENT_TOOLS:
+        return ""
+    if str(hook.get("hook_event_name") or "PostToolUse") != "PostToolUse" or \
+            str(hook.get("tool_use_id") or "").startswith(PLUGIN_CALL):
+        return ""
+    inp = hook.get("tool_input") if isinstance(hook.get("tool_input"), dict) else {}
+    kind = str(inp.get("subagent_type") or "")
+    role = role_of(kind)
+    if kind != FORK_TYPE and role is None:
+        return ""
+    answer = hook.get("tool_response")
+    # Claude Code's `status: async_launched`, or as text the line it opens with, "Async agent launched successfully."
+    launched = ("launched" in str(answer.get("status") or "") if isinstance(answer, dict)
+                else str(answer or "").lstrip().startswith("Async agent launched"))
+    if not launched:
+        return ""
+    return hint("agent-launched", who="This thread's fork" if kind == FORK_TYPE else f"thimble's {role}")
+
+
 def running_role(state: dict[str, Any], role: str, key: str | None = None) -> dict[str, Any] | None:
     """A registered agent of `role` (and of `key`, when given) whose run goes; None when none does."""
     for a in registry(state).values():
@@ -392,7 +418,9 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
             if role == "writer":
                 doc = _doc_of(prompt, state)
                 if doc and running_role(state, "writer", f"writer:{doc}") is not None:
-                    return hint("start_writing-running", doc=doc)
+                    # no request is left, so this is main's own call made again, not the analyst asking twice: it needs
+                    # no words (live checks term-fix4 to 9: main apologized for the second start)
+                    return hint("start_writing-repeated", doc=doc)
             return hint("agent-check-exact")
         rid, req = found[-1]
         if role == "orientation" and running_role(state, "orientation") is not None:

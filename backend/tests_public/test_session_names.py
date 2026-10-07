@@ -465,16 +465,17 @@ def test_after_claude_exits_in_terminal_mode_the_launcher_says_how_to_come_back_
 
 async def test_the_statusline_shows_the_orientation_and_its_cards_and_the_listing_plain_words(monkeypatch):
     """thimble's statusline shows the orientation's state and its cards, the other agents being rows of Claude Code's
-    own tray; /thimble:agents lists every running agent of thimble's by what it does."""
+    own tray; /thimble:agents lists every running agent of thimble's by what it does, and nothing under the rows, since
+    Claude Code's own tray row already says how to follow an agent."""
     rows = [{"name": "thimble:orientation", "label": "orientation", "state": "working", "role": "orientation"},
             {"name": "thimble:writer", "label": "writer: report", "state": "waiting for a permission", "role": "writer"},
             {"name": "fork(thread:probe)", "state": "idle"}]
     monkeypatch.setattr(tray, "_cards", lambda c: 7)
     assert tray.status_line(CORPUS, rows) == "thimble · orientation working · 7 cards"
     assert tray.status_line(CORPUS, rows[1:]) == "", "no orientation runs"
-    assert tray.listing_text(rows).splitlines()[:3] == [f"{'orientation':<18}  working",
-                                                         f"{'writer: report':<18}  waiting for you",
-                                                         "fork(thread:probe)  done"]
+    assert tray.listing_text(rows).splitlines() == [f"{'orientation':<18}  working",
+                                                     f"{'writer: report':<18}  waiting for you",
+                                                     "fork(thread:probe)  done"]
     monkeypatch.setattr(config, "workspace_for_cwd", lambda cwd: CORPUS)
     monkeypatch.setattr(tray, "agent_rows", lambda c: rows)
     got = await tray.agents_route(tray.AgentsQuery(cwd="/work", session="main-1", announce=True))
