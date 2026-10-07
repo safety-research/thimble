@@ -483,7 +483,7 @@ Run a report check over the written documents, a question asked of every passage
 
 ## stop_check
 
-Turn a report check off, as the switch in the Checks pane does, which hides its tints and comments and stops its runs. Its comments are kept, and `run_check` turns it on again.
+Turn a report check off, {{if:browser}}as the switch in the Checks pane does, {{end}}which hides its {{if:browser}}tints and {{end}}comments and stops its runs. Its comments are kept, and `run_check` turns it on again.{{if:terminal}} The terminal has no switch for a check, so the analyst asks you to turn one on or off.{{end}}
 
 ```json
 {
@@ -1050,6 +1050,10 @@ Filtered to the test label, the page shows {records} records, and the filter kee
 ## view-missing
 
 The claims expect files the corpus lacks, which the analyst sees above the view as missing: {files}.
+
+## view-choice-error
+
+{count} choices of the view's controls gave a script error when chosen: {choices}. Every choice the analyst can make must draw the view, None and Off among them: guard what the page reads of a choice that can be null (`rows.by`, `colour.by`, `filter.by`), and draw the records in one group, or uncolored, for it.
 
 ## view-term-error
 

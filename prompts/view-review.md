@@ -22,6 +22,9 @@ Principles. These principles restate established practice in interactive visuali
 - **thimble's parts.** The view uses thimble's own parts and themes, so it looks and acts like the rest of the app. Example: thimble's chips, buttons and fields, legible in light and dark, with the view's own words in American spelling.
 - **Reuse before rebuild.** Where thimble already shows a record well, the view opens it there and does not draw a reader of its own. Example: an agent transcript opens in the File browser's transcript mode.
 - **Labels stay labels.** A judgment that a label already holds belongs to the label, not to a field the view derives from keywords. Example: Rows groups the lanes by the label, not by a field whose keywords copy its classes.
+- **Color on the unit it describes.** A value of a record colors that record, and a group of records, such as a page, an agent or a run, shows at most the mix of its records' colors, never one color of its own. Example: page rows carry a small bar of their revisions' colors, and the revisions carry the color.
+- **The pane's width.** The view fits the pane's width and never scrolls sideways. Example: long text wraps or ends in …, and the overview shrinks with the divider.
+- **Structure before lines.** A line or arrow between marks shows only what the layout cannot. Example: a tree's indentation shows which session started which, with no arrows between lanes.
 
 Smells. A smell is a sign that a principle may be broken. Weigh each one against what the view must show: a view can have a good reason for one, and a view with none can still fail the analyst.
 
