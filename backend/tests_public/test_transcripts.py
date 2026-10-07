@@ -571,3 +571,172 @@ def test_an_agent_transcript_with_tool_records_is_a_strong_transcript():
     board = [{"author": f"u{i % 3}", "body": f"post {i}", "created_at": f"2026-07-18T21:{30 + i}:00Z"} for i in range(9)]
     plain = transcripts.sniff_bytes(jsonl(board).encode(), "board.jsonl", complete=True)
     assert "tools" not in plain
+
+
+def pooled(n_extra: int = 0, **conv2) -> dict:
+    """An agent's conversations kept as one store of messages by id, each conversation listing its messages' ids in
+    order (a shape some harnesses write): a system prompt beside them, `c2` forked from `c1` after their first two
+    messages, and a message no conversation lists. `n_extra` more exchanges at the end of `c1` make the file large."""
+    msgs: dict[str, dict] = {}
+
+    def say(role: str, *blocks: dict) -> str:
+        ident = f"m{len(msgs):04d}"
+        msgs[ident] = {"id": ident, "role": role, "content": list(blocks), "first_seen_ts": 1_790_000_000.5 + len(msgs)}
+        return ident
+
+    def text(t: str) -> dict:
+        return {"type": "text", "text": t}
+
+    shared = [say("user", text("Why does the nightly build fail?")),
+              say("assistant", text("I will read the log."), {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "tail ci.log"}})]
+    one = [say("user", {"type": "tool_result", "tool_use_id": "t1", "content": "1 failed: test_groupby"}),
+           say("assistant", text("The groupby test drops the NaN key."))]
+    for i in range(n_extra):
+        one += [say("user", text(f"And step {i}?")), say("assistant", text(f"Step {i} passes. " + "More detail. " * 20))]
+    two = [say("user", text("Try the other branch.")), say("assistant", text("On the other branch the build passes."))]
+    say("user", text("A message no conversation lists."))
+    return {
+        "agent": "a7",
+        "system": [{"type": "text", "text": "You maintain a small app.", "cache_control": {"type": "ephemeral"}}],
+        "messages": msgs,
+        "conversations": {
+            "c1": {"id": "c1", "messages": shared + one, "sampled_tail": [one[-1]], "forked_from": None, "forked_at": 0},
+            "c2": {"id": "c2", "messages": shared + two, "sampled_tail": [], "forked_from": "c1", "forked_at": 2, **conv2},
+        },
+        "counter": 2,
+        "last_extended": "c2",
+    }
+
+
+def _turns(name: str, **params) -> dict:
+    r = client.get(f"{CHATS}/source/turns", params={"path": f"logs/{name}", **params})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_conversations_that_list_their_messages_by_id_read_them_from_the_store_beside_them(chats):
+    """Each conversation is a group, its turns its listed messages in order, titled by whose it is and its id; the
+    system prompt is the first turn, before them all; a fork starts where it leaves the conversation it forked from, so
+    their shared start is read once; a message no conversation lists is not shown."""
+    (chats / "logs" / "agent.json").write_text(json.dumps(pooled()))
+    assert transcripts.sniff(chats / "logs" / "agent.json", "logs/agent.json") == {"format": "json", "score": transcripts.STRONG}
+    page = _turns("agent.json")
+    got = [(t["speaker"], t["text"].split("\n")[0], t.get("group")) for t in page["turns"]]
+    assert got == [
+        ("system", "You maintain a small app.", None),
+        ("user", "Why does the nightly build fail?", 0),
+        ("assistant", "I will read the log.", 0),
+        ("user", "1 failed: test_groupby", 0),
+        ("assistant", "The groupby test drops the NaN key.", 0),
+        ("user", "Try the other branch.", 1),
+        ("assistant", "On the other branch the build passes.", 1),
+    ]
+    assert page["turns"][2]["text"].endswith('Bash {"command": "tail ci.log"}'), "a tool call shows as its name and input"
+    assert page["groups"] == {"0": {"title": "a7 · c1", "first": 1}, "1": {"title": "a7 · c2 (forked from c1 after message 2)", "first": 5}}
+    assert [t["role"] for t in page["turns"][:3]] == ["system", "user", "assistant"]
+    assert page["turns"][1]["time"] == "2026-09-21T14:13:20Z"
+    # the line locator: in the one-line file every turn stands on line 1, and a citation of words opens at the turn
+    # that holds them; pretty-printed, each turn stands on the line of its words
+    assert {t["line"] for t in page["turns"]} == {1}
+    assert _cited_page(chats, "logs/agent.json", "other branch the build passes")["cited"]["i"] == 6
+    (chats / "logs" / "agent-pretty.json").write_text(json.dumps(pooled(), indent=2))
+    raw = (chats / "logs" / "agent-pretty.json").read_text().split("\n")
+    pretty = _turns("agent-pretty.json")["turns"]
+    assert all(t["text"].split("\n")[0][:20] in raw[t["line"] - 1] for t in pretty), "each turn stands on its line"
+    assert _turns("agent-pretty.json", line=pretty[5]["line"])["turns"][5]["text"] == "Try the other branch."
+
+
+def test_a_fork_starts_where_its_messages_leave_those_of_the_conversation_it_forked_from(chats):
+    def groups(name: str, **conv2) -> list[tuple[str, int]]:
+        (chats / "logs" / name).write_text(json.dumps(pooled(**conv2)))
+        page = _turns(name)
+        return [(g["title"], sum(1 for t in page["turns"] if t.get("group") == int(k))) for k, g in page["groups"].items()]
+
+    # a count past where the lists part, or none, gives way to where they part
+    assert groups("past.json", forked_at=3)[1] == ("a7 · c2 (forked from c1 after message 2)", 2)
+    assert groups("unsaid.json", forked_at=None)[1] == ("a7 · c2 (forked from c1 after message 2)", 2)
+    # a count short of where they part: the fork's own messages start there, though they read as the parent's
+    assert groups("early.json", forked_at=1)[1] == ("a7 · c2 (forked from c1 after message 1)", 3)
+    # a fork of a conversation the file does not hold, and a conversation forked from none, read whole
+    assert groups("orphan.json", forked_from="c0")[1] == ("a7 · c2 (forked from c0)", 4)
+    assert groups("unforked.json", forked_from=None, forked_at=0)[1] == ("a7 · c2", 4)
+
+
+def test_a_store_of_messages_by_id_with_no_conversations_reads_in_time_order(chats):
+    def msg(role: str, text: str, **more) -> dict:
+        return {"role": role, "content": text, **more}
+
+    timed = {"title": "Support chat", "messages": {
+        "b": msg("assistant", "Hello, how can I help?", created_at="2026-09-01T10:00:05Z"),
+        "a": msg("user", "Hi there.", created_at="2026-09-01T10:00:00Z"),
+        "c": msg("user", "My build fails.", created_at="2026-09-01T10:01:00Z")}}
+    (chats / "logs" / "store.json").write_text(json.dumps(timed))
+    page = _turns("store.json")
+    assert [t["text"] for t in page["turns"]] == ["Hi there.", "Hello, how can I help?", "My build fails."]
+    assert page["groups"] == {"0": {"title": "Support chat", "first": 0}}
+    untimed = {"messages": {"x": msg("user", "First."), "y": msg("assistant", "Second."), "z": msg("user", "Third.")}}
+    (chats / "logs" / "store2.json").write_text(json.dumps(untimed))
+    assert [t["text"] for t in _turns("store2.json")["turns"]] == ["First.", "Second.", "Third."], "as the file keeps them"
+
+
+def test_a_system_prompt_beside_a_list_of_messages_is_its_first_turn(chats):
+    (chats / "logs" / "request.json").write_text(json.dumps({"model": "m", "system": "Answer briefly.", "messages": [
+        {"role": "user", "content": "Why does it fail?"}, {"role": "assistant", "content": "A missing key."}]}))
+    assert [(t["speaker"], t["text"]) for t in _turns("request.json")["turns"]] == [
+        ("system", "Answer briefly."), ("user", "Why does it fail?"), ("assistant", "A missing key.")]
+
+
+def test_the_sniff_of_a_large_file_s_head_offers_transcript_only_for_what_the_parse_shows(chats):
+    """A JSON file larger than the sniff's head is read by the same parse as a whole one, over the data its head holds:
+    the store of messages and its conversations past the head offer Transcript, which the parse shows; a head that names
+    roles and words in a shape the parse does not read offers nothing."""
+    big = chats / "logs" / "agent-big.json"
+    big.write_text(json.dumps(pooled(n_extra=1200)))
+    assert big.stat().st_size > 2 * transcripts.HEAD_BYTES
+    assert big.read_text().index('"conversations"') > transcripts.HEAD_BYTES, "the head holds messages, not conversations"
+    assert transcripts.sniff(big, "logs/agent-big.json") == {"format": "json", "score": transcripts.STRONG}
+    page = _turns("agent-big.json", start=0, count=2)
+    assert page["total"] == 1 + 4 + 2400 + 2 and page["n_groups"] == 2
+    keyed = chats / "logs" / "keyed.json"
+    keyed.write_text(json.dumps({"items": {f"k{i}": {"role": "user" if i % 2 else "assistant", "content": f"line {i} " * 40}
+                                           for i in range(2000)}}))
+    assert keyed.stat().st_size > 2 * transcripts.HEAD_BYTES
+    assert transcripts.sniff(keyed, "logs/keyed.json") is None
+    assert client.get(f"{CHATS}/source/turns", params={"path": "logs/keyed.json"}).status_code == 415
+
+
+def test_a_file_whose_whole_parse_finds_no_turns_is_no_longer_offered_transcript(chats):
+    """A head that is all messages in a file whose list, read whole, is mostly other records: the sniff offers
+    Transcript, the parse finds no turns (415), and from then on the sniff says what the parse found, so the source
+    page carries no transcript and the File browser opens the file's other mode."""
+    msgs = [{"role": "user" if i % 2 else "assistant", "content": f"message {i} " * 30} for i in range(1000)]
+    mixed = chats / "logs" / "mixed.json"
+    mixed.write_text(json.dumps({"messages": msgs + [{"n": i} for i in range(3000)]}))
+    assert transcripts.sniff(mixed, "logs/mixed.json") == {"format": "json", "score": transcripts.STRONG}
+    assert client.get(f"{CHATS}/source", params={"path": "logs/mixed.json"}).json()["transcript"]["format"] == "json"
+    r = client.get(f"{CHATS}/source/turns", params={"path": "logs/mixed.json"})
+    assert r.status_code == 415 and "holds no messages" in r.json()["detail"]
+    assert transcripts.sniff(mixed, "logs/mixed.json") is None
+    assert "transcript" not in client.get(f"{CHATS}/source", params={"path": "logs/mixed.json"}).json()
+
+
+def test_terminal_mode_reads_a_page_of_turns_and_none_where_the_parse_finds_none(chats):
+    """`thimble state turns <file>` gives terminal mode's file view the page GET /source/turns gives the browser, from
+    a turn or around a line; a file whose parse finds no turns gives none, with `none` saying why, so the view opens its
+    other tab."""
+    import asyncio
+
+    from app import local
+
+    (chats / "logs" / "agent.json").write_text(json.dumps(pooled(), indent=2))
+    page = asyncio.run(local.state("chats", "turns", ["logs/agent.json"]))
+    assert page["total"] == 7 and page["n_groups"] == 2 and page["turns"][0]["speaker"] == "system"
+    at = page["turns"][5]["line"]
+    assert asyncio.run(local.state("chats", "turns", ["logs/agent.json", "--line", str(at)]))["start"] == 0
+    assert [t["i"] for t in asyncio.run(local.state("chats", "turns", ["logs/agent.json", "--start", "6"]))["turns"]] == [6]
+    none = asyncio.run(local.state("chats", "turns", ["logs/config.json"]))
+    assert none["turns"] == [] and "holds no messages" in none["none"]
+    with pytest.raises(local.StateError, match="no such file"):
+        asyncio.run(local.state("chats", "turns", ["logs/nope.json"]))
+    with pytest.raises(local.StateError, match="needs"):
+        asyncio.run(local.state("chats", "turns", []))

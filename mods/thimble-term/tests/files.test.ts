@@ -341,3 +341,83 @@ test("a click on the path's `files` step goes back to the file browser, never a 
   expect(await pane.find({ type: 'Client', key: 'm:files-tree' })).toBeDefined()
   await pane.unmount()
 })
+
+// a one-line JSON file of an agent's conversations, kept as a store of messages that each conversation lists by id:
+// thimble parses the whole file into turns, all on line 1, the system prompt first and each conversation a group
+const STORE_LINE = '{"agent": "a7", "system": [{"type": "text", "text": "You maintain a small app."}], "messages": {"m0": {"role": "user", "content": "Why does the build fail?"}}, "conversations": {"c1": {"id": "c1", "messages": ["m0"]}}}'
+const STORE = { path: 'agent.json', kind: 'text', total_lines: 1, start: 1, transcript: { format: 'json', score: 0.95 }, records: [{ line: 1, record: { text: STORE_LINE } }] }
+const STORE_TURNS = {
+  path: 'agent.json',
+  total: 6,
+  start: 0,
+  n_groups: 2,
+  groups: { '0': { title: 'a7 · c1', first: 1 }, '1': { title: 'a7 · c2 (forked from c1 after message 2)', first: 3 } },
+  turns: [
+    { i: 0, line: 1, speaker: 'system', role: 'system', text: 'You maintain a small app.' },
+    { i: 1, line: 1, speaker: 'user', role: 'user', text: 'Why does the build fail?', group: 0, time: '2026-09-21T14:13:20Z' },
+    { i: 2, line: 1, speaker: 'assistant', role: 'assistant', text: 'The groupby test drops the NaN key.', group: 0, time: '2026-09-21T14:13:21Z' },
+    { i: 3, line: 1, speaker: 'user', role: 'user', text: 'Try the other branch.', group: 1, time: '2026-09-21T14:13:22Z' },
+    { i: 4, line: 1, speaker: 'assistant', role: 'assistant', text: 'On the other branch the build passes.', group: 1, time: '2026-09-21T14:13:23Z' },
+    // a tool's colored output, as a transcript keeps it: its escape sequences are not drawn
+    { i: 5, line: 1, speaker: 'user', role: 'user', text: '\u001b[32m3 passed\u001b[0m in 0.4s\u0007', group: 1, time: '2026-09-21T14:13:24Z' },
+  ],
+}
+
+test("a whole-file JSON transcript shows the turns thimble parses from the whole file: each conversation's title on a row where it starts, and the turns of its one line told apart", async ($, on) => {
+  const w = world(on)
+  w.states.files = [{ path: 'agent.json', kind: 'text', size_bytes: 10 }]
+  w.opens = { 'agent.json': 'transcript' }
+  w.pages['agent.json'] = STORE
+  w.turns['agent.json'] = STORE_TURNS
+  await start($, w)
+  let pane = await browser($, w)
+  pane = await openRow($, w, pane, 'agent.json', 1)
+  expect(shown(await pane.drawn())).toContain('opens as transcript')
+  pane = await openRow($, w, pane, 'agent.json', 1)
+  expect(w.calls.some(c => c[2] === 'turns' && c[5] === 'agent.json')).toBe(true)
+  const text = shown(await pane.drawn())
+  expect(text).toContain('transcript · turns 1-6 of 6')
+  expect(shown(await pane.find({ type: 'Box', key: 'm:file-tabs' }))).toBe(' Transcript  Raw ')
+  const rows = ((((await pane.drawn({ in: 'm:file-body' })) as { children?: unknown[] }).children ?? []) as unknown[]).map(r => shown(r).trim())
+  const at = (s: string) => rows.findIndex(r => r.includes(s))
+  // the system prompt before the conversations, then each conversation's title over its turns
+  expect(at('You maintain a small app.')).toBeLessThan(at('a7 · c1'))
+  expect(at('a7 · c1')).toBeLessThan(at('Why does the build fail?'))
+  expect(at('a7 · c2 (forked from c1 after message 2)')).toBeLessThan(at('Try the other branch.'))
+  expect(at('a7 · c2 (forked from c1 after message 2)')).toBeGreaterThan(at('The groupby test drops the NaN key.'))
+  expect(rows).toContain('3 passed in 0.4s')
+  expect(JSON.stringify(await pane.drawn())).not.toMatch(/\\u001b|\\u0007/)
+  // ↓ chooses the next turn, though every turn stands on line 1: one turn is lit, not all
+  await pane.key({ key: 'down', in: 'm:file-body' } as never)
+  await w.clock.settle()
+  await pane.key({ key: 'down', in: 'm:file-body' } as never)
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  const lit = ((((await pane.drawn({ in: 'm:file-body' })) as { children?: unknown[] }).children ?? []) as unknown[]).filter(r => /^❯/.test(shown(r)))
+  expect(lit.map(r => shown(r))).toEqual([expect.stringContaining('user')])
+  expect(shown(await pane.drawn({ in: 'file-detail' }))).toBe('↗ agent.json line 1  ?')
+  await pane.unmount()
+})
+
+test("a whole-file JSON transcript whose parse finds no turns opens as its lines, and the type column stops saying transcript", async ($, on) => {
+  const w = world(on)
+  w.states.files = [{ path: 'agent.json', kind: 'text', size_bytes: 10 }]
+  w.opens = { 'agent.json': 'transcript' }
+  w.pages['agent.json'] = STORE
+  await start($, w)
+  let pane = await browser($, w)
+  pane = await openRow($, w, pane, 'agent.json')
+  const text = shown(await pane.drawn())
+  expect(text).not.toContain('Transcript')
+  expect(text).not.toContain('holds no messages')
+  expect(text).toContain('json · lines 1-1 of 1')
+  expect(shown(await pane.drawn({ in: 'm:file-body' }))).toContain('{"agent": "a7"')
+  await pane.key({ key: 'backspace', in: 'm:file-body' } as never)
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  const tree = ((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []
+  expect(shown(tree.find(r => shown(r).includes('agent.json')))).toMatch(/agent\.json +json +10 B$/)
+  await pane.unmount()
+})

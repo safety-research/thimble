@@ -10,7 +10,9 @@ Kinds: `prompt` sends units to the labels role's model in batches through the cl
 tool); `regex` matches a pattern, in the scan pool (concept_scan.py) for file units; `code` runs a Python `label(unit)`
 in a dedicated kernel. Units: `record` (a line, `<path>#L<n>`), `agent` (a file), `run` (a run directory), `cell` (a
 card, `card:<id>`, `cell:<id>` read as the same unit) and `span` (a report sentence). An apply runs as a background task
-whose run record streams on GET .../events.
+whose run record streams on GET .../events. A whole file (`agent`, a label that marks files) reaches code as the file
+whole (`data`, build_code_wrapper) beside its records, and a prompt as its records' texts, or a JSON document as itself,
+shortened to fit (iter_units, fit_json); either up to WHOLE_MAX_BYTES.
 
 Trials: apply_label with a `limit` defines a trial (`trial: true`), left out of the Labels list and label counts until
 a run without a limit makes it a label; a limited run over files samples its units across files (trial_sample).
@@ -132,6 +134,9 @@ QUOTE_MAX = 4_000         # chars of a classifier's quote kept on a row
 WINDOW_TEXT_MAX = 30_000  # chars of a record's or a sentence's text in one classifier item; a longer one is read in windows
 WINDOW_OVERLAP = 400      # chars each window repeats of the one before it
 UNIT_TEXT_MAX = 30_000    # chars for an agent, run or cell unit, which are read no further
+# bytes of a file a whole-file unit holds whole: a code label's `data` (a JSON document parsed, a file's text), and the
+# JSON document a prompt label reads whole, shortened to UNIT_TEXT_MAX (fit_json); a larger file is read by its records
+WHOLE_MAX_BYTES = records.POINTER_PARSE_MAX_BYTES
 CHUNK = 500               # records read per corpus.load_records call
 RATIONALE_MAX = 500       # chars of a classifier's rationale kept on a row
 APPLICATIONS_KEPT = 50    # run summaries kept on the concept
@@ -1188,24 +1193,16 @@ def line_source(corpus_dir: Path, src: dict) -> bool:
         return False
 
 
-def text_source(corpus_dir: Path, src: dict) -> bool:
-    """Whether a whole file's text can be read line by line, as a unit of a whole file or run reads it: anything but a
-    database, a PDF and another binary file, whose rows or pages it reads instead (concept_scan.group_texts). Blocking."""
-    try:
-        return records.reader_of(config.safe_corpus_path(corpus_dir, src["path"]), src["path"]) in ("lines", "json", "csv")
-    except (OSError, ValueError):
-        return False
-
-
 class Unit:
     """One thing to label. `texts()` yields (ref, text) parts lazily; `record` is what the code kind's label() gets;
     `line` the line a record of a CSV or a JSON document starts on (labels_store.row_line)."""
 
-    __slots__ = ("ref", "paths", "record", "_texts", "line")
+    __slots__ = ("ref", "paths", "record", "_texts", "line", "shortened")
 
     def __init__(self, ref: str, paths: list[str], texts: Callable[[], Iterator[tuple[str, str]]], record: Any = None,
                  line: int | None = None):
         self.ref, self.paths, self.record, self._texts, self.line = ref, paths, record, texts, line
+        self.shortened = False  # a JSON document of the unit was shortened to fit what is read of it (fit_json)
 
     def texts(self) -> Iterator[tuple[str, str]]:
         return self._texts()
@@ -1262,7 +1259,10 @@ def groups_for(sources: list[dict], unit: str) -> list[dict]:
 
 
 def iter_units(corpus_dir: Path, sources: list[dict], unit: str) -> Iterator[Unit]:
-    """The file units of the matched sources, in corpus order."""
+    """The file units of the matched sources, in corpus order. A whole file's or a run's text is each file's records'
+    texts, but a JSON document's is the document itself (whole_document), shortened to its share of UNIT_TEXT_MAX
+    (fit_json), since its records leave out every entry beside its lists (a store of messages by id, the conversations
+    that list them)."""
     if unit == "record":
         for src in sources:
             for r in _iter_records(corpus_dir, src):
@@ -1271,13 +1271,81 @@ def iter_units(corpus_dir: Path, sources: list[dict], unit: str) -> Iterator[Uni
     by_path = {s["path"]: s for s in sources}
     for g in groups_for(sources, unit):
         srcs = [by_path[p] for p in g["paths"]]
+        u = Unit(g["ref"], g["paths"], lambda: iter(()))
 
-        def texts(srcs=srcs) -> Iterator[tuple[str, str]]:
+        def texts(srcs=srcs, u=u, share=max(1, UNIT_TEXT_MAX // len(srcs))) -> Iterator[tuple[str, str]]:
             for s in srcs:
+                found, doc = whole_document(corpus_dir, s)
+                if found:
+                    text, short = fit_json(doc, share)
+                    u.shortened = u.shortened or short
+                    yield s["path"], text
+                    continue
                 for r in _iter_records(corpus_dir, s):
                     yield r["ref"], r["text"]
 
-        yield Unit(g["ref"], g["paths"], texts)
+        u._texts = texts
+        yield u
+
+
+def whole_document(corpus_dir: Path, src: dict) -> tuple[bool, Any]:
+    """(True, the document) for a JSON document a whole-file unit reads whole: one records.py reads as a document, of
+    at most WHOLE_MAX_BYTES, matched whole (not by a fragment, `under`, which names the records to read); (False, None)
+    for any other file, read by its records. Blocking."""
+    if src.get("under"):
+        return False, None
+    try:
+        path = config.safe_corpus_path(corpus_dir, src["path"])
+        if records.reader_of(path, src["path"]) != "json" or path.stat().st_size > WHOLE_MAX_BYTES:
+            return False, None
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return True, json.load(f)
+    except (OSError, ValueError, RecursionError):
+        return False, None
+
+
+FIT_CHARS = (4000, 1000, 300, 100, 40)  # the longest a string may stay, tried in turn, as fit_json shortens a document
+FIT_ITEMS = (3000, 1000, 300, 100, 30, 10, 3, 1)  # then the most items a list or mapping may keep
+
+
+def fit_json(value: Any, cap: int) -> tuple[str, bool]:
+    """A JSON value as compact JSON of at most `cap` characters that keeps every part of it in view: as it is when it
+    fits; else with each string past a length cut to that length, at the longest of FIT_CHARS that fits; else, at the
+    shortest, with each list and mapping past a size cut to its first items, at the largest of FIT_ITEMS that fits; else
+    the text cut at `cap`. A cut string ends with `…[N characters]`, a cut list with `"…[N more]"`, a cut mapping with a
+    `"…"` entry saying how many more. Also whether it shortened anything."""
+    text = json.dumps(value, ensure_ascii=False)
+    if len(text) <= cap:
+        return text, False
+    for chars in FIT_CHARS:
+        text = json.dumps(_shortened(value, chars, None), ensure_ascii=False)
+        if len(text) <= cap:
+            return text, True
+    for items in FIT_ITEMS:
+        text = json.dumps(_shortened(value, FIT_CHARS[-1], items), ensure_ascii=False)
+        if len(text) <= cap:
+            return text, True
+    return text[:cap], True
+
+
+def _shortened(v: Any, chars: int, items: int | None, depth: int = 0) -> Any:
+    """`v` with every string longer than `chars` cut, and with `items`, every list and mapping longer than that cut
+    (fit_json)."""
+    if isinstance(v, str):
+        return v if len(v) <= chars else f"{v[:chars]}…[{len(v):,} characters]"
+    if depth > 60:
+        return "…"
+    if isinstance(v, list):
+        head = v if items is None or len(v) <= items else v[:items]
+        out = [_shortened(x, chars, items, depth + 1) for x in head]
+        return out + [f"…[{len(v) - len(head):,} more]"] if len(head) < len(v) else out
+    if isinstance(v, dict):
+        keys = list(v) if items is None or len(v) <= items else list(v)[:items]
+        out = {k: _shortened(v[k], chars, items, depth + 1) for k in keys}
+        if len(keys) < len(v):
+            out["…"] = f"{len(v) - len(keys):,} more entries"
+        return out
+    return v
 
 
 def _record_unit(rel: str, r: dict) -> Unit:
@@ -2076,12 +2144,13 @@ def quoted_span(text: str, quote: str) -> list[str] | None:
 
 class _Item(NamedTuple):
     """One text a classifier call carries: a unit's whole text, or window `part` of the `parts` it is read in; `cut`
-    when the unit's text went on past what was read."""
+    when the unit's text went on past what was read; `short` when a JSON document of it was shortened to fit."""
     unit: Unit
     text: str
     part: int = 0
     parts: int = 1
     cut: bool = False
+    short: bool = False
 
 
 def _items(u: Unit, unit: str) -> list[_Item]:
@@ -2091,7 +2160,7 @@ def _items(u: Unit, unit: str) -> list[_Item]:
         parts = u.windows(WINDOW_TEXT_MAX)
         return [_Item(u, t, i, len(parts)) for i, t in enumerate(parts)]
     t, cut = u.text_cut(UNIT_TEXT_MAX)
-    return [_Item(u, t, cut=cut)]
+    return [_Item(u, t, cut=cut, short=u.shortened)]
 
 
 def _batches(units: Iterator[Unit], unit: str, per_call: int) -> Iterator[list[_Item]]:
@@ -2181,7 +2250,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
     per_call, in_flight = BATCH_ITEMS, CONCURRENCY
     allowed = float(in_flight)  # the calls let run now
     slowdowns = 0  # a call started before the last slowdown does not slow the run again
-    labeled = failed = matches = cut = 0
+    labeled = failed = matches = cut = short = 0
     labels = concept["labels"]
     pos_label = labels[0]
     spans = concept.get("marks") == "span"
@@ -2286,7 +2355,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
 
     def settle(b: list[_Item], answers: list[dict | None]) -> tuple[list[dict], int]:
         """The rows of the units whose last item is in `b`, and how many of those units failed."""
-        nonlocal cut
+        nonlocal cut, short
         rows: list[dict] = []
         n_failed = 0
         for it, a in zip(b, answers):
@@ -2297,6 +2366,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                 continue
             r = merge_windows(labels, windows) if it.parts > 1 else a
             cut += it.cut
+            short += it.short
             if r is None:
                 n_failed += 1
             else:
@@ -2358,9 +2428,12 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         if cut:
             noun = {"agent": "file", "run": "run", "cell": "card"}.get(unit, unit)
             note(f"{cut:,} {noun}{'' if cut == 1 else 's'} ran past {UNIT_TEXT_MAX:,} characters; the classifier read that much of each")
+        if short:
+            note(f"{short:,} JSON document{' was' if short == 1 else 's were'} longer than {UNIT_TEXT_MAX:,} characters; the "
+                 "classifier read each whole, its long strings, lists and mappings shortened to fit")
         if cancel.is_set() and (ready or not exhausted):
             note(_cancelled_message(labeled + failed, unit))
-        if cut or cancel.is_set():
+        if cut or short or cancel.is_set():
             _progress(c, concept["id"], message=message())
     finally:
         for task, _b in pending:
@@ -2649,21 +2722,29 @@ def implicit_value(labels: list[str]) -> str | None:
 
 def build_code_wrapper(concept: dict, groups: list[dict], limit: int | None, rows_file: Path | str,
                        units_file: Path | str | None = None, quiet: str | None = None, ts: str = "",
-                       parts_file: Path | str | None = None) -> str:
+                       parts_file: Path | str | None = None, kinds: dict[str, str] | None = None) -> str:
     """The code the code kind runs in the labels kernel: the analyst's spec (defining `label(unit)`) plus a loop over the units
     that writes one JSON line per unit ({ref, label, confidence, spans?}, or {ref, error}) to `rows_file`. File units are
-    read from `groups` (relative to the kernel's cwd), the records of their databases and PDFs from `parts_file`
-    (_write_parts); cell and span units, and records the wrapper does not read itself, come from `units_file`. The
-    paths must be absolute. With `quiet` (implicit_value), records of whole files that take that value get cover lines
-    instead of rows.
+    read from `groups` (relative to the kernel's cwd), the records of their files that are not read as lines from
+    `parts_file` (_write_parts); cell and span units, and records the wrapper does not read itself, come from
+    `units_file`. The paths must be absolute. With `quiet` (implicit_value), records of whole files that take that value
+    get cover lines instead of rows.
+
+    A whole file's or a run's unit is {ref, paths, records, files}: its files' records in order, as a record unit gets
+    each, and `files`, each file whole by its path, as its kind (`kinds`, whole_kind) says: a JSON document parsed, a
+    JSON lines file's records, a CSV file's, database's or PDF's records, else its text; None for a file past
+    WHOLE_MAX_BYTES that would be read anew. A whole file's unit also has `path` and `data`, its one file whole.
 
     The file list goes into the code as one JSON string rather than a list literal: a long list literal makes one huge line,
     and Python 3.12's tokenizer keeps a copy of the line per token, which can exhaust the kernel's memory."""
     return (
         f"# thimble: apply label {concept['name']!r} (code kind, unit={concept['unit']})\n"
-        "import json as _json\n\n"
+        "import json as _json\n"
+        "import os as _os\n\n"
         f"{concept['spec'].rstrip()}\n\n"
         f"_groups = _json.loads({json.dumps(groups)!r})\n"
+        f"_kinds = _json.loads({json.dumps(kinds or {})!r})\n"
+        f"_whole_max = {WHOLE_MAX_BYTES}\n"
         f"_unit = {concept['unit']!r}\n"
         f"_limit = {int(limit or 0)}\n"
         f"_rows_file = {str(rows_file)!r}\n"
@@ -2694,6 +2775,19 @@ def build_code_wrapper(concept: dict, groups: list[dict], limit: int | None, row
         "            if _line.strip():\n"
         "                yield _json.loads(_line)\n\n"
         "_parts = {_x['path']: _x['records'] for _x in _read_units(_parts_file)} if _parts_file else {}\n\n"
+        "def _whole(_p, _recs):\n"
+        "    _kind = _kinds.get(_p) or ('records' if _p in _parts else 'jsonl' if _p.endswith('.jsonl') else 'text')\n"
+        "    if _kind in ('records', 'jsonl'):\n"
+        "        return _recs\n"
+        "    if _kind not in ('json', 'text'):\n"
+        "        return None\n"
+        "    try:\n"
+        "        if _os.path.getsize(_p) > _whole_max:\n"
+        "            return None\n"
+        "        with open(_p, encoding='utf-8', errors='replace') as _f:\n"
+        "            return _json.load(_f) if _kind == 'json' else _f.read()\n"
+        "    except (OSError, ValueError, RecursionError):\n"
+        "        return None\n\n"
         "def _emit(_ref, _rec, _implicit=False, _line=None):\n"
         "    try:\n"
         "        _out = label(_rec)\n"
@@ -2754,8 +2848,16 @@ def build_code_wrapper(concept: dict, groups: list[dict], limit: int | None, row
         "                _emit(f\"{_g['paths'][0]}#L{_i}\", _rec)\n"
         "                _n += 1\n"
         "        else:\n"
-        "            _recs = [_rec for _p in _g['paths'] for _i, _rec in _read(_p)]\n"
-        "            _emit(_g['ref'], {'ref': _g['ref'], 'paths': _g['paths'], 'records': _recs})\n"
+        "            _recs, _files = [], {}\n"
+        "            for _p in _g['paths']:\n"
+        "                _r = [_rec for _i, _rec in _read(_p)]\n"
+        "                _recs.extend(_r)\n"
+        "                _files[_p] = _whole(_p, _r)\n"
+        "            _u = {'ref': _g['ref'], 'paths': _g['paths'], 'records': _recs, 'files': _files}\n"
+        "            if _unit == 'agent':\n"
+        "                _u['path'] = _g['paths'][0]\n"
+        "                _u['data'] = _files[_u['path']]\n"
+        "            _emit(_g['ref'], _u)\n"
         "            _n += 1\n"
         "print(_json.dumps({'_done': _n, 'errors': _stats['errors'], 'first_error': _stats['first_error']}))\n"
     )
@@ -2887,6 +2989,7 @@ async def _apply_code(c: str, concept: dict, sources: list[dict], units: list[Un
     parts_file: Path | None = None
     groups: list[dict] = []
     rest: list[dict] = []
+    kinds: dict[str, str] = {}
     if units is None:
         corpus_dir = config.corpus_dir(c)
         if concept["unit"] == "record":
@@ -2895,9 +2998,11 @@ async def _apply_code(c: str, concept: dict, sources: list[dict], units: list[Un
             rest = [s for s, ok in zip(sources, lined) if not ok]
             groups = groups_for([s for s, ok in zip(sources, lined) if ok], "record")
         else:
-            # the wrapper reads the files of each unit, and the rows or pages of its databases and PDFs from a file
+            # the wrapper reads the files of lines of each unit, and the records of its other files (a JSON document's,
+            # a CSV file's rows, a database's rows, a PDF's pages) from a file; each file whole as its kind says
             groups = groups_for(sources, concept["unit"])
-            others = await asyncio.to_thread(lambda: [s for s in sources if not text_source(corpus_dir, s)])
+            kinds = await asyncio.to_thread(lambda: {s["path"]: whole_kind(corpus_dir, s) for s in sources})
+            others = await asyncio.to_thread(lambda: [s for s in sources if not line_source(corpus_dir, s)])
             if others:
                 parts_file = out.with_name(f".{concept['id']}.{stamp}.parts.tmp")
                 await asyncio.to_thread(_write_parts, parts_file, corpus_dir, others)
@@ -2908,7 +3013,8 @@ async def _apply_code(c: str, concept: dict, sources: list[dict], units: list[Un
     # a run over the records of whole files of lines writes no row for a record that takes the negative (labels_store,
     # covers)
     quiet = implicit_value(concept["labels"]) if units is None and concept["unit"] == "record" and not limit else None
-    code = build_code_wrapper(concept, groups, limit, rows_file, units_file, quiet=quiet, ts=_now(), parts_file=parts_file)
+    code = build_code_wrapper(concept, groups, limit, rows_file, units_file, quiet=quiet, ts=_now(), parts_file=parts_file,
+                              kinds=kinds)
     try:
         outputs, _n, _status = await notebook.execute_on(c, CODE_KERNEL, code)
         labeled, errors, message, matches = await asyncio.to_thread(_collect_code_rows, outputs, rows_file, out, concept["labels"][0])
@@ -2939,9 +3045,28 @@ def _clear_files(out: Path, paths: list[str]) -> None:
             log.exception("labels store %s: a write failed; the store is rebuilt from the labels file on the next read", out.name)
 
 
+def whole_kind(corpus_dir: Path, src: dict) -> str:
+    """How the code kind's wrapper holds a file of a whole-file or run unit whole (`data`): `json`, a JSON document it
+    parses; `jsonl`, its records, each line parsed; `records`, the records records.py reads (a CSV file's rows, a
+    database's rows, a PDF's pages); `text`, its text; `none`, a binary file no reader reads. Blocking."""
+    try:
+        path = config.safe_corpus_path(corpus_dir, src["path"])
+        reader = records.reader_of(path, src["path"])
+        if reader == "json":
+            return "json" if records.json_index(path) is not None else "text"
+    except (OSError, ValueError):
+        return "none"
+    if reader in ("sqlite", "pdf", "csv"):
+        return "records"
+    if reader == "lines":
+        return "jsonl" if src["path"].endswith(".jsonl") else "text"
+    return "none"
+
+
 def _write_parts(parts_file: Path, corpus_dir: Path, sources: list[dict]) -> None:
-    """The file the code kind's wrapper reads the records of databases, PDFs and other binary files from, for the units
-    of whole files and runs: one JSON line per file, {path, records}, none for a binary file no reader reads. Blocking."""
+    """The file the code kind's wrapper reads the records of the files it does not read as lines from (a JSON document's,
+    a CSV file's rows, a database's rows, a PDF's pages), for the units of whole files and runs: one JSON line per file,
+    {path, records}, none for a binary file no reader reads. Blocking."""
     with open(parts_file, "w", encoding="utf-8") as f:
         for s in sources:
             try:

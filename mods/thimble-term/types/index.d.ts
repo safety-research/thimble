@@ -135,6 +135,10 @@ export type TermPanel = {
   /** a file's record chosen (a citation's line), lit; a file's table sorted by a column (`<column>:asc|desc`) */
   line?: number
   sort?: string
+  /** a whole-file JSON transcript's turns: the first of the page shown, and the one chosen, by their index (turns
+   *  that share a line, as in a file of one line, are told apart by it) */
+  from?: number
+  turn?: number
   agent?: string
   target?: ChatTarget | null
   about?: string

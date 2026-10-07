@@ -609,8 +609,9 @@ const TURNS_CAP = 2000
  * around a cited line, more as the reader nears either end, up to TURNS_CAP at a time. Each turn stands on the line of
  * the file that holds its words, so a label or a citation of that line finds it; the words are the parsed text, which
  * span labels do not mark. A citation of words opens at the turn the server finds holding them (`cited`), where they
- * are highlighted, among however many turns share its line. */
-function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
+ * are highlighted, among however many turns share its line. A file whose whole parse finds no turns (415: the sniff
+ * read only its head) is left for the mode it would otherwise open in (`unavailable`), not shown as an error. */
+function TurnsTranscript({ workspace, path, targetRef, unavailable }: ViewProps) {
   const asked = useMemo(() => targetOf(targetRef, path), [targetRef, path])
   const [data, setData] = useState<SourceTurns | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -628,11 +629,15 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
     api
       .sourceTurns(workspace, path, 0, TURNS_PAGE, askedLine, span)
       .then((p) => alive && setData(p))
-      .catch((e) => alive && setError(errMsg(e)))
+      .catch((e) => {
+        if (!alive) return
+        if (unavailable && noTurns(e)) unavailable()
+        else setError(errMsg(e))
+      })
     return () => {
       alive = false
     }
-  }, [workspace, path, askedLine, askedBlock, askedStart, askedEnd])
+  }, [workspace, path, askedLine, askedBlock, askedStart, askedEnd, unavailable])
   const more = useCallback(
     (dir: 'earlier' | 'later') => {
       if (!data || loading.current) return
@@ -711,6 +716,11 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
       <div ref={tail} className="reader-turns-tail" aria-hidden />
     </div>
   )
+}
+
+/** Whether a failed GET /source/turns says the file holds no turns (415), not that it could not be read. Pure. */
+export function noTurns(e: unknown): boolean {
+  return /^415\b/.test(errMsg(e))
 }
 
 /** The turn a citation of `line` opens at when no quoted words pick one: the first standing on it, else the last before

@@ -26,12 +26,12 @@ import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, freshSeg, hasMargi
 import { chipLook, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
 import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
-import { dirOf, fileRef, firstChoice, folderOpen, sortPaths } from './files'
+import { dirOf, fileRef, firstChoice, folderOpen, sortPaths, turnsRead, wholeJson } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
 import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, labelState, labelStateWords, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
+import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, takeListKeys } from './lines'
 import type { LineHit } from './lines'
@@ -2226,7 +2226,7 @@ function pageLines(page: Obj): { n: number; text: string }[] {
   const first = typeof page.start === 'number' ? page.start : 1
   return records.map((r, i) => ({
     n: typeof r.line === 'number' ? r.line : first + i,
-    text: demojibake((Array.isArray(r.blocks) ? (r.blocks as Obj[]).map(b => str(b.text)).join(' ') : str(r.text ?? r.raw ?? (isObj(r.record) ? JSON.stringify(r.record) : r.record))).replace(/\s+/g, ' ').slice(0, 2000)),
+    text: noControls(demojibake((Array.isArray(r.blocks) ? (r.blocks as Obj[]).map(b => str(b.text)).join(' ') : str(r.text ?? r.raw ?? (isObj(r.record) ? JSON.stringify(r.record) : r.record))))).replace(/\s+/g, ' ').slice(0, 2000),
   }))
 }
 
@@ -2248,7 +2248,7 @@ function rawLines(page: Obj): { n: number; text: string }[] {
     // a page that gives no record (an older backend's) as its blocks' words
     const words = Array.isArray(r.blocks) ? (r.blocks as Obj[]).map(b => str(b.text)).join(' ') : str(r.text ?? r.raw)
     const text = isObj(rec) && typeof rec._raw === 'string' ? rec._raw : isObj(rec) && Object.keys(rec).length === 1 && typeof rec.text === 'string' ? rec.text : rec !== undefined ? jsonLine(rec) : words
-    return { n: typeof r.line === 'number' ? r.line : first + i, text: demojibake(text.replace(/\t/g, '  ')).slice(0, 4000) }
+    return { n: typeof r.line === 'number' ? r.line : first + i, text: noControls(demojibake(text.replace(/\t/g, '  '))).slice(0, 4000) }
   })
 }
 
@@ -2269,10 +2269,13 @@ function middleCut(name: string, n: number): string {
 }
 
 /** The tab a file opens on, by its first page: Transcript when its head reads as a transcript surely (thimble's sniff,
- *  transcripts.STRONG), else Raw, its lines. */
-function firstMode(page: Obj): 'transcript' | 'raw' {
+ *  transcripts.STRONG) and it has turns to show, else Raw, its lines. `turns` are those the view has (a whole-file JSON
+ *  transcript's, from the parse of the whole file); left out, the page's own, or for a whole-file JSON transcript the
+ *  sniff's word, as the file browser's preview has no others. */
+function firstMode(page: Obj, turns?: Turn[] | null): 'transcript' | 'raw' {
   const hint = isObj(page.transcript) ? page.transcript : null
-  return turnsOf(page) && typeof hint?.score === 'number' && hint.score >= 0.95 ? 'transcript' : 'raw'
+  const has = turns !== undefined ? Boolean(turns?.length) : wholeJson(page) || Boolean(turnsOf(page))
+  return has && typeof hint?.score === 'number' && hint.score >= 0.95 ? 'transcript' : 'raw'
 }
 
 /** What a file opens as, by its first page, as its view opens it (firstMode): its transcript or its lines; a binary
@@ -2413,14 +2416,18 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   return <Box flexDirection="column">{body}</Box>
 }
 
+/** turns of a whole-file JSON transcript one read gives (backend local.py TURNS_PAGE) */
+const TURNS_PAGE = 200
+
 // the keys a transcript's record names its speaker, its words and its time by, in the order tried, where thimble's sniff
 // names none
 const SPEAKER_KEYS = ['speaker', 'role', 'author', 'agent', 'sender', 'from', 'user', 'name']
 const TEXT_KEYS = ['text', 'content', 'message', 'body', 'msg', 'comment']
 const TIME_KEYS = ['time', 'timestamp', 'ts', 'created_at', 'date', 'at']
 
-/** A turn of a transcript: its line, who speaks, the words, when; a tool call folded to one line (`tool`). */
-type Turn = { n: number; who: string; text: string; time: string; tool?: boolean }
+/** A turn of a transcript: its line, who speaks, the words, when; a tool call folded to one line (`tool`); a whole-file
+ *  JSON transcript's turn its index (`i`) and the title of the conversation it is in (`group`). */
+type Turn = { n: number; who: string; text: string; time: string; tool?: boolean; i?: number; group?: string }
 
 /** A dotted key's value in a record (`data.speakerId`). */
 function dotted(o: Obj, key: string): unknown {
@@ -2464,11 +2471,30 @@ function turnsOf(page: Obj): Turn[] | null {
       if (hint?.tools && (o.tool_use_id || o.tool || o.name || o.type === 'tool_use' || o.type === 'tool_result')) out.push({ n: lineOf(r, i), who: '', text: str(o.name ?? o.tool ?? o.type ?? 'tool call'), time: '', tool: true })
       continue
     }
-    out.push({ n: lineOf(r, i), who: demojibake(who.trim()), text: demojibake(text.replace(/\s+/g, ' ').trim()), time: time === undefined ? '' : String(time) })
+    out.push({ n: lineOf(r, i), who: noControls(demojibake(who.trim())), text: noControls(demojibake(text)).replace(/\s+/g, ' ').trim(), time: time === undefined ? '' : String(time) })
   }
   const spoken = out.filter(t => !t.tool).length
   if (hint) return spoken ? out : null
   return records.length && spoken >= Math.ceil(records.length * 0.6) ? out : null
+}
+
+/** A page of a whole-file JSON transcript's turns (`thimble state turns`, the parse of the whole file) as the view's
+ *  turns: each with its line and index, its conversation's title where the file holds several or titles one, a turn
+ *  with no words left out as the browser leaves it out; null when the parse found none (`none`), so the view opens its
+ *  other tab. */
+function turnsOfPage(tp: Obj): Turn[] | null {
+  const groups = isObj(tp.groups) ? tp.groups : {}
+  const titleOf = (g: unknown) => (typeof g === 'number' && isObj(groups[String(g)]) ? str((groups[String(g)] as Obj).title) : '')
+  const list = (Array.isArray(tp.turns) ? tp.turns : []).filter(isObj)
+  const titled = (typeof tp.n_groups === 'number' && tp.n_groups > 1) || list.some(t => titleOf(t.group))
+  const out: Turn[] = []
+  for (const t of list) {
+    const text = noControls(demojibake(str(t.text))).replace(/\s+/g, ' ').trim()
+    if (!text) continue
+    const g = typeof t.group === 'number' ? t.group : null
+    out.push({ n: typeof t.line === 'number' ? t.line : 1, i: typeof t.i === 'number' ? t.i : out.length, who: noControls(demojibake(str(t.speaker) || str(t.role))), text, time: str(t.time), ...(titled && g !== null ? { group: noControls(titleOf(g)) || `Conversation ${g + 1}` } : {}) })
+  }
+  return out.length ? out : null
 }
 
 /** The records of a page that are objects (JSON lines, a JSON list's items, CSV rows), each with its line. */
@@ -2513,11 +2539,27 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const total = typeof page.total_lines === 'number' ? page.total_lines : 0
   const first = ls[0]?.n ?? start
   const last = ls.at(-1)?.n ?? first
-  const turns = turnsOf(page)
+  // a whole-file JSON transcript: the page of turns thimble parsed from the whole file (term.ts loadPanel reads it);
+  // where the parse found none, the view opens its other tab and the type column no longer says transcript
+  const whole = wholeJson(page)
+  const tgot = whole ? await surfaceValue<Obj>(cx, turnsRead(p).key) : undefined
+  if (whole && !tgot) return none(cx, e, `◌ reading ${p.title}`)
+  const tpage = tgot?.ok ? tgot.value : null
+  const turns = whole ? (tpage ? turnsOfPage(tpage) : null) : turnsOf(page)
+  if (whole && !turns) {
+    const o = rt.opens.get(path)
+    if (o?.as) rt.opens.set(path, { ...o, as: '' })
+  }
   const recs = recordsOf(page)
   const modes = [...(recs.length ? ['table'] : []), ...(turns ? ['transcript'] : []), 'raw']
   const wanted = p.mode === 'lines' ? 'raw' : p.mode
-  const mode = wanted && modes.includes(wanted) ? wanted : firstMode(page)
+  const firstTab = firstMode(page, turns)
+  const mode = wanted && modes.includes(wanted) ? wanted : firstTab
+  // the Transcript tab of a whole-file JSON transcript pages through its turns, and tells its turns apart by index
+  const jsonMode = whole && mode === 'transcript'
+  const tstart = tpage && typeof tpage.start === 'number' ? tpage.start : 0
+  const tcount = tpage && Array.isArray(tpage.turns) ? tpage.turns.length : 0
+  const ttotal = tpage && typeof tpage.total === 'number' ? tpage.total : 0
   const tabName: Record<string, string> = { table: 'Table', transcript: 'Transcript', raw: 'Raw' }
   // Backspace goes back to the file browser: ← reaches no element of a pane (listKeysEl)
   const fileHints = [...(modes.length > 1 ? [`${modes.map((_m, i) => i + 1).join(' ')} for the tabs`] : []), '↑↓ to choose', 'Enter to open', 'Backspace for the files']
@@ -2533,9 +2575,15 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // a page, a tab, a sort or a line chosen in place: back leads where the file was opened from (live check term-fix9,
   // quirk 12: after a click on a line, b went back to the line clicked before)
   const here = (q: TermPanel) => openPanel(cx, q, { replace: true })
-  const earlier = first > 1 ? () => void here({ ...p, start: Math.max(1, first - 200) }) : null
-  const later = total && last < total ? () => void here({ ...p, start: last + 1 }) : null
-  const subWords = [fileType(path, str(page.kind), firstMode(page) === 'transcript' ? 'transcript' : ''), recs.length ? plural(recs.length, 'record') : '', ls.length ? `lines ${num(first)}-${num(last)}${total ? ` of ${num(total)}` : ''}` : page.binary ? 'raw bytes: not shown' : '']
+  // the Transcript tab of a whole-file JSON transcript pages through its turns
+  const earlier = jsonMode
+    ? tstart > 0 ? () => void here({ ...p, from: Math.max(0, tstart - TURNS_PAGE), turn: undefined }) : null
+    : first > 1 ? () => void here({ ...p, start: Math.max(1, first - 200) }) : null
+  const later = jsonMode
+    ? tstart + tcount < ttotal ? () => void here({ ...p, from: tstart + tcount, turn: undefined }) : null
+    : total && last < total ? () => void here({ ...p, start: last + 1 }) : null
+  const shownWords = jsonMode ? `turns ${num(tstart + 1)}-${num(tstart + tcount)} of ${num(ttotal)}` : ls.length ? `lines ${num(first)}-${num(last)}${total ? ` of ${num(total)}` : ''}` : page.binary ? 'raw bytes: not shown' : ''
+  const subWords = [fileType(path, str(page.kind), firstTab === 'transcript' ? 'transcript' : ''), recs.length ? plural(recs.length, 'record') : '', shownWords]
   // the facts and `earlier  later` on one row, 2 cells apart, when they fit; else the facts wrapped, the pages on a row
   // of their own (live check term-fix9, quirk 3: `lines 1…later` ran together in a narrow pane)
   const subW = lineWidth(subLine(subWords))
@@ -2565,9 +2613,14 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   )
   const more = [...subRows, ...(modes.length > 1 ? [tabsRow] : [])]
   const body: RenderElement[] = [...headerEls(els, { title: p.title || path, cols, more })]
-  // the record chosen, by its line; a click or ↑↓ chooses another
-  const chosen = p.line && p.line >= first && p.line <= last ? p.line : 0
+  // the record chosen, by its line; a click or ↑↓ chooses another. A whole-file JSON transcript's turn by its index, as
+  // its turns may share a line (all of them in a file of one line): the one chosen, else the first on the cited line
+  const pickedTurn = jsonMode ? (turns!.find(t => t.i === p.turn) ?? (p.line ? (turns!.find(t => t.n === p.line) ?? turns!.filter(t => t.n < p.line!).at(-1)) : undefined)) : undefined
+  const chosen = jsonMode ? (pickedTurn?.n ?? 0) : p.line && p.line >= first && p.line <= last ? p.line : 0
   const choose = (n: number) => () => here({ ...p, line: n })
+  const chooseTurn = (t: Turn) => () => here({ ...p, line: t.n, turn: t.i, from: tstart })
+  const isChosen = (t: Turn) => (jsonMode ? t.i === pickedTurn?.i : t.n === chosen)
+  const pickTurn = (t: Turn) => (jsonMode ? chooseTurn(t) : choose(t.n))
   // Backspace: the file browser in place of the file, the file chosen there and its folder open (live check term-fix9,
   // quirk 7: after Backspace from a file /thimble files opened, no row was chosen)
   const back = async () => {
@@ -2591,24 +2644,26 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     const tw = Math.min(22, Math.max(0, ...times.map(x => width(x.clock))))
     for (const [ti, t] of turns!.entries()) {
       const when = times[ti]!
+      // a whole-file JSON transcript's conversation: its title on a dim row of its own where it starts
+      if (t.group && t.group !== turns![ti - 1]?.group) lines.push(pointed([dim(cut(t.group, cols))], false))
       if (when.day) lines.push(pointed([dim(when.day)], false))
       const y = lines.length
       if (t.tool) {
-        if (t.n === chosen) chosenY = y
+        if (isChosen(t)) chosenY = y
         lines.push(pointed([...(tw ? [{ s: ' '.repeat(tw + 2) }] : []), dim(`  ⎿ ${cut(t.text, Math.max(10, cols - tw - 8))}`)], false))
-        hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(t.n) })
-        lineNs.push(t.n)
+        hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: pickTurn(t) })
+        lineNs.push(jsonMode ? t.i! : t.n)
         continue
       }
       const hue = COLORS.series[speakers.indexOf(t.who) % COLORS.series.length]!
-      if (t.n === chosen) chosenY = y
-      lines.push(pointed([...(tw ? [dim(`${cut(when.clock, tw).padEnd(tw)}  `)] : []), { s: '●', fg: hue }, { s: ' ' }, { s: t.who, b: true }], t.n === chosen, true))
+      if (isChosen(t)) chosenY = y
+      lines.push(pointed([...(tw ? [dim(`${cut(when.clock, tw).padEnd(tw)}  `)] : []), { s: '●', fg: hue }, { s: ' ' }, { s: t.who, b: true }], isChosen(t), true))
       const room = Math.max(10, cols - (tw ? tw + 2 : 0) - 2)
       // the words under the name, up to three rows
       const rows = wrapRows(t.text, room, 3)
       for (const r of rows) lines.push(pointed([{ s: ' '.repeat((tw ? tw + 2 : 0) + 2) }, { s: r }], false))
-      for (let k = y; k < lines.length; k++) hits.push({ y: k, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(t.n) })
-      lineNs.push(t.n)
+      for (let k = y; k < lines.length; k++) hits.push({ y: k, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: pickTurn(t) })
+      lineNs.push(jsonMode ? t.i! : t.n)
     }
   } else if (mode === 'table') {
     // the records' keys as columns (the first 8 any of them hold), a click on a column's name sorts by it
@@ -2671,18 +2726,19 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // panel, and a blue "?" that asks a thread about it
   if (chosen) {
     const ref = `${path}#L${chosen}`
-    const words = ls.find(l => l.n === chosen)?.text ?? ''
+    const words = jsonMode ? (pickedTurn?.text ?? '') : (ls.find(l => l.n === chosen)?.text ?? '')
     const place = `↗ ${placeWords(ref)}`
     const ask = () => openAsk(cx, { kind: 'record', ref, text: clip(words, 600), label: `${placeWords(ref)}: ${clip(words, 200)}` })
     body.push(linesEl(cx, e, 'file-detail', [[{ s: '↗', fg: LINK }, { s: ' ' }, linkSeg(placeWords(ref)), { s: '  ' }, { s: '?', fg: LINK }]], [{ y: 0, x0: 0, x1: width(place), row: false, run: () => openCite(cx, ref, null) }, { y: 0, x0: width(place) + 2, x1: width(place) + 3, row: false, run: ask }], width(place) + 3))
   }
   if (lines.length) {
-    const at = chosen ? lineNs.indexOf(chosen) : -1
+    const at = jsonMode ? (pickedTurn ? lineNs.indexOf(pickedTurn.i!) : -1) : chosen ? lineNs.indexOf(chosen) : -1
     const onKey = (k: string) => {
       if (k === 'backspace' || k === 'left' || k === 'delete') return back()
       if ((k === 'up' || k === 'k' || k === 'down' || k === 'j') && lineNs.length) {
         const d = k === 'up' || k === 'k' ? -1 : 1
-        return choose(lineNs[Math.max(0, Math.min(lineNs.length - 1, at < 0 ? 0 : at + d))]!)()
+        const next = lineNs[Math.max(0, Math.min(lineNs.length - 1, at < 0 ? 0 : at + d))]!
+        return jsonMode ? chooseTurn(turns!.find(t => t.i === next)!)() : choose(next)()
       }
       if ((k === 'return' || k === 'enter') && chosen) return openCite(cx, `${path}#L${chosen}`, null)
       if (k === 'tab') return here({ ...p, mode: modes[(modes.indexOf(mode) + 1) % modes.length]! })

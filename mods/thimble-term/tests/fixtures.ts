@@ -191,6 +191,8 @@ export type World = {
   startedAt?: number
   /** what `thimble state opens` says each file opens as (`transcript`), by path */
   opens: Record<string, string>
+  /** a whole-file JSON transcript's page of turns by its path (`thimble state turns`), over none */
+  turns: Record<string, unknown>
   /** whether the panel holds the keyboard, as the engine's record of its panes says it (`ui.panes`); left out, unsaid;
    *  `grantOnReopen`: an open with `focus` while it is false gives the panel the keys, as Claude Code does once the prompt
    *  holds them over an empty composer */
@@ -230,6 +232,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     commands: [],
     pages: {},
     opens: {},
+    turns: {},
     focusAsked: [],
     filled: [],
   }
@@ -312,6 +315,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       case 'files':
         if (rest[0] && w.pages[rest[0]] !== undefined) return w.pages[rest[0]] === null ? out({ error: `could not read ${rest[0]}` }, 1) : out(w.pages[rest[0]])
         return rest[0] ? out(w.states.file) : out(w.states.files)
+      case 'turns':
+        return out(w.turns[rest[0]!] ?? { path: rest[0], total: 0, start: 0, turns: [], n_groups: 0, groups: {}, none: `${rest[0]} holds no messages to show as a transcript` })
       case 'opens': {
         const paths = JSON.parse(rest[0] ?? '[]') as string[]
         return out(Object.fromEntries(paths.filter(p => w.opens[p]).map(p => [p, w.opens[p]])))
