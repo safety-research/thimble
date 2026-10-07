@@ -53,7 +53,8 @@ async def test_write_document_saves_a_generation_and_checks_it(cells):
     assert [f["cell"] for f in doc["sections"][0]["figures"]] == [f"card:{tid}"]
     assert doc["model"] == "session" and doc["written_by"] == "terminal" and doc["words"] > 0
     assert _body(r).splitlines()[:2] == ["saved [[report:report]] as generation 1, 2 sections, 3 sentences and 1 figure",
-                                         "left out 1 figure whose card shows no chart or table"]
+                                         "left out 1 figure whose card draws no figure: a figure shows a chart, a "
+                                         "table, a timeline, a diagram or a custom card's page"]
     assert tools.hint("write_document-saved", slug="report") in r.text and doc["verified"]["status"] == "done"
     assert _events()[-1] == {**_events()[-1], "slug": "report", "status": "generated", "by": "terminal"}
     # a second save is the next generation, the first kept in the history
@@ -74,6 +75,77 @@ async def test_write_document_reads_a_citation_written_in_one_pair_of_brackets(c
     doc = report_types.read_doc(CORPUS, MAIN, "report")
     [first] = report_types.unit_sentences(doc["sections"][0])
     assert first["text"] == f"Bob issued [[9|card:{tid}#count/bob]] deletions, all [[27|card:{cid}]] came from one account [[card:{tid}]]."
+
+
+@pytest.fixture()
+def drawings(workspaces_tmp):
+    """A card of each kind that draws a figure other than a plot or a table (a timeline, diagrams from a dataset and from
+    code, a custom page, a card type's graphic), and a note, which draws none: {kind: id}."""
+    from app.kernel_thimble import CARD_MIME, DIAGRAM_MIME, TIMELINE_MIME
+
+    ws = config.workspace_dir(CORPUS)
+    nb = notebook.create_notebook(ws, "Your work", role="analyst")
+    timeline = notebook.new_cell("timeline", "terminal", "When did the deletions happen?", nb["id"], code="thimble.timeline(evs)")
+    timeline["status"] = "ok"
+    timeline["outputs"] = [{TIMELINE_MIME: {"events": [{"time": "2026-06-23T20:00:00", "label": "first deletion"},
+                                                       {"time": "2026-06-23T23:00:00", "label": "last deletion"}]},
+                            "text/plain": "2026-06-23 20:00 first deletion\n2026-06-23 23:00 last deletion"}]
+    diagram = notebook.new_cell("diagram", "terminal", "Who handed work to whom?", nb["id"],
+                                payload={"dataset": {"nodes": ["alice", "bob"], "edges": [["alice", "bob", "handoff"]]}})
+    drawn = notebook.new_cell("diagram", "terminal", "Which pages link?", nb["id"], code="thimble.diagram(ns, es)")
+    drawn["status"] = "ok"
+    drawn["outputs"] = [{DIAGRAM_MIME: {"nodes": [{"id": "a"}, {"id": "b"}], "edges": [{"source": "a", "target": "b"}]},
+                         "text/plain": "a -> b"}]
+    custom = notebook.new_cell("custom", "terminal", "The deletions as a strip", nb["id"], payload={"html": "<svg></svg>"})
+    typed = notebook.new_cell("plot", "terminal", "The deletions in the swarm view", nb["id"], code="thimble.card('swarm')")
+    typed["status"] = "ok"
+    typed["outputs"] = [{CARD_MIME: {"type": "swarm", "data": {}}, "text/plain": "swarm: 2 records"}]
+    note = notebook.new_cell("note", "terminal", "What we know", nb["id"], payload={"text": "The log covers one week."})
+    nb["cells"] += [timeline, diagram, drawn, custom, typed, note]
+    notebook.write_notebook(ws, nb)
+    return {"timeline": timeline["id"], "diagram": diagram["id"], "drawn": drawn["id"], "custom": custom["id"],
+            "typed": typed["id"], "note": note["id"]}
+
+
+def test_a_card_that_draws_a_figure_is_one_whatever_its_kind(drawings):
+    """material.figure_kind, the one test every form of document uses: a timeline or a diagram from code or from a
+    dataset, a card type's graphic and a custom card's page draw a figure; a note draws none."""
+    from app import material
+
+    by_id = {c["id"]: c for nb in notebook.list_notebooks(config.workspace_dir(CORPUS))
+             for c in notebook.read_notebook(config.workspace_dir(CORPUS), nb["id"])["cells"]}
+    kinds = {k: material.figure_kind(by_id[cid]) for k, cid in drawings.items()}
+    assert kinds == {"timeline": "timeline", "diagram": "diagram", "drawn": "diagram", "custom": "custom", "typed": "chart",
+                     "note": None}
+    assert material.figure_kind({"kind": "code", "outputs": [{"text/plain": "27", "_stream": True}]}) is None
+    assert material.figure_kind({"kind": "custom", "payload": {"html": "  "}}) is None
+
+
+async def test_a_timeline_and_a_diagram_are_a_documents_figures(drawings):
+    """Matt: "why can a timeline card not be used in a document? that seems silly". A document's figure may show any card
+    that draws one, in a whole save and in an inserted passage; a note is still left out, and the result says which
+    cards can be figures."""
+    d = drawings
+    figs = "\n".join(f"![{k}](card:{d[k]})" for k in ("timeline", "diagram", "drawn", "custom", "typed", "note"))
+    text = f"# Deletions\n\n## When\n\nThe deletions came in one evening [[card:{d['timeline']}]].\n\n{figs}\n"
+    r = await call("write_document", doc="report", text=text)
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    shown = [f["cell"] for f in doc["sections"][0]["figures"]]
+    assert shown == [f"card:{d[k]}" for k in ("timeline", "diagram", "drawn", "custom", "typed")]
+    assert _body(r).splitlines()[:2] == ["saved [[report:report]] as generation 1, 1 section, 1 sentence and 5 figures",
+                                         "left out 1 figure whose card draws no figure: a figure shows a chart, a "
+                                         "table, a timeline, a diagram or a custom card's page"]
+    # a passage inserted after the paragraph: a timeline is a figure, a note is not
+    r = await call("write_document", doc="report", text=f"# Deletions\n\n## When\n\nThe deletions came in one evening.\n")
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    para = doc["sections"][0]["paragraphs"][0]["id"]
+    r = await call("edit_document", span=f"report:report#p{para}", text=f"![One evening](card:{d['timeline']})", insert=True)
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    assert [f["cell"] for f in doc["sections"][0]["figures"]] == [f"card:{d['timeline']}"]
+    r = await call("edit_document", span=f"report:report#p{para}", text=f"![What we know](card:{d['note']})", insert=True)
+    assert r.is_error and "draws no figure, so it cannot be one: a figure shows a chart, a table, a timeline" in r.text
 
 
 @pytest.fixture()

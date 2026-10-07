@@ -59,12 +59,9 @@ export function sentenceStands(sets: ReportFilterSets | null, sid: string): bool
   return sets == null || sets.sids.has(sid)
 }
 
-/** The cards a figure can show: the ones whose primary artifact is a chart or a table, in canvas order. */
-export function figureCandidates(cells: Cell[], artifactKind: (cell: Cell) => string | null): Cell[] {
-  return cells.filter((c) => {
-    const k = artifactKind(c)
-    return k === 'chart' || k === 'table'
-  })
+/** The cards a figure can show, the ones that draw a figure (components/Outputs figureKind), in canvas order. */
+export function figureCandidates(cells: Cell[], figureKind: (cell: Cell) => string | null): Cell[] {
+  return cells.filter((c) => figureKind(c) != null)
 }
 
 /** The figures placed after paragraph `pid` (null for the section's end and for figures whose paragraph is gone). */

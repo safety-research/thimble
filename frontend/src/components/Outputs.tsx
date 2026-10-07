@@ -6,7 +6,7 @@
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { Concept, MimeBundle, OutputTruncation } from '../lib/types'
+import type { Cell, Concept, MimeBundle, OutputTruncation } from '../lib/types'
 import { frameStyle, frameTokens, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { useTheme } from '../lib/theme'
 import { inkPair, token, vegaConfig, VIZ_NEUTRAL, VIZ_SERIES } from '../lib/vizTheme'
@@ -137,6 +137,24 @@ export function primaryArtifact(outputs: MimeBundle[] | undefined): { bundle: Mi
   if (shell) return { bundle: shell, kind: 'shell' }
   const other = primaryOutput(list)
   return other ? { bundle: other, kind: 'other' } : null
+}
+
+/** What a card draws that a document can show as a figure (backend material.figure_kind). */
+export type FigureKind = 'chart' | 'table' | 'timeline' | 'diagram' | 'custom'
+
+/** What a card draws that a document can show as a figure: a timeline or a diagram, from its code's drawing or from its
+ * dataset; a chart (an image, a Vega-Lite spec or a card type's graphic); a table; a custom card's page. Null for a card
+ * that draws none: a note, an example, a label, or code that only printed (backend material.figure_kind). */
+export function figureKind(cell: Pick<Cell, 'kind' | 'code' | 'payload' | 'outputs'>): FigureKind | null {
+  const payload = (cell.payload ?? {}) as Record<string, unknown>
+  if ((cell.kind === 'timeline' || cell.kind === 'diagram') && !cell.code && payload.dataset != null) return cell.kind
+  if (cell.kind === 'custom') return typeof payload.html === 'string' && payload.html.trim() ? 'custom' : null
+  const art = primaryArtifact(cell.outputs)
+  if (art?.kind === 'chart') {
+    const mime = pickMime(art.bundle)
+    return mime && isDrawing(mime) ? DRAWING_MIMES[mime] : 'chart'
+  }
+  return art?.kind === 'table' ? 'table' : null
 }
 
 /** The `@out<i>` index a card's output answers to in a ref: its `_out` when it carries one, else its place among the
