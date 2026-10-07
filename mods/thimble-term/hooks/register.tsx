@@ -29,7 +29,7 @@ import { chipState, claimsIn, streamLink, streamStep, streaming } from './cite'
 import type { StreamLook, Streaming } from './cite'
 import type { CardData } from './draw'
 import { cid, citeSpans, citations, clip, embeddedCards, needsDrawing } from './lib'
-import { cardsOfCall, labelsOf, threadOf, withoutEnd } from './model'
+import { cardsOfCall, docsOf, labelsOf, threadOf, withoutEnd } from './model'
 import { HOME_UI_EMPTY } from './home'
 import { linesMessage } from './lines'
 import { drawPanel, fieldMessage, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView } from './panel'
@@ -199,6 +199,68 @@ const applyUi: UiApply = async (cx, kind, args) => {
   if ((kind === 'filter' || kind === 'label') && p?.view.startsWith('file')) await openPanel(cx, p)
 }
 
+/** `/thimble <what>` in terminal mode, a keyboard way to what the chat and the panel draw: `threads`, `cite [n]` (the
+ *  n-th citation of the last reply), `card [n|id]` (the n-th card of the last turn, or a card by its id), `files
+ *  [path[:line]]`, `documents`. What it says, or null for plain `/thimble` (home). */
+async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
+  const [what = '', ...rest] = args.trim().split(/\s+/)
+  const arg = rest.join(' ')
+  const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`
+  switch (what.toLowerCase()) {
+    case '':
+      return null
+    case 'threads': {
+      await openPanel(cx, { view: 'threads', title: 'Threads' })
+      return `thimble: ${plural((await cx.threads()).length, 'side thread')}`
+    }
+    case 'documents':
+    case 'docs':
+    case 'reports': {
+      await readSurface(cx, 'docs', 'docs')
+      const got = await surfaceValue(cx, 'docs')
+      await openPanel(cx, { view: 'docs', title: 'Documents' })
+      return `thimble: ${plural(got?.ok ? docsOf(got.value).length : 0, 'document')}`
+    }
+    case 'cite': {
+      const cs = citations(rt.lastReply)
+      const n = Number(arg)
+      if (!cs.length) return 'thimble: the last reply cites nothing'
+      if (!Number.isInteger(n) || n < 1 || n > cs.length) return `thimble: the last reply has ${plural(cs.length, 'citation')}: \`/thimble cite <1-${cs.length}>\` opens one`
+      const c = cs[n - 1]!
+      await openCite(cx, c.ref, c.display)
+      return `thimble: citation ${n} of ${cs.length}`
+    }
+    case 'card': {
+      const ids = rt.lastCards
+      const n = Number(arg)
+      if (arg && !Number.isInteger(n)) {
+        const id = arg.replace(/^(?:card|cell):/, '')
+        await loadCards(cx, [id])
+        if (!(await cx.card(id))?.data) return 'thimble: no such card in this workspace'
+        await openCard(cx, id)
+        return 'thimble: the card is open'
+      }
+      if (!ids.length) return 'thimble: the last turn made no card'
+      if (!Number.isInteger(n) || n < 1 || n > ids.length) return `thimble: the last turn has ${plural(ids.length, 'card')}: \`/thimble card <1-${ids.length}>\` opens one`
+      await openCard(cx, ids[n - 1]!)
+      return `thimble: card ${n} of ${ids.length}`
+    }
+    case 'files': {
+      if (!arg) {
+        await openPanel(cx, { view: 'files', title: 'Files' })
+        return 'thimble: the file browser is open'
+      }
+      const m = /^(.*?)(?::(\d+))?$/.exec(arg)
+      const path = (m?.[1] ?? arg).replace(/^\.\//, '')
+      const line = m?.[2] ? Number(m[2]) : undefined
+      await openFile(cx, path, line ? Math.max(1, line - 5) : 1, line)
+      return `thimble: ${path}${line ? ` line ${line}` : ''} is open`
+    }
+    default:
+      return `thimble: \`/thimble\` opens home; \`/thimble threads\`, \`cite [n]\`, \`card [n]\`, \`files [path[:line]]\` and \`documents\` open those`
+  }
+}
+
 // a text block as Claude Code was handed it while it streamed -> as the model wrote it
 const asWritten = new Map<string, string>()
 
@@ -360,6 +422,8 @@ export const register: Register = on => {
     if (e.presentation?.columns > 0) rt.termColumns = e.presentation.columns
     await navOrigin(cx, false)
     if (e.command === 'thimble:thimble' || e.command === 'thimble') {
+      const said = await thimbleCommand(cx, String(e.args ?? ''))
+      if (said !== null) return { text: said }
       await openHome(cx)
       return { text: HOME_LINE }
     }
@@ -496,6 +560,10 @@ export const register: Register = on => {
         const cur = (await $.state.get({ ...TURN_CARDS, id: row })).value ?? []
         await $.state.set({ ...TURN_CARDS, id: row }, [...cur, ...t.cards.filter(id => !cur.includes(id))])
       }
+      // what `/thimble cite` and `/thimble card` open: the turn's citations and cards
+      const all = t.parts.flat().map(r => r.text).join('\n\n')
+      if (all.trim()) rt.lastReply = all
+      if (all.trim() || t.cards.length) rt.lastCards = [...new Set([...embeddedCards(all), ...t.cards])]
       // the answer: its last part that cites or embeds a card, else its last; the footer stands under its last row
       const part = answerPart(t.parts)
       const last = part?.at(-1)?.uuid ?? ''
@@ -549,8 +617,9 @@ export const register: Register = on => {
   // /thimble's line as thimble says it, not under the plugin's name, which Claude Code puts before a hook's answer
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
     if (!rt.sc) return next(e)
-    const own = (e.props.command === 'thimble:thimble' || e.props.command === 'thimble') && e.props.text.includes(HOME_LINE.slice(9, 40))
-    const shown = own ? { ...e, props: { ...e.props, text: HOME_LINE } } : e
+    // `/thimble …` answers as thimble, not under the plugin's name, which Claude Code puts before a hook's answer
+    const own = (e.props.command === 'thimble:thimble' || e.props.command === 'thimble') && /^\s*(?:thimble-term:\s*)?thimble:/.test(e.props.text)
+    const shown = own ? { ...e, props: { ...e.props, text: e.props.text.replace(/^\s*thimble-term:\s*/, '') } } : e
     return underRow(cxOf($), e, () => next(shown))
   })
 

@@ -90,6 +90,9 @@ export const rt = {
   docsRead: false,
   // the failures a toast said already
   toasted: new Set<string>(),
+  // the last turn's text and cards, which `/thimble cite` and `/thimble card` open by number
+  lastReply: '',
+  lastCards: [] as string[],
 }
 
 const iso = (ms: number) => new Date(ms).toISOString()
