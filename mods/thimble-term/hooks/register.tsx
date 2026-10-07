@@ -44,6 +44,7 @@ import { NAV_EMPTY } from './nav'
 import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, paneTitle, panelColumns, readSurface, readThread, rt, surfaceValue, takeKeys, threadsNow, tick } from './term'
 import type { UiApply } from './term'
 import { turns } from './turns'
+import { closeView, openViewState, sendEvent, viewMessage } from './viewhost'
 
 type Dollar = EngineInterface
 
@@ -109,6 +110,31 @@ function cxOf($: Dollar): Ctx {
       const end = await child.result
       return { exitCode: end.code ?? 1, stdout, stderr }
     },
+    spawnLines: (argv, init, onLine, onErr) => {
+      const child = $.process.spawn({ argv, ...(init.cwd ? { cwd: init.cwd } : {}), ...(init.env ? { env: init.env } : {}) })
+      const done = (async () => {
+        let buf = ''
+        try {
+          for await (const piece of child) {
+            if (piece.stream !== 'stdout') {
+              onErr?.(piece.text.slice(-500))
+              continue
+            }
+            buf += piece.text
+            let i = buf.indexOf('\n')
+            while (i >= 0) {
+              onLine(buf.slice(0, i))
+              buf = buf.slice(i + 1)
+              i = buf.indexOf('\n')
+            }
+          }
+        } catch (err) {
+          onErr?.(String(err).slice(0, 300))
+        }
+      })()
+      return { stop: () => void child.return(undefined as never).catch(() => undefined), done }
+    },
+    fetch: (url, init) => $.http.fetch(url, init),
     read: path => $.fs.read(path),
     write: (path, text) => $.fs.write(path, text),
     stat: path => $.fs.stat(path),
@@ -957,6 +983,8 @@ export const register: Register = on => {
       rt.panelFocus = ''
       await $.state.set(pendingRef, null).catch(() => undefined)
       await $.state.set(panelA, null).catch(() => undefined)
+      // a terminal view's program ends with its pane
+      if (openViewState()) await closeView(cxOf($))
     }
     return closed
   })
@@ -992,7 +1020,13 @@ export const register: Register = on => {
   // the wheel over a list the panel cut to its rows (panel.tsx windowList) moves the list's rows, the choice where it is;
   // over any other panel the pane scrolls
   on('ui.scroll', { requestId: PANEL }, async ($, e, next) => {
-    if (!rt.sc || !e.pointer || e.origin.kind !== 'person' || !wheelWindow(e.by)) return next(e)
+    if (!rt.sc || !e.pointer || e.origin.kind !== 'person') return next(e)
+    // over a terminal view the wheel is the view's: its list moves its rows
+    if (openViewState()?.id && (await cxOf($).panel())?.view === 'view') {
+      void sendEvent(cxOf($), { t: 'wheel', by: e.by })
+      return {}
+    }
+    if (!wheelWindow(e.by)) return next(e)
     void cxOf($).bumpPanel()
     return {}
   })
@@ -1032,6 +1066,10 @@ export const register: Register = on => {
     if (d.type === 'home') {
       await navOrigin(cx, inPanel)
       await linesMessage(cx, d.horigin, d.hacts)
+    } else if (d.type === 'view') {
+      // a click or a drag in a terminal view (viewclient.tsx); like a click on a list, it gives the pane its keys back
+      await navOrigin(cx, inPanel)
+      if (await viewMessage(cx, d)) await takeKeys(cx)
     } else if (d.type === 'copy' && typeof d.text === 'string') {
       const text = d.text.slice(0, 100000)
       rt.selection = text

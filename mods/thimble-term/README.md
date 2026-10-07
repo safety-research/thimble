@@ -78,7 +78,9 @@ Claude Code's panel chrome, no right-click menu.
   contents, a deck or a story one slide or beat at a time, the retell controls); the file browser (folders that fold,
   each folder's size, the chosen file's first lines as the file holds them) and a file (`Table`, `Transcript`, `Raw`,
   each line as the file holds it, the chosen record's place and `?`); an agent;
-  and the views (a view as one line: the browser draws views, so terminal mode says to open it in browser mode).
+  and the views (a view built in terminal mode drawn by its program, `view.term.js` on the terminal view kit, which
+  thimble's view host runs sandboxed while the view shows: docs/terminal-views.md; a view built in browser mode as one
+  line that says so).
 - **The label panel**, as Matt laid it out: `name:` its name in the accent and bold after a `●` in its colour, `type:`
   (`prompt  regex  code`, the one in use on the selection background, the others a click away), `scope:` (its files, a
   field, and how many records), then a rule; the prompt (or pattern, or code) whole in a field to edit, on the same
@@ -122,6 +124,7 @@ route for it:
 | `thimble act label-stop --cwd <dir> {label}` | stop a run `label-run` started, after its current record (the run's process watches for the stop file this writes) |
 | `thimble act seen --cwd <dir> {thread}` | the thread's answers read |
 | `thimble act stop --cwd <dir> {agent}` | stop one of thimble's agents, or a side thread's fork |
+| `thimble view host --cwd <dir>` | thimble's view host, started beside the session the first time a view opens (`$.process.spawn`): it prints `{t: ready, socket, token}`, then the frames a view's program draws on its own; the panel posts `/open`, `/event` and `/close` to the socket (`$.http.fetch`, `hooks/viewhost.ts`) |
 
 It sees a change without starting Python: once a second it lists the workspace's folders (`notebooks`, `concepts`,
 `labels`, `investigations/main`, `chats`, `trusted/subagents.json`, `orient/run.json`, `extension/views`,
@@ -139,8 +142,9 @@ drawing's, its title a hot spot, everything but the title below the plot), `cite
 tips, `home.ts` and `homeview.tsx` home, `chrome.tsx` the panel's chrome, `paint.ts` the colors, `gestures.tsx` what a
 press does, `anim.ts` the mark a citation lights on a card, `nav.ts` the path from home and the threads tree,
 `signal.ts` the `↳` rows' rules, `files.ts` the file a ref cites, `turns.ts` one drawing of a pane at a time, `lib.ts`
-the pure helpers, `field.tsx` the text field that shows all of its text (a label's prompt), and `kept.ts` what main's
-chat drew under its rows, kept for a resume.
+the pure helpers, `field.tsx` the text field that shows all of its text (a label's prompt), `kept.ts` what main's
+chat drew under its rows, kept for a resume, `viewhost.ts` thimble's view host and the open view's frame, and
+`viewclient.tsx` a view's frame drawn with its hot regions and tips.
 
 ## Tests
 

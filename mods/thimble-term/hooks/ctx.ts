@@ -1,7 +1,7 @@
 // What register.tsx shares of the engine with thimble-term's other files (`$` itself never crosses an import): the host
 // calls they make and the state values they read and write, each a function bound to the `$` of the hook that made it.
 // A drawing builds its own (its reads subscribe it); a timer or a handler uses the one its hook built.
-import type { Elements, FsEntry, FsStat, PaneOpenArgs, ProcessRunInit, ProcessRunResult, RenderElement, ResolveInput, UiOpenResult } from 'claude-code'
+import type { Elements, FsEntry, FsStat, HttpInit, HttpResponse, PaneOpenArgs, ProcessRunInit, ProcessRunResult, RenderElement, ResolveInput, UiOpenResult } from 'claude-code'
 
 import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermThread, TermThreadRow, TermVerdict } from '../types'
 
@@ -15,6 +15,11 @@ export type Ctx = {
   /** a command that may run longer than `run` allows (a label's run on every record): started beside the session, which
    *  it ends with, its whole output read once it exits */
   runLong: (argv: readonly string[], init?: { cwd?: string; env?: Record<string, string> }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
+  /** a command beside the session that runs on (thimble's view host): each line it prints, then `done` as it ends;
+   *  `stop` ends it */
+  spawnLines: (argv: readonly string[], init: { cwd?: string; env?: Record<string, string> }, onLine: (line: string) => void, onErr?: (text: string) => void) => { stop: () => void; done: Promise<void> }
+  /** an HTTP request through the host, over a Unix socket with `socketPath` (thimble's view host) */
+  fetch: (url: string, init?: HttpInit) => Promise<HttpResponse>
   read: (path: string) => Promise<string>
   /** a file written whole, its folders made (the workspace's terminal/chat.json, kept.ts) */
   write: (path: string, text: string) => Promise<void>

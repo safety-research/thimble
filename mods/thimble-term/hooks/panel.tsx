@@ -33,7 +33,7 @@ import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, home
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
 import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, labelRunning, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
-import { linesEl, takeListKeys } from './lines'
+import { linesEl, setListKeys, takeListKeys } from './lines'
 import type { LineHit } from './lines'
 import { docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
 import type { DocFigure, DocSection, DocSentence } from './model'
@@ -45,6 +45,8 @@ import { PANEL, closePanel, inPanelNow, loadCards, navBack, navGo, openHome, ope
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
+import { closeView, onViewAct, openViewState, retryView, sendEvent, viewFor } from './viewhost'
+import type { ViewFrame } from './viewhost'
 
 export type PaneEvent = MatchedEvent<'ui.render', { component: 'Pane'; requestId: string }>
 
@@ -100,7 +102,7 @@ export async function homeViews(cx: Ctx): Promise<HomeView[]> {
     const state = st === 'built' ? 'built' : st === 'building' ? 'building' : st === 'failed' ? 'failed' : 'proposed'
     const slug = str(v.slug)
     const fresh = state === 'built' && !rt.viewsSeen.has(slug) && rt.viewsBuiltBefore !== null && !rt.viewsBuiltBefore.has(slug)
-    return { slug, name: str(v.name) || slug, state, words: '', files: Array.isArray(v.files) ? (v.files as unknown[]).map(String) : [], unit: '', drawable: state === 'built', left: 0, at: Date.parse(str(v.ts)) || 0, ...(fresh ? { fresh: true } : {}) }
+    return { slug, name: str(v.name) || slug, state, words: '', files: Array.isArray(v.files) ? (v.files as unknown[]).map(String) : [], unit: '', drawable: state === 'built', left: 0, at: Date.parse(str(v.ts)) || 0, ...(fresh ? { fresh: true } : {}), ...(v.term === true ? { term: true } : {}) }
   })
 }
 
@@ -454,6 +456,11 @@ export async function relayInput(cx: Ctx, value: string): Promise<void> {
   relayLast = value
   relayFlip = true
   for (const ch of typed) {
+    // a terminal view's field that takes typing (a search) takes every key
+    if (viewTyping && !rt.typeThrough) {
+      await viewTyping(ch === ' ' ? 'space' : ch)
+      continue
+    }
     if (rt.typeThrough) {
       if (ch !== 'backspace') await cx.fill(ch)
       continue
@@ -475,6 +482,9 @@ export async function relayInput(cx: Ctx, value: string): Promise<void> {
   }
   await cx.bumpPanel()
 }
+
+// while a terminal view's field takes typing, where the relay's keys go (drawView)
+let viewTyping: ((k: string) => Promise<void>) | null = null
 
 /** Enter on the relay's Input: Enter for the list. */
 export async function relaySubmit(cx: Ctx): Promise<void> {
@@ -2655,20 +2665,83 @@ async function drawViews(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
 
-function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): RenderElement {
+// the rows of a view's panel that are not the view's own: the path row, the title, the rule and the hint row
+const VIEW_CHROME = 4
+// the panel's own keys, which a view never takes (term_kit/kit.mjs PANEL_KEYS): back, the threads, close
+const PANEL_KEYS = ['b', 't', 'x']
+
+/** One view (docs/terminal-views.md): a view built in terminal mode is drawn by its program (hooks/viewhost.ts) under
+ *  the panel's header, its subtitle the facts the program gives, its hint row the keys it binds; its keys reach it
+ *  through the list's relay (↑↓, Enter, Space, Backspace) and as hotkeys (a letter, a digit, a sign), every key while a
+ *  field of it takes typing, and its clicks and drags through hooks/viewclient.tsx. A view built in browser mode is one
+ *  line that says so. */
+async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
-  const { Box, Text } = cx.els(e)
+  const { Box, Text, Button, Client } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
-  return (
-    <Box flexDirection="column">
-      {[
-        ...headerEls(els, { title: p.title || p.slug || 'view', cols, sub: subLine(['view']) }),
-        <Text key="view-words" wrap="wrap">The browser draws this view. To see it, quit, run `thimble mode browser`, and start `thimble` again in this folder.</Text>,
-        hintsRow(els, ['b to go back', 'x to close'], cols),
-      ]}
-    </Box>
-  )
+  const slug = p.slug ?? ''
+  const v = (await homeViews(cx)).find(x => x.slug === slug)
+  if (!v?.term || !rt.sc || (e.surface !== 'terminal' && e.surface !== 'desktop')) {
+    return (
+      <Box flexDirection="column">
+        {[
+          ...headerEls(els, { title: p.title || slug || 'view', cols, sub: subLine(['view']) }),
+          <Text key="view-words" wrap="wrap">{v && !v.term && v.state === 'built' ? 'This view was built in browser mode, so only the browser draws it. To see it, quit, run `thimble mode browser`, and start `thimble` again in this folder.' : 'The view is not built yet. Its row on home says when it is.'}</Text>,
+          hintsRow(els, ['b to go back', 'x to close'], cols),
+        ]}
+      </Box>
+    )
+  }
+  const shown = openViewState()
+  const sub = shown?.slug === slug && shown.frame?.sub?.length ? shown.frame.sub : []
+  const rows = Math.max(6, (bodyRows || 34) - VIEW_CHROME - (sub.length ? 1 : 0))
+  const ov = viewFor(cx, rt.sc, slug, cols, rows, p.ref)
+  const f: ViewFrame | null = ov.frame
+  const head = headerEls(els, { title: p.title || v.name || slug, cols, ...(sub.length ? { sub: subLine(sub) } : {}) })
+  const body: RenderElement[] = [...head]
+  viewTyping = null
+  if (ov.error && !f?.lines?.length) {
+    body.push(<Text key="view-error" color={COLORS.problem} wrap="wrap">{`× ${ov.error}`}</Text>)
+    body.push(<Button key="view-again" label="open it again" plain onPress={() => { retryView(); void cx.bumpPanel() }} />)
+    body.push(hintsRow(els, [], cols))
+    return <Box flexDirection="column">{body}</Box>
+  }
+  if (!f) {
+    body.push(<Text key="view-opening" dimColor>◌ opening the view</Text>)
+    body.push(hintsRow(els, [], cols))
+    return <Box flexDirection="column">{body}</Box>
+  }
+  const key = (k: string) => sendEvent(cx, { t: 'key', key: k })
+  // the view's keys reach it through the list's relay, which a view always draws: ↑↓, Enter, Space and Backspace, a
+  // sign typed into its field (a Button's hotkey is a letter or a digit), and every key while a field of the view takes
+  // typing
+  setListKeys(k => {
+    const name = k === 'enter' ? 'return' : k
+    if (f.typing || f.keys.includes(name)) return key(name)
+  })
+  if (f.typing) viewTyping = key
+  // the frame's rows bring their margin (`❯`)
+  body.push(<Client key={marginKey('view-frame')} module="./viewclient.tsx" width={cols + MARGIN_W} height={Math.max(1, f.lines.length)} props={JSON.parse(JSON.stringify({ lines: f.lines, hits: f.hits, seq: f.seq, cols: cols + MARGIN_W })) as never} />)
+  if (ov.error) body.push(<Text key="view-error" color={COLORS.problem} wrap="truncate-end">{`× ${ov.error}`}</Text>)
+  // a sign's key works only from the relay's field, so its hint shows only while the ring rests there
+  const isSign = (k: string) => [...k].length === 1 && !/[a-z0-9]/.test(k)
+  const hints = f.hints.filter((_, i) => listKeysHeld() || !(f.hintKeys?.[i] ?? []).some(isSign))
+  body.push(hintsRow(els, hints, cols))
+  // each letter or digit the view binds is a hotkey of the panel, a Button no row tall; a sign is one of the relay's
+  // (relayInput finds it among the hotkeys); none while a field of the view takes typing
+  const chars = f.typing ? [] : f.keys.filter(k => [...k].length === 1 && !PANEL_KEYS.includes(k))
+  for (const c of chars.filter(isSign)) hotkeysDrawing.set(c, () => void key(c))
+  const hk = hiddenKeys(cx, e, chars.filter(c => !isSign(c)).map(c => ({ key: `v${c.codePointAt(0)}`, hotkey: c, onPress: () => void key(c) })))
+  return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
+
+// what the view's acts do in the panel: a record's place in the citation panel, a side thread about a row, a label's
+// panel
+onViewAct(async (cx, a) => {
+  if (a.kind === 'open' && a.ref) return openCite(cx, a.ref, null)
+  if (a.kind === 'ask' && a.ref) return openAsk(cx, { kind: 'record', ref: a.ref, text: a.text ?? '' }, { anchor: a.ref, anchorText: a.text ?? '' })
+  if (a.kind === 'label' && a.id) return openLabel(cx, a.id, a.name || a.id)
+})
 
 // ------------------------------------------------------------------------------------------------ the panel
 
@@ -2727,6 +2800,9 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
         return none(cx, e)
     }
   })()
+  // a terminal view's program lives while its view shows
+  if (p.view !== 'view' && openViewState()) void closeView(cx)
+  if (p.view !== 'view') viewTyping = null
   listRelay = takeListKeys()
   const tree = await withWay(cx, e, p.view, body)
   hotkeys = hotkeysDrawing
