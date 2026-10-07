@@ -18,6 +18,10 @@ the view as text, a glyph or a gray pattern, never in a second palette.
   value's color, its name and its count. A click turns a value off or on. An Alt-click, or a double click, shows that
   value alone. A value turned off is hidden or dimmed, as the view says, and its chip goes quiet with an empty square.
   Hovering a label's value shows what the label says the value means.
+- A click on a chip's square opens the palette of thimble's twelve label colors. The color picked recolors the value
+  everywhere in the view: its chip, the records' bars, the tracks, and what the page draws through `colourOf`. A label's
+  value keeps it as the label's color, in Files and every view; a field's value keeps it for this view, and Reset
+  colors in the palette gives the field's values their own colors back.
 - On a record, color is a 3 px bar on the left edge of its row or card. Text and fills keep their own colors.
 - A long list gets two tracks in place of its scrollbar, as a music or video editor lays out its navigator (below).
 - Reset, at the end of the row, shows while the view is not as it opens and puts it back (below).
@@ -96,18 +100,21 @@ load()
 
 `strip: '#list'`, or `colour.strip('#list')` for another list, puts the list's scrollbar in tracks at its right edge:
 
-- The overview track is the whole list: each record of a value that is on is a mark in its color where it stands in
-  the list (gray for all of them with Off), the labels that are on mark their records as small ticks at the track's
-  edge, and a frame as wide as the track outlines the part in view. Drag the frame to move the view.
-- A list many times the height of its box adds the zoomed track at the overview's left: the part around the view at a
-  finer scale, its colors faded beyond the part in view.
-- Hovering the overview shows the records under the pointer in a preview, each with its time and first line, and the
-  label and value of a tick there, without scrolling, and the zoomed track looks there while the pointer stays. A click
-  goes there, a click on a mark goes to its record, and a drag scrubs, on either track.
+- The overview track is the whole list in one lane: each pixel row in the color of the value that is on which most of
+  the records there take (gray for all of them with Off), never two colors side by side. A label that is on but is not
+  the choice draws nothing on the tracks. A dark frame as wide as the track outlines the part in view; drag it to move
+  the view.
+- A list many times the height of its box adds the zoomed track at the outer edge, which magnifies the frame: the part
+  around the view at a finer scale, its colors faded beyond the part in view, which lies under a lens. Two lines join
+  the frame's top and bottom to the lens's. The lens stands as far down the zoomed track as the frame stands down the
+  overview, so the two move together.
+- Hovering the overview shows the records under the pointer in a preview, each a row with its color as a bar on its
+  left edge, its time and first line, without scrolling. A click goes there, a click on a mark goes to its record, and
+  a drag scrubs, on either track.
 
 For a list that draws only the rows in view, give every row's value in order: `colour.strip('#list', {rows: values})`,
-with `refs` (each row's record, for the labels' ticks) and `preview(i)` (what the preview says of row `i`: a string, or
-`{when, text}`). For a list of elements the preview reads each record's `<time>` and its text, or
+with `preview(i)` (what the preview says of row `i`: a string, or `{when, text}`; `refs`, each row's record, is
+taken). For a list of elements the preview reads each record's `<time>` and its text, or
 `preview(element)`. Call `strip` again with the same list when they change.
 
 ## Details in place

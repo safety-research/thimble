@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import type { Concept, LabelRow, SourceKeys, SourceRecord } from '../lib/types'
-import { chipOfKeyValue, chipOfLabel, choiceId, defaultChoice, keyChips, keyValue, labelChips, parseChoice, readColor, writeColor, type ColorChoice, type ColorKept, type ColorValue } from './colorChoice'
+import { chipOfKeyValue, chipOfLabel, choiceId, defaultChoice, keyChips, keyValue, labelChips, parseChoice, pickedChips, readColor, writeColor, type ColorChoice, type ColorKept, type ColorValue } from './colorChoice'
 import type { RecordColor } from './colorContext'
 import { isFilesLabel, marksOf } from './labels'
 import type { FilesLabels } from './useLabels'
@@ -21,8 +21,14 @@ export interface ColorBy {
   colors: ReadonlyMap<number, RecordColor> | null
   /** the chip a record falls under */
   chipOf: (rec: SourceRecord) => string | undefined
+  /** the palette color (1 to 12) picked for a key's value, by value */
+  picked: Readonly<Record<string, number>>
   choose: (c: ColorChoice) => void
   toggle: (value: string, alone: boolean) => void
+  /** give a value a palette color: a label's as the label's own (Files and every view), a key's kept per file */
+  recolor: (value: string, color: number) => void
+  /** give a key's values their own colors back; null when none was picked */
+  resetColors: (() => void) | null
 }
 
 /** The file's keys (GET /source/keys), asked once per file while `on`. */
@@ -92,7 +98,8 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
   const off = useMemo(() => kept.off[id] ?? [], [kept.off, id])
   const key = choice.by === 'key' ? keys?.keys.find((k) => k.key === choice.key) : undefined
   const label = choice.by === 'label' ? labels.byId.get(choice.id) : undefined
-  const values = useMemo<ColorValue[]>(() => (key ? keyChips(key) : label ? labelChips(label, labels.presence.get(label.id)?.[path], total) : []), [key, label, labels.presence, path, total])
+  const picked = useMemo(() => (key ? (kept.colors?.[id] ?? {}) : {}), [key, kept.colors, id])
+  const values = useMemo<ColorValue[]>(() => (key ? pickedChips(keyChips(key), picked) : label ? labelChips(label, labels.presence.get(label.id)?.[path], total) : []), [key, picked, label, labels.presence, path, total])
   const chipOf = useCallback(
     (rec: SourceRecord): string | undefined => {
       if (key) return chipOfKeyValue(key, keyValue(rec, key.key))
@@ -116,7 +123,7 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
     }
     return out
   }, [on, choice.by, key, label, values, off, records, chipOf])
-  const { setFocus, toggle: toggleLabel } = labels
+  const { setFocus, toggle: toggleLabel, setColour } = labels
   const choose = useCallback(
     (c: ColorChoice) => {
       if (c.by === 'label' && !onIds.has(c.id)) {
@@ -138,6 +145,26 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
     },
     [values, off, keep, kept, id],
   )
+  const recolor = useCallback(
+    (value: string, color: number) => {
+      if (label) return setColour(label.id, value, color)
+      if (!key) return
+      keep({ ...kept, colors: { ...kept.colors, [id]: { ...picked, [value]: color } } })
+    },
+    [label, key, setColour, keep, kept, id, picked],
+  )
+  const hasPicked = Object.keys(picked).length > 0
+  const resetColors = useMemo(
+    () =>
+      key && hasPicked
+        ? () => {
+            const rest = { ...kept.colors }
+            delete rest[id]
+            keep({ ...kept, colors: rest })
+          }
+        : null,
+    [key, hasPicked, kept, keep, id],
+  )
   return {
     keys,
     choice,
@@ -146,7 +173,10 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
     off,
     colors,
     chipOf,
+    picked,
     choose,
     toggle,
+    recolor,
+    resetColors,
   }
 }

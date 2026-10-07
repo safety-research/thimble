@@ -302,12 +302,13 @@ export interface LabelPresence {
   paths: Record<string, Record<string, number>>
 }
 
-/** `GET /ws/{c}/labels/ruler?path=`: where on one file each label's values fall, the file's lines cut into `bins`. */
+/** `GET /ws/{c}/labels/ruler?path=`: where on one file each label's values fall, the file's lines cut into `bins`: per
+ * value the bins that hold it, and in `counts`, in the same order, how many of its records each holds. */
 export interface LabelRuler {
   path: string
   total: number
   bins: number
-  labels: { concept_id: string; bins: Record<string, number[]> }[]
+  labels: { concept_id: string; bins: Record<string, number[]>; counts?: Record<string, number[]> }[]
 }
 
 /** `PUT /concepts/{id}`: what the Files pane's edit card changes. */

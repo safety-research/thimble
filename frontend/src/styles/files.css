@@ -1574,15 +1574,15 @@
   margin-top: -1px;
   background: var(--surface-card);
 }
-/* -------- the reader's two tracks (Tracks.tsx ReaderTracks), after an editor's navigator and zoom bar: the zoomed
-   track (the stretch around what the reader shows, its colors faded past it), then at the edge the overview (the whole
-   file in the Color by colors or the file's density, the labels' markers in thin lanes at its left), each with a frame
-   as wide as the track over what the reader shows -------- */
+/* -------- the reader's two tracks (Tracks.tsx ReaderTracks), after an editor's navigator and zoom bar: the overview
+   (the whole file in one lane of the Color by colors or the file's density, the labels' grey ticks at its left) with a
+   dark frame over what the reader shows, then at the edge the zoomed track, which magnifies the frame: the stretch
+   around what the reader shows, its colors faded past it, what it shows under a lens; two lines and a light wedge join
+   the frame to the lens (the earlier ruler's magnifying viewfinder) -------- */
 .tracks {
   flex: none;
   box-sizing: border-box;
   display: flex;
-  gap: 6px;
   padding: 6px;
   background: var(--bg-sunken);
   box-shadow: inset 1px 0 0 var(--border-hairline);
@@ -1592,11 +1592,11 @@
 .track {
   position: relative;
   flex: none;
-  overflow: hidden;
   border-radius: 2px;
   background: rgba(var(--ink-rgb), 0.04);
 }
 .track-over {
+  overflow: hidden;
   cursor: pointer;
 }
 .track-canvas {
@@ -1605,25 +1605,37 @@
   left: 0;
   pointer-events: none;
 }
-/* the frame over what the reader shows: exactly as wide as its track, an ink outline over the colors */
-.track-frame {
+/* the frame over what the reader shows on the overview: exactly as wide as its track, in the full ink with a line of
+   the paper inside it, so that it stands out over any color */
+.track-frame-over {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   box-sizing: border-box;
-  border: 1.5px solid rgba(var(--ink-rgb), 0.72);
+  border: 2px solid var(--text-primary);
   border-radius: 2px;
-  background: rgba(var(--ink-rgb), 0.06);
-  pointer-events: none;
-}
-.track-frame-over {
-  pointer-events: auto;
+  box-shadow: inset 0 0 0 1px var(--surface-card);
   cursor: grab;
 }
 .tracks[data-drag] .track-frame-over {
-  border-color: var(--text-primary);
   cursor: grabbing;
+}
+/* the lines from the frame's top and bottom to the lens's, and the wedge between them */
+.track-link {
+  flex: none;
+  align-self: stretch;
+  height: auto;
+  overflow: visible;
+  pointer-events: none;
+}
+.track-link polygon {
+  fill: rgba(var(--ink-rgb), 0.08);
+}
+.track-link line {
+  stroke: rgba(var(--ink-rgb), 0.62);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
 }
 .track-zoom {
   cursor: pointer;
@@ -1633,15 +1645,31 @@
   position: absolute;
   left: 0;
   right: 0;
+  overflow: hidden;
 }
 .track-zoom-faded {
   top: 0;
   bottom: 0;
+  border-radius: 2px;
 }
-.track-zoom-shown {
-  overflow: hidden;
+/* the lens: a raised box of the paper, framed, over what the reader shows on the zoomed track, a margin of the paper
+   around the part shown (LENS_OUT_PX); the records it holds are drawn over it in full */
+.track-lens {
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  box-sizing: border-box;
+  border: 1px solid rgba(var(--ink-rgb), 0.55);
+  border-radius: var(--radius-chip);
+  background: var(--surface-card);
+  box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
 }
-/* a record on the zoomed track: a block of its height in its color, grey with no color; its labels' markers at its left */
+.tracks[data-drag] .track-lens {
+  border-color: rgba(var(--ink-rgb), 0.8);
+}
+/* a record on the zoomed track: a block of its height in its color, grey with no color; the labels on it that are not
+   the choice as grey ticks at its left */
 .track-rec {
   position: absolute;
   left: 0;
@@ -1655,8 +1683,12 @@
   top: 0;
   bottom: 0;
   width: 3px;
+  background: rgba(var(--ink-rgb), 0.45);
+  box-shadow: 1px 0 0 var(--surface-card);
 }
-/* the hover preview: the records at the point of the file under the pointer, beside the tracks */
+/* the hover preview: the records at the point of the file under the pointer, beside the tracks, in thimble's popover
+   (its paper, ring and float, the radius of a control); each record a plain row with its color as a straight bar on
+   its left edge, as the reader's records carry it */
 .track-preview {
   position: fixed;
   z-index: var(--z-popover);
@@ -1664,12 +1696,11 @@
   width: 340px;
   max-width: calc(100vw - 80px);
   padding: 4px;
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-ui);
   pointer-events: none;
 }
 .track-preview-rec {
-  padding: 6px 8px 6px 10px;
-  border-radius: var(--radius-ui);
+  padding: 6px 8px 6px 11px;
   box-shadow: inset 3px 0 0 var(--c, transparent);
 }
 .track-preview-rec + .track-preview-rec {
@@ -1819,6 +1850,64 @@
 .colorby-chip[aria-pressed='false'] .colorby-sw {
   background: transparent;
   box-shadow: inset 0 0 0 1.5px var(--c, rgba(var(--ink-rgb), 0.3));
+}
+/* a chip's swatch opens the palette: the press lands a little around it */
+.colorby-sw[data-palette] {
+  position: relative;
+  cursor: pointer;
+}
+.colorby-sw[data-palette]::after {
+  content: '';
+  position: absolute;
+  inset: -6px -4px -6px -5px;
+}
+.colorby-sw[data-palette]:hover {
+  box-shadow: inset 0 0 0 1.5px var(--c), 0 0 0 1.5px var(--surface-card), 0 0 0 2.5px var(--c);
+}
+/* the palette of a value's colors (ValuePalette): thimble's twelve label colors, the value's own ringed, then Reset
+   colors */
+.colorby-palette.popover {
+  min-width: 0;
+  padding: 6px 8px 8px;
+  border-radius: var(--radius-ui);
+}
+.colorby-palette-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 8px;
+  color: var(--text-primary);
+  font: 500 var(--text-ui-sm) / 1.2 var(--font-body);
+}
+.colorby-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 20px);
+  gap: 6px;
+}
+.colorby-pick {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: var(--c);
+  cursor: pointer;
+}
+.colorby-pick:hover {
+  box-shadow: 0 0 0 2px var(--overlay-bg), 0 0 0 3px rgba(var(--ink-rgb), 0.35);
+}
+.colorby-pick.on {
+  box-shadow: 0 0 0 2px var(--overlay-bg), 0 0 0 3.5px var(--text-primary);
+}
+.colorby-pick:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--overlay-bg), 0 0 0 3.5px var(--accent);
+}
+.colorby-repick.btn {
+  gap: 5px;
+  margin-top: 8px;
+  padding: 0 6px;
 }
 .colorby-n {
   flex: none;
