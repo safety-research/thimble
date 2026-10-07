@@ -65,15 +65,16 @@ Claude Code's panel chrome, no right-click menu.
 - **One row above the prompt**, a toast: what is new in the workspace since home was last opened (`2 new cards`, `new` in
   green), `open ›` opening home, gone once it is opened. Side threads have their `↳` rows and thimble's agents Claude
   Code's agent tray, so no row repeats them.
-- **One panel**, on Claude Code's panel chrome: the path row (`‹ back`, the steps from home, `show all threads` and
-  `N new` at the right), a title in the accent colour and bold with a dim subtitle, a rule, the actions at the bottom
-  after a second rule, and a dim italic row of key hints (`b to go back` only where there is a way back), which goes on
-  to a second row where it does not fit, never cut. Claude Code's
+- **One panel**, on Claude Code's panel chrome: the path row (`‹ back`, the steps from home; on home, `show all
+  threads` and `N new` at the right), a title in the accent colour and bold with a dim subtitle, a rule, the actions at
+  the bottom after a second rule, and a dim italic row of key hints (`b to go back` only where there is a way back),
+  which goes on to a second row where it does not fit, never cut. Claude Code's
   pane title says what it shows (`Citation`, `Threads`, `Label: …`, a card's question, a document's title). Its views:
   home (one column: views, documents, threads, cards by group with the newest open, labels, files by folder and the
   orientation's coverage line); a card with how its last run ended, `run again` (main runs `thimble-run card`), and its
   code with what it printed; a citation (its value as a link with `◌` or a red `×`, its status in plain words, the
-  sentence it stands in, its lines with the value marked or the card it names with the cited mark lit, a `follow-up`
+  sentence it stands in, its lines with the value marked (the whole line where it shows none), a file's as a window
+  that ↑↓ and the wheel scroll through the whole file, or the card it names with the cited mark lit, a `follow-up`
   field when opened from a side thread); the threads (a tree with a root per place, `main` or `report "…"`, the selected
   thread under it, `stop` while it answers, `hand back to main` once it answered, the ask field); a label; the documents and one document (a report with its
   contents, a deck or a story one slide or beat at a time, the retell controls); the file browser (folders that fold,

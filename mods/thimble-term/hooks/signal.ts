@@ -1,7 +1,7 @@
 // A side thread that answers while the panel does not show it (the analyst moved on) says so in three places: one row
 // in main's chat at that moment ("↳ thread · <its question> · answered", `new` in green until read; a press opens the
-// thread), its unread mark in the threads panel and in /thimble-home, and `N new` after `show all threads` on every
-// panel's path row. A view main proposes gets a row of its own under the answer that proposed it ("↳ view · <its name> ·
+// thread), its unread mark in the threads panel and in /thimble-home, and `N new` after `show all threads` on home's
+// path row. A view main proposes gets a row of its own under the answer that proposed it ("↳ view · <its name> ·
 // built"), kept the same way. Main's model reads nothing new:
 // the row is drawn under a row main's chat already holds, and main keeps only the hidden note it got before
 // (threads.ts threadNote).

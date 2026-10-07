@@ -35,13 +35,13 @@ import { chipLabel, chipWords, cid, clip, cutLine, fmt, itemsRow, labelRef, midd
 import type { Citation } from './lib'
 import { linesEl, setListKeys, takeListKeys } from './lines'
 import type { LineHit } from './lines'
-import { docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
+import { aroundLine, docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
 import type { DocFigure, DocSection, DocSentence } from './model'
 import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, crumbsWidth, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, closePanel, deleteLabel, handBack, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, readDoc, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
+import { PANEL, citePage, closePanel, deleteLabel, handBack, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -156,6 +156,8 @@ export async function openCite(cx: Ctx, ref: string, display: string | null, mor
   // draws (`agent-chat.jsonl line 2`)
   const c = { raw: '', ref, display }
   const title = display === null && fileRef(ref) ? chipWords(c) : clip(await citeTitle(cx, c), 40)
+  // opened anew, a file citation's window starts at the cited lines again
+  citeTops.delete(ref)
   await openPanel(cx, { view: 'cite', title, ref, display, ...(more.sentence ? { sentence: more.sentence } : {}), ...(more.quote ? { quote: more.quote } : {}), ...(more.of ? { of: more.of } : {}) })
 }
 
@@ -294,15 +296,18 @@ function upOf(s: ChatNavStep, earlier: readonly ChatNavStep[]): TermPanel | null
 const SEP_W = 3
 
 /** The path row (SPEC.md, "A panel's header"): `‹ back`, the steps from home, each a lower-case kind word and its
- *  name parted by a dim ›, each a click away, a thread's step followed by `new` in green while answers wait; at R `show
- *  all threads` and `N new` in green. The threads panel leaves those out. */
+ *  name parted by a dim ›, each a click away, a thread's step followed by `new` in green while answers wait; on home, at
+ *  R `show all threads` and `N new` in green. Every other panel leaves those out. */
 async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElement> {
   const { Box, Text, Button } = cx.els(e)
   // the row's own width: never more than the pane gives it, or it wraps (live check term-fix9, quirk 3)
   const cols = Math.max(10, e.props.bodyColumns)
   const nav = (await cx.nav()) ?? NAV_EMPTY
   const back = backTarget(nav) !== null
-  const inThreads = view === 'threads' || view === 'thread'
+  // `show all threads` only where the threads are the subject, home; the threads panel is the threads, and on a view,
+  // a file, a card or a citation home is one step away (Matt, 2026-10-07: "does 'show all threads' really need to be
+  // there when you're not in a thread?")
+  const showThreads = view === 'home'
   const threads = (await cx.threads()) ?? []
   const fresh = ((await cx.news()) ?? { n: 0 }).n
   const { steps, skipped } = crumbSteps(nav.trail)
@@ -329,7 +334,7 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
   const newW = fresh ? `${fresh} new`.length : 0
   type Tail = { all: string; fresh: boolean; w: number }
   const tail0 = (all: string, withNew: boolean): Tail => ({ all, fresh: withNew, w: (all ? 2 + all.length : 0) + (withNew ? 2 + newW : 0) })
-  const tails: Tail[] = inThreads
+  const tails: Tail[] = !showThreads
     ? [tail0('', false)]
     : [tail0('show all threads', Boolean(fresh)), ...(fresh ? [tail0('threads', true)] : []), tail0('threads', false), tail0('', false)]
   const need = Math.min(crumbsWidth(labels.map(l => clip(l, 34))), 4 + (labels.length > 2 ? 4 : 0) + (labels.length > 1 ? SEP_W + Math.min(12, width(labels.at(-1)!)) : 0))
@@ -607,6 +612,10 @@ export function windowList(key: string, lines: Line[], hits: LineHit[], at: numb
 /** The wheel over the panel while it shows a cut list: the list's rows move by `by`, the choice where it is; false when
  *  the panel shows no cut list. */
 export function wheelWindow(by: number): boolean {
+  if (scrollShown && by) {
+    scrollShown(by)
+    return true
+  }
   const cur = shownWindow ? windowTops.get(shownWindow) : undefined
   if (!cur || !by) return false
   const top = Math.max(0, Math.min(cur.top + by, cur.len - cur.room + 1))
@@ -1018,6 +1027,13 @@ function shifted(raw: string, p: number): number {
   return demojibake(raw.slice(0, p)).replace(/\t/g, '  ').length
 }
 
+/** Whether a citation's cited lines are lit whole: none of them holds the value it shows (a place cited without words,
+ *  `[[README.md#L5]]`, or a value the line does not hold), and no example's quote marks a passage, so the cited part is
+ *  the lines themselves (Matt, 2026-10-07: "the part it cited isn't highlighted"). */
+function wholeLit(hits: readonly TermVerdict['lines'][number][], quote: string): boolean {
+  return !quote && !hits.some(l => l.spans?.length)
+}
+
 /** The cited lines nested at A2 (SPEC.md, section 7, "The citation panel"): each line's number right-aligned in
  *  a dim column (the cited one's in the text colour), its text after a gutter; a cited line wrapped over 3 to 8 rows
  *  (by the pane's rows) around the value or the quoted passage on the selection background; two lines of context
@@ -1040,6 +1056,7 @@ function lineRows(cx: Ctx, e: PaneEvent, v: TermVerdict, cols: number, quote: st
   const firstHit = all.findIndex(l => l.hit)
   const lastHit = all.length - 1 - [...all].reverse().findIndex(l => l.hit)
   const lines = firstHit < 0 ? all : all.filter((l, i) => l.hit || (i >= firstHit - near && i <= lastHit + near))
+  const whole = wholeLit(hits, quote)
   const out: RenderElement[] = []
   for (const l of lines) {
     const text = demojibake(l.text).replace(/\t/g, '  ')
@@ -1063,7 +1080,7 @@ function lineRows(cx: Ctx, e: PaneEvent, v: TermVerdict, cols: number, quote: st
       )
       continue
     }
-    const span: [number, number] | null = quote ? quoteSpan(text, quote) : spans[0] ?? null
+    const span: [number, number] | null = quote ? quoteSpan(text, quote) : (spans[0] ?? (whole ? [0, text.length] : null))
     wrapAround(text, span, room, hitRows).forEach((r, i) =>
       out.push(
         <Text wrap="truncate-end">
@@ -1076,6 +1093,166 @@ function lineRows(cx: Ctx, e: PaneEvent, v: TermVerdict, cols: number, quote: st
     )
   }
   return out
+}
+
+// where a file citation's window over its file starts once the analyst moved it, by the citation's ref: the `at` of
+// its first row (citeWindow); none, and it starts a few lines above the cited one
+const citeTops = new Map<string, number>()
+// the pages of a file the window reads as it moves, by their surface key, while they are read
+const citeReading = new Set<string>()
+// what the wheel does to the window the drawing being made draws, and to the one the drawing shown last drew (wheelWindow)
+let scrollDrawing: ((by: number) => void) | null = null
+let scrollShown: ((by: number) => void) | null = null
+
+/** A row of a file citation's window: a line of the file (`at` its number), or a row of the cited record (`at` its
+ *  line and the row's place in it in thousandths; `n` 0 for a record's rows after its first). */
+type WinRow = { at: number; line: number; n: number; text: string; hit: boolean; spans: number[][] }
+
+/** A file citation's lines as a window over the whole file (Matt, 2026-10-07: "you can't see beyond the few lines it
+ *  picks and the part it cited isn't highlighted"): the lines nested at A2 as lineRows draws them, the cited ones in
+ *  the text colour with the value (the passage an example quotes, or the whole line for a citation that marks none) on
+ *  the selection background, the lines around them dim, one row each; `room` rows tall, opening with the cited lines
+ *  a third of the way down, `↑ N more` and `↓ N more` dim on a row each for the file's lines above and below, a click on
+ *  one a page. ↑↓ (the list's keys, through the relay) and the wheel (wheelWindow) move it a line; as it nears a page's
+ *  end the next page of the file is read (term.ts citePage). Null until a page of the file is read, or when the file
+ *  does not page as lines; lineRows draws the cited lines then. */
+async function citeWindow(cx: Ctx, e: PaneEvent, key: string, v: TermVerdict, cols: number, quote: string, room: number): Promise<{ el: RenderElement; scrolls: boolean } | null> {
+  const path = v.path ?? ''
+  const hits = v.lines.filter(l => l.hit)
+  if (!path || typeof v.line !== 'number' || !hits.length) return null
+  const first = v.line
+  const last = Math.max(first, ...hits.map(l => l.n))
+  // the pages read around where the window stands (the first, the page term.ts loadPanel read for the cited lines),
+  // and the page of the cited lines, so the window has rows while the page it moved to is read
+  const stand = Math.floor(citeTops.get(key) ?? Math.max(1, first - 10))
+  const known = new Map<number, string>()
+  const held: number[] = []
+  let total = 0
+  const pages: number[] = []
+  for (let at = citePage(stand - room - 100); at <= citePage(stand + 2 * room + 100); at += 100) pages.push(at)
+  if (!pages.includes(citePage(first - 10))) pages.push(citePage(first - 10))
+  for (const at of pages) {
+    const got = await surfaceValue<Obj>(cx, `file:${path}:${at}`)
+    if (!got?.ok || got.value.binary) continue
+    const page = got.value
+    if (typeof page.total_lines === 'number') total = Math.max(total, page.total_lines)
+    const from = typeof page.start === 'number' ? page.start : at
+    held.push(from)
+    ;((Array.isArray(page.records) ? page.records : []) as unknown[]).forEach((r, i) => known.set(isObj(r) && typeof r.line === 'number' ? r.line : from + i, aroundLine(r)))
+  }
+  if (!held.length) return null
+  // once the window moved (a key, the wheel, a click: never while it is drawn, which writes nothing), the page of each
+  // line a window's height above or below where it stands that no page read holds, read once, so a line or a page more
+  // is there as it moves on
+  const readAround = (to: number) => {
+    for (const l of [Math.max(1, to - room), to, to + 2 * room]) {
+      const at = citePage(l)
+      const k = `file:${path}:${at}`
+      if ((total && l > total) || held.some(h => h <= l && l < h + 200) || citeReading.has(k)) continue
+      citeReading.add(k)
+      void (async () => {
+        if (!(await surfaceValue(cx, k))) await readFilePage(cx, path, at)
+        citeReading.delete(k)
+        await cx.bumpPanel()
+      })()
+    }
+  }
+  // the lines around the cited ones as the check read them; then the run of lines without a gap where the window
+  // stands (a page not read yet ends it), the cited record over its rows in its place when the run holds it
+  for (const l of v.lines) if (!l.hit && l.n > 0) known.set(l.n, l.text)
+  for (let n = first; n <= last; n++) if (!known.has(n)) known.set(n, '')
+  const anchor = !citeTops.has(key) ? first : known.has(stand) ? stand : [...known.keys()].reduce((a, n) => (Math.abs(n - stand) < Math.abs(a - stand) ? n : a))
+  let lo = anchor
+  let hi = anchor
+  while (known.has(lo - 1)) lo--
+  while (known.has(hi + 1)) hi++
+  const rows: WinRow[] = []
+  const ctx = (n: number): WinRow => ({ at: n, line: n, n, text: known.get(n)!, hit: false, spans: [] })
+  for (let n = lo; n <= Math.min(hi, first - 1); n++) rows.push(ctx(n))
+  if (first >= lo && last <= hi) {
+    let rec = first
+    let part = 0
+    for (const l of hits) {
+      if (l.n) {
+        rec = l.n
+        part = 0
+      }
+      rows.push({ at: rec + part++ / 1000, line: rec, n: l.n, text: l.text, hit: true, spans: l.spans ?? [] })
+    }
+  }
+  for (let n = Math.max(lo, last + 1); n <= hi; n++) rows.push(ctx(n))
+  total = Math.max(total, rows.at(-1)!.line)
+  const gutter = String(total).length
+  const textRoom = Math.max(10, cols - gutter - 4)
+  const hitRows = Math.max(3, Math.min(8, Math.floor(((e.props.scroll?.bodyRows || 20) - 14) / Math.max(1, hits.length))))
+  const whole = wholeLit(hits, quote)
+  // each row as the lines it takes: a line around the cited ones on one dim row, cut around its start; a cited row
+  // wrapped over up to `hitRows` rows around its value
+  const linesOf = (r: WinRow): Line[] => {
+    const text = demojibake(r.text).replace(/\t/g, '  ')
+    const n = r.n ? String(r.n).padStart(gutter) : ' '.repeat(gutter)
+    if (!r.hit) return [pointed([dim(`  ${n}  `), dim((text.length > textRoom ? windowAt(text, 0, textRoom).text : text) || ' ')], false)]
+    const spans = r.spans.map(([a, b]) => [shifted(r.text, a!), shifted(r.text, b!)] as [number, number])
+    const span: [number, number] | null = quote ? quoteSpan(text, quote) : (spans[0] ?? (whole ? [0, text.length] : null))
+    return wrapAround(text, span, textRoom, hitRows).map((w, i) =>
+      pointed([{ s: `  ${i === 0 ? n : ' '.repeat(gutter)}  ` }, ...(w.hi ? [{ s: w.text.slice(0, w.hi[0]) }, { s: w.text.slice(w.hi[0], w.hi[1]), bg: COLORS.selected }, { s: w.text.slice(w.hi[1]) }] : [{ s: w.text || ' ' }])].filter(x => x.s !== ''), false),
+    )
+  }
+  const height = rows.map(r => linesOf(r).length)
+  // the last row the window can start at once the file's end is read: the end on its last row
+  const endRead = rows.at(-1)!.line >= total
+  let maxTop = rows.length - 1
+  if (endRead) {
+    let sum = height[maxTop]!
+    while (maxTop > 0 && sum + height[maxTop - 1]! + (rows[maxTop - 1]!.line > 1 ? 1 : 0) <= room) sum += height[--maxTop]!
+  }
+  // where it opens: the cited rows a third of the way down, two lines above them at least where they fit
+  const block = Math.max(0, rows.findIndex(r => r.hit))
+  const blockH = height.slice(block, block + hits.length).reduce((a, b) => a + b, 0)
+  const lead = Math.max(0, Math.min(block, Math.max(Math.min(2, room - 2 - blockH), Math.floor((room - 2 - blockH) / 3))))
+  const want = citeTops.get(key)
+  let top = want === undefined ? block - lead : rows.findIndex(r => r.at >= want)
+  if (top < 0) top = rows.length - 1
+  top = Math.max(0, Math.min(top, maxTop))
+  const out: Line[] = []
+  const outHits: LineHit[] = []
+  const page = Math.max(1, room - 3)
+  // where the window stands among the rows (below 0 or past the last: lines not read yet), moved by each key and turn
+  // of the wheel until the panel draws again, never above the file's first line or past where its end shows
+  let pos = top
+  const scroll = (by: number) => {
+    pos = Math.max(1 - rows[0]!.line, Math.min(pos + by, endRead ? maxTop : rows.length - 1 + total - rows.at(-1)!.line))
+    const at = pos < 0 ? rows[0]!.line + pos : pos < rows.length ? rows[pos]!.at : rows.at(-1)!.line + pos - (rows.length - 1)
+    citeTops.set(key, at)
+    readAround(Math.floor(at))
+  }
+  const countRow = (words: string, by: number) => {
+    outHits.push({ y: out.length, x0: MARGIN_W + 2, x1: MARGIN_W + 2 + width(words), row: false, run: () => scroll(by) })
+    out.push(pointed([{ s: '  ' }, dim(words)], false))
+  }
+  const above = rows[top]!.line - 1
+  if (above > 0) countRow(`↑ ${num(above)} more`, -page)
+  let shownLast = top - 1
+  for (let i = top; i < rows.length; i++) {
+    const ls = linesOf(rows[i]!)
+    // a row below for `↓ N more` unless this is the file's last
+    const left = room - out.length - (i === rows.length - 1 && endRead ? 0 : 1)
+    if (ls.length > left && i > top) break
+    out.push(...ls.slice(0, Math.max(1, left)))
+    shownLast = i
+    if (ls.length > left) break
+  }
+  const below = total - rows[shownLast]!.line + (shownLast < rows.length - 1 && rows[shownLast + 1]!.line === rows[shownLast]!.line ? 1 : 0)
+  if (below > 0) countRow(`↓ ${num(below)} more`, page)
+  const onKey = (k: string) => {
+    if (k === 'up' || k === 'k') return scroll(-1)
+    if (k === 'down' || k === 'j') return scroll(1)
+    if (k === 'pageup') return scroll(-page)
+    if (k === 'pagedown') return scroll(page)
+    return undefined
+  }
+  scrollDrawing = scroll
+  return { el: linesEl(cx, e, marginKey('cite-lines'), out, outHits, cols + MARGIN_W, onKey), scrolls: above > 0 || below > 0 }
 }
 
 const sameKey = (a: string, b: string) => a === b || (a.trim() !== '' && b.trim() !== '' && Number(a) === Number(b)) || a.toLowerCase() === b.toLowerCase()
@@ -1258,15 +1435,33 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       const lit = citedLines(card, v, Math.max(10, w - 4), Math.max(8, (e.props.scroll?.bodyRows || 20) - 14))
       body.push(framedCard(cx, e, lit.card, w, lit.lines, 'cite-card'))
     }
-  } else if (v?.lines.length) {
-    body.push(<Box key="cite-lines" flexDirection="column">{lineRows(cx, e, v, cols, quote)}</Box>)
+  }
+  const goOn = await followUpField(cx, e, c.raw)
+  let hints = ['a to ask', ...(f ? ['f for its file'] : [])]
+  if (!(v?.card && !v.lines.length) && v?.lines.length) {
     // the passage an example quotes, when the cited lines do not hold it
-    if (quote && status !== 'differs' && !v.lines.some(l => l.hit && quoteSpan(demojibake(l.text).replace(/\t/g, '  '), quote))) body.push(fieldEls(els, [['quoted', <Text wrap="wrap" backgroundColor={COLORS.selected}>{clip(demojibake(quote), 600)}</Text>]], 'cite-quoted')!)
+    const quotedRow = quote && status !== 'differs' && !v.lines.some(l => l.hit && quoteSpan(demojibake(l.text).replace(/\t/g, '  '), quote))
+    // a file's lines: a window over the whole file, as tall as the rows the panel's other parts leave it (the path row,
+    // the title, the subtitle, the rule, the label/value rows, a `quoted` row, the rule, `ask about it`, the follow-up
+    // field and the hint rows)
+    const fieldW = Math.max(0, ...rows.map(([k]) => width(k))) + 2
+    const tall = (words: string, w: number) => (words ? wrapRows(words, Math.max(1, w), 999).length : 0)
+    const used =
+      3 +
+      tall(sub, cols) +
+      rows.reduce((n, [k, val]) => n + tall(typeof val === 'string' ? val : k === 'source' && p.sentence ? sourceSegs(p.sentence, c).map(x => x.s).join('') : ' ', cols - fieldW), 0) +
+      (quotedRow ? tall(clip(demojibake(quote), 600), cols - 8) : 0) +
+      2 +
+      (goOn ? 1 : 0) +
+      hintHeight(['↑↓ to scroll', ...hints], cols)
+    const win = v.path && typeof v.line === 'number' ? await citeWindow(cx, e, c.ref, v, cols, quote, Math.max(5, (bodyRows || 30) - used)) : null
+    if (win?.scrolls) hints = ['↑↓ to scroll', ...hints]
+    body.push(win?.el ?? <Box key="cite-lines" flexDirection="column">{lineRows(cx, e, v, cols, quote)}</Box>)
+    if (quotedRow) body.push(fieldEls(els, [['quoted', <Text wrap="wrap" backgroundColor={COLORS.selected}>{clip(demojibake(quote), 600)}</Text>]], 'cite-quoted')!)
   } else if (!v) body.push(<Text key="cite-wait" dimColor>◌ checking</Text>)
   const ask = () => void openAsk(cx, target, p.sentence ? { anchorText: plainCites(p.sentence) } : {})
-  const goOn = await followUpField(cx, e, c.raw)
   const keys: Key[] = [{ key: 'ask', hotkey: 'a', onPress: ask }, ...(f ? [{ key: 'files', hotkey: 'f', onPress: () => void opens?.() }] : [])]
-  body.push(...bottomRows(cx, e, cols, [<Button key="cite-ask" label="ask about it" plain onPress={ask} />], [goOn], ['a to ask', ...(f ? ['f for its file'] : [])]))
+  body.push(...bottomRows(cx, e, cols, [<Button key="cite-ask" label="ask about it" plain onPress={ask} />], [goOn], hints))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
@@ -3010,6 +3205,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   listExtraDrawing = { space: false, backspace: false }
   fieldsDrawing = new Set()
   windowed = ''
+  scrollDrawing = null
   const body = await (async () => {
     switch (p.view) {
       case 'home':
@@ -3056,6 +3252,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   hotkeys = hotkeysDrawing
   listExtra = listExtraDrawing
   shownWindow = windowed
+  scrollShown = scrollDrawing
   rt.fields = fieldsDrawing
   return tree
 }
