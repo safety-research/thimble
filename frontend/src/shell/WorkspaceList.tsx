@@ -1,12 +1,13 @@
-// The workspaces this server knows (GET /workspaces), in groups: Demo (the datasets `thimble demo` downloaded: the name,
-// the dataset's one sentence and "analysis ready" when its pre-cached orientation is installed), Examples (the worked
+// The workspaces this server knows (GET /workspaces), in groups: Demo (the datasets `thimble demo` downloaded: the
+// dataset's name, not its workspace's demo-<dataset>, the dataset's one sentence and "analysis ready" when its
+// pre-cached orientation is installed), Examples (the worked
 // examples of custom views: the name and the view it opens at) and Your folders (the folder's name and path). A group
 // with no row is left out. Each row is a link to its workspace; `current` marks the workspace the page shows. The start
 // page (StartPage) and the top bar's switcher (TopBar) draw the same list.
 import { Chip } from '../components/Chip'
 import { Icon } from '../components/Icon'
 import type { WorkspaceRow } from '../lib/types'
-import { groupWorkspaces, shortPath, workspaceHref } from '../lib/workspace'
+import { groupWorkspaces, shortPath, workspaceHref, workspaceLabel } from '../lib/workspace'
 
 export interface WorkspaceListProps {
   rows: readonly WorkspaceRow[]
@@ -30,7 +31,7 @@ export function WorkspaceList({ rows, current, compact }: WorkspaceListProps) {
               return (
                 <li key={r.name}>
                   <a className={`ws-row${here ? ' current' : ''}`} href={workspaceHref(r, pathname, hash)} aria-current={here ? 'page' : undefined} data-ws={r.name}>
-                    <span className="ws-row-name">{r.kind === 'folder' ? r.folder : r.name}</span>
+                    <span className="ws-row-name">{workspaceLabel(r)}</span>
                     <span className="ws-row-about">
                       {r.kind === 'example' ? (
                         r.view && (

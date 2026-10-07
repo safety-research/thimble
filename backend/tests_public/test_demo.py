@@ -686,21 +686,22 @@ def test_demo_downloads_installs_opens_and_says_how_to_attach(tmp_path, fake_wor
     assert run(w, args(names=["one", "two"], dir=str(w["root"]), precaches=str(pre))) == 0
     assert (w["root"] / "one" / "a.jsonl").read_bytes() == b'{"n": 1}\n'
     assert w["got"] == ["https://example.org/one", "https://example.org/two"]
-    installed = Path(w["env"]["workspaces_dir"]) / "one"
+    installed = Path(w["env"]["workspaces_dir"]) / "demo-one"
     assert json.loads((installed / "orient" / "run.json").read_text())["precached"]["dataset"] == "one"
     assert json.loads((installed / demo.MARKER).read_text())["folder"] == str(w["root"] / "one")
     assert str(w["root"] / "one") in (installed / "notebooks" / "g1.json").read_text()
-    assert json.loads((tmp_path / "data" / "one.corpus.json").read_text())["path"] == str(w["root"] / "one")
+    assert json.loads((tmp_path / "data" / "demo-one.corpus.json").read_text())["path"] == str(w["root"] / "one")
     # two has no pre-cache: registered, nothing installed
-    assert json.loads((tmp_path / "data" / "two.corpus.json").read_text())["path"] == str(w["root"] / "two")
-    assert not (Path(w["env"]["workspaces_dir"]) / "two").exists()
+    assert json.loads((tmp_path / "data" / "demo-two.corpus.json").read_text())["path"] == str(w["root"] / "two")
+    assert not (Path(w["env"]["workspaces_dir"]) / "demo-two").exists()
     text = said(w)
-    assert "installed as workspace one: 3 cards, 1 label, 1 view, 1 document" in text
+    assert "installed as workspace demo-one: 3 cards, 1 label, 1 view, 1 document" in text
     assert "downloads these datasets from their sources" in text
     assert "two opens without a pre-cached orientation; Start in the page runs one" in text
     assert f"cd {w['root'] / 'one'} && thimble # one" in text and f"cd {w['root'] / 'two'} && thimble # two" in text
-    assert "No Claude Code session is attached" in text and "`thimble -c` in that folder continues" in text
-    assert "starts fresh, with the orientation's cards and report as its context" in text
+    # no session attached: for each dataset the frozen demo's one sentence and command, as the browser's card gives them
+    assert text.count(f"{demo.FROZEN_LINE} cd ") == 2
+    assert "No Claude Code session is attached" not in text and "thimble -c" not in text and "starts fresh" not in text
     assert w["started"] == []  # no terminal here, so nothing is asked and no session starts
     sources = (w["root"] / "SOURCES.md").read_text()
     assert "## one: one" in sources and "redistributes none of these datasets" in sources
@@ -712,7 +713,7 @@ def test_demo_downloads_installs_opens_and_says_how_to_attach(tmp_path, fake_wor
     assert "## two: two" in (w["root"] / "SOURCES.md").read_text()  # an earlier run's dataset stays listed
     # --replace archives it and installs the pre-cache again
     assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre), replace=True)) == 0
-    assert list((Path(w["env"]["workspaces_dir"]) / ".archive").glob("one-*"))
+    assert list((Path(w["env"]["workspaces_dir"]) / ".archive").glob("demo-one-*"))
     assert (installed / "orient" / "run.json").is_file()
 
 
@@ -720,11 +721,11 @@ def test_demo_with_no_precache_opens_each_dataset_with_a_note(fake_world):
     w = fake_world  # PRECACHES is an empty folder, as in a release with no demos/<name>/
     assert run(w, args(names=["one", "two"], dir=str(w["root"]))) == 0
     for name in ("one", "two"):
-        assert json.loads((Path(w["env"]["data_dir"]) / f"{name}.corpus.json").read_text())["path"] == str(w["root"] / name)
-        assert not (Path(w["env"]["workspaces_dir"]) / name).exists()
+        assert json.loads((Path(w["env"]["data_dir"]) / f"demo-{name}.corpus.json").read_text())["path"] == str(w["root"] / name)
+        assert not (Path(w["env"]["workspaces_dir"]) / f"demo-{name}").exists()
     assert len([x for x in w["lines"] if "opens without a pre-cached orientation" in x]) == 2
     text = said(w)
-    assert "No Claude Code session is attached" in text
+    assert demo.FROZEN_LINE in text
     assert "ran in advance" not in text
 
 
@@ -735,8 +736,22 @@ def test_demo_is_static_by_default_and_asks_nothing(tmp_path, fake_world, monkey
     assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
     assert asked == [] and w["started"] == []
     text = said(w)
-    assert "No Claude Code session is attached" in text
-    assert f"cd {w['root'] / 'one'} && thimble" in text and "`thimble -c` in that folder continues" in text
+    assert f"{demo.FROZEN_LINE} cd {w['root'] / 'one'} && thimble" in text
+    assert "No Claude Code session is attached" not in text and "thimble -c" not in text
+
+
+def test_the_printout_names_a_frozen_demo_session_unless_a_session_attaches_or_was_kept(monkeypatch):
+    one = (fake_dataset("one"), Path.home() / "thimble demo" / "one", "demo-one")
+    # the frozen demo: the sentence and the command, the home folder as ~, quoted only where a shell needs it
+    assert demo.attach_lines([one], True, None) == ["", demo.FROZEN_LINE, "  cd ~/'thimble demo/one' && thimble"]
+    assert demo.shell_folder(Path("/srv/data/one")) == "/srv/data/one" and demo.shell_folder(Path.home()) == "~"
+    # a session attaching, or a full pre-cache's session kept: how to attach later and continue, as before
+    attaching = " ".join(demo.attach_lines([one], True, one[1]))
+    assert "Attaching a Claude Code session in" in attaching and "thimble -c" in attaching
+    assert demo.FROZEN_LINE not in attaching
+    kept = " ".join(demo.attach_lines([one], True, None, kept=True))
+    assert "No Claude Code session is attached" in kept and "its Claude Code session came with it" in kept
+    assert demo.FROZEN_LINE not in kept
 
 
 def test_demo_attach_with_two_datasets_asks_which(fake_world, monkeypatch):
@@ -768,7 +783,7 @@ def test_demo_attach_and_no_attach_answer_without_asking(fake_world, monkeypatch
     w = fake_world
     asked = terminal(monkeypatch, [])
     assert run(w, args(names=["one"], dir=str(w["root"]), no_attach=True)) == 0
-    assert asked == [] and w["started"] == [] and "No Claude Code session is attached" in said(w)
+    assert asked == [] and w["started"] == [] and demo.FROZEN_LINE in said(w)
     assert run(w, args(names=["one"], dir=str(w["root"]), attach=True)) == 0
     assert asked == [] and w["started"] == [w["root"] / "one"]
     # --attach without a terminal: the workspace opens, with the instructions
@@ -785,7 +800,7 @@ def test_demo_prints_and_opens_one_url_the_start_page(tmp_path, fake_world, monk
     pre = precache_for(tmp_path, "one")
     from app import cli
 
-    monkeypatch.setattr(demo, "register", lambda folder, url: folder.name)
+    monkeypatch.setattr(demo, "register", lambda folder, url, name=None: name or folder.name)
     monkeypatch.setattr(cli, "ui_url", lambda name, key=True: f"http://127.0.0.1:1/{f'?ws={name}' if name else ''}"
                                                               + ("#k=pagekey" if key else ""))
     w["server"] = lambda say: ("http://127.0.0.1:1", w["env"])
@@ -794,7 +809,7 @@ def test_demo_prints_and_opens_one_url_the_start_page(tmp_path, fake_world, monk
     assert w["shown"] == ["http://127.0.0.1:1/"]
     assert re.findall(r"http://\S+", text) == ["http://127.0.0.1:1/"] and "Open at http://127.0.0.1:1/" in text
     assert "?ws=" not in text and "is open at" not in text
-    assert f"cd {w['root'] / 'one'} && thimble # one" in text and "No Claude Code session is attached" in text
+    assert f"cd {w['root'] / 'one'} && thimble # one" in text and demo.FROZEN_LINE in text
     assert w["started"] == []
     # one dataset: still the start page; on a terminal, with the key
     terminal(monkeypatch, [])
@@ -838,6 +853,172 @@ def test_a_folder_with_other_files_is_left_alone(fake_world):
     assert (w["root"] / "one" / "mine.txt").read_text() == "keep" and w["got"] == []
 
 
+# --------------------------------------------------------------------------- the workspaces' names
+
+
+@pytest.fixture()
+def named_world(tmp_path, fake_world, monkeypatch):
+    """fake_world, its datasets known to the start page's rule too (start_page.demo_dataset reads demo_data.DATASETS),
+    a Claude Code config folder of the test's own, and the analyst's own folder called `one`, opened with thimble
+    before any demo (the workspace `one`)."""
+    monkeypatch.setattr(demo_data, "DATASETS", demo.DATASETS)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-home"))
+    mine = tmp_path / "mine" / "one"
+    mine.mkdir(parents=True)
+    assert config.register_corpus(mine, exact=True)["name"] == "one"
+    fake_world["mine"] = mine
+    return fake_world
+
+
+def old_demo(w, tmp_path: Path, pre: Path | None = None) -> tuple[Path, Path]:
+    """What an earlier `thimble demo` left beside the analyst's `one`: the dataset's folder registered as one-2, its
+    pre-cache (`pre`, else one made here) installed there with an archived run beside it. (the pre-cache folder, the
+    workspace folder)."""
+    pre = pre or precache_for(tmp_path, "one")
+    folder = w["root"] / "one"
+    folder.mkdir(parents=True)
+    (folder / "a.jsonl").write_bytes(b'{"n": 1}\n')
+    assert config.register_corpus(folder, exact=True)["name"] == "one-2"
+    root = Path(w["env"]["workspaces_dir"])
+    ws = root / "one-2"
+    demo.install(pre / "one", ws, folder)
+    (root / ".archive" / "one-2-2026-10-01-120000").mkdir(parents=True)
+    return pre, ws
+
+
+def test_a_dataset_registers_as_demo_name_beside_the_analyst_s_folder_of_its_name(named_world):
+    w = named_world
+    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
+    data = Path(w["env"]["data_dir"])
+    assert json.loads((data / "demo-one.corpus.json").read_text())["path"] == str(w["root"] / "one")
+    assert json.loads((data / "one.corpus.json").read_text())["path"] == str(w["mine"])  # the analyst's, untouched
+    assert not (data / "one-2.corpus.json").exists()
+    # a new registration takes the name asked for, the next free one when another folder holds it; a folder registered
+    # already keeps its own
+    other = w["root"].parent / "elsewhere" / "one"
+    other.mkdir(parents=True)
+    assert config.register_corpus(other, exact=True, name="demo-one")["name"] == "demo-one-2"
+    assert config.register_corpus(w["mine"], exact=True, name="demo-x")["name"] == "one"
+    with pytest.raises(ValueError):
+        config.register_corpus(other, exact=True, name="../up")
+
+
+def test_an_earlier_demo_workspace_under_a_suffixed_name_becomes_demo_name_with_all_it_holds(tmp_path, named_world):
+    w = named_world
+    pre, old = old_demo(w, tmp_path)
+    root, data = Path(w["env"]["workspaces_dir"]), Path(w["env"]["data_dir"])
+    (old / "chats" / "t1.jsonl").write_text(json.dumps({"type": "user", "text": "a question of mine"}) + "\n")
+    held = sorted(str(p.relative_to(old)) for p in old.rglob("*") if p.is_file())
+    assert str(old) in (old / "notebooks" / "g1.json").read_text()  # the pre-cache's absolute path, filled in
+    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
+    new = root / "demo-one"
+    assert not old.exists() and not (data / "one-2.corpus.json").exists()
+    assert sorted(str(p.relative_to(new)) for p in new.rglob("*") if p.is_file()) == held
+    assert "a question of mine" in (new / "chats" / "t1.jsonl").read_text()
+    rec = json.loads((data / "demo-one.corpus.json").read_text())
+    assert rec["name"] == "demo-one" and rec["path"] == str(w["root"] / "one") and rec["renamed_from"] == ["one-2"]
+    g1 = (new / "notebooks" / "g1.json").read_text()
+    assert str(new) in g1 and f"{old}/" not in g1  # its paths name the new folder
+    assert (root / ".archive" / "demo-one-2026-10-01-120000").is_dir()  # its archived run went with it
+    assert json.loads((data / "one.corpus.json").read_text())["path"] == str(w["mine"])
+    text = said(w)
+    assert "the demo workspace one-2 is now demo-one, with its cards, labels, views, documents and chats" in text
+    assert "workspace demo-one holds an analysis already; it stays" in text  # not installed again over it
+    # the next registration of the folder (a session's /thimble) keeps what it was renamed from
+    assert config.register_corpus(w["root"] / "one", exact=True)["renamed_from"] == ["one-2"]
+    # a second run has nothing to rename
+    w["lines"].clear()
+    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
+    assert "is now demo-one" not in said(w)
+
+
+def test_the_server_renames_an_earlier_demo_workspace_and_refuses_while_a_session_holds_it(tmp_path, named_world,
+                                                                                          monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import cli, events, main
+
+    w = named_world
+    pre, old = old_demo(w, tmp_path)
+    client = TestClient(main.create_app())
+    calls: list[tuple[str, str]] = []
+
+    def request(method, url, body=None, timeout=5.0):
+        path = url.removeprefix("http://127.0.0.1:1")
+        calls.append((method, path))
+        r = client.request(method, path, json=body)
+        return r.status_code, r.json()
+
+    monkeypatch.setattr(cli, "_request", request)
+    w["server"] = lambda say: ("http://127.0.0.1:1", w["env"])
+    # a session holds one-2 open: it keeps its name, and the line says how to rename or remove it
+    monkeypatch.setitem(events._subs, "one-2", {events.Sub("s1")})
+    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
+    assert old.is_dir() and ("POST", "/api/ws/one-2/rename") not in calls
+    text = said(w)
+    assert "the demo workspace one-2 keeps its name, since a Claude Code session has it open" in text
+    assert "run `thimble demo` again to rename it demo-one (`thimble purge one-2` removes it)" in text
+    # the route refuses on its own too, the moment it is asked
+    assert client.post("/api/ws/one-2/rename", json={"to": "demo-one"}).status_code == 409
+    monkeypatch.delitem(events._subs, "one-2")
+    assert client.post("/api/ws/one-2/rename", json={"to": "one"}).status_code == 409  # the analyst's name
+    assert client.post("/api/ws/one-2/rename", json={"to": "../x"}).status_code == 400
+    assert client.post("/api/ws/nothing/rename", json={"to": "demo-x"}).status_code == 404
+    # once it is closed, the next run renames it through the server
+    w["lines"].clear()
+    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
+    assert ("POST", "/api/ws/one-2/rename") in calls
+    assert not old.exists() and (Path(w["env"]["workspaces_dir"]) / "demo-one" / demo.MARKER).is_file()
+    assert "the demo workspace one-2 is now demo-one" in said(w)
+    names = {r["name"]: r for r in client.get("/api/workspaces").json()}
+    assert names["demo-one"]["label"] == "one" and names["demo-one"]["renamed_from"] == ["one-2"]
+    assert names["one"]["kind"] == "folder" and names["one"]["label"] == "one"
+
+
+def test_an_earlier_demo_workspace_whose_folder_ran_claude_code_sessions_stays_and_the_dataset_opens_fresh(
+        tmp_path, named_world):
+    w = named_world
+    pre, old = old_demo(w, tmp_path)
+    data = Path(w["env"]["data_dir"])
+    # a session of a full pre-cache ran in the workspace's orientation folder: a move would end it
+    (tmp_path / "claude-home" / "projects" / demo.projects_folder(str(old / "orient"))).mkdir(parents=True)
+    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
+    assert (old / demo.MARKER).is_file() and not (data / "one-2.corpus.json").exists()
+    new = Path(w["env"]["workspaces_dir"]) / "demo-one"
+    assert json.loads((data / "demo-one.corpus.json").read_text())["path"] == str(w["root"] / "one")
+    assert (new / demo.MARKER).is_file()  # installed fresh
+    text = said(w)
+    assert f"the earlier demo workspace one-2 stays as it was in {old}" in text
+    assert "`thimble purge one-2` removes one-2" in text and "installed as workspace demo-one" in text
+
+
+def test_an_analyst_s_own_workspace_and_a_demo_name_another_folder_holds_keep_their_names(tmp_path, named_world,
+                                                                                         monkeypatch):
+    w = named_world
+    # --dir at the analyst's own folders: their `one` holds no pre-cache and is not under a SOURCES.md before the run,
+    # yet once the run writes one it counts as the demo's; its workspace has their own analysis, which stays
+    pre = precache_for(tmp_path, "one")
+    (w["mine"] / "a.jsonl").write_bytes(b'{"n": 1}\n')
+    ws = Path(w["env"]["workspaces_dir"]) / "one"
+    (ws / "notebooks").mkdir(parents=True)
+    (ws / "notebooks" / "g.json").write_text("{}")
+    from app import local
+
+    monkeypatch.setattr(local, "live_terminal", lambda p: p == ws)  # open in a terminal-mode session
+    assert run(w, args(names=["one"], dir=str(w["mine"].parent), precaches=str(pre))) == 0
+    assert ws.is_dir() and (Path(w["env"]["data_dir"]) / "one.corpus.json").exists()
+    assert "keeps its name, since a Claude Code session has it open" in said(w)
+    # demo-one held by another folder: the earlier demo workspace keeps its name, with nothing to say
+    monkeypatch.setattr(local, "live_terminal", lambda p: False)
+    w["lines"].clear()
+    _, old = old_demo(w, tmp_path, pre)
+    taken = tmp_path / "taken" / "x"
+    taken.mkdir(parents=True)
+    config.register_corpus(taken, exact=True, name="demo-one")
+    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
+    assert old.is_dir() and "demo workspace one-2" not in said(w)
+
+
 def test_export_command_waits_for_a_finished_orientation(tmp_path, monkeypatch):
     monkeypatch.setattr(demo, "gitleaks_scan", no_scan)
     monkeypatch.setattr(demo.getpass, "getuser", lambda: "")
@@ -874,6 +1055,19 @@ def test_export_command_waits_for_a_finished_orientation(tmp_path, monkeypatch):
     assert keys == ["transcripts", "chats", "call outputs", "labels", "outputs", "work files", "dataset text",
                     "may be private", "still running", "left out"]  # the orientation's chat said it ran
     assert any(x.startswith("wrote ") and "a full export" in x for x in lines)
+
+
+def test_a_demo_workspace_exports_under_its_dataset_s_name(tmp_path, monkeypatch):
+    """`thimble demo` names a dataset's workspace demo-<dataset>; its export is <out>/<dataset> all the same, and a
+    workspace installed from a pre-cache exports under the dataset its mark names."""
+    monkeypatch.setattr(demo, "DATASETS", {"toy": fake_dataset("toy")})
+    root = tmp_path / "workspaces"
+    for name in ("demo-toy", "demo-other", "mine"):
+        (root / name).mkdir(parents=True)
+    assert demo.dataset_of(root / "demo-toy") == "toy"
+    assert demo.dataset_of(root / "demo-other") == "demo-other"  # no dataset of that name
+    (root / "mine" / demo.MARKER).write_text(json.dumps({"dataset": "toy"}))
+    assert demo.dataset_of(root / "mine") == "toy"
 
 
 def test_the_analyst_picks_the_folder_a_session_attaches_in(tmp_path, monkeypatch):

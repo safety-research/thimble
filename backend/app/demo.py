@@ -8,17 +8,30 @@
 The command lists the datasets (demo_data.DATASETS) with their sources, credits and sizes, asks before each download
 (--yes answers yes for all), rebuilds each dataset from its publisher's files into DIR/<name> (default ~/thimble-demo)
 and checks it against the copy the orientations ran on. thimble redistributes none of the data: each dataset comes from
-its publisher, and DIR/SOURCES.md says from where. It then registers the folder as a corpus, installs that dataset's
-pre-cache as its workspace when demos/ (or --precaches DIR) has one (a dataset without one opens with no analysis yet,
-with a line saying so), and prints and opens one URL without a Claude Code session: thimble's start page, which lists
-every dataset downloaded (start_page.py), one run's or an earlier one's. --examples opens the worked examples of custom
-views on the same server instead (demo_examples.py), and the same start page.
+its publisher, and DIR/SOURCES.md says from where. It then registers the folder as the workspace demo-<name> (names,
+below), installs that dataset's pre-cache as its workspace when demos/ (or --precaches DIR) has one (a dataset without
+one opens with no analysis yet, with a line saying so), and prints and opens one URL without a Claude Code session:
+thimble's start page, which lists every dataset downloaded (start_page.py), one run's or an earlier one's, by the
+dataset's name. --examples opens the worked examples of custom views on the same server instead (demo_examples.py), and
+the same start page.
+
+Names. Each dataset's workspace is demo-<name> (workspace_name), so it never takes the name of a folder of the analyst's
+own called <name>, nor gets a -2 beside one. A workspace an earlier `thimble demo` registered under another name (what
+the start page calls a demo workspace of the dataset, start_page.demo_dataset, such as collusion-wiki-2) is renamed
+demo-<name> on the next run, with its cards, labels, views, documents, chats and archives (settle_name): the server
+stops what it runs for it and moves it (POST /api/ws/{c}/rename, ledger.move_workspace), or, with no server, the move is
+made on the disk. A tab or a bookmark on the old name opens the new one (the registration's `renamed_from`). While a
+Claude Code session holds it open, or when the move fails, it keeps its name, and a line says how to rename or remove
+it; when Claude Code sessions ran in its folder (a full pre-cache's), which could not continue after a move, it stays
+where it is, unregistered, the folder registers as demo-<name>, and a line says how to remove the old one (`thimble
+purge`).
 
 Attaching. The demo is static: it opens the start page and starts no Claude Code session. --attach starts one (`thimble`
 in the dataset's folder), after `claude auth status` says a login is configured (when it says none, it says how to log
-in). Either way it prints how to attach later: `cd <folder> && thimble`, and `thimble
--c` there continues the last session. A session attached to a pre-cached workspace starts fresh, with the canvas and
-the report as its context (precached.py).
+in). Without it, and unless a full pre-cache's session was kept, it prints for each dataset what the orientation's card
+in the browser says of a frozen demo session (FROZEN_LINE) and the command, `cd <folder> && thimble`, and nothing else
+(attach_lines); with it, or a kept session, how to attach later, and that `thimble -c` there continues the last session.
+A session attached to a pre-cached workspace starts fresh, with the canvas and the report as its context (precached.py).
 
 The export writes one of two formats, a folder with `thimble-demo-precache.json` (the manifest), `README.md` (the
 source's notice first, then what the folder holds) and `workspace/`; absolute paths are written as placeholders
@@ -60,6 +73,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -89,6 +103,7 @@ TRANSCRIPTS = "transcripts"  # in a full export: transcripts/<session>.jsonl and
 MARKER = "precached.json"  # in an installed workspace: what was installed, from where, and the sessions given it
 PRECACHES = config.REPO_ROOT / "demos"  # demos/<name>/
 DEFAULT_DIR = Path("$THIMBLE_HOME/demo")  # for the help text; default_dir() is the folder
+DEMO_PREFIX = "demo-"  # of each dataset's workspace name (workspace_name)
 
 
 def default_dir() -> Path:
@@ -1569,16 +1584,117 @@ def _server(say: Callable[[str], None]) -> tuple[str | None, dict[str, Any]]:
     return (url if up else None), env
 
 
-def register(folder: Path, url: str | None) -> str:
-    """The workspace name of `folder`, registered as a corpus of its own (as a session's /thimble registers it)."""
+def register(folder: Path, url: str | None, name: str | None = None) -> str:
+    """The workspace name of `folder`, registered as a corpus of its own (as a session's /thimble registers it): a new
+    registration takes `name` when given (the next free one when another folder holds it), else the folder's name; a
+    folder registered already keeps its name."""
     from . import cli  # noqa: PLC0415
 
     if url:
-        status, body = cli._request("POST", f"{url}/api/corpora/register", {"path": str(folder), "exact": True})
+        body_ = {"path": str(folder), "exact": True, **({"name": name} if name else {})}
+        status, body = cli._request("POST", f"{url}/api/corpora/register", body_)
         if status in (200, 201) and isinstance(body, dict) and body.get("name"):
             return str(body["name"])
         raise DemoError(f"the server did not register {folder}: {status} {str(body)[:200]}")
-    return str(config.register_corpus(folder, exact=True)["name"])
+    return str(config.register_corpus(folder, exact=True, name=name)["name"])
+
+
+def workspace_name(dataset: str) -> str:
+    """The workspace a dataset's folder registers as: demo-<dataset> (DEMO_PREFIX), never the name of a folder of the
+    analyst's own that shares the dataset's name, as `thimble demo --examples` names example-<name>."""
+    return f"{DEMO_PREFIX}{dataset}"
+
+
+def registered_as(folder: Path, data_dir: Path) -> str | None:
+    """The name the registry `data_dir` holds `folder` itself under (as config.sidecar_match finds it), None when no
+    registration names that folder."""
+    p = folder.resolve()
+    recs = []
+    for sidecar in sorted(data_dir.glob(f"*{config.SIDECAR_SUFFIX}")):
+        rec = config.read_sidecar(sidecar.name[: -len(config.SIDECAR_SUFFIX)], data_dir)
+        if rec is not None:
+            recs.append(rec)
+    found = config.sidecar_match(p, recs)
+    return str(found[0]["name"]) if found is not None and found[1] == p else None
+
+
+def bound_sessions(ws: Path, claude_dir: Path) -> list[Path]:
+    """Claude Code's folders of the sessions that ran in the workspace folder `ws` or a folder in it (a projects folder is
+    named after the folder its sessions ran in: projects_folder), such as a full pre-cache's (install) or an earlier
+    thimble's agents': a session continues only from the folder it ran in, so a move of `ws` would end them."""
+    base = projects_folder(str(ws.resolve()))
+    try:
+        found = list((claude_dir / "projects").iterdir())
+    except OSError:
+        return []
+    return sorted(p for p in found if p.is_dir() and (p.name == base or p.name.startswith(base + "-")))
+
+
+def held_open(url: str | None, name: str, ws: Path) -> bool:
+    """Whether a Claude Code session holds the workspace open: one whose shim subscribed on the server (GET
+    /api/events/sessions, as `thimble purge` counts them), or a terminal-mode session that still runs
+    (local.live_terminal)."""
+    from . import cli, local  # noqa: PLC0415
+
+    if local.live_terminal(ws):
+        return True
+    if not url:
+        return False
+    status, body = cli._request("GET", f"{url}/api/events/sessions")
+    got = body.get("workspaces") if status == 200 and isinstance(body, dict) else None
+    return bool(isinstance(got, dict) and got.get(name))
+
+
+def settle_name(ds: Dataset, folder: Path, url: str | None, env: dict[str, Any], say: Callable[[str], None]) -> None:
+    """Before `folder` registers: a workspace an earlier `thimble demo` registered under another name (module note,
+    names), renamed demo-<dataset> with all it holds, through the server (POST /api/ws/{c}/rename) or, with no server,
+    on the disk (ledger.move_workspace), and a line saying so. Left as it is while a session holds it open or when the
+    rename fails, with a line naming it and how to remove it; when Claude Code sessions ran in its folder, its
+    registration alone goes, so the folder registers as demo-<dataset>, and the line says how to remove the old
+    workspace. The analyst's own workspace of the folder, and one whose demo-<dataset> another folder holds, keep their
+    names."""
+    import urllib.parse  # noqa: PLC0415
+
+    from . import cli, ledger, start_page  # noqa: PLC0415
+
+    data, root = Path(env["data_dir"]), Path(env["workspaces_dir"])
+    want = workspace_name(ds.name)
+    old = registered_as(folder, data)
+    if old is None or old == want:
+        return
+    ws = root / old
+    mark = _read_json(ws / MARKER)
+    if start_page.demo_dataset(folder.resolve(), mark if isinstance(mark, dict) else None, default_dir()) != ds.name:
+        return
+    if (data / f"{want}{config.SIDECAR_SUFFIX}").exists() or (data / want / "manifest.json").is_file() \
+            or (root / want).exists():
+        return
+    if held_open(url, old, ws):
+        say(f"  the demo workspace {old} keeps its name, since a Claude Code session has it open: quit that session and "
+            f"run `thimble demo` again to rename it {want} (`thimble purge {old}` removes it)")
+        return
+    if bound_sessions(ws, claude_config_dir()):
+        (data / f"{old}{config.SIDECAR_SUFFIX}").unlink(missing_ok=True)
+        say(f"  the earlier demo workspace {old} stays as it was in {ws}, since Claude Code sessions ran in that folder "
+            f"and could not continue after a move; the dataset opens as {want}, and `thimble purge {old}` removes {old}")
+        return
+    why, had = "", ws.is_dir()
+    if url:
+        status, body = cli._request("POST", f"{url}/api/ws/{urllib.parse.quote(old)}/rename", {"to": want},
+                                    timeout=cli.ARCHIVE_TIMEOUT_S)
+        if status != 200:
+            detail = body.get("detail") if isinstance(body, dict) else body
+            why = f"the server answered {status or 'nothing'}" + (f": {str(detail)[:200]}" if detail else "")
+    else:
+        try:
+            ledger.move_workspace(old, want, workspaces=root)
+        except (ValueError, OSError) as e:
+            why = str(e)
+    if why:
+        say(f"  the demo workspace {old} keeps its name, since it could not be renamed {want} ({why}); "
+            f"`thimble purge {old}` removes it, and the next `thimble demo` opens the dataset as {want}")
+        return
+    say(f"  the demo workspace {old} is now {want}" + (", with its cards, labels, views, documents and chats" if had else ""))
 
 
 def place_precache(ds: Dataset, folder: Path, cat: dict[str, dict[str, Any]], url: str | None, env: dict[str, Any],
@@ -1587,7 +1703,8 @@ def place_precache(ds: Dataset, folder: Path, cat: dict[str, dict[str, Any]], ur
     analysis yet (or `replace`, which archives it first): the workspace's name."""
     from . import cli  # noqa: PLC0415
 
-    name = register(folder, url)
+    settle_name(ds, folder, url, env, say)
+    name = register(folder, url, workspace_name(ds.name))
     pc = cat.get(ds.name)
     if pc is None:
         say(f"  {ds.name} opens without a pre-cached orientation; Start in the page runs one")
@@ -1686,11 +1803,32 @@ def attach_choice(args: argparse.Namespace, folders: list[Path], say: Callable[[
     return pick_folder(folders), False
 
 
+FROZEN_LINE = "To start a live session from scratch with this dataset, run"  # as the browser's card says it (Precached.tsx)
+
+
+def shell_folder(folder: Path) -> str:
+    """`folder` as a shell takes it after `cd`: the home folder as ~, the rest quoted only where a shell would split it or
+    expand it (as the browser writes it, SessionGone.tsx shellFolder)."""
+    home = Path.home()
+    if folder == home:
+        return "~"
+    if folder.is_relative_to(home):
+        return "~/" + shlex.quote(str(folder.relative_to(home)))
+    return shlex.quote(str(folder))
+
+
 def attach_lines(opened: list[tuple[Dataset, Path, str | None]], precached: bool, attaching: Path | None,
                  login_said: bool = False, kept: bool = False) -> list[str]:
-    """How to attach a Claude Code session to each opened workspace later, and to continue it; how to log in unless
-    `login_said`. `kept`: a pre-cache was a full export, whose orientation's session came with it."""
+    """How to start a session on each opened workspace. With no session attaching and no session kept, the frozen demo's
+    one sentence and command for each dataset, as the orientation's card in the browser gives them (FROZEN_LINE), and
+    nothing else. Otherwise how to attach a Claude Code session to each later, and to continue it, and how to log in
+    unless `login_said`. `kept`: a pre-cache was a full export, whose orientation's session came with it."""
     out = [""]
+    if attaching is None and not kept:
+        for ds, folder, _ in opened:
+            out.append(FROZEN_LINE)
+            out.append(f"  cd {shell_folder(folder)} && thimble" + (f"    # {ds.name}" if len(opened) > 1 else ""))
+        return out
     if attaching is None:
         out.append("No Claude Code session is attached. To attach one (main, which you chat with in the page), run in "
                    "a terminal:")
@@ -1826,6 +1964,16 @@ def pick_folder(folders: list[Path]) -> Path | None:
     return folders[int(answer) - 1] if answer.isdigit() and 1 <= int(answer) <= len(folders) else None
 
 
+def dataset_of(ws: Path) -> str:
+    """The name a workspace is exported under unless --dataset says: the dataset its pre-cache's mark names, else its
+    name without demo- when that is a dataset's (workspace_name), else its name."""
+    mark = _read_json(ws / MARKER)
+    if isinstance(mark, dict) and str(mark.get("dataset") or "") in DATASETS:
+        return str(mark["dataset"])
+    bare = ws.name.removeprefix(DEMO_PREFIX)
+    return bare if bare != ws.name and bare in DATASETS else ws.name
+
+
 def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
     from . import cli  # noqa: PLC0415
 
@@ -1845,7 +1993,7 @@ def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
         say(f"thimble demo --export: the orientation of {ws.name} is {run_rec.get('status')}"
             + (" with follow-ups waiting" if run_rec.get("queue") else "") + "; export it once it is done")
         return 1
-    name = args.dataset or ws.name
+    name = args.dataset or dataset_of(ws)
     rec = config.read_sidecar(ws.name, Path(env["data_dir"]))
     corpus = given(args.corpus) if args.corpus else Path(rec["path"]) if rec else None
     if corpus is None or not corpus.is_dir():

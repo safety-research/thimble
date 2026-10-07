@@ -98,15 +98,14 @@ labels and views held, so a card that quotes a record passes, and a card or call
 It fills in the placeholders for the new folders and installs `workspace/` as the dataset's workspace, and ends the
 orientation's thread with the coverage line the manifest's `orientation` keeps, as a live run's thread ends. It marks
 the workspace pre-cached: `precached.json` in the workspace, and `precached` in the orientation's record and its thread's
-meta. In the browser, the orientation's thread then says the orientation ran in advance and shows an "Attach a fresh
-session" button with a short explainer, the command and a Copy button. Until a session first attaches, the page stays
-readable rather than greyed under the card that asks for one, and the composer gives way to the same steps. A message
-to the orientation is refused, since its session was not kept.
+meta. In the browser, the orientation's thread then opens with a card titled "This is a frozen demo session": "To start
+a live session from scratch with this dataset, run" and the command, `cd <folder> && thimble`, with a Copy button.
+Until a session first attaches, the page stays readable rather than greyed under the card that asks for one, and the
+composer gives way to the same sentence and command. A message to the orientation is refused, since its session was not
+kept.
 
-On a terminal it then asks "Attach a Claude Code session now? (requires claude to be logged in)", Enter for yes,
-once `claude auth status` says a login is configured; when it says none, it says how to log in and asks nothing.
-`--attach` answers yes and `--no-attach` no. Without a terminal it asks nothing. Either way it prints how to attach
-later: `cd <folder> && thimble`, and `thimble -c` in that folder continues the last session.
+It starts no Claude Code session unless `--attach`. Without it, it prints the same sentence and command for each
+dataset.
 
 A session attached to a pre-cached workspace starts fresh. Its `/thimble` gives it what the orientation left as its
 context once: the canvas (each card's question and takeaway), the views and the documents, with the full text of
@@ -126,8 +125,9 @@ each one written (backend/app/precached.py).
    Wait until it is done: its views built and its report written. Claude's cyber safeguards flag mythos-5 under Opus
    5.5. On 2026-10-05, an earlier demo dataset ran to the end on claude-opus-4-8, but the same safeguard stopped its
    critic, two verification agents and one view build (the orientation's thread says so).
-3. Export it from the checkout: `thimble demo --export collusion-wiki demos/ --outputs-only` (the workspace's name, or
-   its folder). This writes `demos/collusion-wiki/`, replacing an earlier pre-cache there. The export refuses, listing
+3. Export it from the checkout: `thimble demo --export demo-collusion-wiki demos/ --outputs-only` (the workspace's name,
+   which `thimble demo` makes demo-<dataset>, or its folder). This writes `demos/collusion-wiki/`, replacing an earlier
+   pre-cache there. The export refuses, listing
    each finding, when a file copies a long stretch of the dataset, and while it finds your user name, another
    absolute path or a gitleaks finding.
    - `--scrub-user` writes `user` in place of your user name.

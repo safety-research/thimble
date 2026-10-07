@@ -701,3 +701,123 @@ async def restore_workspace(c: str, body: dict[str, Any] = Body(...)) -> dict[st
     investigation.reset_streams(c)  # an open tab starts over on the restored workspace
     log.info("%s: archive %s restored", c, name)
     return {"restored": str(src), "archived": replaced}
+
+
+# --------------------------------------------------------------------------- rename
+
+# the files whose absolute paths of the workspace folder a rename points at the new folder: text thimble writes
+REPOINTED_SUFFIXES = (".json", ".jsonl", ".md", ".txt", ".py", ".html", ".js", ".mjs", ".css", ".svg", ".csv")
+
+
+def repoint(root: Path, old: str, new: str) -> int:
+    """In the text files under `root` (REPOINTED_SUFFIXES; no link followed or rewritten), the absolute path `old`, where
+    no character of a name follows it, replaced by `new`, as written plain and as JSON escapes it; each file written
+    whole (atomic_write_bytes) with its mode kept. How many files changed; a file that cannot be read or written is
+    logged and left as it was."""
+    forms = {old: new, json.dumps(old)[1:-1]: json.dumps(new)[1:-1]}
+    pats = [(re.compile(re.escape(a) + r"(?![A-Za-z0-9._-])"), b) for a, b in forms.items()]
+    needles = {a.encode("utf-8") for a in forms}
+    changed = 0
+    for dirpath, _dirs, files in os.walk(root):  # os.walk follows no link to a folder
+        for f in files:
+            p = Path(dirpath) / f
+            if p.suffix not in REPOINTED_SUFFIXES or p.is_symlink():
+                continue
+            try:
+                data = p.read_bytes()
+                if not any(n in data for n in needles):
+                    continue
+                text = data.decode("utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            out = text
+            for pat, to in pats:
+                out = pat.sub(lambda _m, to=to: to, out)
+            if out == text:
+                continue
+            try:
+                mode = p.stat().st_mode & 0o777
+                atomic_write_bytes(p, out.encode("utf-8"))
+                os.chmod(p, mode)
+                changed += 1
+            except OSError as e:
+                log.warning("%s: the paths of the renamed workspace were not rewritten: %s", p, e)
+    return changed
+
+
+def move_workspace(c: str, to: str, workspaces: Path | None = None) -> Path | None:
+    """The disk part of a rename (rename_workspace, and `thimble demo` with no server running): workspaces/<c>/ moved to
+    workspaces/<to>/ (`workspaces`: config.WORKSPACES_DIR), the registration of `c` made `to`'s (config.rename_corpus),
+    the archives of `c` moved to `to`'s names where none of `to` holds that name, and the absolute path of the old folder
+    in its text files pointed at the new one (repoint). The caller makes sure nothing runs for `c`. The new folder, None
+    when `c` had none yet. ValueError, with nothing changed, when `c` is no registered folder's corpus or `to` is invalid
+    or taken (a corpus or a workspace folder of that name); an OSError of the move puts the folder back."""
+    root = (workspaces or config.WORKSPACES_DIR).resolve()
+    if config.NAME_RE.fullmatch(to) is None or to.startswith(".") or to == c:
+        raise ValueError(f"invalid workspace name: {to!r}")
+    if config.read_sidecar(c) is None:
+        raise ValueError(f"{c!r} is not a registered folder's corpus")
+    if config.name_taken(to) or (root / to).exists() or (root / to).is_symlink():
+        raise ValueError(f"the name {to!r} is taken")
+    src, dest = root / c, root / to
+    has = src.is_dir() and not src.is_symlink()
+    if has:
+        if src.resolve().parent != root:
+            raise ValueError(f"refusing to move {src}")
+        src.rename(dest)
+    try:
+        config.rename_corpus(c, to)
+    except BaseException:
+        if has:
+            dest.rename(src)
+        raise
+    pattern = re.compile(rf"^{re.escape(c)}(-\d{{4}}-\d{{2}}-\d{{2}}-\d{{6}}(?:-\d+)?)$")
+    try:
+        held = sorted((root / ARCHIVE_DIR).iterdir())
+    except OSError:
+        held = []
+    for p in held:
+        m = pattern.match(p.name)
+        if m and p.is_dir() and not p.is_symlink() and not (p.parent / f"{to}{m.group(1)}").exists():
+            try:
+                p.rename(p.parent / f"{to}{m.group(1)}")
+            except OSError as e:
+                log.warning("%s: the archive %s was not renamed: %s", c, p.name, e)
+    if has:
+        repoint(dest, str(src), str(dest))
+    log.info("%s: workspace renamed %s", c, to)
+    return dest if has else None
+
+
+@router.post("/ws/{c}/rename")
+async def rename_workspace(c: str, body: dict[str, Any] = Body(...)) -> dict[str, str | None]:
+    """`thimble demo` (demo.settle_name): the workspace `c` renamed `to`, with everything it holds (move_workspace). 409
+    while a session holds it open (purge's idle delete refuses the same) or when `to` is taken; 404 for no corpus `c`;
+    400 for an invalid name and for a corpus directory, which keeps its name. Before the move it stops thimble's agents
+    and ends what else runs for it, as the archive does, and an open tab on the old name starts over.
+    {name, workspace: the new folder or null}."""
+    from . import events, investigation, local  # noqa: PLC0415 — lazy, as in _end_work
+
+    to = str(body.get("to") or "").strip()
+    try:
+        config.corpus_dir(c)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    if config.NAME_RE.fullmatch(to) is None or to.startswith(".") or to == c:
+        raise HTTPException(400, f"invalid workspace name: {to!r}")
+    if config.read_sidecar(c) is None or config._dir_corpus(c) is not None:
+        raise HTTPException(400, f"{c} is a corpus directory of the data folder, which keeps its name")
+    if config.name_taken(to) or (config.WORKSPACES_DIR / to).exists():
+        raise HTTPException(409, f"the name {to} is taken")
+    n = len(events.subscribed_sessions(c))
+    if n or local.live_terminal(config.WORKSPACES_DIR / c):
+        raise HTTPException(409, f"{c} is open in a Claude Code session" if not n else
+                            f"{c} has {n} open session{'s' if n > 1 else ''}")
+    await _stop_sessions(c, "renamed")
+    await _end_work(c)
+    try:
+        dest = move_workspace(c, to)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    investigation.reset_streams(c)
+    return {"name": to, "workspace": str(dest) if dest else None}

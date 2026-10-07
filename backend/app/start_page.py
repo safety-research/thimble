@@ -1,14 +1,17 @@
 """The workspaces this server knows, for the start page (the page whose URL names no workspace, or one this server does
 not hold) and the top bar's switcher (frontend shell/WorkspaceList.tsx): GET /api/workspaces.
 
-Each corpus of GET /corpora is one row, of one of three kinds, in this order:
-- demo: a dataset `thimble demo` downloaded (demo_data.DATASETS), named by its folder: the folder is <dir>/<dataset>
+Each corpus of GET /corpora is one row, of one of three kinds, in this order, with the `label` the page shows for it:
+- demo: a dataset `thimble demo` downloaded (demo_data.DATASETS), known by its folder: the folder is <dir>/<dataset>
   where `thimble demo` put it, $THIMBLE_HOME/demo (demo.default_dir) or a --dir that holds the SOURCES.md the command
-  writes, or the workspace holds the pre-cache's mark (precached.MARKER), which names the dataset. `ready` when the
-  mark is there: the orientation ran in advance and its outputs are installed. In DATASETS order.
-- example: a worked example of custom views that `thimble demo --examples` opened, by its workspace's name
+  writes, or the workspace holds the pre-cache's mark (precached.MARKER), which names the dataset. Labeled by the
+  dataset's name, whatever its workspace's name (demo-<dataset>: demo.workspace_name). `ready` when the mark is there:
+  the orientation ran in advance and its outputs are installed. In DATASETS order.
+- example: a worked example of custom views that `thimble demo --examples` opened, labeled by its workspace's name
   (demo_examples.PREFIX), with the slug and name of the view it shows. By name.
-- folder: any other folder, by its folder's name and path. By folder name.
+- folder: any other folder, labeled by its folder's name, with its path. By folder name.
+Each row also lists the names its workspace was renamed from (`renamed_from`, config.rename_corpus), so a page opened on
+an old name goes to the new one (frontend App).
 
 A registered folder that is gone is left out, since its workspace cannot open. The route is a read like GET /corpora,
 open to the page with or without the key's cookie (hook_auth guards writes only).
@@ -83,17 +86,21 @@ def rows() -> list[dict[str, Any]]:
         if not here.is_dir():
             continue
         shown = str(c.get("shown") or here)
-        row: dict[str, Any] = {"name": name, "folder": Path(shown).name or name, "path": shown}
+        folder = Path(shown).name or name
+        row: dict[str, Any] = {"name": name, "folder": folder, "path": shown}
         ws = config.WORKSPACES_DIR / name
         mark = _json(ws / precached.MARKER)
         dataset = demo_dataset(here.resolve(), mark, demo_dir)
         if dataset is not None:
             ds = DATASETS[dataset]
-            row.update(kind="demo", dataset=dataset, title=ds.title, blurb=ds.blurb or ds.title, ready=mark is not None)
+            row.update(kind="demo", label=dataset, dataset=dataset, title=ds.title, blurb=ds.blurb or ds.title,
+                       ready=mark is not None)
         elif name.startswith(demo_examples.PREFIX):
-            row.update(kind="example", view=example_view(ws, name))
+            row.update(kind="example", label=name, view=example_view(ws, name))
         else:
-            row["kind"] = "folder"
+            row.update(kind="folder", label=folder)
+        was = (config.read_sidecar(name) or {}).get("renamed_from")
+        row["renamed_from"] = [str(n) for n in was] if isinstance(was, list) else []
         out.append(row)
     kinds = {"demo": 0, "example": 1, "folder": 2}
     out.sort(key=lambda r: (kinds[r["kind"]], order.get(r.get("dataset") or "", 0),
@@ -103,6 +110,6 @@ def rows() -> list[dict[str, Any]]:
 
 @router.get("/workspaces")
 def list_workspaces() -> list[dict[str, Any]]:
-    """The start page's rows (module note): {name, kind, folder, path}, with {dataset, title, blurb, ready} for a demo
-    dataset and {view: {slug, name} | null} for an example."""
+    """The start page's rows (module note): {name, kind, label, folder, path, renamed_from}, with {dataset, title, blurb,
+    ready} for a demo dataset and {view: {slug, name} | null} for an example."""
     return rows()
