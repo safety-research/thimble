@@ -13,13 +13,17 @@
 //     onChange: (range) => draw(range), the viewfinder settled: draw what lies between range.from and range.to
 //   })
 //
-// Drag the viewfinder to pan, drag either edge to zoom, drag across the overview outside it to frame a new range, click
-// outside it to move it there, double-click to show the whole span; Ctrl, ⌘ or Alt with the wheel (or a pinch) zooms
-// around the pointer, Shift with the wheel pans. The part outside the viewfinder is dimmed, and the readout gives its
-// start, end and length in the data's units. The range opens on the whole span; thimble keeps a range zoomed in per
-// view (with the Color by choice, the bridge's `colour` message) and Reset in Color by's row brings back the whole span.
-// The overview carries light ticks and at most a few labels, and none while it shows the whole span: the view's own
-// chart, drawn on range.scale(width) and labelled by thimble.timeAxis, holds the one readable axis.
+// Drag the viewfinder to pan, drag either edge to zoom, drag across the overview outside it (or anywhere but the edges
+// while it shows the whole span) to frame a new range, click outside it to move it there, double-click to show the whole
+// span; Ctrl, ⌘ or Alt with the wheel (or a pinch) zooms around the pointer, Shift with the wheel pans, and with the
+// viewfinder focused the arrow keys pan, + and - zoom and Home shows the whole span. The part outside the viewfinder is
+// dimmed, and the readout gives its start, end and length in the data's units, as wide as the widest of the span so the
+// overview never moves. The range opens on the whole span; thimble keeps a range zoomed in per view (with the Color by
+// choice, the bridge's `colour` message) and Reset in Color by's row brings back the whole span. Hovering the overview
+// gives the time and the records there in a tip under it.
+// The overview carries light ticks and at most a few labels, none while it shows the whole span and none once the page
+// draws thimble.timeAxis for the range: the view's own chart, drawn on range.scale(width) and labelled by that axis,
+// holds the one readable axis. That axis gives the date with the first time after a break or on a new day.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -44,6 +48,7 @@
   var MOVED = 3 // px a press moves before it is a drag
   var SETTLE = 180 // ms after the wheel stops before the range is told
   var LABELS = 4 // the overview's labels, at most
+  var READ_LINE = 30 // characters: a readout wider than this gives its start and end on two lines
   // the steps of an axis, in ms: seconds, minutes, hours, days, a week; months and years go by the calendar
   var STEPS = [SEC, 2 * SEC, 5 * SEC, 10 * SEC, 15 * SEC, 30 * SEC, MIN, 2 * MIN, 5 * MIN, 10 * MIN, 15 * MIN, 30 * MIN, HOUR, 2 * HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR, DAY, 2 * DAY, 7 * DAY]
   var CAL = [1, 3, 6, 12, 24, 60, 120] // months
@@ -122,14 +127,23 @@
     if (ms >= MIN) return Math.floor(ms / MIN) + 'm' + (ms % MIN >= SEC && ms < 10 * MIN ? ' ' + Math.floor((ms % MIN) / SEC) + 's' : '')
     return Math.max(0, Math.round(ms / SEC)) + 's'
   }
-  // the readout of a range, as precise as its length needs; the year when the span crosses one
-  Units.prototype.range = function (a, b, years) {
-    if (!this.time) return num(Math.round(a)) + ' – ' + num(Math.round(b))
+  // the readout of a range, as precise as its length needs; the year when the span crosses one: [start, end]
+  Units.prototype.ends = function (a, b, years) {
+    if (!this.time) return [num(Math.round(a)), num(Math.round(b))]
     var len = this.ms(b - a)
-    if (len >= 3 * DAY) return this.dm(a, years) + ' – ' + this.dm(b - this.of(1), years)
+    if (len >= 3 * DAY) return [this.dm(a, years), this.dm(b - this.of(1), years)]
     var secs = len < 2 * MIN
-    if (this.sameDay(a, b - this.of(1))) return this.dm(a, years) + ' ' + this.hm(a, secs) + ' – ' + this.hm(b, secs)
-    return this.dm(a, years) + ' ' + this.hm(a, secs) + ' – ' + this.dm(b, years) + ' ' + this.hm(b, secs)
+    if (this.sameDay(a, b - this.of(1))) return [this.dm(a, years) + ' ' + this.hm(a, secs), this.hm(b, secs)]
+    return [this.dm(a, years) + ' ' + this.hm(a, secs), this.dm(b, years) + ' ' + this.hm(b, secs)]
+  }
+  Units.prototype.range = function (a, b, years) {
+    return this.ends(a, b, years).join(' – ')
+  }
+  // the characters of the widest readout of a span to `hi` (to the minute; a range under two minutes, which adds the
+  // seconds, wraps at its dash), and of the widest one end
+  Units.prototype.widest = function (hi, years) {
+    var one = this.time ? 12 + (years ? 5 : 0) : num(Math.round(hi)).length + 1
+    return { all: 2 * one + 3, one: one }
   }
   // a moment, as precise as `step` (in the units) needs
   Units.prototype.at = function (t, step, years) {
@@ -251,13 +265,13 @@
     for (var n = 0, x = first; n < 5000 && u.of(x) <= b; n++, x += u.ms(st)) out.push(u.of(x))
     return out
   }
-  /** the ticks of an axis, a label at least `px` px apart: [{t, x, label, major}] */
+  /** the ticks of an axis, a label at least `px` px apart: [{t, x, lx, label, major}], lx where the label's middle
+   *  stands (beside a break it moves off the tick) */
   Scale.prototype.ticks = function (px, opts) {
     opts = opts || {}
     var u = this.u
     var step = this.step(px || 64)
     var out = []
-    var taken = []
     var self = this
     var years = opts.years != null ? opts.years : u.time && u.parts(this.from).y !== u.parts(this.to).y
     var ms = typeof step === 'object' ? step.months * 30 * DAY : u.ms(step)
@@ -276,23 +290,75 @@
       if (ms >= DAY) return p.d === 1
       return p.h === 0 && p.mi === 0 && p.s === 0
     }
-    // a label keeps clear of the breaks, whose // mark stands there
-    this.gaps().forEach(function (gp) {
+    // a label keeps 8 px from the next label and 4 px clear of a break's // mark
+    var breaks = this.gaps().map(function (gp) {
       var m = (gp[0] + gp[1]) / 2
-      taken.push([m - 6, m + 6])
+      return [m - 6, m + 6]
     })
-    this.segs.forEach(function (g) {
+    var taken = []
+    var free = function (a, w) {
+      return (
+        a >= -2 &&
+        a + w <= self.width + 2 &&
+        taken.every(function (q) { return a + w + 8 <= q[0] || a >= q[1] + 8 }) &&
+        breaks.every(function (q) { return a + w + 4 <= q[0] || a >= q[1] + 4 })
+      )
+    }
+    // where a label of width w for the tick at x stands: centred on it, else moved off a break beside it, just past the
+    // break's // on the tick's side, when it still starts (or ends) by its tick and stays in its stretch of time, else
+    // nowhere (null)
+    var place = function (x, w, g) {
+      var a = x - w / 2
+      if (free(a, w)) return a
+      for (var k = 0; k < breaks.length; k++) {
+        var b = breaks[k]
+        var after = x >= (b[0] + b[1]) / 2
+        var a2 = after ? b[1] + 4 : b[0] - 4 - w
+        if (after ? a2 - x > 14 || a2 + w < x : x - (a2 + w) > 14 || a2 > x) continue
+        if (a2 >= g.x0 - 2 && a2 + w <= g.x1 + 2 && free(a2, w)) return a2
+      }
+      return null
+    }
+    // an axis of hours: the first label after a break or on a new day gives the date with its time, so every time can be
+    // told apart ("13 Sep 09:30"); where that does not fit, the date alone
+    var hours = u.time && typeof step !== 'object' && ms < DAY
+    var dayOf = function (t) {
+      var p = u.parts(t)
+      return p.y * 400 + p.mo * 32 + p.d
+    }
+    var lastDay = null
+    var days = hours && !u.sameDay(this.from, this.to)
+    this.segs.forEach(function (g, si) {
+      // the axis's first label too, when it covers more than a day
+      var dated = si > 0 || days
       var list = self.marks(step, g.a, g.b)
       for (var i = 0; i < list.length; i++) {
         var t = list[i]
         var x = self.x(t)
         if (x < -0.5 || x > self.width + 0.5) continue
         var lab = label(t)
-        var w = lab.length * 6.2
-        var a = x - w / 2
-        var ok = a >= -2 && a + w <= self.width + 2 && taken.every(function (q) { return a + w + 8 <= q[0] || a >= q[1] + 8 })
-        if (ok) taken.push([a, a + w])
-        out.push({ t: t, x: x, label: ok ? lab : '', major: major(t) })
+        var day = hours ? dayOf(t) : null
+        var tries = [lab]
+        if (hours && /^\d\d:/.test(lab) && (dated || (lastDay != null && day !== lastDay))) tries = [u.dm(t, years) + ' ' + lab, u.dm(t, years)]
+        var at = null
+        var shown = ''
+        for (var j = 0; j < tries.length && at == null; j++) {
+          at = place(x, tries[j].length * 6.2, g)
+          if (at != null) shown = tries[j]
+        }
+        if (at == null) {
+          // a stub with no label beside a break's // reads as part of it: left out
+          if (breaks.some(function (b) { return x > b[0] - 4 && x < b[1] + 4 })) continue
+          out.push({ t: t, x: x, lx: x, label: '', major: major(t) })
+          continue
+        }
+        var w = shown.length * 6.2
+        taken.push([at, at + w])
+        if (hours) {
+          lastDay = day
+          dated = false
+        }
+        out.push({ t: t, x: x, lx: at + w / 2, label: shown, major: major(t) })
       }
     })
     return out
@@ -398,6 +464,7 @@
     this.drag = null
     this.timer = null
     this.readEl = null
+    this.axisBelow = false // thimble.timeAxis draws the chart's axis of this range: the overview then shows no labels
     if (!this.mount) return
     this.mount.classList.add('thimble-range-mount')
     this.mount.setAttribute('data-thimble-chrome', '')
@@ -415,6 +482,7 @@
       '<div class="thimble-range-flags"></div></div><div class="thimble-range-axis"></div></div>'
     this.mount.appendChild(this.root)
     this.readEl = read || this.root.querySelector('.thimble-range-read')
+    this.ownRead = !read && !!this.readEl
     if (read) read.classList.add('thimble-range-read')
     this.strip = this.root.querySelector('.thimble-range-strip')
     this.canvas = this.strip.querySelector('canvas')
@@ -449,8 +517,9 @@
       },
       { passive: false },
     )
+    // onKey, not key: this.key is the name the range is kept under, which would hide a method of that name
     this.winEl.addEventListener('keydown', function (e) {
-      self.key(e)
+      self.onKey(e)
     })
     this.axisEl.addEventListener('click', function (e) {
       var lab = e.target.closest && e.target.closest('[data-t]')
@@ -719,14 +788,16 @@
     var W = sc.width
     var ticks = sc.ticks(Math.max(64, W / LABELS))
     var html = ''
-    var labelled = !this.full()
+    // labels only while the viewfinder frames part of the span, and never beside the chart's own axis, whose scale is
+    // another: two rows of labels for one time would contradict each other
+    var labelled = !this.full() && !this.axisBelow && this.opts.labels !== false
     var step = sc.step(Math.max(64, W / LABELS))
     for (var i = 0; i < ticks.length; i++) {
       var tk = ticks[i]
       html += '<i class="thimble-range-tick' + (tk.major ? ' major' : '') + '" style="left:' + tk.x.toFixed(1) + 'px"></i>'
       if (labelled && tk.label) {
         var to = typeof step === 'object' ? this.u.make(this.u.parts(tk.t).y, this.u.parts(tk.t).mo + step.months, 1) : tk.t + step
-        html += '<span class="thimble-range-lab" data-t="' + tk.t + '" data-to="' + to + '" style="left:' + tk.x.toFixed(1) + 'px">' + esc(tk.label) + '</span>'
+        html += '<span class="thimble-range-lab" data-t="' + tk.t + '" data-to="' + to + '" style="left:' + tk.lx.toFixed(1) + 'px">' + esc(tk.label) + '</span>'
       }
     }
     this.axisEl.innerHTML = html
@@ -778,7 +849,18 @@
     gl.setAttribute('aria-valuetext', this.u.at(this.from(), this.to() - this.from(), years))
     gr.setAttribute('aria-valuetext', this.u.at(this.to(), this.to() - this.from(), years))
     this.winEl.setAttribute('aria-valuetext', words)
-    if (this.readEl) this.readEl.innerHTML = '<span class="thimble-range-dates">' + esc(words) + '</span><span class="thimble-range-len">' + esc(this.u.length(rb - ra)) + '</span>'
+    if (this.readEl) {
+      // each end whole, so the readout wraps only after its dash, never inside a date; the kit's own readout as wide as
+      // the widest this span gives, so the overview beside it keeps its place and width as the range zooms
+      var ends = this.u.ends(ra, rb, years)
+      this.readEl.innerHTML = '<span class="thimble-range-dates"><span class="thimble-range-d">' + esc(ends[0]) + ' –</span> <span class="thimble-range-d">' + esc(ends[1]) + '</span></span><span class="thimble-range-len">' + esc(this.u.length(rb - ra)) + '</span>'
+      if (this.ownRead) {
+        var wd = this.u.widest(Math.max(Math.abs(this.span[0]), Math.abs(this.span[1])), years)
+        var stack = wd.all > READ_LINE
+        this.root.classList.toggle('thimble-range-stack', stack)
+        this.readEl.style.setProperty('--thimble-read-w', (stack ? wd.one + 2 : wd.all) + 'ch')
+      }
+    }
   }
   // ---------------------------------------------------------------- moving the viewfinder
   // the viewfinder set to [a, b] (null for the whole span): drawn at once, the page told while it moves (onInput) and
@@ -836,6 +918,8 @@
     var b = this.winAt[1]
     var what = Math.abs(x - a) <= GRIP && (x <= a + GRIP || b - a > 2 * GRIP) ? 'l' : Math.abs(x - b) <= GRIP ? 'r' : x > a && x < b ? 'pan' : 'new'
     if (what === 'l' && Math.abs(x - b) < Math.abs(x - a)) what = 'r'
+    // the whole span has nowhere to pan: a drag across it frames a new range, as the crosshair says
+    if (what === 'pan' && this.full()) what = 'new'
     this.drag = { what: what, x0: x, a: a, b: b, from: this.from(), to: this.to(), moved: false }
     this.unhover()
     if (this.strip.setPointerCapture) this.strip.setPointerCapture(e.pointerId)
@@ -908,7 +992,7 @@
     var p = clamp(a + pan * 0.5, 0, W - w2)
     this.set([p <= 0 ? this.span[0] : sc.t(p), p + w2 >= W ? this.span[1] : sc.t(p + w2)], 'wheel')
   }
-  Range.prototype.key = function (e) {
+  Range.prototype.onKey = function (e) {
     var a = this.from()
     var b = this.to()
     var w = b - a
@@ -940,7 +1024,7 @@
     if (flag) {
       var m = this.marksIn[Number(flag.getAttribute('data-i'))]
       if (m) {
-        tip('<div class="thimble-tip-h">' + esc(m.label || '') + '</div><div class="thimble-tip-m">' + esc(this.u.at(m.t, 1)) + '</div>', r.left + this.sc.x(m.t), r.top, 'above')
+        tip('<div class="thimble-tip-h">' + esc(m.label || '') + '</div><div class="thimble-tip-m">' + esc(this.u.at(m.t, 1)) + '</div>', r.left + this.sc.x(m.t), r.bottom, 'under', r.top)
         if (this.onMark && this.markShown !== m) {
           this.markShown = m
           this.call(function (api) {
@@ -959,7 +1043,7 @@
     var t1 = this.sc.t((col + 1) * BAR)
     var a = Math.abs(x - this.winAt[0]) <= GRIP || Math.abs(x - this.winAt[1]) <= GRIP
     this.strip.style.cursor = this.drag ? '' : a ? 'ew-resize' : x > this.winAt[0] && x < this.winAt[1] && !this.full() ? 'grab' : this.full() && !a ? 'crosshair' : 'pointer'
-    tip('<div class="thimble-tip-h">' + esc(this.u.at(t0, t1 - t0)) + '</div>' + (n ? '<div class="thimble-tip-m">' + num(n) + (n === 1 ? ' record' : ' records') + '</div>' : ''), e.clientX, r.top, 'above')
+    tip('<div class="thimble-tip-h">' + esc(this.u.at(t0, t1 - t0)) + '</div>' + (n ? '<div class="thimble-tip-m">' + num(n) + (n === 1 ? ' record' : ' records') + '</div>' : ''), e.clientX, r.bottom, 'under', r.top)
   }
   Range.prototype.unhover = function () {
     untip()
@@ -1017,7 +1101,9 @@
       /** the scale of the range across `width` px, with the same breaks as the overview: {from, to, width, x(t), t(x),
        *  ticks(px), bins(px), step(px), binOf(t), gaps()}, for a chart below that shows the range */
       scale: function (width) {
-        return scaleApi(new Scale(r.u, r.from(), r.to(), width, r.segs))
+        var sc = scaleApi(new Scale(r.u, r.from(), r.to(), width, r.segs))
+        sc._r = r
+        return sc
       },
       /** a time as the readout words it, as precise as `step` (in the units) needs */
       format: function (t, step) {
@@ -1065,12 +1151,18 @@
     if (!box || !scale || !scale._s) return
     opts = opts || {}
     var s = scale._s
+    // the range this scale is of leaves its overview's labels out from now on: this axis is the one that reads
+    var owner = scale._r
+    if (owner && !owner.axisBelow) {
+      owner.axisBelow = true
+      if (owner.sc) owner.drawAxis()
+    }
     var ticks = s.ticks(opts.px || 72)
     var html = '<div class="thimble-axis-row">'
     for (var i = 0; i < ticks.length; i++) {
       var tk = ticks[i]
       html += '<i class="thimble-axis-tick' + (tk.major ? ' major' : '') + '" style="left:' + tk.x.toFixed(1) + 'px"></i>'
-      if (tk.label) html += '<span class="thimble-axis-lab' + (tk.major ? ' major' : '') + '" style="left:' + tk.x.toFixed(1) + 'px">' + esc(tk.label) + '</span>'
+      if (tk.label) html += '<span class="thimble-axis-lab' + (tk.major ? ' major' : '') + '" style="left:' + tk.lx.toFixed(1) + 'px">' + esc(tk.label) + '</span>'
     }
     var gaps = s.gaps()
     for (var g = 0; g < gaps.length; g++) html += '<span class="thimble-axis-break" style="left:' + ((gaps[g][0] + gaps[g][1]) / 2).toFixed(1) + 'px">//</span>'
@@ -1078,11 +1170,27 @@
     var marks = Array.isArray(opts.marks) ? opts.marks : []
     if (marks.length) {
       html += '<div class="thimble-axis-flags">'
+      // left to right, a flag's label on the side away from the chart's end, and none where it would run into the
+      // label before it (the flag keeps its pin, and its label on hover)
+      var order = []
       for (var m = 0; m < marks.length; m++) {
         var x = s.x(marks[m].t)
-        if (!(x >= 0 && x <= s.width)) continue
-        var right = x > s.width - 120
-        html += '<button type="button" class="thimble-axis-flag' + (right ? ' end' : '') + '" data-i="' + m + '" style="left:' + x.toFixed(1) + 'px' + (marks[m].colour ? ';--c:' + esc(marks[m].colour) : '') + '"><span class="thimble-axis-pin"></span><span class="thimble-axis-fl">' + esc(marks[m].label || '') + '</span></button>'
+        if (x >= 0 && x <= s.width) order.push([x, m])
+      }
+      order.sort(function (p, q) {
+        return p[0] - q[0]
+      })
+      var used = []
+      for (var o = 0; o < order.length; o++) {
+        var fx = order[o][0]
+        var mk = marks[order[o][1]]
+        var text = String(mk.label || '')
+        var right = fx > s.width - 120
+        var lw = Math.min(200, 15 + text.length * 6.5)
+        var lb = right ? [fx - lw, fx] : [fx, fx + lw]
+        var clear = used.every(function (u2) { return lb[1] + 4 <= u2[0] || lb[0] >= u2[1] + 4 })
+        if (clear) used.push(lb)
+        html += '<button type="button" class="thimble-axis-flag' + (right ? ' end' : '') + '" data-i="' + order[o][1] + '" title="' + esc(text) + '" style="left:' + fx.toFixed(1) + 'px' + (mk.colour ? ';--c:' + esc(mk.colour) : '') + '"><span class="thimble-axis-pin"></span>' + (clear ? '<span class="thimble-axis-fl">' + esc(text) + '</span>' : '') + '</button>'
       }
       html += '</div>'
     }

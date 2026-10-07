@@ -158,9 +158,10 @@ body {
   box-shadow: 0 0 0 1.5px var(--accent);
 }
 /* a value with its colour, as a key or a toggle (Colour by's chips): the value's colour a square swatch before its name
-   (.chip-sw, its colour --c, an outline for a value with none), the name in the body face, the count in mono after it
-   (.chip-count), on a hairline box at a control's height. Pressed, it keeps that look; a value turned off (aria-pressed
-   false) takes the quiet chip's look (.chip-plain), its swatch an outline. */
+   (.chip-sw, its colour --c; the records with no value, which the marks draw grey, a grey one), the name in the body
+   face, the count in mono after it (.chip-count), on a hairline box at a control's height. Pressed, it keeps that look;
+   a value turned off (aria-pressed false) takes the quiet chip's look (.chip-plain), its swatch an outline, so a grey
+   swatch never reads as a value turned off. */
 .chip-key {
   height: var(--h-control);
   padding: 0 7px 0 6px;
@@ -196,8 +197,8 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 2px;
-  background: var(--c, transparent);
-  box-shadow: inset 0 0 0 1px var(--c, rgba(var(--ink-rgb), 0.45));
+  background: var(--c, rgba(var(--ink-rgb), 0.34));
+  box-shadow: inset 0 0 0 1px var(--c, rgba(var(--ink-rgb), 0.34));
 }
 .chip-key[aria-pressed='false'] .chip-sw {
   background: transparent;
@@ -502,6 +503,7 @@ select.field {
 }
 .thimble-colour-chips {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 4px;
   min-width: 0;
@@ -588,8 +590,8 @@ select.field {
   width: 8px;
   height: 8px;
   border-radius: 2px;
-  background: var(--c, transparent);
-  box-shadow: inset 0 0 0 1px var(--c, rgba(var(--ink-rgb), 0.45));
+  background: var(--c, rgba(var(--ink-rgb), 0.34));
+  box-shadow: inset 0 0 0 1px var(--c, rgba(var(--ink-rgb), 0.34));
 }
 .thimble-colour-nm {
   flex: 1 1 auto;
@@ -716,7 +718,8 @@ select.field {
   background: #fff;
 }
 
-/* Reset at the row's end */
+/* Reset at the row's end. The chips that fit the row leave its room whether it shows or not (viewer_colour.js fit), so
+   none moves behind "N more" when it shows */
 .thimble-colour {
   flex: 1 1 auto;
 }
@@ -978,10 +981,24 @@ select.field {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* the kit's own readout as wide as the widest this span gives (viewer_range.js), so the overview keeps its place; its
+   start and end each whole, wrapping only after the dash (on two lines for a span of years) */
+.thimble-range > .thimble-range-read {
+  width: var(--thimble-read-w, auto);
+}
+.thimble-range-dates {
+  white-space: normal;
+}
+.thimble-range-d {
+  white-space: nowrap;
+}
 .thimble-range-narrow .thimble-range-read {
   flex-direction: row;
   gap: 8px;
   min-width: 0;
+}
+.thimble-range-narrow > .thimble-range-read {
+  width: auto;
 }
 .thimble-range-len {
   color: var(--text-tertiary);
@@ -1107,7 +1124,8 @@ select.field {
   border-top: 5px solid var(--c, var(--text-secondary));
   border-right: 5px solid transparent;
 }
-/* light ticks, and a few labels while the viewfinder frames part of the span */
+/* light ticks, and a few labels while the viewfinder frames part of the span and no chart's axis (thimble.timeAxis)
+   reads below it */
 .thimble-range-axis {
   position: relative;
   height: 12px;
@@ -1142,6 +1160,8 @@ select.field {
   position: relative;
   display: block;
   min-width: 0;
+  letter-spacing: normal;
+  text-transform: none;
   user-select: none;
 }
 .thimble-axis-row {
@@ -1187,7 +1207,7 @@ select.field {
   top: 0;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   max-width: 200px;
   height: 18px;
   margin: 0;

@@ -19,16 +19,21 @@ the view as text, a glyph or a gray pattern, never in a second palette.
 - Color by is thimble's small secondary button, with the choice in it: "Color by: Kind".
 - Off colors nothing: no chips, no bars, and the tracks and the time range's overview draw every record in gray.
 - The values of the chosen field show as key chips in the top row (`chip chip-key` in the view kit): a square of the
-  value's color, its name and its count. A click turns a value off or on. An Alt-click, or a double click, shows that
+  value's color, its name and its count. The chip of the records with no value ("Not marked", "No kind") has the gray
+  square the marks draw those records in. A click turns a value off or on. An Alt-click, or a double click, shows that
   value alone. A value turned off is hidden or dimmed, as the view says, and its chip goes quiet with an empty square.
-  Hovering a label's value shows what the label says the value means.
+  Hovering a value shows what it means: a label's value what the label says, a field's value what the page declares
+  for it, else what the field is.
 - A click on a chip's square opens the palette of thimble's twelve label colors. The color picked recolors the value
   everywhere in the view: its chip, the records' bars, the tracks, and what the page draws through `colourOf`. A label's
   value keeps it as the label's color, in Files and every view; a field's value keeps it for this view, and Reset
   colors in the palette gives the field's values their own colors back.
-- On a record, color is a 3 px bar on the left edge of its row or card. Text and fills keep their own colors.
+- On a record, color is a 3 px bar on the left edge of its row or card. Text and fills keep their own colors. The
+  texts the chosen label matches are highlighted in its colors; the texts of the other labels that are on, and every
+  label's while a field or Off is chosen, in gray.
 - A long list gets two tracks in place of its scrollbar, as a music or video editor lays out its navigator (below).
-- Reset, at the end of the row, shows while the view is not as it opens and puts it back (below).
+- Reset, at the end of the row, shows while the view is not as it opens and puts it back (below). The chips leave its
+  room while it is hidden, so none moves behind "N more" when it shows.
 - thimble keeps the choice, the values turned off, each value's color and the time ranges per view. The page opens on
   them again.
 
@@ -71,7 +76,7 @@ load()
 | option | what it is |
 |---|---|
 | `mount` | an element or a selector in the view's top row. The control fills it and takes the row's free width. |
-| `fields` | the view's own fields it can color by, in menu order: `{name, title, values?, value?}`. `name` is the field as the records hold it. `values` fixes the order of the values and their colors. A value given as `{name, colour}` takes the label palette's color `colour` (1 to 12), for example so that two values that often sit side by side do not take two blues. `value(record)` gives a record's value when it is not `record[name]`. |
+| `fields` | the view's own fields it can color by, in menu order: `{name, title, description?, values?, value?}`. `name` is the field as the records hold it. `description` says what the field is, on its chips' hover and its menu row. `values` fixes the order of the values and their colors. A value given as `{name, colour}` takes the label palette's color `colour` (1 to 12), for example so that two values that often sit side by side do not take two blues; `{name, meaning}` says what the value means, on its chip's hover. `value(record)` gives a record's value when it is not `record[name]`. |
 | `initial` | the field chosen before the analyst picks one; the first field by default |
 | `chips` | `'highlight'` (the default) dims the records of a value turned off; `'filter'` hides them |
 | `strip` | the list that gets the tracks: an element, a selector, or `true` for the page |
@@ -186,14 +191,16 @@ for a record the label does not mark.
 
 - With a field chosen, thimble draws a bar in the value's color on every element whose `data-colour` names a value,
   anchored or not. An SVG shape and a canvas take no bar: draw them in `colour.colourOf(value)`. The labels that are on
-  draw no bar then, and the texts they match stay highlighted.
-- With a label chosen, the label's value is the bar on each anchored record, as in the File browser.
-- With Off, no element takes a bar.
+  draw no bar then, and the texts they match stay highlighted in gray.
+- With a label chosen, the label's value is the bar on each anchored record, as in the File browser, and the texts it
+  matches are highlighted in its colors; the other labels' texts in gray.
+- With Off, no element takes a bar, and the labels' texts are highlighted in gray.
 - A label the analyst turns on, in the menu or anywhere in thimble, takes the color. When it is turned off again, the
   field chosen last is the color.
 - A field's values take the label palette's colors: the declared `values` in their order, each in the color it
   names or else the next free one, then the others the first time they show, the most frequent first. A declared
-  value always has its declared color; another value keeps its color after it first shows.
+  value always has its declared color; another value keeps its color after it first shows. The palette's first five
+  colors are five hues, blue, orange, green, gold and teal, with no second blue among them, in Dark as well.
 - A value turned off is hidden (`chips: 'filter'`) or dimmed (`'highlight'`) wherever its records show on the page.
   A page that leaves those records out itself, as the reader above does, loses nothing.
 - What a label's values mean comes from thimble itself: the control asks with `thimble.fetch({$thimble: 'label',
