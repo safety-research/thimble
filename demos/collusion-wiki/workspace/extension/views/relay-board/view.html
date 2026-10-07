@@ -190,7 +190,8 @@
 // column's header draws, stacked by the values of what the Color by control colors by; a drag on any strip frames a
 // range. The thread holds the chosen task's messages in the range in time order, each with the color's bar on its left
 // edge and the thread's tracks beside it, and a click opens the save in place under its line: its facts, the page at
-// that save with the lines it added and removed, the page's saves and the username's messages in every task. The bar
+// that save with the lines it added and removed, the page's saves and the username's messages in every task. A band on
+// the range's overview shows the time of the thread's messages in view as it scrolls. The bar
 // searches the added text, picks usernames, and holds the Color by control: a message's kind, wiki or signature, or any
 // label, each value a chip that turns its messages off or on, and Reset.
 // Labels: the reader keeps only the records the label filter keeps and hands each its marks, from which the page reads
@@ -322,6 +323,8 @@ const range = thimble.timeRange({
     if (D) render(true)
   },
 })
+// the band on the overview: the time of the thread's messages in view, kept there as the thread scrolls or changes
+range.follow('#msgs', (el) => T[rowAt.get(+el.dataset.r)], '[data-r]')
 let rangeIdx = []
 function feedRange() {
   rangeIdx = []

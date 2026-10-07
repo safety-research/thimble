@@ -25,6 +25,11 @@
 // The overview carries light ticks and at most a few labels, none while it shows the whole span and none once the page
 // draws thimble.timeAxis for the range: the view's own chart, drawn on range.scale(width) and labelled by that axis,
 // holds the one readable axis. That axis gives the date with the first time after a break or on a new day.
+// A band under the viewfinder's frame shows the time of what the page has in view, as a scrollbar's thumb does:
+// range.visible(from, to) sets it, and range.follow(list, time, rows) keeps it on the rows of a list in view as the list
+// scrolls, resizes or changes, e.g. range.follow('#list', (el) => rows[+el.dataset.i].t, '.row').
+// The overview is drawn again for a change of Color by or of the labels only when what it draws changed: marks that
+// arrive for new refs, as a list scrolls, leave it alone.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -50,6 +55,7 @@
   var SETTLE = 180 // ms after the wheel stops before the range is told
   var LABELS = 4 // the overview's labels, at most
   var READ_LINE = 30 // characters: a readout wider than this gives its start and end on two lines
+  var VIS_MIN = 3 // px, the least width of the band of the time in view
   // the steps of an axis, in ms: seconds, minutes, hours, days, a week; months and years go by the calendar
   var STEPS = [SEC, 2 * SEC, 5 * SEC, 10 * SEC, 15 * SEC, 30 * SEC, MIN, 2 * MIN, 5 * MIN, 10 * MIN, 15 * MIN, 30 * MIN, HOUR, 2 * HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR, DAY, 2 * DAY, 7 * DAY]
   var CAL = [1, 3, 6, 12, 24, 60, 120] // months
@@ -494,6 +500,10 @@
     this.timer = null
     this.readEl = null
     this.axisBelow = false // thimble.timeAxis draws the chart's axis of this range: the overview then shows no labels
+    this.vis = null // [from, to] of the time the page has in view (visible), null for no band
+    this.visAt = '' // where the band was last placed, so a scroll that does not move it writes nothing
+    this.painted = '' // what the canvas last drew (tally's key), so a change that does not alter it paints nothing
+    this.unfollow = null
     if (!this.mount) return
     this.mount.classList.add('thimble-range-mount')
     this.mount.setAttribute('data-thimble-chrome', '')
@@ -505,6 +515,7 @@
       (opts.readout === false || read ? '' : '<div class="thimble-range-read"></div>') +
       '<div class="thimble-range-body"><div class="thimble-range-strip" style="height:' + this.h + 'px"><canvas></canvas>' +
       '<div class="thimble-range-dim thimble-range-dim-l"></div><div class="thimble-range-dim thimble-range-dim-r"></div>' +
+      '<div class="thimble-range-vis" aria-hidden="true" style="display:none"></div>' +
       '<div class="thimble-range-win" tabindex="0" role="group" aria-roledescription="time range" aria-label="Time range">' +
       '<div class="thimble-range-grip thimble-range-grip-l" role="slider" tabindex="-1" aria-label="Start"><span></span></div>' +
       '<div class="thimble-range-grip thimble-range-grip-r" role="slider" tabindex="-1" aria-label="End"><span></span></div></div>' +
@@ -518,6 +529,7 @@
     this.winEl = this.strip.querySelector('.thimble-range-win')
     this.dimL = this.strip.querySelector('.thimble-range-dim-l')
     this.dimR = this.strip.querySelector('.thimble-range-dim-r')
+    this.visEl = this.strip.querySelector('.thimble-range-vis')
     this.flagsEl = this.strip.querySelector('.thimble-range-flags')
     this.axisEl = this.root.querySelector('.thimble-range-axis')
     this.strip.addEventListener('pointerdown', function (e) {
@@ -677,17 +689,24 @@
   // the overview: the records per column, each column's values stacked in the chips' order, grey with Color by Off
   Range.prototype.draw = function () {
     if (!this.strip) return
-    var W = this.strip.clientWidth
-    var H = this.h
-    if (W <= 0) return
-    var dpr = window.devicePixelRatio || 1
-    var cv = this.canvas
-    cv.width = Math.ceil(W * dpr)
-    cv.height = Math.ceil(H * dpr)
-    cv.style.width = W + 'px'
-    cv.style.height = H + 'px'
-    var sc = this.scaleAll()
-    this.sc = sc
+    if (this.strip.clientWidth <= 0) return
+    this.sc = this.scaleAll()
+    this.paint(this.tally(this.sc), true)
+    this.drawAxis()
+    this.drawFlags()
+    this.place()
+  }
+  // the overview drawn again for a change of Color by or of the labels, on the scale it has (the axis, the flags, the
+  // viewfinder and the band do not depend on them), and only when what it draws changed; it reads no layout
+  Range.prototype.recolour = function () {
+    if (!this.strip) return
+    if (!this.sc) return this.draw()
+    this.paint(this.tally(this.sc), false)
+  }
+  // what the overview draws on the scale `sc`: the records per column (counts[col][slot]), each value's colour in its
+  // slot and grey for the records that take none, and a key that changes only when the drawing does
+  Range.prototype.tally = function (sc) {
+    var W = sc.width
     var cols = Math.max(1, Math.floor(W / BAR))
     var colour = this.colour()
     var plain = !colour || colour.off || (!colour.field && !colour.label)
@@ -722,7 +741,6 @@
           return colour.valueOf(i)
         }
     }
-    var self = this
     var keepValue = function (v) {
       // a value turned off leaves the overview, as it leaves the lists
       if (v == null || v === '') return none
@@ -757,6 +775,30 @@
           }
       }
     }
+    var colours = order.map(function (v) {
+      return colour.colourOf(v) || kit.realColour('var(--label-none)')
+    })
+    var grey = kit.realColour('rgba(var(--ink-rgb), 0.32)')
+    var dpr = window.devicePixelRatio || 1
+    return { counts: counts, cols: cols, none: none, colours: colours, grey: grey, key: JSON.stringify([W, dpr, this.h, grey, colours, counts, sc.gaps()]) }
+  }
+  // the tally drawn on the canvas, unless it draws what the canvas holds (`force` draws it anyway)
+  Range.prototype.paint = function (tl, force) {
+    this.counts = tl.counts
+    if (!force && tl.key === this.painted) return
+    this.painted = tl.key
+    var sc = this.sc
+    var W = sc.width
+    var H = this.h
+    var dpr = window.devicePixelRatio || 1
+    var cv = this.canvas
+    cv.width = Math.ceil(W * dpr)
+    cv.height = Math.ceil(H * dpr)
+    cv.style.width = W + 'px'
+    cv.style.height = H + 'px'
+    var counts = tl.counts
+    var cols = tl.cols
+    var none = tl.none
     var max = 0
     for (var q = 0; q < cols; q++) {
       var tot = 0
@@ -764,50 +806,40 @@
       if (a) for (var z = 0; z < a.length; z++) tot += a[z] || 0
       if (tot > max) max = tot
     }
-    this.counts = counts
     var ctx = cv.getContext && cv.getContext('2d')
-    if (ctx) {
-      ctx.clearRect(0, 0, cv.width, cv.height)
-      var colours = order.map(function (v) {
-        return colour.colourOf(v) || kit.realColour('var(--label-none)')
-      })
-      var grey = kit.realColour('rgba(var(--ink-rgb), 0.32)')
-      var lin = this.opts.scale === 'linear'
-      var top = 2
-      var room = H - top - 1
-      for (var col = 0; col < cols; col++) {
-        var cs = counts[col]
-        if (!cs) continue
-        var total = 0
-        for (var m = 0; m < cs.length; m++) total += cs[m] || 0
-        if (!total) continue
-        var full = Math.max(1, (lin ? total / max : Math.sqrt(total / max)) * room)
-        var y = H - 1
-        var x0 = Math.round(col * BAR * dpr)
-        var bw = Math.max(1, Math.round((BAR - 1) * dpr))
-        for (var sIdx = 0; sIdx <= none; sIdx++) {
-          var n2 = cs[sIdx]
-          if (!n2) continue
-          var hh = (n2 / total) * full
-          y -= hh
-          ctx.fillStyle = sIdx < none ? colours[sIdx] : grey
-          var y0 = Math.round(y * dpr)
-          ctx.fillRect(x0, y0, bw, Math.max(1, Math.round((y + hh) * dpr) - y0))
-        }
-      }
-      // the breaks: a hairline pair where the time between bursts is left out
-      var gaps = sc.gaps()
-      ctx.fillStyle = kit.realColour('rgba(var(--ink-rgb), 0.22)')
-      for (var g = 0; g < gaps.length; g++) {
-        var gx = (gaps[g][0] + gaps[g][1]) / 2
-        ctx.fillRect(Math.round((gx - 2) * dpr), Math.round(4 * dpr), Math.max(1, Math.round(dpr)), Math.round((H - 8) * dpr))
-        ctx.fillRect(Math.round((gx + 1) * dpr), Math.round(4 * dpr), Math.max(1, Math.round(dpr)), Math.round((H - 8) * dpr))
+    if (!ctx) return
+    ctx.clearRect(0, 0, cv.width, cv.height)
+    var lin = this.opts.scale === 'linear'
+    var top = 2
+    var room = H - top - 1
+    for (var col = 0; col < cols; col++) {
+      var cs = counts[col]
+      if (!cs) continue
+      var total = 0
+      for (var m = 0; m < cs.length; m++) total += cs[m] || 0
+      if (!total) continue
+      var full = Math.max(1, (lin ? total / max : Math.sqrt(total / max)) * room)
+      var y = H - 1
+      var x0 = Math.round(col * BAR * dpr)
+      var bw = Math.max(1, Math.round((BAR - 1) * dpr))
+      for (var sIdx = 0; sIdx <= none; sIdx++) {
+        var n2 = cs[sIdx]
+        if (!n2) continue
+        var hh = (n2 / total) * full
+        y -= hh
+        ctx.fillStyle = sIdx < none ? tl.colours[sIdx] : tl.grey
+        var y0 = Math.round(y * dpr)
+        ctx.fillRect(x0, y0, bw, Math.max(1, Math.round((y + hh) * dpr) - y0))
       }
     }
-    this.drawAxis()
-    this.drawFlags()
-    this.place()
-    void self
+    // the breaks: a hairline pair where the time between bursts is left out
+    var gaps = sc.gaps()
+    ctx.fillStyle = kit.realColour('rgba(var(--ink-rgb), 0.22)')
+    for (var g = 0; g < gaps.length; g++) {
+      var gx = (gaps[g][0] + gaps[g][1]) / 2
+      ctx.fillRect(Math.round((gx - 2) * dpr), Math.round(4 * dpr), Math.max(1, Math.round(dpr)), Math.round((H - 8) * dpr))
+      ctx.fillRect(Math.round((gx + 1) * dpr), Math.round(4 * dpr), Math.max(1, Math.round(dpr)), Math.round((H - 8) * dpr))
+    }
   }
   // the overview's axis: light ticks, and while the viewfinder frames part of the span at most a few labels of a coarse
   // step, which a click zooms to
@@ -862,6 +894,7 @@
     this.dimL.style.width = a + 'px'
     this.dimR.style.left = b + 'px'
     this.dimR.style.width = Math.max(0, W - b) + 'px'
+    this.placeVis()
     this.root.classList.toggle('thimble-range-all', this.full())
     var years = this.u.time && this.u.parts(this.span[0]).y !== this.u.parts(this.span[1]).y
     // the readout gives the records' own first and last time, not the room left at the ends
@@ -890,6 +923,148 @@
         this.readEl.style.setProperty('--thimble-read-w', (stack ? wd.one + 2 : wd.all) + 'ch')
       }
     }
+  }
+  // ---------------------------------------------------------------- the time in view
+  // the band of the time the page has in view (this.vis), on the overview's scale and at least VIS_MIN px wide; it
+  // writes only when it moves, and reads no layout
+  Range.prototype.placeVis = function () {
+    var el = this.visEl
+    if (!el) return
+    var sc = this.sc
+    var at = ''
+    var a = 0
+    var b = 0
+    if (this.vis && sc) {
+      var W = sc.width
+      a = clamp(sc.x(this.vis[0]), 0, W)
+      b = clamp(sc.x(this.vis[1]), 0, W)
+      if (b - a < VIS_MIN) {
+        var mid = (a + b) / 2
+        a = clamp(mid - VIS_MIN / 2, 0, Math.max(0, W - VIS_MIN))
+        b = a + VIS_MIN
+      }
+      at = a.toFixed(1) + ' ' + (b - a).toFixed(1)
+    }
+    if (at === this.visAt) return
+    this.visAt = at
+    if (!at) {
+      el.style.display = 'none'
+      return
+    }
+    el.style.left = a.toFixed(1) + 'px'
+    el.style.width = (b - a).toFixed(1) + 'px'
+    el.style.display = ''
+  }
+  // the band set to the time from `a` to `b`, in the data's units; null hides it
+  Range.prototype.visible = function (a, b) {
+    a = a == null ? NaN : Number(a)
+    b = b == null ? a : Number(b)
+    this.vis = isFinite(a) && isFinite(b) ? [Math.min(a, b), Math.max(a, b)] : null
+    this.placeVis()
+  }
+  // The band kept on the rows of `list` (an element or a selector) in view: on the next frame after the list scrolls,
+  // resizes or changes, the rows (`rows`, a selector within the list; the list's children by default) that lie in the
+  // part of the list in view are found, the first by a binary search over their places, and the band set to their
+  // times, `time(row)` each (a row whose time is not a number is left out). Its reads come together in one frame and
+  // nothing is written between them. A later call replaces it; follow(null) stops it and hides the band.
+  Range.prototype.follow = function (list, time, rows) {
+    if (this.unfollow) this.unfollow()
+    this.unfollow = null
+    var box = el(list)
+    if (!box || typeof time !== 'function') return this.visible(null)
+    var self = this
+    var sel = typeof rows === 'string' && rows ? rows : null
+    var items = null // the rows in document order, found again after the list changes
+    var frame = null
+    var raf = window.requestAnimationFrame
+      ? function (fn) { return window.requestAnimationFrame(fn) }
+      : function (fn) { return setTimeout(fn, 16) }
+    var unraf = window.cancelAnimationFrame
+      ? function (id) { window.cancelAnimationFrame(id) }
+      : function (id) { clearTimeout(id) }
+    var soon = function () {
+      if (frame == null) frame = raf(look)
+    }
+    var timeOf = function (row) {
+      var t = NaN
+      try {
+        t = Number(time(row))
+      } catch (e) {
+        report(e)
+      }
+      return t
+    }
+    function look() {
+      frame = null
+      if (!box.isConnected) return
+      if (!items) items = sel ? box.querySelectorAll(sel) : box.children
+      var n = items.length
+      var r = box.getBoundingClientRect()
+      var top = Math.max(r.top, 0)
+      var bottom = Math.min(r.bottom, window.innerHeight || r.bottom)
+      if (!n || !(bottom > top)) return self.visible(null)
+      // the first row whose bottom is below the top of the part in view
+      var lo = 0
+      var hi = n
+      while (lo < hi) {
+        var m = (lo + hi) >> 1
+        if (items[m].getBoundingClientRect().bottom <= top) lo = m + 1
+        else hi = m
+      }
+      var a = Infinity
+      var b = -Infinity
+      for (var i = lo; i < n; i++) {
+        var q = items[i].getBoundingClientRect()
+        if (q.top >= bottom) break
+        if (!q.height) continue
+        var t = timeOf(items[i])
+        if (!isFinite(t)) continue
+        if (t < a) a = t
+        if (t > b) b = t
+      }
+      if (a <= b) self.visible(a, b)
+      else self.visible(null)
+    }
+    var onScroll = function (e) {
+      var t = e.target
+      if (t === box || t === document || (t && t.nodeType === 1 && t.contains(box))) soon()
+    }
+    document.addEventListener('scroll', onScroll, { capture: true, passive: true })
+    window.addEventListener('resize', soon)
+    var ro = typeof ResizeObserver === 'function' ? new ResizeObserver(soon) : null
+    if (ro) ro.observe(box)
+    // a row added or taken away is found again; any change may move the rows, so the band is looked at again
+    var mo = typeof MutationObserver === 'function'
+      ? new MutationObserver(function (recs) {
+          if (!items) return soon()
+          for (var k = 0; k < recs.length && items; k++) {
+            if (!sel) {
+              if (recs[k].target === box) items = null
+              continue
+            }
+            var nodes = [recs[k].addedNodes, recs[k].removedNodes]
+            for (var p = 0; p < 2 && items; p++)
+              for (var x = 0; x < nodes[p].length; x++) {
+                var nd = nodes[p][x]
+                if (nd.nodeType === 1 && (nd.matches(sel) || nd.querySelector(sel))) {
+                  items = null
+                  break
+                }
+              }
+          }
+          soon()
+        })
+      : null
+    if (mo) mo.observe(box, { childList: true, subtree: true })
+    this.unfollow = function () {
+      document.removeEventListener('scroll', onScroll, { capture: true })
+      window.removeEventListener('resize', soon)
+      if (ro) ro.disconnect()
+      if (mo) mo.disconnect()
+      if (frame != null) unraf(frame)
+      frame = null
+    }
+    soon()
   }
   // ---------------------------------------------------------------- moving the viewfinder
   // the viewfinder set to [a, b] (null for the whole span): drawn at once, the page told while it moves (onInput) and
@@ -1169,6 +1344,19 @@
         r.draw()
         return out
       },
+      /** a band over the overview, under the viewfinder's frame, at the time from `from` to `to` that the page has in
+       *  view; visible(null) hides it */
+      visible: function (from, to) {
+        r.visible(from, to)
+        return out
+      },
+      /** the band kept on the rows of `list` (an element or a selector) in view as it scrolls, resizes or changes:
+       *  `time(row)` gives a row's time, `rows` a selector of the rows within the list (its children by default);
+       *  follow(null) stops it */
+      follow: function (list, time, rows) {
+        r.follow(list, time, rows)
+        return out
+      },
     }
     return out
   }
@@ -1278,13 +1466,22 @@
     }
   }
 
-  // the overviews follow Color by: its choice, the values turned off and their colours
+  // the overviews follow Color by: its choice, the values turned off and their colours; each is painted again only when
+  // what it draws changed (recolour)
   if (shared)
     shared.onColour(function () {
-      for (var i = 0; i < ranges.length; i++) ranges[i].draw()
+      for (var i = 0; i < ranges.length; i++) ranges[i].recolour()
     })
+  // and the labels: a change of the labels that are on, their values or colours, or for an overview colored by a label
+  // its marks; marks alone, as they arrive for the refs a scrolled list brings, change no field's value
   if (kit.labels)
-    kit.labels(function () {
-      for (var i = 0; i < ranges.length; i++) if (ranges[i].hasData) ranges[i].draw()
+    kit.labels(function (state, labelsChanged, marksChanged) {
+      if (!labelsChanged && !marksChanged) return
+      for (var i = 0; i < ranges.length; i++) {
+        var r = ranges[i]
+        if (!r.hasData) continue
+        var c = labelsChanged ? null : r.colour()
+        if (labelsChanged || (c && !c.off && c.label)) r.recolour()
+      }
     })
 })()

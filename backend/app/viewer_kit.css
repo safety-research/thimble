@@ -1068,6 +1068,19 @@ select.field {
 .thimble-range-dim-r {
   border-radius: 0 var(--radius-chip) var(--radius-chip) 0;
 }
+/* the time the page has in view (range.visible, range.follow): a band under the viewfinder's frame, an ink tint with a
+   line at each edge, where the frame is an outline with no fill */
+.thimble-range-vis {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  box-sizing: border-box;
+  min-width: 3px;
+  border-right: 1px solid rgba(var(--ink-rgb), 0.5);
+  border-left: 1px solid rgba(var(--ink-rgb), 0.5);
+  background: rgba(var(--ink-rgb), 0.14);
+  pointer-events: none;
+}
 /* the viewfinder: a frame over the overview, its middle a drag that pans, its edges grips that zoom */
 .thimble-range-win {
   position: absolute;
