@@ -5,6 +5,8 @@
     thimble-run card <card id>          run the card's code; prints the card's result as add_card prints it
     thimble-run label <label id|name>   run a code label apply_label left waiting; prints apply_label's result
     thimble-run stale                   run again the cards that read a label that changed since they ran
+    thimble-run trial <card id>         run the card with the code on stdin and store nothing; prints the run as JSON
+                                        (the card check's revision, which the shim runs in main's sandbox)
 
 add_card, edit_card and apply_label give the command in their result, by its name: the launcher puts this folder
 first on the session's PATH in terminal mode, and main's `--allowedTools` lets `thimble-run *` (and

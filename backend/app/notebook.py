@@ -1867,6 +1867,11 @@ class TerminalRun(RuntimeError):
     runs through `thimble-run` in the caller's Bash (cardrun.py), never in the MCP shim."""
 
 
+class TrialUnavailable(RuntimeError):
+    """A trial_run in a terminal-mode workspace whose card runner did not start or gave no result (cardrun.trial): the
+    revision was not tried, which says nothing of its code."""
+
+
 def _no_kernel_here(workspace: str) -> None:
     """TerminalRun when this process may not run card code for `workspace` (TerminalRun)."""
     if local_kernel is not None:
@@ -2913,8 +2918,10 @@ TRIAL_EXPR_KEY = "thimble_trial"  # the user expression that ends a trial (trial
 async def trial_run(workspace: str, cell_id: str, code: str) -> dict:
     """The card as it would be with `code`, run on the card's kernel and not stored: a fix the card check tries before
     applying it. Returns {**card, code, outputs, status, exec_count, trial}, its outputs numbered against the card's.
-    The names the run bound are noted under `trial` so trial_settle can put them back when the fix is refused. KeyError
-    for a missing card, ValueError for one that runs no code."""
+    The names the run bound are noted under `trial` so trial_settle can put them back when the fix is refused. In a
+    terminal-mode workspace outside a card runner the code runs through `thimble-run trial` as a card run would
+    (cardrun.trial), whose shell ends with it, so `trial` is empty. KeyError for a missing card, ValueError for one
+    that runs no code, TrialUnavailable for a card runner that gave no result."""
     ws = _ws(workspace)
     hit = _locate(ws, cell_id)
     if hit is None:
@@ -2923,15 +2930,18 @@ async def trial_run(workspace: str, cell_id: str, code: str) -> dict:
     if not runnable(cell):
         raise ValueError(f"a {cell.get('kind', DEFAULT_KIND)} card has no code to run")
     try:
-        _no_kernel_here(workspace)
-    except TerminalRun as e:  # the check keeps no fix of code it cannot run here: the trial fails as a run would
-        return {**copy.deepcopy(cell), "code": code, "outputs": [_error_bundle("TerminalRun", str(e))], "status": "error",
-                "exec_count": None, "labels": [], "label_revs": {}, "trial": ""}
-    kernel = _kernel_for(nb, None, cell, ws)
-    try:
         timeout_s = positive_timeout(cell.get("timeout_s"))
     except ValueError:
         timeout_s = None
+    if local_kernel is None and _terminal(workspace):
+        from . import cardrun  # noqa: PLC0415 — cardrun reaches back into this module
+
+        got = await cardrun.trial(workspace, cell_id, code, timeout_s)  # its outputs numbered there, as below
+        return {**copy.deepcopy(cell), "code": code, "outputs": list(got.get("outputs") or []),
+                "status": str(got.get("status") or "error"),
+                "exec_count": got.get("exec_count"), "labels": list(got.get("labels") or []),
+                "label_revs": dict(got.get("label_revs") or {}), "trial": ""}
+    kernel = _kernel_for(nb, None, cell, ws)
     tid = secrets.token_hex(6)
     try:
         k = _kernel(workspace, kernel)
@@ -2951,7 +2961,8 @@ async def trial_run(workspace: str, cell_id: str, code: str) -> dict:
 
 async def trial_settle(workspace: str, cell_id: str, tid: str, *, keep: bool) -> None:
     """The end of a trial_run: a kept fix's trial is forgotten, and a refused one has its bound names put back where no
-    run since has rebound them. A card or kernel gone since leaves nothing to settle."""
+    run since has rebound them. A card or kernel gone since leaves nothing to settle, nor does a terminal-mode trial,
+    whose card runner's shell ended with it (cardrun.trial)."""
     ws = _ws(workspace)
     hit = _locate(ws, cell_id)
     if hit is None or not tid:

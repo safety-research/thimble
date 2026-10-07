@@ -1,4 +1,5 @@
-"""Card code run in the caller's Bash, for terminal mode: `thimble-run card <cell> | label <label> | stale`.
+"""Card code run in the caller's Bash, for terminal mode: `thimble-run card <cell> | label <label> | stale`, and
+`thimble-run trial <cell>`, which the shim's card check starts itself.
 
 In browser mode a card's code runs in a kernel the server owns. Terminal mode has no server, and code a model wrote never
 runs in the MCP shim: add_card and edit_card store the card with a `run` record ({state: waiting, by: bash, script}) and
@@ -17,7 +18,8 @@ Bash; it writes no canvas history or undo step and starts no chat.
 The shim's CardWatch sees a group file change and records each run that ended (canvas_history, undo), starts the card
 check of a card marked `check: "pending"` (a run that ended with add_card's `takeaway`; card_check.start skips it as
 browser mode does without Chromium or the built frontend), and marks interrupted a run whose `thimble-run` is gone (its
-run lock is free: hold_run), such as one Bash's timeout killed.
+run lock is free: hold_run), such as one Bash's timeout killed. The check tries the code of its revision of a card
+through `thimble-run trial`, which the shim starts in main's sandbox (trial).
 """
 from __future__ import annotations
 
@@ -758,6 +760,157 @@ async def run_stale(c: str) -> tuple[str, int]:
     return concepts.rerun_text(c, told), 1 if any(x.get("status") != "ok" for x in told) else 0
 
 
+# --------------------------------------------------------------------------- thimble-run trial: a card check's revision
+#
+# The card check runs in the shim, and it tries the code of its revision of a card before it keeps it
+# (notebook.trial_run). In browser mode the revision runs on the card's kernel; in terminal mode the shim starts
+# `thimble-run trial <card>` itself (trial), with the revision's code on its stdin, in the sandbox main's Bash runs
+# `thimble-run card` in (trial_sandbox) and with the shim's environment less its keys. The runner runs the code as a
+# card run would, stores nothing, and prints the run as one JSON line (TRIAL_FIELDS), which the shim reads back. No
+# shell lasts after the runner ends, so a trial leaves nothing to put back (notebook.trial_settle).
+
+TRIAL = "trial"
+TRIAL_FIELDS = ("outputs", "status", "exec_count", "labels", "label_revs")
+TRIAL_START_S = 60.0  # beyond the code's own limit: the sandbox, the interpreter and the shell's startup lines
+TRIAL_TAIL = 400  # of what a runner that printed no result wrote, for why the trial could not run
+
+
+async def run_trial(c: str, cid: str, code: str) -> tuple[str, int]:
+    """The runner's side: card `cid` run with `code` and not stored (notebook.trial_run), as one JSON line of
+    TRIAL_FIELDS; 0, whether or not the code ran clean. RunError for a missing card or one that runs no code."""
+    import json  # noqa: PLC0415
+
+    from . import notebook  # noqa: PLC0415
+
+    try:
+        cand = await notebook.trial_run(c, cid, code)
+    except KeyError:
+        raise RunError(f"thimble-run: there is no card:{cid} in this workspace") from None
+    except ValueError as e:
+        raise RunError(f"thimble-run: card:{cid}: {e}") from None
+    # ASCII, so no character of the outputs can break the line the shim reads
+    return json.dumps({k: cand.get(k) for k in TRIAL_FIELDS}, default=str), 0
+
+
+def trial_sandbox(c: str) -> dict[str, Any] | None:
+    """srt's settings for a trial in workspace `c`: the filesystem rules of the sandbox main's Bash runs `thimble-run`
+    in (thimble's fence in terminal mode, cli.main_fence), and no network, since a host main's Bash would ask about has
+    nobody to ask here and the fence names none it allows. None when main runs without thimble's fence (launch.json's
+    `fenced`; a record without it is read as cli.fence_off reads thimble's config and the machine), as main's Bash then
+    runs `thimble-run` unsandboxed too. TrialUnavailable when main is fenced but the fence cannot be built here."""
+    from . import cli, launch_mode, notebook  # noqa: PLC0415 — cli builds main's fence
+
+    fenced = cli.read_launch(c).get("fenced")
+    if fenced is not True and (fenced is False or cli.fence_off(c)):
+        return None
+    fence = cli.main_fence(Path(config.corpus_dir(c)), c, mode=launch_mode.TERMINAL)
+    fs = (fence.get("sandbox") or {}).get("filesystem") if fence else None
+    if not isinstance(fs, dict):
+        raise notebook.TrialUnavailable(f"main's sandbox cannot be set up here ({cli.fence_off(c) or 'no fence'})")
+    return {"network": {"allowedDomains": [], "deniedDomains": []},
+            "filesystem": {"denyRead": list(fs.get("denyRead") or []), "allowRead": [],
+                           "allowWrite": list(fs.get("allowWrite") or []),
+                           "denyWrite": list(fs.get("denyWrite") or [])}}
+
+
+def trial_argv(c: str, cid: str, settings_dir: Path) -> list[str]:
+    """The command of a trial of card `cid`: `thimble-run trial <cid>`, inside srt with trial_sandbox's settings
+    (written to `settings_dir`, outside the sandbox) when main's Bash is sandboxed. TrialUnavailable when srt is
+    missing."""
+    import json  # noqa: PLC0415
+
+    from . import notebook, srt  # noqa: PLC0415
+
+    argv = [str(bin_path()), TRIAL, cid]
+    box = trial_sandbox(c)
+    if box is None:
+        return argv
+    node, package = srt.node(), srt.package(config.REPO_ROOT)
+    if not node or package is None:
+        raise notebook.TrialUnavailable(srt.missing(config.REPO_ROOT, node) or "thimble's sandbox runtime is missing")
+    p = settings_dir / "srt-settings.json"
+    p.write_text(json.dumps(box), "utf-8")
+    return [node, str(package / "dist" / "cli.js"), "--settings", str(p), "--", *argv]
+
+
+def trial_env(c: str) -> dict[str, str]:
+    """The environment of a trial in workspace `c`: the shim's, which is main's, without its keys and tokens
+    (notebook's secret names; thimble's own folders and the session's mode stay, as main's Bash has them), and
+    THIMBLE_WS naming the workspace."""
+    from . import notebook  # noqa: PLC0415
+
+    keys = tuple(p for p in notebook._SECRET_ENV_PREFIXES if p != "THIMBLE_")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(keys) and not notebook._SECRET_ENV_RE.search(k)}
+    return {**env, "THIMBLE_WS": str(config.workspace_path(c).resolve())}
+
+
+def _signal_group(proc: asyncio.subprocess.Process, sig: int) -> None:
+    if proc.returncode is None:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, sig)
+
+
+def _trial_result(out: bytes) -> dict[str, Any] | None:
+    """The run a trial's runner printed: its last line that is a JSON object with outputs and a status."""
+    import json  # noqa: PLC0415
+
+    for line in reversed(out.decode("utf-8", "replace").split("\n")):
+        if not line.strip():
+            continue
+        try:
+            got = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(got, dict) and isinstance(got.get("outputs"), list) and isinstance(got.get("status"), str):
+            return got
+    return None
+
+
+async def trial(c: str, cid: str, code: str, timeout_s: float | None) -> dict[str, Any]:
+    """The shim's side: card `cid` with its code replaced by `code`, run by `thimble-run trial` (module section) and not
+    stored; the run's TRIAL_FIELDS. TrialUnavailable when the runner did not start or printed no result, which says
+    nothing of the code: the code's own error, its time limit's among them, comes back in the run's outputs."""
+    import tempfile  # noqa: PLC0415
+
+    from . import notebook  # noqa: PLC0415
+
+    await asyncio.to_thread(mirror, c)  # as add_card does before it gives the command (prepare)
+    await ready_types(c, code)
+    limit = (timeout_s if timeout_s is not None else notebook.EXEC_TIMEOUT) + GRACE_S + TRIAL_START_S
+    with tempfile.TemporaryDirectory(prefix="thimble-trial-") as d:
+        argv = trial_argv(c, cid, Path(d))
+        try:
+            # from a folder of its own, where srt's guards of a working folder's dotfiles touch nothing of the corpus;
+            # the runner finds the workspace by THIMBLE_WS and runs the code in its scratch mirror, as a card run does
+            proc = await asyncio.create_subprocess_exec(*argv, cwd=d, env=trial_env(c),
+                                                        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                                                        stderr=asyncio.subprocess.PIPE, start_new_session=True)
+        except OSError as e:
+            raise notebook.TrialUnavailable(f"thimble-run did not start: {e}") from None
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(code.encode("utf-8")), limit)
+        except asyncio.TimeoutError:
+            # SIGTERM first, so srt takes down its sandbox and its mount points before it goes
+            _signal_group(proc, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(proc.wait(), GRACE_S)
+            except asyncio.TimeoutError:
+                _signal_group(proc, signal.SIGKILL)
+                await proc.wait()
+            raise notebook.TrialUnavailable(f"thimble-run gave no result within {limit:.0f} s") from None
+        except asyncio.CancelledError:
+            _signal_group(proc, signal.SIGTERM)
+            asyncio.get_running_loop().call_later(GRACE_S, _signal_group, proc, signal.SIGKILL)
+            raise
+    got = _trial_result(out)
+    if got is None:
+        said = err.decode("utf-8", "replace").strip() or out.decode("utf-8", "replace").strip()
+        why = " ".join(said.split())[-TRIAL_TAIL:]
+        said = f"thimble-run ended {proc.returncode} with no result" + (f": {why}" if why else "")
+        raise notebook.TrialUnavailable(said)
+    return {k: got.get(k) for k in TRIAL_FIELDS}
+
+
 # --------------------------------------------------------------------------- the shim's watch
 
 
@@ -871,7 +1024,8 @@ class CardWatch:
 # --------------------------------------------------------------------------- the command line
 
 
-USAGE = "usage: thimble-run card <card id> | label <label id or name> | stale"
+USAGE = "usage: thimble-run card <card id> | label <label id or name> | stale | trial <card id> (its code on stdin)"
+KINDS = ("card", "label", "stale", TRIAL)
 
 
 def _workspace(cid: str | None = None) -> str:
@@ -892,27 +1046,28 @@ def _workspace(cid: str | None = None) -> str:
 
 
 def main(argv: list[str]) -> int:
-    """`thimble-run card <id> | label <id or name> | stale` (module note): prints the result's text, exits 0, or 1
-    when the code errored or the run was refused."""
+    """`thimble-run card <id> | label <id or name> | stale | trial <id>` (module note; `trial`, the card check's, reads
+    the code on stdin): prints the result's text, exits 0, or 1 when the code errored or the run was refused."""
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr, format="thimble-run %(levelname)s: %(message)s")
-    if not argv or argv[0] not in ("card", "label", "stale") or (argv[0] != "stale" and len(argv) < 2):
+    if not argv or argv[0] not in KINDS or (argv[0] != "stale" and len(argv) < 2):
         print(USAGE, file=sys.stderr)
         return 2
     kind = argv[0]
     ident = argv[1].strip().removeprefix("card:").removeprefix("concept:") if len(argv) > 1 else ""
+    trial_code = sys.stdin.read() if kind == TRIAL else ""
     from . import local  # noqa: PLC0415
 
     local.settle_dirs()
     try:
-        c = _workspace(ident if kind == "card" else None)
+        c = _workspace(ident if kind in ("card", TRIAL) else None)
         from . import local  # noqa: PLC0415
 
         if not local.terminal(c):
             raise RunError("thimble-run: this workspace's session runs in browser mode, where the kernel runs cards")
         install()
-        stop = _on_term(c, ident if kind == "card" else "")
+        stop = _on_term(c, ident if kind == "card" else "")  # a trial stores nothing to end
         try:
-            text, code = serve(_main(c, kind, ident))
+            text, code = serve(_main(c, kind, ident, trial_code))
         finally:
             stop()
     except RunError as e:
@@ -923,11 +1078,13 @@ def main(argv: list[str]) -> int:
     return code
 
 
-async def _main(c: str, kind: str, ident: str) -> tuple[str, int]:
+async def _main(c: str, kind: str, ident: str, trial_code: str = "") -> tuple[str, int]:
     if kind == "card":
         out = await run_card(c, ident)
     elif kind == "label":
         out = await run_label(c, ident)
+    elif kind == TRIAL:
+        out = await run_trial(c, ident, trial_code)
     else:
         out = await run_stale(c)
     await _drain()

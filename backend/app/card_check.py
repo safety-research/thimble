@@ -12,7 +12,9 @@ new change to the card cancels a running check and starts the next. At most READ
 2. Critique: the `verify` role's model reads the question, takeaway, resolved links, code, the work that led to the
    card (context.render) and the picture, names what fails each criterion, and gives the replacement card.
 3. Replace: the parts that differ and that the check may change (checkstore.fixable) are tried on a copy of the card
-   and kept only when the code runs clean and the card draws, as one undo step with actor `check`.
+   and kept only when the code runs clean and the card draws, as one undo step with actor `check`. New code runs on the
+   card's kernel, and in terminal mode, where the check runs in the shim, through `thimble-run trial` in main's
+   sandbox, as a card run would (cardrun.trial).
 A check past check_timeout(effort) ends `error`; waits for API capacity are left out of that time. A trial run on the
 kernel is always settled, even when the check is stopped mid-trial. Timings go to
 workspaces/<c>/card-checks/timings.jsonl and pictures under workspaces/<c>/card-checks/<card>/. A refused reading
@@ -66,6 +68,7 @@ CHANGED = "the card changed while it was checked"
 SERVER_STOPPED = "the server stopped while the check ran"
 SESSION_ENDED = "thimble stopped when its Claude Code session ended"  # a check stop_workspace ended
 FALLBACK_NOTE = "Downgrading {model} to {fallback}"  # the record's `note`
+UNTRIED = "its revision could not be tried"  # an `error` whose card runner gave no result (notebook.TrialUnavailable)
 READ_IDLE_S = 60.0  # a reading with no sign of life this long is stalled (model.structured's idle clock)
 PAUSE_POLL_S = 0.05  # how often a check waiting for a reading slot looks at its clock again (_within)
 MAX_EDGE = 2576  # the longest edge of an image the model reads at full resolution
@@ -754,11 +757,12 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
                    timing: dict[str, Any]) -> None:
     """Apply the replacement once, kept only when its code runs clean and the replaced card draws; otherwise the card stays,
     the replacement is recorded as a rejected fix and the check ends `error`. The fix's reason is the problem of the first
-    criterion the card failed.
+    criterion the card failed. A replacement whose code could not be tried at all (terminal mode's card runner gave no
+    result: notebook.TrialUnavailable) is no rejected fix: the check ends `error` saying so (UNTRIED).
 
     The trial on the card's kernel is settled however the check ends: a check stopped or past its time mid-trial leaves it
     running to its end in a task of its own, which then puts back the names it bound."""
-    from . import checkstore  # noqa: PLC0415
+    from . import checkstore, notebook  # noqa: PLC0415
 
     c, cid = run.c, run.cid
     t0 = time.perf_counter()
@@ -771,6 +775,12 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
     except asyncio.CancelledError:
         _spawn(_settle_after(c, cid, trial))
         raise
+    except notebook.TrialUnavailable as e:  # the revision was not tried, so nothing is known of it: no rejected fix
+        timing["replace_ms"] = _ms(t0)
+        timing["replacement"] = "untried"
+        log.warning("card check: the replacement of card:%s could not be tried (%s)", cid, e)
+        _end(run, "error", f"{UNTRIED}: {e}")
+        return
     except Exception as e:  # noqa: BLE001 — a card gone meanwhile, or code on a card that runs none
         cand = None
         log.info("card check: the replacement of card:%s cannot be applied (%s)", cid, e)

@@ -199,10 +199,120 @@ async def test_a_run_past_its_limit_is_interrupted_and_errors(term, monkeypatch)
 
 
 async def test_the_shim_never_runs_card_code_in_terminal_mode(term):
+    """Card code never runs in the shim: a run asked for there is refused, and the card check's trial of a revision
+    runs in a `thimble-run trial` process of its own, as a card run would, and stores nothing."""
     with pytest.raises(notebook.TerminalRun):
         await notebook.run_code(CORPUS, "print(1)", created_by="test")
-    trial = await notebook.trial_run(CORPUS, card_id(await call(term, "add_card", question="q", code="print(1)")), "1")
-    assert trial["status"] == "error", "the card check keeps no code fix it could not run"
+    cid = card_id(await call(term, "add_card", question="q", code="print(1)"))
+    code = "import os\nprint(os.getpid())\nprint(sum(1 for _ in open('board.jsonl')))"
+    trial = await notebook.trial_run(CORPUS, cid, code)
+    assert trial["status"] == "ok" and trial["trial"] == "", trial["outputs"]
+    pid, lines = trial["outputs"][0]["text/plain"].split()
+    assert int(pid) != os.getpid(), "the revision ran in a card runner, not in this process"
+    assert int(lines) > 0, "in the scratch mirror of the corpus, as a card run is"
+    cell = notebook.get_cell(CORPUS, cid)
+    assert cell["code"] == "print(1)" and cell["outputs"] == [], "a trial stores nothing"
+    assert cell["run"]["state"] == "waiting"
+    bad = await notebook.trial_run(CORPUS, cid, "print(posts_undefined)")
+    err = [b[notebook.ERROR_MIME] for b in bad["outputs"] if notebook.ERROR_MIME in b]
+    assert bad["status"] == "error" and err[0]["ename"] == "NameError", "the code's own error comes back as a run's"
+
+
+def _fake_check(monkeypatch, revision: dict) -> None:
+    """The card check with its drawing and its model's reading stood in for: every card draws, and the reading finds
+    the question unclear and gives the card back with `revision["code"]`."""
+    from app import card_check, render
+
+    async def draw(c, cell):
+        return render.Rendered(png=b"\x89PNG card")
+
+    async def read(c, cell, png, run, picture=None):
+        assessment = [{"problem": "The question names no wiki."}] + [{"problem": ""}] * (card_check.CRITERIA - 1)
+        card = {"question": cell["title"], "code": revision["code"], "takeaway": cell["takeaway"]}
+        return assessment, card, "test-model"
+
+    monkeypatch.setattr(render, "down", lambda: False)
+    monkeypatch.setattr(card_check, "_draw", draw)
+    monkeypatch.setattr(card_check, "_read", read)
+
+
+async def _checked(cid: str, again: bool = False) -> dict:
+    from app import card_check
+
+    started = card_check.start(CORPUS, cid, card_check.MAIN, again=again)
+    assert started is not None
+    await started.task
+    return notebook.get_cell(CORPUS, cid, full_outputs=True)
+
+
+async def test_the_card_check_keeps_or_rejects_its_revision_after_running_it_through_thimble_run(term, monkeypatch):
+    """Live check cc-term: in terminal mode the card check's revision of a card failed with TerminalRun, since the shim
+    may not run card code, and the card said `its check ended in an error` in red. The revision now runs through
+    `thimble-run trial`, so the check keeps a revision that runs clean and rejects one whose code errors, as in browser
+    mode; a revision the card runner could not try at all ends the check without a rejected fix."""
+    revision = {"code": "print(4 + 4)"}
+    _fake_check(monkeypatch, revision)
+    cid = card_id(await call(term, "add_card", question="Posts?", code="print(8)", takeaway="There are 8 posts."))
+    assert run(term, "card", cid).returncode == 0
+    cell = await _checked(cid)
+    assert cell["check"]["status"] == "fixed", cell["check"]
+    assert cell["code"] == "print(4 + 4)" and cell["outputs"][0]["text/plain"].strip() == "8"
+    assert cell["fixes"][-1]["state"] == "applied" and cell["fixes"][-1]["reason"] == "The question names no wiki."
+    # a revision whose code errors is not kept, for that reason, and the card stays as it was
+    revision["code"] = "print(posts_undefined)"
+    cell = await _checked(cid, again=True)
+    assert cell["check"]["status"] == "error" and cell["code"] == "print(4 + 4)"
+    why = cell["check"]["reason"]
+    assert why.startswith("its revision was not kept: its code did not run clean: NameError"), why
+    assert "TerminalRun" not in json.dumps(cell)
+    assert cell["fixes"][-1]["state"] == "rejected" and cell["fixes"][-1]["after"]["code"] == "print(posts_undefined)"
+    # a card runner that does not start says nothing of the revision: no rejected fix, and the card stays
+    from app import card_check
+
+    monkeypatch.setattr(cardrun, "bin_path", lambda: config.workspace_dir(CORPUS) / "no-such-thimble-run")
+    revision["code"] = "print(2 * 4)"
+    fixes = len(cell["fixes"])
+    cell = await _checked(cid, again=True)
+    assert cell["check"]["status"] == "error" and cell["check"]["reason"].startswith(card_check.UNTRIED + ": ")
+    assert len(cell["fixes"]) == fixes and cell["code"] == "print(4 + 4)"
+
+
+async def test_a_trial_runs_in_the_sandbox_main_runs_thimble_run_in(term, monkeypatch):
+    """Where main runs in thimble's fence, the trial runs in srt with the fence's filesystem rules and no network: it
+    writes the card folders and nothing of the corpus or the rest of the workspace."""
+    from app import cli, kernel_wrap, srt
+
+    if not kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT)):
+        pytest.skip("thimble's sandbox runtime cannot run on this machine")
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    ws = config.workspace_dir(CORPUS)
+    (ws / "trusted" / "launch.json").write_text(json.dumps({"mode": "terminal", "fenced": True}))
+    box = cardrun.trial_sandbox(CORPUS)
+    fence = cli.main_fence(term, CORPUS, mode="terminal")["sandbox"]["filesystem"]
+    for key in ("allowWrite", "denyWrite", "denyRead"):
+        assert box["filesystem"][key] == fence[key], key
+    assert box["network"] == {"allowedDomains": [], "deniedDomains": []}
+    assert str(ws / "card-runs") in box["filesystem"]["allowWrite"]
+    cid = card_id(await call(term, "add_card", question="q", code="print(1)"))
+    probe = (
+        "import os\n"
+        "def can_write(d):\n"
+        "    p = os.path.join(d, '.thimble-trial-probe')\n"
+        "    try:\n"
+        "        open(p, 'w').close()\n"
+        "    except OSError:\n"
+        "        return False\n"
+        "    os.remove(p)\n"
+        "    return True\n"
+        f"print(can_write({str(term)!r}), can_write({str(ws)!r}), can_write({str(ws / 'card-runs')!r}))\n"
+        "print(os.environ.get('SANDBOX_RUNTIME'))")
+    trial = await notebook.trial_run(CORPUS, cid, probe)
+    assert trial["status"] == "ok", trial["outputs"]
+    assert trial["outputs"][0]["text/plain"].split() == ["False", "False", "True", "1"]
+    # main fenced, its fence not buildable here: the trial is not run unsandboxed
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    with pytest.raises(notebook.TrialUnavailable):
+        await notebook.trial_run(CORPUS, cid, "print(1)")
 
 
 async def test_a_code_label_runs_through_thimble_run_and_its_readers_go_stale(term):
