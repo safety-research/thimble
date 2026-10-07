@@ -1658,11 +1658,14 @@ function brokenScale(from, to, cols, unit, parts) {
   }
 }
 
-/** The chart's axis under it: the ticks' labels dim at their cells, `gutter` cells in, none overlapping; then, with
- *  `marks` ([{t, label}]), their labels on a row of their own, each a control when `onMark(mark)` is given. */
+/** The chart's axis under it: the ticks' labels dim at their cells, `gutter` cells in, none overlapping; `legend`, runs
+ *  in the gutter before them, the key of the marks the chart draws other than Color by's (`─ running  × failed`); then,
+ *  with `marks` ([{t, label}]), their labels on a row of their own, each a control when `onMark(mark)` is given. */
 export function axis(d, scale, o = {}) {
   const gutter = o.gutter || 0
-  const row = d.row().gap(gutter)
+  const row = d.row()
+  if (o.legend && gutter > 2) row.runsOf(clipLine(merged((Array.isArray(o.legend) ? o.legend : [o.legend]).map(segOf).filter(Boolean)), gutter - 2))
+  row.at(gutter)
   let end = 0
   // a broken scale's breaks are `//` in the rule gray, and no label runs into one
   const gaps = scale.gaps ? scale.gaps() : []

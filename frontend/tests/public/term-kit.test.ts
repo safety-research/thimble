@@ -362,6 +362,11 @@ describe('the time range', () => {
     expect(rows[2].slice(2 + 32, 2 + 34)).toBe('//')
     expect(rows[2]).toContain('17 May 09:00')
     expect(last().lines[2].find((s: any) => s.s === '//').fg).toBe('subtle')
+    // a legend stands in the gutter before the ticks, cut to leave a gutter's space
+    kit.draw((d: any) => kit.axis(d, range.scale(d.cols - 12), { gutter: 12, gap: 8, legend: [{ s: '─', fg: 'subtle' }, { s: ' running  × failed', d: true }] }))
+    await tick()
+    expect(text()[0]).toMatch(/^ {2}─ running {4}16 May 14:00/)
+    expect(last().lines[0][1]).toMatchObject({ s: '─', fg: 'subtle' })
     // a stretch with no room for a time and its date gives the date alone
     init({ cols: 40 })
     const narrow = kit.timeRange({ gap: 1200 })

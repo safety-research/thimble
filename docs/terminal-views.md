@@ -153,8 +153,9 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
   strip's cells, so it keeps its width across a break.
 - `range.scale(cols)` lays the range across a chart's cells: `x(t)`, `t(x)`, `binOf(t)`, `step`, `ticks(gap)`, and
   `broken` and `gaps()` (each break's first cell and the cell after it), with the breaks that fall inside the range.
-- `axis(d, scale, {gutter, marks, onMark})` draws the chart's axis under it, `//` at each break with the date on the
-  first label after it, and the marks' labels on a row of their own.
+- `axis(d, scale, {gutter, legend, marks, onMark})` draws the chart's axis under it, `//` at each break with the date on
+  the first label after it, `legend` (runs) in the gutter before the ticks as the key of the marks the chart draws other
+  than Color by's (`─ running  × failed`), and the marks' labels on a row of their own.
 - `strip(scale, items, {value, colour, max, guide})` is one row of a chart over time (a lane), `maxBin(scale,
   groups)` the height every lane shares, and `bar(n, max)` one cell's bar.
 
