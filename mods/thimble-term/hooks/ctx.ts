@@ -3,7 +3,7 @@
 // A drawing builds its own (its reads subscribe it); a timer or a handler uses the one its hook built.
 import type { Elements, FsEntry, FsStat, PaneOpenArgs, ProcessRunInit, ProcessRunResult, RenderElement, ResolveInput, UiOpenResult } from 'claude-code'
 
-import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, ChatTarget, TermAgent, TermCard, TermHome, TermPanel, TermThread, TermThreadRow, TermVerdict } from '../types'
+import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, TermAgent, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermThread, TermThreadRow, TermVerdict } from '../types'
 
 /** What `thimble state` printed for a surface the panel shows, or why it failed. */
 export type SurfaceGot = { ok: true; value: unknown } | { ok: false; error: string }
@@ -12,6 +12,9 @@ export type Ctx = {
   // ---- the host
   now: () => Promise<number>
   run: (argv: readonly string[], init?: ProcessRunInit) => Promise<ProcessRunResult>
+  /** a command that may run longer than `run` allows (a label's run on every record): started beside the session, which
+   *  it ends with, its whole output read once it exits */
+  runLong: (argv: readonly string[], init?: { cwd?: string; env?: Record<string, string> }) => Promise<{ exitCode: number; stdout: string; stderr: string }>
   read: (path: string) => Promise<string>
   stat: (path: string) => Promise<FsStat>
   list: (path: string) => Promise<FsEntry[]>
@@ -25,6 +28,8 @@ export type Ctx = {
   panes: () => Promise<readonly { id: string; isPlaced: boolean }[]>
   log: (text: string) => void
   toast: (text: string) => void
+  /** a prompt to main, as the analyst's (a code label's run, which only main's Bash runs; a new label described) */
+  submit: (text: string) => Promise<void>
   /** the element table of the surface a drawing is for */
   els: (e: ResolveInput) => Elements['terminal']
   // ---- thimble-term's state (types/index.d.ts)
@@ -44,8 +49,6 @@ export type Ctx = {
   setPanel: (p: TermPanel | null) => Promise<void>
   nav: () => Promise<ChatNav>
   setNav: (n: ChatNav) => Promise<void>
-  menu: () => Promise<ChatTarget | null>
-  setMenu: (t: ChatTarget | null) => Promise<void>
   pending: () => Promise<{ title: string } | null>
   setPending: (p: { title: string } | null) => Promise<void>
   home: () => Promise<TermHome | null>
@@ -60,6 +63,10 @@ export type Ctx = {
   setNews: (n: ChatNews) => Promise<void>
   homeUi: () => Promise<ChatHomeUi>
   setHomeUi: (u: ChatHomeUi) => Promise<void>
+  labelUi: () => Promise<TermLabelUi>
+  setLabelUi: (u: TermLabelUi) => Promise<void>
+  filesUi: () => Promise<TermFilesUi>
+  setFilesUi: (u: TermFilesUi) => Promise<void>
   /** a count a drawing of the panel reads, so a bump draws it again */
   panelTick: () => Promise<number>
   bumpPanel: () => Promise<void>

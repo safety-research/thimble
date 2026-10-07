@@ -8,11 +8,12 @@
 //   - main's replies on the mod's grid, each citation a link, red when its place does not hold its value (reply.tsx)
 //   - each card a turn of main added or changed, once, under the turn's last reply, in its last state, its takeaway
 //     under it; no hex id, and Claude Code's tool groups left folded
-//   - the rows above the prompt, like toasts: what is new in the workspace since home was last opened (open › opens
-//     home and the row goes), and side threads with news (Claude Code's agent tray shows thimble's agents)
-//   - one panel (panel.tsx): home, a card, a citation's place, a side thread, a label, a document, the files, an agent
-//   - side threads: right-click a card, a citation or a sentence and choose "ask about it", or select text and press
-//     "ask"; a row under main's latest row when an answer comes in while the panel shows something else
+//   - one row above the prompt, a toast: what is new in the workspace since home was last opened (`open ›` opens home
+//     and the row goes); Claude Code's agent tray shows thimble's agents, and side threads have `↳` rows
+//   - one panel (panel.tsx): home, a card, a citation's place, the threads, a label, a document, the files, an agent
+//   - side threads: the blue "?" beside a passage or a card, or a selection's "ask"; a `↳ thread` row under main's
+//     latest row when an answer comes in while the panel shows something else, and a blue ↳ beside the passage asked
+//     about. A right-click does what a click does: there is no menu
 //   - `/thimble` opens the home panel, with no model turn
 // It hides main's end token, `(shown in the dashboard)`, as the browser does.
 //
@@ -25,14 +26,17 @@ import type { Ctx } from './ctx'
 import { act, scopeOf } from './data'
 import type { Sent } from './gestures'
 import { needsDrawing } from './lib'
-import { cardsOfCall, withoutEnd } from './model'
-import { drawPanel, homeMessage, onGesture, openAsk, openCard, openFile, openThread } from './panel'
+import { cardsOfCall, labelsOf, withoutEnd } from './model'
+import { HOME_UI_EMPTY } from './home'
+import { linesMessage } from './lines'
+import { drawPanel, fieldMessage, onGesture, openAsk, openFile, openLabel, openThread } from './panel'
 import type { PaneEvent } from './panel'
 import { MARGIN, drawCards, drawReply } from './reply'
+import { COLORS } from './paint'
 import { isAnchor } from './signal'
 import type { AppendedRow } from './signal'
 import { NAV_EMPTY } from './nav'
-import { P, PANEL, checkQueued, closePanel, loadCards, navOrigin, openHome, openPanel, readSurface, rt, tick } from './term'
+import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, navOrigin, openHome, openPanel, readSurface, rt, surfaceValue, tick } from './term'
 import type { UiApply } from './term'
 import { turns } from './turns'
 
@@ -63,7 +67,6 @@ const THREAD_ROWS = { plugin: 'thimble-term', key: 'threadRows' } as const
 const SURFACE = { plugin: 'thimble-term', key: 'surface' } as const
 const panelA = { plugin: 'thimble-term', key: 'panel' } as const
 const navRef = { plugin: 'thimble-term', key: 'nav' } as const
-const menuRef = { plugin: 'thimble-term', key: 'menu' } as const
 const pendingRef = { plugin: 'thimble-term', key: 'pending' } as const
 const homeRef = { plugin: 'thimble-term', key: 'home' } as const
 const homeSeenRef = { plugin: 'thimble-term', key: 'homeSeen' } as const
@@ -71,6 +74,8 @@ const agentsRef = { plugin: 'thimble-term', key: 'agents' } as const
 const threadsRef = { plugin: 'thimble-term', key: 'threads' } as const
 const newsRef = { plugin: 'thimble-term', key: 'threadNews' } as const
 const homeUiRef = { plugin: 'thimble-term', key: 'homeUi' } as const
+const labelUiRef = { plugin: 'thimble-term', key: 'labelUi' } as const
+const filesUiRef = { plugin: 'thimble-term', key: 'filesUi' } as const
 const panelTickRef = { plugin: 'thimble-term', key: 'panelTick' } as const
 const panelTickA = atom(panelTickRef, 0)
 
@@ -79,6 +84,17 @@ function cxOf($: Dollar): Ctx {
   return {
     now: () => $.clock.now().catch(() => Date.now()),
     run: (argv, init) => $.process.run(argv, init),
+    runLong: async (argv, init) => {
+      const child = $.process.spawn({ argv, ...(init?.cwd ? { cwd: init.cwd } : {}), ...(init?.env ? { env: init.env } : {}) })
+      let stdout = ''
+      let stderr = ''
+      for await (const piece of child) {
+        if (piece.stream === 'stdout') stdout += piece.text
+        else stderr += piece.text
+      }
+      const end = await child.result
+      return { exitCode: end.code ?? 1, stdout, stderr }
+    },
     read: path => $.fs.read(path),
     stat: path => $.fs.stat(path),
     list: path => $.fs.list(path),
@@ -106,6 +122,7 @@ function cxOf($: Dollar): Ctx {
     panes: () => $.ui.panes().catch(() => []),
     log: text => $.ui.log(text),
     toast: text => $.ui.toast(text),
+    submit: async text => void (await $.prompt.submit({ text, asUser: true })),
     els: e => $.ui.resolve(e as ResolveInput<'Pane', 'terminal'>),
     card: async id => (await $.state.get({ ...CARDS, id })).value,
     setCard: async (id, v) => void (await $.state.set({ ...CARDS, id }, v)),
@@ -123,8 +140,6 @@ function cxOf($: Dollar): Ctx {
     setPanel: async p => void (await $.state.set(panelA, p)),
     nav: async () => (await $.state.get(navRef)).value ?? NAV_EMPTY,
     setNav: async n => void (await $.state.set(navRef, n)),
-    menu: async () => (await $.state.get(menuRef)).value ?? null,
-    setMenu: async t => void (await $.state.set(menuRef, t)),
     pending: async () => (await $.state.get(pendingRef)).value ?? null,
     setPending: async p => void (await $.state.set(pendingRef, p)),
     home: async () => (await $.state.get(homeRef)).value ?? null,
@@ -137,8 +152,12 @@ function cxOf($: Dollar): Ctx {
     setThreads: async t => void (await $.state.set(threadsRef, t)),
     news: async () => (await $.state.get(newsRef)).value ?? { n: 0, one: '' },
     setNews: async n => void (await $.state.set(newsRef, n)),
-    homeUi: async () => (await $.state.get(homeUiRef)).value ?? { layout: 'stacked', folded: [], more: [], pick: '' },
+    homeUi: async () => ({ ...HOME_UI_EMPTY, ...((await $.state.get(homeUiRef)).value ?? {}) }),
     setHomeUi: async u => void (await $.state.set(homeUiRef, u)),
+    labelUi: async () => ({ ...LABEL_UI_EMPTY, ...((await $.state.get(labelUiRef)).value ?? {}) }),
+    setLabelUi: async u => void (await $.state.set(labelUiRef, u)),
+    filesUi: async () => ({ ...FILES_UI_EMPTY, ...((await $.state.get(filesUiRef)).value ?? {}) }),
+    setFilesUi: async u => void (await $.state.set(filesUiRef, u)),
     panelTick: async () => (await $.state.get(panelTickRef)).value ?? 0,
     bumpPanel: async () => void (await update($, panelTickA, n => (n ?? 0) + 1)),
   }
@@ -169,8 +188,9 @@ function hasText(content: unknown): boolean {
   return Array.isArray(content) && content.some(b => b && typeof b === 'object' && (b as { type?: unknown }).type === 'text' && String((b as { text?: unknown }).text ?? '').trim() !== '')
 }
 
-/** The rows a side thread's answer leaves under a row of main's chat (signal.ts): `↳ thread · "<question>" · answered`,
- *  `new` in bold until it is read; a press opens the thread. */
+/** The rows a side thread's answer leaves under a row of main's chat (signal.ts, views/SPEC.md "Main's chat"): `↳` at
+ *  column 0 and its words at 2, dim (`thread · "<question>" · answered`), `new` in green until it is read; a press on
+ *  the question opens the thread. */
 async function signalRows(cx: Ctx, e: ResolveInput & { requestId: string }): Promise<RenderElement | null> {
   const rows = await cx.threadRows(e.requestId)
   if (!rows.length) return null
@@ -187,9 +207,9 @@ async function signalRows(cx: Ctx, e: ResolveInput & { requestId: string }): Pro
       <Box key={`signal-${s.thread}`} flexDirection="row">
         <Text dimColor>{'↳ '}</Text>
         <Text dimColor>{'thread · '}</Text>
-        <Button key={`signal-open-${s.thread}`} label={q} plain onPress={() => void openThread(cx, s.thread)} />
-        {t?.unread ? <Text bold>{' new'}</Text> : null}
-        <Text dimColor>{' · answered'}</Text>
+        <Button key={`signal-open-${s.thread}`} label={q} plain dimColor onPress={() => void openThread(cx, s.thread)} />
+        <Text dimColor>{t?.running ? ' · answering' : ' · answered'}</Text>
+        {t?.unread ? <Text color={COLORS.fresh}>{' · new'}</Text> : null}
       </Box>,
     )
   }
@@ -320,7 +340,7 @@ export const register: Register = on => {
     if (!ids.length && !told && text === e.props.text && !live && !needsDrawing(text)) return next(e)
     const { Box } = $.ui.resolve(e)
     const cols = (e.viewport?.columns ?? 100) - 2
-    const body = text.trim() ? await drawReply(cx, e, text, cols - MARGIN, { first: Boolean(e.props.isFirstOfReply), skipCards: new Set(ids), ask: t => void openAsk(cx, t) }) : []
+    const body = text.trim() ? await drawReply(cx, e, text, cols - MARGIN, { first: Boolean(e.props.isFirstOfReply), skipCards: new Set(ids), ask: t => void openAsk(cx, t), open: id => void openThread(cx, id) }) : []
     const cards = await drawCards(cx, e, ids, cols, t => void openAsk(cx, t))
     if (!body.length && !cards && !told) return <Box />
     return (
@@ -430,31 +450,16 @@ export const register: Register = on => {
           <Box key="above-home" flexDirection="row">
             {label('thimble')}
             <Box flexDirection="row" columnGap={2} flexShrink={1}>
-              <Text wrap="truncate-end">{words}</Text>
+              {/* the word `new` in green, as wherever it shows (views/SPEC.md, rule 8) */}
+              <Text wrap="truncate-end">{words.split(/( new )/).map((w, i) => (w === ' new ' ? <Text key={`new-${i}`}>{' '}<Text color={COLORS.fresh}>new</Text>{' '}</Text> : w))}</Text>
               <Button key="above-home-open" label="open ›" plain onPress={() => void openHome(cx)} />
             </Box>
           </Box>,
         )
       }
     }
-    // side threads with news, or answering
-    const threads = await cx.threads()
-    const news = await cx.news()
-    const answering = threads.filter(t => t.running).length
-    if (news.n || answering) {
-      rows.push(
-        <Box key="above-threads" flexDirection="row">
-          {label('threads')}
-          <Box flexDirection="row" flexShrink={1}>
-            {news.n ? <Text bold>{`${news.n} new`}</Text> : null}
-            {news.n && answering ? <Text dimColor>{' · '}</Text> : null}
-            {answering ? <Text dimColor>{`${answering} answering`}</Text> : null}
-            <Text>{'  '}</Text>
-            <Button key="above-threads-open" label="open ›" plain onPress={() => void (news.one ? openThread(cx, news.one) : openPanel(cx, { view: 'threads', title: 'Side threads' }))} />
-          </Box>
-        </Box>,
-      )
-    }
+    // side threads show as `↳ thread` rows under main's latest row and as `N new` on the panel's path row (views/SPEC.md,
+    // "Main's chat"): no row of their own here
     if (!rows.length) return next(e)
     return <Box flexDirection="column">{rows}</Box>
   })
@@ -481,13 +486,12 @@ export const register: Register = on => {
 
   // ---------------------------------------------------------------------------------------------- clicks
 
-  // a card's title is a Button (card.tsx): its press is the person's own; "ask" beside a selection (para.tsx)
+  // "ask" beside a selection (para.tsx): its press is the person's own (a press on a card's title is a gesture,
+  // card.tsx, which asks a side thread about the card)
   on('ui.press', async ($, e, next) => {
     if (!rt.sc) return next(e)
     const cx = cxOf($)
     await navOrigin(cx, e.component === 'Pane' && e.requestId === PANEL)
-    const id = /^card-title:([A-Za-z0-9_-]+)$/.exec(e.element)?.[1]
-    if (id) await openCard(cx, id)
     if (e.element === 'sel-ask' && rt.selection) await openAsk(cx, { kind: 'sentence', text: rt.selection.slice(0, 1200) })
     return next(e)
   })
@@ -513,22 +517,23 @@ export const register: Register = on => {
       }
     }
     if (d.type === 'home') {
-      await navOrigin(cx, true)
-      await homeMessage(cx, d.horigin, d.hacts)
+      await navOrigin(cx, inPanel)
+      await linesMessage(cx, d.horigin, d.hacts)
     } else if (d.type === 'copy' && typeof d.text === 'string') {
       const text = d.text.slice(0, 100000)
       rt.selection = text
       const r = await $.ui.copy({ text, surface: e.surface })
       $.ui.toast(r.isCopied ? `copied ${text.length} characters` : `could not copy: ${r.reason}`)
     } else if (d.type === 'label-open' && typeof d.slug === 'string') {
+      // a press on a card's label row (its name or its ↗): the label's panel, under its name
       await navOrigin(cx, inPanel)
-      await openPanel(cx, { view: 'label', title: d.slug, label: d.slug })
-    } else if (d.type === 'label-verdict' && typeof d.slug === 'string' && typeof d.ref === 'string' && typeof d.value === 'string' && rt.sc) {
-      const got = await act(cx, rt.sc, 'verdict', { label: d.slug, ref: d.ref, value: d.value })
-      if (!got.ok) $.ui.toast(`thimble: the verdict was not kept: ${got.error}`)
-      await readSurface(cx, `label:${d.slug}`, 'label', [d.slug])
-      // the label cards that count it are read again
-      for (const [card, lid] of rt.labelOf) if (lid === d.slug) await loadCards(cx, [card])
+      if (!(await surfaceValue(cx, 'labels'))?.ok) await readSurface(cx, 'labels', 'labels')
+      const got = await surfaceValue(cx, 'labels')
+      const hit = got?.ok ? labelsOf(got.value).find(l => l.id === d.slug || l.name === d.slug) : undefined
+      await openLabel(cx, hit?.id ?? d.slug, hit?.name ?? d.slug)
+    } else if (d.type === 'field' && typeof d.name === 'string' && typeof d.text === 'string') {
+      // a field's words (field.tsx): a draft, or a save
+      await fieldMessage(cx, d.name, d.text.slice(0, 20000), d.save === true)
     } else if (d.type === 'files-open' && typeof d.path === 'string') {
       await openFile(cx, d.path)
     }

@@ -6,7 +6,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { HOME_LINE } from '../hooks/register'
-import { CLI, CWD, SLIDES, WS, shown, world } from './fixtures'
+import { CLI, CWD, LABEL, SLIDES, WS, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -53,7 +53,7 @@ test('with no workspace in the environment it stays idle too', async ($, on) => 
   expect(w.calls).toEqual([])
 })
 
-test("a turn's card is drawn once, under the turn's last reply, with its takeaway; no hex id; a wrong value is red", async ($, on) => {
+test("a turn's card is drawn once, under the turn's last reply, in its border with its takeaway, as wide as the prose; no hex id; a wrong value is red", async ($, on) => {
   const w = world(on)
   await start($, w)
   await turn($, w, [['r0', 'Let me count.'], ['r1', 'Here is the count.']])
@@ -67,6 +67,10 @@ test("a turn's card is drawn once, under the turn's last reply, with its takeawa
   expect(card).toContain('What does the export hold per wiki?')
   expect(card).toContain('probier')
   expect(card).not.toContain('ff73e071')
+  // the card in a full round border as wide as the reply's prose (the column, at most 120), its takeaway inside it
+  const json = JSON.stringify(await ui.drawn())
+  expect(json).toContain('"width":120,"borderStyle":"round","borderColor":"subtle","paddingX":1')
+  expect(json).toMatch(/"width":120,"flexShrink":1\}/)
   // the takeaway under the card: its citations checked, the one whose place shows another value red
   const tk = JSON.stringify(await ui.drawn({ in: 'para-tk-t0-1' }))
   expect(tk).toContain('4579')
@@ -136,7 +140,7 @@ test("main's end token is hidden; a reply that is only the token draws nothing",
   await some.unmount()
 })
 
-test("a reply's citation is a link; a click opens the panel on its place with the value marked", async ($, on) => {
+test("a reply's citation is a link, blue and underlined; a click opens the citation panel on its place with the value marked", async ($, on) => {
   const w = world(on)
   await start($, w)
   const ui = (await $.ui.mount(MESSAGE('m4', 'The README says [4,579](README.md#L3) pages.'))) as unknown as M
@@ -144,7 +148,7 @@ test("a reply's citation is a link; a click opens the panel on its place with th
   await ui.redraw()
   const para = await ui.drawn({ in: 'para-1' })
   expect(shown(para)).toContain('4,579')
-  expect(JSON.stringify(para)).toContain('"underline":true')
+  expect(JSON.stringify(para)).toMatch(/"color":"remember"[^}]*"underline":true[^}]*\},"children":\["4,579"\]/)
   // the citation sits after "The README says " on the paragraph's first row
   await ui.pointer({ type: 'down', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
   await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
@@ -153,56 +157,58 @@ test("a reply's citation is a link; a click opens the panel on its place with th
   await w.clock.settle()
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const text = shown(await pane.drawn())
-  expect(text).toContain('4,579')
-  expect(text).toContain('the value is at its place')
-  expect(text).toContain('README.md line 3')
+  // the title is the value as a link to its place; its status in plain words under it; then where it is from and its lines
+  expect(shown(await pane.drawn({ in: 'cite-title' }))).toBe('4,579')
+  expect(text).toContain('found in README.md line 3')
+  expect(text).toContain('from')
   expect(text).toContain('An export of 4,579 wiki pages')
-  // the cited value on the selection background
+  expect(text).toContain('ask about it')
+  expect(text).toContain('a to ask · f for its file · b to go back · x to close')
+  // the cited value on the selection background; no right-click menu anywhere
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["4,579"]}')
+  expect(text).not.toContain('open its lines')
   await pane.unmount()
 })
 
-test('a click on plain words opens nothing; a right-click on a sentence offers "ask about it", which asks about its words', async ($, on) => {
+test('a click or a right-click on plain words opens nothing; the "?" beside a passage asks a side thread about its words', async ($, on) => {
   const w = world(on)
   await start($, w)
   const ui = (await $.ui.mount(MESSAGE('m5', 'Most saves came in June. The README says [4,579](README.md#L3) pages.'))) as unknown as M
-  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'para-1' } as never)
-  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'para-1' } as never)
+  for (const button of ['left', 'right'] as const) {
+    await ui.pointer({ type: 'down', x: 2, y: 0, button, in: 'para-1' } as never)
+    await ui.pointer({ type: 'up', x: 2, y: 0, button, in: 'para-1' } as never)
+  }
   expect(w.opened).toEqual([])
-  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'right', in: 'para-1' } as never)
-  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'right', in: 'para-1' } as never)
+  await ui.press({ key: 'ask-1' })
   await ui.unmount()
   expect(w.opened).toEqual(['thimble-term'])
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('"Most saves came in June."')
-  await pane.press({ key: 'menu-thread' })
-  await w.clock.settle()
-  await pane.redraw()
+  const text = shown(await pane.drawn())
+  expect(text).toContain('New thread')
+  expect(text).toContain('Most saves came in June.')
   await pane.input({ key: 'ask-new', text: 'Which day?' })
   await w.clock.settle()
-  expect(w.acts).toContainEqual({ kind: 'thread', payload: { anchor: null, message: 'Which day?', anchor_text: 'Most saves came in June.' } })
+  expect(w.acts.find(a => a.kind === 'thread')?.payload).toMatchObject({ anchor: null, message: 'Which day?' })
   await pane.unmount()
 })
 
-test('the rows above the prompt are toasts: what is new since home was opened, threads with news, no row of agents', async ($, on) => {
+test('the one row above the prompt is a toast: what is new since home was opened, `new` in green, gone once home opens; no row of threads or agents', async ($, on) => {
   const w = world(on)
   await start($, w)
   let above = (await $.ui.mount(ABOVE)) as unknown as M
-  let text = shown(await above.drawn())
-  // what the workspace held when the session started is not new
-  expect(text).not.toContain('new card')
-  expect(text).not.toContain('orientation: the whole corpus')
-  expect(text).toContain('1 new')
-  expect(text).toContain('1 answering')
+  // what the workspace held when the session started is not new; threads have their `↳` rows, agents Claude Code's tray
+  expect(shown(await above.drawn())).toBe('(the engine row)')
   await above.unmount()
   // two cards arrive: the row says so, and open › opens home
   w.states.home = { ...w.states.home, cards: 14 }
   w.stamps.set(`${WS}/notebooks`, 2)
   await w.clock.advance(1100)
   above = (await $.ui.mount(ABOVE)) as unknown as M
-  text = shown(await above.drawn())
+  const drawn = await above.drawn()
+  const text = shown(drawn)
   expect(text).toContain('2 new cards')
   expect(text).toContain('open ›')
+  expect(JSON.stringify(drawn)).toContain('{"type":"Text","props":{"color":"success"},"children":["new"]}')
   await above.press({ key: 'above-home-open' })
   expect(w.opened).toContain('thimble-term')
   await above.unmount()
@@ -224,7 +230,7 @@ test('no agent is listed above the prompt, whatever its state', async ($, on) =>
   await above.unmount()
 })
 
-test('/thimble opens the home panel with no model turn; the panel lists the documents, threads, cards, labels and files', async ($, on) => {
+test('/thimble opens the home panel with no model turn: one column, the title Home, each section bold with its count', async ($, on) => {
   const w = world(on)
   await start($, w)
   const r = (await $.command.run({ command: 'thimble:thimble', args: '' } as never)) as { text?: string }
@@ -236,55 +242,77 @@ test('/thimble opens the home panel with no model turn; the panel lists the docu
   expect(w.opened).toEqual(['thimble-term'])
   await w.clock.settle()
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  const home = shown(await pane.drawn({ in: 'home' }))
-  for (const s of ['Reports', 'Agents used the dse wiki as a relay', 'Side threads', '"why is events.jsonl bigger?"', 'Cards', 'Your work', 'Labels', 'links through a fetch proxy', 'Files', 'revisions.jsonl']) expect(home).toContain(s)
+  const drawn = await pane.drawn({ in: 'm:home' })
+  const home = shown(drawn)
+  for (const s of ['Home', 'Reports', ' (1)', 'Agents used the dse wiki as a relay', 'Threads', '"why is events.jsonl bigger?"', 'Cards', '▾ ', 'Your work', 'Labels', 'links through a fetch proxy', 'Files', 'revisions.jsonl', '↑↓ to choose · Enter to open · Space to fold · x to close']) expect(home).toContain(s)
+  // the title in the accent and bold, the headings bold, `new` in green after an unread thread
+  const json = JSON.stringify(drawn)
+  expect(json).toMatch(/"color":"suggestion","bold":true\},"children":\["Home"\]/)
+  expect(json).toMatch(/"bold":true\},"children":\["Threads"\]/)
+  expect(json).toContain('"color":"success"},"children":["new"]')
+  // the path row: home, and `show all threads` with its news at the right
+  const text = shown(await pane.drawn())
+  expect(text).toContain('show all threads')
+  expect(text).toContain('1 new')
   await pane.unmount()
 })
 
-test("a right-click on a card's cell: the menu opens its cell, asks about it, opens the card", async ($, on) => {
+test("a right-click on a card's cell does what a click does: a side thread about the cell, named by it; no menu", async ($, on) => {
   const w = world(on)
   await start($, w)
   await turn($, w, [['r1', 'Here.']])
   const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
   const key = 'card-t0-ff73e071'
-  await ui.resize({ columns: 100, rows: 14, in: key })
-  // the table's first row of cells (rule, title, column names, then dse): its pages
+  await ui.resize({ columns: 100, rows: 16, in: key })
+  // the card's insides (its border is the drawing's): the row of dse's cells
   const lines = ((await ui.drawn({ in: key })) as { children?: unknown[] }).children ?? []
   const y = lines.findIndex(l => /^dse/.test(shown(l)))
   expect(y).toBeGreaterThan(0)
+  // on dse's pages
   await ui.pointer({ type: 'down', x: 12, y, button: 'right', in: key } as never)
   await ui.pointer({ type: 'up', x: 12, y, button: 'right', in: key } as never)
   await ui.unmount()
+  expect(w.opened).toEqual(['thimble-term'])
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('dse · pages: 3908')
-  expect((await pane.find({ key: 'menu-open' }))?.text).toBe('open its cell')
-  expect(await pane.find({ key: 'menu-thread' })).toBeDefined()
-  expect(await pane.find({ key: 'menu-card' })).toBeDefined()
-  await pane.press({ key: 'menu-open' })
-  await w.clock.settle()
-  await pane.redraw()
   const text = shown(await pane.drawn())
-  expect(text).toContain('the value is at its place')
-  expect(text).toContain('What does the export hold per wiki?')
-  // the cited cell on the selection background, in the card drawn under it
-  expect(JSON.stringify(await pane.drawn())).toMatch(/"backgroundColor":"selectionBg"\},"children":\["3908"\]/)
+  expect(text).toContain('New thread')
+  expect(text).toContain('dse')
+  expect(await pane.find({ key: 'menu-open' })).toBeUndefined()
+  await pane.input({ key: 'ask-new', text: 'Why so many?' })
+  await w.clock.settle()
+  expect(w.acts.find(a => a.kind === 'thread')?.payload).toMatchObject({ anchor: 'card:ff73e071', message: 'Why so many?' })
   await pane.unmount()
 })
 
-test("a label card's verdict goes to thimble as the analyst's, and the label is read again", async ($, on) => {
+test("a label card is a bar card of its counts with the label's row; a press on the label's name opens the label panel", async ($, on) => {
   const w = world(on)
   await start($, w)
   await turn($, w, [['r1', 'Labelled.']], { tool: 'mcp__plugin_thimble_thimble__apply_label', text: "applied label links [[concept:d9b51617]] over 14591 record(s): proxy-link 5191, none 9400. The label's card is [[card:l0label0]]." })
   const ui = (await $.ui.mount(MESSAGE('r1', 'Labelled.'))) as unknown as M
   const key = 'card-t0-l0label0'
-  expect(shown(await ui.drawn({ in: key }))).toContain('proxy-link')
-  await ui.post({ type: 'label-verdict', card: 'l0label0', slug: 'd9b51617', ref: 'revisions.jsonl#L10566', value: 'none', origin: 'x', gestures: [] }, { in: key })
+  await ui.resize({ columns: 100, rows: 14, in: key })
+  const card = shown(await ui.drawn({ in: key }))
+  expect(card).toContain('proxy-link')
+  expect(card).toContain('links through a fetch proxy')
+  expect(card).not.toContain('agree')
+  // the title in bold, a blank row, the bars, then below them the readout row and the label row: its name after "label  "
+  const lines = ((await ui.drawn({ in: key })) as { children?: unknown[] }).children ?? []
+  expect(shown(lines[0])).toBe("links through a fetch proxy")
+  expect(JSON.stringify(lines[0])).toContain('"bold":true')
+  expect(shown(lines[2])).toMatch(/^proxy-link/)
+  const y = lines.findIndex(l => /^label {2}links through a fetch proxy/.test(shown(l)))
+  expect(y).toBeGreaterThan(2)
+  await ui.pointer({ type: 'down', x: 7 + 3, y, button: 'left', in: key } as never)
+  await ui.pointer({ type: 'up', x: 7 + 3, y, button: 'left', in: key } as never)
   await ui.unmount()
-  expect(w.acts).toContainEqual({ kind: 'verdict', payload: { label: 'd9b51617', ref: 'revisions.jsonl#L10566', value: 'none' } })
-  expect(w.calls.filter(c => c[2] === 'label').length).toBeGreaterThanOrEqual(2)
+  await w.clock.settle()
+  expect(w.opened).toEqual(['thimble-term'])
+  const pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.drawn())).toContain('labels › links through a fetch proxy')
+  await pane.unmount()
 })
 
-test("a side thread asked about a card: the ask field posts the thread, and the panel shows it", async ($, on) => {
+test("a side thread asked about a card: the ask field posts the thread, and the threads panel shows it selected under the tree", async ($, on) => {
   const w = world(on)
   await start($, w)
   await turn($, w, [['r1', 'Here.']])
@@ -292,16 +320,20 @@ test("a side thread asked about a card: the ask field posts the thread, and the 
   await ui.press({ key: 'ask-card-0' })
   await ui.unmount()
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('ask about card')
+  expect(shown(await pane.drawn())).toContain('New thread')
   await pane.input({ key: 'ask-new', text: 'Why is dse so big?' })
   await w.clock.settle()
   expect(w.acts).toContainEqual({ kind: 'thread', payload: { anchor: 'card:ff73e071', message: 'Why is dse so big?' } })
   await pane.redraw()
-  expect(shown(await pane.drawn())).toContain('"a question"')
+  const text = shown(await pane.drawn())
+  expect(text).toContain('Threads')
+  expect(text).toContain('"a question"')
+  expect(shown(await pane.drawn({ in: 'm:threads-tree' }))).toContain('main')
+  expect((await pane.findAll({ type: 'Input' })).length).toBe(1)
   await pane.unmount()
 })
 
-test("an answer that comes in while the panel shows something else: a row under main's latest row, and news above the prompt", async ($, on) => {
+test("an answer that comes in while the panel shows something else: a `↳ thread` row under main's latest row, `new` in green", async ($, on) => {
   const w = world(on)
   await start($, w)
   await turn($, w, [['r1', 'Asked.']])
@@ -311,7 +343,8 @@ test("an answer that comes in while the panel shows something else: a row under 
   await w.clock.advance(1100)
   const ui = (await $.ui.mount(MESSAGE('r1', 'Asked.'))) as unknown as M
   const text = shown(await ui.drawn())
-  expect(text).toContain('↳ thread · "which pages were deleted?" new · answered')
+  expect(text).toContain('↳ thread · "which pages were deleted?" · answered · new')
+  expect(JSON.stringify(await ui.drawn())).toContain('{"type":"Text","props":{"color":"success"},"children":[" · new"]}')
   await ui.press({ key: 'signal-open-t2' })
   await ui.unmount()
   // opening it marks it seen in the chat's meta
@@ -326,30 +359,31 @@ async function rowOf(m: M, key: string, text: string): Promise<number> {
   return rows.findIndex(r => shown(r).includes(text))
 }
 
-test('from home, a document opens with its sections, its figures as cards and its citations as links', async ($, on) => {
+test('from home, a document opens drawn as a reply: its title, its contents, each section bold, its figures as cards in their borders', async ($, on) => {
   const w = world(on)
   await start($, w)
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
   await w.clock.settle()
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  const y = await rowOf(pane, 'home', 'Agents used the dse wiki as a relay')
+  const y = await rowOf(pane, 'm:home', 'Agents used the dse wiki as a relay')
   expect(y).toBeGreaterThan(0)
-  await pane.pointer({ type: 'down', x: 4, y, button: 'left', in: 'home' } as never)
+  await pane.pointer({ type: 'down', x: 4, y, button: 'left', in: 'm:home' } as never)
   await w.clock.settle()
   await pane.redraw()
   const text = shown(await pane.drawn())
-  for (const s of ['home', 'Agents used the dse wiki as a relay', 'document · 2 sections · 2 citations · 1 card', 'Contents', 'The data', 'The main claim', 'The export per wiki.']) expect(text).toContain(s)
-  expect(await pane.find({ type: 'Client', key: 'card-f0-0-ff73e071' })).toBeDefined()
-  expect(shown(await pane.drawn({ in: 'para-d0-0-1' }))).toContain('4579')
+  for (const s of ['home', 'documents', 'Agents used the dse wiki as a relay', 'Contents', '## The data', '## The main claim', 'The export per wiki.']) expect(text).toContain(s)
+  const cards = (await pane.findAll({ type: 'Client' })).filter(c => String((c as { key?: string }).key).includes('ff73e071'))
+  expect(cards.length).toBe(1)
+  expect(shown(await pane.drawn({ in: 'para-d0-2' }))).toContain('4579')
   // back leads home again
   await pane.press({ key: 'nav-back' })
   await w.clock.settle()
   await pane.redraw()
-  expect(await pane.find({ type: 'Client', key: 'home' })).toBeDefined()
+  expect(await pane.find({ type: 'Client', key: 'm:home' })).toBeDefined()
   await pane.unmount()
 })
 
-test("a tool's layout record opens the files; a file opens on its lines; an agent's pane opens from the row above the prompt", async ($, on) => {
+test("a tool's layout record opens the file browser: folders that fold, a file chosen shows its first lines, Enter opens it", async ($, on) => {
   const w = world(on)
   await start($, w)
   // set_layout(files) in a tool call of main's: a record in ui.jsonl, which the renderer follows
@@ -358,18 +392,26 @@ test("a tool's layout record opens the files; a file opens on its lines; an agen
   await w.clock.advance(1100)
   expect(w.opened).toEqual(['thimble-term'])
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  let text = shown(await pane.drawn())
-  for (const s of ['Files', '3 files', 'README.md', 'data/', 'events.jsonl', 'records', '52.0 MB']) expect(text).toContain(s)
-  await pane.press({ key: 'file-open-1' })
+  const tree = shown(await pane.drawn({ in: 'm:files-tree' }))
+  for (const s of ['▾ wiki/', 'README.md', '▸ data/', 'markdown', '52.0 MB']) expect(tree).toContain(s)
+  expect(shown(await pane.drawn())).toContain('3 files')
+  // a click on a file chooses it: its first lines under the second rule
+  const y = await rowOf(pane, 'm:files-tree', 'README.md')
+  await pane.pointer({ type: 'down', x: 6, y, button: 'left', in: 'm:files-tree' } as never)
   await w.clock.settle()
   await pane.redraw()
-  text = shown(await pane.drawn())
-  for (const s of ['README.md', 'markdown · 20 lines · lines 1-3', 'Collusion wiki', 'An export of 4,579']) expect(text).toContain(s)
+  expect(shown(await pane.drawn())).toContain('Collusion wiki')
+  // a second click opens it on its lines
+  await pane.pointer({ type: 'down', x: 6, y, button: 'left', in: 'm:files-tree' } as never)
+  await w.clock.settle()
+  await pane.redraw()
+  const text = shown(await pane.drawn())
+  for (const s of ['files › README.md', 'markdown · 20 lines · lines 1-3', 'Collusion wiki', 'An export of 4,579']) expect(text).toContain(s)
   expect(w.calls.some(c => c[2] === 'files' && c[5] === 'README.md')).toBe(true)
   await pane.unmount()
 })
 
-test("a label's panel: its definition, its counts and its records with agree and disagree", async ($, on) => {
+test("a label's panel: its name, type and scope, a rule, its pattern to edit; run on a sample or on all; counts, examples and cards folded", async ($, on) => {
   const w = world(on)
   await start($, w)
   await turn($, w, [['r1', 'Labelled.']], { tool: 'mcp__plugin_thimble_thimble__apply_label', text: "The label's card is [[card:l0label0]]." })
@@ -377,16 +419,59 @@ test("a label's panel: its definition, its counts and its records with agree and
   await ui.post({ type: 'label-open', slug: 'd9b51617', origin: 'y', gestures: [] }, { in: 'card-t0-l0label0' })
   await ui.unmount()
   await w.clock.settle()
-  const pane = (await $.ui.mount(PANE)) as unknown as M
-  const text = shown(await pane.drawn())
-  for (const s of ['links through a fetch proxy', 'regex · revisions.jsonl', 'A revision whose text links']) expect(text).toContain(s)
-  const card = shown(await pane.drawn({ in: 'label-d9b51617' }))
-  expect(card).toContain('proxy-link')
-  expect(card).toContain('disagree')
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  let drawn = await pane.drawn()
+  let text = shown(drawn)
+  // the header block: the name in the accent and bold after a ● in its colour, the type in use on the selection
+  // background, the scope (its files, a field, and how many records); then the rule and the pattern, a field
+  for (const s of ['name', 'links through a fetch proxy', 'type', 'prompt', 'regex', 'code', 'scope', '· 14,591 records', '──', 'pattern', 'run on a sample', 'run on all 14,591', '▸ counts', '▸ examples', '▸ cards']) expect(text).toContain(s)
+  const json = JSON.stringify(drawn)
+  expect(json).toMatch(/"color":"suggestion","bold":true\},"children":\["links through a fetch proxy"\]/)
+  expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["regex"]}')
+  // the pattern whole in its field (field.tsx), in a border
+  const field = (await pane.find({ type: 'Client', key: `lb-def-${LABEL.id}-regex` })) as unknown as { props: { module: string; props: { name: string; text: string } } }
+  expect(field.props.module).toMatch(/field\.tsx$/)
+  expect(field.props.props).toMatchObject({ name: 'label-body:d9b51617', text: 'r\\.jina\\.ai|proxy\\.' })
+  expect((await pane.find({ type: 'Input', key: `lb-glob-${LABEL.id}` }))?.props).toMatchObject({ value: 'revisions.jsonl' })
+  // nothing else until it is opened: no counts' bars, no records, no cards
+  for (const s of ['SEC download', 'agree', 'r.jina.ai link', 'links through a fetch proxy ›', '9,400']) expect(text).not.toContain(s)
+  // the examples open: each record under its value, its place a link, agree or another value, its words, why
+  await pane.press({ key: 'lb-open-examples' })
+  await pane.press({ key: 'lb-open-counts' })
+  await pane.press({ key: 'lb-open-cards' })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  text = shown(await pane.drawn())
+  for (const s of ['▾ examples', 'SEC download', 'agree', 'it is', '✓ agreed', 'why  r.jina.ai link', '▾ counts', '9,400', '5,191', '▾ cards', 'links through a fetch proxy ›']) expect(text).toContain(s)
+  await pane.press({ key: 'lb-agree-revisions.jsonl#L10566' })
+  await w.clock.settle()
+  expect(w.acts).toContainEqual({ kind: 'verdict', payload: { label: 'd9b51617', ref: 'revisions.jsonl#L10566', value: 'proxy-link' } })
+  // an edit of the pattern: Enter in the field saves it through `thimble act label`
+  await pane.post({ type: 'field', name: 'label-body:d9b51617', text: 'jina', save: true, origin: 'f1', gestures: [] }, { in: `lb-def-${LABEL.id}-regex` })
+  await w.clock.settle()
+  expect(w.acts).toContainEqual({ kind: 'label', payload: { label: 'd9b51617', body: 'jina' } })
+  // another type picked, then a run: the kind and the words typed are saved first, then the label runs on a sample
+  await pane.press({ key: 'lk-prompt' })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["prompt"]}')
+  expect(shown(await pane.drawn())).toContain('prompt')
+  await pane.post({ type: 'field', name: 'label-body:d9b51617', text: 'Does the text link through a proxy?', save: false, origin: 'f2', gestures: [] }, { in: `lb-def-${LABEL.id}-prompt` })
+  await pane.press({ key: 'lb-sample' })
+  await w.clock.settle()
+  const runs = w.acts.filter(a => a.kind === 'label-run')
+  expect(runs.at(-1)).toEqual({ kind: 'label-run', payload: { label: 'd9b51617', limit: 30 } })
+  expect(w.acts.filter(a => a.kind === 'label').at(-1)!.payload).toEqual({ label: 'd9b51617', kind: 'prompt', body: 'Does the text link through a proxy?' })
+  await pane.redraw()
+  expect(shown(await pane.drawn())).toContain('ran on a sample of 30: proxy-link 12 · none 18')
+  // run on all: no limit
+  await pane.press({ key: 'lb-all' })
+  await w.clock.settle()
+  expect(w.acts.filter(a => a.kind === 'label-run').at(-1)).toEqual({ kind: 'label-run', payload: { label: 'd9b51617' } })
   await pane.unmount()
 })
 
-test('a deck opens with its slides: each heading, its sentences as bullets, its figure as a card', async ($, on) => {
+test('a deck opens with its slides: each heading, its sentences as a list, its figure as a card', async ($, on) => {
   const w = world(on)
   w.states.home = { ...w.states.home, docs: { ...w.states.home.docs, slides: { exists: true, title: SLIDES.title } } as typeof w.states.home.docs }
   w.states.docs = { ...w.states.docs, slides: { exists: true, title: SLIDES.title, renderer: 'slides', name: 'Slides' } as typeof w.states.docs.slides }
@@ -394,16 +479,16 @@ test('a deck opens with its slides: each heading, its sentences as bullets, its 
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
   await w.clock.settle()
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  const y = await rowOf(pane, 'home', SLIDES.title)
+  const y = await rowOf(pane, 'm:home', SLIDES.title)
   expect(y).toBeGreaterThan(0)
-  await pane.pointer({ type: 'down', x: 4, y, button: 'left', in: 'home' } as never)
+  await pane.pointer({ type: 'down', x: 4, y, button: 'left', in: 'm:home' } as never)
   await w.clock.settle()
   await pane.redraw()
-  let text = shown(await pane.drawn())
-  for (const s of ['slides · 2 slides · 1 citation · 2 cards', 'The export is large', 'What it leaves open', 'Most are agents', 'One week only.', 'The export per wiki.', 'Who acted on what.']) expect(text).toContain(s)
+  const text = shown(await pane.drawn())
+  for (const s of [SLIDES.title, 'The export is large', 'What it leaves open', 'Most are agents', 'One week only.', 'The export per wiki.', 'Who acted on what.']) expect(text).toContain(s)
   await w.clock.settle()  // the figures' cards are read, then drawn
   await pane.redraw()
-  expect(await pane.find({ type: 'Client', key: 'card-f0-0-ff73e071' })).toBeDefined()
-  expect(await pane.find({ type: 'Client', key: 'card-f1-0-d0diag00' })).toBeDefined()
-  await pane.unmount()
+  const keys = (await pane.findAll({ type: 'Client' })).map(c => String((c as { key?: string }).key))
+  expect(keys.some(k => k.includes('ff73e071'))).toBe(true)
+  expect(keys.some(k => k.includes('d0diag00'))).toBe(true)
 })
