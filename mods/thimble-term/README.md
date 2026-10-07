@@ -75,7 +75,7 @@ Claude Code's panel chrome, no right-click menu.
   code with what it printed; a citation (its value as a link with `◌` or a red `×`, its status in plain words, the
   sentence it stands in, its lines with the value marked or the card it names with the cited mark lit, a `follow-up`
   field when opened from a side thread); the threads (a tree with a root per place, `main` or `report "…"`, the selected
-  thread under it, `stop` while it answers, the ask field); a label; the documents and one document (a report with its
+  thread under it, `stop` while it answers, `hand back to main` once it answered, the ask field); a label; the documents and one document (a report with its
   contents, a deck or a story one slide or beat at a time, the retell controls); the file browser (folders that fold,
   each folder's size, the chosen file's first lines as the file holds them) and a file (`Table`, `Transcript`, `Raw`,
   each line as the file holds it, the chosen record's place and `?`); an agent;
@@ -123,6 +123,7 @@ route for it:
 | `thimble act label-run --cwd <dir> {label, limit?}` | a run on a sample (`limit`) or on every record; it answers once the run ends, so the renderer starts it beside the session (`$.process.spawn`), which it ends with; a code label's answer is the `thimble-run label` command (`deferred`) |
 | `thimble act label-stop --cwd <dir> {label}` | stop a run `label-run` started, after its current record (the run's process watches for the stop file this writes) |
 | `thimble act seen --cwd <dir> {thread}` | the thread's answers read |
+| `thimble act hand-back --cwd <dir> {thread}` | a finished thread's answer sent to main as the analyst's message, `From thread "<question>": <answer>` (the thread's meta then says `hand_back: handed`) |
 | `thimble act stop --cwd <dir> {agent}` | stop one of thimble's agents, or a side thread's fork |
 
 It sees a change without starting Python: once a second it lists the workspace's folders (`notebooks`, `concepts`,

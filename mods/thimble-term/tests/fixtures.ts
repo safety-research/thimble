@@ -276,6 +276,12 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       const payload = JSON.parse(rest[0] ?? '{}') as Record<string, unknown>
       w.acts.push({ kind: what!, payload })
       if (what === 'thread') return out({ ok: true, thread: 't9' })
+      // a thread's answer handed back to main: its meta says so from then on, as thimble's does (threads.hand_back_state)
+      if (what === 'hand-back') {
+        const chat = w.chats[String(payload.thread)] as { meta: Record<string, unknown> } | undefined
+        if (chat) chat.meta = { ...chat.meta, hand_back: 'handed' }
+        return out({ ok: true, thread: payload.thread, hand_back: 'handed' })
+      }
       // a label deleted leaves the labels and home; one that is not there is refused, as thimble refuses it
       if (what === 'label-delete') {
         const ls = w.states.labels as { id: string; name?: string }[]

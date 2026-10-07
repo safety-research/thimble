@@ -6,7 +6,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { labelHue } from '../hooks/home'
-import { CWD, WS, shown, takesKeys, world } from './fixtures'
+import { CWD, THREAD_T1, WS, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -62,6 +62,34 @@ test("a thread that answers: what it is about, dim, before its first question; `
   await pane.input({ key: field.key!, text: 'And in June?' })
   await w.clock.settle()
   expect(w.toasts).toContain('thimble: the side thread is still answering: your question waits until it ends')
+  await pane.unmount()
+})
+
+test("a finished thread's answer: `hand back to main` (h) sends it to main once, then the panel says it was handed back; a running thread offers none", async ($, on) => {
+  const w = world(on)
+  w.chats.t1 = { meta: { ...THREAD_T1.meta, hand_back: 'offer' }, events: THREAD_T1.events }
+  // a thread still answering offers none, whatever its meta says
+  w.chats.t2 = { meta: { ...w.states.threads[2], hand_back: 'offer' }, events: [{ type: 'user', text: 'which pages were deleted?' }, { type: 'tool_use', id: 'u1', name: 'Bash', input: {} }] }
+  await start($, w)
+  let pane = await home($, w)
+  pane = await homeClick($, w, pane, '"which pages were deleted?"')
+  let text = shown(await pane.drawn())
+  expect(text).not.toContain('hand back')
+  await pane.unmount()
+  pane = await home($, w)
+  pane = await homeClick($, w, pane, '"why is events.jsonl bigger?"')
+  text = shown(await pane.drawn())
+  expect(text).toContain('hand back to main')
+  expect(text).toContain('↑↓ to choose · Enter or a to ask · h to hand back · b to go back · x to close')
+  await pane.press({ key: 'hk-hand-back' })
+  await w.clock.settle()
+  expect(w.acts.filter(a => a.kind === 'hand-back')).toEqual([{ kind: 'hand-back', payload: { thread: 't1' } }])
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  text = shown(await pane.drawn())
+  expect(text).toContain('handed back to main')
+  expect(text).not.toContain('h to hand back')
+  expect(((await pane.findAll({ type: 'Button' })) as { key?: string }[]).some(b => b.key === 'thread-hand-back')).toBe(false)
   await pane.unmount()
 })
 

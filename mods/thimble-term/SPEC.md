@@ -560,6 +560,9 @@ colored is said under each.
 - The selected thread (`❯`, accent) shows under the second rule: what it is about (named as home names it), its
   questions and answers, drawn as main's chat draws a reply, `stop` while it answers, then, a blank row under the
   answer, the field for the next question, its placeholder dim (`ask a follow-up question`); Enter's word is `ask`.
+  Once its run ended with an answer, `hand back to main` (h, named in the hint row) stands where `stop` stood: it sends
+  main `From thread "<question>": <answer>` as the analyst's message (`thimble act hand-back`), which main answers as
+  any message; then `handed back to main`, dim, until a later question's answer can be handed back.
   1-9 open the first nine threads. A thread's answer is its first reply (`reply_in_thread`) or its run's end: what its
   fork writes after the reply, as it makes a card, is its working and is not drawn, and two texts a tool call parts are
   two paragraphs. The cards the thread made stand under its answer, each in its frame, as under main's reply.

@@ -41,7 +41,7 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, crumbsWidth, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, closePanel, deleteLabel, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, readDoc, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
+import { PANEL, closePanel, deleteLabel, handBack, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, readDoc, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -1389,12 +1389,30 @@ function threadLine(t: ChatThread): Seg {
   return dim(first.replace(/\*\*|__|`/g, '').trim() || (t.loading ? '' : 'answered'))
 }
 
+// the threads whose answer is being handed back to main, until `thimble act hand-back` answers
+const handing = new Set<string>()
+
+/** Hand thread `id`'s answer back to main once (handBack), the panel saying so meanwhile; a refusal is a toast. */
+async function handOver(cx: Ctx, id: string): Promise<void> {
+  if (handing.has(id)) return
+  handing.add(id)
+  await cx.bumpPanel()
+  try {
+    const err = await handBack(cx, id)
+    if (err) cx.toast(`thimble: the answer was not handed back: ${err}`)
+  } finally {
+    handing.delete(id)
+    await cx.bumpPanel()
+  }
+}
+
 /** The threads panel (SPEC.md, section 7, "The threads panel"): its title and a dim subtitle; under the rule the
  *  tree, a root per place a thread was asked from (`main`, or `report "…"`) with a blank row between them, each thread
  *  under the thread it was asked from, its question in quotation marks with guides, the first line of its latest
  *  answer dim under it, `N questions` dim and `new` in green at R; the selected thread (`❯`, accent) under the second
  *  rule: what it is about, its questions and answers drawn as main's chat draws a reply, `stop` (s) while it answers,
- *  then the `ask` field. ↑↓ or j k choose, Enter or a give the field the keys, 1-9 open the first nine. */
+ *  `hand back to main` (h) once its run ended with an answer, then the `ask` field. ↑↓ or j k choose, Enter or a give
+ *  the field the keys, 1-9 open the first nine. */
 async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<RenderElement> {
   if (e.surface === 'mobile') return none(cx, e, 'Threads need a surface with text fields.')
   const els = cx.els(e) as El
@@ -1488,6 +1506,10 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
   )
   const keys: Key[] = order.slice(0, 9).map((x, i) => ({ key: `t${i}`, hotkey: String(i + 1), onPress: () => void openThread(cx, x.id) }))
   const stop = t && running && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: t.id }).then(r => (!r.ok ? cx.toast(`thimble: the thread was not stopped: ${r.error}`) : undefined)) : null
+  // whether the thread's answer can be handed back to main (backend threads.hand_back_state): `offer` once its run ended
+  // with one, `handed` once it was
+  const handState = t && !running ? str((await cx.thread(t.id))?.meta?.hand_back) : ''
+  const hand = t && handState === 'offer' && rt.sc && !handing.has(t.id) ? () => void handOver(cx, t.id) : null
   if (t) {
     body.push(ruleEl(els, cols, 'rule-thread'))
     // what it is about, dim, before its first question
@@ -1511,6 +1533,13 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
       body.push(controlsEl(els, [<Button key="thread-stop" label="stop" plain onPress={stop} />], 'thread-controls')!)
       keys.push({ key: 'stop', hotkey: 's', onPress: stop })
     }
+    // a finished answer goes back to main only when the analyst asks: `hand back to main` (h) sends it as their message,
+    // then the panel says so until a later question's answer can be handed back
+    if (handState === 'offer' && handing.has(t.id)) body.push(<Text key="thread-handing" dimColor>◌ handing back to main</Text>)
+    else if (hand) {
+      body.push(controlsEl(els, [<Button key="thread-hand-back" label="hand back to main" plain onPress={hand} />], 'thread-controls')!)
+      keys.push({ key: 'hand-back', hotkey: 'h', onPress: hand })
+    } else if (handState === 'handed') body.push(<Text key="thread-handed" dimColor>handed back to main</Text>)
     // the field for the next question, a blank row under the answer, its placeholder saying what it takes
     body.push(
       <Box key="ask-row" flexDirection="row" marginTop={1}>
@@ -1532,7 +1561,7 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
     )
     keys.push({ key: 'ask', hotkey: 'a', onPress: () => void focusAsk() })
   }
-  body.push(hintsRow(els, ['↑↓ to choose', ...(t ? ['Enter or a to ask'] : []), ...(stop ? ['s to stop'] : [])], cols))
+  body.push(hintsRow(els, ['↑↓ to choose', ...(t ? ['Enter or a to ask'] : []), ...(stop ? ['s to stop'] : []), ...(hand ? ['h to hand back'] : [])], cols))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }

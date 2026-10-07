@@ -839,6 +839,15 @@ export async function threadMessage(cx: Ctx, thread: string, message: string): P
   return { error: '', queued: (got.value as { queued?: unknown }).queued === true }
 }
 
+/** Hand a finished thread's answer back to main as the analyst's message (`thimble act hand-back`): why it was refused,
+ *  '' when sent. The thread is read again, so its panel says it was handed back. */
+export async function handBack(cx: Ctx, thread: string): Promise<string> {
+  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+  const got = await act(cx, rt.sc, 'hand-back', { thread })
+  await readThread(cx, thread)
+  return got.ok ? '' : got.error
+}
+
 // ------------------------------------------------------------------------------------------------ labels
 
 /** What the label panel changes of a label (`thimble act label`): its kind, its prompt (or pattern or code), its files,
