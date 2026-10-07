@@ -26,7 +26,8 @@
   .line > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font: 400 var(--text-xs) / 1.6 var(--font-body); }
   .line time, .link time { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.6 var(--font-mono); font-variant-numeric: tabular-nums; }
   .line .text { color: var(--text-primary); font-size: var(--text-sm); }
-  .line .failed { color: var(--status-negative); }
+  /* a failed outcome in the ink's own gray with a ✕, since only Color by's choice takes a color */
+  .line .failed { color: var(--text-primary); }
   /* an event opened in place: its whole text, the fields its line leaves out, what it answers and what answers it,
      and its lines as the file holds them */
   .thimble-details { padding: 2px 0 10px 70px; cursor: default; font: 400 var(--text-xs) / 1.5 var(--font-body); }
@@ -169,12 +170,13 @@ function drawLanes() {
   lanes.innerHTML = s
 }
 
-// the events in the range, a heading for each day, each row with a 3 px bar in its Color by color
+// the events in the range, a heading for each day, each row with a 3 px bar in its Color by color; a heading is no
+// record, so it takes no label's mark
 function drawList() {
   let h = '', day = ''
   for (const e of E) {
     if (!range.has(e.t)) continue
-    if (dayOf(e.t) !== day) h += `<div class="day" data-anchor="view:${SLUG}/${(day = dayOf(e.t))}">${range.format(e.t, 86400)}</div>`
+    if (dayOf(e.t) !== day) h += `<div class="day">${range.format(e.t, (day = dayOf(e.t), 86400))}</div>`
     const failed = e.outcome === 'failed' ? ' class="failed" title="failed"' : ''
     h += `<div class="ev" data-r="${e.r}" data-anchor="${esc(e.ref)}" data-anchor-text="${esc(e.text)}"${colour.attr(e)}><div class="line"><time>${hms(e.t)}</time><span>${esc(e.source)}</span><span${failed}>${failed ? '✕ ' : ''}${esc(e.kind)}</span><span>${esc(e.actor)}</span><span>${esc(e.incident)}</span><span class="text">${esc(e.text)}</span></div>${e.r === open && detail ? details(detail) : ''}</div>`
   }
@@ -187,6 +189,22 @@ function details(d) {
   return `<div class="thimble-details"><p>${esc(r.text)}</p><dl>${fact('service', r.service)}${fact('severity', r.severity)}${fact('outcome', r.outcome)}${fact('id', r.id)}${fact('took', r.took != null ? dur(r.took) : '')}</dl>` +
     (d.answers ? `<h4>Answers</h4>${link(d.answers)}` : '') + (d.answered.length ? `<h4>Answered by</h4>${d.answered.map(link).join('')}` : '') +
     `<div class="raw">${d.raw.map(([n, s]) => `<b>${n}</b>${esc(s)}`).join('\n')}</div><button class="chip chip-tone-evidence chip-act" type="button" data-file="${esc(d.ref)}" title="Open in the File browser">${esc(d.ref)}</button></div>`
+}
+
+// the viewfinder on an incident's main burst, with a little room on each side: the run of its events with no gap over
+// BURST_GAP that holds the most of them, so a follow-up days later does not shrink the burst to a sliver; the
+// follow-ups stay in the overview
+const BURST_GAP = 6 * 3600
+function frame() {
+  if (!E.length) return
+  let best = [0, 0], from = 0
+  for (let i = 1; i <= E.length; i++) {
+    if (i < E.length && E[i].t - E[i - 1].t <= BURST_GAP) continue
+    if (i - from > best[1] - best[0] + 1) best = [from, i - 1]
+    from = i
+  }
+  const a = E[best[0]].t, b = E[best[1]].t, pad = Math.max(300, (b - a) * 0.05)
+  range.set(a - pad, b + pad)
 }
 
 // an event opened in place from anywhere: a link in another event's details, a lane, a citation
@@ -220,7 +238,13 @@ lanes.addEventListener('click', (ev) => {
 })
 let typing = null
 q.addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(load, 200) })
-inc.addEventListener('change', load)
+// an incident picked in the top row narrows to it and frames its span, as its citation does; All incidents frames the
+// whole span again
+inc.addEventListener('change', async () => {
+  await load()
+  if (inc.value) frame()
+  else range.set(null)
+})
 addEventListener('resize', draw)
 // the label filter changed: fetch again, since the reader keeps only what it keeps
 let filter = null
@@ -237,9 +261,7 @@ thimble.onOpen(async (place) => {
     q.value = ''
     inc.value = t.incident
     await load()
-    if (!E.length) return
-    const a = E[0].t, b = E[E.length - 1].t, pad = Math.max(300, (b - a) * 0.05)
-    return range.set(a - pad, b + pad)
+    return frame()
   }
   if (t.day) { const a = Date.parse(t.day + 'T00:00:00Z') / 1000; return range.set(a, a + 86400) }
   if (t.from && t.to) range.set(Date.parse(t.from + ':00Z') / 1000, Date.parse(t.to + ':00Z') / 1000)

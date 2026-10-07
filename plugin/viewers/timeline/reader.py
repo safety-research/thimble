@@ -38,15 +38,17 @@
 #
 # The records: every source becomes records with the same fields, which the page filters and colors by.
 #   time (in UTC), source (alert, deploy, chat, ticket or agent), kind (fired or resolved; started, finished or
-#   rollback; message; opened, updated or closed; an agent's action), actor (the monitor, a person, a customer or an
-#   agent), service, severity (an alert's severity, a ticket's priority), outcome (ok, failed or held), incident,
-#   answers (the id of the record it answers), took (the seconds since that record), id and text.
+#   rollback; message; opened, updated or closed; an agent's action, its open and close of an incident read as opened
+#   and closed), actor (the monitor, a person, a customer or an agent), service, severity (an alert's severity, a
+#   ticket's priority), outcome (ok, failed or held), incident, answers (the id of the record it answers), took (the
+#   seconds since that record), id and text.
 #
 # The cleaning:
 #   times       every clock becomes seconds since 1970: epoch milliseconds, epoch seconds in a string, ISO 8601 with or
 #               without an offset, and email dates; a time without an offset is local in deploys.csv and UTC in
 #               agents.log
-#   renames     the monitor's svc and msg are read as service and summary, its state in any case
+#   renames     the monitor's svc and msg are read as service and summary, its state in any case; an agent's action
+#               open or close as opened or closed, the words a ticket's messages and the other sources use
 #   missing     an alert with a null service takes the one its summary starts with ("web-2: ..." is web); a ticket the
 #               index does not list, or lists with no priority, has no severity
 #   duplicates  an alert delivered twice is kept once, and the later line opens the first
@@ -64,14 +66,18 @@
 #               set an agent off become `answers`, the record answered
 #
 # The method: the index keeps every record as a row of small integers (time, file, line, each field's value as an
-# index into that field's names, the row it answers) in time order, with its id, the lines its record spans, and
-# the byte offset of every line. A record's line is the one that holds its text, so a label, which reads a file line
-# by line, marks that line. `records` answers the page's one question, the events it shows: it reads each record's
+# index into that field's names, the row it answers) in time order, with its id, the lines its record spans, its ref,
+# and the byte offset of every line. A record's line is the one that holds its text. Its ref is the one thimble's labels
+# key it by, so a label's value shows on it: a line (<path>#L<n>) in a file of lines (an alert, an agent's action, a
+# ticket's message, by the line its text starts on), a JSON value in a chat file (chat/<channel>.json#/messages/<i>,
+# the i-th of its messages from 0) and a row of deploys.csv (deploys.csv#row=<n>, from 1 after the header). `records`
+# answers the page's one question, the events it shows: it reads each record's
 # fields and text back from the file by seeking to its lines, keeps those of the incident and the search the page
 # asks for, and gives each its value under the page's Color by, OVERVIEW_ROWS rows a fetch as columns, so the page
 # draws its lanes, its time range and its list from one answer. A record's details carry its lines as the file holds
 # them, which the page shows beside the fields the reader made of them.
 #
+# Places: a line (L<n>), a chat message (/messages/<i>) and a deploy's row (row=<n>), each the record opened in place.
 # Units: an incident (INC-312), a day (2026-05-16) and a window of time (2026-05-16T08:00..2026-05-16T09:00).
 #
 # Labels: they apply when records are served, never in the index. Every answer keeps only the records thimble.kept(ref)
@@ -93,6 +99,7 @@ T, F, L = 0, 1, 2  # a row's time, file and line; the fields' values follow, the
 RE = 3 + len(FIELDS)  # the row the record answers, or -1
 LOCAL = timezone(timedelta(hours=1))  # the operator's clock in May, which deploys.csv writes
 OUTCOMES = ("ok", "failed", "held")
+ACTIONS = {"open": "opened", "close": "closed"}  # an agent's action, in the words the other sources use
 PRIORITIES = ("urgent", "high", "normal", "low")
 TEXT_MAX = 400  # characters of a record's text a list row gets
 UNIT_REFS = 200  # refs a unit's citation carries
@@ -179,10 +186,12 @@ def _csv_rows(lines, fi, ctx):
         done = rows.line_num
 
 
-def _rec(fi, line, span, t, source, kind, actor, service, severity, outcome, incident, rid, key=None, re_key=None):
-    """A record found while indexing: `key` is how other records name it, `re_key` how it names the one it answers."""
+def _rec(fi, line, span, t, source, kind, actor, service, severity, outcome, incident, rid, key=None, re_key=None,
+         frag=None):
+    """A record found while indexing: `key` is how other records name it, `re_key` how it names the one it answers,
+    `frag` its ref's fragment when thimble's labels key it by more than its line (a JSON value, a CSV row)."""
     vals = map(_str, (source, kind, actor, service, severity, outcome, incident))
-    return {"t": t, "f": fi, "line": line, "span": span, "id": rid, "key": key, "re": re_key,
+    return {"t": t, "f": fi, "line": line, "span": span, "id": rid, "key": key, "re": re_key, "frag": frag,
             "vals": dict(zip(FIELDS, vals, strict=True))}
 
 
@@ -217,11 +226,12 @@ def _alerts(lines, fi, ctx):
 
 
 def _deploys(lines, fi, ctx):
-    header, incidents = None, {}  # each deploy's incident, which its later events share
+    header, incidents, row = None, {}, 0  # each deploy's incident, which its later events share
     for n, last, cells in _csv_rows(lines, fi, ctx):
         if header is None:
             header = ctx["headers"][fi] = [c.strip().lower() for c in cells]
             continue
+        row += 1  # the row's number after the header, as thimble cites it (deploys.csv#row=<n>)
         r = dict(zip(header, cells, strict=False))
         event, dep, login = _str(r.get("event")).lower(), _str(r.get("deploy")), _str(r.get("by"))
         first = event in ("started", "rollback")
@@ -231,7 +241,7 @@ def _deploys(lines, fi, ctx):
         actor = ctx["people"].get(login.lower(), login)
         yield _rec(fi, n, (n, last), _epoch(r.get("time"), LOCAL), "deploy", event, actor, r.get("service"), "",
                    _word(r.get("result"), OUTCOMES), incident, dep,
-                   key=("deploy", dep) if first else None, re_key=None if first else ("deploy", dep))
+                   key=("deploy", dep) if first else None, re_key=None if first else ("deploy", dep), frag=f"row={row}")
 
 
 def _json_items(text, key):
@@ -266,7 +276,7 @@ def _chat(lines, fi, ctx):
     line_of = lambda pos: bisect.bisect_right(starts, pos)  # noqa: E731
     channel = _str(doc.get("channel")) or PurePosixPath(ctx["files"][fi]).stem
     own = channel.upper() if re.fullmatch(r"inc-\d+", channel, re.I) else ""
-    for m, a, b in _json_items(text, "messages"):
+    for k, (m, a, b) in enumerate(_json_items(text, "messages")):
         if not isinstance(m, dict):
             _problem(ctx, fi, line_of(a), "not a chat message: not a JSON object")
             continue
@@ -283,7 +293,7 @@ def _chat(lines, fi, ctx):
         line = line_of(at if at >= 0 else a)
         yield _rec(fi, line, (line_of(a), line_of(b - 1)), _epoch(ts), "chat", "message", actor, "", "", "",
                    own or (found.group(0) if found else ""), f"{channel}/{ts}", key=("chat", channel, ts),
-                   re_key=("chat", channel, thread) if thread and thread != ts else None)
+                   re_key=("chat", channel, thread) if thread and thread != ts else None, frag=f"/messages/{k}")
 
 
 def _message(lines):
@@ -345,8 +355,9 @@ def _log(lines, fi, ctx):
         via = r.get("via", "").split("/", 1)
         cause = (("alert", r["alert"]) if r.get("alert") else ("ticket", r["ticket"]) if r.get("ticket")
                  else ("chat", *via) if len(via) == 2 else None)
-        yield _rec(fi, n, (n, n), _epoch(r["time"]), "agent", r.get("action"), r["agent"], r.get("service"), "",
-                   _word(r.get("result"), OUTCOMES), r.get("incident"), "", re_key=cause)
+        action = _str(r.get("action")).lower()
+        yield _rec(fi, n, (n, n), _epoch(r["time"]), "agent", ACTIONS.get(action, action), r["agent"], r.get("service"),
+                   "", _word(r.get("result"), OUTCOMES), r.get("incident"), "", re_key=cause)
 
 
 SOURCES = {".jsonl": _alerts, ".csv": _deploys, ".json": _chat, ".txt": _ticket, ".log": _log}
@@ -383,7 +394,8 @@ def build_index(paths):
     """{"rows": [[epoch, file, line, *field values, re row]] in time order, "ids": [id per row], "spans": [[first line,
     last line] per row], "files": [path], "kinds": [each file's suffix, "" for a lookup], "headers": {file: csv
     header}, "names": {field: [name]} (index 0 is "", a record without the field), "offsets": [[byte offset of line n at
-    n-1] per file], "at_line": [[firsts, lasts, rows] per file, the lines each row's record spans], "answered": {row:
+    n-1] per file], "at_line": [[firsts, lasts, rows] per file, the lines each row's record spans], "recs": [each row's
+    ref fragment when it is no line, else None], "at_rec": {such a ref: row}, "answered": {row:
     [rows that answer it]}, "units": {incident: [first row, last row]}, "problems": [{ref, why}] of the lines that do
     not parse}."""
     files = list(paths)
@@ -417,7 +429,7 @@ def build_index(paths):
     kept.sort(key=lambda r: (r["t"], r["f"], r["line"]))
     names = {f: [""] for f in FIELDS}
     at = {f: {"": 0} for f in FIELDS}
-    rows, keys = [], {}
+    rows, keys, recs = [], {}, []
     for i, r in enumerate(kept):
         r["row"] = i
         if r["key"]:
@@ -430,6 +442,7 @@ def build_index(paths):
                 names[f].append(v)
             vals.append(at[f][v])
         rows.append([r["t"], r["f"], r["line"], *vals, -1])
+        recs.append(r["frag"])
     for r in kept:
         if r["re"]:
             rows[r["row"]][RE] = keys.get(r["re"], -1)
@@ -447,9 +460,10 @@ def build_index(paths):
             units.setdefault(names["incident"][row[inc]], [i, i])[1] = i
         if row[RE] >= 0:
             answered.setdefault(row[RE], []).append(i)
+    at_rec = {f"{files[r['f']]}#{r['frag']}": r["row"] for r in kept if r["frag"]}
     return {"rows": rows, "ids": [r["id"] for r in kept], "spans": [list(r["span"]) for r in kept], "files": files,
             "kinds": kinds, "headers": ctx["headers"], "names": names, "offsets": offsets, "at_line": at_line,
-            "answered": answered, "units": units, "problems": ctx["problems"]}
+            "recs": recs, "at_rec": at_rec, "answered": answered, "units": units, "problems": ctx["problems"]}
 
 
 def _text_of(kind, lines, header):
@@ -503,8 +517,9 @@ def _text(r, field):
 
 
 def _ref(index, i):
-    row = index["rows"][i]
-    return f"{index['files'][row[F]]}#L{row[L]}"
+    """The row's record as thimble's labels key it: its JSON value or CSV row, else its line."""
+    row, frag = index["rows"][i], index["recs"][i]
+    return f"{index['files'][row[F]]}#{frag}" if frag else f"{index['files'][row[F]]}#L{row[L]}"
 
 
 def _kept(index, i, keep=()):
@@ -610,7 +625,8 @@ def _at_line(index, fi, n):
 
 
 def resolve(index, locator):
-    """<file>#L<n>: the record on that line, or the nearest one, chosen in the time around it.
+    """<file>#L<n>: the record on that line, or the nearest one, chosen in the time around it. <chat file>#/messages/<i>
+    and deploys.csv#row=<n>: that message or row.
     view:<slug>/<incident>: every record of the incident, filtered to it. view:<slug>/<YYYY-MM-DD>: the records of one
     day in UTC, that day picked. view:<slug>/<from>..<to>: the records between two UTC times, zoomed to them."""
     rows = index["rows"]
@@ -639,21 +655,27 @@ def resolve(index, locator):
         span = f"{_when(a)} to {_when(b)[-5:]}" if _when(a)[:-5] == _when(b)[:-5] else f"{_when(a)} to {_when(b)}"
         return _unit(index, found, f"{span} · {len(found)} records", key, {"from": _iso(a), "to": _iso(b)})
     path, fragment = locator.get("path"), str(locator.get("fragment") or "")
+    if path not in index["files"]:
+        return None
     m = re.fullmatch(r"L(\d+)", fragment)
-    if not m or path not in index["files"]:
-        return None
-    hit = _at_line(index, index["files"].index(path), int(m.group(1)))
-    if hit is None:
-        return None
-    i, a, b = hit
+    if m:
+        hit = _at_line(index, index["files"].index(path), int(m.group(1)))
+        if hit is None:
+            return None
+        i, a, b = hit
+        cite = f"{path}#L{a}" if a == b else f"{path}#L{a}-L{b}"
+    else:  # a chat message or a deploy's row, cited as thimble's labels key it
+        i = index["at_rec"].get(f"{path}#{fragment}")
+        if i is None:
+            return None
+        cite = _ref(index, i)
     r = _read(index, [i]).get(i, {})
     text = _text(r, "text") or _text(r, "kind")
     if not text:
         return None
     inc = _text(r, "incident") or None
     return {"excerpt": text, "label": f"{_text(r, 'actor') or _text(r, 'source')} · {_when(rows[i][T])}",
-            "refs": [f"{path}#L{a}" if a == b else f"{path}#L{a}-L{b}"],
-            "key": inc if inc in index["units"] else None, "target": {"r": i}}
+            "refs": [cite], "key": inc if inc in index["units"] else None, "target": {"r": i}}
 
 
 def problems(index):

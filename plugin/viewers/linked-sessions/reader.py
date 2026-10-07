@@ -61,7 +61,6 @@ from datetime import datetime, timezone
 
 import thimble
 
-NO_FILE = "no file"
 LEAD = "lead"
 TEST_PATH = re.compile(r"(^|/)tests?/|(^|/)test_[^/]*$")
 TOOL_NAMES = {"Agent": "Task"}
@@ -90,9 +89,10 @@ def _epoch(t):
 
 
 def _ftype(files):
-    """A call's file type, from its first file: the extension, marked test for a file under tests/ or named test_*."""
+    """A call's file type, from its first file: the extension, marked test for a file under tests/ or named test_*;
+    None for a call with no file, which Color by counts with the records that have no value."""
     if not files:
-        return NO_FILE
+        return None
     f = str(files[0])
     name = f.rsplit("/", 1)[-1]
     ext = "." + name.rsplit(".", 1)[1] if "." in name else name

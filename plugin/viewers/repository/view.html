@@ -23,10 +23,13 @@
   /* the activity column's head is the axis of every row's strip, its labels as the axis writes them */
   th.act { text-transform: none; letter-spacing: 0; padding-bottom: 0; }
   .id, .dim { color: var(--text-tertiary); }
-  /* a title with its flags after it, which go to a second line when the cell is short of room, cut short there */
+  /* a title with its flags after it, in gray (only Color by's choice takes a color), which wrap onto more lines when
+     the cell is short of room rather than being cut */
+  .table td.t { white-space: normal; }
   .title { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; min-width: 0; }
-  .title b { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font: 500 var(--text-sm) / 1.4 var(--font-body); }
-  .flags { display: flex; gap: 4px; min-width: 0; max-width: 100%; }
+  .title b { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--text-sm) / 1.4 var(--font-body); }
+  .flags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; max-width: 100%; }
+  .flags .chip { max-width: 100%; }
   .strip { display: block; }
   .strip line { stroke: var(--border-strong); }
   .strip rect { fill: var(--viz-ink-3); }
@@ -57,8 +60,8 @@
   <div id="range"></div>
   <div id="list">
     <table class="table">
-      <colgroup><col class="c-id"><col><col class="c-area"><col class="c-who"><col class="c-state"><col class="c-act"></colgroup>
-      <thead><tr><th>Item</th><th>Title</th><th>Area</th><th>Author</th><th>State</th><th class="act"><div id="axis"></div></th></tr></thead>
+      <colgroup id="cols"></colgroup>
+      <thead><tr id="heads"></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
@@ -78,6 +81,9 @@ let open = null // the key of the item opened in place
 let focus = null // the record a citation opened
 let want = null // a place thimble asked for before the items arrived
 const units = new Map() // each opened item's records (reader.py _detail)
+// the table's columns between Title and the activity strip, each shown only while an item of the kind has a value in it
+const COLS = [{ key: 'area', title: 'Area', cls: 'c-area', td: 'dim' }, { key: 'author', title: 'Author', cls: 'c-who' }, { key: 'state', title: 'State', cls: 'c-state' }]
+let shown = COLS // the columns the items of the kind fill
 
 const colour = thimble.colorBy({
   mount: '#colour',
@@ -116,20 +122,32 @@ async function opened(key) {
   return units.get(key)
 }
 
+// the head and the columns for the kind of item: Item, Title, the columns its items fill, and the activity strip,
+// whose head is the axis
+function heads() {
+  const want = COLS.filter((c) => data.items.some((it) => it[c.key] != null && it[c.key] !== ''))
+  if ($('heads').children.length && want.map((c) => c.key).join() === shown.map((c) => c.key).join()) return
+  shown = want
+  $('cols').innerHTML = `<col class="c-id"><col>${shown.map((c) => `<col class="${c.cls}">`).join('')}<col class="c-act">`
+  $('heads').innerHTML = `<th>Item</th><th>Title</th>${shown.map((c) => `<th>${c.title}</th>`).join('')}<th class="act"><div id="axis"></div></th>`
+}
+
 function draw() {
   if (!data) return
+  heads()
   const q = $('q').value.trim().toLowerCase()
   const rows = data.items.filter((it) => (!q || it.search.includes(q)) && (range.full || it.events.some((e) => range.has(e[0]))))
   const sc = range.scale($('axis').clientWidth)
   thimble.timeAxis('#axis', sc, { marks })
   $('rows').innerHTML = rows.map((it) => row(it, sc)).join('') ||
-    `<tr><td colspan="6" class="empty">No ${$('kind').selectedOptions[0].text.toLowerCase()}</td></tr>`
+    `<tr><td colspan="${shown.length + 3}" class="empty">No ${$('kind').selectedOptions[0].text.toLowerCase()}</td></tr>`
 }
 
+const flagChip = (f) => `<span class="chip chip-sans chip-tone-neutral" title="${esc(f)}"><span class="chip-text">${esc(f)}</span></span>`
 const row = (it, sc) => `<tr class="item${it.key === open ? ' active' : ''}" data-key="${esc(it.key)}" data-anchor="view:${slug}/${esc(it.key)}"${colour.attr(it)}>` +
   `<td class="id">${esc(it.run)}${it.number != null ? ' #' + it.number : ''}</td>` +
-  `<td><div class="title"><b>${esc(it.title)}</b>${it.flags.length ? `<span class="flags">${it.flags.map((f) => `<span class="chip chip-tone-negative"><span class="chip-text">${esc(f)}</span></span>`).join('')}</span>` : ''}</div></td>` +
-  `<td class="dim">${esc(it.area)}</td><td>${esc(it.author)}</td><td>${esc(it.state)}</td><td>${strip(it, sc)}</td></tr>` +
+  `<td class="t"><div class="title"><b title="${esc(it.title)}">${esc(it.title)}</b>${it.flags.length ? `<span class="flags">${it.flags.map(flagChip).join('')}</span>` : ''}</div></td>` +
+  shown.map((c) => `<td${c.td ? ` class="${c.td}"` : ''}>${esc(it[c.key])}</td>`).join('') + `<td>${strip(it, sc)}</td></tr>` +
   (it.key === open && units.has(open) ? details(units.get(open)) : '')
 
 // an item's records in the range as ticks in their Color by colors on the range's scale, over a line from its first
@@ -142,9 +160,10 @@ function strip(it, sc) {
   return `<svg class="strip" width="${sc.width}" height="12"><line x1="${x(ev[0])}" x2="${x(ev[ev.length - 1])}" y1="6" y2="6"/>${ev.map((e) => tick(e)).join('')}</svg>`
 }
 
+// an item opened in place: the same issue in the other runs, then its records
 function details(d) {
   const runs = (d.elsewhere || []).map((x) => `<button class="chip chip-sans chip-tone-neutral chip-act" data-go="${esc(x.key)}">${esc(x.run)} #${esc(x.key.split('/')[2])} ${esc(x.state)}</button>`).join('')
-  return `<tr class="thimble-details"><td colspan="6">${runs ? `<div class="runs">${runs}</div>` : ''}${d.records.map(rec).join('')}</td></tr>`
+  return `<tr class="thimble-details"><td colspan="${shown.length + 3}">${runs ? `<div class="runs">${runs}</div>` : ''}${d.records.map(rec).join('')}</td></tr>`
 }
 
 const rec = (r) => `<div class="rec${r.ref === focus ? ' focus' : ''}" data-anchor="${esc(r.ref)}"><time>${r.at.slice(11, 16)}</time>` +
