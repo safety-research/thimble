@@ -85,6 +85,7 @@ KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, n
 # indexes of the card types (cardtypes.py, extensions.card_types)
 INDEXES_SUBDIR = view_indexes.INDEXES_SUBDIR
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
+VIEW_TERM = "view.term.js"  # a view's terminal program, beside its page (term_views.py)
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
 # a view ticket's status on its proposal row; `dropped` is an orientation proposal left out when the analyst stopped the
 # orientation before its view was built. An orientation's proposal carries `held: true` until its view first passes its
@@ -904,10 +905,10 @@ def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]
 
 def write_view(c: str, slug: str, *, name: str, description: str, claims: Any = None, accepts: Any = None,
                units: Any = None, derived: Any = None, libs: Any = None, reader: str, html: str, unit: Any = None,
-               records: Any = None, compare: bool = False, scope: Any = None) -> dict[str, Any]:
+               records: Any = None, compare: bool = False, scope: Any = None, term: str | None = None) -> dict[str, Any]:
     """Write or replace a view's three files, validated (source_problems), and register it built (mark_built): a view
     of thimble's own making, as the tests make theirs; a view ticket's session writes the files itself. `scope` is
-    view.json's name for `claims`."""
+    view.json's name for `claims`; `term`, its terminal program (view.term.js), written beside them when given."""
     slug = _check_slug(slug)
     claims = claims if claims is not None else scope
     reader_src = str(reader or "").replace("\r\n", "\n")
@@ -930,6 +931,8 @@ def write_view(c: str, slug: str, *, name: str, description: str, claims: Any = 
     d.mkdir(parents=True, exist_ok=True)
     atomic_write_text(d / READER_PY, reader_src.rstrip("\n") + "\n")
     atomic_write_text(d / VIEW_HTML, html_src.rstrip("\n") + "\n")
+    if term is not None:
+        atomic_write_text(d / VIEW_TERM, str(term).replace("\r\n", "\n").rstrip("\n") + "\n")
     write_json(d / VIEW_JSON, stored)
     return mark_built(c, slug)
 
@@ -998,6 +1001,8 @@ def install_view(ws: Path, src: Path, slug: str | None = None) -> str:
     try:
         for name in (READER_PY, VIEW_HTML):
             shutil.copyfile(src / name, tmp / name)
+        if (src / VIEW_TERM).is_file():  # its terminal program, which thimble-term draws (term_views.py)
+            shutil.copyfile(src / VIEW_TERM, tmp / VIEW_TERM)
         view_libs.copy_lib(src, tmp)
         raw = {k: v for k, v in _view_json(src).items() if k not in ("built", "version")}
         write_json(tmp / VIEW_JSON, raw)

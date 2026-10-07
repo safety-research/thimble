@@ -202,6 +202,31 @@ export type World = {
   focusAsked: boolean[]
   /** the text typed into the prompt box by `$.prompt.fill` (a key the panel does not bind) */
   filled: string[]
+  /** thimble's view host (`thimble view host`, hooks/viewhost.ts) as the test plays it: each request it got, and the
+   *  frame and acts it answers an event with */
+  viewHost: { requests: { path: string; body: Record<string, unknown> }[]; frame: (n: number, ev?: Record<string, unknown>) => Record<string, unknown>; acts: (ev: Record<string, unknown>) => Record<string, unknown>[]; started: number }
+}
+
+/** A terminal view's frame as a program draws it (backend/app/term_kit/kit.mjs): a top row with a control, a list of
+ *  three rows with the `n`-th chosen, its keys and hints. */
+export function viewFrame(n: number, over: Record<string, unknown> = {}): Record<string, unknown> {
+  const rows = ['first row', 'second row', 'third row']
+  const chosen = Math.max(0, Math.min(2, n))
+  return {
+    seq: n + 1,
+    ack: n,
+    lines: [
+      [{ s: '  ' }, { s: 'Color by', d: true }, { s: '  ' }, { s: 'Kind' }],
+      ...rows.map((r, i) => (i === chosen ? [{ s: '❯ ', fg: 'suggestion' }, { s: '●', fg: '#1d7fc0' }, { s: ` ${r}`, fg: 'suggestion' }] : [{ s: '  ' }, { s: '●', fg: '#1d7fc0' }, { s: ` ${r}` }])),
+      [{ s: '  ' }, { s: '▁▃█▃▁', fg: '#1d7fc0' }],
+    ],
+    hits: [{ y: 0, x0: 12, x1: 16, tip: 'choose what colors the view' }, ...rows.map((_, i) => ({ y: i + 1, x0: 2, x1: 40, row: true })), { y: 4, x0: 2, x1: 7, drag: true, tip: 'drag to frame a range' }],
+    hints: ['↑↓ to choose', 'Enter to open', 'c to color by', '[ ] to pan'],
+    keys: ['up', 'down', 'return', 'c', '[', ']'],
+    typing: false,
+    sub: [],
+    ...over,
+  }
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
@@ -235,6 +260,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     turns: {},
     focusAsked: [],
     filled: [],
+    viewHost: { requests: [], frame: n => viewFrame(n), acts: () => [], started: 0 },
   }
   const ws = opts.ws === undefined ? WS : opts.ws
   mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI })
@@ -337,12 +363,38 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     void next
     const argv = [...e.argv]
     w.calls.push(argv)
+    // thimble's view host: ready on its socket, then running for the session
+    if (argv[1] === 'view' && argv[2] === 'host') {
+      w.viewHost.started++
+      yield { stream: 'stdout' as const, text: `${JSON.stringify({ t: 'ready', socket: '/tmp/thimble-tv-test/s', token: 'tok' })}\n` }
+      await new Promise(() => {})
+    }
     const [, , what, , , payload] = argv
     w.acts.push({ kind: what!, payload: JSON.parse(payload ?? '{}') as Record<string, unknown> })
     if (w.hold) await w.hold
     const answer = what === 'label-run' ? (w.labelRun ?? { ok: true, label: LABEL.id, summary: { status: 'done', labeled: 30, failed: 0, counts: { 'proxy-link': 12, none: 18 } } }) : { ok: true }
     yield { stream: 'stdout' as const, text: JSON.stringify(answer) }
     return { value: { code: 0, signal: null } } as never
+  })
+  // the view host's routes (hooks/viewhost.ts): a view opens on its first frame, an event answers with its next one
+  let viewN = 0
+  on('http.fetch', ($, e) => {
+    const path = new URL(e.url).pathname
+    const body = JSON.parse(e.init?.body ?? '{}') as Record<string, unknown>
+    w.viewHost.requests.push({ path, body })
+    const ok = (v: unknown) => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify(v) } }) as never
+    if (e.init?.socketPath !== '/tmp/thimble-tv-test/s' || e.init?.headers?.['x-thimble-token'] !== 'tok') return { value: { status: 403, ok: false, headers: {}, text: '{"error": "no token"}' } } as never
+    if (path === '/open') {
+      viewN = 0
+      return ok({ id: 'v1', frame: w.viewHost.frame(0) })
+    }
+    if (path === '/event') {
+      const ev = body.event as Record<string, unknown>
+      if (ev.t === 'key' && ev.key === 'down') viewN++
+      if (ev.t === 'key' && ev.key === 'up') viewN--
+      return ok({ frame: w.viewHost.frame(viewN, ev), acts: w.viewHost.acts(ev) })
+    }
+    return ok({ ok: true })
   })
   on('ui.open', ($, e) => {
     w.focusAsked.push(Boolean((e as { focus?: unknown }).focus))

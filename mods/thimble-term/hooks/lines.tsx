@@ -24,6 +24,12 @@ function stampOf(key: string, lines: readonly Line[], hits: readonly LineHit[]):
 // while the pane holds the keyboard (panel.tsx listKeysEl): a Client takes keys only once a click gave it them
 let listKeys: ((k: string) => Promise<void> | void) | null = null
 
+/** The key handler of a part the panel drew that takes the list's keys without a list of lines (a terminal view,
+ *  panel.tsx drawView). */
+export function setListKeys(fn: (k: string) => Promise<void> | void): void {
+  listKeys = fn
+}
+
 /** The key handler of the list the panel drew since the last call, and none from then on. */
 export function takeListKeys(): ((k: string) => Promise<void> | void) | null {
   const k = listKeys

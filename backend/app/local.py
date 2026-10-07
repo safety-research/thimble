@@ -20,6 +20,7 @@ session, as browser-mode jobs end with it.
 
     python -m app.local state <surface> --cwd <dir> [args]    prints JSON (STATE_USAGE)
     python -m app.local act <kind> --cwd <dir> '<json>'        prints {ok, ...} (ACT_USAGE)
+    python -m app.local view host|text …                      terminal views (term_views.py)
 
 Both print `{error}` and exit 1 when they fail, and open no port.
 """
@@ -402,7 +403,7 @@ def _home_views(c: str) -> list[dict[str, Any]]:
     """The views home lists, newest first by the renderer: each built one and each proposal not dropped, held or merely
     suggested, with its state (built, building, failed, proposed, or not built for a view whose files are missing), when
     it was proposed (or built), and the files it claims."""
-    from . import views  # noqa: PLC0415
+    from . import term_views, views  # noqa: PLC0415
 
     props = {p["slug"]: p for p in views.list_proposals(c)}
     built = {v["slug"]: v for v in views.list_views(c) if v.get("origin") != "builtin"}
@@ -419,7 +420,9 @@ def _home_views(c: str) -> list[dict[str, Any]]:
             status = "proposed" if p else "not built"
         rows.append({"slug": slug, "name": str(p.get("name") or (v or {}).get("name") or slug), "status": status,
                      "ts": str(p.get("ts") or (v or {}).get("built") or ""),
-                     "files": [str(x) for x in ((v or {}).get("claims") or p.get("claims") or [])]})
+                     "files": [str(x) for x in ((v or {}).get("claims") or p.get("claims") or [])],
+                     # whether the terminal draws it: a view.term.js among the files its last pass covered
+                     "term": status == "built" and term_views.has_term(v)})
     return rows
 
 
@@ -1019,8 +1022,14 @@ def _fail(text: str) -> int:
 
 
 def main(argv: list[str]) -> int:
-    """`state <surface> --cwd <dir> [args]` or `act <kind> --cwd <dir> '<json>'` (module note)."""
+    """`state <surface> --cwd <dir> [args]` or `act <kind> --cwd <dir> '<json>'` (module note); `view host|text …`,
+    terminal views (term_views.main)."""
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr, format="thimble %(levelname)s: %(message)s")
+    if argv[:1] == ["view"]:
+        settle_dirs()
+        from . import term_views  # noqa: PLC0415
+
+        return term_views.main(argv[1:])
     if len(argv) < 2 or argv[0] not in ("state", "act"):
         return _fail(f"usage: {STATE_USAGE} | {ACT_USAGE}")
     verb, what, rest = argv[0], argv[1], argv[2:]

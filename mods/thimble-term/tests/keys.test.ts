@@ -14,6 +14,8 @@
 //   files        /thimble files, a row click, empty click      ↑↓ Enter Space b x, short and tall
 //   file         a row click, /thimble files <path>            ↑↓ Enter Backspace 1-3 x, short and tall; never ←
 //   views        a heading click                               ↑↓ Enter 1-9 b x
+//   view         a terminal view from the views list           ↑↓ Enter, its letters and signs, a click, a drag, the
+//                                                              wheel, every key while its field takes typing
 //   card, label, document, ask: no list                      their letters; no ↑↓, Enter, Space or ← named
 //   back from a new thread's form   a card, a file's line, after Esc   the view's own hints, never the field's; the list's
 //                                                              keys where it draws a list
@@ -31,7 +33,7 @@ import type { Engine, Mounted } from 'claude-code/testing'
 
 import { width } from '../hooks/lib'
 import { RELAY, UNFOCUSED_HINT } from '../hooks/panel'
-import { CWD, WS, shown, takesKeys, world } from './fixtures'
+import { CWD, WS, shown, takesKeys, viewFrame, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -465,11 +467,136 @@ test('keys · views · a heading click: ↑↓ choose, Enter and 1-9 open, b bac
   s = await seen($, SHORT, 'views-list')
   expect(s.chosen).toContain('Edit Bursts')
   await enter($, w, SHORT)
-  expect((await seen($, SHORT)).text).toContain('The browser draws this view')
+  expect((await seen($, SHORT)).text).toContain('The view is not built yet')
   await hotkey($, w, 'back')
   await takesKeys($)
   await type($, w, SHORT, '1')
-  expect((await seen($, SHORT)).text).toMatch(/Board[\s\S]*The browser draws this view/)
+  // a view built in browser mode has no terminal program: one line says so, and no view host starts
+  expect((await seen($, SHORT)).text).toMatch(/Board[\s\S]*built in browser mode, so only the browser draws it/)
+  expect(w.viewHost.started).toBe(0)
+})
+
+// ------------------------------------------------------------------------------------------------ a terminal view
+//
+// A view built in terminal mode (term: true) is drawn by its program (hooks/viewhost.ts), which thimble's view host
+// runs; the test plays the host (fixtures.ts `viewHost`): its first frame, the next one per key, and the acts it asks.
+
+const TERM_VIEWS = [{ slug: 'timeline', name: 'Timeline', status: 'built', ts: '2026-10-07T02:00:00Z', files: ['agents.log'], term: true }]
+
+async function openTermView($: E, w: World): Promise<void> {
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  await click($, w, SHORT, 'home', 'Views (1)')
+  await takesKeys($)
+  await enter($, w, SHORT)
+  // the panel draws the view, and the session's timer starts the host and opens it (viewhost.ts viewPump)
+  await (await look($, SHORT)).unmount()
+  await w.clock.advance(300)
+  await w.clock.advance(300)
+  await takesKeys($)
+}
+
+const events = (w: World) => w.viewHost.requests.filter(r => r.path === '/event').map(r => r.body.event as Record<string, unknown>)
+
+/** The rows the view's Client draws (hooks/viewclient.tsx), as text. */
+async function viewRows($: E): Promise<string[]> {
+  const pane = await look($, SHORT)
+  const rows = (((await pane.drawn({ in: 'm:view-frame' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
+  await pane.unmount()
+  return rows
+}
+
+test('keys · view · a terminal view: its rows under the header, its hint row, ↑↓ and Enter through the relay, its letters and signs as hotkeys', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, views: TERM_VIEWS } as never
+  await openTermView($, w)
+  expect(w.viewHost.started).toBe(1)
+  const open = w.viewHost.requests.find(r => r.path === '/open')
+  expect(open?.body).toMatchObject({ slug: 'timeline' })
+  expect(Number(open?.body.cols)).toBeGreaterThan(30)
+  const s = await seen($, SHORT)
+  expect(s.text).toContain('Timeline')
+  expect((await viewRows($)).join('\n')).toMatch(/Color by\s*Kind\n❯ ● first row\n  ● second row/)
+  named(s.hint, ['↑↓ to choose', 'Enter to open', 'c to color by', '[ ] to pan', 'b to go back', 'x to close'])
+  expect(s.relay).toBe(true)
+  // ↓ through the relay is the view's `down`; its next frame chooses the second row
+  await down($, w)
+  expect(events(w).at(-1)).toMatchObject({ t: 'key', key: 'down' })
+  expect(await viewRows($)).toContain('❯ ● second row')
+  // a letter and a sign the view binds go to it from the relay's field
+  await type($, w, SHORT, 'c')
+  expect(events(w).at(-1)).toMatchObject({ t: 'key', key: 'c' })
+  await type($, w, SHORT, ']')
+  expect(events(w).at(-1)).toMatchObject({ t: 'key', key: ']' })
+  // Enter is the view's `return`
+  await enter($, w, SHORT)
+  expect(events(w).at(-1)).toMatchObject({ t: 'key', key: 'return' })
+  // a letter it does not bind goes to the prompt, as on every panel
+  await type($, w, SHORT, 'q')
+  expect(w.filled).toContain('q')
+  expect(events(w).some(e => e.key === 'q')).toBe(false)
+})
+
+test('keys · view · a click on a row, a drag on a strip and the wheel are the view\'s; its acts open a place or a thread; b back ends its program', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, views: TERM_VIEWS } as never
+  w.viewHost.acts = ev => (ev.t === 'click' && ev.i === 2 ? [{ kind: 'open', ref: 'README.md#L3' }] : [])
+  await openTermView($, w)
+  const pane = await look($, SHORT)
+  // a press on the third row's hit (the frame's hits: the control, then the three rows, then the strip)
+  await pane.pointer({ type: 'down', x: 8, y: 3, button: 'left', in: 'm:view-frame' } as never)
+  await w.clock.settle()
+  await pane.unmount()
+  const click = events(w).find(e => e.t === 'click')
+  expect(click).toMatchObject({ t: 'click', i: 3, x: 6, seq: 1 })
+  // a drag on the strip, from its cell 1 to its cell 4
+  const pane2 = await look($, SHORT)
+  await pane2.pointer({ type: 'down', x: 3, y: 4, button: 'left', in: 'm:view-frame' } as never)
+  await pane2.pointer({ type: 'move', x: 5, y: 4, button: 'left', in: 'm:view-frame' } as never)
+  await pane2.pointer({ type: 'up', x: 6, y: 4, button: 'left', in: 'm:view-frame' } as never)
+  await w.clock.settle()
+  await pane2.unmount()
+  expect(events(w).find(e => e.t === 'drag')).toMatchObject({ t: 'drag', i: 4, x0: 1, x1: 4 })
+  // the wheel over the view
+  await (await look($, SHORT)).unmount()
+  await $.ui.scroll({ requestId: PANEL, component: 'Pane', by: 3, pointer: { x: 10, y: 10 }, origin: { kind: 'person' } } as never)
+  await w.clock.settle()
+  expect(events(w).find(e => e.t === 'wheel')).toMatchObject({ t: 'wheel', by: 3 })
+  // an act with the answer to the analyst's click: the record's place opens in the citation panel
+  await takesKeys($)
+  const pane3 = await look($, SHORT)
+  await pane3.pointer({ type: 'down', x: 8, y: 2, button: 'left', in: 'm:view-frame' } as never)
+  await w.clock.settle()
+  await pane3.unmount()
+  expect(events(w).filter(e => e.t === 'click').at(-1)).toMatchObject({ i: 2 })
+  expect((await seen($, SHORT)).text).toContain('An export of 4,579 wiki pages')
+  // the citation panel shows no view: the timer ends the view's program
+  await (await look($, SHORT)).unmount()
+  await w.clock.advance(300)
+  expect(w.viewHost.requests.filter(r => r.path === '/close').length).toBeGreaterThanOrEqual(1)
+})
+
+test('keys · view · while its field takes typing, the relay\'s field holds its text and sends each change whole, x and b among them; Enter ends it', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, views: TERM_VIEWS } as never
+  w.viewHost.frame = n => viewFrame(n, { typing: true, field: { text: 're' }, hints: ['Enter to finish'], keys: ['up', 'down'] })
+  await openTermView($, w)
+  const s = await seen($, SHORT)
+  named(s.hint, ['Enter to finish', 'Esc to leave the field'])
+  expect(s.hint).not.toContain('b to go back')
+  const pane = await look($, SHORT)
+  expect(await relayText(pane)).toBe('re')
+  await pane.unmount()
+  // what the analyst types goes into the field, which sends its whole text: no letter is a hotkey there
+  for (const ch of ['d', 'x', 'b']) await type($, w, SHORT, ch)
+  expect(events(w).filter(e => e.t === 'text').map(e => e.value)).toEqual(['red', 'redx', 'redxb'])
+  expect(w.closed).not.toContain(PANEL)
+  await backspace($, w, SHORT)
+  expect(events(w).at(-1)).toMatchObject({ t: 'text', value: '' })
+  await enter($, w, SHORT)
+  expect(events(w).at(-1)).toMatchObject({ t: 'key', key: 'return' })
 })
 
 // ------------------------------------------------------------------------------------------------ files and a file

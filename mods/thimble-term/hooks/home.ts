@@ -41,7 +41,8 @@ export const HOME_UI_EMPTY: HomeUi = { folded: [], unfolded: [], more: [], pick:
 
 // ------------------------------------------------------------------------------------------------ the data
 
-export type HomeView = { slug: string; name: string; state: string; words: string; files: string[]; unit: string; drawable: boolean; left: number; at: number; fresh?: boolean }
+/** `term`: built with a terminal program (view.term.js), so the panel draws it (hooks/viewhost.ts). */
+export type HomeView = { slug: string; name: string; state: string; words: string; files: string[]; unit: string; drawable: boolean; left: number; at: number; fresh?: boolean; term?: boolean }
 export type HomeReport = { slug: string; title: string; form: string; state: string; cards: number; tools: number; at: number; fresh?: boolean }
 export type HomeThread = { id: string; title: string; about: string; words: string; tone: string; unread: number; earlier: boolean; at: number }
 /** `fresh`: made since home was last opened, `new` in green at R as every new item. */

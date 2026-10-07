@@ -536,9 +536,10 @@ case "${1:-}" in
     shift; exec "$self" server status "$@";;
   mode)
     shift; launch_mode cli "$PWD" "$@"; exit;;
-  state | act)
+  state | act | view)
     # terminal mode's renderer reads a surface and acts as the browser would, through thimble's backend in this process
-    # (backend/app/local.py), which opens no port; on failure it prints {"error": …} and exits 1, as local.py does
+    # (backend/app/local.py), which opens no port; on failure it prints {"error": …} and exits 1, as local.py does.
+    # `view host` serves the views thimble-term draws (backend/app/term_views.py) and `view text` draws one as text
     repo="$("$here/thimble-app-dir" 2>/dev/null)" || { printf '{"error": "thimble cannot find its install"}\n'; exit 1; }
     export THIMBLE_CALLER_CWD="${THIMBLE_CALLER_CWD:-$PWD}" THIMBLE_PLUGIN_ROOT="$plugin"
     cd "$repo/backend"

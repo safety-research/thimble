@@ -1,0 +1,702 @@
+// The terminal view kit (backend/app/term_kit/kit.mjs), which a view's view.term.js imports to draw the view in
+// terminal mode (docs/terminal-views.md): its rows and hot regions in thimble-term's look, the keys a pane passes on
+// and the hint row they make, Color by with its chips and a label's definition a step away, the time range's strip and
+// window, the list with its chosen row, details in place and colored track, and acts only during the analyst's own key
+// or click. Each test plays the runtime's half (init, events, answers) in this process; the sandboxed process and the
+// view host are backend/tests_public/test_term_views.py.
+import { beforeEach, describe, expect, test } from 'vitest'
+
+type Msg = { t: string; [k: string]: any }
+// the kit is plain JavaScript that the sandboxed runtime imports; a string URL keeps it out of the type check
+const KIT_URL = new URL('../../../backend/app/term_kit/kit.mjs', import.meta.url).href
+const kit: any = await import(/* @vite-ignore */ KIT_URL)
+
+let sent: Msg[] = []
+const tick = () => new Promise((r) => setTimeout(r, 0))
+const frames = () => sent.filter((m) => m.t === 'frame')
+const last = () => frames().at(-1)!
+const text = (f = last()) => f.lines.map((l: { s: string }[]) => l.map((s) => s.s).join('').replace(/\s+$/, ''))
+let n = 0
+
+const LABELS = [
+  { id: 'k1', name: 'Database connections', kind: 'regex', text: '', spec: '(?i)connections?', scope: 'agents.log', values: [{ name: 'connections', meaning: 'mentions the pool', n: 23 }, { name: 'other', meaning: '', n: 590 }], here: true },
+]
+
+function init(o: Record<string, unknown> = {}) {
+  kit.__driver.reset()
+  sent = []
+  n = 0
+  kit.__driver.connect((m: Msg) => sent.push(m))
+  kit.handle({ t: 'init', cols: 80, rows: 20, view: { slug: 'v', name: 'V' }, labels: LABELS, state: {}, ...o })
+}
+async function key(k: string) {
+  kit.handle({ t: 'key', key: k, n: ++n })
+  await tick()
+}
+async function click(words: string, x = 0) {
+  const f = last()
+  const rows = text(f)
+  const i = f.hits.findIndex((h: any) => (rows[h.y] ?? '').slice(h.x0, h.x1).includes(words))
+  expect(i, `a hot region shows ${words}`).toBeGreaterThanOrEqual(0)
+  kit.handle({ t: 'click', i, seq: f.seq, x, n: ++n })
+  await tick()
+}
+
+beforeEach(() => init())
+
+describe('text', () => {
+  test('width counts wide characters twice; cut keeps whole words and puts … against the last one', () => {
+    expect(kit.width('ab漢字')).toBe(6)
+    expect(kit.cut('Restarted payments-2 (health check failing)', 24)).toBe('Restarted payments-2…')
+    expect(kit.cut('short', 10)).toBe('short')
+    expect(kit.clip('{"id": "alr-42", "ts": 1}', 10)).toBe('{"id": "a…')
+    expect(kit.wrap('one two three four five', 9)).toEqual(['one two', 'three', 'four five'])
+    expect(kit.wrap('one two three four five six', 9, 2)).toEqual(['one two', 'three…'])
+    expect(kit.num(14591)).toBe('14,591')
+    // a cut keeps the cells it is padded to, so the column after it keeps its place
+    expect(kit.pad('Brambleway API v3 migration guide', 20)).toBe('Brambleway API v3…  ')
+    expect(kit.padStart('Brambleway API v3 migration guide', 20)).toBe('  Brambleway API v3…')
+    expect(kit.dur(130)).toBe('2m 10s')
+    expect(kit.when(Date.UTC(2026, 4, 16, 4, 31) / 1000)).toBe('16 May 04:31')
+    expect(kit.placeWords('alerts/x.jsonl#L12')).toBe('alerts/x.jsonl line 12')
+    expect(kit.placeWords('deploys.csv#row=3')).toBe('deploys.csv row 3')
+    expect(kit.placeWords('chat/ops.json#/messages/0')).toBe('chat/ops.json message 1')
+  })
+})
+
+describe('the drawing', () => {
+  test('rows carry a 2-cell margin, hot regions are counted from the frame\'s left edge, and nothing passes the rows or the columns', async () => {
+    init({ cols: 30, rows: 3 })
+    kit.draw((d: any) => {
+      d.row().margin({ s: '❯' }).add('one', {}, { on: () => {} }).right('R', { d: true }).end()
+      d.line('x'.repeat(50))
+      d.line('three')
+      d.line('four')
+    })
+    await tick()
+    const f = last()
+    expect(text(f)).toEqual(['❯ one' + ' '.repeat(26) + 'R', '  ' + 'x'.repeat(30), '  three'])
+    expect(f.hits[0]).toMatchObject({ y: 0, x0: 2, x1: 5 })
+  })
+
+  test('a blank row never doubles and never opens the drawing', async () => {
+    kit.draw((d: any) => {
+      d.blank()
+      d.line('a')
+      d.blank()
+      d.blank()
+      d.line('b')
+    })
+    await tick()
+    expect(text()).toEqual(['  a', '', '  b'])
+  })
+
+  test('the hint row names bound keys in the panel\'s order, and a key the pane does not pass on cannot be bound', async () => {
+    kit.draw((d: any) => {
+      d.key('/', 'to search', () => {})
+      d.key('return', 'to open', () => {})
+      d.key(['up', 'down'], 'to choose', () => {})
+      d.key(['[', ']'], 'to pan', () => {})
+    })
+    await tick()
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to open', '/ to search', '[ ] to pan'])
+    expect(last().hintKeys).toEqual([['up', 'down'], ['return'], ['/'], ['[', ']']])
+    expect(last().keys.sort()).toEqual(['/', '[', ']', 'down', 'return', 'up'].sort())
+    const d = new kit.Drawing(40, 5)
+    for (const k of ['left', 'right', 'pageup', 'home', 'end', 'tab', 'escape']) expect(() => d.key(k, 'x', () => {})).toThrow(/does not reach a view's pane/)
+    for (const k of ['b', 't', 'x']) expect(() => d.key(k, 'x', () => {})).toThrow(/the panel's own/)
+    expect(() => d.key('Q', 'x', () => {})).toThrow(/lowercase/)
+    expect(() => d.key('ab', 'x', () => {})).toThrow(/one character/)
+  })
+
+  test('a key runs what the frame bound it to; a strong binding (an open menu\'s) keeps its keys from a later one', async () => {
+    const got: string[] = []
+    kit.draw((d: any) => {
+      d.key(['up', 'down'], 'in the menu', (k: string) => got.push(`menu ${k}`), true)
+      d.key(['up', 'down'], 'to choose', (k: string) => got.push(`list ${k}`))
+      d.key('return', 'to open', () => got.push('open'))
+    })
+    await tick()
+    await key('down')
+    await key('return')
+    await key('q')
+    expect(got).toEqual(['menu down', 'open'])
+    expect(last().hints).toEqual(['↑↓ in the menu', 'Enter to open'])
+  })
+
+  test('a draw that throws is one red line saying why, and binds nothing', async () => {
+    kit.draw(() => {
+      throw new TypeError('E is undefined')
+    })
+    await tick()
+    expect(text()).toEqual(['  × the view could not be drawn: TypeError: E is undefined'])
+    expect(last().lines[0][1].fg).toBe('error')
+    expect(last().keys).toEqual([])
+  })
+})
+
+describe('acts', () => {
+  test('open, ask and openLabel reach thimble only during the analyst\'s own key or click, with that event\'s number', async () => {
+    kit.draw((d: any) => {
+      d.key('o', 'to open its place', () => kit.open('agents.log#L3'))
+      d.row().add('ask', {}, { on: () => kit.ask('agents.log#L3', 'Restarted  payments-2') }).end()
+    })
+    await tick()
+    expect(() => kit.open('agents.log#L3')).toThrow(/only during the analyst's own click or key/)
+    await key('o')
+    await click('ask')
+    const acts = sent.filter((m) => m.t === 'act')
+    expect(acts).toEqual([{ t: 'act', n: 1, act: { kind: 'open', ref: 'agents.log#L3' } }, { t: 'act', n: 2, act: { kind: 'ask', ref: 'agents.log#L3', text: 'Restarted payments-2' } }])
+    // every frame says the last event it answers, which thimble waits for
+    expect(last().ack).toBe(2)
+  })
+
+  test('a fetch is a query with an id; an answer resolves it; a newer fetch with the same key drops the older one', async () => {
+    const got: unknown[] = []
+    const a = kit.fetch({ op: 'x' }, { key: 'k' }).catch((e: Error) => got.push(e.name))
+    const b = kit.fetch({ op: 'y' }, { key: 'k' }).then((v: unknown) => got.push(v))
+    const qs = sent.filter((m) => m.t === 'query')
+    expect(qs.map((q) => q.q)).toEqual([{ op: 'x' }, { op: 'y' }])
+    expect(sent.find((m) => m.t === 'cancel')).toEqual({ t: 'cancel', id: qs[0]!.id })
+    kit.handle({ t: 'answer', id: qs[1]!.id, data: { rows: 3 } })
+    await Promise.all([a, b])
+    expect(got).toEqual(['AbortError', { rows: 3 }])
+  })
+})
+
+describe('Color by', () => {
+  const FIELDS = [
+    { name: 'kind', title: 'Kind', description: 'What happened', meanings: { fired: 'An alert started firing' } },
+    { name: 'source', title: 'Source', values: ['alert', 'deploy'] },
+  ]
+
+  test('the top row: Color by, the choice, its values as chips with their counts; a click turns a value off; the reader hears it', async () => {
+    let heard = 0
+    const colour = kit.colorBy({ fields: FIELDS, onChange: () => heard++ })
+    kit.draw((d: any) => colour.draw(d))
+    colour.counts({ fired: 12, resolved: 10, '': 2 })
+    await tick()
+    expect(text()[0]).toMatch(/^ {2}Color by {2}Kind {2}● fired 12 {2}● resolved 10 {2}● no kind 2$/)
+    expect(colour.query()).toEqual({ field: 'kind', off: [] })
+    const fired = last().lines[0].find((s: any) => s.s === '●')
+    expect(fired.fg).toBe(kit.SERIES[0])
+    await click('fired')
+    expect(colour.query()).toEqual({ field: 'kind', off: ['fired'] })
+    expect(colour.isOn('fired')).toBe(false)
+    expect(text()[0]).toContain('○ fired 12')
+    expect(heard).toBe(1)
+    // Reset shows while a value is off, and puts it back
+    expect(text()[0]).toMatch(/reset$/)
+    await click('reset')
+    expect(colour.query()).toEqual({ field: 'kind', off: [] })
+    // the choice and the values turned off are kept for the view
+    expect(sent.filter((m) => m.t === 'state').at(-1)!.state.colour).toEqual({ by: 'field:kind', off: [] })
+  })
+
+  test('a chip\'s tip says what its value means; values past six share one chip, `other`, with no hue of their own', async () => {
+    const colour = kit.colorBy({ fields: FIELDS })
+    kit.draw((d: any) => colour.draw(d))
+    init({ cols: 200 })
+    const c2 = kit.colorBy({ fields: FIELDS })
+    kit.draw((d: any) => c2.draw(d))
+    c2.counts(Object.fromEntries(['fired', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((v, i) => [v, 20 - i])))
+    await tick()
+    const row = text()[0]
+    expect(row).toContain('● other 27')
+    expect(c2.colourOf('g')).toBe('inactive')
+    expect(c2.colourOf('fired')).toBe(kit.SERIES[0])
+    const hit = last().hits.find((h: any) => row.slice(h.x0, h.x1).includes('fired'))
+    expect(hit.tip).toBe('fired: An alert started firing')
+    void colour
+  })
+
+  test('`other` with no records once the counts are in is left out, as a value with none is, unless one of its values is off', async () => {
+    init({ cols: 200 })
+    const colour = kit.colorBy({ fields: FIELDS })
+    kit.draw((d: any) => colour.draw(d))
+    colour.counts(Object.fromEntries(['fired', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((v, i) => [v, 20 - i])))
+    await tick()
+    expect(text()[0]).toContain('● other 27')
+    // a narrower fetch: the values past six have no records in it
+    colour.counts({ fired: 3, b: 2 })
+    await tick()
+    expect(text()[0]).toMatch(/● fired 3 {2}● b 2$/)
+    colour.toggle('g')
+    colour.counts({ fired: 3, b: 2 })
+    await tick()
+    expect(text()[0]).toContain('other 0')
+  })
+
+  test('c opens the menu: Off, the fields, then the labels; under the chosen label its definition and a link to its panel; Enter colors by it', async () => {
+    const colour = kit.colorBy({ fields: FIELDS })
+    kit.draw((d: any) => colour.draw(d))
+    await tick()
+    expect(last().hints).toContain('c to color by')
+    await key('c')
+    let rows = text()
+    // under the chosen field, what it is
+    expect(rows.slice(1, 5).map((r: string) => r.trim().split(/\s{2,}/)[0])).toEqual(['Off', '❯ Kind', 'What happened', 'Source'])
+    expect(rows).toContain('  labels')
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to color by', 'c to close'])
+    for (let i = 0; i < 3; i++) await key('down')
+    rows = text()
+    expect(rows.find((r: string) => r.startsWith('❯ Database connections'))).toMatch(/● connections {2}● other\s+regex$/)
+    expect(rows.find((r: string) => r.includes('definition ↗'))).toContain('regex · "(?i)connections?"')
+    await click('definition')
+    expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'label', id: 'k1', name: 'Database connections' })
+    // the menu stays open on the label (the panel showed the label's own meanwhile)
+    await key('return')
+    expect(colour.by).toEqual({ label: 'k1', title: 'Database connections' })
+    expect(colour.query()).toEqual({ label: 'k1', name: 'Database connections', off: [] })
+    // the label's values take the hues in order, its catch-all last value dim; its name's ↗ opens its panel
+    expect(colour.colourOf('connections')).toBe(kit.SERIES[0])
+    expect(colour.colourOf('other')).toBe('inactive')
+    expect(text()[0]).toMatch(/Color by {2}Database connections ↗/)
+    // a query names the label colored by, so the reader's labels hold it although it is not on in Files
+    kit.fetch({ op: 'x' })
+    expect(sent.filter((m) => m.t === 'query').at(-1)!.labels).toEqual(['k1'])
+  })
+
+  test('a label the workspace no longer has gives way to the first field', async () => {
+    init({ state: { colour: { by: 'label:gone', off: ['x'] } } })
+    const colour = kit.colorBy({ fields: FIELDS })
+    expect(colour.by).toEqual({ field: 'kind', title: 'Kind' })
+    expect(colour.query()).toEqual({ field: 'kind', off: [] })
+  })
+})
+
+describe('the time range', () => {
+  const T0 = Date.UTC(2026, 4, 16) / 1000
+  const times = Array.from({ length: 100 }, (_, i) => T0 + i * 3600)
+
+  test('it opens on the whole span; the readout gives its start, end and length; the strip a cell per bin', async () => {
+    const range = kit.timeRange({})
+    range.data({ times })
+    kit.draw((d: any) => range.draw(d, { gutter: 8 }))
+    await tick()
+    expect(range.full).toBe(true)
+    expect(text()[0]).toBe('  16 May 00:00 – 20 May 03:00 · 4d 3h')
+    expect(text()[1].length).toBe(2 + 8 + 72)
+    expect(last().hints).toEqual(['[ ] to pan', '+ - to zoom'])
+  })
+
+  test('+ zooms around the middle, ] pans a quarter, the window is on the selection background and the rest dim; a click moves it; it is kept', async () => {
+    const range = kit.timeRange({})
+    range.data({ times })
+    kit.draw((d: any) => range.draw(d))
+    await tick()
+    await key('+')
+    expect(range.full).toBe(false)
+    const len = range.to - range.from
+    expect(len).toBeCloseTo((times.at(-1)! - times[0]!) * (2 / 3), -1)
+    const from = range.from
+    await key(']')
+    expect(range.from).toBeCloseTo(from + len / 4, -1)
+    const strip = last().lines[1]
+    expect(strip.some((s: any) => s.bg === 'selectionBg')).toBe(true)
+    expect(strip.some((s: any) => s.d && !s.bg)).toBe(true)
+    expect(sent.filter((m) => m.t === 'state').at(-1)!.state.ranges.time).toEqual([range.from, range.to])
+    await click(text()[1].trim().slice(0, 1), 0)
+    expect(range.from).toBeLessThan(from)
+  })
+
+  test('a drag outside the window frames a new range; from inside it moves the window', async () => {
+    const range = kit.timeRange({})
+    range.data({ times })
+    kit.draw((d: any) => range.draw(d))
+    await tick()
+    const f = last()
+    const strip = f.hits.findIndex((h: any) => h.drag)
+    kit.handle({ t: 'drag', i: strip, seq: f.seq, x0: 10, x1: 20, n: ++n })
+    await tick()
+    const s0 = range.span[0]
+    const step = (range.span[1] - range.span[0]) / 80
+    expect(range.from).toBeCloseTo(s0 + 10 * step, -2)
+    expect(range.to).toBeCloseTo(s0 + 21 * step, -2)
+    const g = last()
+    kit.handle({ t: 'drag', i: g.hits.findIndex((h: any) => h.drag), seq: g.seq, x0: 15, x1: 25, n: ++n })
+    await tick()
+    expect(range.from).toBeCloseTo(s0 + 20 * step, -2)
+  })
+
+  test('the scale lays the range across the chart\'s cells; its ticks keep apart and date the first and a new day', () => {
+    const range = kit.timeRange({})
+    range.data({ times })
+    const sc = range.scale(100)
+    expect(sc.x(times[0])).toBe(0)
+    expect(sc.x(times.at(-1))).toBe(99)
+    expect(sc.binOf(times[0] - 10)).toBe(-1)
+    const ticks = sc.ticks(12)
+    expect(ticks[0].label).toMatch(/^\d+ May \d\d:00$/)
+    for (let i = 1; i < ticks.length; i++) expect(ticks[i].x - ticks[i - 1].x).toBeGreaterThanOrEqual(12)
+    expect(ticks.some((t: any) => /^17 May/.test(t.label))).toBe(true)
+  })
+
+  test('with gap, an empty stretch longer than it is a break: each stretch takes its share of the cells, a break 4, drawn // on the strip and the axis', async () => {
+    // three bursts of 40 minutes, the second 2 hours after the first and the third the next morning
+    const burst = (t: number) => Array.from({ length: 41 }, (_, i) => t + i * 60)
+    const B = [T0 + 14 * 3600, T0 + 17 * 3600, T0 + 33 * 3600]
+    const ts = [...burst(B[0]!), ...burst(B[1]!), ...burst(B[2]!)]
+    init({ cols: 100 })
+    const range = kit.timeRange({ gap: 1200 })
+    range.data({ times: ts })
+    const sc = range.scale(100)
+    expect(sc.broken).toBe(true)
+    expect(sc.gaps()).toEqual([[31, 35], [66, 70]])
+    expect(sc.x(B[0])).toBe(0)
+    expect(sc.x(B[0]! + 2400)).toBe(30)
+    expect(sc.x(B[1])).toBe(35)
+    expect(sc.x(B[2]! + 2400)).toBe(99)
+    expect(sc.binOf(B[0]! + 3 * 3600)).toBeGreaterThanOrEqual(31)
+    // the first tick of each stretch gives its date
+    const ticks = sc.ticks(8)
+    expect(ticks.filter((t: any) => / \d\d:\d\d$/.test(t.label) && /May/.test(t.label)).map((t: any) => t.label)).toEqual(['16 May 14:00', '16 May 17:00', '17 May 09:00'])
+    kit.draw((d: any) => {
+      range.draw(d, { gutter: 0 })
+      kit.axis(d, range.scale(d.cols), { gap: 8 })
+    })
+    await tick()
+    const rows = text()
+    expect(rows[1].slice(2 + 31, 2 + 35)).toBe(' // ')
+    expect(rows[1].slice(2 + 66, 2 + 70)).toBe(' // ')
+    expect(rows[2].slice(2 + 32, 2 + 34)).toBe('//')
+    expect(rows[2]).toContain('17 May 09:00')
+    expect(last().lines[2].find((s: any) => s.s === '//').fg).toBe('subtle')
+    // a legend stands in the gutter before the ticks, cut to leave a gutter's space
+    kit.draw((d: any) => kit.axis(d, range.scale(d.cols - 12), { gutter: 12, gap: 8, legend: [{ s: '─', fg: 'subtle' }, { s: ' running  × failed', d: true }] }))
+    await tick()
+    expect(text()[0]).toMatch(/^ {2}─ running {4}16 May 14:00/)
+    expect(last().lines[0][1]).toMatchObject({ s: '─', fg: 'subtle' })
+    // a stretch with no room for a time and its date gives the date alone
+    init({ cols: 40 })
+    const narrow = kit.timeRange({ gap: 1200 })
+    narrow.data({ times: ts })
+    kit.draw((d: any) => kit.axis(d, narrow.scale(d.cols), { gap: 4 }))
+    await tick()
+    expect(text()[0].split(/\s+/).filter(Boolean)).toEqual(['16', 'May', '//', '16', 'May', '//', '17', 'May'])
+  })
+
+  test('data with no record keeps the span and its breaks, as the browser does, so the axis does not jump to 1970', () => {
+    const burst = (t: number) => Array.from({ length: 41 }, (_, i) => t + i * 60)
+    const range = kit.timeRange({ gap: 1200 })
+    range.data({ times: [...burst(T0), ...burst(T0 + 5 * 3600)] })
+    const span = range.span
+    range.data({ times: [] })
+    expect(range.span).toEqual(span)
+    expect(range.scale(80).broken).toBe(true)
+    expect(range.readout()).toMatch(/^16 May 00:00 – 05:40/)
+  })
+
+  test('on a broken scale an edge never stays in a break, and the keys move the window on the strip\'s cells', async () => {
+    const burst = (t: number) => Array.from({ length: 41 }, (_, i) => t + i * 60)
+    const B = [T0 + 14 * 3600, T0 + 17 * 3600, T0 + 33 * 3600]
+    const range = kit.timeRange({ gap: 1200 })
+    range.data({ times: [...burst(B[0]!), ...burst(B[1]!), ...burst(B[2]!)] })
+    kit.draw((d: any) => range.draw(d))
+    await tick()
+    // a range from inside the first break to inside the second: its start moves to the second burst, its end to its end
+    range.set(B[0]! + 3600, B[1]! + 4 * 3600)
+    expect(range.from).toBe(B[1])
+    expect(range.to).toBe(B[1]! + 2400)
+    // ] pans a quarter of the window's cells; the window keeps its cells across the break into the third burst
+    await key('-')
+    await key('-')
+    const before = [range.from, range.to]
+    await key(']')
+    expect(range.from).toBeGreaterThan(before[0]!)
+    expect(range.to).toBeGreaterThan(before[1]!)
+    for (const t of [range.from, range.to]) {
+      const inBreak = (t > B[0]! + 2400 && t < B[1]!) || (t > B[1]! + 2400 && t < B[2]!)
+      expect(inBreak).toBe(false)
+    }
+  })
+
+  test('with a gap, bursts a day apart share the strip and the scale, each burst\'s first tick gives its date, and a pan crosses a break', async () => {
+    // three bursts of five hours, a day apart
+    const bursts = [0, 1, 2].flatMap((day) => Array.from({ length: 6 }, (_, h) => T0 + day * 86400 + (9 + h) * 3600))
+    const range = kit.timeRange({ gap: 4 * 3600 })
+    range.data({ times: bursts })
+    kit.draw((d: any) => {
+      range.draw(d)
+      kit.axis(d, range.scale(d.cols))
+    })
+    await tick()
+    const sc = range.scale(80)
+    expect(sc.broken).toBe(true)
+    const gaps = sc.gaps()
+    // two breaks, the three bursts in the cells between them, about a third of the strip each
+    expect(gaps.length).toBe(2)
+    expect(gaps[0][0]).toBeGreaterThan(20)
+    expect(gaps[1][1]).toBeLessThan(60)
+    const strip = text()[1].slice(2)
+    for (const [g0, g1] of gaps) expect(strip.slice(g0, g1)).toBe(' // ')
+    expect(sc.x(bursts[0])).toBe(0)
+    expect(sc.x(bursts[5])).toBe(gaps[0][0] - 1)
+    expect(sc.x(bursts[6])).toBe(gaps[0][1])
+    expect(sc.x(bursts.at(-1))).toBe(79)
+    // each burst's first tick gives its date; the axis draws the breaks and no label runs into one
+    const days = sc.ticks(8).filter((t: any) => / May /.test(t.label)).map((t: any) => t.label.split(' ')[0])
+    expect(days).toEqual(['16', '17', '18'])
+    for (const [g0] of gaps) expect(text()[2].slice(2 + g0 + 1, 2 + g0 + 3)).toBe('//')
+    // zoomed to the first burst, ] pans across the break into the second: four quarters bring the start to the burst's
+    // end, the fifth past the break's cells
+    range.set(bursts[0], bursts[5])
+    expect(range.scale(80).broken).toBe(false)
+    for (let i = 0; i < 4; i++) await key(']')
+    expect(range.from).toBe(bursts[5])
+    expect(range.to).toBeGreaterThan(bursts[6])
+    await key(']')
+    expect(range.from).toBeGreaterThan(bursts[5])
+    expect(range.to).toBeLessThan(bursts[11] + 3600)
+  })
+})
+
+describe('the list', () => {
+  const items = Array.from({ length: 40 }, (_, i) => ({ id: i, kind: i % 3 ? 'fired' : 'resolved', text: `event ${i}` }))
+
+  test('↑↓ choose (❯ and the accent), the chosen row stays in view, Enter opens its details in place at A2, the track shows the part in view', async () => {
+    init({ rows: 12 })
+    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind' }] })
+    const list = kit.list({ key: (e: any) => e.id })
+    const opened: number[] = []
+    kit.draw((d: any) => list.draw(d, {
+      items: [{ heading: 'Sat 16 May 2026' }, ...items],
+      colour,
+      row: (e: any, r: any) => r.add(e.text),
+      detail: (e: any, dd: any) => kit.details(dd, { text: `all of ${e.text}`, facts: [['kind', e.kind]], place: `log.txt#L${e.id + 1}` }),
+      onOpen: (e: any) => opened.push(e.id),
+      ask: (e: any) => ({ ref: `log.txt#L${e.id + 1}`, text: e.text }),
+    }))
+    await tick()
+    let rows = text()
+    expect(rows[0]).toMatch(/^ {2}Sat 16 May 2026/)
+    expect(last().lines[0][1]).toMatchObject({ b: true })
+    expect(rows[1]).toMatch(/^❯ ● event 0/)
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to open', 'a to ask'])
+    for (let i = 0; i < 15; i++) await key('down')
+    rows = text()
+    expect(rows.length).toBe(12)
+    expect(rows.find((r: string) => r.startsWith('❯'))).toMatch(/event 15/)
+    // the track: a column at the right edge, the part in view on the selection background
+    const right = last().lines.map((l: any) => l.at(-1))
+    expect(right.every((s: any) => s.s === '▌' || s.s === ' ')).toBe(true)
+    expect(right.filter((s: any) => s.bg === 'selectionBg').length).toBeGreaterThan(0)
+    expect(right.filter((s: any) => s.bg === 'selectionBg').length).toBeLessThan(12)
+    await key('return')
+    rows = text()
+    const at = rows.findIndex((r: string) => r.startsWith('❯'))
+    expect(rows[at + 1]).toMatch(/^ {4}all of event 15/)
+    expect(rows[at + 2]).toMatch(/^ {4}kind resolved/)
+    expect(rows[at + 3]).toMatch(/^ {4}↗ log\.txt line 16/)
+    expect(opened).toEqual([15])
+    expect(last().hints).toContain('Enter to close')
+    await click('log.txt line 16')
+    expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'open', ref: 'log.txt#L16' })
+    await key('a')
+    expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'ask', ref: 'log.txt#L16', text: 'event 15' })
+  })
+
+  test('a table: the columns\' names above the rows, dim, ▼ after the one sorted by, a click on a name sorts by it', async () => {
+    init({ cols: 40, rows: 8 })
+    const list = kit.list({ key: (e: any) => e.id })
+    let sorted = 1
+    kit.draw((d: any) => {
+      const cols = kit.columns([{ w: 8 }, { w: 6, align: 'right' }, { grow: true }], d.cols - 2)
+      const rows = [...items.slice(0, 3)].sort((a, b) => (sorted === 1 ? b.id - a.id : a.text.localeCompare(b.text)))
+      list.draw(d, {
+        items: rows,
+        header: (r: any) => cols.header(r, ['kind', 'id', 'text'], { sorted, onSort: (i: number) => (sorted = i) }),
+        row: (e: any, r: any) => cols.cells(r, [e.kind, e.id, e.text]),
+      })
+    })
+    await tick()
+    expect(text()[0]).toBe('  kind        id ▼  text')
+    expect(last().lines[0].find((s: any) => s.s.includes('kind')).d).toBe(true)
+    expect(text()[1]).toMatch(/^❯ fired {10}2 {2}event 2/)
+    await click('text')
+    expect(text()[0]).toBe('  kind          id  text ▼')
+    expect(text()[1]).toMatch(/event 0/)
+  })
+
+  test('a list that fits has no track; one with no item says so', async () => {
+    const list = kit.list({ key: (e: any) => e.id })
+    kit.draw((d: any) => list.draw(d, { items: items.slice(0, 3), row: (e: any, r: any) => r.add(e.text) }))
+    await tick()
+    expect(text().every((r: string) => !r.includes('▌'))).toBe(true)
+    kit.draw((d: any) => list.draw(d, { items: [], empty: 'no event' }))
+    await tick()
+    expect(text()).toEqual(['    no event'])
+  })
+
+  test('the wheel moves the rows and leaves the choice; a click on a row chooses it and opens it', async () => {
+    init({ rows: 10 })
+    const list = kit.list({ key: (e: any) => e.id })
+    kit.draw((d: any) => list.draw(d, { items, row: (e: any, r: any) => r.add(e.text), detail: (e: any, dd: any) => dd.line(`more on ${e.text}`) }))
+    await tick()
+    kit.handle({ t: 'wheel', by: 5 })
+    await tick()
+    expect(text()[0]).toMatch(/event 5/)
+    expect(list.chosen).toBe(0)
+    await click('event 7')
+    expect(list.chosen).toBe(7)
+    expect(list.open).toBe(7)
+    expect(text().some((r: string) => r.startsWith('    more on event 7'))).toBe(true)
+  })
+
+  test('a row its details keep in view (d.focus) shows however far down the details it is, with the chosen row where both fit', async () => {
+    init({ rows: 10 })
+    const list = kit.list({ key: (e: any) => e.id })
+    let at = 30
+    kit.draw((d: any) => list.draw(d, {
+      items: items.slice(0, 5),
+      row: (e: any, r: any) => r.add(e.text),
+      detail: (e: any, dd: any) => {
+        for (let i = 0; i < 40; i++) {
+          if (i === at) dd.focus()
+          dd.line(`line ${i} of ${e.text}`)
+        }
+      },
+    }))
+    list.show(2)
+    await tick()
+    expect(text().some((r: string) => r.includes('line 30 of event 2'))).toBe(true)
+    at = 6
+    kit.redraw()
+    await tick()
+    expect(text()[0]).toMatch(/^❯ event 2/)
+    expect(text().some((r: string) => r.includes('line 6 of event 2'))).toBe(true)
+  })
+})
+
+describe('search and choices', () => {
+  test('/ starts typing: the panel\'s field holds the text and sends each change whole; a key sent alone types too; Enter ends', async () => {
+    const said: string[] = []
+    const q = kit.search({ onChange: (t: string) => said.push(t) })
+    kit.draw((d: any) => {
+      const r = d.row()
+      q.add(r)
+      r.end()
+    })
+    await tick()
+    expect(text()[0]).toBe('  / search')
+    expect(last().hints).toEqual(['/ to search'])
+    await key('/')
+    expect(last().typing).toBe(true)
+    expect(last().field).toEqual({ text: '' })
+    expect(last().hints).toEqual(['Enter to finish'])
+    kit.handle({ t: 'text', value: 'refund', n: ++n })
+    await tick()
+    expect(q.text).toBe('refund')
+    expect(last().field).toEqual({ text: 'refund' })
+    expect(said.at(-1)).toBe('refund')
+    kit.handle({ t: 'text', value: '', n: ++n })
+    await tick()
+    for (const k of ['d', 'b', 'x', 'space', 'q']) await key(k)
+    expect(q.text).toBe('dbx q')
+    await key('backspace')
+    expect(said.at(-1)).toBe('dbx ')
+    await key('return')
+    expect(last().typing).toBe(false)
+    expect(text()[0]).toBe('  / dbx')
+  })
+
+  test('a choice opens a menu of all and its values; Enter picks one; onChange hears it', async () => {
+    const got: unknown[] = []
+    const inc = kit.choice({ title: 'incident', all: 'all', key: 'i', values: ['INC-311', 'INC-312'], onChange: (v: unknown) => got.push(v) })
+    kit.draw((d: any) => {
+      const r = d.row()
+      inc.add(r)
+      r.end()
+    })
+    await tick()
+    expect(text()[0]).toBe('  incident  all')
+    await key('i')
+    expect(text().slice(1).map((r: string) => r.trim())).toEqual(['❯ all', 'INC-311', 'INC-312'])
+    await key('down')
+    await key('down')
+    await key('return')
+    expect(got).toEqual(['INC-312'])
+    expect(text()).toEqual(['  incident  INC-312'])
+  })
+
+  test('a value\'s indent stands its menu row in, 2 cells a level, for a tree; the row shows its name alone', async () => {
+    const scope = kit.choice({ title: 'sessions', all: 'all', key: 's', values: [{ name: 'Run 1 · nested team', value: 'r:r1' }, { name: 'lead', value: 's:a', indent: 1 }, { name: 'survey', value: 's:b', indent: 2 }] })
+    kit.draw((d: any) => {
+      const r = d.row()
+      scope.add(r)
+      r.end()
+    })
+    await tick()
+    await key('s')
+    expect(text().slice(1)).toEqual(['❯ all', '  Run 1 · nested team', '    lead', '      survey'])
+    await key('down')
+    await key('down')
+    await key('down')
+    await key('return')
+    expect(scope.value).toBe('s:b')
+    expect(text()).toEqual(['  sessions  survey'])
+  })
+
+  test('a choice with all: false holds its values alone, opens on the first, and Reset puts it back there', async () => {
+    const got: unknown[] = []
+    const kind = kit.choice({ title: 'items', all: false, key: 'i', values: [{ name: 'pull requests', value: 'pulls' }, { name: 'issues', value: 'issues' }], onChange: (v: unknown) => got.push(v) })
+    kit.draw((d: any) => {
+      const r = d.row()
+      kind.add(r)
+      r.end()
+    })
+    await tick()
+    expect(kind.value).toBe('pulls')
+    expect(kit.changed()).toBe(false)
+    expect(text()[0]).toBe('  items  pull requests')
+    await key('i')
+    expect(text().slice(1).map((r: string) => r.trim())).toEqual(['❯ pull requests', 'issues'])
+    await key('down')
+    await key('return')
+    expect(got).toEqual(['issues'])
+    expect(text()).toEqual(['  items  issues'])
+    expect(kit.changed()).toBe(true)
+    kit.reset()
+    await tick()
+    expect(kind.value).toBe('pulls')
+    expect(got.at(-1)).toBe('pulls')
+  })
+})
+
+describe('details', () => {
+  test('blocks: text as the record holds it, each line cut at the cell edge, code in the code color, at most max rows and then … N more, which a click opens', async () => {
+    init({ cols: 40, rows: 20 })
+    kit.draw((d: any) => kit.details(d, {
+      blocks: [
+        { text: 'pytest -q tests/client/test_http.py --tb=short', code: true },
+        { text: Array.from({ length: 6 }, (_, i) => `line ${i + 1}`).join('\n'), max: 3 },
+        { text: 'one\ntwo', max: 1 },
+        { text: '  \n' },
+      ],
+      facts: [['exit', 1]],
+    }))
+    await tick()
+    expect(text()).toEqual(['  pytest -q tests/client/test_http.py --t…', '  line 1', '  line 2', '  line 3', '  … 3 more', '  one', '  two', '  exit 1'])
+    expect(last().lines[0].find((s: any) => s.s.startsWith('pytest')).fg).toBe('permission')
+    await click('… 3 more')
+    expect(text().slice(1, 7)).toEqual(['  line 1', '  line 2', '  line 3', '  line 4', '  line 5', '  line 6'])
+  })
+
+  test('a place too long for its row beside ask about it drops its folders, so both show', async () => {
+    init({ cols: 60, rows: 4 })
+    const place = 'runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576/subagents/agent-a1e955cf.jsonl#L20'
+    kit.draw((d: any) => kit.details(d, { place, ask: { ref: place, text: 'x' } }))
+    await tick()
+    expect(text()[0]).toBe('  ↗ …/agent-a1e955cf.jsonl line 20  ask about it')
+    await click('agent-a1e955cf')
+    expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'open', ref: place })
+  })
+})
+
+describe('as text', () => {
+  test('frameText draws a frame plain, or with escape codes for its styles and hues', () => {
+    const f = { lines: [[{ s: '  ' }, { s: '●', fg: '#1d7fc0' }, { s: ' fired', d: true }, { s: ' x', bg: 'selectionBg' }]] }
+    expect(kit.frameText(f)).toBe('  ● fired x')
+    expect(kit.frameText(f, { ansi: true })).toBe('  \x1b[38;2;29;127;192m●\x1b[0m\x1b[2m fired\x1b[0m\x1b[48;5;238m x\x1b[0m')
+  })
+})

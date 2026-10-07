@@ -1,8 +1,9 @@
 # thimble-term's visual system
 
 How every surface of terminal mode draws on Claude Code's character grid: main's chat, cards and the panel. The
-hooks' comments cite its rules and sections by number ("SPEC.md rule 7", "SPEC.md, section 7, "Home""). Views are not
-drawn in the terminal: a view is one line, and it opens in the browser.
+hooks' comments cite its rules and sections by number ("SPEC.md rule 7", "SPEC.md, section 7, "Home""). A view built
+in terminal mode is drawn by its own program on the terminal view kit (docs/terminal-views.md), in this visual system; a
+view built in browser mode is one line, and it opens in the browser.
 
 ## The visual system
 
@@ -611,8 +612,14 @@ colored is said under each.
 - The bottom: `ask about it`, then the `follow-up` field when the citation was opened from a side thread.
 
 **The views pane:** `N views · N built`; one row per view, newest first: its glyph, its name, the files it claims dim
-at R, `new` in green until a built one is opened. A view is one line: the browser draws views, so its line says to open
-it in browser mode.
+at R, `new` in green until a built one is opened.
+
+**A view:** the path row, the view's name as the title, the facts its program gives as the subtitle, the rule; then
+the rows its program draws (`view.term.js` on the terminal view kit, docs/terminal-views.md), with their margin; then
+the hint row, the keys the program binds and `b to go back · x to close`. A region under the pointer that is not a
+whole row is inverse, and its tip shows on the tip background on the row below it. Its keys reach it through the list's
+relay (↑↓, Enter, Space, Backspace, a sign typed) and as hotkeys (a letter, a digit); while a field of the view takes
+typing, every key. A view built in browser mode is one line that says so, and how to open it in browser mode.
 
 **The file browser:**
 
