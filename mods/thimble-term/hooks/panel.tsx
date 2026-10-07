@@ -23,15 +23,15 @@ import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderEle
 import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermVerdict } from '../types'
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
-import { chipLook, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
+import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
 import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { dirOf, fileRef, firstChoice, folderOpen, sortPaths, turnsRead, wholeJson } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
-import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
+import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue, NAME_WHOLE } from './home'
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
+import { chipLabel, chipWords, cid, clip, cutLine, fmt, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, takeListKeys } from './lines'
 import type { LineHit } from './lines'
@@ -137,8 +137,8 @@ export async function openView(cx: Ctx, slug: string, name: string): Promise<voi
  *  card by its question): the citation panel's title and its step in the path. */
 async function citeTitle(cx: Ctx, c: Citation): Promise<string> {
   if (c.display !== null) return c.display
-  if (fileRef(c.ref)) return placeWords(c.ref)
-  return /^(?:card|cell):/.test(c.ref) ? placeName(cx, c.ref) : citeLabel(c)
+  if (fileRef(c.ref) || /^call:/.test(c.ref)) return placeWords(c.ref)
+  return /^(?:card|cell):/.test(c.ref) ? placeName(cx, c.ref) : chipWords(c)
 }
 
 /** A citation's panel, its step named by the cited value (or its place, for a citation that shows none); `sentence`
@@ -150,10 +150,10 @@ export async function openCite(cx: Ctx, ref: string, display: string | null, mor
   // a document's link: the document, from the section that holds the passage
   const rr = reportRef(ref)
   if (rr) return openDocAt(cx, rr.slug, rr.unit)
-  // its step in the path: its words cut at a word; for a place cited with no words, the short place the reply draws
-  // (`agent-chat:2`), since the path row has no room for the place in words
+  // its step in the path: its words cut at a word; for a place cited with no words, the words of the chip the reply
+  // draws (`agent-chat.jsonl line 2`)
   const c = { raw: '', ref, display }
-  const title = display === null && fileRef(ref) ? chipLabel(c) : clip(await citeTitle(cx, c), 40)
+  const title = display === null && fileRef(ref) ? chipWords(c) : clip(await citeTitle(cx, c), 40)
   await openPanel(cx, { view: 'cite', title, ref, display, ...(more.sentence ? { sentence: more.sentence } : {}), ...(more.quote ? { quote: more.quote } : {}), ...(more.of ? { of: more.of } : {}) })
 }
 
@@ -319,13 +319,17 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
   }
   const marksW = crumbs.reduce((n, c) => n + (c.mark ? c.mark.length + 1 : 0), 0)
   // at R `show all threads` and `N new`, while the steps keep the room they need beside them (home, the last step at
-  // up to 12 cells); else `N new` alone, else neither (`t` still shows all threads)
+  // up to 12 cells); else `threads` and `N new`, else `threads` alone, so the threads stay one click away in a narrow
+  // pane; else neither. No letter opens them: `t` did, unnamed, and a word typed while the panel held the keys (`table`)
+  // opened the threads and lost its first letter (live check term-fix10, new quirk 4)
   const labels = ['home', ...crumbs.map(c => c.text)]
   const room = cols - (back ? 8 : 0) - marksW
   const newW = fresh ? `${fresh} new`.length : 0
-  const tails: { all: boolean; fresh: boolean; w: number }[] = inThreads
-    ? [{ all: false, fresh: false, w: 0 }]
-    : [{ all: true, fresh: Boolean(fresh), w: 2 + 'show all threads'.length + (fresh ? 2 + newW : 0) }, ...(fresh ? [{ all: false, fresh: true, w: 2 + newW }] : []), { all: false, fresh: false, w: 0 }]
+  type Tail = { all: string; fresh: boolean; w: number }
+  const tail0 = (all: string, withNew: boolean): Tail => ({ all, fresh: withNew, w: (all ? 2 + all.length : 0) + (withNew ? 2 + newW : 0) })
+  const tails: Tail[] = inThreads
+    ? [tail0('', false)]
+    : [tail0('show all threads', Boolean(fresh)), ...(fresh ? [tail0('threads', true)] : []), tail0('threads', false), tail0('', false)]
   const need = Math.min(crumbsWidth(labels.map(l => clip(l, 34))), 4 + (labels.length > 2 ? 4 : 0) + (labels.length > 1 ? SEP_W + Math.min(12, width(labels.at(-1)!)) : 0))
   const tail = tails.find(t => room - t.w >= need) ?? tails.at(-1)!
   const fitted = fitCrumbs(labels, Math.max(4, room - tail.w))
@@ -351,9 +355,9 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
       {back ? <Text>{'  '}</Text> : null}
       {parts}
       <Box flexGrow={1} />
-      {tail.all ? <Button key="threads" label="show all threads" plain onPress={showAll} /> : null}
+      {tail.all ? <Button key="threads" label={tail.all} plain onPress={showAll} /> : null}
       {tail.fresh ? <Text color={FRESH}>{`${tail.all ? '  ' : ''}${fresh} new`}</Text> : null}
-      {hiddenKeys(cx, e, [...(back ? [{ key: 'back', hotkey: 'b', onPress: () => void navBack(cx) }] : []), ...(inThreads ? [] : [{ key: 'threads', hotkey: 't', onPress: showAll }]), { key: 'close', hotkey: 'x', onPress: () => void closePanel(cx) }])}
+      {hiddenKeys(cx, e, [...(back ? [{ key: 'back', hotkey: 'b', onPress: () => void navBack(cx) }] : []), { key: 'close', hotkey: 'x', onPress: () => void closePanel(cx) }])}
       {listKeysEl(cx, e)}
     </Box>
   )
@@ -546,7 +550,7 @@ function windowFit(top: number, len: number, room: number): { up: number; down: 
  *  choosing (live check term-fix8, quirk 1). The wheel and a click on a count row move the rows shown (wheelWindow)
  *  until the choice moves again; the lines cut off above and below are counted on a dim row each, which a click moves
  *  by a page. A list that fits, or a pane whose rows are not known, is drawn whole. */
-export function windowList(key: string, lines: Line[], hits: LineHit[], at: number, room: number, bump: () => Promise<void>): { lines: Line[]; hits: LineHit[] } {
+export function windowList(key: string, lines: Line[], hits: LineHit[], at: number, room: number, bump: () => Promise<void>, lead?: number): { lines: Line[]; hits: LineHit[] } {
   windowed = key
   const len = lines.length
   if (room < 5 || len <= room) {
@@ -560,7 +564,10 @@ export function windowList(key: string, lines: Line[], hits: LineHit[], at: numb
   if (at >= 0 && !free) {
     for (let i = 0; i < 3; i++) {
       const f = windowFit(top, len, room)
-      if (at < top) top = at
+      // a choice that moves up to the window's first row or above it: the window starts at the row that leads it (its
+      // section's heading, or the list's top for its first row), so those rows can be reached by keys (live check
+      // term-fix10, new quirk 5: ↑ back to home's first row left `↑ 4 more` and hid the Views and Documents headings)
+      if (at < top || (lead !== undefined && lead < top && at === top)) top = lead !== undefined && lead <= at ? lead : at
       else if (at >= top + f.n) top = at - f.n + 1
       else break
       top = Math.max(0, Math.min(top, last))
@@ -865,7 +872,9 @@ async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const pick = ui.pick || lay.picks[0]?.key || ''
   const pickY = lay.hits.find(h => h.pick === pick)?.y ?? -1
   const last = lay.lines.length - lay.hintRows
-  const win = windowList('home', lay.lines.slice(2, last), allHits.filter(h => h.y >= 2 && h.y < last).map(h => ({ ...h, y: h.y - 2 })), pickY - 2, bodyRows - 3 - lay.hintRows, () => cx.bumpPanel())
+  // the row that leads the chosen one: the top for the first row the keys choose, else its section's heading
+  const lead = pick === lay.picks[0]?.key ? 2 : Math.max(2, ...lay.heads.filter(y => y <= pickY))
+  const win = windowList('home', lay.lines.slice(2, last), allHits.filter(h => h.y >= 2 && h.y < last).map(h => ({ ...h, y: h.y - 2 })), pickY - 2, bodyRows - 3 - lay.hintRows, () => cx.bumpPanel(), lead - 2)
   const lines = [...lay.lines.slice(0, 2), ...win.lines, ...lay.lines.slice(last)]
   const hits: LineHit[] = [...allHits.filter(h => h.y < 2), ...win.hits.map(h => ({ ...h, y: h.y + 2 }))]
   const onKey = async (k: string) => {
@@ -1136,16 +1145,16 @@ function framedCard(cx: Ctx, e: PaneEvent, card: CardData, w: number, lines: Lin
   )
 }
 
-/** The sentence a citation stands in, its value blue and underlined, in quotation marks. */
+/** The sentence a citation stands in, its value blue and underlined (a chip blue, `[ card ]`), in quotation marks. */
 function sourceSegs(sentence: string, c: Citation): Line {
   const flat = plainCites(sentence).replace(/\s+/g, ' ').trim()
-  // a citation written without words stands in the sentence as its label (`revisions:1`)
+  // a citation written without words stands in the sentence as its chip (`[ revisions.jsonl line 1 ]`)
   const shown = c.display ?? citeLabel(c)
   const at = shown ? flat.indexOf(shown) : -1
   // in quotation marks of the kind its words do not hold (lib.ts quoted)
   const [open, close] = quoted(flat) === flat ? ['', ''] : flat.includes('"') ? ['“', '”'] : ['"', '"']
   if (at < 0) return [{ s: `${open}${flat}${close}` }]
-  return [{ s: `${open}${flat.slice(0, at)}` }, linkSeg(shown), { s: `${flat.slice(at + shown.length)}${close}` }]
+  return [{ s: `${open}${flat.slice(0, at)}` }, c.display === null ? { s: shown, fg: LINK } : linkSeg(shown), { s: `${flat.slice(at + shown.length)}${close}` }]
 }
 
 /** In a citation opened from a side thread, a field whose question goes on in that thread, about the citation; the
@@ -1349,8 +1358,10 @@ export async function anchorName(cx: Ctx, row: AboutRow | undefined): Promise<st
   }
   const slug = slugOf(row.anchorText)
   const t = (row.title ?? '').trim()
-  // a citation's words in quotation marks; one with no words is titled by its place as the reply shows it (`agent-chat:2`)
-  if (t && t !== slug && !t.startsWith(`${slug}-`)) return t === chipLabel({ raw: `[[${a}]]`, ref: a, display: null }) ? t : subjectWords(t)
+  // a citation's words in quotation marks; a chip by its place in words (`agent-chat.jsonl line 2`), as its thread was
+  // titled (gestures.tsx targetLabel)
+  const chip = { raw: `[[${a}]]`, ref: a, display: null }
+  if (t && t !== slug && !t.startsWith(`${slug}-`)) return t === chipName(chip) || t === chipLabel(chip) ? t : subjectWords(t)
   return /^(?:card|cell):/.test(a) ? placeName(cx, a) : placeWords(a)
 }
 
@@ -1492,7 +1503,7 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
         body.push(<Text key={`thread-run-${k}`} dimColor wrap="truncate-end">{cut(`◌ ${plural(turn.tools, 'tool call')}${partial ? ` · ${clip(partial, cols - 30)}` : ''}`, cols)}</Text>)
       } else if (stoppedTurn(turn)) body.push(<Text key={`thread-err-${k}`} dimColor wrap="wrap">{turn.a.trim().replace(/([^.!?])$/, '$1.')}</Text>)
       else if (turn.state === 'error') body.push(<Text key={`thread-err-${k}`} color={COLORS.problem} wrap="wrap">{`× ${turn.a}`}</Text>)
-      else if (turn.a.trim()) body.push(<Box key={marginKey(`thread-answer-${k}`)} flexDirection="column">{await drawReply(cx, e, turn.a, cols, { margin: PANEL_MARGIN, prefix: `t${k}-`, drawn: new Set(turn.cards ?? []), ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}</Box>)
+      else if (turn.a.trim()) body.push(<Box key={marginKey(`thread-answer-${k}`)} flexDirection="column">{await drawReply(cx, e, turn.a, cols, { margin: PANEL_MARGIN, prefix: `t${k}-`, ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}</Box>)
       // the cards the turn made, under its answer, each in its frame, as main's chat draws a turn's cards
       for (const [ci, id] of (turn.cards ?? []).entries()) body.push(<Box key={`thread-card-${k}-${ci}`} flexDirection="column">{await cardBlock(cx, e, id, cols, `th${k}-${ci}`, { order: ci + 1 })}</Box>)
     }
@@ -1626,7 +1637,10 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   const kind = ui.kind[id] ?? l.kind ?? 'prompt'
   const files = !l.unit || ['record', 'agent', 'run'].includes(l.unit)
   const last = l.last_run ?? l.applications?.at(-1) ?? null
-  const scopeN = typeof last?.matched_total === 'number' ? last.matched_total : typeof last?.total === 'number' && !l.trial ? last.total : null
+  // the records its scope holds: its last full run's count, else the count `thimble state` gives a label with no run
+  // that ended (live check term-fix10, low quirk: `run on all` and `scope: pages.jsonl` showed no number after a first
+  // run stopped part way)
+  const scopeN = typeof last?.matched_total === 'number' ? last.matched_total : typeof last?.total === 'number' && !l.trial ? last.total : typeof l.scope_total === 'number' ? l.scope_total : null
   const sample = l.trial && last?.limit ? last.limit : 30
   const unit = unitWords(l.unit)
   const opened = (part: string) => ui.open.includes(`${id}:${part}`)
@@ -1927,7 +1941,11 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     if (cards.length > 8) rows.push(<Text key="lb-cards-more" dimColor>{`  … ${num(cards.length - 8)} more`}</Text>)
     if (!cards.length) rows.push(<Text key="lb-cards-none" dimColor>{'  none'}</Text>)
   }
-  keys.push({ key: 'list', hotkey: 'l', onPress: () => void openList(cx, { view: 'labels', title: 'Labels' }) })
+  // the labels list with this label chosen (live check term-fix10, new quirk 8: it chose the list's remembered row)
+  keys.push({ key: 'list', hotkey: 'l', onPress: () => {
+    labelPick = l.id || p.label || labelPick
+    void openList(cx, { view: 'labels', title: 'Labels' })
+  } })
   // the keys that fit one row: the field says how to save it (its placeholder); each folded part's key by what it opens
   rows.push(hintsRow(els, [...(running || follower ? ['s to stop'] : st.running || asking ? [] : ['r to run a sample', 'k to delete']), 'c counts, e examples, d cards', 'l for labels'], cols))
   const hk = hiddenKeys(cx, e, keys)
@@ -2114,9 +2132,7 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
   // a passage's thread is told the document, its section and the passage
   const askIn = (u: DocSection) => (tgt: Target) =>
     void openAsk(cx, tgt, tgt.kind === 'sentence' ? { anchor: `report:${slug}${u.id ? `#${u.id}` : ''}`, anchorText: `${quoted(title)} › ${plainCites(str(u.heading))}: ${plainCites(tgt.text ?? '')}`, element: `report:${slug}${u.id ? `#${u.id}` : ''}` } : { element: `report:${slug}${u.id ? `#${u.id}` : ''}` })
-  // the document's figures: a sentence that cites one of them whole leaves the reference out
-  const figures = new Set(units.flatMap(u => [...(u.figures ?? []), ...(u.figure ? [u.figure] : [])].map(f => str(f.cell).replace(/^(?:card|cell):/, '')).filter(Boolean)))
-  const drawUnit = async (u: DocSection, i: number, focus?: Record<string, Focus>) => drawReply(cx, e, unitMarkdown(u), cols, { margin: PANEL_MARGIN, prefix: `d${i}-`, drawn: figures, ask: askIn(u), open: id => void openThread(cx, id), in: 'report', ...(focus ? { focus } : {}) })
+  const drawUnit = async (u: DocSection, i: number, focus?: Record<string, Focus>) => drawReply(cx, e, unitMarkdown(u), cols, { margin: PANEL_MARGIN, prefix: `d${i}-`, ask: askIn(u), open: id => void openThread(cx, id), in: 'report', ...(focus ? { focus } : {}) })
   const stepped = units.length > 0 && (form === 'slides' || (form === 'story' && p.mode !== 'page'))
   const controls: (RenderElement | null)[] = []
   const hints: string[] = []
@@ -2186,7 +2202,11 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
     }
     hints.push(forms.join(', '))
   }
-  const all = () => void openList(cx, { view: 'docs', title: 'Documents' })
+  // the documents list with this document chosen (live check term-fix10, new quirk 8: it chose the other document)
+  const all = () => {
+    docPick = p.slug ?? docPick
+    void openList(cx, { view: 'docs', title: 'Documents' })
+  }
   controls.push(<Button key="doc-all" label="all documents ›" plain onPress={all} />)
   keys.push({ key: 'all', hotkey: 'l', onPress: all })
   hints.push('l for all documents')
@@ -2255,18 +2275,6 @@ function rawLines(page: Obj): { n: number; text: string }[] {
 /** The folders open in the file browser: the first unless folded, any other once unfolded. */
 const FOLDER_FILES = 20
 
-/** A short name cut in its middle to `n` cells, its extension kept (`revis…ns.jsonl`); a longer title at its end. */
-function middleCut(name: string, n: number): string {
-  if (width(name) <= n) return name
-  if (name.split(/\s+/).length > 3 || n < 8) return cut(name, n)
-  const dot = name.lastIndexOf('.')
-  const ext = dot > 0 && name.length - dot <= 8 ? name.slice(dot) : ''
-  const stem = ext ? name.slice(0, dot) : name
-  const room = n - width(ext) - 1
-  if (room < 4) return cut(name, n)
-  const head = Math.ceil(room / 2)
-  return `${stem.slice(0, head)}…${stem.slice(stem.length - (room - head))}${ext}`
-}
 
 /** The tab a file opens on, by its first page: Transcript when its head reads as a transcript surely (thimble's sniff,
  *  transcripts.STRONG) and it has turns to show, else Raw, its lines. `turns` are those the view has (a whole-file JSON
@@ -2306,8 +2314,14 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   for (const f of files) byDir.set(dirOf(f.path), [...(byDir.get(dirOf(f.path)) ?? []), f])
   const dirs = [...byDir.keys()]
   const root = `${(await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'}/`
-  const kindW = Math.max(4, ...files.map(f => width(f.kind)))
   const sizeW = Math.max(4, ...files.map(f => fmtSize(f.size).length))
+  // the type column, unless beside it a file's name (up to NAME_WHOLE cells) would be cut: the column goes first, as on
+  // home (live check term-fix10, new quirk 6: `agent-c…` and `pages.j…` beside a 10-cell type column)
+  const kindW0 = Math.max(4, ...files.map(f => width(f.kind)))
+  const longest = Math.max(0, ...files.map(f => width(f.path.slice(dirOf(f.path).length))))
+  const typed = cols - 4 - kindW0 - sizeW - 6 >= Math.min(NAME_WHOLE, longest)
+  const kindW = typed ? kindW0 : 0
+  const typeCol = (s: string): Seg[] => (typed ? [dim(s.padEnd(kindW)), { s: '  ' }] : [])
   const body: RenderElement[] = [...headerEls(els, { title: 'Files', cols, sub: subLine([plural(files.length, 'file')]) })]
   const lines: Line[] = []
   const hits: LineHit[] = []
@@ -2329,8 +2343,8 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   }
   // a click on a file: chosen, and opened when it is chosen already
   const clickFile = (path: string) => async () => (pickFile === path ? openFile(cx, path) : choose(path)())
-  const right = (f: FileEntry): Line => [dim(f.kind.padEnd(kindW)), { s: '  ' }, dim(fmtSize(f.size).padStart(sizeW))]
-  lines.push(pointed(spread([{ s: '    ' }, dim('name')], [dim('type'.padEnd(kindW)), { s: '  ' }, dim('size'.padStart(sizeW))], cols), false))
+  const right = (f: FileEntry): Line => [...typeCol(f.kind), dim(fmtSize(f.size).padStart(sizeW))]
+  lines.push(pointed(spread([{ s: '    ' }, dim('name')], [...typeCol('type'), dim('size'.padStart(sizeW))], cols), false))
   // a folder folded or unfolded, the choice on its row
   const flip = (dir: string) => async () => {
     const key = `dir:${dir}`
@@ -2346,14 +2360,14 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     if (key === pick) pickY = lines.length
     hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: flip(dir) })
     // its files' count after its name, as home shows it, and their size under `size`
-    lines.push(pointed(spread([{ s: open ? '▾' : '▸' }, { s: ' ' }, { s: dir || root }, dim(`  ${num(fs.length)}`)], [dim(''.padEnd(kindW)), { s: '  ' }, dim(fmtSize(fs.reduce((k, f) => k + f.size, 0)).padStart(sizeW))], cols), key === pick))
+    lines.push(pointed(spread([{ s: open ? '▾' : '▸' }, { s: ' ' }, { s: dir || root }, dim(`  ${num(fs.length)}`)], [...typeCol(''), dim(fmtSize(fs.reduce((k, f) => k + f.size, 0)).padStart(sizeW))], cols), key === pick))
     order.push(key)
     if (!open) continue
     const whole = (ui.whole ?? []).includes(dir)
     const shown = !whole && fs.length > FOLDER_FILES + 1 ? fs.slice(0, FOLDER_FILES) : fs
     // each file's name at A4, with no dot, as home lists it: the type column names its type
     for (const f of shown) {
-      const name = middleCut(f.path.slice(dir.length), Math.max(8, cols - 4 - kindW - sizeW - 6))
+      const name = middleCut(f.path.slice(dir.length), Math.max(8, cols - 4 - (typed ? kindW + 2 : 0) - sizeW - 4))
       if (f.path === pick) pickY = lines.length
       hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: clickFile(f.path) })
       lines.push(pointed(spread([{ s: '    ' }, { s: name }], right(f), cols), f.path === pick, true))

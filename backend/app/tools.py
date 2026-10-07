@@ -2379,11 +2379,10 @@ def _chip(c: str, kind: str, text: str, **fields: Any) -> None:
 
 
 async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
-    """Define a category and apply it over one scope's units (concepts.apply_scoped): the label is a card (in `group` or
-    default_group's pick) and, when `filter` is true, the scope's filter. The orientation's labels get no card. A
-    changed
-    label names the cards that read it before (`## apply_label-stale`)."""
-    from . import concepts
+    """Define a category and apply it over one scope's units (concepts.apply_scoped): the label is a card (in `group`,
+    else for a new label a group named after it) and, when `filter` is true, the scope's filter. The orientation's
+    labels get no card. A changed label names the cards that read it before (`## apply_label-stale`)."""
+    from . import concepts, threads
 
     scope = str(args.get("scope") or "files").strip().lower()
     name = " ".join(str(args.get("name") or "").split())
@@ -2419,7 +2418,18 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                         scope=concepts.SCOPE_OF_UNIT.get(prior["unit"]), new=scope))
     orienting = session_kind(ctx.session) == ORIENT_SESSION
     group = str(args.get("group") or "").strip()
-    target = None if orienting else _group_id(ctx, group, []) if group else default_group(ctx)
+    if orienting:
+        target = None
+    elif group:
+        target = _group_id(ctx, group, [])
+    elif (prior is None or not concepts._label_cards(ctx.ws, prior["id"])) and GROUP_PATH_SEP not in name \
+            and request_of(name) is None and threads.group_of(ctx.c, name) is None:
+        # a new label's card with no group named gets a group of its own, named after the label (by its title alone,
+        # never read as a path or a thread), rather than the group of the last card the caller made (live check
+        # term-fix10, quirk 9: a label card landed in "Deletes per day, 18 to 26 June")
+        target = _group_id(ctx, name, [])
+    else:
+        target = default_group(ctx)  # the card the label has already stays where it is (concepts.label_card)
     if target:
         _note_group(ctx, target)
     question = _question(args.get("question")) or None

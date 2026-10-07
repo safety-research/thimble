@@ -194,7 +194,8 @@ def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_vari
     """The launcher passes launch-args' session id with --session-id, exports the env line's switches into `claude`'s
     environment, unsets the variables the unset line names, prints each note line before Claude Code starts, and tells
     launch-args when the analyst's own flags name the session (-r, --session-id, --fork-session) or ask for safe mode.
-    It passes launch-args its own pid, which is `claude`'s once it execs it, for launch.json."""
+    It passes launch-args its own pid for launch.json, which `claude`'s replaces once it starts (the launcher outlives
+    `claude`, so `claude` is its child)."""
     import subprocess  # noqa: PLC0415
 
     head = [str(tmp_path / "plugin"), "mcp__x", "high", "{}", ""]
@@ -205,7 +206,7 @@ def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_vari
                                           "CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CODE_SUBAGENT_MODEL", notes, "browser", "",
                                           "the prompt"])
     (path / "claude").write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done > "$ARGV_OUT"\n'
-                                 'env > "$ARGV_OUT.env"\necho $$ > "$ARGV_OUT.pid"\n')
+                                 'env > "$ARGV_OUT.env"\necho $PPID > "$ARGV_OUT.pid"\n')
     asked = tmp_path / "asked.txt"
     py = tmp_path / "plugin" / "bin" / "thimble-python"
     py.write_text(py.read_text().replace("#!/bin/sh\n", f'#!/bin/sh\nprintf "%s\\n" "$@" > "{asked}"\n'))
@@ -222,7 +223,7 @@ def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_vari
     assert "--own-session" not in asked.read_text() and "--safe-mode" not in asked.read_text()
     told_pid = asked.read_text().splitlines()
     assert told_pid[told_pid.index("--launcher-pid") + 1] == Path(f"{argv_out}.pid").read_text().strip(), \
-        "launch-args gets the pid `claude` runs as"
+        "launch-args gets the launcher's own pid, `claude`'s parent"
     for flags, told in ((["-r", "sid-mine"], "--own-session=sid-mine"), (["--session-id", sid], f"--own-session={sid}"),
                         (["-r", "x", "--fork-session"], "--own-session="), (["--safe-mode"], "--safe-mode")):
         subprocess.run(["bash", str(launcher), *flags], check=True, capture_output=True, cwd=tmp_path, env=env)
@@ -306,7 +307,8 @@ def test_terminal_mode_launches_with_no_server_the_renderer_the_card_runner_and_
     assert settings["env"][cli.cc_plugin.FENCE_MARK] == "1", "fenced as in browser mode"
     allow = settings["sandbox"]["filesystem"]["allowWrite"]
     assert {f"{ws}/notebooks", f"{ws}/labels", f"{ws}/card-runs"} <= set(allow)
-    assert lines[10] == f"terminal\t{t.renderer}"
+    launch = str(config.workspace_dir("logs") / cli.LAUNCH_FILE)  # whose pid the launcher sets to main's `claude`
+    assert lines[10] == f"terminal\t{t.renderer}\t{launch}"
     exported = dict(kv.split("=", 1) for kv in lines[11].split("\t"))
     assert {k: exported[k] for k in want} == want
     # the plugin copy's bin/ first on PATH, so main's Bash runs `thimble-run` by its name; main's --settings leave PATH
@@ -318,7 +320,7 @@ def test_terminal_mode_launches_with_no_server_the_renderer_the_card_runner_and_
 
     (t.renderer / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "other-plugin"}))
     lines = cli.launch_args(t.folder).split("\n")
-    assert lines[10] == "terminal", "no renderer to load"
+    assert lines[10] == f"terminal\t\t{launch}", "no renderer to load"
     assert any(n.startswith("thimble: WARNING - terminal mode's renderer cannot load") for n in lines[9].split("\t"))
 
     for k in t.calls.values():
@@ -330,7 +332,7 @@ def test_terminal_mode_launches_with_no_server_the_renderer_the_card_runner_and_
     settings = json.loads(lines[3])
     assert not {"THIMBLE_MODE", "THIMBLE_WS", "THIMBLE_HOME"} & set(settings["env"])
     assert f"{ws}/notebooks" not in settings["sandbox"]["filesystem"]["allowWrite"]
-    assert lines[10:12] == ["browser", ""]
+    assert lines[10:12] == [f"browser\t\t{launch}", ""]
     assert json.loads((t.ws / cli.LAUNCH_FILE).read_text())["mode"] == "browser"
     assert t.calls["prompt_env"] == [{"THIMBLE_MODE": None, "THIMBLE_WS": None}]
 
@@ -429,11 +431,12 @@ def test_the_launcher_starts_terminal_mode_with_the_renderer_the_exports_and_no_
     assert done.returncode == 1 and "could not render the session prompt" in done.stderr, "the control"
 
 
-def test_after_claude_exits_in_terminal_mode_the_launcher_says_how_to_come_back_with_thimble(tmp_path):
-    """Claude Code's own last line names `claude --resume`, which resumes the session without thimble, so in terminal
-    mode the launcher outlives `claude` and says `thimble --continue`. launch.json still names main's `claude` process:
-    the subshell that execs it writes its own pid there first. A failed `claude` gets no such line, and browser mode
-    execs `claude` as before. `--continue` names no session id."""
+def test_after_claude_exits_the_launcher_says_how_to_come_back_with_thimble_in_either_mode(tmp_path):
+    """Claude Code's own last line names `claude --resume`, which resumes the session without thimble, so the launcher
+    outlives `claude` and says `thimble --continue`, in terminal mode and (live check term-fix10, quirk 9) in browser
+    mode too. launch.json, which the mode line names (or THIMBLE_WS, from a launch-args before it did), still names
+    main's `claude` process: the subshell that execs it writes its own pid there first. A failed `claude` gets no such
+    line, an interrupted one (130) does. `--continue` names no session id."""
     import subprocess  # noqa: PLC0415
 
     ws = tmp_path / "ws"
@@ -458,23 +461,33 @@ def test_after_claude_exits_in_terminal_mode_the_launcher_says_how_to_come_back_
     assert "5e55e55e" not in done.stderr
     done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env={**env, "CLAUDE_EXIT": "1"})
     assert done.returncode == 1 and "thimble --continue" not in done.stderr
+    done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env={**env, "CLAUDE_EXIT": "130"})
+    assert done.returncode == 130 and done.stderr.splitlines()[-1].startswith("Resume with thimble --continue")
+    launch = ws / "trusted" / "launch.json"
+    launch.write_text(json.dumps({"session": "s1", "pid": 1, "mode": "browser"}))
+    (tmp_path / "launch-args.txt").write_text("\n".join([*head, f"browser\t\t{launch}", "", "the prompt"]))
+    done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env=env)
+    assert done.returncode == 0 and done.stderr.splitlines()[-1] == ("Resume with thimble --continue instead; it loads "
+                                                                    "thimble's plugin.")
+    assert json.loads(launch.read_text())["pid"] == int(Path(f"{argv_out}.pid").read_text())
     (tmp_path / "launch-args.txt").write_text("\n".join([*head, "browser", "", "the prompt"]))
     done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env=env)
-    assert done.returncode == 0 and "thimble --continue" not in done.stderr
+    assert done.returncode == 0 and "thimble --continue" in done.stderr, "no workspace: nothing to write, the line all the same"
 
 
 async def test_the_statusline_shows_the_orientation_and_its_cards_and_the_listing_plain_words(monkeypatch):
     """thimble's statusline shows the orientation's state and its cards, the other agents being rows of Claude Code's
-    own tray; /thimble:agents lists every running agent of thimble's by what it does."""
+    own tray; /thimble:agents lists every running agent of thimble's by what it does, and nothing under the rows, since
+    Claude Code's own tray row already says how to follow an agent."""
     rows = [{"name": "thimble:orientation", "label": "orientation", "state": "working", "role": "orientation"},
             {"name": "thimble:writer", "label": "writer: report", "state": "waiting for a permission", "role": "writer"},
             {"name": "fork(thread:probe)", "state": "idle"}]
     monkeypatch.setattr(tray, "_cards", lambda c: 7)
     assert tray.status_line(CORPUS, rows) == "thimble · orientation working · 7 cards"
     assert tray.status_line(CORPUS, rows[1:]) == "", "no orientation runs"
-    assert tray.listing_text(rows).splitlines()[:3] == [f"{'orientation':<18}  working",
-                                                         f"{'writer: report':<18}  waiting for you",
-                                                         "fork(thread:probe)  done"]
+    assert tray.listing_text(rows).splitlines() == [f"{'orientation':<18}  working",
+                                                     f"{'writer: report':<18}  waiting for you",
+                                                     "fork(thread:probe)  done"]
     monkeypatch.setattr(config, "workspace_for_cwd", lambda cwd: CORPUS)
     monkeypatch.setattr(tray, "agent_rows", lambda c: rows)
     got = await tray.agents_route(tray.AgentsQuery(cwd="/work", session="main-1", announce=True))

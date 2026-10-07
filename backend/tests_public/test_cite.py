@@ -167,3 +167,33 @@ def test_a_date_in_words_is_found_where_a_cell_a_row_name_or_a_line_writes_it_in
     # a date the output does not write is still missing
     r = cite.resolve("d5", "On 27 June there were none.", [frames.bundle(f)])
     assert "27 June" in r.unresolved
+
+
+def test_a_number_an_output_writes_in_words_is_found_and_words_match_in_any_case():
+    """Live check term-fix10, quirk 9: edit_card said "NOT found in this card's outputs, 12, 7" for an output whose lines
+    read "Twelve pages are up" and "seven of the twelve pages are gone", as the dates in words were before term-fix9;
+    and the document's check moved `[[twelve pages|…#L4]]` off the line that reads "Twelve pages are up". A whole number
+    is at a place that writes it in words, a cited one stays linked there and an uncited one is found and left plain;
+    words match in any case."""
+    from app import report, verify
+
+    assert [v for _, _, v in cite.number_words("Twelve pages; seven of the twelve; twenty-one, Ninety nine, zero")] == \
+        [12, 7, 12, 21, 99, 0]
+    assert cite.number_words("someone, oneself, seventeenth, x-one") == []
+    assert [v for _, _, v in cite.number_words("a six-week span")] == [6]
+    for display, place in [("12", "alpha: Twelve pages are up."), ("7", "seven of the twelve pages are gone"),
+                           ("21", "twenty-one runs")]:
+        assert cite.value_in(display, place) and verify._value_matches(display, place), (display, place)
+    for display, place in [("12", "eleven pages"), ("13", "Twelve pages"), ("7.5", "seven"), ("120", "twelve")]:
+        assert not cite.value_in(display, place), (display, place)
+    assert cite.value_in("twelve pages", "alpha: Twelve pages are up.")
+    assert report._value_matches("twelve pages", "alpha: Twelve pages are up.")
+    timeline = [{"text/plain": "timeline: 3 events\n2026-06-23T09:12:04Z  alpha: Starting a probe.\n"
+                               "2026-06-23T15:02:18Z  alpha: Twelve pages are up.\n"
+                               "2026-06-24T08:30:51Z  beta: seven of the twelve pages are gone."}]
+    r = cite.resolve("t1", "Alpha made 12 pages, and [[7|card:t1@out0#L4]] were gone the next day.", timeline)
+    assert r.unresolved == [] and "[[7|card:t1@out0#L4]]" in r.annotated and "made 12 pages" in r.annotated
+    r = cite.resolve("t1", "Alpha made [[twelve pages|card:t1@out0#L3]].", timeline)
+    assert r.annotated == "Alpha made [[twelve pages|card:t1@out0#L3]]."
+    r = cite.resolve("t1", "Alpha made 13 pages.", timeline)
+    assert r.unresolved == ["13"], "a number no output writes in digits or words is still missing"

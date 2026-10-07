@@ -214,20 +214,6 @@ export function linksAsSpans(text: string): string {
   return text.replace(LINK_RE, (m: string, shown: string, a?: string, b?: string) => linkCitation(shown, a ?? b ?? '')?.raw ?? m)
 }
 
-/** A citation that names only its place, with no value or words of its own (`[↗](ref)`, `[[ref]]`): a card cited whole,
- *  a card's printed line, a file's line; a label's link is none. */
-export function placeOnly(c: Citation): boolean {
-  return c.display === null && !labelRef(c.ref)
-}
-
-/** Whether a citation that names only its place reads as a reference in parentheses, given the words after it: a card
- *  cited whole always; another place where it ends a clause (`…on 18 June [↗](card:…@out0#L1). That is…`), never as
- *  words of the sentence (live check term-fix6, new quirk 5); one the sentence goes on after (`See [[README.md#L5]] for
- *  the format.`) reads as its words. */
-export function asReference(c: Citation, after: string): boolean {
-  return placeOnly(c) && (Boolean(bareCard(c)) || /^\s*(?:[.,;:!?)]|$)/.test(after))
-}
-
 /** A text with each Markdown link that is a citation (`[4,579](README.md#L3)`, the form main writes for the terminal)
  *  as its shown words; a web link stays as written. */
 export function plainLinks(text: string): string {
@@ -286,39 +272,102 @@ export function outputLine(ref: string): { card: string; first: number; last: nu
   return { card: m[1]!, first, last, words: q ? `${cardWords(q)} output ${lines}` : `a card's output ${lines}` }
 }
 
-/** What a chip says: the shown value, or a short name of the place for a citation without one; a card cited whole by
- *  its question. */
-export function chipLabel(c: Citation): string {
-  if (c.display !== null) return clip(c.display, 40)
+/** A chip: a citation that names only its place, with no words of its own (`[[card:<id>]]`, `[↗](<ref>)`), which the
+ *  browser draws as a chip; its own kind of citation (Matt, 2026-10-07). Every surface draws it as `[ card ]`
+ *  (chipText), never as words of the sentence. */
+export function isChip(c: Citation): boolean {
+  return c.display === null
+}
+
+/** The most cells a chip's words take, its brackets aside. */
+export const CHIP_MAX = 30
+
+/** What a chip says inside its brackets, short (Matt, 2026-10-07): `card` for a card or one of its cells, `card output
+ *  line 1` for a line it printed, `events.jsonl line 12` for a file's line (its name cut in its middle, the line kept),
+ *  a label by its name (`edit purpose`, `edit purpose · yes` for a value), `report`, `slides` or `story` for a document
+ *  or a passage of one, `output line 1` for a command's output. Never an id. */
+export function chipWords(c: Citation): string {
   // a label's link and a document's by their names, never their ids (live check term-fix8, quirk 3: `concept:eb534ca4`
   // and `↗ (report:report#4255ef27)` showed in a reply)
   const lr = labelRef(c.ref)
   if (lr) {
     const name = labelNames.get(lr.id)
-    return name ? `label ${quoted(clip(name, 32))}${lr.value ? ` ${lr.value}` : ''}` : `a label${lr.value ? `'s ${lr.value}` : ''}`
+    const value = lr.value ? ` · ${lr.value}` : ''
+    return name ? `${cut(name, Math.max(8, CHIP_MAX - width(value)))}${value}` : `label${value}`
+  }
+  const rr = reportRef(c.ref)
+  if (rr) return rr.slug === 'slides' || rr.slug === 'story' ? rr.slug : 'report'
+  const [base = '', frag = ''] = c.ref.split('#', 2)
+  const out = outputLine(c.ref)
+  if (out) return out.last !== out.first ? `card output lines ${out.first}-${out.last}` : `card output line ${out.first}`
+  if (/^(?:card|cell):/.test(base)) return 'card'
+  if (base.startsWith('call:')) {
+    const call = /^L(\d+)(?:-L?(\d+))?$/.exec(frag)
+    return call ? (call[2] && call[2] !== call[1] ? `output lines ${call[1]}-${call[2]}` : `output line ${call[1]}`) : 'output'
+  }
+  // a file's place in words, its name as written (`events.jsonl line 12`, `agent-chat.jsonl lines 1-2`), never
+  // `events:1063`, which reads as an id (live check term-fix9, low quirk); a long name cut in its middle, its line kept
+  const name = base.split('/').at(-1) ?? base
+  const lines = /^L(\d+)(?:-L?(\d+)|\.b\d+(?::c\d+-\d+)?)?$/.exec(frag)
+  const row = /^row=(\d+)$/.exec(frag)
+  const page = /^p(\d+)$/.exec(frag)
+  // a JSON list's item, counted from 1 as the file's view counts them (draw.ts placeWords)
+  const item = /^\/(?:[^/]+\/)?(\d+)$/.exec(frag)
+  const where = lines ? (lines[2] && lines[2] !== lines[1] ? ` lines ${lines[1]}-${lines[2]}` : ` line ${lines[1]}`) : row ? ` row ${row[1]}` : page ? ` page ${page[1]}` : item ? ` item ${Number(item[1]) + 1}` : frag ? ` ${frag}` : ''
+  if (width(`${name}${where}`) <= CHIP_MAX) return `${name}${where}`
+  const room = CHIP_MAX - width(where)
+  return room >= 8 ? `${middleCut(name, room)}${where}` : cut(`${name}${where}`, CHIP_MAX)
+}
+
+/** A short name cut in its middle to `n` cells, its extension kept (`revis…ns.jsonl`); a longer title at its end. */
+export function middleCut(name: string, n: number): string {
+  if (width(name) <= n) return name
+  if (name.split(/\s+/).length > 3 || n < 8) return cut(name, n)
+  const dot = name.lastIndexOf('.')
+  const ext = dot > 0 && name.length - dot <= 8 ? name.slice(dot) : ''
+  const stem = ext ? name.slice(0, dot) : name
+  const room = n - width(ext) - 1
+  if (room < 4) return cut(name, n)
+  const head = Math.ceil(room / 2)
+  return `${stem.slice(0, head)}…${stem.slice(stem.length - (room - head))}${ext}`
+}
+
+/** A chip as every surface draws it: its words in brackets, a space inside each (`[ card ]`). */
+export function chipText(c: Citation): string {
+  return `[ ${chipWords(c)} ]`
+}
+
+/** What a citation's link says: the shown value, cut at a word, or a chip (chipText) for a citation without one. */
+export function chipLabel(c: Citation): string {
+  return c.display !== null ? clip(c.display, 40) : chipText(c)
+}
+
+/** A chip's place in full words, for its tip: a label by its name, a document by its title or a passage by its words,
+ *  as they were noted (noteLabelName, noteDocPlace); '' for any other place, which the caller names. */
+export function chipPlace(c: Citation): string {
+  const lr = labelRef(c.ref)
+  if (lr) {
+    const name = labelNames.get(lr.id)
+    return name ? `label ${quoted(clip(name, 40))}${lr.value ? ` at its value ${quoted(lr.value)}` : ''}` : ''
   }
   const rr = reportRef(c.ref)
   if (rr) {
+    const kind = rr.slug === 'slides' || rr.slug === 'story' ? rr.slug : 'report'
     const words = rr.unit ? passages.get(`report:${rr.slug}#${rr.unit}`) : ''
-    if (words) return quoted(clip(words, 40))
+    if (words) return `${kind} ${quoted(clip(words, 60))}`
     const title = docTitles.get(rr.slug)
-    return title ? `${rr.slug === 'slides' ? 'slides' : rr.slug === 'story' ? 'story' : 'report'} ${quoted(clip(title, 32))}` : `the ${rr.slug}`
+    return title ? `${kind} ${quoted(clip(title, 60))}` : `the ${kind}`
   }
-  const [base = '', frag = ''] = c.ref.split('#', 2)
-  const card = bareCard(c)
-  if (card) return cardWords(questionOf(card))
-  const out = outputLine(c.ref)
-  if (out) return out.words
-  if (base.startsWith('card:')) return frag ? `card ${frag.split('/').at(-1)}` : 'card'
-  if (base.startsWith('call:')) return frag ? `output ${frag}` : 'output'
-  // a file's place in words, its name without its extension (`events line 1063`, `agent-chat lines 1-2`), never
-  // `events:1063`, which reads as an id (live check term-fix9, low quirk); a long name cut, its line kept
-  const name = base.split('/').at(-1) ?? base
-  const short = name.replace(/\.(jsonl|json|csv|tsv|txt|md|log)$/, '')
-  const lines = /^L(\d+)(?:-L?(\d+)|\.b\d+(?::c\d+-\d+)?)?$/.exec(frag)
-  const row = /^row=(\d+)$/.exec(frag)
-  const where = lines ? (lines[2] && lines[2] !== lines[1] ? ` lines ${lines[1]}-${lines[2]}` : ` line ${lines[1]}`) : row ? ` row ${row[1]}` : frag ? `#${frag}` : ''
-  return width(`${short}${where}`) <= 28 || !where ? cut(`${short}${where}`, 28) : `${cut(short, Math.max(4, 28 - width(where)))}${where}`
+  return ''
+}
+
+/** A text's chips with the brackets main put around one of its own taken away (`([[card:<id>]])` reads `[ card ]`, never
+ *  `([ card ])`): a chip carries its own brackets. */
+export function withoutOwnParens(text: string): string {
+  return text.replace(/\(\s*(\[\[[^\[\]\n|]+\]\]|\[\s*↗?\s*\]\([^()\s]+\))\s*\)/g, (m, inner: string) => {
+    const c = citations(inner)[0]
+    return c && isChip(c) ? inner : m
+  })
 }
 
 // ---------------------------------------------------------------------------------------- text width and cuts

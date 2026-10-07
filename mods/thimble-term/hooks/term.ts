@@ -59,9 +59,6 @@ export const rt = {
   busy: false,
   again: false,
   turn: null as Turn | null,
-  // the cards each row of main's chat stands with: its turn's, drawn under the turn's last reply, and those its answer
-  // embeds, by the row's uuid, so a sentence of the reply that cites one whole leaves the reference out
-  rowCards: new Map<string, string[]>(),
   // the cards a drawing named and no drawing read yet, which the session's timer reads (tick)
   wanted: new Set<string>(),
   // the latest row of main's chat a line can stand under (signal.ts isAnchor)
@@ -585,8 +582,8 @@ function giveKeys(cx: Ctx, title: string, ringOn = RELAY_PICK): void {
       // the ring onto the list's keys (a ring there already stays, and the call says so); a view that draws none leaves
       // the ring where it is, off them. Neither raises a ui.focus (live check term-fix8, quirk 7)
       // a new thread's field likewise: an open of a pane that holds the keys already is no take, so its `autoFocus` puts
-      // no ring there. Only a text field the panel draws keeps the ring from them; a button's ring (the hotkey pressed,
-      // `t` for the threads) or a field the view no longer draws does not (live check term-fix9, quirks 1 and 12)
+      // no ring there. Only a text field the panel draws keeps the ring from them; a button's ring (a hotkey or a control
+      // pressed, `show all threads`) or a field the view no longer draws does not (live check term-fix9, quirks 1 and 12)
       if (rt.panelFocus !== ringOn && rt.fields.has(rt.panelFocus)) return
       if (await cx.focus(ringOn)) {
         if (rt.panelFocus !== ringOn) {
@@ -668,13 +665,15 @@ export async function navGo(cx: Ctx, nav: ChatNav): Promise<void> {
   await openPanel(cx, p)
 }
 
-/** A list (`labels`, `docs`) from the step it holds, as the path's list step opens it: in place of that step, back
- *  leading to the step (live check term-fix9, quirk 10: `l` pushed `home › documents › "…" › documents`). */
+/** A list (`labels`, `docs`) from the step it holds, as the path's list step opens it: in place of that step (live
+ *  check term-fix9, quirk 10: `l` pushed `home › documents › "…" › documents`), back leading where the path shows, the
+ *  step before the list (home), never the step it replaced (live check term-fix10, new quirk 8). */
 export async function openList(cx: Ctx, p: TermPanel): Promise<void> {
   const nav = (await cx.nav()) ?? NAV_EMPTY
   const at = nav.trail.findIndex(s => s.view === p.view)
   const keep = at >= 0 ? nav.trail.slice(0, at) : nav.trail.slice(0, -1)
-  rt.navTo = { trail: [...keep, stepOf(p)], back: withBack(nav.back, nav.trail) }
+  const before = keep.length ? keep : [stepOf({ view: 'home', title: 'Home' })]
+  rt.navTo = { trail: [...keep, stepOf(p)], back: withBack(nav.back, before) }
   await openPanel(cx, p)
 }
 

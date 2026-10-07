@@ -14,7 +14,8 @@ Python runs with -S, since the file uses only the standard library and runs on e
                                         and prints the lines of the events the watcher wrote out
     .thimble-watch --mode               the UserPromptSubmit and Stop hook that reports the session's permission mode
     .thimble-watch --agents             the PostToolUse hook that tells thimble's agents and their descendants the ref
-                                        of each call and when their work folder grows past its budget
+                                        of each call and when their work folder grows past its budget, and tells main
+                                        to end its turn on a start it launched
     .thimble-watch --agent-check        the PreToolUse hook of Agent and SendMessage calls, main's and its subagents'
     .thimble-watch --subagent-start     the SubagentStart hook: registers one of thimble's agents or a descendant
     .thimble-watch --subagent-stop      the SubagentStop hook: a registered agent's turn ended
@@ -62,7 +63,9 @@ permission modes, and a systemMessage reaches the analyst's terminal but not the
 The agents hook tells one of thimble's agents, or a descendant of one, the ref of each call it made (POST
 /api/ws/<c>/calls/ref, for the orientation and its descendants, whose calls its thread numbers) and, after a Bash call,
 when the work folder of its thimble ancestor holds more than WORK_BUDGET (`## work-budget` of prompts/tools.md), at most
-once per budget step and every CHECK_S. It prints nothing for main.
+once per budget step and every CHECK_S. For main it prints only after main's own Agent call launched a thread's fork or
+one of thimble's agents: the note that the turn ends on that call (app/subagent_files.py launched_note, `## agent-launched`),
+since Claude Code's launch result asks main to go on, and main then made a call that does nothing or the same start again.
 
 The agent-check hook runs on main's Agent and SendMessage calls and on those of its subagents (app/subagent_files.py
 check_call): it lets a start of one of thimble's roles through only when it matches a pending request exactly, records a
@@ -868,6 +871,8 @@ def agents_hook(inp: dict) -> int:
     """The agents hook (module note)."""
     agent = str(inp.get("agent_id") or "")
     name = str(inp.get("tool_name") or "")
+    if not agent and name in ("Agent", "Task"):
+        return launched_hook(inp)
     if not agent or not name:
         return 0
     sf, ws = workspace(inp)
@@ -907,6 +912,18 @@ def agents_hook(inp: dict) -> int:
     if lines:
         event = str(inp.get("hook_event_name") or "PostToolUse")
         print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": "\n".join(lines)}}))
+    return 0
+
+
+def launched_hook(inp: dict) -> int:
+    """Main's own Agent call launched a thread's fork or one of thimble's agents: the note that ends the turn on it
+    (app/subagent_files.py launched_note), as added context alone, with no systemMessage, so the terminal draws no row."""
+    sf, ws = workspace(inp)
+    if ws is None:
+        return 0
+    text = sf.launched_note(inp)
+    if text:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}}))
     return 0
 
 

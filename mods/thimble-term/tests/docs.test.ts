@@ -176,7 +176,7 @@ test("a report's bullets stay a list, one item a row; an opening section with no
   await pane.unmount()
 })
 
-test("a document's sentence that cites one of its figures whole leaves the reference out; another card is named by its question", async ($, on) => {
+test("a document's sentence that cites a card whole keeps its chip, one of its figures or another card", async ($, on) => {
   const w = world(on)
   w.docs.report = {
     ...DOC,
@@ -188,8 +188,9 @@ test("a document's sentence that cites one of its figures whole leaves the refer
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
   const para = shown(await pane.drawn({ in: 'para-d0-2' }))
-  // live check New 1: `the check was done card.`
-  expect(para).toContain('The export holds four wikis. The check was done (card "How many records does each file hold?").')
+  // Matt, 2026-10-07: a chip, `[ card ]`, alike for a figure of the document and another card (live check New 1: `the
+  // check was done card.`)
+  expect(para).toContain('The export holds four wikis [ card ]. The check was done [ card ].')
   // the figure itself is drawn as a card
   expect(JSON.stringify(await pane.drawn())).toContain('"question":"What does the export hold per wiki?"')
   await pane.unmount()

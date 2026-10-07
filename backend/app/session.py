@@ -844,7 +844,7 @@ def main_pid(c: str) -> int | None:
     """The pid of the `claude` process main's session runs in: what its shim reported, else (after a restart, before
     that shim came back) what sessions.json recorded for the session main's meta names."""
     if (ws := _terminal_ws(c)) is not None:
-        return sfiles.main_pid(ws)  # the launcher's pid, which `exec claude` made main's for the session's life
+        return sfiles.main_pid(ws)  # main's `claude`, which the launcher wrote there, for the session's life
     cur = _live.get(c)
     if cur is not None:
         return cur.pid or _shim_pids.get((c, cur.sid))

@@ -258,3 +258,136 @@ async def test_the_title_has_an_id_the_writer_edits_and_no_section_takes_a_headl
     r = await call("write_document", doc="report", text=f"# Copied headline · #title\n\n{text}")
     assert not r.is_error, r.text
     assert report_types.read_doc(CORPUS, MAIN, "report")["title"] == "Copied headline"
+
+
+async def test_a_number_or_a_span_of_time_in_the_title_or_a_heading_that_no_link_shows_is_named(cells):
+    """Live check term-fix8: the title said "for seven weeks" and a slide heading "seven weeks before the busiest days",
+    40 days in the data, and the citation check, which read only sentences, said nothing. A save names the title and
+    each heading that writes a number, a span of time or a date no link shows, a link of its own section for a heading
+    and of the whole document for the title, in the form of the flagged sentences; an edit of the title or a heading
+    names it again while it holds one. The analyst's locked title is left out."""
+    cid, tid = cells
+    text = (f"# The account deleted for seven weeks, 27 times\n\n"
+            f"## Bob issued 9 deletions on 23 June\n\nBob issued [[9|card:{tid}#count/bob]] deletions.\n\n"
+            f"## A gap of 40 days\n\nThe log is short.\n\n"
+            f"## Alice issued 27 over two weeks\n\nAll [[27|card:{cid}]] came from Alice, over [[two weeks|card:{cid}]].\n\n"
+            f"## One account, three accounts\n\nOne account did most of it.\n")
+    r = await call("write_document", doc="report", text=text)
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    bob, gap, alice, _ = doc["sections"]
+    lines = _body(r).splitlines()
+    i = lines.index("the citation check found a number or a span of time that no link shows in 3 headings:")
+    assert lines[i + 1:] == [
+        "- [[report:report#title]] “The account deleted for seven weeks, 27 times” No link in the document shows “seven "
+        "weeks”. Cite it in a sentence, compute it in a card first if no card states it, or reword the title, before you end. "
+        "A link in the title itself is not checked.",
+        f"- [[report:report#{bob['id']}]] “Bob issued 9 deletions on 23 June” No link in its section shows “23 June”. Cite "
+        "it in a sentence, compute it in a card first if no card states it, or reword the heading, before you end. A link "
+        "in the heading itself is not checked.",
+        f"- [[report:report#{gap['id']}]] “A gap of 40 days” No link in its section shows “40 days”. Cite it in a sentence, "
+        "compute it in a card first if no card states it, or reword the heading, before you end. A link in the heading "
+        "itself is not checked."]
+    assert all(alice["id"] not in ln for ln in lines), "27 and two weeks are shown by its links"
+    # an edit of the title that still says what no link shows is named again; a heading made plain is not
+    r = await call("edit_document", span="report:report#title", text="The account deleted for 40 days")
+    assert not r.is_error and "No link in the document shows “40 days”" in r.text, r.text
+    r = await call("edit_document", span=f"report:report#{gap['id']}", text="A gap in the log")
+    assert not r.is_error and "no link shows" not in r.text, r.text
+    r = await call("edit_document", span=f"report:report#{bob['id']}", text="Bob issued 9 deletions")
+    assert not r.is_error and "no link shows" not in r.text, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    assert [x[0] for x in report_types.loose_headings(doc)] == ["title"]
+    doc["title_locked"] = True
+    assert report_types.loose_headings(doc) == [], "the analyst's locked title"
+    # live check dec-back: a span written with a hyphen, as the writer's title "… in a six-week span, June 4 to July 14"
+    assert report_types._claims_of("All in a six-week span, June 4 to July 14, 2026") == [
+        ("date", "June 4", "June 4"), ("date", "July 14, 2026", "July 14, 2026"), ("span", "six-week", "6")]
+
+
+async def test_the_report_checks_read_the_title_as_a_passage_and_its_comment_stays_while_its_words_do(cells):
+    """The report checks (Verified, Unverified, Judgment calls) read the title as a passage at report:<slug>#title,
+    first, and a comment on it carries to the next generation while the title's words stay; a new title settles a
+    check's comment on the old one."""
+    from app import checks
+
+    cid, _ = cells
+    r = await call("write_document", doc="report", text=f"# The account deleted for seven weeks\n\n## One account\n\nAll "
+                                                         f"[[27|card:{cid}]] came from one account.\n")
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    first = checks.passages("report", doc)[0]
+    assert (first["ref"], first["kind"], first["anchor"], first["ids"]) == ("report:report#title", "title", "title", ["title"])
+    assert checks.passage_of("report", doc, "report:report#title") == first
+    doc["comments"] = [{"id": "c1", "sentence_id": "title", "text": "No card shows seven weeks.", "check": "unverified",
+                        "status": "open", "generation": 1}]
+    report_types.write_doc(CORPUS, MAIN, "report", doc)
+    assert [cm["id"] for cm in report_types.anchored_open_comments(doc)] == ["c1"]
+    r = await call("write_document", doc="report", text=f"# The account deleted for seven weeks\n\n## One account\n\nIt "
+                                                         f"was [[27|card:{cid}]] deletions.\n")
+    [cm] = report_types.read_doc(CORPUS, MAIN, "report")["comments"]
+    assert cm["sentence_id"] == "title" and cm["status"] == "open"
+    r = await call("edit_document", span="report:report#title", text="One account deleted everything")
+    [cm] = report_types.read_doc(CORPUS, MAIN, "report")["comments"]
+    assert cm["status"] != "open" and cm["was_on"] == "The account deleted for seven weeks"
+
+
+async def test_edit_document_refuses_a_figure_line_among_sentences(cells):
+    """Live check term-fix10, quirk 1: the writer replaced a sentence with "sentence.\\n![…](card:…)", and the report
+    showed the figure's markdown inside a paragraph, since only a text that opens with a figure was refused. A figure's
+    markup anywhere in a passage's text but as its one line is refused with what to do; a figure line alone is
+    inserted, and a new section reads its figure lines as figures."""
+    cid, tid = cells
+    r = await call("write_document", doc="report", text=f"# Bob\n\n## Bob\n\nBob issued [[9|card:{tid}#count/bob]] deletions.\n")
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    [sid] = [x["id"] for x in report_types.unit_sentences(doc["sections"][0])]
+    for text, insert in [(f"Bob issued nine.\n![Deletions per account](card:{tid})", False),
+                         (f"![Deletions per account](card:{tid})\nBob issued nine.", True),
+                         (f"Bob issued nine, as ![the table](card:{tid}) shows.", False)]:
+        r = await call("edit_document", span=f"report:report#{sid}", text=text, **({"insert": True} if insert else {}))
+        assert r.is_error and report_types.FIGURE_WITH_TEXT in r.text, r.text
+    after = report_types.read_doc(CORPUS, MAIN, "report")
+    assert "![" not in " ".join(x["text"] for x in report_types.all_sentences(after))
+    r = await call("edit_document", span=f"report:report#{sid}", text=f"![Deletions per account](card:{tid})", insert=True)
+    assert not r.is_error, r.text
+    r = await call("edit_document", span=f"report:report#{sid}", insert=True,
+                   text=f"## Alice\n\nAll [[27|card:{cid}]] came from Alice.\n\n![Deletions per account](card:{tid})")
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    assert [len(s.get("figures") or []) for s in doc["sections"]] == [1, 1]
+
+
+async def test_a_replaced_sentence_that_repeats_its_neighbor_is_left_out(cells):
+    """Live check term-fix10, quirk 2: the writer twice replaced a sentence with "A. B." while B already followed it, and
+    the report showed B three times. A new sentence at the end of the text that reads as the sentence after the passage
+    (or at its start as the one before) is left out, and the result says so; a text that only repeats them is refused."""
+    _, tid = cells
+    r = await call("write_document", doc="report", text=f"# Bob\n\n## Bob\n\nBob issued deletions. Alpha paused the probe "
+                                                       f"on 26 June [[card:{tid}]].\n")
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    first, second = report_types.unit_sentences(doc["sections"][0])
+    r = await call("edit_document", span=f"report:report#{first['id']}",
+                   text=f"Bob issued [[9|card:{tid}#count/bob]] deletions. Alpha paused the probe on 26 June [[card:{tid}]].")
+    assert not r.is_error, r.text
+    assert "left out “Alpha paused the probe on 26 June.”, since the sentence next to the passage already says it" in r.text
+    words = [report_types.plain_text(x["text"]) for x in report_types.unit_sentences(report_types.read_doc(CORPUS, MAIN, "report")["sections"][0])]
+    assert words == ["Bob issued 9 deletions.", "Alpha paused the probe on 26 June."]
+    new_first = report_types.unit_sentences(report_types.read_doc(CORPUS, MAIN, "report")["sections"][0])[0]
+    r = await call("edit_document", span=f"report:report#{new_first['id']}", text="alpha paused the probe on 26 June.")
+    assert r.is_error and "pass `delete`" in r.text, r.text
+
+
+async def test_a_first_save_with_a_section_heading_and_no_title_line_shows_the_headline_once(cells):
+    """Live check term-fix10, quirk 3: the first save wrote `## headline` and no `# ` line, the title fell back to that
+    heading, and the section kept it too, so the headline was drawn twice. The section becomes the opening."""
+    cid, _ = cells
+    r = await call("write_document", doc="report", text=f"## One account issued every deletion\n\nAll [[27|card:{cid}]] "
+                                                       f"came from one account.\n\n## Caveats\n\nThe log covers one week.\n")
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    assert doc["title"] == "One account issued every deletion"
+    assert [s["heading"] for s in doc["sections"]] == ["", "Caveats"]
+    lines = report_types.document_lines(doc)
+    assert sum("One account issued every deletion" in ln for ln in lines) == 1

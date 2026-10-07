@@ -43,7 +43,7 @@ function words(tree: unknown): string {
   return walk(tree)
 }
 
-test('the path row fits a pane 40 columns wide: `show all threads` and `N new` give way to the steps; a file\'s facts and `earlier  later` never run together', async ($, on) => {
+test('the path row fits a pane 40 columns wide: `show all threads` shortens to `threads`, then gives way to the steps; a file\'s facts and `earlier  later` never run together', async ($, on) => {
   // live check term-fix9, quirk 3: `‹ back  home › fileshow all threads` wrapped onto a second row and `lines 1…later`
   // ran together
   const w = world(on)
@@ -72,15 +72,30 @@ test('the path row fits a pane 40 columns wide: `show all threads` and `N new` g
     }
     await pane.unmount()
   }
-  // `t` still shows all threads where the row has no room for its words
-  const pane = await look($, 37)
-  await takesKeys($)
-  await pane.press({ key: 'hk-threads' })
-  await w.clock.settle()
-  await pane.unmount()
-  const threads = await look($, 37)
-  expect(words(await threads.drawn())).toContain('Threads')
-  await threads.unmount()
+  // no letter shows the threads (live check term-fix10, new quirk 4: `t` did, unnamed, and `table` typed while the
+  // panel held the keys opened them); in a pane too narrow for `show all threads`, `threads` stays one click away
+  for (const body of [37, 52]) {
+    const pane = await look($, body)
+    await takesKeys($)
+    expect(await pane.find({ type: 'Button', key: 'hk-threads' })).toBeUndefined()
+    const way = words(await pane.find({ type: 'Box', key: 'way' }))
+    expect(width(way)).toBeLessThanOrEqual(body - 4)
+    if (body === 52) expect(way).toMatch(/threads {2}1 new$/)
+    const btn = await pane.find({ type: 'Button', key: 'threads' })
+    if (!btn) {
+      await pane.unmount()
+      continue
+    }
+    expect(way).not.toContain('show all threads')
+    await pane.press({ key: 'threads' })
+    await w.clock.settle()
+    await pane.unmount()
+    const threads = await look($, body)
+    expect(words(await threads.drawn())).toContain('Threads')
+    await threads.unmount()
+    await $.command.run({ command: 'thimble:thimble', args: 'files logs/labels.jsonl:30' } as never)
+    await w.clock.settle()
+  }
 })
 
 test('key hints too long for their row go on to a second row, never cut; a list cut to the pane leaves them their rows', async ($, on) => {
@@ -221,7 +236,7 @@ test("a label whose first run goes on in main's process, or stopped part way, sa
   for (const k of ['home', 'list', 'card']) expect(got[k]).not.toContain('◌ labeling')
 })
 
-test("a document's cards are read before it is drawn: a sentence that cites a card names it by its question on the first drawing", async ($, on) => {
+test("a document's cards are read before it is drawn: a sentence's chip of a card names it by its question in its tip on the first drawing", async ($, on) => {
   // live check term-fix9, quirk 9: `(a card)` until the panel drew again
   const w = world(on)
   w.docs.report = { ...DOC, sections: [{ id: 's1', heading: 'The data', paragraphs: [{ id: 'p1', sentences: [{ id: 'x1', text: 'The files hold more records [[card:a0frame0]].' }] }], figures: [] }] }
@@ -242,8 +257,9 @@ test("a document's cards are read before it is drawn: a sentence that cites a ca
     pane = await look($, 96)
   }
   const drawn = JSON.stringify(await pane.drawn())
-  expect(drawn).toContain('How many records does each file hold?')
-  expect(drawn).not.toContain('(a card)')
+  expect(drawn).toContain('"label":"[ card ]"')
+  expect(drawn).toContain('"tip":"card \\"How many records does each file hold?\\" · ')
+  expect(drawn).not.toMatch(/a card|the card ·/)
   await pane.unmount()
 })
 
@@ -324,4 +340,61 @@ test("a label's shares add up to 100%, on its card and in its panel's counts", a
   expect(drawn).toContain('  62%')
   expect(drawn).not.toContain('63%')
   await pane.unmount()
+})
+
+test("in a narrow pane names stay readable: home's label bar shrinks, then goes; the type column goes before a file's name is cut", async ($, on) => {
+  // live check term-fix10, new quirk 6: `● age…  ████████████████████  1,900` on home, and `agent-c…`, `pages.j…` beside
+  // the file browser's 10-cell type column
+  const w = world(on)
+  w.states.labels = [{ ...LABEL, name: 'agent-chat purpose' } as never]
+  w.states.files = [
+    { path: 'agent-chat.jsonl', kind: 'transcript', size_bytes: 1_200_000 },
+    { path: 'pages.jsonl', kind: 'records', size_bytes: 52_000_000 },
+  ] as never
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  const homeRows = async (body: number) => {
+    const pane = await look($, body, 90)
+    const rows = (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r).replace(/\s+$/, ''))
+    await pane.unmount()
+    return rows
+  }
+  const bar = (r: string) => (r.match(/█+/)?.[0] ?? '').length
+  // wide: the whole bar; narrower: a shorter one beside the whole name; narrowest: no bar, the name whole
+  const wide = (await homeRows(96)).find(r => r.includes('agent-chat purpose'))!
+  expect(bar(wide)).toBe(20)
+  const mid = (await homeRows(52)).find(r => r.includes('agent-chat purpose'))
+  expect(mid).toBeDefined()
+  expect(bar(mid!)).toBeGreaterThanOrEqual(6)
+  expect(bar(mid!)).toBeLessThan(20)
+  for (const body of [39, 44]) {
+    const rows = await homeRows(body)
+    const label = rows.find(r => r.includes('agent-chat purpose'))
+    // the name whole: at 39 with no bar, at 44 beside a short one
+    expect(label).toMatch(body === 39 ? /● agent-chat purpose +14,591$/ : /● agent-chat purpose +█{6,19} {2}14,591$/)
+    // home's files: the type column goes before a name is cut
+    expect(rows.find(r => r.includes('agent-chat.jsonl'))).toMatch(/^ {6}agent-chat\.jsonl +1\.2 MB$/)
+    expect(rows.find(r => r.startsWith('  Files'))).not.toContain('type')
+    for (const r of rows) expect(width(r)).toBeLessThanOrEqual(body - 4 + 2)
+  }
+  expect((await homeRows(96)).find(r => r.startsWith('  Files'))).toMatch(/type {2,}size$/)
+  // the file browser: the same
+  await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
+  await w.clock.settle()
+  for (const body of [37, 96]) {
+    const pane = await look($, body)
+    const tree = (((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []).map(r => shown(r).replace(/\s+$/, ''))
+    await pane.unmount()
+    const chat = tree.find(r => r.includes('agent-chat'))!
+    expect(chat).toContain('agent-chat.jsonl')
+    expect(tree.find(r => r.includes('pages'))).toContain('pages.jsonl')
+    if (body === 37) {
+      expect(tree[0]).not.toContain('type')
+      expect(chat).not.toContain('transcript')
+    } else {
+      expect(tree[0]).toMatch(/type +size$/)
+      expect(chat).toMatch(/transcript +1\.2 MB$/)
+    }
+  }
 })

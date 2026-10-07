@@ -294,8 +294,18 @@ export function recordLine(r: unknown): string {
   return recordText(r).replace(/\s*\n\s*/g, ' ')
 }
 
+/** A record around a cited one as one line, drawn as the cited record is drawn: its words, as the file's reader shows
+ *  them (a transcript's message, an event's params), when thimble reads words in it; else as Raw draws it (recordLine: a
+ *  JSON record as its line of JSON). Live check term-fix10, low quirk: the cited line read as its words and the lines
+ *  around it as raw JSON. */
+export function aroundLine(r: unknown): string {
+  const blocks = isObj(r) && Array.isArray(r.blocks) ? r.blocks.filter(isObj) : []
+  const words = blocks.length && blocks.every(b => typeof b.kind === 'string' && b.kind !== 'raw') ? blocksText(blocks) : ''
+  return words.trim() ? words.replace(/\s*\n\s*/g, ' ') : recordLine(r)
+}
+
 /** The lines of a resolved place, the cited ones hit (a record over its rows, at most 31), each record around them one
- *  line, as Raw draws it. */
+ *  line, drawn as the cited one is (aroundLine). */
 function linesOf(res: Resolution, display: string | null): TermVerdict['lines'] {
   const out: TermVerdict['lines'] = []
   const line = typeof res.line === 'number' ? res.line : 0
@@ -308,7 +318,7 @@ function linesOf(res: Resolution, display: string | null): TermVerdict['lines'] 
   }
   const before = Array.isArray(ctx.before) ? ctx.before : []
   const after = Array.isArray(ctx.after) ? ctx.after : []
-  const around = (n: number, r: unknown) => out.push({ n, text: recordLine(r), hit: false })
+  const around = (n: number, r: unknown) => out.push({ n, text: aroundLine(r), hit: false })
   before.forEach((r, i) => around(isObj(r) && typeof r.line === 'number' ? r.line : line - before.length + i, r))
   if (Array.isArray(res.records) && res.records.length) res.records.forEach((r, i) => push(isObj(r) && typeof r.line === 'number' ? r.line : line + i, recordText(r), true))
   else push(line, line ? blocksText(res.blocks) || str(res.excerpt) : str(res.excerpt), true)

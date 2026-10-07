@@ -598,8 +598,8 @@ esac
 # blank in main's --settings, which rank above those files, and its value is main's --effort the same way.
 # --session-id is the id launch-args chose for a new session and wrote into the workspace's launch.json, from which the
 # hooks module's bridge takes main's session; it is left out when the analyst's flags name the session themselves.
-# --launcher-pid is this script's own pid ($$), which `exec claude` keeps (in terminal mode the pid of the subshell that
-# execs it, written over it just before), so launch.json names main's `claude` process before main starts: the bridge reads from that process's command line whether main runs inside thimble's fence, and so
+# --launcher-pid is this script's own pid ($$), and the subshell that execs `claude` writes its own pid over it just
+# before, so launch.json names main's `claude` process before main starts: the bridge reads from that process's command line whether main runs inside thimble's fence, and so
 # accepts the module's hello inside session.start, in time for main's first agent listing.
 # The env line's switches are exported (CLAUDE_CODE_DISABLE_AGENT_VIEW=1: no "Move to background" and no ← agent view),
 # the variables the unset line names are unset, and the note lines are printed before Claude Code starts.
@@ -687,8 +687,12 @@ rest="${rest#*$'\n'}"
 exports="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
 mode="${mode_line%%$'\t'*}"
-renderer=""
-[ "$mode_line" = "$mode" ] || renderer="${mode_line#*$'\t'}"
+renderer="" launch_file=""
+if [ "$mode_line" != "$mode" ]; then
+  more="${mode_line#*$'\t'}"
+  renderer="${more%%$'\t'*}"
+  [ "$more" = "$renderer" ] || launch_file="${more#*$'\t'}"
+fi
 last=""
 if [ "$cont" = 1 ]; then last="${rest%%$'\n'*}"; rest="${rest#*$'\n'}"; fi
 prompt="$rest"
@@ -729,13 +733,17 @@ export CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT="${CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT:-1
 # A turn that ends right after one of these tools needs no closing text, and main's prompt says so; empty when this
 # `claude` does not read the variable, and main's prompt then ends such turns with the end token (backend/app/terminal_tools.py).
 [ -z "$turn_tools" ] || export CLAUDE_CODE_TERMINAL_MCP_TOOLS="$turn_tools"
-# In terminal mode the launcher outlives `claude`, to say how to come back once it exits: Claude Code's own last line
-# names `claude --resume`, which resumes the session without thimble. `claude` runs in a subshell that execs it, so the
-# pid launch.json names is main's `claude` process all the same: the subshell writes its own pid there first (the helper's
-# parent; bash 3.2 has no BASHPID), which `exec claude` keeps.
-if [ "$mode" = terminal ] && [ -n "${THIMBLE_WS:-}" ]; then
-  (
-    "$here/thimble-python" -I -S - "$THIMBLE_WS/trusted/launch.json" >/dev/null 2>&1 <<'PY' || true
+# The launcher outlives `claude`, in both modes, to say how to come back once it exits: Claude Code's own last line
+# names `claude --resume`, which resumes the session without thimble (live check term-fix10, quirk 9: browser mode
+# printed only that line). `claude` runs in a subshell that execs it, so the pid launch.json names is main's `claude`
+# process all the same: the subshell writes its own pid there first (the helper's parent; bash 3.2 has no BASHPID), which
+# `exec claude` keeps. Its exit status is caught, so that `set -e` does not end the launcher before the line. A
+# launch-args from before the launch file was named: terminal mode's launch.json is in the workspace THIMBLE_WS names.
+[ -n "$launch_file" ] || [ "$mode" != terminal ] || [ -z "${THIMBLE_WS:-}" ] || launch_file="$THIMBLE_WS/trusted/launch.json"
+rc=0
+(
+  if [ -n "$launch_file" ]; then
+    "$here/thimble-python" -I -S - "$launch_file" >/dev/null 2>&1 <<'PY' || true
 import json, os, sys
 path = sys.argv[1]
 try:
@@ -749,13 +757,10 @@ try:
 except (OSError, ValueError):
     pass
 PY
-    exec claude ${load[@]+"${load[@]}"} "${tools[@]}" \
-      ${resume[@]+"${resume[@]}"} --append-system-prompt "$prompt" "$@" ${first[@]+"${first[@]}"}
-  )
-  rc=$?
-  # under Claude Code's own `claude --resume …` line, which would resume the session without thimble
-  case "$rc" in 0 | 130) printf '%s\n' "Resume with thimble --continue instead; it loads thimble's plugin." >&2;; esac
-  exit "$rc"
-fi
-exec claude ${load[@]+"${load[@]}"} "${tools[@]}" \
-  ${resume[@]+"${resume[@]}"} --append-system-prompt "$prompt" "$@" ${first[@]+"${first[@]}"}
+  fi
+  exec claude ${load[@]+"${load[@]}"} "${tools[@]}" \
+    ${resume[@]+"${resume[@]}"} --append-system-prompt "$prompt" "$@" ${first[@]+"${first[@]}"}
+) || rc=$?
+# under Claude Code's own `claude --resume …` line, which would resume the session without thimble
+case "$rc" in 0 | 130) printf '%s\n' "Resume with thimble --continue instead; it loads thimble's plugin." >&2;; esac
+exit "$rc"

@@ -262,7 +262,7 @@ FENCE = json.dumps({"sandbox": {"enabled": True}, "env": {cc_plugin.FENCE_MARK: 
 async def test_a_hello_at_session_start_is_accepted_when_launch_json_s_process_is_main_s_fenced_claude(
         client, plugin_headers, monkeypatch, tmp_path):
     """At session start /thimble has not attached main, so the server knows no `claude` process of main's; the launcher
-    wrote its own pid into launch.json, which `exec claude` kept. A hello from launch.json's session is accepted at once
+    wrote main's `claude` process into launch.json as it started it. A hello from launch.json's session is accepted at once
     when that process is a `claude` whose command line names the session and carries thimble's fence, read from /proc as
     main_fenced reads it, so the module registers thimble's types inside session.start. Every case where that check
     cannot be made waits (409) for /thimble as before: no pid, a process that is gone, not `claude`, not fenced or for

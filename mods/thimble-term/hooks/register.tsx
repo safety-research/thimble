@@ -485,9 +485,6 @@ async function restoreKept($: Dollar, cx: Ctx): Promise<void> {
     if (r.threads?.length && !(await $.state.get({ ...THREAD_ROWS, id: row })).value?.length) await $.state.set({ ...THREAD_ROWS, id: row }, r.threads)
     if (r.views?.length && !(await $.state.get({ ...VIEW_ROWS, id: row })).value?.length) await $.state.set({ ...VIEW_ROWS, id: row }, r.views)
     for (const id of [...(r.cards ?? []), ...(r.answer?.cards ?? []), ...embeddedCards(r.answer?.text ?? '')]) ids.add(id)
-    // the cards each row stood with, for the sentences that cite one whole
-    const near = [...new Set([...(r.cards ?? []), ...(r.answer?.cards ?? []), ...embeddedCards(r.answer?.text ?? '')])]
-    if (near.length) for (const u of [row, ...(r.answer?.rows ?? [])]) rt.rowCards.set(u, [...new Set([...(rt.rowCards.get(u) ?? []), ...near])])
     for (const v of r.views ?? []) rt.viewsTold.add(v)
     for (const t of r.threads ?? []) rt.told.add(t.thread)
     if (r.writer) {
@@ -705,9 +702,6 @@ export const register: Register = on => {
       if (all.trim() || t.cards.length) rt.lastCards = [...new Set([...embeddedCards(all), ...t.cards])]
       if ((all.trim() || t.cards.length) && rt.sc) await keepLast(cx, rt.sc.ws, rt.lastReply, rt.lastCards)
       // the answer: its last part that cites or embeds a card, else its last; the footer stands under its last row
-      // the cards each of the turn's rows stands with: a sentence that cites one whole leaves the reference out
-      const near = [...new Set([...t.cards, ...embeddedCards(all)])]
-      if (near.length) for (const r of t.parts.flat()) rt.rowCards.set(r.uuid, near)
       const part = answerPart(t.parts)
       const last = part?.at(-1)?.uuid ?? ''
       if (part && last && !t.own) {
@@ -747,11 +741,8 @@ export const register: Register = on => {
     const { Box } = $.ui.resolve(e)
     // the reply fills the terminal's width, less 2, its cards as wide as its prose
     const cols = (e.viewport?.columns ?? 100) - 2
-    // the cards drawn with this row's turn: under its last reply, or embedded in its answer (those of a turn still
-    // running too), which a sentence citing one whole leaves out
-    const running = rt.turn?.parts.some(p => p.some(r => r.uuid === e.requestId)) ? rt.turn.cards : []
-    const drawn = new Set([...ids, ...(rt.rowCards.get(e.requestId) ?? []), ...running])
-    const body = text.trim() ? await drawReply(cx, e, text, cols - MARGIN, { first: Boolean(e.props.isFirstOfReply), skipCards: new Set(ids), drawn, ask: t => void openAsk(cx, t), open: id => void openThread(cx, id) }) : []
+    // a sentence that cites a card whole keeps its chip (`[ card ]`) though the card is drawn under the reply
+    const body = text.trim() ? await drawReply(cx, e, text, cols - MARGIN, { first: Boolean(e.props.isFirstOfReply), skipCards: new Set(ids), ask: t => void openAsk(cx, t), open: id => void openThread(cx, id) }) : []
     const cards = await drawCards(cx, e, ids, cols, t => void openAsk(cx, t), id => void openThread(cx, id))
     // a block that held only a line thimble-term hides: nothing (ctrl+o's view still draws the reply's time and model
     // above it, which no hook reaches; the engine's own block with no text draws the same)

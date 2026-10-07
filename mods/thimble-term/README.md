@@ -31,9 +31,9 @@ Claude Code's panel chrome, no right-click menu.
   does not exist`, and why). The blue `?` beside a passage asks a side thread about it (a heading's about its whole
   section, a card's about the card); once one was asked, a blue `↳` stays there and opens it. While main streams,
   citations show as links and a card's line as `◌ <its question>`, never `[[…]]`; a citation typed into the prompt is
-  blue and underlined too. A card cited whole (`[[card:<id>]]`) where it is drawn with the text (under the reply, under
-  a thread's answer, as a document's figure) is left out with the space before it, and elsewhere reads `card "<its
-  question>"`. Every cut is at a word (`hooks/lib.ts` `cut`). Main's end token, `(shown in the dashboard)`, is not
+  blue and underlined too. A chip, a citation that names only its place (`[[card:<id>]]`, `[↗](<ref>)`), reads as its
+  place's short name in brackets in the link color, `[ card ]` or `[ events.jsonl line 12 ]`, alike in replies, thread
+  answers, documents, takeaways and previews; its tip names the place in full. Every cut is at a word (`hooks/lib.ts` `cut`). Main's end token, `(shown in the dashboard)`, is not
   shown. Off the terminal a cited block is
   Markdown, each citation a link to its file and a problem marked `×`.
 - **The footer** under a turn's answer (its last part that cites or embeds a card), one blank row below it: `N citations

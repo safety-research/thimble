@@ -712,3 +712,32 @@ def _cmdline(pid: int) -> str:
         return (Path("/proc") / str(pid) / "cmdline").read_bytes().replace(b"\0", b" ").decode()
     except OSError:
         return ""
+
+
+async def test_a_new_label_s_card_with_no_group_named_gets_a_group_named_after_the_label(term):
+    """Live check term-fix10, quirk 9: a label card made with no group landed in the last group a card went to,
+    "Deletes per day, 18 to 26 June". A new label's card gets a group of its own named after the label; the label's card
+    stays where it is when the label is applied again, and a group named in the call is used."""
+    from app import concepts
+
+    ws = config.workspace_dir(CORPUS)
+    await call(term, "add_card", question="Posts?", kind="note", text="Eight.", group="Deletes per day")
+    res = text(await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+                          paths=["agents/*.jsonl"]))
+    cid = re.search(r"The label's card is \[\[card:([0-9a-f]+)\]\]", res)[1]
+
+    def group_of(card: str) -> str:
+        nb_id, _ = notebook.find_cell(ws, card)
+        return notebook.read_notebook(ws, nb_id)["title"]
+
+    assert group_of(cid) == "bash"
+    await call(term, "add_card", question="More posts?", kind="note", text="Nine.", group="Deletes per day")
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash|Read"},
+               paths=["agents/*.jsonl"])
+    [(_, card)] = concepts._label_cards(ws, concepts.find_concept(ws, "bash")["id"])
+    assert card["id"] == cid and group_of(cid) == "bash", "applied again, the card stays in its group"
+    titles = [r["title"] for r in notebook.list_notebooks(ws)]
+    assert titles.count("bash") == 1
+    res = text(await call(term, "apply_label", scope="files", name="read", predicate={"kind": "regex", "text": "Read"},
+                          paths=["agents/*.jsonl"], group="Deletes per day"))
+    assert group_of(re.search(r"The label's card is \[\[card:([0-9a-f]+)\]\]", res)[1]) == "Deletes per day"

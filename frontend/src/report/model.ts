@@ -414,9 +414,9 @@ export function allSentences(doc: Pick<Writeup, 'sections'>): WriteupSentence[] 
   return (doc.sections ?? []).flatMap((sec) => (sec.paragraphs ?? []).flatMap((p) => p.sentences ?? []))
 }
 
-/** The ids a comment can be on, in reading order: each section's id, then its sentences'. */
+/** The ids a comment can be on, in reading order: the title, then each section's id and its sentences'. */
 export function passageOrder(doc: Pick<Writeup, 'sections'>): string[] {
-  return (doc.sections ?? []).flatMap((sec) => [sec.id, ...(sec.paragraphs ?? []).flatMap((p) => (p.sentences ?? []).map((s) => s.id))])
+  return [TITLE_ID, ...(doc.sections ?? []).flatMap((sec) => [sec.id, ...(sec.paragraphs ?? []).flatMap((p) => (p.sentences ?? []).map((s) => s.id))])]
 }
 
 /** Each sentence's paragraph as the ids of its sentences, by sentence id: what a comment on a whole paragraph tints. */

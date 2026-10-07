@@ -252,7 +252,14 @@ def _normalize(raw: dict[str, Any], valid: _Refs) -> dict[str, Any]:
                 want = wants_section.get(x["id"])
                 if want:
                     x["section"] = by_heading.get(want)
-    title = _collapse(raw.get("title")) or (findings[0]["heading"] if findings else "") or "Report"
+    title = _collapse(raw.get("title"))
+    if not title and findings:
+        title = findings[0]["heading"]
+        if findings[0] is sections[0] and sections[0]["paragraphs"]:
+            # the headline is the title now, so its section is the opening and keeps no heading: drawn as both, it
+            # showed twice (live check term-fix10, quirk 3: the first save wrote `## headline` and no `# ` line)
+            sections[0]["heading"] = ""
+    title = title or "Report"
     return {"id": DOC_ID, "title": title, "title_ok": _title_ok(title), "sections": sections, "comments": []}
 
 
@@ -519,7 +526,8 @@ async def heal_sentences(c: str, sentences: list[dict[str, Any]], *, unwrap: boo
                 external[(display, ref)] = "the cited span is gone"
                 continue
             excerpt = str(out.get("excerpt") or "")
-            external[(display, ref)] = None if _value_matches(display, excerpt) else {"why": "the value is not at this reference", "source": _source_numbers(excerpt)}
+            holds = _value_matches(display, excerpt) or not cite.shows_value(display)  # words that show no value name the link
+            external[(display, ref)] = None if holds else {"why": "the value is not at this reference", "source": _source_numbers(excerpt)}
 
         prior = x.get("healed") if isinstance(x.get("healed"), list) else ()
         res = await heal.heal(text, load=load, notebook=whole, analyst=x.get("edited_by") == "analyst",
@@ -582,6 +590,8 @@ async def verify_and_tag(c: str, sentences: list[dict[str, Any]]) -> dict[str, A
             continue
         out = outs.get(r)
         exc = None if out is None else str(out.get("excerpt") or "")
+        if exc is not None and not cite.is_card_ref(r) and not cite.shows_value(display):
+            continue  # a file place that resolves, cited by words that show no value: they name the link (heal_sentences)
         if exc is None or not _value_matches(display, exc):
             failed.append({"sentence_id": sid, "ref": r, "value": display})
     value_pairs = {(sid, r) for sid, r, _ in values}

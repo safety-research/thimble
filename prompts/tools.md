@@ -1184,6 +1184,14 @@ This message ran on {model} · {effort}, the role's current settings.
 
 A writer of {doc} is running already. Tell the analyst so in one line.
 
+## start_writing-repeated
+
+The writer of {doc} is running already, and thimble shows it, so this turn needs nothing more.
+
+## agent-launched
+
+{who} runs in the background, and the analyst sees it. End the turn now, with no words and no other call, unless the analyst asked for more in this turn. Do not make this call again.
+
 ## start_writing-subagent
 
 Start the writer now as a subagent of this session, with one Agent call whose input is exactly this:
@@ -1603,10 +1611,6 @@ thimble: this session runs in terminal mode, so thimble shows this workspace her
 ## agents-none
 
 No agent of thimble's runs now.
-
-## agents-help
-
-↓ to follow any of them
 
 ## agents-print
 

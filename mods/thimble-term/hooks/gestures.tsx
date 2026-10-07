@@ -13,8 +13,8 @@
 import type { ClientModule, ClientPointerEvent, JsonValue } from 'claude-code'
 
 import type { ChatTarget } from '../types'
-import { citeLabel, plainCites } from './cite'
-import { citations, cut, quoted } from './lib'
+import { chipName, citeLabel, plainCites } from './cite'
+import { citations, cut, isChip, quoted } from './lib'
 import type { Citation } from './lib'
 
 export type Target = ChatTarget
@@ -150,7 +150,8 @@ export function targetLabel(t: Target, max = 48): string {
     case 'sentence':
       return s ? quoted(cut(s, n - 2)) : 'sentence'
     case 'citation':
-      return cut(c ? citeLabel(c) : 'citation', n)
+      // a chip by its place in full words (`card "How many…"`, `events.jsonl line 12`): no tip names it here
+      return cut(c ? (isChip(c) ? chipName(c) : citeLabel(c)) : 'citation', n)
     default:
       return cut(t.label || s || (c ? citeLabel(c) : t.kind), n)
   }
