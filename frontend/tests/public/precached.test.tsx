@@ -3,12 +3,13 @@
 // orientation's thread says it is a frozen demo session and gives the command that starts a live one, with a Copy button,
 // and nothing else, as the bar in place of the composer does. From a full export whose session was kept it says the
 // orientation ran in advance and offers "Attach a fresh session", which shows what a fresh session is, the command and
-// a Copy button. The page stays readable without a session until the first one attaches (isGone).
+// a Copy button. The page stays readable without a session until the first one attaches (isGone), as a worked example's
+// workspace does. Under the frozen card, the bar gives the card's title alone, so the sentence and the command show once.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ATTACH_EXPLAINER, ATTACH_LABEL, AttachBar, FROZEN_TEXT, FROZEN_TITLE, PRECACHED_TITLE, PrecachedCard, attachCommand, attachInstead, isFrozen, precachedMark, precachedText, takesFollowUps } from '../../src/chat/Precached.tsx'
 import type { ChatMeta, PrecachedMark } from '../../src/lib/types.ts'
-import { isGone } from '../../src/shell/SessionGone.tsx'
+import { isExample, isGone } from '../../src/shell/SessionGone.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const T = '2026-10-06T00:00:00+00:00'
@@ -47,6 +48,19 @@ test('a pre-cached workspace is read without a session until one attached and en
   expect(isGone(MAIN, false, false)).toBe(false)
   expect(isGone({ ...MAIN, ended: { session: 's', cwd: '/srv' } } as unknown as ChatMeta, false, false)).toBe(true)
   expect(isGone({ ...MAIN, attached: { session: 's' } } as unknown as ChatMeta, true, true)).toBe(false)
+})
+
+test("a worked example's workspace is read without a session too, until one attached and ended", () => {
+  const rows = [
+    { name: 'example-timeline', kind: 'example', folder: 'example-timeline', path: '/h/examples/example-timeline' },
+    { name: 'example-notes', kind: 'folder', folder: 'example-notes', path: '/h/example-notes' },
+  ] as const
+  expect(isExample(rows, 'example-timeline')).toBe(true)
+  // a folder whose name only starts like an example's is no example
+  expect(isExample(rows, 'example-notes')).toBe(false)
+  expect(isExample(rows, 'elsewhere')).toBe(false)
+  expect(isGone(MAIN, true, isExample(rows, 'example-timeline'))).toBe(false)
+  expect(isGone({ ...MAIN, ended: { session: 's', cwd: '/srv' } } as unknown as ChatMeta, true, true)).toBe(true)
 })
 
 test('the attach steps stand in for the composer only where it would reach main', () => {
@@ -113,6 +127,19 @@ test('the bar in place of the composer gives the same sentence and command', asy
   expect(el.querySelector('.precached-command code')?.textContent).toBe('cd /srv/thimble-demo/collusion-wiki && thimble')
   expect(el.textContent).not.toContain('No Claude Code session is attached')
   expect([...el.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Copy'])
+})
+
+test("under the frozen card the bar gives the card's title alone, so the sentence and the command show once", async () => {
+  const el = await mount(
+    <>
+      <PrecachedCard mark={MARK} attached={false} />
+      <AttachBar mark={MARK} card />
+    </>,
+  )
+  expect(el.querySelector('[data-precached-bar]')?.textContent).toBe(FROZEN_TITLE)
+  expect(el.querySelectorAll('.precached-command').length).toBe(1)
+  expect([...el.querySelectorAll('p')].filter((p) => p.textContent === FROZEN_TEXT).length).toBe(1)
+  expect(el.textContent?.split(FROZEN_TEXT).length).toBe(2)
 })
 
 test('from a full export whose session was kept, the bar offers the attach steps as before', async () => {

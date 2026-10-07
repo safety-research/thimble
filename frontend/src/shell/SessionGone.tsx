@@ -5,8 +5,10 @@
 // (stoppedAgentsLine). A code ticket's session goes on without main, so the permission card with its requests shows
 // under the card, where it can be answered. It goes when a session attaches, and is not shown while the stream is
 // down, unless main's session had ended before it went down (the server stops itself after a quit). A session that
-// takes main over from another terminal is followed at once, with a toast. A workspace `thimble demo` installed from a pre-cache is read without a session until the first attaches, so the card
-// waits for that session's end there (chat/Precached offers the attach command in the orientation's thread).
+// takes main over from another terminal is followed at once, with a toast. A workspace `thimble demo` installed from a
+// pre-cache, and a worked example's that `thimble demo --examples` opened (the start page's `example` row), are static:
+// each is read without a session until the first attaches, so the card waits for that session's end there
+// (chat/Precached offers the attach command in a pre-cache's orientation thread).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ThreadsContext } from '../chat/Notes'
@@ -18,7 +20,7 @@ import { useChatMetas } from '../chat/waiting'
 import { Button } from '../components/Button'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import type { ChatMeta, CorpusInfo, SessionEnded } from '../lib/types'
+import type { ChatMeta, CorpusInfo, SessionEnded, WorkspaceRow } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
 import { copyText } from './ProblemReport'
 
@@ -92,10 +94,15 @@ export function stoppedAgentsLine(metas: Iterable<ChatMeta>): string {
 
 /** Whether main's meta, once loaded, has no session attached while the stream is up, or after main's session ended
  * (`ended`), also once the stream went down: the server stops itself soon after the analyst quits, and the card, not
- * the server-down line, says what to run (live check L10); in a pre-cached workspace, only once a session attached and
- * ended. Pure. */
-export function isGone(main: ChatMeta | null | undefined, streamUp: boolean, precached = false): boolean {
-  return !!main && !main.attached && (streamUp || !!main.ended) && !(precached && !main.ended)
+ * the server-down line, says what to run (live check L10); in a workspace read without a session (`readable`: a
+ * pre-cache's or a worked example's), only once a session attached and ended. Pure. */
+export function isGone(main: ChatMeta | null | undefined, streamUp: boolean, readable = false): boolean {
+  return !!main && !main.attached && (streamUp || !!main.ended) && !(readable && !main.ended)
+}
+
+/** Whether the workspace `ws` is a worked example's, as the start page lists it (backend start_page.py). Pure. */
+export function isExample(rows: readonly WorkspaceRow[], ws: string): boolean {
+  return rows.some((r) => r.name === ws && r.kind === 'example')
 }
 
 /** Whether main's session is `session`, which took main from `after` in another terminal, while this tab followed
@@ -111,10 +118,13 @@ export function useSessionGone(ws: string): Gone | null {
   const [due, setDue] = useState(false)
   const [corpus, setCorpus] = useState<CorpusInfo | null>(null)
   const [precached, setPrecached] = useState(false)
+  // whether the workspace is a worked example's, null until the start page's rows are read: the card waits for them
+  const [example, setExample] = useState<boolean | null>(null)
   const followed = useRef<string | null>(null)
   useEffect(() => {
     let alive = true
     let timer: number | null = null
+    setExample(null)
     const load = () =>
       api
         .chats(ws)
@@ -129,6 +139,10 @@ export function useSessionGone(ws: string): Gone | null {
       .corpora()
       .then((cs) => alive && setCorpus(cs.find((c) => c.name === ws) ?? null))
       .catch(() => undefined)
+    api
+      .workspaces()
+      .then((rows) => alive && setExample(isExample(rows, ws)))
+      .catch(() => alive && setExample(false))
     const offs = [
       bus.on('chat', (e) => {
         if (e.chat !== 'main') return
@@ -146,7 +160,7 @@ export function useSessionGone(ws: string): Gone | null {
       if (timer != null) window.clearTimeout(timer)
     }
   }, [ws])
-  const gone = isGone(main, up, precached)
+  const gone = isGone(main, up, precached || example !== false)
   useEffect(() => {
     setDue(false)
     if (!gone) return

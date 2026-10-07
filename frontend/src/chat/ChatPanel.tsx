@@ -870,7 +870,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               }}
             />
           ) : precached && attachInstead(precached, neverAttached, target.to) ? (
-            <AttachBar mark={precached} />
+            <AttachBar mark={precached} card={kind === 'orient' && current === precached.orientation} />
           ) : orientClosedText ? (
             <div className="chat-continue" role="note" data-continue={orientContinue ?? undefined}>
               <Icon name="terminal" size={13} className="chat-continue-ico" />
