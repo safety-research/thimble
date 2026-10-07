@@ -198,7 +198,8 @@ function crumbText(s: ChatNavStep): string {
     case 'cite':
       return `citation ${s.title === 'Citation' ? '' : s.title}`.trim()
     case 'card':
-      return `card "${s.title}"${panelOfStep(s)?.mode === 'code' ? ' · code' : ''}`
+      // its code view's step keeps ` · code` whole: the question is cut first
+      return panelOfStep(s)?.mode === 'code' ? `card "${clip(s.title, 22)}" · code` : `card "${s.title}"`
     case 'label':
     case 'file':
     case 'agent':
@@ -208,6 +209,8 @@ function crumbText(s: ChatNavStep): string {
       return `"${s.title}"`
     case 'docs':
       return 'documents'
+    case 'ask':
+      return 'new thread'
     default:
       return s.view
   }
@@ -840,7 +843,9 @@ async function drawAsk(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
     />,
     'ask-row',
   )
-  body.push(...bottomRows(cx, e, cols, [], [field], ['Enter to ask']))
+  // the header's rule stands alone when nothing comes between it and the field: no second rule right under it
+  const between = body.length > headerEls(els, { title: 'New thread', cols, sub: subLine(['x']) }).length
+  body.push(...bottomRows(cx, e, cols, [], [field], ['Enter to ask'], between))
   return <Box flexDirection="column">{body}</Box>
 }
 
@@ -1857,11 +1862,11 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const wanted = p.mode === 'lines' ? 'raw' : p.mode
   const mode = wanted && modes.includes(wanted) ? wanted : turns && typeof hint?.score === 'number' && hint.score >= 0.95 ? 'transcript' : 'raw'
   const tabName: Record<string, string> = { table: 'Table', transcript: 'Transcript', raw: 'Raw' }
-  const tab = (m: string, i: number) =>
+  const tab = (m: string) =>
     m === mode ? (
       <Text key={`tab-${m}`} inverse>{` ${tabName[m]} `}</Text>
     ) : (
-      <Button key={`tab-${m}`} label={` ${tabName[m]} `} plain hotkey={String(i + 1)} onPress={() => void openPanel(cx, { ...p, mode: m })} />
+      <Button key={`tab-${m}`} label={` ${tabName[m]} `} plain onPress={() => void openPanel(cx, { ...p, mode: m })} />
     )
   const earlier = first > 1 ? () => void openPanel(cx, { ...p, start: Math.max(1, first - 200) }) : null
   const later = total && last < total ? () => void openPanel(cx, { ...p, start: last + 1 }) : null
@@ -1876,7 +1881,7 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       </Box>
     </Box>
   )
-  const more = [subRow, ...(modes.length > 1 ? [<Box key="file-tabs" flexDirection="row">{modes.map(tab)}</Box>] : [])]
+  const more = [subRow, ...(modes.length > 1 ? [<Box key="file-tabs" flexDirection="row">{modes.map(m => tab(m))}</Box>] : [])]
   const body: RenderElement[] = [...headerEls(els, { title: p.title || path, cols, more })]
   // the record chosen, by its line; a click or ↑↓ chooses another
   const chosen = p.line && p.line >= first && p.line <= last ? p.line : 0
@@ -1961,6 +1966,15 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       lineNs.push(l.n)
     }
   }
+  // the record chosen, right under the header so it shows however long the view: its place a link to the citation
+  // panel, and a blue "?" that asks a thread about it
+  if (chosen) {
+    const ref = `${path}#L${chosen}`
+    const words = ls.find(l => l.n === chosen)?.text ?? ''
+    const place = `↗ ${placeWords(ref)}`
+    const ask = () => openAsk(cx, { kind: 'record', ref, text: clip(words, 600), label: `${placeWords(ref)}: ${clip(words, 200)}` })
+    body.push(linesEl(cx, e, 'file-detail', [[{ s: '↗', fg: LINK }, { s: ' ' }, linkSeg(placeWords(ref)), { s: '  ' }, { s: '?', fg: LINK }]], [{ y: 0, x0: 0, x1: width(place), row: false, run: () => openCite(cx, ref, null) }, { y: 0, x0: width(place) + 2, x1: width(place) + 3, row: false, run: ask }], width(place) + 3))
+  }
   if (lines.length) {
     const at = chosen ? lineNs.indexOf(chosen) : -1
     const onKey = (k: string) => {
@@ -1975,15 +1989,8 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     }
     body.push(linesEl(cx, e, marginKey('file-body'), lines, hits, cols + MARGIN_W, onKey))
   }
-  // the record chosen: its place a link to the citation panel, and a blue "?" that asks a thread about it
-  if (chosen) {
-    const ref = `${path}#L${chosen}`
-    const words = ls.find(l => l.n === chosen)?.text ?? ''
-    const place = `↗ ${placeWords(ref)}`
-    const ask = () => openAsk(cx, { kind: 'record', ref, text: clip(words, 600), label: `${placeWords(ref)}: ${clip(words, 200)}` })
-    body.push(linesEl(cx, e, 'file-detail', [[{ s: '↗', fg: LINK }, { s: ' ' }, linkSeg(placeWords(ref)), { s: '  ' }, { s: '?', fg: LINK }]], [{ y: 0, x0: 0, x1: width(place), row: false, run: () => openCite(cx, ref, null) }, { y: 0, x0: width(place) + 2, x1: width(place) + 3, row: false, run: ask }], width(place) + 3))
-  }
-  const keys: Key[] = modes.length > 1 ? [] : []
+  // the tabs by their digits
+  const keys: Key[] = modes.length > 1 ? modes.map((m, i) => ({ key: `tab${i}`, hotkey: String(i + 1), onPress: () => void openPanel(cx, { ...p, mode: m }) })) : []
   body.push(...bottomRows(cx, e, cols, [], [], [...(modes.length > 1 ? [`${modes.map((_m, i) => i + 1).join(' ')} for the tabs`] : []), '↑↓ to choose', '← for the files']))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>

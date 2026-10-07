@@ -66,8 +66,9 @@ export function chipLook(status: string | undefined, fix: string | undefined, ve
  *  its blue becomes the background; then ◌ while it is worked on or its mark: ✓ in the text colour, × in red. */
 export function chipSegs(c: ChipView, hover: boolean, _frame = 0): Seg[] {
   const segs: Seg[] = [{ s: c.label, fg: c.state === 'link' ? COLORS.link : COLORS.problem, u: true, ...(hover ? { inv: true } : {}) }]
+  // the mark a cell apart from the value, as the spinner is: `19,931 ✓`, not `19,931✓`
   if (c.spin) segs.push({ s: ` ${SPIN}`, ...(c.state === 'link' ? {} : { fg: COLORS.problem }) })
-  else if (c.mark) segs.push({ s: c.mark, ...(c.mark === '✓' ? {} : { fg: COLORS.problem }) })
+  else if (c.mark) segs.push({ s: ` ${c.mark}`, ...(c.mark === '✓' ? {} : { fg: COLORS.problem }) })
   return segs
 }
 

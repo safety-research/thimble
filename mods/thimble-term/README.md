@@ -114,15 +114,16 @@ It sees a change without starting Python: once a second it lists the workspace's
 
 `hooks/register.tsx` holds the hooks and the one place `$` is used (Claude Code follows `$` into no import);
 `hooks/ctx.ts` is what it shares with the rest (the answer footer, the `↳` rows, the stream and `/thimble`'s words are
-in register.tsx too). `hooks/term.ts` keeps what it read and the panel's moves,
-`hooks/reply.tsx` draws main's chat, `hooks/panel.tsx` the panel, `hooks/lines.tsx` the parts drawn from styled lines
-(homeview.tsx), `hooks/cell.ts` turns a thimble cell into the mod's card form, `hooks/model.ts` reads the other
-surfaces, `hooks/data.ts` runs the command. The drawing files are copied from `mods/thimble-cc-mod/hooks/` as of its
-round 8 (0.6.1-dev.1): `anim.ts`, `chrome.tsx`, `cite.ts`, `gestures.tsx`, `homeview.tsx`, `lib.ts`, `nav.ts`,
-`paint.ts`, `para.tsx`, `signal.ts` and `turns.ts` unchanged; `card.tsx` with Matt's card layout (the border the
-drawing's, everything but the title below the plot), `draw.ts` with the `note` and `text` card kinds, `home.ts` with a
-file's `listed` state (its size and kind), `files.ts` with `fileRef` alone. `hooks/field.tsx`, the text field that
-shows all of its text (a label's prompt), was written for the label panel.
+in register.tsx too). `hooks/term.ts` keeps what it read and the panel's moves, `hooks/reply.tsx` draws main's chat,
+`hooks/panel.tsx` the panel, `hooks/lines.tsx` the parts drawn from styled lines (homeview.tsx), `hooks/cell.ts` turns a
+thimble cell into the mod's card form, `hooks/model.ts` reads the other surfaces, `hooks/data.ts` runs the command. The
+drawing files are copied from `mods/thimble-cc-mod/hooks/` as of its round 8 (0.6.1-dev.1): `anim.ts`, `chrome.tsx`,
+`gestures.tsx`, `homeview.tsx`, `lib.ts`, `nav.ts`, `paint.ts`, `para.tsx`, `signal.ts` and `turns.ts` unchanged;
+`cite.ts` with a cell between a citation and its mark (`19,931 ✓`); `card.tsx` with Matt's card layout (the border the
+drawing's, everything but the title below the plot) and its title a hot spot; `draw.ts` with the `note` and `text` card
+kinds, places in words for a command's output and a JSON item, and a timeline's start time said once; `home.ts` with a
+file's `listed` state (its kind, then its size), `Documents`, the coverage line; `files.ts` with `fileRef` alone.
+`hooks/field.tsx`, the text field that shows all of its text (a label's prompt), was written for the label panel.
 
 ## Tests
 

@@ -328,6 +328,9 @@ test("a side thread asked about a card: the ask field posts the thread, and the 
   await ui.unmount()
   const pane = (await $.ui.mount(PANE)) as unknown as M
   expect(shown(await pane.drawn())).toContain('New thread')
+  // its step reads `new thread`; with nothing between the header and the field, one rule
+  expect(shown(await pane.drawn())).toContain('home › new thread')
+  expect(await pane.find({ key: 'rule-bottom' })).toBeUndefined()
   await pane.input({ key: 'ask-new', text: 'Why is dse so big?' })
   await w.clock.settle()
   // the thread is told the card by its question, never its id

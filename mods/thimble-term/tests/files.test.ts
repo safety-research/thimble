@@ -136,6 +136,9 @@ test("a transcript by thimble's sniff: per turn the speaker bold and the words u
   pane = await openRow($, w, pane, 'chat.jsonl')
   const text = shown(await pane.drawn())
   for (const s of [' Table ', ' Transcript ', ' Raw ', '1 2 3 for the tabs']) expect(text).toContain(s)
+  // the tabs' digits are hidden keys: a Button's hotkey would draw `1:` before its name
+  expect(((await pane.find({ type: 'Button', key: 'tab-table' })) as { props?: Record<string, unknown> } | undefined)?.props?.hotkey).toBeUndefined()
+  expect(await pane.find({ type: 'Button', key: 'hk-tab0' })).toBeDefined()
   const body = shown(await pane.drawn({ in: 'm:file-body' }))
   for (const s of ['alice', 'Who saved the page?', 'bob', 'An agent did, twice.', '⎿ Read', 'Which one?']) expect(body).toContain(s)
   await pane.unmount()
