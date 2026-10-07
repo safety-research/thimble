@@ -173,9 +173,11 @@ test("home: views by state, the glyph alone saying it; documents under that word
   expect(at('"which pages were deleted?"')).not.toContain('about')
   expect(at('Files (3)')).toMatch(/type {9}size$/)
   expect(at('README.md')).toMatch(/markdown {5}2 KB$/)
-  // a folder's count after its name, dim, as the file browser shows it; only its size under `size`
+  // a folder's count after its name, dim, as the file browser shows it; only its size under `size`; a folder named as
+  // the file browser names it: its path, the corpus's own files under the corpus folder's name
   expect(at('wiki/')).toMatch(/▾ wiki\/ {2}2 +52\.0 MB$/)
-  expect(lines.find(l => /▸ wiki\/data\//.test(l))).toMatch(/▸ wiki\/data\/ {2}1 +2\.1 MB$/)
+  expect(lines.find(l => /▸ data\//.test(l))).toMatch(/^\s*▸ data\/ {2}1 +2\.1 MB$/)
+  expect(lines.some(l => l.includes('wiki/data/'))).toBe(false)
   expect(lines.some(l => l.includes('Coverage: 2 of 3 files opened; data/ never.'))).toBe(true)
   // a label's ● in the label's color, as the label panel draws it beside its name
   const homeTree = JSON.stringify(await pane.drawn({ in: 'm:home' }))
@@ -276,5 +278,83 @@ test("a thread about a citation names its subject by the citation's words in the
   expect(row?.props).toMatchObject({ marginTop: 1 })
   const field = ((await pane.findAll({ type: 'Input' })) as { key?: string; props?: Record<string, unknown> }[]).find(i => String(i.key).startsWith('ask-'))
   expect(field?.props).toMatchObject({ placeholder: 'ask a follow-up question' })
+  await pane.unmount()
+})
+
+test("a thread's answer is its first reply, in paragraphs, without the fork's working words after it; the cards the thread made stand under it in their frames", async ($, on) => {
+  const w = world(on)
+  const t2 = w.states.threads.find(t => t.id === 't2')! as Record<string, unknown>
+  Object.assign(t2, { running: false, answers: 1, seen: 1 })
+  w.chats.t2 = {
+    meta: { ...t2 },
+    events: [
+      { type: 'user', text: 'which pages were deleted?' },
+      { type: 'tool_use', id: 'u1', name: 'Bash', input: {} },
+      { type: 'text', delta: 'Two test pages, both on 4 June.', reply: true, by: 'terminal' },
+      { type: 'tool_use', id: 'u2', name: 'Bash', input: {} },
+      { type: 'text', delta: 'Making the card.', reply: true, by: 'terminal' },
+      { type: 'tool_use', id: 'u3', name: 'mcp__plugin_thimble_thimble__add_card', input: {} },
+      { type: 'tool_result', id: 'u3', summary: '$ add_card', cell_id: 'a0frame0' },
+    ],
+  }
+  await start($, w)
+  let pane = await home($, w)
+  pane = await homeClick($, w, pane, '"which pages were deleted?"')
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  const text = shown(await pane.drawn())
+  expect(text).toContain('Two test pages, both on 4 June.')
+  expect(text).not.toContain('Making the card.')
+  // the thread's card, under its answer, in its frame (its body a card Client)
+  const json = JSON.stringify(await pane.drawn())
+  expect(json).toMatch(/"key":"thread-card-1-0"[^]*"borderStyle":"round"[^]*"module":"hooks\/card\.tsx"[^]*How many records does each file hold\?/)
+  await pane.unmount()
+})
+
+test("home names a side thread's group of cards by the thread's first question, never its slug title", async ($, on) => {
+  const w = world(on)
+  w.states.cards.groups.push({ id: 'g9', title: 'main/agent-chat:2', role: 'analyst', ts: '2026-10-06T11:00:00+00:00', chat: 't1' } as never)
+  w.cells.a0frame0!.notebook = 'g9'
+  Object.assign(w.states.threads[1]!, { question: 'Is the 3,898 deletions figure supported anywhere in the event log?' })
+  await start($, w)
+  const pane = await home($, w)
+  const text = shown(await pane.drawn({ in: 'm:home' }))
+  expect(text).toContain('in the thread "Is the 3,898 deletions figure supported anywhere in the…"')
+  expect(text).not.toContain('main/agent-chat:2')
+  await pane.unmount()
+})
+
+test("home opened after a card was made while another panel showed draws that card at once, not the list as home last read it", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  let pane = await home($, w)
+  expect(shown(await pane.drawn({ in: 'm:home' }))).toContain('Cards (13)')
+  await pane.unmount()
+  // the threads panel shows; a thread's fork makes a card meanwhile
+  await $.command.run({ command: 'thimble:thimble', args: 'threads' } as never)
+  await w.clock.settle()
+  w.cells.n9new000 = { id: 'n9new000', notebook: 'g1', kind: 'note', title: 'A card a thread made', takeaway: '', labels: [], created_by: 'chat:t1', payload: { text: 'x' } }
+  const mark = w.calls.length
+  w.stamps.set(`${WS}/notebooks`, 9)
+  await w.clock.advance(1100)
+  // home's list of cards is read again then, though home does not show: home opened next draws from it at once
+  expect(w.calls.slice(mark).filter(c => c[2] === 'cards' && c.includes(new Date(0).toISOString())).length).toBe(1)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.drawn({ in: 'm:home' }))).toContain('Cards (14)')
+  await pane.unmount()
+})
+
+test('the key hints come in one order on every panel: choosing, Enter, Space, the panel\'s own keys, back, close', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  let pane = await home($, w)
+  expect(JSON.stringify(await pane.drawn())).toContain('↑↓ to choose · Enter to open · Space to fold · x to close')
+  await pane.unmount()
+  await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
+  await w.clock.settle()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.drawn())).toContain('↑↓ to choose · Enter to open · Space to fold · b to go back · x to close')
   await pane.unmount()
 })

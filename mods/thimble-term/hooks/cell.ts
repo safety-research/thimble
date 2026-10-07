@@ -23,7 +23,9 @@ export type ThimbleCell = {
   payload?: Record<string, unknown> | null
   outputs?: Record<string, unknown>[]
   run?: { state?: string; by?: string; script?: string }
-  check?: string
+  /** its latest card check (backend checkstore.py): `pending` while cardrun waits to start it, then its record, which
+   *  ends `ok`, `fixed`, `error` or `stopped` with a `reason` for the last two */
+  check?: string | { status?: string; reason?: string; phase?: string } | null
   regenerating_for?: string[]
   label_revs?: Record<string, number>
   verification?: { status?: string; links?: { status?: string; checked?: boolean; resolved?: unknown[]; broken?: unknown[] } | null } | null
@@ -48,7 +50,7 @@ export type ThimbleLabel = {
   spec?: string
   applications?: LabelRun[]
   last_run?: LabelRun | null
-  rows?: { ref?: string; label?: string; rationale?: string; analyst?: unknown; text?: string; confidence?: number }[]
+  rows?: { ref?: string; label?: string; rationale?: string; analyst?: unknown; text?: string; confidence?: number; match?: string }[]
   /** its revision, which steps whenever its rows or its definition change (concepts.note_change) */
   rev?: number
 }
@@ -61,7 +63,7 @@ export const CARD_TYPE = 'application/vnd.thimble.card+json'
 const READS = 'application/vnd.thimble.reads+json'
 
 type Frame = { columns?: string[]; index?: string | null; label?: string; rows?: Cell[][]; total?: number; view?: { columns?: string[] } }
-type Enc = { field?: string; type?: string; aggregate?: string }
+type Enc = { field?: string; type?: string; aggregate?: string; sort?: unknown }
 type VegaLite = {
   mark?: string | { type?: string }
   encoding?: Record<string, Enc | undefined>
@@ -174,8 +176,77 @@ function markOf(spec: VegaLite): string {
   return typeof spec.mark === 'string' ? spec.mark : spec.mark?.type ?? ''
 }
 
-/** A one-layer bar or line chart as a bar or line card; null for any other chart. */
+/** Two values of a field as Vega-Lite orders them: numbers by size, anything else by its words, code point by code
+ *  point. */
+function ascending(a: unknown, b: unknown): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b
+  const x = String(a ?? '')
+  const y = String(b ?? '')
+  return x < y ? -1 : x > y ? 1 : 0
+}
+
+/** A bar chart's rows in the order its label axis sorts them, as Vega-Lite draws them: `sort` on the label's channel is a
+ *  channel to sort by (`-y` high to low, `y` low to high), `ascending` or `descending` by the label itself, a list of
+ *  labels in order (the others after it, in the data's order), or `{field, op, order}`; null keeps the data's order; with
+ *  no sort a label axis runs A to Z. A label's rows stay together, in the data's order. */
+export function sortedBars(rows: Record<string, unknown>[], enc: Record<string, Enc | undefined>, channel: string, lab: string): Record<string, unknown>[] {
+  const sort = enc[channel]?.sort
+  if (sort === null) return rows
+  const labels = [...new Set(rows.map(r => String(r[lab] ?? '')))]
+  const first = new Map<string, Record<string, unknown>>()
+  for (const r of rows) if (!first.has(String(r[lab] ?? ''))) first.set(String(r[lab] ?? ''), r)
+  let order: string[]
+  if (Array.isArray(sort)) {
+    const at = new Map(sort.map((v, i) => [String(v), i]))
+    order = labels.map((l, i) => ({ l, i })).sort((a, b) => (at.get(a.l) ?? Infinity) - (at.get(b.l) ?? Infinity) || a.i - b.i).map(x => x.l)
+  } else {
+    // what each label is sorted by, and which way
+    let field = lab
+    let op = ''
+    let desc = false
+    if (typeof sort === 'string') {
+      desc = sort.startsWith('-') || sort === 'descending'
+      const name = sort.replace(/^-/, '')
+      if (name !== 'ascending' && name !== 'descending') field = enc[name]?.field ?? lab
+    } else if (sort && typeof sort === 'object') {
+      const o = sort as { field?: unknown; op?: unknown; order?: unknown; encoding?: unknown }
+      field = typeof o.encoding === 'string' ? enc[o.encoding]?.field ?? lab : typeof o.field === 'string' ? o.field : lab
+      op = typeof o.op === 'string' ? o.op : ''
+      desc = o.order === 'descending'
+    }
+    const key = (l: string): unknown => {
+      const mine = rows.filter(r => String(r[lab] ?? '') === l)
+      if (op === 'count') return mine.length
+      if (field === lab) return first.get(l)?.[lab]
+      // a number field summed over the label's rows (its bars stacked), as Vega-Lite's default op does
+      const nums = mine.map(r => r[field]).filter((v): v is number => typeof v === 'number')
+      return nums.length === mine.length && nums.length ? nums.reduce((a, b) => a + b, 0) : mine[0]?.[field]
+    }
+    const keys = new Map(labels.map(l => [l, key(l)]))
+    order = labels.map((l, i) => ({ l, i })).sort((a, b) => (desc ? -1 : 1) * ascending(keys.get(a.l), keys.get(b.l)) || a.i - b.i).map(x => x.l)
+  }
+  const rank = new Map(order.map((l, i) => [l, i]))
+  return rows.map((r, i) => ({ r, i })).sort((a, b) => rank.get(String(a.r[lab] ?? ''))! - rank.get(String(b.r[lab] ?? ''))! || a.i - b.i).map(x => x.r)
+}
+
+/** The bar layer of a chart whose other layers write the bars' values on them (Altair's `bars + bars.mark_text()`: a
+ *  text mark on the same x and y), each layer with the encoding and the data it takes from the chart; else null. */
+function labeledBars(spec: VegaLite): VegaLite | null {
+  const layers = (spec.layer ?? []).map(l => ({ ...l, encoding: { ...spec.encoding, ...l.encoding } }))
+  const bars = layers.filter(l => markOf(l) === 'bar')
+  if (bars.length !== 1 || layers.some(l => markOf(l) !== 'bar' && markOf(l) !== 'text')) return null
+  const bar = bars[0]!
+  const same = layers.every(l => l === bar || (l.encoding.x?.field === bar.encoding.x?.field && l.encoding.y?.field === bar.encoding.y?.field && !l.layer))
+  return same ? { ...bar, data: bar.data ?? spec.data, datasets: { ...spec.datasets, ...bar.datasets } } : null
+}
+
+/** A one-layer bar or line chart as a bar or line card, a bar chart with its values written on its bars too; null for
+ *  any other chart. */
 export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
+  if (spec.layer && !spec.facet) {
+    const bars = labeledBars(spec)
+    return bars ? chartCard(cell, bars) : null
+  }
   if (spec.layer || spec.facet || spec.hconcat || spec.vconcat || spec.concat || spec.spec) return null
   const mark = markOf(spec)
   const x = spec.encoding?.x
@@ -186,8 +257,10 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
   if (!rows.length) return null
   if (mark === 'bar') {
     // the quantitative axis is the value, the other the label
-    const [lab, val] = x.type === 'quantitative' && y.type !== 'quantitative' ? [y.field, x.field] : [x.field, y.field]
-    const bars: BarRow[] = rows.map(r => ({ label: String(r[lab] ?? ''), value: Number(r[val] ?? 0), group: color?.field ? String(r[color.field] ?? '') : '' }))
+    const horizontal = x.type === 'quantitative' && y.type !== 'quantitative'
+    const [lab, val] = horizontal ? [y.field, x.field] : [x.field, y.field]
+    // in the order the label axis sorts them (its `sort`, else A to Z), as the browser draws them
+    const bars: BarRow[] = sortedBars(rows, spec.encoding ?? {}, horizontal ? 'y' : 'x', lab).map(r => ({ label: String(r[lab] ?? ''), value: Number(r[val] ?? 0), group: color?.field ? String(r[color.field] ?? '') : '' }))
     if (bars.some(b => !Number.isFinite(b.value))) return null
     return { ...blank(cell, 'bar'), x: lab, y: val, rows: bars }
   }
@@ -354,6 +427,16 @@ export function busyWords(cell: ThimbleCell): string {
   if (st === 'waiting') return 'waiting for its run'
   if (st === 'running' || cell.status === 'running' || cell.status === 'queued') return '◌ running'
   if (cell.regenerating_for?.length) return '◌ running again'
+  // cardrun's mark that the card's check waits to start (a running check's record is the check's own business)
   if (cell.check === 'pending') return '◌ checking'
   return ''
+}
+
+/** How the card's latest check stands: `pending`, `ok`, `fixed`, `error` or `stopped` ('' when none ran), and why it
+ *  ended in an error or a stop. */
+export function checkOf(cell: ThimbleCell): { state: string; why: string } {
+  const c = cell.check
+  if (typeof c === 'string') return { state: c, why: '' }
+  if (!c || typeof c !== 'object') return { state: '', why: '' }
+  return { state: typeof c.status === 'string' ? c.status : '', why: typeof c.reason === 'string' ? c.reason : '' }
 }

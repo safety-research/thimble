@@ -340,3 +340,81 @@ test("main's own `↳ thread <slug>:` line names the thread by its first questio
   expect(text).not.toContain('what-does-the-export')
   await ui.unmount()
 })
+
+const ROW = (tool: string, input: Record<string, unknown>) =>
+  ({ plugin: 'thimble-term', component: 'ToolUse', requestId: 'u9', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u9', tool, input, isRunning: false, isErrored: false, isInterrupted: false } }) as never
+
+test("a side thread's fork is named by the thread's first question in its Agent row and in the notice that it finished, never by its slug", async ($, on) => {
+  const w = world(on)
+  Object.assign(w.states.threads[1]!, { fork_name: 'agent-chat-2', question: 'Is the 3,898 deletions figure supported anywhere in the event log?' })
+  await start($, w)
+  const row = await $.ui.mount(ROW('Agent', { description: 'thread:agent-chat-2', subagent_type: 'fork', prompt: 'the thread event' }))
+  const drawn = shown(await row.drawn())
+  expect(drawn).toContain('"description":"thread \\"Is the 3,898 deletions figure supported…\\""')
+  expect(drawn).not.toContain('agent-chat-2')
+  await row.unmount()
+  // the notice the fork's end leaves in main's chat
+  const notice = await $.ui.mount({ plugin: 'thimble-term', component: 'UserMessage', requestId: 'n1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'Agent "thread:agent-chat-2" finished', origin: { kind: 'task-notification' }, isExpanded: false, task: { status: 'completed', durationMs: 29000 } } } as never)
+  expect(shown(await notice.drawn())).toBe('Agent thread "Is the 3,898 deletions figure supported…" finished')
+  await notice.unmount()
+  // any other subagent's row stays as Claude Code draws it
+  const other = await $.ui.mount(ROW('Agent', { description: 'writer: report', subagent_type: 'thimble:writer' }))
+  expect(shown(await other.drawn())).toContain('"description":"writer: report"')
+  await other.unmount()
+})
+
+test("main's own `↳ thread` line is not drawn once thimble-term drew the thread's `↳ thread` row: the chat says the thread answered once", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await turn($, w, [['r1', 'Asked.']])
+  const t2 = w.states.threads.find(t => t.id === 't2')! as Record<string, unknown>
+  Object.assign(t2, { running: false, answers: 1, seen: 0, fork_name: 'the-deletions', question: 'which pages were deleted?' })
+  w.chats.t2 = { meta: { ...t2 }, events: [{ type: 'user', text: 'which pages were deleted?' }, { type: 'text', delta: 'Forty.', reply: true }] }
+  w.stamps.set(`${WS}/chats`, 5)
+  await w.clock.advance(1100)
+  let ui = (await $.ui.mount(MESSAGE('r1', 'Asked.'))) as unknown as M
+  expect(shown(await ui.drawn())).toContain('↳ thread · "which pages were deleted?" · answered')
+  await ui.unmount()
+  // main's line when the fork returns: not drawn, and a block that is only that line draws nothing
+  ui = (await $.ui.mount(MESSAGE('r2', '↳ thread the-deletions: answered that forty pages were deleted.'))) as unknown as M
+  expect(shown(await ui.drawn())).not.toContain('answered that forty')
+  await ui.unmount()
+  // a line about a thread with no row of thimble-term's is drawn, its thread named by its question
+  Object.assign(w.states.threads[1]!, { fork_name: 'what-does-the-export', question: 'why is events.jsonl so much bigger?' })
+  w.stamps.set(`${WS}/chats`, 6)
+  await w.clock.advance(1100)
+  ui = (await $.ui.mount(MESSAGE('r3', 'Done.\n\n↳ thread what-does-the-export: answered.'))) as unknown as M
+  expect(shown(await ui.drawn())).toContain('↳ thread "why is events.jsonl so much bigger?": answered.')
+  await ui.unmount()
+})
+
+test("a thimble tool's row names a card by its question, without straight quotation marks Claude Code would escape, and a takeaway's citations as their words; the questions cut at a word", async ($, on) => {
+  const w = world(on)
+  w.cells.ff73e071!.title = 'Which five pages have the most revisions in the corpus?'
+  await start($, w)
+  await turn($, w, [['r1', 'Here.']])
+  const row = await $.ui.mount(ROW('mcp__plugin_thimble_thimble__edit_card', { card: 'card:ff73e071', takeaway: 'The most edited page has [[60|card:ff73e071#revisions/dse%2FAgentLinkma20JuneAA]] revisions; see [[README.md#L3]] and [[card:ff73e071]].' }))
+  const drawn = shown(await row.drawn())
+  // the card key: its question alone; the takeaway: each citation its words, the card it embeds in curly quotation marks
+  expect(drawn).toContain('"card":"Which five pages have the most revisions in the corpus?"')
+  expect(drawn).toContain('"takeaway":"The most edited page has 60 revisions; see README:3 and card “Which five pages have the most…”."')
+  expect(drawn).not.toMatch(/ff73e071|\[\[|\\"/)
+  await row.unmount()
+  // a Bash row that runs the card: its question cut at a word
+  const bash = await $.ui.mount(ROW('Bash', { command: '/tree/plugin/bin/thimble-run card ff73e071', description: 'Run the card' }))
+  expect(shown(await bash.drawn())).toContain('"command":"thimble-run card \\"Which five pages have the most…\\""')
+  await bash.unmount()
+})
+
+test("a card whose takeaway holds the passage a thread was asked about (a citation in it) keeps a blue ↳ beside it", async ($, on) => {
+  const w = world(on)
+  // the live check's thread (New 14): asked about a citation in the card's takeaway, its anchor the cited place
+  w.states.threads.push({ id: 't4', kind: 'thread', role: 'thread', title: 'README:3', anchor: 'README.md#L3', anchor_text: 'The export holds 4579 pages and 14592 revisions.', parent: 'main', created_at: '2026-10-06T10:05:00+00:00', running: false, answers: 1, seen: 1 } as never)
+  // not the fixtures' thread anchored on the card itself
+  w.states.threads.splice(1, 1)
+  await start($, w)
+  await turn($, w, [['r1', 'Here.']])
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  expect(await ui.find({ type: 'Client', key: 'asked-card-0' })).toBeDefined()
+  await ui.unmount()
+})

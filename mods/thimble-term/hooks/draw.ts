@@ -86,7 +86,7 @@ export function cut(s: string, n: number): string {
     out += ch
     w += cw(ch)
   }
-  return `${out}…`
+  return `${out.trimEnd()}…`
 }
 
 // a byte of a UTF-8 sequence after its first, as Windows-1252 shows it
@@ -177,7 +177,7 @@ export function wrapRows(s: string, n: number, max: number): string[] {
 }
 
 /** `s` cut to `n` cells with `…`, at the last space that keeps half of it, else mid-word. */
-function cutAtWord(s: string, n: number): string {
+export function cutAtWord(s: string, n: number): string {
   if (width(s) <= n) return s
   const head = cut(s, n).slice(0, -1)
   const sp = head.lastIndexOf(' ')
@@ -290,11 +290,15 @@ export function count(n: number): string {
   return n.toLocaleString('en-US')
 }
 
-/** A share as the label panel writes it (harness.tsx pct). */
+/** A share in whole percent, so shares side by side read alike (`7%` beside `93%`): one decimal under 1%, `<0.1%` below
+ *  that, and `>99%` for a part that rounds to the whole. */
 export function share(a: number, b: number): string {
   if (!b || !a) return '0%'
   const p = (100 * a) / b
-  return p < 0.1 ? '<0.1%' : p < 10 ? `${p.toFixed(1)}%` : `${Math.round(p)}%`
+  if (p < 0.1) return '<0.1%'
+  if (p < 1) return `${p.toFixed(1)}%`
+  const r = Math.round(p)
+  return r >= 100 && a < b ? '>99%' : `${r}%`
 }
 
 /** The colour of a label's value, as the label panel draws it: the categorical palette in the label's order, and the

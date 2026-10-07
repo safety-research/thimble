@@ -291,10 +291,12 @@ def ui_records(c: str, after: int = 0) -> list[dict[str, Any]]:
 
 STATE_USAGE = ("thimble state <surface> --cwd <dir> [args]; surfaces: home, cards [--since <iso>], card <id>, labels, "
                "label <id>, docs, doc <slug>, threads, thread <id> [--after <n>], agents [--tail <n>], "
-               "files [path] [--start <n>], resolve <refs json>, ui [--after <n>]")
+               "files [path] [--start <n>], opens <paths json>, resolve <refs json>, ui [--after <n>]")
 
 
 LABEL_ROWS = 3  # records per value `state label` gives with their words (rows)
+LABEL_VERDICT_ROWS = 6  # records per value the analyst set or agreed with that `state label` adds to them
+OPENS_MAX = 100  # files one `state opens` reads the head of
 FILE_PAGE = 200  # lines of a file `state files <file>` gives, the renderer's page (its earlier and later steps)
 
 
@@ -431,12 +433,35 @@ async def _label(c: str, args: list[str], pos: list[str]) -> Any:
     # the analyst's verdict, which the renderer's label card draws with agree and disagree
     ex: dict[str, list[dict[str, str]]] = {}
     rows: list[dict[str, Any]] = []
+    # the records the analyst set or agreed with, under the value they gave: a record set to another value stays in the
+    # list under that value (its row comes last among the store's, past the page each value shows)
+    judged = await asyncio.to_thread(_verdict_rows, c, str(found["id"]))
     for value in out.get("labels") or []:
         pairs = await asyncio.to_thread(concepts.examples, c, str(found["id"]), str(value))
         ex[str(value)] = [{"ref": r, "text": t} for r, t in pairs]
         page = await concepts.rows_route(c, str(found["id"]), value=str(value), limit=LABEL_ROWS, text=True)
-        rows += [r for r in page.get("rows") or [] if isinstance(r, dict)]
+        mine = [r for r in judged if r.get("analyst") == value][:LABEL_VERDICT_ROWS]
+        refs = {r.get("ref") for r in mine}
+        rows += mine + [r for r in page.get("rows") or [] if isinstance(r, dict) and r.get("ref") not in refs]
     return {**out, "examples": ex, "rows": rows}
+
+
+def _verdict_rows(c: str, concept_id: str) -> list[dict[str, Any]]:
+    """The label's rows the analyst gave a value, latest first, as the rows route gives them with their words (ref, label,
+    confidence, rationale, analyst, text). Blocking."""
+    from . import concepts  # noqa: PLC0415
+
+    ws, concept = concepts.load_concept(c, concept_id)
+    # the analyst's latest values with their words, as a prompt run's examples are read (a record with no words is left
+    # out), then each one's row for the value the label gave it and why
+    shots = concepts.few_shot_examples(ws, concept, limit=LABEL_VERDICT_ROWS * 4)
+    by_ref = {str(r.get("ref")): r for r in concepts.rows_for_refs(ws, concept_id, [s["ref"] for s in shots])}
+    out = []
+    for s in shots:
+        r = by_ref.get(s["ref"], {})
+        out.append({"ref": s["ref"], "label": r.get("label"), "confidence": r.get("confidence"),
+                    "rationale": r.get("rationale"), "analyst": s["value"], "text": s["text"]})
+    return out
 
 
 async def _docs(c: str, args: list[str], pos: list[str]) -> Any:
@@ -561,6 +586,39 @@ async def _files(c: str, args: list[str], pos: list[str]) -> Any:
     return await asyncio.to_thread(corpus.get_sources, c)
 
 
+async def _opens(c: str, args: list[str], pos: list[str]) -> Any:
+    """What the file view opens each of these files as where it is not the file's lines: `transcript` for a file whose
+    head reads as a transcript surely enough that the Transcript tab comes first (transcripts.STRONG, the renderer's
+    rule), by path. A file that opens as its lines, or is not a file of the corpus, is left out. At most OPENS_MAX."""
+    from . import transcripts  # noqa: PLC0415
+
+    if not pos:
+        raise StateError("opens needs a JSON list of paths")
+    try:
+        wanted = json.loads(pos[0])
+    except ValueError as e:
+        raise StateError(f"opens: the paths are not JSON ({e})") from None
+    if not isinstance(wanted, list):
+        raise StateError("opens needs a JSON list of paths")
+    root = config.corpus_dir(c)
+
+    def run() -> dict[str, str]:
+        out: dict[str, str] = {}
+        for rel in [x.strip().strip("/") for x in wanted if isinstance(x, str)][:OPENS_MAX]:
+            try:
+                p = config.safe_corpus_path(root, rel)
+            except ValueError:
+                continue
+            if not rel or not p.is_file():
+                continue
+            hint = transcripts.sniff(p, rel)
+            if hint is not None and float(hint.get("score") or 0) >= transcripts.STRONG:
+                out[rel] = "transcript"
+        return out
+
+    return await asyncio.to_thread(run)
+
+
 async def _resolve(c: str, args: list[str], pos: list[str]) -> Any:
     from . import refs, verify  # noqa: PLC0415
 
@@ -603,7 +661,7 @@ async def _ui(c: str, args: list[str], pos: list[str]) -> Any:
 
 _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "label": _label, "docs": _docs,
              "doc": _doc, "threads": _threads, "thread": _thread, "agents": _agents, "files": _files,
-             "resolve": _resolve, "ui": _ui}
+             "opens": _opens, "resolve": _resolve, "ui": _ui}
 
 
 # --------------------------------------------------------------------------- thimble act

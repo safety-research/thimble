@@ -24,7 +24,7 @@ import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
 import type { Target } from './gestures'
-import { cid, citations, clip, mdPieces, parseReply, sectionsOf } from './lib'
+import { cid, citations, clip, clipWords, mdPieces, parseReply, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Citation } from './lib'
 import { COLORS, paintLines } from './paint'
@@ -36,22 +36,23 @@ export const MARGIN = 4
 /** A reply's margin in the panel (a side thread's answer, a document): its marks at M, its text at A0. */
 export const PANEL_MARGIN = 2
 
-const CARD_REF = /^(?:card|cell):([A-Za-z0-9_-]+)(?:#(.*))?$/
+const CARD_REF = /^(?:card|cell):([A-Za-z0-9_-]+)(?:@[A-Za-z0-9_]+)?(?:#(.*))?$/
 const CALL_REF = /^call:[A-Za-z0-9_-]+(?:#L(\d+)(?:-L?(\d+))?)?$/
 
 // ------------------------------------------------------------------------------------------------ a citation in words
 
-/** A card by its question, never its id. */
+/** A card by its question, cut at a word, never its id. */
 export async function cardName(cx: Ctx, id: string): Promise<string> {
   const q = ((await cx.card(id))?.data as CardData | undefined)?.question
-  return q ? `card "${clip(q, 40)}"` : 'the card'
+  return q ? `card "${clipWords(q, 40)}"` : 'the card'
 }
 
 /** A ref as the analyst reads it: a card's place by the card's question, a command's output by its line, never an id;
  *  any other place in words. */
 export async function placeName(cx: Ctx, ref: string): Promise<string> {
   const m = CARD_REF.exec(ref)
-  if (m) return m[2] ? `${await cardName(cx, m[1]!)} · ${m[2].replace('/', ' ')}` : cardName(cx, m[1]!)
+  // a card's output line (`card:<id>@out0#L8`) by its line, a cell by its column and row
+  if (m) return m[2] ? `${await cardName(cx, m[1]!)} · ${/^L\d+$/.test(m[2]) ? `line ${m[2].slice(1)}` : m[2].replace('/', ' ')}` : cardName(cx, m[1]!)
   const call = CALL_REF.exec(ref)
   if (call) return `the command's output${call[1] ? ` · line ${call[1]}${call[2] && call[2] !== call[1] ? `-${call[2]}` : ''}` : ''}`
   return placeWords(ref)
@@ -72,14 +73,38 @@ export async function plainWhy(cx: Ctx, why: string): Promise<string> {
 
 const ID_IN_TEXT = /\b(?:card|cell):([A-Za-z0-9_-]{4,})/g
 
-/** Hex ids in a row's words (a thimble tool's input, an agent's step), as the card's question (or `card`): the analyst
- *  never reads an id. */
+/** Hex ids in a row's words (an agent's step in the panel), as the card's question cut at a word (or `card`): the
+ *  analyst never reads an id. */
 export async function scrubIds(cx: Ctx, text: string): Promise<string> {
   let out = text
   for (const m of text.matchAll(ID_IN_TEXT)) {
     const tc = await cx.card(m[1]!)
     const q = (tc?.data as { question?: string } | null | undefined)?.question
-    out = out.replace(m[0], q ? `card "${q.length > 40 ? `${q.slice(0, 39)}…` : q}"` : 'card')
+    out = out.replace(m[0], q ? `card "${clipWords(q, 40)}"` : 'card')
+  }
+  return out
+}
+
+const BARE_CARD = /^(?:card:|cell:)?([A-Za-z0-9_-]{6,})$/
+const CARD_EMBED = /\[\[(?:card|cell):([A-Za-z0-9_-]+)\]\]|!\[[^\]\n]*\]\((?:card|cell):([A-Za-z0-9_-]+)\)/g
+
+/** A value of a thimble tool's input as its row in Claude Code shows it (the row and ctrl+o's detailed view): the
+ *  card a `card` names by its question alone, which the key already says is a card; elsewhere a citation as its words,
+ *  a card it embeds or names by its question in curly quotation marks, which Claude Code does not escape as it escapes
+ *  straight ones; each question cut at a word. No id. */
+export async function toolWords(cx: Ctx, key: string, value: string): Promise<string> {
+  const question = async (id: string) => ((await cx.card(id))?.data as { question?: string } | null | undefined)?.question ?? ''
+  const bare = key === 'card' ? BARE_CARD.exec(value.trim()) : null
+  if (bare) return clipWords(await question(bare[1]!), 60) || value
+  let out = value
+  for (const m of [...value.matchAll(CARD_EMBED)]) {
+    const q = await question((m[1] ?? m[2])!)
+    out = out.replace(m[0], q ? `card “${clipWords(q, 40)}”` : 'a card')
+  }
+  out = plainCites(out)
+  for (const m of [...out.matchAll(ID_IN_TEXT)]) {
+    const q = await question(m[1]!)
+    out = out.replace(m[0], q ? `card “${clipWords(q, 40)}”` : 'a card')
   }
   return out
 }
@@ -177,10 +202,19 @@ export function claimCard(key: string | undefined): string {
 const flat = (s: string) => plainCites(s).replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
 
 /** The thread asked about a passage, by its words: a side thread whose anchor text is the passage's (or holds it); for
- *  a card (`card:<id>`), the thread anchored on it. */
+ *  a card (`card:<id>`), a thread anchored on it or on a value it shows, or one asked about a passage of its takeaway (a
+ *  citation in it, whose anchor is the cited place). */
 async function threadAbout(cx: Ctx, words: string): Promise<string> {
   const card = /^card:([A-Za-z0-9_-]+)$/.exec(words)
-  if (card) return (await cx.threads()).find(x => x.anchor === `card:${card[1]}` || x.anchor === `cell:${card[1]}`)?.id ?? ''
+  if (card) {
+    const id = card[1]!
+    const threads = await cx.threads()
+    const on = threads.find(x => /^(?:card|cell):/.test(x.anchor) && x.anchor.replace(/^cell:/, 'card:').split(/[#@,]/)[0] === `card:${id}`)
+    if (on) return on.id
+    const takeaway = flat((await cx.card(id))?.takeaway ?? '')
+    if (takeaway.length < 8) return ''
+    return threads.find(x => x.anchorText && flat(x.anchorText).length >= 12 && takeaway.includes(flat(x.anchorText)))?.id ?? ''
+  }
   const w = flat(words)
   if (w.length < 8) return ''
   const t = (await cx.threads()).find(x => x.anchorText && !x.anchor && (flat(x.anchorText) === w || (flat(x.anchorText).length > 20 && w.includes(flat(x.anchorText)))))

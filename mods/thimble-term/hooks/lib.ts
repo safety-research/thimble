@@ -23,7 +23,7 @@ export type TableRuns = { rows: Run[][][]; align: ('left' | 'right' | 'center')[
 const FENCE_RE = /```[\s\S]*?```|`[^`\n]*`/g
 const LINK_RE = /(?<![\[!])\[([^\[\]\n]*)\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)/g
 const WEB_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|tel:)/i
-const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|card:[A-Za-z0-9_-]+(?:#.*)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
+const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|card:[A-Za-z0-9_-]+(?:@[A-Za-z0-9_]+)?(?:#.*)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
 export const EMBED_RE = /^\s*(?:\[\[card:([A-Za-z0-9_-]+)\]\]|!\[[^\]\n]*\]\(card:([A-Za-z0-9_-]+)\))\s*$/
 
 function make(display: string | null, ref: string): Citation {
@@ -509,9 +509,81 @@ export function fmt(v: unknown): string {
   return v === null || v === undefined ? '' : String(v)
 }
 
+/** `s` on one line in `n` characters, cut with `…` and no space before it. */
 export function clip(s: string, n: number): string {
   const one = s.replace(/\s+/g, ' ').trim()
-  return one.length > n ? `${one.slice(0, Math.max(0, n - 1))}…` : one
+  return one.length > n ? `${one.slice(0, Math.max(0, n - 1)).trimEnd()}…` : one
+}
+
+/** `s` on one line in `n` characters, cut at the last word that fits (mid-word only when that keeps less than half),
+ *  without the punctuation or space before `…`: a card's question or a thread's in a row. */
+export function clipWords(s: string, n: number): string {
+  const one = s.replace(/\s+/g, ' ').trim()
+  if (one.length <= n) return one
+  const head = one.slice(0, Math.max(1, n - 1))
+  const sp = one[head.length] === ' ' ? head.length : head.lastIndexOf(' ')
+  return `${(sp > n / 2 ? head.slice(0, sp) : head).replace(/[\s,;:.]+$/, '')}…`
+}
+
+/** A record's fields as a label's example shows them, when its words are a JSON object (a line of a JSON lines file):
+ *  `read`, the fields the label's rule reads (a code label's `unit['name']` or `.get('name')`, the field a pattern
+ *  matches, the fields a prompt names, else the record's words), each its value as a string; `rest`, the other fields
+ *  whose value is one value, in the record's order. null for words that are no JSON object. A cut record (`…` at its
+ *  end) is read field by field as far as it goes. */
+export function recordFields(text: string, rule: { kind?: string; spec?: string; match?: string }): { read: [string, string][]; rest: [string, string][] } | null {
+  const t = text.trim()
+  if (!t.startsWith('{')) return null
+  let fields: [string, unknown][] = []
+  try {
+    const v = JSON.parse(t) as unknown
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+    fields = Object.entries(v as Record<string, unknown>)
+  } catch {
+    // its fields as far as the cut words go: each `"key": value` of a scalar value
+    for (const m of t.matchAll(/"((?:[^"\\]|\\.)+)"\s*:\s*("(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?|true|false|null)/g)) {
+      try {
+        fields.push([JSON.parse(`"${m[1]!}"`) as string, JSON.parse(m[2]!) as unknown])
+      } catch {
+        // a field whose words cannot be read is left out
+      }
+    }
+    if (!fields.length) return null
+  }
+  const words = (v: unknown): string => (typeof v === 'string' ? v : v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v))
+  const keys = fields.map(([k]) => k)
+  const spec = rule.spec ?? ''
+  let read: string[] = []
+  if (rule.kind === 'code') {
+    for (const m of spec.matchAll(/\[\s*(['"])([^'"\n]+)\1\s*\]|\.get\(\s*(['"])([^'"\n]+)\3/g)) {
+      const k = m[2] ?? m[4]!
+      if (keys.includes(k) && !read.includes(k)) read.push(k)
+    }
+  } else if (rule.kind === 'regex') {
+    const hit = (v: unknown) => {
+      if (typeof v !== 'string') return false
+      if (rule.match) return v.includes(rule.match)
+      try {
+        return new RegExp(spec).test(v)
+      } catch {
+        return false
+      }
+    }
+    read = fields.filter(([, v]) => hit(v)).map(([k]) => k).slice(0, 2)
+  } else if (spec) {
+    const lower = spec.toLowerCase()
+    read = keys.filter(k => new RegExp(`\\b${k.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[_ ]')}\\b`).test(lower)).slice(0, 2)
+  }
+  if (!read.length) {
+    // a record's words: its text field, else its longest words
+    const text = keys.find(k => /^(text|content|message|body|msg|comment|title|name|summary)$/i.test(k) && typeof fields.find(([x]) => x === k)?.[1] === 'string')
+    const longest = fields.filter(([, v]) => typeof v === 'string').sort((a, b) => words(b[1]).length - words(a[1]).length)[0]?.[0]
+    read = [text ?? longest ?? keys[0]!].filter(Boolean)
+  }
+  const one = (v: unknown) => v === null || ['string', 'number', 'boolean'].includes(typeof v)
+  return {
+    read: read.map(k => [k, words(fields.find(([x]) => x === k)?.[1])]),
+    rest: fields.filter(([k, v]) => !read.includes(k) && one(v)).map(([k, v]) => [k, words(v)]),
+  }
 }
 
 /** The sentence of a reply that holds a citation, for the prompt that asks for its verification script. */

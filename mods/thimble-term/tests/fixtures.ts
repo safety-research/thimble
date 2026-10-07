@@ -186,6 +186,8 @@ export type World = {
   pages: Record<string, unknown>
   /** when the conversation began, as Claude Code's session figures say it (a resumed one began before its process) */
   startedAt?: number
+  /** what `thimble state opens` says each file opens as (`transcript`), by path */
+  opens: Record<string, string>
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
@@ -214,6 +216,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     docs: {},
     commands: [],
     pages: {},
+    opens: {},
   }
   const ws = opts.ws === undefined ? WS : opts.ws
   mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI })
@@ -283,6 +286,10 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       case 'files':
         if (rest[0] && w.pages[rest[0]] !== undefined) return w.pages[rest[0]] === null ? out({ error: `could not read ${rest[0]}` }, 1) : out(w.pages[rest[0]])
         return rest[0] ? out(w.states.file) : out(w.states.files)
+      case 'opens': {
+        const paths = JSON.parse(rest[0] ?? '[]') as string[]
+        return out(Object.fromEntries(paths.filter(p => w.opens[p]).map(p => [p, w.opens[p]])))
+      }
       case 'resolve': {
         const refs = JSON.parse(rest[0] ?? '[]') as string[]
         return out(Object.fromEntries(refs.map(r => [r, w.resolve[r] ?? RESOLVE[r] ?? { error: `no such place: ${r}`, status: 404 }])))
@@ -344,6 +351,9 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     const { Text } = $.ui.resolve(e)
     // a command's output row as the engine draws it: its text
     if (e.component === 'CommandOutput') return Text({ children: [String((e.props as { text?: unknown }).text ?? '')] })
+    // a tool's row as the engine draws it from its input, and a task's notice by its words
+    if (e.component === 'ToolUse') return Text({ children: [`${String((e.props as { tool?: unknown }).tool)}(${JSON.stringify((e.props as { input?: unknown }).input)})`] })
+    if (e.component === 'UserMessage' && (e.props as { origin?: { kind?: string } }).origin?.kind === 'task-notification') return Text({ children: [String((e.props as { text?: unknown }).text ?? '')] })
     return Text({ children: ['(the engine row)'] })
   })
   return w

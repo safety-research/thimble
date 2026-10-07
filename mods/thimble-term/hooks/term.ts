@@ -4,7 +4,7 @@
 //
 // Nothing here writes the workspace: a read is `thimble state`, a change is `thimble act` (hooks/data.ts).
 import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermLabelUi, TermPanel, TermThreadRow } from '../types'
-import { busyWords, cardOfCell, linksOf, printed } from './cell'
+import { busyWords, cardOfCell, checkOf, linksOf, printed } from './cell'
 import type { ThimbleCell, ThimbleLabel } from './cell'
 import type { CardData, CardLabel } from './draw'
 import type { Ctx, SurfaceGot } from './ctx'
@@ -93,6 +93,31 @@ export const rt = {
   // the last turn's text and cards, which `/thimble cite` and `/thimble card` open by number
   lastReply: '',
   lastCards: [] as string[],
+  // what each file opens as where that is not its lines (`thimble state opens`: `transcript`), by path, with the size it
+  // had when read ('' for a file of lines)
+  opens: new Map<string, { size: number; as: string }>(),
+  // the threads main's chat has a `↳ thread` row of thimble-term's for: main's own `↳ thread` line about one is hidden
+  told: new Set<string>(),
+}
+
+/** The most files one `thimble state opens` reads the head of (backend local.py OPENS_MAX). */
+const OPENS_MAX = 100
+
+/** What the listed files of plain text open as, read for those not read yet or changed since (at most OPENS_MAX a
+ *  read): a file that opens as a transcript shows `transcript` as its type, as its preview and its view say. */
+export async function readOpens(cx: Ctx): Promise<void> {
+  if (!rt.sc) return
+  const got = (await cx.surface('files')) as SurfaceGot | undefined
+  const list = got?.ok ? (Array.isArray(got.value) ? got.value : (got.value as { files?: unknown })?.files) : []
+  const files = (Array.isArray(list) ? list : []).filter((f): f is { path: string; kind?: unknown; size_bytes?: unknown; size?: unknown } => Boolean(f) && typeof (f as { path?: unknown }).path === 'string')
+  const sizeOf = (f: { size_bytes?: unknown; size?: unknown }) => (typeof f.size_bytes === 'number' ? f.size_bytes : typeof f.size === 'number' ? f.size : 0)
+  const want = files.filter(f => (!f.kind || f.kind === 'text') && rt.opens.get(f.path)?.size !== sizeOf(f)).slice(0, OPENS_MAX)
+  if (!want.length) return
+  const r = await readState(cx, rt.sc, 'opens', [JSON.stringify(want.map(f => f.path))])
+  if (!r.ok) return
+  const as = (r.value ?? {}) as Record<string, unknown>
+  for (const f of want) rt.opens.set(f.path, { size: sizeOf(f), as: typeof as[f.path] === 'string' ? (as[f.path] as string) : '' })
+  await cx.bumpPanel()
 }
 
 const iso = (ms: number) => new Date(ms).toISOString()
@@ -123,6 +148,7 @@ export function termCard(cell: ThimbleCell, label: ThimbleLabel | null, rev: num
     ...(links ? { links } : {}),
     ...(out ? { printed: out } : {}),
     ran: error || cell.status === 'error' ? 'error' : cell.status === 'ok' ? 'ok' : '',
+    ...(checkOf(cell).state ? { check: checkOf(cell) } : {}),
   }
 }
 
@@ -306,12 +332,9 @@ export function panelCitation(p: TermPanel): Citation | null {
 export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
   switch (p.view) {
     case 'home':
-      await readSurface(cx, 'home-full', 'home')
-      await readSurface(cx, 'labels', 'labels')
-      await readSurface(cx, 'docs', 'docs')
-      await readSurface(cx, 'canvas', 'cards', ['--since', iso(0)])
-      await readSurface(cx, 'files', 'files')
-      await refreshThreads(cx)
+      // its surfaces read at once, so home draws what changed within one read's time of opening
+      await Promise.all([readSurface(cx, 'canvas', 'cards', ['--since', iso(0)]), readSurface(cx, 'home-full', 'home'), readSurface(cx, 'labels', 'labels'), readSurface(cx, 'docs', 'docs'), readSurface(cx, 'files', 'files'), refreshThreads(cx)])
+      await readOpens(cx)
       return
     case 'card':
       if (p.card) await loadCards(cx, [p.card])
@@ -350,6 +373,7 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
       return
     case 'files': {
       await readSurface(cx, 'files', 'files')
+      await readOpens(cx)
       // the chosen file's first lines, shown under the list
       const pick = (await cx.filesUi()).pick
       if (pick) await readSurface(cx, `file:${pick}:1`, 'files', [pick])
@@ -369,6 +393,12 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
       // the one shown, though the list may not hold it yet (one just asked)
       if (p.view === 'thread' && p.thread && !(await cx.threads()).slice(-THREADS_READ).some(t => t.id === p.thread)) await readThread(cx, p.thread)
       if (p.view === 'thread' && p.thread && (await showingThread(cx, p.thread))) await markSeen(cx, p.thread)
+      // the cards the shown thread made, drawn under its answers
+      if (p.view === 'thread' && p.thread) {
+        const tt = await cx.thread(p.thread)
+        const ids = tt?.events.length ? [...new Set(threadOf(tt.meta, tt.events).turns.flatMap(t => t.cards ?? []))] : []
+        if (ids.length) await loadCards(cx, ids)
+      }
       return
     default:
   }
@@ -556,6 +586,7 @@ export async function refreshThreads(cx: Ctx): Promise<void> {
     if (ended) rt.failed.add(t.id)
     else rt.failed.delete(t.id)
     const at = rt.anchor
+    rt.told.add(t.id)
     await cx.setThreadRows(at, withSignal(await cx.threadRows(at), { thread: t.id, turn: Math.max(1, turn) }))
   }
   await cx.setThreads(rows)
@@ -737,6 +768,9 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
         const before = [...rt.shown]
         await refreshCards(cx, areas.has('labels'))
         if (!first) await recheckCards(cx, before)
+        // the cards home lists, read again while home is not shown (a thread's fork made one): home opened next shows
+        // them at once, not the list as it was when home last showed
+        if (areas.has('cards') && !first && panel?.view !== 'home' && panel?.view !== 'label' && (await cx.surface('canvas'))) await readSurface(cx, 'canvas', 'cards', ['--since', iso(0)])
       }
       if (areas.has('chats') || areas.has('agents')) await refreshAgents(cx)
       if (areas.has('chats')) {

@@ -23,8 +23,9 @@ export type ChatVerify = {
   why?: string
 }
 
-/** One question of a side thread and its answer, while running its tool calls and latest text. */
-export type ChatThreadTurn = { q: string; a: string; state: string; tools: number; partial: string }
+/** One question of a side thread and its answer, while running its tool calls and latest text; `cards` the cards its
+ *  fork made or changed (its tool results' `cell_id`), drawn under the answer. */
+export type ChatThreadTurn = { q: string; a: string; state: string; tools: number; partial: string; cards?: string[] }
 
 /** A side thread: what it is about, its exchange, `parent` the thread it was asked from ('' or absent: main), `at` when
  *  it last changed (epoch ms). thimble-term fills it from a thread's chat (hooks/model.ts threadOf). */
@@ -82,6 +83,8 @@ export type TermCard = {
   printed?: string
   /** how its last run ended: `ok`, `error`, or '' when it has not run */
   ran?: string
+  /** how its latest card check ended (cell.ts checkOf): `error` with why, which the card pane says */
+  check?: { state: string; why: string }
 }
 
 /** A card's takeaway as thimble's links check left it (backend verify.py, the cell's `verification.links`): `pending`
