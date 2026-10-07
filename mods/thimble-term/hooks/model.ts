@@ -6,7 +6,7 @@
 // is left out rather than failing the drawing.
 import type { ChatThread, ChatThreadTurn, TermAgent, TermHome, TermThreadRow, TermVerdict } from '../types'
 import type { ThimbleCell, ThimbleLabel } from './cell'
-import { shownMatches, valueIn } from './lib'
+import { clipWords, shownMatches, valueIn } from './lib'
 import type { Citation } from './lib'
 import { quotedWords, showsValue } from './cite'
 
@@ -105,21 +105,61 @@ export function runShown(command: string, questionOf: (id: string) => string | u
   if (verb !== 'card') return verb ? `thimble-run ${verb}` : 'thimble-run'
   const ids = runIds(command)
   const named = ids.map(questionOf).filter((q): q is string => Boolean(q))
-  const short = (q: string) => (q.length > 40 ? `${q.slice(0, 39)}…` : q)
+  // each question cut at a word, never mid-word
+  const short = (q: string) => clipWords(q, 40)
   if (named.length && named.length === ids.length) return `thimble-run card ${named.map(q => `"${short(q)}"`).join(', ')}`
   return ids.length > 1 ? `thimble-run card · ${ids.length} cards` : 'thimble-run card'
 }
 
+type NamedRow = { id: string; title: string; question?: string; fork?: string }
+
+/** A thread's first question as its rows name it: one line, its citations as their words. */
+function questionWords(q: string | undefined): string {
+  return (q ?? '').replace(/\[\[([^|\]]*)\|[^\]]*\]\]/g, '$1').replace(/\s+/g, ' ').trim()
+}
+
+/** The thread a fork's name names: the slug its forks run under (`fork_name`), its title or its id. */
+function bySlug(rows: readonly NamedRow[], name: string): NamedRow | undefined {
+  return rows.find(x => x.fork === name || x.title === name || x.id === name)
+}
+
 /** main's `↳ thread <name>: …` lines (main.md's form, `<name>` the fork's slug) with each thread named by its first
  *  question in quotation marks, as the chat names a thread everywhere else. */
-export function namedThreads(text: string, rows: readonly { id: string; title: string; question?: string; fork?: string }[]): string {
+export function namedThreads(text: string, rows: readonly NamedRow[]): string {
   if (!/↳\s*thread\s+[A-Za-z0-9_-]/.test(text)) return text
   return text.replace(/(↳\s*thread\s+)([A-Za-z0-9_-]+)(\s*:)/g, (m, lead: string, name: string, colon: string) => {
-    const r = rows.find(x => x.fork === name || x.title === name || x.id === name)
-    const q = (r?.question ?? '').replace(/\[\[([^|\]]*)\|[^\]]*\]\]/g, '$1').replace(/\s+/g, ' ').trim()
+    const q = questionWords(bySlug(rows, name)?.question)
     if (!q) return m
-    const cut = q.length > 40 ? `${(q.slice(0, 39).match(/^(.*\S)\s/)?.[1] ?? q.slice(0, 39)).replace(/[\s,;:.]+$/, '')}…` : q
-    return `${lead}"${cut.replace(/"/g, "'")}"${colon}`
+    return `${lead}"${clipWords(q, 40).replace(/"/g, "'")}"${colon}`
+  })
+}
+
+/** main's own `↳ thread <name>: …` lines left out for each thread whose row thimble-term drew in main's chat (`told`,
+ *  by id): the row says the thread answered, so the chat does not say it twice. `<name>` is the fork's slug, or the
+ *  thread's first question in quotation marks. */
+export function withoutToldThreads(text: string, rows: readonly NamedRow[], told: ReadonlySet<string>): string {
+  if (!told.size || !/↳\s*thread\s/.test(text)) return text
+  const lines = text.split('\n')
+  const kept = lines.filter(l => {
+    const m = /^\s*↳\s*thread\s+("[^"]*"|[A-Za-z0-9_:,.-]+?)\s*:/.exec(l)
+    if (!m) return true
+    const name = m[1]!
+    const quoted = name.startsWith('"') ? questionWords(name.slice(1, -1)).replace(/…$/, '') : ''
+    const r = quoted ? rows.find(x => quoted.length >= 8 && questionWords(x.question).startsWith(quoted)) : bySlug(rows, name)
+    return !(r && told.has(r.id))
+  })
+  if (kept.length === lines.length) return text
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/** An Agent call's description or a task notification's words with each thread's fork (`thread:<slug>`, in quotation
+ *  marks or not) named by the thread's first question, as everywhere else: `thread "How many of the 2,994…"`. A fork
+ *  of a thread not listed keeps its words. */
+export function namedForks(text: string, rows: readonly NamedRow[], n = 40): string {
+  if (!/\bthread:/.test(text)) return text
+  return text.replace(/"?\bthread:([^\s"]+?)([.,;:]*)"?(?=\s|$)/g, (m, slug: string, tail: string) => {
+    const q = questionWords(bySlug(rows, slug)?.question)
+    return q ? `thread "${clipWords(q, n).replace(/"/g, "'")}"${tail}` : m
   })
 }
 
@@ -232,13 +272,19 @@ export function chatOf(v: unknown): { meta: Obj; events: Obj[] } {
 
 /** A chat as a side thread's turns: each analyst message a question, the text after it its answer, its tool calls
  *  counted, answered by its first reply (`reply_in_thread`'s `text` record, marked `reply`) or `done`, failed (or
- *  stopped) by `error`. In terminal mode main often answers with `reply_in_thread` alone, and no `done` follows. */
+ *  stopped) by `error`. In terminal mode main often answers with `reply_in_thread` alone, and no `done` follows. The
+ *  answer is that first reply (SPEC.md, "The threads panel"): what the fork writes after it, as it makes a card, is its
+ *  working, not the answer. Two texts a tool call or a whole message parts are two paragraphs, never one run of words.
+ *  `cards`: the cards the turn made or changed, by its tool results' `cell_id`. */
 export function threadOf(meta: Obj, events: readonly Obj[]): ChatThread {
   const turns: ChatThreadTurn[] = []
   let cur: ChatThreadTurn | null = null
+  // a tool call since the turn's last text: the next text starts a paragraph
+  let parted = false
   const open = (q: string) => {
-    cur = { q, a: '', state: 'running', tools: 0, partial: '' }
+    cur = { q, a: '', state: 'running', tools: 0, partial: '', cards: [] }
     turns.push(cur)
+    parted = false
   }
   for (const e of events) {
     const t = str(e.type)
@@ -256,11 +302,24 @@ export function threadOf(meta: Obj, events: readonly Obj[]): ChatThread {
         c.state = 'running'
         c.a = ''
       }
-      c.a += str(e.delta ?? e.text)
+      // the answer is the turn's first reply: later words are the fork's working
+      if (c.state === 'done') continue
+      const words = str(e.delta ?? e.text)
+      const whole = e.reply === true || Boolean(e.by)
+      // the reply alone is the answer, without the working words before it
+      if (e.reply === true) c.a = ''
+      const sep = c.a.trim() && (parted || whole) ? '\n\n' : ''
+      c.a = `${sep ? c.a.trimEnd() : c.a}${sep}${sep ? words.trimStart() : words}`
       c.partial = c.a
+      parted = false
       if (e.reply === true && c.state === 'running') c.state = 'done'
-    } else if (t === 'tool_use') c.tools++
-    else if (t === 'done') {
+    } else if (t === 'tool_use') {
+      c.tools++
+      parted = true
+    } else if (t === 'tool_result') {
+      const card = str(e.cell_id)
+      if (card && !c.cards!.includes(card)) c.cards!.push(card)
+    } else if (t === 'done') {
       c.state = 'done'
       if (!c.a.trim() && e.result) c.a = str(e.result)
     } else if (t === 'error') {

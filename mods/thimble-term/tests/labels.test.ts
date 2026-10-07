@@ -95,3 +95,50 @@ test('the labels list: 1-9 open the first nine', async ($, on) => {
   expect((await pane.find({ type: 'Button', key: 'label-open-0' }))?.props).toMatchObject({ hotkey: '1' })
   await pane.unmount()
 })
+
+test("a label's example from a JSON record shows the field its rule reads first, its words in quotation marks, then the other fields on one dim row; never the record's JSON in quotation marks", async ($, on) => {
+  const w = world(on)
+  const label = w.states.labels[0] as Record<string, unknown>
+  Object.assign(label, {
+    kind: 'code',
+    spec: "def label(unit):\n    return ('proxy-link' if 'jina' in unit.get('body', '') else 'none', 1.0)",
+    rows: [
+      { ref: 'revisions.jsonl#L10566', label: 'proxy-link', rationale: '', analyst: null, text: '{ "page_id": "dse/County", "wiki": "dse", "body": "SEC download https://r.jina.ai/https://www.sec.gov/files/county.json", "n_revs": 4 }' },
+      { ref: 'revisions.jsonl#L1510', label: 'none', rationale: '', analyst: null, text: 'Welcome to the wiki' },
+    ],
+  })
+  const pane = await labelPanel($, w)
+  await pane.press({ key: 'lb-open-examples' })
+  await w.clock.settle()
+  await pane.unmount()
+  const open = (await $.ui.mount(PANE)) as unknown as M
+  const text = shown(await open.drawn())
+  // the field's name dim in the label column, its words after it
+  expect(text).toContain('body"SEC download https://r.jina.ai/https://www.sec.gov/files/county.json"')
+  expect(JSON.stringify(await open.drawn())).toContain('{"type":"Text","props":{"dimColor":true},"children":["body"]}')
+  expect(text).toContain('page_id dse/County · wiki dse · n_revs 4')
+  expect(text).not.toContain('"{')
+  // words that are no JSON record stay the record's words in quotation marks
+  expect(text).toContain('"Welcome to the wiki"')
+  expect(JSON.stringify(await open.drawn())).toContain('{"type":"Text","props":{"italic":true,"wrap":"wrap"},"children":["\\"SEC download')
+  await open.unmount()
+})
+
+test("a record the analyst set to another value stays among the examples under that value, `✓ set by you`", async ($, on) => {
+  const w = world(on)
+  const label = w.states.labels[0] as Record<string, unknown>
+  // as `thimble state label` gives it: the analyst's records under the value they gave (local.py, live check New 10)
+  label.rows = [
+    { ref: 'revisions.jsonl#L1510', label: 'none', rationale: '', analyst: 'proxy-link', text: 'Welcome to the wiki' },
+    { ref: 'revisions.jsonl#L10566', label: 'proxy-link', rationale: 'r.jina.ai link', analyst: null, text: 'SEC download https://r.jina.ai/x' },
+  ]
+  const pane = await labelPanel($, w)
+  await pane.press({ key: 'lb-open-examples' })
+  await w.clock.settle()
+  await pane.unmount()
+  const open = (await $.ui.mount(PANE)) as unknown as M
+  const text = shown(await open.drawn())
+  const under = text.slice(text.indexOf('proxy-link  2'))
+  expect(under).toMatch(/^proxy-link {2}2✓ set by you"Welcome to the wiki"/)
+  await open.unmount()
+})

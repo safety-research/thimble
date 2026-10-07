@@ -79,9 +79,21 @@ export function headingLine(name: string, count?: number, fresh = 0): Line {
   return [{ s: name, b: true }, ...(count !== undefined ? [dim(` (${count.toLocaleString('en-US')})`)] : []), ...(fresh ? [{ s: '  ' }, { s: `${fresh.toLocaleString('en-US')} new`, fg: FRESH }] : [])]
 }
 
-/** The key-hint row: the bound keys in Claude Code's words, dim and italic, parted by ` · `. */
+/** Where a key hint stands on its row, the same on every panel: choosing (↑↓), Enter, Space, then the panel's own keys
+ *  in the order it gives them, then going back and closing. */
+function hintRank(h: string): number {
+  return /^↑↓/.test(h) ? 0 : /^Enter\b/.test(h) ? 1 : /^Space\b/.test(h) ? 2 : /^b to go back\b/.test(h) ? 8 : /^x to close\b/.test(h) ? 9 : 5
+}
+
+/** The key hints in the order every panel gives them (hintRank). */
+export function orderedHints(hints: readonly string[]): string[] {
+  return hints.map((h, i) => ({ h, i })).sort((a, b) => hintRank(a.h) - hintRank(b.h) || a.i - b.i).map(x => x.h)
+}
+
+/** The key-hint row: the bound keys in Claude Code's words, in one order on every panel, dim and italic, parted by
+ *  ` · `. */
 export function hintLine(hints: readonly string[], w: number): Line {
-  return fitTo([{ s: hints.join(' · '), fg: COLORS.dim, i: true }], w)
+  return fitTo([{ s: orderedHints(hints).join(' · '), fg: COLORS.dim, i: true }], w)
 }
 
 /** `new` in green, the word that follows a new item's name; `N new` after a count. */

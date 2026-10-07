@@ -456,13 +456,27 @@ export function quoteSpan(line: string, quote: string): [number, number] | null 
 }
 
 /** A long line wrapped to `room` columns in at most `rows` rows, the rows around `span` when it does not fit; each row
- *  with the part of `span` it holds. */
+ *  with the part of `span` it holds. A row breaks at its last space (a word wider than the row breaks where the row
+ *  ends), and the spaces at a break are left out; each row keeps where it starts in `text`, so `span` stays in place. */
 export function wrapAround(text: string, span: [number, number] | null, room: number, rows: number): { text: string; hi: [number, number] | null }[] {
   const n = Math.max(1, room)
   const all: { at: number; text: string }[] = []
-  for (let at = 0; at < text.length || all.length === 0; at += n) all.push({ at, text: text.slice(at, at + n) })
+  let at = 0
+  while (at < text.length || all.length === 0) {
+    if (text.length - at <= n) {
+      all.push({ at, text: text.slice(at) })
+      break
+    }
+    // the last space at or before the row's end; none, and the row ends mid-word
+    const sp = text.lastIndexOf(' ', at + n)
+    const end = sp > at ? sp : at + n
+    all.push({ at, text: text.slice(at, end).trimEnd() })
+    at = end
+    while (text[at] === ' ') at++
+  }
   let first = 0
-  if (all.length > rows && span) first = Math.max(0, Math.min(all.length - rows, Math.floor(span[0] / n) - 1))
+  const spanRow = span ? Math.max(0, all.findLastIndex(r => r.at <= span[0])) : 0
+  if (all.length > rows && span) first = Math.max(0, Math.min(all.length - rows, spanRow - 1))
   return all.slice(first, first + rows).map((r, i, shown) => {
     const lo = span ? Math.max(span[0], r.at) - r.at : 0
     const hi = span ? Math.min(span[1], r.at + r.text.length) - r.at : 0

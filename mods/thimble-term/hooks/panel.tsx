@@ -24,14 +24,14 @@ import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermVerdict } from
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, freshSeg, hasMargin, headerEls, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
 import { chipLook, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
-import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, demojibake, labelHead, lineWidth, placeWords, shade, turnTimes, valueColour, width, wrapRows } from './draw'
+import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, demojibake, labelHead, lineWidth, placeWords, shade, share, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
 import { groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { cid, clip, fmt } from './lib'
+import { cid, clip, clipWords, fmt, recordFields } from './lib'
 import type { Citation } from './lib'
 import { linesEl } from './lines'
 import type { LineHit } from './lines'
@@ -404,10 +404,18 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
   const cardOf = (c: Obj) => ({ id: str(c.id), kind: str(c.kind) || 'code', question: str(c.title) || 'a card' })
   // a group by what it holds: a side thread's cards, a document's figures, or a group main named; a card no listed
   // group holds under `other cards`, last
+  // a side thread's group by the thread's first question, as everywhere a thread is named (its title is a slug)
+  const rowsNow = (await cx.threads()) ?? []
+  const threadHead = (chat: string): string => {
+    const r = rowsNow.find(t => t.id === chat)
+    const q = r ? plainCites(r.question || r.title || '') : ''
+    return q.trim() ? `"${clipWords(q, 60)}"` : ''
+  }
   const cardGroups: HomeCardGroup[] = groupCards(
     groups.map(g => {
       const from: HomeCardGroup['from'] = g.anchor || g.chat ? 'thread' : g.role === 'figures' ? 'report' : 'other'
-      return { head: str(g.title) || 'cards', from, cards: cells.filter(c => c.notebook === g.id).map(cardOf), at: Date.parse(str(g.ts)) || 0 }
+      const head = (g.chat ? threadHead(str(g.chat)) : '') || str(g.title) || 'cards'
+      return { head, from, cards: cells.filter(c => c.notebook === g.id).map(cardOf), at: Date.parse(str(g.ts)) || 0 }
     }),
     cells.map(cardOf),
   )
@@ -424,7 +432,7 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
         running: (l.last_run?.status ?? '') === 'running',
       }))
     : []
-  const files: HomeFile[] = filesOf(await surfaceValue(cx, 'files')).map(f => ({ file: f.path, records: null, size: f.size, seen: 0, state: 'listed', ranges: [], kind: fileType(f.path, f.kind) }))
+  const files: HomeFile[] = filesOf(await surfaceValue(cx, 'files')).map(f => ({ file: f.path, records: null, size: f.size, seen: 0, state: 'listed', ranges: [], kind: fileType(f.path, f.kind, rt.opens.get(f.path)?.as) }))
   const root = (await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'
   return { views, reports, threads, cardGroups, labels, files, coverage: homeRaw?.ok ? str(homeRaw.value.coverage) : '', root }
 }
@@ -492,7 +500,8 @@ async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
       // a folder's `… N more`: the file browser with that folder whole
       if (o.view === 'coverage' && o.folder) {
         const root = `${(await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'}/`
-        const dir = o.folder.startsWith(root) ? o.folder.slice(root.length) : o.folder
+        // home names a folder as the file browser does: its path, the corpus's own files by the corpus folder's name
+        const dir = o.folder === root ? '' : o.folder
         const ui = await cx.filesUi()
         await cx.setFilesUi({ ...ui, whole: [...(ui.whole ?? []).filter(x => x !== dir), dir], unfolded: [...ui.unfolded.filter(x => x !== `dir:${dir}`), `dir:${dir}`], folded: ui.folded.filter(x => x !== `dir:${dir}`) })
       }
@@ -511,7 +520,8 @@ async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
 // ------------------------------------------------------------------------------------------------ a card
 
 /** A card in the panel (SPEC.md, "Cards", the card pane): its question is the panel's title; its kind, who made
- *  it and how its last run ended (`last run failed` in red) the dim subtitle; the card in its border, its takeaway
+ *  it, how its last run ended (`last run failed` in red) and a card check that ended in an error (in red, with why) the
+ *  dim subtitle; the card in its border, its takeaway
  *  under it; at the bottom `code  run again  ask about it` (`◌ running` while it runs). Its code (`mode: code`)
  *  through the `Code` element with its gutter at A0, then `output`, the last 8 lines its run printed; `card  run again
  *  ask about it` at the bottom. A run again goes to main, whose Bash runs a card (`thimble-run card`). */
@@ -526,6 +536,8 @@ async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const data = tc.data as CardData
   const by = tc.by ? `made by ${/^(main|terminal|user)$/.test(tc.by) ? 'main' : /^chat:/.test(tc.by) ? 'a side thread' : tc.by}` : ''
   const ran: Seg | null = tc.ran === 'error' ? { s: 'last run failed', fg: COLORS.problem } : tc.ran === 'ok' ? dim('last run ok') : null
+  // a card check that ended in an error says so, and why, in red: the card itself may be fine, but nothing read it
+  const checked: Seg | null = tc.check?.state === 'error' ? { s: `its check ended in an error${tc.check.why ? `: ${tc.check.why}` : ''}`, fg: COLORS.problem } : null
   const ask = () => void openAsk(cx, { kind: 'card', ref: `card:${id}`, cardId: id, text: data.question })
   const busy = Boolean(tc.busy)
   const again = () => {
@@ -533,7 +545,7 @@ async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     void cx.submit(`Run this card again with Bash: thimble-run card ${id}`)
   }
   const code = p.mode === 'code'
-  const body: RenderElement[] = [...headerEls(els, { title: data.question, cols, sub: subLine([code ? 'its code' : tc.kind, by, ran]) })]
+  const body: RenderElement[] = [...headerEls(els, { title: data.question, cols, sub: subLine([code ? 'its code' : tc.kind, by, ran, checked]) })]
   const runEl = busy ? <Text key="card-running">◌ running</Text> : tc.code ? <Button key="card-again" label="run again" plain onPress={again} /> : null
   const keys: Key[] = [{ key: 'ask', hotkey: 'a', onPress: ask }, ...(tc.code && !busy ? [{ key: 'again', hotkey: 'r', onPress: again }] : [])]
   const runHint = tc.code && !busy ? ['r to run again'] : []
@@ -604,9 +616,13 @@ function lineRows(cx: Ctx, e: PaneEvent, v: TermVerdict, cols: number, quote: st
       let t = text
       let sp = spans
       if (t.length > room) {
+        // `…` right against the words at each end: no space between them
         const lo = sp.length ? Math.max(0, sp[0]![0] - Math.floor(room / 3)) : 0
-        t = `${lo ? '…' : ''}${t.slice(lo, lo + room - 2)}…`
-        sp = sp.map(([a, b]) => [a - lo + (lo ? 1 : 0), b - lo + (lo ? 1 : 0)] as [number, number])
+        const head = t.slice(lo, lo + room - 2)
+        const lead = lo ? head.length - head.trimStart().length : 0
+        t = `${lo ? '…' : ''}${head.slice(lead).trimEnd()}…`
+        const shift = lo + lead - (lo ? 1 : 0)
+        sp = sp.map(([a, b]) => [a - shift, b - shift] as [number, number])
       }
       out.push(
         <Text wrap="truncate-end">
@@ -784,8 +800,12 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const body: RenderElement[] = []
   body.push(opens ? linesEl(cx, e, 'cite-title', [titleSegs], [{ y: 0, x0: 0, x1: width(label), row: false, run: () => void opens() }], cols) : lineEl(els, titleSegs, 'cite-title'))
   const why = red && v?.why ? await plainWhy(cx, v.why) : check.state === 'refuted' && check.why ? await plainWhy(cx, check.why) : ''
-  const sub = [await citeStatus(cx, c, v, check), why].filter(Boolean).join(' · ')
-  body.push(lineEl(els, [{ s: sub, fg: bad ? COLORS.problem : COLORS.dim }], 'cite-sub', true))
+  // a citation with no words is titled by its place: its subtitle does not name the place again, and it has none
+  // while the place is there
+  const bare = c.display === null
+  const said = bare ? (!v || status === 'pending' ? '◌ checking' : red ? 'not found' : '') : await citeStatus(cx, c, v, check)
+  const sub = [said, why].filter(Boolean).join(' · ')
+  if (sub) body.push(lineEl(els, [{ s: sub, fg: bad ? COLORS.problem : COLORS.dim }], 'cite-sub', true))
   body.push(ruleEl(els, cols, 'cite-rule'))
   // `from` names the place, unless the title is the place already (a citation written without words)
   const from = cardId ? await placeName(cx, `card:${cardId}`) : placeWords(c.ref)
@@ -1033,6 +1053,8 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
         body.push(<Text key={`thread-run-${k}`} dimColor wrap="truncate-end">{`◌ ${plural(turn.tools, 'tool call')}${partial ? ` · ${clip(partial, cols - 30)}` : ''}`}</Text>)
       } else if (turn.state === 'error') body.push(<Text key={`thread-err-${k}`} color={COLORS.problem} wrap="wrap">{`× ${turn.a}`}</Text>)
       else if (turn.a.trim()) body.push(<Box key={marginKey(`thread-answer-${k}`)} flexDirection="column">{await drawReply(cx, e, turn.a, cols, { margin: PANEL_MARGIN, prefix: `t${k}-`, ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}</Box>)
+      // the cards the turn made, under its answer, each in its frame, as main's chat draws a turn's cards
+      for (const [ci, id] of (turn.cards ?? []).entries()) body.push(<Box key={`thread-card-${k}-${ci}`} flexDirection="column">{await cardBlock(cx, e, id, cols, `th${k}-${ci}`, { order: ci + 1 })}</Box>)
     }
     if (stop) {
       body.push(controlsEl(els, [<Button key="thread-stop" label="stop" plain onPress={stop} />], 'thread-controls')!)
@@ -1306,7 +1328,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
           <Text {...tone}>{'█'.repeat(w)}</Text>
           <Text color={COLORS.rule}>{'─'.repeat(Math.max(0, barW - w))}</Text>
           <Text>{`  ${cs[i]!.padStart(cw)}`}</Text>
-          <Text dimColor>{total ? `  ${(((100 * n) / total) < 10 ? ((100 * n) / total).toFixed(1) : String(Math.round((100 * n) / total))).padStart(4)}%` : ''}</Text>
+          <Text dimColor>{total ? `  ${share(n, total).padStart(5)}` : ''}</Text>
         </Text>,
       )
     })
@@ -1336,6 +1358,22 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   if (opened('counts')) rows.push(<Text key="lb-gap-examples"> </Text>)
   rows.push(toggle('examples', 'examples', recs.length))
   keys.push({ key: 'examples', hotkey: 'e', onPress: () => void flip('examples')() })
+  // a record's words: a JSON record as the field the rule reads first, its value in quotation marks and italic, then
+  // its other fields on one dim row, never its JSON inside quotation marks; other words in quotation marks, up to three
+  // rows
+  const room = Math.max(120, (cols - 4) * 3 - 2)
+  const recordRows = (ref: string, raw: string, match: string): RenderElement | null => {
+    const text = demojibake(raw)
+    if (!text.trim()) return null
+    const f = recordFields(text, { kind: l.kind ?? '', spec: definitionOf(l), ...(match ? { match } : {}) })
+    if (!f) return <Text italic wrap="wrap">{`"${clip(text.replace(/\s+/g, ' ').trim(), room)}"`}</Text>
+    return (
+      <Box flexDirection="column">
+        {fieldEls(els, f.read.map(([k, v]): [string, RenderElement] => [k, <Text italic wrap="wrap">{`"${clip(v.replace(/\s+/g, ' ').trim(), room - k.length - 2)}"`}</Text>]), `lx-f-${cid(ref)}`)}
+        {f.rest.length ? <Text dimColor wrap="truncate-end">{f.rest.map(([k, v]) => `${k} ${clip(v, 48)}`).join(' · ')}</Text> : null}
+      </Box>
+    )
+  }
   if (opened('examples')) {
     for (const v of values) {
       const xs = recs.filter(r => (typeof r.analyst === 'string' && r.analyst ? r.analyst : str(r.label)) === v)
@@ -1378,7 +1416,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
                 </Box>
               )}
             </Box>
-            {x.text ? <Text italic wrap="wrap">{`"${clip(demojibake(str(x.text)).replace(/\s+/g, ' ').trim(), Math.max(120, (cols - 4) * 3 - 2))}"`}</Text> : null}
+            {recordRows(x.ref!, str(x.text), str(x.match))}
             {x.rationale ? <Text dimColor wrap="wrap">{`why  ${clip(str(x.rationale), cols * 2)}`}</Text> : null}
           </Box>,
         )
@@ -1658,10 +1696,12 @@ function filesOf(got: { ok: true; value: unknown } | { ok: false; error: string 
 }
 
 /** What the type column says of a file: thimble's kind for the kinds it reads in its own way (an agent's transcript, a
- *  board, events, a database, a prompt), else the file's format by its extension (`jsonl`, `md`), never the bare `text`
- *  that a transcript or a table of records would contradict. */
-export function fileType(path: string, kind: string): string {
+ *  board, events, a database, a prompt); for a file it knows only as text, what it opens as when that is not its lines
+ *  (`transcript`, as its preview and its view say), else its format by its extension (`jsonl`, `md`); never the bare
+ *  `text` that a transcript or a table of records would contradict. */
+export function fileType(path: string, kind: string, opens = ''): string {
   if (kind && kind !== 'text') return kind
+  if (opens) return opens
   const name = path.split('/').at(-1) ?? path
   const dot = name.lastIndexOf('.')
   return dot > 0 && name.length - dot <= 9 ? name.slice(dot + 1).toLowerCase() : 'text'
@@ -1700,19 +1740,24 @@ function middleCut(name: string, n: number): string {
   return `${stem.slice(0, head)}…${stem.slice(stem.length - (room - head))}${ext}`
 }
 
-/** What a file opens as, by its first page: its transcript, its table of records, or its lines; a binary file not at
- *  all. */
+/** The tab a file opens on, by its first page: Transcript when its head reads as a transcript surely (thimble's sniff,
+ *  transcripts.STRONG), else Raw, its lines. */
+function firstMode(page: Obj): 'transcript' | 'raw' {
+  const hint = isObj(page.transcript) ? page.transcript : null
+  return turnsOf(page) && typeof hint?.score === 'number' && hint.score >= 0.95 ? 'transcript' : 'raw'
+}
+
+/** What a file opens as, by its first page, as its view opens it (firstMode): its transcript or its lines; a binary
+ *  file not at all. */
 function opensAs(page: Obj | undefined): string {
   if (!page) return ''
   if (page.binary) return 'raw bytes: not shown'
-  if (turnsOf(page)) return 'transcript'
-  if (recordsOf(page).length) return 'table'
-  return 'lines'
+  return firstMode(page) === 'transcript' ? 'transcript' : 'lines'
 }
 
 /** The file browser (SPEC.md, section 7, "The file browser"): a folder per group, which folds; an open folder
- *  shows its first 20 files (`… N more` shows them all), each `●` in its type's hue (dim in a folder of one type), its
- *  name cut in its middle; `❯` and the accent on the chosen file, whose name, what it opens as and its first lines show
+ *  shows its first 20 files (`… N more` shows them all), each with a dim `●`, its name cut in its middle; `❯` and the
+ *  accent on the chosen file, whose name, what it opens as and its first lines show
  *  under the second rule; Enter or a second click opens it, Space folds its folder. */
 async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const els = cx.els(e) as El
@@ -1723,7 +1768,7 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   if (!got.ok) return <Box flexDirection="column"><Text color={COLORS.problem} wrap="wrap">{`× ${got.error}`}</Text></Box>
   // each folder's files in natural order, as home lists them; the folder of the corpus's own files first
   const files = filesOf(got)
-    .map(f => ({ ...f, kind: fileType(f.path, f.kind) }))
+    .map(f => ({ ...f, kind: fileType(f.path, f.kind, rt.opens.get(f.path)?.as) }))
     .sort((a, b) => {
       const da = a.path.includes('/') ? a.path.slice(0, a.path.lastIndexOf('/') + 1) : ''
       const db = b.path.includes('/') ? b.path.slice(0, b.path.lastIndexOf('/') + 1) : ''
@@ -1770,10 +1815,9 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     if (!open) return
     const whole = (ui.whole ?? []).includes(dir)
     const shown = !whole && fs.length > FOLDER_FILES + 1 ? fs.slice(0, FOLDER_FILES) : fs
-    // a folder of one type has dim dots: the hue tells types apart only where there are several
-    const kinds = [...new Set(fs.map(f => f.kind))]
+    // each file's dot dim, as home's: the type column names its type, and only a Color by colours
     for (const f of shown) {
-      const hue = kinds.length > 1 ? valueColour(kinds, f.kind) ?? COLORS.dim : COLORS.dim
+      const hue = COLORS.dim
       const name = middleCut(f.path.slice(dir.length), Math.max(8, cols - 4 - kindW - sizeW - 6))
       hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(f.path) })
       lines.push(pointed(spread([{ s: '  ' }, { s: '●', fg: hue }, { s: ' ' }, { s: name }], right(f), cols), f.path === pick, true))
@@ -1830,7 +1874,7 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     if (page && !page.ok) body.push(<Text key="preview-err" color={COLORS.problem} wrap="wrap">{`× ${page.error}`}</Text>)
     if (!page) body.push(<Text key="preview-wait" dimColor>◌ reading</Text>)
   }
-  body.push(hintsRow(els, ['Enter to open', '↑↓ to choose', 'Space to fold'], cols))
+  body.push(hintsRow(els, ['↑↓ to choose', 'Enter to open', 'Space to fold'], cols))
   return <Box flexDirection="column">{body}</Box>
 }
 
@@ -1936,22 +1980,22 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const last = ls.at(-1)?.n ?? first
   const turns = turnsOf(page)
   const recs = recordsOf(page)
-  const hint = isObj(page.transcript) ? page.transcript : null
   const modes = [...(recs.length ? ['table'] : []), ...(turns ? ['transcript'] : []), 'raw']
   const wanted = p.mode === 'lines' ? 'raw' : p.mode
-  const mode = wanted && modes.includes(wanted) ? wanted : turns && typeof hint?.score === 'number' && hint.score >= 0.95 ? 'transcript' : 'raw'
+  const mode = wanted && modes.includes(wanted) ? wanted : firstMode(page)
   const tabName: Record<string, string> = { table: 'Table', transcript: 'Transcript', raw: 'Raw' }
-  // each tab's name with a cell of space at each side, the selected one inverse (SPEC.md, "A panel's header"); the
-  // first, when it is not the selected one, starts at the edge, where the title starts
-  const tab = (m: string, i: number) =>
+  // each tab's name with a cell of space at each side, selected or not, the selected one inverse (SPEC.md, "A panel's
+  // header"), so choosing a tab moves none; the row brings its own margin and starts one cell left of the edge, so the
+  // first tab's left cell hangs in the margin and its name starts at the edge, where the title starts
+  const tab = (m: string) =>
     m === mode ? (
       <Text key={`tab-${m}`} inverse>{` ${tabName[m]} `}</Text>
     ) : (
-      <Button key={`tab-${m}`} label={`${i === 0 ? '' : ' '}${tabName[m]} `} plain onPress={() => void openPanel(cx, { ...p, mode: m })} />
+      <Button key={`tab-${m}`} label={` ${tabName[m]} `} plain onPress={() => void openPanel(cx, { ...p, mode: m })} />
     )
   const earlier = first > 1 ? () => void openPanel(cx, { ...p, start: Math.max(1, first - 200) }) : null
   const later = total && last < total ? () => void openPanel(cx, { ...p, start: last + 1 }) : null
-  const subWords = [fileType(path, str(page.kind)), recs.length ? plural(recs.length, 'record') : '', ls.length ? `lines ${num(first)}-${num(last)}${total ? ` of ${num(total)}` : ''}` : page.binary ? 'raw bytes: not shown' : '']
+  const subWords = [fileType(path, str(page.kind), firstMode(page) === 'transcript' ? 'transcript' : ''), recs.length ? plural(recs.length, 'record') : '', ls.length ? `lines ${num(first)}-${num(last)}${total ? ` of ${num(total)}` : ''}` : page.binary ? 'raw bytes: not shown' : '']
   const subRow = (
     <Box key="file-sub" flexDirection="row">
       <Box flexShrink={1}>{lineEl(els, subLine(subWords))}</Box>
@@ -1962,7 +2006,12 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       </Box>
     </Box>
   )
-  const more = [subRow, ...(modes.length > 1 ? [<Box key="file-tabs" flexDirection="row">{modes.map((m, i) => tab(m, i))}</Box>] : [])]
+  const tabsRow = (
+    <Box key={marginKey('file-tabs')} flexDirection="row" paddingLeft={MARGIN_W - 1}>
+      {modes.map(m => tab(m))}
+    </Box>
+  )
+  const more = [subRow, ...(modes.length > 1 ? [tabsRow] : [])]
   const body: RenderElement[] = [...headerEls(els, { title: p.title || path, cols, more })]
   // the record chosen, by its line; a click or ↑↓ chooses another
   const chosen = p.line && p.line >= first && p.line <= last ? p.line : 0

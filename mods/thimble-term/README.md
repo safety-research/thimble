@@ -43,12 +43,16 @@ Claude Code's panel chrome, no right-click menu.
   panel; its values in their colours, `changed since` once the label changed after the card ran), the params and the
   takeaway. A card that read a label colours its marks by the label's values. A label card is a bar card of the label's
   counts: its records are in the label panel. A card that cannot be read is one red line (`× card 2 cannot be drawn:
-  …`). Claude Code's tool rows stay its own, folded, and no hex id is drawn: a thimble tool's row names a card by its
-  question, a label tool's result its name and counts. A table, a timeline, a diagram, an example and a label draw
+  …`). Claude Code's tool rows stay its own, folded, and no hex id is drawn, in the row or in ctrl+o's detailed view: a
+  thimble tool's row names a card by its question (cut at a word, without straight quotation marks Claude Code would
+  escape) and a citation by its words, a label tool's result its name and counts, and a side thread's fork row and the
+  notice that it finished the thread by its first question; thimble's tool results keep their card ids, which main
+  cites. A bar card keeps the order its chart's label axis sorts, and a bar chart with its values written on its bars is a bar card too. A table, a timeline, a diagram, an example and a label draw
   directly; a simple bar or line chart draws as text; any other chart as a table of its rows; a note, a custom card, a
   code card and a card type's card as their words.
 - **Rows under main's replies.** `↳ thread · "<the turn's question>" · answered` when a side thread's turn ends while the
-  panel shows something else (`failed` in red, `new` in green until it is read; a stop is not news), and `↳ view ·
+  panel shows something else (`failed` in red, `new` in green until it is read; a stop is not news; main's own `↳ thread`
+  line about that thread is then not drawn), and `↳ view ·
   <name> · building|built|proposed` under the answer that proposed a view (`failed` in red, `new` once built until
   opened).
 - **One row above the prompt**, a toast: what is new in the workspace since home was last opened (`2 new cards`, `new` in
@@ -93,11 +97,12 @@ route for it:
 | `thimble state home --cwd <dir>` | the workspace's counts: `cards`, `labels`, `docs`, `threads`, `views`, `files` (a number or a list each); `views`, each with its `status` (built, building, proposed, failed), `ts` and claimed `files`; and the orientation's `coverage` line |
 | `thimble state cards --cwd <dir> --since <iso>` | the canvas route's `{groups, cells}`, the cells changed since |
 | `thimble state card --cwd <dir> <id>` | the cell route's cell |
-| `thimble state labels --cwd <dir>` / `label --cwd <dir> <id>` | the concepts route's list / one concept, with a page of its rows (`rows`, as `/rows?text=1` answers) |
+| `thimble state labels --cwd <dir>` / `label --cwd <dir> <id>` | the concepts route's list / one concept, with a page of its rows per value (`rows`, as `/rows?text=1` answers) after the records the analyst gave that value |
 | `thimble state docs --cwd <dir>` / `doc --cwd <dir> <slug>` | the document types route's `{slug: {exists, title, …}}` / one document |
 | `thimble state threads --cwd <dir>` / `thread --cwd <dir> <id> [--after n]` | the chats route's metas (each with `answers` and `seen`, or `unread`) / `{meta, events}` past `n` |
 | `thimble state agents --cwd <dir>` | the agents route's `{rows}` |
 | `thimble state files --cwd <dir> [path] [--start n]` | the sources route's list / a page of a file's records |
+| `thimble state opens --cwd <dir> <paths json>` | `{path: "transcript"}` for each listed file of plain text that opens as a transcript, which the type column shows |
 | `thimble state resolve --cwd <dir> <refs json>` | `{ref: resolution}` (the ref route's answer, or `{error}`) for a list of refs |
 | `thimble state ui --cwd <dir> --after <n>` | the `ui.jsonl` records past `n` |
 | `thimble act thread --cwd <dir> {anchor, anchor_text?, message}` | a new side thread: `{ok, thread}` |

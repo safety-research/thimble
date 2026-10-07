@@ -2,9 +2,10 @@
 // `claude plugin test mods/thimble-term`.
 import { expect, test } from 'claude-code/testing'
 
-import { busyWords, cardOfCell, htmlTable, labelCard, linksOf } from '../hooks/cell'
+import { busyWords, cardOfCell, htmlTable, labelCard, linksOf, sortedBars } from '../hooks/cell'
 import type { ThimbleCell } from '../hooks/cell'
-import { cardLayout, placeWords } from '../hooks/draw'
+import { cardLayout, cut, placeWords, share } from '../hooks/draw'
+import { citations, clip, clipWords, recordFields } from '../hooks/lib'
 import { plainCites } from '../hooks/cite'
 import type { BarRow, Cell } from '../hooks/draw'
 import { CELLS, LABEL } from './fixtures'
@@ -108,6 +109,74 @@ test("a card's takeaway as thimble's links check left it: linked and contradicte
   expect(linksOf({ id: 'y' } as ThimbleCell)).toBeUndefined()
 })
 
+test("a Markdown link to a card's output line (`card:<id>@out0#L8`, as main writes it for the terminal) is a citation, never a link with its place in parentheses", () => {
+  const [c] = citations('at least [1,397](card:652e26ae@out0#L8) revisions')
+  expect(c).toMatchObject({ display: '1,397', ref: 'card:652e26ae@out0#L8' })
+  expect(plainCites('at least [1,397](card:652e26ae@out0#L8) revisions')).toBe('at least 1,397 revisions')
+})
+
 test("a text's citations as their shown words: the `[[…]]` form and the Markdown link main writes for the terminal; a web link stays", () => {
   expect(plainCites('It has [[4579|card:x#pages/TOTAL]] and [14,591](card:e11488a9#lines/revisions.jsonl) lines, see [the docs](https://example.com).')).toBe('It has 4579 and 14,591 lines, see [the docs](https://example.com).')
+})
+
+test("a bar card keeps the order its chart's label axis sorts: by the value with `-y` or `y`, a list, `descending`, a sort field; A to Z with none, as the browser draws it", () => {
+  const rows = [{ wiki: 'dorfwiki', revisions: 6 }, { wiki: 'probier', revisions: 1013 }, { wiki: 'dse', revisions: 2994 }]
+  const chart = (sort: unknown, horizontal = false) => {
+    const lab = { field: 'wiki', type: 'nominal', ...(sort === undefined ? {} : { sort }) }
+    const val = { field: 'revisions', type: 'quantitative' }
+    const spec = { mark: 'bar', encoding: horizontal ? { y: lab, x: val } : { x: lab, y: val }, data: { values: rows } }
+    return ((cardOfCell({ id: 'b1', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card.rows ?? []) as BarRow[]).map(r => r.label)
+  }
+  // the live check's chart: `sort: '-y'` puts dse first (New 1)
+  expect(chart('-y')).toEqual(['dse', 'probier', 'dorfwiki'])
+  expect(chart('y')).toEqual(['dorfwiki', 'probier', 'dse'])
+  expect(chart('-x', true)).toEqual(['dse', 'probier', 'dorfwiki'])
+  expect(chart(undefined)).toEqual(['dorfwiki', 'dse', 'probier'])
+  expect(chart('descending')).toEqual(['probier', 'dse', 'dorfwiki'])
+  expect(chart(['probier', 'dse'])).toEqual(['probier', 'dse', 'dorfwiki'])
+  expect(chart(null)).toEqual(['dorfwiki', 'probier', 'dse'])
+  expect(chart({ field: 'revisions', order: 'descending' })).toEqual(['dse', 'probier', 'dorfwiki'])
+  expect(chart({ encoding: 'y' })).toEqual(['dorfwiki', 'probier', 'dse'])
+  // the live check's chart: bars with their values written on them, a text layer on the same fields (`bars + labels`)
+  const layered = { layer: [{ mark: { type: 'bar' }, encoding: { x: { field: 'wiki', sort: '-y', type: 'nominal' }, y: { field: 'revisions', type: 'quantitative' } } }, { mark: { type: 'text', dy: -6 }, encoding: { text: { field: 'revisions', type: 'quantitative' }, x: { field: 'wiki', sort: '-y', type: 'nominal' }, y: { field: 'revisions', type: 'quantitative' } } }], data: { name: 'd' }, datasets: { d: [{ wiki: 'dorfwiki', revisions: 6 }, { wiki: 'dse', revisions: 2994 }] } }
+  const drawn = cardOfCell({ id: 'b2', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': layered }] } as ThimbleCell).card
+  expect(drawn.kind).toBe('bar')
+  expect((drawn.rows as BarRow[]).map(r => r.label)).toEqual(['dse', 'dorfwiki'])
+  // a layer of another kind (a rule, a line) is no bar card: a table of its rows
+  const mixed = { ...layered, layer: [layered.layer[0], { mark: 'rule', encoding: { y: { field: 'revisions' } } }] }
+  expect(cardOfCell({ id: 'b3', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': mixed }] } as ThimbleCell).card.kind).toBe('table')
+  // bars of one label stay together, summed for the sort
+  const stacked = [{ wiki: 'a', n: 1, kind: 'x' }, { wiki: 'b', n: 5, kind: 'x' }, { wiki: 'a', n: 9, kind: 'y' }]
+  expect(sortedBars(stacked, { x: { field: 'wiki', sort: '-y' }, y: { field: 'n' } }, 'x', 'wiki').map(r => `${r.wiki}${r.kind}`)).toEqual(['ax', 'ay', 'bx'])
+})
+
+test('text cut short has no space before `…`; a question in a row is cut at a word; shares side by side read in whole percent', () => {
+  expect(cut('removed in under an hour', 12)).toBe('removed in…')
+  expect(clip('Two of the three card checks', 8)).toBe('Two of…')
+  expect(clip('short', 8)).toBe('short')
+  expect(clipWords('Which five pages have the most revisions in the corpus?', 40)).toBe('Which five pages have the most…')
+  expect(clipWords('What are the main events in the corpus, in order?', 40)).toBe('What are the main events in the corpus…')
+  expect(clipWords('Supercalifragilisticexpialidocious-and-more', 20)).toBe('Supercalifragilisti…')
+  // 6.6% beside 93% read 7% and 93%; a part under one percent keeps a decimal; a part that rounds to the whole is >99%
+  expect([share(33, 500), share(467, 500)]).toEqual(['7%', '93%'])
+  expect(share(3, 1000)).toBe('0.3%')
+  expect(share(999, 1000)).toBe('>99%')
+  expect(share(0, 10)).toBe('0%')
+})
+
+test("a label's example from a JSON record: the field the rule reads first, then the others; words that are no JSON object stay words", () => {
+  const page = '{ "page_id": "dorfwiki/AgentOpenResearchDataJune18", "wiki": "dorfwiki", "name": "AgentOpenResearchDataJune18", "n_revs": 4, "labels": ["a", "b"] }'
+  // the live check's code label reads `unit.get('name')` (New 13)
+  const code = recordFields(page, { kind: 'code', spec: "import re\ndef label(unit):\n    return ('yes' if re.search(r'june', unit.get('name') or '', re.I) else 'no', 1.0)" })
+  expect(code!.read).toEqual([['name', 'AgentOpenResearchDataJune18']])
+  expect(code!.rest).toEqual([['page_id', 'dorfwiki/AgentOpenResearchDataJune18'], ['wiki', 'dorfwiki'], ['n_revs', '4']])
+  expect(recordFields(page, { kind: 'code', spec: "unit['wiki'] == 'dse'" })!.read).toEqual([['wiki', 'dorfwiki']])
+  // a pattern: the field it matches; a prompt: the fields it names
+  expect(recordFields(page, { kind: 'regex', spec: 'Research' })!.read.map(r => r[0])).toEqual(['page_id', 'name'])
+  expect(recordFields(page, { kind: 'prompt', spec: 'Is the page name about June?' })!.read.map(r => r[0])).toEqual(['name'])
+  // a record cut short is read as far as it goes
+  const cutShort = recordFields('{ "page_id": "dse/--help", "name": "--help", "n_revs": 19, "first_write": "2026-06-…', { kind: 'code', spec: "unit['name']" })
+  expect(cutShort!.read).toEqual([['name', '--help']])
+  expect(cutShort!.rest).toEqual([['page_id', 'dse/--help'], ['n_revs', '19']])
+  expect(recordFields('SEC download https://r.jina.ai/x', { kind: 'regex', spec: 'jina' })).toBeNull()
 })

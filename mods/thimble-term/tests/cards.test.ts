@@ -161,3 +161,23 @@ test("a press on a label made after the labels were read opens it: the list is r
   expect(w.toasts.filter(t => t.includes('label'))).toEqual([])
   expect(w.panes.at(-1)?.title).toBe('Label: links through a fetch proxy')
 })
+
+test("a card whose check ended in an error says so in the card pane's subtitle, in red, with why; a check that read it says nothing", async ($, on) => {
+  const w = world(on)
+  // the live check's card (New 15): its check ran past its time, its last run was fine
+  Object.assign(w.cells.a0frame0!, { check: { id: 'chk_1', status: 'error', reason: 'it ran past its 75 s at high effort', stages: {} } })
+  Object.assign(w.cells.ff73e071!, { check: { id: 'chk_2', status: 'ok', stages: {} } })
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: 'card a0frame0' } as never)
+  await w.clock.settle()
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  const json = JSON.stringify(await pane.drawn())
+  expect(json).toContain('{"type":"Text","props":{"color":"error"},"children":["its check ended in an error: it ran past its 75 s at high effort"]}')
+  expect(shown(await pane.drawn())).toContain('last run ok')
+  await pane.unmount()
+  await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
+  await w.clock.settle()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.drawn())).not.toContain('its check')
+  await pane.unmount()
+})

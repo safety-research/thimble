@@ -4,6 +4,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
+import { wrapAround } from '../hooks/cite'
 import { CWD, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -173,5 +174,52 @@ test('a file citation written without words names its place once: no `from` row,
   expect(text).not.toContain('from')
   expect(JSON.stringify(tree)).toMatch(/"See [^"]*"[^]*"README:5"/)
   expect(text).toContain('"See README:5 for the format."')
+  // the title is the place: no subtitle names it again (`found in README.md line 5`), and none while it is there
+  expect(text).not.toContain('found in')
+  expect(await pane.find({ key: 'cite-sub' })).toBeUndefined()
+  await pane.unmount()
+})
+
+test('a citation written without words whose place does not exist says `not found` under its title, without its place again', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  const pane = await clickCite($, w, 'See [[README.md#L99]] for the format.', 5)
+  const sub = shown(await pane.find({ key: 'cite-sub' }))
+  expect(sub).toBe('not found · the place does not resolve: line 99 out of range (README.md has 20 lines)')
+  await pane.unmount()
+})
+
+test('a cited line too long for the panel wraps at its spaces, never inside a word, its value still lit; a context line cut short has `…` against its words', async ($, on) => {
+  const words = 'The agent chat says that 3,898 pages were removed in under an hour on 16 June, which no record of the event log shows anywhere at all, and the chat itself never says where the number came from in the first place, so it stands alone.'
+  const rows = wrapAround(words, [words.indexOf('3,898'), words.indexOf('3,898') + 5], 40, 8)
+  // no row starts or ends inside a word, and the rows put back together are the words
+  for (const r of rows) expect(words).toContain(r.text)
+  expect(rows.map(r => r.text).join(' ')).toBe(words)
+  expect(rows.every(r => r.text.length <= 40)).toBe(true)
+  const lit = rows.find(r => r.hi)!
+  expect(lit.text.slice(lit.hi![0], lit.hi![1])).toBe('3,898')
+  // fewer rows than it needs: the rows around the value, `…` against the words at each cut end
+  const few = wrapAround(words, [words.indexOf('event log'), words.indexOf('event log') + 9], 40, 3)
+  expect(few[0]!.text.startsWith('…') && !few[0]!.text.startsWith('… ')).toBe(true)
+  expect(few.at(-1)!.text.endsWith('…') && !few.at(-1)!.text.endsWith(' …')).toBe(true)
+  const hit = few.find(r => r.hi)!
+  expect(hit.text.slice(hit.hi![0], hit.hi![1])).toBe('event log')
+  // a word wider than the row breaks where the row ends
+  expect(wrapAround('x'.repeat(50), null, 20, 4).map(r => r.text.length)).toEqual([20, 20, 10])
+})
+
+test("a context line wider than the panel is cut with `…` right against its words, never after a space", async ($, on) => {
+  const w = world(on)
+  // two context lines, a space at every other cell, one a cell later than the other: one of them has a space where it is cut
+  w.resolve['README.md#L3'] = { ref: 'README.md#L3', kind: 'record', path: 'README.md', line: 3, blocks: [{ text: 'An export of 4,579 wiki pages and their revisions.' }], excerpt: 'An export of 4,579 wiki pages and their revisions.', context: { before: [{ line: 1, blocks: [{ text: 'a '.repeat(100) }] }, { line: 2, blocks: [{ text: ' a'.repeat(100) }] }], after: [] } }
+  await start($, w)
+  const pane = await clickCite($, w, 'It has [4,579](README.md#L3) pages.', 8)
+  const box = (await pane.find({ type: 'Box', key: 'cite-lines' })) as unknown as { children?: unknown[] }
+  const context = (box.children ?? []).map(r => shown(r)).filter(r => /^\s*[12]\s/.test(r))
+  expect(context.length).toBe(2)
+  for (const r of context) {
+    expect(r).toMatch(/a…$/)
+    expect(r).not.toContain(' …')
+  }
   await pane.unmount()
 })

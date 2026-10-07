@@ -29,14 +29,14 @@ import type { Sent } from './gestures'
 import { chipState, claimsIn, streamLink, streamStep, streaming } from './cite'
 import type { StreamLook, Streaming } from './cite'
 import type { CardData } from './draw'
-import { cid, citeSpans, citations, clip, embeddedCards, needsDrawing } from './lib'
-import { cardsOfCall, docsOf, labelsOf, namedThreads, runIds, runShown, threadOf, withoutEnd } from './model'
+import { cid, citeSpans, citations, clip, clipWords, embeddedCards, needsDrawing } from './lib'
+import { cardsOfCall, docsOf, labelsOf, namedForks, namedThreads, runIds, runShown, threadOf, withoutEnd, withoutToldThreads } from './model'
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage } from './lines'
 import { drawPanel, fieldMessage, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView } from './panel'
 import type { PaneEvent } from './panel'
-import { MARGIN, chipOf, drawCards, drawReply, placeUrl, scrubIds } from './reply'
+import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './reply'
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
@@ -335,7 +335,7 @@ async function anchorName(cx: Ctx, anchor: string): Promise<string> {
   const id = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(anchor)?.[1]
   if (id) {
     const q = ((await cx.card(id))?.data as CardData | null | undefined)?.question
-    return q ? `card "${clip(q, 40)}"` : 'a card'
+    return q ? `card "${clipWords(q, 40)}"` : 'a card'
   }
   return anchor
 }
@@ -444,6 +444,7 @@ async function restoreKept($: Dollar, cx: Ctx): Promise<void> {
     if (r.views?.length && !(await $.state.get({ ...VIEW_ROWS, id: row })).value?.length) await $.state.set({ ...VIEW_ROWS, id: row }, r.views)
     for (const id of [...(r.cards ?? []), ...(r.answer?.cards ?? []), ...embeddedCards(r.answer?.text ?? '')]) ids.add(id)
     for (const v of r.views ?? []) rt.viewsTold.add(v)
+    for (const t of r.threads ?? []) rt.told.add(t.thread)
   }
   if (!rt.lastReply && k.last.reply) rt.lastReply = k.last.reply
   if (!rt.lastCards.length && k.last.cards.length) rt.lastCards = k.last.cards
@@ -658,8 +659,10 @@ export const register: Register = on => {
     const told = await signalRows(cx, e)
     const views = await viewRowsEl(cx, e)
     const footer = await footerEl(cx, e)
-    // without main's end token, and a `↳ thread` line naming its thread by its first question, not its fork's slug
-    const text = namedThreads(withoutEnd(e.props.text), await cx.threads())
+    // without main's end token, and a `↳ thread` line naming its thread by its first question, not its fork's slug; no
+    // such line for a thread whose `↳ thread` row thimble-term drew, which says the same
+    const rows = await cx.threads()
+    const text = namedThreads(withoutToldThreads(withoutEnd(e.props.text), rows, rt.told), rows)
     const live = e.surface === 'terminal' || e.surface === 'desktop'
     if (!ids.length && !told && !views && !footer && text === e.props.text && !live && !needsDrawing(text)) return next(e)
     const { Box } = $.ui.resolve(e)
@@ -690,7 +693,9 @@ export const register: Register = on => {
     return underRow(cxOf($), e, () => next(shown))
   })
 
-  // a thimble tool's row, and a card's run in Bash, name the card by its question, never by its id
+  // a thimble tool's row, and a card's run in Bash, name the card by its question, never by its id, and a citation by
+  // its words (in the row and in ctrl+o's detailed view); a side thread's fork is named by the thread's first question,
+  // never its slug
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
     if (!rt.sc) return next(e)
     const cx = cxOf($)
@@ -701,8 +706,7 @@ export const register: Register = on => {
       let changed = false
       const out: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(input)) {
-        // a card named by its bare id (edit_card's `card: "65cc2a70"`) is a card too
-        const s = typeof v === 'string' ? await scrubIds(cx, k === 'card' && /^[A-Za-z0-9_-]{6,}$/.test(v) ? `card:${v}` : v) : v
+        const s = typeof v === 'string' ? await toolWords(cx, k, v) : v
         if (s !== v) changed = true
         out[k] = s
       }
@@ -711,7 +715,18 @@ export const register: Register = on => {
     if (tool === 'Bash' && typeof input.command === 'string' && /thimble-run\b/.test(input.command)) {
       return next({ ...e, props: { ...e.props, input: { ...input, command: await runWords(cx, input.command) } } })
     }
+    if ((tool === 'Agent' || tool === 'Task') && typeof input.description === 'string' && /\bthread:/.test(input.description)) {
+      const description = namedForks(input.description, await cx.threads())
+      if (description !== input.description) return next({ ...e, props: { ...e.props, input: { ...input, description } } })
+    }
     return next(e)
+  })
+
+  // the row saying a side thread's fork finished names the thread by its first question, never the fork's slug
+  on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'task-notification' } } }, async ($, e, next) => {
+    if (!rt.sc || !/\bthread:/.test(e.props.text)) return next(e)
+    const text = namedForks(e.props.text, await cxOf($).threads())
+    return text === e.props.text ? next(e) : next({ ...e, props: { ...e.props, text } })
   })
 
   // a card tool's result row: the card by its question, since the card itself is drawn under the turn's last reply; a

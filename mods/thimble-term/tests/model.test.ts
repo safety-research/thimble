@@ -6,7 +6,7 @@ import { expect, test } from 'claude-code/testing'
 import { changed, cliOf, launchMode, parsePrinted } from '../hooks/data'
 import { citations } from '../hooks/lib'
 import { labelCard } from '../hooks/cell'
-import { agentsOf, cardsOfCall, cellsOf, docsOf, homeOf, labelIdOf, labelOf, labelsOf, namedThreads, resolutionOf, runShown, threadOf, threadRowsOf, verdictOf, withoutEnd } from '../hooks/model'
+import { agentsOf, cardsOfCall, cellsOf, docsOf, homeOf, labelIdOf, labelOf, labelsOf, namedForks, namedThreads, resolutionOf, runShown, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutToldThreads } from '../hooks/model'
 import { turnTimes, wrapRows } from '../hooks/draw'
 import { AGENTS, CELLS, RESOLVE, STATES, THREAD_T1, THREADS } from './fixtures'
 
@@ -49,7 +49,7 @@ test("a card cell's citation compares its value with the cell; a citation that s
 
 test("a thread's chat as turns: its question, its answer's text, its tool calls, answered", () => {
   const t = threadOf(THREAD_T1.meta as never, THREAD_T1.events as never)
-  expect(t.turns).toEqual([{ q: 'why is events.jsonl so much bigger?', a: 'It holds [[19913|card:a0frame0#records/events.jsonl]] rows, one per event.', state: 'done', tools: 1, partial: 'It holds [[19913|card:a0frame0#records/events.jsonl]] rows, one per event.' }])
+  expect(t.turns).toEqual([{ q: 'why is events.jsonl so much bigger?', a: 'It holds [[19913|card:a0frame0#records/events.jsonl]] rows, one per event.', state: 'done', tools: 1, partial: 'It holds [[19913|card:a0frame0#records/events.jsonl]] rows, one per event.', cards: [] }])
   expect(t.label).toBe('What does the export hold per wiki?')
   expect(t.parent).toBe('')
   const failed = threadOf({ id: 'x' }, [{ type: 'user', text: 'q' }, { type: 'error', error: 'stopped by the analyst' }])
@@ -61,6 +61,51 @@ test("a thread's chat as turns: its question, its answer's text, its tool calls,
   // a reply after the end that said main's turn ended unanswered: the reply is the answer, the end's words are gone
   const late = threadOf({ id: 'z' }, [{ type: 'user', text: 'Is 2994 all of them?' }, { type: 'error', message: "Main's turn ended without answering in this thread", kind: 'unanswered' }, { type: 'text', delta: "Yes, I'm sure.", reply: true }])
   expect(late.turns[0]).toMatchObject({ state: 'done', a: "Yes, I'm sure." })
+})
+
+test("a thread's answer is its first reply: the fork's working words after it are left out, and texts a tool call parts are two paragraphs; the cards it made are its turn's", () => {
+  // the live check's thread (New 4): the answer, a tool call, then a note as the fork made its card, both marked reply
+  const t = threadOf({ id: 'f' }, [
+    { type: 'user', text: 'Is the 3,898 deletions figure supported anywhere in the event log?' },
+    { type: 'tool_use', name: 'Bash' },
+    { type: 'tool_result', summary: 'Exit code 1' },
+    { type: 'text', delta: 'No. The event log has 2 deletions in total. But no file in the corpus records any.', reply: true, by: 'terminal' },
+    { type: 'tool_use', name: 'Bash' },
+    { type: 'text', delta: 'Incidental (a page body length). Making the card.', reply: true, by: 'terminal' },
+    { type: 'tool_use', name: 'mcp__plugin_thimble_thimble__add_card' },
+    { type: 'tool_result', summary: '$ add_card …', cell_id: '9b0f8b3b' },
+    { type: 'tool_use', name: 'mcp__plugin_thimble_thimble__edit_card' },
+    { type: 'tool_result', summary: '$ edit_card …', cell_id: '9b0f8b3b' },
+  ])
+  expect(t.turns[0]!.a).toBe('No. The event log has 2 deletions in total. But no file in the corpus records any.')
+  expect(t.turns[0]!.a).not.toContain('Making the card')
+  expect(t.turns[0]!.state).toBe('done')
+  expect(t.turns[0]!.cards).toEqual(['9b0f8b3b'])
+  // streamed words a tool call parts, before any reply: two paragraphs, never `any.Incidental`
+  const streamed = threadOf({ id: 's' }, [{ type: 'user', text: 'q' }, { type: 'text', delta: 'First part.' }, { type: 'tool_use', name: 'Bash' }, { type: 'text', delta: 'Second part.' }, { type: 'done', result: '' }])
+  expect(streamed.turns[0]!.a).toBe('First part.\n\nSecond part.')
+  // deltas of one message still join as written
+  const deltas = threadOf({ id: 'd' }, [{ type: 'user', text: 'q' }, { type: 'text', delta: 'One ' }, { type: 'text', delta: 'message.' }, { type: 'done', result: '' }])
+  expect(deltas.turns[0]!.a).toBe('One message.')
+})
+
+test("main's own `↳ thread` line is left out for a thread whose row thimble-term drew; a fork and its notice name the thread by its question", () => {
+  const rows = [
+    { id: 't1', title: 'agent-chat:2', fork: 'agent-chat-2', question: 'Is the 3,898 deletions figure supported anywhere in the event log?' },
+    { id: 't2', title: '2,994', fork: '2-994', question: 'How many of the 2,994 dse revisions were made on 18 June?' },
+  ]
+  const told = new Set(['t2'])
+  // by its slug, as main writes it, and by its question in quotation marks; another thread's line stays
+  expect(withoutToldThreads('↳ thread 2-994: answered that 1,422 of them were.', rows, told)).toBe('')
+  expect(withoutToldThreads('↳ thread "How many of the 2,994 dse revisions…": answered.', rows, told)).toBe('')
+  expect(withoutToldThreads('↳ thread agent-chat-2: answered that nothing supports it.', rows, told)).toBe('↳ thread agent-chat-2: answered that nothing supports it.')
+  expect(withoutToldThreads('The card is above.\n\n↳ thread 2-994: answered.\n\nMore.', rows, told)).toBe('The card is above.\n\nMore.')
+  expect(withoutToldThreads('↳ thread 2-994: answered.', rows, new Set())).toBe('↳ thread 2-994: answered.')
+  // the Agent call's description and the notice that its fork finished
+  expect(namedForks('thread:agent-chat-2', rows)).toBe('thread "Is the 3,898 deletions figure supported…"')
+  expect(namedForks('Agent "thread:2-994" finished', rows)).toBe('Agent thread "How many of the 2,994 dse revisions…" finished')
+  expect(namedForks('thread:unknown-one', rows)).toBe('thread:unknown-one')
+  expect(namedForks('writer: report', rows)).toBe('writer: report')
 })
 
 test("main's `↳ thread <slug>:` line names the thread by its first question", () => {
@@ -122,6 +167,9 @@ test('the cards a call of main names: add_card, edit_card, apply_label, and a ca
   expect(runShown(loop, () => undefined)).toBe('thimble-run card · 2 cards')
   expect(runShown('/tree/plugin/bin/thimble-run card 2d10d7f3', q)).toBe('thimble-run card "How many revisions does each wiki have?"')
   expect(runShown('/tree/plugin/bin/thimble-run stale', q)).toBe('thimble-run stale')
+  // a long question cut at a word, its comma left out, never mid-word (live check New 9)
+  const long = (id: string) => (id === '2d10d7f3' ? 'What are the main events in the corpus, in order?' : 'Which five pages have the most revisions in the corpus?')
+  expect(runShown(loop, long)).toBe('thimble-run card "What are the main events in the corpus…", "Which five pages have the most…"')
   expect(runShown('B="/x/plugin/bin/thimble-run"; for c in 2d10d7f3 9b4bb0cb; do "$B" card "$c"; done', () => undefined)).toBe('thimble-run card · 2 cards')
   for (const shown of [runShown(loop, q), runShown(loop, () => undefined)]) expect(shown).not.toMatch(/\/mnt|[0-9a-f]{8}/)
   // output naming cards from a command that runs no thimble-run is no card of the turn

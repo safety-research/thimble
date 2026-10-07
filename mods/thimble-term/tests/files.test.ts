@@ -83,6 +83,11 @@ test("the file browser: a long name cut in its middle, its extension kept; a fol
   expect(shown(chosen)).toMatch(/^❯/)
   expect(JSON.stringify(chosen)).toContain('"color":"suggestion"')
   expect(shown(await pane.drawn())).toContain('opens as transcript')
+  // every file's dot dim, in a folder of several types too: the type column names the type, and only a Color by
+  // colours (live check New 11)
+  const readme = tree.find(r => shown(r).includes('README.md'))
+  expect(JSON.stringify(readme)).toContain('"color":"inactive"},"children":["●"]')
+  expect(JSON.stringify(tree)).not.toMatch(/"color":"#[0-9a-f]{6}"\},"children":\["●"\]/)
   // Space folds the chosen file's folder
   await pane.key({ key: 'space', in: 'm:files-tree' } as never)
   await w.clock.settle()
@@ -136,14 +141,25 @@ test("a transcript by thimble's sniff: per turn the speaker bold and the words u
   pane = await openRow($, w, pane, 'chat.jsonl')
   const text = shown(await pane.drawn())
   for (const s of [' Transcript ', ' Raw ', '1 2 3 for the tabs']) expect(text).toContain(s)
-  // the selected tab inverse with a cell of space at each side; the first, not selected, starts at the edge
+  // every tab with a cell of space at each side, selected or not, the selected one inverse; the row starts a cell left
+  // of the edge, in the margin, so the first tab's name starts at the edge, where the title starts
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"inverse":true},"children":[" Transcript "]}')
-  expect((await pane.find({ type: 'Button', key: 'tab-table' }))?.props).toMatchObject({ label: 'Table ' })
+  expect((await pane.find({ type: 'Button', key: 'tab-table' }))?.props).toMatchObject({ label: ' Table ' })
+  expect((await pane.find({ type: 'Box', key: 'm:file-tabs' }))?.props).toMatchObject({ paddingLeft: 1 })
+  const tabsBefore = shown(await pane.find({ type: 'Box', key: 'm:file-tabs' }))
+  expect(tabsBefore).toBe(' Table  Transcript  Raw ')
   // the tabs' digits are hidden keys: a Button's hotkey would draw `1:` before its name
   expect(((await pane.find({ type: 'Button', key: 'tab-table' })) as { props?: Record<string, unknown> } | undefined)?.props?.hotkey).toBeUndefined()
   expect(await pane.find({ type: 'Button', key: 'hk-tab0' })).toBeDefined()
   const body = shown(await pane.drawn({ in: 'm:file-body' }))
   for (const s of ['alice', 'Who saved the page?', 'bob', 'An agent did, twice.', '⎿ Read', 'Which one?']) expect(body).toContain(s)
+  // another tab chosen: the row reads the same, cell for cell, so no tab moves
+  await pane.press({ key: 'hk-tab0' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"inverse":true},"children":[" Table "]}')
+  expect(shown(await pane.find({ type: 'Box', key: 'm:file-tabs' }))).toBe(tabsBefore)
   await pane.unmount()
 })
 
@@ -174,8 +190,8 @@ test("a transcript's turn shows its words in up to three rows; its time column t
   expect(rows[5]).toMatch(/^ {2}07:41:30 {2}● bob$/)
   expect(rows).toContain('  19 Jun 2026')
   expect(rows.join('\n')).not.toContain('T07:40')
-  // its type: the file's format, not `text`, which its Transcript tab would contradict
-  expect(shown(await pane.drawn())).toContain('jsonl · 3 records')
+  // its type: what it opens as, a transcript (its tab says so), not `text` or its format
+  expect(shown(await pane.drawn())).toContain('transcript · 3 records')
   await pane.unmount()
 })
 
@@ -233,4 +249,29 @@ test('a file that cannot be read says why in the panel and in a toast', async ($
   expect(shown(await pane.drawn())).toContain('× could not read gone.jsonl')
   expect(w.toasts).toContain('thimble: could not read gone.jsonl: could not read gone.jsonl')
   await pane.unmount()
+})
+
+test("a file thimble knows only as text that opens as a transcript says `transcript` in the type column, in the file browser and on home, as its preview and its view do", async ($, on) => {
+  const w = world(on)
+  w.states.files = [{ path: 'agent-chat.jsonl', kind: 'text', size_bytes: 10 }, { path: 'pages.jsonl', kind: 'text', size_bytes: 10 }]
+  // thimble's sniff, read for the files of plain text (live check Q17)
+  w.opens = { 'agent-chat.jsonl': 'transcript' }
+  w.pages['agent-chat.jsonl'] = { ...CHAT, path: 'agent-chat.jsonl', kind: 'text' }
+  await start($, w)
+  let pane = await browser($, w)
+  await w.clock.settle()
+  await pane.redraw()
+  const tree = ((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []
+  expect(shown(tree.find(r => shown(r).includes('agent-chat.jsonl')))).toMatch(/agent-chat\.jsonl +transcript +10 B$/)
+  expect(shown(tree.find(r => shown(r).includes('pages.jsonl')))).toMatch(/pages\.jsonl +jsonl +10 B$/)
+  expect(w.calls.some(c => c[2] === 'opens' && JSON.parse(c[5]!).includes('agent-chat.jsonl'))).toBe(true)
+  pane = await openRow($, w, pane, 'agent-chat.jsonl', 1)
+  expect(shown(await pane.drawn())).toContain('opens as transcript')
+  await pane.unmount()
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  const home = (await $.ui.mount(PANE)) as unknown as M
+  const lines = (((await home.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
+  expect(lines.find(l => l.includes('agent-chat.jsonl'))).toMatch(/agent-chat\.jsonl +transcript +10 B$/)
+  await home.unmount()
 })

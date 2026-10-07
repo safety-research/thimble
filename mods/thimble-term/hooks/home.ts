@@ -12,7 +12,7 @@
 // with `▸ ▾`, the newest group and the first folder open. Each line starts with the 2-cell margin, where `❯` marks the
 // row the keys chose.
 import type { Line, Seg } from './draw'
-import { lineWidth, valueColour, width, wrapRows } from './draw'
+import { lineWidth, share as pct, valueColour, width, wrapRows } from './draw'
 import { ACCENT, FRESH, MARGIN_W, fitTo, headingLine, hintLine, pointed, ruleLine, spread } from './chrome'
 import { COLORS } from './paint'
 
@@ -317,11 +317,10 @@ function labelsSection(ls: readonly HomeLabel[]): HomeSection {
   }
 }
 
-/** A share of records read as the coverage panel words it. */
+/** A share of records read, in whole percent as every share (draw.ts share). */
 function share(seen: number, total: number): string {
   if (!total || !seen) return ''
-  const p = (100 * seen) / total
-  return p < 0.1 ? '<0.1%' : p < 10 ? `${p.toFixed(1)}%` : `${Math.round(p)}%`
+  return pct(seen, total)
 }
 
 /** thimble-term: a size in words (`756 KB`), for a file whose records are not counted. */
@@ -334,9 +333,11 @@ const FOLDER_FILES = 20
 
 function filesSection(fs: readonly HomeFile[], root: string, ui: HomeUi): HomeSection {
   const by = new Map<string, HomeFile[]>()
+  // a folder by the name the file browser gives it: its path in the corpus (`collusion-wiki/`), and the corpus's own
+  // files under the corpus folder's name
   for (const f of fs) {
     const cut = f.file.lastIndexOf('/')
-    const folder = `${root}/${cut < 0 ? '' : `${f.file.slice(0, cut)}/`}`
+    const folder = cut < 0 ? `${root}/` : `${f.file.slice(0, cut)}/`
     by.set(folder, [...(by.get(folder) ?? []), f])
   }
   // the corpus's own folder first, the others in natural order, as the file browser lists them
