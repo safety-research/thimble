@@ -136,8 +136,10 @@ def test_the_held_hook_prints_the_held_events_and_the_lines_of_those_the_waker_w
     out = run_hook(env_for(tmp_path, ws), "--held", {"session_id": MAIN, "hook_event_name": "UserPromptSubmit"})
     got = json.loads(out.stdout)
     assert got["hookSpecificOutput"]["additionalContext"] == 'meanwhile:\n[kind="written" doc="report"] Saved.'
-    assert got["systemMessage"] == ("label finished: refunds\nThe orientation made 7 cards.\nIt opened 3 of 7 files.\n"
-                                    "the report writer ended"), "the orient event rode along with the next one"
+    # the writer's end is left out: its hand-back's row says it, and Claude Code draws a systemMessage under the hook's
+    # name (`UserPromptSubmit says: …`), a row no render hook reaches
+    assert got["systemMessage"] == "label finished: refunds\nThe orientation made 7 cards.\nIt opened 3 of 7 files.", \
+        "the orient event rode along with the next one"
     assert sent["id"] and run_hook(env_for(tmp_path, ws), "--held", {"session_id": MAIN}).stdout == "", "each once"
     assert run_hook(env_for(tmp_path, ws), "--held", {"session_id": "not-main"}).stdout == ""
 
@@ -212,8 +214,34 @@ def test_the_agent_check_refuses_a_second_fork_of_a_thread_from_the_file(tmp_pat
     watcher.agent_check({**fork, "tool_use_id": "toolu_f2"})
     out = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
     assert out["permissionDecision"] == "deny" and "thread bots is running already" in out["permissionDecisionReason"]
-    watcher.agent_check({**fork, "tool_input": {**fork["tool_input"], "description": "thread:other"}})
+    watcher.agent_check({**fork, "tool_input": {**fork["tool_input"], "description": "thread:other", "prompt": "thread:other"}})
     assert capsys.readouterr().out == ""
+
+
+def test_the_agent_check_names_a_refused_fork_s_thread_by_its_question_and_knows_the_fork_by_its_prompt(tmp_path, ws, monkeypatch, capsys):
+    """thimble-term gives main's fork call the thread's question as its description, so the check knows the fork by
+    the prompt's `thread:<name>`; a refusal names the thread by its first question, never its fork's slug."""
+    from app import agents
+
+    meta = agents.new_thread(CORPUS, None, None, "Bots", surface="terminal")
+    agents.update_agent(CORPUS, meta["id"], fork_name="which-bots-saved-the")
+    agents.append(agents.paths(CORPUS, meta["id"])[1], {"type": "user", "text": "Which bots saved the welcome page on 18 June, and how often?"})
+    watcher, _ = loaded(monkeypatch, tmp_path, ws)
+    fork = {"session_id": MAIN, "tool_use_id": "toolu_f1", "tool_name": "Agent",
+            "tool_input": {"subagent_type": "fork", "description": "thread “Which bots saved the welcome…”",
+                           "prompt": "thread:which-bots-saved-the"}}
+    watcher.agent_check(fork)
+    assert capsys.readouterr().out == ""
+    watcher.agent_check({**fork, "tool_use_id": "toolu_f2"})
+    reason = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason == ("The fork of thread “Which bots saved the welcome page on 18 June, and how often?” is running "
+                      "already and answers in the thread, so this turn needs nothing more.")
+    assert "which-bots-saved-the" not in reason
+    # the call let through is kept by its tool_use id, by which the mirror knows the fork's thread whatever its meta json
+    # says (live check term-fix5, new quirk 1); the refused one is not
+    state = sf.read(ws)
+    assert sf.fork_call_ref(state, "toolu_f1") == "thread:which-bots-saved-the"
+    assert sf.fork_call_ref(state, "toolu_f2") is None
 
 
 def test_the_agents_hook_numbers_an_orientation_s_call_and_tells_it_its_ref(tmp_path, ws, monkeypatch, capsys):

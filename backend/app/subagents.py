@@ -1534,21 +1534,28 @@ FORK_DEDUPE_S = 600.0  # how long a thread's fork counts as starting, until the 
 _forking: dict[tuple[str, str], float] = {}  # (workspace, thread) -> time.monotonic() when its fork's Agent call ran
 
 
-def fork_check(c: str, tool_input: dict[str, Any]) -> str | None:
+def fork_check(c: str, tool_input: dict[str, Any], tool_use_id: str | None = None) -> str | None:
     """Main's Agent call that would start a second fork of a thread whose fork runs or is starting: why it must not
-    run, else None (the --agent-check hook asks the server this, since it needs the threads)."""
+    run, else None, and the call is kept by its `tool_use_id` as the thread's fork (files.note_fork_call) (the
+    --agent-check hook asks the server this, since it needs the threads)."""
     from . import session  # noqa: PLC0415
+
+    from . import threads  # noqa: PLC0415
 
     if str(tool_input.get("subagent_type") or "") != "fork":
         return None
-    tid = session.thread_for(c, tool_input.get("description"))
+    ref = threads.fork_ref(tool_input)
+    tid = session.thread_for(c, ref)
     if not tid:
         return None
     started = _forking.get((c, tid))
     if started is not None and time.monotonic() - started < FORK_DEDUPE_S:
-        name = str(tool_input.get("description") or "").removeprefix("thread:")
-        return f"The fork of thread {name} is running already; it answers in the thread."
+        return files.fork_refusal(str(ref).removeprefix("thread:"),
+                                  files.cut_words(threads.first_question(c, tid), files.QUESTION_CHARS))
     _forking[(c, tid)] = time.monotonic()
+    if tool_use_id:
+        with update(c) as state:
+            files.note_fork_call(state, tool_use_id, str(ref))
     return None
 
 
@@ -1580,7 +1587,7 @@ async def agent_check_route(body: AgentCheckBody) -> dict[str, Any]:
     """The --agent-check hook, for main's Agent call, once it found nothing to deny in subagents.json: {deny, reason}
     for a second fork of a thread (fork_check)."""
     c = config.workspace_for_cwd(body.cwd)
-    reason = fork_check(c, body.tool_input) if c and not body.agent_id else None
+    reason = fork_check(c, body.tool_input, body.tool_use_id) if c and not body.agent_id else None
     if reason:
         log.info("%s: an Agent call is refused: %s", c, reason)
     return {"deny": bool(reason), "reason": reason or ""}

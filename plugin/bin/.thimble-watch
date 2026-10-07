@@ -76,8 +76,9 @@ and no hook makes an HTTP request there. The file-first hooks write their record
 backend's call for it, `thimble-python -m app.local_hooks <kind>` with the hook's input, detached, in place of the post
 (spawn_local; app/local_hooks.py), and the SubagentStop hook starts it for every subagent, so that the mirror reads a
 thread's fork too. --agent-check also refuses a second fork of a thread from subagents.json (app/subagent_files.py
-fork_check). The waker polls the workspace's events/queue.jsonl (app/event_files.py) for an event main's watcher has not
-taken, takes it, writes it to stderr and exits 2. --held prints the held events from held-events.json and the lines of
+fork_check), and records each fork it lets through by its tool_use id, by which the mirror knows the fork's thread.
+The waker polls the workspace's events/queue.jsonl (app/event_files.py) for an event main's watcher has not taken,
+takes it, writes it to stderr and exits 2. --held prints the held events from held-events.json and the lines of
 the events the waker wrote out. --mode records main's permission mode in subagents.json, and on main's Stop starts the
 backend's `main-stop` call. Plan mode stops none of thimble's running agents, as in browser mode (Claude Code's own
 subagents go on in plan mode). --permission exits at once with no decision, so Claude Code asks in its own dialog.
@@ -496,14 +497,15 @@ def stream_files(args: list[str], ws: Path) -> int:
 
 def held_files(inp: dict, ws: Path) -> int:
     """The held hook in terminal mode: the held events as the prompt's added context, and as its systemMessage the lines
-    of the events the waker wrote out, the held events' and those that send main no event."""
+    of the events the waker wrote out, the held events' and those that send main no event, less those the terminal's
+    own rows already say (app/event_files.py TOLD_IN_CHAT)."""
     session = str(inp.get("session_id") or "")
     if inp.get("agent_id") or not session or not is_main(ws, session):
         return 0
     ef = events()
     riders = ef.pop_held(ws)
     text = ef.meanwhile(riders)
-    lines = [*ef.unshown(ws, session), ef.joined(riders)]
+    lines = [*ef.unshown(ws, session), ef.said(riders)]
     said = "\n".join(dict.fromkeys(x for x in lines if x))
     out: dict = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else {}
     if said:
@@ -640,7 +642,8 @@ def agent_check(inp: dict) -> int:
         with sf.update(ws) as state:
             reason = sf.check_call(state, inp)
             if reason is None and term and not inp.get("agent_id") and str(inp.get("tool_name") or "") in sf.AGENT_TOOLS:
-                reason = sf.fork_check(state, tool_input)  # a second fork of a thread (the server's fork_check)
+                # a second fork of a thread (the server's fork_check); a call let through is kept by its tool_use id
+                reason = sf.fork_check(state, tool_input, ws, inp.get("tool_use_id"))
         if reason is not None:
             reason = reason or sf.hint("agent-check-exact") or "thimble did not ask for this call"
     except Exception:  # noqa: BLE001 — fail closed for a start of one of thimble's roles, open for anything else

@@ -415,7 +415,19 @@ async def _card(c: str, args: list[str], pos: list[str]) -> Any:
 async def _labels(c: str, args: list[str], pos: list[str]) -> Any:
     from . import concepts  # noqa: PLC0415
 
-    return await asyncio.to_thread(concepts.list_concepts_route, c)
+    ws = config.workspace_dir(c)
+
+    def listed() -> list[dict]:
+        """The concepts route's list, each label the analyst set a record of to another value with `verdicts` as
+        `state label` gives them (home's label rows count as thimble.labels() reads the rows)."""
+        out = concepts.list_concepts_route(c)
+        for k in out:
+            applied, moved = concepts.verdicts_applied(ws, str(k.get("id") or ""), dict(k.get("counts") or {}))
+            if moved:
+                k["verdicts"] = {"counts": applied, "set": moved}
+        return out
+
+    return await asyncio.to_thread(listed)
 
 
 async def _label(c: str, args: list[str], pos: list[str]) -> Any:
@@ -443,7 +455,10 @@ async def _label(c: str, args: list[str], pos: list[str]) -> Any:
         mine = [r for r in judged if r.get("analyst") == value][:LABEL_VERDICT_ROWS]
         refs = {r.get("ref") for r in mine}
         rows += mine + [r for r in page.get("rows") or [] if isinstance(r, dict) and r.get("ref") not in refs]
-    return {**out, "examples": ex, "rows": rows}
+    # the counts as thimble.labels() reads the rows, each record the analyst set to another value under that value, and
+    # how many records that is (the label panel's counts, and its `set by you`)
+    applied, moved = await asyncio.to_thread(concepts.verdicts_applied, ws, str(found["id"]), dict(out.get("counts") or {}))
+    return {**out, "examples": ex, "rows": rows, "verdicts": {"counts": applied, "set": moved}}
 
 
 def _verdict_rows(c: str, concept_id: str) -> list[dict[str, Any]]:

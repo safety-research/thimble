@@ -4,8 +4,10 @@ A thread starts in the browser from a ⌘-click or ⌘-drag (agents.new_thread);
 text, surface, selector, and a PNG under `anchors/`). Each message typed in it is a browser event of kind `thread`
 (`event`) naming the thread and its card group `thread:<id>`; the first one carries the anchor and what its refs
 hold.
-Main answers by forking with description `thread:<name>`, the thread's fork name (fork_name: its title as a slug, which
-Claude Code's agent tray shows; the event's line in main's terminal names the thread by its first question, line_name);
+Main answers by forking with description and prompt `thread:<name>`, the thread's fork name (fork_name: its first
+question as a slug, which Claude Code's agent tray shows; in terminal mode thimble-term gives the call the question as its
+description, so the fork is known by its prompt, fork_ref; the event's line in main's terminal names the thread by its
+first question, line_name);
 the mirror (session.py) matches the fork's transcript, copies its tool calls and its text into the thread's chat, with
 the messages the analyst typed to it in Claude Code's agent view and those main sent it for a question typed in the
 terminal, and calls fork_finished when it stops. The fork replies with `reply_in_thread` or its text.
@@ -40,7 +42,7 @@ THREAD_REF_RE = re.compile(r"^thread:([A-Za-z0-9_-]{1,64})$")
 CHIP_KIND = "thread"
 CHIP_CHARS = 120
 FORK_NAME_KEY = "fork_name"  # on a thread's meta: the name its forks run under (fork_name)
-FORK_NAME_CHARS = 48
+FORK_NAME_CHARS = 24  # of a fork's name, which Claude Code's agent tray shows whole up to about 27 characters
 FORK_NAME_FALLBACK = "thread"
 RESERVED_NAMES = ("main", "team-lead", "user", "system")  # names Claude Code's Agent tool refuses for an agent
 WARM_S = 20.0  # the longest wait for the anchor's view refs to resolve before a thread's first event (warm)
@@ -72,6 +74,20 @@ def thread_of(description: Any) -> str | None:
     return m.group(1) if m else None
 
 
+def fork_ref(tool_input: Any) -> str | None:
+    """The `thread:<name>` an Agent call for a thread's fork carries: its description, else its prompt, else None. Main
+    writes `thread:<name>` as both (prompts/main.md); in terminal mode thimble-term gives the call the thread's
+    question as its description before it runs, so that Claude Code's agent tray and exit dialog name the thread by its
+    question (subagent_files.fork_ref)."""
+    if not isinstance(tool_input, dict):
+        return None
+    for key in ("description", "prompt"):
+        value = str(tool_input.get(key) or "")
+        if FORK_DESCRIPTION_RE.match(value):
+            return value.strip()
+    return None
+
+
 def slug(title: str) -> str:
     """A title as a fork name: its words in lower case joined by '-', cut at FORK_NAME_CHARS. Claude Code's Agent takes
     a name only in ASCII, so accents are dropped and words in other scripts left out."""
@@ -87,12 +103,17 @@ def slug(title: str) -> str:
     return f"{out}-{FORK_NAME_FALLBACK}" if out in RESERVED_NAMES or re.fullmatch(r"a[0-9a-f]{16}", out) else out
 
 
-def fork_name(c: str, meta: dict) -> str:
-    """The name the thread's next fork runs under: its title as a slug, with -2, -3 … when another thread's forks run
-    under that name, kept on the meta (FORK_NAME_KEY)."""
-    base = slug(str(meta.get("title") or ""))
+def fork_name(c: str, meta: dict, question: str = "") -> str:
+    """The name the thread's next fork runs under, which Claude Code's agent tray and exit dialog show: the name it has
+    (FORK_NAME_KEY), else its first question as a slug (`question` when its log holds none yet), else its title as one,
+    with -2, -3 … when another thread's forks run under that name, kept on the meta."""
     taken = {str(m.get(FORK_NAME_KEY)) for m in agents.list_chats(c)
              if m.get("kind") == agents.KIND_THREAD and m.get("id") != meta.get("id") and m.get(FORK_NAME_KEY)}
+    kept = str(meta.get(FORK_NAME_KEY) or "")
+    if kept and kept not in taken:
+        return kept
+    first = first_question(c, str(meta.get("id") or "")) or " ".join(str(question or "").split())
+    base = slug(first) if first and slug(first) != FORK_NAME_FALLBACK else slug(str(meta.get("title") or ""))
     name, n = base, 2
     while name in taken:
         name, n = f"{base}-{n}", n + 1
@@ -110,6 +131,16 @@ def by_fork_name(c: str, name: str) -> str | None:
         if m.get("kind") == agents.KIND_THREAD and str(m.get(FORK_NAME_KEY) or "").lower() == low:
             return str(m["id"])
     return None
+
+
+def first_question(c: str, thread_id: str) -> str:
+    """The thread's first question on one line, '' while its log holds none (or for no thread)."""
+    if not thread_id or agents.meta_or_none(c, thread_id) is None:
+        return ""
+    for r in agents.read_events(agents.paths(c, thread_id)[1]):
+        if r.get("type") == "user" and str(r.get("text") or "").strip():
+            return " ".join(str(r["text"]).split())
+    return ""
 
 
 def is_thread(c: str, chat_id: str | None) -> bool:
@@ -298,7 +329,8 @@ def build(c: str, thread_id: str, questions: list[str]) -> tuple[str, dict[str, 
         ]
         _awaiting[(c, thread_id)] = _session_id(c)
     fields: dict[str, Any] = {"thread": thread_id, "group": group,
-                              "name": (fork.get("agent_id") and meta.get(FORK_NAME_KEY)) or fork_name(c, meta)}
+                              "name": (fork.get("agent_id") and meta.get(FORK_NAME_KEY))
+                              or fork_name(c, meta, questions[0] if questions else "")}
     if fork.get("agent_id"):
         fields["agent"] = fork["agent_id"]
     log.info("%s: thread %s asks %s (%d question%s)", c, thread_id, f"its fork {fork['agent_id']}" if fork.get("agent_id")
@@ -312,7 +344,7 @@ LINE_NAME_CHARS = 40  # of the first question that names a thread in main's term
 def line_name(c: str, thread_id: str, questions: list[str]) -> str:
     """What names the thread in its event's line in main's terminal (events.terminal_line): its first question in
     quotation marks, cut at LINE_NAME_CHARS; '' when the questions asked are its first, which the line shows whole
-    (`› new thread: …`). Never the fork's name, which is a slug of the anchor's words."""
+    (`› new thread: …`). Never the fork's name, which is a slug."""
     records = agents.read_events(agents.paths(c, thread_id)[1])
     first = next((" ".join(str(r.get("text") or "").split()) for r in records
                   if r.get("type") == "user" and str(r.get("text") or "").strip()), "")
@@ -462,6 +494,15 @@ def fork_started(c: str, thread_id: str, *, agent_id: str | None = None, tool_us
         flush(c, thread_id)
 
 
+def settled(c: str, thread_id: str) -> bool:
+    """Whether the thread's last question has an answer or an end after it (a reply, `done`, or an error that says why
+    its run stopped), or it has no question."""
+    records = agents.read_events(agents.paths(c, thread_id)[1])
+    last_user = max((i for i, r in enumerate(records) if r.get("type") == "user"), default=-1)
+    return last_user < 0 or any(r.get("type") in ("done", "error") or (r.get("type") == "text" and r.get("reply"))
+                                for r in records[last_user + 1:])
+
+
 def replied_since_question(c: str, thread_id: str) -> bool:
     """Whether a reply follows the analyst's last question in the thread's chat."""
     _, log_path = agents.paths(c, thread_id)
@@ -480,13 +521,28 @@ def _stop(c: str, thread_id: str, kind: str, detail: str | None = None) -> None:
     log.info("%s: thread %s stopped (%s)", c, thread_id, kind)
 
 
-def fork_finished(c: str, thread_id: str, status: str = "done", *, kind: str | None = None) -> None:
+def fork_finished(c: str, thread_id: str, status: str = "done", *, kind: str | None = None,
+                  tool_use_id: str | None = None, agent_id: str | None = None, refused: bool = False) -> None:
     """The fork stopped: the thread stops running, the run ends in its chat with `done` or why it did not finish, and a
-    run
-    with no reply leaves a chip in main pointing at the anchor. Waiting messages go to the fork now."""
+    run with no reply leaves a chip in main pointing at the anchor. Waiting messages go to the fork now.
+
+    The end of an Agent call that never ran (`refused`: a hook denied it, such as fork_check's second fork of a thread)
+    or that is not the thread's fork (its `tool_use_id` and `agent_id` are not those the meta's fork records) changes
+    nothing: the thread's own fork answers it. A failure after the thread replied to its last question leaves the
+    answer as it is."""
     from . import subagents  # noqa: PLC0415 — subagents imports session, which imports this module
 
     meta = agents.meta_or_none(c, thread_id)
+    fork = (meta or {}).get("fork") or {}
+    if refused:
+        log.info("%s: thread %s: an Agent call that did not run (%s) leaves the thread as it is", c, thread_id,
+                 tool_use_id or "?")
+        return
+    if (tool_use_id and fork.get("tool_use_id") and fork["tool_use_id"] != tool_use_id
+            and not (agent_id and fork.get("agent_id") == agent_id)):
+        log.info("%s: thread %s: the end of call %s, which is not its fork's (%s), leaves the thread as it is", c,
+                 thread_id, tool_use_id, fork["tool_use_id"])
+        return
     agents.set_running(c, thread_id, False)
     _awaiting.pop((c, thread_id), None)
     subagents.fork_ended(c, thread_id)
@@ -507,6 +563,10 @@ def fork_finished(c: str, thread_id: str, status: str = "done", *, kind: str | N
         log.info("%s: thread %s: its fork was cut after its reply (%s)", c, thread_id, kind)
     elif kind:
         _stop(c, thread_id, kind)
+    elif replied_since_question(c, thread_id):
+        # the fork answered and then failed: the answer stands, and the run ends as done
+        agents.append(log_path, {"type": "done", "ts": _now(), "result": None})
+        log.info("%s: thread %s: its fork ended %s after its reply", c, thread_id, status)
     else:
         agents.append(log_path, {"type": "error", "ts": _now(), "message": status, "kind": status})
         log.info("%s: thread %s: its fork ended %s", c, thread_id, status)
@@ -575,12 +635,25 @@ def session_ended(c: str, sid: str) -> None:
             agents.update_agent(c, tid, fork=fork)
         if (c, tid) in _awaiting and _awaiting[(c, tid)] in (sid, None):
             _awaiting.pop((c, tid), None)
+        if fork.get("session") == sid:
+            # its fork is gone, so a new Agent call may fork it again at once, also when --continue resumes the session
+            # under the same id (fork_check)
+            from . import subagents  # noqa: PLC0415 — subagents imports session, which imports this module
+
+            subagents.fork_ended(c, tid)
         if agents.running(c, tid):
             agents.set_running(c, tid, False)
             if meta.get(QUEUED_KEY):
                 agents.update_agent(c, tid, **{QUEUED_KEY: []})  # logged already; ask_again sends every unanswered one
             if not replied_since_question(c, tid):
                 _stop(c, tid, SESSION_ENDED)
+            agents.notify(c, tid)
+        elif (fork.get("session") in (None, sid) or fork.get("ended")) and not settled(c, tid):
+            # a question that no fork of this session answered or ended (terminal mode, where each pass of the mirror
+            # runs in its own process and none holds the thread's running mark): it stops and says so, as above
+            if meta.get(QUEUED_KEY):
+                agents.update_agent(c, tid, **{QUEUED_KEY: []})
+            _stop(c, tid, SESSION_ENDED)
             agents.notify(c, tid)
 
 

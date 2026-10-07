@@ -67,6 +67,8 @@ CELL_TOOLS = ("add_card", "edit_card", "add_cell", "edit_cell")  # the card tool
 LABEL_TOOL = "apply_label"
 LABEL_CARD_RE = re.compile(r"The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]")
 AGENT_TOOLS = ("Agent", "Task")  # the CLI's subagent tool, by either of its names
+# a tool result saying a PreToolUse hook denied the call (subagents.HOOK_ERROR_RE), so it never ran
+REFUSED_RE = re.compile(r"^\s*(?:Error:\s*)?PreToolUse:[A-Za-z]+ hook error:")
 WORKFLOW_TOOL = "Workflow"  # Claude Code's dynamic workflows (module note, workflows)
 WORKFLOW_TITLE = "workflow"  # when the script's meta names nothing
 WORKFLOW_DIR_RE = re.compile(r"^Transcript dir:[ \t]*(\S.*?)[ \t]*$", re.M)  # in the Workflow call's result
@@ -195,6 +197,9 @@ class Sub:
         self.skip_prompt = False
         self.root: str | None = None  # the agent id of the thimble agent a descendant's chat is a step of
         self.last_text: str | None = None  # the last text it wrote, a turn's answer (agent_answer)
+        # a thread's fork's words in its last `↳ thread <name>: …` line written after its last tool call, which only the
+        # terminal shows: its answer when it ends with no reply in the thread (_note_reply)
+        self.note: str | None = None
         # Claude Code's error line when the latest reply of its current run is an API error (isApiErrorMessage: a
         # refusal by the model's safeguards, retries run out), else None (agent_error)
         self.api_error: str | None = None
@@ -699,6 +704,11 @@ def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
             sub = Sub(lv.c, str(meta["id"]), fork.get("tool_use_id"), fork.get("agent_id"), thread=True)
             sub.done = True
             lv.subs.append(sub)
+        elif (meta.get("kind") == agents.KIND_THREAD and fork.get("tool_use_id") and fork.get("session") == lv.sid
+              and not fork.get("ended") and not threads.settled(lv.c, str(meta["id"]))):
+            # its Agent call was read and its file not yet found (terminal mode reads each in its own process): the
+            # file, which names the thread by its question only, joins the thread by the call's tool_use id
+            lv.subs.append(Sub(lv.c, str(meta["id"]), fork.get("tool_use_id"), None, thread=True))
         # a chat of one of thimble's agents (route subagent), its role's or a descendant's step, is followed to its end
         # as any other subagent is, its runs ended through subagents.run_ended
         elif meta.get("route") == "subagent" and meta.get("agent_id") and lv.sid in (
@@ -1415,11 +1425,12 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
         lv.watch_calls.add(tool_use_id)
         return
     if name in AGENT_TOOLS:
-        tid = thread_for(lv.c, inp.get("description"))
+        ref = threads.fork_ref(inp)
+        tid = thread_for(lv.c, ref)
         if tid:
             lv.hidden.add(tool_use_id)
             lv.forked.add(tid)
-            _spawn(lv, tool_use_id, None, str(inp.get("description") or ""), inp.get("subagent_type"))
+            _spawn(lv, tool_use_id, None, str(ref), inp.get("subagent_type"))
             return
     if name == SEND_TOOL:
         sub = _sub_by(lv, agent_id=str(inp.get("to") or inp.get("recipient") or ""))
@@ -1784,12 +1795,26 @@ def _sub_by(lv: Live, *, tool_use_id: str | None = None, agent_id: str | None = 
     return None
 
 
+def _fork_runs(lv: Live, thread_id: str, tool_use_id: str | None) -> bool:
+    """Whether the thread has a fork in this session that another Agent call started and that has not ended, so a
+    second call for it (fork_check refuses it) is not recorded as its fork before it shows that it started one."""
+    fork = (agents.meta_or_none(lv.c, thread_id) or {}).get("fork") or {}
+    return bool(fork.get("agent_id") and not fork.get("ended") and fork.get("session") == lv.sid
+                and fork.get("tool_use_id") not in (None, tool_use_id))
+
+
 def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, agent_type: Any,
            prompt: Any = None, parent: str | None = None) -> Sub:
     """The Sub for an Agent call, made on its first sighting (the tool_use, or the file's meta json) and completed by
     the later one. A `thread:<id>` description joins the thread's chat; an agent of thimble's, or a descendant of one,
-    goes to its chat (_spawn_thimble); any other is a new agent chat in main."""
+    goes to its chat (_spawn_thimble); any other is a new agent chat in main. The thread of a call the agent-check hook
+    recorded as a thread's fork is known by that record whatever the description says (_recorded_fork), and a plain
+    agent chat made for the call before the mirror knew its thread becomes the thread's (_into_thread)."""
+    if tool_use_id and not thread_for(lv.c, title):
+        title = _recorded_fork(lv, tool_use_id) or title
     sub = _sub_by(lv, tool_use_id=tool_use_id) or _sub_by(lv, agent_id=agent_id)
+    if sub is not None and _stray(sub) and (tid := thread_for(lv.c, title)):
+        _into_thread(lv, sub, tid)
     if sub is None and agent_id:
         sub = _spawn_thimble(lv, tool_use_id, agent_id, title, agent_type, parent)
         if sub is not None:
@@ -1799,7 +1824,8 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
         if tid:
             sub = Sub(lv.c, tid, tool_use_id, agent_id, thread=True)
             lv.subs.append(sub)
-            threads.fork_started(lv.c, tid, agent_id=agent_id, tool_use_id=tool_use_id, session=lv.sid)
+            if agent_id or not _fork_runs(lv, tid, tool_use_id):
+                threads.fork_started(lv.c, tid, agent_id=agent_id, tool_use_id=tool_use_id, session=lv.sid)
             return sub
         title = " ".join(title.split()) or SUBAGENT_TITLE
         meta = agents.new_agent(lv.c, SUBAGENT_ROLE, title, by=TERMINAL, session=lv.sid, tool_use_id=tool_use_id,
@@ -1819,6 +1845,69 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
     elif fields and not sub.thimble and not sub.root:
         agents.update_agent(lv.c, sub.chat, **fields)
     return sub
+
+
+def _recorded_fork(lv: Live, tool_use_id: str | None) -> str | None:
+    """The `thread:<name>` of a thread of this workspace that the agent-check hook recorded the Agent call `tool_use_id`
+    as forking (subagent_files.fork_call_ref), else None."""
+    if not tool_use_id:
+        return None
+    from . import subagents  # noqa: PLC0415 — subagents imports this module
+
+    try:
+        ref = sfiles.fork_call_ref(subagents.read(lv.c), tool_use_id)
+    except Exception:  # noqa: BLE001 — an unreadable record names no thread
+        return None
+    return ref if ref and thread_for(lv.c, ref) else None
+
+
+FORK_CALL_SCAN_BYTES = 262_144  # of a fork's transcript, read for its own copy of the Agent call (_file_fork_ref)
+
+
+def _file_fork_ref(path: Path, tool_use_id: str | None) -> str | None:
+    """The `thread:<name>` of the Agent call `tool_use_id` as the fork's own transcript `path` holds it (Claude Code
+    writes the call that started a fork near the start of the fork's file, as main wrote it), else None."""
+    if not tool_use_id:
+        return None
+    try:
+        with path.open("rb") as f:
+            head = f.read(FORK_CALL_SCAN_BYTES)
+    except OSError:
+        return None
+    needle = tool_use_id.encode()
+    for line in head.split(b"\n"):
+        if needle not in line or b'"tool_use"' not in line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        content = ((rec.get("message") or {}) if isinstance(rec, dict) else {}).get("content")
+        for b in content if isinstance(content, list) else []:
+            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id") == tool_use_id:
+                return threads.fork_ref(b.get("input"))
+    return None
+
+
+def _stray(sub: Sub) -> bool:
+    """Whether `sub` is a plain agent chat of main's (no thread's fork, no agent of thimble's, no workflow)."""
+    return (sub.of_main and not sub.thread and not sub.thimble and not sub.root and not sub.workflow
+            and sub.owner is None)
+
+
+def _into_thread(lv: Live, sub: Sub, thread_id: str) -> None:
+    """A thread's fork whose Sub the mirror made as a plain agent chat in main, since it saw the fork's file before it
+    knew the fork's thread: the Sub becomes the thread's, its file is read again from its start into the thread's chat,
+    and the stray agent chat goes to the trash."""
+    stray = sub.chat
+    sub.chat, sub.thread, sub.role, sub.of_main = thread_id, True, "thread", False
+    sub.rec = agents.Recorder(lv.c, thread_id)
+    sub.offset, sub.buf = 0, b""
+    sub.seen, sub.names, sub.call_keys = set(), {}, {}
+    sub.done, sub.finish, sub.report, sub.last_text, sub.ran = False, None, None, None, False
+    if stray != thread_id:
+        agents.discard_chat(lv.c, stray)
+    log.info("%s: the agent chat %s is the fork of thread %s", lv.c, stray, thread_id)
 
 
 def _spawn_thimble(lv: Live, tool_use_id: str | None, agent_id: str, title: str, agent_type: Any,
@@ -1871,6 +1960,13 @@ def _agent_result(lv: Live, sub: Sub, content: Any, is_error: bool) -> None:
     notification. A foreground agent's is its outcome, and its chat ends once its file has been quiet (the CLI writes
     its last text moments later)."""
     text = response_text(content)
+    if is_error and sub.thread and REFUSED_RE.match(text):
+        # a hook denied the call, so it started no fork (fork_check: the thread's fork runs already): the thread is its
+        # own fork's to end
+        sub.done = True
+        lv.subs.remove(sub)
+        threads.fork_finished(lv.c, sub.chat, "failed", tool_use_id=sub.tool_use_id, refused=True)
+        return
     m = AGENT_ID_RE.search(text)
     if m and not sub.agent_id:
         _spawn(lv, sub.tool_use_id, m.group(1), "", None)
@@ -1883,10 +1979,38 @@ def _agent_result(lv: Live, sub: Sub, content: Any, is_error: bool) -> None:
     sub.quiet_since = time.monotonic()
 
 
+# the head of a fork's `↳` line: `↳ thread <name>:`, `↳ The thread <name> finished:`, its name quoted or a slug
+NOTE_NAME = r"(?:\"[^\"]*\"|\u201c[^\u201d]*\u201d|\S+?)"
+NOTE_HEAD_RE = re.compile(r"^\s*" + re.escape(TERMINAL_ONLY)
+                          + r"\s*(?:(?:the\s+)?thread\s+" + NOTE_NAME + r"(?:\s+finished)?\s*[:.]\s*)?", re.I)
+
+
+def _note_words(text: str) -> str:
+    """The words of a text's `↳` lines without their `↳ thread <name>:` head, on one line; '' for a text with none."""
+    lines = [ln for ln in text.split("\n") if ln.lstrip().startswith(TERMINAL_ONLY)]
+    return " ".join(" ".join(NOTE_HEAD_RE.sub("", ln, count=1).split()) for ln in lines).strip()
+
+
+def _note_reply(lv: Live, sub: Sub, status: str) -> None:
+    """A thread's fork that finished with no reply in the thread since its question, its answer written only in a `↳`
+    line for main's terminal after its last tool call (live check term-fix6: the thread showed `answered` and no words):
+    those words are the thread's reply."""
+    if not sub.thread or not sub.note or status not in ("done", "completed"):
+        return
+    note, sub.note = sub.note, None  # once: a later run answers its own question
+    try:
+        if not threads.replied_since_question(lv.c, sub.chat):
+            threads.reply(lv.c, sub.chat, note, by=TERMINAL)
+    except Exception:  # noqa: BLE001 — a chat deleted under the mirror
+        log.debug("%s: thread %s: its fork's note was not kept as its reply", lv.c, sub.chat, exc_info=True)
+
+
 def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: str | None = None) -> None:
     """End a subagent's chat, or a thread's run; `kind` says why a thread's fork did not finish (threads.STOP_TEXT)."""
     if sub.done:
         return
+    if kind is None:
+        _note_reply(lv, sub, status)
     if sub.thimble:  # one of thimble's agents: its run ends once, from whichever sign comes first (module note)
         from . import subagents  # noqa: PLC0415
 
@@ -1910,7 +2034,7 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
     sub.finish = None
     try:
         if sub.thread:
-            threads.fork_finished(lv.c, sub.chat, status, kind=kind)
+            threads.fork_finished(lv.c, sub.chat, status, kind=kind, tool_use_id=sub.tool_use_id, agent_id=sub.agent_id)
         else:
             agents.finish_agent(lv.c, sub.chat, status, (sub.report or result or "")[:RESULT_LIMIT] or None)
     except Exception:  # noqa: BLE001 — a chat deleted under the mirror
@@ -1958,7 +2082,16 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
         lv.sub_paths.add(key)
         use = str(meta.get("toolUseId") or "") or None
         followed = _sub_by(lv, tool_use_id=use) or _sub_by(lv, agent_id=agent_id)
-        sub = _spawn(lv, use, agent_id, str(meta.get("description") or ""), meta.get("agentType"),
+        # a fork's file names its thread by its description; when thimble-term gave the call the thread's question as
+        # its description (threads.fork_ref), by the agent-check hook's record of the call, the call as the fork's file
+        # holds it, or the name main gave it
+        title = str(meta.get("description") or "")
+        if not thread_for(lv.c, title):
+            fork = meta.get("isFork") or meta.get("agentType") == sfiles.FORK_TYPE
+            named = f"thread:{meta['name']}" if fork and meta.get("name") else None
+            title = next((r for r in (_recorded_fork(lv, use), _file_fork_ref(path, use) if fork else None, named)
+                          if r and thread_for(lv.c, r)), title)
+        sub = _spawn(lv, use, agent_id, title, meta.get("agentType"),
                      parent=str(meta.get("parentAgentId") or "") or None)
         sub.path = path
         if not replay:
@@ -2454,14 +2587,18 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             text = visible(b["text"])
             if text.strip():
                 sub.last_text = text.strip()
+                sub.note = None
                 sub.rec.text(text, by=TERMINAL, **({"reply": True} if sub.thread else {}))
                 n += 1
+            elif sub.thread:
+                sub.note = _note_words(b["text"]) or sub.note
         elif b["type"] == "tool_use":
             if not isinstance(b.get("id"), str) or not isinstance(b.get("name"), str):
                 raise Unreadable("a tool_use block without id or name")
             tid, name = b["id"], b["name"]
             if tid == sub.tool_use_id or f"use:{tid}" in sub.seen:
                 continue
+            sub.note = None  # a note before a tool call says what the fork is about to do, not its answer
             if (sub.thread and _short(name) == REPLY_TOOL) or name in PLUMBING_TOOLS:
                 sub.seen.add(f"skip:{tid}")
                 continue

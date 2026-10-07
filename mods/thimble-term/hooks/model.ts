@@ -6,7 +6,7 @@
 // is left out rather than failing the drawing.
 import type { ChatThread, ChatThreadTurn, TermAgent, TermHome, TermThreadRow, TermVerdict } from '../types'
 import type { ThimbleCell, ThimbleLabel } from './cell'
-import { clip, quoted, shownMatches, valueIn } from './lib'
+import { clip, curlyQuotes, quoted, shownMatches, valueIn } from './lib'
 import type { Citation } from './lib'
 import { quotedWords, showsValue } from './cite'
 
@@ -163,6 +163,27 @@ export function namedForks(text: string, rows: readonly NamedRow[], n = 40): str
   })
 }
 
+/** A reply without main's own `↳` lines (a hand-back's or a thread's note to the terminal): the answer a thread about
+ *  it is told. */
+export function withoutNotes(text: string): string {
+  return text.split('\n').filter(l => !/^\s*↳/.test(l)).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/** The description main's Agent call for a thread's fork runs with: the thread's first question, `thread: How many…`,
+ *  in place of `thread:<slug>`, so that Claude Code's agent tray and exit dialog name the thread as the chat does. No
+ *  quotation marks around the question, since Claude Code puts the description in its own (`Agent "thread: How
+ *  many…" finished`); straight ones inside it are curly. null
+ *  for any other call, for a thread not listed, and when the call's prompt is not `thread:<name>`, which must stay to
+ *  name the fork (backend threads.fork_ref). */
+export function forkDescription(input: Record<string, unknown>, rows: readonly NamedRow[]): string | null {
+  if (input.subagent_type !== 'fork') return null
+  const ref = /^\s*thread:([A-Za-z0-9_-]{1,64})\s*$/
+  const prompt = typeof input.prompt === 'string' ? ref.exec(input.prompt) : null
+  if (!prompt || typeof input.description !== 'string' || !ref.test(input.description)) return null
+  const q = questionWords(bySlug(rows, prompt[1]!)?.question)
+  return q ? `thread: ${curlyQuotes(clip(q, 40))}` : null
+}
+
 /** main's end token: what it ends a turn with when it has nothing for the analyst, which no chat shows (session.py). */
 export const END_TOKEN = '(shown in the dashboard)'
 const END_RE = /[ \t]*[*_]*\(shown in the dashboard\)\.?[*_]*\.?\s*$/i
@@ -213,7 +234,27 @@ function spansIn(line: string, display: string | null): number[][] {
   return out.slice(0, 4)
 }
 
-/** The lines of a resolved place, the cited ones hit, the records around them not. */
+/** A value as one line of JSON written as Python writes it (`{"a": 1, "b": [2, 3]}`), the way a JSON lines file holds
+ *  its records. */
+export function jsonLine(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(jsonLine).join(', ')}]`
+  if (isObj(v)) return `{${Object.entries(v).map(([k, x]) => `${JSON.stringify(k)}: ${jsonLine(x)}`).join(', ')}}`
+  return JSON.stringify(v) ?? 'null'
+}
+
+/** A record around a cited one as one line, as Raw draws the file's lines: a JSON record as its line of JSON, a text
+ *  line as its words. */
+export function recordLine(r: unknown): string {
+  if (!isObj(r)) return str(r).replace(/\s*\n\s*/g, ' ')
+  const rec = r.record
+  if (isObj(rec) && Object.keys(rec).length === 1 && typeof rec._raw === 'string') return rec._raw
+  if (isObj(rec) && Object.keys(rec).length === 1 && typeof rec.text === 'string') return rec.text
+  if (isObj(rec) || Array.isArray(rec)) return jsonLine(rec)
+  return recordText(r).replace(/\s*\n\s*/g, ' ')
+}
+
+/** The lines of a resolved place, the cited ones hit (a record over its rows, at most 31), each record around them one
+ *  line, as Raw draws it. */
 function linesOf(res: Resolution, display: string | null): TermVerdict['lines'] {
   const out: TermVerdict['lines'] = []
   const line = typeof res.line === 'number' ? res.line : 0
@@ -226,10 +267,11 @@ function linesOf(res: Resolution, display: string | null): TermVerdict['lines'] 
   }
   const before = Array.isArray(ctx.before) ? ctx.before : []
   const after = Array.isArray(ctx.after) ? ctx.after : []
-  before.forEach((r, i) => push(isObj(r) && typeof r.line === 'number' ? r.line : line - before.length + i, recordText(r), false))
+  const around = (n: number, r: unknown) => out.push({ n, text: recordLine(r), hit: false })
+  before.forEach((r, i) => around(isObj(r) && typeof r.line === 'number' ? r.line : line - before.length + i, r))
   if (Array.isArray(res.records) && res.records.length) res.records.forEach((r, i) => push(isObj(r) && typeof r.line === 'number' ? r.line : line + i, recordText(r), true))
   else push(line, line ? blocksText(res.blocks) || str(res.excerpt) : str(res.excerpt), true)
-  after.forEach((r, i) => push(isObj(r) && typeof r.line === 'number' ? r.line : line + 1 + i, recordText(r), false))
+  after.forEach((r, i) => around(isObj(r) && typeof r.line === 'number' ? r.line : line + 1 + i, r))
   return out
 }
 
@@ -251,6 +293,18 @@ export function verdictOf(c: Citation, res: Resolution | null, at = 0): TermVerd
       out.value = str(span.value)
     }
     if (meta.span_missing) return { ...out, status: 'missing', why: 'the card no longer shows the cited cell or line' }
+    // lines the card printed: the cited ones lit among the two on each side the excerpt holds (refs.SPAN_CONTEXT_LINES)
+    if (span && 'line' in span && typeof span.line === 'number') {
+      const first = span.line
+      const last = typeof span.end_line === 'number' ? span.end_line : first
+      const start = Math.max(1, first - 2)
+      out.lines = str(res.excerpt).split('\n').map((t, k) => {
+        const n = start + k
+        const hit = n >= first && n <= last
+        // the value marked where it stands; a citation of the line with no words marks the line
+        return { n, text: t, hit, ...(hit ? { spans: c.display === null ? [[0, t.length]] : spansIn(t, c.display) } : {}) }
+      })
+    }
   } else {
     out.path = str(res.path)
     if (typeof res.line === 'number') out.line = res.line

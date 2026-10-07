@@ -6,7 +6,7 @@ import { expect, test } from 'claude-code/testing'
 import { changed, cliOf, launchMode, parsePrinted } from '../hooks/data'
 import { citations } from '../hooks/lib'
 import { labelCard } from '../hooks/cell'
-import { agentsOf, cardsOfCall, cellsOf, docsOf, homeOf, labelIdOf, labelOf, labelsOf, namedForks, namedThreads, resolutionOf, runShown, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutToldThreads } from '../hooks/model'
+import { agentsOf, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelIdOf, labelOf, labelsOf, namedForks, namedThreads, recordLine, resolutionOf, runShown, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads } from '../hooks/model'
 import { turnTimes, wrapRows } from '../hooks/draw'
 import { AGENTS, CELLS, RESOLVE, STATES, THREAD_T1, THREADS } from './fixtures'
 
@@ -213,4 +213,37 @@ test("a label's counts as the concept routes give them, beside its fields, reach
   expect(labelsOf([route])[0]!.label_stats?.counts).toEqual({ yes: 2, no: 1 })
   // a label that already carries label_stats (the stored file's field) keeps them
   expect(labelOf({ id: 'k2', label_stats: { counts: { a: 1 } }, counts: { a: 9 } })!.label_stats).toEqual({ counts: { a: 1 } })
+})
+
+test("a JSON line's citation: the records around it one line each, as Raw draws them, and only the cited record over its rows", () => {
+  const pretty = (r: Record<string, unknown>) => JSON.stringify(r, null, 2)
+  const rec = (line: number, r: Record<string, unknown>) => ({ line, record: r, blocks: [{ text: pretty(r) }] })
+  const chat = (i: number) => ({ speaker: 'reviewer', time: `08:0${i}`, text: `line ${i} says "hi"`, n: [i, i + 1] })
+  const res = { kind: 'record', path: 'agent-chat.jsonl', line: 4, record: chat(4), blocks: [{ text: pretty(chat(4)) }], context: { before: [1, 2, 3].map(i => rec(i, chat(i))), after: [5, 6, 7].map(i => rec(i, chat(i))) } }
+  const v = verdictOf(citations('[[08:04|agent-chat.jsonl#L4]]')[0]!, res as never)
+  const around = v.lines.filter(l => !l.hit)
+  expect(around.map(l => l.n)).toEqual([1, 2, 3, 5, 6, 7])
+  expect(around[0]!.text).toBe('{"speaker": "reviewer", "time": "08:01", "text": "line 1 says \\"hi\\"", "n": [1, 2]}')
+  // the cited record over its rows, its first row numbered
+  const hit = v.lines.filter(l => l.hit)
+  expect(hit.length).toBe(pretty(chat(4)).split('\n').length)
+  expect(hit[0]!.n).toBe(4)
+  expect(v.lines.findIndex(l => l.hit)).toBe(3)
+  // a text line around it is its words; a line that is no JSON its raw words
+  expect(recordLine({ line: 1, record: { text: 'plain words' } })).toBe('plain words')
+  expect(recordLine({ line: 1, record: { _raw: '{not json' } })).toBe('{not json')
+  expect(jsonLine({ a: [1, { b: null }], c: 'x' })).toBe('{"a": [1, {"b": null}], "c": "x"}')
+})
+
+test("main's fork of a thread runs with the thread's question as its description; its prompt keeps `thread:<name>`", () => {
+  const rows = [{ id: 't1', title: 'raises the 3,898 count', fork: 'who-wrote-line-2', question: 'Who wrote line 2 of agent-chat.jsonl, and at what time? One sentence.' }]
+  expect(forkDescription({ subagent_type: 'fork', name: 'who-wrote-line-2', description: 'thread:who-wrote-line-2', prompt: 'thread:who-wrote-line-2' }, rows)).toBe('thread: Who wrote line 2 of agent-chat.jsonl…')
+  // not a fork, a thread not listed, or a prompt that does not name the fork: as main wrote it
+  expect(forkDescription({ subagent_type: 'general-purpose', description: 'thread:who-wrote-line-2', prompt: 'thread:who-wrote-line-2' }, rows)).toBeNull()
+  expect(forkDescription({ subagent_type: 'fork', description: 'thread:other', prompt: 'thread:other' }, rows)).toBeNull()
+  expect(forkDescription({ subagent_type: 'fork', description: 'thread:who-wrote-line-2', prompt: 'answer the thread' }, rows)).toBeNull()
+})
+
+test("a thread about a whole answer is told the answer without main's own `↳` lines", () => {
+  expect(withoutNotes('↳ The writer finished. You can read the report in thimble.\n\nThe page with the most revisions is A.')).toBe('The page with the most revisions is A.')
 })

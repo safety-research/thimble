@@ -2,9 +2,9 @@
 of the session that posts an event (the MCP shim, the hooks' backend calls, the renderer's acts) writes it to a file in
 the workspace, and main's watcher (plugin/bin/.thimble-watch, the asyncRewake hook) takes it from there:
 
-  events/queue.jsonl   one line per event, as the model reads it: {id, kind, text, line, at}; then, once main's watcher
-                       took it, {taken: id, session, at}, which wakes main with `text`; once main's held hook printed
-                       its `line` in the terminal, {shown: id}. A line for main's terminal that sends main no event
+  events/queue.jsonl   one line per event, as the model reads it: {id, kind, text, line, said, at}; then, once main's
+                       watcher took it, {taken: id, session, at}, which wakes main with `text`; once main's held hook
+                       printed its `said` in the terminal, {shown: id}. A line for main's terminal that sends main no event
                        (events.show) is {show: line, at}. Trimmed to the lines still needed once it grows past
                        TRIM_BYTES.
   held-events.json     the quiet events (events.QUIET_KINDS) as notes, which ask main for nothing: they ride along with
@@ -23,6 +23,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import secrets
 import time
 from pathlib import Path
@@ -36,6 +37,13 @@ TRIM_BYTES = 256 * 1024
 KEEP_S = 24 * 3600.0  # a taken event's lines are dropped this long after it was posted, once the file is trimmed
 MEANWHILE = "meanwhile:"  # events.MEANWHILE
 SAID = "› "  # events.SAID: opens the analyst's own words in an event's line
+# the kinds of event whose line main's terminal leaves out (said): Claude Code draws a hook's systemMessage under the
+# hook's name (`UserPromptSubmit says: …`), a row no render hook reaches, and the terminal's own rows already say these:
+# a thread's question in its fork's row and its `↳` row (thimble-term), a writer's end in its hand-back's row. A thread's
+# event wakes main, whose turn Claude Code opens with a `● thimble` row no hook removes, so it keeps one short line under
+# that row (short_line) rather than none
+TOLD_IN_CHAT = ("thread", "written")
+SHORT_CHARS = 60  # of a thread's question, or of a message to it, in its short line
 
 
 def queue_path(ws: Path) -> Path:
@@ -179,6 +187,41 @@ def joined(notes: list[dict[str, Any]]) -> str:
     return "\n".join(str(n.get("terminal") or "") for n in notes if n.get("terminal"))
 
 
+def said(notes: list[dict[str, Any]]) -> str:
+    """The lines main's held hook prints in the terminal for these events: joined, those of TOLD_IN_CHAT as their short
+    line, or left out."""
+    out = []
+    for n in notes:
+        kind = str((n.get("meta") or {}).get("kind") or "")
+        line = short_line(n) if kind in TOLD_IN_CHAT else str(n.get("terminal") or "")
+        if line:
+            out.append(line)
+    return "\n".join(out)
+
+
+def short_line(note: dict[str, Any]) -> str:
+    """The one short line for an event of TOLD_IN_CHAT: a thread's question in quotation marks (`new thread: "Make a
+    small table card…"`), or a message to a thread after its first question (`thread "Make a small…": "And on 19
+    June?"`); '' for a writer's end, whose hand-back's row says it and which opens no `● thimble` row."""
+    if str((note.get("meta") or {}).get("kind") or "") != "thread":
+        return ""
+    line = str(note.get("terminal") or "").removeprefix(SAID)
+    if line.startswith("new thread: "):
+        return f'new thread: "{_cut(line.removeprefix("new thread: "), SHORT_CHARS)}"'
+    m = re.match(r'^thread (\u201c[^\u201d]*\u201d|"[^"]*"): (.+)$', line)
+    return f'thread {m.group(1)}: "{_cut(m.group(2), SHORT_CHARS)}"' if m else _cut(line, SHORT_CHARS)
+
+
+def _cut(text: str, n: int) -> str:
+    """`text` cut to `n` characters at a word, with an ellipsis right after the last word kept."""
+    text = " ".join(text.split())
+    if len(text) <= n:
+        return text
+    head = text[: n - 1]
+    word = head.rsplit(" ", 1)[0]
+    return (word if len(word) > n // 2 else head).rstrip(" ,;:.") + "\u2026"
+
+
 # --------------------------------------------------------------------------- the queue
 
 
@@ -188,12 +231,13 @@ def append(ws: Path, note: dict[str, Any], render: Callable[[dict[str, Any]], st
     path = queue_path(ws)
     with locked(path):
         riders = pop_held(ws)
+        shown = said([note, *riders])
         if riders:
             note = {**note, "content": f"{note.get('content') or ''}\n\n{meanwhile(riders)}",
                     "terminal": joined([note, *riders])}
         meta = note.get("meta") or {}
         rec = {"id": str(meta.get("event") or secrets.token_hex(4)), "kind": str(meta.get("kind") or ""),
-               "text": render(note), "line": str(note.get("terminal") or ""), "at": time.time()}
+               "text": render(note), "line": str(note.get("terminal") or ""), "said": shown, "at": time.time()}
         _append(path, rec)
     return rec
 
@@ -240,7 +284,8 @@ def unshown(ws: Path, session: str) -> list[str]:
         out, marks = [], []
         for r in recs:
             if r.get("taken") and r.get("session") == session and str(r["taken"]) not in shown:
-                line = str((by_id.get(str(r["taken"])) or {}).get("line") or "")
+                ev = by_id.get(str(r["taken"])) or {}
+                line = str(ev.get("said") if "said" in ev else ev.get("line") or "")
                 marks.append({"shown": str(r["taken"])})
                 shown.add(str(r["taken"]))
                 if line:

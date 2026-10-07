@@ -143,3 +143,21 @@ test("a record the analyst set to another value stays among the examples under t
   expect(under).toMatch(/^proxy-link {2}2✓ set by you"Welcome to the wiki"/)
   await open.unmount()
 })
+
+test("the label's counts apply the analyst's verdicts, as thimble.labels() reads the rows, and say how many the analyst set", async ($, on) => {
+  // live check term-fix5, new quirk 5: one record set to `no` left the counts at 33/467, and a fork took the row the
+  // verdict moved for a bug
+  const w = world(on)
+  Object.assign(w.states.labels[0]!, { verdicts: { counts: { none: 9401, 'proxy-link': 5190 }, set: 1 } })
+  const pane = await labelPanel($, w)
+  await pane.press({ key: 'hk-counts' })
+  await w.clock.settle()
+  await pane.unmount()
+  const again = (await $.ui.mount(PANE)) as unknown as M
+  const text = shown(await again.drawn())
+  expect(text).toContain('counts  14,591 · 1 set by you')
+  expect(text).toMatch(/proxy-link\s+[█─]+\s+5,190/)
+  expect(text).toMatch(/none\s+[█─]+\s+9,401/)
+  expect(text).not.toContain('5,191')
+  await again.unmount()
+})

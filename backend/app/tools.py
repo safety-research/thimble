@@ -1318,6 +1318,12 @@ def _card_installs(ctx: Ctx, code: str, tool: str) -> str:
     return hint("card-installs", tool=tool) if sandbox_allow.code_installs(code) else ""
 
 
+def _question(value: Any) -> str:
+    """A card's or a label's question as given, on one line, with each `\\"` the model wrote inside it as `"` (live check
+    term-fix5, new quirk 13: a card titled `\\"June\\"`)."""
+    return " ".join(str(value or "").replace('\\"', '"').split())
+
+
 async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """One new card on the canvas. A running kind runs its code and the result is checked against the kind; a data kind
     (example, note, custom) stores its refs, text or html. `group` names the group, else default_group picks. A
@@ -1330,7 +1336,7 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return err("add_card: a label card is made by `apply_label`")
     if kind not in ADD_CELL_KINDS:
         return err(f"add_card: `kind` must be one of {', '.join(ADD_CELL_KINDS)}")
-    title = " ".join(str(args.get("question") or args.get("title") or "").split())
+    title = _question(args.get("question") or args.get("title"))
     if not title:
         return err("add_card: `question` is empty (the one question this card answers)")
     code = str(args.get("code") or "")
@@ -1443,7 +1449,7 @@ def _edit_data_cell(ctx: Ctx, nb_id: str, cid: str, cell: dict, args: dict[str, 
         return err(hint("edit_card-kind", cid=cid, kind=kind, new=new_kind))
     if str(args.get("code") or "").strip():
         return err(hint("edit_card-data", cid=cid, kind=kind, field=notebook.PAYLOAD_KEYS.get(kind, "content")))
-    title = " ".join(str(args.get("question") or args.get("title") or "").split()) or None
+    title = _question(args.get("question") or args.get("title")) or None
     key = notebook.PAYLOAD_KEYS.get(kind)
     payload: dict | None = None
     if key in CONTENT_FIELDS and args.get(key) is not None:
@@ -1573,7 +1579,7 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     kind = str(args.get("kind") or "").strip().lower() or None
     if kind is not None and kind not in EDIT_CELL_KINDS:
         return err(f"edit_card: `kind` must be one of {', '.join(EDIT_CELL_KINDS)}")
-    title = " ".join(str(args.get("question") or args.get("title") or "").split()) or None
+    title = _question(args.get("question") or args.get("title")) or None
     cid = _cell_id_of(card_arg) or str(ctx.anchor or "").strip()
     if not cid:
         return err(hint("edit_card-no-card"))
@@ -1586,7 +1592,7 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     args, kept = _kept_by_check(ctx.c, cid, args)
     if kept:
         takeaway = str(args["takeaway"]) if str(args.get("takeaway") or "").strip() else None
-        title = " ".join(str(args.get("question") or args.get("title") or "").split()) or None
+        title = _question(args.get("question") or args.get("title")) or None
         given = any(str(args.get(k) or "").strip() for k in ("code", "question", "title", "kind", *CONTENT_FIELDS))
         if not given and takeaway is None and not moves:
             return ok("\n\n".join([f"card:{cid}", *kept]))
@@ -2408,7 +2414,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     target = None if orienting else _group_id(ctx, group, []) if group else default_group(ctx)
     if target:
         _note_group(ctx, target)
-    question = " ".join(str(args.get("question") or "").split()) or None
+    question = _question(args.get("question")) or None
     within = args.get("within") or None
     if isinstance(within, str):
         within = {"label": within}
@@ -2433,11 +2439,20 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return ok(line)
     if s.get("partial") and not orienting and ctx.session is None:
         concepts.tell_when_done(ctx.c, str(s["concept"]))
-    counts = ", ".join(f"{k} {v}" for k, v in sorted((s.get("counts") or {}).items()))
+    # the counts as thimble.labels() and the label's panel read the rows: each record the analyst set to another value
+    # counted under that value (live check term-fix5, new quirk 5: a fork took the one row a verdict moved for a bug)
+    given = s.get("counts") or {}
+    applied, moved = (await asyncio.to_thread(concepts.verdicts_applied, ctx.ws, str(s["concept"]), given)
+                      if s.get("concept") and given else (given, 0))
+    counts = ", ".join(f"{k} {v}" for k, v in sorted(applied.items()))
     unit = UNIT_WORDS.get(str(s.get("unit") or ""), s.get("unit") or "unit")
     line = (f"applied label {s.get('name', name)} [[concept:{s.get('concept')}]] over {s.get('total', 0)} {unit}(s)"
             f"{' in ' + ', '.join(paths) if scope == 'files' else ''}{' within ' + within['label'] if within else ''}: "
             f"{counts or 'no values yet'}.")
+    if moved:
+        before = ", ".join(f"{k} {v}" for k, v in sorted(given.items()))
+        line += (f" These counts apply the analyst's verdicts, as thimble.labels() does: {moved} {unit}(s) the analyst set"
+                 f" to another value count under that value (the label itself gave {before}).")
     if s.get("failed"):
         line += f" {s['failed']} {unit}(s) failed: {s.get('message') or 'no reason given'}."
     values = (concepts.find_concept(ctx.ws, s["concept"]) or {}).get("labels") or [None]

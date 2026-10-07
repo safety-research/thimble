@@ -512,7 +512,7 @@ test('a deck opens with its slides: each heading, its sentences as a list, its f
   await pane.redraw()
   // one slide at a time: the first, its sentences as a list, its figure; the page row says where it is
   let text = shown(await pane.drawn())
-  for (const s of [SLIDES.title, 'The export is large', 'Most are agents', 'The export per wiki.', 'next', 'notes', 'p n to step · o for notes · y to retell · l for all documents · b to go back · x to close']) expect(text).toContain(s)
+  for (const s of [SLIDES.title, 'The export is large', 'Most are agents', 'The export per wiki.', 'next', 'notes', 'p n to step · o for notes · y story · l for all documents · b to go back · x to close']) expect(text).toContain(s)
   expect(shown(await pane.drawn({ in: 'doc-page' }))).toBe('‹  1 of 2  ›')
   expect(text).not.toContain('- - ')
   expect(text).not.toContain('What it leaves open')

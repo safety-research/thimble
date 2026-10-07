@@ -142,6 +142,8 @@ export type TermPanel = {
   sentence?: string
   quote?: string
   of?: string
+  /** a label panel's: the value a link to the label named (`concept:<id>/<value>`), lit in its counts and examples */
+  value?: string
 }
 
 /** A turn's answer (its last text part that cites or embeds a card, else its last), kept under its last row for the

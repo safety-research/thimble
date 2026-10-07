@@ -24,7 +24,7 @@ import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
 import type { Target } from './gestures'
-import { bareCard, cardWords, cid, citations, clip, curlyQuotes, embeddedCards, mdPieces, noteQuestion, parseReply, quoted, sectionsOf } from './lib'
+import { bareCard, cardWords, cid, citations, clip, curlyQuotes, embeddedCards, labelRef, mdPieces, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, paintLines } from './paint'
@@ -50,6 +50,13 @@ export async function cardName(cx: Ctx, id: string): Promise<string> {
 /** A ref as the analyst reads it: a card's place by the card's question, a command's output by its line, never an id;
  *  any other place in words. */
 export async function placeName(cx: Ctx, ref: string): Promise<string> {
+  // lines the card printed, by its question and the output's lines
+  const out = outputLine(ref)
+  if (out) {
+    const lines = out.last !== out.first ? `lines ${out.first}-${out.last}` : `line ${out.first}`
+    const name = await cardName(cx, out.card)
+    return name === 'the card' ? `the card's output ${lines}` : `${name} output ${lines}`
+  }
   const m = CARD_REF.exec(ref)
   // a card's output line (`card:<id>@out0#L8`) by its line, a cell by its column and row
   if (m) return m[2] ? `${await cardName(cx, m[1]!)} · ${/^L\d+$/.test(m[2]) ? `line ${m[2].slice(1)}` : m[2].replace('/', ' ')}` : cardName(cx, m[1]!)
@@ -162,6 +169,9 @@ export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefine
 /** A citation as its link draws: its label, red with a problem, ◌ ✓ or × after it from thimble's links check of the
  *  card whose takeaway it is in (`card`), and its tip (its status in plain words, and why for a problem). */
 export async function chipOf(cx: Ctx, c: Citation, card?: string): Promise<ChipView> {
+  // a label's link (`[33](concept:<id>/yes)`): blue, no check, a click opens the label at its value
+  const lr = labelRef(c.ref)
+  if (lr) return { label: citeLabel(c), state: 'link', mark: '', spin: false, tip: lr.value ? `opens the label at its value ${quoted(lr.value)}` : 'opens the label' }
   const v = await cx.verdict(cid(c.raw))
   const check = card ? linkCheck((await cx.card(card))?.links, c) : {}
   const look = chipLook(v?.status ?? 'pending', undefined, check.state)
@@ -235,7 +245,7 @@ async function threadAbout(cx: Ctx, words: string): Promise<string> {
 
 /** A rich block's runs with each card it cites whole (`[[card:<id>]]`, at a sentence's end) as the reader needs it: left
  *  out, with the space before it, where the card is drawn under the reply or as a figure (`drawn`); elsewhere named by
- *  its question (`card "…"`), as the citation's link. */
+ *  its question in parentheses (` (card "…")`), the name the citation's link. */
 async function cardRuns(cx: Ctx, block: Extract<Block, { type: 'rich' }>, drawn: ReadonlySet<string>): Promise<Extract<Block, { type: 'rich' }>> {
   if (block.table || !block.runs.some(r => r.cite && bareCard(r.cite))) return block
   const runs: Run[] = []
@@ -259,7 +269,17 @@ async function cardRuns(cx: Ctx, block: Extract<Block, { type: 'rich' }>, drawn:
     if (!tc && !rt.shown.has(id)) rt.wanted.add(id)
     const q = (tc?.data as CardData | null | undefined)?.question ?? ''
     noteQuestion(id, q)
-    runs.push({ ...r, text: cardWords(q) })
+    // in parentheses, so that it reads as a reference and not as words of the sentence: `… (card "How many…").`
+    // (none when main put it in parentheses itself)
+    const prev = runs.at(-1)
+    const own = Boolean(prev && !prev.cite && /\(\s*$/.test(prev.text))
+    if (own) runs.push({ ...r, text: cardWords(q) })
+    else {
+      if (prev && !prev.cite && !prev.b && !prev.i && !prev.code && !prev.u) runs[runs.length - 1] = { ...prev, text: `${prev.text.replace(/\s+$/, '')} (` }
+      else runs.push({ text: prev ? ' (' : '(' })
+      runs.push({ ...r, text: cardWords(q) })
+      runs.push({ text: ')' })
+    }
   }
   return { ...block, runs }
 }
@@ -361,11 +381,11 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     )
   }
   // a blank row before a block that had a blank line before it; none under a heading (it belongs to what follows it),
-  // and none next to a card, whose border stands in for one (SPEC.md, rule 11)
+  // and none next to a card, whose border stands in for one (SPEC.md, rule 11), unless a caption stands under the card
   const gapBefore = (i: number): boolean => {
     const b = blocks[i]!
     const before = blocks[i - 1]
-    if (i === 0 || !b.gap || b.type === 'card' || before?.type === 'card') return false
+    if (i === 0 || !b.gap || b.type === 'card' || (before?.type === 'card' && !before.caption)) return false
     const underHead = (before?.type === 'rich' && before.heading > 0) || (before?.type === 'md' && /^#{1,6}\s/.test(before.text.split('\n').at(-1)!.trim()))
     return !underHead
   }

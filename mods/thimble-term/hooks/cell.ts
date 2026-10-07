@@ -46,6 +46,9 @@ export type ThimbleLabel = {
   labels?: string[]
   trial?: boolean
   label_stats?: { counts?: Record<string, number>; n_labeled?: number }
+  /** the counts with the analyst's verdicts applied, as thimble.labels() reads the rows, and how many records the analyst
+   *  set to another value (`thimble state label`, local._label) */
+  verdicts?: { counts?: Record<string, number>; set?: number }
   description?: string
   spec?: string
   applications?: LabelRun[]

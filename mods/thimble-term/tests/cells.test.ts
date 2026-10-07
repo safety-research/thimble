@@ -5,7 +5,7 @@ import { expect, test } from 'claude-code/testing'
 import { busyWords, cardOfCell, htmlTable, labelCard, linksOf, sortedBars } from '../hooks/cell'
 import type { ThimbleCell } from '../hooks/cell'
 import { cardLayout, cut, placeWords, share } from '../hooks/draw'
-import { citations, clip, formatted, quoted, recordFields, windowAt } from '../hooks/lib'
+import { chipLabel, citations, clip, cutLine, formatted, itemsRow, noteQuestion, quoted, recordFields, windowAt } from '../hooks/lib'
 import { plainCites } from '../hooks/cite'
 import { fitCrumbs } from '../hooks/nav'
 import type { BarRow, Cell } from '../hooks/draw'
@@ -242,4 +242,52 @@ test("the path row's steps are cut at a word", () => {
   const words = '"How many delete events does events.jsonl have on 16 June? One number." citation "I counted 3,898 pages deleted on 16 June"'.split(/\s+/)
   // each cut step ends with a whole word of its own
   for (const s of steps) if (s && s.endsWith('…')) expect(words.some(x => x.replace(/[?.,]+$/, '') === s.slice(0, -1).split(' ').at(-1))).toBe(true)
+})
+
+test('a cut keeps the closing quotation mark of the words it cuts: a path step, a card by its question', () => {
+  expect(cut('thread "Which line of events.jsonl is the first delete event after the reviewer wrote this?"', 40)).toBe('thread "Which line of events.jsonl is…"')
+  expect(cut('card “How many pages in pages.jsonl have "June" in their name?”', 30)).toBe('card “How many pages in…”')
+  // too little room for the quoted words: cut as any words are
+  expect(cut('documents › "The reviewer\'s claim"', 14)).toBe('documents ›…')
+  const steps = fitCrumbs(['home', 'threads', '"Which line of events.jsonl is the first delete event after the reviewer wrote this?"'], 50)
+  expect(steps.at(-1)).toMatch(/^"Which line of[^"]*…"$/)
+  // quoted words inside a step's words, which go on after the closing mark, keep that mark (live check term-fix5, new
+  // quirk 10: `… › citation card "How…`)
+  const deep = fitCrumbs(['home', 'documents', '"The reviewer\'s count of 3,898…"', 'citation card "How many saves and deletions does…" output line 1'], 60)
+  expect(deep.at(-1)).toMatch(/^citation card "How[^"]*…"$/)
+  expect(cut('card “How many saves and deletions” output line 1', 20)).toBe('card “How many…”')
+})
+
+test("a label example's fields cut at whole pairs, never `·…` or a key without its value; a file's JSON line at the cell edge", () => {
+  const pairs = ['n_revs 19', 'n_revs_before 0', 'page_key dorfwiki/AgentDataUSAProbeFebX2']
+  // the pairs left out counted (`+1`), never a `…` against a whole value, which reads as a cut one (`n_revs_before 0…`)
+  expect(itemsRow(pairs, 34)).toBe('n_revs 19 · n_revs_before 0 · +1')
+  expect(itemsRow(pairs, 30)).toBe('n_revs 19 · +2')
+  expect(itemsRow(pairs, 30)).not.toMatch(/\d…$/)
+  expect(itemsRow(pairs, 200)).toBe(pairs.join(' · '))
+  expect(itemsRow(['page_key dorfwiki/AgentDataUSAProbeFebX2'], 20)).toBe('page_key dorfwiki/A…')
+  expect(cut('n_revs 19 · n_revs_before 0 · page_key x', 30)).not.toMatch(/·…$/)
+  const json = '{"page_id": "dorfwiki/AgentDataUSAProbeFebX2", "page_key": "dorfwiki/AgentDataUSAProbeFebX2", "n_revs": 19}'
+  expect(cutLine(json, 60)).toBe(`${json.slice(0, 59)}…`)
+  expect(cutLine('Words of a Markdown file run on past the room they have here', 30)).toBe(cut('Words of a Markdown file run on past the room they have here', 30))
+})
+
+test("a place cited with a passage of its line reads as its line; a card's printed line by the card's question and the output's line", () => {
+  // live check term-fix5, new quirks 3 and 4: `↗ agent-chat.jsonl#L2.b0:c0-120`, and `card L1`
+  expect(placeWords('collusion-wiki/agent-chat.jsonl#L2.b0:c0-120')).toBe('collusion-wiki/agent-chat.jsonl line 2')
+  expect(placeWords('collusion-wiki/agent-chat.jsonl#L2.b1')).toBe('collusion-wiki/agent-chat.jsonl line 2')
+  expect(chipLabel({ raw: '[[agent-chat.jsonl#L2.b0:c0-120]]', ref: 'agent-chat.jsonl#L2.b0:c0-120', display: null })).toBe('agent-chat:2')
+  expect(chipLabel({ raw: '[[card:c0ffee00@out0#L1]]', ref: 'card:c0ffee00@out0#L1', display: null })).toBe("a card's output line 1")
+  noteQuestion('c0ffee00', 'How many saves and deletions per day?')
+  expect(chipLabel({ raw: '[[card:c0ffee00@out0#L1]]', ref: 'card:c0ffee00@out0#L1', display: null })).toBe('card "How many saves and deletions per day?" output line 1')
+  expect(chipLabel({ raw: '[[card:c0ffee00@out0#L1-L3]]', ref: 'card:c0ffee00@out0#L1-L3', display: null })).toContain('output lines 1-3')
+})
+
+test('a card cited whole reads as a reference in parentheses in plain words, as the reply draws it', () => {
+  // live check term-fix5, item 6: the New thread preview read `…deletion claim" card "How…`
+  noteQuestion('ab12cd34', 'How many deletions per day?')
+  expect(plainCites('The 16 June deletion claim holds up [[card:ab12cd34]].')).toBe('The 16 June deletion claim holds up (card "How many deletions per day?").')
+  expect(plainCites('See ([[card:ab12cd34]]).')).toBe('See (card "How many deletions per day?").')
+  expect(plainCites('[[card:ab12cd34]] says so.')).toBe('(card "How many deletions per day?") says so.')
+  expect(plainCites('It has [[3|card:ab12cd34#n/all]] rows.')).toBe('It has 3 rows.')
 })
