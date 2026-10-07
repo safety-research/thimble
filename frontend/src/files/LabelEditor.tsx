@@ -58,8 +58,9 @@ export interface LabelEditorRequest {
   /** what the popover sits beside: the control that asked (an element), or a box such as a control inside a view's frame
    * (labelCalls frameAnchor) */
   anchor: PopoverAnchor
-  /** `aside` (the default): to the anchor's right, else its left, level with its middle; `below`: under it, else above */
-  side?: 'aside' | 'below'
+  /** `aside` (the default): to the anchor's right, else its left, level with its middle; `left`: to its left, else its
+   * right; `below`: under it, else above */
+  side?: 'aside' | 'below' | 'left'
   /** with `below`, the anchor's edge the popover lines up with */
   align?: Align
   /** what a new label applies to */

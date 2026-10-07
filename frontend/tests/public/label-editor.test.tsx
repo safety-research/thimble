@@ -14,6 +14,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vi
 import type { ViewLabelActions } from '../../src/files/labelCalls.ts'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
 import type { Concept } from '../../src/lib/types.ts'
+import { LABEL_WHEEL } from '../../src/files/labels.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 let viewActions: ViewLabelActions | undefined
@@ -247,10 +248,10 @@ describe("a class's swatch", () => {
     const el = await mount(<SideCard editing="k1" />)
     await act(async () => swatch(el, 'writing').click())
     const picks = [...palette()!.querySelectorAll('.colorby-pick')]
-    expect(picks.map((b) => b.getAttribute('aria-label'))).toEqual([...Array.from({ length: 12 }, (_, i) => `Color ${i + 1}`), 'Grey'])
-    expect(picks.map((b) => b.getAttribute('aria-pressed')).indexOf('true')).toBe(1)
+    expect(picks.map((b) => b.getAttribute('aria-label'))).toEqual([...LABEL_WHEEL.flat().map((n) => `Color ${n}`), 'Grey'])
+    expect(picks.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('aria-label'))).toEqual(['Color 2'])
     expect(palette()!.querySelector('.colorby-palette-head')?.textContent).toBe('writing')
-    await act(async () => (picks[4] as HTMLButtonElement).click())
+    await act(async () => (picks.find((b) => b.getAttribute('aria-label') === 'Color 5') as HTMLButtonElement).click())
     expect(setColour.mock.calls).toEqual([['k1', 'writing', 5]])
     expect(palette()).toBeNull()
   })

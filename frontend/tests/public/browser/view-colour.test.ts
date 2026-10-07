@@ -20,7 +20,7 @@ const BRIDGE = inline(read('viewer_bridge.js'))
 const COLOUR = `window.__thimbleLabelOrder = ${read('label_order.json')}\n` + inline(read('viewer_colour.js'))
 const KIT = read('viewer_kit.css')
 const TOKENS =
-  ':root{--label-1:#025ac3;--label-2:#d0750a;--label-3:#08632f;--label-none:#a09c93;--ink-rgb:27,26,24;--surface-card:#fffdf8;' +
+  ':root{--label-1:#025ac3;--label-2:#d0750a;--label-3:#08632f;--label-13:#d0342c;--label-none:#a09c93;--ink-rgb:27,26,24;--surface-card:#fffdf8;' +
   '--text-primary:#000;--text-secondary:#4a4844;--text-tertiary:#726f69;--accent:#5135ff;--radius-chip:4px;--radius-ui:6px;' +
   '--h-row:28px;--control-sm:28px;--h-control:24px;--h-chip:20px;--text-xs:12px;--text-ui-sm:12px;--text-mono-sm:11px;--border-subtle:rgba(27,26,24,0.12);' +
   '--font-body:sans-serif;--font-mono:monospace}'
@@ -206,7 +206,7 @@ describe('Colour by in a frame', () => {
     await page.close()
   })
 
-  test('chips that do not fit the row go behind "N more", which lists them', async () => {
+  test('chips that do not fit the row go behind "N more", which lists them with what a chip offers: its toggle and its color', async () => {
     const { page, frame } = await framed(330)
     const s = await frame().evaluate(() => ({
       shown: [...document.querySelectorAll<HTMLElement>('.thimble-colour-chip')].filter((c) => !c.hidden).length,
@@ -216,7 +216,22 @@ describe('Colour by in a frame', () => {
     assert.ok(s.shown < 2 && s.more === `${2 - s.shown} more`, JSON.stringify(s))
     assert.ok(s.wide, 'the row does not overflow the page')
     await frame().locator('.thimble-colour-more').click()
-    assert.deepEqual(await frame().locator('.thimble-colour-menu .thimble-colour-nm').allTextContents(), ['Text only', 'With links'])
+    // the values it hides, each with its box and its swatch
+    const hidden = ['Text only', 'With links'].slice(s.shown)
+    assert.deepEqual(await frame().locator('.thimble-colour-menu .thimble-colour-nm').allTextContents(), hidden)
+    const last = hidden.at(-1)!
+    const item = frame().locator('.thimble-colour-menu .thimble-colour-val', { hasText: last })
+    // its swatch opens the picker under it, in the menu; a color picked recolors the value and the menu stays
+    await item.locator('[data-palette]').click()
+    assert.equal(await frame().locator('.thimble-colour-menu .thimble-colour-inpick [data-pick]').count(), 18)
+    await frame().locator('.thimble-colour-menu .thimble-colour-inpick [data-pick="12"]').click()
+    await page.waitForTimeout(150)
+    assert.equal(await frame().evaluate((v) => (window as any).colour.colourOf(v), last), 'rgb(208, 52, 44)', 'red, picked')
+    assert.equal(await frame().locator('.thimble-colour-menu').count(), 1, 'the menu stays open')
+    // its box turns it off
+    await frame().locator('.thimble-colour-menu .thimble-colour-val', { hasText: last }).click()
+    await page.waitForTimeout(150)
+    assert.equal(await frame().evaluate((v) => (window as any).colour.isOn(v), last), false)
     await page.close()
   })
 })
@@ -279,8 +294,9 @@ describe('the menu', () => {
       ['edit purpose', '3 values', ['message to other runs', 'posts links', 'restores page']],
     ])
     assert.ok(rows.every((r) => r.cut === 'ellipsis' && r.lines <= 20), JSON.stringify(rows))
-    // a label's row has its switch and no button for its definition: choosing it opens thimble's label editor
-    assert.deepEqual(await frame().evaluate(() => [...document.querySelectorAll('.thimble-colour-label button')].map((b) => b.getAttribute('role') ?? b.className)), ['switch'])
+    // a label's row is a choice as a field's is: a box, no switch and no button for its definition (checking it opens
+    // thimble's label editor)
+    assert.deepEqual(await frame().evaluate(() => [...document.querySelectorAll('.thimble-colour-label')].map((r) => [r.getAttribute('role'), r.querySelectorAll('button, [role=switch]').length, !!r.querySelector('.thimble-colour-box')])), [['menuitemcheckbox', 0, true]])
     await page.close()
   })
 })
@@ -302,18 +318,18 @@ describe("a value's colour", () => {
   test("a click on a chip's swatch opens the palette, and the colour picked recolours the value everywhere and is kept", async () => {
     const { page, frame } = await framed()
     // thimble's palette as it hands it over, its colours as written in the tokens
-    const palette = ['#025ac3', '#d0750a', '#08632f', '#1392d4', '#897301', '#009c85', '#844500', '#013c77', '#2aa02b', '#025a7c', '#622b01', '#0389a0', '#a09c93']
+    const palette = ['#025ac3', '#d0750a', '#08632f', '#1392d4', '#897301', '#009c85', '#844500', '#013c77', '#2aa02b', '#025a7c', '#622b01', '#0389a0', '#d0342c', '#8a1c1c', '#7b4fd6', '#4c2a91', '#d23f8b', '#8d1d5c', '#a09c93']
     await page.evaluate((pal) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage({ type: 'thimble:labels', marks: {}, on: [], filter: null, all: [], palette: pal }, '*'), palette)
     await page.waitForTimeout(100)
     await frame().locator('.thimble-colour-chip').nth(1).locator('.chip-sw').click()
     const pal = await frame().evaluate(() => {
       const m = document.querySelector('.thimble-colour-palette')
-      return m ? { picks: m.querySelectorAll('.thimble-colour-pick').length, on: [...m.querySelectorAll('.thimble-colour-pick')].findIndex((b) => b.classList.contains('on')), head: m.querySelector('.thimble-colour-head')!.textContent, reset: !!m.querySelector('[data-reset-colours]') } : null
+      return m ? { picks: m.querySelectorAll('.thimble-colour-pick').length, on: m.querySelector('.thimble-colour-pick.on')?.getAttribute('data-pick'), head: m.querySelector('.thimble-colour-head')!.textContent, reset: !!m.querySelector('[data-reset-colours]') } : null
     })
-    assert.deepEqual(pal, { picks: 12, on: 1, head: 'With links', reset: false }, 'twelve colours, the value\'s own ringed')
+    assert.deepEqual(pal, { picks: 18, on: '1', head: 'With links', reset: false }, "every hue around the wheel, the value's own ringed")
     assert.equal((await look(frame)).pressed, 'true', 'the swatch does not turn the value off')
     // the third colour, #08632f
-    await frame().locator('.thimble-colour-palette .thimble-colour-pick').nth(2).click()
+    await frame().locator('.thimble-colour-palette .thimble-colour-pick[data-pick="2"]').click()
     await page.waitForTimeout(200)
     const after = await look(frame)
     assert.equal(await frame().locator('.thimble-colour-palette').count(), 0)
@@ -528,9 +544,11 @@ describe("a label's texts", () => {
     await frame().waitForFunction(() => [...CSS.highlights.keys()].some((k) => k.startsWith('thimble-label-')))
     await page.waitForTimeout(150)
     assert.deepEqual(await lit(frame), { colour: ['connection pool', 'pool'], grey: ['charged twice'] }, "Database connections' texts in its colour, the span that names no label by its colour")
-    // a field chosen
+    // a field chosen, the label unchecked
     await frame().locator('.thimble-colour-by').click()
     await frame().locator('.thimble-colour-menu [data-by="f:kind"]').click()
+    await frame().locator('.thimble-colour-menu [data-by="l:k1"]').click()
+    await frame().locator('.thimble-colour-by').click()
     await page.waitForTimeout(200)
     assert.deepEqual(await lit(frame), { grey: ['charged twice', 'connection pool', 'pool'] })
     // Off
@@ -544,7 +562,7 @@ describe("a label's texts", () => {
   })
 })
 
-describe('a lane of the tracks for each label that is on', () => {
+describe("a lane of the tracks for each of Color by's choices past the first", () => {
   // sixty messages: "Passed on" (k1, orange) marks messages 5 to 10, "Links" (k2, green) messages 40 to 45
   const mark = (id: string, name: string, colour: string) => ({ values: [{ id, label: name, value: 'yes', colour }], names: [name], bar: colour })
   const marks: Record<string, unknown> = {}
@@ -568,9 +586,9 @@ describe('a lane of the tracks for each label that is on', () => {
   const ORANGE = '208,117,10'
   const GREEN = '8,99,47'
 
-  test('two labels on are two lanes, each in its own colours and named on hover; one turned off leaves one lane', async () => {
+  test('two labels chosen are two lanes, each in its own colours and named on hover; one turned off leaves one lane', async () => {
     const rows = Array.from({ length: 60 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}">message ${i + 1}</div>`).join('')
-    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], strip: '#list' })`, 700, { v: 1, by: 'l:k1', seen: ['k1', 'k2'] })
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], strip: '#list' })`, 700, { v: 1, by: 'l:k1', picks: ['l:k1', 'l:k2'], seen: ['k1', 'k2'] })
     const post = (m: unknown) => page.evaluate((x) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage(x, '*'), m)
     await post(msg(both))
     await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-lane').length === 2)
@@ -589,6 +607,61 @@ describe('a lane of the tracks for each label that is on', () => {
     assert.equal(one.width, 12, 'one lane, as wide as the track always is')
     assert.equal(one.at[0][0], ORANGE)
     assert.notEqual(one.at[0][1], GREEN)
+    await page.close()
+  })
+  test('a label on that is no choice has no lane, and with Off no lane, no bar and no color show anywhere', async () => {
+    const rows = Array.from({ length: 60 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 30 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
+    const script = `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`
+    // Kind the one choice, both labels on: one lane, Kind's
+    const a = await own(rows, script, 700, { v: 1, by: 'f:kind', picks: ['f:kind'], field: 'kind', seen: ['k1', 'k2'] })
+    const postA = (m: unknown) => a.page.evaluate((x) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage(x, '*'), m)
+    await postA(msg(both))
+    await a.page.waitForTimeout(300)
+    assert.equal(await a.frame().locator('.thimble-colour-lane').count(), 0, 'the labels on are no tracks of their own')
+    await a.page.close()
+    // Off, both labels on: a plain scrollbar, no bar on any record
+    const b = await own(rows, script, 700, { v: 1, by: 'off', picks: [], field: 'kind', seen: ['k1', 'k2'] })
+    const postB = (m: unknown) => b.page.evaluate((x) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage(x, '*'), m)
+    await postB(msg(both))
+    await b.frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
+    await b.page.waitForTimeout(300)
+    const s = await b.frame().evaluate(() => {
+      const el = document.querySelector('.thimble-colour-strip') as HTMLElement
+      const cv = el.querySelector('.thimble-colour-whole canvas') as HTMLCanvasElement
+      const data = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data
+      let hued = 0
+      for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 0 && (Math.abs(data[i] - data[i + 2]) > 12 || Math.abs(data[i + 1] - data[i + 2]) > 12)) hued++
+      return { plain: el.hasAttribute('data-plain'), lanes: el.querySelectorAll('.thimble-colour-lane').length, hued, bars: document.querySelectorAll('[data-thimble-bar]').length }
+    })
+    assert.deepEqual(s, { plain: true, lanes: 0, hued: 0, bars: 0 }, JSON.stringify(s))
+    await b.page.close()
+  })
+
+  test("a field chosen second is a lane in its values' colors, read from the records the page drew", async () => {
+    const rows = Array.from({ length: 60 }, (_, i) => ({ ref: `m.jsonl#L${i + 1}`, kind: i < 30 ? 'Text only' : 'With links', who: i % 2 ? 'ana' : 'bo' }))
+    const script = `const recs = ${JSON.stringify(rows)}; window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }, { name: 'who', title: 'Who' }], strip: '#list', onChange: draw }); function draw() { document.getElementById('list').innerHTML = recs.map((r) => '<div class="msg" data-anchor="' + r.ref + '"' + colour.attr(r) + '>' + r.ref + '</div>').join('') } draw()`
+    const { page, frame } = await own('', script, 700, { v: 1, by: 'f:kind', picks: ['f:kind', 'f:who'], field: 'kind', seen: [] })
+    await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-lane').length === 2)
+    await page.waitForTimeout(250)
+    const two = await lanes(frame)
+    assert.deepEqual(two.marks.map((m) => m.title), ['Kind', 'Who'])
+    assert.ok(two.at[1][0] !== two.at[0][0] || two.at[1][1] !== two.at[0][1], `the second lane is Who's: ${JSON.stringify(two.at)}`)
+    assert.equal(await frame().locator('.thimble-colour-by').textContent(), 'Color by:Kind+1')
+    await page.close()
+  })
+})
+
+describe('popovers beside the tracks', () => {
+  test("Color by's menu and a chip's tip stand left of the tracks, never over them", async () => {
+    const rows = Array.from({ length: 60 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 30 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
+    // Color by at the row's right end, its menu would open over the list's tracks
+    const script = `document.querySelector('.top input').style.width = '300px'; window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', { name: 'With links', meaning: 'links to a page of the wiki' }] }], strip: '#list' })`
+    const { page, frame } = await own(rows, script, 520)
+    await frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
+    await page.waitForTimeout(250)
+    await frame().locator('.thimble-colour-by').click()
+    const [menu, strip] = await frame().evaluate(() => [document.querySelector('.thimble-colour-menu')!, document.querySelector('.thimble-colour-strip')!].map((e) => e.getBoundingClientRect().toJSON()))
+    assert.ok(menu.right <= strip.left, `the menu stands left of the tracks: ${JSON.stringify([menu, strip])}`)
     await page.close()
   })
 })

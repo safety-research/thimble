@@ -7,38 +7,59 @@ choice is drawn in colors, on the chips, the records' bars, the tracks and the c
 the view as text, a glyph or a gray pattern, never in a second palette. Filter by and Rows stand beside it in the top row
 ([rows-and-filters.md](rows-and-filters.md)): they read a field or a label the way Color by does, and draw no color.
 
-- One menu lists Off, the fields the view can color by and every label over files, each with how many values it
-  colors by and those values as chips on a line under its name. Fields are values the files hold or
-  the reader works out, such as a kind or a source. A field the page declares no `values` for shows the values its
-  records take on the page (those the page hands the control through `attr`, `valueOf` or `keeps`), the commonest
-  first, in the colors they would take if it were chosen now. The labels that mark the view's files come first, each
-  with its switch.
-- Choosing a label colors by it and opens thimble's label editor beside the menu, which stays open with the label
-  checked: the same editor as Files' (what it labels and marks, the files it applies to, its classifier, its prompt,
-  pattern or code, and its classes with their colors and highlights), drawn by thimble over the view, so the view
-  stays where it is. A class's color square opens the same palette as a chip's square. Escape, ×, Cancel and Re-run
-  close the editor and put the focus back on the label's row; a click in the view closes it too. Choosing a field or
-  Off opens nothing.
-- Color by is thimble's small secondary button, with the choice in it: "Color by: Kind".
-- Off colors nothing: no chips, no bars, the tracks a plain scrollbar, and the time range's overview draws every record
-  in gray.
+- One menu, which takes several choices: Off, then the fields the view can color by under "Fields" and every label
+  over files under "Labels", each with how many values it colors by and those values as chips on a line under its
+  name. Fields are values the files hold or the reader works out, such as a kind or a source. A field the page
+  declares no `values` for shows the values its records take on the page (those the page hands the control through
+  `attr`, `valueOf` or `keeps`), the commonest first, in the colors they would take if it were chosen now. The labels
+  that mark the view's files come first. A label is a choice as a field is: it has no switch of its own.
+- A click checks a field or a label, or unchecks it, and the menu stays open. The first one checked is the color: the
+  chips, the records' bars and the first lane of the tracks. Each one checked after it is a lane of its own in the
+  tracks (below), and the menu says "track" after its name. Unchecking the first gives the color to the next; unchecking
+  the last is Off. Off unchecks them all and closes the menu.
+- Checking a label turns it on in Files and every view and opens thimble's label editor beside the menu: the same
+  editor as Files' (what it labels and marks, the files it applies to, its classifier, its prompt, pattern or code,
+  and its classes with their colors and highlights), drawn by thimble over the view, so the view stays where it is. A
+  class's color square opens the same picker as a chip's square. Escape, ×, Cancel and Re-run close the editor and put
+  the focus back on the label's row; a click in the view closes it too. Unchecking a label turns it off, unless Rows
+  or Filter by holds it. Checking a field or Off opens nothing.
+- Color by is thimble's small secondary button, with the first choice in it and how many more there are: "Color by:
+  Kind", "Color by: Kind +1".
+- Off colors nothing anywhere: no chips, no bars, no lanes, the tracks a plain scrollbar, the lanes and the time range's
+  overview every record in gray, and the labels' texts highlighted in gray, a label on or not.
 - The values of the chosen field show as key chips in the top row (`chip chip-key` in the view kit): a square of the
   value's color, its name and its count. The chip of the records with no value ("Not marked", "No kind") has the gray
   square the marks draw those records in. A click turns a value off or on. An Alt-click, or a double click, shows that
   value alone. A value turned off is hidden or dimmed, as the view says, and its chip goes quiet with an empty square.
   Hovering a value shows what it means: a label's value what the label says, a field's value what the page declares
   for it, else what the field is.
-- A field has twelve colors for its values. The values past the twelfth would share one gray, so they sit under one
-  chip, "Other", in that gray with their counts summed: a click turns them all off or on, an Alt-click shows them
-  alone, and hovering it names them. The page still hears of each of them in `values`, in the gray.
-- A click on a chip's square opens the palette of thimble's twelve label colors. The color picked recolors the value
-  everywhere in the view: its chip, the records' bars, the tracks, and what the page draws through `colourOf`. A label's
-  value keeps it as the label's color, in Files and every view; a field's value keeps it for this view, and Reset
-  colors in the palette gives the field's values their own colors back.
-- On a record, color is a 3 px bar on the left edge of its row or card. Text and fills keep their own colors. The
-  texts the chosen label matches are highlighted in its colors; the texts of the other labels that are on, and every
-  label's while a field or Off is chosen, in gray.
-- A long list gets two tracks in place of its scrollbar, as a music or video editor lays out its navigator (below).
+- The chips that do not fit the row go behind "N more", which lists those values with what a chip offers: a box that
+  turns the value off or on (Alt keeps it alone), its color square, which opens the picker under it in the menu, and
+  what it means on hover.
+- A field has twelve colors its values take by themselves. The values past the twelfth would share one gray, so they
+  sit under one chip, "Other", in that gray with their counts summed: a click turns them all off or on, an Alt-click
+  shows them alone, and hovering it names them. The page still hears of each of them in `values`, in the gray.
+- A click on a chip's square opens the color picker: every hue around the color wheel, a column per hue with its light
+  color above its dark one, red, orange, gold, green, teal, sky, blue, purple and pink (backend/app/label_wheel.json,
+  which the app's pickers read too). The color picked recolors the value everywhere in the view: its chip, the
+  records' bars, the tracks, and what the page draws through `colourOf`. A label's value keeps it as the label's color,
+  in Files and every view; a field's value keeps it for this view, and Reset colors in the picker gives the field's
+  values their own colors back. Red, purple and pink (places 13 to 18) are the analyst's to pick: no value takes them by
+  itself, so the problem red and the agents' purple keep their meaning, and a failed mark keeps a shape (✕) beside
+  its red so that it stays apart from a value picked red.
+- Color marks the unit its value belongs to: the records, the elements the page anchors (`data-anchor`). On a record,
+  color is a 3 px bar on the left edge of its row or card. Text and fills keep their own colors. A group of records (a
+  page, a wiki, an agent, a run, a session, a source) takes no color of its own: no colored title, edge or chip. Its row
+  may show how its records divide among the values with `thimble.mix` (below). The texts the chosen label matches are
+  highlighted in its colors; the texts of the other labels that are on, and every label's while a field or Off is
+  chosen, in gray.
+- A menu, a tip or the picker never covers a list's tracks: it stands left of them, and thimble's label editor opens on
+  the menu's left where its right would cover them.
+- A view never scrolls sideways: the kit keeps the page to its pane's width (a long line of code wraps, a picture, a
+  video and a canvas scale down), and the overview under the divider scrolls down only. The view checks note a page
+  that is wider than its pane.
+- A long list of records gets two tracks in place of its scrollbar, as a music or video editor lays out its navigator
+  (below). A list of groups gets a plain scrollbar.
 - Reset, at the end of the row, shows while the view is not as it opens and puts it back (below). While hidden it
   keeps its place unseen, so the chips fit the same width whether it shows or not and none moves behind "N more" when
   it shows. Only in a row too narrow for "N more" beside Color by does the hidden Reset give up its place.
@@ -93,9 +114,15 @@ load()
 ## What the page does
 
 - Give each record's element its `data-anchor`, as every view does, and `colour.attr(record)`. While a field is the
-  color, `attr` writes `data-colour="<value>"`, which thimble draws the bar from. While a label is the color, or the
-  color is Off, it writes nothing: thimble draws the label's value on each anchored record, or no bar. When the choice
-  changes, the control takes every `data-colour` off the page until the page draws again in `onChange`.
+  color, `attr` writes `data-colour="<value>"`, which thimble draws the bar from, on the anchored element alone. While
+  a label is the color, or the color is Off, it writes nothing: thimble draws the label's value on each anchored record,
+  or no bar. While a field is one of the choices past the first, `attr` writes its value in `data-colour-tracks` too,
+  which its lane of the tracks reads. When the choices change, the control takes every `data-colour` (and
+  `data-colour-tracks`) off the page until the page draws again in `onChange`.
+- Draw a group's row (a page, an agent, a session) with no `data-colour` and no color of its own. To show the mix of
+  its records' values, put `thimble.mix(counts)` in it, `{value: n}` with `''` for the records with no value: a small
+  bar, 48 px wide, each value's share in its color in the chips' order, the records with no value gray and last, the
+  values turned off left out, and nothing with Off. `thimble.mix(el, counts)` draws it into `el`.
 - Pass `colour.query()` with each fetch, so the reader can count, filter and chart by the choice (below). It is `null`
   for Off.
 - Give the counts with `colour.counts({value: n})`, the key `''` for records with no value. Without them, the control
@@ -118,14 +145,15 @@ load()
 `strip: '#list'`, or `colour.strip('#list', {rows})` or `{whole: true}` for another list (see below), puts the list's
 scrollbar in tracks at its right edge:
 
-- The overview track is the whole list in one lane for the choice: each pixel row in the color of the value that is on
-  which most of the records there take, never two colors side by side. The records with no value ("No kind", "Not
-  marked") are the gray their chip has, and only where no record of the pixel row takes a value, so a value is never
-  hidden under them; turned off, they leave the tracks as any value does. Each other label that is on has a lane of its
-  own beside it, in the label's colors, so that one choice is one lane and two labels on are two; each lane names its
-  label on hover, and the lanes narrow as more come (one is 12 px; more share 24 px, 3 px each at least). Only the
-  choice colors the zoomed track and the records' bars. A dark frame as wide as the lanes outlines the part in view;
-  drag it to move the view.
+- The overview track is the whole list in one lane for the first choice: each pixel row in the color of the value that
+  is on which most of the records there take, never two colors side by side. The records with no value ("No kind",
+  "Not marked") are the gray their chip has, and only where no record of the pixel row takes a value, so a value is
+  never hidden under them; turned off, they leave the tracks as any value does. Each of Color by's choices past the
+  first has a lane of its own beside it, in its colors (a label's own, a field's values'), so that one choice is one
+  lane and two are two; a label that is on but no choice has no lane. Each lane names its choice on hover, and the
+  lanes narrow as more come (one is 12 px; more share 24 px, 3 px each at least). Only the first choice colors the
+  zoomed track and the records' bars. A dark frame as wide as the lanes outlines the part in view; drag it to move the
+  view.
 - A list at least 12 times the height of its box adds the zoomed track at the outer edge (it goes again below 10
   times), where the overview cannot tell the list's rows apart. It magnifies the frame: the part around the view at a
   finer scale, its colors faded beyond the part in view, which lies under a lens. Two lines join the frame's top and
@@ -143,16 +171,17 @@ scrollbar in tracks at its right edge:
   frame; once still, every edge goes onto the device's pixel grid.
 
 For a list that draws only the rows in view, give every row's value in order: `colour.strip('#list', {rows: values})`,
-with `preview(i)` (what the preview says of row `i`: a string, or `{when, text}`; `refs`, each row's record, which the
-labels' lanes read). For a list of elements the preview reads each record's `<time>` and its text, or
+with `preview(i)` (what the preview says of row `i`: a string, or `{when, text}`), `refs` (each row's ref, which the
+labels' lanes read) and `records` (each row's record, which the lanes of fields past the first choice read). For a list of elements the preview reads each record's `<time>` and its text, or
 `preview(element)`. Call `strip` again with the same list when they change; rows given again unchanged, as a list
 drawn again on each scroll gives them, are not measured again.
 
-The tracks show colors only where they reflect the whole list: Color by's own `strip`, a list given `rows`, or another
-list whose elements are all of its records, which says so with `colour.strip('#other', {whole: true})`. Any other pane,
-such as a view's second list or one that loads its records in pieces, gets a plain track: a scrollbar in the kit's
-style with no colors, no lanes and no zoomed track. So does a list none of whose records takes a color (Off, or every
-value turned off). A secondary pane is plain unless the page asks for its colors this way.
+The tracks show colors only on a list of the records the color marks, and only where they reflect the whole list:
+Color by's own `strip`, a list given `rows`, or another list whose elements are all of its records, which says so
+with `colour.strip('#other', {whole: true})`. Any other pane, such as a list of groups (pages, agents, runs), a view's
+second list or one that loads its records in pieces, gets a plain track: a scrollbar in the kit's style with no
+colors, no lanes and no zoomed track. So does a list none of whose records takes a color (Off, or every value turned
+off). A secondary pane is plain unless the page asks for its colors this way.
 
 ## Details
 
@@ -209,15 +238,20 @@ for a record the label does not mark.
 
 ## What thimble does
 
-- With a field chosen, thimble draws a bar in the value's color on every element whose `data-colour` names a value,
-  anchored or not. An SVG shape and a canvas take no bar: draw them in `colour.colourOf(value)`. The labels that are on
+- With a field chosen, thimble draws a bar in the value's color on every anchored element whose `data-colour` names a
+  value; an element with no anchor, such as a group's row, takes none. An SVG shape and a canvas take no bar: draw them in `colour.colourOf(value)`. The labels that are on
   draw no bar then, and the texts they match stay highlighted in gray.
 - With a label chosen, the label's value is the bar on each anchored record, as in the File browser, and the texts it
   matches are highlighted in its colors; the other labels' texts in gray.
 - With Off, no element takes a bar, and the labels' texts are highlighted in gray.
-- A label the analyst turns on, in the menu or anywhere in thimble, takes the color, unless Rows groups the lanes by it
-  ([rows-and-filters.md](rows-and-filters.md)). When it is turned off again, the
-  field chosen last is the color.
+- A label the analyst turns on, in the menu or anywhere in thimble, takes the first place, the color, unless Rows groups
+  the lanes by it ([rows-and-filters.md](rows-and-filters.md)): a field that was the color gives way, and a label that
+  was keeps its lane. When it is turned off again it leaves the choices, and the next is the color; with none left, the
+  field chosen last.
+- Every choice of Color by, Rows and Filter by the page mounts must draw the view, Off and None among them: the view
+  checks try each in turn, and each control's first choice again after the others, and fail the view on the choice
+  whose drawing gives a script error, naming it. Guard what the page reads of a choice that can be null (`rows.by`,
+  `colour.by`, `filter.by`).
 - A field's values take the label palette's colors: the declared `values` in their order, each in the color it
   names or else the next free one, then the others the first time they show, the most frequent first. A declared
   value always has its declared color; another value keeps its color after it first shows. Free colors go in the
@@ -239,17 +273,18 @@ for a record the label does not mark.
 
 | member | what it gives |
 |---|---|
-| `by` | `{field, title}` or `{label, title}` (the label's id and name), or `null` (Off, or nothing to color by) |
+| `by` | the first choice: `{field, title}` or `{label, title}` (the label's id and name), or `null` (Off, or nothing to color by) |
+| `picks` | every choice in order, the first the color and each other a lane of the tracks: `[{field, title}]` or `[{label, title}]`; none for Off |
 | `off` | whether the analyst chose Off |
 | `field`, `label` | the field colored by, or the label's id; `null` for the other and for Off |
 | `values` | the chips' values: `[{value, name, colour, on, n}]`, `value` `null` for no value, each value under "Other" in its place; none for Off |
 | `valueOf(record)` | a record's value: its field's, or for a label the label's value on `record.ref` (or on a ref given as a string); `null` for Off |
 | `colourOf(value)` | the value's color, `rgb()` or a hex, which a canvas can draw; `null` for no value and for Off |
 | `isOn(value)`, `keeps(record)` | whether a value, or a record's value, is on |
-| `attr(record)` | ` data-colour="<value>"` while a field is the color, `''` while a label is or for Off |
+| `attr(record)` | ` data-colour="<value>"` while a field is the color, `''` while a label is or for Off; with ` data-colour-tracks` for the fields past the first choice |
 | `counts(map)` | the counts of the current choice's values from the reader; `null` counts the page's elements again |
 | `query()` | the choice for the reader: `{field, off}`, `{label, name, off}`, or `null` for Off |
-| `strip(list, {rows, refs, preview}?)` | the tracks on another list, or the rows of one already on |
+| `strip(list, {rows, refs, records, preview, whole}?)` | the tracks on another list, or the rows of one already on |
 
 `thimble.markOf(ref)` gives each label's value on a record as `values: [{id, label, value, colour}]`, and every color
 it gives, `bar` too, is one a canvas can draw.

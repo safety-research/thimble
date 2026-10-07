@@ -5,7 +5,7 @@
 // - the held-out agreement line, in the browser's words (frontend canvas/details.ts agreementLine);
 // - what the panel asks of `thimble state label` (`--rows`, the records of a value its `… N more` asked for);
 // - the label deleted last, whose delete the labels list offers to undo (`thimble act label-undelete`).
-import { COLORS, LABEL_HUES } from './paint'
+import { COLORS, LABEL_HUES, PICKED_HUES } from './paint'
 
 /** The label colors by the names show_label takes, in the palette's order: `blue` is color 1. */
 export const COLOR_NAMES = ['blue', 'orange', 'green', 'sky blue', 'olive', 'teal', 'brown', 'navy', 'grass green', 'cerulean', 'chestnut', 'cyan'] as const
@@ -22,8 +22,10 @@ export function classColors(classes: readonly LabelClass[] | null | undefined): 
   return Object.keys(out).length ? out : undefined
 }
 
-/** The hue of label color `n`: LABEL_HUES for 1 to 12, dim for 0 (a value with no color). */
+/** The hue of label color `n`: LABEL_HUES for 1 to 12, PICKED_HUES for 13 to 18 (red, purple, pink, only as the
+ *  analyst picked them), dim for 0 (a value with no color). */
 export function hueOf(n: number): string {
+  if (n > LABEL_HUES.length && n <= LABEL_HUES.length + PICKED_HUES.length) return PICKED_HUES[n - LABEL_HUES.length - 1]!
   return n > 0 ? LABEL_HUES[(n - 1) % LABEL_HUES.length]! : COLORS.dim
 }
 

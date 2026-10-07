@@ -18,25 +18,31 @@
 //     onChange: (colour) => draw(),            the choice, a value turned on or off, or the label values changed
 //   })
 //
-// One menu lists together Off, the view's own fields it declares colorable and every label over files, those that mark
-// the view's files first, each label with its switch. Each field and label says how many values it colors by and shows
-// them as chips on a line under its name, cut off with … where they do not fit; a field that declares no values shows
-// those its records take on the page (the records the page hands valueOf, attr and keeps), the commonest first.
-// Choosing a label colors by it and opens thimble's label editor beside the menu (thimble.editLabel), which stays open;
-// Escape in the editor closes it and puts the focus back on the label's row, and a click in the view closes it too. A
-// field colors by the values its records take, each in a palette colour of its own (the label palette, --label-1 to
-// --label-12, in the order the values come: the declared `values`, each in the colour it names or else the next free
-// one, then the most frequent first, kept per view so a value keeps its colour; the values past the twelve share one
-// chip, "Other", in --label-none). Free places go in the order new values take them, blue, orange, green, gold, teal,
-// brown, sky, then the rest (backend/app/label_order.json, which views.frame_document puts in the frame as
-// window.__thimbleLabelOrder), so the first five are five hues with no second blue; a place a value names or keeps is
-// the same hue whatever the order. A label colors by its values on each anchored record, in the label's own colours;
-// choosing one turns it on, and a label the analyst turns on, here or anywhere in thimble, takes the colour. Off colors
-// nothing: no chips, no bars, the tracks a plain scrollbar.
+// One menu takes several choices: Off, then the view's own fields under "Fields" and every label over files under
+// "Labels", those that mark the view's files first, a label a choice as a field is (no switch of its own). The first
+// checked is the colour; each checked after it is a lane of its own in the list's tracks; with none checked the view is
+// Off. Each field and label says how many values it colors by and shows them as chips on a line under its name, cut off
+// with … where they do not fit; a field that declares no values shows those its records take on the page (the records
+// the page hands valueOf, attr and keeps), the commonest first. Checking a label turns it on in Files and every view and
+// opens thimble's label editor beside the menu (thimble.editLabel), which stays open; unchecking it turns it off unless
+// Rows or Filter by holds it. Escape in the editor closes it and puts the focus back on the label's row, and a click in
+// the view closes it too. A field colors by the values its records take, each in a palette colour of its own (the label
+// palette, --label-1 to --label-12, in the order the values come: the declared `values`, each in the colour it names or
+// else the next free one, then the most frequent first, kept per view so a value keeps its colour; the values past the
+// twelve share one chip, "Other", in --label-none). Free places go in the order new values take them, blue, orange,
+// green, gold, teal, brown, sky, then the rest (backend/app/label_order.json, which views.frame_document puts in the
+// frame as window.__thimbleLabelOrder), so the first five are five hues with no second blue; a place a value names or
+// keeps is the same hue whatever the order. --label-13 to --label-18, red, purple and pink, a value takes only when the
+// analyst picks it. A label colors by its values on each anchored record, in the label's own colours; a label the
+// analyst turns on anywhere in thimble takes the first place. Off colors nothing: no chips, no bars, no lanes, the tracks
+// a plain scrollbar. Colour marks the records alone, the anchored elements: a group's row takes none, and may show its
+// records' mix with thimble.mix.
 // Color by is thimble's small secondary button with the choice in it. The chosen field's values are key chips in the
 // top row (viewer_kit.css .chip-key), each a square swatch of its colour, its name and its count; a click turns a value
 // off or on, an Alt-click or a double click keeps that value alone, and hovering a value shows what it means: a label's
-// as the label says, a field's as the page declares it (or what the field is). A click on a chip's swatch opens the palette of thimble's twelve label colours: the one picked
+// as the label says, a field's as the page declares it (or what the field is). A click on a chip's swatch opens the picker of thimble's label colours
+// around the colour wheel (label_wheel.json, window.__thimbleLabelWheel); "N more" lists the chips it hides, each with
+// its box, its swatch (the picker under it) and its meaning on hover. The one picked
 // recolours the value everywhere in the view (its chip, the records' bars, the tracks, and what the page draws through
 // colourOf). A label's value keeps it through thimble.setLabelColour, so Files and every view show it; a field's value
 // keeps it per view with the choice, and the palette's Reset colors gives the field's values their own colours back. On
@@ -45,7 +51,7 @@
 // text or a fill.
 // The strip is a list's scrollbar as an editor's two tracks, as Files' Transcript mode draws them: the overview track
 // shows the whole list in one lane, each pixel row in the colour most of its records take, grey where they take no
-// value, a lane beside it for each other label that is on, and a dark frame around the part in view; a
+// value, a lane beside it for each of Color by's choices past the first, and a dark frame around the part in view; a
 // long list adds the zoomed track at the outer edge, which magnifies the frame: the part around the view at a finer
 // scale (once the list is ZOOM_AT times its box), its colours faded beyond the part in view, which lies under a lens
 // joined to the frame by two lines; a list whose colours the strip cannot know whole, or whose records take none, is a
@@ -67,7 +73,25 @@
   var NONE = '\u0000none' // the key of the records that take no value
   var OTHER = '\u0000other' // the key of the one chip for a field's values past the palette's twelve colours
   var OFF = 'off' // what thimble keeps for Color by: Off
-  var PALETTE = 12 // --label-1 .. --label-12; a value past them takes --label-none, under the one chip "Other"
+  var PALETTE = 12 // --label-1 .. --label-12, the places values take by themselves; a value past them takes --label-none,
+  // under the one chip "Other"
+  var PICKS = 18 // --label-1 .. --label-18, the places the analyst can pick: the twelve, then red, purple and pink, which
+  // no value takes by itself
+  // the picker's places (1 to PICKS) around the color wheel, a light and a dark of each hue (label_wheel.json, which
+  // views.frame_document puts in the frame as window.__thimbleLabelWheel): red, orange, gold, green, teal, sky, blue,
+  // purple, pink
+  var WHEEL = (function (w) {
+    var out = []
+    if (Array.isArray(w))
+      for (var i = 0; i < w.length; i++) {
+        var pair = Array.isArray(w[i]) ? w[i] : [w[i]]
+        for (var j = 0; j < pair.length; j++) if (pair[j] >= 1 && pair[j] <= PICKS && Math.floor(pair[j]) === pair[j] && out.indexOf(pair[j] - 1) < 0) out.push(pair[j] - 1)
+      }
+    if (out.length === PICKS) return out
+    for (out = [], i = 0; i < PICKS; i++) out.push(i)
+    return out
+  })(window.__thimbleLabelWheel)
+  var WHEEL_COLS = Math.max(1, Array.isArray(window.__thimbleLabelWheel) ? window.__thimbleLabelWheel.length : 9)
   // the palette's places (0 for --label-1) in the order new values take them: label_order.json, which the frame gets as
   // window.__thimbleLabelOrder; without a whole one, the palette's own order, and the page hears of it
   var ORDER = (function (o) {
@@ -91,7 +115,7 @@
   var ZOOM_SPAN = 5 // the zoomed track holds this many heights of the part in view
   var FADE = 0.3 // the zoomed track's colours beyond the part in view, as a share of their strength
   var MIN_MARK = 2 // px, a mark's least height on a track
-  var LANE_GAP = 1 // px between the overview's lanes, one for the Color by choice and one for each other label that is on
+  var LANE_GAP = 1 // px between the overview's lanes, one for the Color by choice and one for each choice past the first
   var LANES_MAX = 24 // px the lanes take together at most, past one lane of TRACK_W
   var LANE_MIN = 3 // px, the narrowest a lane gets
   var SNAP_PX = 4 // px either side of a click on the overview within which it snaps to a thin patch of colour
@@ -141,12 +165,17 @@
   // ---------------------------------------------------------------- what is kept per view
   function loadState() {
     var s = window.__thimbleColour
-    var out = { by: null, field: null, off: {}, seen: null, colours: {}, picked: {}, range: {}, parts: {} }
+    var out = { by: null, picks: null, field: null, off: {}, seen: null, colours: {}, picked: {}, range: {}, parts: {} }
     if (!s || typeof s !== 'object') return out
     // what the kit's other parts keep (viewer_controls.js, viewer_side.js): each part's own small object, by its name
     if (s.parts && typeof s.parts === 'object' && !Array.isArray(s.parts))
       for (var pk in s.parts) if (s.parts[pk] && typeof s.parts[pk] === 'object') out.parts[pk] = s.parts[pk]
     if (typeof s.by === 'string') out.by = s.by
+    // Color by's choices in order, the first the colour and each other a track; [] is Off. A view kept before Color by
+    // took several has its one choice
+    if (Array.isArray(s.picks)) out.picks = s.picks.filter(function (x) { return typeof x === 'string' && /^[fl]:/.test(x) })
+    else if (out.by === OFF) out.picks = []
+    else if (out.by && /^[fl]:/.test(out.by)) out.picks = [out.by]
     if (typeof s.field === 'string') out.field = s.field
     if (s.off && typeof s.off === 'object')
       for (var k in s.off) if (Array.isArray(s.off[k])) out.off[k] = s.off[k].filter(function (x) { return typeof x === 'string' })
@@ -164,7 +193,7 @@
         var pm = s.picked[pf]
         if (!pm || typeof pm !== 'object') continue
         out.picked[pf] = {}
-        for (var pv in pm) if (typeof pm[pv] === 'number' && pm[pv] >= 0 && pm[pv] < PALETTE && Math.floor(pm[pv]) === pm[pv]) out.picked[pf][pv] = pm[pv]
+        for (var pv in pm) if (typeof pm[pv] === 'number' && pm[pv] >= 0 && pm[pv] < PICKS && Math.floor(pm[pv]) === pm[pv]) out.picked[pf][pv] = pm[pv]
       }
     // the time ranges of viewer_range.js, by their key: [from, to]
     if (s.range && typeof s.range === 'object')
@@ -216,24 +245,34 @@
     var fresh = ids.filter(function (id) {
       return before.indexOf(id) < 0 && held.indexOf(id) < 0
     })
-    if (fresh.length) S.by = 'l:' + fresh[fresh.length - 1]
+    if (!fresh.length) return
+    // the label takes the first place, the colour; a field it takes it from gives way, a label there keeps a track
+    var key = 'l:' + fresh[fresh.length - 1]
+    var now = control ? control.pickKeys() : []
+    if (now.length && now[0].indexOf('f:') === 0) now = now.slice(1)
+    S.picks = [key].concat(now.filter(function (k) { return k !== key }))
+    S.by = key
   }
 
   // A label deleted while the view colors by it leaves Color by at Off: it was in thimble's list of every label (`all`)
   // and is no longer, or the first whole list the page hears lacks it. A label turned off stays in that list, and the
   // colour goes back to the view's field.
   function dropDeleted(before, now) {
-    var by = S.by || ''
-    if (by.indexOf('l:') !== 0 || !now || !Array.isArray(now.all)) return
-    var id = by.slice(2)
-    var named = function (l) {
-      return String(l.id) === id
-    }
-    var had = before && Array.isArray(before.all) ? before.all.some(named) : now.all.length > 0
-    if (had && !now.all.some(named)) {
-      S.by = OFF
-      save()
-    }
+    if (!now || !Array.isArray(now.all)) return
+    var keys = S.picks || (S.by && S.by.indexOf('l:') === 0 ? [S.by] : [])
+    var gone = keys.filter(function (k) {
+      if (k.indexOf('l:') !== 0) return false
+      var named = function (l) {
+        return String(l.id) === k.slice(2)
+      }
+      var had = before && Array.isArray(before.all) ? before.all.some(named) : now.all.length > 0
+      return had && !now.all.some(named)
+    })
+    if (!gone.length) return
+    S.picks = keys.filter(function (k) {
+      return gone.indexOf(k) < 0
+    })
+    save()
   }
 
   kit.labels(function (state, labelsChanged) {
@@ -249,7 +288,8 @@
   })
 
   function save() {
-    var keep = { v: 1, by: S.by, field: S.field, off: S.off, seen: S.seen || [], colours: S.colours, picked: S.picked, range: S.range, parts: S.parts }
+    if (S.picks) S.by = S.picks[0] || OFF
+    var keep = { v: 1, by: S.by, picks: S.picks, field: S.field, off: S.off, seen: S.seen || [], colours: S.colours, picked: S.picked, range: S.range, parts: S.parts }
     try {
       kit.save(JSON.parse(JSON.stringify(keep)))
     } catch (e) {}
@@ -309,11 +349,48 @@
     var top = side === 'above' ? y - h - 10 : side === 'under' ? y + 8 : y + 14
     if (top + h > innerHeight - 6) top = (side === 'under' && top0 != null ? top0 : y) - h - (side === 'under' ? 8 : 10)
     if (top < 6) top = 6
-    tipEl.style.left = left + 'px'
+    tipEl.style.left = clearOfStrips(left, top, w, h) + 'px'
     tipEl.style.top = top + 'px'
   }
   function untip() {
     if (tipEl) tipEl.style.display = 'none'
+  }
+  // A popover's left edge, `left` moved so that the box (left, top, w, h) leaves every list's tracks clear: a menu, a
+  // tip or the picker that would lie over them stands left of them, where the frame has room
+  var CLEAR = 6 // px a popover keeps from the tracks
+  function stripRects() {
+    var out = []
+    var all = control ? control.strips : []
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i].el
+      if (!el || !el.isConnected || el.style.display === 'none') continue
+      var r = el.getBoundingClientRect()
+      if (r.width && r.height) out.push(r)
+    }
+    return out
+  }
+  function clearOfStrips(left, top, w, h) {
+    var rs = stripRects()
+    for (var i = 0; i < rs.length; i++) {
+      var r = rs[i]
+      if (top + h <= r.top || top >= r.bottom) continue
+      if (left + w <= r.left - CLEAR || left >= r.right + CLEAR) continue
+      var to = r.left - CLEAR - w
+      if (to >= 6) left = to
+    }
+    return left
+  }
+  // the side thimble's label editor opens on beside a menu: to its left where its right would lie over a list's tracks
+  // and its left has room (the editor is EDITOR_W px wide); else as thimble places it
+  var EDITOR_W = 340
+  function editorSide(anchor) {
+    var a = anchor.getBoundingClientRect()
+    var rs = stripRects()
+    for (var i = 0; i < rs.length; i++) {
+      var r = rs[i]
+      if (a.right + 8 + EDITOR_W > r.left - CLEAR && a.left - 8 - EDITOR_W >= 8) return 'left'
+    }
+    return undefined
   }
 
   // where a palette place comes in ORDER, the order new values take the places in; a place past the palette after all
@@ -461,7 +538,7 @@
         }
       }
       if (any) self.soon()
-    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-colour', 'data-anchor', 'data-thimble-off'] })
+    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-colour', 'data-colour-tracks', 'data-anchor', 'data-thimble-off'] })
     if (opts.strip) this.strip(opts.strip, { whole: true })
   }
 
@@ -469,21 +546,49 @@
     for (var i = 0; i < this.fields.length; i++) if (this.fields[i].name === name) return this.fields[i]
     return null
   }
-  // what the colour is now: Off, a field, a label that is on, or nothing
-  Control.prototype.choice = function () {
-    var by = S.by || ''
-    if (by === OFF) return { off: true, title: 'Off', key: OFF }
+  // a kept choice, 'f:<field>' or 'l:<label id>', as the control reads it: a field the view has, a label that is on
+  Control.prototype.resolve = function (by) {
+    if (typeof by !== 'string') return null
     if (by.indexOf('l:') === 0) {
       var id = by.slice(2)
       var l = isOn(id) ? labelById(id) : null
-      if (l) return { label: id, title: l.name, key: by }
-    } else if (by.indexOf('f:') === 0 && this.field(by.slice(2))) {
-      var f = this.field(by.slice(2))
-      return { field: f.name, title: f.title, key: by }
+      return l ? { label: id, title: l.name, key: by } : null
     }
+    var f = by.indexOf('f:') === 0 ? this.field(by.slice(2)) : null
+    return f ? { field: f.name, title: f.title, key: by } : null
+  }
+  // Color by's choices now, in order: the first is the colour, each other a track beside the list's (Strip). None for
+  // Off; with none that holds (a label turned off, a field the view dropped), the field chosen last or the first
+  Control.prototype.picks = function () {
+    if (S.picks && !S.picks.length) return []
+    var out = []
+    var seen = {}
+    var raw = S.picks || []
+    for (var i = 0; i < raw.length; i++) {
+      var c = seen[raw[i]] ? null : this.resolve(raw[i])
+      if (!c) continue
+      seen[raw[i]] = true
+      out.push(c)
+    }
+    if (out.length) return out
     var name = S.field && this.field(S.field) ? S.field : this.initial
     var fd = name ? this.field(name) : null
-    return fd ? { field: fd.name, title: fd.title, key: 'f:' + fd.name } : null
+    return fd ? [{ field: fd.name, title: fd.title, key: 'f:' + fd.name }] : []
+  }
+  Control.prototype.pickKeys = function () {
+    return this.picks().map(function (c) {
+      return c.key
+    })
+  }
+  // what the colour is now: Off, a field, a label that is on, or nothing
+  Control.prototype.choice = function () {
+    if (S.picks && !S.picks.length) return { off: true, title: 'Off', key: OFF }
+    return this.picks()[0] || null
+  }
+  // the choices past the first, each a track of its own
+  Control.prototype.extra = function () {
+    var c = this.choice()
+    return c && !c.off ? this.picks().slice(1) : []
   }
   Control.prototype.offSet = function (c) {
     c = c || this.choice()
@@ -499,10 +604,10 @@
     var key = keyOf(value)
     if (key === NONE) return null
     var idx = this.placeOf(field, key)
-    return kit.realColour(idx < PALETTE ? 'var(--label-' + (idx + 1) + ')' : 'var(--label-none)')
+    return kit.realColour(idx >= 0 ? 'var(--label-' + (idx + 1) + ')' : 'var(--label-none)')
   }
-  // the palette place of a field's value (see fieldColour), a value seen for the first time given one; PALETTE or more
-  // for a value past the palette's twelve, which goes under "Other"
+  // the palette place of a field's value (see fieldColour), a value seen for the first time given one: a place the
+  // analyst picked (any of PICKS), else one of the twelve; -1 for a value past them, which goes under "Other"
   Control.prototype.placeOf = function (field, key) {
     var picked = S.picked[field]
     if (picked && typeof picked[key] === 'number') return picked[key]
@@ -510,7 +615,7 @@
     if (slot >= 0) return slot
     var map = S.colours[field] || (S.colours[field] = {})
     if (!(key in map)) this.assign(field, key)
-    return typeof map[key] === 'number' ? map[key] : PALETTE
+    return typeof map[key] === 'number' && map[key] < PALETTE ? map[key] : -1
   }
   Control.prototype.assign = function (field, want) {
     var map = S.colours[field] || (S.colours[field] = {})
@@ -558,13 +663,16 @@
   Control.prototype.valueOf = function (record) {
     var c = this.choice()
     if (!c || c.off || record == null) return null
-    if (c.field) {
-      // a field's own value(record) takes any record the page has, such as a row's index into its columns
-      var f = this.field(c.field)
-      var v = f && f.value ? f.value(record) : typeof record === 'object' ? record[c.field] : null
-      return v == null || v === '' ? null : String(v)
-    }
+    if (c.field) return this.fieldValue(c.field, record)
     return labelValue(c.label, record)
+  }
+  // a record's value of a field: a field's own value(record) takes any record the page has, such as a row's index into
+  // its columns
+  Control.prototype.fieldValue = function (name, record) {
+    var f = this.field(name)
+    if (!f || record == null) return null
+    var v = f.value ? f.value(record) : typeof record === 'object' ? record[name] : null
+    return v == null || v === '' || typeof v === 'object' ? null : String(v)
   }
   // a label's value on a record (record.ref, or a ref given as a string), from the marks thimble draws; null for none
   function labelValue(id, record) {
@@ -585,7 +693,7 @@
     if (!c || c.off) return out
     var seen = {}
     var records = 0
-    var els = document.querySelectorAll(c.field ? '[data-colour]' : '[data-anchor]')
+    var els = document.querySelectorAll(c.field ? '[data-anchor][data-colour]' : '[data-anchor]')
     for (var i = 0; i < els.length; i++) {
       var e = els[i]
       if (e.closest('.thimble-colour-mount,.thimble-colour-menu')) continue
@@ -651,7 +759,7 @@
     var kept = []
     var other = null
     for (var o = 0; o < out.length; o++) {
-      if (this.placeOf(f.name, out[o].key) < PALETTE) kept.push(out[o])
+      if (this.placeOf(f.name, out[o].key) >= 0) kept.push(out[o])
       else {
         if (!other) kept.push((other = { key: OTHER, value: null, name: 'Other', colour: kit.realColour('var(--label-none)'), n: 0, members: [] }))
         other.members.push(out[o])
@@ -727,7 +835,7 @@
   Control.prototype.refresh = function () {
     this.domCounts = this.countDom()
     this.values = this.list()
-    var key = JSON.stringify([this.choice(), this.values, this.offSet()])
+    var key = JSON.stringify([this.choice(), this.values, this.offSet(), this.extra()])
     if (key !== this.lastKey) {
       this.lastKey = key
       this.render()
@@ -771,6 +879,13 @@
   Control.prototype.forget = function () {
     var c = this.choice()
     var key = c ? c.key : ''
+    // the tracks' values, which the page writes for the choices past the first (attr), go with those choices
+    var tracks = JSON.stringify(this.extra().map(function (x) { return x.key }))
+    if (this.tracksKey !== undefined && this.tracksKey !== tracks) {
+      var ts = document.querySelectorAll('[data-colour-tracks]')
+      for (var t = 0; t < ts.length; t++) ts[t].removeAttribute('data-colour-tracks')
+    }
+    this.tracksKey = tracks
     if (this.choiceKey === undefined || this.choiceKey === key) {
       this.choiceKey = key
       return
@@ -797,7 +912,7 @@
   Control.prototype.drawnKey = function () {
     var c = this.choice()
     var l = c && c.label ? labelById(c.label) : null
-    return JSON.stringify([c && c.key, l ? (l.values || []).map(function (v) { return [v.name, v.colour, v.highlight] }) : null])
+    return JSON.stringify([c && c.key, l ? (l.values || []).map(function (v) { return [v.name, v.colour, v.highlight] }) : null, this.extra().map(function (x) { return x.key })])
   }
   Control.prototype.labelsChanged = function () {
     this.forget()
@@ -837,7 +952,9 @@
     var off = this.offSet(c)
     var lab = c && c.label ? ' data-label="' + esc(c.label) + '"' : ''
     // Color by is thimble's small secondary button, as a menu's trigger: its choice in it and a chevron
-    var by = '<button type="button" class="btn btn-secondary btn-sm thimble-colour-by" aria-haspopup="menu" aria-expanded="' + (this.menu && !this.menu.values && this.menu.palette == null ? 'true' : 'false') + '"' + lab + '><span class="thimble-colour-k">Color by:</span><b>' + esc(c ? c.title : 'None') + '</b>' + ico('down') + '</button>'
+    // the choices past the first, each a track beside the list's, as "+N" after the first
+    var more = this.extra().length
+    var by = '<button type="button" class="btn btn-secondary btn-sm thimble-colour-by" aria-haspopup="menu" aria-expanded="' + (this.menu && !this.menu.values && this.menu.palette == null ? 'true' : 'false') + '"' + lab + '><span class="thimble-colour-k">Color by:</span><b>' + esc(c ? c.title : 'None') + '</b>' + (more ? '<span class="thimble-colour-plus" title="' + esc(this.extra().map(function (x) { return x.title }).join(', ') + ': a track each') + '">+' + more + '</span>' : '') + ico('down') + '</button>'
     // each value is a key chip: a square swatch of its colour, its name and its count
     var chips = ''
     for (var i = 0; i < this.values.length; i++) {
@@ -893,12 +1010,15 @@
     var chips = box.querySelectorAll('.thimble-colour-chip')
     for (var i = 0; i < chips.length; i++) chips[i].hidden = false
     more.hidden = true
+    // the first chip "N more" stands for: none while every chip shows
+    this.hiddenFrom = chips.length
     if (!over()) return
     more.hidden = false
     var hid = 0
     for (var j = chips.length - 1; j >= 0 && over(); j--) {
       chips[j].hidden = true
       hid++
+      this.hiddenFrom = j
       more.innerHTML = hid + ' more' + ico('down')
     }
     // no chip fits and "N more" not even alone: the unseen Reset gives up its place, which changes no chip that shows
@@ -1020,15 +1140,30 @@
     S.off[c.key] = alone ? [] : others
     this.changed()
   }
+  // `by` alone the choice: 'f:<field>', 'l:<label id>' or Off
   Control.prototype.choose = function (by) {
+    S.picks = by === OFF ? [] : [by]
     S.by = by
     if (by.indexOf('f:') === 0) S.field = by.slice(2)
     this.changed()
   }
+  // `by` added after the other choices, a track of its own unless it is the first, or taken away; with none left Color
+  // by is Off
+  Control.prototype.togglePick = function (by) {
+    var keys = this.pickKeys()
+    var at = keys.indexOf(by)
+    if (at >= 0) keys.splice(at, 1)
+    else keys.push(by)
+    S.picks = keys
+    if (keys[0] && keys[0].indexOf('f:') === 0) S.field = keys[0].slice(2)
+    else if (by.indexOf('f:') === 0 && at < 0) S.field = by.slice(2)
+    this.changed()
+    return at < 0
+  }
 
   // ---------------------------------------------------------------- a value's colour
-  // The palette under a chip: thimble's twelve label colours (onLabels' palette, else the tokens), the value's own
-  // ringed; for a field, Reset colors when the analyst picked any of its values' colours.
+  // The palette under a chip: thimble's label colours around the colour wheel (the labels message's palette, else the
+  // tokens), the value's own ringed; for a field, Reset colors when the analyst picked any of its values' colours.
   Control.prototype.togglePalette = function (chip) {
     var v = this.values[Number(chip.getAttribute('data-i'))]
     if (this.menu) {
@@ -1040,9 +1175,10 @@
     untip()
     this.openMenu(chip, false, v.key)
   }
+  // a palette place's colour: thimble's (the labels message's palette, the PICKS colours then the grey), else the token
   function paletteColour(i) {
     var pal = labelState && Array.isArray(labelState.palette) ? labelState.palette : null
-    return pal && typeof pal[i] === 'string' ? pal[i] : kit.realColour('var(--label-' + (i + 1) + ')')
+    return pal && pal.length > PICKS && typeof pal[i] === 'string' ? pal[i] : kit.realColour('var(--label-' + (i + 1) + ')')
   }
   // a colour as the browser computes it, so that the palette's own (a token's hex) and a value's (rgb) compare
   var colourProbe = null
@@ -1058,29 +1194,39 @@
     colourProbe.style.color = kit.realColour(c)
     return getComputedStyle(colourProbe).color
   }
-  Control.prototype.paletteHtml = function (key) {
-    var c = this.choice()
-    var v = null
-    for (var i = 0; i < this.values.length; i++) if (this.values[i].key === key) v = this.values[i]
-    if (!c || c.off || !v) return ''
+  // a value of the choice by its key, those under "Other" too
+  Control.prototype.valueByKey = function (key) {
+    var all = this.flat()
+    for (var i = 0; i < all.length; i++) if (all[i].key === key) return all[i]
+    return null
+  }
+  // the picker's swatches around the colour wheel, a column per hue, its light above its dark (WHEEL), the value's own
+  // ringed
+  Control.prototype.picksHtml = function (v) {
     var now = computed(v.colour)
     var grid = ''
-    for (var j = 0; j < PALETTE; j++) {
-      var col = paletteColour(j)
+    for (var j = 0; j < WHEEL.length; j++) {
+      var at = WHEEL[j]
+      var col = paletteColour(at)
       var cur = !!now && computed(col) === now
-      grid += '<button type="button" class="thimble-colour-pick' + (cur ? ' on' : '') + '" data-pick="' + j + '" aria-pressed="' + cur + '" aria-label="' + esc('Colour ' + (j + 1)) + '" style="--c:' + esc(col) + '"></button>'
+      grid += '<button type="button" class="thimble-colour-pick' + (cur ? ' on' : '') + '" data-pick="' + at + '" aria-pressed="' + cur + '" aria-label="' + esc('Color ' + (at + 1)) + '" style="--c:' + esc(col) + '"></button>'
     }
+    return '<div class="thimble-colour-picks" style="--cols:' + WHEEL_COLS + '">' + grid + '</div>'
+  }
+  Control.prototype.paletteHtml = function (key) {
+    var c = this.choice()
+    var v = this.valueByKey(key)
+    if (!c || c.off || !v) return ''
     var picked = c.field ? S.picked[c.field] : null
     var reset = picked && Object.keys(picked).length ? '<button type="button" class="btn btn-ghost btn-sm thimble-colour-repick" data-reset-colours>' + ico('reset') + 'Reset colors</button>' : ''
-    return '<div class="thimble-colour-head"><span class="thimble-colour-sw" style="--c:' + esc(v.colour || '') + '"></span>' + esc(v.name) + '</div><div class="thimble-colour-picks">' + grid + '</div>' + reset
+    return '<div class="thimble-colour-head"><span class="thimble-colour-sw" style="--c:' + esc(v.colour || '') + '"></span>' + esc(v.name) + '</div>' + this.picksHtml(v) + reset
   }
   // the colour picked for a value: a label's through thimble, a field's kept per view
   Control.prototype.pick = function (key, i) {
     var c = this.choice()
     if (!c || c.off || key === NONE) return
     if (c.label) {
-      var v = null
-      for (var k = 0; k < this.values.length; k++) if (this.values[k].key === key) v = this.values[k]
+      var v = this.valueByKey(key)
       if (v && v.value != null) thimble.setLabelColour(c.label, v.value, paletteColour(i)).catch(function (e) { kit.report(e) })
       return
     }
@@ -1152,9 +1298,10 @@
     for (var d = 0; d < names.length; d++) used[f.slots[d]] = true
     var picked = S.picked[f.name] || {}
     for (var i = 0; i < fresh.length; i++) {
-      var at = typeof picked[fresh[i]] === 'number' ? picked[fresh[i]] : freePlace(used)
+      var mine = typeof picked[fresh[i]] === 'number'
+      var at = mine ? picked[fresh[i]] : freePlace(used)
       used[at] = true
-      out.push({ name: fresh[i], colour: kit.realColour(at < PALETTE ? 'var(--label-' + (at + 1) + ')' : 'var(--label-none)') })
+      out.push({ name: fresh[i], colour: kit.realColour(mine || at < PALETTE ? 'var(--label-' + (at + 1) + ')' : 'var(--label-none)') })
     }
     return out
   }
@@ -1170,12 +1317,12 @@
   }
   // a field's or a label's row: its name and how many values it has, then its values as chips on one line, cut off with
   // … where they do not fit; nothing of its values when none is known
-  function choiceBody(colour, name, values) {
+  function choiceBody(colour, name, values, note) {
     var n = values.length
     return (
       '<span class="thimble-colour-body"><span class="thimble-colour-top">' +
       (colour ? '<span class="thimble-colour-sw" style="--c:' + esc(colour) + '"></span>' : '') +
-      '<span class="thimble-colour-nm">' + esc(name) + '</span>' +
+      '<span class="thimble-colour-nm">' + esc(name) + '</span>' + (note || '') +
       (n ? '<span class="thimble-colour-n">' + num(n) + (n === 1 ? ' value' : ' values') + '</span>' : '') +
       '</span>' +
       (n
@@ -1190,49 +1337,74 @@
       '</span>'
     )
   }
+  // the values the "N more" of the top row stands for: the chips it hides, each with what its chip offers: its box turns
+  // it off or on (Alt keeps it alone), its swatch opens the picker under it, and hovering it says what it means
+  Control.prototype.valuesHtml = function () {
+    var c = this.choice()
+    var off = this.offSet(c)
+    var self = this
+    var from = Math.max(0, Math.min(this.values.length, this.hiddenFrom == null ? 0 : this.hiddenFrom))
+    var pickFor = this.menu ? this.menu.pickFor : null
+    var html = '<div class="thimble-colour-head">' + esc(c ? c.title : '') + '</div>'
+    for (var i = from; i < this.values.length; i++) {
+      var v = this.values[i]
+      var on = self.chipOn(v, off)
+      var paints = !!v.colour && !v.members && v.value != null
+      html +=
+        '<div class="thimble-colour-item thimble-colour-val" role="menuitemcheckbox" tabindex="0" aria-checked="' + on + '" data-i="' + i + '"' + (c && c.label ? ' data-label="' + esc(c.label) + '"' : '') + '>' +
+        '<span class="thimble-colour-box' + (on ? ' on' : '') + '">' + (on ? ico('check') : '') + '</span>' +
+        (paints
+          ? '<button type="button" class="thimble-colour-sw thimble-colour-swbtn" data-palette data-i="' + i + '" aria-expanded="' + (pickFor === v.key) + '" aria-label="' + esc('Color of ' + v.name) + '" title="' + esc('Color of ' + v.name) + '" style="--c:' + esc(v.colour) + '"></button>'
+          : '<span class="thimble-colour-sw"' + (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + '></span>') +
+        '<span class="thimble-colour-nm">' + esc(v.name) + '</span><span class="thimble-colour-n">' + num(v.n) + '</span></div>'
+      if (pickFor === v.key && paints) {
+        var picked = c && c.field ? S.picked[c.field] : null
+        html += '<div class="thimble-colour-inpick">' + this.picksHtml(v) + (picked && Object.keys(picked).length ? '<button type="button" class="btn btn-ghost btn-sm thimble-colour-repick" data-reset-colours>' + ico('reset') + 'Reset colors</button>' : '') + '</div>'
+      }
+    }
+    return html
+  }
+  // the labels another part of the kit holds (the one Rows groups by, the one Filter by filters by)
+  function heldIds() {
+    var held = []
+    for (var h = 0; h < holds.length; h++) held = held.concat(safe(holds[h], []) || [])
+    return held.map(String)
+  }
+  // Color by's menu: Off, then the view's fields and every label, any of them chosen together. The first chosen is the
+  // colour and each other a track beside the list's; a choice is checked, and one past the first says it is a track
   Control.prototype.menuHtml = function (values, paletteKey) {
     var c = this.choice()
     if (paletteKey != null) return this.paletteHtml(paletteKey)
-    if (values) {
-      var off = this.offSet(c)
-      var self = this
-      return (
-        '<div class="thimble-colour-head">' + esc(c ? c.title : '') + '</div>' +
-        this.values
-          .map(function (v, i) {
-            var on = self.chipOn(v, off)
-            return '<button type="button" class="thimble-colour-item" role="menuitemcheckbox" aria-checked="' + on + '" data-i="' + i + '"' + (c && c.label ? ' data-label="' + esc(c.label) + '"' : '') + '><span class="thimble-colour-box' + (on ? ' on' : '') + '">' + (on ? ico('check') : '') + '</span><span class="thimble-colour-sw"' + (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + '></span><span class="thimble-colour-nm">' + esc(v.name) + '</span><span class="thimble-colour-n">' + num(v.n) + '</span></button>'
-          })
-          .join('')
-      )
+    if (values) return this.valuesHtml()
+    var keys = c && c.off ? [] : this.pickKeys()
+    var box = function (on) {
+      return '<span class="thimble-colour-box' + (on ? ' on' : '') + '">' + (on ? ico('check') : '') + '</span>'
     }
-    var tick = function (on) {
-      return '<span class="thimble-colour-tick">' + (on ? ico('check') : '') + '</span>'
+    var track = function (by) {
+      return keys.indexOf(by) > 0 ? '<span class="thimble-colour-track-n">track</span>' : ''
     }
     var html = '<div class="thimble-colour-head">Color by</div>'
-    html += '<button type="button" class="thimble-colour-item" role="menuitemradio" aria-checked="' + !!(c && c.off) + '" data-by="' + OFF + '">' + tick(!!(c && c.off)) + '<span class="thimble-colour-nm">Off</span></button>'
+    html += '<button type="button" class="thimble-colour-item" role="menuitemradio" aria-checked="' + !!(c && c.off) + '" data-by="' + OFF + '"><span class="thimble-colour-tick">' + (c && c.off ? ico('check') : '') + '</span><span class="thimble-colour-nm">Off</span></button>'
     var self = this
+    if (this.fields.length) html += '<div class="thimble-colour-head">Fields</div>'
     html += this.fields
       .map(function (f) {
-        var on = !!(c && c.field === f.name)
-        return '<button type="button" class="thimble-colour-item thimble-colour-choice" role="menuitemradio" aria-checked="' + on + '" data-by="' + esc('f:' + f.name) + '"' + (f.description ? ' title="' + esc(f.description) + '"' : '') + '>' + tick(on) + choiceBody('', f.title, self.fieldValues(f)) + '</button>'
+        var by = 'f:' + f.name
+        var on = keys.indexOf(by) >= 0
+        return '<button type="button" class="thimble-colour-item thimble-colour-choice" role="menuitemcheckbox" aria-checked="' + on + '" data-by="' + esc(by) + '"' + (f.description ? ' title="' + esc(f.description) + '"' : '') + '>' + box(on) + choiceBody('', f.title, self.fieldValues(f), track(by)) + '</button>'
       })
       .join('')
     var all = allLabels()
     var row = function (l) {
-      var on = !!(c && c.label === l.id)
-      var lit = !!l.on || isOn(l.id)
-      return (
-        '<div class="thimble-colour-item thimble-colour-label thimble-colour-choice" role="menuitemradio" tabindex="0" aria-checked="' + on + '" data-by="' + esc('l:' + l.id) + '" data-label="' + esc(l.id) + '">' + tick(on) +
-        choiceBody(l.colour || '', l.name, labelValues(l)) +
-        '<button type="button" class="thimble-colour-switch' + (lit ? ' on' : '') + '" role="switch" aria-checked="' + lit + '" aria-label="' + esc((lit ? 'Turn off ' : 'Turn on ') + l.name) + '" data-switch="' + esc(l.id) + '" data-label="' + esc(l.id) + '"><span></span></button></div>'
-      )
+      var by = 'l:' + l.id
+      var on = keys.indexOf(by) >= 0
+      return '<button type="button" class="thimble-colour-item thimble-colour-label thimble-colour-choice" role="menuitemcheckbox" aria-checked="' + on + '" data-by="' + esc(by) + '" data-label="' + esc(l.id) + '">' + box(on) + choiceBody(l.colour || '', l.name, labelValues(l), track(by)) + '</button>'
     }
+    // the labels that mark the view's files first
     var here = all.filter(function (l) { return l.here })
     var other = all.filter(function (l) { return !l.here })
-    html += '<div class="thimble-colour-head">Labels over these files</div>'
-    html += here.length ? here.map(row).join('') : '<div class="thimble-colour-note">No label covers these files yet</div>'
-    if (other.length) html += '<div class="thimble-colour-head">Other labels</div>' + other.map(row).join('')
+    html += '<div class="thimble-colour-head">Labels</div>'
+    html += here.length || other.length ? here.concat(other).map(row).join('') : '<div class="thimble-colour-note">No label covers these files yet</div>'
     if (typeof thimble.newLabel === 'function') html += '<div class="thimble-colour-sep"></div><button type="button" class="thimble-colour-item" data-new>' + '<span class="thimble-colour-tick">' + ico('plus') + '</span><span class="thimble-colour-nm">New label</span></button>'
     return html
   }
@@ -1244,7 +1416,7 @@
     m.setAttribute('role', pal ? 'dialog' : 'menu')
     if (pal) m.setAttribute('aria-label', 'Color')
     m.setAttribute('data-thimble-chrome', '')
-    this.menu = { el: m, anchor: anchor, values: !!values, palette: pal ? paletteKey : null }
+    this.menu = { el: m, anchor: anchor, values: !!values, palette: pal ? paletteKey : null, pickFor: null }
     m.innerHTML = this.menuHtml(values, paletteKey)
     document.body.appendChild(m)
     this.placeMenu()
@@ -1277,7 +1449,7 @@
       })
     }
     m.addEventListener('keydown', function (e) {
-      if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('thimble-colour-label')) {
+      if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('thimble-colour-val')) {
         e.preventDefault()
         e.target.click()
       }
@@ -1297,9 +1469,10 @@
     var left = Math.max(8, Math.min(r.left, vw - w - 8))
     var top = r.bottom + 4
     if (top + h > innerHeight - 8 && r.top - 4 - h >= 8) top = r.top - 4 - h
-    m.style.left = left + 'px'
-    m.style.top = Math.max(8, top) + 'px'
-    m.style.maxHeight = Math.max(120, innerHeight - Math.max(8, top) - 8) + 'px'
+    top = Math.max(8, top)
+    m.style.left = clearOfStrips(left, top, w, Math.min(h, innerHeight - top - 8)) + 'px'
+    m.style.top = top + 'px'
+    m.style.maxHeight = Math.max(120, innerHeight - top - 8) + 'px'
   }
   Control.prototype.redrawMenu = function () {
     if (!this.menu) return
@@ -1309,7 +1482,6 @@
   }
   Control.prototype.menuClick = function (e, values) {
     var t = e.target
-    var self = this
     if (this.menu && this.menu.palette != null) {
       var pk = this.menu.palette
       var pick = t.closest('[data-pick]')
@@ -1324,24 +1496,30 @@
       return
     }
     if (values) {
+      // the picker under a value: a colour picked recolours it, and the menu stays open with its new colour
+      var pk2 = this.menu ? this.menu.pickFor : null
+      var pick2 = t.closest('[data-pick]')
+      if (pick2 && pk2 != null) {
+        this.menu.pickFor = null
+        this.pick(pk2, Number(pick2.getAttribute('data-pick')))
+        return this.redrawMenu()
+      }
+      if (t.closest('[data-reset-colours]')) {
+        this.menu.pickFor = null
+        this.resetColours()
+        return this.redrawMenu()
+      }
       var it = t.closest('[data-i]')
       var key = it ? this.keyAt(it) : null
       if (key == null) return
+      if (t.closest('[data-palette]')) {
+        untip()
+        this.menu.pickFor = this.menu.pickFor === key ? null : key
+        return this.redrawMenu()
+      }
       if (e.altKey) this.only(key)
       else this.toggle(key)
       return this.redrawMenu()
-    }
-    var sw = t.closest('[data-switch]')
-    if (sw) {
-      e.stopPropagation()
-      var id = sw.getAttribute('data-switch')
-      var on = !(isOn(id))
-      sw.classList.toggle('on', on)
-      sw.setAttribute('aria-checked', String(on))
-      thimble.setLabel(id, on).catch(function () {
-        self.redrawMenu()
-      })
-      return
     }
     if (t.closest('[data-new]')) {
       this.closeMenu()
@@ -1352,26 +1530,44 @@
     if (!item) return
     var by = item.getAttribute('data-by')
     if (by.indexOf('l:') === 0) return this.chooseLabel(by.slice(2))
-    this.closeMenu()
-    this.choose(by)
+    if (by === OFF) {
+      this.closeMenu()
+      return this.choose(OFF)
+    }
+    this.togglePick(by)
+    this.redrawMenu()
   }
-  // A label chosen: colored by, and its editor opened beside the menu, which stays open with the label checked. Both
-  // calls go during the analyst's click: the label turned on first (it takes the colour once thimble says it is on),
-  // then the editor, which takes the focus out of the view. The editor closed from inside, the focus goes back to the
-  // label's row.
+  // A label checked: one of Color by's choices, turned on in Files and every view, and its editor opened beside the
+  // menu, which stays open. Both calls go during the analyst's click: the label turned on first (it colours once
+  // thimble says it is on), then the editor, which takes the focus out of the view; the editor closed from inside, the
+  // focus goes back to the label's row. A label unchecked leaves the choices and is turned off, unless another part of
+  // the kit (Rows, Filter by) holds it.
   Control.prototype.chooseLabel = function (id) {
     var self = this
     var by = 'l:' + id
+    if (this.pickKeys().indexOf(by) >= 0) {
+      this.togglePick(by)
+      if (heldIds().indexOf(String(id)) < 0) thimble.setLabel(id, false).catch(function () {})
+      return this.redrawMenu()
+    }
+    // seen, so that it keeps its place after the others when thimble says it is on (notice)
+    if (!Array.isArray(S.seen)) S.seen = []
+    if (S.seen.indexOf(String(id)) < 0) S.seen.push(String(id))
     if (!isOn(id)) {
-      S.by = by
+      var keys = this.pickKeys().filter(function (k) {
+        return k !== by
+      })
+      keys.push(by)
+      S.picks = keys
       save()
       thimble.setLabel(id, true).catch(function () {})
-    } else this.choose(by)
+    } else this.togglePick(by)
     this.redrawMenu()
     if (typeof thimble.editLabel !== 'function' || !this.menu) return
     thimble
       .editLabel(id, {
         anchor: this.menu.el,
+        side: editorSide(this.menu.el),
         onClose: function (focused) {
           // closed from inside it: the focus comes back to the label's row, the menu drawn again since it was opened
           var row = focused && self.menu && self.menu.el.querySelector('[data-by="' + by.replace(/["\\]/g, '\\$&') + '"]')
@@ -1385,8 +1581,8 @@
   // A list's scrollbar as a music or video editor's navigator, in one or two tracks beside the list (the list's own
   // scrollbar is hidden in their favour), drawn as Files' Transcript mode draws its tracks. The overview track is the
   // whole list in one lane: each pixel row in the colour of a value that is on which most of the records there take,
-  // grey where they take no value (as the no-value chip is), never two colours side by side; each other label that is
-  // on has a lane of its own beside it, in its own colours, named on hover, the lanes narrower as more come; a dark
+  // grey where they take no value (as the no-value chip is), never two colours side by side; each of Color by's
+  // choices past the first has a lane of its own beside it, in its own colours, named on hover, the lanes narrower as more come; a dark
   // frame shows the part in view. The colours show only where the strip knows the whole list (Color by's own strip,
   // `rows`, or `whole: true`) and some record takes one; otherwise the strip is a plain track, a scrollbar with no
   // colours, no lanes and no zoomed track. A list ZOOM_AT times the height of its box adds the zoomed track at the
@@ -1410,7 +1606,7 @@
     this.box = this.page ? document.scrollingElement || document.documentElement : target
     this.set(opts)
     this.recs = [] // each record: [top, bottom] as fractions of the list's height, its colour or null, its element or row
-    this.lanes = [] // a lane for each other label that is on: {id, name, label, recs}
+    this.lanes = [] // a lane for each of Color by's choices past the first: {key, id, field, name, label, recs}
     this.dataVer = 0 // bumps when the page gives other rows, refs or says otherwise of the list
     this.measured = 0 // how many times the records were measured, which the overview's canvas is drawn for
     this.sigDone = null // what the records were last measured for (sig)
@@ -1499,6 +1695,8 @@
     this.rows = opts && Array.isArray(opts.rows) ? opts.rows : null
     this.refs = opts && Array.isArray(opts.refs) ? opts.refs : null
     this.preview = opts && typeof opts.preview === 'function' ? opts.preview : null
+    // each row's record, which the tracks of Color by's fields past the first read
+    this.records = opts && Array.isArray(opts.records) ? opts.records : null
   }
   // a track `w` px wide: its canvas over its box, and over them the frame around the part in view; the zoomed track's
   // lens (its paper, under the canvas, and its edge, the frame over it)
@@ -1581,7 +1779,10 @@
   Strip.prototype.sig = function () {
     var c = this.c.choice()
     var f = c && c.field
-    return [c ? c.key : '', this.c.offSet(c).join('\u0001'), f ? JSON.stringify([S.colours[f] || null, S.picked[f] || null]) : '', labelsVer, this.dataVer].join('\u0000')
+    var ex = this.c.extra()
+    var fs = ex.filter(function (x) { return x.field }).map(function (x) { return x.field })
+    if (f) fs.unshift(f)
+    return [c ? c.key : '', ex.map(function (x) { return x.key }).join('\u0001'), this.c.offSet(c).join('\u0001'), JSON.stringify(fs.map(function (n) { return [S.colours[n] || null, S.picked[n] || null] })), labelsVer, this.dataVer].join('\u0000')
   }
   // the control counted the page again: the records are measured again only when what they depend on changed, or, for
   // a list of elements, when the page changed inside it; otherwise the tracks are only placed again
@@ -1666,7 +1867,8 @@
       var H = Math.max(1, box.scrollHeight)
       var top0 = this.page ? -box.scrollTop : this.rect().top + box.clientTop - box.scrollTop
       var scope = this.page ? document : box
-      var els = scope.querySelectorAll(ch && ch.field ? '[data-colour]' : '[data-anchor]')
+      // the records alone: the anchored elements (a group's row, which carries no anchor, is no record)
+      var els = scope.querySelectorAll(ch && ch.field ? '[data-anchor][data-colour]' : '[data-anchor]')
       var seen = {}
       for (var j = 0; j < els.length; j++) {
         var e = els[j]
@@ -1698,12 +1900,40 @@
     var complete = !!this.rows || !!this.complete
     var coloured = false
     for (var ci = 0; ci < recs.length && !coloured; ci++) coloured = !!recs[ci][2] && recs[ci][2] !== g
-    // a lane for each other label that is on: its records in its own colours, those it does not mark left out
+    // a lane for each of Color by's choices past the first: a label's records in its own colours, those it does not mark
+    // left out; a field's in its values' colours (the page's data-colour-tracks, or `records` for a list given rows)
     var lanes = []
-    var on = complete ? onLabels() : []
-    for (var li = 0; li < on.length; li++) if (!by || String(on[li].id) !== String(by)) lanes.push({ id: String(on[li].id), name: on[li].name, label: on[li], recs: [] })
+    var extra = complete && !plain ? c.extra() : []
+    for (var li = 0; li < extra.length; li++) {
+      var x = extra[li]
+      var xl = x.label ? labelById(x.label) : null
+      if (x.label && !xl) continue
+      lanes.push({ key: x.key, id: x.label ? String(x.label) : null, field: x.field || null, at: li, name: x.title, label: xl, recs: [] })
+    }
     if (lanes.length) {
-      var colourIn = function (lane, ref) {
+      var self = this
+      var fieldIn = function (lane, v) {
+        return v == null || v === '' ? null : c.fieldColour(lane.field, v)
+      }
+      var tracksOf = function (e) {
+        var raw = e.getAttribute('data-colour-tracks')
+        if (!raw) return null
+        try {
+          var got = JSON.parse(raw)
+          return Array.isArray(got) ? got : null
+        } catch (err) {
+          return null
+        }
+      }
+      var colourIn = function (lane, ref, at) {
+        if (lane.field) {
+          if (typeof at === 'number') {
+            var rec = self.records ? self.records[at] : null
+            return rec == null ? null : fieldIn(lane, c.fieldValue(lane.field, rec))
+          }
+          var tv = at ? tracksOf(at) : null
+          return tv ? fieldIn(lane, tv[lane.at]) : null
+        }
         var mk = ref != null ? thimble.markOf(String(ref)) : null
         var vs = mk && Array.isArray(mk.values) ? mk.values : []
         for (var vi = 0; vi < vs.length; vi++) {
@@ -1718,7 +1948,7 @@
         var nr = this.rows.length
         var refs = this.refs || []
         for (var ri = 0; ri < nr; ri++) for (var la = 0; la < lanes.length; la++) {
-          var cr = colourIn(lanes[la], refs[ri])
+          var cr = colourIn(lanes[la], refs[ri], ri)
           if (cr) lanes[la].recs.push([ri / nr, (ri + 1) / nr, cr, ri])
         }
       } else {
@@ -1729,13 +1959,13 @@
         var seen2 = {}
         for (var ai = 0; ai < anchored.length; ai++) {
           var ae = anchored[ai]
-          if (ae.closest('.thimble-colour-mount,.thimble-colour-menu,[data-thimble-chrome]')) continue
+          if (ae.tagName === 'CANVAS' || ae.closest('.thimble-colour-mount,.thimble-colour-menu,[data-thimble-chrome]')) continue
           var aref = ae.getAttribute('data-anchor')
           if (!aref || seen2[aref]) continue
           seen2[aref] = true
           var ar = null
           for (var lb = 0; lb < lanes.length; lb++) {
-            var ca = colourIn(lanes[lb], aref)
+            var ca = colourIn(lanes[lb], aref, ae)
             if (!ca) continue
             ar = ar || ae.getBoundingClientRect()
             if (!ar.height) break
@@ -1843,7 +2073,7 @@
       this.fill(ctx, this.recs || [], span, bright, Math.round(LANE_X * dpr), Math.max(1, Math.round((t.w - 2 * LANE_X) * dpr)))
       return
     }
-    // the overview: a lane for the Color by choice, then one for each other label that is on; each keeps its rows'
+    // the overview: a lane for the Color by choice, then one for each choice past the first; each keeps its rows'
     // colours, for a click to snap to
     var lw = laneWidth(this.lanes.length + 1)
     var x0 = function (i) {
@@ -2323,10 +2553,12 @@
           }
           var rows = 'rows' in opts ? (Array.isArray(opts.rows) ? opts.rows : null) : s.rows
           var refs = 'refs' in opts ? (Array.isArray(opts.refs) ? opts.refs : null) : s.refs
+          var recs = 'records' in opts ? (Array.isArray(opts.records) ? opts.records : null) : s.records
           var whole = 'whole' in opts ? !!opts.whole : s.complete
-          if (!same(rows, s.rows) || !same(refs, s.refs) || whole !== s.complete) s.dataVer++
+          if (!same(rows, s.rows) || !same(refs, s.refs) || !same(recs, s.records) || whole !== s.complete) s.dataVer++
           s.rows = rows
           s.refs = refs
+          s.records = recs
           s.complete = whole
           if ('preview' in opts) s.preview = typeof opts.preview === 'function' ? opts.preview : null
         }
@@ -2492,6 +2724,15 @@
         var ch = c.choice()
         return ch && !ch.off ? (ch.label ? { label: ch.label, title: ch.title } : { field: ch.field, title: ch.title }) : null
       },
+      /** every choice in order, the first the colour and each other a track beside the list's: [{field, title} or
+       *  {label, title}]; none for Off */
+      get picks() {
+        var ch = c.choice()
+        if (!ch || ch.off) return []
+        return c.picks().map(function (x) {
+          return x.label ? { label: x.label, title: x.title } : { field: x.field, title: x.title }
+        })
+      },
       /** whether the analyst chose Off, which colors nothing */
       get off() {
         var ch = c.choice()
@@ -2540,9 +2781,15 @@
       attr: function (record) {
         c.tally(record)
         var ch = c.choice()
-        if (!ch || !ch.field) return ''
-        var v = c.valueOf(record)
-        return ' data-colour="' + esc(v == null ? '' : v) + '"'
+        var out = ''
+        if (ch && ch.field) {
+          var v = c.valueOf(record)
+          out = ' data-colour="' + esc(v == null ? '' : v) + '"'
+        }
+        // the record's values of the fields past the first choice, which their tracks draw
+        var ex = c.extra()
+        if (ex.some(function (x) { return x.field })) out += ' data-colour-tracks="' + esc(JSON.stringify(ex.map(function (x) { return x.field ? c.fieldValue(x.field, record) : null }))) + '"'
+        return out
       },
       /** the counts of the current choice's values from the reader, {value: n} (the key '' for no value) or [[value, n]];
        *  null counts the elements on the page again */
@@ -2580,6 +2827,32 @@
     return out
   }
 
+  // Every choice of the kit's controls that the page mounted, for the view's checks (views.py, view_shot.mjs), which
+  // try each and fail the view on a script error: [{control, choice, go()}]. Each part adds its own (kit.shared.sweep).
+  var sweeps = [
+    function () {
+      if (!control) return []
+      var c = control
+      var out = [{ control: 'Color by', choice: 'Off', go: function () { c.choose(OFF) } }]
+      c.fields.forEach(function (f) {
+        out.push({ control: 'Color by', choice: f.title, go: function () { c.choose('f:' + f.name) } })
+      })
+      onLabels().forEach(function (l) {
+        out.push({ control: 'Color by', choice: l.name, go: function () { c.choose('l:' + l.id) } })
+      })
+      // two choices together, the second a track
+      if (c.fields.length > 1) out.push({ control: 'Color by', choice: c.fields[0].title + ' + ' + c.fields[1].title, go: function () { S.picks = ['f:' + c.fields[0].name, 'f:' + c.fields[1].name]; c.changed() } })
+      return out
+    },
+  ]
+  Object.defineProperty(thimble, '__choices', {
+    value: function () {
+      var out = []
+      for (var i = 0; i < sweeps.length; i++) out = out.concat(safe(sweeps[i], []) || [])
+      return out
+    },
+  })
+
   /** Color by, in the view's top row (see the top of this file). Called again, it replaces the control. */
   thimble.colorBy = function (opts) {
     opts = opts || {}
@@ -2600,6 +2873,52 @@
     return c.api
   }
   thimble.colourBy = thimble.colorBy
+
+  // A group's mix: a group (a page, an agent, a run, a session) takes no colour of its own, so its row shows how its
+  // records divide among Color by's values as a small proportion bar, each value's share in its colour, in the chips'
+  // order, the records with no value grey and last; the values turned off are left out, and with Off it is empty.
+  function mixHtml(counts) {
+    var c = control
+    var ch = c && c.choice()
+    if (!ch || ch.off || !counts || typeof counts !== 'object') return '<span class="thimble-mix" hidden></span>'
+    var got = {}
+    var pairs = Array.isArray(counts) ? counts : Object.keys(counts).map(function (k) { return [k, counts[k]] })
+    for (var i = 0; i < pairs.length; i++) if (pairs[i] && Number(pairs[i][1]) > 0) got[keyOf(pairs[i][0])] = (got[keyOf(pairs[i][0])] || 0) + Number(pairs[i][1])
+    var order = c.flat().map(function (v) { return v.key })
+    var keys = Object.keys(got).sort(function (a, b) {
+      var ia = a === NONE ? 1e9 : order.indexOf(a) < 0 ? 1e8 : order.indexOf(a)
+      var ib = b === NONE ? 1e9 : order.indexOf(b) < 0 ? 1e8 : order.indexOf(b)
+      return ia - ib || got[b] - got[a]
+    })
+    var off = c.offSet(ch)
+    var parts = ''
+    var words = []
+    for (var k = 0; k < keys.length; k++) {
+      var key = keys[k]
+      if (off.indexOf(key) >= 0) continue
+      var name = key === NONE ? (ch.label ? 'Not marked' : 'No ' + String(ch.title).toLowerCase()) : key
+      var col = key === NONE ? grey() : c.colourOf(key) || grey()
+      parts += '<span style="flex-grow:' + got[key] + ';flex-basis:0;background:' + esc(col) + '"></span>'
+      words.push(name + ' ' + num(got[key]))
+    }
+    if (!parts) return '<span class="thimble-mix" hidden></span>'
+    var said = esc(ch.title + ': ' + words.join(' · '))
+    return '<span class="thimble-mix" role="img" aria-label="' + said + '" title="' + said + '">' + parts + '</span>'
+  }
+  /** A group's row's proportion bar of its records' Color by values (above): thimble.mix(el, counts) draws it in `el`,
+   *  thimble.mix(counts) gives its html; counts are {value: n}, '' for the records with no value */
+  thimble.mix = function (target, counts) {
+    if (target && target.nodeType === 1) {
+      target.innerHTML = mixHtml(counts)
+      return target
+    }
+    if (typeof target === 'string' && counts !== undefined) {
+      var node = document.querySelector(target)
+      if (node) node.innerHTML = mixHtml(counts)
+      return node
+    }
+    return mixHtml(target)
+  }
 
   /** What Reset puts back of the page's own state: `changed()` says whether it differs from how the view opens (a menu's
    *  choice, a selection, a mode), `reset()` puts it back and draws the page again, after the kit has put back its
@@ -2634,6 +2953,15 @@
     hold: function (fn) {
       holds.push(fn)
     },
+    // fn() gives a part's choices for the view's checks (thimble.__choices)
+    sweep: function (fn) {
+      sweeps.push(fn)
+    },
+    // a popover's left edge clear of the lists' tracks, and the side the label editor opens on beside a menu
+    clear: function (left, top, w, h) {
+      return clearOfStrips(left, top, w, h)
+    },
+    editorSide: editorSide,
     tip: tip,
     untip: untip,
     esc: esc,

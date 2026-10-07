@@ -16,11 +16,21 @@ these parts, so a page lays them out and fills them rather than drawing its own:
 | the side panel | `thimble.side` | a record, or a row's children, in a wide panel beside the list |
 | the transcript | `thimble.transcript` | a transcript's turns, as the File browser's Transcript mode draws them |
 
-Only Color by draws in colors. Filter by's toggles and the lanes' names are words; a failure may take the problem red
-beside the Color by colors. Filter by and Rows read a record's value of a field or a label the way Color by does, so a
+Only Color by draws in colors, and only on the records. Filter by's toggles and the lanes' names are words; a failure
+may take the problem red beside the Color by colors, with a shape (✕ or an underline) so that it stays apart from a
+value the analyst picked red. Filter by and Rows read a record's value of a field or a label the way Color by does, so a
 view's own fields and every label over files work the same way in all three. A judgment that a label already holds
 belongs to the label: filter, group or color by the label, and never copy its classes into a field the reader derives
 from keywords.
+
+Every choice of each part must draw the view: None for Rows and Filter by, Off for Color by, each field and each
+label. The view checks try every choice the page's parts offer, and each part's first choice again after the others,
+and fail the view on the one whose drawing gives a script error, naming it ("Rows: None"). Read `rows.by`,
+`filter.by` and `colour.by` as what they are with None or Off, null, and draw the records in one group, unfiltered or
+uncolored then.
+
+No part scrolls sideways: the kit keeps the page to its pane's width, and the overview under the divider scrolls down
+inside the height it has.
 
 thimble keeps each part's state per view, with Color by's choice: Filter by's and Rows' choices, the values turned off,
 the series of the key turned off, the lanes folded, the divider's place and the side panel's width. Reset, at the end of
@@ -76,8 +86,8 @@ function draw() {
 ## Filter by
 
 `thimble.filterBy({mount, fields, initial, key, onChange})` puts Filter by in the top row, beside Color by. Its menu
-lists None, the view's `fields` with their values in words and every label over files, each label with its definition
-one click away. The chosen field's or label's values are toggles in the row, as Color by's chips are, with a box ticked
+lists None, the view's `fields` with their values in words under "Fields" and every label over files under "Labels",
+each label with its definition one click away. The chosen field's or label's values are toggles in the row, as Color by's chips are, with a box ticked
 while the value shows and no color; the toggles that do not fit go behind "N more". A click turns a value off or on, an
 Alt-click or a double click shows that value alone, and hovering a value says what it means. A label chosen while it is
 off is turned on, during the analyst's click, so that its values reach the records; Color by keeps its own choice.
@@ -101,7 +111,8 @@ A reader that filters takes the query as it takes Color by's: `thimble.colour_on
 
 `thimble.rows({mount, fields, initial, key, onChange})` puts Rows in the top row: "Rows: Session". Its menu lists None
 (one lane of every record), the `fields` and every label. Rows groups; it never colors, so the lanes can be grouped by
-one thing and colored by another (rows by tactic, color by tool).
+one thing and colored by another (rows by tactic, color by tool). A lane is a group: its name takes no color, only its
+records' marks do ([color.md](color.md)).
 
 `initial` is what Rows opens on until the analyst chooses: a field's name, or a list of choices whose first that is
 there is taken, each a field's name or `{label: name or id}`, a label counting while it is on. `initial: [{label:
@@ -173,7 +184,7 @@ shows and `set(entries)` draws new ones. The lanes draw their own key with it.
 ## The divider
 
 `thimble.divider({top, key, min})` puts a bar under `top`, the overview's box, which a drag moves: the overview takes
-the height it leaves and scrolls inside it, and the list under it takes the rest. ↑ and ↓ move it while it has the
+the height it leaves and scrolls down inside it, never sideways, and the list under it takes the rest. ↑ and ↓ move it while it has the
 focus, a double click or Home puts it back. thimble keeps its place per view as a share of the height the two share.
 
 ## The side panel

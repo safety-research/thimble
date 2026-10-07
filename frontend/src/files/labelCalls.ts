@@ -35,7 +35,7 @@ export interface FrameRect {
  * closes from inside, and `onClose` tells the page (labelEditorClosed), with whether it did. */
 export interface LabelEditAt {
   anchor: PopoverAnchor
-  side: 'aside' | 'below'
+  side: 'aside' | 'below' | 'left'
   back: HTMLIFrameElement
   onClose: (focused: boolean) => void
 }
@@ -130,7 +130,7 @@ export async function runLabelCall(op: string, args: unknown, ctx: LabelCallCont
       const id = a.id == null ? null : labelOf(byId, str(a.id)).id
       const { frame, onEditorClosed } = ctx
       const rect = frameRect(a.anchor)
-      actions.edit(id, frame ? { anchor: frameAnchor(frame, rect), side: rect && a.side !== 'below' ? 'aside' : 'below', back: frame, onClose: (focused) => onEditorClosed?.(focused) } : undefined)
+      actions.edit(id, frame ? { anchor: frameAnchor(frame, rect), side: rect && a.side !== 'below' ? (a.side === 'left' ? 'left' : 'aside') : 'below', back: frame, onClose: (focused) => onEditorClosed?.(focused) } : undefined)
       return
     }
     case 'mark': {

@@ -2006,9 +2006,12 @@
   color: var(--text-primary);
   font: 500 var(--text-ui-sm) / 1.2 var(--font-body);
 }
+/* the colors around the color wheel, a column per hue, its light above its dark (labels.ts LABEL_WHEEL) */
 .colorby-palette-grid {
   display: grid;
-  grid-template-columns: repeat(6, 20px);
+  grid-template-rows: repeat(2, 20px);
+  grid-auto-columns: 20px;
+  grid-auto-flow: column;
   gap: 6px;
 }
 .colorby-pick {
@@ -3443,7 +3446,9 @@
 }
 .label-palette-grid {
   display: grid;
-  grid-template-columns: repeat(7, 20px);
+  grid-template-rows: repeat(2, 20px);
+  grid-auto-columns: 20px;
+  grid-auto-flow: column;
   gap: 6px;
 }
 .label-palette-colour {

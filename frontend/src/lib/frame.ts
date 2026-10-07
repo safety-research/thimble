@@ -111,6 +111,12 @@ export const VIEW_TOKENS = [
   '--label-10',
   '--label-11',
   '--label-12',
+  '--label-13',
+  '--label-14',
+  '--label-15',
+  '--label-16',
+  '--label-17',
+  '--label-18',
   '--label-none',
 ]
 

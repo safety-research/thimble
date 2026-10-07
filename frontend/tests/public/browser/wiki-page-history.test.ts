@@ -223,6 +223,9 @@ describe('the Wiki Page History demo view', () => {
     const pages = await page.evaluate(() => (window as any).__fetches.filter((x: string) => x === 'page').length)
     await frame.locator('.thimble-colour-by').click()
     await frame.locator('.thimble-colour-menu [data-by="f:save"]').click()
+    // Color by takes several choices: the ones before Kind of save unchecked, it alone colors
+    for (const by of await frame.evaluate(() => [...document.querySelectorAll('.thimble-colour-menu [data-by][aria-checked="true"]')].map((e) => e.getAttribute('data-by')!).filter((b) => b !== 'f:save')))
+      await frame.locator(`.thimble-colour-menu [data-by="${by}"]`).click()
     await frame.waitForFunction(() => document.querySelector('.thimble-colour-by b')?.textContent === 'Kind of save')
     await page.waitForTimeout(200)
     assert.equal(await page.evaluate(() => (window as any).__fetches.filter((x: string) => x === 'page').length), pages, 'a Color by change read the page again')

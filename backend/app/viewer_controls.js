@@ -339,6 +339,21 @@
     this.changed()
   }
   Choice.prototype.changed = function () {}
+  // every choice of the control, for the view's checks (viewer_colour.js thimble.__choices), which try each: None, each
+  // field and each label that is on
+  Choice.prototype.sweepList = function (control) {
+    var self = this
+    var out = []
+    if (this.none) out.push({ control: control, choice: 'None', go: function () { self.choose(NONE_BY) } })
+    this.fields.forEach(function (f) {
+      out.push({ control: control, choice: f.title, go: function () { self.choose('f:' + f.name) } })
+    })
+    if (this.labelsToo)
+      labels().forEach(function (l) {
+        if (shared.labelOn(String(l.id))) out.push({ control: control, choice: l.name, go: function () { self.choose('l:' + l.id) } })
+      })
+    return out
+  }
 
   // ---------------------------------------------------------------- the menu of fields and labels
   // A menu under its trigger, as Color by's (viewer_kit.css .thimble-colour-menu): None, the fields with their values in
@@ -365,6 +380,8 @@
     var left = Math.max(8, Math.min(r.left, vw - w - 8))
     var top = r.bottom + 4
     if (top + h > innerHeight - 8 && r.top - 4 - h >= 8) top = r.top - 4 - h
+    // never over a list's tracks (viewer_colour.js clearOfStrips)
+    if (typeof shared.clear === 'function') left = shared.clear(left, Math.max(8, top), w, Math.min(h, innerHeight - Math.max(8, top) - 8))
     m.style.left = left + 'px'
     m.style.top = Math.max(8, top) + 'px'
     m.style.maxHeight = Math.max(120, innerHeight - Math.max(8, top) - 8) + 'px'
@@ -418,6 +435,7 @@
     var self = this
     var html = '<div class="thimble-colour-head">' + esc(title) + '</div>'
     if (this.none) html += choiceRow(NONE_BY, !c, 'None', [])
+    if (this.fields.length) html += '<div class="thimble-colour-head">Fields</div>'
     html += this.fields
       .map(function (f) {
         var counts = self.tallies[f.name] || {}
@@ -432,9 +450,8 @@
     }
     var here = all.filter(function (l) { return l.here })
     var other = all.filter(function (l) { return !l.here })
-    html += '<div class="thimble-colour-head">Labels over these files</div>'
-    html += here.length ? here.map(row).join('') : '<div class="thimble-colour-note">No label covers these files yet</div>'
-    if (other.length) html += '<div class="thimble-colour-head">Other labels</div>' + other.map(row).join('')
+    html += '<div class="thimble-colour-head">Labels</div>'
+    html += here.length || other.length ? here.concat(other).map(row).join('') : '<div class="thimble-colour-note">No label covers these files yet</div>'
     return html
   }
   Choice.prototype.openMenu = function (anchor, title) {
@@ -446,7 +463,7 @@
         var def = e.target.closest('[data-def]')
         if (def) {
           e.stopPropagation()
-          if (typeof thimble.editLabel === 'function') thimble.editLabel(def.getAttribute('data-def'), { anchor: m.el }).catch(function () {})
+          if (typeof thimble.editLabel === 'function') thimble.editLabel(def.getAttribute('data-def'), { anchor: m.el, side: typeof shared.editorSide === 'function' ? shared.editorSide(m.el) : undefined }).catch(function () {})
           return true
         }
         var item = e.target.closest('[data-by]')
@@ -539,6 +556,10 @@
       if (c && c.label && (labelsChanged || self.marksMoved())) self.fire()
       self.render()
     })
+    if (typeof shared.sweep === 'function')
+      shared.sweep(function () {
+        return self.mount ? self.sweepList('Filter by') : []
+      })
     this.render()
   }
   Filter.prototype = Object.create(Choice.prototype)
@@ -830,6 +851,10 @@
       shared.hold(function () {
         var c = self.choice()
         return c && c.label ? [c.label] : []
+      })
+    if (typeof shared.sweep === 'function')
+      shared.sweep(function () {
+        return self.mount ? self.sweepList('Rows') : []
       })
     this.render()
   }
@@ -1731,7 +1756,9 @@
     this.top.style.flex = 'none'
     this.top.style.height = Math.round(h) + 'px'
     this.top.style.maxHeight = 'none'
-    this.top.style.overflow = 'auto'
+    // the overview scrolls down inside the height it has, never sideways
+    this.top.style.overflowX = 'hidden'
+    this.top.style.overflowY = 'auto'
     var self = this
     if (this.onChange) safe(function () { self.onChange(Math.round(h)) })
   }
@@ -1747,7 +1774,8 @@
     this.top.style.flex = ''
     this.top.style.height = ''
     this.top.style.maxHeight = ''
-    this.top.style.overflow = ''
+    this.top.style.overflowX = ''
+    this.top.style.overflowY = ''
     var self = this
     if (this.onChange) safe(function () { self.onChange(Math.round(self.top.getBoundingClientRect().height)) })
   }

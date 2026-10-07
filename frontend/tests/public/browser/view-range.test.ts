@@ -633,7 +633,7 @@ describe("a label's value's colour through ViewerFrame", () => {
     })
     await page.goto(`${ORIGIN}/`)
     // thimble's palette, which the page hears and names a colour by
-    await page.addStyleTag({ content: 'iframe{width:800px;height:420px;border:0} :root{' + Array.from({ length: 12 }, (_, i) => `--label-${i + 1}:#${(0x204060 + i * 0x0b0907).toString(16).slice(-6)};`).join('') + '--label-none:#a09c93}' })
+    await page.addStyleTag({ content: 'iframe{width:800px;height:420px;border:0} :root{' + Array.from({ length: 18 }, (_, i) => `--label-${i + 1}:#${(0x204060 + i * 0x0b0907).toString(16).slice(-6)};`).join('') + '--label-none:#a09c93}' })
     await page.addScriptTag({ path: script })
     const frame = () => page.frames().find((f) => f !== page.mainFrame())!
     await page.waitForFunction(() => document.querySelector('iframe'))
@@ -641,13 +641,14 @@ describe("a label's value's colour through ViewerFrame", () => {
     await frame().waitForSelector('.thimble-colour-chip[data-label="k1"]')
     await frame().locator('.thimble-colour-chip').first().locator('.chip-sw').click()
     await frame().waitForSelector('.thimble-colour-palette')
-    assert.equal(await frame().locator('.thimble-colour-palette .thimble-colour-pick').count(), 12)
-    const on = await frame().evaluate(() => [...document.querySelectorAll('.thimble-colour-palette .thimble-colour-pick')].findIndex((b) => b.classList.contains('on')))
-    assert.equal(on, 1, "the value's own colour, thimble's second, is ringed")
+    assert.equal(await frame().locator('.thimble-colour-palette .thimble-colour-pick').count(), 18)
+    const on = await frame().evaluate(() => document.querySelector('.thimble-colour-palette .thimble-colour-pick.on')?.getAttribute('data-pick'))
+    assert.equal(on, '1', "the value's own colour, thimble's second, is ringed")
     assert.equal(await frame().locator('.thimble-colour-palette [data-reset-colours]').count(), 0, "a label's colours are the label's own, with no Reset here")
-    await frame().locator('.thimble-colour-palette .thimble-colour-pick').nth(4).click()
+    // red, which no value takes by itself, picked
+    await frame().locator('.thimble-colour-palette .thimble-colour-pick[data-pick="12"]').click()
     await page.waitForFunction(() => (window as any).__acts.length > 0)
-    assert.deepEqual(await page.evaluate(() => (window as any).__acts), [['colour', 'k1', 'yes', 5]])
+    assert.deepEqual(await page.evaluate(() => (window as any).__acts), [['colour', 'k1', 'yes', 13]])
     await page.close()
   })
 })

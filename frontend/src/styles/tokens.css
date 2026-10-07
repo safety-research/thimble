@@ -111,6 +111,13 @@
   --label-10: #0985b4;
   --label-11: #f6b896;
   --label-12: #0bb8d6;
+  /* the hues only the analyst picks, as on the light papers: red, purple and pink, each a strong and a light step */
+  --label-13: #ef5b51;
+  --label-14: #f7a39c;
+  --label-15: #a585f5;
+  --label-16: #cdb9ff;
+  --label-17: #ec6aa8;
+  --label-18: #f6b0d2;
 }
 
 /* -------- the accent: one of seven, iris by default. --accent is the fill, --accent-on the text on it (white or ink,
@@ -296,6 +303,15 @@
   --label-10: #025a7c;
   --label-11: #622b01;
   --label-12: #0389a0;
+  /* the hues a value takes only when the analyst picks it (the picker, around the color wheel): 13 red and 14 a dark
+     red, 15 violet and 16 a dark purple, 17 pink and 18 a dark pink. New values never take them, so red stays the
+     problem's and purple the agents' unless the analyst chooses otherwise; each reads at 3:1 or more on every paper */
+  --label-13: #d0342c;
+  --label-14: #8a1c1c;
+  --label-15: #7b4fd6;
+  --label-16: #4c2a91;
+  --label-17: #d23f8b;
+  --label-18: #8d1d5c;
   --label-none: #a09c93;
   /* a multi-class label as a whole: the plain ink */
   --label-multi: var(--text-secondary);

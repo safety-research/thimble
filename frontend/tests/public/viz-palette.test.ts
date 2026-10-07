@@ -163,16 +163,29 @@ describe.each(Object.keys(PAPERS))('the chart colours on the %s paper', (paper) 
 })
 
 const LABELS = Array.from({ length: 12 }, (_, i) => `--label-${i + 1}`)
+// the colours only the analyst picks: red, a dark red, violet, a dark purple, pink, a dark pink
+const PICKED = Array.from({ length: 6 }, (_, i) => `--label-${i + 13}`)
 
 test("the label colours' copies are the light paper's: the charts' fallbacks and the kernel's", () => {
   expect(LABELS.map((l) => token(l))).toEqual(LABELS.map((l) => BASE[l]))
   const py = readFileSync(new URL('../../../backend/app/kernel_thimble.py', import.meta.url), 'utf8')
   const kernel = [...(/LABEL_COLOURS = \[[^\]]*\]/.exec(py)?.[0] ?? '').matchAll(/"(#[0-9a-fA-F]{6})"/g)].map((m) => m[1].toLowerCase())
-  expect(kernel).toEqual([BASE['--label-none'], ...LABELS.map((l) => BASE[l])])
+  expect(kernel).toEqual([BASE['--label-none'], ...LABELS.map((l) => BASE[l]), ...PICKED.map((l) => BASE[l])])
   // the product tour's example view carries a snapshot of the light paper's tokens
   const tour = readFileSync(new URL('../../public/tour/timeline/assets/frame-base.css', import.meta.url), 'utf8')
   const snap = Object.fromEntries([...tour.matchAll(/(--(?:label|viz)-[\w-]+):(#[0-9a-fA-F]{6})/g)].map((m) => [m[1], m[2].toLowerCase()]))
   for (const name of [...SLOTS, ...LABELS, '--label-none']) expect(snap[name], `${name} in the tour's frame-base.css`).toBe(BASE[name])
+})
+
+describe.each(Object.keys(PAPERS))('the picked colours on the %s paper', (paper) => {
+  const t = PAPERS[paper]
+  test('are red, purple and pink, a light and a dark of each, each at 3:1 or more on every ground', () => {
+    const colours = PICKED.map((s) => t[s])
+    expect(colours.every(Boolean)).toBe(true)
+    const hues = colours.map((c) => chromaHue(c)[1])
+    expect(hues.slice(0, 2).every((h) => h < 45 || h >= 345), `reds ${hues}`).toBe(true)
+    for (const g of GROUNDS) for (const c of colours) expect(contrast(c, t[g]), `${c} on ${g} ${t[g]}`).toBeGreaterThanOrEqual(3)
+  })
 })
 
 describe.each(Object.keys(PAPERS))('the label colours on the %s paper', (paper) => {

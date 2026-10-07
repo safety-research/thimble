@@ -7,7 +7,9 @@
 // PAGES_AT_ONCE at a time:
 // `open` is the place the page is sent once the frame is ready, `actions` the controls clicked in turn once it is quiet,
 // each named by the text it shows (findControl), `viewport` {width, height} the state's own size in place of
-// --viewport, and `out` the PNG written (none without it).
+// --viewport, `out` the PNG written (none without it), and `sweep` true to try, once the actions are done, every
+// choice of the view kit's controls the page mounted (thimble.__choices: Color by's Off, fields and labels, Rows' and
+// Filter by's None, fields and labels), each in turn, the page quiet again after each.
 // The page plays the part frontend/src/files/ViewerFrame.tsx plays in the browser: it puts the frame document (the view
 // page with the bridge, views.frame_document) in a sandboxed iframe with the theme's tokens and the app's two faces, and
 // asks the server over stdin and stdout, one JSON line each way, for what the page needs:
@@ -28,7 +30,9 @@
 // (shownCounts), `layout` how its text fits (layoutCounts), `controls` the controls it shows (controlList),
 // `label_controls` the elements whose data-label names a label that is on, shown or not, `painted`
 // how many of the marked records in view show the label's colour in a picture of the frame (paintedMarks), `actions`
-// each action with whether its control was found, `fonts` whether Hanken Grotesk was loaded in the frame, and
+// each action with whether its control was found, `choices` with `sweep` each choice tried, {control, choice, errors},
+// its errors those the page reported while it settled (they are not among the state's own), `fonts` whether Hanken
+// Grotesk was loaded in the frame, and
 // `self_labels` the ops of the label calls the page made by itself, outside the actions (the bridge's labelRefused, or
 // a labelCall while no action was clicked), which the page answers as refused.
 import { createRequire } from 'node:module'
@@ -40,6 +44,9 @@ const require = createRequire(new URL('../frontend/package.json', import.meta.ur
 const { chromium } = require('playwright')
 
 const QUIET_MS = 900
+const SWEEP_QUIET_MS = 250 // the quiet after a choice the sweep tried, before the next
+const SWEEP_MS = 10_000 // the most one choice of the sweep waits for its page
+const SWEEP_MAX = 40 // the choices one sweep tries
 const MIN_MS = 1200
 const HARD_MS = 25_000
 // a fetch or marks request still unanswered at HARD_MS is waited for this long, since a view's data calls have no time
@@ -477,7 +484,7 @@ const VIEW_TOKENS = [
   '--chip-bg-hover', '--text-xs', '--text-ui-sm', '--text-sm', '--text-lg', '--text-mono', '--text-mono-sm', '--h-chip', '--h-control', '--control-sm', '--h-row', '--radius-chip', '--radius-seg', '--radius-ui', '--radius-card', '--transition-color',
   '--accent-soft', '--hl-bg', '--hl-bg-strong', '--border-hairline', '--border-strong', '--bg-panel', '--status-positive', '--status-negative', '--status-warning',
   '--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-6', '--viz-7', '--viz-ink-1', '--viz-ink-2', '--viz-ink-3', '--viz-ink-4',
-  '--label-1', '--label-2', '--label-3', '--label-4', '--label-5', '--label-6', '--label-7', '--label-8', '--label-9', '--label-10', '--label-11', '--label-12', '--label-none',
+  '--label-1', '--label-2', '--label-3', '--label-4', '--label-5', '--label-6', '--label-7', '--label-8', '--label-9', '--label-10', '--label-11', '--label-12', '--label-13', '--label-14', '--label-15', '--label-16', '--label-17', '--label-18', '--label-none',
 ]
 // The app's faces (frontend/src/styles/fonts.css), latin subset, inlined as data URLs as ViewerFrame inlines them.
 const FACES = [
@@ -736,6 +743,44 @@ async function shootState(browser, opt, doc, state, i) {
       if (how) await settle(Date.now(), QUIET_MS)
       await page.evaluate(() => (window.__acting = false))
     }
+    // every choice of the kit's controls in turn: what the page reports while it draws one is that choice's error
+    const choices = []
+    if (ready && state.sweep) {
+      const list = await frame
+        .evaluate(() => (window.thimble && typeof window.thimble.__choices === 'function' ? window.thimble.__choices().map((c) => [String(c.control), String(c.choice)]) : []))
+        .catch(() => [])
+      // each control's first choice (Off, None) once more after the others, as the analyst comes back to it from a
+      // label or a field
+      const firsts = []
+      for (const [control, choice] of list) if (!firsts.some(([c]) => c === control)) firsts.push([control, choice])
+      for (const [control, choice, again] of [...list.slice(0, SWEEP_MAX), ...firsts.map(([c, ch]) => [c, ch, true])]) {
+        const before = errors.length
+        await page.evaluate(() => (window.__acting = true))
+        const threw = await frame
+          .evaluate(([a, b]) => {
+            const c = window.thimble.__choices().find((x) => String(x.control) === a && String(x.choice) === b)
+            if (!c) return ''
+            try {
+              c.go()
+              return ''
+            } catch (e) {
+              return String((e && e.message) || e)
+            }
+          }, [control, choice])
+          .catch((e) => String((e && e.message) || e))
+        const from = Date.now()
+        lastActivity = Math.max(lastActivity, from)
+        for (;;) {
+          await page.waitForTimeout(50)
+          if (inflight === 0 && Date.now() - lastActivity > SWEEP_QUIET_MS && Date.now() - from > SWEEP_QUIET_MS) break
+          if (Date.now() - from >= SWEEP_MS) break
+        }
+        await page.evaluate(() => (window.__acting = false))
+        const got = errors.splice(before)
+        if (threw) got.unshift(`page: ${threw}`.slice(0, 400))
+        choices.push({ control, choice: again ? `${choice} (after the others)` : choice, errors: got })
+      }
+    }
     // a request the page sent after the last wait ended, such as the next page of data it loads, is waited for before
     // it counts as unanswered
     const until = Date.now() + ANSWER_MS
@@ -775,6 +820,7 @@ async function shootState(browser, opt, doc, state, i) {
       label_controls: labelControls,
       painted,
       actions,
+      ...(state.sweep ? { choices } : {}),
       fonts,
       self_labels: await page.evaluate(() => window.__selfLabels),
     }
