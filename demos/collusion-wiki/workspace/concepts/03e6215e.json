@@ -18,12 +18,12 @@
  "classes": [
   {
    "name": "SEC or investor.gov",
-   "color": 4,
+   "color": 7,
    "highlight": true
   },
   {
    "name": "Data USA",
-   "color": 7,
+   "color": 6,
    "highlight": true
   },
   {
@@ -38,7 +38,7 @@
   },
   {
    "name": "wiki pages or test links only",
-   "color": 5,
+   "color": 4,
    "highlight": true
   }
  ],

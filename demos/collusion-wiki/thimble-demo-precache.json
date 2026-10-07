@@ -82,12 +82,12 @@
   {
    "path": "concepts/03e6215e.json",
    "bytes": 2710,
-   "sha256": "2ec2aa611e43008a9977103e3449051f738940618776f97ffdb71ea29c49edf3"
+   "sha256": "316eea576915a7cc05c14dc4f70efed93b4437540be9803f73de7b2a1c0dc7a5"
   },
   {
    "path": "concepts/7b284df2.json",
    "bytes": 2550,
-   "sha256": "838c16555d580d2d2325a15d5c6b4daa93262f9d34f5a71bc51d265264d5e779"
+   "sha256": "45e49b074af84aad3572f7a8ac9973e5ffedee817cdb8a120b8090811e83c778"
   },
   {
    "path": "concepts/7d7d492a.json",
@@ -117,12 +117,12 @@
   {
    "path": "extension/views/relay-board/view.html",
    "bytes": 67272,
-   "sha256": "3cf4b268225c42e8aa482e5fe654f47af32333a8d12c1bbcd1e2786c84be6d49"
+   "sha256": "731cee1aea9b58fd36c4c4fcd56b1b409f2b975120f3235e58e306951c3c205e"
   },
   {
    "path": "extension/views/relay-board/view.json",
    "bytes": 4963,
-   "sha256": "6eb9396f8bc31854706da6239d914d4ffd07abf3ff15703ad9c47043bc46dc58"
+   "sha256": "7ec6089b7ae1368dfec01e4180d191d88b55203fe93bde158a711ade353c19f8"
   },
   {
    "path": "extension/views/wiki-page-history/reader.py",
@@ -132,12 +132,12 @@
   {
    "path": "extension/views/wiki-page-history/view.html",
    "bytes": 80215,
-   "sha256": "643bfd8f24fc96c2faa6d2e7784360e5fb849f7a384a81099db82e61b0b57634"
+   "sha256": "c8a9d8351839d596811e4fc34259819d24ac5bc3f0aef1ba2f6c1753701308fc"
   },
   {
    "path": "extension/views/wiki-page-history/view.json",
    "bytes": 4883,
-   "sha256": "8d167203724641506495265c861c1b8a7a9854fb7f9f94bb71be3c38e57af6c3"
+   "sha256": "d1789910f5877ddab1bf2853e2bd438786a82c80339a44609dc95b645a0835b0"
   },
   {
    "path": "investigations/main/investigation.json",
@@ -1748,18 +1748,18 @@
   {
    "slug": "relay-board",
    "name": "Relay Board",
-   "version": "6f56c5bdad9d",
+   "version": "db288cba3ef1",
    "from": "relay-board",
-   "from_version": "6f56c5bdad9d",
-   "picked": "live at 6f56c5bdad9d"
+   "from_version": "db288cba3ef1",
+   "picked": "live at db288cba3ef1"
   },
   {
    "slug": "wiki-page-history",
    "name": "Wiki Page History",
-   "version": "8fdebe94864c",
+   "version": "b463bf4c82cf",
    "from": "wiki-page-history",
-   "from_version": "8fdebe94864c",
-   "picked": "live at 8fdebe94864c"
+   "from_version": "b463bf4c82cf",
+   "picked": "live at b463bf4c82cf"
   }
  ]
 }
