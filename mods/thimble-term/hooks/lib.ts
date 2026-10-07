@@ -25,8 +25,43 @@ export type TableRuns = { rows: Run[][][]; align: ('left' | 'right' | 'center')[
 const FENCE_RE = /```[\s\S]*?```|`[^`\n]*`/g
 const LINK_RE = /(?<![\[!])\[([^\[\]\n]*)\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)/g
 const WEB_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|tel:)/i
-const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|card:[A-Za-z0-9_-]+(?:@[A-Za-z0-9_]+)?(?:#.*)?|concept:[A-Za-z0-9_-]+(?:\/[^\s()]+)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
+const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|card:[A-Za-z0-9_-]+(?:@[A-Za-z0-9_]+)?(?:#.*)?|concept:[A-Za-z0-9_-]+(?:\/[^\s()]+)?|report:[A-Za-z0-9_-]+(?:#p?[A-Za-z0-9_-]+)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
 const LABEL_REF = /^concept:([A-Za-z0-9_-]+)(?:\/(.+))?$/
+const REPORT_REF = /^report:([A-Za-z0-9_-]+)(?:#(p?[A-Za-z0-9_-]+))?$/
+
+/** A link to a document, or to one of its paragraphs (`p<id>`), sentences or headings (`report:<slug>#<unit>`): the
+ *  document's slug and the unit; null for any other ref. */
+export function reportRef(ref: string): { slug: string; unit: string } | null {
+  const m = REPORT_REF.exec(ref.trim())
+  return m ? { slug: m[1]!, unit: m[2] ?? '' } : null
+}
+
+// what names a label and a document's passage a reply links to without words, as their resolution (term.ts
+// resolveCitations) and the lists read named them: a label's name by its id; a document's title by its slug and a
+// passage's words by its ref
+const labelNames = new Map<string, string>()
+const docTitles = new Map<string, string>()
+const passages = new Map<string, string>()
+
+/** Whether thimble's agents list a running chat that follows a run of the label named `name` (a `labels` agent titled
+ *  `label <name>`): a run the session's own process holds, which `thimble state` does not show as the label's run. */
+export function labelRunning(agents: readonly { label: string; state: string; role: string }[], name: string): boolean {
+  return Boolean(name) && agents.some(a => a.role === 'labels' && a.state === 'running' && a.label === `label ${name}`)
+}
+
+/** A label's name, noted when the labels are read or a link to it resolves, so a link to it names it in words. */
+export function noteLabelName(id: string, name: string | undefined): void {
+  if (id && name) labelNames.set(id, name)
+}
+
+/** A document's title (by its slug) and a passage's words (by its ref), noted when a link to it resolves or the documents
+ *  are read, so a link to it names it in words. */
+export function noteDocPlace(ref: string, title: string | undefined, words = ''): void {
+  const r = reportRef(ref)
+  if (!r) return
+  if (title) docTitles.set(r.slug, title)
+  if (r.unit && words.trim()) passages.set(`report:${r.slug}#${r.unit}`, words.replace(/\s+/g, ' ').trim())
+}
 
 /** The kinds of a thread's `error` record that end its run as a stop, not a failure: the analyst's stop, and the Claude
  *  Code session that ended under it (backend threads.SESSION_ENDED, as when the analyst quits). */
@@ -115,7 +150,10 @@ export function citeSpans(text: string): { at: number; end: number }[] {
 }
 
 function linkCitation(shown: string, target: string): Citation | null {
-  const ref = target.trim().replaceAll('%20', ' ')
+  // a file's place with its spaces encoded (`my%20file.md#L3`) as the file names it; a label's value keeps its encoding,
+  // which labelRef decodes (`concept:<id>/mentions%20June`: live check term-fix9, it drew as its raw words)
+  const raw = target.trim()
+  const ref = raw.startsWith('concept:') ? raw : raw.replaceAll('%20', ' ')
   if (!ref || WEB_RE.test(ref) || shown.includes('|') || !REF_SHAPE.test(ref)) return null
   const s = shown.trim()
   return make(s === '' || s === '↗' ? null : s, ref)
@@ -222,6 +260,20 @@ export function outputLine(ref: string): { card: string; first: number; last: nu
  *  its question. */
 export function chipLabel(c: Citation): string {
   if (c.display !== null) return clip(c.display, 40)
+  // a label's link and a document's by their names, never their ids (live check term-fix8, quirk 3: `concept:eb534ca4`
+  // and `↗ (report:report#4255ef27)` showed in a reply)
+  const lr = labelRef(c.ref)
+  if (lr) {
+    const name = labelNames.get(lr.id)
+    return name ? `label ${quoted(clip(name, 32))}${lr.value ? ` ${lr.value}` : ''}` : `a label${lr.value ? `'s ${lr.value}` : ''}`
+  }
+  const rr = reportRef(c.ref)
+  if (rr) {
+    const words = rr.unit ? passages.get(`report:${rr.slug}#${rr.unit}`) : ''
+    if (words) return quoted(clip(words, 40))
+    const title = docTitles.get(rr.slug)
+    return title ? `${rr.slug === 'slides' ? 'slides' : rr.slug === 'story' ? 'story' : 'report'} ${quoted(clip(title, 32))}` : `the ${rr.slug}`
+  }
   const [base = '', frag = ''] = c.ref.split('#', 2)
   const card = bareCard(c)
   if (card) return cardWords(questionOf(card))

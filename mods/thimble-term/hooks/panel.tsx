@@ -29,9 +29,9 @@ import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
-import { HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
+import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, outputLine, quoted, recordFields, stoppedTurn, windowAt } from './lib'
+import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, labelRunning, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, takeListKeys } from './lines'
 import type { LineHit } from './lines'
@@ -41,7 +41,7 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, closePanel, inPanelNow, navBack, navGo, openHome, openPanel, panelOfStep, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
+import { PANEL, closePanel, inPanelNow, loadCards, navBack, navGo, openHome, openPanel, panelOfStep, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -112,6 +112,20 @@ export async function openDoc(cx: Ctx, slug: string, title: string): Promise<voi
   await openPanel(cx, { view: 'doc', title: d?.title || title || slug, slug })
 }
 
+/** A document opened at the section, slide or beat that holds `unit` (a sentence's, a heading's or a paragraph's id,
+ *  `p<id>`), from a link to it (`report:<slug>#<unit>`). */
+async function openDocAt(cx: Ctx, slug: string, unit: string): Promise<void> {
+  await readSurface(cx, `doc:${slug}`, 'doc', [slug])
+  const got = await surfaceValue<Obj>(cx, `doc:${slug}`)
+  const doc = got?.ok ? got.value : {}
+  const holds = (u: DocSection) => u.id === unit || (u.paragraphs ?? []).some(p => p.id === unit || `p${p.id}` === unit || (p.sentences ?? []).some(x => x.id === unit))
+  const at = unit ? docUnits(doc).units.findIndex(holds) : -1
+  const docs = await surfaceValue(cx, 'docs')
+  const d = docs?.ok ? docsOf(docs.value).find(x => x.slug === slug) : undefined
+  if (d) rt.docsKnown.set(slug, d.generation)
+  await openPanel(cx, { view: 'doc', title: d?.title || str(doc.title) || slug, slug, ...(at > 0 ? { start: at } : {}) })
+}
+
 /** A view's line in the panel: the browser draws views. Opened, it is no longer new. */
 export async function openView(cx: Ctx, slug: string, name: string): Promise<void> {
   rt.viewsSeen.add(slug)
@@ -133,6 +147,9 @@ export async function openCite(cx: Ctx, ref: string, display: string | null, mor
   // a label's link: the label's panel at the value it names (live check term-fix5, new quirk 2)
   const lr = labelRef(ref)
   if (lr) return openLabelAt(cx, lr.id, lr.value)
+  // a document's link: the document, from the section that holds the passage
+  const rr = reportRef(ref)
+  if (rr) return openDocAt(cx, rr.slug, rr.unit)
   // its step in the path: its words cut at a word; for a place cited with no words, the short place the reply draws
   // (`agent-chat:2`), since the path row has no room for the place in words
   const c = { raw: '', ref, display }
@@ -141,6 +158,9 @@ export async function openCite(cx: Ctx, ref: string, display: string | null, mor
 }
 
 export async function openCard(cx: Ctx, id: string, mode = ''): Promise<void> {
+  // its step named by its question: a card no drawing read yet (one a side thread made) is read first (live check
+  // term-fix8, low quirk: the path read `card "Card"` on its first open)
+  if (!(await cx.card(id))?.data) await loadCards(cx, [id]).catch(() => undefined)
   const tc = await cx.card(id)
   await openPanel(cx, { view: 'card', title: clip((tc?.data as CardData | undefined)?.question ?? 'Card', 60), card: id, ...(mode ? { mode } : {}) })
 }
@@ -283,7 +303,9 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
     const upTrail = nav.trail.slice(0, i + skipped)
     if (up) crumbs.push({ text: up.view === 'docs' ? 'documents' : up.view, mark: '', up: true, go: () => void navGo(cx, { trail: [...upTrail, stepOf(up)], back: withBack(nav.back, nav.trail) }) })
     const t = s.view === 'thread' ? threads.find(x => x.id === s.thread) : undefined
-    crumbs.push({ text: crumbText(s), mark: t?.running ? '◌' : t?.unread ? 'new' : '', go: () => void navGo(cx, { trail: nav.trail.slice(0, i + 1 + skipped), back: withBack(nav.back, nav.trail) }), here: i === steps.length - 1 })
+    // a card's step taken before the card was read names it by its question once it is
+    const card = s.view === 'card' && s.title === 'Card' ? ((await cx.card(panelOfStep(s)?.card ?? ''))?.data as CardData | null | undefined) : null
+    crumbs.push({ text: crumbText(card?.question ? { ...s, title: clip(card.question, 60) } : s), mark: t?.running ? '◌' : t?.unread ? 'new' : '', go: () => void navGo(cx, { trail: nav.trail.slice(0, i + 1 + skipped), back: withBack(nav.back, nav.trail) }), here: i === steps.length - 1 })
   }
   const marksW = crumbs.reduce((n, c) => n + (c.mark ? c.mark.length + 1 : 0), 0)
   const fitted = fitCrumbs(['home', ...crumbs.map(c => c.text)], Math.max(12, cols - (back ? 8 : 0) - tailW - marksW))
@@ -682,8 +704,8 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
   const canvas = await surfaceValue<Obj>(cx, 'canvas')
   const groups = canvas?.ok && Array.isArray(canvas.value.groups) ? (canvas.value.groups as unknown[]).filter(isObj) : []
   const cells = canvas?.ok && Array.isArray(canvas.value.cells) ? (canvas.value.cells as unknown[]).filter(isObj) : []
-  // a group by what it holds: a side thread's cards, a document's figures, or a group main named
-  const cardOf = (c: Obj) => ({ id: str(c.id), kind: str(c.kind) || 'code', question: str(c.title) || 'a card' })
+  // a card made since home was last seen is new on it (openHome)
+  const cardOf = (c: Obj) => ({ id: str(c.id), kind: str(c.kind) || 'code', question: str(c.title) || 'a card', ...(rt.homeSince && madeAt(c) > rt.homeSince ? { fresh: true } : {}) })
   // a group by what it holds: a side thread's cards, a document's figures, or a group main named; a card no listed
   // group holds under `other cards`, last
   // a side thread's group by the thread's first question, as everywhere a thread is named (its title is a slug)
@@ -702,6 +724,8 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
     cells.map(cardOf),
   )
   const labelsRaw = await surfaceValue(cx, 'labels')
+  // a run the session's own process holds shows only as the chat that follows it (lib.ts labelRunning)
+  const agents = (await cx.agents()) ?? []
   const labels: HomeLabel[] = labelsRaw?.ok
     ? labelsOf(labelsRaw.value).map(l => ({
         slug: l.id,
@@ -712,7 +736,7 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
         counts: l.verdicts?.counts ?? l.label_stats?.counts ?? {},
         values: l.labels ?? Object.keys(l.label_stats?.counts ?? {}),
         paths: (l.glob ?? '').split(/,\s*/).filter(Boolean),
-        running: (l.last_run?.status ?? '') === 'running',
+        running: (l.last_run?.status ?? '') === 'running' || labelRunning(agents, l.name ?? ''),
         // the panel's rule (`not run yet` with no last run and no application)
         ran: Boolean(l.last_run ?? l.applications?.at(-1)),
       }))
@@ -720,6 +744,41 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
   const files: HomeFile[] = filesOf(await surfaceValue(cx, 'files')).map(f => ({ file: f.path, records: null, size: f.size, seen: 0, state: 'listed', ranges: [], kind: fileType(f.path, f.kind, rt.opens.get(f.path)?.as) }))
   const root = (await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'
   return { views, reports, threads, cardGroups, labels, files, coverage: homeRaw?.ok ? str(homeRaw.value.coverage) : '', root }
+}
+
+/** When a card was made (ms), as the canvas lists it. */
+function madeAt(c: Obj): number {
+  return Date.parse(str(c.created_ts) || str(c.ts)) || 0
+}
+
+/** Home opened from the row above the prompt (its `open ›`): the group that holds the first new card unfolded (its
+ *  section shown whole when the group is past the first few), the choice on that card; with no new card, on the first
+ *  new document, view or label (live check term-fix8, quirk 6: the new card stood folded, the choice on an old row). */
+export async function openHomeNew(cx: Ctx): Promise<void> {
+  const seen = await cx.homeSeen()
+  const since = seen?.at ?? 0
+  await Promise.all([readSurface(cx, 'canvas', 'cards', ['--since', new Date(0).toISOString()]), readSurface(cx, 'labels', 'labels'), readSurface(cx, 'docs', 'docs')])
+  const canvas = await surfaceValue<Obj>(cx, 'canvas')
+  const cells = canvas?.ok && Array.isArray(canvas.value.cells) ? (canvas.value.cells as unknown[]).filter(isObj) : []
+  const fresh = new Set(cells.filter(c => since && madeAt(c) > since).map(c => str(c.id)))
+  const d = await homeData(cx)
+  let ui = (await cx.homeUi()) as HomeUi
+  const without = (xs: string[], x: string) => xs.filter(y => y !== x)
+  const gi = d.cardGroups.findIndex(g => g.cards.some(c => fresh.has(c.id)))
+  if (gi >= 0) {
+    const g = d.cardGroups[gi]!
+    const fold = `cards:${g.from}:${g.head}`
+    ui = { ...ui, folded: without(ui.folded, fold), unfolded: [...without(ui.unfolded, fold), fold], pick: `card:${g.cards.find(c => fresh.has(c.id))!.id}`, more: gi >= HOME_FIRST && !ui.more.includes('cards') ? [...ui.more, 'cards'] : ui.more }
+  } else {
+    const r = d.reports.find(x => x.fresh)
+    const v = d.views.find(x => x.fresh)
+    const newLabels = seen ? Math.max(0, d.labels.length - seen.labels) : 0
+    const l = newLabels ? d.labels[d.labels.length - newLabels] : undefined
+    const pick = v ? `view:${v.slug}` : r ? `report:${r.slug}` : l ? `label:${l.slug}` : ''
+    if (pick) ui = { ...ui, pick }
+  }
+  await cx.setHomeUi(ui)
+  await openHome(cx)
 }
 
 // the home panel's last layout, which a key steps through
@@ -1791,8 +1850,10 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const { lines, hits } = listLines(
     ls.map(l => {
       const n = Object.values(l.label_stats?.counts ?? {}).reduce((a, b) => a + b, 0)
-      const run = l.trial ? `a sample of ${num(n)}` : `all ${num(n)}`
-      return { key: l.id, glyph: { s: (l.last_run?.status ?? '') === 'running' ? '◌' : '●' }, name: l.name ?? l.id, right: [dim(`${l.kind ?? ''} · ${run}`)], run: () => openLabel(cx, l.id, l.name ?? l.id) }
+      // a label with no run says so, as home, its panel and its card do
+      const ran = Boolean(l.last_run ?? l.applications?.at(-1))
+      const run = !ran ? 'not run yet' : l.trial ? `a sample of ${num(n)}` : `all ${num(n)}`
+      return { key: l.id, glyph: (l.last_run?.status ?? '') === 'running' ? { s: '◌' } : ran ? { s: '●' } : dim('○'), name: l.name ?? l.id, right: [dim(`${l.kind ?? ''} · ${run}`)], run: () => openLabel(cx, l.id, l.name ?? l.id) }
     }),
     pick,
     cols,

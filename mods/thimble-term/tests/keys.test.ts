@@ -14,7 +14,7 @@
 //   files        /thimble files, a row click, empty click      ↑↓ Enter Space b x, short and tall
 //   file         a row click, /thimble files <path>            ↑↓ Enter Backspace 1-3 x, short and tall; never ←
 //   views        a heading click                               ↑↓ Enter 1-9 b x
-//   card, cite, label, document, agent, view, ask: no list    their letters; no ↑↓, Enter, Space or ← named
+//   card, label, document, ask: no list                      their letters; no ↑↓, Enter, Space or ← named
 //
 // `claude plugin test mods/thimble-term`.
 import { expect, test } from 'claude-code/testing'
@@ -204,7 +204,7 @@ for (const rows of [SHORT, TALL]) {
     // Enter opens the chosen row: the group's row folds; on a card it opens the card
     await down($, w, 1)
     await enter($, w, rows)
-    expect((await seen($, rows)).text).toMatch(/home › card "/)
+    expect((await seen($, rows)).text).toMatch(/home › card "What does the export hold/)
     // x closes: the card's own Button's hotkey (no list there), and from home the relay's field
     await hotkey($, w, 'close')
     expect(w.closed).toContain(PANEL)
@@ -214,6 +214,45 @@ for (const rows of [SHORT, TALL]) {
     await takesKeys($)
     await type($, w, rows, 'x')
     expect(w.closed).toContain(PANEL)
+  })
+
+  test(`keys · home · toast · ${size}: open › gives the panel the keys, the new card's group unfolded and the card chosen; the toast hides while home shows`, async ($, on) => {
+    // live check term-fix8, quirk 6
+    const w = world(on)
+    await start($, w)
+    // a second group, newer, holds the two new cards; the first group stays the default open one
+    w.states.cards = { ...w.states.cards, groups: [...w.states.cards.groups, { id: 'g2', title: 'Deletions', role: 'analyst', ts: '2026-10-06T08:00:00+00:00' }] }
+    for (const c of Object.values(w.cells) as Record<string, unknown>[]) Object.assign(c, { created_ts: '2026-09-01T00:00:00+00:00', ts: '2026-09-01T00:00:00+00:00' })
+    const made = new Date(1_790_000_000_000 + 60_000).toISOString()
+    ;(w.cells as Record<string, Record<string, unknown>>).n1new000 = { ...w.cells.k0code00, id: 'n1new000', notebook: 'g2', title: 'When were pages deleted?', created_ts: made, ts: made }
+    ;(w.cells as Record<string, Record<string, unknown>>).n2new000 = { ...w.cells.k0code00, id: 'n2new000', notebook: 'g2', title: 'Who deleted them?', created_ts: made, ts: made }
+    w.states.home = { ...w.states.home, cards: 14 }
+    w.stamps.set(`${WS}/notebooks`, 2)
+    await w.clock.advance(61_000)
+    w.paneFocused = false
+    w.grantOnReopen = true
+    let above = (await $.ui.mount(ABOVE)) as unknown as M
+    expect(shown(await above.drawn())).toContain('2 new cards')
+    await above.press({ key: 'above-home-open' })
+    await above.unmount()
+    await w.clock.advance(300)
+    expect(w.paneFocused).toBe(true)
+    await takesKeys($)
+    const s = await seen($, rows, 'home')
+    named(s.hint, ['↑↓ to choose', 'Enter to open', 'Space to fold'])
+    expect(s.chosen).toContain('When were pages deleted?')
+    expect(s.rows.find(r => r.includes('When were pages deleted?'))).toMatch(/new$/)
+    // the toast hides while home shows, and what arrives meanwhile is seen
+    w.states.home = { ...w.states.home, cards: 15 }
+    w.stamps.set(`${WS}/notebooks`, 3)
+    await w.clock.advance(1100)
+    above = (await $.ui.mount(ABOVE)) as unknown as M
+    expect(shown(await above.drawn())).not.toContain('new card')
+    await above.unmount()
+    await down($, w)
+    expect((await seen($, rows, 'home')).chosen).toContain('Who deleted them?')
+    await enter($, w, rows)
+    expect((await seen($, rows)).text).toMatch(/card "Who deleted them\?"/)
   })
 
   test(`keys · home · empty click and after Esc · ${size}: the keys come back to the pane; an unbound letter goes to the prompt`, async ($, on) => {
@@ -525,7 +564,7 @@ test('keys · file · a transcript: 1 2 for the tabs from the relay', async ($, 
 
 // ------------------------------------------------------------------------------------------------ the panels with no list
 
-test('keys · card, citation, label, document, agent, view and a new thread: no relay; their letters work; no ↑↓, Enter, Space or ← named', async ($, on) => {
+test('keys · card, label, document and a new thread: no relay; their letters work; no ↑↓, Enter, Space or ← named', async ($, on) => {
   const w = world(on)
   await start($, w)
   const noList = async (keys: string[], press: string, effect: () => void) => {
@@ -545,7 +584,7 @@ test('keys · card, citation, label, document, agent, view and a new thread: no 
   await w.clock.settle()
   await noList(['c for its code', 'a to ask', 'x to close'], 'hk-code', () => undefined)
   expect((await seen($, SHORT)).text).toContain('its code')
-  // a citation, from a home row's card's takeaway is a click away; here from /thimble cite after a turn
+  // a label, from its row on home
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
   await w.clock.settle()
   await takesKeys($)

@@ -3,16 +3,17 @@
 // panel.tsx draw.
 //
 // Nothing here writes the workspace: a read is `thimble state`, a change is `thimble act` (hooks/data.ts).
-import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermLabelUi, TermPanel, TermThreadRow } from '../types'
-import { busyWords, cardOfCell, checkOf, linksOf, printed } from './cell'
+import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermThreadRow } from '../types'
+import { busyWords, cardOfCell, checkOf, fixOf, linksOf, printed } from './cell'
 import type { ThimbleCell, ThimbleLabel } from './cell'
 import type { CardData, CardLabel } from './draw'
 import type { Ctx, SurfaceGot } from './ctx'
 import { act, actLong, changed, readState, signature } from './data'
 import type { Area, Scope, Signature } from './data'
-import { cid, citations, clip, labelRef, noteQuestion, questionOf, quoted } from './lib'
+import { cid, citations, clip, labelRef, noteDocPlace, noteLabelName, noteQuestion, questionOf, quoted } from './lib'
 import type { Citation } from './lib'
-import { agentsOf, cellOf, cellsOf, chatOf, docUnits, homeOf, labelIdOf, labelOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
+import { agentsOf, cellOf, cellsOf, chatOf, docUnits, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
+import { keepSeen, keptSeen } from './kept'
 import { NAV_EMPTY, backTarget, moved, nextTrail } from './nav'
 import { signalEnd, withSignal } from './signal'
 
@@ -44,6 +45,10 @@ export const rt = {
   // a key the panel does not bind went to the prompt (panel.tsx typeThrough): until the prompt has the keys the panel
   // draws neither its list's keys nor its hotkeys, so the next key reaches the prompt
   typeThrough: false,
+  // when home was last seen before the open that shows it now (ms): a card made since is new on it
+  homeSince: 0,
+  // a link to a label whose name no read gave yet was drawn (reply.tsx chipOf): the session's timer reads the labels
+  wantLabels: false,
   sc: null as Scope | null,
   sig: null as Signature | null,
   busy: false,
@@ -166,6 +171,7 @@ export function termCard(cell: ThimbleCell, label: ThimbleLabel | null, rev: num
     ...(out ? { printed: out } : {}),
     ran: error || cell.status === 'error' ? 'error' : cell.status === 'ok' ? 'ok' : '',
     ...(checkOf(cell).state ? { check: checkOf(cell) } : {}),
+    ...(fixOf(cell) ? { fixed: fixOf(cell)! } : {}),
   }
 }
 
@@ -176,6 +182,7 @@ async function labelFor(cx: Ctx, id: string): Promise<ThimbleLabel | null> {
   const got = await readState(cx, rt.sc, 'label', [id])
   const l = got.ok ? labelOf(got.value) : null
   rt.labelRead.set(id, l)
+  if (l) noteLabelName(l.id, l.name)
   return l
 }
 
@@ -314,7 +321,14 @@ export async function resolveCitations(cx: Ctx, cs: readonly Citation[]): Promis
   const got = await readState(cx, rt.sc, 'resolve', [JSON.stringify(refs)])
   if (!got.ok) return
   const at = await cx.now()
-  for (const c of cs) await cx.setVerdict(cid(c.raw), verdictOf(c, resolutionOf(got.value, c.ref), at))
+  for (const c of cs) {
+    const res = resolutionOf(got.value, c.ref)
+    // a label's name and a document's title and passage, for a link to it that has no words (lib.ts chipLabel)
+    const meta = (res?.meta ?? {}) as { name?: unknown; title?: unknown }
+    if (res?.kind === 'concept') noteLabelName(String(res.concept_id ?? labelRef(c.ref)?.id ?? ''), typeof meta.name === 'string' ? meta.name : undefined)
+    if (res?.kind === 'report') noteDocPlace(c.ref, typeof meta.title === 'string' ? meta.title : undefined, typeof res.excerpt === 'string' ? res.excerpt : '')
+    await cx.setVerdict(cid(c.raw), verdictOf(c, res, at))
+  }
 }
 
 /** The verdicts of the cards' takeaways checked again, and of every citation of a card's value seen anywhere (main's
@@ -336,6 +350,9 @@ async function recheckCards(cx: Ctx, ids: readonly string[]): Promise<void> {
 export async function readSurface(cx: Ctx, key: string, surface: string, args: readonly string[] = []): Promise<void> {
   if (!rt.sc) return
   const got = await readState(cx, rt.sc, surface, args)
+  // the labels' names and the documents' titles, for a link to one that has no words (lib.ts chipLabel)
+  if (got.ok && key === 'labels') for (const l of labelsOf(got.value)) noteLabelName(l.id, l.name)
+  if (got.ok && key === 'docs') for (const d of docsOf(got.value)) noteDocPlace(`report:${d.slug}`, d.title)
   await cx.setSurface(key, got.ok ? { ok: true, value: got.value } : { ok: false, error: got.error })
 }
 
@@ -605,10 +622,20 @@ export async function navBack(cx: Ctx): Promise<void> {
 }
 
 export async function openHome(cx: Ctx): Promise<void> {
+  // the cards made since home was last seen are new on it while it shows
+  rt.homeSince = (await cx.homeSeen())?.at ?? 0
   await openPanel(cx, { view: 'home', title: 'Home' })
   // what home holds now is seen: the row above the prompt shows only what arrives after
   const home = await cx.home()
-  if (home) await cx.setHomeSeen(home)
+  if (home) await seeHome(cx, home)
+}
+
+/** What home holds as seen: the row above the prompt counts what arrives after, in this session and after a relaunch
+ *  (kept.ts keeps it in the workspace: live check term-fix8, low quirk: the slides made before a quit and never opened
+ *  had no toast after the relaunch). */
+export async function seeHome(cx: Ctx, home: TermHome): Promise<void> {
+  await cx.setHomeSeen(home)
+  if (rt.sc) await keepSeen(cx, rt.sc.ws, home)
 }
 
 // ------------------------------------------------------------------------------------------------ threads
@@ -839,8 +866,14 @@ async function refreshHome(cx: Ctx): Promise<void> {
   if (rt.viewsBuiltBefore === null) rt.viewsBuiltBefore = new Set(views.filter(v => v?.status === 'built').map(v => String(v.slug)))
   const home = homeOf(got.value, await cx.now())
   await cx.setHome(home)
-  // the session's first count is what was there already: the row above the prompt shows only what comes after
-  if (home && !(await cx.homeSeen())) await cx.setHomeSeen(home)
+  if (!home) return
+  // what the workspace held when home was last seen, in this session or the one before a relaunch (kept.ts), else the
+  // session's first count: the row above the prompt shows only what comes after
+  const seen = (await cx.homeSeen()) ?? keptSeen()
+  // while home shows, what it holds is seen (the row above the prompt is hidden then)
+  const showing = (await cx.panel())?.view === 'home' && (await cx.panes()).some(x => x.id === PANEL && x.isPlaced)
+  if (!seen || showing) await seeHome(cx, home)
+  else if (!(await cx.homeSeen())) await cx.setHomeSeen(seen)
 }
 
 /** The ui.jsonl records past the last one followed, handed to `apply` in order. The first read follows none. */
@@ -870,7 +903,12 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
   }
   rt.busy = true
   try {
-    // the cards a drawing named and could not read while it drew (a drawing writes no state): read now
+    // the labels a link with no words names (reply.tsx chipOf), and the cards a drawing named and could not read while
+    // it drew (a drawing writes no state): read now
+    if (rt.wantLabels) {
+      rt.wantLabels = false
+      await readSurface(cx, 'labels', 'labels')
+    }
     if (rt.wanted.size) {
       const ids = [...rt.wanted]
       rt.wanted.clear()

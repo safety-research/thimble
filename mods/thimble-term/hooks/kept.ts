@@ -5,7 +5,7 @@
 // when the session starts. The file is the renderer's own: browser mode does not read it.
 //
 // No `$` here: register.tsx reads and writes through the context (hooks/ctx.ts).
-import type { ChatSignal, TermAnswer } from '../types'
+import type { ChatSignal, TermAnswer, TermHome } from '../types'
 import type { Ctx } from './ctx'
 
 /** What the file is read and written with. */
@@ -15,9 +15,10 @@ type Io = Pick<Ctx, 'read' | 'write'>
  *  and whether it said that run's end first. */
 export type KeptRow = { cards?: string[]; answer?: TermAnswer; threads?: ChatSignal[]; views?: string[]; writer?: { chat: string; first: boolean } }
 
-/** The file: each row's drawings by its uuid, oldest first, and the last turn's text and cards (`/thimble cite` and
- *  `/thimble card` open them by number). */
-export type Kept = { rows: Record<string, KeptRow>; last: { reply: string; cards: string[] } }
+/** The file: each row's drawings by its uuid, oldest first, the last turn's text and cards (`/thimble cite` and
+ *  `/thimble card` open them by number), and what the workspace held when home was last seen (`seen`), so the row above
+ *  the prompt counts what came after across a relaunch. */
+export type Kept = { rows: Record<string, KeptRow>; last: { reply: string; cards: string[] }; seen?: TermHome }
 
 /** The workspace file, under the workspace folder. */
 export const KEPT_FILE = 'terminal/chat.json'
@@ -63,14 +64,22 @@ export function parseKept(raw: string): Kept {
     if (answer) row.answer = answer
     if (Object.keys(row).length) rows[k] = row
   }
-  return { rows, last: { reply: typeof o.last?.reply === 'string' ? o.last.reply : '', cards: strings(o.last?.cards) } }
+  const seen = seenOf((o as { seen?: unknown }).seen)
+  return { rows, last: { reply: typeof o.last?.reply === 'string' ? o.last.reply : '', cards: strings(o.last?.cards) }, ...(seen ? { seen } : {}) }
+}
+
+function seenOf(v: unknown): TermHome | undefined {
+  const o = v as Partial<Record<keyof TermHome, unknown>> | null | undefined
+  if (!o || typeof o !== 'object') return undefined
+  const n = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : 0)
+  return { cards: n(o.cards), labels: n(o.labels), docs: n(o.docs), threads: n(o.threads), views: n(o.views), files: n(o.files), at: n(o.at) }
 }
 
 /** The file's text: the newest ROWS_MAX rows. */
 export function keptJson(k: Kept): string {
   const keys = Object.keys(k.rows)
   const rows = Object.fromEntries(keys.slice(Math.max(0, keys.length - ROWS_MAX)).map(key => [key, k.rows[key]!]))
-  return JSON.stringify({ rows, last: k.last })
+  return JSON.stringify({ rows, last: k.last, ...(k.seen ? { seen: k.seen } : {}) })
 }
 
 /** `kept` with one row's part set (a row moves to the end, the newest). */
@@ -93,8 +102,22 @@ function pathOf(ws: string): string {
 /** The file as earlier sessions left it, merged under what this process set already (a reload keeps its own). */
 export async function loadKept(cx: Io, ws: string): Promise<Kept> {
   const got = parseKept(await cx.read(pathOf(ws)).catch(() => ''))
-  kept = { rows: { ...got.rows, ...kept.rows }, last: kept.last.reply || kept.last.cards.length ? kept.last : got.last }
+  const seen = kept.seen ?? got.seen
+  kept = { rows: { ...got.rows, ...kept.rows }, last: kept.last.reply || kept.last.cards.length ? kept.last : got.last, ...(seen ? { seen } : {}) }
   return kept
+}
+
+/** What the workspace held when home was last seen, kept. */
+export async function keepSeen(cx: Io, ws: string, seen: TermHome): Promise<void> {
+  const k = kept.seen
+  if (k && (Object.keys(seen) as (keyof TermHome)[]).every(x => k[x] === seen[x])) return
+  kept = { ...kept, seen }
+  await save(cx, ws)
+}
+
+/** What the workspace held when home was last seen, as the file read at the session's start (or this process) keeps it. */
+export function keptSeen(): TermHome | null {
+  return kept.seen ?? null
 }
 
 /** One row's part kept, and the file written (one write at a time, in order). */

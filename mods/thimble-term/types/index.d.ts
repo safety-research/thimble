@@ -88,6 +88,9 @@ export type TermCard = {
   ran?: string
   /** how its latest card check ended (cell.ts checkOf): `error` with why, which the card pane says */
   check?: { state: string; why: string }
+  /** the card check's latest rewrite of it that stands (the cell's last `fixes` entry `applied`): the parts it rewrote
+   *  (`takeaway`, `title`, `code`) and why, which a note under the card says (cell.ts fixOf) */
+  fixed?: { fields: string[]; why: string }
 }
 
 /** A card's takeaway as thimble's links check left it (backend verify.py, the cell's `verification.links`): `pending`

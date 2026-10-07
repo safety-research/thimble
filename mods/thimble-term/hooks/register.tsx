@@ -34,7 +34,7 @@ import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThread
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayKey, relayMove, wheelWindow } from './panel'
+import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, homeViews, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, relayKey, relayMove, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './reply'
 import { COLORS } from './paint'
@@ -877,9 +877,11 @@ export const register: Register = on => {
         </Box>,
       )
     }
-    // what is new in the workspace since home was last opened, like a toast: open › opens home and the row goes
+    // what is new in the workspace since home was last opened, like a toast: open › opens home on the first new item
+    // and the row goes; none while home shows (live check term-fix8, quirk 6: it stayed beside home, which showed them)
     const home = await cx.home()
-    if (home) {
+    const homeShown = (await cx.panel())?.view === 'home' && panes.some(p => p.id === PANEL && p.isPlaced)
+    if (home && !homeShown) {
       // the first count of a session (refreshHome keeps it) is what was there already, so nothing is new yet
       const seen = (await cx.homeSeen()) ?? home
       const fresh = (k: 'cards' | 'labels' | 'docs' | 'views') => Math.max(0, home[k] - (seen as typeof home)[k])
@@ -892,7 +894,7 @@ export const register: Register = on => {
             <Box flexDirection="row" columnGap={2} flexShrink={1}>
               {/* the word `new` in green, as wherever it shows (SPEC.md, rule 8) */}
               <Text wrap="truncate-end">{words.split(/( new )/).map((w, i) => (w === ' new ' ? <Text key={`new-${i}`}>{' '}<Text color={COLORS.fresh}>new</Text>{' '}</Text> : w))}</Text>
-              <Button key="above-home-open" label="open ›" plain onPress={() => void openHome(cx)} />
+              <Button key="above-home-open" label="open ›" plain onPress={() => void openHomeNew(cx)} />
             </Box>
           </Box>,
         )

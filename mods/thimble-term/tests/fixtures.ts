@@ -284,8 +284,10 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
         return w.cells[rest[0]!] ? out(w.cells[rest[0]!]) : out({ error: `no card ${rest[0]}` }, 1)
       case 'labels':
         return out(w.states.labels)
-      case 'label':
-        return rest[0] === LABEL.id ? out(w.states.labels[0]) : out({ error: 'no label' }, 1)
+      case 'label': {
+        const l = (w.states.labels as { id: string }[]).find(x => x.id === rest[0])
+        return l ? out(l) : out({ error: 'no label' }, 1)
+      }
       case 'docs':
         return out(w.states.docs)
       case 'doc':
