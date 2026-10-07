@@ -891,10 +891,13 @@ async def test_timeline_details_and_menu_read_in_a_narrow_panel(timeline):
                                      keys=["down"] * 8 + ["return"], panel=False)
     rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
     at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "03:00:48  alert" in rows[at] and set(rows[at + 1].strip()) == {"─"}
-    assert rows[at + 2].strip().startswith("alert fired · 03:00:48") and rows[at + 2].rstrip().endswith("close")
-    assert rows[at + 3].strip() == "payments: health check failing on 2 of 3"
-    assert rows[at + 5].strip() == "service payments · severity critical"
+    assert "03:00:48  alert" in rows[at]
+    # the list keeps the chosen event in its rows (no day heading takes one), the rule under the list, the pane under it
+    rule = next(i for i in range(at + 1, len(rows)) if set(rows[i].strip()) == {"─"})
+    assert all(x.startswith("  ● ") for x in rows[at + 1:rule]), rows[at + 1:rule]
+    assert rows[rule + 1].strip().startswith("alert fired · 03:00:48") and rows[rule + 1].rstrip().endswith("close")
+    assert rows[rule + 2].strip() == "payments: health check failing on 2 of 3"
+    assert rows[rule + 4].strip() == "service payments · severity critical"
     assert any(x.strip() == "↗ alerts/monitor-20260516-0000.jsonl line 2" for x in rows)
     assert "ask about it" not in out
     assert rows[1].rstrip().endswith("reset"), "reset shows once a row is opened"
@@ -902,7 +905,8 @@ async def test_timeline_details_and_menu_read_in_a_narrow_panel(timeline):
     rows = out.splitlines()
     top = next(i for i, x in enumerate(rows) if "╭─ Color by" in x)
     box = [x[4:].rstrip(" │") for x in rows[top + 1:] if x.startswith("  │")]
-    at = next(i for i, x in enumerate(box) if x.startswith("❯ Database connections"))
+    # ● before the choice in use
+    at = next(i for i, x in enumerate(box) if x.startswith("❯ ● Database connections"))
     assert box[at + 1].strip() == "● connections  ● not marked"
     assert any(x.strip().endswith("definition ↗") for x in box[at + 1:])
     assert all(len(x) <= 47 + 2 for x in rows)
