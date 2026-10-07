@@ -371,7 +371,7 @@ test("a whole-file JSON transcript shows the turns thimble parses from the whole
   w.turns['agent.json'] = STORE_TURNS
   await start($, w)
   let pane = await browser($, w)
-  pane = await openRow($, w, pane, 'agent.json', 1)
+  pane = await chooseRow($, w, pane, 'agent.json')
   expect(shown(await pane.drawn())).toContain('opens as transcript')
   pane = await openRow($, w, pane, 'agent.json', 1)
   expect(w.calls.some(c => c[2] === 'turns' && c[5] === 'agent.json')).toBe(true)
