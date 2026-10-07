@@ -6,8 +6,9 @@
     thimble-run label <label id|name>   run a code label apply_label left waiting; prints apply_label's result
     thimble-run stale                   run again the cards that read a label that changed since they ran
 
-add_card, edit_card and apply_label give the command in their result, and main's `--allowedTools` lets
-`<plugin>/bin/thimble-run *` run without asking. The first two lines make this file both a shell script and a Python
+add_card, edit_card and apply_label give the command in their result, by its name: the launcher puts this folder
+first on the session's PATH in terminal mode, and main's `--allowedTools` lets `thimble-run *` (and
+`<plugin>/bin/thimble-run *`) run without asking. The first two lines make this file both a shell script and a Python
 program, as in bin/thimble-mcp. Exit 0, or 1 when the code errored or the run was refused.
 """
 import os

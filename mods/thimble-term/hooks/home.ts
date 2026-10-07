@@ -15,6 +15,7 @@ import type { Line, Seg } from './draw'
 import { lineWidth, share as pct, valueColour, width, wrapRows } from './draw'
 import { ACCENT, FRESH, MARGIN_W, fitTo, headingLine, hintLine, pointed, ruleLine, spread } from './chrome'
 import { COLORS } from './paint'
+import { quoted } from './lib'
 
 export type SectionId = 'views' | 'reports' | 'threads' | 'cards' | 'labels' | 'files'
 
@@ -237,9 +238,9 @@ function threadsSection(ts: readonly HomeThread[]): HomeSection {
 /** What a group of cards holds, in words: the question it answered, the report or the thread it stands in. */
 function groupName(g: HomeCardGroup): string {
   const head = g.head.replace(/\s+/g, ' ').trim()
-  if (g.from === 'answer') return `answer to "${head}"`
-  if (g.from === 'report') return `in the report "${head}"`
-  if (g.from === 'thread') return `in the thread ${head.startsWith('"') ? head : `"${head}"`}`
+  if (g.from === 'answer') return `answer to ${quoted(head)}`
+  if (g.from === 'report') return `in the report ${quoted(head)}`
+  if (g.from === 'thread') return `in the thread ${/^["“]/.test(head) ? head : quoted(head)}`
   return head
 }
 

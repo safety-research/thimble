@@ -10,7 +10,7 @@
 // trail it left in `back`.
 import type { ChatNav, ChatNavStep, ChatThread } from '../types'
 import { plainCites } from './cite'
-import { width } from './draw'
+import { clip, cut, quoted, width } from './lib'
 
 export const NAV_EMPTY: ChatNav = { trail: [], back: [] }
 const TRAIL_MAX = 12
@@ -82,11 +82,6 @@ export function threadOnTrail(trail: readonly ChatNavStep[]): string {
   return ''
 }
 
-function clipTo(s: string, n: number): string {
-  if (width(s) <= n) return s
-  return `${[...s].slice(0, Math.max(1, n - 1)).join('').trimEnd()}…`
-}
-
 const SEP = 3 // " › "
 const MIN_CRUMB = 12
 
@@ -94,7 +89,7 @@ const MIN_CRUMB = 12
  *  first folded, oldest first, into one "…" (null marks a folded crumb) while they would not fit at 12 columns each;
  *  then the longest shortened a column at a time; the last cut to what is left. */
 export function fitCrumbs(labels: readonly string[], room: number): (string | null)[] {
-  const out: (string | null)[] = labels.map(l => clipTo(l.replace(/\s+/g, ' ').trim(), 34))
+  const out: (string | null)[] = labels.map(l => clip(l, 34))
   const total = (w: (s: string) => number) => out.reduce<number>((n, s, i) => n + (s === null ? (out[i - 1] === null ? 0 : 1 + SEP) : w(s) + (i ? SEP : 0)), 0)
   const least = (s: string) => Math.min(width(s), MIN_CRUMB)
   for (let i = 1; total(least) > room && i < out.length - 1; i++) out[i] = null
@@ -104,10 +99,10 @@ export function fitCrumbs(labels: readonly string[], room: number): (string | nu
       if (s !== null && width(s) > MIN_CRUMB && (top < 0 || width(s) > width(out[top]!))) top = i
     })
     if (top < 0) break
-    out[top] = clipTo(out[top]!, width(out[top]!) - 1)
+    out[top] = cut(out[top]!, width(out[top]!) - 1)
   }
   const last = out.length - 1
-  if (total(width) > room && last >= 0 && out[last] !== null) out[last] = clipTo(out[last]!, Math.max(4, width(out[last]!) - (total(width) - room)))
+  if (total(width) > room && last >= 0 && out[last] !== null) out[last] = cut(out[last]!, Math.max(4, width(out[last]!) - (total(width) - room)))
   return out
 }
 
@@ -116,7 +111,7 @@ export function fitCrumbs(labels: readonly string[], room: number): (string | nu
 /** A thread by name: its first question, quoted, else what it is about. */
 export function threadTitle(t: Pick<ChatThread, 'label' | 'turns'>): string {
   const q = t.turns[0]?.q
-  return q ? `"${plainCites(q).replace(/\s+/g, ' ').trim()}"` : `about ${plainCites(t.label)}`
+  return q ? quoted(plainCites(q).replace(/\s+/g, ' ').trim()) : `about ${plainCites(t.label)}`
 }
 
 /** When a thread last changed: its `at`, else when it was made (its id is `t` and the time in base 36). */

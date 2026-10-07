@@ -617,7 +617,8 @@ esac
 # session with no server and no first prompt: launch-args starts no server and writes the hooks module's roles file, the
 # mode line names the renderer plugin (mods/thimble-term), loaded with a second --plugin-dir, and the export line names
 # what the session's processes read (THIMBLE_MODE, THIMBLE_WS, THIMBLE_HOME and the data and workspaces folders), which
-# main's --settings `env` carries too. A THIMBLE_MODE or THIMBLE_WS from the calling shell is dropped first.
+# main's --settings `env` carries too, and a PATH with the plugin copy's bin/ first, so main's Bash runs the card runner
+# by its name (`thimble-run card <id>`). A THIMBLE_MODE or THIMBLE_WS from the calling shell is dropped first.
 # A workspace is open in one mode at a time: while another terminal runs it in the other mode, launch-args prints why on
 # stderr and exits 3 (cli.LAUNCH_REFUSED_EXIT), and the launcher starts nothing.
 command -v claude >/dev/null 2>&1 || {

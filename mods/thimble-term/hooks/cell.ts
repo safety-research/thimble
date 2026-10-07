@@ -62,7 +62,7 @@ export const ERROR = 'application/vnd.thimble.error+json'
 export const CARD_TYPE = 'application/vnd.thimble.card+json'
 const READS = 'application/vnd.thimble.reads+json'
 
-type Frame = { columns?: string[]; index?: string | null; label?: string; rows?: Cell[][]; total?: number; view?: { columns?: string[] } }
+type Frame = { columns?: string[]; index?: string | null; label?: string; rows?: Cell[][]; total?: number; view?: { columns?: string[]; formats?: Record<string, string> } }
 type Enc = { field?: string; type?: string; aggregate?: string; sort?: unknown }
 type VegaLite = {
   mark?: string | { type?: string }
@@ -148,7 +148,14 @@ function frameCard(cell: ThimbleCell, f: Frame): CardData {
   const order = [label, ...shown].filter(Boolean)
   const at = order.map(c => cols.indexOf(c))
   const unnamed = !f.label || /^(index|level_\d+)$/.test(f.label) ? label === f.index : false
-  return { ...blank(cell, 'table'), columns: order.map((c, i) => (i === 0 && unnamed ? '' : c)), rows: (f.rows ?? []).map(r => at.map(j => (r[j] ?? null) as Cell)), total: f.total }
+  const columns = order.map((c, i) => (i === 0 && unnamed ? '' : c))
+  // each number column's format, by the name the table shows it under, as the browser's table formats it
+  const formats: Record<string, string> = {}
+  order.forEach((c, i) => {
+    const spec = f.view?.formats?.[c]
+    if (typeof spec === 'string') formats[columns[i]!] = spec
+  })
+  return { ...blank(cell, 'table'), columns, rows: (f.rows ?? []).map(r => at.map(j => (r[j] ?? null) as Cell)), total: f.total, ...(Object.keys(formats).length ? { formats } : {}) }
 }
 
 function vegaRows(spec: VegaLite, root: VegaLite): Record<string, unknown>[] {

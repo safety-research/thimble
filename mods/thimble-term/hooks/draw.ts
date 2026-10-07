@@ -2,7 +2,7 @@
 // static drawing where no Client runs). Each layout takes the width it may use and the item under the pointer, and
 // returns its lines and a hit test from a cell to an item. The `note` and `text` kinds (noteLayout, textLayout) are the
 // cards drawn as their words.
-import { fmt } from './lib'
+import { cut, cw, fmt, formatted, quoted, width } from './lib'
 import type { Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -43,6 +43,8 @@ export type CardData = {
   edges?: DiagramEdge[]
   labels?: CardLabel[]
   label?: LabelInfo
+  /** a table's number formats by column (the frame's `view.formats`, backend frames.py) */
+  formats?: Record<string, string>
 }
 
 /** What the mod is doing to a card now: running its script, or why the last run failed. */
@@ -60,34 +62,8 @@ export const ONE = COLORS.series[0]!
 
 // ---------------------------------------------------------------------------------------- text width
 
-export function cw(ch: string): number {
-  const c = ch.codePointAt(0) ?? 0
-  if (c === 0) return 0
-  if (
-    (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
-    (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60) ||
-    (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x1f300 && c <= 0x1faff)
-  ) return 2
-  return 1
-}
-
-export function width(s: string): number {
-  let n = 0
-  for (const ch of s) n += cw(ch)
-  return n
-}
-
-export function cut(s: string, n: number): string {
-  if (width(s) <= n) return s
-  let out = ''
-  let w = 0
-  for (const ch of s) {
-    if (w + cw(ch) > n - 1) break
-    out += ch
-    w += cw(ch)
-  }
-  return `${out.trimEnd()}…`
-}
+// the cells a character takes, a string's width and the one cut of thimble-term (lib.ts)
+export { cut, cw, width }
 
 // a byte of a UTF-8 sequence after its first, as Windows-1252 shows it
 const CP1252: Record<number, number> = { 0x20ac: 0x80, 0x201a: 0x82, 0x192: 0x83, 0x201e: 0x84, 0x2026: 0x85, 0x2020: 0x86, 0x2021: 0x87, 0x2c6: 0x88, 0x2030: 0x89, 0x160: 0x8a, 0x2039: 0x8b, 0x152: 0x8c, 0x17d: 0x8e, 0x2018: 0x91, 0x2019: 0x92, 0x201c: 0x93, 0x201d: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97, 0x2dc: 0x98, 0x2122: 0x99, 0x161: 0x9a, 0x203a: 0x9b, 0x153: 0x9c, 0x17e: 0x9e, 0x178: 0x9f }
@@ -172,16 +148,8 @@ export function wrapRows(s: string, n: number, max: number): string[] {
       break
     }
   }
-  if (cur) lines.push(lines.length >= max - 1 ? cutAtWord(cur, n) : cur)
+  if (cur) lines.push(lines.length >= max - 1 ? cut(cur, n) : cur)
   return lines.slice(0, max)
-}
-
-/** `s` cut to `n` cells with `…`, at the last space that keeps half of it, else mid-word. */
-export function cutAtWord(s: string, n: number): string {
-  if (width(s) <= n) return s
-  const head = cut(s, n).slice(0, -1)
-  const sp = head.lastIndexOf(' ')
-  return `${(sp > n / 2 ? head.slice(0, sp) : head).replace(/[\s,;:.]+$/, '')}…`
 }
 
 export function pad(s: string, n: number, right = false): string {
@@ -971,7 +939,9 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
   const n = heads.length
   const all = (card.rows ?? []) as Cell[][]
   const rows = all.slice(0, MAX_TABLE_ROWS)
-  const cells = rows.map(r => heads.map((_, c) => fmt(r[c])))
+  // each number in its column's format, as the browser's table writes it (FrameTable's cellText): `1,446`
+  const text = (v: Cell, h: string): string => (typeof v === 'number' ? formatted(v, card.formats?.[h]) ?? fmt(v) : fmt(v))
+  const cells = rows.map(r => heads.map((h, c) => text(r[c] ?? null, h)))
   // a blank cell does not make a column of numbers text
   const numeric = heads.map((_, c) => rows.every(r => typeof r[c] === 'number' || r[c] === null || (typeof r[c] === 'string' && !r[c].trim())))
   const { ws, packed, gap } = tableGeometry(heads, cells, numeric, cols)
@@ -979,9 +949,10 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
   const items: Item[] = []
   rows.forEach(r =>
     heads.forEach((h, c) => {
-      const v = fmt(r[c])
+      // the value as the card shows it; the row named by its label unformatted, as the backend names it in a ref
+      const v = text(r[c] ?? null, h)
       const ref = `card:${card.id}#${h}/${fmt(r[0])}`
-      items.push({ label: `${fmt(r[0])} · ${h}`, value: v, cite: c === 0 ? v : cite(v, ref), open: ref, kind: c === 0 ? 'row' : 'mark', text: v })
+      items.push({ label: `${text(r[0] ?? null, heads[0] ?? '')} · ${h}`, value: v, cite: c === 0 ? v : cite(v, ref), open: ref, kind: c === 0 ? 'row' : 'mark', text: v })
     }),
   )
   const hr = hover >= 0 ? Math.floor(hover / Math.max(1, n)) : -1
@@ -1049,12 +1020,16 @@ function placeLink(ref: string, n: number, on: boolean): Seg[] {
 /** A record's own words in quotation marks, in at most `max` rows of `room` columns; words that do not fit end in
  *  `…"`. */
 function quoteLines(words: string, room: number, max: number): string[] {
-  const lines = wrapCell(`"${words}"`, room, max).filter(Boolean)
+  // in quotation marks of a kind the words do not hold (lib.ts quoted)
+  const q = quoted(words)
+  const close = q === words ? '' : q.at(-1)!
+  const lines = wrapCell(q, room, max).filter(Boolean)
   const last = lines.at(-1)
   if (last && last.endsWith('…')) {
-    let t = last.slice(0, -1)
-    while (t && width(t) + 2 > room) t = t.slice(0, -1)
-    lines[lines.length - 1] = `${t.trimEnd()}…"`
+    // cut at a word, as every cut, with room for the `…` and the closing mark after it
+    const t = last.slice(0, -1).trimEnd()
+    const kept = width(t) + 1 + close.length <= room ? t : cut(t, room - close.length).slice(0, -1)
+    lines[lines.length - 1] = `${kept.replace(/[\s,;:.!?]+$/, '')}…${close}`
   }
   return lines
 }

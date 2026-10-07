@@ -12,6 +12,7 @@
 // that uuid in the plugin's state (`threadRows`) and draws; this file holds the rules, without `$`.
 import type { ChatSignal, ChatThread } from '../types'
 import { plainCites } from './cite'
+import { clip, quoted } from './lib'
 
 /** A row as session.append hands it, the parts that say where it is drawn. */
 export type AppendedRow = { door: string; origin?: { kind?: string }; message: { type: string; name?: string; content?: unknown } }
@@ -34,14 +35,6 @@ export function isAnchor(r: AppendedRow): boolean {
   return false
 }
 
-function firstWords(s: string, n: number): string {
-  const one = s.replace(/\s+/g, ' ').trim()
-  if (one.length <= n) return one
-  const cut = one.slice(0, n + 1)
-  const sp = cut.lastIndexOf(' ')
-  return `${(sp > n / 2 ? cut.slice(0, sp) : one.slice(0, n)).replace(/[\s,;:.]+$/, '')}…`
-}
-
 /** What a turn's end says in main's chat: `answered`, `failed`, or null for a turn that is not news (still running, or
  *  stopped by the analyst). */
 export function signalEnd(t: Pick<ChatThread, 'turns'>, turn: number): 'answered' | 'failed' | null {
@@ -55,7 +48,7 @@ export function signalEnd(t: Pick<ChatThread, 'turns'>, turn: number): 'answered
 /** The row's words: the question of the turn it reports, short, as its shown words. */
 export function signalQuestion(t: Pick<ChatThread, 'turns' | 'label'>, turn: number, n = 48): string {
   const q = t.turns[turn - 1]?.q
-  return q ? `"${firstWords(plainCites(q), n)}"` : `about ${firstWords(plainCites(t.label), n)}`
+  return q ? quoted(clip(plainCites(q), n)) : `about ${clip(plainCites(t.label), n)}`
 }
 
 /** What signals.json holds: the session it was written in (an anchor names a row of that session's transcript), the

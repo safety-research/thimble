@@ -4,6 +4,8 @@
 // - parseReply(text): a reply block cut into Markdown chunks, card embeds (a line holding only [[card:<id>]]) and rich
 //   blocks (a paragraph, list item, heading, quote or table that holds a citation), each rich block as inline runs.
 // - shownMatches / valueIn: thimble's number comparison (backend/app/cite.py), for the verification script's result.
+// - cut / clip / windowAt: the one cut of thimble-term, at a word; quoted: words in quotation marks of a kind they do
+//   not hold; formatted: a table column's number format, as the browser's table writes it.
 
 export type Citation = { raw: string; ref: string; display: string | null }
 
@@ -138,17 +140,146 @@ export function cid(raw: string): string {
   return h.toString(36)
 }
 
-/** What a chip says: the shown value, or a short name of the place for a citation without one. */
+// the cards' questions read so far, by id (term.ts loadCards notes each): what names a card a reply cites without words
+const questions = new Map<string, string>()
+
+/** A card's question, noted when the card is read, so a citation of the card without words names it by its question. */
+export function noteQuestion(id: string, question: string | undefined): void {
+  if (!question) return
+  questions.delete(id)
+  questions.set(id, question)
+  if (questions.size > 2000) questions.delete(questions.keys().next().value!)
+}
+
+/** A card's question as noted (noteQuestion); '' for a card not read yet. */
+export function questionOf(id: string): string {
+  return questions.get(id) ?? ''
+}
+
+/** The card a citation names whole, with no words and no place on it (`[[card:<id>]]`, as a sentence ends with it), or
+ *  ''. */
+export function bareCard(c: Citation): string {
+  return c.display === null ? (/^(?:card|cell):([A-Za-z0-9_-]+)$/.exec(c.ref)?.[1] ?? '') : ''
+}
+
+/** A card named by its question in words: `card “<question>”`, the question cut at a word; `a card` while it is not
+ *  read. */
+export function cardWords(question: string, n = 40): string {
+  return question.trim() ? `card ${quoted(clip(question, n))}` : 'a card'
+}
+
+/** What a chip says: the shown value, or a short name of the place for a citation without one; a card cited whole by
+ *  its question. */
 export function chipLabel(c: Citation): string {
-  if (c.display !== null) return c.display.length > 40 ? `${c.display.slice(0, 39)}…` : c.display
+  if (c.display !== null) return clip(c.display, 40)
   const [base = '', frag = ''] = c.ref.split('#', 2)
+  const card = bareCard(c)
+  if (card) return cardWords(questionOf(card))
   if (base.startsWith('card:')) return frag ? `card ${frag.split('/').at(-1)}` : 'card'
   if (base.startsWith('call:')) return frag ? `output ${frag}` : 'output'
   const name = base.split('/').at(-1) ?? base
   const short = name.replace(/\.(jsonl|json|csv|tsv|txt|md|log)$/, '')
   const where = frag.startsWith('L') ? `:${frag.slice(1).replace('-L', '-')}` : frag ? `#${frag}` : ''
-  const label = `${short}${where}`
-  return label.length > 24 ? `${label.slice(0, 23)}…` : label
+  return cut(`${short}${where}`, 24)
+}
+
+// ---------------------------------------------------------------------------------------- text width and cuts
+
+/** The cells a character takes on the grid: 2 for a wide one (CJK, emoji), 1 else. */
+export function cw(ch: string): number {
+  const c = ch.codePointAt(0) ?? 0
+  if (c === 0) return 0
+  if (
+    (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
+    (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60) ||
+    (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x1f300 && c <= 0x1faff)
+  ) return 2
+  return 1
+}
+
+export function width(s: string): number {
+  let n = 0
+  for (const ch of s) n += cw(ch)
+  return n
+}
+
+/** The longest start of `s` that fits in `n` cells, with no `…`: a word wider than its row, broken where the row ends. */
+export function prefix(s: string, n: number): string {
+  let out = ''
+  let w = 0
+  for (const ch of s) {
+    if (w + cw(ch) > n) break
+    out += ch
+    w += cw(ch)
+  }
+  return out
+}
+
+// what a cut leaves out before its `…`: the space and the punctuation that ended the last word kept
+const CUT_TAIL = /[\s,;:.!?\-–—]+$/
+
+/** `s` in at most `n` cells: whole when it fits, else cut at the last word that fits, mid-word only when that keeps
+ *  less than half of the room, with no space or punctuation before the `…` (SPEC.md, section 5, "Words that recur").
+ *  The one cut of thimble-term: every row, title, preview and path step that shortens prose shortens it here. */
+export function cut(s: string, n: number): string {
+  if (width(s) <= n) return s
+  if (n <= 1) return n === 1 ? '…' : ''
+  let head = ''
+  let w = 0
+  for (const ch of s) {
+    if (w + cw(ch) > n - 1) break
+    head += ch
+    w += cw(ch)
+  }
+  // a word that ends right where the room does is whole
+  const at = /\s/.test(s[head.length] ?? '') ? head.length : head.search(/\s\S*$/)
+  const keep = at > 0 && width(head.slice(0, at)) * 2 > n ? head.slice(0, at) : head
+  return `${keep.replace(CUT_TAIL, '') || keep.trimEnd()}…`
+}
+
+/** `s` on one line in `n` cells, cut as `cut` cuts. */
+export function clip(s: string, n: number): string {
+  return cut(s.replace(/\s+/g, ' ').trim(), n)
+}
+
+/** About `room` characters of a long line around position `at` (a third of the room before it), each end cut at a word
+ *  with `…` right against the words; `shift` is how far a position of `text` moved to the left. */
+export function windowAt(text: string, at: number, room: number): { text: string; shift: number } {
+  if (text.length <= room) return { text, shift: 0 }
+  let lo = Math.max(0, Math.min(at - Math.floor(room / 3), text.length - room))
+  const late = lo > 0
+  let hi = Math.min(text.length, lo + room - (late ? 2 : 1))
+  if (late) {
+    // the first word whole: start after the space that ends the cut one, while that loses less than a third of the
+    // room; no space after the `…`
+    if (!/\s/.test(text[lo - 1]!)) {
+      const sp = text.slice(lo, Math.min(at, lo + Math.floor(room / 3))).search(/\s/)
+      if (sp >= 0) lo += sp + 1
+    }
+    while (lo < hi && /\s/.test(text[lo]!)) lo++
+  }
+  if (hi < text.length && !/\s/.test(text[hi]!)) {
+    const sp = text.slice(lo, hi).search(/\s\S*$/)
+    if (sp > (hi - lo) / 2) hi = lo + sp
+  }
+  const body = text.slice(lo, hi)
+  const end = hi < text.length ? `${body.replace(CUT_TAIL, '') || body.trimEnd()}…` : body
+  return { text: `${late ? '…' : ''}${end}`, shift: lo - (late ? 1 : 0) }
+}
+
+/** Words in quotation marks for a row: straight ones, curly when the words hold straight ones of their own, and none
+ *  when they hold both kinds, so no quotation marks stand inside the same kind. */
+export function quoted(s: string): string {
+  const straight = s.includes('"')
+  const curly = /[“”]/.test(s)
+  if (straight && curly) return s
+  return straight ? `“${s}”` : `"${s}"`
+}
+
+/** Straight double quotation marks as curly ones, opening after a space or a bracket and closing elsewhere: words in a
+ *  tool's row, where Claude Code escapes straight ones (`\"`). */
+export function curlyQuotes(s: string): string {
+  return s.replace(/"/g, (_m, at: number) => (at === 0 || /[\s([{—–-]/.test(s[at - 1]!) ? '“' : '”'))
 }
 
 // ---------------------------------------------------------------------------------------- inline runs
@@ -509,20 +640,24 @@ export function fmt(v: unknown): string {
   return v === null || v === undefined ? '' : String(v)
 }
 
-/** `s` on one line in `n` characters, cut with `…` and no space before it. */
-export function clip(s: string, n: number): string {
-  const one = s.replace(/\s+/g, ' ').trim()
-  return one.length > n ? `${one.slice(0, Math.max(0, n - 1)).trimEnd()}…` : one
-}
+// the number formats thimble gives a table's columns (backend frames.default_format, which d3-format reads in the
+// browser): `,d` and `d` for whole numbers, `,.N~f` and `.N~f` for the others
+const FORMAT_RE = /^(,)?(?:d|\.(\d)~f)$/
 
-/** `s` on one line in `n` characters, cut at the last word that fits (mid-word only when that keeps less than half),
- *  without the punctuation or space before `…`: a card's question or a thread's in a row. */
-export function clipWords(s: string, n: number): string {
-  const one = s.replace(/\s+/g, ' ').trim()
-  if (one.length <= n) return one
-  const head = one.slice(0, Math.max(1, n - 1))
-  const sp = one[head.length] === ' ' ? head.length : head.lastIndexOf(' ')
-  return `${(sp > n / 2 ? head.slice(0, sp) : head).replace(/[\s,;:.]+$/, '')}…`
+/** A number in a table column's format, as the browser's table writes it (FrameTable's cellText, d3-format), for the
+ *  formats thimble gives; null for any other format. A negative number takes the minus sign, as d3-format writes it. */
+export function formatted(v: number, spec: string | undefined): string | null {
+  const m = spec ? FORMAT_RE.exec(spec) : null
+  if (!m || !Number.isFinite(v)) return null
+  const places = m[2] !== undefined ? Number(m[2]) : 0
+  // a tie rounds away from zero, as the backend's ROUND_HALF_UP of the float's exact value and JS's toFixed do
+  let text = Math.abs(v).toFixed(places)
+  const [whole = '0', frac0 = ''] = text.split('.')
+  const frac = m[2] !== undefined ? frac0.replace(/0+$/, '') : ''
+  const grouped = m[1] ? whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : whole
+  const zero = Number(text) === 0
+  text = `${grouped}${frac ? `.${frac}` : ''}`
+  return (v < 0 || Object.is(v, -0)) && !zero ? `−${text}` : text
 }
 
 /** A record's fields as a label's example shows them, when its words are a JSON object (a line of a JSON lines file):

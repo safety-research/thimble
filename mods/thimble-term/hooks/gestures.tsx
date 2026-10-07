@@ -14,7 +14,7 @@ import type { ClientModule, ClientPointerEvent, JsonValue } from 'claude-code'
 
 import type { ChatTarget } from '../types'
 import { citeLabel, plainCites } from './cite'
-import { citations } from './lib'
+import { citations, cut, quoted } from './lib'
 import type { Citation } from './lib'
 
 export type Target = ChatTarget
@@ -122,7 +122,7 @@ export function citeText(t: Target): string {
   const c = citationOf(t)
   if (c) return c.raw
   const s = (t.text ?? '').replace(/\s+/g, ' ').trim()
-  return s ? `"${s.length > 300 ? `${s.slice(0, 299)}…` : s}"` : ''
+  return s ? quoted(cut(s, 300)) : ''
 }
 
 /** The place a click opens: a citation's; a mark's, row's, record's or node's when it lies outside the cards. Plain
@@ -135,14 +135,6 @@ export function placeOf(t: Target): Citation | null {
 }
 
 export type Act = 'open' | 'thread' | 'verify' | 'script' | 'rerun' | 'files'
-/** `s` in at most `n` characters: whole when it fits, else cut at the last space that keeps half of it, then `…`. */
-function shorten(s: string, n: number): string {
-  if (s.length <= n) return s
-  const room = Math.max(1, n - 1)
-  const sp = s.lastIndexOf(' ', room)
-  return `${(sp >= room / 2 ? s.slice(0, sp) : s.slice(0, room)).replace(/[\s,;:.]+$/, '')}…`
-}
-
 /** A short name for the target in at most `max` characters, as the mouse log and a thread's title show it: each citation by
  *  its label, never its ref; quoted words keep their closing quote when cut. */
 export function targetLabel(t: Target, max = 48): string {
@@ -154,12 +146,12 @@ export function targetLabel(t: Target, max = 48): string {
   const c = citationOf(t)
   switch (t.kind) {
     case 'card':
-      return s ? `card "${shorten(s, n - 7)}"` : 'card'
+      return s ? `card ${quoted(cut(s, n - 7))}` : 'card'
     case 'sentence':
-      return s ? `"${shorten(s, n - 2)}"` : 'sentence'
+      return s ? quoted(cut(s, n - 2)) : 'sentence'
     case 'citation':
-      return shorten(c ? citeLabel(c) : 'citation', n)
+      return cut(c ? citeLabel(c) : 'citation', n)
     default:
-      return shorten(t.label || s || (c ? citeLabel(c) : t.kind), n)
+      return cut(t.label || s || (c ? citeLabel(c) : t.kind), n)
   }
 }

@@ -129,6 +129,21 @@ async def test_a_card_run_by_thimble_run_stores_what_a_kernel_run_stores(term):
         assert tools._format_cell_result(full, lines=tools.result_lines(CORPUS)) in done.stdout
 
 
+async def test_the_command_names_thimble_run_by_its_name_and_runs_from_the_sessions_path(term):
+    """The command add_card gives names `thimble-run` with no install path, so its row in the terminal, running or done,
+    reads `thimble-run card <id>`; it runs as given in a shell whose PATH starts with the plugin copy's bin/, as the
+    launcher's export line sets it (cli.launch_args)."""
+    res = await call(term, "add_card", question="names", code="print(2 + 2)")
+    cid = card_id(res)
+    assert cardrun.command("card", cid) == f"thimble-run card {cid}"
+    assert f"thimble-run card {cid}" in text(res) and str(cardrun.bin_path()) not in text(res)
+    env = {**os.environ, "PATH": os.pathsep.join([str(cardrun.bin_path().parent), os.environ.get("PATH", "")])}
+    done = subprocess.run(cardrun.command("card", cid), shell=True, cwd=term, env=env, capture_output=True, text=True,
+                          timeout=120)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.startswith(f"card:{cid}\n") and "4" in done.stdout
+
+
 async def test_what_a_child_process_writes_is_in_the_card(term):
     """As ipykernel captures file descriptors 1 and 2 by default, a child process's output is the card's."""
     cid = card_id(await call(term, "add_card", question="child", code="import subprocess\n"

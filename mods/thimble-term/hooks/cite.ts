@@ -14,9 +14,9 @@
 // - Streaming: a reply's text as the engine shows it while it streams, citations as links and card lines as
 //   placeholders, before the mod draws the finished block.
 import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from '../types'
-import { cut, lineWidth, width } from './draw'
+import { lineWidth, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, chipLabel, cid, citations, citeEnd, citeSpans, parseReply, plainLinks, shownMatches, valueIn } from './lib'
+import { EMBED_RE, chipLabel, cid, citations, citeEnd, citeSpans, parseReply, plainLinks, prefix, shownMatches, valueIn, windowAt } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -232,7 +232,7 @@ function flow(toks: Tok[], room: number): { lines: Line[]; spans: ChipSpan[]; wo
     let s = seg!.s
     let at = t.at
     while (width(s) > room) {
-      const head = cut(s, room + 1).slice(0, -1) || [...s][0]!
+      const head = prefix(s, room) || [...s][0]!
       if (t.chip >= 0) span(used, used + width(head), t.chip)
       else words.push({ line: lines.length, x0: used, x1: used + width(head), at })
       cur.push({ ...seg!, s: head })
@@ -427,10 +427,8 @@ export function quotedWords(display: string | null): string {
  *  passage), the spans moved with it. */
 export function capLine<T extends { text: string; spans?: number[][] }>(w: T, cap = 1200): T {
   if (w.text.length <= cap) return w
-  const first = w.spans?.[0]
-  const lo = first ? Math.max(0, Math.min(first[0]! - Math.floor(cap / 3), w.text.length - cap)) : 0
-  const text = `${lo ? '…' : ''}${w.text.slice(lo, lo + cap)}${lo + cap < w.text.length ? '…' : ''}`
-  const shift = lo - (lo ? 1 : 0)
+  // each end cut at a word, as every cut (lib.ts windowAt)
+  const { text, shift } = windowAt(w.text, w.spans?.[0]?.[0] ?? 0, cap)
   if (!w.spans) return { ...w, text }
   return { ...w, text, spans: w.spans.map(([a, b]) => [a! - shift, b! - shift]).filter(([a, b]) => a! >= 0 && b! <= text.length) }
 }

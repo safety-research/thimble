@@ -16,7 +16,7 @@ import type { ClientModule, ClientSurface, RenderElement } from 'claude-code'
 
 import { blockLayout, passageAt } from './cite'
 import type { ChipView } from './cite'
-import { lineWidth, shade, width } from './draw'
+import { cut, lineWidth, shade, width } from './draw'
 import { onPointer, send } from './gestures'
 import type { Target } from './gestures'
 import type { Run, TableRuns } from './lib'
@@ -151,13 +151,13 @@ const Para: ClientModule<Props, S> = (props, surface) => {
   // paragraph after its text (an absolute Box is clipped to the region, which is one row tall then)
   if (span && tip) {
     const room = Math.max(10, cols - 3)
-    let text = width(tip) > room ? `${tip.slice(0, room - 1)}…` : tip
+    let text = cut(tip, room)
     let top = span.line < lay.lines.length - 1 ? span.line + 1 : Math.max(0, span.line - 1)
     let left = Math.max(0, Math.min(span.x0, cols - width(text) - 2))
     if (lay.lines.length === 1) {
       const end = lineWidth(lay.lines[0]!) + 2
       const free = cols - end - 2
-      text = free >= 12 ? (width(tip) > free ? `${tip.slice(0, free - 1)}…` : tip) : ''
+      text = free >= 12 ? cut(tip, free) : ''
       left = end
       top = 0
     }

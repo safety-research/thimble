@@ -29,7 +29,10 @@ Claude Code's panel chrome, no right-click menu.
   does not exist`, and why). The blue `?` beside a passage asks a side thread about it (a heading's about its whole
   section, a card's about the card); once one was asked, a blue `↳` stays there and opens it. While main streams,
   citations show as links and a card's line as `◌ <its question>`, never `[[…]]`; a citation typed into the prompt is
-  blue and underlined too. Main's end token, `(shown in the dashboard)`, is not shown. Off the terminal a cited block is
+  blue and underlined too. A card cited whole (`[[card:<id>]]`) where it is drawn with the text (under the reply, under
+  a thread's answer, as a document's figure) is left out with the space before it, and elsewhere reads `card "<its
+  question>"`. Every cut is at a word (`hooks/lib.ts` `cut`). Main's end token, `(shown in the dashboard)`, is not
+  shown. Off the terminal a cited block is
   Markdown, each citation a link to its file and a problem marked `×`.
 - **The footer** under a turn's answer (its last part that cites or embeds a card), one blank row below it: `N citations
   · N cards` dim, `· N problems` in red, `ask about this answer ›`. None for the prompts thimble-term gives main itself.
@@ -46,7 +49,8 @@ Claude Code's panel chrome, no right-click menu.
   …`). Claude Code's tool rows stay its own, folded, and no hex id is drawn, in the row or in ctrl+o's detailed view: a
   thimble tool's row names a card by its question (cut at a word, without straight quotation marks Claude Code would
   escape) and a citation by its words, a label tool's result its name and counts, and a side thread's fork row and the
-  notice that it finished the thread by its first question; thimble's tool results keep their card ids, which main
+  notice that it finished the thread by its first question, and so does the fork's prompt in ctrl+o; a tool's words draw
+  their straight quotation marks curly, which Claude Code does not escape; thimble's tool results keep their card ids, which main
   cites. A bar card keeps the order its chart's label axis sorts, and a bar chart with its values written on its bars is a bar card too. A table, a timeline, a diagram, an example and a label draw
   directly; a simple bar or line chart draws as text; any other chart as a table of its rows; a note, a custom card, a
   code card and a card type's card as their words.
@@ -69,7 +73,8 @@ Claude Code's panel chrome, no right-click menu.
   field when opened from a side thread); the threads (a tree with a root per place, `main` or `report "…"`, the selected
   thread under it, `stop` while it answers, the ask field); a label; the documents and one document (a report with its
   contents, a deck or a story one slide or beat at a time, the retell controls); the file browser (folders that fold,
-  the chosen file's first lines) and a file (`Table`, `Transcript`, `Raw`, the chosen record's place and `?`); an agent;
+  each folder's size, the chosen file's first lines as the file holds them) and a file (`Table`, `Transcript`, `Raw`,
+  each line as the file holds it, the chosen record's place and `?`); an agent;
   and the views (a view as one line: the browser draws views, so terminal mode says to open it in browser mode).
 - **The label panel**, as Matt laid it out: `name:` its name in the accent and bold after a `●` in its colour, `type:`
   (`prompt  regex  code`, the one in use on the selection background, the others a click away), `scope:` (its files, a

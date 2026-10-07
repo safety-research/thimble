@@ -161,8 +161,9 @@ test("a reply's citation is a link, blue and underlined; a click opens the citat
   const text = shown(await pane.drawn())
   // the title is the value as a link to its place; its status in plain words under it; then where it is from and its lines
   expect(shown(await pane.drawn({ in: 'cite-title' }))).toBe('4,579')
-  expect(text).toContain('found in README.md line 3')
-  expect(text).toContain('from')
+  // its status says `found` alone: the `from` row names the place (live check New 7)
+  expect(shown(await pane.find({ key: 'cite-sub' }))).toBe('found')
+  expect(text).toContain('fromREADME.md line 3')
   expect(text).toContain('An export of 4,579 wiki pages')
   expect(text).toContain('ask about it')
   // the sentence it stands in, its value a link; no way back from main, so no `b`; no `in files` (the title opens it)
