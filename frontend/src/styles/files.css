@@ -1787,25 +1787,6 @@
 .colorby-caret {
   color: var(--text-tertiary);
 }
-.colorby-info {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: 22px;
-  height: 22px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-ui);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-}
-.colorby-info:hover,
-.colorby-info[aria-expanded='true'] {
-  background: var(--surface-hover);
-  color: var(--text-primary);
-}
 .colorby-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1929,7 +1910,7 @@
   font: 400 var(--text-mono-sm) / 1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
-/* the menu: Off, the keys, the labels with their info buttons */
+/* the menu: Off, the keys, the labels */
 .colorby-row {
   display: flex;
   align-items: center;
@@ -2002,76 +1983,6 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-chip);
   vertical-align: top;
-}
-/* a label's definition, in the menu under its row or in the popover of the info button beside Color by */
-.colorby-def {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px 10px 10px;
-  font: var(--type-ui-sm);
-  color: var(--text-primary);
-}
-.colorby-def.in-menu {
-  margin: 0 4px 6px 24px;
-  border-radius: var(--radius-ui);
-  background: var(--track-bg);
-}
-.colorby-def-name {
-  font-weight: 500;
-}
-.colorby-def-text {
-  margin: 0;
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
-}
-.colorby-def-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  color: var(--text-tertiary);
-}
-.colorby-def-meta .mono,
-.colorby-def-kind {
-  font: var(--type-mono-sm);
-}
-.colorby-def-spec {
-  max-height: 180px;
-  margin: 0;
-  padding: 6px 8px;
-  overflow: auto;
-  border: 1px solid var(--border-hairline);
-  border-radius: var(--radius-ui);
-  background: var(--surface-card);
-  color: var(--text-secondary);
-  font: var(--type-mono-sm);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.colorby-def-values {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.colorby-def-values li {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 2px 8px;
-}
-.colorby-def-value {
-  font-weight: 500;
-}
-.colorby-def-meaning {
-  grid-column: 2 / 4;
-  color: var(--text-secondary);
-}
-.colorby-def-acts {
-  display: flex;
-  justify-content: flex-end;
 }
 /* a record's Color by color: a bar on its left edge */
 .reader-record.has-cb {

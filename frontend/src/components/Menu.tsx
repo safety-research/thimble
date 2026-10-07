@@ -25,6 +25,9 @@ const MARGIN = 8
 
 const anchorEl = (a: AnchorLike): PopoverAnchor | null => (a && 'current' in a ? a.current : (a ?? null))
 
+/** The open sheets, the last opened last: Escape closes the last alone (a menu or a palette a sheet opened). */
+const openSheets: object[] = []
+
 /** Where a sheet of `w`×`h` goes beside `rect`: below when it fits, else above, else clamped to the viewport. Pure. */
 export function placeBeside(rect: { left: number; right: number; top: number; bottom: number }, w: number, h: number, vw: number, vh: number, align: Align): { left: number; top: number } {
   const left = Math.max(MARGIN, Math.min(align === 'end' ? rect.right - w : rect.left, vw - w - MARGIN))
@@ -102,6 +105,15 @@ export function Popover({ anchor, open, onClose, align = 'start', side = 'below'
     }
   }, [open, place])
 
+  // its place among the open sheets, taken when it opens and kept while it is drawn again
+  const me = useRef({})
+  useEffect(() => {
+    if (!open) return
+    const sheet = me.current
+    openSheets.push(sheet)
+    return () => void openSheets.splice(openSheets.indexOf(sheet), 1)
+  }, [open])
+
   useEffect(() => {
     if (!open) return
     const onDown = (e: globalThis.MouseEvent) => {
@@ -110,7 +122,7 @@ export function Popover({ anchor, open, onClose, align = 'start', side = 'below'
       onClose('outside')
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && openSheets[openSheets.length - 1] === me.current) {
         e.stopPropagation()
         onClose('escape')
       }

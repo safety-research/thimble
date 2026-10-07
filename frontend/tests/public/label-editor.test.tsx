@@ -3,7 +3,9 @@
 // one editor, LabelCard, with the same fields, prompt, classes and actions. The popover sits beside what asked for it,
 // takes the focus, and Escape, Cancel or × close it, giving the focus back and telling the opener; a second request
 // takes the first one's place. A view's edit call (labelCalls.ts) hands the editor the rect the page gave, in the page's
-// coordinates, and a view's label controls (ViewPane) open it with what a new label applies to.
+// coordinates, and a view's label controls (ViewPane) open it with what a new label applies to. A class's swatch opens
+// the palette Color by's chips open (ValuePalette), whose pick for a saved value goes through setColour, and whose
+// Escape closes the palette alone.
 import { act } from 'react'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { ViewLabelActions } from '../../src/files/labelCalls.ts'
@@ -53,7 +55,7 @@ const labels: FilesLabels = {
   presence: new Map(),
   toggle: () => undefined,
   setClasses: () => undefined,
-  setColour: () => undefined,
+  setColour: vi.fn(),
   save: async () => kind,
 }
 
@@ -144,6 +146,54 @@ describe('one label editor in the sidebar and in the popover', () => {
       expect(shape(card).foot).toEqual(['Cancel', 'Run'])
     }
     expect(popover()!.getAttribute('aria-label')).toBe('New label')
+  })
+})
+
+describe("a class's swatch", () => {
+  const swatch = (root: ParentNode, name: string) => root.querySelector<HTMLButtonElement>(`[aria-label="Change the color of ${name}"]`)!
+  const palette = () => document.querySelector<HTMLElement>('.popover.colorby-palette')
+
+  test("opens the value palette, the class's color ringed; a pick for a saved value goes through setColour", async () => {
+    const setColour = labels.setColour as ReturnType<typeof vi.fn>
+    setColour.mockClear()
+    const el = await mount(<SideCard editing="k1" />)
+    await act(async () => swatch(el, 'writing').click())
+    const picks = [...palette()!.querySelectorAll('.colorby-pick')]
+    expect(picks.map((b) => b.getAttribute('aria-label'))).toEqual([...Array.from({ length: 12 }, (_, i) => `Color ${i + 1}`), 'Grey'])
+    expect(picks.map((b) => b.getAttribute('aria-pressed')).indexOf('true')).toBe(1)
+    expect(palette()!.querySelector('.colorby-palette-head')?.textContent).toBe('writing')
+    await act(async () => (picks[4] as HTMLButtonElement).click())
+    expect(setColour.mock.calls).toEqual([['k1', 'writing', 5]])
+    expect(palette()).toBeNull()
+  })
+
+  test("a class not saved yet takes the color in the draft, and a class that had it takes the old one", async () => {
+    const setColour = labels.setColour as ReturnType<typeof vi.fn>
+    setColour.mockClear()
+    const el = await mount(<SideCard editing="new" />)
+    const colours = () => [...el.querySelectorAll<HTMLElement>('.label-card-colour')].map((b) => b.style.getPropertyValue('--c'))
+    const before = colours()
+    await act(async () => swatch(el, 'no match').click())
+    await act(async () => [...palette()!.querySelectorAll<HTMLButtonElement>('.colorby-pick')].find((b) => b.style.getPropertyValue('--c') === before[0])!.click())
+    expect(colours()).toEqual([before[1], before[0]])
+    expect(setColour).not.toHaveBeenCalled()
+  })
+
+  test('Escape in the palette closes the palette alone, in the popover too', async () => {
+    await mount(<LabelEditorHost ws="w" />)
+    await act(async () => openLabelEditor({ id: 'k1', anchor: control() }))
+    await settle()
+    const at = swatch(popover()!, 'reading')
+    at.focus()
+    await act(async () => at.click())
+    // the palette takes the focus on the class's own color
+    await act(frames)
+    expect(document.activeElement?.getAttribute('aria-pressed')).toBe('true')
+    expect(palette()!.contains(document.activeElement)).toBe(true)
+    await act(async () => void document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(palette()).toBeNull()
+    expect(popover(), 'the editor stays open').not.toBeNull()
+    expect(document.activeElement, 'the focus back on the swatch').toBe(swatch(popover()!, 'reading'))
   })
 })
 

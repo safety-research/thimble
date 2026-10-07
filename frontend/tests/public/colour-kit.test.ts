@@ -1,8 +1,9 @@
 // The view kit's Colour by (backend/app/viewer_colour.js, thimble.colourBy) and what it needs of the bridge
 // (backend/app/viewer_bridge.js), in a jsdom window of their own: one menu lists the view's fields and every label, the
 // chosen field's values are chips with their counts that turn a value off and on, the bridge draws the chosen value's
-// bar and hides or dims what is off, a label the analyst turns on takes the colour, and the choice is kept through the
-// `colour` message and handed back as window.__thimbleColour. The marks the page hands over name each label's value
+// bar and hides or dims what is off, a label the analyst turns on takes the colour, a label chosen in the menu asks for
+// thimble's label editor beside the menu, and the choice is kept through the `colour` message and handed back as
+// window.__thimbleColour. The marks the page hands over name each label's value
 // with colours a canvas can draw (src/files/labels.ts viewMarks, src/files/ViewerFrame.tsx colourScript). Layout and
 // the drawn bars, the chips' overflow and the coloured scrollbar are tests/public/browser/view-colour.test.ts; the marks'
 // colours and values tests/public/view-marks.test.ts.
@@ -33,10 +34,10 @@ const ROWS = [
   ['a.jsonl#L4', '', 'ops'],
 ]
 /** A page with four anchored messages, each saying its kind (or its channel) as data-colour, and a mount in its top
- * row; `kept` is what thimble kept for the view (window.__thimbleColour). */
-async function load(kept?: object, field: 'kind' | 'channel' = 'kind') {
+ * row; `kept` is what thimble kept for the view (window.__thimbleColour); `pre`, a script run before the bridge. */
+async function load(kept?: object, field: 'kind' | 'channel' = 'kind', pre = '') {
   const rows = ROWS.map(([ref, kind, channel]) => `<div class="msg" data-anchor="${ref}" data-colour="${field === 'kind' ? kind : channel}">${ref}</div>`).join('')
-  const page = `<!doctype html><html><head>${kept ? `<script>window.__thimbleColour = ${JSON.stringify(kept)}</script>` : ''}${script(BRIDGE)}${script(COLOUR)}</head><body><div class="top"><span id="colour"></span></div><div id="list">${rows}</div></body></html>`
+  const page = `<!doctype html><html><head>${kept ? `<script>window.__thimbleColour = ${JSON.stringify(kept)}</script>` : ''}${pre}${script(BRIDGE)}${script(COLOUR)}</head><body><div class="top"><span id="colour"></span></div><div id="list">${rows}</div></body></html>`
   dom = new JSDOM(page, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://view.invalid/' })
   sent = []
   dom.window.postMessage = ((msg: Msg) => void sent.push(msg)) as typeof dom.window.postMessage
@@ -265,44 +266,76 @@ describe('Reset', () => {
   })
 })
 
-describe("a label's definition", () => {
-  const DEF = { id: 'k1', name: 'Deadline', kind: 'prompt', text: 'Does it set a deadline? deadline = it names a time to post by.', spec: '', scope: 'a.jsonl', unit: 'record', labeled: 4, values: [{ name: 'deadline', highlight: true, n: 1, meaning: 'it names a time to post by' }, { name: 'other', highlight: false, n: 3, meaning: '' }] }
-  const answer = async () => {
-    await wait(20)
-    const f = of('fetch').at(-1)!
-    expect(f.query).toEqual({ $thimble: 'label', id: 'k1' })
-    fromPage({ type: 'thimble:result', id: f.id, data: DEF })
-    await wait()
-  }
-  test("opens in place under the label's row in the menu, and from the button beside Color by while the label is the colour", async () => {
-    await load()
-    mount()
-    labels(false)
+describe('a label chosen in the menu', () => {
+  // the analyst's click as the bridge reads it, which jsdom has no notion of: transient activation held throughout
+  const ACTIVE = script('class Activation { get isActive() { return true } }; Object.defineProperty(navigator, "userActivation", { value: new Activation() })')
+  const ready = async (on: boolean) => {
+    await load(undefined, 'kind', ACTIVE)
+    const c = mount()
+    labels(on)
+    fromPage({ type: 'thimble:key', key: 'key' })
     await wait()
     ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
-    ;(doc().querySelector('.thimble-colour-menu [data-info="k1"]') as HTMLElement).click()
-    await answer()
-    const def = doc().querySelector('.thimble-colour-menu .thimble-def')!
-    expect(def.textContent).toContain('Does it set a deadline?')
-    expect([...def.querySelectorAll('.thimble-def-vn')].map((v) => v.textContent)).toEqual(['deadline', 'other'])
-    expect(def.querySelector('.thimble-def-m')!.textContent).toBe('it names a time to post by')
-    expect(def.querySelector('[data-open-label="k1"]')!.textContent).toBe('Open label')
-    expect(doc().querySelector('.thimble-colour-menu')).not.toBeNull()
-    ;(doc().querySelector('.thimble-colour-menu [data-info="k1"]') as HTMLElement).click()
-    expect(doc().querySelector('.thimble-colour-menu .thimble-def')).toBeNull()
-    // the label as the colour: one click on the button beside Color by
-    doc().body.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }))
-    labels(true, { 'a.jsonl#L2': { bar: '#025ac3', names: ['Deadline'], values: [{ id: 'k1', label: 'Deadline', value: 'deadline', colour: '#025ac3' }], spans: [] } })
+    return c
+  }
+  const row = () => doc().querySelector<HTMLElement>('.thimble-colour-menu [data-by="l:k1"]')!
+  const calls = () => of('labelCall').map((m) => [m.op, m.args])
+
+  test('colours by it and asks for its editor beside the menu, which stays open with the label checked', async () => {
+    const c = await ready(true)
+    row().click()
     await wait()
-    const about = doc().querySelector<HTMLElement>('.thimble-colour-about')!
-    expect(about.getAttribute('data-label')).toBe('k1')
-    about.click()
+    expect(c.by).toEqual({ label: 'k1', title: 'Deadline' })
+    const [edit] = of('labelCall').filter((m) => m.op === 'edit')
+    expect(edit.args).toEqual({ id: 'k1', anchor: { left: 0, top: 0, width: 0, height: 0 } })
+    expect(doc().querySelector('.thimble-colour-menu'), 'the menu stays open').not.toBeNull()
+    expect(row().getAttribute('aria-checked')).toBe('true')
+    // the editor closed from inside: the focus comes back to the label's row
+    fromPage({ type: 'thimble:labelDone', id: edit.id })
+    fromPage({ type: 'thimble:labelEditorClosed', id: edit.id, focus: true })
     await wait()
-    expect(doc().querySelector('.thimble-colour-defpop .thimble-def')!.textContent).toContain('it names a time to post by')
-    ;(doc().querySelector('.thimble-colour-defpop [data-open-label]') as HTMLElement).click()
+    expect(doc().activeElement).toBe(row())
+  })
+
+  test('closed by a click elsewhere, it leaves the focus alone', async () => {
+    await ready(true)
+    row().click()
     await wait()
-    expect(of('labelCall').length + of('labelRefused').length).toBeGreaterThanOrEqual(0)
-    expect(doc().querySelector('.thimble-colour-defpop')).toBeNull()
+    const [edit] = of('labelCall').filter((m) => m.op === 'edit')
+    const field = doc().body.appendChild(doc().createElement('input'))
+    field.focus()
+    fromPage({ type: 'thimble:labelDone', id: edit.id })
+    fromPage({ type: 'thimble:labelEditorClosed', id: edit.id, focus: false })
+    await wait()
+    expect(doc().activeElement).toBe(field)
+  })
+
+  test('a label that is off is turned on first, then its editor asked for, in the same click', async () => {
+    await ready(false)
+    row().click()
+    await wait()
+    expect(calls()).toEqual([
+      ['on', { id: 'k1', on: true }],
+      ['edit', { id: 'k1', anchor: { left: 0, top: 0, width: 0, height: 0 } }],
+    ])
+  })
+
+  test('a field or Off asks for no editor, and there is no button for a definition, beside Color by or in the menu', async () => {
+    const c = await ready(true)
+    expect(doc().querySelector('.thimble-colour-menu [data-info], .thimble-colour-menu .thimble-def')).toBeNull()
+    ;(doc().querySelector('.thimble-colour-menu [data-by="f:channel"]') as HTMLElement).click()
+    await wait()
+    expect(c.by).toEqual({ field: 'channel', title: 'Channel' })
+    expect(doc().querySelector('.thimble-colour-menu')).toBeNull()
+    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
+    ;(doc().querySelector('.thimble-colour-menu [data-by="off"]') as HTMLElement).click()
+    await wait()
+    expect(calls()).toEqual([])
+    // the label as the colour has no button beside Color by
+    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
+    row().click()
+    await wait()
+    expect(doc().querySelector('.thimble-colour-about')).toBeNull()
   })
 })
 

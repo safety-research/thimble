@@ -5,9 +5,8 @@
 // overview, its colours faded beyond the part in view, which lies under a lens joined to the overview's frame by two
 // lines, the lens going down the zoomed track with the frame; hovering the overview previews the records there in plain
 // rows with a straight bar. Through the real ViewerFrame, a colour picked for a label's value from its chip's swatch
-// goes to thimble as the label's colour, and a label's definition opens
-// in Color by's menu from thimble's own answer, and Open label opens thimble's label editor. What the selector decides
-// without layout is tests/public/range-kit.test.ts.
+// goes to thimble as the label's colour, and hovering a chip of a label's value says what the value means from
+// thimble's own answer. What the selector decides without layout is tests/public/range-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -324,19 +323,17 @@ describe("a label's value's colour through ViewerFrame", () => {
   })
 })
 
-describe("a label's definition through ViewerFrame", () => {
-  test("opens in Color by's menu from thimble's answer, and Open label opens the label's editor", async () => {
+describe("a label's value's meaning through ViewerFrame", () => {
+  test("hovering a chip of a label's value says what the value means, from thimble's own answer, asked once", async () => {
     const DEF = { id: 'k1', name: 'asks', kind: 'prompt', text: 'Does the message ask another agent for something? yes = it asks. no = it does not.', spec: '', scope: 'm.jsonl', unit: 'record', labeled: 400, values: [{ name: 'yes', highlight: true, n: 40, meaning: 'it asks' }, { name: 'no', highlight: false, n: 360, meaning: 'it does not' }] }
-    const script = await bundle('view-range-def', [
+    const script = await bundle('view-range-meaning', [
       `import { createElement } from 'react'`,
       `import { createRoot } from 'react-dom/client'`,
       `import { ViewerFrame } from '${src('files/ViewerFrame.tsx')}'`,
-      `const w = window`,
-      `w.__acts = []`,
-      `const k = { id: 'k1', name: 'asks', description: '', unit: 'record', kind: 'prompt', spec: '', labels: ['yes', 'no'], created_by: 'analyst', ts: '', classes: [{ name: 'yes', color: 2, highlight: true }, { name: 'no', color: 0, highlight: false }], shown: false }`,
+      `const k = { id: 'k1', name: 'asks', description: '', unit: 'record', kind: 'prompt', spec: '', labels: ['yes', 'no'], created_by: 'analyst', ts: '', classes: [{ name: 'yes', color: 2, highlight: true }, { name: 'no', color: 0, highlight: false }], shown: true }`,
       `const root = document.body.appendChild(document.createElement('div'))`,
       `root.style.cssText = 'width:800px;height:420px'`,
-      `createRoot(root).render(createElement(ViewerFrame, { ws: 'w', slug: 'board', title: 'Board', byId: new Map([[k.id, k]]), labels: [], labelActions: { edit: (id) => w.__acts.push(['edit', id]) } }))`,
+      `createRoot(root).render(createElement(ViewerFrame, { ws: 'w', slug: 'board', title: 'Board', byId: new Map([[k.id, k]]), labels: [k], labelActions: { setOn: () => {}, setColour: () => {} } }))`,
     ])
     const page = await browser.newPage({ viewport: { width: 900, height: 600 } })
     const asked: unknown[] = []
@@ -346,7 +343,7 @@ describe("a label's definition through ViewerFrame", () => {
       if (url.pathname === '/api/ws/w/views/board/frame') return route.fulfill({ status: 200, contentType: 'text/html', body: VIEW })
       if (url.pathname === '/api/ws/w/views/board/records') {
         const q = JSON.parse(req.postData() || '{}').query
-        asked.push(q)
+        if (q && q.$thimble) asked.push(q)
         return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: q && q.$thimble === 'label' ? DEF : null }) })
       }
       if (url.pathname.startsWith('/api/')) return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
@@ -358,21 +355,14 @@ describe("a label's definition through ViewerFrame", () => {
     const frame = () => page.frames().find((f) => f !== page.mainFrame())!
     await page.waitForFunction(() => document.querySelector('iframe'))
     await page.waitForTimeout(500)
-    await frame().waitForSelector('.thimble-colour-by')
-    await frame().locator('.thimble-colour-by').click()
-    await frame().locator('.thimble-colour-menu [data-info="k1"]').click()
-    await frame().waitForSelector('.thimble-colour-menu .thimble-def-text')
-    assert.deepEqual(asked, [{ $thimble: 'label', id: 'k1' }], 'one fetch, which thimble answers itself')
-    const def = await frame().evaluate(() => {
-      const d = document.querySelector('.thimble-colour-menu .thimble-def')!
-      return { text: d.querySelector('.thimble-def-text')!.textContent, values: [...d.querySelectorAll('.thimble-def-val')].map((v) => v.textContent), n: d.querySelector('.thimble-def-n')!.textContent }
+    await frame().waitForSelector('.thimble-colour-chip[data-label="k1"]')
+    await frame().locator('.thimble-colour-chip[data-label="k1"]').first().locator('.chip-text').hover()
+    await frame().waitForFunction(() => {
+      const t = document.querySelector('.thimble-tip') as HTMLElement | null
+      return !!t && t.style.display === 'block'
     })
-    assert.equal(def.text, DEF.text)
-    assert.deepEqual(def.values, ['yes40it asks', 'no360it does not'])
-    assert.equal(def.n, '400 records')
-    await frame().locator('.thimble-colour-menu [data-open-label="k1"]').click()
-    await page.waitForFunction(() => (window as any).__acts.length > 0)
-    assert.deepEqual(await page.evaluate(() => (window as any).__acts), [['edit', 'k1']])
+    assert.equal(await frame().evaluate(() => document.querySelector('.thimble-tip .thimble-tip-m')!.textContent), 'it asks')
+    assert.deepEqual(asked, [{ $thimble: 'label', id: 'k1' }], 'one fetch, which thimble answers itself')
     await page.close()
   })
 })

@@ -232,6 +232,8 @@ describe('the menu', () => {
       ['edit purpose', '3 values', ['message to other runs', 'posts links', 'restores page']],
     ])
     assert.ok(rows.every((r) => r.cut === 'ellipsis' && r.lines <= 20), JSON.stringify(rows))
+    // a label's row has its switch and no button for its definition: choosing it opens thimble's label editor
+    assert.deepEqual(await frame().evaluate(() => [...document.querySelectorAll('.thimble-colour-label button')].map((b) => b.getAttribute('role') ?? b.className)), ['switch'])
     await page.close()
   })
 })

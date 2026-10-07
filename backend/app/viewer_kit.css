@@ -608,7 +608,6 @@ select.field {
 .thimble-colour-choice > .thimble-colour-tick {
   height: 16px;
 }
-.thimble-colour-choice > .thimble-colour-info,
 .thimble-colour-choice > .thimble-colour-switch {
   margin-top: -2px;
 }
@@ -717,18 +716,9 @@ select.field {
   background: #fff;
 }
 
-/* Color by's definition button while a label is the colour, and Reset at the row's end */
+/* Reset at the row's end */
 .thimble-colour {
   flex: 1 1 auto;
-}
-.thimble-colour-about.btn {
-  flex: none;
-  margin-left: -3px;
-  color: var(--text-tertiary);
-}
-.thimble-colour-about.btn:hover,
-.thimble-colour-about.btn[aria-expanded='true'] {
-  color: var(--text-primary);
 }
 .thimble-reset.btn {
   flex: none;
@@ -746,34 +736,6 @@ select.field {
   color: var(--text-secondary);
 }
 
-/* a label's definition, in place under its row in the menu or in the popover of Color by's definition button */
-.thimble-colour-info {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: 20px;
-  height: 20px;
-  margin: 0 -2px 0 0;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-chip);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-}
-.thimble-colour-info:hover,
-.thimble-colour-info.on {
-  background: var(--surface-hover);
-  color: var(--text-primary);
-}
-.thimble-colour-info .thimble-colour-ico {
-  width: 13px;
-  height: 13px;
-}
-.thimble-colour-menu.thimble-colour-defpop {
-  width: min(360px, calc(100vw - 16px));
-  max-width: min(360px, calc(100vw - 16px));
-}
 /* a chip's swatch opens the palette: the press lands a little around it */
 .thimble-colour-chip .chip-sw[data-palette] {
   position: relative;
@@ -832,106 +794,6 @@ select.field {
   gap: 5px;
   margin-top: 8px;
   padding: 0 6px;
-}
-.thimble-def {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  margin: 0 4px 6px 30px;
-  padding: 8px 10px;
-  border-radius: var(--radius-ui);
-  background: var(--bg-sub, rgba(var(--ink-rgb), 0.03));
-  box-shadow: inset 0 0 0 1px var(--border-hairline);
-  font: 400 var(--text-xs) / 1.45 var(--font-body);
-  color: var(--text-primary);
-  cursor: default;
-}
-.thimble-colour-defpop .thimble-def {
-  margin: 2px 4px 4px;
-}
-.thimble-def-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-}
-.thimble-def-meta .chip-tone-evidence {
-  max-width: 180px;
-}
-.thimble-def-n {
-  color: var(--text-secondary);
-  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-.thimble-def-text {
-  max-height: 168px;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.thimble-def-spec {
-  max-height: 140px;
-  margin: 0;
-  overflow: auto;
-  padding: 6px 8px;
-  border-radius: var(--radius-chip);
-  background: var(--surface-card);
-  box-shadow: inset 0 0 0 1px var(--border-hairline);
-  font: 400 var(--text-mono-sm) / 1.45 var(--font-mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.thimble-def-vals {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.thimble-def-val {
-  display: grid;
-  grid-template-columns: 8px auto 1fr;
-  align-items: baseline;
-  column-gap: 6px;
-}
-.thimble-def-val .thimble-colour-sw {
-  align-self: center;
-}
-.thimble-def-vn {
-  font-weight: 500;
-}
-.thimble-def-val .thimble-colour-n {
-  justify-self: end;
-}
-.thimble-def-m {
-  grid-column: 2 / -1;
-  color: var(--text-secondary);
-}
-.thimble-def-val.quiet .thimble-def-vn {
-  color: var(--text-secondary);
-  font-weight: 400;
-}
-.thimble-def-acts {
-  display: flex;
-  justify-content: flex-start;
-}
-.thimble-def-open .thimble-colour-ico {
-  width: 12px;
-  height: 12px;
-}
-.thimble-def-wait {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.thimble-def-wait span {
-  height: 8px;
-  border-radius: 3px;
-  background: rgba(var(--ink-rgb), 0.07);
-}
-.thimble-def-wait span:nth-child(2) {
-  width: 80%;
-}
-.thimble-def-wait span:nth-child(3) {
-  width: 55%;
 }
 
 /* the kit's tip: a few words beside the pointer, as the app's tooltips */

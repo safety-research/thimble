@@ -73,7 +73,7 @@
 //   labelEditorClosed {id, focus}
 //                          page to frame: the editor that the edit call `id` opened closed, `focus` when thimble gave
 //                          the focus back to the frame, which then puts it back on the element that had it when the
-//                          page asked (editLabel's onClose runs after)
+//                          page asked (editLabel's onClose(focused) runs after)
 //   labelRefused {op}      frame to page: a label call the bridge refused because the analyst made no gesture in the view
 //   hidden {n, self}       frame to page: how many anchored refs the bridge hides or dims for the label filter, null
 //                          while thimble has not answered for every anchored ref, and whether the page filters its
@@ -380,8 +380,9 @@
     },
     /** open thimble's label editor on the label with this id, or on a new label without one, in a popover over the page.
      *  opts.anchor, the element or rect {left, top, width, height} it stands beside (default: inside the page's top-left
-     *  corner); opts.side, 'aside' (the default, to its right, else its left) or 'below'; opts.onClose() runs when the
-     *  editor closes. Closed from inside (Escape, Cancel, Re-run), the focus comes back to the element that had it */
+     *  corner); opts.side, 'aside' (the default, to its right, else its left) or 'below'; opts.onClose(focused) runs
+     *  when the editor closes, `focused` when it closed from inside (Escape, Cancel, Re-run) and the focus came back to
+     *  the frame, onto the element that had it */
     editLabel: function (id, opts) {
       opts = opts || {}
       var args = { id: id == null ? null : String(id) }
@@ -398,7 +399,7 @@
         }
         if (!onClose) return
         try {
-          onClose()
+          onClose(!!focus)
         } catch (e) {
           report(e)
         }
