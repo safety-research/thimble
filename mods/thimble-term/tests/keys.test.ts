@@ -16,6 +16,8 @@
 //   views        a heading click                               ↑↓ Enter 1-9 b x
 //   view         a terminal view from the views list           ↑↓ Enter, its letters and signs, a click, a drag, the
 //                                                              wheel, every key while its field takes typing
+//   citation     a file citation in a reply                    ↑↓ and the wheel scroll the whole file, a click on a
+//                                                              count a page, a f b x
 //   card, label, document, ask: no list                      their letters; no ↑↓, Enter, Space or ← named
 //   back from a new thread's form   a card, a file's line, after Esc   the view's own hints, never the field's; the list's
 //                                                              keys where it draws a list
@@ -589,7 +591,7 @@ test('keys · view · a click on a row, a drag on a strip and the wheel are the 
   await w.clock.settle()
   await pane3.unmount()
   expect(events(w).filter(e => e.t === 'click').at(-1)).toMatchObject({ i: 2 })
-  expect((await seen($, SHORT)).text).toContain('An export of 4,579 wiki pages')
+  expect((await seen($, SHORT, 'cite-lines')).rows.join('\n')).toContain('An export of 4,579 wiki pages')
   // the citation panel shows no view: the timer ends the view's program
   await (await look($, SHORT)).unmount()
   await w.clock.advance(300)
@@ -752,6 +754,108 @@ test('keys · file · a transcript: 1 2 for the tabs from the relay', async ($, 
   named(s.hint, ['1 2 3 for the tabs', '↑↓ to choose'])
   await type($, w, SHORT, '3')
   expect(JSON.stringify(await (await look($, SHORT)).drawn())).toContain('{"type":"Text","props":{"inverse":true},"children":[" Raw "]}')
+})
+
+// ------------------------------------------------------------------------------------------------ a file citation
+
+/** A file of 900 lines, paged as thimble pages it: 200 lines from the line `--start` names. */
+const LOG = (start: number) => ({ path: 'log.txt', kind: 'text', total_lines: 900, start, records: Array.from({ length: Math.max(0, Math.min(200, 901 - start)) }, (_, i) => ({ line: start + i, record: { text: `line ${start + i} of the log` } })) })
+const logLine = (n: number) => ({ line: n, record: { text: `line ${n} of the log` } })
+const CITE_ROWS = 36
+const MESSAGE = (requestId: string, text: string) =>
+  ({ plugin: PANEL, component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+
+/** The first and last line numbers a file citation's window shows. */
+function shownLines(rows: string[]): { first: number; last: number } {
+  const ns = rows.map(r => Number(/^\s+(\d+)\s{2}line/.exec(r)?.[1] ?? 0)).filter(n => n > 0)
+  return { first: ns[0] ?? 0, last: ns.at(-1) ?? 0 }
+}
+
+/** The ring moved onto `element` of the citation panel as drawn in a pane of CITE_ROWS rows. */
+async function citeRing($: E, w: World, element: string): Promise<void> {
+  await (await look($, CITE_ROWS)).unmount()
+  expect(await ring($, element)).toEqual({})
+  await w.clock.settle()
+}
+
+/** The wheel over the citation panel as drawn in a pane of CITE_ROWS rows, then a drawing, which reads a page the
+ *  window reached, then that page's arrival. */
+async function citeWheel($: E, w: World, by: number): Promise<void> {
+  await (await look($, CITE_ROWS)).unmount()
+  await $.ui.scroll({ requestId: PANEL, component: 'Pane', by, pointer: { x: 10, y: 10 }, origin: { kind: 'person' } } as never)
+  await w.clock.settle()
+  await (await look($, CITE_ROWS)).unmount()
+  await w.clock.settle()
+}
+
+test('keys · citation · a file citation: ↑↓ and the wheel move its window over the whole file a line at a time, a click on a count a page, the next page read as it is reached; f opens the file and b comes back to the window where it was', async ($, on) => {
+  // Matt, 2026-10-07: "you can't see beyond the few lines it picks"
+  const w = world(on)
+  w.pages['log.txt'] = LOG
+  w.resolve['log.txt#L450'] = { ref: 'log.txt#L450', kind: 'record', path: 'log.txt', line: 450, record: { text: 'line 450 of the log' }, blocks: [{ text: 'line 450 of the log' }], excerpt: 'line 450 of the log', context: { before: [448, 449].map(logLine), after: [451, 452].map(logLine) } }
+  await start($, w)
+  const text = 'See [[log.txt#L450]] for the restart.'
+  let ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  await ui.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.pointer({ type: 'up', x: 5, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.unmount()
+  await w.clock.settle()
+  await takesKeys($)
+  let s = await seen($, CITE_ROWS, 'cite-lines')
+  expect(s.relay).toBe(true)
+  named(s.hint, ['↑↓ to scroll', 'a to ask', 'f for its file', 'x to close'])
+  const at0 = shownLines(s.rows).first
+  expect(at0).toBeLessThan(450)
+  expect(s.rows[0]!.trim()).toBe(`↑ ${at0 - 1} more`)
+  // ↓ and ↑ a line
+  await citeRing($, w, RELAY.down)
+  expect(shownLines((await seen($, CITE_ROWS, 'cite-lines')).rows).first).toBe(at0 + 1)
+  await citeRing($, w, RELAY.up)
+  await citeRing($, w, RELAY.up)
+  expect(shownLines((await seen($, CITE_ROWS, 'cite-lines')).rows).first).toBe(at0 - 1)
+  // the wheel, by its lines
+  await citeWheel($, w, 5)
+  s = await seen($, CITE_ROWS, 'cite-lines')
+  expect(shownLines(s.rows).first).toBe(at0 + 4)
+  // a click on `↓ N more`: a page, the last line shown before among the first shown now
+  const before = shownLines(s.rows)
+  const pane = await look($, CITE_ROWS)
+  await pane.pointer({ type: 'down', x: 5, y: s.rows.length - 1, button: 'left', in: 'm:cite-lines' } as never)
+  await w.clock.settle()
+  await pane.unmount()
+  s = await seen($, CITE_ROWS, 'cite-lines')
+  expect(shownLines(s.rows).first).toBeGreaterThan(before.first + 10)
+  expect(shownLines(s.rows).first).toBeLessThanOrEqual(before.last)
+  // far past the page it opened on (lines 401-600): the page that holds the file's end is read, and the window stops
+  // with the last line on its last row
+  await citeWheel($, w, 1000)
+  s = await seen($, CITE_ROWS, 'cite-lines')
+  expect(w.calls.some(c => c[2] === 'files' && c[5] === 'log.txt' && c[7] === '801')).toBe(true)
+  expect(s.rows.at(-1)).toMatch(/^\s+900 {2}line 900 of the log$/)
+  expect(s.rows.join('\n')).not.toContain('↓')
+  const end = shownLines(s.rows).first
+  await citeRing($, w, RELAY.down)
+  expect(shownLines((await seen($, CITE_ROWS, 'cite-lines')).rows).first).toBe(end)
+  // and back to the file's first line: no `↑` row
+  await citeWheel($, w, -2000)
+  s = await seen($, CITE_ROWS, 'cite-lines')
+  expect(s.rows[0]).toMatch(/^\s+1 {2}line 1 of the log$/)
+  expect(s.rows.join('\n')).not.toContain('↑')
+  // f opens the file at the cited line; b comes back to the window where it was
+  await type($, w, CITE_ROWS, 'f')
+  await takesKeys($)
+  s = await seen($, CITE_ROWS, 'file-body')
+  expect(s.text).toContain('log.txt line 450')
+  await type($, w, CITE_ROWS, 'b')
+  await takesKeys($)
+  s = await seen($, CITE_ROWS, 'cite-lines')
+  expect(s.rows[0]).toMatch(/^\s+1 {2}line 1 of the log$/)
+  // x closes
+  await type($, w, CITE_ROWS, 'x')
+  expect(w.closed).toContain(PANEL)
 })
 
 // ------------------------------------------------------------------------------------------------ the panels with no list
