@@ -294,7 +294,7 @@ async function signalRows(cx: Ctx, e: ResolveInput & { requestId: string; viewpo
     const tt = await cx.thread(s.thread)
     const th = tt?.events.length ? threadOf(tt.meta, tt.events) : null
     const label = row?.anchorText || (row?.anchor ? await anchorName(cx, row.anchor) : '') || row?.title || 'the side thread'
-    const q = th ? signalQuestion({ turns: th.turns, label }, s.turn, n) : `"${clip((row?.title || label).replace(/\s+/g, ' '), n)}"`
+    const q = th ? signalQuestion({ turns: th.turns, label }, s.turn, n) : `"${clip((row?.question || row?.title || label).replace(/\s+/g, ' '), n)}"`
     const end = th ? signalEnd(th, s.turn) ?? 'answered' : 'answered'
     const fresh = th ? !signalRead(th, s.turn, row?.seen) : Boolean(row?.unread)
     out.push(

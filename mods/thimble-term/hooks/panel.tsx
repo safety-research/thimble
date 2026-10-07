@@ -135,10 +135,13 @@ export async function openCard(cx: Ctx, id: string, mode = ''): Promise<void> {
   await openPanel(cx, { view: 'card', title: clip((tc?.data as CardData | undefined)?.question ?? 'Card', 60), card: id, ...(mode ? { mode } : {}) })
 }
 
-/** A thread opens in the threads panel, selected under the tree. */
-export async function openThread(cx: Ctx, id: string): Promise<void> {
+/** A thread opens in the threads panel, selected under the tree; its step named by its first question (`question` when
+ *  it was just asked), never thimble's slug of it. */
+export async function openThread(cx: Ctx, id: string, question = ''): Promise<void> {
   const row = (await cx.threads()).find(t => t.id === id)
-  await openPanel(cx, { view: 'thread', title: row?.title ? `"${clip(row.title, 60)}"` : 'thread', thread: id })
+  const tt = await cx.thread(id)
+  const q = question || (tt?.events.length ? threadOf(tt.meta, tt.events).turns[0]?.q : '') || row?.question || row?.title || ''
+  await openPanel(cx, { view: 'thread', title: q ? `"${clip(plainCites(q).replace(/\s+/g, ' '), 60)}"` : 'thread', thread: id })
 }
 
 /** A file in the panel from line `start`, `line` the record a citation or a click chose, lit there. */
@@ -388,7 +391,7 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
     const about = await aboutName(cx, t)
     const made = Date.parse(t.created ?? '') || 0
     // its subject at R, short, so its question stays whole beside it
-    threads.push({ id: t.id, title: `"${clip(t.title || t.anchorText || 'side thread', 80)}"`, about: about ? `about ${clip(about, 24)}` : '', words: t.running ? 'answering' : plural(t.answers, 'answer'), tone: st, unread: t.unread, earlier: Boolean(made && rt.startedAt && made < rt.startedAt), at: Date.parse(t.at) || 0 })
+    threads.push({ id: t.id, title: `"${clip(plainCites(t.question || t.title || t.anchorText || 'side thread').replace(/\s+/g, ' '), 80)}"`, about: about ? `about ${clip(about, 24)}` : '', words: t.running ? 'answering' : plural(t.answers, 'answer'), tone: st, unread: t.unread, earlier: Boolean(made && rt.startedAt && made < rt.startedAt), at: Date.parse(t.at) || 0 })
   }
   const canvas = await surfaceValue<Obj>(cx, 'canvas')
   const groups = canvas?.ok && Array.isArray(canvas.value.groups) ? (canvas.value.groups as unknown[]).filter(isObj) : []
@@ -836,7 +839,7 @@ async function drawAsk(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
           await cx.bumpPanel()
           const got = await startThread(cx, p.anchor ?? null, p.anchorText ?? '', q, { ...(p.parent ? { parent: p.parent } : {}), ...(p.element ? { element: p.element } : {}) })
           asking = 'error' in got ? `× ${got.error}` : ''
-          if ('id' in got) await openThread(cx, got.id)
+          if ('id' in got) await openThread(cx, got.id, q)
           else await cx.bumpPanel()
         })()
       }}
@@ -857,7 +860,7 @@ async function threadOfRow(cx: Ctx, id: string): Promise<ChatThread | null> {
   const tt: TermThread | undefined = await cx.thread(id)
   if (tt && tt.events.length) return { ...threadOf(tt.meta, tt.events), ...(row?.parent && row.parent !== 'main' ? { parent: row.parent } : {}) }
   if (!row) return null
-  return { id, label: row.anchorText || row.title, ref: row.anchor, context: '', agentId: '', engine: '', turns: [{ q: row.title, a: '', state: row.running ? 'running' : 'done', tools: 0, partial: '' }], file: '', parent: row.parent === 'main' ? '' : row.parent, at: Date.parse(row.at) || 0 }
+  return { id, label: row.anchorText || row.title, ref: row.anchor, context: '', agentId: '', engine: '', turns: [{ q: row.question || row.title, a: '', state: row.running ? 'running' : 'done', tools: 0, partial: '' }], file: '', parent: row.parent === 'main' ? '' : row.parent, at: Date.parse(row.at) || 0 }
 }
 
 /** What a thread was asked about, in words: its passage's, a card by its question, a citation's place. */

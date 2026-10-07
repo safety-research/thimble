@@ -270,6 +270,7 @@ export function threadRowsOf(v: unknown): TermThreadRow[] {
         parent: str(m.parent),
         created: str(m.created_at),
         element: str(m.anchor_element),
+        question: str(m.question),
       }
     })
 }

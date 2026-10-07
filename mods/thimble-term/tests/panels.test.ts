@@ -75,7 +75,8 @@ test('the threads tree has a root per place: main, and a document a thread was a
   await w.clock.settle()
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('"why is events.jsonl bigger?"')
+  // the thread's step is named by its first question, not thimble's slug of it
+  expect(shown(await pane.drawn())).toContain('"why is events.jsonl so much bigger?"')
   await pane.unmount()
 })
 

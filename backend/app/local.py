@@ -447,21 +447,27 @@ def _unread(c: str, meta: dict[str, Any]) -> bool:
     return threads.unread(c, meta)
 
 
-def _answers(c: str, meta: dict[str, Any]) -> int:
+def _answers(c: str, meta: dict[str, Any]) -> tuple[int, str]:
     """How many of a thread's runs ended with an answer: the `done` records of its log, one per question answered,
-    which the renderer counts to put a row under main's latest reply when a new one comes."""
+    which the renderer counts to put a row under main's latest reply when a new one comes; and its first question,
+    which names the thread in the terminal (its title is a slug)."""
     from . import agents  # noqa: PLC0415
 
     try:
-        return sum(1 for r in agents.read_events(agents.paths(c, str(meta["id"]))[1]) if r.get("type") == "done")
+        events = agents.read_events(agents.paths(c, str(meta["id"]))[1])
     except Exception:  # noqa: BLE001 — a thread that cannot be read shows nothing new
-        return 0
+        return 0, ""
+    first = next((str(r.get("text") or "").strip() for r in events if r.get("type") == "user" and str(r.get("text") or "").strip()), "")
+    return sum(1 for r in events if r.get("type") == "done"), first[:QUESTION_CHARS]
+
+
+QUESTION_CHARS = 300
 
 
 def _thread_marks(c: str, meta: dict[str, Any]) -> None:
-    """A thread's meta with `unread` and `answers` (_unread, _answers)."""
+    """A thread's meta with `unread`, `answers` and its first `question` (_unread, _answers)."""
     meta["unread"] = _unread(c, meta)
-    meta["answers"] = _answers(c, meta)
+    meta["answers"], meta["question"] = _answers(c, meta)
 
 
 async def _threads(c: str, args: list[str], pos: list[str]) -> Any:

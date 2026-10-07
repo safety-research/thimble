@@ -16,7 +16,7 @@
 import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from '../types'
 import { cut, lineWidth, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, chipLabel, cid, citations, citeEnd, citeSpans, parseReply, shownMatches, valueIn } from './lib'
+import { EMBED_RE, chipLabel, cid, citations, citeEnd, citeSpans, parseReply, plainLinks, shownMatches, valueIn } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -409,7 +409,8 @@ export function claimsIn(text: string, answer: string): Claim[] {
 
 /** A text with each citation as its shown words, for a line the analyst reads where no link is drawn. */
 export function plainCites(text: string): string {
-  return citations(text).reduce((t, c) => t.replaceAll(c.raw, citeLabel(c)), text)
+  // a citation written as a Markdown link has no `[[…]]` spelling to replace: its link goes to its shown words
+  return plainLinks(citations(text).reduce((t, c) => t.replaceAll(c.raw, citeLabel(c)), text))
 }
 
 // ---------------------------------------------------------------------------------------- a cited record

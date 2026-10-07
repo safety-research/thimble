@@ -119,6 +119,15 @@ export function citations(text: string): Citation[] {
     .filter(c => !seen.has(c.raw) && Boolean(seen.add(c.raw)))
 }
 
+/** A text with each Markdown link that is a citation (`[4,579](README.md#L3)`, the form main writes for the terminal)
+ *  as its shown words; a web link stays as written. */
+export function plainLinks(text: string): string {
+  return text.replace(LINK_RE, (m: string, shown: string, a?: string, b?: string) => {
+    const c = linkCitation(shown, a ?? b ?? '')
+    return c ? (c.display ?? chipLabel(c)) : m
+  })
+}
+
 /** A short stable id for a citation (FNV-1a of its raw spelling), the key of its state. */
 export function cid(raw: string): string {
   let h = 0x811c9dc5

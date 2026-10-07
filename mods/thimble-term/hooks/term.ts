@@ -401,7 +401,8 @@ async function threadChain(cx: Ctx, p: TermPanel, step: ChatNavStep): Promise<Ch
     seen.add(id)
     const r = rows.find(x => x.id === id)
     if (!r) break
-    chain.unshift(stepOf({ view: 'thread', title: r.title ? `"${r.title.length > 60 ? `${r.title.slice(0, 59)}…` : r.title}"` : 'thread', thread: id }))
+    const name = r.question || r.title
+    chain.unshift(stepOf({ view: 'thread', title: name ? `"${name.length > 60 ? `${name.slice(0, 59)}…` : name}"` : 'thread', thread: id }))
   }
   return chain
 }

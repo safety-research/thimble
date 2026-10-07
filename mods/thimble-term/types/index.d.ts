@@ -157,7 +157,7 @@ export type TermThread = { id: string; meta: Record<string, unknown>; events: Re
 /** A row of the threads list (`thimble state threads`): a side thread with what the rows need. */
 /** A row of the threads list (`thimble state threads`): a side thread with what the rows need; `element` where it was
  *  asked (a document's passage, `report:<slug>#<unit>`). */
-export type TermThreadRow = { id: string; title: string; anchor: string; anchorText: string; running: boolean; answers: number; seen: number; unread: number; at: string; parent: string; created?: string; element?: string }
+export type TermThreadRow = { id: string; title: string; anchor: string; anchorText: string; running: boolean; answers: number; seen: number; unread: number; at: string; parent: string; created?: string; element?: string; question?: string }
 
 /** The label panel's state: the parts opened, by `<label>:<part>`; the kind picked in `type` and not yet saved, by
  *  label; and each label's run started from the panel (its size, 0 for every record) and its last word. */

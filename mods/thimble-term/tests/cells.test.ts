@@ -5,6 +5,7 @@ import { expect, test } from 'claude-code/testing'
 import { busyWords, cardOfCell, htmlTable, labelCard, linksOf } from '../hooks/cell'
 import type { ThimbleCell } from '../hooks/cell'
 import { cardLayout, placeWords } from '../hooks/draw'
+import { plainCites } from '../hooks/cite'
 import type { BarRow, Cell } from '../hooks/draw'
 import { CELLS, LABEL } from './fixtures'
 
@@ -105,4 +106,8 @@ test("a card's takeaway as thimble's links check left it: linked and contradicte
   const links = linksOf({ id: 'x', verification: { links: { status: 'partial', checked: true, resolved: [{ value: '4579', ref: 'card:x#pages/TOTAL' }], broken: [{ value: '12', ref: 'a.csv#row=1', why: 'the place shows 13', source: '13' }] } } } as ThimbleCell)
   expect(links).toEqual({ pending: false, checked: true, ok: ['4579|card:x#pages/TOTAL'], broken: [{ key: '12|a.csv#row=1', why: 'the place shows 13', source: '13' }] })
   expect(linksOf({ id: 'y' } as ThimbleCell)).toBeUndefined()
+})
+
+test("a text's citations as their shown words: the `[[…]]` form and the Markdown link main writes for the terminal; a web link stays", () => {
+  expect(plainCites('It has [[4579|card:x#pages/TOTAL]] and [14,591](card:e11488a9#lines/revisions.jsonl) lines, see [the docs](https://example.com).')).toBe('It has 4579 and 14,591 lines, see [the docs](https://example.com).')
 })
