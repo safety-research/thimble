@@ -34,7 +34,7 @@ import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThread
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, relayKey, relayMove, wheelWindow } from './panel'
+import { ANSWER_ELEMENT, RELAY, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, relayKey, relayMove, scrollPending, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './reply'
 import { COLORS } from './paint'
@@ -185,6 +185,7 @@ function cxOf($: Dollar): Ctx {
       const r = await $.ui.focus({ requestId: PANEL, key }).catch(() => ({ deny: 'failed' }))
       return !r.deny
     },
+    scroll: async (key, block) => void (await $.ui.scroll({ to: { key }, in: PANEL, block: block ?? 'nearest' }).catch(() => undefined)),
     els: e => $.ui.resolve(e as ResolveInput<'Pane', 'terminal'>),
     card: async id => (await $.state.get({ ...CARDS, id })).value,
     setCard: async (id, v) => void (await $.state.set({ ...CARDS, id }, v)),
@@ -1010,6 +1011,8 @@ export const register: Register = on => {
     if (how === 'up' || how === 'down') {
       await relayKey(how).catch(() => undefined)
       void cxOf($).bumpPanel()
+      // a document's comment the key chose, scrolled into view once the panel is drawn again
+      scrollPending(cxOf($))
       return {}
     }
     // a ring put back on a text field the panel no longer draws (the new thread's form left by back, live check
@@ -1104,6 +1107,9 @@ export const register: Register = on => {
     } else if (d.type === 'field' && typeof d.name === 'string' && typeof d.text === 'string') {
       // a field's words (field.tsx): a draft, or a save
       await fieldMessage(cx, d.name, d.text.slice(0, 20000), d.save === true)
+    } else if (d.type === 'doc-edit' && typeof d.slug === 'string' && typeof d.text === 'string') {
+      // a document's editor (docedit.tsx): what was typed, or a save
+      await docEditMessage(cx, d.slug, d.text, d.save === true)
     } else if (d.type === 'files-open' && typeof d.path === 'string') {
       await openFile(cx, d.path)
     }

@@ -51,6 +51,9 @@ export type Ctx = {
   /** the panel's focus ring onto one of its elements, by its key, while the pane holds the keys: true once the ring is
    *  there (moved, or there already) */
   focus: (key: string) => Promise<boolean>
+  /** the panel's element drawn with `key` scrolled into view, `block` saying where it lands (a document's chosen
+   *  comment) */
+  scroll: (key: string, block?: 'start' | 'center' | 'end' | 'nearest') => Promise<void>
   /** the element table of the surface a drawing is for */
   els: (e: ResolveInput) => Elements['terminal']
   // ---- thimble-term's state (types/index.d.ts)

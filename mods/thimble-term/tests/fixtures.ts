@@ -148,6 +148,12 @@ export const STATES = {
   ],
   file: { path: 'README.md', kind: 'markdown', total_lines: 20, start: 1, records: [{ line: 1, blocks: [{ text: '# Collusion wiki' }] }, { line: 2, blocks: [{ text: '' }] }, { line: 3, blocks: [{ text: 'An export of 4,579 wiki pages and their revisions.' }] }] },
   ui: [] as { n: number; kind: string; args: Record<string, unknown> }[],
+  // the report checks (`thimble state checks`, GET /checks), which name a comment's check
+  checks: [
+    { id: 'unverified', name: 'Unverified', colour: 2, shown: true, builtin: true, runs: {} },
+    { id: 'verified', name: 'Verified', colour: 3, shown: false, builtin: true, runs: {} },
+    { id: 'judgment', name: 'Judgment calls', colour: 4, shown: true, builtin: true, runs: {} },
+  ] as Record<string, unknown>[],
 }
 
 export type World = {
@@ -361,6 +367,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       }
       case 'ui':
         return out(w.states.ui)
+      case 'checks':
+        return out(w.states.checks)
       default:
         return out({ error: `no surface ${what}` }, 1)
     }
