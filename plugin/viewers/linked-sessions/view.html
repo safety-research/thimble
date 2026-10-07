@@ -11,20 +11,25 @@
   #view { height: 100%; display: flex; flex-direction: column; }
   .top { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border-subtle); }
   #q { flex: 0 1 200px; min-width: 110px; }
-  /* the overview: the range and its axis over the lanes, the names in a column at the left. The two scroll as one box,
-     the range held at its top, so the lanes stand under the range at any width; the divider under it gives it its height */
-  #overview { flex: 0 1 auto; max-height: 48%; min-height: 0; overflow-y: auto; }
-  .time { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: var(--names) minmax(0, 1fr); padding: 10px 16px 0 8px; background: var(--surface-card); }
-  #lanes { padding: 0 16px 8px 8px; }
+  /* Color by takes the row's free width, and a row of its own where less than that is left, so the row never runs past the pane */
+  #colour { min-width: min(100%, 280px); }
+  /* the overview: the range and its axis over the lanes, the names in a column at the left. It never scrolls, down or
+     sideways, though the divider sets it to: the lanes take the height it has, the divider's or about half the page */
+  #overview { flex: none; min-height: 0; overflow: hidden !important; }
+  .time { display: grid; grid-template-columns: var(--names) minmax(0, 1fr); padding: 10px 16px 0 8px; }
+  #lanes { position: relative; padding: 0 16px 8px 8px; }
   #readout { align-self: center; padding-left: 8px; }
-  .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; padding: 2px 8px 0 4px; }
-  #lanes { position: relative; }
-  /* where each subagent was started from its parent's lane, and where its result came back */
-  .links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-  .links path { fill: none; stroke: var(--text-tertiary); stroke-width: 1; }
-  .links .head { fill: var(--text-tertiary); stroke: none; }
-  .unit-marks { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
-  .unit-marks i { position: absolute; width: 3px; }
+  /* the key keeps its row while it has no entry, so the lanes' room does not change as it comes and goes */
+  .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; min-height: calc(var(--h-chip) + 2px); padding: 2px 8px 0 4px; }
+  /* the tint of the transcript's turns in view and the pointer's line end with the lanes, as they shrink too */
+  .thimble-lanes-span, .thimble-lanes-cursor { max-height: 100%; }
+  /* the session read: a tick on its parent's lane where it was started and one where its result came back */
+  .ticks { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+  .ticks i { position: absolute; width: 2px; background: var(--text-primary); }
+  /* the lanes past the room wait behind '… N more', a lane's height in the names' column */
+  .more { display: block; height: 18px; margin: 0; padding: 0 0 0 8px; border: 0; background: none; color: var(--text-tertiary); font: 400 var(--text-ui-sm) / 18px var(--font-body); cursor: pointer; }
+  .more:hover { color: var(--text-primary); }
+  .more[hidden] { display: none; }
   /* the reading: what links the session to the others over its transcript, and a side panel at the right */
   #body { flex: 1; min-height: 0; }
   #main { display: flex; flex-direction: column; min-height: 0; }
@@ -33,7 +38,7 @@
   #rel time { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); font-variant-numeric: tabular-nums; }
   .go { margin: 0; padding: 0; border: 0; background: none; color: var(--text-primary); font: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
   .go:hover { text-decoration-color: var(--text-primary); }
-  #turns { flex: 1; min-height: 0; overflow: auto; }
+  #turns { flex: 1; min-height: 0; overflow: hidden auto; }
   .empty { padding: 28px 16px; color: var(--text-tertiary); }
   .side-acts { padding: 0 0 8px; }
 </style>
@@ -49,7 +54,7 @@
   <div id="overview">
     <div class="time">
       <div id="readout"></div><div id="range"></div>
-      <div class="keys"><span id="key"></span><span id="linkkey"></span></div><div id="axis"></div>
+      <div class="keys"><span id="key"></span></div><div id="axis"></div>
     </div>
     <div id="lanes"></div>
   </div>
@@ -64,7 +69,6 @@
 const $ = (id) => document.getElementById(id)
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 const slug = (thimble.view && thimble.view.slug) || 'linked-sessions'
-const NS = 'http://www.w3.org/2000/svg'
 const hms = (t) => new Date(t * 1000).toISOString().slice(11, 19)
 const runName = (id) => (/^r\d+$/.test(id) ? `Run ${id.slice(1)}` : id)
 // the names' column, which the lanes and the range over them share
@@ -161,9 +165,10 @@ const valueOf = (it) => (colour.label ? (data && data.colours[it.ref]) ?? null :
 const laneColour = { keeps: () => true, valueOf, colourOf: (v) => colour.colourOf(v) }
 const bySession = () => rows.field === 'session'
 // the lanes: each turn a mark as wide as its call took (a Task call as long as its subagent ran), a failed call
-// underlined in red; the transcript's turns in view tinted across them
+// underlined in red; the transcript's turns in view tinted across them; the groups of Rows in the room the overview has
 const lanes = thimble.lanes({
-  mount: '#lanes', keyMount: '#key', rows, range, colour: laneColour, names: NAMES,
+  mount: '#lanes', keyMount: '#key', range, colour: laneColour, names: NAMES,
+  groups: (its) => fitted(rows.groups(its)),
   time: (it) => it.time,
   end: (it) => it.time + (it.duration || 0),
   problem: (it) => it.kind === 'call' && it.outcome !== 'ok',
@@ -174,13 +179,10 @@ const lanes = thimble.lanes({
   onMark: (it) => goTo(it.ref),
   tip: (it) => `${it.tool || KIND[it.kind]}  ${it.input ?? it.text}`,
 })
-// a key entry of this page's own for the links it draws over the lanes, a toggle as the lanes' own entries are
-const linkKey = thimble.key('#linkkey', [], { key: 'links', onChange: () => drawOver() })
 // the transcript: a card per turn as the File browser draws it, a tool call folded to its line; a Task call opened
 // shows the subagent's transcript beside it in the side panel
 const tr = thimble.transcript({ mount: '#turns', colour, onOpen: (turn) => opened(turn) })
 const side = thimble.side({ mount: '#body', width: 0.42, key: 'subagent' })
-thimble.divider({ top: '#overview' })
 let sideTr = null
 
 async function load() {
@@ -226,89 +228,175 @@ function draw() {
   if (!data) return
   const scale = range.scale($('axis').clientWidth)
   thimble.timeAxis('#axis', scale)
+  fit.room = roomFor()
   lanes.draw(items.filter((it) => range.has(it.time)))
   // the lane read stays chosen while it has a turn in the range, though a folded lane may hold it; else the first
   const ls = lanes.lanes.filter((l) => !l.heading)
   if (bySession() ? !items.some((it) => it.session === chosen && range.has(it.time)) : !ls.some((l) => String(l.key) === chosen)) chosen = ls.length ? String(ls[0].key) : null
+  // the run of the session read open, where it folded by itself
+  if (bySession() && fit.auto.has(runOf(chosen))) lanes.draw()
   lanes.choose(chosen)
-  fitOverview()
-  drawOver()
+  ticks()
   return transcript()
 }
 
-// the overview's height until the divider moves it: about half the page at most, ending on a whole lane, so no lane is
-// cut in half
-function fitOverview() {
-  const box = $('overview')
-  if (box.style.height) return
-  box.style.maxHeight = ''
-  const cap = $('view').clientHeight * 0.48
-  if (box.scrollHeight <= cap) return
-  const top = box.getBoundingClientRect().top - box.scrollTop
-  let end = 0
-  for (const el of box.querySelectorAll('.thimble-lane')) {
-    const bottom = el.getBoundingClientRect().bottom - top
-    if (bottom > cap) break
-    end = bottom
-  }
-  box.style.maxHeight = `${Math.ceil(Math.max(end, $('lanes').getBoundingClientRect().top - top + 18))}px`
+// ------------------------------------------------------------------------------------------------ the lanes' room
+
+// The overview never scrolls: its lanes take the height it has, the divider's or about half the page. Where they do not
+// fit, a run's lead folds the lanes under it into its own by itself, the largest run first, as the terminal's lanes do,
+// and the run of the session read last, so its lane shows where it can; a run that fits again opens, the smallest
+// first. The analyst's ▸ ▾ come first, and a run they open is not folded again. The lanes past the room then wait
+// behind '… N more'. The page lays this out itself until thimble's lanes fit their box on their own.
+const LANE = 18 // px, a lane's height (thimble's .thimble-lane)
+const fit = {
+  room: Infinity, // the lanes the overview has room for
+  first: 0, // the first lane shown, which '… N more' moves on
+  fits: 0, // the lanes shown
+  keys: [], // the lanes there are, the runs folded, by key
+  auto: new Set(), // the runs folded by themselves in the last layout
+  hand: new Set(), // the runs the analyst folded, which thimble keeps and the lanes fold
+  open: new Set(), // the runs the analyst opened, never folded by themselves again
 }
-addEventListener('resize', fitOverview)
+const more = document.createElement('button')
+more.className = 'more'
+more.type = 'button'
+more.hidden = true
+$('lanes').append(more)
 
-// ------------------------------------------------------------------------------------------------ over the lanes
-
-// what this page draws over the lanes: a session's mark where a label marks it, the 3 px bar thimble draws on a record,
-// at its name's left edge (the lanes anchor a session's lane as unmarked, so the page draws it); and for each subagent
-// whose lane and whose parent's lane show, a line from the parent's lane down to the subagent's where the Task call
-// started it and one back up where its result came back, each with its arrowhead
-function drawOver() {
-  const box = $('lanes')
-  const body = box.querySelector('.thimble-lanes-body')
-  let svg = box.querySelector('svg.links')
-  let marks = box.querySelector('.unit-marks')
-  if (!svg) {
-    svg = document.createElementNS(NS, 'svg')
-    svg.setAttribute('class', 'links')
-    svg.setAttribute('aria-hidden', 'true')
-    marks = document.createElement('div')
-    marks.className = 'unit-marks'
-    box.append(svg, marks)
+// the lanes in fit.room rows: the groups of Rows with the runs folded that need to be, from fit.first on; in each lane
+// the longest turns drawn first, so that a Task call's mark, as long as its subagent ran, never hides a turn's under it
+function fitted(nodes) {
+  const tops = nodes.filter((n) => n.depth === 0 && n.children)
+  const under = new Map()
+  for (const t of tops) {
+    const i = nodes.indexOf(t)
+    let k = i + 1
+    while (k < nodes.length && nodes[k].depth > 0) k++
+    under.set(t, nodes.slice(i + 1, k))
   }
+  const shut = new Set(tops.filter((t) => fit.hand.has(String(t.key))))
+  const need = () => nodes.length - [...shut].reduce((n, t) => n + under.get(t).length, 0)
+  fit.auto = new Set()
+  const mine = (t) => (String(t.key) === runOf(chosen) ? 1 : 0)
+  for (const t of [...tops].sort((a, b) => mine(a) - mine(b) || under.get(b).length - under.get(a).length)) {
+    if (need() <= fit.room) break
+    if (shut.has(t) || fit.open.has(String(t.key))) continue
+    shut.add(t)
+    fit.auto.add(String(t.key))
+  }
+  for (const t of tops.filter((x) => fit.auto.has(String(x.key))).sort((a, b) => under.get(a).length - under.get(b).length)) {
+    if (need() + under.get(t).length > fit.room) continue
+    shut.delete(t)
+    fit.auto.delete(String(t.key))
+  }
+  const out = []
+  let top = null
+  for (const n of nodes) {
+    if (n.depth === 0) top = n
+    else if (shut.has(top)) continue
+    const its = shut.has(n) ? [...n.items, ...under.get(n).flatMap((x) => x.items)] : [...n.items]
+    out.push({ ...n, items: its.sort((a, b) => (b.duration || 0) - (a.duration || 0)) })
+  }
+  fit.keys = out.map((n) => String(n.key))
+  fit.fits = out.length <= fit.room ? out.length : Math.max(1, fit.room - 1)
+  if (fit.first >= out.length || out.length <= fit.room) fit.first = 0
+  const left = out.length - fit.first - fit.fits
+  more.hidden = fit.fits >= out.length
+  more.textContent = left > 0 ? `… ${left} more` : '… back to the first'
+  return out.slice(fit.first, fit.first + fit.fits)
+}
+// the lead a session's run starts with, whose lane holds the run's lanes when it folds
+const runOf = (id) => {
+  while (id && S[id] && S[id].parent && S[S[id].parent]) id = S[id].parent
+  return id
+}
+more.addEventListener('click', () => {
+  fit.first = fit.first + fit.fits < fit.keys.length ? fit.first + fit.fits : 0
+  lanes.draw()
+})
+
+// the lanes there is room for: the overview's height, less the range's and the lanes' padding, in lanes
+function roomFor() {
+  const box = $('overview')
+  const h = box.style.height ? box.clientHeight : $('view').clientHeight * 0.48
+  const top = $('lanes').getBoundingClientRect().top - box.getBoundingClientRect().top
+  return Math.max(1, Math.floor((h - top - 8) / LANE))
+}
+function refit() {
+  const room = roomFor()
+  if (room === fit.room) return
+  fit.room = room
+  lanes.draw()
+}
+addEventListener('resize', refit)
+new ResizeObserver(refit).observe(document.querySelector('.time'))
+// the bar under the overview: a drag gives the lanes another height, which they fit
+thimble.divider({ top: '#overview', onChange: refit })
+
+// a run that folded by itself opens by hand; the analyst's own ▸ ▾ are the lanes', which this hears so the layout
+// counts them
+$('lanes').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-fold]')
+  if (!b) return
+  const k = b.dataset.fold
+  if (fit.auto.has(k)) {
+    e.stopPropagation()
+    fit.open.add(k)
+    lanes.draw()
+  } else if (b.getAttribute('aria-expanded') === 'false') {
+    fit.hand.delete(k)
+    fit.open.add(k)
+  } else {
+    fit.hand.add(k)
+    fit.open.delete(k)
+  }
+}, true)
+
+// once the lanes draw: a run folded by itself shows ▸ as one folded by hand does, the runs folded by hand are read
+// from what the lanes drew, and the session read gets its ticks
+function painted() {
+  const hand = new Set(fit.hand)
+  for (const b of $('lanes').querySelectorAll('[data-fold]')) {
+    const k = b.dataset.fold
+    if (fit.auto.has(k)) {
+      b.textContent = '▸'
+      b.setAttribute('aria-expanded', 'false')
+      b.setAttribute('aria-label', `Show the lanes under ${b.parentElement.title}`)
+    } else if (b.getAttribute('aria-expanded') === 'false') hand.add(k)
+    else hand.delete(k)
+  }
+  ticks()
+  if ([...hand].sort().join(' ') === [...fit.hand].sort().join(' ')) return
+  fit.hand = hand
+  lanes.draw()
+}
+new MutationObserver(painted).observe($('lanes').querySelector('.thimble-lanes-body'), { childList: true })
+
+// where the session read was started and where its result came back, a tick at each on its parent's lane, or on the lane
+// a folded run holds it in; the tree's guides show which session started which
+function ticks() {
+  const box = $('lanes')
+  let el = box.querySelector('.ticks')
+  if (!el) {
+    el = document.createElement('div')
+    el.className = 'ticks'
+    el.setAttribute('aria-hidden', 'true')
+    box.append(el)
+  }
+  const body = box.querySelector('.thimble-lanes-body')
+  const sp = bySession() && spawnOf[chosen]
   const sc = lanes.scale
   const at = {}
-  if (body) for (const el of body.querySelectorAll('.thimble-lane')) at[el.dataset.key] = el
-  const y0 = body ? body.offsetTop : 0
-  const bars = []
-  for (const el of Object.values(at)) {
-    const m = el.dataset.anchor && thimble.markOf(el.dataset.anchor)
-    if (m && m.bar) bars.push(`<i style="left:${body.offsetLeft}px;top:${y0 + el.offsetTop + 2}px;height:${el.offsetHeight - 4}px;background:${esc(m.bar)}"></i>`)
-  }
-  marks.innerHTML = bars.join('')
+  for (const l of body.querySelectorAll('.thimble-lane')) at[l.dataset.key] = l
+  let up = sp && sc ? sp.session : null
+  while (up && !at[up]) up = S[up] ? S[up].parent : null
+  const lane = up && at[up]
   const out = []
-  const shown = data && bySession() && sc ? data.spawns.filter((sp) => at[sp.session] && at[sp.child]) : []
-  linkKey.set(shown.length ? [{ id: 'links', name: 'subagent links', mark: 'line', n: shown.length, count: false, about: 'A line down where a Task call started a subagent, and one back up where its result came back' }] : [])
-  if (shown.length && linkKey.isOn('links')) {
-    const x0 = body.offsetLeft + NAMES
-    const mid = (el) => y0 + el.offsetTop + el.offsetHeight / 2
-    const arrow = (x, y, down) => `<path class="head" d="M${x - 3} ${y + (down ? -5 : 5)} L${x + 3} ${y + (down ? -5 : 5)} L${x} ${y} Z"/>`
-    for (const sp of shown) {
-      const a = mid(at[sp.session]), b = mid(at[sp.child])
-      for (const [t, down] of [[sp.time, true], [sp.time + sp.duration, false]]) {
-        if (t < sc.from || t > sc.to) continue
-        const x = Math.round(x0 + sc.x(t)) + 0.5
-        const [from, to] = down ? [a, b - 4] : [b, a + 4]
-        out.push(`<path d="M${x} ${from} V${to}"/>${arrow(x, down ? b - 4 : a + 4, down)}`)
-      }
-    }
-  }
-  svg.setAttribute('width', box.scrollWidth)
-  svg.setAttribute('height', box.scrollHeight)
-  svg.innerHTML = out.join('')
+  if (lane)
+    for (const t of [sp.time, sp.time + sp.duration])
+      if (t >= sc.from && t <= sc.to) out.push(`<i style="left:${body.offsetLeft + NAMES + Math.round(sc.x(t)) - 1}px;top:${body.offsetTop + lane.offsetTop}px;height:${lane.offsetHeight}px"></i>`)
+  el.innerHTML = out.join('')
 }
-// the lanes draw themselves again as the page resizes or a lane folds, and a label's marks arrive: this follows
-const over = () => requestAnimationFrame(drawOver)
-new MutationObserver(over).observe($('lanes').querySelector('.thimble-lanes-body'), { childList: true })
-thimble.onMarks(over)
 
 // ------------------------------------------------------------------------------------------------ the transcript
 
@@ -415,7 +503,15 @@ async function beside(id) {
 async function read(key) {
   if (chosen === key) return
   chosen = key
+  // a session in a run that folded by itself: the lanes laid out again, that run open; a lane behind '… N more' shown
+  if (bySession() && fit.auto.has(runOf(key))) lanes.draw()
+  const at = fit.keys.indexOf(key)
+  if (at >= 0 && (at < fit.first || at >= fit.first + fit.fits)) {
+    fit.first = at - (at % fit.fits)
+    lanes.draw()
+  }
   lanes.choose(key)
+  ticks()
   await transcript()
   $('turns').scrollTop = 0
 }
