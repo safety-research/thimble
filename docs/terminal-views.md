@@ -45,10 +45,12 @@ under its run as a tree, a run folded to one lane where the panel is short, and 
 back (`blocks`).
 
 [plugin/viewers/repository/view.term.js](../plugin/viewers/repository/view.term.js), the third, draws records from a
-code forge and a message board the way their own tools draw them: the tabs with their counts on a row of their own, the
-chosen one inverse; the runs as Filter by's toggles; a heading per run over its items, with a dim line under each row
-(`body`); and an item's page in the side pane (`side`), whose records are a `list` of their own that ↑↓ move through
-while it is open, the one a citation opened chosen.
+code forge the way its own tools draw them: one run's repository at a time, chosen in a switcher on the first row
+(`choice` with `all: false`, which lists each run with its tabs' counts); the tabs with their counts on a row of their
+own, the chosen one inverse; the run's items with a dim line under each row (`body`); under a label, which marks
+records, no mark on a row, which stands for its records, but a small bar of their mix, and a plain track; and an item's
+page in the side pane (`side`), whose records are a `list` of their own that ↑↓ move through while it is open, the one
+a citation opened chosen.
 
 ## The program's life
 

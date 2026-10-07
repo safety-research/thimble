@@ -1,6 +1,6 @@
 {
   "name": "Repository",
-  "description": "Several agent runs on one small library drawn the way a code forge and a message board draw them: pull requests, issues, threads and agents in a box per run with their states and counts, filtered by run and colored by state, area or a label, the runs' activity in the time range, and each item opened as its page in the side panel: a pull request's conversation, commits and changed files, an issue's timeline, a thread's posts or an agent's profile.",
+  "description": "Several agent runs on one small library, each run its own repository on a code forge, drawn the way the forge draws it: a switcher at the top chooses the run, and the run's tabs list its pull requests, issues, discussion threads and agents with their states and counts, colored by state, area or a label, each item opened as its page in the side panel: a pull request's conversation, commits and changed files, an issue's timeline, a thread's posts or an agent's profile.",
   "scope": ["runs/*.json", "runs/*.jsonl", "runs/*.csv"],
   "records": [
     {"name": "event", "one": "one opening, push, review, comment, merge, close, reopen, post or sign-off", "fields": [
@@ -39,10 +39,10 @@
     ]}
   ],
   "accepts": [
-    {"form": "L<n>", "means": "the record on line <n> of a run's file, marked on its pull request's, issue's, thread's or agent's page in the side panel, or a manifest's line, which frames its run in the time range"}
+    {"form": "L<n>", "means": "the record on line <n> of a run's file, marked on its pull request's, issue's, thread's or agent's page in the side panel, or a manifest's line, which opens its run's repository"}
   ],
   "units": [
-    {"form": "<run>", "means": "one run, framed in the time range"},
+    {"form": "<run>", "means": "one run's repository, chosen in the switcher"},
     {"form": "<run>/pull/<n>", "means": "one pull request's page: its conversation with its commits, reviews, comments and merge or close, its commits and its changed files"},
     {"form": "<run>/issues/<n>", "means": "one issue's page: its timeline with its comments and the pull requests that fix it, and the same issue in the other runs"},
     {"form": "<run>/discussions/<n>", "means": "one thread's page, every post in time order"},

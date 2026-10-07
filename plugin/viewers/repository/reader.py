@@ -61,18 +61,20 @@
 # pull request's conversation, commits and changed files, an issue's timeline, a thread's posts and an agent's profile.
 #
 # What the page asks (records(index, query)):
-#   {"op": "view", "tab": "pulls" | "issues" | "discussions" | "agents", "colour": <colour.query()>,
+#   {"op": "view", "run": <a run>, "tab": "pulls" | "issues" | "discussions" | "agents", "colour": <colour.query()>,
 #    "filter": <filter.query()>}
-#       the tab's units the label filter keeps (thimble.kept_unit) and Filter by keeps (thimble.colour_on), each with
-#       the facts its list row shows, its value under the Color by choice (thimble.colour_value) and its records' times,
-#       those of a Color by value turned off left out; the counts of every value for Filter by's and Color by's chips;
-#       how many units each tab holds under the same filters; and each run's facts, which head its part of the list
+#       one run's repository, as a forge shows one repository at a time: the run's units of the tab that the label
+#       filter keeps (thimble.kept_unit) and Filter by and Color by keep (thimble.colour_on), each with the facts its
+#       list row shows, its value under the Color by choice (thimble.colour_value) and, under a label, how many of its
+#       records take each value; the counts of every value for Filter by's and Color by's chips; how many units each
+#       tab of the run holds under the same filters; and each run's facts with its tabs' counts, which the run switcher
+#       lists. The run is the first when `run` names none
 #   {"op": "unit", "key": <a unit's key>}
 #       the unit's facts and its records the label filter keeps, with their text, in time order; for a pull request
 #       the issue it fixes, for an issue the pull requests that fix it, each opening in its timeline; for both the same
 #       issue in every run; and every #<n> its records mention, so the page links them
-# Under a label, a unit's value is the label's value on the first of its records the label marks, and each record
-# keeps its own value, which colors its tick on the time range's overview.
+# Under a label, a unit stands for its records: its value is the label's value most of its marked records take, as
+# thimble marks a unit, and `mix` counts its records by their own values, which the page draws as the unit's mix.
 import csv
 import io
 import json
@@ -563,11 +565,14 @@ def _record(index, at):
 
 
 def _value(choice, u, ref=None):
-    """A unit's value under the page's Color by or Filter by: its state, run, area or author, or for a label the label's
-    value on the record `ref`, else on the first of its records the label marks; None for none."""
+    """A unit's value under the page's Color by or Filter by: its state, area or author, or for a label the label's
+    value on the record `ref`, else the value most of the unit's marked records take (the first of them on a tie), as
+    thimble marks the unit; None for none."""
     if isinstance(choice, dict) and choice.get("label") is not None:
-        refs = [ref] if ref else u["refs"]
-        return next((v for r in refs if (v := thimble.colour_value(choice, r)) is not None), None)
+        if ref:
+            return thimble.colour_value(choice, ref)
+        seen = Counter(v for r in (u["refs"] + u.get("more", []))[:200] if (v := thimble.colour_value(choice, r)) is not None)
+        return max(seen, key=seen.get) if seen else None
     return thimble.colour_value(choice, None, u)
 
 
@@ -608,19 +613,23 @@ def _facts(index, u):
 
 
 def _view(index, query):
-    """One tab's units as rows: {tab, items: [{<_facts>, value, search, events: [[epoch seconds, ref, value]]}],
-    counts: {value: units} (Color by's), filtered: {value: units} (Filter by's), tabs: {tab: units}, runs: [{run,
-    start, end, team, approvals, agents}]}. A unit shows when the label filter keeps one of its records and its values
-    under Filter by and Color by are on; each tab's count is of the units that show."""
+    """One run's tab as rows: {tab, run, items: [{<_facts>, value, search, mix?}], counts: {value: units} (Color by's),
+    filtered: {value: units} (Filter by's), tabs: {tab: units}, runs: [{run, start, end, team, approvals, agents,
+    tabs}]}. A unit shows when the label filter keeps one of its records and its values under Filter by and Color by
+    are on; each tab's count is of the units that show, in each run for the run switcher. Under a label, `mix` is
+    [[value, records]] of the unit's records the label filter keeps, the values turned off left out."""
     tab = query.get("tab") if query.get("tab") in TABS else "pulls"
+    names = sorted(index["runs"])
+    run = query.get("run") if query.get("run") in index["runs"] else (names[0] if names else None)
     colour, filt = query.get("colour"), query.get("filter")
     by_label = isinstance(colour, dict) and colour.get("label") is not None
-    items, counts, filtered, tabs = [], Counter(), Counter(), Counter()
+    items, counts, filtered = [], Counter(), Counter()
+    tabs = {r: Counter() for r in names}
     units = sorted(index["units"].values(), key=lambda u: (u["run"], u.get("number") or 0, u.get("name") or ""))
     for u in units:
         if not thimble.kept_unit(u["refs"] + u.get("more", [])):
             continue
-        here = u["tab"] == tab
+        here = u["run"] == run and u["tab"] == tab
         fv = _value(filt, u)
         if here:
             filtered["" if fv is None else fv] += 1
@@ -631,16 +640,19 @@ def _view(index, query):
             counts["" if value is None else value] += 1
         if not thimble.colour_on(colour, value):
             continue
-        tabs[u["tab"]] += 1
+        tabs[u["run"]][u["tab"]] += 1
         if not here:
             continue
-        events = [[e[5], e[0], _value(colour, u, e[0]) if by_label else value]
-                  for e in sorted(u["events"], key=lambda e: e[5]) if thimble.kept(e[0])]
-        items.append({**_facts(index, u), "value": value, "search": u["search"], "events": events})
+        item = {**_facts(index, u), "value": value, "search": u["search"]}
+        if by_label:
+            # the unit's records as thimble marks it (resolve's refs): how many take each value, in the order they come
+            mix = Counter(_value(colour, u, r) for r in (u["refs"] + u.get("more", []))[:200] if thimble.kept(r))
+            item["mix"] = [[v, n] for v, n in mix.items() if thimble.colour_on(colour, v)]
+        items.append(item)
     runs = [{"run": r, "start": info["start"], "end": info["end"], "team": info["team"], "approvals": info["approvals"],
-             "agents": info["agents"]} for r, info in sorted(index["runs"].items())]
-    return {"tab": tab, "items": items, "counts": dict(counts), "filtered": dict(filtered),
-            "tabs": {t: tabs[t] for t in TABS}, "runs": runs}
+             "agents": info["agents"], "tabs": {t: tabs[r][t] for t in TABS}} for r, info in sorted(index["runs"].items())]
+    return {"tab": tab, "run": run, "items": items, "counts": dict(counts), "filtered": dict(filtered),
+            "tabs": {t: tabs[run][t] for t in TABS} if run else {t: 0 for t in TABS}, "runs": runs}
 
 
 def _iso(t):
@@ -730,7 +742,8 @@ def _detail(index, key):
 
 
 def records(index, query):
-    """{op: view, tab, colour?, filter?}: one tab's units (_view). {op: unit, key}: one unit opened (_detail)."""
+    """{op: view, run?, tab, colour?, filter?}: one run's tab of units (_view). {op: unit, key}: one unit opened
+    (_detail)."""
     query = query or {}
     if query.get("op") == "unit":
         return _detail(index, str(query.get("key") or ""))
