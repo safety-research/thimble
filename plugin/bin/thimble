@@ -538,15 +538,8 @@ case "${1:-}" in
     shift; launch_mode cli "$PWD" "$@"; exit;;
   cc-mod)
     # 0.5.0's `thimble cc-mod on`, then `claude`, put thimble-cc-mod in a folder; this version has terminal mode in its
-    # place, which `thimble` starts. `on` sets this folder to it and `off` back to the browser, so the old steps lead on
-    shift
-    case "${1:-}" in
-      on) launch_mode cli "$PWD" terminal || exit 1
-          printf 'thimble: thimble-cc-mod has been deprecated in version 0.6.0 and replaced by terminal mode, now set for this folder. Start it with `thimble` here (not `claude`).\n';;
-      off) launch_mode cli "$PWD" browser || exit 1
-           printf 'thimble: thimble-cc-mod has been deprecated in version 0.6.0 and replaced by terminal mode; this folder is back in browser mode.\n';;
-      *) printf 'thimble: thimble-cc-mod has been deprecated in version 0.6.0 and replaced by terminal mode: run `thimble mode terminal` in a folder, then `thimble`.\n';;
-    esac
+    # place, so the old command says how to start that, and changes nothing
+    printf 'thimble: thimble-cc-mod has been deprecated in version 0.6.0 and replaced by terminal mode. From the folder you want to analyze, run `thimble mode terminal`, then `thimble`.\n'
     exit 0;;
   state | act | view)
     # terminal mode's renderer reads a surface and acts as the browser would, through thimble's backend in this process
