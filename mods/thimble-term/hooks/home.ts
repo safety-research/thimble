@@ -289,18 +289,29 @@ function cardsSection(groups: readonly HomeCardGroup[], ui: HomeUi): HomeSection
   }
 }
 
+/** The cells a label's bar takes at most, and the fewest it is drawn in: a narrower bar is left out. */
 const BAR_W = 20
+const BAR_MIN = 6
+/** The cells of a row's name a bar leaves it at least, or the whole name when it is shorter: a name is cut at a word,
+ *  so a bar that left it fewer cells cut most names to their first word. */
+const NAME_KEEP = 24
 
-/** A label's counts as a bar of BAR_W cells, each value in its colour as the label panel draws it (draw.ts valueColour). */
+/** A label's counts, each value with its colour as the label panel draws it (draw.ts valueColour): the bar's parts,
+ *  their cells set when the row is laid out at its width (barCells). */
 function countBar(values: readonly string[], counts: Record<string, number>): { n: number; fg: string }[] {
-  const total = values.reduce((k, v) => k + (counts[v] ?? 0), 0)
-  if (!total) return []
-  const cells = values.map(v => ((counts[v] ?? 0) * BAR_W) / total)
+  return values.map(v => ({ n: counts[v] ?? 0, fg: valueColour(values, v)! })).filter(x => x.n > 0)
+}
+
+/** A bar's parts in `w` cells by their counts, the cells left over given to the largest remainders, so the bar is `w`
+ *  wide. */
+function barCells(parts: readonly { n: number; fg: string }[], w: number): { n: number; fg: string }[] {
+  const total = parts.reduce((k, p) => k + p.n, 0)
+  if (!total || w <= 0) return []
+  const cells = parts.map(p => (p.n * w) / total)
   const out = cells.map(c => Math.floor(c))
-  // the cells left go to the largest remainders, so the bar is BAR_W wide
   const order = cells.map((c, i) => ({ i, r: c - Math.floor(c) })).sort((a, b) => b.r - a.r)
-  for (let k = 0, left = BAR_W - out.reduce((a, b) => a + b, 0); k < left; k++) out[order[k % order.length]!.i]!++
-  return values.map((v, i) => ({ n: out[i]!, fg: valueColour(values, v)! })).filter(x => x.n > 0)
+  for (let k = 0, left = w - out.reduce((a, b) => a + b, 0); k < left; k++) out[order[k % order.length]!.i]!++
+  return parts.map((p, i) => ({ n: out[i]!, fg: p.fg })).filter(x => x.n > 0)
 }
 
 /** A label's color, as the label panel's ● beside its name shows it: its first value's, else the first series hue. */
@@ -439,8 +450,9 @@ export function homeSections(d: HomeData, ui: HomeUi = HOME_UI_EMPTY): HomeSecti
 /** A region a click acts on: its line, its cells, and whether the pointer lights its row (else it is a control, which
  *  the pointer inverts). `pick`: the key of the row it stands for, which the keys step through. */
 export type HomeHit = { y: number; x0: number; x1: number; row: boolean; act: HomeAct; pick?: string }
-/** `hintRows`: how many of its last lines are the key hints (chrome.ts hintLines). */
-export type HomeLayout = { lines: Line[]; hits: HomeHit[]; picks: { key: string; act: HomeAct }[]; hintRows: number }
+/** `hintRows`: how many of its last lines are the key hints (chrome.ts hintLines); `heads`: the line of each section's
+ *  heading. */
+export type HomeLayout = { lines: Line[]; hits: HomeHit[]; picks: { key: string; act: HomeAct }[]; hintRows: number; heads: number[] }
 
 /** The items a section shows before `… N more` (card groups and folders count as items). */
 export const FIRST = 5
@@ -473,10 +485,14 @@ function glyphSeg(g: Glyph | null): Seg[] {
 /** The fewest cells of a row's title kept beside its full right part (itemLine). */
 const TITLE_MIN = 32
 
-/** An item's line at `x`: its glyph hanging, its name, its bar and figure against the right edge. */
+/** An item's line at `x`: its glyph hanging, its name, its bar and figure against the right edge. The bar takes what
+ *  the name leaves (NAME_KEEP cells of it, or all of a shorter one), up to BAR_W cells, and is left out under BAR_MIN:
+ *  in a narrow pane the name stays readable (live check term-fix10, new quirk 6: `● age…  ████████████████████  1,900`). */
 function itemLine(row: HomeRow, x: number, w: number): Line {
-  const bar: Line = row.bar?.length ? [...row.bar.map(b => ({ s: '█'.repeat(b.n), fg: b.fg })), { s: '  ' }] : []
   const lead: Line = [...(x ? [{ s: ' '.repeat(x) }] : []), ...glyphSeg(row.glyph)]
+  const barRoom = w - lineWidth(lead) - Math.min(NAME_KEEP, width(row.title)) - lineWidth(row.after ?? []) - 2 - lineWidth(row.right ?? []) - 2
+  const barW = Math.min(BAR_W, barRoom)
+  const bar: Line = row.bar?.length && barW >= BAR_MIN ? [...barCells(row.bar, barW).map(b => ({ s: '█'.repeat(b.n), fg: b.fg })), { s: '  ' }] : []
   const left: Line = [...lead, { s: row.title }, ...(row.after ?? [])]
   // the full right part (a thread's subject) whenever the title keeps TITLE_MIN cells beside it, the title cut at a word
   // to make room; else the shorter right part (live check term-fix6, quirk 10: `about 602` was left out beside a long
@@ -523,8 +539,25 @@ function besideNew(r: HomeRow): HomeRow {
 }
 const NEW_W = '  new'.length
 
+/** The cells of a file's name the type column never cuts: a name up to this long is whole beside the column, or the
+ *  column goes. */
+export const NAME_WHOLE = 32
+
+/** The files section without its type column, when beside it a file's name (up to NAME_WHOLE cells) would be cut (live
+ *  check term-fix10, new quirk 6: `agent-c…` beside the column); else as it is. */
+function withoutType(sec: HomeSection, w: number): HomeSection {
+  if (sec.id !== 'files' || sec.heads?.[0]?.s.trim() !== 'type') return sec
+  const files = sec.rows.flatMap(r => r.kids ?? [])
+  const longest = Math.max(0, ...files.map(f => width(f.title)))
+  const rightW = Math.max(0, ...files.map(f => lineWidth(f.right ?? [])))
+  if (w - 4 - 2 - rightW >= Math.min(NAME_WHOLE, longest)) return sec
+  const sizeOnly = (r: HomeRow): HomeRow => ({ ...r, ...(r.right && r.right.length >= 3 ? { right: [...r.right.slice(0, -3), r.right.at(-1)!] } : {}), ...(r.kids ? { kids: r.kids.map(sizeOnly) } : {}) })
+  return { ...sec, heads: sec.heads.slice(-1), rows: sec.rows.map(sizeOnly) }
+}
+
 function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void {
   alignRight(sec)
+  sec = withoutType(sec, w)
   if (sec.rows.some(r => r.fresh || (r.open && r.kids?.some(k => k.fresh)))) sec = { ...sec, rows: sec.rows.map(r => ({ ...besideNew(r), ...(r.kids ? { kids: r.kids.map(besideNew) } : {}) })) }
   const head = headingLine(sec.name, sec.count, sec.news ?? 0)
   out.push(spread(head, sec.heads ?? [], w), sec.pane ? { x0: 0, x1: lineWidth(head), row: false, act: { op: 'open', open: sec.pane } } : undefined)
@@ -561,13 +594,15 @@ export function homeLayout(d: HomeData, ui: HomeUi, w: number, hints: readonly s
   const out = new Lines(ui.pick || first)
   out.push([{ s: 'Home', fg: ACCENT, b: true }])
   out.push(ruleLine(w))
+  const heads: number[] = []
   sections.forEach((sec, i) => {
     if (i) out.blank()
+    heads.push(out.lines.length)
     sectionLines(out, sec, ui, w)
   })
   const hintRows = hintLines(hints, w)
   for (const l of hintRows) out.push(l)
-  return { lines: out.lines, hits: out.hits, picks: out.picks, hintRows: hintRows.length }
+  return { lines: out.lines, hits: out.hits, picks: out.picks, hintRows: hintRows.length, heads }
 }
 
 /** The UI state after an act that changes it (an act that opens something leaves it as it is). */

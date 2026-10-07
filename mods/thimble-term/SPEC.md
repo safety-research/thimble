@@ -30,7 +30,8 @@ them. Colors are in `hooks/paint.ts`; `hooks/chrome.tsx` draws the panel's chrom
    the model's Markdown.
 8. New is the word `new` (or `N new`) in green after the new thing; opening the thing clears it.
 9. Dim is secondary: labels, counts, times, metadata against R, secondary rows, separators, key hints.
-10. Links are blue and underlined: citations, the place after `↗`, a label's name on a card; the `?` and `↳` are blue.
+10. Links are blue and underlined: citations, the place after `↗`, a label's name on a card; the `?` and `↳` are blue. A
+    chip (a citation that names only its place) is blue in brackets, `[ card ]`, not underlined.
 11. Red means a problem and only a problem: `×` failed, `!` usable with a problem.
 12. A palette hue goes only on the marks of a color field; a chart's one series is a field of one value, in the first hue.
 13. `❯` and the accent mark the selected row; the selection background a choice in use; inverse the tab and the pointer.
@@ -52,6 +53,7 @@ Each channel has one meaning. A run the table does not cover is regular, in the 
 | green | new | anything else |
 | dim | secondary | a name, a number in a number column, a flagged value, a control |
 | blue, underlined | a link: a citation's value, the place after `↗`, a label's name on a card | controls, rows a click selects |
+| blue, in brackets `[ … ]` | a chip: a citation that names only its place (`[ card ]`) | controls, a citation with words |
 | blue | the `?` and `↳` in the margin | |
 | accent | a panel's title, the selected row | anything else |
 | italic | a record's own words (in quotation marks); the key-hint row | emphasis, captions |
@@ -135,7 +137,8 @@ the type area runs from A0 to R.
 15. **Dim** means secondary: labels and units, counts, times, places in a secondary row, the `·` and `›` separators, axis
     labels, metadata against R, secondary rows, `○`, and the key-hint row (dim and italic).
 16. **Underline** means a link: a citation's value, the place after `↗`, a label's name on a card, a URL. Links are blue.
-    Names and rows that a click selects or opens are not underlined.
+    Names and rows that a click selects or opens are not underlined. A chip is a link its brackets mark, so it has no
+    underline (section 7, "Main's chat").
 17. **Italic** means a record's own words quoted among the model's or thimble-term's, always inside quotation marks: an
     example card's records, a label's examples, a quote block. A file is drawn upright, since everything in it is a
     record's. The key-hint row is italic too, as in Claude Code's panels.
@@ -218,8 +221,10 @@ outside this table.
 | `·` | between the items of one inline list | dim |
 | `"…"` | someone's own words: the analyst's question, a record's words | as the text |
 | `-` | an item of a list | text |
+| `[ … ]` | a chip: a citation that names only its place, its short name inside (`[ card ]`, `[ events.jsonl line 12 ]`) | link |
 
-Not drawn: `▶`, `✗ ◇ ■ □ ━ ┃ • ✕ ❚❚ ⓘ ✦ ❢ ⚠ ≡ ╱ ▤ ❝ ┿ ∴ ▪`, a braille spinner, `[ ]` around controls.
+Not drawn: `▶`, `✗ ◇ ■ □ ━ ┃ • ✕ ❚❚ ⓘ ✦ ❢ ⚠ ≡ ╱ ▤ ❝ ┿ ∴ ▪`, a braille spinner, `[ ]` around controls (brackets are a
+chip's only).
 
 **Words that recur.** Plain, short words. A place reads `revisions.jsonl line 10566` or `lines 3-8`, never `#L`. Every
 cut is one cut (`hooks/lib.ts` `cut`): at the last word that fits, mid-word only when a word fills more than half the
@@ -266,7 +271,10 @@ while thimble's links check runs.
     The row names the list's keys only once a `ui.focus` says the ring rests there. A click on a list, on a row or on
     an empty part, hands the keys back to the pane. A list taller than its pane is cut to the rows the pane leaves it
     around the chosen row, `↑ N more` and `↓ N more` dim above and below (a click moves a page, the wheel a row), so
-    the chosen row and the hint row always show.
+    the chosen row and the hint row always show. A choice that moves up to the first row shown, or above it, starts the
+    rows shown at the row that leads it: on home its section's heading, and the top for the first row the keys choose,
+    so every row can be reached by keys. No letter is a hotkey unless the hint row names it: a word typed while the
+    panel holds the keys (`table`) then reaches the prompt whole.
 27. A field: its label dim and lower case on the label column, the field on L, no colon (`ask`, `follow-up`,
     `describe a new label`, the label panel's `prompt`). A field that shows all of its text (the label's prompt) has a
     border in the rule gray; a click gives it the keyboard.
@@ -294,8 +302,8 @@ colored is said under each.
   `events.jsonl`), parted by a dim `›`, a long step cut with `…`. A step whose thread has new answers is followed by
   `new` in green; one whose thread is answering starts with `◌`. At R: `show all threads`, which opens the threads
   panel, then `N new` in green while answers wait. The threads panel itself leaves it out. The row never wraps: in a
-  narrow pane `show all threads`, then `N new`, give way to the steps (`t` still shows all threads), and the steps fold
-  into `…` and are cut to the room left.
+  narrow pane `show all threads` shortens to `threads` (with `N new`, then alone), so the threads stay one click away,
+  then gives way to the steps, and the steps fold into `…` and are cut to the room left. No key shows all threads.
 - The title row: the subject's name in the accent color and bold; navigation against R. The subtitle under it: the
   subject's facts, dim, parted by ` · `, with a problem in red. A panel with no facts worth a row has no subtitle.
 - Tabs, where the subject has them: each tab's name with a cell of space at each side, selected or not, the selected one
@@ -308,7 +316,7 @@ colored is said under each.
 **Main's chat:**
 
 ```
-⏺   The three cards are below. The dse wiki holds most of the corpus, and most of its edits came on one day, 18 June.
+⏺   The dse wiki holds most of the corpus [ card ], and most of its edits came on one day, 18 June.
     ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
     │ How many pages does each wiki have?                                                                          │
     │                                                                                                              │
@@ -333,14 +341,23 @@ colored is said under each.
   6. Prose wraps at the terminal's width, and cards take the same width.
 - The model's Markdown is drawn as Claude Code draws it: `**bold**` bold, `*italic*` italic, inline code in its code
   color, headings bold.
-- A card cited whole (`[[card:<id>]]`, at a sentence's end) where the card is drawn with the text, under the turn's last
-  reply, under a thread's answer or as a document's figure, is left out with the space before it; elsewhere it reads
-  ` (card "<its question>")`, cut at a word, the words in the parentheses the citation's link, so that it reads as a
-  reference and not as words of the sentence. The footer does not count it. Another citation that names only its place
-  (`[↗](<ref>)`: a card's printed line, a file's line) reads the same way where it ends a clause (` (card "…" output
-  line 1)`), in the reply and in every line of plain words (the New thread view's passage); where the sentence goes on
-  after it, it reads as its place. A label's link (`[33](concept:<id>/yes)`) is neither a citation nor a problem in
-  the footer.
+- **A chip** is a citation that names only its place, with no words of its own (`[[card:<id>]]`, `[↗](<ref>)`), which
+  the browser draws as a chip: its own kind of citation (Matt, 2026-10-07). It reads as its place's short name in
+  brackets, a space inside each, in the link color with no underline, kept whole on one row: `[ card ]` for a card cited
+  whole or one of its cells, `[ card output line 1 ]` for a line a card printed, `[ events.jsonl line 12 ]` for a file's
+  line (`lines 3-8`, `row 12`, `item 4`; a long name cut in its middle, its line kept; at most 30 cells inside),
+  `[ edit purpose ]` for a label by its name (`[ edit purpose · yes ]` for a value), `[ report ]`, `[ slides ]` or
+  `[ story ]` for a document or a passage of one, `[ output line 1 ]` for a command's output. It stands where main put
+  it, mid-sentence or at its end, the same in a reply, a thread's answer, a document, a card's takeaway and every line of
+  plain words (a preview: the threads tree's answer row, the New thread view's passage, a caption, a `source` row),
+  where it reads `[ card ]` in that line's own color, as the line's other citations read as their words. It stays where
+  the card it names is drawn under the reply or as a figure. Brackets main put around it alone are left out
+  (`([[card:<id>]])` reads `[ card ]`). A click opens its place as any citation's does (the card, the file at its line,
+  the label, the document at its passage); under the pointer it is inverse and its tip names the place in full, then
+  its status (`card "How many pages does each wiki have?" · found`, `events.jsonl line 12 · ◌ checking`); a place that
+  does not exist is red. The footer does not count a card's chip. Claude Code's tool rows, which draw no link, name a
+  chip's place in words (`events.jsonl line 12`; a card by its question). A label's link with a value
+  (`[33](concept:<id>/yes)`) is neither a chip nor a problem in the footer.
 - A citation is its value in blue, underlined; a value not at its place is red. In a card's takeaway, one cell after
   the value, `◌` while thimble's links check runs, `✓` once it found the value, a red `×` when it found another. The
   citation under the pointer is inverse, and its tip (its place and status in plain words, and why for a problem) sits
@@ -415,7 +432,9 @@ colored is said under each.
   under it, then the plot or body.
 - Below the plot: the readout row, the value of the mark under the pointer (`AgentRelent  317`), plain, or what
   thimble is doing to the card; the label rows; the params row; then the takeaway, drawn as main's chat draws a reply,
-  its citations links.
+  its citations links and its chips chips; then, when the card check rewrote the card, a dim note that is a sentence:
+  `The card check rewrote its takeaway: the takeaway named the wrong hour.` (a capital, the reason after the colon in
+  lower case unless it starts with a name, a full stop).
 - A label row, when the card read a label: `label` dim, the label's name in blue and underlined, then `↗`, then each
   value after its `●` in its hue (`label  edit purpose ↗  ● links or data  ● message to agents  ● other`), and
   `changed since` once the label changed after the card ran. A click on the name or the `↗` opens the label panel. A
@@ -497,7 +516,9 @@ colored is said under each.
   thread's group is named by the thread's first question (`in the thread "…"`), never its title, which is a slug. A group's
   cards are at A2 with their kind word at R.
 - Labels: each label's `●` in its color (as the label panel's), its name, a bar of its values' shares in their hues
-  with the total, and a dim secondary row of its kind, run and values. A label with no run (one a stopped thread left)
+  with the total, and a dim secondary row of its kind, run and values. The bar takes 20 cells where the row has room;
+  in a narrower pane it takes what the name leaves (the whole name, up to 24 cells of it), and under 6 cells it is
+  left out, so the name stays whole. A label with no run (one a stopped thread left)
   has a dim `○`, `not run yet` at R and no bar, as its panel says. A run going says `◌ labeling 3,000 of 4,579`, and a
   first run that stopped part way (a quit) `stopped at 3,150 of 4,579`, alike on home, the labels list, the label panel
   and the label card.
@@ -506,6 +527,8 @@ colored is said under each.
   after its name and its size under `size`; when it is unfolded, its files at A4 with their type, then their size. A
   file's type is thimble's kind; for a file thimble knows only as text, what it opens as when that is not its lines
   (`transcript`, as its preview and its view say), else its format (`jsonl`). The first folder is open; a folder shows its first 20 files, and `… N more` shows the folder whole.
+  Where a file's name (up to 32 cells of it) would be cut beside the type column, the type column is left out and the
+  names keep their room, with their size alone at R.
 - The orientation's coverage line, when an orientation ran.
 
 **The threads panel** (what `show all threads` opens, and where a thread opens):
@@ -541,8 +564,8 @@ colored is said under each.
   two paragraphs. The cards the thread made stand under its answer, each in its frame, as under main's reply.
 - A new thread (one with no question yet): `about <what>` as its dim subtitle, the first sentence of its passage dim on
   one row, then the question's field alone, its placeholder dim. `<what>` is a card by its question (`card "…"`), a
-  citation's words in quotation marks (a value alone, `4579`, and a citation with no words, `agent-chat:2`, as they
-  show), a passage's words in quotation marks, or `this answer` for a whole answer (its footer's `ask about this
+  citation's words in quotation marks (a value alone, `4579`, as it shows; a chip as it shows,
+  `[ agent-chat.jsonl line 2 ]`), a passage's words in quotation marks, or `this answer` for a whole answer (its footer's `ask about this
   answer ›`), which the thread keeps. The field is Claude Code's Input, one row that shows the start of a long question:
   no hook scrolls it to the cursor, and its placeholder is drawn dim with the terminal's reset, which drops the panel's
   background behind it in a light theme.
@@ -569,15 +592,16 @@ colored is said under each.
   card's links check as the chat does: `◌` while it runs, `✓` and `, and a script got the same number` once it ran, a
   red `×` when it got another value. A citation with no value is titled by its place in words, and then has no `from`
   row and no subtitle while its place is there (`not found` and why when it is not), so the place is named once; its
-  `source` marks its label in the sentence, and its step in the path row is the short place the reply draws (`citation
-  agent-chat:2`). Under a `from` row, which names the place, a citation found says `found` alone (then what thimble's
+  `source` marks its chip in the sentence (blue, `[ agent-chat.jsonl line 2 ]`), and its step in the path row is its
+  chip's words (`citation agent-chat.jsonl line 2`). Under a `from` row, which names the place, a citation found says `found` alone (then what thimble's
   links check says). Any other citation's subtitle is its status in plain words (section 5) and
   why for a problem.
 - Label/value rows: `from`, `source` (the reply's sentence in quotation marks, the cited value in it blue and
   underlined), `quoted` for a passage an example quotes. No `why`.
 - The lines: nested at A2, their numbers right-aligned in a dim column, the cited line's number in the text color and
-  the cited value on the selection background; each record around the cited one on one dim row, as Raw draws it (a JSON
-  record as its line of JSON), the cited record over its rows, and never a record cut after its first rows; a cited line wrapped over 3 to 8 rows by the pane's height, with two
+  the cited value on the selection background; each record around the cited one on one dim row, drawn as the cited one
+  is: its words where thimble reads words in it (a transcript's message, an event's params), else as Raw draws it (a
+  JSON record as its line of JSON); the cited record over its rows, and never a record cut after its first rows; a cited line wrapped over 3 to 8 rows by the pane's height, with two
   lines of context when it wraps. A card value's citation draws the card in its frame, the cited mark on the
   selection background. A citation of lines a card printed (`card:<id>@out0#L1`) draws those lines of the output, two
   on each side, the cited value (the whole line, for a citation with no words) on the selection background, never the
@@ -608,7 +632,7 @@ it in browser mode.
 
 - A folder per group, foldable, its file count dim after its name and its size under `size`, as home's; an open folder
   shows its first 20 files, then `… N more`. A file has no dot, as on home: its name at A4, the type column names its
-  type. A long name is cut in its middle. A row is chosen as the browser opens (the first file of the first open
+  type. The type column goes before a name is cut, as on home; a name too long even then is cut in its middle. A row is chosen as the browser opens (the first file of the first open
   folder, or the file Backspace came back from); a folder's row is chosen like a file's, Enter folds it, and Space on a
   file folds its folder with the choice moving onto the folder's row.
 - The chosen file's first lines show under the second rule (at most 6, fewer in a short pane, so the tree keeps eight rows) as the file holds them, with dim line numbers,
@@ -672,7 +696,10 @@ it in browser mode.
   each a click away, at most 8. A blank row stands between an opened part and the next toggle.
 - The labels list (`home › labels`): one row per label (glyph, name, its kind and last run dim at R), 1-9 the first
   nine, then under the second rule the field `describe a new label`, whose words go to main, which makes the label
-  with a trial.
+  with a trial. `l` in a label's panel opens the list in place of the label's step (`home › labels`), the label it came
+  from chosen; b then goes where the path shows, home. A document's `l` does the same for the documents list.
+- The scope's records (`14,591 records`, `run on all 14,591`): the last full run's count, else the scope's size thimble
+  counts for a label whose first run never ended.
 
 **Documents:** the documents list (`home › documents`) has one row per document, `◌` while its writer writes, `●`
 written, its title, its kind dim at R, at most 40. **A document:** the title in the accent and bold, wrapped; while its
@@ -693,7 +720,8 @@ session):
 
 1. Bold only on titles, a card's title, section headings, a card table's column names, transcript speakers, and the
    model's Markdown.
-2. Green only on `new`; accent only on panel titles and the selected row; blue only on links, `?` and `↳`.
+2. Green only on `new`; accent only on panel titles and the selected row; blue only on links (chips among them), `?`
+   and `↳`.
 3. No letters in a palette hue; letters in red only for problems; no other colored letters but check 2's and code's.
 4. No two blank rows in a row; no blank row next to a rule; one blank row under each card's title.
 5. Every card has a full round border in the rule gray.
@@ -707,3 +735,5 @@ session):
 12. Every non-ASCII character thimble-term draws, outside the corpus's and the model's words, is in section 5's table.
 13. A right-click opens no menu.
 14. No centered row.
+15. Every chip is `[ <its short name> ]` in the link color, with no underline, whole on one row; no citation that names
+    only its place is left out, put in parentheses or drawn as words of the sentence.

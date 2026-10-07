@@ -161,3 +161,16 @@ test("the label's counts apply the analyst's verdicts, as thimble.labels() reads
   expect(text).not.toContain('5,191')
   await again.unmount()
 })
+
+test("a label whose first run stopped part way counts its scope in its panel: `run on all N` and `N records`", async ($, on) => {
+  // live check term-fix10, low quirk: `run on all` with no number and `scope: pages.jsonl` with no count, though
+  // `thimble state` gave the scope's 4,579 records (scope_total)
+  const w = world(on)
+  w.states.labels = [{ ...LABEL, glob: 'pages.jsonl', last_run: null, applications: [], label_stats: { n_labeled: 1900, counts: { none: 1800, 'proxy-link': 100 } }, scope_total: 4579 }] as never
+  const pane = await labelPanel($, w)
+  const text = shown(await pane.drawn())
+  expect(text).toContain('stopped at 1,900 of 4,579')
+  expect(text).toContain('run on all 4,579')
+  expect(text).toMatch(/scope:\s*4,579 records/)
+  await pane.unmount()
+})

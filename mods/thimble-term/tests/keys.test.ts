@@ -19,8 +19,9 @@
 //                                                              keys where it draws a list
 //   home's `… N more`                ↓ until it is chosen               Space and Enter show the section, the choice on
 //                                                              its first row shown then
-//   l, t                            a document, a label, home           the list in place of the step; t's threads take
-//                                                              the list's keys though the ring was on the key
+//   l, show all threads             a document, a label, home           the list in place of the step, the item it came
+//                                                              from chosen, b to home; the threads take the list's
+//                                                              keys though the ring was on the control; no `t`
 //   back                            a line chosen in a file, a thread   where the file or the form was opened from
 //                                   just asked
 //
@@ -750,10 +751,14 @@ test('keys · home · a section\'s `… N more` is a row ↑↓ reach; Enter or 
   expect(s.chosen).toContain('thread number')
 })
 
-test('keys · `l` and `t`: the list in place of the step that holds it, and the threads with their list\'s keys whatever the ring was on', async ($, on) => {
+test('keys · `l` and `show all threads`: the list in place of the step that holds it, the item `l` came from chosen and b back to home; the threads with their list\'s keys whatever the ring was on', async ($, on) => {
   // live check term-fix9, quirk 10: `l` pushed `home › documents › "…" › documents`; quirk 12: threads opened with `t`
-  // had no list keys, the ring on the pressed key
+  // had no list keys, the ring on the pressed key; live check term-fix10, new quirk 8: `l` chose the list's remembered
+  // row, and b returned to the step `l` replaced, not the home the path showed
   const w = world(on)
+  // a newer document and another label listed first, so the row `l` chooses is not the list's first
+  ;(w.states.docs as Record<string, unknown>).slides = { exists: true, title: 'Slides of the relay', renderer: 'slides', name: 'Slides', generated_at: '2026-10-07T10:00:00Z' }
+  w.states.labels.unshift({ ...(w.states.labels[0] as object), id: 'a0other0', name: 'another label' } as never)
   await start($, w)
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
   await w.clock.settle()
@@ -770,9 +775,10 @@ test('keys · `l` and `t`: the list in place of the step that holds it, and the 
   expect(await way()).toMatch(/home › documents(?! ›)/)
   await takesKeys($)
   expect((await seen($, SHORT, 'docs-list')).chosen).toContain('Agents used the dse wiki')
-  // back leads to the document
+  // back leads to home, as the path shows
   await type($, w, SHORT, 'b')
-  expect(await way()).toMatch(/home › documents › "Agents used/)
+  expect(await way()).toMatch(/^home(?! ›)/)
+  expect((await seen($, SHORT, 'home')).rows.join('\n')).toContain('Documents (2)')
   // a label's `l`
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
   await w.clock.settle()
@@ -780,15 +786,18 @@ test('keys · `l` and `t`: the list in place of the step that holds it, and the 
   await click($, w, SHORT, 'home', 'links through a fetch proxy', '█')
   await hotkey($, w, 'list')
   expect(await way()).toMatch(/home › labels(?! ›)/)
-  // `t` from home, its key pressed and the ring left on that key by Claude Code: the threads take the list's keys
+  await takesKeys($)
+  expect((await seen($, SHORT, 'labels-list')).chosen).toContain('links through a fetch proxy')
+  // `show all threads` from home, pressed and the ring left on it by Claude Code: the threads take the list's keys
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
   await w.clock.settle()
   await takesKeys($)
   const pane = await look($, SHORT)
-  await pane.press({ key: 'hk-threads' })
+  expect(await pane.find({ type: 'Button', key: 'hk-threads' })).toBeUndefined()
+  await pane.press({ key: 'threads' })
   await w.clock.settle()
   await pane.unmount()
-  await ring($, 'hk-threads')
+  await ring($, 'threads')
   await w.clock.advance(600)
   // the panel asks the ring onto the list's keys though a button holds it (term.ts giveKeys; this kit plays Claude
   // Code's move as it makes it)
@@ -798,6 +807,61 @@ test('keys · `l` and `t`: the list in place of the step that holds it, and the 
   named(s.hint, ['↑↓ to choose', 'x to close'])
   await down($, w)
   expect((await seen($, SHORT)).text).toMatch(/home › threads › (◌ )?"/)
+})
+
+test('keys · home · tall, scrolled: ↑ back to a section\'s first row shows its heading, and back to the first row shows the top', async ($, on) => {
+  // live check term-fix10, new quirk 5: after ↓ through a tall home, ↑ back to the first row left `↑ 4 more` and hid
+  // Views and the Documents heading
+  const w = world(on)
+  w.states.home = { ...w.states.home, views: [{ slug: 'board', name: 'Board', status: 'built', ts: '2026-10-07T02:00:00Z', files: ['board.jsonl'] }] } as never
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  const first = await seen($, TALL, 'home')
+  expect(first.rows.some(r => /↑ \d+ more/.test(r))).toBe(false)
+  let n = 0
+  for (; n < 30; n++) {
+    await down($, w)
+    if ((await seen($, TALL, 'home')).rows.some(r => /↑ \d+ more/.test(r))) break
+  }
+  // scrolled past the top; a few more rows down, then back up
+  await down($, w, 3)
+  for (let i = 0; i < n + 4; i++) {
+    await up($, w)
+    const s = await seen($, TALL, 'home')
+    const at = s.rows.findIndex(r => r.startsWith('❯'))
+    // the chosen row shows, and never right under `↑ N more`: the window starts at the row that leads it, its
+    // section's heading
+    expect(at).toBeGreaterThanOrEqual(0)
+    const more = s.rows.findIndex(r => /↑ \d+ more/.test(r))
+    if (more >= 0) expect(at).toBeGreaterThan(more + 1)
+  }
+  const back = await seen($, TALL, 'home')
+  expect(back.chosen).toBe(first.chosen)
+  expect(back.rows.some(r => /↑ \d+ more/.test(r))).toBe(false)
+  // the title, its rule, then the Views heading over the first row
+  expect(back.rows.slice(0, 4).map(r => r.trim())).toEqual(['Home', expect.stringMatching(/^─+$/), expect.stringMatching(/^Views \(1\)/), expect.stringMatching(/Board/)])
+})
+
+test('keys · home · a word typed while home holds the keys reaches the prompt whole: `t` opens no threads', async ($, on) => {
+  // live check term-fix10, new quirk 4 and the typing race (fb133749): `table` typed while home held the keys opened the
+  // threads at its `t`, and main's prompt got `able`
+  const w = world(on)
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  const pane = await look($, SHORT)
+  expect(await pane.find({ type: 'Button', key: 'hk-threads' })).toBeUndefined()
+  await pane.unmount()
+  await type($, w, SHORT, 't')
+  expect(w.filled).toEqual(['t'])
+  // home still: its sections, no threads panel's tree
+  const s = await seen($, SHORT, 'home')
+  expect(s.rows.join('\n')).toContain('Documents (')
+  expect(s.text).not.toMatch(/home › threads/)
+  expect(s.hint).toBe(UNFOCUSED_HINT)
 })
 
 test('keys · back after a line chosen in a file, and after a thread asked: where the file or the form was opened from', async ($, on) => {
