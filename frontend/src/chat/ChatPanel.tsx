@@ -6,8 +6,9 @@
 // it (PermissionCard). The composer sends where threads.composerTarget says, and while the agent a thread shows (or a
 // step's parent) runs and the browser can stop it, the composer's send square is its Stop (composerStopOf). A thread
 // whose run ended without a reply offers Ask again. Until an orientation was asked for, main's composer is the Start
-// gate (StartGate); a start that did not happen shows its card in main (OrientStart) and the gate comes back filled in.
-// While main runs outside thimble's fence, a banner says so (UnfencedBanner).
+// gate (StartGate), except while the product tour runs (lib/touring), whose orientation step draws its own; a start that
+// did not happen shows its card in main (OrientStart) and the gate comes back filled in. While main runs outside
+// thimble's fence, a banner says so (UnfencedBanner).
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -25,6 +26,7 @@ import { newest, STALE } from '../lib/newest'
 import { callRef, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
+import { useTouring } from '../lib/touring'
 import type { ChatMeta, ChatRecord, MainEffort, ModelConf, Proposal, SessionAlert, StartAnswer, Ticket } from '../lib/types'
 import { loadSettings, onSettingsChange } from '../lib/models'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
@@ -569,7 +571,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const orientIds = useMemo(() => chats.filter((m) => threadKind(m) === 'orient').map((m) => m.id), [chats])
   // New orientation, where the latest one cannot be continued: the gate opens in main though an orientation ran
   const [againGate, setAgainGate] = useState(false)
-  const showGate = startGateShown({ main: current === 'main', skipped, started, loading: main.loading, error: main.error, orientation: main.meta?.orientation, orientChats: orientIds.length, again: againGate })
+  const touring = useTouring()
+  const showGate = startGateShown({ main: current === 'main', skipped, started, loading: main.loading, error: main.error, orientation: main.meta?.orientation, orientChats: orientIds.length, again: againGate, tour: touring })
   // the orientation's record: Starting…, a start that did not happen, and the gate filled in again from it
   const orientRun = useOrientRun(ws, main.meta?.orientation)
   const restore = useMemo(() => restoreOf(orientRun.run), [orientRun.run])
