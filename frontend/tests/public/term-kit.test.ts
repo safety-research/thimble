@@ -53,6 +53,9 @@ describe('text', () => {
     expect(kit.wrap('one two three four five', 9)).toEqual(['one two', 'three', 'four five'])
     expect(kit.wrap('one two three four five six', 9, 2)).toEqual(['one two', 'three…'])
     expect(kit.num(14591)).toBe('14,591')
+    // a cut keeps the cells it is padded to, so the column after it keeps its place
+    expect(kit.pad('Brambleway API v3 migration guide', 20)).toBe('Brambleway API v3…  ')
+    expect(kit.padStart('Brambleway API v3 migration guide', 20)).toBe('  Brambleway API v3…')
     expect(kit.dur(130)).toBe('2m 10s')
     expect(kit.when(Date.UTC(2026, 4, 16, 4, 31) / 1000)).toBe('16 May 04:31')
     expect(kit.placeWords('alerts/x.jsonl#L12')).toBe('alerts/x.jsonl line 12')
@@ -207,6 +210,23 @@ describe('Color by', () => {
     void colour
   })
 
+  test('`other` with no records once the counts are in is left out, as a value with none is, unless one of its values is off', async () => {
+    init({ cols: 200 })
+    const colour = kit.colorBy({ fields: FIELDS })
+    kit.draw((d: any) => colour.draw(d))
+    colour.counts(Object.fromEntries(['fired', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((v, i) => [v, 20 - i])))
+    await tick()
+    expect(text()[0]).toContain('● other 27')
+    // a narrower fetch: the values past six have no records in it
+    colour.counts({ fired: 3, b: 2 })
+    await tick()
+    expect(text()[0]).toMatch(/● fired 3 {2}● b 2$/)
+    colour.toggle('g')
+    colour.counts({ fired: 3, b: 2 })
+    await tick()
+    expect(text()[0]).toContain('other 0')
+  })
+
   test('c opens the menu: Off, the fields, then the labels; under the chosen label its definition and a link to its panel; Enter colors by it', async () => {
     const colour = kit.colorBy({ fields: FIELDS })
     kit.draw((d: any) => colour.draw(d))
@@ -310,6 +330,85 @@ describe('the time range', () => {
     expect(ticks[0].label).toMatch(/^\d+ May \d\d:00$/)
     for (let i = 1; i < ticks.length; i++) expect(ticks[i].x - ticks[i - 1].x).toBeGreaterThanOrEqual(12)
     expect(ticks.some((t: any) => /^17 May/.test(t.label))).toBe(true)
+  })
+
+  test('with gap, an empty stretch longer than it is a break: each stretch takes its share of the cells, a break 4, drawn // on the strip and the axis', async () => {
+    // three bursts of 40 minutes, the second 2 hours after the first and the third the next morning
+    const burst = (t: number) => Array.from({ length: 41 }, (_, i) => t + i * 60)
+    const B = [T0 + 14 * 3600, T0 + 17 * 3600, T0 + 33 * 3600]
+    const ts = [...burst(B[0]!), ...burst(B[1]!), ...burst(B[2]!)]
+    init({ cols: 100 })
+    const range = kit.timeRange({ gap: 1200 })
+    range.data({ times: ts })
+    const sc = range.scale(100)
+    expect(sc.broken).toBe(true)
+    expect(sc.gaps()).toEqual([[31, 35], [66, 70]])
+    expect(sc.x(B[0])).toBe(0)
+    expect(sc.x(B[0]! + 2400)).toBe(30)
+    expect(sc.x(B[1])).toBe(35)
+    expect(sc.x(B[2]! + 2400)).toBe(99)
+    expect(sc.binOf(B[0]! + 3 * 3600)).toBeGreaterThanOrEqual(31)
+    // the first tick of each stretch gives its date
+    const ticks = sc.ticks(8)
+    expect(ticks.filter((t: any) => / \d\d:\d\d$/.test(t.label) && /May/.test(t.label)).map((t: any) => t.label)).toEqual(['16 May 14:00', '16 May 17:00', '17 May 09:00'])
+    kit.draw((d: any) => {
+      range.draw(d, { gutter: 0 })
+      kit.axis(d, range.scale(d.cols), { gap: 8 })
+    })
+    await tick()
+    const rows = text()
+    expect(rows[1].slice(2 + 31, 2 + 35)).toBe(' // ')
+    expect(rows[1].slice(2 + 66, 2 + 70)).toBe(' // ')
+    expect(rows[2].slice(2 + 32, 2 + 34)).toBe('//')
+    expect(rows[2]).toContain('17 May 09:00')
+    expect(last().lines[2].find((s: any) => s.s === '//').fg).toBe('subtle')
+    // a legend stands in the gutter before the ticks, cut to leave a gutter's space
+    kit.draw((d: any) => kit.axis(d, range.scale(d.cols - 12), { gutter: 12, gap: 8, legend: [{ s: '─', fg: 'subtle' }, { s: ' running  × failed', d: true }] }))
+    await tick()
+    expect(text()[0]).toMatch(/^ {2}─ running {4}16 May 14:00/)
+    expect(last().lines[0][1]).toMatchObject({ s: '─', fg: 'subtle' })
+    // a stretch with no room for a time and its date gives the date alone
+    init({ cols: 40 })
+    const narrow = kit.timeRange({ gap: 1200 })
+    narrow.data({ times: ts })
+    kit.draw((d: any) => kit.axis(d, narrow.scale(d.cols), { gap: 4 }))
+    await tick()
+    expect(text()[0].split(/\s+/).filter(Boolean)).toEqual(['16', 'May', '//', '16', 'May', '//', '17', 'May'])
+  })
+
+  test('data with no record keeps the span and its breaks, as the browser does, so the axis does not jump to 1970', () => {
+    const burst = (t: number) => Array.from({ length: 41 }, (_, i) => t + i * 60)
+    const range = kit.timeRange({ gap: 1200 })
+    range.data({ times: [...burst(T0), ...burst(T0 + 5 * 3600)] })
+    const span = range.span
+    range.data({ times: [] })
+    expect(range.span).toEqual(span)
+    expect(range.scale(80).broken).toBe(true)
+    expect(range.readout()).toMatch(/^16 May 00:00 – 05:40/)
+  })
+
+  test('on a broken scale an edge never stays in a break, and the keys move the window on the strip\'s cells', async () => {
+    const burst = (t: number) => Array.from({ length: 41 }, (_, i) => t + i * 60)
+    const B = [T0 + 14 * 3600, T0 + 17 * 3600, T0 + 33 * 3600]
+    const range = kit.timeRange({ gap: 1200 })
+    range.data({ times: [...burst(B[0]!), ...burst(B[1]!), ...burst(B[2]!)] })
+    kit.draw((d: any) => range.draw(d))
+    await tick()
+    // a range from inside the first break to inside the second: its start moves to the second burst, its end to its end
+    range.set(B[0]! + 3600, B[1]! + 4 * 3600)
+    expect(range.from).toBe(B[1])
+    expect(range.to).toBe(B[1]! + 2400)
+    // ] pans a quarter of the window's cells; the window keeps its cells across the break into the third burst
+    await key('-')
+    await key('-')
+    const before = [range.from, range.to]
+    await key(']')
+    expect(range.from).toBeGreaterThan(before[0]!)
+    expect(range.to).toBeGreaterThan(before[1]!)
+    for (const t of [range.from, range.to]) {
+      const inBreak = (t > B[0]! + 2400 && t < B[1]!) || (t > B[1]! + 2400 && t < B[2]!)
+      expect(inBreak).toBe(false)
+    }
   })
 })
 
@@ -455,6 +554,54 @@ describe('search and choices', () => {
     await key('return')
     expect(got).toEqual(['INC-312'])
     expect(text()).toEqual(['  incident  INC-312'])
+  })
+
+  test('a value\'s indent stands its menu row in, 2 cells a level, for a tree; the row shows its name alone', async () => {
+    const scope = kit.choice({ title: 'sessions', all: 'all', key: 's', values: [{ name: 'Run 1 · nested team', value: 'r:r1' }, { name: 'lead', value: 's:a', indent: 1 }, { name: 'survey', value: 's:b', indent: 2 }] })
+    kit.draw((d: any) => {
+      const r = d.row()
+      scope.add(r)
+      r.end()
+    })
+    await tick()
+    await key('s')
+    expect(text().slice(1)).toEqual(['❯ all', '  Run 1 · nested team', '    lead', '      survey'])
+    await key('down')
+    await key('down')
+    await key('down')
+    await key('return')
+    expect(scope.value).toBe('s:b')
+    expect(text()).toEqual(['  sessions  survey'])
+  })
+})
+
+describe('details', () => {
+  test('blocks: text as the record holds it, each line cut at the cell edge, code in the code color, at most max rows and then … N more, which a click opens', async () => {
+    init({ cols: 40, rows: 20 })
+    kit.draw((d: any) => kit.details(d, {
+      blocks: [
+        { text: 'pytest -q tests/client/test_http.py --tb=short', code: true },
+        { text: Array.from({ length: 6 }, (_, i) => `line ${i + 1}`).join('\n'), max: 3 },
+        { text: 'one\ntwo', max: 1 },
+        { text: '  \n' },
+      ],
+      facts: [['exit', 1]],
+    }))
+    await tick()
+    expect(text()).toEqual(['  pytest -q tests/client/test_http.py --t…', '  line 1', '  line 2', '  line 3', '  … 3 more', '  one', '  two', '  exit 1'])
+    expect(last().lines[0].find((s: any) => s.s.startsWith('pytest')).fg).toBe('permission')
+    await click('… 3 more')
+    expect(text().slice(1, 7)).toEqual(['  line 1', '  line 2', '  line 3', '  line 4', '  line 5', '  line 6'])
+  })
+
+  test('a place too long for its row beside ask about it drops its folders, so both show', async () => {
+    init({ cols: 60, rows: 4 })
+    const place = 'runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576/subagents/agent-a1e955cf.jsonl#L20'
+    kit.draw((d: any) => kit.details(d, { place, ask: { ref: place, text: 'x' } }))
+    await tick()
+    expect(text()[0]).toBe('  ↗ …/agent-a1e955cf.jsonl line 20  ask about it')
+    await click('agent-a1e955cf')
+    expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'open', ref: place })
   })
 })
 

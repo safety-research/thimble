@@ -37,7 +37,10 @@ load()
 [plugin/viewers/timeline/view.term.js](../plugin/viewers/timeline/view.term.js), a worked example the dev agent reads,
 draws what its `view.html` draws: the search, the incident and Color by in the top row, the time range over a lane per
 source, and the events by day, each opening in place. `thimble view text timeline --cwd <its sample> --width 120` draws
-it as text (below).
+it as text (below). [plugin/viewers/linked-sessions/view.term.js](../plugin/viewers/linked-sessions/view.term.js) draws
+runs of agent teams on one clock: the time range broken where the runs lie hours apart (`gap`), a lane per session
+under its run as a tree, a run folded to one lane where the panel is short, and each call opened in place with what came
+back (`blocks`).
 
 ## The program's life
 
@@ -107,7 +110,8 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
 
 - The row reads `Color by  Kind` and the chosen field's values as chips: `●` in the value's hue, its name, its count
   dim. A click on a chip turns the value off (`○`, dim) or on. Values past the sixth share one chip, `other`, with no
-  hue of their own; the records with no value have `no kind` (`not marked` for a label), with a dim mark.
+  hue of their own; the records with no value have `no kind` (`not marked` for a label), with a dim mark. A value with
+  no records in the reader's counts has no chip, `other` too, unless it is turned off.
 - `c`, or a click on the choice, opens the menu under the row: Off, the fields with their values, then every label
   over files with its values and its kind. Under the chosen row, what it is: a field's description, a label's kind and
   definition with `definition ↗`, which opens the label's panel. Enter colors by it.
@@ -144,10 +148,17 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
   selection background and the rest dim. It opens on the whole span.
 - A click on the strip moves the window there; a drag frames a new range, a drag from inside the window moves it, a drag
   from its edge moves that edge; `[` `]` pan by a quarter and `+` `-` zoom.
-- `range.data({times, values, span, marks})` gives it the records' times, their Color by values and the incidents or
+- `range.data({times, values, span, marks, gap})` gives it the records' times, their Color by values and the incidents or
   other point events; `range.has(t)`, `from`, `to`, `full`, `set(a, b)`, `set(null)`, `fit()` read and set it.
-- `range.scale(cols)` lays the range across a chart's cells: `x(t)`, `t(x)`, `binOf(t)`, `step`, `ticks(gap)`.
-- `axis(d, scale, {gutter, marks, onMark})` draws the chart's axis under it, and the marks' labels on a row of their own.
+- `gap` (an option of `timeRange` or of `data`): an empty stretch longer than it, in the units, is a break of 4 cells,
+  ` // `, on the strip and on the range's scale, so bursts hours apart (runs, sessions, shifts) share one axis and each
+  keeps its share of the cells. An edge of the range never stays in a break, and `[` `]` `+` `-` move the window on the
+  strip's cells, so it keeps its width across a break.
+- `range.scale(cols)` lays the range across a chart's cells: `x(t)`, `t(x)`, `binOf(t)`, `step`, `ticks(gap)`, and
+  `broken` and `gaps()` (each break's first cell and the cell after it), with the breaks that fall inside the range.
+- `axis(d, scale, {gutter, legend, marks, onMark})` draws the chart's axis under it, `//` at each break with the date on
+  the first label after it, `legend` (runs) in the gutter before the ticks as the key of the marks the chart draws other
+  than Color by's (`─ running  × failed`), and the marks' labels on a row of their own.
 - `strip(scale, items, {value, colour, max, guide})` is one row of a chart over time (a lane), `maxBin(scale,
   groups)` the height every lane shares, and `bar(n, max)` one cell's bar.
 
@@ -165,8 +176,11 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 - `columns(specs, cols)` lays out columns with 2-cell gutters (`{w}`, `{align: 'right'}`, `{grow: true}`):
   `cells(r, values, styles)` adds a row's values, and `header(r, names, {sorted, desc, onSort})` the names, dim, `▼`
   after the one sorted by, each a click that sorts; a list's `header(r)` stands above its rows and does not scroll.
-- `details(dd, {text, facts, groups, raw, place, ask})` draws a record's details: its words, its facts on one row, the
-  records it links to, its lines as the file holds them, `↗` and its place, and `ask about it`.
+- `details(dd, {text, blocks, facts, groups, raw, place, ask})` draws a record's details: its words, its blocks, its
+  facts on one row, the records it links to, its lines as the file holds them, `↗` and its place, and `ask about it`.
+  A block (`{text, code, max}`) is text as the record holds it, such as a command and what it printed, or a diff: each
+  line upright and cut at the cell edge, at most `max` rows (8) and then `… N more`, which a click opens; `code` draws
+  it in the code color (a command, a query, a path).
 - `onWheel(fn)` hears the wheel over the view, for a part of the program's own that scrolls.
 
 ## Search and choices
@@ -174,7 +188,9 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 `search({words, onChange})` adds `/ search` to a row: `/` or a click starts typing, and the panel's field then holds
 its text, each change of which reaches the search whole (Enter ends). A part of the program's own takes typing with
 `d.typing({text, onText, onKey})`. `choice({title, all, key, values, onChange})` adds `incident  all` to a row, whose menu
-picks one of its values.
+picks one of its values. A value is a string or `{name, value, right, indent}`: `right` stands dim against R in the menu,
+and `indent` stands its menu row in by 2 cells a level, for a tree such as runs and their sessions; the row shows the
+chosen value's name alone.
 
 ## Acts
 
