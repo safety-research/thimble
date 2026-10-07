@@ -347,7 +347,8 @@ describe("a long list's two tracks", () => {
         const l = document.getElementById('list')!
         l.scrollTop = x * (l.scrollHeight - l.clientHeight)
       }, f)
-      await page.waitForTimeout(80)
+      // a jump: the tracks glide there, then stand still
+      await page.waitForTimeout(350)
       const s = await tracks(frame)
       return { lens: (s.lens.top + 3 - s.zoomBox.top) / (s.zoomBox.height - (s.lens.height - 6)), frame: (s.thumb.top - s.whole.top) / (s.whole.height - s.thumb.height), s }
     }
@@ -369,8 +370,8 @@ describe("a long list's two tracks", () => {
           const l = document.getElementById('list')!
           l.scrollTop = x * (l.scrollHeight - l.clientHeight)
         }, f)
-        // the tracks go onto the pixel grid once they have stood still a few frames
-        await page.waitForTimeout(200)
+        // a jump: the tracks glide there, and go onto the pixel grid once they have stood still a few frames
+        await page.waitForTimeout(350)
         const s = await tracks(frame)
         const tol = 0.5 / dpr + 1e-6
         const on = (v: number) => Math.abs(v * dpr - Math.round(v * dpr)) < 1e-3

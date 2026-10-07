@@ -5,7 +5,8 @@
 // scroll. In the frames where the pointer moved (or the list scrolled) the frame and the lens move too, never standing
 // still to jump after (a step more than twice their share of the move and a pixel), the reader's records follow the
 // drag rather than a page at a time, and a frame that draws only the tracks takes under 16 ms. Each run logs its
-// numbers: the frames that moved, the largest step, and the frames' times.
+// numbers: the frames that moved, the largest step, and the frames' times. A click a pixel or two off a lone record
+// that Color by colors snaps to it: the reader goes there and chooses it, in Files and in the kit.
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import assert from 'node:assert/strict'
@@ -28,8 +29,11 @@ beforeAll(async () => {
       `const DELAY = Number(new URLSearchParams(location.search).get('delay') || 20)`,
       `const MODE = new URLSearchParams(location.search).get('mode') || 'table'`,
       `localStorage.setItem('thimble:ws:viewOf:events.jsonl', JSON.stringify(MODE))`,
+      // with ?lone=N every record is said by "plain" but record N, said by "orange", which Color by colors alone
+      `const LONE = Number(new URLSearchParams(location.search).get('lone') || 0)`,
+      `const who = (i) => (LONE ? (i === LONE ? 'orange' : 'plain') : 'Agent' + (i % 4))`,
       `const said = (i) => 'message ' + i + ' ' + 'lorem ipsum dolor sit amet '.repeat(1 + (i * 7) % 5)`,
-      `const rec = (i) => MODE === 'transcript' ? { line: i, record: { time: '2026-06-18T20:' + String(i % 60).padStart(2, '0') + ':00Z', speaker: 'Agent' + (i % 4), text: said(i) }, blocks: [{ kind: 'text', text: said(i) }], meta: {} } : { line: i, record: { event_id: 'save:dse~Page' + (i % 997) + '@' + i, event_type: i % 5 ? 'save' : 'request', wiki: 'dse', page: 'Page' + (i % 997), page_key: 'dse~Page' + (i % 997), time: '2026-06-18T20:' + String(i % 60).padStart(2, '0') + ':00Z' }, blocks: [], meta: {} }`,
+      `const rec = (i) => MODE === 'transcript' ? { line: i, record: { time: '2026-06-18T20:' + String(i % 60).padStart(2, '0') + ':00Z', speaker: who(i), text: said(i) }, blocks: [{ kind: 'text', text: said(i) }], meta: {} } : { line: i, record: { event_id: 'save:dse~Page' + (i % 997) + '@' + i, event_type: i % 5 ? 'save' : 'request', wiki: 'dse', page: 'Page' + (i % 997), page_key: 'dse~Page' + (i % 997), time: '2026-06-18T20:' + String(i % 60).padStart(2, '0') + ':00Z' }, blocks: [], meta: {} }`,
       `const hint = MODE === 'transcript' ? { transcript: { format: 'messages', score: 0.95, keys: { speaker: 'speaker', text: 'text', time: 'time' } } } : {}`,
       `const page = (a, b) => { const out = []; for (let i = Math.max(1, a); i <= Math.min(TOTAL, b); i++) out.push(rec(i)); return { path: 'events.jsonl', kind: MODE === 'transcript' ? 'text' : 'events', total_lines: TOTAL, start: Math.max(1, a), records: out, ...hint } }`,
       `w.__asks = []`,
@@ -38,7 +42,7 @@ beforeAll(async () => {
       `  if (p.endsWith('/source/around')) { const l = +s.get('line'); w.__asks.push(['around', l, performance.now()]); return page(l - +s.get('before'), l + +s.get('after')) }`,
       `  if (p.endsWith('/source/lines')) return { path: 'events.jsonl', total_lines: TOTAL, estimated: false, indexed: 1 }`,
       `  if (p.endsWith('/source')) { const a = +s.get('start'); w.__asks.push(['page', a, performance.now()]); return page(a, a + +s.get('count') - 1) }`,
-      `  if (p.endsWith('/source/keys')) return { path: 'events.jsonl', total: TOTAL, bins: 0, partial: false, bytes: [], keys: [] }`,
+      `  if (p.endsWith('/source/keys')) return { path: 'events.jsonl', total: TOTAL, bins: LONE ? 1000 : 0, partial: false, bytes: [], keys: LONE ? [{ key: 'speaker', values: [{ value: 'plain', n: TOTAL - 1 }, { value: 'orange', n: 1 }], more: { values: 0, n: 0 }, none: 0, at: Array.from({ length: 1000 }, (_, b) => (b === Math.floor(((LONE - 1) / TOTAL) * 1000) ? 1 : 0)) }] : [] }`,
       `  return null`,
       `}`,
       `w.fetch = async (url, init) => {`,
@@ -267,11 +271,11 @@ const KIT_TOKENS =
   '--text-primary:#000;--text-secondary:#4a4844;--text-tertiary:#726f69;--accent:#5135ff;--radius-chip:4px;--radius-ui:6px;' +
   '--h-row:28px;--control-sm:28px;--h-control:24px;--h-chip:20px;--text-xs:12px;--text-ui-sm:12px;--text-mono-sm:11px;--border-subtle:rgba(27,26,24,0.12);' +
   '--border-hairline:rgba(27,26,24,0.08);--font-body:sans-serif;--font-mono:monospace}'
-const KIT_VIEW = () => `<!doctype html><html><head><style>${KIT_TOKENS} body{margin:0;font:12px sans-serif;background:#fffdf8} .top{display:flex;align-items:center;gap:8px;padding:8px}
+const KIT_VIEW = (n = 3000) => `<!doctype html><html><head><style>${KIT_TOKENS} body{margin:0;font:12px sans-serif;background:#fffdf8} .top{display:flex;align-items:center;gap:8px;padding:8px}
 #list{height:520px;overflow:auto} .msg{box-sizing:border-box;height:30px;padding:6px 8px 0 12px}</style>${KIT()}</head><body>
 <div class="top"><span id="colour"></span></div><div id="list"></div>
 <script>
-const rows = Array.from({ length: 3000 }, (_, i) => ({ kind: (i * 7) % 11 < 3 ? 'With links' : 'Text only', ref: 'm.jsonl#L' + (i + 1) }))
+const rows = Array.from({ length: ${n} }, (_, i) => ({ kind: (i * 7) % 11 < 3 ? 'With links' : 'Text only', ref: 'm.jsonl#L' + (i + 1) }))
 window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list', onChange: draw })
 function draw() {
   document.getElementById('list').innerHTML = rows.map((r) => '<div class="msg" data-anchor="' + r.ref + '"' + colour.attr(r) + '>message ' + r.ref.slice(9) + '</div>').join('')
@@ -371,3 +375,74 @@ for (const [name, engine] of ENGINES) {
     await browser.close()
   })
 }
+
+// ---------------------------------------------------------------- a click snaps to a thin patch of color
+/** The y, in the page, of the overview's middle device row in a color unlike the track's first row's, and how many rows
+ * it spans: where the lone record is drawn. */
+const lonePatch = (f: import('playwright').Frame, canvas: string) =>
+  f.evaluate((sel) => {
+    const cv = document.querySelector(sel) as HTMLCanvasElement
+    const data = cv.getContext('2d')!.getImageData(cv.width - 2, 0, 1, cv.height).data
+    const px = (y: number) => Array.from(data.slice(y * 4, y * 4 + 4)).join(',')
+    const ground = px(Math.floor(cv.height / 4))
+    const odd: number[] = []
+    for (let y = 0; y < cv.height; y++) if (data[y * 4 + 3] > 0 && px(y) !== ground) odd.push(y)
+    const r = cv.getBoundingClientRect()
+    const dpr = window.devicePixelRatio || 1
+    return odd.length ? { y: r.top + (odd[0] + odd[odd.length - 1] + 1) / 2 / dpr, rows: odd.length, x: r.right - 3 } : null
+  }, canvas)
+
+for (const [name, engine] of ENGINES) {
+  test(`${name}, Files: a click two pixels off a lone colored record snaps to it, and the reader goes there and chooses it`, async (ctx) => {
+    if (!runs.get(name)) return ctx.skip()
+    const { browser, page } = await open(engine, '?mode=transcript&lone=9001')
+    await page.waitForFunction(() => document.querySelector('.reader-colorbar') != null)
+    await page.waitForTimeout(400)
+    const patch = await lonePatch(page.mainFrame(), '.track-over canvas')
+    assert.ok(patch, 'the overview draws the lone record in its color')
+    for (const off of [2, -2]) {
+      // away from it first
+      await page.mouse.click(patch.x, patch.y - 200)
+      await page.waitForTimeout(500)
+      assert.equal(await page.locator('.reader-card[data-line="9001"]').count(), 0, 'the lone record is not in the reader before the click')
+      await page.mouse.click(patch.x, patch.y + off)
+      await page.waitForSelector('.reader-card.reader-target[data-line="9001"]', { timeout: 5000 })
+      await page.waitForTimeout(300)
+      const seen = await page.evaluate(() => {
+        const body = document.querySelector('.reader-body')!.getBoundingClientRect()
+        const card = document.querySelector('.reader-card[data-line="9001"]')!.getBoundingClientRect()
+        return { ok: card.bottom > body.top + 8 && card.top < body.bottom - 8, card: [card.top, card.bottom], body: [body.top, body.bottom] }
+      })
+      assert.ok(seen.ok, `a click ${off}px off the record scrolls it into view: ${JSON.stringify(seen)}`)
+    }
+    await browser.close()
+  })
+
+  test(`${name}, the kit's strip: a click two pixels off a lone colored record snaps to it, and the list goes there and chooses it`, async (ctx) => {
+    if (!runs.get(name)) return ctx.skip()
+    const browser = await engine.launch({ headless: true })
+    const page = await browser.newPage({ viewport: { width: 900, height: 700 }, deviceScaleFactor: 2 })
+    // 200 records, so that one record has rows of the overview to itself
+    await page.setContent(KIT_VIEW(200).replace("(i * 7) % 11 < 3 ? 'With links' : 'Text only'", "i === 120 ? 'With links' : 'Text only'"))
+    await page.waitForSelector('.thimble-colour-lens', { state: 'attached' })
+    await page.waitForTimeout(400)
+    const patch = await lonePatch(page.mainFrame(), '.thimble-colour-whole canvas')
+    assert.ok(patch, 'the overview draws the lone record in its color')
+    for (const off of [2, -2]) {
+      await page.evaluate(() => (document.getElementById('list')!.scrollTop = 0))
+      await page.waitForTimeout(200)
+      await page.mouse.click(patch.x, patch.y + off)
+      await page.waitForTimeout(300)
+      const got = await page.evaluate(() => {
+        const list = document.getElementById('list')!.getBoundingClientRect()
+        const el = document.querySelector('[data-anchor="m.jsonl#L121"]')!
+        const r = el.getBoundingClientRect()
+        return { seen: r.top >= list.top && r.bottom <= list.bottom, chosen: el.hasAttribute('data-thimble-snap') }
+      })
+      assert.ok(got.seen, `a click ${off}px off the record scrolls it into view`)
+      assert.ok(got.chosen, 'and chooses it')
+    }
+    await browser.close()
+  })
+}
+

@@ -23,7 +23,7 @@ import { useScrollAnchor } from './anchor'
 import { ReaderLabelsContext, useReaderLabels } from './marks'
 import { findColumn, rulerColumns, useRuler, type RulerTick, type Seen, type Shown } from './Ruler'
 import { ColorBy } from './ColorBy'
-import { keyColor, KEY_COLORS, OTHER, recordObject } from './colorChoice'
+import { keyColor, KEY_COLORS, keyValue, OTHER, recordObject } from './colorChoice'
 import { ColorContext } from './colorContext'
 import { labelPaint, PlaceFeed, ReaderTracks, ZOOM_SPAN, type DrawnRecord, type OverviewPaint, type PreviewRecord } from './Tracks'
 import { useColorBy } from './useColorBy'
@@ -55,6 +55,8 @@ const AHEAD_NEAR = 120
 const AHEAD_READ = 240
 const AHEAD_BEHIND = 40
 const AHEAD_MAX = 3000
+/** the records of a patch's first lines a click on the overview reads for the first in the patch's value, at most */
+const SNAP_LINES = 250
 /** ms between the records a held drag of the frame shows from what it read ahead: every other frame at least, and at
  * most DRAG_SHOW_MAX_MS twice over where drawing them takes longer than a frame */
 const DRAG_SHOW_MS = 30
@@ -1266,6 +1268,41 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     },
     [markLines, on, workspace, path],
   )
+  // a click near a patch of color on the overview goes to the first record of the patch's value on the lines where the
+  // patch starts (read from the server: a key's value from the records, a label's from its rows), and chooses it as the
+  // find does; the first of those lines when none is found
+  const snapTo = (from: number, to: number, value: number) => {
+    const land = (line: number | null) => goTo(line ?? from, 'ruler')
+    if (colorChoice.by === 'key') {
+      const k = color.keys?.keys.find((x) => x.key === colorChoice.key)
+      if (!k) return land(from)
+      const inValue = (rec: SourceRecord) => {
+        const v = keyValue(rec, k.key)
+        if (v == null) return false
+        const rank = k.values.findIndex((x) => x.value === v)
+        return value < KEY_COLORS ? rank === value : rank < 0 || rank >= KEY_COLORS
+      }
+      void api
+        .source(workspace, path, from, Math.min(SNAP_LINES, to - from + 1))
+        .then((p) => land(p.records.find(inValue)?.line ?? null))
+        .catch(() => land(null))
+      return
+    }
+    const k = colorChoice.by === 'label' ? lanes.find((x) => x.id === colorChoice.id) : undefined
+    const name = k ? classesOf(k).filter((c) => c.highlight)[value]?.name : undefined
+    if (!k || name == null) return land(from)
+    void scaleApi
+      .labelsForLines(workspace, path, from, to)
+      .then((list) => {
+        let line: number | null = null
+        for (const r of list.find((g) => g.concept_id === k.id)?.rows ?? []) {
+          const l = Number(/#L(\d+)$/.exec(r.ref)?.[1])
+          if (l >= from && l <= to && litClass(k, valueOf(r))?.name === name && (line == null || l < line)) line = l
+        }
+        land(line)
+      })
+      .catch(() => land(null))
+  }
   // a click on a mark goes to its record, or to the middle of its lines when none is found; a label over files' mark
   // stands for the whole file and goes nowhere
   const onMark = (column: string, tick: RulerTick) => {
@@ -1400,7 +1437,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
                 {moreRight && <div className="reader-edge" aria-hidden />}
               </div>
               {!isDatabase && !binary && (
-                <ReaderTracks total={total} feed={feed} paint={paint} markers={markers} colorOf={zoomColor} onJump={jump} onSeek={seek} onScrollBy={scrollBy} onMark={onMark} preview={preview} />
+                <ReaderTracks total={total} feed={feed} paint={paint} markers={markers} colorOf={zoomColor} onSnap={snapTo} onJump={jump} onSeek={seek} onScrollBy={scrollBy} onMark={onMark} preview={preview} />
               )}
             </div>
           </>

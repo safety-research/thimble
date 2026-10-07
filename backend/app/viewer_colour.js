@@ -85,11 +85,13 @@
   var ZOOM_SPAN = 5 // the zoomed track holds this many heights of the part in view
   var FADE = 0.3 // the zoomed track's colours beyond the part in view, as a share of their strength
   var MIN_MARK = 2 // px, a mark's least height on a track
-  var HIT = 3 // px either side of a mark within which a click goes to its record
+  var SNAP_PX = 4 // px either side of a click on the overview within which it snaps to a thin patch of colour
+  var THIN_PX = 8 // px a patch of colour may be tall at most to be thin: a click in a taller one goes where it is clicked
   var THUMB_MIN = 8 // px, the least height of the box around the part in view
   var DRAG_PX = 3 // px the pointer moves before a press on a track becomes a drag
   var GLIDE_MS = 160 // ms the tracks take to go from where a drag left them to the list's place
   var SETTLE_MS = 60 // ms the tracks stay still before every edge on them goes onto the device's pixel grid
+  var JUMP_PX = 12 // px the frame moves at once, with nothing held, past which the tracks glide to the list's new place
   var PEEK = 6 // records the hover preview lists
   var MAX_KEPT = 200 // values whose colour is kept per field
   var DEF_FOR = 60000 // ms what a label's values mean is kept before it is asked for again
@@ -1363,8 +1365,9 @@
   // finer scale, its colours faded beyond the part in view, which lies under a lens (a raised box of the paper, framed),
   // and two lines join the frame's top and bottom to the lens's. The zoomed track's span follows the view, the lens as
   // far down it as the frame is down the overview, so that the two move together. Hovering the overview shows the
-  // records there in a preview, without scrolling; a click on it goes there, a click on a mark to its record, and a drag
-  // of the frame, or from where a press sent it, scrubs. A drag on the zoomed track scrolls the list at its scale, as a
+  // records there in a preview, without scrolling; a click on it goes there, a click within SNAP_PX of a thin patch of
+  // a colour to the patch's first record, which it highlights for a moment, and a drag of the frame, or from where the
+  // press was, scrubs. A drag on the zoomed track scrolls the list at its scale, as a
   // scrollbar's thumb: the lens follows the pointer over records that hold still, a press off the lens brings it there
   // first, and let go it glides back to where the frame puts it. A wheel over them scrolls the list. The tracks move in
   // the browser's animation frames with transforms alone, and go onto the device's pixel grid once still. `rows`, for a list
@@ -1706,6 +1709,12 @@
       }
       return best || (got[g] ? g : null)
     }
+    // the overview keeps each row's colour, for a click to snap to
+    if (t === this.whole) {
+      var kept = new Array(Hp)
+      for (var kr = 0; kr < Hp; kr++) kept[kr] = colourAt(kr)
+      this.rowColours = kept
+    }
     var y = 0
     while (y < Hp) {
       var c0 = blank(y) ? null : colourAt(y)
@@ -1781,6 +1790,12 @@
     }
     var g = this.geom()
     if (hold.lens != null) hold.lens = g.vTop
+    // a jump of the list (a click, a record gone to) with nothing held, past twice the part in view at once where a
+    // scroll goes by frames: the tracks glide there
+    var d0 = this.drawn
+    var jumped = this.lastV0 != null && Math.abs(g.v[0] - this.lastV0) > 2 * (g.v[1] - g.v[0])
+    this.lastV0 = g.v[0]
+    if (jumped && !hold.glide && hold.frame == null && hold.lens == null && d0 && Math.abs(d0.frameTop - g.frameTop) > JUMP_PX) hold.glide = { at: now, frameTop: d0.frameTop, vTop: d0.vTop }
     var shown = g
     if (hold.glide) {
       var e = Math.min(1, (now - hold.glide.at) / GLIDE_MS)
@@ -1867,23 +1882,58 @@
     var span = onZoom ? this.zspan || [0, 1] : [0, 1]
     return { track: t, y: y, x: e.clientX - r.left, at: span[0] + (y / h) * (span[1] - span[0]), span: span }
   }
-  Strip.prototype.recAt = function (p) {
-    var h = this.h || 1
-    var sw = p.span[1] - p.span[0]
-    var best = null
-    var bd = Infinity
-    for (var i = 0; i < this.recs.length; i++) {
-      var t = this.recs[i]
-      if (!t[2]) continue
-      var y0 = ((t[0] - p.span[0]) / sw) * h
-      var y1 = Math.max(((t[1] - p.span[0]) / sw) * h, y0 + MIN_MARK)
-      var d = p.y < y0 ? y0 - p.y : p.y > y1 ? p.y - y1 : 0
-      if (d <= HIT && d <= bd) {
-        best = t
-        bd = d
+  // the record a click on the overview snaps to: of the runs of rows in one colour (not the grey of no value) at most
+  // THIN_PX tall that come within SNAP_PX of the click, the nearest, the upper on a tie; its first record of that
+  // colour from where the run starts. Null when none does: a click in a taller patch, or far from any, goes where it is
+  Strip.prototype.snapAt = function (p) {
+    var rows = this.rowColours
+    if (p.track !== this.whole || !rows || !rows.length) return null
+    var dpr = window.devicePixelRatio || 1
+    var g = this.grey
+    var n = rows.length
+    var at = Math.max(0, Math.min(n - 1, Math.floor(p.y * dpr)))
+    var reach = Math.round(SNAP_PX * dpr)
+    var thin = Math.round(THIN_PX * dpr)
+    var best = -1
+    var bestD = Infinity
+    var r = Math.max(0, at - reach)
+    while (r > 0 && rows[r] && rows[r - 1] === rows[r]) r--
+    while (r < n && r <= at + reach) {
+      var c = rows[r]
+      var end = r + 1
+      while (end < n && rows[end] === c) end++
+      if (c && c !== g && end - r <= thin) {
+        var d = at < r ? r - at : at >= end ? at - end + 1 : 0
+        if (d <= reach && d < bestD) {
+          best = r
+          bestD = d
+        }
       }
+      r = end
     }
-    return best
+    if (best < 0) return null
+    var colour = rows[best]
+    var from = best / n
+    for (var i = 0; i < this.recs.length; i++) {
+      var rc = this.recs[i]
+      if (rc[2] === colour && rc[1] > from) return rc
+    }
+    return null
+  }
+  // a record a click snapped to: scrolled to, and an element of the page shown as chosen for a moment
+  Strip.prototype.choose = function (t) {
+    this.go(t)
+    var el = typeof t[3] === 'number' ? null : t[3]
+    if (!el || !el.setAttribute) return
+    el.setAttribute('data-thimble-snap', '')
+    clearTimeout(this.chosenTimer)
+    if (this.chosen && this.chosen !== el) this.chosen.removeAttribute('data-thimble-snap')
+    this.chosen = el
+    var self = this
+    this.chosenTimer = setTimeout(function () {
+      el.removeAttribute('data-thimble-snap')
+      if (self.chosen === el) self.chosen = null
+    }, 1600)
   }
   Strip.prototype.go = function (t) {
     var box = this.box
@@ -1947,14 +1997,17 @@
     this.drag = null
     this.el.removeAttribute('data-drag')
     if (!d) return
-    if (d.track === this.whole && !d.moved && !d.onThumb) {
-      // a click: on a mark, its record; elsewhere the frame's middle comes under the pointer
+    if (d.track === this.whole && !d.moved) {
+      // a click: near a patch of colour, the first record of the patch; elsewhere off the frame, the frame's middle comes
+      // under the pointer
       var p = this.at(e)
-      var t = this.recAt(p)
-      if (t) this.go(t)
-      else {
-        this.holdFrame(p.y - d.dy)
-        this.place(typeof performance !== 'undefined' ? performance.now() : Date.now())
+      var t = this.snapAt(p)
+      if (t) this.choose(t)
+      else if (!d.onThumb) {
+        var g = this.drawn || this.geom()
+        var room = Math.max(1e-9, (this.h || 0) - g.frameH)
+        var box = this.box
+        box.scrollTop = Math.max(0, Math.min(1, (p.y - d.dy) / room)) * Math.max(0, box.scrollHeight - box.clientHeight)
       }
     }
     if (this.hold.seek) this.place(typeof performance !== 'undefined' ? performance.now() : Date.now())

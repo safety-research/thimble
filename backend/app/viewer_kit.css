@@ -911,6 +911,19 @@ select.field {
 .thimble-colour-strip[data-drag] .thimble-colour-zoom .thimble-colour-thumb {
   border-color: rgba(var(--ink-rgb), 0.8);
 }
+/* the record a click on the overview snapped to, highlighted for a moment as a followed ref's record is */
+[data-thimble-snap] {
+  animation: thimble-snap 1.5s ease-out forwards;
+}
+@keyframes thimble-snap {
+  0%,
+  30% {
+    background-color: var(--hl-bg, rgba(255, 214, 0, 0.32));
+  }
+  100% {
+    background-color: transparent;
+  }
+}
 /* the lines from the frame's top and bottom to the lens's, and the wedge between them */
 .thimble-colour-link {
   position: absolute;

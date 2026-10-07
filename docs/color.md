@@ -126,8 +126,10 @@ load()
   the frame's top and bottom to the lens's. The lens stands as far down the zoomed track as the frame stands down the
   overview, so the two move together.
 - Hovering the overview shows the records under the pointer in a preview, each a row with its color as a bar on its
-  left edge, its time and first line, without scrolling. A click on the overview sends the frame there (a click on a
-  mark, to its record), and a drag of the frame, or from where a press sent it, scrubs the list.
+  left edge, its time and first line, without scrolling. A click on the overview sends the frame there, its middle
+  under the pointer; a click within 4 px of a thin patch of a color (8 px tall at most, such as a lone record of a
+  value) snaps to it: the list goes to the patch's first record and highlights it for a moment. A press becomes a drag
+  once the pointer moves 3 px, and a drag of the frame, or from where the press was, scrubs the list.
 - A drag on the zoomed track scrolls the list at the zoomed track's scale, as a scrollbar's thumb does: the lens
   follows the pointer over records that hold still, and a pixel of the track is a few of the list. A press off the lens
   brings the lens there first. Let go, the lens glides back to where the frame puts it.

@@ -8,8 +8,11 @@
 // first match on a click (a marker lane of another kind is drawn in grey, never in a color). Over the lane, a dark
 // frame exactly as wide as the track outlines what the reader shows; a drag of it scrubs the reader, a click elsewhere
 // on the track sends the frame there, and a drag from there scrubs on (a press moves nothing until the pointer has moved
-// DRAG_PX or let go). Hovering the track shows, beside it, the first records at that point of the file (their index,
-// who and when, their first lines), as a video scrubber's hover shows its frame, without scrolling.
+// DRAG_PX or let go). A click within SNAP_PX of a thin patch of a color (THIN_PX tall at most, a lone record of a value
+// that the overview shows) snaps to it: the reader goes to the patch's first record and chooses it as the find does.
+// Hovering the track shows, beside it, the first records at that point of the file (their index, who and when, their
+// first lines), as a video scrubber's hover shows its frame, without scrolling. A jump of the reader (a click, the find)
+// makes the tracks glide to its new place.
 //
 // The zoomed track, at the outer edge, magnifies the frame: the stretch of the reader around what it shows, larger,
 // each record a block of its height in its color, grey with Color by off, past what the reader shows faded. What the
@@ -290,6 +293,56 @@ export const lineAt = (f: number, total: number): number => Math.max(1, Math.min
 /** Per device pixel row of a track `h` rows tall, the bin of `bins` it shows. Pure. */
 export const binOfRow = (y: number, h: number, bins: number): number => Math.max(0, Math.min(bins - 1, Math.floor(((y + 0.5) / h) * bins)))
 
+/** px either side of a click on the overview within which it snaps to a thin patch of color, and the most a patch may
+ * be tall to be thin: a click in a taller patch goes where it is clicked */
+export const SNAP_PX = 4
+export const THIN_PX = 8
+
+/** Per device pixel row of an overview `rows` tall, the value its paint colors the row in (a key's rank, a label's
+ * value), as the overview draws it; -1 for a row in no value, in grey or in a value turned off. Pure. */
+export function rowValues(paint: OverviewPaint, rows: number): Int32Array {
+  const out = new Int32Array(Math.max(0, rows)).fill(-1)
+  if (paint.kind === 'bins' && paint.at.length) {
+    for (let y = 0; y < rows; y++) {
+      const r = paint.at[binOfRow(y, rows, paint.at.length)]
+      if (r >= 0 && paint.colors[Math.min(r, paint.colors.length - 1)] && !paint.faded[Math.min(r, paint.faded.length - 1)]) out[y] = r
+    }
+  } else if (paint.kind === 'counts' && paint.counts.length) {
+    const at = majorityRows(paint.counts, rows)
+    for (let y = 0; y < rows; y++) if (at[y] >= 0 && !paint.faded[at[y]]) out[y] = at[y]
+  }
+  return out
+}
+
+/** The patch of color a click at device row `y` of an overview snaps to: of `values` (rowValues), the runs of rows in
+ * one value at most `thin` rows tall that come within `reach` rows of the click, the nearest (the upper on a tie), as
+ * its first row and its value. Null when none does: a click in a taller patch, or far from any, goes where it is.
+ * Pure. */
+export function snapPatch(values: ArrayLike<number>, y: number, reach: number, thin: number): { row: number; value: number } | null {
+  const n = values.length
+  if (!n) return null
+  const at = Math.max(0, Math.min(n - 1, Math.floor(y)))
+  let best: { row: number; value: number } | null = null
+  let bestD = Infinity
+  let r = Math.max(0, at - reach)
+  // from the start of the run the window's first row stands in
+  while (r > 0 && values[r] >= 0 && values[r - 1] === values[r]) r--
+  while (r < n && r <= at + reach) {
+    const v = values[r]
+    let end = r + 1
+    while (end < n && values[end] === v) end++
+    if (v >= 0 && end - r <= thin) {
+      const d = at < r ? r - at : at >= end ? at - end + 1 : 0
+      if (d <= reach && d < bestD) {
+        best = { row: r, value: v }
+        bestD = d
+      }
+    }
+    r = end
+  }
+  return best
+}
+
 const MARKER_LANES: LaneGeometry = {
   lane: MARKER_PX,
   gap: MARKER_GAP_PX,
@@ -431,6 +484,9 @@ interface TracksProps {
   /** a record's color on the zoomed track and what its hover says */
   colorOf?: (line: number) => { color: string | null; title: string }
   onJump: (fraction: number) => void
+  /** a click on the overview snapped to a patch of color: go to the first record in `value` (a key's rank, a label's
+   * value, as the paint gives them) on lines `from` to `to`, where the patch starts */
+  onSnap?: (from: number, to: number, value: number) => void
   /** the fraction of the file at the reader's top to go to; `held` while the pointer still holds the frame */
   onSeek: (fraction: number, held: boolean) => void
   /** scroll the reader by `px`; how far it went */
@@ -449,6 +505,8 @@ const GLIDE_MS = 160
 const SETTLE_MS = 60
 /** ms a released frame waits for the reader to move before it goes where the reader stands */
 const RELEASE_MS = 400
+/** px the frame moves at once, with nothing held, past which the tracks glide to the reader's new place */
+const JUMP_PX = 12
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3)
 
 /** The parts the tracks' animation frame moves: what it wrote last, so that it writes only what changed. */
@@ -460,7 +518,7 @@ interface Written {
   layer: number
 }
 
-export function ReaderTracks({ total, feed, paint, markers, colorOf, onSeek, onScrollBy, onMark, preview }: TracksProps) {
+export function ReaderTracks({ total, feed, paint, markers, colorOf, onSnap, onSeek, onScrollBy, onMark, preview }: TracksProps) {
   const over = useRef<HTMLDivElement>(null)
   const zoomEl = useRef<HTMLDivElement>(null)
   const frameEl = useRef<HTMLDivElement>(null)
@@ -520,6 +578,8 @@ export function ReaderTracks({ total, feed, paint, markers, colorOf, onSeek, onS
     adj: 0,
     /** inside a call to the reader, which may publish its place at once: that waits for the next frame */
     busy: false,
+    /** the share of the file above the reader's top when last drawn, to tell a jump from a scroll */
+    top: null as number | null,
     /** the geometry last drawn, and whether on the pixel grid */
     drawn: null as TrackGeom | null,
     written: null as Written | null,
@@ -621,6 +681,12 @@ export function ReaderTracks({ total, feed, paint, markers, colorOf, onSeek, onS
       calls.current.onSeek(g.f * Math.max(0, 1 - now$.height), true)
       s.busy = false
     }
+    // a jump of the reader (a click, the find, a link) with nothing held, past twice what it shows of the file at once
+    // where a scroll goes by frames: the tracks glide there
+    const d0 = s.drawn
+    const jumped = s.top != null && Math.abs(now$.top - s.top) > 2 * now$.height
+    s.top = now$.top
+    if (jumped && !s.glide && s.frame == null && s.lens == null && d0 && Math.abs(d0.frameTop - g.frameTop) > JUMP_PX) s.glide = { at: now, frame: d0.frameTop, vTop: d0.vTop }
     let shown = g
     if (s.glide) {
       const e = ease((now - s.glide.at) / GLIDE_MS)
@@ -742,15 +808,31 @@ export function ReaderTracks({ total, feed, paint, markers, colorOf, onSeek, onS
     }
     holdFrame(yIn(e) - g.dy)
   }
+  /** A click within SNAP_PX of a thin patch of color (THIN_PX at most): the reader goes to the patch's first record.
+   * Whether it snapped. */
+  const snapAt = (e: { clientY: number }): boolean => {
+    if (!onSnap || !total || px <= 0) return false
+    const dpr = window.devicePixelRatio || 1
+    const rows = Math.ceil(px * dpr)
+    const hit = snapPatch(rowValues(paint, rows), yIn(e) * dpr, Math.round(SNAP_PX * dpr), Math.round(THIN_PX * dpr))
+    if (!hit) return false
+    const from = Math.max(1, Math.min(total, Math.floor((hit.row / rows) * total) + 1))
+    onSnap(from, Math.max(from, Math.min(total, Math.floor(((hit.row + 1) / rows) * total))), hit.value)
+    return true
+  }
   const onUp = (e: PointerEvent<HTMLDivElement>) => {
     const g = grab.current
     grab.current = null
     if (!g) return
     setDragging(null)
-    // a click off the frame sends the frame there, its middle under the pointer
+    // a click near a patch of color goes to its first record; elsewhere off the frame it sends the frame there, its
+    // middle under the pointer
     if (!g.moved) {
-      if (g.onFrame) return
-      holdFrame(yIn(e) - g.dy)
+      if (snapAt(e) || g.onFrame) return
+      const geo = geom()
+      const room = Math.max(0, px$.current - geo.frameH)
+      const f = room > 0 ? Math.max(0, Math.min(1, (yIn(e) - g.dy) / room)) : 0
+      return calls.current.onSeek(f * Math.max(0, 1 - feed.place.height), false)
     }
     letGo()
   }
