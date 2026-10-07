@@ -24,9 +24,10 @@
   #stack { display: flex; flex-direction: column; min-height: 0; }
   /* the overview: the range selector over the lanes' time, its readout in the lanes' gutter, the one axis, the lanes */
   /* as tall as its lanes need, up to a little over half the height, until the divider is moved */
-  #tl { position: relative; flex: 0 1 auto; max-height: 56%; min-height: 120px; display: flex; flex-direction: column; padding: 0 0 0 14px; overflow: hidden; }
+  /* its lanes scroll inside it, so it grows no scrollbar of its own when the divider moves */
+  #tl { position: relative; flex: 0 1 auto; max-height: 56%; min-height: 120px; display: flex; flex-direction: column; padding: 0 0 0 14px; overflow: hidden !important; }
   #top { flex: none; display: flex; align-items: center; padding: 10px 0 4px; }
-  #rread { flex: none; width: var(--gut); min-width: 0; box-sizing: border-box; padding-right: 10px; white-space: normal; }
+  #rread { flex: none; width: var(--gut); min-width: 0; box-sizing: border-box; padding-right: 10px; white-space: normal; overflow: hidden; }
   #range { flex: none; }
   #axrow { flex: none; display: flex; }
   #axrow .pad { flex: none; width: var(--gut); }
@@ -48,6 +49,8 @@
   .lh:hover .ln { text-decoration: underline; text-underline-offset: 2px; }
   .lh .n { flex: none; color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
   .lh.zero .ln { color: var(--text-tertiary); }
+  /* a gutter too narrow for the names and their counts keeps the names */
+  #gut.tight .lh .n { display: none; }
   .lh.hot { background: var(--surface-hover); }
   .lh.iso { background: var(--surface-selected); }
   .lh.iso .ln { font-weight: 600; }
@@ -61,11 +64,12 @@
   #listhead { flex: none; display: flex; align-items: baseline; gap: 8px; min-height: 34px; padding: 9px 14px 0; box-sizing: border-box; font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap; overflow: hidden; }
   #listhead b { color: var(--text-primary); font: 500 var(--text-ui-sm) / 1.3 var(--font-body); }
   #listhead .n { font-family: var(--font-mono); font-size: var(--text-mono-sm); color: var(--text-primary); }
-  #listhead .s { overflow: hidden; text-overflow: ellipsis; color: var(--text-tertiary); }
+  #listhead > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #listhead .s { color: var(--text-tertiary); }
   .cols { display: grid; align-items: center; column-gap: 12px; padding: 0 14px; }
-  #listcols { flex: none; height: 26px; border-bottom: 1px solid var(--border-hairline); color: var(--text-tertiary); font: 400 var(--text-xs) / 1 var(--font-body); }
+  #listcols { flex: none; height: 26px; overflow: hidden; border-bottom: 1px solid var(--border-hairline); color: var(--text-tertiary); font: 400 var(--text-xs) / 1 var(--font-body); }
   #listcols span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #list { position: relative; flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+  #list { position: relative; flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
   .lrow { height: 30px; box-sizing: border-box; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
   .lrow:hover { background: var(--surface-hover); }
   .lrow.sel, .lrow.sel:hover { background: var(--surface-selected); }
@@ -168,7 +172,9 @@
 // across the lanes.
 // Rows, Filter by and Color by (thimble.rows, thimble.filterBy, thimble.colorBy) read a report's value of a field from
 // its columns and of a label from the marks the reader hands it, so every label over the files groups, filters and
-// colors the same way. Color by is the only color: a value whose chip is off leaves the bars, the counts and the lists.
+// colors the same way. Color by is the only color, and it colors the reports (the bars, the marks and the panel's report
+// rows): a lane or an episode is never colored whole, it shows the mix of its reports' values as a small proportion bar
+// (mixHtml, the page's own helper). A value whose chip is off leaves the bars, the counts and the lists.
 // Labels: the reader keeps only the reports the label filter keeps and hands each its marks; the lanes, their rows and
 // the episodes carry their units as data-anchor, the panel's report rows their row's ref, so thimble marks them.
 const slug = (thimble.view && thimble.view.slug) || 'activity-timeline'
@@ -468,14 +474,14 @@ function syncChips() {
 // thimble hides every anchored element whose label value is turned off, a unit's value being the one most of its
 // records take, so while a label is the colour with a value off the lanes, bars and episodes are not anchored as units
 const unitsAnchored = () => !(colour.label && colour.values.some((v) => !v.on))
-const UNIT = (key, rest) => (unitsAnchored() ? ` data-anchor="view:${slug}/${key}"${rest}` : '')
+// while a label is the colour thimble would draw a unit's value as a solid edge on it, so a unit is anchored unmarked
+// and its row shows its reports' mix itself
+const UNIT = (key, rest) => (unitsAnchored() ? ` data-anchor="view:${slug}/${key}"${colour.label ? ' data-anchor-unmarked' : ''}${rest}` : '')
 const catColour = (k) => VCOL[k] || noneColour()
 const catName = (k) => VNAME[k] || 'none'
 const colourOf = (i) => catColour(VAL[i])
 // the value the sparklines draw over the rest: the first chip's value while it is on
 const leadValue = () => (colour.by && ORD.length && VALS[ORD[0]] != null && VON[ORD[0]] ? ORD[0] : -1)
-// a lane's or an episode's bar on its left edge: the value most of its reports take, while a field is the colour
-const barAttr = (v) => (colour.field ? ` data-colour="${esc(v == null ? '' : v)}"` : '')
 
 // ---------------------------------------------------------------- Rows and Filter by
 // Made once the reports are in, when the data sources' names are known; Rows opens on the data source, Filter by on
@@ -646,9 +652,10 @@ function sizes() {
   const most = textWidth(fmt(N), `400 11px ${mono}`)
   let need = 0
   for (const g of GROUPS) need = Math.max(need, textWidth(g.name, `400 12px ${body}`) + 8 + most)
-  G = Math.round(clamp(need + 18, 140, Math.min(280, w * 0.46)))
+  G = Math.round(clamp(need + 18, Math.min(140, w * 0.4), Math.min(280, w * 0.46)))
   document.documentElement.style.setProperty('--gut', G + 'px')
-  PW = Math.max(160, w - G - 14 - ($('lanes').offsetWidth - $('lanes').clientWidth))
+  $('gut').classList.toggle('tight', G < 110)
+  PW = Math.max(60, w - G - 14 - ($('lanes').offsetWidth - $('lanes').clientWidth))
   // the range selector and the axis span the plot's width, so their time lines up with the lanes'
   $('range').style.width = PW + 'px'
   $('axis').style.width = PW + 'px'
@@ -750,11 +757,12 @@ function renderLanes() {
   svg.setAttribute('width', PW); svg.setAttribute('height', H)
   svg.innerHTML = s
   $('lanebox').style.height = H + 'px'
-  // the lane names, a data source's each a unit of its own, and their counts in the range
+  // the lane names, a data source's each a unit of its own, and their counts in the range; the names draw no color, so
+  // while a label is the colour the lane's row in the list, whose mix shows the label's values, is its unit alone
   const chosen = groupOfLane()
   const gh = lanes.map((r, j) => {
     const grp = GROUPS[r.g], n = layout.inWin[r.g]
-    const unit = grp.unit ? UNIT(esc(grp.unit), ` data-anchor-text="${esc(grp.name)} · ${plural(layout.ever[r.g], 'report')}"`) : ''
+    const unit = grp.unit && !colour.label ? UNIT(esc(grp.unit), ` data-anchor-text="${esc(grp.name)} · ${plural(layout.ever[r.g], 'report')}"`) : ''
     return `<div class="lh${n ? '' : ' zero'}${r.g === chosen ? ' iso' : ''}${hotRow === j ? ' hot' : ''}" data-row="${j}"${unit} style="top:${r.y}px;height:${r.h}px"><button class="ln" type="button" data-g="${r.g}" title="${esc(grp.name)}">${esc(grp.name)}</button><span class="n">${fmt(n)}</span></div>`
   }).join('')
   $('gut').innerHTML = gh + (lanes.length ? '' : '<div class="empty">No report passes these filters in this range</div>')
@@ -858,10 +866,13 @@ function setHot(j) {
   for (const el of $('gut').querySelectorAll('.lh')) el.classList.toggle('hot', el.dataset.row != null && +el.dataset.row === j)
 }
 function hideTip() { tip.style.display = 'none' }
+// beside the pointer, to its left where it would reach the lanes' scrollbar, so it covers no scrollbar
 function showTip(html, ev) {
   tip.innerHTML = html
   tip.style.display = 'block'
-  tip.style.left = Math.max(4, Math.min(innerWidth - tip.offsetWidth - 8, ev.clientX + 12)) + 'px'
+  const lanes = $('lanes'), edge = Math.min(innerWidth, lanes.getBoundingClientRect().right - (lanes.offsetWidth - lanes.clientWidth)) - 4
+  const x = ev.clientX + 12 + tip.offsetWidth > edge ? ev.clientX - 12 - tip.offsetWidth : ev.clientX + 12
+  tip.style.left = Math.max(4, x) + 'px'
   tip.style.top = Math.max(4, Math.min(innerHeight - tip.offsetHeight - 8, ev.clientY + 14)) + 'px'
 }
 function hover(ev) {
@@ -908,16 +919,20 @@ function placeSpan() {
 }
 
 // ---------------------------------------------------------------- the list: the lanes again, in the same order
-// Each row: the lane's name (its edge the value most of its reports take), its reports in the range, its episodes, its
-// first report, a sparkline of its reports over its own span (the first chip's value over the rest), its last report and
-// its mix of the Color by values. A click chooses the lane.
+// Each row: the lane's name, its reports in the range, its episodes, its first report, a sparkline of its reports over
+// its own span (the first chip's value over the rest), its last report and its mix of the Color by values, the only
+// color a lane takes. A narrow list drops the episodes, then the first and last reports, then the sparkline and then
+// the mix, so the rest fits its width. A click chooses the lane.
 function listCols(w) {
-  const mix = !!colour.by
+  const mix = !!colour.by && w >= 240
   const full = w >= 760
-  const cols = [['nm', 'minmax(110px, 1.1fr)'], ['n', '64px']]
+  const ends = w >= 560
+  const cols = [['nm', `minmax(${w >= 400 ? 80 : 0}px, 1.1fr)`], ['n', '64px']]
   if (w >= 620) cols.push(['ep', '58px'])
-  cols.push(['first', full ? '126px' : '82px'], ['spark', 'minmax(60px, 1fr)'], ['last', full ? '126px' : '82px'])
-  if (mix && w >= 480) cols.push(['mix', full ? 'minmax(70px, 0.4fr)' : '64px'])
+  if (ends) cols.push(['first', full ? '126px' : '82px'])
+  if (w >= 400) cols.push(['spark', 'minmax(40px, 1fr)'])
+  if (ends) cols.push(['last', full ? '126px' : '82px'])
+  if (mix) cols.push(['mix', full ? 'minmax(70px, 0.4fr)' : '64px'])
   return { keys: cols.map((c) => c[0]), tmpl: cols.map((c) => c[1]).join(' '), full }
 }
 const COLHEAD = {
@@ -945,11 +960,6 @@ function mixHtml(per, total) {
   const parts = ORD.filter((k) => VALS[k] != null && per[k])
   return `<span class="mix" title="${esc(ORD.filter((k) => per[k]).map((k) => `${catName(k)} ${fmt(per[k])}`).join(' · '))}">${parts.map((k) => `<i style="width:${((100 * per[k]) / total).toFixed(2)}%;background:${esc(catColour(k))}"></i>`).join('')}</span>`
 }
-function mainValue(per) {
-  let best = -1, bn = 0
-  for (let k = 0; k < per.length; k++) if (per[k] > bn) { best = k; bn = per[k] }
-  return best < 0 ? null : VALS[best]
-}
 function renderList() {
   const w = $('listsec').clientWidth
   const lc = listCols(w)
@@ -974,10 +984,24 @@ function renderList() {
       last: `<span class="t last">${ix.length ? esc(whenCell(T[ix[ix.length - 1]], lc.full)) : ''}</span>`,
       mix: `<span>${mixHtml(per, n)}</span>`,
     }
-    h += `<div class="lrow cols${r.g === chosen ? ' sel' : ''}" data-g="${r.g}"${unit}${barAttr(mainValue(per))} style="grid-template-columns:${lc.tmpl}">${lc.keys.map((k) => v[k]).join('')}</div>`
+    h += `<div class="lrow cols${r.g === chosen ? ' sel' : ''}" data-g="${r.g}"${unit} style="grid-template-columns:${lc.tmpl}">${lc.keys.map((k) => v[k]).join('')}</div>`
   })
   $('list').innerHTML = h || '<div class="empty">No report passes these filters in this range</div>'
+  fitList()
 }
+// the list as tall as the rows that fit whole in its room, so its foot never cuts a lane's row, and its mix, in two
+function fitList() {
+  const list = $('list'), room = $('listsec').clientHeight - $('listhead').offsetHeight - $('listcols').offsetHeight
+  const rows = list.children, last = rows[rows.length - 1]
+  let h = room
+  if (last && last.offsetTop + last.offsetHeight > room) {
+    h = 0
+    for (const el of rows) { const b = el.offsetTop + el.offsetHeight; if (b > room) break; h = b }
+  }
+  list.style.flex = 'none'
+  list.style.height = Math.max(0, h || room) + 'px'
+}
+new ResizeObserver(() => fitList()).observe($('listsec'))
 $('list').addEventListener('click', (ev) => {
   if (ev.metaKey || ev.ctrlKey) return
   const row = ev.target.closest('.lrow')
@@ -1016,7 +1040,7 @@ function epHead(k, top, anchored) {
   const e = EP.eps[k], a = T[e.ix[0]], b = T[e.ix[e.ix.length - 1]]
   const grp = GROUPS[EP.g]
   const unit = anchored && grp && grp.unit ? UNIT(`${grp.unit}/${isoSec(a)}`, ` data-anchor-text="${esc(grp.name)} · episode ${esc(epWords(a, b))} · ${plural(e.ix.length, 'report')}"`) : ''
-  return `<div class="eh" data-k="${k}"${unit}${barAttr(mainValue(e.per))} style="top:${top}px" title="Show this episode's span in the timeline"><div class="l1"><span class="w">${esc(epWords(a, b))}</span>${b > a ? `<span class="d">${esc(dur(b - a))}</span>` : ''}<span class="n">${plural(e.ix.length, 'report')}</span></div><div class="l2">${sparkHtml(e.ix)}${mixHtml(e.per, e.ix.length)}</div></div>`
+  return `<div class="eh" data-k="${k}"${unit} style="top:${top}px" title="Show this episode's span in the timeline"><div class="l1"><span class="w">${esc(epWords(a, b))}</span>${b > a ? `<span class="d">${esc(dur(b - a))}</span>` : ''}<span class="n">${plural(e.ix.length, 'report')}</span></div><div class="l2">${sparkHtml(e.ix)}${mixHtml(e.per, e.ix.length)}</div></div>`
 }
 function epRow(q, top) {
   const i = EP.items[q], prev = q > 0 && EP.items[q - 1] >= 0 ? EP.items[q - 1] : null

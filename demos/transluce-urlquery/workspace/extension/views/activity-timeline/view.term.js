@@ -3,7 +3,10 @@
 // which reports show (Filter by) and the one color (Color by); the time range's strip picks the time the lanes and the
 // list show. A lane per group draws its reports per cell in the Color by hues; under it, past the divider, the list
 // holds the same lanes in the same order, each with its reports, its episodes, its first and last report and its reports
-// over its own span. A lane chosen opens its episodes in the side pane, the bursts of its reports less than two hours
+// over its own span and its mix of the Color by values. Color by colors the reports alone (the lanes' bars, the
+// sparklines' cells, the pane's report rows and their track); a lane is never colored whole: its row shows its reports'
+// mix as a small proportion bar (mixRuns, the view's own helper), and the list of lanes has a plain track. A lane
+// chosen opens its episodes in the side pane, the bursts of its reports less than two hours
 // apart, each a heading over its reports; a report there opens in full in the pane. The span of the pane's reports in
 // view is marked across the lanes. One fetch gives every report the label filter keeps, with the marks of the labels the
 // controls read; a report in full comes when it opens.
@@ -312,17 +315,29 @@ function spark(g, w) {
   return strip(scale, g.items, { value: (it) => colour.valueOf(it), colour })
 }
 
-// the value most of a lane's reports take, its mark in the list and its share of the track
-function mainValue(g) {
+// a lane's mix of the Color by values in `w` cells: each value's share of its reports in its hue, in the chips'
+// order, the cells left over going to the largest remainders; its reports with no value, or one with no hue of its own,
+// the rest in the rule gray
+function mixRuns(items, w) {
+  if (!items.length || w < 1 || !colour.by) return [{ s: ' '.repeat(Math.max(0, w)) }]
   const n = new Map()
-  for (const it of g.items) {
+  for (const it of items) {
     const v = colour.valueOf(it)
     if (v !== null) n.set(v, (n.get(v) || 0) + 1)
   }
-  let best = null
-  let bn = 0
-  for (const [v, k] of n) if (k > bn) [best, bn] = [v, k]
-  return best
+  const parts = colour.values.filter((c) => c.value !== null && n.get(c.value) && c.colour && c.colour !== COLORS.dim)
+    .map((c) => ({ fg: c.colour, share: (n.get(c.value) * w) / items.length }))
+  for (const p of parts) p.cells = Math.floor(p.share)
+  let left = Math.round(parts.reduce((t, p) => t + p.share, 0)) - parts.reduce((t, p) => t + p.cells, 0)
+  for (const p of [...parts].sort((a, b) => (b.share - b.cells) - (a.share - a.cells))) {
+    if (left <= 0) break
+    p.cells++
+    left--
+  }
+  const runs = parts.filter((p) => p.cells).map((p) => ({ s: '━'.repeat(p.cells), fg: p.fg }))
+  const used = runs.reduce((t, r) => t + r.s.length, 0)
+  if (used < w) runs.push({ s: '─'.repeat(w - used), fg: COLORS.rule })
+  return runs
 }
 
 // the chosen lane's reports in the range, split into episodes where two lie GAP or more apart: a heading for each, cut
@@ -466,21 +481,22 @@ draw((d) => {
   const total = SHOWN.reduce((n, g) => n + g.n, 0)
   const wide = d.cols >= 100
   const mid = d.cols >= 70
+  // the mix of the Color by values last, while Color by colors
+  const mixed = !!colour.by
   const specs = wide
     ? [{ w: Math.min(24, Math.max(10, longest)) }, { w: 7, align: 'right' }, { w: 4, align: 'right' }, { w: 12 }, { grow: true, min: 6 }, { w: 12 }]
     : mid
       ? [{ w: Math.min(18, Math.max(10, longest)) }, { w: 7, align: 'right' }, { w: 6 }, { grow: true, min: 6 }, { w: 6 }]
       : [{ grow: true, min: 10 }, { w: 7, align: 'right' }, { w: 10 }]
-  const listCols = pane.isOpen ? null : columns(specs, d.cols - 6)
+  if (mixed) specs.push({ w: wide ? 10 : 6 })
+  const listCols = pane.isOpen ? null : columns(specs, d.cols - 4)
   const whenCell = (t) => (t === null ? '' : wide ? `${dmy(t)}` : dm(t))
   laneList.draw(d, {
     items: SHOWN,
     title: rowsC && rowsC.by ? rowsC.by.title : 'Lanes',
     count: `${plural(SHOWN.length, 'lane')} · ${plural(total, 'report')}`,
-    colour,
-    value: mainValue,
     empty: 'no report passes these filters in this range',
-    header: listCols ? (r) => listCols.header(r, wide ? ['', 'reports', 'eps', 'first', '', 'last'] : mid ? ['', 'reports', 'first', '', 'last'] : ['', 'reports', '']) : null,
+    header: listCols ? (r) => listCols.header(r, [...(wide ? ['', 'reports', 'eps', 'first', '', 'last'] : mid ? ['', 'reports', 'first', '', 'last'] : ['', 'reports', '']), ...(mixed ? [cut(colour.by.title.toLowerCase(), wide ? 10 : 6)] : [])]) : null,
     row: (g, r) => {
       // beside the open pane the lane's name and its reports alone
       if (!listCols) {
@@ -490,9 +506,11 @@ draw((d) => {
       const w = listCols.widths
       const cells = wide ? [g.name, num(g.n), num(g.eps), whenCell(g.first), null, whenCell(g.last)] : mid ? [g.name, num(g.n), whenCell(g.first), null, whenCell(g.last)] : [g.name, num(g.n), null]
       const sparkAt = cells.indexOf(null)
+      if (mixed) cells.push(undefined)
       cells.forEach((v, i) => {
         if (i) r.gap(2)
         if (i === sparkAt) return r.runsOf(spark(g, w[i]))
+        if (v === undefined) return r.runsOf(mixRuns(g.items, w[i]))
         const text = String(v)
         const style = i === 0 ? {} : { d: true }
         const s = i === 0 ? text.slice(0, w[i]).padEnd(w[i]) : (wide ? i === 1 || i === 2 : i === 1) ? text.padStart(w[i]) : text.padEnd(w[i])
