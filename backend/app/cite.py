@@ -197,6 +197,28 @@ def day_month(display: str) -> tuple[int, int, int | None] | None:
     return month, day, year
 
 
+# a day and a month in words inside prose, as _DAY_MONTH_RE reads one whole (`23 June`, `June 23, 2026`, `4 June 2026 at
+# 10:53:40 UTC`): what _annotate links whole or leaves plain, never splitting its day off as a number
+_MONTH_WORD = r"(?:" + "|".join(sorted(_MONTHS, key=len, reverse=True)) + r")"
+_DATE_IN_TEXT_RE = re.compile(r"(?<![\w.])(?:\d{1,2}(?:st|nd|rd|th)?\s+" + _MONTH_WORD + r"\b\.?|" + _MONTH_WORD
+                              + r"\.?\s+\d{1,2}(?:st|nd|rd|th)?(?![\d:]))"
+                              r"(?:,?\s+\d{4}(?!\d))?"
+                              r"(?:,?\s+(?:at\s+)?\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:UTC|GMT|Z)\b)?)?", re.I)
+
+
+def dates_in_text(text: str) -> list[tuple[int, int, str]]:
+    """(start, end, words) of each day and month in words a text writes (day_month), with its year and its time when it
+    has them."""
+    out: list[tuple[int, int, str]] = []
+    for m in _DATE_IN_TEXT_RE.finditer(text):
+        # a period that ends it ends the sentence (`on 23 June.`), never the month's (`Jun. 5` keeps its own)
+        words = m.group().rstrip(", ").removesuffix(".")
+        # `may` in lower case is the verb (`3 may fail`), never the month
+        if day_month(words) and not re.search(r"\bmay\b", words):
+            out.append((m.start(), m.start() + len(words), words))
+    return out
+
+
 def date_in(display: str, excerpt: str) -> bool:
     """Whether a display that is a day and a month in words (`23 June`) names a date the excerpt writes as ISO
     (`2026-06-23`) or as month and day (`06-23`): the same month and day, and the same year when both give one (live
@@ -895,6 +917,26 @@ def find_td(outputs: list[dict] | None, col: str, row: str) -> tuple[str, str] |
     return None
 
 
+def _row_names(bundle: dict) -> tuple[str, list[str]]:
+    """(the header over a table's row names, the names) of a frame or a pandas-rendered table; ('', []) when it has no
+    such header."""
+    if frames.FRAME_MIME in bundle:
+        f = frames.frame_of(bundle)
+        return (frames.corner(f) or "", list(frames.row_labels(f))) if f is not None else ("", [])
+    html = table_html(bundle)
+    rows = _ROW_RE.findall(html) if html else []
+    if not rows:
+        return "", []
+    header = [_strip_tags(m.group(2)) for m in _CELL_RE.finditer(rows[0])]
+    head = header[0].strip() if header else ""
+    names: list[str] = []
+    for tr in rows[1:]:
+        cells = [(m.group(1).lower(), _strip_tags(m.group(2))) for m in _CELL_RE.finditer(tr)]
+        if cells and cells[0][0] == "th" and any(tag == "td" for tag, _ in cells):
+            names.append(cells[0][1])
+    return (head, names) if head else ("", [])
+
+
 def _row_name(html: str, want: set[tuple[str, str]]) -> str | None:
     """A row's name in a pandas-rendered table cited by the header over the row names (its index's name, `#day/06-23`):
     the name itself; None when the header is blank or no row has that name."""
@@ -1105,6 +1147,23 @@ class _Sources:
         """Whether `tok` is the one number the outputs hold (the printed count): a small integer links on it."""
         return self.only is not None and _norm(tok) == self.only
 
+    def date_places(self, display: str) -> list[str]:
+        """The table cells and text lines of the outputs that write a day and a month in words (`23 June`) in digits
+        (date_in), each once."""
+        refs: list[str] = []
+        for i, b in iter_outputs(self.outputs):
+            cells = bundle_cells(b)
+            if cells:
+                refs += [r for col, row, val in cells if date_in(display, str(val)) and (r := td_ref(self.cell_id, col, row))]
+                # a row's name under the header over the row names (`#day/06-23`), as find_td reads one
+                head, names = _row_names(b)
+                refs += [r for name in names if head and date_in(display, name) and (r := td_ref(self.cell_id, head, name))]
+                continue
+            if any(k.startswith("image/") or "vega" in k for k in b):
+                continue  # a chart's text/plain is its repr, never a source
+            refs += [f"card:{self.cell_id}@out{i}#L{ln}" for ln, line in numbered_lines(b) if date_in(display, line)]
+        return list(dict.fromkeys(refs))
+
     def lookup_unit(self, tok: str, unit: str | None) -> tuple[str, int] | None:
         """(ref, tier 2) for a number with its unit word when exactly one text line holds that pair ("16 runs"), else None."""
         if not unit:
@@ -1183,10 +1242,31 @@ def _specific(tok: str) -> bool:
 
 
 def _annotate(seg: str, src: _Sources, res: Resolved, seen: set[str]) -> str:
-    """Wrap every number in a plain-text segment (no [[...]] inside) that has a unique source."""
+    """Wrap every number in a plain-text segment (no [[...]] inside) that has a unique source. A day and a month in words
+    (`On 23 June`) is one value: linked whole to the one line or cell that writes that date in digits (date_in), else
+    left plain, never its day linked as a number with the month as its unit (live check term-fix8, quirk 4: `23` was
+    linked to an answer at 23:41 while the sentence was about another line)."""
     parts: list[str] = []
     pos = 0
+    dates = dates_in_text(seg)
     for m in _NUM_RE.finditer(seg):
+        if m.start() < pos:
+            continue  # a number of a date written whole already
+        date = next((d for d in dates if d[0] <= m.start() < d[1]), None)
+        if date is not None:
+            start, end, words = date
+            parts.append(seg[pos:start])
+            pos = end
+            places = src.date_places(words)
+            if len(places) == 1:
+                parts.append(f"[[{words}|{places[0]}]]")
+                res.links.append(Link(words, places[0], 2))
+                continue
+            parts.append(words)
+            if not places and words not in seen:  # no output writes the date; several leave it plain, as an ambiguous number
+                seen.add(words)
+                res.unresolved.append(words)
+            continue
         parts.append(seg[pos : m.start()])
         pos = m.end()
         tok = m.group()

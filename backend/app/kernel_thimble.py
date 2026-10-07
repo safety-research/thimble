@@ -431,9 +431,17 @@ def _row_line(ref: str, row: dict):
     return path, line
 
 
+_LIST_COLUMNS = ["name", "id", "kind", "unit", "values", "n_labeled", "set_by_analyst"]
+
+
 def labels(name=None, negatives=False):
-    """thimble.labels() lists the labels; thimble.labels("<name>") returns one label's matches (every labeled unit with
-    negatives=True)."""
+    """thimble.labels() lists the labels, each with how many of its units the analyst set to another value
+    (`set_by_analyst`); thimble.labels("<name>") returns one label's matches (every labeled unit with negatives=True).
+
+    The analyst's verdicts override the label: a unit's `effective` value is the analyst's `verdict` where they set one,
+    else the label's own (`label`), and the matches are the units whose effective value is the label's first value. So a
+    value's rows here can differ from the count the label itself gave by the units the analyst set to another value; that
+    is the analyst's review, not a fault (the result's `attrs["set_by_analyst"]` counts them)."""
     import pandas as pd
 
     if (_view_ctx or {}).get("probe") and (name is None or name == PROBE_NAME):
@@ -441,8 +449,8 @@ def labels(name=None, negatives=False):
     if name is None:
         ks = [k for k in _concepts() if not k["superseded_by"]]
         return pd.DataFrame([{"name": k["name"], "id": k["id"], "kind": k["kind"], "unit": k["unit"], "values": k["values"],
-                              "n_labeled": k["n_labeled"]} for k in ks],
-                            columns=["name", "id", "kind", "unit", "values", "n_labeled"])
+                              "n_labeled": k["n_labeled"], "set_by_analyst": _set_by_analyst(k["id"])} for k in ks],
+                            columns=_LIST_COLUMNS)
     k = _find(name)
     if all(x["id"] != k["id"] for x in _LABELS_READ):
         _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
@@ -459,7 +467,37 @@ def labels(name=None, negatives=False):
     df = pd.DataFrame(out, columns=_COLUMNS, dtype=object)  # object: a missing label or verdict stays None, not NaN
     df["line"] = pd.array(df["line"].tolist(), dtype="Int64")
     df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce")
+    df.attrs["set_by_analyst"] = sum(1 for _p, _l, label, _s, verdict, _c, _r in rows
+                                     if verdict is not None and label is not None and str(verdict) != str(label))
     return df
+
+
+def _set_by_analyst(concept_id: str) -> int:
+    """How many units of a label the analyst set to another value than the label gave (concepts.verdicts_applied's
+    count): from the store when it reflects the labels file, else from the file."""
+    jsonl = _ws() / "labels" / f"{concept_id}.jsonl"
+    db = jsonl.with_suffix(".sqlite")
+    try:
+        if _store_fresh(jsonl, db):
+            # the analyst's rows alone, each with the value the label gave it: its own, or its cover's (a range of
+            # records the label gave one value)
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+            try:
+                rows = conn.execute("SELECT path, line, label, source, analyst, confidence, ref FROM current "
+                                    "WHERE analyst IS NOT NULL").fetchall()
+                try:
+                    covers = conn.execute("SELECT path, first, last, value, source FROM covers ORDER BY rowid").fetchall()
+                except sqlite3.Error:  # a store without covers
+                    covers = []
+            finally:
+                conn.close()
+            rows = _with_covers(rows, covers, False)
+        else:
+            rows = _rows_from_jsonl(jsonl)
+        return sum(1 for _p, _l, label, _s, verdict, _c, _r in rows
+                   if verdict is not None and label is not None and str(verdict) != str(label))
+    except (OSError, sqlite3.Error):
+        return 0
 
 
 def colours(name, values=None):
@@ -758,7 +796,7 @@ def _probe_labels(pd, name, negatives):
     every = int(_view_ctx["probe"])
     if name is None:
         return pd.DataFrame([{"name": PROBE_NAME, "id": PROBE_ID, "kind": "regex", "unit": "line", "values": [PROBE_NAME],
-                              "n_labeled": None}], columns=["name", "id", "kind", "unit", "values", "n_labeled"])
+                              "n_labeled": None, "set_by_analyst": 0}], columns=_LIST_COLUMNS)
     out = []
     for path in _view_paths:
         for line in range(1, _line_count(path) + 1):

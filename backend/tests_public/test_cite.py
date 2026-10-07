@@ -106,3 +106,29 @@ def test_a_takeaways_value_at_the_row_its_words_name_stays_there():
     assert [(l.token, l.ref) for l in r.misplaced] == [("89", "card:c1#deletions/22:00")]
     r = cite.resolve("c1", "A last [[89|card:c1#deletions/22:00]] deletions.", out)
     assert r.annotated == "A last [[89|card:c1#deletions/23:00]] deletions." and not r.misplaced
+
+
+def test_an_uncited_date_in_words_is_linked_whole_or_left_plain():
+    """Live check term-fix8, quirk 4: main wrote plain "On 23 June", and the check linked its `23` alone, with `June` as
+    its unit, to the agent's answer at 23:41 ("On 23 ✓ June"). A day and a month in words is one value: linked whole to
+    the one line or cell that writes that date in digits, else left plain; its day and its year are never numbers."""
+    from app import frames
+
+    out = [{"_stream": "stdout", "text/plain": "2026-06-22 deletes 40\n23 runs at 23:41 answered\n2026-06-24 deletes 7\n"}]
+    r = cite.resolve("c1", "On 23 June there were 40 deletes.", out)
+    assert r.annotated == "On 23 June there were 40 deletes." and "23 June" in r.unresolved and "23" not in r.unresolved
+    assert all("23" != link.token for link in r.links)
+    r = cite.resolve("c1", "By 24 June 2026 the deletes fell.", out)
+    assert r.annotated == "By [[24 June 2026|card:c1@out0#L3]] the deletes fell." and r.unresolved == []
+    r = cite.resolve("c1", "From June 22 on, and 4 June 2026 at 10:53 UTC.", out)
+    assert "[[June 22|card:c1@out0#L1]]" in r.annotated and "[[4|" not in r.annotated and "[[10|" not in r.annotated
+    # two places write the date: left plain, as an ambiguous number is, and not called missing
+    twice = [{"text/plain": "2026-06-23 20:00 deletes\n2026-06-23 23:41 answer\n"}]
+    r = cite.resolve("c1", "On 23 June they deleted.", twice)
+    assert r.annotated == "On 23 June they deleted." and r.unresolved == [] and not r.links
+    # a table's cell that writes the date
+    f = frames.normalize({"columns": ["day", "n"], "rows": [["06-23", 602], ["07-07", 522]], "index": "day"})
+    r = cite.resolve("c2", "The busiest was 23 June.", [frames.bundle(f)])
+    assert r.annotated == "The busiest was [[23 June|card:c2#day/06-23]]."
+    # `may` in lower case is the verb
+    assert [d[2] for d in cite.dates_in_text("3 may fail; May 3rd; 10 marches")] == ["May 3rd"]

@@ -752,6 +752,20 @@ def start_agent(c: str, role: str, title: str, run: Callable[[Recorder], Awaitab
     return meta
 
 
+def end_left_label_chats(c: str) -> list[str]:
+    """The chats that follow a label's run (role `labels`) still `running` with no task of this process behind them,
+    each ended `stopped`: the ids. A label's run is a task of the process that started it (the server, or in terminal
+    mode the session's own shim), so once main quit (subagents.hook_end) or a new shim starts (local._start), such a
+    chat follows nothing. Live check term-fix8, low quirk: the `label …` record stayed running after the quit."""
+    out = []
+    for m in list_chats(c):
+        cid = str(m.get("id") or "")
+        if m.get("kind") == KIND_AGENT and m.get("role") == "labels" and m.get("status") == "running" and (c, cid) not in _agent_tasks:
+            finish_agent(c, cid, "stopped", STOPPED_LINE)
+            out.append(cid)
+    return out
+
+
 async def stop_agent(c: str, chat_id: str) -> bool:
     task = _agent_tasks.get((c, chat_id))
     if task is None:
@@ -1125,5 +1139,6 @@ async def check_refs(c: str, refs_: list[str]) -> tuple[list[str], list[str]]:
 
 
 __all__ = ["KIND_MAIN", "KIND_THREAD", "KIND_AGENT", "MAIN_ID", "Recorder", "chip", "ensure_main", "finish_agent",
-           "list_chats", "mirror", "new_agent", "new_thread", "paths", "read_events", "read_meta", "start_agent", "stop_agent",
+           "end_left_label_chats", "list_chats", "mirror", "new_agent", "new_thread", "paths", "read_events", "read_meta", "start_agent",
+           "stop_agent",
            "set_running", "update_agent", "write_meta"]
