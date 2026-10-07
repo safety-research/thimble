@@ -79,5 +79,18 @@ def test_a_new_report_check_takes_the_first_check_color_in_the_order(monkeypatch
 def test_a_view_s_frame_hands_the_kit_the_order_before_its_color_by(tmp_path):
     (tmp_path / "view.html").write_text("<!doctype html><body></body>")
     doc = views.frame_document({"dir": str(tmp_path), "slug": "v", "name": "V"})
-    order = f"window.__thimbleLabelOrder = {json.dumps(list(ORDER))}</script>"
+    order = f"window.__thimbleLabelOrder = {json.dumps(list(ORDER))}; "
     assert order in doc and doc.index(order) < doc.index("thimble.colorBy")
+    # and the picker's places around the colour wheel, every place of the palette's eighteen once
+    wheel = json.loads((Path(views.__file__).with_name("label_wheel.json")).read_text("utf-8"))
+    assert f"window.__thimbleLabelWheel = {json.dumps(wheel)}</script>" in doc
+    assert sorted(n for pair in wheel for n in pair) == list(range(1, 19))
+
+
+def test_red_purple_and_pink_are_colours_a_value_holds_only_when_picked():
+    """Places 13 to 18 (red, purple, pink, a light and a dark of each) are colours a label's value can hold, as the
+    analyst picks them, and none that new values take: the order new values take the palette in holds the twelve."""
+    assert len(kernel_thimble.LABEL_COLOURS) == concepts.PICKS + 1 == 19
+    assert [concepts._colour(n) for n in (0, 12, 13, 18, 19)] == [0, 12, 13, 18, None]
+    assert sorted(kernel_thimble.LABEL_ORDER) == list(range(1, concepts.PALETTE + 1))
+    assert all(n <= concepts.PALETTE for n in ORDER)

@@ -8,7 +8,7 @@
 // for the storage.
 import type { Concept, LabelRow, SourceKey, SourceRecord } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
-import { classesOf, colourVar, LABEL_ORDER, litClass, valueOf } from './labels'
+import { classesOf, colourVar, LABEL_ORDER, LABEL_PICKS, litClass, valueOf } from './labels'
 
 export type ColorChoice = { by: 'off' } | { by: 'key'; key: string } | { by: 'label'; id: string }
 
@@ -151,7 +151,7 @@ export function defaultChoice(keys: readonly SourceKey[]): ColorChoice {
 }
 
 /** What the reader keeps of Color by per file: the choice (null for the default), per choice the values off, and per
- * choice the palette color (1 to 12) picked for a value. */
+ * choice the palette color (1 to 18, labels.ts LABEL_PICKS) picked for a value. */
 export interface ColorKept {
   by: string | null
   off: Record<string, string[]>
@@ -168,7 +168,7 @@ export function readColor(ws: string, path: string): ColorKept {
   if (got?.colors && typeof got.colors === 'object')
     for (const [k, m] of Object.entries(got.colors)) {
       if (!m || typeof m !== 'object') continue
-      const kept = Object.entries(m).filter(([, n]) => typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= KEY_COLORS)
+      const kept = Object.entries(m).filter(([, n]) => typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= LABEL_PICKS)
       if (kept.length) colors[k] = Object.fromEntries(kept)
     }
   return { by: typeof got?.by === 'string' ? got.by : null, off, ...(Object.keys(colors).length ? { colors } : {}) }

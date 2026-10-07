@@ -115,7 +115,8 @@ KINDS = ("prompt", "regex", "code")
 FILE_UNITS = ("record", "agent", "run")
 MARKS = ("span", "record", "file")  # what a label over files marks in the reader
 MARKS_UNIT = {"span": "record", "record": "record", "file": "agent"}
-PALETTE = 12              # label colours --label-1..12; 0 is --label-none, the grey of "no match"
+PALETTE = 12              # label colours --label-1..12, which new values take; 0 is --label-none, the grey of "no match"
+PICKS = 18                # the colours a value can hold: --label-1..18, 13 to 18 (red, purple, pink) only when picked
 QUIET_VALUES = frozenset({"no", "none", "other", "no match", "not", "neither", "n/a", "unknown"})  # values that say nothing
 LEFTOVER_WORDS = frozenset({"no", "not", "none", "neither", "nothing", "other", "unrelated", "irrelevant"})  # a leftover's first
 UNITS = (*FILE_UNITS, "cell", "span")
@@ -245,7 +246,7 @@ def _colour(v: Any) -> int | None:
         n = int(v)
     except (TypeError, ValueError):
         return None
-    return n if 0 <= n <= PALETTE else None
+    return n if 0 <= n <= PICKS else None
 
 
 def classes_of(labels: list[str], stored: Any) -> list[dict]:

@@ -5,7 +5,8 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { LABEL_HUES } from '../hooks/paint'
+import { LABEL_HUES, PICKED_HUES } from '../hooks/paint'
+import { hueOf } from '../hooks/labels'
 import { CWD, LABEL, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -328,6 +329,11 @@ test('each label color keeps 3:1 against white, a light panel, black and a dark 
   const ratio = (a: string, b: string) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05)
   expect(LABEL_HUES.length).toBe(12)
   for (const hue of LABEL_HUES) for (const bg of ['#ffffff', '#f0f0f0', '#000000', '#1e1e1e']) expect(ratio(hue, bg)).toBeGreaterThanOrEqual(3)
+  // red, purple and pink, which a value holds only as the analyst picked them, are colors 13 to 18 of their own
+  expect(PICKED_HUES.length).toBe(6)
+  for (const hue of PICKED_HUES) for (const bg of ['#ffffff', '#f0f0f0', '#000000', '#1e1e1e']) expect(ratio(hue, bg)).toBeGreaterThanOrEqual(3)
+  expect([13, 18].map(hueOf)).toEqual([PICKED_HUES[0], PICKED_HUES[5]])
+  expect(hueOf(1)).toBe(LABEL_HUES[0])
 })
 
 test("a label's values take their classes' colors on its card in the chat and on home, the negative dim", async ($, on) => {

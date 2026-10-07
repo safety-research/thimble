@@ -3,6 +3,7 @@
 // gutter cells and marks, the marks a custom view's records take, and a text cut into segments at its spans. A class's
 // colour is an index into the label palette, --label-1..LABEL_COLOURS; 0 is --label-none, the grey of "no match".
 import labelOrder from '../../../backend/app/label_order.json'
+import labelWheel from '../../../backend/app/label_wheel.json'
 import { recordKey, recordOf } from '../lib/refs'
 import type { Concept, ConceptPatch, ConceptRun, ConceptUnit, LabelClass, LabelDraft, LabelMarks, LabelRow } from '../lib/types'
 
@@ -34,8 +35,17 @@ export const marksWord = (k: Pick<Concept, 'unit' | 'marks'>): string => `marks 
 /** The patterns of a label's glob, comma-separated as the server keeps them. */
 export const globPatterns = (glob: string | null | undefined): string[] => (glob ?? '').split(',').map((p) => p.trim()).filter(Boolean)
 
-/** How many colours the label palette has, --label-1..12 (tokens.css; the server's concepts.PALETTE). */
+/** How many colours new values take, --label-1..12 (tokens.css; the server's concepts.PALETTE). */
 export const LABEL_COLOURS = 12
+
+/** How many colours a value can hold, --label-1..18 (the server's concepts.PICKS): the twelve, then red, a dark red,
+ * violet, a dark purple, pink and a dark pink, which a value takes only when the analyst picks it. */
+export const LABEL_PICKS = 18
+
+/** The palette's places as the pickers show them, around the color wheel: a column per hue (red, orange, gold, green,
+ * teal, sky, blue, purple, pink), its light place above its dark (backend/app/label_wheel.json, which the view kit's
+ * picker reads too). */
+export const LABEL_WHEEL: readonly (readonly number[])[] = labelWheel
 
 /** The order new values take the palette's places: blue, orange, green, gold, teal, brown, sky, then navy, grass,
  * cerulean, chestnut and cyan, so the first five are five hues with no second blue. A stored color is a place, which
@@ -50,7 +60,7 @@ export function paletteFrom(at: number): number[] {
 }
 
 /** The name of the token that carries a class colour. */
-export const colourToken = (n: number | null | undefined): string => (n != null && n >= 1 && n <= LABEL_COLOURS ? `--label-${n}` : '--label-none')
+export const colourToken = (n: number | null | undefined): string => (n != null && n >= 1 && n <= LABEL_PICKS ? `--label-${n}` : '--label-none')
 
 /** A class colour as the token that carries it. */
 export const colourVar = (n: number | null | undefined): string => `var(${colourToken(n)})`
@@ -495,8 +505,12 @@ export function pageLabelList(all: Iterable<Concept>, resolve: (token: string) =
   })
 }
 
-/** The colours a label's value can take, in the palette's order: --label-1..LABEL_COLOURS, then the grey. */
-export const PALETTE: readonly number[] = [...Array.from({ length: LABEL_COLOURS }, (_, i) => i + 1), 0]
+/** The colours a label's value can take, in the palette's order: --label-1..LABEL_PICKS, then the grey. */
+export const PALETTE: readonly number[] = [...Array.from({ length: LABEL_PICKS }, (_, i) => i + 1), 0]
+
+/** The pickers' swatches in order, the wheel's columns one after another (each light then dark), for a grid that
+ * flows by column; `grey` adds the grey of a value with no color last. Pure. */
+export const pickerColours = (grey = false): number[] => [...LABEL_WHEEL.flat(), ...(grey ? [0] : [])]
 
 /** The palette as a view's page hears it (thimble.onLabels `palette`): each colour resolved. Pure. */
 export const pagePalette = (resolve: (token: string) => string): string[] => PALETTE.map((n) => resolve(colourToken(n)))

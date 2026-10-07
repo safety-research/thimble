@@ -10,6 +10,7 @@ import { act } from 'react'
 import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { ColorBy } from '../../src/files/ColorBy'
 import { labelChips, type ColorChoice } from '../../src/files/colorChoice'
+import { LABEL_WHEEL } from '../../src/files/labels'
 import { closeLabelEditor, LabelEditorHost } from '../../src/files/LabelEditor'
 import type { Concept, SourceKey } from '../../src/lib/types'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -149,7 +150,7 @@ test('a key or Off opens no editor, and there is no info button beside the trigg
   expect(document.querySelector('.popover.label-editor-pop')).toBeNull()
 })
 
-test("a chip's swatch opens the palette of the twelve label colors, its own ringed, and a pick goes to the reader", async () => {
+test("a chip's swatch opens the palette of every label color around the color wheel, its own ringed, and a pick goes to the reader", async () => {
   const toggled: [string, boolean][] = []
   const colored: [string, number][] = []
   let resets = 0
@@ -158,11 +159,12 @@ test("a chip's swatch opens the palette of the twelve label colors, its own ring
   await click(chips[0].querySelector('.colorby-sw')!)
   expect(toggled).toEqual([])
   const picks = [...document.querySelectorAll('.colorby-palette .colorby-pick')]
-  expect(picks).toHaveLength(12)
-  expect(picks.map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', ...Array(11).fill('false')])
+  // red, orange, gold, green, teal, sky, blue, purple, pink, a light and a dark of each
+  expect(picks.map((b) => b.getAttribute('aria-label'))).toEqual(LABEL_WHEEL.flat().map((n) => `Color ${n}`))
+  expect(picks.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('aria-label'))).toEqual(['Color 1'])
   expect(document.querySelector('.colorby-palette .colorby-palette-head')?.textContent).toBe('dse')
-  await click(picks[6])
-  expect(colored).toEqual([['dse', 7]])
+  await click(picks.find((b) => b.getAttribute('aria-label') === 'Color 13')!)
+  expect(colored).toEqual([['dse', 13]])
   expect(document.querySelector('.colorby-palette .colorby-pick')).toBeNull()
   // Reset colors
   await click(chips[1].querySelector('.colorby-sw')!)

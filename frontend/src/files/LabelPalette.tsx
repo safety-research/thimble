@@ -1,11 +1,12 @@
-// A label's colours in a popover, from the Labels pane: one swatch per palette colour (labels.ts PALETTE), the value's
+// A label's colours in a popover, from the Labels pane: one swatch per palette colour around the colour wheel, then the
+// grey (labels.ts pickerColours), the value's
 // own ringed. A label with more than one coloured value lists its values first, to pick which one takes the colour. A
 // pick is saved at once, without a run (FilesLabels setColour), so Files, the label card and every open view show it. A
 // view's page offers the same palette, which it hears through thimble.onLabels.
 import { useEffect, useState, type CSSProperties, type RefObject } from 'react'
 import { Popover } from '../components/Menu'
 import type { Concept } from '../lib/types'
-import { classesOf, colourVar, isMultiClass, PALETTE } from './labels'
+import { classesOf, colourVar, isMultiClass, pickerColours } from './labels'
 
 interface Props {
   label: Concept
@@ -46,7 +47,7 @@ export function LabelPalette({ label, anchor, open, onClose, onPick }: Props) {
         </div>
       )}
       <div className="label-palette-grid">
-        {PALETTE.map((n) => (
+        {pickerColours(true).map((n) => (
           <button
             key={n}
             type="button"

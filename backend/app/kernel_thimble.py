@@ -76,10 +76,11 @@ TIMELINE_MIME = "application/vnd.thimble.timeline+json"
 
 _COLUMNS = ["path", "line", "effective", "label", "source", "verdict", "confidence", "ref"]
 
-# A label class's colour by index (concepts.PALETTE): 0 is --label-none, the grey of a negative class; 1..12 are
-# --label-1..12 (styles/tokens.css).
+# A label class's colour by index (concepts.PICKS): 0 is --label-none, the grey of a negative class; 1..18 are
+# --label-1..18 (styles/tokens.css), of which new values take 1..12 (LABEL_ORDER) and the analyst alone picks 13..18,
+# red, purple and pink.
 LABEL_COLOURS = ["#a09c93", "#025ac3", "#d0750a", "#06572a", "#1392d4", "#7d6702", "#009c85", "#844500", "#013c77", "#2aa02b", "#025a7c",
-                 "#622b01", "#0389a0"]
+                 "#622b01", "#0389a0", "#d0342c", "#8a1c1c", "#7b4fd6", "#4c2a91", "#d23f8b", "#8d1d5c"]
 # The order new values take the palette's places (indices into LABEL_COLOURS): blue, orange, green, gold, teal, brown,
 # sky, then navy, grass, cerulean, chestnut and cyan, so a label's first five values are five hues with no second blue.
 # A stored place keeps its hue; only the order new values take the places in differs. The frontend and the view kit
