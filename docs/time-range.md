@@ -93,6 +93,7 @@ function draw() {
 | `scale(width)` | the scale of the range across `width` px, with the overview's breaks: `{from, to, width, broken, x(t), t(x), ticks(px), bins(px), step(px), binOf(t), gaps()}`; `ticks(px)` gives `[{t, x, lx, label, major}]`, `lx` where the label's middle stands |
 | `format(t, step?)` | a time in the readout's words, as precise as `step` needs |
 | `redraw()` | the overview drawn again, after the page changed what its values mean |
+| `visible(from, to)`, `visible(null)`, `follow(list, time, rows)` | a band on the overview, under the viewfinder's frame and at least 3 px wide, at the time the page has in view, or none; `follow` keeps it on the rows of `list` in view as the list scrolls, resizes or changes: `time(row)` gives a row's time, `rows` is a selector of the rows in the list (its children by default), and `follow(null)` stops it. Such as `range.follow('#list', (el) => rows[+el.dataset.i].t, '.row')` |
 
 Draw the chart of the range on `range.scale(width)`, so its bins and its ticks match the overview and every chart of the
 view at that width reads as a small multiple of the same time: a row's strip, a lane and the main chart take the same
