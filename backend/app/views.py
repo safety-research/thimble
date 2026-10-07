@@ -64,7 +64,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
 from . import config, corpus_tree, headless, investigation, refs, userconf, view_calls, view_indexes, view_libs
@@ -3221,9 +3221,16 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     return "<!doctype html><head>" + "".join(head) + "</head>" + body
 
 
+# the derived fields of a view whose reader defines derived(), by (workspace, slug, version, the fingerprint of its
+# claimed files and reader, view.json's derived fields): what each open of the view's page would otherwise ask the
+# reader again (derived_fields)
+_derived_kept: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = {}
+DERIVED_KEPT = 64
+
+
 async def derived_fields(c: str, slug: str, view: dict[str, Any], version: str | None = None) -> list[dict[str, str]]:
-    """The view's derived fields: view.json's, and when reader.py defines derived() those it adds too (shown); only
-    view.json's when the reader fails."""
+    """The view's derived fields: view.json's, and when reader.py defines derived() those it adds too (shown), kept
+    while the claimed files, the reader and view.json's list stay the same; only view.json's when the reader fails."""
     try:
         src = (Path(view["dir"]) / READER_PY).read_text("utf-8")
     except (OSError, TypeError):
@@ -3231,9 +3238,17 @@ async def derived_fields(c: str, slug: str, view: dict[str, Any], version: str |
     if not re.search(r"^def derived\s*\(", src, re.M):
         return view.get("derived") or []
     try:
-        return (await shown(c, slug, version))["derived"]
+        _, req = await asyncio.to_thread(_prepare, c, slug, version)
+        key = (c, slug, version or "", str(req["fp"]), json.dumps(view.get("derived") or [], sort_keys=True))
+        if (kept := _derived_kept.get(key)) is not None:
+            return kept
+        got = (await shown(c, slug, version))["derived"]
     except ReaderError:
         return view.get("derived") or []
+    _derived_kept[key] = got
+    while len(_derived_kept) > DERIVED_KEPT:
+        del _derived_kept[next(iter(_derived_kept))]
+    return got
 
 
 # ----------------------------------------------------------------------------------------------------------
@@ -5171,11 +5186,12 @@ async def delete_view_route(c: str, slug: str, request: Request) -> dict[str, An
 
 @router.get("/ws/{c}/views/{slug}/frame")
 async def frame_route(c: str, slug: str, request: Request, origin: str | None = None,
-                      v: str | None = None) -> HTMLResponse:
+                      v: str | None = None) -> Response:
     """The page as a frame loads it (frame_document), as srcdoc text, at version `v` when given (VERSIONS_SUBDIR): the
     records, marks and resolve routes then answer for the same version, so the page stays as loaded while the view
     changes. `origin` is the page's location.origin, since through Vite's proxy the request's host may not be one the
-    browser can reach; without it, the request's host."""
+    browser can reach; without it, the request's host. The answer carries an ETag of the document, and a request whose
+    If-None-Match names it gets 304 with no body, so a view opened again is not sent again."""
     view = _view_or_404(c, slug, v)
     if not view["ok"]:
         raise HTTPException(409, f"the view {slug!r} has no reader.py, view.html or claims")
@@ -5184,7 +5200,13 @@ async def frame_route(c: str, slug: str, request: Request, origin: str | None = 
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     derived = await derived_fields(c, slug, view, v)
-    return HTMLResponse(await asyncio.to_thread(functools.partial(frame_document, view, media, derived=derived)))
+    doc = await asyncio.to_thread(functools.partial(frame_document, view, media, derived=derived))
+    # a validator, so the browser asks again on every open but gets the document again only when it changed
+    tag = f'"{hashlib.sha256(doc.encode("utf-8")).hexdigest()[:32]}"'
+    headers = {"ETag": tag, "Cache-Control": "no-cache"}
+    if tag in (x.strip().removeprefix("W/") for x in (request.headers.get("if-none-match") or "").split(",")):
+        return Response(status_code=304, headers=headers)
+    return HTMLResponse(doc, headers=headers)
 
 
 @router.get("/ws/{c}/views/{slug}/media")
