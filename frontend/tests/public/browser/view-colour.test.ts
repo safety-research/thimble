@@ -294,3 +294,138 @@ describe("a value's colour", () => {
     await page.close()
   })
 })
+
+/** A view of its own, `body` its records and `script` what it runs, held in a sandboxed frame `width` px wide. */
+async function own(body: string, script: string, width = 700, kept?: unknown): Promise<{ page: Page; frame: () => Frame }> {
+  const doc = `<!doctype html><html><head><style>${TOKENS} body{margin:0;font:12px sans-serif} .top{display:flex;align-items:center;gap:8px;padding:8px} #list{height:300px;overflow:auto} .msg{box-sizing:border-box;height:30px;padding:6px 8px 0 12px}</style>
+${kept ? `<script>window.__thimbleColour = ${JSON.stringify(kept)}</script>` : ''}<script>${BRIDGE}</script><script>${COLOUR}</script><style>${KIT}</style></head><body>
+<div class="top"><input style="width:120px"><span id="colour"></span></div><div id="list">${body}</div><script>${script}</script></body></html>`
+  const page = await browser.newPage({ viewport: { width: 900, height: 600 } })
+  await page.setContent(`<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:${width}px;height:400px"></iframe></body></html>`)
+  await page.evaluate((d) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = d), doc)
+  const frame = () => page.frames().find((f) => f !== page.mainFrame())!
+  await page.waitForTimeout(300)
+  await frame().waitForSelector('.thimble-colour-by', { state: 'attached' })
+  return { page, frame }
+}
+
+describe("the key's chips", () => {
+  test('the chip of the records with no value has the grey the marks draw them in, and an outline only when turned off', async () => {
+    const rows = Array.from({ length: 12 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 8 ? 'Text only' : ''}">message ${i + 1}</div>`).join('')
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }] })`)
+    await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-chip').length === 2)
+    const sw = () =>
+      frame().evaluate(() => {
+        const chip = [...document.querySelectorAll('.thimble-colour-chip')].find((c) => c.textContent!.startsWith('No kind'))!
+        const s = getComputedStyle(chip.querySelector('.chip-sw')!)
+        return { text: chip.textContent, bg: s.backgroundColor, ring: s.boxShadow, pressed: chip.getAttribute('aria-pressed') }
+      })
+    const on = await sw()
+    assert.equal(on.text, 'No kind4')
+    assert.equal(on.bg, 'rgba(27, 26, 24, 0.34)', 'filled with the grey of a record that takes no value')
+    await frame().locator('.thimble-colour-chip', { hasText: 'No kind' }).click()
+    await page.waitForTimeout(100)
+    const off = await sw()
+    assert.equal(off.pressed, 'false')
+    assert.equal(off.bg, 'rgba(0, 0, 0, 0)', 'turned off, an outline')
+    assert.match(off.ring, /inset/)
+    await page.close()
+  })
+
+  test('the chips leave Reset its room while it is hidden, so showing it moves no chip behind "N more"', async () => {
+    const vals = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot']
+    const rows = Array.from({ length: 30 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${vals[i % vals.length]}">message ${i + 1}</div>`).join('')
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ${JSON.stringify(vals)} }] })`, 640)
+    await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-chip').length === 6)
+    await page.waitForTimeout(100)
+    const row = () =>
+      frame().evaluate(() => {
+        const reset = document.querySelector('.thimble-reset') as HTMLElement
+        return {
+          shown: [...document.querySelectorAll<HTMLElement>('.thimble-colour-chip')].map((c) => (c.hidden ? 0 : Math.round(c.getBoundingClientRect().left))),
+          more: (document.querySelector('.thimble-colour-more') as HTMLElement).hidden ? '' : document.querySelector('.thimble-colour-more')!.textContent,
+          reset: reset.hidden,
+        }
+      })
+    const before = await row()
+    assert.equal(before.reset, true)
+    assert.ok(before.more, `the row is full: ${JSON.stringify(before)}`)
+    await frame().locator('.thimble-colour-chip').first().click()
+    await page.waitForTimeout(150)
+    const after = await row()
+    assert.equal(after.reset, false)
+    assert.deepEqual([after.shown, after.more], [before.shown, before.more], 'the same chips in the same places')
+    await page.close()
+  })
+
+  test("hovering a field's value says what it means, as the page declares it, else what the field is", async () => {
+    const rows = Array.from({ length: 6 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 3 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', description: 'what the message holds besides text', values: ['Text only', { name: 'With links', meaning: 'links to a page of the wiki' }] }] })`)
+    await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-chip').length === 2)
+    const hover = async (name: string) => {
+      await frame().locator('.thimble-colour-chip', { hasText: name }).locator('.chip-text').hover()
+      await page.waitForTimeout(100)
+      return frame().evaluate(() => {
+        const t = document.querySelector('.thimble-tip') as HTMLElement | null
+        return t && t.style.display === 'block' ? [t.querySelector('.thimble-tip-h')!.textContent, t.querySelector('.thimble-tip-m')!.textContent] : null
+      })
+    }
+    assert.deepEqual(await hover('With links'), ['With links', 'links to a page of the wiki'])
+    assert.deepEqual(await hover('Text only'), ['Text only', 'what the message holds besides text'])
+    assert.equal(await frame().locator('.thimble-colour-chip[title]').count(), 0, 'no native tooltip besides')
+    await page.close()
+  })
+})
+
+describe("a label's texts", () => {
+  // one record whose text two labels mark: "connection pool" by Database connections (k1, orange), "charged twice" by
+  // Charged twice (k2, green); and one whose span comes from before spans named their label
+  const ROWS2 = `<div class="msg" data-anchor="m.jsonl#L1" data-colour="Chat">the connection pool was charged twice</div><div class="msg" data-anchor="m.jsonl#L2" data-colour="Chat">pool again</div>`
+  const label = (id: string, name: string, value: string, colour: string) => ({ id, name, colour, values: [{ name: value, colour }] })
+  const MSG = {
+    type: 'thimble:labels',
+    marks: {
+      'm.jsonl#L1': {
+        bar: '#d0750a',
+        names: ['Database connections', 'Charged twice'],
+        values: [{ id: 'k1', label: 'Database connections', value: 'connections', colour: '#d0750a' }, { id: 'k2', label: 'Charged twice', value: 'charged twice', colour: '#08632f' }],
+        spans: [{ text: 'connection pool', colour: '#d0750a', id: 'k1' }, { text: 'charged twice', colour: '#08632f', id: 'k2' }],
+      },
+      'm.jsonl#L2': { bar: '#d0750a', names: ['Database connections'], values: [{ id: 'k1', label: 'Database connections', value: 'connections', colour: '#d0750a' }], spans: [{ text: 'pool', colour: '#d0750a' }] },
+    },
+    on: [label('k1', 'Database connections', 'connections', '#d0750a'), label('k2', 'Charged twice', 'charged twice', '#08632f')],
+    filter: null,
+    all: [
+      { ...label('k1', 'Database connections', 'connections', '#d0750a'), on: true, here: true, values: [{ name: 'connections', colour: '#d0750a', highlight: true }], count: 2 },
+      { ...label('k2', 'Charged twice', 'charged twice', '#08632f'), on: true, here: true, values: [{ name: 'charged twice', colour: '#08632f', highlight: true }], count: 1 },
+    ],
+  }
+  const lit = (frame: () => Frame) =>
+    frame().evaluate(() => {
+      const out: Record<string, string[]> = {}
+      for (const k of CSS.highlights.keys()) if (k.startsWith('thimble-label-')) out[k === 'thimble-label-grey' ? 'grey' : 'colour'] = [...(out[k === 'thimble-label-grey' ? 'grey' : 'colour'] ?? []), ...[...CSS.highlights.get(k)!].map((r) => r.toString())]
+      for (const k in out) out[k].sort()
+      return out
+    })
+
+  test('only the chosen label takes its colours; the other labels that are on, a field and Off highlight in grey', async () => {
+    const { page, frame } = await own(ROWS2, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }] })`, 700, { v: 1, by: 'l:k1', seen: ['k1', 'k2'] })
+    await page.evaluate((m) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage(m, '*'), MSG)
+    await frame().waitForFunction(() => [...CSS.highlights.keys()].some((k) => k.startsWith('thimble-label-')))
+    await page.waitForTimeout(150)
+    assert.deepEqual(await lit(frame), { colour: ['connection pool', 'pool'], grey: ['charged twice'] }, "Database connections' texts in its colour, the span that names no label by its colour")
+    // a field chosen
+    await frame().locator('.thimble-colour-by').click()
+    await frame().locator('.thimble-colour-menu [data-by="f:kind"]').click()
+    await page.waitForTimeout(200)
+    assert.deepEqual(await lit(frame), { grey: ['charged twice', 'connection pool', 'pool'] })
+    // Off
+    await frame().locator('.thimble-colour-by').click()
+    await frame().locator('.thimble-colour-menu [data-by="off"]').click()
+    await page.waitForTimeout(200)
+    assert.deepEqual(await lit(frame), { grey: ['charged twice', 'connection pool', 'pool'] })
+    const grey = await frame().evaluate(() => [...document.querySelectorAll('style[data-thimble="labels"]')].map((s) => s.textContent).join(''))
+    assert.match(grey, /::highlight\(thimble-label-grey\)\{background-color:var\(--hl-bg/)
+    await page.close()
+  })
+})

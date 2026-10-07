@@ -7,17 +7,23 @@ fixed axis, "N before / N after" links, zoom buttons or a date menu of your own,
 way.
 
 - Drag the viewfinder to pan, and drag either of its edges, which show grips, to zoom. Drag across the overview outside
-  it to frame a new range, or click outside it to move it there. A double click shows the whole span. Ctrl, ⌘ or Alt with
-  the wheel (or a trackpad's pinch) zooms around the pointer; Shift with the wheel pans. With the viewfinder focused,
-  the arrow keys pan, `+` and `-` zoom and Home shows the whole span.
+  it to frame a new range, or click outside it to move it there. While the range shows the whole span, a drag anywhere
+  on the overview but its edges frames a new range. A double click shows the whole span. Ctrl, ⌘ or Alt with the wheel
+  (or a trackpad's pinch) zooms around the pointer; Shift with the wheel pans. With the viewfinder focused (a click on
+  the overview focuses it), the arrow keys pan, `+` and `-` zoom and Home shows the whole span.
 - The part outside the viewfinder is dimmed. The readout gives the range's start, end and length in the data's units.
-- Hovering the overview gives the time under the pointer and how many records lie there.
+  It is as wide as the widest readout of the span, so the overview beside it keeps its place and width as the range
+  zooms. It wraps only after the dash, never inside a date; a span of years gives its start and end on two lines.
+- Hovering the overview gives the time under the pointer and how many records lie there, in a tip under the overview.
 - The range opens on the whole span. thimble keeps a range zoomed in per view, with the Color by choice, and Reset in
   Color by's row brings back the whole span.
 - Zoom is horizontal only: the time zooms, and the view's rows or lanes keep their height and scroll as a list.
 - One readable axis: the overview carries light ticks, and at most a few labels while the viewfinder frames part of the
-  span, none while it shows the whole span. The chart of the range below it holds the axis with its labels
-  (`thimble.timeAxis`).
+  span, none while it shows the whole span, and none at all once the page draws the range's axis with
+  `thimble.timeAxis`. The chart of the range below it holds the axis with its labels. On an axis of hours, the first
+  time after a break or on a new day gives its date ("13 Sep 09:30"), and so does the first time of an axis that covers
+  more than a day; where that does not fit, the date alone. A label that would stand on a break's `//` moves just past
+  it, beside its tick.
 - Point events, such as a context compaction, are flags: a pin on the overview with its label on hover, and on the
   chart's axis a pin with its label at a readable size; hovering it lets the chart draw a faint guide line through
   itself.
@@ -64,7 +70,8 @@ function draw() {
 | `marks` | point events, `[{t, label, colour?}]`, drawn as flags |
 | `min` | the shortest range, in the units |
 | `height` | the overview's height in px, 28 by default |
-| `readout` | `false` for none, or an element or a selector to put it in |
+| `readout` | `false` for none, or an element or a selector to put it in (the page then sets its width) |
+| `labels` | `false` leaves the overview's labels out; they go anyway once `thimble.timeAxis` draws the range's axis |
 | `key` | the name thimble keeps the range under, `'time'` by default; give each control of a page its own |
 | `onChange(range)` | the range settled: after a drag, a wheel, a click, a double click, `set()` or Reset. Draw what lies between `range.from` and `range.to`. |
 | `onInput(range)` | while the viewfinder moves, for a page that can draw that fast |
@@ -80,7 +87,7 @@ function draw() {
 | `has(t)` | whether a time lies in the range |
 | `set(from, to)`, `set(null)`, `fit()` | the range set, or the whole span; `onChange` follows |
 | `data({times, values, bins, span, marks, gap})` | new data, any of them, such as after a filter; the range is kept where it can be |
-| `scale(width)` | the scale of the range across `width` px, with the overview's breaks: `{from, to, width, broken, x(t), t(x), ticks(px), bins(px), step(px), binOf(t), gaps()}` |
+| `scale(width)` | the scale of the range across `width` px, with the overview's breaks: `{from, to, width, broken, x(t), t(x), ticks(px), bins(px), step(px), binOf(t), gaps()}`; `ticks(px)` gives `[{t, x, lx, label, major}]`, `lx` where the label's middle stands |
 | `format(t, step?)` | a time in the readout's words, as precise as `step` needs |
 | `redraw()` | the overview drawn again, after the page changed what its values mean |
 
@@ -90,5 +97,7 @@ view at that width reads as a small multiple of the same time: a row's strip, a 
 
 `thimble.timeAxis(mount, scale, {marks, onMark, px})` draws the chart's axis in `mount`, an element as wide as the
 chart: its ticks with labels at least `px` (72) apart, a `//` at each break, and the marks as flags on a row under it,
-each with its label; `onMark(mark, x)` hears a flag hovered, with its px on the chart, and `onMark(null)` when the
-pointer leaves it.
+each with its label, on the left of its pin near the chart's right end; a flag whose label would run into the one
+before it keeps its pin and gives its label on hover. `onMark(mark, x)` hears a flag hovered, with its px on the chart,
+and `onMark(null)` when the pointer leaves it. Drawn for a scale from `range.scale(width)`, it takes the overview's
+labels away.

@@ -5,7 +5,9 @@
 //   const colour = thimble.colorBy({           thimble.colourBy is the same function
 //     mount: '#colour',                        an element in the view's top row, which the control fills
 //     fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }, { name: 'source' }],
-//                                              a declared value may name its palette colour: { name: 'Error', colour: 7 }
+//                                              a declared value may name its palette colour: { name: 'Error', colour: 7 },
+//                                              and what it means: { name: 'With links', meaning: 'links to a page' };
+//                                              `description` says what the field is; a chip's hover gives them
 //     chips: 'filter',                         a value turned off hides its records; 'highlight' (the default) dims them
 //     strip: '#list',                          the list that gets the colored tracks, or true for the page
 //     onChange: (colour) => draw(),            the choice, a value turned on or off, or the label values changed
@@ -23,8 +25,8 @@
 // nothing: no chips, no bars, grey tracks.
 // Color by is thimble's small secondary button with the choice in it. The chosen field's values are key chips in the
 // top row (viewer_kit.css .chip-key), each a square swatch of its colour, its name and its count; a click turns a value
-// off or on, an Alt-click or a double click keeps that value alone, and hovering a label's value shows what the label
-// says the value means. A click on a chip's swatch opens the palette of thimble's twelve label colours: the one picked
+// off or on, an Alt-click or a double click keeps that value alone, and hovering a value shows what it means: a label's
+// as the label says, a field's as the page declares it (or what the field is). A click on a chip's swatch opens the palette of thimble's twelve label colours: the one picked
 // recolours the value everywhere in the view (its chip, the records' bars, the tracks, and what the page draws through
 // colourOf). A label's value keeps it through thimble.setLabelColour, so Files and every view show it; a field's value
 // keeps it per view with the choice, and the palette's Reset colors gives the field's values their own colours back. On
@@ -224,8 +226,10 @@
     return ''
   }
   // ---------------------------------------------------------------- the kit's tip: a few words beside the pointer
+  // `side`: 'left' of x, 'above' y, 'under' (y the bottom of what it points at, `top` its top: under it, or over it
+  // when the frame has no room below), or else below and right of the pointer
   var tipEl = null
-  function tip(html, x, y, side) {
+  function tip(html, x, y, side, top0) {
     if (!html) return untip()
     if (!tipEl) {
       tipEl = document.createElement('div')
@@ -242,8 +246,8 @@
     var left = side === 'left' ? x - w - 10 : x + 12
     if (left + w > vw - 6) left = x - w - 10
     if (left < 6) left = 6
-    var top = side === 'above' ? y - h - 10 : y + 14
-    if (top + h > innerHeight - 6) top = y - h - 10
+    var top = side === 'above' ? y - h - 10 : side === 'under' ? y + 8 : y + 14
+    if (top + h > innerHeight - 6) top = (side === 'under' && top0 != null ? top0 : y) - h - (side === 'under' ? 8 : 10)
     if (top < 6) top = 6
     tipEl.style.left = left + 'px'
     tipEl.style.top = top + 'px'
@@ -259,11 +263,13 @@
     var values = []
     var named = []
     var taken = {}
+    var meanings = {}
     for (var i = 0; i < list.length; i++) {
       var v = list[i]
       var obj = v != null && typeof v === 'object'
       var name = String(obj ? v.name : v)
       if (values.indexOf(name) >= 0) continue
+      if (obj && typeof v.meaning === 'string' && v.meaning) meanings[name] = v.meaning
       var c = obj ? Number(v.colour) : NaN
       var at = c >= 1 && c <= PALETTE && Math.floor(c) === c && !taken[c - 1] ? c - 1 : -1
       if (at >= 0) taken[at] = true
@@ -277,7 +283,7 @@
       taken[next] = true
       return next
     })
-    return { values: values, slots: slots }
+    return { values: values, slots: slots, meanings: meanings }
   }
   // the palette place a field declares for a value, or -1
   function slotOf(f, key) {
@@ -296,7 +302,9 @@
       .map(function (f) {
         if (typeof f === 'string') f = { name: f }
         var declared = declare(f.values)
-        return { name: String(f.name), title: String(f.title || f.name), values: declared && declared.values, slots: declared && declared.slots, value: typeof f.value === 'function' ? f.value : null }
+        // what the field is and what each declared value means, which a chip's hover says
+        var about = typeof f.description === 'string' ? f.description : ''
+        return { name: String(f.name), title: String(f.title || f.name), values: declared && declared.values, slots: declared && declared.slots, meanings: (declared && declared.meanings) || {}, description: about, value: typeof f.value === 'function' ? f.value : null }
       })
     this.mode = opts.chips === 'filter' ? 'filter' : 'highlight'
     this.initial = typeof opts.initial === 'string' ? opts.initial : this.fields.length ? this.fields[0].name : null
@@ -678,7 +686,7 @@
       var on = off.indexOf(v.key) < 0
       chips +=
         '<button type="button" class="chip chip-key chip-act thimble-colour-chip" data-i="' + i + '" aria-pressed="' + on + '"' + lab +
-        (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + (c && c.label ? '' : ' title="' + esc(v.name) + '"') + '><span class="chip-sw"' + (v.colour ? ' data-palette title="' + esc('Color of ' + v.name) + '"' : '') + '></span><span class="chip-text">' + esc(v.name) + '</span><span class="chip-count">' + num(v.n) + '</span></button>'
+        (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + (c && c.label || this.fieldAbout(c, v) ? '' : ' title="' + esc(v.name) + '"') + '><span class="chip-sw"' + (v.colour ? ' data-palette title="' + esc('Color of ' + v.name) + '"' : '') + '></span><span class="chip-text">' + esc(v.name) + '</span><span class="chip-count">' + num(v.n) + '</span></button>'
     }
     chips += '<button type="button" class="btn btn-ghost btn-sm thimble-colour-more" hidden></button>'
     var reset = '<button type="button" class="btn btn-secondary btn-sm thimble-reset"' + (this.resetShown ? '' : ' hidden') + '>' + ico('reset') + 'Reset</button>'
@@ -701,23 +709,47 @@
     if (b) b.hidden = !on
     this.fit()
   }
-  // the chips that do not fit the row go behind "N more", which lists every value
+  // the chips that do not fit the row go behind "N more", which lists every value. They leave Reset its room while it is
+  // hidden, so the same chips fit when it shows
   Control.prototype.fit = function () {
     if (!this.root) return
     var box = this.root.querySelector('.thimble-colour-chips')
     var more = this.root.querySelector('.thimble-colour-more')
     if (!box || !more) return
+    var reset = this.root.querySelector('.thimble-reset')
+    var room = reset && reset.hidden ? this.resetRoom(reset) : 0
+    // the chips' own width, not the box's, which takes the row's free width
+    var over = function () {
+      var left = box.getBoundingClientRect().left
+      var right = left
+      for (var k = 0; k < box.children.length; k++) {
+        var c = box.children[k]
+        if (!c.hidden) right = Math.max(right, c.getBoundingClientRect().right)
+      }
+      return right - left > box.clientWidth - room + 1
+    }
     var chips = box.querySelectorAll('.thimble-colour-chip')
     for (var i = 0; i < chips.length; i++) chips[i].hidden = false
     more.hidden = true
-    if (box.scrollWidth <= box.clientWidth + 1) return
+    if (!over()) return
     more.hidden = false
     var hid = 0
-    for (var j = chips.length - 1; j >= 0 && box.scrollWidth > box.clientWidth + 1; j--) {
+    for (var j = chips.length - 1; j >= 0 && over(); j--) {
       chips[j].hidden = true
       hid++
       more.innerHTML = hid + ' more' + ico('down')
     }
+  }
+  // the px Reset takes in the row with the gap before it, measured unseen while it is hidden
+  Control.prototype.resetRoom = function (reset) {
+    if (this.resetW) return this.resetW
+    reset.style.visibility = 'hidden'
+    reset.hidden = false
+    var w = reset.offsetWidth
+    reset.hidden = true
+    reset.style.visibility = ''
+    if (w > 0) this.resetW = w + (parseFloat(getComputedStyle(this.root).columnGap) || 0)
+    return this.resetW || 0
   }
   // the value a chip or a menu item stands for, by its place among the chips' values (a value's own text may hold what
   // an attribute cannot)
@@ -725,11 +757,23 @@
     var v = this.values[Number(node.getAttribute('data-i'))]
     return v ? v.key : null
   }
-  // what a label's value means, beside its chip, once thimble has said
+  // what a field's value means, as the page declares it, else what the field is ('' for neither)
+  Control.prototype.fieldAbout = function (c, v) {
+    var f = c && c.field ? this.field(c.field) : null
+    if (!f || !v) return ''
+    return (v.value != null && f.meanings[v.value]) || f.description || ''
+  }
+  // what a value means, beside its chip: a field's as the page declares it, a label's once thimble has said
   Control.prototype.chipTip = function (chip, e) {
     var c = this.choice()
-    if (!c || !c.label) return
+    if (!c || c.off) return
     var v = this.values[Number(chip.getAttribute('data-i'))]
+    if (c.field) {
+      var about = this.fieldAbout(c, v)
+      var fr = chip.getBoundingClientRect()
+      if (about && !this.menu) tip('<div class="thimble-tip-h"><span class="thimble-colour-sw"' + (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + '></span>' + esc(v.name) + '</div><div class="thimble-tip-m">' + esc(about) + '</div>', fr.left, fr.bottom - 8)
+      return
+    }
     if (!v || v.value == null) return
     var id = c.label
     var r = chip.getBoundingClientRect()
@@ -957,7 +1001,7 @@
     html += this.fields
       .map(function (f) {
         var on = !!(c && c.field === f.name)
-        return '<button type="button" class="thimble-colour-item thimble-colour-choice" role="menuitemradio" aria-checked="' + on + '" data-by="' + esc('f:' + f.name) + '">' + tick(on) + choiceBody('', f.title, self.fieldValues(f)) + '</button>'
+        return '<button type="button" class="thimble-colour-item thimble-colour-choice" role="menuitemradio" aria-checked="' + on + '" data-by="' + esc('f:' + f.name) + '"' + (f.description ? ' title="' + esc(f.description) + '"' : '') + '>' + tick(on) + choiceBody('', f.title, self.fieldValues(f)) + '</button>'
       })
       .join('')
     var all = allLabels()

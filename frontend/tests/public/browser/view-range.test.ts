@@ -1,6 +1,8 @@
 // The view kit's time range selector (backend/app/viewer_range.js) and a list's two tracks (viewer_colour.js) in a real
 // browser, a page holding the view in a sandboxed frame: the viewfinder's edge zooms, its middle pans, a double click
-// shows the whole span and Ctrl with the wheel zooms around the pointer; the overview draws its records in the Color by
+// shows the whole span, a drag across the whole span frames a new range, the keys zoom and pan, and Ctrl with the wheel
+// zooms around the pointer; the hover tip stands under the overview, and the readout keeps the overview in place as it
+// zooms; the overview draws its records in the Color by
 // colours, grey with Off, one colour per pixel row; a long list gets the zoomed track at the outer edge beside the
 // overview, its colours faded beyond the part in view, which lies under a lens joined to the overview's frame by two
 // lines, the lens going down the zoomed track with the frame; hovering the overview previews the records there in plain
@@ -49,8 +51,10 @@ afterAll(async () => {
   cleanup()
 })
 
-async function framed(dpr = 1): Promise<{ page: Page; frame: () => Frame }> {
+async function framed(dpr = 1): Promise<{ page: Page; frame: () => Frame; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width: 900, height: 600 }, deviceScaleFactor: dpr })
+  const errors: string[] = []
+  page.on('pageerror', (e) => errors.push(String(e)))
   await page.setContent(`<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:800px;height:420px"></iframe></body></html>`)
   await page.evaluate((doc) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = doc), VIEW)
   const frame = () => page.frames().find((f) => f !== page.mainFrame())!
@@ -58,7 +62,7 @@ async function framed(dpr = 1): Promise<{ page: Page; frame: () => Frame }> {
   await frame().waitForSelector('.thimble-range-win', { state: 'attached' })
   await frame().waitForFunction(() => document.querySelectorAll('[data-thimble-colour]').length > 0)
   await page.waitForTimeout(150)
-  return { page, frame }
+  return { page, frame, errors }
 }
 const state = (frame: () => Frame) => frame().evaluate(() => ({ from: (window as any).range.from as number, to: (window as any).range.to as number, full: (window as any).range.full as boolean, rows: document.querySelectorAll('.msg').length }))
 
@@ -95,6 +99,87 @@ describe('the time range selector in a frame', () => {
     await page.mouse.dblclick(box.x + box.width * 0.6, box.y + box.height / 2)
     await page.waitForTimeout(100)
     assert.equal((await state(frame)).full, true)
+    await page.close()
+  })
+
+  test('at the whole span a drag across the overview frames a new range, as its crosshair says', async () => {
+    const { page, frame } = await framed()
+    const box = (await frame().locator('.thimble-range-strip').boundingBox())!
+    const s0 = await state(frame)
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height / 2)
+    assert.equal(await frame().evaluate(() => getComputedStyle(document.querySelector('.thimble-range-strip')!).cursor), 'crosshair')
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2, { steps: 8 })
+    await page.mouse.up()
+    await page.waitForTimeout(100)
+    const s1 = await state(frame)
+    const at = (f: number) => s0.from + (s0.to - s0.from) * f
+    assert.equal(s1.full, false)
+    assert.ok(Math.abs(s1.from - at(0.3)) < (s0.to - s0.from) * 0.02 && Math.abs(s1.to - at(0.6)) < (s0.to - s0.from) * 0.02, JSON.stringify([s0, s1]))
+    await page.close()
+  })
+
+  test("the viewfinder's keys: + zooms, the arrows pan, - zooms out and Home shows the whole span, with no error", async () => {
+    const { page, frame, errors } = await framed()
+    const box = (await frame().locator('.thimble-range-strip').boundingBox())!
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    assert.equal(await frame().evaluate(() => document.activeElement?.className), 'thimble-range-win')
+    await page.keyboard.press('Shift')
+    await page.keyboard.press('+')
+    await page.waitForTimeout(80)
+    const z = await state(frame)
+    assert.equal(z.full, false)
+    await page.keyboard.press('ArrowLeft')
+    await page.waitForTimeout(80)
+    const l = await state(frame)
+    assert.ok(l.from < z.from && Math.abs(l.to - l.from - (z.to - z.from)) < 1, JSON.stringify([z, l]))
+    await page.keyboard.press('-')
+    await page.waitForTimeout(80)
+    const o = await state(frame)
+    assert.ok(o.full || o.to - o.from > l.to - l.from, JSON.stringify([l, o]))
+    await page.keyboard.press('Home')
+    await page.waitForTimeout(80)
+    assert.equal((await state(frame)).full, true)
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
+  test('hovering the overview gives the time and the records there in a tip under it, never cut off at the top', async () => {
+    const { page, frame } = await framed()
+    const box = (await frame().locator('.thimble-range-strip').boundingBox())!
+    await page.mouse.move(box.x + box.width * 0.4, box.y + box.height / 2)
+    await page.waitForTimeout(100)
+    const tip = await frame().evaluate(() => {
+      const t = document.querySelector('.thimble-tip') as HTMLElement
+      const r = t.getBoundingClientRect()
+      const s = document.querySelector('.thimble-range-strip')!.getBoundingClientRect()
+      return { shown: t.style.display, top: r.top, stripBottom: s.bottom, text: t.textContent }
+    })
+    assert.equal(tip.shown, 'block')
+    assert.ok(tip.top >= tip.stripBottom, JSON.stringify(tip))
+    assert.match(tip.text ?? '', /records?$/)
+    await page.close()
+  })
+
+  test("the readout keeps its width as the range zooms, so the overview keeps its place and width, and no date breaks", async () => {
+    const { page, frame } = await framed()
+    const look = () =>
+      frame().evaluate(() => {
+        const s = document.querySelector('.thimble-range-strip')!.getBoundingClientRect()
+        const lines = [...document.querySelectorAll('.thimble-range-d')].map((d) => d.getClientRects().length)
+        return { left: s.left, width: s.width, lines, text: document.querySelector('.thimble-range-dates')!.textContent }
+      })
+    // a range within a day, whose readout is short, then one across midnight, the widest
+    await frame().evaluate((t0) => (window as any).range.set(t0 + 3600, t0 + 3 * 3600), T0)
+    await page.waitForTimeout(80)
+    const a = await look()
+    assert.equal(a.text, '16 Jun 01:00 – 03:00')
+    await frame().evaluate((t0) => (window as any).range.set(t0 + 18 * 3600, t0 + 30 * 3600), T0)
+    await page.waitForTimeout(80)
+    const b = await look()
+    assert.equal(b.text, '16 Jun 18:00 – 17 Jun 06:00')
+    assert.deepEqual([b.left, b.width], [a.left, a.width], JSON.stringify([a, b]))
+    assert.ok(b.lines.every((n) => n === 1), 'each end on one line')
     await page.close()
   })
 

@@ -304,7 +304,10 @@
       if (typeof c.bar === 'string') c.bar = realColour(c.bar)
       if (Array.isArray(c.spans))
         c.spans = c.spans.map(function (s) {
-          return s && typeof s === 'object' ? { text: s.text, colour: realColour(s.colour) } : s
+          if (!s || typeof s !== 'object') return s
+          var sp = { text: s.text, colour: realColour(s.colour) }
+          if (s.id != null) sp.id = String(s.id)
+          return sp
         })
       if (Array.isArray(c.values))
         c.values = c.values.map(function (v) {
@@ -962,7 +965,10 @@
   // data-colour, anchored or not, takes the bar in that value's colour, with data-thimble-colour (an SVG shape the page
   // colours itself); the labels that are on then draw no bar, and their texts stay highlighted. An element whose value
   // the analyst turned off is hidden or dimmed (data-thimble-off), as the hook says. With Color by Off (mode 'off') no
-  // element takes a bar, and the texts the labels that are on match stay highlighted.
+  // element takes a bar. One colour encoding: with Colour by in the page, only the chosen label's texts are highlighted in
+  // its colours; the texts of the other labels that are on, and every label's with a field or Off chosen, are
+  // highlighted in the plain ink of a highlight (--hl-bg). A span names its label (`id`); one from before spans did is
+  // the chosen label's when it has the colour of that label's value on the record.
   var offed = []
   var OFF = '[data-thimble-off="hide"]{display:none!important}[data-thimble-off="dim"]{opacity:.25!important}'
   function paint() {
@@ -984,6 +990,7 @@
     var plain = !!(colourHook && colourHook.mode === 'off') // Color by: Off, which draws no bar
     var colours = []
     var ranges = []
+    var greyRanges = [] // the texts of a label that is on but is not the Colour by choice
     var owns = []
     function slot(c) {
       var k = colours.indexOf(c)
@@ -1064,11 +1071,15 @@
         if (!hook) spanned.push([el2, todo[d][6]])
       }
       for (var p = 0; p < spanned.length; p++) {
-        var spans = HL && spanned[p][1] && Array.isArray(spanned[p][1].spans) ? spanned[p][1].spans : []
+        var sm = spanned[p][1]
+        var spans = HL && sm && Array.isArray(sm.spans) ? sm.spans : []
         var t = spans.length ? joined(spanned[p][0]) : null
+        var chosen = hook && hook.mode === 'label' ? valueIn(sm, hook) : null
         for (var s = 0; s < spans.length; s++) {
           var sp = spans[s] || {}
-          if (typeof sp.colour === 'string' && COLOUR.test(sp.colour)) rangesOf(t, String(sp.text || ''), ranges[slot(sp.colour)])
+          if (typeof sp.colour !== 'string' || !COLOUR.test(sp.colour)) continue
+          var mine = !colourHook || (!!chosen && (sp.id != null ? String(sp.id) === String(hook.label) : sp.colour === chosen.colour))
+          rangesOf(t, String(sp.text || ''), mine ? ranges[slot(sp.colour)] : greyRanges)
         }
       }
     }
@@ -1079,6 +1090,7 @@
       css += '::highlight(thimble-label-' + k + '){background-color:color-mix(in oklab,' + colours[k] + ' 24%,transparent)}'
     }
     for (var w = 0; w < owns.length; w++) css += '[data-thimble-own="' + w + '"]{--thimble-own:' + owns[w] + '}'
+    if (greyRanges.length) css += '::highlight(thimble-label-grey){background-color:var(--hl-bg,rgba(27,26,24,.08))}'
     if (css && !sheet) {
       sheet = document.createElement('style')
       sheet.setAttribute('data-thimble', 'labels')
@@ -1088,11 +1100,12 @@
     if (HL) {
       for (var o2 = 0; o2 < lit.length; o2++) CSS.highlights.delete(lit[o2])
       lit = []
-      for (var h = 0; h < ranges.length; h++) {
-        if (!ranges[h].length) continue
-        var name = 'thimble-label-' + h
+      for (var h = 0; h <= ranges.length; h++) {
+        var rs = h < ranges.length ? ranges[h] : greyRanges
+        if (!rs.length) continue
+        var name = h < ranges.length ? 'thimble-label-' + h : 'thimble-label-grey'
         var hl = new Highlight()
-        for (var q = 0; q < ranges[h].length; q++) hl.add(ranges[h][q])
+        for (var q = 0; q < rs.length; q++) hl.add(rs[q])
         CSS.highlights.set(name, hl)
         lit.push(name)
       }

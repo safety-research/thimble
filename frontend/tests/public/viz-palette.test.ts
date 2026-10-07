@@ -1,7 +1,8 @@
 // The nominal chart colours (--viz-1 to --viz-7 in src/styles/tokens.css), which views, cards and charts take for
 // their categories: on every paper none is a red, which reads as an error, or a purple, the agents' colour, each reads
 // at 3:1 on the paper's grounds, and neighbours and the first three stay apart, also under protan and deutan vision.
-// The label colours (--label-1 to --label-12) hold to the same, and all twelve stay apart pairwise.
+// The label colours (--label-1 to --label-12) hold to the same, all twelve stay apart pairwise, the first five are five
+// hues, and Dark's chestnut, brown and navy, which a dark paper lightens, stay apart from orange and sky.
 import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import { MPL_CYCLE, restyle } from '../../src/lib/svg.ts'
@@ -72,6 +73,18 @@ const seen = (hex: string, vision?: string): number[] => {
 const apart = (a: string, b: string, vision?: string): number => {
   const [x, y] = [seen(a, vision), seen(b, vision)]
   return 100 * Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2])
+}
+
+/** the CIE 1976 distance of two colours in CIELAB (D65) */
+const cielab = (a: string, b: string): number => {
+  const lab = (hex: string): number[] => {
+    const [r, g, bl] = linear(hex)
+    const xyz = [(0.4124 * r + 0.3576 * g + 0.1805 * bl) / 0.95047, 0.2126 * r + 0.7152 * g + 0.0722 * bl, (0.0193 * r + 0.1192 * g + 0.9505 * bl) / 1.08883]
+    const [x, y, z] = xyz.map((t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116))
+    return [116 * y - 16, 500 * (x - y), 200 * (y - z)]
+  }
+  const [p, q] = [lab(a), lab(b)]
+  return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2])
 }
 
 /** OKLCH chroma and hue in degrees */
@@ -163,5 +176,24 @@ describe.each(Object.keys(PAPERS))('the label colours on the %s paper', (paper) 
       for (const v of ['protan', 'deutan']) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
     }
     for (let i = 0; i < colours.length; i++) for (let j = i + 1; j < colours.length; j++) expect(apart(colours[i], colours[j]), `${colours[i]} and ${colours[j]}`).toBeGreaterThanOrEqual(7.5)
+  })
+
+  test('the first five, which a field of five values shows side by side, are five hues with no second blue, about 30 apart in CIELAB', () => {
+    const five = colours.slice(0, 5)
+    for (let i = 0; i < 5; i++)
+      for (let j = i + 1; j < 5; j++) {
+        const [a, b] = [five[i], five[j]]
+        const dh = Math.abs(chromaHue(a)[1] - chromaHue(b)[1])
+        expect(Math.min(dh, 360 - dh), `${a} and ${b} are one hue`).toBeGreaterThanOrEqual(25)
+        expect(cielab(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(29.5)
+        expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(11)
+      }
+  })
+
+  test('chestnut and brown stay apart from orange, and navy from sky', () => {
+    const [orange, sky, brown, navy, chestnut] = ['--label-2', '--label-7', '--label-6', '--label-8', '--label-11'].map((s) => t[s])
+    expect(cielab(chestnut, orange), `${chestnut} and ${orange}`).toBeGreaterThanOrEqual(30)
+    expect(cielab(brown, orange), `${brown} and ${orange}`).toBeGreaterThanOrEqual(28)
+    expect(cielab(navy, sky), `${navy} and ${sky}`).toBeGreaterThanOrEqual(23)
   })
 })
