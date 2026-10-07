@@ -1,15 +1,16 @@
-// Repository in the terminal: several agent runs on one small library, drawn the way a code forge's command line and
-// a message board draw them, as view.html does in the browser. The tabs row picks pull requests, issues, discussions or
-// agents, each with its count. The top row searches, filters by run (or any field or label) and colors by state (or any
-// field or label). The time range's strip shows the runs' activity, each run's day a stretch of its own and the nights
-// between them breaks. The list has a heading per run and a row per item under the columns' names: its number, title
-// and the tab's columns as the width holds them, and under it a dim line of what a forge writes there (who opened it
-// when, the issue it fixes, its review decision, its flags; a thread's first words; an agent's sign-off). Enter opens
-// the item's page in the side pane: a pull request's or an issue's timeline with each commit's diff, a thread's posts
-// as replies under the first, an agent's sign-off and what it did; ↑↓ then move through its records and Enter opens a
-// record's place. One fetch gives the tab's items that the label filter, Filter by and Color by keep; the search and
-// the range narrow them here.
-import { COLORS, colorBy, columns, cut, dayName, details, draw, dur, fetch, filterBy, list, num, onLabels, onOpen, open as openPlace, plural, search, side, timeRange, view, width, wrap } from 'thimble-term'
+// Repository in the terminal: several agent runs on one small library, each run its own repository on a code forge,
+// drawn the way the forge's command line draws one repository, as view.html does in the browser. The first row is the
+// repository's head: the run switcher with the run's name (p, or a click, lists the runs with their tabs' counts) and
+// the run's facts. The tabs row picks pull requests, issues, discussions or agents, each with its count. The top row
+// searches, filters by any field or label and colors by state (or any field or label). The list has a row per item
+// under the columns' names: its number, title and the tab's columns as the width holds them, and under it a dim line of
+// what a forge writes there (who opened it when, the issue it fixes, its review decision, its flags; a thread's first
+// words; an agent's sign-off). Enter opens the item's page in the side pane: a pull request's or an issue's timeline
+// with each commit's diff, a thread's posts as replies under the first, an agent's sign-off and what it did; ↑↓ then
+// move through its records and Enter opens a record's place. One fetch gives the run's items of the tab that the label
+// filter, Filter by and Color by keep; the search narrows them here. Color marks the unit its value belongs to: a field
+// colors the rows' marks and the track; a label marks records, so a row, which stands for its records, shows their mix.
+import { COLORS, choice, colorBy, columns, cut, dayName, details, draw, dur, fetch, filterBy, list, num, onLabels, onOpen, open as openPlace, plural, search, side, view, width, wrap } from 'thimble-term'
 
 // the forge's tabs, with shorter names where the panel is narrow
 const TABS = [
@@ -68,7 +69,8 @@ const META = {
 }
 
 let tab = 'pulls'
-let data = null // the reader's answer for the tab (reader.py _view): {tab, items, counts, filtered, tabs, runs}
+let run = null // the run whose repository shows, the reader's first until one is chosen
+let data = null // the reader's answer for the run's tab (reader.py _view): {tab, run, items, counts, filtered, tabs, runs}
 let loading = null // the newest load, which a citation waits for after it changed the tab
 let want = null // a place a citation opened before the items arrived
 const units = new Map() // an item's page (reader.py _detail), null while it is read
@@ -83,15 +85,16 @@ const FIELDS = [
       closed: 'A pull request closed without a merge', fixed: 'An issue that a merged pull request fixes',
     },
   },
-  { name: 'run', title: 'Run', description: 'The run whose folder holds the item' },
   { name: 'area', title: 'Area', description: 'The part of the library: the first label, else the area of the issue it fixes' },
   { name: 'author', title: 'Author', description: 'Who opened the pull request or the issue, or started the thread' },
 ]
 const colour = colorBy({ fields: FIELDS, chips: 'filter', onChange: () => load() })
-const filter = filterBy({ fields: FIELDS, initial: 'run', onChange: () => load() })
-// the runs fall on different days, so the nights between them are breaks
-const range = timeRange({ gap: 4 * 3600 })
+const filter = filterBy({ fields: FIELDS, onChange: () => load() })
 const q = search({ words: 'search' })
+// the run switcher, made once the reader named the runs: Reset puts back the run the view opens on
+let runs = null
+const facts = (r) => `${plural(r.team || 0, 'agent')} · ${plural(r.approvals || 1, 'approval')} to merge · ${dayName(r.start)}`
+const tally = (r) => TABS.map((t) => `${num(r.tabs[t.tab])} ${t.short}`).join(' · ')
 const rows = list({ key: (it) => it.key })
 // an item's page beside the list, and its records in it, which ↑↓ move through while it is open
 const pane = side({ key: 'item', width: 0.5 })
@@ -107,17 +110,18 @@ function load() {
 async function reload() {
   let got
   try {
-    got = await fetch({ op: 'view', tab, colour: colour.query(), filter: filter.query() }, { key: 'view' })
+    got = await fetch({ op: 'view', run, tab, colour: colour.query(), filter: filter.query() }, { key: 'view' })
   } catch (e) {
     if (e.name === 'AbortError') return
     throw e
   }
   data = got
+  run = got.run
   colour.counts(got.counts)
   filter.counts(got.filtered)
-  // the overview: every record of the items Color by keeps, in the hue of its value
-  const ev = got.items.flatMap((it) => it.events).filter((e) => colour.isOn(e[2]))
-  range.data({ times: ev.map((e) => e[0]), values: ev.map((e) => e[2]) })
+  const values = got.runs.map((r) => ({ name: r.run, value: r.run, right: tally(r) }))
+  if (!runs) runs = choice({ title: 'run', values, all: false, initial: got.run, key: 'p', tip: 'switch run', onChange: (r) => chooseRun(r) })
+  else runs.values = values
   units.clear()
   if (pane.key !== null && !got.items.some((it) => it.key === pane.key)) pane.hide()
   if (pane.key !== null) await readUnit(pane.key)
@@ -142,18 +146,32 @@ function choose(t) {
   load()
 }
 
+// another run's repository, on the same tab
+function chooseRun(r) {
+  if (!r || r === run) return
+  run = r
+  pane.hide()
+  load()
+}
+
 // an item's page, on its tab, with the record `ref` chosen: a citation, a link and another run's issue come here
 async function show(key, ref = null) {
   const t = TAB_OF[key.split('/')[1]]
+  const r = key.split('/')[0]
   if (!t) return
-  if (t !== tab) {
-    choose(t)
+  if (t !== tab || r !== run) {
+    tab = t
+    if (r !== run) {
+      run = r
+      if (runs) runs.set(r)
+    }
+    pane.hide()
+    load()
     await loading
   }
   const it = data && data.items.find((i) => i.key === key)
   if (!it) return
   if (q.text && !it.search.includes(q.text.trim().toLowerCase())) q.set('')
-  if (!range.full && !it.events.some((e) => range.has(e[0]))) range.set(null)
   rows.choose(key)
   pane.show(key)
   await readUnit(key)
@@ -161,13 +179,14 @@ async function show(key, ref = null) {
   if (x) records.choose(recKey(x))
 }
 
-// a run's citation frames its day in the range; any other opens its item
+// a run's citation opens its repository; any other opens its item
 function go() {
   const t = want
   want = null
-  const run = t.run && data.runs.find((r) => r.run === t.run)
-  if (run) range.set(run.start, run.end)
-  else if (t.key) show(t.key, t.ref)
+  if (t.run && data.runs.some((r) => r.run === t.run)) {
+    if (runs) runs.set(t.run)
+    chooseRun(t.run)
+  } else if (t.key) show(t.key, t.ref)
 }
 
 onOpen((place) => {
@@ -277,6 +296,38 @@ function page(it, d) {
 
 // ------------------------------------------------------------------------------------------------ the view
 
+// under a label, a row stands for its records, so it takes no mark of its own: this bar shows its records' mix of the
+// label's values in `n` cells, each value's share of them, a cell at least for a value that is there, in the chips'
+// order, the records with no value dim. Drawn here until the kit's proportion bar replaces it
+const MIX = 6
+function mixCells(it, n = MIX) {
+  const order = colour.values.map((c) => (c.value === null ? '' : String(c.value)))
+  const at = (v) => { const i = order.indexOf(v === null ? '' : String(v)); return i < 0 ? order.length : i }
+  const parts = (it.mix || []).slice().sort((a, b) => at(a[0]) - at(b[0])).slice(0, n)
+  const total = parts.reduce((k, [, m]) => k + m, 0)
+  if (!total || !parts.some(([v]) => v !== null)) return [{ s: ' '.repeat(n) }]
+  // a cell for each value, then the rest by the largest share left
+  const cells = parts.map(() => 1)
+  for (let left = n - cells.length; left > 0; left--) {
+    let best = 0
+    parts.forEach(([, m], i) => { if (m / total * n - cells[i] > parts[best][1] / total * n - cells[best]) best = i })
+    cells[best]++
+  }
+  return parts.map(([v], i) => {
+    const hue = v === null ? null : colour.colourOf(v)
+    return hue && hue !== COLORS.dim ? { s: '━'.repeat(cells[i]), fg: hue } : { s: '━'.repeat(cells[i]), d: true }
+  })
+}
+
+// the repository's head: the switcher with the run's name, then the run's facts in the room left
+function headRow(d) {
+  const r = d.row()
+  runs.add(r)
+  const now = data.runs.find((x) => x.run === run)
+  if (now && r.room > 4) r.gap().add(cut(facts(now), r.room), { d: true })
+  r.end()
+}
+
 // the tabs, each its name and count with a cell of space at each side, the chosen one inverse; 1-4 choose them
 function tabsRow(d) {
   const counts = (t) => (data ? ` ${num(data.tabs[t.tab])}` : '')
@@ -291,6 +342,7 @@ function tabsRow(d) {
 }
 
 draw((d) => {
+  if (data && runs) headRow(d)
   tabsRow(d)
   // the top row: the search, Filter by with its toggles, Color by with its chips, Reset at R
   colour.draw(d, (r) => {
@@ -302,28 +354,26 @@ draw((d) => {
     d.row().add(`◌ reading the ${name}`, { d: true }).end()
     return
   }
-  // the runs' activity over the whole span, with the window
-  range.draw(d)
   d.blank()
-  // the items active in the range that the search keeps, under their run's heading
+  // the run's items that the search keeps
   const words = q.text.trim().toLowerCase()
-  const shown = data.items.filter((it) => (!words || it.search.includes(words)) && (range.full || it.events.some((e) => range.has(e[0]))))
-  const items = data.runs.flatMap((r) => {
-    const its = shown.filter((it) => it.run === r.run)
-    return its.length ? [{ heading: `${r.run} · ${plural(r.team || 0, 'agent')} · ${plural(r.approvals || 1, 'approval')} to merge · ${dayName(r.start)}` }, ...its] : []
-  })
+  const items = data.items.filter((it) => !words || it.search.includes(words))
+  // a field colors the rows' marks and the track; a label, whose marks are on records, colors neither: the rows show
+  // their records' mix and the track is plain
+  const group = !!colour.label
   // the columns the list's width holds after the item's number, laid out as its header draws, in the width the side pane
   // leaves it less the mark and the track
   const idW = tab === 'pulls' || tab === 'issues' ? Math.max(3, ...data.items.map((it) => width(`#${it.number}`))) : 0
   let specs = []
   let C = null
+  const mixW = group ? MIX + 2 : 0
   rows.draw(d, {
     items,
-    colour,
-    value: (it) => it.value,
+    ...(group ? {} : { colour, value: (it) => it.value }),
     empty: `no ${name}`,
     header: (r) => {
-      const room = r.d.cols - 5 - (idW ? idW + 2 : 0)
+      const room = r.d.cols - 5 - (idW ? idW + 2 : 0) - mixW + (group ? 2 : 0)
+      if (group) r.add(' '.repeat(MIX)).gap()
       specs = COLS[tab].filter((c) => !c.from || room + 5 >= c.from)
       // the first column as wide as its longest cell where the panel has room to spare, so the others stand by it
       const rest = specs.slice(1).reduce((n, c) => n + c.w + 2, 0)
@@ -333,11 +383,12 @@ draw((d) => {
       C.header(r, specs.map((c) => c.name))
     },
     row: (it, r) => {
+      if (group) r.runsOf(mixCells(it)).gap()
       if (idW) r.add(`#${it.number}`.padEnd(idW), { d: true }).gap()
       C.cells(r, specs.map((c) => cut(c.cell(it), C.widths[specs.indexOf(c)])), specs.map((c) => (c.d ? { d: true } : {})))
     },
     body: (it, bd) => bd.line({ s: cut(META[tab](it).filter(Boolean).join(' · '), bd.cols), d: true }),
-    bodyIndent: 2 + (idW ? idW + 2 : 0),
+    bodyIndent: (group ? mixW : 2) + (idW ? idW + 2 : 0),
     side: pane,
     sideTitle: (it) => `${it.run}${it.number != null ? ` #${it.number}` : ''} ${it.title}`,
     detail: page,

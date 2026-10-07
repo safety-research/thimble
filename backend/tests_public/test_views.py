@@ -991,7 +991,7 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
 
 async def _every_answer(name: str, slug: str) -> list:
     """What the example's page fetches, over every place: each Timeline event in full, each session's transcript and
-    each call in full, each Repository tab and unit."""
+    each call in full, each Repository run's tabs and units."""
     call = functools.partial(views.reader_call, name, slug, "records")
     if name == "timeline":
         rows = (await call({"op": "overview"}))["cols"]["r"]
@@ -1003,9 +1003,10 @@ async def _every_answer(name: str, slug: str) -> list:
         out += [await call({"op": "record", "ref": it["ref"]}) for it in ov["items"] if it["kind"] == "call"]
         return [*out, ov]
     out = []
-    for tab in ("pulls", "issues", "discussions", "agents"):
-        got = await call({"op": "view", "tab": tab, "runs": ["r1", "r2", "r3", "r4"], "compare": True})
-        out += [got, *[await call({"op": "unit", "key": it["key"]}) for it in got["items"]]]
+    for run in ("r1", "r2", "r3", "r4"):
+        for tab in ("pulls", "issues", "discussions", "agents"):
+            got = await call({"op": "view", "run": run, "tab": tab})
+            out += [got, *[await call({"op": "unit", "key": it["key"]}) for it in got["items"]]]
     return out
 
 
@@ -1039,8 +1040,13 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     assert [s["state"] for s in rep["shots"]] == list(views.CHECK_STATES)
     assert [s["state"] for s in rep["shots"] if s.get("png")] == ["opened"], "only the picture asked for is taken"
     if name != "pdf":
-        shown = rep["shots"][0]["shown"]
+        by = {s["state"]: s["shown"] for s in rep["shots"]}
+        # the repository's overview lists its items, each standing for its records, so it takes no mark of its own and
+        # shows their mix; its records show on an item's page
+        shown = by["detail" if name == "repository" else "overview"]
         assert shown["due"] and shown["drawn"] == shown["due"], "the test label shows on the records a worked example shows"
+        if name == "repository":
+            assert by["overview"]["units"] and not by["overview"]["due"], "a row takes no mark of its own"
 
 
 FIT_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>

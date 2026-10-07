@@ -660,37 +660,42 @@ def _repository_pane(rows: list[str]) -> list[str]:
     return [x.split(" │ ", 1)[1].rstrip() for x in rows if " │ " in x]
 
 
+HUE = re.compile(r"\x1b\[38;2;")  # a palette hue in ANSI text: only Color by draws one
+
+
 @needs_node
 @pytest.mark.parametrize("cols", [120, 200])
 async def test_repository_draws_what_its_browser_page_shows(repository, cols):
-    """The worked example at 120 and 200 columns, a code forge as its command line draws it: the tabs with their counts,
-    the top row (search, Filter by with the runs as toggles, Color by with its chips), the time range's readout and strip
-    with a break between the runs' days, the columns' names, then a heading per run and a row per pull request: its
-    number, its title, its area, state, comments and lines, and under it the dim line a forge writes there."""
-    out = await term_views.draw_text(repository, "repository", cols=cols, rows=36, wrap=DRAW_WRAP)
+    """The worked example at 120 and 200 columns, one run's repository as a code forge's command line draws it: the
+    repository's head (the run switcher with the run's name, and the run's facts), the tabs with the run's counts, the
+    top row (search, Filter by, Color by with its chips), no time range, the columns' names, then a row per pull request
+    of that run alone: its number, its title, its area, state, comments and lines, and under it the dim line a forge
+    writes there."""
+    out = await term_views.draw_text(repository, "repository", cols=cols, rows=16, wrap=DRAW_WRAP)
     lines = out.splitlines()
     assert lines[0] == "  Repository"
-    body, hints = _split(lines, 2, 36)
+    body, hints = _split(lines, 2, 16)
     assert all(len(x) <= cols + 2 for x in body)
-    assert body[0].split() == ["pull", "requests", "35", "issues", "36", "discussions", "12", "agents", "16"]
-    assert body[1].startswith("  / search  Filter by  Run  ● r") and "● r1 8  ● r2 7" in body[1]
-    assert "Color by  State  ● merged 28  ● closed 4  ● open 3" in body[1]
-    assert body[2] == "  11 May 09:24 – 14 May 13:42 · 3d 4h"
-    assert body[3].count(" // ") == 3 and body[4] == ""
-    assert body[5].split() == ["pull", "request", "area", "state", "comments", "lines"]
-    assert body[6].strip(" ▌") == "r1 · 3 agents · 1 approval to merge · Mon 11 May 2026"
-    assert re.match(r"❯ ● #9   Treat 'next <weekday>' as never today +parser +merged +0 +\+1 -1", body[7])
-    assert body[8].strip().startswith("opened 09:24 by ash · fixes #1 · approved · merged by its author")
+    assert body[0] == "  run  r1  3 agents · 1 approval to merge · Mon 11 May 2026"
+    assert body[1].split() == ["pull", "requests", "8", "issues", "9", "discussions", "3", "agents", "3"]
+    assert body[2].startswith("  / search  Filter by  none  Color by  State  ● merged 7  ● closed 1")
+    assert body[3] == ""
+    assert body[4].split() == ["pull", "request", "area", "state", "comments", "lines"]
+    assert re.match(r"❯ ● #9   Treat 'next <weekday>' as never today +parser +merged +0 +\+1 -1", body[5])
+    assert body[6].strip(" ▌").startswith("opened 09:24 by ash · fixes #1 · approved · merged by its author")
     eleven = next(i for i, x in enumerate(body) if x.startswith("  ● #11  Keep wall-clock"))
     assert body[eleven + 1].strip().startswith("opened 09:50 by cedar · fixes #3 · changes requested · merged by its author")
-    assert hints == "↑↓ to choose · Enter to open · 1 2 3 4 for the tabs · ? for all keys · b to go back · x to close"
+    assert not any(" // " in x or re.search(r"\d May \d\d:\d\d –", x) for x in body), "no time range"
+    assert hints.startswith("↑↓ to choose · Enter to open") and hints.endswith("b to go back · x to close"), hints
+    assert "? for all keys" in hints and "to pan" not in hints and "to zoom" not in hints, hints
 
 
 @needs_node
 async def test_repository_opens_a_pull_request_as_its_page_in_the_side_pane(repository):
     """Enter opens a pull request's page beside the list, never under its row: its facts named plainly, the issue it
     fixes and the same issue in the other runs, its flags, then its records in time order, each commit with its diff,
-    which ↑↓ move through and Enter opens at its place; a click on another run's issue opens that issue's page."""
+    which ↑↓ move through and Enter opens at its place; a click on another run's issue opens that run's repository at
+    the issue's page."""
     out = await term_views.draw_text(repository, "repository", cols=120, rows=44, wrap=DRAW_WRAP,
                                      keys=["down", "down", "return"], panel=False)
     rows = out.splitlines()
@@ -707,7 +712,9 @@ async def test_repository_opens_a_pull_request_as_its_page_in_the_side_pane(repo
     assert next(x for x in rows if x.startswith("❯")).startswith("❯ ● #11  Keep wall-clock"), "its row stays in the list"
     out = await term_views.draw_text(repository, "repository", cols=120, rows=44, wrap=DRAW_WRAP,
                                      keys=["down", "down", "return", "click:r2 #3 fixed"], panel=False)
-    pane = _repository_pane(out.splitlines())
+    rows = out.splitlines()
+    assert rows[0].startswith("  run  r2  3 agents · 2 approvals to merge")
+    pane = _repository_pane(rows)
     assert pane[0].startswith("r2 #3 Every-other-week schedule")
     assert any(re.match(r"\d\d:\d\d  \S+\s+merged #11", x) for x in pane)
 
@@ -735,30 +742,76 @@ async def test_repository_draws_a_thread_as_replies_and_an_agent_as_its_profile(
 
 
 @needs_node
-async def test_repository_follows_its_citations_its_filter_and_its_chips(repository):
-    """A citation of a record opens its item's page with the record chosen and in view; a run's citation frames the
-    run's day in the time range; a Filter by toggle leaves out a run, and a Color by chip turned off the items of its
-    value."""
+async def test_repository_switches_runs_and_follows_its_citations_its_filter_and_its_chips(repository):
+    """One run's repository at a time: the switcher (p) lists every run with its tabs' counts and opens the one chosen,
+    and Reset puts back the run the view opens on; a citation of a record opens its run's repository at its item's
+    page, the record chosen and in view, and a run's citation that run's repository; a Filter by toggle leaves out the
+    items of a value, and a Color by chip turned off the items of its value."""
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, keys=["p"], panel=False)
+    rows = out.splitlines()
+    menu = [re.sub(r"^❯ ", "", x.strip(" │")).split(None, 1) for x in rows if x.startswith("  │")]
+    assert menu == [["r1", "8 pulls · 9 issues · 3 threads · 3 agents"], ["r2", "7 pulls · 9 issues · 3 threads · 3 agents"],
+                    ["r3", "11 pulls · 9 issues · 3 threads · 5 agents"], ["r4", "9 pulls · 9 issues · 3 threads · 5 agents"]]
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, keys=["p", "down", "return"],
+                                     panel=False)
+    rows = out.splitlines()
+    assert rows[0] == "  run  r2  3 agents · 2 approvals to merge · Tue 12 May 2026"
+    assert rows[1].split()[:3] == ["pull", "requests", "7"] and rows[2].rstrip().endswith("reset")
+    assert next(x for x in rows if x.startswith("❯")).startswith("❯ ● #9   Make 'next <weekday>' skip today")
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP,
+                                     keys=["p", "down", "return", "r"], panel=False)
+    rows = out.splitlines()
+    assert rows[0].startswith("  run  r1  ") and not rows[2].rstrip().endswith("reset")
     out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP,
                                      ref="runs/r1/events.jsonl#L35", panel=False)
     pane = _repository_pane(out.splitlines())
     assert pane[0].startswith("r1 #11 Keep wall-clock time")
     assert any(x.startswith("10:58  ash  commented") for x in pane), "the cited record is in view"
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, ref="view:repository/r2",
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP,
+                                     ref="runs/r2/events.jsonl#L5", panel=False)
+    rows = out.splitlines()
+    assert rows[0].startswith("  run  r2  ") and _repository_pane(rows)[0].startswith("r2 #5 Document the strict flag")
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, ref="view:repository/r3",
                                      panel=False)
     rows = out.splitlines()
-    assert rows[2] == "  12 May 09:30 – 14:12 · 4h 42m" and rows[1].rstrip().endswith("reset")
-    assert [x.strip()[:2] for x in rows if "approval to merge" in x or "approvals to merge" in x] == ["r2"]
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP, keys=["click:r1 8"],
+    assert rows[0] == "  run  r3  5 agents · 1 approval to merge · Wed 13 May 2026" and rows[2].rstrip().endswith("reset")
+    assert rows[1].split()[:3] == ["pull", "requests", "11"]
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP,
+                                     keys=["f", "click:Area", "click:parser 3"], panel=False)
+    rows = out.splitlines()
+    assert "Filter by  Area  ○ parser 3" in rows[2] and rows[1].split()[:3] == ["pull", "requests", "5"]
+    assert not any(re.match(r"(❯| ) ● #\d+ .* parser ", x) for x in rows)
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP, keys=["click:closed 1"],
                                      panel=False)
     rows = out.splitlines()
-    assert "○ r1 8" in rows[1] and not any(x.strip().startswith("r1 ·") for x in rows)
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=90, wrap=DRAW_WRAP, keys=["click:closed 4"],
-                                     panel=False)
-    rows = out.splitlines()
-    assert "○ closed 4" in rows[1]
+    assert "○ closed 1" in rows[2]
     states = {m[1] for x in rows if re.match(r"(❯| ) ● #\d+", x) and (m := re.search(r" (merged|closed|open) ", x))}
-    assert states == {"merged", "open"}
+    assert states == {"merged"}
+
+
+@needs_node
+async def test_repository_colors_the_unit_its_value_belongs_to(repository):
+    """A field of the items (State) colors each row's mark and the track beside the list; Color by Off colors nothing,
+    the track included; a label marks records, so a row, which stands for its records, takes no mark of its own and
+    shows their mix in a bar, the label's hue on the part its marked records take, and the track is plain."""
+    out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, ansi=True, panel=False)
+    rows = out.splitlines()[5:]
+    assert all(HUE.search(x) for x in rows), "each row and its part of the track in its state's hue"
+    out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, ansi=True, panel=False,
+                                     keys=["c", "click:Off"])
+    assert not HUE.search(out), "no hue anywhere with Color by Off"
+    await _labels_on(repository, "repository")
+    out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, panel=False)
+    rows = out.splitlines()
+    assert "Color by  Clock change ↗" in rows[2]
+    listed = [x for x in rows[5:] if re.search(r"#\d+ ", x)]
+    assert listed and not any("●" in x for x in listed), "a row takes no mark of its own"
+    assert any(re.match(r"  ━{6}  #11  Keep wall-clock", x) for x in listed), "the mix of a row whose records it marks"
+    out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, ansi=True, panel=False)
+    rows = out.splitlines()[5:]
+    hued = [x for x in rows if HUE.search(x)]
+    assert hued and all(re.search(r"\x1b\[38;2;[\d;]+m━", x) for x in hued), "a hue on the mix alone"
+    assert not any(re.search(r"\x1b\[38;2;[\d;]+m▌", x) for x in rows), "the track is plain"
 
 
 # ------------------------------------------------------------------------------------------------------ narrow panels
@@ -878,19 +931,19 @@ async def test_linked_sessions_opens_as_its_browser_page_does_and_reads_at_every
 
 @needs_node
 async def test_repository_opens_as_its_browser_page_does_and_reads_at_every_width(repository):
-    """Colored by the label that is on; the tabs, a heading per run and the columns' names read at every width, the tabs'
+    """Colored by the label that is on; the run switcher, the tabs and the columns' names read at every width, the tabs'
     names shorter where the panel is narrow; in a narrow panel an item's page stands under the list."""
     await _labels_on(repository, "repository")
     for cols in WIDTHS:
-        out = await term_views.draw_text(repository, "repository", cols=cols, rows=36, wrap=DRAW_WRAP)
-        body, hints = _split(out.splitlines(), 2, 36)
+        out = await term_views.draw_text(repository, "repository", cols=cols, rows=16, wrap=DRAW_WRAP)
+        body, hints = _split(out.splitlines(), 2, 16)
         assert all(len(x) <= cols + 2 for x in body), cols
-        assert body[0].split()[:2] == (["pulls", "35"] if cols < 60 else ["pull", "requests"]), cols
-        top = "\n".join(body[1:4])
+        assert body[0].startswith("  run  r1  3 agents"), cols
+        assert body[1].split()[:2] == (["pulls", "8"] if cols < 60 else ["pull", "requests"]), cols
+        top = "\n".join(body[2:5])
         assert "Color by  Clock change ↗" in top and "● clock change" in top, cols
-        assert any(x.strip().startswith("r1 · 3 agents") for x in body), cols
         assert next(x for x in body if x.split()[:2] == ["pull", "request"]), cols
-        assert len(hints) <= cols and ("1 2 3 4 for the tabs" in hints) == (cols >= 140), cols
+        assert len(hints) <= cols, cols
     out = await term_views.draw_text(repository, "repository", cols=47, rows=50, wrap=DRAW_WRAP, keys=["down", "down", "return"],
                                      panel=False)
     rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]

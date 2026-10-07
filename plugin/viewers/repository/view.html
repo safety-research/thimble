@@ -2,24 +2,42 @@
 <html>
 <head>
 <style>
-  /* thimble's parts (.chip, .btn, .seg, .field, .avatar), its Color by and Filter by, its time range and its side panel
-     come with the frame; this page draws a code forge's pages and a message board in thimble's tokens */
+  /* thimble's parts (.chip, .btn, .seg, .field, .avatar), its Color by and Filter by and its side panel come with the
+     frame; this page draws a code forge's repository pages in thimble's tokens */
   html, body { margin: 0; height: 100%; }
   body { background: var(--surface-card); overflow: hidden; }
   * { box-sizing: border-box; }
   button { font: inherit; color: inherit; }
   #view { height: 100%; display: flex; flex-direction: column; }
 
+  /* the repository's head, as a forge's: its name in the switcher that chooses the run, and the run's facts */
+  .repo { position: relative; flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 10px 16px 2px; color: var(--text-secondary); }
+  .repo > .ico { color: var(--text-tertiary); }
+  #run { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+  .run-name { color: var(--text-primary); font-weight: 600; }
+  .repo-facts { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--text-ui-sm) / 1.4 var(--font-body); }
+  /* the switcher's list: each run's name, its day and its tabs' counts, the chosen one ticked; it opens down from the
+     name, clear of the list's scrollbar */
+  .runs { position: absolute; z-index: 5; top: 100%; left: 12px; width: min(340px, calc(100% - 64px)); padding: 4px; border: 1px solid var(--overlay-edge); border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--shadow-popover); }
+  .runs[hidden] { display: none; }
+  .run-opt { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 0 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--radius-hl); background: none; color: var(--text-secondary); cursor: pointer; text-align: left; }
+  .run-opt:hover, .run-opt:focus-visible { background: var(--surface-hover); outline: none; }
+  .run-opt b { color: var(--text-primary); font-weight: 600; margin-right: 8px; }
+  .run-counts { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 2px; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
+  .run-counts span { display: inline-flex; align-items: center; gap: 3px; }
+  .run-counts .ico { width: 14px; height: 14px; }
+
   /* the forge's tabs, each with its count, the chosen one underlined */
   .tabs { flex: none; display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); overflow: hidden; }
-  .tab { display: flex; align-items: center; gap: 7px; padding: 10px 10px 8px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-secondary); cursor: pointer; white-space: nowrap; font: 400 var(--text-sm) / 1.2 var(--font-body); }
+  .tab { display: flex; flex: 0 1 auto; min-width: 0; align-items: center; gap: 7px; padding: 10px 10px 8px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-secondary); cursor: pointer; white-space: nowrap; font: 400 var(--text-sm) / 1.2 var(--font-body); }
+  .tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .tab:hover { color: var(--text-primary); }
   .tab.on { border-bottom-color: var(--accent); color: var(--text-primary); font-weight: 500; }
   .count { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: var(--radius-chip); background: rgba(var(--ink-rgb), 0.07); color: var(--text-secondary); text-align: center; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
 
-  .top { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px 8px; }
-  .search { flex: 0 1 170px; min-width: 100px; }
-  #range { flex: none; padding: 0 16px 8px; }
+  .top { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 16px 8px; }
+  .search { flex: 0 1 170px; min-width: 80px; }
+  #filter, #colour { min-width: 0; }
   #body { flex: 1; min-height: 0; border-top: 1px solid var(--border-subtle); }
   #list { overflow: auto; padding: 12px 16px 24px; container-type: inline-size; }
 
@@ -28,12 +46,10 @@
   .dim { color: var(--text-tertiary); }
   .mono { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
 
-  /* a run's part of the list: a box headed by the run, its rows under it on hairlines */
+  /* the list: one box, the names of its numbers over its rows, the rows on hairlines */
   .box { margin: 0 0 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--surface-card); }
   .box-head, .item { display: grid; grid-template-columns: 22px minmax(0, 1fr) var(--cols); align-items: center; gap: 0 12px; }
   .box-head { padding: 8px 14px 8px 12px; border-bottom: 1px solid var(--border-subtle); border-radius: var(--radius-card) var(--radius-card) 0 0; background: rgba(var(--ink-rgb), 0.03); color: var(--text-secondary); font: 400 var(--text-ui-sm) / 1.3 var(--font-body); }
-  .box-head .run { grid-column: 1 / 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .box-head b { color: var(--text-primary); font-weight: 600; margin-right: 8px; }
   .heads { display: contents; }
   .heads span, .num { text-align: right; white-space: nowrap; }
   .item { padding: 9px 14px 9px 12px; border-top: 1px solid var(--border-hairline); cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 58px; }
@@ -51,9 +67,13 @@
   .num .ico { width: 14px; height: 14px; }
   .people { display: inline-flex; margin-right: 4px; vertical-align: middle; }
   .people .avatar { width: 18px; height: 18px; margin-right: -4px; font-size: 9px; box-shadow: 0 0 0 1.5px var(--surface-card); }
+  /* under a label a row stands for its records, so it takes no colour of its own: a small bar shows its records' mix
+     of the label's values, each part as wide as its share (the view kit's proportion bar will take its place) */
+  .mix { flex: none; display: inline-flex; gap: 1px; width: 48px; height: 6px; overflow: hidden; border-radius: 1px; }
+  .mix i { flex: 1 1 0; min-width: 3px; }
   .empty { padding: 28px 4px; color: var(--text-tertiary); }
   /* the list's numbers give way to the titles in a narrow list */
-  @container (max-width: 560px) { .box-head, .item { grid-template-columns: 22px minmax(0, 1fr); } .heads, .num { display: none; } }
+  @container (max-width: 560px) { .box-head, .item { grid-template-columns: 22px minmax(0, 1fr); } .heads, .num { display: none; } .box-head { display: none; } }
 
   /* an item's page in the side panel: its state and facts, the links to its issue or pull requests, then its parts */
   .page-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 2px 0 10px; color: var(--text-secondary); }
@@ -66,9 +86,8 @@
   .go .ico { width: 14px; height: 14px; color: var(--text-secondary); }
   .parts { margin: 4px 0 12px; }
 
-  /* a conversation: the forge's timeline, events on a line down the left and comments in boxes over it */
+  /* a conversation: the forge's timeline, each event on a line with its icon and comments in boxes */
   .tl { position: relative; padding: 2px 0 6px; }
-  .tl::before { content: ''; position: absolute; top: 0; bottom: 0; left: 15px; border-left: 2px solid var(--border-subtle); }
   .ev { position: relative; display: flex; align-items: flex-start; gap: 8px; padding: 5px 4px 5px 8px; color: var(--text-secondary); }
   .badge { display: grid; place-items: center; flex: none; width: 16px; height: 18px; background: var(--surface-card); }
   .ev-words { flex: 1; min-width: 0; padding-top: 1px; overflow-wrap: anywhere; }
@@ -97,16 +116,18 @@
   .file-head span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .hunk { padding: 0 0 4px 6px; }
   .hunk-head { padding: 4px 4px 2px; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
-  .diff { margin: 0; overflow-x: auto; font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
-  .diff div { display: grid; grid-template-columns: 16px minmax(0, 1fr); white-space: pre; color: var(--text-secondary); }
+  /* a long line wraps in place, so the panel never scrolls sideways */
+  .diff { margin: 0; font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
+  .diff div { display: grid; grid-template-columns: 16px minmax(0, 1fr); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); }
   .diff div::before { content: attr(data-s); color: var(--text-tertiary); text-align: center; }
   .diff .add { color: var(--text-primary); background: rgba(var(--ink-rgb), 0.05); }
   .diff .del { color: var(--text-tertiary); background: rgba(var(--ink-rgb), 0.025); }
 
-  /* a thread as a social board draws it: avatars down a rail, each post's author, time and words */
+  /* a thread as a social board draws it: the first post, the replies indented under it, each with its author's avatar,
+     time and words */
   .post { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 0 10px; padding: 8px; }
-  .rail { position: relative; display: flex; justify-content: center; }
-  .post:not(:last-child) .rail::after { content: ''; position: absolute; top: 34px; bottom: -14px; left: 15px; border-left: 2px solid var(--border-subtle); }
+  .post:not(.op) { margin-left: 24px; }
+  .rail { display: flex; justify-content: center; }
   .rail .avatar { width: 32px; height: 32px; font-size: 13px; }
   .post-head { display: flex; align-items: baseline; gap: 8px; }
   .post-head b { font-weight: 600; }
@@ -125,23 +146,25 @@
 </head>
 <body>
 <div id="view">
+  <header class="repo" id="repo"></header>
   <nav class="tabs" id="tabs" aria-label="Kind of item"></nav>
   <div class="top">
     <input class="field search" id="q" type="search" placeholder="Search" aria-label="Search">
     <span id="filter"></span>
     <span id="colour"></span>
   </div>
-  <div id="range"></div>
   <div id="body"><div id="list"></div></div>
 </div>
 <script>
-// Several agent runs on one library, drawn the way a code forge and a message board draw them. Overview: the forge's
-// tabs with their counts, the runs' activity in the time range, and the chosen tab's items as the forge lists them, a
-// box per run: pull requests and issues with their states, reviews and comments, threads as a board's feed, agents as
-// people. Zoom and filter: the time range keeps the items active in it, Filter by the runs (or any field or label),
-// Color by's chips the values left on, and the search the items whose words hold it. Details on demand: an item opens
-// as its page in the side panel: a pull request's conversation, commits and changed files, an issue's timeline, a
-// thread's posts, an agent's profile.
+// Several agent runs on one library, each run its own repository on a code forge, drawn the way the forge draws one
+// repository. Overview: the repository's head, whose switcher chooses the run (one run at a time, the others a click
+// away), the forge's tabs with their counts, and the chosen tab's items as the forge lists them: pull requests and
+// issues with their states, reviews and comments, threads as a board's feed, agents as people. Zoom and filter: Filter
+// by any field or label, Color by's chips the values left on, and the search the items whose words hold it. Details on
+// demand: an item opens as its page in the side panel: a pull request's conversation, commits and changed files, an
+// issue's timeline, a thread's posts, an agent's profile. Color marks the unit its value belongs to: a field of the
+// items colors their rows and the scrollbar beside them; a label marks records, so it colors the records on an item's
+// page, and a row, which stands for its records, shows only their mix.
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 const $ = (id) => document.getElementById(id)
 const slug = (thimble.view && thimble.view.slug) || 'repository'
@@ -157,6 +180,9 @@ const TAB_OF = { pull: 'pulls', issues: 'issues', discussions: 'discussions', ag
 
 // line icons in the text colour: a state is a shape, never a colour, which is Color by's
 const ICONS = {
+  repo: '<path d="M3.5 2.5h8.5v9.5H5a1.5 1.5 0 0 0-1.5 1.5zM3.5 13.5A1.5 1.5 0 0 0 5 15h7v-3"/><path d="M6 5h3.5"/>',
+  chev: '<path d="M4.5 6.5L8 10l3.5-3.5"/>',
+  check: '<path d="M3.5 8.5l3 3 6-6.5"/>',
   pr: '<circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><circle cx="12" cy="12.5" r="1.6"/><path d="M12 10.9V6.5a2 2 0 0 0-2-2H7.5M9 3L7.5 4.5 9 6"/>',
   merged: '<circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><circle cx="12" cy="8" r="1.6"/><path d="M4 5.1c0 2.2 2.3 2.9 6.4 2.9"/>',
   prclosed: '<circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><circle cx="12" cy="12.5" r="1.6"/><path d="M12 10.9V8.2M10.5 3l3 3M13.5 3l-3 3"/>',
@@ -204,7 +230,8 @@ function shade(name) {
 const avatar = (name) => `<span class="avatar" style="--a:${shade(name)}" title="${esc(name)}" aria-hidden="true">${esc(String(name || '?')[0])}</span>`
 
 let tab = 'pulls'
-let data = null // the reader's answer for the tab (reader.py _view)
+let run = null // the run whose repository shows, the reader's first until one is chosen
+let data = null // the reader's answer for the run's tab (reader.py _view)
 let open = null // the item in the side panel: {key, ref (the record a citation opened), part (a pull request's tab)}
 let want = null // a place thimble asked for before the items arrived
 const units = new Map() // each opened item's page (reader.py _detail)
@@ -219,29 +246,32 @@ const FIELDS = [
       closed: 'A pull request closed without a merge', fixed: 'An issue that a merged pull request fixes',
     },
   },
-  { name: 'run', title: 'Run', description: 'The run whose folder holds the item' },
   { name: 'area', title: 'Area', description: 'The part of the library: the first label, else the area of the issue it fixes' },
   { name: 'author', title: 'Author', description: 'Who opened the pull request or the issue, or started the thread' },
 ]
-const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, initial: 'run', onChange: load })
-const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, chips: 'filter', strip: '#list', onChange: load })
-// the runs fall on different days, so the nights between them are narrow breaks
-const range = thimble.timeRange({ mount: '#range', gap: 4 * 3600, onChange: draw })
+const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, onChange: load })
+const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, chips: 'filter', onChange: load })
 const side = thimble.side({ mount: '#body', width: 0.45, onClose: () => { open = null; draw() } })
+// Reset puts back the run the view opens on, as it puts back the chips
+const first = () => (data && data.runs.length ? data.runs[0].run : null)
+const resetRun = thimble.onReset({
+  changed: () => !!data && run !== first(),
+  reset: () => { if (run !== first()) choose(first()) },
+})
 
 async function load() {
   let got
   try {
-    got = await thimble.fetch({ op: 'view', tab, colour: colour.query(), filter: filter.query() }, { key: 'view' })
+    got = await thimble.fetch({ op: 'view', run, tab, colour: colour.query(), filter: filter.query() }, { key: 'view' })
   } catch (e) {
     if (e.name === 'AbortError') return
     throw e
   }
   data = got
+  run = got.run
   colour.counts(got.counts)
   filter.counts(got.filtered)
-  const ev = got.items.flatMap((it) => it.events).filter((e) => colour.isOn(e[2]))
-  range.data({ times: ev.map((e) => e[0]), values: ev.map((e) => e[2]), marks: got.runs.map((r) => ({ t: r.start, label: r.run })) })
+  resetRun.check()
   units.clear()
   if (open && got.items.some((it) => it.key === open.key)) await page(open.key, open.ref, open.part)
   else if (open) side.close()
@@ -254,32 +284,84 @@ async function fetchUnit(key) {
   return units.get(key)
 }
 
+// ------------------------------------------------------------------------------------------------ the repository's head
+
+// the facts a forge shows of a repository: its team, what a merge needs, the day it ran
+const facts = (r) => [plural(r.team || 0, 'agent'), `${plural(r.approvals || 1, 'approval')} to merge`, day(r.start)].join(' · ')
+const TAB_ICONS = TABS.map((t) => [t.tab, t.icon, t.name.toLowerCase()])
+
+// the head: the switcher with the run's name, the run's facts, and the list of runs the switcher opens, each with its
+// day and its tabs' counts
+function head() {
+  if (!data) return
+  const r = data.runs.find((x) => x.run === run) || data.runs[0]
+  if (!r) return
+  const opened = !!$('runs') && !$('runs').hidden
+  $('repo').innerHTML = ico('repo') +
+    `<button type="button" class="btn btn-ghost btn-sm" id="run" aria-haspopup="listbox" aria-expanded="${opened}" title="Switch run">` +
+    `<span class="run-name">${esc(r.run)}</span>${ico('chev')}</button><span class="repo-facts">${esc(facts(r))}</span>` +
+    `<div class="runs" id="runs" role="listbox" aria-label="Runs"${opened ? '' : ' hidden'}>${data.runs.map((x) =>
+      `<button type="button" class="run-opt" role="option" aria-selected="${x.run === r.run}" data-run="${esc(x.run)}">` +
+      `<span>${x.run === r.run ? ico('check') : ''}</span><span><span><b>${esc(x.run)}</b>${esc(day(x.start))}</span>` +
+      `<span class="run-counts">${TAB_ICONS.map(([t, i, w]) => `<span title="${esc(w)}">${ico(i)}${x.tabs[t]}</span>`).join('')}</span></span></button>`).join('')}</div>`
+}
+
+function switcher(on) {
+  const m = $('runs')
+  if (!m) return
+  m.hidden = !on
+  $('run').setAttribute('aria-expanded', String(on))
+  if (on) (m.querySelector('[aria-selected="true"]') || m.querySelector('.run-opt'))?.focus()
+}
+
+// another run's repository, on the same tab
+async function choose(r) {
+  switcher(false)
+  if (!r || r === run) return
+  run = r
+  side.close()
+  open = null
+  $('list').scrollTop = 0
+  await load()
+}
+
 // ------------------------------------------------------------------------------------------------ the list
 
 function draw() {
-  $('tabs').innerHTML = TABS.map((t) => `<button type="button" class="tab${t.tab === tab ? ' on' : ''}" data-tab="${t.tab}">${ico(t.icon)}${t.name}` +
+  head()
+  $('tabs').innerHTML = TABS.map((t) => `<button type="button" class="tab${t.tab === tab ? ' on' : ''}" data-tab="${t.tab}">${ico(t.icon)}<span class="tab-name">${t.name}</span>` +
     `<span class="count">${data ? data.tabs[t.tab] : ''}</span></button>`).join('')
   if (!data) return
   const q = $('q').value.trim().toLowerCase()
-  const shown = data.items.filter((it) => (!q || it.search.includes(q)) && (range.full || it.events.some((e) => range.has(e[0]))))
+  const shown = data.items.filter((it) => !q || it.search.includes(q))
   const T = TABS.find((t) => t.tab === tab)
-  const boxes = data.runs.map((r) => {
-    const items = shown.filter((it) => it.run === r.run)
-    if (!items.length) return ''
-    const facts = [plural(r.team || 0, 'agent'), `${plural(r.approvals || 1, 'approval')} to merge`, day(r.start)]
-    return `<section class="box" style="--cols:${T.cols}"><div class="box-head" data-anchor="view:${slug}/${esc(r.run)}">` +
-      `<span class="run"><b>${esc(r.run)}</b>${esc(facts.join(' · '))}</span><span class="heads">${T.heads.map((h) => `<span>${h}</span>`).join('')}</span></div>` +
-      items.map(ROW[tab]).join('') + '</section>'
-  }).join('')
   $('list').classList.toggle('feed', tab === 'discussions')
-  $('list').innerHTML = boxes || `<div class="empty">No ${T.name.toLowerCase()}</div>`
+  $('list').innerHTML = shown.length
+    ? `<section class="box" style="--cols:${T.cols}"><div class="box-head"><span></span><span></span><span class="heads">${T.heads.map((h) => `<span>${h}</span>`).join('')}</span></div>` +
+      shown.map(ROW[tab]).join('') + '</section>'
+    : `<div class="empty">No ${T.name.toLowerCase()}</div>`
+  // the colored scrollbar only on a list of what is colored: the rows while a field colors them; a plain one while a
+  // label colors the records the rows stand for, or Color by is Off (the view kit will say this itself)
+  colour.strip('#list', { whole: !!colour.field })
 }
 
-const rowOpen = (it) => `<div class="item${open && open.key === it.key ? ' active' : ''}" data-key="${esc(it.key)}" data-anchor="view:${slug}/${esc(it.key)}"${colour.attr(it)}>`
-// the area as the forge's label: in its colour while Color by colours by area
-const areaChip = (it) => !it.area ? '' : colour.field === 'area'
-  ? `<span class="chip chip-key"><span class="chip-sw" style="--c:${colour.colourOf(it.area)}"></span><span class="chip-text">${esc(it.area)}</span></span>`
-  : `<span class="chip chip-sans chip-tone-neutral"><span class="chip-text">${esc(it.area)}</span></span>`
+// a row: under a field, the bar of its value; under a label, which marks its records, none, its records' mix shown
+// in the row (mix) and their own bars on its page
+const rowOpen = (it) => `<div class="item${open && open.key === it.key ? ' active' : ''}" data-key="${esc(it.key)}" data-anchor="view:${slug}/${esc(it.key)}"` +
+  `${colour.label ? ' data-anchor-unmarked' : colour.attr(it)}>`
+// the records' mix of the label's values, in the chips' order, each part as wide as its share; the records with no
+// value in the marks' grey. Drawn here until the view kit's proportion bar replaces it
+function mix(it) {
+  if (!colour.label || !it.mix || !it.mix.some(([v]) => v != null)) return ''
+  const chips = colour.values
+  const order = chips.map((c) => (c.value == null ? '' : String(c.value)))
+  const at = (v) => { const i = order.indexOf(v == null ? '' : String(v)); return i < 0 ? order.length : i }
+  const parts = it.mix.slice().sort((a, b) => at(a[0]) - at(b[0]))
+  const words = parts.map(([v, n]) => `${(chips[at(v)] || {}).name || v || 'no value'} ${n}`).join(' · ')
+  return `<span class="mix" title="${esc(words)}">${parts.map(([v, n]) => `<i style="flex-grow:${n};background:${(v != null && colour.colourOf(v)) || 'var(--label-none)'}"></i>`).join('')}</span>`
+}
+// the area as the forge's label, in words: only Color by colors
+const areaChip = (it) => (!it.area ? '' : `<span class="chip chip-sans chip-tone-neutral"><span class="chip-text">${esc(it.area)}</span></span>`)
 const stateIcon = (t, it) => { const [i, w] = STATE[t][it.state] || STATE[t].open; return `<span class="state" title="${w}">${ico(i)}</span>` }
 
 const ROW = {
@@ -288,7 +370,7 @@ const ROW = {
       it.state === 'merged' && !it.flags.includes('merged by its author') && `merged by ${it.merged_by}`,
       it.state === 'closed' && `closed by ${it.closed_by}${it.reason ? ` as ${it.reason}` : ''}`, ...it.flags].filter(Boolean).join(' · ')
     return rowOpen(it) + stateIcon('pulls', it) +
-      `<div class="main"><div class="line1"><span class="title">${esc(it.title)}</span>${areaChip(it)}</div><div class="meta" title="${esc(meta)}">${esc(meta)}</div></div>` +
+      `<div class="main"><div class="line1"><span class="title">${esc(it.title)}</span>${mix(it)}${areaChip(it)}</div><div class="meta" title="${esc(meta)}">${esc(meta)}</div></div>` +
       `<span class="num" title="Approvals and change requests, each reviewer's latest">${ico('approved')}${it.approvals}${it.changes ? ` ${ico('changes')}${it.changes}` : ''}</span>` +
       `<span class="num">${ico('comment')}${it.comments}</span><span class="num">+${it.plus} −${it.minus}</span></div>`
   },
@@ -296,18 +378,18 @@ const ROW = {
     const meta = [`#${it.number} opened ${hm(it.opened)} by ${it.author}`, it.origin === 'backlog' ? 'from the backlog' : it.origin,
       it.state === 'fixed' && `fixed after ${took(it.opened, it.ended)}`].filter(Boolean).join(' · ')
     return rowOpen(it) + stateIcon('issues', it) +
-      `<div class="main"><div class="line1"><span class="title">${esc(it.title)}</span>${areaChip(it)}</div><div class="meta">${esc(meta)}</div></div>` +
+      `<div class="main"><div class="line1"><span class="title">${esc(it.title)}</span>${mix(it)}${areaChip(it)}</div><div class="meta">${esc(meta)}</div></div>` +
       `<span class="num">${it.prs.length ? `${ico('pr')}${it.prs.map((n) => `#${n}`).join(' ')}` : ''}</span><span class="num">${ico('comment')}${it.comments}</span></div>`
   },
   discussions: (it) => {
     const others = it.posters.filter((p) => p !== it.author)
     return rowOpen(it) + avatar(it.author) +
-      `<div class="main"><div class="meta"><b>${esc(it.author)}</b> · ${hm(it.opened)}</div><div class="title">${esc(it.title)}</div>` +
+      `<div class="main"><div class="meta"><b>${esc(it.author)}</b> · ${hm(it.opened)}</div><div class="line1"><span class="title">${esc(it.title)}</span>${mix(it)}</div>` +
       `<div class="lead">${esc(it.lead)}</div>${others.length ? `<div class="meta"><span class="people">${others.map(avatar).join('')}</span> ${esc(others.join(', '))} replied</div>` : ''}</div>` +
       `<span class="num">${ico('comment')}${it.posts}</span><span class="num">${it.last ? hm(it.last) : ''}</span></div>`
   },
   agents: (it) => rowOpen(it) + avatar(it.title) +
-    `<div class="main"><div class="title">${esc(it.title)}</div><div class="meta">${it.note ? `“${esc(it.note)}”` : 'left no transcript'}</div></div>` +
+    `<div class="main"><div class="line1"><span class="title">${esc(it.title)}</span>${mix(it)}</div><div class="meta">${it.note ? `“${esc(it.note)}”` : 'left no transcript'}</div></div>` +
     ['pull requests', 'reviews', 'merges', 'comments'].map((k) => `<span class="num">${it.did[k] || 0}</span>`).join('') + '</div>',
 }
 
@@ -448,28 +530,50 @@ const fileBox = (f) => `<div class="file"><div class="file-head"><span>${esc(f.p
 async function show(key, ref = null) {
   const t = TAB_OF[key.split('/')[1]]
   if (!t) return
-  if (t !== tab) {
+  const r = key.split('/')[0]
+  if (t !== tab || r !== run) {
     tab = t
+    run = r
     side.close()
     open = null
     await load()
   }
   const it = data && data.items.find((i) => i.key === key)
   if (it && !it.search.includes($('q').value.trim().toLowerCase())) $('q').value = ''
-  if (it && !range.full && !it.events.some((e) => range.has(e[0]))) range.set(null)
   await page(key, ref)
   draw()
   document.querySelector(`#list [data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'nearest' })
 }
 
-// a run's citation frames its day in the range; any other opens its item
+// a run's citation opens its repository; any other opens its item
 function go() {
   const t = want
   want = null
-  const run = t.run && data.runs.find((r) => r.run === t.run)
-  if (run) range.set(run.start, run.end)
+  if (t.run && data.runs.some((r) => r.run === t.run)) choose(t.run)
   else if (t.key) show(t.key, t.ref)
 }
+
+$('repo').addEventListener('click', (e) => {
+  if (e.metaKey || e.ctrlKey) return
+  const opt = e.target.closest('[data-run]')
+  if (opt) return choose(opt.dataset.run)
+  if (e.target.closest('#run')) switcher($('runs').hidden)
+})
+$('repo').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('runs').hidden) {
+    switcher(false)
+    $('run').focus()
+  } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !$('runs').hidden) {
+    const opts = [...$('runs').querySelectorAll('.run-opt')]
+    const i = opts.indexOf(document.activeElement)
+    opts[(i + (e.key === 'ArrowDown' ? 1 : opts.length - 1)) % opts.length]?.focus()
+    e.preventDefault()
+  }
+})
+// a click anywhere else closes the switcher's list
+document.addEventListener('pointerdown', (e) => {
+  if ($('runs') && !$('runs').hidden && !e.target.closest('#repo')) switcher(false)
+})
 
 $('tabs').addEventListener('click', (e) => {
   const b = e.target.closest('[data-tab]')
