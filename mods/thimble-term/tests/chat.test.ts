@@ -116,7 +116,8 @@ test('a card a thread was asked about keeps a blue ↳ beside its title; a click
   await ui.unmount()
   await w.clock.settle()
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('Threads')
+  // the threads panel, the thread selected: its question the title row's current step
+  expect(shown(await pane.drawn())).toContain('home › threads › "why is events.jsonl bigger?"')
   await pane.unmount()
 })
 

@@ -435,7 +435,7 @@ async function viewRowsEl(cx: Ctx, e: ResolveInput & { requestId: string }): Pro
   return <Box flexDirection="column">{out}</Box>
 }
 
-/** The footer under a turn's answer (SPEC.md, "Main's chat"), one blank row under it at column 4: `N citations ·
+/** The footer under a turn's answer (SPEC.md, "Main's chat"), one blank row under it at column 2: `N citations ·
  *  N cards` dim, ` · N problems` in red (counted from the checks as they stand now), then `ask about this answer ›`. The
  *  facts are cut first; the problems stay whole. */
 async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promise<RenderElement | null> {
@@ -936,7 +936,7 @@ export const register: Register = on => {
         )
       }
     }
-    // side threads show as `↳ thread` rows under main's latest row and as `N new` on the panel's path row (SPEC.md,
+    // side threads show as `↳ thread` rows under main's latest row and as `N new` on the panel's title row (SPEC.md,
     // "Main's chat"): no row of their own here
     if (!rows.length) return next(e)
     return <Box flexDirection="column">{rows}</Box>

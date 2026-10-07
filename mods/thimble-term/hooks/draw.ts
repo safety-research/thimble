@@ -381,58 +381,115 @@ export function labelHead(card: CardData, cols: number, hover = ''): { lines: Li
   return { lines, slugs, hots }
 }
 
+/** The bars a bar card draws: every row of its first MAX_BARS labels, in the order the rows come (cell.ts sortedBars),
+ *  and how many labels are left out. A label's rows of several groups (the chart's colour field) stand on the label's
+ *  one row, stacked, as the browser stacks them. The layout's items are these rows, in this order. */
+export function barRows(card: CardData): { rows: BarRow[]; more: number } {
+  const all = (card.rows ?? []) as BarRow[]
+  const labels = [...new Set(all.map(r => r.label))]
+  const keep = new Set(labels.slice(0, MAX_BARS))
+  return { rows: all.filter(r => keep.has(r.label)), more: labels.length - keep.size }
+}
+
+/** A bar's label as the browser's axis draws it: timestamps all in one form (`24 May`, the time only when one is not
+ *  midnight, shortTimes); any other label as written. */
+function barNames(labels: readonly string[]): string[] {
+  return labels.length && labels.every(l => STAMP.test(l.trim())) ? shortTimes(labels) : [...labels]
+}
+
 function barLayout(card: CardData, cols: number, hover: number): Layout {
-  const rows = ((card.rows ?? []) as BarRow[]).slice(0, MAX_BARS)
-  const more = (card.rows?.length ?? 0) - rows.length
+  const { rows, more } = barRows(card)
   const col = card.y || 'value'
   const groups = [...new Set(rows.map(r => r.group).filter(Boolean))]
+  // one row per label, the label's rows (one per group) stacked on it in the data's order
+  const labels = [...new Set(rows.map(r => r.label))]
+  const ofLabel = new Map<string, number[]>()
+  rows.forEach((r, i) => ofLabel.set(r.label, [...(ofLabel.get(r.label) ?? []), i]))
+  const names = barNames(labels)
+  const nameOf = new Map(labels.map((l, j) => [l, names[j]!]))
+  const totals = labels.map(l => ofLabel.get(l)!.reduce((a, i) => a + rows[i]!.value, 0))
   // a label card's counts as its panel writes them, each with its share of all
   const own = card.kind === 'label'
   const sum = own ? (card.total ?? rows.reduce((a, r) => a + r.value, 0)) : 0
   // a count reads with thousands separators from 1,000, as everywhere the mod draws one
   const shown = (v: number) => (own || (Number.isInteger(v) && Math.abs(v) >= 1000) ? count(v) : fmt(v))
-  const parts = own ? shares(rows.map(r => r.value), sum) : []
+  const parts = own ? shares(totals, sum) : []
   const shareW = own ? Math.max(...parts.map(x => x.length)) + 2 : 0
-  const valueW = Math.max(...rows.map(r => shown(r.value).length), 1)
+  const valueW = Math.max(...totals.map(t => shown(t).length), 1)
   // 2-cell gutters after the names and before the numbers (rule 3)
   const room = cols - valueW - 4 - shareW
   // the bars keep two fifths of the room; a label longer than the rest takes two lines
-  const labelW = Math.min(Math.max(4, ...rows.map(r => width(r.label))), Math.max(8, room - Math.max(12, Math.ceil(room * 0.4))))
+  const labelW = Math.min(Math.max(4, ...names.map(n => width(n))), Math.max(8, room - Math.max(12, Math.ceil(room * 0.4))))
   const barW = Math.max(4, room - labelW)
-  const max = Math.max(...rows.map(r => Math.abs(r.value)), 0)
+  const max = Math.max(...totals.map(t => Math.abs(t)), 0)
   const lines: Line[] = []
   const owner: number[] = []
-  const items: Item[] = rows.map(r => ({
-    label: r.label,
-    value: `${shown(r.value)} ${col}`,
-    cite: cite(fmt(r.value), `card:${card.id}#${col}/${r.label}`),
-    open: `card:${card.id}#${col}/${r.label}`,
-    kind: 'mark',
-    text: shown(r.value),
-  }))
-  rows.forEach((r, i) => {
-    const on = i === hover
+  // where each label's bars stand on its row: [x0, x1) per row of the data, from the content's edge
+  const spans: { x0: number; x1: number; i: number }[][] = []
+  const items: Item[] = rows.map(r => {
+    // a stacked bar's readout names its group too (`24 May · page saved`)
+    const name = nameOf.get(r.label) ?? r.label
+    const group = groups.length > 1 && r.group && r.group !== r.label ? ` · ${r.group}` : ''
+    return {
+      label: `${name}${group}`,
+      value: `${shown(r.value)} ${col}`,
+      cite: cite(fmt(r.value), `card:${card.id}#${col}/${r.label}`),
+      open: `card:${card.id}#${col}/${r.label}`,
+      kind: 'mark',
+      text: shown(r.value),
+    }
+  })
+  labels.forEach((l, j) => {
+    const ids = ofLabel.get(l)!
+    const on = ids.includes(hover)
     // a hue for a value of the card's colour field (its groups, or a label it read); with no colour field the bars are
     // one series, in the first hue (rule 20); the bar under the pointer turns the text colour
-    const hue = classColour(card, r.group || r.label) ?? (groups.length ? COLORS.series[Math.max(0, groups.indexOf(r.group)) % COLORS.series.length]! : ONE)
-    const color = on ? COLORS.text : hue
-    const b = bar(r.value, max, barW)
-    const [first, second] = fold(r.label, labelW)
+    const hueOf = (r: BarRow) => classColour(card, r.group || r.label) ?? (groups.length ? COLORS.series[Math.max(0, groups.indexOf(r.group)) % COLORS.series.length]! : ONE)
+    const segs: Seg[] = []
+    const mine: { x0: number; x1: number; i: number }[] = []
+    let x = labelW + 2
+    if (ids.length === 1) {
+      const b = bar(rows[ids[0]!]!.value, max, barW)
+      segs.push({ s: b, fg: on ? COLORS.text : hueOf(rows[ids[0]!]!) })
+      mine.push({ x0: x, x1: x + width(b), i: ids[0]! })
+    } else {
+      // stacked: each group's part in whole cells, the last in eighths, so the bar is as long as its total's
+      let cells = 0
+      ids.forEach((i, k) => {
+        const v = Math.abs(rows[i]!.value)
+        let s: string
+        if (k < ids.length - 1) {
+          const n = max > 0 ? Math.max(v ? 1 : 0, Math.round((v / max) * barW)) : 0
+          s = '█'.repeat(n)
+          cells += n
+        } else {
+          const n8 = max > 0 ? Math.max(cells * 8 + (v ? 1 : 0), Math.round((Math.abs(totals[j]!) / max) * barW * 8)) - cells * 8 : 0
+          s = '█'.repeat(Math.floor(n8 / 8)) + EIGHTHS[n8 % 8]!
+        }
+        if (!s) return
+        segs.push({ s, fg: i === hover ? COLORS.text : hueOf(rows[i]!) })
+        mine.push({ x0: x, x1: x + width(s), i })
+        x += width(s)
+      })
+    }
+    const b = segs.map(g => g.s).join('')
+    const [first, second] = fold(names[j]!, labelW)
     // the label of the mark under the pointer in inverse; a label card's bars are parts of a whole, on a track to it
     const track = own ? '─'.repeat(Math.max(0, barW - width(b))) : ''
     lines.push([
       { s: first!, inv: on },
       { s: ' '.repeat(Math.max(0, labelW - width(first!)) + 2) },
-      { s: b, fg: color },
+      ...segs,
       ...(track ? [{ s: track, fg: COLORS.rule }] : []),
       { s: ' '.repeat(Math.max(2, barW - width(b) - width(track) + 2)) },
-      { s: pad(shown(r.value), valueW, true) },
-      ...(own ? [{ s: pad(parts[i]!, shareW, true), fg: COLORS.dim }] : []),
+      { s: pad(shown(totals[j]!), valueW, true) },
+      ...(own ? [{ s: pad(parts[j]!, shareW, true), fg: COLORS.dim }] : []),
     ])
-    owner.push(i)
+    owner.push(j)
+    spans.push(mine)
     if (second) {
       lines.push([{ s: second, inv: on }])
-      owner.push(i)
+      owner.push(j)
     }
   })
   if (more > 0) lines.push([{ s: `… ${more} more`, fg: COLORS.dim }])
@@ -442,7 +499,17 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
   // the legend on its own row under the chart; none when a label it read names the groups on its label row
   const named = new Set(cardLabels(card).flatMap(l => l.values))
   if (groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map((g, j) => [{ s: '● ', fg: classColour(card, g) ?? COLORS.series[j % COLORS.series.length] }, { s: g }]), cols))
-  return { lines, items, hit: (_x, y) => owner[y] ?? -1 }
+  // a row's one bar is the row's mark; on a stacked row the part under the pointer, the nearest part off the bar
+  const hit = (x: number, y: number): number => {
+    const j = owner[y]
+    if (j === undefined) return -1
+    const mine = spans[j]!
+    if (mine.length <= 1) return mine[0]?.i ?? ofLabel.get(labels[j]!)![0]!
+    const inside = mine.find(m => x >= m.x0 && x < m.x1)
+    if (inside) return inside.i
+    return x < mine[0]!.x0 ? mine[0]!.i : mine.at(-1)!.i
+  }
+  return { lines, items, hit }
 }
 
 const DOT = [

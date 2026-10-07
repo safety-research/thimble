@@ -1061,7 +1061,8 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
         </Box>,
       ]
     : [<Box key="file-sub">{lineEl(els, subLine(subWords), undefined, true)}</Box>, <Box key="file-sub-pages" flexDirection="row">{pagesEl}</Box>]
-  const headRows = Math.max(1, Math.ceil(width(p.title || path) / cols)) + (oneRow ? 1 : Math.max(1, Math.ceil(subW / cols)) + 1)
+  // the header's rows under the title row (which holds the file's name): the subtitle's
+  const headRows = oneRow ? 1 : Math.max(1, Math.ceil(subW / cols)) + 1
   // each tab's name with a cell of space at each side, the selected one inverse, so choosing a tab moves none; the row
   // starts one cell left of the edge, so the first tab's name starts at the edge, where the title starts
   const tabsRow = (
@@ -1182,7 +1183,7 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       if (k === 'tab') return here({ ...p, mode: modes[(modes.indexOf(mode) + 1) % modes.length]! })
       return undefined
     }
-    // the lines cut to the rows the path row, the header, the chosen record's row, the label rows and the hint rows
+    // the lines cut to the rows the title row, the header, the chosen record's row, the label rows and the hint rows
     // leave (live check term-fix8, quirk 1: ↓ scrolled the header away and chose no line), a table's column names kept
     const used = 1 + headRows + (modes.length > 1 ? 1 : 0) + (findRow ? 1 : 0) + 1 + (chosen ? 1 : 0) + labelRows.length + d.fixed + hintHeight(fileHints, cols)
     const chosenY = at >= 0 ? (d.at.get(unit) ?? -1) : -1

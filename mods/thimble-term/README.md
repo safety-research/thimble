@@ -22,14 +22,15 @@ Its look is [SPEC.md](SPEC.md) ("The visual system"): one left edge, links blue 
 Claude Code's panel chrome, no right-click menu.
 
 - **Main's replies.** The model's Markdown as Claude Code draws it (bold bold, headings bold, inline code coloured). The
-  prose and the cards share one left edge, column 4 (the ⏺ row's text), and one width: the terminal's, less 2 and the
-  margin, with no measure; the cards follow the text and each other border to border. Each citation, `[[value|ref]]` or
+  prose and the cards share one left edge, column 2, Claude Code's own (the ⏺ row's text), and one width: the
+  terminal's, less 2 and the margin, with no measure; the cards follow the text and each other border to border. Each citation, `[[value|ref]]` or
   the Markdown link main writes for the terminal, is a link, blue and underlined; red when its place does not exist or
   does not hold its value (`thimble state resolve`); in a card's takeaway, `◌` after it while thimble's links check
   runs, `✓` once it found the value, a red `×` when it found another. The citation under the pointer shows its status in
   plain words on a quiet box (`found in README.md line 3`, `found on the card; its value is not checked`, `not found: …
-  does not exist`, and why). The blue `?` beside a passage asks a side thread about it (a heading's about its whole
-  section, a card's about the card); once one was asked, a blue `↳` stays there and opens it. While main streams,
+  does not exist`, and why). The blue `?` beside a passage, in the ⏺'s column (over the ⏺ on the reply's first row),
+  asks a side thread about it (a heading's about its whole section, a card's about the card); once one was asked, a
+  blue `↳` stays there and opens it. While main streams,
   citations show as links and a card's line as `◌ <its question>`, never `[[…]]`; a citation typed into the prompt is
   blue and underlined too. A chip, a citation that names only its place (`[[card:<id>]]`, `[↗](<ref>)`), reads as its
   place's short name in brackets in the link color, `[ card ]` or `[ events.jsonl line 12 ]`, alike in replies, thread
@@ -53,7 +54,7 @@ Claude Code's panel chrome, no right-click menu.
   escape) and a citation by its words, a label tool's result its name and counts, and a side thread's fork row and the
   notice that it finished the thread by its first question, and so does the fork's prompt in ctrl+o; a tool's words draw
   their straight quotation marks curly, which Claude Code does not escape; thimble's tool results keep their card ids, which main
-  cites. A bar card keeps the order its chart's label axis sorts, and a bar chart with its values written on its bars is a bar card too. A table, a timeline, a diagram, an example and a label draw
+  cites. A bar card keeps the order its chart's label axis sorts, and a bar chart with its values written on its bars is a bar card too; a bar chart with a color field has one row per label, its series stacked in their hues and its key below, and timestamps as labels read as the browser's axis writes them (`24 May`). A table, a timeline, a diagram, an example and a label draw
   directly; a simple bar or line chart draws as text; any other chart as a table of its rows; a note, a custom card, a
   code card and a card type's card as their words.
 - **Rows under main's replies.** `↳ thread · "<the turn's question>" · answered` when a side thread's turn ends while the
@@ -65,9 +66,9 @@ Claude Code's panel chrome, no right-click menu.
 - **One row above the prompt**, a toast: what is new in the workspace since home was last opened (`2 new cards`, `new` in
   green), `open ›` opening home, gone once it is opened. Side threads have their `↳` rows and thimble's agents Claude
   Code's agent tray, so no row repeats them.
-- **One panel**, on Claude Code's panel chrome: the path row (`‹ back`, the steps from home; on home, `show all
-  threads` and `N new` at the right), a title in the accent colour and bold with a dim subtitle, a rule, the actions at
-  the bottom after a second rule, and a dim italic row of key hints (`b to go back` only where there is a way back),
+- **One panel**, on Claude Code's panel chrome: one title row, the path from home, its earlier steps dim and a click
+  away and the current step last in the accent colour and bold (`home › Threads`; on home, `show all threads` and
+  `N new` at the right; no `‹ back`, b goes back), a dim subtitle, a rule, the actions at the bottom after a second rule, and a dim italic row of key hints (`b to go back` only where there is a way back),
   which goes on to a second row where it does not fit, never cut. Claude Code's
   pane title says what it shows (`Citation`, `Threads`, `Label: …`, a card's question, a document's title). Its views:
   home (one column: views, documents, threads, cards by group with the newest open, labels, files by folder and the
@@ -76,7 +77,8 @@ Claude Code's panel chrome, no right-click menu.
   sentence it stands in, its lines with the value marked (the whole line where it shows none), a file's as a window
   that ↑↓ and the wheel scroll through the whole file, or the card it names with the cited mark lit, a `follow-up`
   field when opened from a side thread); the threads (a tree with a root per place, `main` or `report "…"`, the selected
-  thread under it, `stop` while it answers, `hand back to main` once it answered, the ask field); a label; the documents and one document (a report with its
+  thread under it with what it is about above its chat: a card in its frame, a file's cited lines, a passage's words,
+  cut to 6 rows and `… N more`; a new thread shows it above its field too; `stop` while it answers, `hand back to main` once it answered, the ask field); a label; the documents and one document (a report with its
   contents, a deck or a story one slide or beat at a time, the retell controls; its comments, a check's, Claude's or the
   analyst's, under the passages they are on, ↑↓ to choose one, `r` to resolve it, `v` to show the resolved ones; `e`
   to edit a report as Markdown, its cards as their lines, saved as the browser's editor saves it); the file browser, after the

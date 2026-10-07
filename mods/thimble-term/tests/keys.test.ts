@@ -171,6 +171,12 @@ async function askField($: E): Promise<void> {
   await $.ui.focus({ requestId: PANEL, component: 'Pane', element: field!.key, origin: { kind: 'plugin', name: PANEL } } as never)
 }
 
+/** The key of the title row's step that reads `words`, a click away. */
+async function crumb(pane: M, words: string): Promise<string | undefined> {
+  const steps = (await pane.findAll({ type: 'Button' })) as { key?: string; props?: { label?: string } }[]
+  return steps.find(b => /^crumb-/.test(String(b.key)) && String(b.props?.label ?? '').includes(words))?.key
+}
+
 /** The hint names only keys among `keys` (and the way's): never ←, →, PgUp or PgDn. */
 function named(hint: string, keys: string[]): void {
   for (const k of keys) expect(hint).toContain(k)
@@ -340,7 +346,10 @@ test('keys · threads · /thimble threads and a heading click: ↓ opens the fir
   s = await seen($, SHORT, 'threads-tree')
   named(s.hint, ['↑↓ to choose', 'b to go back', 'x to close'])
   await type($, w, SHORT, 'b')
-  expect((await seen($, SHORT, 'home')).rows[0]).toContain('Home')
+  // home: its title row `Home`, then the rule
+  const back = await seen($, SHORT, 'home')
+  expect(back.text.startsWith('Home')).toBe(true)
+  expect(back.rows[0]!.trim()).toMatch(/^─+$/)
 })
 
 test('keys · thread · a row click and after Esc: ↑↓ step, Enter and a put the field in the ring and the hint says so, s stops, b goes back', async ($, on) => {
@@ -804,7 +813,7 @@ for (const rows of [SHORT, TALL]) {
     await takesKeys($)
     s = await seen($, rows, 'files-tree')
     expect(s.chosen).toContain('log.txt')
-    expect(s.text).toMatch(/‹ back {2}home › files(?! ›)/)
+    expect(s.text).toMatch(/^home › Files(?! ›)/)
     await type($, w, rows, 'x')
     expect(w.closed).toContain(PANEL)
   })
@@ -987,11 +996,12 @@ test('keys · back from a new thread\'s form: the view shown names its own keys,
   await hotkey($, w, 'ask')
   await $.ui.focus({ requestId: PANEL, component: 'Pane', element: 'ask-new', origin: { kind: 'plugin', name: PANEL } } as never)
   expect((await seen($, SHORT)).hint).toBe('Enter to ask · Esc to leave the field')
-  // Esc, then a click on ‹ back; Claude Code puts the ring back where it was in the pane, on the form's field
+  // Esc, then a click on the card's step of the path; Claude Code puts the ring back where it was in the pane, on the
+  // form's field
   w.paneFocused = false
   expect((await seen($, SHORT)).hint).toBe(UNFOCUSED_HINT)
   let pane = await look($, SHORT)
-  await pane.press({ key: 'nav-back' })
+  await pane.press({ key: (await crumb(pane, 'card "What does the export'))! })
   await w.clock.settle()
   await pane.unmount()
   w.paneFocused = true
@@ -1015,7 +1025,7 @@ test('keys · back from a new thread\'s form: the view shown names its own keys,
   expect((await seen($, SHORT)).text).toContain('New thread')
   w.paneFocused = false
   pane = await look($, SHORT)
-  await pane.press({ key: 'nav-back' })
+  await pane.press({ key: (await crumb(pane, 'log.txt'))! })
   await w.clock.settle()
   await pane.unmount()
   w.paneFocused = true
@@ -1089,12 +1099,12 @@ test('keys · `l` and `show all threads`: the list in place of the step that hol
   }
   expect(await way()).toMatch(/home › documents › "Agents used the dse wiki/)
   await hotkey($, w, 'all')
-  expect(await way()).toMatch(/home › documents(?! ›)/)
+  expect(await way()).toMatch(/home › Documents(?! ›)/)
   await takesKeys($)
   expect((await seen($, SHORT, 'docs-list')).chosen).toContain('Agents used the dse wiki')
   // back leads to home, as the path shows
   await type($, w, SHORT, 'b')
-  expect(await way()).toMatch(/^home(?! ›)/)
+  expect(await way()).toMatch(/^Home(?! ›)/)
   expect((await seen($, SHORT, 'home')).rows.join('\n')).toContain('Documents (2)')
   // a label's `l`
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
@@ -1102,7 +1112,7 @@ test('keys · `l` and `show all threads`: the list in place of the step that hol
   await takesKeys($)
   await click($, w, SHORT, 'home', 'links through a fetch proxy', '█')
   await hotkey($, w, 'list')
-  expect(await way()).toMatch(/home › labels(?! ›)/)
+  expect(await way()).toMatch(/home › Labels(?! ›)/)
   await takesKeys($)
   expect((await seen($, SHORT, 'labels-list')).chosen).toContain('links through a fetch proxy')
   // `show all threads` from home, pressed and the ring left on it by Claude Code: the threads take the list's keys
@@ -1152,7 +1162,7 @@ test('the path row: `show all threads` and `N new` on home alone; the threads pa
     await w.clock.settle()
     await takesKeys($)
     const r = await way()
-    expect(r.text).toMatch(/^(‹ back {2})?home\s*show all threads {2}1 new$/)
+    expect(r.text).toMatch(/^Home\s*show all threads {2}1 new$/)
     expect(r.threads).toBe(true)
   }
   await home()
@@ -1161,11 +1171,11 @@ test('the path row: `show all threads` and `N new` on home alone; the threads pa
   await without(/home › threads › "why is events\.jsonl bigger\?"/)
   await $.command.run({ command: 'thimble:thimble', args: 'threads' } as never)
   await w.clock.settle()
-  await without(/home › threads$/)
+  await without(/home › Threads$/)
   // a view, the views and a file it claims
   await home()
   await click($, w, SHORT, 'home', 'Views (1)')
-  await without(/home › views$/)
+  await without(/home › Views$/)
   await takesKeys($)
   await enter($, w, SHORT)
   await without(/home › views › Timeline$/)
@@ -1174,11 +1184,12 @@ test('the path row: `show all threads` and `N new` on home alone; the threads pa
   await without(/home › files › README\.md$/)
   await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
   await w.clock.settle()
-  await without(/home › files$/)
+  await without(/home › Files$/)
   // a card, and a citation from it
   await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
   await w.clock.settle()
-  await without(/home › card "What does the export hold…"$/)
+  // the current step names the card by its whole question
+  await without(/home › card "What does the export hold per wiki\?"$/)
   const reply = { plugin: PANEL, component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'The README says [4,579](README.md#L3) pages.', isFirstOfReply: true } } as never
   let ui = (await $.ui.mount(reply)) as unknown as M
   await w.clock.advance(300)
@@ -1188,17 +1199,18 @@ test('the path row: `show all threads` and `N new` on home alone; the threads pa
   await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
   await ui.unmount()
   await w.clock.settle()
-  await without(/citation 4,579$/)
+  // the citation's value is the title row's link, drawn in its Client after `citation`
+  await without(/home › citation $/)
   // a label, the documents and a document
   await home()
   await click($, w, SHORT, 'home', 'links through a fetch proxy', '█')
   await without(/home › labels › links through a fetch proxy$/)
   await $.command.run({ command: 'thimble:thimble', args: 'documents' } as never)
   await w.clock.settle()
-  await without(/home › documents$/)
+  await without(/home › Documents$/)
   await takesKeys($)
   await type($, w, SHORT, '1')
-  await without(/home › documents › "Agents used the dse wiki as a…"$/)
+  await without(/home › documents › "Agents used the dse wiki as a relay"$/)
   // home is one click away from each of them
   const pane = await look($, SHORT)
   await pane.press({ key: 'crumb-home' })
@@ -1238,8 +1250,9 @@ test('keys · home · tall, scrolled: ↑ back to a section\'s first row shows i
   const back = await seen($, TALL, 'home')
   expect(back.chosen).toBe(first.chosen)
   expect(back.rows.some(r => /↑ \d+ more/.test(r))).toBe(false)
-  // the title, its rule, then the Views heading over the first row
-  expect(back.rows.slice(0, 4).map(r => r.trim())).toEqual(['Home', expect.stringMatching(/^─+$/), expect.stringMatching(/^Views \(1\)/), expect.stringMatching(/Board/)])
+  // the rule under the title row, then the Views heading over the first row
+  expect(back.text.startsWith('Home')).toBe(true)
+  expect(back.rows.slice(0, 3).map(r => r.trim())).toEqual([expect.stringMatching(/^─+$/), expect.stringMatching(/^Views \(1\)/), expect.stringMatching(/Board/)])
 })
 
 test('keys · home · a word typed while home holds the keys reaches the prompt whole: `t` opens no threads', async ($, on) => {

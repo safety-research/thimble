@@ -5,10 +5,12 @@
 // (hooks/term.ts).
 //
 // The model's Markdown is drawn as Claude Code draws it (bold bold, headings bold, inline code coloured); prose and
-// cards share one left edge (column 4, the ⏺ row's text) and one width (the terminal's), with no measure; a card has
-// its full round border, which stands in for the blank rows next to it. The margin at column 2 holds the blue `?` of
-// the passage under the pointer (a heading's asks about its whole section), and a blue `↳` beside a passage or a card a
-// side thread was asked about, whose click opens that thread.
+// cards share one left edge (column 2, where Claude Code's own reply text starts after its ⏺) and one width (the
+// terminal's), with no measure; a card has its full round border, which stands in for the blank rows next to it. The
+// margin is the ⏺'s column: it holds the blue `?` of the passage under the pointer (a heading's asks about its whole
+// section) and a blue `↳` beside a passage or a card a side thread was asked about, whose click opens that thread; on
+// the reply's first row the mark takes the ⏺'s cell (Matt, 2026-10-07: "indent 2 chars and replace the dot with ? when
+// they overlap"), so a mark never adds indent.
 //
 // A citation's state after it: ◌ while thimble's links check runs on a card's takeaway, ✓ once the check recomputed it,
 // a red × when the check found another value. The citation under the pointer shows its status in plain words (where it
@@ -19,7 +21,7 @@ import type { TermCard, TermLinks, TermVerdict } from '../types'
 import { blockClaims, chipLook, citeLabel, plainCites, richMarkdown, showsValue, streamLink } from './cite'
 import type { ChipView } from './cite'
 import { LINK } from './chrome'
-import { cardLayout, cut, labelHead, placeWords } from './draw'
+import { cardLayout, cut, labelHead, placeWords, wrapRows } from './draw'
 import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
@@ -33,8 +35,9 @@ import { loadCards, queueCitations, rt } from './term'
 import type { Ctx } from './ctx'
 import type { ThimbleLabel } from './cell'
 
-/** The columns left of a reply's blocks: ⏺, a space, the reply's margin ("?" on hover, a passage's ↳), a space. */
-export const MARGIN = 4
+/** The columns left of a reply's blocks in main's chat, Claude Code's own: its ⏺ and a space. The reply's margin ("?"
+ *  on hover, a passage's ↳) is the ⏺'s cell, the mark in its place on the row where both fall. */
+export const MARGIN = 2
 /** A reply's margin in the panel (a side thread's answer, a document): its marks at M, its text at A0. */
 export const PANEL_MARGIN = 2
 
@@ -311,7 +314,7 @@ async function chipRuns(cx: Ctx, block: Extract<Block, { type: 'rich' }>): Promi
 // ------------------------------------------------------------------------------------------------ a reply
 
 export type ReplyOpts = {
-  /** columns left of the text: MARGIN in main's chat, PANEL_MARGIN in the panel */
+  /** columns left of the text: PANEL_MARGIN in the panel, 0 in a card's takeaway; none for main's chat (MARGIN) */
   margin?: number
   /** the block that draws the reply's ⏺ */
   first?: boolean
@@ -354,47 +357,42 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     const first = words.split('\n')[0]!.trim()
     const head = /^#{1,6}\s/.test(first) ? [...secs.keys()].find(k => k === first || flat(k) === flat(first)) : undefined
     const sec = head ? secs.get(head) : undefined
-    if (sec) return () => opts.ask!({ kind: 'sentence', text: clip(sec, 4000), label: `the section ${quoted(clip(flat(first), 60))}` })
+    if (sec) return () => opts.ask!({ kind: 'sentence', text: sec.slice(0, 4000), label: `the section ${quoted(clip(flat(first), 60))}` })
     return () => opts.ask!({ kind: 'sentence', text: words.slice(0, 1200) })
   }
-  // the margin's mark: a blue ↳ once a thread was asked about the passage, else a blue "?" shown under the pointer
-  const markOf = async (ask: Ask | undefined): Promise<RenderElement | null> => {
+  // the margin's mark: a blue ↳ once a thread was asked about the passage, which stays; else a blue "?" shown under the
+  // pointer, over the ⏺ on the reply's first row (`over`), which it hides while it shows
+  const markOf = async (ask: Ask | undefined, over: boolean): Promise<{ el: RenderElement; asked: boolean } | null> => {
     if (!ask || !live) return null
     const tid = opts.open ? await threadAbout(cx, ask.words) : ''
-    if (tid) return linesEl(cx, e, `asked-${ask.key}`, [[{ s: '↳', fg: LINK }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => opts.open?.(tid) }], 1)
+    if (tid) return { asked: true, el: linesEl(cx, e, `asked-${ask.key}`, [[{ s: '↳', fg: LINK }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => opts.open?.(tid) }], 1) }
     if (!ask.press) return null
-    return (
-      <Box width={1} display="none" hover={{ display: 'flex' }}>
-        <Button key={`ask-${ask.key}`} label="?" plain hover={{ color: LINK }} onPress={ask.press} />
-      </Box>
-    )
+    return {
+      asked: false,
+      el: (
+        <Box width={1} display="none" hover={{ display: 'flex' }} {...(over ? { position: 'absolute' as const, top: 0, left: 0 } : {})}>
+          <Button key={`ask-${ask.key}`} label="?" plain hover={{ color: LINK }} onPress={ask.press} />
+        </Box>
+      ),
+    }
   }
-  // a block's row: its margin (⏺ on the first, the mark), then the block, filling the column
+  // a block's row: its margin (⏺ on the reply's first, a passage's mark in its cell), then the block, filling the column
   const row = async (el: RenderElement, ask?: Ask): Promise<RenderElement> => {
     const mark = lead
     lead = ' '
-    const q = await markOf(ask)
+    const dot = mark.trim() !== ''
+    const q = await markOf(ask, dot)
     const content = (
       <Box flexDirection="column" width={cols} flexShrink={1}>
         {el}
       </Box>
     )
-    if (M !== MARGIN)
-      return (
-        <Box key={`row-${ask?.key ?? `${prefix}${n}`}`} flexDirection="row">
-          <Box width={M} flexShrink={0} flexDirection="row" marginTop={ask?.top ?? 0}>
-            {q ?? <Text> </Text>}
-          </Box>
-          {content}
-        </Box>
-      )
+    // a ↳ takes the ⏺'s cell; a "?" lies over it, shown only under the pointer
     return (
       <Box key={`row-${ask?.key ?? `${prefix}${n}`}`} flexDirection="row">
-        <Box width={MARGIN} flexShrink={0} flexDirection="row" marginTop={ask?.top ?? 0}>
-          <Box width={2} flexShrink={0}>
-            <Text>{mark}</Text>
-          </Box>
-          {q}
+        <Box width={M} flexShrink={0} flexDirection="row" marginTop={ask?.top ?? 0}>
+          {dot && !q?.asked ? <Text>{mark}</Text> : null}
+          {q?.el ?? (dot ? null : <Text> </Text>)}
         </Box>
         {content}
       </Box>
@@ -512,7 +510,9 @@ async function withQuotes(cx: Ctx, data: CardData): Promise<CardData> {
   return { ...data, examples }
 }
 
-export type CardOpts = { pane?: boolean; takeaway?: boolean; order?: number; in?: 'reply' | 'report'; focus?: Focus }
+/** `clip`: at most `rows` rows of the card's plot or body, and none of what stands under it, where the card holds more
+ *  than a row past them (a side thread's subject); `more` shows it whole. */
+export type CardOpts = { pane?: boolean; takeaway?: boolean; order?: number; in?: 'reply' | 'report'; focus?: Focus; clip?: { rows: number; more: () => void } }
 
 /** A card in a stream (a reply, a document, the panel), as Matt laid cards out (2026-10-07): a full round border in the
  *  rule grey with a cell of padding; inside, its title in bold, one blank row, then its plot or body directly, and below
@@ -543,20 +543,38 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
   const meta = { ...(tc.busy ? { busy: tc.busy } : {}), ...(tc.error ? { error: tc.error } : {}) }
   const inner = Math.max(10, w - 4)
   const rows: RenderElement[] = []
+  // a subject's card cut to its rows where it holds more than one row past them: its plot's first rows and its readout,
+  // then `… N more` for the rest (the plot's other rows, the label and params rows, the takeaway)
+  let clip: number | undefined
+  let hidden = 0
+  if (opts.clip) {
+    const lay = cardLayout(data, inner, -1)
+    const under = labelHead(data, inner).lines.length + ((data.params ?? []).length ? 1 : 0) + (tc.takeaway.trim() ? wrapRows(plainCites(tc.takeaway), inner, 999).length : 0) + (tc.fixed ? 1 : 0)
+    const left = Math.max(0, lay.lines.length - opts.clip.rows) + under
+    if (left >= 2) {
+      clip = opts.clip.rows
+      hidden = left
+    }
+  }
   if (live) {
     const { Client } = cx.els(e)
-    rows.push(<Client key={`card-${key}-${id}`} module="./card.tsx" width={inner} props={JSON.parse(JSON.stringify({ card: data, cols: inner, meta, ...(opts.pane ? { pane: true, plotRows: 16 } : {}), ...(opts.focus ? { focus: opts.focus } : {}) }))} />)
+    rows.push(<Client key={`card-${key}-${id}`} module="./card.tsx" width={inner} props={JSON.parse(JSON.stringify({ card: data, cols: inner, meta, ...(opts.pane ? { pane: true, plotRows: 16 } : {}), ...(opts.focus ? { focus: opts.focus } : {}), ...(clip !== undefined ? { clip } : {}) }))} />)
   } else {
     const state = meta.busy || meta.error ? [[{ s: meta.busy || meta.error || '', fg: meta.error ? COLORS.problem : COLORS.dim }]] : []
     const first = cardLayout(data, inner, -1)
     const lit = opts.focus ? focusItem(data, first.items, opts.focus) : -1
     const body = lit >= 0 ? cardLayout(data, inner, lit).lines : first.lines
-    rows.push(<Box flexDirection="column">{paintLines(Box, Text, [...(opts.pane ? [] : [[{ s: cut(data.question, inner), b: true }], []]), ...body, ...state, ...labelHead(data, inner).lines])}</Box>)
+    rows.push(<Box flexDirection="column">{paintLines(Box, Text, [...(opts.pane ? [] : [[{ s: cut(data.question, inner), b: true }], []]), ...(clip !== undefined ? body.slice(0, clip) : body), ...state, ...(clip !== undefined ? [] : labelHead(data, inner).lines)])}</Box>)
   }
-  if (opts.takeaway !== false && tc.takeaway.trim()) rows.push(<Box flexDirection="column" width={inner}>{await drawReply(cx, e, tc.takeaway, inner, { margin: 0, prefix: `tk-${key}-`, card: id })}</Box>)
-  // the card check rewrote it: a dim note says which parts and why (live check term-fix8, low quirk: it rewrote a
-  // takeaway with nothing in the chat saying so)
-  if (tc.fixed) rows.push(<Text key={`fixed-${key}`} dimColor wrap="wrap">{fixedNote(tc.fixed)}</Text>)
+  if (clip !== undefined) {
+    const { Button } = cx.els(e)
+    rows.push(<Box key={`more-row-${key}`} flexDirection="row"><Button key={`more-${key}`} label={`… ${hidden.toLocaleString('en-US')} more`} plain dimColor onPress={opts.clip!.more} /></Box>)
+  } else {
+    if (opts.takeaway !== false && tc.takeaway.trim()) rows.push(<Box flexDirection="column" width={inner}>{await drawReply(cx, e, tc.takeaway, inner, { margin: 0, prefix: `tk-${key}-`, card: id })}</Box>)
+    // the card check rewrote it: a dim note says which parts and why (live check term-fix8, low quirk: it rewrote a
+    // takeaway with nothing in the chat saying so)
+    if (tc.fixed) rows.push(<Text key={`fixed-${key}`} dimColor wrap="wrap">{fixedNote(tc.fixed)}</Text>)
+  }
   return (
     <Box flexDirection="column" width={w} borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
       {rows}
@@ -578,9 +596,9 @@ export function fixedNote(f: { fields: string[]; why: string }): string {
   return `The card check rewrote its ${which}${why ? `: ${why}` : ''}.`
 }
 
-/** The cards a turn made, under its last reply, on the reply's text column (4), border to border: the border stands in
- *  for a blank row. The blue "?" beside each, under the pointer, asks a side thread about it; once one was asked, a
- *  blue ↳ stays there and opens it. */
+/** The cards a turn made, under its last reply, on the reply's text column (2), border to border: the border stands in
+ *  for a blank row. The blue "?" in the margin beside each, under the pointer, asks a side thread about it; once one
+ *  was asked, a blue ↳ stays there and opens it. */
 export async function drawCards(cx: Ctx, e: ResolveInput, ids: readonly string[], cols: number, ask?: (t: Target) => void, open?: (thread: string) => void): Promise<RenderElement | null> {
   if (!ids.length) return null
   const { Box, Button } = cx.els(e)
@@ -600,7 +618,6 @@ export async function drawCards(cx: Ctx, e: ResolveInput, ids: readonly string[]
     out.push(
       <Box key={`turn-card-${i}`} flexDirection="row">
         <Box width={MARGIN} flexShrink={0} flexDirection="row" marginTop={1}>
-          <Box width={2} flexShrink={0} />
           {mark}
         </Box>
         <Box flexDirection="column" flexShrink={1}>

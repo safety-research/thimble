@@ -77,7 +77,7 @@ test('the path row fits a pane 40 columns wide: home\'s `show all threads` short
   // home: `show all threads  1 new` where it fits, `threads  1 new` in a pane too narrow for it, so the threads stay one
   // click away. No letter shows the threads (live check term-fix10, new quirk 4: `t` did, unnamed, and `table` typed
   // while the panel held the keys opened them)
-  for (const body of [34, 96]) {
+  for (const body of [28, 96]) {
     await $.command.run({ command: 'thimble:thimble', args: '' } as never)
     await w.clock.settle()
     const pane = await look($, body)

@@ -1,8 +1,9 @@
 // The panel: thimble-term's one pane, drawn by the view `panel` names (hooks/term.ts), on the panel's look in SPEC.md
 // ("The visual system": rules 1 to 15, sections 2 and 7). A cell of padding at each side,
-// then the 2-cell margin where `❯`, `?` and `↳` hang, then the type area. Every view opens with the path row
-// (`‹ back`, the steps from home, `show all threads` and `N new` in green at R), its title in the accent colour and bold
-// with a dim subtitle, a rule; its actions sit at its bottom after a second rule; a dim italic row of key hints ends it.
+// then the 2-cell margin where `❯`, `?` and `↳` hang, then the type area. Every view opens with its title row, the path
+// from home with the current step last in the accent colour and bold (`home › Threads`; on home `show all threads` and
+// `N new` in green at R), a dim subtitle, a rule; its actions sit at its bottom after a second rule; a dim italic row of
+// key hints ends it.
 // A right-click does what a click does: there is no menu.
 //
 //   home      everything the workspace holds (home.ts laid out, homeview.tsx drawn): views, documents, threads, cards by
@@ -23,7 +24,7 @@ import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderEle
 
 import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermVerdict } from '../types'
 import type { ThimbleLabel } from './cell'
-import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
+import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setHead, spread, subLine, takeHead } from './chrome'
 import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
 import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, cutRef, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
@@ -40,11 +41,12 @@ import { aroundLine, docUnits, docsOf, labelOf, labelsOf, threadOf } from './mod
 import type { DocFigure, DocSection } from './model'
 import { TITLE_ID, beginEdit, checksOf, commentFacts, commentLines, commentWho, commentsOf, discardEdit, draftEdit, editChanged, editOf, flipResolved, passageWords, pickOf, resolvedShown, saveEdit, setComment, setPick, shownComments, stepPick, unitOf, unitParts } from './report'
 import type { DocComment } from './report'
+import { focusFromRef } from './anim'
 import type { Focus } from './anim'
-import { NAV_EMPTY, backTarget, crumbSteps, crumbsWidth, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
+import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, citePage, closePanel, deleteLabel, filterLabel, handBack, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage, undeleteLabel } from './term'
+import { PANEL, citePage, closePanel, deleteLabel, filterLabel, handBack, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
 import { COLOR_NAMES, MORE_ROWS, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, setLabelGone } from './labels'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
@@ -299,18 +301,35 @@ function upOf(s: ChatNavStep, earlier: readonly ChatNavStep[]): TermPanel | null
   return null
 }
 
-// the cells of the path row's separator (` › `)
+// the cells of the title row's separator (` › `)
 const SEP_W = 3
 
-/** The path row (SPEC.md, "A panel's header"): `‹ back`, the steps from home, each a lower-case kind word and its
- *  name parted by a dim ›, each a click away, a thread's step followed by `new` in green while answers wait; on home, at
- *  R `show all threads` and `N new` in green. Every other panel leaves those out. */
+// a list's step as the title names it where it is the current step (`home › Threads`); earlier on the path it reads as
+// its lower-case kind word (`home › threads › "…"`)
+const LIST_TITLES: Record<string, string> = { home: 'Home', threads: 'Threads', labels: 'Labels', docs: 'Documents', files: 'Files', views: 'Views', ask: 'New thread' }
+
+/** The current step's words: a list's title; a thread by its question; else the step as the path names it, with the
+ *  subject's name as the view gave it (a card's whole question). */
+function hereText(s: ChatNavStep, title: string | undefined): string {
+  const list = LIST_TITLES[s.view]
+  if (list) return list
+  return s.view === 'thread' || !title ? crumbText(s) : crumbText({ ...s, title })
+}
+
+/** The title row (SPEC.md, "A panel's header"; Matt, 2026-10-07: "can just be one line for title"): the path from
+ *  home, each earlier step dim and a click away, a dim ` › ` between steps, and the current step last, its title in the
+ *  accent and bold (a citation's value its link); a thread's step followed by `new` in green while answers wait, one
+ *  that answers starting with `◌`. Against R what the view puts there (`◌ loading…`), and on home `show all threads`
+ *  and `N new` in green. No `‹ back`: b goes back. Where the path does not fit, the earlier steps shorten first, then
+ *  the current one is cut with `…`. */
 async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElement> {
   const { Box, Text, Button } = cx.els(e)
+  const els = cx.els(e) as El
   // the row's own width: never more than the pane gives it, or it wraps (live check term-fix9, quirk 3)
   const cols = Math.max(10, e.props.bodyColumns)
   const nav = (await cx.nav()) ?? NAV_EMPTY
   const back = backTarget(nav) !== null
+  const head = takeHead()
   // `show all threads` only where the threads are the subject, home; the threads panel is the threads, and on a view,
   // a file, a card or a citation home is one step away (Matt, 2026-10-07: "does 'show all threads' really need to be
   // there when you're not in a thread?")
@@ -327,48 +346,66 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
     const upTrail = nav.trail.slice(0, i + skipped)
     if (up) crumbs.push({ text: up.view === 'docs' ? 'documents' : up.view, mark: '', up: true, go: () => void navGo(cx, { trail: [...upTrail, stepOf(up)], back: withBack(nav.back, nav.trail) }) })
     const t = s.view === 'thread' ? threads.find(x => x.id === s.thread) : undefined
+    const here = i === steps.length - 1
     // a card's step taken before the card was read names it by its question once it is
-    const card = s.view === 'card' && s.title === 'Card' ? ((await cx.card(panelOfStep(s)?.card ?? ''))?.data as CardData | null | undefined) : null
-    crumbs.push({ text: crumbText(card?.question ? { ...s, title: clip(card.question, 60) } : s), mark: t?.running ? '◌' : t?.unread ? 'new' : '', go: () => void navGo(cx, { trail: nav.trail.slice(0, i + 1 + skipped), back: withBack(nav.back, nav.trail) }), here: i === steps.length - 1 })
+    const card = s.view === 'card' && (s.title === 'Card' || (here && !head.title)) ? ((await cx.card(panelOfStep(s)?.card ?? ''))?.data as CardData | null | undefined) : null
+    const named = card?.question ? { ...s, title: here ? card.question : clip(card.question, 60) } : s
+    crumbs.push({ text: here ? hereText(named, head.title) : crumbText(named), mark: t?.running ? '◌' : t?.unread ? 'new' : '', go: () => void navGo(cx, { trail: nav.trail.slice(0, i + 1 + skipped), back: withBack(nav.back, nav.trail) }), here })
   }
+  const home = !crumbs.length
+  // the current step's own words, where the view draws them (a citation's value as its link), after the step's kind
+  // word in the accent and bold (`citation`)
+  const own: Line | null = head.line && crumbs.length ? head.line : null
+  const kind = own && view === 'cite' ? 'citation ' : ''
+  if (own) crumbs[crumbs.length - 1]!.text = `${kind}${own.map(x => x.s).join('')}`
   const marksW = crumbs.reduce((n, c) => n + (c.mark ? c.mark.length + 1 : 0), 0)
   // at R `show all threads` and `N new`, while the steps keep the room they need beside them (home, the last step at
   // up to 12 cells); else `threads` and `N new`, else `threads` alone, so the threads stay one click away in a narrow
   // pane; else neither. No letter opens them: `t` did, unnamed, and a word typed while the panel held the keys (`table`)
   // opened the threads and lost its first letter (live check term-fix10, new quirk 4)
-  const labels = ['home', ...crumbs.map(c => c.text)]
-  const room = cols - (back ? 8 : 0) - marksW
+  const labels = [home ? LIST_TITLES.home! : 'home', ...crumbs.map(c => c.text)]
+  const rightW = head.right ? 2 + 12 : 0
+  const room = cols - marksW - rightW
   const newW = fresh ? `${fresh} new`.length : 0
   type Tail = { all: string; fresh: boolean; w: number }
   const tail0 = (all: string, withNew: boolean): Tail => ({ all, fresh: withNew, w: (all ? 2 + all.length : 0) + (withNew ? 2 + newW : 0) })
   const tails: Tail[] = !showThreads
     ? [tail0('', false)]
     : [tail0('show all threads', Boolean(fresh)), ...(fresh ? [tail0('threads', true)] : []), tail0('threads', false), tail0('', false)]
-  const need = Math.min(crumbsWidth(labels.map(l => clip(l, 34))), 4 + (labels.length > 2 ? 4 : 0) + (labels.length > 1 ? SEP_W + Math.min(12, width(labels.at(-1)!)) : 0))
+  const need = Math.min(pathWidth(labels.map((l, i) => (i < labels.length - 1 ? clip(l, 34) : l))), 4 + (labels.length > 2 ? 4 : 0) + (labels.length > 1 ? SEP_W + Math.min(12, width(labels.at(-1)!)) : 0))
   const tail = tails.find(t => room - t.w >= need) ?? tails.at(-1)!
-  const fitted = fitCrumbs(labels, Math.max(4, room - tail.w))
+  const fitted = fitPath(labels, Math.max(4, room - tail.w))
   const parts: RenderElement[] = []
+  let drawn = false
   fitted.forEach((text, i) => {
     if (text === null) {
-      if (fitted[i - 1] !== null) parts.push(<Text dimColor>{' › …'}</Text>)
+      if (drawn && fitted[i - 1] !== null) parts.push(<Text dimColor>{' › …'}</Text>)
       return
     }
-    if (i) parts.push(<Text dimColor>{' › '}</Text>)
+    if (drawn) parts.push(<Text dimColor>{' › '}</Text>)
+    drawn = true
     const c = i ? crumbs[i - 1]! : null
     if (c?.mark === '◌') parts.push(<Text>{'◌ '}</Text>)
-    if (c?.here) parts.push(<Text>{text}</Text>)
-    else if (c) parts.push(<Button key={c.up ? `crumb-up-${i}` : `crumb-${i}`} label={text} plain onPress={c.go} />)
-    else if (view === 'home' && fitted.length === 1) parts.push(<Text>{text}</Text>)
-    else parts.push(<Button key="crumb-home" label={text} plain onPress={() => void openHome(cx)} />)
+    if (c?.here || (!c && home)) {
+      // the current step: the title, in the accent and bold, or the view's own words for it, cut to the room
+      if (!own) parts.push(lineEl(els, [{ s: text, fg: ACCENT, b: true }]))
+      else {
+        if (kind) parts.push(lineEl(els, [{ s: cut(kind, width(text)), fg: ACCENT, b: true }]))
+        const line = fitTo(own, Math.max(1, width(text) - width(kind)))
+        if (width(text) > width(kind)) parts.push(head.press ? linesEl(cx, e, head.key ?? 'way-here', [line], [{ y: 0, x0: 0, x1: lineWidth(line), row: false, run: head.press }], lineWidth(line)) : lineEl(els, line, head.key))
+      }
+    } else if (c) parts.push(<Button key={c.up ? `crumb-up-${i}` : `crumb-${i}`} label={text} plain dimColor onPress={c.go} />)
+    else parts.push(<Button key="crumb-home" label={text} plain dimColor onPress={() => void openHome(cx)} />)
     if (c?.mark === 'new') parts.push(<Text color={FRESH}>{' new'}</Text>)
   })
   const showAll = () => void openPanel(cx, { view: 'threads', title: 'Threads' })
   return (
     <Box key="way" flexDirection="row">
-      {back ? <Button key="nav-back" label="‹ back" plain onPress={() => void navBack(cx)} /> : null}
-      {back ? <Text>{'  '}</Text> : null}
-      {parts}
+      <Box flexShrink={1} flexDirection="row">
+        {parts}
+      </Box>
       <Box flexGrow={1} />
+      {head.right ? <Box flexShrink={0}>{head.right}</Box> : null}
       {tail.all ? <Button key="threads" label={tail.all} plain onPress={showAll} /> : null}
       {tail.fresh ? <Text color={FRESH}>{`${tail.all ? '  ' : ''}${fresh} new`}</Text> : null}
       {hiddenKeys(cx, e, [...(back ? [{ key: 'back', hotkey: 'b', onPress: () => void navBack(cx) }] : []), { key: 'close', hotkey: 'x', onPress: () => void closePanel(cx) }])}
@@ -377,7 +414,7 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
   )
 }
 
-/** The path row, then the view's rows, each with an empty margin unless it brings its own (a key starting `m:`). */
+/** The title row, then the view's rows, each with an empty margin unless it brings its own (a key starting `m:`). */
 async function withWay(cx: Ctx, e: PaneEvent, view: string, body: RenderElement): Promise<RenderElement> {
   const way = await wayRow(cx, e, view)
   const { Box } = cx.els(e)
@@ -936,16 +973,18 @@ async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       await run(h.act)()
     },
   }))
-  // the sections cut to the pane's rows around the chosen row, the title, its rule and the hint rows kept (windowList):
-  // the path row, the title, the rule and the hint rows take the rest
+  // the sections cut to the pane's rows around the chosen row, the rule and the hint rows kept (windowList): the title
+  // row, the rule and the hint rows take the rest
   const pick = ui.pick || lay.picks[0]?.key || ''
   const pickY = lay.hits.find(h => h.pick === pick)?.y ?? -1
   const last = lay.lines.length - lay.hintRows
+  // the rows above the sections: the rule (the title is the title row's)
+  const top = 1
   // the row that leads the chosen one: the top for the first row the keys choose, else its section's heading
-  const lead = pick === lay.picks[0]?.key ? 2 : Math.max(2, ...lay.heads.filter(y => y <= pickY))
-  const win = windowList('home', lay.lines.slice(2, last), allHits.filter(h => h.y >= 2 && h.y < last).map(h => ({ ...h, y: h.y - 2 })), pickY - 2, bodyRows - 3 - lay.hintRows, () => cx.bumpPanel(), lead - 2)
-  const lines = [...lay.lines.slice(0, 2), ...win.lines, ...lay.lines.slice(last)]
-  const hits: LineHit[] = [...allHits.filter(h => h.y < 2), ...win.hits.map(h => ({ ...h, y: h.y + 2 }))]
+  const lead = pick === lay.picks[0]?.key ? top : Math.max(top, ...lay.heads.filter(y => y <= pickY))
+  const win = windowList('home', lay.lines.slice(top, last), allHits.filter(h => h.y >= top && h.y < last).map(h => ({ ...h, y: h.y - top })), pickY - top, bodyRows - 1 - top - lay.hintRows, () => cx.bumpPanel(), lead - top)
+  const lines = [...lay.lines.slice(0, top), ...win.lines, ...lay.lines.slice(last)]
+  const hits: LineHit[] = [...allHits.filter(h => h.y < top), ...win.hits.map(h => ({ ...h, y: h.y + top }))]
   const onKey = async (k: string) => {
     const cur = (await cx.homeUi()) as HomeUi
     const l = homeLast
@@ -1317,11 +1356,20 @@ function citedItem(card: CardData, items: Item[], v: TermVerdict): number {
   return items.findIndex(it => it.open.startsWith(pre) && sameKey(it.open.slice(pre.length), v.row!))
 }
 
-/** A card whose cited table or bar row is past the rows drawn, that row in place of the last one drawn. */
+/** A card whose cited table or bar row is past the rows drawn, that row in place of the last one drawn (a bar's label
+ *  with each of its groups' rows). */
 function withCitedRow(card: CardData, v: TermVerdict): CardData {
   const cap = card.kind === 'table' ? MAX_TABLE_ROWS : card.kind === 'bar' || card.kind === 'label' ? MAX_BARS : 0
   const all = card.rows ?? []
   if (!cap || all.length <= cap || !v.row) return card
+  if (card.kind !== 'table') {
+    const bars = all as BarRow[]
+    const labels = [...new Set(bars.map(b => b.label))]
+    const at = labels.findIndex(l => sameKey(l, v.row!))
+    if (at < cap) return card
+    const keep = new Set([...labels.slice(0, cap - 1), labels[at]!])
+    return { ...card, rows: bars.filter(b => keep.has(b.label)) as CardData['rows'] }
+  }
   const r = all.findIndex(x => sameKey(fmt(card.kind === 'table' ? (x as Cell[])[0] : (x as BarRow).label), v.row!))
   return r < cap ? card : { ...card, rows: [...all.slice(0, cap - 1), all[r]!] as CardData['rows'] }
 }
@@ -1455,7 +1503,8 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const titleSegs: Line = [{ s: label, b: true, fg: bad ? COLORS.problem : LINK, u: true }, ...(mark ? [mark] : [])]
   const opens = f ? () => openFile(cx, f.path, Math.max(1, (f.line ?? 1) - 5), f.line) : cardId ? () => openCard(cx, cardId) : null
   const body: RenderElement[] = []
-  body.push(opens ? linesEl(cx, e, 'cite-title', [titleSegs], [{ y: 0, x0: 0, x1: width(label), row: false, run: () => void opens() }], cols) : lineEl(els, titleSegs, 'cite-title'))
+  // the title row's current step: the value as its link, a click on it opening its place
+  setHead({ line: titleSegs, key: 'cite-title', ...(opens ? { press: () => void opens() } : {}) })
   const why = red && v?.why ? await plainWhy(cx, v.why) : check.state === 'refuted' && check.why ? await plainWhy(cx, check.why) : ''
   // a citation with no words is titled by its place: its subtitle does not name the place again, and it has none
   // while the place is there
@@ -1487,13 +1536,13 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   if (!(v?.card && !v.lines.length) && v?.lines.length) {
     // the passage an example quotes, when the cited lines do not hold it
     const quotedRow = quote && status !== 'differs' && !v.lines.some(l => l.hit && quoteSpan(demojibake(l.text).replace(/\t/g, '  '), quote))
-    // a file's lines: a window over the whole file, as tall as the rows the panel's other parts leave it (the path row,
-    // the title, the subtitle, the rule, the label/value rows, a `quoted` row, the rule, `ask about it`, the follow-up
-    // field and the hint rows)
+    // a file's lines: a window over the whole file, as tall as the rows the panel's other parts leave it (the title
+    // row, the subtitle, the rule, the label/value rows, a `quoted` row, the rule, `ask about it`, the follow-up field
+    // and the hint rows)
     const fieldW = Math.max(0, ...rows.map(([k]) => width(k))) + 2
     const tall = (words: string, w: number) => (words ? wrapRows(words, Math.max(1, w), 999).length : 0)
     const used =
-      3 +
+      2 +
       tall(sub, cols) +
       rows.reduce((n, [k, val]) => n + tall(typeof val === 'string' ? val : k === 'source' && p.sentence ? sourceSegs(p.sentence, c).map(x => x.s).join('') : ' ', cols - fieldW), 0) +
       (quotedRow ? tall(clip(demojibake(quote), 600), cols - 8) : 0) +
@@ -1512,32 +1561,125 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
 
+// ------------------------------------------------------------------------------------------------ a thread's subject
+
+// the rows of a side thread's subject shown before its `… N more`
+const SUBJECT_ROWS = 6
+// the subjects shown whole, by their key (a thread's id, or a new thread's anchor): `… N more` shows one whole
+const subjectWhole = new Set<string>()
+
+/** What a side thread is about: its anchor (a card, a value on one, a file's line, a document's passage, none for words
+ *  on screen), the words it was asked about, and the card a new thread asks about. */
+type Subject = { anchor: string; text: string; card?: string; lit?: string }
+
+/** Whether words that name a thread's subject (`about "…"`) hold its passage whole, which then is not drawn again. */
+function saidIn(about: string, words: string): boolean {
+  const flat = plainCites(words).replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
+  return Boolean(flat) && about.includes(flat)
+}
+
+/** A passage's words as rows of `cols` cells: each line of it wrapped, a Markdown heading bold without its marks, the
+ *  marks of bold, italic and code left out, citations as their words, blank lines left out. */
+function passageRows(text: string, cols: number): Line[] {
+  const out: Line[] = []
+  for (const raw of plainCites(text).replace(/\[([^\[\]\n]*)\]\([^()\s]*\)/g, '$1').split('\n')) {
+    const head = /^#{1,6}\s+/.test(raw)
+    const words = raw.replace(/^#{1,6}\s+/, '').replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim()
+    if (!words) continue
+    for (const r of wrapRows(words, Math.max(10, cols), 999)) out.push([{ s: r, ...(head ? { b: true } : {}) }])
+  }
+  return out
+}
+
+/** The thing a side thread is about, above its chat and its field for as long as the thread shows (Matt, 2026-10-07:
+ *  "keep that thing above the chat so I know what I'm referencing"): a card in its frame, a value cited on it lit; a
+ *  file's cited line with up to two lines on each side, as the citation panel draws lines; a passage or a quote as its
+ *  words. At most SUBJECT_ROWS rows of it, then `… N more`, which shows it whole; never `… 1 more`. */
+async function subjectEls(cx: Ctx, e: PaneEvent, s: Subject, cols: number, key: string): Promise<RenderElement[]> {
+  const els = cx.els(e) as El
+  const { Box, Text, Button } = cx.els(e)
+  const whole = subjectWhole.has(key)
+  const showAll = () => {
+    subjectWhole.add(key)
+    void cx.bumpPanel()
+  }
+  const moreEl = (n: number) => (
+    <Box key={`subject-more-row-${key}`} flexDirection="row">
+      <Button key={`subject-more-${key}`} label={`… ${num(n)} more`} plain dimColor onPress={showAll} />
+    </Box>
+  )
+  const anchor = (s.anchor ?? '').split(',')[0] ?? ''
+  const cardId = s.card || /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(anchor)?.[1] || ''
+  if (cardId) {
+    const data = (await cx.card(cardId))?.data as CardData | null | undefined
+    const at = s.lit || (anchor.includes('#') ? anchor : '')
+    const focus = data && at ? focusFromRef(data, at.replace(/^cell:/, 'card:')) : undefined
+    const card = await cardBlock(cx, e, cardId, cols, `subject-${cid(key)}`, { ...(focus ? { focus } : {}), ...(whole ? {} : { clip: { rows: SUBJECT_ROWS, more: showAll } }) })
+    return [
+      <Box key={`subject-${key}`} flexDirection="column">
+        {card}
+      </Box>,
+    ]
+  }
+  if (subjectFile(anchor)) {
+    const c = { raw: `[[${anchor}]]`, ref: anchor, display: null }
+    const v = await cx.verdict(cid(c.raw))
+    if (!v) {
+      queueCitations([c])
+      return [<Text key={`subject-${key}`} dimColor>◌ reading its lines</Text>]
+    }
+    if (v.lines.length) {
+      // the cited lines and two on each side; the others the citation read too once shown whole
+      const first = v.lines.findIndex(l => l.hit)
+      const last = v.lines.length - 1 - [...v.lines].reverse().findIndex(l => l.hit)
+      const near = first < 0 ? v.lines : v.lines.filter((_l, i) => i >= first - 2 && i <= last + 2)
+      const all = lineRows(cx, e, v, cols, '')
+      const some = lineRows(cx, e, { ...v, lines: near }, cols, '')
+      // never `… 1 more`: one row past them is drawn
+      const rows = whole || all.length - Math.min(some.length, SUBJECT_ROWS) < 2 ? all : some
+      const cutAt = rows === all || rows.length <= SUBJECT_ROWS + 1 ? rows.length : SUBJECT_ROWS
+      const hidden = all.length - cutAt
+      return [
+        <Box key={`subject-${key}`} flexDirection="column">
+          {rows.slice(0, cutAt)}
+        </Box>,
+        ...(hidden >= 2 ? [moreEl(hidden)] : []),
+      ]
+    }
+  }
+  const lines = passageRows(s.text, cols)
+  if (!lines.length) return []
+  const cutAt = whole || lines.length <= SUBJECT_ROWS + 1 ? lines.length : SUBJECT_ROWS
+  return [
+    <Box key={`subject-${key}`} flexDirection="column">
+      {lines.slice(0, cutAt).map((l, i) => lineEl(els, l, `subject-${key}-${i}`))}
+    </Box>,
+    ...(cutAt < lines.length ? [moreEl(lines.length - cutAt)] : []),
+  ]
+}
+
 // ------------------------------------------------------------------------------------------------ a new thread
 
 let asking = ''
 
-/** A passage's first sentence, flat. */
-function firstSentence(text: string): string {
-  // a Markdown link that is no citation (a label's value, `[33](concept:…/yes)`) as its words
-  const flat = plainCites(text).replace(/\[([^\[\]\n]*)\]\([^()\s]*\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
-  const end = /[.!?](?=\s|$)/.exec(flat)
-  return end ? flat.slice(0, end.index + 1) : flat
-}
-
 /** A new side thread (SPEC.md, section 7, "The threads panel", a thread with no question yet): `about <what>`
- *  as its dim subtitle, the first sentence of the passage dim on one row, then the `ask` field, which has the keys. */
+ *  as its dim subtitle, what it is about (subjectEls: the card, the cited lines, the passage), then the `ask` field,
+ *  which has the keys. */
 async function drawAsk(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   if (e.surface === 'mobile') return none(cx, e, 'A side thread needs a surface with text fields.')
   const els = cx.els(e) as El
   const { Box, Text, Input } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
-  const opens = p.anchorText && p.target?.kind !== 'card' ? firstSentence(p.anchorText) : ''
   // a citation's words in quotation marks, as every subject (aboutName); a citation with no words by its place, as it
   // shows; a card and a passage come quoted already
   const cited = p.target?.kind === 'citation' ? citationOf(p.target) : null
   const about = cited?.display && p.about ? subjectWords(p.about) : (p.about ?? 'this')
   const body: RenderElement[] = [...headerEls(els, { title: 'New thread', cols, sub: subLine([`about ${about}`]) })]
-  if (opens && !(p.about ?? '').includes(opens)) body.push(<Text key="ask-words" dimColor wrap="truncate-end">{cut(opens, cols)}</Text>)
+  // what it is about, above the field: the card, the cited lines, the passage (its words, unless the subtitle holds them)
+  const words = p.target?.kind === 'card' ? '' : p.anchorText ?? ''
+  const said = saidIn(p.about ?? '', words)
+  const lit = p.target?.kind === 'mark' && p.target.ref ? { lit: p.target.ref } : {}
+  body.push(...(await subjectEls(cx, e, { anchor: p.anchor ?? '', text: said ? '' : words, ...(p.target?.kind === 'card' && p.target.cardId ? { card: p.target.cardId } : {}), ...lit }, cols, `ask:${p.anchor ?? ''}:${cid(words)}`)))
   if (asking) body.push(<Text key="ask-state" {...(asking.startsWith('×') ? { color: COLORS.problem } : { dimColor: true })}>{asking}</Text>)
   // the field alone, its placeholder saying what it takes: Enter's word (`⏎ ask`) is the only `ask`
   const field = (
@@ -1768,9 +1910,13 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
   const hand = t && handState === 'offer' && rt.sc && !handing.has(t.id) ? () => void handOver(cx, t.id) : null
   if (t) {
     body.push(ruleEl(els, cols, 'rule-thread'))
-    // what it is about, dim, before its first question
-    const about = await aboutName(cx, rows.find(r => r.id === t.id))
+    // what it is about, dim, then the thing itself (a passage's words unless `about` holds them whole), above its first
+    // question
+    const row = rows.find(r => r.id === t.id)
+    const about = await aboutName(cx, row)
     if (about) body.push(<Text key="thread-about" dimColor wrap="truncate-end">{cut(`about ${about}`, cols)}</Text>)
+    const words = row?.anchorText ?? ''
+    if (row) body.push(...(await subjectEls(cx, e, { anchor: row.anchor ?? '', text: saidIn(about, words) ? '' : words }, cols, t.id)))
     let k = 0
     for (const turn of t.turns) {
       k++
@@ -2426,7 +2572,7 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     )
   ) : null
   const listHints = ['↑↓ to choose', 'Enter to open', ...(undo ? ['u to undo'] : []), 'b to go back', 'x to close']
-  // the path row, the header, the rule under the list, the field and the hint rows aside
+  // the title row, the header, the rule under the list, the field and the hint rows aside
   const win = windowList('labels-list', lines, hits, ls.findIndex(x => x.id === pick), bodyRows - 3 - (goneRow ? 1 : 0) - hintHeight(listHints, cols) - body.length, () => cx.bumpPanel())
   body.push(linesEl(cx, e, marginKey('labels-list'), win.lines, win.hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openLabel(cx, pick, ls.find(x => x.id === pick)?.name ?? pick) : undefined)))
   body.unshift(
@@ -2783,8 +2929,9 @@ async function drawDocEdit(cx: Ctx, e: PaneEvent, p: TermPanel, doc: Obj, title:
   const hints = ['ctrl+s or s to save', ...(changed ? ['d to discard'] : [])]
   const controls = [<Button key="doc-save" label="save" plain onPress={save} />, changed ? <Button key="doc-discard" label="discard" plain onPress={discard} /> : null]
   const said = ed.said ? [<Text key="doc-edit-said" color={COLORS.problem} wrap="wrap">{`! ${ed.said}`}</Text>] : []
-  // the editor's rows: what the pane leaves under the header and above the bottom part
-  const rows = Math.max(6, (bodyRows || 30) - 10 - said.length - (hintHeight(hints, cols) - 1))
+  // the editor's rows: what the pane leaves under the header (its title row, which holds the path) and above the
+  // bottom part
+  const rows = Math.max(6, (bodyRows || 30) - 9 - said.length - (hintHeight(hints, cols) - 1))
   if (e.surface === 'terminal' || e.surface === 'desktop') {
     const { Client } = cx.els(e)
     body.push(
@@ -2900,8 +3047,8 @@ async function drawViews(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
 
-// the rows of a view's panel that are not the view's own: the path row, the title, the rule and the hint row
-const VIEW_CHROME = 4
+// the rows of a view's panel that are not the view's own: the title row, the rule and the hint row
+const VIEW_CHROME = 3
 // the panel's own keys, which a view never takes (term_kit/kit.mjs PANEL_KEYS): back, the threads, close
 const PANEL_KEYS = ['b', 't', 'x']
 
@@ -2999,7 +3146,7 @@ onViewAct(async (cx, a) => {
 
 // ------------------------------------------------------------------------------------------------ the panel
 
-/** The panel's drawing: the path row, then the view `panel` names, on the panel's grid (a cell of padding at each side,
+/** The panel's drawing: the title row, then the view `panel` names, on the panel's grid (a cell of padding at each side,
  *  then the 2-cell margin, then the type area). */
 export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> {
   await cx.panelTick()
@@ -3013,8 +3160,9 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   // takes them (relayInput, typeThrough)
   if (!paneFocused) rt.typeThrough = false
   bodyRows = pe.props.scroll?.bodyRows || 0
-  // the list this drawing draws, read off its drawing (lines.tsx), for the relay in its path row (listKeysEl)
+  // the list this drawing draws, read off its drawing (lines.tsx), for the relay in its title row (listKeysEl)
   takeListKeys()
+  setHead({})
   hotkeysDrawing = new Map()
   listExtraDrawing = { space: false, backspace: false }
   fieldsDrawing = new Set()

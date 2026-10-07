@@ -138,7 +138,7 @@ test("a citation opened from a side thread has a `follow-up` field: its question
   expect(w.acts).toContainEqual({ kind: 'thread-message', payload: { thread: 't1', message: 'Why so many? (about [[19913|card:a0frame0#records/events.jsonl]])' } })
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('Threads')
+  expect(shown(await pane.drawn())).toContain('home › threads › "why is events.jsonl bigger?"')
   await pane.unmount()
 })
 
@@ -172,9 +172,10 @@ test('a file citation written without words names its place once: no `from` row,
   const pane = await clickCite($, w, 'See [[README.md#L5]] for the format.', 5)
   const tree = await pane.drawn()
   const text = shown(tree)
-  // the title, in its Client, is the place in words; the path row has the chip's words (live check New 3)
+  // the title, in its Client, is the place in words, the title row's current step after `citation` (live check New 3)
   expect(JSON.stringify(await pane.find({ type: 'Client', key: 'cite-title' }))).toContain('"s":"README.md line 5"')
-  expect(shown(await pane.find({ type: 'Box', key: 'way' }))).toContain('citation README.md line 5')
+  expect(shown(await pane.find({ type: 'Box', key: 'way' }))).toContain('home › citation ')
+  expect(JSON.stringify(await pane.find({ type: 'Box', key: 'way' }))).toContain('"key":"cite-title"')
   expect(text).not.toContain('from')
   // the sentence holds the chip, marked in the link color (Matt, 2026-10-07)
   expect(JSON.stringify(tree)).toMatch(/"See [^"]*"[^]*"\[ README\.md line 5 \]"/)
@@ -305,9 +306,8 @@ test("a file citation opens on its whole file: the cited line lit whole for a pl
   await start($, w)
   const pane = await clickCite($, w, 'See [[log.txt#L450]] for the restart.', 5)
   const { rows, json } = await windowRows(pane)
-  // the panel's 36 rows less the path row, the title, the rule, the source row, the second rule, `ask about it` and the
-  // hint row
-  expect(rows.length).toBe(36 - 7)
+  // the panel's 36 rows less the title row, the rule, the source row, the second rule, `ask about it` and the hint row
+  expect(rows.length).toBe(36 - 6)
   const nums = rows.map(r => Number(/^\s+(\d+)\s{2}line/.exec(r)?.[1] ?? 0))
   const firstShown = nums.find(n => n > 0)!
   const lastShown = [...nums].reverse().find(n => n > 0)!

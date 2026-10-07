@@ -71,10 +71,10 @@ test("a turn's card is drawn once, under the turn's last reply, in its border wi
   expect(card).toContain('probier')
   expect(card).not.toContain('ff73e071')
   // the card in a full round border as wide as the reply's prose (the terminal's 140 columns less 2 and the margin of
-  // 4), its takeaway inside it; no blank row between the reply and the card's border
+  // 2, Claude Code's own), its takeaway inside it; no blank row between the reply and the card's border
   const json = JSON.stringify(await ui.drawn())
-  expect(json).toContain('"width":134,"borderStyle":"round","borderColor":"subtle","paddingX":1')
-  expect(json).toMatch(/"width":134,"flexShrink":1\}/)
+  expect(json).toContain('"width":136,"borderStyle":"round","borderColor":"subtle","paddingX":1')
+  expect(json).toMatch(/"width":136,"flexShrink":1\}/)
   expect(json).toContain('{"type":"Box","props":{"key":"turn-card-0","flexDirection":"row"}')
   // the takeaway under the card: its citations checked, the one whose place shows another value red
   const tk = JSON.stringify(await ui.drawn({ in: 'para-tk-t0-1' }))
@@ -304,7 +304,7 @@ test("home's list takes ↑, ↓ and Enter from the pane's own keys; a click on 
   await w.clock.settle()
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toMatch(/^‹ back {2}home › documents › "Agents used the dse wiki as a…"/)
+  expect(shown(await pane.drawn())).toMatch(/^home › documents › "Agents used the dse wiki as a relay"/)
   await pane.unmount()
   // a click on an empty row of a list gives its Client the keys; the panel asks for them back, as an open with `focus`
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
@@ -347,10 +347,10 @@ test('/thimble opens the home panel with no model turn: one column, the title Ho
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const drawn = await pane.drawn({ in: 'm:home' })
   const home = shown(drawn)
-  for (const s of ['Home', 'Documents', ' (1)', 'Agents used the dse wiki as a relay', 'Threads', '"why is events.jsonl bigger?"', 'Cards', '▾ ', 'Your work', 'Labels', 'links through a fetch proxy', 'Files', 'revisions.jsonl', '↑↓ to choose · Enter to open · Space to fold · x to close']) expect(home).toContain(s)
-  // the title in the accent and bold, the headings bold, `new` in green after an unread thread
+  for (const s of ['Documents', ' (1)', 'Agents used the dse wiki as a relay', 'Threads', '"why is events.jsonl bigger?"', 'Cards', '▾ ', 'Your work', 'Labels', 'links through a fetch proxy', 'Files', 'revisions.jsonl', '↑↓ to choose · Enter to open · Space to fold · x to close']) expect(home).toContain(s)
+  // the title row's `Home` in the accent and bold, the headings bold, `new` in green after an unread thread
+  expect(JSON.stringify(await pane.find({ key: 'way' }))).toMatch(/"color":"suggestion","bold":true\},"children":\["Home"\]/)
   const json = JSON.stringify(drawn)
-  expect(json).toMatch(/"color":"suggestion","bold":true\},"children":\["Home"\]/)
   expect(json).toMatch(/"bold":true\},"children":\["Threads"\]/)
   expect(json).toContain('"color":"success"},"children":["new"]')
   // the path row: home, and `show all threads` with its news at the right
@@ -425,16 +425,18 @@ test("a side thread asked about a card: the ask field posts the thread, and the 
   await ui.unmount()
   const pane = (await $.ui.mount(PANE)) as unknown as M
   expect(shown(await pane.drawn())).toContain('New thread')
-  // its step reads `new thread`; with nothing between the header and the field, one rule
-  expect(shown(await pane.drawn())).toContain('home › new thread')
-  expect(await pane.find({ key: 'rule-bottom' })).toBeUndefined()
+  // its step reads `New thread`; the card it is about stands in its frame between the header and the field, a rule
+  // above the field
+  expect(shown(await pane.drawn())).toContain('home › New thread')
+  expect(JSON.stringify(await pane.drawn())).toMatch(/"key":"card-subject-[^"]*-a0frame0"/)
+  expect(await pane.find({ key: 'rule-bottom' })).toBeDefined()
   await pane.input({ key: 'ask-new', text: 'Why is dse so big?' })
   await w.clock.settle()
   // the thread is told the card by its question, never its id
   expect(w.acts).toContainEqual({ kind: 'thread', payload: { anchor: 'card:a0frame0', anchor_text: 'card "How many records does each file hold?"', message: 'Why is dse so big?' } })
   await pane.redraw()
   const text = shown(await pane.drawn())
-  expect(text).toContain('Threads')
+  expect(text).toMatch(/^home › threads › /)
   expect(text).toContain('"a question"')
   expect(shown(await pane.drawn({ in: 'm:threads-tree' }))).toContain('main')
   // one field for a question, beside the list's keys (panel.tsx RELAY)
@@ -487,8 +489,8 @@ test('from home, a document opens drawn as a reply: its title, its contents, eac
   const cards = (await pane.findAll({ type: 'Client' })).filter(c => String((c as { key?: string }).key).includes('ff73e071'))
   expect(cards.length).toBe(1)
   expect(shown(await pane.drawn({ in: 'para-d0-2' }))).toContain('4579')
-  // back leads home again
-  await pane.press({ key: 'nav-back' })
+  // back (b) leads home again
+  await pane.press({ key: 'hk-back' })
   await w.clock.settle()
   await pane.redraw()
   expect(await pane.find({ type: 'Client', key: 'm:home' })).toBeDefined()
