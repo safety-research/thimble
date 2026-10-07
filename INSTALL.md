@@ -226,15 +226,17 @@ pre-cache holds the orientation's outputs alone, so its Claude Code session is n
 opens with no analysis yet, and Start in the page runs the orientation. It prints one URL and opens it in your browser
 without a Claude Code session: thimble's start page, which lists the datasets you downloaded (and any other folder
 open in thimble), each row opening its workspace; in a workspace, the folder name in the top bar opens the same list.
-In the orientation's thread, "Attach a fresh session" shows the command that attaches one.
+The orientation's thread opens with a card that says it is a frozen demo session, with the command that starts a live
+session from scratch with the dataset.
 
 The demo is static: it starts no Claude Code session and asks nothing about one. `--attach` starts one in the
-dataset's folder, once `claude auth status` says you are logged in (when you are not, it says how to log in). It
-prints how to attach later:
+dataset's folder, once `claude auth status` says you are logged in (when you are not, it says how to log in). Without
+it, it prints for each dataset the command the card gives, which starts a live session; `thimble -c` in the same folder
+continues the last session later:
 
 ```bash
-cd ~/.thimble/demo/collusion-wiki && thimble     # main, the session you chat with in the page
-cd ~/.thimble/demo/collusion-wiki && thimble -c  # continue the last session there
+cd ~/.thimble/demo/collusion-wiki && thimble     # a live session: main, which you chat with in the page
+cd ~/.thimble/demo/collusion-wiki && thimble -c  # later, to continue the last session there
 ```
 
 A session attached to a pre-cached workspace starts fresh, with the orientation's cards and report as its context.

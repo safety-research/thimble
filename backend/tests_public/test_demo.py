@@ -699,8 +699,9 @@ def test_demo_downloads_installs_opens_and_says_how_to_attach(tmp_path, fake_wor
     assert "downloads these datasets from their sources" in text
     assert "two opens without a pre-cached orientation; Start in the page runs one" in text
     assert f"cd {w['root'] / 'one'} && thimble # one" in text and f"cd {w['root'] / 'two'} && thimble # two" in text
-    assert "No Claude Code session is attached" in text and "`thimble -c` in that folder continues" in text
-    assert "starts fresh, with the orientation's cards and report as its context" in text
+    # no session attached: for each dataset the frozen demo's one sentence and command, as the browser's card gives them
+    assert text.count(f"{demo.FROZEN_LINE} cd ") == 2
+    assert "No Claude Code session is attached" not in text and "thimble -c" not in text and "starts fresh" not in text
     assert w["started"] == []  # no terminal here, so nothing is asked and no session starts
     sources = (w["root"] / "SOURCES.md").read_text()
     assert "## one: one" in sources and "redistributes none of these datasets" in sources
@@ -724,7 +725,7 @@ def test_demo_with_no_precache_opens_each_dataset_with_a_note(fake_world):
         assert not (Path(w["env"]["workspaces_dir"]) / f"demo-{name}").exists()
     assert len([x for x in w["lines"] if "opens without a pre-cached orientation" in x]) == 2
     text = said(w)
-    assert "No Claude Code session is attached" in text
+    assert demo.FROZEN_LINE in text
     assert "ran in advance" not in text
 
 
@@ -735,8 +736,22 @@ def test_demo_is_static_by_default_and_asks_nothing(tmp_path, fake_world, monkey
     assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
     assert asked == [] and w["started"] == []
     text = said(w)
-    assert "No Claude Code session is attached" in text
-    assert f"cd {w['root'] / 'one'} && thimble" in text and "`thimble -c` in that folder continues" in text
+    assert f"{demo.FROZEN_LINE} cd {w['root'] / 'one'} && thimble" in text
+    assert "No Claude Code session is attached" not in text and "thimble -c" not in text
+
+
+def test_the_printout_names_a_frozen_demo_session_unless_a_session_attaches_or_was_kept(monkeypatch):
+    one = (fake_dataset("one"), Path.home() / "thimble demo" / "one", "demo-one")
+    # the frozen demo: the sentence and the command, the home folder as ~, quoted only where a shell needs it
+    assert demo.attach_lines([one], True, None) == ["", demo.FROZEN_LINE, "  cd ~/'thimble demo/one' && thimble"]
+    assert demo.shell_folder(Path("/srv/data/one")) == "/srv/data/one" and demo.shell_folder(Path.home()) == "~"
+    # a session attaching, or a full pre-cache's session kept: how to attach later and continue, as before
+    attaching = " ".join(demo.attach_lines([one], True, one[1]))
+    assert "Attaching a Claude Code session in" in attaching and "thimble -c" in attaching
+    assert demo.FROZEN_LINE not in attaching
+    kept = " ".join(demo.attach_lines([one], True, None, kept=True))
+    assert "No Claude Code session is attached" in kept and "its Claude Code session came with it" in kept
+    assert demo.FROZEN_LINE not in kept
 
 
 def test_demo_attach_with_two_datasets_asks_which(fake_world, monkeypatch):
@@ -768,7 +783,7 @@ def test_demo_attach_and_no_attach_answer_without_asking(fake_world, monkeypatch
     w = fake_world
     asked = terminal(monkeypatch, [])
     assert run(w, args(names=["one"], dir=str(w["root"]), no_attach=True)) == 0
-    assert asked == [] and w["started"] == [] and "No Claude Code session is attached" in said(w)
+    assert asked == [] and w["started"] == [] and demo.FROZEN_LINE in said(w)
     assert run(w, args(names=["one"], dir=str(w["root"]), attach=True)) == 0
     assert asked == [] and w["started"] == [w["root"] / "one"]
     # --attach without a terminal: the workspace opens, with the instructions
@@ -794,7 +809,7 @@ def test_demo_prints_and_opens_one_url_the_start_page(tmp_path, fake_world, monk
     assert w["shown"] == ["http://127.0.0.1:1/"]
     assert re.findall(r"http://\S+", text) == ["http://127.0.0.1:1/"] and "Open at http://127.0.0.1:1/" in text
     assert "?ws=" not in text and "is open at" not in text
-    assert f"cd {w['root'] / 'one'} && thimble # one" in text and "No Claude Code session is attached" in text
+    assert f"cd {w['root'] / 'one'} && thimble # one" in text and demo.FROZEN_LINE in text
     assert w["started"] == []
     # one dataset: still the start page; on a terminal, with the key
     terminal(monkeypatch, [])

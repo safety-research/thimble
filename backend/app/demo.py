@@ -28,9 +28,10 @@ purge`).
 
 Attaching. The demo is static: it opens the start page and starts no Claude Code session. --attach starts one (`thimble`
 in the dataset's folder), after `claude auth status` says a login is configured (when it says none, it says how to log
-in). Either way it prints how to attach later: `cd <folder> && thimble`, and `thimble
--c` there continues the last session. A session attached to a pre-cached workspace starts fresh, with the canvas and
-the report as its context (precached.py).
+in). Without it, and unless a full pre-cache's session was kept, it prints for each dataset what the orientation's card
+in the browser says of a frozen demo session (FROZEN_LINE) and the command, `cd <folder> && thimble`, and nothing else
+(attach_lines); with it, or a kept session, how to attach later, and that `thimble -c` there continues the last session.
+A session attached to a pre-cached workspace starts fresh, with the canvas and the report as its context (precached.py).
 
 The export writes one of two formats, a folder with `thimble-demo-precache.json` (the manifest), `README.md` (the
 source's notice first, then what the folder holds) and `workspace/`; absolute paths are written as placeholders
@@ -72,6 +73,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1801,11 +1803,32 @@ def attach_choice(args: argparse.Namespace, folders: list[Path], say: Callable[[
     return pick_folder(folders), False
 
 
+FROZEN_LINE = "To start a live session from scratch with this dataset, run"  # as the browser's card says it (Precached.tsx)
+
+
+def shell_folder(folder: Path) -> str:
+    """`folder` as a shell takes it after `cd`: the home folder as ~, the rest quoted only where a shell would split it or
+    expand it (as the browser writes it, SessionGone.tsx shellFolder)."""
+    home = Path.home()
+    if folder == home:
+        return "~"
+    if folder.is_relative_to(home):
+        return "~/" + shlex.quote(str(folder.relative_to(home)))
+    return shlex.quote(str(folder))
+
+
 def attach_lines(opened: list[tuple[Dataset, Path, str | None]], precached: bool, attaching: Path | None,
                  login_said: bool = False, kept: bool = False) -> list[str]:
-    """How to attach a Claude Code session to each opened workspace later, and to continue it; how to log in unless
-    `login_said`. `kept`: a pre-cache was a full export, whose orientation's session came with it."""
+    """How to start a session on each opened workspace. With no session attaching and no session kept, the frozen demo's
+    one sentence and command for each dataset, as the orientation's card in the browser gives them (FROZEN_LINE), and
+    nothing else. Otherwise how to attach a Claude Code session to each later, and to continue it, and how to log in
+    unless `login_said`. `kept`: a pre-cache was a full export, whose orientation's session came with it."""
     out = [""]
+    if attaching is None and not kept:
+        for ds, folder, _ in opened:
+            out.append(FROZEN_LINE)
+            out.append(f"  cd {shell_folder(folder)} && thimble" + (f"    # {ds.name}" if len(opened) > 1 else ""))
+        return out
     if attaching is None:
         out.append("No Claude Code session is attached. To attach one (main, which you chat with in the page), run in "
                    "a terminal:")
