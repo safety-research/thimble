@@ -44,9 +44,11 @@
   #ft td.nm { font: 400 var(--text-ui-sm) / 1.2 var(--font-body); }
   #ft td.st { padding: 0 8px 0 6px; overflow: visible; }
   #ft tr.fam:hover td { background: var(--surface-hover); }
-  #ft tr.all td { height: 26px; border-bottom: 1px solid var(--border-strong); }
+  #ft tr.all td { height: 26px; }
   #ft tr.all td.nm { font-weight: 600; }
-  #ft tr.gap td { border-top: 1px solid var(--border-strong); }
+  /* the divider under the rows on their own scale (All messages, Shared pages, No task in the name): the bottom edge of
+     the last, which a collapsed border above the row below would lose to that row's own */
+  #ft tr.end td { border-bottom: 1px solid var(--border-strong); }
   #ft tr.special td.nm { color: var(--text-secondary); }
   #ft tr.none td { color: var(--text-tertiary); }
   #ft tr.active td { background: var(--surface-selected); }
@@ -59,7 +61,6 @@
   body.fm-compact #ft td.nm { font-size: 12px; line-height: 15px; }
   body.fm-compact #ft td { line-height: 15px; }
   #ft tr.sub td { height: 12px; padding-bottom: 3px; color: var(--text-tertiary); font: 400 10.5px / 12px var(--font-body); }
-  #ft tr.sub.all td { border-bottom: 1px solid var(--border-strong); }
   body.fm-compact .strip { height: 13px; }
   body.fm-compact tr.all .strip { height: 16px; }
   .strip { display: block; width: 100%; height: 14px; overflow: visible; touch-action: none; cursor: crosshair; }
@@ -338,6 +339,11 @@ let SC = null // the strips' scale: the range across the strip column
 // the thread's tracks. Each field's value is worked out here from the columns the reader sent (the row index is the
 // record the control is handed); a label's is the value of that label among the row's marks.
 const SIGNED = ['Own username', 'Another name', 'Unsigned'] // the added text signed with its username, with another name, or not
+const SIGNED_MEANS = [
+  "The added text ends in a signature (-- name) that is the save's username, ignoring case",
+  "The added text ends in a signature that is not the save's username",
+  'The added text ends in no signature',
+]
 function sigOf(i) {
   const sg = D.sigs[C.sg[i]] || ''
   return !sg ? SIGNED[2] : sg.toLowerCase() === userName(C.u[i]).toLowerCase() ? SIGNED[0] : SIGNED[1]
@@ -345,10 +351,28 @@ function sigOf(i) {
 const colour = thimble.colorBy({
   mount: '#colour',
   fields: [
-    { name: 'kind', title: 'Kind', values: ['Text only', 'With links'], value: (i) => (isMsg(i) ? D.kinds[C.k[i]] : null) },
+    {
+      name: 'kind', title: 'Kind',
+      description: 'What the added text holds once blanks, the stock new-page line and withheld placeholders are dropped',
+      values: [
+        { name: 'Text only', meaning: 'The added text holds no link' },
+        { name: 'With links', meaning: 'The added text holds http://, https:// or www.' },
+      ],
+      value: (i) => (isMsg(i) ? D.kinds[C.k[i]] : null),
+    },
     // dorfwiki names olive, so it does not take the sky blue that sits beside dse's blue
-    { name: 'wiki', title: 'Wiki', values: ['dse', 'probier', 'fractal', { name: 'dorfwiki', colour: 5 }], value: (i) => (isMsg(i) ? D.wikis[(D.pages[C.pg[i]] || [])[3]] : null) },
-    { name: 'signed', title: 'Signature', values: SIGNED, value: (i) => (isMsg(i) ? sigOf(i) : null) },
+    {
+      name: 'wiki', title: 'Wiki',
+      description: "The wiki of the save's page, as the page's first stored save names it",
+      values: ['dse', 'probier', 'fractal', { name: 'dorfwiki', colour: 5 }],
+      value: (i) => (isMsg(i) ? D.wikis[(D.pages[C.pg[i]] || [])[3]] : null),
+    },
+    {
+      name: 'signed', title: 'Signature',
+      description: "Whether the added text ends in a signature (-- name), and whether that name is the save's username",
+      values: SIGNED.map((name, j) => ({ name, meaning: SIGNED_MEANS[j] })),
+      value: (i) => (isMsg(i) ? sigOf(i) : null),
+    },
   ],
   chips: 'filter',
   strip: '#msgs',
@@ -525,10 +549,11 @@ function renderFams() {
   // itself, a field's from the row's data-colour, so the rows look alike whichever is the color. While a label is the
   // color with a value off, the rows are not anchored, since thimble would hide a row whose messages mostly take it
   const anchorOf = (f) => (unitsAnchored() ? ` data-anchor="view:${slug}/${esc(D.tasks[f][0])}" data-anchor-text="${esc(taskName[f])}: ${plural(FAM[f].msgs, 'message')}"` : '') + mostAttr(FAM[f])
+  // All messages, Shared pages and No task in the name above the divider, the timed tasks below it
   let h = row(-1, 'all', 'All messages', '')
+  h += row(shared, 'special', taskName[shared], anchorOf(shared))
+  h += row(other, 'special end', taskName[other], anchorOf(other))
   for (const f of order) h += row(f, '', taskName[f], anchorOf(f))
-  h += row(shared, 'special gap', taskName[shared], anchorOf(shared))
-  h += row(other, 'special', taskName[other], anchorOf(other))
   $('fb').innerHTML = h
   const svgs = $('fb').querySelectorAll('svg.strip')
   stripW = Math.max(40, (svgs[0] && svgs[0].getBoundingClientRect().width) || 200)
@@ -542,14 +567,17 @@ function renderFams() {
   // the strip column's axis: the one readable axis of the range
   thimble.timeAxis('#axis', SC, { px: 40 })
   const hs = mode === 'full' ? [19, 14] : [16, 13]
-  // every strip on one linear scale, messages per pixel: All messages in its taller row and each task's row alike, the
-  // busiest bin of each filling at most its row
-  const taskMax = Math.max(1, ...taskName.map((_, f) => peak(FAM[f])))
-  perPx = Math.max(peak(ALL) / (hs[0] - 1), taskMax / (hs[1] - 1))
-  for (const sv of svgs) { const f = +sv.dataset.f; drawStrip(sv, f === -1 ? ALL : FAM[f], f === -1 ? hs[0] : hs[1]) }
+  // two linear scales, messages per pixel: one for the rows above the divider (All messages in its taller row, Shared
+  // pages and No task in the name), one for the timed tasks below it, the busiest bin of each row filling at most its row
+  const tasks = order.map((f) => peak(FAM[f]))
+  const topPx = Math.max(peak(ALL) / (hs[0] - 1), peak(FAM[shared]) / (hs[1] - 1), peak(FAM[other]) / (hs[1] - 1))
+  const taskPx = Math.max(1, ...tasks) / (hs[1] - 1)
+  for (const sv of svgs) {
+    const f = +sv.dataset.f
+    drawStrip(sv, f === -1 ? ALL : FAM[f], f === -1 ? hs[0] : hs[1], f === -1 || f === shared || f === other ? topPx : taskPx)
+  }
 }
 const cell = (x, k) => k === 'sub' ? (x.msgs ? `${plural(x.pages.size, 'page')} · ${plural(x.users.size, 'username')} · ${dayKey(x.first) === dayKey(x.last) ? dm(x.first) : `${dm(x.first)} – ${dm(x.last)}`}` : '') : k === 'pages' ? num(x.pages.size) : k === 'msgs' ? num(x.msgs) : k === 'users' ? num(x.users.size) : ''
-let perPx = 1 // messages per pixel of a strip's height
 const unitsAnchored = () => !(colour.label && colour.values.some((v) => !v.on))
 // the value most of a task's messages in the range take, as the row's data-colour while a field is the color
 function mostAttr(x) {
@@ -559,11 +587,11 @@ function mostAttr(x) {
   return best < 0 ? '' : ` data-colour="${esc(SLOTS[best])}"`
 }
 function peak(x) { let max = 1; for (const a of x.bins.values()) { let n = 0; for (const v of a) n += v; if (n > max) max = n } return max }
-function drawStrip(svg, x, h) {
+function drawStrip(svg, x, h, perPx) {
   const w = stripW
   const ns = nSlots()
   const paths = Array.from({ length: ns }, () => '')
-  // a bar's height is its messages on the strips' one scale; its values split the bar by their counts
+  // a bar's height is its messages on its row's scale (`perPx` messages a pixel); its values split the bar by their counts
   for (const [b, a] of x.bins) {
     const bin = BINS[b]
     if (!bin) continue

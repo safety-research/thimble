@@ -397,14 +397,27 @@ function clearFilters() {
 // which the reader sends.
 const NONE = () => token('--viz-ink-3') || '#a19d94'
 const BASE_NAME = ['New page', 'Edit', 'After a delete', 'First stored'] // the reader's BASES: new, prev, deleted, withheld
+const BASE_MEANS = [
+  "The page's first revision, compared with an empty page",
+  'Compared with the revision before',
+  'The first revision after a delete of the page, compared with an empty page',
+  "The page's first revision in the corpus, after earlier ones the corpus does not hold",
+]
 const STATUS = ['deleted', 'never deleted']
+const STATUS_MEANS = ['At least one delete event in events.jsonl names the page', 'No delete event names the page']
 const colour = thimble.colorBy({
   mount: '#colour',
   fields: [
     // a fourth value names olive, so it does not take the sky blue that sits beside the first value's blue
-    { name: 'wiki', title: 'Wiki', values: ['dse', 'probier', 'fractal', { name: 'dorfwiki', colour: 5 }] },
-    { name: 'save', title: 'Kind of save', values: [...BASE_NAME.slice(0, 3), { name: BASE_NAME[3], colour: 5 }] },
-    { name: 'status', title: 'Status', values: STATUS },
+    { name: 'wiki', title: 'Wiki', description: 'The wiki the page belongs to', values: ['dse', 'probier', 'fractal', { name: 'dorfwiki', colour: 5 }] },
+    {
+      name: 'save', title: 'Kind of save', description: "What the revision's diff is against",
+      values: BASE_NAME.map((name, j) => ({ name, meaning: BASE_MEANS[j], ...(j === 3 ? { colour: 5 } : {}) })),
+    },
+    {
+      name: 'status', title: 'Status', description: 'Whether a delete event names the page',
+      values: STATUS.map((name, j) => ({ name, meaning: STATUS_MEANS[j] })),
+    },
   ],
   chips: 'filter',
   onChange: () => { if (O) { compute(); renderAll(); if (!dropGone() && S.sel != null) openPage(S.sel, null, true) } },
@@ -591,8 +604,9 @@ function renderRange() {
 let H = null // the chart's geometry: {x0, x1, sc, bins, slot, fills, ...}
 let stripW = 120
 const stripWidth = () => Math.round(clamp($('list').clientWidth * 0.36, 70, 200))
-// deletes are drawn below the line in one gray ink, so the Color by choice stays the page's one color
-const DEL_INK = 'rgba(var(--ink-rgb), 0.45)'
+// deletes are drawn below the line in one gray ink, so the Color by choice stays the page's one color: a darker gray than
+// the revisions take with Color by Off (in Dark a lighter one), so the two series stay apart there too
+const DEL_INK = 'var(--viz-ink-2)'
 const delInk = () => DEL_INK
 function renderHist() {
   const box = $('chart'), svg = $('hs'), w = box.clientWidth, h = box.clientHeight

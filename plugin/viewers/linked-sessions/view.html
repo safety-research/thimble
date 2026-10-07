@@ -87,7 +87,13 @@ const ready = new Promise((ok) => { loaded = ok })
 // a bar on each row's left edge, the list's two tracks, and Reset at the row's end
 const colour = thimble.colorBy({
   mount: '#colour',
-  fields: [{ name: 'speaker', title: 'Speaker' }, { name: 'tool', title: 'Tool' }, { name: 'file type', title: 'File type' }, { name: 'outcome', title: 'Outcome' }],
+  // each field says what it is (from view.json's records), which the menu and a chip's hover give
+  fields: [
+    { name: 'speaker', title: 'Speaker', description: 'The agent whose transcript holds the call or message; for a prompt, the agent that spawned the session, or user for a lead' },
+    { name: 'tool', title: 'Tool', description: "The tool the call used, Agent read as Task" },
+    { name: 'file type', title: 'File type', description: "The extension of the call's first path, test files apart; none for a call with no file" },
+    { name: 'outcome', title: 'Outcome', description: 'denied when the result says so, error when it is flagged, else ok' },
+  ],
   chips: 'filter',
   strip: '#list',
   onChange: load,
