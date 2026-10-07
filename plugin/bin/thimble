@@ -536,6 +536,18 @@ case "${1:-}" in
     shift; exec "$self" server status "$@";;
   mode)
     shift; launch_mode cli "$PWD" "$@"; exit;;
+  cc-mod)
+    # 0.5.0's `thimble cc-mod on`, then `claude`, put thimble-cc-mod in a folder; this version has terminal mode in its
+    # place, which `thimble` starts. `on` sets this folder to it and `off` back to the browser, so the old steps lead on
+    shift
+    case "${1:-}" in
+      on) launch_mode cli "$PWD" terminal || exit 1
+          printf 'thimble: thimble-cc-mod is now terminal mode, set for this folder. Start it with `thimble` here (not `claude`).\n';;
+      off) launch_mode cli "$PWD" browser || exit 1
+           printf 'thimble: thimble-cc-mod is now terminal mode; this folder is back in browser mode.\n';;
+      *) printf 'thimble: thimble-cc-mod is now terminal mode: run `thimble mode terminal` in a folder, then `thimble`.\n';;
+    esac
+    exit 0;;
   state | act | view)
     # terminal mode's renderer reads a surface and acts as the browser would, through thimble's backend in this process
     # (backend/app/local.py), which opens no port; on failure it prints {"error": …} and exits 1, as local.py does.

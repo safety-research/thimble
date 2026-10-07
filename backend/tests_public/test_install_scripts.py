@@ -1038,6 +1038,17 @@ def test_help_lists_the_commands_an_analyst_uses_and_fix_and_revert_only_in_a_cl
         assert all(c in r.stdout for c in listed), r.stdout
         assert not [c for c in unlisted if c in r.stdout], r.stdout
         assert ("thimble fix" in r.stdout and "thimble revert" in r.stdout) is checkout, r.stdout
+        # 0.5.0's `thimble cc-mod on` leads to terminal mode, which `thimble` starts
+        (tree / "backend" / "app").mkdir(exist_ok=True)
+        shutil.copy(REPO / "backend" / "app" / "launch_mode.py", tree / "backend" / "app" / "launch_mode.py")
+        folder = tmp_path / f"folder-{checkout}"
+        folder.mkdir()
+        cc = subprocess.run([*thimble, "cc-mod", "on"], capture_output=True, text=True, env=env_for(tmp_path), cwd=folder,
+                            stdin=subprocess.DEVNULL, timeout=30)
+        assert cc.returncode == 0 and "terminal mode" in cc.stdout and "`thimble`" in cc.stdout, (cc.stdout, cc.stderr)
+        mode = subprocess.run([*thimble, "mode"], capture_output=True, text=True, env=env_for(tmp_path), cwd=folder,
+                              stdin=subprocess.DEVNULL, timeout=30)
+        assert "terminal" in mode.stdout, (mode.stdout, mode.stderr)
         for word in ("status", "server", "launch-args", "prompt"):
             typed = subprocess.run([*thimble, word], capture_output=True, text=True, env=env_for(tmp_path),
                                    stdin=subprocess.DEVNULL, timeout=30)
