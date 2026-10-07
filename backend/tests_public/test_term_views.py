@@ -16,6 +16,7 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -289,6 +290,76 @@ async def test_a_program_draws_after_its_answer_and_an_act_comes_only_with_the_k
     # draw_text draws the view as it opens (not on the kept 1) and keeps nothing
     out = await term_views.draw_text(CORPUS, slug, cols=60, rows=10, keys=["o", "o"], wrap=DRAW_WRAP)
     assert "presses 2" in out and term_views.read_state(CORPUS, slug) == {"presses": 1}
+
+
+# after its answer the program works on without drawing, for longer than a quiet spell: in one stretch, then in parts
+# between timers, as a view decodes a large answer; then it draws what it got
+WORKS_ON = r"""
+import { draw, fetch, redraw } from 'thimble-term'
+let words = 'loading'
+let presses = 0
+draw((d) => {
+  d.line(`${words} · presses ${presses}`)
+  d.key('o', 'to press', () => { presses++ })
+})
+fetch({}).then(async (got) => {
+  const until = Date.now() + 600
+  while (Date.now() < until) {}
+  for (let i = 0; i < 4; i++) {
+    const t = Date.now() + 150
+    while (Date.now() < t) {}
+    await new Promise((ok) => setTimeout(ok, 0))
+  }
+  words = `done with ${got.rows.length} rows`
+  redraw()
+})
+"""
+
+
+@needs_node
+async def test_a_view_is_drawn_once_its_program_is_done_and_at_once_when_it_is(board, inproc):
+    """draw_check and draw_text take the frame once the program is idle, which it says when asked (a sync): a program
+    still at work after its last answer, drawing nothing for longer than a quiet spell, is drawn once it is done, never
+    as it loads; and a key it answers at once is taken at once, with no quiet spell after each."""
+    slug = _view(WORKS_ON)
+    out = await term_views.draw_check(CORPUS, slug, cols=60, theme="dark", wrap=DRAW_WRAP)
+    assert out["ok"] and "done with 3 rows · presses 0" in out["text"], out
+    p = term_views.Program(CORPUS, slug, keep=False, wrap=DRAW_WRAP)
+    try:
+        await p.start(60, 5, text="plain")
+        assert "done with 3 rows" in (await p.settle())["text"]
+        took = 0.0
+        for _ in range(5):
+            await p.event({"t": "key", "key": "o"})
+            t = time.monotonic()
+            frame = await p.settle()
+            took += time.monotonic() - t
+            assert p.settled
+        assert "presses 5" in frame["text"]
+        # a quiet spell after each key would be 5 * SETTLE_QUIET_S at least
+        assert took < 5 * term_views.SETTLE_QUIET_S * 0.8, took
+    finally:
+        await p.close()
+
+
+BIG_READER = READER.replace('return {"rows": index, "asked": query}',
+                            f'return {{"rows": index, "big": "x" * {term_views.ANSWER_MAX + 1024 * 1024}}}')
+BIG = r"""
+import { draw, fetch } from 'thimble-term'
+let words = 'loading'
+draw((d) => d.line(words))
+fetch({}).then(() => { words = 'got it' }, (e) => { words = `${e.name}: ${e.message}` })
+"""
+
+
+@needs_node
+async def test_a_reader_answer_longer_than_a_program_takes_reaches_it_as_an_error_that_says_to_page_it(board, inproc):
+    assert BIG_READER != READER
+    views.write_view(CORPUS, "big", name="Big", description="", scope=["board.jsonl"], reader=BIG_READER, html=HTML, term=BIG)
+    out = await term_views.draw_check(CORPUS, "big", cols=100, theme="dark", wrap=DRAW_WRAP)
+    mb = (term_views.ANSWER_MAX + 1024 * 1024) / 1048576
+    assert f"ReaderError: the reader's answer is {mb:.1f} MB" in " ".join(out["text"].split()), out["text"]
+    assert not out["ok"] and "answer in pages" in out["error"]
 
 
 @needs_node
@@ -888,3 +959,34 @@ async def test_repository_opens_as_its_browser_page_does_and_reads_at_every_widt
     assert rows[at].startswith("❯"), "its first record is chosen"
     assert rows[at + 1].strip().startswith("Occurrences are computed in local")
 
+
+
+async def _walk(c: str, slug: str, keys: list[str], text: str) -> list[list[str]]:
+    """The rows of each frame of a view opened and walked through `keys`, drawn in the panel (text '') or as text."""
+    p = term_views.Program(c, slug, keep=False, wrap=DRAW_WRAP)
+
+    def rows(f: dict) -> list[str]:
+        return ["".join(s["s"] for s in line).rstrip() for line in f["lines"]]
+
+    try:
+        await p.start(120, 36, text=text)
+        out = [rows(await p.settle())]
+        for k in keys:
+            await p.event(term_views._event_of(k, p.frame))
+            out.append(rows(await p.settle()))
+        return out
+    finally:
+        await p.close()
+
+
+@needs_node
+@pytest.mark.parametrize("example", ["timeline", "linked", "repository"])
+async def test_each_worked_example_draws_in_the_panel_as_it_draws_as_text(example, request):
+    """In the panel a list draws only its rows in view; as text (the checks, the reviewer) every row: each worked
+    example walked through its list, into its side pane and back by the wheel draws the same rows either way."""
+    c = request.getfixturevalue(example)
+    slug = {"timeline": "timeline", "linked": "linked-sessions", "repository": "repository"}[example]
+    keys = ["down"] * 12 + ["return", "down", "down", "up"] + ["down"] * 20 + ["wheel:5", "wheel:-3"]
+    live = await _walk(c, slug, keys, "")
+    assert len({tuple(f) for f in live}) > 10
+    assert live == await _walk(c, slug, keys, "plain")

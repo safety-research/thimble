@@ -12,7 +12,8 @@ import { createInterface } from 'node:readline'
 import * as kit from './kit.mjs'
 
 const KIT_URL = new URL('./kit.mjs', import.meta.url).href
-const LINE_MAX = 4 * 1024 * 1024
+// the longest message thimble sends (app/term_views.py ANSWER_MAX): a longer reader answer comes as an error to page it
+const LINE_MAX = 16 * 1024 * 1024
 
 function write(msg) {
   let text
@@ -25,6 +26,59 @@ function write(msg) {
 }
 
 kit.__driver.connect(write)
+
+// the one-shot timers the program and the kit wait on, each with when it is due, and the intervals with their periods,
+// so thimble knows whether the program is still at work once it answered everything sent before (a `sync`): a view
+// decoding in chunks between timers, a debounce, a ticker that draws while it loads
+const timers = new Map() // the timer -> when it is due (ms since the epoch)
+const intervals = new Map() // the interval -> its period in ms
+const { setTimeout: setT, clearTimeout: clearT, setImmediate: setI, clearImmediate: clearI, setInterval: setIv, clearInterval: clearIv } = globalThis
+globalThis.setTimeout = function (fn, ms, ...args) {
+  const t = setT(function (...a) {
+    timers.delete(t)
+    if (typeof fn === 'function') return fn.apply(this, a)
+  }, ms, ...args)
+  timers.set(t, Date.now() + Math.max(1, Number(ms) || 0))
+  return t
+}
+globalThis.clearTimeout = function (t) {
+  if (t !== null && t !== undefined) for (const k of timers.keys()) if (k === t || +k === +t) timers.delete(k)
+  return clearT(t)
+}
+globalThis.setInterval = function (fn, ms, ...args) {
+  const t = setIv(fn, ms, ...args)
+  intervals.set(t, Math.max(1, Number(ms) || 1))
+  return t
+}
+globalThis.clearInterval = function (t) {
+  if (t !== null && t !== undefined) for (const k of intervals.keys()) if (k === t || +k === +t) intervals.delete(k)
+  return clearIv(t)
+}
+globalThis.setImmediate = function (fn, ...args) {
+  const t = setI((...a) => {
+    timers.delete(t)
+    fn(...a)
+  }, ...args)
+  timers.set(t, Date.now())
+  return t
+}
+globalThis.clearImmediate = function (t) {
+  timers.delete(t)
+  return clearI(t)
+}
+
+// the answer to a sync, once everything sent before it is handled and the frames it drew are out: the ms until the next
+// timer the program waits on and the shortest interval's period (each null for none)
+function synced(id) {
+  setI(() => {
+    let due = null
+    const now = Date.now()
+    for (const at of timers.values()) due = due === null ? Math.max(0, at - now) : Math.min(due, Math.max(0, at - now))
+    let every = null
+    for (const ms of intervals.values()) every = every === null ? ms : Math.min(every, ms)
+    write({ t: 'synced', id, due, every })
+  })
+}
 
 // what the program prints goes to thimble as a log line, never into the protocol
 for (const name of ['log', 'info', 'warn', 'error', 'debug']) {
@@ -72,7 +126,7 @@ async function start(init) {
     kit.__driver.fail(describe(e))
   }
   started = true
-  for (const m of queue.splice(0)) kit.handle(m)
+  for (const m of queue.splice(0)) (m.t === 'sync' ? synced(m.id) : kit.handle(m))
   kit.redraw()
 }
 
@@ -86,6 +140,7 @@ rl.on('line', (line) => {
     return
   }
   if (!msg || typeof msg !== 'object') return
+  if (msg.t === 'sync') return void (started ? synced(msg.id) : queue.push(msg))
   if (msg.t === 'init') {
     if (!starting) {
       starting = true

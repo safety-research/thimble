@@ -339,7 +339,8 @@ queries; thimble-term starts it the first time a view opens and talks to it over
 |---|---|
 | `init {source, cols, rows, theme, view, state, labels, open}` | the program's source and what it opens on |
 | `resize {cols, rows}`, `key {key}`, `text {value}`, `click {i, seq, x}`, `drag {i, seq, x0, x1}`, `wheel {by}` | the panel's events, each with its number `n`; `text` the whole text of the field that takes typing |
-| `answer {id, data \| error}` | a query's answer |
+| `answer {id, data \| error}` | a query's answer; one longer than 16 MB comes as an error that says to answer in pages |
+| `sync {id}` | asks whether the program is idle (`draw_text`, the view checks) |
 | `labels {labels, filter}`, `open {place}` | the labels changed; a citation opened the view at a place |
 
 | from the program to thimble | |
@@ -348,6 +349,7 @@ queries; thimble-term starts it the first time a view opens and talks to it over
 | `query {id, q, labels}`, `cancel {id}` | a reader query, and one dropped |
 | `act {n, act}` | a place, a thread or a label's panel, made during event `n` |
 | `state {state}`, `error {message}`, `log {text}` | what the view keeps, an error, a line it printed |
+| `synced {id, due, every}` | the answer to a sync, once everything sent before it is handled and the frames it drew are out: the ms until the next timer it waits on and its shortest interval's period (null for none) |
 
 The program runs in Node with its permission model, which lets it read the kit's folder alone and start no process,
 worker or addon, inside Anthropic's sandbox runtime (or bubblewrap where that does not run), which gives it no network
@@ -362,9 +364,11 @@ socket.
 
 `thimble view text <slug> --cwd <folder> --width 120 [--height 40] [--keys 'down return'] [--open <ref>] [--ansi]`
 draws a view as thimble-term's panel shows it, with no Claude Code, as it opens (keeping nothing): what the view
-checks and the reviewer read. `--keys` takes key names, `click:<words>` for a click on the region that shows those
-words, `wheel:<n>`, and `text:<words>` for what a field that takes typing holds. `frameText(frame, {ansi})` draws a
-frame's rows as text in the kit itself.
+checks and the reviewer read. It takes each frame once the program is idle: no reader query out, the program's answer
+to a sync in, nothing drawn meanwhile, no timer due within half a second and no ticker of 250 ms or less drawing; so a
+view still decoding its answer is drawn once it is done, never as it loads. `--keys` takes key names, `click:<words>`
+for a click on the region that shows those words, `wheel:<n>`, and `text:<words>` for what a field that takes typing
+holds. `frameText(frame, {ansi})` draws a frame's rows as text in the kit itself.
 
 ```
   / search events  incident  all  Color by  Service  ● payments 79  ● web 45  ● passes 16  ● bookings-db 6  +1
