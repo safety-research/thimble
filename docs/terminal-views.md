@@ -58,7 +58,11 @@ frames.
 
 - `draw(fn)` registers the function that draws the view: `fn(d)` gets a Drawing as wide as the panel's type area and as
   tall as its rows under the header. The kit calls it again after every event, every answer and every change a part of
-  the kit makes, so the program keeps its state in variables and draws from them; `redraw()` asks for it too.
+  the kit makes, so the program keeps its state in variables and draws from them; `redraw()` asks for it too, and one
+  asked while the view draws draws it again before the frame goes. A key is answered by one drawing, so a drawing
+  costs what the rows it shows cost: the kit's list draws only its rows in view, and work that walks every record
+  (grouping, counting, building rows) belongs where the records or a control change (`load`, `onChange`), or is one
+  pass in `draw` that touches each record once.
 - `fetch(query, {key})` asks the view's `reader.records(index, query)`, as `thimble.fetch` does in the browser, and
   resolves with its answer; a newer fetch with the same `key` drops the older one, which rejects with an `AbortError`.
 - `onOpen(fn)` hears each place a citation opens the view at, `{ref, target, key, label, excerpt}` as the reader's
@@ -171,7 +175,7 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
 | `counts(map)` | the reader's counts of the choice's values, `''` for no value |
 | `valueOf(record)`, `colourOf(value)`, `dot(value)` | a record's value, a value's hue, its `●` (`○` when off) |
 | `isOn(value)`, `keeps(record)` | whether a value, or a record's value, is on |
-| `tally(record)` | count a record's values of every field for the menu (the list counts the rows it draws) |
+| `tally(record)` | count a record's values of every field for the menu (a list hands over its records, which the menu counts when it opens) |
 | `by`, `field`, `label`, `off`, `values` | the choice and its chips |
 | `choose(field \| {label} \| null)`, `toggle(value)` | change it from the page |
 
@@ -260,6 +264,10 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
 - Each row starts with its mark in its Color by hue. A list taller than its rows has the colored track at its right
   edge: each cell the commonest hue of the rows it stands for, the part in view on the selection background; one many
   times taller adds the zoomed track beside it. A click on the track goes there; the wheel moves the rows.
+- A list draws only its rows in view (and the chosen one): a list of 15,000 rows answers a key as one of 40 does. The
+  rows an item's `body` takes are counted as it last drew them at that width, so `body` draws from the item and its
+  `{chosen, open}` alone. Drawn as text (`thimble view text`, the view checks) a list draws every row, so a row too
+  wide anywhere in it is found.
 - `columns(specs, cols)` lays out columns with 2-cell gutters (`{w}`, `{align: 'right'}`, `{grow: true}`):
   `cells(r, values, styles)` adds a row's values, and `header(r, names, {sorted, desc, onSort})` the names, dim, `▼`
   after the one sorted by, each a click that sorts; a list's `header(r)` stands above its rows and does not scroll.
@@ -275,8 +283,9 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
 - `body(item, dd)` draws lines every item has under its row, at `bodyIndent` cells (a turn's words); `mark: false`
   leaves out the row's leading Color by mark while its track keeps the hues. A heading with `dim` is a dim row.
 - With `side` (a side pane), Enter or a click opens the row's details in the pane, never under the row.
-- `rows.span(time)` gives the first and last times of the rows in view, which a lanes part marks on the overview; a
-  scroll that changes them draws again, so the overview follows.
+- `rows.span(time)` gives the first and last times of the rows in view, which a lanes part marks on the overview. Read
+  above the list, before it draws, it gives the rows the list will show after the key or the wheel being answered; where
+  the list then shows others (its items changed), the view draws again, so the overview follows.
 - `onWheel(fn)` hears the wheel over the view, for a part of the program's own that scrolls.
 
 ## The side pane

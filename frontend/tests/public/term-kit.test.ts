@@ -693,6 +693,93 @@ describe('the list', () => {
     expect(text()[0]).toMatch(/^❯ event 2/)
     expect(text().some((r: string) => r.includes('line 6 of event 2'))).toBe(true)
   })
+
+  test('a long list draws only its rows in view, and draws them as drawing every row does (as text, for the checks)', async () => {
+    const many = Array.from({ length: 3000 }, (_, i) => ({ id: i, kind: ['fired', 'resolved', 'held'][i % 3], text: `event ${i}` }))
+    const items = many.flatMap((e) => (e.id % 50 ? [e] : [{ heading: `hour ${e.id / 50}` }, e]))
+    const play = async (mode: string) => {
+      init({ rows: 24, text: mode })
+      const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind' }] })
+      const list = kit.list({ key: (e: any) => e.id })
+      let drawn = 0
+      kit.draw((d: any) => {
+        drawn = 0
+        list.draw(d, {
+          items,
+          colour,
+          row: (e: any, r: any) => {
+            drawn++
+            r.add(e.text)
+          },
+          body: (e: any, bd: any) => {
+            if (e.id % 7 === 0) bd.line(`the seventh, ${e.id}`)
+          },
+          detail: (e: any, dd: any) => dd.line(`all of ${e.text}`),
+        })
+      })
+      await tick()
+      const counts: number[] = []
+      const shown: string[][] = []
+      for (const k of [...Array(30).fill('down'), 'return', ...Array(3).fill('down'), ...Array(5).fill('up')]) {
+        await key(k)
+        counts.push(drawn)
+        shown.push(text())
+      }
+      kit.handle({ t: 'wheel', by: 2000 })
+      await tick()
+      shown.push(text())
+      return { counts, shown }
+    }
+    const live = await play('')
+    // a key draws about the rows in view, never the 3,000
+    expect(Math.max(...live.counts)).toBeLessThanOrEqual(30)
+    const every = await play('plain')
+    expect(Math.min(...every.counts)).toBe(3000)
+    expect(live.shown).toEqual(every.shown)
+    expect(live.shown.at(-1)).not.toEqual(live.shown.at(-2))
+  })
+
+  test('a part drawn above the list that marks its rows in view (the lanes\' span) has them in the frame that answers a key, which is the only one', async () => {
+    init({ cols: 60, rows: 16 })
+    const many = Array.from({ length: 300 }, (_, i) => ({ id: i, t: 1000 + i * 10 }))
+    const list = kit.list({ key: (e: any) => e.id })
+    let spans: any[] = []
+    kit.draw((d: any) => {
+      spans.push(list.span())
+      d.line('the overview')
+      list.draw(d, { items: many, row: (e: any, r: any) => r.add(`event ${e.id}`) })
+    })
+    await tick()
+    for (let i = 0; i < 40; i++) {
+      const before = frames().length
+      spans = []
+      await key('down')
+      expect(frames().length).toBe(before + 1)
+      expect(spans.length).toBe(1)
+      const ids = text().flatMap((r: string) => (/event (\d+)/.exec(r) ? [Number(/event (\d+)/.exec(r)![1])] : []))
+      expect(spans[0]).toEqual([1000 + Math.min(...ids) * 10, 1000 + Math.max(...ids) * 10])
+    }
+    // the wheel moves them too
+    spans = []
+    kit.handle({ t: 'wheel', by: 100, n: ++n })
+    await tick()
+    const ids = text().flatMap((r: string) => (/event (\d+)/.exec(r) ? [Number(/event (\d+)/.exec(r)![1])] : []))
+    expect(spans.at(-1)).toEqual([1000 + Math.min(...ids) * 10, 1000 + Math.max(...ids) * 10])
+  })
+
+  test('colored by a label, a list of more records than one marks query answers asks for their values in parts', async () => {
+    init({ rows: 20, labels: [{ ...LABELS[0], on: true }] })
+    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind' }] })
+    const list = kit.list({ key: (e: any) => e.ref })
+    const many = Array.from({ length: 4500 }, (_, i) => ({ ref: `agents.log#L${i + 1}`, text: `line ${i + 1}` }))
+    kit.draw((d: any) => list.draw(d, { items: many, colour, row: (e: any, r: any) => r.add(e.text) }))
+    await tick()
+    await tick()
+    const asked = sent.filter((m) => m.t === 'query' && m.q && m.q.$thimble === 'marks').map((m) => m.q.refs as string[])
+    expect(asked.length).toBeGreaterThan(1)
+    expect(Math.max(...asked.map((r) => r.length))).toBeLessThanOrEqual(2000)
+    expect(new Set(asked.flat()).size).toBe(4500)
+  })
 })
 
 describe('search and choices', () => {
