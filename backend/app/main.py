@@ -48,6 +48,57 @@ def stamp_uvicorn_logs() -> None:
 
 stamp_uvicorn_logs()
 
+OPEN_FILES = 8192  # the soft limit of open files the server raises its own to, within the hard limit
+ACCEPT_LOG_S = 60.0  # one line in this long says the server could not accept connections (quiet_accept_errors)
+ACCEPT_ERROR = "socket.accept() out of system resource"  # asyncio's message when accept() fails for want of descriptors
+
+
+def raise_open_files(want: int = OPEN_FILES) -> str:
+    """Raise this process's soft limit of open files to `want`, or to the hard limit when that is lower, and say what was
+    done, '' when nothing was. Each kernel's channels take about twenty descriptors here (more on macOS, whose default
+    soft limit is 256), so a few views open at once would otherwise run the server out of them: then no kernel starts
+    and no connection is accepted. The kernels the server starts inherit the limit."""
+    try:
+        import resource  # noqa: PLC0415 — Unix only
+
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    except (ImportError, OSError, ValueError):
+        return ""
+    target = want if hard == resource.RLIM_INFINITY else min(hard, want)
+    if soft == resource.RLIM_INFINITY or soft >= target:
+        return ""
+    hard_text = "unlimited" if hard == resource.RLIM_INFINITY else str(hard)
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+    except (OSError, ValueError) as e:
+        return f"open files: the soft limit stays {soft} (hard {hard_text}); raising it to {target} failed: {e}"
+    return f"open files: raised the soft limit from {soft} to {target} (hard {hard_text})"
+
+
+def quiet_accept_errors(loop: asyncio.AbstractEventLoop, every: float = ACCEPT_LOG_S) -> None:
+    """While the process is out of file descriptors, asyncio logs ACCEPT_ERROR with a traceback for every try at each
+    waiting connection, thousands of lines a second: here one line in `every` seconds says it, with how many tries
+    failed meanwhile. Other errors go to the handler the loop had."""
+    before = loop.get_exception_handler()
+    state = {"at": -every, "n": 0}
+
+    def handler(lp: asyncio.AbstractEventLoop, context: dict) -> None:
+        if context.get("message") != ACCEPT_ERROR:
+            if before is not None:
+                before(lp, context)
+            else:
+                lp.default_exception_handler(context)
+            return
+        state["n"] += 1
+        now = time.monotonic()
+        if now - state["at"] < every:
+            return
+        log.error("the server cannot accept connections: %s (tries that failed since the last such line: %d); restart "
+                  "it with `thimble server restart`", context.get("exception"), state["n"])
+        state["at"], state["n"] = now, 0
+
+    loop.set_exception_handler(handler)
+
 
 class QuietPolling(logging.Filter):
     """Drop uvicorn's access line for a successful GET or HEAD, and for a successful telemetry POST: the open tab's
@@ -239,6 +290,9 @@ class BuiltUI(StaticFiles):
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    if raised := raise_open_files():
+        log.info("%s", raised)
+    quiet_accept_errors(asyncio.get_running_loop())
     log.info("data dir %s, workspaces dir %s", config.DATA_DIR, config.WORKSPACES_DIR)
     # the versions in play, so a log sent with a problem report says what ran
     try:

@@ -1,6 +1,7 @@
 """Paths, the `claude` thimble runs and its environment, corpora, model defaults."""
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import logging
@@ -380,6 +381,9 @@ def _valid_name(name: str) -> bool:
     return bool(name) and NAME_RE.fullmatch(name) is not None and name not in {".", ".."}
 
 
+OUT_OF_FILES = (errno.EMFILE, errno.ENFILE)  # a process, or the machine, at its limit of open files
+
+
 def sidecar_path(name: str) -> Path:
     return DATA_DIR / f"{name}{SIDECAR_SUFFIX}"
 
@@ -387,13 +391,18 @@ def sidecar_path(name: str) -> Path:
 def read_sidecar(name: str, data_dir: Path | None = None) -> dict | None:
     """The registration record {name, root, path, registered_at, manifest} of a registered corpus, else None: under
     DATA_DIR, or under `data_dir` for a caller that resolves the data folder itself (cli). A record without `root` reads
-    root as the path."""
+    root as the path. A process out of file descriptors raises (OUT_OF_FILES) rather than taking the corpus for one
+    that is not registered."""
     if not _valid_name(name):
         return None
     try:
         path = sidecar_path(name) if data_dir is None else data_dir / f"{name}{SIDECAR_SUFFIX}"
         rec = json.loads(path.read_text("utf-8"))
-    except (OSError, ValueError):
+    except OSError as e:
+        if e.errno in OUT_OF_FILES:
+            raise
+        return None
+    except ValueError:
         return None
     if not isinstance(rec, dict) or not isinstance(rec.get("path"), str):
         return None
