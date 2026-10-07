@@ -86,9 +86,10 @@ blue and underlined for a link (`↗` and the place after it), the accent and `�
 background for a choice in use (the time range's window), red only for a problem, and a palette hue only on the marks
 of the Color by choice. A record's own words are drawn upright, as a file is.
 
-`width`, `cut`, `clip`, `pad`, `padStart`, `wrap`, `num`, `plural`, `when`, `hms`, `dayOf`, `dayName`, `dur` and
-`placeWords` measure, cut and write text the way thimble-term does: a cut at a word with `…` against it, counts with
-thousands separators, a place as `agents.log line 12`.
+`width`, `charWidth`, `cut`, `clip`, `prefix`, `oneLine`, `pad`, `padStart`, `wrap`, `num`, `plural`, `when`, `hms`,
+`dayOf`, `dayName`, `dur` and `placeWords` measure, cut and write text the way thimble-term does: a cut at a word with
+`…` against it, counts with thousands separators, a place as `agents.log line 12`. `seg`, `italic`, `merged`,
+`lineWidth` and `clipLine` make and measure runs and lines; `HUES` is how many values of a field take a hue (six).
 
 ## Keys
 
@@ -114,7 +115,7 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
   runs and its records are a step away in every view that uses it.
 - A chip's tip says what its value means: the field's `meanings`, a declared value's `meaning`, a label's value.
 - Reset, against R, shows while a value is off, a range is zoomed, a search or a choice is set, or the page's
-  `onReset({changed})` says so, and puts them back (`r`).
+  `onReset({changed})` says so, and puts them back (`r`). `changed()` and `reset()` do the same from the program.
 
 | option | what it is |
 |---|---|
@@ -147,8 +148,8 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
   other point events; `range.has(t)`, `from`, `to`, `full`, `set(a, b)`, `set(null)`, `fit()` read and set it.
 - `range.scale(cols)` lays the range across a chart's cells: `x(t)`, `t(x)`, `binOf(t)`, `step`, `ticks(gap)`.
 - `axis(d, scale, {gutter, marks, onMark})` draws the chart's axis under it, and the marks' labels on a row of their own.
-- `strip(scale, items, {value, colour, max, guide})` is one row of a chart over time (a lane), and `maxBin(scale,
-  groups)` the height every lane shares.
+- `strip(scale, items, {value, colour, max, guide})` is one row of a chart over time (a lane), `maxBin(scale,
+  groups)` the height every lane shares, and `bar(n, max)` one cell's bar.
 
 ## The list
 
@@ -161,9 +162,12 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 - Each row starts with its mark in its Color by hue. A list taller than its rows has the colored track at its right
   edge: each cell the commonest hue of the rows it stands for, the part in view on the selection background; one many
   times taller adds the zoomed track beside it. A click on the track goes there; the wheel moves the rows.
-- `columns(specs, cols)` lays out columns with 2-cell gutters (`{w}`, `{align: 'right'}`, `{grow: true}`), and
-  `details(dd, {text, facts, groups, raw, place, ask})` draws a record's details: its words, its facts on one row, the
+- `columns(specs, cols)` lays out columns with 2-cell gutters (`{w}`, `{align: 'right'}`, `{grow: true}`):
+  `cells(r, values, styles)` adds a row's values, and `header(r, names, {sorted, desc, onSort})` the names, dim, `▼`
+  after the one sorted by, each a click that sorts; a list's `header(r)` stands above its rows and does not scroll.
+- `details(dd, {text, facts, groups, raw, place, ask})` draws a record's details: its words, its facts on one row, the
   records it links to, its lines as the file holds them, `↗` and its place, and `ask about it`.
+- `onWheel(fn)` hears the wheel over the view, for a part of the program's own that scrolls.
 
 ## Search and choices
 
@@ -203,12 +207,16 @@ and hides the home folder, thimble's folders and where user data lives. Its sour
 file of its own either. backend/tests_public/test_term_views.py proves that a program can read no file and open no
 socket.
 
+`handle(msg)` is the runtime's half of the protocol, `__driver` the runtime's and the tests' hold on the kit, and
+`Drawing` and `Row` the drawing's classes, which a program gets from `draw` and `d.row()` rather than making.
+
 ## As text
 
 `thimble view text <slug> --cwd <folder> --width 120 [--height 40] [--keys 'down return'] [--open <ref>] [--ansi]`
 draws a view as thimble-term's panel shows it, with no Claude Code, as it opens (keeping nothing): what the view
 checks and the reviewer read. `--keys` takes key names, `click:<words>` for a click on the region that shows those
-words, `wheel:<n>`, and `text:<words>` for what a field that takes typing holds.
+words, `wheel:<n>`, and `text:<words>` for what a field that takes typing holds. `frameText(frame, {ansi})` draws a
+frame's rows as text in the kit itself.
 
 ```
   / search events  incident  all  Color by  Service  ● payments 79  ● web 45  ● passes 16  ● bookings-db 6  +1

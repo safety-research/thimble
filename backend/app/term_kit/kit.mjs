@@ -1580,11 +1580,19 @@ export function list(opts = {}) {
      * chooses), `o.row(item, r, {chosen, open})` adds the item's row to a Row started after its mark, `o.detail(item,
      * d)` draws its details into an inner drawing at A2, `o.value(item)` its Color by value (its mark and the track),
      * `o.colour` (a Color by control, for the hues), `o.ask(item)` `{ref, text}` to ask about it, `o.onOpen(item)` when
-     * its details open (fetch what they show), `o.empty` the words for no item.
+     * its details open (fetch what they show), `o.header(r)` a row above the rows that does not scroll (a table's
+     * columns' names), `o.empty` the words for no item.
      */
     draw(d, o = {}) {
       const items = o.items || []
       s.items = items
+      // a header row (the columns' names) stands above the rows and does not scroll with them
+      if (o.header) {
+        const hr = d.row()
+        if (o.colour || o.value) hr.gap(2)
+        o.header(hr)
+        hr.end()
+      }
       const height = Math.max(1, Math.min(o.height || d.left, d.left))
       const pickable = items.filter((it) => !it.heading)
       if (!pickable.length) {
@@ -1731,13 +1739,25 @@ function drawTrack(d, y0, shownRows, total, top, height, spans, items, valueOf, 
 
 /**
  * Columns across a width: `specs` [{w, align: 'right', grow: true}], 2-cell gutters, a column that grows taking what
- * is left. `cells(row, values, styles)` adds the values to a Row, each cut to its column.
+ * is left. `cells(row, values, styles)` adds the values to a Row, each cut to its column; `header(row, names, {sorted,
+ * desc, onSort})` the columns' names, dim, `▼` (or `▲`) after the one sorted by, each a control that sorts by it.
  */
 export function columns(specs, cols) {
   const fixed = specs.reduce((n, sp) => n + (sp.grow ? 0 : sp.w || 0), 0) + 2 * Math.max(0, specs.length - 1)
   const widths = specs.map((sp) => (sp.grow ? Math.max(sp.min || 8, cols - fixed) : sp.w || 0))
   return {
     widths,
+    header(r, names, o = {}) {
+      names.forEach((name, i) => {
+        if (i) r.gap(2)
+        const w = widths[i]
+        const mark = o.sorted === i ? (o.desc === false ? ' ▲' : ' ▼') : ''
+        const text = cut(String(name), Math.max(1, w - width(mark))) + mark
+        const s = specs[i].align === 'right' ? padStart(text, w) : i === names.length - 1 ? text : pad(text, w)
+        r.add(s, { d: true }, o.onSort ? { on: () => o.onSort(i), tip: `sort by ${name}` } : {})
+      })
+      return r
+    },
     cells(r, values, styles = []) {
       values.forEach((v, i) => {
         if (i) r.gap(2)

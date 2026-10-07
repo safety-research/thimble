@@ -358,6 +358,28 @@ describe('the list', () => {
     expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'ask', ref: 'log.txt#L16', text: 'event 15' })
   })
 
+  test('a table: the columns\' names above the rows, dim, ▼ after the one sorted by, a click on a name sorts by it', async () => {
+    init({ cols: 40, rows: 8 })
+    const list = kit.list({ key: (e: any) => e.id })
+    let sorted = 1
+    kit.draw((d: any) => {
+      const cols = kit.columns([{ w: 8 }, { w: 6, align: 'right' }, { grow: true }], d.cols - 2)
+      const rows = [...items.slice(0, 3)].sort((a, b) => (sorted === 1 ? b.id - a.id : a.text.localeCompare(b.text)))
+      list.draw(d, {
+        items: rows,
+        header: (r: any) => cols.header(r, ['kind', 'id', 'text'], { sorted, onSort: (i: number) => (sorted = i) }),
+        row: (e: any, r: any) => cols.cells(r, [e.kind, e.id, e.text]),
+      })
+    })
+    await tick()
+    expect(text()[0]).toBe('  kind        id ▼  text')
+    expect(last().lines[0].find((s: any) => s.s.includes('kind')).d).toBe(true)
+    expect(text()[1]).toMatch(/^❯ fired {10}2 {2}event 2/)
+    await click('text')
+    expect(text()[0]).toBe('  kind          id  text ▼')
+    expect(text()[1]).toMatch(/event 0/)
+  })
+
   test('a list that fits has no track; one with no item says so', async () => {
     const list = kit.list({ key: (e: any) => e.id })
     kit.draw((d: any) => list.draw(d, { items: items.slice(0, 3), row: (e: any, r: any) => r.add(e.text) }))
