@@ -34,7 +34,7 @@ import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThread
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayKey, relayMove } from './panel'
+import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayKey, relayMove, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './reply'
 import { COLORS } from './paint'
@@ -144,6 +144,7 @@ function cxOf($: Dollar): Ctx {
     },
     command: async (name, args) => void (await $.command.run({ command: name, args })),
     promptText: async () => (await $.prompt.read().catch(() => ({ text: '' }))).text,
+    fill: async text => void (await $.prompt.fill({ text, mode: 'insert' }).catch(() => undefined)),
     focus: async key => {
       const r = await $.ui.focus({ requestId: PANEL, key }).catch(() => ({ deny: 'failed' }))
       return !r.deny
@@ -965,6 +966,9 @@ export const register: Register = on => {
   // onto a neighbour (↑, ↓, Tab) is that key for the list, and the ring stays; a move onto a neighbour from elsewhere
   // lands on the middle one. Every move draws the panel again, so its hint row names the keys where the ring is.
   on('ui.focus', { requestId: PANEL }, async ($, e, next) => {
+    // the person moving the ring while the panel's typing went to the prompt (panel.tsx typeThrough): the panel has its
+    // keys again
+    if (rt.sc && rt.typeThrough && e.origin.kind === 'person') rt.typeThrough = false
     const how = rt.sc ? relayMove(rt.panelFocus, e.element) : ''
     if (how === 'up' || how === 'down') {
       await relayKey(how).catch(() => undefined)
@@ -981,6 +985,14 @@ export const register: Register = on => {
       // the ring moves whatever thimble-term makes of it
     }
     return moved
+  })
+
+  // the wheel over a list the panel cut to its rows (panel.tsx windowList) moves the list's rows, the choice where it is;
+  // over any other panel the pane scrolls
+  on('ui.scroll', { requestId: PANEL }, async ($, e, next) => {
+    if (!rt.sc || !e.pointer || e.origin.kind !== 'person' || !wheelWindow(e.by)) return next(e)
+    void cxOf($).bumpPanel()
+    return {}
   })
 
   // ---------------------------------------------------------------------------------------------- clicks

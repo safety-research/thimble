@@ -41,6 +41,9 @@ export const rt = {
   // the key of the panel's element that holds its focus ring (ui.focus), '' for none: while a text field holds it, the
   // letters a hint names go into the field
   panelFocus: '',
+  // a key the panel does not bind went to the prompt (panel.tsx typeThrough): until the prompt has the keys the panel
+  // draws neither its list's keys nor its hotkeys, so the next key reaches the prompt
+  typeThrough: false,
   sc: null as Scope | null,
   sig: null as Signature | null,
   busy: false,
@@ -484,7 +487,10 @@ export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
     nav = moved(cur, nextTrail(cur.trail, step, await inPanel(cx), p.view === 'thread' ? await threadChain(cx, p, step) : [step]))
   }
   rt.navFrom = null
-  rt.panelFocus = '' // the view drawn next puts the focus ring where it starts (an autoFocus field), or nowhere
+  // the view drawn next puts the focus ring where it starts (an autoFocus field), or nowhere; a ring on the list's keys
+  // stays there while the next view draws them too (the file view drawn again at the line ↓ chose), so its hint row
+  // keeps them; giveKeys checks it
+  if (rt.panelFocus !== RELAY_PICK || p.view === 'ask') rt.panelFocus = ''
   await cx.setNav(nav)
   await cx.setPanel(p)
   void loadPanel(cx, p).then(() => cx.bumpPanel())
@@ -495,7 +501,7 @@ export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
     await cx.setPending(r.isPlaced ? null : { title })
     // with a draft in the prompt the keys stay there (Claude Code keeps the person's typing)
     if (r.isPlaced && (await cx.promptText().catch(() => '')).trim()) cx.toast('the prompt holds a draft, so it keeps the keys: click the panel to use its keys')
-    else if (r.isPlaced) giveKeys(cx, title)
+    else if (r.isPlaced) giveKeys(cx, title, p.view === 'ask' ? ASK_FIELD : RELAY_PICK)
   } catch (err) {
     cx.log(`thimble-term: could not open the panel: ${String(err).slice(0, 200)}`)
   }
@@ -507,14 +513,18 @@ export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
  *  `ui.focus` that lets its hint row name them (live check term-fix7, quirk 2: ↓ moved the ring to `show all threads`
  *  while the hint named ↑↓). Asked again while the prompt holds them over an empty composer, Claude Code gives them;
  *  else the panel's hint row says how to give them (panel.tsx endHints). */
-function giveKeys(cx: Ctx, title: string): void {
+function giveKeys(cx: Ctx, title: string, ringOn = RELAY_PICK): void {
   const ask = async (last: boolean) => {
     const pane = (await cx.panes()).find(p => p.id === PANEL)
     if (!pane?.isPlaced) return
     if (pane.isFocused !== false) {
-      // the ring onto the list's keys; one there already (the view drew them before) raises no ui.focus
-      if ((!rt.panelFocus || rt.panelFocus === NO_RING) && (await cx.focus(RELAY_PICK))) {
-        rt.panelFocus = RELAY_PICK
+      // the ring onto the list's keys (a ring there already stays, and the call says so); a view that draws none leaves
+      // the ring where it is, off them. Neither raises a ui.focus (live check term-fix8, quirk 7)
+      // a new thread's field likewise: an open of a pane that holds the keys already is no take, so its `autoFocus` puts
+      // no ring there
+      if (rt.panelFocus && rt.panelFocus !== NO_RING && rt.panelFocus !== RELAY_PICK && rt.panelFocus !== ringOn) return
+      if ((await cx.focus(ringOn)) && rt.panelFocus !== ringOn) {
+        rt.panelFocus = ringOn
         await cx.bumpPanel()
       }
       return
@@ -534,12 +544,21 @@ function giveKeys(cx: Ctx, title: string): void {
 export async function takeKeys(cx: Ctx): Promise<void> {
   const p = await cx.panel()
   if (!p) return
+  // typing that went to the prompt ends with a click on the panel: its list's keys are drawn again, and the ring goes
+  // onto them as after an open (giveKeys)
+  if (rt.typeThrough) {
+    rt.typeThrough = false
+    rt.panelFocus = NO_RING
+  }
   await cx.open({ id: PANEL, title: paneTitle(p), focus: true, columns: panelColumns() }).catch(() => undefined)
   await cx.bumpPanel()
+  giveKeys(cx, paneTitle(p))
 }
 
-// the relay's middle Button (panel.tsx RELAY.pick) and the ring off every element (register.tsx NO_FOCUS)
+// the relay's field (panel.tsx RELAY.pick), a new thread's question field (panel.tsx drawAsk) and the ring off every
+// element (register.tsx NO_FOCUS)
 const RELAY_PICK = 'keys-pick'
+const ASK_FIELD = 'ask-new'
 const NO_RING = '-'
 
 /** How long after an open the panel asks for the keys again (giveKeys). */

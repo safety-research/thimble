@@ -39,6 +39,8 @@ export type Ctx = {
   command: (name: string, args: string) => Promise<void>
   /** the prompt box's draft */
   promptText: () => Promise<string>
+  /** text typed into the prompt box at its cursor, as the person's typing (a key the panel does not bind) */
+  fill: (text: string) => Promise<void>
   /** the panel's focus ring onto one of its elements, by its key, while the pane holds the keys: true once the ring is
    *  there (moved, or there already) */
   focus: (key: string) => Promise<boolean>

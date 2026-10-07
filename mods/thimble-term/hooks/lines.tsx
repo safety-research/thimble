@@ -66,7 +66,12 @@ export async function linesMessage(cx: Ctx, origin: unknown, raw: unknown): Prom
     if (!got) continue
     if (a.k === CLIENT_CLICK) await onClientClick?.(cx)
     else if (typeof a.k === 'string') await got.key?.(a.k)
-    else await got.runs[Number(a.i)]?.()
+    else {
+      await got.runs[Number(a.i)]?.()
+      // a click on a row of a list with keys gave its Client the keyboard too: the keys go back to the pane (live check
+      // term-fix8, quirk 2: after a click on a home row x did nothing and the hint said to click the panel)
+      if (got.key) await onClientClick?.(cx)
+    }
     await cx.bumpPanel()
   }
 }

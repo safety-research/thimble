@@ -6,7 +6,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { HOME_LINE } from '../hooks/register'
-import { RELAY } from '../hooks/panel'
+import { RELAY, relayValue } from '../hooks/panel'
 import { PANEL } from '../hooks/term'
 import { CLI, CWD, LABEL, SLIDES, WS, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
@@ -16,7 +16,8 @@ type E = Engine
 
 const MESSAGE = (requestId: string, text: string, first = true) =>
   ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: first } }) as never
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
+// a pane tall enough for home whole: keys.test.ts draws the lists in a pane shorter than they are
+const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 124 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 120 }, view: {} } } as never
 const ABOVE = { plugin: 'thimble-term', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 130, scroll: { bodyRows: 10 }, view: {} } } as never
 
 async function start($: E, w: World): Promise<void> {
@@ -263,7 +264,7 @@ test("home opened from the toast without the keys asks for them once more, and n
   await w.clock.settle()
   pane = (await $.ui.mount(PANE)) as unknown as M
   text = shown(await pane.drawn({ in: 'm:home' }))
-  expect(text).toContain('↑↓ to choose · Enter to open · x to close')
+  expect(text).toContain('↑↓ to choose · Enter to open · Space to fold · x to close')
   await pane.unmount()
   // a panel that holds the keys asks for them no more
   w.focusAsked.length = 0
@@ -286,7 +287,7 @@ test("home's list takes ↑, ↓ and Enter from the pane's own keys; a click on 
     return rows.find(r => r.startsWith('❯'))?.trim() ?? ''
   }
   const first = await picked()
-  // the ring rests on the relay's middle Button: a move onto its neighbour below is ↓ for the list, and the ring stays
+  // the ring rests on the relay's field: a move onto the Button below it is ↓ for the list, and the ring stays
   const r = await $.ui.focus({ requestId: PANEL, component: 'Pane', element: RELAY.down, origin: { kind: 'person' } } as never)
   expect(r).toEqual({})
   await w.clock.settle()
@@ -295,9 +296,9 @@ test("home's list takes ↑, ↓ and Enter from the pane's own keys; a click on 
   await $.ui.focus({ requestId: PANEL, component: 'Pane', element: RELAY.up, origin: { kind: 'person' } } as never)
   await w.clock.settle()
   expect(await picked()).toBe(first)
-  // Enter presses the middle Button: the chosen row opens (the first row is a document)
+  // Enter submits the relay's field: the chosen row opens (the first row is a document)
   let pane = (await $.ui.mount(PANE)) as unknown as M
-  await pane.press({ key: RELAY.pick })
+  await pane.input({ key: RELAY.pick, text: relayValue() })
   await w.clock.settle()
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
@@ -344,7 +345,7 @@ test('/thimble opens the home panel with no model turn: one column, the title Ho
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const drawn = await pane.drawn({ in: 'm:home' })
   const home = shown(drawn)
-  for (const s of ['Home', 'Documents', ' (1)', 'Agents used the dse wiki as a relay', 'Threads', '"why is events.jsonl bigger?"', 'Cards', '▾ ', 'Your work', 'Labels', 'links through a fetch proxy', 'Files', 'revisions.jsonl', '↑↓ to choose · Enter to open · x to close']) expect(home).toContain(s)
+  for (const s of ['Home', 'Documents', ' (1)', 'Agents used the dse wiki as a relay', 'Threads', '"why is events.jsonl bigger?"', 'Cards', '▾ ', 'Your work', 'Labels', 'links through a fetch proxy', 'Files', 'revisions.jsonl', '↑↓ to choose · Enter to open · Space to fold · x to close']) expect(home).toContain(s)
   // the title in the accent and bold, the headings bold, `new` in green after an unread thread
   const json = JSON.stringify(drawn)
   expect(json).toMatch(/"color":"suggestion","bold":true\},"children":\["Home"\]/)
@@ -434,7 +435,8 @@ test("a side thread asked about a card: the ask field posts the thread, and the 
   expect(text).toContain('Threads')
   expect(text).toContain('"a question"')
   expect(shown(await pane.drawn({ in: 'm:threads-tree' }))).toContain('main')
-  expect((await pane.findAll({ type: 'Input' })).length).toBe(1)
+  // one field for a question, beside the list's keys (panel.tsx RELAY)
+  expect(((await pane.findAll({ type: 'Input' })) as { key?: string }[]).filter(i => i.key !== RELAY.pick).length).toBe(1)
   await pane.unmount()
 })
 

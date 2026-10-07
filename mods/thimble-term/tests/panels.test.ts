@@ -14,7 +14,8 @@ type E = Engine
 
 const MESSAGE = (requestId: string, text: string) =>
   ({ plugin: 'thimble-term', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
-const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 36 }, view: {} } } as never
+// a pane tall enough for home whole: keys.test.ts draws the lists in a pane shorter than they are
+const PANE = { plugin: 'thimble-term', component: 'Pane', requestId: 'thimble-term', surface: 'terminal', viewport: { columns: 120, rows: 124 }, props: { title: 'thimble', isFocused: true, bodyColumns: 96, placement: 'dock', scroll: { bodyRows: 120 }, view: {} } } as never
 
 async function start($: E, w: World): Promise<void> {
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
@@ -357,15 +358,14 @@ test('the key hints come in one order on every panel: choosing, Enter, Space, th
   const w = world(on)
   await start($, w)
   let pane = await home($, w)
-  // the panel's own keys pass ↑, ↓ and Enter to its list (panel.tsx RELAY); Space reaches the list only after a click,
-  // which hands the keys back to the panel, so it is not named
-  expect(JSON.stringify(await pane.drawn())).toContain('↑↓ to choose · Enter to open · x to close')
+  // the panel's own keys pass ↑, ↓, Enter and Space to its list (panel.tsx RELAY)
+  expect(JSON.stringify(await pane.drawn())).toContain('↑↓ to choose · Enter to open · Space to fold · x to close')
   await pane.unmount()
   await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
   await w.clock.settle()
   await takesKeys($)
   pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('↑↓ to choose · Enter to open · b to go back · x to close')
+  expect(shown(await pane.drawn())).toContain('↑↓ to choose · Enter to open · Space to fold · b to go back · x to close')
   await pane.unmount()
 })
 
