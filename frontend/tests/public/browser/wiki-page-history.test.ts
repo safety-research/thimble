@@ -3,8 +3,9 @@
 // about 15,000 revisions, long diffs), so what is timed is the page's own work. It opens and switches pages within a
 // bound far above what it takes, which fails when either becomes many times slower; and it keeps what makes it fast:
 // the list draws only the rows near its view and keeps them as it scrolls, a diff draws its first lines until Show
-// all, more of a history is added after what is drawn, a Color by change reads nothing again, and the history, which
-// loads as it scrolls, has the browser's scrollbar rather than Color by's tracks.
+// all, the history draws only the items around its view and reads them in full as they come near, a Color by change
+// reads nothing again, and the history's revisions have Color by's tracks while the list of pages, groups, keeps a
+// plain scrollbar.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -53,43 +54,50 @@ function answers() {
   let seed = 7
   const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648)
   const n = (r: number) => Math.max(1, Math.floor(2327 / Math.pow(r + 1, 1.15)))
-  const pages = { p: [] as number[], ln: [] as number[], w: [] as number[], name: [] as string[], n: [] as number[], f: [] as number[], l: [] as number[], u: [] as number[], d: [] as number[], pm: [] as number[] }
-  const revs = { rp: [] as number[], rt: [] as number[], ru: [] as number[], rk: [] as number[], rb: [] as number[] }
-  const dels = { dp: [] as number[], dt: [] as number[] }
+  const pages = { p: [] as number[], ln: [] as number[], w: [] as number[], name: [] as string[], n: [] as number[], f: [] as number[], l: [] as number[], u: [] as number[], d: [] as number[], pm: [] as number[], pb: [] as number[] }
+  const revs = { rp: [] as number[], rt: [] as number[], ru: [] as number[], rk: [] as number[], rg: [] as number[], rs: [] as number[], rb: [] as number[] }
+  const dels = { dp: [] as number[], dt: [] as number[], db: [] as number[] }
   const times: number[][] = []
   for (let r = 0; r < NP; r++) {
     const k = n(r)
     const start = Math.floor(rnd() * SPAN * 0.8)
     const ts = Array.from({ length: k }, () => start + Math.floor(rnd() * SPAN * 0.2)).sort((a, b) => a - b)
     times.push(ts)
-    for (const t of ts) { revs.rp.push(r); revs.rt.push(t); revs.ru.push(Math.floor(rnd() * NU)); revs.rk.push(ts[0] === t ? 0 : 1); revs.rb.push(0) }
+    // each revision adds text with links (KINDS 2), unsigned (SIGNED 2)
+    for (const t of ts) { revs.rp.push(r); revs.rt.push(t); revs.ru.push(Math.floor(rnd() * NU)); revs.rk.push(ts[0] === t ? 0 : 1); revs.rg.push(2); revs.rs.push(2); revs.rb.push(0) }
     const nd = r % 3 === 0 ? 1 : 0
-    for (let j = 0; j < nd; j++) { dels.dp.push(r); dels.dt.push(ts[ts.length - 1] + 60) }
+    for (let j = 0; j < nd; j++) { dels.dp.push(r); dels.dt.push(ts[ts.length - 1] + 60); dels.db.push(0) }
     pages.p.push(r); pages.ln.push(r + 1); pages.w.push(r % 4); pages.name.push(`Page${r}Name${Math.floor(rnd() * 1e6)}`); pages.n.push(k)
-    pages.f.push(ts[0]); pages.l.push(ts[ts.length - 1]); pages.u.push(Math.min(k, 1 + Math.floor(rnd() * 40))); pages.d.push(nd); pages.pm.push(0)
+    pages.f.push(ts[0]); pages.l.push(ts[ts.length - 1]); pages.u.push(Math.min(k, 1 + Math.floor(rnd() * 40))); pages.d.push(nd); pages.pm.push(0); pages.pb.push(0)
   }
   const wikis = ['dse', 'probier', 'fractal', 'dorfwiki']
   const users = Array.from({ length: NU }, (_, i) => `User${i}`)
   const overview = {
     t0: T0, span: [0, SPAN], wikis, users, pages, revs, dels, gone: { ot: [], ow: [], on: [] }, marks: [], admins: [], total: NP,
-    keys: pages.name.map((s, r) => `${wikis[r % 4]}/${s}`),
+    keys: pages.name.map((s, r) => `${wikis[r % 4]}/${s}`), next: null,
   }
   const iso = (t: number) => new Date((T0 + t) * 1000).toISOString().slice(0, 19)
   const line = (i: number, j: number) => `* [https://example.org/data/county.json?q=${i}-${j}&format=json&source=example] ` + 'x'.repeat(60)
+  // revision i of page r in full, as the reader's _block_rev gives it
+  function block(r: number, i: number) {
+    const ts = times[r]
+    const diff: any[] = [[' ', 'unchanged before'], ['~', 12]]
+    for (let j = 0; j < 36; j++) diff.push(['+', line(i, j)])
+    diff.push([' ', 'unchanged after'])
+    const message = diff.filter((d) => d[0] === '+').map((d) => d[1]).join('\n')
+    return { ref: `revisions.jsonl#L${r * 3000 + i + 1}`, i: r * 3000 + i, rev_id: i + 1, seq: i + 1, time: iso(ts[i]), label: users[(i * 7) % NU], ip16: '10.0', change_summary: `edit ${i}`, body_len: 5000, lines: 40, write_date: iso(ts[i]), request_action: null, base: i ? 'prev' : 'new', add: 36, rem: 0, diff, admin: false, message, kind: 'With links', signature: '', marks: [] }
+  }
   function page(q: any) {
     const r = q.p, ts = times[r], k = ts.length
+    // with `items`, those items alone
+    if (Array.isArray(q.items)) return { blocks: q.items.filter(([kind]: [string]) => kind === 'r').slice(0, 120).map(([, x]: [string, number]) => block(r, x - r * 3000)) }
     const from = Math.max(0, Math.min(q.from || 0, k - 1)), cnt = Math.min(q.n || 40, 120)
     const blocks = []
-    for (let i = from; i < Math.min(k, from + cnt); i++) {
-      const diff: any[] = [[' ', 'unchanged before'], ['~', 12]]
-      for (let j = 0; j < 36; j++) diff.push(['+', line(i, j)])
-      diff.push([' ', 'unchanged after'])
-      blocks.push({ ref: `revisions.jsonl#L${r * 3000 + i + 1}`, i: r * 3000 + i, rev_id: i + 1, seq: i + 1, time: iso(ts[i]), label: users[(i * 7) % NU], ip16: '10.0', change_summary: `edit ${i}`, body_len: 5000, lines: 40, write_date: iso(ts[i]), request_action: null, base: i ? 'prev' : 'new', add: 36, rem: 0, diff, admin: false, marks: [] })
-    }
-    const strip = { k: ts.map(() => 'r'), x: ts.map((_, i) => r * 3000 + i), t: ts, u: ts.map((_, i) => (i * 7) % NU), a: ts.map(() => 36), r: ts.map(() => 0), m: ts.map(() => -1), s: ts.map((_, i) => i + 1), b: ts.map(() => 0), kb: ts.map((_, i) => (i ? 1 : 0)) }
+    for (let i = from; i < Math.min(k, from + cnt); i++) blocks.push(block(r, i))
+    const strip = { k: ts.map(() => 'r'), x: ts.map((_, i) => r * 3000 + i), t: ts, u: ts.map((_, i) => (i * 7) % NU), a: ts.map(() => 36), r: ts.map(() => 0), m: ts.map(() => -1), s: ts.map((_, i) => i + 1), b: ts.map(() => 0), kb: ts.map((_, i) => (i ? 1 : 0)), g: ts.map(() => 2), sg: ts.map(() => 2), ln: ts.map((_, i) => r * 3000 + i + 1) }
     return {
-      page: { p: r, page_id: overview.keys[r], wiki: wikis[r % 4], name: pages.name[r], n_revs: k, n_revs_before: 0, first_write: iso(ts[0]), last_write: iso(ts[k - 1]), n_labels: pages.u[r], deletes: pages.d[r], listed: true, key: overview.keys[r], ref: `pages.jsonl#L${r + 1}` },
-      strip, from, total: k, blocks, marks: [], users: [[0, k]], t0: T0,
+      page: { p: r, page_id: overview.keys[r], wiki: wikis[r % 4], name: pages.name[r], n_revs: k, n_revs_before: 0, first_write: iso(ts[0]), last_write: iso(ts[k - 1]), n_labels: pages.u[r], deletes: pages.d[r], listed: true, key: overview.keys[r], thread: false, ref: `pages.jsonl#L${r + 1}` },
+      strip, from, total: k, blocks, marks: [], users: [[0, k]], t0: T0, files: { revisions: 'revisions.jsonl', events: 'events.jsonl' },
     }
   }
   W.__fetches = []
@@ -184,7 +192,7 @@ describe('the Wiki Page History demo view', () => {
     await page.close()
   })
 
-  test('the history: diffs drawn in part, more added after what is drawn, no tracks, and Color by reads nothing again', async () => {
+  test('the history: diffs drawn in part, only the items around the view drawn, Color by\'s tracks, and Color by reads nothing again', async () => {
     const { page, frame } = await open()
     const h = await frame.evaluate(() => {
       const d = document.querySelector('#blocks .blk .diff')!
@@ -192,33 +200,47 @@ describe('the Wiki Page History demo view', () => {
         lines: d.querySelectorAll('.dl').length,
         more: !!d.parentElement!.querySelector('[data-long]'),
         tracked: document.getElementById('blocks')!.classList.contains('thimble-colour-scrolled'),
+        listTracked: document.getElementById('list')!.classList.contains('thimble-colour-scrolled'),
         strips: document.querySelectorAll('.thimble-colour-strip').length,
       }
     })
     assert.ok(h.lines <= 28 && h.more, `a diff of 39 lines draws ${h.lines} with its Show all button: ${JSON.stringify(h)}`)
-    assert.equal(h.tracked, false, "the history keeps the browser's scrollbar")
-    assert.equal(h.strips, 1, "only the list has Color by's tracks")
+    // the history's revisions take the color, so it has Color by's tracks; the list's pages are groups, under a plain
+    // scrollbar
+    assert.equal(h.tracked, true, "the history has Color by's tracks")
+    assert.equal(h.listTracked, false, 'the list of pages keeps a plain scrollbar')
+    assert.equal(h.strips, 1, "only the history has Color by's tracks")
     // Show all draws the rest
     await frame.locator('#blocks [data-long]').first().click()
     assert.ok((await frame.evaluate(() => document.querySelector('#blocks .blk .diff')!.querySelectorAll('.dl').length)) >= 39)
-    // scrolled to its end: more of the history is read and added after the items drawn, which stay
-    const grew = await frame.evaluate(() => new Promise<[number, number, boolean]>((resolve) => {
+    // scrolled to its end: the history draws only the items around the view, and reads those in full as they come near
+    const read = await page.evaluate(() => (window as any).__fetches.filter((x: string) => x === 'page').length)
+    const end = await frame.evaluate(() => new Promise<{ drawn: number; last: number; full: boolean; items: number }>((resolve) => {
       const box = document.getElementById('blocks')!
-      const first = box.querySelector('.blk') as any
-      first.__mark = true
-      const before = box.querySelectorAll('.blk').length
       const go = (tries: number) => {
         box.scrollTop = box.scrollHeight
         setTimeout(() => {
-          const now = box.querySelectorAll('.blk').length
-          if (now > before || !tries) resolve([before, now, !!(box.querySelector('.blk') as any).__mark])
+          const blks = [...box.querySelectorAll<HTMLElement>('.blk')]
+          const last = blks.at(-1)!
+          const out = { drawn: blks.length, last: Number(last.dataset.pos), full: !last.classList.contains('sk') && !!last.querySelector('.diff'), items: Number(document.querySelector<HTMLElement>('#blocks .blk')!.dataset.pos) }
+          if (out.full || !tries) resolve(out)
           else go(tries - 1)
         }, 100)
       }
       go(30)
     }))
-    assert.ok(grew[1] > grew[0], `the history grew as it scrolled: ${grew}`)
-    assert.ok(grew[2], 'the items drawn before were drawn again')
+    assert.ok(end.full, `the last item was read in full at the end of the history: ${JSON.stringify(end)}`)
+    assert.ok(end.drawn <= 60 && end.items > 0, `only the items around the view are drawn: ${JSON.stringify(end)}`)
+    assert.ok((await page.evaluate(() => (window as any).__fetches.filter((x: string) => x === 'page').length)) > read, 'the items near the end were read')
+    // back at its start, for the first revision
+    await frame.evaluate(() => new Promise<void>((resolve) => {
+      const box = document.getElementById('blocks')!
+      const go = (tries: number) => {
+        box.scrollTop = 0
+        setTimeout(() => (document.querySelector('#blocks .blk.rev:not(.sk) .diff') && document.querySelector<HTMLElement>('#blocks .blk')!.dataset.pos === '0') || !tries ? resolve() : go(tries - 1), 100)
+      }
+      go(30)
+    }))
     // a Color by change draws the history again from what was read
     const pages = await page.evaluate(() => (window as any).__fetches.filter((x: string) => x === 'page').length)
     await frame.locator('.thimble-colour-by').click()
