@@ -44,11 +44,11 @@ runs of agent teams on one clock: the time range broken where the runs lie hours
 under its run as a tree, a run folded to one lane where the panel is short, and each call opened in place with what came
 back (`blocks`).
 
-[plugin/viewers/repository/view.term.js](../plugin/viewers/repository/view.term.js), the third, draws a table over a
-time range: the kind of item picked in the top row (`choice` with `all: false`), the runs' days with the nights between
-them as breaks (`timeRange({gap})`), each row its item's columns and its records as marks on the range's scale under the
-runs' names in the table's header, and an item opened in place with its records in time order, the one a citation
-opened kept in view (`d.focus()`).
+[plugin/viewers/repository/view.term.js](../plugin/viewers/repository/view.term.js), the third, draws records from a
+code forge and a message board the way their own tools draw them: the tabs with their counts on a row of their own, the
+chosen one inverse; the runs as Filter by's toggles; a heading per run over its items, with a dim line under each row
+(`body`); and an item's page in the side pane (`side`), whose records are a `list` of their own that ↑↓ move through
+while it is open, the one a citation opened chosen.
 
 ## The program's life
 

@@ -55,19 +55,24 @@
 #
 # The method: the reader gathers each run's records into the units a forge shows, keyed as its URLs are: pull requests
 # (<run>/pull/<n>), issues (<run>/issues/<n>), discussions (<run>/discussions/<n>) and agents (<run>/agents/<name>),
-# and a run itself (<run>). The index keeps each unit's facts (state, area, flags) and its records' lines and times; a
-# record's text is read back from its byte offset when the page opens the unit.
+# and a run itself (<run>). The index keeps each unit's facts (state, area, flags, a thread's first words, an agent's
+# sign-off) and its records' lines and times; a record's text is read back from its byte offset when the page opens the
+# unit. The page draws the units the way a code forge and a message board draw them: lists with states and counts, a
+# pull request's conversation, commits and changed files, an issue's timeline, a thread's posts and an agent's profile.
 #
 # What the page asks (records(index, query)):
-#   {"op": "view", "tab": "pulls" | "issues" | "discussions" | "agents", "colour": <the page's colour.query()>}
-#       the tab's units the label filter keeps (thimble.kept_unit), each with its facts, its value under the Color by
-#       choice (thimble.colour_value) and its records' times, those of a value turned off left out (thimble.colour_on);
-#       the counts of every value for the chips; and each run's start and end, which the page's time range marks
+#   {"op": "view", "tab": "pulls" | "issues" | "discussions" | "agents", "colour": <colour.query()>,
+#    "filter": <filter.query()>}
+#       the tab's units the label filter keeps (thimble.kept_unit) and Filter by keeps (thimble.colour_on), each with
+#       the facts its list row shows, its value under the Color by choice (thimble.colour_value) and its records' times,
+#       those of a Color by value turned off left out; the counts of every value for Filter by's and Color by's chips;
+#       how many units each tab holds under the same filters; and each run's facts, which head its part of the list
 #   {"op": "unit", "key": <a unit's key>}
-#       the unit's records the label filter keeps, with their text, in time order, and for a pull request or an issue
-#       the same issue in every run
+#       the unit's facts and its records the label filter keeps, with their text, in time order; for a pull request
+#       the issue it fixes, for an issue the pull requests that fix it, each opening in its timeline; for both the same
+#       issue in every run; and every #<n> its records mention, so the page links them
 # Under a label, a unit's value is the label's value on the first of its records the label marks, and each record
-# keeps its own value, which colors its tick on the unit's strip.
+# keeps its own value, which colors its tick on the time range's overview.
 import csv
 import io
 import json
@@ -84,6 +89,7 @@ ACTION = {"pr": "opened", "issue": "opened", "commit": "pushed", "comment": "com
           "close": "closed", "reopen": "reopened", "post": "posted", "agent": "signed off"}
 MENTION = re.compile(r"#(\d+)\b")
 NO_NAME = "unknown"  # the reviewer of a review whose account is gone
+LEAD = 400  # characters the index keeps of a thread's first post and of an agent's sign-off, which their list rows show
 # a record's kind by an event's `type` (schema 2: `event`), and a review's verdict by its `state`, in any case
 KINDS = {"issue.opened": "issue", "pr.opened": "pr", "push": "commit", "review": "review", "comment": "comment",
          "pr.merged": "merge", "pr.closed": "close", "issue.closed": "close", "pr.reopened": "reopen"}
@@ -455,9 +461,9 @@ def _unit(key, run, r, h):
     elif tab == "issues":
         u.update(origin="backlog", prs=[], fixed_by=None)
     elif tab == "discussions":
-        u.update(number=int(key.rsplit("/", 1)[1]), title="", posts=0, posters=[], mentions=[])
+        u.update(number=int(key.rsplit("/", 1)[1]), title="", posts=0, posters=[], mentions=[], lead="")
     else:
-        u.update(name=key.rsplit("/", 1)[1], more=[])
+        u.update(name=key.rsplit("/", 1)[1], more=[], note="")
     return u
 
 
@@ -489,9 +495,12 @@ def _add(u, kind, r, who, h, act, at):
         u.update(state="open", closed_by=None, reason=None, ended=None, why=None)
     elif kind == "post":
         u["title"] = u["title"] or str(r.get("title") or "")
+        u["lead"] = u["lead"] or str(r.get("text") or "")[:LEAD]
         u["posts"] += 1
         u["posters"] += [who] if who not in u["posters"] else []
-        u["mentions"] += [m for m in map(int, MENTION.findall(str(r.get("text") or ""))) if m not in u["mentions"]]
+        u["mentions"] = list(dict.fromkeys([*u["mentions"], *map(int, MENTION.findall(str(r.get("text") or "")))]))
+    elif kind == "agent":
+        u["note"] = str(r.get("text") or "")[:LEAD]
 
 
 def _pull_facts(u, run):
@@ -507,6 +516,10 @@ def _pull_facts(u, run):
     u["first_review"] = round(u["reviews"][0][2] - u["at"], 3) if u["reviews"] else None
     u["to_merge"] = round(u["ended"] - u["at"], 3) if u["state"] == "merged" else None
     approved = [h for _, v, h in u["reviews"] if v == "approved"]
+    u["need"] = run["approvals"] or 1
+    # the review decision a forge writes on the pull request's row
+    u["review"] = ("changes requested" if u["changes"] else "approved" if u["approvals"] >= u["need"]
+                   else "review required")
     flags = []
     if u["state"] == "merged" and u["merged_by"] == u["author"]:
         flags.append("merged by its author")
@@ -550,38 +563,84 @@ def _record(index, at):
 
 
 def _value(choice, u, ref=None):
-    """A unit's value under the page's Color by: its state, run or area, or for a label the label's value on the record
-    `ref`, else on the first of its records the label marks; None for none."""
+    """A unit's value under the page's Color by or Filter by: its state, run, area or author, or for a label the label's
+    value on the record `ref`, else on the first of its records the label marks; None for none."""
     if isinstance(choice, dict) and choice.get("label") is not None:
         refs = [ref] if ref else u["refs"]
         return next((v for r in refs if (v := thimble.colour_value(choice, r)) is not None), None)
     return thimble.colour_value(choice, None, u)
 
 
+# what an agent did, counted by the kind of record, in the order its profile lists them
+DID = (("pr", "pull requests"), ("issue", "issues"), ("commit", "commits"), ("review", "reviews"), ("merge", "merges"),
+       ("close", "closes"), ("comment", "comments"), ("post", "posts"))
+
+
+def _facts(index, u):
+    """What a unit's list row and the head of its page show: its key, run, title and when it opened, and its tab's
+    facts. A pull request: its state, area, the issue it closes, the review decision, the approvals it has and needs,
+    each reviewer's latest verdict, its comments, commits, lines added and removed, files and flags. An issue: its
+    state, area, origin, the pull requests that fix it and its comments. A thread: its first post's author and words,
+    its posts, posters and the last post. An agent: its sign-off note and what it did."""
+    events = sorted(u["events"], key=lambda e: e[5])
+    out = {"key": u["key"], "run": u["run"], "title": u.get("title") or u.get("name") or "",
+           "opened": events[0][5] if events else index["runs"][u["run"]]["start"]}
+    tab = u["tab"]
+    if tab in ("pulls", "issues"):
+        end = next((e[5] for e in reversed(events) if e[2] in ("merged", "closed", "fixed")), None)
+        out.update(number=u["number"], author=u["author"], state=u["state"], area=u["area"] or None,
+                   comments=u["comments"], ended=end if u["state"] != "open" else None)
+    if tab == "pulls":
+        out.update(closes=u["closes"], flags=u["flags"], review=u["review"], approvals=u["approvals"], need=u["need"],
+                   reviewers=[[who, v] for who, v in u["latest"].items()], commits=len(u["commits"]), plus=u["plus"],
+                   minus=u["minus"], files=len(u["paths"]), merged_by=u["merged_by"], closed_by=u["closed_by"],
+                   reason=u["reason"])
+    elif tab == "issues":
+        out.update(origin=u["origin"], prs=u["prs"], fixed_by=u["fixed_by"])
+    elif tab == "discussions":
+        last = events[-1] if events else None
+        out.update(number=u["number"], author=u["author"], lead=u["lead"], posts=u["posts"], posters=u["posters"],
+                   mentions=u["mentions"], last=last[5] if last else None, last_by=last[3] if last else None)
+    elif tab == "agents":
+        kinds = Counter(e[6] for e in events if e[6] != "agent")
+        out.update(note=u["note"], did={name: kinds[k] for k, name in DID if kinds[k]})
+    return out
+
+
 def _view(index, query):
-    """One tab's units as rows: {items: [{key, run, number, title, author, state, area, flags, value, search, events:
-    [[epoch seconds, ref, value]]}], counts: {value: units}, runs: [{run, start, end}]}."""
+    """One tab's units as rows: {tab, items: [{<_facts>, value, search, events: [[epoch seconds, ref, value]]}],
+    counts: {value: units} (Color by's), filtered: {value: units} (Filter by's), tabs: {tab: units}, runs: [{run,
+    start, end, team, approvals, agents}]}. A unit shows when the label filter keeps one of its records and its values
+    under Filter by and Color by are on; each tab's count is of the units that show."""
     tab = query.get("tab") if query.get("tab") in TABS else "pulls"
-    choice = query.get("colour")
-    by_label = isinstance(choice, dict) and choice.get("label") is not None
-    items, counts = [], Counter()
-    units = sorted((u for u in index["units"].values() if u["tab"] == tab),
-                   key=lambda u: (u["run"], u.get("number") or 0, u.get("name") or ""))
+    colour, filt = query.get("colour"), query.get("filter")
+    by_label = isinstance(colour, dict) and colour.get("label") is not None
+    items, counts, filtered, tabs = [], Counter(), Counter(), Counter()
+    units = sorted(index["units"].values(), key=lambda u: (u["run"], u.get("number") or 0, u.get("name") or ""))
     for u in units:
         if not thimble.kept_unit(u["refs"] + u.get("more", [])):
             continue
-        value = _value(choice, u)
-        counts["" if value is None else value] += 1
-        if not thimble.colour_on(choice, value):
+        here = u["tab"] == tab
+        fv = _value(filt, u)
+        if here:
+            filtered["" if fv is None else fv] += 1
+        if not thimble.colour_on(filt, fv):
             continue
-        events = [[e[5], e[0], _value(choice, u, e[0]) if by_label else value]
+        value = _value(colour, u)
+        if here:
+            counts["" if value is None else value] += 1
+        if not thimble.colour_on(colour, value):
+            continue
+        tabs[u["tab"]] += 1
+        if not here:
+            continue
+        events = [[e[5], e[0], _value(colour, u, e[0]) if by_label else value]
                   for e in sorted(u["events"], key=lambda e: e[5]) if thimble.kept(e[0])]
-        items.append({"key": u["key"], "run": u["run"], "number": u.get("number") if tab != "agents" else None,
-                      "title": u.get("title") or u.get("name") or "", "author": u["author"] if tab != "agents" else "",
-                      "state": u.get("state"), "area": u.get("area") or None, "flags": u.get("flags") or [],
-                      "value": value, "search": u["search"], "events": events})
-    runs = [{"run": r, "start": info["start"], "end": info["end"]} for r, info in sorted(index["runs"].items())]
-    return {"tab": tab, "items": items, "counts": dict(counts), "runs": runs}
+        items.append({**_facts(index, u), "value": value, "search": u["search"], "events": events})
+    runs = [{"run": r, "start": info["start"], "end": info["end"], "team": info["team"], "approvals": info["approvals"],
+             "agents": info["agents"]} for r, info in sorted(index["runs"].items())]
+    return {"tab": tab, "items": items, "counts": dict(counts), "filtered": dict(filtered),
+            "tabs": {t: tabs[t] for t in TABS}, "runs": runs}
 
 
 def _iso(t):
@@ -605,6 +664,11 @@ def _texts(index, events):
     return out
 
 
+def _brief(u):
+    """A pull request or an issue as a link to it: {key, number, title, state, author}."""
+    return {"key": u["key"], "number": u["number"], "title": u["title"], "state": u["state"], "author": u["author"]}
+
+
 def _elsewhere(index, u):
     """The same backlog issue in every run: [{run, key, state, prs: [{key, number, state}]}], for an issue or a pull
     request that closes one."""
@@ -625,22 +689,48 @@ def _elsewhere(index, u):
     return out
 
 
+def _mentions(index, run, texts):
+    """Every #<n> the texts mention that names a pull request or an issue of the run, the records' own numbers among
+    them: {n: {key, number, title, state, author}}."""
+    out = {}
+    for text in texts:
+        for n in MENTION.findall(str(text or "")):
+            u = index["units"].get(f"{run}/pull/{n}") or index["units"].get(f"{run}/issues/{n}")
+            if u is not None:
+                out[n] = _brief(u)
+    return out
+
+
 def _detail(index, key):
-    """One unit opened: its records the label filter keeps, the first always, in time order, and for a pull request or
-    an issue the same issue in every run."""
+    """One unit opened: {key, facts, records, ...}. Its records the label filter keeps, the first always, in time order;
+    an issue's timeline holds the openings of the pull requests that fix it too. A pull request names the issue it
+    fixes (`fixes`) and an issue the pull requests that fix it (`prs`), and both the same issue in every run
+    (`elsewhere`); `mentions` are the pull requests and issues its records name by #<n>."""
     u = index["units"].get(key)
     if u is None:
         return None
     first = u["refs"][0] if u["refs"] else None
-    events = sorted(u["events"], key=lambda e: e[5])
-    out = {"key": key, "records": [x for x in _texts(index, events) if x["ref"] == first or thimble.kept(x["ref"])]}
+    events = list(u["events"])
+    out = {"key": key, "facts": _facts(index, u)}
+    if u["tab"] == "pulls":
+        issue = index["units"].get(f"{u['run']}/issues/{u['closes']}")
+        out["fixes"] = _brief(issue) if issue else None
+    elif u["tab"] == "issues":
+        prs = [p for n in u["prs"] if (p := index["units"].get(f"{u['run']}/pull/{n}"))]
+        out["prs"] = [_brief(p) for p in prs]
+        events += [e for p in prs for e in p["events"] if e[6] == "pr"]
     if u["tab"] in ("pulls", "issues"):
         out["elsewhere"] = _elsewhere(index, u)
+    recs = [x for x in _texts(index, sorted(events, key=lambda e: e[5])) if x["ref"] == first or thimble.kept(x["ref"])]
+    out["records"] = recs
+    texts = [u.get("title"), u.get("lead"), u.get("note"), *(x.get(f) for x in recs for f in ("title", "text", "reason")),
+             *(f"#{x[f]}" for x in recs for f in ("number", "closes") if x.get(f) is not None)]
+    out["mentions"] = _mentions(index, u["run"], texts)
     return out
 
 
 def records(index, query):
-    """{op: view, tab, colour?}: one tab's units (_view). {op: unit, key}: one unit opened (_detail)."""
+    """{op: view, tab, colour?, filter?}: one tab's units (_view). {op: unit, key}: one unit opened (_detail)."""
     query = query or {}
     if query.get("op") == "unit":
         return _detail(index, str(query.get("key") or ""))
