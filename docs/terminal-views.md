@@ -41,7 +41,7 @@ draws what its `view.html` draws: the search, the incident and Color by in the t
 source, and the events by day, each opening in place. `thimble view text timeline --cwd <its sample> --width 120` draws
 it as text (below). [plugin/viewers/linked-sessions/view.term.js](../plugin/viewers/linked-sessions/view.term.js) draws
 runs of agent teams on one clock: the time range broken where the runs lie hours apart (`gap`), a lane per session
-under its run as a tree, a run folded to one lane where the panel is short, and each call opened in place with what came
+under its run as a tree, a run folded to one lane where the panel is short, and each call opened in the side pane with what came
 back (`blocks`).
 
 [plugin/viewers/repository/view.term.js](../plugin/viewers/repository/view.term.js), the third, draws records from a

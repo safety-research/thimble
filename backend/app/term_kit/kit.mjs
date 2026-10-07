@@ -2405,7 +2405,7 @@ export function columns(specs, cols) {
  * diff: its lines upright, each cut at the cell edge, at most `max` (8) rows and then `… N more`, which a click opens,
  * `code` in the code color (a command, a query, a path), `problem` in red (what a failed call printed); `facts` [[label, value]] on one row, the labels dim; `groups`
  * [{title, rows: [{when, words, text, on}]}], each row a link to another record; `raw` [[line, text]] its lines as the
- * file holds them; `place` its ref, a link with `↗`; `ask` {ref, text}, `ask about it`.
+ * file holds them; `place` its ref, a link with `↗`; `ask` {ref, text}, `ask about it`, shown only when there is no `place`, whose file view asks.
  */
 export function details(d, o = {}) {
   if (o.text) for (const s of wrap(o.text, d.cols, o.maxRows || 6)) d.line(s)
@@ -2451,25 +2451,14 @@ export function details(d, o = {}) {
     const nw = Math.max(...o.raw.map(([n]) => String(n).length))
     for (const [n, text] of o.raw) d.row().add(padStart(n, nw), { d: true }).gap().add(clip(text, d.cols - nw - 2)).end()
   }
-  if (o.place || o.ask) {
-    let r = d.row()
-    if (o.place) {
-      // a place too long for the row beside `ask about it` drops its folders; where its file's name would be cut
-      // there, `ask about it` takes the row under it, and the name is cut only where the row alone has no room, its
-      // line kept
-      const askW = o.ask ? width('ask about it') + 2 : 0
-      const own = o.ask && width(placeWords(o.place)) > d.cols - 2 - askW && width(placeShort(o.place)) > d.cols - 2 - askW
-      const words = placeIn(o.place, d.cols - 2 - (own ? 0 : askW))
-      r.add('↗ ', { fg: COLORS.link }, { on: () => open(o.place), tip: 'open its lines' })
-      r.add(words, { fg: COLORS.link, u: true }, { on: () => open(o.place), tip: 'open its lines' })
-      if (own) {
-        r.end()
-        r = d.row()
-      } else if (o.ask) r.gap()
-    }
-    if (o.ask) r.add('ask about it', {}, { on: () => ask(o.ask.ref, o.ask.text), tip: 'ask a side thread about this record' })
-    r.end()
-  }
+  // a record with a place asks from its file view (↗), so `ask about it` shows only for a record without one
+  if (o.place) {
+    const words = placeIn(o.place, d.cols - 2)
+    d.row()
+      .add('↗ ', { fg: COLORS.link }, { on: () => open(o.place), tip: 'open its lines' })
+      .add(words, { fg: COLORS.link, u: true }, { on: () => open(o.place), tip: 'open its lines' })
+      .end()
+  } else if (o.ask) d.row().add('ask about it', {}, { on: () => ask(o.ask.ref, o.ask.text), tip: 'ask a side thread about this record' }).end()
 }
 
 // ------------------------------------------------------------------------------------------------ search and choices
