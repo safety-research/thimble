@@ -877,6 +877,10 @@ async def get_route(c: str, chat_id: str) -> Response:
     if chat_id == MAIN_ID:
         meta["orientation"] = _orientation_status(c)
         meta.update(_main_state(c))
+    elif meta.get("kind") == KIND_THREAD:
+        from . import threads  # noqa: PLC0415
+
+        meta[threads.HAND_BACK_KEY] = threads.hand_back_state(c, meta)
     return chat_response(meta, log_path)
 
 
@@ -1034,6 +1038,15 @@ async def ask_again_route(c: str, chat_id: str) -> dict:
     from . import threads  # noqa: PLC0415
 
     return threads.ask_again(c, chat_id)
+
+
+@router.post("/ws/{c}/chats/{chat_id}/hand-back")
+async def hand_back_route(c: str, chat_id: str) -> dict:
+    """Hand a finished thread's answer back to main as the analyst's message (threads.hand_back). 409 while the thread
+    runs, when that answer was handed back already, or when no session listens."""
+    from . import threads  # noqa: PLC0415
+
+    return threads.hand_back(c, chat_id)
 
 
 @router.post("/ws/{c}/chats/{chat_id}/interrupt")

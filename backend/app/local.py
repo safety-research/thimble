@@ -598,28 +598,31 @@ def last_turn(events: list[dict[str, Any]]) -> str:
     return state
 
 
-def _answers(c: str, meta: dict[str, Any]) -> tuple[int, str, str]:
+def _answers(c: str, meta: dict[str, Any]) -> tuple[int, str, str, str]:
     """How many of a thread's questions have an answer (answered), which the renderer counts to put a row under main's
     latest reply when a new one comes; its first question, which names the thread in the terminal (its title is a
-    slug); and how its latest question stands (last_turn), which the threads panel shows before it reads the thread."""
-    from . import agents  # noqa: PLC0415
+    slug); how its latest question stands (last_turn), which the threads panel shows before it reads the thread; and
+    whether its answer can be handed back to main (threads.hand_back_state)."""
+    from . import agents, threads  # noqa: PLC0415
 
     try:
         events = agents.read_events(agents.paths(c, str(meta["id"]))[1])
     except Exception:  # noqa: BLE001 — a thread that cannot be read shows nothing new
-        return 0, "", ""
+        return 0, "", "", ""
     first = next((str(r.get("text") or "").strip() for r in events if r.get("type") == "user" and str(r.get("text") or "").strip()), "")
-    return answered(events), first[:QUESTION_CHARS], last_turn(events)
+    return answered(events), first[:QUESTION_CHARS], last_turn(events), threads.hand_back_state(c, meta, events)
 
 
 QUESTION_CHARS = 300
 
 
 def _thread_marks(c: str, meta: dict[str, Any]) -> None:
-    """A thread's meta with `unread`, `answers`, its first `question` and its latest question's `turn` (_unread,
-    _answers)."""
+    """A thread's meta with `unread`, `answers`, its first `question`, its latest question's `turn` and `hand_back`
+    (_unread, _answers)."""
+    from . import threads  # noqa: PLC0415
+
     meta["unread"] = _unread(c, meta)
-    meta["answers"], meta["question"], meta["turn"] = _answers(c, meta)
+    meta["answers"], meta["question"], meta["turn"], meta[threads.HAND_BACK_KEY] = _answers(c, meta)
 
 
 async def _threads(c: str, args: list[str], pos: list[str]) -> Any:
@@ -792,7 +795,7 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 
 ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
              "verdict {label, ref, value}, label {label, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, label-delete {label}, seen {thread}, "
-             "stop {agent}")
+             "hand-back {thread}, stop {agent}")
 
 
 async def act(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -989,6 +992,14 @@ async def _act_seen(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"thread": thread, "seen": threads.mark_seen(c, thread)}
 
 
+async def _act_hand_back(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Hand a finished thread's answer back to main as the analyst's message, as the browser's `Hand back to main` does
+    (threads.hand_back)."""
+    from . import threads  # noqa: PLC0415
+
+    return threads.hand_back(c, _text(payload, "thread").removeprefix("thread:"))
+
+
 async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Stop one of thimble's agents, by its chat or its agent id, through the hooks module (subagents.stop), as the
     browser's Stop does."""
@@ -1007,7 +1018,7 @@ async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "label": _act_label,
          "label-run": _act_label_run, "label-stop": _act_label_stop, "label-delete": _act_label_delete, "seen": _act_seen,
-         "stop": _act_stop}
+         "hand-back": _act_hand_back, "stop": _act_stop}
 
 
 # --------------------------------------------------------------------------- the command line
