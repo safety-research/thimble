@@ -616,10 +616,10 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
  *  the chosen row's line and what it previews, and what the list's keys do. */
 type Listed = { lines: Line[]; hits: LineHit[]; fixed: number; pickY: number; chosen: { path: string; line?: number } | null; onKey: (k: string) => Promise<void> | void }
 
-/** The label marks after a file's name in the tree: a `●` in each label's hue for each label that is on and labeled
- *  the file, a space between them. */
+/** The label marks after a file's name in the tree: a `●` in each label's hue for each label that is on, highlights a
+ *  value (litValues) and labeled the file, a space between them. */
 function fileDots(on: readonly OnLabel[], path: string): Seg[] {
-  const ls = on.filter(l => labelCovers(l, path))
+  const ls = on.filter(l => l.lit.length > 0 && labelCovers(l, path))
   return ls.length ? [{ s: '  ' }, ...ls.flatMap((l, i): Seg[] => [...(i ? [{ s: ' ' }] : []), { s: '●', fg: labelHue(l.values, l.colors) }])] : []
 }
 
@@ -902,7 +902,7 @@ async function previewEls(cx: Ctx, e: PaneEvent, at: { path: string; line?: numb
   const marks = ls.length ? await surfaceValue(cx, marksKey(path, ls[0]!.n, ls.at(-1)!.n)) : undefined
   const covering = on.filter(l => labelCovers(l, path))
   const rm = recordMarks(marks?.ok ? marks.value : [], covering, path)
-  const gutter = gutterOf(rm.lines.size ? covering : [], rm.lines)
+  const gutter = gutterOf(covering.filter(l => [...rm.lines.values()].some(m => m.has(l.id))), rm.lines)
   const o: DrawOpts = { cols, chosen: at.line ?? 0, gutter, pick: () => () => undefined, labeled: rm.lines.size > 0, max: n }
   let d: Drawn
   const head1 = delimiterOf(path) && start > 1 ? await surfaceValue<Obj>(cx, `file:${path}:1`) : undefined
@@ -1208,8 +1208,10 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
 function labelRow(cx: Ctx, e: PaneEvent, l: OnLabel, fileValue: string | undefined, cols: number, i: number): RenderElement {
   const line: Line = [dim('label  '), linkSeg(l.name), { s: ' ' }, { s: '↗', fg: LINK }]
   const x1 = lineWidth(line)
-  for (const v of l.values) line.push({ s: '  ' }, { s: '●', fg: valueColour(l.values, v, l.colors) ?? COLORS.text }, { s: ` ${v}` })
-  if (fileValue) line.push(dim('  ·  file  '), { s: '●', fg: valueColour(l.values, fileValue, l.colors) ?? COLORS.text }, { s: ` ${fileValue}` })
+  // a value the label does not highlight dim, as the browser's Files shows its toggle off
+  const value = (v: string): Seg[] => (l.lit.includes(v) ? [{ s: '●', fg: valueColour(l.values, v, l.colors) ?? COLORS.text }, { s: ` ${v}` }] : [dim('●'), dim(` ${v}`)])
+  for (const v of l.values) line.push({ s: '  ' }, ...value(v))
+  if (fileValue) line.push(dim('  ·  file  '), ...value(fileValue))
   const open = () => openLabel(cx, l.id, l.name)
   return linesEl(cx, e, `file-label-${i}`, [cutLineSegs(line, cols)], [{ y: 0, x0: width('label  '), x1, row: false, run: open }], cols)
 }

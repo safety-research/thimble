@@ -278,9 +278,22 @@ export function jsonOf(text: string): unknown {
 
 // ------------------------------------------------------------------------------------------------ labels on records
 
-/** A label that is on in Files (`shown`, show_label) over a corpus's records or files: its id, name and values, and
- *  each value's color from its classes (labels.ts classColors), as the label panel draws them. */
-export type OnLabel = { id: string; name: string; values: string[]; paths: string[]; glob: string; colors?: Record<string, number> }
+/** A label that is on in Files (`shown`, show_label) over a corpus's records or files: its id, name and values, the
+ *  values it highlights (litValues), and each value's color from its classes (labels.ts classColors), as the label
+ *  panel draws them. */
+export type OnLabel = { id: string; name: string; values: string[]; lit: string[]; paths: string[]; glob: string; colors?: Record<string, number> }
+
+// the browser's negatives (frontend files/labels.ts QUIET, isNegative): a quiet word, or the second of two
+const QUIET = new Set(['no', 'none', 'other', 'no match', 'not', 'neither', 'n/a', 'unknown'])
+const isNegative = (name: string, i: number, n: number): boolean => QUIET.has(name.trim().toLowerCase()) || (n === 2 && i === 1)
+
+/** The values a label highlights, as the browser's Files reads them (frontend files/labels.ts classesOf and litClass):
+ *  with classes, those whose class has `highlight` (a class with no `highlight` field highlights nothing; thimble
+ *  fills the field for every class it sends); with no classes, every value but the negative. */
+export function litValues(values: readonly string[], classes: readonly LabelClass[] | null | undefined): string[] {
+  if (Array.isArray(classes) && classes.length) return values.filter(v => classes.some(c => c && c.name === v && Boolean(c.highlight)))
+  return values.filter((v, i) => !isNegative(v, i, values.length))
+}
 
 /** The labels over files that are on, in the order the labels list gives them. */
 export function onLabels(labels: readonly Obj[]): OnLabel[] {
@@ -288,8 +301,10 @@ export function onLabels(labels: readonly Obj[]): OnLabel[] {
     .filter(l => l.shown === true && (!l.unit || ['record', 'agent', 'run'].includes(str(l.unit))))
     .map(l => {
       const run = isObj(l.last_run) ? l.last_run : null
-      const colors = classColors(l.classes as LabelClass[] | undefined)
-      return { id: str(l.id), name: str(l.name) || str(l.id), values: Array.isArray(l.labels) ? (l.labels as unknown[]).map(String) : [], paths: run && Array.isArray(run.paths) ? (run.paths as unknown[]).map(String) : [], glob: str(l.glob), ...(colors ? { colors } : {}) }
+      const classes = l.classes as LabelClass[] | undefined
+      const colors = classColors(classes)
+      const values = Array.isArray(l.labels) ? (l.labels as unknown[]).map(String) : []
+      return { id: str(l.id), name: str(l.name) || str(l.id), values, lit: litValues(values, classes), paths: run && Array.isArray(run.paths) ? (run.paths as unknown[]).map(String) : [], glob: str(l.glob), ...(colors ? { colors } : {}) }
     })
 }
 
@@ -309,12 +324,14 @@ export function labelCovers(l: OnLabel, path: string): boolean {
 }
 
 /** The values the labels that are on gave a file's records (`thimble state marks`: each label's rows on a page of its
- *  lines), by line and then by label, and those they gave the file whole (a label over files: a row whose ref is the
- *  path), by label; a value the analyst set stands for the classifier's. */
+ *  lines), by line and then by label, only those the label highlights (litValues), as the browser's Files marks a
+ *  record; and those they gave the file whole (a label over files: a row whose ref is the path), by label, highlighted
+ *  or not, which the file's label row shows; a value the analyst set stands for the classifier's. */
 export function recordMarks(marks: unknown, on: readonly OnLabel[], path: string): { lines: Map<number, Map<string, string>>; file: Map<string, string> } {
   const lines = new Map<number, Map<string, string>>()
   const file = new Map<string, string>()
   const ids = new Set(on.map(l => l.id))
+  const lit = new Map(on.map(l => [l.id, new Set(l.lit)]))
   for (const k of Array.isArray(marks) ? marks : []) {
     if (!isObj(k) || !ids.has(str(k.concept_id))) continue
     for (const r of Array.isArray(k.rows) ? k.rows : []) {
@@ -328,7 +345,7 @@ export function recordMarks(marks: unknown, on: readonly OnLabel[], path: string
       }
       const m = /#L(\d+)/.exec(ref)
       const n = m ? Number(m[1]) : typeof r.line === 'number' ? r.line : 0
-      if (!n) continue
+      if (!n || !lit.get(str(k.concept_id))?.has(value)) continue
       if (!lines.has(n)) lines.set(n, new Map())
       lines.get(n)!.set(str(k.concept_id), value)
     }

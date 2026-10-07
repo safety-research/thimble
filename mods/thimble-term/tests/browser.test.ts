@@ -7,7 +7,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { csvCells, fileTree, fileType, firstChoice, globTest, grepOf, isDatabase, jsonOf, labelCovers, onLabels, recordMarks, tableScore, treeRows, unfoldTo } from '../hooks/files'
+import { csvCells, fileTree, fileType, firstChoice, globTest, grepOf, isDatabase, jsonOf, labelCovers, litValues, onLabels, recordMarks, tableScore, treeRows, unfoldTo } from '../hooks/files'
 import { CWD, LABEL, WS, takesKeys, world } from './fixtures'
 import { LABEL_HUES } from '../hooks/paint'
 import type { World } from './fixtures'
@@ -271,13 +271,17 @@ test('the labels that are on: a `●` in the label\'s hue after each file it lab
   r = await rows($, w)
   expect(w.calls.some(c => c[2] === 'marks' && c[5] === 'revisions.jsonl' && c[7] === '1-3')).toBe(true)
   expect(r.find(x => x.includes('label  '))).toBe(`   label  ${LABEL.name} ↗  ● proxy-link  ● none`)
-  // the table's rows, each after its value's `●` (the analyst's `none` for line 2), a gutter, then its cells
+  // the table's rows, each after its value's `●` when the label highlights it (the analyst's `none` for line 2, the
+  // negative, is not), a gutter, then its cells
   const body = r.filter(x => /^ {3}[● ] {2}(dse|probier)/.test(x))
   expect(body.length).toBe(3)
+  expect(r.find(x => x.includes('Welcome'))).toMatch(/^ {6}dse/)
   pane = (await $.ui.mount(PANE())) as unknown as M
   const drawn = JSON.stringify(await pane.drawn({ in: 'm:file-body' }))
   expect(drawn).toContain('{"type":"Text","props":{"color":"#1d7fc0"},"children":["●"]}')
-  expect(drawn).toContain('{"type":"Text","props":{"color":"inactive"},"children":["●"]}')
+  expect(drawn).not.toContain('{"type":"Text","props":{"color":"inactive"},"children":["●"]}')
+  // the label's row lists every value, the one it does not highlight dim
+  expect(JSON.stringify(await pane.drawn({ in: 'file-label-0' }))).toContain('{"type":"Text","props":{"color":"inactive"},"children":["● none"]}')
   // a click on the label's name opens its panel
   await pane.pointer({ type: 'down', x: 9, y: 0, button: 'left', in: 'file-label-0' } as never)
   await w.clock.settle()
@@ -303,8 +307,31 @@ test("the file browser's marks take the colors the analyst chose for the label's
   pane = (await $.ui.mount(PANE())) as unknown as M
   const drawn = JSON.stringify(await pane.drawn({ in: 'm:file-body' }))
   expect(drawn).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[9]}"},"children":["●"]}`)
-  expect(drawn).toContain('{"type":"Text","props":{"color":"inactive"},"children":["●"]}')
   expect(drawn).not.toContain('#1d7fc0')
+  await pane.unmount()
+})
+
+test("the file browser marks only the values whose class has `highlight`, as the browser's Files does: the tree's dot, the records' marks; the label's row lists every value, the others dim", async ($, on) => {
+  const w = world(on)
+  w.states.files = [{ path: 'revisions.jsonl', kind: 'records', size_bytes: 52_000_000 }]
+  // the analyst turned the highlight off for proxy-link and on for none
+  w.states.labels = [{ ...LABEL, shown: true, classes: [{ name: 'proxy-link', color: 1, highlight: false }, { name: 'none', color: 2, highlight: true }] }] as never
+  w.pages['revisions.jsonl'] = { path: 'revisions.jsonl', kind: 'records', total_lines: 2, start: 1, records: [{ line: 1, record: { wiki: 'dse', body: 'see https://r.jina.ai/x' } }, { line: 2, record: { wiki: 'dse', body: 'Welcome' } }] }
+  w.marks['revisions.jsonl'] = [{ concept_id: LABEL.id, name: LABEL.name, labels: LABEL.labels, unit: 'record', rows: [{ ref: 'revisions.jsonl#L1', label: 'proxy-link', analyst: null }, { ref: 'revisions.jsonl#L2', label: 'none', analyst: null }] }]
+  await start($, w)
+  await browser($, w)
+  let r = await rows($, w)
+  expect(r.find(x => x.includes('revisions.jsonl'))).toMatch(/revisions\.jsonl {2}● +records/)
+  await $.command.run({ command: 'thimble:thimble', args: 'files revisions.jsonl' } as never)
+  await w.clock.settle()
+  r = await rows($, w)
+  expect(r.find(x => x.includes('r.jina.ai'))).toMatch(/^ {6}dse/)
+  expect(r.find(x => x.includes('Welcome'))).toMatch(/^ {3}● {2}dse/)
+  const pane = (await $.ui.mount(PANE())) as unknown as M
+  expect(JSON.stringify(await pane.drawn({ in: 'm:file-body' }))).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[1]}"},"children":["●"]}`)
+  const row = JSON.stringify(await pane.drawn({ in: 'file-label-0' }))
+  expect(row).toContain('{"type":"Text","props":{"color":"inactive"},"children":["● proxy-link"]}')
+  expect(row).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[1]}"},"children":["●"]}`)
   await pane.unmount()
 })
 
@@ -454,10 +481,18 @@ test("a file's modes as files.ts reads them: CSV cells, the browser's table scor
   // each value's color is its class's, as the label panel draws it (labels.ts classColors); none when it has no classes
   expect(on[0]!.colors).toBeUndefined()
   expect(onLabels([{ id: 'c', labels: ['yes', 'no'], shown: true, classes: [{ name: 'yes', color: 10 }, { name: 'no', color: 0 }] }])[0]!.colors).toEqual({ yes: 10, no: 0 })
+  // the values a label highlights, by the browser's rule: its classes' `highlight`; with no classes, all but the negative
+  expect(on[0]!.lit).toEqual(['yes'])
+  expect(litValues(['a', 'none', 'b'], null)).toEqual(['a', 'b'])
+  expect(litValues(['a', 'b', 'c'], [])).toEqual(['a', 'b', 'c'])
+  expect(litValues(['yes', 'no'], [{ name: 'yes', highlight: false }, { name: 'no', highlight: true }])).toEqual(['no'])
+  expect(litValues(['yes', 'no'], [{ name: 'yes', color: 1 }, { name: 'no', color: 0 }])).toEqual([])
   expect(labelCovers(on[0]!, 'a.jsonl')).toBe(true)
   expect(labelCovers(on[0]!, 'b.jsonl')).toBe(false)
   const m = recordMarks([{ concept_id: 'k', rows: [{ ref: 'a.jsonl#L3', label: 'yes', analyst: 'no' }, { ref: 'a.jsonl#L4.b0:c1-5', label: 'yes' }, { ref: 'a.jsonl', label: 'yes' }] }, { concept_id: 'off', rows: [{ ref: 'a.jsonl#L3', label: 'x' }] }], on, 'a.jsonl')
-  expect([...m.lines.entries()].map(([n, v]) => [n, [...v.entries()]])).toEqual([[3, [['k', 'no']]], [4, [['k', 'yes']]]])
+  // only the values the label highlights mark records (`no`, the negative of a label with no classes, does not); the
+  // file's value either way
+  expect([...m.lines.entries()].map(([n, v]) => [n, [...v.entries()]])).toEqual([[4, [['k', 'yes']]]])
   expect([...m.file.entries()]).toEqual([['k', 'yes']])
   const g = grepOf({ files: [{ path: 'a.jsonl', total: 3, complete: false, matches: [{ line: 2, text: 'a relay', hit: [2, 7] }] }], done: { scanned: 4, of: 9, complete: false } })
   expect(g).toEqual({ files: [{ path: 'a.jsonl', total: 3, complete: false, matches: [{ line: 2, text: 'a relay', hit: [2, 7] }] }], scanned: 4, of: 9, complete: false })
