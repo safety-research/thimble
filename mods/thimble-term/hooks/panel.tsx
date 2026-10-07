@@ -23,22 +23,23 @@ import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderEle
 import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermVerdict } from '../types'
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, freshSeg, hasMargin, headerEls, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
-import { citeLabel, plainCites, quoteSpan, wrapAround } from './cite'
-import { cardLayout, cut, labelHead, placeWords, valueColour, width } from './draw'
-import type { CardData, Line, Seg } from './draw'
+import { citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
+import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, cardLayout, cut, demojibake, labelHead, lineWidth, placeWords, shade, valueColour, width } from './draw'
+import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
 import { homeLayout, homePick, homeReduce } from './home'
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { cid, clip } from './lib'
+import { cid, clip, fmt } from './lib'
+import type { Citation } from './lib'
 import { linesEl } from './lines'
 import type { LineHit } from './lines'
 import { docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
-import { NAV_EMPTY, backTarget, crumbSteps, fitCrumbs, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
+import { NAV_EMPTY, backTarget, crumbSteps, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimSentence, drawReply, linkCheck, placeName, plainWhy } from './reply'
-import { closePanel, inPanelNow, navBack, navGo, openHome, openPanel, readSurface, rt, runLabel, saveLabel, startThread, surfaceValue, threadMessage } from './term'
+import { closePanel, inPanelNow, navBack, navGo, openHome, openPanel, panelOfStep, readSurface, rt, runLabel, saveLabel, startThread, surfaceValue, threadMessage } from './term'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -104,8 +105,19 @@ export async function openView(cx: Ctx, slug: string, name: string): Promise<voi
 }
 
 /** A citation's panel, its step named by the cited value (or its place, for a citation that shows none). */
-export async function openCite(cx: Ctx, ref: string, display: string | null): Promise<void> {
-  await openPanel(cx, { view: 'cite', title: clip(display ?? placeWords(ref.replace(/^(?:card|cell):[A-Za-z0-9_-]+/, 'card')), 40), ref, display })
+/** A citation by its words, or, for a place cited without words, the place in words (`revisions.jsonl line 10879`, a
+ *  card by its question): the citation panel's title and its step in the path. */
+async function citeTitle(cx: Ctx, c: Citation): Promise<string> {
+  if (c.display !== null) return c.display
+  if (fileRef(c.ref)) return placeWords(c.ref)
+  return /^(?:card|cell):/.test(c.ref) ? placeName(cx, c.ref) : citeLabel(c)
+}
+
+/** A citation's panel, its step named by the cited value (or its place, for a citation that shows none); `sentence`
+ *  the sentence it stands in, `quote` the passage an example's record quotes. */
+export async function openCite(cx: Ctx, ref: string, display: string | null, more: { sentence?: string; quote?: string } = {}): Promise<void> {
+  const title = clip(await citeTitle(cx, { raw: '', ref, display }), 40)
+  await openPanel(cx, { view: 'cite', title, ref, display, ...(more.sentence ? { sentence: more.sentence } : {}), ...(more.quote ? { quote: more.quote } : {}) })
 }
 
 export async function openCard(cx: Ctx, id: string, mode = ''): Promise<void> {
@@ -119,8 +131,9 @@ export async function openThread(cx: Ctx, id: string): Promise<void> {
   await openPanel(cx, { view: 'thread', title: row?.title ? `"${clip(row.title, 60)}"` : 'thread', thread: id })
 }
 
-export async function openFile(cx: Ctx, path: string, start = 1): Promise<void> {
-  await openPanel(cx, { view: 'file', title: path.split('/').at(-1) ?? path, path, start })
+/** A file in the panel from line `start`, `line` the record a citation or a click chose, lit there. */
+export async function openFile(cx: Ctx, path: string, start = 1, line?: number): Promise<void> {
+  await openPanel(cx, { view: 'file', title: path.split('/').at(-1) ?? path, path, start, ...(line ? { line } : {}) })
 }
 
 /** A label's panel, as it opens: what a save or a run said there before is gone. */
@@ -139,7 +152,16 @@ export async function openLabel(cx: Ctx, id: string, name: string): Promise<void
  *  a link opens a panel). */
 export async function onGesture(cx: Ctx, _gesture: Gesture, t: Target): Promise<void> {
   const place = placeOf(t)
-  if (place) return openCite(cx, place.ref, place.display)
+  if (place) {
+    // a citation of a reply: the sentence it stands in; an example's record: the passage the card quotes
+    const sentence = t.kind === 'citation' ? claimSentence(t.claim) : ''
+    let quote = ''
+    if (t.kind === 'record' && t.cardId) {
+      const card = (await cx.card(t.cardId))?.data as CardData | null | undefined
+      quote = card?.examples?.find(x => x.ref === t.ref)?.quote ?? ''
+    }
+    return openCite(cx, place.ref, place.display, { ...(sentence ? { sentence } : {}), ...(quote ? { quote } : {}) })
+  }
   if (t.cardId) return openAsk(cx, t)
 }
 
@@ -166,7 +188,7 @@ function crumbText(s: ChatNavStep): string {
     case 'cite':
       return `citation ${s.title === 'Citation' ? '' : s.title}`.trim()
     case 'card':
-      return `card "${s.title}"`
+      return `card "${s.title}"${panelOfStep(s)?.mode === 'code' ? ' · code' : ''}`
     case 'label':
     case 'file':
     case 'agent':
@@ -286,13 +308,25 @@ function codeRows(cx: Ctx, e: PaneEvent, source: string, max = 400, language = '
   )
 }
 
+// the way's keys the panel binds now (wayRow): `b to go back` only when there is a way back, `x to close` always
+let wayHints: string[] = ['x to close']
+
+/** A view's key hints with the way's after them, as bound now (rule 26: the hint row names only keys bound on it). */
+function endHints(hints: readonly string[]): string[] {
+  return [...hints.filter(h => h !== 'b to go back' && h !== 'x to close'), ...wayHints]
+}
+
+function hintsRow(els: El, hints: readonly string[], cols: number): RenderElement {
+  return hintsEl(els, endHints(hints), cols)
+}
+
 /** The panel's bottom part (rule 25): the second rule, the actions 2 cells apart, the fields under them; then the
  *  key-hint row, the panel's last. */
 function bottomRows(cx: Ctx, e: PaneEvent, cols: number, controls: (RenderElement | null | false)[], fields: (RenderElement | null | false)[], hints: string[], rule = true): RenderElement[] {
   const els = cx.els(e) as El
   const ctl = controlsEl(els, controls, 'bottom-controls')
   const fs = fields.filter((f): f is RenderElement => Boolean(f))
-  return [...(rule && (ctl || fs.length) ? [ruleEl(els, cols, 'rule-bottom')] : []), ...(ctl ? [ctl] : []), ...fs, hintsEl(els, hints, cols)]
+  return [...(rule && (ctl || fs.length) ? [ruleEl(els, cols, 'rule-bottom')] : []), ...(ctl ? [ctl] : []), ...fs, hintsRow(els, hints, cols)]
 }
 
 function none(cx: Ctx, e: PaneEvent, words = 'none'): RenderElement {
@@ -433,30 +467,62 @@ async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ a card
 
-/** A card in the panel (views/SPEC.md, "Cards", the card pane): its question is the panel's title, its kind and who
- *  made it the dim subtitle; the card in its border, its takeaway under it; at the bottom `code  ask about it`. Its code
- *  (`mode: code`) through the `Code` element, `card  ask about it` at the bottom. */
+/** A card in the panel (views/SPEC.md, "Cards", the card pane): its question is the panel's title; its kind, who made
+ *  it and how its last run ended (`last run failed` in red) the dim subtitle; the card in its border, its takeaway
+ *  under it; at the bottom `code  run again  ask about it` (`◌ running` while it runs). Its code (`mode: code`)
+ *  through the `Code` element with its gutter at A0, then `output`, the last 8 lines its run printed; `card  run again
+ *  ask about it` at the bottom. A run again goes to main, whose Bash runs a card (`thimble-run card`). */
 async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
-  const { Box, Button } = cx.els(e)
+  const { Box, Text, Button } = cx.els(e)
   const id = p.card ?? ''
   const tc = await cx.card(id)
   const cols = Math.max(30, e.props.bodyColumns)
   if (!tc) return none(cx, e, '◌ reading the card')
+  if (!tc.data) return <Box flexDirection="column"><Text color={COLORS.problem} wrap="wrap">{`× this card cannot be drawn: ${tc.error || 'the card is not in this workspace'}`}</Text></Box>
   const data = tc.data as CardData
   const by = tc.by ? `made by ${/^(main|terminal|user)$/.test(tc.by) ? 'main' : /^chat:/.test(tc.by) ? 'a side thread' : tc.by}` : ''
+  const ran: Seg | null = tc.ran === 'error' ? { s: 'last run failed', fg: COLORS.problem } : tc.ran === 'ok' ? dim('last run ok') : null
   const ask = () => void openAsk(cx, { kind: 'card', ref: `card:${id}`, cardId: id, text: data.question })
+  const busy = Boolean(tc.busy)
+  const again = () => {
+    if (busy) return
+    void cx.submit(`Run this card again with Bash: thimble-run card ${id}`)
+  }
   const code = p.mode === 'code'
-  const body: RenderElement[] = [...headerEls(els, { title: data.question, cols, sub: subLine([code ? 'its code' : tc.kind, by]) })]
-  const keys: Key[] = [{ key: 'ask', hotkey: 'a', onPress: ask }]
+  const body: RenderElement[] = [...headerEls(els, { title: data.question, cols, sub: subLine([code ? 'its code' : tc.kind, by, ran]) })]
+  const runEl = busy ? <Text key="card-running">◌ running</Text> : tc.code ? <Button key="card-again" label="run again" plain onPress={again} /> : null
+  const keys: Key[] = [{ key: 'ask', hotkey: 'a', onPress: ask }, ...(tc.code && !busy ? [{ key: 'again', hotkey: 'r', onPress: again }] : [])]
+  const runHint = tc.code && !busy ? ['r to run again'] : []
   if (code) {
     body.push(tc.code ? codeRows(cx, e, tc.code, 400) : none(cx, e, 'no code'))
+    // what its last run printed: its last 8 lines
+    const out = (tc.printed ?? '').split('\n').filter(l => l.trim()).slice(-8)
+    body.push(
+      fieldRow(
+        cx,
+        e,
+        'output',
+        out.length ? (
+          <Box flexDirection="column">
+            {out.map((l, i) => (
+              <Text key={`out-${i}`} wrap="truncate-end">
+                {demojibake(l)}
+              </Text>
+            ))}
+          </Box>
+        ) : (
+          <Text dimColor>nothing printed</Text>
+        ),
+        'card-output',
+      ),
+    )
     keys.push({ key: 'card', hotkey: 'c', onPress: () => void openCard(cx, id) })
-    body.push(...bottomRows(cx, e, cols, [<Button key="card-card" label="card" plain onPress={() => void openCard(cx, id)} />, <Button key="card-ask" label="ask about it" plain onPress={ask} />], [], ['c for the card', 'a to ask', 'b to go back', 'x to close']))
+    body.push(...bottomRows(cx, e, cols, [<Button key="card-card" label="card" plain onPress={() => void openCard(cx, id)} />, runEl, <Button key="card-ask" label="ask about it" plain onPress={ask} />], [], ['c for the card', ...runHint, 'a to ask', 'b to go back', 'x to close']))
   } else {
     body.push(<Box key="card-box" flexDirection="column">{await cardBlock(cx, e, id, cols, 'pane', { pane: true })}</Box>)
     if (tc.code) keys.push({ key: 'code', hotkey: 'c', onPress: () => void openCard(cx, id, 'code') })
-    body.push(...bottomRows(cx, e, cols, [tc.code ? <Button key="card-code" label="code" plain onPress={() => void openCard(cx, id, 'code')} /> : null, <Button key="card-ask" label="ask about it" plain onPress={ask} />], [], [...(tc.code ? ['c for its code'] : []), 'a to ask', 'b to go back', 'x to close']))
+    body.push(...bottomRows(cx, e, cols, [tc.code ? <Button key="card-code" label="code" plain onPress={() => void openCard(cx, id, 'code')} /> : null, runEl, <Button key="card-ask" label="ask about it" plain onPress={ask} />], [], [...(tc.code ? ['c for its code'] : []), ...runHint, 'a to ask', 'b to go back', 'x to close']))
   }
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
@@ -464,29 +530,51 @@ async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
 
 // ------------------------------------------------------------------------------------------------ a citation
 
-/** A cited line nested at A2, its number in a dim column (the cited one's in the text colour), the cited value on the
- *  selection background. */
-function lineRows(cx: Ctx, e: PaneEvent, v: TermVerdict, cols: number): RenderElement[] {
+/** Where position `p` of a line lands once each tab is drawn as two spaces and its mojibake is mended. */
+function shifted(raw: string, p: number): number {
+  return demojibake(raw.slice(0, p)).replace(/\t/g, '  ').length
+}
+
+/** The cited lines nested at A2 (views/SPEC.md, section 7, "The citation panel"): each line's number right-aligned in
+ *  a dim column (the cited one's in the text colour), its text after a gutter; a cited line wrapped over 3 to 8 rows
+ *  (by the pane's rows) around the value or the quoted passage on the selection background; two lines of context
+ *  around the cited ones when a cited line wraps; a long context line cut with `…` around its value. */
+function lineRows(cx: Ctx, e: PaneEvent, v: TermVerdict, cols: number, quote: string): RenderElement[] {
   const { Text } = cx.els(e)
-  const gutter = Math.max(1, ...v.lines.map(l => String(l.n || '').length))
+  const all = v.lines.slice(0, 60)
+  const gutter = Math.max(1, ...all.map(l => String(l.n || '').length))
   const room = Math.max(10, cols - gutter - 4)
-  const quote = v.display && /^["“'‘]/.test(v.display.trim()) ? v.display.trim().replace(/^["“'‘]|["”'’]$/g, '') : ''
+  const hits = all.filter(l => l.hit)
+  const hitRows = Math.max(3, Math.min(8, Math.floor(((e.props.scroll?.bodyRows || 20) - 14) / Math.max(1, hits.length))))
+  const wraps = hits.some(l => l.text.length > room)
+  const near = wraps ? 2 : 99
+  const firstHit = all.findIndex(l => l.hit)
+  const lastHit = all.length - 1 - [...all].reverse().findIndex(l => l.hit)
+  const lines = firstHit < 0 ? all : all.filter((l, i) => l.hit || (i >= firstHit - near && i <= lastHit + near))
   const out: RenderElement[] = []
-  for (const l of v.lines.slice(0, 60)) {
-    const text = l.text.replace(/\t/g, '  ')
+  for (const l of lines) {
+    const text = demojibake(l.text).replace(/\t/g, '  ')
     const n = l.n ? String(l.n).padStart(gutter) : ' '.repeat(gutter)
+    const spans = (l.spans ?? []).map(([a, b]) => [shifted(l.text, a!), shifted(l.text, b!)] as [number, number])
     if (!l.hit) {
+      // a context line: cut around its value when it is wider than the room
+      let t = text
+      let sp = spans
+      if (t.length > room) {
+        const lo = sp.length ? Math.max(0, sp[0]![0] - Math.floor(room / 3)) : 0
+        t = `${lo ? '…' : ''}${t.slice(lo, lo + room - 2)}…`
+        sp = sp.map(([a, b]) => [a - lo + (lo ? 1 : 0), b - lo + (lo ? 1 : 0)] as [number, number])
+      }
       out.push(
         <Text wrap="truncate-end">
           <Text dimColor>{`  ${n}  `}</Text>
-          <Text dimColor>{cut(text, room) || ' '}</Text>
+          <Text dimColor>{t || ' '}</Text>
         </Text>,
       )
       continue
     }
-    const first = l.spans?.[0]
-    const span: [number, number] | null = quote ? quoteSpan(text, quote) : first ? [first[0]!, first[1]!] : null
-    wrapAround(text, span, room, 6).forEach((r, i) =>
+    const span: [number, number] | null = quote ? quoteSpan(text, quote) : spans[0] ?? null
+    wrapAround(text, span, room, hitRows).forEach((r, i) =>
       out.push(
         <Text wrap="truncate-end">
           <Text>{`  ${i === 0 ? n : ' '.repeat(gutter)}  `}</Text>
@@ -500,14 +588,73 @@ function lineRows(cx: Ctx, e: PaneEvent, v: TermVerdict, cols: number): RenderEl
   return out
 }
 
-/** A card with the cited cell on the selection background: a table's cell or row, a bar. */
-function citedLines(card: CardData, v: TermVerdict, w: number): Line[] {
-  const lay = cardLayout(card, w, -1, 8)
-  if (!v.row && !v.column) return lay.lines
-  const k = lay.items.findIndex(it => (v.row ? it.label.startsWith(`${v.row} ·`) || it.label === v.row : false) && (!v.column || it.label.endsWith(`· ${v.column}`) || card.kind !== 'table'))
+const sameKey = (a: string, b: string) => a === b || (a.trim() !== '' && b.trim() !== '' && Number(a) === Number(b)) || a.toLowerCase() === b.toLowerCase()
+
+/** The item of a card's layout a verdict names (by the resolver's column and row): a table's cell, a bar, a line's
+ *  point by its series and x, a timeline's event by its number, a diagram's node or edge; -1 for none. */
+function citedItem(card: CardData, items: Item[], v: TermVerdict): number {
+  if (!v.column || v.row === undefined || v.row === '') return -1
+  if (card.kind === 'diagram' && v.column === 'edge') return items.findIndex(it => it.open === `card:${card.id}#edge/${v.row}`)
+  if (card.kind === 'diagram' && v.column === 'node') return (card.nodes ?? []).slice(0, MAX_NODES).findIndex(n => String(n.id) === v.row)
+  if (card.kind === 'timeline' && v.column === 'time') {
+    const n = Number(v.row) - 1
+    return n >= 0 && n < items.length ? n : -1
+  }
+  const pre = `card:${card.id}#${v.column}/`
+  return items.findIndex(it => it.open.startsWith(pre) && sameKey(it.open.slice(pre.length), v.row!))
+}
+
+/** A card whose cited table or bar row is past the rows drawn, that row in place of the last one drawn. */
+function withCitedRow(card: CardData, v: TermVerdict): CardData {
+  const cap = card.kind === 'table' ? MAX_TABLE_ROWS : card.kind === 'bar' || card.kind === 'label' ? MAX_BARS : 0
+  const all = card.rows ?? []
+  if (!cap || all.length <= cap || !v.row) return card
+  const r = all.findIndex(x => sameKey(fmt(card.kind === 'table' ? (x as Cell[])[0] : (x as BarRow).label), v.row!))
+  return r < cap ? card : { ...card, rows: [...all.slice(0, cap - 1), all[r]!] as CardData['rows'] }
+}
+
+/** The cells of a layout that hit item `k`, on the selection background. */
+function litItem(lay: Layout, k: number, bg: string): Line[] {
   if (k < 0) return lay.lines
-  // the item under the pointer is drawn in inverse; the panel draws the cited one on the selection background instead
-  return cardLayout(card, w, k, 8).lines.map(l => l.map(s => (s.inv ? { ...s, inv: false, bg: COLORS.selected } : s)))
+  const spans: { line: number; x0: number; x1: number }[] = []
+  lay.lines.forEach((l, y) => {
+    const w = lineWidth(l)
+    let x0 = -1
+    for (let x = 0; x <= w; x++) {
+      const on = x < w && lay.hit(x, y) === k
+      if (on && x0 < 0) x0 = x
+      if (!on && x0 >= 0) {
+        spans.push({ line: y, x0, x1: x })
+        x0 = -1
+      }
+    }
+  })
+  return shade(lay.lines, spans, bg)
+}
+
+/** A card with the cited mark on the selection background, kept in view: a cited row past the drawn rows in place of
+ *  the last; a table's column names, then the rows around the cited one when the card is taller than the pane's room;
+ *  a total's `all` lit. */
+function citedLines(card: CardData, v: TermVerdict, w: number, room: number): { card: CardData; lines: Line[] } {
+  const shown = withCitedRow(card, v)
+  const base = cardLayout(shown, w, -1, 8)
+  const k = citedItem(shown, base.items, v)
+  let lines = k >= 0 ? litItem(base, k, COLORS.selected) : base.lines
+  if (k < 0 && (shown.kind === 'bar' || shown.kind === 'label') && v.row === 'all') {
+    lines = lines.map(l => {
+      const at = l.findIndex(x => x.s === 'all  ')
+      return at < 0 ? l : l.map((x, j) => (j === at + 1 ? { ...x, bg: COLORS.selected } : x))
+    })
+  }
+  const ys = lines.flatMap((l, y) => (l.some(x => x.bg === COLORS.selected) ? [y] : []))
+  if (lines.length > room && ys.length && ys.at(-1)! >= room) {
+    // a table's column names are the lines before its first row
+    let head = 0
+    if (shown.kind === 'table') while (head < lines.length && base.hit(0, head) < 0) head++
+    const lo = Math.max(head, Math.min(ys[0]! - 1, lines.length - (room - head)))
+    lines = [...lines.slice(0, head), ...lines.slice(lo, lo + room - head)]
+  }
+  return { card: shown, lines }
 }
 
 /** A card the panel draws itself, laid out as every card is (reply.tsx cardBlock): a full round border in the rule grey
@@ -522,10 +669,53 @@ function framedCard(cx: Ctx, e: PaneEvent, card: CardData, w: number, lines: Lin
   )
 }
 
+/** The sentence a citation stands in, its value blue and underlined, in quotation marks. */
+function sourceSegs(sentence: string, c: Citation): Line {
+  const flat = plainCites(sentence).replace(/\s+/g, ' ').trim()
+  const shown = c.display ?? ''
+  const at = shown ? flat.indexOf(shown) : -1
+  if (at < 0) return [{ s: `"${flat}"` }]
+  return [{ s: `"${flat.slice(0, at)}` }, linkSeg(shown), { s: `${flat.slice(at + shown.length)}"` }]
+}
+
+/** In a citation opened from a side thread, a field whose question goes on in that thread, about the citation; the
+ *  panel then shows the thread. */
+async function followUpField(cx: Ctx, e: PaneEvent, about: string): Promise<RenderElement | null> {
+  if (e.surface === 'mobile') return null
+  const nav = (await cx.nav()) ?? NAV_EMPTY
+  const tid = threadBehind(nav.trail)
+  if (!tid) return null
+  const { Input } = cx.els(e)
+  return fieldRow(
+    cx,
+    e,
+    'follow-up',
+    <Input
+      key={`follow-${cid(tid)}`}
+      submitLabel="ask"
+      onSubmit={v => {
+        const q = v.trim()
+        if (!q) return
+        void (async () => {
+          const err = await threadMessage(cx, tid, `${q} (about ${about})`)
+          if (err) return cx.toast(`thimble: ${err}`)
+          const now = (await cx.nav()) ?? NAV_EMPTY
+          let i = now.trail.length - 1
+          while (i >= 0 && now.trail[i]!.thread !== tid) i--
+          if (i >= 0) await navGo(cx, { trail: now.trail.slice(0, i + 1), back: withBack(now.back, now.trail) })
+        })()
+      }}
+    />,
+    'follow-row',
+  )
+}
+
 /** The citation panel (views/SPEC.md, section 7, "The citation panel"): the title is the cited value, bold, blue and
- *  underlined (a link to its place; red when the value is not there); the subtitle its status in plain words; under the
- *  rule `from`, then the cited lines nested at A2 with the value on the selection background, or the cited card in its
- *  border with the cited mark lit; at the bottom `ask about it` and `in files`. */
+ *  underlined (a link to its place; red when the value is not there), ◌ after it while it is checked and a red × for a
+ *  problem; the subtitle its status in plain words; under the rule `from` and `source` (the sentence it stands in, the
+ *  value in it a link), then the cited lines nested at A2 with the value (or the passage an example quotes) on the
+ *  selection background, or the cited card in its border with the cited mark lit; at the bottom `ask about it` and, for
+ *  a citation opened from a side thread, the `follow-up` field. */
 async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button } = cx.els(e)
@@ -538,28 +728,36 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const target: Target = { kind: 'citation', ref: c.raw, text: citeLabel(c) }
   const f = fileRef(c.ref)
   const cardId = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(c.ref)?.[1]
-  const label = cut(citeLabel(c), Math.max(8, cols - 4))
-  const titleSegs: Line = [{ s: label, b: true, fg: red ? COLORS.problem : LINK, u: true }]
-  const opens = f ? () => openFile(cx, f.path, Math.max(1, (f.line ?? 1) - 5)) : cardId ? () => openCard(cx, cardId) : null
+  const label = cut(await citeTitle(cx, c), Math.max(8, cols - 6))
+  const mark: Seg | null = !v ? { s: ' ◌' } : red ? { s: ' ×', fg: COLORS.problem } : null
+  const titleSegs: Line = [{ s: label, b: true, fg: red ? COLORS.problem : LINK, u: true }, ...(mark ? [mark] : [])]
+  const opens = f ? () => openFile(cx, f.path, Math.max(1, (f.line ?? 1) - 5), f.line) : cardId ? () => openCard(cx, cardId) : null
   const body: RenderElement[] = []
   body.push(opens ? linesEl(cx, e, 'cite-title', [titleSegs], [{ y: 0, x0: 0, x1: width(label), row: false, run: () => void opens() }], cols) : lineEl(els, titleSegs, 'cite-title'))
   const sub = [await citeStatus(cx, c, v), red && v?.why ? await plainWhy(cx, v.why) : ''].filter(Boolean).join(' · ')
   body.push(lineEl(els, [{ s: sub, fg: red ? COLORS.problem : COLORS.dim }], 'cite-sub', true))
   body.push(ruleEl(els, cols, 'cite-rule'))
-  const where = cardId ? `the card${(await cx.card(cardId)) ? ` "${clip(((await cx.card(cardId))!.data as CardData).question, 60)}"` : ''}` : placeWords(c.ref)
-  const rows: [string, RenderElement | string, string?][] = [['from', where]]
-  if (v?.card && (v.column || v.row)) rows.push(['cell', [v.row, v.column].filter(Boolean).join(' · ') + (v.value ? `  ${v.value}` : '')])
+  const rows: [string, RenderElement | string, string?][] = [['from', cardId ? await placeName(cx, `card:${cardId}`) : placeWords(c.ref)]]
+  if (p.sentence) rows.push(['source', lineEl(els, sourceSegs(p.sentence, c), 'cite-source', true)])
   body.push(fieldEls(els, rows, 'cite')!)
+  const quote = p.quote || quotedWords(c.display)
   if (v?.card) {
     const tc = await cx.card(v.card)
-    const card = tc?.data as CardData | undefined
+    const card = tc?.data as CardData | null | undefined
     const w = Math.min(cols, 96)
-    if (card) body.push(framedCard(cx, e, card, w, citedLines(card, v, Math.max(10, w - 4)), 'cite-card'))
-  } else if (v?.lines.length) body.push(<Box key="cite-lines" flexDirection="column">{lineRows(cx, e, v, cols)}</Box>)
-  else if (!v) body.push(<Text key="cite-wait" dimColor>◌ checking</Text>)
-  const ask = () => void openAsk(cx, target)
+    if (card) {
+      const lit = citedLines(card, v, Math.max(10, w - 4), Math.max(8, (e.props.scroll?.bodyRows || 20) - 14))
+      body.push(framedCard(cx, e, lit.card, w, lit.lines, 'cite-card'))
+    }
+  } else if (v?.lines.length) {
+    body.push(<Box key="cite-lines" flexDirection="column">{lineRows(cx, e, v, cols, quote)}</Box>)
+    // the passage an example quotes, when the cited lines do not hold it
+    if (quote && status !== 'differs' && !v.lines.some(l => l.hit && quoteSpan(demojibake(l.text).replace(/\t/g, '  '), quote))) body.push(fieldEls(els, [['quoted', <Text wrap="wrap" backgroundColor={COLORS.selected}>{clip(demojibake(quote), 600)}</Text>]], 'cite-quoted')!)
+  } else if (!v) body.push(<Text key="cite-wait" dimColor>◌ checking</Text>)
+  const ask = () => void openAsk(cx, target, p.sentence ? { anchorText: plainCites(p.sentence) } : {})
+  const goOn = await followUpField(cx, e, c.raw)
   const keys: Key[] = [{ key: 'ask', hotkey: 'a', onPress: ask }, ...(f ? [{ key: 'files', hotkey: 'f', onPress: () => void opens?.() }] : [])]
-  body.push(...bottomRows(cx, e, cols, [<Button key="cite-ask" label="ask about it" plain onPress={ask} />, f ? <Button key="cite-files" label="in files" plain onPress={() => void opens?.()} /> : null], [], ['a to ask', ...(f ? ['f for its file'] : []), 'b to go back', 'x to close']))
+  body.push(...bottomRows(cx, e, cols, [<Button key="cite-ask" label="ask about it" plain onPress={ask} />], [goOn], ['a to ask', ...(f ? ['f for its file'] : [])]))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
@@ -716,7 +914,7 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
       ),
     )
   }
-  body.push(hintsEl(els, hints, cols))
+  body.push(hintsRow(els, hints, cols))
   return <Box flexDirection="column">{body}</Box>
 }
 
@@ -1016,7 +1214,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
                 </Box>
               )}
             </Box>
-            {x.text ? <Text italic wrap="wrap">{`"${clip(str(x.text).replace(/\s+/g, ' ').trim(), Math.max(120, (cols - 4) * 3 - 2))}"`}</Text> : null}
+            {x.text ? <Text italic wrap="wrap">{`"${clip(demojibake(str(x.text)).replace(/\s+/g, ' ').trim(), Math.max(120, (cols - 4) * 3 - 2))}"`}</Text> : null}
             {x.rationale ? <Text dimColor wrap="wrap">{`why  ${clip(str(x.rationale), cols * 2)}`}</Text> : null}
           </Box>,
         )
@@ -1033,7 +1231,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     if (!cards.length) rows.push(<Text key="lb-cards-none" dimColor>{'  none'}</Text>)
   }
   keys.push({ key: 'list', hotkey: 'l', onPress: () => void openPanel(cx, { view: 'labels', title: 'Labels' }) })
-  rows.push(hintsEl(els, [kind === 'code' ? 'click the code, ctrl+s to save' : `click the ${defName}, Enter to save`, ...(running ? [] : ['r to run on a sample']), 'c for counts', 'e for examples', 'd for cards', 'b to go back', 'x to close'], cols))
+  rows.push(hintsRow(els, [kind === 'code' ? 'click the code, ctrl+s to save' : `click the ${defName}, Enter to save`, ...(running ? [] : ['r to run on a sample']), 'c for counts', 'e for examples', 'd for cards', 'b to go back', 'x to close'], cols))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...rows]}</Box>
 }
@@ -1096,7 +1294,7 @@ async function drawDocs(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       {docs.map((d, i) => <Button key={`doc-open-${i}`} label={d.title} plain onPress={() => void openPanel(cx, { view: 'doc', title: d.title, slug: d.slug })} />)}
     </Box>,
   )
-  body.push(hintsEl(els, ['b to go back', 'x to close'], cols))
+  body.push(hintsRow(els, ['b to go back', 'x to close'], cols))
   return <Box flexDirection="column">{body}</Box>
 }
 
@@ -1138,7 +1336,7 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
     figs.forEach((_f, k) => (!placed.has(k) ? figure(k) : undefined))
     body.push(<Box key={marginKey(`doc-sec-${i}`)} flexDirection="column" marginTop={1}>{await drawReply(cx, e, md.join('\n'), cols, { margin: PANEL_MARGIN, prefix: `d${i}-`, ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}</Box>)
   }
-  body.push(hintsEl(els, ['b to go back', 'x to close'], cols))
+  body.push(hintsRow(els, ['b to go back', 'x to close'], cols))
   return <Box flexDirection="column">{body}</Box>
 }
 
@@ -1161,7 +1359,7 @@ function pageLines(page: Obj): { n: number; text: string }[] {
   const first = typeof page.start === 'number' ? page.start : 1
   return records.map((r, i) => ({
     n: typeof r.line === 'number' ? r.line : first + i,
-    text: (Array.isArray(r.blocks) ? (r.blocks as Obj[]).map(b => str(b.text)).join(' ') : str(r.text ?? r.raw ?? (isObj(r.record) ? JSON.stringify(r.record) : r.record))).replace(/\s+/g, ' ').slice(0, 2000),
+    text: demojibake((Array.isArray(r.blocks) ? (r.blocks as Obj[]).map(b => str(b.text)).join(' ') : str(r.text ?? r.raw ?? (isObj(r.record) ? JSON.stringify(r.record) : r.record))).replace(/\s+/g, ' ').slice(0, 2000)),
   }))
 }
 
@@ -1249,7 +1447,7 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     for (const l of ls) body.push(<Text key={`preview-${l.n}`} wrap="truncate-end"><Text dimColor>{`${String(l.n).padStart(gw + 2)}  `}</Text><Text>{l.text || ' '}</Text></Text>)
     if (!page) body.push(<Text key="preview-wait" dimColor>◌ reading</Text>)
   }
-  body.push(hintsEl(els, ['↑↓ to choose', 'Enter to open', 'b to go back', 'x to close'], cols))
+  body.push(hintsRow(els, ['↑↓ to choose', 'Enter to open', 'b to go back', 'x to close'], cols))
   return <Box flexDirection="column">{body}</Box>
 }
 
@@ -1271,7 +1469,7 @@ function turnsOf(page: Obj): Turn[] | null {
     const text = TEXT_KEYS.map(k => o[k]).find(v => typeof v === 'string' && v.trim())
     if (typeof who !== 'string' || typeof text !== 'string') continue
     const time = TIME_KEYS.map(k => o[k]).find(v => typeof v === 'string' || typeof v === 'number')
-    out.push({ n: typeof r.line === 'number' ? r.line : out.length + 1, who: who.trim(), text: text.replace(/\s+/g, ' ').trim(), time: time === undefined ? '' : String(time) })
+    out.push({ n: typeof r.line === 'number' ? r.line : out.length + 1, who: demojibake(who.trim()), text: demojibake(text.replace(/\s+/g, ' ').trim()), time: time === undefined ? '' : String(time) })
   }
   return records.length && out.length >= Math.ceil(records.length * 0.6) ? out : null
 }
@@ -1385,7 +1583,7 @@ async function drawViews(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     cols,
   )
   body.push(linesEl(cx, e, marginKey('views-list'), lines, hits, cols + MARGIN_W))
-  body.push(hintsEl(els, ['b to go back', 'x to close'], cols))
+  body.push(hintsRow(els, ['b to go back', 'x to close'], cols))
   return <Box flexDirection="column">{body}</Box>
 }
 
@@ -1398,7 +1596,7 @@ function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): RenderElement {
       {[
         ...headerEls(els, { title: p.title || p.slug || 'view', cols, sub: subLine(['view']) }),
         <Text key="view-words" wrap="wrap">The browser draws this view. To see it, quit, run `thimble mode browser`, and start `thimble` again in this folder.</Text>,
-        hintsEl(els, ['b to go back', 'x to close'], cols),
+        hintsRow(els, ['b to go back', 'x to close'], cols),
       ]}
     </Box>
   )
@@ -1412,6 +1610,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   await cx.panelTick()
   const e = { ...pe, props: { ...pe.props, bodyColumns: Math.max(20, pe.props.bodyColumns - 2 - MARGIN_W) } } as PaneEvent
   const p = (await cx.panel()) ?? { view: 'home', title: 'Home' }
+  wayHints = [...(backTarget((await cx.nav()) ?? NAV_EMPTY) !== null ? ['b to go back'] : []), 'x to close']
   const body = await (async () => {
     switch (p.view) {
       case 'home':

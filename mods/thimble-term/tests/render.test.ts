@@ -165,7 +165,11 @@ test("a reply's citation is a link, blue and underlined; a click opens the citat
   expect(text).toContain('from')
   expect(text).toContain('An export of 4,579 wiki pages')
   expect(text).toContain('ask about it')
-  expect(text).toContain('a to ask · f for its file · b to go back · x to close')
+  // the sentence it stands in, its value a link; no way back from main, so no `b`; no `in files` (the title opens it)
+  expect(text).toContain('source')
+  expect(text).toContain('"The README says 4,579 pages."')
+  expect(text).toContain('a to ask · f for its file · x to close')
+  expect(text).not.toContain('in files')
   // the cited value on the selection background; no right-click menu anywhere
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["4,579"]}')
   expect(text).not.toContain('open its lines')

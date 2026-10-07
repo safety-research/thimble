@@ -587,7 +587,9 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
     lines.push(cells.map((c): Seg => (c >= 0 ? { s: '●', fg: mark(evs[c]!), ...(c === hover ? { inv: true } : {}) } : { s: '─', fg: COLORS.rule })))
     const a = shown[times.indexOf(t0)]!
     const b = shown[times.indexOf(t1)]!
-    lines.push([{ s: `${a}${' '.repeat(Math.max(2, aw - width(a) - width(b)))}${b}`, fg: COLORS.dim }])
+    // the start time under the axis's start, unless the first event's row right under it says the same time
+    const start = times[0] === t0 ? '' : a
+    lines.push([{ s: `${start}${' '.repeat(Math.max(start ? 2 : 0, aw - width(start) - width(b)))}${b}`, fg: COLORS.dim }])
     axisRows = 2
   }
   // one row per event: its time dim at the content's edge, under the axis's start time (in inverse under the

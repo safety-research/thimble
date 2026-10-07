@@ -136,7 +136,9 @@ const Card: ClientModule<Props, S> = (props, surface) => {
     const lhot = li >= 0 && li < head.lines.length ? head.hots[li] : undefined
     const slug = lhot && cx >= lhot.x0 && cx < lhot.x1 ? head.slugs[li] : undefined
     const i = hot || slug ? -1 : lay.hit(cx, ev.y - top)
-    const act = hot ? `${hot.param}=${hot.value}` : slug ? `label:${slug}` : ''
+    // the title is a hot spot: in inverse under the pointer, a press asks a side thread about the card
+    const onTitle = !pane && ev.y === 0 && cx >= 0 && cx < width(cut(card.question, inner))
+    const act = hot ? `${hot.param}=${hot.value}` : slug ? `label:${slug}` : onTitle ? 'title' : ''
     const plain = !ev.shift && !ev.ctrl && !ev.alt
     if (ev.type === 'down' || ev.type === 'up') {
       if (slug) {
@@ -186,7 +188,7 @@ const Card: ClientModule<Props, S> = (props, surface) => {
         : null
   const rows: RenderElement[] = []
   // the title in bold, then one blank row (in the pane the question is the panel's title)
-  if (!pane) rows.push(paintLine(Text, [{ s: cut(card.question, inner), b: true }]), paintLine(Text, []))
+  if (!pane) rows.push(paintLine(Text, [{ s: cut(card.question, inner), b: true, ...(st.act === 'title' && !stale ? { inv: true } : {}) }]), paintLine(Text, []))
   // the plot or body, directly
   rows.push(...lay.lines.map(l => paintLine(Text, l)))
   // below it: the readout against the right edge, the label rows, the params row

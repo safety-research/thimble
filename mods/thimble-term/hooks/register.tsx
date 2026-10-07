@@ -739,7 +739,8 @@ export const register: Register = on => {
       if (!(await surfaceValue(cx, 'labels'))?.ok) await readSurface(cx, 'labels', 'labels')
       const got = await surfaceValue(cx, 'labels')
       const hit = got?.ok ? labelsOf(got.value).find(l => l.id === d.slug || l.name === d.slug) : undefined
-      await openLabel(cx, hit?.id ?? d.slug, hit?.name ?? d.slug)
+      if (!hit) cx.toast(`thimble: no label "${d.slug}" in this workspace`)
+      else await openLabel(cx, hit.id, hit.name ?? hit.id)
     } else if (d.type === 'field' && typeof d.name === 'string' && typeof d.text === 'string') {
       // a field's words (field.tsx): a draft, or a save
       await fieldMessage(cx, d.name, d.text.slice(0, 20000), d.save === true)
