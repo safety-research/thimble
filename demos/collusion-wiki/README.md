@@ -1,6 +1,6 @@
 # collusion-wiki: pre-cached orientation
 
-`thimble demo collusion-wiki` downloads the dataset from its publisher and installs this folder as its workspace, so thimble opens on the orientation's cards, labels, views and documents. The orientation's Claude Code session is not here: a session the analyst attaches starts fresh, with the canvas and the report as its context.
+`thimble demo collusion-wiki` downloads the dataset from its publisher and installs this folder as its workspace, so thimble opens on the orientation's cards, labels, views and documents. The workspace opens on its view Wiki Page History (`wiki-page-history`). The orientation's Claude Code session is not here: a session the analyst attaches starts fresh, with the canvas and the report as its context.
 
 The data: Published by the collusion.wiki authors with their report at https://collusion.wiki/. thimble does not redistribute it: `thimble demo` downloads it from collusion.wiki on your machine and rebuilds it.
 

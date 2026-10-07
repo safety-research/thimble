@@ -17,12 +17,13 @@ import { FilesTab } from '../files/FilesTab'
 import { LabelEditorHost } from '../files/LabelEditor'
 import { useViews } from '../files/ViewsBar'
 import { ViewSurface } from '../files/ViewSurface'
+import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
 import { isReplay, useWorkspaceEvents } from '../lib/events'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
 import { refFromUrl, teleport } from '../lib/teleport'
-import { readStorage, storageKey, writeStorage } from '../lib/workspace'
+import { noteOpened, openedBefore, openingRef, readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { CmdPointer } from '../pointer/CmdPointer'
 import { ReportTab } from '../report/ReportTab'
 import { tabSignals, useTabDots, writing } from './dots'
@@ -195,11 +196,26 @@ export function Shell({ ws }: { ws: string }) {
     return () => offs.forEach((off) => off())
   }, [patch])
   // a `?ref=` in the URL opens its element once the surfaces are mounted (their effects run before this one), as a
-  // click on its chip would
+  // click on its chip would. Without one, the first time this browser opens the workspace it opens at the view the
+  // workspace's row names (openingRef: a demo dataset's main view, an example's), as that row on the start page does
+  const [firstOpen] = useState(() => !openedBefore(ws))
   useEffect(() => {
+    noteOpened(ws)
     const ref = refFromUrl()
-    if (ref) teleport(ref)
-  }, [])
+    if (ref) return teleport(ref)
+    if (!firstOpen) return
+    let alive = true
+    api
+      .workspaces()
+      .then((rows) => {
+        const at = openingRef(rows, ws)
+        if (alive && at) teleport(at)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [ws, firstOpen])
   const gone = useSessionGone(ws)
 
   // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip

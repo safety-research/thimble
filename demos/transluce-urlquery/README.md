@@ -1,6 +1,6 @@
 # transluce-urlquery: pre-cached orientation
 
-`thimble demo transluce-urlquery` downloads the dataset from its publisher and installs this folder as its workspace, so thimble opens on the orientation's cards, labels, views and documents. The orientation's Claude Code session is not here: a session the analyst attaches starts fresh, with the canvas and the report as its context.
+`thimble demo transluce-urlquery` downloads the dataset from its publisher and installs this folder as its workspace, so thimble opens on the orientation's cards, labels, views and documents. The workspace opens on its view Activity Timeline (`activity-timeline`). The orientation's Claude Code session is not here: a session the analyst attaches starts fresh, with the canvas and the report as its context.
 
 The data: Published by Transluce (Cable, Chiu, Pernice, Zhang, Anthony, Bas, Shen, Stosz, Steinhardt) with "Early rogue AI agent activity and attempts to hack found on urlquery.net", 2026-09-23. thimble does not redistribute it: `thimble demo` downloads it from transluce.org on your machine.
 

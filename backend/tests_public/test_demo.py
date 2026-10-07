@@ -527,6 +527,52 @@ def test_install_keeps_each_view_at_the_version_it_passed_so_readers_see_it(tmp_
     assert not (other / "views" / ".versions" / "v1").exists(), "a stamp that names other files is no pass"
 
 
+def test_a_precache_names_the_view_its_workspace_opens_on_and_install_marks_it(tmp_path):
+    """`--view` names one of the workspace's views for it to open on: the manifest's `view`, a sentence of the README
+    and, on install, the mark's `view`, by which the start page's row opens the workspace there. Without it nothing is
+    named; a view the workspace lacks is refused at export, writing nothing, and a manifest naming a view the pre-cache
+    lacks installs with none and a warning."""
+    out, corpus, m = made(tmp_path, view="v1")
+    assert m["view"] == "v1" and json.loads((out / demo.MANIFEST).read_text())["view"] == "v1"
+    assert "documents. The workspace opens on its view `v1`. The orientation's" in (out / "README.md").read_text()
+    ws = tmp_path / "b" / "toy"
+    got = demo.install(out, ws, corpus)
+    assert json.loads((ws / demo.MARKER).read_text())["view"] == "v1"
+    assert not [w for w in got["warnings"] if "view" in w]
+
+    plain, corpus2, m2 = made(tmp_path, where="c", name="plain")
+    assert "view" not in m2 and "opens on its view" not in (plain / "README.md").read_text()
+    ws2 = tmp_path / "b" / "plain"
+    demo.install(plain, ws2, corpus2)
+    assert json.loads((ws2 / demo.MARKER).read_text())["view"] is None
+
+    with pytest.raises(demo.DemoError, match="has no view nope; its views: v1"):
+        made(tmp_path, where="d", name="refused", view="nope")
+    assert not (tmp_path / "out" / "refused").exists()
+
+    man = json.loads((out / demo.MANIFEST).read_text())
+    (out / demo.MANIFEST).write_text(json.dumps({**man, "view": "gone"}))
+    ws3 = tmp_path / "e" / "toy"
+    got = demo.install(out, ws3, corpus)
+    assert json.loads((ws3 / demo.MARKER).read_text())["view"] is None
+    assert "the pre-cache opens on the view gone, which it does not hold, so the workspace opens on Files" in got["warnings"]
+
+
+def test_each_shipped_precache_opens_on_its_dataset_s_main_view():
+    """demos/: collusion-wiki opens on Wiki Page History, mythos-5 and transluce-urlquery on their Activity Timeline,
+    each a view the pre-cache holds and lists."""
+    want = {"collusion-wiki": "wiki-page-history", "mythos-5": "activity-timeline",
+            "transluce-urlquery": "activity-timeline"}
+    cat = demo.precaches(demo.PRECACHES)
+    assert set(cat) == set(want)
+    for name, pc in cat.items():
+        m = demo.read_manifest(Path(pc["path"]))
+        assert m.get("view") == want[name], name
+        assert demo.opening_view(Path(pc["path"]) / demo.WORKSPACE, m["view"]) == want[name], name
+        assert f"extension/views/{want[name]}/view.json" in {f["path"] for f in m["files"]}, name
+        assert f"opens on its view {demo.opens_on(m)}." in (Path(pc["path"]) / demo.README).read_text(), name
+
+
 def test_the_coverage_line_goes_with_the_precache_to_the_end_of_the_orientation_s_thread(tmp_path):
     """The record and the thread's log stay as the export writes them (no `coverage`, an empty log); the manifest and the
     README carry the first run's coverage line, and install ends the thread with it, as a live run's end does."""
@@ -624,7 +670,7 @@ def fake_dataset(name: str, caution: str = "") -> Dataset:
 def args(**kw) -> argparse.Namespace:
     base = dict(names=[], yes=True, dir=None, list=False, attach=False, no_attach=False, replace=False, precaches=None,
                 export=None, outputs_only=False, dataset=None, corpus=None, allow_private=False, scrub_user=False,
-                app=None, claude_config=None)
+                app=None, claude_config=None, view=None)
     return argparse.Namespace(**{**base, **kw})
 
 
@@ -1037,6 +1083,14 @@ def test_export_command_waits_for_a_finished_orientation(tmp_path, monkeypatch):
     a = args(export=[str(ws), str(tmp_path / "out")], corpus=str(corpus), outputs_only=True)
     assert demo.run(a, say=lines.append) == 0
     assert (tmp_path / "out" / "toy" / demo.MANIFEST).is_file()
+    assert "view" not in json.loads((tmp_path / "out" / "toy" / demo.MANIFEST).read_text())
+    # --view names the view the workspace opens on, one it has
+    assert demo.run(args(export=[str(ws), str(tmp_path / "viewed")], corpus=str(corpus), outputs_only=True,
+                         view="v1"), say=lines.append) == 0
+    assert json.loads((tmp_path / "viewed" / "toy" / demo.MANIFEST).read_text())["view"] == "v1"
+    assert demo.run(args(export=[str(ws), str(tmp_path / "no-such")], corpus=str(corpus), outputs_only=True,
+                         view="nope"), say=lines.append) == 1
+    assert lines[-1] == "thimble demo --export: toy has no view nope; its views: v1"
     assert "2 cited calls" in " ".join(lines) and "refused from 400" in " ".join(lines)
     # OUT naming the pre-cache folder itself writes it again in place
     a = args(export=[str(ws), str(tmp_path / "out" / "toy")], corpus=str(corpus), outputs_only=True)
@@ -1047,8 +1101,10 @@ def test_export_command_waits_for_a_finished_orientation(tmp_path, monkeypatch):
     assert demo.run(a, say=lines.append) == 1
     lines.clear()
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
-    assert demo.run(args(export=[str(ws), str(tmp_path / "full")], corpus=str(corpus)), say=lines.append) == 0
-    assert json.loads((tmp_path / "full" / "toy" / demo.MANIFEST).read_text())["version"] == demo.FULL_VERSION
+    assert demo.run(args(export=[str(ws), str(tmp_path / "full")], corpus=str(corpus), view="v1"),
+                    say=lines.append) == 0
+    full = json.loads((tmp_path / "full" / "toy" / demo.MANIFEST).read_text())
+    assert full["version"] == demo.FULL_VERSION and full["view"] == "v1"
     # the command ends with the inventory
     tail = lines[next(i for i, x in enumerate(lines) if x.startswith("wrote ")):]
     keys = [x[2:].split("  ")[0] for x in tail[1:] if x.startswith("  ") and x[2] != " " and "  " in x[2:]]

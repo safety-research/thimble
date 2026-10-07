@@ -47,17 +47,33 @@ export function withWorkspace(to: string, pathname: string, search: string, hash
   return `${pathname}?${q.toString()}${hash}`
 }
 
-/** Where a row of the start page goes: the page at `pathname` with its workspace, an example opened at its view, and the
- * page key when the address still holds one (`hash`: a claim the server has not answered yet). Pure. */
+/** The ref a workspace opens at, from the server's rows: the view its row names (a demo dataset's pre-cache's main view,
+ * an example's view), else null. Pure. */
+export function openingRef(rows: readonly Pick<WorkspaceRow, 'name' | 'kind' | 'view'>[], ws: string): string | null {
+  const row = rows.find((r) => r.name === ws)
+  return row && row.kind !== 'folder' && row.view?.slug ? `view:${row.view.slug}` : null
+}
+
+/** Where a row of the start page goes: the page at `pathname` with its workspace, a demo dataset or an example opened at
+ * its view (openingRef), and the page key when the address still holds one (`hash`: a claim the server has not answered
+ * yet). Pure. */
 export function workspaceHref(row: Pick<WorkspaceRow, 'name' | 'kind' | 'view'>, pathname = '/', hash = ''): string {
   const q = new URLSearchParams({ ws: row.name })
-  if (row.kind === 'example' && row.view?.slug) q.set('ref', `view:${row.view.slug}`)
+  const ref = openingRef([row], row.name)
+  if (ref) q.set('ref', ref)
   const key = new URLSearchParams(hash.replace(/^#/, '')).get('k')
   return `${pathname}?${q.toString()}${key ? `#k=${encodeURIComponent(key)}` : ''}`
 }
 
 /** A key in browser storage, per workspace. */
 export const storageKey = (ws: string, name: string): string => `thimble:${ws}:${name}`
+
+/** Whether this browser has opened workspace `ws` before (its `opened` key, which App's instance check clears with the
+ * rest when the workspace is replaced). */
+export const openedBefore = (ws: string): boolean => readStorage<unknown>(storageKey(ws, 'opened'), false) === true
+
+/** Notes that this browser has opened workspace `ws`. */
+export const noteOpened = (ws: string): void => writeStorage(storageKey(ws, 'opened'), true)
 
 export function readStorage<T>(key: string, fallback: T): T {
   try {

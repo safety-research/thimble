@@ -221,7 +221,8 @@ orientation for the dataset, it installs it as the folder's workspace: the cards
 pre-cache holds the orientation's outputs alone, so its Claude Code session is not included. A dataset without one
 opens with no analysis yet, and Start in the page runs the orientation. It prints one URL and opens it in your browser
 without a Claude Code session: thimble's start page, which lists the datasets you downloaded (and any other folder
-open in thimble), each row opening its workspace; in a workspace, the folder name in the top bar opens the same list.
+open in thimble), each row opening its workspace on the dataset's main view rather than on Files; in a workspace, the
+folder name in the top bar opens the same list.
 The orientation's thread opens with a card that says it is a frozen demo session, with the command that starts a live
 session from scratch with the dataset.
 

@@ -1,19 +1,21 @@
 // @vitest-environment jsdom
 // thimble's start page (src/shell/StartPage.tsx) and the top bar's switcher (TopBar WorkspaceSwitcher), which draw the
 // server's workspaces (GET /workspaces) in the groups Demo, Examples and Your folders, an empty group left out, each row
-// a link to its workspace, a demo shown by its dataset's name rather than its workspace's demo-<dataset>. A URL with no
-// workspace, or with one the server does not hold, is the start page (App), and one naming a workspace renamed since
-// goes to its new name; in a workspace the folder name opens the same list with that workspace marked.
+// a link to its workspace, a demo shown by its dataset's name rather than its workspace's demo-<dataset>, and a demo or an
+// example opened at the view its row names. A URL with no workspace, or with one the server does not hold, is the start
+// page (App), and one naming a workspace renamed since goes to its new name; a workspace opened the first time without a
+// ref opens at its row's view (Shell); in a workspace the folder name opens the same list with that workspace marked.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from '../../src/App.tsx'
+import { bus } from '../../src/lib/bus.ts'
 import type { CorpusInfo, WorkspaceRow } from '../../src/lib/types.ts'
-import { groupWorkspaces, renamedTo, storageKey, withWorkspace, workspaceHref, workspaceLabel } from '../../src/lib/workspace.ts'
+import { groupWorkspaces, openingRef, renamedTo, storageKey, withWorkspace, workspaceHref, workspaceLabel } from '../../src/lib/workspace.ts'
 import { WorkspaceSwitcher } from '../../src/shell/TopBar.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const ROWS: WorkspaceRow[] = [
-  { name: 'demo-collusion-wiki', kind: 'demo', label: 'collusion-wiki', folder: 'collusion-wiki', path: '/h/.thimble/demo/collusion-wiki', dataset: 'collusion-wiki', title: 'collusion.wiki', blurb: 'Logs of a small wiki.', ready: true, renamed_from: ['collusion-wiki-2'] },
+  { name: 'demo-collusion-wiki', kind: 'demo', label: 'collusion-wiki', folder: 'collusion-wiki', path: '/h/.thimble/demo/collusion-wiki', dataset: 'collusion-wiki', title: 'collusion.wiki', blurb: 'Logs of a small wiki.', ready: true, renamed_from: ['collusion-wiki-2'], view: { slug: 'wiki-page-history', name: 'Wiki Page History' } },
   // a row from a server that sends no label: the dataset's name all the same
   { name: 'demo-mythos-5', kind: 'demo', folder: 'mythos-5', path: '/h/.thimble/demo/mythos-5', dataset: 'mythos-5', title: 'Mythos 5', blurb: 'The transcript.', ready: false },
   { name: 'example-timeline', kind: 'example', folder: 'example-timeline', path: '/h/.thimble/examples/example-timeline', view: { slug: 'timeline', name: 'Timeline' } },
@@ -57,8 +59,9 @@ test('the groups come in order, each with its rows, and an empty group is left o
   expect(groupWorkspaces([])).toEqual([])
 })
 
-test('a row opens its workspace, an example at its view, and keeps a page key the server has not taken yet', () => {
-  expect(workspaceHref(ROWS[0])).toBe('/?ws=demo-collusion-wiki')
+test('a row opens its workspace, a demo or an example at its view, and keeps a page key the server has not taken yet', () => {
+  expect(workspaceHref(ROWS[0])).toBe('/?ws=demo-collusion-wiki&ref=view%3Awiki-page-history')
+  expect(workspaceHref(ROWS[1])).toBe('/?ws=demo-mythos-5') // no view: Files
   expect(workspaceHref(ROWS[2])).toBe('/?ws=example-timeline&ref=view%3Atimeline')
   expect(workspaceHref(ROWS[3], '/', '#k=abc')).toBe('/?ws=logs#k=abc')
   expect(workspaceHref(ROWS[3], '/', '#other=1')).toBe('/?ws=logs')
@@ -70,7 +73,12 @@ test('a URL with no workspace is the start page: a title and the rows, each a li
   expect(el.querySelector('.start-title')?.textContent).toBe('Workspaces')
   expect([...el.querySelectorAll('.ws-group-title')].map((h) => h.textContent)).toEqual(['Demo', 'Examples', 'Your folders'])
   const rows = [...el.querySelectorAll<HTMLAnchorElement>('a.ws-row')]
-  expect(rows.map((a) => a.getAttribute('href'))).toEqual(['/?ws=demo-collusion-wiki', '/?ws=demo-mythos-5', '/?ws=example-timeline&ref=view%3Atimeline', '/?ws=logs'])
+  expect(rows.map((a) => a.getAttribute('href'))).toEqual([
+    '/?ws=demo-collusion-wiki&ref=view%3Awiki-page-history',
+    '/?ws=demo-mythos-5',
+    '/?ws=example-timeline&ref=view%3Atimeline',
+    '/?ws=logs',
+  ])
   const [cw, m5, ex, logs] = rows
   // a demo by its dataset's name, not its workspace's demo-<dataset>
   expect(rows.map((a) => a.querySelector('.ws-row-name')?.textContent)).toEqual(['collusion-wiki', 'mythos-5', 'example-timeline', 'logs'])
@@ -107,6 +115,44 @@ test('a URL naming a workspace renamed since goes to its new name, and the works
   expect(window.localStorage.getItem(storageKey('collusion-wiki-2-x', 'kept-note'))).toBe(JSON.stringify({ panes: 3 })) // another workspace's
   expect(el.querySelector('.start-missing')).toBeNull()
   window.localStorage.clear()
+})
+
+test('the ref a workspace opens at is its row\'s view; a folder, a row with none and a workspace with no row open at none', () => {
+  expect(openingRef(ROWS, 'demo-collusion-wiki')).toBe('view:wiki-page-history')
+  expect(openingRef(ROWS, 'example-timeline')).toBe('view:timeline')
+  expect(openingRef(ROWS, 'demo-mythos-5')).toBeNull()
+  expect(openingRef(ROWS, 'logs')).toBeNull()
+  expect(openingRef(ROWS, 'elsewhere')).toBeNull()
+  expect(openingRef([{ name: 'odd', kind: 'folder', view: { slug: 'x', name: 'X' } }], 'odd')).toBeNull()
+})
+
+test('a demo workspace opens at its main view the first time this browser opens it; after that, and with a ref in the address, it does not', async () => {
+  window.localStorage.clear()
+  const seen: string[] = []
+  const off = bus.on('openRef', (e) => {
+    seen.push(e.ref)
+  })
+  const open = async (url: string) => {
+    unmountAll()
+    seen.length = 0
+    window.history.replaceState(null, '', url)
+    await mount(<App />)
+    for (let i = 0; i < 4; i++) await settle()
+    return [...seen]
+  }
+  try {
+    expect(await open('/?ws=demo-collusion-wiki')).toEqual(['view:wiki-page-history'])
+    // opened before: as the analyst left it
+    expect(await open('/?ws=demo-collusion-wiki')).toEqual([])
+    // a ref in the address is what opens, the first time too
+    expect(await open('/?ws=example-timeline&ref=card%3Ac1')).toEqual(['card:c1'])
+    expect(await open('/?ws=example-timeline')).toEqual([])
+    // a workspace whose row names no view opens on Files as before
+    expect(await open('/?ws=demo-mythos-5')).toEqual([])
+  } finally {
+    off()
+    window.localStorage.clear()
+  }
 })
 
 test('a URL naming a workspace the server does not hold is the start page, saying so in one line', async () => {
