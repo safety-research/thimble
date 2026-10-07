@@ -169,6 +169,10 @@ test("the label colours' copies are the light paper's: the charts' fallbacks and
   const py = readFileSync(new URL('../../../backend/app/kernel_thimble.py', import.meta.url), 'utf8')
   const kernel = [...(/LABEL_COLOURS = \[[^\]]*\]/.exec(py)?.[0] ?? '').matchAll(/"(#[0-9a-fA-F]{6})"/g)].map((m) => m[1].toLowerCase())
   expect(kernel).toEqual([BASE['--label-none'], ...LABELS.map((l) => BASE[l])])
+  // the product tour's example view carries a snapshot of the light paper's tokens
+  const tour = readFileSync(new URL('../../public/tour/timeline/assets/frame-base.css', import.meta.url), 'utf8')
+  const snap = Object.fromEntries([...tour.matchAll(/(--(?:label|viz)-[\w-]+):(#[0-9a-fA-F]{6})/g)].map((m) => [m[1], m[2].toLowerCase()]))
+  for (const name of [...SLOTS, ...LABELS, '--label-none']) expect(snap[name], `${name} in the tour's frame-base.css`).toBe(BASE[name])
 })
 
 describe.each(Object.keys(PAPERS))('the label colours on the %s paper', (paper) => {
@@ -235,6 +239,8 @@ describe.each(Object.keys(PAPERS))('the label colours on the %s paper', (paper) 
   test('chestnut and brown stay apart from orange, and navy from sky', () => {
     const [orange, sky, brown, navy, chestnut] = ['orange', 'sky blue', 'brown', 'navy', 'chestnut'].map((n) => t[place(n)])
     expect(cielab(chestnut, orange), `${chestnut} and ${orange}`).toBeGreaterThanOrEqual(30)
+    // the dataviz floor too: Dark's chestnut #f1a271 was 12.8 from orange in OKLab, and beside it read as one orange
+    expect(apart(chestnut, orange), `${chestnut} and ${orange}`).toBeGreaterThanOrEqual(15)
     expect(cielab(brown, orange), `${brown} and ${orange}`).toBeGreaterThanOrEqual(28)
     expect(cielab(navy, sky), `${navy} and ${sky}`).toBeGreaterThanOrEqual(23)
   })
