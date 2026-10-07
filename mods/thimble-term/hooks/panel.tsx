@@ -24,7 +24,7 @@ import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermVerdict } from
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
 import { chipLook, chipName, citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
-import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
+import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, cutRef, demojibake, labelHead, lineWidth, placeWords, shade, share, shares, turnTimes, valueColour, width, wrapRows } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { dirOf, fileRef, firstChoice, folderOpen, sortPaths, turnsRead, wholeJson } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
@@ -1221,7 +1221,8 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const target: Target = { kind: 'citation', ref: c.raw, text: citeLabel(c) }
   const f = fileRef(c.ref)
   const cardId = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(c.ref)?.[1]
-  const label = cut(await citeTitle(cx, c), Math.max(8, cols - 6))
+  // a place cited with no words keeps its line where its path is cut (`…/agent-ad502eca.jsonl line 20`)
+  const label = c.display === null && fileRef(c.ref) ? cutRef(c.ref, Math.max(8, cols - 6)) : cut(await citeTitle(cx, c), Math.max(8, cols - 6))
   // the takeaway's card's links check, as the chat marks the citation: ◌ while it runs, ✓ once a script got the value, a
   // red × when it got another
   const check = p.of ? linkCheck((await cx.card(p.of))?.links, c) : {}
@@ -2924,7 +2925,9 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   }
   const shown = openViewState()
   const sub = shown?.slug === slug && shown.frame?.sub?.length ? shown.frame.sub : []
-  const rows = Math.max(6, (bodyRows || 34) - VIEW_CHROME - (sub.length ? 1 : 0))
+  // the hint row wraps rather than leave a key out, so the view's rows are what the rows its last hints took leave
+  const hintsN = shown?.slug === slug && shown.frame && !shown.frame.typing ? hintHeight(shown.frame.hints, cols) : 1
+  const rows = Math.max(6, (bodyRows || 34) - VIEW_CHROME - (sub.length ? 1 : 0) - (hintsN - 1))
   const ov = viewFor(rt.sc, slug, cols, rows, p.ref)
   const f: ViewFrame | null = ov.frame
   const head = headerEls(els, { title: p.title || v.name || slug, cols, ...(sub.length ? { sub: subLine(sub) } : {}) })
@@ -2963,9 +2966,6 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // a sign's key works only from the relay's field, so its hint shows only while the ring rests there
   const isSign = (k: string) => [...k].length === 1 && !/[a-z0-9]/.test(k)
   const hints = f.hints.filter((_, i) => listKeysHeld() || !(f.hintKeys?.[i] ?? []).some(isSign))
-  // a hint row too long for the pane leaves out the view's last hints, never the panel's own (back, close)
-  const fits = (hs: string[]) => width(endHints(hs).join(' · ')) <= cols
-  while (hints.length && !fits(hints)) hints.pop()
   // while a field of the view takes typing every key is the field's, b and x among them: the row says only what Enter
   // and Backspace do there
   if (f.typing) {

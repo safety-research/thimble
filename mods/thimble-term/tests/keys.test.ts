@@ -539,6 +539,24 @@ test('keys · view · a terminal view: its rows under the header, its hint row, 
   expect(events(w).some(e => e.key === 'q')).toBe(false)
 })
 
+test('keys · view · a hint row longer than the panel is wide wraps, whole hints on each row, so no key the view binds goes unnamed; the view hears the theme', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, views: TERM_VIEWS } as never
+  const hints = ['↑↓ to choose', 'Enter to open', 'c to color by', '/ to search', 'i for incident', '[ ] to pan', '+ - to zoom', 'a to ask', 'r to reset']
+  w.viewHost.frame = n => viewFrame(n, { hints, hintKeys: hints.map(() => []), keys: ['up', 'down', 'return', 'c', '/', 'i', '[', ']', '+', '-', 'a', 'r'] })
+  await openTermView($, w)
+  const open = w.viewHost.requests.find(r => r.path === '/open')
+  expect(open?.body.theme).toBe('dark')
+  const pane = await look($, SHORT)
+  const box = (await pane.find({ key: 'h-hints' })) as { children?: unknown[] }
+  await pane.unmount()
+  const rows = (box.children ?? []).map(r => shown(r).trim())
+  expect(rows.length).toBeGreaterThan(1)
+  named(rows.join(' · '), [...hints, 'b to go back', 'x to close'])
+  // each hint stands whole on one row
+  for (const h of hints) expect(rows.some(r => r.includes(h))).toBe(true)
+})
+
 test('keys · view · a click on a row, a drag on a strip and the wheel are the view\'s; its acts open a place or a thread; b back ends its program', async ($, on) => {
   const w = world(on)
   w.states.home = { ...w.states.home, views: TERM_VIEWS } as never

@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import pwd
+import re
 import secrets
 import shutil
 import signal
@@ -108,7 +109,8 @@ def has_term(view: dict[str, Any] | None) -> bool:
 
 def labels_list(c: str, claimed: list[str] | None = None) -> list[dict[str, Any]]:
     """Every label over files as the kit's Color by lists it: views.label_definition's {id, name, kind, text, spec,
-    scope, values: [{name, meaning, n}]}, with `here` for a label whose scope holds one of the view's files."""
+    scope, values: [{name, highlight, meaning, n}]}, with `here` for a label whose scope holds one of the view's files
+    and `on` for one the analyst turned on in Files or filters by, which the view opens colored by, as in the browser."""
     from . import concepts, views  # noqa: PLC0415
 
     try:
@@ -116,6 +118,10 @@ def labels_list(c: str, claimed: list[str] | None = None) -> list[dict[str, Any]
         ks = concepts.list_concepts(ws)
     except Exception:  # noqa: BLE001 — a view draws without labels
         return []
+    try:
+        f = concepts.read_filters(ws).get("files") or {}
+    except Exception:  # noqa: BLE001
+        f = {}
     out: list[dict[str, Any]] = []
     for k in ks:
         if k.get("unit") not in concepts.FILE_UNITS or k.get("marks") == "file":
@@ -124,7 +130,10 @@ def labels_list(c: str, claimed: list[str] | None = None) -> list[dict[str, Any]
         if d is None:
             continue
         glob = d.get("scope") or ""
-        d["here"] = not glob or claimed is None or any(views.glob_matches(p, glob) for p in claimed)
+        # a label run over several globs has them in its scope parted by ", "
+        globs = [g for g in re.split(r",\s+", glob) if g.strip()]
+        d["here"] = not globs or claimed is None or any(views.glob_matches(p, g) for g in globs for p in claimed)
+        d["on"] = bool(k.get("shown") or f.get("concept") == k["id"])
         out.append(d)
     return out
 
@@ -592,20 +601,32 @@ async def stop_kernels(c: str) -> None:
 # ------------------------------------------------------------------------------------------------------ as text
 
 
-def panel_text(view_name: str, frame: dict[str, Any], *, ansi: bool = False) -> str:
+def hint_rows(hints: list[str], cols: int | None) -> list[str]:
+    """The hint row in `cols` cells, as thimble-term's view panel wraps it: whole hints parted by ` · `, a row ending
+    where the next hint does not fit (one row with no `cols`)."""
+    rows: list[str] = []
+    for h in hints:
+        if rows and (cols is None or len(rows[-1]) + 3 + len(h) <= cols):
+            rows[-1] += f" · {h}"
+        else:
+            rows.append(h)
+    return rows or [""]
+
+
+def panel_text(view_name: str, frame: dict[str, Any], *, ansi: bool = False, cols: int | None = None) -> str:
     """A frame as thimble-term's panel shows it, with no Claude Code: the view's name, its subtitle, the rule, the
-    frame's rows (frame.text), and its hint row with the panel's own keys."""
+    frame's rows (frame.text), and its hint row with the panel's own keys, wrapped to `cols` as the panel wraps it."""
     sub = " · ".join(frame.get("sub") or [])
-    hints = " · ".join([*(frame.get("hints") or []), "b to go back", "x to close"])
+    hints = hint_rows([*(frame.get("hints") or []), "b to go back", "x to close"], cols)
     body = frame.get("text") or "\n".join("".join(s.get("s", "") for s in line) for line in frame.get("lines") or [])
-    width = max([len(view_name), *(len(x) for x in body.split("\n"))] or [40])
+    width = cols + 2 if cols else max([len(view_name), *(len(x) for x in body.split("\n"))] or [40])
     if ansi:
         head = [f"  \x1b[1;36m{view_name}\x1b[0m", f"  \x1b[2m{sub}\x1b[0m" if sub else None, f"  \x1b[90m{'─' * max(10, width - 2)}\x1b[0m"]
-        tail = f"  \x1b[2;3m{hints}\x1b[0m"
+        tail = [f"  \x1b[2;3m{h}\x1b[0m" for h in hints]
     else:
         head = [f"  {view_name}", f"  {sub}" if sub else None, f"  {'─' * max(10, width - 2)}"]
-        tail = f"  {hints}"
-    return "\n".join([*(h for h in head if h is not None), body, tail])
+        tail = [f"  {h}" for h in hints]
+    return "\n".join([*(h for h in head if h is not None), body, *tail])
 
 
 async def draw_text(c: str, slug: str, *, cols: int = 120, rows: int = 40, keys: list[str] | None = None,
@@ -630,7 +651,7 @@ async def draw_text(c: str, slug: str, *, cols: int = 120, rows: int = 40, keys:
             frame = await p.settle() or frame
         view = views.read_built(c, slug) or {}
         name = str(view.get("name") or slug)
-        return panel_text(name, frame, ansi=ansi) if panel else str(frame.get("text") or "")
+        return panel_text(name, frame, ansi=ansi, cols=cols) if panel else str(frame.get("text") or "")
     finally:
         await p.close()
 

@@ -71,7 +71,10 @@ frames.
 ## The drawing
 
 A Drawing (`d`) holds rows of styled runs on a grid `d.cols` wide, at most `d.rows` tall (`d.left` rows are left), each
-with a 2-cell margin left of the type area for `❯`. Lines past the rows or the columns are cut.
+with a 2-cell margin left of the type area for `❯`. Lines past the rows or the columns are cut, a row whose words pass
+the edge with `…` in its last cell (`fitLine`), never bare. The docked panel is about 47 cells wide at a 120-column
+terminal and 92 at 200: draw a view at 47, 92 and 140 (`thimble view text --width`) and drop or move columns as the
+width asks, as the worked examples do.
 
 | member | what it does |
 |---|---|
@@ -97,17 +100,19 @@ background for a choice in use (the time range's window), red only for a problem
 of the Color by choice. A record's own words are drawn upright, as a file is.
 
 `width`, `charWidth`, `cut`, `clip`, `prefix`, `oneLine`, `pad`, `padStart`, `wrap`, `num`, `plural`, `when`, `hms`,
-`dayOf`, `dayName`, `dur` and `placeWords` measure, cut and write text the way thimble-term does: a cut at a word with
-`…` against it, counts with thousands separators, a place as `agents.log line 12`. `seg`, `italic`, `merged`,
-`lineWidth` and `clipLine` make and measure runs and lines; `HUES` is how many values of a field take a hue (six).
+`dayOf`, `dayName`, `dur`, `placeWords` and `placeIn` measure, cut and write text the way thimble-term does: a cut at a
+word with `…` against it, counts with thousands separators, a place as `agents.log line 12` (in `n` cells, without its
+folders and then its file's name cut in the middle, its line kept). `seg`, `italic`, `merged`, `lineWidth`, `fitLine`
+and `clipLine` make and measure runs and lines; `HUES` is how many values of a field take a hue (six).
 
 ## Keys
 
 A view's pane passes on ↑↓, Enter, Space and Backspace (`up`, `down`, `return`, `space`, `backspace`) and a lowercase
 letter, a digit or a sign typed. ←, →, the page keys, Home, End, Tab and Esc reach no element of a pane, so `d.key`
 refuses them, and `b`, `t` and `x` are the panel's own (back, the threads, close). The hint row names each key bound in
-the frame with its words, in the panel's order: choosing, Enter, Space, the view's own, then `b to go back · x to close`.
-Nothing else in the view says which key does what. A key works only while its part is drawn, since a part binds its keys
+the frame with its words, in the panel's order: choosing, Enter, Space, the view's own, then `b to go back · x to close`;
+where it is longer than the panel is wide it wraps, whole hints on each row, and the view's rows are fewer by the rows it
+takes. Nothing else in the view says which key does what. A key works only while its part is drawn, since a part binds its keys
 as it draws.
 
 ## Color by
@@ -115,18 +120,30 @@ as it draws.
 `colorBy(opts)` is the one control for the view's color, as in the browser ([color.md](color.md)). Draw it in the top row
 with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) or `colour.add(r)`.
 
+- The view opens colored by a label that is on in Files and marks its files, as the browser's view does, else by its
+  `initial` field; a label turned on while the view is away or open takes the color, the one turned on last.
 - The row reads `Color by  Kind` and the chosen field's values as chips: `●` in the value's hue, its name, its count
   dim. A click on a chip turns the value off (`○`, dim) or on. Values past the sixth share one chip, `other`, with no
-  hue of their own; the records with no value have `no kind` (`not marked` for a label), with a dim mark. A value with
-  no records in the reader's counts has no chip, `other` too, unless it is turned off.
-- `c`, or a click on the choice, opens the menu under the row: Off, the fields with their values, then every label
-  over files with its values and its kind. Under the chosen row, what it is: a field's description, a label's kind and
-  definition with `definition ↗`, which opens the label's panel. Enter colors by it.
+  hue of their own, and draw dim wherever they show; the records with no value have `no kind`, with a dim mark. A value
+  with no records in the reader's counts has no chip, `other` too, unless it is turned off. A label's chips are the
+  values it colors by (a regex label's `other` is not one), each with its count, then `not marked`.
+- Where the top row has no room for Color by's name whole and its first chip after the row's other controls, Color by
+  takes the row under them (Reset stays at R on the top row); where its own row has no room for a chip beside the name,
+  the chips take the row under that, at A2, as many as fit and `+N` for the rest. The name is cut only where it alone
+  has no room, and then `Color by` reads `Color`.
+- `c`, or a click on the choice, opens the menu in a frame over the rows under the row, which keep their places: Off,
+  the fields, then every label over files with its kind. The chosen field's or label's values stand after its name
+  with their dots, in their hues; the others' in words, dim: a field's declared values, else those the records the list
+  drew take (the kit counts them, `tally(record)`), the commonest first, else those it gives meanings for; a label's,
+  then `not marked`. Under the chosen row, what it is, once: a field's description, a label's kind and definition with
+  `definition ↗`, which opens the label's panel. In a narrow frame the chosen row's values and what it is stand under
+  its name. Enter colors by it.
 - With a label chosen, its name in the top row is followed by `↗`, which opens the label's panel: its definition, its
   runs and its records are a step away in every view that uses it.
 - A chip's tip says what its value means: the field's `meanings`, a declared value's `meaning`, a label's value.
-- Reset, against R, shows while a value is off, a range is zoomed, a search or a choice is set, or the page's
-  `onReset({changed})` says so, and puts them back (`r`). `changed()` and `reset()` do the same from the program.
+- Reset, against R, shows after any change from how the view opens: Color by's choice, a value off, a range zoomed, a
+  search or a choice set, or what the page's `onReset({changed})` says, and puts them back (`r`). `changed()` and
+  `reset()` do the same from the program.
 
 | option | what it is |
 |---|---|
@@ -141,6 +158,7 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
 | `counts(map)` | the reader's counts of the choice's values, `''` for no value |
 | `valueOf(record)`, `colourOf(value)`, `dot(value)` | a record's value, a value's hue, its `●` (`○` when off) |
 | `isOn(value)`, `keeps(record)` | whether a value, or a record's value, is on |
+| `tally(record)` | count a record's values of every field for the menu (the list counts the rows it draws) |
 | `by`, `field`, `label`, `off`, `values` | the choice and its chips |
 | `choose(field \| {label} \| null)`, `toggle(value)` | change it from the page |
 
@@ -151,8 +169,9 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 `timeRange(opts)` is the one control for a view's time, as in the browser ([time-range.md](time-range.md)).
 
 - `range.draw(d, {gutter})` draws its readout (`16 May 04:31 – 05:10 · 39m`) and its overview strip: a cell per bin of
-  the whole span, each the bar of its records (`▁` to `█`) in the Color by hue most of them take. The window is on the
-  selection background and the rest dim. It opens on the whole span.
+  the whole span, each the bar of its records (`▁` to `█`) in the Color by hue most of them take. Zoomed in, the window
+  is on the selection background between its edges `[` `]`, the cells a drag moves them from, and the rest dim. It
+  opens on the whole span. A chart over the range leaves out a lane with nothing in a range zoomed in.
 - A click on the strip moves the window there; a drag frames a new range, a drag from inside the window moves it, a drag
   from its edge moves that edge; `[` `]` pan by a quarter and `+` `-` zoom.
 - `range.data({times, values, span, marks, gap})` gives it the records' times, their Color by values and the incidents or
@@ -173,7 +192,8 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 
 `list({key})` is a list of records with a chosen row; `rows.draw(d, opts)` draws it in the rows left.
 
-- `❯` and the accent mark the chosen row; ↑↓ choose and the chosen row stays in view; a heading item
+- `❯` and the accent mark the chosen row, across its whole width, its dim columns too (a run in a color of its own, such
+  as a value's hue, keeps it); ↑↓ choose and the chosen row stays in view; a heading item
   (`{heading: 'Sat 16 May 2026'}`) is a bold row no key chooses.
 - Enter, or a click on the row, opens its details in place under it, at A2 (`detail(item, dd)`), and closes them;
   `onOpen(item)` hears it, to fetch what they show. `a` asks a side thread about the chosen row (`ask(item)`).
@@ -183,8 +203,10 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 - `columns(specs, cols)` lays out columns with 2-cell gutters (`{w}`, `{align: 'right'}`, `{grow: true}`):
   `cells(r, values, styles)` adds a row's values, and `header(r, names, {sorted, desc, onSort})` the names, dim, `▼`
   after the one sorted by, each a click that sorts; a list's `header(r)` stands above its rows and does not scroll.
-- `details(dd, {text, blocks, facts, groups, raw, place, ask})` draws a record's details: its words, its blocks, its
-  facts on one row, the records it links to, its lines as the file holds them, `↗` and its place, and `ask about it`.
+- `details(dd, {text, blocks, facts, groups, raw, place, ask})` draws a record's details across the panel's width: its
+  words, its blocks, its facts (on the rows they need, none split), the records it links to, its lines as the file
+  holds them (`raw`, for a record whose facts do not say what its line holds: `↗` opens the line too), `↗` and its
+  place, which keeps its line where it is cut, and `ask about it`, on the row under the place where both do not fit.
   A block (`{text, code, max}`) is text as the record holds it, such as a command and what it printed, or a diff: each
   line upright and cut at the cell edge, at most `max` rows (8) and then `… N more`, which a click opens; `code` draws
   it in the code color (a command, a query, a path).

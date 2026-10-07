@@ -139,10 +139,12 @@ onOpen((place) => {
 // ------------------------------------------------------------------------------------------------ the lanes
 
 // the lanes' rows: each run in scope, then, unless it is folded, its sessions as a tree, each subagent under the
-// session that spawned it (`├ ` and `└ `, with `│ ` down the levels above); a run folds to one lane of all its sessions
+// session that spawned it (`├ ` and `└ `, with `│ ` down the levels above); a run folds to one lane of all its sessions.
+// In a range zoomed in, a session that did not run in it has no lane, and a run with none has no row
 function laneRows(room) {
   const inScope = new Set(data.scope)
-  const runs = data.runs.map((r) => ({ run: r, ss: data.sessions.filter((s) => s.run === r.id && inScope.has(s.id)) })).filter((x) => x.ss.length)
+  const ran = (s) => range.full || (s.end >= range.from && s.start <= range.to)
+  const runs = data.runs.map((r) => ({ run: r, ss: data.sessions.filter((s) => s.run === r.id && inScope.has(s.id) && ran(s)) })).filter((x) => x.ss.length)
   // a run folds by itself, the largest first, until the lanes fit their room; the analyst's ▸ ▾ comes first
   const fold = new Map(runs.map((x) => [x.run.id, folded.get(x.run.id) === true]))
   const need = () => runs.reduce((n, x) => n + 1 + (fold.get(x.run.id) ? 0 : x.ss.length), 0)
@@ -209,9 +211,10 @@ function drawLanes(d, scale, gutter, room) {
   lanes.forEach((l, i) => {
     const r = d.row()
     if (l.run) {
+      // a run's name whole across the row, which holds no lane; cut to the names' column where it is folded to one
       const words = `${runName(l.run.id)} · ${l.run.team}`
       r.add(l.folded ? '▸' : '▾', {}, { on: () => folded.set(l.run.id, !l.folded), tip: l.folded ? 'show its sessions' : 'fold its sessions into one lane' })
-      r.gap(1).add(words, { b: true }, { on: () => scope.set(`r:${l.run.id}`), tip: `${words}: show this run alone`, max: gutter - 4 })
+      r.gap(1).add(words, { b: true }, { on: () => scope.set(`r:${l.run.id}`), tip: `${words}: show this run alone`, max: l.folded ? gutter - 4 : d.cols - 2 })
     } else {
       r.gap(2).add(l.guide, { fg: COLORS.rule })
       r.add(names[l.session.id], {}, { on: () => scope.set(`s:${l.session.id}`), tip: `${names[l.session.id]}: show this session and its subagents alone`, max: gutter - 4 - width(l.guide) })
@@ -273,16 +276,25 @@ draw((d) => {
     listed.push(it)
   }
   const end = (it) => `${it.outcome && it.outcome !== 'ok' ? `× ${it.outcome}  ` : ''}${it.tool ? secs(it.duration) : ''}`
-  // the columns' widths from every row the fetch kept, so they stay put as the range moves
-  const whoW = Math.min(24, Math.max(4, ...items.map((it) => width(who(it)))))
+  // the columns' widths from every row the fetch kept, so they stay put as the range moves; in a panel under 72 cells
+  // the tool or kind stands before the first line and a failed call's `×` before both, and how long a call took is
+  // left to its details, so the first line keeps its room
+  const narrow = d.cols < 72
+  const whoW = Math.min(narrow ? 10 : 24, Math.max(4, ...items.map((it) => width(who(it)))))
   const endW = Math.max(5, ...items.map((it) => width(end(it))))
-  const cols = columns([{ w: 8 }, { w: whoW }, { w: 9 }, { grow: true }, { w: endW, align: 'right' }], d.cols - 6)
+  const cols = narrow
+    ? columns([{ w: 8 }, { w: whoW }, { grow: true }], d.cols - 6)
+    : columns([{ w: 8 }, { w: whoW }, { w: 9 }, { grow: true }, { w: endW, align: 'right' }], d.cols - 6)
+  const textW = narrow ? cols.widths[2] : cols.widths[3]
+  const failed = (it) => it.outcome && it.outcome !== 'ok'
   rows.draw(d, {
     items: listed,
     colour,
     empty: 'no message or call',
-    row: (it, r) => cols.cells(r, [hms(it.time), who(it), it.tool || KIND[it.kind], it.input ?? it.text, end(it)],
-      [{ d: true }, { d: true }, {}, {}, it.outcome && it.outcome !== 'ok' ? {} : { d: true }]),
+    row: (it, r) => narrow
+      ? cols.cells(r, [hms(it.time), who(it), `${failed(it) ? '× ' : ''}${it.tool || KIND[it.kind]}  ${it.input ?? it.text}`], [{ d: true }, { d: true }, {}])
+      : cols.cells(r, [hms(it.time), who(it), it.tool || KIND[it.kind], it.input ?? it.text, end(it)],
+        [{ d: true }, { d: true }, {}, {}, failed(it) ? {} : { d: true }]),
     onOpen: (it) => readRecord(it.ref),
     ask: (it) => ({ ref: it.ref, text: it.input ?? it.text }),
     // a row opened in place: a message's whole text; a call's whole input where its row cut it, in the code color, then
@@ -300,10 +312,10 @@ draw((d) => {
         text: it.tool ? '' : f.text,
         maxRows: 10,
         blocks: it.tool ? [
-          ...(width(f.input || '') > cols.widths[3] || /\n/.test(f.input || '') ? [{ text: f.input, code: true }] : []),
+          ...(width(f.input || '') > textW || /\n/.test(f.input || '') ? [{ text: f.input, code: true }] : []),
           { text: change ?? f.output ?? f.result },
         ] : [],
-        facts: [['exit', f.exit]],
+        facts: [['exit', f.exit], ...(narrow && it.tool ? [['took', secs(it.duration)], ['outcome', failed(it) ? it.outcome : '']] : [])],
         groups: child ? [{ title: 'Subagent', rows: [{ when: hms(child.start), words: names[child.id], text: asked ? asked.text : '', on: () => scope.set(`s:${child.id}`), tip: `show ${names[child.id]} and its subagents alone` }] }] : [],
         place: it.ref,
         ask: { ref: it.ref, text: it.input ?? it.text },

@@ -181,6 +181,30 @@ export function dur(s) {
   return `${Math.floor(s / 86400)}d${Math.floor((s % 86400) / 3600) ? ` ${Math.floor((s % 86400) / 3600)}h` : ''}`
 }
 
+// a place without its folders: `…/agents.log line 12`
+function placeShort(ref) {
+  const words = placeWords(ref)
+  const path = String(ref ?? '').split('#', 1)[0]
+  const file = path.split('/').at(-1) || path
+  return file === path ? words : `…/${file}${words.slice(path.length)}`
+}
+
+/** A place in words in `n` cells: whole where it fits, else without its folders (`…/agents.log line 12`), else its
+ *  file's name cut in the middle, the line or row it names kept (`…/monitor-2…0000.jsonl line 2`). */
+export function placeIn(ref, n) {
+  const words = placeWords(ref)
+  if (width(words) <= n) return words
+  if (width(placeShort(ref)) <= n) return placeShort(ref)
+  const path = String(ref ?? '').split('#', 1)[0]
+  const file = path.split('/').at(-1) || path
+  const at = words.slice(path.length) // ` line 12`, ` row 4`, or nothing
+  const lead = file === path ? '' : '…/'
+  const room = n - width(lead) - width(at) - 1
+  if (room < 4) return cut(words, n)
+  const tail = Math.min(Math.floor(room / 2), 10)
+  return `${lead}${prefix(file, room - tail)}…${[...file].slice(-tail).join('')}${at}`
+}
+
 /** A place as the analyst reads it: `agents.log line 12`, `deploys.csv row 4`, `inc-312.json message 3`. */
 export function placeWords(ref) {
   const [path = '', frag = ''] = String(ref ?? '').split('#', 2)
@@ -238,6 +262,19 @@ export function merged(line) {
 /** The cells of a line of runs. */
 export function lineWidth(line) {
   return line.reduce((n, s) => n + width(s.s), 0)
+}
+
+/** A line in `n` cells, its runs kept: where words pass the edge, the last cell is `…` (thimble-term never cuts a row
+ *  bare); where only spaces do, they are dropped. */
+export function fitLine(line, n) {
+  if (lineWidth(line) <= n) return line
+  const all = line.map((x) => x.s).join('')
+  if (!all.slice(prefix(all, n).length).trim()) return clipLine(line, n)
+  const kept = clipLine(line, Math.max(0, n - 1))
+  while (kept.length && !kept[kept.length - 1].s.trim()) kept.pop()
+  if (kept.length) kept[kept.length - 1] = { ...kept[kept.length - 1], s: kept[kept.length - 1].s.replace(/\s+$/, '') }
+  const last = kept[kept.length - 1] || {}
+  return [...kept, { s: '…', ...(last.fg ? { fg: last.fg } : {}), ...(last.d ? { d: true } : {}), ...(last.bg ? { bg: last.bg } : {}) }]
 }
 
 /** A line cut to `n` cells, its runs kept. */
@@ -305,6 +342,8 @@ export class Drawing {
     // the rows cut at the columns, in this drawing or one inside it: how many, and the first one's text (the frame's
     // `overflow`, which the view checks read)
     this.cutAt = parent ? parent.cutAt : { n: 0, first: '' }
+    // what stands over the rows drawn under it (an open menu's frame): [{y, lines, hits}], the root drawing's
+    this.overlays = parent ? parent.overlays : []
     this.typer = null
     this.focusY = null
   }
@@ -328,7 +367,7 @@ export class Drawing {
       this.cutAt.n += 1
       if (!this.cutAt.first) this.cutAt.first = runs.map((s) => s.s).join('').trimEnd()
     }
-    this.lines.push({ margin: margin ? segOf(margin) : null, runs: clipLine(runs, this.cols) })
+    this.lines.push({ margin: margin ? segOf(margin) : null, runs: fitLine(runs, this.cols) })
     for (const h of hits) if (h && (h.on || h.tip || h.drag)) this.hits.push({ ...h, y })
     return y
   }
@@ -503,6 +542,7 @@ const state = {
   colorBys: [],
   colour: null, // the view's Color by, whose hues a time range and a strip take by default
   lastOpen: null,
+  drawNo: 0, // the drawings made, so a count made while drawing (Color by's tally) knows a new one began
 }
 
 function send(msg) {
@@ -552,6 +592,7 @@ function flush() {
 /** The frame of the view as drawn now (what goes to thimble-term). */
 export function frame() {
   const d = new Drawing(state.cols, state.rows)
+  state.drawNo++
   let error = state.error
   if (!error && state.drawFn) {
     try {
@@ -561,6 +602,7 @@ export function frame() {
     }
   }
   if (error) return errorFrame(error)
+  overlay(d)
   const seq = ++state.frameSeq
   state.binds = d.binds.filter((b) => b.keys.length)
   state.typer = d.typer
@@ -591,6 +633,19 @@ export function frame() {
   if (past > 0 || d.cutAt.n) out.overflow = { rows: past, cols: d.cutAt.n, first: d.cutAt.first.slice(0, 300) }
   if (state.textMode) out.text = frameText(out, { ansi: state.textMode === 'ansi', cols: state.cols })
   return out
+}
+
+// an open menu's frame over the rows under its control, which keep their places (the chart does not move down)
+function overlay(d) {
+  for (const o of d.overlays) {
+    const y1 = o.y + o.lines.length
+    while (d.lines.length < y1) d.lines.push({ margin: null, runs: [] })
+    o.lines.forEach((l, k) => {
+      d.lines[o.y + k] = l
+    })
+    d.hits = d.hits.filter((h) => h.y < o.y || h.y >= y1)
+    d.hits.push(...o.hits)
+  }
 }
 
 function wireLine(l) {
@@ -817,7 +872,7 @@ export const __driver = {
       out: null, cols: 120, rows: 30, theme: 'dark', view: { slug: '', name: '' }, kept: {}, labels: [], filter: null, drawFn: null,
       frameSeq: 0, ack: 0, gesture: null, binds: [], hits: new Map(), typer: null, pending: new Map(), fetchId: 0, scheduled: false,
       lastSent: '', openers: [], labelFns: [], resets: [], pageReset: null, stateTimer: false, wheelFns: [], error: null, textMode: '',
-      lastOpen: null, colourLabels: () => [], colorBys: [], colour: null,
+      lastOpen: null, colourLabels: () => [], colorBys: [], colour: null, drawNo: 0,
     })
     openMenu = null
     openBlocks.clear()
@@ -845,28 +900,52 @@ function toggleMenu(owner, pick = 0) {
   redraw()
 }
 
-/** A menu's rows under its control: `❯` and the accent on the chosen one, ↑↓ choose, Enter picks, `close` (the key that
- *  opened it) closes it; under the chosen row its `about` lines, dim. */
-function drawMenu(d, owner, items, onPick, closeKey, pickWords) {
+/** A menu under its control, in a frame over the rows below it (they keep their places): `❯` and the accent on the
+ *  chosen item, ↑↓ choose, Enter picks, `close` (the key that opened it) closes it. An item is `{name, chips, right,
+ *  about, indent}`: `chips` its values after its name, `right` dim against the frame's right side, and under the chosen
+ *  item its `about(w)` lines. Where the frame is narrow, an item's values and its about lines stand under its name, the
+ *  values for the chosen item alone. A menu taller than the rows left shows the part around the chosen item, with `↑ N
+ *  more` and `↓ N more` in the frame. */
+function drawMenu(d, owner, items, onPick, closeKey, pickWords, title = '') {
   const m = menuOf(owner)
   if (!m) return
   m.pick = Math.max(0, Math.min(items.length - 1, m.pick))
+  // the root drawing frames the menu over the rows under its control; an inner one (a row's details) draws it in place
+  const boxed = !d.parent && d.cols >= 24
+  const box = boxed ? new Drawing(d.cols - 6, 100000, d, 0) : d
   const nameW = Math.min(28, Math.max(8, ...items.map((it) => width(it.name) + 2 * (it.indent || 0)))) + 2
+  // too narrow for an item's values and its about lines beside its name: they stand under it, at A2
+  const stack = box.cols - nameW < 34
+  const spans = []
   items.forEach((it, i) => {
+    const y0 = box.y
     if (it.heading) {
-      d.line([{ s: it.name, d: true }])
+      box.line([{ s: it.name, d: true }])
+      spans.push([y0, box.y - 1])
       return
     }
     const sel = i === m.pick
-    const r = d.row()
+    const r = box.row()
     if (sel) r.margin({ s: '❯', fg: COLORS.accent })
     if (it.indent) r.gap(2 * it.indent)
-    r.add(pad(it.name, Math.max(1, nameW - 2 * (it.indent || 0))), sel ? { fg: COLORS.accent } : {}, { on: () => { m.pick = i; pick(i) }, row: true })
-    if (it.chips) r.runsOf(clipLine(it.chips, Math.max(0, r.room - (it.right ? width(it.right) + 2 : 0))))
+    const rightW = it.right ? width(it.right) + 2 : 0
+    // in a narrow frame the other items' values still follow their names where 10 cells are left for them
+    const beside = !stack || (!sel && box.cols - nameW - rightW >= 10)
+    const nameRoom = beside ? Math.max(1, nameW - 2 * (it.indent || 0)) : Math.max(4, box.cols - rightW - 2 * (it.indent || 0))
+    r.add(beside ? pad(it.name, nameRoom) : cut(it.name, nameRoom), sel ? { fg: COLORS.accent } : {}, { on: () => { m.pick = i; pick(i) }, row: true })
+    if (it.chips && beside) r.runsOf(fitLine(it.chips, Math.max(0, r.room - rightW)))
     if (it.right) r.right(it.right, { d: true })
     r.end()
-    if (sel && it.about) for (const l of it.about(d.cols - nameW)) d.line([{ s: ' '.repeat(nameW) }, ...(Array.isArray(l) ? l : [l]).map(segOf)], (l.hits || []).map((h) => ({ ...h, x0: h.x0 + nameW, x1: h.x1 + nameW })))
+    const indent = stack ? 2 : nameW
+    if (sel && stack && it.chips && lineWidth(it.chips)) box.line([{ s: '  ' }, ...fitLine(it.chips, box.cols - 2)])
+    if (sel && it.about) {
+      for (const l of it.about(box.cols - indent)) {
+        box.line([{ s: ' '.repeat(indent) }, ...(Array.isArray(l) ? l : [l]).map(segOf)], (l.hits || []).map((h) => ({ ...h, x0: h.x0 + indent, x1: h.x1 + indent })))
+      }
+    }
+    spans.push([y0, box.y - 1])
   })
+  if (boxed) frameMenu(d, box, spans[m.pick] || [0, 0], title)
   const step = (by) => {
     let i = m.pick
     do i += by
@@ -882,13 +961,44 @@ function drawMenu(d, owner, items, onPick, closeKey, pickWords) {
   if (closeKey) d.key(closeKey, 'to close', () => toggleMenu(owner), true, 0)
 }
 
+// a menu's rows in a frame in the rule gray, `title` in its top edge, over the rows under the control; the rows
+// around the chosen item where the menu is taller than the rows left
+function frameMenu(d, box, [a, b], title) {
+  const total = box.lines.length
+  const room = Math.max(1, d.rows - d.y - 2)
+  let from = 0
+  if (total > room) {
+    from = Math.max(0, Math.min(a, total - room))
+    if (b >= from + room) from = Math.min(total - room, b - room + 1)
+  }
+  const to = Math.min(total, from + room)
+  const rule = { fg: COLORS.rule }
+  const edge = (left, right, words, note) => {
+    const head = words ? `${left}─ ` : left
+    const tail = note ? ` ${note} ─${right}` : right
+    const fill = Math.max(0, d.cols - width(head) - width(words) - (words ? 1 : 0) - width(tail))
+    return { margin: null, runs: merged([{ s: head, ...rule }, ...(words ? [{ s: words, d: true }, { s: ' ', ...rule }] : []), { s: '─'.repeat(fill), ...rule }, { s: tail, ...rule }]) }
+  }
+  const lines = [edge('╭', '╮', title, from ? `↑ ${num(from)} more` : '')]
+  for (let y = from; y < to; y++) {
+    const l = box.lines[y]
+    const runs = fitLine(l.runs, box.cols)
+    const mk = l.margin ? [{ ...l.margin, s: pad(l.margin.s, 2) }] : [{ s: '  ' }]
+    lines.push({ margin: null, runs: merged([{ s: '│ ', ...rule }, ...mk, ...runs, { s: ' '.repeat(Math.max(0, box.cols - lineWidth(runs))) }, { s: ' │', ...rule }]) })
+  }
+  lines.push(edge('╰', '╯', '', to < total ? `↓ ${num(total - to)} more` : ''))
+  const hits = box.hits.filter((h) => h.y >= from && h.y < to).map((h) => ({ ...h, y: d.y + 1 + h.y - from, x0: h.x0 + 4, x1: Math.min(h.x1, box.cols) + 4, row: false }))
+  d.overlays.push({ y: d.y, lines, hits })
+}
+
 // ------------------------------------------------------------------------------------------------ Color by
 
 /**
  * Color by: the one control for the view's color, in its top row (docs/terminal-views.md, "Color by"). It lists Off,
- * the view's fields and every label over files; the chosen field's values are chips with their counts, which a click
- * turns off and on; a label's definition is one step away (its name's `↗` opens the label's panel, and the menu shows
- * it under the label's row).
+ * the view's fields and every label over files; the chosen field's or label's values are chips with their counts, which
+ * a click turns off and on; a label's definition is one step away (its name's `↗` opens the label's panel, and the menu
+ * shows it under the label's row). As in the browser, the view opens colored by a label that is on in Files and marks
+ * its files, and a label turned on while the view is away or open takes the color.
  *
  * opts: fields [{name, title, description?, values?, meanings?, value?(record)}], initial (a field's name), chips
  * ('filter' hides the records of a value turned off, 'highlight' dims them; the page does either, from isOn), onChange.
@@ -897,33 +1007,71 @@ export function colorBy(opts = {}) {
   const fields = (opts.fields || []).map((f) => ({ ...f, title: f.title || f.name }))
   const keptBy = kept('colour')
   const startKey = fields.length ? `field:${opts.initial || fields[0].name}` : 'off'
+  const fieldOf = (key) => fields.find((f) => `field:${f.name}` === key)
+  const labelOf = (key) => state.labels.find((l) => `label:${l.id}` === key)
+  // the labels on in Files (or filtering) that mark the view's files
+  const onIds = () => state.labels.filter((l) => l.on && l.here !== false).map((l) => String(l.id))
+  // how the view opens: colored by a label that is on, as the browser's view opens, else by its first field
+  const home = () => {
+    const on = onIds()
+    return on.length ? `label:${on[0]}` : startKey
+  }
   const c = {
-    choice: keptBy && typeof keptBy.by === 'string' ? keptBy.by : startKey,
+    choice: keptBy && typeof keptBy.by === 'string' ? keptBy.by : home(),
     off: new Set(keptBy && Array.isArray(keptBy.off) ? keptBy.off.map((v) => (v === null ? '' : String(v))) : []),
+    // the labels on when the view last looked: one turned on since takes the color
+    seen: keptBy && Array.isArray(keptBy.seen) ? keptBy.seen.map(String) : onIds(),
     counts: null,
     hues: new Map(), // field -> value -> hue
     marks: new Map(), // ref -> {label id: value}, from {$thimble: 'marks'}
     asked: new Set(),
+    // the values the records the list draws take, for each field: the menu's words for a field that declares none
+    tally: new Map(),
+    tallied: new Map(),
+    tallyAt: -1,
+    tallySeen: new Set(),
   }
   const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {}
-  const fieldOf = (key) => fields.find((f) => `field:${f.name}` === key)
-  const labelOf = (key) => state.labels.find((l) => `label:${l.id}` === key)
-  // a label the workspace no longer has, or a field the view dropped, gives way to the first field
+  // a label turned on since the view last looked takes the color, the one turned on last
+  const notice = () => {
+    const on = onIds()
+    const fresh = on.filter((id) => !c.seen.includes(id))
+    c.seen = on
+    const key = fresh.length ? `label:${fresh[fresh.length - 1]}` : null
+    if (!key || key === c.choice) return false
+    c.choice = key
+    c.off.clear()
+    c.counts = null
+    return true
+  }
+  // a label the workspace no longer has, or a field the view dropped, gives way to how the view opens
   const settle = () => {
     if (c.choice === 'off' || fieldOf(c.choice) || labelOf(c.choice)) return
-    c.choice = startKey
+    c.choice = home()
     c.off.clear()
   }
+  const save = () => keep('colour', { by: c.choice, off: [...c.off].map((v) => (v === '' ? null : v)), seen: c.seen })
+  if (keptBy) notice()
   settle()
-  state.colorBys.push(settle)
-  const save = () => keep('colour', { by: c.choice, off: [...c.off].map((v) => (v === '' ? null : v)) })
+  state.colorBys.push(() => {
+    const moved = notice()
+    settle()
+    save()
+    if (moved) onChange(api)
+  })
   state.colourLabels = () => (labelOf(c.choice) ? [labelOf(c.choice).id] : [])
 
+  // a label's values that color, as the browser's chips: those it highlights (a regex label's `other` is not one); the
+  // records with none are `not marked`
+  function labelValues(l) {
+    const vs = l.values || []
+    const known = vs.some((v) => v && 'highlight' in v)
+    return (known ? vs.filter((v) => v.highlight !== false) : vs.length > 1 ? vs.slice(0, -1) : vs).map((v) => v.name)
+  }
   function labelHue(l, v) {
-    const names = (l.values || []).map((x) => x.name)
-    const i = names.indexOf(v)
-    if (i < 0) return null
-    return names.length > 1 && i === names.length - 1 ? COLORS.dim : SERIES[i % SERIES.length]
+    const i = labelValues(l).indexOf(v)
+    if (i >= 0) return SERIES[i % SERIES.length]
+    return (l.values || []).some((x) => x.name === v) ? COLORS.dim : null
   }
 
   // a field's values in hue order: those it declares, then the others by their count (the reader counts the field
@@ -1002,8 +1150,8 @@ export function colorBy(opts = {}) {
       }
       return m[l.id] ?? null
     },
-    /** A value's hue (a palette color), dim for a label's catch-all value and a value past six, null for Off and for
-     *  no value. */
+    /** A value's hue (a palette color), dim for a value past six and a label's value that does not color, null for Off
+     *  and for no value. */
     colourOf(value) {
       if (value === null || value === undefined || value === '') return null
       const f = fieldOf(c.choice)
@@ -1028,21 +1176,46 @@ export function colorBy(opts = {}) {
     keeps(record) {
       return api.isOn(api.valueOf(record))
     },
+    /** Count a record's values of every field, as the browser's kit counts the records a page hands it: the menu
+     *  shows them for a field that declares none. The list counts the records it draws. */
+    tally(record) {
+      if (!record || typeof record !== 'object') return
+      if (c.tallyAt !== state.drawNo) {
+        if (c.tally.size) c.tallied = c.tally
+        c.tally = new Map()
+        c.tallySeen = new Set()
+        c.tallyAt = state.drawNo
+      }
+      if (c.tallySeen.has(record)) return
+      c.tallySeen.add(record)
+      for (const f of fields) {
+        const v = typeof f.value === 'function' ? f.value(record) : record[f.name]
+        if (v === undefined || v === null || v === '' || typeof v === 'object') continue
+        const m = c.tally.get(f.name) || new Map()
+        m.set(String(v), (m.get(String(v)) || 0) + 1)
+        c.tally.set(f.name, m)
+      }
+    },
     /** The chips: `[{value, name, colour, on, n}]`, `value` null for no value; none for Off. */
     get values() {
       return chips()
     },
     /** The top row's Color by control and its chips, added to a row (the row's room is theirs). */
     add(row) {
-      addControl(row)
+      control(row, true, false)
       return row
     },
-    /** The top row on its own: Color by, its chips, and Reset at R. */
+    /** The top row: `before(r)` adds the row's other controls, then Color by with its chips, and Reset at R. Where
+     *  the row has no room for Color by's name whole and its first chip, Color by takes the row under it; where its
+     *  own row has no room for a chip beside the name, the chips take the row under that. */
     draw(d, before = null) {
       const r = d.row()
       if (before) before(r)
-      addControl(r)
-      r.end()
+      if (r.x && r.x + 2 + nameW() + firstChipW() > d.cols - RESET_W) {
+        addReset(r)
+        r.end()
+        control(d.row(), false, true).end()
+      } else control(r, true, true).end()
     },
     /** Choose a field by name, a label by id (`{label}`), or Off (null). */
     choose(to) {
@@ -1105,17 +1278,26 @@ export function colorBy(opts = {}) {
     const f = fieldOf(c.choice)
     const l = labelOf(c.choice)
     if (!f && !l) return []
-    const names = f ? fieldValues(f) : (l.values || []).map((x) => x.name)
+    // a label's values that color, each with its count, then `not marked`, as the browser's chips
+    if (l) {
+      const vs = labelValues(l)
+      const out = vs.map((v) => ({ value: v, name: v, colour: labelHue(l, v), on: api.isOn(v), n: counts[v] || 0 }))
+      const rest = (l.values || []).map((x) => x.name).filter((v) => !vs.includes(v))
+      const n = (counts[''] || 0) + rest.reduce((k, v) => k + (counts[v] || 0), 0)
+      out.push({ value: null, name: noValueName(), colour: null, on: api.isOn(null), n })
+      return out
+    }
+    const names = fieldValues(f)
     const out = []
     const other = { value: '\u0000other', name: 'other', colour: null, on: true, n: 0, members: [] }
     for (const v of names) {
       const n = counts[v] || 0
-      if (f && !c.hues.get(f.name).get(v)) {
+      if (!c.hues.get(f.name).get(v)) {
         other.n += n
         other.members.push(v)
         continue
       }
-      if (c.counts && !n && !c.off.has(v) && !(f && (f.values || []).some((x) => (typeof x === 'object' ? x.name : x) === v))) continue
+      if (c.counts && !n && !c.off.has(v) && !(f.values || []).some((x) => (typeof x === 'object' ? x.name : x) === v)) continue
       out.push({ value: v, name: v, colour: api.colourOf(v), on: api.isOn(v), n })
     }
     // like a value with no records, `other` with none is left out once the counts are in, unless one of its values is off
@@ -1145,29 +1327,48 @@ export function colorBy(opts = {}) {
     return runs
   }
 
-  // the menu: Off, the fields, then the labels, each with its values as chips; under the chosen one what it is
+  // a field's values in words for the menu: those it declares, then those the records the list drew take, the commonest
+  // first, else those it gives meanings for
+  function valueWords(f) {
+    const declared = (f.values || []).map((v) => (typeof v === 'object' ? v.name : v))
+    const t = (c.tallyAt === state.drawNo ? c.tallied : c.tally).get(f.name)
+    const seen = t ? [...t.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([v]) => v) : []
+    const names = [...new Set([...declared, ...seen])]
+    return names.length ? names : Object.keys(f.meanings || {})
+  }
+  // the chosen field's or label's values with their dots, in their hues; the others' values in words, dim
+  const dotted = (chs) => chs.flatMap((ch, i) => [...(i ? [{ s: '  ' }] : []), ch.on ? mark(ch.colour) : { s: '○', d: true }, { s: ` ${ch.name}` }])
+  const words = (names) => (names.length ? [{ s: names.slice(0, 16).join(' · '), d: true }] : [])
+
+  // the menu: Off, the fields, then the labels, each with its values; under the chosen one what it is
   function menuItems() {
     const items = [{ key: 'off', name: 'Off', chips: [{ s: 'no color', d: true }] }]
     for (const f of fields) {
-      const vals = previewValues(f)
-      items.push({ key: `field:${f.name}`, name: f.title, chips: vals, about: (w) => wrap(f.description || '', w, 2).map((s) => [{ s, d: true }]) })
+      const mine = fieldOf(c.choice) === f
+      items.push({ key: `field:${f.name}`, name: f.title, chips: mine && chips().length ? dotted(chips()) : words(valueWords(f)), about: (w) => wrap(f.description || '', w, 2).filter(Boolean).map((s) => [{ s, d: true }]) })
     }
     const ls = [...state.labels].sort((a, b) => Number(Boolean(b.here)) - Number(Boolean(a.here)))
     if (ls.length) items.push({ heading: true, name: 'labels' })
     for (const l of ls) {
-      const vals = (l.values || []).flatMap((v, i) => [...(i ? [{ s: '  ' }] : []), mark(labelHue(l, v.name)), { s: ` ${v.name}` }])
+      const mine = labelOf(c.choice) === l
       items.push({
         key: `label:${l.id}`,
         name: l.name,
-        chips: vals,
+        chips: mine ? dotted(chips()) : words([...labelValues(l), 'not marked']),
         right: l.kind || '',
+        // its kind and definition, then `definition ↗`, which opens the label's panel: on the last row where it fits,
+        // else on a row of its own, so the ↗ is never cut
         about: (w) => {
           const text = l.text || l.spec || ''
-          const rows = wrap(text ? `${l.kind ? `${l.kind} · ` : ''}"${oneLine(text)}"` : l.kind || '', Math.max(10, w - 14), 2).map((s) => [{ s, d: true }])
-          const last = rows.length ? rows[rows.length - 1] : (rows[0] = [])
-          const x = lineWidth(last) + 2
-          last.push({ s: '  ' }, { s: 'definition', fg: COLORS.link, u: true }, { s: ' ↗', fg: COLORS.link })
-          last.hits = [{ x0: x, x1: x + width('definition ↗'), on: () => openLabel(l.id), tip: "the label's panel: its definition, its runs and its records" }]
+          const what = text ? `${l.kind ? `${l.kind} · ` : ''}"${oneLine(text)}"` : l.kind || ''
+          const link = 'definition ↗'
+          const rows = what ? wrap(what, w, 2).map((s) => [{ s, d: true }]) : []
+          let last = rows[rows.length - 1]
+          if (!last || lineWidth(last) + 2 + width(link) > w) rows.push((last = []))
+          else last.push({ s: '  ' })
+          const x = lineWidth(last)
+          last.push({ s: 'definition', fg: COLORS.link, u: true }, { s: ' ↗', fg: COLORS.link })
+          last.hits = [{ x0: x, x1: x + width(link), on: () => openLabel(l.id), tip: "the label's panel: its definition, its runs and its records" }]
           return rows
         },
       })
@@ -1175,50 +1376,71 @@ export function colorBy(opts = {}) {
     return items
   }
 
-  // a field's values in the menu: those it took on the page, else those it declares or gives meanings for, in the
-  // hues they take (or would take, the first six), else what the field is
-  function previewValues(f) {
-    let names = fieldValues(f).filter((v) => c.hues.get(f.name).get(v))
-    let hueOf = (v) => c.hues.get(f.name).get(v)
-    if (!names.length && f.meanings) {
-      names = Object.keys(f.meanings)
-      hueOf = (v) => SERIES[names.indexOf(v)] || null
-    }
-    if (!names.length) return [{ s: f.description ? cut(f.description, 60) : '', d: true }]
-    return names.slice(0, HUES).flatMap((v, i) => [...(i ? [{ s: '  ' }] : []), mark(hueOf(v)), { s: ` ${v}` }])
-  }
-
-  function addControl(r) {
-    const by = api.by
-    r.add('Color by', { d: true }).gap()
-    const name = by ? by.title : 'Off'
-    r.add(name, {}, { on: () => toggleMenu(api, menuItems().findIndex((it) => it.key === c.choice)), tip: 'choose what colors the view: a field or a label' })
-    if (by && by.label) r.add(' ').add('↗', { fg: COLORS.link }, { on: () => openLabel(by.label), tip: "the label's panel: its definition, its runs and its records" })
-    // the chips take the row's room but Reset's, which keeps its place whether it shows or not
-    const resetW = width('reset') + 2
-    const room = r.d.cols - r.x - resetW - 2
+  const showMenu = () => toggleMenu(api, menuItems().findIndex((it) => it.key === c.choice))
+  const name = () => (api.by ? api.by.title : 'Off')
+  const arrowW = () => (api.by && api.by.label ? 2 : 0)
+  const nameW = () => width(`Color by  ${name()}`) + arrowW()
+  const chipW = (ch) => lineWidth(chipRuns(ch))
+  const moreW = (n) => (n > 0 ? 2 + width(`+${n}`) : 0)
+  const firstChipW = () => {
     const all = chips()
-    if (all.length) r.gap()
+    return all.length ? 2 + chipW(all[0]) + moreW(all.length - 1) : 0
+  }
+  // how many chips fit in `room` cells, with `+N` after them for the rest
+  function fitting(all, room) {
     let used = 0
-    let shown = 0
+    let k = 0
     for (const ch of all) {
-      const w = lineWidth(chipRuns(ch)) + (shown ? 2 : 0)
-      const moreW = shown < all.length - 1 ? width(` +${all.length - shown - 1}`) + 2 : 0
-      if (used + w + moreW > room) break
-      if (shown) r.gap()
+      const w = chipW(ch) + (k ? 2 : 0)
+      if (used + w + moreW(all.length - k - 1) > room) break
+      used += w
+      k++
+    }
+    return k
+  }
+  function placeChips(r, all, k) {
+    all.slice(0, k).forEach((ch, i) => {
+      if (i) r.gap()
       const x0 = r.x
       for (const s of chipRuns(ch)) r.add(s.s, s)
       r.hits.push({ x0, x1: r.x, on: () => toggleChip(ch), tip: chipTip(ch) })
-      used += w
-      shown++
+    })
+    if (k < all.length) (k ? r.gap() : r).add(`+${all.length - k}`, { d: true }, { on: showMenu, tip: `${plural(all.length - k, 'more value')}: open Color by` })
+  }
+  function addReset(r) {
+    if (!changed()) return
+    r.right('reset', {}, { on: () => reset(), tip: 'the view as it opens: its color, every value on, the whole time span' })
+    r.d.key('r', 'to reset', () => reset(), false, 2)
+  }
+
+  // Color by on row `r`: `Color by` (`Color` where the row has no room for both), the choice whole (cut only where it
+  // alone has no room), `↗` for a label, the chips in the room left, Reset at R with `withReset`; with `mayWrap`, chips that
+  // do not fit beside the name take the row under it, at A2. The row the menu opens under, which the caller ends.
+  function control(r, withReset, mayWrap) {
+    const d = r.d
+    const by = api.by
+    const resetW = withReset ? RESET_W : 0
+    r.add(nameW() <= d.cols - r.x - resetW ? 'Color by' : 'Color', { d: true }).gap()
+    r.add(name(), {}, { on: showMenu, tip: 'choose what colors the view: a field or a label', max: Math.max(4, d.cols - r.x - resetW - arrowW()) })
+    if (by && by.label) r.add(' ').add('↗', { fg: COLORS.link }, { on: () => openLabel(by.label), tip: "the label's panel: its definition, its runs and its records" })
+    const all = chips()
+    const room = d.cols - r.x - 2 - resetW
+    const here = fitting(all, room)
+    const below = mayWrap && all.length && !here && fitting(all, d.cols - 2) > 0
+    if (all.length && !below) {
+      r.gap()
+      placeChips(r, all, here)
     }
-    if (shown < all.length) r.gap().add(`+${all.length - shown}`, { d: true }, { on: () => toggleMenu(api, menuItems().findIndex((it) => it.key === c.choice)), tip: `${plural(all.length - shown, 'more value')}: open Color by` })
-    if (changed()) {
-      r.right('reset', {}, { on: () => reset(), tip: 'the view as it opens: every value on, the whole time span' })
-      r.d.key('r', 'to reset', () => reset(), false, 2)
+    if (withReset) addReset(r)
+    let last = r
+    if (below) {
+      r.end()
+      last = d.row().gap(2)
+      placeChips(last, all, fitting(all, d.cols - 2))
     }
-    r.d.key('c', 'to color by', () => toggleMenu(api, menuItems().findIndex((it) => it.key === c.choice)), false, 0)
-    r.menus.push((d) => drawMenu(d, api, menuItems(), (it) => it && api.choose(it.key === 'off' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'c', 'to color by'))
+    d.key('c', 'to color by', showMenu, false, 0)
+    last.menus.push((dd) => drawMenu(dd, api, menuItems(), (it) => it && api.choose(it.key === 'off' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'c', 'to color by', 'Color by'))
+    return last
   }
 
   function chipTip(ch) {
@@ -1230,8 +1452,11 @@ export function colorBy(opts = {}) {
 
   state.colour = api
   state.resets.push({
-    changed: () => c.off.size > 0,
+    // the view as it opens: colored as it opens, every value on
+    changed: () => c.off.size > 0 || c.choice !== home(),
     reset: () => {
+      if (c.choice !== home()) c.counts = null
+      c.choice = home()
       c.off.clear()
       save()
     },
@@ -1239,6 +1464,9 @@ export function colorBy(opts = {}) {
   })
   return api
 }
+
+// the cells Reset takes against R, with its gutter, whether it shows or not
+const RESET_W = 7
 
 // ------------------------------------------------------------------------------------------------ the time range
 
@@ -1411,6 +1639,9 @@ export function timeRange(opts = {}) {
       const x0 = row.x
       cells.forEach((cell, i) => {
         const inside = i >= lo && i <= hi
+        // a range zoomed in: its window on the selection background, with its edges `[` `]`, the cells a drag moves
+        // them from, and the rest dim
+        if (r.from !== null && (i === lo || i === hi)) return row.add(lo === hi ? '|' : i === lo ? '[' : ']', { b: true, bg: COLORS.selected })
         const style = cell.brk ? { fg: COLORS.rule } : cell.colour && cell.colour !== COLORS.dim ? { fg: cell.colour } : { d: true }
         row.add(cell.glyph, { ...style, ...(inside && r.from !== null ? { bg: COLORS.selected } : {}), ...(!inside && !cell.brk ? { d: true } : {}) })
       })
@@ -1420,7 +1651,7 @@ export function timeRange(opts = {}) {
       row.hits.push({
         x0,
         x1: x0 + w,
-        tip: r.from === null ? 'drag to frame a range; [ ] pan and + - zoom' : 'drag to frame a range, or drag the window; a click moves it there',
+        tip: r.from === null ? 'drag to frame a range; + zooms in' : 'drag an edge [ ] or the window, or drag to frame a new range; a click moves the window there',
         on: (x) => {
           const len = api.to - api.from
           if (r.from === null) return
@@ -1682,7 +1913,9 @@ function brokenScale(from, to, cols, unit, parts) {
 export function axis(d, scale, o = {}) {
   const gutter = o.gutter || 0
   const row = d.row()
-  if (o.legend && gutter > 2) row.runsOf(clipLine(merged((Array.isArray(o.legend) ? o.legend : [o.legend]).map(segOf).filter(Boolean)), gutter - 2))
+  // the legend whole, or none where the gutter has no room for it (the lanes' tips say it too)
+  const legend = o.legend ? merged((Array.isArray(o.legend) ? o.legend : [o.legend]).map(segOf).filter(Boolean)) : []
+  if (legend.length && lineWidth(legend) <= gutter - 2) row.runsOf(legend)
   row.at(gutter)
   let end = 0
   // a broken scale's breaks are `//` in the rule gray, and no label runs into one
@@ -1745,7 +1978,8 @@ export function strip(scale, items, o = {}) {
     let bn = 0
     for (const [v, m] of by[x]) if (v !== '' && m > bn) [best, bn] = [v, m]
     const colour = best ? hueFn(o.colour)(best) : null
-    return colour && colour !== COLORS.dim ? { s: bar(k, max), fg: colour } : { s: bar(k, max), d: !colour }
+    // a value with no hue of its own (past six, a label's value that does not color) is dim, as no value is
+    return colour && colour !== COLORS.dim ? { s: bar(k, max), fg: colour } : { s: bar(k, max), d: true }
   })
 }
 
@@ -1851,7 +2085,10 @@ export function list(opts = {}) {
           if (valueOf) r.add(colour ? colour.dot(v).s : '●', colour ? colour.dot(v) : mark(hueOf(v))).gap(1)
           const before = r.runs.length
           if (o.row) o.row(it, r, { chosen: ch, open: op })
-          if (ch) for (let k = before; k < r.runs.length; k++) if (!r.runs[k].fg && !r.runs[k].d && r.runs[k].s.trim()) r.runs[k] = { ...r.runs[k], fg: COLORS.accent }
+          if (colour && colour.tally) colour.tally(it)
+          // the chosen row in the accent across its whole width, its dim columns too, as thimble-term's tables mark
+          // theirs; a run in a color of its own (a value's hue, a problem, a link) keeps it
+          if (ch) for (let k = before; k < r.runs.length; k++) if ((!r.runs[k].fg || r.runs[k].fg === COLORS.text) && r.runs[k].s.trim()) r.runs[k] = { ...r.runs[k], fg: COLORS.accent, d: false }
           r.hits.push({ x0: 0, x1: inner.cols, row: true, on: () => {
             s.chosen = key
             s.free = false
@@ -1925,7 +2162,7 @@ export function list(opts = {}) {
 function drawTrack(d, y0, shownRows, total, top, height, spans, items, valueOf, hueOf, go) {
   const rows = height
   const valueAtLine = new Array(total).fill(undefined)
-  for (const [a, , i] of spans) if (!items[i].heading) valueAtLine[a] = valueOf ? valueOf(items[i]) : null
+  for (const [a, , i] of spans) if (!items[i].heading) valueAtLine[a] = valueOf ? valueOf(items[i]) ?? null : null
   const cellOf = (from, to) => {
     const counts = new Map()
     let any = false
@@ -2029,23 +2266,28 @@ export function details(d, o = {}) {
       d.row().add(more, { d: true }, { on: () => { openBlocks.add(key); redraw() }, tip: 'show every line' }).end()
     }
   }
+  // the facts on one row, parted by ` · `; on the rows they need where one is too few, a fact never split
   const facts = (o.facts || []).filter(([, v]) => v !== null && v !== undefined && v !== '')
-  if (facts.length) {
-    const r = d.row()
-    facts.forEach(([k, v], i) => {
-      if (i) r.add(' · ', { d: true })
-      r.add(`${k} `, { d: true }).add(String(v))
-    })
-    r.end()
-  }
+  let fr = null
+  facts.forEach(([k, v]) => {
+    const w = width(`${k} ${v}`)
+    if (fr && fr.x + 3 + w > d.cols) {
+      fr.end()
+      fr = null
+    }
+    if (fr) fr.add(' · ', { d: true })
+    else fr = d.row()
+    fr.add(`${k} `, { d: true }).add(String(v))
+  })
+  if (fr) fr.end()
   for (const g of o.groups || []) {
     if (!g.rows || !g.rows.length) continue
     d.line([{ s: g.title, b: true }])
-    const ww = Math.min(30, Math.max(0, ...g.rows.map((x) => width(x.words || ''))))
+    const ww = Math.min(30, Math.floor(d.cols / 4), Math.max(0, ...g.rows.map((x) => width(x.words || ''))))
     for (const x of g.rows) {
       const r = d.row()
       if (x.when) r.add(x.when, { d: true }).gap()
-      if (ww) r.add(pad(x.words || '', ww), { d: true }).gap()
+      if (ww) r.add(pad(cut(x.words || '', ww), ww), { d: true }).gap()
       r.add(cut(x.text || '', Math.max(4, r.room)), {}, x.on ? { on: x.on, tip: x.tip || 'open it in the list' } : {})
       r.end()
     }
@@ -2055,19 +2297,22 @@ export function details(d, o = {}) {
     for (const [n, text] of o.raw) d.row().add(padStart(n, nw), { d: true }).gap().add(clip(text, d.cols - nw - 2)).end()
   }
   if (o.place || o.ask) {
-    const r = d.row()
+    let r = d.row()
     if (o.place) {
-      // a place too long for the row, beside `ask about it`, drops its folders, then is cut
-      const room = d.cols - 2 - (o.ask ? width('ask about it') + 2 : 0)
-      let words = placeWords(o.place)
-      if (width(words) > room) words = `…/${placeWords(String(o.place).replace(/^[^#]*\//, ''))}`
+      // a place too long for the row beside `ask about it` drops its folders; where its file's name would be cut
+      // there, `ask about it` takes the row under it, and the name is cut only where the row alone has no room, its
+      // line kept
+      const askW = o.ask ? width('ask about it') + 2 : 0
+      const own = o.ask && width(placeWords(o.place)) > d.cols - 2 - askW && width(placeShort(o.place)) > d.cols - 2 - askW
+      const words = placeIn(o.place, d.cols - 2 - (own ? 0 : askW))
       r.add('↗ ', { fg: COLORS.link }, { on: () => open(o.place), tip: 'open its lines' })
-      r.add(clip(words, room), { fg: COLORS.link, u: true }, { on: () => open(o.place), tip: 'open its lines' })
+      r.add(words, { fg: COLORS.link, u: true }, { on: () => open(o.place), tip: 'open its lines' })
+      if (own) {
+        r.end()
+        r = d.row()
+      } else if (o.ask) r.gap()
     }
-    if (o.ask) {
-      if (o.place) r.gap()
-      r.add('ask about it', {}, { on: () => ask(o.ask.ref, o.ask.text), tip: 'ask a side thread about this record' })
-    }
+    if (o.ask) r.add('ask about it', {}, { on: () => ask(o.ask.ref, o.ask.text), tip: 'ask a side thread about this record' })
     r.end()
   }
 }
@@ -2169,7 +2414,7 @@ export function choice(opts = {}) {
       const shown = items().find((it) => it.v === s.value)
       r.add(shown ? shown.name : some ? all : String(s.value ?? ''), {}, { on: open, tip: opts.tip || `choose ${opts.title || 'one'}` })
       if (opts.key) r.d.key(opts.key, `for ${opts.title || 'the choice'}`, open)
-      r.menus.push((d) => drawMenu(d, api, items(), (it) => it && api.set(it.v), opts.key || null, 'to select'))
+      r.menus.push((d) => drawMenu(d, api, items(), (it) => it && api.set(it.v), opts.key || null, 'to select', opts.title || ''))
       return r
     },
   }

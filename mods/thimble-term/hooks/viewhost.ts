@@ -159,7 +159,7 @@ async function pump(cx: Ctx): Promise<void> {
       return bump(cx)
     }
     try {
-      const got = await call<{ id: string; frame: ViewFrame }>(cx, h, '/open', { slug: w.slug, cols: w.cols, rows: w.rows, theme: 'dark', ...(w.ref ? { ref: w.ref } : {}) })
+      const got = await call<{ id: string; frame: ViewFrame }>(cx, h, '/open', { slug: w.slug, cols: w.cols, rows: w.rows, theme: await cx.theme(), ...(w.ref ? { ref: w.ref } : {}) })
       if (current !== me) {
         await call(cx, h, '/close', { id: got.id }).catch(() => undefined)
         return

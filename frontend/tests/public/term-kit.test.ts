@@ -16,6 +16,8 @@ const tick = () => new Promise((r) => setTimeout(r, 0))
 const frames = () => sent.filter((m) => m.t === 'frame')
 const last = () => frames().at(-1)!
 const text = (f = last()) => f.lines.map((l: { s: string }[]) => l.map((s) => s.s).join('').replace(/\s+$/, ''))
+// an open menu's rows, inside its frame: `❯ all`, `  INC-311`
+const menu = (rows = text()) => rows.filter((r: string) => /^\s*│/.test(r)).map((r: string) => r.replace(/^\s*│ /, '').replace(/\s*│$/, ''))
 let n = 0
 
 const LABELS = [
@@ -65,7 +67,7 @@ describe('text', () => {
 })
 
 describe('the drawing', () => {
-  test('rows carry a 2-cell margin, hot regions are counted from the frame\'s left edge, and nothing passes the rows or the columns', async () => {
+  test('rows carry a 2-cell margin, hot regions are counted from the frame\'s left edge, and nothing passes the rows or the columns (a cut row ends in …)', async () => {
     init({ cols: 30, rows: 3 })
     kit.draw((d: any) => {
       d.row().margin({ s: '❯' }).add('one', {}, { on: () => {} }).right('R', { d: true }).end()
@@ -75,7 +77,7 @@ describe('the drawing', () => {
     })
     await tick()
     const f = last()
-    expect(text(f)).toEqual(['❯ one' + ' '.repeat(26) + 'R', '  ' + 'x'.repeat(30), '  three'])
+    expect(text(f)).toEqual(['❯ one' + ' '.repeat(26) + 'R', '  ' + 'x'.repeat(29) + '…', '  three'])
     expect(f.hits[0]).toMatchObject({ y: 0, x0: 2, x1: 5 })
   })
 
@@ -190,7 +192,7 @@ describe('Color by', () => {
     await click('reset')
     expect(colour.query()).toEqual({ field: 'kind', off: [] })
     // the choice and the values turned off are kept for the view
-    expect(sent.filter((m) => m.t === 'state').at(-1)!.state.colour).toEqual({ by: 'field:kind', off: [] })
+    expect(sent.filter((m) => m.t === 'state').at(-1)!.state.colour).toEqual({ by: 'field:kind', off: [], seen: [] })
   })
 
   test('a chip\'s tip says what its value means; values past six share one chip, `other`, with no hue of their own', async () => {
@@ -233,14 +235,17 @@ describe('Color by', () => {
     await tick()
     expect(last().hints).toContain('c to color by')
     await key('c')
-    let rows = text()
-    // under the chosen field, what it is
-    expect(rows.slice(1, 5).map((r: string) => r.trim().split(/\s{2,}/)[0])).toEqual(['Off', '❯ Kind', 'What happened', 'Source'])
-    expect(rows).toContain('  labels')
+    // in a frame over the rows under the top row, Color by in its edge
+    expect(text()[1]).toMatch(/^ {2}╭─ Color by ─+╮$/)
+    let rows = menu()
+    // under the chosen field, what it is; the others' values in words
+    expect(rows.map((r: string) => r.trim().split(/\s{2,}/)[0])).toEqual(['Off', '❯ Kind', 'What happened', 'Source', 'labels', 'Database connections'])
+    expect(rows.find((r: string) => r.includes('Source'))).toMatch(/Source\s+alert · deploy$/)
     expect(last().hints).toEqual(['↑↓ to choose', 'Enter to color by', 'c to close'])
     for (let i = 0; i < 3; i++) await key('down')
-    rows = text()
-    expect(rows.find((r: string) => r.startsWith('❯ Database connections'))).toMatch(/● connections {2}● other\s+regex$/)
+    rows = menu()
+    // a label's values named as its chips name them: those it colors by, then `not marked`
+    expect(rows.find((r: string) => r.startsWith('❯ Database connections'))).toMatch(/connections · not marked\s+regex$/)
     expect(rows.find((r: string) => r.includes('definition ↗'))).toContain('regex · "(?i)connections?"')
     await click('definition')
     expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'label', id: 'k1', name: 'Database connections' })
@@ -262,6 +267,103 @@ describe('Color by', () => {
     const colour = kit.colorBy({ fields: FIELDS })
     expect(colour.by).toEqual({ field: 'kind', title: 'Kind' })
     expect(colour.query()).toEqual({ field: 'kind', off: [] })
+  })
+
+  // a label as thimble lists it: its values with whether each colors (a regex label's `other` does not), on in Files
+  const ON = [
+    { id: 'k1', name: 'Database connections', kind: 'regex', text: '', spec: '(?i)connections?', scope: '', values: [{ name: 'connections', highlight: true, n: 22 }, { name: 'other', highlight: false, n: 176 }], here: true, on: true },
+    { id: 'k2', name: 'Charged twice', kind: 'regex', text: '', spec: 'charged twice', scope: '', values: [{ name: 'charged twice', highlight: true, n: 3 }, { name: 'other', highlight: false, n: 195 }], here: true, on: false },
+  ]
+
+  test('the view opens colored by a label that is on, as in the browser: its values as chips with counts, then not marked; one turned on later takes the color', async () => {
+    init({ labels: ON })
+    let heard = 0
+    const colour = kit.colorBy({ fields: FIELDS, onChange: () => heard++ })
+    kit.draw((d: any) => colour.draw(d))
+    colour.counts({ connections: 22, '': 176 })
+    await tick()
+    expect(colour.by).toEqual({ label: 'k1', title: 'Database connections' })
+    expect(text()[0]).toBe('  Color by  Database connections ↗  ● connections 22  ● not marked 176')
+    expect(kit.changed()).toBe(false)
+    // Charged twice turned on in Files: it takes the color, the one turned on last
+    kit.handle({ t: 'labels', labels: ON.map((l) => ({ ...l, on: true })) })
+    await tick()
+    expect(colour.by).toEqual({ label: 'k2', title: 'Charged twice' })
+    expect(heard).toBe(1)
+    // another view opening keeps what it saw: nothing new is on, so its choice stays
+    init({ labels: ON.map((l) => ({ ...l, on: true })), state: { colour: { by: 'field:kind', off: [], seen: ['k1', 'k2'] } } })
+    expect(kit.colorBy({ fields: FIELDS }).by).toEqual({ field: 'kind', title: 'Kind' })
+  })
+
+  test('Reset puts back Color by as the view opens, and shows after any change from it', async () => {
+    init({ labels: ON })
+    const colour = kit.colorBy({ fields: FIELDS })
+    kit.draw((d: any) => colour.draw(d))
+    await tick()
+    expect(text()[0]).not.toMatch(/reset$/)
+    colour.choose('kind')
+    await tick()
+    expect(text()[0]).toMatch(/reset$/)
+    expect(last().hints).toContain('r to reset')
+    await key('r')
+    expect(colour.by).toEqual({ label: 'k1', title: 'Database connections' })
+    expect(text()[0]).not.toMatch(/reset$/)
+  })
+
+  test('in a narrow panel Color by takes a row of its own under the row\'s other controls, its name whole, and its chips the row under that where none fits beside it', async () => {
+    init({ cols: 45, labels: ON })
+    const colour = kit.colorBy({ fields: FIELDS })
+    const q = kit.search({ words: 'search events' })
+    const inc = kit.choice({ title: 'incident', all: 'all', key: 'i', values: ['INC-311'] })
+    kit.draw((d: any) => colour.draw(d, (r: any) => {
+      q.add(r).gap()
+      inc.add(r).gap()
+    }))
+    colour.counts({ connections: 22, '': 176 })
+    await tick()
+    expect(text().slice(0, 3)).toEqual(['  / search events  incident  all', '  Color by  Database connections ↗', '    ● connections 22  ● not marked 176'])
+    // the chips still turn their values off
+    await click('not marked')
+    expect(colour.query()).toEqual({ label: 'k1', name: 'Database connections', off: [null] })
+    // Reset stands at R on the top row
+    expect(text()[0]).toMatch(/ {2}reset$/)
+  })
+
+  test('the menu: in a frame, the chosen field\'s values with their dots, the others\' in words, those of a field with none declared from the records the list drew; what it is said once', async () => {
+    init({ cols: 90, rows: 24 })
+    const fields = [{ name: 'kind', title: 'Kind', description: 'What happened' }, { name: 'service', title: 'Service', description: 'The service it is about' }]
+    const colour = kit.colorBy({ fields })
+    const list = kit.list({ key: (e: any) => e.id })
+    const items = [{ id: 1, kind: 'fired', service: 'web' }, { id: 2, kind: 'resolved', service: 'payments' }, { id: 3, kind: 'fired', service: 'payments' }]
+    kit.draw((d: any) => {
+      colour.draw(d)
+      list.draw(d, { items, colour, row: (e: any, r: any) => r.add(e.kind) })
+    })
+    colour.counts({ fired: 2, resolved: 1 })
+    await tick()
+    await key('c')
+    const rows = menu()
+    const kind = rows.find((r: string) => r.includes('Kind'))!
+    expect(kind).toMatch(/❯ Kind\s+● fired {2}● resolved$/)
+    expect(rows.find((r: string) => r.includes('Service'))).toMatch(/Service\s+payments · web$/)
+    expect(rows.filter((r: string) => r.includes('What happened')).length).toBe(1)
+    expect(rows.some((r: string) => r.includes('The service it is about'))).toBe(false)
+    // a dot only on the chosen field's values
+    const boxed = last().lines.filter((l: any) => l.some((sg: any) => sg.s.includes('Service')))[0]
+    expect(boxed.some((sg: any) => sg.s.includes('●'))).toBe(false)
+  })
+
+  test('in a narrow menu a label\'s values and definition stand under its name, and `definition ↗` keeps its ↗', async () => {
+    init({ cols: 47, rows: 24, labels: ON })
+    const colour = kit.colorBy({ fields: FIELDS })
+    kit.draw((d: any) => colour.draw(d))
+    await tick()
+    await key('c')
+    const rows = menu()
+    const at = rows.findIndex((r: string) => r.startsWith('❯ Database connections'))
+    expect(rows[at + 1].trim()).toBe('● connections  ● not marked')
+    expect(rows.slice(at + 1).some((r: string) => r.trim().endsWith('definition ↗'))).toBe(true)
+    expect(rows.every((r: string) => r.length <= 43)).toBe(true)
   })
 })
 
@@ -295,6 +397,11 @@ describe('the time range', () => {
     const strip = last().lines[1]
     expect(strip.some((s: any) => s.bg === 'selectionBg')).toBe(true)
     expect(strip.some((s: any) => s.d && !s.bg)).toBe(true)
+    // the window's edges are `[` `]`, the cells a drag moves them from
+    const row = text()[1]
+    expect(row.indexOf('[')).toBeGreaterThan(2)
+    expect(row.indexOf(']')).toBeGreaterThan(row.indexOf('['))
+    expect(strip.find((s: any) => s.s.includes('[')).bg).toBe('selectionBg')
     expect(sent.filter((m) => m.t === 'state').at(-1)!.state.ranges.time).toEqual([range.from, range.to])
     await click(text()[1].trim().slice(0, 1), 0)
     expect(range.from).toBeLessThan(from)
@@ -362,11 +469,15 @@ describe('the time range', () => {
     expect(rows[2].slice(2 + 32, 2 + 34)).toBe('//')
     expect(rows[2]).toContain('17 May 09:00')
     expect(last().lines[2].find((s: any) => s.s === '//').fg).toBe('subtle')
-    // a legend stands in the gutter before the ticks, cut to leave a gutter's space
-    kit.draw((d: any) => kit.axis(d, range.scale(d.cols - 12), { gutter: 12, gap: 8, legend: [{ s: '─', fg: 'subtle' }, { s: ' running  × failed', d: true }] }))
+    // a legend stands whole in the gutter before the ticks, leaving a gutter's space; none where it has no room
+    const legend = [{ s: '─', fg: 'subtle' }, { s: ' running  × failed', d: true }]
+    kit.draw((d: any) => kit.axis(d, range.scale(d.cols - 22), { gutter: 22, gap: 8, legend }))
     await tick()
-    expect(text()[0]).toMatch(/^ {2}─ running {4}16 May 14:00/)
+    expect(text()[0]).toMatch(/^ {2}─ running {2}× failed {4}16 May 14:00/)
     expect(last().lines[0][1]).toMatchObject({ s: '─', fg: 'subtle' })
+    kit.draw((d: any) => kit.axis(d, range.scale(d.cols - 12), { gutter: 12, gap: 8, legend }))
+    await tick()
+    expect(text()[0]).toMatch(/^ +16 May 14:00/)
     // a stretch with no room for a time and its date gives the date alone
     init({ cols: 40 })
     const narrow = kit.timeRange({ gap: 1200 })
@@ -496,6 +607,22 @@ describe('the list', () => {
     expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'ask', ref: 'log.txt#L16', text: 'event 15' })
   })
 
+  test('the chosen row is in the accent across its whole width, its dim columns too; a value\'s hue keeps its own', async () => {
+    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind' }] })
+    const list = kit.list({ key: (e: any) => e.id })
+    kit.draw((d: any) => list.draw(d, { items, colour, row: (e: any, r: any) => r.add(String(e.id), { d: true }).gap().add(e.text) }))
+    colour.counts({ fired: 26, resolved: 14 })
+    await tick()
+    const chosen = last().lines[0]
+    expect(chosen.find((s: any) => s.s === '●').fg).toBe(colour.colourOf('resolved'))
+    for (const s of chosen.filter((x: any) => x.s.trim() && x.s !== '●' && x.s !== '❯ ' && x.s !== '▌')) expect([s.s, s.fg, s.d]).toEqual([s.s, 'suggestion', undefined])
+    // a strip's cell whose value has no hue of its own (past six) is dim, never the text's color
+    const sc = { cols: 3, binOf: (t: number) => t, step: 1 }
+    const c2 = kit.colorBy({ fields: [{ name: 'k', title: 'K' }] })
+    c2.counts(Object.fromEntries(['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((v, i) => [v, 10 - i])))
+    expect(kit.strip(sc, [{ t: 0, k: 'g' }], { value: (it: any) => it.k, colour: c2 })[0]).toMatchObject({ d: true })
+  })
+
   test('a table: the columns\' names above the rows, dim, ▼ after the one sorted by, a click on a name sorts by it', async () => {
     init({ cols: 40, rows: 8 })
     const list = kit.list({ key: (e: any) => e.id })
@@ -611,7 +738,8 @@ describe('search and choices', () => {
     await tick()
     expect(text()[0]).toBe('  incident  all')
     await key('i')
-    expect(text().slice(1).map((r: string) => r.trim())).toEqual(['❯ all', 'INC-311', 'INC-312'])
+    expect(text()[1]).toMatch(/^ {2}╭─ incident ─+╮$/)
+    expect(menu().map((r: string) => r.trim())).toEqual(['❯ all', 'INC-311', 'INC-312'])
     await key('down')
     await key('down')
     await key('return')
@@ -628,7 +756,7 @@ describe('search and choices', () => {
     })
     await tick()
     await key('s')
-    expect(text().slice(1)).toEqual(['❯ all', '  Run 1 · nested team', '    lead', '      survey'])
+    expect(menu()).toEqual(['❯ all', '  Run 1 · nested team', '    lead', '      survey'])
     await key('down')
     await key('down')
     await key('down')
@@ -650,7 +778,7 @@ describe('search and choices', () => {
     expect(kit.changed()).toBe(false)
     expect(text()[0]).toBe('  items  pull requests')
     await key('i')
-    expect(text().slice(1).map((r: string) => r.trim())).toEqual(['❯ pull requests', 'issues'])
+    expect(menu().map((r: string) => r.trim())).toEqual(['❯ pull requests', 'issues'])
     await key('down')
     await key('return')
     expect(got).toEqual(['issues'])
@@ -690,6 +818,15 @@ describe('details', () => {
     expect(text()[0]).toBe('  ↗ …/agent-a1e955cf.jsonl line 20  ask about it')
     await click('agent-a1e955cf')
     expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'open', ref: place })
+  })
+
+  test('in a narrow panel ask about it takes the row under the place, which keeps its line; facts take the rows they need, none split', async () => {
+    init({ cols: 40, rows: 6 })
+    const place = 'alerts/monitor-20260516-0000.jsonl#L2'
+    kit.draw((d: any) => kit.details(d, { facts: [['service', 'payments'], ['severity', 'critical'], ['id', 'alr-42']], place, ask: { ref: place, text: 'x' } }))
+    await tick()
+    expect(text()).toEqual(['  service payments · severity critical', '  id alr-42', '  ↗ …/monitor-20260516-0000.jsonl line 2', '  ask about it'])
+    expect(kit.placeIn(place, 24)).toBe('…/monitor…0.jsonl line 2')
   })
 })
 

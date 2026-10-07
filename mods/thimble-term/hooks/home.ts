@@ -187,6 +187,8 @@ function viewsSection(vs: readonly HomeView[]): HomeSection {
       title: v.name,
       fresh: v.fresh,
       right: rightOf([v.files.join(', '), afterMark(v.words)], v.fresh),
+      // without its files where they would cut its name
+      short: rightOf([afterMark(v.words)], v.fresh),
       act: { op: 'open', open: { kind: 'view', slug: v.slug, built: v.drawable } },
     })),
   }
@@ -500,7 +502,10 @@ function itemLine(row: HomeRow, x: number, w: number): Line {
   // question)
   const full: Line = [...bar, ...(row.right ?? [])]
   const room = w - lineWidth(full) - 2 - (lineWidth(left) - width(row.title))
-  const right = row.short && lineWidth(left) + 2 + lineWidth(full) > w && room < Math.min(TITLE_MIN, width(row.title)) ? [...bar, ...row.short] : full
+  const chosen = row.short && lineWidth(left) + 2 + lineWidth(full) > w && room < Math.min(TITLE_MIN, width(row.title)) ? [...bar, ...row.short] : full
+  // the right part never takes the title's first cells: it is cut where it would leave the title fewer than 12
+  const keep = Math.min(width(row.title), 12) + lineWidth(left) - width(row.title)
+  const right = lineWidth(chosen) + 2 + keep > w ? fitTo(chosen, Math.max(0, w - 2 - keep)) : chosen
   // a row whose end tells it from the rows beside it, cut in its middle
   if (row.middle) {
     const fit = w - lineWidth(right) - 2 - (lineWidth(left) - width(row.title))

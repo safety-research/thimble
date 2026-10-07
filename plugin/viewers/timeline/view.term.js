@@ -178,16 +178,17 @@ draw((d) => {
   const scale = range.scale(d.cols - GUTTER)
   const opened = E.find((e) => e.r === events.open)
   // a lane per source, when the panel has the rows for them: the events in the range in the scale's bins, each bin in
-  // the hue most of its events take, every lane on one height scale; the opened event's time a guide through them
+  // the hue most of its events take, every lane on one height scale; the opened event's time a guide through them. In a
+  // range zoomed in, a source with no event in it has no lane
   if (d.rows >= 26) {
-    const bySource = SOURCES.map((s) => E.filter((e) => e.source === s))
-    const max = maxBin(scale, bySource)
-    bySource.forEach((items, l) => {
-      const r = d.row().add(SOURCES[l].padEnd(GUTTER), { d: true })
+    const lanes = SOURCES.map((s) => [s, E.filter((e) => e.source === s)]).filter(([, items]) => range.full || items.some((e) => range.has(e.t)))
+    const max = maxBin(scale, lanes.map(([, items]) => items))
+    lanes.forEach(([source, items]) => {
+      const r = d.row().add(source.padEnd(GUTTER), { d: true })
       const x0 = r.x
       r.runsOf(strip(scale, items, { value: (e) => e.value, colour, max, guide: opened ? opened.t : null }))
       // a click on a lane opens the event nearest that time in that lane
-      r.hits.push({ x0, x1: x0 + scale.cols, tip: `${SOURCES[l]}: a click opens the event nearest that time`, on: (x) => {
+      r.hits.push({ x0, x1: x0 + scale.cols, tip: `${source}: a click opens the event nearest that time`, on: (x) => {
         const t = scale.t(x)
         const near = items.filter((e) => range.has(e.t) && Math.abs(e.t - t) <= scale.step * 3).sort((a, b) => Math.abs(a.t - t) - Math.abs(b.t - t))[0]
         if (near) show(near.r)
@@ -205,8 +206,9 @@ draw((d) => {
     if (dayOf(e.t) !== day) items.push({ heading: dayName((day = dayOf(e.t), e.t)) })
     items.push(e)
   }
-  // the columns the width holds: the actor from 88 cells, the incident from 110 (its menu and the details have it too)
-  const shownCols = ['time', 'source', 'kind', ...(d.cols >= 88 ? ['actor'] : []), ...(d.cols >= 110 ? ['incident'] : []), 'text']
+  // the columns the width holds: the kind from 60 cells (in a narrower panel Color by and the details give it), the
+  // actor from 88, the incident from 110 (its menu and the details have it too)
+  const shownCols = ['time', 'source', ...(d.cols >= 60 ? ['kind'] : []), ...(d.cols >= 88 ? ['actor'] : []), ...(d.cols >= 110 ? ['incident'] : []), 'text']
   const WIDTHS = { time: 8, source: 6, kind: 10, actor: 10, incident: 7 }
   const cols = columns(shownCols.map((k) => (k === 'text' ? { grow: true } : { w: WIDTHS[k] })), d.cols - 6)
   events.draw(d, {
@@ -215,8 +217,11 @@ draw((d) => {
     value: (e) => e.value,
     empty: 'no event',
     row: (e, r) => {
-      // a failed outcome as `×` before its kind in the text's own color, since only Color by's choice takes a color
-      const value = { time: hms(e.t), source: e.source, kind: e.outcome === 'failed' ? `× ${e.kind}` : e.kind, actor: e.actor, incident: e.incident, text: e.text }
+      // a failed outcome as `×` before its kind (before its text where the kind has no column) in the text's own color,
+      // since only Color by's choice takes a color
+      const failed = e.outcome === 'failed' ? '× ' : ''
+      const hasKind = shownCols.includes('kind')
+      const value = { time: hms(e.t), source: e.source, kind: `${failed}${e.kind}`, actor: e.actor, incident: e.incident, text: `${hasKind ? '' : failed}${e.text}` }
       cols.cells(r, shownCols.map((k) => value[k]), shownCols.map((k) => (k === 'kind' || k === 'text' ? {} : { d: true })))
     },
     onOpen: (e) => readRecord(e.r),
@@ -229,11 +234,11 @@ draw((d) => {
       }
       const rec = got.record
       const link = (b) => ({ when: hms(b.t), words: `${b.source} · ${b.actor}`, text: b.text, on: () => show(b.r) })
+      // its facts say what its line holds, so the line itself is a step away, behind ↗ (the citation panel shows it)
       details(dd, {
         text: rec.text,
         facts: [['service', rec.service], ['severity', rec.severity], ['outcome', rec.outcome], ['id', rec.id], ['took', rec.took != null ? dur(rec.took) : '']],
         groups: [{ title: 'Answers', rows: got.answers ? [link(got.answers)] : [] }, { title: 'Answered by', rows: got.answered.map(link) }],
-        raw: got.raw,
         place: got.ref,
         ask: { ref: got.ref, text: rec.text },
       })

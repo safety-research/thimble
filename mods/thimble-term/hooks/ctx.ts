@@ -11,6 +11,8 @@ export type SurfaceGot = { ok: true; value: unknown } | { ok: false; error: stri
 export type Ctx = {
   // ---- the host
   now: () => Promise<number>
+  /** Claude Code's theme as a view's program hears it: `light` for a light theme, else `dark` */
+  theme: () => Promise<'dark' | 'light'>
   run: (argv: readonly string[], init?: ProcessRunInit) => Promise<ProcessRunResult>
   /** a command that may run longer than `run` allows (a label's run on every record): started beside the session, which
    *  it ends with, its whole output read once it exits */

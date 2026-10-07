@@ -100,6 +100,14 @@ function cxOf($: Dollar): Ctx {
   const keep = async (row: string, part: Parameters<typeof keepRow>[3]) => (rt.sc ? keepRow(io, rt.sc.ws, row, part) : undefined)
   return {
     now: () => $.clock.now().catch(() => Date.now()),
+    theme: async () => {
+      try {
+        const v = (await $.config.list()).find(r => r.key === 'theme')?.value
+        return /light/i.test(String(v ?? '')) ? 'light' : 'dark'
+      } catch {
+        return 'dark'
+      }
+    },
     run: (argv, init) => $.process.run(argv, init),
     runLong: async (argv, init) => {
       const child = $.process.spawn({ argv, ...(init?.cwd ? { cwd: init.cwd } : {}), ...(init?.env ? { env: init.env } : {}) })
