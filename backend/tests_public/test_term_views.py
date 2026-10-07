@@ -440,3 +440,117 @@ async def test_timeline_opens_an_event_in_place_and_narrows_to_an_incident(timel
     out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, ref="view:timeline/INC-313",
                                      panel=False)
     assert "incident  INC-313" in out.splitlines()[0]
+
+
+# ------------------------------------------------------------------------------------------------------ Linked sessions
+
+
+@pytest.fixture()
+def linked(workspaces_tmp, tmp_path, monkeypatch, inproc) -> str:
+    """The worked example Linked sessions saved as a view of its own sample, with its terminal program."""
+    d = tmp_path / "data"
+    shutil.copytree(views.EXAMPLES_DIR / "linked-sessions" / "sample", d / "linked")
+    (d / "linked" / "manifest.json").write_text(json.dumps({"name": "linked", "description": "an example's sample"}))
+    monkeypatch.setattr(config, "DATA_DIR", d.resolve())
+    src = views.EXAMPLES_DIR / "linked-sessions"
+    raw = json.loads((src / "view.json").read_text("utf-8"))
+    views.write_view("linked", "linked-sessions", reader=(src / "reader.py").read_text("utf-8"),
+                     html=(src / "view.html").read_text("utf-8"), term=(src / "view.term.js").read_text("utf-8"),
+                     **{k: raw.get(k) for k in ("name", "description", "scope", "records", "accepts", "units", "libs")})
+    return "linked"
+
+
+LEAD1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576.jsonl"
+PORT1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576/subagents/agent-a07a4da7.jsonl"
+
+
+def _lanes(body: list[str]) -> list[str]:
+    """The lanes' names, from the row under the strip to the axis, the row above the blank one."""
+    end = body.index("", 3) - 1
+    return [re.match(r"\s*\S+(?: \S+)*", x[2:])[0] for x in body[3:end]]
+
+
+@needs_node
+@pytest.mark.parametrize("cols", [120, 200])
+async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
+    """The worked example at 120 and 200 columns: the top row (search, the sessions menu, Color by with its chips), the
+    time range's readout and its strip broken where the runs lie hours apart, a lane per session under its run with each
+    subagent under the session that spawned it, the axis with its breaks, then the messages and calls under each run's
+    name, each with its time, session, tool or kind, first line and how long a call took; its hint row names only keys
+    the pane passes on."""
+    out = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP)
+    lines = out.splitlines()
+    assert lines[:2] == ["  Linked sessions", "  3 runs · 17 sessions · 316 calls · 36 messages"]
+    body = lines[3:-1]
+    assert len(body) == 40 and all(len(x) <= cols + 2 for x in body)
+    assert body[0].startswith("  / search  sessions  all  Color by  Speaker  ● client-port 100  ● lead 63  ● webhooks 63")
+    assert body[1] == "  12 Sep 14:02 – 13 Sep 09:53 · 19h 51m"
+    assert body[2].count(" // ") == 2
+    assert _lanes(body) == [
+        "▾ Run 1 · nested team", "  lead", "  ├ survey", "  ├ client-port", "  │ ├ pagination", "  │ └ auth-headers",
+        "  ├ webhooks", "  └ test-runner", "▾ Run 2 · flat team", "  lead", "  ├ client-port", "  ├ webhooks",
+        "  └ test-runner", "▾ Run 3 · with reviewer", "  lead", "  ├ survey", "  ├ client-port", "  ├ webhooks",
+        "  ├ reviewer", "  └ reviewer 2"]
+    # each run's lanes stand in its own stretch of the axis: Run 2's start after the first break, Run 3's after the second
+    breaks = [i for i in range(len(body[2])) if body[2][i:i + 4] == " // "]
+    assert body[4][27:breaks[0]].strip() and not body[13][27:breaks[0]].strip() and body[13][breaks[0]:breaks[1]].strip()
+    axis_row = body[23]
+    assert axis_row.startswith("  ─ running  × failed"), "the key of the lanes' own marks, in the names' column"
+    assert axis_row.count("//") == 2 and "12 Sep 14:15" in axis_row and "12 Sep 16:45" in axis_row and "13 Sep 09:15" in axis_row
+    assert body[24] == ""
+    assert body[25].startswith("  Run 1 · nested team")
+    assert body[26].startswith("❯ ● 14:02:00  lead          Prompt     Upgrade invoicer from Brambleway API v2 to v3.")
+    assert re.match(r"  ● 14:03:10  lead          Task       Find every v2 call site +292 s", body[31])
+    assert re.match(r"  ● 14:04:31  survey        WebSearch  Brambleway API v3 changelog +× error  30 s", body[38])
+    assert lines[-1].strip() == ("↑↓ to choose · Enter to open · c to color by · / to search · s for sessions · [ ] to "
+                                 "pan · + - to zoom · a to ask · b to go back · x to close")
+
+
+@needs_node
+async def test_linked_sessions_folds_a_run_where_the_lanes_have_no_room(linked):
+    """In a short panel the largest run folds to one lane of all its sessions, so the list keeps its rows; ▸ unfolds it,
+    and another run folds in its place."""
+    out = await term_views.draw_text(linked, "linked-sessions", cols=92, rows=36, wrap=DRAW_WRAP, panel=False)
+    body = out.splitlines()
+    assert _lanes(body)[:2] == ["▸ Run 1 · nested team", "▾ Run 2 · flat team"]
+    assert body[3][25:].strip(), "a folded run draws its sessions' records in one lane"
+    out = await term_views.draw_text(linked, "linked-sessions", cols=92, rows=36, wrap=DRAW_WRAP, panel=False, keys=["click:▸"])
+    lanes = _lanes(out.splitlines())
+    assert lanes[:3] == ["▾ Run 1 · nested team", "  lead", "  ├ survey"] and lanes[-1].startswith("▸ Run 3")
+
+
+@needs_node
+async def test_linked_sessions_opens_a_call_in_place_narrows_to_a_run_and_follows_a_citation(linked):
+    """Enter opens the chosen call in place: what came back, the subagent its Task spawned (a click shows that session
+    alone) and its place; an Edit opened from its citation shows its change; a run's name in the lanes narrows the view
+    to it, as the sessions menu does, and a citation of a run opens the view narrowed to it."""
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP,
+                                     keys=["down"] * 5 + ["return"], panel=False)
+    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
+    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
+    assert "14:03:10  lead          Task       Find every v2 call site" in rows[at]
+    assert rows[at + 1].strip().startswith("14 call sites in 9 files.")
+    assert rows[at + 2].strip() == "Subagent"
+    assert rows[at + 3].strip() == "14:03:12  survey  Find every v2 call site in invoicer/ and summarise the v3 changes that affect them."
+    assert rows[at + 4].strip() == f"↗ {LEAD1} line 10  ask about it"
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP,
+                                     keys=["down"] * 5 + ["return", "click:Find every v2 call site in invoicer/ and"], panel=False)
+    rows = out.splitlines()
+    assert "sessions  survey" in rows[0] and rows[0].rstrip().endswith("reset")
+    assert _lanes(rows) == ["▾ Run 1 · nested team", "  survey"]
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref=f"{PORT1}#L13", panel=False)
+    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
+    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
+    assert "14:10:20  client-port   Edit       invoicer/client/http.py" in rows[at]
+    assert rows[at + 1].strip() == '− BASE_URL = "https://api.brambleway.example/v2"'
+    assert rows[at + 2].strip() == '+ BASE_URL = "https://api.brambleway.example/v3"'
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, keys=["click:Run 2 · flat team"],
+                                     panel=False)
+    rows = out.splitlines()
+    assert "sessions  Run 2 · flat team" in rows[0]
+    assert rows[1].startswith("  12 Sep 16:4")
+    assert _lanes(rows) == ["▾ Run 2 · flat team", "  lead", "  ├ client-port", "  ├ webhooks", "  └ test-runner"]
+    assert not any(x.startswith("  Run ") for x in rows), "one run in view needs no heading"
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref="view:linked-sessions/r3",
+                                     panel=False)
+    assert "sessions  Run 3 · with reviewer" in out.splitlines()[0]
