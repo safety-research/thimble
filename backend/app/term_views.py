@@ -24,8 +24,10 @@ srt (or bubblewrap) gives it no network (srt's proxy refuses every host and, on 
 bubblewrap unshares the network) and hides the home folder, thimble's folders, the temp folders and where user data
 lives. A machine where neither runs draws no terminal view (the panel says why).
 
-`thimble view text <slug> --cwd <dir> --width 120` (draw_text) draws a view as text with no Claude Code: for the tests,
-the view checks and the reviewer.
+`thimble view text <slug> --cwd <dir> --width 120` (draw_text) draws a view as text with no Claude Code, for the tests.
+draw_check draws a view's draft the same way for its checks (views.term_draws: at 120 and 200 columns, in light and
+dark) and its reviewer's pictures (view_review.py), and says whether the program failed, timed out or drew past the
+panel.
 """
 from __future__ import annotations
 
@@ -60,6 +62,10 @@ EVENT_WAIT_S = 2.0  # how long an event waits for the frame that answers it
 START_WAIT_S = 20.0  # how long a program has to draw its first frame
 SETTLE_QUIET_S = 0.25  # draw_text: no query out and no new frame for this long
 SETTLE_MAX_S = 120.0
+# the view checks' draws of a view built in terminal mode (views.term_draws): its columns and theme as it opens, each
+# CHECK_ROWS tall, as a laptop's terminal and a large screen show the panel
+CHECK_DRAWS = ((120, "light"), (120, "dark"), (200, "light"), (200, "dark"))
+CHECK_ROWS = 40
 IDLE_S = 600.0  # the host ends this long after its last view closed
 LINE_MAX = 8 * 1024 * 1024
 ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ")
@@ -79,12 +85,13 @@ class SandboxError(TermViewError):
 # --------------------------------------------------------------------------------------------------------- the view
 
 
-def term_view(c: str, slug: str) -> tuple[dict[str, Any], str]:
+def term_view(c: str, slug: str, *, live: bool = False) -> tuple[dict[str, Any], str]:
     """(the view as it last passed its checks, its view.term.js) for workspace `c`; TermViewError for a view that is
-    not there, never passed, or has no view.term.js (built in browser mode)."""
+    not there, never passed, or has no view.term.js (built in browser mode). `live`: the view's live folder, its draft,
+    which the view's checks draw (draw_check)."""
     from . import views  # noqa: PLC0415
 
-    view = views.read_built(c, slug)
+    view = views.read_view(c, slug) if live else views.read_built(c, slug)
     if view is None or not view.get("dir"):
         raise TermViewError(f"there is no view {slug!r}")
     path = Path(view["dir"]) / VIEW_TERM
@@ -194,6 +201,22 @@ def denied_roots() -> list[Path]:
     return out
 
 
+def node_problem() -> str:
+    """Why no view program runs on this machine for want of Node, '' when its Node is NODE_MIN or newer: what a view
+    build in terminal mode needs (views.build_problem_for). The line reaches the orientation and main too, so it names
+    what is missing and no command."""
+    from . import srt  # noqa: PLC0415
+
+    need = ".".join(map(str, NODE_MIN))
+    node = srt.node()
+    if not node:
+        return f"Terminal views need Node {need}+, and this machine has no Node."
+    have = srt.node_version(node) or (0, 0)
+    if have < NODE_MIN:
+        return f"Terminal views need Node {need}+, and this machine has Node {'.'.join(map(str, have))}."
+    return ""
+
+
 def node_flags(node: str) -> list[str]:
     """Node's permission model for the program: reads in the kit's folder alone, no child process, worker, addon or
     WASI (none is allowed), and a heap of MEMORY_MB."""
@@ -275,9 +298,15 @@ class Program:
     """One open view's sandboxed program (module note)."""
 
     def __init__(self, c: str, slug: str, *, pid: str = "", push: Push | None = None, wrap: str | None = None,
-                 keep: bool = True) -> None:
+                 keep: bool = True, live: bool = False, answers: int = 0) -> None:
         self.c, self.slug, self.id = c, slug, pid or secrets.token_hex(6)
         self.keep = keep  # whether it opens on what the view kept and keeps what changes (False: as the view opens)
+        self.live = live  # whether it runs the view's draft and its reader calls read the draft (the view's checks)
+        self.answers_kept = answers  # how many of the reader's answers to keep (`answers`), for the view's checks
+        self.answers: list[Any] = []
+        self.fetches = 0
+        self.failed: list[str] = []  # the reader's errors the program's fetches got
+        self.name = slug
         self.push = push
         self.wrap = wrap
         self.proc: asyncio.subprocess.Process | None = None
@@ -301,7 +330,8 @@ class Program:
         """Start the program and return its first frame. TermViewError when the view or the sandbox cannot run it."""
         from . import views  # noqa: PLC0415
 
-        view, source = await asyncio.to_thread(term_view, self.c, self.slug)
+        view, source = await asyncio.to_thread(lambda: term_view(self.c, self.slug, live=self.live))
+        self.name = str(view.get("name") or self.slug)
         self.claimed = await asyncio.to_thread(lambda: views.claimed_paths(self.c, view, wait=False))
         wrap, argv, env, self.tmp = await asyncio.to_thread(sandbox_argv, self.wrap)
         self.wrap = wrap
@@ -312,7 +342,8 @@ class Program:
         asyncio.ensure_future(self._drain_stderr())
         place = None
         if ref:
-            place = await views.open_place(self.c, self.slug, ref, views.locator_of(ref))
+            with self._reads():
+                place = await views.open_place(self.c, self.slug, ref, views.locator_of(ref))
         self.labels_sig = await asyncio.to_thread(labels_signature, self.c)
         init = {"t": "init", "source": source, "cols": int(cols), "rows": int(rows), "theme": theme,
                 "view": {"slug": self.slug, "name": view.get("name") or self.slug},
@@ -325,6 +356,13 @@ class Program:
             await self.close()
             why = self.errors[-1] if self.errors else "it drew nothing"
             raise TermViewError(f"the view's program did not start: {why}") from None
+
+    def _reads(self) -> Any:
+        """Where its reader calls read: the view's draft for a live program (views.live_reads), else the view as it last
+        passed."""
+        from . import views  # noqa: PLC0415
+
+        return views.live_reads() if self.live else contextlib.nullcontext()
 
     async def _send(self, msg: dict[str, Any]) -> None:
         if self.proc is None or self.proc.stdin is None or self.proc.returncode is not None:
@@ -414,10 +452,13 @@ class Program:
         try:
             data = await self._query(q, [str(x) for x in want][:8])
             msg: dict[str, Any] = {"t": "answer", "id": qid, "data": data}
+            if len(self.answers) < self.answers_kept and not (isinstance(q, dict) and views.KIT_QUERY in q):
+                self.answers.append(data)
         except asyncio.CancelledError:
             return
         except views.ReaderError as e:
             msg = {"t": "answer", "id": qid, "error": e.message}
+            self.failed.append(e.message[:500])
         except Exception as e:  # noqa: BLE001 — the program shows what failed
             log.warning("view %s: a query failed", self.slug, exc_info=True)
             msg = {"t": "answer", "id": qid, "error": f"{type(e).__name__}: {e}"}
@@ -439,11 +480,14 @@ class Program:
             if what == "marks":
                 refs = [str(r) for r in (q.get("refs") or [])][: views.MARKS_MAX]
                 ctx = await asyncio.to_thread(_context, self.c, want)
-                marks = await views.marks_for(self.c, self.slug, refs, ctx)
+                with self._reads():
+                    marks = await views.marks_for(self.c, self.slug, refs, ctx)
                 return {r: {v["id"]: v["value"] for v in m.get("values") or []} for r, m in marks.items()}
             return (await asyncio.to_thread(views.kit_answer, self.c, q))[1]
         ctx = await asyncio.to_thread(_context, self.c, want)
-        return await views.reader_call(self.c, self.slug, "records", q, labels=ctx)
+        self.fetches += 1
+        with self._reads():
+            return await views.reader_call(self.c, self.slug, "records", q, labels=ctx)
 
     async def event(self, ev: dict[str, Any], wait: float = EVENT_WAIT_S) -> dict[str, Any]:
         """Send an event (resize, key, click, drag, wheel, open) and return {frame, acts}: the frame that answers it (or
@@ -474,11 +518,15 @@ class Program:
             await self._send({"t": "labels", "labels": await asyncio.to_thread(labels_list, self.c, self.claimed),
                               "filter": ctx.get("filter")})
 
+    def quiet(self, quiet: float = SETTLE_QUIET_S) -> bool:
+        """Whether the program is quiet: no query out and no new frame for `quiet` seconds."""
+        return not self.queries and time.monotonic() - self.last_frame_at >= quiet
+
     async def settle(self, quiet: float = SETTLE_QUIET_S, timeout: float = SETTLE_MAX_S) -> dict[str, Any] | None:
-        """The frame once the program is quiet: no query out and no new frame for `quiet` seconds (draw_text)."""
+        """The frame once the program is quiet (draw_text), or after `timeout` seconds."""
         end = time.monotonic() + timeout
         while time.monotonic() < end and not self.closed:
-            if not self.queries and time.monotonic() - self.last_frame_at >= quiet:
+            if self.quiet(quiet):
                 return self.frame
             await asyncio.sleep(0.05)
         return self.frame
@@ -583,6 +631,54 @@ async def draw_text(c: str, slug: str, *, cols: int = 120, rows: int = 40, keys:
         view = views.read_built(c, slug) or {}
         name = str(view.get("name") or slug)
         return panel_text(name, frame, ansi=ansi) if panel else str(frame.get("text") or "")
+    finally:
+        await p.close()
+
+
+async def draw_check(c: str, slug: str, *, cols: int, theme: str, rows: int = CHECK_ROWS, ref: str | None = None,
+                     keys: list[str] | None = None, answers: int = 0, wrap: str | None = None,
+                     timeout: float | None = None) -> dict[str, Any]:
+    """The view's draft (its live folder) drawn as draw_text draws it, for the view's checks (views.term_draws) and its
+    reviewer's pictures: {cols, rows, theme, ref, ok, text, error, timeout, overflow, missed, answers, fetches}. Not ok
+    for a program that fails (an error it throws, a fetch its reader cannot answer, a program that ends or draws
+    nothing), one still busy after `timeout` seconds, SETTLE_MAX_S by default (a fetch still out, or frame after
+    frame), or a frame that draws past the panel's rows or columns, which the kit cuts (the frame's `overflow`). `text`
+    is the panel as draw_text shows it; `missed` the keys of `keys` that found no hot region; `answers` the first that
+    many reader answers."""
+    from . import views  # noqa: PLC0415
+
+    views._bind_loop()
+    timeout = SETTLE_MAX_S if timeout is None else timeout
+    out: dict[str, Any] = {"cols": cols, "rows": rows, "theme": theme, "ref": ref, "ok": False, "text": "",
+                           "missed": [], "answers": [], "fetches": 0}
+    p = Program(c, slug, wrap=wrap, keep=False, live=True, answers=answers)
+    try:
+        try:
+            frame = await p.start(cols, rows, theme, ref, text="plain")
+            frame = await p.settle(timeout=timeout) or frame
+            for k in keys or []:
+                if (ev := _event_of(k, frame)) is None:
+                    out["missed"].append(k)
+                    continue
+                await p.event(ev)
+                frame = await p.settle(timeout=timeout) or frame
+        except TermViewError as e:
+            out["error"] = str(e)
+            return out
+        out.update(text=panel_text(p.name, frame), answers=p.answers, fetches=p.fetches)
+        if p.failed:
+            out["error"] = f"a fetch failed: {p.failed[0]}"
+        elif frame.get("error"):
+            out["error"] = str(frame["error"])
+        elif p.closed:
+            out["error"] = f"the program ended: {p.errors[-1] if p.errors else 'it exited'}"
+        elif not p.quiet():
+            out["timeout"] = "a fetch still waits for the reader" if p.queries else "it draws frame after frame"
+        elif isinstance(frame.get("overflow"), dict):
+            out["overflow"] = dict(frame["overflow"])
+        else:
+            out["ok"] = True
+        return out
     finally:
         await p.close()
 

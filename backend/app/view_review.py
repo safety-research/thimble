@@ -18,6 +18,8 @@ in rounds, through two thimble tools (view_tools.py):
    before ROUNDS rounds it is told to take the pictures again; a failure puts the view back as it was before the round
    (REVISION_FAILED_NOTE). A review with no problems calls finish_review with nothing revised. While it edits, readers
    see the view as it last passed (views.read_built's digest rule).
+In terminal mode a picture is the view's program drawn as text (term_views.draw_check), as thimble-term's panel shows
+it: the overview 120 columns wide, then TERM_STATES, given in view_pictures' result itself; no browser is needed.
 An extension's program that replaces the view-review task (tasks.program) reads the pictures in place of the reviewer:
 each view_pictures call passes them to it (review_input, the input docs/agents.md documents), and the reviewer gets the
 problems it found to fix. A program that fails ends the review failed with why (PROGRAM_FAILED_NOTE).
@@ -85,6 +87,12 @@ EXTRA_STATES = {"labels": views.PANE_NARROW, "filtered": views.PANE_NARROW, "det
                 "control": views.PANE_SIZE}
 EXTRA_SHOTS = 3
 CONTROLS_CLICKED = 3  # controls one `control` state clicks in turn
+# in terminal mode, the columns of the overview's drawing and the states the reviewer may ask to see beside it, each
+# with its columns: the view 200 columns wide, the first place a citation opens, the place a ref names, and the view
+# after keys pressed in turn (as `thimble view text --keys` takes them)
+TERM_COLUMNS = 120
+TERM_STATES = {"wide": 200, "detail": TERM_COLUMNS, "open": TERM_COLUMNS, "control": TERM_COLUMNS}
+KEYS_PRESSED = 8  # keys one `control` state presses in turn
 
 _stopping: dict[tuple[str, str], tuple[str, bool]] = {}  # (workspace, agent id) -> (why stop() stopped it, forget)
 _restart: set[tuple[str, str]] = set()  # (workspace, slug): a build passed while its review was being stopped
@@ -215,7 +223,7 @@ def after_built(c: str, slug: str) -> None:
     if view is None or view.get("origin") != "workspace" or prop is None:
         return
     _drop_copies(c, slug)
-    if not enabled() or not auto(c) or headless.missing(headless.PAGES):
+    if not enabled() or not auto(c) or (not views.terminal(c) and headless.missing(headless.PAGES)):
         if prop.get("review"):
             views.update_proposal(c, slug, review=None)
         return
@@ -495,16 +503,17 @@ def _unusable(shots: list[dict[str, Any]]) -> str:
     return ""
 
 
-def _wanted(states: Any, left: int) -> list[dict[str, Any]]:
-    """The extra states asked for, each {state, ref?, controls?, why} of EXTRA_STATES (an `open` with a ref, a `control`
-    with the controls to click), `left` at most."""
+def _wanted(states: Any, left: int, term: bool = False) -> list[dict[str, Any]]:
+    """The extra states asked for, each {state, ref?, controls?, why} of EXTRA_STATES, or TERM_STATES with `term` (an
+    `open` with a ref, a `control` with the controls to click or the keys to press), `left` at most."""
     more: list[dict[str, Any]] = []
     for m in states if isinstance(states, list) else []:
-        if not isinstance(m, dict) or m.get("state") not in EXTRA_STATES:
+        if not isinstance(m, dict) or m.get("state") not in (TERM_STATES if term else EXTRA_STATES):
             continue
         if m["state"] == "open" and not m.get("ref"):
             continue
-        controls = [" ".join(str(x).split()) for x in m.get("controls") or [] if str(x).strip()][:CONTROLS_CLICKED]
+        controls = [" ".join(str(x).split()) for x in m.get("controls") or [] if str(x).strip()][
+            :KEYS_PRESSED if term else CONTROLS_CLICKED]
         if m["state"] == "control" and not controls:
             continue
         more.append({"state": m["state"], "ref": str(m.get("ref") or "") or None, "controls": controls or None,
@@ -521,18 +530,21 @@ async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, 
     view = views.read_view(c, slug)
     if prop is None or view is None:
         raise NoPictures(f"view_pictures: the view {slug} is gone")
-    if headless.missing(headless.PAGES):
+    term = views.terminal(c)
+    if not term and headless.missing(headless.PAGES):
         raise NoPictures(NO_BROWSER_NOTE)
     review = review_of(prop)
     rnd = int(review.get("round") or 0)
     same_round = review.get("pictured") == rnd and review.get("extra_left") is not None
     left = int(review["extra_left"]) if same_round else EXTRA_SHOTS
     wanted: list[dict[str, Any]] = [] if review.get("pictured") == rnd else [{"state": "overview"}]
-    wanted += _wanted(states, left)
+    wanted += _wanted(states, left, term)
     if not wanted:
         raise NoPictures(NO_MORE.format(n=EXTRA_SHOTS))
     files = await asyncio.to_thread(views.claimed_files, c, view)
     done = int(review.get("shots") or 0)
+    if term:
+        return await _drawn(c, slug, agent_id, prop, view, wanted, rnd, left, done)
     with views.live_reads():  # the reviewer looks at its own revision, which no gate has passed yet
         shots = await shoot(c, slug, view, files, wanted, work_dir(c, slug) / "review" / str(rnd + 1), first=done + 1)
     if any(s.get("unavailable") for s in shots):
@@ -549,6 +561,61 @@ async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, 
     if checks:
         lines += ["", "What the view's checks found:", *checks]
     return "\n".join(lines), records_text(shots) or "-", await program_reading(c, slug, agent_id, prop, view, shots)
+
+
+async def draw(c: str, slug: str, wanted: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The pictures of a view built in terminal mode: its draft's program drawn as text (term_views.draw_check) in each
+    state `wanted`, the overview TERM_COLUMNS wide or one of TERM_STATES at its columns. Each result carries its state,
+    ref, controls and why."""
+    from . import term_views  # noqa: PLC0415
+
+    out = []
+    for w in wanted:
+        state, ref, keys = str(w.get("state")), None, None
+        if state == "detail":
+            ref = next(iter(views._kept_locators(c, slug) or []), None)
+        elif state == "open":
+            ref = str(w.get("ref") or "") or None
+        elif state == "control":
+            keys = list(w.get("controls") or [])[:KEYS_PRESSED]
+        d = await term_views.draw_check(c, slug, cols=TERM_STATES.get(state, TERM_COLUMNS), theme="dark", ref=ref,
+                                        keys=keys, answers=ANSWERS_PER_STATE)
+        out.append({**d, "state": state, "controls": w.get("controls"), "why": w.get("why")})
+    return out
+
+
+async def _drawn(c: str, slug: str, agent_id: str, prop: dict[str, Any], view: dict[str, Any],
+                 wanted: list[dict[str, Any]], rnd: int, left: int, done: int) -> tuple[str, str, str]:
+    """pictures in terminal mode: the drawings of the states `wanted` (draw), each with what it shows and the text
+    itself, then what the checks found; the records the programs fetched; what an extension's program found."""
+    shots = await draw(c, slug, wanted)
+    if bad := [s for s in shots if not s.get("text")]:
+        raise NoPictures(SHOTS_NOTE.format(why="; ".join(dict.fromkeys(str(s.get("error") or "it drew nothing")
+                                                                           for s in bad))[:400]))
+    extra = sum(1 for w in wanted if w["state"] != "overview")
+    _set(c, slug, pictured=rnd, extra_left=left - extra, shots=done + len(shots))
+    lines = []
+    for i, s in enumerate(shots, done + 1):
+        lines += [f"{i}: {_drawn_about(s)}", "```", s["text"], "```"]
+    checks = views.gate_notes(c, slug)
+    if checks:
+        lines += ["", "What the view's checks found:", *checks]
+    return "\n".join(lines), records_text(shots) or "-", await program_reading(c, slug, agent_id, prop, view, shots)
+
+
+def _drawn_about(s: dict[str, Any]) -> str:
+    """What one drawing shows, at its columns, and what failed in it (term_views.draw_check)."""
+    words = {"overview": "the view as it opens", "wide": "the view as it opens",
+             "detail": "the place the first citation opens", "open": "the place {ref} opens",
+             "control": "the view after the keys {keys}"}
+    what = words.get(str(s.get("state")), words["overview"]).format(
+        ref=s.get("ref") or "the ref", keys=" ".join(s.get("controls") or []) or "none")
+    line = f"{what}, {s.get('cols')} columns wide" + (f", asked for: {s['why']}" if s.get("why") else "")
+    if s.get("missed"):
+        line += f". No control shows {', '.join(map(repr, s['missed']))}"
+    if not s.get("ok"):
+        line += f". It fails the checks: {views.draw_problems([s])[0]}"
+    return line
 
 
 def review_input(c: str, prop: dict[str, Any], view: dict[str, Any], shots: list[dict[str, Any]]) -> dict[str, Any]:

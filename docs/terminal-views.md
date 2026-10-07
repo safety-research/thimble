@@ -227,3 +227,7 @@ frame's rows as text in the kit itself.
   Sat 16 May 2026
 ❯ ● 01:40:12  chat    message     Oona                 Tonight's release train: web 2.31.0 and payments 4.12.0…
 ```
+
+A view built in terminal mode passes its checks only when its draft draws this way with no error, within the time limit
+and with nothing cut, at 120 and 200 columns in light and dark and opened at the first place that resolves
+(views.term_draws). Its reviewer reads the same drawings in place of pictures.
