@@ -6,8 +6,9 @@
 // while no session is attached, offers an "Attach a fresh session" button that shows what a fresh session is, the
 // command with a Copy button, and how to continue it later. Once a session is attached the card says so. The same
 // steps stand in for the composer while no session was ever attached, since nothing would read a message sent from it;
-// under a frozen demo session's card, that bar gives the card's title alone, so the sentence and the command show once.
-import { useState } from 'react'
+// while a frozen demo session's card is on screen that bar is hidden, so its title, sentence and command show once, and
+// once the card scrolls away the bar gives the sentence and the command again.
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { Button } from '../components/Button'
 import { Card } from '../components/Card'
 import type { ChatMeta, PrecachedMark } from '../lib/types'
@@ -122,12 +123,61 @@ function Attach({ mark, open: initial = false }: { mark: PrecachedMark; open?: b
   )
 }
 
+// The frozen demo session's cards mounted now, which the bar under them watches (frozenCards, useFrozenCardShown)
+const frozen = new Set<HTMLElement>()
+const frozenListeners = new Set<() => void>()
+let frozenVersion = 0
+function frozenChanged() {
+  frozenVersion++
+  for (const fn of frozenListeners) fn()
+}
+/** The ref of a frozen demo session's card: kept while it is mounted. */
+function frozenRef(el: HTMLElement | null) {
+  if (!el) return
+  frozen.add(el)
+  frozenChanged()
+  return () => {
+    frozen.delete(el)
+    frozenChanged()
+  }
+}
+const subscribeFrozen = (fn: () => void) => {
+  frozenListeners.add(fn)
+  return () => void frozenListeners.delete(fn)
+}
+
+/** Whether a frozen demo session's card is on screen (any part of it in the viewport), while `watch`: an
+ * IntersectionObserver on the cards mounted; without one, whether a card is mounted. */
+export function useFrozenCardShown(watch: boolean): boolean {
+  const version = useSyncExternalStore(subscribeFrozen, () => frozenVersion, () => frozenVersion)
+  const [shown, setShown] = useState(false)
+  useEffect(() => {
+    const els = [...frozen]
+    if (!watch || els.length === 0) {
+      setShown(false)
+      return
+    }
+    if (typeof IntersectionObserver === 'undefined') {
+      setShown(true)
+      return
+    }
+    const seen = new Map<Element, boolean>()
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) seen.set(e.target, e.isIntersecting)
+      setShown([...seen.values()].some(Boolean))
+    })
+    for (const el of els) io.observe(el)
+    return () => io.disconnect()
+  }, [watch, version])
+  return watch && shown
+}
+
 /** The card at the top of a pre-cached orientation's thread: a frozen demo session's, else the attach button while no
  * session is attached. */
 export function PrecachedCard({ mark, attached }: { mark: PrecachedMark; attached: boolean }) {
   if (isFrozen(mark, attached)) {
     return (
-      <Card className="precached-card chat-row" head={FROZEN_TITLE} flat data-precached={mark.dataset ?? ''}>
+      <Card ref={frozenRef} className="precached-card chat-row" head={FROZEN_TITLE} flat data-precached={mark.dataset ?? ''}>
         <FrozenSteps mark={mark} />
       </Card>
     )
@@ -141,13 +191,15 @@ export function PrecachedCard({ mark, attached }: { mark: PrecachedMark; attache
 }
 
 /** In place of the composer while no session was ever attached to a pre-cached workspace: a frozen demo session's
- * sentence and command, or its title alone while the card above (`card`, the orientation's thread on screen) gives
- * them, so they show once; else the attach button. */
+ * sentence and command, hidden while the card above (`card`, the orientation's thread is the one shown) is on screen
+ * and gives them, so they show once; else the attach button. */
 export function AttachBar({ mark, card = false }: { mark: PrecachedMark; card?: boolean }) {
-  if (isFrozen(mark, false)) {
+  const frozenMark = isFrozen(mark, false)
+  const cardShown = useFrozenCardShown(frozenMark && card)
+  if (frozenMark) {
     return (
-      <div className="precached-bar" data-precached-bar="">
-        {card ? <p className="precached-title">{FROZEN_TITLE}</p> : <FrozenSteps mark={mark} />}
+      <div className="precached-bar" data-precached-bar="" hidden={cardShown}>
+        <FrozenSteps mark={mark} />
       </div>
     )
   }

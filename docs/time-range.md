@@ -10,7 +10,10 @@ way.
   it to frame a new range, or click outside it to move it there. While the range shows the whole span, a drag anywhere
   on the overview but its edges frames a new range. A double click shows the whole span. Ctrl, ⌘ or Alt with the wheel
   (or a trackpad's pinch) zooms around the pointer; Shift with the wheel pans. With the viewfinder focused (a click on
-  the overview focuses it), the arrow keys pan, `+` and `-` zoom and Home shows the whole span.
+  the overview focuses it), the arrow keys pan by a tenth of the viewfinder (Shift: half), `+` takes a third off it
+  around its middle, `-` adds half to it and Home shows the whole span. The keys move it on the overview's axis as a
+  drag does, so on an axis with breaks the viewfinder keeps its width on the screen and an edge never lands in a break
+  and leaves a sliver of the range.
 - The part outside the viewfinder is dimmed. The readout gives the range's start, end and length in the data's units.
   It is as wide as the widest readout of the span, so the overview beside it keeps its place and width as the range
   zooms. It wraps only after the dash, never inside a date; a span of years gives its start and end on two lines.

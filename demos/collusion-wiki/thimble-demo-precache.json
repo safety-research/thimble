@@ -116,13 +116,13 @@
   },
   {
    "path": "extension/views/relay-board/view.html",
-   "bytes": 67272,
-   "sha256": "3cf4b268225c42e8aa482e5fe654f47af32333a8d12c1bbcd1e2786c84be6d49"
+   "bytes": 68495,
+   "sha256": "67fd49d6f1ac280f03b26678e76b0a382f08be3d8868c26b53b5f8c690580560"
   },
   {
    "path": "extension/views/relay-board/view.json",
    "bytes": 4963,
-   "sha256": "6eb9396f8bc31854706da6239d914d4ffd07abf3ff15703ad9c47043bc46dc58"
+   "sha256": "b687cf7382da7cc0a944339f177b7932863ddc9a42aa62b829fe6e4ba1cf3d35"
   },
   {
    "path": "extension/views/wiki-page-history/reader.py",
@@ -131,13 +131,13 @@
   },
   {
    "path": "extension/views/wiki-page-history/view.html",
-   "bytes": 80215,
-   "sha256": "643bfd8f24fc96c2faa6d2e7784360e5fb849f7a384a81099db82e61b0b57634"
+   "bytes": 81013,
+   "sha256": "661a66875099002ccb948ededc91d21a58c910bcd6ec66e2c041c02510c3365f"
   },
   {
    "path": "extension/views/wiki-page-history/view.json",
    "bytes": 4883,
-   "sha256": "8d167203724641506495265c861c1b8a7a9854fb7f9f94bb71be3c38e57af6c3"
+   "sha256": "bcd64e7f23c7e6a9db4aebd589e09654efcb1fd6a87c4e95b3b3002bbc7195ca"
   },
   {
    "path": "investigations/main/investigation.json",
@@ -1748,18 +1748,18 @@
   {
    "slug": "relay-board",
    "name": "Relay Board",
-   "version": "6f56c5bdad9d",
+   "version": "77dddf826cff",
    "from": "relay-board",
-   "from_version": "6f56c5bdad9d",
-   "picked": "live at 6f56c5bdad9d"
+   "from_version": "77dddf826cff",
+   "picked": "live at 77dddf826cff"
   },
   {
    "slug": "wiki-page-history",
    "name": "Wiki Page History",
-   "version": "8fdebe94864c",
+   "version": "e9497ed37954",
    "from": "wiki-page-history",
-   "from_version": "8fdebe94864c",
-   "picked": "live at 8fdebe94864c"
+   "from_version": "e9497ed37954",
+   "picked": "live at e9497ed37954"
   }
  ]
 }

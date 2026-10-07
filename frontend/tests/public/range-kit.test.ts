@@ -135,6 +135,47 @@ describe('the time range selector', () => {
     expect(r.scale(600).broken).toBe(false)
   })
 
+  test("on a scale with breaks the keys move the viewfinder in the overview's px, as a drag does, so no edge lands in a break and leaves a sliver", async () => {
+    await load()
+    const r = mount({ gap: 6 * H })
+    await wait()
+    const win = doc().querySelector<HTMLElement>('.thimble-range-win')!
+    const key = (k: string, shiftKey = false) => win.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: k, shiftKey, bubbles: true, cancelable: true }))
+    // the viewfinder's px on the overview, as drawn
+    const px = () => [parseFloat(win.style.left), parseFloat(win.style.width)]
+    // three hours of the first burst, the break, and an hour of the second
+    r.set(T0 + 3 * H, T0 + 55 * H)
+    await wait()
+    const [x0, w0] = px()
+    key('ArrowLeft')
+    await wait()
+    // a step of a tenth of the viewfinder in px: it still reaches across the break into the second burst, as wide
+    expect(r.to).toBeGreaterThan(T0 + 54 * H)
+    expect(px()[0]).toBeCloseTo(x0 - w0 / 10, 0)
+    expect(Math.abs(px()[1] - w0)).toBeLessThan(1)
+    key('ArrowRight')
+    await wait()
+    expect(Math.abs(r.from - (T0 + 3 * H))).toBeLessThan(60)
+    expect(Math.abs(r.to - (T0 + 55 * H))).toBeLessThan(60)
+    // + takes a third off the viewfinder's px around its middle; in clock time both edges would land in the break
+    r.set(T0 + H, T0 + 55.5 * H)
+    await wait()
+    const [a1, w1] = px()
+    key('+')
+    await wait()
+    expect(r.from).toBeLessThan(T0 + 6 * H)
+    expect(r.to).toBeGreaterThan(T0 + 54 * H)
+    expect(px()[1]).toBeCloseTo((w1 * 2) / 3, 0)
+    expect(px()[0]).toBeCloseTo(a1 + w1 / 6, 0)
+    // - adds half to it again, and Home shows the whole span
+    key('-')
+    await wait()
+    expect(Math.abs(px()[1] - w1)).toBeLessThan(1)
+    key('Home')
+    await wait()
+    expect(r.full).toBe(true)
+  })
+
   test('an axis of hours gives the date with its first time after a break or on a new day, and a label beside a break moves off it', async () => {
     await load()
     const r = mount({ gap: 6 * H })

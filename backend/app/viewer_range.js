@@ -16,7 +16,8 @@
 // Drag the viewfinder to pan, drag either edge to zoom, drag across the overview outside it (or anywhere but the edges
 // while it shows the whole span) to frame a new range, click outside it to move it there, double-click to show the whole
 // span; Ctrl, ⌘ or Alt with the wheel (or a pinch) zooms around the pointer, Shift with the wheel pans, and with the
-// viewfinder focused the arrow keys pan, + and - zoom and Home shows the whole span. The part outside the viewfinder is
+// viewfinder focused the arrow keys pan, + and - zoom and Home shows the whole span, each in the overview's px as a drag
+// moves, so a key never lands an edge in a break and collapses the range. The part outside the viewfinder is
 // dimmed, and the readout gives its start, end and length in the data's units, as wide as the widest of the span so the
 // overview never moves. The range opens on the whole span; thimble keeps a range zoomed in per view (with the Color by
 // choice, the bridge's `colour` message) and Reset in Color by's row brings back the whole span. Hovering the overview
@@ -992,25 +993,41 @@
     var p = clamp(a + pan * 0.5, 0, W - w2)
     this.set([p <= 0 ? this.span[0] : sc.t(p), p + w2 >= W ? this.span[1] : sc.t(p + w2)], 'wheel')
   }
+  // The keys move the viewfinder in the overview's px, as the drags do: on a scale with breaks, a step in clock time
+  // would land an edge in a break, which takes it to the data beside it and leaves a sliver of the range. The arrows pan
+  // by a tenth of the viewfinder (Shift: half), or move a focused grip by 2% of the overview; + takes a third off the
+  // viewfinder around its middle, - adds half to it; Home or 0 shows the whole span.
   Range.prototype.onKey = function (e) {
-    var a = this.from()
-    var b = this.to()
+    var sc = this.sc
+    if (!sc) return
+    var W = sc.width
+    var span = this.span
+    // the viewfinder's px as its times give them, not as drawn: place() widens a sliver to 4 px
+    var a = this.full() ? 0 : clamp(sc.x(this.from()), 0, W)
+    var b = this.full() ? W : clamp(sc.x(this.to()), 0, W)
     var w = b - a
-    var sp = this.span[1] - this.span[0]
+    var at = function (x0, x1) {
+      return [x0 <= 0 ? span[0] : sc.t(x0), x1 >= W ? span[1] : sc.t(x1)]
+    }
     var grip = e.target.closest && e.target.closest('.thimble-range-grip')
-    var by = (e.shiftKey ? 0.5 : 0.1) * w
     var go = null
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       var sgn = e.key === 'ArrowLeft' ? -1 : 1
-      if (grip && grip.classList.contains('thimble-range-grip-l')) go = [a + sgn * 0.02 * sp, b]
-      else if (grip) go = [a, b + sgn * 0.02 * sp]
+      var step = 0.02 * W
+      if (grip && grip.classList.contains('thimble-range-grip-l')) go = [at(clamp(a + sgn * step, 0, b - 1), b)[0], this.to()]
+      else if (grip) go = [this.from(), at(a, clamp(b + sgn * step, a + 1, W))[1]]
       else {
-        var s = clamp(sgn * by, this.span[0] - a, this.span[1] - b)
-        go = [a + s, b + s]
+        var s = clamp(sgn * (e.shiftKey ? 0.5 : 0.1) * w, -a, W - b)
+        go = at(a + s, b + s)
       }
-    } else if (e.key === '+' || e.key === '=') go = [a + w / 6, b - w / 6]
-    else if (e.key === '-' || e.key === '_') go = [a - w / 4, b + w / 4]
-    else if (e.key === 'Home' || e.key === '0') go = null
+    } else if (e.key === '+' || e.key === '=') {
+      // a viewfinder a few px wide zooms in its own time, which no break crosses at that width
+      go = w >= 8 ? at(a + w / 6, b - w / 6) : [this.from() + (this.to() - this.from()) / 6, this.to() - (this.to() - this.from()) / 6]
+    } else if (e.key === '-' || e.key === '_') {
+      var nw = Math.min(W, w * 1.5)
+      var na = clamp((a + b) / 2 - nw / 2, 0, W - nw)
+      go = nw >= W ? null : at(na, na + nw)
+    } else if (e.key === 'Home' || e.key === '0') go = null
     else return
     e.preventDefault()
     this.set(go, 'set')

@@ -373,6 +373,82 @@ describe("a field's values without a colour of their own", () => {
   })
 })
 
+describe("a field's values past the palette's twelve colours", () => {
+  test('go under one chip, "Other", which turns them off and on together and says on hover which they are', async () => {
+    await load()
+    // a page whose records the reader counts: nothing on the page takes a value before
+    doc().getElementById('list')!.innerHTML = ''
+    const names = Array.from({ length: 15 }, (_, i) => `v${String(i + 1).padStart(2, '0')}`)
+    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], chips: 'filter' })
+    c.counts(Object.fromEntries(names.map((v, i) => [v, 100 - i])))
+    await wait()
+    const shown = chips()
+    expect(shown.map((x) => x[0])).toEqual([...names.slice(0, 12), 'Other'])
+    // the three it stands for, their counts summed, in the grey of a value with no place in the palette
+    expect(shown.at(-1)).toEqual(['Other', String(88 + 87 + 86), 'true'])
+    const other = doc().querySelector<HTMLElement>('.thimble-colour-chip[data-other]')!
+    expect(other.getAttribute('style')).toContain('var(--label-none)')
+    expect(other.querySelector('[data-palette]'), 'no palette: the grey is no colour of its own').toBeNull()
+    expect(other.hasAttribute('title')).toBe(false)
+    // the page still hears of every value, each in its place
+    expect(c.values.map((v: { value: string }) => v.value)).toEqual(names)
+    expect(c.colourOf('v14')).toBe('var(--label-none)')
+    other.click()
+    await wait()
+    expect(chips().at(-1)![2]).toBe('false')
+    expect(c.query()).toEqual({ field: 'kind', off: ['v13', 'v14', 'v15'] })
+    expect(['v12', 'v13', 'v15'].map((v) => c.isOn(v))).toEqual([true, false, false])
+    doc().querySelector<HTMLElement>('.thimble-colour-chip[data-other]')!.click()
+    await wait()
+    expect(c.query()).toEqual({ field: 'kind', off: [] })
+    // Alt keeps the values under it alone
+    doc().querySelector<HTMLElement>('.thimble-colour-chip[data-other]')!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, altKey: true, detail: 1 }))
+    await wait()
+    expect(c.query()).toEqual({ field: 'kind', off: names.slice(0, 12) })
+    // hovering it names the values it stands for
+    doc().querySelector('.thimble-colour-chip[data-other]')!.dispatchEvent(new dom.window.MouseEvent('pointerover', { bubbles: true }))
+    expect(doc().querySelector('.thimble-tip .thimble-tip-m')!.textContent).toBe('v13 88 · v14 87 · v15 86')
+  })
+
+  test('a field of twelve values or fewer has no "Other"', async () => {
+    await load()
+    doc().getElementById('list')!.innerHTML = ''
+    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }] })
+    c.counts(Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`v${i}`, 20 - i])))
+    await wait()
+    // in the order of their counts, which is the order they took the palette in
+    expect(chips().map((x) => x[0])).toEqual(Array.from({ length: 12 }, (_, i) => `v${i}`))
+    expect(doc().querySelector('[data-other]')).toBeNull()
+  })
+})
+
+describe('the menu of a field that declares no values', () => {
+  test("says how many values the records the page hands the kit take, and shows them, the commonest first, in the colours they would take; none is kept", async () => {
+    await load()
+    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }, { name: 'service', title: 'Service' }, { name: 'n', title: 'Row', value: (i: number) => (i % 2 ? 'odd' : 'even') }] })
+    // the page draws its records, each through attr (a record twice, as a redraw does, counts once), and the rows by index
+    const recs = [
+      { kind: 'a', service: 'api' },
+      { kind: 'a', service: 'db' },
+      { kind: 'b', service: 'db' },
+      { kind: 'a', service: 'db' },
+      { kind: 'c', service: '' },
+    ]
+    for (const r of [...recs, recs[0]]) c.attr(r)
+    for (const i of [0, 1, 2, 2]) c.valueOf(i)
+    await wait()
+    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
+    const row = (by: string) => {
+      const r = doc().querySelector(`.thimble-colour-menu [data-by="${by}"]`)!
+      return [r.querySelector('.thimble-colour-top .thimble-colour-n')?.textContent ?? '', [...r.querySelectorAll('.thimble-colour-pchip')].map((p) => [p.textContent, (p.querySelector('.thimble-colour-sw') as HTMLElement).getAttribute('style')])]
+    }
+    expect(row('f:service')).toEqual(['2 values', [['db', '--c:var(--label-1)'], ['api', '--c:var(--label-2)']]])
+    expect(row('f:n')).toEqual(['2 values', [['even', '--c:var(--label-1)'], ['odd', '--c:var(--label-2)']]])
+    // the field chosen keeps its colours by the counts the page gives, not by what the menu showed
+    expect(JSON.stringify(of('colour').at(-1)?.state ?? {})).not.toContain('service')
+  })
+})
+
 describe('a field that says its own value', () => {
   test('takes any record the page has, such as a row index into columns', async () => {
     await load()

@@ -78,7 +78,7 @@ _COLUMNS = ["path", "line", "effective", "label", "source", "verdict", "confiden
 
 # A label class's colour by index (concepts.PALETTE): 0 is --label-none, the grey of a negative class; 1..12 are
 # --label-1..12 (styles/tokens.css).
-LABEL_COLOURS = ["#a09c93", "#025ac3", "#d0750a", "#08632f", "#1392d4", "#897301", "#009c85", "#844500", "#013c77", "#2aa02b", "#025a7c",
+LABEL_COLOURS = ["#a09c93", "#025ac3", "#d0750a", "#06572a", "#1392d4", "#7d6702", "#009c85", "#844500", "#013c77", "#2aa02b", "#025a7c",
                  "#622b01", "#0389a0"]
 # The order new values take the palette's places (indices into LABEL_COLOURS): blue, orange, green, gold, teal, brown,
 # sky, then navy, grass, cerulean, chestnut and cyan, so a label's first five values are five hues with no second blue.

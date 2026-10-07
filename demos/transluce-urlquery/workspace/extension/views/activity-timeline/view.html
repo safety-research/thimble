@@ -324,11 +324,48 @@ function passes(i, skip) {
 // it is on, and their order is a bar's stack from the bottom (ORD). While a label is the colour, a report's value is
 // the first of that label's values among the marks the reader gave it.
 const FIELDS_BY = [
-  { name: 'confidence', title: 'Confidence', values: [{ name: 'significant', colour: 2 }, { name: 'suggestive', colour: 1 }] },
-  { name: 'broad_class', title: 'Class', values: ['source_request', 'indirection', 'custom_program'] },
-  { name: 'disposition', title: 'Disposition', values: ['included', 'review_required', 'background'] },
-  { name: 'source_basis', title: 'Source basis' },
-  { name: 'catalog', title: 'Catalog', values: ['main', 'supplemental'] },
+  {
+    name: 'confidence', title: 'Confidence',
+    description: "The catalog's qualitative confidence in agent-like activity, not a probability; blank for reports that need review and background controls",
+    values: [
+      { name: 'significant', colour: 2, meaning: 'Higher confidence in agent-like activity' },
+      { name: 'suggestive', colour: 1, meaning: 'Moderate confidence in agent-like activity' },
+    ],
+  },
+  {
+    name: 'broad_class', title: 'Class', description: "The report's primary method class",
+    values: [
+      { name: 'source_request', meaning: 'A request to a data source a task uses' },
+      { name: 'indirection', meaning: 'A reader or proxy URL for a task target, or a static page that publishes task data' },
+      { name: 'custom_program', meaning: 'Submitted content with task-specific fetch, form or API logic' },
+    ],
+  },
+  {
+    name: 'disposition', title: 'Disposition', description: 'Whether the collection counts the report',
+    values: [
+      { name: 'included', meaning: 'Counted, with a confidence and a data source' },
+      { name: 'review_required', meaning: 'Needs review; no confidence and no data source' },
+      { name: 'background', meaning: 'A background control; no confidence and no data source' },
+    ],
+  },
+  // in the order of their reports, most first, the order their colors take when they are not declared
+  {
+    name: 'source_basis', title: 'Source basis', description: "How report-sources.csv assigned the report's data source; blank for a report it has no row for",
+    values: [
+      { name: 'source_method', meaning: 'From the collection method whose query found the report' },
+      { name: 'unidentified', meaning: 'No data source identified' },
+      { name: 'external_source_tag', meaning: 'From a source tag imported from outside the collection' },
+      { name: 'selection_provenance', meaning: "From the report's row in selection-provenance.csv, for the reports added in v5" },
+      { name: 'supplement_review', meaning: "From the supplement's review" },
+    ],
+  },
+  {
+    name: 'catalog', title: 'Catalog', description: 'Which catalog lists the report',
+    values: [
+      { name: 'main', meaning: 'Listed in reports.csv, the main catalog' },
+      { name: 'supplemental', meaning: 'Listed in additional-cited-reports.csv, the supplemental catalog' },
+    ],
+  },
 ]
 let VAL = new Int16Array(0), VALS = [null], ORD = [0], VCOL = ['#a09c93'], VON = [true], VNAME = ['']
 const noneColour = () => token('--label-none') || '#a09c93'

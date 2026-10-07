@@ -192,10 +192,32 @@ const toolName = (i) => (D.names.tool[C.tool[i]] ?? '')
 const colour = thimble.colorBy({
   mount: '#colour',
   fields: [
-    // Exploit and Infra name their palette colours (olive, teal), so neither takes the sky blue that sits beside Captcha's blue
-    { name: 'activity', title: 'Activity', values: ['Captcha', 'Signup', 'Money', { name: 'Exploit', colour: 5 }, { name: 'Infra', colour: 6 }], value: (i) => (C && typeof i === 'number' ? ACT_VALUE[actOf(i)] : null) },
+    // each value names the colour the "activity type" label gives the same name, so a name has one colour in the view
+    {
+      name: 'activity', title: 'Activity',
+      description: 'What the record works on, from a table of text and file-path signals; a reasoning record with no signal takes the activity of the nearest record that has one',
+      values: [
+        { name: 'Captcha', colour: 2, meaning: 'Solving a CAPTCHA or challenge image (hCaptcha, reCAPTCHA, Turnstile), with the vision code that does it' },
+        { name: 'Signup', colour: 1, meaning: 'Creating or verifying accounts: mail providers, registration forms, SMS and verification codes' },
+        { name: 'Money', colour: 11, meaning: 'Wallets, crypto and payment or payout services' },
+        { name: 'Exploit', colour: 6, meaning: "The attack carried out: taking over a PyPI account's two-factor login and uploading the malicious package" },
+        { name: 'Infra', colour: 3, meaning: 'SSH, tunnels, installs, downloads and scans of the target' },
+      ],
+      value: (i) => (C && typeof i === 'number' ? ACT_VALUE[actOf(i)] : null),
+    },
     // create and str_replace name olive and teal, so neither takes the sky blue that sits beside terminal's blue
-    { name: 'tool', title: 'Tool', values: ['terminal', 'Reasoning', 'view', { name: 'create', colour: 5 }, { name: 'str_replace', colour: 6 }], value: (i) => (C && typeof i === 'number' ? TOOL_LABEL[toolName(i)] || null : null) },
+    {
+      name: 'tool', title: 'Tool',
+      description: 'The tool the record called; Reasoning for a message with no tool call',
+      values: [
+        { name: 'terminal', meaning: 'A shell command and its output' },
+        { name: 'Reasoning', meaning: 'Reasoning or a reply, with no tool call' },
+        { name: 'view', meaning: 'A file or folder read' },
+        { name: 'create', colour: 5, meaning: 'A file written' },
+        { name: 'str_replace', colour: 6, meaning: 'An edit to a file' },
+      ],
+      value: (i) => (C && typeof i === 'number' ? TOOL_LABEL[toolName(i)] || null : null),
+    },
   ],
   chips: 'filter',
   strip: '#list',
