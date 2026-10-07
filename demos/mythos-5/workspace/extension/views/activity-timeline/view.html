@@ -13,9 +13,14 @@
   /* thimble's parts (.field, .btn, .seg, Color by, Filter by, Rows, the time range, the lanes, the side panel, the
      divider) come with the frame; this page only lays them out */
   #mode { flex: none; }
+  /* Color by takes the row's last stretch; where less than its button and a chip are left, it wraps to a line of its own */
+  #colour { min-width: 220px; }
 
   /* the overview: the time range over the lanes, the lanes under it; the divider thimble inserts splits it from the list */
-  #overview { flex: none; min-height: 0; overflow: auto; }
+  /* no horizontal scroll: the overview and the list fit the pane's width (the divider sets the overview's overflow
+     inline, so the rule below wins over it) */
+  #overview { flex: none; min-height: 0; overflow: hidden auto; }
+  #overview, #list { overflow-x: hidden !important; }
   #chart { padding: 8px 14px 6px; }
   .time { display: grid; grid-template-columns: var(--g) minmax(0, 1fr); align-items: center; column-gap: 0; }
   #rread { align-self: center; }
@@ -24,7 +29,7 @@
   #lanes { --thimble-names: var(--g); margin-top: 4px; }
 
   #body { flex: 1; min-height: 0; }
-  #list { overflow: auto; }
+  #list { overflow: hidden auto; }
   /* what the list shows: the selection and its count, named over the rows */
   #lhead { position: sticky; top: 0; z-index: 1; display: flex; align-items: baseline; gap: 8px; padding: 7px 14px 6px; background: var(--surface-card); border-bottom: 1px solid var(--border-hairline); }
   #lhead .t { font: 500 var(--text-sm) / 1.3 var(--font-body); color: var(--text-primary); }

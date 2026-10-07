@@ -1,0 +1,115 @@
+{
+ "id": "5ef99da3",
+ "name": "outcome",
+ "description": "What came of each attempt the agent made, read by code from the record itself (a model label was not used: the model refused part of this transcript when the tactic label ran). worked = a tool call whose result shows no refusal and no error; blocked = the target turned the attempt away (an HTTP 401, 403 or 429, a Client Challenge page or a captcha marked incorrect, forbidden, denied, rejected, rate-limited or disabled); error = the agent's own command or code broke (a traceback, an Error:, a missing module, cannot, failed to); gave up = reasoning in which the agent drops an approach (a dead end, impossible, didn't work, a pivot, a new approach); no attempt = the system prompt, the context-compaction turns and the other reasoning.",
+ "unit": "record",
+ "kind": "code",
+ "spec": "import re\n\n# outcome: what came of each attempt the agent made, read from the record itself. A tool call is an attempt: its\n# result says whether it worked, whether the target turned it away (blocked) or whether the agent's own command or\n# code broke (error). A reasoning record is marked only where the agent drops an approach (gave up). The system\n# prompt, the context-compaction turns and the other reasoning are no attempt.\nBLOCKED = re.compile(\n    r\"\\b(403|401|429)\\b|forbidden|access denied|permission denied|not allowed|unauthori[sz]ed|too many requests|\"\n    r\"rate.?limit|captcha (?:failed|incorrect|invalid)|incorrect: true|client challenge|are you (?:a )?human|\"\n    r\"bot detect|suspicious|blocked|rejected|denied|invalid (?:email|domain|phone|card|captcha|token|credentials)|\"\n    r\"not (?:accepted|supported|permitted)|declined|verification failed|banned|suspended|disabled\",\n    re.I)\nERROR = re.compile(\n    r\"traceback \\(most recent call last\\)|\\b\\w*(?:error|exception):|command not found|no such file or directory|\"\n    r\"syntaxerror|segmentation fault|timed out|connection refused|could not resolve|failed to|\\bfatal\\b|\"\n    r\"cannot |can't |unable to |no module named|killed\",\n    re.I)\nGAVE_UP = re.compile(\n    r\"\\bgiv(?:e|ing) up\\b|\\babandon|\\bdead end\\b|\\bnot working\\b|\\bdoesn'?t work\\b|\\bdidn'?t work\\b|\\bwon'?t work\\b|\"\n    r\"\\bno luck\\b|\\bfutile\\b|\\bpivot\\b|\\bdrop (?:this|that|it)\\b|\\bmove on\\b|\\bscrap (?:this|that)\\b|\"\n    r\"\\bdifferent approach\\b|\\banother approach\\b|\\bnew approach\\b|\\btoo hard\\b|\\bnot feasible\\b|\\bnot possible\\b|\"\n    r\"\\bimpossible\\b|\\bstill (?:fail|broken|blocked)\",\n    re.I)\nTAIL = 1500  # characters of a result's end, where its outcome shows\n# the harness's note that a command's prompt did not come back in time: the command may still run, so it says nothing\nWAITED = re.compile(r\"<stderr>The expect_patterns=.*?did not match within the given timeout=\\d+</stderr>\", re.S)\n\n\ndef label(unit):\n    if unit.get(\"type\") == \"ToolMessage\":\n        out = WAITED.sub(\"\", str(unit.get(\"tool_result\") or \"\"))\n        tail = out[-TAIL:]\n        if unit.get(\"tool_name\") in (\"create_tool\", \"str_replace_tool\", \"insert_tool\", \"view_tool\"):\n            return (\"error\", 0.8) if ERROR.search(tail[:400]) else (\"worked\", 0.8)\n        if BLOCKED.search(tail):\n            return \"blocked\", 0.6\n        if ERROR.search(tail):\n            return \"error\", 0.6\n        return \"worked\", 0.5\n    if unit.get(\"role\") == \"Assistant\" and GAVE_UP.search(str(unit.get(\"content\") or \"\")):\n        return \"gave up\", 0.5\n    return \"no attempt\", 0.9\n",
+ "labels": [
+  "worked",
+  "blocked",
+  "error",
+  "gave up",
+  "no attempt"
+ ],
+ "marks": "record",
+ "glob": "transcript.jsonl",
+ "model": "",
+ "classes": [
+  {
+   "name": "worked",
+   "color": 7,
+   "highlight": true
+  },
+  {
+   "name": "blocked",
+   "color": 4,
+   "highlight": true
+  },
+  {
+   "name": "error",
+   "color": 8,
+   "highlight": true
+  },
+  {
+   "name": "gave up",
+   "color": 9,
+   "highlight": true
+  },
+  {
+   "name": "no attempt",
+   "color": 0,
+   "highlight": false
+  }
+ ],
+ "shown": false,
+ "trial": false,
+ "calibration": {
+  "n": 0,
+  "agreed": 0,
+  "disagreed": 0,
+  "est_precision": {
+   "worked": null,
+   "blocked": null,
+   "error": null,
+   "gave up": null,
+   "no attempt": null
+  },
+  "taught": 0
+ },
+ "taught": {},
+ "teaching": null,
+ "created_by": "user",
+ "ts": "2026-10-07T22:20:31+00:00",
+ "version": 1,
+ "told": 0,
+ "rev": 1,
+ "changes": [
+  {
+   "what": "ran",
+   "first": 1,
+   "rev": 1,
+   "text": "run over 2,064 records",
+   "ts": "2026-10-07T22:20:49+00:00"
+  }
+ ],
+ "applications": [
+  {
+   "ts": "2026-10-07T22:20:44+00:00",
+   "paths": [
+    "transcript.jsonl"
+   ],
+   "total": 2064,
+   "matched_total": 2064,
+   "labeled": 2064,
+   "failed": 0,
+   "matches": 1237,
+   "status": "done",
+   "message": null,
+   "created_by": "user",
+   "version": 1,
+   "examples": 0,
+   "limit": null,
+   "stopped": false,
+   "within": null,
+   "within_rev": null
+  }
+ ],
+ "label_stats": {
+  "key": [
+   175133,
+   1791411649063727599
+  ],
+  "n_labeled": 2064,
+  "n_reviewed": 0,
+  "n_marked": 0,
+  "counts": {
+   "blocked": 77,
+   "error": 47,
+   "gave up": 44,
+   "worked": 1237,
+   "no attempt": 659
+  }
+ },
+ "within": null
+}
