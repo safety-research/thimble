@@ -144,10 +144,16 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
   selection background and the rest dim. It opens on the whole span.
 - A click on the strip moves the window there; a drag frames a new range, a drag from inside the window moves it, a drag
   from its edge moves that edge; `[` `]` pan by a quarter and `+` `-` zoom.
-- `range.data({times, values, span, marks})` gives it the records' times, their Color by values and the incidents or
+- `range.data({times, values, span, marks, gap})` gives it the records' times, their Color by values and the incidents or
   other point events; `range.has(t)`, `from`, `to`, `full`, `set(a, b)`, `set(null)`, `fit()` read and set it.
-- `range.scale(cols)` lays the range across a chart's cells: `x(t)`, `t(x)`, `binOf(t)`, `step`, `ticks(gap)`.
-- `axis(d, scale, {gutter, marks, onMark})` draws the chart's axis under it, and the marks' labels on a row of their own.
+- `gap` (an option of `timeRange` or of `data`): an empty stretch longer than it, in the units, is a break of 4 cells,
+  ` // `, on the strip and on the range's scale, so bursts hours apart (runs, sessions, shifts) share one axis and each
+  keeps its share of the cells. An edge of the range never stays in a break, and `[` `]` `+` `-` move the window on the
+  strip's cells, so it keeps its width across a break.
+- `range.scale(cols)` lays the range across a chart's cells: `x(t)`, `t(x)`, `binOf(t)`, `step`, `ticks(gap)`, and
+  `broken` and `gaps()` (each break's first cell and the cell after it), with the breaks that fall inside the range.
+- `axis(d, scale, {gutter, marks, onMark})` draws the chart's axis under it, `//` at each break with the date on the
+  first label after it, and the marks' labels on a row of their own.
 - `strip(scale, items, {value, colour, max, guide})` is one row of a chart over time (a lane), `maxBin(scale,
   groups)` the height every lane shares, and `bar(n, max)` one cell's bar.
 

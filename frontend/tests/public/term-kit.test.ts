@@ -311,6 +311,62 @@ describe('the time range', () => {
     for (let i = 1; i < ticks.length; i++) expect(ticks[i].x - ticks[i - 1].x).toBeGreaterThanOrEqual(12)
     expect(ticks.some((t: any) => /^17 May/.test(t.label))).toBe(true)
   })
+
+  test('with gap, an empty stretch longer than it is a break: each stretch takes its share of the cells, a break 4, drawn // on the strip and the axis', async () => {
+    // three bursts of 40 minutes, the second 2 hours after the first and the third the next morning
+    const burst = (t: number) => Array.from({ length: 41 }, (_, i) => t + i * 60)
+    const B = [T0 + 14 * 3600, T0 + 17 * 3600, T0 + 33 * 3600]
+    const ts = [...burst(B[0]!), ...burst(B[1]!), ...burst(B[2]!)]
+    init({ cols: 100 })
+    const range = kit.timeRange({ gap: 1200 })
+    range.data({ times: ts })
+    const sc = range.scale(100)
+    expect(sc.broken).toBe(true)
+    expect(sc.gaps()).toEqual([[31, 35], [66, 70]])
+    expect(sc.x(B[0])).toBe(0)
+    expect(sc.x(B[0]! + 2400)).toBe(30)
+    expect(sc.x(B[1])).toBe(35)
+    expect(sc.x(B[2]! + 2400)).toBe(99)
+    expect(sc.binOf(B[0]! + 3 * 3600)).toBeGreaterThanOrEqual(31)
+    // the first tick of each stretch gives its date
+    const ticks = sc.ticks(8)
+    expect(ticks.filter((t: any) => / \d\d:\d\d$/.test(t.label) && /May/.test(t.label)).map((t: any) => t.label)).toEqual(['16 May 14:00', '16 May 17:00', '17 May 09:00'])
+    kit.draw((d: any) => {
+      range.draw(d, { gutter: 0 })
+      kit.axis(d, range.scale(d.cols), { gap: 8 })
+    })
+    await tick()
+    const rows = text()
+    expect(rows[1].slice(2 + 31, 2 + 35)).toBe(' // ')
+    expect(rows[1].slice(2 + 66, 2 + 70)).toBe(' // ')
+    expect(rows[2].slice(2 + 32, 2 + 34)).toBe('//')
+    expect(rows[2]).toContain('17 May 09:00')
+    expect(last().lines[2].find((s: any) => s.s === '//').fg).toBe('subtle')
+  })
+
+  test('on a broken scale an edge never stays in a break, and the keys move the window on the strip\'s cells', async () => {
+    const burst = (t: number) => Array.from({ length: 41 }, (_, i) => t + i * 60)
+    const B = [T0 + 14 * 3600, T0 + 17 * 3600, T0 + 33 * 3600]
+    const range = kit.timeRange({ gap: 1200 })
+    range.data({ times: [...burst(B[0]!), ...burst(B[1]!), ...burst(B[2]!)] })
+    kit.draw((d: any) => range.draw(d))
+    await tick()
+    // a range from inside the first break to inside the second: its start moves to the second burst, its end to its end
+    range.set(B[0]! + 3600, B[1]! + 4 * 3600)
+    expect(range.from).toBe(B[1])
+    expect(range.to).toBe(B[1]! + 2400)
+    // ] pans a quarter of the window's cells; the window keeps its cells across the break into the third burst
+    await key('-')
+    await key('-')
+    const before = [range.from, range.to]
+    await key(']')
+    expect(range.from).toBeGreaterThan(before[0]!)
+    expect(range.to).toBeGreaterThan(before[1]!)
+    for (const t of [range.from, range.to]) {
+      const inBreak = (t > B[0]! + 2400 && t < B[1]!) || (t > B[1]! + 2400 && t < B[2]!)
+      expect(inBreak).toBe(false)
+    }
+  })
 })
 
 describe('the list', () => {
