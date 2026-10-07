@@ -561,7 +561,7 @@ test('keys · view · its hint row is one row of whole hints: ↑↓, Enter, b, 
   await openTermView($, w)
   const open = w.viewHost.requests.find(r => r.path === '/open')
   expect(open?.body.theme).toBe('dark')
-  expect(open?.body.rows).toBe(SHORT - 4)
+  expect(open?.body.rows).toBe(SHORT - 3)  // the one title row, the rule, the hint row and the gutter above it
   const pane = await look($, SHORT)
   expect(await pane.find({ key: 'h-hints-1' })).toBeUndefined()
   const row = shown(await pane.find({ key: 'h-hints' })).trim()
