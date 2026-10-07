@@ -456,11 +456,6 @@ export async function relayInput(cx: Ctx, value: string): Promise<void> {
   relayLast = value
   relayFlip = true
   for (const ch of typed) {
-    // a terminal view's field that takes typing (a search) takes every key
-    if (viewTyping && !rt.typeThrough) {
-      await viewTyping(ch === ' ' ? 'space' : ch)
-      continue
-    }
     if (rt.typeThrough) {
       if (ch !== 'backspace') await cx.fill(ch)
       continue
@@ -483,8 +478,9 @@ export async function relayInput(cx: Ctx, value: string): Promise<void> {
   await cx.bumpPanel()
 }
 
-// while a terminal view's field takes typing, where the relay's keys go (drawView)
-let viewTyping: ((k: string) => Promise<void>) | null = null
+// while a field of a terminal view takes typing (its search), the relay's Input is that field: it holds the field's
+// text, each change of which goes to the view whole, and Enter ends it (drawView)
+let viewField: { slug: string; text: string; send: (text: string) => Promise<void>; enter: () => Promise<void> } | null = null
 
 /** Enter on the relay's Input: Enter for the list. */
 export async function relaySubmit(cx: Ctx): Promise<void> {
@@ -597,7 +593,15 @@ function listKeysEl(cx: Ctx, e: PaneEvent): RenderElement | null {
   return (
     <Box key="list-keys" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
       <Button key={RELAY.up} label="↑" plain onPress={key('up')} />
-      <Input key={RELAY.pick} value={MARKS[relayMark]} autoFocus onInput={v => void relayInput(cx, v)} onSubmit={() => void relaySubmit(cx)} />
+      {viewField ? (
+        <Input key={RELAY.pick} value={viewField.text} autoFocus onInput={v => {
+          if (!viewField) return
+          viewField.text = v
+          void viewField.send(v)
+        }} onSubmit={() => void viewField?.enter()} />
+      ) : (
+        <Input key={RELAY.pick} value={MARKS[relayMark]} autoFocus onInput={v => void relayInput(cx, v)} onSubmit={() => void relaySubmit(cx)} />
+      )}
       <Button key={RELAY.down} label="↓" plain onPress={key('down')} />
     </Box>
   )
@@ -2695,11 +2699,13 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const shown = openViewState()
   const sub = shown?.slug === slug && shown.frame?.sub?.length ? shown.frame.sub : []
   const rows = Math.max(6, (bodyRows || 34) - VIEW_CHROME - (sub.length ? 1 : 0))
-  const ov = viewFor(cx, rt.sc, slug, cols, rows, p.ref)
+  const ov = viewFor(rt.sc, slug, cols, rows, p.ref)
   const f: ViewFrame | null = ov.frame
   const head = headerEls(els, { title: p.title || v.name || slug, cols, ...(sub.length ? { sub: subLine(sub) } : {}) })
   const body: RenderElement[] = [...head]
-  viewTyping = null
+  // the relay is drawn from the first drawing on, while the view opens too, so the open gives it the ring (term.ts
+  // giveKeys) and the view's keys work as soon as its frame comes
+  setListKeys(() => undefined)
   if (ov.error && !f?.lines?.length) {
     body.push(<Text key="view-error" color={COLORS.problem} wrap="wrap">{`× ${ov.error}`}</Text>)
     body.push(<Button key="view-again" label="open it again" plain onPress={() => { retryView(); void cx.bumpPanel() }} />)
@@ -2712,21 +2718,34 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     return <Box flexDirection="column">{body}</Box>
   }
   const key = (k: string) => sendEvent(cx, { t: 'key', key: k })
-  // the view's keys reach it through the list's relay, which a view always draws: ↑↓, Enter, Space and Backspace, a
-  // sign typed into its field (a Button's hotkey is a letter or a digit), and every key while a field of the view takes
-  // typing
+  // the view's keys reach it through the list's relay, which a view always draws: ↑↓, Enter, Space and Backspace, and a
+  // sign typed into its field (a Button's hotkey is a letter or a digit)
   setListKeys(k => {
     const name = k === 'enter' ? 'return' : k
-    if (f.typing || f.keys.includes(name)) return key(name)
+    if (f.keys.includes(name)) return key(name)
   })
-  if (f.typing) viewTyping = key
+  // while a field of the view takes typing, the relay's field is that field, holding its text (the view's, when it
+  // began; then what the analyst typed, which is what it holds)
+  if (!f.typing) viewField = null
+  else {
+    const text = viewField && viewField.slug === slug ? viewField.text : f.field?.text ?? ''
+    viewField = { slug, text, send: t => sendEvent(cx, { t: 'text', value: t }), enter: () => key('return') }
+  }
   // the frame's rows bring their margin (`❯`)
   body.push(<Client key={marginKey('view-frame')} module="./viewclient.tsx" width={cols + MARGIN_W} height={Math.max(1, f.lines.length)} props={JSON.parse(JSON.stringify({ lines: f.lines, hits: f.hits, seq: f.seq, cols: cols + MARGIN_W })) as never} />)
   if (ov.error) body.push(<Text key="view-error" color={COLORS.problem} wrap="truncate-end">{`× ${ov.error}`}</Text>)
   // a sign's key works only from the relay's field, so its hint shows only while the ring rests there
   const isSign = (k: string) => [...k].length === 1 && !/[a-z0-9]/.test(k)
   const hints = f.hints.filter((_, i) => listKeysHeld() || !(f.hintKeys?.[i] ?? []).some(isSign))
-  body.push(hintsRow(els, hints, cols))
+  // a hint row too long for the pane leaves out the view's last hints, never the panel's own (back, close)
+  const fits = (hs: string[]) => width(endHints(hs).join(' · ')) <= cols
+  while (hints.length && !fits(hints)) hints.pop()
+  // while a field of the view takes typing every key is the field's, b and x among them: the row says only what Enter
+  // and Backspace do there
+  if (f.typing) {
+    endHints(f.hints)
+    body.push(hintsEl(els, paneFocused && !rt.typeThrough ? [...f.hints, 'Esc to leave the field'] : [UNFOCUSED_HINT], cols))
+  } else body.push(hintsRow(els, hints, cols))
   // each letter or digit the view binds is a hotkey of the panel, a Button no row tall; a sign is one of the relay's
   // (relayInput finds it among the hotkeys); none while a field of the view takes typing
   const chars = f.typing ? [] : f.keys.filter(k => [...k].length === 1 && !PANEL_KEYS.includes(k))
@@ -2801,8 +2820,10 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
     }
   })()
   // a terminal view's program lives while its view shows
-  if (p.view !== 'view' && openViewState()) void closeView(cx)
-  if (p.view !== 'view') viewTyping = null
+  if (p.view !== 'view') {
+    closeView()
+    viewField = null
+  }
   listRelay = takeListKeys()
   const tree = await withWay(cx, e, p.view, body)
   hotkeys = hotkeysDrawing

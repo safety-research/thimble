@@ -10,6 +10,12 @@
 //   stdout: {t: ready, socket, token} once; {t: frame, id, frame} for a frame the program drew on its own (an answer
 //   came); {t: ended, id, error} when a program ended
 //
+// A drawing only says which view it shows and at what size (`viewFor`); the session's timer (`viewPump`, started in
+// session.start) opens, resizes and closes the view to match, and starts the host. A call made inside a drawing's
+// dispatch belongs to it, and Claude Code abandons a drawing for a newer one, which would end the call (`ui.render:
+// superseded`) or the host with it; a timer session.start made lives for the session. A key or a click is sent from
+// its own hook, which ends when it is handled, so the frame that answers it comes at once.
+//
 // An act (a record's place, a side thread, a label's panel) comes only with the frame that answers the analyst's own key
 // or click, as the browser's label calls need the analyst's gesture.
 import type { Ctx } from './ctx'
@@ -27,6 +33,8 @@ export type ViewFrame = {
   hintKeys?: string[][]
   keys: string[]
   typing: boolean
+  /** the text of the view's field that takes typing, while one does */
+  field?: { text: string } | null
   sub: string[]
   error?: string
 }
@@ -37,16 +45,27 @@ export type ViewAct = { kind: 'open' | 'ask' | 'label'; ref?: string; text?: str
 export type OpenView = { slug: string; id: string; frame: ViewFrame | null; error: string; cols: number; rows: number; opening: boolean }
 
 type Host = { socket: string; token: string }
+type Wanted = { sc: Scope; slug: string; cols: number; rows: number; ref?: string }
 
+/** How often the session's timer matches the open view to what the panel draws. */
+export const PUMP_MS = 100
 const READY_MS = 60_000
+
 let host: Host | null = null
-let starting: Promise<Host | null> | null = null
+let hostStarting = false
 let hostStop: (() => void) | null = null
+let hostError = ''
 let current: OpenView | null = null
-// what the panel does with an act and with a frame the program drew on its own (set by panel.tsx)
+// what the panel draws now (viewFor), which the timer matches; null when no view shows
+let wanted: Wanted | null = null
+let again = false
+let pumping = false
+// the session's context (session.start's `$`), which the timer's work runs on
+let sessionCx: Ctx | null = null
+// what the panel does with an act (set by panel.tsx)
 let actSink: (cx: Ctx, a: ViewAct) => Promise<void> = async () => {}
 
-// a redraw of the panel from a step that lands after the hook that began it (an answer, the host's line)
+// a redraw of the panel from the timer's work or the host's line
 const bump = (cx: Ctx): void => void cx.bumpPanel().catch(() => undefined)
 
 /** What the panel does with each act the view asks for during the analyst's key or click. */
@@ -59,61 +78,32 @@ export function openViewState(): OpenView | null {
   return current
 }
 
-function hostArgv(sc: Scope): string[] {
-  return [sc.bin, 'view', 'host', '--cwd', sc.cwd]
+/**
+ * The open view for the panel showing `slug` at `cols` × `rows`, as a drawing asks: what to draw now. The session's
+ * timer opens it (starting the host the first time), tells it a new size, and redraws the panel as each step lands.
+ */
+export function viewFor(sc: Scope, slug: string, cols: number, rows: number, ref?: string): OpenView {
+  wanted = { sc, slug, cols, rows, ...(ref ? { ref } : {}) }
+  if (current && current.slug === slug) return current
+  return { slug, id: '', frame: null, error: '', cols, rows, opening: true }
 }
 
-/** The session's view host, started the first time; null (and the line why) when it does not start. */
-async function ensureHost(cx: Ctx, sc: Scope): Promise<Host | null> {
-  if (host) return host
-  if (starting) return starting
-  starting = new Promise<Host | null>(resolve => {
-    let settled = false
-    const done = (h: Host | null) => {
-      if (settled) return
-      settled = true
-      resolve(h)
-    }
-    const errs: string[] = []
-    const run = cx.spawnLines(hostArgv(sc), { cwd: sc.cwd, env: sc.env }, line => {
-      let msg: Record<string, unknown>
-      try {
-        msg = JSON.parse(line) as Record<string, unknown>
-      } catch {
-        return
-      }
-      if (msg.t === 'ready' && typeof msg.socket === 'string' && typeof msg.token === 'string') {
-        host = { socket: msg.socket, token: msg.token }
-        done(host)
-      } else if (typeof msg.error === 'string' && !msg.t) {
-        errs.push(msg.error)
-      } else if (msg.t === 'frame' && current && msg.id === current.id && msg.frame) {
-        const f = msg.frame as ViewFrame
-        if (!current.frame || f.seq > current.frame.seq) {
-          current.frame = f
-          bump(cx)
-        }
-      } else if (msg.t === 'ended' && current && msg.id === current.id) {
-        current.error = `the view's program ended: ${String(msg.error ?? '')}`.slice(0, 300)
-        bump(cx)
-      }
-    }, err => errs.push(err))
-    hostStop = run.stop
-    void run.done.then(() => {
-      host = null
-      starting = null
-      hostStop = null
-      if (current) {
-        current.error = current.error || `thimble's view host ended${errs.length ? `: ${errs.at(-1)}` : ''}`
-        bump(cx)
-      }
-      done(null)
-    })
-    cx.later(READY_MS, () => done(null))
-  })
-  const h = await starting
-  if (!h) starting = null
-  return h
+/** The panel shows no view now: the timer ends the open view's program. */
+export function closeView(): void {
+  wanted = null
+}
+
+/** The open view is opened again (its program failed). */
+export function retryView(): void {
+  again = true
+}
+
+/** The host ends (the module unloads, the session ends). */
+export function stopHost(): void {
+  hostStop?.()
+  host = null
+  current = null
+  wanted = null
 }
 
 async function call<T>(cx: Ctx, h: Host, path: string, body: Record<string, unknown>): Promise<T> {
@@ -135,47 +125,117 @@ async function call<T>(cx: Ctx, h: Host, path: string, body: Record<string, unkn
 }
 
 /**
- * The open view for the panel showing `slug` at `cols` × `rows`: opened the first time it is drawn (the host started
- * if need be), told when the panel's size changes; each step redraws the panel when it lands. Returns what to draw now.
+ * The session's timer: the open view matched to what the panel draws. Its program closed when no view shows, the view
+ * opened when another shows (the host started the first time), a new size sent. One run at a time.
  */
-export function viewFor(cx: Ctx, sc: Scope, slug: string, cols: number, rows: number, ref?: string): OpenView {
-  if (current && current.slug === slug) {
-    if (!current.opening && !current.error && current.id && (current.cols !== cols || current.rows !== rows)) {
-      current.cols = cols
-      current.rows = rows
-      void sendEvent(cx, { t: 'resize', cols, rows })
-    }
-    return current
+export async function viewPump(cx: Ctx): Promise<void> {
+  sessionCx = cx
+  if (pumping) return
+  pumping = true
+  try {
+    await pump(cx)
+  } finally {
+    pumping = false
   }
+}
+
+async function pump(cx: Ctx): Promise<void> {
+  const w = wanted
   const was = current
-  current = { slug, id: '', frame: null, error: '', cols, rows, opening: true }
-  const me = current
-  void (async () => {
-    if (was?.id && host) await call(cx, host, '/close', { id: was.id }).catch(() => undefined)
-    const h = await ensureHost(cx, sc)
+  if (was && (!w || was.slug !== w.slug || again)) {
+    current = null
+    if (was.id && host) await call(cx, host, '/close', { id: was.id }).catch(() => undefined)
+  }
+  if (!w) return
+  if (!current) {
+    again = false
+    const me: OpenView = { slug: w.slug, id: '', frame: null, error: '', cols: w.cols, rows: w.rows, opening: true }
+    current = me
+    const h = await ensureHost(cx, w.sc)
     if (current !== me) return
     if (!h) {
-      me.error = "thimble's view host did not start"
+      me.error = `thimble's view host did not start${hostError ? `: ${hostError}` : ''}`
       me.opening = false
       return bump(cx)
     }
     try {
-      const got = await call<{ id: string; frame: ViewFrame }>(cx, h, '/open', { slug, cols: me.cols, rows: me.rows, theme: 'dark', ...(ref ? { ref } : {}) })
+      const got = await call<{ id: string; frame: ViewFrame }>(cx, h, '/open', { slug: w.slug, cols: w.cols, rows: w.rows, theme: 'dark', ...(w.ref ? { ref: w.ref } : {}) })
       if (current !== me) {
         await call(cx, h, '/close', { id: got.id }).catch(() => undefined)
         return
       }
       me.id = got.id
       me.frame = got.frame
-      // the panel's size changed while it opened
-      if (me.cols !== cols || me.rows !== rows) void sendEvent(cx, { t: 'resize', cols: me.cols, rows: me.rows })
     } catch (err) {
       me.error = String(err instanceof Error ? err.message : err).slice(0, 400)
     }
     me.opening = false
-    bump(cx)
-  })()
-  return current
+    return bump(cx)
+  }
+  // the panel's size changed
+  if (current.id && !current.error && (current.cols !== w.cols || current.rows !== w.rows)) {
+    current.cols = w.cols
+    current.rows = w.rows
+    await sendEvent(cx, { t: 'resize', cols: w.cols, rows: w.rows })
+  }
+}
+
+/** The session's view host, started the first time (from the timer, which lives for the session); null, and why in
+ *  `hostError`, when it does not start. */
+async function ensureHost(cx: Ctx, sc: Scope): Promise<Host | null> {
+  if (host) return host
+  if (hostStarting) return null
+  hostStarting = true
+  hostError = ''
+  const errs: string[] = []
+  const got = await new Promise<Host | null>(resolve => {
+    let settled = false
+    const done = (h: Host | null) => {
+      if (settled) return
+      settled = true
+      if (!h) hostError = errs.at(-1) ?? hostError
+      resolve(h)
+    }
+    const onLine = (line: string) => {
+      let msg: Record<string, unknown>
+      try {
+        msg = JSON.parse(line) as Record<string, unknown>
+      } catch {
+        return
+      }
+      if (msg.t === 'ready' && typeof msg.socket === 'string' && typeof msg.token === 'string') {
+        host = { socket: msg.socket, token: msg.token }
+        done(host)
+      } else if (typeof msg.error === 'string' && !msg.t) {
+        errs.push(msg.error)
+      } else if (msg.t === 'frame' && current && msg.id === current.id && msg.frame) {
+        // a frame the program drew on its own: an answer came
+        const f = msg.frame as ViewFrame
+        if (!current.frame || f.seq > current.frame.seq) {
+          current.frame = f
+          bump(cx)
+        }
+      } else if (msg.t === 'ended' && current && msg.id === current.id) {
+        current.error = `the view's program ended: ${String(msg.error ?? '')}`.slice(0, 300)
+        bump(cx)
+      }
+    }
+    const run = cx.spawnLines([sc.bin, 'view', 'host', '--cwd', sc.cwd], { cwd: sc.cwd, env: sc.env }, onLine, err => errs.push(err.trim().split('\n').at(-1) ?? ''))
+    hostStop = run.stop
+    void run.done.then(() => {
+      host = null
+      hostStop = null
+      if (current) {
+        current.error = current.error || `thimble's view host ended${errs.length ? `: ${errs.at(-1)}` : ''}`
+        current.id = ''
+        bump(cx)
+      }
+      done(null)
+    })
+    cx.later(READY_MS, () => done(null))
+  })
+  hostStarting = false
+  return got
 }
 
 /** An event for the open view: its answering frame is drawn, and the acts made while it was handled are done. */
@@ -186,34 +246,14 @@ export async function sendEvent(cx: Ctx, event: Record<string, unknown>): Promis
     const got = await call<{ frame: ViewFrame | null; acts: ViewAct[] }>(cx, host, '/event', { id: v.id, event })
     if (current !== v) return
     if (got.frame && (!v.frame || got.frame.seq >= v.frame.seq)) v.frame = got.frame
-    bump(cx)
+    bump(sessionCx ?? cx)
     for (const a of got.acts ?? []) await actSink(cx, a)
   } catch (err) {
     if (current === v) {
       v.error = String(err instanceof Error ? err.message : err).slice(0, 400)
-      bump(cx)
+      bump(sessionCx ?? cx)
     }
   }
-}
-
-/** The open view closed (the panel shows something else, or closed): its program ends. */
-export async function closeView(cx: Ctx): Promise<void> {
-  const v = current
-  current = null
-  if (v?.id && host) await call(cx, host, '/close', { id: v.id }).catch(() => undefined)
-}
-
-/** The view open now is drawn afresh the next time (its program had failed). */
-export function retryView(): void {
-  current = null
-}
-
-/** The host ends (the module unloads, the session ends). */
-export function stopHost(): void {
-  hostStop?.()
-  host = null
-  starting = null
-  current = null
 }
 
 /** A post of hooks/viewclient.tsx: each click and drag not seen yet, as the open view's events. */

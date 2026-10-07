@@ -468,7 +468,10 @@ async function openTermView($: E, w: World): Promise<void> {
   await click($, w, SHORT, 'home', 'Views (1)')
   await takesKeys($)
   await enter($, w, SHORT)
-  await w.clock.settle()
+  // the panel draws the view, and the session's timer starts the host and opens it (viewhost.ts viewPump)
+  await (await look($, SHORT)).unmount()
+  await w.clock.advance(300)
+  await w.clock.advance(300)
   await takesKeys($)
 }
 
@@ -546,26 +549,31 @@ test('keys · view · a click on a row, a drag on a strip and the wheel are the 
   await pane3.unmount()
   expect(events(w).filter(e => e.t === 'click').at(-1)).toMatchObject({ i: 2 })
   expect((await seen($, SHORT)).text).toContain('An export of 4,579 wiki pages')
-  // back to the view: its program opens again; back again to the views list ends it
-  await hotkey($, w, 'back')
+  // the citation panel shows no view: the timer ends the view's program
+  await (await look($, SHORT)).unmount()
+  await w.clock.advance(300)
   expect(w.viewHost.requests.filter(r => r.path === '/close').length).toBeGreaterThanOrEqual(1)
 })
 
-test('keys · view · while its field takes typing, every key goes to the view, x and b among them', async ($, on) => {
+test('keys · view · while its field takes typing, the relay\'s field holds its text and sends each change whole, x and b among them; Enter ends it', async ($, on) => {
   const w = world(on)
   w.states.home = { ...w.states.home, views: TERM_VIEWS } as never
-  w.viewHost.frame = n => viewFrame(n, { typing: true, hints: ['Enter to finish', 'Backspace to delete'], keys: ['up', 'down'] })
+  w.viewHost.frame = n => viewFrame(n, { typing: true, field: { text: 're' }, hints: ['Enter to finish'], keys: ['up', 'down'] })
   await openTermView($, w)
   const s = await seen($, SHORT)
-  named(s.hint, ['Enter to finish', 'Backspace to delete'])
-  expect(s.relay).toBe(true)
+  named(s.hint, ['Enter to finish', 'Esc to leave the field'])
+  expect(s.hint).not.toContain('b to go back')
+  const pane = await look($, SHORT)
+  expect(await relayText(pane)).toBe('re')
+  await pane.unmount()
+  // what the analyst types goes into the field, which sends its whole text: no letter is a hotkey there
   for (const ch of ['d', 'x', 'b']) await type($, w, SHORT, ch)
-  expect(events(w).filter(e => e.t === 'key').map(e => e.key)).toEqual(['d', 'x', 'b'])
+  expect(events(w).filter(e => e.t === 'text').map(e => e.value)).toEqual(['red', 'redx', 'redxb'])
   expect(w.closed).not.toContain(PANEL)
   await backspace($, w, SHORT)
-  expect(events(w).at(-1)).toMatchObject({ key: 'backspace' })
+  expect(events(w).at(-1)).toMatchObject({ t: 'text', value: '' })
   await enter($, w, SHORT)
-  expect(events(w).at(-1)).toMatchObject({ key: 'return' })
+  expect(events(w).at(-1)).toMatchObject({ t: 'key', key: 'return' })
 })
 
 // ------------------------------------------------------------------------------------------------ files and a file

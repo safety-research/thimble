@@ -44,7 +44,7 @@ import { NAV_EMPTY } from './nav'
 import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, paneTitle, panelColumns, readSurface, readThread, rt, surfaceValue, takeKeys, threadsNow, tick } from './term'
 import type { UiApply } from './term'
 import { turns } from './turns'
-import { closeView, openViewState, sendEvent, viewMessage } from './viewhost'
+import { PUMP_MS, closeView, openViewState, sendEvent, viewMessage, viewPump } from './viewhost'
 
 type Dollar = EngineInterface
 
@@ -549,6 +549,9 @@ export const register: Register = on => {
     await restoreKept($, cx).catch(err => $.ui.log(`thimble-term: what main's chat drew before could not be read: ${String(err).slice(0, 200)}`))
     $.clock.every(1000, () => void tick(cx, applyUi))
     $.clock.every(250, () => void checkQueued(cx))
+    // the open view matched to what the panel draws, and thimble's view host started the first time a view opens, from
+    // a timer of the session's, which lives as long as it (viewhost.ts)
+    $.clock.every(PUMP_MS, () => void viewPump(cx))
     void tick(cx, applyUi)
     // what drew before the scope was known (the band above the prompt) draws again, now reading thimble-term's state;
     // the typeahead lists /thimble again with its terminal description
@@ -984,7 +987,7 @@ export const register: Register = on => {
       await $.state.set(pendingRef, null).catch(() => undefined)
       await $.state.set(panelA, null).catch(() => undefined)
       // a terminal view's program ends with its pane
-      if (openViewState()) await closeView(cxOf($))
+      closeView()
     }
     return closed
   })
