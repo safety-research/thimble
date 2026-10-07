@@ -252,7 +252,14 @@ def _normalize(raw: dict[str, Any], valid: _Refs) -> dict[str, Any]:
                 want = wants_section.get(x["id"])
                 if want:
                     x["section"] = by_heading.get(want)
-    title = _collapse(raw.get("title")) or (findings[0]["heading"] if findings else "") or "Report"
+    title = _collapse(raw.get("title"))
+    if not title and findings:
+        title = findings[0]["heading"]
+        if findings[0] is sections[0] and sections[0]["paragraphs"]:
+            # the headline is the title now, so its section is the opening and keeps no heading: drawn as both, it
+            # showed twice (live check term-fix10, quirk 3: the first save wrote `## headline` and no `# ` line)
+            sections[0]["heading"] = ""
+    title = title or "Report"
     return {"id": DOC_ID, "title": title, "title_ok": _title_ok(title), "sections": sections, "comments": []}
 
 

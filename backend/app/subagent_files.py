@@ -861,8 +861,8 @@ def main_session(ws: Path, state: dict[str, Any] | None = None) -> str:
 
 
 def main_pid(ws: Path) -> int | None:
-    """The pid of main's `claude` process: launch.json's `pid` (the launcher's own, which `exec claude` keeps for the
-    session's whole life, /clear and /resume included), when that process runs; None otherwise."""
+    """The pid of main's `claude` process: launch.json's `pid` (which the launcher writes as it starts `claude`, and
+    which stays for the session's whole life, /clear and /resume included), when that process runs; None otherwise."""
     pid = launch(ws).get("pid")
     if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1:
         return None

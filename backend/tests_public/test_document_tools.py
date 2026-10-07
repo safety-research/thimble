@@ -187,6 +187,7 @@ async def test_the_title_has_an_id_the_writer_edits_and_no_section_takes_a_headl
     assert not r.is_error, r.text
     assert report_types.read_doc(CORPUS, MAIN, "report")["title"] == "Copied headline"
 
+
 async def test_a_number_or_a_span_of_time_in_the_title_or_a_heading_that_no_link_shows_is_named(cells):
     """Live check term-fix8: the title said "for seven weeks" and a slide heading "seven weeks before the busiest days",
     40 days in the data, and the citation check, which read only sentences, said nothing. A save names the title and
@@ -252,3 +253,63 @@ async def test_the_report_checks_read_the_title_as_a_passage_and_its_comment_sta
     [cm] = report_types.read_doc(CORPUS, MAIN, "report")["comments"]
     assert cm["status"] != "open" and cm["was_on"] == "The account deleted for seven weeks"
 
+
+async def test_edit_document_refuses_a_figure_line_among_sentences(cells):
+    """Live check term-fix10, quirk 1: the writer replaced a sentence with "sentence.\\n![…](card:…)", and the report
+    showed the figure's markdown inside a paragraph, since only a text that opens with a figure was refused. A figure's
+    markup anywhere in a passage's text but as its one line is refused with what to do; a figure line alone is
+    inserted, and a new section reads its figure lines as figures."""
+    cid, tid = cells
+    r = await call("write_document", doc="report", text=f"# Bob\n\n## Bob\n\nBob issued [[9|card:{tid}#count/bob]] deletions.\n")
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    [sid] = [x["id"] for x in report_types.unit_sentences(doc["sections"][0])]
+    for text, insert in [(f"Bob issued nine.\n![Deletions per account](card:{tid})", False),
+                         (f"![Deletions per account](card:{tid})\nBob issued nine.", True),
+                         (f"Bob issued nine, as ![the table](card:{tid}) shows.", False)]:
+        r = await call("edit_document", span=f"report:report#{sid}", text=text, **({"insert": True} if insert else {}))
+        assert r.is_error and report_types.FIGURE_WITH_TEXT in r.text, r.text
+    after = report_types.read_doc(CORPUS, MAIN, "report")
+    assert "![" not in " ".join(x["text"] for x in report_types.all_sentences(after))
+    r = await call("edit_document", span=f"report:report#{sid}", text=f"![Deletions per account](card:{tid})", insert=True)
+    assert not r.is_error, r.text
+    r = await call("edit_document", span=f"report:report#{sid}", insert=True,
+                   text=f"## Alice\n\nAll [[27|card:{cid}]] came from Alice.\n\n![Deletions per account](card:{tid})")
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    assert [len(s.get("figures") or []) for s in doc["sections"]] == [1, 1]
+
+
+async def test_a_replaced_sentence_that_repeats_its_neighbor_is_left_out(cells):
+    """Live check term-fix10, quirk 2: the writer twice replaced a sentence with "A. B." while B already followed it, and
+    the report showed B three times. A new sentence at the end of the text that reads as the sentence after the passage
+    (or at its start as the one before) is left out, and the result says so; a text that only repeats them is refused."""
+    _, tid = cells
+    r = await call("write_document", doc="report", text=f"# Bob\n\n## Bob\n\nBob issued deletions. Alpha paused the probe "
+                                                       f"on 26 June [[card:{tid}]].\n")
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    first, second = report_types.unit_sentences(doc["sections"][0])
+    r = await call("edit_document", span=f"report:report#{first['id']}",
+                   text=f"Bob issued [[9|card:{tid}#count/bob]] deletions. Alpha paused the probe on 26 June [[card:{tid}]].")
+    assert not r.is_error, r.text
+    assert "left out “Alpha paused the probe on 26 June.”, since the sentence next to the passage already says it" in r.text
+    words = [report_types.plain_text(x["text"]) for x in report_types.unit_sentences(report_types.read_doc(CORPUS, MAIN, "report")["sections"][0])]
+    assert words == ["Bob issued 9 deletions.", "Alpha paused the probe on 26 June."]
+    new_first = report_types.unit_sentences(report_types.read_doc(CORPUS, MAIN, "report")["sections"][0])[0]
+    r = await call("edit_document", span=f"report:report#{new_first['id']}", text="alpha paused the probe on 26 June.")
+    assert r.is_error and "pass `delete`" in r.text, r.text
+
+
+async def test_a_first_save_with_a_section_heading_and_no_title_line_shows_the_headline_once(cells):
+    """Live check term-fix10, quirk 3: the first save wrote `## headline` and no `# ` line, the title fell back to that
+    heading, and the section kept it too, so the headline was drawn twice. The section becomes the opening."""
+    cid, _ = cells
+    r = await call("write_document", doc="report", text=f"## One account issued every deletion\n\nAll [[27|card:{cid}]] "
+                                                       f"came from one account.\n\n## Caveats\n\nThe log covers one week.\n")
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    assert doc["title"] == "One account issued every deletion"
+    assert [s["heading"] for s in doc["sections"]] == ["", "Caveats"]
+    lines = report_types.document_lines(doc)
+    assert sum("One account issued every deletion" in ln for ln in lines) == 1

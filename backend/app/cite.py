@@ -155,7 +155,8 @@ def clocks_in(display: str, text: str) -> bool:
 QUOTE_MARKS = "\"'“”‘’"
 
 # a whole number written in words, zero to ninety-nine (`seven`, `Twelve`, `twenty-one`), as prose and an agent's
-# message write a small count (number_words)
+# message write a small count: what a number cited in digits may find at its place (number_words; live check term-fix10,
+# quirk 9: edit_card said 12 and 7 were not in an output that writes "Twelve pages are up" and "seven of the twelve")
 _ONES = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
          "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen")
 _TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
@@ -173,6 +174,14 @@ def number_words(text: str) -> list[tuple[int, int, int]]:
         else:
             out.append((m.start(), m.end(), _WORD_VALUES[m[3].lower()]))
     return out
+
+
+def in_words(display: str, text: str) -> bool:
+    """Whether a display that is one whole number (`12`, `7`) is a number `text` writes in words (`Twelve`, `seven`)."""
+    key = _norm(display.strip())
+    if not key.isdigit() or int(key) > 99:
+        return False
+    return any(v == int(key) for _, _, v in number_words(text))
 
 
 _MONTHS = {m: i for i, names in enumerate((("jan", "january"), ("feb", "february"), ("mar", "march"), ("apr", "april"),
@@ -279,19 +288,21 @@ def dates_shown(text: str) -> str | None:
 
 def value_in(display: str, excerpt: str, *, decrease: bool = False) -> bool:
     """Whether a value-ref's display is at the place it cites (verify._value_matches, report._value_matches): a number
-    must cite a whole number token of the excerpt by shown_matches (a substring hit is not a receipt); a day and a
-    month in words a date the excerpt writes as digits (date_in); anything else is a comma-insensitive substring of it,
-    the quotation marks around a quoted phrase left out."""
+    must cite a whole number token of the excerpt by shown_matches (a substring hit is not a receipt), or a whole number
+    the excerpt writes in words (in_words); a day and a month in words a date the excerpt writes as digits (date_in);
+    anything else is a substring of it, ignoring commas and case, the quotation marks around a quoted phrase left out."""
     if any(shown_matches(display, t, negative_ok=decrease) for t in _NUM_RE.findall(excerpt)):
         return True
     if date_in(display, excerpt):
         return True
     if _NUM_RE.fullmatch(display.strip()):
-        return False
+        return in_words(display, excerpt)  # `7` where the place writes "seven"
     words = display.strip()
     if len(words) > 2 and words[0] in QUOTE_MARKS and words[-1] in QUOTE_MARKS:
         words = words[1:-1]
-    return _norm(words) in excerpt.replace(",", "")
+    # any case: `twelve pages` is at a line that reads "Twelve pages are up" (live check term-fix10, quirk 9: the check
+    # moved the writer's citation to the next line, which writes the words in lower case)
+    return _norm(words).casefold() in excerpt.replace(",", "").casefold()
 
 
 # Prose that says a number is a decrease: an unsigned number may cite a value of the same size with a minus sign ("12
@@ -1193,6 +1204,20 @@ class _Sources:
             refs += [f"card:{self.cell_id}@out{i}#L{ln}" for ln, line in numbered_lines(b) if date_in(display, line)]
         return list(dict.fromkeys(refs))
 
+    def word_places(self, tok: str) -> list[str]:
+        """The table cells and text lines of the outputs that write a whole number in words (`12` as "Twelve"; in_words),
+        each once."""
+        refs: list[str] = []
+        for i, b in iter_outputs(self.outputs):
+            cells = bundle_cells(b)
+            if cells:
+                refs += [r for col, row, val in cells if in_words(tok, str(val)) and (r := td_ref(self.cell_id, col, row))]
+                continue
+            if any(k.startswith("image/") or "vega" in k for k in b):
+                continue  # a chart's text/plain is its repr, never a source
+            refs += [f"card:{self.cell_id}@out{i}#L{ln}" for ln, line in numbered_lines(b) if in_words(tok, line)]
+        return list(dict.fromkeys(refs))
+
     def lookup_unit(self, tok: str, unit: str | None) -> tuple[str, int] | None:
         """(ref, tier 2) for a number with its unit word when exactly one text line holds that pair ("16 runs"), else None."""
         if not unit:
@@ -1224,7 +1249,7 @@ class _Sources:
             if word and not clocks_in(display, hit[0]):
                 return None
             if not word and not (_norm(hit[0]) in wants or shown_matches(display, hit[0], negative_ok=negative_ok)
-                                 or date_in(display, hit[0])):
+                                 or date_in(display, hit[0]) or in_words(display, hit[0])):
                 return None
             return td_ref(self.cell_id, decode_label(m[1]), decode_label(m[2]))
         if m := self.line_span.match(ref):
@@ -1274,7 +1299,9 @@ def _annotate(seg: str, src: _Sources, res: Resolved, seen: set[str]) -> str:
     """Wrap every number in a plain-text segment (no [[...]] inside) that has a unique source. A day and a month in words
     (`On 23 June`) is one value: linked whole to the one line or cell that writes that date in digits (date_in), else
     left plain, never its day linked as a number with the month as its unit (live check term-fix8, quirk 4: `23` was
-    linked to an answer at 23:41 while the sentence was about another line)."""
+    linked to an answer at 23:41 while the sentence was about another line). A number an output writes only in words
+    (`12` as "Twelve pages are up") is found there, so it is not listed as unresolved, and stays plain (live check
+    term-fix10, quirk 9)."""
     parts: list[str] = []
     pos = 0
     dates = dates_in_text(seg)
@@ -1311,7 +1338,10 @@ def _annotate(seg: str, src: _Sources, res: Resolved, seen: set[str]) -> str:
             if tok in seen:  # one entry per token as written: `29` and `29.0` are each listed (each is wrapped by itself)
                 continue
             seen.add(tok)
-            (res.totals if src.is_total(tok) else res.unresolved).append(tok)
+            if src.is_total(tok):
+                res.totals.append(tok)
+            elif not src.word_places(tok):  # one an output writes in words ("Twelve pages") is found, and left plain
+                res.unresolved.append(tok)
     parts.append(seg[pos:])
     return "".join(parts)
 

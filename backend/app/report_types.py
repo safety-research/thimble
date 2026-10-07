@@ -1823,10 +1823,15 @@ async def replace_passage(c: str, slug: str, uid: str, text: str, entry: dict[st
         new = report_format.sentence_units(text, _Refs(c), used)
     if not new:
         raise HTTPException(400, "the new passage has no sentence")
+    start = next((i for i, x in enumerate(holder) if passage and x is passage[0]), 0)
+    new, repeats = _drop_repeats(new, holder[start - 1] if start > 0 else None,
+                                 holder[start + len(passage)] if start + len(passage) < len(holder) else None)
+    if not new:
+        raise HTTPException(400, "the sentences next to this passage already say what the new text says: to remove "
+                                 "the passage, pass `delete`")
     await report.verify_and_tag(c, new)
     old_ids = [str(x.get("id")) for x in passage]
     passage_text = report_format.body_of(passage)
-    start = next((i for i, x in enumerate(holder) if passage and x is passage[0]), 0)
     holder[start:start + len(passage)] = new
     if para is not None and para.get("kind") == "divider":
         para.pop("kind")
@@ -1846,7 +1851,30 @@ async def replace_passage(c: str, slug: str, uid: str, text: str, entry: dict[st
     reverted = _save_edit(c, inv_id, slug, doc, before, str(entry.get("actor") or entry.get("by") or "model"))
     _emit(c, {"type": "report", "slug": slug, "status": "rewritten", "span": span or f"report:{slug}#{uid}"})
     return {"text": report_format.body_of(new), "ids": [str(x["id"]) for x in new],
-            "unverified": [str(x["id"]) for x in new if "unverified" in (x.get("tags") or [])], "reverted": reverted}
+            "unverified": [str(x["id"]) for x in new if "unverified" in (x.get("tags") or [])], "reverted": reverted,
+            "repeats": repeats}
+
+
+def _same_words(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
+    """Whether two sentence records read the same, as a reader sees them (plain_text), ignoring case."""
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    words = plain_text(str(a.get("text") or "")).casefold()
+    return bool(words) and words == plain_text(str(b.get("text") or "")).casefold()
+
+
+def _drop_repeats(new: list[dict[str, Any]], before: dict[str, Any] | None,
+                  after: dict[str, Any] | None) -> tuple[list[dict[str, Any]], list[str]]:
+    """(the new sentences without those at their ends that repeat the sentence just before or just after the replaced
+    passage, the words of each one left out). Live check term-fix10, quirk 2: the writer replaced a sentence with "A.
+    B." while B already followed it, twice, so the report showed B three times."""
+    keep = list(new)
+    dropped: list[str] = []
+    while keep and _same_words(keep[-1], after):
+        dropped.append(plain_text(str(keep.pop().get("text") or "")))
+    while keep and _same_words(keep[0], before):
+        dropped.append(plain_text(str(keep.pop(0).get("text") or "")))
+    return keep, dropped
 
 
 def replace_heading(c: str, slug: str, uid: str, text: str, actor: str, *, span: str | None = None,
@@ -2900,6 +2928,10 @@ async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
         # a `# ` line is the title's mark: on any other passage it would make a second headline
         if not title and text and _TITLE_MARK_RE.match(text):
             return tools.err(f"edit_document: {title_mark_refusal(slug)}")
+        # a figure line with other text would be stored as a sentence's words (live check term-fix10, quirk 1); a new
+        # section, which opens with its heading, reads its figure lines as figures, as write_document does
+        if text and _figure_with_text(text) and not (args.get("insert") and _opens_unit(text, (read_type(ctx.c, slug) or {}).get("renderer"))):
+            return tools.err(f"edit_document: {FIGURE_WITH_TEXT}")
         # a passage inside a block the analyst locked is refused; a passage inserted after it leaves it as it is
         held = None if args.get("insert") else locked_block_ref(read_doc(ctx.c, investigation.MAIN, slug) or {}, slug, uid,
                                                                 whole=bool(args.get("delete")))
@@ -2947,6 +2979,8 @@ async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
         log.debug("chip not written", exc_info=True)
     if out.get("text"):
         line += f": {out['text'][:300]}"
+    for words in out.get("repeats") or []:
+        line += f"\nleft out “{_cut(words, FLAGGED_CHARS)}”, since the sentence next to the passage already says it"
     if ids := [str(i) for i in out.get("unverified") or []]:
         # each flagged sentence by its words and why, never its id alone (flagged_lines)
         line += "\n" + (flagged_lines(slug, all_sentences(read_doc(ctx.c, investigation.MAIN, slug) or {}), ids)
@@ -2957,6 +2991,22 @@ async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
             slug, read_doc(ctx.c, investigation.MAIN, slug) or {}, {str(i) for i in out.get("ids") or []})):
         line += "\n" + loose
     return tools.ok(line)
+
+
+# edit_document's refusal of a figure line sent with sentences
+FIGURE_WITH_TEXT = ("a figure is a passage of its own, so its `![caption](card:<id>)` line cannot share `text` with "
+                    "sentences: send the sentences without it, then insert the figure after them with `insert` and "
+                    "that line alone as `text`")
+_FIGURE_MARK_RE = re.compile(r"!\[[^\n]*\]\(\s*(?:card|cell):[A-Za-z0-9_-]+")
+
+
+def _figure_with_text(text: str) -> bool:
+    """Whether `text` holds a figure's markup anywhere but as its one and only line: on a line of its own among
+    sentences, or inside a sentence."""
+    lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+    if len(lines) == 1 and _MD_FIGURE_RE.match(lines[0]):
+        return False
+    return any(_FIGURE_MARK_RE.search(ln) for ln in lines)
 
 
 def _opens_unit(text: str, renderer: str | None) -> bool:

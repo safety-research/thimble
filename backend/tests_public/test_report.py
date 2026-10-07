@@ -64,6 +64,7 @@ async def test_verify_and_tag_repairs_a_moved_value_and_tags_what_nothing_shows(
     assert stale["tags"] == [] and stale["tag_notes"] == {}  # a tag an earlier pass left on a sentence that now holds is cleared
     assert out["checked"] >= 4 and {f["sentence_id"] for f in out["failed"]} >= {"s3", "s4"}
 
+
 async def test_words_that_show_no_value_name_the_file_place_they_link_and_are_never_tagged(ws, inv):
     """Live check term-fix6: a takeaway's `[[its record|pages.jsonl#L2]]` was marked red, since the check read any words
     at a file line as a value. Words with no number, no quotation marks and no day and month only name the place, so a
@@ -99,3 +100,16 @@ async def test_words_that_show_no_value_name_the_file_place_they_link_and_are_ne
     assert [b["value"] for b in links["broken"]] == ["999"]
     assert "asks for reviews" in {r["value"] for r in links["resolved"]}
 
+
+async def test_the_writer_s_cited_line_is_kept_when_it_shows_the_words_in_another_case(ws, inv):
+    """Live check term-fix10, quirk 9: edit_document moved `[[twelve pages|…@out0#L4]]` from "Twelve pages are up" to
+    the next line, "seven of the twelve pages are gone", since only that one wrote the words in lower case."""
+    nb = notebook.create_notebook(ws, "Exploration", role="exploration", investigation=inv)
+    cell = notebook.new_cell("code", "run", "What did the agents say?", nb["id"], code="print()")
+    cell.update(status="ok", outputs=[{"text/plain": "alpha: Twelve pages are up.\nbeta: seven of the twelve pages are gone."}])
+    nb["cells"].append(cell)
+    notebook.write_notebook(ws, nb)
+    ref = f"card:{cell['id']}@out0#L1"
+    x = {"id": "t1", "text": f"Alpha made [[twelve pages|{ref}]].", "refs": [ref], "tags": [], "tag_notes": {}}
+    out = await report.verify_and_tag(CORPUS, [x])
+    assert x["text"] == f"Alpha made [[twelve pages|{ref}]]." and x["tags"] == [] and out["repaired"] == 0
