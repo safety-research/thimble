@@ -601,23 +601,34 @@ async def stop_kernels(c: str) -> None:
 # ------------------------------------------------------------------------------------------------------ as text
 
 
-def hint_rows(hints: list[str], cols: int | None) -> list[str]:
-    """The hint row in `cols` cells, as thimble-term's view panel wraps it: whole hints parted by ` · `, a row ending
-    where the next hint does not fit (one row with no `cols`)."""
-    rows: list[str] = []
-    for h in hints:
-        if rows and (cols is None or len(rows[-1]) + 3 + len(h) <= cols):
-            rows[-1] += f" · {h}"
-        else:
-            rows.append(h)
-    return rows or [""]
+def _hint_need(h: str) -> int:
+    """What a view's hint row keeps first where it has no room for every hint (thimble-term's chrome.tsx hintNeed): ↑↓,
+    Enter, the way back, `?` (every key), closing, then the view's own keys."""
+    for i, pre in enumerate(("↑↓", "Enter", "b to go back", "? ", "x to close")):
+        if h.startswith(pre):
+            return i
+    return 5
+
+
+def hint_row(hints: list[str], cols: int | None) -> str:
+    """The hint row in `cols` cells, as thimble-term's view panel fits it (fitHints): one row of whole hints parted by
+    ` · `, the most needed kept, in their order (every hint with no `cols`)."""
+    keep: set[int] = set()
+    used = 0
+    for i, h in sorted(enumerate(hints), key=lambda x: (_hint_need(x[1]), x[0])):
+        add = len(h) + (3 if keep else 0)
+        if cols is not None and used + add > cols:
+            continue
+        keep.add(i)
+        used += add
+    return " · ".join(h for i, h in enumerate(hints) if i in keep)
 
 
 def panel_text(view_name: str, frame: dict[str, Any], *, ansi: bool = False, cols: int | None = None) -> str:
     """A frame as thimble-term's panel shows it, with no Claude Code: the view's name, its subtitle, the rule, the
-    frame's rows (frame.text), and its hint row with the panel's own keys, wrapped to `cols` as the panel wraps it."""
+    frame's rows (frame.text), and its hint row with the panel's own keys, fitted to `cols` as the panel fits it."""
     sub = " · ".join(frame.get("sub") or [])
-    hints = hint_rows([*(frame.get("hints") or []), "b to go back", "x to close"], cols)
+    hints = [hint_row([*(frame.get("hints") or []), "b to go back", "x to close"], cols)]
     body = frame.get("text") or "\n".join("".join(s.get("s", "") for s in line) for line in frame.get("lines") or [])
     width = cols + 2 if cols else max([len(view_name), *(len(x) for x in body.split("\n"))] or [40])
     if ansi:
@@ -634,8 +645,9 @@ async def draw_text(c: str, slug: str, *, cols: int = 120, rows: int = 40, keys:
                     panel: bool = True) -> str:
     """The view `slug` of workspace `c` drawn as text at `cols` × `rows` (the panel's body), as it opens (not on what
     the analyst's last opening kept, and keeping nothing), after `keys` (key names, `click:<words>` for a click on the
-    first hot region whose text holds those words, `wheel:<n>`, `text:<words>` for what a field that takes typing
-    holds): what the view checks and the reviewer read, with no Claude Code."""
+    first hot region whose text holds those words, `drag:<x0>-<x1>` for a drag across those cells of the first region a
+    drag moves (the time range's strip), `wheel:<n>`, `text:<words>` for what a field that takes typing holds): what the
+    view checks and the reviewer read, with no Claude Code."""
     from . import views  # noqa: PLC0415
 
     views._bind_loop()
@@ -646,7 +658,7 @@ async def draw_text(c: str, slug: str, *, cols: int = 120, rows: int = 40, keys:
         for k in keys or []:
             ev = _event_of(k, frame)
             if ev is None:
-                raise TermViewError(f"no hot region shows {k[6:]!r}")
+                raise TermViewError(f"no hot region shows {k[6:]!r}" if k.startswith("click:") else "no region takes a drag")
             await p.event(ev)
             frame = await p.settle() or frame
         view = views.read_built(c, slug) or {}
@@ -686,7 +698,7 @@ async def draw_check(c: str, slug: str, *, cols: int, theme: str, rows: int = CH
         except TermViewError as e:
             out["error"] = str(e)
             return out
-        # the hint row wrapped to the panel's columns, as the panel and draw_text wrap it
+        # the hint row fitted to the panel's columns, as the panel and draw_text fit it
         out.update(text=panel_text(p.name, frame, cols=cols), answers=p.answers, fetches=p.fetches)
         if p.failed:
             out["error"] = f"a fetch failed: {p.failed[0]}"
@@ -713,6 +725,13 @@ def _event_of(k: str, frame: dict[str, Any]) -> dict[str, Any] | None:
             text = lines[h["y"]][h["x0"]:h["x1"]] if h["y"] < len(lines) else ""
             if words and words in text:
                 return {"t": "click", "i": i, "seq": frame.get("seq"), "x": 0}
+        return None
+    if k.startswith("drag:"):
+        # a drag across the cells x0 to x1 of the first region a drag moves (the time range's strip), as the panel sends it
+        a, _, b = k[5:].partition("-")
+        for i, h in enumerate(frame.get("hits") or []):
+            if h.get("drag"):
+                return {"t": "drag", "i": i, "seq": frame.get("seq"), "x0": int(a or 0), "x1": int(b or 0)}
         return None
     if k.startswith("wheel:"):
         return {"t": "wheel", "by": int(k[6:] or 0)}

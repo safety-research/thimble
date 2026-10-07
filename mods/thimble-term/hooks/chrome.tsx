@@ -109,6 +109,27 @@ export function hintLines(hints: readonly string[], w: number): Line[] {
   return (rows.length ? rows : ['']).map(r => fitTo([{ s: r, fg: COLORS.dim, i: true }], w))
 }
 
+// what a view's hint row keeps first where it has no room for every hint: ↑↓, Enter, the way back, `?` (every key),
+// closing, then the view's own keys
+function hintNeed(h: string): number {
+  return /^↑↓/.test(h) ? 0 : /^Enter\b/.test(h) ? 1 : /^b to go back\b/.test(h) ? 2 : /^\? /.test(h) ? 3 : /^x to close\b/.test(h) ? 4 : 5
+}
+
+/** A view's key hints on one row of `w` cells (docs/terminal-views.md, "Keys"): whole hints, the most needed kept
+ *  (hintNeed), in the panel's order; `?` lists the keys the row leaves out. */
+export function fitHints(hints: readonly string[], w: number): string[] {
+  const order = orderedHints(hints)
+  const keep = new Set<number>()
+  let used = 0
+  for (const { h, i } of order.map((h, i) => ({ h, i })).sort((a, b) => hintNeed(a.h) - hintNeed(b.h) || a.i - b.i)) {
+    const add = width(h) + (keep.size ? 3 : 0)
+    if (used + add > w) continue
+    keep.add(i)
+    used += add
+  }
+  return order.filter((_, i) => keep.has(i))
+}
+
 /** `new` in green, the word that follows a new item's name; `N new` after a count. */
 export function freshSeg(n?: number): Seg {
   return { s: n === undefined ? 'new' : `${n.toLocaleString('en-US')} new`, fg: FRESH }
