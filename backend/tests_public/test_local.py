@@ -266,6 +266,45 @@ async def test_state_gives_what_the_routes_give(term):
     assert concepts.find_concept(config.workspace_dir(CORPUS), "bash")
 
 
+async def test_state_label_keeps_a_record_the_analyst_set_under_the_value_they_gave(term):
+    """A record the analyst set to another value in the label panel stays among its examples, under the value they gave,
+    with the value the label gave it and its words (live check New 10: its row came past the page each value shows, so it
+    left the list); a record they agreed with stays under its value."""
+    from app import concepts
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    first = await local.state(CORPUS, "label", ["bash"])
+    no = (await concepts.rows_route(CORPUS, first["id"], value="no", limit=500))["rows"]
+    yes = (await concepts.rows_route(CORPUS, first["id"], value="yes", limit=500))["rows"]
+    assert len(yes) > local.LABEL_ROWS, "more yes records than the page shows: the moved one would fall past it"
+    moved = no[-1]["ref"]
+    assert moved not in {r["ref"] for r in first["rows"]}
+    await local.act(CORPUS, "verdict", {"label": "bash", "ref": moved, "value": "yes"})
+    agreed = yes[0]["ref"]
+    await local.act(CORPUS, "verdict", {"label": "bash", "ref": agreed, "value": "yes"})
+    label = await local.state(CORPUS, "label", ["bash"])
+    [row] = [r for r in label["rows"] if r["ref"] == moved]
+    assert (row["analyst"], row["label"]) == ("yes", "no") and row["text"]
+    assert [r["analyst"] for r in label["rows"] if r["ref"] == agreed] == ["yes"]
+    # each record once, the store's own page after the analyst's records
+    refs = [r["ref"] for r in label["rows"]]
+    assert len(refs) == len(set(refs))
+
+
+async def test_state_opens_says_which_files_open_as_a_transcript(term):
+    """What the file view opens a file as where that is not its lines, by path: `transcript` where its head reads as a
+    transcript surely (transcripts.STRONG), which the renderer's type column shows (live check Q17); a file of lines,
+    one that is not there and one outside the corpus are left out."""
+    got = await local.state(CORPUS, "opens", [json.dumps(["agents/agent-01.jsonl", "board.jsonl", "events.jsonl",
+                                                         "README.md", "nope.jsonl", "../outside.jsonl"])])
+    assert got == {"agents/agent-01.jsonl": "transcript", "board.jsonl": "transcript"}
+    with pytest.raises(local.StateError, match="JSON list"):
+        await local.state(CORPUS, "opens", ['{"a": 1}'])
+    with pytest.raises(local.StateError, match="needs"):
+        await local.state(CORPUS, "opens")
+
+
 async def test_act_makes_what_the_browser_makes(term, monkeypatch):
     from app import agents, concepts, events, subagents, threads
 
