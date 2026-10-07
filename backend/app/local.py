@@ -765,7 +765,7 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 
 
 ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
-             "verdict {label, ref, value}, label {label, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, seen {thread}, "
+             "verdict {label, ref, value}, label {label, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, label-delete {label}, seen {thread}, "
              "stop {agent}")
 
 
@@ -937,6 +937,24 @@ async def _act_label_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"label": cid, "stopping": True}
 
 
+async def _act_label_delete(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Delete a label from the terminal's label panel, as the browser's Delete label does (DELETE /concepts/{id},
+    concepts.delete_concept_route): the label, its marks, its card and any filter that uses it. A `label-run` of it in
+    another process is asked to stop first (its stop file); a run in this process ends inside the route."""
+    from . import concepts  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    found = concepts.find_concept(ws, _text(payload, "label"))
+    if found is None:
+        raise StateError(f"no label {payload.get('label')!r}")
+    cid = str(found["id"])
+    stop = _label_stop_file(c, cid)
+    stop.parent.mkdir(parents=True, exist_ok=True)
+    stop.write_text(_now(), "utf-8")
+    await concepts.delete_concept_route(c, cid)
+    return {"label": cid, "name": found["name"], "deleted": True}
+
+
 async def _act_seen(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """The analyst opened a thread: its answers so far are seen (threads.mark_seen)."""
     from . import threads  # noqa: PLC0415
@@ -962,7 +980,8 @@ async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "label": _act_label,
-         "label-run": _act_label_run, "label-stop": _act_label_stop, "seen": _act_seen, "stop": _act_stop}
+         "label-run": _act_label_run, "label-stop": _act_label_stop, "label-delete": _act_label_delete, "seen": _act_seen,
+         "stop": _act_stop}
 
 
 # --------------------------------------------------------------------------- the command line

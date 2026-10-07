@@ -536,6 +536,33 @@ async def test_act_edits_and_runs_a_label_as_the_label_editor_does(term, monkeyp
         await local.act(CORPUS, "label-run", {"label": "nope"})
 
 
+async def test_act_label_delete_deletes_the_label_its_marks_its_card_and_its_filter(term):
+    """The label panel's delete: `label-delete` deletes the label as the browser's Delete label does, with its marks, its
+    card and any filter that uses it, and asks a `label-run` of it in another process to stop; an unknown label is
+    refused."""
+    from app import concepts
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    ws = config.workspace_dir(CORPUS)
+    k = concepts.find_concept(ws, "bash")
+    cid = k["id"]
+    concepts.set_filter(CORPUS, "files", cid, "yes")
+    assert concepts.read_filters(ws).get("files", {}).get("concept") == cid
+    assert concepts._label_cards(ws, cid) and concepts.labels_file(ws, cid).is_file()
+    got = await local.act(CORPUS, "label-delete", {"label": "Bash"})
+    assert got == {"ok": True, "label": cid, "name": "bash", "deleted": True}
+    assert concepts.find_concept(ws, cid) is None and not (concepts.concepts_dir(ws) / f"{cid}.json").exists()
+    assert not concepts.labels_file(ws, cid).exists()
+    assert not concepts._label_cards(ws, cid)
+    assert "files" not in concepts.read_filters(ws)
+    assert local._label_stop_file(CORPUS, cid).exists()  # what a label-run in another process watches for
+    with pytest.raises(local.StateError, match="no label"):
+        await local.act(CORPUS, "label-delete", {"label": "bash"})
+    with pytest.raises(local.StateError, match="empty"):
+        await local.act(CORPUS, "label-delete", {})
+
+
 def _cli(*argv: str, env: dict | None = None, cwd: Path | None = None) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-m", "app.local", *argv], cwd=cwd or BACKEND, env=env or dict(os.environ),
                           capture_output=True, text=True, timeout=120)
