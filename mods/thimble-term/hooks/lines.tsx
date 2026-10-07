@@ -5,6 +5,7 @@ import type { RenderElement, ResolveInput } from 'claude-code'
 
 import type { Ctx } from './ctx'
 import type { Line } from './draw'
+import { noControls } from './lib'
 
 /** A region of a part drawn from lines (homeview.tsx) and what a click on it does. */
 export type LineHit = { y: number; x0: number; x1: number; row: boolean; run: () => Promise<void> | void }
@@ -44,7 +45,9 @@ export function linesEl(cx: Ctx, e: ResolveInput, key: string, lines: Line[], hi
   lineStamps.set(stamp, { runs: hits.map(h => h.run), ...(onKey ? { key: onKey } : {}) })
   for (const k of [...lineStamps.keys()].slice(0, Math.max(0, lineStamps.size - 400))) lineStamps.delete(k)
   const packed = hits.flatMap((h, i) => [h.y, h.x0, h.x1, h.row ? 1 : 0, i])
-  return <Client key={key} module="./homeview.tsx" width={cols} height={Math.max(1, lines.length)} props={JSON.parse(JSON.stringify({ lines, hits: packed, stamp, cols, ...(onKey ? { keys: true } : {}) })) as never} />
+  // a control character a record's words still hold would make the drawing fail to validate
+  const shown = lines.map(l => l.map(x => (noControls(x.s) === x.s ? x : { ...x, s: noControls(x.s) })))
+  return <Client key={key} module="./homeview.tsx" width={cols} height={Math.max(1, lines.length)} props={JSON.parse(JSON.stringify({ lines: shown, hits: packed, stamp, cols, ...(onKey ? { keys: true } : {}) })) as never} />
 }
 
 /** What homeview.tsx posts for a click on no hit of a list with keys, which gave its Client the keyboard. */

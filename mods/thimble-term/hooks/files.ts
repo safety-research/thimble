@@ -1,4 +1,5 @@
-// Which refs name a file of the folder and the record they cite.
+// Which refs name a file of the folder and the record they cite, and which turns a whole-file JSON transcript's view
+// reads.
 
 /** The file a ref cites and the record in it: a line (`#L<n>`, a range's first), a JSON list's item (`#/<i>` or
  *  `#/<key>/<i>`, counted from 1 as the file's view counts them), or the whole file. Null for a ref of no file of the
@@ -18,4 +19,21 @@ export function fileRef(ref: string): { path: string; line?: number; item?: numb
   if (/^row=\d+$/.test(frag) || frag.startsWith('/')) return { path }
   // `<db>#<table>/<key>`: a database's row, which the file browser does not open
   return null
+}
+
+/** Whether a file's page is of a whole-file JSON transcript (thimble's sniff says `json`): a chat export or an agent's
+ *  store of messages, whose turns only a parse of the whole file finds (`thimble state turns`), not its lines. */
+export function wholeJson(page: Record<string, unknown>): boolean {
+  const hint = page.transcript
+  return typeof hint === 'object' && hint !== null && (hint as { format?: unknown }).format === 'json' && !page.binary
+}
+
+/** The page of turns a file's panel reads of a whole-file JSON transcript: from its turn `from`, else around the
+ *  first turn on its `line` (a citation's), else from the first; the surface's key and `thimble state turns`'s
+ *  arguments. */
+export function turnsRead(p: { path?: string; from?: number; line?: number }): { key: string; args: string[] } {
+  const path = p.path ?? ''
+  if (p.from !== undefined) return { key: `turns:${path}:${p.from}`, args: [path, '--start', String(p.from)] }
+  if (p.line) return { key: `turns:${path}:L${p.line}`, args: [path, '--line', String(p.line)] }
+  return { key: `turns:${path}:0`, args: [path] }
 }

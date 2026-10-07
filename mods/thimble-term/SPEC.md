@@ -620,6 +620,10 @@ it in browser mode.
 - A transcript: per turn, its clock dim in a column at A0 (`07:40:01`; the day on a dim row of its own where it
   changes), then `●` in the speaker's hue and the speaker's name bold; its text 2 cells in under the name, wrapped to
   up to three rows, the last cut with `…`; a tool call one dim line.
+- A whole-file JSON transcript (a chat export, an agent's store of messages): its turns as thimble parses the whole
+  file (`thimble state turns`), 200 at a time, `turns 1-200 of N` in the subtitle and `earlier  later` paging them;
+  each conversation's title on a dim row where it starts; a turn chosen by its place among the turns, since its
+  turns may share a line. Where the parse finds no turns, the file opens as its lines and its type is its format.
 
 **The label panel**, as Matt laid it out, after the browser's label editor (`frontend/src/files/LabelCard.tsx`):
 

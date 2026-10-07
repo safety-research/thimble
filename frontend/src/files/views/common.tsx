@@ -23,6 +23,9 @@ export interface ViewProps {
   targetRef?: string
   /** the server's sniff, when the file reads as a transcript */
   transcript?: TranscriptHint | null
+  /** the view found nothing in the file to show (the server's whole parse found no turns that its sniff of the head
+   * promised): the reader drops the view and opens the one it would otherwise use */
+  unavailable?: () => void
 }
 
 export interface ViewDef {

@@ -111,6 +111,7 @@ route for it:
 | `thimble state threads --cwd <dir>` / `thread --cwd <dir> <id> [--after n]` | the chats route's metas (each with `answers` and `seen`, or `unread`) / `{meta, events}` past `n` |
 | `thimble state agents --cwd <dir>` | the agents route's `{rows}` |
 | `thimble state files --cwd <dir> [path] [--start n]` | the sources route's list / a page of a file's records |
+| `thimble state turns --cwd <dir> <path> [--start n] [--line n]` | a page of a whole-file JSON transcript's turns, parsed from the whole file (GET /source/turns), or none with `none` saying why, for its Transcript tab |
 | `thimble state opens --cwd <dir> <paths json>` | `{path: "transcript"}` for each listed file of plain text that opens as a transcript, which the type column shows |
 | `thimble state resolve --cwd <dir> <refs json>` | `{ref: resolution}` (the ref route's answer, or `{error}`) for a list of refs |
 | `thimble state ui --cwd <dir> --after <n>` | the `ui.jsonl` records past `n` |
@@ -138,7 +139,7 @@ The drawing itself: `draw.ts` lays out cards and charts as styled lines, `card.t
 drawing's, its title a hot spot, everything but the title below the plot), `cite.ts` and `para.tsx` citations and their
 tips, `home.ts` and `homeview.tsx` home, `chrome.tsx` the panel's chrome, `paint.ts` the colors, `gestures.tsx` what a
 press does, `anim.ts` the mark a citation lights on a card, `nav.ts` the path from home and the threads tree,
-`signal.ts` the `↳` rows' rules, `files.ts` the file a ref cites, `turns.ts` one drawing of a pane at a time, `lib.ts`
+`signal.ts` the `↳` rows' rules, `files.ts` the file a ref cites and the turns a whole-file JSON transcript's view reads, `turns.ts` one drawing of a pane at a time, `lib.ts`
 the pure helpers, `field.tsx` the text field that shows all of its text (a label's prompt), and `kept.ts` what main's
 chat drew under its rows, kept for a resume.
 

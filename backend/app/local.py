@@ -319,13 +319,15 @@ def ui_records(c: str, after: int = 0) -> list[dict[str, Any]]:
 
 STATE_USAGE = ("thimble state <surface> --cwd <dir> [args]; surfaces: home, cards [--since <iso>], card <id>, labels, "
                "label <id>, docs, doc <slug>, threads, thread <id> [--after <n>], agents [--tail <n>], "
-               "files [path] [--start <n>], opens <paths json>, resolve <refs json>, ui [--after <n>]")
+               "files [path] [--start <n>], turns <path> [--start <n>] [--line <n>], opens <paths json>, "
+               "resolve <refs json>, ui [--after <n>]")
 
 
 LABEL_ROWS = 3  # records per value `state label` gives with their words (rows)
 LABEL_VERDICT_ROWS = 6  # records per value the analyst set or agreed with that `state label` adds to them
 OPENS_MAX = 100  # files one `state opens` reads the head of
 FILE_PAGE = 200  # lines of a file `state files <file>` gives, the renderer's page (its earlier and later steps)
+TURNS_PAGE = 200  # turns of a whole-file JSON transcript `state turns <file>` gives, the renderer's page
 
 
 class StateError(Exception):
@@ -652,6 +654,30 @@ async def _files(c: str, args: list[str], pos: list[str]) -> Any:
     return await asyncio.to_thread(corpus.get_sources, c)
 
 
+async def _turns(c: str, args: list[str], pos: list[str]) -> Any:
+    """A page of the turns of a whole-file JSON transcript (GET /source/turns, TURNS_PAGE turns) from turn `--start`,
+    or around the first turn on `--line`, which the renderer's file view shows as the Transcript tab. A file whose parse
+    finds no turns gives none, with `none` saying so, and the view opens its other tab, as the browser does."""
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    from . import corpus, transcripts  # noqa: PLC0415
+
+    if not pos:
+        raise StateError("turns needs a file's path")
+    rel = pos[0].strip().strip("/")
+    root = config.corpus_dir(c)
+    p = corpus._file(root, rel)
+    start = max(0, _int(_flag(args, "--start"), 0, "--start"))
+    line = _flag(args, "--line")
+    try:
+        return await asyncio.to_thread(transcripts.turns_page, p, rel, start, TURNS_PAGE,
+                                       _int(line, 1, "--line") if line is not None else None)
+    except HTTPException as e:
+        if e.status_code != 415:
+            raise
+        return {"path": rel, "total": 0, "start": 0, "turns": [], "n_groups": 0, "groups": {}, "none": str(e.detail)}
+
+
 async def _opens(c: str, args: list[str], pos: list[str]) -> Any:
     """What the file view opens each of these files as where it is not the file's lines: `transcript` for a file whose
     head reads as a transcript surely enough that the Transcript tab comes first (transcripts.STRONG, the renderer's
@@ -727,7 +753,7 @@ async def _ui(c: str, args: list[str], pos: list[str]) -> Any:
 
 _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "label": _label, "docs": _docs,
              "doc": _doc, "threads": _threads, "thread": _thread, "agents": _agents, "files": _files,
-             "opens": _opens, "resolve": _resolve, "ui": _ui}
+             "turns": _turns, "opens": _opens, "resolve": _resolve, "ui": _ui}
 
 
 # --------------------------------------------------------------------------- thimble act

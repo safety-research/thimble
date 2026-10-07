@@ -477,6 +477,8 @@ interface Builtins {
   binary: boolean
   /** the file's size when the server said it is binary */
   binarySize: number | null
+  /** the Transcript mode found no turns to show: it is dropped for the mode the file would otherwise open in */
+  dropTranscript: () => void
 }
 
 /** The built-in views scored over the file's first records (views/registry.ts). */
@@ -484,7 +486,11 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
   const isDatabase = kind === 'forge'
   const [sample, setSample] = useState<any[] | null>(isDatabase ? [] : null)
   const [binarySize, setBinarySize] = useState<number | null>(null)
-  const [transcript, setTranscript] = useState<TranscriptHint | null>(null)
+  const [hint, setHint] = useState<TranscriptHint | null>(null)
+  // the file whose turns the server's whole parse did not find, though the sniff of its head promised them
+  const [noTurns, setNoTurns] = useState<string | null>(null)
+  const transcript = noTurns === path ? null : hint
+  const dropTranscript = useCallback(() => setNoTurns(path), [path])
   useEffect(() => {
     if (isDatabase) return
     let alive = true
@@ -493,7 +499,7 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
       .then((page) => {
         if (!alive) return
         if (page.binary) setBinarySize(page.size_bytes ?? 0)
-        setTranscript(page.transcript ?? null)
+        setHint(page.transcript ?? null)
         setSample(page.records.map((r) => r.record))
       })
       .catch(() => alive && setSample([]))
@@ -509,8 +515,8 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
       // a file that reads as binary lists Raw alone, and the reader says it is binary in place of its bytes
       .filter((v) => !binary || v.type === 'raw' || isDatabase)
       .sort((a, b) => ORDER.indexOf(a.type) - ORDER.indexOf(b.type))
-    return { listed, auto: pickView(scored), loaded: sample != null, transcript, binary, binarySize }
-  }, [path, kind, sample, isDatabase, binarySize, transcript])
+    return { listed, auto: pickView(scored), loaded: sample != null, transcript, binary, binarySize, dropTranscript }
+  }, [path, kind, sample, isDatabase, binarySize, transcript, dropTranscript])
 }
 
 /** The line of the first record the reader shows at its top, or null when it shows none. */
@@ -1247,11 +1253,13 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // the view is rendered again only when what it shows changes, not when the reader measures its scroll (the ruler's
   // thumb, the fade at the right edge) as the reader resizes or scrolls
   const transcript = builtins.transcript
+  // the Transcript mode is the one view that can find nothing it was offered for (the sniff reads only the head)
+  const unavailable = isTranscript ? builtins.dropTranscript : undefined
   const viewEl = useMemo(() => {
     if (!ViewComponent) return null
-    const viewProps: ViewProps = { workspace, path, kind, page, loadMore: loadPage, targetRef: viewTarget, transcript }
+    const viewProps: ViewProps = { workspace, path, kind, page, loadMore: loadPage, targetRef: viewTarget, transcript, unavailable }
     return <ViewComponent {...viewProps} />
-  }, [ViewComponent, workspace, path, kind, page, loadPage, viewTarget, transcript])
+  }, [ViewComponent, workspace, path, kind, page, loadPage, viewTarget, transcript, unavailable])
   // the built-in modes, then the file-type viewers, then Raw
   const builtinOptions = builtins.listed.map((v) => ({ value: v.type, label: v.title }))
   const options = [

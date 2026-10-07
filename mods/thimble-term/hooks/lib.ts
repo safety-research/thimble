@@ -377,6 +377,17 @@ function unclosed(s: string): string {
   return (s.match(/"/g)?.length ?? 0) % 2 === 1 ? '"' : ''
 }
 
+// a terminal's escape sequence (CSI, OSC, or one character after ESC), then any other control character
+const ESCAPES = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)?|[@-_])?/g
+const CONTROLS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g
+
+/** Text as a drawing may hold it: a terminal's escape sequences (a tool's colored output kept in a transcript) and
+ *  other control characters left out, a tab or a newline as a space, since a drawing whose text holds one does not
+ *  validate. Pure. */
+export function noControls(s: string): string {
+  return /[\u0000-\u001f\u007f-\u009f]/.test(s) ? s.replace(ESCAPES, '').replace(/[\t\n]/g, ' ').replace(CONTROLS, '') : s
+}
+
 /** A file's line in at most `n` cells: a line of code or data (JSON, a tag) cut at the cell edge, so the rows of a file
  *  end together; prose cut at a word, as `cut` cuts. */
 export function cutLine(s: string, n: number): string {

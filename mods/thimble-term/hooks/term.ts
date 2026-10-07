@@ -13,6 +13,7 @@ import type { Area, Scope, Signature } from './data'
 import { cid, citations, clip, labelRef, noteDocPlace, noteLabelName, noteQuestion, questionOf, quoted } from './lib'
 import type { Citation } from './lib'
 import { agentsOf, cellOf, cellsOf, chatOf, docUnits, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
+import { turnsRead, wholeJson } from './files'
 import { keepSeen, keptSeen } from './kept'
 import { NAV_EMPTY, backTarget, moved, nextTrail } from './nav'
 import { signalEnd, withSignal } from './signal'
@@ -418,7 +419,16 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
       return
     }
     case 'file':
-      if (p.path) await readSurface(cx, `file:${p.path}:${p.start ?? 1}`, 'files', [p.path, ...(p.start && p.start > 1 ? ['--start', String(p.start)] : [])])
+      if (p.path) {
+        const key = `file:${p.path}:${p.start ?? 1}`
+        await readSurface(cx, key, 'files', [p.path, ...(p.start && p.start > 1 ? ['--start', String(p.start)] : [])])
+        // a whole-file JSON transcript: a page of the turns thimble parses from the whole file, for its Transcript tab
+        const page = await surfaceValue<Record<string, unknown>>(cx, key)
+        if (page?.ok && wholeJson(page.value)) {
+          const { key: tkey, args } = turnsRead(p)
+          await readSurface(cx, tkey, 'turns', args)
+        }
+      }
       return
     case 'agent':
       if (p.thread) await readThread(cx, p.thread)
