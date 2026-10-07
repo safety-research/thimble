@@ -98,13 +98,13 @@
   /* the label colors (below) stepped for Dark, each place the same hue as on the light papers. A dark hue cannot keep
      3:1 here, so brown (7) and chestnut (11) are a muted khaki and a light tan, apart from orange, and navy (8) is a
      pale periwinkle, apart from sky (4); gold (5) and teal (6) are lighter than orange and green, so the first five
-     colors new values take (blue, orange, green, gold, teal) stay apart */
+     colors new values take (blue, orange, green, gold, teal) stay 15 or more apart in OKLab */
   --label-1: #2275e8;
   --label-2: #da7306;
   --label-3: #17a973;
   --label-4: #0c9edc;
   --label-5: #beb222;
-  --label-6: #5bcec6;
+  --label-6: #5fcfca;
   --label-7: #9b7239;
   --label-8: #9ebdff;
   --label-9: #50c14d;
@@ -280,13 +280,15 @@
      10 cerulean, 11 chestnut, 12 cyan (show_label's color names, concepts.COLOUR_NAMES). Like the nominal hues, no red
      and no purple, and twelve so that a label with more than eight values still gets a distinct color for each. New
      values take the places in another order, blue, orange, green, gold, teal, brown, sky, then 8 to 12
-     (backend/app/label_order.json), so the first five are five hues with no second blue among them. Each reads at 3:1
-     or more on every paper, and Dark has its own steps of the same hues. */
+     (backend/app/label_order.json), so the first five are five hues with no second blue among them, each pair 15 or
+     more apart in OKLab (8 under protan and deutan vision): gold (5) is a darker olive and green (3) a deeper green than
+     the chart colours, so gold stands apart from both orange and green. Each reads at 3:1 or more on every paper, and
+     Dark has its own steps of the same hues. */
   --label-1: #025ac3;
   --label-2: #d0750a;
-  --label-3: #08632f;
+  --label-3: #06572a;
   --label-4: #1392d4;
-  --label-5: #897301;
+  --label-5: #7d6702;
   --label-6: #009c85;
   --label-7: #844500;
   --label-8: #013c77;
