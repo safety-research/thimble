@@ -587,7 +587,9 @@ at R, `new` in green until a built one is opened.
 
 **A view:** the path row, the view's name as the title, the facts its program gives as the subtitle, the rule; then
 the rows its program draws (`view.term.js` on the terminal view kit, docs/terminal-views.md), with their margin; then
-the hint row, the keys the program binds and `b to go back · x to close`. A region under the pointer that is not a
+the hint row, the keys the program binds and `b to go back · x to close`, on the rows it needs where it is longer than
+the panel is wide (whole hints on each row; the program's rows are fewer by them), so no key it binds goes unnamed. The
+program hears Claude Code's theme, `light` or `dark`. A region under the pointer that is not a
 whole row is inverse, and its tip shows on the tip background on the row below it. Its keys reach it through the list's
 relay (↑↓, Enter, Space, Backspace, a sign typed) and as hotkeys (a letter, a digit); while a field of the view takes
 typing, every key. A view built in browser mode is one line that says so, and how to open it in browser mode.

@@ -174,6 +174,24 @@ export function hintsEl(els: El, hints: readonly string[], cols: number): Render
   return lineEl(els, hintLine(hints, cols), 'h-hints')
 }
 
+/** The key hints on the rows they need in `w` cells, in hintLine's order and look, a row ending where the next hint
+ *  does not fit, so none is left out (a view's panel, whose keys are its own). */
+export function hintRows(hints: readonly string[], w: number): string[] {
+  const rows: string[] = []
+  for (const h of orderedHints(hints)) {
+    if (rows.length && width(rows[rows.length - 1]!) + 3 + width(h) <= w) rows[rows.length - 1] += ` · ${h}`
+    else rows.push(h)
+  }
+  return rows
+}
+
+/** The key hints wrapped (hintRows), the panel's last rows. */
+export function hintRowsEl(els: El, hints: readonly string[], cols: number): RenderElement {
+  const rows = hintRows(hints, cols)
+  if (rows.length <= 1) return hintsEl(els, hints, cols)
+  return els.Box({ key: 'h-hints', flexDirection: 'column', children: rows.map((r, i) => lineEl(els, fitTo([{ s: r, fg: COLORS.dim, i: true }], cols), `h-hints-${i}`)) })
+}
+
 /** Label/value rows and fields (rule 27): each label dim and lower case in a column as wide as the longest label plus
  *  a gutter, its value or field on L. */
 export function fieldEls(els: El, rows: readonly [string, RenderElement | string, string?][], keyPrefix = 'f'): RenderElement | null {
