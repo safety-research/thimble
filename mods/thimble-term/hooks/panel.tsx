@@ -230,18 +230,25 @@ function hiddenKeys(cx: Ctx, e: PaneEvent, keys: Key[]): RenderElement | null {
   return (
     <Box key="hidden-keys" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
       {keys.map(k => (
-        <Button key={`hk-${k.key}`} label={k.hotkey} hotkey={k.hotkey} plain onPress={k.onPress} />
+        <Button key={`hk-${k.key}`} label={k.hotkey} hotkey={k.hotkey} plain onPress={typedOr(cx, k.hotkey, k.onPress)} />
       ))}
     </Box>
   )
 }
 
-/** A Button's hotkey prop (`hotkey` for its key), kept by its letter for the list's keys as hiddenKeys keeps one: none
- *  for a Button past the first nine, or while the panel's typing goes to the prompt. */
-function hotkeyOf(hotkey: string | null, onPress: () => void): { hotkey?: string } {
-  if (!hotkey) return {}
+/** A hotkey's press, or, once the panel's typing goes to the prompt (typeThrough), its letter typed into the prompt: a
+ *  key typed before the panel drew again without its hotkeys reached one (live check term-fix10: `table` typed into the
+ *  prompt opened the threads at its `t` and reached main as `able`). */
+function typedOr(cx: Ctx, hotkey: string, onPress: () => void): () => void {
+  return () => (rt.typeThrough ? void cx.fill(hotkey) : onPress())
+}
+
+/** A Button's hotkey prop (`hotkey` for its key) and its press (typedOr), kept by its letter for the list's keys as
+ *  hiddenKeys keeps one: no hotkey for a Button past the first nine, or while the panel's typing goes to the prompt. */
+function hotkeyOf(cx: Ctx, hotkey: string | null, onPress: () => void): { hotkey?: string; onPress: () => void } {
+  if (!hotkey) return { onPress }
   hotkeysDrawing.set(hotkey, onPress)
-  return rt.typeThrough ? {} : { hotkey }
+  return rt.typeThrough ? { onPress: typedOr(cx, hotkey, onPress) } : { hotkey, onPress: typedOr(cx, hotkey, onPress) }
 }
 
 /** What a step of the path says: a lower-case kind word and its name, or the name alone after the list it is in. */
@@ -829,7 +836,8 @@ let homeLast: HomeLayout | null = null
 async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const { Box, Text } = cx.els(e)
   if (e.surface !== 'terminal' && e.surface !== 'desktop') return <Text dimColor>The home panel needs the terminal or the desktop app.</Text>
-  const cols = Math.max(40, e.props.bodyColumns)
+  // the pane's own width, never more: a pane 40 columns wide cut each row's right part (live check term-fix10)
+  const cols = e.props.bodyColumns
   const ui = (await cx.homeUi()) as HomeUi
   // its keys named only while it holds them, as every view's (endHints; live check term-fix6, new quirk 4: home opened
   // from the toast named its keys while they went to the prompt)
@@ -1932,7 +1940,7 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     <Box key="label-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
       {ls.map((l, i) => {
         const go = () => void openLabel(cx, l.id, l.name ?? l.id)
-        return <Button key={`label-open-${i}`} label={l.name ?? l.id} plain {...hotkeyOf(i < 9 ? String(i + 1) : null, go)} onPress={go} />
+        return <Button key={`label-open-${i}`} label={l.name ?? l.id} plain {...hotkeyOf(cx, i < 9 ? String(i + 1) : null, go)} />
       })}
     </Box>,
   )
@@ -1974,7 +1982,7 @@ async function drawDocs(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   body.unshift(
     <Box key="doc-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
       {docs.map((d, i) => (
-        <Button key={`doc-open-${i}`} label={d.title} plain {...hotkeyOf(i < 9 ? String(i + 1) : null, () => void open(d))} onPress={() => void open(d)} />
+        <Button key={`doc-open-${i}`} label={d.title} plain {...hotkeyOf(cx, i < 9 ? String(i + 1) : null, () => void open(d))} />
       ))}
     </Box>,
   )

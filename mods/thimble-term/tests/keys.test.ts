@@ -432,6 +432,19 @@ test('keys · documents · /thimble documents: ↑↓ choose, Enter and 1-9 open
   expect((await seen($, SHORT)).text).toContain('The data')
   await hotkey($, w, 'back')
   await takesKeys($)
+  // a digit that reaches a document's key after a letter went to the prompt (the panel not drawn again yet) is typed into
+  // the prompt too (live check term-fix10: `table` typed into the prompt opened the threads at its `t`)
+  await type($, w, SHORT, 'q')
+  const pane = await look($, SHORT)
+  await pane.press({ key: 'doc-open-0' })
+  await w.clock.settle()
+  await pane.unmount()
+  expect(w.filled).toEqual(['q', '1'])
+  expect((await seen($, SHORT)).text).not.toContain('The main claim')
+  w.paneFocused = false
+  await seen($, SHORT)
+  w.paneFocused = true
+  await takesKeys($)
   await type($, w, SHORT, '1')
   expect((await seen($, SHORT)).text).toContain('The main claim')
 })

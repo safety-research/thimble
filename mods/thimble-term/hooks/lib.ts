@@ -441,11 +441,11 @@ export function itemsRow(items: readonly string[], n: number): string {
 
 /** `s` in at most `n` cells, cut in its middle at words so its end shows: `How many deletes… of 27 June?`, for rows
  *  that share their first words and differ at their ends (live check term-fix9, quirk 8: fifteen card rows read `How
- *  many deletes does…`). As `cut` when the room keeps fewer than 12 cells of the end. */
+ *  many deletes does…`). As `cut` when the room keeps fewer than 6 cells of the end. */
 export function cutMiddle(s: string, n: number): string {
   if (width(s) <= n) return s
   const tailRoom = Math.floor((n - 2) / 2)
-  if (tailRoom < 12) return cut(s, n)
+  if (tailRoom < 6) return cut(s, n)
   // the end: the last words that fit its half, whole
   const words = s.split(' ')
   let tail = ''

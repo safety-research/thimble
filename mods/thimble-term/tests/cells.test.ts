@@ -328,7 +328,8 @@ test('a row cut in its middle keeps its end; a quoted name with a short tail cut
   const q = 'How many deletes does events.jsonl record in each hour (UTC) of 27 June?'
   expect(cutMiddle(q, 40)).toBe('How many deletes does… (UTC) of 27 June?')
   expect(cutMiddle(q, 200)).toBe(q)
-  expect(cutMiddle(q, 20)).toBe(cut(q, 20))
+  expect(cutMiddle(q, 24)).toBe('How many… of 27 June?')
+  expect(cutMiddle(q, 12)).toBe(cut(q, 12))
   expect(cut('card "How many deletes does events.jsonl record on each day?" · code', 34)).toBe('card "How many deletes…" · code')
   const json = '{"label": "A2Research17817720", "stored_revisions": 12, "first": "2026-06-23"}'
   const a = windowAt(json, 40, 30)

@@ -138,6 +138,13 @@ test('card rows of a group whose questions share their first words are cut in th
   // a group whose questions share no first words is cut at its end, as before
   expect(lines.find(l => l.includes('Your work'))).toMatch(/▸ Your work/)
   await pane.unmount()
+  // in a pane 39 columns wide every row of home fits it, its right part whole, and the rows still end apart (live check
+  // term-fix10: home laid out 40 columns cut each row's right part)
+  const narrow = await look($, 39)
+  const rows = (((await narrow.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r).replace(/\s+$/, ''))
+  for (const r of rows) expect(width(r)).toBeLessThanOrEqual(39 - 4 + 2)
+  for (const d of [27, 28, 29]) expect(rows.find(l => l.includes(`${d} June?`))).toMatch(/How many… (of )?\d\d June\? +code/)
+  await narrow.unmount()
 })
 
 test("a label whose first run goes on in main's process, or stopped part way, says so alike on home, the list, its panel and its card", async ($, on) => {
