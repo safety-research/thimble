@@ -20,6 +20,8 @@
   .fbtn .ico { width: 12px; height: 12px; color: var(--text-tertiary); }
   .fbtn .v { font-weight: 500; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
   .fbtn .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
+  .fbtn .clr { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -3px; border-radius: 4px; color: var(--text-tertiary); }
+  .fbtn .clr:hover { background: var(--track-bg); color: var(--text-primary); }
   #colour { min-width: 340px; }
   #range { flex: none; padding: 8px 12px 6px; border-bottom: 1px solid var(--border-hairline); }
   .sw { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
@@ -108,9 +110,9 @@
   .empty { padding: 32px 16px; color: var(--text-secondary); font-size: var(--text-xs); }
   .empty button { margin-left: 6px; }
 
-  /* a save opened in place under its line: its actions, its facts, then the page at that save, the page's saves or the
-     username's messages */
-  .msg .thimble-details { grid-column: 2; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-hairline); cursor: default; }
+  /* a save opened in place under its header line, above its text: its actions, its facts, then the page at that save, the
+     page's saves or the username's messages */
+  .msg .thimble-details { margin: 6px 0 8px; padding: 8px 0; border-top: 1px solid var(--border-hairline); border-bottom: 1px solid var(--border-hairline); cursor: default; }
   .thimble-details { color: var(--text-primary); }
   .dacts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 3px 14px; margin: 8px 0 0; padding: 0; }
@@ -218,6 +220,11 @@ const hm = (t) => new Date(t * 1000).toISOString().slice(11, 16)
 const hms = (t) => new Date(t * 1000).toISOString().slice(11, 19)
 const dayName = (t) => { const d = new Date(t * 1000); return `${WEEKDAY[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}` }
 const when = (t) => `${dm(t)} ${hm(t)}`
+// a bin in words: one day by its day, days as a span of days, part of a day by its times, a midnight at its end as 24:00
+function binText(t0, t1) {
+  if (t1 - t0 >= 86400) return t1 - t0 === 86400 ? dayName(t0) : `${dm(t0)} – ${dm(t1 - 1)}`
+  return `${dayName(t0)} ${hm(t0)}–${dayKey(t1) !== dayKey(t0) && hm(t1) === '00:00' ? '24:00' : hm(t1)}`
+}
 
 // ---------------------------------------------------------------- data
 // The reader sends every save the label filter keeps as columns in one answer: dr and dt (its row and time, as steps
@@ -330,7 +337,7 @@ let SC = null // the strips' scale: the range across the strip column
 // menu; the values as chips that turn their messages off or on; the color as a bar on each message's left edge and in
 // the thread's tracks. Each field's value is worked out here from the columns the reader sent (the row index is the
 // record the control is handed); a label's is the value of that label among the row's marks.
-const SIGNED = ['Username', 'Another name', 'Unsigned'] // the added text signed with its username, with another name, or not
+const SIGNED = ['Own username', 'Another name', 'Unsigned'] // the added text signed with its username, with another name, or not
 function sigOf(i) {
   const sg = D.sigs[C.sg[i]] || ''
   return !sg ? SIGNED[2] : sg.toLowerCase() === userName(C.u[i]).toLowerCase() ? SIGNED[0] : SIGNED[1]
@@ -339,7 +346,8 @@ const colour = thimble.colorBy({
   mount: '#colour',
   fields: [
     { name: 'kind', title: 'Kind', values: ['Text only', 'With links'], value: (i) => (isMsg(i) ? D.kinds[C.k[i]] : null) },
-    { name: 'wiki', title: 'Wiki', values: ['dse', 'probier', 'fractal', 'dorfwiki'], value: (i) => (isMsg(i) ? D.wikis[(D.pages[C.pg[i]] || [])[3]] : null) },
+    // dorfwiki names olive, so it does not take the sky blue that sits beside dse's blue
+    { name: 'wiki', title: 'Wiki', values: ['dse', 'probier', 'fractal', { name: 'dorfwiki', colour: 5 }], value: (i) => (isMsg(i) ? D.wikis[(D.pages[C.pg[i]] || [])[3]] : null) },
     { name: 'signed', title: 'Signature', values: SIGNED, value: (i) => (isMsg(i) ? sigOf(i) : null) },
   ],
   chips: 'filter',
@@ -380,10 +388,10 @@ let FAM = [], ALL = null, BINS = []
 function computeFams() {
   SC = range.scale(stripW)
   BINS = SC.bins(2.5)
-  const mk = () => ({ msgs: 0, pages: new Set(), users: new Set(), first: Infinity, last: -Infinity, bins: new Map() })
+  const ns = nSlots()
+  const mk = () => ({ msgs: 0, pages: new Set(), users: new Set(), first: Infinity, last: -Infinity, bins: new Map(), slots: new Int32Array(ns) })
   FAM = taskName.map(mk)
   ALL = mk()
-  const ns = nSlots()
   for (let i = 0; i < N; i++) {
     if (!isMsg(i) || !passes(i, 'task')) continue
     const b = SC.binOf(T[i])
@@ -391,6 +399,7 @@ function computeFams() {
       f.msgs++; f.pages.add(C.pg[i]); if (C.u[i]) f.users.add(C.u[i]) // a save with no username counts toward no username
       if (T[i] < f.first) f.first = T[i]
       if (T[i] > f.last) f.last = T[i]
+      f.slots[slotOf(i)]++
       if (b < 0) continue
       let a = f.bins.get(b)
       if (!a) { a = new Int32Array(ns); f.bins.set(b, a) }
@@ -427,7 +436,7 @@ const toggled = (anchor) => (openPop && openPop.anchor === anchor ? (close(), tr
 function renderBar() {
   const u = $('f-user')
   u.classList.toggle('active', S.users.size > 0)
-  u.innerHTML = `${ico('user')}${S.users.size === 1 ? `<span class="v">${esc(userName([...S.users][0]) || 'no username')}</span>` : S.users.size ? `Usernames <span class="n">${S.users.size}</span>` : 'Username'}${ico('down')}`
+  u.innerHTML = `${ico('user')}${S.users.size === 1 ? `<span class="v">${esc(userName([...S.users][0]) || 'no username')}</span>` : S.users.size ? `Usernames <span class="n">${S.users.size}</span>` : 'Username'}${S.users.size ? `<span class="clr" data-clear role="button" aria-label="Every username">${ico('x')}</span>` : ico('down')}`
   renderColour()
 }
 function winText(w) {
@@ -450,7 +459,10 @@ function renderColour() {
 }
 
 // usernames: the most active in the filters, narrowed by typing
-$('f-user').onclick = () => userMenu()
+$('f-user').onclick = (ev) => {
+  if (ev.target.closest('[data-clear]')) { close(); S.users.clear(); return rescope() }
+  userMenu()
+}
 function userMenu(find = '') {
   const b = $('f-user')
   if (!find && toggled(b)) return
@@ -460,7 +472,7 @@ function userMenu(find = '') {
   const draw = (q) => {
     const ql = q.toLowerCase()
     const list = [...per].filter(([u]) => !ql || userName(u).toLowerCase().includes(ql)).sort((x, y) => S.users.has(y[0]) - S.users.has(x[0]) || y[1] - x[1])
-    return `<div class="head">Usernames, with their messages here</div>` + list.slice(0, 120).map(([u, n]) => `<button class="item" data-u="${u}" type="button"><span class="box${S.users.has(u) ? ' on' : ''}"></span><span class="lab">${esc(userName(u) || 'no username')}</span><span class="n">${num(n)}</span></button>`).join('')
+    return list.slice(0, 120).map(([u, n]) => `<button class="item" data-u="${u}" type="button"><span class="box${S.users.has(u) ? ' on' : ''}"></span><span class="lab">${esc(userName(u) || 'no username')}</span><span class="n">${num(n)}</span></button>`).join('')
       + (list.length > 120 ? `<div class="note">${num(list.length - 120)} more: type to find one</div>` : '') + (S.users.size ? '<div class="sep"></div><button class="item" data-clear type="button"><span class="lab">Every username</span></button>' : '')
   }
   const p = pop(b, `<input class="field find" placeholder="Find a username" value="${esc(find)}" spellcheck="false"><div class="ul">${draw(find)}</div>`)
@@ -509,7 +521,10 @@ function renderFams() {
   const act = (f) => ((f === -1 ? S.task == null && S.page == null : S.task === f) ? ' active' : '')
   const row = (f, cls, name, anchor) => `<tr class="fam ${cls}${act(f)}" data-f="${f}"${anchor}><td class="nm" title="${esc(name)}">${esc(name)}</td><td class="num" data-k="msgs"></td>${wide('<td class="num" data-k="pages"></td><td class="num" data-k="users"></td>')}<td class="st"><svg class="strip" data-f="${f}"></svg></td></tr>`
     + (mode === 'full' ? '' : `<tr class="sub ${cls}${act(f)}" data-f="${f}"${anchor}><td colspan="3" data-k="sub"></td></tr>`)
-  const anchorOf = (f) => ` data-anchor="view:${slug}/${esc(D.tasks[f][0])}" data-anchor-text="${esc(taskName[f])}: ${plural(FAM[f].msgs, 'message')}"`
+  // a task's row is the task's unit: thimble draws the value most of its messages take as the bar on its edge, a label's
+  // itself, a field's from the row's data-colour, so the rows look alike whichever is the color. While a label is the
+  // color with a value off, the rows are not anchored, since thimble would hide a row whose messages mostly take it
+  const anchorOf = (f) => (unitsAnchored() ? ` data-anchor="view:${slug}/${esc(D.tasks[f][0])}" data-anchor-text="${esc(taskName[f])}: ${plural(FAM[f].msgs, 'message')}"` : '') + mostAttr(FAM[f])
   let h = row(-1, 'all', 'All messages', '')
   for (const f of order) h += row(f, '', taskName[f], anchorOf(f))
   h += row(shared, 'special gap', taskName[shared], anchorOf(shared))
@@ -527,20 +542,28 @@ function renderFams() {
   // the strip column's axis: the one readable axis of the range
   thimble.timeAxis('#axis', SC, { px: 40 })
   const hs = mode === 'full' ? [19, 14] : [16, 13]
-  // the tasks' strips on one scale, the two rows of pages with no task on another, All tasks on its own
-  const taskMax = Math.max(1, ...order.map((f) => peak(FAM[f]))), specialMax = Math.max(1, peak(FAM[shared]), peak(FAM[other]))
-  scaleOf = (f) => (f === -1 ? peak(ALL) : f === shared || f === other ? specialMax : taskMax)
-  for (const sv of svgs) { const f = +sv.dataset.f; drawStrip(sv, f === -1 ? ALL : FAM[f], f === -1 ? hs[0] : hs[1], scaleOf(f)) }
+  // every strip on one linear scale, messages per pixel: All messages in its taller row and each task's row alike, the
+  // busiest bin of each filling at most its row
+  const taskMax = Math.max(1, ...taskName.map((_, f) => peak(FAM[f])))
+  perPx = Math.max(peak(ALL) / (hs[0] - 1), taskMax / (hs[1] - 1))
+  for (const sv of svgs) { const f = +sv.dataset.f; drawStrip(sv, f === -1 ? ALL : FAM[f], f === -1 ? hs[0] : hs[1]) }
 }
 const cell = (x, k) => k === 'sub' ? (x.msgs ? `${plural(x.pages.size, 'page')} · ${plural(x.users.size, 'username')} · ${dayKey(x.first) === dayKey(x.last) ? dm(x.first) : `${dm(x.first)} – ${dm(x.last)}`}` : '') : k === 'pages' ? num(x.pages.size) : k === 'msgs' ? num(x.msgs) : k === 'users' ? num(x.users.size) : ''
-let scaleOf = () => 1
+let perPx = 1 // messages per pixel of a strip's height
+const unitsAnchored = () => !(colour.label && colour.values.some((v) => !v.on))
+// the value most of a task's messages in the range take, as the row's data-colour while a field is the color
+function mostAttr(x) {
+  if (!colour.field || !x.slots) return ''
+  let best = -1
+  for (let j = 0; j < SLOTS.length; j++) if (x.slots[j] && (best < 0 || x.slots[j] > x.slots[best])) best = j
+  return best < 0 ? '' : ` data-colour="${esc(SLOTS[best])}"`
+}
 function peak(x) { let max = 1; for (const a of x.bins.values()) { let n = 0; for (const v of a) n += v; if (n > max) max = n } return max }
-function drawStrip(svg, x, h, max) {
+function drawStrip(svg, x, h) {
   const w = stripW
   const ns = nSlots()
   const paths = Array.from({ length: ns }, () => '')
-  // a bar's height is the square root of its share of the scale, so that a task with few messages still shows beside
-  // the busiest; its values split the bar by their counts
+  // a bar's height is its messages on the strips' one scale; its values split the bar by their counts
   for (const [b, a] of x.bins) {
     const bin = BINS[b]
     if (!bin) continue
@@ -550,7 +573,7 @@ function drawStrip(svg, x, h, max) {
     const x0 = xa.toFixed(2), ww = Math.max(0.8, bw - (bw > 3 ? 0.6 : 0)).toFixed(2)
     let tot = 0
     for (const v of a) tot += v
-    const full = Math.max(1, Math.sqrt(Math.min(1, tot / max)) * (h - 1))
+    const full = Math.max(1, Math.min(h - 1, tot / perPx))
     for (let j = 0; j < ns; j++) {
       if (!a[j]) continue
       const hh = Math.max(0.6, (a[j] / tot) * full)
@@ -619,7 +642,7 @@ function tipAt(ev) {
   if (!bin) { tip.style.display = 'none'; return }
   let n = 0, rows = ''
   if (a) for (let j = 0; j < a.length; j++) { if (!a[j]) continue; n += a[j]; rows += `<div class="r"><span class="sw" style="--c:${esc(slotColour(j))}"></span>${esc(slotName(j))}: ${num(a[j])}</div>` }
-  tip.innerHTML = `<div class="h">${dayName(bin[0])} ${hm(bin[0])}–${hm(bin[1])} UTC</div>${f === -1 ? 'All messages' : esc(taskName[f])}: ${plural(n, 'message')}${rows}<div class="h">a full bar: ${plural(scaleOf(f), 'message')}; a bar's height is the square root of its count</div>`
+  tip.innerHTML = `<div class="h">${binText(bin[0], bin[1])} UTC</div>${f === -1 ? 'All messages' : esc(taskName[f])}: ${plural(n, 'message')}${rows}`
   tip.style.display = 'block'
   tip.style.left = Math.max(4, Math.min(innerWidth - tip.offsetWidth - 8, ev.clientX + 12)) + 'px'
   tip.style.top = Math.min(innerHeight - tip.offsetHeight - 8, ev.clientY + 14) + 'px'
@@ -652,11 +675,10 @@ function renderHead() {
   stats.push(plural(st.users, 'username'))
   if (st.msgs) stats.push(`<span class="nw">${when(st.first)}</span> – <span class="nw">${when(st.last)} UTC</span>`)
   const chips = []
-  // each filter that is set is thimble's active filter chip, the whole chip clearing it
+  // the page narrowed to is thimble's active filter chip, the whole chip clearing it (the search field and the Username
+  // button show their own filters)
   const fchip = (k, v, attrs, label) => `<button class="chip chip-tone-neutral chip-act active" type="button" ${attrs} aria-label="${label}" title="${label}"><span class="chip-text">${k} · ${v}</span>${ico('x')}</button>`
   if (S.page != null) chips.push(fchip('Page', esc(pageName(S.page)), `data-unset="page" data-anchor="view:${slug}/${esc(pageKey(S.page))}" data-anchor-text="${esc(pageName(S.page))}"`, 'Show every page of the task'))
-  for (const u of S.users) chips.push(fchip('Username', esc(userName(u) || 'no username'), `data-unset="user" data-u="${u}"`, 'Show every username'))
-  if (S.q) chips.push(fchip('Text', esc(S.q), 'data-unset="q"', 'Clear the search'))
   if (S.page != null) chips.push(`<button class="chip chip-sans chip-act" type="button" data-history="${esc(pageId(S.page))}" title="Open the page's saves and deletes in Wiki Page History">${ico('hist')}Page history</button>`)
   const titleHtml = hidden || S.page != null
     ? `<button class="field fbtn" id="famPick" type="button" aria-haspopup="menu" aria-expanded="false"><span class="v">${esc(S.task == null ? 'All messages' : taskName[S.task])}</span>${ico('down')}</button>${S.page != null ? `<span class="th-title">${esc(title)}</span>` : ''}`
@@ -672,8 +694,6 @@ $('thead').addEventListener('click', (ev) => {
   if (!b) return
   const k = b.dataset.unset
   if (k === 'page') S.page = null
-  if (k === 'user') S.users.delete(+b.dataset.u)
-  if (k === 'q') { S.q = ''; S.found = null; $('q').value = '' }
   rescope()
 })
 function famMenu(anchor) {
@@ -729,7 +749,7 @@ function msgHtml(i) {
   }
   const [text, cut] = texts.get(r) || ['', false]
   const lines = text.split('\n')
-  const whole = S.expanded.has(r) || open
+  const whole = S.expanded.has(r)
   const shown = whole || lines.length <= CLAMP + 2 ? text : lines.slice(0, CLAMP).join('\n')
   const hidden = whole ? 0 : lines.length - shown.split('\n').length
   const sig = D.sigs[C.sg[i]] || ''
@@ -741,8 +761,9 @@ function msgHtml(i) {
   return `<article class="msg${open ? ' sel' : ''}" role="button" aria-expanded="${open}" data-r="${r}" data-anchor="${esc(ref)}" data-anchor-text="${esc(text)}"${colour.attr(i)}${has ? '' : ' data-wait'} style="--est:${est}px${has ? '' : `;--wait:${est - 38}px`}">`
     + `<span class="avatar" style="--a:${shade(u)}" aria-hidden="true">${esc(initial(u))}</span>`
     + `<div><div class="mh" data-thimble-chrome><button class="who${u ? '' : ' none'}" type="button" data-who="${r}">${esc(u || 'no username')}</button>${signed}${restarted}${S.page == null ? `<span class="on">on <button class="pg" type="button" data-pg="${C.pg[i]}">${esc(pageName(C.pg[i]))}</button></span>` : ''}${S.task == null && S.page == null ? `<span class="fam">${esc(taskName[C.tk[i]])}</span>` : ''}<time>${hms(T[i])}</time></div>`
+    + (open ? `<div class="thimble-details">${detailsHtml(i)}</div>` : '')
     + `<div class="mtx${has ? '' : ' wait'}">${marked(shown, true)}</div>${hidden > 0 ? `<button class="more" data-more="${r}" type="button">${plural(hidden, 'more line')}</button>` : cut && whole ? '<span class="more">…</span>' : ''}</div>`
-    + (open ? `<div class="thimble-details">${detailsHtml(i)}</div>` : '') + `</article>`
+    + `</article>`
 }
 // the height a message takes, in px: its header and padding, and its lines (each long line wrapped at about 92
 // characters), from its text when it has come, else from the lines it added
@@ -843,7 +864,8 @@ document.addEventListener('keydown', (e) => {
 })
 
 // ---------------------------------------------------------------- a save opened in place
-// A click on a message opens it under its own line, the row kept under the pointer; a second click closes it. The save
+// A click on a message opens it under its header line, above its text, the row kept under the pointer; a second click
+// closes it. The save
 // is read in full, with the texts of the page's other saves and the username's other messages.
 async function pick(r, scroll) {
   const i = rowAt.get(r)

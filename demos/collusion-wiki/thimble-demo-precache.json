@@ -116,13 +116,13 @@
   },
   {
    "path": "extension/views/relay-board/view.html",
-   "bytes": 65959,
-   "sha256": "69286cd60cebbe405f97fad088a893ffda85a026a6a6fd98c9d0d67e8340f919"
+   "bytes": 67272,
+   "sha256": "3cf4b268225c42e8aa482e5fe654f47af32333a8d12c1bbcd1e2786c84be6d49"
   },
   {
    "path": "extension/views/relay-board/view.json",
    "bytes": 4963,
-   "sha256": "cf025a2e30e971a755f8c53fbe1de92c495e6f06d1e733544adc6b5d62a91ba1"
+   "sha256": "6eb9396f8bc31854706da6239d914d4ffd07abf3ff15703ad9c47043bc46dc58"
   },
   {
    "path": "extension/views/wiki-page-history/reader.py",
@@ -131,13 +131,13 @@
   },
   {
    "path": "extension/views/wiki-page-history/view.html",
-   "bytes": 80708,
-   "sha256": "98b935ac73fc09d44bb84e232bbce67a989d4dcdeaa91b89a609fa373156a512"
+   "bytes": 80215,
+   "sha256": "643bfd8f24fc96c2faa6d2e7784360e5fb849f7a384a81099db82e61b0b57634"
   },
   {
    "path": "extension/views/wiki-page-history/view.json",
    "bytes": 4883,
-   "sha256": "ab60b61e25e20d5826bfdfb5a1657ad79a9e29219e829ff791e2b17d5ae949c0"
+   "sha256": "8d167203724641506495265c861c1b8a7a9854fb7f9f94bb71be3c38e57af6c3"
   },
   {
    "path": "investigations/main/investigation.json",
@@ -191,8 +191,8 @@
   },
   {
    "path": "views/proposals.json",
-   "bytes": 15231,
-   "sha256": "652316bafe7599d2c1b3f5ba6184bb9d401bf9171065c28fc2a4227f41ccad5e"
+   "bytes": 10496,
+   "sha256": "49b447f04ccc82608d1bbf52c6d47da92010a5e553397770ab5a9e613ba5f071"
   }
  ],
  "cited_calls": [
@@ -1748,18 +1748,18 @@
   {
    "slug": "relay-board",
    "name": "Relay Board",
-   "version": "499de4d25bb4",
+   "version": "6f56c5bdad9d",
    "from": "relay-board",
-   "from_version": "499de4d25bb4",
-   "picked": "live at 499de4d25bb4"
+   "from_version": "6f56c5bdad9d",
+   "picked": "live at 6f56c5bdad9d"
   },
   {
    "slug": "wiki-page-history",
    "name": "Wiki Page History",
-   "version": "4193ae5338b4",
+   "version": "8fdebe94864c",
    "from": "wiki-page-history",
-   "from_version": "4193ae5338b4",
-   "picked": "live at 4193ae5338b4"
+   "from_version": "8fdebe94864c",
+   "picked": "live at 8fdebe94864c"
   }
  ]
 }

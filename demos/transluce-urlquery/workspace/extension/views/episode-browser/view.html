@@ -18,7 +18,8 @@
   .fbtn .k { color: var(--text-secondary); }
   .fbtn .v { font-weight: 500; }
   .fbtn .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  #chips { display: contents; }
+  .fbtn .clr { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -3px; border-radius: 4px; color: var(--text-tertiary); }
+  .fbtn .clr:hover { background: var(--track-bg); color: var(--text-primary); }
   .chip .ico { width: 10px; height: 10px; }
   /* the Color by control takes the row's free width, and a line of its own when less than its least is left */
   #colour { flex: 1 1 320px; min-width: 260px; margin-left: 4px; }
@@ -62,9 +63,11 @@
   #list { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
   .lhead { flex: none; display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 14px; }
   .lhead .count { flex: none; color: var(--text-secondary); font-size: var(--text-xs); white-space: nowrap; }
-  .ckeys { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .ckeys { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--text-secondary); font-size: var(--text-xs); white-space: nowrap; }
+  .ckey { display: inline-flex; align-items: center; gap: 5px; }
+  .ckey .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
   .ckeys[hidden] { display: none; }
-  #rtbl .sw, .pop .sw { box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.16); }
+  #rtbl .sw, .ckey .sw { box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.16); }
   .lhead .count b { color: var(--text-primary); font: 500 var(--text-mono-sm) / 1 var(--font-mono); }
   .lhead .seg { flex: none; margin-left: auto; }
   #allBtn { flex: none; gap: 4px; }
@@ -132,7 +135,7 @@
   .stat .v small { color: var(--text-tertiary); font-weight: 400; font-size: var(--text-xs); }
   .ep-mix { display: flex; align-items: center; gap: 12px; margin-top: 9px; }
   .ep-mix .mix { flex: 1 1 120px; max-width: 260px; height: 10px; }
-  .ep-mix .keys { display: flex; flex-wrap: wrap; gap: 4px; }
+  .ep-mix .keys { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--text-secondary); font-size: var(--text-xs); }
   #rate { flex: none; padding: 2px 14px 4px; }
   #rate svg { display: block; overflow: visible; }
   #rate text { font: 400 10px var(--font-mono); fill: var(--text-tertiary); }
@@ -202,9 +205,7 @@
 <body>
 <header id="bar">
   <button id="f-src" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
-  <button id="f-disp" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
-  <button id="f-more" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
-  <span id="chips"></span>
+  <button id="f-size" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
   <span id="colour"></span>
 </header>
 <div id="body">
@@ -236,8 +237,8 @@
 // lanes under it show each episode in that time as a dot at its start, one lane per data source, sized by its reports;
 // the list holds one row per episode that starts in the range, sorted by size or time; a click opens an episode under
 // its row with its reports in time order and their rate, and a click on a report opens it in full under its own row.
-// "All episodes" sums up the episodes in view above the list. The control row narrows by source, disposition, size and
-// the broad classes an episode holds, and holds thimble's Color by control and its Reset.
+// "All episodes" sums up the episodes in view above the list. The control row narrows by source and by the least size
+// of an episode, and holds thimble's Color by control, whose chips filter by any field it colors by, and its Reset.
 // Color: the Color by control (thimble.colorBy) colors by confidence, class, disposition, source basis or cohort, or
 // by a label; the reader gives each report its value and each episode its reports per value, which color the dots,
 // the overview, the list's color bars, the rate chart and a report row's left edge. A value whose chip is off leaves
@@ -312,9 +313,7 @@ let labelState = { labels: [], filter: null, all: null, palette: null }
 let loadSeq = 0
 const S = {
   src: new Set(), // the groups narrowed to; none for every group
-  disp: 'all',
-  minN: 1,
-  cls: new Set(), // the broad classes an episode must hold
+  minN: 1, // the least reports an episode holds
   sort: { k: 'n', dir: -1 },
   open: null, // the open episode's key
   rep: null, // the open report's index
@@ -355,12 +354,10 @@ function baseSpan(list) {
 // ---------------------------------------------------------------- filters
 const inDates = (e) => range.has(e.start)
 function passes(e, skip) {
-  if (skip !== 'disp' && S.disp !== 'all' && gdisp(e.g) !== S.disp) return false
   if (skip !== 'src' && S.src.size && !S.src.has(e.g)) return false
   // an episode whose reports all take a value turned off counts for the chips, and shows nowhere
   if (skip !== 'minN' && (skip === 'colour' ? e.kn : e.n) < S.minN) return false
   if (skip !== 'colour' && !e.n) return false
-  if (skip !== 'cls') for (const c of S.cls) if (!e[c]) return false
   if (skip !== 'dates' && !inDates(e)) return false
   return true
 }
@@ -376,7 +373,7 @@ function compute() {
   shown.sort((x, y) => { const a = f(x), b = f(y); return (a < b ? -1 : a > b ? 1 : 0) * dir || x.start - y.start })
 }
 const leadShare = (e) => (LEAD != null && e.cv ? (e.cv[LEAD] || 0) / (e.n || 1) : 0)
-const filtersSet = () => S.src.size || !range.full || S.disp !== 'all' || S.minN > 1 || S.cls.size
+const filtersSet = () => S.src.size || !range.full || S.minN > 1
 
 // ---------------------------------------------------------------- colour
 const clsColour = (k) => token(INK[k])
@@ -409,7 +406,7 @@ function feedRange() {
 }
 // what Reset puts back of the page's own state: the menus, the order and the open episode
 thimble.onReset({
-  changed: () => S.src.size > 0 || S.disp !== 'all' || S.minN > 1 || S.cls.size > 0 || S.sort.k !== 'n' || S.sort.dir !== -1 || S.open != null,
+  changed: () => S.src.size > 0 || S.minN > 1 || S.sort.k !== 'n' || S.sort.dir !== -1 || S.open != null,
   reset: () => { clearFilters(); S.sort = { k: 'n', dir: -1 }; S.open = null; S.rep = null; S.keep = null; EP = null; REP = null; rescope() },
 })
 const noneColour = () => token('--label-none') || '#a09c93'
@@ -513,26 +510,9 @@ function renderBar() {
   const one = S.src.size === 1 ? gname([...S.src][0]) : null
   src.innerHTML = `<span class="k">${S.src.size > 1 ? 'Sources:' : 'Source:'}</span> <span class="v">${esc(one || (S.src.size ? S.src.size : 'All'))}</span>${ico('down')}`
   src.classList.toggle('active', S.src.size > 0)
-  const disp = $('f-disp')
-  disp.innerHTML = `<span class="k">Disposition:</span> <span class="v">${esc(DISP.find((x) => x[0] === S.disp)[1])}</span>${ico('down')}`
-  disp.classList.toggle('active', S.disp !== 'all')
-  const more = $('f-more')
-  const n = (S.minN > 1 ? 1 : 0) + S.cls.size
-  more.innerHTML = `Size and class${n ? ` <span class="n">${n}</span>` : ''}${ico('down')}`
-  more.classList.toggle('active', n > 0)
-  const chips = []
-  // a filter that is set: thimble's active filter chip, × at its end; the whole chip clears it
-  const fchip = (text, attrs) => `<button type="button" class="chip chip-tone-neutral chip-act active"${attrs} title="Clear this filter" aria-label="Clear the filter ${esc(text)}"><span class="chip-text">${esc(text)}</span>${ico('x')}</button>`
-  if (S.minN > 1) chips.push(fchip(`≥ ${num(S.minN)} reports`, ' data-chip="minN"'))
-  for (const c of S.cls) chips.push(fchip(`Class · ${CLS_NAME[c]}`, ` data-chip="cls" data-c="${c}"`))
-  $('chips').innerHTML = chips.join('')
-}
-$('chips').onclick = (ev) => {
-  const b = ev.target.closest('[data-chip]')
-  if (!b) return
-  if (b.dataset.chip === 'minN') S.minN = 1
-  else S.cls.delete(b.dataset.c)
-  rescope()
+  const size = $('f-size')
+  size.innerHTML = S.minN > 1 ? `<span class="k">Size:</span> <span class="v">≥ ${num(S.minN)}</span><span class="clr" data-clear role="button" aria-label="Episodes of every size">${ico('x')}</span>` : `Size${ico('down')}`
+  size.classList.toggle('active', S.minN > 1)
 }
 function srcMenu(anchor) {
   if (toggled(anchor)) return
@@ -560,37 +540,22 @@ function drawSrc(p, q) {
   }
   p.querySelector('.items').innerHTML = `<button class="item" data-g="*"><span class="box${S.src.size ? '' : ' on'}"></span><span class="lab">All sources</span></button><div class="sep"></div>${rows || '<div class="note">None</div>'}`
 }
-function dispMenu(anchor) {
+// Size: the least reports an episode holds, one number
+function sizeMenu(anchor) {
   if (toggled(anchor)) return
-  const p = pop(anchor, `<div class="head">Disposition</div>${DISP.map(([k, n]) => `<button class="item" data-disp="${k}"><span class="box${S.disp === k ? ' on' : ''}"></span><span class="lab">${esc(n)}</span></button>`).join('')}`)
-  p.onclick = (ev) => {
-    const it = ev.target.closest('[data-disp]')
-    if (!it) return
-    S.disp = it.dataset.disp
-    close()
-    rescope()
-  }
-}
-function moreMenu(anchor) {
-  if (toggled(anchor)) return
-  const steps = [1, 2, 10, 100, 1000]
-  const draw = () => `<div class="head">Reports in an episode, at least</div><span class="seg seg-track">${steps.map((s) => `<button class="seg-opt${S.minN === s ? ' active' : ''}" data-min="${s}" type="button">${num(s)}</button>`).join('')}</span><div class="range"><input class="field num" inputmode="numeric" data-min-in value="${S.minN > 1 && !steps.includes(S.minN) ? S.minN : ''}" placeholder="other"></div><div class="sep"></div><div class="head">Holds reports of</div>${CLS.map(([k, n]) => `<button class="item" data-cls="${k}"><span class="box${S.cls.has(k) ? ' on' : ''}"></span><span class="sw" style="--c:${clsColour(k)}"></span><span class="lab">${n}</span></button>`).join('')}`
-  const p = pop(anchor, draw())
-  const wire = () => {
-    const i = p.querySelector('[data-min-in]')
-    i.onchange = () => { const v = parseInt(i.value, 10); S.minN = v > 0 ? v : 1; rescope(); p.innerHTML = draw(); wire() }
-  }
-  wire()
-  p.onclick = (ev) => {
-    const m = ev.target.closest('[data-min]')
-    if (m) { S.minN = +m.dataset.min; rescope(); p.innerHTML = draw(); wire(); return }
-    const c = ev.target.closest('[data-cls]')
-    if (c) { const k = c.dataset.cls; S.cls.has(k) ? S.cls.delete(k) : S.cls.add(k); rescope(); p.innerHTML = draw(); wire() }
-  }
+  const p = pop(anchor, `<div class="head">Reports in an episode, at least</div><div class="range"><input class="field num" type="number" min="1" step="1" inputmode="numeric" data-min-in value="${S.minN}" aria-label="Reports in an episode, at least"></div>`)
+  const i = p.querySelector('[data-min-in]')
+  i.focus(); i.select()
+  let typing = null
+  const set = () => { clearTimeout(typing); const v = parseInt(i.value, 10); const n = v > 0 ? v : 1; if (n !== S.minN) { S.minN = n; rescope() } }
+  i.oninput = () => { clearTimeout(typing); typing = setTimeout(set, 250) }
+  i.onkeydown = (ev) => { if (ev.key === 'Enter') { set(); close() } }
 }
 $('f-src').onclick = (ev) => srcMenu(ev.currentTarget)
-$('f-disp').onclick = (ev) => dispMenu(ev.currentTarget)
-$('f-more').onclick = (ev) => moreMenu(ev.currentTarget)
+$('f-size').onclick = (ev) => {
+  if (ev.target.closest('[data-clear]')) { close(); S.minN = 1; return rescope() }
+  sizeMenu(ev.currentTarget)
+}
 
 // ---------------------------------------------------------------- the strip
 // One lane per group, the groups with the most episodes or reports first; the rest share one lane, and the groups of
@@ -643,11 +608,24 @@ function laneGutter(W) {
   }
   return Math.round(Math.min(W * 0.27, Math.max(110, w + 14 + 6 + 12 + 6)))
 }
+// the readout's column: as wide as the readout of the whole span needs on one line, measured in its own font the first
+// time the view shows the whole span and kept, so the lanes do not move as the range changes
+let readNeed = 0
+function readGutter(W) {
+  const el = $('rread').querySelector('.thimble-range-dates')
+  if (el && range.full) {
+    if (!ctx2d) ctx2d = document.createElement('canvas').getContext('2d')
+    const c = getComputedStyle(el)
+    ctx2d.font = `${c.fontWeight} ${c.fontSize} ${c.fontFamily}`
+    readNeed = Math.max(readNeed, Math.ceil(ctx2d.measureText(el.textContent).width) + 24 + 4)
+  }
+  return Math.min(readNeed, Math.round(W * 0.3))
+}
 function renderStrip() {
   const strip = $('strip'), svg = $('plot'), gut = $('gut')
   const list = shown
   const firstTail = computeLanes(list)
-  const W = strip.clientWidth, G = laneGutter(W)
+  const W = strip.clientWidth, G = Math.max(laneGutter(W), readGutter(W))
   const x0 = G, x1 = W - 16 - RMAX, h = LANES.length * LH, w = Math.max(40, x1 - x0)
   plotX0 = x0; plotX1 = x1
   // the time range above the lanes, its readout in the names' column and its overview as wide as the lanes' time; the
@@ -670,6 +648,7 @@ function renderStrip() {
   const max = Math.max(1, ...E.map((e) => e.n))
   const order = list.filter((e) => laneOf.has(e.g)).sort((p, q) => (p.key === S.open) - (q.key === S.open) || q.n - p.n)
   s += `<g id="dots" clip-path="url(#plotclip)">`
+  DOTS = order.map((e) => ({ e, x: X(e.start), y: CENTRE(laneOf.get(e.g)), r: R(e.n, max) }))
   for (const e of order) s += dotSvg(e, max)
   s += '</g>'
   s += `<defs><clipPath id="plotclip"><rect x="${x0 - RMAX}" y="-${RMAX}" width="${x1 - x0 + 2 * RMAX}" height="${h + 2 * RMAX}"/></clipPath></defs>`
@@ -689,6 +668,19 @@ function renderStrip() {
   thimble.timeAxis(axis, sc)
 }
 const CENTRE = (i) => i * LH + LH / 2
+// where each dot is drawn, for the pointer: {e, x, y, r}
+let DOTS = []
+// the dot under the pointer: of the dots it lies in, the one whose centre is nearest, so a small dot on a large one and
+// the large one around it each answer near their own centre
+function dotAt(x, y) {
+  let best = null, bd = Infinity
+  for (const d of DOTS) {
+    const dist = Math.hypot(x - d.x, y - d.y)
+    if (dist > d.r + 1.5) continue
+    if (dist < bd || (dist === bd && best && d.r > best.r)) { best = d; bd = dist }
+  }
+  return best ? best.e : null
+}
 function dotSvg(e, max) {
   const x = X(e.start), y = CENTRE(laneOf.get(e.g)), r = R(e.n, max)
   const ref = unitRef(e.key), open = e.key === S.open
@@ -704,7 +696,7 @@ function pie(x, y, r, e, ps) {
   const parts = ps.map((p) => [p[1], p[2]]), total = e.n || 1
   const sum = parts.reduce((a, p) => a + p[0], 0)
   const base = (parts.reduce((m, p) => (p[0] > m[0] ? p : m), parts[0]) || [])[1] || token('--viz-ink-3')
-  if (r < 5 || !parts.length) return `<circle cx="${x}" cy="${y}" r="${r}" fill="${esc(base)}" stroke="var(--surface-card)" stroke-width="0.6"/>`
+  if (r < 5 || !parts.length) return `<circle cx="${x}" cy="${y}" r="${r}" fill="${esc(base)}"/>`
   let s = `<circle cx="${x}" cy="${y}" r="${r}" fill="var(--viz-ink-4)"/>`
   let a0 = -Math.PI / 2
   const scale = Math.max(total, sum)
@@ -722,9 +714,10 @@ function pie(x, y, r, e, ps) {
 ;(() => {
   const svg = $('plot'), tip = $('tip')
   const xAt = (ev) => ev.clientX - svg.getBoundingClientRect().left
+  const yAt = (ev) => ev.clientY - svg.getBoundingClientRect().top
   svg.addEventListener('click', (ev) => {
-    const d = ev.target.closest('.dot')
-    if (d) openEpisode(E[+d.dataset.k].key, { scrollList: true })
+    const e = dotAt(xAt(ev), yAt(ev))
+    if (e) openEpisode(e.key, { scrollList: true })
   })
   function guide(x) {
     const g = svg.querySelector('#guide')
@@ -735,9 +728,9 @@ function pie(x, y, r, e, ps) {
   }
   svg.addEventListener('pointermove', (ev) => {
     guide(xAt(ev))
-    const g = ev.target.closest('.dot')
-    if (!g) { tip.style.display = 'none'; return }
-    const e = E[+g.dataset.k]
+    const e = dotAt(xAt(ev), yAt(ev))
+    svg.style.cursor = e ? 'pointer' : ''
+    if (!e) { tip.style.display = 'none'; return }
     const marks = parts(e).map(([v, n, c]) => `<div><span class="sw" style="--c:${esc(c || noneColour())}"></span> ${esc(v == null ? valueName(null) : v)} <span class="m">${num(n)}</span></div>`).join('')
     tip.innerHTML = `<b>${esc(gname(e.g))}</b><div class="m">${esc(when(e.start))} → ${esc(endText(e.start, e.end))} · ${esc(dur(e.end - e.start))}</div><div class="m">${plural(e.n, 'report')}${e.cp ? ` · ${num(e.cp)} custom_program` : ''}</div>${marks}`
     tip.style.display = 'block'
@@ -769,6 +762,14 @@ const COLDEF = {
   coh: ['Cohort', 'num', '100%'], lab: ['Color', '', '', 64],
 }
 const ORDER = ['src', 'start', 'end', 'se', 'dur', 'n', 'mix', 'rate', 'pm', 'sig', 'coh', 'lab']
+const COLTIP = {
+  src: 'The data source of the episode\'s reports', start: 'The first report\'s time, in UTC', end: 'The last report\'s time',
+  se: 'The first report\'s time and the last\'s, in UTC', dur: 'From the first report to the last', n: 'The episode\'s reports',
+  mix: 'Its reports by broad_class: source_request, indirection, custom_program, light to dark',
+  rate: 'Its reports in each of 24 equal slices of its span', pm: 'Most reports in one clock minute, in UTC',
+  sig: 'Its reports whose confidence is significant',
+  coh: 'The share of its reports whose why_included names the externally selected research-activity cohort',
+}
 const SRC_MIN = 124, SRC_CAP = 210, SRC_MAX = 250, MIX_GROW = 70
 let srcNeed = SRC_MIN
 let colKeys = '', colW = null
@@ -818,16 +819,17 @@ function listCols() {
   if (colW.labBase == null) colW.labBase = colW.lab
   colW.lab = Math.max(colW.labBase, Math.min(150, colour.by ? headWidth(colour.by.title) : 0))
   const need = (ks) => srcNeed + ks.reduce((a, k) => a + colW[k], 0)
-  let keys = ['start', 'end', 'dur', 'n', 'mix', 'sig', 'coh', ...lab]
-  if (need(keys) > total) keys = ['se', 'dur', 'n', 'mix', 'sig', 'coh', ...lab]
+  const mix = byClass() ? [] : ['mix']
+  let keys = ['start', 'end', 'dur', 'n', ...mix, 'sig', 'coh', ...lab]
+  if (need(keys) > total) keys = ['se', 'dur', 'n', ...mix, 'sig', 'coh', ...lab]
   if (need(keys) > total) {
-    keys = ['se', 'n', 'mix', ...lab]
+    keys = ['se', 'n', ...mix, ...lab]
     for (const k of ['sig', 'coh', 'dur']) if (need([...keys, k]) <= total) keys.push(k)
   }
   for (const k of ['rate', 'pm']) if (need([...keys, k]) <= total && (k !== 'pm' || keys.includes('rate'))) keys.push(k)
   let room = total - need(keys)
   // with room to spare, the classes' bar grows first, up to MIX_GROW more
-  const grow = keys.includes('rate') ? Math.max(0, Math.min(MIX_GROW, room - 260)) : 0
+  const grow = keys.includes('rate') && keys.includes('mix') ? Math.max(0, Math.min(MIX_GROW, room - 260)) : 0
   room -= grow
   return ORDER.filter((k) => k === 'src' || keys.includes(k)).map((k) => {
     let w = k === 'src' ? srcNeed : colW[k]
@@ -841,7 +843,8 @@ function renderHead(cols) {
   requestAnimationFrame(() => $('lscroll').style.setProperty('--thead-h', `${Math.round($('thead').getBoundingClientRect().height)}px`))
   $('cols').innerHTML = cols.map(([, , , w]) => `<col${w ? ` style="width:${w}px"` : ''}>`).join('')
   const on = (k) => S.sort.k === k || (k === 'se' && S.sort.k === 'start')
-  $('thead').innerHTML = cols.map(([k, n, c]) => `<th class="${c}${on(k) ? ' on' : ''}" data-sort="${k}">${n}<span class="ar">${on(k) ? (S.sort.dir < 0 ? '↓' : '↑') : ''}</span></th>`).join('')
+  const tipOf = (k) => (k === 'lab' ? (colour.by ? `Its reports by ${colour.by.title}` : '') : COLTIP[k] || '')
+  $('thead').innerHTML = cols.map(([k, n, c]) => `<th class="${c}${on(k) ? ' on' : ''}" data-sort="${k}"${tipOf(k) ? ` title="${esc(tipOf(k))}"` : ''}>${n}<span class="ar">${on(k) ? (S.sort.dir < 0 ? '↓' : '↑') : ''}</span></th>`).join('')
   for (const b of $('sortSeg').children) b.classList.toggle('active', (b.dataset.sort === 'n' && S.sort.k === 'n' && S.sort.dir < 0) || (b.dataset.sort === 'start' && S.sort.k === 'start' && S.sort.dir > 0))
 }
 function mixBar(e, total = e.n) {
@@ -892,17 +895,21 @@ function rowHtml(e, cols) {
   // the open episode under its row, as wide as the list
   return S.open === e.key ? `${row}<tr class="epx"><td colspan="${cols.length}"><div id="ep"></div></td></tr>` : row
 }
-// the classes' key beside the count: the grey ink each broad class takes in the Classes bars (Size and class in the
-// control row keeps the episodes that hold one); hidden where it does not fit
+// whether the Color by choice is the broad class, which then shows in its colors alone
+const byClass = () => colour.field === 'broad_class'
+// a broad class named after the gray square of its ink, as plain text, with its count when given
+const classKey = (k, n, count) => `<span class="ckey"><span class="sw" style="--c:${clsColour(k)}"></span>${esc(n)}${count != null ? `<span class="n">${num(count)}</span>` : ''}</span>`
+// the classes' key beside the count: the gray ink each broad class takes in the Classes bars; hidden where it does not
+// fit, and while Class is the Color by choice
 function renderKeys() {
   const ck = $('ckeys')
-  ck.innerHTML = CLS.map(([k, n]) => `<span class="chip chip-key" style="--c:${clsColour(k)}"><span class="chip-sw"></span><span class="chip-text">${n}</span></span>`).join('')
+  ck.innerHTML = byClass() ? '' : CLS.map(([k, n]) => classKey(k, n)).join('')
   fitKeys()
 }
 function fitKeys() {
   const ck = $('ckeys'), lh = $('lhead')
-  ck.hidden = false
-  if (lh.scrollWidth > lh.clientWidth + 1) ck.hidden = true
+  ck.hidden = byClass()
+  if (!ck.hidden && lh.scrollWidth > lh.clientWidth + 1) ck.hidden = true
 }
 function renderList() {
   renderKeys()
@@ -1066,7 +1073,7 @@ function renderEpisode() {
       <button class="btn btn-ghost btn-sm" type="button" data-step="-1" aria-label="Previous episode"${at <= 0 ? ' disabled' : ''}>${ico('left')}</button><button class="btn btn-ghost btn-sm" type="button" data-step="1" aria-label="Next episode"${at < 0 || at >= shown.length - 1 ? ' disabled' : ''}>${ico('right')}</button><button class="btn btn-ghost btn-sm" type="button" data-close aria-label="Close">${ico('x')}</button></div>
     <div class="ep-when">${esc(dmy(d.start))} ${hms(d.start)}${d.end > d.start ? ` → ${multiDay ? esc(dmy(d.end)) + ' ' : ''}${hms(d.end)}` : ''} UTC${d.end > d.start ? ` · ${esc(dur(d.end - d.start))}` : ''}</div>
     <div class="stats">${stats.map(([k, v]) => `<div class="stat"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('')}</div>
-    <div class="ep-mix">${mixBar(counts, n)}<span class="keys">${CLS.map(([k, nm]) => `<span class="chip chip-key" style="--c:${clsColour(k)}"><span class="chip-sw"></span><span class="chip-text">${nm}</span><span class="chip-count">${num(counts[k])}</span></span>`).join('')}</span></div>
+    ${byClass() ? '' : `<div class="ep-mix">${mixBar(counts, n)}<span class="keys">${CLS.map(([k, nm]) => classKey(k, nm, counts[k])).join('')}</span></div>`}
   </div>
   <div id="rate"></div>
   <div id="rscroll">
@@ -1161,7 +1168,7 @@ function reportRow(r) {
   const open = S.rep === r.i
   return `<tr data-i="${r.i}" data-anchor="${esc(r.ref)}" data-anchor-name="Report of ${esc(r.report_date_utc || when(r.t))}" class="${open ? 'sel' : ''}"${colour.attr(r)}>`
     + `<td>${hms(r.t)}</td><td class="gap${fast ? ' fast' : ''}">${esc(gapText(r.gap))}</td>`
-    + `<td class="cl">${k ? `<span class="sw" style="--c:${clsColour(k)}"></span>` : ''}${esc(r.broad_class || '')}</td>`
+    + `<td class="cl">${k && !byClass() ? `<span class="sw" style="--c:${clsColour(k)}"></span>` : ''}${esc(r.broad_class || '')}</td>`
     + `<td class="cf ${conf}">${r.confidence ? esc(r.confidence) : '<span class="none">–</span>'}</td>`
     + (whyOn() ? `<td class="why">${esc(r.why_short || '')}</td>` : '')
     + `<td class="lnk">${r.report_url ? `<a class="ext" href="${esc(r.report_url)}" target="_blank" rel="noopener noreferrer" data-url="${esc(r.report_url)}" title="${esc(r.report_url)}" aria-label="Report on urlquery.net">${ico('ext')}</a>` : ''}</td></tr>`
@@ -1305,7 +1312,7 @@ function rescope() {
   markOpen()
   $('lscroll').scrollTop = 0
 }
-function clearFilters() { S.src.clear(); S.disp = 'all'; S.minN = 1; S.cls.clear(); range.set(null) }
+function clearFilters() { S.src.clear(); S.minN = 1; range.set(null) }
 let resizeTimer = null
 addEventListener('resize', () => {
   clearTimeout(resizeTimer)

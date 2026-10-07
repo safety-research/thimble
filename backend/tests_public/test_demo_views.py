@@ -51,7 +51,8 @@ def precache(tmp_path: Path) -> tuple[Path, Path]:
         "extension/views/board/view.html": "<p>the orientation's board</p>",
         "extension/views/replay/view.json": json.dumps({"name": "Replay", "built": "x"}),
         "extension/views/replay/reader.py": "def build_index(): ...",
-        "views/proposals.json": json.dumps([{"slug": "board", "name": "Board"}, {"slug": "replay", "name": "Replay"}]),
+        "views/proposals.json": json.dumps([{"slug": "board", "name": "Board", "review": {"state": "done", "left": []}},
+                                            {"slug": "replay", "name": "Replay"}]),
     })
     out = tmp_path / "demos" / "toy"
     demo.export_outputs(ws, corpus, out, name="toy", home=tmp_path, user="", scan=lambda _: [])
@@ -97,6 +98,7 @@ def test_reviewed_views_replace_the_orientation_s_own_renamed_and_stamped(tmp_pa
     assert not (root / "board" / "__pycache__").exists() and not (root / "board" / "gate.json").exists()
     props = json.loads((pc / "workspace" / "views" / "proposals.json").read_text())
     assert [p["slug"] for p in props] == ["board"]
+    assert "review" not in props[0]  # the review home's reviewer and its notes stay there; the view's head shows no flag
     on_disk = {p.relative_to(pc / "workspace").as_posix() for p in (pc / "workspace").rglob("*") if p.is_file()}
     assert on_disk == {f["path"] for f in m["files"]}
     assert m["counts"]["views"] == 2 and [(v["slug"], v["from"], v["picked"]) for v in m["views"]] == [
