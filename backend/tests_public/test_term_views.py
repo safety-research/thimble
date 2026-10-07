@@ -402,55 +402,73 @@ def timeline(workspaces_tmp, tmp_path, monkeypatch, inproc) -> str:
 @needs_node
 @pytest.mark.parametrize("cols", [120, 200])
 async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
-    """The worked example at 120 and 200 columns: the top row (search, incident, Color by with its chips), the time
-    range's readout and strip, a lane per source, the axis with the incidents' marks, then the events by day, each with
-    its time, source, kind, actor, incident and text; its hint row names only keys the pane passes on."""
+    """The worked example at 120 and 200 columns: the search and Filter by on Incident with its values as toggles; Rows
+    on Source, then Color by with its chips; the time range's readout and strip, a lane per source, the axis with the
+    key's toggle of failed events and the incidents' flags; then what the list shows and how many, its columns'
+    headings, and the events by day, each with its time, source, kind, actor, incident and text; its hint row names
+    only keys the pane passes on."""
     out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=36, wrap=DRAW_WRAP)
     lines = out.splitlines()
     assert lines[0] == "  Timeline"
     body, hints = _split(lines, 2, 36)
     assert all(len(x) <= cols + 2 for x in body)
-    assert body[0].startswith("  / search events  incident  all  Color by  Service  ● payments 79  ● web 45")
-    assert body[1] == "  16 May 01:14 – 19 May 14:25 · 3d 13h"
-    assert [x[2:10].strip() for x in body[3:8]] == ["alert", "deploy", "agent", "chat", "ticket"]
-    assert "17 May 00:00" in body[8] and "18 May 00:00" in body[8]
-    assert body[9].split() == ["INC-311", "INC-312", "INC-313"]
-    assert body[10] == ""
-    assert body[11].startswith("  Sat 16 May 2026")
-    assert body[12].startswith("❯ ● 01:40:12  chat    message     Oona")
-    assert "02:57:20  alert   fired       monitor     INC-311  payments: database connections at 181 of 200 for 5 min" in body[19]
+    assert body[0].startswith("  / search events  Filter by  Incident  ● INC-312 100  ● INC-313 23  ● INC-311 11  ● no incident 64")
+    assert body[1].startswith("  Rows  Source  Color by  Service  ● payments 79  ● web 45")
+    assert body[2] == "  16 May 01:14 – 19 May 14:25 · 3d 13h"
+    assert [x[2:12].strip() for x in body[4:9]] == ["alert", "deploy", "agent", "chat", "ticket"]
+    assert body[9].startswith("  × failed") and "17 May 00:00" in body[9] and "18 May 00:00" in body[9]
+    assert body[10].split() == ["INC-311", "INC-312", "INC-313"]
+    assert body[11] == ""
+    assert body[12] == "  In the range  198 events"
+    assert body[13].split() == ["time", "source", "kind", "actor", "incident", "text"]
+    assert body[14].startswith("  Sat 16 May 2026")
+    assert body[15].startswith("❯ ● 01:40:12  chat    message      Oona")
+    assert "02:57:20  alert   fired        monitor     INC-311   payments: database connections at 181 of 200 for 5 min" in body[22]
     if cols == 200:
-        assert "Tonight's release train: web 2.31.0 and payments 4.12.0. deploybot starts at 02:00." in body[12]
-    assert hints == ("↑↓ to choose · Enter to open · c to color by · / to search · i for incident · [ ] to "
-                                 "pan · + - to zoom · a to ask · b to go back · x to close")
+        assert "Tonight's release train: web 2.31.0 and payments 4.12.0. deploybot starts at 02:00." in body[15]
+    assert hints == ("↑↓ to choose · Enter to open · c to color by · / to search · f to filter by · g for rows · { } to "
+                     "resize the overview · [ ] to pan · + - to zoom · a to ask · b to go back · x to close")
+
+
+def _timeline_pane(rows: list[str]) -> list[str]:
+    """The side pane's rows, right of its `│`."""
+    return [x.rsplit("│ ", 1)[1].rstrip() for x in rows if "│ " in x]
 
 
 @needs_node
-async def test_timeline_opens_an_event_in_place_and_narrows_to_an_incident(timeline):
-    """Enter opens the chosen event in place: its words, its facts, the events that answer it, its line as the file
-    holds it and its place; the incident menu narrows to INC-312 and frames its burst; a citation of an incident opens
-    the view narrowed to it."""
+async def test_timeline_opens_an_event_in_the_side_pane_filters_and_picks_a_lane(timeline):
+    """Enter opens the chosen event in the side pane beside the list, never under its row: its words, its facts named
+    plainly, the events that answer it and its place, with no `ask about it` (the place asks); a click on a Filter by
+    value hides its events; a click on a lane's name shows that lane's events, the list naming them; a citation of an
+    incident narrows Filter by to it and frames its burst."""
     out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP,
                                      keys=["down"] * 8 + ["return"], panel=False)
-    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
+    rows = out.splitlines()
     at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "03:00:48  alert   fired" in rows[at]
-    assert rows[at + 1].strip() == "payments: health check failing on 2 of 3 replicas"
-    assert rows[at + 2].strip() == "service payments · severity critical · id alr-42"
-    assert rows[at + 3].strip() == "Answered by"
-    assert rows[at + 4].strip().startswith("03:01:05  agent · pagerbot  Opened INC-311")
-    # its facts say what its line holds, so the line itself is behind ↗, in the citation panel
-    assert not any(x.strip().startswith('2  {"id": "alr-42"') for x in rows)
-    assert any(x.strip().startswith("↗ alerts/monitor-20260516-0000.jsonl line 2  ask about it") for x in rows)
-    out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, keys=["i", "down", "down", "return"],
+    assert "03:00:48  alert   fired" in rows[at] and rows[at + 1].startswith("  ● 03:01:05  agent"), "nothing opens under the row"
+    pane = _timeline_pane(rows)
+    assert pane[0].startswith("alert fired · 03:00:48") and pane[0].endswith("close")
+    assert pane[1:5] == ["payments: health check failing on 2 of 3 replicas", "service payments · severity critical",
+                         "incident INC-311 · by monitor · alert id alr-42", "Responses · 5"]
+    assert pane[5].startswith("03:01:05  agent opened  Opened INC-311")
+    assert "↗ alerts/monitor-20260516-0000.jsonl line 2" in pane
+    assert "ask about it" not in out
+    assert rows[1].rstrip().endswith("reset"), "Reset shows once an event is open"
+    out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, keys=["click:INC-312"],
                                      panel=False)
     rows = out.splitlines()
-    assert "incident  INC-312" in rows[0] and rows[0].rstrip().endswith("reset")
-    assert rows[1].startswith("  16 May 07:30 – 11:39")
-    assert all("INC-312" in x for x in rows if x.startswith(("❯ ●", "  ●")))
+    assert "○ INC-312 100  ● INC-313 23  ● INC-311 11  ● no incident 64" in rows[0] and rows[1].rstrip().endswith("reset")
+    assert "In the range  98 events" in out and not any("INC-312" in x for x in _list_rows(rows))
+    out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, keys=["click:alert"],
+                                     panel=False)
+    assert "  Source: alert  34 events" in out.splitlines()
+    assert {x[14:22].strip() for x in _list_rows(out.splitlines())} == {"alert"}
     out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, ref="view:timeline/INC-313",
                                      panel=False)
-    assert "incident  INC-313" in out.splitlines()[0]
+    rows = out.splitlines()
+    assert "○ INC-312 100  ● INC-313 23  ○ INC-311 11  ○ no incident 64" in rows[0]
+    assert rows[2].startswith("  18 May 06:39 – 09:49")
+    assert all("INC-313" in x for x in _list_rows(rows))
 
 
 # ------------------------------------------------------------------------------------------------------ Linked sessions
@@ -475,96 +493,138 @@ LEAD1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576.jsonl"
 PORT1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576/subagents/agent-a07a4da7.jsonl"
 
 
-def _lanes(body: list[str]) -> list[str]:
-    """The lanes' names, from the row under the strip to the axis, the row above the blank one."""
-    end = body.index("", 3) - 1
-    return [re.match(r"\s*\S+(?: \S+)*", x[2:])[0] for x in body[3:end]]
+def _tree(body: list[str]) -> list[str]:
+    """The lanes' names, from the row under the time range's strip to the axis, whose key starts `× failed`."""
+    top = next(i for i, x in enumerate(body) if re.match(r"\s+\d+ \w{3} \d\d:\d\d", x)) + 2
+    end = next(i for i, x in enumerate(body) if x.startswith("  × failed"))
+    return [re.match(r"\s*\S+(?: \S+)*", x[2:])[0] for x in body[top:end]]
+
+
+def _linked_pane(rows: list[str], title: str) -> list[str]:
+    """The side pane's rows beside the transcript whose title starts `title`, at the right of the `│` between them."""
+    t = next(i for i, x in enumerate(rows) if x.startswith(f"  {title}"))
+    return [x[x.index("│") + 1:].strip() for x in rows[t + 1:] if "│" in x]
 
 
 @needs_node
 @pytest.mark.parametrize("cols", [120, 200])
 async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
-    """The worked example at 120 and 200 columns: the top row (search, the sessions menu, Color by with its chips), the
-    time range's readout and its strip broken where the runs lie hours apart, a lane per session under its run with each
-    subagent under the session that spawned it, the axis with its breaks, then the messages and calls under each run's
-    name, each with its time, session, tool or kind, first line and how long a call took; its hint row names only keys
-    the pane passes on."""
+    """The worked example at 120 and 200 columns: the top row (search, Filter by, Rows, Color by with its chips), the
+    time range's readout and its strip broken where the runs lie hours apart, each run's sessions as a tree of lanes (a
+    lead, the subagents it started under it with their guides), the axis with the key of the failed calls, what links
+    the lead read to the others, then its transcript under a title that names it and counts its turns: the user's
+    prompt, each tool call on one line, a Task call naming the subagent it started; its hint row names only keys the pane
+    passes on."""
     out = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP)
     lines = out.splitlines()
-    assert lines[:2] == ["  Linked sessions", "  3 runs · 17 sessions · 316 calls · 36 messages"]
+    assert lines[:2] == ["  Linked sessions", "  3 runs · 17 sessions · 352 turns"]
     body, hints = _split(lines, 3, 40)
     assert all(len(x) <= cols + 2 for x in body)
-    assert body[0].startswith("  / search  sessions  all  Color by  Speaker  ● client-port 100  ● lead 63  ● webhooks 63")
+    assert body[0].startswith("  / search  Filter by  none  Rows  Session  Color by  Speaker  ● client-port 100  ● lead 63")
     assert body[1] == "  12 Sep 14:02 – 13 Sep 09:53 · 19h 51m"
     assert body[2].count(" // ") == 2
-    assert _lanes(body) == [
-        "▾ Run 1 · nested team", "  lead", "  ├ survey", "  ├ client-port", "  │ ├ pagination", "  │ └ auth-headers",
-        "  ├ webhooks", "  └ test-runner", "▾ Run 2 · flat team", "  lead", "  ├ client-port", "  ├ webhooks",
-        "  └ test-runner", "▾ Run 3 · with reviewer", "  lead", "  ├ survey", "  ├ client-port", "  ├ webhooks",
-        "  ├ reviewer", "  └ reviewer 2"]
+    assert _tree(body) == [
+        "▾ Run 1 · lead", "  ├ survey", "  ├ client-port", "  │ ├ pagination", "  │ └ auth-headers", "  ├ webhooks",
+        "  └ test-runner", "▾ Run 2 · lead", "  ├ client-port", "  ├ webhooks", "  └ test-runner", "▾ Run 3 · lead",
+        "  ├ survey", "  ├ client-port", "  ├ webhooks", "  ├ reviewer", "  └ reviewer 2"]
     # each run's lanes stand in its own stretch of the axis: Run 2's start after the first break, Run 3's after the second
     breaks = [i for i in range(len(body[2])) if body[2][i:i + 4] == " // "]
-    assert body[4][27:breaks[0]].strip() and not body[13][27:breaks[0]].strip() and body[13][breaks[0]:breaks[1]].strip()
-    axis_row = body[23]
-    assert axis_row.startswith("  ─ running  × failed"), "the key of the lanes' own marks, in the names' column"
-    assert axis_row.count("//") == 2 and "12 Sep 14:15" in axis_row and "12 Sep 16:45" in axis_row and "13 Sep 09:15" in axis_row
-    assert body[24] == ""
-    assert body[25].startswith("  Run 1 · nested team")
-    assert body[26].startswith("❯ ● 14:02:00  lead          Prompt     Upgrade invoicer from Brambleway API v2 to v3.")
-    assert re.match(r"  ● 14:03:10  lead          Task       Find every v2 call site +292 s", body[31])
-    assert re.match(r"  ● 14:04:31  survey        WebSearch  Brambleway API v3 changelog +× error  30 s", body[38])
-    assert hints == ("↑↓ to choose · Enter to open · c to color by · / to search · s for sessions · [ ] to "
-                                 "pan · + - to zoom · a to ask · b to go back · x to close")
+    assert body[3][22:breaks[0]].strip() and not body[10][22:breaks[0]].strip() and body[10][breaks[0]:breaks[1]].strip()
+    axis = next(i for i, x in enumerate(body) if x.startswith("  × failed"))
+    assert body[axis].count("//") == 2 and "12 Sep 14:15" in body[axis] and "13 Sep 09:15" in body[axis]
+    assert body[axis + 1] == ""
+    assert body[axis + 2].startswith("  lead of Run 1 · nested team · subagents survey 14:03:10, client-port 14:09:05, webhooks 14:09:06")
+    assert body[axis + 3].startswith("  lead · Run 1 · nested team  20 turns · 14:02:00 – 14:46:10")
+    rows = [re.sub(r"\s*▌*$", "", x) for x in body[axis + 4:]]
+    assert rows[:2] == ["  12 Sep 2026", "❯ 14:02:00  ● user"]
+    assert rows[2].strip().startswith("Upgrade invoicer from Brambleway API v2 to v3.")
+    assert "  14:03:10  ⎿ Task → survey Find every v2 call site" in rows
+    assert hints.startswith("↑↓ to choose · Enter to open · c to color by · / to search · f to filter by · g for rows")
+    for k in ("{ } to resize the overview", "[ ] to pan", "+ - to zoom", "a to ask", "n p for the next or previous lane",
+              "b to go back · x to close"):
+        assert k in hints, k
 
 
 @needs_node
 async def test_linked_sessions_folds_a_run_where_the_lanes_have_no_room(linked):
-    """In a short panel the largest run folds to one lane of all its sessions, so the list keeps its rows; ▸ unfolds it,
-    and another run folds in its place."""
+    """In a short panel the largest run folds to one lane of all its sessions, so the transcript keeps its rows; ▸
+    unfolds it, and another run folds in its place."""
     out = await term_views.draw_text(linked, "linked-sessions", cols=92, rows=36, wrap=DRAW_WRAP, panel=False)
     body = out.splitlines()
-    assert _lanes(body)[:2] == ["▸ Run 1 · nested team", "▾ Run 2 · flat team"]
-    assert body[3][25:].strip(), "a folded run draws its sessions' records in one lane"
+    assert _tree(body)[:2] == ["▸ Run 1 · lead", "▾ Run 2 · lead"]
+    assert body[3][22:].strip(), "a folded run draws its sessions' turns in one lane"
     out = await term_views.draw_text(linked, "linked-sessions", cols=92, rows=36, wrap=DRAW_WRAP, panel=False, keys=["click:▸"])
-    lanes = _lanes(out.splitlines())
-    assert lanes[:3] == ["▾ Run 1 · nested team", "  lead", "  ├ survey"] and lanes[-1].startswith("▸ Run 3")
+    lanes = _tree(out.splitlines())
+    assert lanes[:3] == ["▾ Run 1 · lead", "  ├ survey", "  ├ client-port"] and lanes[-1] == "▸ Run 3 · lead"
 
 
 @needs_node
-async def test_linked_sessions_opens_a_call_in_place_narrows_to_a_run_and_follows_a_citation(linked):
-    """Enter opens the chosen call in place: what came back, the subagent its Task spawned (a click shows that session
-    alone) and its place; an Edit opened from its citation shows its change; a run's name in the lanes narrows the view
-    to it, as the sessions menu does, and a citation of a run opens the view narrowed to it."""
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP,
-                                     keys=["down"] * 5 + ["return"], panel=False)
-    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
-    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "14:03:10  lead          Task       Find every v2 call site" in rows[at]
-    assert rows[at + 1].strip().startswith("14 call sites in 9 files.")
-    assert rows[at + 2].strip() == "Subagent"
-    assert rows[at + 3].strip() == "14:03:12  survey  Find every v2 call site in invoicer/ and summarise the v3 changes that affect them."
-    assert rows[at + 4].strip() == f"↗ {LEAD1} line 10  ask about it"
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP,
-                                     keys=["down"] * 5 + ["return", "click:Find every v2 call site in invoicer/ and"], panel=False)
-    rows = out.splitlines()
-    assert "sessions  survey" in rows[0] and rows[0].rstrip().endswith("reset")
-    assert _lanes(rows) == ["▾ Run 1 · nested team", "  survey"]
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref=f"{PORT1}#L13", panel=False)
-    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
-    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "14:10:20  client-port   Edit       invoicer/client/http.py" in rows[at]
-    assert rows[at + 1].strip() == '− BASE_URL = "https://api.brambleway.example/v2"'
-    assert rows[at + 2].strip() == '+ BASE_URL = "https://api.brambleway.example/v3"'
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, keys=["click:Run 2 · flat team"],
+async def test_linked_sessions_reads_a_subagent_and_the_session_that_started_it(linked):
+    """n reads the next lane, client-port: over its transcript, when lead's Task call started it, when its result came
+    back and the subagents it started; its first turn is the prompt lead gave it. u reads lead at that Task call, chosen
+    and opened in the side pane beside the transcript (the subagent it started, its whole prompt, what came back, its
+    place); s on that call reads client-port again."""
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, keys=["n", "n"])
+    body, hints = _split(out.splitlines(), 3, 40)
+    at = next(i for i, x in enumerate(body) if x.startswith("  started by"))
+    assert body[at] == ("  started by lead 14:09:05 · result back to lead 14:29:35 · subagents pagination 14:12:40, "
+                        "auth-headers 14:12:41")
+    assert body[at + 1].startswith("  client-port · Run 1 · nested team  40 turns · 14:09:08 – 14:29:35")
+    assert re.sub(r"\s*▌*$", "", body[at + 3]) == "❯ 14:09:08  ● lead"
+    assert "u to read lead" in hints
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, keys=["n", "n", "u"],
                                      panel=False)
     rows = out.splitlines()
-    assert "sessions  Run 2 · flat team" in rows[0]
-    assert rows[1].startswith("  12 Sep 16:4")
-    assert _lanes(rows) == ["▾ Run 2 · flat team", "  lead", "  ├ client-port", "  ├ webhooks", "  └ test-runner"]
-    assert not any(x.startswith("  Run ") for x in rows), "one run in view needs no heading"
+    assert "14:09:05  ⎿ Task → client-port Port invoicer/client to v3" in next(x for x in rows if x.startswith("❯"))
+    pane = _linked_pane(rows, "lead · Run 1 · nested team")
+    assert pane[0].startswith("lead · Task · 14:09:05") and pane[0].endswith("close")
+    assert pane[1] == "→ client-port  Port invoicer/client to v3"
+    assert pane[3].startswith("Port invoicer/client to Brambleway v3")
+    assert pane[4].startswith("Client on v3 with its interface kept")
+    assert pane[5].startswith("↗ …/36fe6b9d") and pane[5].endswith("line 14")
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP,
+                                     keys=["n", "n", "u", "s"], panel=False)
+    assert any(x.startswith("  client-port · Run 1 · nested team  40 turns") for x in out.splitlines())
+
+
+@needs_node
+async def test_linked_sessions_opens_a_cited_call_beside_its_transcript_and_filters_to_a_cited_run(linked):
+    """A citation of an Edit reads its session, the call chosen and opened in the side pane: the lines it took out and
+    put in, what came back and its place. A citation of a run turns Filter by to Run with that run alone on, reads its
+    lead and leaves only its lanes; Reset turns every run back on."""
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref=f"{PORT1}#L13", panel=False)
+    rows = out.splitlines()
+    assert "14:10:20  ⎿ Edit invoicer/client/http.py" in next(x for x in rows if x.startswith("❯"))
+    pane = _linked_pane(rows, "client-port · Run 1 · nested team")
+    assert pane[0].startswith("client-port · Edit · 14:10:20")
+    assert pane[1:5] == ["invoicer/client/http.py", '− BASE_URL = "https://api.brambleway.example/v2"',
+                         '+ BASE_URL = "https://api.brambleway.example/v3"', "The file invoicer/client/http.py has been updated."]
+    assert pane[5].startswith("↗ …/agent-a07a4da7.jsonl line 13")
     out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref="view:linked-sessions/r3",
                                      panel=False)
-    assert "sessions  Run 3 · with reviewer" in out.splitlines()[0]
+    rows = out.splitlines()
+    assert rows[0].startswith("  / search  Filter by  Run  ○ Run 1 166  ○ Run 2 95  ● Run 3 91  Rows  Session")
+    assert rows[0].rstrip().endswith("reset")
+    assert _tree(rows) == ["▾ Run 3 · lead", "  ├ survey", "  ├ client-port", "  ├ webhooks", "  ├ reviewer", "  └ reviewer 2"]
+    assert any(x.startswith("  lead · Run 3 · with reviewer  17 turns") for x in rows)
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref="view:linked-sessions/r3",
+                                     keys=["r"], panel=False)
+    rows = out.splitlines()
+    assert "● Run 1 166  ● Run 2 95  ● Run 3 91" in rows[0]
+    assert _tree(rows)[0] == "▾ Run 1 · lead"
+
+
+@needs_node
+async def test_linked_sessions_groups_its_lanes_by_agent_and_reads_a_lane_across_its_sessions(linked):
+    """Rows by Agent: a lane per agent across the runs, and the transcript of a lane read holds its turns in every session
+    in time order, its title naming the lane and counting its turns and sessions."""
+    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP,
+                                     keys=["g", "click:Agent", "n", "n"], panel=False)
+    rows = out.splitlines()
+    assert "Rows  Agent" in rows[0]
+    assert [x.strip() for x in _tree(rows)] == ["lead", "survey", "client-port", "webhooks", "pagination", "auth-headers",
+                                                "test-runner", "reviewer"]
+    assert any(x.startswith("  Agent: client-port  101 turns · 3 sessions") for x in rows)
 
 
 # ------------------------------------------------------------------------------------------------------ Repository
@@ -585,106 +645,111 @@ def repository(workspaces_tmp, tmp_path, monkeypatch, inproc) -> str:
     return "repository"
 
 
-def _row(rows: list[str], start: str) -> str:
-    return next(x for x in rows if x[2:].startswith(start))
+def _repository_pane(rows: list[str]) -> list[str]:
+    """The side pane's half of each row drawn beside the list, after its `│`."""
+    return [x.split(" │ ", 1)[1].rstrip() for x in rows if " │ " in x]
 
 
 @needs_node
 @pytest.mark.parametrize("cols", [120, 200])
 async def test_repository_draws_what_its_browser_page_shows(repository, cols):
-    """The worked example at 120 and 200 columns: the top row (search, the kind of item, Color by with its chips), the
-    time range's readout and strip with a break between the runs' days, the table's header with each run's name over
-    the activity, then a row per pull request: its item, its title with its flags gray as they fit, its area, author and
-    state, and its records as marks on the range's scale; its hint row names only keys the pane passes on."""
+    """The worked example at 120 and 200 columns, a code forge as its command line draws it: the tabs with their counts,
+    the top row (search, Filter by with the runs as toggles, Color by with its chips), the time range's readout and strip
+    with a break between the runs' days, the columns' names, then a heading per run and a row per pull request: its
+    number, its title, its area, state, comments and lines, and under it the dim line a forge writes there."""
     out = await term_views.draw_text(repository, "repository", cols=cols, rows=36, wrap=DRAW_WRAP)
     lines = out.splitlines()
     assert lines[0] == "  Repository"
     body, hints = _split(lines, 2, 36)
     assert all(len(x) <= cols + 2 for x in body)
-    assert body[0] == "  / search  items  pull requests  Color by  State  ● merged 28  ● closed 4  ● open 3"
-    assert body[1] == "  11 May 09:24 – 14 May 13:42 · 3d 4h"
-    assert body[2].count(" // ") == 3
-    assert body[3] == ""
-    head = body[4].split()
-    # the area from 120 cells, the author from 100, so the activity keeps its share
-    cols_shown = ["item", "title", "author", "state"] if cols == 120 else ["item", "title", "area", "author", "state"]
-    assert head[:len(cols_shown)] == cols_shown and head[len(cols_shown):len(cols_shown) + 4] == ["r1", "r2", "r3", "r4"]
-    assert body[5].startswith("❯ ● r1 #9   Treat 'next <weekday>' as never today")
-    # the strip of each row starts under its run's name: r1's rows at the left, r2's after r1's
-    act = body[4].index("r1")
-    first = {r: min(x.index("●", act) for x in body[5:] if x[4:6] == r) for r in ("r1", "r2", "r3")}
-    assert first["r1"] == act and first["r1"] < body[4].index("r2") <= first["r2"] < body[4].index("r3") <= first["r3"]
-    eleven = _row(body, "● r1 #11")
-    if cols == 120:
-        assert "Keep wall-clock time across DST in biweekly rules  +3  cedar" in eleven
-        assert "Treat 'next <weekday>' as never today  +1  " in body[5]
-    else:
-        assert "Keep wall-clock time across DST in biweekly rules  merged by its author · +2  schedules   cedar    merged" in eleven
-        assert "●●─●●●" in eleven
-    assert "Reject 30 February  merged by its author" in _row(body, "● r4 #12")
-    assert hints == ("↑↓ to choose · Enter to open · c to color by · / to search · i for items · [ ] to "
-                                 "pan · + - to zoom · a to ask · b to go back · x to close")
+    assert body[0].split() == ["pull", "requests", "35", "issues", "36", "discussions", "12", "agents", "16"]
+    assert body[1].startswith("  / search  Filter by  Run  ● r") and "● r1 8  ● r2 7" in body[1]
+    assert "Color by  State  ● merged 28  ● closed 4  ● open 3" in body[1]
+    assert body[2] == "  11 May 09:24 – 14 May 13:42 · 3d 4h"
+    assert body[3].count(" // ") == 3 and body[4] == ""
+    assert body[5].split() == ["pull", "request", "area", "state", "comments", "lines"]
+    assert body[6].strip(" ▌") == "r1 · 3 agents · 1 approval to merge · Mon 11 May 2026"
+    assert re.match(r"❯ ● #9   Treat 'next <weekday>' as never today +parser +merged +0 +\+1 -1", body[7])
+    assert body[8].strip().startswith("opened 09:24 by ash · fixes #1 · approved · merged by its author")
+    eleven = next(i for i, x in enumerate(body) if x.startswith("  ● #11  Keep wall-clock"))
+    assert body[eleven + 1].strip().startswith("opened 09:50 by cedar · fixes #3 · changes requested · merged by its author")
+    for k in ("↑↓ to choose", "Enter to open", "1 2 3 4 for the tabs", "f to filter by", "c to color by", "/ to search", "a to ask"):
+        assert k in hints, k
 
 
 @needs_node
-async def test_repository_opens_an_item_in_place_with_the_same_issue_in_every_run(repository):
-    """Enter opens a pull request in place: its title where its row cut it and its flags, the issue it fixes in every
-    run, then its records in time order, each with its time, author, action, words, diff and `↗` to its line; a click
-    on another run's issue opens it among the issues; the other kinds fill only the columns their items have."""
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=60, wrap=DRAW_WRAP,
+async def test_repository_opens_a_pull_request_as_its_page_in_the_side_pane(repository):
+    """Enter opens a pull request's page beside the list, never under its row: its facts named plainly, the issue it
+    fixes and the same issue in the other runs, its flags, then its records in time order, each commit with its diff,
+    which ↑↓ move through and Enter opens at its place; a click on another run's issue opens that issue's page."""
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=44, wrap=DRAW_WRAP,
                                      keys=["down", "down", "return"], panel=False)
-    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
-    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "r1 #11  Keep wall-clock time across DST in biweekly rules" in rows[at], "its row holds its title whole"
-    assert rows[at + 1].strip() == "merged by its author · merged over a change request · pushed after its last approval"
-    assert rows[at + 2].strip() == "r1 #3 fixed  r2 #3 fixed  r3 #3 fixed  r4 #3 fixed"
-    assert rows[at + 3].strip().startswith("09:50  cedar  opened             Occurrences are computed in local time")
-    assert rows[at + 3].endswith("↗")
-    assert any(x.strip() == "09:53  cedar  pushed             4079459 · Compute occurrences in local time                                      ↗" for x in rows)
-    assert any(x.strip() == "+        at = local + n * self.period" for x in rows)
-    assert any(x.strip().startswith("10:35  ash    changes requested  No test for the spring-forward week itself") for x in rows)
-    assert any(x.strip() == "ask about it" for x in rows)
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=36, wrap=DRAW_WRAP,
+    rows = out.splitlines()
+    pane = _repository_pane(rows)
+    assert pane[0].startswith("r1 #11 Keep wall-clock time") and pane[0].endswith("close")
+    assert pane[1] == "state merged · opened 09:50 by cedar"
+    assert "review changes requested · approvals 1 of 1" in pane
+    assert pane[pane.index("review changes requested · approvals 1 of 1") + 1].startswith("fixes  #3 Every-other-week")
+    assert "other runs  r2 #3 fixed  r3 #3 fixed  r4 #3 fixed" in pane
+    assert any(x.startswith("09:53  cedar  pushed 4079459") for x in pane)
+    assert "+        at = local + n * self.period" in [x.strip(" ▌") for x in pane]
+    assert any(x.startswith("10:35  ash  changes requested") for x in pane)
+    assert not any("ask about it" in x for x in rows)
+    assert next(x for x in rows if x.startswith("❯")).startswith("❯ ● #11  Keep wall-clock"), "its row stays in the list"
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=44, wrap=DRAW_WRAP,
                                      keys=["down", "down", "return", "click:r2 #3 fixed"], panel=False)
-    rows = out.splitlines()
-    assert "items  issues" in rows[0]
-    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert rows[at].startswith("❯ ● r2 #3   Every-other-week schedule moves an hour")
-    assert any(re.match(r"\s+\d\d:\d\d  \S+\s+merged #11", x) for x in rows[at:])
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=36, wrap=DRAW_WRAP,
-                                     keys=["i", "down", "down", "return"], panel=False)
-    rows = out.splitlines()
-    assert rows[4].split()[:3] == ["item", "title", "author"] and rows[4].split()[3:] == ["r1", "r2", "r3", "r4"]
-    assert rows[5].startswith("❯ ● r1 #1  Splitting the backlog") and rows[5].split()[-2:] == ["ash", "●"]
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=36, wrap=DRAW_WRAP,
-                                     keys=["i", "down", "down", "down", "return", "return"], panel=False)
-    rows = out.splitlines()
-    assert rows[4].split()[:2] == ["item", "agent"]
-    assert rows[5].startswith("❯ ● r1    ash")
-    assert re.match(r"\s+09:24  ash\s+opened #9\s+When today is the named weekday", rows[[i for i, x in enumerate(rows) if "09:09" in x][0] + 1])
+    pane = _repository_pane(out.splitlines())
+    assert pane[0].startswith("r2 #3 Every-other-week schedule")
+    assert any(re.match(r"\d\d:\d\d  \S+\s+merged #11", x) for x in pane)
 
 
 @needs_node
-async def test_repository_follows_its_citations_and_its_chips(repository):
-    """A citation of a record opens its item with the record on the selection background, in view however far down its
-    item's details it is; a run's citation frames the run's day in the time range; a chip turned off leaves out the
-    items of its value."""
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP,
-                                     ref="runs/r1/events.jsonl#L35", panel=False, ansi=True)
+async def test_repository_draws_a_thread_as_replies_and_an_agent_as_its_profile(repository):
+    """The board's threads: a row per thread with its first words, and its page the first post with the replies under
+    it on tree guides; the agents: a row per agent with its sign-off, and its page what it did."""
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP, keys=["3", "return"],
+                                     panel=False)
     rows = out.splitlines()
-    cited = next(x for x in rows if "I still wanted a test for the skipped hour." in x)
-    assert "48;5;238" in cited and re.sub(r"\x1b\[[0-9;]*m", "", cited).strip().startswith("10:58  ash    commented")
+    assert next(x for x in rows if x.startswith("❯")).startswith("❯ ● Splitting the backlog")
+    pane = _repository_pane(rows)
+    at = pane.index("ash  09:02")
+    assert pane[at + 1:at + 5] == ["│ I'll take #1 and #4, both in parse and format.", "├ birch  09:02", "│ #2 and #6 for me.",
+                                   "├ cedar  09:06"]
+    assert "└ ash  09:09" in pane
+    out = await term_views.draw_text(repository, "repository", cols=140, rows=40, wrap=DRAW_WRAP, keys=["4", "return"],
+                                     panel=False)
+    rows = out.splitlines()
+    assert any('"Signing off: three merged, four reviews given."' in x for x in rows)
+    pane = _repository_pane(rows)
+    assert any(x.startswith("run r1 · pull requests 3") for x in pane)
+    assert any(x.startswith("09:24  opened #9") for x in pane)
+
+
+@needs_node
+async def test_repository_follows_its_citations_its_filter_and_its_chips(repository):
+    """A citation of a record opens its item's page with the record chosen and in view; a run's citation frames the
+    run's day in the time range; a Filter by toggle leaves out a run, and a Color by chip turned off the items of its
+    value."""
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP,
+                                     ref="runs/r1/events.jsonl#L35", panel=False)
+    pane = _repository_pane(out.splitlines())
+    assert pane[0].startswith("r1 #11 Keep wall-clock time")
+    assert any(x.startswith("10:58  ash  commented") for x in pane), "the cited record is in view"
     out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, ref="view:repository/r2",
                                      panel=False)
     rows = out.splitlines()
-    # the run's day framed, its edges at its first and last records, since an edge never stays in a break
-    assert rows[1] == "  12 May 09:30 – 14:12 · 4h 42m" and rows[0].rstrip().endswith("reset")
-    assert {x[4:6] for x in rows[5:] if x[2:3] == "●"} == {"r2"}
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP, keys=["click:closed 4"],
+    assert rows[2] == "  12 May 09:30 – 14:12 · 4h 42m" and rows[1].rstrip().endswith("reset")
+    assert [x.strip()[:2] for x in rows if "approval to merge" in x or "approvals to merge" in x] == ["r2"]
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP, keys=["click:r1 8"],
                                      panel=False)
     rows = out.splitlines()
-    assert "○ closed 4" in rows[0]
-    assert {x.split()[-2] for x in rows[5:] if x[2:3] == "●" or x.startswith("❯")} == {"merged", "open"}
+    assert "○ r1 8" in rows[1] and not any(x.strip().startswith("r1 ·") for x in rows)
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=90, wrap=DRAW_WRAP, keys=["click:closed 4"],
+                                     panel=False)
+    rows = out.splitlines()
+    assert "○ closed 4" in rows[1]
+    states = {m[1] for x in rows if re.match(r"(❯| ) ● #\d+", x) and (m := re.search(r" (merged|closed|open) ", x))}
+    assert states == {"merged", "open"}
 
 
 # ------------------------------------------------------------------------------------------------------ narrow panels
@@ -723,23 +788,27 @@ WIDTHS = [47, 92, 140]  # the docked panel at 120 and 200 columns, and a wide on
 @needs_node
 async def test_timeline_opens_as_its_browser_page_does_and_reads_at_every_width(timeline):
     """Colored by the label that is on, its values as chips with their counts; Color by's name whole on a row of its own
-    where the top row has no room, its chips under it where they have none beside it; list rows cut with …; every key
-    in the hint row, which wraps; a zoomed range's window between `[` `]`."""
+    where the row has no room, its chips under it where they have none beside it; Filter by's values behind `+N` where
+    they do not fit; list rows cut with …; every key in the hint row, which wraps; a zoomed range's window between
+    `[` `]`."""
     await _labels_on(timeline, "timeline")
     for cols in WIDTHS:
         out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=34, wrap=DRAW_WRAP)
         lines = out.splitlines()
         body, hints = _split(lines, 2, 34)
         assert all(len(x) <= cols + 2 for x in body), cols
-        top = "\n".join(body[:3])
-        assert "/ search events  incident  all" in body[0]
+        top = "\n".join(body[:4])
+        assert "/ search events  Filter by  Incident" in body[0]
         assert "Color by  Database connections ↗" in top and "● connections 22" in top and "● not marked 176" in top, cols
-        for k in ("c to color by", "/ to search", "i for incident", "[ ] to pan", "+ - to zoom", "a to ask", "b to go back"):
+        for k in ("c to color by", "/ to search", "f to filter by", "g for rows", "{ } to resize the overview", "[ ] to pan",
+                  "+ - to zoom", "a to ask", "b to go back"):
             assert k in hints, (cols, k)
         rows = _list_rows(body)
         assert rows and all(len(x) <= cols for x in rows)
         if cols == 47:
-            assert body[1].strip() == "Color by  Database connections ↗" and body[2].strip() == "● connections 22  ● not marked 176"
+            assert body[0].strip() == "/ search events  Filter by  Incident  +4"
+            assert body[1].strip() == "Rows  Source"
+            assert body[2].strip() == "Color by  Database connections ↗" and body[3].strip() == "● connections 22  ● not marked 176"
             assert rows[0].endswith("Tonight's release…"), "a cut row ends in …"
     out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["+", "+"], panel=False)
     strip = next(x for x in out.splitlines() if "[" in x and "]" in x)
@@ -748,18 +817,21 @@ async def test_timeline_opens_as_its_browser_page_does_and_reads_at_every_width(
 
 @needs_node
 async def test_timeline_details_and_menu_read_in_a_narrow_panel(timeline):
-    """At 47 cells an opened event's words and facts wrap to the panel's width, its place keeps its line with ask about
-    it under it; the Color by menu stands in a frame, the label's values and definition under its name, its ↗ whole."""
+    """At 47 cells the side pane stands under the list, a rule between them: an opened event's words and facts wrap to
+    the panel's width and its place keeps its line; `{` gives the overview fewer rows and the pane more. The Color by
+    menu stands in a frame, the label's values and definition under its name, its ↗ whole."""
     await _labels_on(timeline, "timeline")
-    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["down"] * 8 + ["return"],
-                                     panel=False)
+    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP,
+                                     keys=["{", "{", "{"] + ["down"] * 8 + ["return"], panel=False)
     rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
     at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert rows[at + 1].strip() == "payments: health check failing on 2 of 3"
-    assert rows[at + 3].strip() == "service payments · severity critical"
-    assert any(x.strip() == "↗ …/monitor-20260516-0000.jsonl line 2" for x in rows)
-    assert any(x.strip() == "ask about it" for x in rows)
-    assert rows[0].rstrip().endswith("reset"), "reset shows once a row is opened"
+    assert "03:00:48  alert" in rows[at] and set(rows[at + 1].strip()) == {"─"}
+    assert rows[at + 2].strip().startswith("alert fired · 03:00:48") and rows[at + 2].rstrip().endswith("close")
+    assert rows[at + 3].strip() == "payments: health check failing on 2 of 3"
+    assert rows[at + 5].strip() == "service payments · severity critical"
+    assert any(x.strip() == "↗ alerts/monitor-20260516-0000.jsonl line 2" for x in rows)
+    assert "ask about it" not in out
+    assert rows[1].rstrip().endswith("reset"), "reset shows once a row is opened"
     out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["c"], panel=False)
     rows = out.splitlines()
     top = next(i for i, x in enumerate(rows) if "╭─ Color by" in x)
@@ -772,42 +844,47 @@ async def test_timeline_details_and_menu_read_in_a_narrow_panel(timeline):
 
 @needs_node
 async def test_linked_sessions_opens_as_its_browser_page_does_and_reads_at_every_width(linked):
-    """Colored by the label that is on; each run's name whole on its row; list rows cut with …; every key in the hint
-    row; zoomed into one run, the lanes of the sessions that did not run then fold away."""
+    """Colored by the label that is on; each run's lead whole on its lane; every key in the hint row; zoomed into one
+    run, the lanes of the sessions that did not run then go, and the transcript reads a session that did."""
     await _labels_on(linked, "linked-sessions")
     for cols in WIDTHS:
         out = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP)
         body, hints = _split(out.splitlines(), 3, 40)
         assert all(len(x) <= cols + 2 for x in body), cols
-        top = "\n".join(body[:3])
+        top = "\n".join(body[:4])
         assert "Color by  Pagination ↗" in top and "● pagination 20" in top, cols
-        assert "▾ Run 3 · with reviewer" in "\n".join(body), cols
-        for k in ("c to color by", "s for sessions", "[ ] to pan", "+ - to zoom"):
+        assert "Run 3 · lead" in "\n".join(body), cols
+        for k in ("c to color by", "f to filter by", "g for rows", "[ ] to pan", "+ - to zoom"):
             assert k in hints, (cols, k)
-        assert all(len(x) <= cols for x in _list_rows(body))
     out = await term_views.draw_text(linked, "linked-sessions", cols=47, rows=40, wrap=DRAW_WRAP, keys=["+", "+", "]"],
                                      panel=False)
-    lanes = "\n".join(out.splitlines()[:16])
-    assert "Run 2 · flat team" in lanes and "Run 1" not in lanes
+    rows = out.splitlines()
+    lanes = "\n".join(_tree(rows))
+    assert "Run 2 · lead" in lanes and "Run 1" not in lanes
+    assert any(x.startswith("  lead · Run 2") for x in rows), "\n".join(rows)
 
 
 @needs_node
 async def test_repository_opens_as_its_browser_page_does_and_reads_at_every_width(repository):
-    """Colored by the label that is on; the table's header names every run over the activity; an item's records read
-    across a narrow panel, their words under their time, author and action."""
+    """Colored by the label that is on; the tabs, a heading per run and the columns' names read at every width, the tabs'
+    names shorter where the panel is narrow; in a narrow panel an item's page stands under the list."""
     await _labels_on(repository, "repository")
     for cols in WIDTHS:
         out = await term_views.draw_text(repository, "repository", cols=cols, rows=36, wrap=DRAW_WRAP)
         body, hints = _split(out.splitlines(), 2, 36)
         assert all(len(x) <= cols + 2 for x in body), cols
-        top = "\n".join(body[:3])
-        assert "Color by  Clock change ↗" in top and "● clock change 6" in top, cols
-        head = next(x for x in body if x.split()[:2] == ["item", "title"]).split()
-        assert head[-4:] == ["r1", "r2", "r3", "r4"], cols
-        assert "i for items" in hints and "[ ] to pan" in hints
+        assert body[0].split()[:2] == (["pulls", "35"] if cols < 60 else ["pull", "requests"]), cols
+        top = "\n".join(body[1:4])
+        assert "Color by  Clock change ↗" in top and "● clock change" in top, cols
+        assert any(x.strip().startswith("r1 · 3 agents") for x in body), cols
+        assert next(x for x in body if x.split()[:2] == ["pull", "request"]), cols
+        assert "1 2 3 4 for the tabs" in hints and "[ ] to pan" in hints
     out = await term_views.draw_text(repository, "repository", cols=47, rows=50, wrap=DRAW_WRAP, keys=["down", "down", "return"],
                                      panel=False)
     rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
-    at = next(i for i, x in enumerate(rows) if x.strip().startswith("09:50  cedar  opened"))
-    assert rows[at].rstrip().endswith("↗")
-    assert rows[at + 1].strip() == "Occurrences are computed in local time"
+    rule = next(i for i, x in enumerate(rows) if set(x.strip()) == {"─"})
+    assert rows[rule + 1].strip().startswith("r1 #11 Keep wall-clock") and rows[rule + 1].endswith("close")
+    at = next(i for i, x in enumerate(rows) if x[2:].startswith("09:50  cedar  opened"))
+    assert rows[at].startswith("❯"), "its first record is chosen"
+    assert rows[at + 1].strip().startswith("Occurrences are computed in local")
+

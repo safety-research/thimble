@@ -2,143 +2,184 @@
 <html>
 <head>
 <style>
-  /* thimble's parts (.field, .chip), Color by, the time range, its axis and the theme's tokens come with the frame;
-     this page lays out the top row, the lanes under the range, and the list */
+  /* thimble's parts (.field, .chip), Filter by, Rows, Color by, the time range and its axis, the lanes, the divider,
+     the side panel and the theme's tokens come with the frame; this page lays them out and draws the list */
   html, body { margin: 0; height: 100%; }
   body { background: var(--surface-card); overflow: hidden; }
   * { box-sizing: border-box; }
   #view { height: 100%; display: flex; flex-direction: column; }
-  .top { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border-subtle); }
-  #q { flex: 0 1 200px; min-width: 120px; }
-  /* the readout, the range, its axis and the lanes share one column of time; the lanes' names stand in the gutter */
-  .chart { flex: none; display: grid; grid-template-columns: 56px minmax(0, 1fr); padding: 8px 16px 6px; border-bottom: 1px solid var(--border-hairline); }
+  .top { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border-subtle); }
+  #q { flex: 0 1 180px; min-width: 110px; }
+  #colour { min-width: 300px; }
+  /* the overview: the readout, the range and its axis over the lanes, one column of time with the lanes' names in its
+     gutter; the time stays put while the lanes scroll under it, and the divider under it sets its height */
+  #overview { flex: none; max-height: 46%; overflow-y: auto; }
+  .time { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: 112px minmax(0, 1fr); padding: 8px 16px 0; background: var(--surface-card); }
   #read { flex-direction: row; gap: 10px; margin-bottom: 4px; }
-  #names div { height: 22px; color: var(--text-secondary); font: 400 var(--text-xs) / 22px var(--font-body); }
-  #lanes { display: block; width: 100%; cursor: pointer; }
-  #lanes .base { stroke: var(--border-hairline); }
-  #lanes .none { fill: rgba(var(--ink-rgb), 0.32); }
-  #lanes .guide { stroke: var(--text-primary); stroke-opacity: 0.45; }
-  #list { flex: 1; min-height: 0; overflow: auto; padding-bottom: 12px; }
-  .day { padding: 10px 16px 4px; border-bottom: 1px solid var(--border-strong); font: 500 var(--text-ui-sm) / 1.3 var(--font-body); }
-  .ev { padding: 3px 16px 3px 14px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
+  #key { align-self: center; }
+  #lanes { padding: 2px 16px 8px; }
+  /* the list, and the side panel at its right */
+  #body { flex: 1; min-height: 0; border-top: 1px solid var(--border-hairline); }
+  .listbox { display: flex; flex-direction: column; min-height: 0; container-type: inline-size; }
+  .lhead { flex: none; display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 8px 16px 4px; }
+  .lhead b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--text-sm) / 1.4 var(--font-body); }
+  .lhead span { flex: none; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); font-variant-numeric: tabular-nums; }
+  .lhead .btn { flex: none; margin-left: auto; }
+  /* the columns' headings and each event's line share one grid; a narrow list drops the actor and the incident */
+  .cols, .ev { display: grid; grid-template-columns: 64px 50px 84px 96px 60px minmax(0, 1fr); gap: 10px; align-items: center; padding: 0 16px 0 14px; }
+  .cols { flex: none; height: 22px; border-bottom: 1px solid var(--border-strong); color: var(--text-tertiary); font: 500 var(--text-xs) / 22px var(--font-body); }
+  @container (max-width: 600px) {
+    .cols, .ev { grid-template-columns: 64px 50px 84px minmax(0, 1fr); }
+    .c-actor, .c-inc { display: none; }
+  }
+  #list { flex: 1; min-height: 0; overflow: auto; }
+  /* as tall as every row; its padding stands for the rows above the ones drawn, so a long list draws only those in view */
+  #win { min-height: 100%; }
+  .day, .ev { height: 24px; }
+  .day { padding: 6px 16px 0; border-bottom: 1px solid var(--border-strong); font: 500 var(--text-ui-sm) / 16px var(--font-body); }
+  .ev { border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
   .ev:hover { background: rgba(var(--ink-rgb), 0.03); }
-  .line { display: grid; grid-template-columns: 60px 46px 76px 96px 58px minmax(0, 1fr); gap: 10px; align-items: baseline; }
-  .line > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font: 400 var(--text-xs) / 1.6 var(--font-body); }
-  .line time, .link time { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.6 var(--font-mono); font-variant-numeric: tabular-nums; }
-  .line .text { color: var(--text-primary); font-size: var(--text-sm); }
-  /* a failed outcome in the ink's own gray with a ✕, since only Color by's choice takes a color */
-  .line .failed { color: var(--text-primary); }
-  /* an event opened in place: its whole text, the fields its line leaves out, what it answers and what answers it,
-     and its lines as the file holds them */
-  .thimble-details { padding: 2px 0 10px 70px; cursor: default; font: 400 var(--text-xs) / 1.5 var(--font-body); }
-  .thimble-details p { margin: 2px 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-sm); }
-  .thimble-details dl { display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 0; color: var(--text-secondary); }
-  .thimble-details dt { display: inline; color: var(--text-tertiary); }
-  .thimble-details dd { display: inline; margin: 0 0 0 4px; }
-  .thimble-details h4 { margin: 8px 0 2px; font: 500 var(--text-xs) / 1.4 var(--font-body); }
-  .link { display: grid; grid-template-columns: 112px 150px minmax(0, 1fr); gap: 10px; padding: 1px 0; cursor: pointer; }
-  .link > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .link:hover .text { text-decoration: underline; }
-  .raw { margin: 8px 0 6px; padding: 6px 8px; border-radius: var(--radius-ui); background: rgba(var(--ink-rgb), 0.035); font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-  .raw b { display: inline-block; min-width: 32px; color: var(--text-tertiary); font-weight: 400; }
+  .ev.is-open { background: var(--surface-selected); }
+  .ev > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font: 400 var(--text-xs) / 1.6 var(--font-body); }
+  .ev time, .link time { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.6 var(--font-mono); font-variant-numeric: tabular-nums; }
+  .ev .text { color: var(--text-primary); font-size: var(--text-sm); }
+  /* a failed outcome in the problem red, as the lanes underline it */
+  .ev .failed { color: var(--status-negative); }
   .empty { padding: 28px 16px; color: var(--text-tertiary); }
+  /* an event in the side panel: its words, its facts, the events it answers and that answer it, its lines */
+  .words { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 var(--text-sm) / 1.5 var(--font-body); }
+  .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 16px; margin: 0 0 14px; font: 400 var(--text-xs) / 1.5 var(--font-body); }
+  .facts dt { color: var(--text-tertiary); }
+  .facts dd { margin: 0; overflow-wrap: anywhere; }
+  .event h4 { margin: 14px 0 4px; font: 500 var(--text-xs) / 1.4 var(--font-body); }
+  .event h4 span { margin-left: 6px; color: var(--text-tertiary); font-weight: 400; }
+  .link { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: 10px; padding: 2px 0; cursor: pointer; font: 400 var(--text-xs) / 1.6 var(--font-body); }
+  .link > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .link span { color: var(--text-secondary); }
+  .link:hover .text { text-decoration: underline; }
+  .raw { margin: 0 0 8px; padding: 6px 8px; border-radius: var(--radius-ui); background: rgba(var(--ink-rgb), 0.035); font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .raw b { display: inline-block; min-width: 32px; color: var(--text-tertiary); font-weight: 400; }
 </style>
 </head>
 <body>
 <div id="view">
   <div class="top">
     <input class="field" id="q" type="search" placeholder="Search events" aria-label="Search events">
-    <select class="field" id="inc" aria-label="Incident"><option value="">All incidents</option></select>
+    <span id="filter"></span>
+    <span id="rows"></span>
     <span id="colour"></span>
   </div>
-  <div class="chart">
-    <div></div><div id="read"></div>
-    <div></div><div id="range"></div>
-    <div></div><div id="axis"></div>
-    <div id="names"></div><svg id="lanes"></svg>
+  <div id="overview">
+    <div class="time">
+      <div></div><div id="read"></div>
+      <div></div><div id="range"></div>
+      <div id="key"></div><div id="axis"></div>
+    </div>
+    <div id="lanes"></div>
   </div>
-  <div id="list"></div>
+  <div id="body">
+    <div class="listbox">
+      <div class="lhead" id="lhead"></div>
+      <div class="cols"><span>Time</span><span>Source</span><span>Kind</span><span class="c-actor">Actor</span><span class="c-inc">Incident</span><span>Text</span></div>
+      <div id="list"><div id="win"></div></div>
+    </div>
+  </div>
 </div>
 <script>
-// Timeline: a ferry operator's events from five sources on one time axis. The time range's viewfinder picks the
-// time the lanes (one per source) and the list show; the list opens an event in place with what it answers and what
-// answers it. One fetch gives the events the search, the incident and Color by keep; the lanes and the overview draw
-// them in Color by's colors.
+// Timeline: a ferry operator's events from five sources on one time axis. The top row filters the events (Filter by),
+// groups the lanes (Rows) and colors them (Color by); the time range's viewfinder picks the time the lanes and the list
+// show; an event opens in the side panel with the event it answers and those that answer it. One fetch gives the events
+// the search and Filter by keep, each with its Color by value and its Rows group.
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 const hms = (t) => new Date(t * 1000).toISOString().slice(11, 19)
 const dayOf = (t) => new Date(t * 1000).toISOString().slice(0, 10)
 const dur = (s) => (s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`)
-const SLUG = (thimble.view && thimble.view.slug) || 'timeline'
-const SOURCES = ['alert', 'deploy', 'agent', 'chat', 'ticket']
-const LH = 22 // a lane's height
+const cap = (s) => String(s).charAt(0).toUpperCase() + String(s).slice(1)
 const $ = (id) => document.getElementById(id)
-const q = $('q'), inc = $('inc'), lanes = $('lanes'), list = $('list')
-let E = [] // the events shown, in time order: {r, t, ref, source, kind, actor, service, severity, outcome, incident, text, value}
-let span = null, flags = [], scale = null
-let open = null, detail = null // the event opened in place, and its record in full
-let keep = [] // the row a citation opened, kept whatever the label filter
-let guide = null // the time of the flag hovered, drawn as a line through the lanes
-let seq = 0, markLoaded
+const q = $('q'), list = $('list'), win = $('win')
+const RH = 24 // a list row's height, a day's heading too, so the list draws only the rows in view
+let E = [] // the events shown, in time order: {r, t, ref, source, kind, actor, service, severity, outcome, incident, text, value, group}
+let span = null, flags = []
+let picked = null // the lane chosen, whose events the list shows: {key, value, name}
+let open = null // the event in the side panel
+let keep = [] // the row a citation opened, kept whatever the filters
+let narrowTo = null // an incident a citation narrows Filter by to, once its values are in
+let busy = false, seq = 0, markLoaded
 const loaded = new Promise((ok) => (markLoaded = ok))
 
-const colour = thimble.colorBy({
-  mount: '#colour',
-  // each field says what it is (from view.json's records), and `meanings` what the values the sources' formats fix
-  // mean (reader.py's notes), which the menu and a chip's hover give; a value with none, such as a service or a
-  // person, shows what the field is. `meanings` declares no value, so the values keep the colors the records give them
-  fields: [
-    { name: 'service', title: 'Service', description: "The service the event is about: its svc or service, the ticket's in tickets/index.csv, else its summary's first word" },
-    {
-      name: 'kind', title: 'Kind', description: "What happened, from its state, event, Status or action: an alert firing read as fired, a ticket's first message as opened",
-      meanings: {
-        fired: 'An alert started firing', resolved: 'An alert stopped firing; it answers the alert it resolves',
-        started: 'A deploy started', finished: 'A deploy finished, ok or failed', rollback: 'A deploy put an earlier version back',
-        message: 'A chat message', opened: "A ticket's first message, or an agent opening an incident",
-        updated: "A ticket's later message that does not close it", closed: "A ticket's message that closes it, or an agent closing an incident",
-        restart: 'An agent restarted a replica or a worker', page: 'An agent paged a person, or escalated a page',
-        scale: 'An agent changed how many replicas a service runs', tag: 'An agent tagged support tickets',
-        pause: 'An agent paused, as a person asked in chat', resume: 'An agent resumed, as a person asked in chat',
-      },
+// the view's fields, which Filter by, Rows and Color by each offer: what each is (from view.json's records), and
+// `meanings`, what the values the sources' formats fix mean (reader.py's notes), which the menus and a value's hover
+// give; a value with none, such as a service or a person, shows what the field is
+const SOURCES = ['alert', 'deploy', 'agent', 'chat', 'ticket']
+const FIELDS = [
+  { name: 'service', title: 'Service', description: "The service the event is about: its svc or service, the ticket's in tickets/index.csv, else its summary's first word" },
+  {
+    name: 'kind', title: 'Kind', description: "What happened, from its state, event, Status or action: an alert firing read as fired, a ticket's first message as opened",
+    meanings: {
+      fired: 'An alert started firing', resolved: 'An alert stopped firing; it answers the alert it resolves',
+      started: 'A deploy started', finished: 'A deploy finished, ok or failed', rollback: 'A deploy put an earlier version back',
+      message: 'A chat message', opened: "A ticket's first message, or an agent opening an incident",
+      updated: "A ticket's later message that does not close it", closed: "A ticket's message that closes it, or an agent closing an incident",
+      restart: 'An agent restarted a replica or a worker', page: 'An agent paged a person, or escalated a page',
+      scale: 'An agent changed how many replicas a service runs', tag: 'An agent tagged support tickets',
+      pause: 'An agent paused, as a person asked in chat', resume: 'An agent resumed, as a person asked in chat',
     },
-    {
-      name: 'severity', title: 'Severity', description: "The alert's severity, or the ticket's priority in tickets/index.csv",
-      meanings: {
-        critical: "An alert of severity critical", warning: 'An alert of severity warning',
-        urgent: 'A ticket of priority urgent in tickets/index.csv', high: 'A ticket of priority high in tickets/index.csv',
-        normal: 'A ticket of priority normal in tickets/index.csv', low: 'A ticket of priority low in tickets/index.csv',
-      },
+  },
+  {
+    name: 'incident', title: 'Incident',
+    description: "The incident the event belongs to: its incident, an inc- channel, an INC number in its text or the ticket's in tickets/index.csv; a deploy's later steps take its incident",
+  },
+  {
+    name: 'severity', title: 'Severity', description: "The alert's severity, or the ticket's priority in tickets/index.csv",
+    meanings: {
+      critical: 'An alert of severity critical', warning: 'An alert of severity warning',
+      urgent: 'A ticket of priority urgent in tickets/index.csv', high: 'A ticket of priority high in tickets/index.csv',
+      normal: 'A ticket of priority normal in tickets/index.csv', low: 'A ticket of priority low in tickets/index.csv',
     },
-    {
-      name: 'outcome', title: 'Outcome', description: 'The result an event records: ok, failed or held',
-      meanings: {
-        ok: "The agent's action or the deploy succeeded", failed: "The agent's action or the deploy failed, such as a restart that timed out",
-        held: 'The agent held the action back, such as a page held until 07:00 in quiet hours',
-      },
+  },
+  {
+    name: 'outcome', title: 'Outcome', description: 'The result an event records: ok, failed or held',
+    meanings: {
+      ok: "The agent's action or the deploy succeeded", failed: "The agent's action or the deploy failed, such as a restart that timed out",
+      held: 'The agent held the action back, such as a page held until 07:00 in quiet hours',
     },
-    { name: 'actor', title: 'Actor', description: 'Who acted: a login or chat id as chat/users.json names it, or the agent', meanings: { monitor: 'The monitor, which raises and resolves the alerts' } },
-    {
-      name: 'source', title: 'Source', description: "The file the event comes from: alerts, deploys, the agents' log, chat or tickets",
-      meanings: {
-        alert: "One of the monitor's alerts, in alerts/*.jsonl", deploy: "A deploy tool event, a row of deploys.csv",
-        chat: "A message in a channel's file in chat/", ticket: "A support ticket's message, in tickets/*.txt",
-        agent: "An automated agent's action, a line of agents.log",
-      },
+  },
+  { name: 'actor', title: 'Actor', description: 'Who acted: a login or chat id as chat/users.json names it, or the agent', meanings: { monitor: 'The monitor, which raises and resolves the alerts' } },
+  {
+    name: 'source', title: 'Source', description: "The file the event comes from: alerts, deploys, the agents' log, chat or tickets", values: SOURCES,
+    meanings: {
+      alert: "One of the monitor's alerts, in alerts/*.jsonl", deploy: 'A deploy tool event, a row of deploys.csv',
+      chat: "A message in a channel's file in chat/", ticket: "A support ticket's message, in tickets/*.txt",
+      agent: "An automated agent's action, a line of agents.log",
     },
-  ],
-  chips: 'filter',
-  strip: '#list',
-  onChange: load,
+  },
+]
+
+const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, initial: 'service', chips: 'filter', onChange: load })
+const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, initial: 'incident', onChange: load })
+const rows = thimble.rows({ mount: '#rows', fields: FIELDS, initial: 'source', onChange: () => { pick(null); load() } })
+const range = thimble.timeRange({ mount: '#range', readout: '#read', onChange: draw })
+// the lanes draw each event in the value the reader gave it, which holds for a label too, whose marks reach only the
+// rows the list draws; a failed event is underlined in the problem red, and its key entry hides or shows them
+const painted = { keeps: () => true, valueOf: (e) => e.value, colourOf: (v) => colour.colourOf(v) }
+const lanes = thimble.lanes({
+  mount: '#lanes', keyMount: '#key', rows, range, colour: painted, names: 112, follow: '#list',
+  problem: (e) => e.outcome === 'failed', words: { problem: 'failed' },
+  tip: (e) => `${e.kind} · ${e.actor} · ${e.text}`,
+  onPick: (lane) => pick(picked && picked.key === lane.key ? null : lane),
+  onMark: (e) => show(e.r),
 })
-const hover = (m) => { guide = m ? m.t : null; drawLanes() }
-const range = thimble.timeRange({ mount: '#range', readout: '#read', onChange: draw, onMark: hover })
-thimble.onReset({ changed: () => open != null, reset: () => { open = null; keep = []; load() } })
-$('names').innerHTML = SOURCES.map((s) => `<div>${s}</div>`).join('')
-lanes.setAttribute('height', LH * SOURCES.length)
+const side = thimble.side({ mount: '#body', onClose: () => { open = null; paint(true) } })
+thimble.divider({ top: '#overview' })
+const reset = thimble.onReset({ changed: () => picked != null || keep.length > 0, reset: () => { pick(null); keep = []; load() } })
 
 async function load() {
-  const my = ++seq, query = { op: 'overview', colour: colour.query(), incident: inc.value, q: q.value.trim(), keep }
-  const cols = {}, counts = {}
+  const my = ++seq
+  const query = { op: 'overview', colour: colour.query(), filter: filter.query(), rows: rows.query(), q: q.value.trim(), keep }
+  const cols = {}, counts = {}, fcounts = {}
   let from = 0
+  busy = true
+  head()
   try {
     do {
       const page = await thimble.fetch({ ...query, from }, { key: 'events' })
@@ -146,157 +187,196 @@ async function load() {
       if (page.span) { span = page.span; flags = Object.entries(page.starts).map(([label, t]) => ({ t, label })) }
       for (const k in page.cols) (cols[k] = cols[k] || []).push(...page.cols[k])
       for (const k in page.counts) counts[k] = (counts[k] || 0) + page.counts[k]
+      for (const k in page.fcounts) fcounts[k] = (fcounts[k] || 0) + page.fcounts[k]
       from = page.next
     } while (from != null)
   } catch (e) {
     if (e.name === 'AbortError') return
     throw e
+  } finally {
+    if (my === seq) busy = false
   }
   E = (cols.r || []).map((_, i) => Object.fromEntries(Object.keys(cols).map((k) => [k, cols[k][i]])))
-  if (inc.options.length === 1) for (const f of flags) inc.add(new Option(f.label, f.label))
   colour.counts(counts)
-  // the overview keeps the whole span whatever the search keeps, so the viewfinder stays where it was
+  filter.counts(fcounts)
+  // the overview keeps the whole span whatever the filters keep, so the viewfinder stays where it was
   const pad = (span[1] - span[0]) * 0.005
   range.data({ times: E.map((e) => e.t), values: E.map((e) => e.value), span: [span[0] - pad, span[1] + pad], marks: flags })
   markLoaded()
+  if (narrowTo != null && filter.field === 'incident') narrowNow()
   draw()
 }
 
 function draw() {
   if (!span) return
-  scale = range.scale(lanes.clientWidth)
-  thimble.timeAxis('#axis', scale, { marks: flags, onMark: hover })
-  drawLanes()
+  thimble.timeAxis('#axis', range.scale($('axis').clientWidth), { marks: flags })
+  lanes.draw(E)
   drawList()
 }
 
-// a lane per source: the events in the range in bins of the axis's scale, each bin stacked in Color by's colors,
-// every lane on one height scale
-function drawLanes() {
-  if (!scale) return
-  const bins = scale.bins(3), order = colour.values.map((v) => v.value)
-  const n = SOURCES.map(() => bins.map(() => new Map()))
-  for (const e of E) {
-    const b = scale.binOf(e.t), l = SOURCES.indexOf(e.source)
-    if (b >= 0 && l >= 0) n[l][b].set(e.value, (n[l][b].get(e.value) || 0) + 1)
-  }
-  const total = (m) => [...m.values()].reduce((a, b) => a + b, 0)
-  const max = Math.max(1, ...n.flat().map(total))
-  let s = ''
-  n.forEach((lane, l) => {
-    const base = (l + 1) * LH - 3
-    s += `<line class="base" x1="0" x2="${scale.width}" y1="${base + 0.5}" y2="${base + 0.5}"/>`
-    lane.forEach((m, b) => {
-      const sum = total(m)
-      if (!sum) return
-      const x = scale.x(bins[b][0]), w = Math.max(1, scale.x(bins[b][1]) - x - 1)
-      let y = base
-      const h = Math.max(2, Math.sqrt(sum / max) * (LH - 6))
-      for (const [v, k] of [...m].sort((a, c) => order.indexOf(a[0]) - order.indexOf(c[0]))) {
-        const c = colour.colourOf(v), hh = (k / sum) * h
-        y -= hh
-        s += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${hh.toFixed(1)}"${c ? ` fill="${c}"` : ' class="none"'}/>`
-      }
-    })
-  })
-  const at = E.find((e) => e.r === open)
-  for (const t of [guide, at && at.t]) if (t != null && range.has(t)) s += `<line class="guide" x1="${scale.x(t)}" x2="${scale.x(t)}" y1="0" y2="${LH * SOURCES.length}"/>`
-  lanes.innerHTML = s
-}
-
-// the events in the range, a heading for each day, each row with a 3 px bar in its Color by color; a heading is no
-// record, so it takes no label's mark
+// the list: the events in the range (and in the lane chosen), a heading for each day, every row RH px tall
+let shown = [] // the list's rows in order: {day} or an event
+let drawn = '' // the rows last drawn, from..to
 function drawList() {
-  let h = '', day = ''
+  const inLane = (e) => !picked || (rows.groupOf(e) ?? null) === picked.value
+  shown = []
+  let day = ''
   for (const e of E) {
-    if (!range.has(e.t)) continue
-    if (dayOf(e.t) !== day) h += `<div class="day">${range.format(e.t, (day = dayOf(e.t), 86400))}</div>`
-    const failed = e.outcome === 'failed' ? ' class="failed" title="failed"' : ''
-    h += `<div class="ev" data-r="${e.r}" data-anchor="${esc(e.ref)}" data-anchor-text="${esc(e.text)}"${colour.attr(e)}><div class="line"><time>${hms(e.t)}</time><span>${esc(e.source)}</span><span${failed}>${failed ? '✕ ' : ''}${esc(e.kind)}</span><span>${esc(e.actor)}</span><span>${esc(e.incident)}</span><span class="text">${esc(e.text)}</span></div>${e.r === open && detail ? details(detail) : ''}</div>`
+    if (!range.has(e.t) || !inLane(e)) continue
+    if (dayOf(e.t) !== day) shown.push({ day: range.format(e.t, ((day = dayOf(e.t)), 86400)) })
+    shown.push(e)
   }
-  list.innerHTML = h || '<div class="empty">No event</div>'
+  // the colored scrollbar takes every row's value, a day's heading the value of the event under it
+  const values = shown.map((x, i) => (x.day ? (shown[i + 1] || {}).value : x.value))
+  colour.strip(list, { rows: values, refs: shown.map((x) => x.ref || null), preview: (i) => (shown[i].day ? shown[i].day : { when: hms(shown[i].t), text: `${shown[i].source} · ${shown[i].text}` }) })
+  win.style.height = shown.length * RH + 'px'
+  head()
+  paint(true)
 }
 
-function details(d) {
-  const r = d.record, fact = (k, v) => (v != null && v !== '' ? `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>` : '')
-  const link = (b) => `<div class="link" data-go="${b.r}" data-anchor="${esc(b.ref)}"><time>${range.format(b.t, 1)}</time><span>${esc(b.source)} · ${esc(b.actor)}</span><span class="text">${esc(b.text)}</span></div>`
-  return `<div class="thimble-details"><p>${esc(r.text)}</p><dl>${fact('service', r.service)}${fact('severity', r.severity)}${fact('outcome', r.outcome)}${fact('id', r.id)}${fact('took', r.took != null ? dur(r.took) : '')}</dl>` +
-    (d.answers ? `<h4>Answers</h4>${link(d.answers)}` : '') + (d.answered.length ? `<h4>Answered by</h4>${d.answered.map(link).join('')}` : '') +
-    `<div class="raw">${d.raw.map(([n, s]) => `<b>${n}</b>${esc(s)}`).join('\n')}</div><button class="chip chip-tone-evidence chip-act" type="button" data-file="${esc(d.ref)}" title="Open in the File browser">${esc(d.ref)}</button></div>`
+// what the list shows, named over it: the lane chosen or every event, its first and last time, and how many
+function head() {
+  const evs = shown.filter((x) => !x.day)
+  const what = picked ? `${rows.by ? rows.by.title + ': ' : ''}${picked.name}` : 'In the range'
+  const when = evs.length ? `${range.format(evs[0].t, 60)} – ${range.format(evs[evs.length - 1].t, 60)}` : ''
+  $('lhead').innerHTML = `<b>${esc(what)}</b>${when ? `<span>${esc(when)}</span>` : ''}<span>${span ? `${evs.length} ${evs.length === 1 ? 'event' : 'events'}` : ''}${busy ? ' · loading…' : ''}</span>` +
+    (picked ? '<button class="btn btn-ghost btn-sm" type="button" data-all>Every lane</button>' : '')
 }
+
+// the rows in view and a screen's worth either side; the rest are padding, so a list of any length stays fast
+function paint(force) {
+  const a = Math.max(0, Math.floor(list.scrollTop / RH) - 30), b = Math.min(shown.length, a + Math.ceil(list.clientHeight / RH) + 60)
+  if (!force && drawn === `${a}..${b}`) return
+  drawn = `${a}..${b}`
+  win.style.paddingTop = a * RH + 'px'
+  win.innerHTML = !span ? '<div class="empty">Loading the events…</div>' : !shown.length ? '<div class="empty">No event</div>' : shown.slice(a, b).map(rowOf).join('')
+}
+function rowOf(x) {
+  if (x.day) return `<div class="day">${esc(x.day)}</div>`
+  return `<div class="ev${x.r === open ? ' is-open' : ''}" data-r="${x.r}" data-t="${x.t}" data-anchor="${esc(x.ref)}" data-anchor-text="${esc(x.text)}"${colour.attr(x)}>` +
+    `<time>${hms(x.t)}</time><span>${esc(x.source)}</span><span${x.outcome === 'failed' ? ' class="failed" title="failed"' : ''}>${esc(x.kind)}</span>` +
+    `<span class="c-actor">${esc(x.actor)}</span><span class="c-inc">${esc(x.incident)}</span><span class="text">${esc(x.text)}</span></div>`
+}
+let frameReq = null
+list.addEventListener('scroll', () => { if (frameReq == null) frameReq = requestAnimationFrame(() => { frameReq = null; paint() }) }, { passive: true })
+new ResizeObserver(() => paint()).observe(list)
+
+function pick(lane) {
+  picked = lane ? { key: lane.key, value: lane.value, name: lane.name } : null
+  lanes.choose(picked ? picked.key : null)
+  if (span) drawList()
+  reset.check()
+}
+
+// an event in the side panel from anywhere: the list, a lane, a link in another event, a citation
+const ID = { alert: 'Alert id', deploy: 'Deploy id', chat: 'Message id', ticket: 'Ticket message' }
+async function show(r) {
+  if (!E.some((e) => e.r === r)) { keep = [r]; await load() }
+  const e = E.find((x) => x.r === r)
+  if (!e) return
+  if (!range.has(e.t)) { const w = range.to - range.from; range.set(e.t - w / 2, e.t + w / 2) }
+  if (picked && (rows.groupOf(e) ?? null) !== picked.value) pick(null)
+  open = r
+  drawList()
+  const d = await thimble.fetch({ op: 'record', r, keep }, { key: 'record' })
+  if (open !== r || !d) return
+  const rec = d.record, fact = (k, v) => (v ? `<dt>${k}</dt><dd>${esc(v)}</dd>` : '')
+  const link = (b) => `<div class="link" data-go="${b.r}" data-anchor="${esc(b.ref)}"><time>${range.format(b.t, 1)}</time><span>${esc(b.source)} ${esc(b.kind)} · ${esc(b.actor)}</span><span class="text">${esc(b.text)}</span></div>`
+  side.open({
+    title: `${cap(rec.source)} ${rec.kind}${rec.service ? ' · ' + rec.service : ''}`,
+    sub: `${range.format(d.t, 1)} · ${rec.actor || ''}`,
+    ref: d.ref,
+    html: `<div class="event"><p class="words">${esc(rec.text || rec.kind)}</p>` +
+      `<dl class="facts">${fact('Service', rec.service)}${fact('Severity', rec.severity)}${fact('Outcome', rec.outcome)}${fact('Incident', rec.incident)}${fact('By', rec.actor)}${fact(ID[rec.source], rec.id)}</dl>` +
+      (d.answers ? `<h4 title="The event this one follows: the alert it resolves, the message its thread starts with, the ticket's first message, the deploy's start, or what set the agent off">Response to<span>${dur(rec.took)} earlier</span></h4>${link(d.answers)}` : '') +
+      (d.answered.length ? `<h4 title="The events that follow this one: the alert that resolves it, its thread's replies, the ticket's later messages, the deploy's later steps, the agents' actions it set off">Responses<span>${d.answered.length}</span></h4>${d.answered.map(link).join('')}` : '') +
+      `<h4>In the file</h4><div class="raw">${d.raw.map(([n, s]) => `<b>${n}</b>${esc(s)}`).join('\n')}</div>` +
+      `<button class="chip chip-tone-evidence chip-act" type="button" data-file="${esc(d.ref)}" title="Open in the File browser">${esc(d.ref)}</button></div>`,
+  })
+  paint(true)
+  const i = shown.indexOf(e)
+  if (i >= 0 && (i * RH < list.scrollTop || (i + 1) * RH > list.scrollTop + list.clientHeight)) list.scrollTop = i * RH - list.clientHeight / 2
+  reset.check()
+}
+
+list.addEventListener('click', (ev) => {
+  const row = ev.target.closest('.ev')
+  if (!row) return
+  const r = +row.dataset.r
+  if (open !== r) return show(r)
+  side.close()
+  open = null
+  paint(true)
+})
+side.body.addEventListener('click', (ev) => {
+  const go = ev.target.closest('[data-go]'), file = ev.target.closest('[data-file]')
+  if (go) show(+go.dataset.go)
+  else if (file) thimble.navigate(file.dataset.file, { browser: true })
+})
+$('lhead').addEventListener('click', (ev) => { if (ev.target.closest('[data-all]')) pick(null) })
+// ↑ ↓ move the side panel to the event before or after, as the list orders them
+addEventListener('keydown', (ev) => {
+  if (open == null || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return
+  if (ev.target !== document.body && (!ev.target.closest('#body') || ev.target.closest('input, [role="separator"]'))) return
+  const evs = shown.filter((x) => !x.day), i = evs.findIndex((x) => x.r === open)
+  const next = evs[i + (ev.key === 'ArrowUp' ? -1 : 1)]
+  if (i < 0 || !next) return
+  ev.preventDefault()
+  show(next.r)
+})
+let typing = null
+q.addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(load, 200) })
+addEventListener('resize', draw)
+// the label filter changed: fetch again, since the reader keeps only what it keeps
+let labelFilter = null
+thimble.onLabels((s) => { const f = JSON.stringify(s.filter || null); if (f !== labelFilter) { labelFilter = f; load() } })
+// a label's values arrive while it runs, which the lanes, the overview and the chips follow while a label is Color by's
+// or Rows' choice: fetch again when a mark gives an event another value than the reader did, and not for the marks of
+// the rows a scroll brings into view (Filter by and Rows hear a label's changes themselves)
+const moved = (id, e, v) => {
+  const m = id && thimble.markOf(e.ref)
+  const got = m && (m.values || []).find((x) => x.id === id)
+  return !!m && (got ? String(got.value) : null) !== (v ?? null)
+}
+let later = null
+thimble.onMarks(() => {
+  if ((colour.label || rows.label) && E.some((e) => moved(colour.label, e, e.value) || moved(rows.label, e, e.group))) { clearTimeout(later); later = setTimeout(load, 300) }
+})
 
 // the viewfinder on an incident's main burst, with a little room on each side: the run of its events with no gap over
 // BURST_GAP that holds the most of them, so a follow-up days later does not shrink the burst to a sliver; the
 // follow-ups stay in the overview
 const BURST_GAP = 6 * 3600
-function frame() {
-  if (!E.length) return
+function frame(incident) {
+  const ts = E.filter((e) => e.incident === incident).map((e) => e.t)
+  if (!ts.length) return
   let best = [0, 0], from = 0
-  for (let i = 1; i <= E.length; i++) {
-    if (i < E.length && E[i].t - E[i - 1].t <= BURST_GAP) continue
+  for (let i = 1; i <= ts.length; i++) {
+    if (i < ts.length && ts[i] - ts[i - 1] <= BURST_GAP) continue
     if (i - from > best[1] - best[0] + 1) best = [from, i - 1]
     from = i
   }
-  const a = E[best[0]].t, b = E[best[1]].t, pad = Math.max(300, (b - a) * 0.05)
+  const a = ts[best[0]], b = ts[best[1]], pad = Math.max(300, (b - a) * 0.05)
   range.set(a - pad, b + pad)
 }
-
-// an event opened in place from anywhere: a link in another event's details, a lane, a citation
-async function show(r) {
-  if (!E.some((e) => e.r === r)) { keep = [r]; q.value = ''; inc.value = ''; await load() }
-  const e = E.find((x) => x.r === r)
-  if (!e) return
-  if (!range.has(e.t)) { const w = range.to - range.from; range.set(e.t - w / 2, e.t + w / 2) }
-  detail = await thimble.fetch({ op: 'record', r, keep }, { key: 'record' })
-  open = r
-  draw()
-  list.querySelector(`.ev[data-r="${r}"]`)?.scrollIntoView({ block: 'center' })
+// an incident's citation: Filter by on Incident with that incident alone on, and the viewfinder on its burst
+function narrow(incident) {
+  narrowTo = incident
+  if (filter.field === 'incident') narrowNow()
+  else filter.choose('incident') // its onChange fetches the incidents' counts, and load() narrows then
 }
-
-list.addEventListener('click', async (ev) => {
-  const go = ev.target.closest('[data-go]'), file = ev.target.closest('[data-file]'), row = ev.target.closest('.ev')
-  if (go) return show(+go.dataset.go)
-  if (file) return thimble.navigate(file.dataset.file, { browser: true })
-  if (!row || ev.target.closest('.thimble-details')) return
-  const r = +row.dataset.r
-  if (open !== r) detail = await thimble.fetch({ op: 'record', r, keep }, { key: 'record' })
-  open = open === r ? null : r
-  thimble.expand(row, () => { drawList(); drawLanes() })
-})
-// a click on a lane opens the event nearest the pointer in that lane
-lanes.addEventListener('click', (ev) => {
-  const box = lanes.getBoundingClientRect(), source = SOURCES[Math.floor((ev.clientY - box.top) / LH)]
-  const t = scale.t(ev.clientX - box.left), near = (e) => Math.abs(e.t - t)
-  const hit = E.filter((e) => e.source === source && range.has(e.t) && near(e) <= scale.step(6)).sort((a, b) => near(a) - near(b))[0]
-  if (hit) show(hit.r)
-})
-let typing = null
-q.addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(load, 200) })
-// an incident picked in the top row narrows to it and frames its span, as its citation does; All incidents frames the
-// whole span again
-inc.addEventListener('change', async () => {
-  await load()
-  if (inc.value) frame()
-  else range.set(null)
-})
-addEventListener('resize', draw)
-// the label filter changed: fetch again, since the reader keeps only what it keeps
-let filter = null
-thimble.onLabels((s) => { const f = JSON.stringify(s.filter || null); if (f !== filter) { filter = f; load() } })
-// a label's values arrive while it runs, which the lanes, the overview and the chips follow while it is the color
-let later = null
-thimble.onMarks(() => { if (colour.label) { clearTimeout(later); later = setTimeout(load, 300) } })
-// a citation: an event opened in place, an incident narrowed to and framed, a day or a window framed
+function narrowNow() {
+  const want = narrowTo
+  narrowTo = null
+  frame(want)
+  for (const v of filter.values) if ((v.value === want) !== v.on) filter.toggle(v.value)
+}
+// a citation: an event in the side panel, an incident narrowed to and framed, a day or a window framed
 thimble.onOpen(async (place) => {
   const t = (place && place.target) || {}
   await loaded
   if (t.r != null) return show(t.r)
-  if (t.incident) {
-    q.value = ''
-    inc.value = t.incident
-    await load()
-    return frame()
-  }
+  if (t.incident) return narrow(t.incident)
   if (t.day) { const a = Date.parse(t.day + 'T00:00:00Z') / 1000; return range.set(a, a + 86400) }
   if (t.from && t.to) range.set(Date.parse(t.from + ':00Z') / 1000, Date.parse(t.to + ':00Z') / 1000)
 })

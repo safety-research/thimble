@@ -41,14 +41,14 @@ draws what its `view.html` draws: the search, the incident and Color by in the t
 source, and the events by day, each opening in place. `thimble view text timeline --cwd <its sample> --width 120` draws
 it as text (below). [plugin/viewers/linked-sessions/view.term.js](../plugin/viewers/linked-sessions/view.term.js) draws
 runs of agent teams on one clock: the time range broken where the runs lie hours apart (`gap`), a lane per session
-under its run as a tree, a run folded to one lane where the panel is short, and each call opened in place with what came
+under its run as a tree, a run folded to one lane where the panel is short, and each call opened in the side pane with what came
 back (`blocks`).
 
-[plugin/viewers/repository/view.term.js](../plugin/viewers/repository/view.term.js), the third, draws a table over a
-time range: the kind of item picked in the top row (`choice` with `all: false`), the runs' days with the nights between
-them as breaks (`timeRange({gap})`), each row its item's columns and its records as marks on the range's scale under the
-runs' names in the table's header, and an item opened in place with its records in time order, the one a citation
-opened kept in view (`d.focus()`).
+[plugin/viewers/repository/view.term.js](../plugin/viewers/repository/view.term.js), the third, draws records from a
+code forge and a message board the way their own tools draw them: the tabs with their counts on a row of their own, the
+chosen one inverse; the runs as Filter by's toggles; a heading per run over its items, with a dim line under each row
+(`body`); and an item's page in the side pane (`side`), whose records are a `list` of their own that ↑↓ move through
+while it is open, the one a citation opened chosen.
 
 ## The program's life
 
@@ -133,8 +133,8 @@ as it draws.
 `colorBy(opts)` is the one control for the view's color, as in the browser ([color.md](color.md)). Draw it in the top row
 with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) or `colour.add(r)`.
 
-- The view opens colored by a label that is on in Files and marks its files, as the browser's view does, else by its
-  `initial` field; a label turned on while the view is away or open takes the color, the one turned on last.
+- The view opens colored by a label that is on in Files and marks its files (not one Rows groups by), as the browser's
+  view does, else by its `initial` field; a label turned on while the view is away or open takes the color, the one turned on last.
 - The row reads `Color by  Kind` and the chosen field's values as chips: `●` in the value's hue, its name, its count
   dim. A click on a chip turns the value off (`○`, dim) or on. Values past the sixth share one chip, `other`, with no
   hue of their own, and draw dim wherever they show; the records with no value have `no kind`, with a dim mark. A value
@@ -223,6 +223,11 @@ each group under its parent, `guide` its tree guide (`├ ` `└ ` `│ `), a pa
 `query()` (`{field}` or `{label, name}`), `by` and `choose` read and change it; a record the reader gave its group as
 `group` keeps it.
 
+`initial` is what either opens on until the analyst chooses: a field's name, or a list whose first choice that is
+there is taken, each a field's name or `{label: name or id}`, a label counting while it is on in Files (`[{label:
+'tactic'}, 'tool']`). The label Rows groups by takes no color: Color by neither opens on it nor takes it when it is turned
+on, so the lanes keep Color by's own choice.
+
 Both take `fields` as Color by does, `{name, title, description, values, meanings, value(record)}`, with `nameOf(key)`
 for a value's words, and a query names the labels they read, so the reader reads them though they are not on in Files.
 A label's value comes from `labelValue(id, record)`, which Color by reads too.
@@ -240,6 +245,7 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
   records in the tip; a click opens the record nearest there (`onMark(item)`), and a click on a name chooses the lane,
   in the accent (`onPick(lane)`), such as to show that session's transcript.
 - `span`, `[t0, t1]` or a list (its `span()`), is the list's rows in view, on the selection background across the lanes.
+- `density: false` draws Events: a mark `▌` in the hue of each cell that holds a record, in place of its bars.
 - `ln.legend()` is the key for `axis`: an entry for each series the lanes drew (`─ running`, `× failed`), each a toggle.
 
 ## The list

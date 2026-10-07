@@ -810,23 +810,23 @@ describe('details', () => {
     expect(text().slice(1, 7)).toEqual(['  line 1', '  line 2', '  line 3', '  line 4', '  line 5', '  line 6'])
   })
 
-  test('a place too long for its row beside ask about it drops its folders, so both show', async () => {
+  test('a record with a place shows its place and no ask about it, since its file view asks; a click opens it', async () => {
     init({ cols: 60, rows: 4 })
     const place = 'runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576/subagents/agent-a1e955cf.jsonl#L20'
     kit.draw((d: any) => kit.details(d, { place, ask: { ref: place, text: 'x' } }))
     await tick()
-    expect(text()[0]).toBe('  ↗ …/agent-a1e955cf.jsonl line 20  ask about it')
+    expect(text().join('\n')).not.toContain('ask about it')
+    expect(text()[0]).toContain('agent-a1e955cf.jsonl line 20')
     await click('agent-a1e955cf')
     expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'open', ref: place })
   })
 
-  test('in a narrow panel ask about it takes the row under the place, which keeps its line; facts take the rows they need, none split', async () => {
+  test('a record without a place offers ask about it; facts take the rows they need, none split', async () => {
     init({ cols: 40, rows: 6 })
-    const place = 'alerts/monitor-20260516-0000.jsonl#L2'
-    kit.draw((d: any) => kit.details(d, { facts: [['service', 'payments'], ['severity', 'critical'], ['id', 'alr-42']], place, ask: { ref: place, text: 'x' } }))
+    kit.draw((d: any) => kit.details(d, { facts: [['service', 'payments'], ['severity', 'critical'], ['id', 'alr-42']], ask: { ref: 'view:t/alr-42', text: 'x' } }))
     await tick()
-    expect(text()).toEqual(['  service payments · severity critical', '  id alr-42', '  ↗ …/monitor-20260516-0000.jsonl line 2', '  ask about it'])
-    expect(kit.placeIn(place, 24)).toBe('…/monitor…0.jsonl line 2')
+    expect(text()).toEqual(['  service payments · severity critical', '  id alr-42', '  ask about it'])
+    expect(kit.placeIn('alerts/monitor-20260516-0000.jsonl#L2', 24)).toBe('…/monitor…0.jsonl line 2')
   })
 })
 

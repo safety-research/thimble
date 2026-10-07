@@ -203,15 +203,18 @@
   }
 
   // A label turned on since the view last saw the labels takes the colour, the one turned on last; the labels on now
-  // are seen.
+  // are seen. A label another part holds (viewer_controls.js: the one Rows groups the lanes by) takes no colour.
+  var holds = []
   function notice() {
     var ids = onLabels().map(function (l) {
       return String(l.id)
     })
     var before = S.seen || []
     S.seen = ids
+    var held = []
+    for (var h = 0; h < holds.length; h++) held = held.concat(safe(holds[h], []) || [])
     var fresh = ids.filter(function (id) {
-      return before.indexOf(id) < 0
+      return before.indexOf(id) < 0 && held.indexOf(id) < 0
     })
     if (fresh.length) S.by = 'l:' + fresh[fresh.length - 1]
   }
@@ -2626,6 +2629,10 @@
     },
     resetting: function () {
       return resetting
+    },
+    // fn() gives the ids of the labels a part holds, which take no colour when turned on (notice)
+    hold: function (fn) {
+      holds.push(fn)
     },
     tip: tip,
     untip: untip,

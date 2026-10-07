@@ -2,9 +2,10 @@
 <html>
 <head>
 <style>
-  /* thimble's parts (.field, .chip, .btn, .seg), its Color by control, its time range selector and the theme's tokens
-     come with the frame; this page lays out the control row, the timeline (the range selector, the axis and the lanes)
-     and the side column (the list of the reports in the range, each opening in place) */
+  /* thimble's parts (.field, .chip, .btn), its Search, Rows, Filter by and Color by controls, its time range selector,
+     the divider, the side panel and the theme's tokens come with the frame; this page lays out the control row, the
+     overview (the range selector, the axis and the lanes), the list of the same lanes under it, and what the side panel
+     holds: a lane's episodes and their reports, or one report in full */
   html, body { margin: 0; height: 100%; }
   body { display: flex; flex-direction: column; overflow: hidden; background: var(--surface-card); color: var(--text-primary); font: 400 var(--text-ui-sm) / 1.4 var(--font-body); font-variant-numeric: tabular-nums; }
   button { font: inherit; }
@@ -14,18 +15,16 @@
   .search { position: relative; flex: 0 1 170px; min-width: 110px; }
   .search .field { width: 100%; padding-left: 27px; }
   .search .ico { position: absolute; left: 8px; top: 50%; margin-top: -7px; color: var(--text-tertiary); pointer-events: none; }
-  .fbtn { flex: none; padding: 0 7px 0 9px; }
-  .fbtn .ico { width: 12px; height: 12px; color: var(--text-tertiary); }
-  .fbtn .v { font-weight: 500; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
-  .fbtn .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  .fbtn .clr { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -3px; border-radius: 4px; color: var(--text-tertiary); }
-  .fbtn .clr:hover { background: var(--track-bg); color: var(--text-primary); }
   #chips { display: contents; }
-  /* the Color by control takes the row's free width, and a line of its own when less than its least is left */
-  #colour { flex: 1 1 320px; min-width: 260px; margin-left: 4px; }
-  #chips .chip { max-width: 240px; }
+  /* Color by takes the row's free width, and a line of its own when less than its least is left */
+  #colour { flex: 1 1 300px; min-width: 240px; margin-left: 4px; }
   .chip .ico { width: 10px; height: 10px; }
-  /* the range selector over the lanes' time, its readout in the lanes' gutter; the lanes' one axis under it */
+
+  #main { flex: 1; min-height: 0; }
+  #stack { display: flex; flex-direction: column; min-height: 0; }
+  /* the overview: the range selector over the lanes' time, its readout in the lanes' gutter, the one axis, the lanes */
+  /* as tall as its lanes need, up to a little over half the height, until the divider is moved */
+  #tl { position: relative; flex: 0 1 auto; max-height: 56%; min-height: 120px; display: flex; flex-direction: column; padding: 0 0 0 14px; overflow: hidden; }
   #top { flex: none; display: flex; align-items: center; padding: 10px 0 4px; }
   #rread { flex: none; width: var(--gut); min-width: 0; box-sizing: border-box; padding-right: 10px; white-space: normal; }
   #range { flex: none; }
@@ -34,15 +33,8 @@
   #axis { flex: none; }
   .sw { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
 
-  #main { flex: 1; min-height: 0; display: flex; }
-  #tl { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 0 0 0 14px; }
-  #side { order: 2; flex: none; width: clamp(266px, 29vw, 420px); min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border-hairline); }
-
-  .ib { flex: none; width: 24px; padding: 0; }
-
   svg { display: block; overflow: visible; user-select: none; -webkit-user-select: none; }
   svg text { font: 400 10.5px var(--font-mono); fill: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-  svg text.strong { fill: var(--text-secondary); }
   svg .grid { stroke: var(--border-hairline); }
   svg .major { stroke: rgba(var(--ink-rgb), 0.16); }
   svg .rule { stroke: rgba(var(--ink-rgb), 0.07); }
@@ -51,86 +43,84 @@
   #lanebox { position: relative; display: flex; }
   #gut { position: relative; flex: none; width: var(--gut); }
   #plot { flex: none; cursor: crosshair; }
-  .lh { position: absolute; left: 0; right: 10px; display: flex; align-items: center; gap: 6px; box-sizing: border-box; padding-left: 6px; margin-left: -6px; border-radius: 3px; }
-  .lh { cursor: pointer; }
+  .lh { position: absolute; left: 0; right: 10px; display: flex; align-items: center; gap: 6px; box-sizing: border-box; padding-left: 6px; border-radius: 3px; cursor: pointer; }
   .lh .ln { flex: 1; min-width: 0; align-self: stretch; padding: 0; border: 0; background: none; color: var(--text-primary); font: 400 var(--text-xs) / 1.2 var(--font-body); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
   .lh:hover .ln { text-decoration: underline; text-underline-offset: 2px; }
   .lh .n { flex: none; color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
   .lh.zero .ln { color: var(--text-tertiary); }
-  .lh.iso .ln { font-weight: 500; }
   .lh.hot { background: var(--surface-hover); }
+  .lh.iso { background: var(--surface-selected); }
+  .lh.iso .ln { font-weight: 600; }
   #brush { position: absolute; top: 0; bottom: 0; display: none; background: rgba(var(--ink-rgb), 0.07); border-left: 1px solid var(--text-secondary); border-right: 1px solid var(--text-secondary); pointer-events: none; }
+  /* the pointer's time, a thin line across the lanes; the span of the side panel's reports in view, a light tint */
+  #cursor { position: absolute; top: 0; display: none; width: 1px; background: rgba(var(--ink-rgb), 0.45); pointer-events: none; }
+  #span { position: absolute; top: 0; display: none; background: rgba(var(--ink-rgb), 0.06); box-shadow: inset 1px 0 0 rgba(var(--ink-rgb), 0.24), inset -1px 0 0 rgba(var(--ink-rgb), 0.24); pointer-events: none; }
 
-  /* a report opened in place under its line in the list: its fields, then what it can open */
-  .row .thimble-details { padding: 8px 0 10px; cursor: default; }
-  .det-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-  .det-when { margin-top: 6px; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-secondary); }
-  .det-sec { margin-top: 8px; }
-  .det-sec > .h { margin-bottom: 3px; font: 500 var(--text-xs) / 1.3 var(--font-body); color: var(--text-tertiary); }
-  .det-why { margin: 0; font: 400 var(--text-sm) / 1.5 var(--font-body); overflow-wrap: anywhere; }
-  .facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 12px; margin: 0; }
-  .facts dt { color: var(--text-tertiary); font-size: var(--text-xs); line-height: 1.5; }
-  .facts dd { margin: 0; min-width: 0; font-size: var(--text-ui-sm); line-height: 1.45; overflow-wrap: anywhere; }
-  .facts dd.mono { font: 400 var(--text-mono-sm) / 1.6 var(--font-mono); }
-  .srcbox { padding: 6px 0 6px 8px; margin-left: -8px; border-radius: var(--radius-ui); }
-  .kv { margin-top: 6px; }
-  .kv .k { color: var(--text-tertiary); font-size: var(--text-xs); line-height: 1.4; }
-  .kv .v { font: 400 10.5px / 1.5 var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .url { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
-  .url a { flex: 1; min-width: 0; color: var(--text-primary); font: 400 10.5px / 1.5 var(--font-mono); overflow-wrap: anywhere; text-decoration: underline; text-decoration-color: rgba(var(--ink-rgb), 0.4); text-underline-offset: 2px; cursor: pointer; }
-  .url a .ico { width: 11px; height: 11px; margin-left: 3px; vertical-align: -1px; }
-  .url .ib { margin-top: -3px; }
-  .det-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-  .det-acts .ico { width: 12px; height: 12px; }
-  .marks { display: flex; flex-wrap: wrap; gap: 4px; }
-
-  #listhead { flex: none; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--border-hairline); }
-  #listhead .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--text-ui-sm) / 1 var(--font-body); }
-  #listhead .t .n { font-family: var(--font-mono); font-size: var(--text-mono); }
-  #listhead .t .s { color: var(--text-tertiary); font-weight: 400; }
-  #listwrap { position: relative; flex: 1 1 150px; min-height: 150px; }
-  #list { position: absolute; inset: 0; overflow-y: auto; scrollbar-width: thin; }
-  .dh { position: absolute; left: 0; right: 0; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px 0 14px; border-bottom: 1px solid var(--border-subtle); background: var(--surface-card); font: 500 var(--text-xs) / 1 var(--font-body); }
-  .dh .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  #stick { position: absolute; left: 0; right: 10px; top: 0; height: 28px; display: none; }
-  #stick .dh { right: 0; box-shadow: 0 6px 8px -8px rgba(var(--ink-rgb), 0.3); }
-  #rows { position: relative; }
-  .row { position: absolute; left: 0; right: 0; box-sizing: border-box; height: 46px; padding: 6px 12px 0 14px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; overflow: hidden; }
-  .row:hover { background: var(--surface-hover); }
-  .row.sel { background: var(--surface-selected); }
-  .row.sel:hover { background: var(--surface-selected); }
-  .row .l1 { display: flex; align-items: center; gap: 7px; min-width: 0; height: 18px; }
-  .row .tm { flex: none; color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  .row .src { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
-  .row .rid { flex: none; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  .row .l2 { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font-size: var(--text-xs); }
-  .row .l2 .cl { color: var(--text-secondary); }
-  .empty { padding: 26px 14px; color: var(--text-tertiary); font-size: var(--text-xs); }
+  /* the list of the lanes, in the overview's order */
+  #listsec { flex: 1 1 0; min-height: 90px; display: flex; flex-direction: column; }
+  #listhead { flex: none; display: flex; align-items: baseline; gap: 8px; min-height: 34px; padding: 9px 14px 0; box-sizing: border-box; font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap; overflow: hidden; }
+  #listhead b { color: var(--text-primary); font: 500 var(--text-ui-sm) / 1.3 var(--font-body); }
+  #listhead .n { font-family: var(--font-mono); font-size: var(--text-mono-sm); color: var(--text-primary); }
+  #listhead .s { overflow: hidden; text-overflow: ellipsis; color: var(--text-tertiary); }
+  .cols { display: grid; align-items: center; column-gap: 12px; padding: 0 14px; }
+  #listcols { flex: none; height: 26px; border-bottom: 1px solid var(--border-hairline); color: var(--text-tertiary); font: 400 var(--text-xs) / 1 var(--font-body); }
+  #listcols span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #list { position: relative; flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+  .lrow { height: 30px; box-sizing: border-box; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
+  .lrow:hover { background: var(--surface-hover); }
+  .lrow.sel, .lrow.sel:hover { background: var(--surface-selected); }
+  .lrow.sel .nm { font-weight: 600; }
+  .lrow > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lrow .nm { font-size: var(--text-ui-sm); }
+  .num { text-align: right; font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
+  .lrow .t { color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
+  .lrow .t.last { text-align: right; }
+  .sep-row { height: 8px; }
+  .spark { display: block; width: 100%; height: 14px; }
+  .mix { display: flex; height: 8px; border-radius: 2px; overflow: hidden; background: rgba(var(--ink-rgb), 0.08); }
+  .mix i { display: block; height: 100%; }
+  .mix i + i { box-shadow: inset 1px 0 0 var(--surface-card); }
+  .empty { padding: 22px 14px; color: var(--text-tertiary); font-size: var(--text-xs); }
   #gut .empty { padding: 20px 0; white-space: nowrap; }
 
-  .pop { position: fixed; z-index: 2147482500; min-width: 200px; max-width: 320px; max-height: 72vh; overflow: auto; padding: 4px; border-radius: var(--radius-ui); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), 0.14); font: 400 var(--text-ui-sm) / 1.3 var(--font-body); }
-  .pop .head { padding: 8px 8px 4px; font: 500 var(--text-xs) / 1 var(--font-body); color: var(--text-tertiary); }
-  .pop .head .n { margin-left: 6px; font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  .pop.lanes { display: flex; flex-direction: column; width: min(320px, calc(100vw - 12px)); height: min(500px, calc(100vh - 60px)); max-height: none; overflow: hidden; padding: 4px; }
-  /* a box that scrolls shows a shadow at the edge it can scroll past */
-  .scrolls { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin;
-    background: linear-gradient(var(--raised-bg) 30%, transparent) top / 100% 28px no-repeat local,
-      linear-gradient(transparent, var(--raised-bg) 70%) bottom / 100% 28px no-repeat local,
-      radial-gradient(farthest-side at 50% 0, rgba(var(--ink-rgb), 0.16), transparent) top / 100% 10px no-repeat scroll,
-      radial-gradient(farthest-side at 50% 100%, rgba(var(--ink-rgb), 0.16), transparent) bottom / 100% 10px no-repeat scroll; }
-  .pop .sep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
-  .pop .note { padding: 4px 8px 6px; color: var(--text-tertiary); }
-  .item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 0 8px; border: 0; border-radius: 4px; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
-  .item:hover { background: var(--surface-hover); }
-  .item:disabled { cursor: default; }
-  .item .lab { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .item .lab.none { color: var(--text-tertiary); }
-  .item .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  .box { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; box-sizing: border-box; border: 1.5px solid rgba(var(--ink-rgb), 0.35); border-radius: 3px; }
-  .box.on { border-color: var(--text-primary); background: var(--text-primary); }
-  .box.on::after { content: ''; width: 6px; height: 3px; margin-top: -2px; border: solid var(--surface-card); border-width: 0 0 1.6px 1.6px; transform: rotate(-45deg); }
-  .more-link { display: block; width: 100%; padding: 4px 8px 6px 30px; border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-xs); text-align: left; cursor: pointer; }
-  .more-link:hover { color: var(--text-primary); text-decoration: underline; }
+  /* the side panel: a lane's episodes, each a heading over its reports, the heading of the episode at the top held there */
+  .eps, .ep-rows { position: relative; }
+  .ep-stick { position: sticky; top: -10px; height: 0; z-index: 2; }
+  .ep-stick .eh { top: 0; box-shadow: 0 6px 8px -8px rgba(var(--ink-rgb), 0.3); }
+  .eh { position: absolute; left: 0; right: 0; box-sizing: border-box; padding: 6px 2px 4px 6px; border-bottom: 1px solid var(--border-subtle); background: var(--surface-card); cursor: pointer; }
+  .eh .l1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; height: 18px; }
+  .eh .w { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--text-xs) / 1.4 var(--font-body); }
+  .eh:hover .w { text-decoration: underline; text-underline-offset: 2px; }
+  .eh .d, .eh .n { flex: none; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
+  .eh .l2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(60px, 0.45fr); align-items: center; gap: 10px; height: 14px; margin-top: 2px; }
+  .er { position: absolute; left: 0; right: 0; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 2px 0 6px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; overflow: hidden; }
+  .er:hover { background: var(--surface-hover); }
+  .er.sel, .er.sel:hover { background: var(--surface-selected); }
+  .er .tm { flex: none; color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
+  .er .gp { flex: none; width: 52px; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); text-align: right; }
+  .er .rid { flex: none; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
+  .er .cl { flex: none; font-size: var(--text-xs); color: var(--text-secondary); }
+  .er .why { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
+
+  /* a report in full in the side panel */
+  .det { padding: 2px 0 8px 8px; margin-left: -8px; }
+  .det-back { margin: 0 0 8px -6px; }
+  .det-back .ico { width: 12px; height: 12px; }
+  .det-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+  .det-when { margin-top: 6px; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-secondary); }
+  .det-sec { margin-top: 12px; }
+  .det-sec > .h { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font: 500 var(--text-xs) / 1.3 var(--font-body); color: var(--text-tertiary); }
+  .det-why { margin: 0; font: 400 var(--text-sm) / 1.5 var(--font-body); overflow-wrap: anywhere; }
+  .facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 12px; margin: 0; }
+  .facts dt { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.6 var(--font-mono); }
+  .facts dd { margin: 0; min-width: 0; font-size: var(--text-ui-sm); line-height: 1.45; overflow-wrap: anywhere; }
+  .facts dd.mono { font: 400 var(--text-mono-sm) / 1.6 var(--font-mono); }
+  .url { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
+  .url a { flex: 1; min-width: 0; color: var(--text-primary); font: 400 10.5px / 1.6 var(--font-mono); overflow-wrap: anywhere; text-decoration: underline; text-decoration-color: rgba(var(--ink-rgb), 0.4); text-underline-offset: 2px; cursor: pointer; }
+  .ib { flex: none; width: 24px; padding: 0; }
+  .det-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+  .det-acts .ico { width: 12px; height: 12px; }
+  .marks { display: flex; flex-wrap: wrap; gap: 4px; }
 
   #tip { position: fixed; z-index: 2147482600; display: none; max-width: 300px; padding: 7px 9px; border-radius: var(--radius-ui); background: var(--surface-card); box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.12), 0 10px 28px -14px rgba(var(--ink-rgb), 0.32); pointer-events: none; font: 400 var(--text-xs) / 1.45 var(--font-body); }
   #tip .h { font-weight: 500; }
@@ -143,57 +133,61 @@
 <body>
 <div id="ctl">
   <label class="search"><svg class="ico" viewBox="0 0 24 24"><path d="M4 10.5a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0M15.2 15.2L20 20"/></svg><input id="q" class="field" type="search" placeholder="Search reports" autocomplete="off" spellcheck="false"></label>
-  <button id="f-lane" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
+  <span id="rows"></span>
+  <span id="filter"></span>
   <span id="chips"></span>
   <span id="colour"></span>
 </div>
 <div id="main">
-  <aside id="side">
-    <div id="listhead"></div>
-    <div id="listwrap"><div id="list" tabindex="-1"><div id="rows"></div></div><div id="stick"></div></div>
-  </aside>
-  <section id="tl">
-    <div id="top"><div id="rread"></div><div id="range"></div></div>
-    <div id="axrow"><div class="pad"></div><div id="axis"></div></div>
-    <div id="lanes"><div id="lanebox"><div id="gut"></div><svg id="plot"></svg><div id="brush"></div></div></div>
-  </section>
+  <div id="stack">
+    <section id="tl">
+      <div id="top"><div id="rread"></div><div id="range"></div></div>
+      <div id="axrow"><div class="pad"></div><div id="axis"></div></div>
+      <div id="lanes"><div id="lanebox"><div id="gut"></div><svg id="plot"></svg><div id="span"></div><div id="cursor"></div><div id="brush"></div></div></div>
+    </section>
+    <section id="listsec">
+      <div id="listhead"></div>
+      <div id="listcols" class="cols"></div>
+      <div id="list" tabindex="-1"></div>
+    </section>
+  </div>
 </div>
 <div id="tip"></div>
 <script>
 'use strict'
-// Activity Timeline: every report on one UTC time axis, a lane per data source and one each for the reports under
-// review and the background controls. thimble's time range selector above the lanes holds the whole span of the data,
-// its reports per moment in the Color by colors, with a viewfinder over it: drag its middle to pan, its edges to zoom,
-// double-click for the whole span; it opens on the whole span. The lanes show the range's reports per bin, stacked by
-// the Color by choice, as bars whose height grows with the log of the count, and once the range is six hours or less
-// each report is its own mark at its second; the axis under the range is the one axis. A drag on the lanes zooms to the
-// span dragged, Ctrl or ⌘ with the wheel zooms around the pointer (Shift or a sideways wheel pans), a click on a bar
-// zooms to its bin, a click on a lane's name shows that lane alone and a shift-click adds or takes a lane. Lanes keep
-// one height and scroll as a list. The side column lists the range's reports in time order; a click opens a report in
-// place under its line, again closes it.
-// Color: thimble's Color by control in the control row (thimble.colorBy) colors by confidence, class, disposition,
-// source basis or catalog, or by a label; a value whose chip is off leaves the bars, the counts and the list. The list
-// has the control's two tracks.
-// Labels: the reader keeps only the reports the label filter keeps and hands each its marks, which give each report its
-// value while a label is the color; list rows carry their row's ref as data-anchor, so thimble marks them; marks and
-// bars are drawn in the values' colors by the page (data-anchor-unmarked).
+// Activity Timeline: every report on one UTC time axis, a lane per data source (Rows picks another field or a label),
+// under thimble's time range selector, which holds the whole span with its reports per moment in the Color by colors and
+// a viewfinder over it; it opens on the whole span. The lanes show the range's reports per bin, stacked by the Color by
+// choice, as bars whose height grows with the log of the count, and once the range is six hours or less each report is
+// its own mark at its second. A drag on the lanes zooms to the span dragged, Ctrl or ⌘ with the wheel zooms around the
+// pointer, a click on a bar zooms to its bin and a click on a lane's name chooses the lane. Under the overview the list
+// holds the same lanes in the same order, each with its reports over its own span (a sparkline between its first and its
+// last report), its count, its episodes and its mix of the Color by values; a drag on the divider between them moves it.
+// A lane chosen opens its episodes in the side panel, the bursts of its reports less than two hours apart, each a heading
+// over its reports; a report there opens in full in the panel. The span of the panel's reports in view is a light tint
+// across the lanes.
+// Rows, Filter by and Color by (thimble.rows, thimble.filterBy, thimble.colorBy) read a report's value of a field from
+// its columns and of a label from the marks the reader hands it, so every label over the files groups, filters and
+// colors the same way. Color by is the only color: a value whose chip is off leaves the bars, the counts and the lists.
+// Labels: the reader keeps only the reports the label filter keeps and hands each its marks; the lanes, their rows and
+// the episodes carry their units as data-anchor, the panel's report rows their row's ref, so thimble marks them.
 const slug = (thimble.view && thimble.view.slug) || 'activity-timeline'
 const DAY = 86400
 const TICKS_BELOW = 6 * 3600 // a window this short shows each report as its own mark
 const MIN_SPAN = 60
 const LANE_H = 18, SEP = 10 // a lane's height, and the space before the lanes of reports not included
-const RH = 46 // list row
+const ERH = 30, EHH = 44 // a report's row and an episode's heading in the side panel
+const SLICES = 40 // a sparkline's slices
 const NONINC = new Set(['Review required', 'Background control'])
 const COLS = ['r', 't', 'ln', 'sl', 'lane', 'confidence', 'disposition', 'broad_class', 'source_basis', 'catalog', 'why_included', 'mb']
-const NO_CONF = 'No confidence' // a report with no confidence, named as its Color by chip names it
+const NO_CONF = 'No confidence'
 const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const BINS = [1, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, DAY, 2 * DAY, 7 * DAY]
 const ICON = {
-  down: 'M6 9l6 6 6-6', x: 'M6 6l12 12M18 6L6 18', check: 'M5 12.5l4.5 4.5L19 7', plus: 'M12 5v14M5 12h14',
+  x: 'M6 6l12 12M18 6L6 18', check: 'M5 12.5l4.5 4.5L19 7', left: 'M15 6l-6 6 6 6',
   file: 'M8 3h6l5 5v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v5h5',
   copy: 'M9 9h10v11H9zM5 15V4h10', zoom: 'M4 10.5a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0M15.2 15.2L20 20M10.5 7.5v6M7.5 10.5h6',
-  tag: 'M3 12V4h8l10 10-8 8L3 12zM7.5 7.5h.01', ext: 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5',
 }
 const ico = (n, c = 'ico') => `<svg class="${c}" viewBox="0 0 24 24"><path d="${ICON[n]}"/></svg>`
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
@@ -208,6 +202,7 @@ const $ = (id) => document.getElementById(id)
 const dt = (t) => new Date(t * 1000)
 const isoDay = (t) => dt(t).toISOString().slice(0, 10)
 const isoMin = (t) => dt(t).toISOString().slice(0, 16)
+const isoSec = (t) => dt(t).toISOString().slice(0, 19) + 'Z'
 const hms = (t) => dt(t).toISOString().slice(11, 19)
 const hm = (t) => dt(t).toISOString().slice(11, 16)
 const dmy = (t) => { const d = dt(t); return `${d.getUTCDate()} ${MONTH[d.getUTCMonth()]} ${d.getUTCFullYear()}` }
@@ -228,6 +223,25 @@ function spanWords(a, b) {
   if (isoDay(a) === isoDay(b - 1)) return `${dmy(a)}, ${tm(a)}–${b % DAY === 0 ? (sec ? '24:00:00' : '24:00') : tm(b)}`
   return `${dm(a)} ${tm(a)} – ${dm(b)} ${tm(b)}`
 }
+// an episode's span: its first report's day and time to its last report's time, the day again when it changes
+function epWords(a, b) {
+  const head = `${WEEKDAY[dt(a).getUTCDay()]} ${dmy(a)} ${hm(a)}`
+  if (b <= a) return head
+  return `${head} – ${isoDay(a) === isoDay(b) ? hm(b) : `${dm(b)} ${hm(b)}`}`
+}
+function dur(s) {
+  s = Math.max(0, Math.round(s))
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m ${pad2(s % 60)}s`
+  if (s < DAY) return `${Math.floor(s / 3600)}h ${pad2(Math.floor((s % 3600) / 60))}m`
+  return `${Math.floor(s / DAY)}d ${Math.floor((s % DAY) / 3600)}h`
+}
+function gapText(s) {
+  if (s == null) return ''
+  if (s < 60) return `+${s}s`
+  if (s < 3600) return `+${Math.floor(s / 60)}m`
+  return `+${Math.floor(s / 3600)}h ${pad2(Math.floor((s % 3600) / 60))}m`
+}
 const binStart = (t, b) => (b === 7 * DAY ? Math.floor((t - 4 * DAY) / b) * b + 4 * DAY : Math.floor(t / b) * b) // weeks from Monday
 
 // ---------------------------------------------------------------- data
@@ -240,12 +254,16 @@ let rowAt = new Map()
 let loadSeq = 0
 let labelState = { labels: [], filter: null, all: null, palette: null }
 let EXT = [0, DAY] // the whole span of the data: the first report's UTC day to the end of the last report's
+let GAP = 7200
 
 const S = {
-  lanes: new Set(), // lane codes shown alone; empty for all
   q: '', found: null, // the search and the reader rows that hold it
-  sel: null, detail: null, // the report opened in place: its reader row and its fetched details
+  lane: null, // the chosen lane: its group's key
+  view: 'episodes', // what the side panel shows: the lane's episodes, or one report in full
+  sel: null, detail: null, // the report opened in full: its reader row and its fetched details
   keep: null, // a row a citation opened, kept whatever the label filter keeps
+  epTop: 0, // the episodes' scroll, kept while a report shows in full
+  span: null, // [t0, t1] of the panel's reports in view
 }
 
 async function load() {
@@ -291,12 +309,14 @@ async function load() {
   N = n
   C = cols
   T = t
+  GAP = first.gap || 7200
   IDW = first.id_chars || 8
   IDS = parts.map((p) => p.ids || ''.padEnd(p.n * IDW)).join('')
   rowAt = new Map()
   for (let i = 0; i < N; i++) rowAt.set(C.r[i], i)
   if (D.total) EXT = [Math.floor(D.t0 / DAY) * DAY, Math.floor(D.t1 / DAY) * DAY + DAY]
-  assignValues()
+  controls()
+  assignAll()
   return true
 }
 
@@ -306,23 +326,23 @@ const laneKey = (c) => D.keys[String(c)] || ''
 const refOf = (i) => `${D.files.all}#L${C.ln[i]}`
 const idOf = (i) => IDS.substr(i * IDW, IDW).trim()
 const srcRefOf = (i) => (C.sl[i] && D.files.src ? `${D.files.src}#L${C.sl[i]}` : null)
+const shortWhy = (i) => (D.short && D.short[C.why_included[i]]) ?? name('why_included', C.why_included[i])
 const R = () => EXT
-// the range the lanes and the list show: the time range selector's
+// the range the lanes and the lists show: the time range selector's
 const W = () => (range.full ? [EXT[0], EXT[1]] : [range.from, range.to])
 const isWhole = () => range.full
 function lowerBound(t) { let lo = 0, hi = N; while (lo < hi) { const m = (lo + hi) >> 1; if (T[m] < t) lo = m + 1; else hi = m } return lo }
+// whether a report shows: the search holds it, Filter by keeps its value and Color by's chip of its value is on
 function passes(i, skip) {
   if (S.found && !S.found.has(C.r[i])) return false
-  if (skip !== 'lane' && S.lanes.size && !S.lanes.has(C.lane[i])) return false
+  if (skip !== 'filter' && !FON[FVAL[i]]) return false
   if (skip !== 'colour' && !VON[VAL[i]]) return false
   return true
 }
 
-// ---------------------------------------------------------------- colour
-// thimble's Color by control: a field of the reports, or a label. Each report takes one value of the choice (VAL, an
-// index into VALS, the choice's values as strings and null for none); the chips give each value its colour and whether
-// it is on, and their order is a bar's stack from the bottom (ORD). While a label is the colour, a report's value is
-// the first of that label's values among the marks the reader gave it.
+// ---------------------------------------------------------------- the fields and labels the controls read
+// The report fields the controls offer, each value with what it means; a report's value of a field is its column's code
+// in names, a blank cell no value.
 const FIELDS_BY = [
   {
     name: 'confidence', title: 'Confidence',
@@ -348,7 +368,6 @@ const FIELDS_BY = [
       { name: 'background', meaning: 'A background control; no confidence and no data source' },
     ],
   },
-  // in the order of their reports, most first, the order their colors take when they are not declared
   {
     name: 'source_basis', title: 'Source basis', description: "How report-sources.csv assigned the report's data source; blank for a report it has no row for",
     values: [
@@ -367,58 +386,60 @@ const FIELDS_BY = [
     ],
   },
 ]
-let VAL = new Int16Array(0), VALS = [null], ORD = [0], VCOL = ['#a09c93'], VON = [true], VNAME = ['']
-const noneColour = () => token('--label-none') || '#a09c93'
+const LANE_FIELD = {
+  name: 'lane', title: 'Data source',
+  description: "The report's data_source in report-sources.csv; the reports it has no row for in Review required or Background control by their disposition",
+}
 // a report's value of a field, by its column index; null for a blank cell
 const fieldValue = (f, i) => (D && C && C[f] && typeof i === 'number' ? name(f, C[f][i]) || null : null)
-const colour = thimble.colorBy({
-  mount: '#colour',
-  fields: FIELDS_BY.map((f) => ({ ...f, value: (i) => fieldValue(f.name, i) })),
-  chips: 'filter',
-  strip: '#list',
-  onChange: () => { if (D) { assignValues(); rescope() } },
-})
-// the range a search widened to the whole span, since none of its hits was in it: put back when the search is cleared
-let searchWin
-// thimble's time range selector: the whole span with its reports in the Color by colors, and the viewfinder that
-// frames the range the lanes and the list show; its readout stands in the lanes' gutter. It opens on the whole span.
-const range = thimble.timeRange({
-  mount: '#range',
-  readout: '#rread',
-  onInput: () => { if (D) schedule() },
-  // a range the analyst sets after a search widened it is theirs, kept when the search is cleared
-  onChange: () => { if (!range.full) searchWin = undefined; if (D) { listReset = true; draw() } },
-})
-// what Reset puts back of the page's own state: the lanes shown alone and the open report; the kit puts back the search
-// field, the chips and the range
-thimble.onReset({
-  changed: () => S.lanes.size > 0 || S.sel != null || !!S.found,
-  reset: () => { S.lanes.clear(); S.sel = null; S.detail = null; S.found = null; S.q = ''; searchWin = undefined; listReset = true; rescope() },
-})
-// the range selector's records: every report that passes the filters, at its time, in its Color by value
-function overview() {
-  const ts = [], vs = []
-  for (let i = 0; i < N; i++) if (passes(i)) { ts.push(T[i]); vs.push(VALS[VAL[i]]) }
-  range.data({ times: ts, values: vs, span: [EXT[0], EXT[1]] })
+// the marks the reader handed for one label, as indices into D.marks
+const markKeys = (id, title) => (D && D.marks ? D.marks.map((m, k) => (m.id != null ? String(m.id) === String(id) : m.label === title) ? k : -1).filter((k) => k >= 0) : [])
+const labelOf = (id) => (labelState.all || labelState.labels || []).find((l) => String(l.id) === String(id))
+// a label's classes in its order, those it highlights, else those its marks name
+function labelClasses(id, title) {
+  const l = labelOf(id)
+  const vs = l && Array.isArray(l.values) ? l.values.filter((v) => v && v.highlight !== false).map((v) => String(v.name)) : []
+  for (const k of markKeys(id, title)) if (!vs.includes(D.marks[k].value)) vs.push(D.marks[k].value)
+  return vs
 }
-function assignValues() {
-  if (!D) return
-  const by = colour.by
-  VAL = new Int16Array(N)
-  if (by && by.field && C[by.field]) {
-    VALS = (D.names[by.field] || []).map((v) => (v === '' ? null : v))
+// each report's value under a choice ({field} or {label, title}): codes into the values it returns, 0 for none when a
+// label is chosen; [values, codes]
+function valuesUnder(by) {
+  const codes = new Int16Array(N)
+  if (!D || !by) return [[null], codes]
+  if (by.field && C[by.field]) {
     const col = C[by.field]
-    for (let i = 0; i < N; i++) VAL[i] = col[i]
-  } else if (by && by.label) {
-    const ks = (D.marks || []).map((m, k) => (m.label === by.title ? k : -1)).filter((k) => k >= 0)
-    VALS = [null, ...ks.map((k) => D.marks[k].value)]
+    for (let i = 0; i < N; i++) codes[i] = col[i]
+    return [(D.names[by.field] || []).map((v) => (v === '' ? null : v)), codes]
+  }
+  if (by.label) {
+    const ks = markKeys(by.label, by.title)
+    const vals = [null, ...ks.map((k) => D.marks[k].value)]
     for (let i = 0; i < N; i++) {
       const b = C.mb[i]
       let v = 0
       if (b) for (let q = 0; q < ks.length; q++) if (b & (1 << ks[q])) { v = q + 1; break }
-      VAL[i] = v
+      codes[i] = v
     }
-  } else VALS = [null]
+    return [vals, codes]
+  }
+  return [[null], codes]
+}
+
+// ---------------------------------------------------------------- Color by
+// Each report takes one value of the choice (VAL, an index into VALS, null for none); the chips give each value its
+// colour and whether it is on, and their order is a bar's stack from the bottom (ORD).
+let VAL = new Int16Array(0), VALS = [null], ORD = [0], VCOL = ['#a09c93'], VON = [true], VNAME = ['']
+const noneColour = () => token('--label-none') || '#a09c93'
+const colour = thimble.colorBy({
+  mount: '#colour',
+  fields: FIELDS_BY.map((f) => ({ ...f, value: (i) => fieldValue(f.name, i) })),
+  chips: 'filter',
+  onChange: () => { if (D) { assignValues(); rescope() } },
+})
+function assignValues() {
+  if (!D) return
+  ;[VALS, VAL] = valuesUnder(colour.by)
   syncChips()
 }
 // the chips' counts: the window's reports that pass every other filter, by value
@@ -445,91 +466,118 @@ function syncChips() {
   for (let k = 0; k < VALS.length; k++) if (!ORD.includes(k)) ORD.push(k)
 }
 // thimble hides every anchored element whose label value is turned off, a unit's value being the one most of its
-// records take, so while a label is the colour with a value off the lanes, bars and days are not anchored as units:
-// a lane or a day of mixed values would vanish with the value most of its reports take
+// records take, so while a label is the colour with a value off the lanes, bars and episodes are not anchored as units
 const unitsAnchored = () => !(colour.label && colour.values.some((v) => !v.on))
 const UNIT = (key, rest) => (unitsAnchored() ? ` data-anchor="view:${slug}/${key}"${rest}` : '')
-const catOf = (i) => VAL[i]
 const catColour = (k) => VCOL[k] || noneColour()
 const catName = (k) => VNAME[k] || 'none'
 const colourOf = (i) => catColour(VAL[i])
+// the value the sparklines draw over the rest: the first chip's value while it is on
+const leadValue = () => (colour.by && ORD.length && VALS[ORD[0]] != null && VON[ORD[0]] ? ORD[0] : -1)
+// a lane's or an episode's bar on its left edge: the value most of its reports take, while a field is the colour
+const barAttr = (v) => (colour.field ? ` data-colour="${esc(v == null ? '' : v)}"` : '')
 
-// ---------------------------------------------------------------- popovers: one at a time, closed by a click outside or Escape
-let openPop = null
-function close() { if (openPop) { openPop.anchor.setAttribute('aria-expanded', 'false'); openPop.remove(); openPop = null } }
-function pop(anchor, html, align = 'left') {
-  // measured before the open popover closes, since the anchor may be inside it
-  const rect = anchor.getBoundingClientRect()
-  close()
-  const p = document.createElement('div')
-  p.className = 'pop'
-  p.setAttribute('role', 'menu')
-  p.innerHTML = html
-  document.body.appendChild(p)
-  p.rect = rect
-  p.align = align
-  place(p, anchor, align)
-  p.anchor = anchor
-  anchor.setAttribute('aria-expanded', 'true')
-  openPop = p
-  return p
+// ---------------------------------------------------------------- Rows and Filter by
+// Made once the reports are in, when the data sources' names are known; Rows opens on the data source, Filter by on
+// none. A label chosen in either that is not on is turned on, so its marks reach the reports.
+let rows = null, filter = null
+function controls() {
+  if (rows) return
+  const fields = [{ ...LANE_FIELD, values: D.lanes.map((c) => laneName(c)) }, ...FIELDS_BY.map((f) => ({ ...f, values: f.values.map((v) => ({ name: v.name, meaning: v.meaning })) }))]
+  // a regrouping keeps the chosen lane where it is still a lane, as a citation's data source is once Rows turns to it
+  rows = thimble.rows({ mount: '#rows', fields, initial: 'lane', onChange: () => { if (D) { assignGroups(); if (groupOfLane() < 0) { forgetSide(); closeSide() } rescope() } } })
+  filter = thimble.filterBy({ mount: '#filter', fields, onChange: () => { if (D) { assignFilter(); rescope() } } })
 }
-function place(p, anchor, align) {
-  const r = anchor.isConnected ? anchor.getBoundingClientRect() : p.rect, w = p.offsetWidth
-  p.style.top = Math.max(6, Math.min(r.bottom + 4, innerHeight - p.offsetHeight - 6)) + 'px'
-  p.style.left = Math.max(6, Math.min(innerWidth - w - 6, align === 'right' ? r.right - w : r.left)) + 'px'
+// Rows: the lanes, each report's group (GRP) an index into GROUPS, {key, name, value, unit, non}; a data source's lanes
+// in the reader's order (largest first, the reports not included last), a field's in its declared order then by size,
+// a label's every class in its order, so a class added to it is a new lane, then the reports it does not mark
+let GRP = new Int16Array(0), GROUPS = []
+function assignGroups() {
+  GRP = new Int16Array(N)
+  const by = rows ? rows.by : null
+  if (!by) { GROUPS = [{ key: '*', name: 'All reports', value: null }]; return }
+  if (by.field === 'lane') {
+    const at = new Map()
+    GROUPS = D.lanes.map((c, g) => { at.set(c, g); return { key: 'l' + c, name: laneName(c), value: laneName(c), unit: laneKey(c), non: NONINC.has(laneName(c)) } })
+    for (let i = 0; i < N; i++) GRP[i] = at.get(C.lane[i]) ?? 0
+    return
+  }
+  const [vals, codes] = valuesUnder(by)
+  const n = new Int32Array(vals.length)
+  for (let i = 0; i < N; i++) n[codes[i]]++
+  let order
+  if (by.label) {
+    const classes = labelClasses(by.label, by.title)
+    const at = new Map(classes.map((v, g) => [v, g]))
+    GROUPS = classes.map((v) => ({ key: 'v' + v, name: v, value: v }))
+    GROUPS.push({ key: 'none', name: 'Not marked', value: null })
+    const map = vals.map((v) => (v == null ? GROUPS.length - 1 : at.get(v) ?? GROUPS.length - 1))
+    for (let i = 0; i < N; i++) GRP[i] = map[codes[i]]
+    return
+  }
+  const def = FIELDS_BY.find((f) => f.name === by.field)
+  const declared = def ? def.values.map((v) => v.name) : []
+  order = vals.map((_, k) => k).filter((k) => vals[k] != null && n[k])
+  order.sort((p, q) => {
+    const a = declared.indexOf(vals[p]), b = declared.indexOf(vals[q])
+    return (a < 0 ? 1e9 : a) - (b < 0 ? 1e9 : b) || n[q] - n[p]
+  })
+  const none = vals.findIndex((v) => v == null)
+  if (none >= 0 && n[none]) order.push(none)
+  const g = new Int16Array(vals.length)
+  GROUPS = order.map((k, j) => { g[k] = j; return { key: 'v' + (vals[k] ?? ''), name: vals[k] ?? (by.field === 'confidence' ? NO_CONF : `No ${by.title.toLowerCase()}`), value: vals[k] } })
+  for (let i = 0; i < N; i++) GRP[i] = g[codes[i]]
 }
-function repop(html) {
-  if (!openPop) return
-  const sc = [openPop, ...openPop.querySelectorAll('.scrolls, .col')].map((e) => e.scrollTop)
-  openPop.innerHTML = html
-  place(openPop, openPop.anchor, openPop.align)
-  ;[openPop, ...openPop.querySelectorAll('.scrolls, .col')].forEach((e, k) => { e.scrollTop = sc[k] || 0 })
+// Filter by: each report's value (FVAL, an index into FVALS) and whether it is on (FON)
+let FVAL = new Int16Array(0), FVALS = [null], FON = [true]
+function assignFilter() {
+  ;[FVALS, FVAL] = valuesUnder(filter ? filter.by : null)
+  FON = FVALS.map((v) => !filter || filter.isOn(v))
 }
-document.addEventListener('mousedown', (e) => { if (openPop && !openPop.contains(e.target) && !openPop.anchor.contains(e.target)) close() })
-const toggled = (anchor) => (openPop && openPop.anchor === anchor ? (close(), true) : false)
+// Filter by's counts: the window's reports that pass every other filter, by value
+function filterCounts() {
+  if (!filter || !filter.by) return
+  const [a, b] = W(), n = new Int32Array(FVALS.length)
+  for (let i = lowerBound(a), z = lowerBound(b); i < z; i++) if (passes(i, 'filter')) n[FVAL[i]]++
+  const map = {}
+  FVALS.forEach((v, k) => { const key = v == null ? '' : v; map[key] = (map[key] || 0) + n[k] })
+  filter.counts(map)
+}
+function assignAll() { assignValues(); assignGroups(); assignFilter() }
+const groupOfLane = () => GROUPS.findIndex((g) => g.key === S.lane)
 
-// ---------------------------------------------------------------- the control row
-// the data sources with the reports of the range that pass every other filter, in the lanes' order
-function laneCounts() {
-  const [a, b] = W(), n = new Map()
-  for (let i = lowerBound(a), z = lowerBound(b); i < z; i++) if (passes(i, 'lane')) n.set(C.lane[i], (n.get(C.lane[i]) || 0) + 1)
-  for (const v of S.lanes) if (!n.has(v)) n.set(v, 0)
-  return [...n].sort((p, q) => D.lanes.indexOf(p[0]) - D.lanes.indexOf(q[0]))
+// ---------------------------------------------------------------- the time range
+// the range a search widened to the whole span, since none of its hits was in it: put back when the search is cleared
+let searchWin
+// thimble's time range selector: the whole span with its reports in the Color by colors, and the viewfinder that frames
+// the range the lanes and the lists show; its readout stands in the lanes' gutter. It opens on the whole span.
+const range = thimble.timeRange({
+  mount: '#range',
+  readout: '#rread',
+  onInput: () => { if (D) schedule() },
+  // a range the analyst sets after a search widened it is theirs, kept when the search is cleared
+  onChange: () => { if (!range.full) searchWin = undefined; if (D) draw(true) },
+})
+thimble.divider({ top: '#tl', key: 'overview', min: 120 })
+// the side panel beside the overview and the list: a lane's episodes, or one report in full
+const side = thimble.side({ mount: '#main', width: 0.4, min: 320, key: 'episodes', onClose: () => { forgetSide(); draw() } })
+// what Reset puts back of the page's own state: the chosen lane, the open report and the search; the kit puts back the
+// search field, the chips, the range, Rows and Filter by and closes the side panel
+thimble.onReset({
+  changed: () => S.lane != null || S.sel != null || !!S.found,
+  reset: () => { forgetSide(); closeSide(); S.found = null; S.q = ''; searchWin = undefined; if (D) { assignAll(); rescope() } },
+})
+// the range selector's records: every report that passes the filters, at its time, in its Color by value
+function overview() {
+  const ts = [], vs = []
+  for (let i = 0; i < N; i++) if (passes(i)) { ts.push(T[i]); vs.push(VALS[VAL[i]]) }
+  range.data({ times: ts, values: vs, span: [EXT[0], EXT[1]] })
 }
-function checklist(keep) {
-  return laneCounts().filter(([v]) => keep(v)).map(([v, n]) => `<button class="item" data-v="${v}"><span class="box${S.lanes.has(v) ? ' on' : ''}"></span><span class="lab">${esc(laneName(v))}</span><span class="n">${fmt(n)}</span></button>`).join('')
-}
-// Data source: every data source, the reports under review and the background controls last, in a column that scrolls,
-// its shadow showing there is more below; the lanes it keeps are the lanes a click on a lane's name shows alone
-function laneMenu() {
-  const b = $('f-lane')
-  if (toggled(b)) return
-  const html = () => {
-    const isSrc = (c) => !NONINC.has(laneName(c))
-    const non = checklist((c) => !isSrc(c))
-    return `<div class="scrolls">${checklist(isSrc)}${non ? `<div class="sep"></div>${non}` : ''}</div>`
-  }
-  const p = pop(b, html())
-  p.classList.add('lanes')
-  place(p, b, 'left')
-  p.relabel = () => repop(html())
-  p.onclick = (ev) => {
-    const it = ev.target.closest('[data-v]')
-    if (!it) return
-    const v = +it.dataset.v
-    S.lanes.has(v) ? S.lanes.delete(v) : S.lanes.add(v)
-    rescope()
-    repop(html())
-  }
-}
-// a filter that is set and that no control in the row shows: thimble's active filter chip, × at its end
+
+// ---------------------------------------------------------------- the label filter, set outside the row
+// thimble's active filter chip, × at its end
 const fchip = (text, attrs) => `<button type="button" class="chip chip-tone-neutral chip-act active"${attrs} title="Clear this filter" aria-label="Clear the filter ${esc(text)}"><span class="chip-text">${esc(text)}</span>${ico('x')}</button>`
 function renderCtl() {
-  const b = $('f-lane'), n = S.lanes.size
-  b.classList.toggle('active', n > 0)
-  b.innerHTML = n === 1 ? `Data source: <span class="v">${esc(laneName([...S.lanes][0]))}</span><span class="clr" data-clear role="button" aria-label="Every data source">${ico('x')}</span>`
-    : n ? `Data sources <span class="n">${n}</span><span class="clr" data-clear role="button" aria-label="Every data source">${ico('x')}</span>` : `Data source${ico('down')}`
   const chips = []
   if (labelState.filter) {
     const f = labelState.filter, l = (labelState.all || labelState.labels || []).find((x) => x.name === f.label)
@@ -541,38 +589,44 @@ $('chips').onclick = (ev) => {
   const b = ev.target.closest('button')
   if (b && b.dataset.unfilter != null) thimble.setFilter(null, null).catch(() => {})
 }
-// ---------------------------------------------------------------- layout: the lanes, one height each
-let G = 150 // the gutter of lane names, px
-let PW = 400 // the plot's width
-let layout = null // {rows: [{c, non?, y, h}], h}
+
+// ---------------------------------------------------------------- the lanes and their rows: one pass over the reports
+// The lanes with a report that passes the filters, in Rows' order, each LANE_H high, a gap before the lanes of reports
+// not included; the whole span shows every such lane (and every class of a label), a range those with a report in it
+// and the chosen one. For each lane in the range: its reports (ix), how many, its episodes and its reports per Color by
+// value.
+let layout = null
 function laneLayout() {
-  // the lanes with a report that passes the filters, in the reader's order (largest first, the reports under review and
-  // the background controls last), each LANE_H high; a range shows the lanes with a report in it, the whole span every
-  // lane; the lanes scroll as a list when they do not fit
-  const inWin = new Map(), ever = new Map(), [a, b] = W()
-  let total = 0
-  for (let i = 0; i < N; i++) if (passes(i)) {
-    const c = C.lane[i]
-    total++
-    ever.set(c, (ever.get(c) || 0) + 1)
-    if (T[i] >= a && T[i] < b) inWin.set(c, (inWin.get(c) || 0) + 1)
+  const G = GROUPS.length, K = VALS.length
+  const ever = new Int32Array(G), inWin = new Int32Array(G), eps = new Int32Array(G), last = new Float64Array(G).fill(-Infinity)
+  const ix = Array.from({ length: G }, () => [])
+  const per = Array.from({ length: G }, () => new Int32Array(K))
+  const [a, b] = W()
+  for (let i = 0; i < N; i++) {
+    if (!passes(i)) continue
+    const g = GRP[i]
+    ever[g]++
+    if (T[i] < a || T[i] >= b) continue
+    inWin[g]++
+    if (T[i] - last[g] >= GAP) eps[g]++
+    last[g] = T[i]
+    ix[g].push(i)
+    per[g][VAL[i]]++
   }
-  const sel0 = S.sel != null && rowAt.has(S.sel) ? C.lane[rowAt.get(S.sel)] : null
-  const order = D.lanes.filter((c) => ever.has(c) && (isWhole() || inWin.get(c) || c === sel0))
-  const src = order.filter((c) => !NONINC.has(laneName(c))), non = order.filter((c) => NONINC.has(laneName(c)))
-  const rows = [...src.map((c) => ({ c })), ...non.map((c) => ({ c, non: true }))]
+  const chosen = groupOfLane()
+  const always = rows && rows.by && rows.by.label
+  const order = GROUPS.map((_, g) => g).filter((g) => (isWhole() ? ever[g] || always : inWin[g]) || g === chosen)
+  const src = order.filter((g) => !GROUPS[g].non), non = order.filter((g) => GROUPS[g].non)
+  const lanes = [...src.map((g) => ({ g })), ...non.map((g) => ({ g, non: true }))]
   const sep = src.length && non.length ? SEP : 0
-  let y = 0
-  for (const r of rows) {
-    if (r.non && sep && !rows.some((x) => x.non && x.y != null)) y += sep
+  let y = 0, sepAt = -1
+  lanes.forEach((r, j) => {
+    if (r.non && sep && sepAt < 0) { y += sep; sepAt = j }
     r.y = y; r.h = LANE_H; y += LANE_H
-  }
-  return { rows, h: y, inWin, ever, total }
-}
-// a lane's count: its reports in the range
-function laneCount(r) {
-  const n = layout.inWin.get(r.c) || 0
-  return { n, text: fmt(n), html: fmt(n) }
+  })
+  let total = 0
+  for (const r of lanes) total += inWin[r.g]
+  return { rows: lanes, h: y, sepAt, ever, inWin, eps, ix, per, total }
 }
 
 // ---------------------------------------------------------------- the timeline
@@ -583,14 +637,15 @@ function textWidth(text, font) {
   measure.font = font
   return measure.measureText(text).width
 }
+let G = 150 // the gutter of lane names, px
+let PW = 400 // the plot's width
 function sizes() {
   const w = $('tl').clientWidth - 14
   const body = getComputedStyle(document.body).fontFamily, mono = token('--font-mono') || 'monospace'
-  // as wide as every lane's name and the widest count need, whichever lanes show, so the plot stays where it is when a
-  // lane is shown alone
+  // as wide as every lane's name and the widest count need, whichever lanes show, so the plot stays where it is
   const most = textWidth(fmt(N), `400 11px ${mono}`)
   let need = 0
-  for (const c of D.lanes) need = Math.max(need, textWidth(laneName(c), `400 12px ${body}`) + 8 + most)
+  for (const g of GROUPS) need = Math.max(need, textWidth(g.name, `400 12px ${body}`) + 8 + most)
   G = Math.round(clamp(need + 18, 140, Math.min(280, w * 0.46)))
   document.documentElement.style.setProperty('--gut', G + 'px')
   PW = Math.max(160, w - G - 14 - ($('lanes').offsetWidth - $('lanes').clientWidth))
@@ -604,8 +659,6 @@ function pickBin(span, px, fine) {
   for (const b of BINS) { const w = (b / span) * px; if (w >= (b >= DAY ? 1 : fine)) return b }
   return BINS[BINS.length - 1]
 }
-
-// the lanes' one axis: thimble.timeAxis on the range's scale, under the range selector; its ticks are the lanes' grid
 let scale = null
 function renderAxis() {
   scale = range.scale(PW)
@@ -613,36 +666,33 @@ function renderAxis() {
 }
 
 // the lanes: bars per bin, or each report's mark in a short window
-let drawn = null // what the plot holds: {mode, B, first, rows: [{c|group, y, h, bins?}], max}
+let drawn = null // what the plot holds: {mode, B, first, rows, binned, tot, K}
 function renderLanes() {
-  if (!layout) layout = laneLayout()
   const [a, b] = W(), span = b - a, mode = span <= TICKS_BELOW ? 'ticks' : 'bars'
   const K = VALS.length
-  const rows = layout.rows, rowOf = new Map()
-  rows.forEach((r, j) => rowOf.set(r.c, j))
+  const lanes = layout.rows, rowOf = new Map()
+  lanes.forEach((r, j) => rowOf.set(r.g, j))
   const lo = lowerBound(a), hi = lowerBound(b)
   const svg = $('plot'), H = layout.h
   let s = ''
   // the grid of the axis's ticks, and a rule under each lane
   for (const tk of (scale || range.scale(PW)).ticks(72)) s += `<line class="${tk.major ? 'major' : 'grid'}" x1="${tk.x.toFixed(1)}" x2="${tk.x.toFixed(1)}" y1="0" y2="${H}"/>`
-  for (const r of rows) s += `<line class="rule" x1="0" x2="${PW}" y1="${r.y + r.h - 0.5}" y2="${r.y + r.h - 0.5}"/>`
-  const binned = []
-  let max = 1, B = 0, first = 0
+  for (const r of lanes) s += `<line class="rule" x1="0" x2="${PW}" y1="${r.y + r.h - 0.5}" y2="${r.y + r.h - 0.5}"/>`
   if (mode === 'bars') {
-    B = pickBin(span, PW, 3)
-    first = binStart(a, B)
+    const B = pickBin(span, PW, 3), first = binStart(a, B)
     const nb = Math.ceil((b - first) / B) + 1
-    for (let j = 0; j < rows.length; j++) binned.push(new Int32Array(nb * K))
+    const binned = lanes.map(() => new Int32Array(nb * K))
     for (let i = lo; i < hi; i++) {
       if (!passes(i)) continue
-      const j = rowOf.get(C.lane[i])
+      const j = rowOf.get(GRP[i])
       if (j == null) continue
-      binned[j][Math.floor((binStart(T[i], B) - first) / B) * K + catOf(i)]++
+      binned[j][Math.floor((binStart(T[i], B) - first) / B) * K + VAL[i]]++
     }
+    let max = 1
     const tot = binned.map((arr) => { const o = new Int32Array(nb); for (let x = 0; x < nb; x++) { let t = 0; for (let k = 0; k < K; k++) t += arr[x * K + k]; o[x] = t; if (t > max) max = t } return o })
     const L = Math.log1p(max), gap = (B / span) * PW > 3 ? 1 : 0
-    rows.forEach((r, j) => {
-      const key = laneKey(r.c), nm = laneName(r.c)
+    lanes.forEach((r, j) => {
+      const grp = GROUPS[r.g]
       for (let x = 0; x < nb; x++) {
         const n = tot[j][x]
         if (!n) continue
@@ -652,22 +702,18 @@ function renderLanes() {
         const hh = Math.max(3, ((r.h - 4) * Math.log1p(n)) / L)
         let y = r.y + r.h - 1, segs = ''
         for (const k of ORD) { const c = binned[j][x * K + k]; if (!c) continue; const sh = (hh * c) / n; y -= sh; segs += `<rect x="${x0.toFixed(2)}" y="${y.toFixed(2)}" width="${wd.toFixed(2)}" height="${sh.toFixed(2)}" fill="${catColour(k)}"/>` }
-        const bk = B === DAY ? isoDay(t0) : `${isoMin(t0)}..${isoMin(t0 + B)}`
-        const words = B === DAY ? dmy(t0) : spanWords(t0, t0 + B)
-        s += key
-          ? `<g class="bar" data-b="${j}:${x}"${UNIT(`${key}/${bk}`, ` data-anchor-unmarked data-anchor-text="${esc(nm)} · ${esc(words)} · ${plural(n, 'report')}"`)}>${segs}</g>`
-          : `<g class="bar" data-b="${j}:${x}">${segs}</g>`
+        s += `<g class="bar" data-b="${j}:${x}">${segs}</g>`
       }
     })
-    drawn = { mode, B, first, nb, rows, binned, tot, K, max }
+    drawn = { mode, B, first, nb, rows: lanes, binned, tot, K }
   } else {
-    // each report its own mark at its second; marks that would touch stack in rows within the lane, and the marked
-    // ones are drawn last so no other mark covers them
-    const per = rows.map(() => [])
-    for (let i = lo; i < hi; i++) { if (!passes(i)) continue; const j = rowOf.get(C.lane[i]); if (j != null) per[j].push(i) }
+    // each report its own mark at its second; marks that would touch stack in rows within the lane, and the marks of
+    // the first chip's value are drawn last, so no other mark covers them, and the open report's after all
+    const per = lanes.map(() => [])
+    for (let i = lo; i < hi; i++) { if (!passes(i)) continue; const j = rowOf.get(GRP[i]); if (j != null) per[j].push(i) }
     const MW = clamp((1 / span) * PW, 3, 7)
     const sel = S.sel != null && rowAt.has(S.sel) ? rowAt.get(S.sel) : -1
-    rows.forEach((r, j) => {
+    lanes.forEach((r, j) => {
       const list = per[j]
       if (!list.length) return
       const cap = Math.max(1, Math.floor((r.h - 3) / 5))
@@ -681,24 +727,22 @@ function renderLanes() {
         at[q] = k
       }
       const nr = ends.length, mh = nr === 1 ? r.h - 6 : Math.max(4, (r.h - 3) / nr - 1)
-      // the marks of the first chip's value are drawn last, so no other mark covers them, and the open report's after all
       const marked = [], plain = [], sels = []
       for (let q = 0; q < list.length; q++) {
         const i = list[q], x = X(T[i]) - MW / 2, y = r.y + r.h - 2 - (at[q] + 1) * (mh + 1) + 1
-        const c = colourOf(i), ref = refOf(i)
         const isMarked = VAL[i] === ORD[0] && VALS[VAL[i]] != null
-        const el = `<rect class="mk" data-i="${i}" data-anchor="${esc(ref)}" data-anchor-unmarked data-anchor-text="${esc(laneName(C.lane[i]))} · ${dmy(T[i])} ${hms(T[i])} UTC · ${esc(name('confidence', C.confidence[i]) || NO_CONF)}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${MW.toFixed(2)}" height="${mh.toFixed(2)}" rx="1" fill="${c}"${i === sel ? ' stroke="var(--text-primary)" stroke-width="1.5"' : ''}/>`
+        const el = `<rect class="mk" data-i="${i}" data-anchor="${esc(refOf(i))}" data-anchor-unmarked data-anchor-text="${esc(laneName(C.lane[i]))} · ${dmy(T[i])} ${hms(T[i])} UTC · ${esc(name('confidence', C.confidence[i]) || NO_CONF)}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${MW.toFixed(2)}" height="${mh.toFixed(2)}" rx="1" fill="${colourOf(i)}"${i === sel ? ' stroke="var(--text-primary)" stroke-width="1.5"' : ''}/>`
         ;(i === sel ? sels : isMarked ? marked : plain).push(el)
       }
       s += plain.join('') + marked.join('') + sels.join('')
     })
-    drawn = { mode, rows }
+    drawn = { mode, rows: lanes }
   }
   // the open report: a rule at its time over its lane
   if (S.sel != null && rowAt.has(S.sel)) {
-    const i = rowAt.get(S.sel), j = rowOf.get(C.lane[i])
+    const i = rowAt.get(S.sel), j = rowOf.get(GRP[i])
     if (j != null && T[i] >= a && T[i] < b) {
-      const x = X(T[i]).toFixed(1), r = rows[j]
+      const x = X(T[i]).toFixed(1), r = lanes[j]
       s += `<line x1="${x}" x2="${x}" y1="${Math.max(0, r.y - 3)}" y2="${r.y + r.h + 2}" stroke="var(--text-primary)" stroke-width="1.25"/>`
       s += `<path d="M${x - 4},${Math.max(0, r.y - 6)} h8 l-4,5 z" fill="var(--text-primary)"/>`
     }
@@ -706,28 +750,22 @@ function renderLanes() {
   svg.setAttribute('width', PW); svg.setAttribute('height', H)
   svg.innerHTML = s
   $('lanebox').style.height = H + 'px'
-  // the lane names, each a unit of its own, and their counts in the range
-  const hot = hotRow
-  const gh = rows.map((r, j) => {
-    const cnt = laneCount(r), n = cnt.n
-    const nm = laneName(r.c)
-    return `<div class="lh${n ? '' : ' zero'}${S.lanes.has(r.c) ? ' iso' : ''}${hot === j ? ' hot' : ''}" data-row="${j}"${UNIT(esc(laneKey(r.c)), ` data-anchor-unmarked data-anchor-text="${esc(nm)} · ${plural(layout.ever.get(r.c) || 0, 'report')}"`)} style="top:${r.y}px;height:${r.h}px"><button class="ln" type="button" data-lane="${r.c}" title="${esc(nm)}">${esc(nm)}</button><span class="n">${cnt.html}</span></div>`
+  // the lane names, a data source's each a unit of its own, and their counts in the range
+  const chosen = groupOfLane()
+  const gh = lanes.map((r, j) => {
+    const grp = GROUPS[r.g], n = layout.inWin[r.g]
+    const unit = grp.unit ? UNIT(esc(grp.unit), ` data-anchor-text="${esc(grp.name)} · ${plural(layout.ever[r.g], 'report')}"`) : ''
+    return `<div class="lh${n ? '' : ' zero'}${r.g === chosen ? ' iso' : ''}${hotRow === j ? ' hot' : ''}" data-row="${j}"${unit} style="top:${r.y}px;height:${r.h}px"><button class="ln" type="button" data-g="${r.g}" title="${esc(grp.name)}">${esc(grp.name)}</button><span class="n">${fmt(n)}</span></div>`
   }).join('')
-  $('gut').innerHTML = gh + (rows.length ? '' : '<div class="empty">No report passes these filters in this range</div>')
+  $('gut').innerHTML = gh + (lanes.length ? '' : '<div class="empty">No report passes these filters in this range</div>')
+  placeSpan()
 }
 
-// lane names: a click shows that lane alone (again shows every lane); a shift-click adds a lane to the lanes shown
-// alone or takes it out
+// a lane's name chooses the lane, as its row in the list does; again closes the panel
 $('gut').addEventListener('click', (ev) => {
   if (ev.metaKey || ev.ctrlKey) return
-  const h = ev.target.closest('.lh')
-  const b = h && h.querySelector('button')
-  if (!b) return
-  const c = +b.dataset.lane
-  if (ev.shiftKey) S.lanes.has(c) ? S.lanes.delete(c) : S.lanes.add(c)
-  else if (S.lanes.size === 1 && S.lanes.has(c)) S.lanes.clear()
-  else S.lanes = new Set([c])
-  rescope()
+  const b = ev.target.closest('.lh') && ev.target.closest('.lh').querySelector('button')
+  if (b) chooseLane(+b.dataset.g)
 })
 
 // the plot: a drag zooms to the span dragged, Ctrl or ⌘ with the wheel zooms around the pointer (sideways or with Shift
@@ -766,14 +804,14 @@ $('gut').addEventListener('click', (ev) => {
       return setWin([t1, Math.max(t2, t1 + MIN_SPAN)])
     }
     const mk = d.target.closest && d.target.closest('.mk')
-    if (mk) return pick(C.r[+mk.dataset.i], true)
+    if (mk) return openReport(C.r[+mk.dataset.i])
     const bar = d.target.closest && d.target.closest('.bar')
     if (bar && drawn && drawn.mode === 'bars') {
       const x = +bar.dataset.b.split(':')[1], t0 = drawn.first + x * drawn.B
       return setWin([t0, t0 + drawn.B])
     }
   })
-  svg.addEventListener('pointerleave', () => { if (!drag) { hideTip(); setHot(null) } })
+  svg.addEventListener('pointerleave', () => { if (!drag) { hideTip(); setHot(null); $('cursor').style.display = 'none' } })
   svg.addEventListener('wheel', (ev) => {
     if (!D) return
     const unit = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 400 : 1
@@ -785,21 +823,20 @@ $('gut').addEventListener('click', (ev) => {
     if (!zoom) {
       const d = ((ev.shiftKey && !dx ? dy : dx) / PW) * (b - a)
       const [ra, rb] = R(), sh = clamp(d, ra - a, rb - b)
-      if (sh) setWin([a + sh, b + sh], true)
+      if (sh) setWin([a + sh, b + sh])
       return
     }
-    zoomBy(Math.exp(dy * 0.0022), TofX(xAt(ev)), true)
+    zoomBy(Math.exp(dy * 0.0022), TofX(xAt(ev)))
   }, { passive: false })
 })()
-function zoomBy(f, at, quick) {
+function zoomBy(f, at) {
   const [a, b] = W(), [ra, rb] = R()
   const span = clamp((b - a) * f, MIN_SPAN, rb - ra)
   const p = (at - a) / (b - a)
-  let na = at - p * span
-  na = clamp(na, ra, rb - span)
-  setWin([na, na + span], quick)
+  const na = clamp(at - p * span, ra, rb - span)
+  setWin([na, na + span])
 }
-// the range set through the range selector, which tells the page (its onChange draws the lanes and the list)
+// the range set through the range selector, which tells the page (its onChange draws the lanes and the lists)
 function setWin(w) {
   const [ra, rb] = R()
   if (w) {
@@ -812,7 +849,7 @@ function setWin(w) {
   else range.set(null)
 }
 
-// hover: a bar's counts by category, or a mark's report
+// hover: a thin line at the pointer's time across the lanes, and a bar's counts by value or a mark's report
 const tip = $('tip')
 let hotRow = null
 function setHot(j) {
@@ -829,163 +866,311 @@ function showTip(html, ev) {
 }
 function hover(ev) {
   if (!drawn || !layout) return
-  const y = ev.clientY - $('plot').getBoundingClientRect().top
+  const box = $('plot').getBoundingClientRect()
+  const y = ev.clientY - box.top
+  const cur = $('cursor')
+  cur.style.display = 'block'
+  cur.style.left = G + Math.round(ev.clientX - box.left) + 'px'
+  cur.style.height = layout.h + 'px'
   const j = layout.rows.findIndex((r) => y >= r.y && y < r.y + r.h)
   setHot(j < 0 ? null : j)
   const bar = ev.target.closest && ev.target.closest('.bar')
   if (bar && drawn.mode === 'bars') {
     const [jj, x] = bar.dataset.b.split(':').map(Number), r = drawn.rows[jj], t0 = drawn.first + x * drawn.B
-    const nm = r.group ? `${r.group.length} smaller sources` : laneName(r.c)
-    let rows = ''
-    for (const k of ORD) { const c = drawn.binned[jj][x * drawn.K + k]; if (c) rows += `<div class="k"><span class="sw" style="--c:${catColour(k)}"></span>${esc(catName(k))}<span class="n">${fmt(c)}</span></div>` }
-    return showTip(`<div class="h">${esc(nm)}</div><div class="w">${esc(drawn.B === DAY ? `${WEEKDAY[dt(t0).getUTCDay()]} ${dmy(t0)}` : spanWords(t0, t0 + drawn.B))}</div>${rows}`, ev)
+    let lines = ''
+    for (const k of ORD) { const c = drawn.binned[jj][x * drawn.K + k]; if (c) lines += `<div class="k"><span class="sw" style="--c:${catColour(k)}"></span>${esc(catName(k))}<span class="n">${fmt(c)}</span></div>` }
+    return showTip(`<div class="h">${esc(GROUPS[r.g].name)}</div><div class="w">${esc(drawn.B === DAY ? `${WEEKDAY[dt(t0).getUTCDay()]} ${dmy(t0)}` : spanWords(t0, t0 + drawn.B))}</div>${lines}`, ev)
   }
   const mk = ev.target.closest && ev.target.closest('.mk')
   if (mk) {
     const i = +mk.dataset.i
     let same = 0
-    for (let q = lowerBound(T[i]); q < N && T[q] === T[i]; q++) if (C.lane[q] === C.lane[i] && passes(q)) same++
-    return showTip(`<div class="h">${esc(laneName(C.lane[i]))}</div><div class="w">${dmy(T[i])} ${hms(T[i])} UTC</div>${colour.off ? '' : `<div class="k"><span class="sw" style="--c:${colourOf(i)}"></span>${esc(catName(VAL[i]))}</div>`}<div class="x">${esc(name('confidence', C.confidence[i]) || NO_CONF)} · ${esc(name('broad_class', C.broad_class[i]))}</div>${same > 1 ? `<div class="x">${same} reports in this lane at this second</div>` : ''}<div class="x">${esc(name('why_included', C.why_included[i]).slice(0, 160))}</div>`, ev)
+    for (let q = lowerBound(T[i]); q < N && T[q] === T[i]; q++) if (GRP[q] === GRP[i] && passes(q)) same++
+    return showTip(`<div class="h">${esc(laneName(C.lane[i]))}</div><div class="w">${dmy(T[i])} ${hms(T[i])} UTC</div>${colour.off ? '' : `<div class="k"><span class="sw" style="--c:${colourOf(i)}"></span>${esc(catName(VAL[i]))}</div>`}<div class="x">${esc(name('confidence', C.confidence[i]) || NO_CONF)} · ${esc(name('broad_class', C.broad_class[i]))}</div>${same > 1 ? `<div class="x">${same} reports in this lane at this second</div>` : ''}<div class="x">${esc(shortWhy(i).slice(0, 160))}</div>`, ev)
   }
   hideTip()
 }
 
-// ---------------------------------------------------------------- the list: the range's reports in time order
-// Each UTC day opens with its header, which names the day with its year and stays at the list's top while its reports
-// scroll under it. A row gives its report's time, lane and the start of its report_id, then its broad_class and
-// why_included: reports of the same lane and second often share all but their report_id. A click opens the report in
-// place under its line (thimble.expand), its fields and what it can open, and again closes it. Each row's left edge is
-// its value's color, and the list's two tracks show where each value's reports are (the Color by control's strip).
-let listRows = [] // the column indices of the reports listed
-let items = [] // what the list holds in order: a report's column index, or -1 - k for the header of days[k]
-let days = [] // [{t0, n}] each day listed and its reports there
-let tops = new Float64Array(1) // where each item starts, and the list's height after the last
-let itemOf = new Int32Array(0) // a report's column index -> its item, -1 for none
-let listReset = false // the range changed: the list starts again at its top, or at the open report
-const DH = 28 // a day's header
-let EXH = 260 // the open report's details, px: measured once they are drawn
-const heightOf = (k) => (items[k] < 0 ? DH : C.r[items[k]] === S.sel ? RH + EXH : RH)
-function computeList() {
+// the span of the side panel's reports in view, a light tint across the lanes and on the range's own overview where
+// it marks one (range.visible)
+function placeSpan() {
+  const el = $('span')
+  const sp = S.span
+  if (typeof range.visible === 'function') { try { sp ? range.visible(sp[0], sp[1]) : range.visible(null) } catch (e) { /* the range marks nothing */ } }
   const [a, b] = W()
-  listRows = []; items = []; days = []
-  if (itemOf.length !== N) itemOf = new Int32Array(N)
-  itemOf.fill(-1)
-  let cur = null
-  for (let i = lowerBound(a), z = lowerBound(b); i < z; i++) {
-    if (!passes(i)) continue
-    const d = Math.floor(T[i] / DAY)
-    if (d !== cur) { days.push({ t0: d * DAY, n: 0 }); items.push(-days.length); cur = d }
-    days[days.length - 1].n++
-    itemOf[i] = items.length
-    items.push(i)
-    listRows.push(i)
-  }
-  layoutList()
-  // the two tracks: each report's value in the list's order, a day's header about half a row; each report's ref for
-  // the labels' ticks, and its time and first words for the preview
-  const vals = [], refs = [], at = []
-  for (const k of items) {
-    if (k < 0) { vals.push(null); refs.push(null); at.push(-1); continue }
-    const v = VON[VAL[k]] ? VALS[VAL[k]] : null
-    vals.push(v, v); refs.push(refOf(k), null); at.push(k, k)
-  }
-  colour.strip('#list', { rows: vals, refs, preview: (q) => { const i = at[q]; return i == null || i < 0 ? '' : { when: `${dm(T[i])} ${hms(T[i])}`, text: `${laneName(C.lane[i])} · ${name('broad_class', C.broad_class[i])} · ${name('why_included', C.why_included[i])}` } } })
-}
-// where each item starts, the open report taller by its details
-function layoutList() {
-  tops = new Float64Array(items.length + 1)
-  let y = 0
-  for (let k = 0; k < items.length; k++) { tops[k] = y; y += heightOf(k) }
-  tops[items.length] = y
-}
-function renderListHead() {
-  $('listhead').innerHTML = `<span class="t"><span class="n">${fmt(listRows.length)}</span> ${listRows.length === 1 ? 'report' : 'reports'}</span>`
-}
-const dayWords = (t0) => `${WEEKDAY[dt(t0).getUTCDay()]} ${dmy(t0)}`
-// a day's heading is anchored as its unit, for a citation and a question, but takes no label bar: a day's reports carry them
-function dayHtml(k, top, anchored) {
-  const d = days[k]
-  const anchor = anchored ? UNIT(isoDay(d.t0), ` data-anchor-unmarked data-anchor-text="${dayWords(d.t0)}"`) : ''
-  return `<div class="dh"${anchor} style="top:${top}px">${dayWords(d.t0)}<span class="n">${plural(d.n, 'report')}</span></div>`
-}
-function rowHtml(i, top) {
-  const ref = refOf(i), sref = srcRefOf(i), lane = laneName(C.lane[i])
-  const conf = name('confidence', C.confidence[i]) || NO_CONF, cls = name('broad_class', C.broad_class[i])
-  const why = name('why_included', C.why_included[i]), id = idOf(i)
-  const src = sref ? `<span class="src" data-anchor="${esc(sref)}" data-anchor-text="${esc(lane)}">${esc(lane)}</span>` : `<span class="src">${esc(lane)}</span>`
-  const open = C.r[i] === S.sel
-  return `<div class="row${open ? ' sel' : ''}" data-r="${C.r[i]}" data-anchor="${esc(ref)}" data-anchor-text="${esc(lane)} · ${dmy(T[i])} ${hms(T[i])} UTC · ${esc(conf)} · ${esc(cls)} · ${esc(why)}" style="top:${top}px${open ? `;height:${RH + EXH}px` : ''}"${colour.attr(i)}><div class="l1"><span class="tm">${hms(T[i])}</span>${src}<span class="rid" title="report_id">${esc(id)}</span></div><div class="l2"><span class="cl">${esc(cls)}</span> · ${esc(why)}</div>${open ? detailHtml(i) : ''}</div>`
-}
-function itemAt(y) { let lo = 0, hi = items.length; while (lo < hi) { const m = (lo + hi) >> 1; if (tops[m + 1] <= y) lo = m + 1; else hi = m } return lo }
-function renderList() {
-  const box = $('list'), rows = $('rows'), stick = $('stick')
-  if (!items.length) { rows.innerHTML = `<div class="empty">No report passes these filters in this range</div>`; rows.style.height = 'auto'; stick.style.display = 'none'; return }
-  rows.style.height = tops[items.length] + 'px'
-  const top = box.scrollTop, hgt = box.clientHeight
-  let h = ''
-  for (let k = itemAt(Math.max(0, top - 300)); k < items.length && tops[k] < top + hgt + 300; k++) {
-    h += items[k] < 0 ? dayHtml(-items[k] - 1, tops[k], true) : rowHtml(items[k], tops[k])
-  }
-  rows.innerHTML = h
-  // the open report's details, measured: its row takes their height
-  const ex = rows.querySelector('.row.sel .thimble-details')
-  if (ex) {
-    const need = Math.ceil(ex.offsetHeight) + 4
-    if (Math.abs(need - EXH) > 1) { EXH = need; layoutList(); rows.style.height = tops[items.length] + 'px'; return renderList() }
-  }
-  // the day of the item at the top, while its header is scrolled away
-  let k = itemAt(top + 1)
-  while (k > 0 && items[k] >= 0) k--
-  const show = items[k] < 0 && tops[k] < top
-  stick.style.display = show ? 'block' : 'none'
-  if (show) stick.innerHTML = dayHtml(-items[k] - 1, 0, false)
-}
-$('list').addEventListener('scroll', () => requestAnimationFrame(renderList), { passive: true })
-// a click on a row opens its report in place under its line, the row kept under the pointer; again closes it. A click
-// inside the details works their buttons.
-$('rows').addEventListener('click', (ev) => {
-  if (ev.metaKey || ev.ctrlKey) return
-  const r = ev.target.closest('.row')
-  if (!r) return
-  if (ev.target.closest('.thimble-details')) return detailClick(ev)
-  const row = +r.dataset.r
-  thimble.expand(r, () => toggleOpen(row), { find: () => $('rows').querySelector(`.row[data-r="${row}"]`) })
-})
-function listTopOf(i) { const k = i >= 0 && i < itemOf.length ? itemOf[i] : -1; return k < 0 ? -1 : tops[k] }
-function scrollListTo(i, centre) {
-  const y = listTopOf(i)
-  if (y < 0) return
-  const box = $('list')
-  // centred in what the list shows below the day's header that stays at its top
-  if (centre || y < box.scrollTop + DH || y + RH > box.scrollTop + box.clientHeight) box.scrollTop = Math.max(0, y - (box.clientHeight + DH) / 2 + RH / 2)
-  renderList()
+  if (!sp || !layout || sp[1] < a || sp[0] > b) { el.style.display = 'none'; return }
+  let x0 = clamp(X(Math.max(sp[0], a)), 0, PW), x1 = clamp(X(Math.min(sp[1], b)), 0, PW)
+  if (x1 - x0 < 2) { const m = (x0 + x1) / 2; x0 = m - 1; x1 = m + 1 }
+  el.style.display = 'block'
+  el.style.left = G + x0 + 'px'
+  el.style.width = x1 - x0 + 'px'
+  el.style.height = layout.h + 'px'
 }
 
-// ---------------------------------------------------------------- a report opened in place
-function detailHtml(i) {
+// ---------------------------------------------------------------- the list: the lanes again, in the same order
+// Each row: the lane's name (its edge the value most of its reports take), its reports in the range, its episodes, its
+// first report, a sparkline of its reports over its own span (the first chip's value over the rest), its last report and
+// its mix of the Color by values. A click chooses the lane.
+function listCols(w) {
+  const mix = !!colour.by
+  const full = w >= 760
+  const cols = [['nm', 'minmax(110px, 1.1fr)'], ['n', '64px']]
+  if (w >= 620) cols.push(['ep', '58px'])
+  cols.push(['first', full ? '126px' : '82px'], ['spark', 'minmax(60px, 1fr)'], ['last', full ? '126px' : '82px'])
+  if (mix && w >= 480) cols.push(['mix', full ? 'minmax(70px, 0.4fr)' : '64px'])
+  return { keys: cols.map((c) => c[0]), tmpl: cols.map((c) => c[1]).join(' '), full }
+}
+const COLHEAD = {
+  nm: () => (rows && rows.by ? rows.by.title : 'Lane'), n: () => 'Reports', ep: () => 'Episodes', first: () => 'First', spark: () => '', last: () => 'Last',
+  mix: () => (colour.by ? colour.by.title : ''),
+}
+const COLTIP = {
+  n: 'Its reports in the range that pass the filters', ep: 'The bursts of its reports less than two hours apart',
+  first: 'Its first report in the range', last: 'Its last report in the range', mix: () => `Its reports by ${colour.by ? colour.by.title : ''}`,
+}
+const whenCell = (t, full) => (full ? `${dmy(t)} ${hm(t)}` : (dt(t).getUTCFullYear() === dt(EXT[1] - 1).getUTCFullYear() ? `${dm(t)} ${hm(t)}` : dmy(t)))
+function sparkHtml(ix) {
+  if (!ix.length) return ''
+  const a = T[ix[0]], b = T[ix[ix.length - 1]], span = b - a
+  if (span <= 0) return `<svg class="spark" viewBox="0 0 ${SLICES} 1" preserveAspectRatio="none"><rect x="${SLICES / 2 - 0.6}" y="0.25" width="1.2" height="0.75" fill="var(--viz-ink-3)"/></svg>`
+  const all = new Int32Array(SLICES), led = new Int32Array(SLICES), lead = leadValue()
+  for (const i of ix) { const s = Math.min(SLICES - 1, Math.floor(((T[i] - a) * SLICES) / span)); all[s]++; if (VAL[i] === lead) led[s]++ }
+  let max = 1
+  for (const v of all) if (v > max) max = v
+  const path = (bins) => Array.from(bins, (v, s) => (v ? `M${s + 0.12},1V${(1 - v / max).toFixed(3)}H${s + 0.88}V1Z` : '')).join('')
+  return `<svg class="spark" viewBox="0 0 ${SLICES} 1" preserveAspectRatio="none"><path d="${path(all)}" fill="var(--viz-ink-3)"/>${lead >= 0 ? `<path d="${path(led)}" fill="${esc(catColour(lead))}"/>` : ''}</svg>`
+}
+function mixHtml(per, total) {
+  if (!colour.by || !total) return ''
+  const parts = ORD.filter((k) => VALS[k] != null && per[k])
+  return `<span class="mix" title="${esc(ORD.filter((k) => per[k]).map((k) => `${catName(k)} ${fmt(per[k])}`).join(' · '))}">${parts.map((k) => `<i style="width:${((100 * per[k]) / total).toFixed(2)}%;background:${esc(catColour(k))}"></i>`).join('')}</span>`
+}
+function mainValue(per) {
+  let best = -1, bn = 0
+  for (let k = 0; k < per.length; k++) if (per[k] > bn) { best = k; bn = per[k] }
+  return best < 0 ? null : VALS[best]
+}
+function renderList() {
+  const w = $('listsec').clientWidth
+  const lc = listCols(w)
+  const by = rows && rows.by ? rows.by.title : 'Lane'
+  const lanes = layout.rows
+  $('listhead').innerHTML = `<b>${esc(by)}</b><span><span class="n">${fmt(lanes.length)}</span> ${lanes.length === 1 ? 'lane' : 'lanes'} · <span class="n">${fmt(layout.total)}</span> ${layout.total === 1 ? 'report' : 'reports'}</span>${isWhole() ? '' : `<span class="s">${esc(spanWords(...W()))}</span>`}`
+  const cell = (k) => `<span class="${k === 'n' || k === 'ep' ? 'num' : k === 'last' ? 'last' : ''}"${COLTIP[k] ? ` title="${esc(typeof COLTIP[k] === 'function' ? COLTIP[k]() : COLTIP[k])}"` : ''}>${esc(COLHEAD[k]())}</span>`
+  $('listcols').style.gridTemplateColumns = lc.tmpl
+  $('listcols').innerHTML = lc.keys.map(cell).join('')
+  const chosen = groupOfLane()
+  let h = ''
+  lanes.forEach((r, j) => {
+    if (j === layout.sepAt) h += '<div class="sep-row"></div>'
+    const grp = GROUPS[r.g], ix = layout.ix[r.g], per = layout.per[r.g], n = layout.inWin[r.g]
+    const unit = grp.unit ? UNIT(esc(grp.unit), ` data-anchor-text="${esc(grp.name)} · ${plural(layout.ever[r.g], 'report')}"`) : ''
+    const v = {
+      nm: `<span class="nm" title="${esc(grp.name)}">${esc(grp.name)}</span>`,
+      n: `<span class="num">${fmt(n)}</span>`,
+      ep: `<span class="num">${fmt(layout.eps[r.g])}</span>`,
+      first: `<span class="t">${ix.length ? esc(whenCell(T[ix[0]], lc.full)) : ''}</span>`,
+      spark: `<span>${sparkHtml(ix)}</span>`,
+      last: `<span class="t last">${ix.length ? esc(whenCell(T[ix[ix.length - 1]], lc.full)) : ''}</span>`,
+      mix: `<span>${mixHtml(per, n)}</span>`,
+    }
+    h += `<div class="lrow cols${r.g === chosen ? ' sel' : ''}" data-g="${r.g}"${unit}${barAttr(mainValue(per))} style="grid-template-columns:${lc.tmpl}">${lc.keys.map((k) => v[k]).join('')}</div>`
+  })
+  $('list').innerHTML = h || '<div class="empty">No report passes these filters in this range</div>'
+}
+$('list').addEventListener('click', (ev) => {
+  if (ev.metaKey || ev.ctrlKey) return
+  const row = ev.target.closest('.lrow')
+  if (row) chooseLane(+row.dataset.g)
+})
+
+// ---------------------------------------------------------------- the side panel: a lane's episodes
+// The chosen lane's reports in the range that pass the filters, in time order, split into episodes where two lie GAP or
+// more apart; each episode a heading (its span, its length, its reports, a sparkline of its reports over its span and its
+// mix of the Color by values) over its reports, the heading of the episode at the top held there while its reports
+// scroll. A heading's click zooms the range to the episode; a report's click opens it in full.
+let EP = { items: [], eps: [], tops: new Float64Array(1), g: -1 } // items: a report's index, or -1 - k for episode k's heading
+function episodesOf(g) {
+  const ix = layout && layout.ix[g] ? layout.ix[g] : []
+  const eps = [], items = []
+  for (const i of ix) {
+    let e = eps[eps.length - 1]
+    if (!e || T[i] - T[e.ix[e.ix.length - 1]] >= GAP) { e = { ix: [], per: new Int32Array(VALS.length) }; eps.push(e); items.push(-eps.length) }
+    e.ix.push(i)
+    e.per[VAL[i]]++
+    items.push(i)
+  }
+  const tops = new Float64Array(items.length + 1)
+  let y = 0
+  for (let k = 0; k < items.length; k++) { tops[k] = y; y += items[k] < 0 ? EHH : ERH }
+  tops[items.length] = y
+  return { items, eps, tops, g }
+}
+function epAt(y) { let lo = 0, hi = EP.items.length; while (lo < hi) { const m = (lo + hi) >> 1; if (EP.tops[m + 1] <= y) lo = m + 1; else hi = m } return lo }
+const sideTitle = (g) => (GROUPS[g] ? GROUPS[g].name : '')
+function sideSub(g) {
+  const n = layout ? layout.inWin[g] : 0
+  return `${plural(n, 'report')} · ${plural(EP.eps.length, 'episode')}${isWhole() ? '' : ` · ${spanWords(...W())}`}`
+}
+function epHead(k, top, anchored) {
+  const e = EP.eps[k], a = T[e.ix[0]], b = T[e.ix[e.ix.length - 1]]
+  const grp = GROUPS[EP.g]
+  const unit = anchored && grp && grp.unit ? UNIT(`${grp.unit}/${isoSec(a)}`, ` data-anchor-text="${esc(grp.name)} · episode ${esc(epWords(a, b))} · ${plural(e.ix.length, 'report')}"`) : ''
+  return `<div class="eh" data-k="${k}"${unit}${barAttr(mainValue(e.per))} style="top:${top}px" title="Show this episode's span in the timeline"><div class="l1"><span class="w">${esc(epWords(a, b))}</span>${b > a ? `<span class="d">${esc(dur(b - a))}</span>` : ''}<span class="n">${plural(e.ix.length, 'report')}</span></div><div class="l2">${sparkHtml(e.ix)}${mixHtml(e.per, e.ix.length)}</div></div>`
+}
+function epRow(q, top) {
+  const i = EP.items[q], prev = q > 0 && EP.items[q - 1] >= 0 ? EP.items[q - 1] : null
+  const lane = laneName(C.lane[i]), conf = name('confidence', C.confidence[i]) || NO_CONF, cls = name('broad_class', C.broad_class[i])
+  return `<div class="er${C.r[i] === S.sel ? ' sel' : ''}" data-i="${i}" data-t="${T[i]}" data-anchor="${esc(refOf(i))}" data-anchor-text="${esc(lane)} · ${dmy(T[i])} ${hms(T[i])} UTC · ${esc(conf)} · ${esc(cls)} · ${esc(shortWhy(i))}" style="top:${top}px"${colour.attr(i)}><span class="tm">${hms(T[i])}</span><span class="gp">${prev != null ? gapText(T[i] - T[prev]) : ''}</span><span class="rid" title="report_id">${esc(idOf(i))}</span><span class="cl">${esc(cls)}</span><span class="why">${esc(shortWhy(i))}</span></div>`
+}
+function renderEpisodes() {
+  const body = side.body
+  if (!body || S.view !== 'episodes' || !side.isOpen) return
+  const box = body.querySelector('.eps'), rowsEl = body.querySelector('.ep-rows'), stick = body.querySelector('.ep-stick')
+  if (!box) return
+  if (!EP.items.length) { rowsEl.style.height = 'auto'; rowsEl.innerHTML = '<div class="empty">No report of this lane passes these filters in this range</div>'; stick.innerHTML = ''; S.span = null; placeSpan(); return }
+  rowsEl.style.height = EP.tops[EP.items.length] + 'px'
+  const top = Math.max(0, body.getBoundingClientRect().top - rowsEl.getBoundingClientRect().top), hgt = body.clientHeight
+  let h = ''
+  for (let q = epAt(Math.max(0, top - 240)); q < EP.items.length && EP.tops[q] < top + hgt + 240; q++) h += EP.items[q] < 0 ? epHead(-EP.items[q] - 1, EP.tops[q], true) : epRow(q, EP.tops[q])
+  rowsEl.innerHTML = h
+  // the heading of the episode at the top, while its own is scrolled away
+  let q = epAt(top + 1)
+  while (q > 0 && EP.items[q] >= 0) q--
+  stick.innerHTML = EP.items[q] < 0 && EP.tops[q] < top ? epHead(-EP.items[q] - 1, 0, false) : ''
+  // the reports in view, marked on the overview
+  const first = epAt(top + (stick.innerHTML ? EHH : 0)), last = epAt(top + hgt - 1)
+  let t0 = null, t1 = null
+  for (let k = first; k <= Math.min(last, EP.items.length - 1); k++) { const i = EP.items[k]; if (i < 0) continue; if (t0 == null) t0 = T[i]; t1 = T[i] }
+  S.span = t0 == null ? null : [t0, t1]
+  placeSpan()
+}
+// the panel drawn again from the lane's episodes: on a choice, a change of filters or range, or back from a report
+function drawSide(keepTop) {
+  if (S.lane == null) return
+  const g = groupOfLane()
+  if (g < 0) { closeSide(); forgetSide(); return }
+  if (S.view === 'detail') return drawDetail()
+  EP = episodesOf(g)
+  side.open({
+    title: sideTitle(g), sub: sideSub(g), ref: `lane:${S.lane}`,
+    html: '<div class="eps"><div class="ep-stick"></div><div class="ep-rows"></div></div>',
+  })
+  if (keepTop != null) side.body.scrollTop = keepTop
+  renderEpisodes()
+}
+side.body && side.body.addEventListener('scroll', () => requestAnimationFrame(renderEpisodes), { passive: true })
+side.body && side.body.addEventListener('click', (ev) => {
+  if (ev.metaKey || ev.ctrlKey) return
+  if (S.view === 'detail') return detailClick(ev)
+  const head = ev.target.closest('.eh')
+  if (head) {
+    const e = EP.eps[+head.dataset.k]
+    if (!e) return
+    const a = T[e.ix[0]], b = T[e.ix[e.ix.length - 1]], pad = Math.max(300, (b - a) * 0.08)
+    return setWin([a - pad, b + pad + 1])
+  }
+  const row = ev.target.closest('.er')
+  if (row) openReport(C.r[+row.dataset.i], true)
+})
+// the chosen lane's name in the overview and its row in the list, scrolled into view when they are out of it
+function revealLane() {
+  const g = groupOfLane()
+  if (g < 0 || !layout) return
+  const r = layout.rows.find((x) => x.g === g)
+  const lanes = $('lanes')
+  if (r && (r.y < lanes.scrollTop || r.y + r.h > lanes.scrollTop + lanes.clientHeight)) lanes.scrollTop = Math.max(0, r.y - lanes.clientHeight / 2)
+  const row = $('list').querySelector(`.lrow[data-g="${g}"]`), list = $('list')
+  if (row && (row.offsetTop < list.scrollTop || row.offsetTop + row.offsetHeight > list.scrollTop + list.clientHeight)) list.scrollTop = Math.max(0, row.offsetTop - list.clientHeight / 2)
+}
+function closeSide() { if (side.isOpen) side.close(); S.span = null; placeSpan() }
+function forgetSide() { S.lane = null; S.view = 'episodes'; S.sel = null; S.detail = null; S.span = null }
+// a lane chosen in the overview or the list: its episodes in the panel; the lane chosen again closes it
+function chooseLane(g) {
+  const key = GROUPS[g] ? GROUPS[g].key : null
+  if (key == null) return
+  if (S.lane === key && side.isOpen && S.view === 'episodes') { forgetSide(); closeSide(); return draw() }
+  S.lane = key
+  S.view = 'episodes'
+  S.sel = null
+  S.detail = null
+  draw()
+}
+
+// ---------------------------------------------------------------- a report in full in the side panel
+async function openReport(r, fromList) {
+  const i = rowAt.get(r)
+  if (i == null) return
+  if (fromList && side.body) S.epTop = side.body.scrollTop
+  else S.epTop = null
+  S.lane = GROUPS[GRP[i]] ? GROUPS[GRP[i]].key : S.lane
+  S.sel = r
+  S.view = 'detail'
+  S.detail = null
+  if (!(T[i] >= W()[0] && T[i] < W()[1])) range.set(null)
+  draw()
+  if (!fromList) revealLane()
+  let d = null
+  try { d = await thimble.fetch({ op: 'report', r, ...(S.keep != null ? { keep: [S.keep] } : {}) }, { key: 'report' }) } catch (e) { if (e && e.name === 'AbortError') return; throw e }
+  if (S.sel !== r) return
+  S.detail = d
+  drawDetail()
+}
+function backToEpisodes() {
+  const top = S.epTop
+  S.view = 'episodes'
+  S.sel = null
+  S.detail = null
+  draw(false, top)
+}
+const facts = (rows) => `<dl class="facts">${rows.filter(([, v]) => v != null && v !== '').map(([k, v, mono]) => `<dt>${esc(k)}</dt><dd${mono ? ' class="mono"' : ''}>${esc(Array.isArray(v) ? v.join(', ') : v)}</dd>`).join('')}</dl>`
+function section(title, part, keys, monoKeys = []) {
+  if (!part) return ''
+  const rec = part.record || part
+  return `<div class="det-sec" data-anchor="${esc(part.ref)}" data-anchor-text="${esc(title)}"><div class="h">${esc(title)}<button type="button" class="chip chip-tone-evidence chip-act" data-file="${esc(part.ref)}" title="Open ${esc(part.ref)} in the File browser">${ico('file')}${esc(String(part.ref).split('#')[0].split('/').pop())}</button></div>${facts(keys.map((k) => [k, rec[k], monoKeys.includes(k)]))}</div>`
+}
+function drawDetail() {
+  const i = rowAt.get(S.sel)
+  if (i == null) return
   const d = S.detail && S.detail.row === S.sel ? S.detail : null
+  const g = GRP[i]
   const conf = name('confidence', C.confidence[i]) || NO_CONF
   const tag = (t) => `<span class="chip chip-tone-neutral">${esc(t)}</span>`
-  const tags = `${tag(conf)}${tag(name('disposition', C.disposition[i]))}${name('catalog', C.catalog[i]) === 'supplemental' ? tag('supplemental catalog') : ''}`
+  const tags = `${tag(conf)}${tag(name('disposition', C.disposition[i]))}${tag(name('broad_class', C.broad_class[i]))}${name('catalog', C.catalog[i]) === 'supplemental' ? tag('supplemental catalog') : ''}`
   const when = `${WEEKDAY[dt(T[i]).getUTCDay()]} ${dmy(T[i])} · ${hms(T[i])} UTC`
   let body = '<div class="det-sec empty">Reading the report</div>'
   if (d) {
-    const s = d.source
-    const src = s ? `<div class="det-sec srcbox" data-anchor="${esc(s.ref)}" data-anchor-text="${esc(s.data_source)}"><dl class="facts"><dt>data_source</dt><dd>${esc(s.data_source)}</dd><dt>source_basis</dt><dd class="mono">${esc(s.source_basis || '—')}</dd><dt>matched_sources</dt><dd>${esc(s.matched_sources || '—')}</dd></dl></div>` : ''
-    const marks = (d.marks || []).length ? `<div class="det-sec"><div class="h">Labels</div><div class="marks">${d.marks.map((m) => { const l = (labelState.all || labelState.labels || []).find((x) => x.name === m.label); return `<span class="chip chip-key" data-label="${esc(l ? l.id : '')}" style="--c:${esc(m.colour)}"><span class="chip-sw"></span><span class="chip-text">${esc(m.label === m.value ? m.label : `${m.label}: ${m.value}`)}</span></span>` }).join('')}</div></div>` : ''
-    body = `<div class="det-sec"><div class="h">why_included</div><p class="det-why">${esc(d.why_included || '')}</p></div>${src}${marks}<div class="det-sec"><div class="kv"><div class="k">report_id</div><div class="v">${esc(d.report_id || '')}</div></div><div class="kv"><div class="k">report_date_utc</div><div class="v">${esc(d.report_date_utc || '')}</div></div><div class="kv"><div class="k">report_url</div><div class="url"><a href="${esc(d.report_url || '')}" data-url title="${esc(d.report_url || '')}, an outside page: a click copies it">${esc(d.report_url || '')}</a><button class="btn btn-ghost btn-sm ib" type="button" data-copy title="Copy the address" aria-label="Copy the address">${ico('copy')}</button></div></div></div>`
+    const marks = (d.marks || []).length ? `<div class="det-sec"><div class="h">Labels</div><div class="marks">${d.marks.map((m) => { const l = labelOf(m.id) || (labelState.all || []).find((x) => x.name === m.label); return `<span class="chip chip-key" data-label="${esc(l ? l.id : '')}" style="--c:${esc(m.colour)}"><span class="chip-sw"></span><span class="chip-text">${esc(m.label === m.value ? m.label : `${m.label}: ${m.value}`)}</span></span>` }).join('')}</div></div>` : ''
+    body = `<div class="det-sec"><div class="h">why_included</div><p class="det-why">${esc(d.why_included || '')}</p></div>`
+      + (d.caveat ? `<div class="det-sec"><div class="h">caveat</div><p class="det-why">${esc(d.caveat)}</p></div>` : '')
+      + section('Source row', d.source, ['data_source', 'source_basis', 'matched_sources'], ['source_basis'])
+      + section('Selection provenance', d.provenance, ['source_batch', 'group', 'source', 'record_kind', 'selection_basis', 'description'], ['source_batch', 'record_kind', 'selection_basis'])
+      + section('Supplemental decision', d.supplement, ['source_batch', 'disposition', 'confidence', 'broad_class', 'basis', 'reason', 'classification_provenance'], ['source_batch', 'basis'])
+      + section('Confidence change', d.override, ['episode', 'previous_confidence', 'confidence', 'basis', 'reason', 'unchanged_fields'], ['basis'])
+      + marks
+      + `<div class="det-sec">${facts([['report_id', d.report_id, true], ['report_date_utc', d.report_date_utc, true], ['timestamp_precision', d.timestamp_precision, true]])}<dl class="facts" style="margin-top:3px"><dt>report_url</dt><dd><div class="url"><a href="${esc(d.report_url || '')}" data-url title="${esc(d.report_url || '')}, an outside page: a click copies it">${esc(d.report_url || '')}</a><button class="btn btn-ghost btn-sm ib" type="button" data-copy title="Copy the address" aria-label="Copy the address">${ico('copy')}</button></div></dd></dl></div>`
   }
-  return `<div class="thimble-details" data-thimble-chrome><div class="det-tags">${tags}</div><div class="det-when">${when}</div>${body}<div class="det-acts"><button class="btn btn-secondary btn-sm" type="button" data-near>${ico('zoom')}The hour around it</button><button class="btn btn-secondary btn-sm" type="button" data-file>${ico('file')}Its row in the file</button></div></div>`
+  const back = `<button class="btn btn-ghost btn-sm det-back" type="button" data-back>${ico('left')}${esc(sideTitle(g))} · episodes</button>`
+  // the same report drawn again keeps where its details were scrolled
+  const keep = side.isOpen && side.ref === refOf(i) ? side.body.scrollTop : 0
+  side.open({
+    title: sideTitle(g), sub: `report ${idOf(i)} · ${dmy(T[i])} ${hms(T[i])}`, ref: refOf(i),
+    html: `${back}<div class="det" data-anchor="${esc(refOf(i))}" data-anchor-text="${esc(laneName(C.lane[i]))} · ${dmy(T[i])} ${hms(T[i])} UTC · ${esc(conf)}"><div class="det-tags">${tags}</div><div class="det-when">${when}</div>${body}<div class="det-acts"><button class="btn btn-secondary btn-sm" type="button" data-near>${ico('zoom')}The hour around it</button><button class="btn btn-secondary btn-sm" type="button" data-file="${esc(refOf(i))}">${ico('file')}Its row in the file</button></div></div>`,
+  })
+  if (keep) side.body.scrollTop = keep
+  S.span = null
+  placeSpan()
 }
 function detailClick(ev) {
   const b = ev.target.closest('button, a')
   if (!b) return
   const i = rowAt.get(S.sel)
-  if (b.dataset.file != null && i != null) return thimble.navigate(refOf(i), { browser: true })
+  if (b.dataset.back != null) return backToEpisodes()
+  if (b.dataset.file) return thimble.navigate(b.dataset.file, { browser: true })
   if (b.dataset.near != null && i != null) { const m = Math.floor(T[i] / 60) * 60; return setWin([m - 1800, m + 1800]) }
   if (b.dataset.url != null || b.dataset.copy != null) {
     ev.preventDefault()
-    const a = b.closest('.thimble-details').querySelector('[data-url]')
+    const a = side.body.querySelector('[data-url]')
     if (!a) return
     const rg = document.createRange(); rg.selectNodeContents(a)
     const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg)
@@ -994,70 +1179,29 @@ function detailClick(ev) {
     if (b.dataset.copy != null) { b.title = ok ? 'Copied' : 'Selected: press ⌘C to copy'; b.innerHTML = ico(ok ? 'check' : 'copy') }
   }
 }
-// the report of reader row r opened in place, or closed when it was open; its details fetched, then drawn in its row
-function toggleOpen(r) {
-  if (S.sel === r) { S.sel = null; S.detail = null; layoutList(); return renderList() }
-  S.sel = r
-  S.detail = null
-  layoutList()
-  renderList()
-  fetchDetail(r)
-}
-async function fetchDetail(r) {
-  let d = null
-  try { d = await thimble.fetch({ op: 'report', r, ...(S.keep != null ? { keep: [S.keep] } : {}) }, { key: 'report' }) } catch (e) { if (e && e.name === 'AbortError') return; throw e }
-  if (S.sel !== r) return
-  S.detail = d
-  const el = $('rows').querySelector(`.row[data-r="${r}"]`)
-  if (el) thimble.expand(el, () => renderList(), { find: () => $('rows').querySelector(`.row[data-r="${r}"]`) })
-  else renderList()
-}
-// a report picked in the lanes or by a citation: opened in place, in the range and the filters that would drop it
-// cleared, the list scrolled to it
-async function pick(r) {
-  const i = rowAt.get(r)
-  if (i == null) return
-  S.sel = r
-  S.detail = null
-  if (!passes(i)) clearFilters()
-  if (!(T[i] >= W()[0] && T[i] < W()[1])) range.set(null)
-  render()
-  scrollListTo(i, true)
-  await fetchDetail(r)
-  scrollListTo(i)
-}
 
 // ---------------------------------------------------------------- render
 let frame = null
 function schedule() { if (frame == null) frame = requestAnimationFrame(() => { frame = null; draw() }) }
-function draw() {
+// everything drawn again from the state: the counts, the lanes, the list and the side panel; `fresh` starts the
+// panel's episodes at their top
+function draw(fresh, keepTop) {
   if (!D) return
   chipCounts()
+  filterCounts()
   layout = laneLayout()
   sizes()
   renderAxis(); renderLanes()
-  computeList(); renderListHead()
-  if (listReset) {
-    listReset = false
-    const y = S.sel != null && rowAt.has(S.sel) ? listTopOf(rowAt.get(S.sel)) : -1
-    const box = $('list')
-    box.scrollTop = y >= 0 ? Math.max(0, y - (box.clientHeight + DH) / 2 + RH / 2) : 0
-  }
   renderList()
+  if (S.lane != null) drawSide(keepTop != null ? keepTop : fresh || !side.isOpen ? 0 : side.body.scrollTop)
+  else { closeSide() }
 }
 function render() {
   if (!D) return
   renderCtl(); overview(); draw()
-  if (S.sel != null && rowAt.has(S.sel) && listTopOf(rowAt.get(S.sel)) >= 0) scrollListTo(rowAt.get(S.sel))
 }
-// a change of what is in scope starts the list again at its top
-function rescope() { $('list').scrollTop = 0; render(); if (openPop && openPop.relabel) openPop.relabel() }
-// the control row is drawn before the reports arrive, so the page has its controls while it loads
-$('f-lane').innerHTML = `Data source${ico('down')}`
-$('f-lane').onclick = (ev) => {
-  if (ev.target.closest('[data-clear]')) { close(); S.lanes.clear(); return rescope() }
-  laneMenu()
-}
+// a change of what is in scope: the overview's records again, and the lists from their tops
+function rescope() { $('list').scrollTop = 0; renderCtl(); overview(); draw(true) }
 let typing = null
 $('q').addEventListener('input', (e) => {
   clearTimeout(typing)
@@ -1080,29 +1224,46 @@ $('q').addEventListener('input', (e) => {
   }, 220)
 })
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (openPop) return close()
-    if (S.sel != null) { S.sel = null; S.detail = null; return render() }
-  }
+  if (e.key !== 'Escape' || !side.isOpen || e.defaultPrevented) return
+  if (S.view === 'detail') return backToEpisodes()
+  forgetSide(); closeSide(); draw()
 })
 // the gutter is measured in the page's faces, so it is laid out again once they have loaded
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (D) render() })
-let resizeTimer = null
-addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 100) })
+// the overview and the list laid out again when their width changes: the window, or the side panel opening or closing
+let resizeTimer = null, laidW = -1
+new ResizeObserver(() => {
+  const w = $('stack').clientWidth
+  if (w === laidW) return
+  laidW = w
+  clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(() => { if (D) { sizes(); renderAxis(); renderLanes(); renderList(); renderEpisodes() } }, 60)
+}).observe($('stack'))
 
 // ---------------------------------------------------------------- places
-// A report opens in place in the list, its lane in view and the filters that would drop it cleared; a lane shows alone;
-// a day or a window opens zoomed to it; a lane within a day or a window shows alone and zoomed.
-function clearFilters() { S.lanes.clear(); S.found = null; S.q = ''; searchWin = undefined; $('q').value = '' }
+// A report opens in full in the side panel, in its lane, the search that would drop it cleared; a lane opens with its
+// episodes, a data source's under Rows by data source; an episode opens its lane zoomed to it; a day or a window opens
+// zoomed to it.
+function clearSearch() { S.found = null; S.q = ''; searchWin = undefined; $('q').value = '' }
 async function openPlace(t) {
-  if (t.r != null) return pick(t.r)
-  if (t.lane != null || t.from != null) {
-    clearFilters()
-    if (t.lane != null) S.lanes = new Set([t.lane])
-    if (t.from != null) { render(); setWin([t.from, t.to]); return }
-    range.set(null)
+  if (t.r != null) {
+    const i = rowAt.get(t.r)
+    if (i != null && !passes(i)) clearSearch()
+    renderCtl(); overview()
+    return openReport(t.r)
   }
-  render()
+  if (t.lane != null) {
+    clearSearch()
+    if (rows && (!rows.by || rows.by.field !== 'lane')) { rows.choose('lane'); assignGroups() }
+    S.lane = 'l' + t.lane
+    S.view = 'episodes'
+    S.sel = null
+  }
+  renderCtl(); overview()
+  if (t.from != null) { setWin([t.from, t.to]); requestAnimationFrame(revealLane); return }
+  if (t.lane != null) range.set(null)
+  draw(true)
+  revealLane()
 }
 thimble.onOpen(async (place) => {
   const t = (place && place.target) || {}
@@ -1114,12 +1275,11 @@ thimble.onLabels(async (state) => {
   const was = JSON.stringify([labelState.labels, labelState.filter])
   labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
   if (!D) return
-  if (openPop && openPop.relabel) openPop.relabel()
-  if (JSON.stringify([labelState.labels, labelState.filter]) === was) { renderCtl(); return draw() }
+  if (JSON.stringify([labelState.labels, labelState.filter]) === was) { renderCtl(); assignAll(); return draw() }
   if (!(await load())) return
-  if (S.sel != null && !rowAt.has(S.sel)) { S.sel = null; S.detail = null }
+  if (S.sel != null && !rowAt.has(S.sel)) { S.sel = null; S.detail = null; S.view = 'episodes' }
   render()
-  if (S.sel != null) fetchDetail(S.sel)
+  if (S.sel != null && S.view === 'detail') openReport(S.sel, false)
 })
 </script>
 </body>

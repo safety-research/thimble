@@ -991,19 +991,17 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
 
 async def _every_answer(name: str, slug: str) -> list:
     """What the example's page fetches, over every place: each Timeline event in full, each session's transcript and
-    the runs and sessions compared, each Repository tab and unit."""
+    each call in full, each Repository tab and unit."""
     call = functools.partial(views.reader_call, name, slug, "records")
     if name == "timeline":
         rows = (await call({"op": "overview"}))["cols"]["r"]
         return [{"ref": got["ref"], **got["record"]} for got in [await call({"op": "record", "r": r}) for r in rows]]
     if name == "linked-sessions":
         ov = await call({"op": "overview"})
-        out = [await call({"op": "session", "id": s["id"]}) for s in ov["sessions"]]
-        for s in ov["sessions"]:
-            out += [await call({"op": "moment", "run": s["run"], "t": c["time"], "session": s["id"]})
-                    for c in ov["calls"] if c["session"] == s["id"]][:3]
-        return [*out, ov, await call({"op": "compare", "ids": [r["id"] for r in ov["runs"]]}),
-                await call({"op": "compare", "ids": [s["id"] for s in ov["sessions"]][:6]})]
+        out = [await call({"op": "turns", "session": s["id"]}) for s in ov["sessions"]]
+        out.append(await call({"op": "turns", "refs": [it["ref"] for it in ov["items"] if it["agent"] == "client-port"]}))
+        out += [await call({"op": "record", "ref": it["ref"]}) for it in ov["items"] if it["kind"] == "call"]
+        return [*out, ov]
     out = []
     for tab in ("pulls", "issues", "discussions", "agents"):
         got = await call({"op": "view", "tab": tab, "runs": ["r1", "r2", "r3", "r4"], "compare": True})

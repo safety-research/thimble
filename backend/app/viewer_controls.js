@@ -11,9 +11,10 @@
 //                                                        or a label, with a lane for the records with no value. A field with
 //                                                        parentOf(key) is a tree, drawn left-aligned with tree guides
 //   thimble.lanes({ mount, rows, range, ... })           the overview as lanes on the time range's scale: a lane per group of
-//                                                        Rows, the marks in the Color by colours, a failure underlined in the
-//                                                        problem red, a quiet cursor line on hover, the detail list's rows in
-//                                                        view marked as a tint, and the key's entries as toggles
+//                                                        Rows, the marks in the Color by colours (or with `density` bars of
+//                                                        the records per bin), a failure underlined in the problem red, a
+//                                                        quiet cursor line on hover, the detail list's rows in view marked
+//                                                        as a tint, and the key's entries as toggles
 //   thimble.key(mount, entries, { onChange })            a key whose entries turn their series off and on
 //   thimble.divider({ top, key })                        a bar between the overview and the detail list that a drag moves
 //
@@ -37,6 +38,8 @@
   var NONE = '\u0000none' // the key of the records that take no value
   var NONE_BY = 'none' // what a control keeps for no choice
   var LANE_H = 18 // px, a lane's height
+  var DENSE_H = 36 // px, a lane's height while the lanes draw density, so that the bars read
+  var DENSE_BIN = 4 // px, a density bar's least width
   var MARK_MIN = 2 // px, a mark's least width
   var HIT = 4 // px either side of a mark within which a click or the tip finds it
   var ICON = {
@@ -135,7 +138,11 @@
       })
     this.labelsToo = opts.labels !== false
     this.none = opts.none !== false
-    this.initial = typeof opts.initial === 'string' ? opts.initial : opts.initial === null ? null : this.defaultInitial()
+    // what the control opens on until the analyst picks: a field's name, or a list of choices, the first there taken,
+    // each a field's name or {label: name or id}, a label counting while it is on; then the default
+    var init = opts.initial
+    this.starts = Array.isArray(init) ? init.slice() : init && typeof init === 'object' ? [init] : null
+    this.initial = typeof init === 'string' ? init : init === null ? null : this.defaultInitial()
     this.tallies = {}
     this.pass = null
     this.passTimer = null
@@ -161,8 +168,36 @@
       var f = this.field(by.slice(2))
       return { field: f.name, title: f.title, f: f, key: by }
     }
-    var fd = this.initial ? this.field(this.initial) : null
-    return fd ? { field: fd.name, title: fd.title, f: fd, key: 'f:' + fd.name } : null
+    return this.opening()
+  }
+  // how the control opens (`initial`): the first of its starts that is there, a label while it is on, else its field
+  Choice.prototype.opening = function () {
+    var list = (this.starts || []).concat(this.initial ? [this.initial] : [])
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i]
+      if (typeof s === 'string') {
+        var fd = this.field(s)
+        if (fd) return { field: fd.name, title: fd.title, f: fd, key: 'f:' + fd.name }
+      } else if (s && typeof s === 'object' && s.label != null && this.labelsToo) {
+        var l = findLabel(String(s.label))
+        if (l && shared.labelOn(String(l.id))) return { label: String(l.id), title: l.name, key: 'l:' + l.id }
+      }
+    }
+    return null
+  }
+  // a label by its id, else by its name (one over these files first), the case and the spaces aside
+  function findLabel(x) {
+    var all = labels()
+    var norm = function (s) {
+      return String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase()
+    }
+    var i
+    for (i = 0; i < all.length; i++) if (String(all[i].id) === x) return all[i]
+    var named = all.filter(function (l) {
+      return norm(l.name) === norm(x)
+    })
+    for (i = 0; i < named.length; i++) if (named[i].here) return named[i]
+    return named[0] || null
   }
   Choice.prototype.valueOf = function (record, c) {
     c = c === undefined ? this.choice() : c
@@ -790,6 +825,12 @@
       // a label's classes or its values on the records changed: its lanes are drawn again
       if (c && c.label && (labelsChanged || self.marksMoved())) self.fire()
     })
+    // the label the lanes are grouped by takes no colour when it is turned on: the lanes keep Color by's own choice
+    if (typeof shared.hold === 'function')
+      shared.hold(function () {
+        var c = self.choice()
+        return c && c.label ? [c.label] : []
+      })
     this.render()
   }
   Rows.prototype = Object.create(Choice.prototype)
@@ -1077,7 +1118,10 @@
   // problem red. Hovering a lane draws a thin cursor line across the lanes and a tip of the time and the record there;
   // never an inverted band. A click on a mark is onMark(record), on a lane's name onPick(group), which marks the lane
   // chosen; ▾ folds a parent's lanes into its own. The detail list's rows in view (`follow`, rows with data-t) are a
-  // light tint across the lanes, and the range's own overview marks them too where it can (range.visible).
+  // light tint across the lanes, and the range's own overview marks them too where it can (range.visible). With
+  // `density` (a flag, or a function the page answers at each draw) each lane is bars on the scale's bins instead, a
+  // bar's height its bin's records on one scale for every lane, stacked by their Color by values in the chips' order;
+  // hovering a bin gives its time and its records per value, a click opens its first record (onMark).
   // a tree guide (`│ ├ `, `  └ `) as cells a level wide, each drawn as lines that meet the lanes above and below, as a
   // file view draws its folders; the glyphs stay as the cells' text
   var GUIDE = { '│': 'pipe', '├': 'tee', '└': 'elbow' }
@@ -1208,6 +1252,64 @@
   Lanes.prototype.on = function (series) {
     return this.key ? this.key.isOn(series) : true
   }
+  // whether the lanes draw density (`density`, a flag or a function the page answers)
+  Lanes.prototype.dense = function () {
+    var d = this.opts.density
+    return typeof d === 'function' ? !!safe(d, false) : !!d
+  }
+  // Density: each lane's records whose value is on, per bin of the scale (at least DENSE_BIN px wide), by value in the
+  // chips' order, the records with no value last; a bar's height is its bin's records on one scale for every lane.
+  // {bins, step, of(t), per: [Map bin -> {n: [per value], total, first}] per lane, max, names, colours}
+  Lanes.prototype.binned = function (sc, colour) {
+    var self = this
+    var bn
+    if (typeof sc.bins === 'function') {
+      var bins = sc.bins(DENSE_BIN)
+      bn = { bins: bins, of: function (t) { return sc.binOf(t) } }
+    } else {
+      var n = Math.max(1, Math.floor(sc.width / DENSE_BIN))
+      var step = (sc.to - sc.from) / n
+      var list = []
+      for (var k = 0; k < n; k++) list.push([sc.from + k * step, sc.from + (k + 1) * step])
+      bn = { bins: list, of: function (t) { var b = Math.floor((t - sc.from) / step); return b >= 0 && b < n ? b : t === sc.to ? n - 1 : -1 } }
+    }
+    var vals = colour && !colour.off ? colour.values || [] : []
+    var order = vals.filter(function (v) { return v.value != null && v.on }).map(function (v) { return String(v.value) })
+    var slot = {}
+    order.forEach(function (v, i) { slot[v] = i })
+    var K = order.length + 1
+    var blank = vals.filter(function (v) { return v.value == null })[0]
+    var names = order.map(function (v) {
+      var hit = vals.filter(function (x) { return String(x.value) === v })[0]
+      return hit && hit.name ? hit.name : v
+    }).concat([(blank && blank.name) || 'No value'])
+    var colours = order.map(function (v) { return (colour && colour.colourOf(v)) || '' }).concat([''])
+    var max = 1
+    var per = this.nodes.map(function (node) {
+      var m = new Map()
+      var its = node.heading && !node.folded ? [] : node.items || []
+      for (var i = 0; i < its.length; i++) {
+        var it = its[i]
+        if (colour && !colour.keeps(it)) continue
+        var t = self.time(it)
+        var b = bn.of(t)
+        if (b < 0) continue
+        var bin = m.get(b)
+        if (!bin) {
+          bin = { n: new Array(K).fill(0), total: 0, first: it, bad: 0 }
+          m.set(b, bin)
+        }
+        var v = colour ? colour.valueOf(it) : null
+        bin.n[v != null && Object.prototype.hasOwnProperty.call(slot, String(v)) ? slot[String(v)] : K - 1]++
+        bin.total++
+        if (t < self.time(bin.first)) bin.first = it
+        if (self.problem && safe(function () { return self.problem(it) }, false)) bin.bad++
+        if (bin.total > max) max = bin.total
+      }
+      return m
+    })
+    return { bins: bn.bins, of: bn.of, per: per, max: max, K: K, names: names, colours: colours }
+  }
   Lanes.prototype.paint = function () {
     if (!this.mount || !this.nodes) return
     var self = this
@@ -1217,8 +1319,12 @@
     var colour = this.colour || (shared.colour && shared.colour())
     var problems = 0
     var bands = 0
+    var dense = this.dense()
+    var H = dense ? DENSE_H : LANE_H
+    this.mount.classList.toggle('is-density', dense)
+    this.dens = dense ? this.binned(sc, colour) : null
     var html = this.nodes
-      .map(function (n) {
+      .map(function (n, ni) {
         var svg = ''
         if (self.band && !n.heading) {
           var spans = safe(function () { return self.band(n) }, []) || []
@@ -1227,11 +1333,35 @@
             var b = Math.min(W, sc.x(spans[s][1]))
             if (b > a) {
               bands++
-              if (self.on('band')) svg += '<rect class="thimble-lane-band" x="' + a.toFixed(1) + '" y="4" width="' + (b - a).toFixed(1) + '" height="' + (LANE_H - 8) + '"/>'
+              if (self.on('band')) svg += '<rect class="thimble-lane-band" x="' + a.toFixed(1) + '" y="4" width="' + (b - a).toFixed(1) + '" height="' + (H - 8) + '"/>'
             }
           }
         }
         var its = n.items || []
+        if (self.dens) {
+          // Density: a bar per bin, its values stacked in the chips' order, a bin with a failure underlined in red
+          var d = self.dens
+          var room = H - 6
+          d.per[ni].forEach(function (bin, bi) {
+            var bx0 = Math.max(0, sc.x(d.bins[bi][0]))
+            var bx1 = Math.min(W, sc.x(d.bins[bi][1]))
+            if (bx1 <= bx0) return
+            var bw = Math.max(1, bx1 - bx0 - (bx1 - bx0 > 3 ? 1 : 0))
+            var hh = Math.max(1, (bin.total / d.max) * room)
+            var yy = H - 2
+            for (var k = 0; k < d.K; k++) {
+              if (!bin.n[k]) continue
+              var sh = (hh * bin.n[k]) / bin.total
+              yy -= sh
+              svg += '<rect class="thimble-lane-mark thimble-lane-bar" x="' + bx0.toFixed(2) + '" y="' + yy.toFixed(2) + '" width="' + bw.toFixed(2) + '" height="' + sh.toFixed(2) + '"' + (d.colours[k] ? ' style="fill:' + esc(d.colours[k]) + '"' : '') + '/>'
+            }
+            if (bin.bad) {
+              problems += bin.bad
+              if (self.on('problem')) svg += '<rect class="thimble-lane-bad" x="' + bx0.toFixed(2) + '" y="' + (H - 2) + '" width="' + Math.max(2, bw).toFixed(2) + '" height="2"/>'
+            }
+          })
+          its = []
+        }
         for (var i = 0; i < its.length; i++) {
           var it = its[i]
           var t = self.time(it)
@@ -1252,7 +1382,7 @@
         return (
           '<div class="thimble-lane' + (n.heading ? ' is-heading' : '') + (self.chosen === String(n.key) ? ' is-chosen' : '') + '" data-key="' + esc(n.key) + '"' + (anchor ? ' data-anchor="' + esc(anchor) + '" data-anchor-unmarked' : '') + '>' +
           '<div class="thimble-lane-name" data-pick="' + esc(n.key) + '" title="' + esc(n.name) + '">' + guideHtml(n.guide) + fold + '<span class="thimble-lane-nm">' + esc(n.name) + '</span></div>' +
-          '<svg class="thimble-lane-track" width="' + W + '" height="' + LANE_H + '">' + svg + '</svg></div>'
+          '<svg class="thimble-lane-track" width="' + W + '" height="' + H + '">' + svg + '</svg></div>'
         )
       })
       .join('')
@@ -1383,6 +1513,18 @@
     }
     return best
   }
+  // Density: the bin of a lane under the pointer's x, {bin, t0, t1}, or null where the lane has no record there
+  Lanes.prototype.binAt = function (node, x) {
+    var d = this.dens
+    if (!d || !this.sc) return null
+    var ni = this.nodes.indexOf(node)
+    var b = d.of(this.sc.t(x))
+    var bin = ni >= 0 && b >= 0 ? d.per[ni].get(b) : null
+    return bin ? { bin: bin, t0: d.bins[b][0], t1: d.bins[b][1] } : null
+  }
+  Lanes.prototype.when = function (t) {
+    return this.range && typeof this.range.format === 'function' ? this.range.format(t) : new Date(t * 1000).toISOString().slice(11, 19)
+  }
   Lanes.prototype.hover = function (e) {
     var at = this.laneAt(e)
     var br = this.body.getBoundingClientRect()
@@ -1393,15 +1535,30 @@
     this.cursorEl.style.left = this.namesW + Math.round(x) + 'px'
     this.cursorEl.style.height = this.body.scrollHeight + 'px'
     var t = this.sc.t(x)
+    var rr = at.row.getBoundingClientRect()
+    var html
+    if (this.dens) {
+      // Density: the bin's time, its records, and how many take each value, in the chips' colours
+      var hit = this.binAt(at.node, x)
+      html = '<div class="thimble-tip-h">' + esc(at.node.name) + ' · ' + esc(hit ? this.when(hit.t0) + '–' + this.when(hit.t1) : this.when(t)) + '</div>'
+      if (hit) {
+        var d = this.dens
+        var bin = hit.bin
+        html += '<div class="thimble-tip-m">' + num(bin.total) + (bin.total === 1 ? ' record' : ' records') + '</div>'
+        if (d.K > 1)
+          for (var k = 0; k < d.K; k++)
+            if (bin.n[k]) html += '<div class="thimble-tip-m thimble-lanes-row"><span class="chip-sw"' + (d.colours[k] ? ' style="--c:' + esc(d.colours[k]) + '"' : '') + '></span><span class="thimble-lanes-rn">' + esc(d.names[k]) + '</span><span class="thimble-lanes-rc">' + num(bin.n[k]) + '</span></div>'
+        if (bin.bad) html += '<div class="thimble-tip-m thimble-lanes-bad">' + num(bin.bad) + ' ' + esc(this.words.problem) + '</div>'
+      }
+      return tip(html, e.clientX, rr.bottom, 'under', rr.top)
+    }
     var it = this.itemAt(at.node, x)
-    var fmt = this.range && typeof this.range.format === 'function' ? this.range.format(t) : new Date(t * 1000).toISOString().slice(11, 19)
-    var html = '<div class="thimble-tip-h">' + esc(at.node.name) + ' · ' + esc(fmt) + '</div>'
+    html = '<div class="thimble-tip-h">' + esc(at.node.name) + ' · ' + esc(this.when(t)) + '</div>'
     if (it) {
       var words = typeof this.opts.tip === 'function' ? safe(function () { return this.opts.tip(it) }.bind(this), '') : it.text || it.name || ''
       if (words) html += '<div class="thimble-tip-m">' + esc(String(words).slice(0, 200)) + '</div>'
       if (this.problem && safe(function () { return this.problem(it) }.bind(this), false)) html += '<div class="thimble-tip-m thimble-lanes-bad">' + esc(this.words.problem) + '</div>'
     }
-    var rr = at.row.getBoundingClientRect()
     tip(html, e.clientX, rr.bottom, 'under', rr.top)
   }
   Lanes.prototype.unhover = function () {
@@ -1433,7 +1590,10 @@
       return
     }
     var br = this.body.getBoundingClientRect()
-    var it = this.itemAt(lane.node, e.clientX - br.left - this.namesW)
+    var x = e.clientX - br.left - this.namesW
+    // a mark's record, or in Density the first record of the bin
+    var hit = this.dens ? this.binAt(lane.node, x) : null
+    var it = this.dens ? hit && hit.bin.first : this.itemAt(lane.node, x)
     if (it && typeof this.opts.onMark === 'function') {
       var o = this.opts
       safe(function () { o.onMark(it) })

@@ -4,7 +4,7 @@ The orientation is complete. Summary of what I produced and verified:
 
 **Deck (8 cards):** the attack arc (timeline), action composition, the supply-chain plan (diagram), where effort went (captcha/sign-up/money dominate; the exploit itself took ~23 records), the bot-defense arsenal, the two-stage payload, a safety-relevant behavior catalog, and the accidental breakthrough that ended in a 200-OK upload.
 
-**Label:** "activity type" over every record, powering the effort chart and view filters.
+**Label:** "tactic" over every record, powering the effort chart and view filters.
 
 **Views proposed:** Session Replay (read the session as a conversation) and Activity Timeline (how activities interleaved over 10 hours).
 

@@ -546,6 +546,8 @@ const state = {
   drawNo: 0, // the drawings made, so a count made while drawing (Color by's tally) knows a new one began
   answered: 0, // the reader's answers the program has had
   labelWants: [], // each part's labels a query names, so the reader reads them though they are not on in Files
+  holds: [], // each part's labels that take no color when turned on (Rows' label: the lanes keep Color by's choice)
+  rehome: [], // Color by's look again at how it opens, once a part holds a label it may have opened on
 }
 
 function send(msg) {
@@ -915,7 +917,7 @@ export const __driver = {
       out: null, cols: 120, rows: 30, theme: 'dark', view: { slug: '', name: '' }, kept: {}, labels: [], filter: null, drawFn: null,
       frameSeq: 0, ack: 0, gesture: null, binds: [], hits: new Map(), typer: null, pending: new Map(), fetchId: 0, scheduled: false,
       lastSent: '', openers: [], labelFns: [], resets: [], pageReset: null, stateTimer: false, wheelFns: [], error: null, textMode: '',
-      lastOpen: null, colorBys: [], colour: null, drawNo: 0, answered: 0, labelWants: [],
+      lastOpen: null, colorBys: [], colour: null, drawNo: 0, answered: 0, labelWants: [], holds: [], rehome: [],
     })
     openMenu = null
     openBlocks.clear()
@@ -1057,9 +1059,13 @@ export function colorBy(opts = {}) {
   const labelOf = (key) => state.labels.find((l) => `label:${l.id}` === key)
   // the labels on in Files (or filtering) that mark the view's files
   const onIds = () => state.labels.filter((l) => l.on && l.here !== false).map((l) => String(l.id))
-  // how the view opens: colored by a label that is on, as the browser's view opens, else by its first field
+  // the labels another part holds (the one Rows groups the lanes by), which take no color
+  const held = () => new Set(state.holds.flatMap((f) => f() || []).map(String))
+  // how the view opens: colored by a label that is on and no part holds, as the browser's view opens, else by its first
+  // field
   const home = () => {
-    const on = onIds()
+    const h = held()
+    const on = onIds().filter((id) => !h.has(id))
     return on.length ? `label:${on[0]}` : startKey
   }
   const c = {
@@ -1079,7 +1085,8 @@ export function colorBy(opts = {}) {
   // a label turned on since the view last looked takes the color, the one turned on last
   const notice = () => {
     const on = onIds()
-    const fresh = on.filter((id) => !c.seen.includes(id))
+    const h = held()
+    const fresh = on.filter((id) => !c.seen.includes(id) && !h.has(id))
     c.seen = on
     const key = fresh.length ? `label:${fresh[fresh.length - 1]}` : null
     if (!key || key === c.choice) return false
@@ -1104,6 +1111,14 @@ export function colorBy(opts = {}) {
     if (moved) onChange(api)
   })
   state.labelWants.push(() => (labelOf(c.choice) ? [labelOf(c.choice).id] : []))
+  // a part that holds a label now: a view that opened colored by it, and was never given a color, opens again
+  state.rehome.push(() => {
+    const l = labelOf(c.choice)
+    if (kept('colour') || !l || !held().has(String(l.id))) return
+    c.choice = home()
+    c.off.clear()
+    c.counts = null
+  })
 
   // a label's values that color, as the browser's chips: those it highlights (a regex label's `other` is not one); the
   // records with none are `not marked`
@@ -2390,7 +2405,7 @@ export function columns(specs, cols) {
  * diff: its lines upright, each cut at the cell edge, at most `max` (8) rows and then `… N more`, which a click opens,
  * `code` in the code color (a command, a query, a path), `problem` in red (what a failed call printed); `facts` [[label, value]] on one row, the labels dim; `groups`
  * [{title, rows: [{when, words, text, on}]}], each row a link to another record; `raw` [[line, text]] its lines as the
- * file holds them; `place` its ref, a link with `↗`; `ask` {ref, text}, `ask about it`.
+ * file holds them; `place` its ref, a link with `↗`; `ask` {ref, text}, `ask about it`, shown only when there is no `place`, whose file view asks.
  */
 export function details(d, o = {}) {
   if (o.text) for (const s of wrap(o.text, d.cols, o.maxRows || 6)) d.line(s)
@@ -2436,25 +2451,14 @@ export function details(d, o = {}) {
     const nw = Math.max(...o.raw.map(([n]) => String(n).length))
     for (const [n, text] of o.raw) d.row().add(padStart(n, nw), { d: true }).gap().add(clip(text, d.cols - nw - 2)).end()
   }
-  if (o.place || o.ask) {
-    let r = d.row()
-    if (o.place) {
-      // a place too long for the row beside `ask about it` drops its folders; where its file's name would be cut
-      // there, `ask about it` takes the row under it, and the name is cut only where the row alone has no room, its
-      // line kept
-      const askW = o.ask ? width('ask about it') + 2 : 0
-      const own = o.ask && width(placeWords(o.place)) > d.cols - 2 - askW && width(placeShort(o.place)) > d.cols - 2 - askW
-      const words = placeIn(o.place, d.cols - 2 - (own ? 0 : askW))
-      r.add('↗ ', { fg: COLORS.link }, { on: () => open(o.place), tip: 'open its lines' })
-      r.add(words, { fg: COLORS.link, u: true }, { on: () => open(o.place), tip: 'open its lines' })
-      if (own) {
-        r.end()
-        r = d.row()
-      } else if (o.ask) r.gap()
-    }
-    if (o.ask) r.add('ask about it', {}, { on: () => ask(o.ask.ref, o.ask.text), tip: 'ask a side thread about this record' })
-    r.end()
-  }
+  // a record with a place asks from its file view (↗), so `ask about it` shows only for a record without one
+  if (o.place) {
+    const words = placeIn(o.place, d.cols - 2)
+    d.row()
+      .add('↗ ', { fg: COLORS.link }, { on: () => open(o.place), tip: 'open its lines' })
+      .add(words, { fg: COLORS.link, u: true }, { on: () => open(o.place), tip: 'open its lines' })
+      .end()
+  } else if (o.ask) d.row().add('ask about it', {}, { on: () => ask(o.ask.ref, o.ask.text), tip: 'ask a side thread about this record' }).end()
 }
 
 // ------------------------------------------------------------------------------------------------ search and choices
@@ -2687,6 +2691,32 @@ function labelClasses(l) {
   return (known ? vs.filter((v) => v.highlight !== false) : vs.length > 1 ? vs.slice(0, -1) : vs).map((v) => String(v.name))
 }
 
+// How Filter by or Rows opens until the analyst chooses (`initial`): a field's name, or a list of choices, the first there
+// taken, each a field's name or {label: name or id}, a label counting while it is on in Files; else `fallback`. A
+// function, so that the choice follows the labels as they come and go.
+function opening(opts, fallback) {
+  const init = opts.initial
+  const starts = Array.isArray(init) ? init : init && typeof init === 'object' ? [init] : init ? [init] : []
+  const fields = opts.fields || []
+  const norm = (x) => String(x ?? '').replace(/\s+/g, ' ').trim().toLowerCase()
+  const findLabel = (x) => {
+    const byId = state.labels.find((l) => String(l.id) === String(x))
+    if (byId) return byId
+    const named = state.labels.filter((l) => norm(l.name) === norm(x))
+    return named.find((l) => l.here !== false) || named[0] || null
+  }
+  return () => {
+    for (const s of starts) {
+      if (typeof s === 'string' && fields.some((f) => f.name === s)) return `field:${s}`
+      if (s && typeof s === 'object' && s.label !== undefined && s.label !== null) {
+        const l = findLabel(s.label)
+        if (l && l.on) return `label:${l.id}`
+      }
+    }
+    return fallback
+  }
+}
+
 // a tally's counts as one string, to tell whether they changed
 const tallySig = (t) => JSON.stringify([...t].map(([k, m]) => [k, [...m]]))
 
@@ -2696,8 +2726,11 @@ const tallySig = (t) => JSON.stringify([...t].map(([k, m]) => [k, [...m]]))
 function chooser(opts, name, initial) {
   const fields = (opts.fields || []).map((f) => ({ ...f, title: f.title || f.name }))
   const keptC = kept(name) || {}
+  // how it opens: a key, or a function of the labels (`initial` naming a label), followed until the analyst chooses
+  const home = typeof initial === 'function' ? initial : () => initial
   const c = {
-    choice: typeof keptC.by === 'string' ? keptC.by : initial,
+    choice: typeof keptC.by === 'string' ? keptC.by : home(),
+    chosen: typeof keptC.by === 'string',
     off: keptC.off && typeof keptC.off === 'object' ? { ...keptC.off } : {},
     counts: null,
     tally: new Map(),
@@ -2709,8 +2742,9 @@ function chooser(opts, name, initial) {
   const fieldOf = (key) => fields.find((f) => `field:${f.name}` === key) || null
   const labelOf = (key) => state.labels.find((l) => `label:${l.id}` === key) || null
   const settle = () => {
+    if (!c.chosen) c.choice = home()
     if (c.choice === 'none' || fieldOf(c.choice) || labelOf(c.choice)) return
-    c.choice = initial
+    c.choice = home()
   }
   settle()
   state.labelWants.push(() => (labelOf(c.choice) ? [labelOf(c.choice).id] : []))
@@ -2721,6 +2755,7 @@ function chooser(opts, name, initial) {
     labelOf,
     settle,
     save(extra = {}) {
+      c.chosen = true
       keep(name, { by: c.choice, ...extra })
     },
     /** {field, title} or {label, title}, or null for none */
@@ -2861,7 +2896,7 @@ function chooser(opts, name, initial) {
  */
 export function filterBy(opts = {}) {
   const name = opts.key ? `filter:${opts.key}` : 'filter'
-  const ch = chooser(opts, name, opts.initial ? `field:${opts.initial}` : 'none')
+  const ch = chooser(opts, name, opening(opts, 'none'))
   const c = ch.c
   const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {}
   const offOf = () => new Set((c.off[c.choice] || []).map((v) => (v === null ? '' : String(v))))
@@ -2920,8 +2955,9 @@ export function filterBy(opts = {}) {
     /** Choose a field by name, a label (`{label}`), or none (null). */
     choose(to) {
       const key = to === null ? 'none' : typeof to === 'object' ? `label:${to.label}` : `field:${to}`
-      if (key === c.choice) return
+      if (key === c.choice && c.chosen) return
       c.choice = key
+      c.chosen = true
       c.counts = null
       ch.settle()
       changed()
@@ -2993,8 +3029,7 @@ export function filterBy(opts = {}) {
  */
 export function rows(opts = {}) {
   const name = opts.key ? `rows:${opts.key}` : 'rows'
-  const first = opts.initial ? `field:${opts.initial}` : opts.fields && opts.fields.length ? `field:${opts.fields[0].name}` : 'none'
-  const ch = chooser(opts, name, first)
+  const ch = chooser(opts, name, opening(opts, opts.fields && opts.fields.length ? `field:${opts.fields[0].name}` : 'none'))
   const c = ch.c
   const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {}
   // a record the reader gave its group under the choice keeps it (`group`)
@@ -3090,8 +3125,9 @@ export function rows(opts = {}) {
     },
     choose(to) {
       const key = to === null ? 'none' : typeof to === 'object' ? `label:${to.label}` : `field:${to}`
-      if (key === c.choice) return
+      if (key === c.choice && c.chosen) return
       c.choice = key
+      c.chosen = true
       ch.settle()
       ch.save()
       onChange(api)
@@ -3110,10 +3146,14 @@ export function rows(opts = {}) {
     },
   }
   // a label's classes or its values changed: its lanes are grouped again
-  state.colorBys.push(() => {
+  state.colorBys.unshift(() => {
+    const was = c.choice
     ch.settle()
-    if (ch.by() && ch.by().label) onChange(api)
+    if ((ch.by() && ch.by().label) || c.choice !== was) onChange(api)
   })
+  // the label the lanes are grouped by takes no color when it is turned on: the lanes keep Color by's own choice
+  state.holds.push(() => (ch.labelOf(c.choice) ? [ch.labelOf(c.choice).id] : []))
+  for (const f of state.rehome) f()
   return api
 }
 
@@ -3132,6 +3172,8 @@ export function rows(opts = {}) {
  * opts: rows (a Rows control) or groups(items), colour (Color by; the view's by default), time(item), end(item),
  * band(lane) [[start, end]], problem(item), onPick(lane), onMark(item), words {band, problem, record}, key.
  */
+const EVENT = '▌' // a lane's cell that holds a record, while the lanes draw Events rather than density
+
 export function lanes(opts = {}) {
   const name = opts.key ? `lanes:${opts.key}` : 'lanes'
   const keptL = kept(name) || {}
@@ -3183,7 +3225,7 @@ export function lanes(opts = {}) {
     }
     return out
   }
-  function cells(scale, n, max, span, colour) {
+  function cells(scale, n, max, span, colour, dense) {
     const out = Array.from({ length: scale.cols }, () => ({ s: ' ' }))
     const gaps = scale.gaps ? scale.gaps() : []
     const inGap = (x) => gaps.some(([g0, g1]) => x >= g0 && x < g1)
@@ -3204,8 +3246,9 @@ export function lanes(opts = {}) {
         const hue = colour ? colour.colourOf(colour.valueOf(it)) : null
         fill(time(it), e, hue && hue !== COLORS.dim ? { s: '─', fg: hue } : { s: '─', d: true })
       }
+    // Density: each cell's bar its records on the lanes' one height; Events: a mark in every cell that holds a record
     strip(scale, its, { value: (it) => (colour ? colour.valueOf(it) : null), colour, max, time }).forEach((run, x) => {
-      if (run.s !== ' ') out[x] = run
+      if (run.s !== ' ') out[x] = dense ? run : { ...run, s: EVENT }
     })
     const per = new Map()
     for (const it of its) {
@@ -3253,7 +3296,8 @@ export function lanes(opts = {}) {
       return out
     },
     /** Draw the lanes: `o.items` (those of the range), `o.scale` (range.scale), `o.gutter` (the names' cells), `o.room`
-     *  (rows, the rows left by default), `o.span` ([t0, t1] or a list whose rows in view it marks). */
+     *  (rows, the rows left by default), `o.span` ([t0, t1] or a list whose rows in view it marks), `o.density` (false:
+     *  Events, a mark `▌` in each cell with a record, in place of the bars of its records). */
     draw(d, o = {}) {
       const items = o.items || []
       const scale = o.scale
@@ -3261,6 +3305,7 @@ export function lanes(opts = {}) {
       const room = Math.max(1, Math.min(o.room ?? d.left, d.left))
       const colour = opts.colour || state.colour
       const span = o.span && typeof o.span.span === 'function' ? o.span.span(time) : Array.isArray(o.span) ? o.span : null
+      const dense = o.density !== false
       const all = layout(items, room)
       st.counts = { band: 0, problem: 0 }
       const groups = all.map((n) => n.items.filter((it) => !colour || colour.keeps(it)))
@@ -3289,7 +3334,7 @@ export function lanes(opts = {}) {
         r.at(gutter)
         if (!(n.heading && !n.folded)) {
           const x0 = r.x
-          const lane = cells(scale, n, max, span, colour)
+          const lane = cells(scale, n, max, span, colour, dense)
           r.runsOf(lane.runs)
           r.hits.push({
             x0,

@@ -29,7 +29,7 @@ views_of() {
   case "$1" in
     collusion-wiki) echo "relay-board-v2=relay-board wiki-page-history-v2=wiki-page-history";;
     mythos-5) echo "activity-timeline-v2=activity-timeline";;
-    transluce-urlquery) echo "activity-timeline-v2=activity-timeline episode-browser-v2=episode-browser";;
+    transluce-urlquery) echo "activity-timeline-v2=activity-timeline";;
     *) return 1;;
   esac
 }

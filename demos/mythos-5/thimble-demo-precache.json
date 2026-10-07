@@ -66,8 +66,8 @@
   },
   {
    "path": "concepts/df3e291f.json",
-   "bytes": 2967,
-   "sha256": "53de270f3bf2b9c11fa660ac8d36b9be28e55ac3824fe10c4aebc66150add781"
+   "bytes": 2959,
+   "sha256": "2b7f2239fd70bac370bf08bd637bfb81fcc61ca0dfe00fe373a36998b435bcc0"
   },
   {
    "path": "extension/extension.json",
@@ -76,18 +76,23 @@
   },
   {
    "path": "extension/views/activity-timeline/reader.py",
-   "bytes": 22574,
-   "sha256": "5ba510da5dc34118063cb58e3a120a6ca59c445c1ab8888455e55fcac951c35c"
+   "bytes": 17656,
+   "sha256": "3516e5aa209af711577bbd5fe6e94d2c8c9c8bdd9137a2b01669b9caffe17267"
   },
   {
    "path": "extension/views/activity-timeline/view.html",
-   "bytes": 38891,
-   "sha256": "50114746f39c9863d5de4c8242bc40be1685e05e9d421bcfcc51fcce41704901"
+   "bytes": 23302,
+   "sha256": "690e47b1d8d1003c4fc146a3bf998b0347ca2879163d49dc5e67e789d524c4fc"
   },
   {
    "path": "extension/views/activity-timeline/view.json",
-   "bytes": 2283,
-   "sha256": "684ec8ec0925ac8dd9733943dd1e7b009d8742d7c080587a1e54bacb2914dfdb"
+   "bytes": 2139,
+   "sha256": "ace13ee905302b98639be47354399fd8c0b7d1107a70d10ffecf4167121ea401"
+  },
+  {
+   "path": "extension/views/activity-timeline/view.term.js",
+   "bytes": 9955,
+   "sha256": "a9721d752f02ff7d7b7c6e684b1f1933d39175594ff29788a52ccae9ac714564"
   },
   {
    "path": "investigations/main/investigation.json",
@@ -106,8 +111,8 @@
   },
   {
    "path": "notebooks/6a8bb309.json",
-   "bytes": 68727,
-   "sha256": "02050ed34d199130a950119be443d0b891780d25e3ed2c0ff53be500217664ad"
+   "bytes": 68706,
+   "sha256": "99b884da5791d07aceb2a9d1c5761ecfc195c141eb48eca314b980ba158e7244"
   },
   {
    "path": "orient/run.json",
@@ -116,13 +121,13 @@
   },
   {
    "path": "orient/summary.md",
-   "bytes": 1597,
-   "sha256": "fdb627ef431f13526884186b6252ce411b6e443f1c87670ff47f0715148130e0"
+   "bytes": 1590,
+   "sha256": "c176c282559ae99bae3b1aaf93901118d3a5e09f9281ca0f703e28602b838ecd"
   },
   {
    "path": "views/proposals.json",
-   "bytes": 3230,
-   "sha256": "ec073949c0e83d6f69336251d97b6e6f1cc424d76f824835ca77608b22145a4e"
+   "bytes": 3174,
+   "sha256": "d94cf9d509d65ec623318040b8f2e89b2885b3cbe55d5b50f896aa3a94f9a7d9"
   }
  ],
  "cited_calls": [
@@ -152,7 +157,7 @@
    {
     "path": "extension/views/activity-timeline/view.html",
     "chars": 65,
-    "shared": 715
+    "shared": 585
    }
   ]
  },
@@ -890,10 +895,10 @@
   {
    "slug": "activity-timeline",
    "name": "Activity Timeline",
-   "version": "f6563e753126",
+   "version": "e3aaf341afcc",
    "from": "activity-timeline",
-   "from_version": "f6563e753126",
-   "picked": "live at f6563e753126"
+   "from_version": "e3aaf341afcc",
+   "picked": "live at e3aaf341afcc"
   }
  ]
 }

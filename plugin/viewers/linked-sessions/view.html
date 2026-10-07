@@ -2,301 +2,488 @@
 <html>
 <head>
 <style>
-  /* thimble's parts (.field, .btn), its Color by control, its time range selector and the theme's tokens come with the
-     frame; this page lays out the top row, the sessions' lanes under the range and the list of messages and calls */
+  /* thimble's parts come with the frame: .field and .btn, Filter by, Rows and Color by, the time range, the lanes and
+     their key, the divider, the side panel, the transcript, and the theme's tokens. This page lays them out: the top
+     row, the sessions' lanes under the range, then the chosen session's transcript with what links it to the others */
   html, body { margin: 0; height: 100%; }
   body { background: var(--surface-card); overflow: hidden; }
   * { box-sizing: border-box; }
-  #view { --names: 204px; --indent: 318px; height: 100%; display: flex; flex-direction: column; }
-  .top { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border-subtle); }
-  #q { flex: 0 1 220px; min-width: 120px; }
-  #scope { flex: 0 1 190px; min-width: 110px; }
-  /* the names of the sessions in a column at the left and the time across the rest; the range and the lanes keep the
-     same scrollbar gutter, so the lanes stand under the range and its axis */
-  .time, .lane { display: grid; grid-template-columns: var(--names) minmax(0, 1fr); }
-  .time, #lanes { padding: 0 16px 0 8px; scrollbar-gutter: stable; }
-  .time { flex: none; padding-top: 10px; overflow: hidden; }
+  #view { height: 100%; display: flex; flex-direction: column; }
+  .top { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border-subtle); }
+  #q { flex: 0 1 200px; min-width: 110px; }
+  /* the overview: the range and its axis over the lanes, the names in a column at the left. The two scroll as one box,
+     the range held at its top, so the lanes stand under the range at any width; the divider under it gives it its height */
+  #overview { flex: 0 1 auto; max-height: 48%; min-height: 0; overflow-y: auto; }
+  .time { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: var(--names) minmax(0, 1fr); padding: 10px 16px 0 8px; background: var(--surface-card); }
+  #lanes { padding: 0 16px 8px 8px; }
   #readout { align-self: center; padding-left: 8px; }
-  .key { display: flex; align-items: center; gap: 12px; padding-left: 8px; color: var(--text-tertiary); font: 400 var(--text-xs) / 1 var(--font-body); }
-  .key i { display: inline-block; width: 12px; margin-right: 5px; vertical-align: middle; }
-  .key .k-span { height: 10px; background: rgba(var(--ink-rgb), 0.07); }
-  .key .k-err { height: 2px; background: var(--text-primary); }
-  /* the lanes take their height up to the share of the page fitLanes gives them, ending on a whole lane; a fade at the
-     bottom while more lanes lie below */
-  #lanes { flex: 0 1 auto; overflow-y: auto; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
-  #lanes.more { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
-  .run + .run { border-top: 1px solid var(--border-hairline); }
-  .nm { padding: 0 10px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 400 var(--text-ui-sm) / 18px var(--font-body); cursor: pointer; }
-  .nm.head { color: var(--text-secondary); font-weight: 500; line-height: 26px; }
-  .nm:hover { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
-  .lane svg { display: block; }
-  .span { fill: rgba(var(--ink-rgb), 0.07); }
-  .tick { fill: var(--viz-ink-3); cursor: pointer; }
-  /* a failed call underlined in the ink, since only Color by's choice takes a color */
-  .err { fill: var(--text-primary); }
-  .sep { stroke: var(--border-hairline); }
-  /* the list: one row per message or call, its details opened in place under its line */
-  #list { flex: 1; min-height: 0; overflow: auto; padding-bottom: 12px; }
-  .row { padding: 3px 16px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
-  .row:hover { background: rgba(var(--ink-rgb), 0.03); }
-  .line { display: grid; grid-template-columns: 62px 150px 76px minmax(0, 1fr) auto; gap: 0 10px; align-items: baseline; }
-  .row time, .row .end { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .row .who, .row .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--text-ui-sm) / 1.5 var(--font-body); }
-  .row .who { color: var(--text-secondary); }
-  .row .what { color: var(--text-tertiary); }
-  .row .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 400 var(--text-sm) / 1.5 var(--font-body); }
-  .row.call .text { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
-  .row .bad { margin-right: 8px; color: var(--text-primary); }
-  .thimble-details { padding: 4px 0 8px var(--indent); cursor: auto; }
-  .thimble-details pre { max-height: 240px; margin: 0 0 6px; padding: 6px 8px; overflow: auto; border-radius: var(--radius-ui); background: var(--bg-sub); color: var(--text-primary); font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-  .thimble-details .full { margin-bottom: 6px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); font: 400 var(--text-sm) / 1.5 var(--font-body); }
-  .acts { display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
+  .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; padding: 2px 8px 0 4px; }
+  #lanes { position: relative; }
+  /* where each subagent was started from its parent's lane, and where its result came back */
+  .links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+  .links path { fill: none; stroke: var(--text-tertiary); stroke-width: 1; }
+  .links .head { fill: var(--text-tertiary); stroke: none; }
+  .unit-marks { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+  .unit-marks i { position: absolute; width: 3px; }
+  /* the reading: what links the session to the others over its transcript, and a side panel at the right */
+  #body { flex: 1; min-height: 0; }
+  #main { display: flex; flex-direction: column; min-height: 0; }
+  #rel { flex: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; padding: 8px 16px 6px 16px; color: var(--text-tertiary); font: 400 var(--text-ui-sm) / 1.5 var(--font-body); }
+  #rel:empty { display: none; }
+  #rel time { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); font-variant-numeric: tabular-nums; }
+  .go { margin: 0; padding: 0; border: 0; background: none; color: var(--text-primary); font: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+  .go:hover { text-decoration-color: var(--text-primary); }
+  #turns { flex: 1; min-height: 0; overflow: auto; }
   .empty { padding: 28px 16px; color: var(--text-tertiary); }
-  @media (max-width: 720px) { #view { --names: 140px; --indent: 0px; } .line { grid-template-columns: 62px 110px 64px minmax(0, 1fr) auto; } }
+  .side-acts { padding: 0 0 8px; }
 </style>
 </head>
 <body>
 <div id="view">
   <div class="top">
-    <input class="field" id="q" type="search" placeholder="Search messages and calls" aria-label="Search">
-    <select class="field" id="scope" aria-label="Runs and sessions"><option value="">All runs</option></select>
+    <input class="field" id="q" type="search" placeholder="Search the transcripts" aria-label="Search the transcripts">
+    <span id="filter"></span>
+    <span id="rows"></span>
     <span id="colour"></span>
   </div>
-  <div class="time">
-    <div id="readout"></div><div id="range"></div>
-    <div class="key"><span><i class="k-span"></i>running</span><span><i class="k-err"></i>failed</span></div><div id="axis"></div>
+  <div id="overview">
+    <div class="time">
+      <div id="readout"></div><div id="range"></div>
+      <div class="keys"><span id="key"></span><span id="linkkey"></span></div><div id="axis"></div>
+    </div>
+    <div id="lanes"></div>
   </div>
-  <div id="lanes"></div>
-  <div id="list"></div>
+  <div id="body">
+    <div id="main">
+      <div id="rel"></div>
+      <div id="turns"><div class="empty">Loading the sessions…</div></div>
+    </div>
+  </div>
 </div>
 <script>
 const $ = (id) => document.getElementById(id)
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 const slug = (thimble.view && thimble.view.slug) || 'linked-sessions'
-const LANE = 18
-const KIND = { prompt: 'Prompt', text: 'Text', result: 'Result' }
+const NS = 'http://www.w3.org/2000/svg'
 const hms = (t) => new Date(t * 1000).toISOString().slice(11, 19)
-const secs = (d) => `${d < 10 ? d.toFixed(1) : Math.round(d)} s`
 const runName = (id) => (/^r\d+$/.test(id) ? `Run ${id.slice(1)}` : id)
-let data = null, items = [], open = null, several = false, menuHtml = ''
-const S = {}, names = {}, full = new Map() // the sessions by id, their names, and each opened row's record in full
+// the names' column, which the lanes and the range over them share
+const NAMES = innerWidth < 640 ? 150 : 200
+$('view').style.setProperty('--names', `${NAMES}px`)
+const KIND = { prompt: 'Prompt', text: 'Text', result: 'Result', call: 'Tool call' }
+const TOOLS = {
+  Task: 'Starts a subagent, whose session sits under this one', Bash: 'Runs a shell command; its result gives the exit code',
+  Read: 'Reads a file', Edit: 'Changes a file', Grep: 'Searches files; its result lists the files that match', WebSearch: 'Searches the web',
+}
+const OUTCOMES = {
+  ok: 'The result came back with no error flag and no denial', error: 'The harness flagged the result as an error (is_error, or isError in r1)',
+  denied: 'The result says permission to use the tool was denied',
+}
+const FILE_TYPES = {
+  '.py': 'A Python file outside the tests', 'test .py': 'A Python file under tests/ or named test_*',
+  'test .json': 'A JSON file under tests/, such as a fixture', '.md': 'A Markdown file', '.toml': 'A TOML file, such as pyproject.toml',
+}
+
+let data = null // the reader's overview: {runs, sessions, spawns, items, counts, fcounts, colours, groups}
+let items = [] // the calls and messages the filters keep, in time order
+let chosen = null // the lane read in the transcript: a session's id, or a group's key under another Rows choice
+let drawn = '' // what the transcript last drew, so a redraw that changes nothing leaves it and its scroll alone
+const S = {} // the sessions by id
+const names = {} // each session's name, its agent numbered when its run has two
+const kids = {} // the sessions each session started, in the order it started them
+const spawnOf = {} // the Task call that started a session: {ref, session, child, time, duration}
+const teams = {} // each run's team
+const turnsOf = new Map() // a session's turns, or a selection's, as the reader sent them
+const whole = new Map() // a call's whole input and what came back, once its turn opens
 let loaded
 const ready = new Promise((ok) => { loaded = ok })
 
-// the one Color by control: Off, the view's own fields and every label in one menu, the values as chips in this row,
-// a bar on each row's left edge, the list's two tracks, and Reset at the row's end
+// a session's lane: a lead under its run's name, a subagent under the session that started it
+const laneName = (id) => (S[id] ? (S[id].parent ? names[id] : `${runName(S[id].run)} · ${names[id]}`) : id)
+const runTitle = (id) => (teams[id] ? `${runName(id)} · ${teams[id]}` : runName(id))
+
+// Color by, the one color: the speaker, the tool, the file type, the outcome or a label that is on
 const colour = thimble.colorBy({
   mount: '#colour',
-  // each field says what it is (from view.json's records), and `meanings` what the values the transcripts' format
-  // fixes mean (reader.py's notes), which the menu and a chip's hover give; a value with none, such as a subagent's
-  // name, shows what the field is. `meanings` declares no value, so the values keep the colors the records give them
+  // each field says what it is, and `meanings` what the values the transcripts' format fixes mean (reader.py's notes),
+  // which the menu and a chip's hover give
   fields: [
     {
-      name: 'speaker', title: 'Speaker', description: 'The agent whose transcript holds the call or message; for a prompt, the agent that spawned the session, or user for a lead',
-      meanings: { lead: 'The session a run starts with, in runs/<run>/<session id>.jsonl, which spawns the subagents', user: "The person who wrote a lead's prompt" },
+      name: 'speaker', title: 'Speaker', description: 'Who wrote the turn: the agent whose transcript holds it; for a prompt, the agent that started the session, or user for a lead',
+      meanings: { lead: 'The session a run starts with, which starts the subagents', user: "The person who wrote a lead's prompt" },
     },
-    {
-      name: 'tool', title: 'Tool', description: "The tool the call used, Agent read as Task",
-      meanings: {
-        Task: 'Spawns a subagent, whose session sits under this one', Bash: 'Runs a shell command; its result gives the exit code',
-        Read: 'Reads a file', Edit: 'Changes a file', Grep: 'Searches files; its result lists the files that match', WebSearch: 'Searches the web',
-      },
-    },
-    {
-      name: 'file type', title: 'File type', description: "The extension of the call's first path, test files apart; none for a call with no file",
-      meanings: {
-        '.py': 'A Python file outside the tests', 'test .py': 'A Python file under tests/ or named test_*',
-        'test .json': 'A JSON file under tests/, such as a fixture', '.md': 'A Markdown file', '.toml': 'A TOML file, such as pyproject.toml',
-      },
-    },
-    {
-      name: 'outcome', title: 'Outcome', description: 'denied when the result says so, error when it is flagged, else ok',
-      meanings: {
-        ok: 'The result came back with no error flag and no denial', error: 'The harness flagged the result as an error (is_error, or isError in r1)',
-        denied: 'The result says permission to use the tool was denied',
-      },
-    },
+    { name: 'tool', title: 'Tool', description: 'The tool a call used, Agent read as Task', meanings: TOOLS },
+    { name: 'file type', title: 'File type', description: "The extension of the call's first path, test files apart; none for a call with no file", meanings: FILE_TYPES },
+    { name: 'outcome', title: 'Outcome', description: 'denied when the result says so, error when it is flagged, else ok', meanings: OUTCOMES },
   ],
   chips: 'filter',
-  strip: '#list',
+  strip: '#turns',
   onChange: load,
 })
-// the one control for time: every message and call over the whole span in the Color by colors, a break where the runs
-// lie hours apart, and a viewfinder over the part the lanes and the list show
+// Filter by: which turns show, in the lanes and the transcript; the reader leaves out those of a value turned off
+const filter = thimble.filterBy({
+  mount: '#filter',
+  fields: [
+    { name: 'run', title: 'Run', description: "The run a session belongs to: a folder under runs/, its team named in the run's index", nameOf: runTitle },
+    { name: 'agent', title: 'Agent', description: "The agent whose transcript holds the turn: lead, or a subagent's type" },
+    {
+      name: 'kind', title: 'Turn', description: 'What the turn is', values: ['prompt', 'text', 'call', 'result'], nameOf: (k) => KIND[k] || k,
+      meanings: {
+        prompt: "What the session was asked: the user's words for a lead, the Task call's prompt for a subagent", text: 'What the agent said along the way',
+        call: 'A tool call and what came back', result: "The agent's last words, which go back to the session that started it",
+      },
+    },
+    { name: 'tool', title: 'Tool', description: 'The tool a call used', meanings: TOOLS },
+    { name: 'outcome', title: 'Outcome', description: 'denied when the result says so, error when it is flagged, else ok', meanings: OUTCOMES },
+    { name: 'file type', title: 'File type', description: "The extension of the call's first path", meanings: FILE_TYPES },
+  ],
+  onChange: load,
+})
+// Rows: what the lanes are; by session they are each run's tree, a lead with the subagents it started under it
+const rows = thimble.rows({
+  mount: '#rows',
+  fields: [
+    {
+      name: 'session', title: 'Session', description: 'A lane per session, each subagent under the session that started it',
+      nameOf: laneName, parentOf: (id) => (S[id] ? S[id].parent : null),
+    },
+    { name: 'agent', title: 'Agent', description: "A lane per agent: lead, or a subagent's type, across the runs" },
+    { name: 'run', title: 'Run', description: 'A lane per run', nameOf: runTitle },
+    { name: 'tool', title: 'Tool', description: 'A lane per tool, the messages under no tool' },
+  ],
+  onChange: () => { chosen = null; load() },
+})
+// the one control for time: every turn over the whole span in the Color by colors, a break where the runs lie hours
+// apart, and a viewfinder over the part the lanes and the transcript show
 const range = thimble.timeRange({ mount: '#range', readout: '#readout', gap: 1200, onChange: draw })
-// what Reset puts back of this page's own state: the row opened in place (the kit puts back the search and the menu)
-const reset = thimble.onReset({ changed: () => open != null, reset: () => { open = null; load() } })
+// with a label chosen, a turn's value is the reader's, since the page holds a label's marks only for what it shows
+const valueOf = (it) => (colour.label ? (data && data.colours[it.ref]) ?? null : colour.valueOf(it))
+const laneColour = { keeps: () => true, valueOf, colourOf: (v) => colour.colourOf(v) }
+const bySession = () => rows.field === 'session'
+// the lanes: each turn a mark as wide as its call took (a Task call as long as its subagent ran), a failed call
+// underlined in red; the transcript's turns in view tinted across them
+const lanes = thimble.lanes({
+  mount: '#lanes', keyMount: '#key', rows, range, colour: laneColour, names: NAMES,
+  time: (it) => it.time,
+  end: (it) => it.time + (it.duration || 0),
+  problem: (it) => it.kind === 'call' && it.outcome !== 'ok',
+  words: { problem: 'failed' },
+  follow: '#turns',
+  anchor: (lane) => (bySession() && S[lane.key] ? `view:${slug}/${lane.key}` : null),
+  onPick: (lane) => read(String(lane.key)),
+  onMark: (it) => goTo(it.ref),
+  tip: (it) => `${it.tool || KIND[it.kind]}  ${it.input ?? it.text}`,
+})
+// a key entry of this page's own for the links it draws over the lanes, a toggle as the lanes' own entries are
+const linkKey = thimble.key('#linkkey', [], { key: 'links', onChange: () => drawOver() })
+// the transcript: a card per turn as the File browser draws it, a tool call folded to its line; a Task call opened
+// shows the subagent's transcript beside it in the side panel
+const tr = thimble.transcript({ mount: '#turns', colour, onOpen: (turn) => opened(turn) })
+const side = thimble.side({ mount: '#body', width: 0.42, key: 'subagent' })
+thimble.divider({ top: '#overview' })
+let sideTr = null
 
 async function load() {
+  let got
   try {
-    data = await thimble.fetch({ op: 'overview', colour: colour.query(), scope: $('scope').value, search: $('q').value.trim() }, { key: 'overview' })
+    got = await thimble.fetch({ op: 'overview', colour: colour.query(), filter: filter.query(), rows: rows.query(), search: $('q').value.trim() }, { key: 'overview' })
   } catch (e) {
     if (e.name === 'AbortError') return
     throw e
   }
+  data = got
   colour.counts(data.counts)
-  menu()
-  items = [...data.calls, ...data.messages].sort((a, b) => a.time - b.time)
-  range.data({ times: items.map((i) => i.time), values: items.map((i) => colour.valueOf(i)) })
+  filter.counts(data.fcounts)
+  sessions()
+  // under a label, a turn's lane is the reader's value of it (`group`); under a field, the page reads the field
+  items = data.items
+  if (rows.label) for (const it of items) it.group = data.groups[it.ref] ?? null
+  for (const it of items) filter.keeps(it) // the values of each field, for Filter by's menu
+  range.data({ times: items.map((it) => it.time), values: items.map(valueOf) })
   draw()
-  reset.check() // the menu or the search may have changed without a click, as when thimble opens a place
   loaded()
 }
 
-// each session's name, its agent numbered when its run has two; the menu lists every run with its sessions as a tree
-function menu() {
+// each session's name, its agent numbered when its run has two; the sessions each started, and the call that did
+function sessions() {
   const seen = {}
+  for (const r of data.runs) teams[r.id] = r.team
+  for (const k of Object.keys(kids)) delete kids[k]
+  for (const k of Object.keys(spawnOf)) delete spawnOf[k]
   for (const s of data.sessions) {
     S[s.id] = s
     seen[s.run + s.agent] = (seen[s.run + s.agent] || 0) + 1
     names[s.id] = seen[s.run + s.agent] > 1 ? `${s.agent} ${seen[s.run + s.agent]}` : s.agent
   }
-  const opts = ['<option value="">All runs</option>']
-  for (const r of data.runs) {
-    opts.push(`<option value="r:${esc(r.id)}">${esc(runName(r.id))} · ${esc(r.team)}</option>`)
-    for (const s of data.sessions) if (s.run === r.id) opts.push(`<option value="s:${esc(s.id)}">${'\u2003'.repeat(s.depth + 1)}${esc(names[s.id])}</option>`)
+  for (const sp of data.spawns) {
+    spawnOf[sp.child] = sp
+    ;(kids[sp.session] ||= []).push(sp.child)
   }
-  const el = $('scope'), was = el.value
-  if (opts.join('') === menuHtml) return
-  el.innerHTML = menuHtml = opts.join('')
-  el.value = was
-  if (el.selectedIndex < 0) { el.value = ''; soon() } // a session the label filter no longer keeps
+  for (const s of data.sessions) if (s.parent && !spawnOf[s.id] && S[s.parent]) (kids[s.parent] ||= []).push(s.id)
 }
 
 function draw() {
   if (!data) return
   const scale = range.scale($('axis').clientWidth)
   thimble.timeAxis('#axis', scale)
-  lanes(scale)
-  list()
+  lanes.draw(items.filter((it) => range.has(it.time)))
+  // the lane read stays chosen while it has a turn in the range, though a folded lane may hold it; else the first
+  const ls = lanes.lanes.filter((l) => !l.heading)
+  if (bySession() ? !items.some((it) => it.session === chosen && range.has(it.time)) : !ls.some((l) => String(l.key) === chosen)) chosen = ls.length ? String(ls[0].key) : null
+  lanes.choose(chosen)
+  fitOverview()
+  drawOver()
+  return transcript()
 }
 
-// a lane per session in scope under its run's name, each subagent under the session that spawned it: the time it ran
-// as a gray band, and each message and call a mark in its Color by color, as wide as the call took, a failed call
-// underlined in the ink. A run's name and a session's lane are the view's units, which a label marks where it marks
-// one of their records
-function lanes(scale) {
-  const scope = new Set(data.scope), by = {}, runs = {}
-  for (const it of items) (by[it.session] ||= []).push(it)
-  for (const s of data.sessions) if (scope.has(s.id)) (runs[s.run] ||= []).push(lane(s, by[s.id] || [], scale))
-  $('lanes').innerHTML = data.runs.filter((r) => runs[r.id]).map((r) => `<div class="run"><div class="nm head" data-scope="r:${esc(r.id)}" data-anchor="view:${slug}/${esc(r.id)}">${esc(runName(r.id))} · ${esc(r.team)}</div>${runs[r.id].join('')}</div>`).join('')
-  fitLanes()
-}
-// the lanes' box takes up to two fifths of the page and ends on a whole lane, never on a run's name alone, so no row is
-// cut in half; a fade shows that more lie below
-const LANES_SHARE = 0.4
-function fitLanes() {
-  const box = $('lanes'), cap = $('view').clientHeight * LANES_SHARE
+// the overview's height until the divider moves it: about half the page at most, ending on a whole lane, so no lane is
+// cut in half
+function fitOverview() {
+  const box = $('overview')
+  if (box.style.height) return
   box.style.maxHeight = ''
-  const rows = [...box.querySelectorAll('.nm.head, .lane')]
-  if (!rows.length || box.scrollHeight <= cap) return box.classList.remove('more')
+  const cap = $('view').clientHeight * 0.48
+  if (box.scrollHeight <= cap) return
   const top = box.getBoundingClientRect().top - box.scrollTop
   let end = 0
-  for (const [i, el] of rows.entries()) {
+  for (const el of box.querySelectorAll('.thimble-lane')) {
     const bottom = el.getBoundingClientRect().bottom - top
     if (bottom > cap) break
-    if (!el.classList.contains('head') || i === rows.length - 1) end = bottom
+    end = bottom
   }
-  box.style.maxHeight = `${Math.ceil(Math.max(end, rows[0].getBoundingClientRect().bottom - top)) + 8}px`
-  const more = () => box.classList.toggle('more', box.scrollTop + box.clientHeight < box.scrollHeight - 1)
-  box.onscroll = more
-  more()
+  box.style.maxHeight = `${Math.ceil(Math.max(end, $('lanes').getBoundingClientRect().top - top + 18))}px`
 }
-function lane(s, calls, scale) {
-  const a = Math.max(0, scale.x(s.start)), b = Math.min(scale.width, scale.x(s.end))
-  let svg = b > a ? `<rect class="span" x="${a}" y="4" width="${b - a}" height="${LANE - 8}"/>` : ''
-  for (const it of calls) {
-    const end = it.time + (it.duration || 0)
-    if (end < range.from || it.time > range.to) continue
-    const x = scale.x(it.time), w = Math.max(2, scale.x(end) - x), c = colour.colourOf(colour.valueOf(it))
-    svg += `<rect class="tick" data-ref="${esc(it.ref)}" x="${x}" y="3" width="${w}" height="${LANE - 6}"${c ? ` style="fill:${c}"` : ''}><title>${hms(it.time)} ${esc(it.tool || KIND[it.kind])} ${esc(it.input ?? it.text)}</title></rect>`
-    if (it.outcome && it.outcome !== 'ok') svg += `<rect class="err" x="${x}" y="${LANE - 2}" width="${Math.max(4, w)}" height="2"/>`
+addEventListener('resize', fitOverview)
+
+// ------------------------------------------------------------------------------------------------ over the lanes
+
+// what this page draws over the lanes: a session's mark where a label marks it, the 3 px bar thimble draws on a record,
+// at its name's left edge (the lanes anchor a session's lane as unmarked, so the page draws it); and for each subagent
+// whose lane and whose parent's lane show, a line from the parent's lane down to the subagent's where the Task call
+// started it and one back up where its result came back, each with its arrowhead
+function drawOver() {
+  const box = $('lanes')
+  const body = box.querySelector('.thimble-lanes-body')
+  let svg = box.querySelector('svg.links')
+  let marks = box.querySelector('.unit-marks')
+  if (!svg) {
+    svg = document.createElementNS(NS, 'svg')
+    svg.setAttribute('class', 'links')
+    svg.setAttribute('aria-hidden', 'true')
+    marks = document.createElement('div')
+    marks.className = 'unit-marks'
+    box.append(svg, marks)
   }
-  return `<div class="lane" data-anchor="view:${slug}/${esc(s.id)}"><div class="nm" style="padding-left:${8 + s.depth * 12}px" data-scope="s:${esc(s.id)}">${esc(names[s.id])}</div><svg width="${scale.width}" height="${LANE}">${svg}</svg></div>`
+  const sc = lanes.scale
+  const at = {}
+  if (body) for (const el of body.querySelectorAll('.thimble-lane')) at[el.dataset.key] = el
+  const y0 = body ? body.offsetTop : 0
+  const bars = []
+  for (const el of Object.values(at)) {
+    const m = el.dataset.anchor && thimble.markOf(el.dataset.anchor)
+    if (m && m.bar) bars.push(`<i style="left:${body.offsetLeft}px;top:${y0 + el.offsetTop + 2}px;height:${el.offsetHeight - 4}px;background:${esc(m.bar)}"></i>`)
+  }
+  marks.innerHTML = bars.join('')
+  const out = []
+  const shown = data && bySession() && sc ? data.spawns.filter((sp) => at[sp.session] && at[sp.child]) : []
+  linkKey.set(shown.length ? [{ id: 'links', name: 'subagent links', mark: 'line', n: shown.length, count: false, about: 'A line down where a Task call started a subagent, and one back up where its result came back' }] : [])
+  if (shown.length && linkKey.isOn('links')) {
+    const x0 = body.offsetLeft + NAMES
+    const mid = (el) => y0 + el.offsetTop + el.offsetHeight / 2
+    const arrow = (x, y, down) => `<path class="head" d="M${x - 3} ${y + (down ? -5 : 5)} L${x + 3} ${y + (down ? -5 : 5)} L${x} ${y} Z"/>`
+    for (const sp of shown) {
+      const a = mid(at[sp.session]), b = mid(at[sp.child])
+      for (const [t, down] of [[sp.time, true], [sp.time + sp.duration, false]]) {
+        if (t < sc.from || t > sc.to) continue
+        const x = Math.round(x0 + sc.x(t)) + 0.5
+        const [from, to] = down ? [a, b - 4] : [b, a + 4]
+        out.push(`<path d="M${x} ${from} V${to}"/>${arrow(x, down ? b - 4 : a + 4, down)}`)
+      }
+    }
+  }
+  svg.setAttribute('width', box.scrollWidth)
+  svg.setAttribute('height', box.scrollHeight)
+  svg.innerHTML = out.join('')
+}
+// the lanes draw themselves again as the page resizes or a lane folds, and a label's marks arrive: this follows
+const over = () => requestAnimationFrame(drawOver)
+new MutationObserver(over).observe($('lanes').querySelector('.thimble-lanes-body'), { childList: true })
+thimble.onMarks(over)
+
+// ------------------------------------------------------------------------------------------------ the transcript
+
+// a turn as the transcript draws it: a call is a tool turn, folded to its tool and its input's line, a Task call naming
+// the subagent it started; the rest keep the reader's fields, which Color by reads
+function turnOf(it) {
+  const call = it.kind === 'call'
+  const w = whole.get(it.ref)
+  return {
+    ...it, t: it.time, time: null, kind: call ? 'tool' : it.kind === 'prompt' ? 'prompt' : 'text',
+    input: call ? inputOf(it, w) : undefined, output: w ? w.output : undefined,
+    error: call && it.outcome !== 'ok', sessionName: S[it.session] ? `${names[it.session]} · ${runTitle(S[it.session].run)}` : it.session,
+  }
+}
+const inputOf = (it, w) => (it.child && S[it.child] ? `→ ${names[it.child]}\n` : '') + (w ? w.input : it.input)
+
+// a session's turns, or a selection's, fetched once
+async function fetchTurns(key, query) {
+  if (!turnsOf.has(key)) turnsOf.set(key, (await thimble.fetch({ op: 'turns', ...query })).turns)
+  return turnsOf.get(key)
 }
 
-// the messages and calls in the range, in time order: each row its time, its session, its tool or kind and its first
-// line, a call that failed saying so after a ✕
-function list() {
-  const shown = items.filter((i) => range.has(i.time))
-  several = new Set(data.scope.map((id) => S[id].run)).size > 1
-  $('list').innerHTML = shown.length ? shown.map(row).join('') : '<div class="empty">No message or call</div>'
-}
-function row(it) {
-  const s = S[it.session], who = several ? `${runName(s.run)} · ${names[s.id]}` : names[s.id]
-  const bad = it.outcome && it.outcome !== 'ok' ? `<span class="bad">✕ ${esc(it.outcome)}</span>` : ''
-  return `<div class="row ${it.tool ? 'call' : 'msg'}" data-anchor="${esc(it.ref)}"${colour.attr(it)}><div class="line"><time>${hms(it.time)}</time><span class="who">${esc(who)}</span><span class="what">${esc(it.tool || KIND[it.kind])}</span><span class="text">${esc(it.input ?? it.text)}</span><span class="end">${bad}${it.tool ? secs(it.duration) : ''}</span></div>${it.ref === open ? details(it) : ''}</div>`
-}
-// a row opened in place: a call's whole input and what came back, or a message's whole text, and the file it is in
-function details(it) {
-  const f = full.get(it.ref) || {}
-  const out = f.new != null ? `${f.old ? `− ${f.old}\n` : ''}+ ${f.new}` : f.output || f.result
-  const body = it.tool ? `<pre>${esc(f.input)}</pre>${out ? `<pre>${esc(out)}</pre>` : ''}` : `<div class="full">${esc(f.text)}</div>`
-  return `<div class="thimble-details">${body}<div class="acts">${f.exit != null ? `<span>exit ${f.exit}</span>` : ''}${f.child ? `<button class="btn btn-secondary btn-sm" data-scope="s:${esc(f.child)}">Show ${esc(names[f.child] || 'subagent')}</button>` : ''}<button class="btn btn-ghost btn-sm" data-file="${esc(it.ref)}">Open in file</button></div></div>`
+// the chosen lane's turns in the range that the filters keep: a session's transcript, else the turns of the lane's
+// group across the sessions, each session's start marked; the header names what it shows and how many
+async function transcript() {
+  const session = bySession() && S[chosen]
+  const lane = session ? null : lanes.lanes.find((l) => String(l.key) === chosen)
+  rel()
+  if (!session && !lane) {
+    drawn = ''
+    tr.draw([], { title: 'No session', empty: 'No turn holds the search or passes the filters' })
+    return
+  }
+  const keep = new Set((session ? items.filter((it) => it.session === chosen && range.has(it.time)) : lane.items).map((it) => it.ref))
+  const key = session ? `s:${chosen}` : `r:${[...keep].sort().join(' ')}`
+  const title = session ? `${names[chosen]} · ${runTitle(session.run)}` : `${rows.by ? rows.by.title : 'All'}: ${lane.name}`
+  if (!turnsOf.has(key)) tr.draw([], { title, sub: 'loading…', empty: 'Loading the transcript…' })
+  const all = await fetchTurns(key, session ? { session: chosen } : { refs: [...keep] })
+  if (String(lanes.chosen) !== chosen) return // another lane was chosen while these came
+  const turns = all.filter((t) => keep.has(t.ref)).map(turnOf)
+  const total = session ? all.length : turns.length
+  const sub = [
+    turns.length < total ? `of ${total}` : '',
+    session ? `${hms(session.start)} – ${hms(session.end)}` : `${new Set(turns.map((t) => t.session)).size} sessions`,
+  ].filter(Boolean).join(' · ')
+  const sig = JSON.stringify([key, turns.map((t) => t.ref), colour.query()])
+  if (sig === drawn) return
+  drawn = sig
+  tr.draw(turns, { title, sub, empty: range.full ? 'No turn holds the search or passes the filters' : 'No turn in this time range' })
 }
 
-const rowOf = (ref) => $('list').querySelector(`.row[data-anchor="${CSS.escape(ref)}"]`)
-async function fetchFull(ref) {
-  if (!full.has(ref)) full.set(ref, await thimble.fetch({ op: 'record', ref }))
+// what links the session read to the others: the session that started it and when, when its result came back, and
+// the subagents it started; each a link that reads that session, at the call where it happened
+function rel() {
+  const s = bySession() && S[chosen]
+  if (!s) return ($('rel').innerHTML = '')
+  const out = []
+  const sp = spawnOf[s.id]
+  if (sp && S[sp.session]) {
+    out.push(`<span class="fact">Started by <button class="go" data-call="${esc(sp.ref)}">${esc(names[sp.session])}</button> at <time>${hms(sp.time)}</time></span>`)
+    out.push(`<span class="fact">Result back to ${esc(names[sp.session])} at <button class="go" data-call="${esc(sp.ref)}"><time>${hms(sp.time + sp.duration)}</time></button></span>`)
+  } else if (s.parent && S[s.parent]) {
+    out.push(`<span class="fact">Under <button class="go" data-read="${esc(s.parent)}">${esc(names[s.parent])}</button></span>`)
+  } else {
+    out.push(`<span class="fact">Lead of ${esc(runTitle(s.run))}</span>`)
+  }
+  const ks = kids[s.id] || []
+  if (ks.length) out.push(`<span class="fact">Subagents ${ks.map((k) => `<button class="go" data-read="${esc(k)}">${esc(names[k])}</button>${spawnOf[k] ? ` <time>${hms(spawnOf[k].time)}</time>` : ''}`).join(', ')}</span>`)
+  $('rel').innerHTML = out.join('')
 }
-// a message or call to show, from a lane's mark or a citation: opened in place and scrolled to
-async function reveal(ref) {
-  if (!items.some((i) => i.ref === ref)) {
-    $('scope').value = ''
+
+// a turn opened: a call's whole input and what came back, fetched once; a Task call's subagent beside it
+async function opened(turn) {
+  if (turn.kind === 'tool' && !whole.has(turn.ref)) {
+    whole.set(turn.ref, await thimble.fetch({ op: 'record', ref: turn.ref }))
+    const w = whole.get(turn.ref)
+    for (const t of [tr, sideTr]) if (t) t.set(turn.ref, { input: inputOf(turn, w), output: w.output })
+  }
+  if (turn.child && S[turn.child] && turn.child !== chosen) beside(turn.child)
+}
+
+// a subagent's transcript in the side panel, beside its parent's: its turns that the filters keep, and a link that
+// reads it in the center
+async function beside(id) {
+  const s = S[id]
+  const keep = new Set(items.filter((it) => it.session === id).map((it) => it.ref))
+  const all = await fetchTurns(`s:${id}`, { session: id })
+  const turns = all.filter((t) => keep.has(t.ref)).map(turnOf)
+  side.open({
+    title: `${names[id]} · started by ${names[s.parent] || 'its parent'}`,
+    sub: `${turns.length} of ${all.length} turns · ${hms(s.start)} – ${hms(s.end)}`,
+    ref: `view:${slug}/${id}`,
+    render: (body) => {
+      body.innerHTML = `<div class="side-acts"><button class="btn btn-secondary btn-sm" data-read="${esc(id)}">Read ${esc(names[id])} here</button></div><div class="side-turns"></div>`
+      sideTr = thimble.transcript({ mount: body.querySelector('.side-turns'), colour, onOpen: (turn) => opened(turn) })
+      sideTr.draw(turns, { empty: 'No turn passes the filters' })
+    },
+  })
+}
+
+// ------------------------------------------------------------------------------------------------ moving around
+
+// read a lane: its turns in the transcript, from the top
+async function read(key) {
+  if (chosen === key) return
+  chosen = key
+  lanes.choose(key)
+  await transcript()
+  $('turns').scrollTop = 0
+}
+
+// a turn to show, from a lane's mark, a link or a citation: its session read, the turn opened and in the middle
+async function goTo(ref) {
+  let it = items.find((x) => x.ref === ref)
+  if (!it && ($('q').value || filter.query())) {
+    // a turn the search or Filter by hides: both put back, so it shows
     $('q').value = ''
+    if (filter.query()) filter.choose(null)
     await load()
+    it = items.find((x) => x.ref === ref)
   }
-  const it = items.find((i) => i.ref === ref)
   if (!it) return
-  open = ref
-  await fetchFull(ref)
-  if (!range.has(it.time)) range.set(null)
-  list()
-  rowOf(ref)?.scrollIntoView({ block: 'center' })
+  if (!range.has(it.time)) {
+    range.set(null)
+    await draw()
+  }
+  if (bySession()) await read(it.session)
+  else {
+    const lane = lanes.lanes.find((l) => l.items.includes(it))
+    if (lane) await read(String(lane.key))
+  }
+  tr.reveal(ref)
 }
 
 let typing = null
-addEventListener('resize', fitLanes)
 $('q').addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(load, 250) })
-$('scope').addEventListener('change', load)
-// a session's or a run's name narrows the view to it through the menu in the top row; a lane's mark opens its row
 document.addEventListener('click', (e) => {
-  const go = e.target.closest('[data-scope]'), file = e.target.closest('[data-file]'), mark = e.target.closest('[data-ref]')
-  if (go) { $('scope').value = go.dataset.scope; load() }
-  else if (file) thimble.navigate(file.dataset.file, { browser: true })
-  else if (mark) reveal(mark.dataset.ref)
+  const call = e.target.closest('[data-call]'), go = e.target.closest('[data-read]')
+  if (call) goTo(call.dataset.call)
+  else if (go) {
+    if (!bySession()) rows.choose('session')
+    read(go.dataset.read)
+  }
 })
-// a click on a row opens it in place under its line, the row kept under the pointer; a second click closes it
-$('list').addEventListener('click', async (e) => {
-  const el = e.target.closest('.row')
-  if (!el || e.target.closest('.thimble-details')) return
-  const ref = el.dataset.anchor
-  open = open === ref ? null : ref
-  if (open) await fetchFull(ref)
-  thimble.expand(rowOf(ref) || el, list)
-})
-// a place thimble opens: a cited message or call in its row, a session or a run as the menu's choice, and a
-// transcript or a run's index the analyst opened the view on as its session or its run
+// a place thimble opens: a cited call or message in its session's transcript, a session read, a run filtered to, and a
+// transcript or a run's index the analyst opened the view on as that session or that run
 thimble.onOpen(async (place) => {
   await ready
   const t = place.target || {}, path = place.picked ? place.path || '' : ''
   const file = data.sessions.find((s) => s.path === path)
   const run = t.run || (/sessions-index\.json$/.test(path) ? path.split('/').slice(-2)[0] : null)
-  if (t.call || t.message) return reveal(t.call || t.message)
-  if (run || t.session || file) {
-    $('scope').value = run ? `r:${run}` : `s:${t.session || file.id}`
-    load()
+  if (t.call || t.message) return goTo(t.call || t.message)
+  if (run) {
+    // Filter by Run with only this run on, its lead read
+    filter.choose('run')
+    for (const r of data.runs) if ((r.id === run) !== filter.isOn(r.id)) filter.toggle(r.id)
+    await load()
+    const lead = data.sessions.find((s) => s.run === run && !s.parent)
+    if (lead) await read(lead.id)
+    return
+  }
+  if (t.session || file) {
+    if (!bySession()) rows.choose('session')
+    await read(t.session || file.id)
   }
 })
 // the label filter changes which records the reader keeps, and a label's values arrive while it runs
-let later = null, filter = null
+let later = null, labelFilter = null
 const soon = () => { clearTimeout(later); later = setTimeout(load, 300) }
 thimble.onLabels((state) => {
   const now = JSON.stringify(state.filter || null)
-  if (filter != null && now !== filter) soon()
-  filter = now
+  if (labelFilter != null && now !== labelFilter) soon()
+  labelFilter = now
 })
-thimble.onMarks(() => { if (colour.label) soon() })
+thimble.onMarks(() => { if (colour.label || filter.label || rows.label) soon() })
 load()
 </script>
 </body>
