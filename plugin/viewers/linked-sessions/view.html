@@ -87,12 +87,35 @@ const ready = new Promise((ok) => { loaded = ok })
 // a bar on each row's left edge, the list's two tracks, and Reset at the row's end
 const colour = thimble.colorBy({
   mount: '#colour',
-  // each field says what it is (from view.json's records), which the menu and a chip's hover give
+  // each field says what it is (from view.json's records), and `meanings` what the values the transcripts' format
+  // fixes mean (reader.py's notes), which the menu and a chip's hover give; a value with none, such as a subagent's
+  // name, shows what the field is. `meanings` declares no value, so the values keep the colors the records give them
   fields: [
-    { name: 'speaker', title: 'Speaker', description: 'The agent whose transcript holds the call or message; for a prompt, the agent that spawned the session, or user for a lead' },
-    { name: 'tool', title: 'Tool', description: "The tool the call used, Agent read as Task" },
-    { name: 'file type', title: 'File type', description: "The extension of the call's first path, test files apart; none for a call with no file" },
-    { name: 'outcome', title: 'Outcome', description: 'denied when the result says so, error when it is flagged, else ok' },
+    {
+      name: 'speaker', title: 'Speaker', description: 'The agent whose transcript holds the call or message; for a prompt, the agent that spawned the session, or user for a lead',
+      meanings: { lead: 'The session a run starts with, in runs/<run>/<session id>.jsonl, which spawns the subagents', user: "The person who wrote a lead's prompt" },
+    },
+    {
+      name: 'tool', title: 'Tool', description: "The tool the call used, Agent read as Task",
+      meanings: {
+        Task: 'Spawns a subagent, whose session sits under this one', Bash: 'Runs a shell command; its result gives the exit code',
+        Read: 'Reads a file', Edit: 'Changes a file', Grep: 'Searches files; its result lists the files that match', WebSearch: 'Searches the web',
+      },
+    },
+    {
+      name: 'file type', title: 'File type', description: "The extension of the call's first path, test files apart; none for a call with no file",
+      meanings: {
+        '.py': 'A Python file outside the tests', 'test .py': 'A Python file under tests/ or named test_*',
+        'test .json': 'A JSON file under tests/, such as a fixture', '.md': 'A Markdown file', '.toml': 'A TOML file, such as pyproject.toml',
+      },
+    },
+    {
+      name: 'outcome', title: 'Outcome', description: 'denied when the result says so, error when it is flagged, else ok',
+      meanings: {
+        ok: 'The result came back with no error flag and no denial', error: 'The harness flagged the result as an error (is_error, or isError in r1)',
+        denied: 'The result says permission to use the tool was denied',
+      },
+    },
   ],
   chips: 'filter',
   strip: '#list',

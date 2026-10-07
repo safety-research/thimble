@@ -81,12 +81,22 @@ const units = new Map() // each opened item's records (reader.py _detail)
 // with its width in px
 const COLS = [{ key: 'area', title: 'Area', w: 92, td: 'dim' }, { key: 'author', title: 'Author', w: 84 }, { key: 'state', title: 'State', w: 72 }]
 let shown = COLS // the columns the items of the kind fill
+const ID_W = 76 // px of the Item column (.c-id)
+const TITLE_MIN = 48 // px the least Title takes, for its head
 
 const colour = thimble.colorBy({
   mount: '#colour',
-  // each field says what it is (from view.json's records), which the menu and a chip's hover give
+  // each field says what it is (from view.json's records), and `meanings` what the values the forge fixes mean
+  // (reader.py's notes), which the menu and a chip's hover give; a value with none, such as a run or an area, shows what
+  // the field is. `meanings` declares no value, so the values keep the colors the records give them
   fields: [
-    { name: 'state', title: 'State', description: 'A pull request open, merged or closed by its records; an issue fixed once a pull request that fixes it merged' },
+    {
+      name: 'state', title: 'State', description: 'A pull request open, merged or closed by its records; an issue fixed once a pull request that fixes it merged',
+      meanings: {
+        open: 'A pull request neither merged nor closed, or an issue no merged pull request fixes yet', merged: 'A pull request merged',
+        closed: 'A pull request closed without a merge', fixed: 'An issue that a merged pull request fixes',
+      },
+    },
     { name: 'run', title: 'Run', description: "The run whose folder holds the item" },
     { name: 'area', title: 'Area', description: 'The first label, else the area of the issue it fixes' },
   ],
@@ -128,11 +138,38 @@ function heads() {
     shown = want
     $('heads').innerHTML = `<th>Item</th><th>Title</th>${shown.map((c) => `<th>${c.title}</th>`).join('')}<th class="act"><div id="axis"></div></th>`
   }
-  // the strip: a third of the table and the width of the columns the kind leaves out, so it widens rather than Title;
+  // the strip: a third of the table and the width of the columns the kind leaves out, so it widens rather than Title,
+  // and whatever Title's widest title leaves on one line, so short titles such as the agents' names give it the rest;
   // in px, since a table's column takes no calc() of a share and a length
   const freed = COLS.filter((c) => !shown.includes(c)).reduce((n, c) => n + c.w, 0)
-  const strip = Math.round($('list').clientWidth * 0.32) + freed
+  // the list's width inside the room the kit's tracks take at its right
+  const box = getComputedStyle($('list'))
+  const w = $('list').clientWidth - parseFloat(box.paddingLeft) - parseFloat(box.paddingRight)
+  const left = w - ID_W - shown.reduce((n, c) => n + c.w, 0) - titleWidth(data.items)
+  const strip = Math.max(Math.round(w * 0.32) + freed, left)
   $('cols').innerHTML = `<col class="c-id"><col>${shown.map((c) => `<col style="width:${c.w}px">`).join('')}<col style="width:${strip}px">`
+}
+
+// the px Title takes for the widest of these titles on one line, with the cell's padding, in the title's own font
+const ruler = document.createElement('canvas').getContext('2d')
+let fontAsked = false
+function titleWidth(items) {
+  const probe = document.createElement('table')
+  probe.className = 'table'
+  probe.style.cssText = 'position:absolute;visibility:hidden;width:auto'
+  probe.innerHTML = '<tbody><tr><td class="t"><div class="title"><b>Title</b></div></td></tr></tbody>'
+  document.body.appendChild(probe)
+  const td = getComputedStyle(probe.querySelector('td'))
+  const b = getComputedStyle(probe.querySelector('b'))
+  ruler.font = `${b.fontWeight} ${b.fontSize} ${b.fontFamily}`
+  // a face still loading is measured again once it has, once
+  if (!fontAsked && document.fonts && !document.fonts.check(ruler.font)) {
+    fontAsked = true
+    document.fonts.load(ruler.font).then(() => data && draw(), () => {})
+  }
+  const pad = parseFloat(td.paddingLeft) + parseFloat(td.paddingRight)
+  probe.remove()
+  return Math.ceil(items.reduce((n, it) => Math.max(n, ruler.measureText(it.title || '').width), TITLE_MIN) + pad) + 2
 }
 
 function draw() {

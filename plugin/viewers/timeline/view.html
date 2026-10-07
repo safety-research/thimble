@@ -83,14 +83,47 @@ const loaded = new Promise((ok) => (markLoaded = ok))
 
 const colour = thimble.colorBy({
   mount: '#colour',
-  // each field says what it is (from view.json's records), which the menu and a chip's hover give
+  // each field says what it is (from view.json's records), and `meanings` what the values the sources' formats fix
+  // mean (reader.py's notes), which the menu and a chip's hover give; a value with none, such as a service or a
+  // person, shows what the field is. `meanings` declares no value, so the values keep the colors the records give them
   fields: [
     { name: 'service', title: 'Service', description: "The service the event is about: its svc or service, the ticket's in tickets/index.csv, else its summary's first word" },
-    { name: 'kind', title: 'Kind', description: "What happened, from its state, event, Status or action: an alert firing read as fired, a ticket's first message as opened" },
-    { name: 'severity', title: 'Severity', description: "The alert's severity, or the ticket's priority in tickets/index.csv" },
-    { name: 'outcome', title: 'Outcome', description: 'The result an event records: ok, failed or held' },
-    { name: 'actor', title: 'Actor', description: 'Who acted: a login or chat id as chat/users.json names it, or the agent' },
-    { name: 'source', title: 'Source', description: "The file the event comes from: alerts, deploys, the agents' log, chat or tickets" },
+    {
+      name: 'kind', title: 'Kind', description: "What happened, from its state, event, Status or action: an alert firing read as fired, a ticket's first message as opened",
+      meanings: {
+        fired: 'An alert started firing', resolved: 'An alert stopped firing; it answers the alert it resolves',
+        started: 'A deploy started', finished: 'A deploy finished, ok or failed', rollback: 'A deploy put an earlier version back',
+        message: 'A chat message', opened: "A ticket's first message, or an agent opening an incident",
+        updated: "A ticket's later message that does not close it", closed: "A ticket's message that closes it, or an agent closing an incident",
+        restart: 'An agent restarted a replica or a worker', page: 'An agent paged a person, or escalated a page',
+        scale: 'An agent changed how many replicas a service runs', tag: 'An agent tagged support tickets',
+        pause: 'An agent paused, as a person asked in chat', resume: 'An agent resumed, as a person asked in chat',
+      },
+    },
+    {
+      name: 'severity', title: 'Severity', description: "The alert's severity, or the ticket's priority in tickets/index.csv",
+      meanings: {
+        critical: "An alert of severity critical", warning: 'An alert of severity warning',
+        urgent: 'A ticket of priority urgent in tickets/index.csv', high: 'A ticket of priority high in tickets/index.csv',
+        normal: 'A ticket of priority normal in tickets/index.csv', low: 'A ticket of priority low in tickets/index.csv',
+      },
+    },
+    {
+      name: 'outcome', title: 'Outcome', description: 'The result an event records: ok, failed or held',
+      meanings: {
+        ok: "The agent's action or the deploy succeeded", failed: "The agent's action or the deploy failed, such as a restart that timed out",
+        held: 'The agent held the action back, such as a page held until 07:00 in quiet hours',
+      },
+    },
+    { name: 'actor', title: 'Actor', description: 'Who acted: a login or chat id as chat/users.json names it, or the agent', meanings: { monitor: 'The monitor, which raises and resolves the alerts' } },
+    {
+      name: 'source', title: 'Source', description: "The file the event comes from: alerts, deploys, the agents' log, chat or tickets",
+      meanings: {
+        alert: "One of the monitor's alerts, in alerts/*.jsonl", deploy: "A deploy tool event, a row of deploys.csv",
+        chat: "A message in a channel's file in chat/", ticket: "A support ticket's message, in tickets/*.txt",
+        agent: "An automated agent's action, a line of agents.log",
+      },
+    },
   ],
   chips: 'filter',
   strip: '#list',
