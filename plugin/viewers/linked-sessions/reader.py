@@ -1,5 +1,6 @@
-# Linked sessions: the sessions of agent teams, each run's sessions on one clock, with every subagent under the session
-# that spawned it.
+# Linked sessions: a reader for the related transcripts of agent teams. Each run's sessions form a tree, every subagent
+# under the session whose Task call started it; the page reads one session's transcript at a time and shows where each
+# subagent was started and where its result came back.
 #
 # The data (sample/): transcripts, runs/*.jsonl, and each run's index, runs/*/sessions-index.json, one folder per run as
 # the harness that ran the teams wrote it.
@@ -42,17 +43,21 @@
 # whole text, are read back from those offsets when the page opens its row.
 #
 # What the page asks (records(index, query)):
-#   {"op": "overview", "colour": <the page's colour.query()>, "scope": "" | "r:<run>" | "s:<session>", "search": <words>}
-#       every run and session the label filter keeps, for the page's menu; the sessions in scope, every one, a run's or
-#       a session with the subagents under it; and their calls and messages that hold the words, each with its speaker,
-#       those of a value turned off under the Color by choice left out, with the counts of every value for the chips.
+#   {"op": "overview", "colour": <colour.query()>, "filter": <filter.query()>, "rows": <rows.query()>, "search": <words>}
+#       every run and session the label filter keeps, as trees; the Task calls that started them (`spawns`), which the
+#       filters never drop, so the links between sessions always show; and the calls and messages (`items`) that hold
+#       the words and whose Filter by and Color by values are on, with the counts of each control's values. With a label
+#       chosen, `colours` and `groups` give its value on each item by ref, since the page holds a label's marks only for
+#       the records it shows.
+#   {"op": "turns", "session": <id>} or {"op": "turns", "refs": [<ref>, ...]}
+#       a session's turns in order, or those of the refs, each item as the overview gives it with a message's whole text.
 #   {"op": "record", "ref": <a call's or a message's ref>}
 #       the call's whole input, what came back and the session it spawned, or the message's whole text.
 #
 # Labels: they apply when records are served, never in the index. A call passes when thimble.kept_unit holds for its
 # two lines, a message when thimble.kept holds for its line, and a session stays when it holds for its records or one of
-# its subagents stays, so the tree keeps its shape. A label colors a call by its value on the call's tool_use line, the
-# line its row in the page is anchored by.
+# its subagents stays, so the tree keeps its shape. A label colors, filters and groups a call by its value on the call's
+# tool_use line, the line its turn in the page is anchored by.
 import json
 import os
 import re
@@ -395,16 +400,31 @@ def _prompt_text(offsets, ref):
     return _message_text(_record(offsets, ref)) if ref else ""
 
 
+def _whole_input(tool, inp):
+    """What a call was given, whole, as a reader reads it: a Task's description and the prompt the subagent got, a
+    command, an Edit's file with the lines it took out (−) and put in (+), a path, a Grep's pattern with its path and
+    mode, a query; any other input as its keys and values."""
+    if tool == "Task":
+        return "\n\n".join(str(inp.get(k) or "") for k in ("description", "prompt") if inp.get(k))
+    if tool == "Edit" and inp.get("new_string") is not None:
+        old = [f"− {ln}" for ln in str(inp.get("old_string") or "").splitlines()]
+        return "\n".join([str(inp.get("file_path") or ""), *old, *(f"+ {ln}" for ln in str(inp["new_string"]).splitlines())])
+    if tool in ("Bash", "Read", "Grep", "WebSearch") or not inp:
+        return _input(tool, inp)
+    return "\n".join(f"{k}: {v}" for k, v in inp.items())
+
+
 def _call(index, c):
-    """A call as its two lines hold it: its input as a line and as the record holds it word for word (`literal`), and
-    its facts (_facts)."""
+    """A call as its two lines hold it: its input as a line, whole (`whole`) and as the record holds it word for word
+    (`literal`), what came back as the record holds it (`raw`), and its facts (_facts)."""
     use = _block(_record(index["offsets"], c["refs"][0]), "tool_use", "id", c["id"]) or {}
     inp = use.get("input") if isinstance(use.get("input"), dict) else {}
     block, tur = None, None
     if len(c["refs"]) > 1:
         r = _record(index["offsets"], c["refs"][1])
         block, tur = _block(r, "tool_result", "tool_use_id", c["id"]), r.get("toolUseResult")
-    return {"input": _input(c["tool"], inp), "literal": _input(c["tool"], inp, literal=True), **_facts(c["tool"], inp, block, tur)}
+    return {"input": _input(c["tool"], inp), "whole": _whole_input(c["tool"], inp), "literal": _input(c["tool"], inp, literal=True),
+            "raw": _text(block.get("content")).strip() if block else "", **_facts(c["tool"], inp, block, tur)}
 
 
 def _message(index, m):
@@ -425,21 +445,6 @@ def _kept(index):
     return [i for k in index["order"] for i in index["runs"][k]["sessions"] if i in keep]
 
 
-def _in_scope(index, ids, scope):
-    """Of the sessions `ids`, in tree order, those the page's menu picks: every one, a run's ("r:<run>"), or a session
-    with the subagents under it ("s:<session>")."""
-    kind, _, key = str(scope or "").partition(":")
-    if kind == "r":
-        return [i for i in ids if index["sessions"][i]["run"] == key]
-    if kind == "s":
-        under = {key}
-        for i in ids:
-            if index["sessions"][i]["parent"] in under:
-                under.add(i)
-        return [i for i in ids if i in under]
-    return ids
-
-
 def _speaker(index, s, kind):
     """Who wrote a line of the session `s`: its prompt the session that spawned it, or the user for a lead; the rest its
     agent."""
@@ -449,46 +454,92 @@ def _speaker(index, s, kind):
     return parent["agent"] if parent else "user"
 
 
+def _items(index, s):
+    """A session's calls and messages as the page gets them, in the order they were written: each its ref, session, run,
+    agent, time and kind (prompt, text, result, or call), a call's tool, outcome, file type, input as a line, how long
+    it took and the session it started, a message's first line; with the words a search looks in and the refs a label
+    reads (`_words`, `_refs`), which the answers leave out."""
+    out = []
+    for c in (index["calls"][i] for i in s["calls"]):
+        out.append({"ref": c["ref"], "session": s["id"], "run": s["run"], "agent": s["agent"], "time": c["time"], "kind": "call",
+                    "duration": c["duration"], "tool": c["tool"], "outcome": c["outcome"], "file type": c["file type"],
+                    "speaker": s["agent"], "input": c["input"], "child": c["child"], "_words": c["words"], "_refs": c["refs"]})
+    for m in (index["messages"][i] for i in s["msgs"]):
+        out.append({"ref": m["ref"], "session": s["id"], "run": s["run"], "agent": s["agent"], "time": m["time"], "kind": m["kind"],
+                    "speaker": _speaker(index, s, m["kind"]), "text": m["text"], "_words": m["words"], "_refs": [m["ref"]]})
+    line = lambda it: int(it["ref"].rpartition("#L")[2])  # noqa: E731
+    return sorted(out, key=lambda it: (it["time"], line(it)))
+
+
+def _bare(item):
+    return {k: v for k, v in item.items() if not k.startswith("_")}
+
+
 def _overview(index, query):
-    ix, choice = index, query.get("colour")
+    ix = index
+    colour, filt, rows = query.get("colour"), query.get("filter"), query.get("rows")
     words = str(query.get("search") or "").strip().lower()
     keep = _kept(ix)
-    scope = _in_scope(ix, keep, query.get("scope"))
-    calls, messages, counts = [], [], Counter()
-
-    def add(out, item):
-        value = thimble.colour_value(choice, item["ref"], item)
-        counts["" if value is None else value] += 1
-        # a value whose chip the analyst turned off leaves the list, the lanes and the overview, and stays in the counts
-        if thimble.colour_on(choice, value):
-            out.append(item)
-
-    for sid in scope:
-        s = ix["sessions"][sid]
-        for c in (ix["calls"][i] for i in s["calls"]):
-            if words in c["words"] and thimble.kept_unit(c["refs"]):
-                add(calls, {"ref": c["ref"], "session": sid, "time": c["time"], "duration": c["duration"], "tool": c["tool"],
-                            "file type": c["file type"], "outcome": c["outcome"], "speaker": s["agent"], "input": c["input"]})
-        for m in (ix["messages"][i] for i in s["msgs"]):
-            if words in m["words"] and thimble.kept(m["ref"]):
-                add(messages, {"ref": m["ref"], "session": sid, "time": m["time"], "kind": m["kind"],
-                               "speaker": _speaker(ix, s, m["kind"]), "text": m["text"]})
-    ss = ix["sessions"]
+    items, counts, fcounts, colours, groups = [], Counter(), Counter(), {}, {}
+    for sid in keep:
+        for it in _items(ix, ix["sessions"][sid]):
+            if words not in it["_words"] or not thimble.kept_unit(it["_refs"]):
+                continue
+            # Filter by first: a value turned off leaves the lanes, the transcript and Color by's counts
+            fv = thimble.colour_value(filt, it["ref"], it)
+            fcounts["" if fv is None else fv] += 1
+            if not thimble.colour_on(filt, fv):
+                continue
+            cv = thimble.colour_value(colour, it["ref"], it)
+            counts["" if cv is None else cv] += 1
+            if not thimble.colour_on(colour, cv):
+                continue
+            if isinstance(colour, dict) and colour.get("label") is not None and cv is not None:
+                colours[it["ref"]] = cv
+            if isinstance(rows, dict) and rows.get("label") is not None:
+                gv = thimble.colour_value(rows, it["ref"], it)
+                if gv is not None:
+                    groups[it["ref"]] = gv
+            items.append(_bare(it))
+    ss, kept = ix["sessions"], set(keep)
+    spawns = [{"ref": c["ref"], "session": c["session"], "child": c["child"], "time": c["time"], "duration": c["duration"]}
+              for c in ix["calls"] if c["child"] in kept and c["session"] in kept]
     return {"runs": [{"id": k, "team": ix["runs"][k]["team"]} for k in ix["order"] if any(ss[i]["run"] == k for i in keep)],
             "sessions": [{"id": i, "path": ss[i]["ref"].rpartition("#")[0], "run": ss[i]["run"], "agent": ss[i]["agent"],
-                          "parent": ss[i]["parent"], "depth": ss[i]["depth"], "start": ss[i]["t0"], "end": ss[i]["t1"]} for i in keep],
-            "scope": scope, "calls": calls, "messages": messages, "counts": dict(counts)}
+                          "parent": ss[i]["parent"], "depth": ss[i]["depth"], "start": ss[i]["t0"], "end": ss[i]["t1"],
+                          "turns": len(ss[i]["calls"]) + len(ss[i]["msgs"])} for i in keep],
+            "spawns": spawns, "items": sorted(items, key=lambda it: it["time"]), "counts": dict(counts), "fcounts": dict(fcounts),
+            "colours": colours, "groups": groups}
+
+
+def _turns(index, query):
+    """A session's turns, or the turns of the refs asked, in time order: each item as the overview gives it, a message
+    with its whole text."""
+    ix = index
+    if query.get("session") in ix["sessions"]:
+        its = _items(ix, ix["sessions"][query["session"]])
+    else:
+        want = {str(r) for r in query.get("refs") or []}
+        sids = list(dict.fromkeys(ix["calls"][i]["session"] if k == "call" else ix["messages"][i]["session"]
+                                  for k, i in (ix["lines"][r] for r in want if r in ix["lines"]) if k in ("call", "message")))
+        its = sorted((it for sid in sids for it in _items(ix, ix["sessions"][sid]) if it["ref"] in want), key=lambda it: it["time"])
+    out = []
+    for it in its:
+        if it["kind"] != "call":
+            kind, i = ix["lines"][it["ref"]]
+            it["text"] = _message(ix, ix["messages"][i]) if kind == "message" else it["text"]
+        out.append(_bare(it))
+    return {"turns": out}
 
 
 def _one(index, query):
-    """A call or a message in full, for its row's details: the call's whole input, what came back and the session it
-    spawned, or the message's whole text."""
+    """A call or a message in full, for its turn: the call's whole input, what came back as the record holds it and the
+    session it spawned, or the message's whole text."""
     kind, i = index["lines"].get(str(query.get("ref")), (None, None))
     if kind == "call":
         c = index["calls"][i]
         r = _call(index, c)
-        return {"ref": c["ref"], "input": r["input"], "result": r["result"], "exit": r["exit"], "output": r["output"],
-                "old": r["old"], "new": r["new"], "child": c["child"]}
+        return {"ref": c["ref"], "input": r["whole"], "output": r["raw"], "result": r["result"], "exit": r["exit"], "child": c["child"]}
     if kind == "message":
         m = index["messages"][i]
         return {"ref": m["ref"], "text": _message(index, m)}
@@ -497,7 +548,8 @@ def _one(index, query):
 
 def records(index, query):
     q = query or {}
-    return _one(index, q) if q.get("op") == "record" else _overview(index, q)
+    op = q.get("op")
+    return _one(index, q) if op == "record" else _turns(index, q) if op == "turns" else _overview(index, q)
 
 
 # ---------------------------------------------------------------------------------------------------------- places
