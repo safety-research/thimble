@@ -2,10 +2,12 @@
 
 In terminal mode a view is drawn in thimble-term's panel by its own program, `view.term.js`, beside the view's
 `reader.py`, as `view.html` draws it in the browser. The program imports thimble's terminal view kit, which gives it
-the parts every view shares, drawn in terminal mode's look (mods/thimble-term/SPEC.md): Color by with its chips, the
-time range, a list with a chosen row and its details in place, a record's place one click away and asking about a row
-as a side thread. The rest of the view is the program's own: what it draws, in which rows, and what its keys and clicks
-do.
+the parts every view shares, drawn in terminal mode's look (mods/thimble-term/SPEC.md): Color by with its chips,
+Filter by and Rows, the time range, lanes on the range's scale with their key, a list with a chosen row, a side pane for
+its details, the divider between the overview and the list, a transcript, a record's place one click away and asking
+about a row as a side thread. They mirror the browser's parts ([color.md](color.md), [time-range.md](time-range.md),
+[rows-and-filters.md](rows-and-filters.md)). The rest of the view is the program's own: what it draws, in which rows,
+and what its keys and clicks do.
 
 ```js
 import { colorBy, details, draw, fetch, list } from 'thimble-term'
@@ -66,6 +68,10 @@ frames.
 - `keep(key, value)` and `kept(key)` keep a value for the view across openings. Color by keeps its choice and the
   values turned off, the time range keeps a range zoomed in.
 - `size()`, `theme()` and `view()` give the panel's size, `dark` or `light`, and `{slug, name}`.
+- `loading()` says whether the view loads: a reader query has been out 150 ms or more, or the first one is out before
+  any came back (the kit's own queries apart). The panel says `◌ starting the view…` from the moment the view opens until
+  its first frame, and `◌ loading…` dim against R on the title's row while `loading()` holds; a program may draw it too,
+  such as in place of a list with nothing in it yet.
 - An error the program throws is drawn as red rows that say what failed and where in view.term.js.
 
 ## The drawing
@@ -87,7 +93,7 @@ width asks, as the worked examples do.
 | `d.typing({text, onText, onKey, hints})` | a part takes typing: the panel's field holds `text` and sends each change to `onText` |
 | `d.inner(indent)`, `d.put(inner)` | a drawing `indent` cells in, put in at the current row (a row's details at A2) |
 | `d.focus()` | keep the next row in view: in a row's details, the record a citation opened, which the list shows however far down it is |
-| `r.add(text, style, {on, tip, drag, row, max})` | text in a style; `on(x)` makes it a control, `tip` the words the pointer shows under it |
+| `r.add(text, style, {on, tip, drag, row, max, cursor, tips})` | text in a style; `on(x)` makes it a control, `tip` the words the pointer shows under it; `cursor` marks a chart's cells, `tips[i]` the words of cell i |
 | `r.gap(n)`, `r.at(col)`, `r.right(text, style)` | space, a column, text against R |
 | `r.margin(run)` | the mark in the margin: `❯` and the accent on the chosen row |
 | `r.runsOf(runs)` | runs as they are, such as a `strip` |
@@ -99,6 +105,11 @@ blue and underlined for a link (`↗` and the place after it), the accent and `�
 background for a choice in use (the time range's window), red only for a problem, and a palette hue only on the marks
 of the Color by choice. A record's own words are drawn upright, as a file is.
 
+A control under the pointer is drawn inverse. A chart's cells never are, which would turn the chart into a band: a hit
+with `cursor`, and any hit over four or more cells that hold only a chart's glyphs (bars, lines, `×`, a break), marks
+only the pointer's column, `┊` in an empty cell and a bar in the text color, on every chart hit over the same columns
+(the lanes and the range's strip), with that cell's tip.
+
 `width`, `charWidth`, `cut`, `clip`, `prefix`, `oneLine`, `pad`, `padStart`, `wrap`, `num`, `plural`, `when`, `hms`,
 `dayOf`, `dayName`, `dur`, `placeWords` and `placeIn` measure, cut and write text the way thimble-term does: a cut at a
 word with `…` against it, counts with thousands separators, a place as `agents.log line 12` (in `n` cells, without its
@@ -109,7 +120,9 @@ and `clipLine` make and measure runs and lines; `HUES` is how many values of a f
 
 A view's pane passes on ↑↓, Enter, Space and Backspace (`up`, `down`, `return`, `space`, `backspace`) and a lowercase
 letter, a digit or a sign typed. ←, →, the page keys, Home, End, Tab and Esc reach no element of a pane, so `d.key`
-refuses them, and `b`, `t` and `x` are the panel's own (back, the threads, close). The hint row names each key bound in
+refuses them, and `b`, `t` and `x` are the panel's own (back, the threads, close). The kit's parts bind `c` (Color by),
+`f` (Filter by), `g` (Rows), `r` (Reset), `a` (ask), `/` (search), `[` `]` `+` `-` (the time range), `{` `}` (the divider),
+`<` `>` and Backspace (the side pane) while they are drawn. The hint row names each key bound in
 the frame with its words, in the panel's order: choosing, Enter, Space, the view's own, then `b to go back · x to close`;
 where it is longer than the panel is wide it wraps, whole hints on each row, and the view's rows are fewer by the rows it
 takes. Nothing else in the view says which key does what. A key works only while its part is drawn, since a part binds its keys
@@ -171,7 +184,8 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 - `range.draw(d, {gutter})` draws its readout (`16 May 04:31 – 05:10 · 39m`) and its overview strip: a cell per bin of
   the whole span, each the bar of its records (`▁` to `█`) in the Color by hue most of them take. Zoomed in, the window
   is on the selection background between its edges `[` `]`, the cells a drag moves them from, and the rest dim. It
-  opens on the whole span. A chart over the range leaves out a lane with nothing in a range zoomed in.
+  opens on the whole span. A chart over the range leaves out a lane with nothing in a range zoomed in. Under the
+  pointer the strip marks its cell, with the cell's time and records in the tip.
 - A click on the strip moves the window there; a drag frames a new range, a drag from inside the window moves it, a drag
   from its edge moves that edge; `[` `]` pan by a quarter and `+` `-` zoom.
 - `range.data({times, values, span, marks, gap})` gives it the records' times, their Color by values and the incidents or
@@ -183,10 +197,50 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 - `range.scale(cols)` lays the range across a chart's cells: `x(t)`, `t(x)`, `binOf(t)`, `step`, `ticks(gap)`, and
   `broken` and `gaps()` (each break's first cell and the cell after it), with the breaks that fall inside the range.
 - `axis(d, scale, {gutter, legend, marks, onMark})` draws the chart's axis under it, `//` at each break with the date on
-  the first label after it, `legend` (runs) in the gutter before the ticks as the key of the marks the chart draws other
-  than Color by's (`─ running  × failed`), and the marks' labels on a row of their own.
+  the first label after it, `legend` in the gutter before the ticks as the key of the marks the chart draws other than
+  Color by's (`─ running  × failed`), and the marks' labels on a row of their own. `legend` is runs, or entries
+  `{glyph, fg, name, on, toggle}`, each a control that hides or shows its series, dim while it is off, as `lanes`
+  gives them (`legend()`); entries that do not all fit the gutter stand on a row of their own over the axis.
 - `strip(scale, items, {value, colour, max, guide})` is one row of a chart over time (a lane), `maxBin(scale,
   groups)` the height every lane shares, and `bar(n, max)` one cell's bar.
+
+## Filter by and Rows
+
+`filterBy(opts)` is Filter by: which rows show, by a field of the view or a label. `filter.add(r, {max})` adds
+`Filter by  Outcome` to a row and the chosen one's values as toggles, `●` while a value shows and `○` (dim) while it is
+off, never in a hue (only Color by colors), each with its count, `+N` for those past `max` cells; a click on one turns
+it off or on, its tip says what it means. `f`, or a click on the choice, opens the menu: none, the fields with their
+values in words, then every label with its definition a step away. `filter.keeps(record)` says whether a record shows,
+`query()` gives the reader the choice in Color by's form (`{field, off}` or `{label, name, off}`), `counts(map)` takes
+the reader's counts, and `valueOf`, `isOn`, `values`, `by`, `choose` and `toggle` read and change it. Reset turns every
+value back on.
+
+`rows(opts)` is Rows: what the lanes are grouped by, a field or a label. `rows.add(r)` adds `Rows  Session`; `g`, or a
+click, opens its menu. `rows.groups(items)` gives the groups in order, each `{key, value, name, depth, guide, last,
+heading, parent, children, items}`: a label's classes (each one, so a class added to the label is a new lane), else the
+field's values, then `no <field>` or `not marked` for the records with none. A field with `parentOf(key)` is a tree:
+each group under its parent, `guide` its tree guide (`├ ` `└ ` `│ `), a parent no record takes a heading. `groupOf`,
+`query()` (`{field}` or `{label, name}`), `by` and `choose` read and change it; a record the reader gave its group as
+`group` keeps it.
+
+Both take `fields` as Color by does, `{name, title, description, values, meanings, value(record)}`, with `nameOf(key)`
+for a value's words, and a query names the labels they read, so the reader reads them though they are not on in Files.
+A label's value comes from `labelValue(id, record)`, which Color by reads too.
+
+## Lanes
+
+`lanes(opts)` draws the overview as lanes on the time range's scale: `ln.draw(d, {items, scale, gutter, room, span})`
+draws a lane per group of `rows`, its name in the gutter at the left, left-aligned with its tree guide in the rule gray,
+a top group's `▾` `▸` at A0 folding the lanes under it into its own, and in each lane's cells its records' bars in the
+Color by hues on one height, `─` in the rule gray where it ran (`band(lane)`), `─` in a record's hue while that record
+ran (`end(item)`), and `×` in red where most of a cell's records failed (`problem(item)`). Where the lanes pass their
+`room`, the top groups fold by themselves, the largest first, and then the rest wait behind `… N more`.
+
+- A lane's cells are a chart's: under the pointer only its cell is marked, with the lane, the cell's time and its
+  records in the tip; a click opens the record nearest there (`onMark(item)`), and a click on a name chooses the lane,
+  in the accent (`onPick(lane)`), such as to show that session's transcript.
+- `span`, `[t0, t1]` or a list (its `span()`), is the list's rows in view, on the selection background across the lanes.
+- `ln.legend()` is the key for `axis`: an entry for each series the lanes drew (`─ running`, `× failed`), each a toggle.
 
 ## The list
 
@@ -210,7 +264,40 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
   A block (`{text, code, max}`) is text as the record holds it, such as a command and what it printed, or a diff: each
   line upright and cut at the cell edge, at most `max` rows (8) and then `… N more`, which a click opens; `code` draws
   it in the code color (a command, a query, a path).
+- `title` and `count` name what the list shows over it, bold and dim: the run, the session or the selection, and how
+  many (`explorer · Run 2  214 turns`).
+- `body(item, dd)` draws lines every item has under its row, at `bodyIndent` cells (a turn's words); `mark: false`
+  leaves out the row's leading Color by mark while its track keeps the hues. A heading with `dim` is a dim row.
+- With `side` (a side pane), Enter or a click opens the row's details in the pane, never under the row.
+- `rows.span(time)` gives the first and last times of the rows in view, which a lanes part marks on the overview; a
+  scroll that changes them draws again, so the overview follows.
 - `onWheel(fn)` hears the wheel over the view, for a part of the program's own that scrolls.
+
+## The side pane
+
+`side(opts)` is a pane for a record or a row's children: `list.draw(d, {side, detail, sideTitle})` opens its rows
+there. Where the panel holds both, the pane stands beside the list, `width` of the panel (0.42), a `│` in the rule gray
+between them; in a narrower panel it stands under the list, a rule between them. Its first row names the record, bold,
+with `close` against R. `<` `>` narrow and widen it (thimble keeps its width per view), Backspace or `close` closes it,
+and Reset closes it too. `isOpen`, `key`, `show(key)` and `hide()` read and change it; `side.draw(d, left, right,
+{title})` lays out any two parts the same way.
+
+## The divider
+
+`divider(opts)` is the divider between the overview and the list: `div.rows(d, fallback)` gives the overview's rows of
+the rows left, `fallback` until the analyst moved it, and binds `{` `}`, which give the overview fewer or more rows.
+thimble keeps its share per view. Give the lanes those rows (`room`).
+
+## The transcript
+
+`transcript(opts)` draws a transcript's turns as thimble-term's file view draws a transcript: `tr.draw(d, {turns, title,
+count, colour, side, onOpen})`. Each turn has its clock dim in a column, `●` (in its Color by hue, with `colour`) and the
+speaker bold, and its words under the name, up to three rows; a tool call is one dim row, `⎿ Bash pytest -q`; the day
+stands on a dim row of its own where it changes. It is a list: ↑↓ choose a turn, Enter opens it in place, or in the side
+pane with `side` (a turn's words whole; a tool call's input in the code color and what came back, in red for an
+error), `a` asks about it, and its track shows where the Color by values are. A turn is `{ref, t, speaker, kind, tool,
+text, input, output, error}`, `kind` one of `text`, `prompt`, `tool`, `thinking` and `system`; `title` names what it
+shows, with the count of its turns. `tr.list` is the list under it, for `span` and `choose`.
 
 ## Search and choices
 
@@ -242,7 +329,7 @@ queries; thimble-term starts it the first time a view opens and talks to it over
 
 | from the program to thimble | |
 |---|---|
-| `frame {seq, ack, lines, hits, hints, hintKeys, keys, typing, field, sub, overflow?}` | what to draw: rows of runs, hot regions, the keys bound and the hint row, the text of a field that takes typing; `ack` the last event it answers; `overflow` `{rows, cols, first}` when the kit cut rows past the rows or wider than the columns |
+| `frame {seq, ack, lines, hits, hints, hintKeys, keys, typing, field, sub, overflow?, loading?}` | what to draw: rows of runs, hot regions (`cursor` on a chart's, with `tips` per cell), the keys bound and the hint row, the text of a field that takes typing; `ack` the last event it answers; `overflow` `{rows, cols, first}` when the kit cut rows past the rows or wider than the columns; `loading` while a reader query is out (`loading()`) |
 | `query {id, q, labels}`, `cancel {id}` | a reader query, and one dropped |
 | `act {n, act}` | a place, a thread or a label's panel, made during event `n` |
 | `state {state}`, `error {message}`, `log {text}` | what the view keeps, an error, a line it printed |
