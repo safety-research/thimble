@@ -483,7 +483,7 @@ Run a report check over the written documents, a question asked of every passage
 
 ## stop_check
 
-Turn a report check off, as the switch in the Checks pane does, which hides its tints and comments and stops its runs. Its comments are kept, and `run_check` turns it on again.
+Turn a report check off, {{if:browser}}as the switch in the Checks pane does, {{end}}which hides its {{if:browser}}tints and {{end}}comments and stops its runs. Its comments are kept, and `run_check` turns it on again.{{if:terminal}} The terminal has no switch for a check, so the analyst asks you to turn one on or off.{{end}}
 
 ```json
 {
