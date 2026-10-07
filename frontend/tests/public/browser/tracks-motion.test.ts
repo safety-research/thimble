@@ -42,6 +42,7 @@ beforeAll(async () => {
       `  if (p.endsWith('/source/around')) { const l = +s.get('line'); w.__asks.push(['around', l, performance.now()]); return page(l - +s.get('before'), l + +s.get('after')) }`,
       `  if (p.endsWith('/source/lines')) return { path: 'events.jsonl', total_lines: TOTAL, estimated: false, indexed: 1 }`,
       `  if (p.endsWith('/source')) { const a = +s.get('start'); w.__asks.push(['page', a, performance.now()]); return page(a, a + +s.get('count') - 1) }`,
+      `  if (LABELS && answerLabels(p) != null) return answerLabels(p)`,
       `  if (p.endsWith('/source/keys')) return { path: 'events.jsonl', total: TOTAL, bins: LONE ? 1000 : 0, partial: false, bytes: [], keys: LONE ? [{ key: 'speaker', values: [{ value: 'plain', n: TOTAL - 1 }, { value: 'orange', n: 1 }], more: { values: 0, n: 0 }, none: 0, at: Array.from({ length: 1000 }, (_, b) => (b === Math.floor(((LONE - 1) / TOTAL) * 1000) ? 1 : 0)) }] : [] }`,
       `  return null`,
       `}`,
@@ -52,8 +53,18 @@ beforeAll(async () => {
       `  if (got == null) return new Response(JSON.stringify({ detail: 'not here' }), { status: 404, headers: { 'content-type': 'application/json' } })`,
       `  return new Response(JSON.stringify(got), { status: 200, headers: { 'content-type': 'application/json' } })`,
       `}`,
-      `const labels = { all: [], on: [], focus: null, setFocus() {}, byId: new Map(), presence: new Map(), toggle() {}, setClasses() {}, setColour() {}, save: async () => ({}), remove: async () => {} }`,
-      `createRoot(document.getElementById('root')!).render(<div style={{ height: 640, display: 'flex' }}><div className="files-main"><Reader workspace="ws" path="events.jsonl" kind="events" labels={labels} lead={null} /></div></div>)`,
+      // with ?labels=1 two labels over records mark the file, "passed on" (orange) on lines 1,501 to 1,800 and "links"
+      // (green) on lines 7,501 to 7,800, both on, and Color by is "passed on"; w.__on(ids) turns on just those
+      `const LABELS = new URLSearchParams(location.search).get('labels') === '1'`,
+      `const concept = (id, name, colour) => ({ id, name, unit: 'record', labels: ['yes', 'no'], classes: [{ name: 'yes', color: colour, highlight: true }, { name: 'no', color: 0, highlight: false }], trial: false })`,
+      `const ALL = LABELS ? [concept('a', 'passed on', 2), concept('b', 'links', 3)] : []`,
+      `const RULER = { path: 'events.jsonl', total: TOTAL, bins: 100, labels: [{ concept_id: 'a', bins: { yes: [10, 11] }, counts: { yes: [150, 150] } }, { concept_id: 'b', bins: { yes: [50, 51] }, counts: { yes: [150, 150] } }] }`,
+      `if (LABELS) localStorage.setItem('thimble:ws:colorBy:events.jsonl', JSON.stringify({ by: 'l:a', off: {} }))`,
+      `const answerLabels = (p) => (p.endsWith('/labels/ruler') ? RULER : p.endsWith('/labels') ? [] : null)`,
+      `const labelsOf = (ids) => ({ all: ALL, on: ALL.filter((k) => ids.includes(k.id)), focus: null, setFocus() {}, byId: new Map(ALL.map((k) => [k.id, k])), presence: new Map(ALL.map((k) => [k.id, { 'events.jsonl': { yes: 300 } }])), toggle() {}, setClasses() {}, setColour() {}, save: async () => ({}), remove: async () => {} })`,
+      `const root = createRoot(document.getElementById('root')!)`,
+      `w.__on = (ids) => root.render(<div style={{ height: 640, display: 'flex' }}><div className="files-main"><Reader workspace="ws" path="events.jsonl" kind="events" labels={labelsOf(ids)} lead={null} /></div></div>)`,
+      `w.__on(ALL.map((k) => k.id))`,
     ],
     {
       loader: { '.css': 'css', '.woff2': 'file', '.woff': 'file', '.json': 'json' },
@@ -445,4 +456,45 @@ for (const [name, engine] of ENGINES) {
     await browser.close()
   })
 }
+
+// ---------------------------------------------------------------- one lane per label that is on
+test("Files: two labels on are two lanes of the overview, each in its label's colors and named on hover; one turned off leaves one lane", async () => {
+  const { browser, page } = await open(chromium, '?mode=transcript&labels=1')
+  await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 2, null, { timeout: 10000 })
+  await page.waitForTimeout(300)
+  const lanes = () =>
+    page.evaluate(() => {
+      const cv = document.querySelector('.track-over canvas') as HTMLCanvasElement
+      const ctx = cv.getContext('2d')!
+      const dpr = window.devicePixelRatio || 1
+      const real = (c: string) => {
+        const probe = document.createElement('i')
+        probe.style.color = c
+        document.body.appendChild(probe)
+        const got = getComputedStyle(probe).color.match(/\d+/g)!.slice(0, 3).map(Number)
+        probe.remove()
+        return got
+      }
+      // the color at the middle of a lane (its left edge in css px), a share down the track
+      const at = (left: number, w: number, f: number) => Array.from(ctx.getImageData(Math.floor((left + w / 2) * dpr), Math.floor(f * cv.height), 1, 1).data.slice(0, 3))
+      const marks = [...document.querySelectorAll('.track-lane')].map((e) => ({ left: (e as HTMLElement).offsetLeft, width: (e as HTMLElement).offsetWidth, title: e.getAttribute('title') }))
+      return { width: (document.querySelector('.track-over') as HTMLElement).offsetWidth, marks, orange: real('var(--label-2)'), green: real('var(--label-3)'), sample: marks.map((m) => [at(m.left, m.width, 0.105), at(m.left, m.width, 0.505)]), one: at(0, 12, 0.105), oneGreen: at(0, 12, 0.505) }
+    })
+  const near = (a: number[], b: number[]) => a.every((v, i) => Math.abs(v - b[i]) <= 3)
+  const two = await lanes()
+  assert.deepEqual(two.marks.map((m) => m.title), ['passed on', 'links'], 'each lane names its label on hover')
+  assert.ok(two.marks.every((m) => m.width >= 3 && m.width <= 12) && two.width <= 25, `the lanes narrower, the overview ${two.width} px: ${JSON.stringify(two.marks)}`)
+  // the first lane in "passed on"'s orange where it marks, the second in "links"'s green where it marks, each blank where the other marks
+  assert.ok(near(two.sample[0][0], two.orange), `the first lane orange at "passed on": ${two.sample[0][0]} against ${two.orange}`)
+  assert.ok(near(two.sample[1][1], two.green), `the second lane green at "links": ${two.sample[1][1]} against ${two.green}`)
+  assert.ok(!near(two.sample[0][1], two.green) && !near(two.sample[1][0], two.orange), `each lane only its label: ${JSON.stringify(two.sample)}`)
+  // "links" turned off: one lane, "passed on"'s
+  await page.evaluate(() => (window as any).__on(['a']))
+  await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 0)
+  await page.waitForTimeout(300)
+  const one = await lanes()
+  assert.equal(one.width, 12, 'one lane, as wide as the overview always is')
+  assert.ok(near(one.one, one.orange) && !near(one.oneGreen, one.green), `the one lane is "passed on": ${one.one} ${one.oneGreen}`)
+  await browser.close()
+})
 

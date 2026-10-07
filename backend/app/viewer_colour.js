@@ -43,7 +43,7 @@
 // text or a fill.
 // The strip is a list's scrollbar as an editor's two tracks, as Files' Transcript mode draws them: the overview track
 // shows the whole list in one lane, each pixel row in the colour most of its records take, grey where they take no
-// value (a label that is on but is not the choice draws nothing there), and a dark frame around the part in view; a
+// value, a lane beside it for each other label that is on, and a dark frame around the part in view; a
 // long list adds the zoomed track at the outer edge, which magnifies the frame: the part around the view at a finer
 // scale, its colours faded beyond the part in view, which lies under a lens joined to the frame by two lines. The lens stands as far down the zoomed track
 // as the frame stands down the overview, so the two move together. Hovering the overview shows the records there, a
@@ -85,6 +85,9 @@
   var ZOOM_SPAN = 5 // the zoomed track holds this many heights of the part in view
   var FADE = 0.3 // the zoomed track's colours beyond the part in view, as a share of their strength
   var MIN_MARK = 2 // px, a mark's least height on a track
+  var LANE_GAP = 1 // px between the overview's lanes, one for the Color by choice and one for each other label that is on
+  var LANES_MAX = 24 // px the lanes take together at most, past one lane of TRACK_W
+  var LANE_MIN = 3 // px, the narrowest a lane gets
   var SNAP_PX = 4 // px either side of a click on the overview within which it snaps to a thin patch of colour
   var THIN_PX = 8 // px a patch of colour may be tall at most to be thin: a click in a taller one goes where it is clicked
   var THUMB_MIN = 8 // px, the least height of the box around the part in view
@@ -1359,8 +1362,8 @@
   // scrollbar is hidden in their favour), drawn as Files' Transcript mode draws its tracks. The overview track is the
   // whole list in one lane: each pixel row in the colour of a value that is on which most of the records there take,
   // grey where they take no value (as the no-value chip is, and every record with Color by Off), never two colours side
-  // by side; a label that is on but is not the choice
-  // draws nothing on the tracks, and a dark frame shows the part in view. A list many times the
+  // by side; each other label that is on has a lane of its own beside it, in its own colours, named on hover, the lanes
+  // narrower as more come; a dark frame shows the part in view. A list many times the
   // height of its box adds the zoomed track at the outer edge, which magnifies the frame: the part around the view at a
   // finer scale, its colours faded beyond the part in view, which lies under a lens (a raised box of the paper, framed),
   // and two lines join the frame's top and bottom to the lens's. The zoomed track's span follows the view, the lens as
@@ -1381,6 +1384,7 @@
     this.box = this.page ? document.scrollingElement || document.documentElement : target
     this.set(opts)
     this.recs = [] // each record: [top, bottom] as fractions of the list's height, its colour or null, its element or row
+    this.lanes = [] // a lane for each other label that is on: {id, name, label, recs}
     this.stale = true
     this.zoomed = false
     // what a drag holds, in px of the tracks: the frame's top on the overview, the top of the part in view on the zoomed
@@ -1493,14 +1497,44 @@
   // the tracks' width, and the room the list leaves them
   // the overview at the left, the zoomed track at the outer edge
   Strip.prototype.fitWidth = function () {
-    var w = this.zoomed ? TRACK_W + LINK + ZOOM_W : TRACK_W
-    if (w === this.width) return
+    var n = (this.lanes ? this.lanes.length : 0) + 1
+    var ow = lanesWidth(n)
+    var w = this.zoomed ? ow + LINK + ZOOM_W : ow
+    // each lane named on hover, when there are several
+    var names = n > 1 ? [this.choiceName()].concat(this.lanes.map(function (l) { return l.name })) : []
+    var key = names.join('\u0000')
+    if (key !== this.laneKey) {
+      this.laneKey = key
+      var old = this.whole.el.querySelectorAll('.thimble-colour-lane')
+      for (var i = 0; i < old.length; i++) old[i].remove()
+      var lw = laneWidth(n)
+      for (var j = 0; j < names.length; j++) {
+        var sp = document.createElement('span')
+        sp.className = 'thimble-colour-lane'
+        sp.style.left = j * (lw + LANE_GAP) + 'px'
+        sp.style.width = lw + 'px'
+        if (names[j]) sp.title = names[j]
+        this.whole.el.insertBefore(sp, this.whole.thumb)
+      }
+    }
+    if (w === this.width && ow === this.overW) return false
+    var padded = this.width !== -1
     this.width = w
+    this.overW = ow
     this.el.style.width = w + 'px'
+    this.whole.w = ow
+    this.whole.el.style.width = ow + 'px'
+    this.link.style.left = ow + 'px'
     this.zoom.el.style.display = this.zoomed ? '' : 'none'
     this.link.style.display = this.zoomed ? '' : 'none'
-    this.zoom.el.style.left = TRACK_W + LINK + 'px'
+    this.zoom.el.style.left = ow + LINK + 'px'
     this.padded.style.paddingRight = this.padBase + w + 2 + LENS_OUT + 'px'
+    return padded
+  }
+  // what the overview's first lane shows, which its hover names
+  Strip.prototype.choiceName = function () {
+    var ch = this.c.choice()
+    return ch && !ch.off ? ch.title || '' : ''
   }
   Strip.prototype.dirty = function () {
     var self = this
@@ -1520,6 +1554,14 @@
   }
   function grey() {
     return kit.realColour('rgba(var(--ink-rgb), 0.34)')
+  }
+  // the width of each of `n` lanes of the overview: one lane TRACK_W wide; more share LANES_MAX, each narrower as more
+  // come, down to LANE_MIN
+  function laneWidth(n) {
+    return n <= 1 ? TRACK_W : Math.max(LANE_MIN, Math.min(TRACK_W, Math.floor((LANES_MAX - (n - 1) * LANE_GAP) / n)))
+  }
+  function lanesWidth(n) {
+    return n * laneWidth(n) + (n - 1) * LANE_GAP
   }
   // every record of the list: [top, bottom] as fractions of the list's height, its colour (the marks' grey for a record
   // that takes no value, as for every record with Color by Off), its element or its row; a record of a value turned off
@@ -1570,6 +1612,63 @@
     }
     this.recs = recs
     this.grey = g
+    // a lane for each other label that is on: its records in its own colours, those it does not mark left out
+    var lanes = []
+    var on = onLabels()
+    for (var li = 0; li < on.length; li++) if (!by || String(on[li].id) !== String(by)) lanes.push({ id: String(on[li].id), name: on[li].name, label: on[li], recs: [] })
+    if (lanes.length) {
+      var colourIn = function (lane, ref) {
+        var mk = ref != null ? thimble.markOf(String(ref)) : null
+        var vs = mk && Array.isArray(mk.values) ? mk.values : []
+        for (var vi = 0; vi < vs.length; vi++) {
+          if (!vs[vi] || String(vs[vi].id) !== lane.id) continue
+          var lv = lane.label.values || []
+          for (var vj = 0; vj < lv.length; vj++) if (lv[vj].name === String(vs[vi].value)) return lv[vj].colour || lane.label.colour || null
+          return lane.label.colour || null
+        }
+        return null
+      }
+      if (this.rows) {
+        var nr = this.rows.length
+        var refs = this.refs || []
+        for (var ri = 0; ri < nr; ri++) for (var la = 0; la < lanes.length; la++) {
+          var cr = colourIn(lanes[la], refs[ri])
+          if (cr) lanes[la].recs.push([ri / nr, (ri + 1) / nr, cr, ri])
+        }
+      } else {
+        var box2 = this.box
+        var H2 = Math.max(1, box2.scrollHeight)
+        var top2 = this.page ? -box2.scrollTop : this.rect().top + box2.clientTop - box2.scrollTop
+        var anchored = (this.page ? document : box2).querySelectorAll('[data-anchor]')
+        var seen2 = {}
+        for (var ai = 0; ai < anchored.length; ai++) {
+          var ae = anchored[ai]
+          if (ae.closest('.thimble-colour-mount,.thimble-colour-menu,[data-thimble-chrome]')) continue
+          var aref = ae.getAttribute('data-anchor')
+          if (!aref || seen2[aref]) continue
+          seen2[aref] = true
+          var ar = null
+          for (var lb = 0; lb < lanes.length; lb++) {
+            var ca = colourIn(lanes[lb], aref)
+            if (!ca) continue
+            ar = ar || ae.getBoundingClientRect()
+            if (!ar.height) break
+            var ay = ar.top - top2
+            lanes[lb].recs.push([ay / H2, (ay + ar.height) / H2, ca, ae])
+          }
+        }
+        for (var lc = 0; lc < lanes.length; lc++)
+          lanes[lc].recs.sort(function (a, b) {
+            return a[0] - b[0]
+          })
+      }
+    }
+    this.lanes = lanes
+    // lanes that change the tracks' width change the room the list leaves them, and the records' places with it
+    if (this.fitWidth()) {
+      this.stale = true
+      this.dirty()
+    }
   }
   // the part in view, as fractions of the list's height
   Strip.prototype.view = function () {
@@ -1603,6 +1702,11 @@
       this.zoomed = zoomed
       this.fitWidth()
     }
+    // measured before the tracks are placed, since the lanes the labels need set their width
+    if (this.stale) {
+      this.stale = false
+      this.measure()
+    }
     // the tracks on the device's pixel grid, so that every edge on them is drawn sharp
     var dpr = window.devicePixelRatio || 1
     var snap = function (v) {
@@ -1615,10 +1719,6 @@
     this.el.style.top = top + 'px'
     this.el.style.height = h + 'px'
     this.h = h
-    if (this.stale) {
-      this.measure()
-      this.stale = false
-    }
     this.paint(this.whole, [0, 1], null)
     this.drawn = null
     this.place(typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -1640,8 +1740,30 @@
     var ctx = cv.getContext && cv.getContext('2d')
     if (!ctx) return
     ctx.clearRect(0, 0, cv.width, cv.height)
-    var x = Math.round(LANE_X * dpr)
-    var w = Math.max(1, Math.round((t.w - 2 * LANE_X) * dpr))
+    if (t !== this.whole) {
+      this.fill(ctx, this.recs, span, bright, Math.round(LANE_X * dpr), Math.max(1, Math.round((t.w - 2 * LANE_X) * dpr)))
+      return
+    }
+    // the overview: a lane for the Color by choice, then one for each other label that is on; each keeps its rows'
+    // colours, for a click to snap to
+    var lw = laneWidth(this.lanes.length + 1)
+    var x0 = function (i) {
+      return Math.round(i * (lw + LANE_GAP) * dpr)
+    }
+    var wOf = function (i) {
+      return Math.max(1, Math.round((i * (lw + LANE_GAP) + lw) * dpr) - x0(i))
+    }
+    this.rowColours = this.fill(ctx, this.recs, span, null, x0(0), wOf(0))
+    this.laneRows = []
+    for (var i = 0; i < this.lanes.length; i++) this.laneRows.push(this.fill(ctx, this.lanes[i].recs, span, null, x0(i + 1), wOf(i + 1)))
+  }
+  // one lane of a track's canvas, `x` to `x + w` device px: the records `recs` within `span` (fractions of the list),
+  // each pixel row in the one colour most of it takes (the records' share of the row), grey where its records take no
+  // value, faded outside `bright`, where the lane's ground gives way to the lens's paper; each row's colour
+  Strip.prototype.fill = function (ctx, recs, span, bright, x, w) {
+    var h = this.h || 0
+    var dpr = window.devicePixelRatio || 1
+    var Hp = Math.ceil(h * dpr)
     var s0 = span[0]
     var sw = Math.max(1e-9, span[1] - span[0])
     // the part in view, in device rows
@@ -1658,12 +1780,11 @@
     ctx.globalAlpha = 1
     ctx.fillStyle = kit.realColour('rgba(var(--ink-rgb), 0.035)')
     if (bright) {
-      var l0 = Math.max(0, Math.min(cv.height, Math.round(b0 - m)))
-      var l1 = Math.max(l0, Math.min(cv.height, Math.round(b1 + m)))
+      var l0 = Math.max(0, Math.min(Hp, Math.round(b0 - m)))
+      var l1 = Math.max(l0, Math.min(Hp, Math.round(b1 + m)))
       ctx.fillRect(x, 0, w, l0)
-      ctx.fillRect(x, l1, w, cv.height - l1)
-    } else ctx.fillRect(x, 0, w, cv.height)
-    var recs = this.recs
+      ctx.fillRect(x, l1, w, Hp - l1)
+    } else ctx.fillRect(x, 0, w, Hp)
     // the first record that reaches into the span
     var lo = 0
     var hi = recs.length
@@ -1709,18 +1830,14 @@
       }
       return best || (got[g] ? g : null)
     }
-    // the overview keeps each row's colour, for a click to snap to
-    if (t === this.whole) {
-      var kept = new Array(Hp)
-      for (var kr = 0; kr < Hp; kr++) kept[kr] = colourAt(kr)
-      this.rowColours = kept
-    }
+    var kept = new Array(Hp)
+    for (var kr = 0; kr < Hp; kr++) kept[kr] = colourAt(kr)
     var y = 0
     while (y < Hp) {
-      var c0 = blank(y) ? null : colourAt(y)
+      var c0 = blank(y) ? null : kept[y]
       var on = lit(y)
       var end = y + 1
-      while (end < Hp && (blank(end) ? null : colourAt(end)) === c0 && lit(end) === on) end++
+      while (end < Hp && (blank(end) ? null : kept[end]) === c0 && lit(end) === on) end++
       if (c0) {
         ctx.globalAlpha = on ? 1 : FADE
         ctx.fillStyle = c0
@@ -1729,6 +1846,7 @@
       y = end
     }
     ctx.globalAlpha = 1
+    return kept
   }
   // where the tracks stand, in px of them: the frame's top and height on the overview and how far through the list that
   // is (as a scrollbar's thumb), and on the zoomed track its scale (`k`, px per share of the list), the share of the
@@ -1886,8 +2004,13 @@
   // THIN_PX tall that come within SNAP_PX of the click, the nearest, the upper on a tie; its first record of that
   // colour from where the run starts. Null when none does: a click in a taller patch, or far from any, goes where it is
   Strip.prototype.snapAt = function (p) {
-    var rows = this.rowColours
-    if (p.track !== this.whole || !rows || !rows.length) return null
+    if (p.track !== this.whole) return null
+    // the lane clicked: the choice's, or another label's
+    var lw = laneWidth(this.lanes.length + 1)
+    var lane = Math.max(0, Math.min(this.lanes.length, Math.floor((p.x + LANE_GAP / 2) / (lw + LANE_GAP))))
+    var rows = lane ? this.laneRows && this.laneRows[lane - 1] : this.rowColours
+    var recs = lane ? this.lanes[lane - 1].recs : this.recs
+    if (!rows || !rows.length) return null
     var dpr = window.devicePixelRatio || 1
     var g = this.grey
     var n = rows.length
@@ -1914,8 +2037,8 @@
     if (best < 0) return null
     var colour = rows[best]
     var from = best / n
-    for (var i = 0; i < this.recs.length; i++) {
-      var rc = this.recs[i]
+    for (var i = 0; i < recs.length; i++) {
+      var rc = recs[i]
       if (rc[2] === colour && rc[1] > from) return rc
     }
     return null

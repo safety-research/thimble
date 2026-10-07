@@ -25,7 +25,7 @@ import { findColumn, rulerColumns, useRuler, type RulerTick, type Seen, type Sho
 import { ColorBy } from './ColorBy'
 import { keyColor, KEY_COLORS, keyValue, OTHER, recordObject } from './colorChoice'
 import { ColorContext } from './colorContext'
-import { labelPaint, PlaceFeed, ReaderTracks, ZOOM_SPAN, type DrawnRecord, type OverviewPaint, type PreviewRecord } from './Tracks'
+import { labelPaint, PlaceFeed, ReaderTracks, ZOOM_SPAN, type DrawnRecord, type OverviewPaint, type PreviewRecord, type TrackLane } from './Tracks'
 import { useColorBy } from './useColorBy'
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
@@ -696,6 +696,7 @@ export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color:
 }
 
 const NO_LANES: Concept[] = []
+const NO_OFF: ReadonlySet<string> = new Set()
 
 
 function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only, onMode, findAsk }: ReaderProps) {
@@ -1216,9 +1217,21 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     }
     return color.keys?.bytes.length ? { kind: 'density', bytes: color.keys.bytes } : { kind: 'none' }
   }, [isTranscript, colorChoice, color.keys, color.off, color.picked, lanes, ruler])
-  // the markers: the find's matches; a label that is on but is not the choice draws nothing on the tracks, so that the
-  // overview is one lane in the choice's colors
+  // the markers: the find's matches. Each other label that is on and marks the file has a lane of its own beside the
+  // choice's, in its own colors, so that one choice is one lane and two labels on are two
   const markers = useMemo(() => rulerCols.filter((c) => c.id === 'find'), [rulerCols])
+  const choiceLabel = colorChoice.by === 'label' ? colorChoice.id : null
+  const trackLanes = useMemo<TrackLane[]>(() => {
+    if (!isTranscript) return []
+    const out: TrackLane[] = []
+    for (const k of lanes) {
+      if (k.id === choiceLabel || marksOf(k) === 'file' || !fileOf(k.id)) continue
+      const got = labelPaint(k, ruler, NO_OFF)
+      if (got) out.push({ id: k.id, name: k.name, paint: got })
+    }
+    return out
+  }, [isTranscript, lanes, choiceLabel, fileOf, ruler])
+  const paintName = colorChoice.by === 'key' ? colorChoice.key : colorChoice.by === 'label' ? (lanes.find((k) => k.id === choiceLabel)?.name ?? '') : ''
   const recordAtLine = useMemo(() => new Map(records.map((r) => [r.line, r])), [records])
   // a record's color on the zoomed track, and its value of the choice for its hover
   const zoomColor = useMemo(() => {
@@ -1271,9 +1284,9 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // a click near a patch of color on the overview goes to the first record of the patch's value on the lines where the
   // patch starts (read from the server: a key's value from the records, a label's from its rows), and chooses it as the
   // find does; the first of those lines when none is found
-  const snapTo = (from: number, to: number, value: number) => {
+  const snapTo = (from: number, to: number, value: number, lane: string | null) => {
     const land = (line: number | null) => goTo(line ?? from, 'ruler')
-    if (colorChoice.by === 'key') {
+    if (colorChoice.by === 'key' && lane == null) {
       const k = color.keys?.keys.find((x) => x.key === colorChoice.key)
       if (!k) return land(from)
       const inValue = (rec: SourceRecord) => {
@@ -1288,7 +1301,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         .catch(() => land(null))
       return
     }
-    const k = colorChoice.by === 'label' ? lanes.find((x) => x.id === colorChoice.id) : undefined
+    const id = lane ?? choiceLabel
+    const k = id != null ? lanes.find((x) => x.id === id) : undefined
     const name = k ? classesOf(k).filter((c) => c.highlight)[value]?.name : undefined
     if (!k || name == null) return land(from)
     void scaleApi
@@ -1437,7 +1451,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
                 {moreRight && <div className="reader-edge" aria-hidden />}
               </div>
               {!isDatabase && !binary && (
-                <ReaderTracks total={total} feed={feed} paint={paint} markers={markers} colorOf={zoomColor} onSnap={snapTo} onJump={jump} onSeek={seek} onScrollBy={scrollBy} onMark={onMark} preview={preview} />
+                <ReaderTracks total={total} feed={feed} paint={paint} paintName={paintName} lanes={trackLanes} markers={markers} colorOf={zoomColor} onSnap={snapTo} onJump={jump} onSeek={seek} onScrollBy={scrollBy} onMark={onMark} preview={preview} />
               )}
             </div>
           </>

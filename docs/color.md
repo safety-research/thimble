@@ -115,12 +115,14 @@ load()
 
 `strip: '#list'`, or `colour.strip('#list')` for another list, puts the list's scrollbar in tracks at its right edge:
 
-- The overview track is the whole list in one lane: each pixel row in the color of the value that is on which most of
-  the records there take, never two colors side by side. The records with no value ("No kind", "Not marked") are the
-  gray their chip has, as every record is with Off, and only where no record of the pixel row takes a value, so a
-  value is never hidden under them; turned off, they leave the tracks as any value does. A label that is on but is not
-  the choice draws nothing on the tracks. A dark frame as wide as the track outlines the part in view; drag it to move
-  the view.
+- The overview track is the whole list in one lane for the choice: each pixel row in the color of the value that is
+  on which most of the records there take, never two colors side by side. The records with no value ("No kind", "Not
+  marked") are the gray their chip has, as every record is with Off, and only where no record of the pixel row takes a
+  value, so a value is never hidden under them; turned off, they leave the tracks as any value does. Each other label
+  that is on has a lane of its own beside it, in the label's colors, so that one choice is one lane and two labels on
+  are two; each lane names its label on hover, and the lanes narrow as more come (one is 12 px; more share 24 px, 3 px
+  each at least). Only the choice colors the zoomed track and the records' bars. A dark frame as wide as the lanes
+  outlines the part in view; drag it to move the view.
 - A list many times the height of its box adds the zoomed track at the outer edge, which magnifies the frame: the part
   around the view at a finer scale, its colors faded beyond the part in view, which lies under a lens. Two lines join
   the frame's top and bottom to the lens's. The lens stands as far down the zoomed track as the frame stands down the

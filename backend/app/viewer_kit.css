@@ -862,6 +862,12 @@ select.field {
   left: 0;
   pointer-events: none;
 }
+/* a lane of the overview, over its colours, which names its label on hover */
+.thimble-colour-lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
 /* the part in view on the overview: a frame as wide as the track in the full ink, a line of the paper inside it, so
    that it stands out over any colour; square, so that the lines start at its corners; a drag of it moves the view */
 .thimble-colour-thumb {

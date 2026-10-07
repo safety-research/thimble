@@ -542,3 +542,52 @@ describe("a label's texts", () => {
     await page.close()
   })
 })
+
+describe('a lane of the tracks for each label that is on', () => {
+  // sixty messages: "Passed on" (k1, orange) marks messages 5 to 10, "Links" (k2, green) messages 40 to 45
+  const mark = (id: string, name: string, colour: string) => ({ values: [{ id, label: name, value: 'yes', colour }], names: [name], bar: colour })
+  const marks: Record<string, unknown> = {}
+  for (let i = 5; i <= 10; i++) marks[`m.jsonl#L${i}`] = mark('k1', 'Passed on', '#d0750a')
+  for (let i = 40; i <= 45; i++) marks[`m.jsonl#L${i}`] = mark('k2', 'Links', '#08632f')
+  const label = (id: string, name: string, colour: string) => ({ id, name, colour, values: [{ name: 'yes', colour }] })
+  const both = [label('k1', 'Passed on', '#d0750a'), label('k2', 'Links', '#08632f')]
+  const msg = (on: typeof both) => ({ type: 'thimble:labels', marks, on, filter: null, all: both.map((l) => ({ ...l, on: on.some((o) => o.id === l.id), here: true, values: [{ name: 'yes', colour: l.colour, highlight: true }], count: 6 })) })
+  /** the overview's lanes: their names, widths, and the colour each draws a share down the track */
+  const lanes = (frame: () => Frame) =>
+    frame().evaluate(() => {
+      const whole = document.querySelector('.thimble-colour-whole') as HTMLElement
+      const cv = whole.querySelector('canvas') as HTMLCanvasElement
+      const ctx = cv.getContext('2d')!
+      const dpr = window.devicePixelRatio || 1
+      const marks = [...whole.querySelectorAll('.thimble-colour-lane')].map((e) => ({ left: (e as HTMLElement).offsetLeft, width: (e as HTMLElement).offsetWidth, title: e.getAttribute('title') }))
+      const at = (left: number, w: number, f: number) => Array.from(ctx.getImageData(Math.floor((left + w / 2) * dpr), Math.floor(f * cv.height), 1, 1).data.slice(0, 3)).join(',')
+      const cols = marks.length ? marks : [{ left: 0, width: whole.offsetWidth, title: null }]
+      return { width: whole.offsetWidth, marks, at: cols.map((m) => [at(m.left, m.width, 7.5 / 60), at(m.left, m.width, 42.5 / 60)]) }
+    })
+  const ORANGE = '208,117,10'
+  const GREEN = '8,99,47'
+
+  test('two labels on are two lanes, each in its own colours and named on hover; one turned off leaves one lane', async () => {
+    const rows = Array.from({ length: 60 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}">message ${i + 1}</div>`).join('')
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], strip: '#list' })`, 700, { v: 1, by: 'l:k1', seen: ['k1', 'k2'] })
+    const post = (m: unknown) => page.evaluate((x) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage(x, '*'), m)
+    await post(msg(both))
+    await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-lane').length === 2)
+    await page.waitForTimeout(200)
+    const two = await lanes(frame)
+    assert.deepEqual(two.marks.map((m) => m.title), ['Passed on', 'Links'], 'each lane names its label on hover')
+    assert.ok(two.marks.every((m) => m.width >= 3 && m.width <= 12) && two.width <= 25, `the lanes narrower: ${JSON.stringify(two)}`)
+    assert.equal(two.at[0][0], ORANGE, 'the first lane, the choice, orange where "Passed on" marks')
+    assert.equal(two.at[1][1], GREEN, 'the second lane green where "Links" marks')
+    assert.ok(two.at[0][1] !== GREEN && two.at[1][0] !== ORANGE, `each lane only its label: ${JSON.stringify(two.at)}`)
+    // "Links" turned off: one lane, "Passed on"
+    await post(msg([both[0]]))
+    await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-lane').length === 0)
+    await page.waitForTimeout(200)
+    const one = await lanes(frame)
+    assert.equal(one.width, 12, 'one lane, as wide as the track always is')
+    assert.equal(one.at[0][0], ORANGE)
+    assert.notEqual(one.at[0][1], GREEN)
+    await page.close()
+  })
+})

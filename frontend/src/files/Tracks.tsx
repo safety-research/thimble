@@ -3,7 +3,8 @@
 // The overview track, at the left, is the whole file: its lines top to bottom in one lane, each pixel row in the color
 // of the Color by choice that most of its records take (a key's commonest value, a label's value most of the records
 // there have), or, with Color by off or no choice to make, the file's density (each bin's bytes) in grey; never two
-// colors side by side. A label that is on but is not the choice draws nothing on the tracks; at the overview's left the
+// colors side by side. Each other label that is on has a lane of its own beside it, in its own colors (laneWidth: the
+// lanes narrower as more come), named on hover; only the choice colors the zoomed track. At the overview's left the
 // find's matches leave ticks in the ink, like cue points on a timeline, which say what is found on hover and go to the
 // first match on a click (a marker lane of another kind is drawn in grey, never in a color). Over the lane, a dark
 // frame exactly as wide as the track outlines what the reader shows; a drag of it scrubs the reader, a click elsewhere
@@ -349,8 +350,17 @@ const MARKER_LANES: LaneGeometry = {
   inset: 0,
 }
 
-/** The overview's width for `n` marker lanes, px. */
-export const overviewWidth = (n: number): number => (n ? n * (MARKER_PX + MARKER_GAP_PX) + 1 : 0) + OVER_PX
+/** px: the gap between the overview's lanes, and what the lanes take together at most past one lane of OVER_PX */
+const LANE_GAP_PX = 1
+const LANES_MAX_PX = 24
+const LANE_MIN_PX = 3
+
+/** The width of each of `n` lanes of the overview, px: one lane OVER_PX wide; more share LANES_MAX_PX, each narrower as
+ * more come, down to LANE_MIN_PX. Pure. */
+export const laneWidth = (n: number): number => (n <= 1 ? OVER_PX : Math.max(LANE_MIN_PX, Math.min(OVER_PX, Math.floor((LANES_MAX_PX - (n - 1) * LANE_GAP_PX) / n))))
+
+/** The overview's width for `n` marker lanes and `lanes` lanes of colors, px. */
+export const overviewWidth = (n: number, lanes = 1): number => (n ? n * (MARKER_PX + MARKER_GAP_PX) + 1 : 0) + lanes * laneWidth(lanes) + (lanes - 1) * LANE_GAP_PX
 
 /** Where a mark over `from`..`to` (lines, `from` exclusive) is drawn on a rail of `k` px per line `h` px tall. */
 function drawnSpan(from: number, to: number, k: number, h: number): [number, number] {
@@ -363,8 +373,81 @@ function drawnSpan(from: number, to: number, k: number, h: number): [number, num
   return [y0, y1]
 }
 
-/** The overview's canvas: the marker lanes, then the colored column. */
-const OverviewCanvas = memo(function OverviewCanvas({ paint, markers }: { paint: OverviewPaint; markers: readonly RulerColumn[] }) {
+/** One lane of the overview drawn from its paint, `x0` to `x0 + cw` device px of a canvas `H` device rows tall: each row
+ * in its value's color (faded when the value is turned off), or the file's density in the ink. */
+function paintLane(ctx: CanvasRenderingContext2D, paint: OverviewPaint, x0: number, cw: number, H: number, colourOf: (c: string) => string) {
+  ctx.fillStyle = colourOf('rgba(var(--ink-rgb), 0.05)')
+  ctx.fillRect(x0, 0, cw, H)
+  if (paint.kind === 'bins' && paint.at.length) {
+    const bins = paint.at.length
+    let runStart = 0
+    let runColour: string | null = null
+    let runAlpha = 1
+    const flush = (end: number) => {
+      if (runColour) {
+        ctx.globalAlpha = runAlpha
+        ctx.fillStyle = runColour
+        ctx.fillRect(x0, runStart, cw, end - runStart)
+        ctx.globalAlpha = 1
+      }
+    }
+    for (let y = 0; y < H; y++) {
+      const rank = paint.at[binOfRow(y, H, bins)]
+      const c = rank >= 0 ? paint.colors[Math.min(rank, paint.colors.length - 1)] : null
+      const colour = c ? colourOf(c) : null
+      const alpha = rank >= 0 && paint.faded[Math.min(rank, paint.faded.length - 1)] ? 0.18 : 1
+      if (colour !== runColour || alpha !== runAlpha) {
+        flush(y)
+        runStart = y
+        runColour = colour
+        runAlpha = alpha
+      }
+    }
+    flush(H)
+  } else if (paint.kind === 'counts' && paint.counts.length) {
+    // each row in the one value most of its records have
+    const at = majorityRows(paint.counts, H)
+    let y = 0
+    while (y < H) {
+      const v = at[y]
+      let end = y + 1
+      while (end < H && at[end] === v) end++
+      if (v >= 0) {
+        ctx.globalAlpha = paint.faded[v] ? 0.18 : 1
+        ctx.fillStyle = colourOf(paint.colors[v])
+        ctx.fillRect(x0, y, cw, end - y)
+      }
+      y = end
+    }
+    ctx.globalAlpha = 1
+  } else if (paint.kind === 'density' && paint.bytes.length) {
+    const bins = paint.bytes.length
+    const most = Math.max(1, ...paint.bytes)
+    const ink = colourOf('var(--text-primary)')
+    for (let y = 0; y < H; y++) {
+      const b = paint.bytes[binOfRow(y, H, bins)]
+      if (!b) continue
+      ctx.globalAlpha = 0.08 + 0.42 * Math.sqrt(b / most)
+      ctx.fillStyle = ink
+      ctx.fillRect(x0, y, cw, 1)
+    }
+    ctx.globalAlpha = 1
+  }
+}
+
+/** The overview's left edges of its lanes of colors, device px at `dpr`, past `lead` css px of marker lanes: each lane
+ * a whole number of device pixels wide, so that its rows stand in one column. */
+function laneEdges(lead: number, n: number, dpr: number): [number, number][] {
+  const w = laneWidth(n)
+  return Array.from({ length: n }, (_, i) => {
+    const a = Math.round((lead + i * (w + LANE_GAP_PX)) * dpr)
+    return [a, Math.round((lead + i * (w + LANE_GAP_PX) + w) * dpr) - a] as [number, number]
+  })
+}
+
+/** The overview's canvas: the marker lanes, then a lane of colors for the Color by choice and one for each other label
+ * that is on. */
+const OverviewCanvas = memo(function OverviewCanvas({ paint, lanes, markers }: { paint: OverviewPaint; lanes: readonly OverviewPaint[]; markers: readonly RulerColumn[] }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState<[number, number]>([0, 0])
   const theme = useTheme().key
@@ -409,69 +492,22 @@ const OverviewCanvas = memo(function OverviewCanvas({ paint, markers }: { paint:
         ctx.fillRect(x, a, cw, Math.max(1, Math.round(y1 * dpr) - a))
       }
     })
-    // the colored column
-    const x0 = markers.length ? Math.round((markers.length * (MARKER_PX + MARKER_GAP_PX) + 1) * dpr) : 0
-    const cw = el.width - x0
-    ctx.fillStyle = colourOf('rgba(var(--ink-rgb), 0.05)')
-    ctx.fillRect(x0, 0, cw, H)
-    if (paint.kind === 'bins' && paint.at.length) {
-      const bins = paint.at.length
-      let runStart = 0
-      let runColour: string | null = null
-      let runAlpha = 1
-      const flush = (end: number) => {
-        if (runColour) {
-          ctx.globalAlpha = runAlpha
-          ctx.fillStyle = runColour
-          ctx.fillRect(x0, runStart, cw, end - runStart)
-          ctx.globalAlpha = 1
-        }
-      }
-      for (let y = 0; y < H; y++) {
-        const rank = paint.at[binOfRow(y, H, bins)]
-        const c = rank >= 0 ? paint.colors[Math.min(rank, paint.colors.length - 1)] : null
-        const colour = c ? colourOf(c) : null
-        const alpha = rank >= 0 && paint.faded[Math.min(rank, paint.faded.length - 1)] ? 0.18 : 1
-        if (colour !== runColour || alpha !== runAlpha) {
-          flush(y)
-          runStart = y
-          runColour = colour
-          runAlpha = alpha
-        }
-      }
-      flush(H)
-    } else if (paint.kind === 'counts' && paint.counts.length) {
-      // each row in the one value most of its records have
-      const at = majorityRows(paint.counts, H)
-      let y = 0
-      while (y < H) {
-        const v = at[y]
-        let end = y + 1
-        while (end < H && at[end] === v) end++
-        if (v >= 0) {
-          ctx.globalAlpha = paint.faded[v] ? 0.18 : 1
-          ctx.fillStyle = colourOf(paint.colors[v])
-          ctx.fillRect(x0, y, cw, end - y)
-        }
-        y = end
-      }
-      ctx.globalAlpha = 1
-    } else if (paint.kind === 'density' && paint.bytes.length) {
-      const bins = paint.bytes.length
-      const most = Math.max(1, ...paint.bytes)
-      const ink = colourOf('var(--text-primary)')
-      for (let y = 0; y < H; y++) {
-        const b = paint.bytes[binOfRow(y, H, bins)]
-        if (!b) continue
-        ctx.globalAlpha = 0.08 + 0.42 * Math.sqrt(b / most)
-        ctx.fillStyle = ink
-        ctx.fillRect(x0, y, cw, 1)
-      }
-      ctx.globalAlpha = 1
-    }
-  }, [paint, markers, size, theme])
+    // the lanes of colors
+    const lead = markers.length ? markers.length * (MARKER_PX + MARKER_GAP_PX) + 1 : 0
+    const all = [paint, ...lanes]
+    laneEdges(lead, all.length, dpr).forEach(([x0, cw], i) => paintLane(ctx, all[i], x0, cw, H, colourOf))
+  }, [paint, lanes, markers, size, theme])
   return <canvas ref={ref} className="track-canvas" />
 })
+
+/** A lane of the overview for a label that is on but is not the Color by choice: its records in its own colors. */
+export interface TrackLane {
+  id: string
+  name: string
+  paint: OverviewPaint
+}
+
+const NO_LANES: readonly TrackLane[] = []
 
 interface TracksProps {
   /** the file's lines */
@@ -479,14 +515,19 @@ interface TracksProps {
   /** where the reader stands, which it publishes each frame it moves */
   feed: PlaceFeed
   paint: OverviewPaint
+  /** what the overview's first lane of colors shows, which its hover names */
+  paintName?: string
+  /** a lane beside it for each other label that is on, in its own colors */
+  lanes?: readonly TrackLane[]
   /** a lane each, in grey or for the find's matches the ink: the reader gives the find's matches alone */
   markers: readonly RulerColumn[]
   /** a record's color on the zoomed track and what its hover says */
   colorOf?: (line: number) => { color: string | null; title: string }
   onJump: (fraction: number) => void
   /** a click on the overview snapped to a patch of color: go to the first record in `value` (a key's rank, a label's
-   * value, as the paint gives them) on lines `from` to `to`, where the patch starts */
-  onSnap?: (from: number, to: number, value: number) => void
+   * value, as the paint gives them) on lines `from` to `to`, where the patch starts; `lane` the label's id for a lane of
+   * another label, null for the Color by choice's */
+  onSnap?: (from: number, to: number, value: number, lane: string | null) => void
   /** the fraction of the file at the reader's top to go to; `held` while the pointer still holds the frame */
   onSeek: (fraction: number, held: boolean) => void
   /** scroll the reader by `px`; how far it went */
@@ -518,7 +559,7 @@ interface Written {
   layer: number
 }
 
-export function ReaderTracks({ total, feed, paint, markers, colorOf, onSnap, onSeek, onScrollBy, onMark, preview }: TracksProps) {
+export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, markers, colorOf, onSnap, onSeek, onScrollBy, onMark, preview }: TracksProps) {
   const over = useRef<HTMLDivElement>(null)
   const zoomEl = useRef<HTMLDivElement>(null)
   const frameEl = useRef<HTMLDivElement>(null)
@@ -545,6 +586,10 @@ export function ReaderTracks({ total, feed, paint, markers, colorOf, onSnap, onS
   }, [])
   const n = markers.length
   const lanesPx = n ? n * (MARKER_PX + MARKER_GAP_PX) + 1 : 0
+  const lanePaints = useMemo(() => lanes.map((l) => l.paint), [lanes])
+  const laneW = laneWidth(lanes.length + 1)
+  /** the lane of colors under a point `x` css px from the overview's left edge: 0 the choice's, i for lanes[i - 1] */
+  const laneAtX = (x: number) => Math.max(0, Math.min(lanes.length, Math.floor((x - lanesPx + LANE_GAP_PX / 2) / (laneW + LANE_GAP_PX))))
   const sorted = useMemo(() => markers.map((c) => [...c.ticks].sort((a, b) => a.from - b.from)), [markers])
   // the records around the reader's place that the zoomed track draws, as the reader last published them
   const [drawn, setDrawn] = useState(feed.records)
@@ -810,14 +855,16 @@ export function ReaderTracks({ total, feed, paint, markers, colorOf, onSnap, onS
   }
   /** A click within SNAP_PX of a thin patch of color (THIN_PX at most): the reader goes to the patch's first record.
    * Whether it snapped. */
-  const snapAt = (e: { clientY: number }): boolean => {
+  const snapAt = (e: { clientX: number; clientY: number }): boolean => {
     if (!onSnap || !total || px <= 0) return false
     const dpr = window.devicePixelRatio || 1
     const rows = Math.ceil(px * dpr)
-    const hit = snapPatch(rowValues(paint, rows), yIn(e) * dpr, Math.round(SNAP_PX * dpr), Math.round(THIN_PX * dpr))
+    // the lane clicked: the choice's, or another label's
+    const lane = laneAtX(e.clientX - (over.current?.getBoundingClientRect().left ?? 0))
+    const hit = snapPatch(rowValues(lane ? lanes[lane - 1].paint : paint, rows), yIn(e) * dpr, Math.round(SNAP_PX * dpr), Math.round(THIN_PX * dpr))
     if (!hit) return false
     const from = Math.max(1, Math.min(total, Math.floor((hit.row / rows) * total) + 1))
-    onSnap(from, Math.max(from, Math.min(total, Math.floor(((hit.row + 1) / rows) * total))), hit.value)
+    onSnap(from, Math.max(from, Math.min(total, Math.floor(((hit.row + 1) / rows) * total))), hit.value, lane ? lanes[lane - 1].id : null)
     return true
   }
   const onUp = (e: PointerEvent<HTMLDivElement>) => {
@@ -966,8 +1013,10 @@ export function ReaderTracks({ total, feed, paint, markers, colorOf, onSnap, onS
   const full = useMemo(() => blocks('shown'), [blocks])
   return (
     <div className="tracks" data-drag={dragging ?? undefined} onWheel={wheel} aria-hidden>
-      <div ref={over} className="track track-over" style={{ width: lanesPx + OVER_PX }} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onPointerLeave={leave}>
-        <OverviewCanvas paint={paint} markers={markers} />
+      <div ref={over} className="track track-over" style={{ width: overviewWidth(n, lanes.length + 1) }} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onPointerLeave={leave}>
+        <OverviewCanvas paint={paint} lanes={lanePaints} markers={markers} />
+        {lanes.length > 0 &&
+          [paintName ?? '', ...lanes.map((l) => l.name)].map((name, i) => <span key={i} className="track-lane" style={{ left: lanesPx + i * (laneW + LANE_GAP_PX), width: laneW }} title={name || undefined} />)}
         <div ref={frameEl} className="track-frame-over" />
       </div>
       <svg className="track-link" width={LINK_PX}>
