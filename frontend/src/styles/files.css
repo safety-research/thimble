@@ -1849,7 +1849,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* -------- Color by in the Transcript mode (ColorBy.tsx): thimble's bordered button with the choice, then a key chip per
+/* -------- Color by in the Transcript and Table modes (ColorBy.tsx): thimble's bordered button with the choice, then a key chip per
    value (a square swatch of its color, its name, its count, in a small bordered box; the view kit's .chip-key) that
    turns its records off and on. A record carries the color as a bar on its left edge. -------- */
 .reader-colorbar {
@@ -2972,6 +2972,13 @@
 .reader-table-row.reader-target td.reader-table-gutter {
   box-shadow: inset 2px 0 0 var(--hl-edge);
   color: var(--text-primary);
+}
+/* a row's Color by color: a bar on its left edge, as a record carries it (and the target's edge beside it) */
+.reader-table-row.has-cb td.reader-table-gutter {
+  box-shadow: inset 3px 0 0 var(--cb);
+}
+.reader-table-row.has-cb.reader-target td.reader-table-gutter {
+  box-shadow: inset 3px 0 0 var(--cb), inset 5px 0 0 var(--hl-edge);
 }
 /* the cell holding the words a followed ref quotes shows them over a few lines, the words highlighted (.hl) */
 .reader-table .reader-table-cell.cited .reader-table-clip {

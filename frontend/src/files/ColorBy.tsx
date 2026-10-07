@@ -1,4 +1,4 @@
-// The Color by control of Files' Transcript mode (colorChoice.ts): thimble's bordered button "Color by: <choice> ▾", then
+// The Color by control of Files' Transcript and Table modes (colorChoice.ts): thimble's bordered button "Color by: <choice> ▾", then
 // a chip per value of the choice (a square swatch of its color, its name and its count, in thimble's small bordered box)
 // that turns its records off and on, on one line: the chips that do not fit go behind "N more", which lists every value,
 // as a view's Color by does (viewer_colour.js fit); Alt-click keeps that value alone. The menu lists Off, the records' keys and the
