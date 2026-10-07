@@ -2,7 +2,7 @@
 
 # mythos-5: pre-cached orientation
 
-`thimble demo mythos-5` downloads the dataset from its publisher and installs this folder as its workspace, so thimble opens on the orientation's cards, labels, views and documents. The orientation's Claude Code session is not here: a session the analyst attaches starts fresh, with the canvas and the report as its context.
+`thimble demo mythos-5` downloads the dataset from its publisher and installs this folder as its workspace, so thimble opens on the orientation's cards, labels, views and documents. The workspace opens on its view Activity Timeline (`activity-timeline`). The orientation's Claude Code session is not here: a session the analyst attaches starts fresh, with the canvas and the report as its context.
 
 The data: Released by Anthropic at github.com/anthropics/mythos-5-incident-transcript. thimble does not redistribute it: `thimble demo` downloads it from GitHub on your machine.
 

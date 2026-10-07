@@ -23,6 +23,7 @@ one](#making-one)).
 - `thimble-demo-precache.json`, the manifest:
   - `schema` (`thimble-demo-precache`), `version` (3), `format` (`outputs-only`), `dataset`, `created`, `notice`
     (the source's notice), `credit` (who published the data);
+  - `view`, the slug of the view the workspace opens on (`--view` in step 3 of [Making one](#making-one));
   - `thimble` (the version and commit that made it);
   - `orientation` (status, outputs, effort, Ultracode, critique, model, its chat, start and end, and the coverage
     line its first run ended with);
@@ -104,6 +105,10 @@ Until a session first attaches, the page stays readable rather than greyed under
 composer gives way to the same sentence and command. A message to the orientation is refused, since its session was not
 kept.
 
+The mark's `view` is the manifest's when the folder holds that view. The dataset's row on the start page then opens
+the workspace on that view rather than on Files, and so does a browser's first open of the workspace without a ref in
+its address.
+
 It starts no Claude Code session unless `--attach`. Without it, it prints the same sentence and command for each
 dataset.
 
@@ -135,6 +140,7 @@ each one written (backend/app/precached.py).
      lists what was kept. It never lets through a file that copies the dataset.
    - `--corpus <folder>` names the dataset's folder, when thimble does not know it.
    - `--app <folder>` names the thimble install the orientation ran in, when it was another.
+   - `--view <slug>` names the view the workspace opens on (the dataset's main view); without it, it opens on Files.
 
    It ends with an inventory: the counts, the cited calls, the longest stretch shared with the dataset, the findings
    kept and what it left out. Before it, it names any cited call it could not find in the call logs.

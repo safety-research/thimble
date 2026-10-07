@@ -1285,6 +1285,7 @@ export interface WorkspaceRow {
   title?: string
   blurb?: string
   ready?: boolean
+  /** the view the row opens the workspace on: a demo dataset's pre-cache's main view, an example's view */
   view?: { slug: string; name: string } | null
   /** the names the workspace was renamed from (`thimble demo` renames a demo workspace demo-<dataset>) */
   renamed_from?: string[]

@@ -3,6 +3,7 @@
  "version": 3,
  "format": "outputs-only",
  "dataset": "collusion-wiki",
+ "view": "wiki-page-history",
  "created": "2026-10-06T22:12:21+00:00",
  "notice": "",
  "credit": "Published by the collusion.wiki authors with their report at https://collusion.wiki/. thimble does not redistribute it: `thimble demo` downloads it from collusion.wiki on your machine and rebuilds it.",

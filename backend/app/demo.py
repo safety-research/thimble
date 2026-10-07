@@ -2,7 +2,7 @@
 
     thimble demo [NAME...] [--yes] [--dir DIR] [--attach | --no-attach] [--replace] [--precaches DIR] [--list]
     thimble demo --export WORKSPACE OUT [--outputs-only] [--dataset NAME] [--corpus DIR] [--claude-config DIR]
-        [--scrub-user] [--allow-private]
+        [--view SLUG] [--scrub-user] [--allow-private]
     thimble demo --examples [--refresh]
 
 The command lists the datasets (demo_data.DATASETS) with their sources, credits and sizes, asks before each download
@@ -63,6 +63,11 @@ orientation's thread with the coverage line the manifest keeps (coverage_line), 
 `precached` in the orientation's record and its thread's meta): the orientation's thread then says it ran in advance
 and offers to attach a fresh session. From the outputs alone a follow-up to it is refused, since its session was not kept; from a full
 export the mark says `kept` and a follow-up resumes the installed session.
+
+The view it opens on. Either export takes `--view SLUG`, one of the workspace's views, and the manifest's `view` keeps
+it; install copies it to the mark's `view` when the pre-cache holds that view (opening_view). The start page's row of
+the dataset then opens the workspace on that view, as an example's row opens on its own (start_page.rows), and so does
+a first open of the workspace in a browser with no `?ref=` (frontend Shell), rather than on the File browser.
 """
 from __future__ import annotations
 
@@ -166,6 +171,28 @@ SAFE_NAME = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[^\\\x00]+$")
 
 class DemoError(Exception):
     pass
+
+
+def opening_view(ws: Path, slug: Any) -> str | None:
+    """`slug` when workspace folder `ws` holds that view (extension/views/<slug>/view.json), else None: the view a
+    pre-cache names for its workspace to open on (module note)."""
+    from . import views  # noqa: PLC0415 — the views' module is the server's, loaded only here
+
+    slug = str(slug or "")
+    if not views.SLUG_RE.match(slug):
+        return None
+    return slug if (ws / views.LOCAL_SUBDIR / views.VIEWS_SUBDIR / slug / views.VIEW_JSON).is_file() else None
+
+
+def check_view(ws: Path, slug: str | None) -> None:
+    """DemoError when an export is asked to open on view `slug` and workspace folder `ws` has no such view."""
+    if slug is None or opening_view(ws, slug):
+        return
+    from . import views  # noqa: PLC0415
+
+    root = ws / views.LOCAL_SUBDIR / views.VIEWS_SUBDIR
+    have = sorted(d.parent.name for d in root.glob(f"*/{views.VIEW_JSON}")) if root.is_dir() else []
+    raise DemoError(f"{ws.name} has no view {slug}; its views: {', '.join(have) or 'none'}")
 
 
 def now() -> str:
@@ -482,12 +509,14 @@ def verbatim_check(staged: dict[str, str], corpus: demo_verbatim.Corpus,
 def export_outputs(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = None, user: str | None = None,
                    allow_private: bool = False, scrub_user: bool = False, app: Path | None = None,
                    scan: Callable[[Path], list[str] | None] = gitleaks_scan, long: int = demo_verbatim.LONG,
-                   index: demo_verbatim.Corpus | None = None) -> dict[str, Any]:
+                   index: demo_verbatim.Corpus | None = None, view: str | None = None) -> dict[str, Any]:
     """Write the outputs-only pre-cache (version VERSION) of workspace folder `ws`, made on corpus folder `corpus`, as
     the folder `out` (replacing an export there); the manifest. DemoError, and nothing written, when a file would share
     a stretch of `long` characters or more with the corpus (`index`, else built from `corpus`), when something private
-    remains (unless `allow_private`), or when `out` holds files that are not a pre-cache's. `scrub_user` writes
-    SCRUBBED_USER in place of the user name where it stands as a word (in `ls -l` output, say)."""
+    remains (unless `allow_private`), when `out` holds files that are not a pre-cache's, or when `view` (the view the
+    workspace opens on: the manifest's `view`) is none of the workspace's. `scrub_user` writes SCRUBBED_USER in place of
+    the user name where it stands as a word (in `ls -l` output, say)."""
+    check_view(ws, view)
     home = home or Path.home()
     user = getpass.getuser() if user is None else user
     if out.exists() and any(out.iterdir()) and not (out / MANIFEST).is_file():
@@ -562,7 +591,8 @@ def export_outputs(ws: Path, corpus: Path, out: Path, *, name: str, home: Path |
         flagged += [f"gitleaks: {x}" for x in leaks or []]
         meta = chat_summary(ws, chat)
         manifest = {
-            "schema": SCHEMA, "version": VERSION, "format": "outputs-only", "dataset": name, "created": now(),
+            "schema": SCHEMA, "version": VERSION, "format": "outputs-only", "dataset": name,
+            **({"view": view} if view else {}), "created": now(),
             # the source's own notice travels with excerpts of it (mythos-5's asks to stay out of training corpora)
             "notice": DATASETS[name].notice if name in DATASETS else "",
             "credit": DATASETS[name].credit if name in DATASETS else "",
@@ -850,12 +880,14 @@ def subagent_transcripts(ws: Path, claude_dir: Path) -> list[tuple[str, list[Pat
 def export_full(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = None, user: str | None = None,
                 scrub_user: bool = False, app: Path | None = None, claude_dir: Path | None = None,
                 scan: Callable[[Path], list[str] | None] = gitleaks_scan,
-                index: demo_verbatim.Corpus | None = None) -> dict[str, Any]:
+                index: demo_verbatim.Corpus | None = None, view: str | None = None) -> dict[str, Any]:
     """Write the full export (version FULL_VERSION, module note) of workspace folder `ws`, made on corpus folder
     `corpus`, as the folder `out` (replacing an export there), with the transcripts of its sessions from `claude_dir`
     (claude_config_dir()); the manifest, whose `inventory` says what it holds. It refuses nothing for its content;
-    DemoError only when `out` holds files that are not an export's. `scrub_user` writes SCRUBBED_USER in place of the
-    user name where it stands as a word."""
+    DemoError only when `out` holds files that are not an export's, or when `view` (the view the workspace opens on)
+    is none of the workspace's. `scrub_user` writes SCRUBBED_USER in place of the user name where it stands as a
+    word."""
+    check_view(ws, view)
     home = home or Path.home()
     user = getpass.getuser() if user is None else user
     claude_dir = claude_dir or claude_config_dir()
@@ -1009,7 +1041,8 @@ def export_full(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | No
         meta = chat_summary(ws, chat)
         dropped = sum(n for t in transcripts for n in t["dropped"].values())
         manifest: dict[str, Any] = {
-            "schema": SCHEMA, "version": FULL_VERSION, "format": "full", "dataset": name, "created": now(),
+            "schema": SCHEMA, "version": FULL_VERSION, "format": "full", "dataset": name,
+            **({"view": view} if view else {}), "created": now(),
             "notice": DATASETS[name].notice if name in DATASETS else "",
             "credit": DATASETS[name].credit if name in DATASETS else "",
             "thimble": {"version": _thimble_version(), "commit": _commit()},
@@ -1195,6 +1228,15 @@ def readme_full(m: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def opens_on(m: dict[str, Any]) -> str:
+    """The view a manifest names for its workspace to open on, as the README names it: `Name (`slug`)`, by the name the
+    manifest's `views` gives it, else the slug alone."""
+    slug = str(m.get("view") or "")
+    name = next((str(x.get("name")) for x in m.get("views") or [] if isinstance(x, dict) and x.get("slug") == slug
+                 and x.get("name")), "")
+    return f"{name} (`{slug}`)" if name else f"`{slug}`"
+
+
 def readme(m: dict[str, Any]) -> str:
     """The pre-cache folder's README.md: the source's notice first, then what the folder holds and how it was made."""
     if m.get("version") in FULL_VERSIONS:
@@ -1206,9 +1248,10 @@ def readme(m: dict[str, Any]) -> str:
         lines += [f"> Notice from the source: {m['notice']}", ""]
     lines += [f"# {m['dataset']}: pre-cached orientation", "",
               f"`thimble demo {m['dataset']}` downloads the dataset from its publisher and installs this folder as its "
-              "workspace, so thimble opens on the orientation's cards, labels, views and documents. The orientation's "
-              "Claude Code session is not here: a session the analyst attaches starts fresh, with the canvas and the "
-              "report as its context.", ""]
+              "workspace, so thimble opens on the orientation's cards, labels, views and documents."
+              + (f" The workspace opens on its view {opens_on(m)}." if m.get("view") else "")
+              + " The orientation's Claude Code session is not here: a session the analyst attaches starts fresh, with "
+              "the canvas and the report as its context.", ""]
     if m.get("credit"):
         lines += [f"The data: {m['credit']}", ""]
     longest = (v.get("longest") or [{}])[0]
@@ -1309,7 +1352,8 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
     its thread's meta); the manifest, with `warnings` for corpus files that differ and transcripts that could not be
     placed. A full export's transcripts go where Claude Code in `claude_dir` (claude_config_dir()) resumes them, each
     under a new session id that the workspace's files name in place of the old one (`installed_transcripts`); when the
-    orientation's is among them the mark says `kept`, and its record keeps its session, so a follow-up resumes it."""
+    orientation's is among them the mark says `kept`, and its record keeps its session, so a follow-up resumes it. The
+    mark's `view` is the manifest's when the pre-cache holds that view (opening_view), else None."""
     home = home or Path.home()
     values = {"workspace": str(ws), "corpus": str(corpus), "app": str(config.REPO_ROOT),
               "thimble_home": str(thimble_home()), "home": str(home)}
@@ -1404,10 +1448,14 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
         kept = bool(isinstance(run, dict) and run.get("session")
                     and any(i["session"] == run["session"] for i in installed))
         o = manifest.get("orientation") or {}
+        opens = opening_view(tmp, manifest.get("view"))
+        if manifest.get("view") and not opens:
+            warnings.append(f"the pre-cache opens on the view {manifest['view']}, which it does not hold, so the "
+                            "workspace opens on Files")
         mark = {"dataset": manifest.get("dataset"), "created": manifest.get("created"), "installed": now(),
                 "thimble": manifest.get("thimble"), "folder": str(corpus), "orientation": chat or None,
                 "ran": o.get("ended") or o.get("started"), "model": o.get("model"),
-                "format": "full" if full else "outputs-only", "kept": kept}
+                "format": "full" if full else "outputs-only", "kept": kept, "view": opens}
         (tmp / MARKER).write_text(json.dumps(mark, ensure_ascii=False, indent=1), "utf-8")
         if isinstance(run, dict):
             if not kept:
@@ -2010,10 +2058,11 @@ def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
     try:
         if outputs_only:
             m = export_outputs(ws, corpus, out_path, name=name, allow_private=args.allow_private,
-                               scrub_user=args.scrub_user, app=app)
+                               scrub_user=args.scrub_user, app=app, view=getattr(args, "view", None))
         else:
             m = export_full(ws, corpus, out_path, name=name, scrub_user=args.scrub_user, app=app,
-                            claude_dir=given(args.claude_config) if getattr(args, "claude_config", None) else None)
+                            claude_dir=given(args.claude_config) if getattr(args, "claude_config", None) else None,
+                            view=getattr(args, "view", None))
     except DemoError as e:
         say(f"thimble demo --export: {e}")
         return 1
@@ -2059,6 +2108,8 @@ def add_parser(sub: Any) -> None:
     p.add_argument("--dataset", help="with --export: the dataset the export is for (default: the workspace's name)")
     p.add_argument("--corpus", help="with --export: the workspace's corpus folder, when thimble does not know it")
     p.add_argument("--app", help="with --export: the thimble install the orientation ran in, when it is not this one")
+    p.add_argument("--view", metavar="SLUG",
+                   help="with --export: the view the workspace opens on when `thimble demo` installs it (default: Files)")
     p.add_argument("--claude-config", metavar="DIR",
                    help="with --export: the Claude Code config folder the workspace's sessions ran with (default "
                         "CLAUDE_CONFIG_DIR, else ~/.claude)")

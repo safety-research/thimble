@@ -2,8 +2,9 @@
 // dataset's name, not its workspace's demo-<dataset>, the dataset's one sentence and "analysis ready" when its
 // pre-cached orientation is installed), Examples (the worked
 // examples of custom views: the name and the view it opens at) and Your folders (the folder's name and path). A group
-// with no row is left out. Each row is a link to its workspace; `current` marks the workspace the page shows. The start
-// page (StartPage) and the top bar's switcher (TopBar) draw the same list.
+// with no row is left out. Each row is a link to its workspace, a demo's or an example's at the view it opens on
+// (workspaceHref); `current` marks the workspace the page shows. The start page (StartPage) and the top bar's switcher
+// (TopBar) draw the same list.
 import { Chip } from '../components/Chip'
 import { Icon } from '../components/Icon'
 import type { WorkspaceRow } from '../lib/types'

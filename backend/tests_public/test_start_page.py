@@ -1,9 +1,9 @@
 """GET /api/workspaces (app/start_page.py): the start page's rows and the top bar's switcher's. A demo dataset is a folder
 `thimble demo` put in $THIMBLE_HOME/demo or in a --dir beside its SOURCES.md, or a workspace with the pre-cache's mark,
-is labeled by the dataset's name whatever its workspace's name (demo-<dataset>), and is `ready` with the mark; an
-example is a workspace named example-*, with its view; every other folder is a folder, labeled by its own name. Each
-row lists the names its workspace was renamed from. A folder that is gone is left out, and the route is a read the page
-makes without the key's cookie."""
+is labeled by the dataset's name whatever its workspace's name (demo-<dataset>), is `ready` with the mark and opens on
+the view the mark names; an example is a workspace named example-*, with its view; every other folder is a folder,
+labeled by its own name. Each row lists the names its workspace was renamed from. A folder that is gone is left out,
+and the route is a read the page makes without the key's cookie."""
 from __future__ import annotations
 
 import json
@@ -33,7 +33,10 @@ def world(tmp_path, monkeypatch):
     # the name an earlier `thimble demo` gave it
     cw = register(home / "demo" / "collusion-wiki", "demo-collusion-wiki")
     (ws / cw).mkdir(parents=True)
-    (ws / cw / precached.MARKER).write_text(json.dumps({"dataset": "collusion-wiki"}))
+    (ws / cw / precached.MARKER).write_text(json.dumps({"dataset": "collusion-wiki", "view": "wiki-page-history"}))
+    history = ws / cw / "extension" / "views" / "wiki-page-history"
+    history.mkdir(parents=True)
+    (history / "view.json").write_text(json.dumps({"name": "Wiki Page History"}))
     register(home / "demo" / "mythos-5")
     config.rename_corpus("mythos-5", "demo-mythos-5")
     # downloaded with --dir: the folder beside the SOURCES.md `thimble demo` writes
@@ -43,7 +46,8 @@ def world(tmp_path, monkeypatch):
     # a pre-cache installed on a folder of another name: the mark names the dataset
     marked = register(tmp_path / "copies" / "wiki-copy")
     (ws / marked).mkdir(parents=True)
-    (ws / marked / precached.MARKER).write_text(json.dumps({"dataset": "collusion-wiki"}))
+    # its mark names a view it does not hold
+    (ws / marked / precached.MARKER).write_text(json.dumps({"dataset": "collusion-wiki", "view": "relay-board"}))
     # a folder that only shares a dataset's name is the analyst's own
     register(tmp_path / "mine" / "mythos-5")
     # an example, with the view `thimble demo --examples` installed
@@ -81,6 +85,9 @@ def test_the_start_page_lists_demo_datasets_examples_and_folders_in_that_order(w
     assert m5["ready"] is False and m5["blurb"] == DATASETS["mythos-5"].blurb and m5["renamed_from"] == ["mythos-5"]
     assert cw["renamed_from"] == [] and by_name["alpha"]["renamed_from"] == []
     assert by_name["transluce-urlquery"]["kind"] == "demo" and by_name["transluce-urlquery"]["ready"] is False
+    # a demo opens on the view its pre-cache's mark names, while the workspace holds it; an example on its own
+    assert cw["view"] == {"slug": "wiki-page-history", "name": "Wiki Page History"}
+    assert by_name["wiki-copy"]["view"] is None and m5["view"] is None
     assert by_name["example-timeline"]["view"] == {"slug": "timeline", "name": "Timeline"}
     assert by_name["example-bare"]["view"] is None
     mine = by_name["mythos-5"]  # the analyst's folder of a dataset's name takes the name the demo gave up
