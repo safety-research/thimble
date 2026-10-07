@@ -182,6 +182,8 @@ export type World = {
   docs: Record<string, unknown>
   /** the slash commands run, as `/name args` */
   commands: string[]
+  /** a file's page by its path, over the fixtures' (null: it cannot be read) */
+  pages: Record<string, unknown>
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
@@ -209,6 +211,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     labelRun: null,
     docs: {},
     commands: [],
+    pages: {},
   }
   const ws = opts.ws === undefined ? WS : opts.ws
   mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI })
@@ -269,6 +272,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       case 'agents':
         return out(w.states.agents)
       case 'files':
+        if (rest[0] && w.pages[rest[0]] !== undefined) return w.pages[rest[0]] === null ? out({ error: `could not read ${rest[0]}` }, 1) : out(w.pages[rest[0]])
         return rest[0] ? out(w.states.file) : out(w.states.files)
       case 'resolve': {
         const refs = JSON.parse(rest[0] ?? '[]') as string[]

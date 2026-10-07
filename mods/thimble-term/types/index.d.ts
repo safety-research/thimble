@@ -123,8 +123,9 @@ export type TermPanel = {
   slug?: string
   path?: string
   start?: number
-  /** a file's record chosen (a citation's line), lit */
+  /** a file's record chosen (a citation's line), lit; a file's table sorted by a column (`<column>:asc|desc`) */
   line?: number
+  sort?: string
   agent?: string
   target?: ChatTarget | null
   about?: string

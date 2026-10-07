@@ -24,7 +24,7 @@ import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermVerdict } from
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, fieldEls, freshSeg, hasMargin, headerEls, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
 import { citeLabel, plainCites, quoteSpan, quotedWords, wrapAround } from './cite'
-import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, cardLayout, cut, demojibake, labelHead, lineWidth, placeWords, shade, valueColour, width } from './draw'
+import { MAX_BARS, MAX_NODES, MAX_TABLE_ROWS, amount, cardLayout, cut, demojibake, fold, labelHead, lineWidth, placeWords, shade, valueColour, width } from './draw'
 import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
@@ -1610,9 +1610,33 @@ function pageLines(page: Obj): { n: number; text: string }[] {
 /** The folders open in the file browser: the first unless folded, any other once unfolded. */
 const FOLDER_FILES = 20
 
+/** A short name cut in its middle to `n` cells, its extension kept (`revis…ns.jsonl`); a longer title at its end. */
+function middleCut(name: string, n: number): string {
+  if (width(name) <= n) return name
+  if (name.split(/\s+/).length > 3 || n < 8) return cut(name, n)
+  const dot = name.lastIndexOf('.')
+  const ext = dot > 0 && name.length - dot <= 8 ? name.slice(dot) : ''
+  const stem = ext ? name.slice(0, dot) : name
+  const room = n - width(ext) - 1
+  if (room < 4) return cut(name, n)
+  const head = Math.ceil(room / 2)
+  return `${stem.slice(0, head)}…${stem.slice(stem.length - (room - head))}${ext}`
+}
+
+/** What a file opens as, by its first page: its transcript, its table of records, or its lines; a binary file not at
+ *  all. */
+function opensAs(page: Obj | undefined): string {
+  if (!page) return ''
+  if (page.binary) return 'raw bytes: not shown'
+  if (turnsOf(page)) return 'transcript'
+  if (recordsOf(page).length) return 'table'
+  return 'lines'
+}
+
 /** The file browser (views/SPEC.md, section 7, "The file browser"): a folder per group, which folds; an open folder
- *  shows its first 20 files, each `●` in its type's hue; `❯` on the chosen file, whose first lines show under the second
- *  rule; Enter or a second click opens it. */
+ *  shows its first 20 files (`… N more` shows them all), each `●` in its type's hue (dim in a folder of one type), its
+ *  name cut in its middle; `❯` and the accent on the chosen file, whose name, what it opens as and its first lines show
+ *  under the second rule; Enter or a second click opens it, Space folds its folder. */
 async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button } = cx.els(e)
@@ -1622,7 +1646,6 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   if (!got.ok) return <Box flexDirection="column"><Text color={COLORS.problem} wrap="wrap">{`× ${got.error}`}</Text></Box>
   const files = filesOf(got)
   const ui = await cx.filesUi()
-  const kinds = [...new Set(files.map(f => f.kind))]
   const byDir = new Map<string, FileEntry[]>()
   for (const f of files) {
     const d = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/') + 1) : ''
@@ -1635,6 +1658,7 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const lines: Line[] = []
   const hits: LineHit[] = []
   const order: string[] = []
+  const dirOf = new Map<string, string>()
   const pick = ui.pick && files.some(f => f.path === ui.pick) ? ui.pick : ''
   const choose = (path: string) => async () => {
     const cur = await cx.filesUi()
@@ -1645,26 +1669,32 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   }
   const right = (f: FileEntry): Line => [dim(f.kind.padEnd(kindW)), { s: '  ' }, dim(fmtSize(f.size).padStart(sizeW))]
   lines.push(pointed(spread([{ s: '    ' }, dim('name')], [dim('type'.padEnd(kindW)), { s: '  ' }, dim('size'.padStart(sizeW))], cols), false))
+  const flipOf = (dir: string, open: boolean) => async () => {
+    const key = `dir:${dir}`
+    const cur = await cx.filesUi()
+    const without = (xs: string[]) => xs.filter(x => x !== key)
+    await cx.setFilesUi(open ? { ...cur, folded: [...without(cur.folded), key], unfolded: without(cur.unfolded) } : { ...cur, folded: without(cur.folded), unfolded: [...without(cur.unfolded), key] })
+    await cx.bumpPanel()
+  }
+  const opened = new Map<string, boolean>()
   ;[...byDir.entries()].forEach(([dir, fs], i) => {
     const key = `dir:${dir}`
     const open = i === 0 ? !ui.folded.includes(key) : ui.unfolded.includes(key)
-    const name = `${dir ? dir : root}`
-    const flip = async () => {
-      const cur = await cx.filesUi()
-      const without = (xs: string[]) => xs.filter(x => x !== key)
-      await cx.setFilesUi(open ? { ...cur, folded: [...without(cur.folded), key], unfolded: without(cur.unfolded) } : { ...cur, folded: without(cur.folded), unfolded: [...without(cur.unfolded), key] })
-      await cx.bumpPanel()
-    }
-    hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: flip })
-    lines.push(pointed([{ s: open ? '▾' : '▸' }, { s: ' ' }, { s: name }, dim(`  ${num(fs.length)}`)], false))
+    opened.set(dir, open)
+    hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: flipOf(dir, open) })
+    lines.push(pointed([{ s: open ? '▾' : '▸' }, { s: ' ' }, { s: dir || root }, dim(`  ${num(fs.length)}`)], false))
     if (!open) return
     const whole = (ui.whole ?? []).includes(dir)
     const shown = !whole && fs.length > FOLDER_FILES + 1 ? fs.slice(0, FOLDER_FILES) : fs
+    // a folder of one type has dim dots: the hue tells types apart only where there are several
+    const kinds = [...new Set(fs.map(f => f.kind))]
     for (const f of shown) {
       const hue = kinds.length > 1 ? valueColour(kinds, f.kind) ?? COLORS.dim : COLORS.dim
+      const name = middleCut(f.path.slice(dir.length), Math.max(8, cols - 4 - kindW - sizeW - 6))
       hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(f.path) })
-      lines.push(pointed(spread([{ s: '  ' }, { s: '●', fg: hue }, { s: ' ' }, { s: f.path.slice(dir.length) }], right(f), cols), f.path === pick))
+      lines.push(pointed(spread([{ s: '  ' }, { s: '●', fg: hue }, { s: ' ' }, { s: name }], right(f), cols), f.path === pick, true))
       order.push(f.path)
+      dirOf.set(f.path, dir)
     }
     if (fs.length > shown.length) {
       // `… N more` shows the folder whole
@@ -1685,105 +1715,277 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     await cx.setFilesUi({ ...(await cx.filesUi()), pick: next })
     await readSurface(cx, `file:${next}:1`, 'files', [next])
   }
-  body.push(linesEl(cx, e, marginKey('files-tree'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openFile(cx, pick) : undefined)))
+  const onKey = (k: string) => {
+    if (k === 'up' || k === 'k') return step(-1)
+    if (k === 'down' || k === 'j') return step(1)
+    if ((k === 'return' || k === 'enter') && pick) return openFile(cx, pick)
+    // Space folds the chosen file's folder
+    if ((k === 'space' || k === ' ') && pick) {
+      const dir = dirOf.get(pick) ?? ''
+      return flipOf(dir, opened.get(dir) ?? true)()
+    }
+    return undefined
+  }
+  body.push(linesEl(cx, e, marginKey('files-tree'), lines, hits, cols + MARGIN_W, onKey))
   body.unshift(
     <Box key="file-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
       {files.map((f, i) => <Button key={`file-open-${i}`} label={f.path} plain onPress={() => void openFile(cx, f.path)} />)}
     </Box>,
   )
-  // the chosen file's first lines
+  // the chosen file: its name, what it opens as, its first lines
   if (pick) {
-    body.push(ruleEl(els, cols, 'rule-preview'))
-    body.push(lineEl(els, spread([{ s: pick }], [dim('Enter to open')], cols), 'preview-name'))
     const page = await surfaceValue<Obj>(cx, `file:${pick}:1`)
-    const ls = page?.ok ? pageLines(page.value).slice(0, 8) : []
-    const gw = Math.max(1, ...ls.map(l => String(l.n).length))
-    for (const l of ls) body.push(<Text key={`preview-${l.n}`} wrap="truncate-end"><Text dimColor>{`${String(l.n).padStart(gw + 2)}  `}</Text><Text>{l.text || ' '}</Text></Text>)
+    const as = page?.ok ? opensAs(page.value) : page && !page.ok ? '' : ''
+    body.push(ruleEl(els, cols, 'rule-preview'))
+    body.push(lineEl(els, spread([{ s: pick }], as ? [dim(`opens as ${as}`)] : [], cols), 'preview-name'))
+    if (page?.ok && !page.value.binary) {
+      const ls = pageLines(page.value).slice(0, 6)
+      const gw = Math.max(1, ...ls.map(l => String(l.n).length))
+      for (const l of ls) body.push(<Text key={`preview-${l.n}`} wrap="truncate-end"><Text dimColor>{`${String(l.n).padStart(gw + 2)}  `}</Text><Text>{cut(l.text, Math.min(160, cols - gw - 4)) || ' '}</Text></Text>)
+    }
+    if (page && !page.ok) body.push(<Text key="preview-err" color={COLORS.problem} wrap="wrap">{`× ${page.error}`}</Text>)
     if (!page) body.push(<Text key="preview-wait" dimColor>◌ reading</Text>)
   }
-  body.push(hintsRow(els, ['↑↓ to choose', 'Enter to open', 'b to go back', 'x to close'], cols))
+  body.push(hintsRow(els, ['Enter to open', '↑↓ to choose', 'Space to fold'], cols))
   return <Box flexDirection="column">{body}</Box>
 }
 
-// the keys a transcript's record names its speaker, its words and its time by, in the order tried
+// the keys a transcript's record names its speaker, its words and its time by, in the order tried, where thimble's sniff
+// names none
 const SPEAKER_KEYS = ['speaker', 'role', 'author', 'agent', 'sender', 'from', 'user', 'name']
 const TEXT_KEYS = ['text', 'content', 'message', 'body', 'msg', 'comment']
 const TIME_KEYS = ['time', 'timestamp', 'ts', 'created_at', 'date', 'at']
 
-type Turn = { n: number; who: string; text: string; time: string }
+/** A turn of a transcript: its line, who speaks, the words, when; a tool call folded to one line (`tool`). */
+type Turn = { n: number; who: string; text: string; time: string; tool?: boolean }
 
-/** A page's records as a transcript's turns, when most of them name a speaker and hold words; else null. */
-function turnsOf(page: Obj): Turn[] | null {
-  const records = (Array.isArray(page.records) ? page.records : []) as Obj[]
-  const out: Turn[] = []
-  for (const r of records) {
-    const o = isObj(r.record) ? r.record : null
-    if (!o) continue
-    const who = SPEAKER_KEYS.map(k => o[k]).find(v => typeof v === 'string' && v.trim())
-    const text = TEXT_KEYS.map(k => o[k]).find(v => typeof v === 'string' && v.trim())
-    if (typeof who !== 'string' || typeof text !== 'string') continue
-    const time = TIME_KEYS.map(k => o[k]).find(v => typeof v === 'string' || typeof v === 'number')
-    out.push({ n: typeof r.line === 'number' ? r.line : out.length + 1, who: demojibake(who.trim()), text: demojibake(text.replace(/\s+/g, ' ').trim()), time: time === undefined ? '' : String(time) })
-  }
-  return records.length && out.length >= Math.ceil(records.length * 0.6) ? out : null
+/** A dotted key's value in a record (`data.speakerId`). */
+function dotted(o: Obj, key: string): unknown {
+  let v: unknown = o
+  for (const k of key.split('.')) v = isObj(v) ? v[k] : undefined
+  return v
 }
 
-/** A file (views/SPEC.md, "The file browser", a file): its name as the title, its kind and lines dim under it, the tabs
- *  `Lines` and `Transcript` where its records read as one; the lines' numbers right-aligned in a dim column and their text
- *  after a gutter, or per turn its time dim, a ● in the speaker's hue, the speaker bold and the text 2 cells in under it,
- *  up to three rows; `earlier  later` at the bottom. */
+/** Words held as a string, or as a list of blocks with text. */
+function wordsOf(v: unknown): string {
+  if (typeof v === 'string') return v
+  if (Array.isArray(v)) return v.map(b => (typeof b === 'string' ? b : isObj(b) ? str(b.text) : '')).filter(Boolean).join(' ')
+  return ''
+}
+
+/** A page's records as a transcript's turns: by the keys thimble's sniff named (`page.transcript`), a text log's turns
+ *  (each record's `meta.turn`), else when most records name a speaker and hold words; else null. */
+function turnsOf(page: Obj): Turn[] | null {
+  const records = (Array.isArray(page.records) ? page.records : []) as Obj[]
+  const hint = isObj(page.transcript) ? page.transcript : null
+  const out: Turn[] = []
+  const lineOf = (r: Obj, i: number) => (typeof r.line === 'number' ? r.line : (typeof page.start === 'number' ? page.start : 1) + i)
+  if (hint?.format === 'text') {
+    records.forEach((r, i) => {
+      const text = isObj(r.record) ? str(r.record.text) : str(r.text)
+      const turn = isObj(r.meta) && isObj(r.meta.turn) ? r.meta.turn : null
+      if (turn) out.push({ n: lineOf(r, i), who: demojibake(str(turn.speaker)), text: demojibake(text.slice(typeof turn.at === 'number' ? turn.at : 0).trim()), time: str(turn.time) })
+      else if (out.length && text.trim()) out.at(-1)!.text += ` ${demojibake(text.trim())}`
+    })
+    return out.length ? out : null
+  }
+  const keys = hint && isObj(hint.keys) ? hint.keys : null
+  for (const [i, r] of records.entries()) {
+    const o = isObj(r.record) ? r.record : null
+    if (!o) continue
+    const who = keys ? str(keys.speaker).split('|').map(k => dotted(o, k)).find(v => typeof v === 'string' && v.trim()) : SPEAKER_KEYS.map(k => o[k]).find(v => typeof v === 'string' && v.trim())
+    const text = keys ? wordsOf(dotted(o, str(keys.text))) : TEXT_KEYS.map(k => o[k]).find(v => typeof v === 'string' && v.trim())
+    const time = keys && keys.time ? dotted(o, str(keys.time)) : TIME_KEYS.map(k => o[k]).find(v => typeof v === 'string' || typeof v === 'number')
+    if (typeof who !== 'string' || typeof text !== 'string' || !text.trim()) {
+      // a tool record of an agent's transcript: one dim line
+      if (hint?.tools && (o.tool_use_id || o.tool || o.name || o.type === 'tool_use' || o.type === 'tool_result')) out.push({ n: lineOf(r, i), who: '', text: str(o.name ?? o.tool ?? o.type ?? 'tool call'), time: '', tool: true })
+      continue
+    }
+    out.push({ n: lineOf(r, i), who: demojibake(who.trim()), text: demojibake(text.replace(/\s+/g, ' ').trim()), time: time === undefined ? '' : String(time) })
+  }
+  const spoken = out.filter(t => !t.tool).length
+  if (hint) return spoken ? out : null
+  return records.length && spoken >= Math.ceil(records.length * 0.6) ? out : null
+}
+
+/** The records of a page that are objects (JSON lines, a JSON list's items, CSV rows), each with its line. */
+function recordsOf(page: Obj): { n: number; o: Obj }[] {
+  const records = (Array.isArray(page.records) ? page.records : []) as Obj[]
+  const first = typeof page.start === 'number' ? page.start : 1
+  const out = records.flatMap((r, i) => (isObj(r.record) && !('text' in r.record && Object.keys(r.record).length === 1) ? [{ n: typeof r.line === 'number' ? r.line : first + i, o: r.record }] : []))
+  return out.length * 2 >= records.length ? out : []
+}
+
+/** A record's value as a table's cell: words as written, a number, anything else as JSON. */
+function cellText(v: unknown): string {
+  if (v === null || v === undefined) return ''
+  if (typeof v === 'string') return demojibake(v.replace(/\s+/g, ' '))
+  if (typeof v === 'number' || typeof v === 'boolean') return typeof v === 'number' ? amount(v) : String(v)
+  return JSON.stringify(v)
+}
+
+/** A file (views/SPEC.md, "The file browser", a file): its name as the title; under it its kind, its records and the
+ *  lines shown of how many, `earlier  later` at R; the tabs `Table  Transcript  Raw` as its records read (1 2 3); the
+ *  record chosen (a citation's, a click's, ↑↓) on the selection background, its place a link and a blue `?` under the
+ *  view; ← or Backspace back to the file browser. Raw: each line's number right-aligned in a dim column, a Markdown
+ *  file's headings bold. Transcript: per turn its time dim, a ● in the speaker's hue, the speaker bold, the words under
+ *  the name up to three rows, a tool call one dim line. Table: the records' keys as columns, a click on one sorts. */
 async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
   const start = p.start ?? 1
   const got = await surfaceValue<Obj>(cx, `file:${p.path}:${start}`)
-  if (!got) return none(cx, e, '◌ reading the file')
-  if (!got.ok) return <Box flexDirection="column"><Text color={COLORS.problem} wrap="wrap">{`× ${got.error}`}</Text></Box>
+  if (!got) return none(cx, e, `◌ reading ${p.title}`)
+  if (!got.ok) {
+    if (!rt.toasted.has(`${p.path}:${got.error}`)) {
+      rt.toasted.add(`${p.path}:${got.error}`)
+      cx.toast(`thimble: could not read ${p.title}: ${got.error}`)
+    }
+    return <Box flexDirection="column"><Text color={COLORS.problem} wrap="wrap">{`× ${got.error}`}</Text></Box>
+  }
   const page = got.value
+  const path = p.path ?? ''
   const ls = pageLines(page)
   const total = typeof page.total_lines === 'number' ? page.total_lines : 0
   const first = ls[0]?.n ?? start
   const last = ls.at(-1)?.n ?? first
   const turns = turnsOf(page)
-  const mode = p.mode === 'transcript' && turns ? 'transcript' : 'lines'
-  const tab = (name: string, m: string) =>
+  const recs = recordsOf(page)
+  const hint = isObj(page.transcript) ? page.transcript : null
+  const modes = [...(recs.length ? ['table'] : []), ...(turns ? ['transcript'] : []), 'raw']
+  const wanted = p.mode === 'lines' ? 'raw' : p.mode
+  const mode = wanted && modes.includes(wanted) ? wanted : turns && typeof hint?.score === 'number' && hint.score >= 0.95 ? 'transcript' : 'raw'
+  const tabName: Record<string, string> = { table: 'Table', transcript: 'Transcript', raw: 'Raw' }
+  const tab = (m: string, i: number) =>
     m === mode ? (
-      <Text key={`tab-${m}`} inverse>{` ${name} `}</Text>
+      <Text key={`tab-${m}`} inverse>{` ${tabName[m]} `}</Text>
     ) : (
-      <Button key={`tab-${m}`} label={` ${name} `} plain onPress={() => void openPanel(cx, { ...p, mode: m })} />
+      <Button key={`tab-${m}`} label={` ${tabName[m]} `} plain hotkey={String(i + 1)} onPress={() => void openPanel(cx, { ...p, mode: m })} />
     )
-  const more = turns ? [<Box key="file-tabs" flexDirection="row">{tab('Lines', 'lines')}{tab('Transcript', 'transcript')}</Box>] : []
-  const body: RenderElement[] = [...headerEls(els, { title: p.path ?? '', cols, sub: subLine([str(page.kind), total ? `${num(total)} lines` : '', ls.length ? `lines ${first}-${last}` : '']), more })]
-  if (!ls.length) body.push(<Text key="file-none" dimColor>none</Text>)
-  else if (mode === 'transcript') {
-    const speakers = [...new Set(turns!.map(t => t.who))]
+  const earlier = first > 1 ? () => void openPanel(cx, { ...p, start: Math.max(1, first - 200) }) : null
+  const later = total && last < total ? () => void openPanel(cx, { ...p, start: last + 1 }) : null
+  const subWords = [str(page.kind), recs.length ? plural(recs.length, 'record') : '', ls.length ? `lines ${num(first)}-${num(last)}${total ? ` of ${num(total)}` : ''}` : page.binary ? 'raw bytes: not shown' : '']
+  const subRow = (
+    <Box key="file-sub" flexDirection="row">
+      <Box flexShrink={1}>{lineEl(els, subLine(subWords))}</Box>
+      <Box flexGrow={1} />
+      <Box flexShrink={0} flexDirection="row" columnGap={2}>
+        {earlier ? <Button key="file-earlier" label="earlier" plain onPress={earlier} /> : null}
+        {later ? <Button key="file-later" label="later" plain onPress={later} /> : null}
+      </Box>
+    </Box>
+  )
+  const more = [subRow, ...(modes.length > 1 ? [<Box key="file-tabs" flexDirection="row">{modes.map(tab)}</Box>] : [])]
+  const body: RenderElement[] = [...headerEls(els, { title: p.title || path, cols, more })]
+  // the record chosen, by its line; a click or ↑↓ chooses another
+  const chosen = p.line && p.line >= first && p.line <= last ? p.line : 0
+  const choose = (n: number) => () => openPanel(cx, { ...p, line: n })
+  const back = () => openPanel(cx, { view: 'files', title: 'Files' })
+  const lineNs: number[] = []
+  const lines: Line[] = []
+  const hits: LineHit[] = []
+  const gw = Math.max(1, ...ls.map(l => String(l.n).length))
+  if (!ls.length) {
+    if (!page.binary) body.push(none(cx, e))
+  } else if (mode === 'transcript') {
+    const speakers = [...new Set(turns!.filter(t => !t.tool).map(t => t.who))]
     const tw = Math.min(22, Math.max(0, ...turns!.map(t => width(t.time))))
-    turns!.forEach((t, i) => {
+    for (const t of turns!) {
+      const y = lines.length
+      if (t.tool) {
+        lines.push(pointed([...(tw ? [{ s: ' '.repeat(tw + 2) }] : []), dim(`  ⎿ ${cut(t.text, Math.max(10, cols - tw - 8))}`)], false))
+        hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(t.n) })
+        lineNs.push(t.n)
+        continue
+      }
       const hue = COLORS.series[speakers.indexOf(t.who) % COLORS.series.length]!
-      body.push(
-        <Text key={`turn-${i}`} wrap="truncate-end">
-          {tw ? <Text dimColor>{`${cut(t.time, tw).padEnd(tw)}  `}</Text> : null}
-          <Text color={hue}>{'● '}</Text>
-          <Text bold>{t.who}</Text>
-        </Text>,
-      )
-      body.push(
-        <Box key={`turn-text-${i}`} marginLeft={(tw ? tw + 2 : 0) + 2} height={Math.min(3, Math.max(1, Math.ceil(width(t.text) / Math.max(10, cols - tw - 4))))} overflow="hidden">
-          <Text wrap="wrap">{t.text}</Text>
-        </Box>,
-      )
+      lines.push(pointed([...(tw ? [dim(`${cut(t.time, tw).padEnd(tw)}  `)] : []), { s: '●', fg: hue }, { s: ' ' }, { s: t.who, b: true }], t.n === chosen, true))
+      const room = Math.max(10, cols - (tw ? tw + 2 : 0) - 2)
+      const rows = fold(t.text, room).slice(0, 3)
+      for (const r of rows) lines.push(pointed([{ s: ' '.repeat((tw ? tw + 2 : 0) + 2) }, { s: r }], false))
+      for (let k = y; k < lines.length; k++) hits.push({ y: k, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(t.n) })
+      lineNs.push(t.n)
+    }
+  } else if (mode === 'table') {
+    // the records' keys as columns (the first 8 any of them hold), a click on a column's name sorts by it
+    const heads = [...new Set(recs.flatMap(r => Object.keys(r.o)))].slice(0, 8)
+    const [sortKey, sortDir] = (p.sort ?? '').split(':')
+    const rows = recs.map(r => ({ n: r.n, cells: heads.map(h => r.o[h]) }))
+    if (sortKey && heads.includes(sortKey)) {
+      const k = heads.indexOf(sortKey)
+      rows.sort((a, b) => {
+        const x = a.cells[k]
+        const y = b.cells[k]
+        const c = typeof x === 'number' && typeof y === 'number' ? x - y : cellText(x).localeCompare(cellText(y), undefined, { numeric: true })
+        return sortDir === 'desc' ? -c : c
+      })
+    }
+    const numeric = heads.map((_h, k) => rows.every(r => typeof r.cells[k] === 'number' || r.cells[k] === null || r.cells[k] === undefined))
+    const natural = heads.map((h, k) => Math.max(width(h) + 2, ...rows.map(r => width(cellText(r.cells[k])))))
+    const room = cols - 2 * (heads.length - 1)
+    const ws = natural.slice()
+    while (ws.reduce((a, b) => a + b, 0) > room && Math.max(...ws) > 6) ws[ws.indexOf(Math.max(...ws))]!--
+    const cellSeg = (v: string, k: number): string => (numeric[k] ? cut(v, ws[k]!).padStart(ws[k]!) : cut(v, ws[k]!).padEnd(ws[k]!))
+    // the column names dim, no rule; the sorted one with ▼ or ▲
+    const headLine: Line = []
+    let x = 0
+    heads.forEach((h, k) => {
+      if (k) {
+        headLine.push({ s: '  ' })
+        x += 2
+      }
+      const mark = sortKey === h ? (sortDir === 'desc' ? ' ▼' : ' ▲') : ''
+      const name = cellSeg(`${h}${mark}`, k)
+      headLine.push(dim(name))
+      const next = sortKey === h && sortDir !== 'desc' ? `${h}:desc` : `${h}:asc`
+      hits.push({ y: 0, x0: MARGIN_W + x, x1: MARGIN_W + x + ws[k]!, row: false, run: () => openPanel(cx, { ...p, sort: next }) })
+      x += ws[k]!
     })
+    lines.push(pointed(headLine, false))
+    for (const r of rows) {
+      hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(r.n) })
+      lines.push(pointed(r.cells.flatMap((v, k): Seg[] => [...(k ? [{ s: '  ' }] : []), { s: cellSeg(cellText(v), k) }]), r.n === chosen, true))
+      lineNs.push(r.n)
+    }
   } else {
-    const gw = Math.max(1, ...ls.map(l => String(l.n).length))
-    for (const l of ls) body.push(<Text key={`line-${l.n}`} wrap="truncate-end"><Text dimColor>{`${String(l.n).padStart(gw)}  `}</Text><Text>{l.text || ' '}</Text></Text>)
+    // raw: a Markdown file's headings bold and its blank lines left out
+    const md = /\.(md|markdown)$/i.test(path)
+    for (const l of ls) {
+      if (md && !l.text.trim()) continue
+      const head = md && /^#{1,6}\s/.test(l.text)
+      const text = cut(l.text, Math.max(10, cols - gw - 2)) || ' '
+      hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(l.n) })
+      const line: Line = [dim(`${String(l.n).padStart(gw)}  `), l.n === chosen ? { s: text, bg: COLORS.selected } : { s: text, ...(head ? { b: true } : {}) }]
+      lines.push(pointed(line, false))
+      lineNs.push(l.n)
+    }
   }
-  const controls = [
-    first > 1 ? <Button key="file-earlier" label="earlier" plain onPress={() => void openPanel(cx, { ...p, start: Math.max(1, first - 200) })} /> : null,
-    total && last < total ? <Button key="file-later" label="later" plain onPress={() => void openPanel(cx, { ...p, start: last + 1 })} /> : null,
-  ]
-  body.push(...bottomRows(cx, e, cols, controls, [], [...(turns ? ['Tab for the transcript'] : []), 'b to go back', 'x to close']))
-  const hk = turns ? hiddenKeys(cx, e, [{ key: 'tab', hotkey: 'tab', onPress: () => void openPanel(cx, { ...p, mode: mode === 'lines' ? 'transcript' : 'lines' }) }]) : null
+  if (lines.length) {
+    const at = chosen ? lineNs.indexOf(chosen) : -1
+    const onKey = (k: string) => {
+      if (k === 'left' || k === 'backspace' || k === 'delete') return back()
+      if ((k === 'up' || k === 'k' || k === 'down' || k === 'j') && lineNs.length) {
+        const d = k === 'up' || k === 'k' ? -1 : 1
+        return choose(lineNs[Math.max(0, Math.min(lineNs.length - 1, at < 0 ? 0 : at + d))]!)()
+      }
+      if ((k === 'return' || k === 'enter') && chosen) return openCite(cx, `${path}#L${chosen}`, null)
+      if (k === 'tab') return openPanel(cx, { ...p, mode: modes[(modes.indexOf(mode) + 1) % modes.length]! })
+      return undefined
+    }
+    body.push(linesEl(cx, e, marginKey('file-body'), lines, hits, cols + MARGIN_W, onKey))
+  }
+  // the record chosen: its place a link to the citation panel, and a blue "?" that asks a thread about it
+  if (chosen) {
+    const ref = `${path}#L${chosen}`
+    const words = ls.find(l => l.n === chosen)?.text ?? ''
+    const place = `↗ ${placeWords(ref)}`
+    const ask = () => openAsk(cx, { kind: 'record', ref, text: clip(words, 600), label: `${placeWords(ref)}: ${clip(words, 200)}` })
+    body.push(linesEl(cx, e, 'file-detail', [[{ s: '↗', fg: LINK }, { s: ' ' }, linkSeg(placeWords(ref)), { s: '  ' }, { s: '?', fg: LINK }]], [{ y: 0, x0: 0, x1: width(place), row: false, run: () => openCite(cx, ref, null) }, { y: 0, x0: width(place) + 2, x1: width(place) + 3, row: false, run: ask }], width(place) + 3))
+  }
+  const keys: Key[] = modes.length > 1 ? [] : []
+  body.push(...bottomRows(cx, e, cols, [], [], [...(modes.length > 1 ? [`${modes.map((_m, i) => i + 1).join(' ')} for the tabs`] : []), '↑↓ to choose', '← for the files']))
+  const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
 

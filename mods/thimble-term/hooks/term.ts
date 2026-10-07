@@ -88,6 +88,8 @@ export const rt = {
   // each document's generation as the session first read it or last opened it: a newer one is new
   docsKnown: new Map<string, number>(),
   docsRead: false,
+  // the failures a toast said already
+  toasted: new Set<string>(),
 }
 
 const iso = (ms: number) => new Date(ms).toISOString()
