@@ -12,7 +12,9 @@
 //   })
 //
 // One menu lists together Off, the view's own fields it declares colorable and every label over files, those that mark
-// the view's files first, each label with its switch and the button that shows its definition in place. A field colors
+// the view's files first, each label with its switch and the button that shows its definition in place. Each field and
+// label says how many values it colors by and shows them as chips on a line under its name, cut off with … where they
+// do not fit. A field colors
 // by the values its records take, each in a palette colour of its own (the label palette, --label-1 to --label-12, in
 // the order the values come: the declared `values`, each in the colour it names or else the next free one, then the
 // most frequent first, kept per view so a value keeps its colour). A label colors by its values on each anchored record,
@@ -50,11 +52,12 @@
   var NONE = '\u0000none' // the key of the records that take no value
   var OFF = 'off' // what thimble keeps for Color by: Off
   var PALETTE = 12 // --label-1 .. --label-12; a value past them takes --label-none
-  var TRACK_W = 12 // px: the overview track, its lane inset 1px at either side
-  var ZOOM_W = 18 // px: the zoomed track, its lane inset the same
-  var LANE_X = 1
+  var TRACK_W = 12 // px: the overview track, its lane as wide as it, as the frame is
+  var ZOOM_W = 18 // px: the zoomed track, its lane as wide as it, so that the lens's margin is the same on every side
+  var LANE_X = 0
   var LINK = 14 // px between the overview and the zoomed track, which the lines from the frame to the lens cross
   var LENS_OUT = 3 // px the lens stands out past the part it shows at every side: its edge and a margin of the paper
+  var LENS_R = 4 // px, the lens's corners: the lines from the frame meet its left edge where their curves end
   var ZOOM_AT = 8 // the zoomed track shows once the list is this many times the part in view
   var ZOOM_OFF = 6.5 // and goes again below this, so a list near the line does not flip
   var ZOOM_SPAN = 5 // the zoomed track holds this many heights of the part in view
@@ -920,6 +923,63 @@
     this.menu.anchor.setAttribute('aria-expanded', 'false')
     this.menu = null
   }
+  // a field's values as the menu shows them: the chips' while it is the choice, else those it declares and those it has
+  // shown before, each in its colour
+  Control.prototype.fieldValues = function (f) {
+    var c = this.choice()
+    if (c && c.field === f.name)
+      return this.values
+        .filter(function (v) {
+          return v.key !== NONE
+        })
+        .map(function (v) {
+          return { name: v.name, colour: v.colour }
+        })
+    var names = (f.values || []).slice()
+    var map = S.colours[f.name] || {}
+    var seen = Object.keys(map).filter(function (k) {
+      return names.indexOf(k) < 0
+    })
+    seen.sort(function (a, b) {
+      return map[a] - map[b]
+    })
+    var self = this
+    return names.concat(seen).map(function (n) {
+      return { name: n, colour: self.fieldColour(f.name, n) }
+    })
+  }
+  // a label's values as the menu shows them: those it colours by
+  function labelValues(l) {
+    return (l.values || [])
+      .filter(function (v) {
+        return v.highlight !== false
+      })
+      .map(function (v) {
+        return { name: v.name, colour: v.colour }
+      })
+  }
+  // a field's or a label's row: its name and how many values it has, then its values as chips on one line, cut off with
+  // … where they do not fit; nothing of its values when none is known
+  function choiceBody(colour, name, values) {
+    var n = values.length
+    return (
+      '<span class="thimble-colour-body"><span class="thimble-colour-top">' +
+      (colour ? '<span class="thimble-colour-sw" style="--c:' + esc(colour) + '"></span>' : '') +
+      '<span class="thimble-colour-nm">' + esc(name) + '</span>' +
+      (n ? '<span class="thimble-colour-n">' + num(n) + (n === 1 ? ' value' : ' values') + '</span>' : '') +
+      '</span>' +
+      (n
+        ? '<span class="thimble-colour-preview">' +
+          values
+            .map(function (v) {
+              return '<span class="thimble-colour-pchip"><span class="thimble-colour-sw"' + (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + '></span>' + esc(v.name) + '</span>'
+            })
+            .join('') +
+          '</span>'
+        : '') +
+      '</span>'
+    )
+  }
   Control.prototype.menuHtml = function (values, defId, paletteKey) {
     var c = this.choice()
     if (paletteKey != null) return this.paletteHtml(paletteKey)
@@ -945,10 +1005,11 @@
     var open = (this.menu && this.menu.open) || {}
     var html = '<div class="thimble-colour-head">Color by</div>'
     html += '<button type="button" class="thimble-colour-item" role="menuitemradio" aria-checked="' + !!(c && c.off) + '" data-by="' + OFF + '">' + tick(!!(c && c.off)) + '<span class="thimble-colour-nm">Off</span></button>'
+    var self = this
     html += this.fields
       .map(function (f) {
         var on = !!(c && c.field === f.name)
-        return '<button type="button" class="thimble-colour-item" role="menuitemradio" aria-checked="' + on + '" data-by="' + esc('f:' + f.name) + '">' + tick(on) + '<span class="thimble-colour-nm">' + esc(f.title) + '</span></button>'
+        return '<button type="button" class="thimble-colour-item thimble-colour-choice" role="menuitemradio" aria-checked="' + on + '" data-by="' + esc('f:' + f.name) + '">' + tick(on) + choiceBody('', f.title, self.fieldValues(f)) + '</button>'
       })
       .join('')
     var all = allLabels()
@@ -957,9 +1018,8 @@
       var lit = !!l.on || isOn(l.id)
       var shown = !!open[l.id]
       return (
-        '<div class="thimble-colour-item thimble-colour-label" role="menuitemradio" tabindex="0" aria-checked="' + on + '" data-by="' + esc('l:' + l.id) + '" data-label="' + esc(l.id) + '">' + tick(on) +
-        '<span class="thimble-colour-sw" style="--c:' + esc(l.colour || '') + '"></span><span class="thimble-colour-nm">' + esc(l.name) + '</span>' +
-        (typeof l.count === 'number' ? '<span class="thimble-colour-n">' + num(l.count) + '</span>' : '') +
+        '<div class="thimble-colour-item thimble-colour-label thimble-colour-choice" role="menuitemradio" tabindex="0" aria-checked="' + on + '" data-by="' + esc('l:' + l.id) + '" data-label="' + esc(l.id) + '">' + tick(on) +
+        choiceBody(l.colour || '', l.name, labelValues(l)) +
         '<button type="button" class="thimble-colour-info' + (shown ? ' on' : '') + '" aria-expanded="' + shown + '" aria-label="' + esc('What ' + l.name + ' means') + '" title="' + esc('What ' + l.name + ' means') + '" data-info="' + esc(l.id) + '" data-label="' + esc(l.id) + '">' + ico('info') + '</button>' +
         '<button type="button" class="thimble-colour-switch' + (lit ? ' on' : '') + '" role="switch" aria-checked="' + lit + '" aria-label="' + esc((lit ? 'Turn off ' : 'Turn on ') + l.name) + '" data-switch="' + esc(l.id) + '" data-label="' + esc(l.id) + '"><span></span></button></div>' +
         (shown ? defHtml(l, knownDef(l.id)) : '')
@@ -1353,10 +1413,16 @@
       this.zoomed = zoomed
       this.fitWidth()
     }
-    var h = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0) - 4)
+    // the tracks on the device's pixel grid, so that every edge on them is drawn sharp
+    var dpr = window.devicePixelRatio || 1
+    var snap = function (v) {
+      return Math.round(v * dpr) / dpr
+    }
+    var top = snap(Math.max(r.top, 0) + 2)
+    var h = Math.max(0, snap(Math.min(r.bottom, innerHeight) - 2) - top)
     // the lens stands out past the zoomed track, which stands in from the list's edge by as much
-    this.el.style.left = r.right - this.width - 2 - (this.zoomed ? LENS_OUT : 0) + 'px'
-    this.el.style.top = Math.max(r.top, 0) + 2 + 'px'
+    this.el.style.left = snap(r.right - this.width - 2 - (this.zoomed ? LENS_OUT : 0)) + 'px'
+    this.el.style.top = top + 'px'
     this.el.style.height = h + 'px'
     this.h = h
     if (this.stale) {
@@ -1467,6 +1533,8 @@
   Strip.prototype.place = function () {
     var h = this.h || 0
     var v = this.drag && this.drag.view ? this.drag.view : this.view()
+    var dpr = window.devicePixelRatio || 1
+    // each edge on the device's pixel grid
     var span = function (a, b, min) {
       var y0 = a * h
       var y1 = b * h
@@ -1475,7 +1543,7 @@
         y0 = Math.max(0, Math.min(h - min, m - min / 2))
         y1 = y0 + min
       }
-      return [Math.max(0, y0), Math.min(h, y1)]
+      return [Math.round(Math.max(0, y0) * dpr) / dpr, Math.round(Math.min(h, y1) * dpr) / dpr]
     }
     var put = function (el, at) {
       el.style.display = at[1] > at[0] ? '' : 'none'
@@ -1495,18 +1563,23 @@
     put(this.zoom.thumb, lens)
     this.lensAt = lens
     this.paint(this.zoom, z, v)
+    // each line from a corner of the frame to the lens's left edge where its corner's curve ends; at a pixel ratio where a
+    // 1px line is an odd number of device pixels wide, its ends move half a device pixel into the frame's and the lens's
+    // edges, so that it lies on whole device pixels there. The wedge reaches the edges themselves.
     var x1 = LINK - LENS_OUT
+    var o = Math.round(dpr) % 2 === 1 ? 0.5 / dpr : 0
+    var r = Math.min(LENS_R, (lens[1] - lens[0]) / 2)
     var f = this.thumbAt
     var edges = this.link.querySelectorAll('line')
     var set = function (el, a, b) {
-      el.setAttribute('x1', '0')
+      el.setAttribute('x1', String(-o))
       el.setAttribute('y1', String(a))
-      el.setAttribute('x2', String(x1))
+      el.setAttribute('x2', String(x1 + o))
       el.setAttribute('y2', String(b))
     }
-    set(edges[0], f[0], lens[0])
-    set(edges[1], f[1], lens[1])
-    this.link.querySelector('polygon').setAttribute('points', '0,' + f[0] + ' ' + x1 + ',' + lens[0] + ' ' + x1 + ',' + lens[1] + ' 0,' + f[1])
+    set(edges[0], f[0] + o, lens[0] + r)
+    set(edges[1], f[1] - o, lens[1] - r)
+    this.link.querySelector('polygon').setAttribute('points', '0,' + f[0] + ' ' + x1 + ',' + (lens[0] + r) + ' ' + x1 + ',' + (lens[1] - r) + ' 0,' + f[1])
     this.link.style.height = h + 'px'
   }
   // the list scrolled so that the place `at` (a fraction of it) is in the middle of the box

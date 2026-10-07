@@ -6,7 +6,8 @@ color control of your own, so that every view colors the same way. Color is one 
 choice is drawn in colors, on the chips, the records' bars, the tracks and the chart marks. Show any other category of
 the view as text, a glyph or a gray pattern, never in a second palette.
 
-- One menu lists Off, the fields the view can color by and every label over files. Fields are values the files hold or
+- One menu lists Off, the fields the view can color by and every label over files, each with how many values it
+  colors by and those values as chips on a line under its name. Fields are values the files hold or
   the reader works out, such as a kind or a source. The labels that mark the view's files come first, each with its
   switch and an info button that shows the label's definition in place: what it asks or matches, its values with what
   each means, the files it covers and how many records it has read, and Open label, which opens it in thimble's label

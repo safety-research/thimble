@@ -3,7 +3,8 @@
 // menu offers Off, the records' keys and the labels that mark the file; Off draws no chips; a chip turns its value off
 // and on (Alt keeps it alone); a label's info button in the menu opens its definition in place, its question and each
 // value with its meaning, and Open label opens it in the Labels pane; while a label is the choice an info button beside
-// the trigger opens the same; a click on a chip's swatch opens the palette of the twelve label colors, its own ringed,
+// the trigger opens the same; each key and label in the menu says how many values it has and shows them as chips on a
+// line under its name; a click on a chip's swatch opens the palette of the twelve label colors, its own ringed,
 // without turning the value off, and a pick or Reset colors goes to the reader.
 import { act } from 'react'
 import { afterEach, beforeAll, expect, test } from 'vitest'
@@ -74,7 +75,7 @@ test('the trigger names the choice and the menu offers Off, the keys and the lab
   expect(el.querySelector('.colorby-trigger')?.textContent).toBe('Color by: wiki')
   await click(el.querySelector('.colorby-trigger')!)
   const items = [...document.querySelectorAll('.colorby-menu [role="menuitemradio"]')]
-  expect(items.map((b) => b.textContent?.replace(/\d+$/, '').trim())).toEqual(['Off', 'wiki', 'edit purpose'])
+  expect(items.map((b) => b.querySelector('.menu-item-label')?.textContent)).toEqual(['Off', 'wiki', 'edit purpose'])
   expect(items[1].getAttribute('aria-checked')).toBe('true')
   await click(items[0])
   expect(picked).toEqual([{ by: 'off' }])
@@ -158,4 +159,21 @@ test("the records a label does not mark have no color to pick, and without a rea
   unmountAll()
   const plain = await draw({ by: 'key', key: 'wiki' })
   expect(plain.querySelector('.colorby-sw[data-palette]')).toBeNull()
+})
+
+test('each key and label in the menu says how many values it has, and shows them as chips on the line under its name', async () => {
+  const el = await draw({ by: 'off' })
+  await click(el.querySelector('.colorby-trigger')!)
+  const rows = [...document.querySelectorAll('.colorby-menu [role="menuitemradio"]')].slice(1)
+  expect(rows.map((r) => [r.querySelector('.menu-item-label')?.textContent, r.querySelector('.menu-item-note')?.textContent, [...r.querySelectorAll('.colorby-preview-chip')].map((c) => c.textContent)])).toEqual([
+    ['wiki', '2 values', ['dse', 'probier']],
+    ['edit purpose', '2 values', ['posts links', 'other']],
+  ])
+  // each chip a square swatch of its value's color
+  expect((rows[0].querySelector('.colorby-preview-chip') as HTMLElement).style.getPropertyValue('--c')).toBe('var(--label-1)')
+})
+
+test('a choice of one value says "1 value"', async () => {
+  const { valuesWord } = await import('../../src/files/ColorBy')
+  expect([valuesWord(1), valuesWord(3), valuesWord(1200)]).toEqual(['1 value', '3 values', '1,200 values'])
 })

@@ -598,6 +598,58 @@ select.field {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* a field's or a label's row: its name and how many values it has, then its values as chips on one line, cut off with
+   … where they do not fit */
+.thimble-colour-item.thimble-colour-choice {
+  align-items: flex-start;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.thimble-colour-choice > .thimble-colour-tick {
+  height: 16px;
+}
+.thimble-colour-choice > .thimble-colour-info,
+.thimble-colour-choice > .thimble-colour-switch {
+  margin-top: -2px;
+}
+.thimble-colour-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.thimble-colour-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 16px;
+}
+.thimble-colour-top .thimble-colour-n {
+  flex: none;
+  margin-left: auto;
+}
+.thimble-colour-preview {
+  display: block;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font: 400 var(--text-xs) / 18px var(--font-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.thimble-colour-pchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 18px;
+  margin-right: 4px;
+  padding: 0 5px 0 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-chip, 4px);
+  vertical-align: top;
+}
 .thimble-colour-note {
   padding: 4px 8px 6px 30px;
   color: var(--text-tertiary);
@@ -932,7 +984,6 @@ select.field {
   bottom: 0;
   left: 0;
   width: 12px;
-  border-radius: 2px;
   background: rgba(var(--ink-rgb), 0.05);
 }
 .thimble-colour-track canvas {
@@ -942,7 +993,7 @@ select.field {
   pointer-events: none;
 }
 /* the part in view on the overview: a frame as wide as the track in the full ink, a line of the paper inside it, so
-   that it stands out over any colour; a drag of it moves the view */
+   that it stands out over any colour; square, so that the lines start at its corners; a drag of it moves the view */
 .thimble-colour-thumb {
   position: absolute;
   top: 0;
@@ -950,7 +1001,7 @@ select.field {
   right: 0;
   box-sizing: border-box;
   border: 2px solid var(--text-primary, rgb(var(--ink-rgb)));
-  border-radius: 2px;
+  border-radius: 0;
   box-shadow: inset 0 0 0 1px var(--surface-card);
   cursor: grab;
 }
@@ -965,7 +1016,7 @@ select.field {
   left: -3px;
   right: -3px;
   box-sizing: border-box;
-  border-radius: var(--radius-chip, 4px);
+  border-radius: 4px; /* LENS_R: the lines meet the lens's left edge where its corners' curves end */
   pointer-events: none;
 }
 .thimble-colour-lens {
@@ -990,6 +1041,7 @@ select.field {
 }
 .thimble-colour-link polygon {
   fill: rgba(var(--ink-rgb), 0.08);
+  shape-rendering: crispEdges;
 }
 .thimble-colour-link line {
   stroke: rgba(var(--ink-rgb), 0.62);

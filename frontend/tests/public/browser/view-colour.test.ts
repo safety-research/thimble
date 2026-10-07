@@ -213,6 +213,29 @@ describe('Colour by through ViewerFrame', () => {
   })
 })
 
+describe('the menu', () => {
+  test('each field and label says how many values it has, and shows them as chips on one line under its name, cut off with …', async () => {
+    const { page, frame } = await framed()
+    // a label with four values, three it colours by, in a menu narrow enough that they do not fit
+    const label = { id: 'k1', name: 'edit purpose', on: false, here: true, colour: '#025ac3', values: [{ name: 'message to other runs', colour: '#025ac3', highlight: true }, { name: 'posts links', colour: '#d0750a', highlight: true }, { name: 'restores page', colour: '#08632f', highlight: true }, { name: 'other', colour: '#a09c93', highlight: false }], count: 12 }
+    await page.evaluate((l) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage({ type: 'thimble:labels', marks: {}, on: [], filter: null, all: [l], palette: [] }, '*'), label)
+    await page.waitForTimeout(100)
+    await frame().locator('.thimble-colour-by').click()
+    const rows = await frame().evaluate(() =>
+      [...document.querySelectorAll('.thimble-colour-menu .thimble-colour-choice')].map((r) => {
+        const p = r.querySelector('.thimble-colour-preview') as HTMLElement
+        return { name: r.querySelector('.thimble-colour-nm')!.textContent, n: r.querySelector('.thimble-colour-top .thimble-colour-n')?.textContent, chips: [...r.querySelectorAll('.thimble-colour-pchip')].map((c) => c.textContent), cut: p ? getComputedStyle(p).textOverflow : null, lines: p ? Math.round(p.getBoundingClientRect().height) : 0 }
+      }),
+    )
+    assert.deepEqual(rows.map((r) => [r.name, r.n, r.chips]), [
+      ['Kind', '2 values', ['Text only', 'With links']],
+      ['edit purpose', '3 values', ['message to other runs', 'posts links', 'restores page']],
+    ])
+    assert.ok(rows.every((r) => r.cut === 'ellipsis' && r.lines <= 20), JSON.stringify(rows))
+    await page.close()
+  })
+})
+
 describe("a value's colour", () => {
   const look = (frame: () => Frame) =>
     frame().evaluate(() => {
