@@ -155,7 +155,7 @@ describe('the time range selector in a frame', () => {
     await page.close()
   })
 
-  test("on an axis with breaks the keys pan and zoom in the overview's px, as the drags do, and the range never collapses", async () => {
+  test("on an axis with breaks the keys pan and zoom in the overview's px, as the drags do, keep the viewfinder's width, and the range never collapses", async () => {
     const { page, frame, errors } = await framed(1, BROKEN)
     assert.ok(await frame().evaluate(() => (window as any).range.scale(600).broken), 'the overview has its breaks')
     const H = 3600
@@ -171,7 +171,8 @@ describe('the time range selector in a frame', () => {
       await page.waitForTimeout(60)
       const s = await state(frame)
       const [, w] = await win()
-      assert.ok(Math.abs(w - w0) <= 11, `${k} keeps the viewfinder's width on the screen, give or take a break: ${w} against ${w0}`)
+      // an edge that would land in a break moves on to its side, and the other edge as far
+      assert.ok(Math.abs(w - w0) <= 1, `${k} keeps the viewfinder's width on the screen: ${w} against ${w0}`)
       // a break's empty time drops out of a range whose edge leaves it, as in a drag, but the range never shrinks to a sliver
       assert.ok(s.to - s.from > 3 * H, `${k} leaves the range whole: ${(s.to - s.from) / H}h`)
     }
@@ -180,6 +181,14 @@ describe('the time range selector in a frame', () => {
     await page.waitForTimeout(60)
     const z = await state(frame)
     assert.ok(Math.abs((await win())[1] - (w1 * 2) / 3) <= 11 && z.to - z.from > H, JSON.stringify([w1, await win(), z]))
+    // beside the break, an arrow then - gives back the width + took
+    const [, w2] = await win()
+    await page.keyboard.press('ArrowLeft')
+    await page.waitForTimeout(60)
+    assert.ok(Math.abs((await win())[1] - w2) <= 1, JSON.stringify([w2, await win()]))
+    await page.keyboard.press('-')
+    await page.waitForTimeout(60)
+    assert.ok(Math.abs((await win())[1] - w2 * 1.5) <= 11, JSON.stringify([w2, await win()]))
     assert.deepEqual(errors, [])
     await page.close()
   })

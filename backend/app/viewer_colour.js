@@ -7,7 +7,10 @@
 //     fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }, { name: 'source' }],
 //                                              a declared value may name its palette colour: { name: 'Error', colour: 7 },
 //                                              and what it means: { name: 'With links', meaning: 'links to a page' };
-//                                              `description` says what the field is; a chip's hover gives them
+//                                              `meanings` says what values mean without declaring them, so their
+//                                              order and colors stay the records': { meanings: { payments: 'the
+//                                              payments API' } }; `description` says what the field is; a chip's hover
+//                                              gives them
 //     chips: 'filter',                         a value turned off hides its records; 'highlight' (the default) dims them
 //     strip: '#list',                          the list that gets the colored tracks, or true for the page
 //     onChange: (colour) => draw(),            the choice, a value turned on or off, or the label values changed
@@ -329,9 +332,14 @@
       .map(function (f) {
         if (typeof f === 'string') f = { name: f }
         var declared = declare(f.values)
-        // what the field is and what each declared value means, which a chip's hover says
+        // what the field is and what its values mean, which a chip's hover says: those of `meanings`, which declares no
+        // value, then a declared value's own
         var about = typeof f.description === 'string' ? f.description : ''
-        return { name: String(f.name), title: String(f.title || f.name), values: declared && declared.values, slots: declared && declared.slots, meanings: (declared && declared.meanings) || {}, description: about, value: typeof f.value === 'function' ? f.value : null }
+        var means = {}
+        if (f.meanings && typeof f.meanings === 'object' && !Array.isArray(f.meanings))
+          for (var k in f.meanings) if (Object.prototype.hasOwnProperty.call(f.meanings, k) && typeof f.meanings[k] === 'string' && f.meanings[k]) means[k] = f.meanings[k]
+        if (declared) for (var d in declared.meanings) means[d] = declared.meanings[d]
+        return { name: String(f.name), title: String(f.title || f.name), values: declared && declared.values, slots: declared && declared.slots, meanings: means, description: about, value: typeof f.value === 'function' ? f.value : null }
       })
     // the values the fields that declare none take on the records the page hands the kit, each record once (tally)
     this.tallied = this.fields.filter(function (f) {
@@ -377,7 +385,7 @@
       // a label's value shows what the label says it means
       this.root.addEventListener('pointerover', function (e) {
         var chip = e.target.closest && e.target.closest('.thimble-colour-chip')
-        if (chip) self.chipTip(chip, e)
+        if (chip) self.chipTip(chip)
       })
       this.root.addEventListener('pointerout', function (e) {
         var chip = e.target.closest && e.target.closest('.thimble-colour-chip')
@@ -855,40 +863,60 @@
   Control.prototype.fieldAbout = function (c, v) {
     var f = c && c.field ? this.field(c.field) : null
     if (!f || !v) return ''
-    return (v.value != null && f.meanings[v.value]) || f.description || ''
+    return (v.value != null && Object.prototype.hasOwnProperty.call(f.meanings, v.value) && f.meanings[v.value]) || f.description || ''
   }
-  // what a value means, beside its chip: a field's as the page declares it, a label's once thimble has said
-  Control.prototype.chipTip = function (chip, e) {
+  // what a value says on hover, handed to `show` as the tip's html, at once or once thimble has said: for "Other" each
+  // value under it with its count, for a field's value its meaning as the page declares it, for a label's value its
+  // meaning from the label's definition; nothing for a value with none
+  Control.prototype.aboutValue = function (v, show) {
     var c = this.choice()
-    if (!c || c.off) return
-    var v = this.values[Number(chip.getAttribute('data-i'))]
-    if (v && v.members) {
-      var or = chip.getBoundingClientRect()
-      if (!this.menu)
-        tip('<div class="thimble-tip-h"><span class="thimble-colour-sw" style="--c:' + esc(v.colour || '') + '"></span>Other</div><div class="thimble-tip-m">' +
-          v.members.map(function (m) { return esc(m.name) + ' ' + num(m.n) }).join(' · ') + '</div>', or.left, or.bottom - 8)
-      return
+    if (!c || c.off || !v) return
+    var head = function (name) {
+      return '<div class="thimble-tip-h"><span class="thimble-colour-sw"' + (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + '></span>' + esc(name) + '</div>'
     }
+    if (v.members)
+      return show(head('Other') + '<div class="thimble-tip-m">' + v.members.map(function (m) { return esc(m.name) + ' ' + num(m.n) }).join(' · ') + '</div>')
     if (c.field) {
       var about = this.fieldAbout(c, v)
-      var fr = chip.getBoundingClientRect()
-      if (about && !this.menu) tip('<div class="thimble-tip-h"><span class="thimble-colour-sw"' + (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + '></span>' + esc(v.name) + '</div><div class="thimble-tip-m">' + esc(about) + '</div>', fr.left, fr.bottom - 8)
+      if (about) show(head(v.name) + '<div class="thimble-tip-m">' + esc(about) + '</div>')
       return
     }
-    if (!v || v.value == null) return
-    var id = c.label
-    var r = chip.getBoundingClientRect()
-    var self = this
-    var show = function (def) {
-      // not over the palette or a menu the chip opened
-      if (!chip.isConnected || !chip.matches(':hover') || self.menu) return
+    if (v.value == null) return
+    var said = function (def) {
       var m = meaningOf(def, v.value)
-      if (m) tip('<div class="thimble-tip-h"><span class="thimble-colour-sw" style="--c:' + esc(v.colour || '') + '"></span>' + esc(v.name) + '</div><div class="thimble-tip-m">' + esc(m) + '</div>', r.left, r.bottom - 8)
+      if (m) show(head(v.name) + '<div class="thimble-tip-m">' + esc(m) + '</div>')
     }
-    var known = knownDef(id)
-    if (known !== undefined) return show(known)
-    definition(id).then(show)
-    void e
+    var known = knownDef(c.label)
+    if (known !== undefined) return said(known)
+    definition(c.label).then(said)
+  }
+  // what a value means, under its chip; not over the palette or a menu the chip opened, nor once the pointer has left
+  // the chip by the time thimble says
+  Control.prototype.chipTip = function (chip) {
+    var self = this
+    var v = this.values[Number(chip.getAttribute('data-i'))]
+    var now = true
+    this.aboutValue(v, function (html) {
+      if (!chip.isConnected || self.menu || (!now && !chip.matches(':hover'))) return
+      var r = chip.getBoundingClientRect()
+      tip(html, r.left, r.bottom - 8)
+    })
+    now = false
+  }
+  // the same beside a value's item in the "N more" menu, where its chip does not show: right of the menu, or left of it
+  // where the frame has no room
+  Control.prototype.itemTip = function (item) {
+    var self = this
+    var v = this.values[Number(item.getAttribute('data-i'))]
+    var now = true
+    this.aboutValue(v, function (html) {
+      if (!item.isConnected || !self.menu || !self.menu.values || (!now && !item.matches(':hover'))) return
+      var r = self.menu.el.getBoundingClientRect()
+      var y = item.getBoundingClientRect().top - 14
+      tip(html, r.right - 4, y)
+      if (tipEl && tipEl.getBoundingClientRect().left < r.right - 4) tip(html, r.left + 4, y, 'left')
+    })
+    now = false
   }
   Control.prototype.click = function (e) {
     var t = e.target
@@ -1186,6 +1214,17 @@
     m.addEventListener('click', function (e) {
       self.menuClick(e, values)
     })
+    // a value's item in the "N more" menu says what its chip would on hover
+    if (values) {
+      m.addEventListener('pointerover', function (e) {
+        var it = e.target.closest && e.target.closest('.thimble-colour-item[data-i]')
+        if (it) self.itemTip(it)
+      })
+      m.addEventListener('pointerout', function (e) {
+        var it = e.target.closest && e.target.closest('.thimble-colour-item[data-i]')
+        if (it && !(e.relatedTarget && it.contains(e.relatedTarget))) untip()
+      })
+    }
     m.addEventListener('keydown', function (e) {
       if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('thimble-colour-label')) {
         e.preventDefault()

@@ -66,6 +66,34 @@
     if (typeof target === 'string') return document.querySelector(target)
     return target && target.nodeType === 1 ? target : null
   }
+  // [x0, x1] px moved as a whole so that neither edge is inside a break (`gaps`, [x0, x1] px each): an edge in one goes
+  // to the break's side `dir` gives (-1 the left, 1 the right, 0 the nearer) and the other edge goes as far, so the
+  // viewfinder keeps its width. clampWin would take only that edge to the data beside it, leaving the viewfinder
+  // narrower and moved less than the key asked.
+  function clearOf(gaps, x0, x1, dir, W) {
+    for (var n = 0; n <= 2 * gaps.length; n++) {
+      var d = 0
+      for (var k = 0; k < gaps.length && !d; k++) {
+        var g = gaps[k]
+        for (var e = 0; e < 2 && !d; e++) {
+          var x = e ? x1 : x0
+          if (x > g[0] && x < g[1]) d = dir < 0 || (!dir && x - g[0] <= g[1] - x) ? g[0] - x : g[1] - x
+        }
+      }
+      if (!d) break
+      x0 += d
+      x1 += d
+    }
+    if (x0 < 0) {
+      x1 -= x0
+      x0 = 0
+    }
+    if (x1 > W) {
+      x0 -= x1 - W
+      x1 = W
+    }
+    return [Math.max(0, x0), x1]
+  }
   function clamp(v, a, b) {
     return Math.max(a, Math.min(b, v))
   }
@@ -996,7 +1024,8 @@
   // The keys move the viewfinder in the overview's px, as the drags do: on a scale with breaks, a step in clock time
   // would land an edge in a break, which takes it to the data beside it and leaves a sliver of the range. The arrows pan
   // by a tenth of the viewfinder (Shift: half), or move a focused grip by 2% of the overview; + takes a third off the
-  // viewfinder around its middle, - adds half to it; Home or 0 shows the whole span.
+  // viewfinder around its middle, - adds half to it; Home or 0 shows the whole span. A pan or a zoom whose edge would
+  // land in a break moves the viewfinder on to the break's side (clearOf), so it keeps its px width and - undoes +.
   Range.prototype.onKey = function (e) {
     var sc = this.sc
     if (!sc) return
@@ -1006,8 +1035,17 @@
     var a = this.full() ? 0 : clamp(sc.x(this.from()), 0, W)
     var b = this.full() ? W : clamp(sc.x(this.to()), 0, W)
     var w = b - a
+    // the time at px x; a break's side is its stretch's own end or start, which clampWin keeps where it is
+    var tAt = function (x) {
+      var g = sc.segs
+      for (var k = 0; k + 1 < g.length; k++) {
+        if (Math.abs(x - g[k].x1) < 1e-6) return g[k].b
+        if (Math.abs(x - g[k + 1].x0) < 1e-6) return g[k + 1].a
+      }
+      return sc.t(x)
+    }
     var at = function (x0, x1) {
-      return [x0 <= 0 ? span[0] : sc.t(x0), x1 >= W ? span[1] : sc.t(x1)]
+      return [x0 <= 0 ? span[0] : tAt(x0), x1 >= W ? span[1] : tAt(x1)]
     }
     var grip = e.target.closest && e.target.closest('.thimble-range-grip')
     var go = null
@@ -1018,15 +1056,15 @@
       else if (grip) go = [this.from(), at(a, clamp(b + sgn * step, a + 1, W))[1]]
       else {
         var s = clamp(sgn * (e.shiftKey ? 0.5 : 0.1) * w, -a, W - b)
-        go = at(a + s, b + s)
+        go = at.apply(null, clearOf(sc.gaps(), a + s, b + s, sgn, W))
       }
     } else if (e.key === '+' || e.key === '=') {
       // a viewfinder a few px wide zooms in its own time, which no break crosses at that width
-      go = w >= 8 ? at(a + w / 6, b - w / 6) : [this.from() + (this.to() - this.from()) / 6, this.to() - (this.to() - this.from()) / 6]
+      go = w >= 8 ? at.apply(null, clearOf(sc.gaps(), a + w / 6, b - w / 6, 0, W)) : [this.from() + (this.to() - this.from()) / 6, this.to() - (this.to() - this.from()) / 6]
     } else if (e.key === '-' || e.key === '_') {
       var nw = Math.min(W, w * 1.5)
       var na = clamp((a + b) / 2 - nw / 2, 0, W - nw)
-      go = nw >= W ? null : at(na, na + nw)
+      go = nw >= W ? null : at.apply(null, clearOf(sc.gaps(), na, na + nw, 0, W))
     } else if (e.key === 'Home' || e.key === '0') go = null
     else return
     e.preventDefault()

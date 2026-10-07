@@ -602,15 +602,20 @@ def test_the_test_label_answers_thimble_labels_as_a_label_would(tmp_path):
 
 def test_a_mark_names_each_label_s_value_with_the_label_s_id():
     """Under the test label a marked record's mark and a unit's say the test label's value with its id, which the page's
-    `all` lists the label by, so a page can tell one label's values from another's; an unmarked record has no mark."""
+    `all` lists the label by, so a page can tell one label's values from another's; an unmarked record has no mark. Its
+    colors are the palette's tokens, which the bridge resolves in the frame's theme, so a unit's bar in Dark is Dark's
+    step of the color."""
     from app import kernel_thimble as kt  # noqa: PLC0415
 
     ctx = views.probe_context()
+    token = f"var(--label-{kt.LABEL_COLOURS.index(kt.PROBE_COLOUR)})"
     rec = views._record_mark(ctx, "board.jsonl#L7")
-    assert rec["values"] == [{"id": kt.PROBE_ID, "label": kt.PROBE_NAME, "value": kt.PROBE_NAME, "colour": kt.PROBE_COLOUR}]
+    assert rec["bar"] == token
+    assert rec["values"] == [{"id": kt.PROBE_ID, "label": kt.PROBE_NAME, "value": kt.PROBE_NAME, "colour": token}]
     assert views._record_mark(ctx, "board.jsonl#L8") is None
     unit = views._unit_mark(ctx, ["board.jsonl#L6", "board.jsonl#L7", "board.jsonl#L14"])
-    assert unit["values"] == rec["values"] and unit["bar"] == kt.PROBE_COLOUR
+    assert unit["values"] == rec["values"] and unit["bar"] == token
+    assert views._page_colour(kt.LABEL_COLOURS[0]) == "var(--label-none)" and views._page_colour("#123456") == "#123456"
 
 
 def _shot(state: str, **shown) -> dict:

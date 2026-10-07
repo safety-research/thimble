@@ -432,6 +432,62 @@ describe("the key's chips", () => {
     assert.equal(await frame().locator('.thimble-colour-chip[title]').count(), 0, 'no native tooltip besides')
     await page.close()
   })
+
+  test("a field's `meanings` say what its values mean without declaring them, so the values keep the records' order and colors", async () => {
+    // With links on four records, Text only on two: undeclared, the commoner comes first, in the first color
+    const rows = Array.from({ length: 6 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 2 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
+    const field = (extra: string) => `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', description: 'what the message holds besides text'${extra} }] })`
+    const chips = async (frame: () => Frame) => {
+      await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-chip').length === 2)
+      return frame().evaluate(() => [...document.querySelectorAll('.thimble-colour-chip')].map((c) => [c.querySelector('.chip-text')!.textContent, getComputedStyle(c.querySelector('.chip-sw')!).backgroundColor]))
+    }
+    const plain = await own(rows, field(''))
+    const before = await chips(plain.frame)
+    await plain.page.close()
+    const { page, frame } = await own(rows, field(", meanings: { 'With links': 'links to a page of the wiki' }"))
+    assert.deepEqual(await chips(frame), before)
+    assert.equal(before[0][0], 'With links')
+    await frame().locator('.thimble-colour-chip', { hasText: 'With links' }).locator('.chip-text').hover()
+    await page.waitForTimeout(100)
+    const said = await frame().evaluate(() => {
+      const t = document.querySelector('.thimble-tip') as HTMLElement | null
+      return t && t.style.display === 'block' ? t.querySelector('.thimble-tip-m')!.textContent : null
+    })
+    assert.equal(said, 'links to a page of the wiki')
+    await page.close()
+  })
+
+  test('"Other" names the values under it with their counts on hover, as a chip in the row and as an item of the "N more" menu', async () => {
+    // fourteen kinds, kind k on 15 - k records, so the last two go under "Other"
+    const kinds = Array.from({ length: 14 }, (_, k) => `kind ${String.fromCharCode(97 + k)}`)
+    const rows = kinds.flatMap((n, k) => Array.from({ length: 15 - k }, () => n)).map((n, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${n}">message ${i + 1}</div>`).join('')
+    const script = `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }] })`
+    const tipText = (frame: () => Frame) =>
+      frame().evaluate(() => {
+        const t = document.querySelector('.thimble-tip') as HTMLElement | null
+        return t && t.style.display === 'block' ? [t.querySelector('.thimble-tip-h')!.textContent, t.querySelector('.thimble-tip-m')!.textContent] : null
+      })
+    const want = ['Other', 'kind m 3 · kind n 2']
+    // wide enough for every chip: the row's "Other" chip
+    const wide = await own(rows, script, 2400)
+    await wide.frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-chip[data-other]').length === 1)
+    await wide.frame().locator('.thimble-colour-chip[data-other] .chip-text').hover()
+    await wide.page.waitForTimeout(100)
+    assert.deepEqual(await tipText(wide.frame), want)
+    await wide.page.close()
+    // narrow: "Other" goes behind "N more", whose item says the same beside the menu
+    const { page, frame } = await own(rows, script, 700)
+    await frame().waitForFunction(() => !(document.querySelector('.thimble-colour-more') as HTMLElement).hidden)
+    assert.ok(await frame().locator('.thimble-colour-chip[data-other]').isHidden(), 'the row has no room for "Other"')
+    await frame().locator('.thimble-colour-more').click()
+    const item = frame().locator('.thimble-colour-menu .thimble-colour-item', { hasText: 'Other' })
+    await item.hover()
+    await page.waitForTimeout(100)
+    assert.deepEqual(await tipText(frame), want)
+    const [menu, tip] = await frame().evaluate(() => [document.querySelector('.thimble-colour-menu')!, document.querySelector('.thimble-tip')!].map((e) => e.getBoundingClientRect().toJSON()))
+    assert.ok(tip.left >= menu.right - 4 || tip.right <= menu.left + 4, `the tip stands beside the menu, not over it: ${JSON.stringify([menu, tip])}`)
+    await page.close()
+  })
 })
 
 describe("a label's texts", () => {
