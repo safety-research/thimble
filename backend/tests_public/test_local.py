@@ -277,6 +277,17 @@ async def test_state_gives_what_the_routes_give(term):
     agents.append(log_path, {"type": "user", "text": "Still there?"})
     [row] = [t for t in await local.state(CORPUS, "threads") if t["id"] == meta["id"]]
     assert row["answers"] == 3, "one answer per question; the last question has none yet"
+    # how the latest question stands, which the threads panel shows before it reads the thread (live check term-fix6,
+    # new quirk 9: every row read `answered` until then, a stopped thread's too)
+    assert row["turn"] == ""
+    agents.append(log_path, {"type": "error", "message": "The Claude Code session ended before this thread finished",
+                             "kind": "session-ended"})
+    assert [t["turn"] for t in await local.state(CORPUS, "threads") if t["id"] == meta["id"]] == ["stopped"]
+    agents.append(log_path, {"type": "user", "text": "Once more?"})
+    agents.append(log_path, {"type": "error", "message": "boom", "kind": "failed"})
+    assert [t["turn"] for t in await local.state(CORPUS, "threads") if t["id"] == meta["id"]] == ["failed"]
+    agents.append(log_path, {"type": "text", "delta": "Here it is.", "reply": True})
+    assert [t["turn"] for t in await local.state(CORPUS, "threads") if t["id"] == meta["id"]] == ["answered"]
     assert (await local.state(CORPUS, "files"))[0]["path"]
     assert [f["path"] for f in (await local.state(CORPUS, "files", ["agents"]))["files"]][0] == "agents/agent-01.jsonl"
     # a file: a page of its records from --start, as GET /source gives it, for the renderer's file view
@@ -339,6 +350,19 @@ async def test_state_label_keeps_a_record_the_analyst_set_under_the_value_they_g
     assert f"yes {given['yes'] + 1}" in again and "These counts apply the analyst's verdicts, as thimble.labels() does: " \
         "1 record(s) the analyst set to another value count under that value" in again
     assert f"(the label itself gave no {given['no']}, yes {given['yes']})" in again
+    # a label's value cited by its count, and the label read whole, count with the verdicts too (live check term-fix6,
+    # new quirk 1: `[32](concept:<id>/yes)` after one verdict was checked against the label's own 33, and read_ref said
+    # the label's own counts)
+    yes_now, no_now = given["yes"] + 1, given["no"] - 1
+    cid = label["id"]
+    [ok, old, whole] = await local.state(CORPUS, "resolve", [json.dumps([
+        {"ref": f"concept:{cid}/yes", "value": str(yes_now)}, {"ref": f"concept:{cid}/yes", "value": str(given["yes"])},
+        f"concept:{cid}"])])
+    assert (ok["state"], ok["meta"]["count"], old["state"]) == ("ok", yes_now, "differs")
+    assert ok["excerpt"].startswith(f"yes: {yes_now} records") and "with the analyst's verdicts" in ok["excerpt"]
+    assert f"no: {no_now}, yes: {yes_now}" in whole["excerpt"] and "1 record(s) the analyst set to another value" in whole["excerpt"]
+    read = text(await call(term, "read_ref", ref=f"concept:{cid}"))
+    assert f"no: {no_now}, yes: {yes_now}" in read and f"no: {given['no']}," not in read
 
 
 async def test_state_opens_says_which_files_open_as_a_transcript(term):

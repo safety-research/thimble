@@ -60,3 +60,17 @@ async def test_write_document_saves_a_generation_and_checks_it(cells):
     r = await call("write_document", doc="report", text="# Shorter\n\n## One account\n\nOne account did it.\n")
     doc = report_types.read_doc(CORPUS, MAIN, "report")
     assert not r.is_error and doc["generation"] == 2 and doc["title"] == "Shorter"
+
+
+async def test_write_document_reads_a_citation_written_in_one_pair_of_brackets(cells):
+    """Live check term-fix7: the writer wrote `[23 June|card:<id>#day/06-23]`, and the document showed it as written. A
+    document's citation forms are put right as a takeaway's are (cite.normalise_markup): one pair of brackets, a
+    Markdown link to a ref, and `[[↗|ref]]` for a place alone."""
+    cid, tid = cells
+    text = (f"# Bob\n\n## Bob\n\nBob issued [9|card:{tid}#count/bob] deletions, all [27](card:{cid}) came from one account "
+            f"[[↗|card:{tid}]].\n")
+    r = await call("write_document", doc="report", text=text)
+    assert not r.is_error, r.text
+    doc = report_types.read_doc(CORPUS, MAIN, "report")
+    [first] = report_types.unit_sentences(doc["sections"][0])
+    assert first["text"] == f"Bob issued [[9|card:{tid}#count/bob]] deletions, all [[27|card:{cid}]] came from one account [[card:{tid}]]."

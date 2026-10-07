@@ -1991,13 +1991,26 @@ def _note_words(text: str) -> str:
     return " ".join(" ".join(NOTE_HEAD_RE.sub("", ln, count=1).split()) for ln in lines).strip()
 
 
+# a `↳` note's opening clause that says what the fork made (`added a table card.`, `I added a table of … and answered in
+# the thread.`): main's news, not the thread's answer; its sentence ends at a stop before a space and a word
+NOTE_MADE_RE = re.compile(r"^\s*(?:I\s+)?(?:added|made|updated|edited|changed)\s+(?:a|an|the|one|two|three|\d+)\b"
+                          r"[^.]*?\b(?:card|table|chart|plot|timeline|diagram|example|note)s?\b.*?\.\s+(?=\S)", re.I)
+
+
+def note_answer(note: str) -> str:
+    """A fork's closing `↳` note as the thread's answer: without an opening clause that says what it made (NOTE_MADE_RE,
+    live check term-fix6, new quirk 3: `added a table card. Yes, 23 June…`), its first letter a capital."""
+    words = NOTE_MADE_RE.sub("", note, count=1).strip() or note.strip()
+    return words[:1].upper() + words[1:]
+
+
 def _note_reply(lv: Live, sub: Sub, status: str) -> None:
     """A thread's fork that finished with no reply in the thread since its question, its answer written only in a `↳`
     line for main's terminal after its last tool call (live check term-fix6: the thread showed `answered` and no words):
-    those words are the thread's reply."""
+    those words are the thread's reply (note_answer)."""
     if not sub.thread or not sub.note or status not in ("done", "completed"):
         return
-    note, sub.note = sub.note, None  # once: a later run answers its own question
+    note, sub.note = note_answer(sub.note), None  # once: a later run answers its own question
     try:
         if not threads.replied_since_question(lv.c, sub.chat):
             threads.reply(lv.c, sub.chat, note, by=TERMINAL)

@@ -4,9 +4,11 @@
 import { expect, test } from 'claude-code/testing'
 
 import { changed, cliOf, launchMode, parsePrinted } from '../hooks/data'
-import { citations } from '../hooks/lib'
+import { citations, stoppedTurn, valueIn } from '../hooks/lib'
+import { signalEnd } from '../hooks/signal'
+import { threadState } from '../hooks/nav'
 import { labelCard } from '../hooks/cell'
-import { agentsOf, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelIdOf, labelOf, labelsOf, namedForks, namedThreads, recordLine, resolutionOf, runShown, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads } from '../hooks/model'
+import { agentsOf, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelIdOf, labelOf, labelsOf, namedForks, namedThreads, recordLine, resolutionOf, runShown, saysWriter, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from '../hooks/model'
 import { turnTimes, wrapRows } from '../hooks/draw'
 import { AGENTS, CELLS, RESOLVE, STATES, THREAD_T1, THREADS } from './fixtures'
 
@@ -61,6 +63,35 @@ test("a thread's chat as turns: its question, its answer's text, its tool calls,
   // a reply after the end that said main's turn ended unanswered: the reply is the answer, the end's words are gone
   const late = threadOf({ id: 'z' }, [{ type: 'user', text: 'Is 2994 all of them?' }, { type: 'error', message: "Main's turn ended without answering in this thread", kind: 'unanswered' }, { type: 'text', delta: "Yes, I'm sure.", reply: true }])
   expect(late.turns[0]).toMatchObject({ state: 'done', a: "Yes, I'm sure." })
+  // a thread stopped when Claude Code quit is a stop, not a failure, whatever its words (live check term-fix6, new
+  // quirk 2): no `failed` row in main's chat, `stopped` in the threads panel and home
+  const quit = threadOf({ id: 'q' }, [{ type: 'user', text: 'q' }, { type: 'error', message: 'The Claude Code session ended before this thread finished', kind: 'session-ended' }])
+  expect(quit.turns[0]).toMatchObject({ state: 'error', stopped: true })
+  expect(stoppedTurn(quit.turns[0]!) && signalEnd(quit, 1) === null && threadState(quit).words === 'stopped · 1 question').toBe(true)
+  expect(stoppedTurn(failed.turns[0]!)).toBe(true)
+  const boom = threadOf({ id: 'b' }, [{ type: 'user', text: 'q' }, { type: 'error', message: 'boom', kind: 'failed' }])
+  expect(stoppedTurn(boom.turns[0]!) || signalEnd(boom, 1) !== 'failed').toBe(false)
+})
+
+test("a thread's row says how its latest question stands (`turn`), which the threads panel shows until it reads the thread", () => {
+  const rows = threadRowsOf([{ id: 't9', kind: 'thread', title: 'x', running: false, answers: 1, seen: 1, turn: 'stopped' }])
+  expect(rows[0]!.turn).toBe('stopped')
+})
+
+test("main's `↳ The writer …` line is found and left out; its other lines stay", () => {
+  expect(saysWriter('↳ The writer finished the report; thimble shows it.')).toBe(true)
+  expect(saysWriter('↳ The report writer finished, and thimble shows the report.')).toBe(true)
+  expect(saysWriter('The writer of this page is A.')).toBe(false)
+  expect(saysWriter('↳ thread "Who is the writer?": answered.')).toBe(false)
+  expect(withoutWriterLines('↳ The writer finished the report; thimble shows it.\n\nThe thread is asked.')).toBe('The thread is asked.')
+})
+
+test("a day and a month in words cite a date written in digits: ISO or month and day, the year when both give one", () => {
+  // live check term-fix6, new quirk 7: `23 June` and `19 June` citing the cells `06-23` and `06-19` were red
+  for (const [d, cell] of [['23 June', '06-23'], ['19 June', '2026-06-19T18:21:02Z'], ['June 23, 2026', '2026-06-23'], ['23rd Jun', '06-23']] as const) expect(valueIn(d, cell)).toBe(true)
+  for (const [d, cell] of [['23 June', '06-24'], ['23 May', '06-23'], ['June 23, 2025', '2026-06-23'], ['23', '06-23']] as const) expect(valueIn(d, cell)).toBe(false)
+  const v = verdictOf(citations('[[23 June|card:c1#day/top]]')[0]!, { ref: 'card:c1#day/top', kind: 'cell', cell_id: 'c1', excerpt: 'day × top = 06-23', meta: { span: { col: 'day', row: 'top', value: '06-23' } } } as never)
+  expect(v.status).toBe('ok')
 })
 
 test("a thread's answer is its first reply: the fork's working words after it are left out, and texts a tool call parts are two paragraphs; the cards it made are its turn's", () => {

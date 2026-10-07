@@ -12,7 +12,7 @@
 // that uuid in the plugin's state (`threadRows`) and draws; this file holds the rules, without `$`.
 import type { ChatSignal, ChatThread } from '../types'
 import { plainCites } from './cite'
-import { clip, quoted } from './lib'
+import { clip, quoted, stoppedTurn } from './lib'
 
 /** A row as session.append hands it, the parts that say where it is drawn. */
 export type AppendedRow = { door: string; origin?: { kind?: string }; message: { type: string; name?: string; content?: unknown } }
@@ -41,7 +41,7 @@ export function signalEnd(t: Pick<ChatThread, 'turns'>, turn: number): 'answered
   const x = t.turns[turn - 1]
   if (!x) return null
   if (x.state === 'done') return 'answered'
-  if (x.state === 'error' && !/^\s*stopped/.test(x.a)) return 'failed'
+  if (x.state === 'error' && !stoppedTurn(x)) return 'failed'
   return null
 }
 

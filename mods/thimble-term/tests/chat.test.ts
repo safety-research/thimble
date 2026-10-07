@@ -6,6 +6,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
+import { KEPT_FILE, parseKept } from '../hooks/kept'
 import { CWD, WS, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -120,7 +121,8 @@ test('a card a thread was asked about keeps a blue ↳ beside its title; a click
 test("the footer under a turn's answer: its citations and cards dim, its problems in red, and `ask about this answer ›`; only the answer part counts", async ($, on) => {
   const w = world(on)
   await start($, w)
-  const answer = 'The export holds [[4579|card:ff73e071#pages/TOTAL]] pages and [[14592|card:ff73e071#revisions/TOTAL]] revisions.'
+  // a label's link (`[9,400](concept:<id>/none)`) is neither a citation nor a problem (live check term-fix6, new quirk 1)
+  const answer = 'The export holds [[4579|card:ff73e071#pages/TOTAL]] pages and [[14592|card:ff73e071#revisions/TOTAL]] revisions, [9,400](concept:d9b51617/none) of them without a proxy link.'
   w.toolText = 'card:ff73e071\n[out0: table]'
   await $.turn.start({ text: 'How big?', turnId: 't1' } as never)
   // what main wrote while it worked, then a tool call, then the answer
@@ -161,7 +163,7 @@ test("the footer under a turn's answer: its citations and cards dim, its problem
   await pane.input({ key: 'ask-new', text: 'Is it right?' })
   await w.clock.settle()
   // a thread about the whole answer is marked so (its element), and keeps `about this answer` in the threads panel
-  expect(w.acts.find(a => a.kind === 'thread')!.payload).toMatchObject({ anchor: null, anchor_text: 'The export holds 4579 pages and 14592 revisions.', element: 'answer' })
+  expect(w.acts.find(a => a.kind === 'thread')!.payload).toMatchObject({ anchor: null, anchor_text: 'The export holds 4579 pages and 14592 revisions, 9,400 of them without a proxy link.', element: 'answer' })
   await pane.unmount()
 })
 
@@ -469,6 +471,53 @@ test('a sentence that cites a card the turn draws under the reply leaves the ref
   // a thread asked about the whole card (the fixtures' t1) stands beside the card, not beside a passage naming it
   expect(await ui.find({ type: 'Client', key: 'asked-1' })).toBeUndefined()
   await ui.unmount()
+})
+
+test('a citation that names only its place (`[↗](ref)`) reads as a reference in parentheses, as a card cited whole does', async ($, on) => {
+  // live check term-fix6, new quirk 5: `…on 18 June card "What is the first deletion in…" output line 1. That is…`
+  const w = world(on)
+  await start($, w)
+  const text = 'The files hold 19913 events [↗](card:a0frame0@out0#L1). See also ([↗](card:a0frame0@out0#L2)).'
+  await turn($, w, [['r1', text]])
+  let ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
+  await w.clock.advance(1100)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
+  const para = shown(await ui.drawn({ in: 'para-1' }))
+  expect(para).toContain('19913 events (card "How many records does each file hold?" output line 1). See also (card "How many')
+  expect(para).toMatch(/hold\?" output line 2\)\.$/)
+  const chips = await chipsOf(ui, 'para-1')
+  expect(chips.map(c => c.label)).toEqual(['card "How many records does each file hold?" output line 1', 'card "How many records does each file hold?" output line 2'])
+  await ui.unmount()
+})
+
+test("main's `↳ The writer …` line is said once: a later row about the same writer run leaves it out, after a resume too", async ($, on) => {
+  // live check term-fix6, new quirk 6: once after the writer's message, again after Claude Code's task notification
+  const w = world(on)
+  ;(w.states.agents.rows as unknown[]).push({ name: 'thimble:writer', label: 'writer: report', state: 'done', kind: 'subagent', chat: 'w1', role: 'writer', started: '2026-10-06T10:10:00+00:00' })
+  await start($, w)
+  await w.clock.advance(1100)
+  const line = '↳ The writer finished the report; thimble shows it.'
+  const draw = async (row: string, text: string) => {
+    const ui = (await $.ui.mount(MESSAGE(row, text))) as unknown as M
+    const got = shown(await ui.drawn())
+    await ui.unmount()
+    return got
+  }
+  expect(await draw('r1', line)).toContain('The writer finished the report; thimble shows it.')
+  const again = await draw('r2', `${line}\n\nThe thread is asked.`)
+  expect(again).not.toContain('The writer finished')
+  expect(again).toContain('The thread is asked.')
+  expect(await draw('r1', line)).toContain('The writer finished the report')
+  // kept with the rows, so a resumed session decides the same
+  const kept = parseKept(w.files.get(`${WS}/${KEPT_FILE}`) ?? '')
+  expect(kept.rows.r1?.writer).toEqual({ chat: 'w1', first: true })
+  expect(kept.rows.r2?.writer).toEqual({ chat: 'w1', first: false })
+  // a later writer run's end is said again
+  ;(w.states.agents.rows as unknown[]).push({ name: 'thimble:writer', label: 'writer: slides', state: 'done', kind: 'subagent', chat: 'w2', role: 'writer', started: '2026-10-06T11:10:00+00:00' })
+  w.stamps.set(`${WS}/chats`, 2)
+  await w.clock.advance(1100)
+  expect(await draw('r3', '↳ The writer finished the slides; thimble shows them.')).toContain('The writer finished the slides')
 })
 
 test("a passage whose citation a side thread was asked about keeps a blue ↳ beside it, which opens that thread", async ($, on) => {

@@ -25,11 +25,14 @@ export type ChatVerify = {
 
 /** One question of a side thread and its answer, while running its tool calls and latest text; `cards` the cards its
  *  fork made or changed (its tool results' `cell_id`), drawn under the answer. */
-export type ChatThreadTurn = { q: string; a: string; state: string; tools: number; partial: string; cards?: string[] }
+/** A side thread's turn. `stopped`: its run ended as a stop, not a failure (its error record's kind: the analyst's stop, or
+ *  the Claude Code session that ended under it). */
+export type ChatThreadTurn = { q: string; a: string; state: string; tools: number; partial: string; cards?: string[]; stopped?: boolean }
 
 /** A side thread: what it is about, its exchange, `parent` the thread it was asked from ('' or absent: main), `at` when
- *  it last changed (epoch ms). thimble-term fills it from a thread's chat (hooks/model.ts threadOf). */
-export type ChatThread = { id: string; label: string; ref: string; context: string; agentId: string; engine: string; turns: ChatThreadTurn[]; file: string; parent?: string; at?: number; passage?: string }
+ *  it last changed (epoch ms). thimble-term fills it from a thread's chat (hooks/model.ts threadOf); `loading`: the chat is
+ *  not read yet, so its one turn holds only the state its row gives. */
+export type ChatThread = { id: string; label: string; ref: string; context: string; agentId: string; engine: string; turns: ChatThreadTurn[]; file: string; parent?: string; at?: number; passage?: string; loading?: boolean }
 
 /** A side thread's turn that ended while the panel did not show the thread: one row in main's chat under the row it
  *  stands under (hooks/signal.ts), by its thread and its turn (from 1). */
@@ -163,8 +166,9 @@ export type TermThread = { id: string; meta: Record<string, unknown>; events: Re
 
 /** A row of the threads list (`thimble state threads`): a side thread with what the rows need; `element` where it was
  *  asked (a document's passage, `report:<slug>#<unit>`), `fork` the name its forks run under (a slug, which main's
- *  `↳ thread` line names and the chat shows as its first question). */
-export type TermThreadRow = { id: string; title: string; anchor: string; anchorText: string; running: boolean; answers: number; seen: number; unread: number; at: string; parent: string; created?: string; element?: string; question?: string; fork?: string }
+ *  `↳ thread` line names and the chat shows as its first question), `turn` how its latest question stands as its records
+ *  say (`answered`, `stopped`, `failed`, '' while it runs: backend local.last_turn). */
+export type TermThreadRow = { id: string; title: string; anchor: string; anchorText: string; running: boolean; answers: number; seen: number; unread: number; at: string; parent: string; created?: string; element?: string; question?: string; fork?: string; turn?: string }
 
 /** The label panel's state: the parts opened, by `<label>:<part>`; the kind picked in `type` and not yet saved, by
  *  label; and each label's run started from the panel (its size, 0 for every record) and its last word. */

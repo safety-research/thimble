@@ -29,9 +29,9 @@ import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
-import { groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
+import { HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, outputLine, quoted, recordFields, windowAt } from './lib'
+import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, outputLine, quoted, recordFields, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl } from './lines'
 import type { LineHit } from './lines'
@@ -41,7 +41,7 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { closePanel, inPanelNow, navBack, navGo, openHome, openPanel, panelOfStep, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
+import { PANEL, closePanel, inPanelNow, navBack, navGo, openHome, openPanel, panelOfStep, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -493,7 +493,9 @@ async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   if (e.surface !== 'terminal' && e.surface !== 'desktop') return <Text dimColor>The home panel needs the terminal or the desktop app.</Text>
   const cols = Math.max(40, e.props.bodyColumns)
   const ui = (await cx.homeUi()) as HomeUi
-  const lay = homeLayout(await homeData(cx), ui, cols)
+  // its keys named only while it holds them, as every view's (endHints; live check term-fix6, new quirk 4: home opened
+  // from the toast named its keys while they went to the prompt)
+  const lay = homeLayout(await homeData(cx), ui, cols, paneFocused ? HOME_HINTS : [UNFOCUSED_HINT])
   homeLast = lay
   const run = (a: HomeAct) => async () => {
     if (a.op === 'open') await homeOpen(cx, a.open)
@@ -955,7 +957,10 @@ async function threadOfRow(cx: Ctx, id: string): Promise<ChatThread | null> {
   const tt: TermThread | undefined = await cx.thread(id)
   if (tt && tt.events.length) return { ...threadOf(tt.meta, tt.events), ...(row?.parent && row.parent !== 'main' ? { parent: row.parent } : {}) }
   if (!row) return null
-  return { id, label: row.anchorText || row.title, ref: row.anchor, context: '', agentId: '', engine: '', turns: [{ q: row.question || row.title, a: '', state: row.running ? 'running' : 'done', tools: 0, partial: '' }], file: '', parent: row.parent === 'main' ? '' : row.parent, at: Date.parse(row.at) || 0 }
+  // until its chat is read, its turn holds the state its row gives: answered, stopped, failed or running, never words
+  // (live check term-fix6, new quirk 9: every row read `answered` for a few seconds, a stopped thread's too)
+  const turn = row.running ? { state: 'running' } : row.turn === 'stopped' ? { state: 'error', stopped: true } : row.turn === 'failed' ? { state: 'error' } : row.turn === '' ? { state: 'running' } : { state: 'done' }
+  return { id, label: row.anchorText || row.title, ref: row.anchor, context: '', agentId: '', engine: '', turns: [{ q: row.question || row.title, a: '', tools: 0, partial: '', ...turn }], file: '', parent: row.parent === 'main' ? '' : row.parent, at: Date.parse(row.at) || 0, loading: true }
 }
 
 /** A thread title as thimble makes one from the anchor's words when none is given (agents._title_from): its first four
@@ -1007,10 +1012,11 @@ function threadLine(t: ChatThread): Seg {
   const last = t.turns.at(-1)
   if (!last) return dim('nothing asked yet')
   if (last.state === 'running') return dim(`◌ ${plural(last.tools, 'tool call')}`)
-  if (last.state === 'error') return /^\s*stopped/.test(last.a) ? dim('stopped') : { s: `× ${plainCites(last.a).split('\n')[0] ?? ''}`, fg: COLORS.problem }
+  if (last.state === 'error') return stoppedTurn(last) ? dim('stopped') : { s: `× ${plainCites(last.a).split('\n')[0] || 'failed'}`, fg: COLORS.problem }
   const done = [...t.turns].reverse().find(x => x.state === 'done' && x.a.trim())
   const first = plainCites(done?.a ?? '').replace(/^#+\s*/gm, '').split('\n').find(l => l.trim()) ?? ''
-  return dim(first.replace(/\*\*|__|`/g, '').trim() || 'answered')
+  // an answer not read yet shows nothing until it is
+  return dim(first.replace(/\*\*|__|`/g, '').trim() || (t.loading ? '' : 'answered'))
 }
 
 /** The threads panel (SPEC.md, section 7, "The threads panel"): its title and a dim subtitle; under the rule the
@@ -1119,7 +1125,8 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
       if (turn.state === 'running') {
         const partial = turn.partial.trim()
         body.push(<Text key={`thread-run-${k}`} dimColor wrap="truncate-end">{cut(`◌ ${plural(turn.tools, 'tool call')}${partial ? ` · ${clip(partial, cols - 30)}` : ''}`, cols)}</Text>)
-      } else if (turn.state === 'error') body.push(<Text key={`thread-err-${k}`} color={COLORS.problem} wrap="wrap">{`× ${turn.a}`}</Text>)
+      } else if (stoppedTurn(turn)) body.push(<Text key={`thread-err-${k}`} dimColor wrap="wrap">{turn.a.trim().replace(/([^.!?])$/, '$1.')}</Text>)
+      else if (turn.state === 'error') body.push(<Text key={`thread-err-${k}`} color={COLORS.problem} wrap="wrap">{`× ${turn.a}`}</Text>)
       else if (turn.a.trim()) body.push(<Box key={marginKey(`thread-answer-${k}`)} flexDirection="column">{await drawReply(cx, e, turn.a, cols, { margin: PANEL_MARGIN, prefix: `t${k}-`, drawn: new Set(turn.cards ?? []), ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}</Box>)
       // the cards the turn made, under its answer, each in its frame, as main's chat draws a turn's cards
       for (const [ci, id] of (turn.cards ?? []).entries()) body.push(<Box key={`thread-card-${k}-${ci}`} flexDirection="column">{await cardBlock(cx, e, id, cols, `th${k}-${ci}`, { order: ci + 1 })}</Box>)
@@ -2333,7 +2340,9 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   const e = { ...pe, props: { ...pe.props, bodyColumns: Math.max(20, pe.props.bodyColumns - 2 - MARGIN_W) } } as PaneEvent
   const p = (await cx.panel()) ?? { view: 'home', title: 'Home' }
   wayHints = [...(backTarget((await cx.nav()) ?? NAV_EMPTY) !== null ? ['b to go back'] : []), 'x to close']
-  paneFocused = pe.props.isFocused !== false
+  // the keys as the pane's props and the engine's record say: a pane either says is without them names none of its keys
+  // (an open the engine refused the keys, live check term-fix6, new quirk 4)
+  paneFocused = pe.props.isFocused !== false && (await cx.panes()).find(x => x.id === PANEL)?.isFocused !== false
   const body = await (async () => {
     switch (p.view) {
       case 'home':

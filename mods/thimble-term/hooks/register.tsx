@@ -29,8 +29,8 @@ import type { Sent } from './gestures'
 import { chipState, claimsIn, streamLink, streamStep, streaming } from './cite'
 import type { StreamLook, Streaming } from './cite'
 import type { CardData } from './draw'
-import { bareCard, cardWords, cid, citeSpans, citations, clip, cut, embeddedCards, needsDrawing, quoted } from './lib'
-import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThreads, runIds, runShown, threadOf, withoutEnd, withoutNotes, withoutToldThreads } from './model'
+import { bareCard, cardWords, cid, citeSpans, citations, clip, cut, embeddedCards, labelRef, needsDrawing, quoted } from './lib'
+import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThreads, runIds, runShown, saysWriter, threadOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from './model'
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage } from './lines'
@@ -131,6 +131,7 @@ function cxOf($: Dollar): Ctx {
     open: args => $.ui.open(args),
     close: id => $.ui.close({ id }),
     panes: () => $.ui.panes().catch(() => []),
+    later: (ms, fn) => void $.clock.after(ms, fn),
     log: text => $.ui.log(text),
     toast: text => $.ui.toast(text),
     submit: async text => {
@@ -394,8 +395,9 @@ async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promi
   const ans = await cx.answer(e.requestId)
   if (!ans) return null
   const { Box, Text, Button } = cx.els(e)
-  // a card cited whole (`[[card:<id>]]`) is no cited value: the footer counts the values cited
-  const cls = claimsIn(ans.text, e.requestId).filter(cl => !bareCard(cl.c))
+  // a card cited whole (`[[card:<id>]]`) is no cited value, and a label's link (`[33](concept:<id>/yes)`) names no place
+  // a check reads: the footer counts the values cited, and only their problems (live check term-fix6, new quirk 1)
+  const cls = claimsIn(ans.text, e.requestId).filter(cl => !bareCard(cl.c) && !labelRef(cl.c.ref))
   let red = 0
   for (const cl of cls) {
     const v = await cx.verdict(cid(cl.c.raw))
@@ -421,6 +423,23 @@ async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promi
       </Box>
     </Box>
   )
+}
+
+/** A row of main's chat without its `↳ The writer …` line when an earlier row said that writer run's end (the run: the
+ *  writer whose chat began last when the row was first drawn, kept with the row so a resumed session decides the same). */
+async function withoutSaidWriter(cx: Ctx, row: string, text: string): Promise<string> {
+  if (!row || !saysWriter(text)) return text
+  let chat = rt.writerOf.get(row)
+  if (!chat) {
+    // the writer that began last: its chat's start, the newest
+    const latest = (await cx.agents()).filter(a => a.role === 'writer' && a.chat).sort((a, b) => a.started.localeCompare(b.started)).at(-1)
+    if (!latest) return text
+    chat = latest.chat
+    rt.writerOf.set(row, chat)
+    if (!rt.writerSaid.has(chat)) rt.writerSaid.set(chat, row)
+    if (rt.sc) await keepRow(cx, rt.sc.ws, row, { writer: { chat, first: rt.writerSaid.get(chat) === row } })
+  }
+  return rt.writerSaid.get(chat) === row || !rt.writerSaid.has(chat) ? text : withoutWriterLines(text)
 }
 
 /** A row of main's chat with what thimble-term draws under it: the turn's cards (when no reply row carries them) and
@@ -461,6 +480,10 @@ async function restoreKept($: Dollar, cx: Ctx): Promise<void> {
     if (near.length) for (const u of [row, ...(r.answer?.rows ?? [])]) rt.rowCards.set(u, [...new Set([...(rt.rowCards.get(u) ?? []), ...near])])
     for (const v of r.views ?? []) rt.viewsTold.add(v)
     for (const t of r.threads ?? []) rt.told.add(t.thread)
+    if (r.writer) {
+      if (!rt.writerOf.has(row)) rt.writerOf.set(row, r.writer.chat)
+      if (r.writer.first && !rt.writerSaid.has(r.writer.chat)) rt.writerSaid.set(r.writer.chat, row)
+    }
   }
   if (!rt.lastReply && k.last.reply) rt.lastReply = k.last.reply
   if (!rt.lastCards.length && k.last.cards.length) rt.lastCards = k.last.cards
@@ -695,7 +718,7 @@ export const register: Register = on => {
     // without main's end token, and a `↳ thread` line naming its thread by its first question, not its fork's slug; no
     // such line for a thread whose `↳ thread` row thimble-term drew, which says the same
     const rows = await cx.threads()
-    const text = namedThreads(withoutToldThreads(withoutEnd(e.props.text), rows, rt.told), rows)
+    const text = await withoutSaidWriter(cx, e.requestId, namedThreads(withoutToldThreads(withoutEnd(e.props.text), rows, rt.told), rows))
     const live = e.surface === 'terminal' || e.surface === 'desktop'
     if (!ids.length && !told && !views && !footer && text === e.props.text && !live && !needsDrawing(text)) return next(e)
     const { Box } = $.ui.resolve(e)

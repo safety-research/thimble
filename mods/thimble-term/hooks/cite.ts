@@ -16,7 +16,7 @@
 import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from '../types'
 import { lineWidth, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, bareCard, chipLabel, cid, citations, citeEnd, citeSpans, parseReply, plainLinks, prefix, shownMatches, valueIn, windowAt } from './lib'
+import { EMBED_RE, asReference, chipLabel, cid, citations, citeEnd, citeSpans, linksAsSpans, parseReply, placeOnly, plainLinks, prefix, shownMatches, valueIn, windowAt } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -407,21 +407,24 @@ export function claimsIn(text: string, answer: string): Claim[] {
   return out
 }
 
-/** A text with each citation as its shown words, for a line the analyst reads where no link is drawn. */
-export function plainCites(text: string): string {
-  // a citation written as a Markdown link has no `[[…]]` spelling to replace: its link goes to its shown words; a card
-  // cited whole reads as a reference in parentheses, as the reply draws it (` (card "How…")`), unless main put it in
-  // parentheses itself
+/** A text with each citation as its shown words, for a line the analyst reads where no link is drawn; `places` false
+ *  for a tool's own words, where a citation that names only its place reads as its place, not in parentheses. */
+export function plainCites(text: string, places = true): string {
+  // a citation written as a Markdown link reads as its `[[…]]` spelling; a citation that names only its place (a card
+  // cited whole, a card's printed line: placeOnly) reads as a reference in parentheses, as the reply draws it
+  // (` (card "How…" output line 1)`), unless main put it in parentheses itself (live check term-fix6, new quirk 5)
+  const spans = linksAsSpans(text)
   return plainLinks(
-    citations(text).reduce((t, c) => {
-      if (!bareCard(c)) return t.replaceAll(c.raw, citeLabel(c))
+    citations(spans).reduce((t, c) => {
+      if (!places || !placeOnly(c)) return t.replaceAll(c.raw, citeLabel(c))
       return t.split(c.raw).reduce((acc, part, i) => {
         if (i === 0) return part
+        if (!asReference(c, part)) return `${acc}${citeLabel(c)}${part}`
         const own = /\(\s*$/.test(acc)
         const head = own ? acc : acc.replace(/\s+$/, '')
         return `${head}${own ? '' : head ? ' (' : '('}${citeLabel(c)}${own ? '' : ')'}${part}`
       }, '')
-    }, text),
+    }, spans),
   )
 }
 

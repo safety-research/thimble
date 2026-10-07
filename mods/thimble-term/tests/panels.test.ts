@@ -157,6 +157,9 @@ test("home: views by state, the glyph alone saying it; documents under that word
   w.states.threads[1]!.created_at = '2020-01-01T00:00:00+00:00'
   // a thread about a citation, titled by its words (as openAsk asks for it)
   w.states.threads.push({ id: 't3', kind: 'thread', role: 'thread', title: '4579', anchor: 'card:ff73e071#pages/TOTAL', anchor_text: 'The export holds 4579 pages and 14592 revisions.', parent: 'main', created_at: '2026-10-06T10:05:00+00:00', running: false, answers: 1, seen: 0, question: 'Is 4579 every page?' } as never)
+  // a long question beside a short subject (live check term-fix6, quirk 10: `about 602` was left out)
+  w.states.threads.push({ id: 't6', kind: 'thread', role: 'thread', title: '3908', anchor: 'card:ff73e071#pages/dse', anchor_text: 'The dse wiki holds 3908 pages.', parent: 'main', created_at: '2026-10-06T10:06:00+00:00', running: false, answers: 1, seen: 1,
+    question: 'Would 23 June still have the most deletions if the days were counted in Berlin time instead of UTC? Make a small table card of it.' } as never)
   await start($, w)
   const pane = await home($, w)
   const lines = (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
@@ -169,6 +172,8 @@ test("home: views by state, the glyph alone saying it; documents under that word
   // a thread's subject at R by its citation's words, or a card's question cut at a word
   expect(at('"Is 4579 every page?"')).toMatch(/"Is 4579 every page\?" +about 4579 {2}new$/)
   expect(at('"why is events.jsonl bigger?"')).toMatch(/"why is events\.jsonl bigger\?" +about What does the export hold per… · earlier session {2}new$/)
+  // the question cut at a word so that a short subject stands at R
+  expect(at('"Would 23 June')).toMatch(/"Would 23 June still have the most deletions[^"]*…" +about 3908$/)
   // a thread asked about a passage has no subject at R: its sentence would cut the question beside it
   expect(at('"which pages were deleted?"')).not.toContain('about')
   expect(at('Files (3)')).toMatch(/type {9}size$/)

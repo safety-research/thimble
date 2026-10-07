@@ -82,6 +82,43 @@ def _guard(event: str, args: tuple) -> None:
 
 
 sys.addaudithook(_guard)
+
+
+class LiveServerConnect(ConnectionRefusedError):
+    """A connection to the port of the user's thimble server (LIVE_PORTS), which the suite's audit hook refuses before
+    it is made."""
+
+
+# The ports a live thimble server of the user's answers on: the default (cli.DEFAULT_PORT, written here since conftest
+# runs before any app module is imported; test_suite_isolation checks they agree) and the THIMBLE_PORT the run started
+# with. No test connects to one: a CLI path that falls back to the default port would reach the user's server.
+DEFAULT_PORT = 8300
+LIVE_PORTS = frozenset(int(p) for p in (DEFAULT_PORT, os.environ.get("THIMBLE_PORT")) if str(p or "").isdigit())
+LIVE_CONNECTS: list[str] = []  # each connection to a live port refused (host:port), which fails the test and the run
+
+
+def _live_port(address: object) -> str | None:
+    """`host:port` when a socket address names a loopback host on one of LIVE_PORTS, else None."""
+    if not isinstance(address, tuple) or len(address) < 2 or not isinstance(address[1], int):
+        return None
+    host = str(address[0]).lower()
+    loopback = host in ("localhost", "::1", "0.0.0.0", "::") or host.startswith(("127.", "::ffff:127."))
+    return f"{host}:{address[1]}" if loopback and address[1] in LIVE_PORTS else None
+
+
+def _no_live_server(event: str, args: tuple) -> None:
+    """The suite's second audit hook: a connection to a live thimble server's port (LIVE_PORTS on the loopback) is
+    refused before it is made (LiveServerConnect, a ConnectionRefusedError, so the code under test sees no server) and
+    recorded, which fails the test and the run."""
+    if event != "socket.connect":
+        return
+    hit = _live_port(args[1] if len(args) > 1 else None)
+    if hit:
+        LIVE_CONNECTS.append(hit)
+        raise LiveServerConnect(f"thimble's tests never connect to a live thimble server's port: {hit}")
+
+
+sys.addaudithook(_no_live_server)
 # The suite tests the default model speed; a test that wants another value sets it with monkeypatch.
 os.environ.pop("THIMBLE_MODEL_SPEED", None)
 # The Host names httpx.ASGITransport and TestClient send (main.ALLOWED_HOSTS is read at import).
@@ -96,6 +133,22 @@ def pytest_sessionfinish(session, exitstatus):
         lines = "\n".join(f"  {event} {path}" for event, path in dict.fromkeys(REAL_HOME_WRITES))
         print(f"\nthimble's tests tried to write under the user's thimble home (refused):\n{lines}", file=sys.stderr)
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    if LIVE_CONNECTS:
+        lines = "\n".join(f"  {hit} ({LIVE_CONNECTS.count(hit)}x)" for hit in dict.fromkeys(LIVE_CONNECTS))
+        print(f"\nthimble's tests tried to connect to a live thimble server's port (refused):\n{lines}", file=sys.stderr)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item):
+    """A test during which the audit hook refused a connection to a live thimble server's port fails, naming the port,
+    also when the code under test took the refusal as no server (cli.healthy answers False)."""
+    before = len(LIVE_CONNECTS)
+    out = yield
+    if len(LIVE_CONNECTS) > before:
+        pytest.fail(f"this test connected to a live thimble server's port (refused): {', '.join(dict.fromkeys(LIVE_CONNECTS[before:]))}",
+                    pytrace=False)
+    return out
 
 
 @pytest.fixture()
@@ -342,6 +395,41 @@ def _launch_writes_nothing_shared(monkeypatch):
     monkeypatch.setattr(cli, "register_here", lambda cwd: config.workspace_for_cwd(str(cwd)))
     monkeypatch.setattr(cli, "server_for_launch", lambda c: [])
     monkeypatch.setattr(cli, "refresh_extensions", lambda c: None)
+
+
+def _port_of(url: str | None, default: int) -> int:
+    """The port a health probe's url names, or `default` (the port the probe falls back to) for none."""
+    import urllib.parse
+
+    try:
+        return urllib.parse.urlsplit(url).port or default if url else default
+    except ValueError:
+        return default
+
+
+@pytest.fixture(autouse=True)
+def _no_live_server_probe(monkeypatch):
+    """The health probes that decide whether thimble's server runs answer no server for a live server's port
+    (LIVE_PORTS), without connecting: with no port set, the CLI's commands (`thimble extension`, `list`, `purge`, …)
+    and feedback fall back to the default port, which may be the user's own server (live check term-fix6: a test's
+    `thimble extension add` posted /api/extensions/refresh to it). A probe of another port, such as a test server's,
+    probes as before; a test's own patch still wins. The audit hook (_no_live_server) refuses any other way there."""
+    from app import cli, dev, feedback, restart_watch
+
+    def guarded(real, default, none):
+        def probe(url=None, *args, **kwargs):
+            if _port_of(url, default()) in LIVE_PORTS:
+                return none
+            return real(url, *args, **kwargs)
+
+        return probe
+
+    monkeypatch.setattr(cli, "healthy", guarded(cli.healthy, cli.port, False))
+    monkeypatch.setattr(feedback, "server_answers", guarded(feedback.server_answers, lambda: DEFAULT_PORT, False))
+    monkeypatch.setattr(dev, "_health", guarded(dev._health, dev.config_port, None))
+
+    real_watch = restart_watch.health
+    monkeypatch.setattr(restart_watch, "health", lambda port, *a, **k: None if port in LIVE_PORTS else real_watch(port, *a, **k))
 
 
 @pytest.fixture(autouse=True)

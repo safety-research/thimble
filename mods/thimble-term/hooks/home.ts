@@ -430,14 +430,20 @@ function glyphSeg(g: Glyph | null): Seg[] {
   return [{ s: g.mark, ...(g.fg ? { fg: g.fg } : {}) }, { s: ' ' }]
 }
 
+/** The fewest cells of a row's title kept beside its full right part (itemLine). */
+const TITLE_MIN = 32
+
 /** An item's line at `x`: its glyph hanging, its name, its bar and figure against the right edge. */
 function itemLine(row: HomeRow, x: number, w: number): Line {
   const bar: Line = row.bar?.length ? [...row.bar.map(b => ({ s: '█'.repeat(b.n), fg: b.fg })), { s: '  ' }] : []
   const lead: Line = [...(x ? [{ s: ' '.repeat(x) }] : []), ...glyphSeg(row.glyph)]
   const left: Line = [...lead, { s: row.title }, ...(row.after ?? [])]
-  // the title stays whole where it can: the shorter right part when the full one would cut it
+  // the full right part (a thread's subject) whenever the title keeps TITLE_MIN cells beside it, the title cut at a word
+  // to make room; else the shorter right part (live check term-fix6, quirk 10: `about 602` was left out beside a long
+  // question)
   const full: Line = [...bar, ...(row.right ?? [])]
-  const right = row.short && lineWidth(left) + 2 + lineWidth(full) > w ? [...bar, ...row.short] : full
+  const room = w - lineWidth(full) - 2 - (lineWidth(left) - width(row.title))
+  const right = row.short && lineWidth(left) + 2 + lineWidth(full) > w && room < Math.min(TITLE_MIN, width(row.title)) ? [...bar, ...row.short] : full
   return spread(left, right, w)
 }
 
@@ -489,8 +495,9 @@ function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void
   if (left > 0) out.push([{ s: '  ' }, dim(`… ${num(left)} more`)], { x0: 2, x1: 2 + width(`… ${num(left)} more`), row: false, act: { op: 'more', sec: sec.id } })
 }
 
-/** The whole panel below its path row: the title `Home`, the rule, every section, the key hints. */
-export function homeLayout(d: HomeData, ui: HomeUi, w: number): HomeLayout {
+/** The whole panel below its path row: the title `Home`, the rule, every section, the key hints (`hints`: HOME_HINTS
+ *  while the panel holds the keys, else what gives it them). */
+export function homeLayout(d: HomeData, ui: HomeUi, w: number, hints: readonly string[] = HOME_HINTS): HomeLayout {
   const sections = homeSections(d, ui)
   // the row the keys chose: the one named, else the first
   const first = sections.flatMap(s => s.rows.slice(0, 1).map(r => r.key))[0] ?? ''
@@ -501,7 +508,7 @@ export function homeLayout(d: HomeData, ui: HomeUi, w: number): HomeLayout {
     if (i) out.blank()
     sectionLines(out, sec, ui, w)
   })
-  out.push(hintLine(HOME_HINTS, w))
+  out.push(hintLine(hints, w))
   return { lines: out.lines, hits: out.hits, picks: out.picks }
 }
 

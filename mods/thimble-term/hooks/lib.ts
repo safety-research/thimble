@@ -28,6 +28,16 @@ const WEB_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|tel:)/i
 const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|card:[A-Za-z0-9_-]+(?:@[A-Za-z0-9_]+)?(?:#.*)?|concept:[A-Za-z0-9_-]+(?:\/[^\s()]+)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
 const LABEL_REF = /^concept:([A-Za-z0-9_-]+)(?:\/(.+))?$/
 
+/** The kinds of a thread's `error` record that end its run as a stop, not a failure: the analyst's stop, and the Claude
+ *  Code session that ended under it (backend threads.SESSION_ENDED, as when the analyst quits). */
+export const STOP_KINDS: readonly string[] = ['stopped', 'session-ended']
+
+/** Whether a thread's turn ended as a stop, not a failure: its record said so (`stopped`), or its words do (live check
+ *  term-fix6, new quirk 2: a thread stopped by quitting showed a red failure). */
+export function stoppedTurn(t: { state: string; a: string; stopped?: boolean }): boolean {
+  return t.state === 'error' && (Boolean(t.stopped) || /^\s*stopped\b/i.test(t.a))
+}
+
 /** A citation of a label, or of one of its values (`[[33|concept:<id>/yes]]`, or `[33](concept:<id>/yes)` as main writes
  *  it for the terminal): the label's id and the value; null for any other ref. It is a link that opens the label at the
  *  value, never a place a check reads. */
@@ -128,6 +138,26 @@ export function citations(text: string): Citation[] {
     .sort((a, b) => a.at - b.at)
     .map(f => f.c)
     .filter(c => !seen.has(c.raw) && Boolean(seen.add(c.raw)))
+}
+
+/** A text with each Markdown link that is a citation (`[4,579](README.md#L3)`, the form main writes for the terminal)
+ *  in its `[[…]]` spelling (`[[4,579|README.md#L3]]`); a web link stays as written. */
+export function linksAsSpans(text: string): string {
+  return text.replace(LINK_RE, (m: string, shown: string, a?: string, b?: string) => linkCitation(shown, a ?? b ?? '')?.raw ?? m)
+}
+
+/** A citation that names only its place, with no value or words of its own (`[↗](ref)`, `[[ref]]`): a card cited whole,
+ *  a card's printed line, a file's line; a label's link is none. */
+export function placeOnly(c: Citation): boolean {
+  return c.display === null && !labelRef(c.ref)
+}
+
+/** Whether a citation that names only its place reads as a reference in parentheses, given the words after it: a card
+ *  cited whole always; another place where it ends a clause (`…on 18 June [↗](card:…@out0#L1). That is…`), never as
+ *  words of the sentence (live check term-fix6, new quirk 5); one the sentence goes on after (`See [[README.md#L5]] for
+ *  the format.`) reads as its words. */
+export function asReference(c: Citation, after: string): boolean {
+  return placeOnly(c) && (Boolean(bareCard(c)) || /^\s*(?:[.,;:!?)]|$)/.test(after))
 }
 
 /** A text with each Markdown link that is a citation (`[4,579](README.md#L3)`, the form main writes for the terminal)
@@ -691,9 +721,35 @@ export function shownMatches(token: string, shown: string): boolean {
   return a.scale < b.scale && rounded(b, a.scale).some(r => eq(a, r))
 }
 
-/** Whether a shown value is in a text: a number must match a whole number of it, anything else is a substring. */
+const MONTHS: Record<string, number> = Object.fromEntries(
+  [['jan', 'january'], ['feb', 'february'], ['mar', 'march'], ['apr', 'april'], ['may'], ['jun', 'june'], ['jul', 'july'], ['aug', 'august'], ['sep', 'sept', 'september'], ['oct', 'october'], ['nov', 'november'], ['dec', 'december']].flatMap((names, i) => names.map(n => [n, i + 1])),
+)
+// a day and a month in words, as prose writes a date (`23 June`, `June 23`, `23rd June`, `Jun. 23`), with or without a
+// year; a date as an output writes it, ISO (`2026-06-23`, also at a time stamp's head) or month and day (`06-23`)
+const DAY_MONTH_RE = /^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?|([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?)(?:,?\s+(\d{4}))?$/i
+const ISO_DATE_RE = /(?<![\d-])(?:(\d{4})-)?(\d{2})-(\d{2})(?![\d-])/g
+
+/** Whether a shown value that is a day and a month in words (`23 June`) names a date the text writes as ISO
+ *  (`2026-06-23`) or as month and day (`06-23`): the same month and day, the year too when both give one (backend
+ *  cite.date_in; live check term-fix6, new quirk 7: `23 June` citing a cell `06-23` was red). */
+export function dateIn(display: string, text: string): boolean {
+  const m = DAY_MONTH_RE.exec(display.trim())
+  if (!m) return false
+  const [day, word] = m[1] ? [m[1], m[2]!] : [m[4]!, m[3]!]
+  const month = MONTHS[word.toLowerCase()]
+  if (!month || Number(day) < 1 || Number(day) > 31) return false
+  const year = m[5] ? Number(m[5]) : null
+  for (const d of text.matchAll(ISO_DATE_RE)) {
+    if (Number(d[2]) === month && Number(d[3]) === Number(day) && (year === null || !d[1] || Number(d[1]) === year)) return true
+  }
+  return false
+}
+
+/** Whether a shown value is in a text: a number must match a whole number of it, a day and a month in words a date it
+ *  writes in digits (dateIn), anything else is a substring. */
 export function valueIn(display: string, text: string): boolean {
   for (const m of text.matchAll(NUM_RE)) if (shownMatches(display, m[0])) return true
+  if (dateIn(display, text)) return true
   const d = display.trim()
   if (new RegExp(`^(?:${NUM_RE.source})$`).test(d)) return false
   let words = d

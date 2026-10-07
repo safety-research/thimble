@@ -57,8 +57,9 @@ Claude Code's panel chrome, no right-click menu.
   directly; a simple bar or line chart draws as text; any other chart as a table of its rows; a note, a custom card, a
   code card and a card type's card as their words.
 - **Rows under main's replies.** `↳ thread · "<the turn's question>" · answered` when a side thread's turn ends while the
-  panel shows something else (`failed` in red, `new` in green until it is read; a stop is not news; main's own `↳ thread`
-  line about that thread is then not drawn), and `↳ view ·
+  panel shows something else (`failed` in red, `new` in green until it is read; a stop, the analyst's or the end of the
+  Claude Code session, is not news; main's own `↳ thread` line about that thread is then not drawn; main's
+  `↳ The writer …` line is drawn once per writer run, the first time), and `↳ view ·
   <name> · building|built|proposed` under the answer that proposed a view (`failed` in red, `new` once built until
   opened).
 - **One row above the prompt**, a toast: what is new in the workspace since home was last opened (`2 new cards`, `new` in

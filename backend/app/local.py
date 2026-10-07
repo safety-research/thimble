@@ -515,27 +515,50 @@ def answered(events: list[dict[str, Any]]) -> int:
     return n
 
 
-def _answers(c: str, meta: dict[str, Any]) -> tuple[int, str]:
+# the kinds of a thread's `error` record that end its run as a stop, not a failure: the analyst's stop, and the Claude
+# Code session that ended under it (threads.SESSION_ENDED, as when the analyst quits)
+STOP_KINDS = ("stopped", "session-ended")
+
+
+def last_turn(events: list[dict[str, Any]]) -> str:
+    """How a thread's latest question stands, as its records say: `answered` (a reply, or `done`), `stopped` (an error
+    record of a STOP_KINDS kind, or whose words say it stopped), `failed` (any other error), '' while it runs or before
+    any question. Words after an end are its answer, as the renderer reads them (hooks/model.ts threadOf)."""
+    state = ""
+    for r in events:
+        kind = r.get("type")
+        if kind == "user":
+            state = ""
+        elif kind == "done" or (kind == "text" and r.get("reply")):
+            state = "answered"
+        elif kind == "error":
+            words = str(r.get("message") or r.get("error") or "")
+            state = "stopped" if r.get("kind") in STOP_KINDS or words.lstrip().lower().startswith("stopped") else "failed"
+    return state
+
+
+def _answers(c: str, meta: dict[str, Any]) -> tuple[int, str, str]:
     """How many of a thread's questions have an answer (answered), which the renderer counts to put a row under main's
-    latest reply when a new one comes; and its first question, which names the thread in the terminal (its title is a
-    slug)."""
+    latest reply when a new one comes; its first question, which names the thread in the terminal (its title is a
+    slug); and how its latest question stands (last_turn), which the threads panel shows before it reads the thread."""
     from . import agents  # noqa: PLC0415
 
     try:
         events = agents.read_events(agents.paths(c, str(meta["id"]))[1])
     except Exception:  # noqa: BLE001 — a thread that cannot be read shows nothing new
-        return 0, ""
+        return 0, "", ""
     first = next((str(r.get("text") or "").strip() for r in events if r.get("type") == "user" and str(r.get("text") or "").strip()), "")
-    return answered(events), first[:QUESTION_CHARS]
+    return answered(events), first[:QUESTION_CHARS], last_turn(events)
 
 
 QUESTION_CHARS = 300
 
 
 def _thread_marks(c: str, meta: dict[str, Any]) -> None:
-    """A thread's meta with `unread`, `answers` and its first `question` (_unread, _answers)."""
+    """A thread's meta with `unread`, `answers`, its first `question` and its latest question's `turn` (_unread,
+    _answers)."""
     meta["unread"] = _unread(c, meta)
-    meta["answers"], meta["question"] = _answers(c, meta)
+    meta["answers"], meta["question"], meta["turn"] = _answers(c, meta)
 
 
 async def _threads(c: str, args: list[str], pos: list[str]) -> Any:

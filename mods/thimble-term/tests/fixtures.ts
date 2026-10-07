@@ -190,6 +190,13 @@ export type World = {
   startedAt?: number
   /** what `thimble state opens` says each file opens as (`transcript`), by path */
   opens: Record<string, string>
+  /** whether the panel holds the keyboard, as the engine's record of its panes says it (`ui.panes`); left out, unsaid;
+   *  `grantOnReopen`: an open with `focus` while it is false gives the panel the keys, as Claude Code does once the prompt
+   *  holds them over an empty composer */
+  paneFocused?: boolean
+  grantOnReopen?: boolean
+  /** each open's `focus` */
+  focusAsked: boolean[]
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
@@ -220,6 +227,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     commands: [],
     pages: {},
     opens: {},
+    focusAsked: [],
   }
   const ws = opts.ws === undefined ? WS : opts.ws
   mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI })
@@ -317,6 +325,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     return { value: { code: 0, signal: null } } as never
   })
   on('ui.open', ($, e) => {
+    w.focusAsked.push(Boolean((e as { focus?: unknown }).focus))
+    if (w.paneFocused === false && w.grantOnReopen && w.opened.includes(e.id) && (e as { focus?: unknown }).focus) w.paneFocused = true
     w.opened.push(e.id)
     w.panes.push({ id: e.id, title: String((e as { title?: unknown }).title ?? ''), ...(typeof (e as { columns?: unknown }).columns === 'number' ? { columns: (e as { columns: number }).columns } : {}) })
     return { value: { isPlaced: true } } as never
@@ -326,7 +336,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     return { value: undefined } as never
   })
   // the panes open: each opened and not closed since, placed
-  on('ui.panes', () => ({ value: [...new Set(w.opened)].filter(id => w.opened.filter(x => x === id).length > w.closed.filter(x => x === id).length).map(id => ({ id, isPlaced: true })) }) as never)
+  on('ui.panes', () => ({ value: [...new Set(w.opened)].filter(id => w.opened.filter(x => x === id).length > w.closed.filter(x => x === id).length).map(id => ({ id, isPlaced: true, ...(w.paneFocused === undefined ? {} : { isFocused: w.paneFocused }) })) }) as never)
   on('ui.toast', ($, e) => {
     w.toasts.push(String((e as { text?: unknown }).text ?? ''))
     return { value: undefined } as never

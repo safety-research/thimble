@@ -155,11 +155,53 @@ def clocks_in(display: str, text: str) -> bool:
 QUOTE_MARKS = "\"'“”‘’"
 
 
+_MONTHS = {m: i for i, names in enumerate((("jan", "january"), ("feb", "february"), ("mar", "march"), ("apr", "april"),
+                                            ("may",), ("jun", "june"), ("jul", "july"), ("aug", "august"),
+                                            ("sep", "sept", "september"), ("oct", "october"), ("nov", "november"),
+                                            ("dec", "december")), 1) for m in names}
+# a day and a month in words, as prose writes a date: `23 June`, `June 23`, `23rd June`, `Jun. 23`, with or without a
+# year (`23 June 2026`, `June 23, 2026`)
+_DAY_MONTH_RE = re.compile(r"^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?|([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?)"
+                           r"(?:,?\s+(\d{4}))?$", re.I)
+# a date as an output writes it: ISO (`2026-06-23`, also at the head of a time stamp) or a month and day (`06-23`)
+_ISO_DATE_RE = re.compile(r"(?<![\d-])(?:(\d{4})-)?(\d{2})-(\d{2})(?![\d-])")
+
+
+def day_month(display: str) -> tuple[int, int, int | None] | None:
+    """(month, day, year or None) of a display that is a day and a month in words (`23 June`, `June 23, 2026`); None
+    for any other display."""
+    m = _DAY_MONTH_RE.match(display.strip())
+    if not m:
+        return None
+    day, word = (m[1], m[2]) if m[1] else (m[4], m[3])
+    month = _MONTHS.get(word.lower())
+    if month is None or not 1 <= int(day) <= 31:
+        return None
+    return month, int(day), int(m[5]) if m[5] else None
+
+
+def date_in(display: str, excerpt: str) -> bool:
+    """Whether a display that is a day and a month in words (`23 June`) names a date the excerpt writes as ISO
+    (`2026-06-23`) or as month and day (`06-23`): the same month and day, and the same year when both give one (live
+    check term-fix6, new quirk 7: `23 June` citing a cell `06-23` was marked red)."""
+    want = day_month(display)
+    if want is None:
+        return False
+    month, day, year = want
+    for m in _ISO_DATE_RE.finditer(excerpt):
+        if (int(m[2]), int(m[3])) == (month, day) and (year is None or m[1] is None or int(m[1]) == year):
+            return True
+    return False
+
+
 def value_in(display: str, excerpt: str, *, decrease: bool = False) -> bool:
     """Whether a value-ref's display is at the place it cites (verify._value_matches, report._value_matches): a number
-    must cite a whole number token of the excerpt by shown_matches (a substring hit is not a receipt); anything else is
-    a comma-insensitive substring of it, the quotation marks around a quoted phrase left out."""
+    must cite a whole number token of the excerpt by shown_matches (a substring hit is not a receipt); a day and a
+    month in words a date the excerpt writes as digits (date_in); anything else is a comma-insensitive substring of it,
+    the quotation marks around a quoted phrase left out."""
     if any(shown_matches(display, t, negative_ok=decrease) for t in _NUM_RE.findall(excerpt)):
+        return True
+    if date_in(display, excerpt):
         return True
     if _NUM_RE.fullmatch(display.strip()):
         return False
@@ -724,8 +766,9 @@ def prose(text: str) -> str:
 
 def normalise_markup(text: str) -> str:
     """`text` with the value-ref forms the grammar does not know put right: `[[v]](ref)` and `[v|ref]` become `[[v|ref]]`, a
-    Markdown link to a ref becomes its citation (from_links), a number alone in brackets becomes the plain number, and a
-    file's line cited through a card becomes the file's line. Idempotent; every other token is untouched."""
+    Markdown link to a ref becomes its citation (from_links), `[[↗|ref]]` becomes `[[ref]]`, a number alone in brackets
+    becomes the plain number, and a file's line cited through a card becomes the file's line. Idempotent; every other
+    token is untouched."""
 
     def hybrid(m: "re.Match[str]") -> str:
         display, ref = m.group(1).strip(), m.group(2)
@@ -739,9 +782,16 @@ def normalise_markup(text: str) -> str:
             return m.group()
         return f"[[{display}|{ref}]]"
 
+    def bare(m: "re.Match[str]") -> str:
+        shown, bar, ref = m.group(1).rpartition("|")
+        return f"[[{ref.strip()}]]" if bar and shown.strip() in BARE_LINK_TEXTS and ref.strip() else m.group()
+
     text = _CARD_FILE_LINE_RE.sub(lambda m: m.group(1), text)
     text = _HYBRID_RE.sub(hybrid, text)
     text = from_links(text)
+    # a citation without a value written with the link text as its value (`[[↗|ref]]`) is the bare ref, never a value
+    # the check looks for at its place (live check term-fix7: a takeaway's `[[↗|events.jsonl#L1063]]` was red)
+    text = _SPAN_RE.sub(bare, text)
     text = _SINGLE_RE.sub(single, text)
     return _BARE_NUMBER_RE.sub(lambda m: m.group(1), text)
 
@@ -757,6 +807,13 @@ def find_td(outputs: list[dict] | None, col: str, row: str) -> tuple[str, str] |
             for c, r, v in frames.frame_cells(b) or []:
                 if (c, r) in want:
                     return v, frames.frame_html(b, around=r)
+            # a row's name cited by its label column (`#day/06-23`): the name is the value (live check term-fix7: `[23
+            # June](card:…#day/06-23)` was missing)
+            f = frames.frame_of(b)
+            head = frames.corner(f) if f is not None else ""
+            if head and any((head, r) in want for r in frames.row_labels(f)):
+                name = next(r for r in frames.row_labels(f) if (head, r) in want)
+                return name, frames.frame_html(b, around=name)
             continue
         html = table_html(b)
         if not html:
@@ -765,6 +822,9 @@ def find_td(outputs: list[dict] | None, col: str, row: str) -> tuple[str, str] |
         for c, r, v in cells:
             if (c, r) in want:
                 return v, html
+        name = _row_name(html, want)
+        if name is not None:
+            return name, html
         # a chart whose rows are labelled by its axis still answers a ref that names a row by its position
         table = chart_table(b) if chart_spec(b) is not None else None
         pos = decode_label(row)
@@ -776,6 +836,23 @@ def find_td(outputs: list[dict] | None, col: str, row: str) -> tuple[str, str] |
         hit = _by_key_column(cells, col, row)
         if hit is not None:
             return hit, html
+    return None
+
+
+def _row_name(html: str, want: set[tuple[str, str]]) -> str | None:
+    """A row's name in a pandas-rendered table cited by the header over the row names (its index's name, `#day/06-23`):
+    the name itself; None when the header is blank or no row has that name."""
+    rows = _ROW_RE.findall(html)
+    if not rows:
+        return None
+    header = [_strip_tags(m.group(2)) for m in _CELL_RE.finditer(rows[0])]
+    head = header[0].strip() if header else ""
+    if not head:
+        return None
+    for tr in rows[1:]:
+        cells = [(m.group(1).lower(), _strip_tags(m.group(2))) for m in _CELL_RE.finditer(tr)]
+        if cells and cells[0][0] == "th" and any(tag == "td" for tag, _ in cells) and (head, cells[0][1]) in want:
+            return cells[0][1]
     return None
 
 
