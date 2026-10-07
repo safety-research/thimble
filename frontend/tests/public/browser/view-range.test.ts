@@ -51,12 +51,23 @@ afterAll(async () => {
   cleanup()
 })
 
-async function framed(dpr = 1): Promise<{ page: Page; frame: () => Frame; errors: string[] }> {
+// three bursts of messages on three days, one every ten minutes, the nights between them narrow breaks on the axis
+const BURSTS = [
+  [Date.UTC(2026, 4, 12, 8) / 1000, 60],
+  [Date.UTC(2026, 4, 13, 6) / 1000, 36],
+  [Date.UTC(2026, 4, 14, 8) / 1000, 12],
+]
+const BROKEN = VIEW.replace(
+  'const rows = Array.from({ length: ' + N + ' }, (_, i) => ({ t: ' + T0 + ' + i * 600,',
+  'const rows = ' + JSON.stringify(BURSTS) + '.flatMap(([t0, n]) => Array.from({ length: n }, (_, i) => t0 + i * 600)).map((t, i) => ({ t,',
+).replace("onChange: draw })\nfunction draw", "gap: 4 * 3600, onChange: draw })\nfunction draw")
+
+async function framed(dpr = 1, doc = VIEW): Promise<{ page: Page; frame: () => Frame; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width: 900, height: 600 }, deviceScaleFactor: dpr })
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(String(e)))
   await page.setContent(`<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:800px;height:420px"></iframe></body></html>`)
-  await page.evaluate((doc) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = doc), VIEW)
+  await page.evaluate((d) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = d), doc)
   const frame = () => page.frames().find((f) => f !== page.mainFrame())!
   await page.waitForTimeout(300)
   await frame().waitForSelector('.thimble-range-win', { state: 'attached' })
@@ -140,6 +151,35 @@ describe('the time range selector in a frame', () => {
     await page.keyboard.press('Home')
     await page.waitForTimeout(80)
     assert.equal((await state(frame)).full, true)
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
+  test("on an axis with breaks the keys pan and zoom in the overview's px, as the drags do, and the range never collapses", async () => {
+    const { page, frame, errors } = await framed(1, BROKEN)
+    assert.ok(await frame().evaluate(() => (window as any).range.scale(600).broken), 'the overview has its breaks')
+    const H = 3600
+    const [d1, d2] = [BURSTS[0][0] as number, BURSTS[1][0] as number]
+    // from the first day's afternoon to an hour into the second day's burst, across the night's break
+    await frame().evaluate(([a, b]) => (window as any).range.set(a, b), [d1 + 6 * H, d2 + H])
+    await page.waitForTimeout(80)
+    const win = () => frame().evaluate(() => { const r = document.querySelector('.thimble-range-win')!.getBoundingClientRect(); return [r.left, r.width] })
+    const [, w0] = await win()
+    await frame().locator('.thimble-range-win').focus()
+    for (const k of ['ArrowLeft', 'ArrowLeft', 'ArrowRight']) {
+      await page.keyboard.press(k)
+      await page.waitForTimeout(60)
+      const s = await state(frame)
+      const [, w] = await win()
+      assert.ok(Math.abs(w - w0) <= 11, `${k} keeps the viewfinder's width on the screen, give or take a break: ${w} against ${w0}`)
+      // a break's empty time drops out of a range whose edge leaves it, as in a drag, but the range never shrinks to a sliver
+      assert.ok(s.to - s.from > 3 * H, `${k} leaves the range whole: ${(s.to - s.from) / H}h`)
+    }
+    const [, w1] = await win()
+    await page.keyboard.press('+')
+    await page.waitForTimeout(60)
+    const z = await state(frame)
+    assert.ok(Math.abs((await win())[1] - (w1 * 2) / 3) <= 11 && z.to - z.from > H, JSON.stringify([w1, await win(), z]))
     assert.deepEqual(errors, [])
     await page.close()
   })

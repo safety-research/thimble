@@ -718,8 +718,8 @@ select.field {
   background: #fff;
 }
 
-/* Reset at the row's end. The chips that fit the row leave its room whether it shows or not (viewer_colour.js fit), so
-   none moves behind "N more" when it shows */
+/* Reset at the row's end. Hidden, it keeps its place unseen (not focusable, not read out), so the chips fit one box
+   whether it shows or not (viewer_colour.js fit) and none moves behind "N more" when it shows */
 .thimble-colour {
   flex: 1 1 auto;
 }
@@ -730,7 +730,12 @@ select.field {
   padding: 0 9px 0 7px;
   font-weight: 400;
 }
-.thimble-reset[hidden] {
+.thimble-reset.btn[hidden] {
+  display: inline-flex;
+  visibility: hidden;
+}
+/* a row too narrow for "N more" beside Color by and the unseen Reset: Reset gives up its place while hidden */
+.thimble-reset.btn.thimble-reset-gone[hidden] {
   display: none;
 }
 .thimble-reset .thimble-colour-ico {
