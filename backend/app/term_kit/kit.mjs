@@ -802,6 +802,7 @@ export const __driver = {
       lastOpen: null, colourLabels: () => [], colorBys: [], colour: null,
     })
     openMenu = null
+    openBlocks.clear()
   },
   fail(why) {
     state.error = String(why)
@@ -832,7 +833,7 @@ function drawMenu(d, owner, items, onPick, closeKey, pickWords) {
   const m = menuOf(owner)
   if (!m) return
   m.pick = Math.max(0, Math.min(items.length - 1, m.pick))
-  const nameW = Math.min(28, Math.max(8, ...items.map((it) => width(it.name)))) + 2
+  const nameW = Math.min(28, Math.max(8, ...items.map((it) => width(it.name) + 2 * (it.indent || 0)))) + 2
   items.forEach((it, i) => {
     if (it.heading) {
       d.line([{ s: it.name, d: true }])
@@ -841,7 +842,8 @@ function drawMenu(d, owner, items, onPick, closeKey, pickWords) {
     const sel = i === m.pick
     const r = d.row()
     if (sel) r.margin({ s: '❯', fg: COLORS.accent })
-    r.add(pad(it.name, nameW), sel ? { fg: COLORS.accent } : {}, { on: () => { m.pick = i; pick(i) }, row: true })
+    if (it.indent) r.gap(2 * it.indent)
+    r.add(pad(it.name, Math.max(1, nameW - 2 * (it.indent || 0))), sel ? { fg: COLORS.accent } : {}, { on: () => { m.pick = i; pick(i) }, row: true })
     if (it.chips) r.runsOf(clipLine(it.chips, Math.max(0, r.room - (it.right ? width(it.right) + 2 : 0))))
     if (it.right) r.right(it.right, { d: true })
     r.end()
@@ -1098,7 +1100,8 @@ export function colorBy(opts = {}) {
       if (c.counts && !n && !c.off.has(v) && !(f && (f.values || []).some((x) => (typeof x === 'object' ? x.name : x) === v))) continue
       out.push({ value: v, name: v, colour: api.colourOf(v), on: api.isOn(v), n })
     }
-    if (other.members.length) {
+    // like a value with no records, `other` with none is left out once the counts are in, unless one of its values is off
+    if (other.members.length && (!c.counts || other.n || other.members.some((v) => c.off.has(v)))) {
       other.on = other.members.some((v) => api.isOn(v))
       out.push(other)
     }
@@ -1935,6 +1938,9 @@ function drawTrack(d, y0, shownRows, total, top, height, spans, items, valueOf, 
 
 // ------------------------------------------------------------------------------------------------ columns and details
 
+// the blocks of details a click on `… N more` opened whole, by where they stand and how they start
+const openBlocks = new Set()
+
 /**
  * Columns across a width: `specs` [{w, align: 'right', grow: true}], 2-cell gutters, a column that grows taking what
  * is left. `cells(row, values, styles)` adds the values to a Row, each cut to its column; `header(row, names, {sorted,
@@ -1971,12 +1977,26 @@ export function columns(specs, cols) {
 
 /**
  * A record's details, drawn into the inner drawing a list's `detail` gives (A2): `text` its words, wrapped (at most
- * `maxRows`); `facts` [[label, value]] on one row, the labels dim; `groups` [{title, rows: [{when, words, text, on}]}],
- * each row a link to another record; `raw` [[line, text]] its lines as the file holds them; `place` its ref, a link with
- * `↗`; `ask` {ref, text}, `ask about it`.
+ * `maxRows`); `blocks` [{text, code, max}] text as the record holds it, such as a command and what it printed or a
+ * diff: its lines upright, each cut at the cell edge, at most `max` (8) rows and then `… N more`, which a click opens,
+ * `code` in the code color (a command, a query, a path); `facts` [[label, value]] on one row, the labels dim; `groups`
+ * [{title, rows: [{when, words, text, on}]}], each row a link to another record; `raw` [[line, text]] its lines as the
+ * file holds them; `place` its ref, a link with `↗`; `ask` {ref, text}, `ask about it`.
  */
 export function details(d, o = {}) {
   if (o.text) for (const s of wrap(o.text, d.cols, o.maxRows || 6)) d.line(s)
+  for (const b of o.blocks || []) {
+    const lines = String(b.text ?? '').replace(/\s+$/, '').split('\n')
+    if (!lines.join('').trim()) continue
+    const key = `${d.y}:${lines.length}:${lines[0]}`
+    const max = openBlocks.has(key) ? lines.length : Math.max(1, b.max || 8)
+    const shown = lines.length > max + 1 ? lines.slice(0, max) : lines
+    for (const l of shown) d.line(b.code ? { s: clip(l, d.cols), fg: COLORS.code } : clip(l, d.cols))
+    if (shown.length < lines.length) {
+      const more = `… ${num(lines.length - shown.length)} more`
+      d.row().add(more, { d: true }, { on: () => { openBlocks.add(key); redraw() }, tip: 'show every line' }).end()
+    }
+  }
   const facts = (o.facts || []).filter(([, v]) => v !== null && v !== undefined && v !== '')
   if (facts.length) {
     const r = d.row()
@@ -2076,6 +2096,8 @@ export function search(opts = {}) {
 /**
  * A choice among values in a row (`incident  INC-312`): its title dim, the value chosen a control that opens a menu
  * of `all` (the words for no choice) and the values; `key` the letter that opens it; onChange(value), null for all.
+ * A value is a string or `{name, value, right, indent}`: `right` dim against R in the menu, `indent` the levels (2 cells
+ * each) its menu row stands in, for a tree such as runs and their sessions; the row shows its name alone.
  */
 export function choice(opts = {}) {
   const s = { value: null, values: Array.isArray(opts.values) ? opts.values.slice() : [] }
@@ -2100,7 +2122,7 @@ export function choice(opts = {}) {
       redraw()
     },
     add(r) {
-      const items = () => [{ name: all, v: null }, ...s.values.map((v) => (typeof v === 'object' ? { name: v.name, v: v.value ?? v.name, right: v.right } : { name: String(v), v }))]
+      const items = () => [{ name: all, v: null }, ...s.values.map((v) => (typeof v === 'object' ? { name: v.name, v: v.value ?? v.name, right: v.right, indent: v.indent } : { name: String(v), v }))]
       const open = () => toggleMenu(api, Math.max(0, items().findIndex((it) => it.v === s.value)))
       if (opts.title) r.add(opts.title, { d: true }).gap()
       const shown = items().find((it) => it.v === s.value)

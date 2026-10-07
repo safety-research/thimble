@@ -207,6 +207,23 @@ describe('Color by', () => {
     void colour
   })
 
+  test('`other` with no records once the counts are in is left out, as a value with none is, unless one of its values is off', async () => {
+    init({ cols: 200 })
+    const colour = kit.colorBy({ fields: FIELDS })
+    kit.draw((d: any) => colour.draw(d))
+    colour.counts(Object.fromEntries(['fired', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((v, i) => [v, 20 - i])))
+    await tick()
+    expect(text()[0]).toContain('● other 27')
+    // a narrower fetch: the values past six have no records in it
+    colour.counts({ fired: 3, b: 2 })
+    await tick()
+    expect(text()[0]).toMatch(/● fired 3 {2}● b 2$/)
+    colour.toggle('g')
+    colour.counts({ fired: 3, b: 2 })
+    await tick()
+    expect(text()[0]).toContain('other 0')
+  })
+
   test('c opens the menu: Off, the fields, then the labels; under the chosen label its definition and a link to its panel; Enter colors by it', async () => {
     const colour = kit.colorBy({ fields: FIELDS })
     kit.draw((d: any) => colour.draw(d))
@@ -511,6 +528,44 @@ describe('search and choices', () => {
     await key('return')
     expect(got).toEqual(['INC-312'])
     expect(text()).toEqual(['  incident  INC-312'])
+  })
+
+  test('a value\'s indent stands its menu row in, 2 cells a level, for a tree; the row shows its name alone', async () => {
+    const scope = kit.choice({ title: 'sessions', all: 'all', key: 's', values: [{ name: 'Run 1 · nested team', value: 'r:r1' }, { name: 'lead', value: 's:a', indent: 1 }, { name: 'survey', value: 's:b', indent: 2 }] })
+    kit.draw((d: any) => {
+      const r = d.row()
+      scope.add(r)
+      r.end()
+    })
+    await tick()
+    await key('s')
+    expect(text().slice(1)).toEqual(['❯ all', '  Run 1 · nested team', '    lead', '      survey'])
+    await key('down')
+    await key('down')
+    await key('down')
+    await key('return')
+    expect(scope.value).toBe('s:b')
+    expect(text()).toEqual(['  sessions  survey'])
+  })
+})
+
+describe('details', () => {
+  test('blocks: text as the record holds it, each line cut at the cell edge, code in the code color, at most max rows and then … N more, which a click opens', async () => {
+    init({ cols: 40, rows: 20 })
+    kit.draw((d: any) => kit.details(d, {
+      blocks: [
+        { text: 'pytest -q tests/client/test_http.py --tb=short', code: true },
+        { text: Array.from({ length: 6 }, (_, i) => `line ${i + 1}`).join('\n'), max: 3 },
+        { text: 'one\ntwo', max: 1 },
+        { text: '  \n' },
+      ],
+      facts: [['exit', 1]],
+    }))
+    await tick()
+    expect(text()).toEqual(['  pytest -q tests/client/test_http.py --t…', '  line 1', '  line 2', '  line 3', '  … 3 more', '  one', '  two', '  exit 1'])
+    expect(last().lines[0].find((s: any) => s.s.startsWith('pytest')).fg).toBe('permission')
+    await click('… 3 more')
+    expect(text().slice(1, 7)).toEqual(['  line 1', '  line 2', '  line 3', '  line 4', '  line 5', '  line 6'])
   })
 })
 

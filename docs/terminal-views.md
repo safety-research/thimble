@@ -107,7 +107,8 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
 
 - The row reads `Color by  Kind` and the chosen field's values as chips: `●` in the value's hue, its name, its count
   dim. A click on a chip turns the value off (`○`, dim) or on. Values past the sixth share one chip, `other`, with no
-  hue of their own; the records with no value have `no kind` (`not marked` for a label), with a dim mark.
+  hue of their own; the records with no value have `no kind` (`not marked` for a label), with a dim mark. A value with
+  no records in the reader's counts has no chip, `other` too, unless it is turned off.
 - `c`, or a click on the choice, opens the menu under the row: Off, the fields with their values, then every label
   over files with its values and its kind. Under the chosen row, what it is: a field's description, a label's kind and
   definition with `definition ↗`, which opens the label's panel. Enter colors by it.
@@ -171,8 +172,11 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 - `columns(specs, cols)` lays out columns with 2-cell gutters (`{w}`, `{align: 'right'}`, `{grow: true}`):
   `cells(r, values, styles)` adds a row's values, and `header(r, names, {sorted, desc, onSort})` the names, dim, `▼`
   after the one sorted by, each a click that sorts; a list's `header(r)` stands above its rows and does not scroll.
-- `details(dd, {text, facts, groups, raw, place, ask})` draws a record's details: its words, its facts on one row, the
-  records it links to, its lines as the file holds them, `↗` and its place, and `ask about it`.
+- `details(dd, {text, blocks, facts, groups, raw, place, ask})` draws a record's details: its words, its blocks, its
+  facts on one row, the records it links to, its lines as the file holds them, `↗` and its place, and `ask about it`.
+  A block (`{text, code, max}`) is text as the record holds it, such as a command and what it printed, or a diff: each
+  line upright and cut at the cell edge, at most `max` rows (8) and then `… N more`, which a click opens; `code` draws
+  it in the code color (a command, a query, a path).
 - `onWheel(fn)` hears the wheel over the view, for a part of the program's own that scrolls.
 
 ## Search and choices
@@ -180,7 +184,9 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 `search({words, onChange})` adds `/ search` to a row: `/` or a click starts typing, and the panel's field then holds
 its text, each change of which reaches the search whole (Enter ends). A part of the program's own takes typing with
 `d.typing({text, onText, onKey})`. `choice({title, all, key, values, onChange})` adds `incident  all` to a row, whose menu
-picks one of its values.
+picks one of its values. A value is a string or `{name, value, right, indent}`: `right` stands dim against R in the menu,
+and `indent` stands its menu row in by 2 cells a level, for a tree such as runs and their sessions; the row shows the
+chosen value's name alone.
 
 ## Acts
 
