@@ -15,13 +15,15 @@
 //
 // One menu lists together Off, the view's own fields it declares colorable and every label over files, those that mark
 // the view's files first, each label with its switch. Each field and label says how many values it colors by and shows
-// them as chips on a line under its name, cut off with … where they do not fit. Choosing a label colors by it and opens
-// thimble's label editor beside the menu (thimble.editLabel), which stays open; Escape in the editor closes it and puts
-// the focus back on the label's row, and a click in the view closes it too. A field colors by the values its records
-// take, each in a palette colour of its own (the label palette, --label-1 to --label-12, in the order the values come:
-// the declared `values`, each in the colour it names or else the next free one, then the most frequent first, kept per
-// view so a value keeps its colour). Free places go in the order new values take them, blue, orange, green, gold,
-// teal, brown, sky, then the rest (backend/app/label_order.json, which views.frame_document puts in the frame as
+// them as chips on a line under its name, cut off with … where they do not fit; a field that declares no values shows
+// those its records take on the page (the records the page hands valueOf, attr and keeps), the commonest first.
+// Choosing a label colors by it and opens thimble's label editor beside the menu (thimble.editLabel), which stays open;
+// Escape in the editor closes it and puts the focus back on the label's row, and a click in the view closes it too. A
+// field colors by the values its records take, each in a palette colour of its own (the label palette, --label-1 to
+// --label-12, in the order the values come: the declared `values`, each in the colour it names or else the next free
+// one, then the most frequent first, kept per view so a value keeps its colour; the values past the twelve share one
+// chip, "Other", in --label-none). Free places go in the order new values take them, blue, orange, green, gold, teal,
+// brown, sky, then the rest (backend/app/label_order.json, which views.frame_document puts in the frame as
 // window.__thimbleLabelOrder), so the first five are five hues with no second blue; a place a value names or keeps is
 // the same hue whatever the order. A label colors by its values on each anchored record, in the label's own colours;
 // choosing one turns it on, and a label the analyst turns on, here or anywhere in thimble, takes the colour. Off colors
@@ -37,17 +39,17 @@
 // data-colour is the value of the chosen field, and on every anchored record when a label is chosen), never coloured
 // text or a fill.
 // The strip is a list's scrollbar as an editor's two tracks, as Files' Transcript mode draws them: the overview track
-// shows the whole list in one lane, each pixel row in the colour most of its records take (a label that is on but is
-// not the choice draws nothing there), and a dark frame around the part in view; a long list adds the zoomed track
-// at the outer edge, which magnifies the frame: the part around the view at a finer scale, its colours faded beyond the
-// part in view, which lies under a lens joined to the frame by two lines. The lens stands as far down the zoomed track
+// shows the whole list in one lane, each pixel row in the colour most of its records take, grey where they take no
+// value (a label that is on but is not the choice draws nothing there), and a dark frame around the part in view; a
+// long list adds the zoomed track at the outer edge, which magnifies the frame: the part around the view at a finer
+// scale, its colours faded beyond the part in view, which lies under a lens joined to the frame by two lines. The lens stands as far down the zoomed track
 // as the frame stands down the overview, so the two move together. Hovering the overview shows the records there, a
 // click goes there and a drag scrubs. thimble keeps the choice, the values turned off and the colours per view (the bridge's `colour` message),
 // with the time ranges viewer_range.js keeps, and hands them back as window.__thimbleColour when the page loads.
 //
 // Reset, at the row's end, shows while the view is not as it opens: a value turned off, a time range zoomed in, a search
 // field or select in the row changed, or what the page says of its own state (thimble.onReset). It puts all of them
-// back and keeps the choice of Color by.
+// back and keeps the choice of Color by. Hidden, it keeps its place unseen, so the chips fit one width either way.
 ;(function () {
   'use strict'
   // the bridge's part for the kit (window.__thimbleKit), which viewer_range.js, loaded after this file, takes away
@@ -56,8 +58,9 @@
   var thimble = window.thimble
 
   var NONE = '\u0000none' // the key of the records that take no value
+  var OTHER = '\u0000other' // the key of the one chip for a field's values past the palette's twelve colours
   var OFF = 'off' // what thimble keeps for Color by: Off
-  var PALETTE = 12 // --label-1 .. --label-12; a value past them takes --label-none
+  var PALETTE = 12 // --label-1 .. --label-12; a value past them takes --label-none, under the one chip "Other"
   // the palette's places (0 for --label-1) in the order new values take them: label_order.json, which the frame gets as
   // window.__thimbleLabelOrder; without a whole one, the palette's own order, and the page hears of it
   var ORDER = (function (o) {
@@ -269,6 +272,11 @@
     if (tipEl) tipEl.style.display = 'none'
   }
 
+  // where a palette place comes in ORDER, the order new values take the places in; a place past the palette after all
+  function rank(place) {
+    var at = ORDER.indexOf(place)
+    return at >= 0 ? at : place
+  }
   // the first palette place `taken` does not hold, in ORDER; past the palette (--label-none) when it holds all twelve
   function freePlace(taken) {
     for (var i = 0; i < ORDER.length; i++) if (!taken[ORDER[i]]) return ORDER[i]
@@ -325,6 +333,13 @@
         var about = typeof f.description === 'string' ? f.description : ''
         return { name: String(f.name), title: String(f.title || f.name), values: declared && declared.values, slots: declared && declared.slots, meanings: (declared && declared.meanings) || {}, description: about, value: typeof f.value === 'function' ? f.value : null }
       })
+    // the values the fields that declare none take on the records the page hands the kit, each record once (tally)
+    this.tallied = this.fields.filter(function (f) {
+      return !f.values
+    })
+    this.tallies = {}
+    this.seenRecs = typeof WeakSet === 'function' ? new WeakSet() : null
+    this.seenRows = {}
     this.mode = opts.chips === 'filter' ? 'filter' : 'highlight'
     this.initial = typeof opts.initial === 'string' ? opts.initial : this.fields.length ? this.fields[0].name : null
     this.onChange = typeof opts.onChange === 'function' ? opts.onChange : null
@@ -428,14 +443,19 @@
   Control.prototype.fieldColour = function (field, value) {
     var key = keyOf(value)
     if (key === NONE) return null
-    var picked = S.picked[field]
-    if (picked && typeof picked[key] === 'number') return kit.realColour('var(--label-' + (picked[key] + 1) + ')')
-    var slot = slotOf(this.field(field), key)
-    var map = S.colours[field] || (S.colours[field] = {})
-    if (slot < 0 && !(key in map)) this.assign(field, key)
-    var idx = slot >= 0 ? slot : map[key]
-    if (typeof idx !== 'number') return kit.realColour('var(--label-none)')
+    var idx = this.placeOf(field, key)
     return kit.realColour(idx < PALETTE ? 'var(--label-' + (idx + 1) + ')' : 'var(--label-none)')
+  }
+  // the palette place of a field's value (see fieldColour), a value seen for the first time given one; PALETTE or more
+  // for a value past the palette's twelve, which goes under "Other"
+  Control.prototype.placeOf = function (field, key) {
+    var picked = S.picked[field]
+    if (picked && typeof picked[key] === 'number') return picked[key]
+    var slot = slotOf(this.field(field), key)
+    if (slot >= 0) return slot
+    var map = S.colours[field] || (S.colours[field] = {})
+    if (!(key in map)) this.assign(field, key)
+    return typeof map[key] === 'number' ? map[key] : PALETTE
   }
   Control.prototype.assign = function (field, want) {
     var map = S.colours[field] || (S.colours[field] = {})
@@ -559,17 +579,82 @@
       this.assign(f.name)
       map = S.colours[f.name] || {}
     }
-    // the values the view did not declare in the order of their colours, which the most frequent took first, so the
-    // chips keep their places as the counts change
+    // the values the view did not declare in the order of their colours, which the most frequent took first (their
+    // places' rank in ORDER), so the chips keep their places as the counts change
     extra.sort(function (a, b) {
-      var ia = a in map ? map[a] : 1e9
-      var ib = b in map ? map[b] : 1e9
+      var ia = a in map ? rank(map[a]) : 1e9
+      var ib = b in map ? rank(map[b]) : 1e9
       return ia - ib || (counts[b] || 0) - (counts[a] || 0) || (a < b ? -1 : a > b ? 1 : 0)
     })
     for (var d = 0; d < declared.length; d++) add(declared[d], declared[d])
     for (var e = 0; e < extra.length; e++) add(extra[e], extra[e])
+    // the values past the palette's twelve colours share its grey: one chip, "Other", stands for them all
+    var kept = []
+    var other = null
+    for (var o = 0; o < out.length; o++) {
+      if (this.placeOf(f.name, out[o].key) < PALETTE) kept.push(out[o])
+      else {
+        if (!other) kept.push((other = { key: OTHER, value: null, name: 'Other', colour: kit.realColour('var(--label-none)'), n: 0, members: [] }))
+        other.members.push(out[o])
+        other.n += out[o].n
+      }
+    }
+    out = kept
     if (counts[NONE]) add(null, 'No ' + f.title.toLowerCase())
     return out
+  }
+  // the values a chip stands for: its own, or for "Other" those under it
+  function keysOf(v) {
+    return v.members
+      ? v.members.map(function (m) {
+          return m.key
+        })
+      : [v.key]
+  }
+  // the chips' values with each value under "Other" in its place, as the page and the menu list them
+  Control.prototype.flat = function () {
+    var out = []
+    for (var i = 0; i < this.values.length; i++) {
+      var v = this.values[i]
+      if (v.members) out.push.apply(out, v.members)
+      else out.push(v)
+    }
+    return out
+  }
+  // whether a chip's value is on: "Other" while any value under it is
+  Control.prototype.chipOn = function (v, off) {
+    return keysOf(v).some(function (k) {
+      return off.indexOf(k) < 0
+    })
+  }
+  // the values of the records the page hands the kit, for the fields that declare none: each record once, a record
+  // being an object (record[field]) or what a field's own value(record) takes, such as a row's index
+  Control.prototype.tally = function (record) {
+    var fields = this.tallied
+    if (!fields.length || record == null) return
+    var obj = typeof record === 'object'
+    if (obj) {
+      if (!this.seenRecs || this.seenRecs.has(record)) return
+      this.seenRecs.add(record)
+    } else if (typeof record === 'number') {
+      if (this.seenRows[record]) return
+      this.seenRows[record] = true
+    } else return
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i]
+      var v = null
+      if (f.value)
+        try {
+          v = f.value(record)
+        } catch (e) {
+          v = null
+        }
+      else if (obj) v = record[f.name]
+      if (v == null || v === '' || typeof v === 'object') continue
+      var t = this.tallies[f.name] || (this.tallies[f.name] = {})
+      var k = String(v)
+      t[k] = (t[k] || 0) + 1
+    }
   }
   Control.prototype.soon = function () {
     var self = this
@@ -698,10 +783,10 @@
     var chips = ''
     for (var i = 0; i < this.values.length; i++) {
       var v = this.values[i]
-      var on = off.indexOf(v.key) < 0
+      var on = this.chipOn(v, off)
       chips +=
-        '<button type="button" class="chip chip-key chip-act thimble-colour-chip" data-i="' + i + '" aria-pressed="' + on + '"' + lab +
-        (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + (c && c.label || this.fieldAbout(c, v) ? '' : ' title="' + esc(v.name) + '"') + '><span class="chip-sw"' + (v.colour ? ' data-palette title="' + esc('Color of ' + v.name) + '"' : '') + '></span><span class="chip-text">' + esc(v.name) + '</span><span class="chip-count">' + num(v.n) + '</span></button>'
+        '<button type="button" class="chip chip-key chip-act thimble-colour-chip" data-i="' + i + '" aria-pressed="' + on + '"' + lab + (v.members ? ' data-other' : '') +
+        (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + ((c && c.label) || v.members || this.fieldAbout(c, v) ? '' : ' title="' + esc(v.name) + '"') + '><span class="chip-sw"' + (v.colour && !v.members ? ' data-palette title="' + esc('Color of ' + v.name) + '"' : '') + '></span><span class="chip-text">' + esc(v.name) + '</span><span class="chip-count">' + num(v.n) + '</span></button>'
     }
     chips += '<button type="button" class="btn btn-ghost btn-sm thimble-colour-more" hidden></button>'
     var reset = '<button type="button" class="btn btn-secondary btn-sm thimble-reset"' + (this.resetShown ? '' : ' hidden') + '>' + ico('reset') + 'Reset</button>'
@@ -716,23 +801,24 @@
     }
     this.fit()
   }
-  // Reset shows only while the view is not as it opens
+  // Reset shows only while the view is not as it opens. Hidden, it keeps its place in the row unseen (viewer_kit.css), so
+  // showing it changes no width and the same chips fit
   Control.prototype.showReset = function (on) {
     if (on === this.resetShown) return
     this.resetShown = on
     var b = this.root && this.root.querySelector('.thimble-reset')
-    if (b) b.hidden = !on
-    this.fit()
+    if (!b) return
+    b.hidden = !on
+    // a Reset that gave up its place in a narrow row has it again once it shows, and is fitted again once it hides
+    if (b.classList.contains('thimble-reset-gone')) this.fit()
   }
-  // the chips that do not fit the row go behind "N more", which lists every value. They leave Reset its room while it is
-  // hidden, so the same chips fit when it shows
+  // the chips that do not fit the row go behind "N more", which lists every value. Reset is laid out whether it shows
+  // or not, so the box the chips fit in is one width in both states
   Control.prototype.fit = function () {
     if (!this.root) return
     var box = this.root.querySelector('.thimble-colour-chips')
     var more = this.root.querySelector('.thimble-colour-more')
     if (!box || !more) return
-    var reset = this.root.querySelector('.thimble-reset')
-    var room = reset && reset.hidden ? this.resetRoom(reset) : 0
     // the chips' own width, not the box's, which takes the row's free width
     var over = function () {
       var left = box.getBoundingClientRect().left
@@ -741,8 +827,10 @@
         var c = box.children[k]
         if (!c.hidden) right = Math.max(right, c.getBoundingClientRect().right)
       }
-      return right - left > box.clientWidth - room + 1
+      return right - left > box.clientWidth + 1
     }
+    var reset = this.root.querySelector('.thimble-reset')
+    if (reset) reset.classList.remove('thimble-reset-gone')
     var chips = box.querySelectorAll('.thimble-colour-chip')
     for (var i = 0; i < chips.length; i++) chips[i].hidden = false
     more.hidden = true
@@ -754,17 +842,8 @@
       hid++
       more.innerHTML = hid + ' more' + ico('down')
     }
-  }
-  // the px Reset takes in the row with the gap before it, measured unseen while it is hidden
-  Control.prototype.resetRoom = function (reset) {
-    if (this.resetW) return this.resetW
-    reset.style.visibility = 'hidden'
-    reset.hidden = false
-    var w = reset.offsetWidth
-    reset.hidden = true
-    reset.style.visibility = ''
-    if (w > 0) this.resetW = w + (parseFloat(getComputedStyle(this.root).columnGap) || 0)
-    return this.resetW || 0
+    // no chip fits and "N more" not even alone: the unseen Reset gives up its place, which changes no chip that shows
+    if (over() && reset && reset.hidden) reset.classList.add('thimble-reset-gone')
   }
   // the value a chip or a menu item stands for, by its place among the chips' values (a value's own text may hold what
   // an attribute cannot)
@@ -783,6 +862,13 @@
     var c = this.choice()
     if (!c || c.off) return
     var v = this.values[Number(chip.getAttribute('data-i'))]
+    if (v && v.members) {
+      var or = chip.getBoundingClientRect()
+      if (!this.menu)
+        tip('<div class="thimble-tip-h"><span class="thimble-colour-sw" style="--c:' + esc(v.colour || '') + '"></span>Other</div><div class="thimble-tip-m">' +
+          v.members.map(function (m) { return esc(m.name) + ' ' + num(m.n) }).join(' · ') + '</div>', or.left, or.bottom - 8)
+      return
+    }
     if (c.field) {
       var about = this.fieldAbout(c, v)
       var fr = chip.getBoundingClientRect()
@@ -822,23 +908,36 @@
     this.pre = c ? { key: key, by: c.key, off: (S.off[c.key] || []).slice() } : null
     this.toggle(key)
   }
+  // the chip of `key` turned off or on: "Other" turns every value under it
   Control.prototype.toggle = function (key) {
     var c = this.choice()
     if (!c || c.off) return
     var off = (S.off[c.key] || []).slice()
-    var at = off.indexOf(key)
-    if (at >= 0) off.splice(at, 1)
-    else off.push(key)
+    var v = this.chipOf(key)
+    var keys = v ? keysOf(v) : [key]
+    var on = v ? this.chipOn(v, off) : off.indexOf(key) < 0
+    for (var i = 0; i < keys.length; i++) {
+      var at = off.indexOf(keys[i])
+      if (on && at < 0) off.push(keys[i])
+      else if (!on && at >= 0) off.splice(at, 1)
+    }
     S.off[c.key] = off
     this.changed()
   }
-  // that value alone, or every value again when it was alone already
+  Control.prototype.chipOf = function (key) {
+    for (var i = 0; i < this.values.length; i++) if (this.values[i].key === key) return this.values[i]
+    return null
+  }
+  // that value alone (for "Other", the values under it), or every value again when it was alone already
   Control.prototype.only = function (key) {
     var c = this.choice()
     if (!c || c.off) return
-    var others = this.values.map(function (v) { return v.key }).filter(function (k) { return k !== key })
+    var v = this.chipOf(key)
+    var mine = v ? keysOf(v) : [key]
+    var others = []
+    for (var i = 0; i < this.values.length; i++) if (this.values[i].key !== key) others.push.apply(others, keysOf(this.values[i]))
     var off = S.off[c.key] || []
-    var alone = off.indexOf(key) < 0 && others.every(function (k) { return off.indexOf(k) >= 0 })
+    var alone = mine.every(function (k) { return off.indexOf(k) < 0 }) && others.every(function (k) { return off.indexOf(k) >= 0 })
     S.off[c.key] = alone ? [] : others
     this.changed()
   }
@@ -935,12 +1034,14 @@
     this.menu.anchor.setAttribute('aria-expanded', 'false')
     this.menu = null
   }
-  // a field's values as the menu shows them: the chips' while it is the choice, else those it declares and those it has
-  // shown before, each in its colour
+  // a field's values as the menu shows them: the chips' while it is the choice (those under "Other" each in its place),
+  // else those it declares, those it has shown before and, for a field that declares none, those its records take on the
+  // page (tally), the commonest first, each in its colour: a value not yet given one in the colour it would take if the
+  // field were chosen now, which is not kept
   Control.prototype.fieldValues = function (f) {
     var c = this.choice()
     if (c && c.field === f.name)
-      return this.values
+      return this.flat()
         .filter(function (v) {
           return v.key !== NONE
         })
@@ -953,12 +1054,30 @@
       return names.indexOf(k) < 0
     })
     seen.sort(function (a, b) {
-      return map[a] - map[b]
+      return rank(map[a]) - rank(map[b])
     })
     var self = this
-    return names.concat(seen).map(function (n) {
+    var out = names.concat(seen).map(function (n) {
       return { name: n, colour: self.fieldColour(f.name, n) }
     })
+    var t = this.tallies[f.name] || {}
+    var fresh = Object.keys(t).filter(function (k) {
+      return names.indexOf(k) < 0 && !(k in map)
+    })
+    fresh.sort(function (a, b) {
+      return t[b] - t[a] || (a < b ? -1 : a > b ? 1 : 0)
+    })
+    if (!fresh.length) return out
+    var used = {}
+    for (var k in map) used[map[k]] = true
+    for (var d = 0; d < names.length; d++) used[f.slots[d]] = true
+    var picked = S.picked[f.name] || {}
+    for (var i = 0; i < fresh.length; i++) {
+      var at = typeof picked[fresh[i]] === 'number' ? picked[fresh[i]] : freePlace(used)
+      used[at] = true
+      out.push({ name: fresh[i], colour: kit.realColour(at < PALETTE ? 'var(--label-' + (at + 1) + ')' : 'var(--label-none)') })
+    }
+    return out
   }
   // a label's values as the menu shows them: those it colours by
   function labelValues(l) {
@@ -997,11 +1116,12 @@
     if (paletteKey != null) return this.paletteHtml(paletteKey)
     if (values) {
       var off = this.offSet(c)
+      var self = this
       return (
         '<div class="thimble-colour-head">' + esc(c ? c.title : '') + '</div>' +
         this.values
           .map(function (v, i) {
-            var on = off.indexOf(v.key) < 0
+            var on = self.chipOn(v, off)
             return '<button type="button" class="thimble-colour-item" role="menuitemcheckbox" aria-checked="' + on + '" data-i="' + i + '"' + (c && c.label ? ' data-label="' + esc(c.label) + '"' : '') + '><span class="thimble-colour-box' + (on ? ' on' : '') + '">' + (on ? ico('check') : '') + '</span><span class="thimble-colour-sw"' + (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + '></span><span class="thimble-colour-nm">' + esc(v.name) + '</span><span class="thimble-colour-n">' + num(v.n) + '</span></button>'
           })
           .join('')
@@ -1174,8 +1294,9 @@
   // ---------------------------------------------------------------- the tracks: a list's colored scrollbar
   // A list's scrollbar as a music or video editor's navigator, in one or two tracks beside the list (the list's own
   // scrollbar is hidden in their favour), drawn as Files' Transcript mode draws its tracks. The overview track is the
-  // whole list in one lane: each pixel row in the colour of a value that is on which most of the records there take
-  // (grey for all of them with Color by Off), never two colours side by side; a label that is on but is not the choice
+  // whole list in one lane: each pixel row in the colour of a value that is on which most of the records there take,
+  // grey where they take no value (as the no-value chip is, and every record with Color by Off), never two colours side
+  // by side; a label that is on but is not the choice
   // draws nothing on the tracks, and a dark frame shows the part in view. A list many times the
   // height of its box adds the zoomed track at the outer edge, which magnifies the frame: the part around the view at a
   // finer scale, its colours faded beyond the part in view, which lies under a lens (a raised box of the paper, framed),
@@ -1325,8 +1446,9 @@
   function grey() {
     return kit.realColour('rgba(var(--ink-rgb), 0.34)')
   }
-  // every record of the list: [top, bottom] as fractions of the list's height, its colour (null for a record that takes
-  // none), its element or its row; a record of a value turned off is left out
+  // every record of the list: [top, bottom] as fractions of the list's height, its colour (the marks' grey for a record
+  // that takes no value, as for every record with Color by Off), its element or its row; a record of a value turned off
+  // is left out, the records with no value too when their chip is off
   Strip.prototype.measure = function () {
     var c = this.c
     var ch = c.choice()
@@ -1339,8 +1461,8 @@
       var n = this.rows.length
       for (var i = 0; i < n; i++) {
         var key = plain ? '' : keyOf(this.rows[i])
-        if (!plain && key !== NONE && off.indexOf(key) >= 0) continue
-        recs.push([i / n, (i + 1) / n, plain ? g : key === NONE ? null : c.colourOf(this.rows[i]), i])
+        if (!plain && off.indexOf(key) >= 0) continue
+        recs.push([i / n, (i + 1) / n, plain || key === NONE ? g : c.colourOf(this.rows[i]) || g, i])
       }
     } else {
       var box = this.box
@@ -1361,17 +1483,18 @@
           if (by) v = c.valueOf(ref)
         }
         var k2 = plain ? '' : keyOf(v)
-        if (!plain && k2 !== NONE && off.indexOf(k2) >= 0) continue
+        if (!plain && off.indexOf(k2) >= 0) continue
         var rr = e.getBoundingClientRect()
         if (!rr.height) continue
         var y = rr.top - top0
-        recs.push([y / H, (y + rr.height) / H, plain ? g : k2 === NONE ? null : c.colourOf(v), e])
+        recs.push([y / H, (y + rr.height) / H, plain || k2 === NONE ? g : c.colourOf(v) || g, e])
       }
       recs.sort(function (a, b) {
         return a[0] - b[0]
       })
     }
     this.recs = recs
+    this.grey = g
   }
   // the part in view, as fractions of the list's height
   Strip.prototype.view = function () {
@@ -1426,7 +1549,8 @@
     this.place()
   }
   // a track's canvas: the records within `span` (fractions of the list), each pixel row in the one colour most of it
-  // takes (the records' share of the row), faded outside `bright`, where the lane's ground gives way to the lens's paper
+  // takes (the records' share of the row), grey where its records take no value, faded outside `bright`, where the
+  // lane's ground gives way to the lens's paper
   Strip.prototype.paint = function (t, span, bright) {
     var h = this.h || 0
     var dpr = window.devicePixelRatio || 1
@@ -1493,18 +1617,21 @@
         got[rc[2]] = (got[rc[2]] || 0) + share
       }
     }
+    // the colour most of the row's records take; the grey of the records with no value only where none of them takes
+    // one, so that records with no value never hide a value's
+    var g = this.grey
     var colourAt = function (r) {
       var got = rows[r]
       if (!got) return null
       var best = null
       var most = 0
       for (var c in got) {
-        if (got[c] > most) {
+        if (c !== g && got[c] > most) {
           most = got[c]
           best = c
         }
       }
-      return best
+      return best || (got[g] ? g : null)
     }
     var y = 0
     while (y < Hp) {
@@ -1911,10 +2038,11 @@
         var ch = c.choice()
         return ch && ch.label ? ch.label : null
       },
-      /** the chips' values: [{value, name, colour, on, n}], value null for the records that take none; none for Off */
+      /** the chips' values: [{value, name, colour, on, n}], value null for the records that take none, each value under
+       *  the chip "Other" in its place; none for Off */
       get values() {
         var off = c.offSet()
-        return c.values.map(function (v) {
+        return c.flat().map(function (v) {
           return { value: v.value, name: v.name, colour: v.colour, on: off.indexOf(v.key) < 0, n: v.n }
         })
       },
@@ -1922,6 +2050,7 @@
        *  record such as a row's index), or for a label the label's value on record.ref (or on a ref given as a
        *  string); null for none, and always null for Off */
       valueOf: function (record) {
+        c.tally(record)
         return c.valueOf(record)
       },
       /** the colour of a value, one a canvas can draw; null for no value and for Off */
@@ -1934,11 +2063,13 @@
       },
       /** whether a record's value is on: the records a page keeps in a list, a count or a chart */
       keeps: function (record) {
+        c.tally(record)
         return c.isOn(c.valueOf(record))
       },
       /** ` data-colour="<value>"` for a record's element while a field is colored by, '' while a label is or for Off:
        *  the bar thimble draws on the element */
       attr: function (record) {
+        c.tally(record)
         var ch = c.choice()
         if (!ch || !ch.field) return ''
         var v = c.valueOf(record)

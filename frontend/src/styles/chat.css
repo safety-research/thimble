@@ -1694,6 +1694,10 @@ button.model-line-part[aria-expanded='true'] {
   flex-direction: column;
   gap: 8px;
 }
+/* hidden while a frozen demo session's card is on screen, which says the same (Precached AttachBar) */
+.precached-bar[hidden] {
+  display: none;
+}
 .precached-bar {
   padding: 10px 12px;
   border: 1px solid var(--border-hairline);
@@ -1709,12 +1713,6 @@ button.model-line-part[aria-expanded='true'] {
   margin: 0;
   color: var(--text-tertiary);
   font: var(--type-body-sm);
-}
-/* the bar under a frozen demo session's card: its title alone, as the card's head writes it */
-.precached-title {
-  margin: 0;
-  color: var(--text-primary);
-  font: var(--type-question);
 }
 .precached-actions {
   display: flex;

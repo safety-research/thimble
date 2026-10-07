@@ -217,7 +217,7 @@ describe.each(Object.keys(PAPERS))('the label colours on the %s paper', (paper) 
     expect(chroma('blue'), 'blue is more vivid than navy').toBeGreaterThan(chroma('navy'))
   })
 
-  test('the first five new values take (LABEL_ORDER), which a field of five values shows side by side, are five hues with no second blue, about 30 apart in CIELAB', () => {
+  test('the first five new values take (LABEL_ORDER), which a field of five values shows side by side, are five hues with no second blue, 15 apart in OKLab, also under protan and deutan vision', () => {
     const five = LABEL_ORDER.slice(0, 5).map((n) => t[`--label-${n}`])
     expect(LABEL_ORDER.slice(0, 5).map((n) => Object.keys(NAMES).find((k) => NAMES[k] === n))).toEqual(['blue', 'orange', 'green', 'olive', 'teal'])
     for (let i = 0; i < 5; i++)
@@ -226,7 +226,9 @@ describe.each(Object.keys(PAPERS))('the label colours on the %s paper', (paper) 
         const dh = Math.abs(chromaHue(a)[1] - chromaHue(b)[1])
         expect(Math.min(dh, 360 - dh), `${a} and ${b} are one hue`).toBeGreaterThanOrEqual(25)
         expect(cielab(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(29.5)
-        expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(11)
+        // the floor of the dataviz validator: orange and gold were 12.7 apart on the light papers, and read as one
+        expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(15)
+        for (const v of ['protan', 'deutan']) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
       }
   })
 

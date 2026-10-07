@@ -146,6 +146,51 @@ describe('Colour by in a frame', () => {
     await page.close()
   })
 
+  test("the records with no value are the marks' grey on the scrollbar, under any value's colour, and leave it when their chip is off", async () => {
+    const { page, frame } = await framed()
+    // 1,000 rows: the first half take no value, but every tenth of them is With links; the second half Text only
+    await frame().evaluate(() => (window as any).colour.strip('#list', { rows: Array.from({ length: 1000 }, (_, i) => (i < 500 ? (i % 10 === 0 ? 'With links' : null) : 'Text only')) }))
+    await page.waitForTimeout(150)
+    const rows = () =>
+      frame().evaluate(() => {
+        const cv = document.querySelector('.thimble-colour-strip canvas') as HTMLCanvasElement
+        const data = cv.getContext('2d')!.getImageData(Math.floor(cv.width / 2), 0, 1, cv.height).data
+        const out: string[] = []
+        for (let y = 0; y < cv.height; y++) out.push([data[y * 4], data[y * 4 + 1], data[y * 4 + 2], data[y * 4 + 3]].join(','))
+        return out
+      })
+    const px = await rows()
+    const half = Math.floor(px.length / 2)
+    const first = px.slice(2, half - 2)
+    const links = '208,117,10,255'
+    // every pixel row of the first half holds a With links record among the nine with none: the value shows, never the grey
+    assert.equal(first.filter((c) => c !== links).length, 0, JSON.stringify([...new Set(first)]))
+    // the rows with no value alone: the grey the no-value chip has
+    await frame().evaluate(() => (window as any).colour.strip('#list', { rows: Array.from({ length: 1000 }, (_, i) => (i < 500 ? null : 'Text only')) }))
+    await page.waitForTimeout(150)
+    const grey = (await rows()).slice(2, half - 2)
+    assert.equal(new Set(grey).size, 1, JSON.stringify([...new Set(grey)]))
+    assert.notEqual(grey[0].split(',')[3], '0', 'drawn, not left blank')
+    // the grey of every record with Color by Off
+    await frame().locator('.thimble-colour-by').click()
+    await frame().locator('.thimble-colour-menu [data-by="off"]').click()
+    await page.waitForTimeout(200)
+    assert.equal((await rows())[half + 10], grey[0], 'the grey the records take with Color by Off')
+    await frame().locator('.thimble-colour-by').click()
+    await frame().locator('.thimble-colour-menu [data-by="f:kind"]').click()
+    await page.waitForTimeout(200)
+    await frame().evaluate(() => (window as any).colour.strip('#list', { rows: Array.from({ length: 1000 }, (_, i) => (i < 500 ? null : 'Text only')) }))
+    // the list's own records all take a value, so the page says how many take none, as a reader does
+    await frame().evaluate(() => (window as any).colour.counts({ 'Text only': 500, '': 500 }))
+    await page.waitForTimeout(200)
+    // their chip turned off: they leave the scrollbar as any value does
+    await frame().locator('.thimble-colour-chip', { hasText: 'No kind' }).click()
+    await page.waitForTimeout(200)
+    const gone = (await rows()).slice(2, half - 2)
+    assert.equal(gone.filter((c) => c.split(',')[3] !== '0' && c === grey[0]).length, 0)
+    await page.close()
+  })
+
   test('a value turned off has its records dimmed and leaves the scrollbar', async () => {
     const { page, frame } = await framed()
     await frame().locator('.thimble-colour-chip').nth(1).click()
@@ -333,29 +378,40 @@ describe("the key's chips", () => {
     await page.close()
   })
 
-  test('the chips leave Reset its room while it is hidden, so showing it moves no chip behind "N more"', async () => {
+  test('Reset keeps its place unseen while hidden, so the chips fit one box and showing it moves no chip behind "N more", even after its text changes width', async () => {
     const vals = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot']
     const rows = Array.from({ length: 30 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${vals[i % vals.length]}">message ${i + 1}</div>`).join('')
     const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ${JSON.stringify(vals)} }] })`, 640)
     await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-chip').length === 6)
     await page.waitForTimeout(100)
+    // a web font arriving after the first fit: Reset's text a little wider than when the row was first laid out
+    await frame().evaluate(() => document.head.insertAdjacentHTML('beforeend', '<style>.thimble-reset{font-size:15px;letter-spacing:0.5px}</style>'))
+    await page.evaluate(() => ((document.getElementById('f') as HTMLIFrameElement).style.width = '641px'))
+    await page.waitForTimeout(150)
     const row = () =>
       frame().evaluate(() => {
         const reset = document.querySelector('.thimble-reset') as HTMLElement
+        const rs = getComputedStyle(reset)
         return {
           shown: [...document.querySelectorAll<HTMLElement>('.thimble-colour-chip')].map((c) => (c.hidden ? 0 : Math.round(c.getBoundingClientRect().left))),
           more: (document.querySelector('.thimble-colour-more') as HTMLElement).hidden ? '' : document.querySelector('.thimble-colour-more')!.textContent,
+          box: (document.querySelector('.thimble-colour-chips') as HTMLElement).clientWidth,
           reset: reset.hidden,
+          laid: [rs.display !== 'none' && reset.getBoundingClientRect().width > 0, rs.visibility],
         }
       })
     const before = await row()
     assert.equal(before.reset, true)
+    assert.deepEqual(before.laid, [true, 'hidden'], 'hidden, Reset keeps its place unseen')
     assert.ok(before.more, `the row is full: ${JSON.stringify(before)}`)
+    // unseen, it takes no focus
+    await frame().evaluate(() => (document.querySelector('.thimble-reset') as HTMLElement).focus())
+    assert.notEqual(await frame().evaluate(() => document.activeElement?.className ?? ''), (await frame().evaluate(() => document.querySelector('.thimble-reset')!.className)))
     await frame().locator('.thimble-colour-chip').first().click()
     await page.waitForTimeout(150)
     const after = await row()
-    assert.equal(after.reset, false)
-    assert.deepEqual([after.shown, after.more], [before.shown, before.more], 'the same chips in the same places')
+    assert.deepEqual([after.reset, after.laid], [false, [true, 'visible']])
+    assert.deepEqual([after.shown, after.more, after.box], [before.shown, before.more, before.box], 'the same chips in the same places, in a box of the same width')
     await page.close()
   })
 

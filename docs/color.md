@@ -8,8 +8,10 @@ the view as text, a glyph or a gray pattern, never in a second palette.
 
 - One menu lists Off, the fields the view can color by and every label over files, each with how many values it
   colors by and those values as chips on a line under its name. Fields are values the files hold or
-  the reader works out, such as a kind or a source. The labels that mark the view's files come first, each with its
-  switch.
+  the reader works out, such as a kind or a source. A field the page declares no `values` for shows the values its
+  records take on the page (those the page hands the control through `attr`, `valueOf` or `keeps`), the commonest
+  first, in the colors they would take if it were chosen now. The labels that mark the view's files come first, each
+  with its switch.
 - Choosing a label colors by it and opens thimble's label editor beside the menu, which stays open with the label
   checked: the same editor as Files' (what it labels and marks, the files it applies to, its classifier, its prompt,
   pattern or code, and its classes with their colors and highlights), drawn by thimble over the view, so the view
@@ -24,6 +26,9 @@ the view as text, a glyph or a gray pattern, never in a second palette.
   value alone. A value turned off is hidden or dimmed, as the view says, and its chip goes quiet with an empty square.
   Hovering a value shows what it means: a label's value what the label says, a field's value what the page declares
   for it, else what the field is.
+- A field has twelve colors for its values. The values past the twelfth would share one gray, so they sit under one
+  chip, "Other", in that gray with their counts summed: a click turns them all off or on, an Alt-click shows them
+  alone, and hovering it names them. The page still hears of each of them in `values`, in the gray.
 - A click on a chip's square opens the palette of thimble's twelve label colors. The color picked recolors the value
   everywhere in the view: its chip, the records' bars, the tracks, and what the page draws through `colourOf`. A label's
   value keeps it as the label's color, in Files and every view; a field's value keeps it for this view, and Reset
@@ -32,8 +37,9 @@ the view as text, a glyph or a gray pattern, never in a second palette.
   texts the chosen label matches are highlighted in its colors; the texts of the other labels that are on, and every
   label's while a field or Off is chosen, in gray.
 - A long list gets two tracks in place of its scrollbar, as a music or video editor lays out its navigator (below).
-- Reset, at the end of the row, shows while the view is not as it opens and puts it back (below). The chips leave its
-  room while it is hidden, so none moves behind "N more" when it shows.
+- Reset, at the end of the row, shows while the view is not as it opens and puts it back (below). While hidden it
+  keeps its place unseen, so the chips fit the same width whether it shows or not and none moves behind "N more" when
+  it shows. Only in a row too narrow for "N more" beside Color by does the hidden Reset give up its place.
 - thimble keeps the choice, the values turned off, each value's color and the time ranges per view. The page opens on
   them again.
 
@@ -110,7 +116,9 @@ load()
 `strip: '#list'`, or `colour.strip('#list')` for another list, puts the list's scrollbar in tracks at its right edge:
 
 - The overview track is the whole list in one lane: each pixel row in the color of the value that is on which most of
-  the records there take (gray for all of them with Off), never two colors side by side. A label that is on but is not
+  the records there take, never two colors side by side. The records with no value ("No kind", "Not marked") are the
+  gray their chip has, as every record is with Off, and only where no record of the pixel row takes a value, so a
+  value is never hidden under them; turned off, they leave the tracks as any value does. A label that is on but is not
   the choice draws nothing on the tracks. A dark frame as wide as the track outlines the part in view; drag it to move
   the view.
 - A list many times the height of its box adds the zoomed track at the outer edge, which magnifies the frame: the part
@@ -201,8 +209,9 @@ for a record the label does not mark.
   names or else the next free one, then the others the first time they show, the most frequent first. A declared
   value always has its declared color; another value keeps its color after it first shows. Free colors go in the
   order new values take them everywhere in thimble: blue, orange, green, gold, teal, brown, sky, then navy, grass,
-  cerulean, chestnut and cyan, so the first five are five hues with no second blue among them, in Dark as well. A
-  color's number is its place in the palette, so `colour: 4` is always sky, whatever the order.
+  cerulean, chestnut and cyan, so the first five are five hues with no second blue among them, each pair 15 or more
+  apart in OKLab on every paper, Dark as well. A color's number is its place in the palette, so `colour: 4` is always
+  sky, whatever the order. The chips of values the page did not declare come in the order of their colors.
 - A value turned off is hidden (`chips: 'filter'`) or dimmed (`'highlight'`) wherever its records show on the page.
   A page that leaves those records out itself, as the reader above does, loses nothing.
 - What a label's values mean comes from thimble itself: the control asks with `thimble.fetch({$thimble: 'label',
@@ -220,7 +229,7 @@ for a record the label does not mark.
 | `by` | `{field, title}` or `{label, title}` (the label's id and name), or `null` (Off, or nothing to color by) |
 | `off` | whether the analyst chose Off |
 | `field`, `label` | the field colored by, or the label's id; `null` for the other and for Off |
-| `values` | the chips: `[{value, name, colour, on, n}]`, `value` `null` for no value; none for Off |
+| `values` | the chips' values: `[{value, name, colour, on, n}]`, `value` `null` for no value, each value under "Other" in its place; none for Off |
 | `valueOf(record)` | a record's value: its field's, or for a label the label's value on `record.ref` (or on a ref given as a string); `null` for Off |
 | `colourOf(value)` | the value's color, `rgb()` or a hex, which a canvas can draw; `null` for no value and for Off |
 | `isOn(value)`, `keeps(record)` | whether a value, or a record's value, is on |

@@ -4,7 +4,8 @@
 // and nothing else, as the bar in place of the composer does. From a full export whose session was kept it says the
 // orientation ran in advance and offers "Attach a fresh session", which shows what a fresh session is, the command and
 // a Copy button. The page stays readable without a session until the first one attaches (isGone), as a worked example's
-// workspace does. Under the frozen card, the bar gives the card's title alone, so the sentence and the command show once.
+// workspace does. While the frozen card is on screen the bar is hidden, so the title, the sentence and the command show
+// once; scrolled away, the bar gives the sentence and the command again.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ATTACH_EXPLAINER, ATTACH_LABEL, AttachBar, FROZEN_TEXT, FROZEN_TITLE, PRECACHED_TITLE, PrecachedCard, attachCommand, attachInstead, isFrozen, precachedMark, precachedText, takesFollowUps } from '../../src/chat/Precached.tsx'
@@ -129,17 +130,61 @@ test('the bar in place of the composer gives the same sentence and command', asy
   expect([...el.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Copy'])
 })
 
-test("under the frozen card the bar gives the card's title alone, so the sentence and the command show once", async () => {
+test('while the frozen card is on screen the bar is hidden, so its title, sentence and command show once; scrolled away, the bar gives them', async () => {
+  // the browser's IntersectionObserver, which jsdom has none of: the test says when the card enters and leaves the view
+  const observers: { cb: IntersectionObserverCallback; els: Element[] }[] = []
+  class FakeObserver {
+    els: Element[] = []
+    constructor(public cb: IntersectionObserverCallback) {
+      observers.push(this)
+    }
+    observe(el: Element) {
+      this.els.push(el)
+    }
+    disconnect() {
+      this.els = []
+    }
+  }
+  vi.stubGlobal('IntersectionObserver', FakeObserver)
+  const seen = async (on: boolean) => {
+    await act(async () => {
+      for (const o of observers) if (o.els.length) o.cb(o.els.map((target) => ({ target, isIntersecting: on }) as IntersectionObserverEntry), o as unknown as IntersectionObserver)
+    })
+  }
   const el = await mount(
     <>
       <PrecachedCard mark={MARK} attached={false} />
       <AttachBar mark={MARK} card />
     </>,
   )
-  expect(el.querySelector('[data-precached-bar]')?.textContent).toBe(FROZEN_TITLE)
-  expect(el.querySelectorAll('.precached-command').length).toBe(1)
-  expect([...el.querySelectorAll('p')].filter((p) => p.textContent === FROZEN_TEXT).length).toBe(1)
-  expect(el.textContent?.split(FROZEN_TEXT).length).toBe(2)
+  const bar = () => el.querySelector('[data-precached-bar]') as HTMLElement
+  const visible = () => [...el.querySelectorAll('.card, [data-precached-bar]')].filter((x) => !(x as HTMLElement).hidden)
+  expect(observers.at(-1)?.els).toEqual([el.querySelector('.precached-card')])
+  await seen(true)
+  expect(bar().hidden).toBe(true)
+  // the title, the sentence and the command once among what shows
+  expect(visible().map((x) => x.textContent).join('').split(FROZEN_TITLE).length).toBe(2)
+  expect(visible().map((x) => x.textContent).join('').split(FROZEN_TEXT).length).toBe(2)
+  // the card scrolled out of the view: the bar gives the sentence and the command
+  await seen(false)
+  expect(bar().hidden).toBe(false)
+  expect(bar().querySelector('.precached-command code')?.textContent).toBe('cd /srv/thimble-demo/collusion-wiki && thimble')
+  expect(bar().textContent).not.toContain(FROZEN_TITLE)
+})
+
+test('another thread shown, the bar gives the sentence and the command whatever the card does', async () => {
+  vi.stubGlobal('IntersectionObserver', undefined)
+  const el = await mount(<AttachBar mark={MARK} />)
+  expect((el.querySelector('[data-precached-bar]') as HTMLElement).hidden).toBe(false)
+  // without an IntersectionObserver, a mounted frozen card counts as on screen
+  const both = await mount(
+    <>
+      <PrecachedCard mark={MARK} attached={false} />
+      <AttachBar mark={MARK} card />
+    </>,
+  )
+  await settle()
+  expect((both.querySelector('[data-precached-bar]') as HTMLElement).hidden).toBe(true)
 })
 
 test('from a full export whose session was kept, the bar offers the attach steps as before', async () => {
