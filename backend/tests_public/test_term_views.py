@@ -645,106 +645,111 @@ def repository(workspaces_tmp, tmp_path, monkeypatch, inproc) -> str:
     return "repository"
 
 
-def _row(rows: list[str], start: str) -> str:
-    return next(x for x in rows if x[2:].startswith(start))
+def _pane(rows: list[str]) -> list[str]:
+    """The side pane's half of each row drawn beside the list, after its `│`."""
+    return [x.split(" │ ", 1)[1].rstrip() for x in rows if " │ " in x]
 
 
 @needs_node
 @pytest.mark.parametrize("cols", [120, 200])
 async def test_repository_draws_what_its_browser_page_shows(repository, cols):
-    """The worked example at 120 and 200 columns: the top row (search, the kind of item, Color by with its chips), the
-    time range's readout and strip with a break between the runs' days, the table's header with each run's name over
-    the activity, then a row per pull request: its item, its title with its flags gray as they fit, its area, author and
-    state, and its records as marks on the range's scale; its hint row names only keys the pane passes on."""
+    """The worked example at 120 and 200 columns, a code forge as its command line draws it: the tabs with their counts,
+    the top row (search, Filter by with the runs as toggles, Color by with its chips), the time range's readout and strip
+    with a break between the runs' days, the columns' names, then a heading per run and a row per pull request: its
+    number, its title, its area, state, comments and lines, and under it the dim line a forge writes there."""
     out = await term_views.draw_text(repository, "repository", cols=cols, rows=36, wrap=DRAW_WRAP)
     lines = out.splitlines()
     assert lines[0] == "  Repository"
     body, hints = _split(lines, 2, 36)
     assert all(len(x) <= cols + 2 for x in body)
-    assert body[0] == "  / search  items  pull requests  Color by  State  ● merged 28  ● closed 4  ● open 3"
-    assert body[1] == "  11 May 09:24 – 14 May 13:42 · 3d 4h"
-    assert body[2].count(" // ") == 3
-    assert body[3] == ""
-    head = body[4].split()
-    # the area from 120 cells, the author from 100, so the activity keeps its share
-    cols_shown = ["item", "title", "author", "state"] if cols == 120 else ["item", "title", "area", "author", "state"]
-    assert head[:len(cols_shown)] == cols_shown and head[len(cols_shown):len(cols_shown) + 4] == ["r1", "r2", "r3", "r4"]
-    assert body[5].startswith("❯ ● r1 #9   Treat 'next <weekday>' as never today")
-    # the strip of each row starts under its run's name: r1's rows at the left, r2's after r1's
-    act = body[4].index("r1")
-    first = {r: min(x.index("●", act) for x in body[5:] if x[4:6] == r) for r in ("r1", "r2", "r3")}
-    assert first["r1"] == act and first["r1"] < body[4].index("r2") <= first["r2"] < body[4].index("r3") <= first["r3"]
-    eleven = _row(body, "● r1 #11")
-    if cols == 120:
-        assert "Keep wall-clock time across DST in biweekly rules  +3  cedar" in eleven
-        assert "Treat 'next <weekday>' as never today  +1  " in body[5]
-    else:
-        assert "Keep wall-clock time across DST in biweekly rules  merged by its author · +2  schedules   cedar    merged" in eleven
-        assert "●●─●●●" in eleven
-    assert "Reject 30 February  merged by its author" in _row(body, "● r4 #12")
-    assert hints == ("↑↓ to choose · Enter to open · c to color by · / to search · i for items · [ ] to "
-                                 "pan · + - to zoom · a to ask · b to go back · x to close")
+    assert body[0].split() == ["pull", "requests", "35", "issues", "36", "discussions", "12", "agents", "16"]
+    assert body[1].startswith("  / search  Filter by  Run  ● r") and "● r1 8  ● r2 7" in body[1]
+    assert "Color by  State  ● merged 28  ● closed 4  ● open 3" in body[1]
+    assert body[2] == "  11 May 09:24 – 14 May 13:42 · 3d 4h"
+    assert body[3].count(" // ") == 3 and body[4] == ""
+    assert body[5].split() == ["pull", "request", "area", "state", "comments", "lines"]
+    assert body[6].strip(" ▌") == "r1 · 3 agents · 1 approval to merge · Mon 11 May 2026"
+    assert re.match(r"❯ ● #9   Treat 'next <weekday>' as never today +parser +merged +0 +\+1 -1", body[7])
+    assert body[8].strip().startswith("opened 09:24 by ash · fixes #1 · approved · merged by its author")
+    eleven = next(i for i, x in enumerate(body) if x.startswith("  ● #11  Keep wall-clock"))
+    assert body[eleven + 1].strip().startswith("opened 09:50 by cedar · fixes #3 · changes requested · merged by its author")
+    for k in ("↑↓ to choose", "Enter to open", "1 2 3 4 for the tabs", "f to filter by", "c to color by", "/ to search", "a to ask"):
+        assert k in hints, k
 
 
 @needs_node
-async def test_repository_opens_an_item_in_place_with_the_same_issue_in_every_run(repository):
-    """Enter opens a pull request in place: its title where its row cut it and its flags, the issue it fixes in every
-    run, then its records in time order, each with its time, author, action, words, diff and `↗` to its line; a click
-    on another run's issue opens it among the issues; the other kinds fill only the columns their items have."""
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=60, wrap=DRAW_WRAP,
+async def test_repository_opens_a_pull_request_as_its_page_in_the_side_pane(repository):
+    """Enter opens a pull request's page beside the list, never under its row: its facts named plainly, the issue it
+    fixes and the same issue in the other runs, its flags, then its records in time order, each commit with its diff,
+    which ↑↓ move through and Enter opens at its place; a click on another run's issue opens that issue's page."""
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=44, wrap=DRAW_WRAP,
                                      keys=["down", "down", "return"], panel=False)
-    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
-    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "r1 #11  Keep wall-clock time across DST in biweekly rules" in rows[at], "its row holds its title whole"
-    assert rows[at + 1].strip() == "merged by its author · merged over a change request · pushed after its last approval"
-    assert rows[at + 2].strip() == "r1 #3 fixed  r2 #3 fixed  r3 #3 fixed  r4 #3 fixed"
-    assert rows[at + 3].strip().startswith("09:50  cedar  opened             Occurrences are computed in local time")
-    assert rows[at + 3].endswith("↗")
-    assert any(x.strip() == "09:53  cedar  pushed             4079459 · Compute occurrences in local time                                      ↗" for x in rows)
-    assert any(x.strip() == "+        at = local + n * self.period" for x in rows)
-    assert any(x.strip().startswith("10:35  ash    changes requested  No test for the spring-forward week itself") for x in rows)
-    assert any(x.strip() == "ask about it" for x in rows)
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=36, wrap=DRAW_WRAP,
+    rows = out.splitlines()
+    pane = _pane(rows)
+    assert pane[0].startswith("r1 #11 Keep wall-clock time") and pane[0].endswith("close")
+    assert pane[1] == "state merged · opened 09:50 by cedar"
+    assert "review changes requested · approvals 1 of 1" in pane
+    assert pane[pane.index("review changes requested · approvals 1 of 1") + 1].startswith("fixes  #3 Every-other-week")
+    assert "other runs  r2 #3 fixed  r3 #3 fixed  r4 #3 fixed" in pane
+    assert any(x.startswith("09:53  cedar  pushed 4079459") for x in pane)
+    assert "+        at = local + n * self.period" in [x.strip(" ▌") for x in pane]
+    assert any(x.startswith("10:35  ash  changes requested") for x in pane)
+    assert not any("ask about it" in x for x in rows)
+    assert next(x for x in rows if x.startswith("❯")).startswith("❯ ● #11  Keep wall-clock"), "its row stays in the list"
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=44, wrap=DRAW_WRAP,
                                      keys=["down", "down", "return", "click:r2 #3 fixed"], panel=False)
-    rows = out.splitlines()
-    assert "items  issues" in rows[0]
-    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert rows[at].startswith("❯ ● r2 #3   Every-other-week schedule moves an hour")
-    assert any(re.match(r"\s+\d\d:\d\d  \S+\s+merged #11", x) for x in rows[at:])
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=36, wrap=DRAW_WRAP,
-                                     keys=["i", "down", "down", "return"], panel=False)
-    rows = out.splitlines()
-    assert rows[4].split()[:3] == ["item", "title", "author"] and rows[4].split()[3:] == ["r1", "r2", "r3", "r4"]
-    assert rows[5].startswith("❯ ● r1 #1  Splitting the backlog") and rows[5].split()[-2:] == ["ash", "●"]
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=36, wrap=DRAW_WRAP,
-                                     keys=["i", "down", "down", "down", "return", "return"], panel=False)
-    rows = out.splitlines()
-    assert rows[4].split()[:2] == ["item", "agent"]
-    assert rows[5].startswith("❯ ● r1    ash")
-    assert re.match(r"\s+09:24  ash\s+opened #9\s+When today is the named weekday", rows[[i for i, x in enumerate(rows) if "09:09" in x][0] + 1])
+    pane = _pane(out.splitlines())
+    assert pane[0].startswith("r2 #3 Every-other-week schedule")
+    assert any(re.match(r"\d\d:\d\d  \S+\s+merged #11", x) for x in pane)
 
 
 @needs_node
-async def test_repository_follows_its_citations_and_its_chips(repository):
-    """A citation of a record opens its item with the record on the selection background, in view however far down its
-    item's details it is; a run's citation frames the run's day in the time range; a chip turned off leaves out the
-    items of its value."""
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP,
-                                     ref="runs/r1/events.jsonl#L35", panel=False, ansi=True)
+async def test_repository_draws_a_thread_as_replies_and_an_agent_as_its_profile(repository):
+    """The board's threads: a row per thread with its first words, and its page the first post with the replies under
+    it on tree guides; the agents: a row per agent with its sign-off, and its page what it did."""
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP, keys=["3", "return"],
+                                     panel=False)
     rows = out.splitlines()
-    cited = next(x for x in rows if "I still wanted a test for the skipped hour." in x)
-    assert "48;5;238" in cited and re.sub(r"\x1b\[[0-9;]*m", "", cited).strip().startswith("10:58  ash    commented")
+    assert next(x for x in rows if x.startswith("❯")).startswith("❯ ● Splitting the backlog")
+    pane = _pane(rows)
+    at = pane.index("ash  09:02")
+    assert pane[at + 1:at + 5] == ["│ I'll take #1 and #4, both in parse and format.", "├ birch  09:02", "│ #2 and #6 for me.",
+                                   "├ cedar  09:06"]
+    assert "└ ash  09:09" in pane
+    out = await term_views.draw_text(repository, "repository", cols=140, rows=40, wrap=DRAW_WRAP, keys=["4", "return"],
+                                     panel=False)
+    rows = out.splitlines()
+    assert any('"Signing off: three merged, four reviews given."' in x for x in rows)
+    pane = _pane(rows)
+    assert any(x.startswith("run r1 · pull requests 3") for x in pane)
+    assert any(x.startswith("09:24  opened #9") for x in pane)
+
+
+@needs_node
+async def test_repository_follows_its_citations_its_filter_and_its_chips(repository):
+    """A citation of a record opens its item's page with the record chosen and in view; a run's citation frames the
+    run's day in the time range; a Filter by toggle leaves out a run, and a Color by chip turned off the items of its
+    value."""
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP,
+                                     ref="runs/r1/events.jsonl#L35", panel=False)
+    pane = _pane(out.splitlines())
+    assert pane[0].startswith("r1 #11 Keep wall-clock time")
+    assert any(x.startswith("10:58  ash  commented") for x in pane), "the cited record is in view"
     out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, ref="view:repository/r2",
                                      panel=False)
     rows = out.splitlines()
-    # the run's day framed, its edges at its first and last records, since an edge never stays in a break
-    assert rows[1] == "  12 May 09:30 – 14:12 · 4h 42m" and rows[0].rstrip().endswith("reset")
-    assert {x[4:6] for x in rows[5:] if x[2:3] == "●"} == {"r2"}
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP, keys=["click:closed 4"],
+    assert rows[2] == "  12 May 09:30 – 14:12 · 4h 42m" and rows[1].rstrip().endswith("reset")
+    assert [x.strip()[:2] for x in rows if "approval to merge" in x or "approvals to merge" in x] == ["r2"]
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP, keys=["click:r1 8"],
                                      panel=False)
     rows = out.splitlines()
-    assert "○ closed 4" in rows[0]
-    assert {x.split()[-2] for x in rows[5:] if x[2:3] == "●" or x.startswith("❯")} == {"merged", "open"}
+    assert "○ r1 8" in rows[1] and not any(x.strip().startswith("r1 ·") for x in rows)
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=90, wrap=DRAW_WRAP, keys=["click:closed 4"],
+                                     panel=False)
+    rows = out.splitlines()
+    assert "○ closed 4" in rows[1]
+    states = {m[1] for x in rows if re.match(r"(❯| ) ● #\d+", x) and (m := re.search(r" (merged|closed|open) ", x))}
+    assert states == {"merged", "open"}
 
 
 # ------------------------------------------------------------------------------------------------------ narrow panels
@@ -861,21 +866,25 @@ async def test_linked_sessions_opens_as_its_browser_page_does_and_reads_at_every
 
 @needs_node
 async def test_repository_opens_as_its_browser_page_does_and_reads_at_every_width(repository):
-    """Colored by the label that is on; the table's header names every run over the activity; an item's records read
-    across a narrow panel, their words under their time, author and action."""
+    """Colored by the label that is on; the tabs, a heading per run and the columns' names read at every width, the tabs'
+    names shorter where the panel is narrow; in a narrow panel an item's page stands under the list."""
     await _labels_on(repository, "repository")
     for cols in WIDTHS:
         out = await term_views.draw_text(repository, "repository", cols=cols, rows=36, wrap=DRAW_WRAP)
         body, hints = _split(out.splitlines(), 2, 36)
         assert all(len(x) <= cols + 2 for x in body), cols
-        top = "\n".join(body[:3])
-        assert "Color by  Clock change ↗" in top and "● clock change 6" in top, cols
-        head = next(x for x in body if x.split()[:2] == ["item", "title"]).split()
-        assert head[-4:] == ["r1", "r2", "r3", "r4"], cols
-        assert "i for items" in hints and "[ ] to pan" in hints
+        assert body[0].split()[:2] == (["pulls", "35"] if cols < 60 else ["pull", "requests"]), cols
+        top = "\n".join(body[1:4])
+        assert "Color by  Clock change ↗" in top and "● clock change" in top, cols
+        assert any(x.strip().startswith("r1 · 3 agents") for x in body), cols
+        assert next(x for x in body if x.split()[:2] == ["pull", "request"]), cols
+        assert "1 2 3 4 for the tabs" in hints and "[ ] to pan" in hints
     out = await term_views.draw_text(repository, "repository", cols=47, rows=50, wrap=DRAW_WRAP, keys=["down", "down", "return"],
                                      panel=False)
     rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
-    at = next(i for i, x in enumerate(rows) if x.strip().startswith("09:50  cedar  opened"))
-    assert rows[at].rstrip().endswith("↗")
-    assert rows[at + 1].strip() == "Occurrences are computed in local time"
+    rule = next(i for i, x in enumerate(rows) if set(x.strip()) == {"─"})
+    assert rows[rule + 1].strip().startswith("r1 #11 Keep wall-clock") and rows[rule + 1].endswith("close")
+    at = next(i for i, x in enumerate(rows) if x[2:].startswith("09:50  cedar  opened"))
+    assert rows[at].startswith("❯"), "its first record is chosen"
+    assert rows[at + 1].strip().startswith("Occurrences are computed in local")
+

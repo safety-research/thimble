@@ -21,6 +21,7 @@ The rest is your judgment. Aim for the page a demanding designer would ship, one
 {{if:terminal}}
 - The layout is fluid. The panel is 120 columns wide in a laptop's terminal and 200 columns on a large screen.
 {{end}}
+- Records from a system the analyst knows, such as a code forge, a message board or a chat, can be drawn the way that system draws them, in thimble's parts and colors, as `repository` draws a forge's pull requests and a board's threads.
 - The page explains nothing in words. The analyst learns it by using it, so a line that explains the page, a hint or a caption is clutter, even where the proposal asks for one.
 - The reviewer judges the page by established principles, so design with them from the start: zoom and filter by acting on the data's own marks and axes, details that open in a side panel, each control once in the top row, one visual channel for each attribute with color only for the one the analyst colors by, one scale and mark for each quantity in every part, keys that match the marks, no ink that shows no data, each encoding's meaning one click away, and thimble's own parts and readers.
 
@@ -61,9 +62,9 @@ Code checks three things in every view and shows the first two to the analyst ab
 
 Three example views in {{examples}} show the contract above on invented data, each with its files described at the top of its `reader.py`. They are examples only, never views of this corpus. Each sample is several files with the mess a real corpus has, such as renamed fields, mixed time formats, duplicates and a torn last line, and the reader cleans it, lists what it derived and reports what it could not parse. Read the one closest to your task for how a reader and a page meet the contract. Their layouts fit their invented data, so lay out yours for the data you counted.
 
-- `timeline` is for events over time from several sources.
-- `linked-sessions` is for agent transcripts, sessions and subagents.
-- `repository` is for work items across runs, such as pull requests and issues.
+- `timeline` is for events on a time axis, the base layout: lanes on the time range, the events in a list with its columns' names, Filter by, Rows and Color by in the top row, and an event's details in the side panel.
+- `repository` is for records from a system the analyst knows, drawn the way that system draws them: a code forge's pull requests and issues, and a message board's threads.
+- `linked-sessions` is for reading many related transcripts: sessions as a tree, the chosen session's transcript at the center, and the links between sessions.
 {{if:terminal}}
 
 Each example's `view.term.js` draws the same view in the terminal on the kit. Start from the `view.term.js` of the closest one and change it for your data: it shows how a program uses the kit's parts, fetches and keeps its state, and fits the panel at each width.

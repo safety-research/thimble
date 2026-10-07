@@ -2,235 +2,467 @@
 <html>
 <head>
 <style>
-  /* thimble's parts (.field, .table, .chip), its Color by control, its time range selector and its axis come with the
-     frame; this page lays out the top row, the range and the table of items */
+  /* thimble's parts (.chip, .btn, .seg, .field, .avatar), its Color by and Filter by, its time range and its side panel
+     come with the frame; this page draws a code forge's pages and a message board in thimble's tokens */
   html, body { margin: 0; height: 100%; }
   body { background: var(--surface-card); overflow: hidden; }
   * { box-sizing: border-box; }
+  button { font: inherit; color: inherit; }
   #view { height: 100%; display: flex; flex-direction: column; }
-  .top { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border-subtle); }
-  .search { flex: 0 1 180px; min-width: 110px; }
-  #range { flex: none; padding: 10px 16px 6px; }
-  #list { flex: 1; min-height: 0; overflow: auto; }
-  .table { table-layout: fixed; }
-  .table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  tr.item { cursor: pointer; }
-  .c-id { width: 76px; }
-  /* the activity column's head is the axis of every row's strip, its labels as the axis writes them */
-  th.act { text-transform: none; letter-spacing: 0; padding-bottom: 0; }
-  .id, .dim { color: var(--text-tertiary); }
-  /* a title with its flags after it, in gray (only Color by's choice takes a color), which wrap onto more lines when
-     the cell is short of room rather than being cut */
-  .table td.t { white-space: normal; }
-  .title { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; min-width: 0; }
-  .title b { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--text-sm) / 1.4 var(--font-body); }
-  .flags { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; max-width: 100%; }
-  .flags .chip { max-width: 100%; }
-  .strip { display: block; }
-  .strip line { stroke: var(--border-strong); }
-  .strip rect { fill: var(--viz-ink-3); }
-  /* an item opened in place: its records in time order under its line */
-  .thimble-details > td { padding: 2px 12px 10px 84px; white-space: normal; }
-  .runs { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 0 6px 8px; }
-  .rec { display: grid; grid-template-columns: 44px 72px 124px minmax(0, 1fr); gap: 0 10px; padding: 3px 0 3px 8px; }
-  .rec.focus { background: var(--surface-selected); }
-  .rec time, .rec span { color: var(--text-tertiary); }
-  .rec .who { color: var(--text-secondary); }
-  .rec .body { white-space: pre-wrap; overflow-wrap: anywhere; font: 400 var(--text-sm) / 1.5 var(--font-body); }
-  .rec pre { margin: 4px 0 0; white-space: pre-wrap; color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); }
-  .empty { padding: 28px 16px; color: var(--text-tertiary); }
+
+  /* the forge's tabs, each with its count, the chosen one underlined */
+  .tabs { flex: none; display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); overflow: hidden; }
+  .tab { display: flex; align-items: center; gap: 7px; padding: 10px 10px 8px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-secondary); cursor: pointer; white-space: nowrap; font: 400 var(--text-sm) / 1.2 var(--font-body); }
+  .tab:hover { color: var(--text-primary); }
+  .tab.on { border-bottom-color: var(--accent); color: var(--text-primary); font-weight: 500; }
+  .count { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: var(--radius-chip); background: rgba(var(--ink-rgb), 0.07); color: var(--text-secondary); text-align: center; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
+
+  .top { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px 8px; }
+  .search { flex: 0 1 170px; min-width: 100px; }
+  #range { flex: none; padding: 0 16px 8px; }
+  #body { flex: 1; min-height: 0; border-top: 1px solid var(--border-subtle); }
+  #list { overflow: auto; padding: 12px 16px 24px; container-type: inline-size; }
+
+  .ico { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+  .ico .fill { fill: currentColor; stroke: none; }
+  .dim { color: var(--text-tertiary); }
+  .mono { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
+
+  /* a run's part of the list: a box headed by the run, its rows under it on hairlines */
+  .box { margin: 0 0 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--surface-card); }
+  .box-head, .item { display: grid; grid-template-columns: 22px minmax(0, 1fr) var(--cols); align-items: center; gap: 0 12px; }
+  .box-head { padding: 8px 14px 8px 12px; border-bottom: 1px solid var(--border-subtle); border-radius: var(--radius-card) var(--radius-card) 0 0; background: rgba(var(--ink-rgb), 0.03); color: var(--text-secondary); font: 400 var(--text-ui-sm) / 1.3 var(--font-body); }
+  .box-head .run { grid-column: 1 / 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .box-head b { color: var(--text-primary); font-weight: 600; margin-right: 8px; }
+  .heads { display: contents; }
+  .heads span, .num { text-align: right; white-space: nowrap; }
+  .item { padding: 9px 14px 9px 12px; border-top: 1px solid var(--border-hairline); cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 58px; }
+  .box-head + .item { border-top: 0; }
+  .item:hover { background: var(--surface-hover); }
+  .item.active { background: var(--surface-selected); }
+  .item:last-child { border-radius: 0 0 var(--radius-card) var(--radius-card); }
+  .state { color: var(--text-secondary); align-self: start; padding-top: 2px; }
+  .main { min-width: 0; }
+  .line1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 var(--text-sm) / 1.4 var(--font-body); }
+  .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font: 400 var(--text-ui-sm) / 1.5 var(--font-body); }
+  .lead { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-secondary); }
+  .num { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
+  .num .ico { width: 14px; height: 14px; }
+  .people { display: inline-flex; margin-right: 4px; vertical-align: middle; }
+  .people .avatar { width: 18px; height: 18px; margin-right: -4px; font-size: 9px; box-shadow: 0 0 0 1.5px var(--surface-card); }
+  .empty { padding: 28px 4px; color: var(--text-tertiary); }
+  /* the list's numbers give way to the titles in a narrow list */
+  @container (max-width: 560px) { .box-head, .item { grid-template-columns: 22px minmax(0, 1fr); } .heads, .num { display: none; } }
+
+  /* an item's page in the side panel: its state and facts, the links to its issue or pull requests, then its parts */
+  .page-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 2px 0 10px; color: var(--text-secondary); }
+  .page-head b { color: var(--text-primary); font-weight: 600; }
+  .facts { margin: 0 0 12px; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; font: 400 var(--text-ui-sm) / 1.5 var(--font-body); }
+  .facts dt { color: var(--text-tertiary); }
+  .facts dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+  .go { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--text-primary); cursor: pointer; text-align: left; }
+  .go:hover { text-decoration: underline; }
+  .go .ico { width: 14px; height: 14px; color: var(--text-secondary); }
+  .parts { margin: 4px 0 12px; }
+
+  /* a conversation: the forge's timeline, events on a line down the left and comments in boxes over it */
+  .tl { position: relative; padding: 2px 0 6px; }
+  .tl::before { content: ''; position: absolute; top: 0; bottom: 0; left: 15px; border-left: 2px solid var(--border-subtle); }
+  .ev { position: relative; display: flex; align-items: flex-start; gap: 8px; padding: 5px 4px 5px 8px; color: var(--text-secondary); }
+  .badge { display: grid; place-items: center; flex: none; width: 16px; height: 18px; background: var(--surface-card); }
+  .ev-words { flex: 1; min-width: 0; padding-top: 1px; overflow-wrap: anywhere; }
+  .ev-words b { color: var(--text-primary); font-weight: 600; }
+  .ev time, .card-head time { flex: none; padding-top: 1px; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
+  .card { position: relative; margin: 6px 0 8px; padding-left: 8px; }
+  .card-box { border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--surface-card); }
+  .card-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); border-radius: var(--radius-card) var(--radius-card) 0 0; background: rgba(var(--ink-rgb), 0.03); color: var(--text-secondary); }
+  .card-head .said { flex: 1; min-width: 0; }
+  .card-head b { color: var(--text-primary); font-weight: 600; }
+  .text { padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ev .text { padding: 4px 0 0; color: var(--text-primary); }
+  .focus { background: var(--surface-selected); }
+  .card.focus { background: none; }
+  .card.focus .card-box { background: var(--surface-selected); }
+  .ref { padding: 0; border: 0; background: none; color: var(--text-accent); cursor: pointer; }
+  .ref:hover { text-decoration: underline; }
+  code { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-secondary); }
+
+  /* commits, and the changed files as the commits' diffs by file, the signs in a gutter */
+  .commit { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 0 8px; align-items: start; padding: 7px 8px; border-top: 1px solid var(--border-hairline); }
+  .commit:first-child { border-top: 0; }
+  .commit b { font-weight: 500; }
+  .file { margin: 0 0 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); overflow: hidden; }
+  .file-head { display: flex; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); background: rgba(var(--ink-rgb), 0.03); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
+  .file-head span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .hunk { padding: 0 0 4px 6px; }
+  .hunk-head { padding: 4px 4px 2px; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
+  .diff { margin: 0; overflow-x: auto; font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
+  .diff div { display: grid; grid-template-columns: 16px minmax(0, 1fr); white-space: pre; color: var(--text-secondary); }
+  .diff div::before { content: attr(data-s); color: var(--text-tertiary); text-align: center; }
+  .diff .add { color: var(--text-primary); background: rgba(var(--ink-rgb), 0.05); }
+  .diff .del { color: var(--text-tertiary); background: rgba(var(--ink-rgb), 0.025); }
+
+  /* a thread as a social board draws it: avatars down a rail, each post's author, time and words */
+  .post { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 0 10px; padding: 8px; }
+  .rail { position: relative; display: flex; justify-content: center; }
+  .post:not(:last-child) .rail::after { content: ''; position: absolute; top: 34px; bottom: -14px; left: 15px; border-left: 2px solid var(--border-subtle); }
+  .rail .avatar { width: 32px; height: 32px; font-size: 13px; }
+  .post-head { display: flex; align-items: baseline; gap: 8px; }
+  .post-head b { font-weight: 600; }
+  .post .text { padding: 2px 0 0; }
+  .post.op .text { font-size: var(--text-lg, 15px); line-height: 1.45; }
+  .feed .item { align-items: start; }
+
+  /* an agent's profile */
+  .who { display: flex; align-items: center; gap: 12px; margin: 4px 0 12px; }
+  .who .avatar { width: 44px; height: 44px; font-size: 18px; }
+  .who b { display: block; font: 600 var(--text-lg, 15px) / 1.3 var(--font-body); }
+  .note { margin: 0 0 12px; padding: 8px 10px; border-left: 3px solid var(--border-strong); color: var(--text-secondary); }
+  .did { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 12px; color: var(--text-secondary); }
+  .did b { color: var(--text-primary); font-weight: 600; }
 </style>
 </head>
 <body>
 <div id="view">
+  <nav class="tabs" id="tabs" aria-label="Kind of item"></nav>
   <div class="top">
     <input class="field search" id="q" type="search" placeholder="Search" aria-label="Search">
-    <select class="field" id="kind" aria-label="Items">
-      <option value="pulls">Pull requests</option>
-      <option value="issues">Issues</option>
-      <option value="discussions">Discussions</option>
-      <option value="agents">Agents</option>
-    </select>
+    <span id="filter"></span>
     <span id="colour"></span>
   </div>
   <div id="range"></div>
-  <div id="list">
-    <table class="table">
-      <colgroup id="cols"></colgroup>
-      <thead><tr id="heads"></tr></thead>
-      <tbody id="rows"></tbody>
-    </table>
-  </div>
+  <div id="body"><div id="list"></div></div>
 </div>
 <script>
-// Several agent runs on one library. Overview: the runs' activity over time in the time range selector, and a table of
-// the chosen kind of item, each row with its records as ticks on one shared time scale. Zoom and filter: the
-// viewfinder narrows the table to the items active in its range, search and the kind of item narrow it, and the Color by
-// chips hide a state, a run, an area or a label's value. Details on demand: a row opens its records in place.
+// Several agent runs on one library, drawn the way a code forge and a message board draw them. Overview: the forge's
+// tabs with their counts, the runs' activity in the time range, and the chosen tab's items as the forge lists them, a
+// box per run: pull requests and issues with their states, reviews and comments, threads as a board's feed, agents as
+// people. Zoom and filter: the time range keeps the items active in it, Filter by the runs (or any field or label),
+// Color by's chips the values left on, and the search the items whose words hold it. Details on demand: an item opens
+// as its page in the side panel: a pull request's conversation, commits and changed files, an issue's timeline, a
+// thread's posts, an agent's profile.
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 const $ = (id) => document.getElementById(id)
 const slug = (thimble.view && thimble.view.slug) || 'repository'
-const TAB = { pull: 'pulls', issues: 'issues', discussions: 'discussions', agents: 'agents' } // the kind of item a key names in its second part
-let data = null // the reader's answer for the kind of item (reader.py _view)
-let marks = [] // each run's start, a flag on the overview and on the axis
-let open = null // the key of the item opened in place
-let focus = null // the record a citation opened
-let want = null // a place thimble asked for before the items arrived
-const units = new Map() // each opened item's records (reader.py _detail)
-// the table's columns between Title and the activity strip, each shown only while an item of the kind has a value in it,
-// with its width in px
-const COLS = [{ key: 'area', title: 'Area', w: 92, td: 'dim' }, { key: 'author', title: 'Author', w: 84 }, { key: 'state', title: 'State', w: 72 }]
-let shown = COLS // the columns the items of the kind fill
-const ID_W = 76 // px of the Item column (.c-id)
-const TITLE_MIN = 48 // px the least Title takes, for its head
 
-const colour = thimble.colorBy({
-  mount: '#colour',
-  // each field says what it is (from view.json's records), and `meanings` what the values the forge fixes mean
-  // (reader.py's notes), which the menu and a chip's hover give; a value with none, such as a run or an area, shows what
-  // the field is. `meanings` declares no value, so the values keep the colors the records give them
-  fields: [
-    {
-      name: 'state', title: 'State', description: 'A pull request open, merged or closed by its records; an issue fixed once a pull request that fixes it merged',
-      meanings: {
-        open: 'A pull request neither merged nor closed, or an issue no merged pull request fixes yet', merged: 'A pull request merged',
-        closed: 'A pull request closed without a merge', fixed: 'An issue that a merged pull request fixes',
-      },
+// the forge's tabs: what each lists, and the headings of its list's numbers with their widths
+const TABS = [
+  { tab: 'pulls', name: 'Pull requests', icon: 'pr', heads: ['Reviews', 'Comments', 'Lines'], cols: '76px 72px 84px' },
+  { tab: 'issues', name: 'Issues', icon: 'issue', heads: ['Fixed by', 'Comments'], cols: '76px 72px' },
+  { tab: 'discussions', name: 'Discussions', icon: 'talk', heads: ['Posts', 'Last post'], cols: '52px 68px' },
+  { tab: 'agents', name: 'Agents', icon: 'person', heads: ['Pull requests', 'Reviews', 'Merges', 'Comments'], cols: '92px 62px 58px 72px' },
+]
+const TAB_OF = { pull: 'pulls', issues: 'issues', discussions: 'discussions', agents: 'agents' } // a key's second part
+
+// line icons in the text colour: a state is a shape, never a colour, which is Color by's
+const ICONS = {
+  pr: '<circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><circle cx="12" cy="12.5" r="1.6"/><path d="M12 10.9V6.5a2 2 0 0 0-2-2H7.5M9 3L7.5 4.5 9 6"/>',
+  merged: '<circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><circle cx="12" cy="8" r="1.6"/><path d="M4 5.1c0 2.2 2.3 2.9 6.4 2.9"/>',
+  prclosed: '<circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><circle cx="12" cy="12.5" r="1.6"/><path d="M12 10.9V8.2M10.5 3l3 3M13.5 3l-3 3"/>',
+  issue: '<circle cx="8" cy="8" r="6"/><circle class="fill" cx="8" cy="8" r="1.3"/>',
+  fixed: '<circle cx="8" cy="8" r="6"/><path d="M5.4 8.2l1.8 1.8 3.4-3.7"/>',
+  closed: '<circle cx="8" cy="8" r="6"/><path d="M5.6 5.6l4.8 4.8"/>',
+  talk: '<path d="M2.5 3h8v5.5H6l-2.5 2v-2h-1z"/><path d="M12.5 6.5h1V12h-1v2L10 12H6.5"/>',
+  person: '<circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c.8-2.4 2.7-3.7 5-3.7s4.2 1.3 5 3.7"/>',
+  comment: '<path d="M2.5 3h11v7.5H7l-3 2.5v-2.5H2.5z"/>',
+  commit: '<circle cx="8" cy="8" r="2.5"/><path d="M1 8h4.5M10.5 8H15"/>',
+  approved: '<path d="M3.5 8.5l3 3 6-6.5"/>',
+  changes: '<path d="M8 2.5v6M5 5.5h6M5 12.5h6"/>',
+  reviewed: '<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="1.8"/>',
+  reopened: '<path d="M12.6 7.2A4.7 4.7 0 1 0 11.4 11"/><path d="M13 3.5v3.7H9.3"/>',
+  x: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
+  flag: '<path d="M4 14V2.5M4 3h7.5l-1.8 2.8 1.8 2.7H4"/>',
+}
+const ico = (name) => `<svg class="ico" viewBox="0 0 16 16" aria-hidden="true">${ICONS[name]}</svg>`
+// a state's icon and word, by tab
+const STATE = {
+  pulls: { open: ['pr', 'Open'], merged: ['merged', 'Merged'], closed: ['prclosed', 'Closed'] },
+  issues: { open: ['issue', 'Open'], fixed: ['fixed', 'Fixed'], closed: ['closed', 'Closed'] },
+}
+// a record's icon on a timeline, by its kind; a review's by its verdict, with what its line says
+const EVENT = { commit: 'commit', merge: 'merged', close: 'x', reopen: 'reopened', pr: 'pr', issue: 'issue', comment: 'comment', post: 'comment', agent: 'flag' }
+const VERDICT = { approved: ['approved', 'approved these changes'], 'changes requested': ['changes', 'requested changes'], commented: ['reviewed', 'reviewed'] }
+
+const hm = (t) => new Date(t * 1000).toISOString().slice(11, 16)
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const day = (t) => { const d = new Date(t * 1000); return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}` }
+const tOf = (iso) => Date.parse(iso) / 1000
+function took(a, b) {
+  const m = Math.round((b - a) / 60)
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`
+}
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+const cap = (s) => String(s || '').replace(/^./, (c) => c.toUpperCase())
+// an avatar's shade from its name, so people tell apart without a colour
+function shade(name) {
+  let h = 0
+  for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) | 0
+  return (0.08 + (Math.abs(h) % 9) * 0.02).toFixed(2)
+}
+const avatar = (name) => `<span class="avatar" style="--a:${shade(name)}" title="${esc(name)}" aria-hidden="true">${esc(String(name || '?')[0])}</span>`
+
+let tab = 'pulls'
+let data = null // the reader's answer for the tab (reader.py _view)
+let open = null // the item in the side panel: {key, ref (the record a citation opened), part (a pull request's tab)}
+let want = null // a place thimble asked for before the items arrived
+const units = new Map() // each opened item's page (reader.py _detail)
+
+// the fields Filter by and Color by offer: each says what it is (view.json's records), and `meanings` what the states
+// the forge gives mean (reader.py's notes), which the menus and a chip's hover show
+const FIELDS = [
+  {
+    name: 'state', title: 'State', description: 'A pull request open, merged or closed by its records; an issue fixed once a pull request that fixes it merged',
+    meanings: {
+      open: 'A pull request neither merged nor closed, or an issue no merged pull request fixes yet', merged: 'A pull request merged',
+      closed: 'A pull request closed without a merge', fixed: 'An issue that a merged pull request fixes',
     },
-    { name: 'run', title: 'Run', description: "The run whose folder holds the item" },
-    { name: 'area', title: 'Area', description: 'The first label, else the area of the issue it fixes' },
-  ],
-  chips: 'filter',
-  strip: '#list',
-  onChange: load,
-})
+  },
+  { name: 'run', title: 'Run', description: 'The run whose folder holds the item' },
+  { name: 'area', title: 'Area', description: 'The part of the library: the first label, else the area of the issue it fixes' },
+  { name: 'author', title: 'Author', description: 'Who opened the pull request or the issue, or started the thread' },
+]
+const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, initial: 'run', onChange: load })
+const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, chips: 'filter', strip: '#list', onChange: load })
 // the runs fall on different days, so the nights between them are narrow breaks
 const range = thimble.timeRange({ mount: '#range', gap: 4 * 3600, onChange: draw })
-thimble.onReset({ changed: () => open != null, reset: () => { open = null; load() } })
+const side = thimble.side({ mount: '#body', width: 0.45, onClose: () => { open = null; draw() } })
 
 async function load() {
+  let got
   try {
-    data = await thimble.fetch({ op: 'view', tab: $('kind').value, colour: colour.query() }, { key: 'view' })
+    got = await thimble.fetch({ op: 'view', tab, colour: colour.query(), filter: filter.query() }, { key: 'view' })
   } catch (e) {
     if (e.name === 'AbortError') return
     throw e
   }
-  colour.counts(data.counts)
-  const ev = data.items.flatMap((it) => it.events).filter((e) => colour.isOn(e[2]))
-  marks = data.runs.map((r) => ({ t: r.start, label: r.run }))
-  range.data({ times: ev.map((e) => e[0]), values: ev.map((e) => e[2]), marks })
+  data = got
+  colour.counts(got.counts)
+  filter.counts(got.filtered)
+  const ev = got.items.flatMap((it) => it.events).filter((e) => colour.isOn(e[2]))
+  range.data({ times: ev.map((e) => e[0]), values: ev.map((e) => e[2]), marks: got.runs.map((r) => ({ t: r.start, label: r.run })) })
   units.clear()
-  if (open) await opened(open)
+  if (open && got.items.some((it) => it.key === open.key)) await page(open.key, open.ref, open.part)
+  else if (open) side.close()
   draw()
   if (want) go()
 }
 
-async function opened(key) {
+async function fetchUnit(key) {
   if (!units.has(key)) units.set(key, await thimble.fetch({ op: 'unit', key }))
   return units.get(key)
 }
 
-// the head and the columns for the kind of item: Item, Title, the columns its items fill, and the activity strip,
-// whose head is the axis
-function heads() {
-  const want = COLS.filter((c) => data.items.some((it) => it[c.key] != null && it[c.key] !== ''))
-  if (!$('heads').children.length || want.map((c) => c.key).join() !== shown.map((c) => c.key).join()) {
-    shown = want
-    $('heads').innerHTML = `<th>Item</th><th>Title</th>${shown.map((c) => `<th>${c.title}</th>`).join('')}<th class="act"><div id="axis"></div></th>`
-  }
-  // the strip: a third of the table and the width of the columns the kind leaves out, so it widens rather than Title,
-  // and whatever Title's widest title leaves on one line, so short titles such as the agents' names give it the rest;
-  // in px, since a table's column takes no calc() of a share and a length
-  const freed = COLS.filter((c) => !shown.includes(c)).reduce((n, c) => n + c.w, 0)
-  // the list's width inside the room the kit's tracks take at its right
-  const box = getComputedStyle($('list'))
-  const w = $('list').clientWidth - parseFloat(box.paddingLeft) - parseFloat(box.paddingRight)
-  const left = w - ID_W - shown.reduce((n, c) => n + c.w, 0) - titleWidth(data.items)
-  const strip = Math.max(Math.round(w * 0.32) + freed, left)
-  $('cols').innerHTML = `<col class="c-id"><col>${shown.map((c) => `<col style="width:${c.w}px">`).join('')}<col style="width:${strip}px">`
-}
-
-// the px Title takes for the widest of these titles on one line, with the cell's padding, in the title's own font
-const ruler = document.createElement('canvas').getContext('2d')
-let fontAsked = false
-function titleWidth(items) {
-  const probe = document.createElement('table')
-  probe.className = 'table'
-  probe.style.cssText = 'position:absolute;visibility:hidden;width:auto'
-  probe.innerHTML = '<tbody><tr><td class="t"><div class="title"><b>Title</b></div></td></tr></tbody>'
-  document.body.appendChild(probe)
-  const td = getComputedStyle(probe.querySelector('td'))
-  const b = getComputedStyle(probe.querySelector('b'))
-  ruler.font = `${b.fontWeight} ${b.fontSize} ${b.fontFamily}`
-  // a face still loading is measured again once it has, once
-  if (!fontAsked && document.fonts && !document.fonts.check(ruler.font)) {
-    fontAsked = true
-    document.fonts.load(ruler.font).then(() => data && draw(), () => {})
-  }
-  const pad = parseFloat(td.paddingLeft) + parseFloat(td.paddingRight)
-  probe.remove()
-  return Math.ceil(items.reduce((n, it) => Math.max(n, ruler.measureText(it.title || '').width), TITLE_MIN) + pad) + 2
-}
+// ------------------------------------------------------------------------------------------------ the list
 
 function draw() {
+  $('tabs').innerHTML = TABS.map((t) => `<button type="button" class="tab${t.tab === tab ? ' on' : ''}" data-tab="${t.tab}">${ico(t.icon)}${t.name}` +
+    `<span class="count">${data ? data.tabs[t.tab] : ''}</span></button>`).join('')
   if (!data) return
-  heads()
   const q = $('q').value.trim().toLowerCase()
-  const rows = data.items.filter((it) => (!q || it.search.includes(q)) && (range.full || it.events.some((e) => range.has(e[0]))))
-  const sc = range.scale($('axis').clientWidth)
-  thimble.timeAxis('#axis', sc, { marks })
-  $('rows').innerHTML = rows.map((it) => row(it, sc)).join('') ||
-    `<tr><td colspan="${shown.length + 3}" class="empty">No ${$('kind').selectedOptions[0].text.toLowerCase()}</td></tr>`
+  const shown = data.items.filter((it) => (!q || it.search.includes(q)) && (range.full || it.events.some((e) => range.has(e[0]))))
+  const T = TABS.find((t) => t.tab === tab)
+  const boxes = data.runs.map((r) => {
+    const items = shown.filter((it) => it.run === r.run)
+    if (!items.length) return ''
+    const facts = [plural(r.team || 0, 'agent'), `${plural(r.approvals || 1, 'approval')} to merge`, day(r.start)]
+    return `<section class="box" style="--cols:${T.cols}"><div class="box-head" data-anchor="view:${slug}/${esc(r.run)}">` +
+      `<span class="run"><b>${esc(r.run)}</b>${esc(facts.join(' · '))}</span><span class="heads">${T.heads.map((h) => `<span>${h}</span>`).join('')}</span></div>` +
+      items.map(ROW[tab]).join('') + '</section>'
+  }).join('')
+  $('list').classList.toggle('feed', tab === 'discussions')
+  $('list').innerHTML = boxes || `<div class="empty">No ${T.name.toLowerCase()}</div>`
 }
 
-const flagChip = (f) => `<span class="chip chip-sans chip-tone-neutral" title="${esc(f)}"><span class="chip-text">${esc(f)}</span></span>`
-const row = (it, sc) => `<tr class="item${it.key === open ? ' active' : ''}" data-key="${esc(it.key)}" data-anchor="view:${slug}/${esc(it.key)}"${colour.attr(it)}>` +
-  `<td class="id">${esc(it.run)}${it.number != null ? ' #' + it.number : ''}</td>` +
-  `<td class="t"><div class="title"><b title="${esc(it.title)}">${esc(it.title)}</b>${it.flags.length ? `<span class="flags">${it.flags.map(flagChip).join('')}</span>` : ''}</div></td>` +
-  shown.map((c) => `<td${c.td ? ` class="${c.td}"` : ''}>${esc(it[c.key])}</td>`).join('') + `<td>${strip(it, sc)}</td></tr>` +
-  (it.key === open && units.has(open) ? details(units.get(open)) : '')
+const rowOpen = (it) => `<div class="item${open && open.key === it.key ? ' active' : ''}" data-key="${esc(it.key)}" data-anchor="view:${slug}/${esc(it.key)}"${colour.attr(it)}>`
+// the area as the forge's label: in its colour while Color by colours by area
+const areaChip = (it) => !it.area ? '' : colour.field === 'area'
+  ? `<span class="chip chip-key"><span class="chip-sw" style="--c:${colour.colourOf(it.area)}"></span><span class="chip-text">${esc(it.area)}</span></span>`
+  : `<span class="chip chip-sans chip-tone-neutral"><span class="chip-text">${esc(it.area)}</span></span>`
+const stateIcon = (t, it) => { const [i, w] = STATE[t][it.state] || STATE[t].open; return `<span class="state" title="${w}">${ico(i)}</span>` }
 
-// an item's records in the range as ticks in their Color by colors on the range's scale, over a line from its first
-// to its last, so every row reads as a small multiple of the same time
-function strip(it, sc) {
-  const ev = it.events.filter((e) => range.has(e[0]) && colour.isOn(e[2]))
-  if (!ev.length) return ''
-  const x = (e) => Math.round(sc.x(e[0]) * 10) / 10
-  const tick = (e, c = colour.colourOf(e[2])) => `<rect x="${x(e) - 1}" y="1" width="2" height="10"${c ? ` style="fill:${c}"` : ''}/>`
-  return `<svg class="strip" width="${sc.width}" height="12"><line x1="${x(ev[0])}" x2="${x(ev[ev.length - 1])}" y1="6" y2="6"/>${ev.map((e) => tick(e)).join('')}</svg>`
+const ROW = {
+  pulls: (it) => {
+    const meta = [`#${it.number} opened ${hm(it.opened)} by ${it.author}`, it.closes != null && `fixes #${it.closes}`, cap(it.review),
+      it.state === 'merged' && !it.flags.includes('merged by its author') && `merged by ${it.merged_by}`,
+      it.state === 'closed' && `closed by ${it.closed_by}${it.reason ? ` as ${it.reason}` : ''}`, ...it.flags].filter(Boolean).join(' · ')
+    return rowOpen(it) + stateIcon('pulls', it) +
+      `<div class="main"><div class="line1"><span class="title">${esc(it.title)}</span>${areaChip(it)}</div><div class="meta" title="${esc(meta)}">${esc(meta)}</div></div>` +
+      `<span class="num" title="Approvals and change requests, each reviewer's latest">${ico('approved')}${it.approvals}${it.changes ? ` ${ico('changes')}${it.changes}` : ''}</span>` +
+      `<span class="num">${ico('comment')}${it.comments}</span><span class="num">+${it.plus} −${it.minus}</span></div>`
+  },
+  issues: (it) => {
+    const meta = [`#${it.number} opened ${hm(it.opened)} by ${it.author}`, it.origin === 'backlog' ? 'from the backlog' : it.origin,
+      it.state === 'fixed' && `fixed after ${took(it.opened, it.ended)}`].filter(Boolean).join(' · ')
+    return rowOpen(it) + stateIcon('issues', it) +
+      `<div class="main"><div class="line1"><span class="title">${esc(it.title)}</span>${areaChip(it)}</div><div class="meta">${esc(meta)}</div></div>` +
+      `<span class="num">${it.prs.length ? `${ico('pr')}${it.prs.map((n) => `#${n}`).join(' ')}` : ''}</span><span class="num">${ico('comment')}${it.comments}</span></div>`
+  },
+  discussions: (it) => {
+    const others = it.posters.filter((p) => p !== it.author)
+    return rowOpen(it) + avatar(it.author) +
+      `<div class="main"><div class="meta"><b>${esc(it.author)}</b> · ${hm(it.opened)}</div><div class="title">${esc(it.title)}</div>` +
+      `<div class="lead">${esc(it.lead)}</div>${others.length ? `<div class="meta"><span class="people">${others.map(avatar).join('')}</span> ${esc(others.join(', '))} replied</div>` : ''}</div>` +
+      `<span class="num">${ico('comment')}${it.posts}</span><span class="num">${it.last ? hm(it.last) : ''}</span></div>`
+  },
+  agents: (it) => rowOpen(it) + avatar(it.title) +
+    `<div class="main"><div class="title">${esc(it.title)}</div><div class="meta">${it.note ? `“${esc(it.note)}”` : 'left no transcript'}</div></div>` +
+    ['pull requests', 'reviews', 'merges', 'comments'].map((k) => `<span class="num">${it.did[k] || 0}</span>`).join('') + '</div>',
 }
 
-// an item opened in place: the same issue in the other runs, then its records
-function details(d) {
-  const runs = (d.elsewhere || []).map((x) => `<button class="chip chip-sans chip-tone-neutral chip-act" data-go="${esc(x.key)}">${esc(x.run)} #${esc(x.key.split('/')[2])} ${esc(x.state)}</button>`).join('')
-  return `<tr class="thimble-details"><td colspan="${shown.length + 3}">${runs ? `<div class="runs">${runs}</div>` : ''}${d.records.map(rec).join('')}</td></tr>`
+// ------------------------------------------------------------------------------------------------ an item's page
+
+// an item's page in the side panel, with the record `ref` marked and in view; `part` a pull request's tab
+async function page(key, ref = null, part = null) {
+  const d = await fetchUnit(key)
+  if (!d) return
+  open = { key, ref, part: part || 'conversation' }
+  const f = d.facts
+  const t = TAB_OF[key.split('/')[1]]
+  const sub = t === 'agents' ? `${f.run} · agent` : t === 'discussions' ? `${f.run} · thread ${f.number}` : `${f.run} #${f.number}`
+  side.open({ title: f.title, sub, ref: `view:${slug}/${key}`, html: PAGE[t](d) })
+  const el = ref && side.body.querySelector(`[data-anchor="${CSS.escape(ref)}"]`)
+  if (el) el.scrollIntoView({ block: 'center' })
 }
 
-const rec = (r) => `<div class="rec${r.ref === focus ? ' focus' : ''}" data-anchor="${esc(r.ref)}"><time>${r.at.slice(11, 16)}</time>` +
-  `<span class="who">${esc(r.author)}</span><span>${esc(r.action)}${r.number != null && !open.endsWith('/' + r.number) ? ' #' + r.number : ''}</span>` +
-  `<div class="body">${esc([r.sha, r.reason, r.text].filter(Boolean).join(' · '))}${r.diff ? `<pre>${esc(r.diff)}</pre>` : ''}</div></div>`
+// a record's words with each #<n> a link to the pull request or issue it names
+const linked = (text, d) => esc(text).replace(/#(\d+)\b/g, (m, n) => (d.mentions[n] ? `<button type="button" class="ref" data-go="${esc(d.mentions[n].key)}" title="${esc(d.mentions[n].title)}">${m}</button>` : m))
+const words = (r, d) => (r.text ? `<div class="text">${linked(r.text, d)}</div>` : '')
+const focus = (r) => (open && r.ref === open.ref ? ' focus' : '')
+const goTo = (b, what) => `<button type="button" class="go" data-go="${esc(b.key)}">${ico((STATE[TAB_OF[b.key.split('/')[1]]][b.state] || ['pr'])[0])}${what}</button>`
+const badge = (state, t) => { const [i, w] = STATE[t][state] || STATE[t].open; return `<span class="chip chip-sans chip-tone-neutral">${ico(i)}<span class="chip-text">${w}</span></span>` }
 
-// open an item in place, on its kind, with the record `ref` picked; a citation, and an issue in another run, come here
-async function show(key, ref) {
-  const tab = TAB[key.split('/')[1]]
-  if (!tab) return
-  if ($('kind').value !== tab) {
-    $('kind').value = tab
+// one record on a conversation's timeline: an opening or a comment in a box, any other record on a line
+function entry(r, d) {
+  const own = d.facts.number
+  const at = `<time>${hm(tOf(r.at))}</time>`
+  if (r.kind === 'comment' || (['pr', 'issue'].includes(r.kind) && r.number === own)) {
+    const what = r.kind === 'comment' ? 'commented' : r.kind === 'pr' ? 'opened this pull request' : 'opened this issue'
+    return `<div class="card${focus(r)}" data-anchor="${esc(r.ref)}"><div class="card-box"><div class="card-head">${avatar(r.author)}<span class="said"><b>${esc(r.author)}</b> ${what}</span>${at}</div>` +
+      (r.text ? words(r, d) : '<div class="text dim">No description.</div>') + '</div></div>'
+  }
+  let icon = EVENT[r.kind] || 'comment'
+  let said = ''
+  if (r.kind === 'commit') said = `${r.forced ? `force-pushed <code>${esc(r.sha)}</code> over <code>${esc(r.before)}</code>` : `pushed <code>${esc(r.sha)}</code>`} ${esc((r.text || '').split('\n')[0])}`
+  else if (r.kind === 'review') [icon, said] = VERDICT[r.verdict] || VERDICT.commented
+  else if (r.kind === 'merge') said = r.number === own ? 'merged this' : `merged ${linked(`#${r.number}`, d)}, which fixed this`
+  else if (r.kind === 'close') said = `closed this${r.reason ? ` as ${esc(r.reason)}` : ''}`
+  else if (r.kind === 'reopen') said = 'reopened this'
+  else if (r.kind === 'pr') said = `opened ${linked(`#${r.number}`, d)} ${esc(r.title || '')}, which fixes this`
+  const body = r.kind !== 'commit' && r.kind !== 'pr' && r.text ? `<div class="text">${linked(r.text, d)}</div>` : ''
+  return `<div class="ev${focus(r)}" data-anchor="${esc(r.ref)}"><span class="badge">${ico(icon)}</span><div class="ev-words"><b>${esc(r.author)}</b> ${said}${body}</div>${at}</div>`
+}
+
+// the same issue in the other runs, each a link to it
+const elsewhere = (d) => (d.elsewhere || []).filter((x) => x.run !== d.facts.run).map((x) => goTo(x, `${esc(x.run)} #${esc(x.key.split('/')[2])} ${esc(x.state)}`)).join('')
+const dl = (rows) => `<dl class="facts">${rows.filter((r) => r[1]).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`
+
+const PAGE = {
+  pulls: (d) => {
+    const f = d.facts
+    const commits = d.records.filter((r) => r.kind === 'commit')
+    const files = changed(commits)
+    const end = f.state === 'merged' ? `${esc(f.merged_by)} merged it at ${hm(f.ended)}, ${took(f.opened, f.ended)} after it opened`
+      : f.state === 'closed' ? `${esc(f.closed_by)} closed it at ${hm(f.ended)}${f.reason ? ` as ${esc(f.reason)}` : ''}` : 'still open'
+    const head = `<div class="page-head">${badge(f.state, 'pulls')}<span><b>${esc(f.author)}</b> opened it at ${hm(f.opened)} · ${end}</span></div>` +
+      dl([['Fixes', d.fixes && goTo(d.fixes, `#${d.fixes.number} ${esc(d.fixes.title)}`)], ['In the other runs', elsewhere(d)],
+        ['Reviews', `${esc(cap(f.review))} · ${f.approvals} of ${plural(f.need, 'approval')}${f.reviewers.length ? ` · ${f.reviewers.map(([w, v]) => `${esc(w)} ${esc((VERDICT[v] || VERDICT.commented)[1].replace(' these changes', ''))}`).join(', ')}` : ''}`],
+        ['Flags', f.flags.map(esc).join(' · ')]])
+    const parts = [['conversation', 'Conversation', d.records.length], ['commits', 'Commits', commits.length], ['files', 'Files changed', files.length]]
+    const seg = `<div class="seg parts">${parts.map(([k, w, n]) => `<button type="button" class="seg-opt${open.part === k ? ' active' : ''}" data-part="${k}">${w} <span class="count">${n}</span></button>`).join('')}</div>`
+    const body = open.part === 'commits' ? `<div class="card-box">${commits.map(commitRow).join('') || '<div class="text dim">No commits.</div>'}</div>`
+      : open.part === 'files' ? files.map(fileBox).join('') || '<div class="dim">No changes.</div>'
+      : `<div class="tl">${d.records.map((r) => entry(r, d)).join('')}</div>`
+    return head + seg + body
+  },
+  issues: (d) => {
+    const f = d.facts
+    const end = f.state === 'fixed' ? `fixed at ${hm(f.ended)}, ${took(f.opened, f.ended)} after it opened` : f.state === 'closed' ? `closed at ${hm(f.ended)}` : 'still open'
+    return `<div class="page-head">${badge(f.state, 'issues')}<span><b>${esc(f.author)}</b> opened it at ${hm(f.opened)} · ${f.origin === 'backlog' ? 'from the backlog' : esc(f.origin)} · ${end}</span></div>` +
+      dl([['Pull requests', (d.prs || []).map((p) => goTo(p, `#${p.number} ${esc(p.title)}`)).join('')], ['In the other runs', elsewhere(d)]]) +
+      `<div class="tl">${d.records.map((r) => entry(r, d)).join('')}</div>`
+  },
+  discussions: (d) => {
+    const f = d.facts
+    return `<div class="page-head"><span>${plural(f.posts, 'post')} · ${plural(f.posters.length, 'person', 'people')} · ${hm(f.opened)}–${hm(f.last)}</span></div>` +
+      d.records.map((r, i) => `<div class="post${i ? '' : ' op'}${focus(r)}" data-anchor="${esc(r.ref)}"><div class="rail">${avatar(r.author)}</div>` +
+        `<div><div class="post-head"><b>${esc(r.author)}</b><span class="dim mono">${hm(tOf(r.at))}</span></div>${words(r, d)}</div></div>`).join('')
+  },
+  agents: (d) => {
+    const f = d.facts
+    const note = d.records.find((r) => r.kind === 'agent')
+    const did = Object.entries(f.did).map(([k, n]) => `<span><b>${n}</b> ${k}</span>`).join('')
+    return `<div class="who">${avatar(f.title)}<div><b>${esc(f.title)}</b><span class="dim">${esc(f.run)}</span></div></div>` +
+      (note ? `<div class="note${focus(note)}" data-anchor="${esc(note.ref)}">“${linked(note.text, d)}”</div>` : '') +
+      `<div class="did">${did}</div><div class="tl">${d.records.filter((r) => r.kind !== 'agent').map((r) => activity(r, d)).join('')}</div>`
+  },
+}
+
+// an agent's record in its activity: what it did, to which item, and its words
+function activity(r, d) {
+  const [icon, said] = r.kind === 'review' ? VERDICT[r.verdict] || VERDICT.commented : [EVENT[r.kind] || 'comment', '']
+  const what = r.kind === 'review' ? said.replace(' these changes', '') : r.kind === 'commit' ? `pushed <code>${esc(r.sha)}</code> to` : r.kind === 'post' ? 'posted in a thread' : esc(r.action)
+  const on = r.number != null ? ` ${linked(`#${r.number}`, d)}` : ''
+  const text = r.kind === 'commit' ? (r.text || '').split('\n')[0] : r.title || r.text || ''
+  return `<div class="ev${focus(r)}" data-anchor="${esc(r.ref)}"><span class="badge">${ico(icon)}</span><div class="ev-words"><b>${what}</b>${on}` +
+    `${text ? `<div class="text">${linked(text, d)}</div>` : ''}</div><time>${hm(tOf(r.at))}</time></div>`
+}
+
+const commitRow = (r) => `<div class="commit${focus(r)}" data-anchor="${esc(r.ref)}">${ico('commit')}<div><b>${esc((r.text || '').split('\n')[0])}</b>` +
+  `<div class="meta">${esc(r.author)} ${r.forced ? `force-pushed over ${esc(r.before)}` : 'committed'} ${hm(tOf(r.at))}</div></div><code>${esc(r.sha || '')}</code></div>`
+
+// the commits' diffs by the file they change, each hunk under its commit: [{path, plus, minus, hunks: [{ref, sha,
+// head, lines}]}]
+function changed(commits) {
+  const files = new Map()
+  for (const c of commits) {
+    let file = null
+    let hunk = null
+    for (const line of String(c.diff || '').replace(/\n$/, '').split('\n')) {
+      if (line.startsWith('--- ')) continue
+      if (line.startsWith('+++ ')) {
+        const path = line.slice(4).replace(/^b\//, '')
+        file = files.get(path) || { path, plus: 0, minus: 0, hunks: [] }
+        files.set(path, file)
+        hunk = null
+      } else if (file && line.startsWith('@@')) {
+        hunk = { ref: c.ref, sha: c.sha, head: line, lines: [] }
+        file.hunks.push(hunk)
+      } else if (hunk) {
+        hunk.lines.push(line)
+        if (line[0] === '+') file.plus++
+        else if (line[0] === '-') file.minus++
+      }
+    }
+  }
+  return [...files.values()]
+}
+const fileBox = (f) => `<div class="file"><div class="file-head"><span>${esc(f.path)}</span><span class="dim">+${f.plus} −${f.minus}</span></div>` +
+  f.hunks.map((h) => `<div class="hunk${open && h.ref === open.ref ? ' focus' : ''}" data-anchor="${esc(h.ref)}"><div class="hunk-head">${esc(h.sha || '')} ${esc(h.head)}</div><div class="diff">` +
+    h.lines.map((l) => `<div class="${l[0] === '+' ? 'add' : l[0] === '-' ? 'del' : ''}" data-s="${l[0] === '+' || l[0] === '-' ? l[0] : ''}">${esc(l.slice(1)) || ' '}</div>`).join('') + '</div></div>').join('') + '</div>'
+
+// ------------------------------------------------------------------------------------------------ places and clicks
+
+// open an item's page, on its tab, with the record `ref` marked: a citation, a link and another run's issue come here
+async function show(key, ref = null) {
+  const t = TAB_OF[key.split('/')[1]]
+  if (!t) return
+  if (t !== tab) {
+    tab = t
+    side.close()
     open = null
     await load()
   }
   const it = data && data.items.find((i) => i.key === key)
-  if (!it) return
-  await opened(key)
-  open = key
-  focus = ref || null
-  if (!it.search.includes($('q').value.trim().toLowerCase())) $('q').value = ''
-  if (!range.full && !it.events.some((e) => range.has(e[0]))) range.set(null)
+  if (it && !it.search.includes($('q').value.trim().toLowerCase())) $('q').value = ''
+  if (it && !range.full && !it.events.some((e) => range.has(e[0]))) range.set(null)
+  await page(key, ref)
   draw()
-  document.querySelector(`[data-anchor="${CSS.escape(ref || `view:${slug}/${key}`)}"]`)?.scrollIntoView({ block: 'center' })
+  document.querySelector(`#list [data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'nearest' })
 }
 
-// a run's citation frames its span in the range; any other opens its item
+// a run's citation frames its day in the range; any other opens its item
 function go() {
   const t = want
   want = null
@@ -239,25 +471,32 @@ function go() {
   else if (t.key) show(t.key, t.ref)
 }
 
-$('q').addEventListener('input', draw)
-$('kind').addEventListener('change', () => { open = null; load() })
-$('list').addEventListener('click', async (e) => {
-  const other = e.target.closest('[data-go]')
-  if (other) return show(other.dataset.go)
-  const tr = e.target.closest('tr.item')
-  if (!tr) return
-  const key = tr.dataset.key
-  if (open !== key) await opened(key)
-  open = open === key ? null : key
-  focus = null
-  thimble.expand(tr, draw)
+$('tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tab]')
+  if (!b || b.dataset.tab === tab) return
+  tab = b.dataset.tab
+  side.close()
+  open = null
+  load()
 })
-new ResizeObserver(() => requestAnimationFrame(draw)).observe($('list'))
+$('q').addEventListener('input', draw)
+$('body').addEventListener('click', async (e) => {
+  if (e.metaKey || e.ctrlKey) return // a ⌘-click asks about the element
+  const link = e.target.closest('[data-go]')
+  if (link) return show(link.dataset.go)
+  const part = e.target.closest('[data-part]')
+  if (part && open) return page(open.key, null, part.dataset.part)
+  const row = e.target.closest('#list .item')
+  if (!row) return
+  if (open && open.key === row.dataset.key) side.close()
+  else await page(row.dataset.key)
+  draw()
+})
 thimble.onLabels(() => load())
-// a label's values arrive while it runs, which the chips' counts and the overview follow while a label is the color
+// a label's values arrive while it runs, which the counts and the list follow while a label colors or filters
 let later = null
 thimble.onMarks(() => {
-  if (!colour.label) return
+  if (!colour.label && !filter.label) return
   clearTimeout(later)
   later = setTimeout(load, 300)
 })
@@ -265,6 +504,7 @@ thimble.onOpen((place) => {
   want = place.target || null
   if (want && data) go()
 })
+draw()
 load()
 </script>
 </body>
