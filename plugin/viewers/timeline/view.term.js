@@ -205,8 +205,10 @@ draw((d) => {
     if (dayOf(e.t) !== day) items.push({ heading: dayName((day = dayOf(e.t), e.t)) })
     items.push(e)
   }
-  const wide = d.cols >= 100
-  const cols = columns(wide ? [{ w: 8 }, { w: 6 }, { w: 10 }, { w: 10 }, { w: 7 }, { grow: true }] : [{ w: 8 }, { w: 6 }, { w: 10 }, { grow: true }], d.cols - 6)
+  // the columns the width holds: the actor from 88 cells, the incident from 110 (its menu and the details have it too)
+  const shownCols = ['time', 'source', 'kind', ...(d.cols >= 88 ? ['actor'] : []), ...(d.cols >= 110 ? ['incident'] : []), 'text']
+  const WIDTHS = { time: 8, source: 6, kind: 10, actor: 10, incident: 7 }
+  const cols = columns(shownCols.map((k) => (k === 'text' ? { grow: true } : { w: WIDTHS[k] })), d.cols - 6)
   events.draw(d, {
     items,
     colour,
@@ -214,9 +216,8 @@ draw((d) => {
     empty: 'no event',
     row: (e, r) => {
       // a failed outcome as `×` before its kind in the text's own color, since only Color by's choice takes a color
-      const kind = e.outcome === 'failed' ? `× ${e.kind}` : e.kind
-      const values = wide ? [hms(e.t), e.source, kind, e.actor, e.incident, e.text] : [hms(e.t), e.source, kind, e.text]
-      cols.cells(r, values, [{ d: true }, { d: true }, {}, { d: true }, { d: true }, {}])
+      const value = { time: hms(e.t), source: e.source, kind: e.outcome === 'failed' ? `× ${e.kind}` : e.kind, actor: e.actor, incident: e.incident, text: e.text }
+      cols.cells(r, shownCols.map((k) => value[k]), shownCols.map((k) => (k === 'kind' || k === 'text' ? {} : { d: true })))
     },
     onOpen: (e) => readRecord(e.r),
     ask: (e) => ({ ref: e.ref, text: e.text }),
