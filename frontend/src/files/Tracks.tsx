@@ -35,6 +35,8 @@ export const ZOOM_PX = 20
 export const LINK_PX = 16
 /** px the lens stands out past the part it shows at every side: its edge and a margin of the paper inside it */
 export const LENS_OUT_PX = 3
+/** px: the lens's corners; the lines from the frame meet its left edge where the corners' curves end */
+export const LENS_RADIUS_PX = 4
 /** px: the frame's least height on the overview */
 export const FRAME_MIN_PX = 8
 /** the grey of a marker's tick other than the find's: nothing but the Color by choice takes a color on the tracks */
@@ -132,18 +134,27 @@ export function frameOf(view: { top: number; height: number }, px: number): { to
   return { top, height }
 }
 
+/** A length in css px moved onto the device's pixel grid at `dpr`, so that an edge there is drawn sharp. Pure. */
+export const snap = (v: number, dpr: number): number => Math.round(v * dpr) / dpr
+
 /** The lens over what the reader shows on the zoomed track, px of it: the box LENS_OUT_PX outside the part shown (`top`
  * to `bottom`), so that its edge and its margin of the paper cover none of it. Pure. */
 export const lensOf = (top: number, bottom: number): { top: number; height: number } => ({ top: top - LENS_OUT_PX, height: Math.max(2, bottom - top) + 2 * LENS_OUT_PX })
 
-/** The two lines that join the overview's frame to the lens, across the LINK_PX between the tracks (x from the
- * overview's right edge to the lens's left), and the wedge between them, px of the tracks' height: the frame's top to
- * the lens's top, its bottom to the lens's bottom. Pure. */
-export function linkOf(frame: { top: number; height: number }, lens: { top: number; height: number }): { top: [number, number, number, number]; bottom: [number, number, number, number]; points: string } {
+/** The two 1px lines that join the overview's frame to the lens, across the LINK_PX between the tracks, and the wedge
+ * between them, px from the overview's right edge and the tracks' top: from the frame's top right corner to the lens's
+ * left edge where its top corner's curve ends, and from the frame's bottom right corner to where its bottom corner's
+ * curve begins. At a `dpr` where a 1px line is an odd number of device pixels wide, each line's ends move half a device
+ * pixel into the frame's and the lens's edges, so that the line lies on whole device pixels there; the wedge reaches
+ * the edges themselves. Pure. */
+export function linkOf(frame: { top: number; height: number }, lens: { top: number; height: number }, dpr = 1): { top: [number, number, number, number]; bottom: [number, number, number, number]; points: string } {
   const x1 = LINK_PX - LENS_OUT_PX
-  const top: [number, number, number, number] = [0, frame.top, x1, lens.top]
-  const bottom: [number, number, number, number] = [0, frame.top + frame.height, x1, lens.top + lens.height]
-  return { top, bottom, points: `${top[0]},${top[1]} ${top[2]},${top[3]} ${bottom[2]},${bottom[3]} ${bottom[0]},${bottom[1]}` }
+  const o = Math.round(dpr) % 2 === 1 ? 0.5 / dpr : 0
+  const r = Math.min(LENS_RADIUS_PX, lens.height / 2)
+  const x0 = o ? -o : 0
+  const top: [number, number, number, number] = [x0, frame.top + o, x1 + o, lens.top + r]
+  const bottom: [number, number, number, number] = [x0, frame.top + frame.height - o, x1 + o, lens.top + lens.height - r]
+  return { top, bottom, points: `0,${frame.top} ${x1},${lens.top + r} ${x1},${lens.top + lens.height - r} 0,${frame.top + frame.height}` }
 }
 
 /** Per device pixel row of a track `h` rows tall, the value most records in it have: of `counts` (per value, its
@@ -551,13 +562,15 @@ export function ReaderTracks({ total, view, paint, markers, zoom, onJump, onSeek
     zgrab.current = null
     if (g && !g.moved && g.line != null) onLine(g.line)
   }
-  const zy = (v: number) => (zoom && zpx > 0 ? ((v - zoom.from) / Math.max(1, zoom.to - zoom.from)) * zpx : 0)
+  // every edge on the tracks stands on the device's pixel grid
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+  const zy = (v: number) => snap(zoom && zpx > 0 ? ((v - zoom.from) / Math.max(1, zoom.to - zoom.from)) * zpx : 0, dpr)
   const zLanes = zoom?.records.find((r) => r.marks.length)?.marks.length ?? 0
   // a record's block, in its color or grey, with a grey tick at its left for each marker lane that marks it
   const blocks = (layer: 'faded' | 'shown') =>
     zoom?.records.map((r) => {
       const top = zy(r.top)
-      const h = Math.max(1, zy(r.bottom) - top - 1)
+      const h = Math.max(1 / dpr, zy(r.bottom) - top - 1)
       return (
         <i key={r.line} className={'track-rec' + (r.color ? '' : ' plain')} data-line={r.line} title={layer === 'shown' ? r.title : undefined} style={{ top, height: h, ...(r.color ? { background: r.color } : {}) } as CSSProperties}>
           {r.marks.map((m, i) => (m ? <b key={i} style={{ left: i * (MARKER_PX + MARKER_GAP_PX) }} /> : null))}
@@ -567,13 +580,14 @@ export function ReaderTracks({ total, view, paint, markers, zoom, onJump, onSeek
   const vTop = zoom ? zy(zoom.viewTop) : 0
   const vH = zoom ? Math.max(2, zy(zoom.viewBottom) - vTop) : 0
   const lens = lensOf(vTop, vTop + vH)
-  const frameTop = drag ? drag.top : frame.top
-  const link = zoom && px > 0 ? linkOf({ top: frameTop, height: frame.height }, lens) : null
+  const frameTop = snap(drag ? drag.top : frame.top, dpr)
+  const frameH = snap(frame.height, dpr)
+  const link = zoom && px > 0 ? linkOf({ top: frameTop, height: frameH }, lens, dpr) : null
   return (
     <div className="tracks" data-drag={drag?.held || undefined} onWheel={wheel} aria-hidden>
       <div ref={over} className="track track-over" style={{ width: lanesPx + OVER_PX }} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onPointerLeave={leave}>
         <OverviewCanvas paint={paint} markers={markers} />
-        <div className="track-frame-over" style={{ transform: `translateY(${frameTop}px)`, height: frame.height }} />
+        <div className="track-frame-over" style={{ transform: `translateY(${frameTop}px)`, height: frameH }} />
       </div>
       <svg className="track-link" width={LINK_PX}>
         {link && (
@@ -590,7 +604,7 @@ export function ReaderTracks({ total, view, paint, markers, zoom, onJump, onSeek
             <div className="track-zoom-faded" style={{ opacity: FADE }}>
               {blocks('faded')}
             </div>
-            <div className="track-lens" style={{ top: lens.top, height: lens.height }} />
+            <div className="track-lens" style={{ top: lens.top, height: lens.height, borderRadius: LENS_RADIUS_PX }} />
             <div className="track-zoom-shown" style={{ top: vTop, height: vH }}>
               <div style={{ position: 'absolute', left: 0, right: 0, top: -vTop }}>{blocks('shown')}</div>
             </div>

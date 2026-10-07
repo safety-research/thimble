@@ -50,8 +50,8 @@ afterAll(async () => {
   cleanup()
 })
 
-async function framed(): Promise<{ page: Page; frame: () => Frame }> {
-  const page = await browser.newPage({ viewport: { width: 900, height: 600 } })
+async function framed(dpr = 1): Promise<{ page: Page; frame: () => Frame }> {
+  const page = await browser.newPage({ viewport: { width: 900, height: 600 }, deviceScaleFactor: dpr })
   await page.setContent(`<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:800px;height:420px"></iframe></body></html>`)
   await page.evaluate((doc) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = doc), VIEW)
   const frame = () => page.frames().find((f) => f !== page.mainFrame())!
@@ -177,7 +177,9 @@ describe("a long list's two tracks", () => {
         thumb: box(thumb),
         lens: lensBox,
         lensBg: getComputedStyle(lens).backgroundColor,
+        radius: parseFloat(getComputedStyle(lens).borderTopLeftRadius),
         frameBorder: parseFloat(getComputedStyle(thumb).borderTopWidth),
+        ring: ['top', 'right', 'bottom', 'left'].map((side) => getComputedStyle(thumb).getPropertyValue(`border-${side}-width`)),
         top: line('top'),
         bottom: line('bottom'),
         right: Math.round(list.getBoundingClientRect().right - strip.getBoundingClientRect().right),
@@ -199,8 +201,8 @@ describe("a long list's two tracks", () => {
     assert.ok(s.lens.left < s.zoomBox.left && s.lens.right > s.zoomBox.right, 'the lens a little wider than the zoomed track')
     assert.notEqual(s.lensBg, 'rgba(0, 0, 0, 0)')
     assert.ok(s.inView > 200 && s.beyond < 120, `faded beyond the part in view: ${s.inView} ${s.beyond}`)
-    assert.ok(near(s.top.x1, s.whole.right) && near(s.top.y1, s.thumb.top) && near(s.top.x2, s.lens.left) && near(s.top.y2, s.lens.top), `top line ${JSON.stringify([s.top, s.thumb, s.lens])}`)
-    assert.ok(near(s.bottom.x1, s.whole.right) && near(s.bottom.y1, s.thumb.bottom) && near(s.bottom.x2, s.lens.left) && near(s.bottom.y2, s.lens.bottom), `bottom line ${JSON.stringify([s.bottom, s.thumb, s.lens])}`)
+    assert.ok(near(s.top.x1, s.whole.right) && near(s.top.y1, s.thumb.top) && near(s.top.x2, s.lens.left) && near(s.top.y2, s.lens.top + s.radius), `top line ${JSON.stringify([s.top, s.thumb, s.lens])}`)
+    assert.ok(near(s.bottom.x1, s.whole.right) && near(s.bottom.y1, s.thumb.bottom) && near(s.bottom.x2, s.lens.left) && near(s.bottom.y2, s.lens.bottom - s.radius), `bottom line ${JSON.stringify([s.bottom, s.thumb, s.lens])}`)
     await page.close()
   })
 
@@ -221,9 +223,35 @@ describe("a long list's two tracks", () => {
     assert.ok(near(top.lens, 0, 0.03) && near(top.frame, 0, 0.03), JSON.stringify(top))
     assert.ok(near(mid.lens, 0.5, 0.05) && near(mid.frame, 0.5, 0.05), JSON.stringify(mid))
     assert.ok(near(end.lens, 1, 0.03) && near(end.frame, 1, 0.03), JSON.stringify(end))
-    assert.ok(near(end.s.top.y2, end.s.lens.top) && near(end.s.bottom.y2, end.s.lens.bottom) && near(end.s.bottom.y1, end.s.thumb.bottom), JSON.stringify(end.s))
+    assert.ok(near(end.s.top.y2, end.s.lens.top + end.s.radius) && near(end.s.bottom.y2, end.s.lens.bottom - end.s.radius) && near(end.s.bottom.y1, end.s.thumb.bottom), JSON.stringify(end.s))
     await page.close()
   })
+
+  for (const dpr of [1, 2]) {
+    test(`at a pixel ratio of ${dpr}, every edge stands on whole device pixels and each line's ends meet the corners within half a device pixel`, async () => {
+      const { page, frame } = await framed(dpr)
+      for (const f of [0, 0.5, 1]) {
+        await frame().evaluate((x) => {
+          const l = document.getElementById('list')!
+          l.scrollTop = x * (l.scrollHeight - l.clientHeight)
+        }, f)
+        await page.waitForTimeout(80)
+        const s = await tracks(frame)
+        const tol = 0.5 / dpr + 1e-6
+        const on = (v: number) => Math.abs(v * dpr - Math.round(v * dpr)) < 1e-3
+        const at = `${f} ${JSON.stringify(s)}`
+        for (const v of [s.thumb.top, s.thumb.bottom, s.thumb.left, s.thumb.right, s.lens.top, s.lens.bottom, s.lens.left, s.lens.right]) assert.ok(on(v), `${v} off the grid, ${at}`)
+        assert.equal(new Set(s.ring).size, 1, at)
+        assert.ok(Math.abs(s.zoomBox.left - s.lens.left - 3) < 1e-3 && Math.abs(s.lens.right - s.zoomBox.right - 3) < 1e-3, at)
+        const ends = [
+          [s.top.x1, s.whole.right], [s.top.y1, s.thumb.top], [s.top.x2, s.lens.left], [s.top.y2, s.lens.top + s.radius],
+          [s.bottom.x1, s.whole.right], [s.bottom.y1, s.thumb.bottom], [s.bottom.x2, s.lens.left], [s.bottom.y2, s.lens.bottom - s.radius],
+        ]
+        ends.forEach(([a, b], i) => assert.ok(Math.abs(a - b) <= tol, `end ${i}: ${a} against ${b}, ${at}`))
+      }
+      await page.close()
+    })
+  }
 
   test('hovering the overview previews the records there in plain rows without scrolling, and a click goes there', async () => {
     const { page, frame } = await framed()
