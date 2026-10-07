@@ -27,7 +27,9 @@ export type ViewFrame = {
   seq: number
   ack: number
   lines: Line[]
-  hits: { y: number; x0: number; x1: number; row?: boolean; tip?: string; drag?: boolean }[]
+  /** `cursor` marks a chart's cells, whose column under the pointer is marked rather than the region drawn inverse,
+   *  with `tips` each cell's words */
+  hits: { y: number; x0: number; x1: number; row?: boolean; tip?: string; drag?: boolean; cursor?: boolean; tips?: string[] }[]
   hints: string[]
   /** each hint's keys (a sign's hint shows only while the relay holds the ring) */
   hintKeys?: string[][]
@@ -37,6 +39,8 @@ export type ViewFrame = {
   field?: { text: string } | null
   sub: string[]
   error?: string
+  /** a reader query is out (term_kit/kit.mjs `loading`): the panel says `◌ loading…` */
+  loading?: boolean
 }
 
 export type ViewAct = { kind: 'open' | 'ask' | 'label'; ref?: string; text?: string; id?: string; name?: string }

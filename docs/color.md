@@ -4,7 +4,8 @@ Every view page has thimble's Color by control, `thimble.colorBy`, in its view k
 function). The page mounts it in its top row and draws its records with the color it chooses. Use it in place of a
 color control of your own, so that every view colors the same way. Color is one encoding at a time: only the Color by
 choice is drawn in colors, on the chips, the records' bars, the tracks and the chart marks. Show any other category of
-the view as text, a glyph or a gray pattern, never in a second palette.
+the view as text, a glyph or a gray pattern, never in a second palette. Filter by and Rows stand beside it in the top row
+([rows-and-filters.md](rows-and-filters.md)): they read a field or a label the way Color by does, and draw no color.
 
 - One menu lists Off, the fields the view can color by and every label over files, each with how many values it
   colors by and those values as chips on a line under its name. Fields are values the files hold or
@@ -153,28 +154,20 @@ such as a view's second list or one that loads its records in pieces, gets a pla
 style with no colors, no lanes and no zoomed track. So does a list none of whose records takes a color (Off, or every
 value turned off). A secondary pane is plain unless the page asks for its colors this way.
 
-## Details in place
+## Details
 
-A row's details open under its own line, as in the File browser's transcript, never in a box above the list:
+A record, or a row's children, open in the kit's side panel beside the list, never under the row, so the list keeps
+its place: `thimble.side` ([rows-and-filters.md](rows-and-filters.md)).
 
-```js
-list.addEventListener('click', (e) => {
-  const row = e.target.closest('.row')
-  if (!row || e.target.closest('.thimble-details')) return
-  open = open === row.dataset.anchor ? null : row.dataset.anchor
-  thimble.expand(row, draw)   // draw() adds <div class="thimble-details"> under the open row
-})
-```
-
-`thimble.expand(row, render)` runs `render()`, keeps the row where it was on the screen, under the pointer that
-clicked it, and lets the details that appeared grow into place, the rows below moving down with them. The details are
-the elements `render()` adds with the class `thimble-details` (or `{details: selector}`); a row that `render()` drew
-again is found by its `data-anchor`. A second click closes the row.
+`thimble.expand(row, render)`, which opened a row's details under its own line, stays for the views built before the
+side panel: it runs `render()`, keeps the row where it was on the screen and lets the details that appeared (the
+elements with the class `thimble-details`) grow into place. A new view uses the side panel.
 
 ## Reset
 
-Reset shows at the end of the row while the view is not as it opens: a value turned off, a time range zoomed in, or a
-search field or select in Color by's row changed. It puts them back and keeps the choice of Color by. Tell it the
+Reset shows at the end of the row while the view is not as it opens: a value turned off (Color by's or Filter by's), a
+series of a key turned off, a time range zoomed in, the side panel open, or a search field or select in Color by's row
+changed. It puts them back and keeps the choices of Color by, Filter by and Rows. Tell it the
 page's own state, such as a menu's choice or the row opened, with `thimble.onReset`:
 
 ```js

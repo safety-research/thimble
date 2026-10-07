@@ -181,6 +181,9 @@ async def test_the_terminal_gate_passes_the_worked_example_and_the_view_draws_on
         (120, "light", "opens"), (120, "dark", "opens"), (200, "light", "opens"), (200, "dark", "opens"),
         (120, "light", "detail")]
     assert all(d["ok"] and d["fetches"] for d in draws), lines
+    # the drawings the reviewer reads wrap the hint row as the panel does, so no row is wider than the panel
+    assert all(len(row) <= d["cols"] + 2 for d in draws for row in d["text"].splitlines()), \
+        [row for d in draws for row in d["text"].splitlines() if len(row) > d["cols"] + 2]
     assert draws[4]["ref"] and draws[4]["ref"] == next(r["locator"] for r in report["checks"] if r["ok"])
     assert any(ln.startswith("draw: as it opens at 200 columns in the dark theme: ok") for ln in lines)
     assert not any(ln.startswith(("page: ", "png: ")) for ln in lines)

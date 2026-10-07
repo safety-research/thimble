@@ -12,7 +12,7 @@ Principles. These principles restate established practice in interactive visuali
 
 - **Overview first.** The view opens on all the records it covers, so the analyst sees the shape of the data before any one record. Example: a long list has an overview track of the whole list beside the part in view, as the colored scrollbar does.
 - **Direct manipulation.** The analyst zooms and filters by acting on the data's own marks and axes, and the view answers at once. Example: time is one viewfinder over the full span, which the analyst drags and resizes along one horizontal axis, with labeled markers for events.
-- **Details in place.** A record opens in full where the analyst clicked it, and the rest of the view stays where it was. Example: a clicked row expands below itself and keeps its position in the list.
+- **Details in place.** A record opens in full beside the list, and the rest of the view stays where it was. Example: a clicked row opens in a wide side panel, and the list keeps its position.
 - **One place for each control.** Each control shows once and acts on the whole view. Example: search, filters, Color by and Reset sit in the top row, and no pane has a filter of its own.
 - **One job for each channel.** Each visual channel shows one attribute, and color, the strongest channel for categories, shows only the attribute the analyst colors by. Example: only the Color by choice colors records, the analyst can turn it off, and other categories show as text, glyphs or gray.
 - **Same data, same look.** One quantity keeps one scale, one mark and one color in every part of the view. Example: small multiples share the main chart's scale and marks, so the analyst compares them by eye.
@@ -21,6 +21,7 @@ Principles. These principles restate established practice in interactive visuali
 - **Meaning one click away.** The analyst can always find what a color, a mark or a label means. Example: a label's definition opens from the Color by menu, and a value's meaning shows when the pointer is on its chip.
 - **thimble's parts.** The view uses thimble's own parts and themes, so it looks and acts like the rest of the app. Example: thimble's chips, buttons and fields, legible in light and dark, with the view's own words in American spelling.
 - **Reuse before rebuild.** Where thimble already shows a record well, the view opens it there and does not draw a reader of its own. Example: an agent transcript opens in the File browser's transcript mode.
+- **Labels stay labels.** A judgment that a label already holds belongs to the label, not to a field the view derives from keywords. Example: Rows groups the lanes by the label, not by a field whose keywords copy its classes.
 
 Smells. A smell is a sign that a principle may be broken. Weigh each one against what the view must show: a view can have a good reason for one, and a view with none can still fail the analyst.
 
