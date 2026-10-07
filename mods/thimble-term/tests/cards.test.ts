@@ -162,22 +162,35 @@ test("a press on a label made after the labels were read opens it: the list is r
   expect(w.panes.at(-1)?.title).toBe('Label: links through a fetch proxy')
 })
 
-test("a card whose check ended in an error says so in the card pane's subtitle, in red, with why; a check that read it says nothing", async ($, on) => {
+test("a card whose check ended in an error says so in the card pane's subtitle, dim and in plain words; a check that read it says nothing", async ($, on) => {
   const w = world(on)
   // the live check's card (New 15): its check ran past its time, its last run was fine
   Object.assign(w.cells.a0frame0!, { check: { id: 'chk_1', status: 'error', reason: 'it ran past its 75 s at high effort', stages: {} } })
   Object.assign(w.cells.ff73e071!, { check: { id: 'chk_2', status: 'ok', stages: {} } })
+  // live check cc-term: a check whose revision of the card would not run (it recorded the revision `rejected`)
+  Object.assign(w.cells.k0code00!, {
+    check: { id: 'chk_3', status: 'error', reason: 'its revision was not kept: its code did not run clean: NameError: x', stages: {} },
+    fixes: [{ id: 'fix_1', check: 'chk_3', state: 'rejected', fields: ['code'], reason: 'its code did not run clean: NameError: x' }],
+  })
   await start($, w)
-  await $.command.run({ command: 'thimble:thimble', args: 'card a0frame0' } as never)
-  await w.clock.settle()
-  let pane = (await $.ui.mount(PANE)) as unknown as M
-  const json = JSON.stringify(await pane.drawn())
-  expect(json).toContain('{"type":"Text","props":{"color":"error"},"children":["its check ended in an error: it ran past its 75 s at high effort"]}')
-  expect(shown(await pane.drawn())).toContain('last run ok')
-  await pane.unmount()
-  await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
-  await w.clock.settle()
-  pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).not.toContain('its check')
-  await pane.unmount()
+  const pane = async (id: string): Promise<{ text: string; json: string }> => {
+    await $.command.run({ command: 'thimble:thimble', args: `card ${id}` } as never)
+    await w.clock.settle()
+    const p = (await $.ui.mount(PANE)) as unknown as M
+    const drawn = await p.drawn()
+    await p.unmount()
+    return { text: shown(drawn), json: JSON.stringify(drawn) }
+  }
+  // the card is fine, so nothing of its check is red, and why the check ended (its internals) is not on the card
+  let got = await pane('a0frame0')
+  expect(got.text).toContain('last run ok · its check could not finish')
+  expect(got.text).not.toContain('75 s')
+  expect(got.json).not.toContain('"color":"error"')
+  got = await pane('k0code00')
+  expect(got.text).toContain("its check's revision would not run")
+  expect(got.text).not.toContain('NameError')
+  expect(got.text).not.toContain('could not finish')
+  expect(got.json).not.toMatch(/"color":"error"\},"children":\["its check/)
+  got = await pane('ff73e071')
+  expect(got.text).not.toContain('its check')
 })

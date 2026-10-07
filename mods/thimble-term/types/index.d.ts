@@ -86,8 +86,9 @@ export type TermCard = {
   printed?: string
   /** how its last run ended: `ok`, `error`, or '' when it has not run */
   ran?: string
-  /** how its latest card check ended (cell.ts checkOf): `error` with why, which the card pane says */
-  check?: { state: string; why: string }
+  /** how its latest card check ended (cell.ts checkOf): `error` with why, and `unrun` when its revision of the card
+   *  would not run; the card pane says which, dim */
+  check?: { state: string; why: string; unrun?: boolean }
   /** the card check's latest rewrite of it that stands (the cell's last `fixes` entry `applied`): the parts it rewrote
    *  (`takeaway`, `title`, `code`) and why, which a note under the card says (cell.ts fixOf) */
   fixed?: { fields: string[]; why: string }

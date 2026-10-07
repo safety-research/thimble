@@ -28,7 +28,7 @@ export type ThimbleCell = {
   run?: { state?: string; by?: string; script?: string }
   /** its latest card check (backend checkstore.py): `pending` while cardrun waits to start it, then its record, which
    *  ends `ok`, `fixed`, `error` or `stopped` with a `reason` for the last two */
-  check?: string | { status?: string; reason?: string; phase?: string } | null
+  check?: string | { id?: string; status?: string; reason?: string; phase?: string } | null
   regenerating_for?: string[]
   label_revs?: Record<string, number>
   verification?: { status?: string; links?: { status?: string; checked?: boolean; resolved?: unknown[]; broken?: unknown[] } | null } | null
@@ -467,8 +467,6 @@ export function busyWords(cell: ThimbleCell): string {
   return ''
 }
 
-/** How the card's latest check stands: `pending`, `ok`, `fixed`, `error` or `stopped` ('' when none ran), and why it
- *  ended in an error or a stop. */
 /** The card check's latest rewrite of a card that stands (its last `fixes` entry, `applied`): the parts it rewrote and
  *  why; null when it rewrote none. */
 export function fixOf(cell: ThimbleCell): { fields: string[]; why: string } | null {
@@ -480,9 +478,14 @@ export function fixOf(cell: ThimbleCell): { fields: string[]; why: string } | nu
   return fields.length ? { fields, why: typeof f.reason === 'string' ? f.reason.trim() : '' } : null
 }
 
-export function checkOf(cell: ThimbleCell): { state: string; why: string } {
+/** How the card's latest check stands: `pending`, `ok`, `fixed`, `error` or `stopped` ('' when none ran), why it
+ *  ended in an error or a stop, and `unrun` when it ended so because its revision of the card would not run (a fix of
+ *  its own that it recorded `rejected`, backend checkstore.record_rejected). */
+export function checkOf(cell: ThimbleCell): { state: string; why: string; unrun: boolean } {
   const c = cell.check
-  if (typeof c === 'string') return { state: c, why: '' }
-  if (!c || typeof c !== 'object') return { state: '', why: '' }
-  return { state: typeof c.status === 'string' ? c.status : '', why: typeof c.reason === 'string' ? c.reason : '' }
+  if (typeof c === 'string') return { state: c, why: '', unrun: false }
+  if (!c || typeof c !== 'object') return { state: '', why: '', unrun: false }
+  const fixes = (cell as { fixes?: unknown }).fixes
+  const unrun = Boolean(c.id) && Array.isArray(fixes) && fixes.some(f => f && typeof f === 'object' && (f as { state?: unknown }).state === 'rejected' && (f as { check?: unknown }).check === c.id)
+  return { state: typeof c.status === 'string' ? c.status : '', why: typeof c.reason === 'string' ? c.reason : '', unrun }
 }

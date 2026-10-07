@@ -63,6 +63,11 @@ const num = (n: number) => Math.round(n).toLocaleString('en-US')
 const plural = (n: number, w: string, many = `${w}s`) => `${num(n)} ${n === 1 ? w : many}`
 const dim = (s: string): Seg => ({ s, fg: COLORS.dim })
 
+/** What the card pane's subtitle says of a card check that ended in an error: its revision of the card would not run,
+ *  or it could not finish (it ran past its time, or the reading or the drawing failed). */
+const CHECK_UNRUN = "its check's revision would not run"
+const CHECK_UNFINISHED = 'its check could not finish'
+
 // ------------------------------------------------------------------------------------------------ opening
 
 /** The `element` of a thread asked about a whole answer, from the answer's footer. */
@@ -1003,8 +1008,8 @@ async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
 // ------------------------------------------------------------------------------------------------ a card
 
 /** A card in the panel (SPEC.md, "Cards", the card pane): its question is the panel's title; its kind, who made
- *  it, how its last run ended (`last run failed` in red) and a card check that ended in an error (in red, with why) the
- *  dim subtitle; the card in its border, its takeaway
+ *  it, how its last run ended (`last run failed` in red) and a card check that ended in an error (CHECK_UNRUN or
+ *  CHECK_UNFINISHED) the dim subtitle; the card in its border, its takeaway
  *  under it; at the bottom `code  run again  ask about it` (`◌ running` while it runs). Its code (`mode: code`)
  *  through the `Code` element with its gutter at A0, then `output`, the last 8 lines its run printed; `card  run again
  *  ask about it` at the bottom. A run again goes to main, whose Bash runs a card (`thimble-run card`). */
@@ -1019,8 +1024,9 @@ async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const data = tc.data as CardData
   const by = tc.by ? `made by ${/^(main|terminal|user)$/.test(tc.by) ? 'main' : /^chat:/.test(tc.by) ? 'a side thread' : tc.by}` : ''
   const ran: Seg | null = tc.ran === 'error' ? { s: 'last run failed', fg: COLORS.problem } : tc.ran === 'ok' ? dim('last run ok') : null
-  // a card check that ended in an error says so, and why, in red: the card itself may be fine, but nothing read it
-  const checked: Seg | null = tc.check?.state === 'error' ? { s: `its check ended in an error${tc.check.why ? `: ${tc.check.why}` : ''}`, fg: COLORS.problem } : null
+  // a card check that ended in an error says so in plain words, dim: the card itself is fine, and red is only for a
+  // problem with the card (SPEC.md, Checks 3); why it ended is in the check's record, for main to read
+  const checked: Seg | null = tc.check?.state === 'error' ? dim(tc.check.unrun ? CHECK_UNRUN : CHECK_UNFINISHED) : null
   const ask = () => void openAsk(cx, { kind: 'card', ref: `card:${id}`, cardId: id, text: data.question })
   const busy = Boolean(tc.busy)
   const again = () => {

@@ -473,8 +473,9 @@ colored is said under each.
   chart (a bar chart with its values written on its bars is one): a table of its rows.
 - A card that cannot be read: one red line named by its place (`× card 2 cannot be drawn: …`).
 - The card pane: the question is the panel's title and the subtitle reads the card's kind, who made it, `last run
-  ok` or `last run failed` (in red), and, when its card check ended in an error, `its check ended in an error: <why>` (in
-  red); the box starts with the plot; at the bottom `code  run again  ask about it`. The
+  ok` or `last run failed` (in red), and, when its card check ended in an error, `its check's revision would not run` or
+  `its check could not finish`, dim like the rest, since the card itself is fine (red is only for a problem with the
+  card); the box starts with the plot; at the bottom `code  run again  ask about it`. The
   code view lists the script with the `Code` element, its gutter at A0, no other indent, then `output`, the last lines
   its run printed.
 
