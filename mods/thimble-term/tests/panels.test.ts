@@ -395,7 +395,8 @@ test('the key hints come in one order on every panel: choosing, Enter, Space, th
   await w.clock.settle()
   await takesKeys($)
   pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('↑↓ to choose · Enter to open · Space to fold · b to go back · x to close')
+  // the file browser's own key, `f` for its find, after Space
+  expect(shown(await pane.drawn())).toContain('↑↓ to choose · Enter to open · Space to fold · f to find · b to go back · x to close')
   await pane.unmount()
 })
 

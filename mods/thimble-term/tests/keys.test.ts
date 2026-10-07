@@ -742,7 +742,7 @@ for (const rows of [SHORT, TALL]) {
   })
 }
 
-test('keys · file · a transcript: 1 2 for the tabs from the relay', async ($, on) => {
+test('keys · file · a transcript: 1 2 3 4 for the tabs from the relay', async ($, on) => {
   const w = world(on)
   w.states.files = [{ path: 'chat.jsonl', kind: 'records', size_bytes: 10 }]
   w.pages['chat.jsonl'] = { path: 'chat.jsonl', kind: 'records', total_lines: 2, start: 1, transcript: { format: 'messages', score: 0.95, keys: { speaker: 'author', text: 'body' } }, records: [{ line: 1, record: { author: 'alice', body: 'Who saved it?' } }, { line: 2, record: { author: 'bob', body: 'An agent.' } }] }
@@ -751,8 +751,8 @@ test('keys · file · a transcript: 1 2 for the tabs from the relay', async ($, 
   await w.clock.settle()
   await takesKeys($)
   const s = await seen($, SHORT, 'file-body')
-  named(s.hint, ['1 2 3 for the tabs', '↑↓ to choose'])
-  await type($, w, SHORT, '3')
+  named(s.hint, ['1 2 3 4 for the tabs', '↑↓ to choose'])
+  await type($, w, SHORT, '4')
   expect(JSON.stringify(await (await look($, SHORT)).drawn())).toContain('{"type":"Text","props":{"inverse":true},"children":[" Raw "]}')
 })
 

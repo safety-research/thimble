@@ -194,6 +194,13 @@ export type World = {
   opens: Record<string, string>
   /** a whole-file JSON transcript's page of turns by its path (`thimble state turns`), over none */
   turns: Record<string, unknown>
+  /** the file browser's reads: what `thimble state find` and `grep` answer by the words, `marks` by the file's path,
+   *  `tables` by a database's path and `rows` by `<path>:<table>` (a function: the page from `--start`) */
+  found: Record<string, unknown>
+  grepped: Record<string, unknown>
+  marks: Record<string, unknown>
+  tables: Record<string, unknown>
+  rows: Record<string, unknown>
   /** whether the panel holds the keyboard, as the engine's record of its panes says it (`ui.panes`); left out, unsaid;
    *  `grantOnReopen`: an open with `focus` while it is false gives the panel the keys, as Claude Code does once the prompt
    *  holds them over an empty composer */
@@ -259,6 +266,11 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     pages: {},
     opens: {},
     turns: {},
+    found: {},
+    grepped: {},
+    marks: {},
+    tables: {},
+    rows: {},
     focusAsked: [],
     filled: [],
     viewHost: { requests: [], frame: n => viewFrame(n), acts: () => [], started: 0 },
@@ -351,6 +363,28 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
         return rest[0] ? out(w.states.file) : out(w.states.files)
       case 'turns':
         return out(w.turns[rest[0]!] ?? { path: rest[0], total: 0, start: 0, turns: [], n_groups: 0, groups: {}, none: `${rest[0]} holds no messages to show as a transcript` })
+      case 'find':
+        return out(w.found[rest[0]!] ?? { q: rest[0], files: [], total: 0 })
+      case 'grep':
+        return out(w.grepped[rest[0]!] ?? { q: rest[0], files: [], done: { done: true, files: 0, hits: 0, scanned: 3, of: 3, complete: true } })
+      case 'findin': {
+        // the lines of a file's page that hold the words, in any case, past `--after`
+        const page = w.pages[rest[0]!]
+        const after = rest.includes('--after') ? Number(rest[rest.indexOf('--after') + 1]) : 0
+        const recs = ((typeof page === 'function' ? (page as (s: number) => { records: { line: number; record: { text?: string } }[] })(1) : (page as { records?: { line: number; record: { text?: string } }[] } | undefined)) ?? { records: [] }).records ?? []
+        const lines = recs.filter(r => r.line > after && JSON.stringify(r.record).toLowerCase().includes(rest[1]!.toLowerCase())).map(r => r.line)
+        return out({ path: rest[0], q: rest[1], lines, counts: lines.map(() => 1), total: lines.length, matches: lines.length, complete: true, scanned: recs.length, total_lines: recs.length })
+      }
+      case 'marks':
+        return out(w.marks[rest[0]!] ?? [])
+      case 'tables':
+        return w.tables[rest[0]!] !== undefined ? out(w.tables[rest[0]!]) : out({ error: `not a database file (*.db, *.sqlite, *.sqlite3): '${rest[0]}'` }, 1)
+      case 'rows': {
+        const table = rest[rest.indexOf('--table') + 1]
+        const page = w.rows[`${rest[0]}:${table}`]
+        const from = rest.includes('--start') ? Number(rest[rest.indexOf('--start') + 1]) : 1
+        return page === undefined ? out({ error: `no such table: '${table}'` }, 1) : out(typeof page === 'function' ? (page as (start: number) => unknown)(from) : page)
+      }
       case 'opens': {
         const paths = JSON.parse(rest[0] ?? '[]') as string[]
         return out(Object.fromEntries(paths.filter(p => w.opens[p]).map(p => [p, w.opens[p]])))

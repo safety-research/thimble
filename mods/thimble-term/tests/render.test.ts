@@ -517,9 +517,11 @@ test("a tool's layout record opens the file browser: folders that fold, a file c
   await pane.redraw()
   const text = shown(await pane.drawn())
   for (const s of ['files › README.md', 'markdown · lines 1-3 of 20', 'later']) expect(text).toContain(s)
-  // a Markdown file's lines: its heading bold, its blank line left out
+  // a Markdown file opens as its text (the browser's Rendered view): its heading bold without its marks, its blank
+  // line left out
   const body = shown(await pane.drawn({ in: 'm:file-body' }))
-  for (const s of ['# Collusion wiki', 'An export of 4,579']) expect(body).toContain(s)
+  for (const s of ['Collusion wiki', 'An export of 4,579']) expect(body).toContain(s)
+  expect(body).not.toContain('# Collusion')
   expect(JSON.stringify(await pane.drawn({ in: 'm:file-body' }))).toContain('"bold":true')
   expect(w.calls.some(c => c[2] === 'files' && c[5] === 'README.md')).toBe(true)
   await pane.unmount()

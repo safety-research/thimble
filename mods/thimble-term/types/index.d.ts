@@ -135,6 +135,8 @@ export type TermPanel = {
   /** a file's record chosen (a citation's line), lit; a file's table sorted by a column (`<column>:asc|desc`) */
   line?: number
   sort?: string
+  /** a database file's table shown, and its rows from row `start` */
+  table?: string
   /** a whole-file JSON transcript's turns: the first of the page shown, and the one chosen, by their index (turns
    *  that share a line, as in a file of one line, are told apart by it) */
   from?: number
@@ -181,9 +183,9 @@ export type TermThreadRow = { id: string; title: string; anchor: string; anchorT
  *  label; and each label's run started from the panel (its size, 0 for every record) and its last word. */
 export type TermLabelUi = { open: string[]; kind: Record<string, string>; runs: Record<string, { limit: number; at: number }>; said: Record<string, string> }
 
-/** The file browser's state: the folders folded or unfolded against their default (the first open), and the file the
- *  keys chose. */
-export type TermFilesUi = { folded: string[]; unfolded: string[]; pick: string; whole?: string[] }
+/** The file browser: the folders folded or unfolded against their default, the folders shown whole, the row the keys
+ *  chose; the words of its find (`query`) and the row of what it found that the keys chose (`found`). */
+export type TermFilesUi = { folded: string[]; unfolded: string[]; pick: string; whole?: string[]; query?: string; found?: string }
 
 declare module 'claude-code' {
   interface PluginState {

@@ -13,7 +13,6 @@ import type { Area, Scope, Signature } from './data'
 import { cid, citations, clip, labelRef, noteDocPlace, noteLabelName, noteQuestion, questionOf, quoted } from './lib'
 import type { Citation } from './lib'
 import { agentsOf, cellOf, cellsOf, chatOf, docUnits, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
-import { firstChoice, turnsRead, wholeJson } from './files'
 import { keepSeen, keptSeen } from './kept'
 import { NAV_EMPTY, backTarget, moved, nextTrail, withBack } from './nav'
 import { signalEnd, withSignal } from './signal'
@@ -428,35 +427,6 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
         await readDoc(cx, p.slug)
       }
       return
-    case 'files': {
-      await readSurface(cx, 'files', 'files')
-      await readOpens(cx)
-      // the row chosen: the analyst's, else the first file of the first open folder (live check term-fix9, quirk 7: no
-      // row was chosen as the browser opened); the chosen file's first lines, shown under the list
-      let ui = await cx.filesUi()
-      if (!ui.pick) {
-        const got = (await cx.surface('files')) as SurfaceGot | undefined
-        const list = got?.ok ? (Array.isArray(got.value) ? got.value : (got.value as { files?: unknown })?.files) : []
-        const first = firstChoice((Array.isArray(list) ? list : []).filter((f): f is { path: string } => typeof (f as { path?: unknown })?.path === 'string'), ui)
-        if (first) {
-          ui = { ...ui, pick: first }
-          await cx.setFilesUi(ui)
-        }
-      }
-      if (ui.pick && !ui.pick.startsWith('dir:')) await readSurface(cx, `file:${ui.pick}:1`, 'files', [ui.pick])
-      return
-    }
-    case 'file':
-      if (p.path) {
-        const key = await readFilePage(cx, p.path, p.start ?? 1)
-        // a whole-file JSON transcript: a page of the turns thimble parses from the whole file, for its Transcript tab
-        const page = await surfaceValue<Record<string, unknown>>(cx, key)
-        if (page?.ok && wholeJson(page.value)) {
-          const { key: tkey, args } = turnsRead(p)
-          await readSurface(cx, tkey, 'turns', args)
-        }
-      }
-      return
     case 'agent':
       if (p.thread) await readThread(cx, p.thread)
       return
@@ -476,7 +446,14 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
       }
       return
     default:
+      await loaders.get(p.view)?.(cx, p)
   }
+}
+
+/** The reads of a panel view drawn by a module of its own (filesview.tsx: the file browser and a file), by its name. */
+const loaders = new Map<string, (cx: Ctx, p: TermPanel) => Promise<void>>()
+export function loadsView(view: string, load: (cx: Ctx, p: TermPanel) => Promise<void>): void {
+  loaders.set(view, load)
 }
 
 /** A document read for the panel, with the cards it draws as figures and those its words cite read first, so its
@@ -1001,7 +978,7 @@ async function followUi(cx: Ctx, apply: UiApply): Promise<void> {
 }
 
 /** The areas a panel view reads. */
-const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats', 'views', 'agents'], views: ['views'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs', 'agents'], doc: ['docs', 'cards', 'agents', 'chats'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'], thread: ['chats'] }
+const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats', 'views', 'agents'], files: ['labels'], file: ['labels'], views: ['views'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs', 'agents'], doc: ['docs', 'cards', 'agents', 'chats'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'], thread: ['chats'] }
 
 /** One pass: what changed in the workspace since the last pass, read again where some drawing shows it. */
 export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
