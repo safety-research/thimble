@@ -3,7 +3,7 @@
 // asks for a label's editor beside it (backend/app/viewer_bridge.js editLabel, its `anchor` a rect in the frame's
 // coordinates). The popover stands beside that control in the page's coordinates, inside the window, over the frame's
 // edge rather than clipped by it, at the card's width, scrolling inside itself when the window is short, with the
-// label's prompt and classes. Escape closes it with the focus back in the view, on the control, and the view hears it;
+// label's prompt and classes, compact: no Re-run until something changed, and More folded. Escape closes it with the focus back in the view, on the control, and the view hears it;
 // a click in the view closes it too; Re-run saves and applies the label as Files does. With no rect it stands inside
 // the view's top-left corner.
 import assert from 'node:assert/strict'
@@ -150,6 +150,8 @@ async function measure(control: string) {
       prompt: pop.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')?.value ?? null,
       classes: [...pop.querySelectorAll<HTMLInputElement>('[aria-label="Class name"]')].map((e) => e.value),
       foot: [...pop.querySelectorAll('.label-card-foot button')].map((b) => b.textContent?.trim()),
+      close: !!pop.querySelector('.label-card-head [aria-label="Close"]'),
+      more: pop.querySelector('.label-card-more')?.getAttribute('aria-expanded') ?? null,
       focusInside: pop.contains(document.activeElement),
     }
   }, inFrame)
@@ -178,7 +180,8 @@ test("the analyst's click on a control in the view opens the editor beside it, i
   assert.equal(m.label, 'Edit activity type')
   assert.equal(m.prompt, 'What the agent is doing in this message: reading files, writing code, or something else.')
   assert.deepEqual(m.classes, ['reading', 'writing', 'other'])
-  assert.deepEqual(m.foot, ['Cancel', 'Re-run'])
+  // compact: only × until something changes, and More folded
+  assert.deepEqual([m.foot, m.close, m.more], [[], true, 'false'])
   assert.equal(m.focusInside, true, 'the popover has the focus')
 })
 
@@ -212,13 +215,17 @@ test("with no anchor it stands inside the view's top-left corner", async () => {
   await page.waitForFunction(() => !document.querySelector('.popover.label-editor-pop'))
 })
 
-test('in a short window it fits and scrolls inside itself', async () => {
+test('in a short window, with More open, it fits and scrolls inside itself', async () => {
   await page.setViewportSize({ width: 1000, height: 360 })
   await frame().locator('#pick').click()
+  await measure('pick')
+  await page.locator('.popover.label-editor-pop .label-card-more').click()
   const m = await measure('pick')
   assert.ok(inside(m.pop, m.vw, m.vh), JSON.stringify(m))
   assert.ok(m.pop.height <= m.vh - 16 + 1, JSON.stringify(m))
   assert.equal(m.scrolls, true, 'the popover scrolls inside itself')
+  // More folded again for the tests after, since the page keeps it as it was left
+  await page.locator('.popover.label-editor-pop .label-card-more').click()
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !document.querySelector('.popover.label-editor-pop'))
   await page.setViewportSize({ width: 1000, height: 700 })

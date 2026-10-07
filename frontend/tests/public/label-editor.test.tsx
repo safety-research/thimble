@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 // The label editor (src/files/LabelEditor.tsx): Files' Labels sidebar and the popover a view opens over itself draw the
-// one editor, LabelCard, with the same fields, prompt, classes and actions. The popover sits beside what asked for it,
+// one editor, LabelCard, with the same fields, prompt, classes and actions. A label that exists opens compact: its name,
+// its type and scope, its prompt clamped until it has the focus, its classes, and More folded over the rest, which stays
+// as the analyst left it for the page's session; Cancel and Re-run show once something changed. A new label shows every
+// field. The popover sits beside what asked for it,
 // takes the focus, and Escape, Cancel or × close it, giving the focus back and telling the opener; a second request
 // takes the first one's place. A view's edit call (labelCalls.ts) hands the editor the rect the page gave, in the page's
 // coordinates, and a view's label controls (ViewPane) open it with what a new label applies to. A class's swatch opens
@@ -24,6 +27,7 @@ vi.mock('../../src/files/ViewerFrame', () => ({
 const { closeLabelEditor, EDITOR_WIDTH, LabelEditorHost, openLabelEditor } = await import('../../src/files/LabelEditor.tsx')
 const { frameAnchor, frameRect, runLabelCall } = await import('../../src/files/labelCalls.ts')
 const { useLabelRuns, useLabelSide } = await import('../../src/files/ViewSide.tsx')
+const { scopeLine } = await import('../../src/files/LabelCard.tsx')
 const { ViewPane } = await import('../../src/files/ViewPane.tsx')
 
 const kind = {
@@ -35,6 +39,7 @@ const kind = {
   spec: '',
   glob: 'transcript.jsonl',
   marks: 'record',
+  n_labeled: 1815,
   labels: ['reading', 'writing', 'other'],
   created_by: 'analyst',
   ts: '',
@@ -82,15 +87,16 @@ afterEach(() => {
 })
 
 /** The sidebar's editor, as Files places it at the Labels pane's edge. */
-function SideCard({ editing }: { editing: string | 'new' }) {
-  const runs = useLabelRuns('w', labels)
-  const { card } = useLabelSide({ ws: 'w', labels, runs, open: true, onToggleOpen: () => undefined, editing, onEdit: () => undefined, drafted: null, onDraft: () => undefined, appliesTo: ['transcript.jsonl'], width: 250, onWidth: () => undefined, onWidthEnd: () => undefined, maxWidth: 400 })
+function SideCard({ editing, of = labels }: { editing: string | 'new'; of?: FilesLabels }) {
+  const runs = useLabelRuns('w', of)
+  const { card } = useLabelSide({ ws: 'w', labels: of, runs, open: true, onToggleOpen: () => undefined, editing, onEdit: () => undefined, drafted: null, onDraft: () => undefined, appliesTo: ['transcript.jsonl'], width: 250, onWidth: () => undefined, onWidthEnd: () => undefined, maxWidth: 400 })
   return <div className="side">{card}</div>
 }
 
 /** What a card shows: its field names, name, prompt, classes and the foot's actions. */
 const shape = (card: Element) => ({
   keys: [...card.querySelectorAll('.label-card-key')].map((e) => e.textContent),
+  facts: [...card.querySelectorAll('.label-card-fact')].map((e) => e.textContent),
   name: card.querySelector<HTMLInputElement>('[aria-label="Name"]')?.value,
   prompt: card.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')?.value,
   classes: [...card.querySelectorAll<HTMLInputElement>('[aria-label="Class name"]')].map((e) => e.value),
@@ -122,9 +128,16 @@ describe('one label editor in the sidebar and in the popover', () => {
     const side = el.querySelector('.side .label-card')!
     const pop = popover()!
     const inPop = pop.querySelector('.label-card')!
-    expect(shape(side).keys).toEqual(['Over', 'Marks', 'Applies to', 'Classifier', 'Model', 'Classes'])
+    // compact: the type and scope, the prompt and the classes; no highlight switch and no foot until something changes
     expect(shape(inPop)).toEqual(shape(side))
-    expect(shape(inPop)).toMatchObject({ name: 'activity type', prompt: 'What the agent is doing in this message.', classes: ['reading', 'writing', 'other'], switches: 3, foot: ['Cancel', 'Re-run'] })
+    expect(shape(inPop)).toEqual({ keys: ['Type', 'Scope'], facts: ['Prompt', 'transcript.jsonl · 1,815 records'], name: 'activity type', prompt: 'What the agent is doing in this message.', classes: ['reading', 'writing', 'other'], switches: 0, foot: [] })
+    for (const card of [side, inPop]) {
+      expect(card.querySelector('.label-card-more')?.getAttribute('aria-expanded')).toBe('false')
+      expect(card.querySelector('.label-card-head [aria-label="Close"]')).not.toBeNull()
+      // a multi-class label has no color of its own: its glyph, and its name in the ink
+      expect(card.querySelector<HTMLInputElement>('[aria-label="Name"]')!.style.color).toBe('')
+      expect(card.querySelector('.label-card-tag')).not.toBeNull()
+    }
     // the sidebar's card is its own dialog on the overlay's paper; in the popover, the popover is both, at the card's width
     expect([side.classList.contains('overlay'), side.getAttribute('role'), side.getAttribute('aria-label')]).toEqual([true, 'dialog', 'Edit activity type'])
     expect([inPop.classList.contains('overlay'), inPop.classList.contains('in-popover'), inPop.getAttribute('role')]).toEqual([false, true, null])
@@ -144,8 +157,82 @@ describe('one label editor in the sidebar and in the popover', () => {
       expect(card.querySelector('[aria-label="Label from prompt"]')).not.toBeNull()
       expect(card.querySelector<HTMLInputElement>('[aria-label="Applies to"]')?.value).toBe('transcript.jsonl')
       expect(shape(card).foot).toEqual(['Cancel', 'Run'])
+      // every field, since a new label needs them
+      expect(shape(card).keys).toEqual(['Over', 'Marks', 'Applies to', 'Classifier', 'Model', 'Classes'])
+      expect(card.querySelector('.label-card-more')).toBeNull()
     }
     expect(popover()!.getAttribute('aria-label')).toBe('New label')
+  })
+})
+
+/** Type `text` into a field as React hears it. */
+async function type(el: HTMLTextAreaElement | HTMLInputElement, text: string) {
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, text)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
+describe('a compact card', () => {
+  test('More holds the rest: what it labels and marks, what it applies to, the classifier, the model, the highlights and + class', async () => {
+    const el = await mount(<SideCard editing="k1" />)
+    const more = el.querySelector<HTMLButtonElement>('.label-card-more')!
+    expect(more.textContent).toBe('More')
+    await act(async () => more.click())
+    expect(more.getAttribute('aria-expanded')).toBe('true')
+    const body = el.querySelector('.label-card-more-body')!
+    expect([...body.querySelectorAll('.label-card-key')].map((e) => e.textContent)).toEqual(['Over', 'Marks', 'Applies to', 'Classifier', 'Model', 'Highlight'])
+    expect([...body.querySelectorAll('.label-card-hlname')].map((e) => e.textContent)).toEqual(['reading', 'writing', 'other'])
+    expect(body.querySelectorAll('[role="switch"]')).toHaveLength(3)
+    expect([...body.querySelectorAll('button')].some((b) => b.textContent === 'class')).toBe(true)
+    await act(async () => more.click())
+    expect(el.querySelector('.label-card-more-body')).toBeNull()
+  })
+
+  test("More stays as the analyst left it for the next card the page opens", async () => {
+    const first = await mount(<SideCard editing="k1" />)
+    await act(async () => first.querySelector<HTMLButtonElement>('.label-card-more')!.click())
+    unmountAll()
+    const next = await mount(<SideCard editing="k1" />)
+    expect(next.querySelector('.label-card-more-body')).not.toBeNull()
+    await act(async () => next.querySelector<HTMLButtonElement>('.label-card-more')!.click())
+  })
+
+  test('a label of one color has its name in that color, in place of the swatch', async () => {
+    const one = { ...kind, id: 'k2', classes: [{ name: 'asks', color: 3, highlight: true }, { name: 'other', color: 0, highlight: false }], labels: ['asks', 'other'] } as unknown as Concept
+    const el = await mount(<SideCard editing="k2" of={{ ...labels, all: [one], on: [one], byId: new Map([[one.id, one]]) }} />)
+    expect(el.querySelector<HTMLInputElement>('[aria-label="Name"]')!.style.color).toBe('var(--label-3)')
+    expect(el.querySelector('.label-card-swatch, .label-card-tag')).toBeNull()
+  })
+
+  test('an edit shows Cancel and Re-run; put back, they go again', async () => {
+    const el = await mount(<SideCard editing="k1" />)
+    const prompt = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')!
+    await type(prompt, 'What the agent does.')
+    expect(shape(el.querySelector('.label-card')!).foot).toEqual(['Cancel', 'Re-run'])
+    await type(prompt, 'What the agent is doing in this message.')
+    expect(shape(el.querySelector('.label-card')!).foot).toEqual([])
+    await type(el.querySelector<HTMLInputElement>('[aria-label="Name"]')!, 'activity')
+    expect(shape(el.querySelector('.label-card')!).foot).toEqual(['Cancel', 'Re-run'])
+  })
+
+  test("the scope says the files and how many records, as the label's row in the Labels pane does", () => {
+    expect(scopeLine(kind)).toBe('transcript.jsonl · 1,815 records')
+    expect(scopeLine({ ...kind, last_run: { status: 'done', ts: '2026-10-07T00:00:00Z', total: 2064, matches: 1815, failed: 230 } } as unknown as Concept)).toBe('transcript.jsonl · 1,815 of 2,064 records')
+    expect(scopeLine({ ...kind, glob: 'a.jsonl, b/*.jsonl', n_labeled: undefined } as unknown as Concept)).toBe('a.jsonl, b/*.jsonl')
+  })
+
+  test('the prompt stands about four lines tall until it has the focus', async () => {
+    const el = await mount(<SideCard editing="k1" />)
+    const prompt = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')!
+    expect(prompt.style.maxHeight).toBe('90px')
+    expect(el.querySelector('.label-card-body')!.classList.contains('is-clamped')).toBe(true)
+    await act(async () => prompt.focus())
+    expect(prompt.style.maxHeight).toBe('180px')
+    expect(el.querySelector('.label-card-body')!.classList.contains('is-clamped')).toBe(false)
+    await act(async () => prompt.blur())
+    expect(prompt.style.maxHeight).toBe('90px')
   })
 })
 
@@ -211,13 +298,14 @@ describe('the popover', () => {
     expect(closed.mock.calls).toEqual([[true]])
   })
 
-  test('Cancel and × close it too', async () => {
+  test('× closes it, and so does Cancel once an edit shows it', async () => {
     await mount(<LabelEditorHost ws="w" />)
     const at = control()
-    for (const name of ['Cancel', 'Close']) {
+    for (const name of ['Close', 'Cancel']) {
       const closed = vi.fn()
       await act(async () => openLabelEditor({ id: 'k1', anchor: at, back: at, onClose: closed }))
       await act(frames)
+      if (name === 'Cancel') await type(popover()!.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')!, 'What the agent does.')
       const button = [...popover()!.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === name || b.getAttribute('aria-label') === name)!
       button.focus()
       await act(async () => button.click())
