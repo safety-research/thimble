@@ -231,12 +231,12 @@ body[data-cmd] .refchip-pop {
   margin-top: 0;
 }
 
-/* a table's cited cell (lib/tableCell): the evidence highlight under a 1.5px ink edge, in the label's table and in
-   the card's table while its citation is hovered; after a click it shows for a while, then fades */
+/* a table's cited cell (lib/tableCell): the accent's wash, with no edge, in the label's table and in the card's table
+   while its citation is hovered; after a click it shows for a while, then fades */
 .cite-cell,
 .outputs-html tbody td.cite-cell {
-  background: var(--hl-bg);
-  box-shadow: inset 0 0 0 1.5px var(--hl-edge);
+  background: var(--accent-wash);
+  box-shadow: none;
   color: var(--text-primary);
 }
 .outputs-html tbody td.cite-cell-flash {
@@ -245,18 +245,16 @@ body[data-cmd] .refchip-pop {
 @keyframes cite-cell-flash {
   0%,
   60% {
-    background: var(--hl-bg);
-    box-shadow: inset 0 0 0 1.5px var(--hl-edge);
+    background: var(--accent-wash);
   }
   100% {
     background: transparent;
-    box-shadow: inset 0 0 0 1.5px transparent;
   }
 }
 /* a cited line of a card's printed output, after a click opened it (lib/tableCell revealLines): marked as a cited cell
    is, then fading */
 span[data-line].cite-cell-flash {
-  /* the padding, taken back by the margin, keeps the edge off the glyphs without moving the text */
+  /* the padding, taken back by the margin, keeps the wash off the glyphs without moving the text */
   margin: 0 -3px;
   padding: 2px 3px;
   border-radius: 2px;

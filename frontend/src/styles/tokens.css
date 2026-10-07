@@ -251,8 +251,8 @@
   --status-info-soft: var(--paper-1);
   --status-neutral: var(--ink-500);
   --status-neutral-soft: var(--paper-1);
-  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css), a cited
-     table cell or output line with its edge, and the stronger wash of the find's current match */
+  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css) and the
+     stronger wash of the find's current match (a cited table cell or output line is the accent's wash, refchip.css) */
   --hl-bg: rgba(var(--ink-rgb), 0.08);
   --hl-bg-strong: rgba(var(--ink-rgb), 0.18);
   --hl-edge: rgba(var(--ink-rgb), 0.4);
