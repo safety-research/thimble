@@ -62,6 +62,7 @@ const labels: FilesLabels = {
   setClasses: () => undefined,
   setColour: vi.fn(),
   save: async () => kind,
+  remove: vi.fn(async () => undefined),
 }
 
 beforeAll(() => {

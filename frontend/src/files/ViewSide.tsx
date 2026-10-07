@@ -143,8 +143,10 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
   )
   // the card stands at the sidebar's edge (--side-w, files.css); the width is set on the card's slot alone, since a
   // custom property on the body would restyle every element in it on each drag move
+  // a label deleted while its card is open (by main, or in another window) takes its card with it, rather than leaving
+  // a new label's card in its place
   const card =
-    editing && p.open ? (
+    editing && p.open && (editing === 'new' || labels.byId.has(editing)) ? (
       <div className="label-card-slot" style={{ '--side-w': `${width}px` } as CSSProperties}>
         <LabelEditor ws={ws} labels={labels} editing={editing} drafted={drafted} appliesTo={appliesTo} onEdit={onEdit} onDraft={onDraft} onRun={runs.setRun} />
       </div>

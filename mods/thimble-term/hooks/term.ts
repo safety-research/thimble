@@ -901,6 +901,26 @@ export async function stopLabel(cx: Ctx, id: string): Promise<void> {
   else await labelSaid(cx, id, '◌ stopping after the current record')
 }
 
+/** Delete a label from its panel (`thimble act label-delete`): the label, its marks, its card and any filter that uses
+ *  it, as the browser's Delete label does. Then the labels and home are read again and the labels list opens. '' when
+ *  deleted, else why not, which the panel says on a `×` row. */
+export async function deleteLabel(cx: Ctx, id: string, name: string): Promise<string> {
+  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+  const got = await act(cx, rt.sc, 'label-delete', { label: id })
+  if (!got.ok) {
+    await labelSaid(cx, id, `× not deleted: ${got.error}`)
+    return got.error
+  }
+  const ui = await cx.labelUi()
+  const drop = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => k !== id)) as Record<string, T>
+  await cx.setLabelUi({ ...ui, runs: drop(ui.runs), said: drop(ui.said), kind: drop(ui.kind), open: ui.open.filter(k => !k.startsWith(`${id}:`)) })
+  await readSurface(cx, 'labels', 'labels')
+  await refreshHome(cx)
+  cx.toast(`thimble: deleted the label "${name}"`)
+  await openList(cx, { view: 'labels', title: 'Labels' })
+  return ''
+}
+
 // ------------------------------------------------------------------------------------------------ the refresh loop
 
 async function refreshAgents(cx: Ctx): Promise<void> {

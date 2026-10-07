@@ -640,12 +640,12 @@ it in browser mode.
   │ Decide what the revision's body is mainly for. 'message to agents': the body speaks to     │
   │ other agents, runs or cohorts, such as asking them to post, relay, confirm or coordinate…  │
   ╰────────────────────────────────────────────────────────────────────────────────────────────╯
-  run on a sample  run on all 14,591  last run on a sample of 30
+  run on a sample  run on all 14,591  delete  last run on a sample of 30
 
   ▸ counts  30
   ▸ examples  12
   ▸ cards  2
-  r to run a sample · c counts, e examples, d cards · l for labels · x to close
+  r to run a sample · k to delete · c counts, e examples, d cards · l for labels · x to close
 ```
 
 - The header: `name:` the label's name in the accent and bold after a `●` in its color; `type:` the kinds, the one in
@@ -654,7 +654,10 @@ it in browser mode.
 - The definition whole in a field to edit, under its kind's name (`prompt`, `pattern` or `code`; code through the
   `Code` element), on the same column as the header's values. A click gives it the keyboard; Enter saves it.
 - `run on a sample` and `run on all N`, which save what was typed first and run it, then the last run dim; `stop`
-  while it runs, and the type as plain text. A run's first error is a red `!` row under them.
+  while it runs, and the type as plain text. A run's first error is a red `!` row under them. `delete` (k), not offered
+  while a run goes, asks once in their place: `delete label "…"? its marks and card go too · y to delete · n to keep`;
+  y deletes the label with its marks, its card and any filter that uses it (`thimble act label-delete`) and opens the
+  labels list.
 - `▸ counts`, `▸ examples` and `▸ cards` are folded, and nothing of them shows until one is opened. Counts: each
   value's `●` in its hue, its name, a bar on a track to the whole, its count and its share dim, in whole percent as every
   share (`7%` beside `93%`; one decimal under 1%); the values to edit. The counts apply the analyst's verdicts, as

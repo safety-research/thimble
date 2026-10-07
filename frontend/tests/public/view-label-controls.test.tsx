@@ -26,6 +26,7 @@ function labelsWith(on: Concept[], marks: string[] = []): FilesLabels {
     setClasses: () => undefined,
     setColour: () => undefined,
     save: async () => asks,
+    remove: async () => undefined,
   }
 }
 

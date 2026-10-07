@@ -3,7 +3,9 @@
 A step is one change to a card (recorded by canvas_history.record via notebook._emit: add, delete, edit, move,
 resize;
 a code change keeps the outputs on either side, RUN_FIELDS) or one saved edit of a document's text
-(report_types.write_doc/write_frame). Labels, groups and frames are not undoable. Steps made inside batching() share
+(report_types.write_doc/write_frame), or a label's delete (concepts.delete_concept_route), whose files wait in
+TRASH_NAME/<id> until Undo restores them or the step leaves the journal. Other changes to labels, groups and frames are
+not undoable. Steps made inside batching() share
 a
 `batch` (an orientation follow-up), and one Undo reverts the whole batch. Steps of a session thimble started carry
 its
@@ -25,6 +27,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -39,6 +42,7 @@ log = logging.getLogger("thimble.undo")
 router = APIRouter()
 
 LOG_NAME = "undo.jsonl"
+TRASH_NAME = "undo-trash"  # a deleted label's files, a folder per step, until Undo restores them or the step is dropped
 MAX_STEPS = 100  # kept on each stack when the journal is rewritten
 MAX_LINES = 400  # the journal's length that makes it rewritten
 # the card's fields a step restores: what an edit, a move or a resize changes, with the fields derived from them
@@ -206,6 +210,21 @@ def _rewrite(c: str) -> None:
         lines += [json.dumps({**plain(s), "stack": "redo"}, ensure_ascii=False) for s in redo]
         ledger.atomic_write_text(log_path(c), "\n".join(lines) + ("\n" if lines else ""))
         _sigs[c] = _sig(c)
+        _prune_trash(c, undo + redo)
+
+
+def _prune_trash(c: str, steps: list[dict[str, Any]]) -> None:
+    """Delete the trash folders no step on either stack names: a deleted label's files once its step left the journal."""
+    try:
+        root = config.workspace_dir(c) / TRASH_NAME
+        if not root.is_dir():
+            return
+        kept = {str(s.get("trash")) for s in steps if s.get("trash")}
+        for d in root.iterdir():
+            if d.is_dir() and d.name not in kept:
+                shutil.rmtree(d, ignore_errors=True)
+    except (OSError, ValueError, HTTPException):
+        log.exception("%s: the undo trash was not pruned", c)
 
 
 def _append(c: str, line: dict[str, Any]) -> None:
@@ -296,7 +315,7 @@ def _pick(c: str, stack: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], st
     touched = {(s.get("kind"), str(s.get("target"))) for s in group}
     for later in stack[at + 1:]:
         if (later.get("kind"), str(later.get("target"))) in touched:
-            what = f"the {later['target']}" if later.get("kind") == "doc" else f"card {later.get('target')}"
+            what = f"the {later['target']}" if later.get("kind") == "doc" else f"{later.get('kind') or 'card'} {later.get('target')}"
             return [], f"{session_name(str(later.get('session')))} has changed {what} since and is still running; undo it once that ends"
     return group, None
 
@@ -466,6 +485,26 @@ def doc_written(c: str, inv_id: str, slug: str, which: str, before: dict[str, An
         log.exception("%s: the save of %s made no undo step", c, slug)
 
 
+def new_trash(c: str) -> Path | None:
+    """The folder a label's delete moves its files to, for its undo step (label_deleted); None inside an undo or a
+    redo, which makes no step."""
+    if is_applying():
+        return None
+    return config.workspace_dir(c) / TRASH_NAME / secrets.token_hex(6)
+
+
+def label_deleted(c: str, concept: dict[str, Any], cards: list[dict[str, Any]], filters: dict[str, Any],
+                  trash: Path, by: str = "") -> None:
+    """A label deleted, its files in `trash` (new_trash): a step whose undo restores it with its cards ({card, after})
+    and the filters that named it. Never raises."""
+    try:
+        push(c, {"kind": "label", "op": "deleted", "target": str(concept.get("id") or ""), "by": by,
+                 "label": f"delete label {concept.get('name') or concept.get('id')}", "trash": trash.name,
+                 "cards": copy.deepcopy(cards), "filters": copy.deepcopy(filters)})
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the delete of label %s made no undo step", c, concept.get("id"))
+
+
 # --------------------------------------------------------------------------- applying
 
 
@@ -560,6 +599,16 @@ def _apply(c: str, step: dict[str, Any], forward: bool) -> None:
     with applying():
         if step["kind"] == "doc":
             _write_doc(c, step, step.get("after") if forward else step.get("before"))
+            return
+        if step["kind"] == "label":
+            from . import concepts  # noqa: PLC0415 — concepts records this step
+
+            trash = config.workspace_dir(c) / TRASH_NAME / str(step.get("trash") or "")
+            if forward:
+                concepts.delete_again(c, str(step["target"]), trash)
+            else:
+                concepts.restore_concept(c, str(step["target"]), trash, list(step.get("cards") or []),
+                                         dict(step.get("filters") or {}))
             return
         op, cid = step["op"], str(step["target"])
         if op == "created":

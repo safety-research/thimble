@@ -4,6 +4,7 @@
 // by; choosing a label that is off turns it on.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
+import { bus } from '../lib/bus'
 import type { Concept, LabelRow, SourceKeys, SourceRecord } from '../lib/types'
 import { chipOfKeyValue, chipOfLabel, choiceId, colorKeys, defaultChoice, keyChips, keyValue, labelChips, parseChoice, pickedChips, readColor, writeColor, type ColorChoice, type ColorKept, type ColorValue } from './colorChoice'
 import type { RecordColor } from './colorContext'
@@ -84,6 +85,8 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
     if (c?.by === 'key' && keys?.keys.some((k) => k.key === c.key)) return c
     return defaultChoice(keys?.keys ?? [])
   }, [kept.by, onIds, fileLabels, keys])
+  // a label deleted while the file is colored by it leaves Color by at Off, as a view's does (viewer_colour.js)
+  useEffect(() => bus.on('concepts', (e) => e.what === 'deleted' && kept.by === `l:${e.concept}` && keep({ ...kept, by: 'off' })), [kept, keep])
   // a label turned on since the labels first came, that marks this file, takes the color
   const seenOn = useRef<Set<string> | null>(null)
   const loaded = labels.all.length > 0

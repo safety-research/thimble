@@ -198,11 +198,30 @@
     if (fresh.length) S.by = 'l:' + fresh[fresh.length - 1]
   }
 
+  // A label deleted while the view colors by it leaves Color by at Off: it was in thimble's list of every label (`all`)
+  // and is no longer, or the first whole list the page hears lacks it. A label turned off stays in that list, and the
+  // colour goes back to the view's field.
+  function dropDeleted(before, now) {
+    var by = S.by || ''
+    if (by.indexOf('l:') !== 0 || !now || !Array.isArray(now.all)) return
+    var id = by.slice(2)
+    var named = function (l) {
+      return String(l.id) === id
+    }
+    var had = before && Array.isArray(before.all) ? before.all.some(named) : now.all.length > 0
+    if (had && !now.all.some(named)) {
+      S.by = OFF
+      save()
+    }
+  }
+
   kit.labels(function (state, labelsChanged) {
+    var before = labelState
     labelState = state
     // a page that has not mounted the control keeps nothing: what it sees is noticed once it does
     if (!control) return
     if (!labelsChanged) return control.marksChanged()
+    dropDeleted(before, state)
     notice()
     control.labelsChanged()
   })

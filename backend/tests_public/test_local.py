@@ -77,6 +77,7 @@ def _args(c: str, corpus: Path) -> dict[str, dict]:
         "apply_label": {"scope": "files", "name": "bash", "predicate": {"kind": "regex", "text": "Bash"},
                         "paths": ["agents/*.jsonl"]},
         "show_label": {"name": "bash", "on": True},
+        "delete_label": {"name": "nope"},
         "set_filter": {"scope": "files", "label": "bash"},
         "clear_filter": {"scope": "files"},
         "set_layout": {"layout": "one", "surfaces": ["files"]},
@@ -534,6 +535,60 @@ async def test_act_edits_and_runs_a_label_as_the_label_editor_does(term, monkeyp
         await local.act(CORPUS, "label", {"label": "bash"})
     with pytest.raises(local.StateError, match="no label"):
         await local.act(CORPUS, "label-run", {"label": "nope"})
+
+
+async def test_act_label_delete_deletes_the_label_its_marks_its_card_and_its_filter(term):
+    """The label panel's delete: `label-delete` deletes the label as the browser's Delete label does, with its marks, its
+    card and any filter that uses it; a `label-run` of it in another process stops once the label's file is gone; an
+    unknown label is refused."""
+    from app import concepts
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    ws = config.workspace_dir(CORPUS)
+    k = concepts.find_concept(ws, "bash")
+    cid = k["id"]
+    concepts.set_filter(CORPUS, "files", cid, "yes")
+    assert concepts.read_filters(ws).get("files", {}).get("concept") == cid
+    assert concepts._label_cards(ws, cid) and concepts.labels_file(ws, cid).is_file()
+    got = await local.act(CORPUS, "label-delete", {"label": "Bash"})
+    assert got == {"ok": True, "label": cid, "name": "bash", "deleted": True}
+    assert concepts.find_concept(ws, cid) is None and not (concepts.concepts_dir(ws) / f"{cid}.json").exists()
+    assert not concepts.labels_file(ws, cid).exists()
+    assert not concepts._label_cards(ws, cid)
+    assert "files" not in concepts.read_filters(ws)
+    assert not local._label_stop_file(CORPUS, cid).exists()
+    with pytest.raises(local.StateError, match="no label"):
+        await local.act(CORPUS, "label-delete", {"label": "bash"})
+    with pytest.raises(local.StateError, match="empty"):
+        await local.act(CORPUS, "label-delete", {})
+
+
+async def test_a_label_run_stops_when_another_process_deletes_its_label(term, monkeypatch):
+    """`label-run` watches the label's file as it watches its stop file: a `label-delete` in another process removes the
+    file, and the run stops after its current unit."""
+    from app import concepts
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    ws = config.workspace_dir(CORPUS)
+    cid = concepts.find_concept(ws, "bash")["id"]
+    seen: list[bool] = []
+    real_wait = concepts.wait_apply
+
+    async def wait_apply(c, k, timeout=None, enough=None):
+        concepts._concept_file(ws, k).unlink()  # what the other process's delete leaves
+        for _ in range(100):
+            if concepts._cancel_event(c, k).is_set():
+                break
+            await asyncio.sleep(0.02)
+        seen.append(concepts._cancel_event(c, k).is_set())
+        return await real_wait(c, k, timeout, enough)
+
+    monkeypatch.setattr(local, "LABEL_STOP_POLL_S", 0.02)
+    monkeypatch.setattr(concepts, "wait_apply", wait_apply)
+    await local.act(CORPUS, "label-run", {"label": cid})
+    assert seen == [True]
 
 
 def _cli(*argv: str, env: dict | None = None, cwd: Path | None = None) -> subprocess.CompletedProcess:

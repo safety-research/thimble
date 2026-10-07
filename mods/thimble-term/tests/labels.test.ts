@@ -39,7 +39,7 @@ test("the label panel's header reads `name:`, `type:`, `scope:`, and its pattern
   // each label in a column 10 cells wide (`pattern:` and a gutter), the field after it
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Box","props":{"key":"lf-pattern:","flexDirection":"row"},"children":[{"type":"Box","props":{"width":10,"flexShrink":0}')
   // each folded part's key by what it opens (live check New 11)
-  expect(text).toContain('r to run a sample · c counts, e examples, d cards · l for labels')
+  expect(text).toContain('r to run a sample · k to delete · c counts, e examples, d cards · l for labels')
   await pane.unmount()
 })
 
@@ -83,6 +83,63 @@ test("a run that failed on some records says so, its first error on a row of its
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
   expect(shown(await pane.drawn())).toContain('stopped after 7: proxy-link 3 · none 4')
+  await pane.unmount()
+})
+
+test('`delete` (k) asks once in the panel; n keeps the label, y deletes it (`thimble act label-delete`) and opens the labels list without it', async ($, on) => {
+  const w = world(on)
+  let pane = await labelPanel($, w)
+  await pane.press({ key: 'lb-delete' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  let text = shown(await pane.drawn())
+  expect(text).toContain(`delete label "${LABEL.name}"? its marks and card go too · y to delete · n to keep`)
+  // the run row gives way to the question, and the run key with it
+  expect(await pane.find({ type: 'Button', key: 'lb-sample' })).toBeUndefined()
+  expect(text).not.toContain('r to run a sample')
+  await pane.press({ key: 'hk-delete-no' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  text = shown(await pane.drawn())
+  expect(text).not.toContain('its marks and card go too')
+  expect(text).toContain('run on a sample')
+  expect(w.acts.some(a => a.kind === 'label-delete')).toBe(false)
+  // k asks again, and y deletes
+  await pane.press({ key: 'hk-delete' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  await pane.press({ key: 'hk-delete-yes' })
+  await w.clock.settle()
+  expect(w.acts).toContainEqual({ kind: 'label-delete', payload: { label: LABEL.id } })
+  expect(w.toasts.join('\n')).toContain(`deleted the label "${LABEL.name}"`)
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  text = shown(await pane.drawn())
+  expect(text).toContain('Labels')
+  expect(text).toContain('0 labels')
+  expect(text).not.toContain(LABEL.name)
+  await pane.unmount()
+})
+
+test('a delete thimble refuses says why on a red `×` row, and the label stays', async ($, on) => {
+  const w = world(on)
+  let pane = await labelPanel($, w)
+  await pane.press({ key: 'hk-delete' })
+  await w.clock.settle()
+  // the label went from the workspace after the panel read it: thimble refuses the delete
+  const kept = w.states.labels
+  w.states.labels = [] as never
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  await pane.press({ key: 'lb-delete-yes' })
+  await w.clock.settle()
+  w.states.labels = kept
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(JSON.stringify(await pane.drawn())).toContain(`"color":"error"},"children":["× not deleted: no label '${LABEL.id}'"]`)
   await pane.unmount()
 })
 

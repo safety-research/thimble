@@ -170,6 +170,9 @@ REGISTRY: dict[str, Spec] = {
         Spec("apply_label", (ANALYST,), _H + "apply_label"),
         # a label over files on or off in Files and the views, which runs nothing (concepts.show_concept)
         Spec("show_label", (ANALYST,), _H + "show_label"),
+        # a label deleted with its marks, its card and its filters, as the Labels pane's Delete label does; main's, as
+        # the analyst asks it
+        Spec("delete_label", (ANALYST,), _H + "delete_label", sessions=MAIN_ONLY),
         # the filters the browser's Filter menu and label chips set, by a label that exists or by the cards' own facts
         Spec("set_filter", (ANALYST,), "app.filters:tool_set_filter"),
         Spec("clear_filter", (ANALYST,), "app.filters:tool_clear_filter"),
@@ -2543,6 +2546,23 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return ok(f"label {k['name']} {ref} {state}.")
     lit = [cl["name"] for cl in k["classes"] if cl["highlight"]]
     return ok(f"label {k['name']} {ref} {state}, highlighting {', '.join(lit) or 'none of its values'}.")
+
+
+async def _h_delete_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
+    """Delete a label as the Labels pane's Delete label does (concepts.delete_concept_route): its marks, its card, any
+    filter that uses it and its run state, which ends first. The browser's Undo restores it."""
+    from . import concepts
+
+    name = " ".join(str(args.get("name") or "").split())
+    if not name:
+        return err("delete_label: `name` is required, the label's name or id")
+    key = name[len("concept:"):] if name.startswith("concept:") else name
+    k = concepts.find_concept(ctx.ws, key)
+    if k is None:
+        names = ", ".join(repr(x["name"]) for x in concepts.list_concepts(ctx.ws)) or "none yet"
+        return err(f"delete_label: no label {name!r}; the labels are {names}")
+    await concepts.delete_concept_route(ctx.c, str(k["id"]))
+    return ok(f"label {k['name']} ({k['id']}) is deleted, with its marks, its card and any filter that used it.")
 
 
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:

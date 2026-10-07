@@ -41,7 +41,7 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, crumbsWidth, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, closePanel, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, readDoc, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
+import { PANEL, closePanel, deleteLabel, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, readDoc, readSurface, rt, runLabel, saveLabel, startThread, stepOf, stopLabel, surfaceValue, threadMessage } from './term'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -1592,12 +1592,16 @@ export async function fieldMessage(cx: Ctx, name: string, text: string, save: bo
   if (save && text.trim()) await saveLabelEdits(cx, m[1]!, { body: text.trim() })
 }
 
+// the label whose delete the label panel asks about (`delete label "…"? … y to delete · n to keep`), '' for none
+let labelDeleting = ''
+
 /** The label panel, after the browser's label editor (SPEC.md, section 7, "The label panel"): its header block,
  *  the label's name in the accent and bold after a ● in its colour, its type (prompt, regex or code: the one in use on
  *  the selection background) and its scope (the files, editable, and how many records), then the rule; the prompt (or
  *  pattern or code) in a field to edit, Enter saving it (`thimble act label`); `run on a sample` and `run on all N`,
- *  which save what was typed first and run it (`thimble act label-run`); then `▸ counts`, `▸ examples` and `▸ cards`,
- *  folded. Nothing else shows until it is opened. */
+ *  which save what was typed first and run it (`thimble act label-run`), and `delete`, which asks once in the panel
+ *  (y deletes, n keeps; `thimble act label-delete`); then `▸ counts`, `▸ examples` and `▸ cards`, folded. Nothing else
+ *  shows until it is opened. */
 async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button, Input } = cx.els(e)
@@ -1609,6 +1613,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   if (!l) return none(cx, e)
   const id = l.id
   const name = l.name ?? id
+  // a delete asked about another label is not asked here
+  if (labelDeleting !== id) labelDeleting = ''
   const ui = await cx.labelUi()
   const running = ui.runs[id]
   const said = ui.said[id] ?? ''
@@ -1635,6 +1641,20 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   const run = (limit: number) => async () => {
     if (running) return
     if (await save()) await runLabel(cx, id, name, limit)
+  }
+  // delete: asked once in the panel (labelDeleting), then `thimble act label-delete` and the labels list
+  const askDelete = async () => {
+    labelDeleting = id
+    await cx.bumpPanel()
+  }
+  const keepIt = async () => {
+    labelDeleting = ''
+    await cx.bumpPanel()
+  }
+  const deleteIt = async () => {
+    if (labelDeleting !== id) return
+    labelDeleting = ''
+    await deleteLabel(cx, id, name)
   }
   const rows: RenderElement[] = []
   const keys: Key[] = []
@@ -1743,17 +1763,30 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
         {follower ? <Button key="lb-stop" label="stop" plain onPress={stop} /> : null}
       </Box>,
     )
+  else if (labelDeleting === id)
+    // the delete asks once, in the run row's place: y deletes, n keeps
+    rows.push(
+      <Box key="lb-delete" flexDirection="row" flexWrap="wrap">
+        <Text>{`delete label "${name}"? its marks and card go too · `}</Text>
+        <Button key="lb-delete-yes" label="y to delete" plain onPress={() => void deleteIt()} />
+        <Text>{' · '}</Text>
+        <Button key="lb-delete-no" label="n to keep" plain onPress={() => void keepIt()} />
+      </Box>,
+    )
   else
     rows.push(
       <Box key="lb-runs" flexDirection="row" columnGap={2} flexWrap="wrap">
         <Button key="lb-sample" label="run on a sample" plain onPress={() => void run(sample)()} />
         <Button key="lb-all" label={scopeN !== null ? `run on all ${num(scopeN)}` : 'run on all'} plain onPress={() => void run(0)()} />
+        <Button key="lb-delete" label="delete" plain onPress={() => void askDelete()} />
         <Text dimColor>{lastWords}</Text>
       </Box>,
     )
   // what the last save or run said: `×` and `!` rows in red
   said.split('\n').filter(Boolean).forEach((line, i) => rows.push(<Text key={`lb-said-${i}`} wrap="wrap" {...(/^[×!]/.test(line) ? { color: COLORS.problem } : { dimColor: true })}>{line}</Text>))
-  if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() })
+  const asking = labelDeleting === id && !running && !st.running
+  if (asking) keys.push({ key: 'delete-yes', hotkey: 'y', onPress: () => void deleteIt() }, { key: 'delete-no', hotkey: 'n', onPress: () => void keepIt() })
+  else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
   else if (running || follower) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
   // the counts, the examples and the cards, folded
   const toggle = (part: string, words: string, n: number | null, note = '') => (
@@ -1896,7 +1929,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   }
   keys.push({ key: 'list', hotkey: 'l', onPress: () => void openList(cx, { view: 'labels', title: 'Labels' }) })
   // the keys that fit one row: the field says how to save it (its placeholder); each folded part's key by what it opens
-  rows.push(hintsRow(els, [...(running || follower ? ['s to stop'] : st.running ? [] : ['r to run a sample']), 'c counts, e examples, d cards', 'l for labels'], cols))
+  rows.push(hintsRow(els, [...(running || follower ? ['s to stop'] : st.running || asking ? [] : ['r to run a sample', 'k to delete']), 'c counts, e examples, d cards', 'l for labels'], cols))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...rows]}</Box>
 }

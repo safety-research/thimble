@@ -316,6 +316,7 @@ export function callTarget(name: string, input: unknown, n: number, ws = ''): st
     }
     case 'apply_label':
     case 'show_label':
+    case 'delete_label':
       return inp.name ? `label “${oneLine(str(inp.name), 60)}”` : step
     case 'critique':
       return 'the critic’s report'
@@ -375,6 +376,8 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
       return [str(inp.name), inp.scope ? `on ${str(inp.scope)}` : ''].filter(Boolean).join(' ')
     case 'show_label':
       return [str(inp.name), inp.on === false ? 'off' : 'on'].join(' ')
+    case 'delete_label':
+      return str(inp.name)
     case 'set_filter': {
       // what the filter keeps, in the words of the canvas's chips: `canvas · table · Orientation · "merge"`
       const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : typeof v === 'string' && v ? [v] : [])
@@ -465,6 +468,7 @@ export const TOOL_WORDS: Record<string, string> = {
   list_cards: 'List cards',
   apply_label: 'Apply label',
   show_label: 'Show label',
+  delete_label: 'Delete label',
   set_filter: 'Filter',
   clear_filter: 'Clear filter',
   set_layout: 'Lay out panes',
@@ -499,6 +503,7 @@ export const TOOL_GROUPS: Record<string, string> = {
   list_cards: 'Cards',
   apply_label: 'Label',
   show_label: 'Label',
+  delete_label: 'Label',
   set_filter: 'Filter',
   clear_filter: 'Filter',
   set_layout: 'Layout',
@@ -740,6 +745,8 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
       return with_('Applied label', str(inp.name))
     case 'show_label':
       return with_(inp.on === false ? 'Hid label' : 'Showed label', str(inp.name))
+    case 'delete_label':
+      return with_('Deleted label', str(inp.name))
     case 'run_check':
       return with_('Ran check', str(inp.name))
     case 'stop_check':

@@ -273,6 +273,15 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       const payload = JSON.parse(rest[0] ?? '{}') as Record<string, unknown>
       w.acts.push({ kind: what!, payload })
       if (what === 'thread') return out({ ok: true, thread: 't9' })
+      // a label deleted leaves the labels and home; one that is not there is refused, as thimble refuses it
+      if (what === 'label-delete') {
+        const ls = w.states.labels as { id: string; name?: string }[]
+        const l = ls.find(x => x.id === payload.label)
+        if (!l) return out({ error: `no label '${String(payload.label)}'` }, 1)
+        w.states.labels = ls.filter(x => x !== l) as typeof w.states.labels
+        w.states.home = { ...w.states.home, labels: w.states.home.labels - 1 }
+        return out({ ok: true, label: l.id, name: l.name, deleted: true })
+      }
       return out({ ok: true })
     }
     switch (what) {
