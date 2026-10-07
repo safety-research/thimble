@@ -10,7 +10,7 @@ import type { CardData, CardLabel } from './draw'
 import type { Ctx, SurfaceGot } from './ctx'
 import { act, actLong, changed, readState, signature } from './data'
 import type { Area, Scope, Signature } from './data'
-import { cid, citations } from './lib'
+import { cid, citations, clip, noteQuestion, quoted } from './lib'
 import type { Citation } from './lib'
 import { agentsOf, cellOf, cellsOf, chatOf, docUnits, homeOf, labelIdOf, labelOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
 import { NAV_EMPTY, backTarget, moved, nextTrail } from './nav'
@@ -43,6 +43,11 @@ export const rt = {
   busy: false,
   again: false,
   turn: null as Turn | null,
+  // the cards each row of main's chat stands with: its turn's, drawn under the turn's last reply, and those its answer
+  // embeds, by the row's uuid, so a sentence of the reply that cites one whole leaves the reference out
+  rowCards: new Map<string, string[]>(),
+  // the cards a drawing named and no drawing read yet, which the session's timer reads (tick)
+  wanted: new Set<string>(),
   // the latest row of main's chat a line can stand under (signal.ts isAnchor)
   anchor: '',
   termColumns: 0,
@@ -194,6 +199,8 @@ async function putCard(cx: Ctx, cell: ThimbleCell): Promise<void> {
     if (ls.length) next.data = { ...(next.data as CardData), labels: cardLabelsOf(cell, ls) }
   } else rt.readers.delete(cell.id)
   await cx.setCard(cell.id, next)
+  // its question, which names it where a reply cites it without words
+  noteQuestion(cell.id, (next.data as CardData | null)?.question ?? cell.title)
   queueCitations(citations(next.takeaway))
   if (cell.kind === 'example') queueCitations(((cell.payload?.refs as unknown[]) ?? []).map(r => ({ raw: `[[${String(r)}]]`, ref: String(r), display: null })))
 }
@@ -450,7 +457,7 @@ async function threadChain(cx: Ctx, p: TermPanel, step: ChatNavStep): Promise<Ch
     const r = rows.find(x => x.id === id)
     if (!r) break
     const name = r.question || r.title
-    chain.unshift(stepOf({ view: 'thread', title: name ? `"${name.length > 60 ? `${name.slice(0, 59)}…` : name}"` : 'thread', thread: id }))
+    chain.unshift(stepOf({ view: 'thread', title: name ? quoted(clip(name, 60)) : 'thread', thread: id }))
   }
   return chain
 }
@@ -756,6 +763,12 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
   }
   rt.busy = true
   try {
+    // the cards a drawing named and could not read while it drew (a drawing writes no state): read now
+    if (rt.wanted.size) {
+      const ids = [...rt.wanted]
+      rt.wanted.clear()
+      await loadCards(cx, ids)
+    }
     do {
       rt.again = false
       const sig = await signature(cx, rt.sc)

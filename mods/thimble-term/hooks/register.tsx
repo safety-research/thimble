@@ -29,7 +29,7 @@ import type { Sent } from './gestures'
 import { chipState, claimsIn, streamLink, streamStep, streaming } from './cite'
 import type { StreamLook, Streaming } from './cite'
 import type { CardData } from './draw'
-import { cid, citeSpans, citations, clip, clipWords, embeddedCards, needsDrawing } from './lib'
+import { bareCard, cardWords, cid, citeSpans, citations, clip, cut, embeddedCards, needsDrawing, quoted } from './lib'
 import { cardsOfCall, docsOf, labelsOf, namedForks, namedThreads, runIds, runShown, threadOf, withoutEnd, withoutToldThreads } from './model'
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
@@ -312,7 +312,7 @@ async function signalRows(cx: Ctx, e: ResolveInput & { requestId: string; viewpo
     const tt = await cx.thread(s.thread)
     const th = tt?.events.length ? threadOf(tt.meta, tt.events) : null
     const label = row?.anchorText || (row?.anchor ? await anchorName(cx, row.anchor) : '') || row?.title || 'the side thread'
-    const q = th ? signalQuestion({ turns: th.turns, label }, s.turn, n) : `"${clip((row?.question || row?.title || label).replace(/\s+/g, ' '), n)}"`
+    const q = th ? signalQuestion({ turns: th.turns, label }, s.turn, n) : quoted(clip(row?.question || row?.title || label, n))
     const end = th ? signalEnd(th, s.turn) ?? 'answered' : 'answered'
     // `new` while the thread holds an answer the analyst has not opened (thimble's `unread`), on its latest answer's row
     const latest = th ? th.turns.map((x, i) => (x.state === 'done' ? i + 1 : 0)).reduce((a, b) => Math.max(a, b), 0) : s.turn
@@ -335,9 +335,21 @@ async function anchorName(cx: Ctx, anchor: string): Promise<string> {
   const id = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(anchor)?.[1]
   if (id) {
     const q = ((await cx.card(id))?.data as CardData | null | undefined)?.question
-    return q ? `card "${clipWords(q, 40)}"` : 'a card'
+    return q ? cardWords(q) : 'a card'
   }
   return anchor
+}
+
+/** An Agent call's stored result with a thread's fork named by the thread's first question where its `prompt` or
+ *  `description` names the fork's slug (`thread:<slug>`, what ctrl+o shows under `Prompt:`); the result itself when it
+ *  names none. */
+function forkOutput(output: unknown, threads: Parameters<typeof namedForks>[1]): unknown {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return output
+  const o = output as Record<string, unknown>
+  const named = (v: unknown) => (typeof v === 'string' && /\bthread:/.test(v) ? namedForks(v, threads) : v)
+  const prompt = named(o.prompt)
+  const description = named(o.description)
+  return prompt === o.prompt && description === o.description ? output : { ...o, prompt, description }
 }
 
 /** A Bash command that runs `thimble-run`, as its row shows it (model.ts runShown), the cards it names by their
@@ -382,7 +394,8 @@ async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promi
   const ans = await cx.answer(e.requestId)
   if (!ans) return null
   const { Box, Text, Button } = cx.els(e)
-  const cls = claimsIn(ans.text, e.requestId)
+  // a card cited whole (`[[card:<id>]]`) is no cited value: the footer counts the values cited
+  const cls = claimsIn(ans.text, e.requestId).filter(cl => !bareCard(cl.c))
   let red = 0
   for (const cl of cls) {
     const v = await cx.verdict(cid(cl.c.raw))
@@ -443,6 +456,9 @@ async function restoreKept($: Dollar, cx: Ctx): Promise<void> {
     if (r.threads?.length && !(await $.state.get({ ...THREAD_ROWS, id: row })).value?.length) await $.state.set({ ...THREAD_ROWS, id: row }, r.threads)
     if (r.views?.length && !(await $.state.get({ ...VIEW_ROWS, id: row })).value?.length) await $.state.set({ ...VIEW_ROWS, id: row }, r.views)
     for (const id of [...(r.cards ?? []), ...(r.answer?.cards ?? []), ...embeddedCards(r.answer?.text ?? '')]) ids.add(id)
+    // the cards each row stood with, for the sentences that cite one whole
+    const near = [...new Set([...(r.cards ?? []), ...(r.answer?.cards ?? []), ...embeddedCards(r.answer?.text ?? '')])]
+    if (near.length) for (const u of [row, ...(r.answer?.rows ?? [])]) rt.rowCards.set(u, [...new Set([...(rt.rowCards.get(u) ?? []), ...near])])
     for (const v of r.views ?? []) rt.viewsTold.add(v)
     for (const t of r.threads ?? []) rt.told.add(t.thread)
   }
@@ -632,6 +648,9 @@ export const register: Register = on => {
       if (all.trim() || t.cards.length) rt.lastCards = [...new Set([...embeddedCards(all), ...t.cards])]
       if ((all.trim() || t.cards.length) && rt.sc) await keepLast(cx, rt.sc.ws, rt.lastReply, rt.lastCards)
       // the answer: its last part that cites or embeds a card, else its last; the footer stands under its last row
+      // the cards each of the turn's rows stands with: a sentence that cites one whole leaves the reference out
+      const near = [...new Set([...t.cards, ...embeddedCards(all)])]
+      if (near.length) for (const r of t.parts.flat()) rt.rowCards.set(r.uuid, near)
       const part = answerPart(t.parts)
       const last = part?.at(-1)?.uuid ?? ''
       if (part && last && !t.own) {
@@ -668,8 +687,14 @@ export const register: Register = on => {
     const { Box } = $.ui.resolve(e)
     // the reply fills the terminal's width, less 2, its cards as wide as its prose
     const cols = (e.viewport?.columns ?? 100) - 2
-    const body = text.trim() ? await drawReply(cx, e, text, cols - MARGIN, { first: Boolean(e.props.isFirstOfReply), skipCards: new Set(ids), ask: t => void openAsk(cx, t), open: id => void openThread(cx, id) }) : []
+    // the cards drawn with this row's turn: under its last reply, or embedded in its answer (those of a turn still
+    // running too), which a sentence citing one whole leaves out
+    const running = rt.turn?.parts.some(p => p.some(r => r.uuid === e.requestId)) ? rt.turn.cards : []
+    const drawn = new Set([...ids, ...(rt.rowCards.get(e.requestId) ?? []), ...running])
+    const body = text.trim() ? await drawReply(cx, e, text, cols - MARGIN, { first: Boolean(e.props.isFirstOfReply), skipCards: new Set(ids), drawn, ask: t => void openAsk(cx, t), open: id => void openThread(cx, id) }) : []
     const cards = await drawCards(cx, e, ids, cols, t => void openAsk(cx, t), id => void openThread(cx, id))
+    // a block that held only a line thimble-term hides: nothing (ctrl+o's view still draws the reply's time and model
+    // above it, which no hook reaches; the engine's own block with no text draws the same)
     if (!body.length && !cards && !told && !views && !footer) return <Box />
     return (
       <Box flexDirection="column">
@@ -715,9 +740,14 @@ export const register: Register = on => {
     if (tool === 'Bash' && typeof input.command === 'string' && /thimble-run\b/.test(input.command)) {
       return next({ ...e, props: { ...e.props, input: { ...input, command: await runWords(cx, input.command) } } })
     }
-    if ((tool === 'Agent' || tool === 'Task') && typeof input.description === 'string' && /\bthread:/.test(input.description)) {
-      const description = namedForks(input.description, await cx.threads())
-      if (description !== input.description) return next({ ...e, props: { ...e.props, input: { ...input, description } } })
+    if (tool === 'Agent' || tool === 'Task') {
+      // a fork's description and its prompt (ctrl+o's `Prompt:`) name the thread by its first question, never its slug
+      const threads = await cx.threads()
+      const named = (v: unknown) => (typeof v === 'string' && /\bthread:/.test(v) ? namedForks(v, threads) : v)
+      const description = named(input.description)
+      const prompt = named(input.prompt)
+      const output = forkOutput(e.props.output, threads)
+      if (description !== input.description || prompt !== input.prompt || output !== e.props.output) return next({ ...e, props: { ...e.props, input: { ...input, description, prompt }, ...(output !== undefined ? { output } : {}) } })
     }
     return next(e)
   })
@@ -732,18 +762,26 @@ export const register: Register = on => {
   // a card tool's result row: the card by its question, since the card itself is drawn under the turn's last reply; a
   // label's, its name and each value's count. An error stays Claude Code's row.
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
-    if (!rt.sc || e.props.isErrored || !CARD_TOOL.test(String(e.props.tool))) return next(e)
+    if (!rt.sc || e.props.isErrored) return next(e)
+    // a fork's result (`Backgrounded agent`, and in ctrl+o its `Prompt:`) names the thread by its first question
+    if (e.props.tool === 'Agent' || e.props.tool === 'Task') {
+      const output = forkOutput(e.props.output, await cxOf($).threads())
+      return output === e.props.output ? next(e) : next({ ...e, props: { ...e.props, output } })
+    }
+    if (!CARD_TOOL.test(String(e.props.tool))) return next(e)
     const ids = cardsOfCall(String(e.props.tool), {}, resultText(e.props.output))
     const tc = ids[0] ? await cxOf($).card(ids[0]) : undefined
     const data = tc?.data as CardData | null | undefined
     const q = data?.question
     if (!q) return next(e)
     const { Text } = $.ui.resolve(e)
+    // the row cut at a word, as every cut, to the terminal's width
+    const room = Math.max(20, (e.viewport?.columns ?? 100) - 2)
     if (data.kind === 'label' && data.label) {
       const counts = ((data.rows ?? []) as { label: string; value: number }[]).map(r => `${r.label} ${r.value.toLocaleString('en-US')}`).join(' · ')
-      return <Text dimColor wrap="truncate-end">{`  ⎿  label "${data.label.name}"${counts ? ` · ${counts}` : ''}${tc?.busy ? ` · ${tc.busy}` : ''}`}</Text>
+      return <Text dimColor wrap="truncate-end">{cut(`  ⎿  label ${quoted(data.label.name)}${counts ? ` · ${counts}` : ''}${tc?.busy ? ` · ${tc.busy}` : ''}`, room)}</Text>
     }
-    return <Text dimColor wrap="truncate-end">{`  ⎿  card "${q}"${tc?.busy ? ` · ${tc.busy}` : ''}`}</Text>
+    return <Text dimColor wrap="truncate-end">{cut(`  ⎿  card ${quoted(q)}${tc?.busy ? ` · ${tc.busy}` : ''}`, room)}</Text>
   })
 
   // ---------------------------------------------------------------------------------------------- above the prompt

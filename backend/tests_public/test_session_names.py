@@ -297,7 +297,7 @@ def test_terminal_mode_launches_with_no_server_the_renderer_the_card_runner_and_
     assert t.calls["server"] == [] and t.calls["refresh"] == [], "no server started or asked"
     assert t.calls["local"] == ["logs"] and t.calls["roles"] == ["logs"]
     runner = f"Bash({cli.plugin_root() / cli.CARD_RUNNER} *)"
-    assert runner in lines[1].split(",")
+    assert runner in lines[1].split(",") and "Bash(thimble-run *)" in lines[1].split(","), "by its path and its name"
     settings = json.loads(lines[3])
     ws = str(t.ws.resolve())
     want = {"THIMBLE_MODE": "terminal", "THIMBLE_HOME": str((tmp_path / "home").resolve()), "THIMBLE_WS": ws,
@@ -307,7 +307,10 @@ def test_terminal_mode_launches_with_no_server_the_renderer_the_card_runner_and_
     allow = settings["sandbox"]["filesystem"]["allowWrite"]
     assert {f"{ws}/notebooks", f"{ws}/labels", f"{ws}/card-runs"} <= set(allow)
     assert lines[10] == f"terminal\t{t.renderer}"
-    assert dict(kv.split("=", 1) for kv in lines[11].split("\t")) == want
+    exported = dict(kv.split("=", 1) for kv in lines[11].split("\t"))
+    assert {k: exported[k] for k in want} == want
+    # the plugin copy's bin/ first on PATH, so main's Bash runs `thimble-run` by its name; main's --settings leave PATH
+    assert exported["PATH"].split(os.pathsep)[0] == str(cli.plugin_root() / "bin") and "PATH" not in settings["env"]
     assert json.loads((t.ws / cli.LAUNCH_FILE).read_text())["mode"] == "terminal"
     assert t.calls["prompt_env"] == [{"THIMBLE_MODE": "terminal", "THIMBLE_WS": ws}], "main's prompt sees the mode"
     assert os.environ.get("THIMBLE_MODE") is None and os.environ.get("THIMBLE_WS") is None, "and only it"
@@ -323,7 +326,7 @@ def test_terminal_mode_launches_with_no_server_the_renderer_the_card_runner_and_
     launch_mode.set_folder(t.folder, "browser")
     lines = cli.launch_args(t.folder).split("\n")
     assert t.calls["server"] == ["logs"] and t.calls["refresh"] == ["logs"] and t.calls["roles"] == []
-    assert runner not in lines[1].split(",")
+    assert runner not in lines[1].split(",") and "Bash(thimble-run *)" not in lines[1].split(",")
     settings = json.loads(lines[3])
     assert not {"THIMBLE_MODE", "THIMBLE_WS", "THIMBLE_HOME"} & set(settings["env"])
     assert f"{ws}/notebooks" not in settings["sandbox"]["filesystem"]["allowWrite"]

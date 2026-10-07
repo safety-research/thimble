@@ -5,8 +5,9 @@ import { expect, test } from 'claude-code/testing'
 import { busyWords, cardOfCell, htmlTable, labelCard, linksOf, sortedBars } from '../hooks/cell'
 import type { ThimbleCell } from '../hooks/cell'
 import { cardLayout, cut, placeWords, share } from '../hooks/draw'
-import { citations, clip, clipWords, recordFields } from '../hooks/lib'
+import { citations, clip, formatted, quoted, recordFields, windowAt } from '../hooks/lib'
 import { plainCites } from '../hooks/cite'
+import { fitCrumbs } from '../hooks/nav'
 import type { BarRow, Cell } from '../hooks/draw'
 import { CELLS, LABEL } from './fixtures'
 
@@ -154,9 +155,9 @@ test('text cut short has no space before `…`; a question in a row is cut at a 
   expect(cut('removed in under an hour', 12)).toBe('removed in…')
   expect(clip('Two of the three card checks', 8)).toBe('Two of…')
   expect(clip('short', 8)).toBe('short')
-  expect(clipWords('Which five pages have the most revisions in the corpus?', 40)).toBe('Which five pages have the most…')
-  expect(clipWords('What are the main events in the corpus, in order?', 40)).toBe('What are the main events in the corpus…')
-  expect(clipWords('Supercalifragilisticexpialidocious-and-more', 20)).toBe('Supercalifragilisti…')
+  expect(clip('Which five pages have the most revisions in the corpus?', 40)).toBe('Which five pages have the most…')
+  expect(clip('What are the main events in the corpus, in order?', 40)).toBe('What are the main events in the corpus…')
+  expect(clip('Supercalifragilisticexpialidocious-and-more', 20)).toBe('Supercalifragilisti…')
   // 6.6% beside 93% read 7% and 93%; a part under one percent keeps a decimal; a part that rounds to the whole is >99%
   expect([share(33, 500), share(467, 500)]).toEqual(['7%', '93%'])
   expect(share(3, 1000)).toBe('0.3%')
@@ -179,4 +180,66 @@ test("a label's example from a JSON record: the field the rule reads first, then
   expect(cutShort!.read).toEqual([['name', '--help']])
   expect(cutShort!.rest).toEqual([['page_id', 'dse/--help'], ['n_revs', '19']])
   expect(recordFields('SEC download https://r.jina.ai/x', { kind: 'regex', spec: 'jina' })).toBeNull()
+})
+
+test('one cut everywhere: at the last word that fits, mid-word only when that keeps less than half, no space or punctuation before `…`', () => {
+  // live check New 3: `deleted on 1…`, `with a ca…`, `in o…`, `Can s…`
+  expect(cut('The event log does not support the claim of 3,898 pages deleted on 16 June', 64)).toBe('The event log does not support the claim of 3,898 pages deleted…')
+  expect(cut('How many delete events does events.jsonl have on 16 June? One number, with a card.', 80)).toBe('How many delete events does events.jsonl have on 16 June? One number, with a…')
+  expect(cut('What did the organizer, the reviewer and the editor say in the agent chat, in order?', 80)).toBe('What did the organizer, the reviewer and the editor say in the agent chat, in…')
+  expect(cut('organizer: Can someone check the deletion count?', 20)).toBe('organizer: Can…')
+  // a word that ends where the room does is whole; one word longer than the room is cut inside it
+  expect(cut('one two three', 8)).toBe('one two…')
+  expect(cut('Supercalifragilistic', 8)).toBe('Superca…')
+  // the cells of wide characters count twice
+  expect(cut('四月 五月 六月', 10)).toBe('四月 五月…')
+  expect(cut('四月 五月 六月', 9)).toBe('四月 五…')
+  expect(clip('  a  b\n c ', 10)).toBe('a b c')
+})
+
+test('a context line keeps its value in view, each end cut at a word with `…` against the words', () => {
+  const line = 'The organizer wrote that the review is closed, and then the reviewer said that all of the talk pages were read before anyone checked the count.'
+  const at = line.indexOf('talk pages')
+  const w = windowAt(line, at, 60)
+  expect(w.text.startsWith('…')).toBe(true)
+  expect(w.text.endsWith('…')).toBe(true)
+  expect(w.text).not.toMatch(/… | …/)
+  // the words at each end are whole
+  const inner = w.text.slice(1, -1)
+  expect(line).toContain(inner)
+  expect(line[line.indexOf(inner) - 1]).toBe(' ')
+  expect(/[\s,]/.test(line[line.indexOf(inner) + inner.length] ?? ' ')).toBe(true)
+  // a position moves by `shift`
+  expect(w.text.slice(at - w.shift, at - w.shift + 10)).toBe('talk pages')
+})
+
+test('words in quotation marks: straight, curly when they hold straight ones, none when they hold both', () => {
+  expect(quoted('How many pages?')).toBe('"How many pages?"')
+  expect(quoted('How many pages have "June" in their title?')).toBe('“How many pages have "June" in their title?”')
+  expect(quoted('The reviewer\'s claim: "I counted" and “more”')).toBe('The reviewer\'s claim: "I counted" and “more”')
+})
+
+test("a table card's numbers take its columns' formats, as the browser's table writes them: `19,913`", () => {
+  const card = cardOfCell(CELLS.a0frame0 as unknown as ThimbleCell).card
+  expect(card.formats).toEqual({ records: ',d' })
+  const lay = cardLayout(card, 60, -1)
+  const text = lay.lines.map(l => l.map(s => s.s).join('')).join('\n')
+  expect(text).toContain('19,913')
+  expect(text).not.toContain('19913')
+  // the value a click cites is the value shown; the row stays named by its label as the ref names it
+  expect(lay.items.find(i => i.open === 'card:a0frame0#records/events.jsonl')?.cite).toBe('[[19,913|card:a0frame0#records/events.jsonl]]')
+  expect(formatted(1446, ',d')).toBe('1,446')
+  expect(formatted(1987, 'd')).toBe('1987')
+  expect(formatted(0.12345, ',.3~f')).toBe('0.123')
+  expect(formatted(2.5, ',.2~f')).toBe('2.5')
+  expect(formatted(-1234.5, ',.1~f')).toBe('−1,234.5')
+  expect(formatted(12, '.0%')).toBeNull()
+})
+
+test("the path row's steps are cut at a word", () => {
+  const steps = fitCrumbs(['home', 'threads', '"How many delete events does events.jsonl have on 16 June? One number."', 'citation "I counted 3,898 pages deleted on 16 June"'], 70)
+  for (const s of steps) if (s && s.endsWith('…')) expect(s).toMatch(/[A-Za-z0-9,"]…$/)
+  const words = '"How many delete events does events.jsonl have on 16 June? One number." citation "I counted 3,898 pages deleted on 16 June"'.split(/\s+/)
+  // each cut step ends with a whole word of its own
+  for (const s of steps) if (s && s.endsWith('…')) expect(words.some(x => x.replace(/[?.,]+$/, '') === s.slice(0, -1).split(' ').at(-1))).toBe(true)
 })

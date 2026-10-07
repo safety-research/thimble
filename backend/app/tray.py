@@ -8,7 +8,8 @@ cards`, and the browser's messages main has not got yet (events.queued_line). Th
 Claude Code's tray, so the statusline does not list them.
 
 /thimble:agents lists thimble's running agents from the agent registry (subagent_rows), the code ticket and view builds
-the server runs (dev.running_builds), and main's other subagents and threads' forks (session.running_agents).
+the server runs (dev.running_builds), and main's other subagents and threads' forks (session.running_agents; in terminal
+mode, where no server follows main's session, the forks from the workspace's files: thread_rows_files).
 
 In terminal mode no server runs. The list_agents tool runs in the MCP shim, where the registry (subagents.json) gives
 thimble's subagents as in browser mode, and the statusline command reads the workspace's files itself
@@ -17,12 +18,14 @@ thimble's subagents as in browser mode, and the statusline command reads the wor
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from . import config, session
+from . import subagent_files as files
 
 log = logging.getLogger("thimble.tray")
 router = APIRouter()
@@ -85,6 +88,57 @@ def agent_rows(c: str) -> list[dict[str, Any]]:
         log.debug("%s: the builds were not listed", c, exc_info=True)
     known = {r.get("chat") for r in rows if r.get("chat")}
     rows.extend(r for r in session.running_agents(c) if r.get("chat") not in known)
+    if files.terminal(config.workspace_path(c)):
+        known = {r.get("chat") for r in rows if r.get("chat")}
+        rows.extend(r for r in thread_rows_files(c) if r["chat"] not in known)
+    return rows
+
+
+THREAD_WORDS = 60  # of a thread's first question in its row
+
+
+def _words(text: str, n: int = THREAD_WORDS) -> str:
+    """`text` on one line in `n` characters, cut at the last word that fits, `…` right after it."""
+    one = " ".join(text.split())
+    if len(one) <= n:
+        return one
+    head = one[: n - 1]
+    cut = head if one[n - 1] == " " else head.rsplit(" ", 1)[0] if " " in head[n // 2:] else head
+    return cut.rstrip(" ,;:.!?") + "…"
+
+
+def thread_rows_files(c: str) -> list[dict[str, Any]]:
+    """The side threads whose fork runs now, in terminal mode, from the workspace's files (no server follows main's
+    session there, so session.running_agents has none): a thread whose last question has no end yet (no `done` or
+    `error` record after it) and whose fork main started (an Agent call the --agent-check hook recorded as starting,
+    subagents.json `forking`, which fork_finished clears) or still runs in main's session (its meta's `fork`, not ended).
+    Each {name, label, state, kind, chat}, the label the thread's first question."""
+    from . import agents, session, threads  # noqa: PLC0415
+
+    ws = config.workspace_path(c)
+    state = files.read(ws)
+    main = files.main_session(ws, state)
+    table = state.get(files.FORKING)
+    now = time.time()
+    starting = {session.thread_for(c, desc) for desc, at in (table.items() if isinstance(table, dict) else [])
+                if isinstance(at, (int, float)) and now - float(at) < files.FORK_DEDUPE_S}
+    rows: list[dict[str, Any]] = []
+    for meta in agents.list_chats(c):
+        if meta.get("kind") != agents.KIND_THREAD:
+            continue
+        tid = str(meta["id"])
+        fork = meta.get("fork") or {}
+        live = bool(fork.get("agent_id")) and not fork.get("ended") and (not main or fork.get("session") == main)
+        if tid not in starting and not live:
+            continue
+        records = agents.read_events(agents.paths(c, tid)[1])
+        last_user = max((i for i, r in enumerate(records) if r.get("type") == "user"), default=-1)
+        if last_user < 0 or any(r.get("type") in ("done", "error") for r in records[last_user + 1:]):
+            continue
+        question = next((str(r.get("text") or "") for r in records if r.get("type") == "user" and str(r.get("text") or "").strip()), "")
+        name = f"fork {meta.get(threads.FORK_NAME_KEY) or meta.get('title') or tid}"
+        rows.append({"name": name, "label": f'thread "{_words(question)}"' if question.strip() else name,
+                     "state": "working", "kind": "subagent", "chat": tid})
     return rows
 
 

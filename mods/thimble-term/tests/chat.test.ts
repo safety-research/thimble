@@ -418,3 +418,69 @@ test("a card whose takeaway holds the passage a thread was asked about (a citati
   expect(await ui.find({ type: 'Client', key: 'asked-card-0' })).toBeDefined()
   await ui.unmount()
 })
+
+test('a sentence that cites a card the turn draws under the reply leaves the reference out; a card drawn elsewhere is named by its question', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  const text = 'The pages are spread over four wikis [[card:ff73e071]]. The files hold more records [[card:a0frame0]].'
+  await turn($, w, [['r1', text]])
+  let ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
+  // the card of another turn is read by the session's timer, then named
+  await w.clock.advance(1100)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
+  const para = shown(await ui.drawn({ in: 'para-1' }))
+  // the turn's card stands under the reply: no `card` at the sentence's end, and no space before its full stop
+  expect(para).toContain('four wikis. The files')
+  // a card of another turn: named by its question, as its citation's link (live check New 1)
+  expect(para).toContain('card "How many records does each file hold?".')
+  expect(para).not.toMatch(/\bcard\./)
+  const chips = await chipsOf(ui, 'para-1')
+  expect(chips.map(c => c.label)).toEqual(['card "How many records does each file hold?"'])
+  // the footer counts cited values: a card cited whole is none
+  expect(shown(await ui.drawn())).not.toMatch(/\d+ citations?/)
+  // a thread asked about the whole card (the fixtures' t1) stands beside the card, not beside a passage naming it
+  expect(await ui.find({ type: 'Client', key: 'asked-1' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test("a passage whose citation a side thread was asked about keeps a blue ↳ beside it, which opens that thread", async ($, on) => {
+  const w = world(on)
+  // the live check's thread (New 5): asked about the citation, its anchor the cited place, its anchor text the passage
+  w.states.threads.push({ id: 't5', kind: 'thread', role: 'thread', title: 'README:3', anchor: 'README.md#L3', anchor_text: 'The reviewer read the README: it says 4,579 pages.', parent: 'main', created_at: '2026-10-06T10:05:00+00:00', running: false, answers: 1, seen: 1 } as never)
+  await start($, w)
+  const text = '- The reviewer read the README: it says [4,579](README.md#L3) pages.\n- Another passage cites [4,579](README.md#L3) too, with other words around it.'
+  const ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  expect(await ui.find({ type: 'Client', key: 'asked-1' })).toBeDefined()
+  // a passage that cites the same place in other words is not the one the thread was asked about
+  expect(await ui.find({ type: 'Client', key: 'asked-2' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test("a fork's prompt (ctrl+o's `Prompt:`) and its result name the thread by its first question, never its slug", async ($, on) => {
+  const w = world(on)
+  Object.assign(w.states.threads[1]!, { fork_name: 'agent-chat-2', question: 'Is the 3,898 deletions figure supported anywhere in the event log?' })
+  await start($, w)
+  const row = await $.ui.mount(ROW('Agent', { description: 'thread:agent-chat-2', subagent_type: 'fork', prompt: 'thread:agent-chat-2' }))
+  const drawn = shown(await row.drawn())
+  expect(drawn).toContain('"prompt":"thread \\"Is the 3,898 deletions figure supported…\\""')
+  expect(drawn).not.toContain('agent-chat-2')
+  await row.unmount()
+  const result = await $.ui.mount({ plugin: 'thimble-term', component: 'ToolResult', requestId: 'u9', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u9', tool: 'Agent', output: { status: 'async_launched', agentId: 'a1', description: 'thread:agent-chat-2', prompt: 'thread:agent-chat-2' }, isErrored: false } } as never)
+  expect(shown(await result.drawn())).not.toContain('agent-chat-2')
+  await result.unmount()
+})
+
+test("a thimble tool's row draws a takeaway's own quotation marks curly, so Claude Code escapes none (`\\\"Agent\\\"`)", async ($, on) => {
+  const w = world(on)
+  w.cells.ff73e071!.title = 'How many pages have "June" in their title?'
+  await start($, w)
+  await turn($, w, [['r1', 'Here.']])
+  const row = await $.ui.mount(ROW('mcp__plugin_thimble_thimble__edit_card', { card: 'card:ff73e071', takeaway: 'All five are pages whose names start with "Agent", as [[card:ff73e071]] shows.', code: 'print("a")' }))
+  const drawn = shown(await row.drawn())
+  expect(drawn).toContain('"takeaway":"All five are pages whose names start with “Agent”, as card “How many pages have ‘June’ in their…” shows."')
+  expect(drawn).toContain('"card":"How many pages have “June” in their title?"')
+  // code keeps its quotation marks as written
+  expect(drawn).toContain('"code":"print(\\"a\\")"')
+  await row.unmount()
+})

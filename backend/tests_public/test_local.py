@@ -126,6 +126,40 @@ async def test_every_tool_runs_in_process_and_opens_no_socket(term, no_sockets, 
     assert local.ui_records(CORPUS)[0]["kind"] in ("label", "filter", "layout")
 
 
+async def test_list_agents_counts_a_side_threads_running_fork_in_terminal_mode(term):
+    """No server follows main's session in terminal mode, so list_agents reads the forks from the workspace's files: a
+    thread whose fork main started (subagents.json `forking`, the --agent-check hook's record) and whose question has no
+    end yet runs; once its fork's run ended (`done`) it is not listed, and a fork that runs on in main's session (its
+    meta's `fork`) is listed while a follow-up waits for its answer."""
+    from app import agents, subagent_files, threads, tray
+
+    meta = agents.new_thread(CORPUS, "board.jsonl#L2", "the second post", title="second-post")
+    tid = meta["id"]
+    name = threads.fork_name(CORPUS, meta)
+    log_path = agents.paths(CORPUS, tid)[1]
+    agents.append(log_path, {"type": "user", "ts": "2026-10-07T05:22:23Z", "text": "How many posts does the board hold? One number.", "by": "browser"})
+    ws = config.workspace_dir(CORPUS)
+    assert "No agent of thimble's runs now" in text(await call(term, "list_agents")), "asked, not forked yet"
+    with subagent_files.update(ws) as state:
+        state.setdefault(subagent_files.FORKING, {})[f"thread:{name}"] = __import__("time").time()
+    out = text(await call(term, "list_agents"))
+    assert 'thread "How many posts does the board hold? One number."' in out and "working" in out, out
+    assert [r["chat"] for r in tray.agent_rows(CORPUS)] == [tid]
+    agents.append(log_path, {"type": "text", "delta": "12 posts.", "reply": True, "by": "terminal"})
+    agents.append(log_path, {"type": "done", "ts": "2026-10-07T05:22:35Z", "result": None})
+    assert tray.thread_rows_files(CORPUS) == [], "its run ended"
+    # a follow-up while its fork runs on in main's session (launch.json names the session)
+    launch = json.loads((ws / "trusted" / "launch.json").read_text())
+    (ws / "trusted" / "launch.json").write_text(json.dumps({**launch, "session": "s1"}))
+    with subagent_files.update(ws) as state:
+        state[subagent_files.FORKING] = {}
+    agents.update_agent(CORPUS, tid, fork={"agent_id": "a1", "session": "s1"})
+    agents.append(log_path, {"type": "user", "ts": "2026-10-07T05:23:00Z", "text": "And on 16 June?", "by": "browser"})
+    assert [r["chat"] for r in tray.thread_rows_files(CORPUS)] == [tid]
+    agents.update_agent(CORPUS, tid, fork={"agent_id": "a1", "session": "s0"})
+    assert tray.thread_rows_files(CORPUS) == [], "a fork of another session does not run in this one"
+
+
 async def test_the_tools_refuse_a_folder_of_no_workspace_and_a_browser_mode_workspace(term, tmp_path):
     res = await local.call("list_cards", {"group": "all"}, cwd=str(tmp_path))
     assert res["is_error"] and "not inside a corpus thimble knows" in text(res)

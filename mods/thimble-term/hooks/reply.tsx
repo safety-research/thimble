@@ -24,9 +24,9 @@ import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
 import type { Target } from './gestures'
-import { cid, citations, clip, clipWords, mdPieces, parseReply, sectionsOf } from './lib'
+import { bareCard, cardWords, cid, citations, clip, curlyQuotes, embeddedCards, mdPieces, noteQuestion, parseReply, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
-import type { Citation } from './lib'
+import type { Block, Citation, Run } from './lib'
 import { COLORS, paintLines } from './paint'
 import { loadCards, queueCitations, rt } from './term'
 import type { Ctx } from './ctx'
@@ -44,7 +44,7 @@ const CALL_REF = /^call:[A-Za-z0-9_-]+(?:#L(\d+)(?:-L?(\d+))?)?$/
 /** A card by its question, cut at a word, never its id. */
 export async function cardName(cx: Ctx, id: string): Promise<string> {
   const q = ((await cx.card(id))?.data as CardData | undefined)?.question
-  return q ? `card "${clipWords(q, 40)}"` : 'the card'
+  return q ? cardWords(q) : 'the card'
 }
 
 /** A ref as the analyst reads it: a card's place by the card's question, a command's output by its line, never an id;
@@ -80,7 +80,7 @@ export async function scrubIds(cx: Ctx, text: string): Promise<string> {
   for (const m of text.matchAll(ID_IN_TEXT)) {
     const tc = await cx.card(m[1]!)
     const q = (tc?.data as { question?: string } | null | undefined)?.question
-    out = out.replace(m[0], q ? `card "${clipWords(q, 40)}"` : 'card')
+    out = out.replace(m[0], q ? cardWords(q) : 'card')
   }
   return out
 }
@@ -88,25 +88,30 @@ export async function scrubIds(cx: Ctx, text: string): Promise<string> {
 const BARE_CARD = /^(?:card:|cell:)?([A-Za-z0-9_-]{6,})$/
 const CARD_EMBED = /\[\[(?:card|cell):([A-Za-z0-9_-]+)\]\]|!\[[^\]\n]*\]\((?:card|cell):([A-Za-z0-9_-]+)\)/g
 
+// the keys of a thimble tool's input whose values are words (a question, a takeaway, a message), not code or a name
+const PROSE_KEYS = new Set(['question', 'takeaway', 'text', 'message', 'request', 'brief', 'title', 'caption', 'name'])
+
 /** A value of a thimble tool's input as its row in Claude Code shows it (the row and ctrl+o's detailed view): the
  *  card a `card` names by its question alone, which the key already says is a card; elsewhere a citation as its words,
- *  a card it embeds or names by its question in curly quotation marks, which Claude Code does not escape as it escapes
- *  straight ones; each question cut at a word. No id. */
+ *  a card it embeds or names by its question in curly quotation marks; each question cut at a word. No id. Words keep
+ *  no straight quotation marks, which Claude Code would escape (`\"Agent\"`): curly ones stand for them. */
 export async function toolWords(cx: Ctx, key: string, value: string): Promise<string> {
   const question = async (id: string) => ((await cx.card(id))?.data as { question?: string } | null | undefined)?.question ?? ''
   const bare = key === 'card' ? BARE_CARD.exec(value.trim()) : null
-  if (bare) return clipWords(await question(bare[1]!), 60) || value
+  if (bare) return curlyQuotes(clip(await question(bare[1]!), 60)) || value
+  // a question in curly quotation marks keeps its own quoted words in single ones
+  const named = (q: string) => `card “${clip(q, 40).replace(/"([^"]*)"/g, '‘$1’')}”`
   let out = value
   for (const m of [...value.matchAll(CARD_EMBED)]) {
     const q = await question((m[1] ?? m[2])!)
-    out = out.replace(m[0], q ? `card “${clipWords(q, 40)}”` : 'a card')
+    out = out.replace(m[0], q ? named(q) : 'a card')
   }
   out = plainCites(out)
   for (const m of [...out.matchAll(ID_IN_TEXT)]) {
     const q = await question(m[1]!)
-    out = out.replace(m[0], q ? `card “${clipWords(q, 40)}”` : 'a card')
+    out = out.replace(m[0], q ? named(q) : 'a card')
   }
-  return out
+  return PROSE_KEYS.has(key) ? curlyQuotes(out) : out
 }
 
 /** Where a citation's place is, in words: on the card, in the command's output at a line, in a file at a line. */
@@ -201,9 +206,10 @@ export function claimCard(key: string | undefined): string {
 
 const flat = (s: string) => plainCites(s).replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
 
-/** The thread asked about a passage, by its words: a side thread whose anchor text is the passage's (or holds it); for
- *  a card (`card:<id>`), a thread anchored on it or on a value it shows, or one asked about a passage of its takeaway (a
- *  citation in it, whose anchor is the cited place). */
+/** The thread asked about a passage, by its words: a side thread whose anchor text is the passage's (or holds it), or
+ *  one asked about a citation in the passage (its anchor the cited place, its anchor text the citation's sentence, which
+ *  the passage holds); for a card (`card:<id>`), a thread anchored on it or on a value it shows, or one asked about a
+ *  passage of its takeaway (a citation in it, whose anchor is the cited place). */
 async function threadAbout(cx: Ctx, words: string): Promise<string> {
   const card = /^card:([A-Za-z0-9_-]+)$/.exec(words)
   if (card) {
@@ -217,8 +223,45 @@ async function threadAbout(cx: Ctx, words: string): Promise<string> {
   }
   const w = flat(words)
   if (w.length < 8) return ''
-  const t = (await cx.threads()).find(x => x.anchorText && !x.anchor && (flat(x.anchorText) === w || (flat(x.anchorText).length > 20 && w.includes(flat(x.anchorText)))))
-  return t?.id ?? ''
+  const threads = await cx.threads()
+  const holds = (text: string) => flat(text) === w || (flat(text).length > 20 && w.includes(flat(text)))
+  const t = threads.find(x => x.anchorText && !x.anchor && holds(x.anchorText))
+  if (t) return t.id
+  // a citation of a value or a place: a thread asked about a whole card stands beside the card, not a passage naming it
+  const refs = new Set(citations(words).filter(c => !bareCard(c)).map(c => c.ref))
+  if (!refs.size) return ''
+  return threads.find(x => x.anchor && refs.has(x.anchor.split(',')[0]!) && (!x.anchorText || holds(x.anchorText)))?.id ?? ''
+}
+
+/** A rich block's runs with each card it cites whole (`[[card:<id>]]`, at a sentence's end) as the reader needs it: left
+ *  out, with the space before it, where the card is drawn under the reply or as a figure (`drawn`); elsewhere named by
+ *  its question (`card "…"`), as the citation's link. */
+async function cardRuns(cx: Ctx, block: Extract<Block, { type: 'rich' }>, drawn: ReadonlySet<string>): Promise<Extract<Block, { type: 'rich' }>> {
+  if (block.table || !block.runs.some(r => r.cite && bareCard(r.cite))) return block
+  const runs: Run[] = []
+  for (const r of block.runs) {
+    const id = r.cite ? bareCard(r.cite) : ''
+    if (!id) {
+      runs.push(r)
+      continue
+    }
+    if (drawn.has(id)) {
+      const prev = runs.at(-1)
+      if (prev && !prev.cite) {
+        const text = prev.text.replace(/\s+$/, '')
+        if (text) runs[runs.length - 1] = { ...prev, text }
+        else runs.pop()
+      }
+      continue
+    }
+    // a card no drawing read yet is read now, and named once it is (`a card` until then)
+    const tc = await cx.card(id)
+    if (!tc && !rt.shown.has(id)) rt.wanted.add(id)
+    const q = (tc?.data as CardData | null | undefined)?.question ?? ''
+    noteQuestion(id, q)
+    runs.push({ ...r, text: cardWords(q) })
+  }
+  return { ...block, runs }
 }
 
 // ------------------------------------------------------------------------------------------------ a reply
@@ -232,6 +275,9 @@ export type ReplyOpts = {
   prefix?: string
   /** cards not drawn where the text embeds them, since they are drawn under the reply */
   skipCards?: ReadonlySet<string>
+  /** the other cards drawn with the text (a turn's under its last reply, a thread's under its answer, a document's
+   *  figures): a sentence that cites one whole leaves the reference out */
+  drawn?: ReadonlySet<string>
   /** a side thread about a passage of the reply: the "?" beside it */
   ask?: (target: Target) => void
   /** a thread's ↳ beside its passage: a click opens the thread */
@@ -256,6 +302,7 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
   const out: RenderElement[] = []
   const blocks = parseReply(text)
   const secs = sectionsOf(text)
+  const drawn = new Set([...(opts.skipCards ?? []), ...(opts.drawn ?? []), ...embeddedCards(text), ...(opts.card ? [opts.card] : [])])
   let lead = opts.first ? '⏺' : ' '
   let n = 0
   let order = 0 // a card's place among the reply's cards, its name for the analyst ("card 2")
@@ -267,7 +314,7 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     const first = words.split('\n')[0]!.trim()
     const head = /^#{1,6}\s/.test(first) ? [...secs.keys()].find(k => k === first || flat(k) === flat(first)) : undefined
     const sec = head ? secs.get(head) : undefined
-    if (sec) return () => opts.ask!({ kind: 'sentence', text: clip(sec, 4000), label: `the section "${clip(flat(first), 60)}"` })
+    if (sec) return () => opts.ask!({ kind: 'sentence', text: clip(sec, 4000), label: `the section ${quoted(clip(flat(first), 60))}` })
     return () => opts.ask!({ kind: 'sentence', text: words.slice(0, 1200) })
   }
   // the margin's mark: a blue ↳ once a thread was asked about the passage, else a blue "?" shown under the pointer
@@ -323,9 +370,10 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     return !underHead
   }
   const push = (el: RenderElement, gap: boolean) => out.push(gap ? <Box marginTop={1}>{el}</Box> : el)
-  for (const [i, block] of blocks.entries()) {
+  for (const [i, whole] of blocks.entries()) {
     n++
     const key = `${prefix}${n}`
+    const block = whole.type === 'rich' ? await cardRuns(cx, whole, drawn) : whole
     if (block.type === 'md') {
       if (!live) {
         push(await row(<Markdown text={block.text} />), gapBefore(i))

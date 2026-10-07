@@ -81,8 +81,10 @@ def bin_path() -> Path:
 
 
 def command(kind: str, ident: str = "") -> str:
-    """The Bash command that runs `thimble-run <kind> [<ident>]`, which main's `--allowedTools` lets run without asking."""
-    return shlex.join([str(bin_path()), kind, *([ident] if ident else [])])
+    """The Bash command that runs `thimble-run <kind> [<ident>]`, which main's `--allowedTools` lets run without asking:
+    `thimble-run` by its name, with no install path, since the launcher puts this copy's bin/ first on the session's
+    PATH in terminal mode (cli.launch_args), so the command's row in the terminal reads `thimble-run card <id>`."""
+    return shlex.join([BIN, kind, *([ident] if ident else [])])
 
 
 def write_dirs(c: str) -> list[Path]:

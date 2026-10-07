@@ -175,3 +175,22 @@ test("a report's bullets stay a list, one item a row; an opening section with no
   expect(tree).not.toContain('"text":"## "')
   await pane.unmount()
 })
+
+test("a document's sentence that cites one of its figures whole leaves the reference out; another card is named by its question", async ($, on) => {
+  const w = world(on)
+  w.docs.report = {
+    ...DOC,
+    sections: [{ ...DOC.sections[0]!, paragraphs: [{ id: 'p1', sentences: [{ id: 'x1', text: 'The export holds four wikis [[card:ff73e071]].' }, { id: 'x2', text: 'The check was done [[card:a0frame0]].' }] }] }],
+  }
+  await start($, w)
+  let pane = await fromHome($, w, DOC.title)
+  await w.clock.advance(1100)
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  const para = shown(await pane.drawn({ in: 'para-d0-2' }))
+  // live check New 1: `the check was done card.`
+  expect(para).toContain('The export holds four wikis. The check was done card "How many records does each file hold?".')
+  // the figure itself is drawn as a card
+  expect(JSON.stringify(await pane.drawn())).toContain('"question":"What does the export hold per wiki?"')
+  await pane.unmount()
+})

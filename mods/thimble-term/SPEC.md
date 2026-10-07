@@ -221,9 +221,11 @@ outside this table.
 
 Not drawn: `▶`, `✗ ◇ ■ □ ━ ┃ • ✕ ❚❚ ⓘ ✦ ❢ ⚠ ≡ ╱ ▤ ❝ ┿ ∴ ▪`, a braille spinner, `[ ]` around controls.
 
-**Words that recur.** Plain, short words. A place reads `revisions.jsonl line 10566` or `lines 3-8`, never `#L`. Text cut
-short ends in `…` right against its last word, never after a space; a name in a row (a card's question, a thread's) is
-cut at a word. A count
+**Words that recur.** Plain, short words. A place reads `revisions.jsonl line 10566` or `lines 3-8`, never `#L`. Every
+cut is one cut (`hooks/lib.ts` `cut`): at the last word that fits, mid-word only when a word fills more than half the
+room, `…` right against the last word kept, with no space or punctuation before it; a row, a title, a path step, a
+preview, a context line (cut at a word at each end) and a tip all cut that way. Someone's words in quotation marks take
+straight ones, curly ones (`“…”`) when they hold straight ones of their own, and none when they hold both. A count
 reads with thousands separators from 1,000 wherever thimble-term draws it; a number that names a thing (a line, a year,
 an id) reads as written. No hex or hash ids: a card is named by its question, a thread by its first question, a script
 by its file name. A citation's status reads `found on the card`, `found in revisions.jsonl line 10566`, `found in the
@@ -306,6 +308,9 @@ colored is said under each.
   6. Prose wraps at the terminal's width, and cards take the same width.
 - The model's Markdown is drawn as Claude Code draws it: `**bold**` bold, `*italic*` italic, inline code in its code
   color, headings bold.
+- A card cited whole (`[[card:<id>]]`, at a sentence's end) where the card is drawn with the text, under the turn's last
+  reply, under a thread's answer or as a document's figure, is left out with the space before it; elsewhere it reads
+  `card "<its question>"`, cut at a word, as the citation's link. The footer does not count it.
 - A citation is its value in blue, underlined; a value not at its place is red. In a card's takeaway, one cell after
   the value, `◌` while thimble's links check runs, `✓` once it found the value, a red `×` when it found another. The
   citation under the pointer is inverse, and its tip (its place and status in plain words, and why for a problem) sits
@@ -315,7 +320,8 @@ colored is said under each.
   `thimble-run` command ran too, a shell loop over several cards included. They, the footer and the `↳` rows are drawn
   again after `thimble --continue` or `--resume`.
 - The margin at column 2: the `?` (blue) of the passage under the pointer (a heading's asks about its whole section, a
-  card's about the card); a blue `↳` beside a passage or a card a thread was asked about (a card also when the thread
+  card's about the card); a blue `↳` beside a passage or a card a thread was asked about (a passage also when the
+  thread was asked about a citation of a value or a place in it; a card also when the thread
   was asked about a value it shows or a passage of its takeaway, a citation in it), which stays, and a click on it opens
   that thread in the threads panel.
 - The footer, one blank row under the turn's answer (its last part that cites or embeds a card): its facts dim
@@ -333,9 +339,14 @@ colored is said under each.
   escape as it escapes straight ones), a citation by its words, the label tool's result its name and counts, and a
   `thimble-run` command's row is `thimble-run card "<question>"` (each card of a loop by its question), never the install
   path; each question cut at a word. A side thread's fork row and the notice that it finished name the thread by its
-  first question (`thread "How many of the 2,994…"`), never the fork's slug. thimble's tool results keep their card ids:
+  first question (`thread "How many of the 2,994…"`), never the fork's slug, and so do the fork's prompt and result in
+  ctrl+o (`Prompt:`). A thimble tool's words (a question, a takeaway) draw their straight quotation marks curly, which
+  Claude Code does not escape (`“Agent”`, never `\"Agent\"`); code stays as written. The running `thimble-run` row
+  (`⎿ $ thimble-run card <id>`), which no hook reaches, has no install path: the tools give the command by its name and
+  the launcher puts the plugin copy's bin/ first on the session's PATH. thimble's tool results keep their card ids:
   main cites cards by them. Main's own `↳ thread <name>:` line names the thread by its first question in quotation
-  marks, never its fork's slug, and is not drawn for a thread whose `↳` row thimble-term drew, which says the same.
+  marks, never its fork's slug, and is not drawn for a thread whose `↳` row thimble-term drew, which says the same
+  (ctrl+o's view still draws the reply's time and model over the hidden line: no hook reaches that header).
 
 **Cards**, alike in the chat, the card pane, the citation panel and a document (rule 11 for the frame):
 
@@ -373,7 +384,7 @@ colored is said under each.
 - A line chart: y labels right-aligned in a column, axes in the rule gray, x labels dim at the ends and the middle, a
   legend row of `● series` entries; the pointer's column `┊` with its readout on the readout row.
 - A table: the column names bold, a `─` rule under each name as wide as its column, the rows right under it; numbers
-  right-aligned with separators. Markdown tables in a reply take the same header.
+  right-aligned in the card's column formats, as the browser's table writes them (`1,446`). Markdown tables in a reply take the same header.
 - A timeline: the axis across the content with its `●` marks in hue on a rule-gray line, its two end times dim under
   its ends, both or neither: neither when the list under it starts at the first time and ends at the last; then one
   row per event: its time dim at the content's edge, a `●` in hue, its words, and a blue `↗` when it has
@@ -502,7 +513,9 @@ colored is said under each.
   card's links check as the chat does: `◌` while it runs, `✓` and `, and a script got the same number` once it ran, a
   red `×` when it got another value. A citation with no value is titled by its place in words, and then has no `from`
   row and no subtitle while its place is there (`not found` and why when it is not), so the place is named once; its
-  `source` marks its label in the sentence. Any other citation's subtitle is its status in plain words (section 5) and
+  `source` marks its label in the sentence, and its step in the path row is the short place the reply draws (`citation
+  agent-chat:2`). Under a `from` row, which names the place, a citation found says `found` alone (then what thimble's
+  links check says). Any other citation's subtitle is its status in plain words (section 5) and
   why for a problem.
 - Label/value rows: `from`, `source` (the reply's sentence in quotation marks, the cited value in it blue and
   underlined), `quoted` for a passage an example quotes. No `why`.
@@ -523,9 +536,9 @@ it in browser mode.
   Files
   4 files
   ──────────────────────────────────────────────────────────────────────────────────────────────
-  ▾ collusion-wiki/                                                     4 files            41.6 MB
-❯   ● events.jsonl                                                                events     5.4 MB
-    ● labels.jsonl                                                                text       1.1 MB
+  ▾ collusion-wiki/  4                                                                       41.6 MB
+❯     events.jsonl                                                                events     5.4 MB
+      labels.jsonl                                                                jsonl      1.1 MB
   ──────────────────────────────────────────────────────────────────────────────────────────────
   events.jsonl                                                                 opens as lines
      1  {"time": "2026-05-18T06:02:11Z", "event_type": "save", "wiki": "dse", …}
@@ -533,9 +546,11 @@ it in browser mode.
   ↑↓ to choose · Enter to open · Space to fold · x to close
 ```
 
-- A folder per group, foldable; an open folder shows its first 20 files, then `… N more`. A file's `●` is dim, as home's:
-  the type column names its type, and only a Color by colours. A long name is cut in its middle.
-- The chosen file's first lines show under the second rule (at most 6), with dim line numbers, and what it opens as, on
+- A folder per group, foldable, its file count dim after its name and its size under `size`, as home's; an open folder
+  shows its first 20 files, then `… N more`. A file has no dot, as on home: its name at A4, the type column names its
+  type. A long name is cut in its middle.
+- The chosen file's first lines show under the second rule (at most 6) as the file holds them, with dim line numbers,
+  and what it opens as, on
   the tab its view opens on (`transcript`, or `lines` for Raw); Enter or a second click opens it.
 - A file: path `home › files › labels.jsonl`, title its name, subtitle its type (as the file browser's), its records and the lines shown,
   `earlier  later` at R, tabs `Table  Transcript  Raw` as its records read. The chosen record (a citation's, a click's)
@@ -543,7 +558,8 @@ it in browser mode.
   to the file browser.
 - The Table tab: the records' keys as columns, names dim on the row above, `▼` or `▲` after the sorted one, a click on
   a name sorts by it; numbers right-aligned with separators; free text last.
-- Raw draws the lines' numbers right-aligned in a dim column and the text after a gutter, a Markdown file's headings
+- Raw draws each line as the file holds it (a JSON record as its JSON line, never a transcript's words), its number
+  right-aligned in a dim column and the text after a gutter, a Markdown file's headings
   bold.
 - A transcript: per turn, its clock dim in a column at A0 (`07:40:01`; the day on a dim row of its own where it
   changes), then `●` in the speaker's hue and the speaker's name bold; its text 2 cells in under the name, wrapped to
@@ -567,7 +583,7 @@ it in browser mode.
   ▸ counts  30
   ▸ examples  12
   ▸ cards  2
-  click the prompt, Enter to save · r to run on a sample · c for counts · e for examples · x to close
+  r to run a sample · c counts, e examples, d cards · l for labels · x to close
 ```
 
 - The header: `name:` the label's name in the accent and bold after a `●` in its color; `type:` the kinds, the one in

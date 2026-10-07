@@ -1714,6 +1714,7 @@ LAUNCH_FILE = "trusted/launch.json"  # in the workspace (subagent_files): {sessi
 TERMINAL_RENDERER = "mods/thimble-term"  # under the tree: the plugin `thimble-term` that draws thimble's work in the terminal
 RENDERER_NAME = "thimble-term"
 CARD_RUNNER = "bin/thimble-run"  # under the plugin copy: runs a card's code in the caller's Bash (`thimble-run card <cell>`)
+RUNNER_NAME = "thimble-run"  # the card runner by its name on the session's PATH, as the tools give its command
 NO_RENDERER_LINE = ("thimble: WARNING - terminal mode's renderer cannot load ({why}), so thimble's cards, citations and "
                     "agents are not drawn in the terminal; `thimble doctor` says more. `thimble mode browser` opens the "
                     "browser workspace instead.")
@@ -2161,8 +2162,8 @@ def launch_args(cwd: Path, resume: bool = False, settings: str = "", own_session
     one), the env line (NAME=VALUE words to export: SWITCHES), the unset line (the names of UNSET_VARS the analyst's
     environment sets), the note line (tab-separated lines to print before Claude Code starts), the mode line (the mode
     the folder starts in, launch_mode.resolve, and in terminal mode a tab and the renderer plugin's folder to load with
-    `--plugin-dir`, when it can load), the export line (tab-separated NAME=VALUE pairs to export: terminal_env in
-    terminal mode, else none), with `resume` the session to resume, then main's prompt, whose turn ending follows that
+    `--plugin-dir`, when it can load), the export line (tab-separated NAME=VALUE pairs to export: terminal_env and a PATH
+    with the plugin copy's bin/ first in terminal mode, else none), with `resume` the session to resume, then main's prompt, whose turn ending follows that
     value.
 
     Before it prints, it registers the folder (register_here), refuses with LaunchRefused when the workspace is open in
@@ -2201,8 +2202,9 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     # only --stream, since the watcher's other modes report to the server as main's hooks
     watcher = f"Bash({root / WATCHER} --stream *)"
     # in terminal mode a card's code runs through the card runner in main's Bash, which must not wait on a prompt either,
-    # as a browser-mode card's code runs in the kernel unasked
-    runner = [f"Bash({root / CARD_RUNNER} *)"] if terminal else []
+    # as a browser-mode card's code runs in the kernel unasked: by its name (cardrun.command), with this copy's bin/ first
+    # on the session's PATH (the export line), and by its path, as a command from before this release named it
+    runner = [f"Bash({RUNNER_NAME} *)", f"Bash({root / CARD_RUNNER} *)"] if terminal else []
     tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", watcher, *runner, *skill_rules(root)])
     last = [last_main(cwd)] if resume else []
     turn_tools = terminal_tools.launch_value()
@@ -2261,9 +2263,13 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     # launch_mode.current finds that mode here as in the session
     with with_environ(exports):
         prompt = events.session_prompt(str(cwd.resolve()), bool(turn_tools))
+    # the launcher's exports in terminal mode also put this copy's bin/ first on PATH, so main's Bash, and every agent's,
+    # runs the card runner the tools name without its install path (cardrun.command); main's --settings `env` leaves
+    # PATH alone
+    exported = {**exports, "PATH": os.pathsep.join([str(root / "bin"), os.environ.get("PATH", "")])} if terminal else exports
     return "\n".join([load, tools_line, effort, settings_value, turn_tools,
                       main_name(cwd), session_id, " ".join(f"{k}={v}" for k, v in switches.items()), " ".join(unset),
-                      "\t".join(notes), mode_line, "\t".join(f"{k}={v}" for k, v in exports.items()), *last, prompt])
+                      "\t".join(notes), mode_line, "\t".join(f"{k}={v}" for k, v in exported.items()), *last, prompt])
 
 
 @contextmanager

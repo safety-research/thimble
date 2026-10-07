@@ -6,7 +6,7 @@
 // is left out rather than failing the drawing.
 import type { ChatThread, ChatThreadTurn, TermAgent, TermHome, TermThreadRow, TermVerdict } from '../types'
 import type { ThimbleCell, ThimbleLabel } from './cell'
-import { clipWords, shownMatches, valueIn } from './lib'
+import { clip, quoted, shownMatches, valueIn } from './lib'
 import type { Citation } from './lib'
 import { quotedWords, showsValue } from './cite'
 
@@ -106,8 +106,8 @@ export function runShown(command: string, questionOf: (id: string) => string | u
   const ids = runIds(command)
   const named = ids.map(questionOf).filter((q): q is string => Boolean(q))
   // each question cut at a word, never mid-word
-  const short = (q: string) => clipWords(q, 40)
-  if (named.length && named.length === ids.length) return `thimble-run card ${named.map(q => `"${short(q)}"`).join(', ')}`
+  const short = (q: string) => quoted(clip(q, 40))
+  if (named.length && named.length === ids.length) return `thimble-run card ${named.map(short).join(', ')}`
   return ids.length > 1 ? `thimble-run card · ${ids.length} cards` : 'thimble-run card'
 }
 
@@ -130,7 +130,7 @@ export function namedThreads(text: string, rows: readonly NamedRow[]): string {
   return text.replace(/(↳\s*thread\s+)([A-Za-z0-9_-]+)(\s*:)/g, (m, lead: string, name: string, colon: string) => {
     const q = questionWords(bySlug(rows, name)?.question)
     if (!q) return m
-    return `${lead}"${clipWords(q, 40).replace(/"/g, "'")}"${colon}`
+    return `${lead}${quoted(clip(q, 40))}${colon}`
   })
 }
 
@@ -141,11 +141,11 @@ export function withoutToldThreads(text: string, rows: readonly NamedRow[], told
   if (!told.size || !/↳\s*thread\s/.test(text)) return text
   const lines = text.split('\n')
   const kept = lines.filter(l => {
-    const m = /^\s*↳\s*thread\s+("[^"]*"|[A-Za-z0-9_:,.-]+?)\s*:/.exec(l)
+    const m = /^\s*↳\s*thread\s+("[^"]*"|“[^”]*”|[A-Za-z0-9_:,.-]+?)\s*:/.exec(l)
     if (!m) return true
     const name = m[1]!
-    const quoted = name.startsWith('"') ? questionWords(name.slice(1, -1)).replace(/…$/, '') : ''
-    const r = quoted ? rows.find(x => quoted.length >= 8 && questionWords(x.question).startsWith(quoted)) : bySlug(rows, name)
+    const words = /^["“]/.test(name) ? questionWords(name.slice(1, -1)).replace(/…$/, '') : ''
+    const r = words ? rows.find(x => words.length >= 8 && questionWords(x.question).startsWith(words)) : bySlug(rows, name)
     return !(r && told.has(r.id))
   })
   if (kept.length === lines.length) return text
@@ -159,7 +159,7 @@ export function namedForks(text: string, rows: readonly NamedRow[], n = 40): str
   if (!/\bthread:/.test(text)) return text
   return text.replace(/"?\bthread:([^\s"]+?)([.,;:]*)"?(?=\s|$)/g, (m, slug: string, tail: string) => {
     const q = questionWords(bySlug(rows, slug)?.question)
-    return q ? `thread "${clipWords(q, n).replace(/"/g, "'")}"${tail}` : m
+    return q ? `thread ${quoted(clip(q, n))}${tail}` : m
   })
 }
 

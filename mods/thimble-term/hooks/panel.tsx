@@ -31,7 +31,7 @@ import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
 import { groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { cid, clip, clipWords, fmt, recordFields } from './lib'
+import { chipLabel, cid, clip, fmt, quoted, recordFields, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl } from './lines'
 import type { LineHit } from './lines'
@@ -127,7 +127,10 @@ async function citeTitle(cx: Ctx, c: Citation): Promise<string> {
 /** A citation's panel, its step named by the cited value (or its place, for a citation that shows none); `sentence`
  *  the sentence it stands in, `quote` the passage an example's record quotes. */
 export async function openCite(cx: Ctx, ref: string, display: string | null, more: { sentence?: string; quote?: string; of?: string } = {}): Promise<void> {
-  const title = clip(await citeTitle(cx, { raw: '', ref, display }), 40)
+  // its step in the path: its words cut at a word; for a place cited with no words, the short place the reply draws
+  // (`agent-chat:2`), since the path row has no room for the place in words
+  const c = { raw: '', ref, display }
+  const title = display === null && fileRef(ref) ? chipLabel(c) : clip(await citeTitle(cx, c), 40)
   await openPanel(cx, { view: 'cite', title, ref, display, ...(more.sentence ? { sentence: more.sentence } : {}), ...(more.quote ? { quote: more.quote } : {}), ...(more.of ? { of: more.of } : {}) })
 }
 
@@ -142,7 +145,7 @@ export async function openThread(cx: Ctx, id: string, question = ''): Promise<vo
   const row = (await cx.threads()).find(t => t.id === id)
   const tt = await cx.thread(id)
   const q = question || (tt?.events.length ? threadOf(tt.meta, tt.events).turns[0]?.q : '') || row?.question || row?.title || ''
-  await openPanel(cx, { view: 'thread', title: q ? `"${clip(plainCites(q).replace(/\s+/g, ' '), 60)}"` : 'thread', thread: id })
+  await openPanel(cx, { view: 'thread', title: q ? quoted(clip(plainCites(q), 60)) : 'thread', thread: id })
 }
 
 /** A file in the panel from line `start`, `line` the record a citation or a click chose, lit there. */
@@ -205,14 +208,14 @@ function crumbText(s: ChatNavStep): string {
       return `citation ${s.title === 'Citation' ? '' : s.title}`.trim()
     case 'card':
       // its code view's step keeps ` · code` whole: the question is cut first
-      return panelOfStep(s)?.mode === 'code' ? `card "${clip(s.title, 22)}" · code` : `card "${s.title}"`
+      return panelOfStep(s)?.mode === 'code' ? `card ${quoted(clip(s.title, 22))} · code` : `card ${quoted(s.title)}`
     case 'label':
     case 'file':
     case 'agent':
     case 'view':
       return s.title
     case 'doc':
-      return `"${s.title}"`
+      return quoted(s.title)
     case 'docs':
       return 'documents'
     case 'ask':
@@ -395,7 +398,7 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
     // question beside it
     const about = await anchorName(cx, t)
     const made = Date.parse(t.created ?? '') || 0
-    threads.push({ id: t.id, title: `"${clip(plainCites(t.question || t.title || t.anchorText || 'side thread').replace(/\s+/g, ' '), 80)}"`, about: about ? `about ${clip(about, 32)}` : '', words: t.running ? 'answering' : plural(t.answers, 'answer'), tone: st, unread: t.unread, earlier: Boolean(made && rt.startedAt && made < rt.startedAt), at: Date.parse(t.at) || 0 })
+    threads.push({ id: t.id, title: quoted(clip(plainCites(t.question || t.title || t.anchorText || 'side thread'), 80)), about: about ? `about ${clip(about, 32)}` : '', words: t.running ? 'answering' : plural(t.answers, 'answer'), tone: st, unread: t.unread, earlier: Boolean(made && rt.startedAt && made < rt.startedAt), at: Date.parse(t.at) || 0 })
   }
   const canvas = await surfaceValue<Obj>(cx, 'canvas')
   const groups = canvas?.ok && Array.isArray(canvas.value.groups) ? (canvas.value.groups as unknown[]).filter(isObj) : []
@@ -409,7 +412,7 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
   const threadHead = (chat: string): string => {
     const r = rowsNow.find(t => t.id === chat)
     const q = r ? plainCites(r.question || r.title || '') : ''
-    return q.trim() ? `"${clipWords(q, 60)}"` : ''
+    return q.trim() ? quoted(clip(q, 60)) : ''
   }
   const cardGroups: HomeCardGroup[] = groupCards(
     groups.map(g => {
@@ -616,13 +619,10 @@ function lineRows(cx: Ctx, e: PaneEvent, v: TermVerdict, cols: number, quote: st
       let t = text
       let sp = spans
       if (t.length > room) {
-        // `…` right against the words at each end: no space between them
-        const lo = sp.length ? Math.max(0, sp[0]![0] - Math.floor(room / 3)) : 0
-        const head = t.slice(lo, lo + room - 2)
-        const lead = lo ? head.length - head.trimStart().length : 0
-        t = `${lo ? '…' : ''}${head.slice(lead).trimEnd()}…`
-        const shift = lo + lead - (lo ? 1 : 0)
-        sp = sp.map(([a, b]) => [a - shift, b - shift] as [number, number])
+        // each end cut at a word, `…` right against the words: no space between them
+        const w = windowAt(t, sp.length ? sp[0]![0] : 0, room)
+        t = w.text
+        sp = sp.map(([a, b]) => [a - w.shift, b - w.shift] as [number, number])
       }
       out.push(
         <Text wrap="truncate-end">
@@ -734,8 +734,10 @@ function sourceSegs(sentence: string, c: Citation): Line {
   // a citation written without words stands in the sentence as its label (`revisions:1`)
   const shown = c.display ?? citeLabel(c)
   const at = shown ? flat.indexOf(shown) : -1
-  if (at < 0) return [{ s: `"${flat}"` }]
-  return [{ s: `"${flat.slice(0, at)}` }, linkSeg(shown), { s: `${flat.slice(at + shown.length)}"` }]
+  // in quotation marks of the kind its words do not hold (lib.ts quoted)
+  const [open, close] = quoted(flat) === flat ? ['', ''] : flat.includes('"') ? ['“', '”'] : ['"', '"']
+  if (at < 0) return [{ s: `${open}${flat}${close}` }]
+  return [{ s: `${open}${flat.slice(0, at)}` }, linkSeg(shown), { s: `${flat.slice(at + shown.length)}${close}` }]
 }
 
 /** In a citation opened from a side thread, a field whose question goes on in that thread, about the citation; the
@@ -803,13 +805,15 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // a citation with no words is titled by its place: its subtitle does not name the place again, and it has none
   // while the place is there
   const bare = c.display === null
-  const said = bare ? (!v || status === 'pending' ? '◌ checking' : red ? 'not found' : '') : await citeStatus(cx, c, v, check)
-  const sub = [said, why].filter(Boolean).join(' · ')
-  if (sub) body.push(lineEl(els, [{ s: sub, fg: bad ? COLORS.problem : COLORS.dim }], 'cite-sub', true))
-  body.push(ruleEl(els, cols, 'cite-rule'))
   // `from` names the place, unless the title is the place already (a citation written without words)
   const from = cardId ? await placeName(cx, `card:${cardId}`) : placeWords(c.ref)
   const rows: [string, RenderElement | string, string?][] = from === (await citeTitle(cx, c)) ? [] : [['from', from]]
+  // the subtitle names the place only where no `from` row does: under one, a citation found is `found`
+  const status0 = bare ? (!v || status === 'pending' ? '◌ checking' : red ? 'not found' : '') : await citeStatus(cx, c, v, check)
+  const said = rows.length && !red ? status0.replace(/^found (?:on the card|in the command's output(?:, line \d+(?:-\d+)?)?|in .+?)(?=;|,|$)/, 'found') : status0
+  const sub = [said, why].filter(Boolean).join(' · ')
+  if (sub) body.push(lineEl(els, [{ s: sub, fg: bad ? COLORS.problem : COLORS.dim }], 'cite-sub', true))
+  body.push(ruleEl(els, cols, 'cite-rule'))
   if (p.sentence) rows.push(['source', lineEl(els, sourceSegs(p.sentence, c), 'cite-source', true)])
   if (rows.length) body.push(fieldEls(els, rows, 'cite')!)
   const quote = p.quote || quotedWords(c.display)
@@ -854,7 +858,7 @@ async function drawAsk(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
   const cols = Math.max(30, e.props.bodyColumns)
   const opens = p.anchorText && p.target?.kind !== 'card' ? firstSentence(p.anchorText) : ''
   const body: RenderElement[] = [...headerEls(els, { title: 'New thread', cols, sub: subLine([`about ${p.about ?? 'this'}`]) })]
-  if (opens && !(p.about ?? '').includes(opens)) body.push(<Text key="ask-words" dimColor wrap="truncate-end">{opens}</Text>)
+  if (opens && !(p.about ?? '').includes(opens)) body.push(<Text key="ask-words" dimColor wrap="truncate-end">{cut(opens, cols)}</Text>)
   if (asking) body.push(<Text key="ask-state" {...(asking.startsWith('×') ? { color: COLORS.problem } : { dimColor: true })}>{asking}</Text>)
   // the field alone, its placeholder saying what it takes: Enter's word (`⏎ ask`) is the only `ask`
   const field = (
@@ -991,7 +995,7 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
     const tree = threadTree(threads.filter(t => placeOf(t) === place))
     if (!tree.length) continue
     if (pi > 0) lines.push([])
-    lines.push(pointed([{ s: place === 'main' ? 'main' : `report "${clip(docTitle(place.slice(7)), 60)}"` }], false))
+    lines.push(pointed([{ s: place === 'main' ? 'main' : `report ${quoted(clip(docTitle(place.slice(7)), 60))}` }], false))
     for (const r of tree) {
       if (drawn >= cap) {
         more++
@@ -1042,17 +1046,17 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
     body.push(ruleEl(els, cols, 'rule-thread'))
     // what it is about, dim, before its first question
     const about = await aboutName(cx, rows.find(r => r.id === t.id))
-    if (about) body.push(<Text key="thread-about" dimColor wrap="truncate-end">{`about ${about}`}</Text>)
+    if (about) body.push(<Text key="thread-about" dimColor wrap="truncate-end">{cut(`about ${about}`, cols)}</Text>)
     let k = 0
     for (const turn of t.turns) {
       k++
       if (k > 1) body.push(<Text key={`thread-gap-${k}`}> </Text>)
-      body.push(<Text key={`thread-q-${k}`} wrap="wrap">{`"${plainCites(turn.q)}"`}</Text>)
+      body.push(<Text key={`thread-q-${k}`} wrap="wrap">{quoted(plainCites(turn.q))}</Text>)
       if (turn.state === 'running') {
         const partial = turn.partial.trim()
-        body.push(<Text key={`thread-run-${k}`} dimColor wrap="truncate-end">{`◌ ${plural(turn.tools, 'tool call')}${partial ? ` · ${clip(partial, cols - 30)}` : ''}`}</Text>)
+        body.push(<Text key={`thread-run-${k}`} dimColor wrap="truncate-end">{cut(`◌ ${plural(turn.tools, 'tool call')}${partial ? ` · ${clip(partial, cols - 30)}` : ''}`, cols)}</Text>)
       } else if (turn.state === 'error') body.push(<Text key={`thread-err-${k}`} color={COLORS.problem} wrap="wrap">{`× ${turn.a}`}</Text>)
-      else if (turn.a.trim()) body.push(<Box key={marginKey(`thread-answer-${k}`)} flexDirection="column">{await drawReply(cx, e, turn.a, cols, { margin: PANEL_MARGIN, prefix: `t${k}-`, ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}</Box>)
+      else if (turn.a.trim()) body.push(<Box key={marginKey(`thread-answer-${k}`)} flexDirection="column">{await drawReply(cx, e, turn.a, cols, { margin: PANEL_MARGIN, prefix: `t${k}-`, drawn: new Set(turn.cards ?? []), ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}</Box>)
       // the cards the turn made, under its answer, each in its frame, as main's chat draws a turn's cards
       for (const [ci, id] of (turn.cards ?? []).entries()) body.push(<Box key={`thread-card-${k}-${ci}`} flexDirection="column">{await cardBlock(cx, e, id, cols, `th${k}-${ci}`, { order: ci + 1 })}</Box>)
     }
@@ -1366,11 +1370,11 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     const text = demojibake(raw)
     if (!text.trim()) return null
     const f = recordFields(text, { kind: l.kind ?? '', spec: definitionOf(l), ...(match ? { match } : {}) })
-    if (!f) return <Text italic wrap="wrap">{`"${clip(text.replace(/\s+/g, ' ').trim(), room)}"`}</Text>
+    if (!f) return <Text italic wrap="wrap">{quoted(clip(text, room))}</Text>
     return (
       <Box flexDirection="column">
-        {fieldEls(els, f.read.map(([k, v]): [string, RenderElement] => [k, <Text italic wrap="wrap">{`"${clip(v.replace(/\s+/g, ' ').trim(), room - k.length - 2)}"`}</Text>]), `lx-f-${cid(ref)}`)}
-        {f.rest.length ? <Text dimColor wrap="truncate-end">{f.rest.map(([k, v]) => `${k} ${clip(v, 48)}`).join(' · ')}</Text> : null}
+        {fieldEls(els, f.read.map(([k, v]): [string, RenderElement] => [k, <Text italic wrap="wrap">{quoted(clip(v, room - k.length - 2))}</Text>]), `lx-f-${cid(ref)}`)}
+        {f.rest.length ? <Text dimColor wrap="truncate-end">{cut(f.rest.map(([k, v]) => `${k} ${clip(v, 48)}`).join(' · '), Math.max(10, cols - 4))}</Text> : null}
       </Box>
     )
   }
@@ -1435,8 +1439,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     if (!cards.length) rows.push(<Text key="lb-cards-none" dimColor>{'  none'}</Text>)
   }
   keys.push({ key: 'list', hotkey: 'l', onPress: () => void openPanel(cx, { view: 'labels', title: 'Labels' }) })
-  // the keys that fit one row: the field says how to save it (its placeholder), the folded parts open with c, e, d
-  rows.push(hintsRow(els, [running ? 's to stop' : 'r to run on a sample', 'c, e or d to open', 'l for all labels'], cols))
+  // the keys that fit one row: the field says how to save it (its placeholder); each folded part's key by what it opens
+  rows.push(hintsRow(els, [running ? 's to stop' : 'r to run a sample', 'c counts, e examples, d cards', 'l for labels'], cols))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...rows]}</Box>
 }
@@ -1607,8 +1611,10 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
   const at = (k: number) => openPanel(cx, { ...p, start: k })
   // a passage's thread is told the document, its section and the passage
   const askIn = (u: DocSection) => (tgt: Target) =>
-    void openAsk(cx, tgt, tgt.kind === 'sentence' ? { anchor: `report:${slug}${u.id ? `#${u.id}` : ''}`, anchorText: `"${title}" › ${plainCites(str(u.heading))}: ${plainCites(tgt.text ?? '')}`, element: `report:${slug}${u.id ? `#${u.id}` : ''}` } : { element: `report:${slug}${u.id ? `#${u.id}` : ''}` })
-  const drawUnit = async (u: DocSection, i: number, focus?: Record<string, Focus>) => drawReply(cx, e, unitMarkdown(u), cols, { margin: PANEL_MARGIN, prefix: `d${i}-`, ask: askIn(u), open: id => void openThread(cx, id), in: 'report', ...(focus ? { focus } : {}) })
+    void openAsk(cx, tgt, tgt.kind === 'sentence' ? { anchor: `report:${slug}${u.id ? `#${u.id}` : ''}`, anchorText: `${quoted(title)} › ${plainCites(str(u.heading))}: ${plainCites(tgt.text ?? '')}`, element: `report:${slug}${u.id ? `#${u.id}` : ''}` } : { element: `report:${slug}${u.id ? `#${u.id}` : ''}` })
+  // the document's figures: a sentence that cites one of them whole leaves the reference out
+  const figures = new Set(units.flatMap(u => [...(u.figures ?? []), ...(u.figure ? [u.figure] : [])].map(f => str(f.cell).replace(/^(?:card|cell):/, '')).filter(Boolean)))
+  const drawUnit = async (u: DocSection, i: number, focus?: Record<string, Focus>) => drawReply(cx, e, unitMarkdown(u), cols, { margin: PANEL_MARGIN, prefix: `d${i}-`, drawn: figures, ask: askIn(u), open: id => void openThread(cx, id), in: 'report', ...(focus ? { focus } : {}) })
   const stepped = units.length > 0 && (form === 'slides' || (form === 'story' && p.mode !== 'page'))
   const controls: (RenderElement | null)[] = []
   const hints: string[] = []
@@ -1724,6 +1730,28 @@ function pageLines(page: Obj): { n: number; text: string }[] {
   }))
 }
 
+/** A value as JSON in the form a JSON lines file is most often written in (Python's json.dumps: `, ` and `: ` between
+ *  parts), so a line of the file reads as written. */
+function jsonLine(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(jsonLine).join(', ')}]`
+  if (isObj(v)) return `{${Object.entries(v).map(([k, x]) => `${JSON.stringify(k)}: ${jsonLine(x)}`).join(', ')}}`
+  return JSON.stringify(v) ?? 'null'
+}
+
+/** A file page's lines as the file holds them (the Raw tab, and the file browser's preview of a file's first lines): a
+ *  JSON record as its JSON line, a line of text as written, never the words a transcript's turn shows. */
+function rawLines(page: Obj): { n: number; text: string }[] {
+  const records = (Array.isArray(page.records) ? page.records : []) as Obj[]
+  const first = typeof page.start === 'number' ? page.start : 1
+  return records.map((r, i) => {
+    const rec = r.record
+    // a page that gives no record (an older backend's) as its blocks' words
+    const words = Array.isArray(r.blocks) ? (r.blocks as Obj[]).map(b => str(b.text)).join(' ') : str(r.text ?? r.raw)
+    const text = isObj(rec) && typeof rec._raw === 'string' ? rec._raw : isObj(rec) && Object.keys(rec).length === 1 && typeof rec.text === 'string' ? rec.text : rec !== undefined ? jsonLine(rec) : words
+    return { n: typeof r.line === 'number' ? r.line : first + i, text: demojibake(text.replace(/\t/g, '  ')).slice(0, 4000) }
+  })
+}
+
 /** The folders open in the file browser: the first unless folded, any other once unfolded. */
 const FOLDER_FILES = 20
 
@@ -1756,7 +1784,8 @@ function opensAs(page: Obj | undefined): string {
 }
 
 /** The file browser (SPEC.md, section 7, "The file browser"): a folder per group, which folds; an open folder
- *  shows its first 20 files (`… N more` shows them all), each with a dim `●`, its name cut in its middle; `❯` and the
+ *  shows its first 20 files (`… N more` shows them all), each by its name at A4, cut in its middle, its folder's row with
+ *  the folder's size; `❯` and the
  *  accent on the chosen file, whose name, what it opens as and its first lines show
  *  under the second rule; Enter or a second click opens it, Space folds its folder. */
 async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
@@ -1811,16 +1840,16 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     const open = i === 0 ? !ui.folded.includes(key) : ui.unfolded.includes(key)
     opened.set(dir, open)
     hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: flipOf(dir, open) })
-    lines.push(pointed([{ s: open ? '▾' : '▸' }, { s: ' ' }, { s: dir || root }, dim(`  ${num(fs.length)}`)], false))
+    // its files' count after its name, as home shows it, and their size under `size`
+    lines.push(pointed(spread([{ s: open ? '▾' : '▸' }, { s: ' ' }, { s: dir || root }, dim(`  ${num(fs.length)}`)], [dim(''.padEnd(kindW)), { s: '  ' }, dim(fmtSize(fs.reduce((k, f) => k + f.size, 0)).padStart(sizeW))], cols), false))
     if (!open) return
     const whole = (ui.whole ?? []).includes(dir)
     const shown = !whole && fs.length > FOLDER_FILES + 1 ? fs.slice(0, FOLDER_FILES) : fs
-    // each file's dot dim, as home's: the type column names its type, and only a Color by colours
+    // each file's name at A4, with no dot, as home lists it: the type column names its type
     for (const f of shown) {
-      const hue = COLORS.dim
       const name = middleCut(f.path.slice(dir.length), Math.max(8, cols - 4 - kindW - sizeW - 6))
       hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(f.path) })
-      lines.push(pointed(spread([{ s: '  ' }, { s: '●', fg: hue }, { s: ' ' }, { s: name }], right(f), cols), f.path === pick, true))
+      lines.push(pointed(spread([{ s: '    ' }, { s: name }], right(f), cols), f.path === pick, true))
       order.push(f.path)
       dirOf.set(f.path, dir)
     }
@@ -1867,7 +1896,7 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     body.push(ruleEl(els, cols, 'rule-preview'))
     body.push(lineEl(els, spread([{ s: pick }], as ? [dim(`opens as ${as}`)] : [], cols), 'preview-name'))
     if (page?.ok && !page.value.binary) {
-      const ls = pageLines(page.value).slice(0, 6)
+      const ls = rawLines(page.value).slice(0, 6)
       const gw = Math.max(1, ...ls.map(l => String(l.n).length))
       for (const l of ls) body.push(<Text key={`preview-${l.n}`} wrap="truncate-end"><Text dimColor>{`${String(l.n).padStart(gw + 2)}  `}</Text><Text>{cut(l.text, Math.min(160, cols - gw - 4)) || ' '}</Text></Text>)
     }
@@ -2089,9 +2118,10 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
       lineNs.push(r.n)
     }
   } else {
-    // raw: a Markdown file's headings bold and its blank lines left out
+    // raw: each line as the file holds it (a JSON record as its JSON line), a Markdown file's headings bold and its
+    // blank lines left out
     const md = /\.(md|markdown)$/i.test(path)
-    for (const l of ls) {
+    for (const l of rawLines(page)) {
       if (md && !l.text.trim()) continue
       const head = md && /^#{1,6}\s/.test(l.text)
       const text = cut(l.text, Math.max(10, cols - gw - 2)) || ' '
@@ -2158,7 +2188,7 @@ async function drawAgent(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   if (!(tt?.events ?? []).length) body.push(<Text key="agent-none" dimColor>{tt ? 'nothing yet' : '◌ reading its chat'}</Text>)
   if (steps.length) {
     body.push(<Text key="agent-steps"><Text bold>Steps</Text><Text dimColor>{` (${num(steps.length)})`}</Text></Text>)
-    steps.slice(-12).forEach((s, i) => body.push(<Text key={`agent-step-${i}`} dimColor wrap="truncate-end">{`  ${s}`}</Text>))
+    steps.slice(-12).forEach((s, i) => body.push(<Text key={`agent-step-${i}`} dimColor wrap="truncate-end">{cut(`  ${s}`, cols)}</Text>))
   }
   if (text.trim()) body.push(<Box key={marginKey('agent-text')} flexDirection="column" marginTop={steps.length ? 1 : 0}>{await drawReply(cx, e, text.trim(), cols, { margin: PANEL_MARGIN, prefix: 'agent-' })}</Box>)
   const stop = a && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: a.chat || a.name, name: a.name }) : null

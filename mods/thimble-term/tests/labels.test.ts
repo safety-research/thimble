@@ -38,7 +38,8 @@ test("the label panel's header reads `name:`, `type:`, `scope:`, and its pattern
   for (const s of ['name:', 'type:', 'scope:', 'pattern:']) expect(text).toContain(s)
   // each label in a column 10 cells wide (`pattern:` and a gutter), the field after it
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Box","props":{"key":"lf-pattern:","flexDirection":"row"},"children":[{"type":"Box","props":{"width":10,"flexShrink":0}')
-  expect(text).toContain('l for all labels')
+  // each folded part's key by what it opens (live check New 11)
+  expect(text).toContain('r to run a sample · c counts, e examples, d cards · l for labels')
   await pane.unmount()
 })
 

@@ -65,7 +65,7 @@ async function openRow($: E, w: World, pane: M, text: string, times = 2): Promis
   return pane
 }
 
-test("the file browser: a long name cut in its middle, its extension kept; a folder of one type's dots dim; the chosen file says what it opens as; Space folds its folder", async ($, on) => {
+test("the file browser: a long name cut in its middle, its extension kept; no dots, a folder's size; the chosen file says what it opens as; Space folds its folder", async ($, on) => {
   const w = world(on)
   w.states.files = [
     { path: 'README.md', kind: 'markdown', size_bytes: 10 },
@@ -83,11 +83,12 @@ test("the file browser: a long name cut in its middle, its extension kept; a fol
   expect(shown(chosen)).toMatch(/^❯/)
   expect(JSON.stringify(chosen)).toContain('"color":"suggestion"')
   expect(shown(await pane.drawn())).toContain('opens as transcript')
-  // every file's dot dim, in a folder of several types too: the type column names the type, and only a Color by
-  // colours (live check New 11)
+  // no file has a dot, as home lists them: the type column names the type (live check New 10); its name at A4
   const readme = tree.find(r => shown(r).includes('README.md'))
-  expect(JSON.stringify(readme)).toContain('"color":"inactive"},"children":["●"]')
-  expect(JSON.stringify(tree)).not.toMatch(/"color":"#[0-9a-f]{6}"\},"children":\["●"\]/)
+  expect(shown(tree)).not.toContain('●')
+  expect(shown(readme)).toMatch(/^ {6}README\.md /)
+  // each folder's size against R, as home shows it
+  expect(shown(tree.find(r => shown(r).includes('wiki/')))).toMatch(/▾ wiki\/ {2}2 +20 B$/)
   // Space folds the chosen file's folder
   await pane.key({ key: 'space', in: 'm:files-tree' } as never)
   await w.clock.settle()
@@ -101,7 +102,7 @@ test("the file browser: a long name cut in its middle, its extension kept; a fol
   await pane.redraw()
   const logs = (((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []).filter(r => /\.jsonl/.test(shown(r)) && /a-very/.test(shown(r)))
   expect(shown(logs[0])).toMatch(/a-very-long-file-name-th[^ ]*…[^ ]*-not\.jsonl/)
-  expect(JSON.stringify(logs[0])).toContain('"color":"inactive"},"children":["●"]')
+  expect(shown(tree.find(r => shown(r).includes('logs/')) ?? '')).toMatch(/logs\/ {2}2 +20 B$/)
   await pane.unmount()
 })
 
@@ -206,7 +207,7 @@ test('the file browser lists each folder in natural order, as home does; a folde
   await start($, w)
   const pane = await browser($, w)
   const tree = ((((await pane.drawn({ in: 'm:files-tree' })) as { children?: unknown[] }).children ?? []) as unknown[]).map(r => shown(r))
-  const names = tree.filter(r => /\.jsonl/.test(r)).map(r => r.trim().split(/\s+/)[1])
+  const names = tree.filter(r => /\.jsonl/.test(r)).map(r => r.trim().split(/\s+/)[0])
   expect(names).toEqual(['events.jsonl', 'pages.jsonl', 'run-2.jsonl', 'run-10.jsonl'])
   expect(tree.find(r => r.includes('run-2.jsonl'))).toMatch(/jsonl +10 B$/)
   await pane.unmount()
@@ -274,4 +275,25 @@ test("a file thimble knows only as text that opens as a transcript says `transcr
   const lines = (((await home.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
   expect(lines.find(l => l.includes('agent-chat.jsonl'))).toMatch(/agent-chat\.jsonl +transcript +10 B$/)
   await home.unmount()
+})
+
+test("the Raw tab shows a file's lines as the file holds them: a transcript's records as their JSON lines, and so does the file browser's preview", async ($, on) => {
+  const w = world(on)
+  w.states.files = [{ path: 'chat.jsonl', kind: 'records', size_bytes: 10 }]
+  w.pages['chat.jsonl'] = CHAT
+  await start($, w)
+  let pane = await browser($, w)
+  pane = await openRow($, w, pane, 'chat.jsonl', 1)
+  // the preview: the file's first lines, not its turns' words
+  expect(shown(await pane.drawn())).toContain('{"author": "alice", "body": "Who saved the page?", "at": "10:00"}')
+  pane = await openRow($, w, pane, 'chat.jsonl', 1)
+  await pane.press({ key: 'hk-tab2' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  const body = shown(await pane.drawn({ in: 'm:file-body' }))
+  // live check New 12: Raw showed each record's words
+  expect(body).toContain('{"author": "bob", "body": "An agent did, twice.", "at": "10:01"}')
+  expect(body).toContain('{"type": "tool_use", "name": "Read", "at": "10:02"}')
+  await pane.unmount()
 })
