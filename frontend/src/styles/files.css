@@ -202,6 +202,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: normal;
 }
 .files-caret {
   flex: none;
@@ -1835,6 +1836,7 @@
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: normal;
 }
 .colorby-sw {
   flex: none;

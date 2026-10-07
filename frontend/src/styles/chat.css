@@ -767,6 +767,7 @@ button.view-tab:focus-visible {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: normal;
 }
 /* a chip that names a label (chat/SurfaceChips.tsx) is its row in the Labels pane, a size smaller: 22px, radius 6,
    the name in the body face at 12.5 */
@@ -1500,10 +1501,6 @@ button.model-line-part[aria-expanded='true'] {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
-}
-/* room for descenders, which the label's ellipsis overflow clips at line-height 1 */
-.chat-perm-always .btn-label {
-  line-height: 1.3;
 }
 .chat-perm-deny.btn {
   margin-left: auto;
