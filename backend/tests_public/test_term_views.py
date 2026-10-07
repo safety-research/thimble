@@ -430,7 +430,7 @@ async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
                      "resize the overview · [ ] to pan · + - to zoom · a to ask · b to go back · x to close")
 
 
-def _pane(rows: list[str]) -> list[str]:
+def _timeline_pane(rows: list[str]) -> list[str]:
     """The side pane's rows, right of its `│`."""
     return [x.rsplit("│ ", 1)[1].rstrip() for x in rows if "│ " in x]
 
@@ -446,7 +446,7 @@ async def test_timeline_opens_an_event_in_the_side_pane_filters_and_picks_a_lane
     rows = out.splitlines()
     at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
     assert "03:00:48  alert   fired" in rows[at] and rows[at + 1].startswith("  ● 03:01:05  agent"), "nothing opens under the row"
-    pane = _pane(rows)
+    pane = _timeline_pane(rows)
     assert pane[0].startswith("alert fired · 03:00:48") and pane[0].endswith("close")
     assert pane[1:5] == ["payments: health check failing on 2 of 3 replicas", "service payments · severity critical",
                          "incident INC-311 · by monitor · alert id alr-42", "Responses · 5"]
@@ -500,7 +500,7 @@ def _tree(body: list[str]) -> list[str]:
     return [re.match(r"\s*\S+(?: \S+)*", x[2:])[0] for x in body[top:end]]
 
 
-def _pane(rows: list[str], title: str) -> list[str]:
+def _linked_pane(rows: list[str], title: str) -> list[str]:
     """The side pane's rows beside the transcript whose title starts `title`, at the right of the `│` between them."""
     t = next(i for i, x in enumerate(rows) if x.startswith(f"  {title}"))
     return [x[x.index("│") + 1:].strip() for x in rows[t + 1:] if "│" in x]
@@ -576,7 +576,7 @@ async def test_linked_sessions_reads_a_subagent_and_the_session_that_started_it(
                                      panel=False)
     rows = out.splitlines()
     assert "14:09:05  ⎿ Task → client-port Port invoicer/client to v3" in next(x for x in rows if x.startswith("❯"))
-    pane = _pane(rows, "lead · Run 1 · nested team")
+    pane = _linked_pane(rows, "lead · Run 1 · nested team")
     assert pane[0].startswith("lead · Task · 14:09:05") and pane[0].endswith("close")
     assert pane[1] == "→ client-port  Port invoicer/client to v3"
     assert pane[3].startswith("Port invoicer/client to Brambleway v3")
@@ -595,7 +595,7 @@ async def test_linked_sessions_opens_a_cited_call_beside_its_transcript_and_filt
     out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref=f"{PORT1}#L13", panel=False)
     rows = out.splitlines()
     assert "14:10:20  ⎿ Edit invoicer/client/http.py" in next(x for x in rows if x.startswith("❯"))
-    pane = _pane(rows, "client-port · Run 1 · nested team")
+    pane = _linked_pane(rows, "client-port · Run 1 · nested team")
     assert pane[0].startswith("client-port · Edit · 14:10:20")
     assert pane[1:5] == ["invoicer/client/http.py", '− BASE_URL = "https://api.brambleway.example/v2"',
                          '+ BASE_URL = "https://api.brambleway.example/v3"', "The file invoicer/client/http.py has been updated."]
@@ -645,7 +645,7 @@ def repository(workspaces_tmp, tmp_path, monkeypatch, inproc) -> str:
     return "repository"
 
 
-def _pane(rows: list[str]) -> list[str]:
+def _repository_pane(rows: list[str]) -> list[str]:
     """The side pane's half of each row drawn beside the list, after its `│`."""
     return [x.split(" │ ", 1)[1].rstrip() for x in rows if " │ " in x]
 
@@ -685,7 +685,7 @@ async def test_repository_opens_a_pull_request_as_its_page_in_the_side_pane(repo
     out = await term_views.draw_text(repository, "repository", cols=120, rows=44, wrap=DRAW_WRAP,
                                      keys=["down", "down", "return"], panel=False)
     rows = out.splitlines()
-    pane = _pane(rows)
+    pane = _repository_pane(rows)
     assert pane[0].startswith("r1 #11 Keep wall-clock time") and pane[0].endswith("close")
     assert pane[1] == "state merged · opened 09:50 by cedar"
     assert "review changes requested · approvals 1 of 1" in pane
@@ -698,7 +698,7 @@ async def test_repository_opens_a_pull_request_as_its_page_in_the_side_pane(repo
     assert next(x for x in rows if x.startswith("❯")).startswith("❯ ● #11  Keep wall-clock"), "its row stays in the list"
     out = await term_views.draw_text(repository, "repository", cols=120, rows=44, wrap=DRAW_WRAP,
                                      keys=["down", "down", "return", "click:r2 #3 fixed"], panel=False)
-    pane = _pane(out.splitlines())
+    pane = _repository_pane(out.splitlines())
     assert pane[0].startswith("r2 #3 Every-other-week schedule")
     assert any(re.match(r"\d\d:\d\d  \S+\s+merged #11", x) for x in pane)
 
@@ -711,7 +711,7 @@ async def test_repository_draws_a_thread_as_replies_and_an_agent_as_its_profile(
                                      panel=False)
     rows = out.splitlines()
     assert next(x for x in rows if x.startswith("❯")).startswith("❯ ● Splitting the backlog")
-    pane = _pane(rows)
+    pane = _repository_pane(rows)
     at = pane.index("ash  09:02")
     assert pane[at + 1:at + 5] == ["│ I'll take #1 and #4, both in parse and format.", "├ birch  09:02", "│ #2 and #6 for me.",
                                    "├ cedar  09:06"]
@@ -720,7 +720,7 @@ async def test_repository_draws_a_thread_as_replies_and_an_agent_as_its_profile(
                                      panel=False)
     rows = out.splitlines()
     assert any('"Signing off: three merged, four reviews given."' in x for x in rows)
-    pane = _pane(rows)
+    pane = _repository_pane(rows)
     assert any(x.startswith("run r1 · pull requests 3") for x in pane)
     assert any(x.startswith("09:24  opened #9") for x in pane)
 
@@ -732,7 +732,7 @@ async def test_repository_follows_its_citations_its_filter_and_its_chips(reposit
     value."""
     out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP,
                                      ref="runs/r1/events.jsonl#L35", panel=False)
-    pane = _pane(out.splitlines())
+    pane = _repository_pane(out.splitlines())
     assert pane[0].startswith("r1 #11 Keep wall-clock time")
     assert any(x.startswith("10:58  ash  commented") for x in pane), "the cited record is in view"
     out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, ref="view:repository/r2",
