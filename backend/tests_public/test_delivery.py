@@ -104,7 +104,8 @@ def test_the_pull_takes_one_event_as_its_text_and_it_stays_in_flight_until_ackno
 
 def test_the_held_hook_prints_what_the_analyst_wrote_once_its_event_is_written_out():
     """Claude Code shows a woken turn only as the watcher's fixed summary, so the UserPromptSubmit hook prints the
-    analyst's words, each thread's name with its question, and a line for each quiet event, without ids."""
+    analyst's words, each thread's question (named by its first question, never its fork's slug), and a line for each
+    quiet event, without ids."""
     _subscribe(SID)
     session.attach(CORPUS, SID, _cwd(), None)
     events.post(CORPUS, "labeled", {"text": "links whose host is api-la", "name": "api-la", "ref": "concept:c0ffee12"})
@@ -120,7 +121,7 @@ def test_the_held_hook_prints_what_the_analyst_wrote_once_its_event_is_written_o
     asyncio.run(deliver())
     lines = asyncio.run(events.held_route(events.HeldBody(cwd=_cwd(), session=SID)))["terminal"].splitlines()
     assert len(lines) == 3 and "Which kinds of link failed today?" in lines[0] and "api-la" in lines[1]
-    assert "days-the-page-changed" in lines[2] and "On which days did it change?" in lines[2]
+    assert lines[2] == "› new thread: On which days did it change?" and "days-the-page-changed" not in lines[2]
     assert not any(x in "\n".join(lines) for x in (asked["id"], posted["id"], thread["id"], "c0ffee12"))
     assert not asyncio.run(events.held_route(events.HeldBody(cwd=_cwd(), session=SID)))["terminal"], "printed once"
 

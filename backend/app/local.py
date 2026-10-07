@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -176,9 +177,22 @@ async def call(name: str, args: dict[str, Any], *, cwd: str, session: str | None
     return res.as_dict()
 
 
+def begin(cwd: str | None) -> str | None:
+    """The shim's start in terminal mode, on its event loop: _start for the workspace of `cwd`, before any tool call.
+    A session resumed with `--continue` may run cards with `thimble-run` before it calls a tool, and their card checks
+    wait for the card watch, which would otherwise start only with the first call. The workspace, or None for a folder
+    of no terminal-mode workspace."""
+    c = workspace(cwd)
+    if not c or not terminal(c):
+        return None
+    _start(c)
+    return c
+
+
 def _start(c: str) -> None:
-    """The first call for workspace `c` in this process: the cards an earlier session left `running` are marked
-    interrupted, and the watch that starts the card check of each card `thimble-run` writes begins (cardrun.CardWatch)."""
+    """The shim's start (begin), or the first call for workspace `c` in this process: the cards an earlier session left
+    `running` are marked interrupted, and the watch that starts the card check of each card `thimble-run` writes begins
+    (cardrun.CardWatch)."""
     if c in _started:
         return
     _started.add(c)
@@ -341,14 +355,40 @@ async def _home(c: str, args: list[str], pos: list[str]) -> Any:
     threads = [m for m in agents.list_chats(c) if m.get("kind") == agents.KIND_THREAD]
     out["threads"] = len(threads)
     out["unread"] = [m["id"] for m in threads if _unread(c, m)]
-    try:  # the views built for this corpus, each one line in the terminal (the browser shows the view itself)
-        out["views"] = [{"slug": v["slug"], "name": v["name"], "status": "built" if v.get("ok") else "not built"}
-                        for v in views.list_views(c) if v.get("origin") != "builtin"]
+    try:  # the views proposed and built for this corpus, each one line in the terminal (the browser shows the view itself)
+        out["views"] = _home_views(c)
     except Exception:  # noqa: BLE001 — the row above the prompt still shows the rest
         out["views"] = []
-    out["orientation"] = (orientation.read_run(c) or {}).get("status")
+    run = orientation.read_run(c) or {}
+    out["orientation"] = run.get("status")
+    out["coverage"] = run.get("coverage")  # run 0's coverage line (orient_session.measure), which home shows under Files
     out["mode"] = session_mode(config.workspace_path(c))
     return out
+
+
+def _home_views(c: str) -> list[dict[str, Any]]:
+    """The views home lists, newest first by the renderer: each built one and each proposal not dropped, held or merely
+    suggested, with its state (built, building, failed, proposed, or not built for a view whose files are missing), when
+    it was proposed (or built), and the files it claims."""
+    from . import views  # noqa: PLC0415
+
+    props = {p["slug"]: p for p in views.list_proposals(c)}
+    built = {v["slug"]: v for v in views.list_views(c) if v.get("origin") != "builtin"}
+    rows: list[dict[str, Any]] = []
+    for slug in dict.fromkeys([*built, *props]):
+        v, p = built.get(slug), props.get(slug) or {}
+        if p.get("held") or p.get("status") in ("dropped", "suggested"):
+            continue
+        if v is not None and v.get("ok"):
+            status = "built"
+        elif p.get("status") in ("building", "failed"):
+            status = str(p["status"])
+        else:
+            status = "proposed" if p else "not built"
+        rows.append({"slug": slug, "name": str(p.get("name") or (v or {}).get("name") or slug), "status": status,
+                     "ts": str(p.get("ts") or (v or {}).get("built") or ""),
+                     "files": [str(x) for x in ((v or {}).get("claims") or p.get("claims") or [])]})
+    return rows
 
 
 async def _cards(c: str, args: list[str], pos: list[str]) -> Any:
@@ -420,21 +460,42 @@ def _unread(c: str, meta: dict[str, Any]) -> bool:
     return threads.unread(c, meta)
 
 
-def _answers(c: str, meta: dict[str, Any]) -> int:
-    """How many of a thread's runs ended with an answer: the `done` records of its log, one per question answered,
-    which the renderer counts to put a row under main's latest reply when a new one comes."""
+def answered(events: list[dict[str, Any]]) -> int:
+    """How many of a thread's questions have an answer: each question (a `user` record and the records after it) counts
+    once, at its first `done` record or its first reply (the `text` record `reply_in_thread` writes, threads.reply). In
+    terminal mode main often answers with `reply_in_thread` alone, and no `done` record follows."""
+    n, got = 0, False
+    for r in events:
+        kind = r.get("type")
+        if kind == "user":
+            got = False
+        elif not got and (kind == "done" or (kind == "text" and r.get("reply"))):
+            got = True
+            n += 1
+    return n
+
+
+def _answers(c: str, meta: dict[str, Any]) -> tuple[int, str]:
+    """How many of a thread's questions have an answer (answered), which the renderer counts to put a row under main's
+    latest reply when a new one comes; and its first question, which names the thread in the terminal (its title is a
+    slug)."""
     from . import agents  # noqa: PLC0415
 
     try:
-        return sum(1 for r in agents.read_events(agents.paths(c, str(meta["id"]))[1]) if r.get("type") == "done")
+        events = agents.read_events(agents.paths(c, str(meta["id"]))[1])
     except Exception:  # noqa: BLE001 — a thread that cannot be read shows nothing new
-        return 0
+        return 0, ""
+    first = next((str(r.get("text") or "").strip() for r in events if r.get("type") == "user" and str(r.get("text") or "").strip()), "")
+    return answered(events), first[:QUESTION_CHARS]
+
+
+QUESTION_CHARS = 300
 
 
 def _thread_marks(c: str, meta: dict[str, Any]) -> None:
-    """A thread's meta with `unread` and `answers` (_unread, _answers)."""
+    """A thread's meta with `unread`, `answers` and its first `question` (_unread, _answers)."""
     meta["unread"] = _unread(c, meta)
-    meta["answers"] = _answers(c, meta)
+    meta["answers"], meta["question"] = _answers(c, meta)
 
 
 async def _threads(c: str, args: list[str], pos: list[str]) -> Any:
@@ -549,7 +610,7 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 
 
 ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
-             "verdict {label, ref, value}, label {label, kind?, body?, glob?, values?}, label-run {label, limit?}, seen {thread}, "
+             "verdict {label, ref, value}, label {label, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, seen {thread}, "
              "stop {agent}")
 
 
@@ -671,14 +732,54 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         cardrun.mirror(c)
         return {"label": cid, "deferred": True, "command": cardrun.command("label", cid)}
     ran_before = bool(found["applications"])
+    stop = _label_stop_file(c, cid)
+    stop.unlink(missing_ok=True)
     await concepts.start_apply(c, cid, paths, limit or None, "user")
     cards = await asyncio.to_thread(concepts._label_cards, ws, cid)
     card = dict(cards[0][1]) if cards else None
     if card is None and not ran_before:
         card = await asyncio.to_thread(concepts.label_card, c, found, None, "user")
     concepts.tell_main(c, found, card)
-    summary = await concepts.wait_apply(c, cid, float("inf"))
+    # `label-stop` from another process asks this run to stop after its current unit, as the browser's Stop does
+    ended = threading.Event()
+
+    def watch() -> None:
+        while not ended.wait(LABEL_STOP_POLL_S):
+            if stop.exists():
+                concepts._cancel_event(c, cid).set()
+                stop.unlink(missing_ok=True)
+                return
+
+    threading.Thread(target=watch, name=f"label-stop-{cid}", daemon=True).start()
+    try:
+        summary = await concepts.wait_apply(c, cid, float("inf"))
+    finally:
+        ended.set()
     return {"label": cid, "summary": summary}
+
+
+LABEL_STOP_POLL_S = 0.5
+
+
+def _label_stop_file(c: str, cid: str) -> Path:
+    """The file that asks a running `label-run` of label `cid` to stop (`label-stop`); the run's process watches for it."""
+    return config.workspace_dir(c) / "concepts" / f"{cid}.stop"
+
+
+async def _act_label_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Stop a label's run that `label-run` started, after its current unit; the rows written so far stay (the browser's
+    Stop, concepts.cancel_apply_route). The run lives in that act's own process, which watches for the stop file."""
+    from . import concepts  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    found = concepts.find_concept(ws, _text(payload, "label"))
+    if found is None:
+        raise StateError(f"no label {payload.get('label')!r}")
+    cid = str(found["id"])
+    stop = _label_stop_file(c, cid)
+    stop.parent.mkdir(parents=True, exist_ok=True)
+    stop.write_text(_now(), "utf-8")
+    return {"label": cid, "stopping": True}
 
 
 async def _act_seen(c: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -694,9 +795,11 @@ async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     browser's Stop does."""
     from . import agents, subagents  # noqa: PLC0415
 
-    who = _text(payload, "agent").removeprefix("chat:")
+    who = _text(payload, "agent").removeprefix("chat:").removeprefix("thread:")
     meta = agents.meta_or_none(c, who) if agents.ID_RE.match(who) else None
-    agent_id = str((meta or {}).get("agent_id") or who)
+    # an agent's chat names its agent; a side thread's, the fork of main that answers it
+    fork = (meta or {}).get("fork") if isinstance((meta or {}).get("fork"), dict) else {}
+    agent_id = str((meta or {}).get("agent_id") or fork.get("agent_id") or who)
     ans = await subagents.stop(c, agent_id)
     if ans.refused:
         return {"stopped": False, "kind": ans.kind, "reason": ans.reason}
@@ -704,7 +807,7 @@ async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "label": _act_label,
-         "label-run": _act_label_run, "seen": _act_seen, "stop": _act_stop}
+         "label-run": _act_label_run, "label-stop": _act_label_stop, "seen": _act_seen, "stop": _act_stop}
 
 
 # --------------------------------------------------------------------------- the command line

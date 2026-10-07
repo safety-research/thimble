@@ -163,6 +163,29 @@ export type World = {
   clock: ReturnType<typeof mock.clock>
   /** what the next tool call of main answers */
   toolText: string
+  /** a thread's chat by its id, over the fixtures' */
+  chats: Record<string, unknown>
+  /** a ref's resolution, over the fixtures' */
+  resolve: Record<string, unknown>
+  /** the prompts submitted to main */
+  submitted: string[]
+  /** the prompt box's draft */
+  draft: string
+  /** the panel's elements given the keyboard, by key */
+  focused: string[]
+  /** each pane opened: its id, title and columns */
+  panes: { id: string; title: string; columns?: number }[]
+  /** a promise a spawned act waits for before it answers (a label's run that goes on), and what label-run answers */
+  hold: Promise<void> | null
+  labelRun: Record<string, unknown> | null
+  /** a document by its slug, over the fixtures' */
+  docs: Record<string, unknown>
+  /** the slash commands run, as `/name args` */
+  commands: string[]
+  /** a file's page by its path, over the fixtures' (null: it cannot be read) */
+  pages: Record<string, unknown>
+  /** when the conversation began, as Claude Code's session figures say it (a resumed one began before its process) */
+  startedAt?: number
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
@@ -180,6 +203,17 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     launch: JSON.stringify({ session: 's1', mode: opts.mode ?? 'terminal', fenced: true }),
     clock: undefined as never,
     toolText: 'card:ff73e071\n[out0: table]',
+    chats: {},
+    resolve: {},
+    submitted: [],
+    draft: '',
+    focused: [],
+    panes: [],
+    hold: null,
+    labelRun: null,
+    docs: {},
+    commands: [],
+    pages: {},
   }
   const ws = opts.ws === undefined ? WS : opts.ws
   mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI })
@@ -193,6 +227,13 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     if (t === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: t }
   })
+  // a file the renderer writes (the workspace's terminal/chat.json) is kept, and read back
+  on('fs.write', ($, e) => {
+    w.files.set(e.path, e.text)
+    return { value: undefined } as never
+  })
+  // the session's figures: it began when the test's clock starts, unless a test says it began earlier (a resume)
+  on('session.usage', () => ({ value: { startedAt: w.startedAt ?? 1_790_000_000_000, context: {}, rateLimits: [] } }) as never)
   on('fs.stat', ($, e) => {
     const t = w.stamps.get(e.path)
     if (t === undefined) return { deny: `ENOENT: ${e.path}` } as never
@@ -230,18 +271,21 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       case 'docs':
         return out(w.states.docs)
       case 'doc':
+        if (w.docs[rest[0]!]) return out(w.docs[rest[0]!])
         return rest[0] === 'report' ? out(DOC) : rest[0] === 'slides' ? out(SLIDES) : out({ error: 'no doc' }, 1)
       case 'threads':
         return out(w.states.threads)
       case 'thread':
+        if (w.chats[rest[0]!]) return out(w.chats[rest[0]!])
         return rest[0] === 't1' ? out(THREAD_T1) : out({ meta: { id: rest[0], kind: 'thread', title: 'new thread', running: true }, events: [{ type: 'user', text: 'a question' }] })
       case 'agents':
         return out(w.states.agents)
       case 'files':
+        if (rest[0] && w.pages[rest[0]] !== undefined) return w.pages[rest[0]] === null ? out({ error: `could not read ${rest[0]}` }, 1) : out(w.pages[rest[0]])
         return rest[0] ? out(w.states.file) : out(w.states.files)
       case 'resolve': {
         const refs = JSON.parse(rest[0] ?? '[]') as string[]
-        return out(Object.fromEntries(refs.map(r => [r, RESOLVE[r] ?? { error: `no such place: ${r}`, status: 404 }])))
+        return out(Object.fromEntries(refs.map(r => [r, w.resolve[r] ?? RESOLVE[r] ?? { error: `no such place: ${r}`, status: 404 }])))
       }
       case 'ui':
         return out(w.states.ui)
@@ -257,19 +301,22 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     w.calls.push(argv)
     const [, , what, , , payload] = argv
     w.acts.push({ kind: what!, payload: JSON.parse(payload ?? '{}') as Record<string, unknown> })
-    const answer = what === 'label-run' ? { ok: true, label: LABEL.id, summary: { status: 'done', labeled: 30, failed: 0, counts: { 'proxy-link': 12, none: 18 } } } : { ok: true }
+    if (w.hold) await w.hold
+    const answer = what === 'label-run' ? (w.labelRun ?? { ok: true, label: LABEL.id, summary: { status: 'done', labeled: 30, failed: 0, counts: { 'proxy-link': 12, none: 18 } } }) : { ok: true }
     yield { stream: 'stdout' as const, text: JSON.stringify(answer) }
     return { value: { code: 0, signal: null } } as never
   })
   on('ui.open', ($, e) => {
     w.opened.push(e.id)
+    w.panes.push({ id: e.id, title: String((e as { title?: unknown }).title ?? ''), ...(typeof (e as { columns?: unknown }).columns === 'number' ? { columns: (e as { columns: number }).columns } : {}) })
     return { value: { isPlaced: true } } as never
   })
   on('ui.close', ($, e) => {
     w.closed.push(e.id)
     return { value: undefined } as never
   })
-  on('ui.panes', () => ({ value: [] }) as never)
+  // the panes open: each opened and not closed since, placed
+  on('ui.panes', () => ({ value: [...new Set(w.opened)].filter(id => w.opened.filter(x => x === id).length > w.closed.filter(x => x === id).length).map(id => ({ id, isPlaced: true })) }) as never)
   on('ui.toast', ($, e) => {
     w.toasts.push(String((e as { text?: unknown }).text ?? ''))
     return { value: undefined } as never
@@ -277,9 +324,22 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
   on('ui.log', () => ({ value: undefined }) as never)
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
-  on('command.run', () => ({ text: '(the engine command)' }))
+  on('command.run', ($, e) => {
+    w.commands.push(`/${e.command} ${e.args}`.trim())
+    return { text: '(the engine command)' }
+  })
   on('tool.call', () => ({ result: w.toolText, text: w.toolText }) as never)
   on('ui.copy', () => ({ value: { isCopied: true } }) as never)
+  on('prompt.submit', ($, e) => {
+    w.submitted.push(String((e as { text?: unknown }).text ?? ''))
+    return { text: String((e as { text?: unknown }).text ?? '') } as never
+  })
+  on('ui.focus', ($, e) => {
+    w.focused.push(String((e as { key?: unknown }).key ?? ''))
+    return { value: {} } as never
+  })
+  on('prompt.read', () => ({ value: { text: w.draft, cursor: w.draft.length } }) as never)
+  on('prompt.edit', ($, e) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }) as never)
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
     // a command's output row as the engine draws it: its text

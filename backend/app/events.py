@@ -257,7 +257,9 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
     if kind in (MAIN, "card"):
         line = SAID + words
     elif kind == THREAD:
-        line = f"{SAID}thread {fields.get('name') or ''}: {words}"
+        # the thread by its first question (threads.line_name), never its fork's name, which is a slug
+        name = str(fields.get("name") or "")
+        line = f"{SAID}thread {name}: {words}" if name else f"{SAID}new thread: {words}"
     elif kind == "labeled":
         line = f"label {fields.get('what') or 'defined'}: {fields.get('name') or ''}"
     elif kind == "view":
@@ -319,6 +321,8 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         text, payload, thread_id = built
         note = build_note(kind, event_id, text, {**payload, **_filters(c)})
         out["thread"] = thread_id
+        if line is None:
+            line = terminal_line(kind, words, {"name": threads.line_name(c, thread_id, [words])})
     else:
         words = str(payload.pop("text", "") or "").strip()
         note = build_note(kind, event_id, words or describe(kind, payload), payload)

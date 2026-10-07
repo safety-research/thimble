@@ -1,7 +1,7 @@
 // Layouts as styled lines, shared by the surface modules (the interactive chips and cards) and the hooks module (the
 // static drawing where no Client runs). Each layout takes the width it may use and the item under the pointer, and
-// returns its lines and a hit test from a cell to an item. Copied from thimble-cc-mod's hooks/draw.ts; thimble-term adds
-// the `note` and `text` kinds (noteLayout, textLayout), the cards drawn as their words.
+// returns its lines and a hit test from a cell to an item. The `note` and `text` kinds (noteLayout, textLayout) are the
+// cards drawn as their words.
 import { fmt } from './lib'
 import type { Run, TableRuns } from './lib'
 import { COLORS } from './paint'
@@ -19,7 +19,7 @@ export type DiagramEdge = { source: string; target: string; label?: string }
 /** A label a card's script read (tcard.label): its values, and the value of each record the card names (`marks`, by
  *  ref). `stale`: the label changed after the card was made (register.tsx sets it). */
 export type CardLabel = { slug: string; name: string; values: string[]; marks?: Record<string, string>; stale?: boolean }
-/** A label card's own label (helper/labels.py): how its records were labeled and how many. */
+/** A label card's own label (cell.ts labelCard, from `thimble state label`): how its records were labeled and how many. */
 export type LabelInfo = { slug: string; name: string; kind: string; values: string[]; labeled: number; total: number; trial: boolean; paths?: string[] }
 /** An example: its record, its words, and on a label card its value now, why, and whether the analyst set or agreed
  *  with it (`set`; `was` the value the label gave). */
@@ -54,7 +54,7 @@ export type Item = { label: string; value: string; cite: string; open: string; k
 
 export type Layout = { lines: Line[]; items: Item[]; hit: (x: number, y: number) => number }
 
-/** The first palette hue: the marks of a chart with no colour field, which is one series (views/SPEC.md, "The visual
+/** The first palette hue: the marks of a chart with no colour field, which is one series (SPEC.md, "The visual
  *  system", rule 12). */
 export const ONE = COLORS.series[0]!
 
@@ -89,15 +89,14 @@ export function cut(s: string, n: number): string {
   return `${out}…`
 }
 
-// a byte of a UTF-8 sequence after its first, as Windows-1252 shows it (helper/refs.py _CONT)
+// a byte of a UTF-8 sequence after its first, as Windows-1252 shows it
 const CP1252: Record<number, number> = { 0x20ac: 0x80, 0x201a: 0x82, 0x192: 0x83, 0x201e: 0x84, 0x2026: 0x85, 0x2020: 0x86, 0x2021: 0x87, 0x2c6: 0x88, 0x2030: 0x89, 0x160: 0x8a, 0x2039: 0x8b, 0x152: 0x8c, 0x17d: 0x8e, 0x2018: 0x91, 0x2019: 0x92, 0x201c: 0x93, 0x201d: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97, 0x2dc: 0x98, 0x2122: 0x99, 0x161: 0x9a, 0x203a: 0x9b, 0x153: 0x9c, 0x17e: 0x9e, 0x178: 0x9f }
 const CONT = '[\\u0080-\\u00bf\\u0152\\u0153\\u0160\\u0161\\u0178\\u017d\\u017e\\u0192\\u02c6\\u02dc\\u2013\\u2014\\u2018-\\u201a\\u201c-\\u201e\\u2020-\\u2022\\u2026\\u2030\\u2039\\u203a\\u20ac\\u2122]'
 const MOJIBAKE = new RegExp(`[\\u00c2-\\u00df]${CONT}|[\\u00e0-\\u00ef]${CONT}{2}|[\\u00f0-\\u00f4]${CONT}{3}`, 'g')
 
 /**
  * Text whose UTF-8 bytes were once read as Windows-1252 or Latin-1 and saved again ("mÃ¶chten"), each such character
- * back as written ("möchten"); a run that is not one UTF-8 character is kept. For display only. helper/refs.py
- * demojibake has the same rule.
+ * back as written ("möchten"); a run that is not one UTF-8 character is kept. For display only.
  */
 export function demojibake(s: string): string {
   if (!/[\u00c2-\u00f4]/.test(s)) return s
@@ -134,6 +133,55 @@ export function fold(s: string, n: number): string[] {
   if (t[i] === ' ') sp = i
   if (sp < 0) return wrapLabel(t, n)
   return [t.slice(0, sp), cut(t.slice(sp + 1), n)]
+}
+
+/** `s` in at most `max` lines of `n` columns, each broken at the last space that fits (a word wider than a line broken
+ *  where the line ends); the last line cut with `…` when words are left. */
+export function wrapRows(s: string, n: number, max: number): string[] {
+  if (max <= 1) return [cut(s.replace(/\s+/g, ' ').trim(), n)]
+  const words = s.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+  const lines: string[] = []
+  let cur = ''
+  for (let i = 0; i < words.length; i++) {
+    let word = words[i]!
+    const next = cur ? `${cur} ${word}` : word
+    if (width(next) <= n) {
+      cur = next
+      continue
+    }
+    if (cur) {
+      lines.push(cur)
+      cur = ''
+    }
+    // a word wider than a line: its cells up to the line's end, the rest on the next
+    while (width(word) > n && lines.length < max - 1) {
+      let k = 0
+      let w = 0
+      for (const ch of word) {
+        if (w + cw(ch) > n) break
+        w += cw(ch)
+        k += ch.length
+      }
+      lines.push(word.slice(0, k))
+      word = word.slice(k)
+    }
+    cur = word
+    if (lines.length >= max - 1) {
+      // the last line takes the rest
+      cur = [cur, ...words.slice(i + 1)].join(' ')
+      break
+    }
+  }
+  if (cur) lines.push(lines.length >= max - 1 ? cutAtWord(cur, n) : cur)
+  return lines.slice(0, max)
+}
+
+/** `s` cut to `n` cells with `…`, at the last space that keeps half of it, else mid-word. */
+function cutAtWord(s: string, n: number): string {
+  if (width(s) <= n) return s
+  const head = cut(s, n).slice(0, -1)
+  const sp = head.lastIndexOf(' ')
+  return `${(sp > n / 2 ? head.slice(0, sp) : head).replace(/[\s,;:.]+$/, '')}…`
 }
 
 export function pad(s: string, n: number, right = false): string {
@@ -272,8 +320,11 @@ function classColour(card: CardData, name?: string, ref?: string): string | unde
   return undefined
 }
 
-/** A place as the analyst reads it: `revisions.jsonl line 10566`, `lines 3-8`, `row 12`; any other as written. */
+/** A place as the analyst reads it: `revisions.jsonl line 10566`, `lines 3-8`, `row 12`, `results.json item 4`, `the
+ *  command's output line 3`; never `#L` or a command's id. A card's place is named by its question by the caller. */
 export function placeWords(ref: string): string {
+  const call = /^call:[A-Za-z0-9_-]+(?:#L(\d+)(?:-L?(\d+))?)?$/.exec(ref)
+  if (call) return `the command's output${call[1] ? ` ${call[2] && call[2] !== call[1] ? `lines ${call[1]}-${call[2]}` : `line ${call[1]}`}` : ''}`
   const at = ref.indexOf('#')
   if (at < 0) return ref
   const path = ref.slice(0, at)
@@ -282,6 +333,9 @@ export function placeWords(ref: string): string {
   if (lines) return `${path} ${lines[2] && lines[2] !== lines[1] ? `lines ${lines[1]}-${lines[2]}` : `line ${lines[1]}`}`
   const row = /^row=(\d+)$/.exec(frag)
   if (row) return `${path} row ${row[1]}`
+  // a JSON list's item, counted from 1 as the file's view counts them
+  const item = /^\/(?:[^/]+\/)?(\d+)$/.exec(frag)
+  if (item && !path.startsWith('card:')) return `${path} item ${Number(item[1]) + 1}`
   return ref
 }
 
@@ -528,7 +582,7 @@ const STAMP = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+
 /**
  * Timestamps as a timeline shows them, all in one form: "18 Jun 21:26", the year only when the events span more than
  * one, the time only when one is not midnight, seconds only when two events share a minute. The clock reads as written
- * (no time zone conversion). Times that are not all ISO dates are kept as they are. helper/tcard.py has the same rule.
+ * (no time zone conversion). Times that are not all ISO dates are kept as they are.
  */
 export function shortTimes(times: readonly string[]): string[] {
   const parts = times.map(t => STAMP.exec(t.trim()))
@@ -542,6 +596,26 @@ export function shortTimes(times: readonly string[]): string[] {
     const day = `${Number(p[3])} ${MONTHS[Number(p[2]) - 1] ?? p[2]}${years.size > 1 ? ` ${p[1]}` : ''}`
     if (!clock) return day
     return `${day} ${p[4] ?? '00'}:${p[5] ?? '00'}${secs ? `:${p[6] ?? '00'}` : ''}`
+  })
+}
+
+/**
+ * Times of a transcript's turns as its time column shows them: the clock alone (`07:40:01`; seconds only when a time
+ * has them), and the day (`18 Jun 2026`) on each turn where it changes, which the column shows on a row of its own. Times
+ * that are not all ISO stamps stay as written, with no day. An empty time stays empty.
+ */
+export function turnTimes(times: readonly string[]): { clock: string; day: string }[] {
+  const parts = times.map(t => (t.trim() ? STAMP.exec(t.trim()) : null))
+  if (times.some((t, i) => t.trim() && !parts[i]) || !parts.some(Boolean)) return times.map(t => ({ clock: t, day: '' }))
+  const secs = parts.some(p => p && (p[6] ?? '00') !== '00')
+  let last = ''
+  return parts.map(p => {
+    if (!p) return { clock: '', day: '' }
+    const key = `${p[1]}-${p[2]}-${p[3]}`
+    const day = key === last ? '' : `${Number(p[3])} ${MONTHS[Number(p[2]) - 1] ?? p[2]} ${p[1]}`
+    last = key
+    const clock = p[4] === undefined ? '' : `${p[4]}:${p[5] ?? '00'}${secs ? `:${p[6] ?? '00'}` : ''}`
+    return { clock, day }
   })
 }
 
@@ -581,8 +655,12 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
     lines.push(cells.map((c): Seg => (c >= 0 ? { s: '●', fg: mark(evs[c]!), ...(c === hover ? { inv: true } : {}) } : { s: '─', fg: COLORS.rule })))
     const a = shown[times.indexOf(t0)]!
     const b = shown[times.indexOf(t1)]!
-    lines.push([{ s: `${a}${' '.repeat(Math.max(2, aw - width(a) - width(b)))}${b}`, fg: COLORS.dim }])
-    axisRows = 2
+    // the axis's two ends named under them, both or neither: the list right under the axis already names them when its
+    // first row is the start and its last the end
+    if (!(times[0] === t0 && times[times.length - 1] === t1)) {
+      lines.push([{ s: `${a}${' '.repeat(Math.max(2, aw - width(a) - width(b)))}${b}`, fg: COLORS.dim }])
+      axisRows = 2
+    } else axisRows = 1
   }
   // one row per event: its time dim at the content's edge, under the axis's start time (in inverse under the
   // pointer), its ● in hue, its words, and a blue ↗ when it has a record a click opens
@@ -1647,7 +1725,7 @@ function diagramGrid(nodes: DiagramNode[], edges: DiagramEdge[], cols: number, f
     }
   })
   // ports and arrows on the borders: ↓ where an edge reaches its target's top, ↑ where one drawn against the layers
-  // reaches its target's bottom (views/SPEC.md, "The visual system", section 5: ▼ ▲ name a table's sorted column)
+  // reaches its target's bottom (SPEC.md, "The visual system", section 5: ▼ ▲ name a table's sorted column)
   segs.forEach(s => {
     const k = s.edge
     const { rev } = dirs[k]!
@@ -1867,7 +1945,7 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
 }
 
 // thimble-term: a card drawn as its words. `note` is prose (a note card, a custom card's text), wrapped to the card's
-// width (views/SPEC.md rule 7: no measure); `text` is a card's printed output or a listing, its lines as written and cut
+// width (SPEC.md rule 7: no measure); `text` is a card's printed output or a listing, its lines as written and cut
 // at the card's width, the first MAX_TEXT_ROWS of them.
 export const MAX_TEXT_ROWS = 24
 

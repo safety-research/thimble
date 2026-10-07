@@ -149,7 +149,7 @@ export function threadState(t: Pick<ChatThread, 'turns'>): { words: string; tone
 }
 
 /** A thread's state words beside its glyph, without the word the glyph already says (● answered, ◌ answering, × failed,
- *  ○ stopped): views/SPEC.md, "Symbols", a glyph and a word that say the same thing are never drawn together. */
+ *  ○ stopped): SPEC.md, "Symbols", a glyph and a word that say the same thing are never drawn together. */
 export function afterGlyph(words: string): string {
   return words.replace(/^(answered|answering|failed|stopped) · /, '')
 }

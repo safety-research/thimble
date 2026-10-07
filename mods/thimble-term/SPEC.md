@@ -1,0 +1,602 @@
+# thimble-term's visual system
+
+How every surface of terminal mode draws on Claude Code's character grid: main's chat, cards and the panel. The
+hooks' comments cite its rules and sections by number ("SPEC.md rule 7", "SPEC.md, section 7, "Home""). Views are not
+drawn in the terminal: a view is one line, and it opens in the browser.
+
+## The visual system
+
+The terminal has one typeface and one size, so position and space carry the structure that type sizes carry on paper.
+Weight and color stay rare, so that each one means one thing. Columns and intervals follow Josef Müller-Brockmann,
+*Rastersysteme für die visuelle Gestaltung / Grid Systems in Graphic Design* (Niggli, 1981); the rule that contrast is
+read only when it is rare follows Emil Ruder, *Typographie / Typography* (Niggli, 1967). The panel's chrome follows
+Claude Code's own panels (its Artifacts and Background panels): an accent title, an inverse tab, bold section headings,
+`❯` on the selected row, metadata dim at the right, and a dim italic row of key hints. Where Claude Code has a way of
+drawing something, thimble-term draws it that way. These rules apply to everything thimble-term draws. Claude Code's
+own drawing (its `❯ ⏺ ✻ ⎿ ✕`, tool rows, subagent rows, Markdown in replies thimble-term does not draw) is outside
+them. Colors are in `hooks/paint.ts`; `hooks/chrome.tsx` draws the panel's chrome; `hooks/reply.tsx`, `draw.ts`,
+`card.tsx`, `cite.ts`, `para.tsx`, `home.ts`, `homeview.tsx`, `panel.tsx` and `register.tsx` draw.
+
+### The rules
+
+1. One left edge: the reply's text column (4) in the chat, A0 in a panel; indent only to nest (an item, an output, a child).
+2. Marks hang in a 2-cell margin left of that edge: `❯` on the selected row, `?` or `↳` by a passage.
+3. Thimble's text fills its column, with no fixed measure; cards take the same width as the text.
+4. Every card has a full round border in the rule gray; inside it, its title in bold, a blank row, then its plot or
+   body, and everything else (the readout, the label rows, the params, the takeaway) below the plot.
+5. Every panel opens with the path row, its title in the accent color and bold, a dim subtitle, a rule; key hints end it.
+6. A panel's actions sit at its bottom, after a rule, where their result appears; the title row holds only navigation.
+7. Bold is for titles and headings: panel titles, a card's title, section headings, a card table's header, speakers,
+   the model's Markdown.
+8. New is the word `new` (or `N new`) in green after the new thing; opening the thing clears it.
+9. Dim is secondary: labels, counts, times, metadata against R, secondary rows, separators, key hints.
+10. Links are blue and underlined: citations, the place after `↗`, a label's name on a card; the `?` and `↳` are blue.
+11. Red means a problem and only a problem: `×` failed, `!` usable with a problem.
+12. A palette hue goes only on the marks of a color field; a chart's one series is a field of one value, in the first hue.
+13. `❯` and the accent mark the selected row; the selection background a choice in use; inverse the tab and the pointer.
+14. Code is colored as Claude Code colors it; a record's own words are in quotation marks and italic.
+15. One glyph, one meaning (section 5); groups and folders fold with `▸ ▾`; a right-click does what a click does.
+
+### 1. Channels
+
+Each channel has one meaning. A run the table does not cover is regular, in the text color, on the panel's background.
+
+| channel | its one meaning | never used for |
+| --- | --- | --- |
+| position | what kind of thing a run is: the column it starts on (section 2) | |
+| the margin | a mark beside a row: `❯`, `?`, `↳` | text |
+| a blank row | the end of a group; the gap under a card's title | spacing inside a group |
+| a rule `─` | the end of a region: under a panel's header, above its bottom part | the line under a heading |
+| a border | a card, and a text field | a panel's regions |
+| **bold** | a title or a heading (rule 7) | names in a list, values, the selected row, new |
+| green | new | anything else |
+| dim | secondary | a name, a number in a number column, a flagged value, a control |
+| blue, underlined | a link: a citation's value, the place after `↗`, a label's name on a card | controls, rows a click selects |
+| blue | the `?` and `↳` in the margin | |
+| accent | a panel's title, the selected row | anything else |
+| italic | a record's own words (in quotation marks); the key-hint row | emphasis, captions |
+| inverse | the selected tab; the control, citation, mark or bar label under the pointer; a card's title under the pointer | anything at rest |
+| selection background | a choice in use: a card's parameter, a label's type, the cited value in its lines, the chosen record of a file, text being dragged | rows, hover |
+| tip background | the tip of the citation under the pointer | anything else |
+| palette hue | a value of the region's one color field | letters, headings, backgrounds |
+| red | a problem | negative numbers, hover |
+| code colors | code: a script, a label's code, a command, inline code | prose |
+
+### 2. The grid
+
+The horizontal unit is the cell and the indent step is 2 cells. The vertical unit is the row.
+
+**The chat column**, where thimble-term draws in Claude Code's transcript, uses the columns Claude Code already has:
+
+| column | holds |
+| --- | --- |
+| 0 | Claude Code's `❯ ⏺ ✻`; the `↳` that starts a `↳` row |
+| 2 | the reply's margin: the `?` of the passage under the pointer, a passage's `↳`; the words of a `↳` row; the toast above the prompt |
+| 4 | the reply's edge: prose, headings, a list's `-`, a card's left border, the footer |
+| 6 | nested: a list item's text, a quote block, a card's content (inside its border and padding) |
+
+**A panel's columns.** The pane has 1 cell of padding at each side; the margin M is the 2 cells after the left padding;
+the type area runs from A0 to R.
+
+| axis | column | holds |
+| --- | --- | --- |
+| M | the 2 cells left of A0 | the margin: `❯`, a passage's `?` or `↳` |
+| A0 | the type area's first cell | the edge: the path row, title, subtitle, tabs, rules, headings, prose, field labels, a card's border, a state glyph, a fold marker, a tree's guides, the key-hint row |
+| A2 | A0 + 2 | an item's name after its glyph, marker or guide; a secondary row; nested content (a command's output, a list item's text) |
+| A4 | A0 + 4 | a second level: the name of a folder's file or of an unfolded group's item after its own glyph at A2 |
+| L | the label column's width (its longest label + 2) | the values of label/value rows and fields |
+| R | the type area's last cell | numbers, metadata (dim), the title row's navigation (`earlier  later`) |
+
+1. **Axes.** A run that opens a row starts on M, A0, A2, A4, L or a table's column. A tree deeper than A4 goes on with
+   guides `├ └ │`, 2 cells a level.
+2. **Marks hang.** `❯`, `?` and `↳` sit in the margin, so text keeps its edge with or without them. A state glyph or a
+   fold marker sits on A0 with its item's name at A2. In a file's table the chosen record shows its `?` under the
+   panel's header, since the margin holds `❯`.
+3. **Space.** 1 cell is a word space. ` · ` parts the items of one inline list of facts. 2 cells are a gutter: between
+   columns, a label and its value, two controls. A gutter is never 1 cell.
+4. **Columns.** The name first, then categories, then numbers, then free text. Text columns align left; number columns
+   align right, each on its own axis, the last on R. A row's metadata (a kind, a status, a time, a count of parts) is one
+   dim run against R, parted by ` · `. A unit shared by a column goes in the column's name (`records`).
+5. **Shared axes.** A component works out its columns once for all its groups; the sections of one panel share A0, A2
+   and R.
+6. **Label/value rows and fields.** The label is dim and lower case, in the label column; values and fields start on
+   L. It has no colon, except in the label panel's header, which Matt laid out as `name:`, `type:`, `scope:`. A value
+   that is a list puts each item on its own row after a `-`.
+7. **No measure.** Prose, a thread's answer, a document, a definition and a detail's text fill the type area (in the
+   chat, the terminal's width less the margin). Cards take the same width as the text.
+8. **Flush left, ragged right.** Nothing is centered or justified.
+
+**Rows.**
+
+9. No blank row inside a group, one between groups, never two, none at the top of a region. A card has one blank row
+   under its title.
+10. A rule divides a panel's regions: under the header, and above the bottom part (a detail, a selected thread, the
+    actions). A panel has two at most. A rule spans the type area in the rule gray, and no blank row is ever next to it.
+11. **A card** has a full border with round corners in the rule gray and 1 cell of padding: in Ink, a `Box` with
+    `borderStyle="round"`, `borderColor` the rule gray and `paddingX={1}`. Its left border sits on the stream's edge
+    (column 4 in the chat, A0 in a panel). Inside: the title row in bold, a blank row, then the plot or body; below the
+    plot, the readout row (the value under the pointer, plain, or what thimble is doing to the card), the label rows,
+    the params row and the takeaway. In the card pane the question is the panel's title, so the box starts with the
+    plot. In a stream a card's border stands in for blank rows next to it; a document's caption is dim on the row under
+    the bottom border.
+12. Every item of a list takes the same number of rows: one, or a name row and a dim secondary row. The selected item
+    may open more under it. A transcript's turn takes its time-and-speaker row and up to three rows of text.
+
+### 3. Type
+
+13. **Bold** marks a title or a heading: a panel's title, a card's title, a section heading in a panel, a card table's
+    column names, a transcript speaker's name, and the model's own `**…**` and `#` headings, drawn as Claude Code draws
+    Markdown. thimble-term adds no other bold: not on names in a list, values, the selected row or anything new. Claude
+    Code draws a Button that is not `plain` as a bold `[ label ]`, so every Button stays `plain`.
+14. **New** is the word `new`, or `N new` after a count, in green: a thread with an answer not yet read, a view built and
+    not yet opened, a document written and not yet opened, a card or a label run that home has not shown yet. It
+    follows the item's name, which stays regular, wherever the item shows (home, a `↳` row, a step of the path, the
+    threads tree, `show all threads`, the toast above the prompt). Opening the item clears it.
+15. **Dim** means secondary: labels and units, counts, times, places in a secondary row, the `·` and `›` separators, axis
+    labels, metadata against R, secondary rows, `○`, and the key-hint row (dim and italic).
+16. **Underline** means a link: a citation's value, the place after `↗`, a label's name on a card, a URL. Links are blue.
+    Names and rows that a click selects or opens are not underlined.
+17. **Italic** means a record's own words quoted among the model's or thimble-term's, always inside quotation marks: an
+    example card's records, a label's examples, a quote block. A file is drawn upright, since everything in it is a
+    record's. The key-hint row is italic too, as in Claude Code's panels.
+18. **Inverse** marks the selected tab, and the control, citation, chart mark, bar label or card title under the pointer
+    or the keyboard focus.
+19. No blink, strike-through or capitals for emphasis. Kind words, field labels and steps of the path are lower case,
+    names are as written, headings are in sentence case.
+
+### 4. Color
+
+| color | theme key | drawn on | means |
+| --- | --- | --- | --- |
+| text | `text` | letters and controls; state glyphs; the bar under the pointer | content |
+| dim | `inactive` (`dimColor`) | letters (rule 15); the catch-all value's marks | secondary |
+| rule gray | `subtle` | lines only: rules, card borders, a field's border, tracks, axes, tree guides, a diagram's boxes and edges | structure |
+| link | `remember` | links (rule 16); the `?` and `↳` in the margin | opens what it names |
+| accent | `suggestion` | a panel's title; the selected row's `❯` and its text | where you are |
+| new | `success` | the word `new` and `N new` | new |
+| tip | `userMessageBackground`, a background | the tip of the citation under the pointer | |
+| inline code | `permission` | inline code in thimble-term's own paragraphs | code |
+| palette | `SERIES`, seven hues that keep 3:1 on both panels | `●`, marks, bars, swatches | a value of the color field |
+| red | `error` | a problem's words and its `×` or `!` | a problem |
+| selection | `selectionBg`, a background | a choice in use (rule 21) | |
+| panel | `composerSidebarBackground`, a background | the whole panel | |
+
+Code blocks (a script, a label's code, a command) are drawn by Claude Code's `Code` element, with its own syntax colors
+and, given `startLine`, its dim gutter of line numbers.
+
+20. **One color field per region**: a card's group or label, the file browser's file type, a transcript's speakers.
+    While a card reads a label, the label is its field. Its hues go on glyphs and marks; a value's word stays in the
+    text color (`● dse 3,908`). A chart with no color field is one series, drawn in the first hue. The bar or mark
+    under the pointer turns the text color and its readout stays plain. A field colors at most six values, past which
+    its marks take the text color (transcripts cycle the hues). A label's catch-all value ("other") takes dim marks. A
+    field with one value draws dim marks.
+21. **The selection background** marks a choice in use among choices shown together: a card's parameter, a label's
+    type (`prompt  regex  code`), the cited value in the citation panel, the chosen record of a file, text being
+    dragged. Selected rows use `❯` and the accent instead (rule 13 of "The rules"), and the selected tab uses inverse.
+22. **Red** marks a problem and only a problem: a failure, a citation whose value is not at its place, a card that
+    cannot be drawn, a run's error, a document's warning or caution. `×` is a failure and `!` something usable with a
+    problem. Negative numbers are drawn as positive ones are.
+23. No other color: no warning amber, and no green except `new`.
+
+### 5. Symbols
+
+One glyph, one meaning, everywhere. A glyph and a word that say the same thing are never drawn together (`○ Edit Bursts`,
+not `○ Edit Bursts proposed`). Besides the words of the corpus and the model, thimble-term draws no non-ASCII character
+outside this table.
+
+| glyph | its one meaning | color |
+| --- | --- | --- |
+| **state**, one per item, on A0 | | |
+| `○` | not started: proposed, stopped, queued, a file never opened | dim |
+| `◌` | running: building, checking, answering, writing, labeling | text |
+| `●` | one thing that is there: an item built, answered, written or read; a value's swatch; a record's or event's mark | a state: text; a mark: its value's hue (rule 20) |
+| `!` | usable with a problem | red |
+| `×` | failed | red |
+| `✓` | confirmed: thimble's links check found the cited value, the analyst agreed with a record | text |
+| **margin** | | |
+| `❯` | the selected row | accent |
+| `?` | ask a side thread about this passage (shown under the pointer; under the header for a file's chosen record) | link |
+| `↳` | a side thread was asked here (in a reply's margin, a click opens it); the start of a `↳` row | link in the margin; dim on a row |
+| **navigation** | | |
+| `›` | into: opens one level in (`open ›`, `all documents ›`); between the steps of the path | text; dim between steps |
+| `‹` | back one level (`‹ back`, a slide's `‹ 3 of 9 ›`) | text |
+| `↗` | opens what it points at: a place in the corpus (the place after it), a label (its name before it) | link |
+| `▸` `▾` | a folded or unfolded group or folder; a click toggles it | text |
+| **data** | | |
+| `◆` | three or more marks in one cell | text |
+| `█` and `▏▎▍▌▋▊▉` | a bar and its last eighth | hue (rule 20) |
+| `▁▂▃▄▅▆▇█` | a strip's bins | hue |
+| braille | a line chart's lines | hue |
+| `─ │ ├ └ ┤ ┬ ┴ ╭ ╮ ╰ ╯` | lines: rules, card borders, a field's border, tracks, axes, tree guides, a diagram's boxes | rule gray |
+| `→ ← ↓ ↑` | the direction of a diagram's edge | rule gray |
+| `┊` | the pointer's column on a chart | rule gray |
+| `▼ ▲` | the column a table is sorted by | dim |
+| **text** | | |
+| `…` | text cut short | as the text |
+| `… N more` | N rows not drawn; a click draws them; never for one row | dim |
+| `+N` | N values not drawn in a cell | dim |
+| `·` | between the items of one inline list | dim |
+| `"…"` | someone's own words: the analyst's question, a record's words | as the text |
+| `-` | an item of a list | text |
+
+Not drawn: `▶`, `✗ ◇ ■ □ ━ ┃ • ✕ ❚❚ ⓘ ✦ ❢ ⚠ ≡ ╱ ▤ ❝ ┿ ∴ ▪`, a braille spinner, `[ ]` around controls.
+
+**Words that recur.** Plain, short words. A place reads `revisions.jsonl line 10566` or `lines 3-8`, never `#L`. A count
+reads with thousands separators from 1,000 wherever thimble-term draws it; a number that names a thing (a line, a year,
+an id) reads as written. No hex or hash ids: a card is named by its question, a thread by its first question, a script
+by its file name. A citation's status reads `found on the card`, `found in revisions.jsonl line 10566`, `found in the
+command's output, line 1` or `not found: …`, then why for a problem; a citation in a card's takeaway reads `checking`
+while thimble's links check runs.
+
+### 6. Controls and fields
+
+24. A control is a word or a few, in the text color and plain: no brackets, bold, color or underline at rest, inverse
+    under the pointer or the focus. Its words say what it does (`run again`, `ask about it`, `run on a sample`,
+    `as slides`, `show all threads`).
+25. A panel's actions sit at its bottom, after the second rule, at A0, 2 cells apart, with their fields under them: that
+    is where a reply, a run's counts or a writer's state appear. The title row holds only navigation, against R
+    (`earlier  later`). A reply's footer has its facts, then its controls after a gutter.
+26. The key-hint row is a panel's last row: dim and italic, at A0, the bound keys in Claude Code's words, parted by
+    ` · ` (`↑↓ to choose · Enter to open · a to ask · b to go back · x to close`). It names only keys that are bound on
+    that panel (`b to go back` only where there is a way back). Nothing else in a panel or the chat says which key does
+    what. The keys are Buttons with no label of their own, in a Box no row tall (`hiddenKeys`).
+27. A field: its label dim and lower case on the label column, the field on L, no colon (`ask`, `follow-up`,
+    `describe a new label`, the label panel's `prompt`). A field that shows all of its text (the label's prompt) has a
+    border in the rule gray; a click gives it the keyboard.
+28. An empty region shows `none`, dim, at A2.
+29. A right-click does what a click does. There is no menu.
+
+### 7. Surfaces
+
+The sketches are rows as drawn. In the panel sketches the first two columns are the margin M. What is bold, dim or
+colored is said under each.
+
+**A panel's header**, the same on every panel:
+
+```
+  ‹ back  home › files › events.jsonl                                   show all threads  1 new
+  events.jsonl                                                                  earlier  later
+  jsonl · 19,931 records · lines 201-400 of 19,931
+  Table   Transcript   Raw
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+```
+
+- The path row: `‹ back` (only where there is a way back), a gutter, then each step as a lower-case kind word and its
+  name (`thread "how many…"`, `citation 5884`, `card "How many pages…"`, `label edit purpose`, `files`,
+  `events.jsonl`), parted by a dim `›`, a long step cut with `…`. A step whose thread has new answers is followed by
+  `new` in green; one whose thread is answering starts with `◌`. At R: `show all threads`, which opens the threads
+  panel, then `N new` in green while answers wait. The threads panel itself leaves it out.
+- The title row: the subject's name in the accent color and bold; navigation against R. The subtitle under it: the
+  subject's facts, dim, parted by ` · `, with a problem in red. A panel with no facts worth a row has no subtitle.
+- Tabs, where the subject has them: each tab's name with a cell of space at each side, the selected one inverse; the
+  first, when it is not the selected one, starts at A0 with the title.
+- Claude Code's pane title says what the panel shows (`Citation`, `Threads`, `Label: …`, a card's question, a
+  document's title).
+- No `[ close ]` row: Claude Code's `✕` and the `x` key close the pane.
+
+**Main's chat:**
+
+```
+⏺   The three cards are below. The dse wiki holds most of the corpus, and most of its edits came on one day, 18 June.
+    ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+    │ How many pages does each wiki have?                                                                          │
+    │                                                                                                              │
+    │ dse       █████████████████████████████████████████████████████████████████████████████████████████   3,908  │
+    │ probier   ██████████████▎                                                                               601  │
+    │ dorfwiki  ▏                                                                                               2  │
+    │ all  4,579                                                                                                   │
+    │                                                                                                              │
+    │ dse has 3,908 ✓ of the 4,579 ✓ pages, about 85%. probier comes next with 601 ✓.                              │
+    ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ↳ The chart counts by the day in each revision's time field.
+
+    13 citations · 2 cards  ask about this answer ›
+
+↳ thread · "How many delete events are in events.jsonl? One number." · answered · new
+↳ view · Wiki Pages · built · new
+  thimble   3 new cards  open ›
+```
+
+- Everything of the reply starts on column 4: prose, headings, a list's `-`, a card's border, the footer. A heading is
+  bold, with a blank row above it and none under it, as the model wrote it. A list item's text and a quote block are at
+  6. Prose wraps at the terminal's width, and cards take the same width.
+- The model's Markdown is drawn as Claude Code draws it: `**bold**` bold, `*italic*` italic, inline code in its code
+  color, headings bold.
+- A citation is its value in blue, underlined; a value not at its place is red. In a card's takeaway, one cell after
+  the value, `◌` while thimble's links check runs, `✓` once it found the value, a red `×` when it found another. The
+  citation under the pointer is inverse, and its tip (its place and status in plain words, and why for a problem) sits
+  on the tip background on the row below it, or above it on a paragraph's last row. While main streams, a citation
+  shows as a link and a card's line as `◌ <its question>`, never `[[…]]`.
+- The cards a turn added or changed stand under the turn's last reply, each once, in its last state: those a
+  `thimble-run` command ran too, a shell loop over several cards included. They, the footer and the `↳` rows are drawn
+  again after `thimble --continue` or `--resume`.
+- The margin at column 2: the `?` (blue) of the passage under the pointer (a heading's asks about its whole section, a
+  card's about the card); a blue `↳` beside a passage or a card a thread was asked about, which stays, and a click on it
+  opens that thread in the threads panel.
+- The footer, one blank row under the turn's answer (its last part that cites or embeds a card): its facts dim
+  (`· N problems` in red), its control after a gutter, no file path. No footer for the prompts thimble-term gives main
+  itself.
+- A `↳` row: `↳` at 0 and its words at 2, dim (`thread · "question" · answered`, `view · Wiki Pages · built`), `new` in
+  green while it is new, `failed` in red. A thread's row names the turn's question; a stop is not news. A view's row
+  stands under the answer that proposed it.
+- One row above the prompt, the toast, at column 2: `thimble` dim, what is new in the workspace since home was last opened
+  (`3 new cards`), `open ›`, which opens home; the row is gone once home is opened. Side threads have their `↳` rows and
+  thimble's agents Claude Code's agent tray, so no row repeats them.
+- Claude Code's tool rows and subagent rows stay Claude Code's, folded as it folds them, with no hex id: a thimble
+  tool's row names a card by its question, the label tool's result its name and counts, and a `thimble-run` command's
+  row is `thimble-run card "<question>"` (each card of a loop by its question), never the install path. Main's own
+  `↳ thread <name>:` line names the thread by its first question in quotation marks, never its fork's slug.
+
+**Cards**, alike in the chat, the card pane, the citation panel and a document (rule 11 for the frame):
+
+```
+╭──────────────────────────────────────────────────────────────────────╮
+│ Which ten labels have the most revisions?                            │
+│                                                                      │
+│ label                  revisions  pages  wikis                       │
+│ ─────────────────────  ─────────  ─────  ──────────                  │
+│ AgentRelent                  317      4  dse                         │
+│ AgentMassPointer13           187      3  dse                         │
+│ AgentRelent  317                                                     │
+│ wiki  all  dse  probier  fractal                                     │
+│                                                                      │
+│ AgentRelent made the most revisions, 317 ✓.                          │
+╰──────────────────────────────────────────────────────────────────────╯
+```
+
+- The title row: the card's question in bold, inverse under the pointer (a press asks a side thread). A blank row
+  under it, then the plot or body.
+- Below the plot: the readout row, the value of the mark under the pointer (`AgentRelent  317`), plain, or what
+  thimble is doing to the card; the label rows; the params row; then the takeaway, drawn as main's chat draws a reply,
+  its citations links.
+- A label row, when the card read a label: `label` dim, the label's name in blue and underlined, then `↗`, then each
+  value after its `●` in its hue (`label  edit purpose ↗  ● links or data  ● message to agents  ● other`), and
+  `changed since` once the label changed after the card ran. A click on the name or the `↗` opens the label panel. A
+  label card (the label tool's) is a bar card of the label's counts with this row; its records live in the label
+  panel.
+- A params row: the param's name dim, its choices 2 cells apart, the one in use on the selection background.
+- Bars: labels in a column at the content's edge, bars after a gutter, numbers against the right edge. The bars are in
+  the first hue (or their value's hue); the bar under the pointer turns the text color and its label is inverse. A part
+  of a whole runs on a `─` track to the whole. The total has its own row (`all  4,579`).
+- A line chart: y labels right-aligned in a column, axes in the rule gray, x labels dim at the ends and the middle, a
+  legend row of `● series` entries; the pointer's column `┊` with its readout on the readout row.
+- A table: the column names bold, a `─` rule under each name as wide as its column, the rows right under it; numbers
+  right-aligned with separators. Markdown tables in a reply take the same header.
+- A timeline: the axis across the content with its `●` marks in hue on a rule-gray line, its two end times dim under
+  its ends, both or neither: neither when the list under it starts at the first time and ends at the last; then one
+  row per event: its time dim at the content's edge, a `●` in hue, its words, and a blue `↗` when it has
+  a record.
+- An example: per record, a `●` in hue at the content's edge and thimble's note after it, regular; under the note, at
+  +2, the record's words in quotation marks and italic, up to three rows, then `↗` and its place in blue and underlined,
+  on the quote's last row if it fits, else on the next. A blank row between records.
+- A diagram: boxes and edges in the rule gray, node text in the text color, edge labels dim; a note's number in a dim
+  column and its text dim.
+- A note, a custom card, a code card and a card type's card: their words. A chart that is not a simple bar or line
+  chart: a table of its rows.
+- A card that cannot be read: one red line named by its place (`× card 2 cannot be drawn: …`).
+- The card pane: the question is the panel's title and the subtitle reads the card's kind, who made it and `last run
+  ok` or `last run failed` (in red); the box starts with the plot; at the bottom `code  run again  ask about it`. The
+  code view lists the script with the `Code` element, its gutter at A0, no other indent, then `output`, the last lines
+  its run printed.
+
+**Home:**
+
+```
+  home                                                                          show all threads  1 new
+  Home
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  Views (1)
+  ● Wiki Pages                                                                     pages.jsonl  new
+
+  Documents (1)
+  ● On 18 June, agents rewrote the dse wiki's welcome page 2,299 times…                     report
+
+  Threads (2)  1 new
+  ● "How many delete events are in events.jsonl? One number."                                new
+  ● "Which wiki got the most revisions on 18 June, and from how many labels?"
+
+  Cards (12)
+❯ ▾ Your work                                                                             3 cards
+    How many pages does each wiki have?                                                       bar
+    How many revisions did the three biggest wikis get each day?                             line
+    Which ten labels have the most revisions?                                               table
+  ▸ Orientation                                                                           9 cards
+
+  Labels (1)
+  ● edit purpose                                                            ██████████▌█████▌███   30
+    prompt · a sample of 30 · revisions.jsonl  ● links or data 15  ● message to agents 8  ● other 7
+
+  Files (4)                                                                       type       size
+  ▾ collusion-wiki/  4                                                                     41.6 MB
+      events.jsonl                                                                events     5.4 MB
+      revisions.jsonl                                                             text      33.5 MB
+  ↑↓ to choose · Enter to open · Space to fold · x to close
+```
+
+- One layout, a single column. The title is `Home` alone.
+- A section heading: its name bold, its count dim in parentheses, `N new` in green after it; a blank row above it; a
+  click on it opens the section's own panel. A section shows its first five items, then `… N more` (never for one
+  row). An empty section shows `none`.
+- An item: its glyph at A0, its name at A2 (regular, even when new), metadata dim against R, `new` in green at R.
+- Views by state, each with the files it claims. Documents under the browser's word, newest first. Threads by their
+  first question, with `about <its subject>` at R when a card or a citation names it (a card by its question, a
+  citation by its words; never a passage's sentence, and left out when it would cut the question), `earlier session`
+  for one from an earlier conversation (a resumed one is the same conversation), a failed one `×`.
+- Card groups by thimble's group, with their card count at R; the newest group is open, the others folded. A group's
+  cards are at A2 with their kind word at R.
+- Labels: each label's `●` in its color (as the label panel's), its name, a bar of its values' shares in their hues
+  with the total, and a dim secondary row of its kind, run and values.
+- Files by folder, the corpus's own first, each folder's files in natural order: a folder row with its file count dim
+  after its name and its size under `size`; when it is unfolded, its files at A4 with their type (thimble's kind, or
+  the file's format, `jsonl`, where the kind would only say `text`), then their size. The first folder is open; a folder shows its first 20 files, and `… N more` shows the folder whole.
+- The orientation's coverage line, when an orientation ran.
+
+**The threads panel** (what `show all threads` opens, and where a thread opens):
+
+```
+  ‹ back  home › threads › "How many delete events…"
+  Threads
+  2 threads · 1 new
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  main
+❯ ├ "How many delete events are in events.jsonl? One number."                               new
+  │ There are 5,217 delete events in events.jsonl.
+  └ "Which wiki got the most revisions on 18 June, and from how many labels?"
+    dse got the most revisions on 18 June: 5,884 of the 6,543.
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  "How many delete events are in events.jsonl? One number."
+  There are 5,217 delete events in events.jsonl.
+
+  ask a follow-up question
+  ↑↓ to choose · Enter to open · a to ask · b to go back · x to close
+```
+
+- A tree: a root per place a thread was asked from (`main`, `report "…"`) at A0, a blank row between roots; its
+  threads under it with guides; a thread asked from a thread one level deeper. Each thread's row is its question in
+  quotation marks; its secondary row is the first line of its latest answer, dim; `N questions` dim at R when there is
+  more than one.
+- The selected thread (`❯`, accent) shows under the second rule: what it is about (named as home names it), its
+  questions and answers, drawn as main's chat draws a reply, `stop` while it answers, then, a blank row under the
+  answer, the field for the next question, its placeholder dim (`ask a follow-up question`); Enter's word is `ask`.
+  1-9 open the first nine threads. A thread's answer is its first reply (`reply_in_thread`) or its run's end.
+- A new thread (one with no question yet): `about <what>` as its dim subtitle, the first sentence of its passage dim on
+  one row, then the question's field alone, its placeholder dim.
+
+**The citation panel:**
+
+```
+  ‹ back  home › citation 14591                                         show all threads  1 new
+  14591
+  found in the command's output, line 1
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  from    a command's output · line 1
+  source  "To count by wiki properly, run the label on all 14591 revisions."
+    1  all revisions: 14591
+    2  dse revisions: 13403
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  ask about it
+  follow-up ▏
+  a to ask · b to go back · x to close
+```
+
+- The title is the cited value, bold, in blue and underlined (a link to its place, in place of the accent), `◌` after
+  it while it is checked; red, with a red `×`, when it is not at its place. A citation in a card's takeaway takes the
+  card's links check as the chat does: `◌` while it runs, `✓` and `, and a script got the same number` once it ran, a
+  red `×` when it got another value. A citation with no value is titled by its place in words, and then has no `from`
+  row; its `source` marks its label in the sentence. The subtitle is its status in plain words (section 5) and why for
+  a problem.
+- Label/value rows: `from`, `source` (the reply's sentence in quotation marks, the cited value in it blue and
+  underlined), `quoted` for a passage an example quotes. No `why`.
+- The lines: nested at A2, their numbers right-aligned in a dim column, the cited line's number in the text color and
+  the cited value on the selection background; a cited line wrapped over 3 to 8 rows by the pane's height, with two
+  lines of context when it wraps. A card value's citation draws the card in its frame, the cited mark on the
+  selection background.
+- The bottom: `ask about it`, then the `follow-up` field when the citation was opened from a side thread.
+
+**The views pane:** `N views · N built`; one row per view, newest first: its glyph, its name, the files it claims dim
+at R, `new` in green until a built one is opened. A view is one line: the browser draws views, so its line says to open
+it in browser mode.
+
+**The file browser:**
+
+```
+  ‹ back  home › files                                                         show all threads
+  Files
+  4 files
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  ▾ collusion-wiki/                                                     4 files            41.6 MB
+❯   ● events.jsonl                                                                events     5.4 MB
+    ● labels.jsonl                                                                text       1.1 MB
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  events.jsonl                                                               opens as records
+     1  {"time": "2026-05-18T06:02:11Z", "event_type": "save", "wiki": "dse", …}
+     2  {"time": "2026-05-18T06:02:40Z", "event_type": "save", "wiki": "dse", …}
+  ↑↓ to choose · Enter to open · Space to fold · x to close
+```
+
+- A folder per group, foldable; an open folder shows its first 20 files, then `… N more`. A file's `●` is in its
+  type's hue; one type in the whole folder draws dim dots. A long name is cut in its middle.
+- The chosen file's first lines show under the second rule (at most 6), with dim line numbers; Enter or a second click
+  opens it.
+- A file: path `home › files › labels.jsonl`, title its name, subtitle its type (as the file browser's), its records and the lines shown,
+  `earlier  later` at R, tabs `Table  Transcript  Raw` as its records read. The chosen record (a citation's, a click's)
+  is on the selection background, with its place as a link and a blue `?` under the header. ← or Backspace goes back
+  to the file browser.
+- The Table tab: the records' keys as columns, names dim on the row above, `▼` or `▲` after the sorted one, a click on
+  a name sorts by it; numbers right-aligned with separators; free text last.
+- Raw draws the lines' numbers right-aligned in a dim column and the text after a gutter, a Markdown file's headings
+  bold.
+- A transcript: per turn, its clock dim in a column at A0 (`07:40:01`; the day on a dim row of its own where it
+  changes), then `●` in the speaker's hue and the speaker's name bold; its text 2 cells in under the name, wrapped to
+  up to three rows, the last cut with `…`; a tool call one dim line.
+
+**The label panel**, as Matt laid it out, after the browser's label editor (`frontend/src/files/LabelCard.tsx`):
+
+```
+  ‹ back  home › labels › edit purpose                                         show all threads
+  name:   ● edit purpose
+  type:   prompt  regex  code
+  scope:  revisions.jsonl                                                        14,591 records
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  prompt
+  ╭────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ Decide what the revision's body is mainly for. 'message to agents': the body speaks to     │
+  │ other agents, runs or cohorts, such as asking them to post, relay, confirm or coordinate…  │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────╯
+  run on a sample  run on all 14,591  last run on a sample of 30
+
+  ▸ counts  30
+  ▸ examples  12
+  ▸ cards  2
+  click the prompt, Enter to save · r to run on a sample · c for counts · e for examples · x to close
+```
+
+- The header: `name:` the label's name in the accent and bold after a `●` in its color; `type:` the kinds, the one in
+  use on the selection background, the others a click away; `scope:` its files, a field, and how many records against
+  R. Then the rule.
+- The definition whole in a field to edit, under its kind's name (`prompt`, `pattern` or `code`; code through the
+  `Code` element), on the same column as the header's values. A click gives it the keyboard; Enter saves it.
+- `run on a sample` and `run on all N`, which save what was typed first and run it, then the last run dim; `stop`
+  while it runs, and the type as plain text. A run's first error is a red `!` row under them.
+- `▸ counts`, `▸ examples` and `▸ cards` are folded, and nothing of them shows until one is opened. Counts: each
+  value's `●` in its hue, its name, a bar on a track to the whole, its count and its share dim; the values to edit.
+  Examples: grouped by value, each record with `↗` and its place, `agree` or another value, the record's words in
+  quotation marks and italic, `why` dim; after a verdict `✓ agreed` or `✓ set by you`; each value's button as wide as
+  the longest value, so `agree  it is  …` stands in one place under every value. Cards: the cards that use the label,
+  each a click away, at most 8. A blank row stands between an opened part and the next toggle.
+- The labels list (`home › labels`): one row per label (glyph, name, its kind and last run dim at R), 1-9 the first
+  nine, then under the second rule the field `describe a new label`, whose words go to main, which makes the label
+  with a trial.
+
+**Documents:** the documents list (`home › documents`) has one row per document, `◌` while its writer writes, `●`
+written, its title, its kind dim at R, at most 40. **A document:** the title in the accent and bold, wrapped; while its
+writer writes, `◌ writing · N tool calls · <its latest words>`. A report: `Contents` as a bold heading, the sections
+with a heading numbered in a dim column at A0, each a click or a digit away (an opening section with no heading is not
+listed, and starts with its words); then each section drawn as main's chat draws a reply, at A0: its heading bold, its
+bullets a list, one item a row, its prose filling the type area, its cards in their frames, a caption dim under each. A callout:
+its kind (`note`, `tip`, `important`, `warning`, `caution`) as a dim label and its text on L, `warning` and `caution`
+red. A deck steps one slide at a time (`‹ 3 of 9 ›`, `previous  next`, its `notes`); a story one beat at a time, its
+figure lit at the beat's step, or `read as a page`. At the bottom `all documents ›` and the retell controls, `as slides`
+and `as a story`, which ask main to write it again in that form. No stats row and no file path.
+
+### 8. Checks
+
+Testable against what thimble-term draws (`tests/visual.test.ts`, the panel and card tests, and ANSI captures of a live
+session):
+
+1. Bold only on titles, a card's title, section headings, a card table's column names, transcript speakers, and the
+   model's Markdown.
+2. Green only on `new`; accent only on panel titles and the selected row; blue only on links, `?` and `↳`.
+3. No letters in a palette hue; letters in red only for problems; no other colored letters but check 2's and code's.
+4. No two blank rows in a row; no blank row next to a rule; one blank row under each card's title.
+5. Every card has a full round border in the rule gray.
+6. Every rule is as wide as its type area; a panel has two rules at most.
+7. Every run that opens a row starts on M, A0, A2, A4, L, a table's column or a tree's guide.
+8. Columns are parted by 2 spaces or more.
+9. No background but the panel's, the selection's and the tip's; no inverse but on the selected tab and under the pointer.
+10. No prose is cut at a fixed measure.
+11. Every panel starts with the path row and a bold title in the accent (the citation panel's is a blue link), and ends
+    with its key-hint row.
+12. Every non-ASCII character thimble-term draws, outside the corpus's and the model's words, is in section 5's table.
+13. A right-click opens no menu.
+14. No centered row.

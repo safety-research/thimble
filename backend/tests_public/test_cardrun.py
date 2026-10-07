@@ -4,6 +4,7 @@ kernel run stores; a code label runs through `thimble-run label`, and the cards 
 `thimble-run stale`. The kernel runs here are real kernels, the card runs real `thimble-run` processes."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -243,6 +244,34 @@ async def test_the_shims_watch_starts_the_check_of_a_card_run_with_a_takeaway(te
     mine = [x for x in lines if x.get("card") == cid]
     assert [x["op"] for x in mine] == ["created", "edited"], "the run and its takeaway, in one line from the watch"
     assert mine[-1]["state"]["status"] == "ok" and mine[-1]["state"]["takeaway"].startswith("There are")
+
+
+async def test_the_shim_starts_the_watch_before_any_call_so_a_resumed_sessions_cards_are_checked(term, monkeypatch):
+    """After `thimble --continue` main may run cards with `thimble-run` before it calls any tool: the shim starts the
+    card watch when it starts (local.begin), so their checks still run and `◌ checking` clears."""
+    from app import card_check
+
+    started: list[str] = []
+    monkeypatch.setattr(card_check, "start", lambda c, cid, author, **kw: started.append(cid))
+    monkeypatch.setenv("THIMBLE_CARD_CHECK", "on")
+    cid = card_id(await call(term, "add_card", question="Posts?", code="print(8)", takeaway="There are 8 posts."))
+    # the next session: a new shim, which has served no call yet
+    cardrun.CardWatch.stop_all()
+    local._started.clear()
+    started.clear()
+    assert run(term, "card", cid).returncode == 0
+    assert notebook.get_cell(CORPUS, cid).get("check") == "pending"
+    assert local.begin(str(term)) == CORPUS
+    for _ in range(60):
+        if "check" not in notebook.get_cell(CORPUS, cid):
+            break
+        await asyncio.sleep(0.1)
+    assert started == [cid] and "check" not in notebook.get_cell(CORPUS, cid)
+    # a folder of no terminal-mode workspace starts nothing
+    _mode("browser")
+    cardrun.CardWatch.stop_all()
+    local._started.clear()
+    assert local.begin(str(term)) is None and not cardrun.CardWatch._tasks
 
 
 async def test_the_watch_ends_a_run_whose_process_is_gone(term):

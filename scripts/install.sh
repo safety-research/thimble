@@ -1290,6 +1290,68 @@ register_plugin() {  # thimble in every Claude Code session (scripts/plugin.sh):
   plugin_apply "$answer" || note "thimble is not in every Claude Code session as asked: once the above is fixed, run install.sh again with --plugin."
 }
 
+# ------------------------------------------------------------- thimble-cc-mod, which this version no longer has
+# 0.5.0's `thimble cc-mod on` installed thimble-cc-mod from thimble's marketplace at project scope in a folder, and this
+# version's marketplace no longer lists it. An update does what Claude Code does with a plugin that left its
+# marketplace (code.claude.com/docs/en/plugins/host-marketplace, "Rename or remove a plugin"): it takes the plugin out
+# of the user, project and local scopes it is installed at, with `claude plugin uninstall` at each scope, in every
+# folder Claude Code lists it in, then says in one line where it turned it off. The marketplace's renames map
+# (`"thimble-cc-mod": null`) has Claude Code do the same in a folder this misses, when a session starts there.
+MOD_GONE=thimble-cc-mod
+
+mod_plan() {  # mod_at: where thimble-cc-mod from this install's marketplace is installed, a line each of its
+  # marketplace, scope and folder (none at user scope), read from the lists plugin_regs (scripts/plugin.sh) left in $tmp
+  mod_at=""
+  [ -s "$tmp/plugins.json" ] && [ -s "$tmp/markets.json" ] || return 0
+  mod_at="$(python3 -I - "$tmp/plugins.json" "$tmp/markets.json" "$dir" "$MOD_GONE" <<'PY'
+import json, os, sys
+
+plugins, markets, mine, gone = sys.argv[1:]
+try:
+    rows, listed = json.load(open(plugins, encoding="utf-8")), json.load(open(markets, encoding="utf-8"))
+except (OSError, ValueError):
+    raise SystemExit(0)
+ours = set()
+for m in listed if isinstance(listed, list) else []:
+    if not isinstance(m, dict):
+        continue
+    src = m.get("source")
+    kind, path = (src.get("source"), src.get("path")) if isinstance(src, dict) else (src, m.get("path"))
+    if kind == "directory" and isinstance(path, str) and path and os.path.realpath(path) == os.path.realpath(mine):
+        ours.add(m.get("name"))
+for p in rows if isinstance(rows, list) else []:
+    if not isinstance(p, dict):
+        continue
+    name, _, market = str(p.get("id", "")).partition("@")
+    if name == gone and market in ours and p.get("scope") in ("user", "project", "local"):
+        print(market, p["scope"], p.get("projectPath") or "", sep="\t")
+PY
+)" || mod_at=""
+}
+
+mod_step() {  # thimble-cc-mod taken out of each scope mod_at names (a folder that is gone has no settings left to change),
+  # then one line naming where; a scope it could not be taken out of gets a ! line with the command that does it
+  [ -n "$mod_at" ] || return 0
+  local market scope folder where off=() n i list=""
+  while IFS=$'\t' read -r market scope folder; do
+    if [ "$scope" = user ]; then
+      where="your user settings"
+      if run claude plugin uninstall "$MOD_GONE@$market" --scope user; then off+=("$where")
+      else warn "thimble-cc-mod is still on in $where: claude plugin uninstall $MOD_GONE@$market --scope user turns it off"; fi
+    elif [ -d "$folder" ]; then
+      where="$(tilde "$folder")"
+      if run_in "$folder" claude plugin uninstall "$MOD_GONE@$market" --scope "$scope"; then off+=("$where")
+      else warn "thimble-cc-mod is still on in $where: claude plugin uninstall $MOD_GONE@$market --scope $scope, run there, turns it off"; fi
+    fi
+  done <<< "$mod_at"
+  n="${#off[@]}"
+  [ "$n" -gt 0 ] || return 0
+  for ((i = 0; i < n; i++)); do
+    if [ "$i" = 0 ]; then list="${off[i]}"; elif [ "$i" = $((n - 1)) ]; then list="$list and ${off[i]}"; else list="$list, ${off[i]}"; fi
+  done
+  ok "Turned thimble-cc-mod off in $list: thimble $version no longer has it (\`thimble mode terminal\` shows thimble in the terminal)"
+}
+
 # ---------------------------------------------------------------------------- the opening screen
 found() { local m="$1"; shift; local sym="✓" col="$c_ok"; [ "$m" = ok ] || { sym="!"; col="$c_warn"; }
   clear_busy; printf '%s\n' "$*" | folded 4 | sed "1s/^    /  $col$sym$c_off /"; printf '  %s %s\n' "$sym" "$*" >&4; }
@@ -1313,9 +1375,9 @@ NODE_RUNTIME_SIZE="about 70 MB"  # a release's frontend/runtime packages, measur
 plan() {  # what each question, the plugin and the link find, before the opening screen
   local q
   for q in ${QUESTIONS[@]+"${QUESTIONS[@]}"}; do "${q}_plan"; done
-  plugin_prev="" plugin_reg="" plugin_kept="" plugin_switch="" other_reg="" other_from="" mod_in="" plugin_known=1
+  plugin_prev="" plugin_reg="" plugin_kept="" plugin_switch="" other_reg="" other_from="" plugin_known=1 mod_at=""
   cli_state="" cli_other="" cli_switch=""
-  [ "$deps_only" = 1 ] || { plugin_record; cli_plan; shell_plan; }
+  [ "$deps_only" = 1 ] || { plugin_record; mod_plan; cli_plan; shell_plan; }
 }
 
 opening() {  # the one screen before the questions: what install.sh found, what it installs where, what it changes in
@@ -1505,7 +1567,7 @@ finish() {  # doctor, a server that runs another tree, then the one next step: `
   else
     showf "Next: run $here in a folder of transcripts. It starts Claude Code with thimble and prints the dashboard's address."
   fi
-  showf "Optional: \`thimble cc-mod on\` turns on thimble-cc-mod, a single-agent thimble inside Claude Code, in one folder."
+  showf "Optional: \`thimble mode terminal\` in a folder shows thimble's work in the terminal, with no server or browser."
 }
 
 main() {
@@ -1536,6 +1598,7 @@ main() {
   write_pointer
   link_cli
   shell_step
+  mod_step
   register_plugin
   run_steps last
   finish

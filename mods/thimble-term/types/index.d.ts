@@ -1,12 +1,12 @@
-// thimble-term's state contract: every value the hooks module keeps in $.state, and the types the drawing files copied
-// from thimble-cc-mod name (the Chat* types, copied from thimble-cc-mod's types/index.d.ts as they are).
+// thimble-term's state contract: every value the hooks module keeps in $.state, and the types the drawing files name
+// (the Chat* types).
 //
 // thimble-term keeps no data of its own: each value is what one `thimble state` call printed (hooks/data.ts) and what
 // the screen shows now, and it is read again when the workspace changes.
 
-// ------------------------------------------------------------------ copied from thimble-cc-mod (drawing files use them)
+// ------------------------------------------------------------------------------------- the drawing files' types
 
-/** A verification script for one citation (thimble-cc-mod; thimble-term runs none). */
+/** A verification script for one citation (thimble-term runs none). */
 export type ChatVerify = {
   id: string
   state: string
@@ -60,11 +60,12 @@ export type ChatHomeUi = { folded: string[]; unfolded: string[]; more: string[];
 
 // ------------------------------------------------------------------------------------------------- thimble-term's own
 
-/** A card as thimble-term draws it: the card in thimble-cc-mod's drawing form (hooks/draw.ts CardData, as JSON), its
+/** A card as thimble-term draws it: the card in its drawing form (hooks/draw.ts CardData, as JSON), its
  *  takeaway, its state words (`waiting for its run`, `running`, an error), and what the cell carried that the drawing
  *  reads (its group, who made it, its label). `rev` counts the reads, so a drawing reads it again. */
 export type TermCard = {
   id: string
+  /** null when the card cannot be read (`error` says why) */
   data: unknown
   takeaway: string
   busy: string
@@ -75,7 +76,18 @@ export type TermCard = {
   label: string
   code: string
   rev: number
+  /** thimble's links check of the takeaway (the cell's `verification.links`), when it ran */
+  links?: TermLinks
+  /** what its last run printed (cell.ts printed) */
+  printed?: string
+  /** how its last run ended: `ok`, `error`, or '' when it has not run */
+  ran?: string
 }
+
+/** A card's takeaway as thimble's links check left it (backend verify.py, the cell's `verification.links`): `pending`
+ *  while it runs; then each citation it linked (`ok`) and each it found another value for (`broken`, with why and the
+ *  value the place shows), by `<value>|<ref>`. */
+export type TermLinks = { pending: boolean; checked: boolean; ok: string[]; broken: { key: string; why: string; source: string }[] }
 
 /** A citation as checked against `thimble state resolve`: ok (the place holds the value, or the citation shows none),
  *  differs (the place resolves, the value is not there), missing (the place does not resolve), pending (not checked
@@ -111,12 +123,27 @@ export type TermPanel = {
   slug?: string
   path?: string
   start?: number
+  /** a file's record chosen (a citation's line), lit; a file's table sorted by a column (`<column>:asc|desc`) */
+  line?: number
+  sort?: string
   agent?: string
   target?: ChatTarget | null
   about?: string
   anchor?: string | null
   anchorText?: string
+  /** a new thread's: the thread it is asked from, and where it was asked (a document's passage) */
+  parent?: string
+  element?: string
+  /** a citation panel's: the sentence the citation stands in, and the passage an example's record quotes; `of` the card
+   *  whose takeaway holds the citation, whose links check the panel shows as the chat does */
+  sentence?: string
+  quote?: string
+  of?: string
 }
+
+/** A turn's answer (its last text part that cites or embeds a card, else its last), kept under its last row for the
+ *  footer drawn there: its rows' uuids, its text, the cards it shows (embedded, or made in the turn). */
+export type TermAnswer = { rows: string[]; text: string; cards: string[] }
 
 /** The row above the prompt and the home panel's counts, from `thimble state home`. */
 export type TermHome = { cards: number; labels: number; docs: number; threads: number; views: number; files: number; at: number }
@@ -129,8 +156,10 @@ export type TermAgent = { name: string; label: string; state: string; kind: stri
  *  count, is passed back as `--after`). */
 export type TermThread = { id: string; meta: Record<string, unknown>; events: Record<string, unknown>[]; n: number; rev: number }
 
-/** A row of the threads list (`thimble state threads`): a side thread with what the rows need. */
-export type TermThreadRow = { id: string; title: string; anchor: string; anchorText: string; running: boolean; answers: number; seen: number; unread: number; at: string; parent: string }
+/** A row of the threads list (`thimble state threads`): a side thread with what the rows need; `element` where it was
+ *  asked (a document's passage, `report:<slug>#<unit>`), `fork` the name its forks run under (a slug, which main's
+ *  `↳ thread` line names and the chat shows as its first question). */
+export type TermThreadRow = { id: string; title: string; anchor: string; anchorText: string; running: boolean; answers: number; seen: number; unread: number; at: string; parent: string; created?: string; element?: string; question?: string; fork?: string }
 
 /** The label panel's state: the parts opened, by `<label>:<part>`; the kind picked in `type` and not yet saved, by
  *  label; and each label's run started from the panel (its size, 0 for every record) and its last word. */
@@ -138,7 +167,7 @@ export type TermLabelUi = { open: string[]; kind: Record<string, string>; runs: 
 
 /** The file browser's state: the folders folded or unfolded against their default (the first open), and the file the
  *  keys chose. */
-export type TermFilesUi = { folded: string[]; unfolded: string[]; pick: string }
+export type TermFilesUi = { folded: string[]; unfolded: string[]; pick: string; whole?: string[] }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -166,6 +195,10 @@ declare module 'claude-code' {
       thread: StateFamily<TermThread>
       // rows in main's chat saying a side thread answered, by the row they stand under
       threadRows: StateFamily<ChatSignal[]>
+      // a turn's answer, by its last row, for the footer under it
+      answers: StateFamily<TermAnswer>
+      // the views main proposed, by the row their `↳ view` rows stand under
+      viewRows: StateFamily<string[]>
       // the home panel: what is folded and shown whole, and the row the keys chose
       homeUi: ChatHomeUi
       // the label panel: its parts opened (`<label>:counts`, `:examples`, `:cards`), the kind picked and not yet saved

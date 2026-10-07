@@ -19,9 +19,6 @@
 #                                        each was last used and the sessions open on it (backend/app/runs.py)
 #   thimble purge <id>… [-y] [--dry-run] delete workspaces or archived runs by id, printing what went; never the folder a
 #                                        workspace read or Claude Code's transcripts (backend/app/runs.py)
-#   thimble cc-mod on [--yes] | off | status
-#                                        thimble-cc-mod in this folder, by `claude plugin` at project scope; the thimble
-#                                        plugin stays as it is (backend/app/cli.py cmd_cc_mod)
 #   thimble plugin on | off | status     thimble in every Claude Code session, or only in the sessions this command
 #                                        starts, which load its plugin either way (scripts/plugin.sh, bash: it needs no
 #                                        venv)
@@ -82,7 +79,7 @@ plugin="$(cd "$here/.." && pwd -P)"
 
 # the supervisor's subcommands (backend/app/cli.py build_parser) plus the `server` group; `up` is an alias of `ensure`.
 # `uninstall` is the bash function below, so it works with backend/.venv missing or broken.
-SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge extension cc-mod launch-args prompt demo "
+SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge extension launch-args prompt demo "
 
 # usage: what `thimble help` prints, the commands an analyst uses; the header above has the details. `server`,
 # `status`, `launch-args`, `prompt`, `state` and `act` run when typed and are not listed (CONTRIBUTING.md has them).
@@ -106,9 +103,6 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
                                           delete workspaces or archived runs by id, after asking
        thimble extension add <folder | git URL | name> [--yes] | on <name> | off <name> | list | remove <name>
                                           add, switch on or off, list or remove extensions
-       thimble cc-mod on [--yes] | off | status
-                                          thimble-cc-mod (a single-agent thimble inside Claude Code) in this
-                                          folder
        thimble plugin on | off | status   thimble in every Claude Code session (/thimble in any `claude`), or
                                           only in the sessions `thimble` starts
        thimble mode [browser | terminal] [--default] | --unset [--default]
@@ -223,7 +217,7 @@ uninstall() {
   local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="$HOME/.local/bin/thimble" tree="" kind="" name="" name_note=""
   local inside=0 pid="" port="" pid_note="" conf="" planned="" pport="" link_ours=0 link_why="" stop_how="" have_claude=0 ans cwd rc
   local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd="" undone=1
-  local reg="" reg_ok=1 reg_from="" reg_other="" mkt="" mod_in="" sh_record="" sh_files=() sh_ok=1 kind_ f_ line_
+  local reg="" reg_ok=1 reg_from="" reg_other="" mkt="" sh_record="" sh_files=() sh_ok=1 kind_ f_ line_
   case "$home_raw" in *[![:space:]]*) ;; *) home_raw="$HOME/.thimble";; esac   # unset or blank: the default
   home="${home_raw%/}"; [ -n "$home" ] || home=/
   enable -n kill 2>/dev/null || true   # `kill` is the program on PATH, not the builtin: the `+ kill …` line names what ran, and a test can stand a failing one in for it
@@ -359,18 +353,9 @@ for m in rows if isinstance(rows, list) else []:
     if [ -n "$reg_from" ] && [ "$reg_from" != "$tree" ]; then reg_other="$reg"; reg=""; fi
   fi
   # the marketplace alone: Claude Code has $name from this tree and no thimble plugin of install.sh's is registered with
-  # it, since `thimble cc-mod on` added it for thimble-cc-mod. It goes too. Removing a marketplace turns its plugins off,
-  # so the plan names the folders where thimble-cc-mod is on (mod_in)
+  # it (an earlier version registered it for a plugin this version no longer has). It goes too
   if [ -n "$tree" ] && [ "$have_claude" = 1 ] && command -v python3 >/dev/null 2>&1; then
     if [ -z "$reg" ] && [ -z "$reg_other" ] && [ "$(market_from "$name")" = "$tree" ]; then mkt="$name"; fi
-    if [ -n "$reg$mkt" ]; then
-      mod_in="$(claude plugin list --json 2>/dev/null | python3 -I -c 'import json, sys
-try:
-    rows = json.load(sys.stdin)
-except ValueError:
-    rows = []
-print(", ".join(sorted({str(p.get("projectPath") or "a folder") for p in rows if isinstance(rows, list) and isinstance(p, dict) and p.get("id") == sys.argv[1]})))' "thimble-cc-mod@${reg:-$mkt}" || true)"
-    fi
   fi
   # the link: ours when it ends at this tree's plugin/bin/thimble, or is a thimble link (…/plugin/bin/thimble) whose target
   # is gone or lies inside $THIMBLE_HOME — it would dangle after the rm
@@ -415,7 +400,7 @@ print(", ".join(sorted({str(p.get("projectPath") or "a folder") for p in rows if
   if [ -n "$reg_other" ]; then
     printf "  thimble's plugin: thimble@%s is another install's, from %s, so it is left as it is\n" "$reg_other" "$reg_from"
   elif [ -z "$reg" ] && [ -n "$mkt" ]; then
-    step "claude plugin marketplace remove $mkt (thimble's marketplace, which \`thimble cc-mod on\` registered; thimble's plugin was not registered with it)"
+    step "claude plugin marketplace remove $mkt (thimble's marketplace, which an earlier version registered; thimble's plugin was not registered with it)"
   elif [ -z "$reg" ] && [ -f "$home/plugin.json" ]; then
     printf "  thimble's plugin: install.sh did not register it (answered no), so nothing is removed there\n"
   elif [ -z "$reg" ]; then
@@ -426,7 +411,6 @@ print(", ".join(sorted({str(p.get("projectPath") or "a folder") for p in rows if
   else
     printf '  claude is not on PATH; run these yourself when it is:\n    claude plugin uninstall thimble@%s\n    claude plugin marketplace remove %s\n' "$reg" "$reg"
   fi
-  [ -z "$mod_in" ] || printf "  removing thimble's marketplace also turns thimble-cc-mod off where it is on: %s\n" "$mod_in"
   if [ "$link_ours" = 1 ]; then step "rm $link ($link_why)"
   elif [ -e "$link" ] || [ -L "$link" ]; then printf '  %s is left alone: not a link into this tree\n' "$link"; fi
   # the lines install.sh added to shell startup files, which its record names: one step per file that still has one
@@ -623,10 +607,9 @@ esac
 # folder; it is passed on -c/--continue and -r/--resume too, so a resumed main keeps that name (one an earlier build
 # left unnamed takes it, and so does one the analyst renamed with /rename), and an -n/--name among the analyst's own
 # flags wins.
-# --settings carries thimble's statusline, the composer's fast mode and thimble-cc-mod off (config.without_mod), merged
-# into the analyst's own --settings, since Claude Code reads only the last one. --allowedTools lets the thimble tools
-# and the plugin's skills run without a permission prompt, since a fork answering the browser must not wait on a
-# terminal nobody watches; nothing is denied.
+# --settings carries thimble's statusline and the composer's fast mode, merged into the analyst's own --settings, since
+# Claude Code reads only the last one. --allowedTools lets the thimble tools and the plugin's skills run without a
+# permission prompt, since a fork answering the browser must not wait on a terminal nobody watches; nothing is denied.
 # THIMBLE_LAUNCHED tells /thimble that main's prompt is appended already. launch-args starts the server and waits for it
 # before claude starts, so the hooks module registers thimble's agent types inside the session's start; the session
 # opens with /thimble, which opens this folder as a workspace (and starts the server if it is down).

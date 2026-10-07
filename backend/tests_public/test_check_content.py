@@ -38,19 +38,11 @@ def test_files_of_kinds_that_never_belong_are_refused(cc, tmp_path, monkeypatch)
     write(tmp_path, {"data/c/x.txt": "", "a/b.db": b"\0", "run.jsonl": "{}\n", "big.txt": "x" * 101, "ok.txt": "ok\n",
                      "plugin/viewers/repository/sample/repo.jsonl": "{}\n", "plugin/viewers/repository/sample/x/run.jsonl": "{}\n",
                      "plugin/viewers/repository/x/run.jsonl": "{}\n",
-                     "mods/thimble-cc-mod/viewers/repository/sample/x/run.jsonl": "{}\n",
-                     "mods/thimble-cc-mod/viewers/repository/sample/repo.jsonl": '{"real": 1}\n',
-                     "mods/thimble-cc-mod/viewers/repository/sample/y/run.jsonl": "{}\n",
-                     "mods/thimble-cc-mod/viewers/repository/x/run.jsonl": "{}\n"})
+                     "mods/thimble-term/viewers/repository/sample/repo.jsonl": "{}\n"})
     got = {h[0]: h[3] for h in hits(cc, tmp_path)}
-    assert sorted(got) == ["a/b.db", "big.txt", "data/c/x.txt",
-                           "mods/thimble-cc-mod/viewers/repository/sample/repo.jsonl",
-                           "mods/thimble-cc-mod/viewers/repository/sample/y/run.jsonl",
-                           "mods/thimble-cc-mod/viewers/repository/x/run.jsonl",
+    assert sorted(got) == ["a/b.db", "big.txt", "data/c/x.txt", "mods/thimble-term/viewers/repository/sample/repo.jsonl",
                            "plugin/viewers/repository/x/run.jsonl", "run.jsonl"], \
-        "a worked example's sample files, in their folders, are data on purpose; a mod's copy only unchanged"
-    assert got["mods/thimble-cc-mod/viewers/repository/sample/repo.jsonl"] == \
-        "a mod's sample file that is not a copy of thimble's plugin/viewers/repository/sample/repo.jsonl"
+        "a worked example's sample files, in their folders, are data on purpose; a copy elsewhere is not"
 
 
 def test_the_command_fails_on_a_hit_and_passes_a_clean_tree(tmp_path):

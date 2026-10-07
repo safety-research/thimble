@@ -67,10 +67,12 @@ test("a turn's card is drawn once, under the turn's last reply, in its border wi
   expect(card).toContain('What does the export hold per wiki?')
   expect(card).toContain('probier')
   expect(card).not.toContain('ff73e071')
-  // the card in a full round border as wide as the reply's prose (the column, at most 120), its takeaway inside it
+  // the card in a full round border as wide as the reply's prose (the terminal's 140 columns less 2 and the margin of
+  // 4), its takeaway inside it; no blank row between the reply and the card's border
   const json = JSON.stringify(await ui.drawn())
-  expect(json).toContain('"width":120,"borderStyle":"round","borderColor":"subtle","paddingX":1')
-  expect(json).toMatch(/"width":120,"flexShrink":1\}/)
+  expect(json).toContain('"width":134,"borderStyle":"round","borderColor":"subtle","paddingX":1')
+  expect(json).toMatch(/"width":134,"flexShrink":1\}/)
+  expect(json).toContain('{"type":"Box","props":{"key":"turn-card-0","flexDirection":"row"}')
   // the takeaway under the card: its citations checked, the one whose place shows another value red
   const tk = JSON.stringify(await ui.drawn({ in: 'para-tk-t0-1' }))
   expect(tk).toContain('4579')
@@ -163,7 +165,11 @@ test("a reply's citation is a link, blue and underlined; a click opens the citat
   expect(text).toContain('from')
   expect(text).toContain('An export of 4,579 wiki pages')
   expect(text).toContain('ask about it')
-  expect(text).toContain('a to ask · f for its file · b to go back · x to close')
+  // the sentence it stands in, its value a link; no way back from main, so no `b`; no `in files` (the title opens it)
+  expect(text).toContain('source')
+  expect(text).toContain('"The README says 4,579 pages."')
+  expect(text).toContain('a to ask · f for its file · x to close')
+  expect(text).not.toContain('in files')
   // the cited value on the selection background; no right-click menu anywhere
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["4,579"]}')
   expect(text).not.toContain('open its lines')
@@ -244,7 +250,7 @@ test('/thimble opens the home panel with no model turn: one column, the title Ho
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const drawn = await pane.drawn({ in: 'm:home' })
   const home = shown(drawn)
-  for (const s of ['Home', 'Reports', ' (1)', 'Agents used the dse wiki as a relay', 'Threads', '"why is events.jsonl bigger?"', 'Cards', '▾ ', 'Your work', 'Labels', 'links through a fetch proxy', 'Files', 'revisions.jsonl', '↑↓ to choose · Enter to open · Space to fold · x to close']) expect(home).toContain(s)
+  for (const s of ['Home', 'Documents', ' (1)', 'Agents used the dse wiki as a relay', 'Threads', '"why is events.jsonl bigger?"', 'Cards', '▾ ', 'Your work', 'Labels', 'links through a fetch proxy', 'Files', 'revisions.jsonl', '↑↓ to choose · Enter to open · Space to fold · x to close']) expect(home).toContain(s)
   // the title in the accent and bold, the headings bold, `new` in green after an unread thread
   const json = JSON.stringify(drawn)
   expect(json).toMatch(/"color":"suggestion","bold":true\},"children":\["Home"\]/)
@@ -281,6 +287,7 @@ test("a right-click on a card's cell does what a click does: a side thread about
   await pane.input({ key: 'ask-new', text: 'Why so many?' })
   await w.clock.settle()
   expect(w.acts.find(a => a.kind === 'thread')?.payload).toMatchObject({ anchor: 'card:ff73e071', message: 'Why so many?' })
+  expect(String(w.acts.find(a => a.kind === 'thread')?.payload.anchor_text)).toContain('dse')
   await pane.unmount()
 })
 
@@ -315,15 +322,19 @@ test("a label card is a bar card of its counts with the label's row; a press on 
 test("a side thread asked about a card: the ask field posts the thread, and the threads panel shows it selected under the tree", async ($, on) => {
   const w = world(on)
   await start($, w)
-  await turn($, w, [['r1', 'Here.']])
+  await turn($, w, [['r1', 'Here.']], { tool: 'mcp__plugin_thimble_thimble__add_card', text: 'card:a0frame0\n[out0: table]' })
   const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
   await ui.press({ key: 'ask-card-0' })
   await ui.unmount()
   const pane = (await $.ui.mount(PANE)) as unknown as M
   expect(shown(await pane.drawn())).toContain('New thread')
+  // its step reads `new thread`; with nothing between the header and the field, one rule
+  expect(shown(await pane.drawn())).toContain('home › new thread')
+  expect(await pane.find({ key: 'rule-bottom' })).toBeUndefined()
   await pane.input({ key: 'ask-new', text: 'Why is dse so big?' })
   await w.clock.settle()
-  expect(w.acts).toContainEqual({ kind: 'thread', payload: { anchor: 'card:ff73e071', message: 'Why is dse so big?' } })
+  // the thread is told the card by its question, never its id
+  expect(w.acts).toContainEqual({ kind: 'thread', payload: { anchor: 'card:a0frame0', anchor_text: 'card "How many records does each file hold?"', message: 'Why is dse so big?' } })
   await pane.redraw()
   const text = shown(await pane.drawn())
   expect(text).toContain('Threads')
@@ -339,6 +350,7 @@ test("an answer that comes in while the panel shows something else: a `↳ threa
   await turn($, w, [['r1', 'Asked.']])
   const t2 = w.states.threads.find(t => t.id === 't2')! as Record<string, unknown>
   Object.assign(t2, { running: false, answers: 1, seen: 0 })
+  w.chats.t2 = { meta: { ...t2 }, events: [{ type: 'user', text: 'which pages were deleted?' }, { type: 'text', delta: 'Forty.' }, { type: 'done', result: 'Forty.' }] }
   w.stamps.set(`${WS}/chats`, 5)
   await w.clock.advance(1100)
   const ui = (await $.ui.mount(MESSAGE('r1', 'Asked.'))) as unknown as M
@@ -371,7 +383,9 @@ test('from home, a document opens drawn as a reply: its title, its contents, eac
   await w.clock.settle()
   await pane.redraw()
   const text = shown(await pane.drawn())
-  for (const s of ['home', 'documents', 'Agents used the dse wiki as a relay', 'Contents', '## The data', '## The main claim', 'The export per wiki.']) expect(text).toContain(s)
+  for (const s of ['home', 'documents', 'Agents used the dse wiki as a relay', '## The data', '## The main claim', 'The export per wiki.', 'all documents ›', 'as slides', 'as a story']) expect(text).toContain(s)
+  // two sections: no contents (it shows from three headings)
+  expect(text).not.toContain('Contents')
   const cards = (await pane.findAll({ type: 'Client' })).filter(c => String((c as { key?: string }).key).includes('ff73e071'))
   expect(cards.length).toBe(1)
   expect(shown(await pane.drawn({ in: 'para-d0-2' }))).toContain('4579')
@@ -406,7 +420,11 @@ test("a tool's layout record opens the file browser: folders that fold, a file c
   await w.clock.settle()
   await pane.redraw()
   const text = shown(await pane.drawn())
-  for (const s of ['files › README.md', 'markdown · 20 lines · lines 1-3', 'Collusion wiki', 'An export of 4,579']) expect(text).toContain(s)
+  for (const s of ['files › README.md', 'markdown · lines 1-3 of 20', 'later']) expect(text).toContain(s)
+  // a Markdown file's lines: its heading bold, its blank line left out
+  const body = shown(await pane.drawn({ in: 'm:file-body' }))
+  for (const s of ['# Collusion wiki', 'An export of 4,579']) expect(body).toContain(s)
+  expect(JSON.stringify(await pane.drawn({ in: 'm:file-body' }))).toContain('"bold":true')
   expect(w.calls.some(c => c[2] === 'files' && c[5] === 'README.md')).toBe(true)
   await pane.unmount()
 })
@@ -424,7 +442,9 @@ test("a label's panel: its name, type and scope, a rule, its pattern to edit; ru
   let text = shown(drawn)
   // the header block: the name in the accent and bold after a ● in its colour, the type in use on the selection
   // background, the scope (its files, a field, and how many records); then the rule and the pattern, a field
-  for (const s of ['name', 'links through a fetch proxy', 'type', 'prompt', 'regex', 'code', 'scope', '· 14,591 records', '──', 'pattern', 'run on a sample', 'run on all 14,591', '▸ counts', '▸ examples', '▸ cards']) expect(text).toContain(s)
+  for (const s of ['name', 'links through a fetch proxy', 'type', 'prompt', 'regex', 'code', 'scope', '14,591 records', '──', 'pattern', 'run on a sample', 'run on all 14,591', '▸ counts', '▸ examples', '▸ cards']) expect(text).toContain(s)
+  // the scope's count with no leading dot
+  expect(text).not.toContain('· 14,591')
   const json = JSON.stringify(drawn)
   expect(json).toMatch(/"color":"suggestion","bold":true\},"children":\["links through a fetch proxy"\]/)
   expect(json).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["regex"]}')
@@ -443,6 +463,11 @@ test("a label's panel: its name, type and scope, a rule, its pattern to edit; ru
   pane = (await $.ui.mount(PANE)) as unknown as M
   text = shown(await pane.drawn())
   for (const s of ['▾ examples', 'SEC download', 'agree', 'it is', '✓ agreed', 'why  r.jina.ai link', '▾ counts', '9,400', '5,191', '▾ cards', 'links through a fetch proxy ›']) expect(text).toContain(s)
+  // a value's button as wide as the longest value, so `agree  it is  …` stands in one place under every value
+  expect((await pane.find({ type: 'Button', key: 'lb-set-revisions.jsonl#L10566-none' }))?.props).toMatchObject({ label: 'none      ' })
+  // a blank row between an opened part and the next toggle
+  const rowsNow = ((((await pane.drawn()) as { children?: unknown[] }).children ?? []) as unknown[]).map(r => shown(r))
+  for (const t of ['▾ examples', '▾ cards']) expect(rowsNow[rowsNow.findIndex(r => r.startsWith(t)) - 1]!.trim()).toBe('')
   await pane.press({ key: 'lb-agree-revisions.jsonl#L10566' })
   await w.clock.settle()
   expect(w.acts).toContainEqual({ kind: 'verdict', payload: { label: 'd9b51617', ref: 'revisions.jsonl#L10566', value: 'proxy-link' } })
@@ -484,11 +509,27 @@ test('a deck opens with its slides: each heading, its sentences as a list, its f
   await pane.pointer({ type: 'down', x: 4, y, button: 'left', in: 'm:home' } as never)
   await w.clock.settle()
   await pane.redraw()
-  const text = shown(await pane.drawn())
-  for (const s of [SLIDES.title, 'The export is large', 'What it leaves open', 'Most are agents', 'One week only.', 'The export per wiki.', 'Who acted on what.']) expect(text).toContain(s)
+  // one slide at a time: the first, its sentences as a list, its figure; the page row says where it is
+  let text = shown(await pane.drawn())
+  for (const s of [SLIDES.title, 'The export is large', 'Most are agents', 'The export per wiki.', 'next', 'notes', 'p n to step · o for notes · y to retell · l for all documents · b to go back · x to close']) expect(text).toContain(s)
+  expect(shown(await pane.drawn({ in: 'doc-page' }))).toBe('‹  1 of 2  ›')
+  expect(text).not.toContain('- - ')
+  expect(text).not.toContain('What it leaves open')
   await w.clock.settle()  // the figures' cards are read, then drawn
   await pane.redraw()
-  const keys = (await pane.findAll({ type: 'Client' })).map(c => String((c as { key?: string }).key))
-  expect(keys.some(k => k.includes('ff73e071'))).toBe(true)
-  expect(keys.some(k => k.includes('d0diag00'))).toBe(true)
+  expect((await pane.findAll({ type: 'Client' })).map(c => String((c as { key?: string }).key)).some(k => k.includes('ff73e071'))).toBe(true)
+  // its notes, then the next slide
+  await pane.press({ key: 'hk-notes' })
+  await w.clock.settle()
+  await pane.redraw()
+  expect(shown(await pane.drawn())).toContain('speaker notes')
+  await pane.press({ key: 'hk-next' })
+  await w.clock.settle()
+  await pane.redraw()
+  text = shown(await pane.drawn())
+  for (const s of ['What it leaves open', 'One week only.', 'Who acted on what.', 'previous']) expect(text).toContain(s)
+  expect(shown(await pane.drawn({ in: 'doc-page' }))).toBe('‹  2 of 2  ›')
+  await w.clock.settle()
+  await pane.redraw()
+  expect((await pane.findAll({ type: 'Client' })).map(c => String((c as { key?: string }).key)).some(k => k.includes('d0diag00'))).toBe(true)
 })

@@ -1,7 +1,7 @@
 // A card's insides as an interactive panel: a Client surface module, drawn on Claude Code's drawing thread (no `$`).
-// Copied from thimble-cc-mod's hooks/card.tsx and changed for thimble-term's card layout (Matt, 2026-10-07): the
-// border is the drawing's (reply.tsx cardBlock, a Box with a full round border in the rule grey and a cell of padding),
-// so the card's takeaway can stand inside it too; in it, the card's title in bold, one blank row, then the plot or body
+// The card layout is Matt's (2026-10-07; SPEC.md rule 4 and section 2, rule 11): the border is the drawing's (reply.tsx
+// cardBlock, a Box with a full round border in the rule gray and a cell of padding), so the card's takeaway can stand
+// inside it too; in it, the card's title in bold, one blank row, then the plot or body
 // directly; everything else the card shows below the plot: the readout row (the value under the pointer, plain, or
 // what thimble is doing to the card), the label rows, the params row. In the card pane the question is the panel's
 // title, so the region starts with the plot. The chart is text (block, braille and box-drawing characters), so the
@@ -136,7 +136,9 @@ const Card: ClientModule<Props, S> = (props, surface) => {
     const lhot = li >= 0 && li < head.lines.length ? head.hots[li] : undefined
     const slug = lhot && cx >= lhot.x0 && cx < lhot.x1 ? head.slugs[li] : undefined
     const i = hot || slug ? -1 : lay.hit(cx, ev.y - top)
-    const act = hot ? `${hot.param}=${hot.value}` : slug ? `label:${slug}` : ''
+    // the title is a hot spot: in inverse under the pointer, a press asks a side thread about the card
+    const onTitle = !pane && ev.y === 0 && cx >= 0 && cx < width(cut(card.question, inner))
+    const act = hot ? `${hot.param}=${hot.value}` : slug ? `label:${slug}` : onTitle ? 'title' : ''
     const plain = !ev.shift && !ev.ctrl && !ev.alt
     if (ev.type === 'down' || ev.type === 'up') {
       if (slug) {
@@ -186,7 +188,7 @@ const Card: ClientModule<Props, S> = (props, surface) => {
         : null
   const rows: RenderElement[] = []
   // the title in bold, then one blank row (in the pane the question is the panel's title)
-  if (!pane) rows.push(paintLine(Text, [{ s: cut(card.question, inner), b: true }]), paintLine(Text, []))
+  if (!pane) rows.push(paintLine(Text, [{ s: cut(card.question, inner), b: true, ...(st.act === 'title' && !stale ? { inv: true } : {}) }]), paintLine(Text, []))
   // the plot or body, directly
   rows.push(...lay.lines.map(l => paintLine(Text, l)))
   // below it: the readout against the right edge, the label rows, the params row

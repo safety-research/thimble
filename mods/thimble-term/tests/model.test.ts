@@ -6,7 +6,8 @@ import { expect, test } from 'claude-code/testing'
 import { changed, cliOf, launchMode, parsePrinted } from '../hooks/data'
 import { citations } from '../hooks/lib'
 import { labelCard } from '../hooks/cell'
-import { agentsOf, cardsOfCall, cellsOf, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, verdictOf, withoutEnd } from '../hooks/model'
+import { agentsOf, cardsOfCall, cellsOf, docsOf, homeOf, labelIdOf, labelOf, labelsOf, namedThreads, resolutionOf, runShown, threadOf, threadRowsOf, verdictOf, withoutEnd } from '../hooks/model'
+import { turnTimes, wrapRows } from '../hooks/draw'
 import { AGENTS, CELLS, RESOLVE, STATES, THREAD_T1, THREADS } from './fixtures'
 
 const check = (raw: string) => {
@@ -53,6 +54,38 @@ test("a thread's chat as turns: its question, its answer's text, its tool calls,
   expect(t.parent).toBe('')
   const failed = threadOf({ id: 'x' }, [{ type: 'user', text: 'q' }, { type: 'error', error: 'stopped by the analyst' }])
   expect(failed.turns[0]).toMatchObject({ state: 'error', a: 'stopped by the analyst' })
+  // main's reply_in_thread is an answer though no `done` follows it (terminal mode)
+  const replied = threadOf({ id: 'y' }, [{ type: 'user', text: 'Is 2994 all of them?' }, { type: 'tool_use', name: 'Bash' }, { type: 'text', delta: 'Yes, for this file.', reply: true }, { type: 'user', text: 'And dorfwiki?' }])
+  expect(replied.turns.map(t => t.state)).toEqual(['done', 'running'])
+  expect(replied.turns[0]!.a).toBe('Yes, for this file.')
+  // a reply after the end that said main's turn ended unanswered: the reply is the answer, the end's words are gone
+  const late = threadOf({ id: 'z' }, [{ type: 'user', text: 'Is 2994 all of them?' }, { type: 'error', message: "Main's turn ended without answering in this thread", kind: 'unanswered' }, { type: 'text', delta: "Yes, I'm sure.", reply: true }])
+  expect(late.turns[0]).toMatchObject({ state: 'done', a: "Yes, I'm sure." })
+})
+
+test("main's `↳ thread <slug>:` line names the thread by its first question", () => {
+  const rows = [{ id: 't1', title: 'nearly-all-revisions-are', fork: 'nearly-all-revisions-are', question: 'Is 2994 all of the [[dse|card:a#x/y]] revisions in this file, and how sure is it?' }]
+  expect(namedThreads('↳ thread nearly-all-revisions-are: confirmed 2994 is every dse record.', rows)).toBe('↳ thread "Is 2994 all of the dse revisions in…": confirmed 2994 is every dse record.')
+  expect(namedThreads('↳ thread other-one: done.', rows)).toBe('↳ thread other-one: done.')
+  expect(namedThreads('No thread here.', rows)).toBe('No thread here.')
+})
+
+test("a turn's words in up to three rows, the last cut; a transcript's times as the clock, the day where it changes", () => {
+  expect(wrapRows('one two three', 20, 3)).toEqual(['one two three'])
+  const rows = wrapRows('alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu', 12, 3)
+  expect(rows.length).toBe(3)
+  expect(rows.slice(0, 2)).toEqual(['alpha beta', 'gamma delta'])
+  expect(rows[2]).toBe('epsilon…')
+  expect(rows.every(r => r.length <= 12)).toBe(true)
+  expect(wrapRows('x'.repeat(30), 12, 3)).toEqual(['x'.repeat(12), 'x'.repeat(12), 'x'.repeat(6)])
+  expect(wrapRows('x'.repeat(40), 12, 3)).toEqual(['x'.repeat(12), 'x'.repeat(12), `${'x'.repeat(11)}…`])
+  expect(turnTimes(['2026-06-18T07:40:01Z', '2026-06-18T07:41:00Z', '2026-06-19T09:00:00Z'])).toEqual([
+    { clock: '07:40:01', day: '18 Jun 2026' },
+    { clock: '07:41:00', day: '' },
+    { clock: '09:00:00', day: '19 Jun 2026' },
+  ])
+  expect(turnTimes(['10:00', '10:01'])).toEqual([{ clock: '10:00', day: '' }, { clock: '10:01', day: '' }])
+  expect(turnTimes(['2026-06-18T07:40:00Z', ''])).toEqual([{ clock: '07:40', day: '18 Jun 2026' }, { clock: '', day: '' }])
 })
 
 test('the threads list keeps side threads, each with its answers and those not read', () => {
@@ -67,7 +100,7 @@ test('the agents, the counts, the documents and the cells, from their routes', (
   expect(agentsOf(AGENTS)).toEqual([{ name: 'thimble:orientation', label: 'orientation: the whole corpus', state: 'working', kind: 'subagent', chat: 'o1', role: 'orientation', started: '' }])
   expect(homeOf(STATES.home)).toMatchObject({ cards: 12, labels: 1, docs: 1, threads: 2, files: 4 })
   expect(homeOf({ counts: { cards: [1, 2], labels: 0 } })).toMatchObject({ cards: 2, labels: 0 })
-  expect(docsOf(STATES.docs)).toEqual([{ slug: 'report', title: 'Agents used the dse wiki as a relay', renderer: 'document', status: 'written' }])
+  expect(docsOf(STATES.docs)).toEqual([{ slug: 'report', title: 'Agents used the dse wiki as a relay', renderer: 'document', status: 'written', generation: 0, at: '' }])
   expect(cellsOf(STATES.cards).length).toBe(Object.keys(CELLS).length)
   expect(cellsOf([{ id: 'a' }, { nope: 1 }]).length).toBe(1)
   expect(labelIdOf(CELLS.l0label0 as never)).toBe('d9b51617')
@@ -80,6 +113,19 @@ test('the cards a call of main names: add_card, edit_card, apply_label, and a ca
   expect(cardsOfCall('mcp__plugin_thimble_thimble__apply_label', {}, "applied label x [[concept:e7]] over 3 record(s): yes 1. The label's card is [[card:01fee4d5]].")).toEqual(['01fee4d5'])
   expect(cardsOfCall('Bash', { command: '/tree/plugin/bin/thimble-run card 69d6b48a' }, 'card:69d6b48a\n...')).toEqual(['69d6b48a'])
   expect(cardsOfCall('Bash', { command: 'ls -la' }, '')).toEqual([])
+  // several cards run again in a shell loop: each card its output names
+  const loop = 'B=/mnt/store/x/plugin/bin/thimble-run; for c in 2d10d7f3 9b4bb0cb; do $B card $c; done'
+  expect(cardsOfCall('Bash', { command: loop }, 'card:2d10d7f3\n[out0: plot]\n\ncard:9b4bb0cb\n[out0: table]\n')).toEqual(['2d10d7f3', '9b4bb0cb'])
+  // its row: each card by its question, never the install path or an id; cards not read yet are counted
+  const q = (id: string) => ({ '2d10d7f3': 'How many revisions does each wiki have?', '9b4bb0cb': 'Which ten pages have the most revisions?' })[id]
+  expect(runShown(loop, q)).toBe('thimble-run card "How many revisions does each wiki have?", "Which ten pages have the most revisions?"')
+  expect(runShown(loop, () => undefined)).toBe('thimble-run card · 2 cards')
+  expect(runShown('/tree/plugin/bin/thimble-run card 2d10d7f3', q)).toBe('thimble-run card "How many revisions does each wiki have?"')
+  expect(runShown('/tree/plugin/bin/thimble-run stale', q)).toBe('thimble-run stale')
+  expect(runShown('B="/x/plugin/bin/thimble-run"; for c in 2d10d7f3 9b4bb0cb; do "$B" card "$c"; done', () => undefined)).toBe('thimble-run card · 2 cards')
+  for (const shown of [runShown(loop, q), runShown(loop, () => undefined)]) expect(shown).not.toMatch(/\/mnt|[0-9a-f]{8}/)
+  // output naming cards from a command that runs no thimble-run is no card of the turn
+  expect(cardsOfCall('Bash', { command: 'grep card notes.txt' }, 'card:2d10d7f3')).toEqual([])
   expect(cardsOfCall('mcp__plugin_thimble_thimble__read_ref', {}, 'card:69d6b48a')).toEqual([])
 })
 
@@ -99,8 +145,8 @@ test('the thimble command beside the plugin, the session mode, what a run printe
   expect(parsePrinted({ exitCode: 0, stdout: '{"a":1}', stderr: '' })).toEqual({ ok: true, value: { a: 1 } })
   expect(parsePrinted({ exitCode: 1, stdout: '{"error":"no workspace for /x"}', stderr: '' })).toEqual({ ok: false, error: 'no workspace for /x' })
   expect(parsePrinted({ exitCode: 2, stdout: '', stderr: 'Traceback\nValueError: bad' })).toEqual({ ok: false, error: 'ValueError: bad' })
-  const a = { cards: '1', labels: '', docs: '', chats: '', agents: '', ui: '' }
-  expect(changed(null, a).length).toBe(6)
+  const a = { cards: '1', labels: '', docs: '', chats: '', agents: '', views: '', ui: '' }
+  expect(changed(null, a).length).toBe(7)
   expect(changed(a, { ...a, cards: '2' })).toEqual(['cards'])
 })
 

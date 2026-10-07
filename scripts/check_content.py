@@ -60,12 +60,9 @@ from pathlib import Path
 
 NEVER = re.compile(r"(^|/)(__pycache__|node_modules|\.venv)(/|$)|^(data|dev|notes|context|experiments|"
                    r"workspaces[^/]*|\.claude|docs/archive|docs/proposals)/|\.(db|sqlite3?|jsonl|pyc)$")
-# the invented sample files of the worked examples (thimble's and a mod's copy of them) and of the extensions' views and
-# card types, in their folders, which are data on purpose
-SAMPLES = re.compile(r"^(plugin/viewers|mods/[\w-]+/viewers|extensions/[\w-]+/(views|cards))/[\w-]+/sample/.+$")
-# a mod's copy of a worked example's sample file: allowed only as a byte-for-byte copy of thimble's own,
-# plugin/<the path after the mod's name>
-MOD_SAMPLE = re.compile(r"^mods/[\w-]+/(viewers/[\w-]+/sample/.+)$")
+# the invented sample files of the worked examples and of the extensions' views and card types, in their folders, which
+# are data on purpose
+SAMPLES = re.compile(r"^(plugin/viewers|extensions/[\w-]+/(views|cards))/[\w-]+/sample/.+$")
 MAX_BYTES = 2_000_000
 # demos/<dataset>/<file>: a pre-cached orientation, checked by demo_hits instead of NEVER's .jsonl and MAX_BYTES
 DEMO = re.compile(r"^demos/([a-z0-9][a-z0-9-]*)/(.+)$")
@@ -90,18 +87,6 @@ def files_of(root: Path) -> list[str]:
                   if p.is_file() and ".git" not in p.relative_to(root).parts)
 
 
-def sample(root: Path, rel: str) -> bool:
-    """Whether `rel` is a worked example's sample file (SAMPLES); a mod's copy only when it is thimble's file
-    unchanged (MOD_SAMPLE)."""
-    if not SAMPLES.match(rel):
-        return False
-    m = MOD_SAMPLE.match(rel)
-    if not m:
-        return True
-    original = root / "plugin" / m.group(1)
-    return original.is_file() and original.read_bytes() == (root / rel).read_bytes()
-
-
 def scan(root: Path, rels: list[str]) -> list[tuple[str, int, str, str]]:
     """The files of kinds that never belong in the tree, and those over MAX_BYTES, as (path, 0, "path", why). A
     pre-cache's .jsonl files and its size are demo_hits' to check."""
@@ -109,10 +94,8 @@ def scan(root: Path, rels: list[str]) -> list[tuple[str, int, str, str]]:
     for rel in rels:
         p = root / rel
         demo = DEMO.match(rel) is not None
-        if NEVER.search(rel[: -len(".jsonl")] if demo and rel.endswith(".jsonl") else rel) and not sample(root, rel):
-            why = ("a mod's sample file that is not a copy of thimble's plugin/" + MOD_SAMPLE.match(rel).group(1)
-                   if SAMPLES.match(rel) else "a file of a kind that never belongs in the tree")
-            hits.append((rel, 0, "path", why))
+        if NEVER.search(rel[: -len(".jsonl")] if demo and rel.endswith(".jsonl") else rel) and not SAMPLES.match(rel):
+            hits.append((rel, 0, "path", "a file of a kind that never belongs in the tree"))
         if not demo and p.stat().st_size > MAX_BYTES:
             hits.append((rel, 0, "path", f"{p.stat().st_size} bytes, over {MAX_BYTES}"))
     return hits

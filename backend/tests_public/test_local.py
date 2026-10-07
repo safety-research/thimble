@@ -190,6 +190,16 @@ async def test_state_gives_what_the_routes_give(term):
     home = await local.state(CORPUS, "home")
     assert home["cards"] == 2 and home["labels"] == 1 and home["mode"] == "terminal" and home["unread"] == []
     assert home["views"] == [], "the views built for this corpus, as a list the home panel draws; no built-in viewer"
+    assert home["coverage"] is None, "no orientation ran: no coverage line"
+    # a view proposed and not built yet is listed with its state, when it was proposed and the files it claims; a
+    # dropped one is not
+    from app import views
+    views._save_proposals(CORPUS, [
+        {"slug": "edit-bursts", "name": "Edit Bursts", "status": "building", "ts": "2026-10-07T01:00:00Z", "claims": ["agents/*.jsonl"]},
+        {"slug": "gone", "name": "Gone", "status": "dropped", "ts": "2026-10-07T01:00:00Z", "claims": ["board.jsonl"]},
+    ])
+    home = await local.state(CORPUS, "home")
+    assert home["views"] == [{"slug": "edit-bursts", "name": "Edit Bursts", "status": "building", "ts": "2026-10-07T01:00:00Z", "files": ["agents/*.jsonl"]}]
     cards = await local.state(CORPUS, "cards", ["--since", "2000-01-01"])
     assert {c["title"] for c in cards["cells"]} >= {"Posts?"} and cards["groups"]
     assert (await local.state(CORPUS, "cards", ["--since", "2999-01-01"]))["cells"] == []
@@ -217,6 +227,19 @@ async def test_state_gives_what_the_routes_give(term):
         agents.append(log_path, {"type": "done", "result": None})
     [row] = [t for t in await local.state(CORPUS, "threads") if t["id"] == meta["id"]]
     assert row["answers"] == 2 and row["unread"] is True
+    assert row["question"] == "Why?", "its first question names the thread in the terminal"
+    # main often answers with reply_in_thread alone (a `text` record marked `reply`, no `done`): that counts too, and a
+    # reply and a `done` of one question count once
+    agents.append(log_path, {"type": "user", "text": "And the rest?"})
+    agents.append(log_path, {"type": "tool_use", "name": "Bash"})
+    agents.append(log_path, {"type": "text", "delta": "All of it.", "reply": True})
+    [row] = [t for t in await local.state(CORPUS, "threads") if t["id"] == meta["id"]]
+    assert row["answers"] == 3
+    agents.append(log_path, {"type": "text", "delta": "Also this.", "reply": True})
+    agents.append(log_path, {"type": "done", "result": None})
+    agents.append(log_path, {"type": "user", "text": "Still there?"})
+    [row] = [t for t in await local.state(CORPUS, "threads") if t["id"] == meta["id"]]
+    assert row["answers"] == 3, "one answer per question; the last question has none yet"
     assert (await local.state(CORPUS, "files"))[0]["path"]
     assert [f["path"] for f in (await local.state(CORPUS, "files", ["agents"]))["files"]][0] == "agents/agent-01.jsonl"
     # a file: a page of its records from --start, as GET /source gives it, for the renderer's file view
@@ -286,6 +309,9 @@ async def test_act_makes_what_the_browser_makes(term, monkeypatch):
 
     monkeypatch.setattr(subagents, "stop", stop)
     assert (await local.act(CORPUS, "stop", {"agent": "a1234"}))["stopped"] is True and asked == ["a1234"]
+    # a side thread is stopped by the fork of main that answers it
+    agents.change_meta(CORPUS, made["thread"], lambda m: m.update(fork={"agent_id": "afork99"}))
+    assert (await local.act(CORPUS, "stop", {"agent": made["thread"]}))["stopped"] is True and asked[-1] == "afork99"
     with pytest.raises(local.StateError, match="no act"):
         await local.act(CORPUS, "nope", {})
     with pytest.raises(local.StateError, match="empty"):
@@ -295,7 +321,7 @@ async def test_act_makes_what_the_browser_makes(term, monkeypatch):
     assert concepts.find_concept(ws, "bash")
 
 
-async def test_act_edits_and_runs_a_label_as_the_label_editor_does(term):
+async def test_act_edits_and_runs_a_label_as_the_label_editor_does(term, monkeypatch):
     """The label panel's edits: `label` saves the kind, the prompt (or pattern or code) and the files as the browser's
     label editor saves them; `label-run` runs the label on a sample or on every record and answers with the run's
     summary once it ends; a code label's run waits for `thimble-run label` in main's Bash, whose command it gives."""
@@ -319,6 +345,24 @@ async def test_act_edits_and_runs_a_label_as_the_label_editor_does(term):
     assert ran["ok"] and s["status"] == "done" and s["limit"] == 3 and s["labeled"] <= 3
     whole = await local.act(CORPUS, "label-run", {"label": "bash"})
     assert whole["summary"]["status"] == "done" and whole["summary"]["limit"] is None
+    # `label-stop` from another process: the running label-run sees its stop file and stops after its current unit
+    stop_seen: list[bool] = []
+    real_wait = concepts.wait_apply
+
+    async def wait_apply(c, cid, timeout=None, enough=None):
+        await local.act(CORPUS, "label-stop", {"label": "bash"})
+        for _ in range(100):
+            if concepts._cancel_event(c, cid).is_set():
+                break
+            await asyncio.sleep(0.02)
+        stop_seen.append(concepts._cancel_event(c, cid).is_set())
+        return await real_wait(c, cid, timeout, enough)
+
+    monkeypatch.setattr(local, "LABEL_STOP_POLL_S", 0.02)
+    monkeypatch.setattr(concepts, "wait_apply", wait_apply)
+    stopped = await local.act(CORPUS, "label-run", {"label": "bash"})
+    monkeypatch.setattr(concepts, "wait_apply", real_wait)
+    assert stop_seen == [True] and stopped["ok"] and not local._label_stop_file(CORPUS, before["id"]).exists()
     assert concepts.find_concept(ws, "bash")["applications"][-1]["paths"] == ["agents/agent-01.jsonl"]
     # a code label's code runs only where main's Bash runs it
     await local.act(CORPUS, "label", {"label": "bash", "kind": "code", "body": "def label(unit):\n    return 'yes', 1.0"})

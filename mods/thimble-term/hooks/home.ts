@@ -1,20 +1,18 @@
-// Copied from thimble-cc-mod's hooks/home.ts; thimble-term adds a file's `listed` state (neither its records nor its
-// reading is counted: the file shows its size and its kind where the mod shows its records and the share read).
-//
 // The home panel (/thimble-home, and the path row's first step): one panel listing what this folder's sessions made,
 // as thimble's workbench lists them in its tabs: views (built, building, proposed), reports, side threads (those with
 // answers not yet read first), cards grouped by the question that made them, labels with their counts, and the files
-// by folder with what this session read of them. Each is a click away from the panel that opens it.
+// by folder with what this session read of them. Each is a click away from the panel that opens it. A file in the
+// `listed` state counts neither its records nor its reading: it shows its kind and its size.
 //
 // This file lays the panel out as styled lines and their hit regions, without `$`; register.tsx gathers the data
 // (homeData), draws the lines in the Client homeview.tsx and acts on a click or a key. It follows the visual system
-// (views/SPEC.md, section 7, "Home"): one column; the title `Home`; a section heading bold with its count dim in
+// (SPEC.md, section 7, "Home"): one column; the title `Home`; a section heading bold with its count dim in
 // parentheses and `N new` in green, a blank row above it; an item's state glyph at A0 and its name at A2, regular,
 // its metadata dim against the right edge and `new` in green there while it is new; card groups and folders that fold
 // with `▸ ▾`, the newest group and the first folder open. Each line starts with the 2-cell margin, where `❯` marks the
 // row the keys chose.
 import type { Line, Seg } from './draw'
-import { lineWidth, valueColour, width } from './draw'
+import { lineWidth, valueColour, width, wrapRows } from './draw'
 import { ACCENT, FRESH, MARGIN_W, fitTo, headingLine, hintLine, pointed, ruleLine, spread } from './chrome'
 import { COLORS } from './paint'
 
@@ -23,12 +21,12 @@ export type SectionId = 'views' | 'reports' | 'threads' | 'cards' | 'labels' | '
 /** What a click opens: an item in its own panel, or a section's own panel. */
 export type HomeOpen =
   | { kind: 'view'; slug: string; built: boolean }
-  | { kind: 'report'; slug: string }
+  | { kind: 'report'; slug: string; title?: string }
   | { kind: 'thread'; id: string }
   | { kind: 'card'; id: string }
   | { kind: 'label'; name: string }
   | { kind: 'file'; path: string }
-  | { kind: 'pane'; view: 'views' | 'reports' | 'threads' | 'labels' | 'coverage'; title: string }
+  | { kind: 'pane'; view: 'views' | 'reports' | 'threads' | 'labels' | 'coverage'; title: string; folder?: string }
 
 /** A click's act: open something, fold or unfold a card group or a folder (`key`, `open` as it is drawn now), show a
  *  section whole. */
@@ -91,6 +89,10 @@ export type HomeRow = {
   key: string
   glyph: Glyph | null
   title: string
+  /** dim words right after the title (a folder's count of files) */
+  after?: Seg[]
+  /** what stands at R in place of `right` when `right` would cut the title (a thread's row without its subject) */
+  short?: Seg[]
   fresh?: boolean
   right?: Seg[]
   bar?: { n: number; fg: string }[]
@@ -105,9 +107,9 @@ export type HomeRow = {
 
 /** A section: its heading's name and count, what is new, the panel its heading opens, the column heads at the right,
  *  and its rows. `summary` says in words what the glyphs show (for the tests and a thread about the panel). */
-export type HomeSection = { id: SectionId; name: string; count: number; news?: number; heads?: Seg[]; summary: Seg[]; rows: HomeRow[]; pane?: HomeOpen }
+export type HomeSection = { id: SectionId; name: string; count: number; news?: number; heads?: Seg[]; summary: Seg[]; rows: HomeRow[]; pane?: HomeOpen; coverage?: string }
 
-// state glyphs (views/SPEC.md, "The visual system", section 5): done ● and working ◌ in the text colour, not started ○
+// state glyphs (SPEC.md, "The visual system", section 5): done ● and working ◌ in the text colour, not started ○
 // dim, a problem × or ! in red
 const DONE: Glyph = { mark: '●' }
 const WORKING: Glyph = { mark: '◌' }
@@ -144,9 +146,10 @@ function viewGlyph(v: HomeView): Glyph {
   return NOT_STARTED
 }
 
-/** A view's state words where its glyph already says what they would: without "built", "proposed" or "failed". */
+/** A view's state words where its glyph already says what they would: without "built", "proposed", "not built" or
+ *  "failed". */
 function afterMark(words: string): string {
-  return words.replace(/^(built|proposed)(\s·\s|$)/, '').replace(/^failed:\s*/, '')
+  return words.replace(/^(built|proposed|not built)(\s·\s|$)/, '').replace(/^failed:\s*/, '')
 }
 
 function countBy(words: readonly string[], order: readonly string[]): string[] {
@@ -187,19 +190,20 @@ function reportsSection(rs: readonly HomeReport[]): HomeSection {
   const word = (r: HomeReport) => (r.state === 'writing' ? 'writing' : r.state === 'error' ? 'failed' : 'written')
   return {
     id: 'reports',
-    name: 'Reports',
+    // the browser's word for them, which the list panel and the path use too
+    name: 'Documents',
     count: rs.length,
     news: rs.filter(r => r.fresh).length,
     summary: joined(countBy(sorted.map(word), ['written', 'writing', 'failed'])),
-    pane: { kind: 'pane', view: 'reports', title: 'Reports' },
+    pane: { kind: 'pane', view: 'reports', title: 'Documents' },
     rows: sorted.map(r => ({
       key: `report:${r.slug}`,
       glyph: r.state === 'writing' ? WORKING : r.state === 'error' ? { mark: '×', fg: COLORS.problem } : DONE,
       title: r.title,
       fresh: r.fresh,
       // what the glyph does not say (◌ writing, × failed, ● written): its kind, its tool calls while writing, its cards
-      right: rightOf([r.form, r.state === 'writing' ? plural(r.tools, 'tool call') : '', r.cards ? plural(r.cards, 'card') : ''], r.fresh),
-      act: { op: 'open', open: { kind: 'report', slug: r.slug } },
+      right: rightOf([r.form, r.state === 'writing' && r.tools ? plural(r.tools, 'tool call') : '', r.cards ? plural(r.cards, 'card') : ''], r.fresh),
+      act: { op: 'open', open: { kind: 'report', slug: r.slug, title: r.title } },
     })),
   }
 }
@@ -221,7 +225,10 @@ function threadsSection(ts: readonly HomeThread[]): HomeSection {
       glyph: t.tone === 'run' ? WORKING : t.tone === 'problem' ? { mark: '×', fg: COLORS.problem } : t.tone === 'ok' || t.unread ? DONE : NOT_STARTED,
       title: t.title,
       fresh: t.unread > 0,
-      right: rightOf([t.earlier ? 'earlier session' : ''], t.unread > 0),
+      // what it is about, then `earlier session`, dim at R (on its one row); without its subject when that would cut
+      // its question
+      right: rightOf([t.about, t.earlier ? 'earlier session' : ''], t.unread > 0),
+      short: rightOf([t.earlier ? 'earlier session' : ''], t.unread > 0),
       act: { op: 'open', open: { kind: 'thread', id: t.id } },
     })),
   }
@@ -275,6 +282,12 @@ function countBar(values: readonly string[], counts: Record<string, number>): { 
   return values.map((v, i) => ({ n: out[i]!, fg: valueColour(values, v)! })).filter(x => x.n > 0)
 }
 
+/** A label's color, as the label panel's ● beside its name shows it: its first value's, else the first series hue. */
+export function labelHue(values: readonly string[]): string {
+  const hue = values.length ? valueColour(values, values[0]!) : undefined
+  return hue && hue !== COLORS.dim ? hue : COLORS.series[0]!
+}
+
 function labelsSection(ls: readonly HomeLabel[]): HomeSection {
   return {
     id: 'labels',
@@ -292,7 +305,8 @@ function labelsSection(ls: readonly HomeLabel[]): HomeSection {
       })
       return {
         key: `label:${l.slug}`,
-        glyph: l.running ? WORKING : DONE,
+        // its ● in the label's color, as the label panel draws it beside its name
+        glyph: l.running ? WORKING : { mark: '●', fg: labelHue(l.values) },
         title: l.name,
         bar: countBar(l.values, l.counts),
         right: [{ s: num(labeled) }],
@@ -325,17 +339,19 @@ function filesSection(fs: readonly HomeFile[], root: string, ui: HomeUi): HomeSe
     const folder = `${root}/${cut < 0 ? '' : `${f.file.slice(0, cut)}/`}`
     by.set(folder, [...(by.get(folder) ?? []), f])
   }
-  const folders = [...by.entries()]
+  // the corpus's own folder first, the others in natural order, as the file browser lists them
+  const top = `${root}/`
+  const folders = [...by.entries()].sort(([a], [b]) => (a === b ? 0 : a === top ? -1 : b === top ? 1 : a.localeCompare(b, undefined, { numeric: true })))
   const recs = (xs: readonly HomeFile[]) => xs.reduce((k, f) => k + (f.records ?? 0), 0)
   const seen = (xs: readonly HomeFile[]) => xs.reduce((k, f) => k + Math.min(f.seen, f.records ?? 0), 0)
   const cols = (records: string, read: string): Seg[] => [{ s: records }, { s: '  ' }, dim(read)]
-  // thimble-term: where no reading is counted, the last column is the files' kind
+  // thimble-term: where no reading is counted, the columns are the files' kind (text, left) then size (a number, on R)
   const listed = fs.length > 0 && fs.every(f => f.state === 'listed')
   return {
     id: 'files',
     name: 'Files',
     count: fs.length,
-    heads: [dim(listed ? 'size' : 'records'), { s: '  ' }, dim(listed ? 'type' : 'read')],
+    heads: listed ? [dim('type'), { s: '  ' }, dim('size')] : [dim('records'), { s: '  ' }, dim('read')],
     summary: joined([fs.length && !listed ? `${num(fs.filter(f => f.state === 'read').length)} of ${num(fs.length)} read` : '']),
     pane: { kind: 'pane', view: 'coverage', title: 'Coverage' },
     rows: folders.map(([folder, files], i) => {
@@ -346,16 +362,19 @@ function filesSection(fs: readonly HomeFile[], root: string, ui: HomeUi): HomeSe
         key: `folder:${folder}`,
         glyph: { mark: open ? '▾' : '▸' },
         title: folder,
-        right: [dim(plural(files.length, 'file')), { s: '  ' }, ...(listed ? cols(sizeWords(files.reduce((k, f) => k + f.size, 0)), '') : cols(num(recs(files)), share(seen(files), recs(files)) || '0%'))],
+        // its count of files dim after its name, as the file browser shows it; under the columns only what they head
+        after: [dim(`  ${num(files.length)}`)],
+        right: listed ? [{ s: '' }, { s: '  ' }, dim(sizeWords(files.reduce((k, f) => k + f.size, 0)))] : cols(num(recs(files)), share(seen(files), recs(files)) || '0%'),
         fold,
         open,
-        more: Math.max(0, sorted.length - FOLDER_FILES),
+        // a folder of 21 shows all 21: `… 1 more` would take the row the file takes
+        more: sorted.length > FOLDER_FILES + 1 ? sorted.length - FOLDER_FILES : 0,
         kids: sorted.slice(0, sorted.length > FOLDER_FILES + 1 ? FOLDER_FILES : sorted.length).map(f => ({
           key: `file:${f.file}`,
           // a listed file has no state glyph: a blank in its place keeps its name at A4
           glyph: f.state === 'listed' ? { mark: ' ' } : f.state === 'read' ? DONE : NOT_STARTED,
           title: f.file.split('/').at(-1) ?? f.file,
-          right: f.state === 'listed' ? cols(sizeWords(f.size), f.kind ?? '') : cols(f.records !== null ? num(f.records) : `${num(f.size)} B`, f.state === 'read' ? share(f.seen, f.records ?? 0) || '0%' : f.state === 'scanned' ? 'counted' : ''),
+          right: f.state === 'listed' ? [dim(f.kind ?? ''), { s: '  ' }, dim(sizeWords(f.size))] : cols(f.records !== null ? num(f.records) : `${num(f.size)} B`, f.state === 'read' ? share(f.seen, f.records ?? 0) || '0%' : f.state === 'scanned' ? 'counted' : ''),
           act: { op: 'open', open: { kind: 'file', path: f.file } } as HomeAct,
         })),
         act: { op: 'fold', key: fold, open },
@@ -371,7 +390,7 @@ function isOpen(ui: HomeUi, key: string, byDefault: boolean): boolean {
 
 /** Every section, in the order of thimble's workbench: what it built, what it wrote, what it asked, then its parts. */
 export function homeSections(d: HomeData, ui: HomeUi = HOME_UI_EMPTY): HomeSection[] {
-  return [viewsSection(d.views), reportsSection(d.reports), threadsSection(d.threads), cardsSection(d.cardGroups, ui), labelsSection(d.labels), filesSection(d.files, d.root || 'folder', ui)]
+  return [viewsSection(d.views), reportsSection(d.reports), threadsSection(d.threads), cardsSection(d.cardGroups, ui), labelsSection(d.labels), { ...filesSection(d.files, d.root || 'folder', ui), ...(d.coverage ? { coverage: d.coverage } : {}) }]
 }
 
 // ------------------------------------------------------------------------------------------------ the layout
@@ -411,9 +430,13 @@ function glyphSeg(g: Glyph | null): Seg[] {
 
 /** An item's line at `x`: its glyph hanging, its name, its bar and figure against the right edge. */
 function itemLine(row: HomeRow, x: number, w: number): Line {
-  const right: Line = [...(row.bar?.length ? [...row.bar.map(b => ({ s: '█'.repeat(b.n), fg: b.fg })), { s: '  ' }] : []), ...(row.right ?? [])]
+  const bar: Line = row.bar?.length ? [...row.bar.map(b => ({ s: '█'.repeat(b.n), fg: b.fg })), { s: '  ' }] : []
   const lead: Line = [...(x ? [{ s: ' '.repeat(x) }] : []), ...glyphSeg(row.glyph)]
-  return spread([...lead, { s: row.title }], right, w)
+  const left: Line = [...lead, { s: row.title }, ...(row.after ?? [])]
+  // the title stays whole where it can: the shorter right part when the full one would cut it
+  const full: Line = [...bar, ...(row.right ?? [])]
+  const right = row.short && lineWidth(left) + 2 + lineWidth(full) > w ? [...bar, ...row.short] : full
+  return spread(left, right, w)
 }
 
 /** The figures of a section's rows set in shared columns: each row's right part padded so its last column ends on R
@@ -426,21 +449,25 @@ function alignRight(sec: HomeSection): void {
   const first = sec.heads?.[0]?.s.trim() || 'records'
   const recW = Math.max(width(first), ...parts.map(p => width(p.at(-3)?.s ?? '')))
   const readW = Math.max(width(sec.heads?.at(-1)?.s.trim() || 'read'), ...parts.map(p => width(p.at(-1)?.s ?? '')))
+  // text aligns left, numbers right: a listed file's kind is text (its first column), its size a number
+  const textFirst = first === 'type'
   for (const r of rows) {
     const p = r.right ?? []
     if (p.length < 3) continue
     const rec = p.at(-3)!
     const read = p.at(-1)!
-    r.right = [...p.slice(0, -3), { ...rec, s: rec.s.padStart(recW) }, { s: '  ' }, { ...read, s: read.s.padStart(readW) }]
+    r.right = [...p.slice(0, -3), { ...rec, s: textFirst ? rec.s.padEnd(recW) : rec.s.padStart(recW) }, { s: '  ' }, { ...read, s: read.s.padStart(readW) }]
   }
   const last = sec.heads?.at(-1)?.s.trim() || 'read'
-  sec.heads = [dim(first.padStart(recW)), { s: '  ' }, dim(last.padStart(readW))]
+  sec.heads = [dim(textFirst ? first.padEnd(recW) : first.padStart(recW)), { s: '  ' }, dim(last.padStart(readW))]
 }
 
 function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void {
   alignRight(sec)
   const head = headingLine(sec.name, sec.count, sec.news ?? 0)
   out.push(spread(head, sec.heads ?? [], w), sec.pane ? { x0: 0, x1: lineWidth(head), row: false, act: { op: 'open', open: sec.pane } } : undefined)
+  // the orientation's coverage line, dim under the Files heading, whole up to four rows
+  if (sec.coverage) for (const l of wrapRows(sec.coverage, Math.max(10, w - 2), 4)) out.push([{ s: '  ' }, dim(l)])
   if (!sec.rows.length) {
     out.push([{ s: '  ' }, dim('none')])
     return
@@ -453,7 +480,7 @@ function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void
     if (r.kids && r.open) {
       // a group's cards at A2 under its name; a folder's files with their glyphs at A2 and their names at A4
       for (const k of r.kids) out.push(itemLine(k, k.glyph ? 2 : 0, w), { x0: 2, x1: w, row: true, act: k.act, pick: k.key })
-      if (r.more) out.push([{ s: '    ' }, dim(`… ${num(r.more)} more`)], { x0: 4, x1: 4 + width(`… ${num(r.more)} more`), row: false, act: { op: 'open', open: { kind: 'pane', view: 'coverage', title: 'Coverage' } } })
+      if (r.more) out.push([{ s: '    ' }, dim(`… ${num(r.more)} more`)], { x0: 4, x1: 4 + width(`… ${num(r.more)} more`), row: false, act: { op: 'open', open: { kind: 'pane', view: 'coverage', title: 'Coverage', folder: r.title } } })
     }
   }
   const left = sec.rows.length - shown.length

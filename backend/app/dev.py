@@ -1461,7 +1461,7 @@ class Sessions:
             flags += ["--add-dir", str(d)]
         if conf_models.get("effort"):
             flags += ["--effort", str(conf_models["effort"])]
-        flags += ["--settings", json.dumps(config.without_mod(settings))]
+        flags += ["--settings", json.dumps(settings)]
         return flags
 
     async def _spawn(self, cwd: Path, sid: str, prompt: str, flags: list[str], *, resume: bool) -> dict[str, str]:

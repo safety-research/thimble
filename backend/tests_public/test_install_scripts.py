@@ -75,18 +75,31 @@ def stub_bin(tmp_path: Path) -> Path:
 ANSWERS = ("--browser", "off", "--no-sandbox-deps")  # install.sh's questions --deps-only asks, answered
 
 # Claude Code's stand-in for the plugin commands: the marketplaces (name → folder) and the installed plugins are kept in
-# $CLAUDE_STATE, and each command is appended to $STUB_LOG
+# $CLAUDE_STATE, and each command is appended to $STUB_LOG. A plugin is its id (installed at user scope) or, as
+# `claude plugin list --json` lists one, {"id", "scope", "projectPath"}; `plugin uninstall --scope project|local` takes
+# out the one of the folder it runs in
 CLAUDE_STUB = """#!{python} -I
 import json, os, sys
 path, args = os.environ["CLAUDE_STATE"], sys.argv[1:]
 state = json.load(open(path)) if os.path.exists(path) else {"marketplaces": {}, "plugins": []}
 with open(os.environ.get("STUB_LOG", os.devnull), "a") as log:
     log.write(" ".join(args) + "\\n")
-words = [a for a in args if a not in ("--json", "--scope", "user")]
+words = [a for a in args if a not in ("--json", "--scope", "user", "project", "local")]
+scope = args[args.index("--scope") + 1] if "--scope" in args else "user"
+here = os.path.realpath(os.getcwd())
+
+
+def taken(p):
+    if not isinstance(p, dict):
+        return p == words[2] and scope == "user"
+    return p["id"] == words[2] and p["scope"] == scope and (scope == "user" or os.path.realpath(p["projectPath"]) == here)
+
+
 if args[:1] == ["--version"]:
     print("2.1.286 (Claude Code)")
 elif words[:2] == ["plugin", "list"]:
-    print(json.dumps([{"id": p, "version": "0.0.1", "scope": "user", "enabled": True} for p in state["plugins"]]))
+    print(json.dumps([p if isinstance(p, dict) else {"id": p, "version": "0.0.1", "scope": "user", "enabled": True}
+                      for p in state["plugins"]]))
 elif words[:3] == ["plugin", "marketplace", "list"]:
     print(json.dumps([{"name": n, "source": "directory", "path": f, "installLocation": f}
                       for n, f in state["marketplaces"].items()]))
@@ -101,9 +114,10 @@ elif words[:3] == ["plugin", "marketplace", "remove"]:
 elif words[:2] == ["plugin", "install"]:
     if words[2].split("@")[1] not in state["marketplaces"]:
         sys.exit("no such marketplace")
-    state["plugins"] = sorted(set(state["plugins"]) | {words[2]})
+    state["plugins"] = sorted({p for p in state["plugins"] if isinstance(p, str)} | {words[2]}) + \\
+        [p for p in state["plugins"] if isinstance(p, dict)]
 elif words[:2] == ["plugin", "uninstall"]:
-    state["plugins"] = [p for p in state["plugins"] if p != words[2]]
+    state["plugins"] = [p for p in state["plugins"] if not taken(p)]
 json.dump(state, open(path, "w"))
 """
 
@@ -595,10 +609,47 @@ def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_
     assert run(uninstall) == taken_back and not record.exists()
 
 
-def test_thimble_cc_mod_s_marketplace_outlives_a_no_and_uninstall_removes_it(tmp_path):
-    """`thimble cc-mod on` registers thimble's marketplace when a no left it out. A --no-plugin re-run leaves it; a yes
-    then a no takes back the thimble plugin and keeps the marketplace while thimble-cc-mod from it is on, since removing
-    a marketplace turns its plugins off; uninstall removes the marketplace and names what that turns off."""
+def test_an_update_turns_thimble_cc_mod_off_where_an_earlier_version_turned_it_on(tmp_path):
+    """0.5.0's `thimble cc-mod on` installed thimble-cc-mod from this install's marketplace at project scope in a folder.
+    An update does what Claude Code does with a plugin that left its marketplace: `claude plugin uninstall` at each scope
+    it is installed at, in its folder, then one line naming the folders. A folder that is gone and the mod from another
+    install's marketplace are left alone, and a second run changes nothing."""
+    tree = fake_tree(tmp_path / "release")
+    dest = tmp_path / "home" / ".thimble" / "app"
+    bin_ = stub_bin(tmp_path)
+    claude_stub(bin_)
+    log, state = tmp_path / "claude.log", tmp_path / "claude.json"
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log), CLAUDE_STATE=str(state))
+    home = Path(env["HOME"])
+    one, two, other = home / "wiki", home / "runs" / "march", tmp_path / "elsewhere"
+    for d in (one, two, other):
+        d.mkdir(parents=True)
+    mod = "thimble-cc-mod@thimble-local"
+    left = [{"id": mod, "scope": "project", "projectPath": str(tmp_path / "deleted")},
+            {"id": "thimble-cc-mod@thimble", "scope": "project", "projectPath": str(other)}]
+    state.write_text(json.dumps({"marketplaces": {"thimble-local": str(dest), "thimble": str(tmp_path / "clone")},
+                                 "plugins": [{"id": mod, "scope": "project", "projectPath": str(one)},
+                                             {"id": mod, "scope": "local", "projectPath": str(two)}, *left]}))
+
+    def update() -> tuple[str, list[str]]:
+        log.write_text("")
+        r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS],
+                           capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return r.stdout, plugin_changes(log)
+
+    out, changes = update()
+    assert changes == [f"plugin uninstall {mod} --scope project", f"plugin uninstall {mod} --scope local"], out
+    assert json.loads(state.read_text())["plugins"] == left
+    assert ("✓ Turned thimble-cc-mod off in ~/wiki and ~/runs/march: thimble 0.0.1 no longer has it (`thimble mode "
+            "terminal` shows thimble in the terminal)") in out, out
+    out, changes = update()
+    assert changes == [] and "thimble-cc-mod" not in out, out
+
+
+def test_uninstall_removes_the_marketplace_an_earlier_version_registered_without_the_plugin(tmp_path):
+    """An earlier version registered thimble's marketplace for a plugin of it this version no longer has, where a no had
+    left it out. A --no-plugin re-run leaves it; uninstall removes it."""
     tree = fake_tree(tmp_path / "release")
     dest = tmp_path / "home" / ".thimble" / "app"
     bin_ = stub_bin(tmp_path)
@@ -613,20 +664,12 @@ def test_thimble_cc_mod_s_marketplace_outlives_a_no_and_uninstall_removes_it(tmp
         assert r.returncode == 0, r.stdout + r.stderr
         return r.stdout, plugin_changes(log)
 
-    def install(flag: str) -> list[str]:
-        return run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, flag,
-                    ])[1]
-
-    assert install("--no-plugin") == []
-    state.write_text(json.dumps({"marketplaces": {"thimble-local": str(dest)}, "plugins": ["thimble-cc-mod@thimble-local"]}))
-    assert install("--no-plugin") == [] and json.loads(record.read_text()) == {"answer": "no", "registered": ""}
-    assert install("--plugin")[-2:] == ["plugin install --scope user thimble@thimble-local",
-                                        "plugin update --scope user thimble@thimble-local"]
-    assert install("--no-plugin") == ["plugin uninstall thimble@thimble-local"]
-    assert json.loads(state.read_text())["marketplaces"] == {"thimble-local": str(dest)}
-    assert json.loads(record.read_text()) == {"answer": "no", "registered": ""}
+    install = ["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, "--no-plugin"]
+    assert run(install)[1] == []
+    state.write_text(json.dumps({"marketplaces": {"thimble-local": str(dest)}, "plugins": []}))
+    assert run(install)[1] == [] and json.loads(record.read_text()) == {"answer": "no", "registered": ""}
     out, changes = run(["bash", str(dest / "plugin" / "bin" / "thimble"), "uninstall", "--yes"])
-    assert changes == ["plugin marketplace remove thimble-local"] and "thimble-cc-mod off" in out, out
+    assert changes == ["plugin marketplace remove thimble-local"] and "which an earlier version registered" in out, out
     assert json.loads(state.read_text())["marketplaces"] == {}
 
 
@@ -983,7 +1026,7 @@ def test_help_lists_the_commands_an_analyst_uses_and_fix_and_revert_only_in_a_cl
     are not listed, nor are state and act, terminal mode's renderer's; fix and revert change thimble's own code, so only
     a development install (a git clone) lists them."""
     listed = ("thimble [claude flags...]", "thimble demo", "thimble list", "thimble purge", "thimble extension",
-              "thimble cc-mod", "thimble plugin", "thimble mode", "thimble doctor", "thimble feedback", "thimble update",
+              "thimble plugin", "thimble mode", "thimble doctor", "thimble feedback", "thimble update",
               "thimble uninstall")
     unlisted = ("thimble server", "thimble status", "thimble launch-args", "thimble prompt", "thimble state",
                 "thimble act")

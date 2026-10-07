@@ -115,6 +115,8 @@ export const AREAS = {
   docs: [{ dir: 'investigations/main' }],
   chats: [{ dir: 'chats' }],
   agents: [{ dir: 'trusted', names: ['subagents.json', 'module.json'] }, { dir: 'orient', names: ['run.json'] }],
+  // a view built (its folder in the local extension) or proposed (proposals.json)
+  views: [{ dir: 'extension/views' }, { dir: 'views', names: ['proposals.json'] }],
   ui: [{ dir: '', names: ['ui.jsonl'] }],
 } as const satisfies Record<string, readonly { dir: string; names?: readonly string[] }[]>
 

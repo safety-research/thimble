@@ -4,16 +4,17 @@
 //
 // Nothing here writes the workspace: a read is `thimble state`, a change is `thimble act` (hooks/data.ts).
 import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermLabelUi, TermPanel, TermThreadRow } from '../types'
-import { busyWords, cardOfCell } from './cell'
+import { busyWords, cardOfCell, linksOf, printed } from './cell'
 import type { ThimbleCell, ThimbleLabel } from './cell'
+import type { CardData, CardLabel } from './draw'
 import type { Ctx, SurfaceGot } from './ctx'
 import { act, actLong, changed, readState, signature } from './data'
 import type { Area, Scope, Signature } from './data'
 import { cid, citations } from './lib'
 import type { Citation } from './lib'
-import { agentsOf, cellOf, cellsOf, chatOf, docUnits, homeOf, labelIdOf, labelOf, resolutionOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
+import { agentsOf, cellOf, cellsOf, chatOf, docUnits, homeOf, labelIdOf, labelOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
 import { NAV_EMPTY, backTarget, moved, nextTrail } from './nav'
-import { withSignal } from './signal'
+import { signalEnd, withSignal } from './signal'
 
 export const P = 'thimble-term'
 export const LABEL_UI_EMPTY: TermLabelUi = { open: [], kind: {}, runs: {}, said: {} }
@@ -28,7 +29,9 @@ const THREADS_READ = 30
 const PANEL_COLS = 96
 const MAIN_KEEP = 70
 
-type Turn = { id: string; at: string; cards: string[]; row: string }
+/** main's turn as it runs: the cards it made, its latest text row, its text rows in parts (a tool call starts the next),
+ *  the views it proposed, and whether thimble-term gave its prompt (`own`). */
+type Turn = { id: string; at: string; cards: string[]; row: string; parts: { uuid: string; text: string }[][]; views: string[]; own: boolean }
 
 /** A ui.jsonl record's effect: what register.tsx does with a record a tool wrote for the renderer. */
 export type UiApply = (cx: Ctx, kind: string, args: Record<string, unknown>) => Promise<void>
@@ -43,6 +46,8 @@ export const rt = {
   // the latest row of main's chat a line can stand under (signal.ts isAnchor)
   anchor: '',
   termColumns: 0,
+  // the terminal's width the docked panel was last opened or fitted at
+  fittedFor: 0,
   // when the cards were last read (`cards --since`)
   cardsAt: '',
   // the cards some drawing shows, and the label each label card counts
@@ -57,11 +62,37 @@ export const rt = {
   seenGestures: new Map<string, number>(),
   // the answers each side thread had when last read: a new one while the panel does not show it is news
   answers: new Map<string, number>(),
+  // whether each side thread ran when last read, and those whose last turn failed
+  running: new Map<string, boolean>(),
+  failed: new Set<string>(),
   // the text a paragraph's drag selected last (para.tsx), for "ask about this"
   selection: '',
   // citations waiting for their check, by id (a drawing queues them; the session's timer checks them)
   queue: new Map<string, Citation>(),
   checking: false,
+  // every citation of a card's value seen, by the card: checked again when the card changes
+  cardCites: new Map<string, Map<string, Citation>>(),
+  // the labels read for the cards that read them (their label rows and colours), read again when the labels change;
+  // and those cards
+  labelRead: new Map<string, ThimbleLabel | null>(),
+  readers: new Set<string>(),
+  // the prompts thimble-term gave main itself (a code label's run, a label described): their answers get no footer
+  own: new Set<string>(),
+  // when this session started: a thread made before is an earlier session's
+  startedAt: 0,
+  // the views a `↳ view` row stands for already, the views opened, and those built when the session first read them
+  // (null until then): a view built since and not opened is new
+  viewsTold: new Set<string>(),
+  viewsSeen: new Set<string>(),
+  viewsBuiltBefore: null as Set<string> | null,
+  // each document's generation as the session first read it or last opened it: a newer one is new
+  docsKnown: new Map<string, number>(),
+  docsRead: false,
+  // the failures a toast said already
+  toasted: new Set<string>(),
+  // the last turn's text and cards, which `/thimble cite` and `/thimble card` open by number
+  lastReply: '',
+  lastCards: [] as string[],
 }
 
 const iso = (ms: number) => new Date(ms).toISOString()
@@ -75,6 +106,8 @@ export function panelColumns(): number {
 /** A cell as the drawing holds it. */
 export function termCard(cell: ThimbleCell, label: ThimbleLabel | null, rev: number): TermCard {
   const { card, error } = cardOfCell(cell, label)
+  const links = linksOf(cell)
+  const out = printed(cell)
   return {
     id: cell.id,
     data: card,
@@ -87,7 +120,35 @@ export function termCard(cell: ThimbleCell, label: ThimbleLabel | null, rev: num
     label: labelIdOf(cell),
     code: String(cell.code ?? ''),
     rev,
+    ...(links ? { links } : {}),
+    ...(out ? { printed: out } : {}),
+    ran: error || cell.status === 'error' ? 'error' : cell.status === 'ok' ? 'ok' : '',
   }
+}
+
+/** A label as the cards that read it draw it, read once until the labels change. */
+async function labelFor(cx: Ctx, id: string): Promise<ThimbleLabel | null> {
+  if (rt.labelRead.has(id)) return rt.labelRead.get(id)!
+  if (!rt.sc) return null
+  const got = await readState(cx, rt.sc, 'label', [id])
+  const l = got.ok ? labelOf(got.value) : null
+  rt.labelRead.set(id, l)
+  return l
+}
+
+/** The label rows of a card that read labels (SPEC.md, "Cards", the label row): each label's name, its values in
+ *  their colours, the value of each record it marked (from the label's rows), and whether it changed since the card ran
+ *  (the cell's `label_revs`, concepts.stale_in). */
+export function cardLabelsOf(cell: ThimbleCell, labels: readonly ThimbleLabel[]): CardLabel[] {
+  return labels.map(l => {
+    const read = cell.label_revs?.[l.id]
+    const marks: Record<string, string> = {}
+    for (const r of l.rows ?? []) {
+      const v = typeof r.analyst === 'string' && r.analyst ? r.analyst : String(r.label ?? '')
+      if (r.ref && v) marks[r.ref] = v
+    }
+    return { slug: l.id, name: l.name ?? l.id, values: l.labels ?? [], marks, ...(typeof read === 'number' && typeof l.rev === 'number' && l.rev > read ? { stale: true } : {}) }
+  })
 }
 
 async function putCard(cx: Ctx, cell: ThimbleCell): Promise<void> {
@@ -95,11 +156,17 @@ async function putCard(cx: Ctx, cell: ThimbleCell): Promise<void> {
   let label: ThimbleLabel | null = null
   if (cell.kind === 'label' && lid && rt.sc) {
     rt.labelOf.set(cell.id, lid)
-    const got = await readState(cx, rt.sc, 'label', [lid])
-    label = got.ok ? labelOf(got.value) : null
+    label = await labelFor(cx, lid)
   }
   const prev = await cx.card(cell.id)
   const next = termCard(cell, label, (prev?.rev ?? 0) + 1)
+  // a card that read labels shows each on a row, and its marks take the values' colours
+  const read = cell.kind === 'label' ? [] : [...new Set((cell.labels ?? []).map(String))]
+  if (read.length && next.data) {
+    rt.readers.add(cell.id)
+    const ls = (await Promise.all(read.map(id => labelFor(cx, id)))).filter((l): l is ThimbleLabel => l !== null)
+    if (ls.length) next.data = { ...(next.data as CardData), labels: cardLabelsOf(cell, ls) }
+  } else rt.readers.delete(cell.id)
   await cx.setCard(cell.id, next)
   queueCitations(citations(next.takeaway))
   if (cell.kind === 'example') queueCitations(((cell.payload?.refs as unknown[]) ?? []).map(r => ({ raw: `[[${String(r)}]]`, ref: String(r), display: null })))
@@ -113,7 +180,31 @@ export async function loadCards(cx: Ctx, ids: readonly string[]): Promise<void> 
     const got = await readState(cx, rt.sc, 'card', [id])
     const cell = got.ok ? cellOf(got.value) : null
     if (cell) await putCard(cx, cell)
+    else {
+      // a card that cannot be read is said so, in red, never by its id
+      const why = got.ok ? '' : got.error
+      const prev = await cx.card(id)
+      await cx.setCard(id, { id, data: null, takeaway: '', busy: '', error: !why || why.includes(id) ? 'the card is not in this workspace' : why, group: '', by: '', kind: '', label: '', code: '', rev: (prev?.rev ?? 0) + 1 })
+    }
   }
+}
+
+/** These cards read in one call (`cards --since` the epoch), each it does not list on its own (said so in red): the cards
+ *  a resumed session's rows draw (register.tsx restoreKept). */
+export async function loadCardsBatch(cx: Ctx, ids: readonly string[]): Promise<void> {
+  if (!rt.sc || !ids.length) return
+  const want = new Set(ids)
+  const got = await readState(cx, rt.sc, 'cards', ['--since', iso(0)])
+  const read = new Set<string>()
+  if (got.ok) {
+    for (const cell of cellsOf(got.value)) {
+      if (!want.has(cell.id)) continue
+      rt.shown.add(cell.id)
+      read.add(cell.id)
+      await putCard(cx, cell)
+    }
+  }
+  await loadCards(cx, ids.filter(id => !read.has(id)))
 }
 
 /** The cards some drawing shows, read again: those the notebooks changed since the last read, and the label cards
@@ -133,7 +224,11 @@ async function refreshCards(cx: Ctx, labels: boolean): Promise<void> {
   }
   // a card that waits for its run, runs or is checked is read whole, whatever its stamp says
   for (const id of rt.shown) if (!read.has(id) && (await cx.card(id))?.busy) await loadCards(cx, [id])
-  if (labels) for (const id of rt.labelOf.keys()) if (rt.shown.has(id)) await loadCards(cx, [id])
+  if (labels) {
+    // the label cards and the cards that read a label, with the labels as they are now
+    rt.labelRead.clear()
+    for (const id of new Set([...rt.labelOf.keys(), ...rt.readers])) if (rt.shown.has(id)) await loadCards(cx, [id])
+  }
 }
 
 // ------------------------------------------------------------------------------------------------ citations
@@ -144,6 +239,12 @@ export function queueCitations(cs: readonly Citation[]): void {
   for (const c of cs) {
     const id = cid(c.raw)
     if (!rt.queue.has(id)) rt.queue.set(id, c)
+    const card = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(c.ref)?.[1]
+    if (card) {
+      const m = rt.cardCites.get(card) ?? new Map<string, Citation>()
+      m.set(id, c)
+      rt.cardCites.set(card, m)
+    }
   }
 }
 
@@ -170,13 +271,15 @@ export async function resolveCitations(cx: Ctx, cs: readonly Citation[]): Promis
   for (const c of cs) await cx.setVerdict(cid(c.raw), verdictOf(c, resolutionOf(got.value, c.ref), at))
 }
 
-/** The verdicts of the cards' takeaways, checked again (a card ran again, its cell holds new values). */
+/** The verdicts of the cards' takeaways checked again, and of every citation of a card's value seen anywhere (main's
+ *  prose, a thread's answer, a document): a card ran again, its cell holds new values, so a stale one turns red. */
 async function recheckCards(cx: Ctx, ids: readonly string[]): Promise<void> {
   const cs: Citation[] = []
   for (const id of ids) {
     const card = await cx.card(id)
     if (card) cs.push(...citations(card.takeaway))
   }
+  for (const m of rt.cardCites.values()) cs.push(...m.values())
   if (cs.length) await resolveCitations(cx, cs)
 }
 
@@ -235,6 +338,10 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
       return
     case 'doc':
       if (p.slug) {
+        // while its writer writes: the writer's chat, for what it is doing
+        await readSurface(cx, 'docs', 'docs')
+        const writer = (await cx.agents()).find(a => a.role === 'writer' && a.state === 'running')
+        if (writer?.chat) await readThread(cx, writer.chat)
         await readSurface(cx, `doc:${p.slug}`, 'doc', [p.slug])
         const doc = await surfaceValue<Record<string, unknown>>(cx, `doc:${p.slug}`)
         const ids = doc?.ok ? docUnits(doc.value).units.flatMap(s => (s.figures ?? []).map(f => String(f.cell ?? '').replace(/^(?:card|cell):/, ''))).filter(Boolean) : []
@@ -261,7 +368,7 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
       for (const t of (await cx.threads()).slice(-THREADS_READ)) await readThread(cx, t.id)
       // the one shown, though the list may not hold it yet (one just asked)
       if (p.view === 'thread' && p.thread && !(await cx.threads()).slice(-THREADS_READ).some(t => t.id === p.thread)) await readThread(cx, p.thread)
-      if (p.view === 'thread' && p.thread) await markSeen(cx, p.thread)
+      if (p.view === 'thread' && p.thread && (await showingThread(cx, p.thread))) await markSeen(cx, p.thread)
       return
     default:
   }
@@ -297,6 +404,27 @@ async function inPanel(cx: Ctx): Promise<boolean> {
   return !!rt.navFrom?.panel && (await cx.now()) - rt.navFrom.at < 5000
 }
 
+/** Whether the latest gesture came from inside the panel (within 5 s): what it opens stands on the panel's trail. */
+export async function inPanelNow(cx: Ctx): Promise<boolean> {
+  return inPanel(cx)
+}
+
+/** A thread's step after the steps of the threads it was asked from, the root first (at most 12): where a thread
+ *  opened from outside the panel starts its trail. */
+async function threadChain(cx: Ctx, p: TermPanel, step: ChatNavStep): Promise<ChatNavStep[]> {
+  const rows = await cx.threads()
+  const chain: ChatNavStep[] = [step]
+  const seen = new Set<string>([p.thread ?? ''])
+  for (let id = rows.find(r => r.id === p.thread)?.parent ?? ''; id && id !== 'main' && !seen.has(id) && chain.length < 12; id = rows.find(r => r.id === id)?.parent ?? '') {
+    seen.add(id)
+    const r = rows.find(x => x.id === id)
+    if (!r) break
+    const name = r.question || r.title
+    chain.unshift(stepOf({ view: 'thread', title: name ? `"${name.length > 60 ? `${name.slice(0, 59)}…` : name}"` : 'thread', thread: id }))
+  }
+  return chain
+}
+
 /** Show `p` in the panel: its step on the panel's way, its data read, the pane opened with the keys. A pane opened
  *  from a click on a narrow terminal waits undrawn: the row above the prompt offers it (`pending`). */
 export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
@@ -305,17 +433,42 @@ export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
   rt.navTo = null
   if (!nav) {
     const cur = (await cx.nav()) ?? NAV_EMPTY
-    nav = moved(cur, nextTrail(cur.trail, step, await inPanel(cx)))
+    nav = moved(cur, nextTrail(cur.trail, step, await inPanel(cx), p.view === 'thread' ? await threadChain(cx, p, step) : [step]))
   }
   rt.navFrom = null
   await cx.setNav(nav)
   await cx.setPanel(p)
   void loadPanel(cx, p).then(() => cx.bumpPanel())
   try {
-    const r = await cx.open({ id: PANEL, title: p.title || 'thimble', focus: true, columns: panelColumns() })
-    await cx.setPending(r.isPlaced ? null : { title: p.title })
+    const title = paneTitle(p)
+    rt.fittedFor = rt.termColumns
+    const r = await cx.open({ id: PANEL, title, focus: true, columns: panelColumns() })
+    await cx.setPending(r.isPlaced ? null : { title })
+    // with a draft in the prompt the keys stay there (Claude Code keeps the person's typing)
+    if (r.isPlaced && (await cx.promptText().catch(() => '')).trim()) cx.toast('the prompt holds a draft, so it keeps the keys: click the panel to use its keys')
   } catch (err) {
     cx.log(`thimble-term: could not open the panel: ${String(err).slice(0, 200)}`)
+  }
+}
+
+/** The title Claude Code shows on the pane for what the panel shows: `Citation`, a card's question, `Threads`, `Home`,
+ *  a view's name, `Label: <name>`, a document's title, the lists by their names. The path names each step itself. */
+export function paneTitle(p: TermPanel): string {
+  switch (p.view) {
+    case 'cite':
+      return 'Citation'
+    case 'thread':
+    case 'threads':
+    case 'ask':
+      return 'Threads'
+    case 'label':
+      return `Label: ${p.title}`
+    case 'docs':
+      return 'Documents'
+    case 'files':
+      return 'Files'
+    default:
+      return p.title || 'thimble'
   }
 }
 
@@ -368,27 +521,46 @@ function newsOf(rows: readonly TermThreadRow[]): { n: number; one: string } {
   return { n: fresh.length, one: fresh.length === 1 ? fresh[0]!.id : '' }
 }
 
-/** The threads list read again: the counts above the prompt, and a row in main's chat for each answer that came in
- *  while the panel did not show its thread (hooks/signal.ts). */
+/** Whether the panel shows a thread now: drawn (no panel waits undrawn) and showing it. */
+async function showingThread(cx: Ctx, id: string): Promise<boolean> {
+  const shown = await cx.panel()
+  if (shown?.view !== 'thread' || shown.thread !== id) return false
+  if ((await cx.pending()) !== null) return false
+  return (await cx.panes()).some(p => p.id === PANEL && p.isPlaced)
+}
+
+/** The threads list read again: the counts above the prompt, and a row in main's chat for each turn that ended (an
+ *  answer, or a failure; not a stop) while the panel did not show its thread (hooks/signal.ts). */
 export async function refreshThreads(cx: Ctx): Promise<void> {
   if (!rt.sc) return
   const got = await readState(cx, rt.sc, 'threads')
   if (!got.ok) return
   const rows = threadRowsOf(got.value)
-  const shown = await cx.panel()
   const first = rt.answers.size === 0
   for (const t of rows) {
     const was = rt.answers.get(t.id)
+    const ran = rt.running.get(t.id)
     rt.answers.set(t.id, t.answers)
-    const showing = shown?.view === 'thread' && shown.thread === t.id
-    if (!first && was !== undefined && t.answers > was && !showing && rt.anchor) {
-      const at = rt.anchor
-      await cx.setThreadRows(at, withSignal(await cx.threadRows(at), { thread: t.id, turn: t.answers }))
-    }
+    rt.running.set(t.id, t.running)
+    if (first || was === undefined || !rt.anchor) continue
+    const answered = t.answers > was
+    // a run that ended with no answer: failed, or stopped by the analyst (not news)
+    const ended = !answered && ran === true && !t.running
+    if (!answered && !ended) continue
+    if (await showingThread(cx, t.id)) continue
+    await readThread(cx, t.id)
+    const tt = await cx.thread(t.id)
+    const th = tt?.events.length ? threadOf(tt.meta, tt.events) : null
+    const turn = th ? th.turns.length : t.answers
+    if (ended && (!th || signalEnd(th, turn) !== 'failed')) continue
+    if (ended) rt.failed.add(t.id)
+    else rt.failed.delete(t.id)
+    const at = rt.anchor
+    await cx.setThreadRows(at, withSignal(await cx.threadRows(at), { thread: t.id, turn: Math.max(1, turn) }))
   }
   await cx.setThreads(rows)
   await cx.setNews(newsOf(rows))
-  if (shown?.view === 'thread' && shown.thread && rows.some(t => t.id === shown.thread && t.unread)) await markSeen(cx, shown.thread)
+  for (const t of rows) if (t.unread && (await showingThread(cx, t.id))) await markSeen(cx, t.id)
 }
 
 /** The analyst has read a thread's answers: thimble keeps it in the chat's meta (`thimble act seen`). */
@@ -412,9 +584,9 @@ export async function signalsAt(cx: Ctx, row: string): Promise<ChatSignal[]> {
 
 /** A new side thread about `anchor` (a ref) or `anchorText` (words on screen), with its first question: main forks
  *  `thread:<name>` for it, as for the browser's. Its id, or why it was refused. */
-export async function startThread(cx: Ctx, anchor: string | null, anchorText: string, message: string): Promise<{ id: string } | { error: string }> {
+export async function startThread(cx: Ctx, anchor: string | null, anchorText: string, message: string, more: { parent?: string; element?: string; title?: string } = {}): Promise<{ id: string } | { error: string }> {
   if (!rt.sc) return { error: 'thimble is not in terminal mode in this session' }
-  const got = await act(cx, rt.sc, 'thread', { anchor, message, ...(anchorText ? { anchor_text: anchorText } : {}) })
+  const got = await act(cx, rt.sc, 'thread', { anchor, message, ...(anchorText ? { anchor_text: anchorText } : {}), ...(more.parent ? { parent: more.parent } : {}), ...(more.element ? { element: more.element } : {}), ...(more.title ? { title: more.title } : {}) })
   if (!got.ok) return { error: got.error }
   const v = got.value as { thread?: unknown; id?: unknown; meta?: { id?: unknown } }
   const id = String(v.thread ?? v.id ?? v.meta?.id ?? '')
@@ -424,12 +596,14 @@ export async function startThread(cx: Ctx, anchor: string | null, anchorText: st
   return { id }
 }
 
-export async function threadMessage(cx: Ctx, thread: string, message: string): Promise<string> {
-  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+/** A question in a thread that exists: why it was refused (''), and whether thimble queued it because the thread
+ *  still answers. */
+export async function threadMessage(cx: Ctx, thread: string, message: string): Promise<{ error: string; queued: boolean }> {
+  if (!rt.sc) return { error: 'thimble is not in terminal mode in this session', queued: false }
   const got = await act(cx, rt.sc, 'thread-message', { thread, message })
-  if (!got.ok) return got.error
+  if (!got.ok) return { error: got.error, queued: false }
   await readThread(cx, thread)
-  return ''
+  return { error: '', queued: (got.value as { queued?: unknown }).queued === true }
 }
 
 // ------------------------------------------------------------------------------------------------ labels
@@ -472,7 +646,7 @@ const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n =
 export async function runLabel(cx: Ctx, id: string, name: string, limit: number): Promise<void> {
   if (!rt.sc) return
   await labelSaid(cx, id, '', { limit, at: await cx.now() })
-  const got = await actLong<{ deferred?: boolean; command?: string; summary?: { counts?: Record<string, number>; labeled?: number; failed?: number; message?: string | null } }>(cx, rt.sc, 'label-run', { label: id, ...(limit ? { limit } : {}) })
+  const got = await actLong<{ deferred?: boolean; command?: string; summary?: { counts?: Record<string, number>; labeled?: number; failed?: number; message?: string | null; stopped?: boolean } }>(cx, rt.sc, 'label-run', { label: id, ...(limit ? { limit } : {}) })
   if (!got.ok) {
     await labelSaid(cx, id, `× ${got.error}`, null)
     return
@@ -488,7 +662,18 @@ export async function runLabel(cx: Ctx, id: string, name: string, limit: number)
   await readSurface(cx, `label:${id}`, 'label', [id])
   // the label cards that count it are read again
   for (const [card, lid] of rt.labelOf) if (lid === id) await loadCards(cx, [card])
-  await labelSaid(cx, id, `ran on ${limit ? `a sample of ${(s.labeled ?? limit).toLocaleString('en-US')}` : `all ${(s.labeled ?? 0).toLocaleString('en-US')}`}${counts ? `: ${counts}` : ''}${failed}`, null)
+  const how = s.stopped ? `stopped after ${(s.labeled ?? 0).toLocaleString('en-US')}` : `ran on ${limit ? `a sample of ${(s.labeled ?? limit).toLocaleString('en-US')}` : `all ${(s.labeled ?? 0).toLocaleString('en-US')}`}`
+  // a run with failures says the first error on a row of its own, `!` in red
+  const err = s.failed && s.message && !s.stopped ? `\n! ${s.message}` : ''
+  await labelSaid(cx, id, `${how}${counts ? `: ${counts}` : ''}${failed}${err}`, null)
+}
+
+/** Stop a label's run started from its panel, after its current record (`thimble act label-stop`). */
+export async function stopLabel(cx: Ctx, id: string): Promise<void> {
+  if (!rt.sc) return
+  const got = await act(cx, rt.sc, 'label-stop', { label: id })
+  if (!got.ok) cx.toast(`thimble: the label's run was not stopped: ${got.error}`)
+  else await labelSaid(cx, id, '◌ stopping after the current record')
 }
 
 // ------------------------------------------------------------------------------------------------ the refresh loop
@@ -503,6 +688,10 @@ async function refreshHome(cx: Ctx): Promise<void> {
   if (!rt.sc) return
   const got = await readState(cx, rt.sc, 'home')
   if (!got.ok) return
+  // the views and the rest home draws, which the `↳ view` rows read too
+  await cx.setSurface('home-full', { ok: true, value: got.value })
+  const views = Array.isArray((got.value as { views?: unknown })?.views) ? ((got.value as { views: { slug?: unknown; status?: unknown }[] }).views) : []
+  if (rt.viewsBuiltBefore === null) rt.viewsBuiltBefore = new Set(views.filter(v => v?.status === 'built').map(v => String(v.slug)))
   const home = homeOf(got.value, await cx.now())
   await cx.setHome(home)
   // the session's first count is what was there already: the row above the prompt shows only what comes after
@@ -525,7 +714,7 @@ async function followUi(cx: Ctx, apply: UiApply): Promise<void> {
 }
 
 /** The areas a panel view reads. */
-const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs'], doc: ['docs', 'cards'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'], thread: ['chats'] }
+const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats', 'views', 'agents'], views: ['views'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs', 'agents'], doc: ['docs', 'cards', 'agents', 'chats'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'], thread: ['chats'] }
 
 /** One pass: what changed in the workspace since the last pass, read again where some drawing shows it. */
 export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
@@ -555,7 +744,7 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
         if (panel?.thread && (panel.view === 'thread' || panel.view === 'agent')) await readThread(cx, panel.thread)
       }
       if (areas.has('ui')) await followUi(cx, ui)
-      if (first || areas.has('cards') || areas.has('labels') || areas.has('docs') || areas.has('chats')) await refreshHome(cx)
+      if (first || areas.has('cards') || areas.has('labels') || areas.has('docs') || areas.has('chats') || areas.has('views') || areas.has('agents')) await refreshHome(cx)
       if (panel && !first) {
         if ((PANEL_AREAS[panel.view] ?? []).some(a => areas.has(a))) await loadPanel(cx, panel)
         await cx.bumpPanel()

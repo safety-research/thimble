@@ -16,7 +16,7 @@
 import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from '../types'
 import { cut, lineWidth, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, chipLabel, cid, citations, citeEnd, citeSpans, parseReply, shownMatches, valueIn } from './lib'
+import { EMBED_RE, chipLabel, cid, citations, citeEnd, citeSpans, parseReply, plainLinks, shownMatches, valueIn } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -33,7 +33,7 @@ export function citeLabel(c: Citation): string {
   return c.display ?? chipLabel(c)
 }
 
-/** The glyph of a citation being worked on: running (views/SPEC.md, "The visual system", section 5). */
+/** The glyph of a citation being worked on: running (SPEC.md, "The visual system", section 5). */
 export const SPIN = '◌'
 
 /** A verification that failed: its script recomputed another value, crashed, printed no result, or was never written. */
@@ -66,8 +66,9 @@ export function chipLook(status: string | undefined, fix: string | undefined, ve
  *  its blue becomes the background; then ◌ while it is worked on or its mark: ✓ in the text colour, × in red. */
 export function chipSegs(c: ChipView, hover: boolean, _frame = 0): Seg[] {
   const segs: Seg[] = [{ s: c.label, fg: c.state === 'link' ? COLORS.link : COLORS.problem, u: true, ...(hover ? { inv: true } : {}) }]
+  // the mark a cell apart from the value, as the spinner is: `19,931 ✓`, not `19,931✓`
   if (c.spin) segs.push({ s: ` ${SPIN}`, ...(c.state === 'link' ? {} : { fg: COLORS.problem }) })
-  else if (c.mark) segs.push({ s: c.mark, ...(c.mark === '✓' ? {} : { fg: COLORS.problem }) })
+  else if (c.mark) segs.push({ s: ` ${c.mark}`, ...(c.mark === '✓' ? {} : { fg: COLORS.problem }) })
   return segs
 }
 
@@ -408,7 +409,8 @@ export function claimsIn(text: string, answer: string): Claim[] {
 
 /** A text with each citation as its shown words, for a line the analyst reads where no link is drawn. */
 export function plainCites(text: string): string {
-  return citations(text).reduce((t, c) => t.replaceAll(c.raw, citeLabel(c)), text)
+  // a citation written as a Markdown link has no `[[…]]` spelling to replace: its link goes to its shown words
+  return plainLinks(citations(text).reduce((t, c) => t.replaceAll(c.raw, citeLabel(c)), text))
 }
 
 // ---------------------------------------------------------------------------------------- a cited record
@@ -521,20 +523,6 @@ export function fixItems(text: string, problems: Problem[]): ChatFixItem[] {
     }
   }
   return items
-}
-
-/** What the fix round's forked subagent is asked: each passage and its problems, answered with each sentence
- *  rewritten whole, one line per passage. `thread`: the side thread's answer the passages are in, which the fork's
- *  conversation does not hold; absent for main's last reply. */
-export function fixPrompt(items: ChatFixItem[], thread?: string): string {
-  const whose = thread === undefined ? 'your last reply has' : "a side thread's answer, which the analyst reads in the panel, has"
-  return [
-    `thimble-cc-mod: ${whose} problems the analyst sees in red. Fix them here: rerun or fix a card's script, or cite the value the place shows. Do not change the corpus; write only under .thimble-cc-mod/.`,
-    ...(thread === undefined ? [] : ['The answer:', thread, '', 'Its problems:']),
-    ...items.map((it, i) => `${i + 1}. ${it.old}\n   ${it.problems.map(p => (p.raw === it.old ? p.why : `${p.raw}: ${p.why}`)).join('; ')}`),
-    'Then answer with one line per item and nothing else: `<n>: <the corrected item>`, or `<n>: CANNOT <why>`.',
-    'thimble-cc-mod puts each corrected item in place of the old one. Give a sentence whole, rewritten so that every word of it agrees with the corrected values (a comparison, a ranking, a share such as "about a third"), its citations included; a table row whole, its cells between | as before; a card by its embed line.',
-  ].join('\n')
 }
 
 export type FixAnswer = { ok: true; text: string } | { ok: false; why: string }
@@ -799,7 +787,7 @@ function runMarkdown(r: Run, n: number, link: (c: Citation, n: number) => string
   return s
 }
 
-/** A block thimble-cc-mod used to draw itself (a paragraph, heading, list item, quote or table holding citations) as
+/** A block that holds citations (a paragraph, heading, list item, quote or table) as
  *  Markdown the engine draws, each citation a link, so its text selects like any reply's and a plain click on a
  *  citation is a press. */
 export function richMarkdown(block: { prefix: string; heading: number; quote: boolean; runs: Run[]; table?: TableRuns }, link: (c: Citation, n: number) => string): string {

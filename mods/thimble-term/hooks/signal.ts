@@ -8,9 +8,8 @@
 //
 // The row stands under the latest row of main's chat a hook of the mod can draw a line under (its anchor): a text row
 // of main's reply, the analyst's prompt, the line saying how long a turn took, or a command's output. They are drawn by
-// the uuid they were stored under (their `requestId`), which a resumed session keeps, so the rows, the anchor and the
-// answers read are kept in .thimble-cc-mod/signals.json and come back with `claude --resume`. register.tsx keeps the
-// state and draws; this file holds the rules, without `$`.
+// the uuid they were stored under (their `requestId`), which a resumed session keeps. register.tsx keeps the rows by
+// that uuid in the plugin's state (`threadRows`) and draws; this file holds the rules, without `$`.
 import type { ChatSignal, ChatThread } from '../types'
 import { plainCites } from './cite'
 
@@ -57,12 +56,6 @@ export function signalEnd(t: Pick<ChatThread, 'turns'>, turn: number): 'answered
 export function signalQuestion(t: Pick<ChatThread, 'turns' | 'label'>, turn: number, n = 48): string {
   const q = t.turns[turn - 1]?.q
   return q ? `"${firstWords(plainCites(q), n)}"` : `about ${firstWords(plainCites(t.label), n)}`
-}
-
-/** Whether the turn a row reports is read: the analyst has seen as many answers as it was. */
-export function signalRead(t: Pick<ChatThread, 'turns'>, turn: number, seen: number | undefined): boolean {
-  const answeredBy = t.turns.slice(0, turn).filter(x => x.state === 'done').length
-  return seen !== undefined && seen >= answeredBy
 }
 
 /** What signals.json holds: the session it was written in (an anchor names a row of that session's transcript), the

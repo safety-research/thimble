@@ -313,7 +313,7 @@ def test_terminal_mode_launches_with_no_server_the_renderer_the_card_runner_and_
     assert os.environ.get("THIMBLE_MODE") is None and os.environ.get("THIMBLE_WS") is None, "and only it"
     assert "\n".join(lines[12:]).strip(), "main's prompt is appended as in browser mode"
 
-    (t.renderer / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble-cc-mod"}))
+    (t.renderer / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "other-plugin"}))
     lines = cli.launch_args(t.folder).split("\n")
     assert lines[10] == "terminal", "no renderer to load"
     assert any(n.startswith("thimble: WARNING - terminal mode's renderer cannot load") for n in lines[9].split("\t"))
