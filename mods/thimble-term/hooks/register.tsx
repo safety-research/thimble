@@ -131,6 +131,7 @@ function cxOf($: Dollar): Ctx {
       rt.own.add(text)
       await $.prompt.submit({ text, asUser: true })
     },
+    command: async (name, args) => void (await $.command.run({ command: name, args })),
     promptText: async () => (await $.prompt.read().catch(() => ({ text: '' }))).text,
     focus: async key => void (await $.ui.focus({ requestId: PANEL, key }).catch(() => undefined)),
     els: e => $.ui.resolve(e as ResolveInput<'Pane', 'terminal'>),

@@ -178,6 +178,10 @@ export type World = {
   /** a promise a spawned act waits for before it answers (a label's run that goes on), and what label-run answers */
   hold: Promise<void> | null
   labelRun: Record<string, unknown> | null
+  /** a document by its slug, over the fixtures' */
+  docs: Record<string, unknown>
+  /** the slash commands run, as `/name args` */
+  commands: string[]
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
@@ -203,6 +207,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     panes: [],
     hold: null,
     labelRun: null,
+    docs: {},
+    commands: [],
   }
   const ws = opts.ws === undefined ? WS : opts.ws
   mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI })
@@ -253,6 +259,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       case 'docs':
         return out(w.states.docs)
       case 'doc':
+        if (w.docs[rest[0]!]) return out(w.docs[rest[0]!])
         return rest[0] === 'report' ? out(DOC) : rest[0] === 'slides' ? out(SLIDES) : out({ error: 'no doc' }, 1)
       case 'threads':
         return out(w.states.threads)
@@ -304,7 +311,10 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
   on('ui.log', () => ({ value: undefined }) as never)
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
-  on('command.run', () => ({ text: '(the engine command)' }))
+  on('command.run', ($, e) => {
+    w.commands.push(`/${e.command} ${e.args}`.trim())
+    return { text: '(the engine command)' }
+  })
   on('tool.call', () => ({ result: w.toolText, text: w.toolText }) as never)
   on('ui.copy', () => ({ value: { isCopied: true } }) as never)
   on('prompt.submit', ($, e) => {

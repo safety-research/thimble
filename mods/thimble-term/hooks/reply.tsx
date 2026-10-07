@@ -197,6 +197,8 @@ export type ReplyOpts = {
   card?: string
   /** where a card that cannot be drawn is: `reply` (`card 2`), or `report` (`this card`) */
   in?: 'reply' | 'report'
+  /** the mark to light on a card, by its id (a story beat's step) */
+  focus?: Record<string, Focus>
 }
 
 /** A reply's blocks as rows: Markdown as the engine draws it, a paragraph or table that holds citations as links, a card
@@ -304,7 +306,7 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     if (block.type === 'card') {
       if (opts.skipCards?.has(block.id)) continue
       order++
-      const focus = block.caption ? await captionFocus(cx, block.id, block.caption) : undefined
+      const focus = opts.focus?.[block.id] ?? (block.caption ? await captionFocus(cx, block.id, block.caption) : undefined)
       const card = await cardBlock(cx, e, block.id, cols, key, { order, in: opts.in ?? 'reply', ...(focus ? { focus } : {}) })
       const ask: Ask = { key, words: `card:${block.id}`, top: 1, ...(opts.ask ? { press: () => opts.ask!({ kind: 'card', ref: `card:${block.id}`, cardId: block.id }) } : {}) }
       push(await row(card, ask), false)

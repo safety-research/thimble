@@ -36,6 +36,8 @@ import type { Citation } from './lib'
 import { linesEl } from './lines'
 import type { LineHit } from './lines'
 import { docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
+import type { DocFigure, DocSection } from './model'
+import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimSentence, drawReply, placeName, plainWhy, scrubIds } from './reply'
@@ -1390,68 +1392,196 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
 
 // ------------------------------------------------------------------------------------------------ documents
 
+// the documents list's chosen row
+let docPick = ''
+
+/** The documents (views/SPEC.md, section 7, "Reports"): one row per document, ◌ while its writer writes, ● written,
+ *  its title, its kind dim at R; `❯` on the chosen row, ↑↓ or j k choose, Enter or a click opens it, 1-9 the first
+ *  nine; at most 40. */
 async function drawDocs(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Button } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
   const got = await surfaceValue(cx, 'docs')
-  const docs = got?.ok ? docsOf(got.value) : []
+  const docs = (got?.ok ? docsOf(got.value) : []).sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0)).slice(0, 40)
   const body: RenderElement[] = [...headerEls(els, { title: 'Documents', cols, sub: subLine([plural(docs.length, 'document')]) })]
+  const pick = docs.find(d => d.slug === docPick)?.slug ?? docs[0]?.slug ?? ''
+  const open = (d: (typeof docs)[number]) => openDoc(cx, d.slug, d.title)
   const { lines, hits } = listLines(
-    docs.map(d => ({ key: d.slug, glyph: { s: d.status === 'generating' ? '◌' : '●' }, name: d.title, right: [dim(d.renderer)], run: () => openDoc(cx, d.slug, d.title) })),
-    '',
+    docs.map(d => ({ key: d.slug, glyph: { s: d.status === 'generating' ? '◌' : '●' }, name: d.title, right: [dim(d.status === 'generating' ? `${d.renderer} · writing` : d.renderer)], run: () => open(d) })),
+    pick,
     cols,
   )
-  body.push(linesEl(cx, e, marginKey('docs-list'), lines, hits, cols + MARGIN_W))
+  const step = (k: number) => {
+    const at = docs.findIndex(d => d.slug === pick)
+    docPick = docs[Math.max(0, Math.min(docs.length - 1, at + k))]?.slug ?? ''
+    return cx.bumpPanel()
+  }
+  body.push(linesEl(cx, e, marginKey('docs-list'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? open(docs.find(d => d.slug === pick)!) : undefined)))
   body.unshift(
     <Box key="doc-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
-      {docs.map((d, i) => <Button key={`doc-open-${i}`} label={d.title} plain onPress={() => void openPanel(cx, { view: 'doc', title: d.title, slug: d.slug })} />)}
+      {docs.map((d, i) => (
+        <Button key={`doc-open-${i}`} label={d.title} plain {...(i < 9 ? { hotkey: String(i + 1) } : {})} onPress={() => void open(d)} />
+      ))}
     </Box>,
   )
-  body.push(hintsRow(els, ['b to go back', 'x to close'], cols))
+  body.push(hintsRow(els, docs.length ? ['↑↓ to choose', 'Enter to open'] : [], cols))
   return <Box flexDirection="column">{body}</Box>
 }
 
-/** One document (views/SPEC.md, section 7, "A report"): the title in the accent and bold, wrapped; `Contents` bold, the
- *  sections numbered in a dim column; then each section drawn as main's chat draws a reply, at A0: its heading bold, its
- *  prose filling the type area, its cards in their borders with their captions dim under them. */
+/** What a document's writer is doing while it writes: its tool calls, its latest words, and the request it was given. */
+async function writerState(cx: Ctx): Promise<{ tools: number; words: string; request: string } | null> {
+  const a = ((await cx.agents()) ?? []).find(x => x.role === 'writer' && x.state === 'running')
+  const tt = a?.chat ? await cx.thread(a.chat) : undefined
+  if (!a) return null
+  let tools = 0
+  let words = ''
+  let request = ''
+  for (const ev of tt?.events ?? []) {
+    if (ev.type === 'user' && !request) request = str(ev.text)
+    if (ev.type === 'tool_use') {
+      tools++
+      words = ''
+    } else if (ev.type === 'text') words += str(ev.delta ?? ev.text)
+  }
+  return { tools, words: words.replace(/\s+/g, ' ').trim(), request: request || str(tt?.meta.title) }
+}
+
+/** A document's unit as Markdown: its heading, its paragraphs (a slide's sentences as a list), each figure where it
+ *  stands, its caption italic under it. */
+function unitMarkdown(s: DocSection): string {
+  const figs = s.figures ?? []
+  const placed = new Set<number>()
+  const md: string[] = [`## ${str(s.heading)}`]
+  const figure = (k: number) => {
+    const f = figs[k]!
+    placed.add(k)
+    const cell = str(f.cell).replace(/^(?:card|cell):/, '')
+    if (cell) md.push('', `[[card:${cell}]]`, ...(f.caption ? [`*${str(f.caption).replace(/\*/g, '')}*`] : []))
+  }
+  for (const para of s.paragraphs ?? []) {
+    const ss = para.sentences ?? []
+    // a slide's sentences are a list: docUnits put each bullet before its words already
+    const words = ss.some(x => x.bullet) ? ss.map(x => (x.bullet ? str(x.text) : `- ${str(x.text)}`)).join('\n') : ss.map(x => str(x.text)).join(' ')
+    if (words.trim()) md.push('', words)
+    figs.forEach((f, k) => (f.after_paragraph === para.id && !placed.has(k) ? figure(k) : undefined))
+  }
+  figs.forEach((_f, k) => (!placed.has(k) ? figure(k) : undefined))
+  return md.join('\n')
+}
+
+/** The mark each figure of a story's beat lights: the rows, events or nodes its step names (story.step_of). */
+function stepFocus(s: DocSection): Record<string, Focus> {
+  const out: Record<string, Focus> = {}
+  for (const f of (s.figures ?? []) as (DocFigure & { highlight?: unknown })[]) {
+    const first = Array.isArray(f.highlight) ? str(f.highlight[0]) : ''
+    const cell = str(f.cell).replace(/^(?:card|cell):/, '')
+    if (cell && first) out[cell] = { row: first, event: first, node: first }
+  }
+  return out
+}
+
+/** One document (views/SPEC.md, section 7, "A report"): the title in the accent and bold, wrapped; while its writer
+ *  writes, `◌ writing · N tool calls · <its latest words>` (and the request until anything is written). A report:
+ *  `Contents` from three headings, each a click (or 1-9) away; each section drawn as main's chat draws a reply. A deck
+ *  or a story steps one slide or beat at a time: `‹ 3 of 9 ›`, `previous  next` (p, n), a deck's `notes` (o), a
+ *  story's `read as a page` (a), its figure lit at the beat's step. At the bottom `all documents ›` (l) and the retell
+ *  controls, `as slides` (s) and `as a story` (y), which ask main to write it again in that form. A passage's "?" asks a
+ *  side thread told the document, its section and the passage. */
 async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
-  const { Box, Text } = cx.els(e)
+  const { Box, Text, Button } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
   const got = await surfaceValue<Obj>(cx, `doc:${p.slug ?? ''}`)
-  if (!got) return none(cx, e, '◌ reading the document')
-  if (!got.ok) return <Box flexDirection="column"><Text color={COLORS.problem} wrap="wrap">{`× ${got.error}`}</Text></Box>
-  const doc = got.value
-  const { units: sections } = docUnits(doc)
-  const body: RenderElement[] = [...headerEls(els, { title: str(doc.title) || p.title, cols })]
-  if (sections.length > 1) {
-    body.push(<Text key="doc-contents" bold>Contents</Text>)
-    const w = String(sections.length).length
-    sections.forEach((s, i) => body.push(<Text key={`doc-toc-${i}`} wrap="truncate-end"><Text dimColor>{`${String(i + 1).padStart(w)}  `}</Text><Text>{plainCites(str(s.heading))}</Text></Text>))
-  }
-  // each section as Markdown: its heading, its paragraphs (a slide's sentences as a list), each figure where it stands
-  for (const [i, s] of sections.entries()) {
-    const figs = s.figures ?? []
-    const placed = new Set<number>()
-    const md: string[] = [`## ${str(s.heading)}`]
-    const figure = (k: number) => {
-      const f = figs[k]!
-      placed.add(k)
-      const cell = str(f.cell).replace(/^(?:card|cell):/, '')
-      if (cell) md.push('', `[[card:${cell}]]`, ...(f.caption ? [`*${str(f.caption).replace(/\*/g, '')}*`] : []))
+  const listed = await surfaceValue(cx, 'docs')
+  const entry = listed?.ok ? docsOf(listed.value).find(d => d.slug === p.slug) : undefined
+  const writing = entry?.status === 'generating' ? await writerState(cx) : null
+  if (!got && !writing) return none(cx, e, '◌ reading the document')
+  if (got && !got.ok && !writing) return <Box flexDirection="column"><Text color={COLORS.problem} wrap="wrap">{`× ${got.error}`}</Text></Box>
+  const doc = got?.ok ? got.value : {}
+  const title = str(doc.title) || entry?.title || p.title
+  const slug = p.slug ?? ''
+  const form = str(doc.renderer) || str(doc.type) || entry?.renderer || 'document'
+  const { units } = docUnits(doc)
+  const sub = writing ? subLine([`◌ writing · ${plural(writing.tools, 'tool call')}${writing.words ? ` · ${clip(writing.words, Math.max(20, cols - 30))}` : ''}`]) : undefined
+  const body: RenderElement[] = [...headerEls(els, { title, cols, ...(sub ? { sub } : {}) })]
+  if (writing && !units.length && writing.request) body.push(<Text key="doc-request" dimColor wrap="wrap">{`the request: ${clip(writing.request, 600)}`}</Text>)
+  const keys: Key[] = []
+  const at = (k: number) => openPanel(cx, { ...p, start: k })
+  // a passage's thread is told the document, its section and the passage
+  const askIn = (u: DocSection) => (tgt: Target) =>
+    void openAsk(cx, tgt, tgt.kind === 'sentence' ? { anchor: `report:${slug}${u.id ? `#${u.id}` : ''}`, anchorText: `"${title}" › ${plainCites(str(u.heading))}: ${plainCites(tgt.text ?? '')}`, element: `report:${slug}${u.id ? `#${u.id}` : ''}` } : { element: `report:${slug}${u.id ? `#${u.id}` : ''}` })
+  const drawUnit = async (u: DocSection, i: number, focus?: Record<string, Focus>) => drawReply(cx, e, unitMarkdown(u), cols, { margin: PANEL_MARGIN, prefix: `d${i}-`, ask: askIn(u), open: id => void openThread(cx, id), in: 'report', ...(focus ? { focus } : {}) })
+  const stepped = units.length > 0 && (form === 'slides' || (form === 'story' && p.mode !== 'page'))
+  const controls: (RenderElement | null)[] = []
+  const hints: string[] = []
+  if (stepped) {
+    const i = Math.max(0, Math.min(units.length - 1, p.start ?? 0))
+    const u = units[i]!
+    body.push(<Box key={marginKey(`doc-unit-${i}`)} flexDirection="column">{await drawUnit(u, i, form === 'story' ? stepFocus(u) : undefined)}</Box>)
+    const notes = str((u as { notes?: unknown }).notes)
+    if (form === 'slides' && notes && p.mode === 'notes') body.push(<Box key="doc-notes" flexDirection="column" marginTop={1}><Text bold>Notes</Text><Text wrap="wrap">{notes}</Text></Box>)
+    // the page row: ‹ and › a click away, ← → once it has the keys
+    const pageWords = `${i + 1} of ${units.length}`
+    const pageLine: Line = [{ s: '‹', fg: i > 0 ? LINK : COLORS.dim }, { s: `  ${pageWords}  ` }, { s: '›', fg: i < units.length - 1 ? LINK : COLORS.dim }]
+    const prev = () => (i > 0 ? at(i - 1) : undefined)
+    const next = () => (i < units.length - 1 ? at(i + 1) : undefined)
+    body.push(<Box key="doc-page" marginTop={1}>{linesEl(cx, e, 'doc-page', [pageLine], [{ y: 0, x0: 0, x1: 1, row: false, run: prev }, { y: 0, x0: width(pageWords) + 5, x1: width(pageWords) + 6, row: false, run: next }], cols, k => (k === 'left' || k === 'pageup' ? prev() : k === 'right' || k === 'pagedown' || k === 'space' || k === ' ' ? next() : undefined))}</Box>)
+    controls.push(i > 0 ? <Button key="doc-prev" label="previous" plain onPress={() => void prev()} /> : null, i < units.length - 1 ? <Button key="doc-next" label="next" plain onPress={() => void next()} /> : null)
+    keys.push({ key: 'prev', hotkey: 'p', onPress: () => void prev() }, { key: 'next', hotkey: 'n', onPress: () => void next() })
+    hints.push('p n to step')
+    if (form === 'slides' && units.some(x => str((x as { notes?: unknown }).notes))) {
+      const flip = () => void openPanel(cx, { ...p, mode: p.mode === 'notes' ? '' : 'notes' })
+      controls.push(<Button key="doc-notes-flip" label={p.mode === 'notes' ? 'hide notes' : 'notes'} plain onPress={flip} />)
+      keys.push({ key: 'notes', hotkey: 'o', onPress: flip })
+      hints.push('o for notes')
     }
-    for (const para of s.paragraphs ?? []) {
-      const ss = para.sentences ?? []
-      const words = ss.some(x => x.bullet) ? ss.map(x => `- ${str(x.text)}`).join('\n') : ss.map(x => str(x.text)).join(' ')
-      if (words.trim()) md.push('', words)
-      figs.forEach((f, k) => (f.after_paragraph === para.id && !placed.has(k) ? figure(k) : undefined))
+    if (form === 'story') {
+      const page = () => void openPanel(cx, { ...p, mode: 'page', start: 0 })
+      controls.push(<Button key="doc-page-read" label="read as a page" plain onPress={page} />)
+      keys.push({ key: 'page', hotkey: 'a', onPress: page })
+      hints.push('a for the page')
     }
-    figs.forEach((_f, k) => (!placed.has(k) ? figure(k) : undefined))
-    body.push(<Box key={marginKey(`doc-sec-${i}`)} flexDirection="column" marginTop={i === 0 && sections.length <= 1 ? 0 : 1}>{await drawReply(cx, e, md.join('\n'), cols, { margin: PANEL_MARGIN, prefix: `d${i}-`, ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}</Box>)
+  } else {
+    const from = Math.max(0, Math.min(units.length - 1, p.start ?? 0))
+    // the contents from three headings: each a click away (and 1-9), drawing the document from there
+    if (units.length >= 3) {
+      body.push(<Text key="doc-contents" bold>Contents</Text>)
+      const shown = units.slice(0, 24)
+      const w = String(shown.length).length
+      const lines: Line[] = shown.map((u, i) => [dim(`${String(i + 1).padStart(w)}  `), { s: plainCites(str(u.heading)), ...(i === from && from > 0 ? { fg: ACCENT } : {}) }])
+      body.push(linesEl(cx, e, 'doc-toc', lines, shown.map((_u, i) => ({ y: i, x0: 0, x1: cols, row: true, run: () => at(i) })), cols))
+      shown.slice(0, 9).forEach((_u, i) => keys.push({ key: `sec${i}`, hotkey: String(i + 1), onPress: () => void at(i) }))
+      hints.push('1-9 for a section')
+    }
+    for (const [i, u] of units.entries()) {
+      if (i < from) continue
+      body.push(<Box key={marginKey(`doc-sec-${i}`)} flexDirection="column" marginTop={i === 0 && units.length <= 1 ? 0 : 1}>{await drawUnit(u, i)}</Box>)
+    }
   }
-  body.push(hintsRow(els, ['b to go back', 'x to close'], cols))
-  return <Box flexDirection="column">{body}</Box>
+  // retell: main writes the document again in another form (thimble's writer)
+  const retell = (to: 'slides' | 'story') => () => void cx.command('thimble:write', `${to} Retell the document "${title}" as ${to === 'slides' ? 'slides' : 'a story'}.`).catch(err => cx.toast(`thimble: could not start the writer: ${String(err).slice(0, 200)}`))
+  if (units.length && !writing) {
+    const letters: string[] = []
+    if (form !== 'slides') {
+      controls.push(<Button key="doc-as-slides" label="as slides" plain onPress={retell('slides')} />)
+      keys.push({ key: 'slides', hotkey: 's', onPress: retell('slides') })
+      letters.push('s')
+    }
+    if (form !== 'story') {
+      controls.push(<Button key="doc-as-story" label="as a story" plain onPress={retell('story')} />)
+      keys.push({ key: 'story', hotkey: 'y', onPress: retell('story') })
+      letters.push('y')
+    }
+    hints.push(`${letters.join(' ')} to retell`)
+  }
+  const all = () => void openPanel(cx, { view: 'docs', title: 'Documents' })
+  controls.push(<Button key="doc-all" label="all documents ›" plain onPress={all} />)
+  keys.push({ key: 'all', hotkey: 'l', onPress: all })
+  hints.push('l for all documents')
+  body.push(...bottomRows(cx, e, cols, controls, [], hints))
+  const hk = hiddenKeys(cx, e, keys)
+  return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
 
 // ------------------------------------------------------------------------------------------------ files

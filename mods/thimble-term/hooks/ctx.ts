@@ -30,6 +30,8 @@ export type Ctx = {
   toast: (text: string) => void
   /** a prompt to main, as the analyst's (a code label's run, which only main's Bash runs; a new label described) */
   submit: (text: string) => Promise<void>
+  /** a slash command run as if the analyst typed it (a plugin's skill, such as `thimble:write`) */
+  command: (name: string, args: string) => Promise<void>
   /** the prompt box's draft */
   promptText: () => Promise<string>
   /** the keyboard to one of the panel's elements, by its key */

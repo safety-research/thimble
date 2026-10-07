@@ -315,6 +315,10 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
       return
     case 'doc':
       if (p.slug) {
+        // while its writer writes: the writer's chat, for what it is doing
+        await readSurface(cx, 'docs', 'docs')
+        const writer = (await cx.agents()).find(a => a.role === 'writer' && a.state === 'running')
+        if (writer?.chat) await readThread(cx, writer.chat)
         await readSurface(cx, `doc:${p.slug}`, 'doc', [p.slug])
         const doc = await surfaceValue<Record<string, unknown>>(cx, `doc:${p.slug}`)
         const ids = doc?.ok ? docUnits(doc.value).units.flatMap(s => (s.figures ?? []).map(f => String(f.cell ?? '').replace(/^(?:card|cell):/, ''))).filter(Boolean) : []
@@ -686,7 +690,7 @@ async function followUi(cx: Ctx, apply: UiApply): Promise<void> {
 }
 
 /** The areas a panel view reads. */
-const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats', 'views', 'agents'], views: ['views'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs'], doc: ['docs', 'cards'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'], thread: ['chats'] }
+const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats', 'views', 'agents'], views: ['views'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs', 'agents'], doc: ['docs', 'cards', 'agents', 'chats'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'], thread: ['chats'] }
 
 /** One pass: what changed in the workspace since the last pass, read again where some drawing shows it. */
 export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
