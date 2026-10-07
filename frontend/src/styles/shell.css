@@ -69,6 +69,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: normal;
 }
 .shell-corpus-caret {
   flex: none;
@@ -212,6 +213,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: normal;
 }
 .pane-name-ico,
 .pane-name-caret {

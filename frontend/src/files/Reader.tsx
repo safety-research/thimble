@@ -1304,7 +1304,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
           <>
             {isTranscript && !binary && !isDatabase && loaded && !noViewReason && (
               <div className="reader-colorbar">
-                <ColorBy choice={color.choice} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={color.values} off={color.off} onChoose={color.choose} onToggle={color.toggle} countsOf={fileOf} onColor={color.recolor} onResetColors={color.resetColors ?? undefined} />
+                <ColorBy choice={color.choice} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={color.values} off={color.off} onChoose={color.choose} onToggle={color.toggle} countsOf={fileOf} onColor={color.recolor} onResetColors={color.resetColors ?? undefined} pickedOf={color.pickedOf} />
               </div>
             )}
             <div className="reader-main">

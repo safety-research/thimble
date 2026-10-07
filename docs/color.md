@@ -6,13 +6,17 @@ color control of your own, so that every view colors the same way. Color is one 
 choice is drawn in colors, on the chips, the records' bars, the tracks and the chart marks. Show any other category of
 the view as text, a glyph or a gray pattern, never in a second palette.
 
-- One menu lists Off, the fields the view can color by and every label over files. Fields are values the files hold or
+- One menu lists Off, the fields the view can color by and every label over files, each with how many values it
+  colors by and those values as chips on a line under its name. Fields are values the files hold or
   the reader works out, such as a kind or a source. The labels that mark the view's files come first, each with its
-  switch and an info button that shows the label's definition in place: what it asks or matches, its values with what
-  each means, the files it covers and how many records it has read, and Open label, which opens it in thimble's label
-  panel.
-- Color by is thimble's small secondary button, with the choice in it: "Color by: Kind". While a label is the choice, an
-  info button beside it opens the label's definition.
+  switch.
+- Choosing a label colors by it and opens thimble's label editor beside the menu, which stays open with the label
+  checked: the same editor as Files' (what it labels and marks, the files it applies to, its classifier, its prompt,
+  pattern or code, and its classes with their colors and highlights), drawn by thimble over the view, so the view
+  stays where it is. A class's color square opens the same palette as a chip's square. Escape, ×, Cancel and Re-run
+  close the editor and put the focus back on the label's row; a click in the view closes it too. Choosing a field or
+  Off opens nothing.
+- Color by is thimble's small secondary button, with the choice in it: "Color by: Kind".
 - Off colors nothing: no chips, no bars, and the tracks and the time range's overview draw every record in gray.
 - The values of the chosen field show as key chips in the top row (`chip chip-key` in the view kit): a square of the
   value's color, its name and its count. A click turns a value off or on. An Alt-click, or a double click, shows that
@@ -192,8 +196,11 @@ for a record the label does not mark.
   value always has its declared color; another value keeps its color after it first shows.
 - A value turned off is hidden (`chips: 'filter'`) or dimmed (`'highlight'`) wherever its records show on the page.
   A page that leaves those records out itself, as the reader above does, loses nothing.
-- A label's definition comes from thimble itself: the control asks with `thimble.fetch({$thimble: 'label', id})`,
-  which thimble answers without calling the reader.
+- What a label's values mean comes from thimble itself: the control asks with `thimble.fetch({$thimble: 'label',
+  id})`, which thimble answers without calling the reader.
+- The label editor opens through `thimble.editLabel(id, {anchor: menu})` during the analyst's click (the bridge's
+  label calls take effect only then). A page that offers its own control for a label can open the editor the same way,
+  with that control as the anchor.
 
 ## The control
 

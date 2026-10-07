@@ -29,6 +29,8 @@ export interface ColorBy {
   recolor: (value: string, color: number) => void
   /** give a key's values their own colors back; null when none was picked */
   resetColors: (() => void) | null
+  /** the colors picked for a choice's values, by the choice's id (choiceId) */
+  pickedOf: (id: string) => Readonly<Record<string, number>> | undefined
 }
 
 /** The file's keys (GET /source/keys), asked once per file while `on`. */
@@ -165,6 +167,7 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
         : null,
     [key, hasPicked, kept, keep, id],
   )
+  const pickedOf = useCallback((c: string) => kept.colors?.[c], [kept.colors])
   return {
     keys,
     choice,
@@ -178,5 +181,6 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
     toggle,
     recolor,
     resetColors,
+    pickedOf,
   }
 }

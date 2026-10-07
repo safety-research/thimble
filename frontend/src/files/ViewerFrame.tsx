@@ -18,7 +18,9 @@
 //   key       sent once the page is ready: the key the bridge puts on each labelCall
 //   labelCall the page's label controls (labelCalls.ts), answered by labelDone: done here as the Labels pane does them
 //             (`labelActions`), a mark stored as the analyst's verdict and the label filter set, each only during the
-//             analyst's own gesture in the frame; labelRefused says the bridge refused one for want of a gesture
+//             analyst's own gesture in the frame; labelRefused says the bridge refused one for want of a gesture. `edit`
+//             opens the label editor in a popover over the page (LabelEditor), beside its `anchor` rect, and the page
+//             hears labelEditorClosed {id, focus} when it closes: the call's id, and whether the focus came back
 //   hidden    how many anchored refs the bridge hides for the label filter, which with what the reader left out for
 //             it (the records answers' `hidden`) is the count the view's head shows (onHidden)
 //   state     what the analyst is looking at (the element they picked, scroll positions, fields), asked for through
@@ -669,7 +671,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           if (typeof d.key !== 'string' || !pageKey.current || d.key !== pageKey.current) return done('this label call did not come through thimble')
           if (!inGesture(frame)) return done(NO_GESTURE)
           notePress(frame)
-          runLabelCall(String(d.op), d.args, { ws, byId: known.current, palette: colours.current, actions: actions.current }).then(
+          const closed = (focused: boolean) => post({ type: P + 'labelEditorClosed', id: d.id, focus: focused })
+          runLabelCall(String(d.op), d.args, { ws, byId: known.current, palette: colours.current, actions: actions.current, frame, onEditorClosed: closed }).then(
             () => done(),
             (err: Error) => done(err.message || String(err)),
           )

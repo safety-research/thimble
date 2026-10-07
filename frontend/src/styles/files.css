@@ -202,6 +202,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: normal;
 }
 .files-caret {
   flex: none;
@@ -1071,6 +1072,21 @@
   font: var(--type-body-sm);
 }
 
+/* the same card in the popover beside the control that opened it (LabelEditor): the popover is its paper, its place
+   and its scroll, at the card's own width */
+.label-editor-pop.popover {
+  padding: 0;
+}
+.label-editor-body {
+  outline: none;
+}
+.label-card.in-popover {
+  position: static;
+  width: auto;
+  max-height: none;
+  overflow: visible;
+}
+
 /* the edit card in a popover on a card (LabelCard LabelSheet): the card's head, the same fields, and each class's
    count before its switch */
 .label-sheet-popover.popover {
@@ -1592,7 +1608,6 @@
 .track {
   position: relative;
   flex: none;
-  border-radius: 2px;
   background: rgba(var(--ink-rgb), 0.04);
 }
 .track-over {
@@ -1606,7 +1621,7 @@
   pointer-events: none;
 }
 /* the frame over what the reader shows on the overview: exactly as wide as its track, in the full ink with a line of
-   the paper inside it, so that it stands out over any color */
+   the paper inside it, so that it stands out over any color; square, so that the lines start at its corners */
 .track-frame-over {
   position: absolute;
   top: 0;
@@ -1614,7 +1629,7 @@
   right: 0;
   box-sizing: border-box;
   border: 2px solid var(--text-primary);
-  border-radius: 2px;
+  border-radius: 0;
   box-shadow: inset 0 0 0 1px var(--surface-card);
   cursor: grab;
 }
@@ -1631,6 +1646,7 @@
 }
 .track-link polygon {
   fill: rgba(var(--ink-rgb), 0.08);
+  shape-rendering: crispEdges;
 }
 .track-link line {
   stroke: rgba(var(--ink-rgb), 0.62);
@@ -1650,7 +1666,6 @@
 .track-zoom-faded {
   top: 0;
   bottom: 0;
-  border-radius: 2px;
 }
 /* the lens: a raised box of the paper, framed, over what the reader shows on the zoomed track, a margin of the paper
    around the part shown (LENS_OUT_PX); the records it holds are drawn over it in full */
@@ -1660,7 +1675,6 @@
   right: -3px;
   box-sizing: border-box;
   border: 1px solid rgba(var(--ink-rgb), 0.55);
-  border-radius: var(--radius-chip);
   background: var(--surface-card);
   box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.3);
   pointer-events: none;
@@ -1675,7 +1689,6 @@
   left: 0;
   right: 0;
   display: block;
-  border-radius: 1px;
   background: rgba(var(--ink-rgb), 0.2);
 }
 .track-rec b {
@@ -1774,25 +1787,6 @@
 .colorby-caret {
   color: var(--text-tertiary);
 }
-.colorby-info {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: 22px;
-  height: 22px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-ui);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-}
-.colorby-info:hover,
-.colorby-info[aria-expanded='true'] {
-  background: var(--surface-hover);
-  color: var(--text-primary);
-}
 .colorby-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1838,6 +1832,7 @@
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: normal;
 }
 .colorby-sw {
   flex: none;
@@ -1915,7 +1910,7 @@
   font: 400 var(--text-mono-sm) / 1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
-/* the menu: Off, the keys, the labels with their info buttons */
+/* the menu: Off, the keys, the labels */
 .colorby-row {
   display: flex;
   align-items: center;
@@ -1935,75 +1930,59 @@
 .colorby-item .menu-item-note {
   margin-left: auto;
 }
-/* a label's definition, in the menu under its row or in the popover of the info button beside Color by */
-.colorby-def {
+/* a key's or a label's row: its name and how many values it has, then its values as chips on one line, cut off with …
+   where they do not fit */
+.colorby-item.menu-item:has(.colorby-choice) {
+  align-items: flex-start;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.colorby-item:has(.colorby-choice) .colorby-tick {
+  height: 16px;
+}
+.colorby-choice {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 10px 10px;
-  font: var(--type-ui-sm);
-  color: var(--text-primary);
+  gap: 4px;
+  min-width: 0;
 }
-.colorby-def.in-menu {
-  margin: 0 4px 6px 24px;
-  border-radius: var(--radius-ui);
-  background: var(--track-bg);
-}
-.colorby-def-name {
-  font-weight: 500;
-}
-.colorby-def-text {
-  margin: 0;
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
-}
-.colorby-def-meta {
+.colorby-choice-top {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  color: var(--text-tertiary);
-}
-.colorby-def-meta .mono,
-.colorby-def-kind {
-  font: var(--type-mono-sm);
-}
-.colorby-def-spec {
-  max-height: 180px;
-  margin: 0;
-  padding: 6px 8px;
-  overflow: auto;
-  border: 1px solid var(--border-hairline);
-  border-radius: var(--radius-ui);
-  background: var(--surface-card);
-  color: var(--text-secondary);
-  font: var(--type-mono-sm);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.colorby-def-values {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.colorby-def-values li {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 2px 8px;
+  gap: 6px;
+  min-width: 0;
+  min-height: 16px;
 }
-.colorby-def-value {
-  font-weight: 500;
+.colorby-choice-top .menu-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.colorby-def-meaning {
-  grid-column: 2 / 4;
+.colorby-choice-top .menu-item-note {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+}
+.colorby-preview {
+  display: block;
+  overflow: hidden;
   color: var(--text-secondary);
+  font: 400 var(--text-xs) / 18px var(--font-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.colorby-def-acts {
-  display: flex;
-  justify-content: flex-end;
+.colorby-preview-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 18px;
+  margin-right: 4px;
+  padding: 0 5px 0 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-chip);
+  vertical-align: top;
 }
 /* a record's Color by color: a bar on its left edge */
 .reader-record.has-cb {

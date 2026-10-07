@@ -1,10 +1,10 @@
 // The Labels sidebar beside a view, shared by Files (a view picked in its views bar) and a view in a pane of its own
-// (ViewSurface): the Labels pane, the label's edit card at the sidebar's edge and the seam that resizes it. Beside a
-// view a label's row sets or clears the Files label filter, which the view keeps its records by. A view draws its own
-// label controls and thimble draws none in its head, so the sidebar opens beside it when the view's controls open a
-// label's editor; beside a view built without label controls it also opens while a label is on or a label marks the
-// view's files, with the offer to add them (AddLabelControls). useLabelRuns keeps the runs of the labels' applies,
-// polled while they run, and Retry.
+// (ViewSurface): the Labels pane, the label editor at the sidebar's edge (LabelEditor) and the seam that resizes it.
+// Beside a view a label's row sets or clears the Files label filter, which the view keeps its records by. A view draws
+// its own label controls and thimble draws none in its head; they open the label editor in a popover over the view
+// (ViewPane), never this sidebar, which opens beside a view built without label controls while a label is on or a label
+// marks the view's files, with the offer to add them (AddLabelControls). useLabelRuns keeps the runs of the labels'
+// applies, polled while they run, and Retry.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Spinner } from '../components/Spinner'
@@ -15,8 +15,7 @@ import { track } from '../lib/telemetry'
 import type { ConceptRun, LabelDraft } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { Resizer } from '../shell/Resizer'
-import { LabelCard } from './LabelCard'
-import { LabelPrompt } from './LabelPrompt'
+import { LabelEditor } from './LabelEditor'
 import { viewLabels } from './labels'
 import { LabelsPane } from './LabelsPane'
 import { TREE } from './params'
@@ -117,11 +116,10 @@ export interface LabelSideProps {
   note?: ReactNode
 }
 
-/** The sidebar's three parts, which the caller places: the Labels pane, the edit card at the sidebar's edge and the
+/** The sidebar's three parts, which the caller places: the Labels pane, the label editor at the sidebar's edge and the
  * seam. */
 export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactNode; resizer: ReactNode } {
   const { ws, labels, runs, editing, onEdit, drafted, onDraft, appliesTo, width } = p
-  const editLabel = editing && editing !== 'new' ? labels.byId.get(editing) ?? null : null
   const filter = useFilesFilter(ws)
   const onFilter = useCallback(
     (id: string, value: string | null) => void (value == null ? api.deleteFilter(ws, 'files') : api.putFilter(ws, 'files', id, value)).catch(() => undefined),
@@ -148,16 +146,7 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
   const card =
     editing && p.open ? (
       <div className="label-card-slot" style={{ '--side-w': `${width}px` } as CSSProperties}>
-        <LabelCard
-          ws={ws}
-          label={editLabel}
-          labels={labels}
-          appliesTo={appliesTo}
-          draft={drafted}
-          onClose={() => onEdit(null)}
-          onRun={runs.setRun}
-          lead={editing === 'new' ? <LabelPrompt ws={ws} labels={labels} appliesTo={appliesTo} onRun={runs.setRun} onManual={onDraft} onEdit={onEdit} onDone={() => onEdit(null)} /> : undefined}
-        />
+        <LabelEditor ws={ws} labels={labels} editing={editing} drafted={drafted} appliesTo={appliesTo} onEdit={onEdit} onDraft={onDraft} onRun={runs.setRun} />
       </div>
     ) : null
   const resizer = <Resizer side="left" width={width} min={TREE.min} max={Math.max(TREE.min, Math.min(TREE.max, Math.floor(p.maxWidth)))} defaultWidth={TREE.def} onResize={p.onWidth} onEnd={p.onWidthEnd} />
@@ -214,14 +203,10 @@ export function AddLabelControls({ ws, view }: { ws: string; view: BuiltView }) 
   )
 }
 
-/** A view in a pane of its own with its Labels sidebar: shown when the view's controls open a label's editor, and, for
- * a view built without label controls, while labels are on or a label marks its files, until the analyst hides it; with
- * the Labels pane, the edit card and the seam as Files has them beside a view. */
-export function useViewSide(
-  ws: string,
-  view: BuiltView,
-  labels: FilesLabels,
-): { side: ReactNode; card: ReactNode; first?: ReadonlySet<string>; editLabel: (id: string | null) => void } {
+/** A view in a pane of its own with its Labels sidebar: shown, for a view built without label controls, while labels
+ * are on or a label marks its files, until the analyst hides it; with the Labels pane, the label editor and the seam as
+ * Files has them beside a view. */
+export function useViewSide(ws: string, view: BuiltView, labels: FilesLabels): { side: ReactNode; card: ReactNode; first?: ReadonlySet<string> } {
   const runs = useLabelRuns(ws, labels)
   const [choice, setChoice] = useState<boolean | null>(null)
   const [open, setOpen] = useState(true)
@@ -272,13 +257,5 @@ export function useViewSide(
       {parts.resizer}
     </>
   ) : null
-  const editLabel = useCallback(
-    (id: string | null) => {
-      setChoice(true)
-      setOpen(true)
-      edit(id ?? 'new')
-    },
-    [edit],
-  )
-  return { side, card: shown ? parts.card : null, first, editLabel }
+  return { side, card: shown ? parts.card : null, first }
 }

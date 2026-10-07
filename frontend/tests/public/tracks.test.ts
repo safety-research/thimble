@@ -4,7 +4,7 @@
 // top and bottom to the lens's; each pixel row of the overview takes the one value most of its records have; a label's
 // paint comes from the ruler's counts per bin; the overview's frame is at least FRAME_MIN_PX tall.
 import { describe, expect, test } from 'vitest'
-import { binOfRow, followOf, frameOf, FRAME_MIN_PX, labelPaint, lensOf, lineAt, LINK_PX, LENS_OUT_PX, linkOf, majorityRows, markerText, zoomWindow, ZOOM_SPAN } from '../../src/files/Tracks'
+import { binOfRow, followOf, frameOf, FRAME_MIN_PX, labelPaint, LENS_OUT_PX, LENS_RADIUS_PX, lensOf, lineAt, LINK_PX, linkOf, majorityRows, markerText, snap, zoomWindow, ZOOM_SPAN } from '../../src/files/Tracks'
 import type { LabelRuler } from '../../src/lib/types'
 
 describe('the zoomed track follows the frame', () => {
@@ -56,14 +56,22 @@ describe('the zoomed track follows the frame', () => {
     expect(frameOf({ top: 0.999, height: 0.0001 }, 800)).toEqual({ top: 800 - FRAME_MIN_PX, height: FRAME_MIN_PX })
   })
 
-  test("the two lines join the frame's top and bottom to the lens's, across the gap between the tracks", () => {
+  test("the two lines join the frame's corners to the lens's left edge where its corners' curves end, on whole device pixels", () => {
     const lens = lensOf(300, 460)
     expect(lens).toEqual({ top: 300 - LENS_OUT_PX, height: 160 + 2 * LENS_OUT_PX })
-    const link = linkOf({ top: 395, height: 8 }, lens)
     const x = LINK_PX - LENS_OUT_PX
-    expect(link.top).toEqual([0, 395, x, 300 - LENS_OUT_PX])
-    expect(link.bottom).toEqual([0, 403, x, 460 + LENS_OUT_PX])
-    expect(link.points).toBe(`0,395 ${x},${300 - LENS_OUT_PX} ${x},${460 + LENS_OUT_PX} 0,403`)
+    const r = LENS_RADIUS_PX
+    // at a pixel ratio of 2 a 1px line is two device pixels wide: its ends are the corners themselves
+    const two = linkOf({ top: 395, height: 8 }, lens, 2)
+    expect(two.top).toEqual([0, 395, x, 297 + r])
+    expect(two.bottom).toEqual([0, 403, x, 463 - r])
+    // at 1, one device pixel wide: its ends half a pixel into the frame's and the lens's edges
+    const one = linkOf({ top: 395, height: 8 }, lens, 1)
+    expect(one.top).toEqual([-0.5, 395.5, x + 0.5, 297 + r])
+    expect(one.bottom).toEqual([-0.5, 402.5, x + 0.5, 463 - r])
+    // the wedge reaches the edges themselves
+    expect(one.points).toBe(`0,395 ${x},${297 + r} ${x},${463 - r} 0,403`)
+    expect([snap(10.26, 2), snap(10.26, 1), snap(10.2, 3)]).toEqual([10.5, 10, 31 / 3])
   })
 })
 

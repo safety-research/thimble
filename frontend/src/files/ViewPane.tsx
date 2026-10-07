@@ -5,7 +5,8 @@
 // that fails says so, with Raw beside it when it reads a file, which opens that file in the File browser. While a Files
 // label filter is set, the head shows it as a chip that clears it, with how many records the filter hides in the view.
 // At the head's right end, the mark of the review of the view's pictures (ReviewMark). The head offers no other view and
-// no Raw: a file's own modes (Transcript, Table, Raw, its viewers) are the File browser's.
+// no Raw: a file's own modes (Transcript, Table, Raw, its viewers) are the File browser's. The view's label controls
+// open the label editor in a popover over the view, beside the control that asked (LabelEditor), so nothing moves.
 // The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
 // orientation, never reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
 // element they picked, the scroll positions, the fields and the label filter. Undo in the review's mark loads at once.
@@ -19,6 +20,7 @@ import { refPath } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { ViewQuery, ViewReview } from '../lib/types'
+import { openLabelEditor } from './LabelEditor'
 import { ViewFailed } from './Reader'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewFilter, ViewHeadLine } from './ViewChrome'
@@ -42,20 +44,21 @@ interface Props {
   onMode?: (title: string) => void
   /** the labels that mark the view's files, which its page lists first */
   first?: ReadonlySet<string>
-  /** open the label editor in the Labels sidebar beside the view, on a label or on a new one with null */
-  onEditLabel?: (id: string | null) => void
   /** the card the view was opened from and its arguments (a card type's Open as view) */
   query?: ViewQuery
   /** the view dropped them */
   onClearQuery?: () => void
 }
 
-export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMissing, labels, onMode, first, onEditLabel, query, onClearQuery }: Props) {
+export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMissing, labels, onMode, first, query, onClearQuery }: Props) {
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
   const filterLabel = filter ? labels.byId.get(filter.concept) : undefined
   const pin = usePinnedView(ws, view.slug, view.version)
   const { byId, toggle, setFocus, setColour } = labels
+  // what a new label made in the editor applies to: the files the view claims
+  const claims = view.claims
+  const firstFile = view.first_file
   const labelActions = useMemo<ViewLabelActions>(
     () => ({
       setOn: (id, on) => {
@@ -65,9 +68,9 @@ export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMiss
         toggle(id)
       },
       setColour,
-      edit: onEditLabel,
+      edit: (id, at) => at && openLabelEditor({ id, ...at, appliesTo: claims ?? (firstFile ? [firstFile] : []) }),
     }),
-    [byId, toggle, setFocus, setColour, onEditLabel],
+    [byId, toggle, setFocus, setColour, claims, firstFile],
   )
   // how many records the label filter hides in the view, null while there is no filter or no exact count yet
   const [hidden, setHidden] = useState<number | null>(null)

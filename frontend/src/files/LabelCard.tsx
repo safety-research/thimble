@@ -2,14 +2,15 @@
 // a label over files what it marks (Span, Record or File) and its glob, the classifier (Prompt, Regex or Code) with its
 // body, and the classes with colour and highlight switch. Colours and highlights save as they change; the rest is a
 // draft that Re-run (Run for a new label) saves before applying the label (backend concepts.apply_route). Cancel, × or
-// Escape drops the draft. LabelSheet is the same card in a popover on a canvas card (LabelFields, with each class's
+// Escape drops the draft. The card stands at the Labels pane's edge, or in the popover a view or Files opens beside a
+// control (LabelEditor). LabelSheet is the same card in a popover on a canvas card (LabelFields, with each class's
 // count); its draft outlasts the popover (canvas/labelDrafts) and its foot offers Discard and Re-run.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { CodeArea } from '../components/Code'
 import { TextArea, TextInput } from '../components/Field'
 import { Icon } from '../components/Icon'
-import { Menu } from '../components/Menu'
+import { Menu, Popover } from '../components/Menu'
 import { Switch } from '../components/Switch'
 import { TipButton } from '../components/Tooltip'
 import { labelApi } from '../lib/api'
@@ -19,8 +20,9 @@ import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptKind, ConceptPatch, ConceptRun, LabelClass, LabelDraft, LabelMarks } from '../lib/types'
 import { examplesNote } from '../canvas/details'
-import { classesOf, colourVar, draftClasses, freeColour, isFilesLabel, isMultiClass, LABEL_COLOURS, MULTI_COLOUR, labelStatus, marksOf, nextColour, overOf, ownColour, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
+import { classesOf, colourVar, draftClasses, freeColour, isFilesLabel, isMultiClass, LABEL_COLOURS, MULTI_COLOUR, labelStatus, marksOf, overOf, ownColour, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
 import { useFilesLabels, type FilesLabels } from './useLabels'
+import { ValuePalette } from './ValuePalette'
 
 interface Props {
   ws: string
@@ -33,6 +35,8 @@ interface Props {
   draft?: LabelDraft | null
   /** the row above the head, which then holds the card's × (a new label's Label from prompt, LabelPrompt) */
   lead?: ReactNode
+  /** in a popover (LabelEditor), which is then the card's paper, its place and its dialog */
+  inPopover?: boolean
   onClose: () => void
   /** an apply started for this label, with the run record the server answered (the Labels pane shows its progress) */
   onRun: (id: string, run: ConceptRun) => void
@@ -173,7 +177,10 @@ export function editsOf(k: Concept, d: Draft): string[] {
   return out
 }
 
-export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null, lead, onClose, onRun }: Props) {
+/** The accessible name of a label's edit card. */
+export const labelCardName = (label: Concept | null): string => (label ? `Edit ${label.name}` : 'New label')
+
+export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null, lead, inPopover, onClose, onRun }: Props) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(label, appliesTo, nextFreeColour(labels.all), drafted, usedColours(labels.all)))
   const [saving, setSaving] = useState(false)
   const isNew = label == null
@@ -210,11 +217,12 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
 
   return (
     <div
-      className="label-card overlay"
-      role="dialog"
-      aria-label={isNew ? 'New label' : `Edit ${label!.name}`}
+      className={'label-card' + (inPopover ? ' in-popover' : ' overlay')}
+      role={inPopover ? undefined : 'dialog'}
+      aria-label={inPopover ? undefined : labelCardName(label)}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') {
+        // not an Escape in a popover the card opened (the Model menu, a class's palette), which closes that alone
+        if (e.key === 'Escape' && e.currentTarget.contains(e.target as Node)) {
           e.stopPropagation()
           onClose()
         }
@@ -244,11 +252,15 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
 }
 
 /** The fields of a label's edit card under its head, shared by LabelCard and LabelSheet. Colours and highlight
- * switches are saved at once for an existing label. `counts` puts each class's count before its switch. */
+ * switches are saved at once for an existing label. `counts` puts each class's count before its switch. A class's
+ * swatch opens the palette Color by's chips open (ValuePalette), with the grey too. */
 function LabelFields({ ws, label, labels, draft, classes, set, counts }: { ws: string; label: Concept | null; labels: FilesLabels; draft: Draft; classes: LabelClass[]; set: (patch: Partial<Draft>) => void; counts?: Record<string, number> }) {
   const [scopeOpen, setScopeOpen] = useState(false)
   const [scope, setScope] = useState<{ files: string[]; total: number } | null>(null)
   const [models, setModels] = useState<{ choices: string[]; role: string }>({ choices: [], role: '' })
+  // the class whose palette is open, and its swatch
+  const [painting, setPainting] = useState<number | null>(null)
+  const paintAt = useRef<HTMLElement | null>(null)
   const isNew = label == null
   const liveClasses = label ? classesOf(label) : draft.classes
 
@@ -300,6 +312,15 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts }: { ws: s
   }
   const dropClass = (i: number) => set({ classes: classes.filter((_, j) => j !== i) })
   const saved = new Set(liveClasses.map((c) => c.name))
+  // a color picked for a class: a saved value of the label through setColour, as Color by gives it, so Files and every
+  // view show it; a class not saved yet in the draft alone. Either way a class that had the color takes the old one.
+  const paint = (i: number, n: number) => {
+    const c = classes[i]
+    if (!c) return
+    if (label && c.name && saved.has(c.name)) return labels.setColour(label.id, c.name, n)
+    set({ classes: classes.map((x, j) => (j === i ? { ...x, color: n } : n && x.color === n ? { ...x, color: c.color } : x)) })
+  }
+  const painted = painting != null ? classes[painting] : undefined
 
   const modelShown = draft.model || models.role
   const modelItems = useMemo(
@@ -413,7 +434,17 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts }: { ws: s
         </div>
         {classes.map((c, i) => (
           <div key={i} className="label-card-class">
-            <TipButton tip="Change colour" className="label-card-colour" aria-label={`Change the colour of ${c.name || 'the class'}`} style={{ '--c': colourVar(c.color) } as CSSProperties} onClick={() => setClass(i, { color: nextColour(c.color, classes.filter((_, j) => j !== i).map((x) => x.color)) })} />
+            <TipButton
+              tip="Change color"
+              className="label-card-colour"
+              aria-label={`Change the color of ${c.name || 'the class'}`}
+              aria-expanded={painting === i}
+              style={{ '--c': colourVar(c.color) } as CSSProperties}
+              onClick={(e) => {
+                paintAt.current = e.currentTarget
+                setPainting((p) => (p === i ? null : i))
+              }}
+            />
             <TextInput bare mono value={c.name} onChange={(v) => setClass(i, { name: v })} aria-label="Class name" className="label-card-classname" autoFocus={!c.name && i >= 2} />
             {classes.length > 2 && <Button variant="icon" size="sm" icon="x" title="Remove" aria-label={`Remove ${c.name || 'the class'}`} className="label-card-drop" onClick={() => dropClass(i)} />}
             {counts?.[c.name] != null && saved.has(c.name) && <span className="label-sheet-count">{counts[c.name].toLocaleString()}</span>}
@@ -424,6 +455,28 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts }: { ws: s
           class
         </Button>
       </div>
+      <Popover
+        anchor={paintAt}
+        open={!!painted}
+        onClose={(how) => {
+          setPainting(null)
+          if (how === 'escape') paintAt.current?.focus()
+        }}
+        label={`Color of ${painted?.name || 'the class'}`}
+        className="colorby-palette"
+      >
+        {painted && (
+          <ValuePalette
+            value={{ name: painted.name || 'class', color: colourVar(painted.color) }}
+            grey
+            onPick={(n) => {
+              setPainting(null)
+              paint(painting!, n)
+              paintAt.current?.focus()
+            }}
+          />
+        )}
+      </Popover>
     </>
   )
 }

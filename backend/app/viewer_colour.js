@@ -12,22 +12,25 @@
 //   })
 //
 // One menu lists together Off, the view's own fields it declares colorable and every label over files, those that mark
-// the view's files first, each label with its switch and the button that shows its definition in place. A field colors
-// by the values its records take, each in a palette colour of its own (the label palette, --label-1 to --label-12, in
-// the order the values come: the declared `values`, each in the colour it names or else the next free one, then the
-// most frequent first, kept per view so a value keeps its colour). A label colors by its values on each anchored record,
-// in the label's own colours; choosing one turns it on, and a label the analyst turns on, here or anywhere in thimble,
-// takes the colour. Off colors nothing: no chips, no bars, grey tracks.
-// Color by is thimble's small secondary button with the choice in it, and while a label is the choice a button beside
-// it shows the label's definition. The chosen field's values are key chips in the top row (viewer_kit.css .chip-key),
-// each a square swatch of its colour, its name and its count; a click turns a value off or on, an Alt-click or a double
-// click keeps that value alone, and hovering a label's value shows what the label says the value means. A click on a
-// chip's swatch opens the palette of thimble's twelve label colours: the one picked recolours the value everywhere in
-// the view (its chip, the records' bars, the tracks, and what the page draws through colourOf). A label's value keeps
-// it through thimble.setLabelColour, so Files and every view show it; a field's value keeps it per view with the
-// choice, and the palette's Reset colors gives the field's values their own colours back. On a record,
-// colour is always a bar on the left edge of its row or card (the bridge draws it on every element whose data-colour is
-// the value of the chosen field, and on every anchored record when a label is chosen), never coloured text or a fill.
+// the view's files first, each label with its switch. Each field and label says how many values it colors by and shows
+// them as chips on a line under its name, cut off with … where they do not fit. Choosing a label colors by it and opens
+// thimble's label editor beside the menu (thimble.editLabel), which stays open; Escape in the editor closes it and puts
+// the focus back on the label's row, and a click in the view closes it too. A field colors by the values its records
+// take, each in a palette colour of its own (the label palette, --label-1 to --label-12, in the order the values come:
+// the declared `values`, each in the colour it names or else the next free one, then the most frequent first, kept per
+// view so a value keeps its colour). A label colors by its values on each anchored record, in the label's own colours;
+// choosing one turns it on, and a label the analyst turns on, here or anywhere in thimble, takes the colour. Off colors
+// nothing: no chips, no bars, grey tracks.
+// Color by is thimble's small secondary button with the choice in it. The chosen field's values are key chips in the
+// top row (viewer_kit.css .chip-key), each a square swatch of its colour, its name and its count; a click turns a value
+// off or on, an Alt-click or a double click keeps that value alone, and hovering a label's value shows what the label
+// says the value means. A click on a chip's swatch opens the palette of thimble's twelve label colours: the one picked
+// recolours the value everywhere in the view (its chip, the records' bars, the tracks, and what the page draws through
+// colourOf). A label's value keeps it through thimble.setLabelColour, so Files and every view show it; a field's value
+// keeps it per view with the choice, and the palette's Reset colors gives the field's values their own colours back. On
+// a record, colour is always a bar on the left edge of its row or card (the bridge draws it on every element whose
+// data-colour is the value of the chosen field, and on every anchored record when a label is chosen), never coloured
+// text or a fill.
 // The strip is a list's scrollbar as an editor's two tracks, as Files' Transcript mode draws them: the overview track
 // shows the whole list in one lane, each pixel row in the colour most of its records take (a label that is on but is
 // not the choice draws nothing there), and a dark frame around the part in view; a long list adds the zoomed track
@@ -50,11 +53,12 @@
   var NONE = '\u0000none' // the key of the records that take no value
   var OFF = 'off' // what thimble keeps for Color by: Off
   var PALETTE = 12 // --label-1 .. --label-12; a value past them takes --label-none
-  var TRACK_W = 12 // px: the overview track, its lane inset 1px at either side
-  var ZOOM_W = 18 // px: the zoomed track, its lane inset the same
-  var LANE_X = 1
+  var TRACK_W = 12 // px: the overview track, its lane as wide as it, as the frame is
+  var ZOOM_W = 18 // px: the zoomed track, its lane as wide as it, so that the lens's margin is the same on every side
+  var LANE_X = 0
   var LINK = 14 // px between the overview and the zoomed track, which the lines from the frame to the lens cross
   var LENS_OUT = 3 // px the lens stands out past the part it shows at every side: its edge and a margin of the paper
+  var LENS_R = 4 // px, the lens's corners: the lines from the frame meet its left edge where their curves end
   var ZOOM_AT = 8 // the zoomed track shows once the list is this many times the part in view
   var ZOOM_OFF = 6.5 // and goes again below this, so a list near the line does not flip
   var ZOOM_SPAN = 5 // the zoomed track holds this many heights of the part in view
@@ -64,14 +68,12 @@
   var THUMB_MIN = 8 // px, the least height of the box around the part in view
   var PEEK = 6 // records the hover preview lists
   var MAX_KEPT = 200 // values whose colour is kept per field
-  var DEF_FOR = 60000 // ms a label's definition is kept before it is asked for again
+  var DEF_FOR = 60000 // ms what a label's values mean is kept before it is asked for again
   var ICON = {
     down: 'M6 9l6 6 6-6',
     check: 'M5 12.5l4.5 4.5L19 7',
     plus: 'M12 5v14M5 12h14',
-    info: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM12 11v5.5M12 7.6v.01',
     reset: 'M4 12a8 8 0 1 0 2.35-5.65M4 4.5v4h4',
-    open: 'M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5',
   }
   function ico(name) {
     return '<svg class="thimble-colour-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="' + ICON[name] + '"/></svg>'
@@ -191,10 +193,10 @@
     } catch (e) {}
   }
 
-  // ---------------------------------------------------------------- a label's definition
-  // What thimble's label panel shows of a label, asked of thimble with a fetch the server answers itself
-  // (views.kit_answer): {id, name, kind, text, spec, scope, unit, labeled, values: [{name, highlight, n, meaning}]}, or
-  // null when thimble does not know it (an older thimble, a card's frame, the checks' test label).
+  // ---------------------------------------------------------------- what a label's values mean
+  // A label's definition, asked of thimble with a fetch the server answers itself (views.kit_answer): {id, name, kind,
+  // text, spec, scope, unit, labeled, values: [{name, highlight, n, meaning}]}, or null when thimble does not know it (an
+  // older thimble, a card's frame, the checks' test label). A chip of a label's value says what the value means.
   var defs = {}
   function definition(id) {
     var d = defs[id]
@@ -221,46 +223,6 @@
     for (var i = 0; i < vs.length; i++) if (vs[i].name === value) return vs[i].meaning || ''
     return ''
   }
-  var KIND = { prompt: 'Prompt', regex: 'Regex', code: 'Code', manual: 'By hand' }
-  // the definition as the menu and its popover show it: what it judges or matches, its values with what each means
-  // and how many records take it, the files it covers, and Open label
-  function defHtml(l, def) {
-    var id = l ? l.id : def && def.id
-    var head = ''
-    var body = ''
-    if (def === undefined) body = '<div class="thimble-def-wait" aria-busy="true"><span></span><span></span><span></span></div>'
-    if (def) {
-      head =
-        '<div class="thimble-def-meta"><span class="chip chip-sans chip-tone-neutral">' + esc(KIND[def.kind] || def.kind || 'Label') + '</span>' +
-        (def.scope ? '<span class="chip chip-tone-evidence" title="' + esc(def.scope) + '"><span class="chip-text">' + esc(def.scope) + '</span></span>' : '') +
-        (typeof def.labeled === 'number' ? '<span class="thimble-def-n">' + num(def.labeled) + ' ' + (def.labeled === 1 ? 'record' : 'records') + '</span>' : '') +
-        '</div>'
-      if (def.text) body += '<div class="thimble-def-text">' + esc(def.text) + '</div>'
-      if (def.spec) body += '<pre class="thimble-def-spec">' + esc(def.spec) + '</pre>'
-    }
-    var vals = (def && def.values) || (l && l.values) || []
-    var colours = {}
-    var lv = (l && l.values) || []
-    for (var c = 0; c < lv.length; c++) colours[lv[c].name] = lv[c].colour
-    if (vals.length)
-      body +=
-        '<div class="thimble-def-vals">' +
-        vals
-          .map(function (v) {
-            var col = colours[v.name]
-            return (
-              '<div class="thimble-def-val' + (v.highlight === false ? ' quiet' : '') + '"><span class="thimble-colour-sw"' + (col ? ' style="--c:' + esc(col) + '"' : '') + '></span><span class="thimble-def-vn">' + esc(v.name) + '</span>' +
-              (typeof v.n === 'number' ? '<span class="thimble-colour-n">' + num(v.n) + '</span>' : '') +
-              (v.meaning ? '<span class="thimble-def-m">' + esc(v.meaning) + '</span>' : '') +
-              '</div>'
-            )
-          })
-          .join('') +
-        '</div>'
-    var open = typeof thimble.editLabel === 'function' && id != null ? '<div class="thimble-def-acts"><button type="button" class="btn btn-secondary btn-sm thimble-def-open" data-open-label="' + esc(id) + '" data-label="' + esc(id) + '">' + ico('open') + 'Open label</button></div>' : ''
-    return '<div class="thimble-def" data-def="' + esc(id) + '">' + head + body + open + '</div>'
-  }
-
   // ---------------------------------------------------------------- the kit's tip: a few words beside the pointer
   var tipEl = null
   function tip(html, x, y, side) {
@@ -678,7 +640,7 @@
     save()
     this.hook()
     this.refresh()
-    if (this.menu && !this.menu.values && !this.menu.def) this.redrawMenu()
+    if (this.menu && !this.menu.values && this.menu.palette == null) this.redrawMenu()
     if (key !== was) this.changedQuiet()
   }
   Control.prototype.changedQuiet = function () {
@@ -708,9 +670,7 @@
     var off = this.offSet(c)
     var lab = c && c.label ? ' data-label="' + esc(c.label) + '"' : ''
     // Color by is thimble's small secondary button, as a menu's trigger: its choice in it and a chevron
-    var by = '<button type="button" class="btn btn-secondary btn-sm thimble-colour-by" aria-haspopup="menu" aria-expanded="' + (this.menu && !this.menu.def ? 'true' : 'false') + '"' + lab + '><span class="thimble-colour-k">Color by:</span><b>' + esc(c ? c.title : 'None') + '</b>' + ico('down') + '</button>'
-    // while a label is the colour, one click shows its definition
-    var about = c && c.label ? '<button type="button" class="btn btn-ghost btn-sm btn-square thimble-colour-about"' + lab + ' aria-haspopup="dialog" aria-expanded="' + (this.menu && this.menu.def ? 'true' : 'false') + '" aria-label="' + esc('What ' + c.title + ' means') + '" title="' + esc('What ' + c.title + ' means') + '">' + ico('info') + '</button>' : ''
+    var by = '<button type="button" class="btn btn-secondary btn-sm thimble-colour-by" aria-haspopup="menu" aria-expanded="' + (this.menu && !this.menu.values && this.menu.palette == null ? 'true' : 'false') + '"' + lab + '><span class="thimble-colour-k">Color by:</span><b>' + esc(c ? c.title : 'None') + '</b>' + ico('down') + '</button>'
     // each value is a key chip: a square swatch of its colour, its name and its count
     var chips = ''
     for (var i = 0; i < this.values.length; i++) {
@@ -722,7 +682,15 @@
     }
     chips += '<button type="button" class="btn btn-ghost btn-sm thimble-colour-more" hidden></button>'
     var reset = '<button type="button" class="btn btn-secondary btn-sm thimble-reset"' + (this.resetShown ? '' : ' hidden') + '>' + ico('reset') + 'Reset</button>'
-    this.root.innerHTML = by + about + '<span class="thimble-colour-chips">' + chips + '</span>' + reset
+    this.root.innerHTML = by + '<span class="thimble-colour-chips">' + chips + '</span>' + reset
+    // a menu that stays open over a redraw is anchored again to the new button it opened from
+    if (this.menu && !this.menu.anchor.isConnected && this.menu.palette == null) {
+      var again = this.root.querySelector(this.menu.values ? '.thimble-colour-more' : '.thimble-colour-by')
+      if (again) {
+        this.menu.anchor = again
+        again.setAttribute('aria-expanded', 'true')
+      }
+    }
     this.fit()
   }
   // Reset shows only while the view is not as it opens
@@ -781,7 +749,6 @@
     var t = e.target
     if (!t.closest) return
     if (t.closest('.thimble-colour-by')) return this.toggleMenu(t.closest('.thimble-colour-by'))
-    if (t.closest('.thimble-colour-about')) return this.toggleDef(t.closest('.thimble-colour-about'))
     if (t.closest('.thimble-colour-more')) return this.toggleMenu(t.closest('.thimble-colour-more'), true)
     if (t.closest('.thimble-reset')) return doReset()
     var chip = t.closest('.thimble-colour-chip')
@@ -834,7 +801,7 @@
     }
     if (!v || v.value == null) return
     untip()
-    this.openMenu(chip, false, null, v.key)
+    this.openMenu(chip, false, v.key)
   }
   function paletteColour(i) {
     var pal = labelState && Array.isArray(labelState.palette) ? labelState.palette : null
@@ -900,17 +867,6 @@
     }
     this.openMenu(anchor, values)
   }
-  // the definition of the label colored by, in a popover under its button
-  Control.prototype.toggleDef = function (anchor) {
-    var c = this.choice()
-    if (!c || !c.label) return
-    if (this.menu) {
-      var was = this.menu.anchor
-      this.closeMenu()
-      if (was === anchor) return
-    }
-    this.openMenu(anchor, false, c.label)
-  }
   Control.prototype.closeMenu = function () {
     if (!this.menu) return
     this.menu.el.remove()
@@ -920,13 +876,66 @@
     this.menu.anchor.setAttribute('aria-expanded', 'false')
     this.menu = null
   }
-  Control.prototype.menuHtml = function (values, defId, paletteKey) {
+  // a field's values as the menu shows them: the chips' while it is the choice, else those it declares and those it has
+  // shown before, each in its colour
+  Control.prototype.fieldValues = function (f) {
+    var c = this.choice()
+    if (c && c.field === f.name)
+      return this.values
+        .filter(function (v) {
+          return v.key !== NONE
+        })
+        .map(function (v) {
+          return { name: v.name, colour: v.colour }
+        })
+    var names = (f.values || []).slice()
+    var map = S.colours[f.name] || {}
+    var seen = Object.keys(map).filter(function (k) {
+      return names.indexOf(k) < 0
+    })
+    seen.sort(function (a, b) {
+      return map[a] - map[b]
+    })
+    var self = this
+    return names.concat(seen).map(function (n) {
+      return { name: n, colour: self.fieldColour(f.name, n) }
+    })
+  }
+  // a label's values as the menu shows them: those it colours by
+  function labelValues(l) {
+    return (l.values || [])
+      .filter(function (v) {
+        return v.highlight !== false
+      })
+      .map(function (v) {
+        return { name: v.name, colour: v.colour }
+      })
+  }
+  // a field's or a label's row: its name and how many values it has, then its values as chips on one line, cut off with
+  // … where they do not fit; nothing of its values when none is known
+  function choiceBody(colour, name, values) {
+    var n = values.length
+    return (
+      '<span class="thimble-colour-body"><span class="thimble-colour-top">' +
+      (colour ? '<span class="thimble-colour-sw" style="--c:' + esc(colour) + '"></span>' : '') +
+      '<span class="thimble-colour-nm">' + esc(name) + '</span>' +
+      (n ? '<span class="thimble-colour-n">' + num(n) + (n === 1 ? ' value' : ' values') + '</span>' : '') +
+      '</span>' +
+      (n
+        ? '<span class="thimble-colour-preview">' +
+          values
+            .map(function (v) {
+              return '<span class="thimble-colour-pchip"><span class="thimble-colour-sw"' + (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + '></span>' + esc(v.name) + '</span>'
+            })
+            .join('') +
+          '</span>'
+        : '') +
+      '</span>'
+    )
+  }
+  Control.prototype.menuHtml = function (values, paletteKey) {
     var c = this.choice()
     if (paletteKey != null) return this.paletteHtml(paletteKey)
-    if (defId != null) {
-      var dl = labelById(defId)
-      return '<div class="thimble-colour-head">' + esc(dl ? dl.name : '') + '</div>' + defHtml(dl || { id: defId, values: [] }, knownDef(defId))
-    }
     if (values) {
       var off = this.offSet(c)
       return (
@@ -942,27 +951,23 @@
     var tick = function (on) {
       return '<span class="thimble-colour-tick">' + (on ? ico('check') : '') + '</span>'
     }
-    var open = (this.menu && this.menu.open) || {}
     var html = '<div class="thimble-colour-head">Color by</div>'
     html += '<button type="button" class="thimble-colour-item" role="menuitemradio" aria-checked="' + !!(c && c.off) + '" data-by="' + OFF + '">' + tick(!!(c && c.off)) + '<span class="thimble-colour-nm">Off</span></button>'
+    var self = this
     html += this.fields
       .map(function (f) {
         var on = !!(c && c.field === f.name)
-        return '<button type="button" class="thimble-colour-item" role="menuitemradio" aria-checked="' + on + '" data-by="' + esc('f:' + f.name) + '">' + tick(on) + '<span class="thimble-colour-nm">' + esc(f.title) + '</span></button>'
+        return '<button type="button" class="thimble-colour-item thimble-colour-choice" role="menuitemradio" aria-checked="' + on + '" data-by="' + esc('f:' + f.name) + '">' + tick(on) + choiceBody('', f.title, self.fieldValues(f)) + '</button>'
       })
       .join('')
     var all = allLabels()
     var row = function (l) {
       var on = !!(c && c.label === l.id)
       var lit = !!l.on || isOn(l.id)
-      var shown = !!open[l.id]
       return (
-        '<div class="thimble-colour-item thimble-colour-label" role="menuitemradio" tabindex="0" aria-checked="' + on + '" data-by="' + esc('l:' + l.id) + '" data-label="' + esc(l.id) + '">' + tick(on) +
-        '<span class="thimble-colour-sw" style="--c:' + esc(l.colour || '') + '"></span><span class="thimble-colour-nm">' + esc(l.name) + '</span>' +
-        (typeof l.count === 'number' ? '<span class="thimble-colour-n">' + num(l.count) + '</span>' : '') +
-        '<button type="button" class="thimble-colour-info' + (shown ? ' on' : '') + '" aria-expanded="' + shown + '" aria-label="' + esc('What ' + l.name + ' means') + '" title="' + esc('What ' + l.name + ' means') + '" data-info="' + esc(l.id) + '" data-label="' + esc(l.id) + '">' + ico('info') + '</button>' +
-        '<button type="button" class="thimble-colour-switch' + (lit ? ' on' : '') + '" role="switch" aria-checked="' + lit + '" aria-label="' + esc((lit ? 'Turn off ' : 'Turn on ') + l.name) + '" data-switch="' + esc(l.id) + '" data-label="' + esc(l.id) + '"><span></span></button></div>' +
-        (shown ? defHtml(l, knownDef(l.id)) : '')
+        '<div class="thimble-colour-item thimble-colour-label thimble-colour-choice" role="menuitemradio" tabindex="0" aria-checked="' + on + '" data-by="' + esc('l:' + l.id) + '" data-label="' + esc(l.id) + '">' + tick(on) +
+        choiceBody(l.colour || '', l.name, labelValues(l)) +
+        '<button type="button" class="thimble-colour-switch' + (lit ? ' on' : '') + '" role="switch" aria-checked="' + lit + '" aria-label="' + esc((lit ? 'Turn off ' : 'Turn on ') + l.name) + '" data-switch="' + esc(l.id) + '" data-label="' + esc(l.id) + '"><span></span></button></div>'
       )
     }
     var here = all.filter(function (l) { return l.here })
@@ -973,26 +978,28 @@
     if (typeof thimble.newLabel === 'function') html += '<div class="thimble-colour-sep"></div><button type="button" class="thimble-colour-item" data-new>' + '<span class="thimble-colour-tick">' + ico('plus') + '</span><span class="thimble-colour-nm">New label</span></button>'
     return html
   }
-  Control.prototype.openMenu = function (anchor, values, defId, paletteKey) {
+  Control.prototype.openMenu = function (anchor, values, paletteKey) {
     var self = this
     var m = document.createElement('div')
     var pal = paletteKey != null
-    m.className = 'thimble-colour-menu' + (defId != null ? ' thimble-colour-defpop' : '') + (pal ? ' thimble-colour-palette' : '')
-    m.setAttribute('role', defId != null || pal ? 'dialog' : 'menu')
+    m.className = 'thimble-colour-menu' + (pal ? ' thimble-colour-palette' : '')
+    m.setAttribute('role', pal ? 'dialog' : 'menu')
     if (pal) m.setAttribute('aria-label', 'Color')
     m.setAttribute('data-thimble-chrome', '')
-    this.menu = { el: m, anchor: anchor, values: !!values, def: defId != null ? defId : null, palette: pal ? paletteKey : null, open: {} }
-    m.innerHTML = this.menuHtml(values, defId, paletteKey)
+    this.menu = { el: m, anchor: anchor, values: !!values, palette: pal ? paletteKey : null }
+    m.innerHTML = this.menuHtml(values, paletteKey)
     document.body.appendChild(m)
     this.placeMenu()
+    // the anchor read when it is used: a redraw of the top row gives the menu a new one (render)
     var away = function (e) {
-      if (!m.contains(e.target) && !anchor.contains(e.target)) self.closeMenu()
+      if (self.menu && !m.contains(e.target) && !self.menu.anchor.contains(e.target)) self.closeMenu()
     }
     var key = function (e) {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && self.menu) {
         e.stopPropagation()
+        var at = self.menu.anchor
         self.closeMenu()
-        anchor.focus()
+        at.focus()
       }
     }
     document.addEventListener('pointerdown', away, true)
@@ -1009,7 +1016,6 @@
     this.menu.away = away
     this.menu.key = key
     anchor.setAttribute('aria-expanded', 'true')
-    if (defId != null) this.loadDef(defId)
   }
   Control.prototype.placeMenu = function () {
     var m = this.menu && this.menu.el
@@ -1029,33 +1035,12 @@
   Control.prototype.redrawMenu = function () {
     if (!this.menu) return
     var scroll = this.menu.el.scrollTop
-    this.menu.el.innerHTML = this.menuHtml(this.menu.values, this.menu.def, this.menu.palette)
+    this.menu.el.innerHTML = this.menuHtml(this.menu.values, this.menu.palette)
     this.menu.el.scrollTop = scroll
-  }
-  // a label's definition asked of thimble, the menu drawn again when it comes
-  Control.prototype.loadDef = function (id) {
-    var self = this
-    if (knownDef(id) !== undefined && defs[id] && Date.now() - defs[id].at < DEF_FOR) return
-    definition(id).then(function () {
-      if (!self.menu) return
-      if (self.menu.def === id || self.menu.open[id]) {
-        self.redrawMenu()
-        if (self.menu.def === id) self.placeMenu()
-      }
-    })
   }
   Control.prototype.menuClick = function (e, values) {
     var t = e.target
     var self = this
-    var ol = t.closest('[data-open-label]')
-    if (ol) {
-      e.stopPropagation()
-      var lid = ol.getAttribute('data-open-label')
-      this.closeMenu()
-      thimble.editLabel(lid).catch(function () {})
-      return
-    }
-    if (this.menu && this.menu.def != null) return
     if (this.menu && this.menu.palette != null) {
       var pk = this.menu.palette
       var pick = t.closest('[data-pick]')
@@ -1077,16 +1062,6 @@
       else this.toggle(key)
       return this.redrawMenu()
     }
-    var info = t.closest('[data-info]')
-    if (info) {
-      e.stopPropagation()
-      var iid = info.getAttribute('data-info')
-      this.menu.open[iid] = !this.menu.open[iid]
-      this.redrawMenu()
-      if (this.menu.open[iid]) this.loadDef(iid)
-      return
-    }
-    if (t.closest('.thimble-def')) return
     var sw = t.closest('[data-switch]')
     if (sw) {
       e.stopPropagation()
@@ -1107,15 +1082,34 @@
     var item = t.closest('[data-by]')
     if (!item) return
     var by = item.getAttribute('data-by')
+    if (by.indexOf('l:') === 0) return this.chooseLabel(by.slice(2))
     this.closeMenu()
-    if (by.indexOf('l:') === 0 && !isOn(by.slice(2))) {
-      // the label is turned on; it takes the colour once thimble says it is on
+    this.choose(by)
+  }
+  // A label chosen: colored by, and its editor opened beside the menu, which stays open with the label checked. Both
+  // calls go during the analyst's click: the label turned on first (it takes the colour once thimble says it is on),
+  // then the editor, which takes the focus out of the view. The editor closed from inside, the focus goes back to the
+  // label's row.
+  Control.prototype.chooseLabel = function (id) {
+    var self = this
+    var by = 'l:' + id
+    if (!isOn(id)) {
       S.by = by
       save()
-      thimble.setLabel(by.slice(2), true).catch(function () {})
-      return
-    }
-    this.choose(by)
+      thimble.setLabel(id, true).catch(function () {})
+    } else this.choose(by)
+    this.redrawMenu()
+    if (typeof thimble.editLabel !== 'function' || !this.menu) return
+    thimble
+      .editLabel(id, {
+        anchor: this.menu.el,
+        onClose: function (focused) {
+          // closed from inside it: the focus comes back to the label's row, the menu drawn again since it was opened
+          var row = focused && self.menu && self.menu.el.querySelector('[data-by="' + by.replace(/["\\]/g, '\\$&') + '"]')
+          if (row) row.focus({ preventScroll: true })
+        },
+      })
+      .catch(function () {})
   }
 
   // ---------------------------------------------------------------- the tracks: a list's colored scrollbar
@@ -1353,10 +1347,16 @@
       this.zoomed = zoomed
       this.fitWidth()
     }
-    var h = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0) - 4)
+    // the tracks on the device's pixel grid, so that every edge on them is drawn sharp
+    var dpr = window.devicePixelRatio || 1
+    var snap = function (v) {
+      return Math.round(v * dpr) / dpr
+    }
+    var top = snap(Math.max(r.top, 0) + 2)
+    var h = Math.max(0, snap(Math.min(r.bottom, innerHeight) - 2) - top)
     // the lens stands out past the zoomed track, which stands in from the list's edge by as much
-    this.el.style.left = r.right - this.width - 2 - (this.zoomed ? LENS_OUT : 0) + 'px'
-    this.el.style.top = Math.max(r.top, 0) + 2 + 'px'
+    this.el.style.left = snap(r.right - this.width - 2 - (this.zoomed ? LENS_OUT : 0)) + 'px'
+    this.el.style.top = top + 'px'
     this.el.style.height = h + 'px'
     this.h = h
     if (this.stale) {
@@ -1467,6 +1467,8 @@
   Strip.prototype.place = function () {
     var h = this.h || 0
     var v = this.drag && this.drag.view ? this.drag.view : this.view()
+    var dpr = window.devicePixelRatio || 1
+    // each edge on the device's pixel grid
     var span = function (a, b, min) {
       var y0 = a * h
       var y1 = b * h
@@ -1475,7 +1477,7 @@
         y0 = Math.max(0, Math.min(h - min, m - min / 2))
         y1 = y0 + min
       }
-      return [Math.max(0, y0), Math.min(h, y1)]
+      return [Math.round(Math.max(0, y0) * dpr) / dpr, Math.round(Math.min(h, y1) * dpr) / dpr]
     }
     var put = function (el, at) {
       el.style.display = at[1] > at[0] ? '' : 'none'
@@ -1495,18 +1497,23 @@
     put(this.zoom.thumb, lens)
     this.lensAt = lens
     this.paint(this.zoom, z, v)
+    // each line from a corner of the frame to the lens's left edge where its corner's curve ends; at a pixel ratio where a
+    // 1px line is an odd number of device pixels wide, its ends move half a device pixel into the frame's and the lens's
+    // edges, so that it lies on whole device pixels there. The wedge reaches the edges themselves.
     var x1 = LINK - LENS_OUT
+    var o = Math.round(dpr) % 2 === 1 ? 0.5 / dpr : 0
+    var r = Math.min(LENS_R, (lens[1] - lens[0]) / 2)
     var f = this.thumbAt
     var edges = this.link.querySelectorAll('line')
     var set = function (el, a, b) {
-      el.setAttribute('x1', '0')
+      el.setAttribute('x1', String(-o))
       el.setAttribute('y1', String(a))
-      el.setAttribute('x2', String(x1))
+      el.setAttribute('x2', String(x1 + o))
       el.setAttribute('y2', String(b))
     }
-    set(edges[0], f[0], lens[0])
-    set(edges[1], f[1], lens[1])
-    this.link.querySelector('polygon').setAttribute('points', '0,' + f[0] + ' ' + x1 + ',' + lens[0] + ' ' + x1 + ',' + lens[1] + ' 0,' + f[1])
+    set(edges[0], f[0] + o, lens[0] + r)
+    set(edges[1], f[1] - o, lens[1] - r)
+    this.link.querySelector('polygon').setAttribute('points', '0,' + f[0] + ' ' + x1 + ',' + (lens[0] + r) + ' ' + x1 + ',' + (lens[1] - r) + ' 0,' + f[1])
     this.link.style.height = h + 'px'
   }
   // the list scrolled so that the place `at` (a fraction of it) is in the middle of the box

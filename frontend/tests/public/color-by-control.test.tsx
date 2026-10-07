@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
 // The Color by control of Files' Transcript mode (src/files/ColorBy.tsx): the trigger says "Color by: <choice>"; its
 // menu offers Off, the records' keys and the labels that mark the file; Off draws no chips; a chip turns its value off
-// and on (Alt keeps it alone); a label's info button in the menu opens its definition in place, its question and each
-// value with its meaning, and Open label opens it in the Labels pane; while a label is the choice an info button beside
-// the trigger opens the same; a click on a chip's swatch opens the palette of the twelve label colors, its own ringed,
-// without turning the value off, and a pick or Reset colors goes to the reader.
+// and on (Alt keeps it alone); choosing a label closes the menu and opens the label's editor under the trigger
+// (LabelEditor), which Escape closes with the focus back on the trigger, while a key or Off opens nothing, and there is
+// no info button; each key and label in the menu says how many values it has and shows them as chips on a line under
+// its name; a click on a chip's swatch opens the palette of the twelve label colors, its own ringed, without turning the
+// value off, and a pick or Reset colors goes to the reader.
 import { act } from 'react'
-import { afterEach, beforeAll, expect, test } from 'vitest'
+import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { ColorBy } from '../../src/files/ColorBy'
 import { labelChips, type ColorChoice } from '../../src/files/colorChoice'
-import { bus } from '../../src/lib/bus'
+import { closeLabelEditor, LabelEditorHost } from '../../src/files/LabelEditor'
 import type { Concept, SourceKey } from '../../src/lib/types'
-import { mount, unmountAll } from './mount.tsx'
+import { mount, settle, unmountAll } from './mount.tsx'
 
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
@@ -20,7 +21,11 @@ beforeAll(() => {
     disconnect() {}
   } as unknown as typeof ResizeObserver
 })
-afterEach(unmountAll)
+afterEach(() => {
+  act(() => closeLabelEditor())
+  unmountAll()
+  vi.unstubAllGlobals()
+})
 
 const keys: SourceKey[] = [
   {
@@ -74,7 +79,7 @@ test('the trigger names the choice and the menu offers Off, the keys and the lab
   expect(el.querySelector('.colorby-trigger')?.textContent).toBe('Color by: wiki')
   await click(el.querySelector('.colorby-trigger')!)
   const items = [...document.querySelectorAll('.colorby-menu [role="menuitemradio"]')]
-  expect(items.map((b) => b.textContent?.replace(/\d+$/, '').trim())).toEqual(['Off', 'wiki', 'edit purpose'])
+  expect(items.map((b) => b.querySelector('.menu-item-label')?.textContent)).toEqual(['Off', 'wiki', 'edit purpose'])
   expect(items[1].getAttribute('aria-checked')).toBe('true')
   await click(items[0])
   expect(picked).toEqual([{ by: 'off' }])
@@ -102,29 +107,46 @@ test('a chip turns its value off and on, and Alt keeps it alone', async () => {
   ])
 })
 
-test("a label's definition opens in place in the menu, and Open label opens it in the Labels pane", async () => {
-  const opened: string[] = []
-  const off = bus.on('editLabel', ({ id }) => opened.push(id))
-  const el = await draw({ by: 'key', key: 'wiki' })
-  await click(el.querySelector('.colorby-trigger')!)
-  await click(document.querySelector('.colorby-menu .colorby-info')!)
-  const def = document.querySelector('.colorby-menu .colorby-def')!
-  expect(def.querySelector('.colorby-def-text')?.textContent).toBe('What this edit adds.')
-  expect([...def.querySelectorAll('.colorby-def-values li')].map((li) => [li.querySelector('.colorby-def-value')?.textContent, li.querySelector('.colorby-def-meaning')?.textContent])).toEqual([
-    ['posts links', 'the edit adds links.'],
-    ['other', 'anything else.'],
-  ])
-  await click([...def.querySelectorAll('button')].find((b) => b.textContent === 'Open label')!)
-  off()
-  expect(opened).toEqual(['c1'])
+test("choosing a label closes the menu and opens its editor under the trigger; Escape gives the focus back to the trigger", async () => {
+  // the editor reads the labels itself
+  vi.stubGlobal('fetch', async (url: string) => {
+    const path = new URL(String(url), 'http://thimble.test').pathname
+    const body = path.endsWith('/concepts') ? [label] : path.endsWith('/labels/presence') ? [] : null
+    return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404, headers: { 'content-type': 'application/json' } })
+  })
+  const picked: ColorChoice[] = []
+  const el = await draw({ by: 'key', key: 'wiki' }, picked)
+  await mount(<LabelEditorHost ws="w" />)
+  const trigger = el.querySelector<HTMLButtonElement>('.colorby-trigger')!
+  await click(trigger)
+  const row = [...document.querySelectorAll('.colorby-menu [role="menuitemradio"]')].find((r) => r.querySelector('.menu-item-label')?.textContent === 'edit purpose')!
+  await click(row)
+  await settle()
+  expect(picked).toEqual([{ by: 'label', id: 'c1' }])
+  expect(document.querySelector('.colorby-menu'), 'the menu closed').toBeNull()
+  const pop = document.querySelector<HTMLElement>('.popover.label-editor-pop')!
+  expect(pop.getAttribute('aria-label')).toBe('Edit edit purpose')
+  expect(pop.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')?.value).toBe(label.description)
+  await act(async () => new Promise((r) => setTimeout(r, 40)))
+  await act(async () => void (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  expect(document.querySelector('.popover.label-editor-pop')).toBeNull()
+  expect(document.activeElement).toBe(trigger)
 })
 
-test('while a label is the choice, the info button beside the trigger opens its definition', async () => {
-  const el = await draw({ by: 'label', id: 'c1' })
+test('a key or Off opens no editor, and there is no info button beside the trigger or in the menu', async () => {
+  const picked: ColorChoice[] = []
+  const el = await draw({ by: 'label', id: 'c1' }, picked)
+  await mount(<LabelEditorHost ws="w" />)
   expect(el.querySelector('.colorby-trigger')?.textContent).toBe('Color by: edit purpose')
   expect([...el.querySelectorAll('.colorby-chip')].map((c) => c.querySelector('.colorby-name')?.textContent)).toEqual(['posts links', 'other', 'Not marked'])
-  await click(el.querySelector('.colorby > .colorby-info')!)
-  expect(document.querySelector('.colorby-infopop .colorby-def-name')?.textContent).toBe('edit purpose')
+  expect(el.querySelector('.colorby-info')).toBeNull()
+  for (const name of ['wiki', 'Off']) {
+    await click(el.querySelector('.colorby-trigger')!)
+    expect(document.querySelector('.colorby-menu .colorby-info, .colorby-menu .colorby-def')).toBeNull()
+    await click([...document.querySelectorAll('.colorby-menu [role="menuitemradio"]')].find((r) => r.querySelector('.menu-item-label')?.textContent === name)!)
+  }
+  expect(picked).toEqual([{ by: 'key', key: 'wiki' }, { by: 'off' }])
+  expect(document.querySelector('.popover.label-editor-pop')).toBeNull()
 })
 
 test("a chip's swatch opens the palette of the twelve label colors, its own ringed, and a pick goes to the reader", async () => {
@@ -158,4 +180,21 @@ test("the records a label does not mark have no color to pick, and without a rea
   unmountAll()
   const plain = await draw({ by: 'key', key: 'wiki' })
   expect(plain.querySelector('.colorby-sw[data-palette]')).toBeNull()
+})
+
+test('each key and label in the menu says how many values it has, and shows them as chips on the line under its name', async () => {
+  const el = await draw({ by: 'off' })
+  await click(el.querySelector('.colorby-trigger')!)
+  const rows = [...document.querySelectorAll('.colorby-menu [role="menuitemradio"]')].slice(1)
+  expect(rows.map((r) => [r.querySelector('.menu-item-label')?.textContent, r.querySelector('.menu-item-note')?.textContent, [...r.querySelectorAll('.colorby-preview-chip')].map((c) => c.textContent)])).toEqual([
+    ['wiki', '2 values', ['dse', 'probier']],
+    ['edit purpose', '2 values', ['posts links', 'other']],
+  ])
+  // each chip a square swatch of its value's color
+  expect((rows[0].querySelector('.colorby-preview-chip') as HTMLElement).style.getPropertyValue('--c')).toBe('var(--label-1)')
+})
+
+test('a choice of one value says "1 value"', async () => {
+  const { valuesWord } = await import('../../src/files/ColorBy')
+  expect([valuesWord(1), valuesWord(3), valuesWord(1200)]).toEqual(['1 value', '3 values', '1,200 values'])
 })

@@ -1,7 +1,8 @@
 // The reader's two tracks (src/files/Tracks.tsx ReaderTracks) with the app's stylesheets in headless Chromium, light
 // and dark: the overview at the left with a dark frame exactly as wide as its track, the zoomed track at the outer
 // edge; on the zoomed track the records past what the reader shows fade and those it shows are full, under a lens of
-// the paper; two lines join the frame's top and bottom to the lens's; at the file's end the lens goes down the zoomed
+// the paper; two lines join the frame's corners to the lens's left edge, at a pixel ratio of 1 and 2 within half a
+// device pixel, every edge on whole device pixels; at the file's end the lens goes down the zoomed
 // track with the frame; each pixel row of the overview is one color; the find's matches leave ticks in the ink, no
 // color; hovering the overview shows the records at that point beside the tracks, without scrolling, in plain rows
 // with a straight bar, and a find's tick says what is found; a press on the overview scrubs the reader.
@@ -14,6 +15,34 @@ import { bundle, cleanup, launch, ORIGIN, src } from './page.ts'
 
 let browser: Browser
 let page: Page
+/** the bundle's folder, which a page at another pixel ratio loads from too */
+let dir = ''
+
+/** A page of the bundle at a device pixel ratio. */
+async function open(dpr: number): Promise<Page> {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 640 }, deviceScaleFactor: dpr })
+  await page.route('**/*', (route) => {
+    const p = new URL(route.request().url()).pathname
+    if (p === '/')
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: '<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>',
+      })
+    const file = path.join(dir, p)
+    if (existsSync(file))
+      return route.fulfill({
+        status: 200,
+        contentType: p.endsWith('.css') ? 'text/css' : 'text/javascript',
+        body: readFileSync(file),
+      })
+    return route.fulfill({ status: 404, body: '' })
+  })
+  await page.goto(`${ORIGIN}/`)
+  await page.waitForSelector('.track-over')
+  await page.waitForTimeout(100)
+  return page
+}
 
 beforeAll(async () => {
   const script = await bundle(
@@ -43,29 +72,9 @@ beforeAll(async () => {
       conditions: ['style'],
     },
   )
-  const dir = path.dirname(script)
+  dir = path.dirname(script)
   browser = await launch()
-  page = await browser.newPage({ viewport: { width: 1000, height: 640 } })
-  await page.route('**/*', (route) => {
-    const p = new URL(route.request().url()).pathname
-    if (p === '/')
-      return route.fulfill({
-        status: 200,
-        contentType: 'text/html',
-        body: '<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>',
-      })
-    const file = path.join(dir, p)
-    if (existsSync(file))
-      return route.fulfill({
-        status: 200,
-        contentType: p.endsWith('.css') ? 'text/css' : 'text/javascript',
-        body: readFileSync(file),
-      })
-    return route.fulfill({ status: 404, body: '' })
-  })
-  await page.goto(`${ORIGIN}/`)
-  await page.waitForSelector('.track-over')
-  await page.waitForTimeout(100)
+  page = await open(1)
 })
 
 afterAll(async () => {
@@ -74,8 +83,8 @@ afterAll(async () => {
 })
 
 /** The tracks as laid out: each part's box, the lines' ends in the page, and what the lens and frame are drawn in. */
-const layout = () =>
-  page.evaluate(() => {
+const layout = (pg: Page = page) =>
+  pg.evaluate(() => {
     const box = (sel: string) => {
       const r = document.querySelector(sel)!.getBoundingClientRect()
       return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }
@@ -101,6 +110,9 @@ const layout = () =>
       frameBorder: getComputedStyle(frame).borderTopColor,
       frameWidth: parseFloat(getComputedStyle(frame).borderTopWidth),
       lensBg: getComputedStyle(lens).backgroundColor,
+      radius: parseFloat(getComputedStyle(lens).borderTopLeftRadius),
+      zoomBox: box('.track-zoom'),
+      ring: ['top', 'right', 'bottom', 'left'].map((side) => getComputedStyle(frame).getPropertyValue(`border-${side}-width`)),
       lensBorder: getComputedStyle(lens).borderTopColor,
       faded: getComputedStyle(document.querySelector('.track-zoom-faded')!).opacity,
       full: [...document.querySelectorAll('.track-zoom-shown [data-line]')].map((e) => Number((e as HTMLElement).dataset.line)),
@@ -132,8 +144,8 @@ for (const theme of ['light', 'dark']) {
     assert.notEqual(g.lensBg, 'rgba(0, 0, 0, 0)')
     assert.notEqual(g.lensBorder, 'rgba(0, 0, 0, 0)')
     // the lines: from the frame's right edge at its top and bottom to the lens's left edge at its top and bottom
-    assert.ok(near(g.top.x1, g.frame.right) && near(g.top.y1, g.frame.top) && near(g.top.x2, g.lens.left) && near(g.top.y2, g.lens.top), `top line ${JSON.stringify([g.top, g.frame, g.lens])}`)
-    assert.ok(near(g.bottom.x1, g.frame.right) && near(g.bottom.y1, g.frame.bottom) && near(g.bottom.x2, g.lens.left) && near(g.bottom.y2, g.lens.bottom), `bottom line ${JSON.stringify([g.bottom, g.frame, g.lens])}`)
+    assert.ok(near(g.top.x1, g.frame.right) && near(g.top.y1, g.frame.top) && near(g.top.x2, g.lens.left) && near(g.top.y2, g.lens.top + g.radius), `top line ${JSON.stringify([g.top, g.frame, g.lens])}`)
+    assert.ok(near(g.bottom.x1, g.frame.right) && near(g.bottom.y1, g.frame.bottom) && near(g.bottom.x2, g.lens.left) && near(g.bottom.y2, g.lens.bottom - g.radius), `bottom line ${JSON.stringify([g.bottom, g.frame, g.lens])}`)
     assert.notEqual(g.top.stroke, 'none')
     assert.ok(g.polygon && g.polygon.split(' ').length === 4)
   })
@@ -150,9 +162,34 @@ test("near the file's end the lens goes down the zoomed track with the frame, an
   assert.ok(near(frameAt(mid), 0.5, 0.02) && near(lensAt(mid), 0.5, 0.02), `${frameAt(mid)} ${lensAt(mid)}`)
   assert.ok(lensAt(end) > 0.9 && frameAt(end) > 0.9, `${frameAt(end)} ${lensAt(end)}`)
   assert.ok(end.lens.top - mid.lens.top > 150, 'the lens moved down the zoomed track')
-  assert.ok(near(end.top.y2, end.lens.top) && near(end.bottom.y2, end.lens.bottom) && near(end.top.y1, end.frame.top) && near(end.bottom.y1, end.frame.bottom), JSON.stringify(end))
+  assert.ok(near(end.top.y2, end.lens.top + end.radius) && near(end.bottom.y2, end.lens.bottom - end.radius) && near(end.top.y1, end.frame.top) && near(end.bottom.y1, end.frame.bottom), JSON.stringify(end))
   await page.evaluate(() => (window as any).__render('middle'))
 })
+
+for (const dpr of [1, 2]) {
+  test(`at a pixel ratio of ${dpr}, every edge stands on whole device pixels and each line's ends meet the corners within half a device pixel`, async () => {
+    const pg = await open(dpr)
+    for (const where of ['middle', 'end']) {
+      await pg.evaluate((w) => (window as any).__render(w), where)
+      const g = await layout(pg)
+      const tol = 0.5 / dpr + 1e-6
+      const on = (v: number) => Math.abs(v * dpr - Math.round(v * dpr)) < 1e-3
+      const at = `${where} ${JSON.stringify(g)}`
+      // the frame's and the lens's edges on the device's pixel grid
+      for (const v of [g.frame.top, g.frame.bottom, g.frame.left, g.frame.right, g.lens.top, g.lens.bottom, g.lens.left, g.lens.right, g.shown.top, g.shown.bottom]) assert.ok(on(v), `${v} off the grid, ${at}`)
+      // the ring the same on its four sides, the lens's margin of the paper the same on its four
+      assert.equal(new Set(g.ring).size, 1, at)
+      assert.ok([g.shown.top - g.lens.top, g.lens.bottom - g.shown.bottom, g.zoomBox.left - g.lens.left, g.lens.right - g.zoomBox.right].every((m) => Math.abs(m - 3) < 1e-3), at)
+      // each line from the frame's outer corner to the lens's left edge where its corner's curve ends
+      const ends = [
+        [g.top.x1, g.frame.right], [g.top.y1, g.frame.top], [g.top.x2, g.lens.left], [g.top.y2, g.lens.top + g.radius],
+        [g.bottom.x1, g.frame.right], [g.bottom.y1, g.frame.bottom], [g.bottom.x2, g.lens.left], [g.bottom.y2, g.lens.bottom - g.radius],
+      ]
+      ends.forEach(([a, b], i) => assert.ok(Math.abs(a - b) <= tol, `end ${i}: ${a} against ${b}, ${at}`))
+    }
+    await pg.close()
+  })
+}
 
 test("each pixel row of the overview is one color, and the find's matches leave ticks in the ink, no color", async () => {
   await page.evaluate(() => document.documentElement.setAttribute('data-paper', 'warm'))
