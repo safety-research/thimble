@@ -36,6 +36,8 @@ import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage, onListClick } from './lines'
 import { ANSWER_ELEMENT, RELAY, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, relayKey, relayMove, scrollPending, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
+// the file browser and a file, drawn by a module of their own (panel.tsx drawsView, term.ts loadsView)
+import './filesview'
 import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './reply'
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'

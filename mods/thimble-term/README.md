@@ -79,9 +79,14 @@ Claude Code's panel chrome, no right-click menu.
   thread under it, `stop` while it answers, `hand back to main` once it answered, the ask field); a label; the documents and one document (a report with its
   contents, a deck or a story one slide or beat at a time, the retell controls; its comments, a check's, Claude's or the
   analyst's, under the passages they are on, ↑↓ to choose one, `r` to resolve it, `v` to show the resolved ones; `e`
-  to edit a report as Markdown, its cards as their lines, saved as the browser's editor saves it); the file browser (folders that fold,
-  each folder's size, the chosen file's first lines as the file holds them) and a file (`Table`, `Transcript`, `Raw`,
-  each line as the file holds it, the chosen record's place and `?`); an agent;
+  to edit a report as Markdown, its cards as their lines, saved as the browser's editor saves it); the file browser, after the
+  browser's Files (folders that nest and fold, each folder's count and size, a `●` in a label's hue after each file a
+  label that is on labeled; `f` to find by name and by words, `thimble state find` and `grep`, what it found in place of
+  the tree with each matching line and its match lit; the chosen file's preview in the mode it opens in) and a file (the
+  modes that fit it, as the browser offers them: `Table` for records and CSV rows, `Transcript`, `Text`, `JSON` one record
+  at a time, `Raw`; the chosen record's place and `?`; `f` to find in the file, `thimble state findin`; the labels that are on marking the records they labeled in their
+  values' hues, `thimble state marks`; a database's tables and a table's rows, `thimble state tables` and `rows`); an
+  agent;
   and the views (a view built in terminal mode drawn by its program, `view.term.js` on the terminal view kit, which
   thimble's view host runs sandboxed while the view shows: docs/terminal-views.md; a view built in browser mode as one
   line that says so).
@@ -152,13 +157,14 @@ It sees a change without starting Python: once a second it lists the workspace's
 `hooks/register.tsx` holds the hooks and the one place `$` is used (Claude Code follows `$` into no import);
 `hooks/ctx.ts` is what it shares with the rest (the answer footer, the `↳` rows, the stream and `/thimble`'s words are
 in register.tsx too). `hooks/term.ts` keeps what it read and the panel's moves, `hooks/reply.tsx` draws main's chat,
-`hooks/panel.tsx` the panel, `hooks/lines.tsx` the parts drawn from styled lines (homeview.tsx), `hooks/cell.ts` turns a
+`hooks/panel.tsx` the panel, `hooks/filesview.tsx` its file browser and a file, `hooks/lines.tsx` the parts drawn from styled lines (homeview.tsx), `hooks/cell.ts` turns a
 thimble cell into the drawing's card form, `hooks/model.ts` reads the other surfaces, `hooks/data.ts` runs the command.
 The drawing itself: `draw.ts` lays out cards and charts as styled lines, `card.tsx` draws a card (its border the
 drawing's, its title a hot spot, everything but the title below the plot), `cite.ts` and `para.tsx` citations and their
 tips, `home.ts` and `homeview.tsx` home, `chrome.tsx` the panel's chrome, `paint.ts` the colors, `gestures.tsx` what a
 press does, `anim.ts` the mark a citation lights on a card, `nav.ts` the path from home and the threads tree,
-`signal.ts` the `↳` rows' rules, `report.ts` a document's comments and its edit as Markdown, `docedit.tsx` the document's editor, `files.ts` the file a ref cites and the turns a whole-file JSON transcript's view reads, `turns.ts` one drawing of a pane at a time, `lib.ts`
+`signal.ts` the `↳` rows' rules, `report.ts` a document's comments and its edit as Markdown, `docedit.tsx` the document's editor, `files.ts` the file browser's pure parts (the file a ref cites, the folder tree, a file's modes, the labels that are on
+and the values they gave its records, what a find found, the turns a whole-file JSON transcript's view reads), `turns.ts` one drawing of a pane at a time, `lib.ts`
 the pure helpers, `field.tsx` the text field that shows all of its text (a label's prompt), `kept.ts` what main's
 chat drew under its rows, kept for a resume, `viewhost.ts` thimble's view host and the open view's frame, and
 `viewclient.tsx` a view's frame drawn with its hot regions and tips.

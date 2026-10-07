@@ -145,7 +145,7 @@ test("a citation's file opens at its record, lit, with its place a link and a bl
   await pane.unmount()
 })
 
-test("a transcript by thimble's sniff: per turn the speaker bold and the words under the name, a tool call one dim line; tabs Transcript and Raw (1 2)", async ($, on) => {
+test("a transcript by thimble's sniff: per turn the speaker bold and the words under the name, a tool call one dim line; tabs Table, Transcript, JSON and Raw (1 2 3 4)", async ($, on) => {
   const w = world(on)
   w.states.files = [{ path: 'chat.jsonl', kind: 'records', size_bytes: 10 }]
   w.pages['chat.jsonl'] = CHAT
@@ -153,14 +153,14 @@ test("a transcript by thimble's sniff: per turn the speaker bold and the words u
   let pane = await browser($, w)
   pane = await openRow($, w, pane, 'chat.jsonl')
   const text = shown(await pane.drawn())
-  for (const s of [' Transcript ', ' Raw ', '1 2 3 for the tabs']) expect(text).toContain(s)
+  for (const s of [' Transcript ', ' JSON ', ' Raw ', '1 2 3 4 for the tabs']) expect(text).toContain(s)
   // every tab with a cell of space at each side, selected or not, the selected one inverse; the row starts a cell left
   // of the edge, in the margin, so the first tab's name starts at the edge, where the title starts
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"inverse":true},"children":[" Transcript "]}')
   expect((await pane.find({ type: 'Button', key: 'tab-table' }))?.props).toMatchObject({ label: ' Table ' })
   expect((await pane.find({ type: 'Box', key: 'm:file-tabs' }))?.props).toMatchObject({ paddingLeft: 1 })
   const tabsBefore = shown(await pane.find({ type: 'Box', key: 'm:file-tabs' }))
-  expect(tabsBefore).toBe(' Table  Transcript  Raw ')
+  expect(tabsBefore).toBe(' Table  Transcript  JSON  Raw ')
   // the tabs' digits are hidden keys: a Button's hotkey would draw `1:` before its name
   expect(((await pane.find({ type: 'Button', key: 'tab-table' })) as { props?: Record<string, unknown> } | undefined)?.props?.hotkey).toBeUndefined()
   expect(await pane.find({ type: 'Button', key: 'hk-tab0' })).toBeDefined()
@@ -227,17 +227,15 @@ test('the file browser lists each folder in natural order, as home does; a folde
   await pane.unmount()
 })
 
-test('a file of records opens as a table of their keys; a click on a column sorts by it, again the other way', async ($, on) => {
+test('a file of uniform records opens as a table of their keys, as the browser scores it; a click on a column sorts by it, again the other way', async ($, on) => {
   const w = world(on)
   w.states.files = [{ path: 'runs.jsonl', kind: 'records', size_bytes: 10 }]
   w.pages['runs.jsonl'] = RUNS
   await start($, w)
   let pane = await browser($, w)
   pane = await openRow($, w, pane, 'runs.jsonl')
-  await pane.press({ key: 'tab-table' })
-  await w.clock.settle()
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE)) as unknown as M
+  // the Table tab first: records that share their keys (frontend views/table.tsx tableScore 0.85)
+  expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"inverse":true},"children":[" Table "]}')
   const rows = () => pane.drawn({ in: 'm:file-body' }).then(t => (((t as { children?: unknown[] }).children ?? []) as unknown[]).map(r => shown(r).trim()))
   let got = await rows()
   expect(got[0]).toMatch(/^run +score +ok$/)
@@ -291,18 +289,21 @@ test("a file thimble knows only as text that opens as a transcript says `transcr
   await home.unmount()
 })
 
-test("the Raw tab shows a file's lines as the file holds them: a transcript's records as their JSON lines, and so does the file browser's preview", async ($, on) => {
+test("the Raw tab shows a file's lines as the file holds them: a transcript's records as their JSON lines; the file browser's preview shows the mode the file opens in", async ($, on) => {
   const w = world(on)
   w.states.files = [{ path: 'chat.jsonl', kind: 'records', size_bytes: 10 }]
   w.pages['chat.jsonl'] = CHAT
   await start($, w)
   let pane = await browser($, w)
   pane = await chooseRow($, w, pane, 'chat.jsonl')
-  // the preview: the file's first lines, not its turns' words
-  expect(shown(await pane.drawn())).toContain('{"author": "alice", "body": "Who saved the page?", "at": "10:00"}')
+  // the preview: the file's first turns, as it opens, each on one row, not its lines
+  const preview = shown(await pane.drawn())
+  expect(preview).toContain('opens as transcript')
+  expect(preview).toContain('Who saved the page?')
+  expect(preview).not.toContain('{"author": "alice"')
   // a second click on the chosen file opens it
   pane = await openRow($, w, pane, 'chat.jsonl', 1)
-  await pane.press({ key: 'hk-tab2' })
+  await pane.press({ key: 'hk-tab3' })
   await w.clock.settle()
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
@@ -377,7 +378,7 @@ test("a whole-file JSON transcript shows the turns thimble parses from the whole
   expect(w.calls.some(c => c[2] === 'turns' && c[5] === 'agent.json')).toBe(true)
   const text = shown(await pane.drawn())
   expect(text).toContain('transcript · turns 1-6 of 6')
-  expect(shown(await pane.find({ type: 'Box', key: 'm:file-tabs' }))).toBe(' Transcript  Raw ')
+  expect(shown(await pane.find({ type: 'Box', key: 'm:file-tabs' }))).toBe(' Transcript  JSON  Raw ')
   const rows = ((((await pane.drawn({ in: 'm:file-body' })) as { children?: unknown[] }).children ?? []) as unknown[]).map(r => shown(r).trim())
   const at = (s: string) => rows.findIndex(r => r.includes(s))
   // the system prompt before the conversations, then each conversation's title over its turns

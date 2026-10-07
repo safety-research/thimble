@@ -59,7 +59,7 @@ Each channel has one meaning. A run the table does not cover is regular, in the 
 | accent | a panel's title, the selected row | anything else |
 | italic | a record's own words (in quotation marks); the key-hint row | emphasis, captions |
 | inverse | the selected tab; the control, citation, mark or bar label under the pointer; a card's title under the pointer | anything at rest |
-| selection background | a choice in use: a card's parameter, a label's type, the cited value in its lines, the chosen record of a file, text being dragged | rows, hover |
+| selection background | a choice in use: a card's parameter, a label's type, the cited value in its lines, the chosen record of a file, the words a find matched, text being dragged | rows, hover |
 | tip background | the tip of the citation under the pointer | anything else |
 | palette hue | a value of the region's one color field | letters, headings, backgrounds |
 | red | a problem | negative numbers, hover |
@@ -91,7 +91,8 @@ the type area runs from A0 to R.
 | R | the type area's last cell | numbers, metadata (dim), the title row's navigation (`earlier  later`) |
 
 1. **Axes.** A run that opens a row starts on M, A0, A2, A4, L or a table's column. A tree deeper than A4 goes on with
-   guides `├ └ │`, 2 cells a level.
+   guides `├ └ │`, 2 cells a level; the file browser's folders go on 2 cells a level with no guides, as the browser's
+   tree indents them.
 2. **Marks hang.** `❯`, `?` and `↳` sit in the margin, so text keeps its edge with or without them. A state glyph or a
    fold marker sits on A0 with its item's name at A2. In a file's table the chosen record shows its `?` under the
    panel's header, since the margin holds `❯`.
@@ -168,8 +169,9 @@ the type area runs from A0 to R.
 Code blocks (a script, a label's code, a command) are drawn by Claude Code's `Code` element, with its own syntax colors
 and, given `startLine`, its dim gutter of line numbers.
 
-20. **One color field per region**: a card's group or label, the file browser's file type, a transcript's speakers.
-    While a card reads a label, the label is its field. Its hues go on glyphs and marks; a value's word stays in the
+20. **One color field per region**: a card's group or label, the file browser's labels that are on, a transcript's
+    speakers. While a card reads a label, the label is its field; while a label that is on marks a file's records, it is
+    the file's field, and a transcript's speakers' `●` take the text color. Its hues go on glyphs and marks; a value's word stays in the
     text color (`● dse 3,908`). A chart with no color field is one series, drawn in the first hue. The bar or mark
     under the pointer turns the text color and its readout stays plain. A field colors at most six values, past which
     its marks take the text color (transcripts cycle the hues). A label's values take the colors their classes have,
@@ -178,8 +180,8 @@ and, given `startLine`, its dim gutter of line numbers.
     classes takes the series in its values' order. A label's catch-all value ("other", a class with no color) takes dim
     marks. A field with one value draws dim marks.
 21. **The selection background** marks a choice in use among choices shown together: a card's parameter, a label's
-    type (`prompt  regex  code`), the cited value in the citation panel, the chosen record of a file, text being
-    dragged. Selected rows use `❯` and the accent instead (rule 13 of "The rules"), and the selected tab uses inverse.
+    type (`prompt  regex  code`), the cited value in the citation panel, the chosen record of a file, the words a find
+    matched in a line, text being dragged. Selected rows use `❯` and the accent instead (rule 13 of "The rules"), and the selected tab uses inverse.
 22. **Red** marks a problem and only a problem: a failure, a citation whose value is not at its place, a card that
     cannot be drawn, a run's error, a document's warning or caution. `×` is a failure and `!` something usable with a
     problem. Negative numbers are drawn as positive ones are.
@@ -643,40 +645,89 @@ and a bar in the text color, on every chart region over the same columns, with t
 relay (↑↓, Enter, Space, Backspace, a sign typed) and as hotkeys (a letter, a digit); while a field of the view takes
 typing, every key. A view built in browser mode is one line that says so, and how to open it in browser mode.
 
-**The file browser:**
+**The file browser**, after the browser's Files (`frontend/src/files`: its tree, its search, its reader's modes):
 
 ```
   ‹ back  home › files
   Files
-  4 files
+  7 files · 1 label on
   ──────────────────────────────────────────────────────────────────────────────────────────────
-  ▾ collusion-wiki/  4                                                                       41.6 MB
-❯     events.jsonl                                                                events     5.4 MB
-      labels.jsonl                                                                jsonl      1.1 MB
+      name                                                                       type       size
+  ▾ wiki/  3                                                                               94 KB
+      pages.csv                                                                  csv        2 KB
+      README.md                                                                  markdown   2 KB
+  ▸ logs/only/deep/  1                                                                     300 B
+  ▾ runs/  3                                                                              9.2 MB
+    ▾ 2026-06/  2                                                                         9.2 MB
+❯       agent-a.jsonl  ●                                                         agent    4.0 MB
+        agent-b.jsonl  ●                                                         agent    5.2 MB
+      notes.txt                                                                  txt       900 B
   ──────────────────────────────────────────────────────────────────────────────────────────────
-  events.jsonl                                                                 opens as lines
-     1  {"time": "2026-05-18T06:02:11Z", "event_type": "save", "wiki": "dse", …}
-     2  {"time": "2026-05-18T06:02:40Z", "event_type": "save", "wiki": "dse", …}
-  ↑↓ to choose · Enter to open · x to close
+  runs/2026-06/agent-a.jsonl                                                 opens as transcript
+  ●  07:40:01  ● alice  Who saved the welcome page this morning? It changed three times before…
+  ●  07:41:30  ● agent-a  I did, twice: once to fix the broken link through r.jina.ai and once…
+  ↑↓ to choose · Enter to open · Space to fold · f to find · x to close
 ```
 
-- A folder per group, foldable, its file count dim after its name and its size under `size`, as home's; an open folder
-  shows its first 20 files, then `… N more`. A file has no dot, as on home: its name at A4, the type column names its
-  type. The type column goes before a name is cut, as on home; a name too long even then is cut in its middle. A row is chosen as the browser opens (the first file of the first open
-  folder, or the file Backspace came back from); a folder's row is chosen like a file's, Enter folds it, and Space on a
-  file folds its folder with the choice moving onto the folder's row.
-- The chosen file's first lines show under the second rule (at most 6, fewer in a short pane, so the tree keeps eight rows) as the file holds them, with dim line numbers,
-  and what it opens as, on
-  the tab its view opens on (`transcript`, or `lines` for Raw); Enter or a second click opens it.
-- A file: path `home › files › labels.jsonl`, title its name, subtitle its type (as the file browser's), its records and the lines shown,
-  `earlier  later` at R, tabs `Table  Transcript  Raw` as its records read. The chosen record (a citation's, a click's)
-  is on the selection background, with its place as a link and a blue `?` under the header. Backspace goes back to
-  the file browser (`Backspace for the files`; ← reaches no element of a pane).
-- The Table tab: the records' keys as columns, names dim on the row above, `▼` or `▲` after the sorted one, a click on
-  a name sorts by it; numbers right-aligned with separators; free text last.
+- The tree, as the browser's: the corpus's own files under the corpus folder's name first, then each folder; in a
+  folder its folders first, then its files, each in natural order. A folder nests 2 cells further in per level, its
+  fold marker on its level's edge and its name 2 cells after it, its files 2 cells further in than its name, with no
+  dot. A folder that holds one folder and no files joins it on one row (`logs/only/deep/`). A folder's row: its file
+  count dim after its name (every file under it), its size under `size`, as home's. The first folder is open, the
+  others folded; an open folder shows its first 20 files, then `… N more`. The type column goes before a name is cut,
+  as on home; a name too long even then is cut in its middle. A row is chosen as the browser opens (the first file the
+  tree shows, or the file Backspace came back from, its folders open); a folder's row is chosen like a file's, Enter
+  folds it, and Space on a file folds its folder with the choice moving onto the folder's row.
+- The labels that are on (`shown`, as show_label or the browser's Files turns them on) are the tree's color field: a
+  `●` in each label's hue after the name of each file it labeled (its last run read it, or its scope names it), a space
+  between two; the subtitle counts them (`1 label on`).
+- `f` begins the find (the browser's Files search): `find` dim in the header, under the subtitle, and the words typed
+  after it, an inverse cell after them while its field takes typing. Its field is the relay's Input, so every letter
+  goes into it while ↑↓ still choose a row of what it found; Enter opens the chosen row, Esc leaves the field and keeps
+  the words, `f` takes typing again, and Backspace (out of the field) clears the find. The hint row while it types:
+  `↑↓ to choose · Enter to open · Esc to leave the field`.
+- What the find found stands in place of the tree. `Named` and its count: the files whose path holds every word
+  (`thimble state find`), each path at A2, its type and size against R. A blank row, then `In the text` and its count,
+  the matches against R: each file whose text holds the words (`thimble state grep`, from 2 letters on, read for at most
+  20 seconds), its path at A2 and its matches against R (`7 matches`, `+` when the count stopped short), then its first
+  matching lines at A4, each line's number right-aligned in a dim column and the words around the match, the match on
+  the selection background; `◌ searching the files' text` while it reads, and `searched N of M files` when it stopped
+  short. Enter or a second click on a file opens it (a file found in the text at its first match), on a line opens its
+  file at that line, chosen. Words that end in `:<n>` (`README.md:3`) find the name before it and open its file at
+  line n, as the browser's search reads them.
+- The chosen row's file shows under the second rule (at most 6 rows, fewer in a short pane, so the list keeps eight):
+  its path, what it opens in at R (`opens as transcript`, `table`, `text`, `lines`, `tables`), then its first rows in
+  that mode: a transcript's turns one row each (its clock, its speaker bold, its words after a gutter), a table's column
+  names and first rows, text wrapped, lines as the file holds them, a database's tables with their rows at R; a
+  matching line's file from that line, wrapped, the line lit.
+- A file: path `home › files › labels.jsonl`, title its name, subtitle its type (as the file browser's), its records
+  (a CSV file's `rows`) and the lines shown, `earlier  later` at R; the tabs of the modes it reads in, as the browser's
+  Files offers them, and it opens in the best by the browser's scores (`frontend/src/files/views/registry.ts`): a
+  transcript the sniff is sure of, then a text file, then records that share their keys or a CSV file as a table, else
+  Raw. The chosen record (a citation's, a click's) is on the selection background or `❯` in the accent, with its place
+  as a link and a blue `?` under the header. Backspace goes back to the file browser (`Backspace for the files`; ←
+  reaches no element of a pane).
+- `f` in a file begins its find (the browser's find bar): `find` dim under the tabs, the words typed after it with an
+  inverse cell after them while its field takes typing, and against R how many lines of the whole file hold them
+  (`thimble state findin`), `2 of 41 lines` while the chosen line is one of them, `none` when none does. The first such
+  line at or after the chosen one is chosen as the words come in, and ↑↓ choose the one before or after it while the
+  field takes typing (`↑↓ for the lines it found · Enter to stay there · Esc to leave the field`), reading its page when
+  it is on another. In the Raw and Text tabs the words are on the selection background wherever a line holds them. The
+  find goes with the file: Backspace back to the files clears it.
+- The labels that are on and labeled the file: a label row each under the chosen record's row, as a card's (`label`
+  dim, the name in blue and underlined, `↗`, each value after its `●` in its hue; `file` and the value it gave the file
+  whole for a label over files), a click on the name opens the label's panel; before each record a column of marks, a
+  `●` per label in the hue of the value it gave the record (dim for the catch-all), a space where it gave none, then a
+  gutter (`thimble state marks`, the rows on the page's lines).
+- The Table tab: the records' keys as columns (a CSV or TSV file's: the names its first line gives), names dim on the
+  row above, `▼` or `▲` after the sorted one, a click on a name sorts by it; numbers right-aligned with separators,
+  those that name things (an `id`, a `number`, a line, a year, a table's key) as written; free text last.
+- The Text tab (a Markdown file, a .txt file, a prompt; the browser's Rendered view): each line wrapped over the rows
+  it needs, its number in a dim column, a Markdown heading bold without its marks, blank lines left out.
+- The JSON tab (a file of JSON records, a line of a .json file): the chosen record whole (the first when none is),
+  indented, colored as Claude Code colors JSON, its long lines wrapped; ↑↓ the record before or after it.
 - Raw draws each line as the file holds it (a JSON record as its JSON line, never a transcript's words), its number
-  right-aligned in a dim column and the text after a gutter, a Markdown file's headings
-  bold.
+  right-aligned in a dim column and the text after a gutter, a Markdown file's headings bold.
 - A transcript: per turn, its clock dim in a column at A0 (`07:40:01`; the day on a dim row of its own where it
   changes), then `●` in the speaker's hue and the speaker's name bold; its text 2 cells in under the name, wrapped to
   up to three rows, the last cut with `…`; a tool call one dim line.
@@ -684,6 +735,11 @@ typing, every key. A view built in browser mode is one line that says so, and ho
   file (`thimble state turns`), 200 at a time, `turns 1-200 of N` in the subtitle and `earlier  later` paging them;
   each conversation's title on a dim row where it starts; a turn chosen by its place among the turns, since its
   turns may share a line. Where the parse finds no turns, the file opens as its lines and its type is its format.
+- A database (`.db`, `.sqlite`; the browser's Database view): `database · N tables`, then its tables, each with its rows
+  against R, Enter opening one; a table's rows as the Table tab draws them (`thimble state rows`, 100 at a time,
+  `earlier  later`; a click on a column's name sorts by it), `table <name> · rows 1-100 of N` in the subtitle; the
+  chosen row's place (`↗ forge.db · prs · 7131`) and `?` under the header, Enter opening its citation. Backspace goes
+  from a table to its tables, from the tables to the files.
 
 **The label panel**, as Matt laid it out, after the browser's label editor (`frontend/src/files/LabelCard.tsx`):
 
@@ -811,7 +867,7 @@ session):
 4. No two blank rows in a row; no blank row next to a rule; one blank row under each card's title.
 5. Every card has a full round border in the rule gray.
 6. Every rule is as wide as its type area; a panel has two rules at most.
-7. Every run that opens a row starts on M, A0, A2, A4, L, a table's column or a tree's guide.
+7. Every run that opens a row starts on M, A0, A2, A4, L, a table's column, a tree's guide or a folder's level in the file browser.
 8. Columns are parted by 2 spaces or more.
 9. No background but the panel's, the selection's and the tip's; no inverse but on the selected tab and under the pointer.
 10. No prose is cut at a fixed measure.
