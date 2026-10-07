@@ -83,13 +83,14 @@ const loaded = new Promise((ok) => (markLoaded = ok))
 
 const colour = thimble.colorBy({
   mount: '#colour',
+  // each field says what it is (from view.json's records), which the menu and a chip's hover give
   fields: [
-    { name: 'service', title: 'Service' },
-    { name: 'kind', title: 'Kind' },
-    { name: 'severity', title: 'Severity' },
-    { name: 'outcome', title: 'Outcome' },
-    { name: 'actor', title: 'Actor' },
-    { name: 'source', title: 'Source' },
+    { name: 'service', title: 'Service', description: "The service the event is about: its svc or service, the ticket's in tickets/index.csv, else its summary's first word" },
+    { name: 'kind', title: 'Kind', description: "What happened, from its state, event, Status or action: an alert firing read as fired, a ticket's first message as opened" },
+    { name: 'severity', title: 'Severity', description: "The alert's severity, or the ticket's priority in tickets/index.csv" },
+    { name: 'outcome', title: 'Outcome', description: 'The result an event records: ok, failed or held' },
+    { name: 'actor', title: 'Actor', description: 'Who acted: a login or chat id as chat/users.json names it, or the agent' },
+    { name: 'source', title: 'Source', description: "The file the event comes from: alerts, deploys, the agents' log, chat or tickets" },
   ],
   chips: 'filter',
   strip: '#list',

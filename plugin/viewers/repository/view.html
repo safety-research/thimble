@@ -16,10 +16,6 @@
   .table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   tr.item { cursor: pointer; }
   .c-id { width: 76px; }
-  .c-area { width: 92px; }
-  .c-who { width: 84px; }
-  .c-state { width: 72px; }
-  .c-act { width: 32%; }
   /* the activity column's head is the axis of every row's strip, its labels as the axis writes them */
   th.act { text-transform: none; letter-spacing: 0; padding-bottom: 0; }
   .id, .dim { color: var(--text-tertiary); }
@@ -81,16 +77,18 @@ let open = null // the key of the item opened in place
 let focus = null // the record a citation opened
 let want = null // a place thimble asked for before the items arrived
 const units = new Map() // each opened item's records (reader.py _detail)
-// the table's columns between Title and the activity strip, each shown only while an item of the kind has a value in it
-const COLS = [{ key: 'area', title: 'Area', cls: 'c-area', td: 'dim' }, { key: 'author', title: 'Author', cls: 'c-who' }, { key: 'state', title: 'State', cls: 'c-state' }]
+// the table's columns between Title and the activity strip, each shown only while an item of the kind has a value in it,
+// with its width in px
+const COLS = [{ key: 'area', title: 'Area', w: 92, td: 'dim' }, { key: 'author', title: 'Author', w: 84 }, { key: 'state', title: 'State', w: 72 }]
 let shown = COLS // the columns the items of the kind fill
 
 const colour = thimble.colorBy({
   mount: '#colour',
+  // each field says what it is (from view.json's records), which the menu and a chip's hover give
   fields: [
-    { name: 'state', title: 'State' },
-    { name: 'run', title: 'Run' },
-    { name: 'area', title: 'Area' },
+    { name: 'state', title: 'State', description: 'A pull request open, merged or closed by its records; an issue fixed once a pull request that fixes it merged' },
+    { name: 'run', title: 'Run', description: "The run whose folder holds the item" },
+    { name: 'area', title: 'Area', description: 'The first label, else the area of the issue it fixes' },
   ],
   chips: 'filter',
   strip: '#list',
@@ -126,10 +124,15 @@ async function opened(key) {
 // whose head is the axis
 function heads() {
   const want = COLS.filter((c) => data.items.some((it) => it[c.key] != null && it[c.key] !== ''))
-  if ($('heads').children.length && want.map((c) => c.key).join() === shown.map((c) => c.key).join()) return
-  shown = want
-  $('cols').innerHTML = `<col class="c-id"><col>${shown.map((c) => `<col class="${c.cls}">`).join('')}<col class="c-act">`
-  $('heads').innerHTML = `<th>Item</th><th>Title</th>${shown.map((c) => `<th>${c.title}</th>`).join('')}<th class="act"><div id="axis"></div></th>`
+  if (!$('heads').children.length || want.map((c) => c.key).join() !== shown.map((c) => c.key).join()) {
+    shown = want
+    $('heads').innerHTML = `<th>Item</th><th>Title</th>${shown.map((c) => `<th>${c.title}</th>`).join('')}<th class="act"><div id="axis"></div></th>`
+  }
+  // the strip: a third of the table and the width of the columns the kind leaves out, so it widens rather than Title;
+  // in px, since a table's column takes no calc() of a share and a length
+  const freed = COLS.filter((c) => !shown.includes(c)).reduce((n, c) => n + c.w, 0)
+  const strip = Math.round($('list').clientWidth * 0.32) + freed
+  $('cols').innerHTML = `<col class="c-id"><col>${shown.map((c) => `<col style="width:${c.w}px">`).join('')}<col style="width:${strip}px">`
 }
 
 function draw() {
