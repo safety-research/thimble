@@ -954,6 +954,87 @@ test('keys · `l` and `show all threads`: the list in place of the step that hol
   expect((await seen($, SHORT)).text).toMatch(/home › threads › (◌ )?"/)
 })
 
+test('the path row: `show all threads` and `N new` on home alone; the threads panel, a thread, a view, a file, a card, a citation, a label and a document leave them out, home one step away', async ($, on) => {
+  // Matt, 2026-10-07: "does 'show all threads' really need to be there when you're not in a thread?"
+  const w = world(on)
+  w.states.home = { ...w.states.home, views: TERM_VIEWS } as never
+  await start($, w)
+  const way = async () => {
+    const pane = await look($, SHORT)
+    // the row's words, without the labels of the hidden keys (their Boxes no row tall)
+    const box = (await pane.find({ type: 'Box', key: 'way' })) as { children?: { props?: { height?: unknown } }[] } | undefined
+    const out = { text: shown((box?.children ?? []).filter(k => k?.props?.height !== 0)), threads: Boolean(await pane.find({ type: 'Button', key: 'threads' })) }
+    await pane.unmount()
+    return out
+  }
+  const without = async (step: RegExp) => {
+    const r = await way()
+    expect(r.text).toMatch(step)
+    // neither `show all threads` nor its narrow form `threads` at R (a step may be the threads panel's), nor `1 new`
+    expect(r.text).not.toContain('show all threads')
+    expect(r.text).not.toContain('1 new')
+    expect(r.threads).toBe(false)
+  }
+  const home = async () => {
+    await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+    await w.clock.settle()
+    await takesKeys($)
+    const r = await way()
+    expect(r.text).toMatch(/^(‹ back {2})?home\s*show all threads {2}1 new$/)
+    expect(r.threads).toBe(true)
+  }
+  await home()
+  // a thread, from its row on home, and the threads panel
+  await click($, w, SHORT, 'home', 'why is events.jsonl bigger?')
+  await without(/home › threads › "why is events\.jsonl bigger\?"/)
+  await $.command.run({ command: 'thimble:thimble', args: 'threads' } as never)
+  await w.clock.settle()
+  await without(/home › threads$/)
+  // a view, the views and a file it claims
+  await home()
+  await click($, w, SHORT, 'home', 'Views (1)')
+  await without(/home › views$/)
+  await takesKeys($)
+  await enter($, w, SHORT)
+  await without(/home › views › Timeline$/)
+  await $.command.run({ command: 'thimble:thimble', args: 'files README.md' } as never)
+  await w.clock.settle()
+  await without(/home › files › README\.md$/)
+  await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
+  await w.clock.settle()
+  await without(/home › files$/)
+  // a card, and a citation from it
+  await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
+  await w.clock.settle()
+  await without(/home › card "What does the export hold…"$/)
+  const reply = { plugin: PANEL, component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'The README says [4,579](README.md#L3) pages.', isFirstOfReply: true } } as never
+  let ui = (await $.ui.mount(reply)) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(reply)) as unknown as M
+  await ui.pointer({ type: 'down', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.pointer({ type: 'up', x: 18, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.unmount()
+  await w.clock.settle()
+  await without(/citation 4,579$/)
+  // a label, the documents and a document
+  await home()
+  await click($, w, SHORT, 'home', 'links through a fetch proxy', '█')
+  await without(/home › labels › links through a fetch proxy$/)
+  await $.command.run({ command: 'thimble:thimble', args: 'documents' } as never)
+  await w.clock.settle()
+  await without(/home › documents$/)
+  await takesKeys($)
+  await type($, w, SHORT, '1')
+  await without(/home › documents › "Agents used the dse wiki as a…"$/)
+  // home is one click away from each of them
+  const pane = await look($, SHORT)
+  await pane.press({ key: 'crumb-home' })
+  await w.clock.settle()
+  await pane.unmount()
+  expect((await way()).text).toMatch(/show all threads {2}1 new$/)
+})
+
 test('keys · home · tall, scrolled: ↑ back to a section\'s first row shows its heading, and back to the first row shows the top', async ($, on) => {
   // live check term-fix10, new quirk 5: after ↓ through a tall home, ↑ back to the first row left `↑ 4 more` and hid
   // Views and the Documents heading

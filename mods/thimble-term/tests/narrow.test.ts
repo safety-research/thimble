@@ -43,7 +43,7 @@ function words(tree: unknown): string {
   return walk(tree)
 }
 
-test('the path row fits a pane 40 columns wide: `show all threads` shortens to `threads`, then gives way to the steps; a file\'s facts and `earlier  later` never run together', async ($, on) => {
+test('the path row fits a pane 40 columns wide: home\'s `show all threads` shortens to `threads`; a file\'s path row has no threads at any width; a file\'s facts and `earlier  later` never run together', async ($, on) => {
   // live check term-fix9, quirk 3: `‹ back  home › fileshow all threads` wrapped onto a second row and `lines 1…later`
   // ran together
   const w = world(on)
@@ -59,8 +59,10 @@ test('the path row fits a pane 40 columns wide: `show all threads` shortens to `
     expect(width(way)).toBeLessThanOrEqual(cols)
     expect(way).toContain('home')
     expect(way).toContain('labels.jsonl')
-    if (body === 37) expect(way).not.toContain('show all threads')
-    if (body === 96) expect(way).toMatch(/show all threads {2}1 new$/)
+    // the threads are not a file's subject: home is one step away (Matt, 2026-10-07)
+    expect(way).not.toContain('threads')
+    expect(way).not.toContain('new')
+    expect(await pane.find({ type: 'Button', key: 'threads' })).toBeUndefined()
     // the facts and the pages: on one row at least 2 cells apart when they fit, else on two rows
     const sub = await pane.find({ type: 'Box', key: 'file-sub' })
     if (body === 37) {
@@ -72,29 +74,28 @@ test('the path row fits a pane 40 columns wide: `show all threads` shortens to `
     }
     await pane.unmount()
   }
-  // no letter shows the threads (live check term-fix10, new quirk 4: `t` did, unnamed, and `table` typed while the
-  // panel held the keys opened them); in a pane too narrow for `show all threads`, `threads` stays one click away
-  for (const body of [37, 52]) {
+  // home: `show all threads  1 new` where it fits, `threads  1 new` in a pane too narrow for it, so the threads stay one
+  // click away. No letter shows the threads (live check term-fix10, new quirk 4: `t` did, unnamed, and `table` typed
+  // while the panel held the keys opened them)
+  for (const body of [34, 96]) {
+    await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+    await w.clock.settle()
     const pane = await look($, body)
     await takesKeys($)
     expect(await pane.find({ type: 'Button', key: 'hk-threads' })).toBeUndefined()
     const way = words(await pane.find({ type: 'Box', key: 'way' }))
     expect(width(way)).toBeLessThanOrEqual(body - 4)
-    if (body === 52) expect(way).toMatch(/threads {2}1 new$/)
-    const btn = await pane.find({ type: 'Button', key: 'threads' })
-    if (!btn) {
-      await pane.unmount()
-      continue
+    if (body === 96) expect(way).toMatch(/show all threads {2}1 new$/)
+    else {
+      expect(way).toMatch(/threads {2}1 new$/)
+      expect(way).not.toContain('show all threads')
     }
-    expect(way).not.toContain('show all threads')
     await pane.press({ key: 'threads' })
     await w.clock.settle()
     await pane.unmount()
     const threads = await look($, body)
     expect(words(await threads.drawn())).toContain('Threads')
     await threads.unmount()
-    await $.command.run({ command: 'thimble:thimble', args: 'files logs/labels.jsonl:30' } as never)
-    await w.clock.settle()
   }
 })
 

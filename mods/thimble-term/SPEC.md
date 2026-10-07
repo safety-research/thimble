@@ -290,7 +290,7 @@ colored is said under each.
 **A panel's header**, the same on every panel:
 
 ```
-  ‹ back  home › files › events.jsonl                                   show all threads  1 new
+  ‹ back  home › files › events.jsonl
   events.jsonl                                                                  earlier  later
   jsonl · 19,931 records · lines 201-400 of 19,931
   Table   Transcript   Raw
@@ -301,10 +301,13 @@ colored is said under each.
   name (a click on a step goes back to it; a click on the list a step stands in, such as `files` before a file opened
   from a citation, goes to that list in its place) (`thread "how many…"`, `citation 5884`, `card "How many pages…"`, `label edit purpose`, `files`,
   `events.jsonl`), parted by a dim `›`, a long step cut with `…`. A step whose thread has new answers is followed by
-  `new` in green; one whose thread is answering starts with `◌`. At R: `show all threads`, which opens the threads
-  panel, then `N new` in green while answers wait. The threads panel itself leaves it out. The row never wraps: in a
-  narrow pane `show all threads` shortens to `threads` (with `N new`, then alone), so the threads stay one click away,
-  then gives way to the steps, and the steps fold into `…` and are cut to the room left. No key shows all threads.
+  `new` in green; one whose thread is answering starts with `◌`. On home, at R: `show all threads`, which opens the
+  threads panel, then `N new` in green while answers wait. Every other panel leaves them out (Matt, 2026-10-07: "does
+  'show all threads' really need to be there when you're not in a thread?"): the threads panel is the threads, and on
+  a view, a file, a card, a citation, a label or a document they are not the subject, and home is one click away. The
+  row never wraps: in a narrow pane `show all threads` shortens to `threads` (with `N new`, then alone), so the threads
+  stay one click away, then gives way to the steps, and the steps fold into `…` and are cut to the room left. No key
+  shows all threads.
 - The title row: the subject's name in the accent color and bold; navigation against R. The subtitle under it: the
   subject's facts, dim, parted by ` · `, with a problem in red. A panel with no facts worth a row has no subtitle.
 - Tabs, where the subject has them: each tab's name with a cell of space at each side, selected or not, the selected one
@@ -578,7 +581,7 @@ colored is said under each.
 **The citation panel:**
 
 ```
-  ‹ back  home › citation 14591                                         show all threads  1 new
+  ‹ back  home › citation 14591
   14591
   found in the command's output, line 1
   ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -629,7 +632,7 @@ typing, every key. A view built in browser mode is one line that says so, and ho
 **The file browser:**
 
 ```
-  ‹ back  home › files                                                         show all threads
+  ‹ back  home › files
   Files
   4 files
   ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -671,7 +674,7 @@ typing, every key. A view built in browser mode is one line that says so, and ho
 **The label panel**, as Matt laid it out, after the browser's label editor (`frontend/src/files/LabelCard.tsx`):
 
 ```
-  ‹ back  home › labels › edit purpose                                         show all threads
+  ‹ back  home › labels › edit purpose
   name:   ● edit purpose
   type:   prompt  regex  code
   scope:  revisions.jsonl                                                        14,591 records

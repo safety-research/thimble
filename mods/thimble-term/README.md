@@ -65,10 +65,10 @@ Claude Code's panel chrome, no right-click menu.
 - **One row above the prompt**, a toast: what is new in the workspace since home was last opened (`2 new cards`, `new` in
   green), `open ›` opening home, gone once it is opened. Side threads have their `↳` rows and thimble's agents Claude
   Code's agent tray, so no row repeats them.
-- **One panel**, on Claude Code's panel chrome: the path row (`‹ back`, the steps from home, `show all threads` and
-  `N new` at the right), a title in the accent colour and bold with a dim subtitle, a rule, the actions at the bottom
-  after a second rule, and a dim italic row of key hints (`b to go back` only where there is a way back), which goes on
-  to a second row where it does not fit, never cut. Claude Code's
+- **One panel**, on Claude Code's panel chrome: the path row (`‹ back`, the steps from home; on home, `show all
+  threads` and `N new` at the right), a title in the accent colour and bold with a dim subtitle, a rule, the actions at
+  the bottom after a second rule, and a dim italic row of key hints (`b to go back` only where there is a way back),
+  which goes on to a second row where it does not fit, never cut. Claude Code's
   pane title says what it shows (`Citation`, `Threads`, `Label: …`, a card's question, a document's title). Its views:
   home (one column: views, documents, threads, cards by group with the newest open, labels, files by folder and the
   orientation's coverage line); a card with how its last run ended, `run again` (main runs `thimble-run card`), and its

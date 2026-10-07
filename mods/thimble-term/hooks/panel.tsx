@@ -294,15 +294,18 @@ function upOf(s: ChatNavStep, earlier: readonly ChatNavStep[]): TermPanel | null
 const SEP_W = 3
 
 /** The path row (SPEC.md, "A panel's header"): `‹ back`, the steps from home, each a lower-case kind word and its
- *  name parted by a dim ›, each a click away, a thread's step followed by `new` in green while answers wait; at R `show
- *  all threads` and `N new` in green. The threads panel leaves those out. */
+ *  name parted by a dim ›, each a click away, a thread's step followed by `new` in green while answers wait; on home, at
+ *  R `show all threads` and `N new` in green. Every other panel leaves those out. */
 async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElement> {
   const { Box, Text, Button } = cx.els(e)
   // the row's own width: never more than the pane gives it, or it wraps (live check term-fix9, quirk 3)
   const cols = Math.max(10, e.props.bodyColumns)
   const nav = (await cx.nav()) ?? NAV_EMPTY
   const back = backTarget(nav) !== null
-  const inThreads = view === 'threads' || view === 'thread'
+  // `show all threads` only where the threads are the subject, home; the threads panel is the threads, and on a view,
+  // a file, a card or a citation home is one step away (Matt, 2026-10-07: "does 'show all threads' really need to be
+  // there when you're not in a thread?")
+  const showThreads = view === 'home'
   const threads = (await cx.threads()) ?? []
   const fresh = ((await cx.news()) ?? { n: 0 }).n
   const { steps, skipped } = crumbSteps(nav.trail)
@@ -329,7 +332,7 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
   const newW = fresh ? `${fresh} new`.length : 0
   type Tail = { all: string; fresh: boolean; w: number }
   const tail0 = (all: string, withNew: boolean): Tail => ({ all, fresh: withNew, w: (all ? 2 + all.length : 0) + (withNew ? 2 + newW : 0) })
-  const tails: Tail[] = inThreads
+  const tails: Tail[] = !showThreads
     ? [tail0('', false)]
     : [tail0('show all threads', Boolean(fresh)), ...(fresh ? [tail0('threads', true)] : []), tail0('threads', false), tail0('', false)]
   const need = Math.min(crumbsWidth(labels.map(l => clip(l, 34))), 4 + (labels.length > 2 ? 4 : 0) + (labels.length > 1 ? SEP_W + Math.min(12, width(labels.at(-1)!)) : 0))
