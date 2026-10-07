@@ -414,6 +414,44 @@ async def test_state_opens_says_which_files_open_as_a_transcript(term):
         await local.state(CORPUS, "opens")
 
 
+async def test_state_gives_the_file_browser_s_search_marks_and_database(term):
+    """The terminal file browser's reads, as the browser's Files routes give them: the files named by the words typed
+    (find), the files whose text holds them with their first matching lines (grep, read whole), every label's rows on a
+    page of a file's lines (marks), and a database file's tables and a page of a table's rows (tables, rows)."""
+    named = await local.state(CORPUS, "find", ["board"])
+    assert [f["path"] for f in named["files"]] == ["board.jsonl"] and named["total"] == 1
+    grep = await local.state(CORPUS, "grep", ["Bash"])
+    assert grep["q"] == "Bash" and grep["done"]["complete"] is True
+    first = grep["files"][0]
+    assert first["path"].startswith("agents/") and first["total"] >= 1
+    hit = first["matches"][0]
+    assert isinstance(hit["line"], int) and hit["text"][hit["hit"][0]:hit["hit"][1]].lower() == "bash"
+    with pytest.raises(local.StateError, match="one line"):
+        await local.state(CORPUS, "grep", [" "])
+    # the lines of one file that hold the words, past a line
+    inside = await local.state(CORPUS, "findin", [first["path"], "bash"])
+    assert inside["lines"] and inside["lines"][0] == hit["line"] and inside["complete"] is True
+    later = await local.state(CORPUS, "findin", [first["path"], "bash", "--after", str(inside["lines"][0])])
+    assert hit["line"] not in later["lines"]
+    with pytest.raises(local.StateError, match="needs"):
+        await local.state(CORPUS, "find")
+    # a label's rows on lines 1-20 of an agent's transcript: the lines its pattern matched, by ref
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    [marks] = await local.state(CORPUS, "marks", ["agents/agent-01.jsonl", "--lines", "1-20"])
+    assert marks["name"] == "bash" and marks["rows"]
+    assert all(r["ref"].startswith("agents/agent-01.jsonl#L") for r in marks["rows"])
+    assert await local.state(CORPUS, "marks", ["board.jsonl", "--lines", "1-5"]) == []
+    tables = await local.state(CORPUS, "tables", ["forge.db"])
+    assert {"name": "agents", "row_count": 3} in tables
+    rows = await local.state(CORPUS, "rows", ["forge.db", "--table", "agents", "--start", "2"])
+    assert rows["total"] == 3 and len(rows["rows"]) == 2 and rows["columns"][0] == "id"
+    with pytest.raises(local.StateError, match="no such table"):
+        await local.state(CORPUS, "rows", ["forge.db", "--table", "nope"])
+    with pytest.raises(local.StateError, match="not a database"):
+        await local.state(CORPUS, "tables", ["board.jsonl"])
+
+
 async def test_act_makes_what_the_browser_makes(term, monkeypatch):
     from app import agents, concepts, events, subagents, threads
 

@@ -1633,19 +1633,18 @@ def put_source(c: str, path: str, body: SourceTextBody) -> dict[str, Any]:
 
 
 # /forge/* routes: `path` names any database file under the corpus (default forge.db); the connection is read-only.
-@router.get("/corpora/{c}/forge/tables")
-def forge_tables(c: str, request: Request, path: str = "forge.db") -> list[dict[str, Any]]:
-    with closing(_database(_corpus(c), path)) as con:
-        tables = [{"name": t, "row_count": con.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]}
-                  for t in table_names(con)]
-    _viewed(c, path, request)
-    return tables
+def database_tables(corpus: Path, rel: str) -> list[dict[str, Any]]:
+    """A database file's tables, [{name, row_count}] (GET /forge/tables, and `thimble state tables`)."""
+    with closing(_database(corpus, rel)) as con:
+        return [{"name": t, "row_count": con.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]}
+                for t in table_names(con)]
 
 
-@router.get("/corpora/{c}/forge/rows")
-def forge_rows(c: str, table: str, request: Request, offset: int = 0, limit: int = 100,
-               order: str | None = None, where: str | None = None, path: str = "forge.db") -> dict[str, Any]:
-    with closing(_database(_corpus(c), path)) as con:
+def database_rows(corpus: Path, rel: str, table: str, offset: int = 0, limit: int = 100, order: str | None = None,
+                  where: str | None = None) -> dict[str, Any]:
+    """A page of a database table's rows, {table, columns, rows, pk, total} (GET /forge/rows, and `thimble state
+    rows`): `limit` rows from `offset`, sorted by `order` (a column, then asc or desc), kept by `where`."""
+    with closing(_database(corpus, rel)) as con:
         if table not in table_names(con):
             raise HTTPException(404, f"no such table: {table!r}")
         columns, pk = table_info(con, table)
@@ -1673,8 +1672,22 @@ def forge_rows(c: str, table: str, request: Request, offset: int = 0, limit: int
             rows = [[jsonable(v) for v in r] for r in con.execute(sql)]
         except sqlite3.Error as e:
             raise HTTPException(400, f"sqlite: {e}")
-    _viewed(c, path, request)
     return {"table": table, "columns": columns, "rows": rows, "pk": pk, "total": total}
+
+
+@router.get("/corpora/{c}/forge/tables")
+def forge_tables(c: str, request: Request, path: str = "forge.db") -> list[dict[str, Any]]:
+    tables = database_tables(_corpus(c), path)
+    _viewed(c, path, request)
+    return tables
+
+
+@router.get("/corpora/{c}/forge/rows")
+def forge_rows(c: str, table: str, request: Request, offset: int = 0, limit: int = 100,
+               order: str | None = None, where: str | None = None, path: str = "forge.db") -> dict[str, Any]:
+    page = database_rows(_corpus(c), path, table, offset, limit, order, where)
+    _viewed(c, path, request)
+    return page
 
 
 class QueryBody(BaseModel):

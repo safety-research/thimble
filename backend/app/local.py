@@ -33,6 +33,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -321,12 +322,16 @@ def ui_records(c: str, after: int = 0) -> list[dict[str, Any]]:
 STATE_USAGE = ("thimble state <surface> --cwd <dir> [args]; surfaces: home, cards [--since <iso>], card <id>, labels, "
                "label <id>, docs, doc <slug>, threads, thread <id> [--after <n>], agents [--tail <n>], "
                "files [path] [--start <n>], turns <path> [--start <n>] [--line <n>], opens <paths json>, "
-               "resolve <refs json>, ui [--after <n>]")
+               "find <text>, grep <text>, findin <path> <text> [--after <n>], marks <path> [--lines <a-b>], "
+               "tables <path>, rows <path> --table <name> [--start <n>] [--order <column>], resolve <refs json>, "
+               "ui [--after <n>]")
 
 
 LABEL_ROWS = 3  # records per value `state label` gives with their words (rows)
 LABEL_VERDICT_ROWS = 6  # records per value the analyst set or agreed with that `state label` adds to them
 OPENS_MAX = 100  # files one `state opens` reads the head of
+GREP_STATE_S = 20.0  # seconds one `state grep` reads the files' text before it answers with what it found
+DB_PAGE = 100  # rows of a database table one `state rows` gives, the renderer's page
 FILE_PAGE = 200  # lines of a file `state files <file>` gives, the renderer's page (its earlier and later steps)
 TURNS_PAGE = 200  # turns of a whole-file JSON transcript `state turns <file>` gives, the renderer's page
 
@@ -748,6 +753,85 @@ async def _opens(c: str, args: list[str], pos: list[str]) -> Any:
     return await asyncio.to_thread(run)
 
 
+async def _find(c: str, args: list[str], pos: list[str]) -> Any:
+    """The file browser's search by name (GET /sources/find): {q, files, total}, the files whose path holds every word
+    of the text, best first."""
+    from . import corpus  # noqa: PLC0415
+
+    if not pos or not pos[0].strip():
+        raise StateError("find needs the text to find")
+    return await asyncio.to_thread(corpus.find_sources, c, pos[0])
+
+
+async def _grep(c: str, args: list[str], pos: list[str]) -> Any:
+    """The file browser's search inside the files (GET /sources/grep), read whole: {q, files, done}, each file whose
+    text holds the text with its first matching lines (`matches`, each {line, text, hit}) and its count (`total`), then
+    how many files it read (`done`). It stops after GREP_STATE_S seconds, `done.complete` false then, since a state
+    read answers once."""
+    from . import corpus  # noqa: PLC0415
+
+    q = pos[0] if pos else ""
+    if not q.strip() or "\n" in q:
+        raise StateError("grep needs text on one line")
+    root = corpus._corpus(c)
+
+    def run() -> dict[str, Any]:
+        deadline = time.monotonic() + GREP_STATE_S
+        files: list[dict[str, Any]] = []
+        done: dict[str, Any] | None = None
+        for item in corpus.grep_files(root, corpus.search_paths(root).ordered, q, stop=lambda: time.monotonic() > deadline):
+            if item.get("done"):
+                done = item
+            elif not item.get("progress"):
+                files.append(item)
+        return {"q": q, "files": files, "done": done}
+
+    return await asyncio.to_thread(run)
+
+
+async def _findin(c: str, args: list[str], pos: list[str]) -> Any:
+    """The file view's find (GET /source/find): the lines of one file past line `--after` that hold the text, searched
+    over the whole file, {lines, counts, total, complete, total_lines, ...}."""
+    from . import corpus  # noqa: PLC0415
+
+    if len(pos) < 2:
+        raise StateError("findin needs a file's path and the text to find")
+    return await asyncio.to_thread(corpus.find_in_source, c, pos[0].strip().strip("/"), pos[1],
+                                   max(0, _int(_flag(args, "--after"), 0, "--after")))
+
+
+async def _marks(c: str, args: list[str], pos: list[str]) -> Any:
+    """Every label's rows on one file (GET /labels?path=&lines=a-b): [{concept_id, name, labels, unit, rows}], with
+    `--lines a-b` the rows on those lines and the file's whole-file rows, which the file view marks its records with."""
+    from . import concepts  # noqa: PLC0415
+
+    if not pos:
+        raise StateError("marks needs a file's path")
+    return await asyncio.to_thread(concepts.all_labels_route, c, pos[0].strip().strip("/"), _flag(args, "--lines"))
+
+
+async def _tables(c: str, args: list[str], pos: list[str]) -> Any:
+    """A database file's tables (GET /forge/tables): [{name, row_count}]."""
+    from . import corpus  # noqa: PLC0415
+
+    if not pos:
+        raise StateError("tables needs a database file's path")
+    return await asyncio.to_thread(corpus.database_tables, corpus._corpus(c), pos[0].strip().strip("/"))
+
+
+async def _rows(c: str, args: list[str], pos: list[str]) -> Any:
+    """A page of a database table's rows (GET /forge/rows): DB_PAGE rows from row `--start` (from 1), sorted by
+    `--order` (a column, then asc or desc); {table, columns, rows, pk, total}."""
+    from . import corpus  # noqa: PLC0415
+
+    table = _flag(args, "--table")
+    if not pos or not table:
+        raise StateError("rows needs a database file's path and --table")
+    start = max(1, _int(_flag(args, "--start"), 1, "--start"))
+    return await asyncio.to_thread(corpus.database_rows, corpus._corpus(c), pos[0].strip().strip("/"), table, start - 1,
+                                   DB_PAGE, _flag(args, "--order"))
+
+
 async def _resolve(c: str, args: list[str], pos: list[str]) -> Any:
     from . import refs, verify  # noqa: PLC0415
 
@@ -790,7 +874,8 @@ async def _ui(c: str, args: list[str], pos: list[str]) -> Any:
 
 _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "label": _label, "docs": _docs,
              "doc": _doc, "threads": _threads, "thread": _thread, "agents": _agents, "files": _files,
-             "turns": _turns, "opens": _opens, "resolve": _resolve, "ui": _ui}
+             "turns": _turns, "opens": _opens, "find": _find, "grep": _grep, "findin": _findin, "marks": _marks, "tables": _tables,
+             "rows": _rows, "resolve": _resolve, "ui": _ui}
 
 
 # --------------------------------------------------------------------------- thimble act
