@@ -113,6 +113,9 @@ FEEDBACK = "feedback"  # /thimble feedback: the problem report (feedback.py)
 # where the server did not start: how to send the developer a problem report, which needs no server
 REPORT_LINE = ("thimble: to report it, say `/thimble feedback` or run `thimble feedback \"the server did not start\"` in a "
                "shell; either writes a zip with the logs to send the developer.")
+# a server of this install that runs, holding its port, but does not answer (out of file descriptors, or its loop held)
+STUCK_LINE = "thimble's server (pid {pid}) is running but does not answer; restart it with `thimble server restart`"
+STUCK_AFTER_S = 60.0  # a server server.json says started less long ago may still be starting, so is not called stuck
 UNINSTALL_SHELL_LINE = "thimble: uninstall is a shell command, not a /thimble action. Run `thimble uninstall` in a terminal; it says what it will remove and asks first."
 # What /thimble prints where the plugin's hooks are off, so that thimble connects through main's Monitor
 # (cc_plugin.route): on that route permission prompts stay in the terminal, and after /clear the Monitor is gone, so the
@@ -731,20 +734,49 @@ def start_error(since: int) -> str:
 
 
 def start_failure(url: str) -> str:
-    """Why the server `start` spawned in this process is not answering at `url`: another program on the port, the
-    error it exited with, or that it is still starting. '' when this process started nothing."""
+    """Why no server answers at `url` after a start: another program on the port, a server of this install that runs
+    there but does not answer (STUCK_LINE), the error the server `start` spawned in this process exited with, or that it
+    is still starting. '' when none of these is found."""
     p = int(LAST_START.get("port") or port())
     pid = LAST_START.get("pid")
     if listening(p) and not healthy(url):
         holder = procs.listener(p)
-        if holder != pid and not (holder and is_server(holder, p)):
-            return port_line(p, False)
+        if holder != pid:
+            return STUCK_LINE.format(pid=holder) if holder and is_server(holder, p) else port_line(p, False)
     if pid and spawned_exited(pid):
         err = start_error(int(LAST_START.get("log_offset") or 0))
         return f"the server exited while starting{': ' + err if err else ''}"
     if pid:
         return f"the server (pid {pid}) is still starting; this machine may be slow"
-    return ""
+    stuck = stuck_server(url)
+    return STUCK_LINE.format(pid=stuck) if stuck else ""
+
+
+def _started_within(st: dict[str, Any], seconds: float) -> bool:
+    """Whether server.json's `started` is less than `seconds` ago."""
+    try:
+        started = datetime.fromisoformat(str(st.get("started") or ""))
+    except ValueError:
+        return False
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - started).total_seconds() < seconds
+
+
+def stuck_server(url: str | None = None) -> int | None:
+    """The pid of a server of this install that runs, holding its port or named by server.json, but does not answer at
+    `url`; None when it answers, when none runs, and for the server server.json says started less than STUCK_AFTER_S
+    ago, which may still be starting."""
+    st = read_state()
+    p = int(st.get("port") or port())
+    recorded = st.get("pid")
+    holder = procs.listener(p) if listening(p) else None
+    for pid in dict.fromkeys(q for q in (holder, recorded) if q):
+        if pid == recorded and _started_within(st, STUCK_AFTER_S):
+            continue
+        if is_server(pid, p, st.get("repo")):
+            return None if healthy(url or api_url(p)) else int(pid)
+    return None
 
 
 def session_pids(leader: int) -> list[int]:
@@ -1975,7 +2007,9 @@ def server_for_launch(c: str) -> list[str]:
         NOTICES.clear()
         if not up:
             _log(f"launch-args: no server answers at {url} for {c}")
-            notes.append(LAUNCH_NO_SERVER_LINE.format(wait=WAIT_S, log=log_path()))
+            stuck = stuck_server(url)
+            notes.append(f"thimble: {STUCK_LINE.format(pid=stuck)}" if stuck else
+                         LAUNCH_NO_SERVER_LINE.format(wait=WAIT_S, log=log_path()))
         return notes
     except Exception as e:  # noqa: BLE001 — the launch goes on without it
         _log(f"launch-args: the server was not started: {type(e).__name__}: {e}")
@@ -3087,6 +3121,8 @@ def port_line(p: int, up: bool) -> str:
     if not listening(p):
         return f"{p} (free)"
     holder = procs.listener(p)
+    if holder and is_server(holder, p):
+        return f"{p} is held by thimble's server (pid {holder}), which does not answer; restart it with `thimble server restart`"
     who = f"pid {holder}: {procs.cmdline(holder)[:80]}" if holder else "a process this user cannot see"
     return (f"{p} is taken by another program ({who}) and thimble cannot start there; stop that program, or start "
             "thimble on a free port with THIMBLE_PORT=<port> thimble")
@@ -3219,10 +3255,13 @@ def doctor_text(commands: bool = True) -> str:
         lines.append(f"  turn endings: {_checked(_turn_endings_line)}")
     lines.append(f"  node: {_checked(node_line, commands)}")
     lines.append(f"  python: {_checked(python_line)}")
-    lines.append(f"  port: {_checked(port_line, p, up)}")
+    port_text = _checked(port_line, p, up)
+    lines.append(f"  port: {port_text}")
+    stuck = None if up or "thimble server restart" in port_text else _checked(stuck_server, url)
     lines.append(f"  server: {'up' if up else 'down'} at {url}; pid {pid or '-'} "
                  f"({'alive' if pid_alive(pid) else 'gone'}); started {st.get('started') or '-'}"
-                 + (f"; stopped {st['stopped']}" if st.get("stopped") else ""))
+                 + (f"; stopped {st['stopped']}" if st.get("stopped") else "")
+                 + (f"; {STUCK_LINE.format(pid=stuck)}" if isinstance(stuck, int) else ""))
     ui = int(st.get("ui_port") or ui_port())
     if env["dev"]:
         lines.append(f"  ui: http://127.0.0.1:{ui} (Vite, {'listening' if listening(ui) else 'not listening'}); dev mode on")
@@ -3582,7 +3621,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
     if not up:
         why = start_failure(url)
         _log(f"server up: no server answers at {url}" + (f" ({why})" if why else ""))
-        print(f"thimble: the server did not start: {why}; see {log_path()}" if why else
+        print(f"thimble: no server answers: {why}; see {log_path()}" if why else
               f"thimble: the server did not start within {WAIT_S:.0f} s; see {log_path()}")
         print("Say `/thimble` again once that is fixed, or run `thimble doctor` in a shell.")
         print(REPORT_LINE)

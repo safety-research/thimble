@@ -1822,6 +1822,7 @@ class _Kernel:
         self.home = self.record.with_suffix(".home")  # HOME of a kernel under srt, emptied at each start
         self.lease_fd: int | None = None  # this server's flock on it while held
         self.kc: AsyncKernelClient | None = None  # channels to the process; None while detached or not started
+        self.proc: subprocess.Popen | None = None  # the process when this server launched it (_launch), until _kill
         self.pid: int | None = None
         self.pgid: int | None = None
         self.wrap: str | None = None  # the wrapper it runs in (config.KERNEL_WRAPS), from its record
@@ -1835,7 +1836,13 @@ class _Kernel:
         self.last_result: int | None = None
 
     def alive(self) -> bool:
-        """The kernel process runs: the pid is live and its command line still names our connection file."""
+        """The kernel process runs: for a process this server launched, while it has not exited (its pid cannot pass to
+        another program before this server collects it); else the pid is live and its command line still names our
+        connection file. The first needs no file descriptor, so a server out of them does not take its own kernel for
+        dead (procs reads /proc or runs ps)."""
+        proc = self.proc
+        if proc is not None and proc.pid == self.pid:
+            return proc.poll() is None
         return _is_kernel_process(self.pid, self.conn)
 
     def interrupt(self) -> None:
@@ -1948,10 +1955,11 @@ def _group_alive(pid: int, pgid: int | None) -> bool:
     return True
 
 
-def _terminate(pid: int, pgid: int | None, connection_file: Path) -> None:
+def _terminate(pid: int, pgid: int | None, connection_file: Path, ours: bool = False) -> None:
     """SIGTERM, then SIGKILL after KILL_WAIT_S, to the process group, only while the process's command line names our
-    connection file, until no member of its group is left. Blocking; call it in a thread."""
-    if not _is_kernel_process(pid, connection_file):
+    connection file (or, `ours`, while it is this server's child that has not exited, which no other program can hold
+    the pid of), until no member of its group is left. Blocking; call it in a thread."""
+    if not ours and not _is_kernel_process(pid, connection_file):
         _reap(pid)
         return
     _signal(pid, pgid, signal.SIGTERM)
@@ -2036,11 +2044,47 @@ def recorded_kernels(workspace: str) -> list[str | None]:
 # --- start, attach, detach, kill ---
 
 
+CHANNELS = ("_shell_channel", "_iopub_channel", "_stdin_channel", "_hb_channel", "_control_channel")  # AsyncKernelClient's
+HB_SOCKET_WAIT_S = 1.0  # _close_client: the most it waits for a heartbeat thread just started to make its socket
+
+
 def _client(connection_file: Path) -> AsyncKernelClient:
+    """Channels to the kernel of `connection_file`. A start that fails part way (a server out of file descriptors fails
+    in zmq) closes what it opened before it raises."""
     kc = AsyncKernelClient()
-    kc.load_connection_file(str(connection_file))
-    kc.start_channels()
+    try:
+        kc.load_connection_file(str(connection_file))
+        kc.start_channels()
+    except BaseException:
+        _close_client(kc)
+        raise
     return kc
+
+
+def _close_client(kc: AsyncKernelClient) -> None:
+    """Close the client's channels and the zmq context it made, whatever a failed start left of them. Never raises, and
+    opens nothing: stop_channels makes each channel it closes, so after a partial start it would open sockets (and fail
+    again where the descriptors ran out) before it reached the context."""
+    for attr in CHANNELS:
+        ch = getattr(kc, attr, None)
+        if ch is None:
+            continue
+        try:
+            if isinstance(ch, threading.Thread) and ch.is_alive():
+                # the heartbeat's thread, joined once it has made its socket: stopped before, the thread fails in zmq
+                deadline = time.monotonic() + HB_SOCKET_WAIT_S
+                while ch.is_alive() and ch.socket is None and time.monotonic() < deadline:
+                    time.sleep(0.005)
+                ch.stop()
+            else:
+                ch.close()
+        except Exception:  # noqa: BLE001
+            log.debug("closing a kernel channel failed", exc_info=True)
+    try:
+        if kc._created_context and not kc.context.closed:  # never true for a context that was not made
+            kc.context.destroy(linger=0)  # closes any socket left in it
+    except Exception:  # noqa: BLE001
+        log.debug("destroying a kernel client's zmq context failed", exc_info=True)
 
 
 async def _wait_ready(k: _Kernel, kc: AsyncKernelClient, timeout: float, *, control: bool) -> None:
@@ -2220,30 +2264,33 @@ async def _launch(k: _Kernel, workspace: str) -> None:
         argv = wrapped_argv(argv, workspace=workspace, corpus=corpus, connection_file=k.conn, source=source)
     elif wrap == config.KERNEL_WRAP_SRT:
         argv = sandboxed_argv(argv, workspace=workspace, corpus=corpus, source=source)
-    await asyncio.to_thread(write_connection_file, str(k.conn), ip="127.0.0.1", key=secrets.token_hex(16).encode())
-    env = kernel_env()
-    env.pop("JPY_PARENT_PID", None)  # no parent poller: the kernel outlives this server
-    env.setdefault("MATPLOTLIBRC", str(MATPLOTLIBRC))  # thimble's figure defaults, unless the environment names its own
-    if wrap == config.KERNEL_WRAP_SRT:
-        env = kernel_wrap.srt_env(env, home=k.home)
-        await asyncio.to_thread(_fresh_home, k)
-    if wrapped:
-        await asyncio.to_thread(_hold_lease, k)  # before the process exists: its watchdog never sees a free lease
-    log.info("starting kernel %s for %s in %s (a mirror of %s)%s", k.key, workspace, cwd, corpus,
-             f"; wrapped in {wrap} ({source})" if wrapped else "")
-    with k.log.open("wb") as out:
-        proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
-                                stdout=out, stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
-    k.pid = k.pgid = proc.pid
-    k.wrap = wrap
-    _write_record(k, {"name": k.name, "workspace": workspace, "pid": proc.pid, "pgid": proc.pid,
-                      "connection_file": str(k.conn), "cwd": str(cwd), "started": _now(), "server_pid": os.getpid(),
-                      "home": str(_home()), "attached": _now(), "wrap": wrap})
-    kc = _client(k.conn)
-    try:
+    kc: AsyncKernelClient | None = None
+    try:  # from the first file written: a failure anywhere leaves no process, channels, lease or file behind (_kill)
+        await asyncio.to_thread(write_connection_file, str(k.conn), ip="127.0.0.1", key=secrets.token_hex(16).encode())
+        env = kernel_env()
+        env.pop("JPY_PARENT_PID", None)  # no parent poller: the kernel outlives this server
+        env.setdefault("MATPLOTLIBRC", str(MATPLOTLIBRC))  # thimble's figure defaults, unless the environment names its own
+        if wrap == config.KERNEL_WRAP_SRT:
+            env = kernel_wrap.srt_env(env, home=k.home)
+            await asyncio.to_thread(_fresh_home, k)
+        if wrapped:
+            await asyncio.to_thread(_hold_lease, k)  # before the process exists: its watchdog never sees a free lease
+        log.info("starting kernel %s for %s in %s (a mirror of %s)%s", k.key, workspace, cwd, corpus,
+                 f"; wrapped in {wrap} ({source})" if wrapped else "")
+        with k.log.open("wb") as out:
+            proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                                    stdout=out, stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
+        k.proc = proc
+        k.pid = k.pgid = proc.pid
+        k.wrap = wrap
+        _write_record(k, {"name": k.name, "workspace": workspace, "pid": proc.pid, "pgid": proc.pid,
+                          "connection_file": str(k.conn), "cwd": str(cwd), "started": _now(), "server_pid": os.getpid(),
+                          "home": str(_home()), "attached": _now(), "wrap": wrap})
+        kc = _client(k.conn)
         await _wait_ready(k, kc, STARTUP_TIMEOUT, control=False)
     except BaseException:
-        kc.stop_channels()
+        if kc is not None:
+            _close_client(kc)
         await _kill(k)
         raise
     k.kc = kc
@@ -2265,11 +2312,11 @@ async def _attach(k: _Kernel) -> bool:
     try:
         await _wait_ready(k, kc, RECONNECT_TIMEOUT, control=True)
     except asyncio.CancelledError:
-        kc.stop_channels()
+        _close_client(kc)
         raise
     except Exception as e:  # noqa: BLE001
         log.warning("kernel %s of %s (pid %s) does not answer (%s); killed", k.key, k.workspace, pid, e)
-        kc.stop_channels()
+        _close_client(kc)
         await _kill(k)
         return False
     k.kc = kc
@@ -2303,7 +2350,7 @@ def _detach(k: _Kernel) -> None:
     so an interrupted run can tell a living kernel from a dead one."""
     kc, k.kc = k.kc, None
     if kc is not None:
-        kc.stop_channels()
+        _close_client(kc)
     _release_lease(k)  # the file stays: the next server's _attach takes the lease back
 
 
@@ -2312,14 +2359,16 @@ async def _kill(k: _Kernel) -> None:
     terminated through its pid, record and connection file removed. Idempotent."""
     kc, k.kc = k.kc, None
     if kc is not None:
-        kc.stop_channels()
+        _close_client(kc)
+    proc, k.proc = k.proc, None
     pid, pgid = k.pid, k.pgid
     if pid is None:  # not attached: the record may still name a live kernel of a previous server
         rec = _read_record(k.record) or {}
         pid, pgid = _record_pid(rec), _record_pid(rec, "pgid")
     k.pid = k.pgid = None
     if pid is not None:
-        await asyncio.to_thread(_terminate, pid, pgid or pid, k.conn)
+        ours = proc is not None and proc.pid == pid and proc.poll() is None
+        await asyncio.to_thread(_terminate, pid, pgid or pid, k.conn, ours)
     _release_lease(k, drop=True)
     _drop_files(k.record, k.conn)
     await asyncio.to_thread(shutil.rmtree, k.home, True)
@@ -2406,7 +2455,8 @@ def _kill_left_at_exit() -> None:
     for k in ks:
         try:
             if k.pid:
-                _terminate(k.pid, k.pgid or k.pid, k.conn)
+                _terminate(k.pid, k.pgid or k.pid, k.conn,
+                           k.proc is not None and k.proc.pid == k.pid and k.proc.poll() is None)
             _drop_files(k.record, k.conn)
         except Exception:  # noqa: BLE001 — the interpreter is exiting; the next server's start reaps what is left
             pass

@@ -1580,7 +1580,8 @@ def _server(say: Callable[[str], None]) -> tuple[str | None, dict[str, Any]]:
     except TimeoutError:
         up = cli.healthy(url)
     if not up:
-        say(f"  the thimble server did not start ({cli.start_failure(url) or 'see ' + str(cli.log_path())})")
+        why = cli.start_failure(url)
+        say(f"  no thimble server answers: {why}" if why else f"  the thimble server did not start (see {cli.log_path()})")
     return (url if up else None), env
 
 
@@ -1941,7 +1942,7 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
         if show(page):
             say("  (opened in your browser)")
     if not url:
-        say("  the server is not running, so nothing is open; `thimble` in a folder below starts it")
+        say("  no server answers, so nothing is open; `thimble` in a folder below starts it")
     pick, login_said = attach_choice(args, [f for _, f, _ in opened], say, auth)
     for line in attach_lines(opened, any(ds.name in cat for ds, _, _ in opened), pick, login_said,
                              kept=any(cat[ds.name].get("full") for ds, _, name in opened if name and ds.name in cat)):
