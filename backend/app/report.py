@@ -94,9 +94,9 @@ def _reflist(raw: Any) -> list[str]:
 
 
 class _Refs:
-    """Validates refs against the workspace: a cell of one of its notebooks, a concept, a corpus file. Knows the chart-
-    or
-    table-bearing cells a figure may show (`artifacts`, cell id to its title). Every notebook group counts."""
+    """Validates refs against the workspace: a cell of one of its notebooks, a concept, a corpus file. Knows the cards
+    that draw a figure, which a document's figure may show (`artifacts`, cell id to its title, by material.figure_kind).
+    Every notebook group counts."""
 
     def __init__(self, c: str):
         ws = config.workspace_dir(c)
@@ -109,7 +109,7 @@ class _Refs:
                 if not cid:
                     continue
                 self.cells.add(cid)
-                if material.has_chart(cell.get("outputs")) or material.has_table(cell.get("outputs")):
+                if material.figure_kind(cell):
                     self.artifacts[cid] = _collapse(cell.get("title"))
         try:
             from . import concepts  # noqa: PLC0415
@@ -153,7 +153,7 @@ class _Refs:
         return out
 
     def artifact_id(self, raw: Any) -> str | None:
-        """The id of the chart- or table-bearing card `raw` names, as card:<id> (or cell:<id>), a span, markup or a bare id."""
+        """The id of the card that draws a figure `raw` names, as card:<id> (or cell:<id>), a span, markup or a bare id."""
         found = _reflist(raw)
         s = found[0] if found else ""
         cid: str | None = None
@@ -174,7 +174,7 @@ class _Refs:
 def _normalize(raw: dict[str, Any], valid: _Refs) -> dict[str, Any]:
     """The stored report from the `document` tool's input: sections in the writer's order, roles by heading then
     position,
-    sentence records from each markdown body, figures on chart- or table-bearing cells. 502 when nothing survives."""
+    sentence records from each markdown body, figures on cards that draw one. 502 when nothing survives."""
     used: set[str] = set()
     wants_section: dict[str, str] = {}
 

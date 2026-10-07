@@ -26,7 +26,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import cite, config, investigation, ledger, notebook, prompts, refs, slides, undo
+from . import cite, config, investigation, ledger, material, notebook, prompts, refs, slides, undo
 from .ledger import atomic_write_text, read_json, unlinked, write_json
 from .report import (_Refs, _collapse, _cut, _new_id, _put_text, _replace_text, _title_ok, plain_text, reopen_comment,
                      settle_carried_comment)
@@ -73,7 +73,7 @@ def undescribed(schema: dict) -> dict:
 
 PLACEHOLDERS = ("$sentence", "$cell", "$graphic")
 _CELL_SCHEMA = {"type": "string", "pattern": CELL_REF,
-                "description": "A chart- or table-bearing card as card:<id> — one of the cards the material lists as bearing a chart or a table."}
+                "description": f"A card that draws a figure, as card:<id>: {material.FIGURE_WORDS}."}
 
 
 def _graphic_schema() -> dict[str, Any]:
@@ -2420,7 +2420,7 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
         line = (f"saved [[report:{slug}]] as {saved_as}, {_plural(len(units(doc)), 'section')}, "
                 f"{_plural(len(all_sentences(doc)), 'sentence')} and {_plural(kept, 'figure')}")
     if kept < len(asked):
-        line += f"\nleft out {_plural(len(asked) - kept, 'figure')} whose card shows no chart or table"
+        line += f"\nleft out {_plural(len(asked) - kept, 'figure')} whose card draws no figure: a figure shows {material.FIGURE_WORDS}"
     if refused:  # hold_locks put back the locked blocks the text changed, so the writer does not report those changes
         line += "\n" + reverted_line(refused)
     if flagged := flagged_lines(slug, all_sentences(doc)):
@@ -2480,10 +2480,11 @@ async def insert_passage(c: str, slug: str, uid: str, text: str, actor: str, *, 
         return await _insert_story_blocks(c, inv_id, slug, doc, before, unit, para, text, actor, valid, used)
     fig = _MD_FIGURE_RE.match(text.strip())
     if fig:
-        # a slide or a story's beat shows any card, a document's figure a chart or a table (report_format.figures)
+        # a slide or a story's beat shows any card, a document's figure a card that draws one (material.figure_kind)
         cid = slides.card_id(valid, fig.group(2)) if deck or doc.get("renderer") == "story" else valid.artifact_id(fig.group(2))
         if cid is None:
-            raise HTTPException(400, f"{fig.group(2)} is no card, or shows no chart or table, so it cannot be a figure")
+            raise HTTPException(400, f"{fig.group(2)} is no card, or draws no figure, so it cannot be one: a figure shows "
+                                     f"{material.FIGURE_WORDS}")
         if deck and len(slides.figures_of(unit)) >= slides.MAX_FIGURES:
             raise HTTPException(400, f"the slide shows {slides.MAX_FIGURES} figures already; insert a slide for another")
         rec = {"id": _new_id(used), "cell": f"card:{cid}", "caption": _collapse(fig.group(1)) or valid.artifacts.get(cid, ""),

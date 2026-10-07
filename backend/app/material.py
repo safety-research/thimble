@@ -1,5 +1,6 @@
 """Reading the canvas as text, for the modules that compare or cite it: a card's kind, question, takeaway, outputs as
-text and marks (notebook_cells, which revise_diff fingerprints), and the chart and table tests a figure needs."""
+text and marks (notebook_cells, which revise_diff fingerprints), and figure_kind, the one test of a card that draws a
+figure, which every form of document uses."""
 from __future__ import annotations
 
 import json
@@ -7,6 +8,7 @@ import logging
 from typing import Any
 
 from . import cite, config, frames, notebook, refs
+from .kernel_thimble import CARD_MIME, DIAGRAM_MIME, TIMELINE_MIME
 
 log = logging.getLogger("thimble.material")
 
@@ -20,10 +22,21 @@ def cut(s: Any, n: int) -> str:
     return t if len(t) <= n else t[:n] + " …"
 
 
-def has_chart(outputs: Any) -> bool:
-    """An output the frontend renders as a chart, an image or a vega spec."""
-    return any(isinstance(b, dict) and any(str(k).startswith("image/") or "vega" in str(k) for k in b)
-               for b in (outputs if isinstance(outputs, list) else []))
+# the drawings a card's code makes with thimble.diagram and thimble.timeline, which the canvas lays out (tools.DRAWING_MIMES)
+DRAWINGS = {DIAGRAM_MIME: "diagram", TIMELINE_MIME: "timeline"}
+# what figure_kind answers, in words, for the messages that say which cards a document can show
+FIGURE_WORDS = "a chart, a table, a timeline, a diagram or a custom card's page"
+
+
+def _chart_of(b: Any) -> str | None:
+    """What one output bundle draws as a chart (frontend components/Outputs isChart): `timeline` or `diagram` for a
+    drawing, `chart` for an image, a vega spec or a card type's graphic; None for another bundle."""
+    if not isinstance(b, dict):
+        return None
+    drawn = next((DRAWINGS[k] for k in b if k in DRAWINGS), None)
+    if drawn:
+        return drawn
+    return "chart" if CARD_MIME in b or any(str(k).startswith("image/") or "vega" in str(k) for k in b) else None
 
 
 def has_table(outputs: Any) -> bool:
@@ -34,6 +47,29 @@ def has_table(outputs: Any) -> bool:
         if isinstance(b, dict) and "text/html" in b and cite.table_cells(cite._bundle_html(b)):
             return True
     return False
+
+
+def figure_kind(cell: Any) -> str | None:
+    """What a card draws that a document can show as a figure (frontend components/Outputs figureKind): `timeline` or
+    `diagram` for a drawing, from its code's thimble.timeline or thimble.diagram or from its dataset; `chart` for an
+    image, a vega spec or a card type's graphic; `table` for an html table or a table card's frame; `custom` for a custom
+    card's page. None for a card that draws none: a note, an example, a label, or code that only printed. The first
+    output that draws a chart decides, as the card shows it."""
+    if not isinstance(cell, dict):
+        return None
+    kind = str(cell.get("kind") or notebook.DEFAULT_KIND)
+    payload = cell.get("payload")
+    if isinstance(payload, dict):
+        if kind in ("timeline", "diagram") and payload.get("dataset") is not None:
+            return kind
+        if kind == "custom" and str(payload.get("html") or "").strip():
+            return "custom"
+        return None
+    outputs = cell.get("outputs") if isinstance(cell.get("outputs"), list) else []
+    drawn = next((k for k in map(_chart_of, outputs) if k), None)
+    if drawn:
+        return drawn
+    return "table" if has_table(outputs) else None
 
 
 def notebook_cells(c: str, roles: tuple[str, ...], *, raw: bool = False) -> list[dict[str, Any]]:
@@ -59,8 +95,7 @@ def notebook_cells(c: str, roles: tuple[str, ...], *, raw: bool = False) -> list
                 "id": cid, "notebook": info["id"], "notebook_title": str(nb.get("title") or info["id"]), "notebook_role": role,
                 "kind": kind, "title": collapse(cell.get("title")), "text": text, "takeaway": takeaway,
                 "status": str(cell.get("status") or "idle"),
-                "chart": kind == "code" and has_chart(cell.get("outputs")),
-                "table": kind == "code" and has_table(cell.get("outputs")),
+                "figure": figure_kind(cell),
                 "refs": refs.extract_refs(takeaway or text),
                 "created_by": str(cell.get("created_by") or ""),
             }
