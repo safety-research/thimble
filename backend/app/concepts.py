@@ -4525,7 +4525,11 @@ def update_concept_route(c: str, concept_id: str, body: ConceptPatch) -> dict:
 
 @router.delete("/ws/{c}/concepts/{concept_id}")
 async def delete_concept_route(c: str, concept_id: str) -> dict:
-    """Delete the concept, its labels, its card, any filter naming it and its run state; an apply in progress ends first."""
+    """Delete the concept, its labels, its card, any filter naming it and its run state; an apply in progress ends first.
+    The concept file and its labels file go to the undo step's trash folder, so the top bar's Undo restores the label
+    with its card and its filters (undo.label_deleted, restore_concept)."""
+    from . import undo  # noqa: PLC0415 — undo reaches this module to restore a label
+
     ws, concept = load_concept(c, concept_id)
     task = _stop_apply((c, concept_id))
     if task is not None:
@@ -4533,15 +4537,92 @@ async def delete_concept_route(c: str, concept_id: str) -> dict:
             await task
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
-    _concept_file(ws, concept_id).unlink(missing_ok=True)
-    labels_file(ws, concept_id).unlink(missing_ok=True)
+    cards = await asyncio.to_thread(_label_cards_placed, ws, concept_id)
+    filters = {scope: f for scope, f in read_filters(ws).items() if f.get("concept") == concept_id}
+    trash = undo.new_trash(c)
+    _forget_concept(c, ws, concept_id, trash)
+    await asyncio.to_thread(_drop_label_cards, c, concept_id)
+    _notify(c, concept_id, "deleted")
+    if trash is not None:
+        undo.label_deleted(c, concept, cards, filters, trash)
+    return {"ok": True}
+
+
+def _label_cards_placed(ws: Path, concept_id: str) -> list[dict]:
+    """The concept's label cards as an undo puts them back: {card, after}, `after` the card before it in its group."""
+    out = []
+    for nb, cell in _label_cards(ws, concept_id):
+        ids = [x.get("id") for x in nb.get("cells") or []]
+        at = ids.index(cell.get("id"))
+        out.append({"card": dict(cell), "after": ids[at - 1] if at > 0 else None})
+    return out
+
+
+def _forget_concept(c: str, ws: Path, concept_id: str, trash: Path | None) -> None:
+    """The concept's files gone (into `trash` when given), its run state forgotten and its filters cleared."""
+    for path in (_concept_file(ws, concept_id), labels_file(ws, concept_id)):
+        if trash is not None and path.is_file():
+            trash.mkdir(parents=True, exist_ok=True)
+            os.replace(path, trash / path.name)
+        else:
+            path.unlink(missing_ok=True)
     labels_store.remove(labels_file(ws, concept_id))
     _runs.pop((c, concept_id), None)
     _cancels.pop((c, concept_id), None)
     _clear_filters_of(c, concept_id)
-    await asyncio.to_thread(_drop_label_cards, c, concept_id)
+
+
+def delete_again(c: str, concept_id: str, trash: Path) -> None:
+    """A label deleted again by Redo, its files into `trash` as the first delete put them: on the calling thread, which
+    is the loop's in the undo routes."""
+    ws = _ws(c)
+    if read_concept(ws, concept_id) is None:
+        raise HTTPException(409, "the label is deleted already")
+    _stop_apply((c, concept_id))
+    _forget_concept(c, ws, concept_id, trash)
+    _drop_label_cards(c, concept_id)
     _notify(c, concept_id, "deleted")
-    return {"ok": True}
+
+
+def restore_concept(c: str, concept_id: str, trash: Path, cards: list[dict], filters: dict) -> None:
+    """A deleted label back, as Undo asks: its concept file and its labels file from `trash` (the store is built again
+    from the jsonl on its first read), its cards where they stood, and each filter that named it in a scope whose label
+    filter is not set now. 409 when the label is back already or its files are gone."""
+    from . import undo  # noqa: PLC0415
+
+    ws = _ws(c)
+    if read_concept(ws, concept_id) is not None:
+        raise HTTPException(409, "the label is there already")
+    kept = trash / _concept_file(ws, concept_id).name
+    if not kept.is_file():
+        raise HTTPException(409, "the deleted label's files are gone, so it cannot be restored")
+    rows = labels_file(ws, concept_id)
+    rows.parent.mkdir(parents=True, exist_ok=True)
+    concepts_dir(ws).mkdir(parents=True, exist_ok=True)
+    if (trash / rows.name).is_file():
+        os.replace(trash / rows.name, rows)
+    os.replace(kept, _concept_file(ws, concept_id))
+    try:
+        trash.rmdir()
+    except OSError:
+        pass
+    for placed in cards:
+        if isinstance(placed, dict) and isinstance(placed.get("card"), dict):
+            try:
+                undo._put_card(c, placed["card"], placed.get("after"))
+            except HTTPException:
+                pass  # on the canvas already
+    with _filters_lock:
+        now = read_filters(ws)
+        back = [scope for scope, f in (filters or {}).items()
+                if scope in SCOPES and isinstance(f, dict) and not (now.get(scope) or {}).get("concept")]
+        for scope in back:
+            now[scope] = {**(now.get(scope) or {}), "concept": concept_id, "value": str(filters[scope].get("value") or "")}
+        if back:
+            _write_filters(ws, now)
+    for scope in back:
+        _emit(c, _filter_event(scope, now[scope]))
+    _notify(c, concept_id, "defined")
 
 
 @router.post("/ws/{c}/concepts/{concept_id}/apply")

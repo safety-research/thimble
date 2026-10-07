@@ -145,6 +145,20 @@ Turn a label over files on or off in Files and the views, where it marks the rec
 }
 ```
 
+## delete_label
+
+Delete a label, with its marks, its card and any filter that uses it. A run of the label stops first. Use it only when the analyst asks for it.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "name": {"type": "string", "description": "The label's name or id."}
+  },
+  "required": ["name"]
+}
+```
+
 ## set_filter
 
 Filter the cards, the records in Files or the report's sentences by a value of a label that exists, and the cards also by their kind, group, maker, card check, star, lock or words. It makes no label and no card. The parts you give replace those parts of the scope's filter, and the others stay.

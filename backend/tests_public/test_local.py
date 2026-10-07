@@ -77,6 +77,7 @@ def _args(c: str, corpus: Path) -> dict[str, dict]:
         "apply_label": {"scope": "files", "name": "bash", "predicate": {"kind": "regex", "text": "Bash"},
                         "paths": ["agents/*.jsonl"]},
         "show_label": {"name": "bash", "on": True},
+        "delete_label": {"name": "nope"},
         "set_filter": {"scope": "files", "label": "bash"},
         "clear_filter": {"scope": "files"},
         "set_layout": {"layout": "one", "surfaces": ["files"]},
