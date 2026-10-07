@@ -3,7 +3,7 @@
 // A drawing builds its own (its reads subscribe it); a timer or a handler uses the one its hook built.
 import type { Elements, FsEntry, FsStat, PaneOpenArgs, ProcessRunInit, ProcessRunResult, RenderElement, ResolveInput, UiOpenResult } from 'claude-code'
 
-import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, TermAgent, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermThread, TermThreadRow, TermVerdict } from '../types'
+import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermThread, TermThreadRow, TermVerdict } from '../types'
 
 /** What `thimble state` printed for a surface the panel shows, or why it failed. */
 export type SurfaceGot = { ok: true; value: unknown } | { ok: false; error: string }
@@ -30,6 +30,10 @@ export type Ctx = {
   toast: (text: string) => void
   /** a prompt to main, as the analyst's (a code label's run, which only main's Bash runs; a new label described) */
   submit: (text: string) => Promise<void>
+  /** the prompt box's draft */
+  promptText: () => Promise<string>
+  /** the keyboard to one of the panel's elements, by its key */
+  focus: (key: string) => Promise<void>
   /** the element table of the surface a drawing is for */
   els: (e: ResolveInput) => Elements['terminal']
   // ---- thimble-term's state (types/index.d.ts)
@@ -43,6 +47,10 @@ export type Ctx = {
   setThread: (id: string, v: TermThread) => Promise<void>
   threadRows: (row: string) => Promise<ChatSignal[]>
   setThreadRows: (row: string, rows: ChatSignal[]) => Promise<void>
+  answer: (row: string) => Promise<TermAnswer | undefined>
+  setAnswer: (row: string, a: TermAnswer) => Promise<void>
+  viewRows: (row: string) => Promise<string[]>
+  setViewRows: (row: string, slugs: string[]) => Promise<void>
   surface: (key: string) => Promise<SurfaceGot | undefined>
   setSurface: (key: string, v: SurfaceGot) => Promise<void>
   panel: () => Promise<TermPanel | null>

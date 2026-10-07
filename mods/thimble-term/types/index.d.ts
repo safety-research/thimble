@@ -65,6 +65,7 @@ export type ChatHomeUi = { folded: string[]; unfolded: string[]; more: string[];
  *  reads (its group, who made it, its label). `rev` counts the reads, so a drawing reads it again. */
 export type TermCard = {
   id: string
+  /** null when the card cannot be read (`error` says why) */
   data: unknown
   takeaway: string
   busy: string
@@ -75,7 +76,18 @@ export type TermCard = {
   label: string
   code: string
   rev: number
+  /** thimble's links check of the takeaway (the cell's `verification.links`), when it ran */
+  links?: TermLinks
+  /** what its last run printed (cell.ts printed) */
+  printed?: string
+  /** how its last run ended: `ok`, `error`, or '' when it has not run */
+  ran?: string
 }
+
+/** A card's takeaway as thimble's links check left it (backend verify.py, the cell's `verification.links`): `pending`
+ *  while it runs; then each citation it linked (`ok`) and each it found another value for (`broken`, with why and the
+ *  value the place shows), by `<value>|<ref>`. */
+export type TermLinks = { pending: boolean; checked: boolean; ok: string[]; broken: { key: string; why: string; source: string }[] }
 
 /** A citation as checked against `thimble state resolve`: ok (the place holds the value, or the citation shows none),
  *  differs (the place resolves, the value is not there), missing (the place does not resolve), pending (not checked
@@ -116,7 +128,17 @@ export type TermPanel = {
   about?: string
   anchor?: string | null
   anchorText?: string
+  /** a new thread's: the thread it is asked from, and where it was asked (a document's passage) */
+  parent?: string
+  element?: string
+  /** a citation panel's: the sentence the citation stands in, and the passage an example's record quotes */
+  sentence?: string
+  quote?: string
 }
+
+/** A turn's answer (its last text part that cites or embeds a card, else its last), kept under its last row for the
+ *  footer drawn there: its rows' uuids, its text, the cards it shows (embedded, or made in the turn). */
+export type TermAnswer = { rows: string[]; text: string; cards: string[] }
 
 /** The row above the prompt and the home panel's counts, from `thimble state home`. */
 export type TermHome = { cards: number; labels: number; docs: number; threads: number; views: number; files: number; at: number }
@@ -166,6 +188,10 @@ declare module 'claude-code' {
       thread: StateFamily<TermThread>
       // rows in main's chat saying a side thread answered, by the row they stand under
       threadRows: StateFamily<ChatSignal[]>
+      // a turn's answer, by its last row, for the footer under it
+      answers: StateFamily<TermAnswer>
+      // the views main proposed, by the row their `↳ view` rows stand under
+      viewRows: StateFamily<string[]>
       // the home panel: what is folded and shown whole, and the row the keys chose
       homeUi: ChatHomeUi
       // the label panel: its parts opened (`<label>:counts`, `:examples`, `:cards`), the kind picked and not yet saved

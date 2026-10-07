@@ -163,6 +163,16 @@ export type World = {
   clock: ReturnType<typeof mock.clock>
   /** what the next tool call of main answers */
   toolText: string
+  /** a thread's chat by its id, over the fixtures' */
+  chats: Record<string, unknown>
+  /** a ref's resolution, over the fixtures' */
+  resolve: Record<string, unknown>
+  /** the prompts submitted to main */
+  submitted: string[]
+  /** the prompt box's draft */
+  draft: string
+  /** the panel's elements given the keyboard, by key */
+  focused: string[]
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
@@ -180,6 +190,11 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     launch: JSON.stringify({ session: 's1', mode: opts.mode ?? 'terminal', fenced: true }),
     clock: undefined as never,
     toolText: 'card:ff73e071\n[out0: table]',
+    chats: {},
+    resolve: {},
+    submitted: [],
+    draft: '',
+    focused: [],
   }
   const ws = opts.ws === undefined ? WS : opts.ws
   mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI })
@@ -234,6 +249,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       case 'threads':
         return out(w.states.threads)
       case 'thread':
+        if (w.chats[rest[0]!]) return out(w.chats[rest[0]!])
         return rest[0] === 't1' ? out(THREAD_T1) : out({ meta: { id: rest[0], kind: 'thread', title: 'new thread', running: true }, events: [{ type: 'user', text: 'a question' }] })
       case 'agents':
         return out(w.states.agents)
@@ -241,7 +257,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
         return rest[0] ? out(w.states.file) : out(w.states.files)
       case 'resolve': {
         const refs = JSON.parse(rest[0] ?? '[]') as string[]
-        return out(Object.fromEntries(refs.map(r => [r, RESOLVE[r] ?? { error: `no such place: ${r}`, status: 404 }])))
+        return out(Object.fromEntries(refs.map(r => [r, w.resolve[r] ?? RESOLVE[r] ?? { error: `no such place: ${r}`, status: 404 }])))
       }
       case 'ui':
         return out(w.states.ui)
@@ -269,7 +285,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     w.closed.push(e.id)
     return { value: undefined } as never
   })
-  on('ui.panes', () => ({ value: [] }) as never)
+  // the panes open: each opened and not closed since, placed
+  on('ui.panes', () => ({ value: [...new Set(w.opened)].filter(id => w.opened.filter(x => x === id).length > w.closed.filter(x => x === id).length).map(id => ({ id, isPlaced: true })) }) as never)
   on('ui.toast', ($, e) => {
     w.toasts.push(String((e as { text?: unknown }).text ?? ''))
     return { value: undefined } as never
@@ -280,6 +297,16 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
   on('command.run', () => ({ text: '(the engine command)' }))
   on('tool.call', () => ({ result: w.toolText, text: w.toolText }) as never)
   on('ui.copy', () => ({ value: { isCopied: true } }) as never)
+  on('prompt.submit', ($, e) => {
+    w.submitted.push(String((e as { text?: unknown }).text ?? ''))
+    return { text: String((e as { text?: unknown }).text ?? '') } as never
+  })
+  on('ui.focus', ($, e) => {
+    w.focused.push(String((e as { key?: unknown }).key ?? ''))
+    return { value: {} } as never
+  })
+  on('prompt.read', () => ({ value: { text: w.draft, cursor: w.draft.length } }) as never)
+  on('prompt.edit', ($, e) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }) as never)
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
     // a command's output row as the engine draws it: its text

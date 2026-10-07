@@ -25,15 +25,18 @@ import type { EngineInterface, Register, RenderElement, ResolveInput } from 'cla
 import type { Ctx } from './ctx'
 import { act, scopeOf } from './data'
 import type { Sent } from './gestures'
-import { needsDrawing } from './lib'
-import { cardsOfCall, labelsOf, withoutEnd } from './model'
+import { chipState, claimsIn, streamLink, streamStep, streaming } from './cite'
+import type { StreamLook, Streaming } from './cite'
+import type { CardData } from './draw'
+import { cid, citeSpans, citations, clip, embeddedCards, needsDrawing } from './lib'
+import { cardsOfCall, labelsOf, threadOf, withoutEnd } from './model'
 import { HOME_UI_EMPTY } from './home'
 import { linesMessage } from './lines'
-import { drawPanel, fieldMessage, onGesture, openAsk, openFile, openLabel, openThread } from './panel'
+import { drawPanel, fieldMessage, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView } from './panel'
 import type { PaneEvent } from './panel'
-import { MARGIN, drawCards, drawReply } from './reply'
+import { MARGIN, chipOf, drawCards, drawReply, placeUrl } from './reply'
 import { COLORS } from './paint'
-import { isAnchor } from './signal'
+import { isAnchor, signalEnd, signalQuestion, signalRead } from './signal'
 import type { AppendedRow } from './signal'
 import { NAV_EMPTY } from './nav'
 import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, navOrigin, openHome, openPanel, readSurface, rt, surfaceValue, tick } from './term'
@@ -47,6 +50,7 @@ export const HOME_LINE = 'thimble: terminal mode. The home panel is open. For th
 
 const THIMBLE_TOOL = /^mcp__plugin_thimble_thimble__/
 const CARD_TOOL = /^mcp__plugin_thimble_thimble__(add_card|edit_card|apply_label)$/
+const VIEW_TOOL = /^mcp__plugin_thimble_thimble__propose_view$/
 
 /** The text of a tool's result as the transcript holds it: a string, or content blocks. */
 function resultText(output: unknown): string {
@@ -64,6 +68,8 @@ const TURN_CARDS = { plugin: 'thimble-term', key: 'turnCards' } as const
 const VERDICTS = { plugin: 'thimble-term', key: 'verdicts' } as const
 const THREAD = { plugin: 'thimble-term', key: 'thread' } as const
 const THREAD_ROWS = { plugin: 'thimble-term', key: 'threadRows' } as const
+const ANSWERS = { plugin: 'thimble-term', key: 'answers' } as const
+const VIEW_ROWS = { plugin: 'thimble-term', key: 'viewRows' } as const
 const SURFACE = { plugin: 'thimble-term', key: 'surface' } as const
 const panelA = { plugin: 'thimble-term', key: 'panel' } as const
 const navRef = { plugin: 'thimble-term', key: 'nav' } as const
@@ -122,7 +128,12 @@ function cxOf($: Dollar): Ctx {
     panes: () => $.ui.panes().catch(() => []),
     log: text => $.ui.log(text),
     toast: text => $.ui.toast(text),
-    submit: async text => void (await $.prompt.submit({ text, asUser: true })),
+    submit: async text => {
+      rt.own.add(text)
+      await $.prompt.submit({ text, asUser: true })
+    },
+    promptText: async () => (await $.prompt.read().catch(() => ({ text: '' }))).text,
+    focus: async key => void (await $.ui.focus({ requestId: PANEL, key }).catch(() => undefined)),
     els: e => $.ui.resolve(e as ResolveInput<'Pane', 'terminal'>),
     card: async id => (await $.state.get({ ...CARDS, id })).value,
     setCard: async (id, v) => void (await $.state.set({ ...CARDS, id }, v)),
@@ -134,6 +145,10 @@ function cxOf($: Dollar): Ctx {
     setThread: async (id, v) => void (await $.state.set({ ...THREAD, id }, v)),
     threadRows: async row => (await $.state.get({ ...THREAD_ROWS, id: row })).value ?? [],
     setThreadRows: async (row, rows) => void (await $.state.set({ ...THREAD_ROWS, id: row }, rows)),
+    answer: async row => (await $.state.get({ ...ANSWERS, id: row })).value,
+    setAnswer: async (row, a) => void (await $.state.set({ ...ANSWERS, id: row }, a)),
+    viewRows: async row => (await $.state.get({ ...VIEW_ROWS, id: row })).value ?? [],
+    setViewRows: async (row, slugs) => void (await $.state.set({ ...VIEW_ROWS, id: row }, slugs)),
     surface: async key => (await $.state.get({ ...SURFACE, id: key })).value as never,
     setSurface: async (key, v) => void (await $.state.set({ ...SURFACE, id: key }, v)),
     panel: async () => (await $.state.get(panelA)).value ?? null,
@@ -184,36 +199,122 @@ const applyUi: UiApply = async (cx, kind, args) => {
   if ((kind === 'filter' || kind === 'label') && p?.view.startsWith('file')) await openPanel(cx, p)
 }
 
+// a text block as Claude Code was handed it while it streamed -> as the model wrote it
+const asWritten = new Map<string, string>()
+
+/** The part of a turn that is its answer: the last that cites or embeds a card, else the last with text. Earlier parts
+ *  are what main wrote while it worked ("Reading the files…"). */
+function answerPart(parts: { uuid: string; text: string }[][]): { uuid: string; text: string }[] | undefined {
+  const full = parts.filter(p => p.some(r => r.text.trim()))
+  return [...full].reverse().find(p => needsDrawing(p.map(r => r.text).join('\n\n'))) ?? full.at(-1)
+}
+
 function hasText(content: unknown): boolean {
   return Array.isArray(content) && content.some(b => b && typeof b === 'object' && (b as { type?: unknown }).type === 'text' && String((b as { text?: unknown }).text ?? '').trim() !== '')
 }
 
-/** The rows a side thread's answer leaves under a row of main's chat (signal.ts, views/SPEC.md "Main's chat"): `↳` at
- *  column 0 and its words at 2, dim (`thread · "<question>" · answered`), `new` in green until it is read; a press on
- *  the question opens the thread. */
-async function signalRows(cx: Ctx, e: ResolveInput & { requestId: string }): Promise<RenderElement | null> {
+/** The rows a side thread's answer leaves under a row of main's chat (signal.ts, views/SPEC.md "Main's chat"), one
+ *  blank row above the first: `↳` at column 0 and its words at 2, dim (`thread · "<the turn's question>" · answered`,
+ *  `failed` in red), `new` in green until it is read; a press on the question opens the thread. Each turn once. */
+async function signalRows(cx: Ctx, e: ResolveInput & { requestId: string; viewport?: { columns: number } }): Promise<RenderElement | null> {
   const rows = await cx.threadRows(e.requestId)
   if (!rows.length) return null
   const { Box, Text, Button } = cx.els(e)
   const threads = await cx.threads()
   const seen = new Set<string>()
   const out: RenderElement[] = []
+  const n = Math.max(16, Math.min(60, (e.viewport?.columns ?? 100) - 30))
   for (const s of rows) {
-    if (seen.has(s.thread)) continue
-    seen.add(s.thread)
-    const t = threads.find(x => x.id === s.thread)
-    const q = `"${(t?.title || t?.anchorText || 'side thread').replace(/\s+/g, ' ').slice(0, 60)}"`
+    const k = `${s.thread}:${s.turn}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    const row = threads.find(x => x.id === s.thread)
+    const tt = await cx.thread(s.thread)
+    const th = tt?.events.length ? threadOf(tt.meta, tt.events) : null
+    const label = row?.anchorText || (row?.anchor ? await anchorName(cx, row.anchor) : '') || row?.title || 'the side thread'
+    const q = th ? signalQuestion({ turns: th.turns, label }, s.turn, n) : `"${clip((row?.title || label).replace(/\s+/g, ' '), n)}"`
+    const end = th ? signalEnd(th, s.turn) ?? 'answered' : 'answered'
+    const fresh = th ? !signalRead(th, s.turn, row?.seen) : Boolean(row?.unread)
     out.push(
-      <Box key={`signal-${s.thread}`} flexDirection="row">
+      <Box key={`signal-${k}`} flexDirection="row" {...(out.length ? {} : { marginTop: 1 })}>
         <Text dimColor>{'↳ '}</Text>
         <Text dimColor>{'thread · '}</Text>
         <Button key={`signal-open-${s.thread}`} label={q} plain dimColor onPress={() => void openThread(cx, s.thread)} />
-        <Text dimColor>{t?.running ? ' · answering' : ' · answered'}</Text>
-        {t?.unread ? <Text color={COLORS.fresh}>{' · new'}</Text> : null}
+        {end === 'failed' ? <Text color={COLORS.problem}>{' · failed'}</Text> : <Text dimColor>{' · answered'}</Text>}
+        {fresh && end !== 'failed' ? <Text color={COLORS.fresh}>{' · new'}</Text> : null}
       </Box>,
     )
   }
   return <Box flexDirection="column">{out}</Box>
+}
+
+/** What a thread's anchor names, in words: a card by its question, a citation's place in words. */
+async function anchorName(cx: Ctx, anchor: string): Promise<string> {
+  const id = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(anchor)?.[1]
+  if (id) {
+    const q = ((await cx.card(id))?.data as CardData | null | undefined)?.question
+    return q ? `card "${clip(q, 40)}"` : 'a card'
+  }
+  return anchor
+}
+
+/** The `↳ view` rows under a row of main's chat (views/SPEC.md, "Main's chat"): a view main proposed, `↳` dim at 0,
+ *  `view · <name> · building|built|proposed` dim, `failed` in red, then `new` in green once built and not yet opened;
+ *  a press on its name opens its line in the panel. */
+async function viewRowsEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promise<RenderElement | null> {
+  const slugs = await cx.viewRows(e.requestId)
+  if (!slugs.length) return null
+  const { Box, Text, Button } = cx.els(e)
+  const views = await homeViews(cx)
+  const out: RenderElement[] = []
+  for (const slug of [...new Set(slugs)]) {
+    const v = views.find(x => x.slug === slug)
+    const state = v?.state ?? 'proposed'
+    out.push(
+      <Box key={`view-row-${slug}`} flexDirection="row" {...(out.length ? {} : { marginTop: 1 })}>
+        <Text dimColor>{'↳ view · '}</Text>
+        <Button key={`view-open-${slug}`} label={v?.name ?? slug} plain dimColor onPress={() => void openView(cx, slug, v?.name ?? slug)} />
+        {state === 'failed' ? <Text color={COLORS.problem}>{' · failed'}</Text> : <Text dimColor>{` · ${state === 'built' ? 'built' : state === 'building' ? 'building' : 'proposed'}`}</Text>}
+        {v?.fresh ? <Text color={COLORS.fresh}>{' · new'}</Text> : null}
+      </Box>,
+    )
+  }
+  return <Box flexDirection="column">{out}</Box>
+}
+
+/** The footer under a turn's answer (views/SPEC.md, "Main's chat"), one blank row under it at column 4: `N citations ·
+ *  N cards` dim, ` · N problems` in red (counted from the checks as they stand now), then `ask about this answer ›`. The
+ *  facts are cut first; the problems stay whole. */
+async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promise<RenderElement | null> {
+  const ans = await cx.answer(e.requestId)
+  if (!ans) return null
+  const { Box, Text, Button } = cx.els(e)
+  const cls = claimsIn(ans.text, e.requestId)
+  let red = 0
+  for (const cl of cls) {
+    const v = await cx.verdict(cid(cl.c.raw))
+    const st = chipState(v?.status, undefined)
+    if (st === 'problem' || st === 'failed') red++
+  }
+  const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`
+  const facts = [plural(cls.length, 'citation'), ...(ans.cards.length ? [plural(ans.cards.length, 'card')] : [])].join(' · ')
+  return (
+    <Box key={`footer-${e.requestId}`} marginTop={1} marginLeft={MARGIN} flexDirection="row" columnGap={2}>
+      <Box flexShrink={1} flexDirection="row">
+        <Box flexShrink={1}>
+          <Text dimColor wrap="truncate-end">{facts}</Text>
+        </Box>
+        {red ? (
+          <Box flexShrink={0}>
+            <Text color={COLORS.problem}>{` · ${plural(red, 'problem')}`}</Text>
+          </Box>
+        ) : null}
+      </Box>
+      <Box flexShrink={0}>
+        <Button key={`ask-answer-${e.requestId}`} label="ask about this answer ›" plain onPress={() => void openAsk(cx, { kind: 'sentence', text: ans.text.slice(0, 6000), label: 'this answer' })} />
+      </Box>
+    </Box>
+  )
 }
 
 /** A row of main's chat with what thimble-term draws under it: the turn's cards (when no reply row carries them) and
@@ -221,14 +322,16 @@ async function signalRows(cx: Ctx, e: ResolveInput & { requestId: string }): Pro
 async function underRow(cx: Ctx, e: ResolveInput & { requestId: string; viewport?: { columns: number } }, next: () => Promise<RenderElement>): Promise<RenderElement> {
   const ids = await cx.turnCards(e.requestId)
   const told = await signalRows(cx, e)
-  if (!ids.length && !told) return next()
+  const views = await viewRowsEl(cx, e)
+  if (!ids.length && !told && !views) return next()
   const { Box } = cx.els(e)
-  const cards = await drawCards(cx, e, ids, (e.viewport?.columns ?? 100) - 2, t => void openAsk(cx, t))
+  const cards = await drawCards(cx, e, ids, (e.viewport?.columns ?? 100) - 2, t => void openAsk(cx, t), id => void openThread(cx, id))
   return (
     <Box flexDirection="column">
       {await next()}
       {cards}
       {told}
+      {views}
     </Box>
   )
 }
@@ -252,6 +355,7 @@ export const register: Register = on => {
     if (!rt.sc) return started
     rt.sig = null
     rt.uiN = -1
+    rt.startedAt = await $.clock.now().catch(() => Date.now())
     $.clock.every(1000, () => void tick(cx, applyUi))
     $.clock.every(250, () => void checkQueued(cx))
     void tick(cx, applyUi)
@@ -278,10 +382,22 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // a citation typed or pasted into the prompt is painted there as the reply's are, blue and underlined
+  on('prompt.edit', async ($, e, next) => {
+    const r = await next(e)
+    if (!rt.sc) return r
+    const d = citeSpans(r.text).map(sp => ({ start: sp.at, end: sp.end, underline: true, color: COLORS.link }))
+    return d.length ? { ...r, decorations: [...(r.decorations ?? []), ...d] } : r
+  })
+
   // ---------------------------------------------------------------------------------------------- main's turn
 
   on('turn.start', async ($, e, next) => {
-    if (rt.sc) rt.turn = { id: e.turnId, at: new Date(await $.clock.now()).toISOString(), cards: [], row: '' }
+    if (rt.sc) {
+      const own = rt.own.has(e.text)
+      rt.own.delete(e.text)
+      rt.turn = { id: e.turnId, at: new Date(await $.clock.now()).toISOString(), cards: [], row: '', parts: [[]], views: [], own }
+    }
     return next(e)
   })
 
@@ -294,24 +410,91 @@ export const register: Register = on => {
         if (rt.turn) for (const id of ids) if (!rt.turn.cards.includes(id)) rt.turn.cards.push(id)
         void loadCards(cxOf($), ids)
       }
+      // a view main proposed: its `↳ view` row under the turn's answer
+      if (VIEW_TOOL.test(String(e.tool)) && rt.turn) {
+        const name = String((e as { name?: unknown }).name ?? '')
+        const slug = /\bview:([a-z0-9][a-z0-9-]*)/.exec(String(ran.text ?? ''))?.[1] ?? name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+        if (slug && !rt.turn.views.includes(slug)) rt.turn.views.push(slug)
+      }
     } catch {
       // the call's answer stands whatever thimble-term makes of it
     }
     return ran
   })
 
+  // main's reply as it streams: each citation handed to Claude Code as a Markdown link (never its raw spelling) and a
+  // card's line as a placeholder naming the card; a citation, code span or card line not yet closed waits. The row is
+  // stored as the model wrote it (session.append), and drawn by AssistantMessage once it is whole.
+  on('turn.step', async function* ($, e, next) {
+    if (!rt.sc || e.agentId !== undefined) return yield* next(e)
+    const cx = cxOf($)
+    const blocks = new Map<number, Streaming>()
+    const urls = new Map<string, string>()
+    const questions = new Map<string, string>()
+    const look: StreamLook = {
+      link: c => streamLink(c, urls.get(c.ref) ?? ''),
+      card: id => `◌ ${(questions.get(id) || 'drawing the card').replace(/[\\[\]*_`<>]/g, m => `\\${m}`)}`,
+    }
+    const end = (i: number, st: Streaming) => {
+      const out = streamStep(st, '', true, look)
+      if (st.shown !== st.raw) {
+        asWritten.set(st.shown, st.raw)
+        if (asWritten.size > 50) asWritten.delete(asWritten.keys().next().value!)
+      }
+      return out ? [{ kind: 'text' as const, index: i, text: out }] : []
+    }
+    for await (const ch of next(e)) {
+      if (ch.kind === 'text') {
+        const st = blocks.get(ch.index) ?? streaming()
+        blocks.set(ch.index, st)
+        const ahead = `${st.raw.slice(st.done)}${ch.text}`
+        try {
+          for (const c of citations(ahead)) if (!urls.has(c.ref)) urls.set(c.ref, await placeUrl(cx, c.ref))
+          for (const m of ahead.matchAll(/\[\[card:([A-Za-z0-9_-]+)\]\]/g)) if (!questions.has(m[1]!)) questions.set(m[1]!, ((await cx.card(m[1]!))?.data as CardData | null | undefined)?.question ?? '')
+        } catch {
+          // a link without its file still hides the raw spelling
+        }
+        const out = streamStep(st, ch.text, false, look)
+        if (out === ch.text) yield ch
+        else if (out) yield { ...ch, text: out }
+        continue
+      }
+      // a block ends before anything else of the response passes: what it held back is handed over
+      for (const [i, st] of blocks) yield* end(i, st)
+      blocks.clear()
+      yield ch
+    }
+    for (const [i, st] of blocks) yield* end(i, st)
+  })
+
   // the rows of main's chat a drawing stands under, by the uuid they are stored under (their `requestId`): the
-  // latest row a line can stand under, and the turn's latest text row
+  // latest row a line can stand under, and the turn's latest text row; each text row of the turn in its part (a tool
+  // call starts the next part), for the turn's answer. A block of main's reply is stored as the model wrote it, not as
+  // it showed while it streamed.
   on('session.append', async ($, e, next) => {
+    let msg = e.message
     try {
       if (rt.sc && e.agentId === undefined) {
-        if (isAnchor(e as unknown as AppendedRow)) rt.anchor = e.uuid
-        if (e.door === 'response' && rt.turn && hasText(e.message.content)) rt.turn.row = e.uuid
+        if (e.door === 'response' && Array.isArray(msg.content)) {
+          const shown = msg.content as { type?: string; text?: string }[]
+          const blocks = shown.map(b => (b.type === 'text' && typeof b.text === 'string' && asWritten.has(b.text) ? { ...b, text: asWritten.get(b.text)! } : b))
+          if (blocks.some((b, i) => b !== shown[i])) msg = { ...msg, content: blocks as typeof msg.content }
+          const texts = blocks.flatMap(b => (b.type === 'text' && typeof b.text === 'string' && b.text.trim() ? [b.text] : []))
+          if (rt.turn) {
+            if (texts.length) rt.turn.parts.at(-1)!.push({ uuid: e.uuid, text: texts.join('\n\n') })
+            if (blocks.some(b => b.type === 'tool_use')) rt.turn.parts.push([])
+          }
+          // the cards a reply embeds, read so they draw
+          const embeds = texts.flatMap(t => embeddedCards(t))
+          if (embeds.length) void loadCards(cxOf($), embeds)
+        }
+        if (isAnchor({ ...e, message: msg } as unknown as AppendedRow)) rt.anchor = e.uuid
+        if (e.door === 'response' && rt.turn && hasText(msg.content)) rt.turn.row = e.uuid
       }
     } catch {
       // the row is stored whatever thimble-term makes of it
     }
-    return next(e)
+    return next(msg === e.message ? e : { ...e, message: msg })
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
@@ -324,6 +507,21 @@ export const register: Register = on => {
         const cur = (await $.state.get({ ...TURN_CARDS, id: row })).value ?? []
         await $.state.set({ ...TURN_CARDS, id: row }, [...cur, ...t.cards.filter(id => !cur.includes(id))])
       }
+      // the answer: its last part that cites or embeds a card, else its last; the footer stands under its last row
+      const part = answerPart(t.parts)
+      const last = part?.at(-1)?.uuid ?? ''
+      if (part && last && !t.own) {
+        const text = part.map(r => r.text).join('\n\n')
+        const shows = [...new Set([...embeddedCards(text), ...(last === row ? t.cards : [])])]
+        if (citations(text).length || shows.length) await $.state.set({ ...ANSWERS, id: last }, { rows: part.map(r => r.uuid), text, cards: shows })
+      }
+      // the views this turn proposed: their rows under the answer
+      const vrow = last || row
+      if (t.views.length && vrow) {
+        const cur = (await $.state.get({ ...VIEW_ROWS, id: vrow })).value ?? []
+        await $.state.set({ ...VIEW_ROWS, id: vrow }, [...cur, ...t.views.filter(v => !cur.includes(v))])
+        for (const v of t.views) rt.viewsTold.add(v)
+      }
     }
     return done
   })
@@ -335,19 +533,24 @@ export const register: Register = on => {
     const cx = cxOf($)
     const ids = await cx.turnCards(e.requestId)
     const told = await signalRows(cx, e)
+    const views = await viewRowsEl(cx, e)
+    const footer = await footerEl(cx, e)
     const text = withoutEnd(e.props.text)
     const live = e.surface === 'terminal' || e.surface === 'desktop'
-    if (!ids.length && !told && text === e.props.text && !live && !needsDrawing(text)) return next(e)
+    if (!ids.length && !told && !views && !footer && text === e.props.text && !live && !needsDrawing(text)) return next(e)
     const { Box } = $.ui.resolve(e)
+    // the reply fills the terminal's width, less 2, its cards as wide as its prose
     const cols = (e.viewport?.columns ?? 100) - 2
     const body = text.trim() ? await drawReply(cx, e, text, cols - MARGIN, { first: Boolean(e.props.isFirstOfReply), skipCards: new Set(ids), ask: t => void openAsk(cx, t), open: id => void openThread(cx, id) }) : []
-    const cards = await drawCards(cx, e, ids, cols, t => void openAsk(cx, t))
-    if (!body.length && !cards && !told) return <Box />
+    const cards = await drawCards(cx, e, ids, cols, t => void openAsk(cx, t), id => void openThread(cx, id))
+    if (!body.length && !cards && !told && !views && !footer) return <Box />
     return (
       <Box flexDirection="column">
         {body}
         {cards}
+        {footer}
         {told}
+        {views}
       </Box>
     )
   })
@@ -388,14 +591,20 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // a card tool's result row: the card by its question, since the card itself is drawn under the turn's last reply
+  // a card tool's result row: the card by its question, since the card itself is drawn under the turn's last reply; a
+  // label's, its name and each value's count. An error stays Claude Code's row.
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
     if (!rt.sc || e.props.isErrored || !CARD_TOOL.test(String(e.props.tool))) return next(e)
     const ids = cardsOfCall(String(e.props.tool), {}, resultText(e.props.output))
     const tc = ids[0] ? await cxOf($).card(ids[0]) : undefined
-    const q = (tc?.data as { question?: string } | undefined)?.question
+    const data = tc?.data as CardData | null | undefined
+    const q = data?.question
     if (!q) return next(e)
     const { Text } = $.ui.resolve(e)
+    if (data.kind === 'label' && data.label) {
+      const counts = ((data.rows ?? []) as { label: string; value: number }[]).map(r => `${r.label} ${r.value.toLocaleString('en-US')}`).join(' · ')
+      return <Text dimColor wrap="truncate-end">{`  ⎿  label "${data.label.name}"${counts ? ` · ${counts}` : ''}${tc?.busy ? ` · ${tc.busy}` : ''}`}</Text>
+    }
     return <Text dimColor wrap="truncate-end">{`  ⎿  card "${q}"${tc?.busy ? ` · ${tc.busy}` : ''}`}</Text>
   })
 

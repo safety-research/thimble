@@ -67,10 +67,12 @@ test("a turn's card is drawn once, under the turn's last reply, in its border wi
   expect(card).toContain('What does the export hold per wiki?')
   expect(card).toContain('probier')
   expect(card).not.toContain('ff73e071')
-  // the card in a full round border as wide as the reply's prose (the column, at most 120), its takeaway inside it
+  // the card in a full round border as wide as the reply's prose (the terminal's 140 columns less 2 and the margin of
+  // 4), its takeaway inside it; no blank row between the reply and the card's border
   const json = JSON.stringify(await ui.drawn())
-  expect(json).toContain('"width":120,"borderStyle":"round","borderColor":"subtle","paddingX":1')
-  expect(json).toMatch(/"width":120,"flexShrink":1\}/)
+  expect(json).toContain('"width":134,"borderStyle":"round","borderColor":"subtle","paddingX":1')
+  expect(json).toMatch(/"width":134,"flexShrink":1\}/)
+  expect(json).toContain('{"type":"Box","props":{"key":"turn-card-0","flexDirection":"row"}')
   // the takeaway under the card: its citations checked, the one whose place shows another value red
   const tk = JSON.stringify(await ui.drawn({ in: 'para-tk-t0-1' }))
   expect(tk).toContain('4579')
@@ -281,6 +283,7 @@ test("a right-click on a card's cell does what a click does: a side thread about
   await pane.input({ key: 'ask-new', text: 'Why so many?' })
   await w.clock.settle()
   expect(w.acts.find(a => a.kind === 'thread')?.payload).toMatchObject({ anchor: 'card:ff73e071', message: 'Why so many?' })
+  expect(String(w.acts.find(a => a.kind === 'thread')?.payload.anchor_text)).toContain('dse')
   await pane.unmount()
 })
 
@@ -315,7 +318,7 @@ test("a label card is a bar card of its counts with the label's row; a press on 
 test("a side thread asked about a card: the ask field posts the thread, and the threads panel shows it selected under the tree", async ($, on) => {
   const w = world(on)
   await start($, w)
-  await turn($, w, [['r1', 'Here.']])
+  await turn($, w, [['r1', 'Here.']], { tool: 'mcp__plugin_thimble_thimble__add_card', text: 'card:a0frame0\n[out0: table]' })
   const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
   await ui.press({ key: 'ask-card-0' })
   await ui.unmount()
@@ -323,7 +326,8 @@ test("a side thread asked about a card: the ask field posts the thread, and the 
   expect(shown(await pane.drawn())).toContain('New thread')
   await pane.input({ key: 'ask-new', text: 'Why is dse so big?' })
   await w.clock.settle()
-  expect(w.acts).toContainEqual({ kind: 'thread', payload: { anchor: 'card:ff73e071', message: 'Why is dse so big?' } })
+  // the thread is told the card by its question, never its id
+  expect(w.acts).toContainEqual({ kind: 'thread', payload: { anchor: 'card:a0frame0', anchor_text: 'card "How many records does each file hold?"', message: 'Why is dse so big?' } })
   await pane.redraw()
   const text = shown(await pane.drawn())
   expect(text).toContain('Threads')
@@ -339,6 +343,7 @@ test("an answer that comes in while the panel shows something else: a `↳ threa
   await turn($, w, [['r1', 'Asked.']])
   const t2 = w.states.threads.find(t => t.id === 't2')! as Record<string, unknown>
   Object.assign(t2, { running: false, answers: 1, seen: 0 })
+  w.chats.t2 = { meta: { ...t2 }, events: [{ type: 'user', text: 'which pages were deleted?' }, { type: 'text', delta: 'Forty.' }, { type: 'done', result: 'Forty.' }] }
   w.stamps.set(`${WS}/chats`, 5)
   await w.clock.advance(1100)
   const ui = (await $.ui.mount(MESSAGE('r1', 'Asked.'))) as unknown as M

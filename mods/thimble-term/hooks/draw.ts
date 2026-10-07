@@ -272,8 +272,11 @@ function classColour(card: CardData, name?: string, ref?: string): string | unde
   return undefined
 }
 
-/** A place as the analyst reads it: `revisions.jsonl line 10566`, `lines 3-8`, `row 12`; any other as written. */
+/** A place as the analyst reads it: `revisions.jsonl line 10566`, `lines 3-8`, `row 12`, `results.json item 4`, `the
+ *  command's output line 3`; never `#L` or a command's id. A card's place is named by its question by the caller. */
 export function placeWords(ref: string): string {
+  const call = /^call:[A-Za-z0-9_-]+(?:#L(\d+)(?:-L?(\d+))?)?$/.exec(ref)
+  if (call) return `the command's output${call[1] ? ` ${call[2] && call[2] !== call[1] ? `lines ${call[1]}-${call[2]}` : `line ${call[1]}`}` : ''}`
   const at = ref.indexOf('#')
   if (at < 0) return ref
   const path = ref.slice(0, at)
@@ -282,6 +285,9 @@ export function placeWords(ref: string): string {
   if (lines) return `${path} ${lines[2] && lines[2] !== lines[1] ? `lines ${lines[1]}-${lines[2]}` : `line ${lines[1]}`}`
   const row = /^row=(\d+)$/.exec(frag)
   if (row) return `${path} row ${row[1]}`
+  // a JSON list's item, counted from 1 as the file's view counts them
+  const item = /^\/(?:[^/]+\/)?(\d+)$/.exec(frag)
+  if (item && !path.startsWith('card:')) return `${path} item ${Number(item[1]) + 1}`
   return ref
 }
 

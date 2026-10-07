@@ -35,10 +35,10 @@ import { cid, clip } from './lib'
 import { linesEl } from './lines'
 import type { LineHit } from './lines'
 import { docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
-import { NAV_EMPTY, backTarget, crumbSteps, fitCrumbs, threadTitle, threadTree, withBack } from './nav'
+import { NAV_EMPTY, backTarget, crumbSteps, fitCrumbs, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
-import { PANEL_MARGIN, cardBlock, drawReply } from './reply'
-import { closePanel, navBack, navGo, openHome, openPanel, readSurface, rt, runLabel, saveLabel, startThread, surfaceValue, threadMessage } from './term'
+import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimSentence, drawReply, linkCheck, placeName, plainWhy } from './reply'
+import { closePanel, inPanelNow, navBack, navGo, openHome, openPanel, readSurface, rt, runLabel, saveLabel, startThread, surfaceValue, threadMessage } from './term'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -56,12 +56,51 @@ const dim = (s: string): Seg => ({ s, fg: COLORS.dim })
 
 // ------------------------------------------------------------------------------------------------ opening
 
-/** A side thread about a target: the ask view, its question field first. */
-export async function openAsk(cx: Ctx, t: Target): Promise<void> {
+/** What a new thread is told it was asked about, beside its anchor: `anchor` (a ref, or none for words on screen),
+ *  `anchorText` (the words), `element` (where it was asked, a document's passage). */
+export type AskOver = { anchor?: string | null; anchorText?: string; element?: string; about?: string }
+
+/** A side thread about a target: the ask view, its question field first. A thread asked from inside the panel hangs
+ *  under the thread on the panel's trail. Its words: a passage's, a mark's name and value, a card by its question, a
+ *  citation's sentence. */
+export async function openAsk(cx: Ctx, t: Target, over: AskOver = {}): Promise<void> {
   const c = citationOf(t)
-  const anchor = t.kind === 'sentence' ? null : t.cardId && t.kind !== 'record' && t.kind !== 'citation' ? `card:${t.cardId}` : c?.ref ?? (t.cardId ? `card:${t.cardId}` : null)
-  const anchorText = t.kind === 'card' ? '' : t.kind === 'citation' ? '' : plainCites(t.label ? `${t.label}` : t.text ?? '')
-  await openPanel(cx, { view: 'ask', title: 'Ask', target: t, anchor, anchorText, about: targetLabel(t, 60) })
+  const anchor = over.anchor !== undefined ? over.anchor : t.kind === 'sentence' ? null : t.cardId && t.kind !== 'record' && t.kind !== 'citation' ? `card:${t.cardId}` : c?.ref ?? (t.cardId ? `card:${t.cardId}` : null)
+  const anchorText =
+    over.anchorText !== undefined
+      ? over.anchorText
+      : t.kind === 'sentence'
+        ? plainCites(t.text ?? '')
+        : t.kind === 'card'
+          ? t.cardId
+            ? await cardName(cx, t.cardId)
+            : ''
+          : t.kind === 'citation'
+            ? plainCites(claimSentence(t.claim)) || (c ? citeLabel(c) : '')
+            : plainCites(t.label ? `${t.label}` : t.text ?? '')
+  const parent = (await inPanelNow(cx)) ? threadOnTrail(((await cx.nav()) ?? NAV_EMPTY).trail) : ''
+  const about = over.about ?? (t.kind === 'sentence' && t.label ? t.label : targetLabel(t, 60))
+  await openPanel(cx, { view: 'ask', title: 'Ask', target: t, anchor, anchorText, about, ...(parent ? { parent } : {}), ...(over.element ? { element: over.element } : {}) })
+}
+
+/** The views as home lists them (`thimble state home`): each by its slug and name, its state (built, building,
+ *  proposed, failed), when it was proposed or built, the files it claims, and `fresh` once built and not yet opened. */
+export async function homeViews(cx: Ctx): Promise<HomeView[]> {
+  const homeRaw = await surfaceValue<Obj>(cx, 'home-full')
+  if (!homeRaw?.ok || !Array.isArray(homeRaw.value.views)) return []
+  return (homeRaw.value.views as unknown[]).filter(isObj).map(v => {
+    const st = str(v.status)
+    const state = st === 'built' ? 'built' : st === 'building' ? 'building' : st === 'failed' ? 'failed' : 'proposed'
+    const slug = str(v.slug)
+    const fresh = state === 'built' && !rt.viewsSeen.has(slug) && rt.viewsBuiltBefore !== null && !rt.viewsBuiltBefore.has(slug)
+    return { slug, name: str(v.name) || slug, state, words: '', files: Array.isArray(v.files) ? (v.files as unknown[]).map(String) : [], unit: '', drawable: state === 'built', left: 0, at: Date.parse(str(v.ts)) || 0, ...(fresh ? { fresh: true } : {}) }
+  })
+}
+
+/** A view's line in the panel: the browser draws views. Opened, it is no longer new. */
+export async function openView(cx: Ctx, slug: string, name: string): Promise<void> {
+  rt.viewsSeen.add(slug)
+  await openPanel(cx, { view: 'view', title: name || slug, slug })
 }
 
 /** A citation's panel, its step named by the cited value (or its place, for a citation that shows none). */
@@ -415,7 +454,7 @@ async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     keys.push({ key: 'card', hotkey: 'c', onPress: () => void openCard(cx, id) })
     body.push(...bottomRows(cx, e, cols, [<Button key="card-card" label="card" plain onPress={() => void openCard(cx, id)} />, <Button key="card-ask" label="ask about it" plain onPress={ask} />], [], ['c for the card', 'a to ask', 'b to go back', 'x to close']))
   } else {
-    body.push(<Box key="card-box" flexDirection="column">{await cardBlock(cx, e, id, Math.min(cols, 120), 'pane', { pane: true })}</Box>)
+    body.push(<Box key="card-box" flexDirection="column">{await cardBlock(cx, e, id, cols, 'pane', { pane: true })}</Box>)
     if (tc.code) keys.push({ key: 'code', hotkey: 'c', onPress: () => void openCard(cx, id, 'code') })
     body.push(...bottomRows(cx, e, cols, [tc.code ? <Button key="card-code" label="code" plain onPress={() => void openCard(cx, id, 'code')} /> : null, <Button key="card-ask" label="ask about it" plain onPress={ask} />], [], [...(tc.code ? ['c for its code'] : []), 'a to ask', 'b to go back', 'x to close']))
   }
@@ -483,16 +522,6 @@ function framedCard(cx: Ctx, e: PaneEvent, card: CardData, w: number, lines: Lin
   )
 }
 
-/** A citation's status in plain words (views/SPEC.md, section 5, "Words that recur"). */
-function statusWords(ref: string, v: TermVerdict | undefined, shows: boolean): string {
-  const onCard = /^(?:card|cell):/.test(ref)
-  const place = onCard ? 'the card' : placeWords(ref)
-  if (!v || v.status === 'pending') return '◌ checking'
-  if (v.status === 'ok') return shows ? (onCard ? 'found on the card' : `found in ${place}`) : place
-  if (v.status === 'differs') return `not found in ${place}${v.why ? ` · ${plainCites(v.why)}` : ''}`
-  return `not found: ${v.why ? plainCites(v.why) : `${place} does not exist`}`
-}
-
 /** The citation panel (views/SPEC.md, section 7, "The citation panel"): the title is the cited value, bold, blue and
  *  underlined (a link to its place; red when the value is not there); the subtitle its status in plain words; under the
  *  rule `from`, then the cited lines nested at A2 with the value on the selection background, or the cited card in its
@@ -514,7 +543,8 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const opens = f ? () => openFile(cx, f.path, Math.max(1, (f.line ?? 1) - 5)) : cardId ? () => openCard(cx, cardId) : null
   const body: RenderElement[] = []
   body.push(opens ? linesEl(cx, e, 'cite-title', [titleSegs], [{ y: 0, x0: 0, x1: width(label), row: false, run: () => void opens() }], cols) : lineEl(els, titleSegs, 'cite-title'))
-  body.push(lineEl(els, [{ s: statusWords(c.ref, v, c.display !== null), fg: red ? COLORS.problem : COLORS.dim }], 'cite-sub', true))
+  const sub = [await citeStatus(cx, c, v), red && v?.why ? await plainWhy(cx, v.why) : ''].filter(Boolean).join(' · ')
+  body.push(lineEl(els, [{ s: sub, fg: red ? COLORS.problem : COLORS.dim }], 'cite-sub', true))
   body.push(ruleEl(els, cols, 'cite-rule'))
   const where = cardId ? `the card${(await cx.card(cardId)) ? ` "${clip(((await cx.card(cardId))!.data as CardData).question, 60)}"` : ''}` : placeWords(c.ref)
   const rows: [string, RenderElement | string, string?][] = [['from', where]]
@@ -562,7 +592,7 @@ async function drawAsk(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
           if (!q) return
           asking = '◌ asking'
           await cx.bumpPanel()
-          const got = await startThread(cx, p.anchor ?? null, p.anchorText ?? '', q)
+          const got = await startThread(cx, p.anchor ?? null, p.anchorText ?? '', q, { ...(p.parent ? { parent: p.parent } : {}), ...(p.element ? { element: p.element } : {}) })
           asking = 'error' in got ? `× ${got.error}` : ''
           if ('id' in got) await openThread(cx, got.id)
           else await cx.bumpPanel()

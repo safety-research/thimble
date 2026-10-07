@@ -2,9 +2,9 @@
 // `claude plugin test mods/thimble-term`.
 import { expect, test } from 'claude-code/testing'
 
-import { busyWords, cardOfCell, htmlTable, labelCard } from '../hooks/cell'
+import { busyWords, cardOfCell, htmlTable, labelCard, linksOf } from '../hooks/cell'
 import type { ThimbleCell } from '../hooks/cell'
-import { cardLayout } from '../hooks/draw'
+import { cardLayout, placeWords } from '../hooks/draw'
 import type { BarRow, Cell } from '../hooks/draw'
 import { CELLS, LABEL } from './fixtures'
 
@@ -90,4 +90,19 @@ test('no card drawing shows a hex id', () => {
     expect(lines).not.toMatch(/\b(card|cell):[0-9a-f]{6,}/)
     expect(lines).not.toContain(id)
   }
+})
+
+test("a place reads in words: a file's line or lines, a row, a JSON list's item, a command's output; never `#L` or an id", () => {
+  expect(placeWords('revisions.jsonl#L10566')).toBe('revisions.jsonl line 10566')
+  expect(placeWords('README.md#L3-L8')).toBe('README.md lines 3-8')
+  expect(placeWords('data.csv#row=12')).toBe('data.csv row 12')
+  expect(placeWords('results.json#/runs/3')).toBe('results.json item 4')
+  expect(placeWords('call:abc123#L2')).toBe("the command's output line 2")
+  expect(placeWords('call:abc123')).toBe("the command's output")
+})
+
+test("a card's takeaway as thimble's links check left it: linked and contradicted citations by value and ref", () => {
+  const links = linksOf({ id: 'x', verification: { links: { status: 'partial', checked: true, resolved: [{ value: '4579', ref: 'card:x#pages/TOTAL' }], broken: [{ value: '12', ref: 'a.csv#row=1', why: 'the place shows 13', source: '13' }] } } } as ThimbleCell)
+  expect(links).toEqual({ pending: false, checked: true, ok: ['4579|card:x#pages/TOTAL'], broken: [{ key: '12|a.csv#row=1', why: 'the place shows 13', source: '13' }] })
+  expect(linksOf({ id: 'y' } as ThimbleCell)).toBeUndefined()
 })

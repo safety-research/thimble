@@ -5,6 +5,7 @@
 // simple bar or line chart (one Altair layer, x and y fields) draws as text; any other chart draws as a table of its
 // rows; a note is prose; a code card, a card type's card and a matplotlib figure draw as their printed text; a custom
 // HTML card draws as its text. A label card's counts and records come from the label (`thimble state label`).
+import type { TermLinks } from '../types'
 import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode } from './draw'
 
 /** A cell as the workspace stores it: the fields the drawing reads. */
@@ -24,6 +25,8 @@ export type ThimbleCell = {
   run?: { state?: string; by?: string; script?: string }
   check?: string
   regenerating_for?: string[]
+  label_revs?: Record<string, number>
+  verification?: { status?: string; links?: { status?: string; checked?: boolean; resolved?: unknown[]; broken?: unknown[] } | null } | null
 }
 
 /** One run of a label as the concept keeps it: the records it ran over (`total`), those its scope holds
@@ -46,6 +49,8 @@ export type ThimbleLabel = {
   applications?: LabelRun[]
   last_run?: LabelRun | null
   rows?: { ref?: string; label?: string; rationale?: string; analyst?: unknown; text?: string; confidence?: number }[]
+  /** its revision, which steps whenever its rows or its definition change (concepts.note_change) */
+  rev?: number
 }
 
 export const FRAME = 'application/vnd.thimble.frame+json'
@@ -325,6 +330,20 @@ export function labelCard(cell: ThimbleCell, label: ThimbleLabel | null): CardDa
     total: labeled,
     examples,
     label: { slug: label.id, name: label.name ?? label.id, kind: label.kind ?? '', values, labeled, total, trial: Boolean(label.trial), paths },
+  }
+}
+
+/** What thimble's links check left of a card's takeaway (backend verify.py), or undefined when it never ran. */
+export function linksOf(cell: ThimbleCell): TermLinks | undefined {
+  const l = cell.verification?.links
+  if (!l || typeof l !== 'object') return undefined
+  const entries = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => Boolean(x) && typeof x === 'object') : [])
+  const key = (x: Record<string, unknown>) => `${x.value === null || x.value === undefined ? '' : String(x.value)}|${String(x.ref ?? '')}`
+  return {
+    pending: l.status === 'pending',
+    checked: Boolean(l.checked),
+    ok: entries(l.resolved).map(key),
+    broken: entries(l.broken).map(b => ({ key: key(b), why: String(b.why ?? ''), source: b.source === null || b.source === undefined ? '' : String(b.source) })),
   }
 }
 
