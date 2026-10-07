@@ -303,6 +303,7 @@ export class Drawing {
     this.binds = parent ? parent.binds : []
     this.facts = parent ? parent.facts : []
     this.typer = null
+    this.focusY = null
   }
 
   /** The row the next line goes on. */
@@ -370,6 +371,12 @@ export class Drawing {
     root.typer = { onKey: o.onKey || (() => {}), onText: o.onText || null, text: String(o.text ?? ''), hints: o.hints || ['Enter to finish'] }
   }
 
+  /** Keep the next row drawn in view: in a row's details, the record a citation opened, which a list shows however far
+   *  down its details it is. */
+  focus() {
+    this.focusY = this.lines.length
+  }
+
   /** A drawing `cols` wide whose lines stand `indent` cells in from this one's edge (a row's details at A2), to be
    *  put in with `put`. */
   inner(indent = 2, rows = this.left) {
@@ -379,6 +386,7 @@ export class Drawing {
   /** The lines of an inner drawing, in at this one's row. */
   put(inner, from = 0, to = inner.lines.length) {
     const y0 = this.lines.length
+    if (inner.focusY !== null && inner.focusY >= from && inner.focusY < to) this.focusY = inner.focusY - from + y0
     for (const l of inner.lines.slice(from, to)) this.lines.push({ margin: l.margin, runs: clipLine([{ s: ' '.repeat(inner.indent) }, ...l.runs], this.cols) })
     for (const h of inner.hits) if (h.y >= from && h.y < to) this.hits.push({ ...h, y: h.y - from + y0, x0: h.x0 + inner.indent, x1: h.x1 + inner.indent })
   }
@@ -1859,6 +1867,9 @@ export function list(opts = {}) {
         if (end >= top + height) top = end - height + 1
         // a heading right above the chosen row comes with it
         if (top === at[0] && top > 0 && items[spans.find(([a]) => a === top - 1)?.[2]]?.heading) top -= 1
+        // a row its details keep in view (d.focus) shows, with the chosen row above it where both fit
+        const f = inner.focusY
+        if (f !== null && f > at[0] && f <= at[1] && f >= top + height) top = f - at[0] < height ? at[0] : f - Math.floor(height / 3)
       }
       s.top = top = Math.max(0, Math.min(top, last))
       const y0 = d.y
@@ -2113,9 +2124,14 @@ export function search(opts = {}) {
  * of `all` (the words for no choice) and the values; `key` the letter that opens it; onChange(value), null for all.
  * A value is a string or `{name, value, right, indent}`: `right` dim against R in the menu, `indent` the levels (2 cells
  * each) its menu row stands in, for a tree such as runs and their sessions; the row shows its name alone.
+ * With `all: false` the menu holds the values alone (the kind of record a view lists): the choice opens on `initial`,
+ * else the first value, and Reset puts it back there.
  */
 export function choice(opts = {}) {
-  const s = { value: null, values: Array.isArray(opts.values) ? opts.values.slice() : [] }
+  const valueOf = (v) => (v !== null && typeof v === 'object' ? v.value ?? v.name : v)
+  const some = opts.all !== false
+  const first = some ? null : opts.initial !== undefined ? opts.initial : Array.isArray(opts.values) && opts.values.length ? valueOf(opts.values[0]) : null
+  const s = { value: first, values: Array.isArray(opts.values) ? opts.values.slice() : [] }
   const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {}
   const all = opts.all || 'all'
   const api = {
@@ -2128,26 +2144,26 @@ export function choice(opts = {}) {
     get values() {
       return s.values.slice()
     },
-    /** Choose a value (null for all); onChange follows. */
+    /** Choose a value (null for all, or the first with `all: false`); onChange follows. */
     set(v) {
-      const next = v === undefined ? null : v
+      const next = v === undefined || v === null ? first : v
       if (next === s.value) return
       s.value = next
       onChange(next)
       redraw()
     },
     add(r) {
-      const items = () => [{ name: all, v: null }, ...s.values.map((v) => (typeof v === 'object' ? { name: v.name, v: v.value ?? v.name, right: v.right, indent: v.indent } : { name: String(v), v }))]
+      const items = () => [...(some ? [{ name: all, v: null }] : []), ...s.values.map((v) => (typeof v === 'object' ? { name: v.name, v: valueOf(v), right: v.right, indent: v.indent } : { name: String(v), v }))]
       const open = () => toggleMenu(api, Math.max(0, items().findIndex((it) => it.v === s.value)))
       if (opts.title) r.add(opts.title, { d: true }).gap()
       const shown = items().find((it) => it.v === s.value)
-      r.add(shown ? shown.name : all, {}, { on: open, tip: opts.tip || `choose ${opts.title || 'one'}` })
+      r.add(shown ? shown.name : some ? all : String(s.value ?? ''), {}, { on: open, tip: opts.tip || `choose ${opts.title || 'one'}` })
       if (opts.key) r.d.key(opts.key, `for ${opts.title || 'the choice'}`, open)
       r.menus.push((d) => drawMenu(d, api, items(), (it) => it && api.set(it.v), opts.key || null, 'to select'))
       return r
     },
   }
-  state.resets.push({ changed: () => s.value !== null, reset: () => { s.value = null }, after: () => onChange(null) })
+  state.resets.push({ changed: () => s.value !== first, reset: () => { s.value = first }, after: () => onChange(first) })
   return api
 }
 

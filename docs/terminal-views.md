@@ -42,6 +42,12 @@ runs of agent teams on one clock: the time range broken where the runs lie hours
 under its run as a tree, a run folded to one lane where the panel is short, and each call opened in place with what came
 back (`blocks`).
 
+[plugin/viewers/repository/view.term.js](../plugin/viewers/repository/view.term.js), the third, draws a table over a
+time range: the kind of item picked in the top row (`choice` with `all: false`), the runs' days with the nights between
+them as breaks (`timeRange({gap})`), each row its item's columns and its records as marks on the range's scale under the
+runs' names in the table's header, and an item opened in place with its records in time order, the one a citation
+opened kept in view (`d.focus()`).
+
 ## The program's life
 
 The program runs sandboxed, one process per open view, alive while the view shows and ended when the panel shows
@@ -77,6 +83,7 @@ with a 2-cell margin left of the type area for `❯`. Lines past the rows or the
 | `d.sub(...facts)` | facts for the panel's subtitle under the view's name, dim, parted by ` · ` |
 | `d.typing({text, onText, onKey, hints})` | a part takes typing: the panel's field holds `text` and sends each change to `onText` |
 | `d.inner(indent)`, `d.put(inner)` | a drawing `indent` cells in, put in at the current row (a row's details at A2) |
+| `d.focus()` | keep the next row in view: in a row's details, the record a citation opened, which the list shows however far down it is |
 | `r.add(text, style, {on, tip, drag, row, max})` | text in a style; `on(x)` makes it a control, `tip` the words the pointer shows under it |
 | `r.gap(n)`, `r.at(col)`, `r.right(text, style)` | space, a column, text against R |
 | `r.margin(run)` | the mark in the margin: `❯` and the accent on the chosen row |
@@ -190,7 +197,8 @@ its text, each change of which reaches the search whole (Enter ends). A part of 
 `d.typing({text, onText, onKey})`. `choice({title, all, key, values, onChange})` adds `incident  all` to a row, whose menu
 picks one of its values. A value is a string or `{name, value, right, indent}`: `right` stands dim against R in the menu,
 and `indent` stands its menu row in by 2 cells a level, for a tree such as runs and their sessions; the row shows the
-chosen value's name alone.
+chosen value's name alone. With `all: false` its menu holds the values alone (`items  pull requests`, the kind of record
+a view lists): it opens on `initial`, else the first value, and Reset puts it back there.
 
 ## Acts
 
