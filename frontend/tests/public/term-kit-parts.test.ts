@@ -163,6 +163,43 @@ describe('Rows', () => {
     expect(kit.__driver.state.kept.rows).toEqual({ by: 'label:k1' })
   })
 
+  test("it opens on a label named in `initial` while the label is on, else the field after it; Color by does not take the label it groups by", async () => {
+    init({ labels: [TACTIC(['explore', 'verify'])] })
+    const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }], initial: 'tool' })
+    const rows = kit.rows({ fields: [{ name: 'session', title: 'Session' }, { name: 'tool', title: 'Tool' }], initial: [{ label: 'tactic' }, 'tool'] })
+    kit.draw((d: any) => {
+      const r = d.row()
+      rows.add(r)
+      r.end()
+      colour.draw(d)
+    })
+    await tick()
+    // found by its name, the case aside; the label opened Color by too until Rows held it
+    expect(rows.by).toEqual({ label: 'k1', title: 'Tactic' })
+    expect(text()[0]).toBe('  Rows  Tactic ↗')
+    expect(colour.by).toEqual({ field: 'tool', title: 'Tool' })
+    // nothing was chosen, so nothing of Rows is kept
+    expect(kit.__driver.state.kept.rows).toBe(undefined)
+    // turned off, the label gives way to the field after it; on again, it is Rows' again and still not the colour
+    kit.handle({ t: 'labels', labels: [{ ...TACTIC(['explore', 'verify']), on: false }], filter: null })
+    await tick()
+    expect(rows.by).toEqual({ field: 'tool', title: 'Tool' })
+    kit.handle({ t: 'labels', labels: [TACTIC(['explore', 'verify'])], filter: null })
+    await tick()
+    expect(rows.by).toEqual({ label: 'k1', title: 'Tactic' })
+    expect(colour.by).toEqual({ field: 'tool', title: 'Tool' })
+    // a label no part holds still takes the colour when it is turned on
+    kit.handle({ t: 'labels', labels: [TACTIC(['explore', 'verify']), { ...TACTIC(['early']), id: 'k2', name: 'Phase' }], filter: null })
+    await tick()
+    expect(colour.by).toEqual({ label: 'k2', title: 'Phase' })
+    // a choice in the menu is kept, and the label no longer moves it
+    rows.choose('session')
+    expect(kit.__driver.state.kept.rows).toEqual({ by: 'field:session' })
+    kit.handle({ t: 'labels', labels: [TACTIC(['explore', 'verify'])], filter: null })
+    await tick()
+    expect(rows.by).toEqual({ field: 'session', title: 'Session' })
+  })
+
   test('a record the reader gave its group keeps it', () => {
     const rows = kit.rows({ fields: [{ name: 'tool', title: 'Tool' }] })
     expect(rows.groups([{ ref: 'a#L1', tool: 'Bash', group: 'Edit' }]).map((g: any) => g.name)).toEqual(['Edit'])
@@ -240,6 +277,29 @@ describe('lanes', () => {
     const bgs = runsAt(f, explore).filter((r) => r.bg === kit.COLORS.selected).map((r) => r.s).join('')
     expect(bgs.length).toBeGreaterThan(5)
     expect(runsAt(f, explore).slice(0, 2).some((r) => r.bg)).toBe(false)
+  })
+
+  test('Events draws a mark ▌ in each cell that holds a record, in place of the bars of its records', async () => {
+    init()
+    const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }] })
+    const rows = kit.rows({ fields: [{ name: 'session', title: 'Session' }] })
+    const range = kit.timeRange({})
+    range.data({ times: CALLS.map((c) => c.t) })
+    const ln = kit.lanes({ rows, colour })
+    let dense = true
+    kit.draw((d: any) => {
+      const scale = range.scale(d.cols - 16)
+      ln.draw(d, { items: CALLS, scale, gutter: 16, density: dense })
+    })
+    await tick()
+    const lane = (name: string) => text().find((r: string) => r.trimStart().startsWith(name))!.slice(18)
+    expect(lane('explore')).toMatch(/[▁▂▃▄▅▆▇█]/)
+    expect(lane('explore')).not.toContain('▌')
+    dense = false
+    kit.redraw()
+    await tick()
+    expect(lane('explore').replace(/ /g, '')).toBe('▌▌')
+    expect(lane('lead').replace(/ /g, '')).toBe('▌▌')
   })
 
   test('the lanes past their room fold a top group, and past that wait behind … N more', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "Activity Timeline",
-  "description": "Every record of the agent's transcript on one time axis, one lane per activity, so the long stretches of captcha-solving, account sign-up and money-hunting stand apart from the thin sliver of exploit work at the very end; a time range selector holds the whole run and frames the part the lanes and the list show, the marks, the overview and the list color by Activity, Tool or any label from one Color by control, the context compaction is a flag on the axis, and a record opens in place in the list with a button that opens the transcript at that message.",
+  "description": "Every record of the agent's transcript on one time axis. A time range selector holds the whole run and frames the part the lanes and the list show. The lanes are grouped by the Rows control (the tactic label where it has run, so the long stretches of captcha-solving, account sign-up and money-hunting stand apart from the thin sliver of exploit work at the very end, else a field such as Tool), colored by the Color by control and filtered by the Filter by control, all in the top row; Events draws each record as a mark, Density each lane as bars on the range's bins. The context compaction is a flag on the axis, and a record opens in the side panel with a button that opens the transcript at that message.",
   "claims": [
     "transcript.jsonl"
   ],
@@ -30,22 +30,22 @@
           "how": "read in UTC, and for the system prompt and the two context-compaction turns, whose stamp is the harness clock rather than a point in the run, taken from the records around them in file order"
         },
         {
-          "name": "activity",
+          "name": "tool",
           "type": "category",
-          "derived": "computed",
-          "from": "the record's content, tool call and result",
-          "how": "classified captcha, signup, money, exploit, infra or other by a table of text and file-path signals, the strongest single match winning, and a bare reasoning record with no signal of its own taking the activity of the nearest record that has one; the system prompt and the two compaction turns take no activity"
+          "derived": "deterministic",
+          "from": "tool_name",
+          "how": "the tool a ToolMessage called, read as the file holds it; Reasoning for a message with no tool call"
         },
         {
-          "name": "value",
+          "name": "role",
           "type": "category",
-          "derived": "computed",
-          "from": "the Color by choice",
-          "how": "the record's activity, its tool (Reasoning for a message with no tool), or a label's value on it"
+          "derived": "deterministic",
+          "from": "role",
+          "how": "System, Assistant or Human, read as the file holds it"
         }
       ]
     }
   ],
-  "built": "2026-10-07T06:06:44+00:00",
-  "version": "f6563e753126"
+  "built": "2026-10-07T19:31:58+00:00",
+  "version": "e3aaf341afcc"
 }

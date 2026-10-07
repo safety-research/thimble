@@ -103,6 +103,14 @@ A reader that filters takes the query as it takes Color by's: `thimble.colour_on
 (one lane of every record), the `fields` and every label. Rows groups; it never colors, so the lanes can be grouped by
 one thing and colored by another (rows by tactic, color by tool).
 
+`initial` is what Rows opens on until the analyst chooses: a field's name, or a list of choices whose first that is
+there is taken, each a field's name or `{label: name or id}`, a label counting while it is on. `initial: [{label:
+'tactic'}, 'tool']` opens on the label tactic where it is on and on Tool where it is not, and follows the label as it is
+turned on and off. Filter by takes `initial` the same way (None by default).
+
+The label Rows groups by takes no color when it is turned on: Color by keeps its own choice, so the lanes are grouped
+by the label and colored by Color by's field (a label no part holds takes the color as before).
+
 `groups(items)` gives the groups in order, each `{key, value, name, depth, guide, last, heading, parent, children,
 items}`:
 
@@ -135,12 +143,15 @@ stand under them.
 | `words` | the key's words: `{band, problem}` |
 | `keyMount` | where the key goes; at the lanes' top by default |
 | `follow` | the detail list, whose rows carry `data-t`: the rows in view are a light tint across the lanes |
+| `density` | a flag, or a function the page answers at each draw: each lane as bars on the scale's bins in place of marks (an Events \| Density choice) |
 | `anchor(lane)` | a lane's `data-anchor`, such as a session's unit |
 | `onPick(lane)`, `onMark(item)` | a lane's name clicked, which marks it chosen; a mark clicked |
 | `tip(item)` | the words of a record in the hover tip |
 
 Hovering a lane draws a thin cursor line across every lane and a tip of the lane, the time and the record there; never
-a band over the marks. A parent's `▾` folds the lanes under it into its own. The tint of the list's rows in view moves
+a band over the marks. With `density` each lane is a bar per bin, its height the bin's records on one scale for every
+lane, stacked by their Color by values in the chips' order (the records with no value last, in gray); hovering a bin
+gives its time and its records per value, and a click opens its first record (`onMark`). A parent's `▾` folds the lanes under it into its own. The tint of the list's rows in view moves
 as the list scrolls; where the time range marks a span on its own overview (`range.visible`), the lanes mark it there
 too.
 
