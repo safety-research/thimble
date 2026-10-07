@@ -19,6 +19,17 @@ function stampOf(key: string, lines: readonly Line[], hits: readonly LineHit[]):
   return `${key}:${(h >>> 0).toString(36)}`
 }
 
+// the key handler of the panel's list drawn last (a part whose key starts `m:`), which the panel's own keys reach too
+// while the pane holds the keyboard (panel.tsx listKeysEl): a Client takes keys only once a click gave it them
+let listKeys: ((k: string) => Promise<void> | void) | null = null
+
+/** The key handler of the list the panel drew since the last call, and none from then on. */
+export function takeListKeys(): ((k: string) => Promise<void> | void) | null {
+  const k = listKeys
+  listKeys = null
+  return k
+}
+
 /** A part drawn from styled lines by the Client homeview.tsx, `cols` wide: a click (left or right) on a hit runs it; its
  *  keys go to `onKey` once a click gave it the keyboard. Its key starts with `m:` when its lines bring the margin. */
 export function linesEl(cx: Ctx, e: ResolveInput, key: string, lines: Line[], hits: LineHit[], cols: number, onKey?: (k: string) => Promise<void> | void): RenderElement {
@@ -27,12 +38,22 @@ export function linesEl(cx: Ctx, e: ResolveInput, key: string, lines: Line[], hi
     return <Text key={key}>{lines.map(l => l.map(x => x.s).join('')).join('\n')}</Text>
   }
   const { Client } = cx.els(e)
+  if (onKey && key.startsWith('m:')) listKeys = onKey
   const stamp = stampOf(key, lines, hits)
   lineStamps.delete(stamp)
   lineStamps.set(stamp, { runs: hits.map(h => h.run), ...(onKey ? { key: onKey } : {}) })
   for (const k of [...lineStamps.keys()].slice(0, Math.max(0, lineStamps.size - 400))) lineStamps.delete(k)
   const packed = hits.flatMap((h, i) => [h.y, h.x0, h.x1, h.row ? 1 : 0, i])
   return <Client key={key} module="./homeview.tsx" width={cols} height={Math.max(1, lines.length)} props={JSON.parse(JSON.stringify({ lines, hits: packed, stamp, cols, ...(onKey ? { keys: true } : {}) })) as never} />
+}
+
+/** What homeview.tsx posts for a click on no hit of a list with keys, which gave its Client the keyboard. */
+export const CLIENT_CLICK = '\u0000click'
+let onClientClick: ((cx: Ctx) => Promise<void>) | null = null
+
+/** What a click on no hit of a list does (term.ts takeKeys: the keys back to the pane). */
+export function onListClick(fn: (cx: Ctx) => Promise<void>): void {
+  onClientClick = fn
 }
 
 /** A post of homeview.tsx: each click and key not seen yet, by the drawing it was made in. */
@@ -43,7 +64,8 @@ export async function linesMessage(cx: Ctx, origin: unknown, raw: unknown): Prom
     lineSeen.set(origin, a.seq)
     const got = lineStamps.get(String(a.s))
     if (!got) continue
-    if (typeof a.k === 'string') await got.key?.(a.k)
+    if (a.k === CLIENT_CLICK) await onClientClick?.(cx)
+    else if (typeof a.k === 'string') await got.key?.(a.k)
     else await got.runs[Number(a.i)]?.()
     await cx.bumpPanel()
   }

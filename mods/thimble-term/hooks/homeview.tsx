@@ -15,6 +15,8 @@ type Props = { lines: Line[]; hits: number[]; stamp: string; cols: number; keys?
 type S = { hover: number }
 type H = { y: number; x0: number; x1: number; row: boolean; g: number }
 type Out = { seq: number; s: string; i?: number; k?: string }
+// the key a click on no hit posts (lines.tsx CLIENT_CLICK)
+const CLICK = '\u0000click'
 
 // every post carries the clicks and keys not yet seen, under this instance's name, so a reload's count starts afresh
 const horigin = Math.random().toString(36).slice(2, 10)
@@ -58,6 +60,9 @@ const HomeView: ClientModule<Props, S> = (props, surface) => {
     if (ev.type === 'down') {
       const i = at(ev.x, ev.y)
       const button = ev.button ?? 'left'
+      // a click on no hit of a list with keys gave this Client the keyboard, which the hooks module hands back to the pane,
+      // whose own keys reach the list (panel.tsx RELAY)
+      if (i < 0 && props.keys && button === 'left' && !ev.shift && !ev.ctrl && !ev.alt) return post(surface, { k: CLICK, s: props.stamp })
       if (i < 0 || button === 'middle' || ev.shift || ev.ctrl || ev.alt) return
       post(surface, { i, s: props.stamp })
       return

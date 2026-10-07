@@ -6,7 +6,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { labelHue } from '../hooks/home'
-import { CWD, WS, shown, world } from './fixtures'
+import { CWD, WS, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -24,6 +24,7 @@ async function start($: E, w: World): Promise<void> {
 async function home($: E, w: World): Promise<M> {
   await $.command.run({ command: 'thimble:thimble', args: '' } as never)
   await w.clock.settle()
+  await takesKeys($)
   return (await $.ui.mount(PANE)) as unknown as M
 }
 
@@ -34,6 +35,7 @@ async function homeClick($: E, w: World, pane: M, text: string, x = 4): Promise<
   expect(y).toBeGreaterThan(0)
   await pane.pointer({ type: 'down', x, y, button: 'left', in: 'm:home' } as never)
   await w.clock.settle()
+  await takesKeys($)
   await pane.unmount()
   return (await $.ui.mount(PANE)) as unknown as M
 }
@@ -355,12 +357,15 @@ test('the key hints come in one order on every panel: choosing, Enter, Space, th
   const w = world(on)
   await start($, w)
   let pane = await home($, w)
-  expect(JSON.stringify(await pane.drawn())).toContain('↑↓ to choose · Enter to open · Space to fold · x to close')
+  // the panel's own keys pass ↑, ↓ and Enter to its list (panel.tsx RELAY); Space reaches the list only after a click,
+  // which hands the keys back to the panel, so it is not named
+  expect(JSON.stringify(await pane.drawn())).toContain('↑↓ to choose · Enter to open · x to close')
   await pane.unmount()
   await $.command.run({ command: 'thimble:thimble', args: 'files' } as never)
   await w.clock.settle()
+  await takesKeys($)
   pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await pane.drawn())).toContain('↑↓ to choose · Enter to open · Space to fold · b to go back · x to close')
+  expect(shown(await pane.drawn())).toContain('↑↓ to choose · Enter to open · b to go back · x to close')
   await pane.unmount()
 })
 
@@ -372,5 +377,22 @@ test("home's label row counts as thimble.labels() reads the rows: the analyst's 
   const text = (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r)).join('\n')
   expect(text).toContain('proxy-link 5,190')
   expect(text).toContain('none 9,401')
+  await pane.unmount()
+})
+
+test("home shows `not run yet` for a label with no run, as its panel does, with no bar and no counts", async ($, on) => {
+  // live check term-fix7, new quirk 6: a label a stopped thread left showed `yes 0 · no 0` and 0 on home
+  const w = world(on)
+  w.states.labels.push({ id: 'n0run000', name: 'deleted in the 23 June 20:00 hour', kind: 'prompt', unit: 'record', labels: ['yes', 'no'], glob: 'events.jsonl', counts: {}, n_labeled: 0, last_run: null, applications: [] } as never)
+  await start($, w)
+  const pane = await home($, w)
+  const rows = (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
+  const at = rows.findIndex(r => r.includes('deleted in the 23 June 20:00 hour'))
+  expect(at).toBeGreaterThan(0)
+  expect(rows[at]).toMatch(/○ deleted in the 23 June 20:00 hour +not run yet$/)
+  expect(rows[at + 1]).toMatch(/^ +prompt · events\.jsonl$/)
+  expect(rows.join('\n')).not.toContain('yes 0')
+  // the section's summary counts it apart
+  expect(rows.find(r => r.startsWith('Labels') || r.includes('Labels (2)'))).toBeTruthy()
   await pane.unmount()
 })

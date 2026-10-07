@@ -39,8 +39,9 @@ export type Ctx = {
   command: (name: string, args: string) => Promise<void>
   /** the prompt box's draft */
   promptText: () => Promise<string>
-  /** the keyboard to one of the panel's elements, by its key */
-  focus: (key: string) => Promise<void>
+  /** the panel's focus ring onto one of its elements, by its key, while the pane holds the keys: true once the ring is
+   *  there (moved, or there already) */
+  focus: (key: string) => Promise<boolean>
   /** the element table of the surface a drawing is for */
   els: (e: ResolveInput) => Elements['terminal']
   // ---- thimble-term's state (types/index.d.ts)

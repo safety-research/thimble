@@ -28,8 +28,10 @@ import { asReference, bareCard, cardWords, chipLabel, cid, citations, clip, curl
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, paintLines } from './paint'
+import { labelLinkStale, labelsOf } from './model'
 import { loadCards, queueCitations, rt } from './term'
 import type { Ctx } from './ctx'
+import type { ThimbleLabel } from './cell'
 
 /** The columns left of a reply's blocks: ⏺, a space, the reply's margin ("?" on hover, a passage's ↳), a space. */
 export const MARGIN = 4
@@ -170,9 +172,14 @@ export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefine
 /** A citation as its link draws: its label, red with a problem, ◌ ✓ or × after it from thimble's links check of the
  *  card whose takeaway it is in (`card`), and its tip (its status in plain words, and why for a problem). */
 export async function chipOf(cx: Ctx, c: Citation, card?: string): Promise<ChipView> {
-  // a label's link (`[33](concept:<id>/yes)`): blue, no check, a click opens the label at its value
+  // a label's link (`[33](concept:<id>/yes)`): blue, no check, a click opens the label at its value; in a card's
+  // takeaway, red once the label counts another number (a verdict changed the counts), its tip the count now
   const lr = labelRef(c.ref)
-  if (lr) return { label: citeLabel(c), state: 'link', mark: '', spin: false, tip: lr.value ? `opens the label at its value ${quoted(lr.value)}` : 'opens the label' }
+  if (lr) {
+    const opens = lr.value ? `opens the label at its value ${quoted(lr.value)}` : 'opens the label'
+    const stale = card ? labelLinkStale(c.display, await labelNow(cx, lr.id), lr.value) : ''
+    return { label: citeLabel(c), state: stale ? 'problem' : 'link', mark: '', spin: false, tip: stale ? `${stale} · ${opens}` : opens }
+  }
   const v = await cx.verdict(cid(c.raw))
   const check = card ? linkCheck((await cx.card(card))?.links, c) : {}
   const look = chipLook(v?.status ?? 'pending', undefined, check.state)
@@ -180,6 +187,14 @@ export async function chipOf(cx: Ctx, c: Citation, card?: string): Promise<ChipV
   const why = problem ? await plainWhy(cx, v?.why ?? '') : check.state === 'refuted' && check.why ? await plainWhy(cx, check.why) : ''
   const tip = [await citeStatus(cx, c, v, check), why].filter(Boolean).join(' · ')
   return { label: citeLabel(c), ...look, tip }
+}
+
+/** A label as thimble-term last read it: the one a label card read (term.ts labelFor), else the labels list's. */
+async function labelNow(cx: Ctx, id: string): Promise<ThimbleLabel | null> {
+  const read = rt.labelRead.get(id)
+  if (read) return read
+  const list = (await cx.surface('labels')) as { ok: boolean; value?: unknown } | undefined
+  return list?.ok ? (labelsOf(list.value).find(l => l.id === id) ?? null) : null
 }
 
 /** A file URL for a citation's place: a file of the folder, or the group file that holds a card. */

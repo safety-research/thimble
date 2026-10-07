@@ -47,7 +47,9 @@ export type HomeThread = { id: string; title: string; about: string; words: stri
 export type HomeCard = { id: string; kind: string; question: string }
 /** Cards by the question they answered: an answer's prompt, a side thread's question, a report's title, or none. */
 export type HomeCardGroup = { head: string; from: 'answer' | 'thread' | 'report' | 'other'; cards: HomeCard[]; at: number }
-export type HomeLabel = { slug: string; name: string; kind: string; trial: boolean; counts: Record<string, number>; values: string[]; paths: string[]; running: boolean }
+/** `ran`: whether the label has a run, as its panel's `last run on …` or `not run yet` says (a label a stopped thread
+ *  left is none); absent is true. */
+export type HomeLabel = { slug: string; name: string; kind: string; trial: boolean; counts: Record<string, number>; values: string[]; paths: string[]; running: boolean; ran?: boolean }
 /** thimble-term: a file whose reading thimble does not count (`listed`) has no state glyph and shows its kind. */
 export type HomeFile = { file: string; records: number | null; size: number; seen: number; state: 'read' | 'scanned' | 'untouched' | 'listed'; ranges: number[][]; kind?: string }
 export type HomeData = {
@@ -294,9 +296,20 @@ function labelsSection(ls: readonly HomeLabel[]): HomeSection {
     id: 'labels',
     name: 'Labels',
     count: ls.length,
-    summary: joined(countBy(ls.map(l => (l.running ? 'running' : l.trial ? 'on a sample' : 'on every record')), ['on every record', 'on a sample', 'running'])),
+    summary: joined(countBy(ls.map(l => (l.running ? 'running' : l.ran === false ? 'not run yet' : l.trial ? 'on a sample' : 'on every record')), ['on every record', 'on a sample', 'running', 'not run yet'])),
     pane: { kind: 'pane', view: 'labels', title: 'Labels' },
     rows: ls.map(l => {
+      // a label with no run says so, as its panel does, with no bar and no counts (live check term-fix7, new quirk 6:
+      // home showed `yes 0 · no 0` and 0 for a label a stopped thread left)
+      if (l.ran === false && !l.running)
+        return {
+          key: `label:${l.slug}`,
+          glyph: NOT_STARTED,
+          title: l.name,
+          right: [dim('not run yet')],
+          meta: joined([l.kind, l.paths.join(', ')]),
+          act: { op: 'open', open: { kind: 'label', name: l.name } },
+        }
       const labeled = l.values.reduce((k, v) => k + (l.counts[v] ?? 0), 0)
       // a legend: each value's ● in its hue, its word and count dim as the rest of the secondary row
       const legend: Seg[] = []

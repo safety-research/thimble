@@ -725,24 +725,55 @@ const MONTHS: Record<string, number> = Object.fromEntries(
   [['jan', 'january'], ['feb', 'february'], ['mar', 'march'], ['apr', 'april'], ['may'], ['jun', 'june'], ['jul', 'july'], ['aug', 'august'], ['sep', 'sept', 'september'], ['oct', 'october'], ['nov', 'november'], ['dec', 'december']].flatMap((names, i) => names.map(n => [n, i + 1])),
 )
 // a day and a month in words, as prose writes a date (`23 June`, `June 23`, `23rd June`, `Jun. 23`), with or without a
-// year; a date as an output writes it, ISO (`2026-06-23`, also at a time stamp's head) or month and day (`06-23`)
-const DAY_MONTH_RE = /^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?|([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?)(?:,?\s+(\d{4}))?$/i
+// year and a time after it (`4 June 2026 at 10:53:40 UTC`); a date as an output writes it, ISO (`2026-06-23`, also at a
+// time stamp's head) or month and day (`06-23`), and the time a stamp writes right after its date
+const DAY_MONTH_RE = /^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?|([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?)(?:,?\s+(\d{4}))?(?:,?\s+(?:at\s+)?(\d{1,2}:\d{2}(?::\d{2})?)(?:\s*(?:UTC|GMT|Z))?)?$/i
 const ISO_DATE_RE = /(?<![\d-])(?:(\d{4})-)?(\d{2})-(\d{2})(?![\d-])/g
+const STAMP_CLOCK_RE = /^[T ](\d{1,2}:\d{2}(?::\d{2})?)(?![\d:])/
+const CLOCK_RE = /(?<![\d:])(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?![\d:])/g
+
+/** The month, day, year and time of a shown value that is a day and a month in words (`23 June`, `4 June 2026 at
+ *  10:53:40 UTC`), or null for any other words (backend cite._date_words). */
+export function dayMonth(display: string): { month: number; day: number; year: number | null; clock: string | null } | null {
+  const m = DAY_MONTH_RE.exec(display.trim())
+  if (!m) return null
+  const [day, word] = m[1] ? [m[1], m[2]!] : [m[4]!, m[3]!]
+  const month = MONTHS[word.toLowerCase()]
+  if (!month || Number(day) < 1 || Number(day) > 31) return null
+  return { month, day: Number(day), year: m[5] ? Number(m[5]) : null, clock: m[6] ?? null }
+}
+
+/** Whether every clock time the shown value writes is one the text writes: the same hour and minute, the same second
+ *  when the value gives one (backend cite.clocks_in). */
+export function clocksIn(display: string, text: string): boolean {
+  const have = [...text.matchAll(CLOCK_RE)].map(c => [Number(c[1]), c[2], c[3] ?? ''] as const)
+  return [...display.matchAll(CLOCK_RE)].every(c => have.some(([h, mi, se]) => h === Number(c[1]) && mi === c[2] && (!c[3] || c[3] === se)))
+}
 
 /** Whether a shown value that is a day and a month in words (`23 June`) names a date the text writes as ISO
  *  (`2026-06-23`) or as month and day (`06-23`): the same month and day, the year too when both give one (backend
- *  cite.date_in; live check term-fix6, new quirk 7: `23 June` citing a cell `06-23` was red). */
+ *  cite.date_in; live check term-fix6, new quirk 7: `23 June` citing a cell `06-23` was red). A time after the date is
+ *  the time the stamp writes after that date, or with none there, a clock time of the text (live check term-fix7, new
+ *  quirk 1: `4 June 2026 at 10:53:40 UTC` against 2026-06-04T10:53:40Z was not found). */
 export function dateIn(display: string, text: string): boolean {
-  const m = DAY_MONTH_RE.exec(display.trim())
-  if (!m) return false
-  const [day, word] = m[1] ? [m[1], m[2]!] : [m[4]!, m[3]!]
-  const month = MONTHS[word.toLowerCase()]
-  if (!month || Number(day) < 1 || Number(day) > 31) return false
-  const year = m[5] ? Number(m[5]) : null
+  const want = dayMonth(display)
+  if (!want) return false
   for (const d of text.matchAll(ISO_DATE_RE)) {
-    if (Number(d[2]) === month && Number(d[3]) === Number(day) && (year === null || !d[1] || Number(d[1]) === year)) return true
+    if (Number(d[2]) !== want.month || Number(d[3]) !== want.day || (want.year !== null && d[1] && Number(d[1]) !== want.year)) continue
+    if (want.clock === null) return true
+    const stamp = STAMP_CLOCK_RE.exec(text.slice(d.index! + d[0].length))
+    if (clocksIn(want.clock, stamp ? stamp[1]! : text)) return true
   }
   return false
+}
+
+const STAMP_RE = /(?<![\d-])(?:\d{4}-)?\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?(?![\d-])/g
+
+/** Where a line writes in digits the date a shown value names in words (`23 June` at `2026-06-23`): each stamp dateIn
+ *  accepts, as [start, end], so a citation's panel marks the date it cites. */
+export function dateSpans(display: string, line: string): number[][] {
+  if (!dayMonth(display)) return []
+  return [...line.matchAll(STAMP_RE)].filter(m => dateIn(display, m[0])).map(m => [m.index!, m.index! + m[0].length])
 }
 
 /** Whether a shown value is in a text: a number must match a whole number of it, a day and a month in words a date it

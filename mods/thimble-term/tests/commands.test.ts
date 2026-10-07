@@ -80,3 +80,21 @@ test('`/thimble files [path[:line]]` opens the file browser, or a file at a reco
   await pane.unmount()
   expect(await run($, 'what')).toContain('`/thimble threads`')
 })
+
+test("/thimble's description in terminal mode says what it does here: home in this terminal, never the browser's server", async ($, on) => {
+  // live check term-fix7, quirk 8: the typeahead read "In browser mode `/thimble` starts the server…"
+  const w = world(on)
+  // beneath the plugins, the command as it declares itself
+  on('command.describe', ($, e) => {
+    const d = e as { description: string; argumentHint?: string }
+    return { description: d.description, isHidden: false, ...(d.argumentHint ? { argumentHint: d.argumentHint } : {}) } as never
+  })
+  await start($, w)
+  const said = (await $.command.describe({ command: 'thimble:thimble', description: 'thimble gives a human analyst a workspace… In browser mode `/thimble` starts the server…', isHidden: false, immediate: false, provider: { plugin: 'thimble', tier: 'plugin' } } as never)) as { description: string; argumentHint?: string }
+  expect(said.description).toMatch(/^Opens thimble's home panel in this terminal/)
+  expect(said.description).not.toContain('server')
+  expect(said.argumentHint).toBe('[threads | cite <n> | card <n> | files [path[:line]] | documents]')
+  // another command is described as it declares itself
+  const other = (await $.command.describe({ command: 'thimble:orient', description: 'Orient the analyst.', isHidden: false, immediate: false, provider: { plugin: 'thimble', tier: 'plugin' } } as never)) as { description: string }
+  expect(other.description).toBe('Orient the analyst.')
+})

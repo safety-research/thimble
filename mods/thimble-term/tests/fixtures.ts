@@ -3,6 +3,7 @@
 // The cells and the label are cut from a real workspace (collusion-wiki); the rest is made to fit them.
 import type { On } from 'claude-code'
 import { mock } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 export const WS = '/home/a/.thimble/app/workspaces/wiki'
 export const CWD = '/corpus/wiki'
@@ -392,4 +393,10 @@ export function shown(tree: unknown): string {
   }
   walk(tree)
   return out.join('')
+}
+
+/** The panel taking the keys as Claude Code gives them to a pane opened with `focus`: the relay's `autoFocus` Button
+ *  (panel.tsx RELAY) takes the focus ring, which raises `ui.focus` with origin the plugin. */
+export async function takesKeys($: Engine): Promise<void> {
+  await $.ui.focus({ requestId: 'thimble-term', component: 'Pane', element: 'keys-pick', origin: { kind: 'plugin', name: 'thimble-term' } } as never)
 }

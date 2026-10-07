@@ -2423,11 +2423,32 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
         line += f"\nleft out {_plural(len(asked) - kept, 'figure')} whose card shows no chart or table"
     if refused:  # hold_locks put back the locked blocks the text changed, so the writer does not report those changes
         line += "\n" + reverted_line(refused)
-    flagged =[x for x in all_sentences(doc) if "unverified" in (x.get("tags") or [])]
-    if flagged:
-        line += f"\nthe citation check tagged {_plural(len(flagged), 'sentence')} unverified, " + " ".join(
-            f"[[report:{slug}#{x['id']}]]" for x in flagged[:12]) + (" …" if len(flagged) > 12 else "")
+    if flagged := flagged_lines(slug, all_sentences(doc)):
+        line += "\n" + flagged
     return tools.ok(line)
+
+
+FLAGGED_MAX = 12  # the unverified sentences a save's result names, each with its words and why
+FLAGGED_CHARS = 200  # the words of each, cut after this many characters
+
+
+def flagged_lines(slug: str, sentences: list[dict[str, Any]], ids: list[str] | None = None) -> str:
+    """The sentences the citation check tagged unverified (of `ids`, when given), as a save's result names them: each
+    one's ref, its words as the reader reads them and why (its note), so the writer re-cites the sentence the check means
+    (live check term-fix7, new quirk 1: the result named only `report:report#307a473b`, and the writer replaced the
+    sentence before it). '' when none is tagged."""
+    want = set(ids) if ids is not None else None
+    flagged = [x for x in sentences if "unverified" in (x.get("tags") or []) and (want is None or str(x.get("id")) in want)]
+    if not flagged:
+        return ""
+    rows = [f"the citation check tagged {_plural(len(flagged), 'sentence')} unverified:"]
+    for x in flagged[:FLAGGED_MAX]:
+        words = _cut(plain_text(str(x.get("text") or "")), FLAGGED_CHARS)
+        note = _collapse((x.get("tag_notes") or {}).get("unverified"))
+        rows.append(f"- [[report:{slug}#{x['id']}]] “{words}”" + (f" {note}" if note else ""))
+    if len(flagged) > FLAGGED_MAX:
+        rows.append(f"- … and {len(flagged) - FLAGGED_MAX} more")
+    return "\n".join(rows)
 
 
 async def insert_passage(c: str, slug: str, uid: str, text: str, actor: str, *, inv_id: str = investigation.MAIN) -> dict[str, Any]:
@@ -2746,11 +2767,12 @@ async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
                     writer=_writer_chat(ctx))
     except Exception:  # noqa: BLE001
         log.debug("chip not written", exc_info=True)
-    flagged = [i for i in out.get("unverified") or []]
-    if flagged:
-        line += "\nthe citation check tagged unverified " + " ".join(f"[[report:{slug}#{i}]]" for i in flagged)
     if out.get("text"):
         line += f": {out['text'][:300]}"
+    if ids := [str(i) for i in out.get("unverified") or []]:
+        # each flagged sentence by its words and why, never its id alone (flagged_lines)
+        line += "\n" + (flagged_lines(slug, all_sentences(read_doc(ctx.c, investigation.MAIN, slug) or {}), ids)
+                        or "the citation check tagged unverified " + " ".join(f"[[report:{slug}#{i}]]" for i in ids))
     if out.get("reverted"):
         line += "\n" + reverted_line(out["reverted"])
     return tools.ok(line)

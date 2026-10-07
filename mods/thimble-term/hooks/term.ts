@@ -501,22 +501,46 @@ export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
   }
 }
 
-/** The panel asks for the keys once more, a moment after it opened without them: an open from a press on the row above
- *  the prompt (the toast's `open ›`) is refused the keys while that row holds them, which go back to the prompt after
- *  the press (live check term-fix6, new quirk 4: home named its keys while a `q` went to the prompt). Asked again while
- *  the prompt holds them over an empty composer, Claude Code gives them; else the panel's hint row says how to give them
- *  (panel.tsx endHints). */
+/** The panel asks for the keys once more a moment after it opened, once the press that opened it is over: an open from
+ *  a press on the row above the prompt (the toast's `open ›`) is refused the keys while that row holds them (live check
+ *  term-fix6, new quirk 4). Given them, its ring goes onto its list's keys (panel.tsx RELAY), which raises the
+ *  `ui.focus` that lets its hint row name them (live check term-fix7, quirk 2: ↓ moved the ring to `show all threads`
+ *  while the hint named ↑↓). Asked again while the prompt holds them over an empty composer, Claude Code gives them;
+ *  else the panel's hint row says how to give them (panel.tsx endHints). */
 function giveKeys(cx: Ctx, title: string): void {
-  cx.later(KEYS_AGAIN_MS, () => {
-    void (async () => {
-      const pane = (await cx.panes()).find(p => p.id === PANEL)
-      if (!pane?.isPlaced || pane.isFocused !== false || (await cx.promptText().catch(() => '')).trim()) return
-      const p = await cx.panel()
-      await cx.open({ id: PANEL, title: p ? paneTitle(p) : title, focus: true, columns: panelColumns() }).catch(() => undefined)
-      await cx.bumpPanel()
-    })()
-  })
+  const ask = async (last: boolean) => {
+    const pane = (await cx.panes()).find(p => p.id === PANEL)
+    if (!pane?.isPlaced) return
+    if (pane.isFocused !== false) {
+      // the ring onto the list's keys; one there already (the view drew them before) raises no ui.focus
+      if ((!rt.panelFocus || rt.panelFocus === NO_RING) && (await cx.focus(RELAY_PICK))) {
+        rt.panelFocus = RELAY_PICK
+        await cx.bumpPanel()
+      }
+      return
+    }
+    if (last || (await cx.promptText().catch(() => '')).trim()) return
+    const p = await cx.panel()
+    await cx.open({ id: PANEL, title: p ? paneTitle(p) : title, focus: true, columns: panelColumns() }).catch(() => undefined)
+    await cx.bumpPanel()
+    cx.later(KEYS_AGAIN_MS, () => void ask(true))
+  }
+  cx.later(KEYS_AGAIN_MS, () => void ask(false))
 }
+
+/** The keys back to the panel after a click on an empty part of a list, which gave them to the list's Client: its keys
+ *  then reach the list through the pane's own (panel.tsx RELAY), and the hint row can say so (live check term-fix7,
+ *  quirk 2: after such a click the list took ↓ while the hint said to click the panel). */
+export async function takeKeys(cx: Ctx): Promise<void> {
+  const p = await cx.panel()
+  if (!p) return
+  await cx.open({ id: PANEL, title: paneTitle(p), focus: true, columns: panelColumns() }).catch(() => undefined)
+  await cx.bumpPanel()
+}
+
+// the relay's middle Button (panel.tsx RELAY.pick) and the ring off every element (register.tsx NO_FOCUS)
+const RELAY_PICK = 'keys-pick'
+const NO_RING = '-'
 
 /** How long after an open the panel asks for the keys again (giveKeys). */
 const KEYS_AGAIN_MS = 120

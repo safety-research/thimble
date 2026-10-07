@@ -160,16 +160,23 @@ _MONTHS = {m: i for i, names in enumerate((("jan", "january"), ("feb", "february
                                             ("sep", "sept", "september"), ("oct", "october"), ("nov", "november"),
                                             ("dec", "december")), 1) for m in names}
 # a day and a month in words, as prose writes a date: `23 June`, `June 23`, `23rd June`, `Jun. 23`, with or without a
-# year (`23 June 2026`, `June 23, 2026`)
+# year (`23 June 2026`, `June 23, 2026`), and with or without a time after it (`4 June 2026 at 10:53:40 UTC`,
+# `June 4, 10:53`)
 _DAY_MONTH_RE = re.compile(r"^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?|([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?)"
-                           r"(?:,?\s+(\d{4}))?$", re.I)
+                           r"(?:,?\s+(\d{4}))?"
+                           r"(?:,?\s+(?:at\s+)?(\d{1,2}:\d{2}(?::\d{2})?)(?:\s*(?:UTC|GMT|Z))?)?$", re.I)
 # a date as an output writes it: ISO (`2026-06-23`, also at the head of a time stamp) or a month and day (`06-23`)
 _ISO_DATE_RE = re.compile(r"(?<![\d-])(?:(\d{4})-)?(\d{2})-(\d{2})(?![\d-])")
+# a date as an output writes it with the time after it, if any (`2026-06-04T10:53:40Z`, `06-23`): what a place shows
+# where a date in words is cited (dates_shown)
+_STAMP_RE = re.compile(r"(?<![\d-])(?:\d{4}-)?\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?(?![\d-])")
+# the time a time stamp writes right after its date (`2026-06-04T10:53:40Z`, `2026-06-04 10:53`)
+_STAMP_CLOCK_RE = re.compile(r"[T ](\d{1,2}:\d{2}(?::\d{2})?)(?![\d:])")
 
 
-def day_month(display: str) -> tuple[int, int, int | None] | None:
-    """(month, day, year or None) of a display that is a day and a month in words (`23 June`, `June 23, 2026`); None
-    for any other display."""
+def _date_words(display: str) -> tuple[int, int, int | None, str | None] | None:
+    """(month, day, year or None, the clock time written after it or None) of a display that is a day and a month in
+    words, with or without a year and a time (`23 June`, `4 June 2026 at 10:53:40 UTC`); None for any other display."""
     m = _DAY_MONTH_RE.match(display.strip())
     if not m:
         return None
@@ -177,21 +184,46 @@ def day_month(display: str) -> tuple[int, int, int | None] | None:
     month = _MONTHS.get(word.lower())
     if month is None or not 1 <= int(day) <= 31:
         return None
-    return month, int(day), int(m[5]) if m[5] else None
+    return month, int(day), int(m[5]) if m[5] else None, m[6]
+
+
+def day_month(display: str) -> tuple[int, int, int | None] | None:
+    """(month, day, year or None) of a display that is a day and a month in words (`23 June`, `June 23, 2026`, also
+    with a time after it); None for any other display."""
+    parts = _date_words(display)
+    if parts is None:
+        return None
+    month, day, year, _ = parts
+    return month, day, year
 
 
 def date_in(display: str, excerpt: str) -> bool:
     """Whether a display that is a day and a month in words (`23 June`) names a date the excerpt writes as ISO
     (`2026-06-23`) or as month and day (`06-23`): the same month and day, and the same year when both give one (live
-    check term-fix6, new quirk 7: `23 June` citing a cell `06-23` was marked red)."""
-    want = day_month(display)
+    check term-fix6, new quirk 7: `23 June` citing a cell `06-23` was marked red). A time after the date
+    (`4 June 2026 at 10:53:40 UTC`) is the time the time stamp writes after that date, or with no time there, a clock
+    time of the excerpt (clocks_in); live check term-fix7, new quirk 1: the citation check tagged it unverified against a
+    line holding 2026-06-04T10:53:40Z."""
+    want = _date_words(display)
     if want is None:
         return False
-    month, day, year = want
+    month, day, year, clock = want
     for m in _ISO_DATE_RE.finditer(excerpt):
-        if (int(m[2]), int(m[3])) == (month, day) and (year is None or m[1] is None or int(m[1]) == year):
+        if (int(m[2]), int(m[3])) != (month, day) or (year is not None and m[1] is not None and int(m[1]) != year):
+            continue
+        if clock is None:
+            return True
+        stamp = _STAMP_CLOCK_RE.match(excerpt, m.end())
+        if clocks_in(clock, stamp[1] if stamp else excerpt):
             return True
     return False
+
+
+def dates_shown(text: str) -> str | None:
+    """The dates a place writes in digits, each with its time (up to three, joined), for the note of a date in words
+    cited there; None when it writes none."""
+    found = list(dict.fromkeys(_STAMP_RE.findall(text or "")))
+    return ", ".join(found[:3]) if found else None
 
 
 def value_in(display: str, excerpt: str, *, decrease: bool = False) -> bool:
@@ -241,6 +273,27 @@ def says_decrease(text: str, start: int, end: int) -> bool:
     b = _DECREASE_BEFORE_RE.search(_prose(text[:start]))
     a = _DECREASE_AFTER_RE.match(_prose(text[end:]))
     return (b is not None and b.group(1).lower() in DECREASE_WORDS) or (a is not None and a.group(1).lower() in DECREASE_WORDS)
+
+
+def names_label(text: str, label: str) -> bool:
+    """Whether the words of `text` (its citations read as their words, _prose) write a row's name as a whole word, as
+    "a last 89 in the 22:00 hour" names the row 22:00. A one-character name is too common to tell."""
+    name = label.strip()
+    if len(name) < 2:
+        return False
+    return re.search(r"(?<![\w:.-])" + re.escape(name) + r"(?![\w:-])", _prose(text), re.I) is not None
+
+
+def off_named_row(ref: str, to: str, text: str) -> bool:
+    """Whether moving a td span `ref` to the td `to` takes it off the row the words of `text` name: a value cited at the
+    row its sentence names (`[[89|…#deletions/22:00]]` "in the 22:00 hour") is wrong there, not misplaced, so it stays
+    at that row for the check to mark (live check term-fix7, new quirk 1: the writer's `#deletions/22:00` was stored as
+    `#deletions/23:00`, the one td showing 89, and the sentence's hour turned wrong under a blue link)."""
+    a, b = _ANY_TD.match(ref or ""), _ANY_TD.match(to or "")
+    if not a or not b:
+        return False
+    row = decode_label(a[3])
+    return decode_label(b[3]) != row and names_label(text, row)
 
 
 def _keys(key: str, negative_ok: bool) -> list[str]:
@@ -305,6 +358,9 @@ class Resolved:
     # numbers with no value of their own to link to that state a total or count of the card's data (data_totals): left
     # plain and supported, so they are not in `unresolved`
     totals: list[str] = field(default_factory=list)
+    # value-refs into this cell whose value another row shows while the words name the row cited (off_named_row): kept
+    # at that row as written, tier 0
+    misplaced: list[Link] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- output addressing (`@out<i>`)
@@ -1079,7 +1135,8 @@ class _Sources:
                 return None
             if word and not clocks_in(display, hit[0]):
                 return None
-            if not word and not (_norm(hit[0]) in wants or shown_matches(display, hit[0], negative_ok=negative_ok)):
+            if not word and not (_norm(hit[0]) in wants or shown_matches(display, hit[0], negative_ok=negative_ok)
+                                 or date_in(display, hit[0])):
                 return None
             return td_ref(self.cell_id, decode_label(m[1]), decode_label(m[2]))
         if m := self.line_span.match(ref):
@@ -1107,10 +1164,13 @@ class _Sources:
 
     @staticmethod
     def _line_holds(line: str, display: str, wants: set[str], negative_ok: bool) -> bool:
-        """Whether a line of text output shows a value-ref's display: a number as a whole token (value_in), anything
-        else as written or by one of its numbers."""
+        """Whether a line of text output shows a value-ref's display: a number as a whole token (value_in), a day and a
+        month in words as a date the line writes in digits (date_in; live check term-fix7, new quirk 4: edit_card
+        unlinked `[[23 June|…#L2]]` from a line holding 2026-06-23), anything else as written or by one of its numbers."""
         if _num_parts(display) is not None:
             return value_in(display, line, decrease=negative_ok)
+        if date_in(display, line):
+            return True
         return display.strip() in line or bool(wants & {_norm(x) for x in _NUM_RE.findall(line)})
 
 
@@ -1204,6 +1264,11 @@ def resolve(cell_id: str, answer: str, outputs: list[dict] | None, *, keep_stale
         neg = says_decrease(answer, m.start(), m.end())  # "[[12|…]] fewer": the td may hold -12
         canon = src.verify(ref, display, negative_ok=neg)
         hit = (canon, 2) if canon else src.lookup_display(display, negative_ok=neg)
+        if hit and not canon and off_named_row(ref, hit[0], answer):
+            # the value is at another row than the one the words name: kept where it was cited, named in `misplaced`
+            out.append(_canonical_token(m.group()))
+            res.misplaced.append(Link(display, ref, 0))
+            continue
         if hit:
             out.append(f"[[{display}|{hit[0]}]]")
             res.links.append(Link(display, hit[0], hit[1]))

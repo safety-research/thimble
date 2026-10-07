@@ -33,7 +33,7 @@ import { HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue } fr
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
 import { chipLabel, cid, clip, cutLine, fmt, itemsRow, labelRef, outputLine, quoted, recordFields, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
-import { linesEl } from './lines'
+import { linesEl, takeListKeys } from './lines'
 import type { LineHit } from './lines'
 import { docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
 import type { DocFigure, DocSection, DocSentence } from './model'
@@ -301,6 +301,7 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
       {inThreads ? null : <Button key="threads" label="show all threads" plain onPress={showAll} />}
       {!inThreads && fresh ? <Text color={FRESH}>{`  ${fresh} new`}</Text> : null}
       {hiddenKeys(cx, e, [...(back ? [{ key: 'back', hotkey: 'b', onPress: () => void navBack(cx) }] : []), ...(inThreads ? [] : [{ key: 'threads', hotkey: 't', onPress: showAll }]), { key: 'close', hotkey: 'x', onPress: () => void closePanel(cx) }])}
+      {listKeysEl(cx, e)}
     </Box>
   )
 }
@@ -351,6 +352,56 @@ function codeRows(cx: Ctx, e: PaneEvent, source: string, max = 400, language = '
 let wayHints: string[] = ['x to close']
 // whether the pane holds the keys as it is drawn (its `isFocused`)
 let paneFocused = true
+// the key handler of the list the view draws (lines.tsx takeListKeys), which the panel's own keys reach (listKeysEl)
+let listRelay: ((k: string) => Promise<void> | void) | null = null
+
+/** The panel's own keys for the list a view draws (live check term-fix7, quirk 2): a list is drawn by a Client, which
+ *  takes keys only once a click gave it them, so a pane opened with the keys (from the toast's `open ›` or `/thimble`)
+ *  moved its focus ring onto `show all threads` at ↓, and Enter pressed it. Three Buttons no row tall: the ring starts
+ *  on the middle one (`autoFocus`, which raises `ui.focus` as the pane takes the keys), and the `ui.focus` hook
+ *  (register.tsx) turns a move onto either neighbour into ↑ or ↓ for the list and keeps the ring where it is; Enter
+ *  presses the middle one. */
+export const RELAY = { up: 'keys-up', pick: 'keys-pick', down: 'keys-down' } as const
+const RELAY_KEYS: readonly string[] = Object.values(RELAY)
+
+/** The key a move of the panel's focus ring onto `element` stands for while it rests on the relay's middle Button
+ *  (`up`, `down`), `park` for a move onto a neighbour from elsewhere (the ring goes to the middle one), or '' for any
+ *  other move. */
+export function relayMove(from: string, element: string | undefined): 'up' | 'down' | 'park' | '' {
+  if (element !== RELAY.up && element !== RELAY.down) return ''
+  if (from !== RELAY.pick) return 'park'
+  return element === RELAY.up ? 'up' : 'down'
+}
+
+/** A key for the list the panel shows now, from the panel's own keys (the relay); false when it shows none. */
+export async function relayKey(k: string): Promise<boolean> {
+  if (!listRelay) return false
+  await listRelay(k)
+  return true
+}
+
+function listKeysEl(cx: Ctx, e: PaneEvent): RenderElement | null {
+  if (!listRelay || e.surface === 'mobile') return null
+  const { Box, Button } = cx.els(e)
+  const key = (k: string) => () => void relayKey(k)
+  return (
+    <Box key="list-keys" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
+      <Button key={RELAY.up} label="↑" plain onPress={key('up')} />
+      <Button key={RELAY.pick} label="⏎" plain autoFocus onPress={key('return')} />
+      <Button key={RELAY.down} label="↓" plain onPress={key('down')} />
+    </Box>
+  )
+}
+
+/** Whether the panel's focus ring rests on its list's keys (the relay), as the last `ui.focus` put it. */
+function listKeysHeld(): boolean {
+  return paneFocused && RELAY_KEYS.includes(rt.panelFocus)
+}
+
+// a list's keys, which the Client takes after a click and the relay passes on while the ring rests on it; the relay
+// passes ↑, ↓ and Enter alone
+const LIST_HINT = /^(?:↑↓|←|→|Enter |Space |PgUp|PgDn)/
+const UNRELAYED_HINT = /^(?:←|→|Space |PgUp|PgDn)/
 
 // the panel's text fields by their keys, with what Enter does in each
 const FIELD_KEYS: [RegExp, string][] = [
@@ -374,7 +425,13 @@ function endHints(hints: readonly string[], autoFocus = ''): string[] {
   // `autoFocus`: the view's field that takes the ring as it opens, before any ui.focus says where the ring is
   const field = focusedField(rt.panelFocus || autoFocus)
   if (field) return [field, 'Esc to leave the field']
-  return [...hints.filter(h => h !== 'b to go back' && h !== 'x to close'), ...wayHints]
+  // a list's keys only while the ring rests on them (listKeysHeld): until a ui.focus says so, ↑↓ walk the panel's
+  // buttons and Enter presses the one the ring is on
+  const held = listKeysHeld()
+  const own = hints
+    .map(h => (h === 'Enter or a to ask' && !held ? 'a to ask' : h))
+    .filter(h => h !== 'b to go back' && h !== 'x to close' && !(held ? UNRELAYED_HINT : LIST_HINT).test(h))
+  return [...own, ...wayHints]
 }
 
 /** The hint row while the panel does not hold the keys. */
@@ -476,6 +533,8 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
         values: l.labels ?? Object.keys(l.label_stats?.counts ?? {}),
         paths: (l.glob ?? '').split(/,\s*/).filter(Boolean),
         running: (l.last_run?.status ?? '') === 'running',
+        // the panel's rule (`not run yet` with no last run and no application)
+        ran: Boolean(l.last_run ?? l.applications?.at(-1)),
       }))
     : []
   const files: HomeFile[] = filesOf(await surfaceValue(cx, 'files')).map(f => ({ file: f.path, records: null, size: f.size, seen: 0, state: 'listed', ranges: [], kind: fileType(f.path, f.kind, rt.opens.get(f.path)?.as) }))
@@ -495,7 +554,7 @@ async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const ui = (await cx.homeUi()) as HomeUi
   // its keys named only while it holds them, as every view's (endHints; live check term-fix6, new quirk 4: home opened
   // from the toast named its keys while they went to the prompt)
-  const lay = homeLayout(await homeData(cx), ui, cols, paneFocused ? HOME_HINTS : [UNFOCUSED_HINT])
+  const lay = homeLayout(await homeData(cx), ui, cols, endHints(HOME_HINTS))
   homeLast = lay
   const run = (a: HomeAct) => async () => {
     if (a.op === 'open') await homeOpen(cx, a.open)
@@ -1095,7 +1154,7 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
   const t = selected ? threads.find(x => x.id === selected) : undefined
   const running = t?.turns.at(-1)?.state === 'running'
   const askKey = t ? `ask-${cid(t.id)}` : ''
-  const focusAsk = () => (askKey ? cx.focus(askKey) : undefined)
+  const focusAsk = async () => void (askKey ? await cx.focus(askKey) : undefined)
   const step = async (d: number) => {
     if (!order.length) return
     const at = order.findIndex(x => x.id === selected)
@@ -2343,6 +2402,8 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   // the keys as the pane's props and the engine's record say: a pane either says is without them names none of its keys
   // (an open the engine refused the keys, live check term-fix6, new quirk 4)
   paneFocused = pe.props.isFocused !== false && (await cx.panes()).find(x => x.id === PANEL)?.isFocused !== false
+  // the list this drawing draws, read off its drawing (lines.tsx), for the relay in its path row (listKeysEl)
+  takeListKeys()
   const body = await (async () => {
     switch (p.view) {
       case 'home':
@@ -2379,6 +2440,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
         return none(cx, e)
     }
   })()
+  listRelay = takeListKeys()
   return withWay(cx, e, p.view, body)
 }
 
