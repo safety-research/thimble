@@ -341,14 +341,40 @@ async def _home(c: str, args: list[str], pos: list[str]) -> Any:
     threads = [m for m in agents.list_chats(c) if m.get("kind") == agents.KIND_THREAD]
     out["threads"] = len(threads)
     out["unread"] = [m["id"] for m in threads if _unread(c, m)]
-    try:  # the views built for this corpus, each one line in the terminal (the browser shows the view itself)
-        out["views"] = [{"slug": v["slug"], "name": v["name"], "status": "built" if v.get("ok") else "not built"}
-                        for v in views.list_views(c) if v.get("origin") != "builtin"]
+    try:  # the views proposed and built for this corpus, each one line in the terminal (the browser shows the view itself)
+        out["views"] = _home_views(c)
     except Exception:  # noqa: BLE001 — the row above the prompt still shows the rest
         out["views"] = []
-    out["orientation"] = (orientation.read_run(c) or {}).get("status")
+    run = orientation.read_run(c) or {}
+    out["orientation"] = run.get("status")
+    out["coverage"] = run.get("coverage")  # run 0's coverage line (orient_session.measure), which home shows under Files
     out["mode"] = session_mode(config.workspace_path(c))
     return out
+
+
+def _home_views(c: str) -> list[dict[str, Any]]:
+    """The views home lists, newest first by the renderer: each built one and each proposal not dropped, held or merely
+    suggested, with its state (built, building, failed, proposed, or not built for a view whose files are missing), when
+    it was proposed (or built), and the files it claims."""
+    from . import views  # noqa: PLC0415
+
+    props = {p["slug"]: p for p in views.list_proposals(c)}
+    built = {v["slug"]: v for v in views.list_views(c) if v.get("origin") != "builtin"}
+    rows: list[dict[str, Any]] = []
+    for slug in dict.fromkeys([*built, *props]):
+        v, p = built.get(slug), props.get(slug) or {}
+        if p.get("held") or p.get("status") in ("dropped", "suggested"):
+            continue
+        if v is not None and v.get("ok"):
+            status = "built"
+        elif p.get("status") in ("building", "failed"):
+            status = str(p["status"])
+        else:
+            status = "proposed" if p else "not built"
+        rows.append({"slug": slug, "name": str(p.get("name") or (v or {}).get("name") or slug), "status": status,
+                     "ts": str(p.get("ts") or (v or {}).get("built") or ""),
+                     "files": [str(x) for x in ((v or {}).get("claims") or p.get("claims") or [])]})
+    return rows
 
 
 async def _cards(c: str, args: list[str], pos: list[str]) -> Any:
@@ -694,9 +720,11 @@ async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     browser's Stop does."""
     from . import agents, subagents  # noqa: PLC0415
 
-    who = _text(payload, "agent").removeprefix("chat:")
+    who = _text(payload, "agent").removeprefix("chat:").removeprefix("thread:")
     meta = agents.meta_or_none(c, who) if agents.ID_RE.match(who) else None
-    agent_id = str((meta or {}).get("agent_id") or who)
+    # an agent's chat names its agent; a side thread's, the fork of main that answers it
+    fork = (meta or {}).get("fork") if isinstance((meta or {}).get("fork"), dict) else {}
+    agent_id = str((meta or {}).get("agent_id") or fork.get("agent_id") or who)
     ans = await subagents.stop(c, agent_id)
     if ans.refused:
         return {"stopped": False, "kind": ans.kind, "reason": ans.reason}

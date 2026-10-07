@@ -67,7 +67,7 @@ test('the agents, the counts, the documents and the cells, from their routes', (
   expect(agentsOf(AGENTS)).toEqual([{ name: 'thimble:orientation', label: 'orientation: the whole corpus', state: 'working', kind: 'subagent', chat: 'o1', role: 'orientation', started: '' }])
   expect(homeOf(STATES.home)).toMatchObject({ cards: 12, labels: 1, docs: 1, threads: 2, files: 4 })
   expect(homeOf({ counts: { cards: [1, 2], labels: 0 } })).toMatchObject({ cards: 2, labels: 0 })
-  expect(docsOf(STATES.docs)).toEqual([{ slug: 'report', title: 'Agents used the dse wiki as a relay', renderer: 'document', status: 'written' }])
+  expect(docsOf(STATES.docs)).toEqual([{ slug: 'report', title: 'Agents used the dse wiki as a relay', renderer: 'document', status: 'written', generation: 0, at: '' }])
   expect(cellsOf(STATES.cards).length).toBe(Object.keys(CELLS).length)
   expect(cellsOf([{ id: 'a' }, { nope: 1 }]).length).toBe(1)
   expect(labelIdOf(CELLS.l0label0 as never)).toBe('d9b51617')
@@ -99,8 +99,8 @@ test('the thimble command beside the plugin, the session mode, what a run printe
   expect(parsePrinted({ exitCode: 0, stdout: '{"a":1}', stderr: '' })).toEqual({ ok: true, value: { a: 1 } })
   expect(parsePrinted({ exitCode: 1, stdout: '{"error":"no workspace for /x"}', stderr: '' })).toEqual({ ok: false, error: 'no workspace for /x' })
   expect(parsePrinted({ exitCode: 2, stdout: '', stderr: 'Traceback\nValueError: bad' })).toEqual({ ok: false, error: 'ValueError: bad' })
-  const a = { cards: '1', labels: '', docs: '', chats: '', agents: '', ui: '' }
-  expect(changed(null, a).length).toBe(6)
+  const a = { cards: '1', labels: '', docs: '', chats: '', agents: '', views: '', ui: '' }
+  expect(changed(null, a).length).toBe(7)
   expect(changed(a, { ...a, cards: '2' })).toEqual(['cards'])
 })
 

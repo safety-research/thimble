@@ -250,7 +250,7 @@ test('/thimble opens the home panel with no model turn: one column, the title Ho
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const drawn = await pane.drawn({ in: 'm:home' })
   const home = shown(drawn)
-  for (const s of ['Home', 'Reports', ' (1)', 'Agents used the dse wiki as a relay', 'Threads', '"why is events.jsonl bigger?"', 'Cards', '▾ ', 'Your work', 'Labels', 'links through a fetch proxy', 'Files', 'revisions.jsonl', '↑↓ to choose · Enter to open · Space to fold · x to close']) expect(home).toContain(s)
+  for (const s of ['Home', 'Documents', ' (1)', 'Agents used the dse wiki as a relay', 'Threads', '"why is events.jsonl bigger?"', 'Cards', '▾ ', 'Your work', 'Labels', 'links through a fetch proxy', 'Files', 'revisions.jsonl', '↑↓ to choose · Enter to open · Space to fold · x to close']) expect(home).toContain(s)
   // the title in the accent and bold, the headings bold, `new` in green after an unread thread
   const json = JSON.stringify(drawn)
   expect(json).toMatch(/"color":"suggestion","bold":true\},"children":\["Home"\]/)

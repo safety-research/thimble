@@ -29,7 +29,7 @@ import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
-import { homeLayout, homePick, homeReduce } from './home'
+import { groupCards, homeLayout, homePick, homeReduce } from './home'
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
 import { cid, clip, fmt } from './lib'
 import type { Citation } from './lib'
@@ -38,7 +38,7 @@ import type { LineHit } from './lines'
 import { docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
 import { NAV_EMPTY, backTarget, crumbSteps, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
-import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimSentence, drawReply, linkCheck, placeName, plainWhy } from './reply'
+import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimSentence, drawReply, placeName, plainWhy, scrubIds } from './reply'
 import { closePanel, inPanelNow, navBack, navGo, openHome, openPanel, panelOfStep, readSurface, rt, runLabel, saveLabel, startThread, surfaceValue, threadMessage } from './term'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
@@ -96,6 +96,14 @@ export async function homeViews(cx: Ctx): Promise<HomeView[]> {
     const fresh = state === 'built' && !rt.viewsSeen.has(slug) && rt.viewsBuiltBefore !== null && !rt.viewsBuiltBefore.has(slug)
     return { slug, name: str(v.name) || slug, state, words: '', files: Array.isArray(v.files) ? (v.files as unknown[]).map(String) : [], unit: '', drawable: state === 'built', left: 0, at: Date.parse(str(v.ts)) || 0, ...(fresh ? { fresh: true } : {}) }
   })
+}
+
+/** A document in the panel, under its title. Opened, it is no longer new. */
+export async function openDoc(cx: Ctx, slug: string, title: string): Promise<void> {
+  const docs = await surfaceValue(cx, 'docs')
+  const d = docs?.ok ? docsOf(docs.value).find(x => x.slug === slug) : undefined
+  if (d) rt.docsKnown.set(slug, d.generation)
+  await openPanel(cx, { view: 'doc', title: d?.title || title || slug, slug })
 }
 
 /** A view's line in the panel: the browser draws views. Opened, it is no longer new. */
@@ -329,10 +337,11 @@ function bottomRows(cx: Ctx, e: PaneEvent, cols: number, controls: (RenderElemen
   return [...(rule && (ctl || fs.length) ? [ruleEl(els, cols, 'rule-bottom')] : []), ...(ctl ? [ctl] : []), ...fs, hintsRow(els, hints, cols)]
 }
 
+/** An empty region (rule 28): dim words at A2. */
 function none(cx: Ctx, e: PaneEvent, words = 'none'): RenderElement {
   const { Box, Text } = cx.els(e)
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" marginLeft={2}>
       <Text dimColor>{words}</Text>
     </Box>
   )
@@ -356,27 +365,40 @@ function fieldRow(cx: Ctx, e: PaneEvent, label: string, field: RenderElement, ke
 /** What the home panel lists, from what `thimble state` printed for its surfaces. */
 export async function homeData(cx: Ctx): Promise<HomeData> {
   const homeRaw = await surfaceValue<Obj>(cx, 'home-full')
-  const views: HomeView[] = homeRaw?.ok && Array.isArray(homeRaw.value.views)
-    ? (homeRaw.value.views as unknown[]).filter(isObj).map(v => ({ slug: str(v.slug), name: str(v.name) || str(v.slug), state: str(v.status) === 'built' ? 'built' : 'proposed', words: str(v.status), files: [], unit: '', drawable: str(v.status) === 'built', left: 0, at: Date.parse(str(v.ts)) || 0 }))
-    : []
+  const views: HomeView[] = await homeViews(cx)
   const docs = await surfaceValue(cx, 'docs')
-  const reports: HomeReport[] = docs?.ok ? docsOf(docs.value).map(d => ({ slug: d.slug, title: d.title, form: d.renderer, state: d.status === 'generating' ? 'writing' : 'written', cards: 0, tools: 0, at: 0 })) : []
-  const threads: HomeThread[] = ((await cx.threads()) ?? []).map(t => {
-    const st = t.running ? 'run' : t.answers ? 'ok' : 'dim'
-    return { id: t.id, title: `"${clip(t.title || t.anchorText || 'side thread', 80)}"`, about: t.anchorText ? `about ${clip(plainCites(t.anchorText), 60)}` : '', words: t.running ? 'answering' : plural(t.answers, 'answer'), tone: st, unread: t.unread, earlier: false, at: Date.parse(t.at) || 0 }
-  })
+  const first = docs?.ok ? !rt.docsRead : false
+  if (docs?.ok) rt.docsRead = true
+  const reports: HomeReport[] = docs?.ok
+    ? docsOf(docs.value).map(d => {
+        // a document written since the session first read the list, and not opened since, is new
+        const known = rt.docsKnown.get(d.slug)
+        if (first) rt.docsKnown.set(d.slug, d.generation)
+        return { slug: d.slug, title: d.title, form: d.renderer, state: d.status === 'generating' ? 'writing' : 'written', cards: 0, tools: 0, at: Date.parse(d.at) || 0, ...(!first && known !== d.generation && d.status !== 'generating' ? { fresh: true } : {}) }
+      })
+    : []
+  const threads: HomeThread[] = []
+  for (const t of (await cx.threads()) ?? []) {
+    const st = t.running ? 'run' : rt.failed.has(t.id) ? 'problem' : t.answers ? 'ok' : 'dim'
+    const about = await aboutName(cx, t)
+    const made = Date.parse(t.created ?? '') || 0
+    // its subject at R, short, so its question stays whole beside it
+    threads.push({ id: t.id, title: `"${clip(t.title || t.anchorText || 'side thread', 80)}"`, about: about ? `about ${clip(about, 24)}` : '', words: t.running ? 'answering' : plural(t.answers, 'answer'), tone: st, unread: t.unread, earlier: Boolean(made && rt.startedAt && made < rt.startedAt), at: Date.parse(t.at) || 0 })
+  }
   const canvas = await surfaceValue<Obj>(cx, 'canvas')
   const groups = canvas?.ok && Array.isArray(canvas.value.groups) ? (canvas.value.groups as unknown[]).filter(isObj) : []
   const cells = canvas?.ok && Array.isArray(canvas.value.cells) ? (canvas.value.cells as unknown[]).filter(isObj) : []
   // a group by what it holds: a side thread's cards, a document's figures, or a group main named
-  const cardGroups: HomeCardGroup[] = groups
-    .map(g => {
-      const cards = cells.filter(c => c.notebook === g.id).map(c => ({ id: str(c.id), kind: str(c.kind) || 'code', question: str(c.title) || 'a card' }))
+  const cardOf = (c: Obj) => ({ id: str(c.id), kind: str(c.kind) || 'code', question: str(c.title) || 'a card' })
+  // a group by what it holds: a side thread's cards, a document's figures, or a group main named; a card no listed
+  // group holds under `other cards`, last
+  const cardGroups: HomeCardGroup[] = groupCards(
+    groups.map(g => {
       const from: HomeCardGroup['from'] = g.anchor || g.chat ? 'thread' : g.role === 'figures' ? 'report' : 'other'
-      return { head: str(g.title) || 'cards', from, cards, at: Date.parse(str(g.ts)) || 0 }
-    })
-    .filter(g => g.cards.length)
-    .sort((a, b) => b.at - a.at)
+      return { head: str(g.title) || 'cards', from, cards: cells.filter(c => c.notebook === g.id).map(cardOf), at: Date.parse(str(g.ts)) || 0 }
+    }),
+    cells.map(cardOf),
+  )
   const labelsRaw = await surfaceValue(cx, 'labels')
   const labels: HomeLabel[] = labelsRaw?.ok
     ? labelsOf(labelsRaw.value).map(l => ({
@@ -437,10 +459,12 @@ async function drawHome(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
 
 async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
   switch (o.kind) {
-    case 'view':
-      return openPanel(cx, { view: 'view', title: o.slug, slug: o.slug })
+    case 'view': {
+      const v = (await homeViews(cx)).find(x => x.slug === o.slug)
+      return openView(cx, o.slug, v?.name ?? o.slug)
+    }
     case 'report':
-      return openPanel(cx, { view: 'doc', title: o.slug, slug: o.slug })
+      return openDoc(cx, o.slug, o.title ?? o.slug)
     case 'thread':
       return openThread(cx, o.id)
     case 'card':
@@ -453,6 +477,13 @@ async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
     case 'file':
       return openFile(cx, o.path)
     case 'pane': {
+      // a folder's `… N more`: the file browser with that folder whole
+      if (o.view === 'coverage' && o.folder) {
+        const root = `${(await cx.root().catch(() => '')).split('/').filter(Boolean).at(-1) ?? 'folder'}/`
+        const dir = o.folder.startsWith(root) ? o.folder.slice(root.length) : o.folder
+        const ui = await cx.filesUi()
+        await cx.setFilesUi({ ...ui, whole: [...(ui.whole ?? []).filter(x => x !== dir), dir], unfolded: [...ui.unfolded.filter(x => x !== `dir:${dir}`), `dir:${dir}`], folded: ui.folded.filter(x => x !== `dir:${dir}`) })
+      }
       const to: Record<string, TermPanel> = {
         reports: { view: 'docs', title: 'Documents' },
         threads: { view: 'threads', title: 'Threads' },
@@ -697,8 +728,8 @@ async function followUpField(cx: Ctx, e: PaneEvent, about: string): Promise<Rend
         const q = v.trim()
         if (!q) return
         void (async () => {
-          const err = await threadMessage(cx, tid, `${q} (about ${about})`)
-          if (err) return cx.toast(`thimble: ${err}`)
+          const r = await threadMessage(cx, tid, `${q} (about ${about})`)
+          if (r.error) return cx.toast(`thimble: ${r.error}`)
           const now = (await cx.nav()) ?? NAV_EMPTY
           let i = now.trail.length - 1
           while (i >= 0 && now.trail[i]!.thread !== tid) i--
@@ -766,15 +797,23 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
 
 let asking = ''
 
-/** A new side thread: what it is about, its words in quotation marks and italic, then the `ask` field. */
+/** A passage's first sentence, flat. */
+function firstSentence(text: string): string {
+  const flat = plainCites(text).replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
+  const end = /[.!?](?=\s|$)/.exec(flat)
+  return end ? flat.slice(0, end.index + 1) : flat
+}
+
+/** A new side thread (views/SPEC.md, section 7, "The threads panel", a thread with no question yet): `about <what>`
+ *  as its dim subtitle, the first sentence of the passage dim on one row, then the `ask` field, which has the keys. */
 async function drawAsk(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   if (e.surface === 'mobile') return none(cx, e, 'A side thread needs a surface with text fields.')
   const els = cx.els(e) as El
   const { Box, Text, Input } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
-  const words = p.anchorText ? clip(p.anchorText, 400) : ''
+  const opens = p.anchorText && p.target?.kind !== 'card' ? firstSentence(p.anchorText) : ''
   const body: RenderElement[] = [...headerEls(els, { title: 'New thread', cols, sub: subLine([`about ${p.about ?? 'this'}`]) })]
-  if (words && p.target?.kind !== 'card') body.push(<Text key="ask-words" italic wrap="wrap">{`"${words}"`}</Text>)
+  if (opens && !(p.about ?? '').includes(opens)) body.push(<Text key="ask-words" dimColor wrap="truncate-end">{opens}</Text>)
   if (asking) body.push(<Text key="ask-state" {...(asking.startsWith('×') ? { color: COLORS.problem } : { dimColor: true })}>{asking}</Text>)
   const field = fieldRow(
     cx,
@@ -799,7 +838,7 @@ async function drawAsk(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
     />,
     'ask-row',
   )
-  body.push(...bottomRows(cx, e, cols, [], [field], ['Enter to ask', 'b to go back', 'x to close']))
+  body.push(...bottomRows(cx, e, cols, [], [field], ['Enter to ask']))
   return <Box flexDirection="column">{body}</Box>
 }
 
@@ -814,11 +853,21 @@ async function threadOfRow(cx: Ctx, id: string): Promise<ChatThread | null> {
   return { id, label: row.anchorText || row.title, ref: row.anchor, context: '', agentId: '', engine: '', turns: [{ q: row.title, a: '', state: row.running ? 'running' : 'done', tools: 0, partial: '' }], file: '', parent: row.parent === 'main' ? '' : row.parent, at: Date.parse(row.at) || 0 }
 }
 
+/** What a thread was asked about, in words: its passage's, a card by its question, a citation's place. */
+export async function aboutName(cx: Ctx, row: { anchor: string; anchorText: string } | undefined): Promise<string> {
+  if (!row) return ''
+  if (row.anchorText) return clip(plainCites(row.anchorText).replace(/\s+/g, ' ').trim(), 60)
+  if (!row.anchor) return ''
+  if (/^(?:card|cell):/.test(row.anchor)) return placeName(cx, row.anchor.split(',')[0]!)
+  if (/^report:/.test(row.anchor)) return `the report's passage`
+  return placeWords(row.anchor.split(',')[0]!)
+}
+
 /** The first line of a thread's latest answer, or what it is doing. */
 function threadLine(t: ChatThread): Seg {
   const last = t.turns.at(-1)
   if (!last) return dim('nothing asked yet')
-  if (last.state === 'running') return dim(`◌ answering · ${plural(last.tools, 'tool call')}`)
+  if (last.state === 'running') return dim(`◌ ${plural(last.tools, 'tool call')}`)
   if (last.state === 'error') return /^\s*stopped/.test(last.a) ? dim('stopped') : { s: `× ${plainCites(last.a).split('\n')[0] ?? ''}`, fg: COLORS.problem }
   const done = [...t.turns].reverse().find(x => x.state === 'done' && x.a.trim())
   const first = plainCites(done?.a ?? '').replace(/^#+\s*/gm, '').split('\n').find(l => l.trim()) ?? ''
@@ -826,13 +875,15 @@ function threadLine(t: ChatThread): Seg {
 }
 
 /** The threads panel (views/SPEC.md, section 7, "The threads panel"): its title and a dim subtitle; under the rule the
- *  tree under `main`, each thread's question in quotation marks with guides, the first line of its latest answer dim
- *  under it, `N questions` dim and `new` in green at R; the selected thread (`❯`, accent) under the second rule, its
- *  questions and answers drawn as main's chat draws a reply, then the `ask` field. */
+ *  tree, a root per place a thread was asked from (`main`, or `report "…"`) with a blank row between them, each thread
+ *  under the thread it was asked from, its question in quotation marks with guides, the first line of its latest
+ *  answer dim under it, `N questions` dim and `new` in green at R; the selected thread (`❯`, accent) under the second
+ *  rule: what it is about, its questions and answers drawn as main's chat draws a reply, `stop` (s) while it answers,
+ *  then the `ask` field. ↑↓ or j k choose, Enter or a give the field the keys, 1-9 open the first nine. */
 async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<RenderElement> {
   if (e.surface === 'mobile') return none(cx, e, 'Threads need a surface with text fields.')
   const els = cx.els(e) as El
-  const { Box, Text, Input } = cx.els(e)
+  const { Box, Text, Input, Button } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
   const rows = (await cx.threads()) ?? []
   // the threads listed, and the one selected though the list does not hold it yet (one just asked)
@@ -841,51 +892,86 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
   const unreadOf = (id: string) => rows.find(r => r.id === id)?.unread ?? 0
   const fresh = rows.filter(t => t.unread).length
   const body: RenderElement[] = [...headerEls(els, { title: 'Threads', cols, sub: subLine([plural(threads.length, 'thread'), fresh ? freshSeg(fresh) : null]) })]
-  const tree = threadTree(threads)
+  // a root per place: the threads asked from a document under it, the rest under main
+  const byId = new Map(threads.map(t => [t.id, t]))
+  const rootOf = (t: ChatThread): ChatThread => {
+    const seen = new Set<string>()
+    let cur = t
+    while (cur.parent && byId.has(cur.parent) && !seen.has(cur.id)) {
+      seen.add(cur.id)
+      cur = byId.get(cur.parent)!
+    }
+    return cur
+  }
+  const placeOf = (t: ChatThread) => {
+    const el = rows.find(r => r.id === rootOf(t).id)?.element ?? ''
+    return /^report:/.test(el) ? el.split('#')[0]! : 'main'
+  }
+  const docs = await surfaceValue(cx, 'docs')
+  const docTitle = (slug: string) => (docs?.ok ? docsOf(docs.value).find(d => d.slug === slug)?.title : '') || slug
+  const places = [...new Set(threads.map(placeOf))].sort((a, b) => (a === 'main' ? -1 : b === 'main' ? 1 : a.localeCompare(b)))
   const lines: Line[] = []
   const hits: LineHit[] = []
   const order: ChatThread[] = []
   const cap = selected ? 12 : 50
-  if (tree.length) lines.push(pointed([{ s: 'main' }], false))
-  for (const r of tree.slice(0, cap)) {
-    const n = unreadOf(r.t.id)
-    const asked = r.t.turns.length
-    const guide = r.guide.replace(/(.)../g, (_m, ch: string) => `${ch} `)
-    const lead = r.under.replace(/(.)../g, (_m, ch: string) => `${ch} `)
-    const right: Line = [...(asked > 1 ? [dim(`${asked} questions`)] : []), ...(n ? [...(asked > 1 ? [{ s: '  ' }] : []), freshSeg()] : [])]
-    const y = lines.length
-    lines.push(pointed(spread([{ s: guide, fg: COLORS.rule }, { s: threadTitle(r.t) }], right, cols), r.t.id === selected))
-    const second = threadLine(r.t)
-    lines.push(pointed([{ s: lead.slice(0, guide.length), fg: COLORS.rule }, { ...second, s: cut(second.s, Math.max(10, cols - guide.length)) }], false))
-    const open = () => openThread(cx, r.t.id)
-    hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: open }, { y: y + 1, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: open })
-    order.push(r.t)
+  let drawn = 0
+  let more = 0
+  for (const [pi, place] of places.entries()) {
+    const tree = threadTree(threads.filter(t => placeOf(t) === place))
+    if (!tree.length) continue
+    if (pi > 0) lines.push([])
+    lines.push(pointed([{ s: place === 'main' ? 'main' : `report "${clip(docTitle(place.slice(7)), 60)}"` }], false))
+    for (const r of tree) {
+      if (drawn >= cap) {
+        more++
+        continue
+      }
+      drawn++
+      const n = unreadOf(r.t.id)
+      const asked = r.t.turns.length
+      const guide = r.guide.replace(/(.)../g, (_m, ch: string) => `${ch} `)
+      const lead = r.under.replace(/(.)../g, (_m, ch: string) => `${ch} `)
+      const right: Line = [...(asked > 1 ? [dim(`${asked} questions`)] : []), ...(n ? [...(asked > 1 ? [{ s: '  ' }] : []), freshSeg()] : [])]
+      const y = lines.length
+      lines.push(pointed(spread([{ s: guide, fg: COLORS.rule }, { s: threadTitle(r.t) }], right, cols), r.t.id === selected))
+      const second = threadLine(r.t)
+      lines.push(pointed([{ s: lead.slice(0, guide.length), fg: COLORS.rule }, { ...second, s: cut(second.s, Math.max(10, cols - guide.length)) }], false))
+      const open = () => openThread(cx, r.t.id)
+      hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: open }, { y: y + 1, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: open })
+      order.push(r.t)
+    }
   }
   if (!threads.length) lines.push(pointed([{ s: '  ' }, dim('none')], false))
-  if (tree.length > cap) {
-    const more = `… ${tree.length - cap} more`
-    hits.push({ y: lines.length, x0: MARGIN_W + 2, x1: MARGIN_W + 2 + more.length, row: false, run: () => openPanel(cx, { view: 'threads', title: 'Threads' }) })
-    lines.push(pointed([{ s: '  ' }, dim(more)], false))
+  if (more) {
+    const words = `… ${num(more)} more`
+    hits.push({ y: lines.length, x0: MARGIN_W + 2, x1: MARGIN_W + 2 + words.length, row: false, run: () => openPanel(cx, { view: 'threads', title: 'Threads' }) })
+    lines.push(pointed([{ s: '  ' }, dim(words)], false))
   }
+  const t = selected ? threads.find(x => x.id === selected) : undefined
+  const running = t?.turns.at(-1)?.state === 'running'
+  const askKey = t ? `ask-${cid(t.id)}` : ''
+  const focusAsk = () => (askKey ? cx.focus(askKey) : undefined)
   const step = async (d: number) => {
     if (!order.length) return
     const at = order.findIndex(x => x.id === selected)
     await openThread(cx, order[Math.max(0, Math.min(order.length - 1, at < 0 ? (d > 0 ? 0 : order.length - 1) : at + d))]!.id)
   }
-  body.push(linesEl(cx, e, marginKey('threads-tree'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : undefined)))
+  body.push(linesEl(cx, e, marginKey('threads-tree'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : k === 'return' || k === 'enter' ? focusAsk() : undefined)))
   // each thread a press away by its key too, for a surface that draws no Client: no row of its own
   body.unshift(
     <Box key="thread-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
-      {order.map(x => {
-        const { Button } = cx.els(e)
-        return <Button key={`thread-open-${x.id}`} label={threadTitle(x)} plain onPress={() => void openThread(cx, x.id)} />
-      })}
+      {order.map(x => (
+        <Button key={`thread-open-${x.id}`} label={threadTitle(x)} plain onPress={() => void openThread(cx, x.id)} />
+      ))}
     </Box>,
   )
-  const t = selected ? threads.find(x => x.id === selected) : undefined
-  const hints = ['↑↓ to choose', ...(t ? ['Enter to ask'] : []), 'b to go back', 'x to close']
+  const keys: Key[] = order.slice(0, 9).map((x, i) => ({ key: `t${i}`, hotkey: String(i + 1), onPress: () => void openThread(cx, x.id) }))
+  const stop = t && running && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: t.id }).then(r => (!r.ok ? cx.toast(`thimble: the thread was not stopped: ${r.error}`) : undefined)) : null
   if (t) {
     body.push(ruleEl(els, cols, 'rule-thread'))
+    // what it is about, dim, before its first question
+    const about = await aboutName(cx, rows.find(r => r.id === t.id))
+    if (about) body.push(<Text key="thread-about" dimColor wrap="truncate-end">{`about ${about}`}</Text>)
     let k = 0
     for (const turn of t.turns) {
       k++
@@ -893,9 +979,13 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
       body.push(<Text key={`thread-q-${k}`} wrap="wrap">{`"${plainCites(turn.q)}"`}</Text>)
       if (turn.state === 'running') {
         const partial = turn.partial.trim()
-        body.push(<Text key={`thread-run-${k}`} dimColor wrap="truncate-end">{`◌ answering · ${plural(turn.tools, 'tool call')}${partial ? ` · ${clip(partial, cols - 30)}` : ''}`}</Text>)
+        body.push(<Text key={`thread-run-${k}`} dimColor wrap="truncate-end">{`◌ ${plural(turn.tools, 'tool call')}${partial ? ` · ${clip(partial, cols - 30)}` : ''}`}</Text>)
       } else if (turn.state === 'error') body.push(<Text key={`thread-err-${k}`} color={COLORS.problem} wrap="wrap">{`× ${turn.a}`}</Text>)
       else if (turn.a.trim()) body.push(<Box key={marginKey(`thread-answer-${k}`)} flexDirection="column">{await drawReply(cx, e, turn.a, cols, { margin: PANEL_MARGIN, prefix: `t${k}-`, ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}</Box>)
+    }
+    if (stop) {
+      body.push(controlsEl(els, [<Button key="thread-stop" label="stop" plain onPress={stop} />], 'thread-controls')!)
+      keys.push({ key: 'stop', hotkey: 's', onPress: stop })
     }
     body.push(
       fieldRow(
@@ -903,19 +993,26 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
         e,
         'ask',
         <Input
-          key={`ask-${cid(t.id)}`}
+          key={askKey}
           submitLabel="ask"
           onSubmit={v => {
             const q = v.trim()
-            if (q) void threadMessage(cx, t.id, q).then(err => (err ? cx.toast(`thimble: ${err}`) : undefined))
+            if (!q) return
+            // a question asked while the thread answers waits until its answer ends: thimble queues it
+            void threadMessage(cx, t.id, q).then(r => {
+              if (r.error) cx.toast(`thimble: ${r.error}`)
+              else if (r.queued || running) cx.toast('thimble: the side thread is still answering: your question waits until it ends')
+            })
           }}
         />,
         'ask-row',
       ),
     )
+    keys.push({ key: 'ask', hotkey: 'a', onPress: () => void focusAsk() })
   }
-  body.push(hintsRow(els, hints, cols))
-  return <Box flexDirection="column">{body}</Box>
+  body.push(hintsRow(els, ['↑↓ to choose', ...(t ? ['Enter or a to ask'] : []), ...(stop ? ['s to stop'] : [])], cols))
+  const hk = hiddenKeys(cx, e, keys)
+  return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
 
 // ------------------------------------------------------------------------------------------------ labels
@@ -1027,8 +1124,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   }
   const rows: RenderElement[] = []
   const keys: Key[] = []
-  // the header block: name, type, scope, each on the label column
-  const L = 'scope'.length + 2
+  // the header block: name, type, scope, each on the label column, as Matt wrote them (`name:`), then the definition
+  const L = 'pattern:'.length + 2
   const fieldLine = (label: string, el: RenderElement) => (
     <Box key={`lf-${label}`} flexDirection="row">
       <Box width={L} flexShrink={0}>
@@ -1040,10 +1137,10 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     </Box>
   )
   const hue = values.length ? valueColour(values, values[0]!) : undefined
-  rows.push(fieldLine('name', lineEl(els, [{ s: '●', fg: hue && hue !== COLORS.dim ? hue : COLORS.series[0] }, { s: ' ' }, { s: name, fg: ACCENT, b: true }], undefined, true)))
+  rows.push(fieldLine('name:', lineEl(els, [{ s: '●', fg: hue && hue !== COLORS.dim ? hue : COLORS.series[0] }, { s: ' ' }, { s: name, fg: ACCENT, b: true }], undefined, true)))
   rows.push(
     fieldLine(
-      'type',
+      'type:',
       <Box flexDirection="row" columnGap={2}>
         {(['prompt', 'regex', 'code'] as const).map(k =>
           k === kind ? (
@@ -1072,7 +1169,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   const scopeCount = scopeN !== null ? `${num(scopeN)} ${unit}` : ''
   rows.push(
     fieldLine(
-      'scope',
+      'scope:',
       files && !running && e.surface !== 'mobile' ? (
         <Box flexDirection="row">
           <Box flexGrow={1} flexShrink={1}>
@@ -1093,14 +1190,18 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   // keyboard, Enter saves it (in code, ctrl+s)
   const defName = kind === 'prompt' ? 'prompt' : kind === 'regex' ? 'pattern' : 'code'
   const shownDef = kind === l.kind ? definitionOf(l) : ''
-  rows.push(<Text key="lb-def-name" dimColor>{defName}</Text>)
-  if (running || (e.surface !== 'terminal' && e.surface !== 'desktop')) rows.push(kind === 'code' ? <Box key="lb-def">{codeRows(cx, e, shownDef, 30)}</Box> : <Text key="lb-def" wrap="wrap">{shownDef}</Text>)
+  // the definition starts on L like the rows above it
+  const defW = Math.max(10, cols - L - 4)
+  if (running || (e.surface !== 'terminal' && e.surface !== 'desktop')) rows.push(fieldLine(`${defName}:`, kind === 'code' ? <Box key="lb-def">{codeRows(cx, e, shownDef, 30)}</Box> : <Text key="lb-def" wrap="wrap">{shownDef}</Text>))
   else {
     const { Client } = cx.els(e)
     rows.push(
-      <Box key="lb-def" flexDirection="column" borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
-        <Client key={`lb-def-${id}-${kind}`} module="./field.tsx" width={Math.max(10, cols - 4)} props={JSON.parse(JSON.stringify({ name: `label-body:${id}`, text: shownDef, cols: Math.max(10, cols - 4), placeholder: `the ${defName}: click to write it`, multiline: kind === 'code' }))} />
-      </Box>,
+      fieldLine(
+        `${defName}:`,
+        <Box key="lb-def" flexDirection="column" borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
+          <Client key={`lb-def-${id}-${kind}`} module="./field.tsx" width={defW} props={JSON.parse(JSON.stringify({ name: `label-body:${id}`, text: shownDef, cols: defW, placeholder: `the ${defName}: click to write it`, multiline: kind === 'code' }))} />
+        </Box>,
+      ),
     )
   }
   // run it: on a sample, or on every record; they save what was typed first
@@ -1284,7 +1385,7 @@ async function drawDocs(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const docs = got?.ok ? docsOf(got.value) : []
   const body: RenderElement[] = [...headerEls(els, { title: 'Documents', cols, sub: subLine([plural(docs.length, 'document')]) })]
   const { lines, hits } = listLines(
-    docs.map(d => ({ key: d.slug, glyph: { s: d.status === 'generating' ? '◌' : '●' }, name: d.title, right: [dim(d.renderer)], run: () => openPanel(cx, { view: 'doc', title: d.title, slug: d.slug }) })),
+    docs.map(d => ({ key: d.slug, glyph: { s: d.status === 'generating' ? '◌' : '●' }, name: d.title, right: [dim(d.renderer)], run: () => openDoc(cx, d.slug, d.title) })),
     '',
     cols,
   )
@@ -1334,7 +1435,7 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
       figs.forEach((f, k) => (f.after_paragraph === para.id && !placed.has(k) ? figure(k) : undefined))
     }
     figs.forEach((_f, k) => (!placed.has(k) ? figure(k) : undefined))
-    body.push(<Box key={marginKey(`doc-sec-${i}`)} flexDirection="column" marginTop={1}>{await drawReply(cx, e, md.join('\n'), cols, { margin: PANEL_MARGIN, prefix: `d${i}-`, ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}</Box>)
+    body.push(<Box key={marginKey(`doc-sec-${i}`)} flexDirection="column" marginTop={i === 0 && sections.length <= 1 ? 0 : 1}>{await drawReply(cx, e, md.join('\n'), cols, { margin: PANEL_MARGIN, prefix: `d${i}-`, ask: tgt => void openAsk(cx, tgt), open: id => void openThread(cx, id) })}</Box>)
   }
   body.push(hintsRow(els, ['b to go back', 'x to close'], cols))
   return <Box flexDirection="column">{body}</Box>
@@ -1412,16 +1513,26 @@ async function drawFiles(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       await cx.bumpPanel()
     }
     hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: flip })
-    lines.push(pointed([{ s: open ? '▾' : '▸' }, { s: ' ' }, { s: name }, dim(`  ${fs.length}`)], false))
+    lines.push(pointed([{ s: open ? '▾' : '▸' }, { s: ' ' }, { s: name }, dim(`  ${num(fs.length)}`)], false))
     if (!open) return
-    const shown = fs.length > FOLDER_FILES + 1 ? fs.slice(0, FOLDER_FILES) : fs
+    const whole = (ui.whole ?? []).includes(dir)
+    const shown = !whole && fs.length > FOLDER_FILES + 1 ? fs.slice(0, FOLDER_FILES) : fs
     for (const f of shown) {
       const hue = kinds.length > 1 ? valueColour(kinds, f.kind) ?? COLORS.dim : COLORS.dim
       hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: choose(f.path) })
       lines.push(pointed(spread([{ s: '  ' }, { s: '●', fg: hue }, { s: ' ' }, { s: f.path.slice(dir.length) }], right(f), cols), f.path === pick))
       order.push(f.path)
     }
-    if (fs.length > shown.length) lines.push(pointed([{ s: '    ' }, dim(`… ${num(fs.length - shown.length)} more`)], false))
+    if (fs.length > shown.length) {
+      // `… N more` shows the folder whole
+      const more = `… ${num(fs.length - shown.length)} more`
+      hits.push({ y: lines.length, x0: MARGIN_W + 4, x1: MARGIN_W + 4 + width(more), row: false, run: async () => {
+        const cur = await cx.filesUi()
+        await cx.setFilesUi({ ...cur, whole: [...(cur.whole ?? []).filter(x => x !== dir), dir] })
+        await cx.bumpPanel()
+      } })
+      lines.push(pointed([{ s: '    ' }, dim(more)], false))
+    }
   })
   if (!files.length) lines.push(pointed([{ s: '  ' }, dim('none')], false))
   const step = async (d: number) => {
@@ -1552,39 +1663,62 @@ async function drawAgent(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     if (ev.type === 'tool_use') {
       const inp = isObj(ev.input) ? ev.input : {}
       const what = str(inp.question ?? inp.command ?? inp.file_path ?? inp.pattern ?? inp.name ?? inp.description ?? '')
-      steps.push(`${str(ev.name).replace(/^mcp__.*__/, '')}${what ? ` · ${what.replace(/\s+/g, ' ')}` : ''}`)
+      steps.push(await scrubIds(cx, `${str(ev.name).replace(/^mcp__.*__/, '')}${what ? ` · ${what.replace(/\s+/g, ' ')}` : ''}`))
       text = ''
     } else if (ev.type === 'text') text += str(ev.delta ?? ev.text)
     else if (ev.type === 'done' && ev.result) text = str(ev.result)
   }
   if (!(tt?.events ?? []).length) body.push(<Text key="agent-none" dimColor>{tt ? 'nothing yet' : '◌ reading its chat'}</Text>)
   if (steps.length) {
-    body.push(<Text key="agent-steps"><Text bold>Steps</Text><Text dimColor>{` (${steps.length})`}</Text></Text>)
+    body.push(<Text key="agent-steps"><Text bold>Steps</Text><Text dimColor>{` (${num(steps.length)})`}</Text></Text>)
     steps.slice(-12).forEach((s, i) => body.push(<Text key={`agent-step-${i}`} dimColor wrap="truncate-end">{`  ${s}`}</Text>))
   }
-  if (text.trim()) body.push(<Box key={marginKey('agent-text')} flexDirection="column" marginTop={1}>{await drawReply(cx, e, text.trim(), cols, { margin: PANEL_MARGIN, prefix: 'agent-' })}</Box>)
+  if (text.trim()) body.push(<Box key={marginKey('agent-text')} flexDirection="column" marginTop={steps.length ? 1 : 0}>{await drawReply(cx, e, text.trim(), cols, { margin: PANEL_MARGIN, prefix: 'agent-' })}</Box>)
   const stop = a && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: a.chat || a.name, name: a.name }) : null
   body.push(...bottomRows(cx, e, cols, [stop ? <Button key="agent-stop" label="stop" plain onPress={stop} /> : null], [], [...(stop ? ['s to stop'] : []), 'b to go back', 'x to close']))
   const hk = stop ? hiddenKeys(cx, e, [{ key: 'stop', hotkey: 's', onPress: stop }]) : null
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
 
-/** The views pane: one row per view, its status dim at R; a click opens the view. */
+// the views list's chosen row
+let viewPick = ''
+
+/** The views pane (views/SPEC.md, section 7, "Views"): `N views · N built`; one row per view, newest first, its glyph
+ *  (● built, ◌ building, ○ proposed, × failed in red) and its name, the files it claims dim at R and `new` in green
+ *  until a built one is opened (no word that repeats the glyph); `❯` on the chosen row, ↑↓ or j k choose, Enter or a
+ *  click opens it, 1-9 the first nine. */
 async function drawViews(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const els = cx.els(e) as El
   const cols = Math.max(30, e.props.bodyColumns)
-  const home = await surfaceValue<Obj>(cx, 'home-full')
-  const vs = home?.ok && Array.isArray(home.value.views) ? (home.value.views as unknown[]).filter(isObj) : []
-  const { Box } = cx.els(e)
-  const body: RenderElement[] = [...headerEls(els, { title: 'Views', cols, sub: subLine([plural(vs.length, 'view')]) })]
+  const vs = (await homeViews(cx)).sort((a, b) => b.at - a.at)
+  const { Box, Button } = cx.els(e)
+  const built = vs.filter(v => v.state === 'built').length
+  const body: RenderElement[] = [...headerEls(els, { title: 'Views', cols, sub: subLine([plural(vs.length, 'view'), built ? `${num(built)} built` : '']) })]
+  const glyph = (v: HomeView): Seg => (v.state === 'built' ? { s: '●' } : v.state === 'building' ? { s: '◌' } : v.state === 'failed' ? { s: '×', fg: COLORS.problem } : dim('○'))
+  const pick = vs.find(v => v.slug === viewPick)?.slug ?? vs[0]?.slug ?? ''
+  const open = (v: HomeView) => openView(cx, v.slug, v.name)
   const { lines, hits } = listLines(
-    vs.map(v => ({ key: str(v.slug), glyph: str(v.status) === 'built' ? { s: '●' } : dim('○'), name: str(v.name) || str(v.slug), right: [dim(str(v.status))], run: () => openPanel(cx, { view: 'view', title: str(v.name) || str(v.slug), slug: str(v.slug) }) })),
-    '',
+    vs.map(v => ({ key: v.slug, glyph: glyph(v), name: v.name, right: [...(v.files.length ? [dim(v.files.join(', '))] : []), ...(v.fresh ? [{ s: '  ' }, freshSeg()] : [])], run: () => open(v) })),
+    pick,
     cols,
   )
-  body.push(linesEl(cx, e, marginKey('views-list'), lines, hits, cols + MARGIN_W))
-  body.push(hintsRow(els, ['b to go back', 'x to close'], cols))
-  return <Box flexDirection="column">{body}</Box>
+  const step = (d: number) => {
+    const at = vs.findIndex(v => v.slug === pick)
+    viewPick = vs[Math.max(0, Math.min(vs.length - 1, at + d))]?.slug ?? ''
+    return cx.bumpPanel()
+  }
+  body.push(linesEl(cx, e, marginKey('views-list'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? open(vs.find(v => v.slug === pick)!) : undefined)))
+  // each view a press away by its key too, for a surface that draws no Client: no row of its own
+  body.unshift(
+    <Box key="view-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
+      {vs.map((v, i) => (
+        <Button key={`view-open-${i}`} label={v.name} plain onPress={() => void open(v)} />
+      ))}
+    </Box>,
+  )
+  body.push(hintsRow(els, vs.length ? ['↑↓ to choose', 'Enter to open'] : [], cols))
+  const hk = hiddenKeys(cx, e, vs.slice(0, 9).map((v, i) => ({ key: `v${i}`, hotkey: String(i + 1), onPress: () => void open(v) })))
+  return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
 
 function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): RenderElement {

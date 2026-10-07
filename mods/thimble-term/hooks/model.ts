@@ -268,6 +268,8 @@ export function threadRowsOf(v: unknown): TermThreadRow[] {
         unread,
         at: str(m.last_ts) || str(m.created_at),
         parent: str(m.parent),
+        created: str(m.created_at),
+        element: str(m.anchor_element),
       }
     })
 }
@@ -304,11 +306,11 @@ export function homeOf(v: unknown, at = 0): TermHome | null {
 
 /** The documents `thimble state docs` listed (the types route's `{slug: {exists, title, …}}`, or a list), those that
  *  exist or are being written. */
-export function docsOf(v: unknown): { slug: string; title: string; renderer: string; status: string }[] {
+export function docsOf(v: unknown): { slug: string; title: string; renderer: string; status: string; generation: number; at: string }[] {
   const entries: [string, Obj][] = Array.isArray(v) ? v.filter(isObj).map(d => [str(d.slug ?? d.type), d]) : isObj(v) ? Object.entries(v).filter((e): e is [string, Obj] => isObj(e[1])) : []
   return entries
     .filter(([, d]) => d.exists !== false || d.status === 'generating')
-    .map(([slug, d]) => ({ slug, title: str(d.title) || str(d.name) || slug, renderer: str(d.renderer) || 'document', status: str(d.status) || (d.exists === false ? 'generating' : 'written') }))
+    .map(([slug, d]) => ({ slug, title: str(d.title) || str(d.name) || slug, renderer: str(d.renderer) || 'document', status: str(d.status) || (d.exists === false ? 'generating' : 'written'), generation: typeof d.generation === 'number' ? d.generation : 0, at: str(d.generated_at) }))
 }
 
 /** One ui.jsonl record as `thimble state ui --after <n>` printed it. */

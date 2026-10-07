@@ -34,12 +34,12 @@ import { HOME_UI_EMPTY } from './home'
 import { linesMessage } from './lines'
 import { drawPanel, fieldMessage, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView } from './panel'
 import type { PaneEvent } from './panel'
-import { MARGIN, chipOf, drawCards, drawReply, placeUrl } from './reply'
+import { MARGIN, chipOf, drawCards, drawReply, placeUrl, scrubIds } from './reply'
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion, signalRead } from './signal'
 import type { AppendedRow } from './signal'
 import { NAV_EMPTY } from './nav'
-import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, navOrigin, openHome, openPanel, readSurface, rt, surfaceValue, tick } from './term'
+import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, navOrigin, openHome, openPanel, paneTitle, panelColumns, readSurface, rt, surfaceValue, tick } from './term'
 import type { UiApply } from './term'
 import { turns } from './turns'
 
@@ -58,7 +58,6 @@ function resultText(output: unknown): string {
   const blocks = Array.isArray(output) ? output : (output as { content?: unknown } | undefined)?.content
   return Array.isArray(blocks) ? blocks.map(b => (b && typeof b === 'object' && 'text' in b ? String((b as { text: unknown }).text) : '')).join('\n') : ''
 }
-const ID_IN_TEXT = /\b(?:card|cell):([A-Za-z0-9_-]{4,})/g
 const ABOVE_LABEL = 12
 const paneTurns = turns()
 
@@ -334,17 +333,6 @@ async function underRow(cx: Ctx, e: ResolveInput & { requestId: string; viewport
       {views}
     </Box>
   )
-}
-
-/** Hex ids in a thimble tool's row, as the card's question (or `card`): the analyst never reads an id. */
-async function scrubIds(cx: Ctx, text: string): Promise<string> {
-  let out = text
-  for (const m of text.matchAll(ID_IN_TEXT)) {
-    const tc = await cx.card(m[1]!)
-    const q = (tc?.data as { question?: string } | undefined)?.question
-    out = out.replace(m[0], q ? `card "${q.length > 40 ? `${q.slice(0, 39)}…` : q}"` : 'card')
-  }
-  return out
 }
 
 export const register: Register = on => {
@@ -675,13 +663,47 @@ export const register: Register = on => {
 
   // ---------------------------------------------------------------------------------------------- the panel
 
+  // the panel's drawings run one at a time (turns.ts, two seconds at most each); one that settles after a later one
+  // began, or that Claude Code abandoned, draws once more 50 ms after, so the shown panel's buttons and fields work
+  const paneDraws = { draws: 0, settled: 0, redrawing: false }
   on('ui.render', { component: 'Pane', requestId: PANEL }, async ($, e, next) => {
     if (!rt.sc) return next(e)
     const pe = e as PaneEvent
-    if (pe.surface === 'terminal' && pe.viewport?.columns) rt.termColumns = pe.props.placement === 'dock' ? pe.viewport.columns + pe.props.bodyColumns + 1 : pe.viewport.columns
-    await read($, panelTickA)
     const cx = cxOf($)
-    return paneTurns.run(() => drawPanel(cx, pe), fire => $.clock.after(2000, fire))
+    if (pe.surface === 'terminal' && pe.viewport?.columns && (pe.props.placement === 'dock' || pe.props.placement === 'inline')) {
+      rt.termColumns = pe.props.placement === 'dock' ? pe.viewport.columns + pe.props.bodyColumns + 1 : pe.viewport.columns
+      // a resize keeps the dock at the width it was opened with: it opens again at the panel's width for the terminal
+      // now (a width the person dragged still wins)
+      if (pe.props.placement === 'dock' && rt.termColumns !== rt.fittedFor && rt.termColumns >= 110) {
+        rt.fittedFor = rt.termColumns
+        if (panelColumns() !== pe.props.bodyColumns) {
+          $.clock.after(0, () => {
+            void (async () => {
+              const placed = (await cx.panes()).some(p => p.id === PANEL && p.isPlaced)
+              const p = await cx.panel()
+              if (placed && p) await cx.open({ id: PANEL, title: paneTitle(p), columns: panelColumns() }).catch(() => undefined)
+            })()
+          })
+        }
+      }
+    }
+    return paneTurns.run(async () => {
+      const n = ++paneDraws.draws
+      await read($, panelTickA)
+      const tree = await drawPanel(cx, pe)
+      const late = paneDraws.settled > n
+      paneDraws.settled = Math.max(paneDraws.settled, n)
+      if ((late || next.signal.aborted) && !paneDraws.redrawing) {
+        paneDraws.redrawing = true
+        $.clock.after(50, () => {
+          paneDraws.redrawing = false
+          // an aborted drawing draws again only when no drawing began since; drawing again regardless would abort a
+          // drawing slower than 50 ms each time, and the panel would never show
+          if (late || paneDraws.draws === n) void update($, panelTickA, k => (k ?? 0) + 1)
+        })
+      }
+      return tree
+    }, fire => $.clock.after(2000, fire))
   })
 
   on('ui.close', async ($, e, next) => {

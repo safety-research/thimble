@@ -190,6 +190,16 @@ async def test_state_gives_what_the_routes_give(term):
     home = await local.state(CORPUS, "home")
     assert home["cards"] == 2 and home["labels"] == 1 and home["mode"] == "terminal" and home["unread"] == []
     assert home["views"] == [], "the views built for this corpus, as a list the home panel draws; no built-in viewer"
+    assert home["coverage"] is None, "no orientation ran: no coverage line"
+    # a view proposed and not built yet is listed with its state, when it was proposed and the files it claims; a
+    # dropped one is not
+    from app import views
+    views._save_proposals(CORPUS, [
+        {"slug": "edit-bursts", "name": "Edit Bursts", "status": "building", "ts": "2026-10-07T01:00:00Z", "claims": ["agents/*.jsonl"]},
+        {"slug": "gone", "name": "Gone", "status": "dropped", "ts": "2026-10-07T01:00:00Z", "claims": ["board.jsonl"]},
+    ])
+    home = await local.state(CORPUS, "home")
+    assert home["views"] == [{"slug": "edit-bursts", "name": "Edit Bursts", "status": "building", "ts": "2026-10-07T01:00:00Z", "files": ["agents/*.jsonl"]}]
     cards = await local.state(CORPUS, "cards", ["--since", "2000-01-01"])
     assert {c["title"] for c in cards["cells"]} >= {"Posts?"} and cards["groups"]
     assert (await local.state(CORPUS, "cards", ["--since", "2999-01-01"]))["cells"] == []
@@ -286,6 +296,9 @@ async def test_act_makes_what_the_browser_makes(term, monkeypatch):
 
     monkeypatch.setattr(subagents, "stop", stop)
     assert (await local.act(CORPUS, "stop", {"agent": "a1234"}))["stopped"] is True and asked == ["a1234"]
+    # a side thread is stopped by the fork of main that answers it
+    agents.change_meta(CORPUS, made["thread"], lambda m: m.update(fork={"agent_id": "afork99"}))
+    assert (await local.act(CORPUS, "stop", {"agent": made["thread"]}))["stopped"] is True and asked[-1] == "afork99"
     with pytest.raises(local.StateError, match="no act"):
         await local.act(CORPUS, "nope", {})
     with pytest.raises(local.StateError, match="empty"):

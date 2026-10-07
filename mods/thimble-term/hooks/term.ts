@@ -46,6 +46,8 @@ export const rt = {
   // the latest row of main's chat a line can stand under (signal.ts isAnchor)
   anchor: '',
   termColumns: 0,
+  // the terminal's width the docked panel was last opened or fitted at
+  fittedFor: 0,
   // when the cards were last read (`cards --since`)
   cardsAt: '',
   // the cards some drawing shows, and the label each label card counts
@@ -83,6 +85,9 @@ export const rt = {
   viewsTold: new Set<string>(),
   viewsSeen: new Set<string>(),
   viewsBuiltBefore: null as Set<string> | null,
+  // each document's generation as the session first read it or last opened it: a newer one is new
+  docsKnown: new Map<string, number>(),
+  docsRead: false,
 }
 
 const iso = (ms: number) => new Date(ms).toISOString()
@@ -377,6 +382,21 @@ export async function inPanelNow(cx: Ctx): Promise<boolean> {
   return inPanel(cx)
 }
 
+/** A thread's step after the steps of the threads it was asked from, the root first (at most 12): where a thread
+ *  opened from outside the panel starts its trail. */
+async function threadChain(cx: Ctx, p: TermPanel, step: ChatNavStep): Promise<ChatNavStep[]> {
+  const rows = await cx.threads()
+  const chain: ChatNavStep[] = [step]
+  const seen = new Set<string>([p.thread ?? ''])
+  for (let id = rows.find(r => r.id === p.thread)?.parent ?? ''; id && id !== 'main' && !seen.has(id) && chain.length < 12; id = rows.find(r => r.id === id)?.parent ?? '') {
+    seen.add(id)
+    const r = rows.find(x => x.id === id)
+    if (!r) break
+    chain.unshift(stepOf({ view: 'thread', title: r.title ? `"${r.title.length > 60 ? `${r.title.slice(0, 59)}…` : r.title}"` : 'thread', thread: id }))
+  }
+  return chain
+}
+
 /** Show `p` in the panel: its step on the panel's way, its data read, the pane opened with the keys. A pane opened
  *  from a click on a narrow terminal waits undrawn: the row above the prompt offers it (`pending`). */
 export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
@@ -385,17 +405,42 @@ export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
   rt.navTo = null
   if (!nav) {
     const cur = (await cx.nav()) ?? NAV_EMPTY
-    nav = moved(cur, nextTrail(cur.trail, step, await inPanel(cx)))
+    nav = moved(cur, nextTrail(cur.trail, step, await inPanel(cx), p.view === 'thread' ? await threadChain(cx, p, step) : [step]))
   }
   rt.navFrom = null
   await cx.setNav(nav)
   await cx.setPanel(p)
   void loadPanel(cx, p).then(() => cx.bumpPanel())
   try {
-    const r = await cx.open({ id: PANEL, title: p.title || 'thimble', focus: true, columns: panelColumns() })
-    await cx.setPending(r.isPlaced ? null : { title: p.title })
+    const title = paneTitle(p)
+    rt.fittedFor = rt.termColumns
+    const r = await cx.open({ id: PANEL, title, focus: true, columns: panelColumns() })
+    await cx.setPending(r.isPlaced ? null : { title })
+    // with a draft in the prompt the keys stay there (Claude Code keeps the person's typing)
+    if (r.isPlaced && (await cx.promptText().catch(() => '')).trim()) cx.toast('the prompt holds a draft, so it keeps the keys: click the panel to use its keys')
   } catch (err) {
     cx.log(`thimble-term: could not open the panel: ${String(err).slice(0, 200)}`)
+  }
+}
+
+/** The title Claude Code shows on the pane for what the panel shows: `Citation`, a card's question, `Threads`, `Home`,
+ *  a view's name, `Label: <name>`, a document's title, the lists by their names. The path names each step itself. */
+export function paneTitle(p: TermPanel): string {
+  switch (p.view) {
+    case 'cite':
+      return 'Citation'
+    case 'thread':
+    case 'threads':
+    case 'ask':
+      return 'Threads'
+    case 'label':
+      return `Label: ${p.title}`
+    case 'docs':
+      return 'Documents'
+    case 'files':
+      return 'Files'
+    default:
+      return p.title || 'thimble'
   }
 }
 
@@ -523,12 +568,14 @@ export async function startThread(cx: Ctx, anchor: string | null, anchorText: st
   return { id }
 }
 
-export async function threadMessage(cx: Ctx, thread: string, message: string): Promise<string> {
-  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+/** A question in a thread that exists: why it was refused (''), and whether thimble queued it because the thread
+ *  still answers. */
+export async function threadMessage(cx: Ctx, thread: string, message: string): Promise<{ error: string; queued: boolean }> {
+  if (!rt.sc) return { error: 'thimble is not in terminal mode in this session', queued: false }
   const got = await act(cx, rt.sc, 'thread-message', { thread, message })
-  if (!got.ok) return got.error
+  if (!got.ok) return { error: got.error, queued: false }
   await readThread(cx, thread)
-  return ''
+  return { error: '', queued: (got.value as { queued?: unknown }).queued === true }
 }
 
 // ------------------------------------------------------------------------------------------------ labels
@@ -628,7 +675,7 @@ async function followUi(cx: Ctx, apply: UiApply): Promise<void> {
 }
 
 /** The areas a panel view reads. */
-const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs'], doc: ['docs', 'cards'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'], thread: ['chats'] }
+const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats', 'views', 'agents'], views: ['views'], labels: ['labels'], label: ['labels', 'cards'], docs: ['docs'], doc: ['docs', 'cards'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'], thread: ['chats'] }
 
 /** One pass: what changed in the workspace since the last pass, read again where some drawing shows it. */
 export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
@@ -658,7 +705,7 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
         if (panel?.thread && (panel.view === 'thread' || panel.view === 'agent')) await readThread(cx, panel.thread)
       }
       if (areas.has('ui')) await followUi(cx, ui)
-      if (first || areas.has('cards') || areas.has('labels') || areas.has('docs') || areas.has('chats')) await refreshHome(cx)
+      if (first || areas.has('cards') || areas.has('labels') || areas.has('docs') || areas.has('chats') || areas.has('views') || areas.has('agents')) await refreshHome(cx)
       if (panel && !first) {
         if ((PANEL_AREAS[panel.view] ?? []).some(a => areas.has(a))) await loadPanel(cx, panel)
         await cx.bumpPanel()

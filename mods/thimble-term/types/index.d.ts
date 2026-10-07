@@ -154,7 +154,9 @@ export type TermAgent = { name: string; label: string; state: string; kind: stri
 export type TermThread = { id: string; meta: Record<string, unknown>; events: Record<string, unknown>[]; n: number; rev: number }
 
 /** A row of the threads list (`thimble state threads`): a side thread with what the rows need. */
-export type TermThreadRow = { id: string; title: string; anchor: string; anchorText: string; running: boolean; answers: number; seen: number; unread: number; at: string; parent: string }
+/** A row of the threads list (`thimble state threads`): a side thread with what the rows need; `element` where it was
+ *  asked (a document's passage, `report:<slug>#<unit>`). */
+export type TermThreadRow = { id: string; title: string; anchor: string; anchorText: string; running: boolean; answers: number; seen: number; unread: number; at: string; parent: string; created?: string; element?: string }
 
 /** The label panel's state: the parts opened, by `<label>:<part>`; the kind picked in `type` and not yet saved, by
  *  label; and each label's run started from the panel (its size, 0 for every record) and its last word. */
@@ -162,7 +164,7 @@ export type TermLabelUi = { open: string[]; kind: Record<string, string>; runs: 
 
 /** The file browser's state: the folders folded or unfolded against their default (the first open), and the file the
  *  keys chose. */
-export type TermFilesUi = { folded: string[]; unfolded: string[]; pick: string }
+export type TermFilesUi = { folded: string[]; unfolded: string[]; pick: string; whole?: string[] }
 
 declare module 'claude-code' {
   interface PluginState {

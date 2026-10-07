@@ -173,6 +173,8 @@ export type World = {
   draft: string
   /** the panel's elements given the keyboard, by key */
   focused: string[]
+  /** each pane opened: its id, title and columns */
+  panes: { id: string; title: string; columns?: number }[]
 }
 
 /** `thimble state` and `thimble act` answered from the fixtures; the workspace's files as `fs` sees them. */
@@ -195,6 +197,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     submitted: [],
     draft: '',
     focused: [],
+    panes: [],
   }
   const ws = opts.ws === undefined ? WS : opts.ws
   mock.env(on, { ...(ws ? { THIMBLE_WS: ws } : {}), THIMBLE_HOME: '/home/a/.thimble', THIMBLE_TERM_CLI: CLI })
@@ -279,6 +282,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
   })
   on('ui.open', ($, e) => {
     w.opened.push(e.id)
+    w.panes.push({ id: e.id, title: String((e as { title?: unknown }).title ?? ''), ...(typeof (e as { columns?: unknown }).columns === 'number' ? { columns: (e as { columns: number }).columns } : {}) })
     return { value: { isPlaced: true } } as never
   })
   on('ui.close', ($, e) => {

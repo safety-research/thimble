@@ -70,6 +70,20 @@ export async function plainWhy(cx: Ctx, why: string): Promise<string> {
     .replace(/\S*notebooks\/[A-Za-z0-9_-]+\.json/g, 'its card file')
 }
 
+const ID_IN_TEXT = /\b(?:card|cell):([A-Za-z0-9_-]{4,})/g
+
+/** Hex ids in a row's words (a thimble tool's input, an agent's step), as the card's question (or `card`): the analyst
+ *  never reads an id. */
+export async function scrubIds(cx: Ctx, text: string): Promise<string> {
+  let out = text
+  for (const m of text.matchAll(ID_IN_TEXT)) {
+    const tc = await cx.card(m[1]!)
+    const q = (tc?.data as { question?: string } | null | undefined)?.question
+    out = out.replace(m[0], q ? `card "${q.length > 40 ? `${q.slice(0, 39)}…` : q}"` : 'card')
+  }
+  return out
+}
+
 /** Where a citation's place is, in words: on the card, in the command's output at a line, in a file at a line. */
 export function whereWords(ref: string): string {
   if (CARD_REF.test(ref)) return 'on the card'
