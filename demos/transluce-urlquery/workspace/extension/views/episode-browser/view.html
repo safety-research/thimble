@@ -178,7 +178,7 @@
   .det-sec dd .copy .ico { width: 12px; height: 12px; }
   .det-sec.wide { grid-column: 1 / -1; }
 
-  .pop { position: fixed; z-index: 60; min-width: 200px; max-width: 320px; max-height: 72vh; overflow: auto; padding: 4px; border-radius: var(--radius-ui); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), 0.14); font: 400 var(--text-ui-sm) / 1.3 var(--font-body); }
+  .pop { position: fixed; z-index: 2147482500; min-width: 200px; max-width: 320px; max-height: 72vh; overflow: auto; padding: 4px; border-radius: var(--radius-ui); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), 0.14); font: 400 var(--text-ui-sm) / 1.3 var(--font-body); }
   .pop .head { padding: 8px 8px 4px; font: 500 var(--text-xs) / 1 var(--font-body); color: var(--text-tertiary); }
   .pop .sep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
   .pop .note { padding: 4px 8px 6px; color: var(--text-tertiary); }
@@ -196,7 +196,7 @@
   .range .field.num { width: 72px; }
   .pop .seg { margin: 2px 8px 8px; }
 
-  #tip { position: fixed; z-index: 70; display: none; max-width: 300px; padding: 7px 9px; border-radius: var(--radius-ui); background: var(--surface-card); box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.12), 0 10px 28px -14px rgba(var(--ink-rgb), 0.32); pointer-events: none; font: 400 var(--text-xs) / 1.45 var(--font-body); }
+  #tip { position: fixed; z-index: 2147482600; display: none; max-width: 300px; padding: 7px 9px; border-radius: var(--radius-ui); background: var(--surface-card); box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.12), 0 10px 28px -14px rgba(var(--ink-rgb), 0.32); pointer-events: none; font: 400 var(--text-xs) / 1.45 var(--font-body); }
   #tip b { font-weight: 600; }
   #tip .m { color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); }
   #tip .tep.more { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border-hairline); }
@@ -719,14 +719,17 @@ const CENTRE = (i) => i * LH + LH / 2
 // where each dot is drawn, for the pointer: {e, x, y, r}
 let DOTS = []
 // the dots under the pointer, those it lies inside before those it only grazes, each group the one whose centre is
-// nearest first (a click opens the first); the tip lists them all, so where a small dot sits on a large one both show
+// nearest first, but of dots it lies inside whose centers are within about a pixel of each other the larger first, so
+// a pixel's rounding never puts a small dot before the large one it sits on; the tip lists them all, so where a small
+// dot sits on a large one both show, and a click opens the first the tip lists
 function dotsAt(x, y) {
   const hits = []
   for (const d of DOTS) {
     const dist = Math.hypot(x - d.x, y - d.y)
     if (dist <= d.r + 1.5) hits.push([dist > d.r, dist, d])
   }
-  hits.sort((a, b) => a[0] - b[0] || a[1] - b[1] || b[2].r - a[2].r)
+  const together = (a, b) => !a[0] && !b[0] && Math.hypot(a[2].x - b[2].x, a[2].y - b[2].y) <= 1.2
+  hits.sort((a, b) => a[0] - b[0] || (together(a, b) ? b[2].r - a[2].r : 0) || a[1] - b[1] || b[2].r - a[2].r)
   return hits.map((h) => h[2].e)
 }
 const dotAt = (x, y) => dotsAt(x, y)[0] || null
@@ -764,8 +767,12 @@ function pie(x, y, r, e, ps) {
   const svg = $('plot'), tip = $('tip')
   const xAt = (ev) => ev.clientX - svg.getBoundingClientRect().left
   const yAt = (ev) => ev.clientY - svg.getBoundingClientRect().top
+  // the episode the tip lists first where the pointer last moved: a click there opens it, though the click's point is
+  // rounded to a whole pixel
+  let shown = null
   svg.addEventListener('click', (ev) => {
-    const e = dotAt(xAt(ev), yAt(ev))
+    const x = xAt(ev), y = yAt(ev)
+    const e = shown && Math.hypot(x - shown.x, y - shown.y) <= 2 ? shown.e : dotAt(x, y)
     if (e) openEpisode(e.key, { scrollList: true })
   })
   function guide(x) {
@@ -783,6 +790,7 @@ function pie(x, y, r, e, ps) {
   svg.addEventListener('pointermove', (ev) => {
     guide(xAt(ev))
     const hits = dotsAt(xAt(ev), yAt(ev)).slice(0, 3)
+    shown = hits.length ? { e: hits[0], x: xAt(ev), y: yAt(ev) } : null
     svg.style.cursor = hits.length ? 'pointer' : ''
     if (!hits.length) { tip.style.display = 'none'; return }
     tip.innerHTML = hits.map((e, k) => `<div class="tep${k ? ' more' : ''}">${tipOf(e)}</div>`).join('')
@@ -790,7 +798,7 @@ function pie(x, y, r, e, ps) {
     tip.style.left = Math.max(4, Math.min(innerWidth - tip.offsetWidth - 8, ev.clientX + 12)) + 'px'
     tip.style.top = Math.min(innerHeight - tip.offsetHeight - 8, ev.clientY + 14) + 'px'
   })
-  svg.addEventListener('mouseleave', () => { tip.style.display = 'none'; guide(null) })
+  svg.addEventListener('mouseleave', () => { tip.style.display = 'none'; shown = null; guide(null) })
 })()
 $('gut').onclick = (ev) => {
   const el = ev.target.closest('[data-lane]')
