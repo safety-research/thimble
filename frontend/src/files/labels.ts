@@ -412,8 +412,9 @@ export interface ViewMark {
   /** each label that is on and highlights the record, with its value and that value's colour, in the order of `on`, so
    * a page can colour its records by one of them */
   values?: { id: string; label: string; value: string; colour: string }[]
-  /** the texts to highlight in the record's element, each span cut into the pieces `needles` looks for */
-  spans: { text: string; colour: string }[]
+  /** the texts to highlight in the record's element, each span cut into the pieces `needles` looks for, with the id of
+   * the label that marks it, by which the bridge tells the Color by label's texts from the others' */
+  spans: { text: string; colour: string; id: string }[]
   /** with a label filter on, whether the record or unit passes it */
   keep?: boolean
 }
@@ -569,7 +570,7 @@ export function viewMarks(
       bar: real(lit[0].colour),
       names,
       values: m.lit.map((x) => ({ id: x.concept, label: x.name, value: x.value, colour: real(x.colour) })),
-      spans: m.spans.flatMap((s) => needles(s.text).map((text) => ({ text, colour: real(s.colour) }))),
+      spans: m.spans.flatMap((s) => needles(s.text).map((text) => ({ text, colour: real(s.colour), id: s.concept }))),
     }
   }
   return out
