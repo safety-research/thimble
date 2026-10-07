@@ -150,7 +150,14 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
   drew take (the kit counts them, `tally(record)`), the commonest first, else those it gives meanings for; a label's,
   then `not marked`. Under the chosen row, what it is, once: a field's description, a label's kind and definition with
   `definition ↗`, which opens the label's panel. In a narrow frame the chosen row's values and what it is stand under
-  its name. Enter colors by it.
+  its name. Each row starts with `●` (in the accent) while it is a choice and `○` while it is not. Space checks or
+  unchecks the row under `❯` and the menu stays open, so several are chosen together: the first is the color, each
+  other a column of its own beside the list's track (`tracks`), and says `track`; the top row reads `Kind +1`. Enter
+  colors by the row alone; Off unchecks them all. With Off, no mark and no track cell takes a hue.
+- `+N` after the chips opens the values it stands for in the same frame, each with its dot in its hue, its count and,
+  under the one at `❯`, what it means; Space or Enter turns it off or on, as a chip's click does.
+- A group's row (a page, an agent, a session) takes no color of its own: `colour.mix(counts, cells)` gives the runs of
+  a small bar of its records' share of each value in its hue, which the row adds; none with Off.
 - With a label chosen, its name in the top row is followed by `↗`, which opens the label's panel: its definition, its
   runs and its records are a step away in every view that uses it.
 - A chip's tip says what its value means: the field's `meanings`, a declared value's `meaning`, a label's value.
