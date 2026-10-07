@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The Transcript view for an agent transcript whose records interleave spoken turns with tool records (the sniff's
 // `tools`): a tool call and its cleaned result as blocks, a reply's <thinking> as a quiet block, one line per tool and
-// system message with click to expand, a Raw toggle for the stored terminal bytes, the record's label gutter, and a
+// system message (its head and the start of its call and output) with click to expand, a Raw toggle for the stored terminal bytes, the record's label gutter, and a
 // citation of words in a result (src/files/views/transcript.tsx).
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
@@ -72,20 +72,23 @@ describe('the agent transcript view', () => {
     expect(heads).toEqual(['System · 2026-07-18 21:29', 'Assistant · 2026-07-18 21:30', 'Assistant · terminal · 2026-07-18 21:30'])
     // the reply is shown (its thinking a quiet block), the system and tool messages are one line
     const card = (line: string) => el.querySelector(`.reader-card[data-line="${line}"]`)!
-    expect(card('2').querySelector('.reader-msg-oneline')).toBeNull()
+    expect(card('2').querySelector('.reader-fold-line')).toBeNull()
     expect(card('2').querySelector('.reader-thinking')?.textContent).toContain('look at the directory')
     expect(card('2').textContent).toContain('Listing the files now.')
-    expect(card('1').querySelector('.reader-msg-oneline')?.textContent).toContain('You have access to tools')
-    expect(card('3').querySelector('.reader-msg-oneline')?.textContent).toBe('terminal  ls -la')
-    // the folded tool result keeps its full, cleaned text in the DOM for a search to find
-    expect(card('3').querySelector('.reader-msgfold-full')?.textContent).toContain('user@host:~$ done')
+    expect(card('1').querySelector('.reader-fold-text')?.textContent).toContain('You have access to tools')
+    expect(card('3').querySelector('.reader-fold-text')?.textContent).toBe('terminal ls -la · file1 file2 user@host:~$ done')
+    // the folded tool result keeps its full, cleaned text in the DOM, hidden, for a search to find
+    const body = card('3').querySelector<HTMLElement>('.reader-record-body')!
+    expect(body.hidden).toBe(true)
+    expect(body.textContent).toContain('user@host:~$ done')
     expect(el.textContent).not.toContain('<counter>')
   })
   test('clicking a folded tool message opens it; Raw shows the stored bytes, Cleaned hides them again', async () => {
     const el = await mount(<View workspace="w" path="transcript.jsonl" kind="text" page={page} loadMore={() => undefined} transcript={HINT} />)
     const card = el.querySelector('.reader-card[data-line="3"]')! as HTMLElement
-    await act(async () => (card.querySelector('.reader-msg-oneline') as HTMLElement).click())
-    expect(card.querySelector('.reader-msg-oneline')).toBeNull()
+    await act(async () => (card.querySelector('.reader-fold-line') as HTMLElement).click())
+    expect(card.querySelector('.reader-fold-line')).toBeNull()
+    expect(card.querySelector<HTMLElement>('.reader-record-body')!.hidden).toBe(false)
     expect(card.querySelector('.reader-tool_use')?.textContent).toContain('terminal')
     const result = card.querySelector('.reader-tool_result')!
     expect(result.textContent).toContain('user@host:~$ done')
@@ -142,7 +145,7 @@ describe('the agent transcript view', () => {
       const el = await mount(<View workspace="w" path="transcript.jsonl" kind="text" page={page} targetRef="transcript.jsonl#L3" loadMore={() => undefined} transcript={HINT} />)
       const card = el.querySelector('.reader-card[data-line="3"]')!
       // the cited message is open (no one-line summary), its result shown
-      expect(card.querySelector('.reader-msg-oneline')).toBeNull()
+      expect(card.querySelector('.reader-fold-line')).toBeNull()
       expect(card.classList.contains('reader-target')).toBe(true)
     } finally {
       delete (Element.prototype as Partial<Element>).scrollIntoView

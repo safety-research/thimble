@@ -9,8 +9,11 @@
 // pages past them. A record with no words to show (a turn that holds only redacted thinking, a post with an empty body)
 // gets no row, unless a citation points at it; Raw shows every line. A citation of words marks them wherever the view
 // shows them, in a field or a turn that then shows whole. An author named only by id shows the name the corpus gives
-// that id (an agents.jsonl beside the file), else the id shortened, the whole id on hover.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+// that id (an agents.jsonl beside the file), else the id shortened, the whole id on hover. Each record folds to one
+// line, its head and the start of its words or its tool call (fold.ts, common RecordCard): a tool call, a tool result,
+// a system record and a record of more than a few lines start folded. Records Filter by hides have no row, and a long
+// run of them says in one line how many it hides, as a run of system records does (useFilterBy.ts).
+import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../../components/Button'
 import { Chip } from '../../components/Chip'
 import { Spinner } from '../../components/Spinner'
@@ -18,8 +21,8 @@ import { api } from '../../lib/api'
 import { findQuote } from '../../lib/quoteFind'
 import { cleanTerminal, needsClean } from '../../lib/terminal'
 import type { Block, ChatTurn, SourceKind, SourceRecord, SourceTurn, SourceTurns, TranscriptHint } from '../../lib/types'
-import { BlockEl, citedQuote, Collapsible, compact, errMsg, isTargetLine, lineCount, quoteTarget, RecordCard, recordExcerpt, targetOf, useTarget, type Target, type ViewDef, type ViewProps } from './common'
-import { UNFOLD_EVENT } from '../find'
+import { FilterContext } from '../useFilterBy'
+import { BlockEl, citedQuote, Collapsible, compact, errMsg, FOLD_LINES, foldsByDefault, isTargetLine, lineCount, oneLine, quoteTarget, RecordCard, recordExcerpt, targetOf, useTarget, type RecordFold, type Target, type ViewDef, type ViewProps } from './common'
 import { useDelimited } from './table'
 
 export const CONVERSATIONAL = new Set(['assistant', 'user'])
@@ -79,50 +82,152 @@ function ToolResult({ block, path, line, index, target, hit, isError }: { block:
   )
 }
 
-/** `quote`: the words a span ref of the record quotes, found in its blocks when they are made here (no `blockPath`). */
+/** A system record, folded to its summary until opened, its blocks under its head when open. `quote`: the words a span
+ * ref of the record quotes, found in its blocks when they are made here (no `blockPath`). */
 function SysRow({ path, blockPath, rec, target, hit, quote }: { path: string; blockPath?: string; rec: SourceRecord; target: Target | null; hit: boolean; quote: string | null }) {
-  const [open, setOpen] = useState(false)
-  const forced = !!target && target.line === rec.line && target.block != null
+  const summary = sysSummary(rec.record)
+  const fold = useMemo<RecordFold>(() => ({ summary: <span className="reader-fold-mono">{summary}</span>, folded: true }), [summary])
   return (
-    <RecordCard path={path} line={rec.line} target={target} hit={hit} className="reader-sysrow" header="system" text={sysSummary(rec.record)}>
-      <Button size="sm" className="reader-sys-summary mono" aria-expanded={open || forced} onClick={() => setOpen((o) => !o)}>
-        {sysSummary(rec.record)}
-      </Button>
-      {(open || forced) && rec.blocks.map((b, k) => <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockPath ? target : quoteTarget(target, rec.line, k, b.text, quote)} hit={hit} />)}
+    <RecordCard path={path} line={rec.line} target={target} hit={hit} className="reader-sysrow" header="system" text={summary} fold={fold}>
+      {rec.blocks.map((b, k) => (
+        <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockPath ? target : quoteTarget(target, rec.line, k, b.text, quote)} hit={hit} />
+      ))}
     </RecordCard>
   )
 }
 
-/** A run of hidden system records, in one line: how many, and Show, which shows every system record. */
-function HiddenRun({ count, onShow }: { count: number; onShow: () => void }) {
+/** what a run of hidden records holds: those the system toggle hides, and those Filter by hides */
+export interface HiddenCount {
+  system: number
+  filtered: number
+}
+
+/** A run of hidden records, in one line: how many, and Show, which shows every system record and turns every value of
+ * Filter by back on, as the run holds them. */
+function HiddenRun({ run, onShowSystem, onShowFiltered }: { run: HiddenCount; onShowSystem?: () => void; onShowFiltered?: () => void }) {
+  const said = [run.system ? `${run.system.toLocaleString()} system ${run.system === 1 ? 'record' : 'records'} hidden` : '', run.filtered ? `${run.filtered.toLocaleString()} ${run.system ? '' : run.filtered === 1 ? 'record ' : 'records '}filtered out` : ''].filter(Boolean)
   return (
     <div className="reader-hidden-run">
-      <span>
-        {count.toLocaleString()} system {count === 1 ? 'record' : 'records'} hidden
-      </span>
-      <Button size="sm" onClick={onShow}>
+      <span>{said.join(', ')}</span>
+      <Button
+        size="sm"
+        onClick={() => {
+          if (run.system) onShowSystem?.()
+          if (run.filtered) onShowFiltered?.()
+        }}
+      >
         Show
       </Button>
     </div>
   )
 }
 
-/** Where the loaded records' runs of hidden system records stand: per run, the line it starts at and its length, for
- * the runs that get a line of their own (HIDDEN_RUN_NOTE or longer, or any run when no record is shown). Pure. */
-export function hiddenRuns(types: readonly (string | undefined)[], lines: readonly number[]): Map<number, number> {
-  const runs: [number, number][] = []
-  let start = -1
-  types.forEach((t, i) => {
-    const hidden = !CONVERSATIONAL.has(t ?? 'record')
-    if (hidden && start < 0) start = i
-    if (!hidden && start >= 0) {
-      runs.push([start, i - start])
-      start = -1
+/** how a row of a view stands: shown, hidden as a system record, or hidden by Filter by */
+export type RowState = 'shown' | 'system' | 'filtered'
+
+/** Where the runs of hidden rows stand among a view's rows: per run, the index of its first row and what it holds, for
+ * the runs that get a line of their own (HIDDEN_RUN_NOTE rows or more, or any run when no row is shown). Pure. */
+export function hiddenRuns(rows: readonly RowState[]): Map<number, HiddenCount> {
+  const runs: [number, HiddenCount, number][] = []
+  let cur: [number, HiddenCount, number] | null = null
+  rows.forEach((r, i) => {
+    if (r === 'shown') {
+      if (cur) runs.push(cur)
+      cur = null
+      return
     }
+    if (!cur) cur = [i, { system: 0, filtered: 0 }, 0]
+    cur[1][r]++
+    cur[2]++
   })
-  if (start >= 0) runs.push([start, types.length - start])
-  const shown = types.some((t) => CONVERSATIONAL.has(t ?? 'record'))
-  return new Map(runs.filter(([, n]) => n >= HIDDEN_RUN_NOTE || !shown).map(([i, n]) => [lines[i], n]))
+  if (cur) runs.push(cur)
+  const shown = rows.includes('shown')
+  return new Map(runs.filter(([, , n]) => n >= HIDDEN_RUN_NOTE || !shown).map(([i, c]) => [i, c]))
+}
+
+const NO_RUNS: ReadonlyMap<number, HiddenCount> = new Map()
+
+/** The runs of rows Filter by hides among a view's rows, on `lines` (hiddenRuns); a ref's row shows. */
+function useFilterRuns(lines: readonly number[], target: Target | null): { runs: ReadonlyMap<number, HiddenCount>; show?: () => void } {
+  const filter = useContext(FilterContext)
+  const runs = useMemo(() => (filter ? hiddenRuns(lines.map((l) => (!isTargetLine(target, l) && filter.hides(l) ? 'filtered' : 'shown'))) : NO_RUNS), [filter, lines, target])
+  return { runs, show: filter?.show }
+}
+
+/** A piece of a folded record's one line: its words, a tool call (its name and what it acts on), a tool result's
+ * output, or another block's text. */
+export interface FoldPart {
+  kind: 'text' | 'tool' | 'result' | 'other'
+  text: string
+  tool?: string
+}
+
+/** pieces a folded record's one line holds at most */
+const FOLD_PARTS = 4
+
+/** A record's blocks as the pieces of its one folded line: its words, each tool call as its name and the first telling
+ * string of its input (callGloss: the command, the path), each result's output from its start (terminal output
+ * cleaned), the rest as text; its thinking only when it holds nothing else. Pure (clean-up aside). */
+export function foldParts(blocks: readonly { kind: string; text: string }[]): FoldPart[] {
+  const out: FoldPart[] = []
+  for (const b of blocks) {
+    if (out.length >= FOLD_PARTS) break
+    if (b.kind === 'thinking') continue
+    if (b.kind === 'tool_use') {
+      const nl = b.text.indexOf('\n')
+      const name = nl < 0 ? b.text : b.text.slice(0, nl)
+      const rest = nl < 0 ? '' : b.text.slice(nl + 1)
+      let gloss: string
+      try {
+        gloss = callGloss(JSON.parse(rest))
+      } catch {
+        gloss = firstLine(rest)
+      }
+      out.push({ kind: 'tool', tool: name, text: oneLine(gloss) })
+    } else if (b.kind === 'tool_result') {
+      const head = b.text.slice(0, 4000)
+      out.push({ kind: 'result', text: oneLine(needsClean(head) ? cleanTerminal(head) : head) || '(empty)' })
+    } else {
+      const t = oneLine(b.text)
+      if (t) out.push({ kind: b.kind === 'text' ? 'text' : 'other', text: t })
+    }
+  }
+  const thinking = blocks.find((b) => b.kind === 'thinking')
+  if (!out.length && thinking) out.push({ kind: 'other', text: `thinking: ${oneLine(thinking.text)}` })
+  return out
+}
+
+/** A folded record's one line: its pieces in order, a tool call and the output in mono, the tool's name in the ink. */
+function FoldSummary({ parts }: { parts: readonly FoldPart[] }) {
+  return (
+    <>
+      {parts.map((p, i) => (
+        <Fragment key={i}>
+          {i > 0 && <span className="reader-fold-sep"> · </span>}
+          {p.kind === 'tool' ? (
+            <span className="reader-fold-mono">
+              <span className="reader-tool-name">{p.tool}</span> {p.text}
+            </span>
+          ) : p.kind === 'text' ? (
+            p.text
+          ) : (
+            <span className="reader-fold-mono">{p.text}</span>
+          )}
+        </Fragment>
+      ))}
+    </>
+  )
+}
+
+/** How a record of blocks folds: to its pieces (foldParts), from the start when foldsByDefault says so. Pure. */
+export function blocksFold(blocks: readonly { kind: string; text: string }[]): RecordFold {
+  return { summary: <FoldSummary parts={foldParts(blocks)} />, folded: foldsByDefault(blocks) }
+}
+
+/** How a record of one text folds: to the text on one line, from the start when it is over FOLD_LINES lines. Pure. */
+function textFold(text: string, mono = false): RecordFold {
+  const t = oneLine(text)
+  return { summary: mono ? <span className="reader-fold-mono">{t}</span> : t, folded: lineCount(text, FOLD_LINES) > FOLD_LINES }
 }
 
 function errorBlockIndexes(rec: any): Set<number> {
@@ -404,9 +509,13 @@ function Posts({ workspace, path, records, targetRef, hint, derived, quote }: { 
   const idSet = useMemo(() => new Set(ids), [ids])
   const names = useSpeakerNames(workspace, path, keys.author, ids)
   const asked = targetOf(targetRef, path)?.line
+  const lines = useMemo(() => records.map((r) => r.line), [records])
+  const { runs, show } = useFilterRuns(lines, target)
   return (
     <div className="reader-transcript reader-msgboard" ref={rootRef}>
-      {records.map((rec) => {
+      {records.map((rec, i) => {
+        const run = runs.get(i)
+        const note = run ? <HiddenRun key={`h${rec.line}`} run={run} onShowFiltered={show} /> : null
         const r = rec.record ?? {}
         const author = nameOf(pick(r, keys.author)) ?? '(unsigned)'
         const ts = timeOf(pick(r, keys.time))
@@ -424,11 +533,12 @@ function Posts({ workspace, path, records, targetRef, hint, derived, quote }: { 
         // an empty body leaves the server a raw block of the whole record: the post has no row, or, when a citation
         // points at it, says it is empty
         const empty = typeof body === 'string' && !body.trim()
-        if (empty && rec.line !== asked) return null
+        if (empty && rec.line !== asked) return note
         const fields = value == null && rec.blocks.every((b) => b.kind === 'raw') ? restFields(r, keys, cite) : null
         const own = !derived && rec.blocks.length > 0 && !rec.blocks.every((b) => b.kind === 'raw' && body != null)
-        return (
-          <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className="reader-msg" header={header} text={empty ? undefined : own ? recordExcerpt(rec) : body?.slice(0, 500)}>
+        const fold = empty ? undefined : fields?.length ? textFold(fields.map(([k, v]) => `${k} ${v}`).join('  '), true) : own ? blocksFold(rec.blocks) : textFold(body ?? JSON.stringify(value ?? r))
+        const card = (
+          <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className="reader-msg" header={header} text={empty ? undefined : own ? recordExcerpt(rec) : body?.slice(0, 500)} fold={fold}>
             {empty ? (
               <div className="reader-msg-empty">(empty body)</div>
             ) : fields?.length ? (
@@ -455,6 +565,7 @@ function Posts({ workspace, path, records, targetRef, hint, derived, quote }: { 
             )}
           </RecordCard>
         )
+        return note ? [note, card] : card
       })}
     </div>
   )
@@ -492,20 +603,26 @@ function ChatLog({ path, page, targetRef }: ViewProps) {
   const holder = asked ? turns.find((t) => asked.line >= t.line && asked.line <= t.end) : undefined
   const cardRef = holder && holder.line !== asked!.line ? `${path}#L${holder.line}` : targetRef
   const { target, hit } = useTarget(cardRef, path, rootRef, [records])
+  const starts = useMemo(() => turns.map((t) => t.line), [turns])
+  const { runs, show } = useFilterRuns(starts, target)
   return (
     <div className="reader-transcript reader-chatlog" ref={rootRef}>
-      {turns.map(({ line, end, turn, recs }) => {
+      {turns.map(({ line, end, turn, recs }, ti) => {
+        const run = runs.get(ti)
         const header = turn ? [turn.speaker, turn.time ? stamp(turn.time) : null].filter(Boolean).join(' · ') : undefined
         const lines = shownLines(recs, turn)
         const text = lines.map((r, i) => (i === 0 && turn ? lineText(r).slice(turn.at) : lineText(r))).join('\n').trim()
         return (
-          <RecordCard key={line} path={path} line={line} end={end} target={target} hit={hit} className={turn ? 'reader-msg' : 'reader-msg reader-chat-lead'} header={header} text={text.slice(0, 500)}>
-            {lines.map((r, i) =>
-              r.blocks.length ? (
-                r.blocks.map((b, k) => <BlockEl key={`${r.line}.${k}`} block={b} path={path} line={r.line} index={k} target={asked} hit={hit} from={i === 0 && turn && k === 0 ? turn.at : 0} className={i === 0 && turn && turn.at >= b.text.length ? 'reader-chat-empty' : undefined} />)
-              ) : null,
-            )}
-          </RecordCard>
+          <Fragment key={line}>
+            {run && <HiddenRun run={run} onShowFiltered={show} />}
+            <RecordCard path={path} line={line} end={end} target={target} hit={hit} className={turn ? 'reader-msg' : 'reader-msg reader-chat-lead'} header={header} text={text.slice(0, 500)} fold={textFold(text)}>
+              {lines.map((r, i) =>
+                r.blocks.length ? (
+                  r.blocks.map((b, k) => <BlockEl key={`${r.line}.${k}`} block={b} path={path} line={r.line} index={k} target={asked} hit={hit} from={i === 0 && turn && k === 0 ? turn.at : 0} className={i === 0 && turn && turn.at >= b.text.length ? 'reader-chat-empty' : undefined} />)
+                ) : null,
+              )}
+            </RecordCard>
+          </Fragment>
         )
       })}
     </div>
@@ -558,9 +675,12 @@ function Conversations({ path, page, targetRef, transcript }: ViewProps) {
   const quote = useMemo(() => citedQuote(page.records, targetOf(targetRef, path)), [page.records, targetRef, path])
   const rootRef = useRef<HTMLDivElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records])
+  const recLines = useMemo(() => records.map((r) => r.line), [records])
+  const { runs, show } = useFilterRuns(recLines, target)
   return (
     <div className="reader-transcript reader-convs" ref={rootRef}>
-      {records.map((rec) => {
+      {records.map((rec, i) => {
+        const run = runs.get(i)
         const r = rec.record ?? {}
         // a turn with no words gets no row
         const turns = conversationTurns(r, transcript)?.filter((t) => t.text.trim())
@@ -573,27 +693,44 @@ function Conversations({ path, page, targetRef, transcript }: ViewProps) {
           const at = findQuote(turns[k].text, cite)
           if (at) cited = { k, at }
         }
+        // folded, its first turns, each after its speaker
+        const fold: RecordFold | undefined = turns
+          ? {
+              summary: (
+                <FoldSummary
+                  parts={turns.slice(0, FOLD_PARTS).flatMap((t): FoldPart[] => [
+                    { kind: 'other', text: t.speaker || '(unsigned)' },
+                    { kind: 'text', text: oneLine(t.text) },
+                  ])}
+                />
+              ),
+              folded: turns.length > 1 || foldsByDefault(turns.map((t) => ({ kind: 'text', text: t.text }))),
+            }
+          : textFold(typeof r.text === 'string' ? r.text : JSON.stringify(r))
         return (
-          <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className="reader-msg reader-conv" header={ctx != null ? String(ctx) : undefined} text={first.slice(0, 500) || undefined}>
-            {turns && !turns.length ? (
-              <div className="reader-msg-empty">(empty)</div>
-            ) : turns ? (
-              turns.map((t, k) => {
-                const at = cited?.k === k ? cited.at : null
-                // a turn whose quoted words lie past the cut shows whole
-                const shown = at && at[1] > TURN_TEXT_MAX ? t.text : t.text.slice(0, TURN_TEXT_MAX)
-                return (
-                  <div key={k} className="reader-conv-turn">
-                    <div className="reader-conv-speaker mono">{[t.speaker, t.time].filter(Boolean).join(' · ') || '(unsigned)'}</div>
-                    <BlockEl block={{ kind: 'text', text: shown }} line={rec.line} index={k} target={at ? { line: rec.line, block: k, start: at[0], end: at[1] } : null} hit={hit} />
-                    {t.text.length > shown.length && <div className="reader-msg-empty">Cut at {TURN_TEXT_MAX.toLocaleString()} of {t.text.length.toLocaleString()} characters. Raw shows all of it.</div>}
-                  </div>
-                )
-              })
-            ) : (
-              <PostText text={typeof r.text === 'string' ? r.text : JSON.stringify(r)} line={rec.line} target={target} hit={hit} quote={cite} />
-            )}
-          </RecordCard>
+          <Fragment key={rec.line}>
+            {run && <HiddenRun run={run} onShowFiltered={show} />}
+            <RecordCard path={path} line={rec.line} target={target} hit={hit} className="reader-msg reader-conv" header={ctx != null ? String(ctx) : undefined} text={first.slice(0, 500) || undefined} fold={fold}>
+              {turns && !turns.length ? (
+                <div className="reader-msg-empty">(empty)</div>
+              ) : turns ? (
+                turns.map((t, k) => {
+                  const at = cited?.k === k ? cited.at : null
+                  // a turn whose quoted words lie past the cut shows whole
+                  const shown = at && at[1] > TURN_TEXT_MAX ? t.text : t.text.slice(0, TURN_TEXT_MAX)
+                  return (
+                    <div key={k} className="reader-conv-turn">
+                      <div className="reader-conv-speaker mono">{[t.speaker, t.time].filter(Boolean).join(' · ') || '(unsigned)'}</div>
+                      <BlockEl block={{ kind: 'text', text: shown }} line={rec.line} index={k} target={at ? { line: rec.line, block: k, start: at[0], end: at[1] } : null} hit={hit} />
+                      {t.text.length > shown.length && <div className="reader-msg-empty">Cut at {TURN_TEXT_MAX.toLocaleString()} of {t.text.length.toLocaleString()} characters. Raw shows all of it.</div>}
+                    </div>
+                  )
+                })
+              ) : (
+                <PostText text={typeof r.text === 'string' ? r.text : JSON.stringify(r)} line={rec.line} target={target} hit={hit} quote={cite} />
+              )}
+            </RecordCard>
+          </Fragment>
         )
       })}
     </div>
@@ -680,6 +817,10 @@ function TurnsTranscript({ workspace, path, targetRef, unavailable }: ViewProps)
   // the citation itself when the turn stands on its line, so another span of that line scrolls again
   const cardRef = !holder ? undefined : holder.line === asked!.line ? targetRef : `${path}#L${holder.line}`
   const { target, hit } = useTarget(cardRef, path, rootRef, [data])
+  // a turn with no words gets no card, unless a citation points at it; the card before it shows its lines' labels
+  const shown = useMemo(() => (data?.turns ?? []).filter((t) => t.text.trim() || holder?.i === t.i), [data, holder])
+  const turnLines = useMemo(() => shown.map((t) => t.line), [shown])
+  const { runs, show } = useFilterRuns(turnLines, target)
   if (error) return <div className="reader-error-text">{error}</div>
   if (!data)
     return (
@@ -689,8 +830,6 @@ function TurnsTranscript({ workspace, path, targetRef, unavailable }: ViewProps)
     )
   const titled = data.n_groups > 1 || Object.values(data.groups).some((g) => g.title)
   const out: ReactNode[] = []
-  // a turn with no words gets no card, unless a citation points at it; the card before it shows its lines' labels
-  const shown = turns.filter((t) => t.text.trim() || holder?.i === t.i)
   const last = turns[turns.length - 1]
   shown.forEach((t, k) => {
     const g = t.group != null ? data.groups[String(t.group)] : undefined
@@ -701,6 +840,8 @@ function TurnsTranscript({ workspace, path, targetRef, unavailable }: ViewProps)
         </div>,
       )
     const next = shown[k + 1]?.line ?? (last.i !== t.i ? last.line + 1 : t.line)
+    const run = runs.get(k)
+    if (run) out.push(<HiddenRun key={`h${t.i}`} run={run} onShowFiltered={show} />)
     out.push(<TurnCard key={t.i} path={path} turn={t} end={Math.max(t.line, next - 1)} target={holder?.i === t.i ? target : null} hit={hit} quote={cited?.i === t.i ? cited.quote : null} />)
   })
   return (
@@ -734,8 +875,9 @@ function lineHolder(turns: readonly SourceTurn[], line: number): SourceTurn | nu
 function TurnCard({ path, turn, end, target, hit, quote }: { path: string; turn: SourceTurn; end: number; target: Target | null; hit: boolean; quote: string | null }) {
   const header = [turn.speaker || turn.role, turn.time ? timeOf(turn.time) : null].filter(Boolean).join(' · ')
   const block: Block = { kind: 'text', text: turn.text }
+  const fold = useMemo(() => textFold(turn.text), [turn.text])
   return (
-    <RecordCard path={path} line={turn.line} end={end} target={target} hit={hit} className={`reader-msg reader-turn-${turn.role}`} header={header} text={turn.text.slice(0, 500)}>
+    <RecordCard path={path} line={turn.line} end={end} target={target} hit={hit} className={`reader-msg reader-turn-${turn.role}`} header={header} text={turn.text.slice(0, 500)} fold={fold}>
       {turn.text.trim() ? <BlockEl block={block} line={turn.line} index={0} target={quoteTarget(target, turn.line, 0, turn.text, quote)} hit={hit} /> : <div className="reader-msg-empty">(empty)</div>}
       {turn.cut != null && <div className="reader-msg-empty">Cut at {turn.text.length.toLocaleString()} of {turn.cut.toLocaleString()} characters. Raw shows all of it.</div>}
     </RecordCard>
@@ -883,38 +1025,6 @@ export function agentDisplay(r: any, keys: MessageKeys): AgentMsg {
   return { kind: role === 'system' ? 'system' : 'text', blocks, summary }
 }
 
-/** A message folded to one line until it is opened. The full message stays in the DOM so a search finds its words and,
- * finding them folded (`reader-collapsed`), opens it (UNFOLD_EVENT). A citation or search keeps it open (`forced`). */
-function MessageFold({ startOpen, forced, summary, children }: { startOpen: boolean; forced: boolean; summary: string; children: ReactNode }) {
-  const [open, setOpen] = useState(startOpen)
-  const box = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = box.current
-    if (!el) return
-    const unfold = () => setOpen(true)
-    el.addEventListener(UNFOLD_EVENT, unfold)
-    return () => el.removeEventListener(UNFOLD_EVENT, unfold)
-  }, [])
-  const expanded = open || forced
-  return (
-    <div ref={box} className={'reader-msgfold' + (expanded ? '' : ' reader-collapsed')}>
-      {!expanded && (
-        <button type="button" className="reader-msg-oneline" onClick={() => setOpen(true)}>
-          {summary}
-        </button>
-      )}
-      <div className="reader-msgfold-full" style={expanded ? undefined : { display: 'none' }}>
-        {children}
-      </div>
-      {expanded && !forced && (
-        <Button size="sm" className="reader-expand reader-msgfold-collapse" onClick={() => setOpen(false)}>
-          Collapse
-        </Button>
-      )}
-    </div>
-  )
-}
-
 /** A made tool-result block: cleaned terminal output, with Raw to see the stored bytes. The block is the view's own, so
  * a citation of it highlights the words it quotes (`quote`). */
 function AgentResult({ block, line, index, target, hit, quote }: { block: AgentBlock; line: number; index: number; target: Target | null; hit: boolean; quote: string | null }) {
@@ -935,19 +1045,22 @@ function AgentResult({ block, line, index, target, hit, quote }: { block: AgentB
 }
 
 /** An agent transcript whose records interleave spoken turns with tool records (the sniff's `tools`): one card per
- * message, its speaker, tool name and time in the head. A spoken reply shows (its `<thinking>` a quiet block); a tool
- * call and its cleaned result, and a system record, fold to one line until opened. A citation or a search opens the
- * message it lands in. The blocks are the view's own, so the record's label gutter marks the message and a citation
- * highlights the words it quotes; a span ref into the stored record still resolves there. */
+ * message, its speaker, tool name and time in the head. A spoken reply shows (its `<thinking>` a quiet block) unless it
+ * is long; a tool call and its cleaned result, and a system record, fold to one line until opened. A citation or a
+ * search opens the message it lands in. The blocks are the view's own, so the record's label gutter marks the message
+ * and a citation highlights the words it quotes; a span ref into the stored record still resolves there. */
 function AgentTranscript({ workspace: _workspace, path, page, targetRef, transcript }: ViewProps) {
   const records = useMemo(() => (transcript?.lines ? parsedLines(page.records) : page.records), [transcript?.lines, page.records])
   const keys = useMemo(() => keysFor(transcript, records.slice(0, 20).map((r) => r.record)), [transcript, records])
   const quote = useMemo(() => citedQuote(page.records, targetOf(targetRef, path)), [page.records, targetRef, path])
   const rootRef = useRef<HTMLDivElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records])
+  const lines = useMemo(() => records.map((r) => r.line), [records])
+  const { runs, show } = useFilterRuns(lines, target)
   return (
     <div className="reader-transcript reader-agent" ref={rootRef}>
-      {records.map((rec) => {
+      {records.map((rec, i) => {
+        const run = runs.get(i)
         const r = rec.record ?? {}
         const msg = agentDisplay(r, keys)
         const speaker = nameOf(pick(r, keys.author)) ?? '(unsigned)'
@@ -960,11 +1073,12 @@ function AgentTranscript({ workspace: _workspace, path, page, targetRef, transcr
           </>
         )
         const cite = target && target.line === rec.line ? quote : null
-        const forced = isTargetLine(target, rec.line)
-        const startOpen = msg.kind === 'text' || msg.kind === 'other'
+        const fold = blocksFold(msg.blocks)
+        if (msg.kind === 'tool' || msg.kind === 'system') fold.folded = true
         return (
-          <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className={`reader-msg reader-agent-${msg.kind}`} header={header} text={msg.summary}>
-            <MessageFold startOpen={startOpen} forced={forced} summary={msg.summary}>
+          <Fragment key={rec.line}>
+            {run && <HiddenRun run={run} onShowFiltered={show} />}
+            <RecordCard path={path} line={rec.line} target={target} hit={hit} className={`reader-msg reader-agent-${msg.kind}`} header={header} text={msg.summary} fold={fold}>
               {msg.blocks.map((b, k) =>
                 b.kind === 'tool_result' ? (
                   <AgentResult key={k} block={b} line={rec.line} index={k} target={target} hit={hit} quote={cite} />
@@ -976,8 +1090,8 @@ function AgentTranscript({ workspace: _workspace, path, page, targetRef, transcr
                   <BlockEl key={k} block={b} line={rec.line} index={k} target={quoteTarget(target, rec.line, k, b.text, cite)} hit={hit} />
                 ),
               )}
-            </MessageFold>
-          </RecordCard>
+            </RecordCard>
+          </Fragment>
         )
       })}
     </div>
@@ -1018,14 +1132,10 @@ function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
   // a conversational record with no words to show gets no row, unless a citation points at it
   const asked = targetOf(targetRef, path)?.line
   const rows = useMemo(() => records.filter((r) => !CONVERSATIONAL.has(r.record?.type) || hasWords(r.blocks) || r.line === asked), [records, asked])
-  const runs = useMemo(
-    () =>
-      hiddenRuns(
-        rows.map((r) => r.record?.type),
-        rows.map((r) => r.line),
-      ),
-    [rows],
-  )
+  // a row Filter by hides is hidden whatever its type; a ref's row shows
+  const filter = useContext(FilterContext)
+  const runs = useMemo(() => hiddenRuns(rows.map((r) => (filter && !isTargetLine(target, r.line) && filter.hides(r.line) ? 'filtered' : !CONVERSATIONAL.has(r.record?.type) && !showSystem ? 'system' : 'shown'))), [rows, filter, target, showSystem])
+  const folds = useMemo(() => new Map(rows.map((r) => [r.line, blocksFold(r.blocks)])), [rows])
   const out: ReactNode[] = []
   let prevSession: string | undefined
   let sessionNo = 1
@@ -1042,9 +1152,10 @@ function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
     }
     if (sid) prevSession = sid
     const type: string = r.type ?? 'record'
+    const run = runs.get(i)
+    if (run) out.push(<HiddenRun key={`h${rec.line}`} run={run} onShowSystem={() => setShowSystem(true)} onShowFiltered={filter?.show} />)
     if (!CONVERSATIONAL.has(type)) {
       if (showSystem) out.push(<SysRow key={rec.line} path={path} blockPath={blockPathOf(rec.line)} rec={rec} target={target} hit={hit} quote={quote} />)
-      else if (runs.has(rec.line)) out.push(<HiddenRun key={`h${rec.line}`} count={runs.get(rec.line)!} onShow={() => setShowSystem(true)} />)
       return
     }
     const ts = rec.meta?.timestamp ?? r.timestamp
@@ -1052,8 +1163,19 @@ function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
     const blockPath = blockPathOf(rec.line)
     const header = [type, ts ? stamp(String(ts)) : null].filter(Boolean).join(' · ')
     out.push(
-      <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className={`reader-rec-${type}`} header={header} text={recordExcerpt(rec)}>
-        {rec.blocks.map((b, k) => (b.kind === 'tool_result' ? <ToolResult key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} isError={errorBlocks.has(k)} /> : <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} />))}
+      <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className={`reader-rec-${type}`} header={header} text={recordExcerpt(rec)} fold={folds.get(rec.line)}>
+        {rec.blocks.map((b, k) =>
+          b.kind === 'tool_result' ? (
+            <ToolResult key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} isError={errorBlocks.has(k)} />
+          ) : b.kind === 'tool_use' ? (
+            // a tool's input folds as a long result does: a whole file in one string reads as one line wrapped many times
+            <Collapsible key={k} lines={lineCount(b.text)} forced={!!target && target.line === rec.line && target.block === k}>
+              <BlockEl block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} />
+            </Collapsible>
+          ) : (
+            <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} />
+          ),
+        )}
       </RecordCard>,
     )
   })
