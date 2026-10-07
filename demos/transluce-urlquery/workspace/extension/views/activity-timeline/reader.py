@@ -1,15 +1,21 @@
-# Activity Timeline: every URLQuery report of the catalog on one UTC time axis, one lane per data source.
+# Activity Timeline: every URLQuery report of the catalog on one UTC time axis, a lane per data source (or per value of
+# another field or a label), and the bursts of each lane's reports, its episodes.
 #
 # The data:
 #   all-reports.csv                 one row per report (38,160), the header first: report_id, report_url,
 #                                   report_date_utc (ISO 8601 in UTC, to the second), timestamp_precision, disposition
 #                                   (included, review_required or background), confidence (significant, suggestive or
 #                                   blank), broad_class (source_request, indirection or custom_program), why_included
-#                                   (free text) and caveat
+#                                   (free text of stock sentences) and caveat
 #   report-sources.csv              one row per included report: report_id, report_date_utc, data_source (a display
 #                                   name such as UNCTAD), source_basis and matched_sources
 #   additional-cited-reports.csv    the supplemental catalog, all-reports.csv's columns: a report is supplemental when
 #                                   its report_id is listed here
+#   selection-provenance.csv        the provenance of the supplement's additions, one row per report_id: source_batch,
+#                                   group, source, record_kind, selection_basis and description
+#   supplement-classifications.json {original_classifier_sha256, decisions}: one decision per supplemental report_id
+#   classification-overrides.json   {generated_at, base_release, scope, decisions}: the reviewed confidence changes, each
+#                                   with previous_confidence, confidence, basis and reason
 #
 # The records: one report per row of all-reports.csv, cited as all-reports.csv#L<n>. The reader joins the report's
 # source row on report_id (cited as report-sources.csv#L<n>) and gives each report:
@@ -17,33 +23,44 @@
 #   lane      the report's data_source, else Review required or Background control by its disposition (another
 #             disposition names its own lane, and an included report with no source row is in "No source row")
 #   catalog   supplemental when additional-cited-reports.csv lists its report_id, else main
+# A report's provenance row, supplemental decision and confidence change are joined on report_id and shown with it.
+# An episode is the reports of one lane whose consecutive times are less than GAP seconds apart; a gap of GAP or more
+# starts the next one. The page groups the reports it shows into episodes the same way for whatever the lanes are
+# grouped by; the reader knows the data source lanes' episodes, for their citations.
 #
 # The cleaning: a row whose cells do not match the header (a line cut short), a row with no report_id, a time that does
-# not parse and a report_id that repeats are no record, and problems() lists them. A source row or a supplemental row
-# whose report_id no report has cannot be placed, and unplaced() lists it.
+# not parse and a report_id that repeats are no record, and problems() lists them. The JSON files are read decision by
+# decision, so a torn file keeps the decisions before the tear. A source row, supplemental row, provenance row or
+# decision whose report_id no report has cannot be placed, and unplaced() lists it.
 #
 # The method: the index keeps each report as small integers in time order (its time, its lines, a code per field) with
 # its report_id and the byte offset of every line, so a report's row is read back from its file when the page opens it.
-# `records` sends every report the label filter keeps as columns, ROWS a fetch, and the page zooms, filters and lays out
-# its lanes without asking again.
+# `records` sends every report the label filter keeps as columns, ROWS a fetch, and the page zooms, filters, groups and
+# lays out its lanes and episodes without asking again.
 #
-# Units: a lane (unctad, review-required), a UTC day (2026-05-11), a window (2026-05-11T14:00..2026-05-11T15:00), and a
-# lane within a day or a window (unctad/2026-05-11), which the overview's bars are.
+# Units: a lane (unctad, review-required), a UTC day (2026-05-11), a window (2026-05-11T14:00..2026-05-11T15:00), a lane
+# within a day or a window (unctad/2026-05-11), which the overview's bars are, and an episode, a lane and its first
+# report's second (unctad/2026-05-17T00:10:01Z).
 #
 # Labels: a report is its two rows, so a label over either file applies to it. It stays when thimble.kept_unit holds for
-# its rows, and its marks are those thimble.marked gives either row, in the order of the labels that are on; the page
-# draws the first in its charts, since thimble cannot see inside them.
+# its rows, and its marks are those thimble.marked gives either row, in the order of the labels the view reads (those
+# that are on, and those its controls name), each with its label's id; the page reads a report's value of a label from
+# them for Color by, Filter by and Rows, since thimble cannot see inside its charts.
 import bisect
 import csv
+import json
 import re
 from datetime import datetime, timezone
 
 import thimble
 
 ALL, SRC, SUP = "all-reports.csv", "report-sources.csv", "additional-cited-reports.csv"
+PROVENANCE, SUPPLEMENT, OVERRIDES = "selection-provenance.csv", "supplement-classifications.json", "classification-overrides.json"
+PROVENANCE_COLUMNS = ("report_id", "source_batch", "group", "source", "record_kind", "selection_basis", "description")
 FIELDS = ("lane", "confidence", "disposition", "broad_class", "source_basis", "catalog", "why_included")  # coded per report
 NON_INCLUDED = {"review_required": "Review required", "background": "Background control"}
 NO_SOURCE = "No source row"
+GAP = 7200  # seconds between two reports of a lane that start a new episode
 ROWS = 40000  # reports one overview fetch sends
 MARKS_MAX = 24  # label values the page tells apart
 UNIT_REFS = 40  # refs a unit's answer cites
@@ -55,6 +72,19 @@ ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_"  #
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 DAY = re.compile(r"\d{4}-\d\d-\d\d")
 WINDOW = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d)\.\.(\d{4}-\d\d-\d\dT\d\d:\d\d)")
+EPISODE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
+UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+# why_included is a few stock sentences; the short form the page lists keeps what tells one report from another
+SHORT = (
+    (re.compile(r"^Related data source or exact task identifier: (.*?)\.?$"), r"\1"),
+    (re.compile(r"^Member of the externally selected research-activity cohort(?::.*)?\.?$"), "external cohort"),
+    (re.compile(r"^Imported tags are source-attributed evidence.*$"), ""),
+    (re.compile(r"^Submitted content uses an intermediary or publishes task material\.$"), "intermediary or published task"),
+    (re.compile(r"^Supplied task-specific code fetches data or automatically submits a POST form\.$"), "task code"),
+    (re.compile(r"^Explicit reference or discovery candidate; relation to an agent-like workflow needs review\.$"),
+     "candidate, needs review"),
+)
+SENTENCE = re.compile(r"(?<=\.)\s+(?=[A-Z])")
 
 
 def _epoch(s):
@@ -69,8 +99,8 @@ def _epoch(s):
     return int((dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp())
 
 
-def _iso(t):
-    return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M")
+def _iso_second(t):
+    return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _when(t, seconds=False):
@@ -80,6 +110,19 @@ def _when(t, seconds=False):
 
 def slug(name):
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "lane"
+
+
+def short_why(text):
+    """why_included with its stock sentences cut to a few words and its disclaimer dropped, joined by ' · '."""
+    out = []
+    for s in SENTENCE.split((text or "").strip()):
+        for pat, rep in SHORT:
+            if pat.match(s):
+                s = pat.sub(rep, s)
+                break
+        if s and s not in out:
+            out.append(s)
+    return " · ".join(out)
 
 
 def _rows(path, offs, problems):
@@ -137,19 +180,63 @@ def _table(path, offs, problems, need):
     return header, out
 
 
+def _decisions(path, problems):
+    """[(index, first line, last line, decision)] of a JSON file's `decisions` array, read one decision at a time, so a
+    torn file keeps the decisions before the tear, which is a problem."""
+    try:
+        with open(path, "rb") as fh:
+            text = fh.read().decode("utf-8", "replace")
+    except OSError as e:
+        problems.append({"ref": f"{path}#L1", "why": f"cannot be read ({type(e).__name__})"})
+        return []
+    line_of = lambda pos: text.count("\n", 0, pos) + 1  # noqa: E731
+    try:
+        json.loads(text)
+        whole = True
+    except ValueError as e:
+        whole = False
+        problems.append({"ref": f"{path}#L{line_of(getattr(e, 'pos', 0) or 0)}",
+                         "why": "not valid JSON (the file may be cut short): the decisions before this line are read"})
+    m = re.search(r'"decisions"\s*:\s*\[', text)
+    if not m:
+        if whole:
+            problems.append({"ref": f"{path}#L1", "why": "no decisions array"})
+        return []
+    dec, pos, out, gap = json.JSONDecoder(), m.end(), [], re.compile(r"[\s,]*")
+    while True:
+        pos = gap.match(text, pos).end()
+        if pos >= len(text) or text[pos] == "]":
+            break
+        try:
+            item, end = dec.raw_decode(text, pos)
+        except ValueError:
+            if whole:
+                problems.append({"ref": f"{path}#L{line_of(pos)}", "why": "a decision that does not parse"})
+            break
+        k = len(out)
+        if not isinstance(item, dict) or not UUID.fullmatch(str(item.get("report_id", "")).strip()):
+            problems.append({"ref": f"{path}#/decisions/{k}", "why": "a decision with no report_id"})
+        out.append((k, line_of(pos), line_of(end - 1), item))
+        pos = end
+    return out
+
+
 def build_index(paths):
     """{"n", "t": [epoch] in time order, "line": [all-reports.csv line], "sline": [report-sources.csv line or 0],
-    "codes": {field: [code]}, "names": {field: [value]}, "ids": [report_id], "lanes": [lane codes, largest first, the
-    non-included last], "lane_keys": {key: code}, "files": {name: path}, "offsets": {path: [byte offset of line n at n-1]},
-    "lane_count": [reports per lane], "by_lane": {lane: [rows]}, "at": {path: {line: row}}, "problems", "unplaced"}."""
+    "codes": {field: [code]}, "names": {field: [value]}, "short": [why_included's short form, by its code], "ids":
+    [report_id], "lanes": [lane codes, largest first, the non-included last], "lane_keys": {key: code}, "files": {name:
+    path}, "offsets": {path: [byte offset of line n at n-1]}, "lane_count": [reports per lane], "by_lane": {lane:
+    [rows]}, "episodes": [{lane, start, end, rows}], "ep_at": {unit key: episode}, "at": {path: {line: row}},
+    "provenance", "supplement", "overrides": {row: record and its place}, "problems", "unplaced"}."""
     files = {}
     for p in paths:
         name = p.rsplit("/", 1)[-1]
-        if name in (ALL, SRC, SUP):
+        if name in (ALL, SRC, SUP, PROVENANCE, SUPPLEMENT, OVERRIDES):
             files[name] = p
     problems, unplaced, offsets = [], [], {}
 
     sources, sup = {}, {}
+    thimble.progress(0, 5, "Reading the source table")
     if SRC in files:
         p = files[SRC]
         offsets[p] = []
@@ -171,6 +258,7 @@ def build_index(paths):
             if rid:
                 sup.setdefault(rid, a)
 
+    thimble.progress(1, 5, "Reading the catalog")
     found, seen = [], {}
     if ALL in files:
         p = files[ALL]
@@ -232,22 +320,70 @@ def build_index(paths):
             k, i = f"{slug(names['lane'][c])}-{i}", i + 1
         taken.add(k)
         lane_keys[k] = c
+    key_of = {c: k for k, c in lane_keys.items()}
     at = {p: {} for p in offsets}
     for i, x in enumerate(found):
         at[files[ALL]][x[1]] = i
         if x[2]:
             at[files[SRC]][x[2]] = i
+    by_id = {x[3]: i for i, x in enumerate(found)}
     if SUP in files:
-        by_id = {x[3]: i for i, x in enumerate(found)}
         for rid, a in sup.items():
             if rid in by_id:
                 at[files[SUP]][a] = by_id[rid]
     by_lane = {}
     for i, c in enumerate(codes["lane"]):
         by_lane.setdefault(c, []).append(i)
-    return {"n": n, "t": [x[0] for x in found], "line": [x[1] for x in found], "sline": [x[2] for x in found],
-            "ids": [x[3] for x in found], "codes": codes, "names": names, "lanes": lanes, "lane_keys": lane_keys,
-            "lane_count": count, "by_lane": by_lane, "files": files, "offsets": offsets, "at": at,
+
+    # the episodes of each data source lane: its reports in time order, split where two lie GAP or more apart
+    thimble.progress(2, 5, "Finding the episodes")
+    t_of = [x[0] for x in found]
+    episodes, ep_at = [], {}
+    for c in lanes:
+        cur = []
+        for i in by_lane.get(c, []):
+            if cur and t_of[i] - t_of[cur[-1]] >= GAP:
+                episodes.append({"lane": c, "start": t_of[cur[0]], "end": t_of[cur[-1]], "rows": cur})
+                cur = []
+            cur.append(i)
+        if cur:
+            episodes.append({"lane": c, "start": t_of[cur[0]], "end": t_of[cur[-1]], "rows": cur})
+    for e, ep in enumerate(episodes):
+        ep_at.setdefault(f"{key_of[ep['lane']]}/{_iso_second(ep['start'])}", e)
+
+    # provenance rows and decisions, each joined to its report by report_id
+    thimble.progress(3, 5, "Reading provenance and decisions")
+    provenance, supplement, overrides = {}, {}, {}
+    if PROVENANCE in files:
+        p = files[PROVENANCE]
+        offsets[p] = []
+        _, rows = _table(p, offsets[p], problems, PROVENANCE_COLUMNS)
+        at[p] = {}
+        for a, _b, r in rows:
+            rid = r["report_id"].strip()
+            if rid not in by_id:
+                unplaced.append({"ref": f"{p}#L{a}", "why": f"no report in {ALL} has the report_id {rid}"})
+                continue
+            provenance[by_id[rid]] = {"line": a, "record": {k: r.get(k, "").strip() for k in PROVENANCE_COLUMNS}}
+            at[p][a] = by_id[rid]
+    for name, store in ((SUPPLEMENT, supplement), (OVERRIDES, overrides)):
+        if name not in files:
+            continue
+        p = files[name]
+        for k, a, b, d in _decisions(p, problems):
+            rid = str(d.get("report_id", "")).strip() if isinstance(d, dict) else ""
+            if not rid:
+                continue
+            if rid not in by_id:
+                unplaced.append({"ref": f"{p}#/decisions/{k}", "why": f"no report in {ALL} has the report_id {rid}"})
+                continue
+            store[by_id[rid]] = {"k": k, "lines": [a, b], "record": d}
+    thimble.progress(5, 5, "Done")
+    return {"n": n, "t": t_of, "line": [x[1] for x in found], "sline": [x[2] for x in found],
+            "ids": [x[3] for x in found], "codes": codes, "names": names,
+            "short": [short_why(w) for w in names["why_included"]], "lanes": lanes, "lane_keys": lane_keys,
+            "lane_count": count, "by_lane": by_lane, "episodes": episodes, "ep_at": ep_at, "files": files,
+            "offsets": offsets, "at": at, "provenance": provenance, "supplement": supplement, "overrides": overrides,
             "problems": problems, "unplaced": unplaced}
 
 
@@ -309,14 +445,13 @@ def _name(index, f, i):
 
 
 class _Labels:
-    """The label calls of one fetch: `marks` the values of the labels that are on, each {label, value, colour}, in
-    thimble's order; `first(i)` the first of them that marks report i (-1 for none) and `bits(i)` all of them;
-    `kept(i)` whether the label filter keeps it."""
+    """The label calls of one fetch: `marks` the values of the labels the view reads, each {label, id, value, colour},
+    in thimble's order; `bits(i)` those that mark report i, as bits; `kept(i)` whether the label filter keeps it."""
 
     def __init__(self, index):
         self.index = index
         on = thimble.view_labels()
-        self.marks = [{"label": lab["name"], "value": v["name"], "colour": v["colour"]}
+        self.marks = [{"label": lab["name"], "id": lab.get("id"), "value": v["name"], "colour": v["colour"]}
                       for lab in on.get("labels") or [] for v in lab.get("values") or []][:MARKS_MAX]
         self.filter = on.get("filter")
         self._at = {(m["label"], m["value"]): k for k, m in enumerate(self.marks)}
@@ -359,8 +494,8 @@ def _overview(index, start, keep):
     gap); `sl` the line in report-sources.csv as the difference from the last report that has one, 0 for none; `codes`
     each field's index into `names` packed as `w` characters of ALPHABET per report; and `mb` [report, bits] for each
     report a label marks, its marks as bits. `next` is the row the next page starts at, None after the last. The first
-    page also holds `t0`, `names`, `lanes` (the lanes' codes in order), `keys` (each lane's unit key), `counts` (every
-    lane's reports, unfiltered), `files`, `marks`, `alphabet` and `total`."""
+    page also holds `t0`, `names`, `short` (why_included's short forms), `lanes` (the lanes' codes in order), `keys`
+    (each lane's unit key), `counts` (every lane's reports, unfiltered), `files`, `marks`, `alphabet` and `total`."""
     labels = _Labels(index)
     n = index["n"]
     t0 = index["t"][0] if n else 0
@@ -395,16 +530,18 @@ def _overview(index, start, keep):
     page = {"n": len(rows), "r": None if all(x == 1 for x in r) else r, "t": t, "ln": ln, "sl": sl, "codes": codes,
             "ids": ids, "mb": mb, "next": i if i < n else None, "start": start}
     if start <= 0:
-        page.update(t0=t0, t1=index["t"][-1] if n else 0, names=index["names"], lanes=index["lanes"],
-                    keys={str(c): k for k, c in index["lane_keys"].items()}, counts=index["lane_count"],
-                    files={"all": index["files"].get(ALL), "src": index["files"].get(SRC)}, marks=labels.marks,
-                    alphabet=ALPHABET, id_chars=ID_CHARS, total=n, filtered=bool(labels.filter))
+        page.update(t0=t0, t1=index["t"][-1] if n else 0, names=index["names"], short=index["short"],
+                    lanes=index["lanes"], keys={str(c): k for k, c in index["lane_keys"].items()},
+                    counts=index["lane_count"], files={"all": index["files"].get(ALL), "src": index["files"].get(SRC)},
+                    marks=labels.marks, alphabet=ALPHABET, id_chars=ID_CHARS, total=n, gap=GAP,
+                    filtered=bool(labels.filter))
     return page
 
 
 def _report(index, i):
     """Report i in full: the cells of its all-reports.csv row under their column names, its source row (`source`, with
-    its ref) when it has one, its lane and catalog, and the marks of the labels that are on."""
+    its ref) when it has one, its provenance row, supplemental decision and confidence change when its report_id has
+    them (each {ref, record}), its lane and catalog, and the marks of the labels the view reads."""
     if not isinstance(i, int) or isinstance(i, bool) or not 0 <= i < index["n"]:
         return None
     path = index["files"][ALL]
@@ -415,6 +552,15 @@ def _report(index, i):
         src = _parse(index, sp, index["sline"][i])
         out["source"] = {"ref": f"{sp}#L{index['sline'][i]}", **{k: src.get(k, "") for k in
                                                                   ("data_source", "source_basis", "matched_sources")}}
+    p = index["provenance"].get(i)
+    if p:
+        out["provenance"] = {"ref": f"{index['files'][PROVENANCE]}#L{p['line']}", "record": p["record"]}
+    for name, key, store in ((SUPPLEMENT, "supplement", "supplement"), (OVERRIDES, "override", "overrides")):
+        d = index[store].get(i)
+        if d:
+            out[key] = {"ref": f"{index['files'][name]}#/decisions/{d['k']}",
+                        "record": {k: v for k, v in d["record"].items() if isinstance(v, (str, int, float)) or
+                                   (isinstance(v, list) and all(isinstance(x, str) for x in v))}}
     out["lane"] = _name(index, "lane", i)
     out["catalog"] = _name(index, "catalog", i)
     out["marks"] = _Labels(index).of(i)
@@ -507,10 +653,40 @@ def _chip(*parts):
     return " · ".join(parts)
 
 
+EXCERPT_CELLS = {
+    SUPPLEMENT: ("reason", "basis", "confidence", "broad_class"),
+    OVERRIDES: ("reason", "previous_confidence", "confidence", "basis"),
+}
+
+
+def _quote(record, name):
+    """The cells of a decision an excerpt quotes, one a line, each once."""
+    out = []
+    for k in EXCERPT_CELLS[name]:
+        v = record.get(k) if isinstance(record, dict) else None
+        v = v.strip() if isinstance(v, str) else ""
+        if v and v not in out:
+            out.append(v)
+    return out
+
+
+def _report_place(index, i, refs, excerpt, what=""):
+    """A citation of report i: its lane, its time and what of it is cited, opened in its lane."""
+    if not excerpt:
+        return None
+    lane = _name(index, "lane", i)
+    key = next((k for k, c in index["lane_keys"].items() if c == index["codes"]["lane"][i]), None)
+    return {"excerpt": excerpt, "label": _chip(lane + what, _when(index["t"][i], True)[:-3]), "refs": refs, "key": key,
+            "target": {"r": i}}
+
+
 def resolve(index, locator):
-    """<file>#L<n>: the report on that line of any of the three files, opened in its lane; a header line is the file's
-    columns. view:<slug>/<lane>: one lane's reports. view:<slug>/<YYYY-MM-DD> or <from>..<to>: the reports of a UTC day
-    or window. view:<slug>/<lane>/<day or window>: one lane's reports in it."""
+    """<file>#L<n>: the report on that line of all-reports.csv, report-sources.csv, additional-cited-reports.csv or
+    selection-provenance.csv, opened in its lane; a header line is the file's columns. <decisions file>#/decisions/<k>
+    or #L<n>: the report the decision is about, from the decision on that line or the nearest one after it.
+    view:<slug>/<lane>: one lane's reports. view:<slug>/<YYYY-MM-DD> or <from>..<to>: the reports of a UTC day or window.
+    view:<slug>/<lane>/<day or window>: one lane's reports in it. view:<slug>/<lane>/<YYYY-MM-DDTHH:MM:SSZ>: the
+    episode of that lane whose first report is at that second."""
     if "key" in locator:
         key = str(locator["key"]).strip()
         lane_key, _, when = key.partition("/")
@@ -520,6 +696,15 @@ def resolve(index, locator):
             name = index["names"]["lane"][c]
             if not when:
                 return _unit(index, rows, _chip(name, _plural(len(rows), "report")), key, {"lane": c})
+            if EPISODE.fullmatch(when):
+                e = index["ep_at"].get(key)
+                if e is None:
+                    return None
+                ep = index["episodes"][e]
+                d = datetime.fromtimestamp(ep["start"], timezone.utc)
+                return _unit(index, ep["rows"], _chip(name, f"episode {d.day} {MONTHS[d.month - 1]} {d:%H:%M}",
+                                                      _plural(len(ep["rows"]), "report")), key,
+                             {"lane": c, "episode": ep["start"], "from": ep["start"], "to": ep["end"] + 1})
             w = _window(when)
             if w is None:
                 return None
@@ -532,6 +717,29 @@ def resolve(index, locator):
         got = _span(index, w[0], w[1])
         return _unit(index, got, _chip(w[2], _plural(len(got), "report")), key, {"from": w[0], "to": w[1]})
     path, fragment = locator.get("path"), str(locator.get("fragment") or "")
+    name = str(path or "").rsplit("/", 1)[-1]
+    if name in (SUPPLEMENT, OVERRIDES) and index["files"].get(name) == path:
+        store = index["supplement" if name == SUPPLEMENT else "overrides"]
+        found = sorted(store.items(), key=lambda kv: kv[1]["k"])
+        if not found:
+            return None
+        m = re.fullmatch(r"/decisions/(\d+)(?:/.*)?", fragment)
+        line = re.fullmatch(r"L(\d+)", fragment)
+        if m:
+            hit = next((kv for kv in found if kv[1]["k"] == int(m.group(1))), None)
+            refs = [f"{path}#/decisions/{m.group(1)}"]
+        elif line:
+            n = int(line.group(1))
+            hit = next((kv for kv in found if kv[1]["lines"][0] <= n <= kv[1]["lines"][1]), None)
+            hit = hit or next((kv for kv in found if kv[1]["lines"][0] > n), found[-1])
+            refs = [f"{path}#L{n}", f"{path}#/decisions/{hit[1]['k']}"]
+        else:
+            return None
+        if not hit:
+            return None
+        i, d = hit
+        return _report_place(index, i, refs, "\n".join(_quote(d["record"], name)),
+                             "'s decision" if name == SUPPLEMENT else "'s confidence change")
     m = re.fullmatch(r"L(\d+)", fragment)
     if not m or path not in index["at"]:
         return None
@@ -539,17 +747,15 @@ def resolve(index, locator):
     text = _line(index, path, n)
     if text is None or not text.strip():
         return None
-    name = path.rsplit("/", 1)[-1]
     if n == 1:
         return {"excerpt": text, "label": f"{name} columns", "refs": [f"{path}#L1"], "key": None, "target": {}}
     i = index["at"][path].get(n)
     if i is None:
         return None
+    if name == PROVENANCE:
+        return _report_place(index, i, [f"{path}#L{n}"], text, "'s provenance")
     refs = [f"{path}#L{n}"] + [r for r in _refs(index, i) if r != f"{path}#L{n}"]
-    lane = _name(index, "lane", i)
-    key = next((k for k, c in index["lane_keys"].items() if c == index["codes"]["lane"][i]), None)
-    return {"excerpt": text, "label": _chip(lane, _when(index["t"][i], True)[:-3]), "refs": refs, "key": key,
-            "target": {"r": i}}
+    return _report_place(index, i, refs, text)
 
 
 def problems(index):
@@ -558,7 +764,7 @@ def problems(index):
 
 
 def unplaced(index):
-    """The source and supplemental rows whose report_id no report has, each {ref, why}."""
+    """The source, supplemental and provenance rows and the decisions whose report_id no report has, each {ref, why}."""
     return index["unplaced"]
 
 
