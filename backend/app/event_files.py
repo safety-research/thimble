@@ -23,6 +23,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import secrets
 import time
 from pathlib import Path
@@ -38,8 +39,11 @@ MEANWHILE = "meanwhile:"  # events.MEANWHILE
 SAID = "› "  # events.SAID: opens the analyst's own words in an event's line
 # the kinds of event whose line main's terminal leaves out (said): Claude Code draws a hook's systemMessage under the
 # hook's name (`UserPromptSubmit says: …`), a row no render hook reaches, and the terminal's own rows already say these:
-# a thread's question in its fork's row and its `↳` row (thimble-term), a writer's end in its hand-back's row
+# a thread's question in its fork's row and its `↳` row (thimble-term), a writer's end in its hand-back's row. A thread's
+# event wakes main, whose turn Claude Code opens with a `● thimble` row no hook removes, so it keeps one short line under
+# that row (short_line) rather than none
 TOLD_IN_CHAT = ("thread", "written")
+SHORT_CHARS = 60  # of a thread's question, or of a message to it, in its short line
 
 
 def queue_path(ws: Path) -> Path:
@@ -184,8 +188,38 @@ def joined(notes: list[dict[str, Any]]) -> str:
 
 
 def said(notes: list[dict[str, Any]]) -> str:
-    """The lines main's held hook prints in the terminal for these events: joined, less those of TOLD_IN_CHAT."""
-    return joined([n for n in notes if str((n.get("meta") or {}).get("kind") or "") not in TOLD_IN_CHAT])
+    """The lines main's held hook prints in the terminal for these events: joined, those of TOLD_IN_CHAT as their short
+    line, or left out."""
+    out = []
+    for n in notes:
+        kind = str((n.get("meta") or {}).get("kind") or "")
+        line = short_line(n) if kind in TOLD_IN_CHAT else str(n.get("terminal") or "")
+        if line:
+            out.append(line)
+    return "\n".join(out)
+
+
+def short_line(note: dict[str, Any]) -> str:
+    """The one short line for an event of TOLD_IN_CHAT: a thread's question in quotation marks (`new thread: "Make a
+    small table card…"`), or a message to a thread after its first question (`thread "Make a small…": "And on 19
+    June?"`); '' for a writer's end, whose hand-back's row says it and which opens no `● thimble` row."""
+    if str((note.get("meta") or {}).get("kind") or "") != "thread":
+        return ""
+    line = str(note.get("terminal") or "").removeprefix(SAID)
+    if line.startswith("new thread: "):
+        return f'new thread: "{_cut(line.removeprefix("new thread: "), SHORT_CHARS)}"'
+    m = re.match(r'^thread (\u201c[^\u201d]*\u201d|"[^"]*"): (.+)$', line)
+    return f'thread {m.group(1)}: "{_cut(m.group(2), SHORT_CHARS)}"' if m else _cut(line, SHORT_CHARS)
+
+
+def _cut(text: str, n: int) -> str:
+    """`text` cut to `n` characters at a word, with an ellipsis right after the last word kept."""
+    text = " ".join(text.split())
+    if len(text) <= n:
+        return text
+    head = text[: n - 1]
+    word = head.rsplit(" ", 1)[0]
+    return (word if len(word) > n // 2 else head).rstrip(" ,;:.") + "\u2026"
 
 
 # --------------------------------------------------------------------------- the queue

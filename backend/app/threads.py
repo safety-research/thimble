@@ -494,6 +494,15 @@ def fork_started(c: str, thread_id: str, *, agent_id: str | None = None, tool_us
         flush(c, thread_id)
 
 
+def settled(c: str, thread_id: str) -> bool:
+    """Whether the thread's last question has an answer or an end after it (a reply, `done`, or an error that says why
+    its run stopped), or it has no question."""
+    records = agents.read_events(agents.paths(c, thread_id)[1])
+    last_user = max((i for i, r in enumerate(records) if r.get("type") == "user"), default=-1)
+    return last_user < 0 or any(r.get("type") in ("done", "error") or (r.get("type") == "text" and r.get("reply"))
+                                for r in records[last_user + 1:])
+
+
 def replied_since_question(c: str, thread_id: str) -> bool:
     """Whether a reply follows the analyst's last question in the thread's chat."""
     _, log_path = agents.paths(c, thread_id)
@@ -638,6 +647,13 @@ def session_ended(c: str, sid: str) -> None:
                 agents.update_agent(c, tid, **{QUEUED_KEY: []})  # logged already; ask_again sends every unanswered one
             if not replied_since_question(c, tid):
                 _stop(c, tid, SESSION_ENDED)
+            agents.notify(c, tid)
+        elif (fork.get("session") in (None, sid) or fork.get("ended")) and not settled(c, tid):
+            # a question that no fork of this session answered or ended (terminal mode, where each pass of the mirror
+            # runs in its own process and none holds the thread's running mark): it stops and says so, as above
+            if meta.get(QUEUED_KEY):
+                agents.update_agent(c, tid, **{QUEUED_KEY: []})
+            _stop(c, tid, SESSION_ENDED)
             agents.notify(c, tid)
 
 

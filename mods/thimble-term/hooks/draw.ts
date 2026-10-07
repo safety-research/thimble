@@ -301,7 +301,9 @@ export function placeWords(ref: string): string {
   if (at < 0) return ref
   const path = ref.slice(0, at)
   const frag = ref.slice(at + 1)
-  const lines = /^L(\d+)(?:-L?(\d+))?$/.exec(frag)
+  // a line, a range of lines, or a passage of a line (`L2.b0:c0-120`, a block of a JSON line and its characters), which
+  // reads as its line
+  const lines = /^L(\d+)(?:-L?(\d+)|\.b\d+(?::c\d+-\d+)?)?$/.exec(frag)
   if (lines) return `${path} ${lines[2] && lines[2] !== lines[1] ? `lines ${lines[1]}-${lines[2]}` : `line ${lines[1]}`}`
   const row = /^row=(\d+)$/.exec(frag)
   if (row) return `${path} row ${row[1]}`

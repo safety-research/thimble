@@ -237,7 +237,7 @@ test("a JSON line's citation: the records around it one line each, as Raw draws 
 
 test("main's fork of a thread runs with the thread's question as its description; its prompt keeps `thread:<name>`", () => {
   const rows = [{ id: 't1', title: 'raises the 3,898 count', fork: 'who-wrote-line-2', question: 'Who wrote line 2 of agent-chat.jsonl, and at what time? One sentence.' }]
-  expect(forkDescription({ subagent_type: 'fork', name: 'who-wrote-line-2', description: 'thread:who-wrote-line-2', prompt: 'thread:who-wrote-line-2' }, rows)).toBe('thread “Who wrote line 2 of agent-chat.jsonl…”')
+  expect(forkDescription({ subagent_type: 'fork', name: 'who-wrote-line-2', description: 'thread:who-wrote-line-2', prompt: 'thread:who-wrote-line-2' }, rows)).toBe('thread: Who wrote line 2 of agent-chat.jsonl…')
   // not a fork, a thread not listed, or a prompt that does not name the fork: as main wrote it
   expect(forkDescription({ subagent_type: 'general-purpose', description: 'thread:who-wrote-line-2', prompt: 'thread:who-wrote-line-2' }, rows)).toBeNull()
   expect(forkDescription({ subagent_type: 'fork', description: 'thread:other', prompt: 'thread:other' }, rows)).toBeNull()

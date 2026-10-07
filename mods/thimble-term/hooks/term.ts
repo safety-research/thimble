@@ -10,7 +10,7 @@ import type { CardData, CardLabel } from './draw'
 import type { Ctx, SurfaceGot } from './ctx'
 import { act, actLong, changed, readState, signature } from './data'
 import type { Area, Scope, Signature } from './data'
-import { cid, citations, clip, noteQuestion, quoted } from './lib'
+import { cid, citations, clip, labelRef, noteQuestion, quoted } from './lib'
 import type { Citation } from './lib'
 import { agentsOf, cellOf, cellsOf, chatOf, docUnits, homeOf, labelIdOf, labelOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
 import { NAV_EMPTY, backTarget, moved, nextTrail } from './nav'
@@ -273,6 +273,7 @@ async function refreshCards(cx: Ctx, labels: boolean): Promise<void> {
  *  drawing may call it: it only notes them. */
 export function queueCitations(cs: readonly Citation[]): void {
   for (const c of cs) {
+    if (labelRef(c.ref)) continue // a label's link names no place to check
     const id = cid(c.raw)
     if (!rt.queue.has(id)) rt.queue.set(id, c)
     const card = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(c.ref)?.[1]

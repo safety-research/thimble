@@ -225,9 +225,10 @@ Not drawn: `▶`, `✗ ◇ ■ □ ━ ┃ • ✕ ❚❚ ⓘ ✦ ❢ ⚠ ≡ �
 cut is one cut (`hooks/lib.ts` `cut`): at the last word that fits, mid-word only when a word fills more than half the
 room, `…` right against the last word kept, with no space or punctuation before it; a row, a title, a path step, a
 preview, a context line (cut at a word at each end) and a tip all cut that way. Words in quotation marks that end what
-is cut are cut inside the marks, and the closing mark stays (`thread "Which line of…"`). An inline list of facts parted
-by ` · ` (a label example's other fields) keeps whole items and ends `…` after the last one that fits, never `·…` or a
-key without its value. A file's line of code or data (JSON, a tag) is cut at the cell edge, so a file's rows end
+is cut are cut inside the marks, and the closing mark stays (`thread "Which line of…"`); words in quotation marks that
+open in what is kept and close after the cut keep their closing mark too (`citation card "How…"`). An inline list of
+facts parted by ` · ` (a label example's other fields) keeps whole items and ends ` · +N` for the N left out, never a
+`…` against a whole value (which reads as a cut one), `·…` or a key without its value. A file's line of code or data (JSON, a tag) is cut at the cell edge, so a file's rows end
 together; prose is cut at a word. Someone's words in quotation marks take straight ones, curly ones (`“…”`) when they
 hold straight ones of their own, and none when they hold both. A count
 reads with thousands separators from 1,000 wherever thimble-term draws it; a number that names a thing (a line, a year,
@@ -251,7 +252,8 @@ while thimble's links check runs.
     what. The keys are Buttons with no label of their own, in a Box no row tall (`hiddenKeys`). While a text field
     holds the panel's focus (the new thread's field, which takes it as the view opens; a follow-up field once clicked),
     a letter goes into the field, so the row reads `Enter to ask · Esc to leave the field`; Esc gives the keys back to
-    the prompt, and the row then names the panel's keys, which a click on the panel gives back.
+    the prompt, and while the prompt holds them the row names none of the panel's keys (a letter or Enter would go to
+    the prompt, and Enter to main), only `click the panel for its keys`.
 27. A field: its label dim and lower case on the label column, the field on L, no colon (`ask`, `follow-up`,
     `describe a new label`, the label panel's `prompt`). A field that shows all of its text (the label's prompt) has a
     border in the rule gray; a click gives it the keyboard.
@@ -350,9 +352,10 @@ colored is said under each.
   path; each question cut at a word. A side thread's fork row and the notice that it finished name the thread by its
   first question (`thread "How many of the 2,994…"`), never the fork's slug, and so do the fork's prompt and result in
   ctrl+o (`Prompt:`). Main's Agent call for a fork runs with the thread's question as its description
-  (`thread “How many of the 2,994…”`, thimble-term's `tool.call`; its prompt keeps `thread:<name>`, by which thimble
+  (`thread: How many of the 2,994…`, thimble-term's `tool.call`, with no quotation marks of its own, since Claude Code
+  quotes a description: `Agent "thread: How many…" finished`; its prompt keeps `thread:<name>`, by which thimble
   knows the fork), and the fork's name is a slug of that question, so Claude Code's agent tray (`◯ how-many-of-the-2994
-  thread “How many of the 2,994…”`) and its exit dialog (`subagent · thread “…”`) name the thread by its question too. A
+  thread: How many of the 2,994…`) and its exit dialog (`subagent · thread: …`) name the thread by its question too. A
   second fork call that thimble refuses names the thread by its question in its error row. A thimble tool's words (a question, a takeaway) draw their straight quotation marks curly, which
   Claude Code does not escape (`“Agent”`, never `\"Agent\"`); code stays as written. The running `thimble-run` row
   (`⎿ $ thimble-run card <id>`), which no hook reaches, has no install path: the tools give the command by its name and
@@ -362,11 +365,14 @@ colored is said under each.
   (ctrl+o's view still draws the reply's time and model over the hidden line: no hook reaches that header).
 - Claude Code draws a hook's `systemMessage` as its own row under the hook's name (`⎿ UserPromptSubmit says: …`), which
   no render hook reaches. thimble's held hook prints there the lines of the events that reached main, so in terminal
-  mode it leaves out those the chat's own rows already say: a thread's question (its fork's row and its `↳` row) and a
-  writer's end (its hand-back's row). The other events' lines (a label run finished, a view built, the orientation's
-  coverage line) still show in that row.
-- After `claude` exits, the launcher (not thimble-term) prints `Resume this session with thimble: thimble --continue` under
-  Claude Code's own `Resume this session with: claude --resume …`, which would resume the session without thimble; and
+  mode it shortens or leaves out those the chat's own rows already say: a thread's question (its fork's row and its `↳`
+  row) is one short line, `new thread: "Make a small table…"`, since its wake opens a `● thimble` row (the hook's
+  rewakeSummary) that no hook removes and that would otherwise stand empty; a writer's end (its hand-back's row) none.
+  The other events' lines (a label run finished, a view built, the orientation's coverage line) still show in that
+  row.
+- After `claude` exits, the launcher (not thimble-term) prints `Resume with thimble --continue instead; it loads thimble's
+  plugin.` under Claude Code's own `Resume this session with: claude --resume …`, which would resume the session without
+  thimble; and
   `thimble --continue` says `continuing the last thimble session in this folder`, with no session id.
 
 **Cards**, alike in the chat, the card pane, the citation panel and a document (rule 11 for the frame):
@@ -549,7 +555,10 @@ colored is said under each.
   the cited value on the selection background; each record around the cited one on one dim row, as Raw draws it (a JSON
   record as its line of JSON), the cited record over its rows, and never a record cut after its first rows; a cited line wrapped over 3 to 8 rows by the pane's height, with two
   lines of context when it wraps. A card value's citation draws the card in its frame, the cited mark on the
-  selection background.
+  selection background. A citation of lines a card printed (`card:<id>@out0#L1`) draws those lines of the output, two
+  on each side, the cited value (the whole line, for a citation with no words) on the selection background, never the
+  card's table; it is named `card "<question>" output line 1`, never `card L1`. A place cited with a passage of its line
+  (`#L2.b0:c0-120`) reads as its line (`agent-chat.jsonl line 2`).
 - The bottom: `ask about it`, then the `follow-up` field when the citation was opened from a side thread.
 
 **The views pane:** `N views · N built`; one row per view, newest first: its glyph, its name, the files it claims dim
@@ -622,7 +631,10 @@ it in browser mode.
   while it runs, and the type as plain text. A run's first error is a red `!` row under them.
 - `▸ counts`, `▸ examples` and `▸ cards` are folded, and nothing of them shows until one is opened. Counts: each
   value's `●` in its hue, its name, a bar on a track to the whole, its count and its share dim, in whole percent as every
-  share (`7%` beside `93%`; one decimal under 1%); the values to edit.
+  share (`7%` beside `93%`; one decimal under 1%); the values to edit. The counts apply the analyst's verdicts, as
+  thimble.labels() reads the rows: a record set to another value counts under that value, and the toggle row says how
+  many (`▸ counts  500 · 1 set by you`). A link to the label in a reply (`[33](concept:<id>/yes)`) opens the panel with
+  its counts and examples open and the value on the selection background, its examples first.
   Examples: grouped by value (a record the analyst set or agreed with under the value they gave), each record with `↗`
   and its place, `agree` or another value, the record's words in quotation marks and italic, `why` dim; a JSON record
   shows the field the rule reads first (a code label's `unit['name']`, the field a pattern matches, a field the prompt

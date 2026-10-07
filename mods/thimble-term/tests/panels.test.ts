@@ -358,3 +358,14 @@ test('the key hints come in one order on every panel: choosing, Enter, Space, th
   expect(shown(await pane.drawn())).toContain('↑↓ to choose · Enter to open · Space to fold · b to go back · x to close')
   await pane.unmount()
 })
+
+test("home's label row counts as thimble.labels() reads the rows: the analyst's verdicts applied", async ($, on) => {
+  const w = world(on)
+  Object.assign(w.states.labels[0]!, { verdicts: { counts: { none: 9401, 'proxy-link': 5190 }, set: 1 } })
+  await start($, w)
+  const pane = await home($, w)
+  const text = (((await pane.drawn({ in: 'm:home' })) as { children?: unknown[] }).children ?? []).map(r => shown(r)).join('\n')
+  expect(text).toContain('proxy-link 5,190')
+  expect(text).toContain('none 9,401')
+  await pane.unmount()
+})

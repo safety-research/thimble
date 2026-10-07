@@ -24,7 +24,7 @@ import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
 import type { Target } from './gestures'
-import { bareCard, cardWords, cid, citations, clip, curlyQuotes, embeddedCards, mdPieces, noteQuestion, parseReply, quoted, sectionsOf } from './lib'
+import { bareCard, cardWords, cid, citations, clip, curlyQuotes, embeddedCards, labelRef, mdPieces, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, paintLines } from './paint'
@@ -50,6 +50,13 @@ export async function cardName(cx: Ctx, id: string): Promise<string> {
 /** A ref as the analyst reads it: a card's place by the card's question, a command's output by its line, never an id;
  *  any other place in words. */
 export async function placeName(cx: Ctx, ref: string): Promise<string> {
+  // lines the card printed, by its question and the output's lines
+  const out = outputLine(ref)
+  if (out) {
+    const lines = out.last !== out.first ? `lines ${out.first}-${out.last}` : `line ${out.first}`
+    const name = await cardName(cx, out.card)
+    return name === 'the card' ? `the card's output ${lines}` : `${name} output ${lines}`
+  }
   const m = CARD_REF.exec(ref)
   // a card's output line (`card:<id>@out0#L8`) by its line, a cell by its column and row
   if (m) return m[2] ? `${await cardName(cx, m[1]!)} · ${/^L\d+$/.test(m[2]) ? `line ${m[2].slice(1)}` : m[2].replace('/', ' ')}` : cardName(cx, m[1]!)
@@ -162,6 +169,9 @@ export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefine
 /** A citation as its link draws: its label, red with a problem, ◌ ✓ or × after it from thimble's links check of the
  *  card whose takeaway it is in (`card`), and its tip (its status in plain words, and why for a problem). */
 export async function chipOf(cx: Ctx, c: Citation, card?: string): Promise<ChipView> {
+  // a label's link (`[33](concept:<id>/yes)`): blue, no check, a click opens the label at its value
+  const lr = labelRef(c.ref)
+  if (lr) return { label: citeLabel(c), state: 'link', mark: '', spin: false, tip: lr.value ? `opens the label at its value ${quoted(lr.value)}` : 'opens the label' }
   const v = await cx.verdict(cid(c.raw))
   const check = card ? linkCheck((await cx.card(card))?.links, c) : {}
   const look = chipLook(v?.status ?? 'pending', undefined, check.state)

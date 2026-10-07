@@ -665,7 +665,9 @@ def test_a_second_fork_of_a_thread_is_refused_while_the_first_runs(monkeypatch):
     assert subagents.fork_check(CORPUS, {"subagent_type": "fork", "description": "thread:t1"}) is None
     assert subagents.fork_check(CORPUS, {"subagent_type": "fork", "description": "thread:t1"})
     subagents.fork_ended(CORPUS, "t1")
-    assert subagents.fork_check(CORPUS, {"subagent_type": "fork", "description": "thread:t1"}) is None
+    assert subagents.fork_check(CORPUS, {"subagent_type": "fork", "description": "thread:t1"}, "toolu_f3") is None
+    assert subagents.files.fork_call_ref(subagents.read(CORPUS), "toolu_f3") == "thread:t1", \
+        "the call let through is kept by its tool_use id, by which the mirror knows the fork's thread"
 
 
 def test_old_workspaces_have_their_background_sessions_stopped_once(monkeypatch):

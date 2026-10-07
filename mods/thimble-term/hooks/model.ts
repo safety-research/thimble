@@ -6,7 +6,7 @@
 // is left out rather than failing the drawing.
 import type { ChatThread, ChatThreadTurn, TermAgent, TermHome, TermThreadRow, TermVerdict } from '../types'
 import type { ThimbleCell, ThimbleLabel } from './cell'
-import { clip, quoted, shownMatches, valueIn } from './lib'
+import { clip, curlyQuotes, quoted, shownMatches, valueIn } from './lib'
 import type { Citation } from './lib'
 import { quotedWords, showsValue } from './cite'
 
@@ -169,8 +169,10 @@ export function withoutNotes(text: string): string {
   return text.split('\n').filter(l => !/^\s*↳/.test(l)).join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
-/** The description main's Agent call for a thread's fork runs with: the thread's first question, `thread “How many…”`,
- *  in place of `thread:<slug>`, so that Claude Code's agent tray and exit dialog name the thread as the chat does. null
+/** The description main's Agent call for a thread's fork runs with: the thread's first question, `thread: How many…`,
+ *  in place of `thread:<slug>`, so that Claude Code's agent tray and exit dialog name the thread as the chat does. No
+ *  quotation marks around the question, since Claude Code puts the description in its own (`Agent "thread: How
+ *  many…" finished`); straight ones inside it are curly. null
  *  for any other call, for a thread not listed, and when the call's prompt is not `thread:<name>`, which must stay to
  *  name the fork (backend threads.fork_ref). */
 export function forkDescription(input: Record<string, unknown>, rows: readonly NamedRow[]): string | null {
@@ -179,7 +181,7 @@ export function forkDescription(input: Record<string, unknown>, rows: readonly N
   const prompt = typeof input.prompt === 'string' ? ref.exec(input.prompt) : null
   if (!prompt || typeof input.description !== 'string' || !ref.test(input.description)) return null
   const q = questionWords(bySlug(rows, prompt[1]!)?.question)
-  return q ? `thread “${clip(q, 40).replace(/[“”]/g, '"')}”` : null
+  return q ? `thread: ${curlyQuotes(clip(q, 40))}` : null
 }
 
 /** main's end token: what it ends a turn with when it has nothing for the analyst, which no chat shows (session.py). */
@@ -291,6 +293,18 @@ export function verdictOf(c: Citation, res: Resolution | null, at = 0): TermVerd
       out.value = str(span.value)
     }
     if (meta.span_missing) return { ...out, status: 'missing', why: 'the card no longer shows the cited cell or line' }
+    // lines the card printed: the cited ones lit among the two on each side the excerpt holds (refs.SPAN_CONTEXT_LINES)
+    if (span && 'line' in span && typeof span.line === 'number') {
+      const first = span.line
+      const last = typeof span.end_line === 'number' ? span.end_line : first
+      const start = Math.max(1, first - 2)
+      out.lines = str(res.excerpt).split('\n').map((t, k) => {
+        const n = start + k
+        const hit = n >= first && n <= last
+        // the value marked where it stands; a citation of the line with no words marks the line
+        return { n, text: t, hit, ...(hit ? { spans: c.display === null ? [[0, t.length]] : spansIn(t, c.display) } : {}) }
+      })
+    }
   } else {
     out.path = str(res.path)
     if (typeof res.line === 'number') out.line = res.line

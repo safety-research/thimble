@@ -142,12 +142,22 @@ test("the footer under a turn's answer: its citations and cards dim, its problem
   expect(JSON.stringify(footer)).toContain('{"type":"Text","props":{"color":"error"},"children":[" · 1 problem"]}')
   await ui.press({ key: 'ask-answer-r1' })
   await ui.unmount()
-  const pane = (await $.ui.mount(PANE)) as unknown as M
+  let pane = (await $.ui.mount(PANE)) as unknown as M
   const asking = shown(await pane.drawn())
   expect(asking).toContain('about this answer')
   // the field holds the keys as the view opens, so a letter goes into the question: no `b` or `x` among the hints
   expect(asking).toContain('Enter to ask · Esc to leave the field')
   expect(asking).not.toContain('b to go back')
+  // Esc gave the keys back to the prompt (live check term-fix5, new quirk 6): no key of the panel's is named, since a
+  // letter or Enter goes to the prompt now, only how to give the panel the keys again
+  await pane.unmount()
+  const away = (await $.ui.mount({ ...(PANE as object), props: { ...(PANE as { props: object }).props, isFocused: false } } as never)) as unknown as M
+  const unfocused = shown(await away.drawn())
+  expect(unfocused).toContain('click the panel for its keys')
+  expect(unfocused).not.toContain('Enter to ask')
+  expect(unfocused).not.toContain('x to close')
+  await away.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
   await pane.input({ key: 'ask-new', text: 'Is it right?' })
   await w.clock.settle()
   // a thread about the whole answer is marked so (its element), and keeps `about this answer` in the threads panel
@@ -351,7 +361,7 @@ test("main's fork of a thread runs with the thread's question as its description
   Object.assign(w.states.threads[1]!, { fork_name: 'why-is-events-jsonl-so-much', question: 'why is events.jsonl so much bigger than the other files?' })
   await start($, w)
   await $.tool.call({ tool: 'Agent', tool_use_id: 'u8', subagent_type: 'fork', name: 'why-is-events-jsonl-so-much', description: 'thread:why-is-events-jsonl-so-much', prompt: 'thread:why-is-events-jsonl-so-much' } as never)
-  expect(w.toolCalls.at(-1)).toMatchObject({ name: 'why-is-events-jsonl-so-much', description: 'thread “why is events.jsonl so much bigger than…”', prompt: 'thread:why-is-events-jsonl-so-much' })
+  expect(w.toolCalls.at(-1)).toMatchObject({ name: 'why-is-events-jsonl-so-much', description: 'thread: why is events.jsonl so much bigger than…', prompt: 'thread:why-is-events-jsonl-so-much' })
   // any other Agent call runs as main wrote it
   await $.tool.call({ tool: 'Agent', tool_use_id: 'u9', subagent_type: 'general-purpose', description: 'Count the pages', prompt: 'Count them.' } as never)
   expect(w.toolCalls.at(-1)).toMatchObject({ description: 'Count the pages', prompt: 'Count them.' })

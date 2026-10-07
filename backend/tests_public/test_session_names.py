@@ -450,7 +450,8 @@ def test_after_claude_exits_in_terminal_mode_the_launcher_says_how_to_come_back_
     argv_out = tmp_path / "argv.txt"
     env = {"PATH": f"{path}:/usr/bin:/bin", "HOME": str(tmp_path), "ARGV_OUT": str(argv_out)}
     done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env=env)
-    assert done.returncode == 0 and done.stderr.splitlines()[-1] == "Resume this session with thimble: thimble --continue"
+    assert done.returncode == 0 and done.stderr.splitlines()[-1] == ("Resume with thimble --continue instead; it loads "
+                                                                    "thimble's plugin.")
     assert json.loads((ws / "trusted" / "launch.json").read_text())["pid"] == int(Path(f"{argv_out}.pid").read_text())
     done = subprocess.run(["bash", str(launcher), "--continue"], capture_output=True, text=True, cwd=tmp_path, env=env)
     assert done.stderr.splitlines()[0] == "thimble: continuing the last thimble session in this folder"

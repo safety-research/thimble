@@ -1004,6 +1004,26 @@ def _ref_path(ref: str) -> str | None:
     return labels_store.ref_parts(ref)[0]
 
 
+def verdicts_applied(ws: Path, concept_id: str, counts: dict[str, int]) -> tuple[dict[str, int], int]:
+    """(`counts` with the analyst's verdicts applied, as thimble.labels() reads the rows: each record the analyst set to
+    another value counted under that value; how many records that is). Blocking (worker thread); `counts` as they are,
+    and 0, when the store cannot be read."""
+    try:
+        st, _building_now = _store(ws, concept_id)
+        rows = st.calibration_rows() if st is not None else []
+    except Exception:  # noqa: BLE001 — the counts as the label gave them still show
+        return dict(counts), 0
+    out = {str(k): int(v) for k, v in counts.items()}
+    moved = 0
+    for _ref, label, analyst, _ts in rows:
+        if label is None or analyst is None or str(label) == str(analyst):
+            continue
+        moved += 1
+        out[str(label)] = max(0, out.get(str(label), 0) - 1)
+        out[str(analyst)] = out.get(str(analyst), 0) + 1
+    return out, moved
+
+
 def concept_stats(ws: Path, concept: dict) -> dict:
     """{n_labeled, n_reviewed, n_marked, counts} from the stats stored on the concept while their key matches the labels
     file, else from the store. While a run appends, the stored (pre-run) stats stand."""

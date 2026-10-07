@@ -753,7 +753,8 @@ PY
       ${resume[@]+"${resume[@]}"} --append-system-prompt "$prompt" "$@" ${first[@]+"${first[@]}"}
   )
   rc=$?
-  case "$rc" in 0 | 130) printf 'Resume this session with thimble: thimble --continue\n' >&2;; esac
+  # under Claude Code's own `claude --resume …` line, which would resume the session without thimble
+  case "$rc" in 0 | 130) printf '%s\n' "Resume with thimble --continue instead; it loads thimble's plugin." >&2;; esac
   exit "$rc"
 fi
 exec claude ${load[@]+"${load[@]}"} "${tools[@]}" \

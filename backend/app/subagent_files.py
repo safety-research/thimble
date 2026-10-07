@@ -910,6 +910,13 @@ FORK_REF_RE = re.compile(r"^\s*thread:([A-Za-z0-9_-]{1,64})\s*$")  # threads.FOR
 # the refusal of a second fork of a thread, which main reads as the call's error and the analyst sees in its row
 FORK_RUNNING = "The fork of thread {thread} is running already and answers in the thread, so this turn needs nothing more."
 QUESTION_CHARS = 60  # of the first question that names a thread in FORK_RUNNING
+# subagents.json: each Agent call the agent-check hook let through as a thread's fork, by its tool_use id: {ref: its
+# `thread:<name>`, at}. Claude Code's subagent meta file holds the call's description, which thimble-term rewrites to the
+# thread's question in terminal mode, so the mirror knows the fork's thread from here (fork_call_ref), whatever main
+# passed and whichever of the file and main's tool_use it reads first
+FORK_CALLS = "fork_calls"
+FORK_CALLS_KEEP_S = 7 * 86400.0  # long enough for a --continue days later to find its forks' threads again
+FORK_CALLS_MAX = 500
 
 
 def fork_ref(tool_input: dict[str, Any]) -> str | None:
@@ -962,10 +969,35 @@ def fork_refusal(name: str, question: str) -> str:
     return FORK_RUNNING.format(thread=f"\u201c{question}\u201d" if question else name)
 
 
-def fork_check(state: dict[str, Any], tool_input: dict[str, Any], ws: Path | None = None) -> str | None:
+def note_fork_call(state: dict[str, Any], tool_use_id: Any, ref: str) -> None:
+    """Record that the Agent call `tool_use_id` forks the thread `ref` names (FORK_CALLS); older records go."""
+    if not tool_use_id or not isinstance(tool_use_id, str):
+        return
+    table = state.get(FORK_CALLS)
+    if not isinstance(table, dict):
+        table = state[FORK_CALLS] = {}
+    t = now()
+    table[tool_use_id] = {"ref": ref, "at": t}
+    keep = sorted(((k, v) for k, v in table.items() if isinstance(v, dict) and isinstance(v.get("at"), (int, float))
+                   and t - float(v["at"]) < FORK_CALLS_KEEP_S), key=lambda kv: float(kv[1]["at"]))[-FORK_CALLS_MAX:]
+    state[FORK_CALLS] = dict(keep)
+
+
+def fork_call_ref(state: dict[str, Any], tool_use_id: Any) -> str | None:
+    """The `thread:<name>` the Agent call `tool_use_id` forks, as the agent-check hook recorded it; None for a call it
+    did not record as a thread's fork."""
+    table = state.get(FORK_CALLS)
+    entry = table.get(tool_use_id) if isinstance(table, dict) and isinstance(tool_use_id, str) else None
+    ref = entry.get("ref") if isinstance(entry, dict) else None
+    return ref if isinstance(ref, str) and FORK_REF_RE.match(ref) else None
+
+
+def fork_check(state: dict[str, Any], tool_input: dict[str, Any], ws: Path | None = None,
+               tool_use_id: str | None = None) -> str | None:
     """Terminal mode's dedupe of a thread's fork (subagents.fork_check in browser mode): main's Agent call that would
     start a second fork of the thread it names (`thread:<name>`, fork_ref) while the first starts or runs: why it must
-    not run, naming the thread by its first question in workspace `ws`; else None, and the call is recorded."""
+    not run, naming the thread by its first question in workspace `ws`; else None, and the call is recorded, by its
+    `tool_use_id` too (note_fork_call)."""
     if str(tool_input.get("subagent_type") or "") != FORK_TYPE:
         return None
     desc = fork_ref(tool_input)
@@ -982,6 +1014,7 @@ def fork_check(state: dict[str, Any], tool_input: dict[str, Any], ws: Path | Non
     table[desc] = t
     for k in [k for k, v in table.items() if not isinstance(v, (int, float)) or t - float(v) >= FORK_DEDUPE_S]:
         table.pop(k, None)
+    note_fork_call(state, tool_use_id, desc)
     return None
 
 

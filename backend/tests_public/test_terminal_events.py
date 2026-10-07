@@ -102,10 +102,10 @@ def test_two_terminal_threads_on_one_citation_keep_its_words_as_their_title_and_
     assert agents.new_thread(CORPUS, "agent-chat.jsonl#L2", "x", "raises the 3,898 count")["title"] == "raises the 3,898 count-2"
 
 
-def test_the_held_hook_leaves_out_a_thread_s_line_which_the_terminal_s_own_rows_say(ws):
+def test_the_held_hook_leaves_one_short_line_for_a_thread_which_the_terminal_s_own_rows_say(ws):
     """A thread's question shows in its fork's row and its `↳` row (thimble-term), so main's terminal does not show it
-    again as `UserPromptSubmit says: › new thread: …`; a quiet event riding along still shows its line, and the
-    statusline still counts the question while it waits."""
+    again as `UserPromptSubmit says: › new thread: …`, only one short line under the `● thimble` row its wake opens; a
+    quiet event riding along still shows its line, and the statusline still counts the question while it waits."""
     from app import agents
 
     meta = agents.new_thread(CORPUS, "card:abc#n/all", "Nearly all revisions are on one wiki.", surface="terminal")
@@ -116,9 +116,16 @@ def test_the_held_hook_leaves_out_a_thread_s_line_which_the_terminal_s_own_rows_
     events.post(CORPUS, "thread", {"thread": meta["id"], "text": "Is that all of them?"})
     assert event_files.queued_words(ws)[0].startswith("new thread: Is that all of them?")
     event_files.take(ws, MAIN)
-    assert event_files.unshown(ws, MAIN) == []
+    # the thread's event wakes main, whose turn opens with a `● thimble` row no hook removes: one short line under it
+    # (live check term-fix5, new quirk 7), never the whole `› new thread: …` line
+    assert event_files.unshown(ws, MAIN) == ['new thread: "Is that all of them?"']
     assert event_files.said([{"terminal": "view built: pages", "meta": {"kind": "view"}},
                              {"terminal": "the report writer ended", "meta": {"kind": "written"}}]) == "view built: pages"
+    long = "Which pages in pages.jsonl have a name that contains June and were saved on 18 June by a bot?"
+    assert event_files.said([{"terminal": f"› new thread: {long}", "meta": {"kind": "thread"}}]) == \
+        'new thread: "Which pages in pages.jsonl have a name that contains June…"'
+    assert event_files.said([{"terminal": '› thread "Which pages in pages.jsonl…": And on 19 June?',
+                              "meta": {"kind": "thread"}}]) == 'thread "Which pages in pages.jsonl…": "And on 19 June?"'
 
 
 def test_a_take_from_two_processes_at_once_hands_each_event_to_one(ws):

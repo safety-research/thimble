@@ -237,6 +237,11 @@ def test_the_agent_check_names_a_refused_fork_s_thread_by_its_question_and_knows
     assert reason == ("The fork of thread “Which bots saved the welcome page on 18 June, and how often?” is running "
                       "already and answers in the thread, so this turn needs nothing more.")
     assert "which-bots-saved-the" not in reason
+    # the call let through is kept by its tool_use id, by which the mirror knows the fork's thread whatever its meta json
+    # says (live check term-fix5, new quirk 1); the refused one is not
+    state = sf.read(ws)
+    assert sf.fork_call_ref(state, "toolu_f1") == "thread:which-bots-saved-the"
+    assert sf.fork_call_ref(state, "toolu_f2") is None
 
 
 def test_the_agents_hook_numbers_an_orientation_s_call_and_tells_it_its_ref(tmp_path, ws, monkeypatch, capsys):

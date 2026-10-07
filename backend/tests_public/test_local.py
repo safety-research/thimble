@@ -327,6 +327,18 @@ async def test_state_label_keeps_a_record_the_analyst_set_under_the_value_they_g
     # each record once, the store's own page after the analyst's records
     refs = [r["ref"] for r in label["rows"]]
     assert len(refs) == len(set(refs))
+    # the counts as thimble.labels() reads the rows: the moved record under the value the analyst gave, and how many
+    # records the analyst set to another value (an agreement moves none) (live check term-fix5, new quirk 5)
+    given = label["counts"]
+    assert label["verdicts"] == {"counts": {**given, "yes": given["yes"] + 1, "no": given["no"] - 1}, "set": 1}
+    [listed] = await local.state(CORPUS, "labels")
+    assert listed["verdicts"] == label["verdicts"], "home's label row counts as the panel does"
+    # the label tool's result says its counts apply the verdicts, and what the label itself gave
+    again = text(await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+                            paths=["agents/*.jsonl"]))
+    assert f"yes {given['yes'] + 1}" in again and "These counts apply the analyst's verdicts, as thimble.labels() does: " \
+        "1 record(s) the analyst set to another value count under that value" in again
+    assert f"(the label itself gave no {given['no']}, yes {given['yes']})" in again
 
 
 async def test_state_opens_says_which_files_open_as_a_transcript(term):

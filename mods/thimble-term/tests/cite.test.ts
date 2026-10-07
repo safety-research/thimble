@@ -226,3 +226,47 @@ test("a context line wider than the panel is cut with `…` right against its wo
   }
   await pane.unmount()
 })
+
+test("a citation of lines a card printed is named `card \"…\" output line N`, and its panel draws those lines, the cited one lit, never the card's table", async ($, on) => {
+  // live check term-fix5, new quirk 4: `card L1`, and the panel drew the card's table, which did not show the value
+  const w = world(on)
+  w.resolve['card:ff73e071@out0#L2'] = { ref: 'card:ff73e071@out0#L2', kind: 'cell', cell_id: 'ff73e071', excerpt: 'file records\nrevisions.jsonl 14591\nevents.jsonl 19913\npages.jsonl 4579', meta: { span: { out: 0, line: 2, text: 'revisions.jsonl 14591' } } }
+  await start($, w)
+  const pane = await clickCite($, w, 'It is the [[14591|card:ff73e071@out0#L2]] revisions.', 11)
+  const drawn = await pane.drawn()
+  const text = shown(drawn)
+  expect(text).toContain('card "What does the export hold per wiki?" output line 2')
+  expect(text).toMatch(/2\s+revisions\.jsonl 14591/)
+  expect(text).toMatch(/1\s+file records/)
+  expect(text).not.toContain('╭')
+  // the value on the selection background where it stands in the line
+  expect(JSON.stringify(drawn)).toMatch(/"backgroundColor":"[^"]+"\},"children":\["14591"\]/)
+  await pane.unmount()
+})
+
+test("a label's link in a reply (`[33](concept:<id>/<value>)`) is a blue link, never `33 (concept:…)`, checked by nothing, and opens the label at the value", async ($, on) => {
+  // live check term-fix5, new quirk 2
+  const w = world(on)
+  await start($, w)
+  const text = 'The rule gives [5,191](concept:d9b51617/proxy-link) records.'
+  let ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  // drawn by thimble-term as a paragraph with one link, not handed to Claude Code's Markdown (`5,191 (concept:…)`)
+  expect(JSON.stringify(await ui.drawn())).not.toContain('(concept:')
+  const chips = ((await ui.find({ type: 'Client', key: 'para-1' })) as unknown as { props: { props: { chips: { label: string; state: string; tip: string }[] } } }).props.props.chips
+  expect(chips[0]).toMatchObject({ label: '5,191', state: 'link', tip: 'opens the label at its value "proxy-link"' })
+  await ui.pointer({ type: 'down', x: 15, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.pointer({ type: 'up', x: 15, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.unmount()
+  await w.clock.settle()
+  const pane = (await $.ui.mount(PANE)) as unknown as M
+  const panel = await pane.drawn()
+  const words = shown(panel)
+  expect(words).toContain('links through a fetch proxy')
+  expect(words).toContain('▾ counts')
+  expect(words).toContain('▾ examples')
+  expect(JSON.stringify(panel)).toMatch(/"backgroundColor":"[^"]+"\},"children":\["proxy-link"\]/)
+  await pane.unmount()
+})

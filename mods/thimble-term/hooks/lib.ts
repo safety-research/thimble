@@ -25,7 +25,16 @@ export type TableRuns = { rows: Run[][][]; align: ('left' | 'right' | 'center')[
 const FENCE_RE = /```[\s\S]*?```|`[^`\n]*`/g
 const LINK_RE = /(?<![\[!])\[([^\[\]\n]*)\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)/g
 const WEB_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|tel:)/i
-const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|card:[A-Za-z0-9_-]+(?:@[A-Za-z0-9_]+)?(?:#.*)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
+const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|card:[A-Za-z0-9_-]+(?:@[A-Za-z0-9_]+)?(?:#.*)?|concept:[A-Za-z0-9_-]+(?:\/[^\s()]+)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
+const LABEL_REF = /^concept:([A-Za-z0-9_-]+)(?:\/(.+))?$/
+
+/** A citation of a label, or of one of its values (`[[33|concept:<id>/yes]]`, or `[33](concept:<id>/yes)` as main writes
+ *  it for the terminal): the label's id and the value; null for any other ref. It is a link that opens the label at the
+ *  value, never a place a check reads. */
+export function labelRef(ref: string): { id: string; value: string } | null {
+  const m = LABEL_REF.exec(ref.trim())
+  return m ? { id: m[1]!, value: m[2] ? decodeURIComponent(m[2]) : '' } : null
+}
 export const EMBED_RE = /^\s*(?:\[\[card:([A-Za-z0-9_-]+)\]\]|!\[[^\]\n]*\]\(card:([A-Za-z0-9_-]+)\))\s*$/
 
 function make(display: string | null, ref: string): Citation {
@@ -168,6 +177,17 @@ export function cardWords(question: string, n = 40): string {
   return question.trim() ? `card ${quoted(clip(question, n))}` : 'a card'
 }
 
+/** A citation of lines a card printed (`card:<id>@out0#L1`): the card, the lines, and the place in words, `card "…"
+ *  output line 1` (`a card's output line 1` while the card is not read); null for any other ref. */
+export function outputLine(ref: string): { card: string; first: number; last: number; words: string } | null {
+  const m = /^(?:card|cell):([A-Za-z0-9_-]+)@out\d+#L(\d+)(?:-L?(\d+))?$/.exec(ref.trim())
+  if (!m) return null
+  const [first, last] = [Number(m[2]), Number(m[3] ?? m[2])]
+  const lines = last !== first ? `lines ${first}-${last}` : `line ${first}`
+  const q = questionOf(m[1]!)
+  return { card: m[1]!, first, last, words: q ? `${cardWords(q)} output ${lines}` : `a card's output ${lines}` }
+}
+
 /** What a chip says: the shown value, or a short name of the place for a citation without one; a card cited whole by
  *  its question. */
 export function chipLabel(c: Citation): string {
@@ -175,11 +195,13 @@ export function chipLabel(c: Citation): string {
   const [base = '', frag = ''] = c.ref.split('#', 2)
   const card = bareCard(c)
   if (card) return cardWords(questionOf(card))
+  const out = outputLine(c.ref)
+  if (out) return out.words
   if (base.startsWith('card:')) return frag ? `card ${frag.split('/').at(-1)}` : 'card'
   if (base.startsWith('call:')) return frag ? `output ${frag}` : 'output'
   const name = base.split('/').at(-1) ?? base
   const short = name.replace(/\.(jsonl|json|csv|tsv|txt|md|log)$/, '')
-  const where = frag.startsWith('L') ? `:${frag.slice(1).replace('-L', '-')}` : frag ? `#${frag}` : ''
+  const where = frag.startsWith('L') ? `:${frag.slice(1).replace(/\.b\d+(?::c\d+-\d+)?$/, '').replace('-L', '-')}` : frag ? `#${frag}` : ''
   return cut(`${short}${where}`, 24)
 }
 
@@ -243,6 +265,17 @@ export function cut(s: string, n: number): string {
     const room = n - width(head) - 1
     if (room >= 4) return `${head}${cut(s.slice(open + 1, -1), room)}${s.at(-1)}`
   }
+  // words in quotation marks that open inside the words kept and close after the cut (`citation card "How many…" output
+  // line 1`) keep their closing mark too: `citation card "How…"`
+  const plain = cutWords(s, n)
+  const close = unclosed(plain)
+  if (!close || n < 3) return plain
+  const shorter = cutWords(s, n - 1)
+  return unclosed(shorter) ? `${shorter}${unclosed(shorter)}` : shorter
+}
+
+/** `s` cut at a word in `n` cells (cut's last step). */
+function cutWords(s: string, n: number): string {
   let head = ''
   let w = 0
   for (const ch of s) {
@@ -256,6 +289,12 @@ export function cut(s: string, n: number): string {
   return `${keep.replace(CUT_TAIL, '') || keep.trimEnd()}…`
 }
 
+/** The closing quotation mark words in quotation marks that open in `s` and do not close there want, else ''. */
+function unclosed(s: string): string {
+  if (s.lastIndexOf('“') > s.lastIndexOf('”')) return '”'
+  return (s.match(/"/g)?.length ?? 0) % 2 === 1 ? '"' : ''
+}
+
 /** A file's line in at most `n` cells: a line of code or data (JSON, a tag) cut at the cell edge, so the rows of a file
  *  end together; prose cut at a word, as `cut` cuts. */
 export function cutLine(s: string, n: number): string {
@@ -263,13 +302,17 @@ export function cutLine(s: string, n: number): string {
   return n <= 1 ? (n === 1 ? '…' : '') : `${prefix(s, n - 1)}…`
 }
 
-/** Items of an inline list of facts parted by ` · ` in at most `n` cells: as many whole items as fit, then `…` right
- *  against the last when some are left out; the first item cut as `cut` cuts when not even it fits whole. */
+/** Items of an inline list of facts parted by ` · ` in at most `n` cells: as many whole items as fit, then ` · +N` for
+ *  the N left out (never a `…` against a whole item, which would read as a cut value: `wiki dse…`); the first item cut
+ *  as `cut` cuts when not even it fits whole. */
 export function itemsRow(items: readonly string[], n: number): string {
   let k = items.length
-  const row = (m: number) => `${items.slice(0, m).join(' · ')}${m < items.length ? '…' : ''}`
+  const more = (m: number) => (m < items.length ? ` · +${items.length - m}` : '')
+  const row = (m: number) => `${items.slice(0, m).join(' · ')}${more(m)}`
   while (k > 0 && width(row(k)) > n) k--
-  return k > 0 ? row(k) : cut(items[0] ?? '', n)
+  if (k > 0) return row(k)
+  const tail = more(1)
+  return n - width(tail) >= 8 ? `${cut(items[0] ?? '', n - width(tail))}${tail}` : cut(items[0] ?? '', n)
 }
 
 /** `s` on one line in `n` cells, cut as `cut` cuts. */

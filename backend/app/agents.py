@@ -983,12 +983,22 @@ async def delete_chat(c: str, chat_id: str) -> list[str]:
     for m in gone:
         await _stop_for_delete(c, m)
     for m in gone:
-        cid = str(m["id"])
-        _busy.discard((c, cid))
-        _trash(c, cid)
-        log.info("%s: chat %s (%s) deleted", c, cid, m.get("role"))
-        investigation.emit(c, investigation.MAIN, {"type": "chat", "chat": cid, "deleted": True})
+        discard_chat(c, str(m["id"]), str(m.get("role") or ""))
     return [str(m["id"]) for m in gone]
+
+
+def discard_chat(c: str, chat_id: str, role: str = "") -> None:
+    """A chat that runs no task goes to the trash, and the pages are told (delete_chat; the mirror's agent chat that
+    turned out to be a thread's fork, session._into_thread)."""
+    if chat_id == MAIN_ID:
+        return
+    _busy.discard((c, chat_id))
+    _trash(c, chat_id)
+    log.info("%s: chat %s (%s) deleted", c, chat_id, role or "?")
+    try:
+        investigation.emit(c, investigation.MAIN, {"type": "chat", "chat": chat_id, "deleted": True})
+    except Exception:  # noqa: BLE001 — off the event loop (a pass of terminal mode's mirror), no page listens
+        log.debug("chat deletion for %s/%s not emitted", c, chat_id, exc_info=True)
 
 
 @router.delete("/ws/{c}/chats/{chat_id}")
