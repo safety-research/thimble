@@ -175,12 +175,15 @@ def _check_text(answer: dict[str, Any]) -> str:
     out = "\n".join([head, *lines])
     if answer.get("png"):
         out += f"\n\nThe picture of the page as it opens, which Read opens: {answer['png']}"
+    if answer.get("drawing"):
+        out += f"\n\nThe view as it opens, drawn as text as the panel shows it:\n\n{answer['drawing']}"
     return out
 
 
 async def tool_view_check(ctx: Any, args: dict[str, Any]) -> Any:
     """`view_check`: the checks of the view the caller builds or reviews, with the `locators` it names beside the
-    sampled lines, and with `picture` a picture of the page as it opens (views.check_answer)."""
+    sampled lines, and with `picture` a picture of the page as it opens, or in terminal mode the view drawn as text
+    (views.check_answer)."""
     from . import views  # noqa: PLC0415
 
     slug = _program_call(ctx)

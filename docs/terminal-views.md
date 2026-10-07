@@ -220,7 +220,7 @@ queries; thimble-term starts it the first time a view opens and talks to it over
 
 | from the program to thimble | |
 |---|---|
-| `frame {seq, ack, lines, hits, hints, hintKeys, keys, typing, field, sub}` | what to draw: rows of runs, hot regions, the keys bound and the hint row, the text of a field that takes typing; `ack` the last event it answers |
+| `frame {seq, ack, lines, hits, hints, hintKeys, keys, typing, field, sub, overflow?}` | what to draw: rows of runs, hot regions, the keys bound and the hint row, the text of a field that takes typing; `ack` the last event it answers; `overflow` `{rows, cols, first}` when the kit cut rows past the rows or wider than the columns |
 | `query {id, q, labels}`, `cancel {id}` | a reader query, and one dropped |
 | `act {n, act}` | a place, a thread or a label's panel, made during event `n` |
 | `state {state}`, `error {message}`, `log {text}` | what the view keeps, an error, a line it printed |
@@ -251,3 +251,7 @@ frame's rows as text in the kit itself.
   Sat 16 May 2026
 ❯ ● 01:40:12  chat    message     Oona                 Tonight's release train: web 2.31.0 and payments 4.12.0…
 ```
+
+A view built in terminal mode passes its checks only when its draft draws this way with no error, within the time limit
+and with nothing cut, at 120 and 200 columns in light and dark and opened at the first place that resolves
+(views.term_draws). Its reviewer reads the same drawings in place of pictures.

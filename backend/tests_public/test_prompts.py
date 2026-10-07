@@ -464,9 +464,11 @@ def test_the_hints_the_hooks_read_raw_have_no_mode_block(monkeypatch):
 # a `{{if:browser}}` block, a code span (a token or a command, such as the end token `(shown in the dashboard)`, the
 # rewake line `thimble browser event:` or `canvas`, a scope's name) or the name of the other mode, "browser mode".
 BROWSER_WORDS = re.compile(r"\bbrowser|\bcanvas|\bdashboard|⌘|\bchips?\b", re.I)
-# Prompts that keep these words in terminal mode, each with why: the view page stays a browser page (its builder's and
-# its reviewer's prompts), video is browser mode's only, and its `canvas` is the HTML element.
-BROWSER_ONLY_PROMPTS = {"dev-view.md": "the view page", "view-review.md": "the view page", "report-video.md": "video"}
+# Prompts that keep these words in terminal mode, each with why: the view's builder and reviewer, whose page passages
+# are browser blocks and whose shared ones name the File browser and Color by's chips, which the terminal kit has too;
+# video is browser mode's only, and its `canvas` is the HTML element.
+BROWSER_ONLY_PROMPTS = {"dev-view.md": "the view's parts", "view-review.md": "the view's parts",
+                        "report-video.md": "video"}
 BROWSER_ONLY_HINTS = {"view-media-unplayable": "the view page", "view-marks-missing": "the view page",
                       "view-own-parts": "the view page"}
 

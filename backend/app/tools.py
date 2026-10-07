@@ -2620,7 +2620,7 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if status == "suggested":
         return ok(hint("propose_view-suggested", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
     # without Node 20+ or the frontend's packages the build fails at once (dev.start_build), and main is told why
-    if why := await asyncio.to_thread(views.build_problem):
+    if why := await asyncio.to_thread(views.build_problem_for, ctx.c):
         if typed:
             views.update_proposal(ctx.c, str(prop["slug"]), status="failed", error=why)
         return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=prop.get("slug"), why=why))
@@ -2672,7 +2672,7 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         prop = views.revise(ctx.c, slug, f"{title}\n\n{body}", proposed_by=ctx.created_by,  # on the loop: it queues
                             asked=typed, route=views.TYPED if typed else views.FOLLOW_ON)
         _chip(ctx.c, "view", str(prop.get("name") or slug), ref=f"view:{slug}", status="queued")
-        if why := await asyncio.to_thread(views.build_problem):
+        if why := await asyncio.to_thread(views.build_problem_for, ctx.c):
             return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=slug, why=why))
         if typed:
             return await _typed_build(ctx, slug)

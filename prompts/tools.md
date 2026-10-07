@@ -514,14 +514,14 @@ File a ticket for thimble's developer agent when thimble itself should change, s
 
 ## view_check
 
-Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get a picture of the page as it opens, whose path Read opens.
+Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get {{if:browser}}a picture of the page as it opens, whose path Read opens{{end}}{{if:terminal}}the view as it opens, drawn as text as the panel shows it{{end}}.
 
 ```json
 {
   "type": "object",
   "properties": {
     "locators": {"type": "array", "items": {"type": "string"}, "description": "Refs to check beside the sampled lines, such as `<path>#L<n>` or `view:<slug>/<key>`."},
-    "picture": {"type": "boolean", "description": "Also take a picture of the page as it opens, 1048 px wide with no label on."}
+    "picture": {"type": "boolean", "description": "{{if:browser}}Also take a picture of the page as it opens, 1048 px wide with no label on.{{end}}{{if:terminal}}Also draw the view as text as it opens, 120 columns wide with no label on.{{end}}"}
   }
 }
 ```
@@ -554,6 +554,33 @@ Take pictures of the view you review, whose paths Read opens. The first call of 
         "properties": {
           "state": {"type": "string", "enum": ["control", "labels", "filtered", "detail", "open", "narrow", "wide"]},
           "controls": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "For `control`: the controls to click in turn, by their text."},
+          "ref": {"type": "string", "description": "For `open`: the ref whose place to see."},
+          "why": {"type": "string", "description": "What you want to check in it, in a few words."}
+        },
+        "required": ["state", "why"]
+      }
+    }
+  }
+}
+```
+
+## view_pictures@terminal
+
+Draw the view you review as text, as thimble's panel shows it. The first call of a round gives the view as it opens, 120 columns wide; ask for other states in `states`, up to three more in each round.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "states": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "States to see beside the overview: `control`, the view after the keys in `controls`, pressed in turn; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `wide`, the view as it opens 200 columns wide.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "state": {"type": "string", "enum": ["control", "detail", "open", "wide"]},
+          "controls": {"type": "array", "maxItems": 8, "items": {"type": "string"}, "description": "For `control`: the keys to press in turn, such as `down`, `return` or `c`, or `click:<words>` for a click on the control that shows those words."},
           "ref": {"type": "string", "description": "For `open`: the ref whose place to see."},
           "why": {"type": "string", "description": "What you want to check in it, in a few words."}
         },
@@ -834,7 +861,7 @@ screenshot cannot take this picture in terminal mode. There it draws only a card
 
 ## propose_view-proposed
 
-Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in Files when its checks pass.
+Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in {{if:browser}}Files{{end}}{{if:terminal}}thimble's panel in the terminal{{end}} when its checks pass.
 
 ## propose_view-suggested
 
@@ -966,6 +993,16 @@ The records they show:
 
 {records}
 
+## view-pictures@terminal
+
+The pictures, each the view drawn as text as the panel shows it:
+
+{paths}
+
+The records they show:
+
+{records}
+
 ## view-review-program
 
 {extension}'s program reviews views in this workspace in place of your own reading of the pictures. It read these pictures and found these problems:
@@ -1013,6 +1050,18 @@ Filtered to the test label, the page shows {records} records, and the filter kee
 ## view-missing
 
 The claims expect files the corpus lacks, which the analyst sees above the view as missing: {files}.
+
+## view-term-error
+
+The view's program failed {where}: {what}. It must draw the view with no error, also when a fetch fails or a file is missing.
+
+## view-term-timeout
+
+The view's program did not end its draw {where} within {s} s: {what}. Draw when an answer or an event comes, and do not draw on a timer.
+
+## view-term-overflow
+
+The view's program draws past the panel {where}: {what}. The panel cuts a row at its right edge and drops the rows below its last row. Fit each row in `d.cols` and the rows in `d.left`, with `cut`, `columns` and the list.
 
 ## view-robust-reader
 
