@@ -159,8 +159,9 @@
 // by any field or label, Color by's chips the values left on, and the search the items whose words hold it. Details on
 // demand: an item opens as its page in the side panel: a pull request's conversation, commits and changed files, an
 // issue's timeline, a thread's posts, an agent's profile. Color marks the unit its value belongs to: a field of the
-// items colors their rows and the scrollbar beside them; a label marks records, so it colors the records on an item's
-// page, and a row, which stands for its records, shows only their mix.
+// items colors their rows and the scrollbar beside them, an agent's row under Author by its own name; a label marks
+// records, so it colors the records on an item's page, and a row, which stands for its records, shows only their mix,
+// as an agent's row does under a field of the items it worked on (state, area).
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 const $ = (id) => document.getElementById(id)
 const slug = (thimble.view && thimble.view.slug) || 'repository'
@@ -337,16 +338,17 @@ function draw() {
       shown.map(ROW[tab]).join('') + '</section>'
     : `<div class="empty">No ${T.name.toLowerCase()}</div>`
   // the colored scrollbar only on a list of what is colored: the rows while a field colors them; the kit's plain track
-  // while a label colors the records the rows stand for, or Color by is Off
-  colour.strip('#list', { whole: !!colour.field })
+  // while the rows stand for the records a label or a field colors (they show their mix), or Color by is Off
+  colour.strip('#list', { whole: !!colour.field && !shown.some((it) => it.mix) })
 }
 
-// a row: under a field, the bar of its value; under a label, which marks its records, none, its records' mix shown
-// in the row (mix) and their own bars on its page
+// a row: under a field, the bar of its value; a row that stands for its records (any under a label, which marks
+// records, and an agent's under a field it does not carry) none, its records' mix shown in the row (mix) and their own
+// bars on its page
 const rowOpen = (it) => `<div class="item${open && open.key === it.key ? ' active' : ''}" data-key="${esc(it.key)}" data-anchor="view:${slug}/${esc(it.key)}"` +
-  `${colour.label ? ' data-anchor-unmarked' : colour.attr(it)}>`
-// the records' mix of the label's values ([[value, n]]) as the kit's proportion bar, where any of them takes a value
-const mix = (it) => (colour.label && it.mix && it.mix.some(([v]) => v != null) ? thimble.mix(it.mix) : '')
+  `${colour.label || it.mix ? ' data-anchor-unmarked' : colour.attr(it)}>`
+// the records' mix of the values ([[value, n]]) as the kit's proportion bar, where any of them takes a value
+const mix = (it) => (it.mix && it.mix.some(([v]) => v != null) ? thimble.mix(it.mix) : '')
 // the area as the forge's label, in words: only Color by colors
 const areaChip = (it) => (!it.area ? '' : `<span class="chip chip-sans chip-tone-neutral"><span class="chip-text">${esc(it.area)}</span></span>`)
 const stateIcon = (t, it) => { const [i, w] = STATE[t][it.state] || STATE[t].open; return `<span class="state" title="${w}">${ico(i)}</span>` }

@@ -9,7 +9,8 @@
 // with each commit's diff, a thread's posts as replies under the first, an agent's sign-off and what it did; ↑↓ then
 // move through its records and Enter opens a record's place. One fetch gives the run's items of the tab that the label
 // filter, Filter by and Color by keep; the search narrows them here. Color marks the unit its value belongs to: a field
-// colors the rows' marks and the track; a label marks records, so a row, which stands for its records, shows their mix.
+// colors the rows' marks and the track, an agent's under author by its own name; a label marks records, so a row, which
+// stands for its records, shows their mix, as an agent's row does under a field of the items it worked on (state, area).
 import { COLORS, choice, colorBy, columns, cut, dayName, details, draw, dur, fetch, filterBy, list, num, onLabels, onOpen, open as openPlace, plural, search, side, view, width, wrap } from 'thimble-term'
 
 // the forge's tabs, with shorter names where the panel is narrow
@@ -296,8 +297,8 @@ function page(it, d) {
 
 // ------------------------------------------------------------------------------------------------ the view
 
-// under a label, a row stands for its records, so it takes no mark of its own: the kit's colour.mix of its records'
-// values in `n` cells, where any of them takes a value
+// a row that stands for its records (any under a label, an agent's under a field it does not carry) takes no mark of
+// its own: the kit's colour.mix of its records' values in `n` cells, where any of them takes a value
 const MIX = 6
 function mixCells(it, n = MIX) {
   const parts = it.mix || []
@@ -345,8 +346,8 @@ draw((d) => {
   const words = q.text.trim().toLowerCase()
   const items = data.items.filter((it) => !words || it.search.includes(words))
   // a field colors the rows' marks and the track; a label, whose marks are on records, colors neither: the rows show
-  // their records' mix and the track is plain
-  const group = !!colour.label
+  // their records' mix and the track is plain, as the agents' rows do under a field they do not carry
+  const group = !!colour.label || data.items.some((it) => it.mix)
   // the columns the list's width holds after the item's number, laid out as its header draws, in the width the side pane
   // leaves it less the mark and the track
   const idW = tab === 'pulls' || tab === 'issues' ? Math.max(3, ...data.items.map((it) => width(`#${it.number}`))) : 0

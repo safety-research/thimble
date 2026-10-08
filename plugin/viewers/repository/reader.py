@@ -74,7 +74,10 @@
 #       the issue it fixes, for an issue the pull requests that fix it, each opening in its timeline; for both the same
 #       issue in every run; and every #<n> its records mention, so the page links them
 # Under a label, a unit stands for its records: its value is the label's value most of its marked records take, as
-# thimble marks a unit, and `mix` counts its records by their own values, which the page draws as the unit's mix.
+# thimble marks a unit, and `mix` counts its records by their own values, which the page draws as the unit's mix. An
+# agent's row carries its author, itself, so Color by author colors it as it colors the other rows; under a field it
+# does not carry, its records' state or area, it stands for its records in the same way, each record taking the value
+# of the pull request, issue or thread it is about.
 import csv
 import io
 import json
@@ -576,6 +579,26 @@ def _value(choice, u, ref=None):
     return thimble.colour_value(choice, None, u)
 
 
+def _by_records(index, choice, u):
+    """The values an agent's records take under a field its row does not carry: each record's is that of the pull
+    request, issue or thread it is about (a review takes its pull request's state), None where that has none; the
+    records its row counts (its sign-off left out) that the label filter keeps, in time order. None for any other unit,
+    for a label, and for a field the agent carries: its author, itself."""
+    if u["tab"] != "agents" or not isinstance(choice, dict) or choice.get("label") is not None or not choice.get("field"):
+        return None
+    if thimble.colour_value(choice, None, u) is not None:
+        return None
+    return [thimble.colour_value(choice, None, index["units"].get(index["line"].get(e[0])))
+            for e in u["events"] if e[6] != "agent" and thimble.kept(e[0])]
+
+
+def _values(choice, u, got):
+    """The values a unit's row stands for under Color by or Filter by: its own (_value), or for an agent under a field
+    it does not carry each value its records `got` take (_by_records), in the order they come; [None] for a row with
+    none."""
+    return [_value(choice, u)] if got is None else list(dict.fromkeys(got)) or [None]
+
+
 # what an agent did, counted by the kind of record, in the order its profile lists them
 DID = (("pr", "pull requests"), ("issue", "issues"), ("commit", "commits"), ("review", "reviews"), ("merge", "merges"),
        ("close", "closes"), ("comment", "comments"), ("post", "posts"))
@@ -608,7 +631,7 @@ def _facts(index, u):
                    mentions=u["mentions"], last=last[5] if last else None, last_by=last[3] if last else None)
     elif tab == "agents":
         kinds = Counter(e[6] for e in events if e[6] != "agent")
-        out.update(note=u["note"], did={name: kinds[k] for k, name in DID if kinds[k]})
+        out.update(author=u["author"], note=u["note"], did={name: kinds[k] for k, name in DID if kinds[k]})
     return out
 
 
@@ -617,7 +640,9 @@ def _view(index, query):
     filtered: {value: units} (Filter by's), tabs: {tab: units}, runs: [{run, start, end, team, approvals, agents,
     tabs}]}. A unit shows when the label filter keeps one of its records and its values under Filter by and Color by
     are on; each tab's count is of the units that show, in each run for the run switcher. Under a label, `mix` is
-    [[value, records]] of the unit's records the label filter keeps, the values turned off left out."""
+    [[value, records]] of the unit's records the label filter keeps, the values turned off left out. An agent under a
+    field it does not carry stands for its records too: it counts under each value they take, shows while any of those
+    is on, and its `mix` and `value` are its records' (_by_records)."""
     tab = query.get("tab") if query.get("tab") in TABS else "pulls"
     names = sorted(index["runs"])
     run = query.get("run") if query.get("run") in index["runs"] else (names[0] if names else None)
@@ -630,23 +655,31 @@ def _view(index, query):
         if not thimble.kept_unit(u["refs"] + u.get("more", [])):
             continue
         here = u["run"] == run and u["tab"] == tab
-        fv = _value(filt, u)
+        fvs = _values(filt, u, _by_records(index, filt, u))
         if here:
-            filtered["" if fv is None else fv] += 1
-        if not thimble.colour_on(filt, fv):
+            filtered.update("" if v is None else v for v in fvs)
+        if not any(thimble.colour_on(filt, v) for v in fvs):
             continue
-        value = _value(colour, u)
+        got = _by_records(index, colour, u)
+        values = _values(colour, u, got)
         if here:
-            counts["" if value is None else value] += 1
-        if not thimble.colour_on(colour, value):
+            counts.update("" if v is None else v for v in values)
+        if not any(thimble.colour_on(colour, v) for v in values):
             continue
         tabs[u["run"]][u["tab"]] += 1
         if not here:
             continue
+        # an agent standing for its records takes the value most of them take, as a unit under a label does
+        seen = Counter(v for v in got or [] if v is not None)
+        value = _value(colour, u) if got is None else seen.most_common(1)[0][0] if seen else None
         item = {**_facts(index, u), "value": value, "search": u["search"]}
+        mix = None
         if by_label:
             # the unit's records as thimble marks it (resolve's refs): how many take each value, in the order they come
             mix = Counter(_value(colour, u, r) for r in (u["refs"] + u.get("more", []))[:200] if thimble.kept(r))
+        elif got is not None:
+            mix = Counter(got)
+        if mix is not None:
             item["mix"] = [[v, n] for v, n in mix.items() if thimble.colour_on(colour, v)]
         items.append(item)
     runs = [{"run": r, "start": info["start"], "end": info["end"], "team": info["team"], "approvals": info["approvals"],
