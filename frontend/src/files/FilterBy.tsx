@@ -174,7 +174,7 @@ function FilterMenu({ choice, keys, labels, countsOf, onChoose }: { choice: Colo
       {item({ by: 'off' }, <span className="menu-item-label">None</span>)}
       {keys.length > 0 && (
         <div className="menu-heading" role="presentation">
-          Keys
+          Fields
         </div>
       )}
       {keys.map((k) =>

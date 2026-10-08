@@ -1895,6 +1895,11 @@
 .colorby-caret {
   color: var(--text-tertiary);
 }
+/* "+N": the choices past the first, a lane of the tracks each */
+.colorby-plus {
+  color: var(--text-secondary);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+}
 /* the values on one line: those that do not fit go behind "N more" (ColorBy fit) */
 .colorby-chips {
   display: flex;
@@ -2074,6 +2079,32 @@
 }
 .colorby-item:has(.colorby-choice) .colorby-tick {
   height: 16px;
+}
+/* a key's or a label's box: ticked in the ink while it is one of the choices */
+.colorby-box {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--surface-card);
+  color: var(--text-on-inverse);
+}
+.colorby-box.on {
+  border-color: var(--surface-inverse);
+  background: var(--surface-inverse);
+}
+.colorby-item:has(.colorby-choice) .colorby-box {
+  margin-top: 1px;
+}
+/* a choice past the first: "track" after its name */
+.colorby-track-n {
+  flex: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1 var(--font-body);
 }
 .colorby-choice {
   display: flex;

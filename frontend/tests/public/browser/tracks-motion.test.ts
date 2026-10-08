@@ -8,7 +8,9 @@
 // WebKit's times are logged, its software drawing of the records spilling into the frames around them). Each run logs
 // its numbers: the frames that moved, the largest step, and the frames' times. A click a pixel or two off a lone record
 // that Color by colors snaps to it: the reader goes there and chooses it, in Files and in the kit. In Files, two labels
-// on are two lanes of the overview in their colors, and one turned off leaves one. In the kit, a list of 4,458 rows
+// that are Color by's choices are two lanes of the overview in their colors, and one turned off leaves one; a label on
+// that is no choice has no lane; a key checked after a label is a lane in its values' colors; and Off leaves the overview
+// plain, with no lane and no record's bar. In the kit, a list of 4,458 rows
 // drawn again as it scrolls, which gives the strip its rows again each time, is not measured or drawn again while its
 // rows stay the same.
 import { existsSync, readFileSync } from 'node:fs'
@@ -47,7 +49,7 @@ beforeAll(async () => {
       `  if (p.endsWith('/source/lines')) return { path: 'events.jsonl', total_lines: TOTAL, estimated: false, indexed: 1 }`,
       `  if (p.endsWith('/source')) { const a = +s.get('start'); w.__asks.push(['page', a, performance.now()]); return page(a, a + +s.get('count') - 1) }`,
       `  if (LABELS && answerLabels(p) != null) return answerLabels(p)`,
-      `  if (p.endsWith('/source/keys')) return { path: 'events.jsonl', total: TOTAL, bins: LONE ? 1000 : 0, partial: false, bytes: [], keys: LONE ? [{ key: 'speaker', values: [{ value: 'plain', n: TOTAL - 1 }, { value: 'orange', n: 1 }], more: { values: 0, n: 0 }, none: 0, at: Array.from({ length: 1000 }, (_, b) => (b === Math.floor(((LONE - 1) / TOTAL) * 1000) ? 1 : 0)) }] : [] }`,
+      `  if (p.endsWith('/source/keys')) return { path: 'events.jsonl', total: TOTAL, bins: LONE ? 1000 : LABELS ? 100 : 0, partial: false, bytes: [], keys: LONE ? [{ key: 'speaker', values: [{ value: 'plain', n: TOTAL - 1 }, { value: 'orange', n: 1 }], more: { values: 0, n: 0 }, none: 0, at: Array.from({ length: 1000 }, (_, b) => (b === Math.floor(((LONE - 1) / TOTAL) * 1000) ? 1 : 0)) }] : LABELS ? [SPEAKERS] : [] }`,
       `  return null`,
       `}`,
       `w.fetch = async (url, init) => {`,
@@ -58,12 +60,15 @@ beforeAll(async () => {
       `  return new Response(JSON.stringify(got), { status: 200, headers: { 'content-type': 'application/json' } })`,
       `}`,
       // with ?labels=1 two labels over records mark the file, "passed on" (orange) on lines 1,501 to 1,800 and "links"
-      // (green) on lines 7,501 to 7,800, both on, and Color by is "passed on"; w.__on(ids) turns on just those
+      // (green) on lines 7,501 to 7,800, both on, and Color by is "passed on" then "links"; w.__on(ids) turns on just
+      // those. The records' key "speaker" has four values, its commonest in the first half of the file Agent0 (blue), in
+      // the second Agent1 (orange)
       `const LABELS = new URLSearchParams(location.search).get('labels') === '1'`,
       `const concept = (id, name, colour) => ({ id, name, unit: 'record', labels: ['yes', 'no'], classes: [{ name: 'yes', color: colour, highlight: true }, { name: 'no', color: 0, highlight: false }], trial: false })`,
       `const ALL = LABELS ? [concept('a', 'passed on', 2), concept('b', 'links', 3)] : []`,
       `const RULER = { path: 'events.jsonl', total: TOTAL, bins: 100, labels: [{ concept_id: 'a', bins: { yes: [10, 11] }, counts: { yes: [150, 150] } }, { concept_id: 'b', bins: { yes: [50, 51] }, counts: { yes: [150, 150] } }] }`,
-      `if (LABELS) localStorage.setItem('thimble:ws:colorBy:events.jsonl', JSON.stringify({ by: 'l:a', off: {} }))`,
+      `if (LABELS) localStorage.setItem('thimble:ws:colorBy:events.jsonl', JSON.stringify({ by: 'l:a', picks: ['l:a', 'l:b'], off: {} }))`,
+      `const SPEAKERS = { key: 'speaker', values: [0, 1, 2, 3].map((k) => ({ value: 'Agent' + k, n: TOTAL / 4 })), more: { values: 0, n: 0 }, none: 0, at: Array.from({ length: 100 }, (_, b) => (b < 50 ? 0 : 1)) }`,
       `const answerLabels = (p) => (p.endsWith('/labels/ruler') ? RULER : p.endsWith('/labels') ? [] : null)`,
       `const labelsOf = (ids) => ({ all: ALL, on: ALL.filter((k) => ids.includes(k.id)), focus: null, setFocus() {}, byId: new Map(ALL.map((k) => [k.id, k])), presence: new Map(ALL.map((k) => [k.id, { 'events.jsonl': { yes: 300 } }])), toggle() {}, setClasses() {}, setColour() {}, save: async () => ({}), remove: async () => {} })`,
       `const root = createRoot(document.getElementById('root')!)`,
@@ -463,32 +468,37 @@ for (const [name, engine] of ENGINES) {
   })
 }
 
-// ---------------------------------------------------------------- one lane per label that is on
-test("Files: two labels on are two lanes of the overview, each in its label's colors and named on hover; one turned off leaves one lane", async () => {
+// ---------------------------------------------------------------- one lane per choice of Color by
+/** The overview's lanes as drawn: each lane's box and name, the overview's width, and the colors under it. */
+const overview = (page: Page) =>
+  page.evaluate(() => {
+    const cv = document.querySelector('.track-over canvas') as HTMLCanvasElement
+    const ctx = cv.getContext('2d')!
+    const dpr = window.devicePixelRatio || 1
+    const real = (c: string) => {
+      const probe = document.createElement('i')
+      probe.style.color = c
+      document.body.appendChild(probe)
+      const got = getComputedStyle(probe).color.match(/\d+/g)!.slice(0, 3).map(Number)
+      probe.remove()
+      return got
+    }
+    // the color at the middle of a lane (its left edge in css px), a share down the track
+    const at = (left: number, w: number, f: number) => Array.from(ctx.getImageData(Math.floor((left + w / 2) * dpr), Math.floor(f * cv.height), 1, 1).data.slice(0, 3))
+    const marks = [...document.querySelectorAll('.track-lane')].map((e) => ({ left: (e as HTMLElement).offsetLeft, width: (e as HTMLElement).offsetWidth, title: e.getAttribute('title') }))
+    // the first lane down the whole track, a sample every 5%
+    const column = Array.from({ length: 20 }, (_, i) => at(0, marks[0]?.width ?? 12, (i + 0.5) / 20).join(','))
+    return { width: (document.querySelector('.track-over') as HTMLElement).offsetWidth, marks, blue: real('var(--label-1)'), orange: real('var(--label-2)'), green: real('var(--label-3)'), sample: marks.map((m) => [at(m.left, m.width, 0.105), at(m.left, m.width, 0.505), at(m.left, m.width, 0.25), at(m.left, m.width, 0.75)]), one: at(0, 12, 0.105), oneGreen: at(0, 12, 0.505), column, bars: document.querySelectorAll('.reader-record.has-cb').length, trigger: document.querySelector('.reader-colorbar .colorby .colorby-trigger')?.textContent ?? null }
+  })
+const near = (a: number[], b: number[]) => a.every((v, i) => Math.abs(v - b[i]) <= 3)
+
+test("Files: two labels that are Color by's choices are two lanes of the overview, each in its label's colors and named on hover; one turned off leaves one lane", async () => {
   const { browser, page } = await open(chromium, '?mode=transcript&labels=1')
   await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 2, null, { timeout: 10000 })
   await page.waitForTimeout(300)
-  const lanes = () =>
-    page.evaluate(() => {
-      const cv = document.querySelector('.track-over canvas') as HTMLCanvasElement
-      const ctx = cv.getContext('2d')!
-      const dpr = window.devicePixelRatio || 1
-      const real = (c: string) => {
-        const probe = document.createElement('i')
-        probe.style.color = c
-        document.body.appendChild(probe)
-        const got = getComputedStyle(probe).color.match(/\d+/g)!.slice(0, 3).map(Number)
-        probe.remove()
-        return got
-      }
-      // the color at the middle of a lane (its left edge in css px), a share down the track
-      const at = (left: number, w: number, f: number) => Array.from(ctx.getImageData(Math.floor((left + w / 2) * dpr), Math.floor(f * cv.height), 1, 1).data.slice(0, 3))
-      const marks = [...document.querySelectorAll('.track-lane')].map((e) => ({ left: (e as HTMLElement).offsetLeft, width: (e as HTMLElement).offsetWidth, title: e.getAttribute('title') }))
-      return { width: (document.querySelector('.track-over') as HTMLElement).offsetWidth, marks, orange: real('var(--label-2)'), green: real('var(--label-3)'), sample: marks.map((m) => [at(m.left, m.width, 0.105), at(m.left, m.width, 0.505)]), one: at(0, 12, 0.105), oneGreen: at(0, 12, 0.505) }
-    })
-  const near = (a: number[], b: number[]) => a.every((v, i) => Math.abs(v - b[i]) <= 3)
-  const two = await lanes()
+  const two = await overview(page)
   assert.deepEqual(two.marks.map((m) => m.title), ['passed on', 'links'], 'each lane names its label on hover')
+  assert.equal(two.trigger, 'Color by: passed on+1')
   assert.ok(two.marks.every((m) => m.width >= 3 && m.width <= 12) && two.width <= 25, `the lanes narrower, the overview ${two.width} px: ${JSON.stringify(two.marks)}`)
   // the first lane in "passed on"'s orange where it marks, the second in "links"'s green where it marks, each blank where the other marks
   assert.ok(near(two.sample[0][0], two.orange), `the first lane orange at "passed on": ${two.sample[0][0]} against ${two.orange}`)
@@ -498,9 +508,49 @@ test("Files: two labels on are two lanes of the overview, each in its label's co
   await page.evaluate(() => (window as any).__on(['a']))
   await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 0)
   await page.waitForTimeout(300)
-  const one = await lanes()
+  const one = await overview(page)
   assert.equal(one.width, 12, 'one lane, as wide as the overview always is')
   assert.ok(near(one.one, one.orange) && !near(one.oneGreen, one.green), `the one lane is "passed on": ${one.one} ${one.oneGreen}`)
+  assert.equal(one.trigger, 'Color by: passed on')
+  // "links" on again from elsewhere takes the color; "passed on" keeps its lane
+  await page.evaluate(() => (window as any).__on(['a', 'b']))
+  await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 2)
+  assert.deepEqual((await overview(page)).marks.map((m) => m.title), ['links', 'passed on'])
+  await browser.close()
+})
+
+test("Files: a label on that is no choice has no lane; a key checked after a label is a lane in its values' colors; Off leaves the overview plain, with no lane and no record's bar", async () => {
+  const { browser, page } = await open(chromium, '?mode=transcript&labels=1')
+  await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 2, null, { timeout: 10000 })
+  // "links" unchecked in the menu leaves the choices; the test's labels stay as they are (its toggle does nothing), so
+  // "links" is on and is no choice
+  await page.click('.reader-colorbar .colorby .colorby-trigger')
+  await page.click('.colorby-menu .colorby-item[data-by="l:b"]')
+  await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 0)
+  assert.equal(await page.locator('.colorby-menu').count(), 1, 'the menu stays open')
+  // the key "speaker" checked: a lane after "passed on", blue in the first half and orange in the second
+  await page.click('.colorby-menu .colorby-item[data-by="k:speaker"]')
+  await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 2)
+  assert.equal(await page.locator('.colorby-menu .colorby-item[data-by="k:speaker"] .colorby-track-n').textContent(), 'track')
+  await page.waitForTimeout(300)
+  const lanes = await overview(page)
+  assert.deepEqual(lanes.marks.map((m) => m.title), ['passed on', 'speaker'])
+  assert.equal(lanes.trigger, 'Color by: passed on+1')
+  assert.ok(near(lanes.sample[1][2], lanes.blue) && near(lanes.sample[1][3], lanes.orange), `the key's lane in its values' colors: ${JSON.stringify(lanes.sample[1])}`)
+  // "passed on" unchecked: "speaker" is the color, on the records' bars too
+  await page.click('.colorby-menu .colorby-item[data-by="l:a"]')
+  await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 0 && document.querySelectorAll('.reader-record.has-cb').length > 0)
+  assert.equal((await overview(page)).trigger, 'Color by: speaker')
+  // Off: no lane, the overview one plain color top to bottom, no record's bar, no chip
+  await page.click('.colorby-menu .colorby-item[data-by="off"]')
+  await page.waitForFunction(() => document.querySelectorAll('.track-lane').length === 0 && !document.querySelector('.colorby-menu'))
+  await page.waitForTimeout(300)
+  const off = await overview(page)
+  assert.equal(off.trigger, 'Color by: Off')
+  assert.equal(off.width, 12)
+  assert.equal(new Set(off.column).size, 1, `the overview is plain: ${JSON.stringify(off.column)}`)
+  assert.equal(off.bars, 0)
+  assert.equal(await page.locator('.reader-colorbar .colorby-chip').count(), 0)
   await browser.close()
 })
 

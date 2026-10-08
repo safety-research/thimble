@@ -23,7 +23,7 @@ import { useScrollAnchor } from './anchor'
 import { ReaderLabelsContext, useReaderLabels } from './marks'
 import { findColumn, rulerColumns, useRuler, type RulerTick, type Seen, type Shown } from './Ruler'
 import { ColorBy } from './ColorBy'
-import { keyColor, KEY_COLORS, keyValue, OTHER, recordObject } from './colorChoice'
+import { choiceId, KEY_COLORS, keyPaint, keyValue, parseChoice, recordObject, type ColorChoice } from './colorChoice'
 import { ColorContext } from './colorContext'
 import { FilterBy } from './FilterBy'
 import { FilterContext, useFilterBy } from './useFilterBy'
@@ -1197,55 +1197,51 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const rulerCols = useMemo(() => (found && found.total && total ? [...columns, findColumn(found.lines, total, findText)] : columns), [columns, found, total, findText])
 
   // ---- Color by and the tracks
-  // the labels Filter by turns on, which Color by leaves to it
+  // the labels Filter by turns on, which Color by leaves to it, and the one it filters by, which Color by leaves on
   const quiet = useRef(new Set<string>())
+  const filterHolds = useRef<string | null>(null)
   // a CSV or TSV file's records as the Table mode reads them, by its first line's names
   const colorRecords = useDelimited(workspace, colored && !isTranscript ? path : '', records)
-  const color = useColorBy(workspace, path, colored && !binary && !isDatabase, labels, colorRecords, readerLabels.rows, total, quiet)
+  const color = useColorBy(workspace, path, colored && !binary && !isDatabase, labels, colorRecords, readerLabels.rows, total, quiet, filterHolds)
   const filter = useFilterBy(workspace, path, isTranscript && !binary && !isDatabase, labels, color.fileLabels, color.keys, records, readerLabels.rows, total, quiet)
+  const filterLabel = isTranscript && filter.choice.by === 'label' ? filter.choice.id : null
+  useEffect(() => {
+    filterHolds.current = filterLabel
+  }, [filterLabel])
   const fold = useFold(workspace, path)
   const colorChoice = color.choice
-  // the overview's colors: the chosen key's commonest value per bin, the chosen label's value most records have per
-  // bin, else the density
-  const paint = useMemo<OverviewPaint>(() => {
-    if (!colored) return { kind: 'none' }
-    if (colorChoice.by === 'key') {
-      const k = color.keys?.keys.find((x) => x.key === colorChoice.key)
-      if (k) {
-        const ranks = Math.max(1, k.values.length)
-        const offSet = new Set(color.off)
-        // a value's rank's color, or the one picked for it
-        const pickedOf = (r: number) => color.picked[r < KEY_COLORS ? k.values[r]?.value ?? '' : OTHER]
-        return {
-          kind: 'bins',
-          at: k.at,
-          colors: Array.from({ length: ranks }, (_, r) => (pickedOf(r) ? `var(--label-${pickedOf(r)})` : keyColor(r))),
-          faded: Array.from({ length: ranks }, (_, r) => offSet.has(r < KEY_COLORS ? k.values[r].value : OTHER)),
-        }
+  // a choice's lane of the overview: a key's commonest value per bin, a label's value most records have per bin; the
+  // first choice's values turned off faded
+  const paintOf = useCallback(
+    (c: ColorChoice, off: ReadonlySet<string>): OverviewPaint | null => {
+      if (c.by === 'key') {
+        const k = color.keys?.keys.find((x) => x.key === c.key)
+        return k ? keyPaint(k, color.pickedOf(choiceId(c)), off) : null
       }
-    }
-    if (colorChoice.by === 'label') {
-      const k = lanes.find((x) => x.id === colorChoice.id)
-      const got = k ? labelPaint(k, ruler, new Set(color.off)) : null
-      if (got) return got
-    }
-    return color.keys?.bytes.length ? { kind: 'density', bytes: color.keys.bytes } : { kind: 'none' }
-  }, [colored, colorChoice, color.keys, color.off, color.picked, lanes, ruler])
-  // the markers: the find's matches. Each other label that is on and marks the file has a lane of its own beside the
-  // choice's, in its own colors, so that one choice is one lane and two labels on are two
+      if (c.by === 'label') {
+        const k = lanes.find((x) => x.id === c.id)
+        return k ? labelPaint(k, ruler, off) : null
+      }
+      return null
+    },
+    [color.keys, color.pickedOf, lanes, ruler],
+  )
+  // the overview's colors: the first choice's; with Off a plain track
+  const paint = useMemo<OverviewPaint>(() => (colored ? (paintOf(colorChoice, new Set(color.off)) ?? { kind: 'none' }) : { kind: 'none' }), [colored, paintOf, colorChoice, color.off])
+  // the markers: the find's matches. Each choice past the first has a lane of its own beside the first's, in its own
+  // colors, so that one choice is one lane and two are two
   const markers = useMemo(() => rulerCols.filter((c) => c.id === 'find'), [rulerCols])
-  const choiceLabel = colorChoice.by === 'label' ? colorChoice.id : null
+  const nameOfChoice = useCallback((c: ColorChoice) => (c.by === 'key' ? c.key : c.by === 'label' ? (lanes.find((k) => k.id === c.id)?.name ?? '') : ''), [lanes])
   const trackLanes = useMemo<TrackLane[]>(() => {
     if (!colored) return []
     const out: TrackLane[] = []
-    for (const k of lanes) {
-      if (k.id === choiceLabel || marksOf(k) === 'file' || !fileOf(k.id)) continue
-      const got = labelPaint(k, ruler, NO_OFF)
-      if (got) out.push({ id: k.id, name: k.name, paint: got })
+    for (const c of color.picks.slice(1)) {
+      const got = paintOf(c, NO_OFF)
+      if (got) out.push({ id: choiceId(c), name: nameOfChoice(c), paint: got })
     }
     return out
-  }, [colored, lanes, choiceLabel, fileOf, ruler])
-  const paintName = colorChoice.by === 'key' ? colorChoice.key : colorChoice.by === 'label' ? (lanes.find((k) => k.id === choiceLabel)?.name ?? '') : ''
+  }, [colored, color.picks, paintOf, nameOfChoice])
+  const paintName = nameOfChoice(colorChoice)
   const recordAtLine = useMemo(() => new Map(colorRecords.map((r) => [r.line, r])), [colorRecords])
   // a record's color on the zoomed track, and its value of the choice for its hover
   const zoomColor = useMemo(() => {
@@ -1300,8 +1296,10 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // find does; the first of those lines when none is found
   const snapTo = (from: number, to: number, value: number, lane: string | null) => {
     const land = (line: number | null) => goTo(line ?? from, 'ruler')
-    if (colorChoice.by === 'key' && lane == null) {
-      const k = color.keys?.keys.find((x) => x.key === colorChoice.key)
+    // the choice whose lane it is: the first's, or another's by its id
+    const c = lane != null ? parseChoice(lane) : colorChoice
+    if (c?.by === 'key') {
+      const k = color.keys?.keys.find((x) => x.key === c.key)
       if (!k) return land(from)
       const inValue = (rec: SourceRecord) => {
         const v = keyValue(rec, k.key)
@@ -1315,7 +1313,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         .catch(() => land(null))
       return
     }
-    const id = lane ?? choiceLabel
+    const id = c?.by === 'label' ? c.id : null
     const k = id != null ? lanes.find((x) => x.id === id) : undefined
     const name = k ? classesOf(k).filter((c) => c.highlight)[value]?.name : undefined
     if (!k || name == null) return land(from)
@@ -1437,7 +1435,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
             {colored && !binary && !isDatabase && loaded && !noViewReason && (
               <div className="reader-colorbar">
                 {isTranscript && <FilterBy choice={filter.choice} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={filter.values} off={filter.off} onChoose={filter.choose} onToggle={filter.toggle} countsOf={fileOf} />}
-                <ColorBy choice={color.choice} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={color.values} off={color.off} onChoose={color.choose} onToggle={color.toggle} countsOf={fileOf} onColor={color.recolor} onResetColors={color.resetColors ?? undefined} pickedOf={color.pickedOf} />
+                <ColorBy choice={color.choice} picks={color.picks} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={color.values} off={color.off} onChoose={color.choose} onToggle={color.toggle} countsOf={fileOf} onColor={color.recolor} onResetColors={color.resetColors ?? undefined} pickedOf={color.pickedOf} />
                 {isTranscript && (
                   <Button size="sm" className="reader-foldall" onClick={() => fold.setAll(fold.all === 'fold' ? 'open' : 'fold')}>
                     {fold.all === 'fold' ? 'Expand all' : 'Collapse all'}
