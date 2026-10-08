@@ -67,10 +67,6 @@
   .num .ico { width: 14px; height: 14px; }
   .people { display: inline-flex; margin-right: 4px; vertical-align: middle; }
   .people .avatar { width: 18px; height: 18px; margin-right: -4px; font-size: 9px; box-shadow: 0 0 0 1.5px var(--surface-card); }
-  /* under a label a row stands for its records, so it takes no colour of its own: a small bar shows its records' mix
-     of the label's values, each part as wide as its share (the view kit's proportion bar will take its place) */
-  .mix { flex: none; display: inline-flex; gap: 1px; width: 48px; height: 6px; overflow: hidden; border-radius: 1px; }
-  .mix i { flex: 1 1 0; min-width: 3px; }
   .empty { padding: 28px 4px; color: var(--text-tertiary); }
   /* the list's numbers give way to the titles in a narrow list */
   @container (max-width: 560px) { .box-head, .item { grid-template-columns: 22px minmax(0, 1fr); } .heads, .num { display: none; } .box-head { display: none; } }
@@ -340,8 +336,8 @@ function draw() {
     ? `<section class="box" style="--cols:${T.cols}"><div class="box-head"><span></span><span></span><span class="heads">${T.heads.map((h) => `<span>${h}</span>`).join('')}</span></div>` +
       shown.map(ROW[tab]).join('') + '</section>'
     : `<div class="empty">No ${T.name.toLowerCase()}</div>`
-  // the colored scrollbar only on a list of what is colored: the rows while a field colors them; a plain one while a
-  // label colors the records the rows stand for, or Color by is Off (the view kit will say this itself)
+  // the colored scrollbar only on a list of what is colored: the rows while a field colors them; the kit's plain track
+  // while a label colors the records the rows stand for, or Color by is Off
   colour.strip('#list', { whole: !!colour.field })
 }
 
@@ -349,17 +345,8 @@ function draw() {
 // in the row (mix) and their own bars on its page
 const rowOpen = (it) => `<div class="item${open && open.key === it.key ? ' active' : ''}" data-key="${esc(it.key)}" data-anchor="view:${slug}/${esc(it.key)}"` +
   `${colour.label ? ' data-anchor-unmarked' : colour.attr(it)}>`
-// the records' mix of the label's values, in the chips' order, each part as wide as its share; the records with no
-// value in the marks' grey. Drawn here until the view kit's proportion bar replaces it
-function mix(it) {
-  if (!colour.label || !it.mix || !it.mix.some(([v]) => v != null)) return ''
-  const chips = colour.values
-  const order = chips.map((c) => (c.value == null ? '' : String(c.value)))
-  const at = (v) => { const i = order.indexOf(v == null ? '' : String(v)); return i < 0 ? order.length : i }
-  const parts = it.mix.slice().sort((a, b) => at(a[0]) - at(b[0]))
-  const words = parts.map(([v, n]) => `${(chips[at(v)] || {}).name || v || 'no value'} ${n}`).join(' · ')
-  return `<span class="mix" title="${esc(words)}">${parts.map(([v, n]) => `<i style="flex-grow:${n};background:${(v != null && colour.colourOf(v)) || 'var(--label-none)'}"></i>`).join('')}</span>`
-}
+// the records' mix of the label's values ([[value, n]]) as the kit's proportion bar, where any of them takes a value
+const mix = (it) => (colour.label && it.mix && it.mix.some(([v]) => v != null) ? thimble.mix(it.mix) : '')
 // the area as the forge's label, in words: only Color by colors
 const areaChip = (it) => (!it.area ? '' : `<span class="chip chip-sans chip-tone-neutral"><span class="chip-text">${esc(it.area)}</span></span>`)
 const stateIcon = (t, it) => { const [i, w] = STATE[t][it.state] || STATE[t].open; return `<span class="state" title="${w}">${ico(i)}</span>` }
