@@ -3879,9 +3879,10 @@ const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 /**
  * A transcript's turns as thimble-term's file view draws a transcript (docs/terminal-views.md, "The transcript"): per
  * turn its clock dim in a column, `●` and the speaker bold, the words under the name up to three rows, a tool call one
- * dim line `⎿ Bash  pytest -q`; the day on a dim row of its own where it changes. It is a list: ↑↓ choose a turn, Enter
- * opens it (a turn's words whole, a tool call's input and what came back, an error in red), in place or in a side
- * pane (`side`), `a` asks about it, and its track shows where the Color by values are.
+ * dim line `⎿ Bash  pytest -q`, a failed one with `× Bash` in red as the lanes draw it; the day on a dim row of its own
+ * where it changes. It is a list: ↑↓ choose a turn, Enter opens it (a turn's words whole, a tool call's input and what
+ * came back, an error in red), in place or in a side pane (`side`), `a` asks about it, and its track shows where the
+ * Color by values are.
  *
  * opts: key (the list's), enter. draw(d, {turns, title, count, colour, side, onOpen, empty}): turns [{ref, t, speaker,
  * kind (text | prompt | tool | thinking | system), tool, text, input, output, error}].
@@ -3929,6 +3930,11 @@ export function transcript(opts = {}) {
         ask: (t) => ({ ref: t.ref, text: t.kind === 'tool' ? `${t.tool || ''} ${t.input || ''}` : t.text || '' }),
         row: (t, r) => {
           if (tw) r.add(pad(clockOf(t), tw), { d: true }).gap()
+          if (t.kind === 'tool' && t.error) {
+            r.add('⎿ ', { d: true }).add(`× ${t.tool || 'tool'}`, { fg: COLORS.problem }, { max: Math.max(4, r.room) })
+            if (r.room > 1) r.gap(1).add(firstLine(t.input), { d: true }, { max: r.room })
+            return
+          }
           if (t.kind === 'tool' || t.kind === 'system') {
             r.add(`⎿ ${t.kind === 'tool' ? `${t.tool || 'tool'}  ${firstLine(t.input)}` : firstLine(t.text)}`, { d: true }, { max: Math.max(6, r.room) })
             return

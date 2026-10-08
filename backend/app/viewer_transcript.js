@@ -3,13 +3,14 @@
 // draws them (frontend/src/files/views/transcript.tsx AgentTranscript, views/common.tsx RecordCard, files.css
 // .reader-*): one card per turn, its number in a column at the left, its speaker, tool and time in a mono head, its words
 // under it; a tool call and what came back, and a system record, folded to one line until opened; a long block folded to
-// six lines with Expand; a thought quiet; an error in the problem red; a line between sessions. Each turn is anchored
-// with its ref, so a label marks it, a ⌘-click asks about it and Color by draws its bar, and its number opens its lines
-// in the File browser.
+// six lines with Expand; a thought quiet; an error in the problem red, a failed call's head with ✕ before its tool; a
+// line between sessions. Each turn is anchored with its ref, so a label marks it, a ⌘-click asks about it and Color by
+// draws its bar, and its number opens its lines in the File browser.
 //
 //   const tr = thimble.transcript({ mount: '#turns', colour, onOpen: (turn) => fetchWhole(turn) })
 //   tr.draw(turns, { title: 'explorer · Run 2' })   turns: [{ref, t, speaker, kind, tool, text, input, output, error,
-//                                                    session, line}], kind text | prompt | tool | thinking | system
+//                                                    session, line}], kind text | prompt | tool | thinking | system,
+//                                                    error true or the failure's word (✕'s hover gives it)
 //   tr.reveal(ref)                                  a cited turn: opened, scrolled to the middle, its highlight fading
 //   tr.set(ref, {text, input, output})              a turn's words once the reader sent them whole
 ;(function () {
@@ -87,7 +88,10 @@
   Transcript.prototype.turnHtml = function (turn, i) {
     var open = this.isOpen(turn)
     var kind = turn.kind || 'text'
-    var head = esc(turn.speaker || '(unsigned)') + (turn.tool && kind === 'tool' ? '<span class="thimble-turn-tool"> · ' + esc(turn.tool) + '</span>' : '') + (stamp(turn) ? ' · ' + esc(stamp(turn)) : '')
+    // a failed call: ✕ and its tool in the problem red, whether the turn is folded or open
+    var failed = kind === 'tool' && turn.error
+    var tool = failed ? '<span class="thimble-turn-failed" title="' + esc(typeof turn.error === 'string' ? turn.error : 'failed') + '">✕ ' + esc(turn.tool || 'tool') + '</span>' : esc(turn.tool)
+    var head = esc(turn.speaker || '(unsigned)') + ((turn.tool || failed) && kind === 'tool' ? '<span class="thimble-turn-tool"> · ' + tool + '</span>' : '') + (stamp(turn) ? ' · ' + esc(stamp(turn)) : '')
     var body = ''
     if (!open) body = '<button type="button" class="thimble-turn-line" data-open="' + esc(turn.ref) + '">' + esc(summary(turn)) + '</button>'
     else {

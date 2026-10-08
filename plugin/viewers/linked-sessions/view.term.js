@@ -2,10 +2,11 @@
 // The top row searches the turns, filters them (Filter by), groups the lanes (Rows) and colors them (Color by); the time
 // range's strip, broken where the runs lie hours apart, picks the time the lanes and the transcript show. A lane per
 // session, each subagent under the session that started it with its tree guide, shows its turns in the Color by hues
-// and a failed call as a red ×; a click on a lane's name reads that session. Under the lanes, what links the session
-// read to the others (the session that started it, when its result came back, the subagents it started), then its
-// transcript, a turn's whole words and a call's input and output opening in the side pane. One fetch gives what the
-// search and the controls keep; a session's turns come when it is read, a call's whole input when it opens.
+// and a failed call as a red ×, always shown (no key hides it; Filter by's Outcome keeps or leaves out the failures); a
+// click on a lane's name reads that session. Under the lanes, what links the session read to the others (the session
+// that started it, when its result came back, the subagents it started), then its transcript, a turn's whole words and
+// a call's input and output opening in the side pane. One fetch gives what the search and the controls keep; a
+// session's turns come when it is read, a call's whole input when it opens.
 import { axis, colorBy, divider, draw, fetch, filterBy, hms, lanes, onLabels, onOpen, plural, rows, search, side, timeRange, transcript, width, COLORS } from 'thimble-term'
 
 const KIND = { prompt: 'prompt', text: 'text', result: 'result', call: 'tool call' }
@@ -96,7 +97,8 @@ const range = timeRange({ gap: GAP })
 const valueOf = (it) => (colour.label ? (data && data.colours[it.ref]) ?? null : colour.valueOf(it))
 const laneColour = { keeps: () => true, valueOf, colourOf: (v) => colour.colourOf(v) }
 // the lanes: each turn's bar in its hue, a call that ran past its cell (a Task call while its subagent ran) a line in its
-// hue, a cell where most calls failed a red ×; the transcript's turns in view on the selection background
+// hue, a cell where most calls failed a red ×, always shown, as the transcript gives `× Bash`; the transcript's turns
+// in view on the selection background
 const overview = lanes({
   rows: ln,
   colour: laneColour,
@@ -107,6 +109,7 @@ const overview = lanes({
   onPick: (lane) => read(String(lane.key)),
   onMark: (it) => goTo(it.ref),
 })
+if (!overview.isOn('problem')) overview.toggle('problem')
 const pane = side({ key: 'turn' })
 const split = divider()
 // the transcript: each turn its clock, speaker and words, a tool call one line; Enter opens a turn in the side pane
@@ -292,9 +295,8 @@ draw((d) => {
   const y0 = d.y
   range.draw(d, { gutter })
   const scale = range.scale(d.cols - gutter)
-  const legend = () => overview.legend()
   overview.draw(d, { items: items.filter((it) => range.has(it.time)), scale, gutter, room: Math.max(2, top - (d.y - y0) - 1), span: tr.list })
-  axis(d, scale, { gutter, gap: 8, legend: legend() })
+  axis(d, scale, { gutter, gap: 8 })
   // the lane read stays chosen while it has a turn in the range, though a folded lane may hold it; else the first
   const ls = overview.lanes.filter((l) => !l.heading)
   const lane = bySession() ? null : ls.find((l) => String(l.key) === chosen)

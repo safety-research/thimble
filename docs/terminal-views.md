@@ -324,13 +324,14 @@ panel has no drag across its rows, so here the overview has the rows the view gi
 ## The transcript
 
 `transcript(opts)` draws a transcript's turns as thimble-term's file view draws a transcript: `tr.draw(d, {turns, title,
-count, colour, side, onOpen})`. Each turn has its clock dim in a column, `●` (in its Color by hue, with `colour`) and the
-speaker bold, and its words under the name, up to three rows; a tool call is one dim row, `⎿ Bash pytest -q`; the day
-stands on a dim row of its own where it changes. It is a list: ↑↓ choose a turn, Enter opens it in place, or in the side
-pane with `side` (a turn's words whole; a tool call's input in the code color and what came back, in red for an
-error), `a` asks about it, and its track shows where the Color by values are. A turn is `{ref, t, speaker, kind, tool,
-text, input, output, error}`, `kind` one of `text`, `prompt`, `tool`, `thinking` and `system`; `title` names what it
-shows, with the count of its turns. `tr.list` is the list under it, for `span` and `choose`.
+count, colour, side, onOpen})`. Each turn has its clock dim in a column, `●` (in its Color by hue, with `colour`) and
+the speaker bold, and its words under the name, up to three rows; a tool call is one dim row, `⎿ Bash pytest -q`, a
+failed one (`error`) with `× Bash` in red as the lanes draw it; the day stands on a dim row of its own where it changes.
+It is a list: ↑↓ choose a turn, Enter opens it in place, or in the side pane with `side` (a turn's words whole; a tool
+call's input in the code color and what came back, in red for an error), `a` asks about it, and its track shows where
+the Color by values are. A turn is `{ref, t, speaker, kind, tool, text, input, output, error}`, `kind` one of `text`,
+`prompt`, `tool`, `thinking` and `system`; `title` names what it shows, with the count of its turns. `tr.list` is the
+list under it, for `span` and `choose`.
 
 ## Search and choices
 

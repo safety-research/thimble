@@ -645,11 +645,16 @@ LEAD1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576.jsonl"
 PORT1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576/subagents/agent-a07a4da7.jsonl"
 
 
-def _tree(body: list[str]) -> list[str]:
-    """The lanes' names, from the row under the time range's strip to the axis, whose key starts `× failed`."""
+def _axis(body: list[str]) -> int:
+    """The axis under the lanes: the first row after the time range's strip with a blank gutter, where no key stands."""
     top = next(i for i, x in enumerate(body) if re.match(r"\s+\d+ \w{3} \d\d:\d\d", x)) + 2
-    end = next(i for i, x in enumerate(body) if x.startswith("  × failed"))
-    return [re.match(r"\s*\S+(?: \S+)*", x[2:])[0] for x in body[top:end]]
+    return next(i for i in range(top, len(body)) if body[i].strip() and not body[i][:12].strip())
+
+
+def _tree(body: list[str]) -> list[str]:
+    """The lanes' names, from the row under the time range's strip to the axis."""
+    top = next(i for i, x in enumerate(body) if re.match(r"\s+\d+ \w{3} \d\d:\d\d", x)) + 2
+    return [re.match(r"\s*\S+(?: \S+)*", x[2:])[0] for x in body[top:_axis(body)]]
 
 
 def _linked_pane(rows: list[str], title: str) -> list[str]:
@@ -663,10 +668,10 @@ def _linked_pane(rows: list[str], title: str) -> list[str]:
 async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     """The worked example at 120 and 200 columns: the top row (search, Filter by, Rows, Color by with its chips), the
     time range's readout and its strip broken where the runs lie hours apart, each run's sessions as a tree of lanes (a
-    lead, the subagents it started under it with their guides), the axis with the key of the failed calls, what links
-    the lead read to the others, then its transcript under a title that names it and counts its turns: the user's
-    prompt, each tool call on one line, a Task call naming the subagent it started; its hint row names ↑↓, Enter, its
-    own n p and `?`."""
+    lead, the subagents it started under it with their guides), the axis alone (no key of the failed calls: a failed
+    call is × in red on its lane and before its tool in the transcript), what links the lead read to the others, then
+    its transcript under a title that names it and counts its turns: the user's prompt, each tool call on one line, a
+    Task call naming the subagent it started; its hint row names ↑↓, Enter, its own n p and `?`."""
     out = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP)
     lines = out.splitlines()
     assert lines[:2] == ["  Linked sessions", "  3 runs · 17 sessions · 352 turns"]
@@ -682,8 +687,10 @@ async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     # each run's lanes stand in its own stretch of the axis: Run 2's start after the first break, Run 3's after the second
     breaks = [i for i in range(len(body[2])) if body[2][i:i + 4] == " // "]
     assert body[3][22:breaks[0]].strip() and not body[10][22:breaks[0]].strip() and body[10][breaks[0]:breaks[1]].strip()
-    axis = next(i for i, x in enumerate(body) if x.startswith("  × failed"))
+    axis = _axis(body)
     assert body[axis].count("//") == 2 and "12 Sep 14:15" in body[axis] and "13 Sep 09:15" in body[axis]
+    assert "failed" not in "\n".join(body[:axis + 1]), "no key of the failed calls"
+    assert any("×" in x[22:] for x in body[3:axis]), "a failed call is × on its lane"
     assert body[axis + 1] == ""
     assert body[axis + 2].startswith("  lead of Run 1 · nested team · subagents survey 14:03:10, client-port 14:09:05, webhooks 14:09:06")
     assert body[axis + 3].startswith("  lead · Run 1 · nested team  20 turns · 14:02:00 – 14:46:10")
@@ -691,6 +698,7 @@ async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     assert rows[:2] == ["  12 Sep 2026", "❯ 14:02:00  ● user"]
     assert rows[2].strip().startswith("Upgrade invoicer from Brambleway API v2 to v3.")
     assert "  14:03:10  ⎿ Task → survey Find every v2 call site" in rows
+    assert "  14:30:20  ⎿ × Bash pytest -q" in rows, "a failed call's row gives × before its tool"
     assert hints == "↑↓ to choose · Enter to open · n p for the next or previous lane · ? for all keys · b to go back · x to close"
 
 
