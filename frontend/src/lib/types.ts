@@ -1588,6 +1588,20 @@ export interface ConceptApplication {
   examples?: number
   /** the units the run gave the first value (may be absent) */
   matches?: number
+  /** the whole files or runs a prompt label's run read only in part; absent when it read every one whole */
+  cut?: ReadCut | null
+}
+
+/** The whole files or runs a prompt label's run read only in part, since they were longer than its model's context
+ * holds (backend concepts.read_cut): how many, of how many, the JSON documents among them read whole with their long
+ * parts shortened, the median tokens it sent of each, the first of them, and the line that says it. */
+export interface ReadCut {
+  n: number
+  of?: number | null
+  short?: number
+  tokens: number
+  refs: string[]
+  line: string
 }
 
 /** The live run record GET /concepts/{id} carries as `run` while and after an apply on this server. */
@@ -1607,6 +1621,8 @@ export interface ConceptRun {
   /** the files the run covers and the ones indexed so far, while `total` is not known yet */
   files_total?: number | null
   files_indexed?: number
+  /** the whole files or runs it read only in part, once its classifier calls end */
+  cut?: ReadCut | null
   [k: string]: unknown
 }
 

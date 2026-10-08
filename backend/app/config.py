@@ -1003,6 +1003,16 @@ def long_context(model: str) -> str:
     return f"{m}[1m]"
 
 
+CONTEXT_TOKENS = 200_000  # the context window of a model without a 1M-token one (LONG_CONTEXT_MODELS), as Haiku's
+LONG_CONTEXT_TOKENS = 1_000_000
+
+
+def context_tokens(model: str) -> int:
+    """The context window, in tokens, of `model` (an alias read as its id) run on long_context(model):
+    LONG_CONTEXT_TOKENS for a model with a 1M-token window, else CONTEXT_TOKENS."""
+    return LONG_CONTEXT_TOKENS if long_context(exact_model(model)).lower().endswith("[1m]") else CONTEXT_TOKENS
+
+
 def agent_front(name: str) -> dict[str, Any]:
     """The frontmatter of an agent file (ROLE_AGENTS' names); {} when it cannot be read."""
     import yaml  # noqa: PLC0415 — only the agent files need it

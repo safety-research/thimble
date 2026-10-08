@@ -85,7 +85,10 @@ ERROR_MIME = "application/vnd.thimble.error+json"
 DRAWING_MIMES = {"application/vnd.thimble.diagram+json": "diagram", "application/vnd.thimble.timeline+json": "timeline"}
 LABEL_KINDS = ("prompt", "regex", "code")
 LABEL_SCOPES = ("files", "canvas", "report")
-UNIT_WORDS = {"cell": "card", "span": "sentence"}  # a label's stored unit (concepts.SCOPES) as a result names it
+# a label's stored unit (concepts.UNITS) as a result names it
+UNIT_WORDS = {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}
+# apply_label's `unit` for files: what one value goes to, as concepts.FILE_UNITS names it
+LABEL_UNITS = {"records": "record", "files": "agent", "runs": "run"}
 CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom")
 # add_card's and edit_card's enum, in the order of thimble's grammar of cards, then custom. The grammar's classifier is
 # the label card, which apply_label makes.
@@ -2397,6 +2400,11 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return err(f"apply_label: predicate.kind must be one of {', '.join(LABEL_KINDS)}")
     if not text:
         return err("apply_label: predicate.text is required (the description, the pattern or the function)")
+    unit_arg = str(args.get("unit") or "").strip().lower()
+    if unit_arg and unit_arg not in LABEL_UNITS:
+        return err(f"apply_label: `unit` must be one of {', '.join(LABEL_UNITS)}")
+    if unit_arg and scope != "files":
+        return err("apply_label: `unit` is for a label over files")
     values = _label_list(args.get("values"))
     paths = args.get("paths")
     if isinstance(paths, str):
@@ -2440,7 +2448,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     s = await concepts.apply_scoped(ctx.c, scope=scope, name=name, kind=kind, text=text, values=values, paths=paths, limit=limit,
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
-                                    card=not orienting, within=within, show=bool(args.get("show")), defer=defer)
+                                    card=not orienting, within=within, show=bool(args.get("show")), defer=defer,
+                                    unit=LABEL_UNITS.get(unit_arg))
     if s.get("deferred"):
         # the run makes the call again where the code runs; the filter and Files' switch are set already, here
         again = {k: v for k, v in args.items() if k not in ("filter", "show")}
@@ -2473,6 +2482,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                  f" to another value count under that value (the label itself gave {before}).")
     if s.get("failed"):
         line += f" {s['failed']} {unit}(s) failed: {s.get('message') or 'no reason given'}."
+    if (s.get("cut") or {}).get("line"):
+        line += f" {s['cut']['line']}."
     values = (concepts.find_concept(ctx.ws, s["concept"]) or {}).get("labels") or [None]
     if kind != "prompt" and s.get("unit") == "record" and not s.get("partial") and (s.get("counts") or {}).get(values[0]):
         shown = await asyncio.to_thread(concepts.examples, ctx.c, s["concept"], values[0])

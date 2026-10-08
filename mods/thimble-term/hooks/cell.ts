@@ -36,7 +36,9 @@ export type ThimbleCell = {
 
 /** One run of a label as the concept keeps it: the records it ran over (`total`), those its scope holds
  *  (`matched_total`), those labeled, its sample size (`limit`, none for every record), when it began. */
-export type LabelRun = { total?: number; matched_total?: number | null; labeled?: number; status?: string; paths?: string[]; limit?: number | null; ts?: string }
+/** A run of a label as the concept keeps it; `cut`, the whole files or runs a prompt label read only in part, with the
+ *  line that says it (backend concepts.read_cut). */
+export type LabelRun = { total?: number; matched_total?: number | null; labeled?: number; status?: string; paths?: string[]; limit?: number | null; ts?: string; cut?: { n?: number; line?: string } | null }
 
 /** A label (`thimble state label <id>`, the concept route's shape), with a page of its rows when the backend gives
  *  one (`rows`, as GET /concepts/<id>/rows?text=1 answers). */

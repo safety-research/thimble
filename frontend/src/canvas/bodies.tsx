@@ -11,6 +11,7 @@ import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { useTooltip } from '../components/Tooltip'
 import { classesOf, colourVar, globPatterns, isFilesLabel, isMultiClass, mainColour, marksOf } from '../files/labels'
+import { ReadCutLine } from '../files/ReadCutLine'
 import { api, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
@@ -352,6 +353,8 @@ function LabelBody({ conceptId, concept, error, title }: { conceptId: string; co
   const classes = files ? new Map(classesOf(known).map((c) => [c.name, c])) : null
   const glob = files && ctx.concepts.has(conceptId) && asksQuestion(title, conceptName(ctx.concepts, conceptId)) ? shortGlob(known.glob) : null
   const how = [known.kind, known.kind === 'prompt' && (known.model || model) ? modelLabel(known.model || model) : ''].filter(Boolean).join(' · ')
+  // the whole files or runs its last run read only in part: the concepts list's `last_run`, a card's detail's last kept run
+  const cut = (known.last_run ?? (known as ConceptDetail).applications?.at(-1))?.cut
   const done = run?.done ?? run?.labeled
   const progress = running && typeof done === 'number' ? (typeof run?.total === 'number' && run.total > 0 ? `${done.toLocaleString()} of ${run.total.toLocaleString()} ${unitWord(known.unit, run.total)}` : `${done.toLocaleString()} ${unitWord(known.unit, done)}`) : ''
   return (
@@ -396,6 +399,7 @@ function LabelBody({ conceptId, concept, error, title }: { conceptId: string; co
           {shares.matched.toLocaleString()} of {unitTotal(total, known.unit)} matched
         </div>
       )}
+      {!running && cut && <ReadCutLine cut={cut} className="bcell-label-cut" />}
       {shown.length > 0 && (
         <ul className="bcell-label-examples">
           {shown.map((v) => {

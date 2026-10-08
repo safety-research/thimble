@@ -509,9 +509,9 @@ async def test_a_file_too_large_to_hold_whole_gives_its_code_none_and_its_record
 
 
 async def test_a_file_label_s_prompt_reads_a_json_document_whole_shortened_to_fit(api, corpus, workspaces_tmp, monkeypatch):
-    """A prompt label that marks files reads a JSON document as itself, not its records; one longer than a unit's
-    text keeps every part of it in view, its long strings and its long lists and mappings shortened, and the run says
-    so."""
+    """A prompt label that marks files reads a JSON document as itself, not its records, as far as its model's context
+    holds (concepts.whole_read_chars); one longer than that keeps every part of it in view, its long strings and its
+    long lists and mappings shortened, and the run's `cut` says so."""
     seen: dict[str, str] = {}
 
     async def classify(c, concept, items, comment=True, on_retry=None):
@@ -535,9 +535,17 @@ async def test_a_file_label_s_prompt_reads_a_json_document_whole_shortened_to_fi
     assert await _values(workspaces_tmp / CORPUS, k) == {"transcripts/a.json": "fork", "transcripts/b.json": "no fork",
                                                          "transcripts/c.json": "fork", "transcripts/d.json": "fork"}
     assert json.loads(seen["transcripts/b.json"]) == _agent_store(False), "a document that fits, whole"
+    assert json.loads(seen["transcripts/d.json"]) == big and not s.get("cut"), "a million characters fit the model's context"
+    # a model that reads 30,000 characters of a file
+    monkeypatch.setattr(concepts, "READ_RESERVE_TOKENS", config.LONG_CONTEXT_TOKENS - concepts.UNIT_TEXT_MAX // concepts.CHARS_PER_TOKEN)
+    k = await _label(api, name="transcript forks 2", kind="prompt", description="any conversation forks from another",
+                     marks="file", labels=["fork", "no fork"])
+    s = await _apply(api, k, ["transcripts/*.json"])
+    assert s["status"] == "done" and s["labeled"] == 4, s
     short = seen["transcripts/d.json"]
     assert len(short) <= concepts.UNIT_TEXT_MAX and '"conversations"' in short and "more entries" in short
-    assert "1 JSON document was longer than 30,000 characters" in (s.get("message") or ""), s
+    assert s["cut"]["n"] == 1 and s["cut"]["short"] == 1 and s["cut"]["refs"] == ["transcripts/d.json"], s
+    assert "shortened" in s["cut"]["line"] and "tokens" in s["cut"]["line"], s
 
 
 def test_fit_json_keeps_every_part_of_a_document_in_view():

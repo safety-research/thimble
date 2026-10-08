@@ -2317,6 +2317,9 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   rows.push(<Text key="lb-gap"> </Text>)
   rows.push(toggle('counts', 'counts', total, [setByYou ? `${num(setByYou)} set by you` : '', filtered ? `filtered to ${filtered}` : ''].filter(Boolean).join(' · ')))
   keys.push({ key: 'counts', hotkey: 'c', onPress: () => void flip('counts')() })
+  // the whole files or runs its last run read only in part, one dim line under the counts as the browser's Labels pane
+  // has it, until a run cuts none (backend concepts.read_cut)
+  if (!running && last?.cut?.line) rows.push(<Text key="lb-cut" wrap="wrap" dimColor>{`  ${last.cut.line}`}</Text>)
   if (opened('counts')) {
     const vw = Math.min(Math.max(12, Math.floor(cols / 3)), Math.max(4, ...values.map(v => width(v))))
     const cs = values.map(v => num(counts[v] ?? 0))
