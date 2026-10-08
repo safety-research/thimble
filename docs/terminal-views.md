@@ -109,7 +109,10 @@ dim, `i` italic, `u` underlined, `inv` inverse. `dim`, `bold`, `link`, `accent`,
 make one. Each style keeps the one meaning SPEC.md gives it: bold for titles and headings, dim for what is secondary,
 blue and underlined for a link (`↗` and the place after it), the accent and `❯` for the chosen row, the selection
 background for a choice in use (the time range's window), red only for a problem, and a palette hue only on the marks
-of the Color by choice. A record's own words are drawn upright, as a file is.
+of the Color by choice. A record's own words are drawn upright, as a file is. A record's text can hold control
+characters (an escape sequence, a bell, a NUL, the C1 characters of text decoded twice). The kit removes them from each
+run, tip, hint, fact and error of a frame (`printable`: a tab is two spaces, a line break in a run is a space) and counts
+them as no cells, so the columns after them stay in place.
 
 A control under the pointer is drawn inverse. A chart's cells never are, which would turn the chart into a band: a hit
 with `cursor`, and any hit over four or more cells that hold only a chart's glyphs (bars, lines, `×`, a break), marks
