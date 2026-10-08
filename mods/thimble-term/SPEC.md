@@ -461,9 +461,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   under it, then the plot or body.
 - Below the plot: the readout row, the value of the mark under the pointer (`AgentRelent  317`), plain, or what
   thimble is doing to the card; the label rows; the params row; then the takeaway, drawn as main's chat draws a reply,
-  its citations links and its chips chips; then, when the card check rewrote the card, a dim note that is a sentence:
-  `The card check rewrote its takeaway: the takeaway named the wrong hour.` (a capital, the reason after the colon in
-  lower case unless it starts with a name, a full stop).
+  its citations links and its chips chips. A card the card check rewrote shows no note of it (Matt, 10-08: "don't show
+  this").
 - A label row, when the card read a label: `label` dim, the label's name in blue and underlined, then `↗`, then each
   value after its `●` in its hue (`label  edit purpose ↗  ● links or data  ● message to agents  ● other`), and
   `changed since` once the label changed after the card ran. A click on the name or the `↗` opens the label panel. A

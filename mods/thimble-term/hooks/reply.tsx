@@ -549,7 +549,7 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
   let hidden = 0
   if (opts.clip) {
     const lay = cardLayout(data, inner, -1)
-    const under = labelHead(data, inner).lines.length + ((data.params ?? []).length ? 1 : 0) + (tc.takeaway.trim() ? wrapRows(plainCites(tc.takeaway), inner, 999).length : 0) + (tc.fixed ? 1 : 0)
+    const under = labelHead(data, inner).lines.length + ((data.params ?? []).length ? 1 : 0) + (tc.takeaway.trim() ? wrapRows(plainCites(tc.takeaway), inner, 999).length : 0)
     const left = Math.max(0, lay.lines.length - opts.clip.rows) + under
     if (left >= 2) {
       clip = opts.clip.rows
@@ -571,29 +571,12 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
     rows.push(<Box key={`more-row-${key}`} flexDirection="row"><Button key={`more-${key}`} label={`… ${hidden.toLocaleString('en-US')} more`} plain dimColor onPress={opts.clip!.more} /></Box>)
   } else {
     if (opts.takeaway !== false && tc.takeaway.trim()) rows.push(<Box flexDirection="column" width={inner}>{await drawReply(cx, e, tc.takeaway, inner, { margin: 0, prefix: `tk-${key}-`, card: id })}</Box>)
-    // the card check rewrote it: a dim note says which parts and why (live check term-fix8, low quirk: it rewrote a
-    // takeaway with nothing in the chat saying so)
-    if (tc.fixed) rows.push(<Text key={`fixed-${key}`} dimColor wrap="wrap">{fixedNote(tc.fixed)}</Text>)
   }
   return (
     <Box flexDirection="column" width={w} borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
       {rows}
     </Box>
   )
-}
-
-/** What the card check's rewrite of a card changed, in words, and why, as a sentence: `The card check rewrote its
- *  takeaway: the takeaway named the wrong hour.` (item e2-card-check-note-format: it read as a fragment, lower case with
- *  no full stop, its reason starting with a capital after the colon). */
-export function fixedNote(f: { fields: string[]; why: string }): string {
-  const names: Record<string, string> = { takeaway: 'takeaway', title: 'question', code: 'code' }
-  const parts = f.fields.map(x => names[x] ?? x)
-  const which = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]!
-  const flat = f.why.replace(/\s+/g, ' ').trim().replace(/[.]+$/, '')
-  // the reason goes on the sentence after its colon: its first letter in lower case, unless the word is a name or an
-  // acronym (a second capital in it, `UTC`, `README`)
-  const why = /^[A-Z][a-z]/.test(flat) && !/^\S*[A-Z]\S*[A-Z]/.test(flat) && !/^I\b/.test(flat) ? `${flat[0]!.toLowerCase()}${flat.slice(1)}` : flat
-  return `The card check rewrote its ${which}${why ? `: ${why}` : ''}.`
 }
 
 /** The cards a turn made, under its last reply, on the reply's text column (2), border to border: the border stands in
