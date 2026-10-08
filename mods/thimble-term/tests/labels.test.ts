@@ -235,3 +235,17 @@ test("a label whose first run stopped part way counts its scope in its panel: `r
   expect(text).toMatch(/scope:\s*4,579 records/)
   await pane.unmount()
 })
+
+test("a prompt label whose last run read some whole files only in part says so under its counts, in tokens", async ($, on) => {
+  // the browser's Labels pane has the same line (backend concepts.read_cut), until a run of the label cuts none
+  const w = world(on)
+  const line = '2 of 3 files were longer than the model reads; it read the first ~905k tokens of each'
+  w.states.labels = [{ ...LABEL, kind: 'prompt', unit: 'agent', glob: 'agents/*.jsonl', last_run: { ...LABEL.last_run, cut: { n: 2, line } } }] as never
+  let pane = await labelPanel($, w)
+  expect(shown(await pane.drawn())).toContain(`  ${line}`)
+  await pane.unmount()
+  w.states.labels = [{ ...LABEL, kind: 'prompt', unit: 'agent', glob: 'agents/*.jsonl' }] as never
+  pane = await labelPanel($, w)
+  expect(shown(await pane.drawn())).not.toContain('longer than the model reads')
+  await pane.unmount()
+})

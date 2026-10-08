@@ -90,7 +90,7 @@ Remove a copy of a card, or an attempt another card replaced. Fix a wrong card w
 
 ## apply_label
 
-Define a category, apply it to every unit of a scope, and get the counts per value and a card where the analyst checks each unit. A prompt label over many files takes minutes.
+Define a category, apply it to every unit of a scope, and get the counts per value and a card where the analyst checks each unit. In files, a unit is a record, a whole file or a run directory (`unit`). A prompt label over many files takes minutes.
 
 ```json
 {
@@ -102,13 +102,14 @@ Define a category, apply it to every unit of a scope, and get the counts per val
     "predicate": {
       "type": "object",
       "properties": {
-        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], a row of a database or a CSV file a dict of its columns, a record of a JSON document its value, a PDF page a dict with its page and text, and a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it. A record that saves a whole document again, such as a wiki page's revision, is read by a model or a regex as what it changed from the save before, and by code whole."},
+        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], a row of a database or a CSV file a dict of its columns, a record of a JSON document its value, a PDF page a dict with its page and text, a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it, a whole file a dict with its path, records and data, the whole file parsed or its text, and a run a dict with its paths, records and files, each file whole by its path. A record that saves a whole document again, such as a wiki page's revision, is read by a model or a regex as what it changed from the save before, and by code whole."},
         "text": {"type": "string", "description": "The description, pattern or function."}
       },
       "required": ["kind", "text"]
     },
     "values": {"type": "array", "items": {"type": "string"}, "description": "Positive first. Default yes and no."},
     "paths": {"type": "array", "items": {"type": "string"}, "description": "Globs, for files. A record of a file is a line of text, a row of a database's table, a page of a PDF, a value of a JSON document or a row of a CSV file. A glob followed by a record's place, such as `runs/*/forge.db#prs` for a table or `results.json#/runs`, keeps the records there."},
+    "unit": {"type": "string", "enum": ["records", "files", "runs"], "description": "For files: records, the default, files for one value per file, or runs for one value per run directory. A label keeps its unit when you apply it again without one. A prompt label reads as much of each file or run as fits its model's context, and the result says how many it read only in part."},
     "limit": {"type": "integer", "description": "Units to label, for a trial."},
     "within": {
       "type": "object",

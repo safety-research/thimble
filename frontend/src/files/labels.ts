@@ -5,7 +5,7 @@
 import labelOrder from '../../../backend/app/label_order.json'
 import labelWheel from '../../../backend/app/label_wheel.json'
 import { recordKey, recordOf } from '../lib/refs'
-import type { Concept, ConceptPatch, ConceptRun, ConceptUnit, LabelClass, LabelDraft, LabelMarks, LabelRow } from '../lib/types'
+import type { Concept, ConceptPatch, ConceptRun, ConceptUnit, LabelClass, LabelDraft, LabelMarks, LabelRow, ReadCut } from '../lib/types'
 
 const FILE_UNITS = new Set(['record', 'agent', 'run'])
 
@@ -261,7 +261,7 @@ export const unitWord = (unit: string, n: number): string => (UNIT_WORDS[unit] ?
  * none it can state), or a failed run with its message. */
 export type LabelStatus =
   | { state: 'running'; done: number; total: number | null; unit: string }
-  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string }
+  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string; cut?: ReadCut | null }
   | { state: 'error'; message: string }
 
 /** A run's total as its outcome can state it: none when the run kept none, or kept one below the units that matched
@@ -278,7 +278,7 @@ const later = (a: string | null | undefined, b: string | null | undefined): bool
 /** A label's status from the run the pane last saw (`live`, else the concepts list's run record) and the last run kept
  * on the label. A run that ended after the kept one stands in for it until the list is read again (a failed run sends
  * no `concepts` event). The kept run's count is matchedCount over the label's counts; before counts are known, the
- * run's `matches`. */
+ * run's `matches`. `cut` is the whole files or runs that run read only in part. */
 export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'last_run' | 'run'>, live?: ConceptRun | null): LabelStatus | null {
   const run = live ?? k.run ?? null
   if (run?.status === 'running') {
@@ -290,13 +290,13 @@ export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'las
   if (run && (run.status === 'error' || run.status === 'done') && (!last || later(run.started, last.ts))) {
     if (run.status === 'error') return { state: 'error', message: run.message || 'the run failed' }
     const matches = run.matches ?? 0
-    return { state: 'done', matches, total: statedTotal(run.total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit }
+    return { state: 'done', matches, total: statedTotal(run.total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit, cut: run.cut ?? null }
   }
   if (!last) return null
   if (last.status === 'error') return { state: 'error', message: last.message || 'the run failed' }
   const total = last.total ?? last.matched_total ?? last.labeled
   const matches = k.counts ? matchedCount(k.labels, k.counts, total) : last.matches ?? 0
-  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit }
+  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null }
 }
 
 /** An outcome as the label row says it: "468 of 2,392,002 records", or "468 records" without a total, with "· 3 failed"

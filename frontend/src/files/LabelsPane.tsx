@@ -21,6 +21,7 @@ import { classesOf, colourVar, isFilesLabel, failedText, isMultiClass, labelStat
 import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
 import { LabelMark } from './LabelMark'
 import { LabelPalette } from './LabelPalette'
+import { ReadCutLine } from './ReadCutLine'
 import type { FilesLabels } from './useLabels'
 
 interface Props {
@@ -210,9 +211,9 @@ function FilterButton({ pressed, label, onClick }: { pressed: boolean; label: st
   return <Button variant="icon" size="sm" icon="filter" title={pressed ? 'Show all records' : 'Show only these records'} aria-label={label} active={pressed} className="files-label-filter" onClick={onClick} />
 }
 
-/** The line under a label's name: the run's progress, its outcome with how many records it could not label and how
- * many the analyst marked by hand (in a view, the Files reader or the label's card), each on a line of its own, or its
- * failure with Retry. */
+/** The line under a label's name: the run's progress, its outcome with how many records it could not label, how many
+ * the analyst marked by hand (in a view, the Files reader or the label's card) and how many whole files it read only in
+ * part (ReadCutLine), each on a line of its own, or its failure with Retry. */
 function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelStatus; name: string; marked: number; onRetry: () => Promise<void> }) {
   const [retrying, setRetrying] = useState(false)
   if (s.state === 'running') {
@@ -265,6 +266,7 @@ function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelSt
           {marked.toLocaleString()} {unitWord(s.unit, marked)} marked by hand
         </span>
       )}
+      {s.cut && <ReadCutLine cut={s.cut} className="files-label-cut" />}
     </div>
   )
 }
