@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 // The Start gate (src/chat/StartGate.tsx): the orientation's request, start_orientation's four switches, and the run's
 // model and effort, which open at Settings' orientation row and apply to this run only; no fast mode, Ultracode or
-// permission switcher, since the orientation runs as a subagent of main in main's mode, which one line names. Start is
-// a click to its own route with the switches, model and effort and no mode. Start is off, with the line saying why,
-// while thimble's hooks module is not in main's session or main is in plan mode; a refused start fills the gate again.
+// permission switcher, since the orientation runs as a subagent of main in main's mode. Start is a click to its own
+// route with the switches, model and effort and no mode. Start is off, with a line under the field saying why, while
+// thimble's hooks module is not in main's session or main is in plan mode, and no line shows while Start is on; a
+// refused start fills the gate again.
 // A stored ultracode reads as xhigh. While the product tour runs, main draws no gate, and the tour's own example of it
 // (src/tour/examples.json) is the gate as it is drawn now, with no Ultracode and no fast mode either.
 import { readFileSync } from 'node:fs'
@@ -11,7 +12,7 @@ import path from 'node:path'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { AGENT_EFFORTS, agentEffort } from '../../src/chat/ModelLine.tsx'
-import { DEFAULT_ON, NO_SESSION_LINE, PLAN_MODE_LINE, StartGate, modeLine, noModuleLine, restoreOf, startBlocked, startBody, startGateOpen, startGateShown, startedChat } from '../../src/chat/StartGate.tsx'
+import { DEFAULT_ON, NO_SESSION_LINE, PLAN_MODE_LINE, StartGate, noModuleLine, restoreOf, startBlocked, startBody, startGateOpen, startGateShown, startedChat } from '../../src/chat/StartGate.tsx'
 import { UNFENCED_LINE } from '../../src/shell/UnfencedBanner.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -44,7 +45,7 @@ const startButton = (el: HTMLElement) => [...el.querySelectorAll<HTMLButtonEleme
 const menuItems = () => [...document.querySelectorAll<HTMLButtonElement>('.menu-item')].map((b) => b.querySelector('.menu-item-label')?.textContent ?? b.textContent)
 
 describe('the Start gate', () => {
-  test("opens at Settings' model and effort, with Claude Code's levels and no fast mode, Ultracode or mode switcher", async () => {
+  test("opens at Settings' model and effort, with Claude Code's levels, no fast mode, Ultracode or mode switcher, and no line under the field while Start is on", async () => {
     const el = await mount(<StartGate ws="mini" model="claude-opus-5-5[1m]" effort="xhigh" main={{ attached: { session: 's', cwd: '/c', since: '', permission_mode: 'auto' } }} />)
     await settle()
     expect(el.querySelector('button[aria-label="Model for the orientation"]')?.textContent).toBe('Opus 5.5')
@@ -56,7 +57,9 @@ describe('the Start gate', () => {
     await click(el.querySelector('.chat-gate-options-toggle')!)
     expect([...el.querySelectorAll('.chat-gate-row')].map((r) => r.getAttribute('data-pass'))).toEqual(['final', 'views', 'critique', 'report'])
     expect(el.querySelector('.chat-gate-perms, .seg')).toBeNull()
-    expect(el.querySelector('.chat-gate-mode')?.textContent).toBe('Runs as a subagent of your Claude Code session, in auto mode.')
+    expect(startButton(el).disabled).toBe(false)
+    expect(el.querySelector('.chat-gate-mode')).toBeNull()
+    expect(el.textContent).not.toMatch(/subagent|auto mode/)
   })
 
   test("Start posts the switches, the run's model and effort and no mode to its own route", async () => {
@@ -210,10 +213,8 @@ describe('its rules', () => {
     expect(startGateShown({ ...open, again: true, tour: true })).toBe(false)
   })
 
-  test("the body leaves out what is not known, and the mode line names Claude Code's modes", () => {
+  test("the body leaves out what is not known, and the modules-off line says what to change", () => {
     expect(startBody(DEFAULT_ON, '  ')).toEqual({ deck: true, views: true, critique: false, report: true })
-    expect(modeLine('default')).toBe('Runs as a subagent of your Claude Code session, in default mode.')
-    expect(modeLine(undefined)).toBe('Runs as a subagent of your Claude Code session, in its permission mode.')
     expect(startBlocked({ module: true })).toBeNull()
     expect(startBlocked({})).toBeNull()
     expect(noModuleLine('your organization\'s managed settings set disableAllHooks')).toContain("Ask whoever manages your Claude Code settings")
