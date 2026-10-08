@@ -2,9 +2,9 @@
 // an element makes the browser work out that element's style again, and every computed style it reads makes the
 // browser work out the page's. So a list that adds rows as it scrolls has only its new rows written and measured, a
 // labels message that adds the marks of new rows writes nothing on the rows drawn already, and a message that changes
-// nothing writes and reads nothing. WebKit checks every range of a highlight for each piece of text it draws, so a page
-// with many highlighted texts registers only those near the view. What paint draws is
-// tests/public/browser/view-labels.test.ts.
+// nothing writes and reads nothing; so too with the bands of two choices of the kit's Colour by. WebKit checks every
+// range of a highlight for each piece of text it draws, so a page with many highlighted texts registers only those near
+// the view. What paint draws is tests/public/browser/view-labels.test.ts and view-bands.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -152,4 +152,58 @@ test('with many highlighted texts only those near the view are registered, and a
   s = await lit()
   assert.ok(s.all && s.shown > 5, `after a scroll, every row in view has its text highlighted: ${JSON.stringify(s)}`)
   await many.close()
+})
+
+test("with two choices of the kit's Colour by, the rows a list adds are the only ones given bands and measured; a message that changes nothing writes nothing", async () => {
+  const two = await browser.newPage()
+  await two.setContent('<!doctype html><html><body><iframe id="f" sandbox="allow-scripts" style="border:0;width:600px;height:400px"></iframe></body></html>')
+  await two.evaluate((d) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = d), VIEW)
+  const f = () => two.frames().find((x) => x !== two.mainFrame())!
+  await f().waitForFunction((n) => document.querySelectorAll('.row').length === n, ROWS)
+  // the labels "coord" (the colour) and "lang" (a track, on every other row), as viewer_colour.js hands them over
+  await f().evaluate(() => (window as any).__thimbleKit.colour({ mode: 'label', label: 'k1', name: 'coord', off: () => null, colourOf: () => null, tracks: [{ label: 'k2', name: 'lang' }] }))
+  const marked = (n: number) =>
+    Object.fromEntries(
+      Array.from({ length: n }, (_, i) => [
+        `a.jsonl#L${i + 1}`,
+        { ...mark(i), names: ['coord', 'lang'], values: [...mark(i).values, ...(i % 2 ? [{ id: 'k2', label: 'lang', value: 'yes', colour: '#08632f' }] : [])] },
+      ]),
+    )
+  const tell = (m: object) => two.evaluate((m) => (document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage({ type: 'thimble:labels', marks: m, on: [], filter: null }, '*'), m)
+  const tally = (from = 0) =>
+    f().evaluate((from) => {
+      const C = (window as any).__count
+      let old = 0
+      let added = 0
+      ;[...document.querySelectorAll('.row')].forEach((r, i) => (i < from ? (old += C.writes.get(r) || 0) : (added += C.writes.get(r) || 0)))
+      const out = { old, added, styles: C.styles }
+      C.writes = new Map()
+      C.styles = 0
+      return out
+    }, from)
+  await tell(marked(ROWS))
+  await f().waitForFunction((n) => document.querySelectorAll('[data-thimble-bands]').length === n, ROWS)
+  await settle(f())
+  assert.equal(await f().evaluate(() => document.querySelector('.row')!.getAttribute('data-thimble-edge')), 'bands')
+  await tally()
+
+  await f().evaluate(({ from, n }) => {
+    const list = document.getElementById('list')!
+    for (let i = from; i < from + n; i++) list.insertAdjacentHTML('beforeend', `<div class="row" data-anchor="a.jsonl#L${i + 1}">row ${i + 1} says the deadline moved</div>`)
+  }, { from: ROWS, n: 20 })
+  await settle(f())
+  let c = await tally(ROWS)
+  assert.equal(c.old, 0, `the rows drawn before had ${c.old} attributes written when rows were added`)
+  await tell(marked(ROWS + 20))
+  await f().waitForFunction((n) => document.querySelectorAll('[data-thimble-bands]').length === n, ROWS + 20)
+  await settle(f())
+  c = await tally(ROWS)
+  assert.equal(c.old, 0, `the marks of new rows wrote ${c.old} attributes on the rows drawn before`)
+  assert.ok(c.added > 0 && c.added <= 20 * 3, `${c.added} attributes written on the 20 new rows`)
+  assert.ok(c.styles <= 20 * 2 + 10, `${c.styles} computed styles read to give 20 new rows of ${ROWS + 20} their bands`)
+  await tell(marked(ROWS + 20))
+  await settle(f())
+  c = await tally()
+  assert.deepEqual([c.old + c.added, c.styles], [0, 0], 'a labels message that changes nothing wrote or read')
+  await two.close()
 })

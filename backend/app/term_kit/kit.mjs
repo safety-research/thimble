@@ -1410,14 +1410,14 @@ export function colorBy(opts = {}) {
     get picks() {
       return c.picks.map(resolve).filter(Boolean)
     },
-    /** The tracks of the choices past the first, which the list draws beside its own: `[{title, valueOf(record),
-     *  colourOf(value)}]`. */
+    /** The tracks of the choices past the first, which the list draws beside its own and a mark each on its rows:
+     *  `[{title, valueOf(record), colourOf(value)}]`, a label's with its id (`label`). */
     get tracks() {
       return c.picks.slice(1).map((key) => {
         const f = fieldOf(key)
         if (f) return { title: f.title, valueOf: (r) => { const v = r && (typeof f.value === 'function' ? f.value(r) : r[f.name]); return v === undefined || v === null || v === '' ? null : String(v) }, colourOf: (v) => (v === null ? null : hueFor(f, String(v))) }
         const l = labelOf(key)
-        return l ? { title: l.name, valueOf: (r) => labelValue(l.id, r), colourOf: (v) => (v === null ? null : labelHue(l, String(v))) } : null
+        return l ? { title: l.name, label: l.id, valueOf: (r) => labelValue(l.id, r), colourOf: (v) => (v === null ? null : labelHue(l, String(v))) } : null
       }).filter(Boolean)
     },
     /** A group's mix (a page, an agent, a session takes no color of its own): runs of `cells` cells, each value's share
@@ -2542,10 +2542,14 @@ export function list(opts = {}) {
         }
       }
       const pane = o.side || o.sideOpen || null
-      // a header row (the columns' names) stands above the rows and does not scroll with them
+      const colour = o.colour
+      // Color by's choices past the first, each a column of its own beside the track (at most TRACKS_MAX) and a mark of
+      // its own after the row's first
+      const tracks = colour && Array.isArray(colour.tracks) ? colour.tracks.slice(0, TRACKS_MAX) : []
+      // a header row (the columns' names) stands above the rows and does not scroll with them, over their columns
       if (o.header) {
         const hr = d.row()
-        if (o.colour || o.value) hr.gap(2)
+        if (o.colour || o.value) hr.gap(2 + (o.mark !== false ? tracks.length : 0))
         o.header(hr)
         hr.end()
       }
@@ -2557,11 +2561,8 @@ export function list(opts = {}) {
       }
       if (!pickable.some((it) => keyOf(it) === s.chosen)) s.chosen = keyOf(pickable[0])
       if (s.open !== null && !pickable.some((it) => keyOf(it) === s.open)) s.open = null
-      const colour = o.colour
       const valueOf = o.value || (colour ? (it) => colour.valueOf(it) : null)
       const hueOf = (v) => (colour ? colour.colourOf(v) : null)
-      // Color by's choices past the first, each a column of its own beside the track (at most TRACKS_MAX)
-      const tracks = colour && Array.isArray(colour.tracks) ? colour.tracks.slice(0, TRACKS_MAX) : []
       // Color by's menu names the values the records the list holds take: the kit's Color by counts them when its menu
       // draws; another control's tally counts each of them here
       if (colour && typeof colour.drew === 'function') colour.drew(items)
@@ -2584,7 +2585,12 @@ export function list(opts = {}) {
           const r = di.row()
           if (ch) r.margin({ s: '❯', fg: COLORS.accent })
           const v = valueOf ? valueOf(it) : null
-          if (valueOf && o.mark !== false) r.add(colour ? colour.dot(v).s : '●', colour ? colour.dot(v) : mark(hueOf(v))).gap(1)
+          // the row's marks, one cell per choice: its value of the first, then of each past it (trackMarks)
+          if (valueOf && o.mark !== false) {
+            r.add(colour ? colour.dot(v).s : '●', colour ? colour.dot(v) : mark(hueOf(v)))
+            for (const m of trackMarks(tracks, it)) r.runsOf(m)
+            r.gap(1)
+          }
           const before = r.runs.length
           if (o.row) o.row(it, r, { chosen: ch, open: op })
           // the chosen row in the accent across its whole width, its dim columns too, as thimble-term's tables mark
@@ -2755,6 +2761,16 @@ function windowTop(off, items, n, height, c, top0, free, focus) {
 // past the first (`tracks`) a column of its own before them, in its own hues. A click goes there. `off` holds each
 // item's first line, so the track reads each item's value once, never a line at a time.
 const TRACKS_MAX = 3
+/** A record's mark for each of Color by's choices past the first (`tracks`), as the browser's bands on its edge: `●` in
+ *  the hue of its value of that choice (dim for a field's value with no hue of its own), a space where it has none or a
+ *  label does not mark it (a value that colors nothing, as a regex label's `other`). */
+function trackMarks(tracks, item) {
+  return tracks.map((tr) => {
+    const v = tr.valueOf(item)
+    const h = v === null || v === undefined ? null : tr.colourOf(v)
+    return !h || (tr.label && h === COLORS.dim) ? { s: ' ' } : mark(h)
+  })
+}
 function drawTrack(d, y0, total, top, height, off, items, valueOf, hueOf, tracks, go) {
   const rows = height
   // the first line of each item that is not a heading, in order, and its value; each track's value too
@@ -3904,6 +3920,8 @@ export function transcript(opts = {}) {
     draw(d, o = {}) {
       const turns = o.turns || []
       const colour = o.colour || null
+      // Color by's choices past the first: a mark each after the speaker's
+      const tracks = colour && Array.isArray(colour.tracks) ? colour.tracks.slice(0, TRACKS_MAX) : []
       const withTime = turns.some((t) => clockOf(t))
       const tw = withTime ? 8 : 0
       const rows = []
@@ -3935,6 +3953,7 @@ export function transcript(opts = {}) {
           }
           const v = colour ? colour.valueOf(t) : null
           r.runsOf(colour ? colour.dot(v) : { s: '●' })
+          for (const m of trackMarks(tracks, t)) r.runsOf(m)
           r.add(' ').add(t.speaker || '(unsigned)', { b: true }, { max: Math.max(4, r.room) })
         },
         bodyIndent: indent,

@@ -48,7 +48,8 @@
 // keeps it per view with the choice, and the palette's Reset colors gives the field's values their own colours back. On
 // a record, colour is always a bar on the left edge of its row or card (the bridge draws it on every element whose
 // data-colour is the value of the chosen field, and on every anchored record when a label is chosen), never coloured
-// text or a fill.
+// text or a fill; with several choices, a band per choice there, side by side in the order of the strip's lanes, each
+// in the record's value's colour of that choice and empty where it has none, as a slice of the strip.
 // The strip is a list's scrollbar as an editor's two tracks, as Files' Transcript mode draws them: the overview track
 // shows the whole list in one lane, each pixel row in the colour most of its records take, grey where they take no
 // value, a lane beside it for each of Color by's choices past the first, and a dark frame around the part in view; a
@@ -868,6 +869,20 @@
               off: function (v) {
                 return off.indexOf(keyOf(v)) >= 0 ? how : null
               },
+              // the choices past the first, a band each beside the first's on every record: a label's value from its
+              // mark, a field's from the record's data-colour-tracks (attr), at its place there
+              tracks: this.extra().map(function (x, at) {
+                return x.label
+                  ? { label: String(x.label), name: x.title }
+                  : {
+                      field: x.field,
+                      at: at,
+                      name: x.title,
+                      colourOf: function (v) {
+                        return self.fieldColour(x.field, v)
+                      },
+                    }
+              }),
             }
           : null,
     )

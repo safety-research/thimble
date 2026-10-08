@@ -438,6 +438,26 @@ describe('the transcript', () => {
     expect(runsAt(last(), at).find((r) => r.s.includes('FAILED'))!.fg).toBe(kit.COLORS.problem)
     expect(runsAt(last(), at - 1).find((r) => r.s.includes('pytest'))!.fg).toBe(kit.COLORS.code)
   })
+
+  test("with two choices of Color by a turn's `●` is two, the second in its value's hue of the second choice, a space where it has none", async () => {
+    init({ cols: 70, state: { colour: { by: 'field:speaker', picks: ['field:speaker', 'field:mood'], off: [], seen: [] } } })
+    const colour = kit.colorBy({ fields: [{ name: 'speaker', title: 'Speaker' }, { name: 'mood', title: 'Mood' }] })
+    const tr = kit.transcript({})
+    const turns = [{ ...TURNS[0], mood: 'calm' }, TURNS[1], TURNS[2]]
+    kit.draw((d: any) => tr.draw(d, { turns, colour }))
+    colour.counts({ user: 1, lead: 2 })
+    await tick()
+    const rows = text()
+    expect(rows.find((r: string) => r.includes('user'))).toBe('❯ 09:00:00  ●● user')
+    expect(rows.find((r: string) => r.includes('lead') && !r.includes('⎿'))).toBe('  09:00:00  ●  lead')
+    const y = rows.findIndex((r: string) => r.includes('user'))
+    const mood = colour.tracks[0]
+    expect(kit.SERIES).toContain(colour.colourOf('user'))
+    expect(cell(last(), y, 12)!.fg).toBe(colour.colourOf('user'))
+    expect(cell(last(), y, 13)!.fg).toBe(mood.colourOf('calm'))
+    expect(kit.SERIES).toContain(mood.colourOf('calm'))
+    expect(mood.colourOf('calm')).not.toBe(colour.colourOf('user'))
+  })
 })
 
 describe('loading', () => {

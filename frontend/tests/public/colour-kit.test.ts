@@ -208,6 +208,81 @@ describe('Colour by', () => {
   })
 })
 
+describe('several choices', () => {
+  /** Each record's bands as the bridge draws them, by its ref: its edge and the colours of its set of bands as the
+   * page's sheet gives them ('transparent' for an empty band); null for a record with none. */
+  const bands = () => {
+    const css = doc().querySelector('style[data-thimble="labels"]')?.textContent ?? ''
+    return Object.fromEntries(
+      [...doc().querySelectorAll('#list [data-anchor]')].map((e) => {
+        const k = e.getAttribute('data-thimble-bands')
+        if (k == null) return [e.getAttribute('data-anchor'), null]
+        const grad = new RegExp(`\\[data-thimble-bands="${k}"\\]\\{--thimble-bands:linear-gradient\\(to right,(.*?)\\);`).exec(css)?.[1] ?? ''
+        // its stops: a band, a gap, a band, ..., then the rest of the element
+        const stops = grad.split(/,(?![^(]*\))/)
+        return [e.getAttribute('data-anchor'), { edge: e.getAttribute('data-thimble-edge'), bar: e.hasAttribute('data-thimble-bar'), colours: stops.filter((_, i) => i % 2 === 0 && i < stops.length - 1).map((x) => x.replace(/ \d+px \d+px$/, '')) }]
+      }),
+    )
+  }
+  // each record's channel as the page writes it for the track (attr)
+  const channels = () => {
+    for (const [ref, , channel] of ROWS) doc().querySelector(`[data-anchor="${ref}"]`)!.setAttribute('data-colour-tracks', JSON.stringify([channel || null]))
+  }
+
+  test("two fields: a band each on every record with a value of either, in the colour of its value of each, an empty one where it has none; one set of colours, one slot", async () => {
+    await load({ v: 1, by: 'f:kind', picks: ['f:kind', 'f:channel'], field: 'kind', off: {}, seen: [], colours: {} })
+    const c = mount()
+    await wait()
+    expect(c.picks.map((p: { title: string }) => p.title)).toEqual(['Kind', 'Channel'])
+    channels()
+    await wait()
+    const got = bands()
+    const ops = got['a.jsonl#L1']!.colours[1]
+    const wiki = got['a.jsonl#L2']!.colours[1]
+    expect(ops).toBeTruthy()
+    expect(wiki).toBeTruthy()
+    expect(wiki).not.toBe(ops)
+    expect(got['a.jsonl#L1']).toEqual({ edge: 'bands', bar: false, colours: [c.colourOf('Text only'), ops] })
+    expect(got['a.jsonl#L2']).toEqual({ edge: 'bands', bar: false, colours: [c.colourOf('With links'), wiki] })
+    // no kind: an empty first band, then its channel's
+    expect(got['a.jsonl#L4']).toEqual({ edge: 'bands', bar: false, colours: ['transparent', ops] })
+    expect(doc().querySelector('[data-anchor="a.jsonl#L1"]')!.getAttribute('data-thimble-bands')).toBe(doc().querySelector('[data-anchor="a.jsonl#L3"]')!.getAttribute('data-thimble-bands'))
+    // a record with no channel: its kind's band, then an empty one
+    doc().querySelector('[data-anchor="a.jsonl#L3"]')!.setAttribute('data-colour-tracks', '[null]')
+    await wait()
+    expect(bands()['a.jsonl#L3']).toEqual({ edge: 'bands', bar: false, colours: [c.colourOf('Text only'), 'transparent'] })
+    // Channel unchecked: the one bar, and no bands
+    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
+    ;(doc().querySelector('.thimble-colour-menu [data-by="f:channel"]') as HTMLElement).click()
+    await wait()
+    expect(doc().querySelectorAll('[data-thimble-bands]')).toHaveLength(0)
+    expect([...doc().querySelectorAll('[data-thimble-bar]')].map((e) => e.getAttribute('data-anchor'))).toEqual(['a.jsonl#L1', 'a.jsonl#L2', 'a.jsonl#L3'])
+    // Off: nothing on any edge
+    ;(doc().querySelector('.thimble-colour-menu [data-by="off"]') as HTMLElement).click()
+    await wait()
+    expect(doc().querySelectorAll('[data-thimble-bands], [data-thimble-bar], [data-thimble-edge]')).toHaveLength(0)
+  })
+
+  test("a label as the second choice: its band where it marks the record, in its value's colour, an empty one where it does not", async () => {
+    await load({ v: 1, by: 'f:kind', picks: ['f:kind', 'l:k1'], field: 'kind', off: {}, seen: ['k1'], colours: {} })
+    const c = mount()
+    const marks = {
+      'a.jsonl#L2': { bar: '#025ac3', names: ['Deadline'], values: [{ id: 'k1', label: 'Deadline', value: 'deadline', colour: '#025ac3' }], spans: [] },
+      'a.jsonl#L4': { bar: '#025ac3', names: ['Deadline'], values: [{ id: 'k1', label: 'Deadline', value: 'deadline', colour: '#025ac3' }], spans: [] },
+    }
+    labels(true, marks)
+    await wait()
+    expect(c.picks.map((p: { title: string }) => p.title)).toEqual(['Kind', 'Deadline'])
+    expect(bands()).toEqual({
+      'a.jsonl#L1': { edge: 'bands', bar: false, colours: [c.colourOf('Text only'), 'transparent'] },
+      'a.jsonl#L2': { edge: 'bands', bar: false, colours: [c.colourOf('With links'), '#025ac3'] },
+      'a.jsonl#L3': { edge: 'bands', bar: false, colours: [c.colourOf('Text only'), 'transparent'] },
+      'a.jsonl#L4': { edge: 'bands', bar: false, colours: ['transparent', '#025ac3'] },
+    })
+    expect(doc().querySelector('[data-anchor="a.jsonl#L4"]')!.getAttribute('data-thimble-colour')).toBe('')
+  })
+})
+
 describe('Color by: Off', () => {
   test('colors nothing: no chips, no bars, no choice for the reader; it is kept, and the page starts on it', async () => {
     await load()

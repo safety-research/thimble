@@ -278,7 +278,8 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
   (`{heading: 'Sat 16 May 2026'}`) is a bold row no key chooses.
 - Enter, or a click on the row, opens its details in place under it, at A2 (`detail(item, dd)`), and closes them;
   `onOpen(item)` hears it, to fetch what they show. `a` asks a side thread about the chosen row (`ask(item)`).
-- Each row starts with its mark in its Color by hue. A list taller than its rows has the colored track at its right
+- Each row starts with its mark in its Color by hue, then a mark for each choice past the first (`●` in the hue of the
+  row's value of that choice, a space where it has none), as the browser's bands on a row's edge. A list taller than its rows has the colored track at its right
   edge: each cell the commonest hue of the rows it stands for, the part in view on the selection background; one many
   times taller adds the zoomed track beside it. A click on the track goes there; the wheel moves the rows.
 - A list draws only its rows in view (and the chosen one): a list of 15,000 rows answers a key as one of 40 does. The
@@ -324,8 +325,8 @@ panel has no drag across its rows, so here the overview has the rows the view gi
 ## The transcript
 
 `transcript(opts)` draws a transcript's turns as thimble-term's file view draws a transcript: `tr.draw(d, {turns, title,
-count, colour, side, onOpen})`. Each turn has its clock dim in a column, `●` (in its Color by hue, with `colour`) and the
-speaker bold, and its words under the name, up to three rows; a tool call is one dim row, `⎿ Bash pytest -q`; the day
+count, colour, side, onOpen})`. Each turn has its clock dim in a column, `●` (in its Color by hue, with `colour`, and a
+mark for each choice past the first) and the speaker bold, and its words under the name, up to three rows; a tool call is one dim row, `⎿ Bash pytest -q`; the day
 stands on a dim row of its own where it changes. It is a list: ↑↓ choose a turn, Enter opens it in place, or in the side
 pane with `side` (a turn's words whole; a tool call's input in the code color and what came back, in red for an
 error), `a` asks about it, and its track shows where the Color by values are. A turn is `{ref, t, speaker, kind, tool,

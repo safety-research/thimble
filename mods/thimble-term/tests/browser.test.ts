@@ -290,6 +290,32 @@ test('the labels that are on: a `●` in the label\'s hue after each file it lab
   expect(r[0]).toContain(`labels › ${LABEL.name}`)
 })
 
+test("two labels on: before each record a mark cell per label, in the order they were turned on, each in the hue of its value, a space where it gave none, as the browser's bands on a record's edge", async ($, on) => {
+  const w = world(on)
+  const TACTIC = { ...LABEL, id: 'a1b2c3d4', name: 'tactic', spec: 'Welcome|proxy', labels: ['tactic', 'other'], classes: [{ name: 'tactic', color: 3, highlight: true }, { name: 'other', color: 0, highlight: false }] }
+  const PROXY = { ...LABEL, classes: [{ name: 'proxy-link', color: 1, highlight: true }, { name: 'none', color: 0, highlight: false }] }
+  w.states.files = [{ path: 'revisions.jsonl', kind: 'records', size_bytes: 52_000_000 }]
+  w.states.labels = [{ ...PROXY, shown: true }, { ...TACTIC, shown: true }] as never
+  w.pages['revisions.jsonl'] = { path: 'revisions.jsonl', kind: 'records', total_lines: 4, start: 1, records: [{ line: 1, record: { wiki: 'dse', body: 'see https://r.jina.ai/x' } }, { line: 2, record: { wiki: 'dse', body: 'Welcome' } }, { line: 3, record: { wiki: 'probier', body: 'proxy.example' } }, { line: 4, record: { wiki: 'probier', body: 'plain' } }] }
+  w.marks['revisions.jsonl'] = [
+    { concept_id: PROXY.id, name: PROXY.name, labels: PROXY.labels, unit: 'record', rows: [{ ref: 'revisions.jsonl#L1', label: 'proxy-link', analyst: null }, { ref: 'revisions.jsonl#L3', label: 'proxy-link', analyst: null }, { ref: 'revisions.jsonl#L4', label: 'none', analyst: null }] },
+    { concept_id: TACTIC.id, name: TACTIC.name, labels: TACTIC.labels, unit: 'record', rows: [{ ref: 'revisions.jsonl#L2', label: 'tactic', analyst: null }, { ref: 'revisions.jsonl#L3', label: 'tactic', analyst: null }, { ref: 'revisions.jsonl#L4', label: 'other', analyst: null }] },
+  ]
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: 'files revisions.jsonl' } as never)
+  await w.clock.settle()
+  const r = await rows($, w)
+  // the first label's cell, a space, the second's, then the gutter: line 1 the first alone, line 2 the second alone
+  // (an empty place before it), line 3 both, line 4 neither (values the labels do not highlight)
+  const body = r.filter(x => /(dse|probier) {2}/.test(x) && !x.includes('wiki'))
+  expect(body.map(x => x.slice(3, 8))).toEqual(['●    ', '  ●  ', '● ●  ', '     '])
+  expect(body.map(x => x.slice(8, 15))).toEqual(['dse    ', 'dse    ', 'probier', 'probier'])
+  const pane = (await $.ui.mount(PANE())) as unknown as M
+  const drawn = JSON.stringify(await pane.drawn({ in: 'm:file-body' }))
+  for (const hue of [LABEL_HUES[0], LABEL_HUES[2]]) expect(drawn).toContain(`{"type":"Text","props":{"color":"${hue}"},"children":["●"]}`)
+  await pane.unmount()
+})
+
 test("the file browser's marks take the colors the analyst chose for the label's values, as the label panel draws them", async ($, on) => {
   const w = world(on)
   w.states.files = [{ path: 'revisions.jsonl', kind: 'records', size_bytes: 52_000_000 }]

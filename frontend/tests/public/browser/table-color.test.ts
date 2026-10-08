@@ -1,7 +1,7 @@
 // Color by in Files' Table mode (src/files/Reader.tsx, views/table.tsx), in a real browser: Chromium and, where
 // Playwright's WebKit starts, WebKit. A file of JSON lines and a CSV file in the Table mode show the same Color by control
-// as the Transcript mode, its choice the file's first key; each row carries its value's color as a bar on its left edge,
-// in the chip's color; the overview track is painted in those colors; a chip turned off leaves out the rows of its value
+// as the Transcript mode, its choice the file's first key; each row carries its value's color as a band on its left
+// edge (views/common.tsx EdgeBands), in the chip's color; the overview track is painted in those colors; a chip turned off leaves out the rows of its value
 // and turned on again brings them back.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -80,14 +80,13 @@ async function open(page: Page, query: string) {
   await page.waitForTimeout(300)
 }
 
-/** The rows drawn: each one's line, the color of the bar on its left edge (null for none), and each chip's value with
+/** The rows drawn: each one's line, the color of the band on its left edge (null for none), and each chip's value with
  * its swatch's color. */
 const drawn = (page: Page) =>
   page.evaluate(() => {
     const rows = [...document.querySelectorAll<HTMLElement>('.reader-table-row[data-line]')].map((tr) => {
-      const gutter = tr.querySelector('td.reader-table-gutter')!
-      const shadow = getComputedStyle(gutter).boxShadow
-      return { line: Number(tr.dataset.line), edge: tr.classList.contains('has-cb') ? (shadow.match(/rgba?\([^)]*\)/)?.[0] ?? shadow) : null }
+      const band = tr.querySelector('td.reader-table-gutter .reader-band')
+      return { line: Number(tr.dataset.line), edge: tr.classList.contains('has-cb') && band ? getComputedStyle(band).backgroundColor : null }
     })
     const chips = Object.fromEntries([...document.querySelectorAll<HTMLElement>('.reader-colorbar .colorby-chip')].map((c) => [c.dataset.value!, getComputedStyle(c.querySelector('.colorby-sw')!).backgroundColor]))
     return { rows, chips, choice: document.querySelector('.reader-colorbar .colorby-trigger b')?.textContent ?? null }

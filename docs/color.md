@@ -48,7 +48,10 @@ the view as text, a glyph or a gray pattern, never in a second palette. Filter b
   itself, so the problem red and the agents' purple keep their meaning, and a failed mark keeps a shape (✕) beside
   its red so that it stays apart from a value picked red.
 - Color marks the unit its value belongs to: the records, the elements the page anchors (`data-anchor`). On a record,
-  color is a 3 px bar on the left edge of its row or card. Text and fills keep their own colors. A group of records (a
+  color is a 3 px bar on the left edge of its row or card; with several choices, a band per choice there, side by side
+  in the order of the overview's lanes (the first at the edge), each in the color of the record's value of that choice
+  and empty where it has none, so that a row's edge reads as a slice of the tracks. The bands stay in the space the bar
+  takes (narrower as more come), so the text stays where it is. Text and fills keep their own colors. A group of records (a
   page, a wiki, an agent, a run, a session, a source) takes no color of its own: no colored title, edge or chip. Its row
   may show how its records divide among the values with `thimble.mix` (below). The texts the chosen label matches are
   highlighted in its colors; the texts of the other labels that are on, and every label's while a field or Off is

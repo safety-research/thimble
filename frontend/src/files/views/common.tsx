@@ -207,6 +207,28 @@ export function LaneGutter({ cells }: { cells: readonly LaneCell[] }) {
   )
 }
 
+/** px between two bands at a record's left edge, as between two lanes of the tracks (Tracks.tsx LANE_GAP_PX) */
+export const BAND_GAP_PX = 1
+/** px of a record's left padding the bands take at most, so its text stays where it is with three of them */
+const BANDS_ROOM_PX = 9
+/** px: a band's width at a record's left edge for `n` choices of Color by: the one bar's 3 px for one or two, narrower
+ * as more come, as the tracks' lanes do, so that they all fit BANDS_ROOM_PX. Pure. */
+export const bandWidth = (n: number): number => Math.max(1, Math.min(3, Math.floor((BANDS_ROOM_PX - (Math.max(1, n) - 1) * BAND_GAP_PX) / Math.max(1, n))))
+
+/** A record's left edge under Color by, as a slice of the tracks: a band per choice, side by side from the left in the
+ * tracks' order (the first choice's at the edge), each in the color of the record's value of that choice and empty
+ * where it has none; nothing while no band has a color (Color by Off, or a record with no value of any choice). */
+export function EdgeBands({ bands }: { bands: readonly (string | null)[] | null | undefined }) {
+  if (!bands?.some(Boolean)) return null
+  return (
+    <span className="reader-bands" style={{ '--band-w': `${bandWidth(bands.length)}px` } as CSSProperties} aria-hidden>
+      {bands.map((c, i) => (
+        <span key={i} className={'reader-band' + (c ? '' : ' is-empty')} style={c ? { background: c } : undefined} />
+      ))}
+    </span>
+  )
+}
+
 /** The head of the records' label gutters, held at the top of the reader as it scrolls: each label's mark over its
  * column (a multi-class label's with its number), its name on hover. */
 export function LaneHead({ tags }: { tags: readonly LaneTag[] }) {
@@ -229,9 +251,9 @@ export function LaneHead({ tags }: { tags: readonly LaneTag[] }) {
 export const LANE_GLYPH_PX = 13
 
 /** One record as a row: the label gutter, the line number, the head in mono, the blocks under it; a highlighted value
- * with nothing to mark as a tint behind the text. In the Transcript mode, the Color by choice's color as a bar on its
- * left edge, and no row while its value is turned off in Color by or Filter by, unless a ref points at it (ColorContext,
- * FilterContext). With `fold`, a click on the head folds the record to one line, the head and the summary, and a click
+ * with nothing to mark as a tint behind the text. In the Transcript mode, a band per Color by choice on its left edge,
+ * in the color of its value of each (EdgeBands), and no row while its value of the first is turned off in Color by or
+ * Filter by, unless a ref points at it (ColorContext, FilterContext). With `fold`, a click on the head folds the record to one line, the head and the summary, and a click
  * on that line opens it again (FoldContext keeps it per file); a ref's record shows open until it is folded under the
  * ref. A folded record keeps its blocks in the page, hidden, so that the find finds them and opens it (UNFOLD_EVENT). */
 export function RecordCard({ path, line, target, hit, className, header, text, children, end, fold }: RecordProps) {
@@ -271,10 +293,11 @@ export function RecordCard({ path, line, target, hit, className, header, text, c
     if (sel && !sel.isCollapsed && sel.anchorNode && e.currentTarget.contains(sel.anchorNode)) return
     setFolded(f)
   }
-  const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint', cb?.color && 'has-cb', folded && 'is-folded'].filter(Boolean).join(' ')
-  const style = cb?.color ? ({ ...markStyle(marks), '--cb': cb.color } as CSSProperties) : markStyle(marks)
+  const banded = !!cb?.bands.some(Boolean)
+  const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint', banded && 'has-cb', folded && 'is-folded'].filter(Boolean).join(' ')
   return (
-    <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={style}>
+    <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={markStyle(marks)}>
+      {banded && <EdgeBands bands={cb!.bands} />}
       <LaneGutter cells={marks.cells} />
       <span className="reader-lineno mono">{line}</span>
       <div className={'reader-record-main' + (folded ? ' reader-collapsed' : '')} ref={main}>

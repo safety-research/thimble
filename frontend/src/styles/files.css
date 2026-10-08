@@ -2233,9 +2233,21 @@
   margin-left: 8px;
   color: var(--text-secondary);
 }
-/* a record's Color by color: a bar on its left edge */
-.reader-record.has-cb {
-  box-shadow: inset 3px 0 0 var(--cb);
+/* a record's Color by colors on its left edge, as a slice of the tracks (views/common EdgeBands): a band per choice,
+   side by side from the edge in the tracks' order, --band-w wide and a pixel apart, empty where the record has no value
+   of that choice; in the record's left padding, so its text stays where it is */
+.reader-bands {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  gap: 1px;
+  pointer-events: none;
+}
+.reader-band {
+  flex: none;
+  width: var(--band-w, 3px);
 }
 .reader-more {
   display: flex;
@@ -3007,12 +3019,16 @@
   box-shadow: inset 2px 0 0 var(--hl-edge);
   color: var(--text-primary);
 }
-/* a row's Color by color: a bar on its left edge, as a record carries it (and the target's edge beside it) */
-.reader-table-row.has-cb td.reader-table-gutter {
-  box-shadow: inset 3px 0 0 var(--cb);
-}
+/* a row's Color by colors: its bands on the edge of its pinned cell, as a record carries them (.reader-bands), and the
+   target's edge after them */
 .reader-table-row.has-cb.reader-target td.reader-table-gutter {
-  box-shadow: inset 3px 0 0 var(--cb), inset 5px 0 0 var(--hl-edge);
+  box-shadow: none;
+}
+.reader-table-row.reader-target .reader-bands::after {
+  content: '';
+  flex: none;
+  width: 2px;
+  background: var(--hl-edge);
 }
 /* the cell holding the words a followed ref quotes shows them over a few lines, the words highlighted (.hl) */
 .reader-table .reader-table-cell.cited .reader-table-clip {

@@ -777,6 +777,11 @@
   // and a bar in the first label's colour along its left edge, drawn as a box-shadow added to the view's own
   // (data-thimble-own): inset when the left padding has room or when a box that hides overflow, or the frame's edge,
   // would cut a bar outside it; else just outside. Only the outermost element carrying a record's ref takes the bar. Span labels are highlighted with the CSS Custom Highlight API, leaving the DOM as it is.
+  // With several choices of the kit's Colour by, the bar is a band per choice (bandsAt), side by side from the left in
+  // the order of the strip's lanes, each in the colour of the record's value of that choice and empty where it has none,
+  // as a slice of the strip: in the left padding a gradient behind the text (data-thimble-edge="bands"), so an empty
+  // band shows the element's own background; with no room there, shadows just outside ("bands-out"), and on an element
+  // with a background image of its own inset shadows ("bands-in"), their gaps in the colour behind (data-thimble-gap).
   var marks = {}
   var reported = {}
   var unsent = []
@@ -802,6 +807,52 @@
     // an SVG element draws no box-shadow, so a mark there is a halo in the label's colour around the shape; a group's
     // text keeps no halo, so its label stays sharp
     '[data-thimble-edge="svg"]:not(g),g[data-thimble-edge="svg"]>:not(text):not(title){filter:drop-shadow(0 0 1.5px var(--thimble-label)) drop-shadow(0 0 1.5px var(--thimble-label))}'
+  // the bands of several choices (bandVars gives each set its --thimble-bands*); a row's on its first cell, as its bar
+  var BANDS =
+    '[data-thimble-edge="bands"]:not(tr),tr[data-thimble-edge="bands"]>:first-child{background-image:var(--thimble-bands)!important;background-repeat:no-repeat!important;background-position:0 0!important;background-size:auto!important}' +
+    '[data-thimble-edge="bands"]{box-shadow:var(--thimble-own)!important}' +
+    '[data-thimble-edge="bands-in"]{box-shadow:var(--thimble-bands-in),var(--thimble-own)!important}' +
+    'tr[data-thimble-edge="bands-in"]>:first-child{box-shadow:var(--thimble-bands-in)!important}' +
+    '[data-thimble-edge="bands-out"]{box-shadow:var(--thimble-bands-out),var(--thimble-own)!important}'
+  var BAND_GAP = 1 // px between two bands, as between two lanes of the strip
+  var BANDS_ROOM = 9 // px the bands take at most
+  var GAP = 'var(--thimble-gap,transparent)'
+  // a band's width for `n` choices: the bar's for one or two, narrower as more come, so that they fit BANDS_ROOM; and
+  // the width of all `n`
+  function bandW(n) {
+    return Math.max(1, Math.min(BAR, Math.floor((BANDS_ROOM - (n - 1) * BAND_GAP) / n)))
+  }
+  function bandsW(n) {
+    return n * bandW(n) + (n - 1) * BAND_GAP
+  }
+  // One set of bands (`key`, their colours joined by |, '' for none) as the custom properties its elements draw by: the
+  // gradient, and the inset and outside shadows, the band nearest the text on top, each gap and empty band in the
+  // colour behind the element. An outside band is a shadow as the bar's (-2·BAR 0 0 -BAR for the one bar).
+  function bandVars(key) {
+    var cs = key.split('|')
+    var n = cs.length
+    var w = bandW(n)
+    var all = bandsW(n)
+    var grad = []
+    var inner = []
+    var outer = []
+    for (var i = 0; i < n; i++) {
+      var x0 = i * (w + BAND_GAP)
+      var x1 = x0 + w
+      grad.push((cs[i] || 'transparent') + ' ' + x0 + 'px ' + x1 + 'px')
+      inner.push('inset ' + x1 + 'px 0 0 ' + (cs[i] || GAP))
+      if (i === n - 1) continue
+      grad.push('transparent ' + x1 + 'px ' + (x1 + BAND_GAP) + 'px')
+      inner.push('inset ' + (x1 + BAND_GAP) + 'px 0 0 ' + GAP)
+    }
+    grad.push('transparent ' + all + 'px')
+    for (var j = n - 1; j >= 0; j--) {
+      var far = all - j * (w + BAND_GAP)
+      outer.push(-(far + BAR) + 'px 0 0 -' + BAR + 'px ' + (cs[j] || GAP))
+      if (j) outer.push(-(far + BAND_GAP + BAR) + 'px 0 0 -' + BAR + 'px ' + GAP)
+    }
+    return '--thimble-bands:linear-gradient(to right,' + grad.join(',') + ');--thimble-bands-in:' + inner.join(',') + ';--thimble-bands-out:' + outer.join(',')
+  }
   var DROP = '[data-thimble-drop="hide"]{display:none!important}[data-thimble-drop="dim"]{opacity:.25!important}'
   var COLOUR = /^[\w\s(),.#%-]+$/
   var SHADOW = /^[\w\s(),.#%\/-]+$/ // a computed box-shadow: colours, lengths, inset, commas between shadows
@@ -992,19 +1043,38 @@
     cut.set(a, left)
     return left
   }
-  function measure(el, cut) {
+  // With `n` choices of Colour by past one, the bands take the bar's place (bandsW wide), and the element also gets how
+  // they are drawn (`bands`, the edge they take) and, for shadows, the colour behind the element (`gap`).
+  function measure(el, cut, n) {
     var style = getComputedStyle(el)
     var shadow = style.boxShadow
     // whether the bar fits in the element's left padding with a gap before its text (a row's, its first cell's)
     var box = el.tagName === 'TR' && el.cells && el.cells.length ? el.cells[0] : el
-    var room = parseFloat((box === el ? style : getComputedStyle(box)).paddingLeft) >= 2 * BAR
+    var boxStyle = box === el ? style : getComputedStyle(box)
+    var w = n > 1 ? bandsW(n) : BAR
+    var room = parseFloat(boxStyle.paddingLeft) >= w + BAR
     var r = el.getBoundingClientRect()
-    return {
+    var got = {
       turn: measureTurn,
       hidden: r.width || r.height ? null : hiddenTurn,
-      edge: room || r.left - BAR < clipLeft(el, cut) ? 'in' : 'out',
+      edge: room || r.left - w < clipLeft(el, cut) ? 'in' : 'out',
       own: shadow && shadow !== 'none' && SHADOW.test(shadow) ? shadow : null,
     }
+    if (n > 1) {
+      var image = boxStyle.backgroundImage
+      got.bands = got.edge === 'out' ? 'bands-out' : image && image !== 'none' ? 'bands-in' : 'bands'
+      if (got.bands !== 'bands') got.gap = behind(got.edge === 'out' ? el.parentElement : box)
+    }
+    return got
+  }
+  // the colour behind an element's edge: the first background colour from `from` up that shows, else the canvas's
+  function behind(from) {
+    for (var a = from; a && a.nodeType === 1; a = a.parentElement) {
+      var c = getComputedStyle(a).backgroundColor
+      if (!c || c === 'transparent' || /^rgba\(.*,\s*0\)$/.test(c)) continue
+      return COLOUR.test(c) ? c : 'Canvas'
+    }
+    return 'Canvas'
   }
   function stale(el) {
     var got = measured.get(el)
@@ -1033,6 +1103,55 @@
     for (var a = el.parentElement; a; a = a.parentElement) if (a.getAttribute('data-anchor') === ref) return false
     return true
   }
+  // A record's bands for Colour by's choices (colourHook.tracks, the choices past the first): `first`, the first's
+  // colour, then each other's: a label's value on the record (its mark), a field's value as the element says it in
+  // data-colour-tracks (the kit's attr) in that field's colour; null where the record has none. Null when none has a
+  // colour.
+  function bandsAt(el, m, first, tracks) {
+    var out = [typeof first === 'string' && COLOUR.test(first) ? first : null]
+    var any = out[0] != null
+    var said
+    for (var i = 0; i < tracks.length; i++) {
+      var t = tracks[i] || {}
+      var c = null
+      if (t.label != null) {
+        var hit = valueIn(m, t)
+        c = hit ? hit.colour : null
+      } else if (t.field != null && typeof t.colourOf === 'function') {
+        if (said === undefined) said = tracksOf(el)
+        var v = said ? said[t.at] : null
+        c = v == null || v === '' ? null : t.colourOf(String(v))
+      }
+      if (typeof c !== 'string' || !COLOUR.test(c)) c = null
+      if (c) any = true
+      out.push(c)
+    }
+    return any ? out : null
+  }
+  // a set of bands as one string (their colours joined by |, '' for none), by which it has its slot
+  function bandKey(bands) {
+    return bands
+      .map(function (c) {
+        return c || ''
+      })
+      .join('|')
+  }
+  // what an element with bands shows: the names of the choices that give it a colour
+  function namesOf(bands, hook, tracks) {
+    var out = []
+    for (var i = 0; i < bands.length; i++) if (bands[i]) out.push(i ? (tracks[i - 1] && tracks[i - 1].name) || '' : hook.name)
+    return out.join(', ')
+  }
+  function tracksOf(el) {
+    var raw = el.getAttribute('data-colour-tracks')
+    if (!raw) return null
+    try {
+      var got = JSON.parse(raw)
+      return Array.isArray(got) ? got : null
+    } catch (e) {
+      return null
+    }
+  }
   // With the view kit's Colour by in the page (colourHook, viewer_colour.js), the bar shows the one thing the analyst
   // colours by, on the records alone (the anchored elements). For a label, the outermost element of each anchored record
   // that label highlights takes the bar in its value's colour, with data-thimble-label as before. For a field of the
@@ -1044,11 +1163,14 @@
   // its colours; the texts of the other labels that are on, and every label's with a field or Off chosen, are
   // highlighted in the plain ink of a highlight (--hl-bg). A span names its label (`id`); one from before spans did is
   // the chosen label's when it has the colour of that label's value on the record.
-  // The colours bars and highlights take, and the views' own shadows, each by a number kept from paint to paint, so an
-  // element keeps its attributes and the sheet its text while the page scrolls; numbered afresh only when most of them
-  // are no longer used, and forgotten when nothing is marked.
+  // The colours bars and highlights take, the sets of bands, the colours behind them and the views' own shadows, each by
+  // a number kept from paint to paint, so an element keeps its attributes and the sheet its text while the page
+  // scrolls; numbered afresh only when most of them are no longer used, and forgotten when nothing is marked.
   var colourSlots = []
   var ownSlots = []
+  var bandSlots = []
+  var gapSlots = []
+  var bandsN = 1 // the choices the bands were measured for
   function slotIn(list, v) {
     var k = list.indexOf(v)
     return k < 0 ? list.push(v) - 1 : k
@@ -1065,6 +1187,8 @@
     unset(el, 'data-thimble-bar')
     unset(el, 'data-thimble-edge')
     unset(el, 'data-thimble-own')
+    unset(el, 'data-thimble-bands')
+    unset(el, 'data-thimble-gap')
   }
   // The highlights of the span texts, from the ranges paint found (spanRanges). WebKit checks every range of a highlight
   // for each piece of text it draws, so with more than NEAR_MAX ranges on the page only those of the elements near the
@@ -1151,7 +1275,15 @@
     paintFrame = null
     var hook = colourHook && (colourHook.mode === 'label' || colourHook.mode === 'field') ? colourHook : null
     var plain = !!(colourHook && colourHook.mode === 'off') // Color by: Off, which draws no bar
-    var todo = [] // [element, bar colour, what it shows, 'label' or 'colour', mark]
+    // Colour by's choices past the first, each a band beside the first's; the elements are measured again when their
+    // number changes, since the bands take more room than the bar
+    var tracks = hook && Array.isArray(hook.tracks) ? hook.tracks : []
+    var n = tracks.length + 1
+    if (n !== bandsN) {
+      bandsN = n
+      measureTurn++
+    }
+    var todo = [] // [element, bar colour (null for bands), what it shows, 'label' or 'colour', mark, bands or null]
     var offs = []
     var spanned = []
     if (hasMarks() || hook) {
@@ -1163,6 +1295,7 @@
         var m = ref ? marks[ref] : null
         var unmarked = el.hasAttribute('data-anchor-unmarked')
         var bar = null
+        var bands = null
         var shows = ''
         var kind = 'label'
         if (plain) {
@@ -1177,9 +1310,11 @@
           var hit = valueIn(m, hook)
           offs.push([el, hook.off(hit ? hit.value : null)])
           if (m && !unmarked) spanned.push([el, m])
-          if (!hit || unmarked) continue
-          bar = hit.colour
-          shows = hook.name
+          if (unmarked) continue
+          bar = hit ? hit.colour : null
+          if (n > 1) bands = bandsAt(el, m, bar, tracks)
+          if (!hit && !bands) continue
+          shows = bands ? namesOf(bands, hook, tracks) : hook.name
         } else {
           var own = el.hasAttribute('data-colour')
           var v = own ? el.getAttribute('data-colour') : null
@@ -1187,13 +1322,20 @@
           if (own) offs.push([el, hook.off(v)])
           if (m && !unmarked && outermost(el, ref)) spanned.push([el, m])
           // the bar marks a record, the element the view anchors: a group's row (no anchor) takes none
-          if (!own || v == null || !ref || unmarked || el instanceof SVGElement) continue
-          bar = hook.colourOf(v)
-          shows = v
+          if (!own || !ref || unmarked || el instanceof SVGElement) continue
+          if (v != null) bar = hook.colourOf(v)
+          if (n > 1) bands = bandsAt(el, m, bar, tracks)
+          if (v == null && !bands) continue
+          shows = v == null ? '' : v
           kind = 'colour'
         }
-        if (typeof bar !== 'string' || !COLOUR.test(bar)) continue
-        todo.push([el, bar, shows, kind, m])
+        if (bands && el instanceof SVGElement) {
+          // a shape draws a halo, in the first colour it has
+          bar = bands.filter(Boolean)[0]
+          bands = null
+        }
+        if (!bands && (typeof bar !== 'string' || !COLOUR.test(bar))) continue
+        todo.push([el, bands ? null : bar, shows, kind, m, bands])
         if (!hook) spanned.push([el, m])
       }
     }
@@ -1217,15 +1359,20 @@
     if (reads.length) {
       for (var b = 0; b < reads.length; b++) unset(reads[b], 'data-thimble-edge')
       var cut = new Map()
-      for (var c = 0; c < reads.length; c++) measured.set(reads[c], measure(reads[c], cut))
+      for (var c = 0; c < reads.length; c++) measured.set(reads[c], measure(reads[c], cut, n))
     }
     // the texts of the span labels, each in its colour, or in the plain ink when it is not the Colour by choice
     var used = new Set()
     var usedOwn = new Set()
+    var usedBands = new Set()
+    var usedGaps = new Set()
     for (var u = 0; u < todo.length; u++) {
-      used.add(todo[u][1])
-      var mo = todo[u][0] instanceof SVGElement ? null : measured.get(todo[u][0]).own
-      if (mo) usedOwn.add(mo)
+      if (todo[u][1]) used.add(todo[u][1])
+      var mu = todo[u][0] instanceof SVGElement ? null : measured.get(todo[u][0])
+      if (mu && mu.own) usedOwn.add(mu.own)
+      if (!todo[u][5]) continue
+      usedBands.add(bandKey(todo[u][5]))
+      if (mu && mu.gap) usedGaps.add(mu.gap)
     }
     var texts = [] // [element, [[text, colour or null]]]
     for (var p = 0; p < spanned.length; p++) {
@@ -1248,12 +1395,16 @@
       renumbered = colourSlots.length > 0
       colourSlots = []
       ownSlots = []
+      bandSlots = []
+      gapSlots = []
     } else {
       if (colourSlots.length > 16 && colourSlots.length > 2 * used.size) {
         colourSlots = []
         renumbered = true
       }
       if (ownSlots.length > 16 && ownSlots.length > 2 * usedOwn.size) ownSlots = []
+      if (bandSlots.length > 16 && bandSlots.length > 2 * usedBands.size) bandSlots = []
+      if (gapSlots.length > 16 && gapSlots.length > 2 * usedGaps.size) gapSlots = []
       used.forEach(function (col) {
         slotIn(colourSlots, col)
       })
@@ -1265,8 +1416,19 @@
       var mm = e2 instanceof SVGElement ? SVG_EDGE : measured.get(e2)
       set(e2, todo[d][3] === 'label' ? 'data-thimble-label' : 'data-thimble-colour', todo[d][2])
       unset(e2, todo[d][3] === 'label' ? 'data-thimble-colour' : 'data-thimble-label')
-      set(e2, 'data-thimble-bar', String(slotIn(colourSlots, todo[d][1])))
-      set(e2, 'data-thimble-edge', mm.edge)
+      var bs = todo[d][5]
+      if (bs) {
+        set(e2, 'data-thimble-bands', String(slotIn(bandSlots, bandKey(bs))))
+        set(e2, 'data-thimble-edge', mm.bands || mm.edge)
+        if (mm.gap) set(e2, 'data-thimble-gap', String(slotIn(gapSlots, mm.gap)))
+        else unset(e2, 'data-thimble-gap')
+        unset(e2, 'data-thimble-bar')
+      } else {
+        set(e2, 'data-thimble-bar', String(slotIn(colourSlots, todo[d][1])))
+        set(e2, 'data-thimble-edge', mm.edge)
+        unset(e2, 'data-thimble-bands')
+        unset(e2, 'data-thimble-gap')
+      }
       if (mm.own) set(e2, 'data-thimble-own', String(slotIn(ownSlots, mm.own)))
       else unset(e2, 'data-thimble-own')
       now.add(e2)
@@ -1304,13 +1466,15 @@
     spanRanges = ranged
     textChanged.clear()
     if (HL && lit2) light()
-    var css = (marked.size ? BARS : '') + (dropOn ? DROP : '') + (offed.size ? OFF : '')
+    var css = (marked.size ? BARS : '') + (usedBands.size ? BANDS : '') + (dropOn ? DROP : '') + (offed.size ? OFF : '')
     sendHidden()
     for (var k2 = 0; k2 < colourSlots.length; k2++) {
       css += '[data-thimble-bar="' + k2 + '"]{--thimble-label:' + colourSlots[k2] + '}'
       css += '::highlight(thimble-label-' + k2 + '){background-color:color-mix(in oklab,' + colourSlots[k2] + ' 24%,transparent)}'
     }
     for (var w = 0; w < ownSlots.length; w++) css += '[data-thimble-own="' + w + '"]{--thimble-own:' + ownSlots[w] + '}'
+    for (var bk = 0; bk < bandSlots.length; bk++) css += '[data-thimble-bands="' + bk + '"]{' + bandVars(bandSlots[bk]) + '}'
+    for (var gk = 0; gk < gapSlots.length; gk++) css += '[data-thimble-gap="' + gk + '"]{--thimble-gap:' + gapSlots[gk] + '}'
     if (greyShown && spanRanges.size) css += '::highlight(thimble-label-grey){background-color:var(--hl-bg,rgba(27,26,24,.08))}'
     if (css && !sheet) {
       sheet = document.createElement('style')
@@ -1504,7 +1668,7 @@
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
     else if (changed) seenSoon()
     if (changed && (hasMarks() || dropping() || colourHook)) paintSoon()
-  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'data-colour', 'class'] })
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'data-colour', 'data-colour-tracks', 'class'] })
 
   // What the analyst is looking at, for a newer version of the view loaded in this page's place: `ref` the element they
   // last clicked since the last `open`, `scroll` the scroll positions of the page and of each box scrolled, `fields`

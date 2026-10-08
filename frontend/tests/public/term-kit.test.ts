@@ -463,6 +463,41 @@ describe('Color by takes several choices', () => {
     expect(colour.picks.length).toBe(1)
   })
 
+  test("each row has a mark per choice, as the browser's bands on its edge: its value's `●` of the first, then of each past it, a space where it has none; Off has one dim mark", async () => {
+    init({ cols: 80, rows: 16, state: { colour: { by: 'field:kind', picks: ['field:kind', 'field:service'], off: [], seen: [] } } })
+    const colour = kit.colorBy({ fields: FIELDS })
+    const list = kit.list({ key: (e: any) => e.id })
+    const items = [{ id: 1, kind: 'fired', service: 'db' }, { id: 2, kind: 'fired', service: 'web' }, { id: 3, kind: 'resolved' }, { id: 4, service: 'web' }]
+    kit.draw((d: any) => {
+      colour.draw(d)
+      list.draw(d, { items, colour, header: (r: any) => r.add('kind'), row: (e: any, r: any) => r.add(e.kind || '-') })
+    })
+    colour.counts({ fired: 2, resolved: 1 })
+    await tick()
+    expect(colour.picks.map((p: any) => p.title)).toEqual(['Kind', 'Service'])
+    const service = colour.tracks[0]
+    const lines = () => last().lines.slice(1)
+    // the header's names over the rows' words, past both marks and the gap
+    expect(text()[1]).toBe('     kind')
+    expect(text().slice(2, 6)).toEqual(['❯ ●● fired', '  ●● fired', '  ●  resolved', '  ●● -'])
+    // each `●` of a row, by its style: a run may hold two of one hue
+    const dots = (l: any[]) => l.flatMap((sg: any) => [...sg.s].filter((ch) => ch === '●').map(() => (sg.d ? 'dim' : sg.fg)))
+    const [, one, two, three, four] = lines()
+    expect(dots(one)).toEqual([colour.colourOf('fired'), service.colourOf('db')])
+    // the second mark is the service's hue, not the kind's
+    expect(dots(two)).toEqual([colour.colourOf('fired'), service.colourOf('web')])
+    expect(service.colourOf('web')).not.toBe(colour.colourOf('fired'))
+    // no service: the kind's mark alone, a space in the service's cell
+    expect(dots(three)).toEqual([colour.colourOf('resolved')])
+    // no kind: the kind's dim mark, then the service's
+    expect(dots(four)).toEqual(['dim', service.colourOf('web')])
+    // Off: one mark, dim, and no cell for the track
+    colour.choose(null)
+    await tick()
+    expect(text().slice(2, 6)).toEqual(['❯ ● fired', '  ● fired', '  ● resolved', '  ● -'])
+    expect(lines().slice(1, 5).map(dots)).toEqual([['dim'], ['dim'], ['dim'], ['dim']])
+  })
+
   test('with Off, the track and every mark the kit draws carry no hue, a label on or not', async () => {
     init({ cols: 80, rows: 16, labels: [{ id: 'k1', name: 'Asks', kind: 'regex', values: [{ name: 'yes', highlight: true }], here: true, on: true }], state: { colour: { by: 'off', picks: [], off: [], seen: ['k1'] } } })
     const colour = kit.colorBy({ fields: FIELDS })

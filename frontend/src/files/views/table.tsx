@@ -3,8 +3,9 @@
 // carry them; records that read as posts lead with author, time and body. Every cell is one line cut with an ellipsis.
 // The labels that are on tint rows and highlight marked texts in cells (a cell starts a little before its first mark
 // when the mark would fall past what it shows), and the pinned line-number column holds a slot per label in the gutter's
-// lanes, under the label's mark (LabelMark). The Color by choice (ColorContext) colors a row's left edge, as the
-// Transcript mode colors a record's, and a row whose value is turned off is not drawn, unless a ref points at it. Only
+// lanes, under the label's mark (LabelMark). Color by (ColorContext) gives a row's left edge a band per choice, as the
+// Transcript mode gives a record's (EdgeBands), and a row whose value is turned off is not drawn, unless a ref points at
+// it. Only
 // rows near the view are drawn, with spacer rows for the rest; hidden width holders in the header keep column widths
 // stable.
 import { Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
@@ -17,7 +18,7 @@ import { ReaderLabelsContext, useMarksAt } from '../marks'
 import { LabelMark } from '../LabelMark'
 import { ColorContext } from '../colorContext'
 import { findQuote } from '../../lib/quoteFind'
-import { cellTitle, citedQuote, compact, isJsonlFile, isTargetLine, LANE_GLYPH_PX, SpanEl, useTarget, type Target, type ViewDef, type ViewProps } from './common'
+import { cellTitle, citedQuote, compact, EdgeBands, isJsonlFile, isTargetLine, LANE_GLYPH_PX, SpanEl, useTarget, type Target, type ViewDef, type ViewProps } from './common'
 import { messageKeys, stamp, transcriptScore } from './transcript'
 
 const MAX_COLS = 40
@@ -445,7 +446,7 @@ export function Table({ workspace, path, page, targetRef }: ViewProps) {
         <tbody ref={bodyRef}>
           {drawn.above > 0 && pad(drawn.above)}
           {shown.slice(drawn.from, drawn.to).map((rec) => (
-            <TableRow key={rec.line} path={path} rec={rec} row={rowOf.get(rec.line)} cols={cols} wide={wide} dots={n} edge={colors?.get(rec.line)?.color ?? null} target={isTargetLine(target, rec.line)} hit={hit && isTargetLine(target, rec.line)} cited={cited?.line === rec.line ? cited : null} />
+            <TableRow key={rec.line} path={path} rec={rec} row={rowOf.get(rec.line)} cols={cols} wide={wide} dots={n} bands={colors?.get(rec.line)?.bands ?? null} target={isTargetLine(target, rec.line)} hit={hit && isTargetLine(target, rec.line)} cited={cited?.line === rec.line ? cited : null} />
           ))}
           {drawn.below > 0 && pad(drawn.below)}
         </tbody>
@@ -455,17 +456,20 @@ export function Table({ workspace, path, page, targetRef }: ViewProps) {
 }
 
 /** `dots` is how many labels are on: the row's dots take room for that many. `row` is a CSV row's number, which its
- * citation names; any other record is cited by its line. `edge`: the Color by choice's color of the row's value, a bar
- * on its left edge. `target`: a followed ref names the row; `cited`: the cell holding the words it quotes. */
-const TableRow = memo(function TableRow({ path, rec, row, cols, wide, dots, edge, target, hit, cited }: { path: string; rec: SourceRecord; row?: number; cols: string[]; wide: Set<string>; dots: number; edge: string | null; target: boolean; hit: boolean; cited: { col: string | null; at: [number, number] } | null }) {
+ * citation names; any other record is cited by its line. `bands`: per Color by choice, the color of the row's value of
+ * it, a band each on its left edge (EdgeBands). `target`: a followed ref names the row; `cited`: the cell holding the
+ * words it quotes. */
+const TableRow = memo(function TableRow({ path, rec, row, cols, wide, dots, bands, target, hit, cited }: { path: string; rec: SourceRecord; row?: number; cols: string[]; wide: Set<string>; dots: number; bands: readonly (string | null)[] | null; target: boolean; hit: boolean; cited: { col: string | null; at: [number, number] } | null }) {
   const r = rec.record
   const obj = r && typeof r === 'object' && !Array.isArray(r) ? (r as Record<string, unknown>) : null
   const marks = useMarksAt(path, rec.line)
   const focus = useContext(ReaderLabelsContext)?.focus
   const tint = focus === undefined ? marks.lit[0] : marks.lit.find((l) => l.concept === focus)
+  const banded = !!bands?.some(Boolean)
   return (
-    <tr className={['reader-card', 'reader-table-row', target && 'reader-target', hit && 'reader-hit', tint && 'has-tint', edge && 'has-cb'].filter(Boolean).join(' ')} style={tint || edge ? ({ ...(tint ? { '--tint': tint.colour } : {}), ...(edge ? { '--cb': edge } : {}) } as CSSProperties) : undefined} data-anchor={row ? `${path}#row=${row}` : `${path}#L${rec.line}`} data-line={rec.line}>
+    <tr className={['reader-card', 'reader-table-row', target && 'reader-target', hit && 'reader-hit', tint && 'has-tint', banded && 'has-cb'].filter(Boolean).join(' ')} style={tint ? ({ '--tint': tint.colour } as CSSProperties) : undefined} data-anchor={row ? `${path}#row=${row}` : `${path}#L${rec.line}`} data-line={rec.line}>
       <td className="reader-table-gutter mono">
+        {banded && <EdgeBands bands={bands} />}
         {dots > 0 && (
           <span className="reader-table-dots" style={{ '--dots': dots } as CSSProperties}>
             {marks.cells.map((c) =>
