@@ -4,8 +4,8 @@
 // bound far above what it takes, which fails when either becomes many times slower; and it keeps what makes it fast:
 // the list draws only the rows near its view and keeps them as it scrolls, a diff draws its first lines until Show
 // all, the history draws only the items around its view and reads them in full as they come near, a Color by change
-// reads nothing again, and the history's revisions have Color by's tracks while the list of pages, groups, keeps a
-// plain scrollbar.
+// reads nothing again, and the history's revisions have Color by's tracks while the list of pages, groups, has the
+// kit's plain track.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -200,16 +200,23 @@ describe('the Wiki Page History demo view', () => {
         lines: d.querySelectorAll('.dl').length,
         more: !!d.parentElement!.querySelector('[data-long]'),
         tracked: document.getElementById('blocks')!.classList.contains('thimble-colour-scrolled'),
-        listTracked: document.getElementById('list')!.classList.contains('thimble-colour-scrolled'),
-        strips: document.querySelectorAll('.thimble-colour-strip').length,
+        // a page's row: the kit's mix of its revisions' colors, no color of its own
+        rowMix: !!document.querySelector('#vl .row .thimble-mix:not([hidden])'),
+        rowColoured: !!document.querySelector('#vl .row[data-colour], #vl .row [data-colour]'),
+        // each strip by the list it stands beside, and whether it is the kit's plain track
+        strips: [...document.querySelectorAll<HTMLElement>('.thimble-colour-strip')].map((el) => {
+          const r = el.getBoundingClientRect()
+          const by = ['list', 'blocks'].find((id) => { const b = document.getElementById(id)!.getBoundingClientRect(); return r.left >= b.left - 1 && r.right <= b.right + 1 })
+          return `${by}:${el.hasAttribute('data-plain') ? 'plain' : 'colored'}`
+        }).sort(),
       }
     })
     assert.ok(h.lines <= 28 && h.more, `a diff of 39 lines draws ${h.lines} with its Show all button: ${JSON.stringify(h)}`)
-    // the history's revisions take the color, so it has Color by's tracks; the list's pages are groups, under a plain
-    // scrollbar
+    // the history's revisions take the color, so it has Color by's tracks; the list's pages are groups, under the kit's
+    // plain track
     assert.equal(h.tracked, true, "the history has Color by's tracks")
-    assert.equal(h.listTracked, false, 'the list of pages keeps a plain scrollbar')
-    assert.equal(h.strips, 1, "only the history has Color by's tracks")
+    assert.deepEqual(h.strips, ['blocks:colored', 'list:plain'], "the history has Color by's tracks, the list of pages the kit's plain track")
+    assert.ok(h.rowMix && !h.rowColoured, `a page's row shows the kit's mix and takes no color: ${JSON.stringify(h)}`)
     // Show all draws the rest
     await frame.locator('#blocks [data-long]').first().click()
     assert.ok((await frame.evaluate(() => document.querySelector('#blocks .blk .diff')!.querySelectorAll('.dl').length)) >= 39)

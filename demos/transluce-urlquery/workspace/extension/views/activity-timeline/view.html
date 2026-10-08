@@ -69,7 +69,8 @@
   .cols { display: grid; align-items: center; column-gap: 12px; padding: 0 14px; }
   #listcols { flex: none; height: 26px; overflow: hidden; border-bottom: 1px solid var(--border-hairline); color: var(--text-tertiary); font: 400 var(--text-xs) / 1 var(--font-body); }
   #listcols span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #list { position: relative; flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+  /* the list of lanes holds groups, which take no colour: the kit's plain track (colour.strip('#list')) */
+  #list { position: relative; flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; }
   .lrow { height: 30px; box-sizing: border-box; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
   .lrow:hover { background: var(--surface-hover); }
   .lrow.sel, .lrow.sel:hover { background: var(--surface-selected); }
@@ -81,9 +82,6 @@
   .lrow .t.last { text-align: right; }
   .sep-row { height: 8px; }
   .spark { display: block; width: 100%; height: 14px; }
-  .mix { display: flex; height: 8px; border-radius: 2px; overflow: hidden; background: rgba(var(--ink-rgb), 0.08); }
-  .mix i { display: block; height: 100%; }
-  .mix i + i { box-shadow: inset 1px 0 0 var(--surface-card); }
   .empty { padding: 22px 14px; color: var(--text-tertiary); font-size: var(--text-xs); }
   #gut .empty { padding: 20px 0; white-space: nowrap; }
 
@@ -173,8 +171,9 @@
 // Rows, Filter by and Color by (thimble.rows, thimble.filterBy, thimble.colorBy) read a report's value of a field from
 // its columns and of a label from the marks the reader hands it, so every label over the files groups, filters and
 // colors the same way. Color by is the only color, and it colors the reports (the bars, the marks and the panel's report
-// rows): a lane or an episode is never colored whole, it shows the mix of its reports' values as a small proportion bar
-// (mixHtml, the page's own helper). A value whose chip is off leaves the bars, the counts and the lists.
+// rows): a lane or an episode is never colored whole, it shows the mix of its reports' values as the kit's small
+// proportion bar (thimble.mix), and the list of lanes has the kit's plain track. A value whose chip is off leaves the
+// bars, the counts and the lists.
 // Labels: the reader keeps only the reports the label filter keeps and hands each its marks; the lanes, their rows and
 // the episodes carry their units as data-anchor, the panel's report rows their row's ref, so thimble marks them.
 const slug = (thimble.view && thimble.view.slug) || 'activity-timeline'
@@ -955,10 +954,13 @@ function sparkHtml(ix) {
   const path = (bins) => Array.from(bins, (v, s) => (v ? `M${s + 0.12},1V${(1 - v / max).toFixed(3)}H${s + 0.88}V1Z` : '')).join('')
   return `<svg class="spark" viewBox="0 0 ${SLICES} 1" preserveAspectRatio="none"><path d="${path(all)}" fill="var(--viz-ink-3)"/>${lead >= 0 ? `<path d="${path(led)}" fill="${esc(catColour(lead))}"/>` : ''}</svg>`
 }
-function mixHtml(per, total) {
-  if (!colour.by || !total) return ''
-  const parts = ORD.filter((k) => VALS[k] != null && per[k])
-  return `<span class="mix" title="${esc(ORD.filter((k) => per[k]).map((k) => `${catName(k)} ${fmt(per[k])}`).join(' · '))}">${parts.map((k) => `<i style="width:${((100 * per[k]) / total).toFixed(2)}%;background:${esc(catColour(k))}"></i>`).join('')}</span>`
+// a lane's or an episode's mix of its reports' Color by values (`per`, a count per value of VALS): the kit's proportion
+// bar, nothing with Color by Off
+function mixHtml(per) {
+  if (!colour.by) return ''
+  const n = {}
+  for (let k = 0; k < VALS.length; k++) if (per[k]) { const key = VALS[k] == null ? '' : String(VALS[k]); n[key] = (n[key] || 0) + per[k] }
+  return thimble.mix(n)
 }
 function renderList() {
   const w = $('listsec').clientWidth
@@ -982,7 +984,7 @@ function renderList() {
       first: `<span class="t">${ix.length ? esc(whenCell(T[ix[0]], lc.full)) : ''}</span>`,
       spark: `<span>${sparkHtml(ix)}</span>`,
       last: `<span class="t last">${ix.length ? esc(whenCell(T[ix[ix.length - 1]], lc.full)) : ''}</span>`,
-      mix: `<span>${mixHtml(per, n)}</span>`,
+      mix: `<span>${mixHtml(per)}</span>`,
     }
     h += `<div class="lrow cols${r.g === chosen ? ' sel' : ''}" data-g="${r.g}"${unit} style="grid-template-columns:${lc.tmpl}">${lc.keys.map((k) => v[k]).join('')}</div>`
   })
@@ -1002,6 +1004,8 @@ function fitList() {
   list.style.height = Math.max(0, h || room) + 'px'
 }
 new ResizeObserver(() => fitList()).observe($('listsec'))
+// the list of lanes holds groups, which take no colour: the kit's plain track
+colour.strip('#list')
 $('list').addEventListener('click', (ev) => {
   if (ev.metaKey || ev.ctrlKey) return
   const row = ev.target.closest('.lrow')
@@ -1040,7 +1044,7 @@ function epHead(k, top, anchored) {
   const e = EP.eps[k], a = T[e.ix[0]], b = T[e.ix[e.ix.length - 1]]
   const grp = GROUPS[EP.g]
   const unit = anchored && grp && grp.unit ? UNIT(`${grp.unit}/${isoSec(a)}`, ` data-anchor-text="${esc(grp.name)} · episode ${esc(epWords(a, b))} · ${plural(e.ix.length, 'report')}"`) : ''
-  return `<div class="eh" data-k="${k}"${unit} style="top:${top}px" title="Show this episode's span in the timeline"><div class="l1"><span class="w">${esc(epWords(a, b))}</span>${b > a ? `<span class="d">${esc(dur(b - a))}</span>` : ''}<span class="n">${plural(e.ix.length, 'report')}</span></div><div class="l2">${sparkHtml(e.ix)}${mixHtml(e.per, e.ix.length)}</div></div>`
+  return `<div class="eh" data-k="${k}"${unit} style="top:${top}px" title="Show this episode's span in the timeline"><div class="l1"><span class="w">${esc(epWords(a, b))}</span>${b > a ? `<span class="d">${esc(dur(b - a))}</span>` : ''}<span class="n">${plural(e.ix.length, 'report')}</span></div><div class="l2">${sparkHtml(e.ix)}${mixHtml(e.per)}</div></div>`
 }
 function epRow(q, top) {
   const i = EP.items[q], prev = q > 0 && EP.items[q - 1] >= 0 ? EP.items[q - 1] : null
