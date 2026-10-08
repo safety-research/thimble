@@ -43,7 +43,7 @@ import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
 import { NAV_EMPTY } from './nav'
-import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, paneTitle, panelColumns, readSurface, readThread, rt, surfaceValue, takeKeys, threadsNow, tick } from './term'
+import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, openPending, paneTitle, panelColumns, placedLater, readSurface, readThread, retryPending, rt, surfaceValue, takeKeys, threadsNow, tick } from './term'
 import type { UiApply } from './term'
 import { turns } from './turns'
 import { PUMP_MS, closeView, openViewState, sendEvent, viewMessage, viewPump } from './viewhost'
@@ -369,7 +369,7 @@ async function signalRows(cx: Ctx, e: ResolveInput & { requestId: string; viewpo
       <Box key={`signal-${k}`} flexDirection="row" {...(out.length ? {} : { marginTop: 1 })}>
         <Text dimColor>{'↳ '}</Text>
         <Text dimColor>{'thread · '}</Text>
-        <Button key={`signal-open-${s.thread}`} label={q} plain dimColor onPress={() => void openThread(cx, s.thread)} />
+        <Button key={`signal-open-${s.thread}`} label={q} plain dimColor onPress={() => openThread(cx, s.thread)} />
         {end === 'failed' ? <Text color={COLORS.problem}>{' · failed'}</Text> : <Text dimColor>{' · answered'}</Text>}
         {fresh && end !== 'failed' ? <Text color={COLORS.fresh}>{' · new'}</Text> : null}
       </Box>,
@@ -426,7 +426,7 @@ async function viewRowsEl(cx: Ctx, e: ResolveInput & { requestId: string }): Pro
     out.push(
       <Box key={`view-row-${slug}`} flexDirection="row" {...(out.length ? {} : { marginTop: 1 })}>
         <Text dimColor>{'↳ view · '}</Text>
-        <Button key={`view-open-${slug}`} label={v?.name ?? slug} plain dimColor onPress={() => void openView(cx, slug, v?.name ?? slug)} />
+        <Button key={`view-open-${slug}`} label={v?.name ?? slug} plain dimColor onPress={() => openView(cx, slug, v?.name ?? slug)} />
         {state === 'failed' ? <Text color={COLORS.problem}>{' · failed'}</Text> : <Text dimColor>{` · ${state === 'built' ? 'built' : state === 'building' ? 'building' : 'proposed'}`}</Text>}
         {v?.fresh ? <Text color={COLORS.fresh}>{' · new'}</Text> : null}
       </Box>,
@@ -466,7 +466,7 @@ async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promi
         ) : null}
       </Box>
       <Box flexShrink={0}>
-        <Button key={`ask-answer-${e.requestId}`} label="ask about this answer ›" plain onPress={() => void openAsk(cx, { kind: 'sentence', text: withoutNotes(ans.text).slice(0, 6000), label: 'this answer' }, { element: ANSWER_ELEMENT })} />
+        <Button key={`ask-answer-${e.requestId}`} label="ask about this answer ›" plain onPress={() => openAsk(cx, { kind: 'sentence', text: withoutNotes(ans.text).slice(0, 6000), label: 'this answer' }, { element: ANSWER_ELEMENT })} />
       </Box>
     </Box>
   )
@@ -497,7 +497,7 @@ async function underRow(cx: Ctx, e: ResolveInput & { requestId: string; viewport
   const views = await viewRowsEl(cx, e)
   if (!ids.length && !told && !views) return next()
   const { Box } = cx.els(e)
-  const cards = await drawCards(cx, e, ids, (e.viewport?.columns ?? 100) - 2, t => void openAsk(cx, t), id => void openThread(cx, id))
+  const cards = await drawCards(cx, e, ids, (e.viewport?.columns ?? 100) - 2, t => openAsk(cx, t), id => openThread(cx, id))
   return (
     <Box flexDirection="column">
       {await next()}
@@ -549,6 +549,8 @@ export const register: Register = on => {
     if (!rt.sc) return started
     rt.sig = null
     rt.uiN = -1
+    // a pane that waited undrawn before the module loaded again (its state is the session's)
+    rt.waiting = (await cx.pending()) !== null
     // when this conversation began: its first launch, so a thread asked before a `--continue` is not an earlier one's
     rt.startedAt = await $.session
       .usage()
@@ -782,8 +784,8 @@ export const register: Register = on => {
     // the reply fills the terminal's width, less 2, its cards as wide as its prose
     const cols = (e.viewport?.columns ?? 100) - 2
     // a sentence that cites a card whole keeps its chip (`[ card ]`) though the card is drawn under the reply
-    const body = text.trim() ? await drawReply(cx, e, text, cols - MARGIN, { first: Boolean(e.props.isFirstOfReply), skipCards: new Set(ids), ask: t => void openAsk(cx, t), open: id => void openThread(cx, id) }) : []
-    const cards = await drawCards(cx, e, ids, cols, t => void openAsk(cx, t), id => void openThread(cx, id))
+    const body = text.trim() ? await drawReply(cx, e, text, cols - MARGIN, { first: Boolean(e.props.isFirstOfReply), skipCards: new Set(ids), ask: t => openAsk(cx, t), open: id => openThread(cx, id) }) : []
+    const cards = await drawCards(cx, e, ids, cols, t => openAsk(cx, t), id => openThread(cx, id))
     // a block that held only a line thimble-term hides: nothing (ctrl+o's view still draws the reply's time and model
     // above it, which no hook reaches; the engine's own block with no text draws the same)
     if (!body.length && !cards && !told && !views && !footer) return <Box />
@@ -889,26 +891,31 @@ export const register: Register = on => {
         <Text dimColor>{`  ${s}`}</Text>
       </Box>
     )
-    // a panel a click opened that waits undrawn on a narrow terminal
+    // a panel Claude Code left undrawn (an open it was not asked for, on a terminal narrower than it places those at),
+    // and why; `open panel` opens it as `/thimble` does, from the press, which Claude Code places at any width. Gone
+    // once the pane is drawn (Claude Code places it when the terminal is widened to that width)
     const pending = await cx.pending()
-    if (pending && !panes.some(p => p.id === PANEL && p.isPlaced)) {
+    const placed = panes.some(p => p.id === PANEL && p.isPlaced)
+    if (pending && placed) $.clock.after(0, () => void placedLater(cx))
+    if (pending && !placed) {
+      const columns = (e.surface === 'terminal' ? e.viewport?.columns : 0) || pending.columns || 0
+      const more = pending.floor && columns ? pending.floor - columns : 0
+      if (pending.floor && columns && more <= 0) $.clock.after(0, () => void retryPending(cx, columns))
+      const why = more > 0 ? ` · opens on its own at ${pending.floor} columns (${more} more)` : pending.noScreen ? ' · no attached screen draws panels' : ''
       rows.push(
         <Box key="above-panel" flexDirection="row">
           {label('panel')}
-          <Box flexDirection="row" columnGap={2}>
-            <Text>{`${pending.title} is ready`}</Text>
-            <Button
-              key="above-panel-open"
-              label="open panel"
-              plain
-              onPress={() =>
-                void (async () => {
-                  const p = await cx.panel()
-                  if (p) await openPanel(cx, p)
-                })()
-              }
-            />
-            <Button key="above-panel-dismiss" label="dismiss" plain onPress={() => void closePanel(cx)} />
+          <Box flexDirection="row" columnGap={2} flexShrink={1}>
+            <Box flexShrink={1}>
+              <Text wrap="truncate-end">
+                {`${pending.title} is ready`}
+                {why ? <Text dimColor>{why}</Text> : null}
+              </Text>
+            </Box>
+            <Box flexDirection="row" columnGap={2} flexShrink={0}>
+              <Button key="above-panel-open" label="open panel" plain onPress={() => openPending(cx)} />
+              <Button key="above-panel-dismiss" label="dismiss" plain onPress={() => closePanel(cx)} />
+            </Box>
           </Box>
         </Box>,
       )
@@ -930,7 +937,7 @@ export const register: Register = on => {
             <Box flexDirection="row" columnGap={2} flexShrink={1}>
               {/* the word `new` in green, as wherever it shows (SPEC.md, rule 8) */}
               <Text wrap="truncate-end">{words.split(/( new )/).map((w, i) => (w === ' new ' ? <Text key={`new-${i}`}>{' '}<Text color={COLORS.fresh}>new</Text>{' '}</Text> : w))}</Text>
-              <Button key="above-home-open" label="open ›" plain onPress={() => void openHomeNew(cx)} />
+              <Button key="above-home-open" label="open ›" plain onPress={() => openHomeNew(cx)} />
             </Box>
           </Box>,
         )
@@ -951,6 +958,12 @@ export const register: Register = on => {
     if (!rt.sc) return next(e)
     const pe = e as PaneEvent
     const cx = cxOf($)
+    // a pane that waited undrawn is drawn now (Claude Code placed it once the terminal was wide enough): the row above
+    // the prompt that offered it goes
+    if (rt.waiting) {
+      rt.waiting = false
+      $.clock.after(0, () => void placedLater(cx))
+    }
     if (pe.surface === 'terminal' && pe.viewport?.columns && (pe.props.placement === 'dock' || pe.props.placement === 'inline')) {
       rt.termColumns = pe.props.placement === 'dock' ? pe.viewport.columns + pe.props.bodyColumns + 1 : pe.viewport.columns
       // a resize keeps the dock at the width it was opened with: it opens again at the panel's width for the terminal
@@ -991,6 +1004,7 @@ export const register: Register = on => {
     const closed = await next(e)
     if (e.id === PANEL) {
       rt.panelFocus = ''
+      rt.waiting = false
       await $.state.set(pendingRef, null).catch(() => undefined)
       await $.state.set(panelA, null).catch(() => undefined)
       // a terminal view's program ends with its pane
