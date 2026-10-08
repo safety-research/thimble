@@ -25,7 +25,8 @@ def test_the_order_is_one_list_for_the_server_the_frontend_and_the_view_kit():
 def test_show_label_s_names_are_the_places_a_stored_color_takes_and_the_first_five_are_five_hues():
     # each name says its place's hue on every paper (frontend tests/public/viz-palette.test.ts); the names never move
     assert concepts.COLOUR_NAMES == {"blue": 1, "orange": 2, "green": 3, "sky blue": 4, "olive": 5, "teal": 6, "brown": 7,
-                                     "navy": 8, "grass green": 9, "cerulean": 10, "chestnut": 11, "cyan": 12}
+                                     "navy": 8, "grass green": 9, "cerulean": 10, "chestnut": 11, "cyan": 12, "red": 13,
+                                     "dark red": 14, "purple": 15, "dark purple": 16, "pink": 17, "dark pink": 18}
     name = {n: k for k, n in concepts.COLOUR_NAMES.items()}
     assert [name[n] for n in ORDER[:5]] == ["blue", "orange", "green", "olive", "teal"]
     assert [name[n] for n in ORDER].index("sky blue") == 6

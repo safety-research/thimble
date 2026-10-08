@@ -242,10 +242,14 @@ async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values
     concepts.show_concept(CORPUS, "even", None, colours={"odd": "blue"})
     swapped = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
     assert swapped == {"even": 12, "odd": 1}, "the value that had the colour takes the one the other left"
-    with pytest.raises(HTTPException, match="no label colour is named 'red'"):
-        concepts.show_concept(CORPUS, "even", None, colours={"odd": "red"})
+    # red, purple and pink, which no value takes by itself, when the analyst asks for them
+    concepts.show_concept(CORPUS, "even", None, colours={"odd": "red", "even": "purple"})
+    asked = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
+    assert asked == {"even": 15, "odd": 13}
+    with pytest.raises(HTTPException, match="no label colour is named 'magenta'"):
+        concepts.show_concept(CORPUS, "even", None, colours={"odd": "magenta"})
     named = tools.schema_of("show_label")["properties"]["colours"]["additionalProperties"]["enum"]
-    assert named == list(concepts.COLOUR_NAMES) and sorted(concepts.COLOUR_NAMES.values()) == list(range(1, concepts.PALETTE + 1))
+    assert named == list(concepts.COLOUR_NAMES) and sorted(concepts.COLOUR_NAMES.values()) == list(range(1, concepts.PICKS + 1))
 
 
 async def test_swarm_orient_ships_no_view_and_takes_back_the_one_it_installed(crew, monkeypatch, tmp_path):

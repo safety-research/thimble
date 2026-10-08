@@ -652,7 +652,7 @@ async def test_act_label_show_turns_a_label_on_or_off_and_colors_its_values_by_n
     assert off["shown"] is False
     assert len(concepts.find_concept(ws, "bash")["applications"]) == runs, "it runs nothing"
     with pytest.raises(local.StateError, match="no label colour is named"):
-        await local.act(CORPUS, "label-show", {"label": "bash", "colours": {"no": "purple"}})
+        await local.act(CORPUS, "label-show", {"label": "bash", "colours": {"no": "magenta"}})
     with pytest.raises(local.StateError, match="has no value"):
         await local.act(CORPUS, "label-show", {"label": "bash", "colours": {"maybe": "teal"}})
     with pytest.raises(local.StateError, match="nothing to change"):

@@ -113,6 +113,10 @@ const FAMILY: Record<string, [number, number]> = {
   cyan: [205, 227],
   'sky blue': [228, 247], cerulean: [228, 247],
   blue: [248, 275], navy: [248, 275],
+  // the places only the analyst picks (13 to 18)
+  red: [10, 40], 'dark red': [10, 40],
+  purple: [280, 310], 'dark purple': [280, 310],
+  pink: [335, 360], 'dark pink': [335, 360],
 }
 
 test("matplotlib's colour cycle is the light paper's chart colours, and an inlined figure takes each as its token", () => {
@@ -219,7 +223,7 @@ describe.each(Object.keys(PAPERS))('the label colours on the %s paper', (paper) 
 
   test('each place is the hue its name says: show_label names the place a stored color takes, so a place keeps its hue', () => {
     expect(Object.keys(NAMES).sort()).toEqual(Object.keys(FAMILY).sort())
-    expect(Object.values(NAMES).sort((a, b) => a - b)).toEqual(Array.from({ length: 12 }, (_, i) => i + 1))
+    expect(Object.values(NAMES).sort((a, b) => a - b)).toEqual(Array.from({ length: 18 }, (_, i) => i + 1))
     for (const [name, [lo, hi]] of Object.entries(FAMILY)) {
       const c = t[place(name)]
       const hue = chromaHue(c)[1]
@@ -232,6 +236,7 @@ describe.each(Object.keys(PAPERS))('the label colours on the %s paper', (paper) 
     expect(light('sky blue'), 'sky is lighter than cerulean').toBeGreaterThan(light('cerulean'))
     expect(chroma('sky blue'), 'sky is more vivid than cerulean').toBeGreaterThan(chroma('cerulean'))
     expect(chroma('blue'), 'blue is more vivid than navy').toBeGreaterThan(chroma('navy'))
+    for (const n of ['red', 'purple', 'pink']) expect(chroma(n), `${n} is more vivid than dark ${n}`).toBeGreaterThan(chroma(`dark ${n}`))
   })
 
   test('the first five new values take (LABEL_ORDER), which a field of five values shows side by side, are five hues with no second blue, 15 apart in OKLab, also under protan and deutan vision', () => {
