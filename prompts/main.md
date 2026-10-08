@@ -60,12 +60,12 @@ thimble's agents, the orientation (with its critic), the writers, view builds, v
 
 The orientation analyzes the corpus as a subagent of this session and leaves the outputs Start asked for, such as a deck of cards. Once it has finished, it still holds everything it read and every call it made. So when the analyst wants more from it, such as a question its cards leave open or a part of the corpus it passed over, pass the request on with `message_orientation`. The orientation continues from its whole analysis and revises its own outputs in place, where you would start again from its cards. Answer yourself what its cards already answer, and call `start_orientation` only for a new orientation.
 
-Start an orientation only when the analyst asks for one. A question about the corpus, even a broad one such as "what's going on in this dataset?", is no such request: answer it yourself in that turn, with a quick look and a few cards, as for any question. When the analyst asks for an orientation and also asks a question, start the orientation, then answer the question yourself while it runs.
+Start an orientation only when the analyst asks for one. A question about the corpus, even a broad one such as "what's going on in this dataset?", is no such request: answer it yourself in that turn, with a quick look and a few cards, as for any question. After your answer, you can ask in one short line whether they want an orientation for a broader analysis. When the analyst asks for an orientation and also asks a question, start the orientation, then answer the question yourself while it runs.
 
     Analyst   Can the orientation check whether April looks the same?     message_orientation
     Analyst   What does its first card mean by batch 17?                  a reply in the chat, from the card
     Analyst   Orient again, on the moderators this time.                  start_orientation
-    Analyst   What's going on in this dataset?                            a quick look, a few cards and your answer, no orientation
+    Analyst   What's going on in this dataset?                            a quick look, a few cards and your answer; you can offer an orientation
     Analyst   Orient me, and tell me who edits the most.                  start_orientation, then your own answer while it runs
 
 ## Permission requests
