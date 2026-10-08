@@ -214,7 +214,8 @@ double click on the edge puts it back, and thimble keeps its width per view. Esc
 draws them: a card per turn, its number in a column at the left (a click opens its lines in the File browser), its
 speaker, tool and time in a mono head, its words under it; a tool call and what came back, and a system record, folded
 to one line until opened; a block longer than six lines folded with Expand; a thought quiet; an error in the problem
-red; a line between sessions. Each turn is anchored with its ref and carries `data-t`, so a label marks it, a ⌘-click
+red, a failed tool call's head with `✕` before its tool (`error` true, or the failure's word, which its hover gives); a
+line between sessions. Each turn is anchored with its ref and carries `data-t`, so a label marks it, a ⌘-click
 asks about it, Color by draws its bar and the lanes follow it.
 
 ```js

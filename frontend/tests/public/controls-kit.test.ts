@@ -368,7 +368,7 @@ describe('the side panel and the transcript', () => {
     expect(w.side.isOpen).toBe(false)
   })
 
-  test('a transcript: speaker, tool and time in the head; a tool call folded to one line until opened; a long result folded to six lines; a cited turn opened', async () => {
+  test("a transcript: speaker, tool and time in the head, a failed call's ✕ before its tool; a tool call folded to one line until opened; a long result folded to six lines; a cited turn opened", async () => {
     await load()
     const w = win()
     const long = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n')
@@ -379,8 +379,14 @@ describe('the side panel and the transcript', () => {
     ]
     w.eval(`window.opened = []; window.tr = thimble.transcript({ mount: '#turns', onOpen: (t) => window.opened.push(t.ref) }); window.tr.draw(window.TURNS, { title: 'lead · Run 1' })`)
     expect([texts('.thimble-transcript-title'), texts('.thimble-transcript-n')]).toEqual([['lead · Run 1'], ['3 turns']])
-    expect(texts('.thimble-turn-head')).toEqual(['user · 2026-05-16 09:00:00', 'lead · Bash · 2026-05-16 09:00:05', 'lead · 2026-05-16 09:00:09'])
+    expect(texts('.thimble-turn-head')).toEqual(['user · 2026-05-16 09:00:00', 'lead · ✕ Bash · 2026-05-16 09:00:05', 'lead · 2026-05-16 09:00:09'])
     expect(texts('.thimble-turn-line')).toEqual(['Bash pytest -q'])
+    // a failed call: ✕ and its tool in the problem red in its head, folded or open, its hover the failure's word
+    const failed = doc().querySelector('.thimble-turn-failed')!
+    expect([failed.textContent, failed.getAttribute('title')]).toEqual(['✕ Bash', 'failed'])
+    w.tr.draw([{ ...w.TURNS[1], error: 'denied' }])
+    expect(doc().querySelector('.thimble-turn-failed')!.getAttribute('title')).toBe('denied')
+    w.tr.draw(w.TURNS, { title: 'lead · Run 1' })
     expect(texts('.thimble-transcript-session')).toEqual(['explorer'])
     // every turn is anchored with its ref, and its time for the lanes' tint
     expect([...doc().querySelectorAll('.thimble-turn')].map((e) => [e.getAttribute('data-anchor'), e.getAttribute('data-t')])).toEqual([

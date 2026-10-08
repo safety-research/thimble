@@ -19,13 +19,14 @@
   .time { display: grid; grid-template-columns: var(--names) minmax(0, 1fr); padding: 10px 16px 0 8px; }
   #lanes { position: relative; padding: 0 16px 8px 8px; }
   #readout { align-self: center; padding-left: 8px; }
-  /* the key keeps its row while it has no entry, so the lanes' room does not change as it comes and goes */
-  .keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; min-height: calc(var(--h-chip) + 2px); padding: 2px 8px 0 4px; }
   /* the tint of the transcript's turns in view and the pointer's line end with the lanes, as they shrink too */
   .thimble-lanes-span, .thimble-lanes-cursor { max-height: 100%; }
   /* the session read: a tick on its parent's lane where it was started and one where its result came back */
   .ticks { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
   .ticks i { position: absolute; width: 2px; background: var(--text-primary); }
+  /* a failed call: a small ✕ in the problem red at the foot of its mark, as the transcript gives it before its tool; it
+     leaves the marks' Color by colors in view */
+  .fail-x { fill: none; stroke: var(--status-negative); stroke-width: 1.6; stroke-linecap: round; pointer-events: none; }
   /* the lanes past the room wait behind '… N more', a lane's height in the names' column */
   .more { display: block; height: 18px; margin: 0; padding: 0 0 0 8px; border: 0; background: none; color: var(--text-tertiary); font: 400 var(--text-ui-sm) / 18px var(--font-body); cursor: pointer; }
   .more:hover { color: var(--text-primary); }
@@ -54,7 +55,7 @@
   <div id="overview">
     <div class="time">
       <div id="readout"></div><div id="range"></div>
-      <div class="keys"><span id="key"></span></div><div id="axis"></div>
+      <div id="key"></div><div id="axis"></div>
     </div>
     <div id="lanes"></div>
   </div>
@@ -164,20 +165,20 @@ const range = thimble.timeRange({ mount: '#range', readout: '#readout', gap: 120
 const valueOf = (it) => (colour.label ? (data && data.colours[it.ref]) ?? null : colour.valueOf(it))
 const laneColour = { keeps: () => true, valueOf, colourOf: (v) => colour.colourOf(v) }
 const bySession = () => rows.field === 'session'
-// the lanes: each turn a mark as wide as its call took (a Task call as long as its subagent ran), a failed call
-// underlined in red; the transcript's turns in view tinted across them; the groups of Rows in the room the overview has
+// the lanes: each turn a mark as wide as its call took (a Task call as long as its subagent ran), a failed call a red
+// ✕ at its mark's foot (failMarks), always shown; the transcript's turns in view tinted across them; the groups of
+// Rows in the room the overview has
+const failed = (it) => it.kind === 'call' && it.outcome !== 'ok'
 const lanes = thimble.lanes({
   mount: '#lanes', keyMount: '#key', range, colour: laneColour, names: NAMES,
   groups: (its) => fitted(rows.groups(its)),
   time: (it) => it.time,
   end: (it) => it.time + (it.duration || 0),
-  problem: (it) => it.kind === 'call' && it.outcome !== 'ok',
-  words: { problem: 'failed' },
   follow: '#turns',
   anchor: (lane) => (bySession() && S[lane.key] ? `view:${slug}/${lane.key}` : null),
   onPick: (lane) => read(String(lane.key)),
   onMark: (it) => goTo(it.ref),
-  tip: (it) => `${it.tool || KIND[it.kind]}  ${it.input ?? it.text}`,
+  tip: (it) => `${it.tool || KIND[it.kind]}${failed(it) ? ` · ${it.outcome}` : ''}  ${it.input ?? it.text}`,
 })
 // the transcript: a card per turn as the File browser draws it, a tool call folded to its line; a Task call opened
 // shows the subagent's transcript beside it in the side panel
@@ -353,7 +354,7 @@ $('lanes').addEventListener('click', (e) => {
 }, true)
 
 // once the lanes draw: a run folded by itself shows ▸ as one folded by hand does, the runs folded by hand are read
-// from what the lanes drew, and the session read gets its ticks
+// from what the lanes drew, a failed call gets its ✕ and the session read its ticks
 function painted() {
   const hand = new Set(fit.hand)
   for (const b of $('lanes').querySelectorAll('[data-fold]')) {
@@ -365,12 +366,33 @@ function painted() {
     } else if (b.getAttribute('aria-expanded') === 'false') hand.add(k)
     else hand.delete(k)
   }
+  failMarks()
   ticks()
   if ([...hand].sort().join(' ') === [...fit.hand].sort().join(' ')) return
   fit.hand = hand
   lanes.draw()
 }
 new MutationObserver(painted).observe($('lanes').querySelector('.thimble-lanes-body'), { childList: true })
+
+// a failed call's ✕ at the foot of its mark, in the problem red, over the mark's lower edge and the lane's bottom
+// padding, so no mark loses its color under it
+const SVG = 'http://www.w3.org/2000/svg'
+const X = 2.75 // px, half the ✕'s width
+function failMarks() {
+  const byKey = new Map(lanes.lanes.map((n) => [String(n.key), n.items || []]))
+  for (const svg of $('lanes').querySelectorAll('svg.thimble-lane-track:not([data-fails])')) {
+    svg.setAttribute('data-fails', '')
+    const its = byKey.get(svg.closest('.thimble-lane')?.getAttribute('data-key')) || []
+    for (const m of svg.querySelectorAll('.thimble-lane-mark[data-i]')) {
+      if (!failed(its[+m.getAttribute('data-i')] || {})) continue
+      const x = +m.getAttribute('x') + +m.getAttribute('width') / 2, y = +m.getAttribute('y') + +m.getAttribute('height') - 0.5
+      const path = document.createElementNS(SVG, 'path')
+      path.setAttribute('class', 'fail-x')
+      path.setAttribute('d', `M${x - X} ${y - X}L${x + X} ${y + X}M${x + X} ${y - X}L${x - X} ${y + X}`)
+      svg.appendChild(path)
+    }
+  }
+}
 
 // where the session read was started and where its result came back, a tick at each on its parent's lane, or on the lane
 // a folded run holds it in; the tree's guides show which session started which
@@ -408,7 +430,7 @@ function turnOf(it) {
   return {
     ...it, t: it.time, time: null, kind: call ? 'tool' : it.kind === 'prompt' ? 'prompt' : 'text',
     input: call ? inputOf(it, w) : undefined, output: w ? w.output : undefined,
-    error: call && it.outcome !== 'ok', sessionName: S[it.session] ? `${names[it.session]} · ${runTitle(S[it.session].run)}` : it.session,
+    error: failed(it) && it.outcome, sessionName: S[it.session] ? `${names[it.session]} · ${runTitle(S[it.session].run)}` : it.session,
   }
 }
 const inputOf = (it, w) => (it.child && S[it.child] ? `→ ${names[it.child]}\n` : '') + (w ? w.input : it.input)
