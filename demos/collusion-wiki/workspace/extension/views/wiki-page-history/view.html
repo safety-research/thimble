@@ -53,12 +53,8 @@
   #count { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: var(--text-xs); }
   #count b { color: var(--text-primary); font: 500 var(--text-mono-sm) / 1 var(--font-mono); }
   #sort { flex: none; width: 168px; }
-  /* the list of pages holds groups, which take no colour, so it keeps a plain scrollbar (the view's own, until the
-     kit's plain track takes its place) */
-  #list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; outline: none; scrollbar-width: thin; scrollbar-color: rgba(var(--ink-rgb), 0.28) transparent; }
-  #list::-webkit-scrollbar { width: 8px; }
-  #list::-webkit-scrollbar-thumb { border-radius: 4px; background: rgba(var(--ink-rgb), 0.24); }
-  #list::-webkit-scrollbar-track { background: transparent; }
+  /* the list of pages holds groups, which take no colour, so it has the kit's plain track (colour.strip('#list')) */
+  #list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; outline: none; }
   #vl { position: relative; }
   .chunk { position: absolute; left: 0; right: 0; }
   .row { position: relative; box-sizing: border-box; height: 50px; padding: 7px 12px 6px 14px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
@@ -74,12 +70,11 @@
   .row .dl .ico { width: 11px; height: 11px; }
   .row .meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font-size: var(--text-xs); line-height: 1.2; }
   .row svg { flex: none; display: block; }
-  /* a page's mix of its revisions' colours in the range, the values in the chips' order: a page is a group, so it
-     takes no bar of its own (the view's own helper, until the kit's proportion bar takes its place) */
+  /* a page's mix of its revisions' colours in the range (thimble.mix): a page is a group, so it takes no bar of its
+     own; its holder, which carries the page's anchor, stands after the name */
   .row .r1 > * { order: 2; }
   .row .r1 > .nm { order: 1; }
-  .pbar { flex: none; display: flex; width: 36px; height: 6px; overflow: hidden; border-radius: 1px; background: rgba(var(--ink-rgb), 0.08); }
-  .pbar i { display: block; flex: var(--n) 1 0; min-width: 2px; height: 100%; background: var(--c); }
+  .mixw { flex: none; display: inline-flex; align-items: center; }
   .row .nu { flex: none; display: inline-flex; align-items: center; gap: 2px; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
   .row .nu .ico { width: 11px; height: 11px; }
   .empty { padding: 28px 14px; color: var(--text-tertiary); font-size: var(--text-xs); }
@@ -553,19 +548,20 @@ function pop(anchor, html, { align = 'left', cls = '' } = {}) {
   openPop = p
   return p
 }
-// the right edge popovers and tips keep to: left of the history's tracks, which they never cover
-function rightEdge() {
+// the right edge a popover or a tip that starts at `from` (px) keeps to: left of the first tracks right of it (the
+// list's or the history's), which it never covers
+function rightEdge(from = 0) {
   let x = innerWidth
   for (const el of document.querySelectorAll('.thimble-colour-strip')) {
     const r = el.getBoundingClientRect()
-    if (r.width && r.height) x = Math.min(x, r.left)
+    if (r.width && r.height && r.left >= from) x = Math.min(x, r.left)
   }
   return x
 }
 // below its anchor, or above it when there is more room there, inside the page and left of the tracks
 function place(p) {
   p.style.maxHeight = ''
-  const edge = rightEdge()
+  const edge = rightEdge(p.anchor.getBoundingClientRect().left)
   p.style.maxWidth = Math.max(200, Math.min(edge - 12, 360)) + 'px'
   const r = p.anchor.getBoundingClientRect(), w = p.offsetWidth, h = p.offsetHeight
   const below = innerHeight - r.bottom - 10, above = r.top - 10
@@ -823,7 +819,7 @@ function showTip(e, html) {
   tip.innerHTML = html
   tip.style.display = 'block'
   // to the pointer's right, or its left where that would cover the tracks or pass the edge
-  const edge = rightEdge(), w = tip.offsetWidth
+  const edge = rightEdge(e.clientX), w = tip.offsetWidth
   const x = e.clientX + 12 + w <= edge - 6 ? e.clientX + 12 : e.clientX - 12 - w
   tip.style.left = Math.max(4, Math.min(edge - w - 6, x)) + 'px'
   tip.style.top = Math.min(innerHeight - tip.offsetHeight - 8, e.clientY + 14) + 'px'
@@ -900,26 +896,17 @@ function nameHtml(r) {
   return esc(name.slice(0, i)) + `<b>${esc(name.slice(i, i + S.q.length))}</b>` + esc(name.slice(i + S.q.length))
 }
 const anchorOf = (r) => (O.keys[r] ? unitRef(O.keys[r]) : O.pages.ln[r] ? `pages.jsonl#L${O.pages.ln[r]}` : '')
-// A group's mix of its records' colours: the share of each value that is on among `n` (a count per slot, in H.slot's
-// order, the last for no value), as a bar of its parts; nothing with Color by Off. The view's own helper until the
-// kit's proportion bar takes its place.
-function proportionBar(n, title, attrs = '') {
-  if (!H || colour.off || !n) return ''
-  let all = 0
-  for (const x of n) all += x
-  if (!all) return ''
-  let h = ''
-  // each part as wide as its share, and at least 2 px, so a value a few records take still shows
-  for (let j = 0; j < n.length; j++) if (n[j]) h += `<i style="--n:${n[j]};--c:${esc(H.fills[j])}"></i>`
-  return `<span class="pbar" title="${esc(title)}"${attrs}>${h}</span>`
-}
-// a page's records by the colour's values that are on, as proportionBar counts them: its revisions and deletes in the
-// range, and its own line; a delete and the page's line take a label's value, or the page's wiki or status, and no
-// value of a revision's own fields
+// A group's mix of its records' colours (rowMix's counts), as the kit's proportion bar, in a holder that carries
+// `attrs`; nothing with Color by Off or no value on
+const mixBar = (n, attrs = '') => (n ? `<span class="mixw"${attrs}>${thimble.mix(n)}</span>` : '')
+// a page's records by the colour's values that are on, {value: n} with '' for no value: its revisions and deletes in
+// the range, and its own line; a delete and the page's line take a label's value, or the page's wiki or status, and no
+// value of a revision's own fields; null with Color by Off or none on
 function rowMix(r) {
-  if (!H || colour.off) return null
-  const n = new Int32Array(H.NS)
-  const add = (v) => { if (colour.isOn(v)) n[v == null || !H.slot.has(v) ? H.NS - 1 : H.slot.get(v)]++ }
+  if (colour.off) return null
+  const n = {}
+  let all = 0
+  const add = (v) => { if (colour.isOn(v)) { const k = v == null ? '' : String(v); n[k] = (n[k] || 0) + 1; all++ } }
   for (let k = RS[r]; k < RE[r]; k++) if (inR(O.revs.rt[k])) add(revValue(k, r))
   const own = colour.label ? null : pageValue(r)
   for (let k = DS[r]; k < DE[r]; k++) if (inR(O.dels.dt[k])) add(colour.label ? labelValue(O.dels.db[k], O.marks) : own)
@@ -927,12 +914,7 @@ function rowMix(r) {
     const v = colour.label ? labelValue(O.pages.pb[r], O.marks) : own
     if (v != null) add(v)
   }
-  return n
-}
-function mixTitle(n) {
-  const parts = []
-  for (let j = 0; j < n.length; j++) if (n[j]) parts.push(`${j < H.NS - 1 ? H.vals[j] : 'No value'} ${fmt(n[j])}`)
-  return parts.join(' · ')
+  return all ? n : null
 }
 // a label colored by with a value turned off: the rows are not anchored, since thimble hides an anchored element whose
 // unit takes a value turned off, and a page takes none of its own
@@ -948,7 +930,7 @@ function rowHtml(r) {
   // name, which a ⌘-click asks about; the mix stands after the name
   const a = anchor ? ` data-anchor="${esc(anchor)}" data-anchor-text="${esc(P.name[r])}" data-anchor-unmarked` : ''
   return `<div class="row${S.sel === p ? ' sel' : ''}" data-p="${p}">` +
-    `<div class="r1">${mix ? proportionBar(mix, mixTitle(mix), a) : ''}<span class="nm"${a}>${nameHtml(r)}</span>${d ? `<span class="dl" title="${plural(d, 'delete')}">${ico('trash')}${fmt(d)}</span>` : ''}<span class="nu" title="${plural(P.u[r], 'username')}">${ico('user')}${fmt(P.u[r])}</span><span class="nr" title="${plural(P.n[r], 'revision')}">${ico('edit')}${fmt(P.n[r])}</span></div>` +
+    `<div class="r1">${mixBar(mix, a)}<span class="nm"${a}>${nameHtml(r)}</span>${d ? `<span class="dl" title="${plural(d, 'delete')}">${ico('trash')}${fmt(d)}</span>` : ''}<span class="nu" title="${plural(P.u[r], 'username')}">${ico('user')}${fmt(P.u[r])}</span><span class="nr" title="${plural(P.n[r], 'revision')}">${ico('edit')}${fmt(P.n[r])}</span></div>` +
     `<div class="r2"><span class="meta">${meta}</span>${stripSvg(r)}</div></div>`
 }
 // the list drawn whole, as when the rows, their order or what they show changed; its width and height are read here
@@ -1093,7 +1075,7 @@ function renderHead() {
   const mode = readMode()
   // the page is a group: its title is anchored, so it can be asked about, and takes no colour
   const r = rowOf.get(S.sel), mix = r != null ? rowMix(r) : null
-  let h = `<div class="h1"${anchor ? ` data-anchor="${esc(anchor)}" data-anchor-text="${esc(g.name)}" data-anchor-unmarked` : ''}><h2 title="${esc(g.page_id)}">${esc(g.name)}</h2>${mix ? proportionBar(mix, mixTitle(mix)) : ''}<span class="chip chip-sans chip-tone-neutral">${esc(g.wiki)}</span>` +
+  let h = `<div class="h1"${anchor ? ` data-anchor="${esc(anchor)}" data-anchor-text="${esc(g.name)}" data-anchor-unmarked` : ''}><h2 title="${esc(g.page_id)}">${esc(g.name)}</h2>${mixBar(mix)}<span class="chip chip-sans chip-tone-neutral">${esc(g.wiki)}</span>` +
     (del ? `<button class="chip chip-sans chip-tone-neutral chip-act" type="button" data-jump="d">${ico('trash')}${del > 1 ? `Deleted ${del} times` : 'Deleted'}</button>` : '') +
     `<span class="sp"></span><div class="seg seg-track rd" role="tablist" aria-label="Read the revisions as" data-thimble-chrome>${[['messages', 'Messages', 'Each revision as the text it added'], ['diff', 'Diff', 'Each revision as its diff against the revision before']].map(([k, t, tip]) => `<button class="seg-opt${mode === k ? ' active' : ''}" type="button" role="tab" aria-selected="${mode === k}" data-read="${k}" title="${tip}">${t}</button>`).join('')}</div>` +
     `<button class="btn btn-ghost btn-sm${S.pinfo ? ' active' : ''}" type="button" id="pinfo">${ico('info')}Details</button>` +
@@ -1656,6 +1638,8 @@ function slicePreview(j) {
   return { when: `${dm(t)} ${hm(t)}`, text: `${u ? `${u}: ` : ''}${what}` }
 }
 colour.strip('#blocks', { rows: [], refs: [], preview: slicePreview })
+// the list of pages holds groups, which take no colour: the kit's plain track
+colour.strip('#list')
 range.follow('#blocks', (el) => O.t0 + Number(el.dataset.t), '.blk')
 
 // an event no page holds: a delete of a page with no stored revision, or a request that names none
@@ -1687,7 +1671,7 @@ async function userPop(name, anchor) {
   p.innerHTML = `<div${res.ref ? ` data-anchor="${esc(res.ref)}" data-anchor-text="${esc(name)}"` : ''}><div class="uh"><b>${esc(name || 'anonymous')}</b>${O.admins.includes(name) ? '<span class="chip chip-tone-neutral">admin</span>' : ''}${res.role ? `<span class="chip chip-tone-neutral">${esc(res.role)}</span>` : ''}</div>` +
     `<dl class="facts">${fact('revisions', fmt(res.stored_revisions ?? pages.reduce((a, x) => a + (x.edits || 0), 0)))}${fact('pages', fmt(pages.length))}${fact('first write', T(res.first_write))}${fact('last write', T(res.last_write))}${res.stored_revision_ips != null ? fact('IPs', fmt(res.stored_revision_ips)) : ''}${res.stored_revision_ip16 != null ? fact('IP prefixes', fmt(res.stored_revision_ip16)) : ''}${fact('wikis', (res.wikis || []).join(', '))}${res.deletes ? fact('deletes', fmt(res.deletes)) : ''}</dl>` +
     `<div class="acts"><button class="btn btn-secondary btn-sm" type="button" data-act="list">${S.user === name ? 'Every username' : 'Only this username'}</button></div>` +
-    `<div class="pages"><div class="up uhd"><span class="nm">${plural(pages.length, 'page')}</span><span class="n">revisions / page total</span></div>${pages.map((x) => x.p == null ? `<div class="up"><span class="nm">${esc(x.page_id)}</span></div>` : `<div class="up" data-p="${x.p}"${x.key ? ` data-anchor="${esc(unitRef(x.key))}" data-anchor-text="${esc(x.name)}" data-anchor-unmarked` : ''}><span class="nm">${esc(x.name)}</span>${(() => { const r = rowOf.get(x.p), mix = r != null ? rowMix(r) : null; return mix ? proportionBar(mix, mixTitle(mix)) : '' })()}<span class="wk">${esc(x.wiki)}</span>${x.deletes ? ico('trash') : ''}<span class="n">${fmt(x.edits)} / ${fmt(x.n_revs)}</span></div>`).join('')}</div></div>`
+    `<div class="pages"><div class="up uhd"><span class="nm">${plural(pages.length, 'page')}</span><span class="n">revisions / page total</span></div>${pages.map((x) => x.p == null ? `<div class="up"><span class="nm">${esc(x.page_id)}</span></div>` : `<div class="up" data-p="${x.p}"${x.key ? ` data-anchor="${esc(unitRef(x.key))}" data-anchor-text="${esc(x.name)}" data-anchor-unmarked` : ''}><span class="nm">${esc(x.name)}</span>${(() => { const r = rowOf.get(x.p), mix = r != null ? rowMix(r) : null; return mixBar(mix) })()}<span class="wk">${esc(x.wiki)}</span>${x.deletes ? ico('trash') : ''}<span class="n">${fmt(x.edits)} / ${fmt(x.n_revs)}</span></div>`).join('')}</div></div>`
   p.onclick = (e) => {
     const a = e.target.closest('[data-act]')
     if (a && a.dataset.act === 'list') { S.user = S.user === name ? null : name; closePop(); rescope(); if (S.sel != null) openPage(S.sel); return }

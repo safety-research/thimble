@@ -949,11 +949,11 @@ async def test_repository_colors_the_unit_its_value_belongs_to(repository):
     assert "Color by  Clock change ↗" in rows[2]
     listed = [x for x in rows[5:] if re.search(r"#\d+ ", x)]
     assert listed and not any("●" in x for x in listed), "a row takes no mark of its own"
-    assert any(re.match(r"  ━{6}  #11  Keep wall-clock", x) for x in listed), "the mix of a row whose records it marks"
+    assert any(re.match(r"  █{6}  #11  Keep wall-clock", x) for x in listed), "the mix of a row whose records it marks"
     out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, ansi=True, panel=False)
     rows = out.splitlines()[5:]
     hued = [x for x in rows if HUE.search(x)]
-    assert hued and all(re.search(r"\x1b\[38;2;[\d;]+m━", x) for x in hued), "a hue on the mix alone"
+    assert hued and all(re.search(r"\x1b\[38;2;[\d;]+m█", x) for x in hued), "a hue on the mix alone"
     assert not any(re.search(r"\x1b\[38;2;[\d;]+m▌", x) for x in rows), "the track is plain"
 
 

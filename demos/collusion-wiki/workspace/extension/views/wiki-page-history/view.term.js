@@ -241,23 +241,16 @@ function shownPages() {
   }
   return out.sort((a, b) => b.n - a.n || (a.name < b.name ? -1 : 1))
 }
-// a page's mix of its revisions' colors in the range, in MIX cells: each value that is on in cells as many as its share,
-// at least one; no cells with Color by Off
+// a page's mix of its revisions' colors in the range, in MIX cells: the kit's colour.mix of its records' values, blank
+// with Color by Off or no value on
 function mixRuns(pg) {
-  if (colour.off) return []
-  const n = new Map()
-  let all = 0
-  const add = (v) => { if (!colour.isOn(v)) return; const k = v ?? ''; n.set(k, (n.get(k) || 0) + 1); all++ }
+  const n = {}
+  const add = (v) => { const k = v ?? ''; n[k] = (n[k] || 0) + 1 }
   for (const x of pg.revs) if (range.has(x.t)) add(colour.valueOf(x))
   for (const x of pg.dels) if (range.has(x.t)) add(deleteValue(x))
   if (colour.label && pg.value != null) add(pg.value)
-  if (!all) return [{ s: ' '.repeat(MIX) }]
-  const parts = [...n].sort((a, b) => (a[0] === '' ? 1 : b[0] === '' ? -1 : b[1] - a[1])).slice(0, MIX)
-  const cells = parts.map(([, k]) => Math.max(1, Math.round((k / all) * MIX)))
-  let over = cells.reduce((a, b) => a + b, 0) - MIX
-  while (over > 0) { const i = cells.indexOf(Math.max(...cells)); cells[i]--; over-- }
-  while (over < 0) { cells[0]++; over++ }
-  return parts.map(([v], i) => { const hue = v === '' ? null : colour.colourOf(v); return hue && hue !== COLORS.dim ? { s: '▬'.repeat(cells[i]), fg: hue } : { s: '▬'.repeat(cells[i]), d: true } })
+  const runs = colour.mix(n, MIX)
+  return runs.length ? runs : [{ s: ' '.repeat(MIX) }]
 }
 
 // ---------------------------------------------------------------- the open page

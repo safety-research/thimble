@@ -296,27 +296,13 @@ function page(it, d) {
 
 // ------------------------------------------------------------------------------------------------ the view
 
-// under a label, a row stands for its records, so it takes no mark of its own: this bar shows its records' mix of the
-// label's values in `n` cells, each value's share of them, a cell at least for a value that is there, in the chips'
-// order, the records with no value dim. Drawn here until the kit's proportion bar replaces it
+// under a label, a row stands for its records, so it takes no mark of its own: the kit's colour.mix of its records'
+// values in `n` cells, where any of them takes a value
 const MIX = 6
 function mixCells(it, n = MIX) {
-  const order = colour.values.map((c) => (c.value === null ? '' : String(c.value)))
-  const at = (v) => { const i = order.indexOf(v === null ? '' : String(v)); return i < 0 ? order.length : i }
-  const parts = (it.mix || []).slice().sort((a, b) => at(a[0]) - at(b[0])).slice(0, n)
-  const total = parts.reduce((k, [, m]) => k + m, 0)
-  if (!total || !parts.some(([v]) => v !== null)) return [{ s: ' '.repeat(n) }]
-  // a cell for each value, then the rest by the largest share left
-  const cells = parts.map(() => 1)
-  for (let left = n - cells.length; left > 0; left--) {
-    let best = 0
-    parts.forEach(([, m], i) => { if (m / total * n - cells[i] > parts[best][1] / total * n - cells[best]) best = i })
-    cells[best]++
-  }
-  return parts.map(([v], i) => {
-    const hue = v === null ? null : colour.colourOf(v)
-    return hue && hue !== COLORS.dim ? { s: '━'.repeat(cells[i]), fg: hue } : { s: '━'.repeat(cells[i]), d: true }
-  })
+  const parts = it.mix || []
+  const runs = parts.some(([v]) => v !== null) ? colour.mix(Object.fromEntries(parts.map(([v, m]) => [v ?? '', m])), n) : []
+  return runs.length ? runs : [{ s: ' '.repeat(n) }]
 }
 
 // the repository's head: the switcher with the run's name, then the run's facts in the room left
