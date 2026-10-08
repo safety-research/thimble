@@ -49,8 +49,8 @@ code forge the way its own tools draw them: one run's repository at a time, chos
 (`choice` with `all: false`, which lists each run with its tabs' counts); the tabs with their counts on a row of their
 own, the chosen one inverse; the run's items with a dim line under each row (`body`); under a label, which marks
 records, no mark on a row, which stands for its records, but a small bar of their mix, and a plain track; and an item's
-page in the side pane (`side`), whose records are a `list` of their own that ↑↓ move through while it is open, the one
-a citation opened chosen.
+page in the side pane (`side`), whose records are a `list` of their own, which ↑↓ move through once a click, the wheel
+or `l` gives it the keys, the one a citation opened chosen.
 
 ## The program's life
 
@@ -129,6 +129,12 @@ letter, a digit or a sign typed. ←, →, the page keys, Home, End, Tab and Esc
 refuses them, and `b`, `t` and `x` are the panel's own (back, the threads, close). The kit's parts bind `c` (Color by),
 `f` (Filter by), `g` (Rows), `r` (Reset), `a` (ask), `/` (search), a choice's own letter, and `<` `>` and Backspace (the
 side pane) while they are drawn. The time range and the divider bind no key: the mouse moves the range.
+
+A view that draws two lists or more (the pages, and a page's revisions in the side pane or under them) gives ↑↓, Enter
+and `a` to one of them: the one the analyst last clicked (a row, the track, its details) or turned the wheel over, or
+the one the program last chose a row of (`choose`, `show`: a citation opened it), else the main list, the first the
+frame draws. When that list is not drawn any more (its pane closed), the main list has the keys again. `l` gives them
+to the next list the frame draws; `?` names it and the hint row does not, and a view that binds `l` itself keeps it.
 
 The hint row is one row: the moves the screen cannot show, `↑↓ to choose · Enter to open` (and an open menu's Space),
 the first two keys the view binds of its own (`n p for the next lane`), `? for all keys`, then `b to go back · x to
@@ -280,7 +286,8 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
   `onOpen(item)` hears it, to fetch what they show. `a` asks a side thread about the chosen row (`ask(item)`).
 - Each row starts with its mark in its Color by hue. A list taller than its rows has the colored track at its right
   edge: each cell the commonest hue of the rows it stands for, the part in view on the selection background; one many
-  times taller adds the zoomed track beside it. A click on the track goes there; the wheel moves the rows.
+  times taller adds the zoomed track beside it. A click on the track goes there; the wheel over the list moves its
+  rows, and the rows of no other list (over a side pane's rows, those of the list the pane draws).
 - A list draws only its rows in view (and the chosen one): a list of 15,000 rows answers a key as one of 40 does. The
   rows an item's `body` takes are counted as it last drew them at that width, so `body` draws from the item and its
   `{chosen, open}` alone. Drawn as text (`thimble view text`, the view checks) a list draws every row, so a row too
@@ -303,7 +310,8 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
 - `rows.span(time)` gives the first and last times of the rows in view, which a lanes part marks on the overview. Read
   above the list, before it draws, it gives the rows the list will show after the key or the wheel being answered; where
   the list then shows others (its items changed), the view draws again, so the overview follows.
-- `onWheel(fn)` hears the wheel over the view, for a part of the program's own that scrolls.
+- `onWheel(fn)` hears the wheel over the view, `fn(by, at)` with `at` the cell under the pointer (`{x, y}` from A0 and
+  the view's first row, null when the panel did not say), for a part of the program's own that scrolls.
 
 ## The side pane
 
@@ -358,7 +366,7 @@ queries; thimble-term starts it the first time a view opens and talks to it over
 | from thimble to the program | |
 |---|---|
 | `init {source, cols, rows, theme, view, state, labels, open}` | the program's source and what it opens on |
-| `resize {cols, rows}`, `key {key}`, `text {value}`, `click {i, seq, x}`, `drag {i, seq, x0, x1}`, `wheel {by}` | the panel's events, each with its number `n`; `text` the whole text of the field that takes typing |
+| `resize {cols, rows}`, `key {key}`, `text {value}`, `click {i, seq, x}`, `drag {i, seq, x0, x1}`, `wheel {by, seq, x, y}` | the panel's events, each with its number `n`; `text` the whole text of the field that takes typing; `wheel`'s `x` `y` the frame's cell under the pointer (its margin's two cells counted, as a hot region's), which a wheel from no pointer leaves out |
 | `answer {id, data \| error}` | a query's answer; one longer than 16 MB comes as an error that says to answer in pages |
 | `sync {id}` | asks whether the program is idle (`draw_text`, the view checks) |
 | `labels {labels, filter}`, `open {place}` | the labels changed; a citation opened the view at a place |
@@ -390,7 +398,8 @@ checks and the reviewer read. It takes each frame once the program is idle: no r
 to a sync in, nothing drawn meanwhile, no timer due within half a second and no ticker of 250 ms or less drawing; so a
 view still decoding its answer is drawn once it is done, never as it loads. `--keys` takes key names, `click:<words>`
 for a click on the region that shows those words, `drag:<x0>-<x1>` for a drag across those cells of the time range's
-strip, `wheel:<n>`, and `text:<words>` for what a field that takes typing holds. `frameText(frame, {ansi})` draws a
+strip, `wheel:<n>` (the list that has the keys) and `wheel:<n>@<words>` (the wheel over the first row that shows those
+words), and `text:<words>` for what a field that takes typing holds. `frameText(frame, {ansi})` draws a
 frame's rows as text in the kit itself.
 
 ```

@@ -834,8 +834,9 @@ async def draw_text(c: str, slug: str, *, cols: int = 120, rows: int = 40, keys:
     """The view `slug` of workspace `c` drawn as text at `cols` × `rows` (the panel's body), as it opens (not on what
     the analyst's last opening kept, and keeping nothing), after `keys` (key names, `click:<words>` for a click on the
     first hot region whose text holds those words, `drag:<x0>-<x1>` for a drag across those cells of the first region a
-    drag moves (the time range's strip), `wheel:<n>`, `text:<words>` for what a field that takes typing holds): what the
-    view checks and the reviewer read, with no Claude Code."""
+    drag moves (the time range's strip), `wheel:<n>` and `wheel:<n>@<words>` for the wheel over the first row that holds
+    those words, `text:<words>` for what a field that takes typing holds): what the view checks and the reviewer read,
+    with no Claude Code."""
     from . import views  # noqa: PLC0415
 
     views._bind_loop()
@@ -846,7 +847,9 @@ async def draw_text(c: str, slug: str, *, cols: int = 120, rows: int = 40, keys:
         for k in keys or []:
             ev = _event_of(k, frame)
             if ev is None:
-                raise TermViewError(f"no hot region shows {k[6:]!r}" if k.startswith("click:") else "no region takes a drag")
+                raise TermViewError(f"no hot region shows {k[6:]!r}" if k.startswith("click:")
+                                    else f"no row shows {k.partition('@')[2]!r}" if k.startswith("wheel:")
+                                    else "no region takes a drag")
             await p.event(ev)
             frame = await p.settle() or frame
         view = views.read_built(c, slug) or {}
@@ -928,7 +931,17 @@ def _event_of(k: str, frame: dict[str, Any]) -> dict[str, Any] | None:
                 return {"t": "drag", "i": i, "seq": frame.get("seq"), "x0": int(a or 0), "x1": int(b or 0)}
         return None
     if k.startswith("wheel:"):
-        return {"t": "wheel", "by": int(k[6:] or 0)}
+        # `wheel:<n>@<words>`: the wheel over the first row that shows those words, at their first cell, as the panel
+        # sends the cell under the pointer; `wheel:<n>` names no cell, and moves the list that has the keys
+        by, _, words = k[6:].partition("@")
+        ev: dict[str, Any] = {"t": "wheel", "by": int(by or 0)}
+        if not words:
+            return ev
+        for y, line in enumerate(frame.get("lines") or []):
+            text = "".join(s.get("s", "") for s in line)
+            if words in text:
+                return {**ev, "seq": frame.get("seq"), "x": text.index(words), "y": y}
+        return None
     if k.startswith("text:"):
         return {"t": "text", "value": k[5:]}
     return {"t": "key", "key": {"enter": "return", " ": "space"}.get(k, k)}

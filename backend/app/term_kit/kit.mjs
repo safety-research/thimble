@@ -590,6 +590,10 @@ const state = {
   sweeps: [], // each other part's choices (Filter by's, Rows'), in the order the program made them
   seers: [], // Color by's: a label another part turned on is seen, so it does not take the color (as the browser's)
   using: [], // the labels Filter by and Rows read, which Color by leaves on when it unchecks them
+  lists: [], // the lists the drawing being made drew, in order: the first is the main list
+  drawnLists: [], // those the last frame drew
+  focused: null, // the list ↑↓ and Enter move (the one last clicked, scrolled or chosen); null: the main list
+  areas: new Map(), // frame seq -> the rows each list (and each side pane) stood on in that frame (the last few)
 }
 
 function send(msg) {
@@ -663,10 +667,11 @@ function flush() {
   send({ t: 'frame', ...f })
 }
 
-/** The frame of the view as drawn now (what goes to thimble-term). */
-export function frame() {
+// the view drawn once by its draw function: the drawing, and the error it threw
+function paint() {
   const d = new Drawing(state.cols, state.rows)
   state.drawNo++
+  state.lists = []
   let error = state.error
   if (!error && state.drawFn) {
     try {
@@ -675,17 +680,38 @@ export function frame() {
       error = describe(e)
     }
   }
-  if (error) return errorFrame(error)
+  return { d, error }
+}
+
+/** The frame of the view as drawn now (what goes to thimble-term). */
+export function frame() {
+  let { d, error } = paint()
+  // the list that had the keys is not drawn now (its side pane closed): the main list has them, drawn again so that it
+  // binds them
+  if (!error && state.focused && !state.lists.includes(state.focused)) {
+    state.focused = null
+    ;({ d, error } = paint())
+  }
+  if (error) {
+    state.drawnLists = []
+    return errorFrame(error)
+  }
+  state.drawnLists = state.lists.slice()
+  switchKey(d)
   keyList(d)
   overlay(d)
   const seq = ++state.frameSeq
   state.binds = d.binds.filter((b) => b.keys.length)
   state.typer = d.typer
   const lines = d.lines.slice(0, state.rows)
-  const hits = d.hits.filter((h) => h.y < lines.length && h.x1 > h.x0)
+  const shown = d.hits.filter((h) => h.y < lines.length && h.x1 > h.x0)
+  // the rows a list stands on (`wheel`) are no hot region: the wheel and a click there find the list (listAt)
+  const hits = shown.filter((h) => !h.wheel)
   for (const h of hits) if (h.cursor === undefined && !h.row && chartCells(lines[h.y], h.x0, h.x1)) h.cursor = true
   state.hits.set(seq, hits)
+  state.areas.set(seq, shown.filter((h) => h.wheel))
   for (const k of [...state.hits.keys()]) if (k < seq - 4) state.hits.delete(k)
+  for (const k of [...state.areas.keys()]) if (k < seq - 4) state.areas.delete(k)
   const keys = [...new Set(state.binds.flatMap((b) => b.keys))]
   const shownBinds = d.typer ? [] : hintBinds(state.binds)
   const hints = d.typer ? d.typer.hints.slice() : shownBinds.map((b) => `${keyWords(b.keys)} ${b.words}`)
@@ -725,6 +751,34 @@ function hintBinds(binds) {
   const named = namedBinds(binds)
   const own = named.filter((b) => b.own && !isMove(b.keys)).slice(0, OWN_HINTS)
   return named.filter((b) => isMove(b.keys) || b.move || own.includes(b) || b.list)
+}
+
+// The keys of the lists (docs/terminal-views.md, "Keys"): ↑↓, Enter and `a` move the one list that has them, the one
+// the analyst last clicked or scrolled with the wheel or the program last chose a row of, else the main list, the first
+// the frame draws; where the frame draws two lists or more, `l` gives them to the next, and `?` alone names it.
+const SWITCH = 'l'
+
+// the list that has the keys among `lists` (a frame's)
+function keyed(lists) {
+  return state.focused && lists.includes(state.focused) ? state.focused : lists[0] || null
+}
+
+function switchKey(d) {
+  const lists = state.lists.slice()
+  if (lists.length < 2 || d.binds.some((b) => b.keys.includes(SWITCH))) return
+  kitKey(d, SWITCH, lists.length === 2 ? 'to choose in the other list' : 'to choose in the next list', () => {
+    state.focused = lists[(lists.indexOf(keyed(lists)) + 1) % lists.length]
+  })
+}
+
+// The list under a cell of frame `seq` (the last, when that one is gone): the innermost whose rows the cell is on (a
+// list in another's details, a list in a side pane before the pane), or for the wheel the innermost of them that has
+// rows out of view, so that the wheel over a list that shows every row moves the one around it
+function listAt(seq, x, y, wheel) {
+  const areas = state.areas.get(seq) || state.areas.get(state.frameSeq) || []
+  const at = Math.max(0, x)
+  const under = areas.filter((a) => a.y === y && at >= a.x0 && at < a.x1).map((a) => a.wheel)
+  return (wheel && under.find((l) => l.scrolls)) || under[0] || null
 }
 
 // `?` and the list it opens: every key the frame binds with its words, in a frame over the view's top rows, while the
@@ -953,7 +1007,9 @@ export function keep(key, value) {
   })
 }
 
-/** `fn(by)` for the wheel over the view (rows, positive down); the list moves its rows with it. */
+/** `fn(by, at)` for the wheel over the view (rows, positive down), `at` the cell under the pointer `{x, y}` (from A0
+ *  and the view's first row; null when the panel did not say), for a part of the program's own that scrolls; the list
+ *  under the pointer moves its rows by itself. */
 export function onWheel(fn) {
   state.wheelFns.push(fn)
 }
@@ -988,6 +1044,10 @@ export function handle(msg) {
       // a click closes the list of keys, and acts where the list did not stand over it
       state.keysOpen = false
       if (!h) break
+      // a click on a list's rows, its track or its details gives it the keys, before the click acts (which may choose a
+      // row of another list, which then has them)
+      const l = listAt(msg.seq, h.x0 + (Number(msg.x) || 0), h.y, false)
+      if (l) state.focused = l
       gesture(msg.n, () => {
         if (msg.t === 'drag' && h.drag) h.drag(Number(msg.x0) || 0, Number(msg.x1) || 0)
         else if (h.on) h.on(Math.max(0, (Number(msg.x) || 0)))
@@ -998,9 +1058,20 @@ export function handle(msg) {
       // the panel's field changed: its whole text, as the analyst edited it
       if (state.typer && state.typer.onText) gesture(msg.n, () => state.typer.onText(String(msg.value ?? '').slice(0, 2000)))
       break
-    case 'wheel':
-      for (const fn of state.wheelFns) fn(Number(msg.by) || 0)
+    case 'wheel': {
+      // the wheel moves the rows of the list under the pointer alone (`x` `y` the frame's cell, its margin's two
+      // cells counted, as a click's), which then has the keys; with no cell (`thimble view text`'s `wheel:<n>`), those
+      // of the list that has the keys
+      const by = Number(msg.by) || 0
+      const at = Number.isFinite(msg.y) ? { x: (Number(msg.x) || 0) - 2, y: msg.y } : null
+      const l = at ? listAt(msg.seq, at.x, at.y, true) : keyed(state.drawnLists)
+      if (l) {
+        l.scroll(by)
+        if (at) state.focused = l
+      }
+      for (const fn of state.wheelFns) fn(by, at)
       break
+    }
     case 'answer': {
       const p = state.pending.get(msg.id)
       if (!p) break
@@ -1065,7 +1136,8 @@ export const __driver = {
       frameSeq: 0, ack: 0, gesture: null, binds: [], hits: new Map(), typer: null, pending: new Map(), fetchId: 0, scheduled: false,
       lastSent: '', openers: [], labelFns: [], resets: [], pageReset: null, stateTimer: false, wheelFns: [], error: null, textMode: '',
       lastOpen: null, colorBys: [], colour: null, drawNo: 0, answered: 0, labelWants: [], holds: [], rehome: [], keysOpen: false,
-      drawing: false, again: false, afterDraw: [], colourSweep: null, sweeps: [], seers: [], using: [],
+      drawing: false, again: false, afterDraw: [], colourSweep: null, sweeps: [], seers: [], using: [], lists: [],
+      drawnLists: [], focused: null, areas: new Map(),
     })
     openMenu = null
     labelKeys = { of: null, map: new Map() }
@@ -2440,8 +2512,9 @@ export function maxBin(scale, groups, time = (it) => it.t) {
 /**
  * A list of records with a chosen row (`❯` and the accent), its details in place under it or in a side pane beside it,
  * and the colored track at its right edge when it is taller than its room (docs/terminal-views.md, "The list"). ↑↓
- * choose, Enter or a click opens and closes the chosen row's details, `a` asks a side thread about it; the wheel moves
- * the rows. `span(time)` gives the times of the rows in view, which a lanes part marks on the overview.
+ * choose, Enter or a click opens and closes the chosen row's details, `a` asks a side thread about it, while the list
+ * has the keys (SWITCH); the wheel over it moves its rows. `span(time)` gives the times of the rows in view, which a
+ * lanes part marks on the overview.
  *
  * opts: key(item) its identity; enter (the hint's words, `to open`).
  */
@@ -2467,10 +2540,19 @@ export function list(opts = {}) {
     for (let i = itemAtLine(L.off, L.n, top); i < L.n && L.off[i] < top + L.height; i++) if (!L.items[i].heading && L.off[i + 1] > top) out.push(L.items[i])
     return out
   }
-  onWheel((by) => {
-    s.top = Math.max(0, s.top + by)
-    s.free = true
-  })
+  // the list as the frame knows it: the wheel over its rows moves them (listAt); `scrolls` while rows are out of view
+  const me = {
+    scrolls: false,
+    scroll(by) {
+      s.top = Math.max(0, s.top + by)
+      s.free = true
+    },
+  }
+  // the program chose a row (a citation, a lane's click): the list has the keys; a choice made while the view draws
+  // keeps them where they are
+  const take = () => {
+    if (!state.drawing) state.focused = me
+  }
   const api = {
     get chosen() {
       return s.chosen
@@ -2478,17 +2560,19 @@ export function list(opts = {}) {
     get open() {
       return s.open
     },
-    /** Choose the item with this key (and show it). */
+    /** Choose the item with this key (and show it); the list has the keys. */
     choose(key) {
       s.chosen = key
       s.free = false
+      take()
       redraw()
     },
-    /** Open (or with `false`, close) the details of the item with this key, and choose it. */
+    /** Open (or with `false`, close) the details of the item with this key, and choose it; the list has the keys. */
     show(key, on = true) {
       s.chosen = key
       s.open = on ? key : null
       s.free = false
+      take()
       redraw()
     },
     /** The chosen item among those last drawn. */
@@ -2523,6 +2607,7 @@ export function list(opts = {}) {
     draw(d, o = {}) {
       const items = o.items || []
       s.items = items
+      const yTop = d.y
       // what the list shows, named over it: the run, the session or the selection, and how many
       if (o.title) {
         const tr = d.row()
@@ -2537,7 +2622,11 @@ export function list(opts = {}) {
         const open = items.find((it) => !it.heading && keyOf(it) === o.side.key)
         if (open) {
           const rest = { ...o, title: null, side: null, sideOpen: o.side }
+          const yRows = d.y
           o.side.draw(d, (dl) => api.draw(dl, rest), (ds) => (o.detail ? o.detail(open, ds) : null), { title: o.sideTitle ? o.sideTitle(open) : open.ref ? placeWords(open.ref) : '' })
+          // the title over the list and the pane is the list's, for the wheel
+          if (!state.lists.includes(me)) return
+          for (let y = yTop; y < yRows; y++) d.hits.push({ y, x0: 0, x1: d.cols, wheel: me })
           return
         }
       }
@@ -2555,6 +2644,10 @@ export function list(opts = {}) {
         d.row().gap(2).add(o.empty || 'none', { d: true }).end()
         return
       }
+      // the list has the keys when the analyst or the program gave it them, else when it is the first the frame draws
+      // (one that had them and is not drawn now gives them to the first: frame)
+      if (!state.lists.includes(me)) state.lists.push(me)
+      const hasKeys = state.focused ? state.focused === me : state.lists[0] === me
       if (!pickable.some((it) => keyOf(it) === s.chosen)) s.chosen = keyOf(pickable[0])
       if (s.open !== null && !pickable.some((it) => keyOf(it) === s.open)) s.open = null
       const colour = o.colour
@@ -2679,23 +2772,29 @@ export function list(opts = {}) {
         s.free = true
       })
       s.rows = height
+      // the rows the list stands on, from its title to its last row in view, its track too: the wheel there moves them,
+      // a click there gives it the keys (listAt); after its rows' hits, so that a list in a row's details comes first
+      me.scrolls = total > height
+      for (let y = yTop; y < y0 + k; y++) d.hits.push({ y, x0: 0, x1: d.cols, wheel: me })
       const step = (by) => {
         const keys = pickable.map(keyOf)
         const i = keys.indexOf(s.chosen)
         s.chosen = keys[Math.max(0, Math.min(keys.length - 1, i + by))]
         s.free = false
       }
-      kitKey(d, ['up', 'down'], 'to choose', (k) => step(k === 'up' ? -1 : 1))
-      const isOpen = pane ? pane.key !== null && pane.key === s.chosen : s.open !== null && s.open === s.chosen
-      kitKey(d, 'return', isOpen ? 'to close' : opts.enter || 'to open', () => {
-        const it = api.item()
-        if (it) toggle(it)
-      })
-      if (o.ask) kitKey(d, 'a', 'to ask', () => {
-        const it = api.item()
-        const q = it && o.ask(it)
-        if (q) ask(q.ref, q.text)
-      })
+      if (hasKeys) {
+        kitKey(d, ['up', 'down'], 'to choose', (k) => step(k === 'up' ? -1 : 1))
+        const isOpen = pane ? pane.key !== null && pane.key === s.chosen : s.open !== null && s.open === s.chosen
+        kitKey(d, 'return', isOpen ? 'to close' : opts.enter || 'to open', () => {
+          const it = api.item()
+          if (it) toggle(it)
+        })
+        if (o.ask) kitKey(d, 'a', 'to ask', () => {
+          const it = api.item()
+          const q = it && o.ask(it)
+          if (q) ask(q.ref, q.text)
+        })
+      }
       function toggle(it) {
         const key = keyOf(it)
         if (pane) {
@@ -3074,12 +3173,21 @@ export function side(opts = {}) {
         hr.right('close', {}, { on: () => api.hide(), tip: 'close the details' })
         hr.end()
       }
+      // the pane's rows, drawn by `right`: where it draws a list, the wheel over the pane's other rows (its title, its
+      // facts) moves that list, and a click there gives it the keys (listAt), as the wheel over a browser's side panel
+      // scrolls it
+      const pane = (R) => {
+        const before = state.lists.length
+        head(R)
+        right(R)
+        const own = state.lists[before]
+        if (own) for (let y = 0; y < R.lines.length; y++) R.hits.push({ y, x0: 0, x1: R.cols, wheel: own })
+      }
       if (d.cols - w - 3 >= LIST_MIN) {
         const L = new Drawing(d.cols - w - 3, rows, d, 0)
         const R = new Drawing(w, rows, d, 0)
         left(L)
-        head(R)
-        right(R)
+        pane(R)
         const y0 = d.y
         const n = Math.min(rows, Math.max(L.lines.length, R.lines.length))
         for (let y = 0; y < n; y++) {
@@ -3103,8 +3211,7 @@ export function side(opts = {}) {
         d.put(L, 0, Math.min(top, L.lines.length))
         d.rule()
         const R = d.inner(0, Math.max(1, rows - top - 1))
-        head(R)
-        right(R)
+        pane(R)
         d.put(R, 0, Math.min(R.rows, R.lines.length))
       }
       kitKey(d, 'backspace', 'to close the details', () => api.hide())

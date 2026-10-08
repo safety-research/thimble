@@ -818,6 +818,130 @@ describe('the list', () => {
     expect(text().some((r: string) => r.startsWith('    more on event 7'))).toBe(true)
   })
 
+  // the frame's rows of a list's items, by their words (`page 3`, `rev 12`), and the first of them in view
+  const shownOf = (word: string) => text().flatMap((r: string) => (new RegExp(`${word} (\\d+)`).exec(r) ? [Number(new RegExp(`${word} (\\d+)`).exec(r)![1])] : []))
+  // the wheel over the frame's row that shows `words`, as thimble-term sends it (the cell under the pointer, its margin
+  // counted), or with no cell
+  async function wheel(by: number, words?: string) {
+    const f = last()
+    const y = words ? text(f).findIndex((r: string) => r.includes(words)) : -1
+    if (words) expect(y, `a row shows ${words}`).toBeGreaterThanOrEqual(0)
+    kit.handle({ t: 'wheel', by, n: ++n, ...(words ? { seq: f.seq, x: text(f)[y].indexOf(words), y } : {}) })
+    await tick()
+  }
+
+  test('two lists in one view (the pages, and under them a page\'s revisions): the wheel moves the rows of the list under the pointer alone, which then has ↑↓ and Enter; a click gives a list the keys; `l` gives them to the other, named in `?` alone; else the main list has them', async () => {
+    init({ cols: 60, rows: 24 })
+    const pages = kit.list({ key: (p: any) => p.id })
+    const revs = kit.list({ key: (r: any) => r.id, enter: 'to read it' })
+    const P = Array.from({ length: 40 }, (_, i) => ({ id: i, text: `page ${i}` }))
+    const R = Array.from({ length: 40 }, (_, i) => ({ id: i, text: `rev ${i}` }))
+    let open = true
+    kit.draw((d: any) => {
+      pages.draw(d, { title: 'pages', count: 40, items: P, height: 8, row: (p: any, r: any) => r.add(p.text) })
+      if (!open) return
+      d.rule()
+      d.line([{ s: 'dse/StartSeite', b: true }])
+      revs.draw(d, { items: R, row: (x: any, r: any) => r.add(x.text) })
+    })
+    await tick()
+    // the wheel over the revisions moves them, and the pages stay where they are
+    await wheel(5, 'rev 3')
+    expect(shownOf('page')[0]).toBe(0)
+    expect(shownOf('rev')[0]).toBe(5)
+    // the revisions have ↑↓ and Enter now
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to read it', '? for all keys'])
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([0, 1])
+    // the wheel over the pages' title, their rows or their track moves them alone
+    await wheel(3, 'pages')
+    await wheel(2, 'page 6')
+    expect(shownOf('page')[0]).toBe(5)
+    expect(shownOf('rev')[0]).toBe(1)
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([1, 1])
+    // the wheel over no list (the rule, the page's name) moves none
+    await wheel(4, 'dse/StartSeite')
+    expect([shownOf('page')[0], shownOf('rev')[0]]).toEqual([1, 1])
+    // with no cell (`thimble view text`'s wheel:<n>), the list that has the keys
+    await wheel(3)
+    expect([shownOf('page')[0], shownOf('rev')[0]]).toEqual([4, 1])
+    // a click on a revision chooses it and gives the revisions the keys
+    await click('rev 9')
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([1, 10])
+    // `l` gives the keys to the other list: `?` names it, the hint row does not
+    expect(last().keys).toContain('l')
+    expect(last().hints.join(' · ')).not.toContain('other list')
+    await key('?')
+    expect(text().some((r: string) => /l +to choose in the other list/.test(r))).toBe(true)
+    await key('l')
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([2, 10])
+    await key('l')
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([2, 11])
+    // the revisions gone (the page closed), the main list has the keys again, and `l` is bound no more
+    open = false
+    kit.redraw()
+    await tick()
+    expect(last().keys).not.toContain('l')
+    await key('down')
+    expect(pages.chosen).toBe(3)
+    // drawn again, the main list, the first drawn, has the keys until another is clicked, scrolled or chosen
+    open = true
+    kit.redraw()
+    await tick()
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to open', '? for all keys'])
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([4, 11])
+    // the program choosing a row gives its list the keys (a citation opened it)
+    revs.show(20)
+    await tick()
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([4, 21])
+  })
+
+  test('a list in a side pane: the wheel over the pane\'s rows moves its list, the wheel over the list beside it that list; a list in a row\'s details that shows every row passes the wheel to the list around it', async () => {
+    init({ cols: 100, rows: 20 })
+    const pane = kit.side({ key: 'page', width: 0.5 })
+    const pages = kit.list({ key: (p: any) => p.id })
+    const revs = kit.list({ key: (r: any) => r.id })
+    const P = Array.from({ length: 40 }, (_, i) => ({ id: i, text: `page ${i}` }))
+    const R = Array.from({ length: 40 }, (_, i) => ({ id: i, text: `rev ${i}` }))
+    kit.draw((d: any) => pages.draw(d, {
+      items: P,
+      side: pane,
+      sideTitle: (p: any) => p.text,
+      row: (p: any, r: any) => r.add(p.text),
+      detail: (p: any, dd: any) => {
+        dd.line(`facts of ${p.text}`)
+        revs.draw(dd, { items: R, row: (x: any, r: any) => r.add(x.text) })
+      },
+    }))
+    pane.show(0)
+    await tick()
+    expect(text()[1]).toContain('│ facts of page 0')
+    await wheel(4, 'facts of page 0')
+    expect([shownOf('page')[0], shownOf('rev')[0]]).toEqual([0, 4])
+    await wheel(3, 'page 2')
+    expect([shownOf('page')[0], shownOf('rev')[0]]).toEqual([3, 4])
+    // details in place, a list in them that shows every row: the wheel over it moves the list around it
+    init({ cols: 60, rows: 12 })
+    const outer = kit.list({ key: (p: any) => p.id })
+    const inner = kit.list({ key: (r: any) => r.id })
+    kit.draw((d: any) => outer.draw(d, {
+      items: P,
+      row: (p: any, r: any) => r.add(p.text),
+      detail: (p: any, dd: any) => inner.draw(dd, { items: R.slice(0, 3), row: (x: any, r: any) => r.add(x.text) }),
+    }))
+    outer.show(0)
+    await tick()
+    expect([shownOf('page')[0], shownOf('rev')[0]]).toEqual([0, 0])
+    await wheel(2, 'rev 1')
+    expect([shownOf('page')[0], shownOf('rev')[0]]).toEqual([1, 1])
+  })
+
   test('a row its details keep in view (d.focus) shows however far down the details it is, with the chosen row where both fit', async () => {
     init({ rows: 10 })
     const list = kit.list({ key: (e: any) => e.id })

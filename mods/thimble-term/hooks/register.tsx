@@ -34,7 +34,7 @@ import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThread
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, relayKey, relayMove, scrollPending, wheelWindow } from './panel'
+import { ANSWER_ELEMENT, RELAY, docEditMessage, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openHomeNew, openLabel, openThread, openView, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 // the file browser and a file, drawn by a module of their own (panel.tsx drawsView, term.ts loadsView)
 import './filesview'
@@ -1037,9 +1037,10 @@ export const register: Register = on => {
   // over any other panel the pane scrolls
   on('ui.scroll', { requestId: PANEL }, async ($, e, next) => {
     if (!rt.sc || !e.pointer || e.origin.kind !== 'person') return next(e)
-    // over a terminal view the wheel is the view's: its list moves its rows
+    // over a terminal view the wheel is the view's: the list under the pointer moves its rows, so it goes with the
+    // frame's cell there
     if (openViewState()?.id && (await cxOf($).panel())?.view === 'view') {
-      void sendEvent(cxOf($), { t: 'wheel', by: e.by })
+      void sendEvent(cxOf($), { t: 'wheel', by: e.by, ...viewWheelAt(e.pointer) })
       return {}
     }
     if (!wheelWindow(e.by)) return next(e)
