@@ -12,9 +12,10 @@ new change to the card cancels a running check and starts the next. At most READ
 2. Critique: the `verify` role's model reads the question, takeaway, resolved links, code, the work that led to the
    card (context.render) and the picture, names what fails each criterion, and gives the replacement card.
 3. Replace: the parts that differ and that the check may change (checkstore.fixable) are tried on a copy of the card
-   and kept only when the code runs clean and the card draws, as one undo step with actor `check`. New code runs on the
-   card's kernel, and in terminal mode, where the check runs in the shim, through `thimble-run trial` in main's
-   sandbox, as a card run would (cardrun.trial).
+   and kept only when the code runs clean and the card draws, as one undo step with actor `check`. A card that fails no
+   criterion stays as it is, unless its links check found a value its code types in and the replacement's code
+   changes (_problems). New code runs on the card's kernel, and in terminal mode, where the check runs in the shim,
+   through `thimble-run trial` in main's sandbox, as a card run would (cardrun.trial).
 A check past check_timeout(effort) ends `error`; waits for API capacity are left out of that time. A trial run on the
 kernel is always settled, even when the check is stopped mid-trial. Timings go to
 workspaces/<c>/card-checks/timings.jsonl and pictures under workspaces/<c>/card-checks/<card>/. A refused reading
@@ -510,6 +511,7 @@ async def _check(run: _Run) -> None:
         _gone(run)  # the card changed while the model read it; a change by a tool began the next check
         return
     patch = _patch(cell, card, notebook.get_cell(c, cid, full_outputs=True), c=c)
+    failed = _problems(cell, failed, patch)
     if patch and not failed:
         # a card that meets every criterion stays as it is: the prompt asks for changes only to what fails one
         log.info("card check: card:%s failed no criterion, so its replacement's changes to %s were not applied", cid,
@@ -771,6 +773,22 @@ def _failed(assessment: list[dict[str, Any]]) -> list[str]:
     return [a["problem"] for a in assessment if a["problem"]]
 
 
+# the fix's reason when a typed link was the card's one problem (typed_links)
+TYPED_REASON = "The card shows {values} typed in its code, {lines}, not computed."
+
+
+def _problems(cell: dict[str, Any], failed: list[str], patch: dict[str, Any]) -> list[str]:
+    """What was wrong, for the replacement: the criteria the card failed, else, when its links check found a value its
+    code types in (typed_links) and the replacement's code changes, that value. Such a card fails no criterion, and the
+    replacement may compute the value, so it is applied for that reason."""
+    typed = typed_links(cell)
+    if failed or not typed or "code" not in patch:
+        return failed
+    values = ", ".join(dict.fromkeys(str(t.get("value") or "") for t in typed))
+    lines = list(dict.fromkeys(str(t.get("line") or "") for t in typed))
+    return [TYPED_REASON.format(values=values, lines=("line " if len(lines) == 1 else "lines ") + ", ".join(lines))]
+
+
 async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], failed: list[str],
                    timing: dict[str, Any]) -> None:
     """Apply the replacement once, kept only when its code runs clean and the replaced card draws; otherwise the card stays,
@@ -943,13 +961,24 @@ def fit_image(png: bytes, max_edge: int = MAX_EDGE) -> bytes:
     return out.getvalue()
 
 
+def typed_links(cell: dict[str, Any]) -> list[dict[str, Any]]:
+    """The card's citations whose value its code types in rather than computes, as its links check recorded them
+    (verify.py's `links.typed`: {value, ref, line, why})."""
+    v = cell.get("verification") if isinstance(cell.get("verification"), dict) else {}
+    links = v.get("links") if isinstance(v.get("links"), dict) else {}
+    return [t for t in links.get("typed") or [] if isinstance(t, dict) and t.get("ref")]
+
+
 def _citations_text(c: str, cell: dict[str, Any]) -> str:
     """What each of the card's links resolves to, one line each: the value the source shows and its excerpt, or why
-    the link does not resolve."""
+    the link does not resolve; a link to a value the code types in says so (typed_links)."""
     refs = render.cited_refs(cell)
     if not refs:
         return ""
     resolved = render.resolve_all(c, refs)
+    typed: dict[str, list[str]] = {}
+    for t in typed_links(cell):
+        typed.setdefault(str(t["ref"]), []).append(f"{t.get('value')} {t.get('why')}".strip())
     lines = []
     for ref in refs:
         r = resolved.get(ref) or {}
@@ -960,6 +989,8 @@ def _citations_text(c: str, cell: dict[str, Any]) -> str:
         meta = r.get("meta") if isinstance(r.get("meta"), dict) else {}
         shown = meta.get("value") or meta.get("shown")
         bit = f"{ref} shows {shown}" if shown not in (None, "") else ref
+        if typed.get(ref):
+            bit += ", " + "; ".join(typed[ref])
         lines.append(f"- {bit}: {excerpt[:CITE_CHARS]}" if excerpt else f"- {bit}")
     return "\n".join(lines)
 

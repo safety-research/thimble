@@ -2,7 +2,8 @@
 `verification {exec_count, links, attempts, note, status}`. A deterministic pass links a takeaway's numbers to the
 places the outputs show them, and a job then checks every value ref by execution, heals moved ones and records what
 is
-linked, quiet or broken. No model runs here."""
+linked, quiet or broken, and what is typed: a value its card's code types in rather than computes
+(cite.typed_citations). No model runs here."""
 from __future__ import annotations
 
 import asyncio
@@ -114,30 +115,61 @@ def _link_now(c: str, cell: dict, v: dict, *, rerun: bool = False) -> None:
         v["links"] = {"status": "unchecked", "resolved": [], "unresolved": [], "broken": [], "checked": False,
                       "note": "the number resolver failed; the takeaway stands as written"}
         return
-    cell["takeaway"] = res.annotated
+    own = {"id": cid, "code": cell.get("code"), "outputs": outputs}
+    typed = _typed(cid, res.annotated, lambda x: own if x == cid else None)
+    cell["takeaway"] = typed.text
     # a value ref re-pointed at the one place in this cell that holds its value keeps the place the text cited (`from`),
     # so the chip says the value was found elsewhere
     resolved = [{"value": l.token, "ref": l.ref, "tier": l.tier, **({"how": heal.CELL, "from": res.moved[(l.token, l.ref)]} if (l.token, l.ref) in res.moved else {})}
                 for l in res.links]
+    resolved, typed_links = _apply_typed(typed, resolved)
     unresolved = list(dict.fromkeys(res.unresolved))
     quiet = [{"value": l.token, "ref": l.ref, "why": heal.WHY_GONE.format(value=l.token) if rerun else heal.WHY_MOVED, "gone": rerun}
              for l in res.stale]
-    links = {"status": "pending", "resolved": resolved, "unresolved": unresolved, "broken": [], "quiet": quiet, "checked": False}
+    links = {"status": "pending", "resolved": resolved, "unresolved": unresolved, "broken": [], "quiet": quiet,
+             "typed": typed_links, "checked": False}
     if not CHECK_JOBS:  # the deterministic verdict stands as the record; nothing is checked by execution
-        links["status"] = _links_status(resolved, unresolved, [], _numbers(res.annotated) or resolved or quiet, quiet=quiet)
+        links["status"] = _links_status(resolved, unresolved, [], _numbers(typed.text) or resolved or quiet or typed_links,
+                                        quiet=quiet, typed=typed_links)
         v["links"] = links
         return
-    if not unresolved and not quiet and not _value_refs(res.annotated) and not _bare_refs(res.annotated):
-        links["status"] = "unchecked" if not _numbers(res.annotated) else "ok"
+    if not unresolved and not quiet and not _value_refs(typed.text) and not _bare_refs(typed.text):
+        links["status"] = "unchecked" if not _numbers(typed.text) else "ok"
         links["checked"] = True
         v["links"] = links
         return
     v["links"] = links
-    if _runnable(cell) or _value_refs(res.annotated) or _bare_refs(res.annotated):
+    if _runnable(cell) or _value_refs(typed.text) or _bare_refs(typed.text):
         _enqueue_links(c, cell, _links_version(cell))
     else:  # an errored or silent cell with numbers in its takeaway: nothing here can vouch for them
-        links["status"] = _links_status(resolved, unresolved, [], True)
+        links["status"] = _links_status(resolved, unresolved, [], True, typed=typed_links)
         links["checked"] = True
+
+
+def _typed(cid: str, text: str, load: Any) -> cite.Typed:
+    """cite.typed_citations over a takeaway; a problem there leaves the takeaway's links as they are."""
+    try:
+        return cite.typed_citations(text, load)
+    except Exception:  # noqa: BLE001
+        log.exception("verify: the typed pass failed for cell %s", cid)
+        return cite.Typed(text=text)
+
+
+def _apply_typed(typed: cite.Typed, resolved: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(the linked entries, the typed ones) after cite.typed_citations: an entry it re-pointed off a typed place takes
+    the place the code computed (`how` computed, `from` the typed place), and an entry it left at a typed place is
+    typed, no longer linked."""
+    left = {(t["value"], t["ref"]) for t in typed.typed}
+    by_from = {(value, frm): to for (value, to), frm in typed.moved.items()}
+    out: list[dict] = []
+    for e in resolved:
+        key = (e.get("value"), e.get("ref"))
+        if key in left:
+            continue
+        if key in by_from:
+            e = {**e, "ref": by_from[key], "tier": 2, "how": cite.COMPUTED, "from": key[1]}
+        out.append(e)
+    return out, list(typed.typed)
 
 
 def _links_version(cell: dict) -> str:
@@ -375,14 +407,19 @@ async def _links_job(c: str, cid: str, version: str) -> None:
         why = await _ref_check(corpus, ref, None)
         if why is not None:
             quiet.append({"value": None, "ref": ref, "why": why})
+    # a linked value its card's code types in rather than computes moves to a place the code computed, or is typed
+    typed = _typed(cid, text, load)
+    text = typed.text
+    resolved, typed_links = _apply_typed(typed, resolved)
     unresolved = [t for t in (stored.get("unresolved") or []) if isinstance(t, str)] or _unlinked(text)
     if text != raw:  # tokens were put right or unwrapped: what is unlinked is read off the text as it stands
         unresolved = _unlinked(text)
     still = unresolved  # a number no output shows stays unlinked, for the agent that wrote the takeaway to cite
     # a re-run's orphan that found no home keeps its cause on the grey mark ("was 44 in an earlier run")
     changes = [ch.record() for ch in healed.changes if ch.how != heal.KEPT]
-    links = {"status": _links_status(resolved, still, broken, _numbers(text) or resolved, quiet=quiet), "resolved": resolved,
-             "unresolved": still, "broken": broken, "quiet": quiet, "checked": True,
+    links = {"status": _links_status(resolved, still, broken, _numbers(text) or resolved or typed_links, quiet=quiet,
+                                     typed=typed_links), "resolved": resolved,
+             "unresolved": still, "broken": broken, "quiet": quiet, "typed": typed_links, "checked": True,
              "healed": {"version": heal.version(text, [x for x in (load(i) for i in heal.cited_cell_ids(text)) if x]),
                         "relinks": relinks, "changes": changes, "ms": int((time.monotonic() - t0) * 1000)}}
 
@@ -404,11 +441,13 @@ async def _links_job(c: str, cid: str, version: str) -> None:
     _emit_cell(c, saved, "verified")
 
 
-def _links_status(resolved: list, unresolved: list, broken: list, had_numbers: Any, quiet: list | None = None) -> str:
-    """The word for a finished check from its counts: unchecked, ok, partial or unresolved."""
-    if not resolved and not unresolved and not broken and not quiet and not had_numbers:
+def _links_status(resolved: list, unresolved: list, broken: list, had_numbers: Any, quiet: list | None = None,
+                  typed: list | None = None) -> str:
+    """The word for a finished check from its counts: unchecked, ok, partial or unresolved. A value its card's code
+    types in (`typed`) is a problem, as a broken link is."""
+    if not resolved and not unresolved and not broken and not quiet and not typed and not had_numbers:
         return "unchecked"
-    if not unresolved and not broken and not quiet:
+    if not unresolved and not broken and not quiet and not typed:
         return "ok"
     if resolved:
         return "partial"

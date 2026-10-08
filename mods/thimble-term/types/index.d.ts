@@ -95,9 +95,10 @@ export type TermCard = {
 }
 
 /** A card's takeaway as thimble's links check left it (backend verify.py, the cell's `verification.links`): `pending`
- *  while it runs; then each citation it linked (`ok`) and each it found another value for (`broken`, with why and the
- *  value the place shows), by `<value>|<ref>`. */
-export type TermLinks = { pending: boolean; checked: boolean; ok: string[]; broken: { key: string; why: string; source: string }[] }
+ *  while it runs; then each citation it linked (`ok`), each it found another value for (`broken`, with why and the
+ *  value the place shows) and each whose value the card's code types in rather than computes (`typed`, with why), by
+ *  `<value>|<ref>`. */
+export type TermLinks = { pending: boolean; checked: boolean; ok: string[]; broken: { key: string; why: string; source: string }[]; typed: { key: string; why: string }[] }
 
 /** A citation as checked against `thimble state resolve`: ok (the place holds the value, or the citation shows none),
  *  differs (the place resolves, the value is not there), missing (the place does not resolve), pending (not checked

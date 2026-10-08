@@ -50,9 +50,10 @@ export function chipName(c: Citation): string {
 /** The glyph of a citation being worked on: running (SPEC.md, "The visual system", section 5). */
 export const SPIN = '◌'
 
-/** A verification that failed: its script recomputed another value, crashed, printed no result, or was never written. */
+/** A verification that failed: its script recomputed another value, crashed, printed no result, or was never written;
+ *  or thimble's links check found the value typed in the card's code. */
 export function verifyFailed(verify: string | undefined): boolean {
-  return verify === 'refuted' || verify === 'error' || verify === 'missing'
+  return verify === 'refuted' || verify === 'error' || verify === 'missing' || verify === 'typed'
 }
 
 /** How a citation is drawn, from the resolver's status, its fix round's state and its verification's state. */

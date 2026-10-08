@@ -31,7 +31,7 @@ export type ThimbleCell = {
   check?: string | { id?: string; status?: string; reason?: string; phase?: string } | null
   regenerating_for?: string[]
   label_revs?: Record<string, number>
-  verification?: { status?: string; links?: { status?: string; checked?: boolean; resolved?: unknown[]; broken?: unknown[] } | null } | null
+  verification?: { status?: string; links?: { status?: string; checked?: boolean; resolved?: unknown[]; broken?: unknown[]; typed?: unknown[] } | null } | null
 }
 
 /** One run of a label as the concept keeps it: the records it ran over (`total`), those its scope holds
@@ -454,6 +454,7 @@ export function linksOf(cell: ThimbleCell): TermLinks | undefined {
     checked: Boolean(l.checked),
     ok: entries(l.resolved).map(key),
     broken: entries(l.broken).map(b => ({ key: key(b), why: String(b.why ?? ''), source: b.source === null || b.source === undefined ? '' : String(b.source) })),
+    typed: entries(l.typed).map(t => ({ key: key(t), why: String(t.why ?? '') })),
   }
 }
 
