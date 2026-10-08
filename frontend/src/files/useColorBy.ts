@@ -1,19 +1,25 @@
-// Color by's state in Files' Transcript and Table modes (colorChoice.ts): the file's keys from the server, the choice and the values
-// turned off kept per file, the labels that mark the file, each value's chip, and per record loaded its color and
-// whether it is hidden. A label the analyst turns on, here or anywhere in thimble, takes the color, as in a view's Color
-// by, but for one Filter by turns on (`quiet`), which keeps its own; choosing a label that is off turns it on.
+// Color by's state in Files' Transcript and Table modes (colorChoice.ts): the file's keys from the server, the choices,
+// the values turned off and the colors picked, kept per file, the labels that mark the file, each value's chip of the
+// first choice, and per record loaded its color and whether it is hidden. The choices go in order: the first colors the
+// records, each other one has a lane of the tracks (Reader). Checking a label that is off turns it on, and unchecking
+// one turns it off unless Filter by filters by it (`holds`). A label the analyst turns on anywhere else in thimble takes
+// the first place, as in a view's Color by: a key that was first gives way, a label there keeps its lane; but for one
+// Filter by turns on (`quiet`), which keeps its own.
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import type { Concept, LabelRow, SourceKeys, SourceRecord } from '../lib/types'
-import { chipOfKeyValue, chipOfLabel, choiceId, colorKeys, defaultChoice, keyChips, keyValue, labelChips, parseChoice, pickedChips, readColor, writeColor, type ColorChoice, type ColorKept, type ColorValue } from './colorChoice'
+import { chipOfKeyValue, chipOfLabel, choiceId, colorKeys, keptPicks, keyChips, keyValue, labelChips, pickedChips, picksOf, readColor, togglePick, withPicks, writeColor, type ColorChoice, type ColorKept, type ColorValue } from './colorChoice'
 import type { RecordColor } from './colorContext'
 import { isFilesLabel, marksOf } from './labels'
 import type { FilesLabels } from './useLabels'
 
 export interface ColorBy {
   keys: SourceKeys | null
+  /** the first choice, which colors the records; `off` for Off */
   choice: ColorChoice
+  /** every choice in order, the first the color and each other a lane of the tracks; none for Off */
+  picks: ColorChoice[]
   /** the labels over files that mark this file, on or off */
   fileLabels: Concept[]
   values: ColorValue[]
@@ -24,6 +30,7 @@ export interface ColorBy {
   chipOf: (rec: SourceRecord) => string | undefined
   /** the palette color (1 to 12) picked for a key's value, by value */
   picked: Readonly<Record<string, number>>
+  /** Off, or a key or a label checked after the other choices, or unchecked */
   choose: (c: ColorChoice) => void
   toggle: (value: string, alone: boolean) => void
   /** give a value a palette color: a label's as the label's own (Files and every view), a key's kept per file */
@@ -65,7 +72,9 @@ export function useSourceKeys(ws: string, path: string, on: boolean): SourceKeys
   return got?.path === path ? got.keys : null
 }
 
-export function useColorBy(ws: string, path: string, on: boolean, labels: FilesLabels, records: readonly SourceRecord[], rows: ReadonlyMap<string, ReadonlyMap<string, LabelRow>>, total: number | null, quiet?: RefObject<Set<string>>): ColorBy {
+const OFF: ColorChoice = { by: 'off' }
+
+export function useColorBy(ws: string, path: string, on: boolean, labels: FilesLabels, records: readonly SourceRecord[], rows: ReadonlyMap<string, ReadonlyMap<string, LabelRow>>, total: number | null, quiet?: RefObject<Set<string>>, holds?: RefObject<string | null>): ColorBy {
   const keys = useSourceKeys(ws, path, on)
   const [kept, setKept] = useState<ColorKept>(() => readColor(ws, path))
   const keep = useCallback(
@@ -77,17 +86,28 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
   )
   const fileLabels = useMemo(() => [...labels.byId.values()].filter((k) => isFilesLabel(k) && marksOf(k) !== 'file' && !k.trial && !!labels.presence.get(k.id)?.[path]), [labels.byId, labels.presence, path])
   const onIds = useMemo(() => new Set(labels.on.map((k) => k.id)), [labels.on])
-  // the choice kept, while it still stands (its key is the file's, its label is on), else the file's default
-  const choice = useMemo<ColorChoice>(() => {
-    const c = parseChoice(kept.by)
-    if (c?.by === 'off') return c
-    if (c?.by === 'label' && onIds.has(c.id) && fileLabels.some((k) => k.id === c.id)) return c
-    if (c?.by === 'key' && keys?.keys.some((k) => k.key === c.key)) return c
-    return defaultChoice(keys?.keys ?? [])
-  }, [kept.by, onIds, fileLabels, keys])
-  // a label deleted while the file is colored by it leaves Color by at Off, as a view's does (viewer_colour.js)
-  useEffect(() => bus.on('concepts', (e) => e.what === 'deleted' && kept.by === `l:${e.concept}` && keep({ ...kept, by: 'off' })), [kept, keep])
-  // a label turned on since the labels first came, that marks this file, takes the color
+  // a label holds as a choice while it is on and marks the file
+  const labelHolds = useCallback((id: string) => onIds.has(id) && fileLabels.some((k) => k.id === id), [onIds, fileLabels])
+  // the choices kept that still stand, else the key chosen last, else the file's default
+  const picks = useMemo(() => picksOf(kept, keys?.keys ?? [], labelHolds), [kept.by, kept.picks, kept.key, keys, labelHolds]) // eslint-disable-line react-hooks/exhaustive-deps
+  const choice = picks[0] ?? OFF
+  // a label deleted while it is one of the choices leaves them, and with none left Color by is Off, as a view's does
+  // (viewer_colour.js)
+  useEffect(
+    () =>
+      bus.on('concepts', (e) => {
+        if (e.what !== 'deleted') return
+        const gone = `l:${e.concept}`
+        const raw = keptPicks(kept)
+        if (!raw?.includes(gone)) return
+        const rest = raw.filter((x) => x !== gone)
+        keep({ ...kept, by: rest[0] ?? 'off', picks: rest })
+      }),
+    [kept, keep],
+  )
+  // the labels Color by itself turns on, which keep the place they were checked in
+  const mine = useRef(new Set<string>())
+  // a label turned on since the labels first came, that marks this file, takes the first place
   const seenOn = useRef<Set<string> | null>(null)
   const loaded = labels.all.length > 0
   useEffect(() => {
@@ -96,9 +116,15 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
     seenOn.current = onIds
     if (!before || !on) return
     const held = quiet?.current
-    const fresh = labels.on.filter((k) => !before.has(k.id) && fileLabels.some((f) => f.id === k.id) && !held?.has(k.id))
+    const fresh = labels.on.filter((k) => !before.has(k.id) && fileLabels.some((f) => f.id === k.id) && !held?.has(k.id) && !mine.current.has(k.id))
     held?.forEach((id) => onIds.has(id) && held.delete(id))
-    if (fresh.length) keep({ ...kept, by: `l:${fresh[fresh.length - 1].id}` })
+    mine.current.forEach((id) => onIds.has(id) && mine.current.delete(id))
+    if (!fresh.length) return
+    const id = fresh[fresh.length - 1].id
+    const now = picksOf(kept, keys?.keys ?? [], (x) => x !== id && labelHolds(x))
+    // a key that was the color gives way; a label there keeps its lane
+    const gave = now[0]?.by === 'key' ? now[0].key : undefined
+    keep(withPicks(kept, [{ by: 'label', id }, ...(gave ? now.slice(1) : now)], gave))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onIds, loaded])
   const id = choiceId(choice)
@@ -133,13 +159,19 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
   const { setFocus, toggle: toggleLabel, setColour } = labels
   const choose = useCallback(
     (c: ColorChoice) => {
-      if (c.by === 'label' && !onIds.has(c.id)) {
-        setFocus(c.id)
-        toggleLabel(c.id)
+      if (c.by === 'off') return keep(withPicks(kept, []))
+      const had = picks.some((p) => choiceId(p) === choiceId(c))
+      if (c.by === 'label') {
+        // checked while off, it is turned on; unchecked, it is turned off, unless Filter by filters by it
+        if (!had && !onIds.has(c.id)) {
+          mine.current.add(c.id)
+          setFocus(c.id)
+          toggleLabel(c.id)
+        } else if (had && onIds.has(c.id) && holds?.current !== c.id) toggleLabel(c.id)
       }
-      keep({ ...kept, by: choiceId(c) })
+      keep(withPicks(kept, togglePick(picks, c), !had && c.by === 'key' ? c.key : undefined))
     },
-    [onIds, setFocus, toggleLabel, keep, kept],
+    [picks, onIds, holds, setFocus, toggleLabel, keep, kept],
   )
   const toggle = useCallback(
     (value: string, alone: boolean) => {
@@ -176,6 +208,7 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
   return {
     keys,
     choice,
+    picks,
     fileLabels,
     values,
     off,

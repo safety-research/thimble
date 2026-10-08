@@ -4154,9 +4154,11 @@ def _filter_to(c: str, scope: str, concept: dict) -> dict:
     return chosen
 
 
-# the label colours by the names show_label takes (--label-1..12)
+# the label colours by the names show_label takes (--label-1..18): the twelve new values take, then red, purple and pink,
+# which a value takes only when the analyst asks for one (PICKS)
 COLOUR_NAMES = {"blue": 1, "orange": 2, "green": 3, "sky blue": 4, "olive": 5, "teal": 6, "brown": 7, "navy": 8,
-                "grass green": 9, "cerulean": 10, "chestnut": 11, "cyan": 12}
+                "grass green": 9, "cerulean": 10, "chestnut": 11, "cyan": 12, "red": 13, "dark red": 14, "purple": 15,
+                "dark purple": 16, "pink": 17, "dark pink": 18}
 
 
 def show_concept(c: str, id_or_name: str, on: bool | None, values: list[str] | None = None,

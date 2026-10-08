@@ -1,10 +1,10 @@
 // The reader's two tracks at its right edge, after a music or video editor's navigator and zoom bar (ReaderTracks).
 //
 // The overview track, at the left, is the whole file: its lines top to bottom in one lane, each pixel row in the color
-// of the Color by choice that most of its records take (a key's commonest value, a label's value most of the records
-// there have), or, with Color by off or no choice to make, the file's density (each bin's bytes) in grey; never two
-// colors side by side. Each other label that is on has a lane of its own beside it, in its own colors (laneWidth: the
-// lanes narrower as more come), named on hover; only the choice colors the zoomed track. At the overview's left the
+// of Color by's first choice that most of its records take (a key's commonest value, a label's value most of the records
+// there have), or, with Color by off or no choice to make, no color (a plain track); never two colors side by side. Each
+// other choice of Color by has a lane of its own beside it, in its own colors (laneWidth: the lanes narrower as more
+// come), named on hover; only the first choice colors the zoomed track. At the overview's left the
 // find's matches leave ticks in the ink, like cue points on a timeline, which say what is found on hover and go to the
 // first match on a click (a marker lane of another kind is drawn in grey, never in a color). Over the lane, a dark
 // frame exactly as wide as the track outlines what the reader shows; a drag of it scrubs the reader, a click elsewhere
@@ -453,8 +453,8 @@ function laneEdges(lead: number, n: number, dpr: number): [number, number][] {
   })
 }
 
-/** The overview's canvas: the marker lanes, then a lane of colors for the Color by choice and one for each other label
- * that is on. */
+/** The overview's canvas: the marker lanes, then a lane of colors for Color by's first choice and one for each other
+ * choice. */
 const OverviewCanvas = memo(function OverviewCanvas({ paint, lanes, markers }: { paint: OverviewPaint; lanes: readonly OverviewPaint[]; markers: readonly RulerColumn[] }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState<[number, number]>([0, 0])
@@ -508,7 +508,8 @@ const OverviewCanvas = memo(function OverviewCanvas({ paint, lanes, markers }: {
   return <canvas ref={ref} className="track-canvas" />
 })
 
-/** A lane of the overview for a label that is on but is not the Color by choice: its records in its own colors. */
+/** A lane of the overview for a choice of Color by past the first: its records in its own colors; `id` the choice's
+ * (colorChoice choiceId). */
 export interface TrackLane {
   id: string
   name: string
@@ -525,7 +526,7 @@ interface TracksProps {
   paint: OverviewPaint
   /** what the overview's first lane of colors shows, which its hover names */
   paintName?: string
-  /** a lane beside it for each other label that is on, in its own colors */
+  /** a lane beside it for each other choice of Color by, in its own colors */
   lanes?: readonly TrackLane[]
   /** a lane each, in grey or for the find's matches the ink: the reader gives the find's matches alone */
   markers: readonly RulerColumn[]
@@ -533,8 +534,8 @@ interface TracksProps {
   colorOf?: (line: number) => { color: string | null; title: string }
   onJump: (fraction: number) => void
   /** a click on the overview snapped to a patch of color: go to the first record in `value` (a key's rank, a label's
-   * value, as the paint gives them) on lines `from` to `to`, where the patch starts; `lane` the label's id for a lane of
-   * another label, null for the Color by choice's */
+   * value, as the paint gives them) on lines `from` to `to`, where the patch starts; `lane` the choice's id for the lane
+   * of a choice past the first, null for the first's */
   onSnap?: (from: number, to: number, value: number, lane: string | null) => void
   /** the fraction of the file at the reader's top to go to; `held` while the pointer still holds the frame */
   onSeek: (fraction: number, held: boolean) => void

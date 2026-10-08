@@ -303,9 +303,10 @@
   --label-10: #025a7c;
   --label-11: #622b01;
   --label-12: #0389a0;
-  /* the hues a value takes only when the analyst picks it (the picker, around the color wheel): 13 red and 14 a dark
-     red, 15 violet and 16 a dark purple, 17 pink and 18 a dark pink. New values never take them, so red stays the
-     problem's and purple the agents' unless the analyst chooses otherwise; each reads at 3:1 or more on every paper */
+  /* the hues a value takes only when the analyst picks it (the picker, around the color wheel, or show_label as the
+     analyst asks): 13 red and 14 a dark red, 15 purple and 16 a dark purple, 17 pink and 18 a dark pink. New values
+     never take them, so red stays the problem's and purple the agents' unless the analyst chooses otherwise; each reads
+     at 3:1 or more on every paper */
   --label-13: #d0342c;
   --label-14: #8a1c1c;
   --label-15: #7b4fd6;

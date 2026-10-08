@@ -2,11 +2,13 @@
 // Color by in Files' Transcript mode (src/files/colorChoice.ts): a key's values take the palette by frequency, the rest
 // one Other, the records with none their own chip; a label's chips are its highlighted values with their counts and the
 // meanings its definition gives, then Not marked; the default choice is the file's first key with few values, else Off;
-// a record's value is read from a JSON line the server pages as text; the choice and the values off are kept per file.
-// A key whose values are nearly unique per record (an id, a page) is not offered.
+// a record's value is read from a JSON line the server pages as text; the choices and the values off are kept per file,
+// a file kept with one choice before Color by took several opening on it; the choices that no longer hold fall back to
+// the key chosen last, else the default; a key's lane paints its commonest value per bin. A key whose values are nearly
+// unique per record (an id, a page) is not offered.
 // The tracks' geometry is tracks.test.ts.
 import { afterEach, describe, expect, test } from 'vitest'
-import { chipOfKeyValue, choiceId, colorKeys, defaultChoice, definitionLead, keyChips, keyValue, labelChips, nearlyUnique, NONE, OTHER, parseChoice, pickedChips, readColor, valueMeaning, writeColor } from '../../src/files/colorChoice'
+import { chipOfKeyValue, choiceId, colorKeys, defaultChoice, definitionLead, keptPicks, keyChips, keyPaint, keyValue, labelChips, nearlyUnique, NONE, OTHER, parseChoice, pickedChips, picksOf, readColor, togglePick, valueMeaning, withPicks, writeColor, type ColorChoice } from '../../src/files/colorChoice'
 import type { Concept, SourceKey, SourceRecord } from '../../src/lib/types'
 
 afterEach(() => window.localStorage.clear())
@@ -153,4 +155,53 @@ test('a key whose values are nearly unique per record is not offered, one with f
   expect(nearlyUnique(few)).toBe(false)
   expect(colorKeys([pageId, wiki, user, few]).map((k) => k.key)).toEqual(['wiki', 'user', 'type'])
   expect(defaultChoice(colorKeys([pageId, wiki]))).toEqual({ by: 'key', key: 'wiki' })
+})
+
+describe('several choices', () => {
+  const wiki: SourceKey = { key: 'wiki', values: [{ value: 'dse', n: 9 }], more: { values: 0, n: 0 }, none: 0, at: [] }
+  const type: SourceKey = { key: 'type', values: [{ value: 'save', n: 9 }], more: { values: 0, n: 0 }, none: 0, at: [] }
+  const on = (...ids: string[]) => (id: string) => ids.includes(id)
+
+  test('a file kept with one choice opens on it; with picks it opens on them in order', () => {
+    expect(keptPicks({ by: 'k:wiki', off: {} })).toEqual(['k:wiki'])
+    expect(keptPicks({ by: 'off', off: {} })).toEqual([])
+    expect(keptPicks({ by: null, off: {} })).toBeNull()
+    writeColor('ws', 'a.jsonl', { by: 'l:c1', picks: ['l:c1', 'k:wiki', 'x', 3 as unknown as string], key: 'wiki', off: {} })
+    expect(readColor('ws', 'a.jsonl')).toEqual({ by: 'l:c1', picks: ['l:c1', 'k:wiki'], key: 'wiki', off: {} })
+    expect(picksOf(readColor('ws', 'a.jsonl'), [wiki, type], on('c1'))).toEqual([
+      { by: 'label', id: 'c1' },
+      { by: 'key', key: 'wiki' },
+    ])
+  })
+
+  test("the choices that hold stay in order; with none that holds, the key chosen last, else the default; [] is Off", () => {
+    // a label turned off leaves the choices, the next is the color
+    expect(picksOf({ by: 'l:c1', picks: ['l:c1', 'k:type'], off: {} }, [wiki, type], on())).toEqual([{ by: 'key', key: 'type' }])
+    // none holds: the key chosen last, else the file's default
+    expect(picksOf({ by: 'l:c1', picks: ['l:c1'], key: 'type', off: {} }, [wiki, type], on())).toEqual([{ by: 'key', key: 'type' }])
+    expect(picksOf({ by: 'l:c1', picks: ['l:c1'], off: {} }, [wiki, type], on())).toEqual([{ by: 'key', key: 'wiki' }])
+    expect(picksOf({ by: null, off: {} }, [wiki, type], on())).toEqual([{ by: 'key', key: 'wiki' }])
+    // Off is Off, whatever the file has
+    expect(picksOf({ by: 'off', picks: [], key: 'type', off: {} }, [wiki, type], on('c1'))).toEqual([])
+    // a file with nothing to color by is Off
+    expect(picksOf({ by: null, off: {} }, [], on())).toEqual([])
+  })
+
+  test('a choice checked goes after the others and unchecked leaves them; the last unchecked is Off', () => {
+    const k: ColorChoice = { by: 'key', key: 'wiki' }
+    const l: ColorChoice = { by: 'label', id: 'c1' }
+    expect(togglePick([k], l)).toEqual([k, l])
+    expect(togglePick([k, l], k)).toEqual([l])
+    expect(togglePick([l], l)).toEqual([])
+    expect(withPicks({ by: 'k:wiki', off: {} }, [])).toEqual({ by: 'off', picks: [], off: {} })
+    // the key chosen last is kept: the first choice's, or one just checked after a label
+    expect(withPicks({ by: null, off: {} }, [k, l])).toEqual({ by: 'k:wiki', picks: ['k:wiki', 'l:c1'], key: 'wiki', off: {} })
+    expect(withPicks({ by: null, key: 'wiki', off: {} }, [l, { by: 'key', key: 'type' }], 'type').key).toBe('type')
+    expect(withPicks({ by: null, key: 'wiki', off: {} }, [l]).key).toBe('wiki')
+  })
+
+  test("a key's lane is its commonest value per bin in its colors, the one picked for a value, and a value off faded", () => {
+    const k: SourceKey = { key: 'kind', values: [{ value: 'a', n: 5 }, { value: 'b', n: 3 }], more: { values: 0, n: 0 }, none: 0, at: [0, 1, -1] }
+    expect(keyPaint(k, { b: 15 }, new Set(['a']))).toEqual({ kind: 'bins', at: [0, 1, -1], colors: ['var(--label-1)', 'var(--label-15)'], faded: [true, false] })
+  })
 })

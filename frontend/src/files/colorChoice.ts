@@ -1,14 +1,17 @@
-// Color by in Files' Transcript and Table modes: what colors the records' left edge and the reader's tracks (Tracks.tsx). The
-// choice is Off, a key of the records (one of those the server finds naming a kind or a who over the whole file,
-// GET /source/keys, the fields Table view shows), or a label over files that is on. A key's values take the label
-// palette by frequency, in the order new values take its colors (labels.ts LABEL_ORDER: blue, orange, green, gold,
-// teal, ...), the rest one Other in --label-none; a label's values take the label's own colors, its highlighted values
-// only. A key whose values are nearly unique per record (an id) is not offered. Each value is a chip that turns its
-// records off (hides them) and on. The choice and the values turned off are kept per file in this browser. Pure, but
+// Color by in Files' Transcript and Table modes: what colors the records' left edge and the reader's tracks (Tracks.tsx), as
+// the view kit's Color by does (backend/app/viewer_colour.js). It takes several choices, in order: each a key of the
+// records (one of those the server finds naming a kind or a who over the whole file, GET /source/keys, the fields Table
+// view shows) or a label over files that is on; none is Off. The first colors the records and the overview's first lane;
+// each other one has a lane of its own beside it. A key's values take the label palette by frequency, in the order new
+// values take its colors (labels.ts LABEL_ORDER: blue, orange, green, gold, teal, ...), the rest one Other in
+// --label-none; a label's values take the label's own colors, its highlighted values only. A key whose values are nearly
+// unique per record (an id) is not offered. Each value of the first choice is a chip that turns its records off (hides
+// them) and on. The choices, the values turned off and the colors picked are kept per file in this browser. Pure, but
 // for the storage.
 import type { Concept, LabelRow, SourceKey, SourceRecord } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { classesOf, colourVar, LABEL_ORDER, LABEL_PICKS, litClass, valueOf } from './labels'
+import type { OverviewPaint } from './Tracks'
 
 export type ColorChoice = { by: 'off' } | { by: 'key'; key: string } | { by: 'label'; id: string }
 
@@ -150,12 +153,56 @@ export function defaultChoice(keys: readonly SourceKey[]): ColorChoice {
   return k ? { by: 'key', key: k.key } : { by: 'off' }
 }
 
-/** What the reader keeps of Color by per file: the choice (null for the default), per choice the values off, and per
- * choice the palette color (1 to 18, labels.ts LABEL_PICKS) picked for a value. */
+/** What the reader keeps of Color by per file: the first choice (`off` for Off, null for the default), the choices in
+ * order (choiceId; [] for Off), the key chosen last, which comes back when none of the choices holds, per choice the
+ * values off, and per choice the palette color (1 to 18, labels.ts LABEL_PICKS) picked for a value. A file kept before
+ * Color by took several choices has `by` alone. */
 export interface ColorKept {
   by: string | null
+  picks?: string[]
+  key?: string
   off: Record<string, string[]>
   colors?: Record<string, Record<string, number>>
+}
+
+/** The choices kept, by their ids in order: `picks`, else the one `by` names ([] for Off); null for none kept. Pure. */
+export const keptPicks = (kept: ColorKept): string[] | null => kept.picks ?? (kept.by === 'off' ? [] : kept.by ? [kept.by] : null)
+
+/** Color by's choices now, in order, the first the color: the kept ones that hold (a key the file has, a label that is
+ * on and marks the file), none for Off; with none kept, or none that holds (a label turned off), the key chosen last,
+ * else the file's default (defaultChoice). Pure. */
+export function picksOf(kept: ColorKept, keys: readonly SourceKey[], labelHolds: (id: string) => boolean): ColorChoice[] {
+  const raw = keptPicks(kept)
+  if (raw && raw.length === 0) return []
+  const out: ColorChoice[] = []
+  const seen = new Set<string>()
+  for (const id of raw ?? []) {
+    const c = parseChoice(id)
+    if (!c || c.by === 'off' || seen.has(id)) continue
+    if (c.by === 'key' ? !keys.some((k) => k.key === c.key) : !labelHolds(c.id)) continue
+    seen.add(id)
+    out.push(c)
+  }
+  if (out.length) return out
+  if (kept.key && keys.some((k) => k.key === kept.key)) return [{ by: 'key', key: kept.key }]
+  const d = defaultChoice(keys)
+  return d.by === 'off' ? [] : [d]
+}
+
+/** The choices with `c` checked after them, or unchecked; none left is Off. Pure. */
+export function togglePick(picks: readonly ColorChoice[], c: ColorChoice): ColorChoice[] {
+  const id = choiceId(c)
+  return picks.some((p) => choiceId(p) === id) ? picks.filter((p) => choiceId(p) !== id) : [...picks, c]
+}
+
+/** What is kept once the choices are `picks`: `by` the first ('off' for none), and the key chosen last: the first
+ * choice's when it is a key, else `last` (a key just checked, or one a label took the color from), else the one kept.
+ * Pure. */
+export function withPicks(kept: ColorKept, picks: readonly ColorChoice[], last?: string): ColorKept {
+  const ids = picks.map(choiceId)
+  const first = picks[0]
+  const key = first?.by === 'key' ? first.key : (last ?? kept.key)
+  return { ...kept, by: ids[0] ?? 'off', picks: ids, ...(key ? { key } : {}) }
 }
 
 export const colorKey = (ws: string, path: string): string => storageKey(ws, `colorBy:${path}`)
@@ -171,7 +218,14 @@ export function readColor(ws: string, path: string): ColorKept {
       const kept = Object.entries(m).filter(([, n]) => typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= LABEL_PICKS)
       if (kept.length) colors[k] = Object.fromEntries(kept)
     }
-  return { by: typeof got?.by === 'string' ? got.by : null, off, ...(Object.keys(colors).length ? { colors } : {}) }
+  const picks = Array.isArray(got?.picks) ? got.picks.filter((x): x is string => typeof x === 'string' && /^[kl]:/.test(x)) : null
+  return {
+    by: typeof got?.by === 'string' ? got.by : null,
+    ...(picks ? { picks } : {}),
+    ...(typeof got?.key === 'string' && got.key ? { key: got.key } : {}),
+    off,
+    ...(Object.keys(colors).length ? { colors } : {}),
+  }
 }
 
 /** A key's chips with the colors picked for its values (`picked`, a palette color 1 to 12 by value). Pure. */
@@ -179,6 +233,20 @@ export const pickedChips = (chips: readonly ColorValue[], picked: Readonly<Recor
   chips.map((v) => (v.color && picked?.[v.id] ? { ...v, color: `var(--label-${picked[v.id]})` } : v))
 
 export const writeColor = (ws: string, path: string, kept: ColorKept): void => writeStorage(colorKey(ws, path), kept)
+
+/** A key's lane of the overview: its commonest value per bin (the server's `at`, a rank), each rank in its palette color
+ * or the one picked for its value (`picked`, by value), Other past the palette, a value in `off` faded. Pure. */
+export function keyPaint(k: SourceKey, picked: Readonly<Record<string, number>> | undefined, off: ReadonlySet<string>): OverviewPaint {
+  const ranks = Math.max(1, k.values.length)
+  const valueAt = (r: number) => (r < KEY_COLORS ? (k.values[r]?.value ?? '') : OTHER)
+  const pickOf = (r: number) => picked?.[valueAt(r)]
+  return {
+    kind: 'bins',
+    at: k.at,
+    colors: Array.from({ length: ranks }, (_, r) => (pickOf(r) ? `var(--label-${pickOf(r)})` : keyColor(r))),
+    faded: Array.from({ length: ranks }, (_, r) => off.has(valueAt(r))),
+  }
+}
 
 const parsed = new WeakMap<object, unknown>()
 
