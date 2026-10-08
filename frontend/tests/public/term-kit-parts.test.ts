@@ -476,3 +476,98 @@ describe('loading', () => {
     expect(kit.loading()).toBe(false)
   })
 })
+
+describe("the checks' choices and the labels the parts turn on", () => {
+  test("every choice of the parts the program drew, Color by's first, as the checks ask for them; each made as the analyst's key makes it, its error its own", async () => {
+    init({ labels: [TACTIC(['explore', 'test'])] })
+    const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }, { name: 'outcome', title: 'Outcome' }], onChange: () => void colour.by.title })
+    const filter = kit.filterBy({ fields: [{ name: 'outcome', title: 'Outcome' }] })
+    const rows = kit.rows({ fields: [{ name: 'session', title: 'Session' }] })
+    // a part not drawn yet offers no choice
+    expect(kit.__driver.choices()).toEqual([])
+    kit.draw((d: any) => {
+      colour.draw(d, (r: any) => {
+        filter.add(r).gap()
+        rows.add(r).gap()
+      })
+      d.line(`grouped by ${rows.by.title}`)
+    })
+    await tick()
+    kit.handle({ t: 'choices', id: 7 })
+    expect(sent.find((m) => m.t === 'choices')).toEqual({
+      t: 'choices', id: 7, choices: [['Color by', 'Off'], ['Color by', 'Tool'], ['Color by', 'Outcome'], ['Color by', 'Tactic'], ['Color by', 'Tool + Outcome'],
+        ['Filter by', 'None'], ['Filter by', 'Outcome'], ['Filter by', 'Tactic'], ['Rows', 'None'], ['Rows', 'Session'], ['Rows', 'Tactic']],
+    })
+    const choose = async (control: string, choice: string) => {
+      kit.handle({ t: 'choose', control, choice, n: ++n })
+      await tick()
+    }
+    // Rows: None throws as the view draws: that frame says so; the next choice draws again
+    await choose('Rows', 'None')
+    expect(last().error).toMatch(/reading 'title'/)
+    expect(last().ack).toBe(n)
+    await choose('Rows', 'Session')
+    expect(last().error).toBeUndefined()
+    expect(text()).toContain('  grouped by Session')
+    // Color by: Off throws as it is chosen (its onChange): the view stays failed until the next choice, which draws
+    await choose('Color by', 'Off')
+    expect(sent.filter((m) => m.t === 'error').at(-1)!.message).toMatch(/reading 'title'/)
+    expect(last().error).toMatch(/reading 'title'/)
+    await choose('Color by', 'Tool + Outcome')
+    expect(last().error).toBeUndefined()
+    expect(colour.picks.map((p: any) => p.title)).toEqual(['Tool', 'Outcome'])
+    await choose('Filter by', 'Tactic')
+    expect(filter.by).toEqual({ label: 'k1', title: 'Tactic' })
+  })
+
+  test('a label checked in Color by is turned on in Files during the analyst\'s key and keeps its place as a track; unchecked, it is turned off unless Filter by reads it; one Filter by chooses is turned on and Color by keeps its choice', async () => {
+    const OFF = { ...TACTIC(['explore']), on: false }
+    init({ labels: [OFF] })
+    const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }] })
+    const filter = kit.filterBy({ fields: [{ name: 'outcome', title: 'Outcome' }] })
+    kit.draw((d: any) => colour.draw(d, (r: any) => filter.add(r).gap()))
+    await tick()
+    const shown = () => sent.filter((m) => m.t === 'act' && m.act.kind === 'show').map((m) => m.act)
+    // chosen by the page itself, outside the analyst's key, a label is not turned on
+    colour.choose({ label: 'k1' })
+    filter.choose({ label: 'k1' })
+    expect(shown()).toEqual([])
+    colour.choose('tool')
+    filter.choose(null)
+    // Space on it in the menu checks it, a track after Tool, and turns it on
+    await key('c')
+    await key('down')
+    await key('space')
+    expect(colour.picks.map((p: any) => p.title)).toEqual(['Tool', 'Tactic'])
+    expect(shown()).toEqual([{ kind: 'show', id: 'k1', on: 'on' }])
+    // thimble says it is on: it stays a track, as the analyst checked it, rather than taking the color
+    kit.handle({ t: 'labels', labels: [{ ...OFF, on: true }] })
+    await tick()
+    expect(colour.picks.map((p: any) => p.title)).toEqual(['Tool', 'Tactic'])
+    // Space again unchecks it and turns it off
+    await key('space')
+    expect(colour.picks.map((p: any) => p.title)).toEqual(['Tool'])
+    expect(shown().at(-1)).toEqual({ kind: 'show', id: 'k1', on: 'off' })
+    await key('c')
+    kit.handle({ t: 'labels', labels: [OFF] })
+    await tick()
+    // Filter by chooses it: it is turned on, and once it is on Color by keeps Tool
+    await key('f')
+    await key('down')
+    await key('down')
+    await key('return')
+    expect(filter.by).toEqual({ label: 'k1', title: 'Tactic' })
+    expect(shown().at(-1)).toEqual({ kind: 'show', id: 'k1', on: 'on' })
+    kit.handle({ t: 'labels', labels: [{ ...OFF, on: true }] })
+    await tick()
+    expect(colour.by).toEqual({ field: 'tool', title: 'Tool' })
+    // checked and unchecked in Color by while Filter by reads it, it stays on
+    const before = shown().length
+    await key('c')
+    await key('down')
+    await key('space')
+    await key('space')
+    expect(colour.picks.map((p: any) => p.title)).toEqual(['Tool'])
+    expect(shown().length).toBe(before)
+  })
+})

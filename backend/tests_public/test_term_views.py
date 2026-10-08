@@ -442,6 +442,78 @@ async def test_the_host_serves_thimble_term_over_its_socket_with_its_token(board
     assert view_calls.KERNEL == kernel, "the host's own kernels' name is its own while it serves"
 
 
+LABEL_PROGRAM = r"""
+import { colorBy, draw, labels } from 'thimble-term'
+const colour = colorBy({ fields: [{ name: 'body', title: 'Body' }] })
+draw((d) => {
+  colour.draw(d)
+  d.line(labels().map((l) => `${l.name} is ${l.on ? 'on' : 'off'}`).join(', '))
+})
+"""
+
+
+@needs_node
+async def test_a_label_checked_in_color_by_is_turned_on_in_files_by_the_host(board, inproc, monkeypatch, capsys):
+    """A label checked in Color by's menu is turned on in Files and every view, as the browser kit's does: the host
+    makes the change show_label makes (concepts.show_concept) during the analyst's key, sends the program the labels
+    with it on, and passes thimble-term no act for it; unchecked with Space, it is turned off again."""
+    from app import concepts
+
+    ws = config.workspace_dir(CORPUS)
+    k = concepts.new_concept("Asks", kind="regex", spec="first", labels=["yes", "no"], glob="board.jsonl")
+    concepts.write_concept(ws, k)
+    slug = _view(LABEL_PROGRAM)
+    real = term_views.Program
+    monkeypatch.setattr(term_views, "Program", lambda *a, **kw: real(*a, **{**kw, "wrap": DRAW_WRAP}))
+    host = term_views.Host(CORPUS)
+    task = asyncio.ensure_future(host.serve())
+    try:
+        ready = None
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            ready = next((json.loads(x) for x in capsys.readouterr().out.splitlines() if '"ready"' in x), None)
+            if ready:
+                break
+        assert ready
+
+        async def post(path: str, body: dict) -> dict:
+            r, w = await asyncio.open_unix_connection(ready["socket"])
+            data = json.dumps(body).encode()
+            w.write(f"POST {path} HTTP/1.1\r\nContent-Length: {len(data)}\r\nx-thimble-token: {ready['token']}\r\n\r\n"
+                    .encode() + data)
+            await w.drain()
+            raw = await r.read()
+            w.close()
+            return json.loads(raw.split(b"\r\n\r\n", 1)[1])
+
+        def text(frame: dict) -> str:
+            return "\n".join("".join(s["s"] for s in line) for line in frame["lines"])
+
+        opened = await post("/open", {"slug": slug, "cols": 80, "rows": 12})
+        assert "Asks is off" in text(opened["frame"])
+
+        async def keys(*ks: str) -> list[dict]:
+            acts = []
+            for key in ks:
+                acts += (await post("/event", {"id": opened["id"], "event": {"t": "key", "key": key}}))["acts"]
+            return acts
+
+        # c opens the menu on Body; ↓ goes to the label; Enter colors by it alone and turns it on
+        assert await keys("c", "down", "return") == []
+        assert concepts.find_concept(ws, k["id"])["shown"] is True
+        got = await post("/event", {"id": opened["id"], "event": {"t": "resize", "cols": 80, "rows": 12}})
+        assert "Color by  Asks" in text(got["frame"]) and "Asks is on" in text(got["frame"]), text(got["frame"])
+        # Space on it unchecks it, the last choice, so the view is Off, and turns it off; c closes the menu
+        assert await keys("c", "space", "c") == []
+        assert concepts.find_concept(ws, k["id"])["shown"] is False
+        got = await post("/event", {"id": opened["id"], "event": {"t": "resize", "cols": 80, "rows": 12}})
+        assert "Color by  Off" in text(got["frame"]) and "Asks is off" in text(got["frame"]), text(got["frame"])
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 # ------------------------------------------------------------------------------------------------------ Timeline
 
 
@@ -1059,3 +1131,24 @@ async def test_each_worked_example_draws_in_the_panel_as_it_draws_as_text(exampl
     live = await _walk(c, slug, keys, "")
     assert len({tuple(f) for f in live}) > 10
     assert live == await _walk(c, slug, keys, "plain")
+
+
+@needs_node
+@pytest.mark.parametrize("example, parts", [("timeline", ["Color by", "Filter by", "Rows"]),
+                                            ("linked", ["Color by", "Filter by", "Rows"]),
+                                            ("repository", ["Color by", "Filter by"])])
+async def test_each_worked_example_draws_every_choice_of_its_controls(example, parts, request):
+    """The checks' sweep (draw_check with `sweep`, Program.sweep): with the test label on, each worked example is drawn
+    on every choice of the kit's controls it draws, Color by's Off and the None of Filter by and Rows among them, the
+    test label too, then each control's first choice again after the others, and no choice gives an error."""
+    c = request.getfixturevalue(example)
+    slug = {"timeline": "timeline", "linked": "linked-sessions", "repository": "repository"}[example]
+    d = await term_views.draw_check(c, slug, cols=120, theme="light", sweep=True, wrap=DRAW_WRAP)
+    assert d["ok"], d
+    tried = [(x["control"], x["choice"]) for x in d["choices"]]
+    assert sorted({p for p, _ in tried}) == sorted(parts), tried
+    assert ("Color by", "Off") in tried and ("Color by", term_views.probe_label()["name"]) in tried, tried
+    for p in parts:
+        first = next(ch for q, ch in tried if q == p)
+        assert first == ("Off" if p == "Color by" else "None") and (p, f"{first} (after the others)") in tried, tried
+    assert not [x for x in d["choices"] if x["errors"]], d["choices"]

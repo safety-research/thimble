@@ -165,6 +165,9 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
   unchecks the row under `❯` and the menu stays open, so several are chosen together: the first is the color, each
   other a column of its own beside the list's track (`tracks`), and says `track`; the top row reads `Kind +1`. Enter
   colors by the row alone; Off unchecks them all. With Off, no mark and no track cell takes a hue.
+- Checking a label, with Space or Enter, turns it on in Files and every view, as the browser's Color by does: the
+  view host makes the change show_label makes, and the label keeps the place it was checked in. Unchecking it with
+  Space turns it off, unless Filter by or Rows reads it. A choice the page makes itself (`choose`) turns no label on.
 - `+N` after the chips opens the values it stands for in the same frame, each with its dot in its hue, its count and,
   under the one at `❯`, what it means; Space or Enter turns it off or on, as a chip's click does.
 - A group's row (a page, an agent, a session) takes no color of its own: `colour.mix(counts, cells)` gives the runs of
@@ -243,7 +246,8 @@ each group under its parent, `guide` its tree guide (`├ ` `└ ` `│ `), a pa
 `initial` is what either opens on until the analyst chooses: a field's name, or a list whose first choice that is
 there is taken, each a field's name or `{label: name or id}`, a label counting while it is on in Files (`[{label:
 'tactic'}, 'tool']`). The label Rows groups by takes no color: Color by neither opens on it nor takes it when it is turned
-on, so the lanes keep Color by's own choice.
+on, so the lanes keep Color by's own choice. A label chosen in either while it is off is turned on in Files and every
+view during the analyst's key or click, as in the browser, and Color by keeps its own choice when it comes on.
 
 Both take `fields` as Color by does, `{name, title, description, values, meanings, value(record)}`, with `nameOf(key)`
 for a value's words, and a query names the labels they read, so the reader reads them though they are not on in Files.
@@ -342,7 +346,9 @@ a view lists): it opens on `initial`, else the first value, and Reset puts it ba
 
 `open(ref)` opens a record's place in thimble-term's citation panel, `ask(ref, text)` asks a side thread about it, and
 `openLabel(id)` opens a label's panel. Each works only during the analyst's own key or click in the view, as the
-browser's label calls do: thimble takes an act only with the frame that answers that event.
+browser's label calls do: thimble takes an act only with the frame that answers that event. The kit's parts make one
+more act themselves, `show`, when the analyst checks a label in Color by or chooses one in Filter by or Rows: the view
+host turns the label on or off in Files and every view, as show_label does, and sends the program the labels again.
 
 ## The protocol and the sandbox
 
@@ -356,12 +362,14 @@ queries; thimble-term starts it the first time a view opens and talks to it over
 | `answer {id, data \| error}` | a query's answer; one longer than 16 MB comes as an error that says to answer in pages |
 | `sync {id}` | asks whether the program is idle (`draw_text`, the view checks) |
 | `labels {labels, filter}`, `open {place}` | the labels changed; a citation opened the view at a place |
+| `choices {id}`, `choose {control, choice}` | the view checks ask for every choice of the kit's parts the program drew, then make each in turn, as the analyst's key makes it, with its number `n` |
 
 | from the program to thimble | |
 |---|---|
 | `frame {seq, ack, lines, hits, hints, hintKeys, keys, typing, field, sub, overflow?, loading?}` | what to draw: rows of runs, hot regions (`cursor` on a chart's, with `tips` per cell), every key bound (`keys`) and the hints the hint row may name (`hints`, each one's keys in `hintKeys`), which the panel fits to one row with its own `b` and `x`, the text of a field that takes typing; `ack` the last event it answers; `overflow` `{rows, cols, first}` when the kit cut rows past the rows or wider than the columns; `loading` while a reader query is out (`loading()`) |
 | `query {id, q, labels}`, `cancel {id}` | a reader query, and one dropped |
-| `act {n, act}` | a place, a thread or a label's panel, made during event `n` |
+| `act {n, act}` | a place, a thread or a label's panel, made during event `n`; or a label turned on or off (`show {id, on}`), which the host makes |
+| `choices {id, choices}` | the answer to `choices`: `[[control, choice]]`, Color by's first, then the other parts' in the order the program made them |
 | `state {state}`, `error {message}`, `log {text}` | what the view keeps, an error, a line it printed |
 | `synced {id, due, every}` | the answer to a sync, once everything sent before it is handled and the frames it drew are out: the ms until the next timer it waits on and its shortest interval's period (null for none) |
 
@@ -397,4 +405,7 @@ frame's rows as text in the kit itself.
 
 A view built in terminal mode passes its checks only when its draft draws this way with no error, within the time limit
 and with nothing cut, at 120 and 200 columns in light and dark and opened at the first place that resolves
-(views.term_draws). Its reviewer reads the same drawings in place of pictures.
+(views.term_draws), and, with the checks' test label on, when every choice of the Color by, Filter by and Rows it draws
+draws with no error: Off, None, each field and each label, two fields together, then each part's first choice again
+after the others, as the browser's checks try a page's (term_views.Program.sweep). The checks name each choice that
+fails, such as `Rows: None`. Its reviewer reads the same drawings in place of pictures.

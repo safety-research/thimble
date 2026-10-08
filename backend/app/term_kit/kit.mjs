@@ -586,6 +586,10 @@ const state = {
   drawing: false, // a flush is drawing: a redraw asked meanwhile draws again in it (again)
   again: false,
   afterDraw: [], // what parts look at once the drawing is done
+  colourSweep: null, // Color by's choices, for the view's checks (choices)
+  sweeps: [], // each other part's choices (Filter by's, Rows'), in the order the program made them
+  seers: [], // Color by's: a label another part turned on is seen, so it does not take the color (as the browser's)
+  using: [], // the labels Filter by and Rows read, which Color by leaves on when it unchecks them
 }
 
 function send(msg) {
@@ -823,6 +827,33 @@ export function openLabel(id) {
   act('label', { id: String(id), name: l ? l.name : '' })
 }
 
+// A label turned on or off in Files and every view, as the browser kit's thimble.setLabel does: the view host makes the
+// change as show_label does, and the labels come back with it on. Only during the analyst's own click or key; a choice
+// the page makes by itself turns no label on.
+function setLabel(id, on) {
+  if (state.gesture === null) return
+  send({ t: 'act', n: state.gesture, act: { kind: 'show', id: String(id), on: on ? 'on' : 'off' } })
+}
+
+// a label another part (Filter by, Rows) turns on: Color by has seen it, so it keeps its own choice
+function seeLabel(id) {
+  for (const fn of state.seers) fn(String(id))
+}
+
+// whether Filter by or Rows reads the label, so that Color by leaves it on when it unchecks it
+function inUse(id) {
+  return state.using.some((fn) => (fn() || []).map(String).includes(String(id)))
+}
+
+// Every choice of the kit's parts the program drew, for the view's checks (term_views.draw_check), which try each in
+// turn and fail the view on an error, as the browser kit's thimble.__choices: [{control, choice, go()}], Color by's
+// first.
+function choices() {
+  const out = []
+  for (const fn of [state.colourSweep, ...state.sweeps]) if (fn) out.push(...(fn() || []))
+  return out
+}
+
 /** The answer of the view's reader.records(index, query), as a promise. `opts.key`: a newer fetch with the same key
  *  drops this one, which rejects with an AbortError (its reader call is cancelled). */
 export function fetch(query, opts = {}) {
@@ -996,6 +1027,18 @@ export function handle(msg) {
       state.lastOpen = msg.place
       for (const fn of state.openers) fn(msg.place)
       break
+    case 'choices':
+      // the view's checks ask for every choice of the kit's parts the program drew (term_views.draw_check)
+      send({ t: 'choices', id: msg.id, choices: choices().map((ch) => [String(ch.control), String(ch.choice)]) })
+      break
+    case 'choose': {
+      // the view's checks try one choice, as the analyst's own key or click makes it. The error a choice before left
+      // goes, so that each choice's error is its own
+      const ch = choices().find((x) => String(x.control) === msg.control && String(x.choice) === msg.choice)
+      state.error = null
+      if (ch) gesture(msg.n, () => ch.go())
+      break
+    }
   }
   redraw()
 }
@@ -1022,7 +1065,7 @@ export const __driver = {
       frameSeq: 0, ack: 0, gesture: null, binds: [], hits: new Map(), typer: null, pending: new Map(), fetchId: 0, scheduled: false,
       lastSent: '', openers: [], labelFns: [], resets: [], pageReset: null, stateTimer: false, wheelFns: [], error: null, textMode: '',
       lastOpen: null, colorBys: [], colour: null, drawNo: 0, answered: 0, labelWants: [], holds: [], rehome: [], keysOpen: false,
-      drawing: false, again: false, afterDraw: [],
+      drawing: false, again: false, afterDraw: [], colourSweep: null, sweeps: [], seers: [], using: [],
     })
     openMenu = null
     labelKeys = { of: null, map: new Map() }
@@ -1034,6 +1077,10 @@ export const __driver = {
   fail(why) {
     state.error = String(why)
     redraw()
+  },
+  /** Every choice of the kit's parts the program drew, `[{control, choice, go()}]`, which the view's checks try. */
+  choices() {
+    return choices()
   },
   get state() {
     return state
@@ -1323,6 +1370,28 @@ export function colorBy(opts = {}) {
     save()
     onChange(api)
     redraw()
+  }
+  // a label this part has seen, so that it keeps its place when thimble says it is on (notice)
+  const see = (id) => {
+    if (c.seen.includes(id)) return
+    c.seen = [...c.seen, id]
+    save()
+  }
+  state.seers.push(see)
+  // A choice made in the menu, as the browser's menu takes a click: Enter takes it alone, Space checks or unchecks it.
+  // A label checked is turned on in Files and every view, seen first so that it keeps its place when thimble says it
+  // is on; a label unchecked with Space is turned off, unless Filter by or Rows reads it.
+  function menuPick(key, alone) {
+    const l = labelOf(key)
+    const had = c.picks.includes(key)
+    if (alone) api.choose(key === 'off' ? null : l ? { label: l.id } : key.slice(6))
+    else togglePick(key)
+    if (!l) return
+    const id = String(l.id)
+    if (c.picks.includes(key) && !l.on) {
+      see(id)
+      setLabel(id, true)
+    } else if (!alone && had && !c.picks.includes(key) && l.on && !inUse(id)) setLabel(id, false)
   }
 
   const api = {
@@ -1735,8 +1804,9 @@ export function colorBy(opts = {}) {
       last = d.row().gap(2)
       placeChips(last, all, fitting(all, d.cols - 2))
     }
+    c.drawn = true
     kitKey(d, 'c', 'to color by', showMenu, false, 0)
-    last.menus.push((dd) => menuOf(api) && drawMenu(dd, api, menuItems(), (it) => it && api.choose(it.key === 'off' ? null : it.key.startsWith('label:') ? { label: it.key.slice(6) } : it.key.slice(6)), 'c', 'to color by it alone', 'Color by', { words: 'to check or uncheck', on: (it) => togglePick(it.key) }))
+    last.menus.push((dd) => menuOf(api) && drawMenu(dd, api, menuItems(), (it) => it && menuPick(it.key, true), 'c', 'to color by it alone', 'Color by', { words: 'to check or uncheck', on: (it) => menuPick(it.key, false) }))
     last.menus.push((dd) => menuOf(valuesOwner) && drawMenu(dd, valuesOwner, valueItems(), (it) => it && toggleChip(it.chip), 'c', 'to turn off or on', by ? by.title : '', { words: 'to turn off or on', on: (it) => toggleChip(it.chip) }))
     return last
   }
@@ -1749,6 +1819,19 @@ export function colorBy(opts = {}) {
   }
 
   state.colour = api
+  // every choice of the menu, for the view's checks (choices), made as the menu makes it: Off, each field, each label,
+  // then the first two fields together, the second a track
+  state.colourSweep = () => {
+    if (!c.drawn) return []
+    const one = (choice, key) => ({ control: 'Color by', choice, go: () => menuPick(key, true) })
+    const ls = [...state.labels].sort((a, b) => Number(Boolean(b.here)) - Number(Boolean(a.here)))
+    const out = [one('Off', 'off'), ...fields.map((f) => one(f.title, `field:${f.name}`)), ...ls.map((l) => one(l.name, `label:${l.id}`))]
+    if (fields.length > 1) {
+      const [a, b] = fields
+      out.push({ control: 'Color by', choice: `${a.title} + ${b.title}`, go: () => { menuPick(`field:${a.name}`, true); menuPick(`field:${b.name}`, false) } })
+    }
+    return out
+  }
   state.resets.push({
     // the view as it opens: colored as it opens, every value on
     changed: () => c.off.size > 0 || c.choice !== home(),
@@ -3125,6 +3208,7 @@ function chooser(opts, name, initial) {
   }
   settle()
   state.labelWants.push(() => (labelOf(c.choice) ? [labelOf(c.choice).id] : []))
+  state.using.push(() => (labelOf(c.choice) ? [labelOf(c.choice).id] : []))
   const ch = {
     c,
     fields,
@@ -3134,6 +3218,23 @@ function chooser(opts, name, initial) {
     save(extra = {}) {
       c.chosen = true
       keep(name, { by: c.choice, ...extra })
+    },
+    // a label chosen while it is off is turned on in Files and every view, during the analyst's own click or key, so
+    // that its values reach the records, as the browser's; Color by has seen it, so it keeps its own choice
+    turnOn(key) {
+      const l = labelOf(key)
+      if (!l || l.on) return
+      seeLabel(l.id)
+      setLabel(l.id, true)
+    },
+    // every choice of the menu, for the view's checks (choices), once the part is drawn: none, each field, each label
+    sweep(control, choose) {
+      state.sweeps.push(() => {
+        if (!c.drawn) return []
+        const ls = [...state.labels].sort((a, b) => Number(Boolean(b.here)) - Number(Boolean(a.here)))
+        return [{ control, choice: 'None', go: () => choose(null) }, ...fields.map((f) => ({ control, choice: f.title, go: () => choose(f.name) })),
+          ...ls.map((l) => ({ control, choice: l.name, go: () => choose({ label: l.id }) }))]
+      })
     },
     /** {field, title} or {label, title}, or null for none */
     by() {
@@ -3340,6 +3441,7 @@ export function filterBy(opts = {}) {
     /** Choose a field by name, a label (`{label}`), or none (null). */
     choose(to) {
       const key = to === null ? 'none' : typeof to === 'object' ? `label:${to.label}` : `field:${to}`
+      ch.turnOn(key)
       if (key === c.choice && c.chosen) return
       c.choice = key
       c.chosen = true
@@ -3363,6 +3465,7 @@ export function filterBy(opts = {}) {
       const x0 = r.x
       const b = ch.by()
       const open = () => toggleMenu(api, Math.max(0, ch.menuItems().findIndex((it) => it.key === c.choice)))
+      c.drawn = true
       r.add('Filter by', { d: true }).gap()
       r.add(b ? b.title : 'none', {}, { on: open, tip: 'choose which rows show: a field or a label', max: Math.max(4, room - 12) })
       if (b && b.label) r.add(' ').add('↗', { fg: COLORS.link }, { on: () => openLabel(b.label), tip: "the label's panel: its definition, its runs and its records" })
@@ -3391,6 +3494,7 @@ export function filterBy(opts = {}) {
     ch.settle()
     if (ch.by() && ch.by().label) onChange(api)
   })
+  ch.sweep('Filter by', (to) => api.choose(to))
   state.resets.push({
     changed: () => offOf().size > 0,
     reset: () => {
@@ -3510,6 +3614,7 @@ export function rows(opts = {}) {
     },
     choose(to) {
       const key = to === null ? 'none' : typeof to === 'object' ? `label:${to.label}` : `field:${to}`
+      ch.turnOn(key)
       if (key === c.choice && c.chosen) return
       c.choice = key
       c.chosen = true
@@ -3522,6 +3627,7 @@ export function rows(opts = {}) {
     add(r) {
       const b = ch.by()
       const open = () => toggleMenu(api, Math.max(0, ch.menuItems().findIndex((it) => it.key === c.choice)))
+      c.drawn = true
       r.add('Rows', { d: true }).gap()
       r.add(b ? b.title : 'none', {}, { on: open, tip: 'choose what the lanes are grouped by: a field or a label', max: Math.max(4, r.room - 2) })
       if (b && b.label) r.add(' ').add('↗', { fg: COLORS.link }, { on: () => openLabel(b.label), tip: "the label's panel: its definition, its runs and its records" })
@@ -3539,6 +3645,7 @@ export function rows(opts = {}) {
   // the label the lanes are grouped by takes no color when it is turned on: the lanes keep Color by's own choice
   state.holds.push(() => (ch.labelOf(c.choice) ? [ch.labelOf(c.choice).id] : []))
   for (const f of state.rehome) f()
+  ch.sweep('Rows', (to) => api.choose(to))
   return api
 }
 

@@ -34,8 +34,9 @@ aside and restores them if the change fails. Progress is `view {slug, status, ch
 
 In terminal mode (terminal) the builder writes view.term.js in place of view.html: a program on the terminal view kit
 (term_views.py) that thimble-term's panel draws. Its gate runs the same reader checks, then draws the program as text
-at 120 and 200 columns, in light and dark, and opened at the first place that resolved (term_draws), with no browser:
-it fails on a program error, a timeout or a draw past the panel's rows or columns. The page's checks (the label marks,
+at 120 and 200 columns, in light and dark, and opened at the first place that resolved, then with the test label on
+and every choice of its Color by, Filter by and Rows tried (term_draws), with no browser: it fails on a program error, a
+timeout, a draw past the panel's rows or columns, or a choice that gives an error. The page's checks (the label marks,
 the layout, the page on a damaged copy of the files) are the browser's alone."""
 from __future__ import annotations
 
@@ -3131,8 +3132,11 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
     draws = report.get("draws") or []
     for d in draws:
         missed = f", no control shows {', '.join(map(repr, d['missed']))}" if d.get("missed") else ""
+        tried = d.get("choices") or []
+        swept = (f", {len(tried)} choice(s) of its controls tried, {sum(1 for x in tried if x.get('errors'))} with an "
+                 "error" if d.get("state") == "choices" and d.get("ok") else "")
         lines.append(f"draw: {draw_where(d)}: {'ok' if d.get('ok') else 'failed'}, {int(d.get('fetches') or 0)} "
-                     f"fetch(es){missed}")
+                     f"fetch(es){missed}{swept}")
     if page.get("unavailable"):
         lines.append("note: " + _hint("view-no-screenshots"))
     for s in shots:
@@ -3848,12 +3852,13 @@ async def _derived_check(c: str, view: dict[str, Any], shots: list[dict[str, Any
 async def _term_check(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
                       report: dict[str, Any], picture: bool) -> dict[str, Any]:
     """The rest of _check for a view built in terminal mode, after its reader's checks: its program drawn as text
-    (term_draws), each failed draw a problem (draw_problems), the reader run on a damaged copy of the files
-    (robust_check without the page), and the fields of the answers its draws got that are not listed as derived."""
+    (term_draws), each failed draw a problem (draw_problems), as each choice of the kit's parts that gave an error
+    (choice_problems), the reader run on a damaged copy of the files (robust_check without the page), and the fields of
+    the answers its draws got that are not listed as derived."""
     draws = await term_draws(c, slug, report["checks"])
     report["draws"], report["shots"] = draws, []
     report["page"] = {"ok": all(d["ok"] for d in draws), "errors": [], "fetches": sum(int(d["fetches"]) for d in draws)}
-    report["problems"] += draw_problems(draws)
+    report["problems"] += draw_problems(draws) + choice_problems(draws)
     if picture and draws:
         report["drawing"] = draws[0]["text"]
     if not report["problems"] and all(r["ok"] for r in report["checks"]) and report["page"]["ok"]:
@@ -3867,8 +3872,10 @@ async def _term_check(c: str, slug: str, view: dict[str, Any], files: list[tuple
 
 async def term_draws(c: str, slug: str, checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The draws of a view's program that its checks run in terminal mode (term_views.draw_check): as it opens at each
-    columns and theme of term_views.CHECK_DRAWS, then opened at the first place that resolved, at the first of them.
-    Each carries its `state`, `opens` or `detail`, and the first ANSWERS_KEPT reader answers it got."""
+    columns and theme of term_views.CHECK_DRAWS, then opened at the first place that resolved, at the first of them,
+    then, where the first drew, as it opens there with the test label on and every choice of the kit's parts it drew
+    tried in turn (`choices`, choice_problems), as the browser's checks' `choices` state tries a page's. Each carries
+    its `state`, `opens`, `detail` or `choices`, and the first ANSWERS_KEPT reader answers it got."""
     from . import term_views  # noqa: PLC0415
 
     out = []
@@ -3876,10 +3883,13 @@ async def term_draws(c: str, slug: str, checks: list[dict[str, Any]]) -> list[di
         d = await term_views.draw_check(c, slug, cols=cols, theme=theme, answers=ANSWERS_KEPT)
         out.append({**d, "state": "opens"})
     first = next((r for r in checks if r["ok"]), None)
+    cols, theme = term_views.CHECK_DRAWS[0]
     if first is not None:
-        cols, theme = term_views.CHECK_DRAWS[0]
         d = await term_views.draw_check(c, slug, cols=cols, theme=theme, ref=first["locator"], answers=ANSWERS_KEPT)
         out.append({**d, "state": "detail"})
+    if out[0]["ok"]:
+        d = await term_views.draw_check(c, slug, cols=cols, theme=theme, answers=ANSWERS_KEPT, sweep=True)
+        out.append({**d, "state": "choices", "choices": d.get("choices") or []})
     return out
 
 
@@ -3890,19 +3900,23 @@ def draw_where(d: dict[str, Any]) -> str:
 
 def draws_where(draws: list[dict[str, Any]]) -> str:
     """Which draws of a view's program these are, in words: those as it opens by their columns and themes, then each
-    opened at a place."""
+    opened at a place, then the one with the test label on (`choices`)."""
     def themes(ts: list[str]) -> str:
         return f"the {ts[0]} theme" if len(ts) == 1 else f"the {' and '.join(ts)} themes"
 
     by_cols: dict[Any, list[str]] = {}
     placed = []
+    labelled = []
     for d in draws:
         if d.get("ref"):
             placed.append(f"opened at {d['ref']}, at {d.get('cols')} columns in {themes([str(d.get('theme'))])}")
+        elif d.get("state") == "choices":
+            labelled.append(f"as it opens with the test label on, at {d.get('cols')} columns in "
+                            f"{themes([str(d.get('theme'))])}")
         else:
             by_cols.setdefault(d.get("cols"), []).append(str(d.get("theme")))
     opens = " and ".join(f"at {cols} columns in {themes(ts)}" for cols, ts in by_cols.items())
-    return "; ".join([*([f"as it opens {opens}"] if by_cols else []), *placed])
+    return "; ".join([*([f"as it opens {opens}"] if by_cols else []), *placed, *labelled])
 
 
 def draw_problems(draws: list[dict[str, Any]]) -> list[str]:

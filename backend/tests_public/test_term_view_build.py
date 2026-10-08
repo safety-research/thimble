@@ -171,16 +171,21 @@ def test_a_build_in_terminal_mode_needs_node_and_no_browser(board, monkeypatch):
 @needs_node
 async def test_the_terminal_gate_passes_the_worked_example_and_the_view_draws_once_built(timeline):
     """The gate of a terminal-mode draft: the reader's checks, then the program drawn as text at 120 and 200 columns in
-    light and dark and at the first place that resolved, with no browser. Timeline passes; once registered, the view
-    is listed as built and drawn in the terminal panel (draw_text reads the view as it passed)."""
+    light and dark and at the first place that resolved, then with the test label on and every choice of its controls
+    tried, with no browser. Timeline passes; once registered, the view is listed as built and drawn in the terminal
+    panel (draw_text reads the view as it passed)."""
     report = await views.gate(timeline, "timeline", picture=True)
     lines = views.gate_lines(report)
     assert report["ok"], lines
     draws = report["draws"]
     assert [(d["cols"], d["theme"], d["state"]) for d in draws] == [
         (120, "light", "opens"), (120, "dark", "opens"), (200, "light", "opens"), (200, "dark", "opens"),
-        (120, "light", "detail")]
+        (120, "light", "detail"), (120, "light", "choices")]
     assert all(d["ok"] and d["fetches"] for d in draws), lines
+    tried = draws[5]["choices"]
+    assert len(tried) > 20 and not [x for x in tried if x["errors"]], tried
+    assert (f"draw: as it opens with the test label on, at 120 columns in the light theme: ok, {draws[5]['fetches']} "
+            f"fetch(es), {len(tried)} choice(s) of its controls tried, 0 with an error") in lines, lines
     # the drawings the reviewer reads wrap the hint row as the panel does, so no row is wider than the panel
     assert all(len(row) <= d["cols"] + 2 for d in draws for row in d["text"].splitlines()), \
         [row for d in draws for row in d["text"].splitlines() if len(row) > d["cols"] + 2]
@@ -225,6 +230,50 @@ async def test_the_terminal_gate_fails_a_broken_program_with_what_broke(board, m
     assert "as it opens at 120 columns in the light and dark themes and at 200 columns in the light and dark themes; " \
            "opened at board.jsonl#L" in problems[0]
     assert views.first_failure(report) == f"problem: {problems[0]}"
+
+
+# the kit's three controls, Color by's onChange reading its choice's title, so Color by: Off throws as it is chosen, and
+# the drawing reading Rows' title, so Rows: None throws as it draws; every other choice draws
+CHOICES = """import { colorBy, draw, fetch, filterBy, list, rows as rowsBy } from 'thimble-term'
+const FIELDS = [{ name: 'kind', title: 'Kind' }]
+let heard = ''
+const colour = colorBy({ fields: FIELDS, onChange: () => { heard = colour.by.title } })
+const filter = filterBy({ fields: FIELDS })
+const rows = rowsBy({ fields: FIELDS })
+const posts = list({ key: (r) => r.ref })
+let items = []
+fetch({}).then((d) => { items = d.rows.map((r) => ({ ...r, kind: r.body.length > 5 ? 'long' : 'short' })) })
+draw((d) => {
+  colour.draw(d, (r) => { filter.add(r).gap(); rows.add(r).gap() })
+  d.line(`${rows.by.title} ${heard}`)
+  posts.draw(d, { items: items.filter((p) => filter.keeps(p)), colour, row: (p, r) => r.add(p.body) })
+})
+"""
+
+
+@needs_node
+async def test_the_terminal_gate_tries_every_choice_of_the_kit_s_controls_and_names_the_one_that_gives_an_error(board):
+    """The gate's last draw, with the test label on, tries each choice of Color by, Filter by and Rows the program
+    draws, Off, None and the test label among them, then each control's first choice again after the others, and fails
+    the view on the choices that give an error, naming them (choice_problems): an error thrown as the choice is made
+    and one thrown as it draws, each the choice's own, so the choice after it draws."""
+    _draft("board", "board", BOARD_VIEW, BOARD_READER, CHOICES)
+    report = await views.gate("board", "board")
+    choices = report["draws"][-1]["choices"]
+    tried = [(x["control"], x["choice"]) for x in choices]
+    for want in [("Color by", "Off"), ("Color by", "Kind"), ("Color by", "test label"), ("Filter by", "None"),
+                 ("Filter by", "Kind"), ("Filter by", "test label"), ("Rows", "None"), ("Rows", "Kind"),
+                 ("Rows", "test label"), ("Color by", "Off (after the others)"), ("Rows", "None (after the others)")]:
+        assert want in tried, tried
+    bad = [(x["control"], x["choice"]) for x in choices if x["errors"]]
+    assert bad == [("Color by", "Off"), ("Rows", "None"), ("Color by", "Off (after the others)"),
+                   ("Rows", "None (after the others)")], choices
+    assert all("reading 'title'" in x["errors"][0] and "view.term.js line" in x["errors"][0] for x in choices if x["errors"])
+    assert not report["ok"] and all(d["ok"] for d in report["draws"]), views.gate_lines(report)
+    (problem,) = report["problems"]
+    assert problem.startswith("4 choices of the view's controls gave a script error when chosen: Color by: Off (") \
+        and "; Rows: None (" in problem and " and 1 more." in problem, problem
+    assert views.first_failure(report) == f"problem: {problem}"
 
 
 @needs_node
