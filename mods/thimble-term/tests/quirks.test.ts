@@ -1,12 +1,11 @@
 // The live check term-fix8's code quirks: a link to a label or a document's passage named in words, never its id; a label
 // with no run drawn as `not run yet` on its card; a card's path step named by its question on its first open; the toast
-// after a relaunch for what came before the quit and was never opened; a note under a card the card check rewrote.
+// after a relaunch for what came before the quit and was never opened; no note under a card the card check rewrote.
 // `claude plugin test mods/thimble-term`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { KEPT_FILE, parseKept, resetKept } from '../hooks/kept'
-import { fixedNote } from '../hooks/reply'
 import { CWD, DOC, WS, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -152,15 +151,8 @@ test('after a relaunch the toast counts what came before the quit and was never 
   expect(parseKept(w.files.get(`${WS}/${KEPT_FILE}`) ?? '').seen?.cards).toBe(14)
 })
 
-test('the card check\'s note is a sentence whatever its reason looks like', () => {
-  expect(fixedNote({ fields: ['takeaway'], why: 'The takeaway highlights only which day had the most deletes.' })).toBe('The card check rewrote its takeaway: the takeaway highlights only which day had the most deletes.')
-  expect(fixedNote({ fields: ['title', 'takeaway'], why: 'UTC hours were read as local ones' })).toBe('The card check rewrote its question and takeaway: UTC hours were read as local ones.')
-  expect(fixedNote({ fields: ['code'], why: '' })).toBe('The card check rewrote its code.')
-  expect(fixedNote({ fields: ['takeaway'], why: '  the count was off by one..  ' })).toBe('The card check rewrote its takeaway: the count was off by one.')
-})
-
-test('a card the card check rewrote says so under its takeaway: which parts, and why', async ($, on) => {
-  // live check term-fix8, low quirk: the card check rewrote takeaways with nothing in the chat saying so
+test('a card the card check rewrote shows no note of the rewrite', async ($, on) => {
+  // Matt, 10-08: "The card check rewrote its takeaway: …" under a card — "don't show this"
   const w = world(on)
   Object.assign(w.cells.ff73e071!, { takeaway: 'The export holds [[4579|card:ff73e071#pages/TOTAL]] pages.', fixes: [{ id: 'fix1', check: 'c1', by: 'check', fields: ['takeaway'], before: { takeaway: 'The 22:00 hour had 89 deletes.' }, after: { takeaway: 'x' }, reason: 'the takeaway named the wrong hour', state: 'applied' }] })
   await start($, w)
@@ -168,7 +160,9 @@ test('a card the card check rewrote says so under its takeaway: which parts, and
   await w.clock.settle()
   await takesKeys($)
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  // a sentence: a capital, the reason after the colon in lower case, a full stop (item e2-card-check-note-format)
-  expect(shown(await pane.drawn())).toContain('The card check rewrote its takeaway: the takeaway named the wrong hour.')
+  const drawn = shown(await pane.drawn())
+  expect(drawn).toContain('What does the export hold per wiki?')
+  expect(drawn).not.toContain('card check rewrote')
+  expect(drawn).not.toContain('the takeaway named the wrong hour')
   await pane.unmount()
 })
