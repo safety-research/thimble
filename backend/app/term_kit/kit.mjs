@@ -25,6 +25,9 @@ export const COLORS = Object.freeze({
   selected: 'selectionBg',
   tip: 'userMessageBackground',
   code: 'permission',
+  /** the lines a diff added and removed, and their marks: Claude Code's own diff green and red */
+  added: 'diffAddedWord',
+  removed: 'diffRemovedWord',
 })
 
 /** The palette for the values of the one Color by field: seven hues that keep 3:1 on light and dark panels. */
@@ -3969,7 +3972,7 @@ export function transcript(opts = {}) {
 
 // ------------------------------------------------------------------------------------------------ text
 
-const ANSI_FG = { text: '', inactive: '2', subtle: '90', remember: '34', suggestion: '36', success: '32', error: '31', permission: '35' }
+const ANSI_FG = { text: '', inactive: '2', subtle: '90', remember: '34', suggestion: '36', success: '32', error: '31', permission: '35', diffAddedWord: '32', diffRemovedWord: '31' }
 const ANSI_BG = { selectionBg: '48;5;238', userMessageBackground: '48;5;236' }
 const ANSI_BG_LIGHT = { selectionBg: '48;5;252', userMessageBackground: '48;5;254' }
 

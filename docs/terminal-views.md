@@ -108,7 +108,8 @@ A run is `{s, fg, bg, b, d, i, u, inv}`: `fg` and `bg` a theme key of `COLORS` o
 dim, `i` italic, `u` underlined, `inv` inverse. `dim`, `bold`, `link`, `accent`, `problem`, `chosen` and `mark(hue)`
 make one. Each style keeps the one meaning SPEC.md gives it: bold for titles and headings, dim for what is secondary,
 blue and underlined for a link (`↗` and the place after it), the accent and `❯` for the chosen row, the selection
-background for a choice in use (the time range's window), red only for a problem, and a palette hue only on the marks
+background for a choice in use (the time range's window), red only for a problem, `added` and `removed` (Claude Code's
+own diff green and red) only for the lines a diff added and removed and their marks, and a palette hue only on the marks
 of the Color by choice. A record's own words are drawn upright, as a file is.
 
 A control under the pointer is drawn inverse. A chart's cells never are, which would turn the chart into a band: a hit

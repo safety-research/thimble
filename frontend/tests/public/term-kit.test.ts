@@ -1072,4 +1072,10 @@ describe('as text', () => {
     expect(kit.frameText(f)).toBe('  ● fired x')
     expect(kit.frameText(f, { ansi: true })).toBe('  \x1b[38;2;29;127;192m●\x1b[0m\x1b[2m fired\x1b[0m\x1b[48;5;238m x\x1b[0m')
   })
+
+  test("a diff's added and removed lines take Claude Code's diff colors, green and red as text", () => {
+    expect([kit.COLORS.added, kit.COLORS.removed]).toEqual(['diffAddedWord', 'diffRemovedWord'])
+    const f = { lines: [[{ s: '▆', fg: kit.COLORS.added }, { s: '▃', fg: kit.COLORS.removed }]] }
+    expect(kit.frameText(f, { ansi: true })).toBe('\x1b[32m▆\x1b[0m\x1b[31m▃\x1b[0m')
+  })
 })
