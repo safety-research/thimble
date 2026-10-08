@@ -154,19 +154,156 @@ def clocks_in(display: str, text: str) -> bool:
 
 QUOTE_MARKS = "\"'“”‘’"
 
+# a whole number written in words, zero to ninety-nine (`seven`, `Twelve`, `twenty-one`), as prose and an agent's
+# message write a small count: what a number cited in digits may find at its place (number_words; live check term-fix10,
+# quirk 9: edit_card said 12 and 7 were not in an output that writes "Twelve pages are up" and "seven of the twelve")
+_ONES = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+         "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen")
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+_WORD_VALUES = {w: i for i, w in enumerate(_ONES)} | _TENS
+# (a hyphen may follow, as in `six-week`, but not come before: `twenty-one` is one number)
+_NUMBER_WORDS_RE = re.compile(r"(?<![\w-])(" + "|".join(sorted(_TENS, key=len, reverse=True)) + r")(?:[- ](one|two|three|four|five|six|"
+                              r"seven|eight|nine)(?!\w))?|(?<![\w-])(" + "|".join(sorted(_ONES, key=len, reverse=True)) + r")(?!\w)", re.I)
+
+
+def number_words(text: str) -> list[tuple[int, int, int]]:
+    """(start, end, value) of each whole number from zero to ninety-nine that `text` writes in words, any case."""
+    out: list[tuple[int, int, int]] = []
+    for m in _NUMBER_WORDS_RE.finditer(text or ""):
+        if m[1]:
+            out.append((m.start(), m.end(), _TENS[m[1].lower()] + (_WORD_VALUES[m[2].lower()] if m[2] else 0)))
+        else:
+            out.append((m.start(), m.end(), _WORD_VALUES[m[3].lower()]))
+    return out
+
+
+def in_words(display: str, text: str) -> bool:
+    """Whether a display that is one whole number (`12`, `7`) is a number `text` writes in words (`Twelve`, `seven`)."""
+    key = _norm(display.strip())
+    if not key.isdigit() or int(key) > 99:
+        return False
+    return any(v == int(key) for _, _, v in number_words(text))
+
+
+_MONTHS = {m: i for i, names in enumerate((("jan", "january"), ("feb", "february"), ("mar", "march"), ("apr", "april"),
+                                            ("may",), ("jun", "june"), ("jul", "july"), ("aug", "august"),
+                                            ("sep", "sept", "september"), ("oct", "october"), ("nov", "november"),
+                                            ("dec", "december")), 1) for m in names}
+# a day and a month in words, as prose writes a date: `23 June`, `June 23`, `23rd June`, `Jun. 23`, with or without a
+# year (`23 June 2026`, `June 23, 2026`), and with or without a time after it (`4 June 2026 at 10:53:40 UTC`,
+# `June 4, 10:53`)
+_DAY_MONTH_RE = re.compile(r"^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?|([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?)"
+                           r"(?:,?\s+(\d{4}))?"
+                           r"(?:,?\s+(?:at\s+)?(\d{1,2}:\d{2}(?::\d{2})?)(?:\s*(?:UTC|GMT|Z))?)?$", re.I)
+# a date as an output writes it: ISO (`2026-06-23`, also at the head of a time stamp) or a month and day (`06-23`)
+_ISO_DATE_RE = re.compile(r"(?<![\d-])(?:(\d{4})-)?(\d{2})-(\d{2})(?![\d-])")
+# a date as an output writes it with the time after it, if any (`2026-06-04T10:53:40Z`, `06-23`): what a place shows
+# where a date in words is cited (dates_shown)
+_STAMP_RE = re.compile(r"(?<![\d-])(?:\d{4}-)?\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?(?![\d-])")
+# the time a time stamp writes right after its date (`2026-06-04T10:53:40Z`, `2026-06-04 10:53`)
+_STAMP_CLOCK_RE = re.compile(r"[T ](\d{1,2}:\d{2}(?::\d{2})?)(?![\d:])")
+
+
+def _date_words(display: str) -> tuple[int, int, int | None, str | None] | None:
+    """(month, day, year or None, the clock time written after it or None) of a display that is a day and a month in
+    words, with or without a year and a time (`23 June`, `4 June 2026 at 10:53:40 UTC`); None for any other display."""
+    m = _DAY_MONTH_RE.match(display.strip())
+    if not m:
+        return None
+    day, word = (m[1], m[2]) if m[1] else (m[4], m[3])
+    month = _MONTHS.get(word.lower())
+    if month is None or not 1 <= int(day) <= 31:
+        return None
+    return month, int(day), int(m[5]) if m[5] else None, m[6]
+
+
+def day_month(display: str) -> tuple[int, int, int | None] | None:
+    """(month, day, year or None) of a display that is a day and a month in words (`23 June`, `June 23, 2026`, also
+    with a time after it); None for any other display."""
+    parts = _date_words(display)
+    if parts is None:
+        return None
+    month, day, year, _ = parts
+    return month, day, year
+
+
+# a day and a month in words inside prose, as _DAY_MONTH_RE reads one whole (`23 June`, `June 23, 2026`, `4 June 2026 at
+# 10:53:40 UTC`): what _annotate links whole or leaves plain, never splitting its day off as a number
+_MONTH_WORD = r"(?:" + "|".join(sorted(_MONTHS, key=len, reverse=True)) + r")"
+_DATE_IN_TEXT_RE = re.compile(r"(?<![\w.])(?:\d{1,2}(?:st|nd|rd|th)?\s+" + _MONTH_WORD + r"\b\.?|" + _MONTH_WORD
+                              + r"\.?\s+\d{1,2}(?:st|nd|rd|th)?(?![\d:]))"
+                              r"(?:,?\s+\d{4}(?!\d))?"
+                              r"(?:,?\s+(?:at\s+)?\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:UTC|GMT|Z)\b)?)?", re.I)
+
+
+def dates_in_text(text: str) -> list[tuple[int, int, str]]:
+    """(start, end, words) of each day and month in words a text writes (day_month), with its year and its time when it
+    has them."""
+    out: list[tuple[int, int, str]] = []
+    for m in _DATE_IN_TEXT_RE.finditer(text):
+        # a period that ends it ends the sentence (`on 23 June.`), never the month's (`Jun. 5` keeps its own)
+        words = m.group().rstrip(", ").removesuffix(".")
+        # `may` in lower case is the verb (`3 may fail`), never the month
+        if day_month(words) and not re.search(r"\bmay\b", words):
+            out.append((m.start(), m.start() + len(words), words))
+    return out
+
+
+def date_in(display: str, excerpt: str) -> bool:
+    """Whether a display that is a day and a month in words (`23 June`) names a date the excerpt writes as ISO
+    (`2026-06-23`) or as month and day (`06-23`): the same month and day, and the same year when both give one (live
+    check term-fix6, new quirk 7: `23 June` citing a cell `06-23` was marked red). A time after the date
+    (`4 June 2026 at 10:53:40 UTC`) is the time the time stamp writes after that date, or with no time there, a clock
+    time of the excerpt (clocks_in); live check term-fix7, new quirk 1: the citation check tagged it unverified against a
+    line holding 2026-06-04T10:53:40Z. A date the excerpt writes in words holds it too (`23 June`, `June 23, 2026`, a
+    row named `last delete on 30 June`): the same day and month, the same year when both give one, and the clock time
+    among the excerpt's (live check term-fix9, quirk 11: edit_card reported `23 June` missing from a table whose row is
+    named `23 June`)."""
+    want = _date_words(display)
+    if want is None:
+        return False
+    month, day, year, clock = want
+    for m in _ISO_DATE_RE.finditer(excerpt):
+        if (int(m[2]), int(m[3])) != (month, day) or (year is not None and m[1] is not None and int(m[1]) != year):
+            continue
+        if clock is None:
+            return True
+        stamp = _STAMP_CLOCK_RE.match(excerpt, m.end())
+        if clocks_in(clock, stamp[1] if stamp else excerpt):
+            return True
+    for _, _, words in dates_in_text(excerpt):
+        got = _date_words(words)
+        if got is None or (got[0], got[1]) != (month, day) or (year is not None and got[2] is not None and got[2] != year):
+            continue
+        if clock is None or clocks_in(clock, got[3] or excerpt):
+            return True
+    return False
+
+
+def dates_shown(text: str) -> str | None:
+    """The dates a place writes in digits, each with its time (up to three, joined), for the note of a date in words
+    cited there; None when it writes none."""
+    found = list(dict.fromkeys(_STAMP_RE.findall(text or "")))
+    return ", ".join(found[:3]) if found else None
+
 
 def value_in(display: str, excerpt: str, *, decrease: bool = False) -> bool:
     """Whether a value-ref's display is at the place it cites (verify._value_matches, report._value_matches): a number
-    must cite a whole number token of the excerpt by shown_matches (a substring hit is not a receipt); anything else is
-    a comma-insensitive substring of it, the quotation marks around a quoted phrase left out."""
+    must cite a whole number token of the excerpt by shown_matches (a substring hit is not a receipt), or a whole number
+    the excerpt writes in words (in_words); a day and a month in words a date the excerpt writes as digits (date_in);
+    anything else is a substring of it, ignoring commas and case, the quotation marks around a quoted phrase left out."""
     if any(shown_matches(display, t, negative_ok=decrease) for t in _NUM_RE.findall(excerpt)):
         return True
+    if date_in(display, excerpt):
+        return True
     if _NUM_RE.fullmatch(display.strip()):
-        return False
+        return in_words(display, excerpt)  # `7` where the place writes "seven"
     words = display.strip()
     if len(words) > 2 and words[0] in QUOTE_MARKS and words[-1] in QUOTE_MARKS:
         words = words[1:-1]
-    return _norm(words) in excerpt.replace(",", "")
+    # any case: `twelve pages` is at a line that reads "Twelve pages are up" (live check term-fix10, quirk 9: the check
+    # moved the writer's citation to the next line, which writes the words in lower case)
+    return _norm(words).casefold() in excerpt.replace(",", "").casefold()
 
 
 # Prose that says a number is a decrease: an unsigned number may cite a value of the same size with a minus sign ("12
@@ -199,6 +336,27 @@ def says_decrease(text: str, start: int, end: int) -> bool:
     b = _DECREASE_BEFORE_RE.search(_prose(text[:start]))
     a = _DECREASE_AFTER_RE.match(_prose(text[end:]))
     return (b is not None and b.group(1).lower() in DECREASE_WORDS) or (a is not None and a.group(1).lower() in DECREASE_WORDS)
+
+
+def names_label(text: str, label: str) -> bool:
+    """Whether the words of `text` (its citations read as their words, _prose) write a row's name as a whole word, as
+    "a last 89 in the 22:00 hour" names the row 22:00. A one-character name is too common to tell."""
+    name = label.strip()
+    if len(name) < 2:
+        return False
+    return re.search(r"(?<![\w:.-])" + re.escape(name) + r"(?![\w:-])", _prose(text), re.I) is not None
+
+
+def off_named_row(ref: str, to: str, text: str) -> bool:
+    """Whether moving a td span `ref` to the td `to` takes it off the row the words of `text` name: a value cited at the
+    row its sentence names (`[[89|…#deletions/22:00]]` "in the 22:00 hour") is wrong there, not misplaced, so it stays
+    at that row for the check to mark (live check term-fix7, new quirk 1: the writer's `#deletions/22:00` was stored as
+    `#deletions/23:00`, the one td showing 89, and the sentence's hour turned wrong under a blue link)."""
+    a, b = _ANY_TD.match(ref or ""), _ANY_TD.match(to or "")
+    if not a or not b:
+        return False
+    row = decode_label(a[3])
+    return decode_label(b[3]) != row and names_label(text, row)
 
 
 def _keys(key: str, negative_ok: bool) -> list[str]:
@@ -263,6 +421,9 @@ class Resolved:
     # numbers with no value of their own to link to that state a total or count of the card's data (data_totals): left
     # plain and supported, so they are not in `unresolved`
     totals: list[str] = field(default_factory=list)
+    # value-refs into this cell whose value another row shows while the words name the row cited (off_named_row): kept
+    # at that row as written, tier 0
+    misplaced: list[Link] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- output addressing (`@out<i>`)
@@ -724,8 +885,9 @@ def prose(text: str) -> str:
 
 def normalise_markup(text: str) -> str:
     """`text` with the value-ref forms the grammar does not know put right: `[[v]](ref)` and `[v|ref]` become `[[v|ref]]`, a
-    Markdown link to a ref becomes its citation (from_links), a number alone in brackets becomes the plain number, and a
-    file's line cited through a card becomes the file's line. Idempotent; every other token is untouched."""
+    Markdown link to a ref becomes its citation (from_links), `[[↗|ref]]` becomes `[[ref]]`, a number alone in brackets
+    becomes the plain number, and a file's line cited through a card becomes the file's line. Idempotent; every other
+    token is untouched."""
 
     def hybrid(m: "re.Match[str]") -> str:
         display, ref = m.group(1).strip(), m.group(2)
@@ -739,9 +901,16 @@ def normalise_markup(text: str) -> str:
             return m.group()
         return f"[[{display}|{ref}]]"
 
+    def bare(m: "re.Match[str]") -> str:
+        shown, bar, ref = m.group(1).rpartition("|")
+        return f"[[{ref.strip()}]]" if bar and shown.strip() in BARE_LINK_TEXTS and ref.strip() else m.group()
+
     text = _CARD_FILE_LINE_RE.sub(lambda m: m.group(1), text)
     text = _HYBRID_RE.sub(hybrid, text)
     text = from_links(text)
+    # a citation without a value written with the link text as its value (`[[↗|ref]]`) is the bare ref, never a value
+    # the check looks for at its place (live check term-fix7: a takeaway's `[[↗|events.jsonl#L1063]]` was red)
+    text = _SPAN_RE.sub(bare, text)
     text = _SINGLE_RE.sub(single, text)
     return _BARE_NUMBER_RE.sub(lambda m: m.group(1), text)
 
@@ -757,6 +926,13 @@ def find_td(outputs: list[dict] | None, col: str, row: str) -> tuple[str, str] |
             for c, r, v in frames.frame_cells(b) or []:
                 if (c, r) in want:
                     return v, frames.frame_html(b, around=r)
+            # a row's name cited by its label column (`#day/06-23`): the name is the value (live check term-fix7: `[23
+            # June](card:…#day/06-23)` was missing)
+            f = frames.frame_of(b)
+            head = frames.corner(f) if f is not None else ""
+            if head and any((head, r) in want for r in frames.row_labels(f)):
+                name = next(r for r in frames.row_labels(f) if (head, r) in want)
+                return name, frames.frame_html(b, around=name)
             continue
         html = table_html(b)
         if not html:
@@ -765,6 +941,9 @@ def find_td(outputs: list[dict] | None, col: str, row: str) -> tuple[str, str] |
         for c, r, v in cells:
             if (c, r) in want:
                 return v, html
+        name = _row_name(html, want)
+        if name is not None:
+            return name, html
         # a chart whose rows are labelled by its axis still answers a ref that names a row by its position
         table = chart_table(b) if chart_spec(b) is not None else None
         pos = decode_label(row)
@@ -776,6 +955,43 @@ def find_td(outputs: list[dict] | None, col: str, row: str) -> tuple[str, str] |
         hit = _by_key_column(cells, col, row)
         if hit is not None:
             return hit, html
+    return None
+
+
+def _row_names(bundle: dict) -> tuple[str, list[str]]:
+    """(the header over a table's row names, the names) of a frame or a pandas-rendered table; ('', []) when it has no
+    such header."""
+    if frames.FRAME_MIME in bundle:
+        f = frames.frame_of(bundle)
+        return (frames.corner(f) or "", list(frames.row_labels(f))) if f is not None else ("", [])
+    html = table_html(bundle)
+    rows = _ROW_RE.findall(html) if html else []
+    if not rows:
+        return "", []
+    header = [_strip_tags(m.group(2)) for m in _CELL_RE.finditer(rows[0])]
+    head = header[0].strip() if header else ""
+    names: list[str] = []
+    for tr in rows[1:]:
+        cells = [(m.group(1).lower(), _strip_tags(m.group(2))) for m in _CELL_RE.finditer(tr)]
+        if cells and cells[0][0] == "th" and any(tag == "td" for tag, _ in cells):
+            names.append(cells[0][1])
+    return (head, names) if head else ("", [])
+
+
+def _row_name(html: str, want: set[tuple[str, str]]) -> str | None:
+    """A row's name in a pandas-rendered table cited by the header over the row names (its index's name, `#day/06-23`):
+    the name itself; None when the header is blank or no row has that name."""
+    rows = _ROW_RE.findall(html)
+    if not rows:
+        return None
+    header = [_strip_tags(m.group(2)) for m in _CELL_RE.finditer(rows[0])]
+    head = header[0].strip() if header else ""
+    if not head:
+        return None
+    for tr in rows[1:]:
+        cells = [(m.group(1).lower(), _strip_tags(m.group(2))) for m in _CELL_RE.finditer(tr)]
+        if cells and cells[0][0] == "th" and any(tag == "td" for tag, _ in cells) and (head, cells[0][1]) in want:
+            return cells[0][1]
     return None
 
 
@@ -972,6 +1188,37 @@ class _Sources:
         """Whether `tok` is the one number the outputs hold (the printed count): a small integer links on it."""
         return self.only is not None and _norm(tok) == self.only
 
+    def date_places(self, display: str) -> list[str]:
+        """The table cells, row names and text lines of the outputs that write a day and a month in words (`23 June`),
+        in digits or in words (date_in), each once."""
+        refs: list[str] = []
+        for i, b in iter_outputs(self.outputs):
+            cells = bundle_cells(b)
+            if cells:
+                refs += [r for col, row, val in cells if date_in(display, str(val)) and (r := td_ref(self.cell_id, col, row))]
+                # a row's name under the header over the row names (`#day/06-23`), as find_td reads one
+                head, names = _row_names(b)
+                refs += [r for name in names if head and date_in(display, name) and (r := td_ref(self.cell_id, head, name))]
+                continue
+            if any(k.startswith("image/") or "vega" in k for k in b):
+                continue  # a chart's text/plain is its repr, never a source
+            refs += [f"card:{self.cell_id}@out{i}#L{ln}" for ln, line in numbered_lines(b) if date_in(display, line)]
+        return list(dict.fromkeys(refs))
+
+    def word_places(self, tok: str) -> list[str]:
+        """The table cells and text lines of the outputs that write a whole number in words (`12` as "Twelve"; in_words),
+        each once."""
+        refs: list[str] = []
+        for i, b in iter_outputs(self.outputs):
+            cells = bundle_cells(b)
+            if cells:
+                refs += [r for col, row, val in cells if in_words(tok, str(val)) and (r := td_ref(self.cell_id, col, row))]
+                continue
+            if any(k.startswith("image/") or "vega" in k for k in b):
+                continue  # a chart's text/plain is its repr, never a source
+            refs += [f"card:{self.cell_id}@out{i}#L{ln}" for ln, line in numbered_lines(b) if in_words(tok, line)]
+        return list(dict.fromkeys(refs))
+
     def lookup_unit(self, tok: str, unit: str | None) -> tuple[str, int] | None:
         """(ref, tier 2) for a number with its unit word when exactly one text line holds that pair ("16 runs"), else None."""
         if not unit:
@@ -1002,7 +1249,8 @@ class _Sources:
                 return None
             if word and not clocks_in(display, hit[0]):
                 return None
-            if not word and not (_norm(hit[0]) in wants or shown_matches(display, hit[0], negative_ok=negative_ok)):
+            if not word and not (_norm(hit[0]) in wants or shown_matches(display, hit[0], negative_ok=negative_ok)
+                                 or date_in(display, hit[0]) or in_words(display, hit[0])):
                 return None
             return td_ref(self.cell_id, decode_label(m[1]), decode_label(m[2]))
         if m := self.line_span.match(ref):
@@ -1030,10 +1278,13 @@ class _Sources:
 
     @staticmethod
     def _line_holds(line: str, display: str, wants: set[str], negative_ok: bool) -> bool:
-        """Whether a line of text output shows a value-ref's display: a number as a whole token (value_in), anything
-        else as written or by one of its numbers."""
+        """Whether a line of text output shows a value-ref's display: a number as a whole token (value_in), a day and a
+        month in words as a date the line writes in digits (date_in; live check term-fix7, new quirk 4: edit_card
+        unlinked `[[23 June|…#L2]]` from a line holding 2026-06-23), anything else as written or by one of its numbers."""
         if _num_parts(display) is not None:
             return value_in(display, line, decrease=negative_ok)
+        if date_in(display, line):
+            return True
         return display.strip() in line or bool(wants & {_norm(x) for x in _NUM_RE.findall(line)})
 
 
@@ -1046,10 +1297,33 @@ def _specific(tok: str) -> bool:
 
 
 def _annotate(seg: str, src: _Sources, res: Resolved, seen: set[str]) -> str:
-    """Wrap every number in a plain-text segment (no [[...]] inside) that has a unique source."""
+    """Wrap every number in a plain-text segment (no [[...]] inside) that has a unique source. A day and a month in words
+    (`On 23 June`) is one value: linked whole to the one line or cell that writes that date in digits (date_in), else
+    left plain, never its day linked as a number with the month as its unit (live check term-fix8, quirk 4: `23` was
+    linked to an answer at 23:41 while the sentence was about another line). A number an output writes only in words
+    (`12` as "Twelve pages are up") is found there, so it is not listed as unresolved, and stays plain (live check
+    term-fix10, quirk 9)."""
     parts: list[str] = []
     pos = 0
+    dates = dates_in_text(seg)
     for m in _NUM_RE.finditer(seg):
+        if m.start() < pos:
+            continue  # a number of a date written whole already
+        date = next((d for d in dates if d[0] <= m.start() < d[1]), None)
+        if date is not None:
+            start, end, words = date
+            parts.append(seg[pos:start])
+            pos = end
+            places = src.date_places(words)
+            if len(places) == 1:
+                parts.append(f"[[{words}|{places[0]}]]")
+                res.links.append(Link(words, places[0], 2))
+                continue
+            parts.append(words)
+            if not places and words not in seen:  # no output writes the date; several leave it plain, as an ambiguous number
+                seen.add(words)
+                res.unresolved.append(words)
+            continue
         parts.append(seg[pos : m.start()])
         pos = m.end()
         tok = m.group()
@@ -1065,7 +1339,10 @@ def _annotate(seg: str, src: _Sources, res: Resolved, seen: set[str]) -> str:
             if tok in seen:  # one entry per token as written: `29` and `29.0` are each listed (each is wrapped by itself)
                 continue
             seen.add(tok)
-            (res.totals if src.is_total(tok) else res.unresolved).append(tok)
+            if src.is_total(tok):
+                res.totals.append(tok)
+            elif not src.word_places(tok):  # one an output writes in words ("Twelve pages") is found, and left plain
+                res.unresolved.append(tok)
     parts.append(seg[pos:])
     return "".join(parts)
 
@@ -1083,6 +1360,16 @@ def whole_output_cell(ref: str) -> str | None:
 def is_label_display(display: str) -> bool:
     """Whether a value-ref's display names the link rather than a value — no number in it (`chart`, `per-run table`)."""
     return not _NUM_RE.search(display or "")
+
+
+def shows_value(display: str) -> bool:
+    """Whether a value-ref's display shows a value its place can be checked for: a number, quoted words or a day and a
+    month in words (mods/thimble-term/hooks/cite.ts showsValue). Other words, such as `its record` or `had the answer
+    cached`, only name the place they link to (live check term-fix6: `[[its record|pages.jsonl#L2]]` was marked red
+    because the line holds no such words)."""
+    d = (display or "").strip()
+    quoted = len(d) > 2 and d[0] in QUOTE_MARKS and d[-1] in QUOTE_MARKS
+    return bool(_NUM_RE.search(d)) or quoted or day_month(d) is not None
 
 
 def _canonical_token(token: str) -> str:
@@ -1127,6 +1414,11 @@ def resolve(cell_id: str, answer: str, outputs: list[dict] | None, *, keep_stale
         neg = says_decrease(answer, m.start(), m.end())  # "[[12|…]] fewer": the td may hold -12
         canon = src.verify(ref, display, negative_ok=neg)
         hit = (canon, 2) if canon else src.lookup_display(display, negative_ok=neg)
+        if hit and not canon and off_named_row(ref, hit[0], answer):
+            # the value is at another row than the one the words name: kept where it was cited, named in `misplaced`
+            out.append(_canonical_token(m.group()))
+            res.misplaced.append(Link(display, ref, 0))
+            continue
         if hit:
             out.append(f"[[{display}|{hit[0]}]]")
             res.links.append(Link(display, hit[0], hit[1]))

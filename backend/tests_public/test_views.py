@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import Listener
 
 from app import config, dev, extension_manifest, headless, tools, userconf, views
 
@@ -128,6 +129,7 @@ def _fresh(monkeypatch):
     monkeypatch.setattr(views, "FOLDER_CACHE_S", 0.0)
     views._memo.clear()
     views._ready.clear()
+    views._derived_kept.clear()
     sys.modules.pop("_thimble_views", None)
     yield
     views._memo.clear()
@@ -599,6 +601,24 @@ def test_the_test_label_answers_thimble_labels_as_a_label_would(tmp_path):
         kt._view_ctx, kt._view_paths = None, []
 
 
+def test_a_mark_names_each_label_s_value_with_the_label_s_id():
+    """Under the test label a marked record's mark and a unit's say the test label's value with its id, which the page's
+    `all` lists the label by, so a page can tell one label's values from another's; an unmarked record has no mark. Its
+    colors are the palette's tokens, which the bridge resolves in the frame's theme, so a unit's bar in Dark is Dark's
+    step of the color."""
+    from app import kernel_thimble as kt  # noqa: PLC0415
+
+    ctx = views.probe_context()
+    token = f"var(--label-{kt.LABEL_COLOURS.index(kt.PROBE_COLOUR)})"
+    rec = views._record_mark(ctx, "board.jsonl#L7")
+    assert rec["bar"] == token
+    assert rec["values"] == [{"id": kt.PROBE_ID, "label": kt.PROBE_NAME, "value": kt.PROBE_NAME, "colour": token}]
+    assert views._record_mark(ctx, "board.jsonl#L8") is None
+    unit = views._unit_mark(ctx, ["board.jsonl#L6", "board.jsonl#L7", "board.jsonl#L14"])
+    assert unit["values"] == rec["values"] and unit["bar"] == token
+    assert views._page_colour(kt.LABEL_COLOURS[0]) == "var(--label-none)" and views._page_colour("#123456") == "#123456"
+
+
 def _shot(state: str, **shown) -> dict:
     return {"ok": True, "state": state, "fetched_records": shown.pop("fetched", 0), "label_controls": shown.pop("controls", 1),
             "shown": shown}
@@ -649,11 +669,11 @@ async def test_a_claim_that_matches_no_file_is_listed_as_missing(ws, inproc, bou
     assert rep["ok"] and any("logs/*.log" in n for n in rep["notes"]), views.gate_lines(rep)
 
 
-async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems_for_a_revision(ws, bound, monkeypatch):
-    """The review starts from one picture of the view as it opens; the reading may ask for other states, which are shot
-    and read once more with the first, and that reading's problems go to a revision. The view revised, it is reviewed
-    again from one picture, and a reading with no problems ends it."""
-    from app import card_check, model, view_review  # noqa: PLC0415
+async def test_the_review_s_pictures_take_each_state_in_its_pane_with_its_label_and_its_clicks(ws, bound, monkeypatch):
+    """view_pictures (view_review.pictures): a round's first call takes the overview, then the states the reviewer asks
+    for, each in its pane, with the test label on or filtered to, and the controls it names clicked; a `control` that
+    names none is left out. Each picture's line says what it shows and why it was asked for."""
+    from app import view_review  # noqa: PLC0415
 
     monkeypatch.setattr(views, "_queue", lambda c, slug: None)
     views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
@@ -671,118 +691,64 @@ async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems
         return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"]), "answers": [[{"ref": "board.jsonl#L1"}]]}
                 for st in states]
 
-    answers = [{"problems": ["picture 1: the list is cut off"],
-                "more": [{"state": "filtered", "why": "the filter"}, {"state": "control", "controls": ["Day"], "why": "days"},
-                         {"state": "control", "why": "names no control"}]},
-               {"problems": ["picture 2: the filter keeps every post"]},
-               {"problems": [], "more": []}]
-    readings: list[tuple[int, bool, str]] = []
-
-    async def reading(c, system, user, tool, images, effort):
-        readings.append((len(images), "more" in tool.input_schema["properties"], user))
-        return model.CallResult(status="ok", output=answers[len(readings) - 1])
-
-    revisions: list[list[str]] = []
-
-    async def revise(c, slug, prop, problems, shots):
-        revisions.append(problems)
-        return True, "fixed"
-
     monkeypatch.setattr(views, "shoot_states", shoot_states)
-    monkeypatch.setattr(view_review, "_call", reading)
-    monkeypatch.setattr(view_review, "revise", revise)
-    monkeypatch.setattr(card_check, "fit_image", lambda b: b)
-    await view_review._review(view_review._Run(CORPUS, "threads"))
-    assert taken == [["plain"], ["filtered", "plain"], ["plain"]]
-    assert asked[:3] == [(views.PANE_SIZE, None), (views.PANE_NARROW, None), (views.PANE_SIZE, ["Day"])]
-    assert [(n, more) for n, more, _ in readings] == [(1, True), (3, False), (1, True)]
-    assert "3: the overview after clicking nothing" in readings[1][2], "the stub clicked nothing"
-    assert f"2: the overview filtered to the test label, {views.PANE_NARROW[0]} px wide (asked for: the filter)" in readings[1][2]
-    assert revisions == [["picture 2: the filter keeps every post"]]
-    review = views.read_proposal(CORPUS, "threads")["review"]
-    assert review["state"] == "done" and review["revised"] == revisions[0] and review["shots"] == 4 and not review["left"]
+    monkeypatch.setattr(view_review.headless, "missing", lambda what: False)
+    more = [{"state": "filtered", "why": "the filter"}, {"state": "control", "controls": ["Day"], "why": "days"},
+            {"state": "control", "why": "names no control"}]
+    paths, records, reading = await view_review.pictures(CORPUS, "threads", "a1", more)
+    assert reading == "", "no extension's program replaces the view-review task"
+    assert taken == [["plain", "filtered", "plain"]]
+    assert asked == [(views.PANE_SIZE, None), (views.PANE_NARROW, None), (views.PANE_SIZE, ["Day"])]
+    assert f"the overview filtered to the test label, {views.PANE_NARROW[0]} px wide, asked for: the filter" in paths
+    assert "the overview after clicking nothing" in paths, "the stub clicked nothing"
+    assert "board.jsonl#L1" in records
+    assert views.read_proposal(CORPUS, "threads")["review"]["shots"] == 3
 
 
-async def test_the_review_reads_again_for_as_long_as_the_api_stays_at_capacity(ws, bound, monkeypatch):
-    """A reading the API keeps refusing at capacity waits and reads again, with the waits doubling up to a cap, so a
-    long streak of 429s or 529s never ends the review."""
-    from app import card_check, model, view_review
+async def test_a_program_that_replaces_the_view_review_task_reads_the_reviewer_s_pictures(ws, bound, monkeypatch):
+    """An extension's program that replaces the view-review task gets each view_pictures call's pictures as the task's
+    input (docs/agents.md), and the reviewer gets the problems it found to fix; a program that fails ends the review
+    failed with why, and the reviewer is told to end."""
+    import types  # noqa: PLC0415
 
-    views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
-    views.mark_built(CORPUS, "threads")
-
-    async def shoot_states(c, slug, states, **k):
-        for st in states:
-            Path(st["out"]).parent.mkdir(parents=True, exist_ok=True)
-            Path(st["out"]).write_bytes(b"png")
-        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"])} for st in states]
-
-    readings: list[int] = []
-
-    async def reading(c, system, user, tool, images, effort):
-        readings.append(1)
-        if len(readings) <= 7:
-            return model.CallResult(status="rate_limited" if len(readings) % 2 else "error", detail="529 overloaded_error")
-        return model.CallResult(status="ok", output={"problems": [], "more": []})
-
-    slept: list[float] = []
-
-    async def sleep(s):
-        slept.append(s)
-        await asyncio.sleep(0.05)
-
-    monkeypatch.setattr(views, "shoot_states", shoot_states)
-    monkeypatch.setattr(view_review, "_call", reading)
-    monkeypatch.setattr(view_review, "_capacity_sleep", sleep)
-    monkeypatch.setattr(card_check, "fit_image", lambda b: b)
-    await view_review._guarded(view_review._Run(CORPUS, "threads"))
-    assert slept == [30.0, 60.0, 120.0, 240.0, 300.0, 300.0, 300.0]
-    review = views.read_proposal(CORPUS, "threads")["review"]
-    assert review["state"] == "done" and not review["left"], review
-
-
-async def test_a_review_runs_until_it_ends_and_the_analyst_s_stop_puts_the_view_back(ws, bound, monkeypatch):
-    """A review has no time limit: a revision that takes long is waited for, and the analyst's Stop ends the review
-    `stopped`, its revision's session stopped and the view back at its last version that passed."""
-    from app import card_check, dev, model, view_review  # noqa: PLC0415
+    from app import model, tasks, view_review  # noqa: PLC0415
 
     monkeypatch.setattr(views, "_queue", lambda c, slug: None)
     views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
     views.mark_built(CORPUS, "threads")
-    page = views.views_dir(CORPUS) / "threads" / "view.html"
-    built = page.read_text("utf-8")
 
     async def shoot_states(c, slug, states, **k):
         for st in states:
             Path(st["out"]).parent.mkdir(parents=True, exist_ok=True)
             Path(st["out"]).write_bytes(b"png")
-        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"])} for st in states]
+        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"]), "answers": []} for st in states]
 
-    async def reading(c, system, user, tool, images, effort):
-        return model.CallResult(status="ok", output={"problems": ["the list is cut off"], "more": []})
-
-    revising = asyncio.Event()
-
-    async def revise(c, slug, prop, problems, shots):
-        page.write_text("<p>half a revision</p>", "utf-8")
-        revising.set()
-        await asyncio.Event().wait()
-
-    stopped: list[tuple[str, str]] = []
     monkeypatch.setattr(views, "shoot_states", shoot_states)
-    monkeypatch.setattr(view_review, "_call", reading)
-    monkeypatch.setattr(view_review, "revise", revise)
-    monkeypatch.setattr(dev, "stop_review_session", lambda c, slug: stopped.append((c, slug)))
-    monkeypatch.setattr(card_check, "fit_image", lambda b: b)
-    run = view_review.start(CORPUS, "threads")
-    await asyncio.wait_for(revising.wait(), 5)
-    await asyncio.sleep(0.2)
-    assert view_review.running(CORPUS, "threads") and view_review.revising(CORPUS, "threads")
-    assert view_review.stop(CORPUS, "threads")
-    await asyncio.wait_for(run.task, 5)
+    monkeypatch.setattr(view_review.headless, "missing", lambda what: False)
+    monkeypatch.setattr(tasks, "program", lambda c, task: types.SimpleNamespace(extension="vote") if task == "view-review"
+                        else None)
+    inputs: list[dict] = []
+    answer = model.CallResult(status="ok", output={"problems": ["picture 1: the header covers the first post"]})
+
+    async def call(c, task, inp, schema=None, **k):
+        inputs.append(inp)
+        return answer
+
+    monkeypatch.setattr(tasks, "call", call)
+    paths, _, reading = await view_review.pictures(CORPUS, "threads", "a1", [])
+    [inp] = inputs
+    assert inp["view"]["slug"] == "threads" and inp["ask"] is False
+    assert [p["path"] for p in inp["pictures"]] == [paths.split(" ", 2)[1]]
+    assert "vote's program" in reading and "- picture 1: the header covers the first post" in reading
+    answer = model.CallResult(status="error", detail="it crashed")
+    stopped: list[str] = []
+    from app import view_tools  # noqa: PLC0415
+
+    monkeypatch.setattr(view_tools, "stop_after_grace", lambda c, key, agent_id: stopped.append(agent_id))
+    with pytest.raises(view_review.NoPictures, match="vote's program .* failed: it crashed"):
+        await view_review.pictures(CORPUS, "threads", "a1", [{"state": "narrow", "why": "the width"}])
     review = views.read_proposal(CORPUS, "threads")["review"]
-    assert (review["state"], review["note"]) == ("stopped", view_review.STOPPED_NOTE)
-    assert stopped == [(CORPUS, "threads")] and page.read_text("utf-8") == built
+    assert review["state"] == "failed" and review["finished"] and "it crashed" in review["note"] and stopped == ["a1"]
 
 
 async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
@@ -834,9 +800,34 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
     v = dict(views.read_view(CORPUS, "threads"), libs=views._libs(["vega-embed"]))
     with_libs = views.frame_document(v)
     if views.LIBS["vega"].is_file():
-        assert with_libs.count("<script>") == 6, "the view's name, the bridge, vega, vega-lite, vega-embed and the view's own"
+        assert with_libs.count("<script>") == 11, \
+            "the view's name, the bridge, the kit's Color by, row controls, side panel, transcript and time range, vega, " \
+            "vega-lite, vega-embed and the view's own"
     assert views._script_text("a</script>b") == "a<\\/script>b"
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
+
+
+async def test_the_frame_route_sends_the_document_again_only_when_it_changed(ws, inproc, bound):
+    """The frame document carries an ETag, so the browser asks on every open, and a request that names the tag gets
+    304 with no body until the view's page changes."""
+    import httpx  # noqa: PLC0415
+
+    from app.main import app  # noqa: PLC0415
+
+    views.mark_built(CORPUS, "threads")
+    url = f"/api/ws/{CORPUS}/views/threads/frame"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+        r = await client.get(url)
+        assert r.status_code == 200 and "window.thimble" in r.text
+        tag = r.headers["etag"]
+        assert r.headers["cache-control"] == "no-cache"
+        again = await client.get(url, headers={"If-None-Match": tag})
+        assert (again.status_code, again.content, again.headers["etag"]) == (304, b"", tag)
+        assert (await client.get(url, headers={"If-None-Match": '"0"'})).status_code == 200
+        views.write_view(CORPUS, "threads", reader=THREADS_READER, html=THREADS_HTML + "<!-- changed -->", **VIEW)
+        views.mark_built(CORPUS, "threads")
+        changed = await client.get(url, headers={"If-None-Match": tag})
+        assert changed.status_code == 200 and changed.headers["etag"] != tag and "<!-- changed -->" in changed.text
 
 
 async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc, bound):
@@ -844,11 +835,9 @@ async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc,
     anchor's content only."""
     import httpx  # noqa: PLC0415
 
-    from app import channel  # noqa: PLC0415
     from app.main import app  # noqa: PLC0415
 
-    q: asyncio.Queue = asyncio.Queue()
-    channel._subs.setdefault(CORPUS, set()).add(q)
+    q = Listener(CORPUS)
     click = {"surface": "files", "element": "view:threads", "selector": "", "image": None, "parent": None}
     cases = [{**click, "anchor": "view:threads", "anchor_text": "Legend"},
              {**click, "anchor": "board.jsonl#L3", "anchor_text": "Confirmed"},
@@ -862,7 +851,7 @@ async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc,
                 assert "asked: in the view's own box" not in content, body
                 assert "The records the view reads" not in content, body
     finally:
-        channel._subs.pop(CORPUS, None)
+        q.close()
 
 
 # ------------------------------------------------------------------------------------------------- worked examples
@@ -1002,23 +991,22 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
 
 async def _every_answer(name: str, slug: str) -> list:
     """What the example's page fetches, over every place: each Timeline event in full, each session's transcript and
-    the runs and sessions compared, each Repository tab and unit."""
+    each call in full, each Repository run's tabs and units."""
     call = functools.partial(views.reader_call, name, slug, "records")
     if name == "timeline":
         rows = (await call({"op": "overview"}))["cols"]["r"]
         return [{"ref": got["ref"], **got["record"]} for got in [await call({"op": "record", "r": r}) for r in rows]]
     if name == "linked-sessions":
         ov = await call({"op": "overview"})
-        out = [await call({"op": "session", "id": s["id"]}) for s in ov["sessions"]]
-        for s in ov["sessions"]:
-            out += [await call({"op": "moment", "run": s["run"], "t": c["time"], "session": s["id"]})
-                    for c in ov["calls"] if c["session"] == s["id"]][:3]
-        return [*out, ov, await call({"op": "compare", "ids": [r["id"] for r in ov["runs"]]}),
-                await call({"op": "compare", "ids": [s["id"] for s in ov["sessions"]][:6]})]
+        out = [await call({"op": "turns", "session": s["id"]}) for s in ov["sessions"]]
+        out.append(await call({"op": "turns", "refs": [it["ref"] for it in ov["items"] if it["agent"] == "client-port"]}))
+        out += [await call({"op": "record", "ref": it["ref"]}) for it in ov["items"] if it["kind"] == "call"]
+        return [*out, ov]
     out = []
-    for tab in ("pulls", "issues", "discussions", "agents"):
-        got = await call({"op": "view", "tab": tab, "runs": ["r1", "r2", "r3", "r4"], "compare": True})
-        out += [got, *[await call({"op": "unit", "key": it["key"]}) for it in got["items"]]]
+    for run in ("r1", "r2", "r3", "r4"):
+        for tab in ("pulls", "issues", "discussions", "agents"):
+            got = await call({"op": "view", "run": run, "tab": tab})
+            out += [got, *[await call({"op": "unit", "key": it["key"]}) for it in got["items"]]]
     return out
 
 
@@ -1037,6 +1025,37 @@ async def test_every_record_a_worked_example_serves_lists_the_fields_its_lines_d
     assert not views.unlisted_derived(name, [{"answers": answers}], declared)
 
 
+async def test_the_repository_colors_an_agent_by_its_own_name_and_by_its_records_under_their_items_fields(samples, inproc,
+                                                                                                        bound):
+    """Matt (10-08): Color by author did not color the Agents tab. An agent's row carries its author, itself, so it
+    takes its own value as the other tabs' rows do (the page's colour.attr reads it). Under a field it does not carry,
+    a state or an area of the items it worked on, the row stands for its records: each takes the value of the pull
+    request, issue or thread it is about, `mix` counts them (its sign-off left out, so they add up to what the row
+    counts), the chips count the agent under each value, and the agent shows while any of its values is on. The other
+    tabs' rows keep their own values."""
+    slug = _save_example("repository")
+
+    async def view(field, tab="agents", off=()):
+        return await views.reader_call("repository", slug, "records", {"op": "view", "run": "r1", "tab": tab,
+                                                                        "colour": {"field": field, "off": list(off)}})
+
+    got = await view("author")
+    assert [(it["title"], it["author"], it["value"], "mix" in it) for it in got["items"]] == \
+        [("ash", "ash", "ash", False), ("birch", "birch", "birch", False), ("cedar", "cedar", "cedar", False)]
+    assert got["counts"] == {"ash": 1, "birch": 1, "cedar": 1}
+    got = await view("state")
+    ash = got["items"][0]
+    assert dict(map(tuple, ash["mix"])) == {None: 4, "fixed": 3, "merged": 13, "closed": 1} and ash["value"] == "merged"
+    assert sum(n for _, n in ash["mix"]) == sum(ash["did"].values()), "the mix divides the records the row counts"
+    assert got["counts"] == {"": 3, "fixed": 3, "merged": 3, "closed": 2, "open": 1}, "a chip for each value a mix draws"
+    got = await view("state", off=["merged", "fixed", "closed", None])
+    assert [(it["title"], it["mix"]) for it in got["items"]] == [("birch", [["open", 2]])], \
+        "a value turned off leaves the mixes, and an agent with no value on leaves the list"
+    assert got["tabs"]["agents"] == 1
+    got = await view("state", tab="pulls")
+    assert got["items"] and not any("mix" in it for it in got["items"]) and got["counts"] == {"merged": 7, "closed": 1}
+
+
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
 async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, samples, inproc, bound, tmp_path):
     """The whole check a view ticket's session runs, the headless page included, where this machine has Node and the
@@ -1051,56 +1070,18 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     assert rep["page"]["fetches"] >= 1 and Path(rep["page"]["png"]).is_file()
     assert [s["state"] for s in rep["shots"]] == list(views.CHECK_STATES)
     assert [s["state"] for s in rep["shots"] if s.get("png")] == ["opened"], "only the picture asked for is taken"
+    # every choice of the kit's controls the example mounts was tried, and drew
+    tried = {(c["control"], c["choice"]) for s in rep["shots"] if s["state"] == "choices" for c in s.get("choices") or []}
+    assert ("Color by", "Off") in tried, tried
     if name != "pdf":
-        shown = rep["shots"][0]["shown"]
+        # the `choices` state is no state of its own the checks read (views.check), so it carries no `shown`
+        by = {s["state"]: s["shown"] for s in rep["shots"] if s["state"] != "choices"}
+        # the repository's overview lists its items, each standing for its records, so it takes no mark of its own and
+        # shows their mix; its records show on an item's page
+        shown = by["detail" if name == "repository" else "overview"]
         assert shown["due"] and shown["drawn"] == shown["due"], "the test label shows on the records a worked example shows"
-
-
-async def test_a_check_run_where_it_cannot_reach_the_server_leaves_its_request_in_the_view_s_folder(ws, monkeypatch):
-    """view_check.py run inside the sandbox reaches neither the server nor server.json: it leaves its request as a file
-    in the view's folder, which the server watches while the session runs, and prints the answer written beside it."""
-    import importlib.util  # noqa: PLC0415
-
-    spec = importlib.util.spec_from_file_location("view_check_t", Path(views.__file__).with_name("view_check.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    asked: list[tuple] = []
-
-    async def answer(c, slug, locators, picture):
-        asked.append((c, slug, locators, picture))
-        return {"ok": True, "lines": ["page: loaded"], "png": None}
-
-    monkeypatch.setattr(views, "check_answer", answer)
-    monkeypatch.setattr(views, "CHECK_POLL_S", 0.05)
-    monkeypatch.setattr(mod, "POLL_S", 0.05)
-    folder = views.views_dir(CORPUS) / "threads"
-    out = io.StringIO()
-    monkeypatch.setattr(sys, "stdout", out)
-    watch = views.watch_checks(CORPUS, "threads")
-    try:
-        code = await asyncio.to_thread(mod.main, ["--home", str(folder / "nowhere"), "--folder", str(folder),
-                                                  "http://127.0.0.1:9/api/ws/boards/views/threads/check", "board.jsonl#L3",
-                                                  "--picture"])
-    finally:
-        watch.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await watch
-    assert code == 0 and json.loads(out.getvalue())["lines"] == ["page: loaded"]
-    assert asked == [(CORPUS, "threads", ["board.jsonl#L3"], True)]
-    assert not (folder / views.CHECK_DROP).exists(), "the folder goes when the session's watch ends"
-    monkeypatch.setattr(mod, "PICKUP_S", 0.2)
-    code = await asyncio.to_thread(mod.main, ["--folder", str(folder), "http://127.0.0.1:9/api/ws/boards/views/threads/check"])
-    assert code == 1 and not list((folder / views.CHECK_DROP).glob("*.json")), "with no server watching it gives up"
-    elsewhere = folder.parent / "elsewhere"
-    elsewhere.mkdir()
-    (elsewhere / "0123abcd.json").write_text("{}")
-    shutil.rmtree(folder / views.CHECK_DROP, ignore_errors=True)
-    (folder / views.CHECK_DROP).symlink_to(elsewhere)
-    assert views._drop_requests(folder / views.CHECK_DROP) == [], "a drop folder that is a symlink is not read"
-    (folder / views.CHECK_DROP).unlink()
-    (folder / views.CHECK_DROP).mkdir()
-    (folder / views.CHECK_DROP / "4567abcd.json").symlink_to(elsewhere / "0123abcd.json")
-    assert views._drop_requests(folder / views.CHECK_DROP) == [], "nor a request that is a symlink"
+        if name == "repository":
+            assert by["overview"]["units"] and not by["overview"]["due"], "a row takes no mark of its own"
 
 
 FIT_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>
@@ -1140,6 +1121,47 @@ async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control
     notes = views.layout_notes([{**plain, "state": "wide"}])
     assert len(notes) == 1 and "overlaps other text in 1 place," in notes[0] and "rest of the pane is empty" in notes[0]
 
+
+
+# a page with the kit's three controls whose Rows draws a heading from the choice's title, so Rows: None (no title)
+# throws in its onChange; every other choice draws
+CHOICES_HTML = """<!doctype html><html><head></head><body><div class="top"><span id="filter"></span><span id="rows"></span>
+<span id="colour"></span></div><div id="list"></div>
+<script>
+const posts = [{ ref: 'board.jsonl#L1', kind: 'ask' }, { ref: 'board.jsonl#L2', kind: 'answer' }]
+const colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], strip: '#list', onChange: draw })
+const filter = thimble.filterBy({ mount: '#filter', fields: [{ name: 'kind', title: 'Kind' }], onChange: draw })
+const rows = thimble.rows({ mount: '#rows', fields: [{ name: 'kind', title: 'Kind' }], onChange: draw })
+function draw() {
+  const head = rows.by.title
+  document.getElementById('list').innerHTML = '<h3>' + head + '</h3>' + posts.filter((p) => filter.keeps(p)).map((p) => '<div data-anchor="' + p.ref + '"' + colour.attr(p) + '>' + p.kind + '</div>').join('')
+}
+draw()
+</script></body></html>"""
+
+
+async def test_the_gate_tries_every_choice_of_the_kit_s_controls_and_names_the_one_that_gives_a_script_error(ws, inproc,
+                                                                                                          bound):
+    """The checks' `choices` state tries each choice of Color by, Rows and Filter by the page mounted, Off and None
+    among them, and fails the view on the choice whose drawing throws, naming it (choice_problems)."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "choices", reader=THREADS_READER, html=CHOICES_HTML, **{**VIEW, "name": "Choices"})
+    (s,) = await views.shoot_states(CORPUS, "choices", [{"open": {}, "sweep": True, "labels": views.probe_context()}])
+    tried = [(c["control"], c["choice"]) for c in s["choices"]]
+    for want in [("Color by", "Off"), ("Color by", "Kind"), ("Rows", "None"), ("Rows", "Kind"), ("Filter by", "None"),
+                 ("Filter by", "Kind")]:
+        assert want in tried, tried
+    # each control's first choice is tried again after the others, as the analyst comes back to it
+    assert ("Rows", "None (after the others)") in tried and ("Color by", "Off (after the others)") in tried, tried
+    bad = [(c["control"], c["choice"]) for c in s["choices"] if c["errors"]]
+    assert bad == [("Rows", "None"), ("Rows", "None (after the others)")], s["choices"]
+    assert s["ok"], "the errors of a choice are its own, not the state's"
+    (problem,) = views.choice_problems([{**s, "state": "choices"}])
+    assert "Rows: None" in problem and "title" in problem, problem
+    assert not views.choice_problems([{**s, "state": "choices", "choices": [c for c in s["choices"] if not c["errors"]]}])
 
 
 async def test_the_headless_page_waits_for_a_slow_answer_and_its_run_gets_the_time_the_answer_took(ws, inproc, bound,
@@ -1295,6 +1317,25 @@ async def test_a_page_that_changes_labels_by_itself_fails_the_checks_and_a_click
     (problem,) = views.self_label_problems([plain])
     assert "`thimble.setLabel`, `thimble.setFilter`" in problem and "2 label calls by itself" in problem
     assert views.self_label_problems([{**plain, "self_labels": []}]) == []
+
+
+SRC_HTML = """<!doctype html><html><head><script src="lib/marked/marked.min.js"></script></head><body>
+<div data-anchor="board.jsonl#L1">one</div><script>thimble.onOpen(() => {})</script></body></html>"""
+
+
+async def test_a_page_that_loads_a_script_by_its_path_fails_the_checks_as_the_browser_refuses_it(ws, inproc, bound):
+    """Live check L31: a builder put `<script src="lib/marked/marked.min.js">` in the page. The browser resolves the
+    path against thimble's address and the frame's policy refuses it ("which a view may not do"), but the checks' page
+    sat at about:blank, where the path resolved to nothing, so the view passed and could not be shown. The checks' page
+    has an http address too, so the page check fails with the same words."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "src", reader=THREADS_READER, html=SRC_HTML, **{**VIEW, "name": "Src"})
+    (state,) = await views.shoot_states(CORPUS, "src", [{"open": {}}])
+    assert not state["ok"]
+    assert any("lib/marked/marked.min.js, which a view may not do" in e for e in state["errors"]), state["errors"]
 
 
 # what Playwright's own error says to run, which never reaches a model

@@ -3,7 +3,7 @@
 An id is a workspace's name: a registered folder's live workspace, or an archived run `/thimble fresh` moved aside
 (ledger.archive_path). The rows come from the disk (the registry and the workspaces folder, as cli.resolve_env
 resolves them), so `list` works with the server down; open sessions are counted only when this install's server
-answers GET /api/channel/sessions for the same folders.
+answers GET /api/events/sessions for the same folders.
 
 `purge <id>…` prints its plan and asks unless -y; --dry-run stops after the plan. A live workspace is deleted through
 the server when it is up (DELETE /api/ws/<c>?idle=true), else from the disk, and its registration goes too. A
@@ -31,7 +31,7 @@ ARCHIVE_DIR = ".archive"  # ledger.ARCHIVE_DIR
 # ledger.archive_path's names: <c>-<local time>, with -2, -3 … for two archives of one second
 ARCHIVE_RE = re.compile(r"^(?P<ws>.+)-(?P<when>\d{4}-\d{2}-\d{2}-\d{6})(?:-(?P<n>\d+))?$")
 SIDECAR_SUFFIX = config.SIDECAR_SUFFIX
-SESSIONS_PATH = "/api/channel/sessions"
+SESSIONS_PATH = "/api/events/sessions"
 UP, DOWN, OTHER, UNKNOWN = "up", "down", "other", "unknown"  # what answers on the port (server)
 
 

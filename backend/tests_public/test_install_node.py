@@ -35,6 +35,7 @@ def checkout(root: Path) -> Path:
     """A git checkout of thimble holding the real install.sh, the manifests it reads and a built UI."""
     (root / "scripts").mkdir(parents=True)
     shutil.copy(REPO / "scripts" / "install.sh", root / "scripts")
+    shutil.copy(REPO / "scripts" / "plugin.sh", root / "scripts")
     (root / "plugin" / "bin").mkdir(parents=True)
     (root / "plugin" / ".claude-plugin").mkdir()
     (root / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble", "version": "0.0.1"}))

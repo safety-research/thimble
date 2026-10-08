@@ -1,7 +1,7 @@
 """Views: viewers written for how a corpus arranges its records, and the proposals they start as.
 
 A view is three files in `workspaces/<c>/extension/views/<slug>/`, the workspace's local extension (local_dir), written
-by the dev agent's session (dev.run_view): view.json {name, description, scope, unit, records, accepts, units, libs,
+by the view's builder, a subagent of main (dev.start_build, view_tools.py): view.json {name, description, scope, unit, records, accepts, units, libs,
 built}, reader.py (the contract in view_host.py), and view.html, drawn in a sandboxed frame that loads nothing but the
 view's media route. `scope` are globs of the files the view opens (held as `claims`), `unit` "file" for a file viewer
 (file_type_viewer), `records` its kinds of record with the fields its reader made rather than read, each `derived`
@@ -24,14 +24,20 @@ kernel with a cached index; refs.resolve hands file refs with a fragment to enri
 synchronous callers to the kernel on the server's loop.
 
 thimble's own state of the views (proposals, versions, revisions, reviews) stays in `workspaces/<c>/views/` (state_dir).
-A proposal is a view ticket in `views/proposals.json` that starts building as soon as it is proposed. Until the
-server
-stamps `built` into view.json the view is a draft that nothing lists or opens. After each session turn the server
-runs
-`gate` (the files' validation, then `check`); a pass stamps `built`, a failure goes back to the session up to
-dev.MAX_ATTEMPTS times. A change to a built view (revise) copies its files aside and restores them if the change
-fails.
-Progress is `view {slug, status, chat?}` on the workspace stream."""
+A proposal is a build in `views/proposals.json` that starts as soon as it is proposed. Until the server stamps
+`built` into view.json the view is a draft that nothing lists or opens. The builder checks its draft with view_check and
+finishes with finish_view, where the server runs `gate` (the files' validation, then `check`); a pass stamps `built`
+and `version` (mark_built) and keeps the files as they passed (VERSIONS_SUBDIR), a failure goes back to the builder up
+to dev.MAX_ATTEMPTS times. Readers see only what a gate passed (read_built's digest rule): a write into the view's
+folder after its pass reaches them only once a gate passes it. A change to a built view (revise) copies its files
+aside and restores them if the change fails. Progress is `view {slug, status, chat?}` on the workspace stream.
+
+In terminal mode (terminal) the builder writes view.term.js in place of view.html: a program on the terminal view kit
+(term_views.py) that thimble-term's panel draws. Its gate runs the same reader checks, then draws the program as text
+at 120 and 200 columns, in light and dark, and opened at the first place that resolved, then with the test label on
+and every choice of its Color by, Filter by and Rows tried (term_draws), with no browser: it fails on a program error, a
+timeout, a draw past the panel's rows or columns, or a choice that gives an error. The page's checks (the label marks,
+the layout, the page on a damaged copy of the files) are the browser's alone."""
 from __future__ import annotations
 
 import asyncio
@@ -56,13 +62,13 @@ import time
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
-from . import config, corpus_tree, headless, investigation, prompts, refs, userconf, view_calls, view_indexes, view_libs
+from . import config, corpus_tree, headless, investigation, refs, userconf, view_calls, view_indexes, view_libs
 from .records import is_record_ref as is_record
 from .view_host import shown_whole
 from .ledger import atomic_write_text, read_json, unlinked, write_json, write_json_once
@@ -86,10 +92,14 @@ KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, n
 # indexes of the card types (cardtypes.py, extensions.card_types)
 INDEXES_SUBDIR = view_indexes.INDEXES_SUBDIR
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
+VIEW_TERM = "view.term.js"  # a view's terminal program, beside its page (term_views.py)
+NOT_BROWSER = ("This view was built in terminal mode, so only the terminal draws it. To see it, quit, run "
+               "`thimble mode terminal`, and start `thimble` again in this folder.")
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
-# a view ticket's status on its proposal row; `dropped` is an orientation proposal that could not be built through its
-# repairs. An orientation's proposal carries `held: true` until its view first passes its checks (mark_built): it builds
-# at once, and the analyst hears of it only then.
+# a view ticket's status on its proposal row; `dropped` is an orientation proposal left out when the analyst stopped the
+# orientation before its view was built. An orientation's proposal carries `held: true` until its view first passes its
+# checks (mark_built) or fails through its repairs (dev._repairs_failed): it builds at once, and the analyst hears of it
+# only then.
 # `suggested` is a viewer for a file type the File browser proposed (suggest), which builds only once the analyst
 # accepts it.
 STATUSES = ("queued", "building", "built", "failed", "dropped", "suggested")
@@ -152,6 +162,20 @@ LIBS: dict[str, Path] = {
 LIB_NEEDS = {"vega-lite": ("vega",), "vega-embed": ("vega", "vega-lite")}
 BRIDGE_JS = Path(__file__).with_name("viewer_bridge.js")
 KIT_CSS = Path(__file__).with_name("viewer_kit.css")  # thimble's chips, buttons, segmented controls, tables and list rows
+COLOUR_JS = Path(__file__).with_name("viewer_colour.js")  # the view kit's Color by control, thimble.colorBy
+RANGE_JS = Path(__file__).with_name("viewer_range.js")  # the view kit's time range selector, thimble.timeRange
+# the view kit's row controls (thimble.filterBy, rows, lanes, key, divider), its side panel (thimble.side) and its
+# transcript (thimble.transcript), loaded between Color by and the range, which takes the bridge's part away; their styles
+CONTROLS_JS = Path(__file__).with_name("viewer_controls.js")
+SIDE_JS = Path(__file__).with_name("viewer_side.js")
+TRANSCRIPT_JS = Path(__file__).with_name("viewer_transcript.js")
+PARTS_CSS = Path(__file__).with_name("viewer_parts.css")
+# the order new values take the label palette's places, which the kit's Color by reads as window.__thimbleLabelOrder
+# (the frontend imports the same file; kernel_thimble.LABEL_ORDER is the server's)
+LABEL_ORDER_JSON = Path(__file__).with_name("label_order.json")
+# the label palette's places around the colour wheel, as the kit's picker (window.__thimbleLabelWheel) and the app's
+# show them
+LABEL_WHEEL_JSON = Path(__file__).with_name("label_wheel.json")
 HOST_PY = Path(__file__).with_name("view_host.py")
 KERNEL_THIMBLE = Path(__file__).with_name("kernel_thimble.py")  # the `thimble` module a reader imports (view_host)
 # The test label of the checks and the review: it marks every record whose line is a multiple of PROBE_EVERY, about one
@@ -201,17 +225,28 @@ class ReaderError(Exception):
         self.detail = detail
 
 
+class RawJSON:
+    """A reader call's result as the JSON text the kernel wrote (view_host._result_json), which the records route sends
+    to the page without reading it."""
+
+    __slots__ = ("text",)
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _emit(c: str, slug: str, status: str, **extra: Any) -> None:
     """The `view` event on the workspace stream. investigation.emit runs on the event loop only, so a caller in a
-    worker thread (a route's blocking part) hands it to the bound loop. A held proposal's build sends none: the analyst
-    hears of it once its view is built (mark_built)."""
-    if slug in held_slugs(c):
-        return
+    worker thread (a route's blocking part) hands it to the bound loop. A held proposal's build (one of the
+    orientation's, before its view first passes) says `held`: its chip in the orientation's thread follows it, while
+    the views bar and the view-ready toast wait for the view to be built (mark_built) (live checks L19, L25)."""
     event = {"type": "view", "slug": slug, "status": status, **extra}
+    if slug in held_slugs(c):
+        event["held"] = True
 
     def send() -> None:
         try:
@@ -553,8 +588,10 @@ def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: s
         # a workspace view the server has not stamped `built` is a view ticket's work in progress, which only its
         # checks read (module note); a file-type viewer thimble ships is never one
         "draft": origin == "workspace" and not raw.get("built"),
-        # a view whose reader or page is missing is listed so it can be deleted, and never opens a citation
-        "ok": bool(d is not None and (d / READER_PY).is_file() and (d / VIEW_HTML).is_file() and claims),
+        # a view whose reader or page is missing is listed so it can be deleted, and never opens a citation; the page is
+        # view.html, or view.term.js for a view built in terminal mode
+        "ok": bool(d is not None and (d / READER_PY).is_file()
+                   and ((d / VIEW_HTML).is_file() or (d / VIEW_TERM).is_file()) and claims),
         "dir": str(d) if d else None,
     }
 
@@ -584,23 +621,163 @@ def _view_json(d: Path) -> dict[str, Any]:
 
 
 def read_built(c: str, slug: str) -> dict[str, Any] | None:
-    """The view as it last passed its checks: what every reader of a view but its own checks uses, since a draft never
-    opens a citation. While a session may be writing the view's folder (_changing), or has left it a draft, that is the
-    version kept when it last passed (_as_built); otherwise read_view. None for a view that never passed."""
+    """The view as it last passed its checks: what every reader of a view but its own checks uses (citations, the
+    views kernel, list_views), since only files a gate passed may reach them (the digest rule). The live folder is
+    served only when its files' digest (view_digest, cached) equals the `version` stamp mark_built wrote and the copy
+    kept at that version (VERSIONS_SUBDIR, which only the server writes) exists; otherwise the copy kept when it last
+    passed (_as_built). So neither a builder's or reviewer's edit after its pass, another agent's write into the folder,
+    nor a `built` stamp an agent wrote into view.json reaches a reader ungated. A change found while no agent of the view
+    runs is gated once (_found_change). None for a view that never passed."""
     v = read_view(c, slug)
-    if v is not None and v["origin"] == "workspace" and (v["draft"] or _changing(c, slug)):
+    if v is None or v["origin"] != "workspace":
+        return v
+    if not v["draft"] and passed_as_is(c, slug, v):
+        return v
+    kept = _as_built(c, slug, v)
+    if not v["draft"] or kept is not None:
+        _found_change(c, slug)
+    return kept
+
+
+def passed_as_is(c: str, slug: str, v: dict[str, Any] | None = None) -> bool:
+    """Whether the view's live folder holds what its last gate passed: its digest is its `version` stamp, and the copy
+    kept at that version exists."""
+    v = v or read_view(c, slug)
+    version = str((v or {}).get("version") or "")
+    if not v or not VERSION_RE.match(version) or not (_versions_dir(c, slug) / version / VIEW_JSON).is_file():
+        return False
+    return digest(views_dir(c) / slug)[:12] == version
+
+
+_digests: dict[str, tuple[tuple[Any, ...], str]] = {}  # a view folder -> (its files' sizes and times, their digest)
+_DIGESTS_MAX = 512
+
+
+def digest(d: Path) -> str:
+    """view_digest of the folder `d`, cached on its files' names, sizes and modification times."""
+    try:
+        files = sorted(p for p in d.iterdir() if p.is_file())
+        lib = d / view_libs.LIB_DIR
+        files += sorted(p for p in lib.iterdir() if p.is_file()) if lib.is_dir() and not lib.is_symlink() else []
+        stamp = tuple((p.relative_to(d).as_posix(), st.st_size, st.st_mtime_ns) for p in files for st in (p.stat(),))
+    except OSError:
+        return ""
+    hit = _digests.get(str(d))
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    value = view_digest(d)
+    if len(_digests) >= _DIGESTS_MAX:
+        _digests.pop(next(iter(_digests)))
+    _digests[str(d)] = (stamp, value)
+    return value
+
+
+FOUND_GATE_S = 5.0  # a change found in a view's folder with no agent of the view running is gated once this quiet
+_found: dict[tuple[str, str], str] = {}  # (workspace, slug) -> the digest gated or waiting to be, so each is gated once
+_found_timers: dict[tuple[str, str], asyncio.TimerHandle] = {}
+
+
+def _raw_proposal(c: str, slug: str) -> dict[str, Any]:
+    """The proposal of `slug` as stored, its status not settled against the built views (list_proposals reads those
+    through read_built, which calls this)."""
+    p = proposals_path(c)
+    raw = read_json(p, []) if p.is_file() else []
+    return next((x for x in raw if isinstance(x, dict) and x.get("slug") == slug), {}) if isinstance(raw, list) else {}
+
+
+def _agent_works_on(c: str, slug: str) -> bool:
+    """Whether a builder, a reviewer or a program's build of the view runs, or its proposal waits for one."""
+    from . import dev, subagents, view_tools  # noqa: PLC0415
+
+    prop = _raw_proposal(c, slug)
+    return (prop.get("status") in PENDING or (c, slug) in dev._view_runs
+            or subagents.running(c, view_tools.build_key(slug)) or subagents.running(c, view_tools.review_key(slug)))
+
+
+def _found_change(c: str, slug: str) -> None:
+    """The view's folder no longer holds what its last gate passed, and no agent of the view runs (a change made in the
+    analyst's editor, say): the gate runs once on it after FOUND_GATE_S, and a pass makes it the view (mark_built); a
+    failure leaves readers on the copy that passed."""
+    try:
+        if _agent_works_on(c, slug):
+            return
+    except Exception:  # noqa: BLE001 — a reader never fails for this
+        log.debug("%s: whether an agent works on %s is unknown", c, slug, exc_info=True)
+        return
+    now = digest(views_dir(c) / slug)
+    if not now or _found.get((c, slug)) == now:
+        return
+    loop = _thread_loop() or (_loop if _loop is not None and _loop.is_running() and not _loop.is_closed() else None)
+    if loop is None:
+        return
+    _found[(c, slug)] = now
+
+    def arm() -> None:
+        old = _found_timers.pop((c, slug), None)
+        if old is not None:
+            old.cancel()
+        _found_timers[(c, slug)] = loop.call_later(
+            FOUND_GATE_S, lambda: loop.create_task(_gate_found(c, slug, now), name=f"view-found:{c}:{slug}"))
+
+    if _thread_loop() is loop:
+        arm()
+    else:
+        loop.call_soon_threadsafe(arm)
+
+
+async def _gate_found(c: str, slug: str, seen: str) -> None:
+    _found_timers.pop((c, slug), None)
+    d = views_dir(c) / slug
+    if digest(d) != seen or _agent_works_on(c, slug) or passed_as_is(c, slug):
+        return
+    try:
+        rep = await gate(c, slug, _kept_locators(c, slug))
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the gate of the change found in %s failed", c, slug)
+        return
+    if rep.get("ok") and digest(d) == seen:
+        log.info("%s: a change made to the view %s outside thimble's agents passed its checks", c, slug)
+        mark_built(c, slug)
+    else:
+        log.info("%s: a change made to the view %s outside thimble's agents did not pass, so readers keep the view as "
+                 "it last passed: %s", c, slug, first_failure(rep))
+
+
+async def regate(c: str, slug: str) -> dict[str, Any] | None:
+    """At the end of an agent of the view (dev._settle, view_review.subagent_ended): a folder that changed after its
+    last pass is gated again, and a pass makes it the view, a failure puts back the files kept at that pass
+    (restore_version). The gate's report, or None when the folder holds what passed."""
+    v = read_view(c, slug)
+    if v is None or v["origin"] != "workspace" or passed_as_is(c, slug, v):
+        return None
+    version = str(v.get("version") or "")
+    rep = await gate(c, slug, _kept_locators(c, slug))
+    if rep.get("ok"):
+        mark_built(c, slug)
+    elif not restore_version(c, slug, version):
         kept = _as_built(c, slug, v)
         if kept is not None:
-            return kept
-    return None if v is None or v["draft"] else v
+            restore_version(c, slug, str(kept.get("version") or ""))
+    return rep
 
 
-def _changing(c: str, slug: str) -> bool:
-    """Whether a session may be writing the view's folder: a change to it (revise, whose copy aside stays until the
-    change ends) or a revision its review asked for."""
-    from . import view_review  # noqa: PLC0415 — the review imports this module
-
-    return _revision_dir(c, slug).is_dir() or view_review.revising(c, slug)
+def restore_version(c: str, slug: str, version: str) -> bool:
+    """Put the view's files back as they were kept at `version` (_publish), its cache left: False without that copy."""
+    src = _versions_dir(c, slug) / version if VERSION_RE.match(str(version or "")) else None
+    if src is None or not (src / VIEW_JSON).is_file():
+        return False
+    d = views_dir(c) / slug
+    d.mkdir(parents=True, exist_ok=True)
+    for p in d.iterdir():
+        if p.name == CACHE_SUBDIR or p.is_symlink():
+            continue
+        shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
+    for p in src.iterdir():
+        if p.is_symlink():
+            continue
+        shutil.copytree(p, d / p.name, symlinks=True) if p.is_dir() else shutil.copy2(p, d / p.name)
+    _forget(c, slug)
+    return True
 
 
 def _as_built(c: str, slug: str, live: dict[str, Any]) -> dict[str, Any] | None:
@@ -734,13 +911,14 @@ def _check_slug(slug: str) -> str:
     return slug
 
 
-def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]:
-    """What makes a view's files unable to run, as lines for whoever wrote them: no claims, an empty reader or page, a
-    reader that does not parse or lacks one of its three functions, a library that is no package."""
+def source_problems(claims: Any, reader: str, html: str, libs: Any, page: str = VIEW_HTML) -> list[str]:
+    """What makes a view's files unable to run, as lines for whoever wrote them: no claims, an empty reader or page (the
+    file `page` names: view.html, or view.term.js in terminal mode), a reader that does not parse or lacks one of its
+    three functions, a library that is no package."""
     out: list[str] = []
     if not _str_list(claims):
         out.append("a view reads at least one file: give `scope` in view.json as corpus-relative globs")
-    for label, text in ((READER_PY, reader), (VIEW_HTML, html)):
+    for label, text in ((READER_PY, reader), (page, html)):
         if not text.strip():
             out.append(f"{label} is empty")
     if reader.strip():
@@ -758,10 +936,10 @@ def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]
 
 def write_view(c: str, slug: str, *, name: str, description: str, claims: Any = None, accepts: Any = None,
                units: Any = None, derived: Any = None, libs: Any = None, reader: str, html: str, unit: Any = None,
-               records: Any = None, compare: bool = False, scope: Any = None) -> dict[str, Any]:
+               records: Any = None, compare: bool = False, scope: Any = None, term: str | None = None) -> dict[str, Any]:
     """Write or replace a view's three files, validated (source_problems), and register it built (mark_built): a view
     of thimble's own making, as the tests make theirs; a view ticket's session writes the files itself. `scope` is
-    view.json's name for `claims`."""
+    view.json's name for `claims`; `term`, its terminal program (view.term.js), written beside them when given."""
     slug = _check_slug(slug)
     claims = claims if claims is not None else scope
     reader_src = str(reader or "").replace("\r\n", "\n")
@@ -784,6 +962,8 @@ def write_view(c: str, slug: str, *, name: str, description: str, claims: Any = 
     d.mkdir(parents=True, exist_ok=True)
     atomic_write_text(d / READER_PY, reader_src.rstrip("\n") + "\n")
     atomic_write_text(d / VIEW_HTML, html_src.rstrip("\n") + "\n")
+    if term is not None:
+        atomic_write_text(d / VIEW_TERM, str(term).replace("\r\n", "\n").rstrip("\n") + "\n")
     write_json(d / VIEW_JSON, stored)
     return mark_built(c, slug)
 
@@ -815,16 +995,72 @@ def _versions_dir(c: str, slug: str) -> Path:
 
 def _publish(c: str, slug: str, version: str) -> None:
     """Keep the view's files as they passed their checks at `version` (VERSIONS_SUBDIR), the newest VERSIONS_KEPT."""
-    root = _versions_dir(c, slug)
+    _keep_version(views_dir(c) / slug, _versions_dir(c, slug), version)
+
+
+def keep_installed(ws: Path) -> list[str]:
+    """The copies kept at their versions (VERSIONS_SUBDIR) of the views of a workspace folder thimble installs whole (a
+    pre-cache, demo.install), which carries the views' files with their `version` stamps but not thimble's state of
+    them: a view whose files still hash to its stamp gets that copy, so readers see it as it passed when the pre-cache
+    was made (read_built) rather than nothing until its checks run again here. The slugs kept."""
+    root = ws / LOCAL_SUBDIR / VIEWS_SUBDIR
+    kept: list[str] = []
+    if not root.is_dir() or root.is_symlink():
+        return kept
+    for d in sorted(root.iterdir()):
+        if not SLUG_RE.match(d.name) or not d.is_dir() or d.is_symlink():
+            continue
+        raw = _view_json(d)
+        version = str(raw.get("version") or "")
+        if raw.get("built") and VERSION_RE.match(version) and view_digest(d)[:12] == version:
+            _keep_version(d, ws / VIEWS_SUBDIR / VERSIONS_SUBDIR / d.name, version)
+            kept.append(d.name)
+    return kept
+
+
+def install_view(ws: Path, src: Path, slug: str | None = None) -> str:
+    """The view in the folder `src` (its view.json, reader.py, view.html and vendored packages) installed as the view
+    `slug`, by default the folder's name, of the workspace folder `ws`, replacing a view of that slug: stamped built at
+    its files' digest, with the copy kept at that version, as keep_installed leaves a pre-cache's views, so readers see
+    it at once without its checks running here (read_built). The folder is written beside the views and renamed into
+    place, so a server reading the workspace meanwhile never sees it half written. The version."""
+    slug = _check_slug(slug or src.name)
+    root = ensure_local(ws) / VIEWS_SUBDIR
+    tmp = root / f".{slug}.install-{os.getpid()}-{time.monotonic_ns()}"
+    old = tmp.with_name(tmp.name.replace(".install-", ".old-"))
+    tmp.mkdir()
+    try:
+        for name in (READER_PY, VIEW_HTML):
+            shutil.copyfile(src / name, tmp / name)
+        if (src / VIEW_TERM).is_file():  # its terminal program, which thimble-term draws (term_views.py)
+            shutil.copyfile(src / VIEW_TERM, tmp / VIEW_TERM)
+        view_libs.copy_lib(src, tmp)
+        raw = {k: v for k, v in _view_json(src).items() if k not in ("built", "version")}
+        write_json(tmp / VIEW_JSON, raw)
+        version = view_digest(tmp)[:12]
+        write_json(tmp / VIEW_JSON, {**raw, "built": _now(), "version": version})
+        _keep_version(tmp, ws / VIEWS_SUBDIR / VERSIONS_SUBDIR / slug, version)
+        if (root / slug).exists():
+            (root / slug).rename(old)
+        tmp.rename(root / slug)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    shutil.rmtree(old, ignore_errors=True)
+    return version
+
+
+def _keep_version(src: Path, root: Path, version: str) -> None:
+    """The files of the view folder `src` kept at `version` in `root`, the newest VERSIONS_KEPT of its versions."""
     dst = root / version
     if not dst.is_dir():
         tmp = root / f".{version}.tmp"
         shutil.rmtree(tmp, ignore_errors=True)
         tmp.mkdir(parents=True)
-        for f in (views_dir(c) / slug).iterdir():
+        for f in src.iterdir():
             if f.is_file() and not f.is_symlink():
                 shutil.copy2(f, tmp / f.name)
-        view_libs.copy_lib(views_dir(c) / slug, tmp)
+        view_libs.copy_lib(src, tmp)
         os.replace(tmp, dst)
     os.utime(dst)
     kept = sorted((x for x in root.iterdir() if x.is_dir() and VERSION_RE.match(x.name)),
@@ -1266,17 +1502,43 @@ def snippet(req: dict[str, Any]) -> str:
 _runner = view_calls.execute
 # the limit of the reader calls made in this context: CHECK_CALL_S within gate(), else none
 _call_limit: contextvars.ContextVar[float | None] = contextvars.ContextVar("view_call_limit", default=None)
+# whether the reader calls made in this context read the view's live folder (live_reads), else the view as it last
+# passed its checks (read_built)
+_live: contextvars.ContextVar[bool] = contextvars.ContextVar("view_live_reads", default=False)
 
 
-def _answer_from(outputs: list[dict]) -> dict[str, Any] | None:
-    """The host's answer: the last stdout line after the sentinel."""
-    from .view_host import SENTINEL
+@contextlib.contextmanager
+def live_reads() -> Iterator[None]:
+    """The reader calls made inside, without a version, read the view's live folder, its draft: the checks of a view
+    (check, which the gates run) and a reviewer's pictures (view_review.pictures). Every other reader call without a
+    version reads the view as it last passed (read_built), so a citation, a page, main's screenshot or the views kernel
+    never runs files no gate passed (the digest rule)."""
+    token = _live.set(True)
+    try:
+        yield
+    finally:
+        _live.reset(token)
+
+
+def _current(c: str, slug: str) -> dict[str, Any] | None:
+    """The view a reader call without a version reads: the live folder inside live_reads, else read_built."""
+    return read_view(c, slug) if _live.get() else read_built(c, slug)
+
+
+def _answer_from(outputs: list[dict], raw: bool = False) -> dict[str, Any] | None:
+    """The host's answer: the last stdout line after the sentinel, its result read from the JSON after RESULT_SEP, or
+    with `raw` kept as that text (RawJSON) unread."""
+    from .view_host import RESULT_SEP, SENTINEL
 
     text = "".join(b.get("text/plain", "") for b in outputs if b.get("_stream") == "stdout")
     for line in reversed(text.split("\n")):  # not splitlines, which also breaks at the sentinel's \x1e
         if line.startswith(SENTINEL):
+            head, sep, result = line[len(SENTINEL):].partition(RESULT_SEP)
             try:
-                return json.loads(line[len(SENTINEL):])
+                ans = json.loads(head)
+                if sep and isinstance(ans, dict):
+                    ans["result"] = RawJSON(result) if raw else json.loads(result)
+                return ans
             except ValueError:
                 return None
     return None
@@ -1301,8 +1563,9 @@ def _prepare(c: str, slug: str, version: str | None = None) -> tuple[dict[str, A
 
 def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, Any], dict[str, Any],
                                                                        list[tuple[str, int, int]]]:
-    """_prepare's view and request, and the claimed files they were made from."""
-    view = read_version(c, slug, version) if version else read_view(c, slug)
+    """_prepare's view and request, and the claimed files they were made from: with `version` the view at that version,
+    else the view as it last passed, or its live folder inside live_reads (_current)."""
+    view = read_version(c, slug, version) if version else _current(c, slug)
     if view is None:
         raise ReaderError(f"no view {slug!r}" + (f" at version {version}; reload it" if version else ""))
     if not view["ok"]:
@@ -1336,17 +1599,20 @@ def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, 
 
 
 async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: str | None = None,
-                sink: dict[str, Any] | None = None) -> Any:
+                sink: dict[str, Any] | None = None, raw: bool = False) -> Any:
     """One reader operation, with no time limit but within the checks (_call_limit); ReaderError when it raised, ran
     past that limit or the kernel did not answer. `call` is the id of a call the page named (view_calls.begin), whose
     progress the kernel writes to its file. Cancelling the awaiting task interrupts the call. `sink` gets the refs a
-    records call's thimble.kept refused (`left_out`, `left_out_n`)."""
+    records call's thimble.kept refused (`left_out`, `left_out_n`). With `raw` the result is the kernel's JSON text
+    (RawJSON)."""
     _bind_loop()
     key = (c, req["slug"], req["fp"])
     by_built = bool(req.get("built"))  # a built view's request (_prepared): pruning keeps its index longest
     req = {**{k: x for k, x in req.items() if k != "built"}, "memory": view_calls.memory_budget()}
     if call is not None:
         req["progress"] = str(view_calls.progress_path(indexes_dir(c), call).resolve())
+    if raw:
+        req["raw"] = True  # the kernel writes the result as the page gets it (view_host._result_json)
     paths = req.get("paths") or []
     if len(paths) > PATHS_SENT:
         req.pop("paths")
@@ -1355,10 +1621,10 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: 
     token = view_calls.REQUEST.set({"slug": req["slug"], "fp": req["fp"], "cache": req.get("cache"), "call": call})
     try:
         outputs, status = await _runner(c, snippet({**req, "op": op, "arg": arg}), _call_limit.get())
-        ans = _answer_from(outputs)
+        ans = _answer_from(outputs, raw)
         if ans is not None and ans.get("need_paths"):
             outputs, status = await _runner(c, snippet({**req, "paths": paths, "op": op, "arg": arg}), _call_limit.get())
-            ans = _answer_from(outputs)
+            ans = _answer_from(outputs, raw)
     except asyncio.CancelledError:
         raise
     except Exception as e:  # noqa: BLE001 — the kernel did not start
@@ -1384,20 +1650,21 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: 
 
 
 async def reader_call(c: str, slug: str, op: str, arg: Any = None, *, labels: dict[str, Any] | None = None,
-                      version: str | None = None, call: str | None = None, sink: dict[str, Any] | None = None) -> Any:
+                      version: str | None = None, call: str | None = None, sink: dict[str, Any] | None = None,
+                      raw: bool = False) -> Any:
     """reader.<op>(index, arg) for the view, op being index, records or resolve (resolve goes through resolve_locator,
     which cleans and memoises the answer). A records call runs with `labels` as the labels context thimble.marked and
     thimble.kept read, by default the workspace's (labels_context); labels apply when records are served, so they are no
     part of the index's fingerprint. `version` is the version a page was loaded at (read_version), `call` the id of a
     call the page named (_call). `sink` gets what the records call's filter left out (_call) and the filter's key
-    (filter_key)."""
+    (filter_key). With `raw` the result is the kernel's JSON text (RawJSON)."""
     _, req = await asyncio.to_thread(_prepare, c, slug, version)
     if op == "records":
         ctx = labels if labels is not None else await asyncio.to_thread(labels_context, c)
         req = {**req, "labels": _wire(ctx)}
         if sink is not None:
             sink["filter_key"] = await asyncio.to_thread(filter_key, ctx)
-    return await _call(c, req, op, arg, call=call, sink=sink)
+    return await _call(c, req, op, arg, call=call, sink=sink, raw=raw)
 
 
 def clean_problems(raw: Any) -> dict[str, Any]:
@@ -1687,6 +1954,18 @@ def _label_colour(n: Any) -> str:
     return LABEL_COLOURS[n] if isinstance(n, int) and 0 <= n < len(LABEL_COLOURS) else LABEL_COLOURS[1]
 
 
+def _page_colour(colour: Any) -> Any:
+    """A palette color as a mark sends it to the bridge: LABEL_COLOURS[n] as var(--label-n) (the gray var(--label-none)),
+    which the bridge resolves in the frame's tokens, so a mark takes the theme's step of the color as the page's chips
+    and the app's record marks do; any other color as it is."""
+    from .kernel_thimble import LABEL_COLOURS  # noqa: PLC0415
+
+    if not isinstance(colour, str) or colour.lower() not in LABEL_COLOURS:
+        return colour
+    n = LABEL_COLOURS.index(colour.lower())
+    return f"var(--label-{n or 'none'})"
+
+
 def labels_context(c: str, only: list[str] | None = None) -> dict[str, Any]:
     """The labels a view's reader sees: {labels: [{id, name, colour, values: [{name, colour, highlight}], jsonl}],
     filter: {id, label, value, colour} | None}. The labels are those over records the analyst turned on in Files, and
@@ -1744,15 +2023,23 @@ def labels_state(ctx: dict[str, Any] | None) -> dict[str, Any]:
     return kernel_thimble._view_labels(ctx or NO_LABELS)
 
 
+def _mark_values(marks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A mark's `values` for the bridge: each label that highlights the record, {id, label, value, colour}, so that a
+    page can colour its records by one label of those that are on (thimble.markOf); colors as _page_colour sends them."""
+    return [{"id": m.get("id"), "label": m.get("label"), "value": m.get("value"), "colour": _page_colour(m.get("colour"))} for m in marks]
+
+
 def _record_mark(ctx: dict[str, Any], ref: str) -> dict[str, Any] | None:
-    """A record's mark for the bridge, {bar, names, spans, keep?}: the first label's colour as its bar, and with a filter
-    whether it is kept; None for a record no label marks and no filter keeps."""
+    """A record's mark for the bridge, {bar, names, values, spans, keep?}: the first label's colour as its bar, each
+    label's value, and with a filter whether it is kept; None for a record no label marks and no filter keeps. Colors
+    are tokens (_page_colour), which the bridge resolves in the frame's theme."""
     from . import kernel_thimble  # noqa: PLC0415
 
     marks = kernel_thimble._marked(ctx, ref)
     out: dict[str, Any] = {}
     if marks:
-        out = {"bar": marks[0]["colour"], "names": list(dict.fromkeys(m["label"] for m in marks)), "spans": []}
+        out = {"bar": _page_colour(marks[0]["colour"]), "names": list(dict.fromkeys(m["label"] for m in marks)),
+               "values": _mark_values(marks), "spans": []}
     if ctx.get("filter"):
         keep = kernel_thimble._kept(ctx, ref)
         if not keep and not out:
@@ -1763,18 +2050,28 @@ def _record_mark(ctx: dict[str, Any], ref: str) -> dict[str, Any] | None:
 
 def _unit_mark(ctx: dict[str, Any], rs: list[str]) -> dict[str, Any] | None:
     """A unit's mark from the records it stands for: marked by each label that marks any of them, its bar the colour most
-    of its marked records take, and with a filter kept as kernel_thimble.kept_unit keeps it."""
+    of its marked records take, each label's value the one most of them take, and with a filter kept as
+    kernel_thimble.kept_unit keeps it. Colors are tokens (_page_colour), which the bridge resolves in the frame's theme,
+    so a unit's bar in Dark is Dark's step of the color."""
     from . import kernel_thimble  # noqa: PLC0415
 
     names: dict[str, None] = {}
     colours: dict[str, int] = {}
+    by_label: dict[Any, dict[tuple, int]] = {}
     for r in rs:
         for m in kernel_thimble._marked(ctx, r):
             names.setdefault(m["label"], None)
             colours[m["colour"]] = colours.get(m["colour"], 0) + 1
+            seen = by_label.setdefault(m.get("id"), {})
+            key = (m.get("label"), m.get("value"), m.get("colour"))
+            seen[key] = seen.get(key, 0) + 1
     out: dict[str, Any] = {}
     if names:
-        out = {"bar": max(colours, key=lambda k: colours[k]), "names": list(names), "spans": []}
+        values = []
+        for lid, seen in by_label.items():
+            label, value, colour = max(seen, key=lambda k: seen[k])
+            values.append({"id": lid, "label": label, "value": value, "colour": _page_colour(colour)})
+        out = {"bar": _page_colour(max(colours, key=lambda k: colours[k])), "names": list(names), "values": values, "spans": []}
     if ctx.get("filter"):
         keep = kernel_thimble._kept_unit(ctx, rs)
         if not keep and not out:
@@ -2333,10 +2630,17 @@ def _keep_deleted(c: str, prop: dict[str, Any]) -> None:
         write_json(state_dir(c) / DELETED_FILE, items)
 
 
+CLICK, FOLLOW_ON, TYPED = "click", "follow-on", "typed"  # how a build starts (subagents.ROUTES)
+
+
 def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed_by: str = "analyst",
             orientation: bool = False, asked: bool = False, suggested: bool = False,
-            spec: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Store a proposal, announce it and queue it for the dev agent at once (dev.queue_view). A proposal of the same
+            spec: dict[str, Any] | None = None, route: str | None = None,
+            values: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Store a proposal, announce it and queue its build at once (dev.queue_view), as part of the start that asked for it
+    (`route`: an orientation's proposal a follow-on start, else a click), with the run's `values` (model and effort,
+    else Settings' dev row). A typed proposal, main's propose_view, is not queued: its caller starts it with main's
+    Agent call (dev.start_build). A proposal of the same
     name not yet built is replaced under its slug, its build stopped. An `orientation` proposal is stored
     `orientation: true` and, unless `suggested`, `held: true`, queued unannounced until its view passes its checks
     (mark_built); a held proposal proposed again unchanged is left as it is, and changed it is revised (revise), still
@@ -2367,9 +2671,10 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
         raise HTTPException(400, "a proposal says which records a unit gathers and how the page lays it out (`arrangement`)")
     # a view already built under this name is changed in place, as the analyst still uses it, rather than built again
     # beside it under a new slug
+    route = route or (FOLLOW_ON if orientation else CLICK)
     if (built := built_slug(c, name)) is not None:
         return revise(c, built, "", why=why, claims=claims_l, arrangement=arrangement, proposed_by=proposed_by,
-                      asked=asked, spec=spec or None)
+                      asked=asked, spec=spec or None, route=route, values=values)
     with _proposals_lock:
         items = list_proposals(c)
         old = next((p for p in items if str(p.get("name", "")).casefold() == name.casefold()
@@ -2380,7 +2685,7 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
                 return old  # the same proposal again: its build goes on, or its view stays built
             # changed, such as after the critique: its build goes on from its draft, or its view is changed
             return revise(c, old["slug"], "", why=why, claims=claims_l, arrangement=arrangement,
-                          proposed_by=proposed_by, spec=spec or None)
+                          proposed_by=proposed_by, spec=spec or None, route=route, values=values)
         if old is not None:
             _stop_review(c, old["slug"], forget=True)
             _stop_build(c, old["slug"], "replaced", force=bool(old.get("held")))
@@ -2396,10 +2701,13 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
             prop["held"] = True
         if asked:
             prop["asked"] = True
+        prop["route"] = route
+        if values:
+            prop["values"] = {k: str(v) for k, v in values.items() if v}
         items.append(prop)
         _save_proposals(c, items)
     _emit(c, slug, prop["status"])
-    if not suggested:
+    if not suggested and route != TYPED:
         _queue(c, slug)
     return prop
 
@@ -2528,28 +2836,27 @@ def unchanged_since_built(c: str, slug: str) -> bool:
     return kept.is_dir() and view_digest(kept) == view_digest(views_dir(c) / slug)
 
 
-def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: str | None = None) -> None:
-    """A change to a built view that failed (`error`) or was dismissed: the view as it was, its proposal built again
-    with the error kept, and `view {built}` on the stream. `failed_change`, the request of a change that failed, stays
-    on the proposal for retry."""
+def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: str | None = None,
+                 stopped_by: str | None = None) -> None:
+    """A change to a built view that failed (`error`), was dismissed or was stopped by main's quit (`stopped_by`
+    "quit", which its chip shows as stopped): the view as it was, its proposal built again with the error kept, and
+    `view {built}` on the stream. `failed_change`, the request of a change that failed, stays on the proposal for
+    retry."""
     restore_built(c, slug)
     update_proposal(c, slug, status="built", change=None, changed=None, revision=None, error=error,
-                    failed_change=failed_change)
+                    failed_change=failed_change, stopped_by=stopped_by)
     _emit(c, slug, "built")
 
 
 def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: Any = None,
            arrangement: str | None = None, proposed_by: str = "analyst", asked: bool = False,
-           spec: dict[str, Any] | None = None) -> dict[str, Any]:
-    """A change to the view `slug`, as a view ticket on its proposal (made from the view when it has none): `request` is
-    the
+           spec: dict[str, Any] | None = None, route: str = CLICK, values: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A change to the view `slug`, as a build on its proposal (made from the view when it has none): `request` is the
     analyst's words, and given fields replace the proposal's. A built view's files are copied aside first
-    (restore_built),
-    and the proposal is marked `revision` and `changed`. A running build stops, its draft kept. Queued at once. 404
-    for
-    no such view or proposal."""
-    from . import dev  # noqa: PLC0415
-
+    (restore_built), and the proposal is marked `revision` and `changed`. Queued at once (dev.queue_view), as part of
+    the start that asked for it (`route`), where a running builder of the view gets the change as a message, and a
+    finished one that main's session can still reach runs again with it; a typed change (main's propose_view) is
+    started by its caller. 404 for no such view or proposal."""
     request = str(request or "").strip()
     _stop_review(c, slug)
     with _proposals_lock:
@@ -2564,13 +2871,13 @@ def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: A
             _save_proposals(c, [*items, prop])
         revision = view is not None or bool(prop.get("revision"))
         pending = prop.get("status") in PENDING
-        if pending:
-            # the build stops and its draft stays: the session goes on from it with the change
-            dev.stop_view(c, slug, "revised")
         change = "\n\n".join(x for x in (str(prop.get("change") or "") if pending else "", request) if x)
-        fields: dict[str, Any] = {"status": "queued", "error": None, "change": change or None, "changed": True,
-                                  "revision": revision or None, "asked": True if asked else None,
-                                  "failed_change": None, "ts": _now()}
+        fields: dict[str, Any] = {"status": "building" if prop.get("status") == "building" else "queued", "error": None,
+                                  "change": change or None, "changed": True, "revision": revision or None,
+                                  "asked": True if asked else None, "failed_change": None, "ts": _now(),
+                                  "route": route, "refused": None, "stopped_by": None}
+        if values:
+            fields["values"] = {k: str(v) for k, v in values.items() if v}
         spec = clean_spec(spec)
         for k, v in (("why", " ".join(str(why or "").split())), ("claims", _str_list(claims)),
                      ("arrangement", spec_arrangement(spec) if spec else _lines(arrangement)), ("spec", spec)):
@@ -2579,15 +2886,17 @@ def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: A
         if revision:
             _keep_built(c, slug)
         prop = update_proposal(c, slug, **fields) or prop
-    _emit(c, slug, "queued", chat=prop.get("chat"))
-    _queue(c, slug)
+    _emit(c, slug, str(prop.get("status") or "queued"), chat=prop.get("chat"))
+    if route != TYPED:
+        _queue(c, slug)
     return {**prop, "revised": True}
 
 
-def message(c: str, slug: str, text: str) -> dict[str, Any]:
+def message(c: str, slug: str, text: str, *, by: str = "browser", route: str = CLICK) -> dict[str, Any]:
     """What the analyst typed in the thread of the view's build: logged there, then applied as a change to the view
-    (revise,
-    `asked`) in the same session. 400 for an empty message, 404 for no such view or proposal."""
+    (revise, `asked`), as part of the click that sent it from the browser; one typed in the terminal (/thimble:ask,
+    threads.tool_message_thread, `by` terminal) is a typed change, which main's exact Agent call starts (`route`
+    typed). 400 for an empty message, 404 for no such view or proposal."""
     from . import agents  # noqa: PLC0415
 
     text = str(text or "").strip()
@@ -2598,22 +2907,47 @@ def message(c: str, slug: str, text: str) -> dict[str, Any]:
         raise HTTPException(404, f"no such view: {slug}")
     chat = str((prop or {}).get("chat") or "")
     if chat and agents.meta_or_none(c, chat) is not None:
-        agents.Recorder(c, chat).record("user", text=text, by=agents.BROWSER)
-    return revise(c, slug, text, asked=True)
+        agents.Recorder(c, chat).record("user", text=text, by=by)
+    return revise(c, slug, text, asked=True, route=route)
 
 
-def retry(c: str, slug: str) -> dict[str, Any]:
-    """Queue a failed proposal again (the Retry of its chip); its run resumes the same session when it has one. A built
-    view whose last change failed (`failed_change`) is changed again with the same request. 404 for no such proposal,
-    409 for one that is built with no failed change, queued or building."""
+def click_refused(c: str, slug: str) -> dict[str, Any] | None:
+    """A Build, Retry or accept click that cannot start a builder now, refused at once as Start is
+    (subagents.refusal_before: main not started by `thimble`, or no hooks module; in plan mode --agent-check refuses
+    the builder's start as it runs): the proposal keeps its status and records the refusal, which its chip shows. None
+    when nothing stands in the way. Queued instead, the build waited for a session that could start it and started by
+    itself later (live check L15)."""
+    from . import subagents  # noqa: PLC0415
+
+    before = subagents.refusal_before(c, click=True)
+    if before is None:
+        return None
+    refused = {"kind": before.kind, "reason": before.reason, "request": None, "at": _now()}
+    failed = (read_proposal(c, slug) or {}).get("status") == "failed"
+    prop = update_proposal(c, slug, refused=refused, **({"error": before.reason} if failed else {}))
+    prop = prop or read_proposal(c, slug) or {}
+    _emit(c, slug, str(prop.get("status") or "failed"), chat=prop.get("chat"))
+    return prop
+
+
+def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Queue a failed proposal again (Build or Retry on its chip, a click), with the run's `values` when the Build menu
+    names them, else Settings' dev row; a new builder goes on from the draft in the view's folder. A built view whose
+    last change failed (`failed_change`) is changed again with the same request. 404 for no such proposal, 409 for one
+    that is built with no failed change, queued or building."""
     prop = read_proposal(c, slug)
     if prop is None:
         raise HTTPException(404, f"no such proposal: {slug}")
+    vals = {k: str(v) for k, v in (values or {}).items() if v} or None
+    again = prop.get("status") == "failed" or (prop.get("status") == "built" and prop.get("failed_change") is not None)
+    if again and (refused := click_refused(c, slug)) is not None:
+        return refused
     if prop.get("status") == "built" and prop.get("failed_change") is not None:
-        return revise(c, slug, str(prop["failed_change"]), asked=True)
+        return revise(c, slug, str(prop["failed_change"]), asked=True, route=CLICK, values=vals)
     if prop.get("status") != "failed":
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not failed")
-    prop = update_proposal(c, slug, status="queued", error=None) or prop
+    prop = update_proposal(c, slug, status="queued", error=None, refused=None, route=CLICK, repairs=0,
+                           values=vals, stopped_by=None) or prop
     _emit(c, slug, "queued", chat=prop.get("chat"))
     _queue(c, slug)
     return prop
@@ -2636,9 +2970,10 @@ def stop_build(c: str, slug: str) -> dict[str, Any]:
 
 
 def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
-    """Leave an orientation's proposal out once its build failed through its repairs (dev._view_dropped): the row stays
-    as `dropped` with the reason, so every chip that names it knows to hide, its draft folder is removed, and
-    `view {dropped}` goes on the stream. None when there is no such proposal."""
+    """Leave an orientation's proposal out once the analyst stopped the orientation before its view was built
+    (dev.stop_orientation_views): the row stays as `dropped` with the reason, so every chip that names it knows to hide,
+    its draft folder is removed, and `view {dropped}` goes on the stream. None when there is no such proposal. A
+    proposal whose build failed through its repairs is not dropped: it fails with Retry (dev._repairs_failed)."""
     prop = update_proposal(c, slug, status="dropped", error=" ".join(str(why or "").split())[:ERROR_MAX] or None)
     if prop is None:
         return None
@@ -2663,7 +2998,7 @@ def delete_proposal(c: str, slug: str) -> None:
         if hit is None:
             raise HTTPException(404, f"no such proposal: {slug}")
         if hit.get("revision") and hit.get("status") in PENDING:
-            # a running build puts the view back itself once its session has stopped (dev.run_view)
+            # a running build puts the view back itself once its builder has stopped (dev._settle)
             if not dev.stop_view(c, slug, "dismissed"):
                 end_revision(c, slug)
             return
@@ -2690,8 +3025,9 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
     """Whether the view in the slug's folder may be registered: its files' own problems (source_problems; view.json
     written by thimble alone once it names `built`), then, when there are none, check() with `locators` beside the
     sampled lines. The report check() returns, with the files' problems among its `problems`. With `picture` the page
-    as it opens is pictured for the session. Each reader call of the gate may take CHECK_CALL_S, so a reader that never
-    answers fails the checks rather than holding its kernel."""
+    as it opens is pictured for the session, or in terminal mode drawn as text (`drawing`). Each reader call of the
+    gate may take CHECK_CALL_S, so a reader that never answers fails the checks rather than holding its kernel. In
+    terminal mode the page is view.term.js, which needs no libraries and gets none of the page's notes."""
     token = _call_limit.set(CHECK_CALL_S)
     try:
         return await _gate(c, slug, locators, shot_dir=shot_dir, picture=picture)
@@ -2705,16 +3041,23 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
     if not (d / VIEW_JSON).is_file():
         return {"ok": False, "view": None, "problems": [f"{d / VIEW_JSON} does not exist yet"], "checks": [], "page": None}
     raw = _view_json(d)
-    text = {n: (d / n).read_text("utf-8", errors="replace") if (d / n).is_file() else "" for n in (READER_PY, VIEW_HTML)}
+    term = terminal(c)
+    page = VIEW_TERM if term else VIEW_HTML
+    text = {n: (d / n).read_text("utf-8", errors="replace") if (d / n).is_file() else "" for n in (READER_PY, page)}
     problems = source_problems(raw.get("claims") if raw.get("claims") is not None else raw.get("scope"),
-                               text[READER_PY], text[VIEW_HTML], raw.get("libs"))
-    # a change to a built view starts from files that carry thimble's own stamp, so it is no sign of a session's
+                               text[READER_PY], text[page], raw.get("libs"), page)
+    # a change to a built view starts from files that carry thimble's own stamp, so it is no sign of a builder's
     # writing there (a session that removes it is fine too; mark_built stamps the view again)
     if raw.get("built") and (prop := read_proposal(c, slug)) is not None and prop.get("status") != "built" \
             and not prop.get("revision"):
         problems.append("view.json names `built`, which thimble adds when the view passes; remove it")
     if problems:
         return {"ok": False, "view": read_view(c, slug), "problems": problems, "checks": [], "page": None}
+    if term:
+        report = await check(c, slug, locators, shot_dir=shot_dir, picture=picture, term=True)
+        _gate_notes[(c, slug)] = [ln for ln in gate_lines(report)
+                                  if ln.startswith(("unread: ", "files: ", "draw: ", "note: "))]
+        return report
     vendored = await view_libs.ensure(c, slug, d, raw.get("libs"))
     if vendored["problems"]:
         return {"ok": False, "view": read_view(c, slug), "problems": vendored["problems"], "checks": [], "page": None,
@@ -2725,6 +3068,8 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
     if note := await media_note(text[VIEW_HTML]):
         report["notes"] = [*report.get("notes", []), note]
     if note := purple_note(text[VIEW_HTML]):
+        report["notes"] = [*report.get("notes", []), note]
+    if note := own_parts_note(text[VIEW_HTML]):
         report["notes"] = [*report.get("notes", []), note]
     if picture:
         _prune_shots(shot_dir or (d / CACHE_SUBDIR / "shots"))
@@ -2784,6 +3129,14 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
             lines.append(f"bad {r['locator']}: {r.get('why')}")
     page = report.get("page") or {}
     shots = report.get("shots") or []
+    draws = report.get("draws") or []
+    for d in draws:
+        missed = f", no control shows {', '.join(map(repr, d['missed']))}" if d.get("missed") else ""
+        tried = d.get("choices") or []
+        swept = (f", {len(tried)} choice(s) of its controls tried, {sum(1 for x in tried if x.get('errors'))} with an "
+                 "error" if d.get("state") == "choices" and d.get("ok") else "")
+        lines.append(f"draw: {draw_where(d)}: {'ok' if d.get('ok') else 'failed'}, {int(d.get('fetches') or 0)} "
+                     f"fetch(es){missed}{swept}")
     if page.get("unavailable"):
         lines.append("note: " + _hint("view-no-screenshots"))
     for s in shots:
@@ -2802,7 +3155,7 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
             lines.append(f"page: {s.get('state')}: " + "; ".join(s.get("errors") or ["did not load"]))
         if s.get("png"):
             lines.append(f"png: {s['png']}")
-    if page and not shots and not page.get("unavailable"):
+    if page and not shots and not draws and not page.get("unavailable"):
         if page.get("ok"):
             lines.append(f"page: loaded, {page.get('fetches', 0)} fetch(es), no errors")
         else:
@@ -2823,7 +3176,7 @@ _PAGE_LOADED = re.compile(r"^page: [a-z]+, ")  # a page line of a page that load
 
 
 def built_line(view: dict[str, Any]) -> str:
-    """What main hears when a view is built (the `view` event, dev.run_view): the files that open in it now and the
+    """What main hears when a view is built (the `view` event, dev.register_pass): the files that open in it now and the
     citation forms it adds, since main's prompt, with its table of forms, was rendered before the view existed."""
     return _hint("view-built", view=view.get("name", ""), claims=", ".join(view.get("claims") or []),
                  forms=forms_sentence(view) or _hint("view-no-forms"))
@@ -2856,7 +3209,11 @@ def _style_text(css: str) -> str:
 def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool = False,
                    derived: list[dict[str, str]] | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
-    (viewer_bridge.js), thimble's parts (viewer_kit.css), the vendored libraries the view names, then view.html, whose
+    (viewer_bridge.js), the order new values take the label palette (label_order.json, for Color by), the kit's Color by
+    control (viewer_colour.js), its row controls, side panel and transcript (viewer_controls.js, viewer_side.js,
+    viewer_transcript.js) and its time range selector (viewer_range.js),
+    thimble's parts (viewer_kit.css, viewer_parts.css), the vendored
+    libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
     route's absolute URL (media_url), which the policy allows for images, audio and video and thimble.mediaUrl builds
     on; without it the page loads no URL at all. `card` marks the page as a card's (cardtypes.py), which draws what the
@@ -2866,16 +3223,26 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     page = Path(view["dir"]) / (view.get("page") or VIEW_HTML)
     if page.is_symlink() or Path(view["dir"]).is_symlink():
         raise HTTPException(404, f"the page of {view['slug']!r} is a symlink")
-    html = page.read_text("utf-8")
+    # a view built in terminal mode has no page: the frame says so (as term_views.NOT_TERMINAL says the reverse)
+    html = page.read_text("utf-8") if page.is_file() or not (Path(view["dir"]) / VIEW_TERM).is_file() else \
+        f"<p class=muted style='padding:16px'>{NOT_BROWSER}</p>"
     fields = (view.get("derived") or []) if derived is None else derived
     who = json.dumps({"slug": view["slug"], "name": view["name"], "media": media, **({"card": True} if card else {}),
                       **({"derived": fields} if fields else {})}, ensure_ascii=False)
     csp = FRAME_CSP.format(media=f" {media}" if media else "")
     head = [f'<meta http-equiv="Content-Security-Policy" content="{csp}">',
             '<meta charset="utf-8">',
-            f"<script>window.__thimbleView = {_script_text(who)}</script>",
+            f"<script>window.__thimbleView = {_script_text(who)}; "
+            f"window.__thimbleLabelOrder = {_script_text(LABEL_ORDER_JSON.read_text('utf-8').strip())}; "
+            f"window.__thimbleLabelWheel = {_script_text(LABEL_WHEEL_JSON.read_text('utf-8').strip())}</script>",
             f"<script>{_script_text(BRIDGE_JS.read_text('utf-8'))}</script>",
-            f"<style>{KIT_CSS.read_text('utf-8')}</style>"]
+            f"<script>{_script_text(COLOUR_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(CONTROLS_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(SIDE_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(TRANSCRIPT_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(RANGE_JS.read_text('utf-8'))}</script>",
+            f"<style>{KIT_CSS.read_text('utf-8')}</style>",
+            f"<style>{_style_text(PARTS_CSS.read_text('utf-8'))}</style>"]
     for name in view.get("libs") or []:
         p = LIBS.get(name)
         got = ("js", p.read_text("utf-8")) if p is not None and p.is_file() else \
@@ -2892,9 +3259,16 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     return "<!doctype html><head>" + "".join(head) + "</head>" + body
 
 
+# the derived fields of a view whose reader defines derived(), by (workspace, slug, version, the fingerprint of its
+# claimed files and reader, view.json's derived fields): what each open of the view's page would otherwise ask the
+# reader again (derived_fields)
+_derived_kept: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = {}
+DERIVED_KEPT = 64
+
+
 async def derived_fields(c: str, slug: str, view: dict[str, Any], version: str | None = None) -> list[dict[str, str]]:
-    """The view's derived fields: view.json's, and when reader.py defines derived() those it adds too (shown); only
-    view.json's when the reader fails."""
+    """The view's derived fields: view.json's, and when reader.py defines derived() those it adds too (shown), kept
+    while the claimed files, the reader and view.json's list stay the same; only view.json's when the reader fails."""
     try:
         src = (Path(view["dir"]) / READER_PY).read_text("utf-8")
     except (OSError, TypeError):
@@ -2902,9 +3276,17 @@ async def derived_fields(c: str, slug: str, view: dict[str, Any], version: str |
     if not re.search(r"^def derived\s*\(", src, re.M):
         return view.get("derived") or []
     try:
-        return (await shown(c, slug, version))["derived"]
+        _, req = await asyncio.to_thread(_prepare, c, slug, version)
+        key = (c, slug, version or "", str(req["fp"]), json.dumps(view.get("derived") or [], sort_keys=True))
+        if (kept := _derived_kept.get(key)) is not None:
+            return kept
+        got = (await shown(c, slug, version))["derived"]
     except ReaderError:
         return view.get("derived") or []
+    _derived_kept[key] = got
+    while len(_derived_kept) > DERIVED_KEPT:
+        del _derived_kept[next(iter(_derived_kept))]
+    return got
 
 
 # ----------------------------------------------------------------------------------------------------------
@@ -2919,6 +3301,24 @@ def _node_version(node: str, mtime_ns: int) -> str:
         return subprocess.run([node, "-v"], capture_output=True, text=True, timeout=10).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return ""
+
+
+def terminal(c: str) -> bool:
+    """Whether workspace `c`'s session runs in terminal mode (local.terminal), where a view's page is its view.term.js
+    and its checks draw it as text (term_draws)."""
+    from . import local  # noqa: PLC0415
+
+    return local.terminal(c)
+
+
+def build_problem_for(c: str) -> str:
+    """Why a view cannot be built and checked in workspace `c`, '' when it can: build_problem, but in terminal mode,
+    whose checks draw the view's program as text rather than load a page, only Node (term_views.node_problem)."""
+    if terminal(c):
+        from . import term_views  # noqa: PLC0415
+
+        return term_views.node_problem()
+    return build_problem()
 
 
 def build_problem() -> str:
@@ -2959,8 +3359,9 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
     `width` by `height`. Returns one result per state, {ok, errors, fetches, height, refs, records, units, marked, hidden,
     shown, layout, controls, actions, fonts, fetched_records, png?}, and with `answers` the first that many reader answers each
     state's page got; without Node or the frontend's packages each has build_problem's line as its one error. With
-    `prepared`, a reader request of its own (robust_check's), the page's fetches are answered from it."""
-    view = read_view(c, slug)
+    `prepared`, a reader request of its own (robust_check's), the page's fetches are answered from it. The page is the
+    view as it last passed, or its live folder inside live_reads (_current)."""
+    view = _current(c, slug)
     if view is None:
         return [{"ok": False, "errors": [f"no view {slug!r}"], "fetches": 0} for _ in states]
     media = media_url(SHOT_MEDIA_ORIGIN, c, slug)
@@ -2970,6 +3371,9 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
 
     async def answer(kind: str, i: int, msg: dict[str, Any]) -> dict[str, Any]:
         if kind == "fetch":
+            kit, data = kit_answer(c, msg.get("query"))
+            if kit:
+                return {"data": data}
             try:
                 if prepared is not None:
                     data = await _call(c, {**prepared, "labels": _wire(ctxs[i])}, "records", msg.get("query"))
@@ -2998,7 +3402,8 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
             return {"error": str(getattr(e, "detail", e))}
 
     shot_states = [{"out": s.get("out"), "open": s.get("open") or {}, "actions": [str(a) for a in s.get("actions") or []],
-                    **({"viewport": {"width": s["size"][0], "height": s["size"][1]}} if s.get("size") else {})}
+                    **({"viewport": {"width": s["size"][0], "height": s["size"][1]}} if s.get("size") else {}),
+                    **({"sweep": True} if s.get("sweep") else {})}
                    for s in states]
     doc = frame_document(view, media, derived=await derived_fields(c, slug, view))
     out = await shoot_page(doc, shot_states, answer, width=width, height=height, media=media)
@@ -3105,7 +3510,8 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
                     results = [{"ok": False, "errors": [launch_error.splitlines()[0][:400]]} for _ in states]
                 return
 
-    limit = SHOT_TIMEOUT_S + SHOT_STATE_S * len(states)
+    # a state that tries every choice of the kit's controls (`sweep`) takes the time of another two
+    limit = SHOT_TIMEOUT_S + SHOT_STATE_S * (len(states) + 2 * sum(1 for s in states if s.get("sweep")))
     talk = asyncio.ensure_future(converse())
     start = time.monotonic()
     timed_out = ""
@@ -3273,21 +3679,32 @@ def _is_line_form(form: str) -> bool:
 
 
 async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
-                picture: bool = False, need_locators: bool = True) -> dict[str, Any]:
+                picture: bool = False, need_locators: bool = True, term: bool = False) -> dict[str, Any]:
+    """_check on the view's live folder (live_reads): what the gates check is the draft, not the view as it last passed."""
+    with live_reads():
+        return await _check(c, slug, locators, shot_dir=shot_dir, picture=picture, need_locators=need_locators,
+                            term=term)
+
+
+async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
+                 picture: bool = False, need_locators: bool = True, term: bool = False) -> dict[str, Any]:
     """A view's checks, all by code: the index builds, every claimed file is read or hidden with a why, locators and
     sampled lines round-trip (the answer cites the line back and its excerpt is literal source), declared keys resolve,
     the page loads headless without errors, and the test label's marks show on the records it shows (label_problems).
     Fields of the fetched records that the lines they cite do not hold and `derived` does not list are noted
     (unlisted_derived). Without the headless browser the page is not loaded (its `page` is `unavailable`) and the other
     checks decide. With `picture` the page as it opens is pictured. Without `need_locators`, a view that no locator
-    or sampled line opens passes the rest. Returns {ok, view, index, checks, page, shots, coverage, unread, problems,
-    notes}."""
+    or sampled line opens passes the rest. With `term`, a view built in terminal mode: its program is drawn as text
+    (term_draws) in place of the page's loads, which fails on a program error, a timeout or a draw past the panel, and
+    the page's label, layout and damaged-copy checks are left out (the reader's run on the damaged copy is not). Returns
+    {ok, view, index, checks, page, shots, coverage, unread, problems, notes}, and with `term` `draws` in place of
+    `shots` and `drawing`, the text of the first draw, with `picture`."""
     view = read_view(c, slug)
     if view is None:
         return {"ok": False, "view": None, "problems": [f"no view {slug!r}"], "checks": [], "page": None}
     report: dict[str, Any] = {"ok": False, "view": view, "problems": [], "notes": [], "checks": [], "page": None}
     if not view["ok"]:
-        report["problems"].append("the view has no reader.py, no view.html or no claims")
+        report["problems"].append(f"the view has no reader.py, no {VIEW_TERM if term else VIEW_HTML} or no claims")
         return report
     files = await asyncio.to_thread(claimed_files, c, view)
     if not files:
@@ -3396,6 +3813,8 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
             report["checks"].append(await check_one(f"view:{slug}/{key}"))
     if not report["checks"] and need_locators:
         report["problems"].append("no locator was checked: pass `locators` with refs the view should open")
+    if term:
+        return await _term_check(c, slug, view, files, report, picture)
 
     base = shot_dir or (cache_dir(c, view) / "shots")
     shots = await shoot_checks(c, slug, view, files, report["checks"], base, f"check-{int(time.time())}", picture=picture)
@@ -3404,7 +3823,7 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
     else:
         report["shots"], report["page"] = shots, _page_of(shots)
     problems, notes = label_problems(view, files, shots, switch=label_controls(view))
-    report["problems"] += problems + self_label_problems(shots)
+    report["problems"] += problems + self_label_problems(shots) + choice_problems(shots)
     report["notes"] += notes
     page = report["page"]
     if not report["problems"] and all(r["ok"] for r in report["checks"]) and (page.get("ok") or page.get("unavailable")):
@@ -3412,11 +3831,7 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
         problems, notes = await robust_check(c, slug, view, files, overview.get("shown"))
         report["problems"] += problems
         report["notes"] += notes
-    declared = {k for d in (report.get("coverage") or {}).get("derived") or view["derived"] for k in (d["field"], d.get("key"))
-                if k}
-    if unlisted := await asyncio.to_thread(unlisted_derived, c, shots, declared):
-        report["problems"].append(_hint("view-derived-unlisted", fields="; ".join(
-            f"{x['field']} ({x['value']!r} on {x['ref']})" for x in unlisted)))
+    await _derived_check(c, view, shots, report)
     report["notes"] += layout_notes(shots)
     page = report["page"]
     report["ok"] = (not report["problems"] and all(r["ok"] for r in report["checks"])
@@ -3424,10 +3839,114 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
     return report
 
 
+async def _derived_check(c: str, view: dict[str, Any], shots: list[dict[str, Any]], report: dict[str, Any]) -> None:
+    """The problem with the fields of the reader's answers in `shots` that the lines they cite do not hold and the
+    view does not list as derived (unlisted_derived), added to the report."""
+    declared = {k for d in (report.get("coverage") or {}).get("derived") or view["derived"] for k in (d["field"], d.get("key"))
+                if k}
+    if unlisted := await asyncio.to_thread(unlisted_derived, c, shots, declared):
+        report["problems"].append(_hint("view-derived-unlisted", fields="; ".join(
+            f"{x['field']} ({x['value']!r} on {x['ref']})" for x in unlisted)))
+
+
+async def _term_check(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
+                      report: dict[str, Any], picture: bool) -> dict[str, Any]:
+    """The rest of _check for a view built in terminal mode, after its reader's checks: its program drawn as text
+    (term_draws), each failed draw a problem (draw_problems), as each choice of the kit's parts that gave an error
+    (choice_problems), the reader run on a damaged copy of the files (robust_check without the page), and the fields of
+    the answers its draws got that are not listed as derived."""
+    draws = await term_draws(c, slug, report["checks"])
+    report["draws"], report["shots"] = draws, []
+    report["page"] = {"ok": all(d["ok"] for d in draws), "errors": [], "fetches": sum(int(d["fetches"]) for d in draws)}
+    report["problems"] += draw_problems(draws) + choice_problems(draws)
+    if picture and draws:
+        report["drawing"] = draws[0]["text"]
+    if not report["problems"] and all(r["ok"] for r in report["checks"]) and report["page"]["ok"]:
+        problems, notes = await robust_check(c, slug, view, files, None, page=False)
+        report["problems"] += problems
+        report["notes"] += notes
+    await _derived_check(c, view, draws, report)
+    report["ok"] = not report["problems"] and all(r["ok"] for r in report["checks"]) and report["page"]["ok"]
+    return report
+
+
+async def term_draws(c: str, slug: str, checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The draws of a view's program that its checks run in terminal mode (term_views.draw_check): as it opens at each
+    columns and theme of term_views.CHECK_DRAWS, then opened at the first place that resolved, at the first of them,
+    then, where the first drew, as it opens there with the test label on and every choice of the kit's parts it drew
+    tried in turn (`choices`, choice_problems), as the browser's checks' `choices` state tries a page's. Each carries
+    its `state`, `opens`, `detail` or `choices`, and the first ANSWERS_KEPT reader answers it got."""
+    from . import term_views  # noqa: PLC0415
+
+    out = []
+    for cols, theme in term_views.CHECK_DRAWS:
+        d = await term_views.draw_check(c, slug, cols=cols, theme=theme, answers=ANSWERS_KEPT)
+        out.append({**d, "state": "opens"})
+    first = next((r for r in checks if r["ok"]), None)
+    cols, theme = term_views.CHECK_DRAWS[0]
+    if first is not None:
+        d = await term_views.draw_check(c, slug, cols=cols, theme=theme, ref=first["locator"], answers=ANSWERS_KEPT)
+        out.append({**d, "state": "detail"})
+    if out[0]["ok"]:
+        d = await term_views.draw_check(c, slug, cols=cols, theme=theme, answers=ANSWERS_KEPT, sweep=True)
+        out.append({**d, "state": "choices", "choices": d.get("choices") or []})
+    return out
+
+
+def draw_where(d: dict[str, Any]) -> str:
+    """Which draw of a view's program `d` is, in words: as it opens, or opened at a place, at its columns and theme."""
+    return draws_where([d])
+
+
+def draws_where(draws: list[dict[str, Any]]) -> str:
+    """Which draws of a view's program these are, in words: those as it opens by their columns and themes, then each
+    opened at a place, then the one with the test label on (`choices`)."""
+    def themes(ts: list[str]) -> str:
+        return f"the {ts[0]} theme" if len(ts) == 1 else f"the {' and '.join(ts)} themes"
+
+    by_cols: dict[Any, list[str]] = {}
+    placed = []
+    labelled = []
+    for d in draws:
+        if d.get("ref"):
+            placed.append(f"opened at {d['ref']}, at {d.get('cols')} columns in {themes([str(d.get('theme'))])}")
+        elif d.get("state") == "choices":
+            labelled.append(f"as it opens with the test label on, at {d.get('cols')} columns in "
+                            f"{themes([str(d.get('theme'))])}")
+        else:
+            by_cols.setdefault(d.get("cols"), []).append(str(d.get("theme")))
+    opens = " and ".join(f"at {cols} columns in {themes(ts)}" for cols, ts in by_cols.items())
+    return "; ".join([*([f"as it opens {opens}"] if by_cols else []), *placed, *labelled])
+
+
+def draw_problems(draws: list[dict[str, Any]]) -> list[str]:
+    """The checks' problems with the draws of a view's program (term_draws): one per failure, a program error, a
+    timeout or a draw past the panel, naming every draw it showed in."""
+    found: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for d in draws:
+        if d.get("ok"):
+            continue
+        if d.get("error"):
+            key = ("view-term-error", str(d["error"]))
+        elif d.get("timeout"):
+            key = ("view-term-timeout", str(d["timeout"]))
+        else:
+            o = d.get("overflow") or {}
+            first = _cut(str(o.get("first") or ""), 100)
+            parts = [*([f"{int(o['rows'])} rows past its {d.get('rows')} rows"] if o.get("rows") else []),
+                     *([f"{int(o['cols'])} rows wider than its columns, such as {first!r}"] if o.get("cols") else [])]
+            key = ("view-term-overflow", "; ".join(parts) or "it draws past the panel")
+        found.setdefault(key, []).append(d)
+    from . import term_views  # noqa: PLC0415
+
+    return [_hint(name, where=draws_where(ds), what=what, s=f"{term_views.SETTLE_MAX_S:.0f}")
+            for (name, what), ds in found.items()]
+
+
 # the states the checks load the page in: with the test label on, in the pane beside the Labels pane, the page as the
 # Views bar opens it, the same filtered to the test label, and the first place that resolved; then with no label, the
 # page as it opens in its pane and in the pane of a 1920 px window
-CHECK_STATES = ("overview", "filtered", "detail", "opened", "wide")
+CHECK_STATES = ("overview", "filtered", "detail", "opened", "wide", "choices")
 LABELLED_STATES = ("overview", "filtered", "detail")
 ANSWERS_KEPT = 2  # reader answers per state the checks keep, for unlisted_derived and the review
 
@@ -3447,8 +3966,10 @@ async def shoot_checks(c: str, slug: str, view: dict[str, Any], files: list[tupl
                        checks: list[dict[str, Any]], base: Path, stem: str, *, picture: bool = False) -> list[dict[str, Any]]:
     """The page loaded in CHECK_STATES: with the test label on, at PANE_NARROW, the overview, opened on its first claimed
     file as the Views bar opens it, the same filtered to the test label, and the detail, the first place that resolved;
-    then with no label the overview at PANE_SIZE and at PANE_WIDE. Only with `picture` is anything pictured: the
-    overview at PANE_SIZE, as the review's first picture shows it. Each result carries its `state` name."""
+    then with no label the overview at PANE_SIZE and at PANE_WIDE; then with the test label on, at PANE_SIZE, every
+    choice of the view kit's controls the page mounted tried in turn (`choices`, choice_problems), whose page is no state
+    the other checks read. Only with `picture` is anything pictured: the overview at PANE_SIZE, as the review's first
+    picture shows it. Each result carries its `state` name."""
     overview = {"ref": None, "path": files[0][0]} if files else {"ref": None}
     detail = await first_place(c, slug, checks) or overview
     states = [{"out": None, "open": overview, "labels": probe_context(), "size": PANE_NARROW},
@@ -3456,9 +3977,35 @@ async def shoot_checks(c: str, slug: str, view: dict[str, Any], files: list[tupl
               {"out": None, "open": detail, "labels": probe_context(), "size": PANE_NARROW},
               {"out": base / f"{stem}-overview.png" if picture else None, "open": overview, "labels": NO_LABELS,
                "size": PANE_SIZE},
-              {"out": None, "open": overview, "labels": NO_LABELS, "size": PANE_WIDE}]
+              {"out": None, "open": overview, "labels": NO_LABELS, "size": PANE_WIDE},
+              # every choice of the kit's controls the page mounted, in turn (choice_problems)
+              {"out": None, "open": overview, "labels": probe_context(), "size": PANE_SIZE, "sweep": True}]
     shots = await shoot_states(c, slug, states, answers=ANSWERS_KEPT)
-    return [{**s, "state": name} for s, name in zip(shots, CHECK_STATES)]
+    out = [{**s, "state": name} for s, name in zip(shots, CHECK_STATES)]
+    # what the page shows after the last choice is no state of its own: the other checks read the states before it
+    for s in out:
+        if s["state"] == "choices":
+            for k in ("shown", "layout", "painted", "label_controls", "controls"):
+                s.pop(k, None)
+    return out
+
+
+CHOICE_ERRORS_NAMED = 3  # the choices with a script error a check names
+
+
+def choice_problems(shots: list[dict[str, Any]]) -> list[str]:
+    """The problem of the choices of the kit's controls that gave a script error when the `choices` state tried them
+    (view_shot.mjs `sweep`): each choice the analyst can make, Rows: None and Color by: Off among them, must draw."""
+    bad = [ch for s in shots if s.get("state") == "choices" for ch in s.get("choices") or [] if ch.get("errors")]
+    if not bad:
+        return []
+    named = "; ".join(f"{ch.get('control')}: {ch.get('choice')} ({str(ch['errors'][0])[:200]})" for ch in bad[:CHOICE_ERRORS_NAMED])
+    more = f" and {len(bad) - CHOICE_ERRORS_NAMED} more" if len(bad) > CHOICE_ERRORS_NAMED else ""
+    return [_hint("view-choice-error", count=len(bad), choices=named + more)
+            or f"{_plural(len(bad), 'choice')} of the view's controls gave a script error when chosen: {named}{more}. "
+               "Every choice the analyst can make must draw the view, None and Off among them: guard what the page "
+               "reads of a choice that can be null (rows.by, colour.by, filter.by) and draw the records in one group, "
+               "or uncolored, for it."]
 
 
 def _page_of(shots: list[dict[str, Any]]) -> dict[str, Any]:
@@ -3701,12 +4248,13 @@ def robust_copy(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, 
 
 
 async def robust_check(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
-                       shown: dict[str, Any] | None) -> tuple[list[str], list[str]]:
+                       shown: dict[str, Any] | None, page: bool = True) -> tuple[list[str], list[str]]:
     """(problems, notes) of the view run on a copy of its files with one missing and a torn line (robust_copy), as a
     real corpus may be: build_index and problems() must not fail, problems() must report the torn line, and the page
     must load without errors and, when `shown` (what the overview showed over the whole corpus) anchored records or
     units and the copy left nothing else out, show some too. The torn line goes in a file the reader reads to the end
-    and does not hide, since one it leaves out has no line to report."""
+    and does not hide, since one it leaves out has no line to report. Without `page` (a view built in terminal mode)
+    only the reader runs on the copy."""
     try:
         _, req = await asyncio.to_thread(_prepare, c, slug)
         ans = await _call(c, req, "shown")
@@ -3738,6 +4286,8 @@ async def robust_check(c: str, slug: str, view: dict[str, Any], files: list[tupl
         problems: list[str] = []
         if copy["torn"] and not got["count"]:
             problems.append(_hint("view-robust-torn", ref=copy["torn"]))
+        if not page:
+            return problems, []
         overview = {"ref": None, "path": copy["files"][0][0]}
         s = (await shoot_states(c, slug, [{"out": None, "open": overview, "labels": probe_context()}], prepared=req))[0]
         if s.get("unavailable"):
@@ -3991,6 +4541,151 @@ def purple_note(html: str) -> str:
     return _hint("view-purple", colours=shown)
 
 
+# thimble's parts as a view's styles may touch them: the frame styles .chip, .btn, .seg, .field, the Color by control
+# and the time range selector (viewer_kit.css), Filter by, Rows, the lanes, the key, the divider, the side panel and the
+# transcript (viewer_parts.css), and a view lays them out but does not restyle them or draw chips of its own
+_STYLE_RE = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.S | re.I)
+_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
+_KIT_PART_RE = re.compile(r"\.(?:chip|btn|seg|field|thimble-(?:colour|range|axis|def|peek|reset|tip|filter|rows|ctl|key|lanes?|"
+                          r"divider|side|transcript|turn))(?:-[\w-]+)?(?![\w-])")
+_CLASS_RE = re.compile(r"\.(-?[_a-zA-Z][\w-]*)")
+# what a part looks like, which the kit sets: its edge, fill, corners, colours, type and height. Its width, margins,
+# padding, flex and place are the page's layout.
+_LOOK_PROPS = ("border", "background", "color", "font", "box-shadow", "outline", "height", "min-height", "line-height",
+               "letter-spacing", "text-transform", "text-decoration")
+_LOOK_PREFIXES = ("border-", "background-", "font-", "outline-", "text-decoration-")
+_RADIUS_VARS = {"--radius-hl": 3, "--radius-chip": 4, "--radius-seg": 5, "--radius-ui": 6, "--radius-card": 8,
+                "--radius-pane": 12, "--radius-pill": 999}
+CHIP_RADIUS = 4  # px, var(--radius-chip): a chip's corners
+CHIP_HEIGHT = 30  # px: a padded box no taller than this, or drawn inline, is a chip, a tag or a small button
+_SMALL_HEIGHT_VARS = ("--h-chip", "--h-control", "--control-sm", "--h-row")
+
+
+def _css_rules(css: str) -> Iterator[tuple[str, str]]:
+    """(selector, declarations) of each style rule in `css`, those inside @media, @supports, @container and @layer
+    included; @keyframes, @font-face and the like left out."""
+    i, n = 0, len(css)
+    while i < n:
+        j = css.find("{", i)
+        if j < 0:
+            return
+        depth, k = 1, j + 1
+        while k < n and depth:
+            depth += {"{": 1, "}": -1}.get(css[k], 0)
+            k += 1
+        sel = css[i:j].rsplit(";", 1)[-1].rsplit("}", 1)[-1].strip()
+        body = css[j + 1:k - 1]
+        if sel.startswith("@"):
+            if re.match(r"@(?:media|supports|container|layer)\b", sel, re.I):
+                yield from _css_rules(body)
+        elif sel:
+            yield sel, body
+        i = k
+
+
+def _declarations(body: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for part in body.split(";"):
+        prop, sep, value = part.partition(":")
+        if sep and prop.strip():
+            out[prop.strip().lower()] = value.replace("!important", "").strip()
+    return out
+
+
+def _last_compound(selector: str) -> str:
+    """The compound a selector picks its element by: the part after its last combinator, with what its :not(), :is()
+    and attribute brackets hold left out."""
+    bare = re.sub(r"\([^()]*\)|\[[^\]]*\]", "", selector.strip())
+    return re.split(r"\s*[\s>+~]\s*", bare)[-1]
+
+
+def _looks(decls: dict[str, str]) -> list[str]:
+    return [p for p in decls if p in _LOOK_PROPS or p.startswith(_LOOK_PREFIXES)]
+
+
+def _px(value: str) -> float | None:
+    """The largest length a CSS value names, in px: thimble's radius and height tokens by their sizes, a percentage of
+    25 or more as a pill; None when it names none."""
+    sizes: list[float] = []
+    for m in re.finditer(r"var\(\s*(--[\w-]+)", value):
+        if m.group(1) in _RADIUS_VARS:
+            sizes.append(_RADIUS_VARS[m.group(1)])
+    for m in re.finditer(r"(?<![\w-])(\d*\.?\d+)(px|%|rem|em)(?![\w-])", value):
+        num, unit = float(m.group(1)), m.group(2)
+        sizes.append(999.0 if unit == "%" and num >= 25 else num * 16 if unit == "rem" else num * 13 if unit == "em"
+                     else num if unit == "px" else 0.0)
+    return max(sizes) if sizes else None
+
+
+def _painted(decls: dict[str, str]) -> bool:
+    """Whether a rule draws a box: an edge, a fill or a ring."""
+    for prop, value in decls.items():
+        v = value.lower()
+        if prop in ("border", "border-color", "border-width", "border-style", "background", "background-color",
+                    "box-shadow", "outline") and v not in ("0", "none", "transparent", "unset", "initial", "inherit"):
+            return True
+    return False
+
+
+def _padded_sideways(decls: dict[str, str]) -> bool:
+    sides = [decls[p] for p in ("padding-left", "padding-right", "padding-inline") if p in decls]
+    if "padding" in decls:
+        vals = decls["padding"].split()
+        sides.append(vals[1] if len(vals) > 1 else vals[0] if vals else "0")
+    return any(re.search(r"[1-9]|var\(", v) for v in sides)
+
+
+def _chip_like(decls: dict[str, str], radius: float) -> bool:
+    """Whether a rule with corners of `radius` px draws a chip, a tag, a pill or a small button: a box with an edge or a
+    fill, padded at its sides, and a pill, no taller than CHIP_HEIGHT or drawn inline; not a square or a circle of a
+    fixed size."""
+    if not (_painted(decls) and _padded_sideways(decls)):
+        return False
+    w, h = decls.get("width"), decls.get("height") or decls.get("min-height")
+    if w and h and w == h:
+        return False
+    small = h is not None and (any(v in h for v in _SMALL_HEIGHT_VARS) or ((px := _px(h)) is not None and px <= CHIP_HEIGHT))
+    inline = decls.get("display", "").startswith("inline")
+    return radius >= 999 or small or inline
+
+
+def own_parts(html: str) -> list[str]:
+    """What a view's page (`html`) does in its styles that makes its parts look unlike thimble's: a rule that restyles
+    one of thimble's parts (.chip, .btn, .seg, .field or the Colour by control, or a class the page puts on one of
+    them in the same selector, such as `.fbtn.field`), setting its edge, fill, corners, colours, type or height; and a
+    rule that draws a chip-like element (_chip_like) with corners rounder than var(--radius-chip). Each once, in the
+    page's order, as `selector` and what it sets."""
+    css = _CSS_COMMENT_RE.sub("", "\n".join(_STYLE_RE.findall(html or "")))
+    rules = [(sel.strip(), _declarations(body)) for group, body in _css_rules(css) for sel in group.split(",")]
+    aliases: set[str] = set()
+    for sel, _ in rules:
+        for compound in re.split(r"\s*[\s>+~]\s*", re.sub(r"\([^()]*\)|\[[^\]]*\]", "", sel)):
+            if _KIT_PART_RE.search(compound):
+                aliases |= {c for c in _CLASS_RE.findall(compound) if not _KIT_PART_RE.fullmatch("." + c)}
+    found: dict[str, None] = {}
+    for sel, decls in rules:
+        last = _last_compound(sel)
+        part = bool(_KIT_PART_RE.search(last)) or any(c in aliases for c in _CLASS_RE.findall(last))
+        looks = _looks(decls) if part else []
+        if looks:
+            found.setdefault(f"`{sel}` sets {', '.join(looks)}", None)
+            continue
+        radius = decls.get("border-radius")
+        if radius and (px := _px(radius)) is not None and px > CHIP_RADIUS and _chip_like(decls, px):
+            found.setdefault(f"`{sel}` draws a chip with border-radius {radius}", None)
+    return list(found)
+
+
+def own_parts_note(html: str) -> str:
+    """The note for a view whose styles restyle thimble's parts or draw rounded chips of their own (own_parts); ''
+    otherwise."""
+    found = own_parts(html)
+    if not found:
+        return ""
+    shown = "; ".join(found[:4]) + (f"; and {len(found) - 4} more" if len(found) > 4 else "")
+    return _hint("view-own-parts", found=shown)
+
+
 # ----------------------------------------------------------------------------------------------------------
 # the tool cases this module owns (tools.REGISTRY and tools._h_read_ref / _h_screenshot call them)
 # ----------------------------------------------------------------------------------------------------------
@@ -4233,14 +4928,14 @@ def _fmt_size(n: int) -> str:
 
 
 async def _suggest_call(c: str, system: str, user: str, tool: Any, model: str | None = None) -> Any:
-    """The proposal's one model call: `model`, else the `dev` role's model, at low effort (the fallback model after a
-    refusal, as model.structured runs it). Tests replace it."""
+    """The proposal's one model call: `model`, else the viewer suggestion's model (Settings' `suggest` row), at that
+    row's effort and speed, and on the refusal row's after a refusal (config.call_settings). Tests replace it."""
     from . import model as model_mod  # noqa: PLC0415
 
-    role = config.models_for(c).get("dev") or dict(config.ROLE_MODELS_DEFAULT["dev"])
-    return await model_mod.structured(user, tool=tool,
-                                      model=model or role.get("model") or config.ROLE_MODELS_DEFAULT["dev"]["model"],
-                                      effort="low", system_append=system, cwd=config.corpus_dir(c))
+    role = config.call_settings(c, "suggest")
+    return await model_mod.structured(user, tool=tool, model=model or role["model"], effort=role["effort"],
+                                      speed=role["speed"], refusal=role["refusal"], system=system,
+                                      cwd=config.corpus_dir(c))
 
 
 def _suggest_sections(c: str) -> tuple[dict[str, str], Any]:
@@ -4313,7 +5008,9 @@ def accept(c: str, slug: str) -> dict[str, Any]:
         raise HTTPException(404, f"no such proposal: {slug}")
     if prop.get("status") != "suggested":
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not suggested")
-    prop = update_proposal(c, slug, status="queued", asked=True, accepted=True, ts=_now()) or prop
+    if (refused := click_refused(c, slug)) is not None:
+        return refused
+    prop = update_proposal(c, slug, status="queued", asked=True, accepted=True, ts=_now(), route=CLICK) or prop
     _emit(c, slug, "queued", asked=True)
     _queue(c, slug)
     return prop
@@ -4339,8 +5036,9 @@ _controls_seen: dict[tuple[str, int, int], bool] = {}
 
 def label_controls(v: dict[str, Any]) -> bool:
     """Whether the view's page draws label controls of its own: its view.html gives an element `data-label`
-    (prompts/dev-view.md), even one only a menu shows, and calls `thimble.setLabel`. thimble draws no label control
-    above a view, so beside a view without them its Labels sidebar opens while a label is on."""
+    (prompts/dev-view.md), even one only a menu shows, and calls `thimble.setLabel`, or it mounts the kit's Color by
+    control (`thimble.colorBy`, or `thimble.colourBy`, viewer_colour.js), which draws them. thimble draws no label control above a view, so
+    beside a view without them its Labels sidebar opens while a label is on."""
     d = v.get("dir")
     if not d:
         return False
@@ -4355,7 +5053,8 @@ def label_controls(v: dict[str, Any]) -> bool:
             _controls_seen.clear()
         try:
             text = page.read_text("utf-8", "replace")
-            _controls_seen[key] = "data-label" in text and "setLabel" in text
+            _controls_seen[key] = ("data-label" in text and "setLabel" in text) or "thimble.colourBy(" in text \
+                or "thimble.colorBy(" in text
         except OSError:
             return False
     return _controls_seen[key]
@@ -4431,27 +5130,63 @@ async def suggest_route(c: str, body: SuggestBody) -> dict[str, Any]:
         return {"slug": None}
 
 
+def _click(request: Request) -> None:
+    """403 unless the request carries the analyst's browser cookie: a click that starts, messages or stops a view's
+    builder or reviewer, which auto mode does not judge (subagents.analyst_only)."""
+    from . import subagents  # noqa: PLC0415
+
+    subagents.analyst_only(request)
+
+
+def _working(c: str, slug: str) -> bool:
+    """Whether a builder or reviewer of the view runs, so that a deletion stops one (a click)."""
+    try:
+        return _agent_works_on(c, slug)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @router.post("/ws/{c}/views/proposals/{slug}/accept")
-async def accept_route(c: str, slug: str) -> dict[str, Any]:
-    """Build a suggested viewer (accept); it comes back queued."""
+async def accept_route(c: str, slug: str, request: Request) -> dict[str, Any]:
+    """Build a suggested viewer (accept), a click; it comes back queued."""
+    _click(request)
     config.workspace_dir(c)
     _bind_loop()
     return accept(c, slug)
 
 
+class BuildBody(BaseModel):
+    model: str | None = None
+    effort: str | None = None
+
+
+@router.post("/ws/{c}/views/{slug}/build")
+async def build_route(c: str, slug: str, request: Request, body: BuildBody | None = None) -> dict[str, Any]:
+    """Build or Retry on a view's chip, a click, with the model and effort its Build menu names (else Settings' dev
+    row): a failed proposal, or a built view's failed change, queued again and started through main's module as the
+    pool has room (retry). Answers the proposal; 404 for none, 409 for one with nothing failed."""
+    _click(request)
+    config.workspace_dir(c)
+    _bind_loop()
+    values = {k: v for k, v in (("model", body.model if body else None), ("effort", body.effort if body else None)) if v}
+    return retry(c, slug, values or None)
+
+
 @router.post("/ws/{c}/views/proposals/{slug}/retry")
-async def retry_route(c: str, slug: str) -> dict[str, Any]:
-    """Queue a failed proposal, or a built view's failed change, again; it comes back `queued` (404 for none, 409 for
+async def retry_route(c: str, slug: str, request: Request) -> dict[str, Any]:
+    """Retry with Settings' values (build_route without a menu), a click; it comes back `queued` (404 for none, 409 for
     one with nothing failed)."""
+    _click(request)
     config.workspace_dir(c)
     _bind_loop()
     return retry(c, slug)
 
 
 @router.post("/ws/{c}/views/proposals/{slug}/stop")
-async def stop_build_route(c: str, slug: str) -> dict[str, Any]:
-    """Stop the proposal's build (stop_build); the proposal then fails, with Retry (404 for none, 409 for one that is
-    not queued or building)."""
+async def stop_build_route(c: str, slug: str, request: Request) -> dict[str, Any]:
+    """Stop the proposal's build (stop_build), a click; the proposal then fails, with Retry (404 for none, 409 for one
+    that is not queued or building)."""
+    _click(request)
     config.workspace_dir(c)
     _bind_loop()
     return stop_build(c, slug)
@@ -4462,17 +5197,21 @@ class ViewMessage(BaseModel):
 
 
 @router.post("/ws/{c}/views/proposals/{slug}/message")
-async def message_route(c: str, slug: str, body: ViewMessage) -> dict[str, Any]:
-    """A message typed in the view's build thread: logged there and queued as a change to the view (message); answers
-    the proposal."""
+async def message_route(c: str, slug: str, body: ViewMessage, request: Request) -> dict[str, Any]:
+    """A message typed in the view's build thread, a click: logged there and sent as a change to the view (message);
+    answers the proposal."""
+    _click(request)
     config.workspace_dir(c)
     _bind_loop()
     return message(c, slug, body.text)
 
 
 @router.delete("/ws/{c}/views/proposals/{slug}")
-async def delete_proposal_route(c: str, slug: str) -> dict[str, Any]:
+async def delete_proposal_route(c: str, slug: str, request: Request) -> dict[str, Any]:
+    """Delete the proposal (delete_proposal); while its builder or reviewer runs, that is a click that stops it."""
     config.workspace_dir(c)
+    if _working(c, slug):
+        _click(request)
     delete_proposal(c, slug)
     return {"ok": True}
 
@@ -4515,19 +5254,23 @@ async def get_view_route(c: str, slug: str) -> dict[str, Any]:
 
 
 @router.delete("/ws/{c}/views/{slug}")
-async def delete_view_route(c: str, slug: str) -> dict[str, Any]:
+async def delete_view_route(c: str, slug: str, request: Request) -> dict[str, Any]:
+    """Delete the view (delete_view); while its builder or reviewer runs, that is a click that stops it."""
     config.workspace_dir(c)
+    if _working(c, slug):
+        _click(request)
     delete_view(c, slug)
     return {"ok": True}
 
 
 @router.get("/ws/{c}/views/{slug}/frame")
 async def frame_route(c: str, slug: str, request: Request, origin: str | None = None,
-                      v: str | None = None) -> HTMLResponse:
+                      v: str | None = None) -> Response:
     """The page as a frame loads it (frame_document), as srcdoc text, at version `v` when given (VERSIONS_SUBDIR): the
     records, marks and resolve routes then answer for the same version, so the page stays as loaded while the view
     changes. `origin` is the page's location.origin, since through Vite's proxy the request's host may not be one the
-    browser can reach; without it, the request's host."""
+    browser can reach; without it, the request's host. The answer carries an ETag of the document, and a request whose
+    If-None-Match names it gets 304 with no body, so a view opened again is not sent again."""
     view = _view_or_404(c, slug, v)
     if not view["ok"]:
         raise HTTPException(409, f"the view {slug!r} has no reader.py, view.html or claims")
@@ -4536,7 +5279,13 @@ async def frame_route(c: str, slug: str, request: Request, origin: str | None = 
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     derived = await derived_fields(c, slug, view, v)
-    return HTMLResponse(await asyncio.to_thread(functools.partial(frame_document, view, media, derived=derived)))
+    doc = await asyncio.to_thread(functools.partial(frame_document, view, media, derived=derived))
+    # a validator, so the browser asks again on every open but gets the document again only when it changed
+    tag = f'"{hashlib.sha256(doc.encode("utf-8")).hexdigest()[:32]}"'
+    headers = {"ETag": tag, "Cache-Control": "no-cache"}
+    if tag in (x.strip().removeprefix("W/") for x in (request.headers.get("if-none-match") or "").split(",")):
+        return Response(status_code=304, headers=headers)
+    return HTMLResponse(doc, headers=headers)
 
 
 @router.get("/ws/{c}/views/{slug}/media")
@@ -4557,6 +5306,66 @@ async def card_media_route(c: str, path: str) -> FileResponse:
     return FileResponse(f, media_type=media_type, headers=MEDIA_HEADERS)
 
 
+# A fetch the view kit sends (viewer_colour.js), {"$thimble": <what>, ...}, which thimble answers itself rather than the
+# view's reader: "label", a label's definition for Color by's menu.
+KIT_QUERY = "$thimble"
+_MEANING_SPLIT = re.compile(r"(?<=[.;?!])\s+|\n+")
+
+
+def _meanings(text: str, values: list[str]) -> dict[str, str]:
+    """What a label's text says each value means, where it says it as `<value> = <meaning>` or `<value>: <meaning>` at
+    the start of a sentence, a clause or a line: {value: meaning}."""
+    out: dict[str, str] = {}
+    for part in _MEANING_SPLIT.split(text or ""):
+        part = part.strip().lstrip("-*• ").strip()
+        for v in values:
+            m = re.match(rf"[\"'`]?{re.escape(v)}[\"'`]?\s*(?:=|:|—|–| - )\s*(.+)", part, re.I | re.S)
+            if m and v not in out:
+                out[v] = m.group(1).strip().rstrip(".;").strip()
+                break
+    return out
+
+
+def label_definition(c: str, concept_id: str) -> dict[str, Any] | None:
+    """A label over files as Color by's menu shows its definition: {id, name, kind, text, spec, scope, unit, labeled,
+    values: [{name, highlight, n, meaning}]}. `text` is what the label asks or describes (a prompt label's prompt), `spec`
+    the pattern or the code of the other kinds, `labeled` how many records the label has read, each value's `n` how
+    many records took it. None for a label thimble does not know (the checks' test label among them) or one of cards or
+    sentences."""
+    from . import concepts  # noqa: PLC0415
+
+    try:
+        ws = config.workspace_dir(c)
+        k = concepts.read_concept(ws, str(concept_id))
+    except (HTTPException, OSError, ValueError):
+        return None
+    if k is None or k["unit"] not in concepts.FILE_UNITS:
+        return None
+    try:
+        stats = concepts.concept_stats(ws, k)
+    except (OSError, ValueError):
+        stats = {"n_labeled": None, "counts": {}}
+    prompt = k["kind"] == "prompt"
+    text = (k["spec"].strip() or k["description"].strip()) if prompt else k["description"].strip()
+    names = [cl["name"] for cl in k.get("classes") or []] or list(k.get("labels") or [])
+    meant = _meanings(text, names)
+    counts = stats.get("counts") or {}
+    return {"id": k["id"], "name": k["name"], "kind": k["kind"], "text": text, "spec": "" if prompt else k["spec"],
+            "scope": k.get("glob") or "", "unit": k["unit"], "labeled": stats.get("n_labeled"),
+            "values": [{"name": cl["name"], "highlight": bool(cl.get("highlight", True)), "n": counts.get(cl["name"]),
+                        "meaning": meant.get(cl["name"], "")} for cl in (k.get("classes") or [])]}
+
+
+def kit_answer(c: str, query: Any) -> tuple[bool, Any]:
+    """(True, the answer) for a fetch the view kit sent ({KIT_QUERY: ...}), which never reaches the reader; (False, None)
+    for any other query."""
+    if not isinstance(query, dict) or KIT_QUERY not in query:
+        return False, None
+    if query.get(KIT_QUERY) == "label" and isinstance(query.get("id"), str):
+        return True, label_definition(c, query["id"])
+    return True, None
+
+
 class RecordsBody(BaseModel):
     query: Any = None
     call: str | None = None
@@ -4566,20 +5375,23 @@ class RecordsBody(BaseModel):
     turn: int = 0
 
 
-@router.post("/ws/{c}/views/{slug}/records")
-async def records_route(c: str, slug: str, body: RecordsBody, request: Request, v: str | None = None) -> dict[str, Any]:
+@router.post("/ws/{c}/views/{slug}/records", response_model=dict[str, Any])
+async def records_route(c: str, slug: str, body: RecordsBody, request: Request,
+                        v: str | None = None) -> dict[str, Any] | Response:
     """reader.records(index, query): what the view's page, loaded at version `v`, asked for with thimble.fetch, with no
-    time limit. `call` names the call, so the page can cancel it (cancel_route) and read its progress (call_route); a
-    request the page drops (a reload, a closed tab) cancels it too. 502 with the reader's error, 409 {cancelled} when it
-    was cancelled."""
+    time limit, as {data, hidden?}, `data` the kernel's JSON text sent as it is (RawJSON). `call` names the call, so the
+    page can cancel it (cancel_route) and read its progress (call_route); a request the page drops (a reload, a closed
+    tab) cancels it too. 502 with the reader's error, 409 {cancelled} when it was cancelled."""
     from .tools import until_dropped  # noqa: PLC0415 — tools imports this module
 
     _view_or_404(c, slug, v)
+    if isinstance(body.query, dict) and KIT_QUERY in body.query:
+        return {"data": (await asyncio.to_thread(kit_answer, c, body.query))[1]}
     cid = view_calls.call_id(body.call)
     if view_calls.cancelled_before(c, cid):
         raise HTTPException(409, {"message": "the call was cancelled", "cancelled": True})
     sink: dict[str, Any] = {}
-    work = asyncio.ensure_future(reader_call(c, slug, "records", body.query, version=v, call=cid, sink=sink))
+    work = asyncio.ensure_future(reader_call(c, slug, "records", body.query, version=v, call=cid, sink=sink, raw=True))
     call = view_calls.begin(c, slug, cid, indexes_dir(c))
     if call is not None:
         call.task = work
@@ -4589,7 +5401,10 @@ async def records_route(c: str, slug: str, body: RecordsBody, request: Request, 
         out = {"data": work.result()}
         if sink.get("filter_key") is not None:
             out["hidden"] = note_left_out(c, slug, v, sink, frame=body.frame, turn=body.turn, part=body.key)
-        return out
+        if not isinstance(out["data"], RawJSON):
+            return out
+        rest = "".join(f",{json.dumps(k)}:{json.dumps(x)}" for k, x in out.items() if k != "data")
+        return Response('{"data":' + out["data"].text + rest + "}", media_type="application/json")
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
     except asyncio.CancelledError:
@@ -4666,83 +5481,16 @@ async def resolve_route(c: str, slug: str, ref: str, v: str | None = None) -> di
     return await open_place(c, slug, ref, locator_of(ref), v)
 
 
-class CheckBody(BaseModel):
-    locators: list[str] | None = None
-    picture: bool = False
-
-
-@router.post("/ws/{c}/views/{slug}/check")
-async def check_route(c: str, slug: str, request: Request, body: CheckBody | None = None) -> dict[str, Any]:
-    """A view ticket's session checking its draft: the gate with `locators` beside the sampled lines, {ok, lines, png},
-    `png` the picture of the page as it opens when `picture` asks for one. The locators are kept on the proposal for the
-    server's gate after the turn. Loopback only, and like every write only with the token's proof (view_check.py) or
-    the analyst's cookie (hook_auth.LocalWriteGuard)."""
-    from . import dev  # noqa: PLC0415
-
-    if not dev._is_loopback(request):
-        raise HTTPException(403, "a view's checks run from localhost only")
-    config.workspace_dir(c)
-    _check_slug(slug)
-    _bind_loop()
-    from .tools import until_dropped  # noqa: PLC0415 — tools imports this module
-
-    locators = [str(x).strip() for x in (body.locators if body and body.locators else []) if str(x).strip()]
-    answer = await until_dropped(request.receive, check_answer(c, slug, locators, bool(body and body.picture)),
-                                 f"view {slug}'s check")
-    if answer is None:
-        raise HTTPException(409, "the check was dropped by its caller")
-    return answer
-
-
-CHECK_DROP = ".check"  # in a view's folder: the check requests view_check.py leaves where it cannot reach the server
-CHECK_POLL_S = 0.3
-_DROP_NAME = re.compile(r"^[0-9a-f]{8,64}\.json$")
-
-
 async def check_answer(c: str, slug: str, locators: list[str], picture: bool) -> dict[str, Any]:
-    """A session's check of its draft: the gate with `locators` beside the sampled lines, the locators kept on the
-    proposal for the server's gate after the turn. {ok, lines, png}, `png` the picture of the page as it opens when
-    `picture` asks for one."""
+    """A builder's or reviewer's check of its draft (view_tools.tool_view_check): the gate with `locators` beside the
+    sampled lines, the locators kept on the proposal for the gates of record (finish_view). {ok, lines, png, drawing},
+    `png` the path of a picture of the page as it opens when `picture` asks for one, or in terminal mode `drawing` the
+    view drawn as text as it opens."""
     if locators and read_proposal(c, slug) is not None:
         update_proposal(c, slug, locators=locators)
     report = await gate(c, slug, locators or _kept_locators(c, slug), picture=picture)
-    return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png")}
-
-
-def watch_checks(c: str, slug: str) -> asyncio.Task:
-    """While a session builds or revises the view, answer the check requests view_check.py leaves in the view's
-    CHECK_DROP folder when its post cannot reach the server, as from inside the sandbox: each `<id>.json` {locators,
-    picture} is renamed `<id>.taken` and answered as `<id>.answer.json` with check_answer's answer. Cancel the task to
-    stop; the folder is removed then."""
-    return asyncio.get_running_loop().create_task(_watch_checks(c, slug), name=f"view-checks:{c}:{slug}")
-
-
-def _drop_requests(drop: Path) -> list[Path]:
-    """The requests waiting in a view's CHECK_DROP folder: regular files named `<id>.json`, and none when the folder or
-    the view's folder is a symlink, since the session that writes there could point it at files of thimble's own."""
-    if drop.parent.is_symlink() or drop.is_symlink() or not drop.is_dir():
-        return []
-    return sorted(p for p in drop.glob("*.json") if _DROP_NAME.match(p.name) and not p.is_symlink() and p.is_file())
-
-
-async def _watch_checks(c: str, slug: str) -> None:
-    drop = views_dir(c) / slug / CHECK_DROP
-    try:
-        while True:
-            await asyncio.sleep(CHECK_POLL_S)
-            for req in await asyncio.to_thread(_drop_requests, drop):
-                taken = req.with_suffix(".taken")
-                try:
-                    await asyncio.to_thread(os.replace, req, taken)
-                    body = json.loads(await asyncio.to_thread(taken.read_text, "utf-8"))
-                    locators = [str(x).strip() for x in body.get("locators") or [] if str(x).strip()]
-                    answer = await check_answer(c, slug, locators, bool(body.get("picture")))
-                except (OSError, ValueError, AttributeError) as e:
-                    answer = {"ok": False, "lines": [f"problem: the check request could not be read: {e}"], "png": None}
-                await asyncio.to_thread(atomic_write_text, drop / f"{req.stem}.answer.json", json.dumps(answer))
-                await asyncio.to_thread(taken.unlink, True)
-    finally:
-        await asyncio.to_thread(shutil.rmtree, drop, True)
+    return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png"),
+            "drawing": report.get("drawing")}
 
 
 def _kept_locators(c: str, slug: str) -> list[str] | None:

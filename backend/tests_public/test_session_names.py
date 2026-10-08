@@ -1,26 +1,24 @@
 """The names of the Claude Code sessions thimble starts (config.session_name): `thimble:<role> · <workspace>`, since
-`claude agents` lists the sessions of every folder; how bg_session addresses and shows them, a name an earlier build
-gave (`thimble:writer`) or one a model wrote with another separator included, a long name kept short and distinct, and
-main's name as launch-args prints it (cli.main_name) and the launcher passes it."""
+`claude agents` lists the sessions of every folder; a long name kept short and distinct, and main's name as launch-args
+prints it (cli.main_name) and the launcher passes it. The statusline and /thimble:agents name thimble's agents by what
+they do (tray.py)."""
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
-from app import bg_session, cli, config, dev, tools
+from app import tray, cli, config, dev, launch_mode
 
 CORPUS = "mini"
+INSTALLED_COPY = cli.installed_copy  # before conftest's autouse fixture stands it in
 
 
 def test_names_carry_the_workspace():
     assert config.session_name("main", "logs-2") == "thimble:main · logs-2"
     assert config.session_name("dev", None) == "thimble:dev", "a ticket of no workspace"
-    assert bg_session.name_of(CORPUS, "orient") == "thimble:orient · mini"
-    assert bg_session.name_of(CORPUS, "writer:report") == "thimble:writer · mini"
-    assert bg_session.name_of(CORPUS, "writer:story") == "thimble:writer-story · mini"
-    assert bg_session.name_of(CORPUS, "critique") == "thimble:critic · mini"
     assert dev.dev_session_name(CORPUS) == "thimble:dev · mini"
     assert dev.view_session_name(CORPUS, "board") == "thimble:view-board · mini"
 
@@ -47,85 +45,6 @@ def test_role_drops_the_workspace_only_from_thimble_names():
     assert config.session_role("thimble:writer-story · logs") == "thimble:writer-story"
     assert config.session_role("thimble:orient") == "thimble:orient", "an earlier build's name"
     assert config.session_role("fork(thread:a · b)") == "fork(thread:a · b)"
-
-
-@pytest.fixture()
-def followed():
-    """Two followed sessions of the workspace: a new one, and one an earlier build named without the workspace."""
-    new = bg_session.Entry(CORPUS, "writer:report", bg_session.name_of(CORPUS, "writer:report"), "ab12cd34", "sid-1",
-                           "chat-1", "writer", "/work/report")
-    old = bg_session.Entry(CORPUS, "critique", "thimble:critic", "ef56ab78", "sid-2", "chat-2", "critique", "/work/c")
-    bg_session._loaded.add(CORPUS)
-    bg_session._entries[(CORPUS, new.key)] = new
-    bg_session._entries[(CORPUS, old.key)] = old
-    yield new, old
-    bg_session._entries.pop((CORPUS, new.key), None)
-    bg_session._entries.pop((CORPUS, old.key), None)
-    bg_session._loaded.discard(CORPUS)
-
-
-def test_by_name_matches_the_whole_name_and_its_ref(followed):
-    new, old = followed
-    assert bg_session.by_name(CORPUS, "thimble:writer · mini") is new
-    assert bg_session.by_name(CORPUS, "Thimble:Writer · mini [3fa9c1]") is new, "SendMessage's ` [ref]`, any case"
-    assert bg_session.by_name(CORPUS, "thimble:critic") is old, "an earlier build's name is still its address"
-
-
-def test_by_name_takes_the_role_alone_unless_exact(followed):
-    new, _old = followed
-    assert bg_session.by_name(CORPUS, "thimble:writer") is new, "wait_session with the role alone"
-    assert bg_session.by_name(CORPUS, "ab12cd34") is new
-    # Claude Code delivers a SendMessage by the whole name, so `thimble:writer` reaches some other session
-    assert bg_session.by_name(CORPUS, "thimble:writer", exact=True) is None
-    assert bg_session.relay_check(CORPUS, None, "thimble:writer", "hello") is None
-
-
-def test_the_tray_entry_is_described_by_the_session_name(followed):
-    new, _old = followed
-    hint = bg_session.proxy_start_hint(CORPUS, new.key)
-    assert '`description` "thimble:writer · mini"' in hint
-    prompt = Path(bg_session.proxy_prompt(CORPUS, new.key)).read_text("utf-8")
-    assert 'SendMessage with `to` "thimble:writer · mini"' in prompt
-    assert bg_session._by_tray(CORPUS, "thimble:writer", "thimble:writer · mini") is new
-
-
-def test_record_keeps_the_name_claude_agents_lists(followed, monkeypatch):
-    monkeypatch.setattr(bg_session, "_ensure_watcher", lambda: None)
-    monkeypatch.setattr(bg_session.session, "find_transcript", lambda sid, config_dir=None: None)
-    e = bg_session.record(CORPUS, "orient", short="99aa88bb", sid="sid-9", chat="chat-9", role="orient",
-                          folder=Path("/work/o"), name="thimble:orient")
-    assert e.name == "thimble:orient" and e.shown == "thimble:orient"
-    bg_session._entries.pop((CORPUS, "orient"), None)
-    e = bg_session.record(CORPUS, "orient", short="99aa88bc", sid="sid-9", chat="chat-9", role="orient",
-                          folder=Path("/work/o"))
-    assert e.name == "thimble:orient · mini" and e.shown == "thimble:orient"
-    bg_session._entries.pop((CORPUS, "orient"), None)
-
-
-def test_the_statusline_shows_roles_and_the_listing_plain_names():
-    rows = [{"name": "thimble:writer · mini", "label": "writer: story", "state": "working"},
-            {"name": "fork(thread:probe)", "state": "idle"}]
-    assert bg_session.status_line(rows) == "thimble · ● thimble:writer working · ○ fork(thread:probe) idle"
-    assert bg_session.listing_text(rows).splitlines()[:2] == [f"{'writer: story':<18}  working",
-                                                              "fork(thread:probe)  done"]
-    assert [bg_session.label_of(k) for k in ("orient", "critique:orient", "writer:report", "writer:story")] == [
-        "orientation", "critic", "writer", "writer: story"]
-    assert "{label}" not in tools.hint("bg-proxy-start", type="t", session="s", prompt="p", short="x")
-
-
-async def test_the_agents_list_and_the_start_lines_name_each_agent_in_plain_words(followed, monkeypatch):
-    """/thimble:agents and the lines main's terminal prints as a session starts name it by what it does, with no
-    session name, id or command; the statusline keeps the roles."""
-    _new, old = followed
-    old.status, old.waiting_for = "waiting", "permission"
-    monkeypatch.setattr(config, "workspace_for_cwd", lambda cwd: CORPUS)
-    monkeypatch.setattr(bg_session, "_announced", {})
-    monkeypatch.setattr(bg_session, "_announced_loaded", {CORPUS})
-    monkeypatch.setattr(bg_session, "_save_announced", lambda c: None)
-    got = await bg_session.agents_route(bg_session.AgentsQuery(cwd="/work", session="main-1", announce=True))
-    assert got["text"] == "writer  working\ncritic  waiting for you\n\n↓ to follow any of them"
-    assert got["announce"] == "writer started: ↓ to follow it\ncritic started: ↓ to follow it"
-    assert got["line"] == "thimble · ● thimble:writer working · ◐ thimble:critic waiting for a permission"
 
 
 def test_main_name_is_the_workspace_slash_thimble_opens(tmp_path, monkeypatch):
@@ -163,10 +82,13 @@ def test_launch_args_put_mains_name_before_the_resume_id_and_the_prompt(tmp_path
     monkeypatch.setattr(cli, "last_main", lambda cwd: "sid-last")
     plain = cli.launch_args(logs).split("\n")
     assert plain[5] == cli.main_name(logs) == "thimble:main · logs"
-    assert "\n".join(plain[6:]).strip() and plain[6] != "sid-last", "the prompt follows the name"
+    assert cli.SESSION_ID_RE.fullmatch(plain[6]), "a new session's id, which launch.json records"
+    assert plain[7].split() == [f"{k}={v}" for k, v in cli.SWITCHES.items()]
+    assert plain[10:12] == ["browser", ""], "the mode line, and no export line in browser mode"
+    assert "\n".join(plain[12:]).strip() and "sid-last" not in plain[6:13], "the prompt follows the name and the lines"
     resumed = cli.launch_args(logs, resume=True).split("\n")
-    assert resumed[5] == "thimble:main · logs" and resumed[6] == "sid-last"
-    assert resumed[7:] == plain[6:]
+    assert resumed[5] == "thimble:main · logs" and resumed[6] == "" and resumed[12] == "sid-last"
+    assert resumed[13:] == plain[12:]
 
 
 def _launcher(tmp_path: Path, lines: list[str]) -> tuple[Path, Path]:
@@ -194,9 +116,12 @@ def _launcher(tmp_path: Path, lines: list[str]) -> tuple[Path, Path]:
 def test_the_launcher_passes_mains_name_and_lets_the_analysts_win(tmp_path):
     import subprocess  # noqa: PLC0415
 
-    head = ["plugin:thimble@inline", "mcp__x", "", "{}", ""]
-    launcher, path = _launcher(tmp_path, [*head, "thimble:main · logs", "the prompt"])
-    (tmp_path / "launch-args.txt.resume").write_text("\n".join([*head, "thimble:main · logs", "sid-last", "the prompt"]))
+    head = [str(tmp_path / "plugin"), "mcp__x", "", "{}", ""]
+    # no session id, the env, unset and note lines, browser mode and no exports
+    lines = ["", "CLAUDE_CODE_DISABLE_AGENT_VIEW=1", "", "", "browser", ""]
+    launcher, path = _launcher(tmp_path, [*head, "thimble:main · logs", *lines, "the prompt"])
+    (tmp_path / "launch-args.txt.resume").write_text("\n".join([*head, "thimble:main · logs", *lines, "sid-last",
+                                                                "the prompt"]))
     argv_out = tmp_path / "argv.txt"
 
     def run(*flags: str) -> list[str]:
@@ -207,6 +132,9 @@ def test_the_launcher_passes_mains_name_and_lets_the_analysts_win(tmp_path):
     argv = run()
     assert argv[argv.index("--name") + 1] == "thimble:main · logs" and "--resume" not in argv
     assert argv[argv.index("--append-system-prompt") + 1] == "the prompt"
+    assert argv[argv.index("--plugin-dir") + 1] == str(tmp_path / "plugin")
+    assert [a for a in argv if a.startswith("--")] == ["--plugin-dir", "--allowedTools", "--settings", "--name",
+                                                       "--append-system-prompt", "--"], "no flag but these"
     argv = run("-c")
     assert argv[argv.index("--name") + 1] == "thimble:main · logs"
     assert argv[argv.index("--resume") + 1] == "sid-last"
@@ -216,39 +144,375 @@ def test_the_launcher_passes_mains_name_and_lets_the_analysts_win(tmp_path):
         assert "thimble:main · logs" not in argv and own[-1] in argv
 
 
-def test_by_name_takes_the_role_before_any_separator(followed):
-    new, _old = followed
-    for mangled in ("thimble:writer - mini", "thimble:writer • mini", "thimble:writer·mini", "thimble:writer  ·  mini"):
-        assert bg_session.by_name(CORPUS, mangled) is new, mangled
-        assert bg_session.by_name(CORPUS, mangled, exact=True) is None
+def test_without_the_plugin_registered_the_launcher_loads_its_own_plugin_folder(tmp_path, monkeypatch):
+    """thimble is not added to every Claude Code session unless asked (install.sh --plugin, `thimble plugin on`), so the
+    launcher must load the plugin itself: when Claude Code lists no thimble copy of this install (installed_copy is
+    None), launch-args names this tree's plugin folder and the launcher passes it with --plugin-dir; when launch-args
+    names none (an installed copy, which Claude Code loads already), the launcher adds no --plugin-dir."""
+    path = tmp_path / "path"
+    path.mkdir()
+    (path / "claude").write_text('#!/bin/sh\ncase "$*" in *"plugin list"*|*"marketplace list"*) echo "[]";; esac\n')
+    (path / "claude").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{path}:/usr/bin:/bin")
+    assert INSTALLED_COPY(tmp_path) is None
+    (path / "claude").write_text('#!/bin/sh\ncase "$*" in *"plugin list"*) echo \'[{"id": "thimble@elsewhere", '
+                                 '"enabled": true}]\';; *"marketplace list"*) echo "[]";; esac\n')
+    assert INSTALLED_COPY(tmp_path) is None, "another marketplace's thimble is not this install's"
+    name = config.marketplace_name()
+    listed = json.dumps([{"id": f"thimble@{name}", "enabled": True}])
+    markets = json.dumps([{"name": name, "source": "directory", "path": str(config.REPO_ROOT)}])
+    (path / "claude").write_text(f"#!/bin/sh\ncase \"$*\" in *\"marketplace list\"*) echo '{markets}';; "
+                                 f"*\"plugin list\"*) echo '{listed}';; esac\n")
+    assert INSTALLED_COPY(tmp_path) == cli.Installed(cli.PLUGIN_DIR.resolve(), name), "the control: registered here"
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("THIMBLE_DATA_DIR", str(data))
+    logs = tmp_path / "work" / "logs"
+    logs.mkdir(parents=True)
+    assert cli.launch_args(logs).split("\n")[0] == str(cli.plugin_root()), "installed_copy None: load plugin/"
+
+    work = tmp_path / "w"
+    work.mkdir()
+    launcher, cpath = _launcher(work, [str(work / "plugin"), "mcp__x", "", "{}", "", "thimble:main · w", "", "", "", "",
+                                       "browser", "", "the prompt"])
+    argv_out = tmp_path / "argv.txt"
+    subprocess_env = {"PATH": f"{cpath}:/usr/bin:/bin", "HOME": str(tmp_path), "ARGV_OUT": str(argv_out)}
+    import subprocess  # noqa: PLC0415
+
+    subprocess.run(["bash", str(launcher)], check=True, capture_output=True, cwd=work, env=subprocess_env)
+    argv = argv_out.read_text().splitlines()
+    assert argv[argv.index("--plugin-dir") + 1] == str(work / "plugin")
+    assert "--dangerously-load-development-channels" not in argv
+    (work / "launch-args.txt").write_text("\n".join(["", "mcp__x", "", "{}", "", "thimble:main · w", "", "", "", "",
+                                                     "browser", "", "the prompt"]))
+    subprocess.run(["bash", str(launcher)], check=True, capture_output=True, cwd=work, env=subprocess_env)
+    argv = argv_out.read_text().splitlines()
+    assert "--plugin-dir" not in argv and argv[-1] == "/thimble"
 
 
-def test_a_peer_messages_sender_is_found_in_a_slugged_name(followed):
-    new, old = followed
-    assert bg_session.by_origin(CORPUS, "thimble:writer · mini") is new
-    assert bg_session.by_origin(CORPUS, "thimble-writer-mini") is new
-    assert bg_session.by_origin(CORPUS, "thimble-writer") is new
-    assert bg_session.by_origin(CORPUS, "thimble-critic") is old
-    assert bg_session.by_origin(CORPUS, "thimble-dev") is None
+def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_variables_and_prints_the_notes(tmp_path):
+    """The launcher passes launch-args' session id with --session-id, exports the env line's switches into `claude`'s
+    environment, unsets the variables the unset line names, prints each note line before Claude Code starts, and tells
+    launch-args when the analyst's own flags name the session (-r, --session-id, --fork-session) or ask for safe mode.
+    It passes launch-args its own pid for launch.json, which `claude`'s replaces once it starts (the launcher outlives
+    `claude`, so `claude` is its child)."""
+    import subprocess  # noqa: PLC0415
+
+    head = [str(tmp_path / "plugin"), "mcp__x", "high", "{}", ""]
+    sid = "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+    notes = "thimble: CLAUDE_CODE_EFFORT_LEVEL is unset\tthimble's agents can't start in this session: x."
+    launcher, path = _launcher(tmp_path, [*head, "thimble:main · logs", sid,
+                                          "CLAUDE_CODE_DISABLE_AGENT_VIEW=1 CLAUDE_DISABLE_ADOPT=1",
+                                          "CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CODE_SUBAGENT_MODEL", notes, "browser", "",
+                                          "the prompt"])
+    (path / "claude").write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done > "$ARGV_OUT"\n'
+                                 'env > "$ARGV_OUT.env"\necho $PPID > "$ARGV_OUT.pid"\n')
+    asked = tmp_path / "asked.txt"
+    py = tmp_path / "plugin" / "bin" / "thimble-python"
+    py.write_text(py.read_text().replace("#!/bin/sh\n", f'#!/bin/sh\nprintf "%s\\n" "$@" > "{asked}"\n'))
+    argv_out = tmp_path / "argv.txt"
+    env = {"PATH": f"{path}:/usr/bin:/bin", "HOME": str(tmp_path), "ARGV_OUT": str(argv_out),
+           "CLAUDE_CODE_EFFORT_LEVEL": "high", "CLAUDE_CODE_SUBAGENT_MODEL": "haiku"}
+    done = subprocess.run(["bash", str(launcher)], check=True, capture_output=True, text=True, cwd=tmp_path, env=env)
+    argv = argv_out.read_text().splitlines()
+    assert argv[argv.index("--session-id") + 1] == sid and argv[argv.index("--effort") + 1] == "high"
+    seen = dict(line.split("=", 1) for line in Path(f"{argv_out}.env").read_text().splitlines() if "=" in line)
+    assert seen["CLAUDE_CODE_DISABLE_AGENT_VIEW"] == "1" and seen["CLAUDE_DISABLE_ADOPT"] == "1"
+    assert "CLAUDE_CODE_EFFORT_LEVEL" not in seen and "CLAUDE_CODE_SUBAGENT_MODEL" not in seen
+    # thimble's plugin folders load unwatched, so a hook or Client of theirs that fails is told in the debug log, not in
+    # main's chat; a value the analyst set is kept
+    assert seen["CLAUDE_CODE_PLUGIN_DIR_WATCH"] == "0"
+    subprocess.run(["bash", str(launcher)], check=True, capture_output=True, cwd=tmp_path,
+                   env={**env, "CLAUDE_CODE_PLUGIN_DIR_WATCH": "1"})
+    assert "CLAUDE_CODE_PLUGIN_DIR_WATCH=1" in Path(f"{argv_out}.env").read_text().splitlines()
+    assert done.stderr.splitlines()[:2] == notes.split("\t")
+    assert "--own-session" not in asked.read_text() and "--safe-mode" not in asked.read_text()
+    told_pid = asked.read_text().splitlines()
+    assert told_pid[told_pid.index("--launcher-pid") + 1] == Path(f"{argv_out}.pid").read_text().strip(), \
+        "launch-args gets the launcher's own pid, `claude`'s parent"
+    for flags, told in ((["-r", "sid-mine"], "--own-session=sid-mine"), (["--session-id", sid], f"--own-session={sid}"),
+                        (["-r", "x", "--fork-session"], "--own-session="), (["--safe-mode"], "--safe-mode")):
+        subprocess.run(["bash", str(launcher), *flags], check=True, capture_output=True, cwd=tmp_path, env=env)
+        assert told in asked.read_text().splitlines(), flags
+        assert flags[-1] in argv_out.read_text().splitlines(), "the analyst's flags reach claude as they are"
 
 
-def test_a_session_started_again_keeps_its_start_flags(monkeypatch, tmp_path, workspaces_tmp):
-    """Claude Code keeps none of an ended session's options, so a session started again is passed its whole argv."""
-    import asyncio
+@pytest.fixture()
+def terminal_corpus(tmp_path, monkeypatch):
+    """A folder registered as `logs` in the test's data folder and home, its sandbox able to run, with the session
+    modules terminal mode reaches stood in for: the card runner's folders (app/cardrun.py, the backend lane's), the
+    hooks module's roles file (module_bridge.roles_file, the agents lane's) and the renderer plugin. Records what the
+    launch called."""
+    import sys  # noqa: PLC0415
+    import types  # noqa: PLC0415
 
-    calls: list[list[str]] = []
-    sid = "0123abcd-0000-0000-0000-000000000000"
+    import app  # noqa: PLC0415
+    from app import cc_plugin, module_bridge  # noqa: PLC0415
 
-    def cli(bin_, args, env, cwd=None, timeout=0):
-        calls.append(args)
-        return 0, "backgrounded · 9999ffff"
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("THIMBLE_DATA_DIR", str(data))
+    monkeypatch.setattr(config, "DATA_DIR", data.resolve())
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    for name in (*cli.UNSET_VARS, cli.NO_MODULE_ENV, cli.SAFE_MODE_ENV, "THIMBLE_CALLER_CWD", launch_mode.ENV,
+                 launch_mode.WS_ENV):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(cc_plugin, "MANAGED_DIRS", {})
+    folder = tmp_path / "work" / "logs"
+    folder.mkdir(parents=True)
+    config.register_corpus(folder, exact=True)
+    ws = config.workspace_dir("logs")
+    calls: dict[str, list] = {"server": [], "refresh": [], "local": [], "roles": [], "prompt_env": []}
+    monkeypatch.setattr(cli, "server_for_launch", lambda c: calls["server"].append(c) or [])
+    monkeypatch.setattr(cli, "refresh_extensions", lambda c: calls["refresh"].append(c))
+    monkeypatch.setattr(cli, "local_extensions", lambda c: calls["local"].append(c))
+    monkeypatch.setattr(module_bridge, "roles_file", lambda c: calls["roles"].append(c), raising=False)
+    cards = types.SimpleNamespace(write_dirs=lambda c: [ws / "notebooks", ws / "labels", ws / "card-runs"])
+    monkeypatch.setitem(sys.modules, "app.cardrun", cards)
+    monkeypatch.setattr(app, "cardrun", cards, raising=False)
+    renderer = tmp_path / "tree" / "mods" / "thimble-term"
+    (renderer / ".claude-plugin").mkdir(parents=True)
+    (renderer / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble-term"}))
+    (renderer / "hooks").mkdir()
+    (renderer / "hooks" / "hooks.json").write_text(json.dumps({"modules": ["./register.tsx"]}))
+    (renderer / "hooks" / "register.tsx").write_text("export default {}\n")
+    monkeypatch.setattr(cli, "renderer_root", lambda: renderer)
+    from app import events  # noqa: PLC0415
 
-    monkeypatch.setattr(bg_session.shutil, "which", lambda *a, **k: "/bin/claude")
-    monkeypatch.setattr(bg_session, "_cli", cli)
-    monkeypatch.setattr(bg_session, "listing", lambda *a: [{"id": "9999ffff", "sessionId": "9999ffff-1", "pid": 1}])
-    argv = ["claude", "-p", "--resume", sid, "--disallowedTools", "WebFetch", "--settings", json.dumps({"hooks": {}})]
-    proc = asyncio.run(bg_session.start(CORPUS, "orient", argv, tmp_path, {}, "go on", sid, "chat", "orient"))
-    got = calls[-1]
-    assert got[:3] == ["--bg", "--resume", sid] and got.count("--resume") == 1
-    assert "--settings" in got and got[got.index("--disallowedTools") + 1] == "WebFetch"
-    assert got[got.index("-n") + 1] == bg_session.name_of(CORPUS, "orient") and proc.session_id == "9999ffff-1"
+    real_prompt = events.session_prompt
+
+    def prompt(workdir, terminal=None):
+        calls["prompt_env"].append({k: os.environ.get(k) for k in (launch_mode.ENV, launch_mode.WS_ENV)})
+        return real_prompt(workdir, terminal)
+
+    monkeypatch.setattr(events, "session_prompt", prompt)
+    return types.SimpleNamespace(folder=folder, ws=ws, calls=calls, renderer=renderer)
+
+
+def test_terminal_mode_launches_with_no_server_the_renderer_the_card_runner_and_the_session_s_environment(
+        terminal_corpus, tmp_path):
+    """Terminal mode: launch-args starts no server and asks none (its extensions are found here), writes launch.json
+    with `mode: terminal` and the hooks module's roles file; the allow rule for the card runner, main's fence letting
+    its Bash write the card folders, THIMBLE_MODE, THIMBLE_HOME, THIMBLE_WS and the data and workspaces folders in
+    main's --settings `env` and on the export line, the renderer's folder on the mode line, and main's prompt rendered
+    in that environment. Browser mode, the control, has none of these."""
+    t = terminal_corpus
+    launch_mode.set_folder(t.folder, "terminal")
+    lines = cli.launch_args(t.folder).split("\n")
+    assert t.calls["server"] == [] and t.calls["refresh"] == [], "no server started or asked"
+    assert t.calls["local"] == ["logs"] and t.calls["roles"] == ["logs"]
+    runner = f"Bash({cli.plugin_root() / cli.CARD_RUNNER} *)"
+    assert runner in lines[1].split(",") and "Bash(thimble-run *)" in lines[1].split(","), "by its path and its name"
+    settings = json.loads(lines[3])
+    ws = str(t.ws.resolve())
+    want = {"THIMBLE_MODE": "terminal", "THIMBLE_HOME": str((tmp_path / "home").resolve()), "THIMBLE_WS": ws,
+            "THIMBLE_DATA_DIR": str((tmp_path / "data").resolve()), "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR)}
+    assert {k: settings["env"].get(k) for k in want} == want
+    assert settings["env"][cli.cc_plugin.FENCE_MARK] == "1", "fenced as in browser mode"
+    allow = settings["sandbox"]["filesystem"]["allowWrite"]
+    assert {f"{ws}/notebooks", f"{ws}/labels", f"{ws}/card-runs"} <= set(allow)
+    launch = str(config.workspace_dir("logs") / cli.LAUNCH_FILE)  # whose pid the launcher sets to main's `claude`
+    assert lines[10] == f"terminal\t{t.renderer}\t{launch}"
+    exported = dict(kv.split("=", 1) for kv in lines[11].split("\t"))
+    assert {k: exported[k] for k in want} == want
+    # the plugin copy's bin/ first on PATH, so main's Bash runs `thimble-run` by its name; main's --settings leave PATH
+    assert exported["PATH"].split(os.pathsep)[0] == str(cli.plugin_root() / "bin") and "PATH" not in settings["env"]
+    assert json.loads((t.ws / cli.LAUNCH_FILE).read_text())["mode"] == "terminal"
+    assert t.calls["prompt_env"] == [{"THIMBLE_MODE": "terminal", "THIMBLE_WS": ws}], "main's prompt sees the mode"
+    assert os.environ.get("THIMBLE_MODE") is None and os.environ.get("THIMBLE_WS") is None, "and only it"
+    assert "\n".join(lines[12:]).strip(), "main's prompt is appended as in browser mode"
+
+    (t.renderer / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "other-plugin"}))
+    lines = cli.launch_args(t.folder).split("\n")
+    assert lines[10] == f"terminal\t\t{launch}", "no renderer to load"
+    assert any(n.startswith("thimble: WARNING - terminal mode's renderer cannot load") for n in lines[9].split("\t"))
+
+    for k in t.calls.values():
+        k.clear()
+    launch_mode.set_folder(t.folder, "browser")
+    lines = cli.launch_args(t.folder).split("\n")
+    assert t.calls["server"] == ["logs"] and t.calls["refresh"] == ["logs"] and t.calls["roles"] == []
+    assert runner not in lines[1].split(",") and "Bash(thimble-run *)" not in lines[1].split(",")
+    settings = json.loads(lines[3])
+    assert not {"THIMBLE_MODE", "THIMBLE_WS", "THIMBLE_HOME"} & set(settings["env"])
+    assert f"{ws}/notebooks" not in settings["sandbox"]["filesystem"]["allowWrite"]
+    assert lines[10:12] == [f"browser\t\t{launch}", ""]
+    assert json.loads((t.ws / cli.LAUNCH_FILE).read_text())["mode"] == "browser"
+    assert t.calls["prompt_env"] == [{"THIMBLE_MODE": None, "THIMBLE_WS": None}]
+
+
+def _claude_process(tmp_path: Path, *args: str):
+    """A process whose command line is `<tmp_path>/claude <args>`, as /proc shows it: this Python by a link named
+    claude, sleeping."""
+    import subprocess  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    from app import procs  # noqa: PLC0415
+
+    link = tmp_path / "claude"
+    if not link.exists():
+        link.symlink_to(sys.executable)
+    p = subprocess.Popen([str(link), "-c", "import time; time.sleep(60)", *args])
+    for _ in range(300):
+        if procs.argv(p.pid)[-1:] == list(args[-1:]):
+            break
+        time.sleep(0.01)
+    return p
+
+
+def test_a_workspace_open_in_the_other_mode_refuses_the_launch(terminal_corpus, tmp_path, capsys):
+    """One mode per workspace at a time: while launch.json names the other mode and a `claude` that runs for its
+    session, launch-args refuses (exit 3) and writes nothing; the same mode, a pid that is gone, another program or a
+    `claude` of another session do not refuse."""
+    t = terminal_corpus
+    sid = "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+    launch_mode.set_folder(t.folder, "terminal")
+    main = _claude_process(tmp_path, "--session-id", sid)
+    try:
+        record = {"session": sid, "pid": main.pid, "mode": "browser", "at": "then"}
+        (t.ws / cli.LAUNCH_FILE).write_text(json.dumps(record))
+        assert cli.open_elsewhere("logs") == cli.OPEN_ELSEWHERE_LINE.format(mode="browser")
+        assert cli.main(["launch-args", "--cwd", str(t.folder)]) == cli.LAUNCH_REFUSED_EXIT
+        assert capsys.readouterr().err.splitlines()[0] == ("thimble: This workspace is open in browser mode in another "
+                                                           "terminal. Quit that session first.")
+        assert json.loads((t.ws / cli.LAUNCH_FILE).read_text()) == record and t.calls["roles"] == []
+        assert cli.open_elsewhere("logs", "browser") is None, "the same mode"
+        (t.ws / cli.LAUNCH_FILE).write_text(json.dumps({**record, "mode": None}))
+        assert cli.open_elsewhere("logs") is not None, "a launch from before modes ran in browser mode"
+        (t.ws / cli.LAUNCH_FILE).write_text(json.dumps({**record, "session": "another"}))
+        assert cli.open_elsewhere("logs") is None, "a claude of another session took the pid"
+        (t.ws / cli.LAUNCH_FILE).write_text(json.dumps({**record, "pid": os.getppid()}))
+        assert cli.open_elsewhere("logs") is None, "not claude"
+    finally:
+        main.kill()
+        main.wait()
+    (t.ws / cli.LAUNCH_FILE).write_text(json.dumps(record))
+    assert cli.open_elsewhere("logs") is None, "gone"
+    assert cli.launch_args(t.folder).split("\n")[10].startswith("terminal")
+
+
+def test_the_launcher_starts_terminal_mode_with_the_renderer_the_exports_and_no_first_prompt(tmp_path):
+    """The mode line's renderer is a second --plugin-dir, the export line's pairs are exported (a folder with a space
+    kept whole), and terminal mode opens with no `-- /thimble`; a THIMBLE_MODE or THIMBLE_WS from the calling shell
+    reaches no browser-mode session. A refused launch (exit 3) starts nothing and adds no line of its own."""
+    import subprocess  # noqa: PLC0415
+
+    head = [str(tmp_path / "plugin"), "mcp__x", "", "{}", "", "thimble:main · logs", "", "CLAUDE_CODE_DISABLE_AGENT_VIEW=1",
+            "", ""]
+    exports = "THIMBLE_MODE=terminal\tTHIMBLE_WS=/w s/workspaces/logs\tTHIMBLE_HOME=/h"
+    launcher, path = _launcher(tmp_path, [*head, "terminal\t/tree/mods/thimble-term", exports, "the prompt"])
+    (path / "claude").write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done > "$ARGV_OUT"\n'
+                                 'env > "$ARGV_OUT.env"\n')
+    argv_out = tmp_path / "argv.txt"
+    env = {"PATH": f"{path}:/usr/bin:/bin", "HOME": str(tmp_path), "ARGV_OUT": str(argv_out)}
+
+    def run(**extra: str) -> tuple[list[str], dict[str, str]]:
+        subprocess.run(["bash", str(launcher)], check=True, capture_output=True, cwd=tmp_path, env={**env, **extra})
+        seen = dict(line.split("=", 1) for line in Path(f"{argv_out}.env").read_text().splitlines() if "=" in line)
+        return argv_out.read_text().splitlines(), seen
+
+    argv, seen = run()
+    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--plugin-dir"] == [str(tmp_path / "plugin"),
+                                                                                "/tree/mods/thimble-term"]
+    assert "/thimble" not in argv and "--" not in argv and argv[-1] == "the prompt"
+    assert argv[argv.index("--append-system-prompt") + 1] == "the prompt"
+    assert (seen["THIMBLE_MODE"], seen["THIMBLE_WS"], seen["THIMBLE_HOME"]) == ("terminal", "/w s/workspaces/logs", "/h")
+
+    (tmp_path / "launch-args.txt").write_text("\n".join([*head, "browser", "", "the prompt"]))
+    argv, seen = run(THIMBLE_MODE="terminal", THIMBLE_WS="/elsewhere")
+    assert argv[-2:] == ["--", "/thimble"] and argv.count("--plugin-dir") == 1
+    assert "THIMBLE_MODE" not in seen and "THIMBLE_WS" not in seen
+
+    py = tmp_path / "plugin" / "bin" / "thimble-python"
+    py.write_text('#!/bin/sh\necho "thimble: This workspace is open in terminal mode in another terminal." >&2\nexit 3\n')
+    argv_out.unlink()
+    done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env=env)
+    assert done.returncode == 1 and not argv_out.exists()
+    assert done.stderr.splitlines() == ["thimble: This workspace is open in terminal mode in another terminal."]
+    py.write_text('#!/bin/sh\nexit 1\n')
+    done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env=env)
+    assert done.returncode == 1 and "could not render the session prompt" in done.stderr, "the control"
+
+
+def test_after_claude_exits_the_launcher_says_how_to_come_back_with_thimble_in_either_mode(tmp_path):
+    """Claude Code's own last line names `claude --resume`, which resumes the session without thimble, so the launcher
+    outlives `claude` and says `thimble --continue`, in terminal mode and (live check term-fix10, quirk 9) in browser
+    mode too. launch.json, which the mode line names (or THIMBLE_WS, from a launch-args before it did), still names
+    main's `claude` process: the subshell that execs it writes its own pid there first. A failed `claude` gets no such
+    line, an interrupted one (130) does. `--continue` names no session id."""
+    import subprocess  # noqa: PLC0415
+
+    ws = tmp_path / "ws"
+    (ws / "trusted").mkdir(parents=True)
+    (ws / "trusted" / "launch.json").write_text(json.dumps({"session": "s1", "pid": 1, "mode": "terminal"}))
+    head = [str(tmp_path / "plugin"), "mcp__x", "", "{}", "", "thimble:main · logs", "", "", "", ""]
+    exports = f"THIMBLE_MODE=terminal\tTHIMBLE_WS={ws}\tTHIMBLE_HOME=/h"
+    launcher, path = _launcher(tmp_path, [*head, "terminal\t/tree/mods/thimble-term", exports, "the prompt"])
+    (tmp_path / "launch-args.txt.resume").write_text("\n".join([*head, "terminal\t/tree/mods/thimble-term", exports,
+                                                                "5e55e55e-0000-4000-8000-000000000001", "the prompt"]))
+    py = tmp_path / "plugin" / "bin" / "thimble-python"
+    py.write_text(py.read_text().replace("case \" $* \" in", 'case " $* " in *" -I -S - "*) exec python3 "$@";;', 1))
+    (path / "claude").write_text('#!/bin/sh\necho $$ > "$ARGV_OUT.pid"\nexit "${CLAUDE_EXIT:-0}"\n')
+    argv_out = tmp_path / "argv.txt"
+    env = {"PATH": f"{path}:/usr/bin:/bin", "HOME": str(tmp_path), "ARGV_OUT": str(argv_out)}
+    done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env=env)
+    assert done.returncode == 0 and done.stderr.splitlines()[-1] == ("Resume with thimble --continue instead; it loads "
+                                                                    "thimble's plugin.")
+    assert json.loads((ws / "trusted" / "launch.json").read_text())["pid"] == int(Path(f"{argv_out}.pid").read_text())
+    done = subprocess.run(["bash", str(launcher), "--continue"], capture_output=True, text=True, cwd=tmp_path, env=env)
+    assert done.stderr.splitlines()[0] == "thimble: continuing the last thimble session in this folder"
+    assert "5e55e55e" not in done.stderr
+    done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env={**env, "CLAUDE_EXIT": "1"})
+    assert done.returncode == 1 and "thimble --continue" not in done.stderr
+    done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env={**env, "CLAUDE_EXIT": "130"})
+    assert done.returncode == 130 and done.stderr.splitlines()[-1].startswith("Resume with thimble --continue")
+    launch = ws / "trusted" / "launch.json"
+    launch.write_text(json.dumps({"session": "s1", "pid": 1, "mode": "browser"}))
+    (tmp_path / "launch-args.txt").write_text("\n".join([*head, f"browser\t\t{launch}", "", "the prompt"]))
+    done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env=env)
+    assert done.returncode == 0 and done.stderr.splitlines()[-1] == ("Resume with thimble --continue instead; it loads "
+                                                                    "thimble's plugin.")
+    assert json.loads(launch.read_text())["pid"] == int(Path(f"{argv_out}.pid").read_text())
+    (tmp_path / "launch-args.txt").write_text("\n".join([*head, "browser", "", "the prompt"]))
+    done = subprocess.run(["bash", str(launcher)], capture_output=True, text=True, cwd=tmp_path, env=env)
+    assert done.returncode == 0 and "thimble --continue" in done.stderr, "no workspace: nothing to write, the line all the same"
+
+
+async def test_the_statusline_shows_the_orientation_and_its_cards_and_the_listing_plain_words(monkeypatch):
+    """thimble's statusline shows the orientation's state and its cards, the other agents being rows of Claude Code's
+    own tray; /thimble:agents lists every running agent of thimble's by what it does, and nothing under the rows, since
+    Claude Code's own tray row already says how to follow an agent."""
+    rows = [{"name": "thimble:orientation", "label": "orientation", "state": "working", "role": "orientation"},
+            {"name": "thimble:writer", "label": "writer: report", "state": "waiting for a permission", "role": "writer"},
+            {"name": "fork(thread:probe)", "state": "idle"}]
+    monkeypatch.setattr(tray, "_cards", lambda c: 7)
+    assert tray.status_line(CORPUS, rows) == "thimble · orientation working · 7 cards"
+    assert tray.status_line(CORPUS, rows[1:]) == "", "no orientation runs"
+    assert tray.listing_text(rows).splitlines() == [f"{'orientation':<18}  working",
+                                                     f"{'writer: report':<18}  waiting for you",
+                                                     "fork(thread:probe)  done"]
+    monkeypatch.setattr(config, "workspace_for_cwd", lambda cwd: CORPUS)
+    monkeypatch.setattr(tray, "agent_rows", lambda c: rows)
+    got = await tray.agents_route(tray.AgentsQuery(cwd="/work", session="main-1", announce=True))
+    assert got["line"] == "thimble · orientation working · 7 cards" and got["announce"] == ""
+
+
+def test_the_orientation_waiting_names_its_critic_or_its_own_subagents(workspaces_tmp, monkeypatch):
+    """Live check L13: with critique off the statusline said the orientation was waiting for its critique while it
+    waited for a helper it had started. The row names the child it waits for: its critic, else its subagents."""
+    from app import events, subagent_files as sf, subagents
+
+    monkeypatch.setattr(events, "asking", lambda c: set())
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["o1"] = {"role": "orientation", "key": "orient", "status": "waiting", "started": 1}
+        sf.registry(state)["h1"] = {"role": None, "type": "thimble:orient-helper", "parent": "o1", "status": "running",
+                                    "started": 2}
+    [row] = tray.subagent_rows(CORPUS)
+    assert row["state"] == "waiting for its subagents"
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["k1"] = {"role": "critic", "key": "critique", "parent": "o1", "status": "running",
+                                    "started": 3}
+    assert tray.subagent_rows(CORPUS)[0]["state"] == "waiting for its critique"

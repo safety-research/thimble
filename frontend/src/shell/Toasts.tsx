@@ -1,21 +1,23 @@
-// Toasts: the opaque overlay at the bottom right, from the bus, gone after a few seconds or on a click. An error has a
-// negative edge and ✕; news has the accent dot and a chip to where it landed. A failure that names `report` also
-// offers Report a problem and stays longer.
+// Toasts: the opaque overlay at the bottom right, from the bus, gone after a few seconds or on a click. One rule says
+// what is a toast: it confirms or fails the analyst's own click, or reports news with a link to where it landed (a
+// view that is ready, a thread that got its answer). A state that lasts (a refused start, a write that failed, the
+// server down) shows once, next to what it concerns, and is never also a toast. An error has a negative edge and ✕;
+// news has the accent dot and a chip to where it landed, and news of a thread stays longer (its chip opens it).
 import { useEffect, useState } from 'react'
 import { Mark } from '../components/Marks'
 import { RefChip } from '../components/RefChip'
-import { bus, type ProblemPrefill } from '../lib/bus'
-import { ReportProblemButton } from './ProblemReport'
+import { bus } from '../lib/bus'
+import { ThreadChip } from '../chat/Notes'
 
 interface Toast {
   id: number
   text: string
   kind: 'info' | 'error'
   ref?: string
-  report?: ProblemPrefill
+  thread?: { id: string; label: string }
 }
 const SHOW_MS = 5000
-const REPORT_SHOW_MS = 15000
+const THREAD_SHOW_MS = 15000
 let seq = 0
 
 /** An error's words without the HTTP status lib/api puts before the server's detail, first letter capitalised. Pure. */
@@ -29,11 +31,10 @@ export function Toasts() {
     () =>
       bus.on('toast', (t) => {
         const id = ++seq
-        // the toast event's optional `ref` is not in lib/bus.ts's type, so it is read past the type
-        const ref = (t as { ref?: string }).ref
         const text = t.kind === 'error' ? toastText(t.text) : t.text
-        setToasts((ts) => (ts.some((x) => x.text === text) ? ts : [...ts, { id, text, kind: t.kind ?? 'info', ref, report: t.report }]))
-        window.setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), t.report ? REPORT_SHOW_MS : SHOW_MS)
+        const same = (x: Toast) => x.text === text && x.thread?.id === t.thread?.id
+        setToasts((ts) => (ts.some(same) ? ts : [...ts, { id, text, kind: t.kind ?? 'info', ref: t.ref, thread: t.thread }]))
+        window.setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), t.thread ? THREAD_SHOW_MS : SHOW_MS)
       }),
     [],
   )
@@ -45,7 +46,7 @@ export function Toasts() {
           <Mark kind={t.kind === 'error' ? 'failed' : 'unread'} label={t.kind === 'error' ? 'error' : 'news'} />
           <span className="shell-toast-text">{t.text}</span>
           {t.ref && <RefChip ref={t.ref} compact />}
-          {t.report && <ReportProblemButton description={t.report.description} focus={t.report.focus} className="shell-toast-report" />}
+          {t.thread && <ThreadChip id={t.thread.id} label={t.thread.label} />}
         </div>
       ))}
     </div>

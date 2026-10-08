@@ -30,15 +30,125 @@ DATA = Path(tempfile.mkdtemp(prefix="thimble-tests-data-")).resolve()
 MINI = write_mini(DATA / "mini")
 atexit.register(shutil.rmtree, DATA, True)
 os.environ["THIMBLE_DATA_DIR"] = str(DATA)
-# view builds' temp folders (dev.view_tmp_dir) go under a short folder of the suite's own in /tmp
-VIEW_TMP = Path(tempfile.mkdtemp(prefix="tt-", dir="/tmp")).resolve()
-atexit.register(shutil.rmtree, VIEW_TMP, True)
+# The suite's thimble home is a temporary folder, always: each test gets its own (_thimble_home_off_the_user), and what
+# runs outside a test's fixtures (a background thread that ends after its test, a test that undoes its monkeypatch, a
+# subprocess) finds this one, never the user's ~/.thimble, which THIMBLE_HOME unset would name (corpus.INDEX_DIR and the
+# other files "in thimble's home").
+REAL_HOMES = tuple(dict.fromkeys(os.path.abspath(os.path.expanduser(h)) for h in
+                                 ("~/.thimble", os.environ.get("THIMBLE_HOME") or "~/.thimble")))
+SUITE_HOME = Path(tempfile.mkdtemp(prefix="thimble-tests-home-")).resolve()
+atexit.register(shutil.rmtree, SUITE_HOME, True)
+os.environ["THIMBLE_HOME"] = str(SUITE_HOME)
+
+
+class RealHomeWrite(PermissionError):
+    """A write under the user's thimble home (REAL_HOMES), which the suite's audit hook refuses."""
+
+
+REAL_HOME_WRITES: list[tuple[str, str]] = []  # (audit event, path) of each write refused, which fails the session
+_WRITE_EVENTS = ("open", "os.mkdir", "os.rename", "os.remove", "os.rmdir", "os.chmod", "os.truncate", "os.utime",
+                 "os.symlink", "os.link", "shutil.rmtree", "shutil.copyfile", "shutil.move")
+_WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+
+
+def _under_real_home(path: object) -> str | None:
+    if isinstance(path, int) or path is None:
+        return None
+    try:
+        full = os.path.abspath(os.fsdecode(path))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return full if any(full == h or full.startswith(h + os.sep) for h in REAL_HOMES) else None
+
+
+def _guard(event: str, args: tuple) -> None:
+    """The suite's audit hook (sys.addaudithook): a write, a move, a removal or a mode change under the user's thimble
+    home is refused (RealHomeWrite) and recorded, so no test leaves a file there or removes one of the user's."""
+    if event not in _WRITE_EVENTS:
+        return
+    if event == "open":
+        path, mode, flags = (tuple(args) + (None, None, None))[:3]
+        writes = any(c in mode for c in "wax+") if isinstance(mode, str) else isinstance(flags, int) and bool(flags & _WRITE_FLAGS)
+        paths = [path] if writes else []
+    elif event in ("os.rename", "os.symlink", "os.link", "shutil.copyfile", "shutil.move"):
+        paths = list(args[:2])
+    else:
+        paths = list(args[:1])
+    for p in paths:
+        hit = _under_real_home(p)
+        if hit:
+            REAL_HOME_WRITES.append((event, hit))
+            raise RealHomeWrite(f"thimble's tests never write under the user's thimble home: {event} {hit}")
+
+
+sys.addaudithook(_guard)
+
+
+class LiveServerConnect(ConnectionRefusedError):
+    """A connection to the port of the user's thimble server (LIVE_PORTS), which the suite's audit hook refuses before
+    it is made."""
+
+
+# The ports a live thimble server of the user's answers on: the default (cli.DEFAULT_PORT, written here since conftest
+# runs before any app module is imported; test_suite_isolation checks they agree) and the THIMBLE_PORT the run started
+# with. No test connects to one: a CLI path that falls back to the default port would reach the user's server.
+DEFAULT_PORT = 8300
+LIVE_PORTS = frozenset(int(p) for p in (DEFAULT_PORT, os.environ.get("THIMBLE_PORT")) if str(p or "").isdigit())
+LIVE_CONNECTS: list[str] = []  # each connection to a live port refused (host:port), which fails the test and the run
+
+
+def _live_port(address: object) -> str | None:
+    """`host:port` when a socket address names a loopback host on one of LIVE_PORTS, else None."""
+    if not isinstance(address, tuple) or len(address) < 2 or not isinstance(address[1], int):
+        return None
+    host = str(address[0]).lower()
+    loopback = host in ("localhost", "::1", "0.0.0.0", "::") or host.startswith(("127.", "::ffff:127."))
+    return f"{host}:{address[1]}" if loopback and address[1] in LIVE_PORTS else None
+
+
+def _no_live_server(event: str, args: tuple) -> None:
+    """The suite's second audit hook: a connection to a live thimble server's port (LIVE_PORTS on the loopback) is
+    refused before it is made (LiveServerConnect, a ConnectionRefusedError, so the code under test sees no server) and
+    recorded, which fails the test and the run."""
+    if event != "socket.connect":
+        return
+    hit = _live_port(args[1] if len(args) > 1 else None)
+    if hit:
+        LIVE_CONNECTS.append(hit)
+        raise LiveServerConnect(f"thimble's tests never connect to a live thimble server's port: {hit}")
+
+
+sys.addaudithook(_no_live_server)
 # The suite tests the default model speed; a test that wants another value sets it with monkeypatch.
 os.environ.pop("THIMBLE_MODEL_SPEED", None)
 # The Host names httpx.ASGITransport and TestClient send (main.ALLOWED_HOSTS is read at import).
 os.environ.setdefault("THIMBLE_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver,test,t")
 
 import pytest  # noqa: E402
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """A write the audit hook refused under the user's thimble home fails the run, naming each one."""
+    if REAL_HOME_WRITES:
+        lines = "\n".join(f"  {event} {path}" for event, path in dict.fromkeys(REAL_HOME_WRITES))
+        print(f"\nthimble's tests tried to write under the user's thimble home (refused):\n{lines}", file=sys.stderr)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    if LIVE_CONNECTS:
+        lines = "\n".join(f"  {hit} ({LIVE_CONNECTS.count(hit)}x)" for hit in dict.fromkeys(LIVE_CONNECTS))
+        print(f"\nthimble's tests tried to connect to a live thimble server's port (refused):\n{lines}", file=sys.stderr)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item):
+    """A test during which the audit hook refused a connection to a live thimble server's port fails, naming the port,
+    also when the code under test took the refusal as no server (cli.healthy answers False)."""
+    before = len(LIVE_CONNECTS)
+    out = yield
+    if len(LIVE_CONNECTS) > before:
+        pytest.fail(f"this test connected to a live thimble server's port (refused): {', '.join(dict.fromkeys(LIVE_CONNECTS[before:]))}",
+                    pytrace=False)
+    return out
 
 
 @pytest.fixture()
@@ -67,25 +177,17 @@ def _workspaces_off_the_checkout(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def claude_global_config(tmp_path, tmp_path_factory, monkeypatch) -> Path:
-    """Claude Code's global config is the test's own, which trusts the test's tmp dir, where its workspaces live, so no
-    test reads the user's ~/.claude.json and the background sessions may start (bg_session.trusted). The file lives
-    outside that dir, which some tests scan. A test of an untrusted workspace rewrites it."""
+    """Claude Code's global config is the test's own (claude_changes.global_config), so no test reads or writes the
+    user's ~/.claude.json. It trusts no folder, since nothing thimble starts needs trust. The file lives outside the
+    test's tmp dir, which some tests scan."""
     import json
 
-    from app import bg_session
+    from app import claude_changes
 
     path = tmp_path_factory.mktemp("claude-config") / ".claude.json"
-    path.write_text(json.dumps({"projects": {str(tmp_path): {"hasTrustDialogAccepted": True}}}))
-    monkeypatch.setattr(bg_session, "claude_json", lambda: path)
+    path.write_text(json.dumps({"projects": {}}))
+    monkeypatch.setattr(claude_changes, "global_config", lambda: path)
     return path
-
-
-@pytest.fixture(autouse=True)
-def _view_temp_off_the_user(monkeypatch):
-    """View builds' temp folders are the suite's own, never in the user's /tmp/thimble-<uid>."""
-    from app import dev
-
-    monkeypatch.setattr(dev, "VIEW_TMP_ROOT", VIEW_TMP)
 
 
 @pytest.fixture(autouse=True)
@@ -173,29 +275,86 @@ def _dev_dir_off_the_checkout(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _view_tickets_held(monkeypatch):
-    """A view proposal queues a ticket at once, and a ticket that starts runs a real `claude --bg`. Every test holds
-    them queued with an empty pool."""
-    from app import dev
+    """A view proposal queues its build at once, and a build that starts asks main's module for a subagent. Every test
+    holds them queued with an empty pool, and starts with no report check's run."""
+    from app import checks, dev
 
     monkeypatch.setattr(dev, "VIEW_POOL", 0)
     monkeypatch.setattr(dev, "_view_runs", {})
     monkeypatch.setattr(dev, "_view_queue", [])
     monkeypatch.setattr(dev, "_view_stopping", {})
-    monkeypatch.setattr(dev, "_parked", set())
     monkeypatch.setattr(dev, "_closing", False)
+    monkeypatch.setattr(dev, "_retry_handle", None)
+    monkeypatch.setattr(dev, "_no_module_looks", {})
+    monkeypatch.setattr(dev, "_settling", set())
+    monkeypatch.setattr(checks, "_active", {})
+    monkeypatch.setattr(checks, "_queue", [])
+    monkeypatch.setattr(checks, "_retry_handle", None)
 
 
 @pytest.fixture(autouse=True)
 def _no_held_events():
-    """The quiet events channel.post holds for the next event and the modes main's hooks reported are module state:
+    """The quiet events events.post holds for the next event and the modes main's hooks reported are module state:
     none carries over from another test."""
-    from app import channel, session
+    from app import events, session
 
-    for held in (channel._held, session._modes):
+    for held in (events._held, session._modes):
         held.clear()
     yield
-    for held in (channel._held, session._modes):
+    for held in (events._held, session._modes):
         held.clear()
+
+
+LISTENER_SID = "5e55a000-0000-4000-8000-0000000000aa"
+
+
+class Listener:
+    """A session that is main in workspace `corpus` and whose shim holds a subscription, for a test that checks what
+    reaches main: the events events.post queues for its watcher (events._pending), taken like an asyncio.Queue's."""
+
+    def __init__(self, corpus: str, sid: str = LISTENER_SID) -> None:
+        from app import config, events, session
+
+        self.corpus, self.sid = corpus, sid
+        self.sub = events.Sub(sid)
+        events._subs.setdefault(corpus, set()).add(self.sub)
+        session.attach(corpus, sid, str(config.corpus_dir(corpus)), None)
+
+    def _queue(self):
+        from app import events
+
+        return events._pending.get((self.corpus, self.sid))
+
+    def empty(self) -> bool:
+        return not self._queue()
+
+    def get_nowait(self) -> dict:
+        import asyncio
+
+        q = self._queue()
+        if not q:
+            raise asyncio.QueueEmpty
+        return q.popleft()
+
+    async def get(self, timeout: float = 10.0) -> dict:
+        import asyncio
+
+        end = time.monotonic() + timeout
+        while self.empty():
+            if time.monotonic() > end:
+                raise asyncio.TimeoutError
+            await asyncio.sleep(0.02)
+        return self.get_nowait()
+
+    def close(self) -> None:
+        from app import events, session
+
+        events._subs.get(self.corpus, set()).discard(self.sub)
+        events._pending.pop((self.corpus, self.sid), None)
+        events._notices.pop((self.corpus, self.sid), None)
+        lv = session._live.pop(self.corpus, None)
+        if lv is not None and lv.task is not None:
+            lv.task.cancel()
 
 
 @pytest.fixture(autouse=True)
@@ -223,6 +382,54 @@ def _no_plugin_list(monkeypatch):
     from app import cli
 
     monkeypatch.setattr(cli, "installed_copy", lambda cwd: None)
+
+
+@pytest.fixture(autouse=True)
+def _launch_writes_nothing_shared(monkeypatch):
+    """launch_args registers its folder (cli.register_here), starts thimble's server (cli.server_for_launch) and finds
+    the workspace's extensions again through it (cli.refresh_extensions). In a test it registers nothing, so the suite's
+    shared data folder gains no corpus, and starts and reaches no server: the default port may be a live server's. A
+    test of any of them replaces it again."""
+    from app import cli, config
+
+    monkeypatch.setattr(cli, "register_here", lambda cwd: config.workspace_for_cwd(str(cwd)))
+    monkeypatch.setattr(cli, "server_for_launch", lambda c: [])
+    monkeypatch.setattr(cli, "refresh_extensions", lambda c: None)
+
+
+def _port_of(url: str | None, default: int) -> int:
+    """The port a health probe's url names, or `default` (the port the probe falls back to) for none."""
+    import urllib.parse
+
+    try:
+        return urllib.parse.urlsplit(url).port or default if url else default
+    except ValueError:
+        return default
+
+
+@pytest.fixture(autouse=True)
+def _no_live_server_probe(monkeypatch):
+    """The health probes that decide whether thimble's server runs answer no server for a live server's port
+    (LIVE_PORTS), without connecting: with no port set, the CLI's commands (`thimble extension`, `list`, `purge`, …)
+    and feedback fall back to the default port, which may be the user's own server (live check term-fix6: a test's
+    `thimble extension add` posted /api/extensions/refresh to it). A probe of another port, such as a test server's,
+    probes as before; a test's own patch still wins. The audit hook (_no_live_server) refuses any other way there."""
+    from app import cli, dev, feedback, restart_watch
+
+    def guarded(real, default, none):
+        def probe(url=None, *args, **kwargs):
+            if _port_of(url, default()) in LIVE_PORTS:
+                return none
+            return real(url, *args, **kwargs)
+
+        return probe
+
+    monkeypatch.setattr(cli, "healthy", guarded(cli.healthy, cli.port, False))
+    monkeypatch.setattr(feedback, "server_answers", guarded(feedback.server_answers, lambda: DEFAULT_PORT, False))
+    monkeypatch.setattr(dev, "_health", guarded(dev._health, dev.config_port, None))
+
+    real_watch = restart_watch.health
+    monkeypatch.setattr(restart_watch, "health", lambda port, *a, **k: None if port in LIVE_PORTS else real_watch(port, *a, **k))
 
 
 @pytest.fixture(autouse=True)
@@ -261,8 +468,8 @@ def data_tmp(tmp_path, monkeypatch):
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
     """A scratch THIMBLE_HOME and Claude Code config dir, a stand-in UI build, and no adoption of a real server: the
-    default port may be a live server's. `up` runs as in a session the launcher started, on a claude.ai login."""
-    from app import cc_channel, cli, config
+    default port may be a live server's. `up` runs as in a session the launcher started."""
+    from app import cli, config
 
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
     for k in ("THIMBLE_PORT", "THIMBLE_UI_PORT", "THIMBLE_DEV", "THIMBLE_DATA_DIR", "THIMBLE_WORKSPACES_DIR"):
@@ -273,8 +480,7 @@ def home(tmp_path, monkeypatch):
     (tmp_path / "ui-dist" / "index.html").write_text("<html></html>")
     monkeypatch.setenv("THIMBLE_FRONTEND_DIST", str(tmp_path / "ui-dist"))
     monkeypatch.setattr(config, "FRONTEND_DIST", tmp_path / "ui-dist")
-    monkeypatch.setenv(cli.CHANNEL_ENV, "plugin:thimble@inline")
-    monkeypatch.setattr(cc_channel, "login", lambda environ=None, cwd=None: {"loggedIn": True, "authMethod": "claude.ai"})
+    monkeypatch.setenv(cli.LAUNCHED_ENV, "1")
     monkeypatch.setattr(cli, "health_leader", lambda url=None: None)
     monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)  # nor refuses one: another test covers that
     monkeypatch.delenv(cli.SANDBOX_ENV, raising=False)
@@ -293,29 +499,17 @@ def data(tmp_path, monkeypatch):
     return d
 
 
-def print_sessions(monkeypatch) -> None:
-    """Every session agent_session.start starts runs as `claude -p`, for a stand-in `claude` that speaks only --print:
-    the orientation's, its critic's and the writers' too, which otherwise run as `claude --bg`. The permission flow a
-    test checks is the same in both."""
-    from app import agent_session
-
-    real = agent_session.start
-
-    async def start(*args, **kw):
-        return await real(*args, **{**kw, "background": False})
-
-    monkeypatch.setattr(agent_session, "start", start)
-
-
 def fake_claude_bin(folder: Path, status: dict) -> Path:
     """A stand-in `claude` in `folder` whose `auth status --json` prints `status` (config.auth_status), and which names
-    itself a recent version."""
+    itself the version thimble is tested with, about which thimble says nothing (cli.claude_code_warning)."""
     import json
     import shlex
 
+    from app import cli
+
     (folder / "auth-status.json").write_text(json.dumps(status))
     bin_ = folder / "fake-claude"
-    bin_.write_text(f'#!/bin/sh\ncase "$1" in --version) echo "9.9.9 (Claude Code)";; '
+    bin_.write_text(f'#!/bin/sh\ncase "$1" in --version) echo "{cli.TESTED_CLAUDE_CODE} (Claude Code)";; '
                     f'auth) cat {shlex.quote(str(folder / "auth-status.json"))};; esac\n')
     bin_.chmod(0o755)
     return bin_

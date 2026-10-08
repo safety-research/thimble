@@ -1,5 +1,5 @@
 // One chat's live state: its meta and records, refetched on the stream's `chat` events, and its rows (tidy.ts). A
-// message goes to the analyst's Claude Code session as a channel event (`main`, or `thread` with the thread's id); the
+// message goes to the analyst's Claude Code session as a browser event (`main`, or `thread` with the thread's id); the
 // reply comes back through the log the mirror writes. A null chat is idle.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'

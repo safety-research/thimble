@@ -1,11 +1,14 @@
 // Which representation of a bundle a card draws (src/components/Outputs.tsx pickMime): an error first, and a picture or
 // a chart before its text. A card type's graphic is the card's chart, drawn by the type's frame, and a citation of one
-// of its listing's lines opens the record that ends the line (src/canvas/TypeCard.tsx).
+// of its listing's lines opens the record that ends the line (src/canvas/TypeCard.tsx). What a card draws that a
+// document can show as a figure (figureKind).
 import { describe, expect, test } from 'vitest'
 import { citedRecord } from '../../src/canvas/TypeCard.tsx'
-import { CARD_MIME, ERROR_MIME, pickMime, primaryArtifact, responsive } from '../../src/components/Outputs.tsx'
+import { CARD_MIME, ERROR_MIME, figureKind, pickMime, primaryArtifact, responsive } from '../../src/components/Outputs.tsx'
 import { FRAME_MIME } from '../../src/lib/dataFrame.ts'
-import type { MimeBundle } from '../../src/lib/types.ts'
+import type { Cell, MimeBundle } from '../../src/lib/types.ts'
+import { cardShape } from '../../src/report/cards.ts'
+import { figureCandidates } from '../../src/report/model.ts'
 
 const bundle = (b: object) => b as MimeBundle
 
@@ -34,6 +37,28 @@ describe("a card type's graphic", () => {
     expect(citedRecord('card:c7@out1#L1', 'c7', 1, listing)).toBeNull()
     expect(citedRecord('card:c8@out1#L2', 'c7', 1, listing)).toBeNull()
     expect(citedRecord('chat/help.jsonl#L4', 'c7', 1, listing)).toBe('chat/help.jsonl#L4')
+  })
+})
+
+describe('what a card draws as a figure', () => {
+  // Matt: "why can a timeline card not be used in a document? that seems silly". Every card that draws a figure is one
+  // a document can show (backend material.figure_kind), and the picker and the sidebar's glyph read the same test.
+  const card = (c: Partial<Cell>) => ({ id: 'c', notebook: 'n', title: 'q', created_by: 'a', ts: '', kind: 'code', ...c }) as Cell
+  const timeline = card({ kind: 'timeline', code: 'thimble.timeline(evs)', outputs: [bundle({ 'application/vnd.thimble.timeline+json': { events: [] }, 'text/plain': 'x' })] })
+  const diagram = card({ kind: 'diagram', payload: { dataset: { nodes: ['a'], edges: [] } } })
+  const custom = card({ kind: 'custom', payload: { html: '<svg></svg>' } })
+  const typed = card({ kind: 'plot', outputs: [bundle({ [CARD_MIME]: { type: 'swarm', data: {} }, 'text/plain': 'swarm' })] })
+  const plot = card({ kind: 'plot', outputs: [bundle({ 'image/png': 'AAAA' })] })
+  const table = card({ kind: 'table', outputs: [bundle({ [FRAME_MIME]: {}, 'text/plain': 'x' })] })
+  const note = card({ kind: 'note', payload: { text: 'words' } })
+  const printed = card({ kind: 'code', outputs: [bundle({ 'text/plain': '27', _stream: 'stdout' })] })
+  test('a timeline or a diagram, from code or a dataset, a card type, a custom page, a chart and a table; not a note or a print', () => {
+    expect([timeline, diagram, custom, typed, plot, table, note, printed].map(figureKind)).toEqual(['timeline', 'diagram', 'custom', 'chart', 'chart', 'table', null, null])
+    expect(figureKind(card({ kind: 'custom', payload: { html: ' ' } }))).toBeNull()
+  })
+  test('the picker offers each, and the sidebar draws each as a figure', () => {
+    expect(figureCandidates([timeline, note, diagram, printed, custom], figureKind)).toEqual([timeline, diagram, custom])
+    expect(['timeline', 'diagram', 'custom', 'chart', 'table', null].map(cardShape)).toEqual(['bars', 'bars', 'bars', 'bars', 'table', 'text'])
   })
 })
 

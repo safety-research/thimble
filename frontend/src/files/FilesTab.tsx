@@ -49,6 +49,10 @@ interface Open {
   quote?: ViewQuote & { span: string }
   /** in a view: the card it was opened from and its arguments (a card type's Open as view) */
   query?: ViewQuery
+  /** in a view: the analyst chose this file (Open in, or a ref that names the whole file), so the view shows it rather
+   * than opening as from its tab; a view opened by name (view:<slug>, a start page's row) is opened on its first file
+   * with this unset */
+  picked?: boolean
 }
 
 /** The open tabs a workspace keeps: their paths and the one shown. */
@@ -308,9 +312,9 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const searchRef = useRef<HTMLInputElement>(null)
   const [findAsk, setFindAsk] = useState<FindAsk>({ mode: 'find', n: 0 })
   // Sidebars (shell/dock.tsx) dock only while the body holds them beside the view or reader at a readable width. A
-  // view draws its own label controls, so its Labels sidebar starts hidden and shows when those controls open a label's
-  // editor; beside a view built without label controls it also shows while a label is on or a label marks the view's
-  // files, so turning the last label off there keeps it. The analyst's hide or show holds for the tab's session, apart
+  // view draws its own label controls, which open the label editor in a popover over the view (ViewPane), so its Labels
+  // sidebar starts hidden; beside a view built without label controls it shows while a label is on or a label marks the
+  // view's files, so turning the last label off there keeps it. The analyst's hide or show holds for the tab's session, apart
   // for views with label controls and views without, so hiding it beside one kind leaves the other's as it was. When it
   // cannot dock it lies over the view's left edge. The File browser's sidebar folds to its show button when it cannot
   // dock.
@@ -342,7 +346,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const ownPane = !!shownSlug && panesShow.includes(viewSurface(shownSlug))
   useEffect(() => {
     if (!ownPane || !shownSlug) return
-    if (viewAt) bus.emit('openInView', { slug: shownSlug, path: viewAt.path, ref: viewAt.ref, quote: viewAt.quote, query: viewAt.query })
+    if (viewAt) bus.emit('openInView', { slug: shownSlug, path: viewAt.path, ref: viewAt.ref, quote: viewAt.quote, query: viewAt.query, picked: viewAt.picked })
     bus.emit('showTab', { tab: viewSurface(shownSlug) })
     setBar(BROWSER)
     setViewAt(null)
@@ -423,7 +427,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const toView = useCallback(
     (slug: string, at: Open | null, from?: string | null) => {
       if (surfaceShown(viewSurface(slug))) {
-        if (at) bus.emit('openInView', { slug, path: at.path, ref: at.ref, quote: at.quote, query: at.query })
+        if (at) bus.emit('openInView', { slug, path: at.path, ref: at.ref, quote: at.quote, query: at.query, picked: at.picked })
         bus.emit('showTab', { tab: viewSurface(slug), from })
         return
       }
@@ -515,7 +519,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
         if (!view) return toBrowser({ path, ref }, from)
         if (view.file_type) return toFileViewer(view.slug, { path, ref }, from)
         const fragment = fragmentIn(ref, path)
-        if (fragment == null) return toView(view.slug, { path }, from)
+        if (fragment == null) return toView(view.slug, { path, picked: true }, from)
         const knows = (s: string, r: string) =>
           api
             .viewOpen(ws, s, r)
@@ -542,7 +546,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
       used(path, slug)
       const at = ref && refPath(ref) === path ? ref : undefined
       track('view-open', { target: slug ? `view:${slug}` : 'panel:files', detail: { from: 'open-in' } })
-      if (slug) toView(slug, { path, ref: at })
+      if (slug) toView(slug, { path, ref: at, picked: true })
       else toBrowser({ path, ref: at })
     },
     [used, toView, toBrowser],
@@ -613,15 +617,6 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   // what a new label applies to: the files the view in front claims, else the file open in the reader
   const appliesTo = useMemo(() => (shownView ? shownView.claims ?? (shownPath ? [shownPath] : []) : open?.path ? [open.path] : []), [shownView, shownPath, open?.path])
   useViewDefaults(ws, shownView, labels)
-  // a view's label controls open the editor, on a label or on a new one, in the Labels sidebar beside it
-  const editLabel = useCallback(
-    (id: string | null) => {
-      setViewSideChoice(true)
-      setLabelsOpen(true)
-      edit(id ?? 'new')
-    },
-    [setViewSideChoice, setLabelsOpen, edit],
-  )
   const fillNew = useCallback((draft: LabelDraft) => {
     setEditing('new')
     setDrafted(draft)
@@ -691,8 +686,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             ws={ws}
             view={shownView}
             path={shownPath}
-            picked={!!viewAt?.path}
-            kind={shownPath ? kindOf(shownPath) : 'text'}
+            picked={!!viewAt?.picked}
             targetRef={viewAt?.ref}
             quote={viewAt?.quote}
             query={viewAt?.query}
@@ -701,7 +695,6 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             labels={labels}
             onMode={setMode}
             first={marking ?? undefined}
-            onEditLabel={editLabel}
           />
           {viewSideOpen && labelCard}
         </div>

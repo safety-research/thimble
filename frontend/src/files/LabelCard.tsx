@@ -2,14 +2,19 @@
 // a label over files what it marks (Span, Record or File) and its glob, the classifier (Prompt, Regex or Code) with its
 // body, and the classes with colour and highlight switch. Colours and highlights save as they change; the rest is a
 // draft that Re-run (Run for a new label) saves before applying the label (backend concepts.apply_route). Cancel, × or
-// Escape drops the draft. LabelSheet is the same card in a popover on a canvas card (LabelFields, with each class's
+// Escape drops the draft. The card stands at the Labels pane's edge, or in the popover a view or Files opens beside a
+// control (LabelEditor). A label that exists opens compact: its name in its color (a multi-class label's in the ink,
+// after its glyph), its type and scope, a rule, its prompt (pattern or code) clamped to four lines until it has the
+// focus, its classes one line each, and More folded over the rest (what it labels and marks, what it applies to, the
+// classifier, the model, the highlights, + class, Delete label), open or folded for the page's session; Cancel and Re-run show once
+// something changed, until then only ×. A new label shows every field. LabelSheet is the same card in a popover on a canvas card (LabelFields, with each class's
 // count); its draft outlasts the popover (canvas/labelDrafts) and its foot offers Discard and Re-run.
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type ReactNode } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { CodeArea } from '../components/Code'
 import { TextArea, TextInput } from '../components/Field'
 import { Icon } from '../components/Icon'
-import { Menu } from '../components/Menu'
+import { Menu, Popover } from '../components/Menu'
 import { Switch } from '../components/Switch'
 import { TipButton } from '../components/Tooltip'
 import { labelApi } from '../lib/api'
@@ -18,8 +23,11 @@ import { loadSettings, modelChoices, modelLabel } from '../lib/models'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptKind, ConceptPatch, ConceptRun, LabelClass, LabelDraft, LabelMarks } from '../lib/types'
-import { classesOf, colourVar, draftClasses, freeColour, isFilesLabel, isMultiClass, LABEL_COLOURS, MULTI_COLOUR, labelStatus, marksOf, nextColour, overOf, ownColour, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
+import { examplesNote } from '../canvas/details'
+import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
+import { classesOf, colourVar, draftClasses, freeColour, globPatterns, isFilesLabel, isMultiClass, LABEL_COLOURS, LABEL_ORDER, MULTI_COLOUR, labelStatus, marksOf, outcomeText, overOf, ownColour, paletteFrom, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
 import { useFilesLabels, type FilesLabels } from './useLabels'
+import { ValuePalette } from './ValuePalette'
 
 interface Props {
   ws: string
@@ -32,6 +40,8 @@ interface Props {
   draft?: LabelDraft | null
   /** the row above the head, which then holds the card's × (a new label's Label from prompt, LabelPrompt) */
   lead?: ReactNode
+  /** in a popover (LabelEditor), which is then the card's paper, its place and its dialog */
+  inPopover?: boolean
   onClose: () => void
   /** an apply started for this label, with the run record the server answered (the Labels pane shows its progress) */
   onRun: (id: string, run: ConceptRun) => void
@@ -76,10 +86,10 @@ function LabelSwatch({ classes }: { classes: readonly LabelClass[] }) {
   return <span className="label-card-swatch" style={{ '--c': colourVar(classes[0]?.color) } as CSSProperties} />
 }
 
-/** The colour a new label takes: the first no class of any label has, else the next in turn (the server's rule,
- * fill_colours). */
+/** The color a new label takes: the first in LABEL_ORDER no class of any label has, else the next in turn (the
+ * server's rule, fill_colours). */
 export function nextFreeColour(labels: Concept[]): number {
-  return freeColour(1, usedColours(labels)) ?? (labels.length % LABEL_COLOURS) + 1
+  return freeColour(LABEL_ORDER[0], usedColours(labels)) ?? LABEL_ORDER[labels.length % LABEL_COLOURS]
 }
 
 export const draftOf = (k: Concept | null, appliesTo: string[], colour = 1, drafted: LabelDraft | null = null, used: readonly number[] = []): Draft =>
@@ -153,6 +163,27 @@ export function patchOf(draft: Draft, classes: LabelClass[]): ConceptPatch {
 /** A draft's definition, the fields an edit changes (not its name, colours or highlights), as one comparable string. */
 const definitionOf = (d: Draft): string => JSON.stringify([d.over, d.marks, d.glob, d.kind, d.body, d.model, d.classes.map((c) => c.name)])
 
+/** Whether a draft changes label `k`: its name or its definition, not its colours or highlights, which are saved as
+ * they change. Pure. */
+export const draftChanges = (k: Concept, d: Draft): boolean => d.name.trim() !== k.name.trim() || definitionOf(d) !== definitionOf(draftOf(k, []))
+
+/** What a label's scope row says: the files it applies to (its glob, or the draft's `glob`) and how many units it
+ * marks, as its row in the Labels pane says it (of how many, or how far a run is), else how many it labelled. Pure. */
+export function scopeLine(k: Concept, glob: string | null | undefined = k.glob): string {
+  const files = isFilesLabel(k) ? globPatterns(glob).join(', ') : ''
+  const st = labelStatus(k)
+  const n = k.n_labeled
+  // how many it marks of how many, without the failures the Labels pane's row adds
+  const count = st?.state === 'done' ? outcomeText({ ...st, failed: 0 }) : st?.state === 'running' ? progressText(st) : n != null ? `${n.toLocaleString()} ${unitWord(k.unit, n)}` : ''
+  return [files, count].filter(Boolean).join(' · ')
+}
+
+/** Whether More is open in a label's compact card, for the page's session: the next card opens as the last was left. */
+let moreShown = false
+
+/** How tall a compact card's prompt stands until it has the focus: about four lines of its text with its padding. */
+const CLAMP_PX = 90
+
 const BODY_WORD: Record<ConceptKind, string> = { prompt: 'its prompt', regex: 'its pattern', code: 'its code' }
 
 /**
@@ -172,12 +203,20 @@ export function editsOf(k: Concept, d: Draft): string[] {
   return out
 }
 
-export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null, lead, onClose, onRun }: Props) {
+/** The accessible name of a label's edit card. */
+export const labelCardName = (label: Concept | null): string => (label ? `Edit ${label.name}` : 'New label')
+
+export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null, lead, inPopover, onClose, onRun }: Props) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(label, appliesTo, nextFreeColour(labels.all), drafted, usedColours(labels.all)))
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState<DeleteLabelAsk | null>(null)
   const isNew = label == null
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }))
   const classes = withSavedColours(label, draft)
+  // a label that exists opens compact, and offers Cancel and Re-run once the draft changes it
+  const compact = !isNew
+  const changed = isNew || draftChanges(label!, draft)
+  const multi = isMultiClass(classes)
 
   useEffect(() => {
     setDraft(draftOf(label, appliesTo, nextFreeColour(labels.all), drafted, usedColours(labels.all)))
@@ -209,11 +248,12 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
 
   return (
     <div
-      className="label-card overlay"
-      role="dialog"
-      aria-label={isNew ? 'New label' : `Edit ${label!.name}`}
+      className={'label-card' + (inPopover ? ' in-popover' : ' overlay')}
+      role={inPopover ? undefined : 'dialog'}
+      aria-label={inPopover ? undefined : labelCardName(label)}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') {
+        // not an Escape in a popover the card opened (the Model menu, a class's palette), which closes that alone
+        if (e.key === 'Escape' && e.currentTarget.contains(e.target as Node)) {
           e.stopPropagation()
           onClose()
         }
@@ -226,27 +266,57 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
         </div>
       )}
       <div className="label-card-head">
-        <LabelSwatch classes={classes} />
-        <TextInput bare value={draft.name} onChange={(v) => set({ name: v })} aria-label="Name" className="label-card-name" autoFocus={isNew && !lead} />
+        {/* compact, a label of one color has its name in it, in place of the swatch; a multi-class label, which has no
+            color of its own, keeps its glyph */}
+        {(!compact || multi) && <LabelSwatch classes={classes} />}
+        <TextInput bare value={draft.name} onChange={(v) => set({ name: v })} aria-label="Name" className="label-card-name" autoFocus={isNew && !lead} style={compact && !multi ? { color: colourVar(classes[0]?.color) } : undefined} />
         {!lead && <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" onClick={onClose} />}
       </div>
-      <LabelFields ws={ws} label={label} labels={labels} draft={draft} classes={classes} set={set} />
-      <div className="label-card-foot">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="primary" busy={saving} onClick={() => void run()}>
-          {isNew ? 'Run' : 'Re-run'}
-        </Button>
-      </div>
+      <LabelFields ws={ws} label={label} labels={labels} draft={draft} classes={classes} set={set} compact={compact} onDelete={label ? (at) => setDeleting({ id: label.id, name: label.name, at }) : undefined} />
+      <DeleteLabelConfirm
+        asked={deleting}
+        align="start"
+        onClose={() => setDeleting(null)}
+        onDelete={({ id }) => {
+          setDeleting(null)
+          onClose()
+          void labels.remove(id)
+        }}
+      />
+      {changed && (
+        <div className="label-card-foot">
+          {!isNew && examplesNote(draft.kind, label?.n_marked) && <span className="label-card-note">{examplesNote(draft.kind, label?.n_marked)}</span>}
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" busy={saving} onClick={() => void run()}>
+            {isNew ? 'Run' : 'Re-run'}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
 
 /** The fields of a label's edit card under its head, shared by LabelCard and LabelSheet. Colours and highlight
- * switches are saved at once for an existing label. `counts` puts each class's count before its switch. */
-function LabelFields({ ws, label, labels, draft, classes, set, counts }: { ws: string; label: Concept | null; labels: FilesLabels; draft: Draft; classes: LabelClass[]; set: (patch: Partial<Draft>) => void; counts?: Record<string, number> }) {
+ * switches are saved at once for an existing label. `counts` puts each class's count before its switch. A class's
+ * swatch opens the palette Color by's chips open (ValuePalette), with the grey too. `compact`: the type and scope as
+ * plain rows, a rule, the body clamped until it has the focus, the classes one line each, and More over the rest. */
+function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, onDelete }: { ws: string; label: Concept | null; labels: FilesLabels; draft: Draft; classes: LabelClass[]; set: (patch: Partial<Draft>) => void; counts?: Record<string, number>; compact?: boolean; onDelete?: (at: HTMLElement) => void }) {
+  const [more, setMore] = useState(moreShown)
+  const [bodyFocus, setBodyFocus] = useState(false)
+  // whether the clamped body holds more than it shows, which fades its last line
+  const bodyEl = useRef<HTMLTextAreaElement>(null)
+  const [cut, setCut] = useState(false)
+  const clamped = !!compact && !bodyFocus
+  useEffect(() => {
+    const el = bodyEl.current
+    setCut(clamped && !!el && el.scrollHeight > el.clientHeight + 1)
+  }, [clamped, draft.body, draft.kind])
   const [scopeOpen, setScopeOpen] = useState(false)
   const [scope, setScope] = useState<{ files: string[]; total: number } | null>(null)
   const [models, setModels] = useState<{ choices: string[]; role: string }>({ choices: [], role: '' })
+  // the class whose palette is open, and its swatch
+  const [painting, setPainting] = useState<number | null>(null)
+  const paintAt = useRef<HTMLElement | null>(null)
   const isNew = label == null
   const liveClasses = label ? classesOf(label) : draft.classes
 
@@ -291,13 +361,22 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts }: { ws: s
       labels.setClasses(label.id, next)
   }
   const addClass = () => {
-    const at = (((classes[0]?.color || 1) - 1 + classes.length) % LABEL_COLOURS) + 1
+    const at = paletteFrom(classes[0]?.color || LABEL_ORDER[0])[classes.length % LABEL_COLOURS]
     const own = classes.map((x) => x.color)
     const others = usedColours(labels.all.filter((k) => k.id !== label?.id))
     set({ classes: [...classes, { name: '', color: freeColour(at, [...others, ...own]) ?? ownColour(at, own), highlight: true }] })
   }
   const dropClass = (i: number) => set({ classes: classes.filter((_, j) => j !== i) })
   const saved = new Set(liveClasses.map((c) => c.name))
+  // a color picked for a class: a saved value of the label through setColour, as Color by gives it, so Files and every
+  // view show it; a class not saved yet in the draft alone. Either way a class that had the color takes the old one.
+  const paint = (i: number, n: number) => {
+    const c = classes[i]
+    if (!c) return
+    if (label && c.name && saved.has(c.name)) return labels.setColour(label.id, c.name, n)
+    set({ classes: classes.map((x, j) => (j === i ? { ...x, color: n } : n && x.color === n ? { ...x, color: c.color } : x)) })
+  }
+  const painted = painting != null ? classes[painting] : undefined
 
   const modelShown = draft.model || models.role
   const modelItems = useMemo(
@@ -313,115 +392,219 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts }: { ws: s
     [models, modelShown],
   )
 
+  const grid = (
+    <div className="label-card-grid">
+      <span className="label-card-key">Over</span>
+      <Segmented
+        label="Over"
+        size="sm"
+        track
+        value={draft.over}
+        onChange={(v) => set({ over: v })}
+        options={OVER.map((o) => ({ ...o, disabled: !isNew && o.value !== draft.over }))}
+      />
+      {draft.over === 'files' && (
+        <>
+          <span className="label-card-key">Marks</span>
+          <Segmented
+            label="Marks"
+            size="sm"
+            track
+            value={draft.marks}
+            onChange={(v) => set({ marks: v })}
+            options={MARKS}
+          />
+          <span className="label-card-key">Applies to</span>
+          <span className="label-card-scope">
+            <TextInput mono value={draft.glob} onChange={(v) => set({ glob: v })} aria-label="Applies to" className="label-card-glob" spellCheck={false} />
+            <button type="button" className="label-card-files" aria-expanded={scopeOpen} onClick={() => setScopeOpen((o) => !o)}>
+              {scope ? `${scope.total.toLocaleString()} ${scope.total === 1 ? 'file' : 'files'}` : 'files'}
+              <Icon name={scopeOpen ? 'chevron-down' : 'chevron-right'} size={12} />
+            </button>
+          </span>
+          {scopeOpen && scope && (
+            <>
+              <span />
+              <span className="label-card-filelist">
+                {scope.files.map((f) => (
+                  <span key={f} className="label-card-file">
+                    <span className="label-card-filedot" style={covered?.[f] ? ({ '--c': isMultiClass(classes) ? MULTI_COLOUR : colourVar(classes[0]?.color) } as CSSProperties) : undefined} />
+                    {f}
+                  </span>
+                ))}
+                {scope.total > scope.files.length && <span className="label-card-file">+{(scope.total - scope.files.length).toLocaleString()}</span>}
+              </span>
+            </>
+          )}
+        </>
+      )}
+      <span className="label-card-key">Classifier</span>
+      <Segmented
+        label="Classifier"
+        size="sm"
+        track
+        value={draft.kind}
+        onChange={(v) => set({ kind: v })}
+        options={CLASSIFIERS}
+      />
+      {draft.kind === 'prompt' && (
+        <>
+          <span className="label-card-key">Model</span>
+          <Menu
+            label="Model"
+            items={modelItems}
+            trigger={
+              <button type="button" className="label-card-model">
+                {modelShown ? modelLabel(modelShown) : 'model'}
+                <Icon name="chevron-down" size={12} />
+              </button>
+            }
+          />
+        </>
+      )}
+    </div>
+  )
+  // compact, the body stands four lines tall until it has the focus
+  const clamp = {
+    maxHeight: clamped ? CLAMP_PX : 180,
+    onFocus: () => setBodyFocus(true),
+    // clamped again, it shows its start
+    onBlur: (e: FocusEvent<HTMLTextAreaElement>) => {
+      setBodyFocus(false)
+      e.currentTarget.scrollTop = 0
+    },
+  }
+  const body = (
+    <div className={'label-card-body' + (clamped ? ' is-clamped' : '') + (cut ? ' is-cut' : '')}>
+      {draft.kind === 'code' ? (
+        // the code kind's `label(unit)` runs in a Python kernel, and is coloured as Python as it is typed
+        <CodeArea ref={bodyEl} {...clamp} lang="python" block autoGrow rows={4} mono spellCheck={false} value={draft.body} onChange={(v) => set({ body: v })} aria-label="Code" className="label-card-text" />
+      ) : (
+        <TextArea
+          block
+          ref={bodyEl}
+          {...clamp}
+          autoGrow
+          rows={2}
+          mono={draft.kind !== 'prompt'}
+          spellCheck={draft.kind === 'prompt'}
+          value={draft.body}
+          onChange={(v) => set({ body: v })}
+          aria-label={draft.kind === 'prompt' ? 'Prompt' : 'Pattern'}
+          className="label-card-text"
+        />
+      )}
+    </div>
+  )
+  const classRow = (c: LabelClass, i: number, full: boolean) => (
+    <div key={i} className="label-card-class">
+      <TipButton
+        tip="Change color"
+        className="label-card-colour"
+        aria-label={`Change the color of ${c.name || 'the class'}`}
+        aria-expanded={painting === i}
+        style={{ '--c': colourVar(c.color) } as CSSProperties}
+        onClick={(e) => {
+          paintAt.current = e.currentTarget
+          setPainting((p) => (p === i ? null : i))
+        }}
+      />
+      <TextInput bare mono value={c.name} onChange={(v) => setClass(i, { name: v })} aria-label="Class name" className="label-card-classname" autoFocus={!c.name && i >= 2} />
+      {classes.length > 2 && <Button variant="icon" size="sm" icon="x" title="Remove" aria-label={`Remove ${c.name || 'the class'}`} className="label-card-drop" onClick={() => dropClass(i)} />}
+      {counts?.[c.name] != null && saved.has(c.name) && <span className="label-sheet-count">{counts[c.name].toLocaleString()}</span>}
+      {full && <Switch checked={c.highlight} onChange={(v) => setClass(i, { highlight: v })} label={`Highlight ${c.name}`} />}
+    </div>
+  )
+  const add = (
+    <Button size="sm" icon="plus" className="label-card-add" onClick={addClass}>
+      class
+    </Button>
+  )
+  const palette = (
+    <Popover
+      anchor={paintAt}
+      open={!!painted}
+      onClose={(how) => {
+        setPainting(null)
+        if (how === 'escape') paintAt.current?.focus()
+      }}
+      label={`Color of ${painted?.name || 'the class'}`}
+      className="colorby-palette"
+    >
+      {painted && (
+        <ValuePalette
+          value={{ name: painted.name || 'class', color: colourVar(painted.color) }}
+          grey
+          onPick={(n) => {
+            setPainting(null)
+            paint(painting!, n)
+            paintAt.current?.focus()
+          }}
+        />
+      )}
+    </Popover>
+  )
+
+  if (compact)
+    return (
+      <>
+        <div className="label-card-grid label-card-facts">
+          <span className="label-card-key">Type</span>
+          <span className="label-card-fact">{CLASSIFIERS.find((c) => c.value === draft.kind)?.label ?? draft.kind}</span>
+          {label && scopeLine(label, draft.glob) && (
+            <>
+              <span className="label-card-key">Scope</span>
+              <span className="label-card-fact">{scopeLine(label, draft.glob)}</span>
+            </>
+          )}
+        </div>
+        <hr className="label-card-rule" />
+        {body}
+        <div className="label-card-classes">{classes.map((c, i) => classRow(c, i, false))}</div>
+        <button type="button" className="label-card-more" aria-expanded={more} onClick={() => setMore((m) => (moreShown = !m))}>
+          <Icon name={more ? 'chevron-down' : 'chevron-right'} size={12} />
+          More
+        </button>
+        {more && (
+          <div className="label-card-more-body">
+            {grid}
+            <div className="label-card-classes">
+              <div className="label-card-classes-head">
+                <span className="label-card-key">Highlight</span>
+              </div>
+              {classes.map((c, i) => (
+                <div key={i} className="label-card-class">
+                  <span className="label-card-hlname">{c.name}</span>
+                  <Switch checked={c.highlight} onChange={(v) => setClass(i, { highlight: v })} label={`Highlight ${c.name}`} />
+                </div>
+              ))}
+              {add}
+            </div>
+            {onDelete && (
+              <div className="label-card-danger">
+                <Button size="sm" icon="trash" className="label-card-delete" onClick={(e) => onDelete(e.currentTarget)}>
+                  Delete label
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+        {palette}
+      </>
+    )
   return (
     <>
-      <div className="label-card-grid">
-        <span className="label-card-key">Over</span>
-        <Segmented
-          label="Over"
-          size="sm"
-          track
-          value={draft.over}
-          onChange={(v) => set({ over: v })}
-          options={OVER.map((o) => ({ ...o, disabled: !isNew && o.value !== draft.over }))}
-        />
-        {draft.over === 'files' && (
-          <>
-            <span className="label-card-key">Marks</span>
-            <Segmented
-              label="Marks"
-              size="sm"
-              track
-              value={draft.marks}
-              onChange={(v) => set({ marks: v })}
-              options={MARKS}
-            />
-            <span className="label-card-key">Applies to</span>
-            <span className="label-card-scope">
-              <TextInput mono value={draft.glob} onChange={(v) => set({ glob: v })} aria-label="Applies to" className="label-card-glob" spellCheck={false} />
-              <button type="button" className="label-card-files" aria-expanded={scopeOpen} onClick={() => setScopeOpen((o) => !o)}>
-                {scope ? `${scope.total.toLocaleString()} ${scope.total === 1 ? 'file' : 'files'}` : 'files'}
-                <Icon name={scopeOpen ? 'chevron-down' : 'chevron-right'} size={12} />
-              </button>
-            </span>
-            {scopeOpen && scope && (
-              <>
-                <span />
-                <span className="label-card-filelist">
-                  {scope.files.map((f) => (
-                    <span key={f} className="label-card-file">
-                      <span className="label-card-filedot" style={covered?.[f] ? ({ '--c': isMultiClass(classes) ? MULTI_COLOUR : colourVar(classes[0]?.color) } as CSSProperties) : undefined} />
-                      {f}
-                    </span>
-                  ))}
-                  {scope.total > scope.files.length && <span className="label-card-file">+{(scope.total - scope.files.length).toLocaleString()}</span>}
-                </span>
-              </>
-            )}
-          </>
-        )}
-        <span className="label-card-key">Classifier</span>
-        <Segmented
-          label="Classifier"
-          size="sm"
-          track
-          value={draft.kind}
-          onChange={(v) => set({ kind: v })}
-          options={CLASSIFIERS}
-        />
-        {draft.kind === 'prompt' && (
-          <>
-            <span className="label-card-key">Model</span>
-            <Menu
-              label="Model"
-              items={modelItems}
-              trigger={
-                <button type="button" className="label-card-model">
-                  {modelShown ? modelLabel(modelShown) : 'model'}
-                  <Icon name="chevron-down" size={12} />
-                </button>
-              }
-            />
-          </>
-        )}
-      </div>
-      <div className="label-card-body">
-        {draft.kind === 'code' ? (
-          // the code kind's `label(unit)` runs in a Python kernel, and is coloured as Python as it is typed
-          <CodeArea lang="python" block autoGrow maxHeight={180} rows={4} mono spellCheck={false} value={draft.body} onChange={(v) => set({ body: v })} aria-label="Code" className="label-card-text" />
-        ) : (
-          <TextArea
-            block
-            autoGrow
-            maxHeight={180}
-            rows={2}
-            mono={draft.kind !== 'prompt'}
-            spellCheck={draft.kind === 'prompt'}
-            value={draft.body}
-            onChange={(v) => set({ body: v })}
-            aria-label={draft.kind === 'prompt' ? 'Prompt' : 'Pattern'}
-            className="label-card-text"
-          />
-        )}
-      </div>
+      {grid}
+      {body}
       <div className="label-card-classes">
         <div className="label-card-classes-head">
           <span className="label-card-key">Classes</span>
           <span className="label-card-hl">highlight</span>
         </div>
-        {classes.map((c, i) => (
-          <div key={i} className="label-card-class">
-            <TipButton tip="Change colour" className="label-card-colour" aria-label={`Change the colour of ${c.name || 'the class'}`} style={{ '--c': colourVar(c.color) } as CSSProperties} onClick={() => setClass(i, { color: nextColour(c.color, classes.filter((_, j) => j !== i).map((x) => x.color)) })} />
-            <TextInput bare mono value={c.name} onChange={(v) => setClass(i, { name: v })} aria-label="Class name" className="label-card-classname" autoFocus={!c.name && i >= 2} />
-            {classes.length > 2 && <Button variant="icon" size="sm" icon="x" title="Remove" aria-label={`Remove ${c.name || 'the class'}`} className="label-card-drop" onClick={() => dropClass(i)} />}
-            {counts?.[c.name] != null && saved.has(c.name) && <span className="label-sheet-count">{counts[c.name].toLocaleString()}</span>}
-            <Switch checked={c.highlight} onChange={(v) => setClass(i, { highlight: v })} label={`Highlight ${c.name}`} />
-          </div>
-        ))}
-        <Button size="sm" icon="plus" className="label-card-add" onClick={addClass}>
-          class
-        </Button>
+        {classes.map((c, i) => classRow(c, i, true))}
+        {add}
       </div>
+      {palette}
     </>
   )
 }
@@ -486,6 +669,7 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
       <div className="label-card-foot">
         {draft ? (
           <>
+            {examplesNote(draft.kind, k.n_marked) && <span className="label-card-note">{examplesNote(draft.kind, k.n_marked)}</span>}
             <Button onClick={() => onDraft(null)}>Discard</Button>
             <Button variant="primary" busy={saving} onClick={() => void rerun()}>
               Re-run

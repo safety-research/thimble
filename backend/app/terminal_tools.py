@@ -1,8 +1,10 @@
 """Turns of main's that end on a thimble call, without closing words.
 
 Claude Code asks the model for a visible reply whenever a turn ends without text, unless the environment variable ENV
-names a tool the turn called. The launcher sets ENV to Agent, SendMessage and every thimble tool whose result the
-browser shows (names), and main's prompt then ends such a turn without text. Where Claude Code does not read ENV, main's
+names a tool the turn called; it matches any tool's name, not only an MCP tool's. The launcher sets ENV to Agent,
+SendMessage, TaskStop and every thimble tool whose result the browser shows (names), and main's prompt then ends such a
+turn without text. With these three names Claude Code stopped nudging main after a start, a follow-up or a stop of one
+of thimble's subagents (0 nudges in 15 such turns, against 38 in 97 calls without them). Where Claude Code does not read ENV, main's
 prompt keeps the other ending: the end token (session.END_TOKEN), which no chat shows. The prompt's two endings are
 one line each of main.md (ENDINGS); main_prompt keeps the one that applies.
 
@@ -25,13 +27,13 @@ log = logging.getLogger("thimble.terminal_tools")
 
 ENV = "CLAUDE_CODE_TERMINAL_MCP_TOOLS"
 BIN_ENV = "THIMBLE_CLAUDE_BIN"  # the `claude` executable to use instead of the one on PATH (cli.claude_code_version)
-BUILTIN = ("Agent", "SendMessage")
+BUILTIN = ("Agent", "SendMessage", "TaskStop")  # main starts, continues and stops thimble's subagents with these
 # thimble tools whose result the model reads rather than the browser shows, so a turn that ends on one still needs words
 READS = ("read_ref", "list_cards", "screenshot", "list_agents", "wait_session")
 CACHE = "terminal-tools.json"
 # main.md's two endings of a turn with nothing for the analyst, by a phrase only that line holds: with ENV read, and
 # without it
-ENDINGS = {True: "needs no closing words", False: "which the browser never shows"}
+ENDINGS = {True: "needs no closing words", False: "which thimble never shows"}
 # the meta prompt Claude Code adds when a turn ended without text
 NUDGE = "[Your previous response had no visible output"
 
@@ -44,7 +46,7 @@ def tool_name(name: str) -> str:
 
 
 def names() -> list[str]:
-    """The tools ENV names: Agent, SendMessage and every thimble tool but READS."""
+    """The tools ENV names: BUILTIN and every thimble tool but READS."""
     from . import tools  # noqa: PLC0415
 
     return [*BUILTIN, *(tool_name(n) for n in tools.REGISTRY if n not in READS)]

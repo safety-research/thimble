@@ -1,8 +1,8 @@
-"""Delivery without a channel: thimble uses channels where Claude Code offers them and falls back to hooks. The server
-side (channel.py): an event for a session on the hook route is taken by one watcher, in flight until acknowledged, and
-the PermissionRequest hook's prompt waits on main's meta until the browser answers. The server answers a hook route only
-to a request that proves the token, and the hooks, run against a stand-in server, do nothing without server.json or with
-a server that cannot prove the token."""
+"""Delivery through the plugin's hooks. The server side (events.py): an event for the session that is main is taken by
+one watcher, in flight until acknowledged, a message main has not got yet shows on its statusline, and the
+PermissionRequest hook's prompt waits on main's meta until the browser answers. The server answers a hook route only to
+a request that proves the token, and the hooks, run against a stand-in server, do nothing without server.json or with a
+server that cannot prove the token."""
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +21,7 @@ from conftest import UI_KEY
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app import agents, cc_channel, channel, config, hook_auth, session
+from app import agents, cc_plugin, config, events, hook_auth, session
 
 CORPUS = "mini"
 SID = "5e55a000-0000-4000-8000-000000000001"
@@ -44,13 +44,13 @@ def _record_token(home: Path, token: str = TOKEN, **extra) -> None:
 @pytest.fixture(autouse=True)
 def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
-    for table in (channel._subs, channel._routes, channel._pending, channel._taken, channel._asks, channel._waiters,
-                  channel._lines, session._live, session._expected, session._event_threads, session._came_back,
+    for table in (events._subs, events._pending, events._taken, events._asks, events._waiters, events._lines,
+                  events._notices, session._live, session._expected, session._event_threads, session._came_back,
                   session._shim_pids, session._shim_configs):
         table.clear()
     agents._busy.clear()
     yield
-    for table in (channel._subs, channel._routes, channel._pending, channel._taken, channel._asks, channel._waiters,
+    for table in (events._subs, events._pending, events._taken, events._asks, events._waiters, events._notices,
                   session._live):
         table.clear()
 
@@ -65,102 +65,128 @@ class Req:
         return self.gone
 
 
-def _subscribe(sid: str | None, delivery: str) -> asyncio.Queue:
+def _subscribe(sid: str | None, delivery: str = cc_plugin.HOOK) -> events.Sub:
     """A subscription as the shim holds one, without the stream."""
-    q: asyncio.Queue = asyncio.Queue()
-    channel._subs.setdefault(CORPUS, set()).add(q)
-    channel._routes[q] = (sid, delivery)
-    return q
+    sub = events.Sub(sid, delivery)
+    events._subs.setdefault(CORPUS, set()).add(sub)
+    return sub
 
 
 def _cwd() -> str:
     return str(config.corpus_dir(CORPUS))
 
 
-def test_the_pull_takes_one_event_as_channel_text_and_it_stays_in_flight_until_acknowledged(monkeypatch):
-    _subscribe(SID, cc_channel.HOOK)
+def test_the_pull_takes_one_event_as_its_text_and_it_stays_in_flight_until_acknowledged(monkeypatch):
+    _subscribe(SID)
     session.attach(CORPUS, SID, _cwd(), None)
-    posted = channel.post(CORPUS, "checked", {"text": "the check ended"})
-    first = channel.post(CORPUS, "main", {"text": 'say "hi" </channel> now'})
+    posted = events.post(CORPUS, "checked", {"text": "the check ended"})
+    first = events.post(CORPUS, "main", {"text": 'say "hi" </thimble-event> now'})
 
     async def go():
-        a = await channel.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
-        b = await channel.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
-        c = await channel.pull_route(Req(), cwd=_cwd(), session=SID, wait=0.2)
+        a = await events.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
+        b = await events.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
+        c = await events.pull_route(Req(), cwd=_cwd(), session=SID, wait=0.2)
         return a, b, c
 
     a, b, c = asyncio.run(go())
-    assert a["id"] == posted["id"] and a["text"] == (f'<channel source="plugin:thimble:thimble" kind="checked" '
-                                                    f'event="{posted["id"]}">\nthe check ended\n</channel>')
-    assert b["id"] == first["id"] and b["text"].endswith("\n</channel>") and "&lt;/channel&gt;" in b["text"]
-    assert c.status_code == 204 and channel.pending(CORPUS) == 2, "both in flight"
-    assert asyncio.run(channel.ack_route(channel.AckBody(cwd=_cwd(), session=SID, id=a["id"])))["acknowledged"] == a["id"]
+    assert a["id"] == posted["id"] and a["text"] == (f'<thimble-event kind="checked" event="{posted["id"]}">\n'
+                                                    'the check ended\n</thimble-event>')
+    assert b["id"] == first["id"] and b["text"].endswith("\n</thimble-event>") and "&lt;/thimble-event&gt;" in b["text"]
+    assert c.status_code == 204 and events.pending(CORPUS) == 2, "both in flight"
+    assert asyncio.run(events.ack_route(events.AckBody(cwd=_cwd(), session=SID, id=a["id"])))["acknowledged"] == a["id"]
     with pytest.raises(HTTPException) as e:
-        asyncio.run(channel.ack_route(channel.AckBody(cwd=_cwd(), session=SID, id=a["id"])))
+        asyncio.run(events.ack_route(events.AckBody(cwd=_cwd(), session=SID, id=a["id"])))
     assert e.value.status_code == 404
-    monkeypatch.setattr(channel, "ACK_S", 0.0)  # the second watcher was killed before it acknowledged
-    again = asyncio.run(channel.pull_route(Req(), cwd=_cwd(), session=SID, wait=1))
+    monkeypatch.setattr(events, "ACK_S", 0.0)  # the second watcher was killed before it acknowledged
+    again = asyncio.run(events.pull_route(Req(), cwd=_cwd(), session=SID, wait=1))
     assert again["id"] == first["id"], "an event never acknowledged goes back to the front of its queue"
 
 
 def test_the_held_hook_prints_what_the_analyst_wrote_once_its_event_is_written_out():
     """Claude Code shows a woken turn only as the watcher's fixed summary, so the UserPromptSubmit hook prints the
-    analyst's words, each thread's name with its question, and a line for each quiet event, without ids."""
-    _subscribe(SID, cc_channel.HOOK)
+    analyst's words, each thread's question (named by its first question, never its fork's slug), and a line for each
+    quiet event, without ids."""
+    _subscribe(SID)
     session.attach(CORPUS, SID, _cwd(), None)
-    channel.post(CORPUS, "labeled", {"text": "links whose host is api-la", "name": "api-la", "ref": "concept:c0ffee12"})
-    asked = channel.post(CORPUS, "main", {"text": "Which kinds of link failed today?"})
+    events.post(CORPUS, "labeled", {"text": "links whose host is api-la", "name": "api-la", "ref": "concept:c0ffee12"})
+    asked = events.post(CORPUS, "main", {"text": "Which kinds of link failed today?"})
     thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
-    posted = channel.post(CORPUS, "thread", {"thread": thread["id"], "text": "On which days did it change?"})
+    posted = events.post(CORPUS, "thread", {"thread": thread["id"], "text": "On which days did it change?"})
 
     async def deliver() -> None:
         for _ in range(2):
-            got = await channel.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
-            await channel.ack_route(channel.AckBody(cwd=_cwd(), session=SID, id=got["id"], terminal=True))
+            got = await events.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
+            await events.ack_route(events.AckBody(cwd=_cwd(), session=SID, id=got["id"], terminal=True))
 
     asyncio.run(deliver())
-    lines = asyncio.run(channel.held_route(channel.HeldBody(cwd=_cwd(), session=SID)))["terminal"].splitlines()
+    lines = asyncio.run(events.held_route(events.HeldBody(cwd=_cwd(), session=SID)))["terminal"].splitlines()
     assert len(lines) == 3 and "Which kinds of link failed today?" in lines[0] and "api-la" in lines[1]
-    assert "days-the-page-changed" in lines[2] and "On which days did it change?" in lines[2]
+    assert lines[2] == "› new thread: On which days did it change?" and "days-the-page-changed" not in lines[2]
     assert not any(x in "\n".join(lines) for x in (asked["id"], posted["id"], thread["id"], "c0ffee12"))
-    assert not asyncio.run(channel.held_route(channel.HeldBody(cwd=_cwd(), session=SID)))["terminal"], "printed once"
+    assert not asyncio.run(events.held_route(events.HeldBody(cwd=_cwd(), session=SID)))["terminal"], "printed once"
 
 
-def test_a_tray_entry_claude_code_refuses_is_asked_for_once_and_its_line_prints_once(monkeypatch):
-    """Claude Code may refuse main's Agent call that shows a background session in the agent tray, as auto mode can:
-    thimble then asks main no more for that session, while its own refusal of a second tray entry is no such refusal.
-    Asks that wait for the same turn print their line once."""
-    from app import bg_session
+def test_a_message_main_has_not_got_yet_shows_on_its_statusline_until_its_line_prints():
+    """Claude Code gives main a browser message only at its turn's next tool call or once the turn ends, so main's
+    statusline shows the analyst's words at once, after QUEUED, until the held hook prints the message's line; an event
+    that carries no words of the analyst's shows nothing there, nor does another session's statusline."""
+    from app import tray
 
-    _subscribe(SID, cc_channel.HOOK)
-    lv = session.attach(CORPUS, SID, _cwd(), None)
-    monkeypatch.setattr(bg_session, "_save", lambda c: None)
-    e = bg_session.Entry(CORPUS, "orient", bg_session.name_of(CORPUS, "orient"), "ab12cd34", "sid-o", "chat-o", "orient",
-                         "/work/o")
-    monkeypatch.setitem(bg_session._entries, (CORPUS, "orient"), e)
-    monkeypatch.setattr(bg_session, "_loaded", {CORPUS})
-    call = {"subagent_type": "thimble:orient", "description": e.name, "run_in_background": True,
-            "prompt": str(bg_session.proxy_file(CORPUS, "orient"))}
-    assert bg_session.ask_main_for_proxy(CORPUS, "orient") and bg_session.ask_main_for_proxy(CORPUS, "orient")
+    _subscribe(SID)
+    session.attach(CORPUS, SID, _cwd(), None)
+    first = events.post(CORPUS, "main", {"text": "Which kinds of link failed today?"})
+    events.post(CORPUS, "checked", {"text": "the check ended"})
+    thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
+    events.post(CORPUS, "thread", {"thread": thread["id"], "text": "On which days did it change?"})
+
+    def line(sid: str = SID) -> str:
+        return asyncio.run(tray.agents_route(tray.AgentsQuery(cwd=_cwd(), session=sid)))["line"]
+
+    assert line() == f"thimble · {events.QUEUED}Which kinds of link failed today? (and 1 more)"
+    assert line() == line() and first["id"] not in line(), "it shows until main gets it, without ids"
+    assert line("0ther000-0000-4000-8000-000000000001") == ""
 
     async def deliver() -> None:
-        for _ in range(2):
-            got = await channel.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
-            await channel.ack_route(channel.AckBody(cwd=_cwd(), session=SID, id=got["id"], terminal=True))
+        for _ in range(3):
+            got = await events.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
+            await events.ack_route(events.AckBody(cwd=_cwd(), session=SID, id=got["id"], terminal=True))
 
     asyncio.run(deliver())
-    said = asyncio.run(channel.held_route(channel.HeldBody(cwd=_cwd(), session=SID)))["terminal"]
-    assert said == f"agent: {e.name}"
-    assert bg_session.agent_check(CORPUS, call, "tu-1") is None
-    assert bg_session.agent_check(CORPUS, call, "tu-2"), "a second tray entry while the first starts"
-    for tid, words in (("tu-2", f"{e.name} already shows in the agent tray."), ("tu-1", "Permission denied")):
-        session._tool_use(lv, tid, "Agent", call)
-        session._tool_result(lv, tid, words, is_error=True)
-        assert e.proxy_refused is (tid == "tu-1")
-    assert not bg_session.ask_main_for_proxy(CORPUS, "orient") and channel.pending(CORPUS) == 0
+    said = asyncio.run(events.held_route(events.HeldBody(cwd=_cwd(), session=SID)))["terminal"]
+    assert "Which kinds of link failed today?" in said and "On which days did it change?" in said
+    assert line() == "", "main got both"
 
 
-# ----------------------------------------------------------------------------- the server: the permission hook
+def test_a_queued_message_leaves_the_statusline_on_the_monitor_route_and_when_another_session_is_main():
+    """No held hook prints a line on the Monitor route, so the watcher's ack ends the message's place on the
+    statusline; a session that is no longer main shows none of the words queued for it, and they go once the new main
+    gets a message."""
+    from app import tray
+
+    def line(sid: str = SID) -> str:
+        return asyncio.run(tray.agents_route(tray.AgentsQuery(cwd=_cwd(), session=sid)))["line"]
+
+    _subscribe(SID, cc_plugin.MONITOR)
+    session.attach(CORPUS, SID, _cwd(), None)
+    # queued while main's shim had not subscribed yet (events._awaits_shim), which noted it for the statusline
+    posted = events.post(CORPUS, "main", {"text": "Which kinds of link failed today?"})
+    events._notices[(CORPUS, SID)] = [(posted["id"], "Which kinds of link failed today?"), ("e0", "an older one")]
+    assert line() == f"thimble · {events.QUEUED}Which kinds of link failed today? (and 1 more)"
+
+    async def take() -> None:
+        got = await events.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
+        await events.ack_route(events.AckBody(cwd=_cwd(), session=SID, id=got["id"], terminal=False))
+
+    asyncio.run(take())
+    assert line() == f"thimble · {events.QUEUED}an older one", "the acknowledged one is gone"
+
+    other = "0ther000-0000-4000-8000-000000000001"
+    _subscribe(other)
+    session.attach(CORPUS, other, _cwd(), None)
+    assert line() == "", "SID is not main"
+    events.post(CORPUS, "main", {"text": "And yesterday?"})
+    assert line(other) == f"thimble · {events.QUEUED}And yesterday?"
+    assert (CORPUS, SID) not in events._notices
 
 
 def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monkeypatch, tmp_path):
@@ -173,7 +199,7 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
             "tool_input": {"command": "touch x", "description": "Create x"}}
     answers: list = []
     with client:
-        t = threading.Thread(target=lambda: answers.append(client.post("/api/channel/permission/hook", json=body)))
+        t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body)))
         t.start()
         for _ in range(100):
             held = (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions") or []
@@ -193,24 +219,21 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
         assert answers[0].status_code == 200 and answers[0].json() == {"id": held[0]["id"], "behavior": "allow"}
         assert not agents.meta_or_none(CORPUS, agents.MAIN_ID).get("permissions")
         # answered in the terminal: the session moved on, and the hook's wait ends with no decision
-        t = threading.Thread(target=lambda: answers.append(client.post("/api/channel/permission/hook", json=body)))
+        t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body)))
         t.start()
         for _ in range(100):  # the server's loop registers the ask and then puts it on main's meta, apart from this thread
-            if channel._asks and (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions"):
+            if events._asks and (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions"):
                 break
             time.sleep(0.05)
-        channel.clear_permissions(CORPUS)
+        events.clear_permissions(CORPUS)
         t.join(10)
         assert answers[1].json()["behavior"] is None and not agents.meta_or_none(CORPUS, agents.MAIN_ID).get("permissions")
         # each request and its answer are in the permission log a problem report carries
         log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
         assert [(r["event"], r.get("tool"), r.get("answer")) for r in log] == [
-            ("asked", "Bash", None), ("answered", None, "allow"), ("asked", "Bash", None), ("answered", None, channel.GONE_ANSWER)]
+            ("asked", "Bash", None), ("answered", None, "allow"), ("asked", "Bash", None), ("answered", None, events.GONE_ANSWER)]
         assert log[0]["what"] == "Create x" and log[0]["chat"] == "main" and log[1]["id"] == log[0]["id"]
-        _subscribe(SID, cc_channel.CHANNEL)
-        assert client.post("/api/channel/permission/hook", json=body).status_code == 409, "the channel relays it"
-        channel._subs.clear()
-        assert client.post("/api/channel/permission/hook", json={**body, "session": "not-main"}).status_code == 409
+        assert client.post("/api/events/permission", json={**body, "session": "not-main"}).status_code == 409
 
 
 class _Stand:
@@ -275,11 +298,11 @@ class _Stand:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
                 path = urllib.parse.urlsplit(self.path).path
                 outer.seen.append(("POST", path, body))
-                if path == "/api/channel/held":
+                if path == "/api/events/held":
                     return self._reply(*outer.held)
                 if path == "/api/agents":
                     return self._reply(*outer.agents)
-                self._reply(*(outer.permission if path.endswith("/permission/hook") else (200, {})))
+                self._reply(*(outer.permission if path == "/api/events/permission" else (200, {})))
 
             def log_message(self, *a):
                 pass
@@ -306,7 +329,7 @@ def _watch(tmp_path: Path, port: int | None, stdin: dict, *args: str, extra: dic
                           timeout=timeout)
 
 
-EVENT_TEXT = '<channel source="plugin:thimble:thimble" kind="main" event="e1">\nhello\n</channel>'
+EVENT_TEXT = '<thimble-event kind="main" event="e1">\nhello\n</thimble-event>'
 
 
 def test_the_server_answers_a_hook_route_only_to_a_request_that_proves_the_token(monkeypatch, tmp_path):
@@ -317,19 +340,27 @@ def test_the_server_answers_a_hook_route_only_to_a_request_that_proves_the_token
     app = __import__("app.main", fromlist=["app"]).app
     body = {"cwd": _cwd(), "session": SID}
     with TestClient(app, base_url="http://127.0.0.1") as client:
-        assert client.post("/api/channel/held", json=body).status_code == 401, "no server.json: no token to prove"
+        assert client.post("/api/events/held", json=body).status_code == 401, "no server.json: no token to prove"
         _record_token(home)
-        assert client.post("/api/channel/held", json=body).status_code == 401, "no proof"
+        assert client.post("/api/events/held", json=body).status_code == 401, "no proof"
         wrong, _ = _signed("another-token")
         for path in hook_auth.HOOK_PATHS:
             assert client.post(path, json=body, headers=wrong).status_code == 401, path
         good, proof = _signed()
-        r = client.post("/api/channel/held", json=body, headers=good)
+        r = client.post("/api/events/held", json=body, headers=good)
         assert r.status_code == 200 and r.headers[hook_auth.PROOF_HEADER] == proof
         assert client.get("/api/health").status_code == 200, "no other route asks for it"
+        # a session started before the update to 0.6.0 calls 0.5.0's routes, which answer as the new ones, proof and all
+        assert client.post("/api/channel/held", json=body, headers=wrong).status_code == 401
+        r = client.post("/api/channel/held", json=body, headers=good)
+        assert r.status_code == 200 and r.headers[hook_auth.PROOF_HEADER] == proof
+        assert set(events.OLD_PATHS.values()) <= {*hook_auth.HOOK_PATHS, *hook_auth.SHIM_PATHS, "/api/events/main",
+                                                  "/api/events/sessions"}
+        relay = {"cwd": _cwd(), "request_id": "r1", "tool_name": "Bash"}
+        assert client.post("/api/channel/permission", json=relay, headers=_signed()[0]).status_code == 404
         _record_token(home, token="rotated")  # a new start writes a new token, which the server reads at once
-        assert client.post("/api/channel/held", json=body, headers=_signed()[0]).status_code == 401
-        assert client.post("/api/channel/held", json=body, headers=_signed("rotated")[0]).status_code == 200
+        assert client.post("/api/events/held", json=body, headers=_signed()[0]).status_code == 401
+        assert client.post("/api/events/held", json=body, headers=_signed("rotated")[0]).status_code == 200
 
 
 def test_main_s_stop_hook_shows_the_link_thimble_up_left_once_and_only_as_it_ends(tmp_path):
@@ -368,8 +399,8 @@ def test_the_hooks_do_nothing_without_server_json_or_with_a_server_that_cannot_p
         for args in (("--permission",), ("--held",), ()):
             r = _watch(tmp_path, rogue.port, {**inp, "hook_event_name": "Stop"} if not args else inp, *args)
             assert r.returncode == 0 and r.stdout == "" and r.stderr == "", args
-        assert [p for _, p, _ in rogue.seen] == ["/api/channel/permission/hook", "/api/channel/held",
-                                                 "/api/channel/pull"], "each asked once and not believed"
+        assert [p for _, p, _ in rogue.seen] == ["/api/events/permission", "/api/events/held",
+                                                 "/api/events/pull"], "each asked once and not believed"
         assert rogue.sent and not any(TOKEN in v for v in rogue.sent), "the token itself is never sent"
     finally:
         rogue.close()
@@ -379,3 +410,28 @@ def test_the_hooks_do_nothing_without_server_json_or_with_a_server_that_cannot_p
     finally:
         stand.close()
     assert json.loads(r.stdout)["hookSpecificOutput"]["decision"] == {"behavior": "allow"} and stand.unproven == 0
+
+
+def test_the_held_hook_lets_each_hand_back_through_and_still_delivers_the_held_events(tmp_path):
+    """Q2: the held hook never blocks a prompt. A subagent's hand-back in auto mode (the `isMeta` row with
+    `origin.kind: "peer"`, a plugin-started agent's included) and a later run's `<task-notification>` in default mode reach
+    main as Claude Code sends them, with the events held for main added as context, as for any prompt."""
+    handbacks = [
+        "[Subagent hand-back] The orientation (agent a1f0c2d3e4b5a6f7) handed back. The report follows:\n  Done: 14 cards.",
+        "<task-notification>\n<task-id>a1f0c2d3e4b5a6f7</task-id>\n<status>completed</status>\n"
+        "<summary>Agent \"orientation: the corpus\" completed</summary>\n<result>Revised the deck.</result>\n"
+        "</task-notification>",
+    ]
+    stand = _Stand([], held=(200, {"text": "MEANWHILE\n[kind=\"report\"] the report was written", "terminal": ""}))
+    try:
+        for prompt in handbacks:
+            inp = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "UserPromptSubmit", "prompt": prompt}
+            r = _watch(tmp_path, stand.port, inp, "--held")
+            out = json.loads(r.stdout)
+            assert r.returncode == 0 and "decision" not in out and "continue" not in out, prompt
+            assert out["hookSpecificOutput"]["additionalContext"].startswith("MEANWHILE"), "held events still delivered"
+        sub = _watch(tmp_path, stand.port, {**inp, "agent_id": "a1f0c2d3e4b5a6f7"}, "--held")
+        assert sub.returncode == 0 and sub.stdout == "", "a subagent's prompt gets nothing"
+    finally:
+        stand.close()
+    assert [p for _, p, _ in stand.seen].count("/api/events/held") == 2

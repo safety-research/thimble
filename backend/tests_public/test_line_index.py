@@ -165,17 +165,18 @@ def test_a_big_files_index_is_kept_on_disk_for_the_next_server(big, monkeypatch,
     def no_build(p, progress=None):
         raise AssertionError("indexed again")
 
-    monkeypatch.setattr(corpus, "build_index", no_build)
-    again = corpus.line_offsets(path)
-    assert (again.key, again.lines, list(again.marks_list())) == (idx.key, idx.lines, list(idx.marks_list()))
-    corpus._INDEX.pop(path)
-    assert corpus.page_lines(path, N - 9, N) == (lines_of(data)[-10:], N, False)
-    # a changed file is indexed again
-    monkeypatch.undo()
-    monkeypatch.setattr(corpus, "INDEX_BIG", 1024)
+    # its own patch alone is undone after: undoing all of them would undo the test's THIMBLE_HOME too
+    with monkeypatch.context() as m:
+        m.setattr(corpus, "build_index", no_build)
+        again = corpus.line_offsets(path)
+        assert (again.key, again.lines, list(again.marks_list())) == (idx.key, idx.lines, list(idx.marks_list()))
+        corpus._INDEX.pop(path)
+        assert corpus.page_lines(path, N - 9, N) == (lines_of(data)[-10:], N, False)
+    # a changed file is indexed again, its index kept in the test's thimble home
     with open(path, "ab") as f:
         f.write(b"\n{\"i\": \"one more\"}\n")
     assert len(corpus.line_offsets(path)) == N + 1
+    assert len(list((tmp_path / "thimble-home" / corpus.INDEX_DIR).glob("*.idx"))) == 1
 
 
 def test_an_index_file_that_does_not_match_is_not_used(big):

@@ -2,6 +2,9 @@
 // (getDisplayMedia) and optionally the logs. Prepare bundle asks the server to write a zip (POST /ws/{c}/feedback) with
 // the tab's recent console errors and failed requests; the dialog then offers Download, Copy path, Show in folder and
 // Open a GitHub issue, prefilled by the server without the logs. The dialog hides itself while the tab is captured.
+// In a development install (GET /dev/status says code tickets run here) the form also offers File a code ticket, which
+// files the description as a ticket for thimble's developer agent (POST /dev/tickets, the analyst's click, which starts
+// the agent as a subagent of their Claude Code session) and opens the ticket's thread.
 //
 // Where something fails, ReportProblemButton opens the same dialog through the bus with the failure written in.
 import { useCallback, useEffect, useState, type MouseEvent } from 'react'
@@ -9,7 +12,8 @@ import { Button } from '../components/Button'
 import { TextArea } from '../components/Field'
 import { Mark } from '../components/Marks'
 import { Popover } from '../components/Menu'
-import { feedbackApi } from '../lib/api'
+import { api, feedbackApi } from '../lib/api'
+import { openThread } from '../chat/Notes'
 import { bus, type ProblemPrefill } from '../lib/bus'
 import { recentProblems } from '../lib/problemLog'
 import type { ProblemReport, ProblemReportBody } from '../lib/types'
@@ -39,6 +43,13 @@ export function linkPieces(sentence: string, links: readonly { text: string; hre
   }
   if (rest) out.push({ text: rest })
   return out
+}
+
+/** A code ticket's title from what the analyst wrote: its first line that has words, at most TITLE_CHARS long. Pure. */
+export const TITLE_CHARS = 80
+export function ticketTitle(description: string): string {
+  const first = description.split('\n').map((l) => l.trim()).find(Boolean) ?? ''
+  return first.length > TITLE_CHARS ? `${first.slice(0, TITLE_CHARS - 1).trimEnd()}…` : first
 }
 
 /** Open the prefilled new issue in a new tab, with no handle back to this page. */
@@ -135,6 +146,21 @@ export function ProblemReportPopover({ ws, anchor, open, onClose, prefill = null
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<ProblemReport | null>(null)
   const [copied, setCopied] = useState(false)
+  // whether code tickets run here (a development install), asked each time the dialog opens
+  const [tickets, setTickets] = useState(false)
+  const [filing, setFiling] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    api
+      .devStatus()
+      .then((s) => alive && setTickets(s.tickets === ''))
+      .catch(() => alive && setTickets(false))
+    return () => {
+      alive = false
+    }
+  }, [open])
 
   // opened from a failure, the form starts with what failed
   useEffect(() => {
@@ -166,6 +192,22 @@ export function ProblemReportPopover({ ws, anchor, open, onClose, prefill = null
       setBusy(false)
     }
   }, [ws, description, shot, logs, prefill])
+
+  // the description as a ticket for thimble's developer agent: a click, which starts its agent; the dialog closes on the
+  // ticket's thread
+  const fileTicket = useCallback(async () => {
+    setFiling(true)
+    setError(null)
+    try {
+      const t = await api.fileTicket({ workspace: ws, title: ticketTitle(description), body: description.trim(), source: 'ui' })
+      if (t.chat) openThread(t.chat, 'file-ticket')
+      onClose()
+    } catch (e) {
+      setError(`The ticket could not be filed: ${(e as Error).message}`)
+    } finally {
+      setFiling(false)
+    }
+  }, [ws, description, onClose])
 
   const copy = async () => {
     if (!done) return
@@ -254,10 +296,15 @@ export function ProblemReportPopover({ ws, anchor, open, onClose, prefill = null
           <p className="problem-note">{LOGS_NOTE}</p>
           {error && <div className="problem-error">{error}</div>}
           <div className="problem-foot">
-            <Button variant="ghost" onClick={onClose} disabled={busy}>
+            <Button variant="ghost" onClick={onClose} disabled={busy || filing}>
               Cancel
             </Button>
-            <Button variant="primary" busy={busy} onClick={() => void prepare()}>
+            {tickets && (
+              <Button variant="secondary" busy={filing} disabled={busy || !description.trim()} onClick={() => void fileTicket()} data-tel="file-code-ticket" title="thimble's developer agent works on it in a copy of thimble's code, and asks you before the change reaches thimble">
+                File a code ticket
+              </Button>
+            )}
+            <Button variant="primary" busy={busy} disabled={filing} onClick={() => void prepare()}>
               Prepare bundle
             </Button>
           </div>

@@ -44,7 +44,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import config, corpus_tree, hook_auth, refs, transcripts, viewlog
+from . import config, corpus_tree, hook_auth, refs, transcripts, view_calls, viewlog
 
 log = logging.getLogger("thimble.corpus")
 
@@ -1112,18 +1112,21 @@ class RegisterBody(BaseModel):
     path: str
     exact: bool = False  # register this folder even inside a registered one
     shown: str | None = None  # the folder as the analyst named it, through a symlink; null clears it, absent keeps it
+    name: str | None = None  # the name a new registration takes in place of the basename (`thimble demo`'s demo-<dataset>)
 
 
 @router.post("/corpora/register", status_code=201)
 def register_corpus(body: RegisterBody) -> dict[str, Any]:
     """Register a directory as a corpus: writes the sidecar DATA_DIR/<name>.corpus.json, never into the directory. 400
-    for a non-directory. A taken basename gets the next free name (`logs-2`); a path inside a corpus returns that corpus
-    unless `exact`."""
+    for a non-directory or an invalid `name`. A taken basename (or `name`) gets the next free name (`logs-2`); a folder
+    registered already keeps its name; a path inside a corpus returns that corpus unless `exact`."""
     shown = body.shown if "shown" in body.model_fields_set else config.KEEP_SHOWN
     try:
-        return config.register_corpus(body.path, exact=body.exact, shown=shown)
+        rec = config.register_corpus(body.path, exact=body.exact, shown=shown, name=body.name)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    view_calls.registered(str(rec["name"]))
+    return rec
 
 
 @router.get("/corpora/{c}/sources")
@@ -1630,19 +1633,18 @@ def put_source(c: str, path: str, body: SourceTextBody) -> dict[str, Any]:
 
 
 # /forge/* routes: `path` names any database file under the corpus (default forge.db); the connection is read-only.
-@router.get("/corpora/{c}/forge/tables")
-def forge_tables(c: str, request: Request, path: str = "forge.db") -> list[dict[str, Any]]:
-    with closing(_database(_corpus(c), path)) as con:
-        tables = [{"name": t, "row_count": con.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]}
-                  for t in table_names(con)]
-    _viewed(c, path, request)
-    return tables
+def database_tables(corpus: Path, rel: str) -> list[dict[str, Any]]:
+    """A database file's tables, [{name, row_count}] (GET /forge/tables, and `thimble state tables`)."""
+    with closing(_database(corpus, rel)) as con:
+        return [{"name": t, "row_count": con.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]}
+                for t in table_names(con)]
 
 
-@router.get("/corpora/{c}/forge/rows")
-def forge_rows(c: str, table: str, request: Request, offset: int = 0, limit: int = 100,
-               order: str | None = None, where: str | None = None, path: str = "forge.db") -> dict[str, Any]:
-    with closing(_database(_corpus(c), path)) as con:
+def database_rows(corpus: Path, rel: str, table: str, offset: int = 0, limit: int = 100, order: str | None = None,
+                  where: str | None = None) -> dict[str, Any]:
+    """A page of a database table's rows, {table, columns, rows, pk, total} (GET /forge/rows, and `thimble state
+    rows`): `limit` rows from `offset`, sorted by `order` (a column, then asc or desc), kept by `where`."""
+    with closing(_database(corpus, rel)) as con:
         if table not in table_names(con):
             raise HTTPException(404, f"no such table: {table!r}")
         columns, pk = table_info(con, table)
@@ -1670,8 +1672,22 @@ def forge_rows(c: str, table: str, request: Request, offset: int = 0, limit: int
             rows = [[jsonable(v) for v in r] for r in con.execute(sql)]
         except sqlite3.Error as e:
             raise HTTPException(400, f"sqlite: {e}")
-    _viewed(c, path, request)
     return {"table": table, "columns": columns, "rows": rows, "pk": pk, "total": total}
+
+
+@router.get("/corpora/{c}/forge/tables")
+def forge_tables(c: str, request: Request, path: str = "forge.db") -> list[dict[str, Any]]:
+    tables = database_tables(_corpus(c), path)
+    _viewed(c, path, request)
+    return tables
+
+
+@router.get("/corpora/{c}/forge/rows")
+def forge_rows(c: str, table: str, request: Request, offset: int = 0, limit: int = 100,
+               order: str | None = None, where: str | None = None, path: str = "forge.db") -> dict[str, Any]:
+    page = database_rows(_corpus(c), path, table, offset, limit, order, where)
+    _viewed(c, path, request)
+    return page
 
 
 class QueryBody(BaseModel):

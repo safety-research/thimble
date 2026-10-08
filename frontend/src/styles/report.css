@@ -647,6 +647,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: normal;
 }
 .wu-count {
   margin-left: auto;
@@ -778,6 +779,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: normal;
 }
 .wu-check-more {
   width: 22px;
@@ -2964,4 +2966,31 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
     animation: none;
     background-image: linear-gradient(color-mix(in oklab, var(--accent) 8%, transparent), color-mix(in oklab, var(--accent) 8%, transparent));
   }
+}
+
+/* a check whose passages the analyst changed since it ran: how many, then Run (Checks.StaleRow) */
+.wu-check-stale,
+.wu-check-refused {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  margin: 0 0 4px 22px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+.wu-check-stale {
+  display: block;
+}
+/* Run flows on after the words, as a link would, so a narrow pane wraps the words and keeps Run beside the last */
+.wu-check-stale-run.btn {
+  display: inline-flex;
+  vertical-align: baseline;
+  height: 20px;
+  padding: 0 6px;
+}
+/* a writer's start that did not happen, under the type bar (chat/Refused) */
+.wu-refused {
+  margin: 8px 16px 0;
 }

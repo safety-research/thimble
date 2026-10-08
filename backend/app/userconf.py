@@ -12,6 +12,29 @@ Earlier builds kept the agents' models and permission modes in the workspace's s
 that workspace's override the first time the workspace's config is read, so each workspace runs as it did. The settings
 of an extension thimble renamed (RENAMED_EXTENSIONS) are read under its new name, and written so when a file is
 rewritten (rename_extensions).
+
+Edits of the config. An agent's edit of these files (config_files) goes to the analyst in every permission mode, as an
+edit of the corpus does with `data` at "ask" (Session.verdict, ask_cause `config`), so the analyst sees on the card what
+an agent would change in its own permissions and decides; a session nobody answers is refused it. main's kept mode
+(main_modes_file), which only thimble writes, stays denied.
+
+One fence for main and its agents. thimble's agents are subagents of main, the analyst's Claude Code session, which the
+launcher starts inside thimble's fence (cli.main_fence, its permission rules main_rules): they run in main's permission
+mode and share its sandbox, network and rules. So the orientation's `web`, `network` and `data` are main's fence's keys,
+which every agent shares; the other agents keep only `web: off`, which keeps that one agent off the web tools. Code
+tickets' agents are subagents of main too. The dev agent alone keeps its own permission mode, fast mode and fence keys,
+for `thimble fix` and an extension's program that runs the dev agent, which stay jobs of the server.
+Installs follow Claude Code's permission mode: thimble adds no rule for them. The keys earlier builds read for this,
+`installs`, and each agent's own `fast` and `permissionMode` and `web` other than "off" but the dev agent's
+(IGNORED_KEYS), are read and ignored, so an earlier config stays valid; `ignored` lists those a file holds, and a save
+from the Settings pane drops them. `suggest` (the viewer suggestion's call) and `refusal` (the model and effort a refused classifier call runs
+again on, which `off` turns off) are classifier rows.
+
+Extensions' programs. An extension's program that runs an agent or one of its tasks (harness.py) is no subagent of main:
+it runs in a box of its own and keeps its power. So it takes its agent's own `env`, `sandbox`, `network` and `data`
+(PROGRAM_KEYS; agent_conf with `program`), which thimble's own agent of that role does not read, since it shares main's
+fence. Where the agent sets none of them, as for the dev agent and the classifiers, the program's network and sandbox
+are on, its edits of the corpus ask, and it gets no variable of the server's.
 """
 from __future__ import annotations
 
@@ -25,23 +48,34 @@ import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 from . import config, permission_hook, sandbox_allow
 
 log = logging.getLogger("thimble.userconf")
 
 FILE = "config.json"
-AGENTS = ("orientation", "critic", "writer", "checks", "dev", "labels", "cardCheck")
+AGENTS = ("orientation", "critic", "writer", "checks", "dev", "labels", "cardCheck", "suggest", "refusal")
 CALLS = ("labels", "cardCheck")  # one model call each, with no tools, unless an extension's program runs their tasks
-# each agent's role among config.MODEL_ROLES, and its row among modes.AGENTS
+# each agent's role among config.MODEL_ROLES
 ROLES = {"orientation": "orient", "critic": "critic", "writer": "writer", "checks": "checks", "dev": "dev",
-         "labels": "labels", "cardCheck": "verify"}
-MODE_ROWS = {"orientation": "orient", "writer": "writer", "critic": "critic", "checks": "checks", "dev": "dev"}
+         "labels": "labels", "cardCheck": "verify", "suggest": "suggest", "refusal": "refusal"}
+# each agent's row among modes.AGENTS: the dev agent's alone, for an extension's program that runs it; every other agent,
+# code tickets' among them, runs in main's mode (module note, one fence)
+MODE_ROWS = {"dev": "dev"}
+SUBAGENT_ROLES = ("orientation", "critic", "writer", "checks")  # the agents that run as subagents of main
+# the keys of each agent that earlier builds read and this one reads and ignores (module note, one fence)
+IGNORED_KEYS: dict[str, tuple[str, ...]] = {
+    **{a: ("fast", "permissionMode") for a in ("orientation", "critic", "writer", "checks")},
+}
+IGNORED_TOP = ("installs",)  # top-level keys read and ignored
+# the keys of an agent that runs as a subagent of main which only an extension's program running the agent reads (module
+# note, extensions' programs), and what the program gets where the agent sets none (null in DEFAULTS)
+PROGRAM_KEYS = ("env", "sandbox", "network", "data")
+PROGRAM_DEFAULTS = {"env": [], "sandbox": "on", "network": "on", "data": "ask"}
 # the prompt file under prompts/ that an agent's `prompt` replaces
 PROMPT_FILES = {"orientation": "orient", "critic": "critic", "writer": "writer", "checks": "check", "dev": "dev",
                 "labels": "labels", "cardCheck": "card-check"}
-INSTALLS = ("ask", "deny", "allow")
 SANDBOX_USES = ("when-available", "never")
 BROWSERS = ("system", "bundled", "off")
 WEB = ("ask", "off", "allow")
@@ -70,23 +104,37 @@ def _session_agent(web: str, network: str = "on") -> dict[str, Any]:
             "sandbox": "on", "data": "ask", "env": [], "memory": "inherit", "prompt": None}
 
 
+def _subagent(web: str | None) -> dict[str, Any]:
+    """An agent that runs as a subagent of main (module note, one fence): its model and effort, `web` ("off", or null
+    for main's), its CLAUDE.md files (`memory`) and its prompt, and PROGRAM_KEYS for an extension's program that runs it
+    (module note, extensions' programs)."""
+    return {"model": None, "effort": None, "web": web, "memory": "inherit", "prompt": None,
+            **{k: None for k in PROGRAM_KEYS}}
+
+
 DEFAULTS: dict[str, Any] = {
-    "installs": "ask",
     "sandbox": {"use": "when-available", "enforce": True},
     "browser": None,
     "cardWait": CARD_WAIT_MINUTES,
     "extensions": {},
     "agents": {
-        "orientation": {**_session_agent("ask"), "subagentModel": None},
-        "critic": _session_agent("ask"),
-        "writer": _session_agent("ask"),
-        "checks": _session_agent("ask"),
-        "dev": _session_agent("off"),
+        # the orientation's web, network and data are main's fence's (module note, one fence); subagentModel and
+        # subagentEffort are thimble:orient-helper's, the type of the orientation's own subagents
+        "orientation": {**_subagent("ask"), "network": "on", "data": "ask", "subagentModel": None,
+                        "subagentEffort": None},
+        "critic": _subagent(None),
+        "writer": _subagent(None),
+        "checks": _subagent(None),
+        "dev": _session_agent("off"),  # its `fast` is `thimble fix`'s (config.FAST_OF_TICKETS)
         # `network`, `data` and `env` reach only an extension's program that runs one of their tasks (harness.py)
         **{a: {"model": None, "effort": None, "fast": None, "network": "on", "data": "ask", "env": [], "prompt": None}
            for a in CALLS},
+        "suggest": {"model": None, "effort": None, "fast": None},
+        "refusal": {"model": None, "effort": None, "off": None},
     },
 }
+# `agents.cardCheck.auto`: whether the card check reads each new card by itself (card_check.auto); null is on
+DEFAULTS["agents"]["cardCheck"]["auto"] = None
 
 # An extension's agent, `agents."<extension>:<agent>"` (extensions.agent_definitions), runs as a subagent of the
 # orientation's session, under that session's sandbox, installs rules, permission mode, fast mode and memory. Its web
@@ -97,20 +145,6 @@ EXTENSION_KEYS = ("enabled",)  # of `extensions.<name>`
 EXTENSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the extensions thimble ships under a new name, by their old name: a config's settings of an old name are the new one's
 RENAMED_EXTENSIONS = {"swarm": "swarm-orient"}
-
-def install_rules() -> list[str]:
-    """The contents of Claude Code's Bash rules for every install or download command (sandbox_allow.INSTALL_*), a
-    program's also at a path, a command's also with options before its subcommand. Claude Code's matching misses a
-    command behind `sh -c` or a path it does not know, which Session.verdict catches."""
-    def spread(c: str) -> list[str]:
-        head, _, rest = c.partition(" ")
-        return [f"{c}:*", f"{head} * {rest} *"] if rest else [f"{c}:*"]
-
-    return [*(r for p in sandbox_allow.INSTALL_PROGRAMS for r in (f"{p}:*", f"*/{p} *")),
-            *(r for c in sandbox_allow.INSTALL_COMMANDS for r in spread(c)),
-            *(r for m in sandbox_allow.INSTALL_MODULES for r in (f"* -m {m} *", *[f"* -m {x}" for x in spread(m)[1:]])),
-            "pip3.*", "uv run --with *", "uv run * --with *", "uv run --script *", "uv run * --script *"]
-
 
 def private_paths() -> list[str]:
     """The files no agent thimble starts may read: server.json in thimble's home, which holds the local API's token, and
@@ -273,9 +307,7 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
                            f"{', '.join(known)}{more}")
         return True
 
-    keys("", data, ("installs", "sandbox", "browser", "cardWait", "extensions", "agents"))
-    if "installs" in data:
-        one_of("installs", data["installs"], INSTALLS)
+    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "extensions", "agents"))
     if "browser" in data:
         if scope != "global":
             out.append("browser is set for the whole machine, in the config in thimble's home, not per workspace")
@@ -324,6 +356,8 @@ def _agent_problems(name: str, conf: Any, base: Path) -> list[str]:
     out: list[str] = []
     for k, v in conf.items():
         at = f"{where}.{k}"
+        if k in IGNORED_KEYS.get(name, ()):
+            continue  # read and ignored (module note, one fence)
         if k not in known:
             extra = (f"; {name} runs one model call with no tools, or an extension's program, so it takes only "
                      f"{', '.join(known)}" if name in CALLS
@@ -336,11 +370,11 @@ def _agent_problems(name: str, conf: Any, base: Path) -> list[str]:
         elif k in ("model", "subagentModel"):
             if not isinstance(v, str) or not v.strip():
                 out.append(f"{at} must be a model id, such as \"claude-opus-5-5\", or null")
-        elif k == "effort":
-            efforts = config.role_efforts(ROLES[name]) if name in ROLES else config.ROLE_EFFORTS
-            if v not in efforts:
+        elif k in ("effort", "subagentEffort"):
+            efforts = config.role_efforts(ROLES[name]) if name in ROLES and k == "effort" else config.ROLE_EFFORTS
+            if v not in efforts and not (name == "orientation" and k == "effort" and v in config.LEGACY_EFFORTS):
                 out.append(f"{at} is {json.dumps(v)}; it takes {_words(tuple(e for e in efforts if e))} or null")
-        elif k == "fast":
+        elif k in ("fast", "auto", "off"):
             if not isinstance(v, bool):
                 out.append(f"{at} is {json.dumps(v)}; it takes true, false or null")
         elif k == "permissionMode":
@@ -348,7 +382,8 @@ def _agent_problems(name: str, conf: Any, base: Path) -> list[str]:
                 out.append(f"{at} is {json.dumps(v)}; it takes {_words(PERMISSION_MODES)} or null")
         elif k == "web":
             if v not in WEB:
-                out.append(f"{at} is {json.dumps(v)}; it takes {_words(WEB)}")
+                out.append(f"{at} is {json.dumps(v)}; it takes {_words(WEB)}"
+                           + (" or null" if name in SUBAGENT_ROLES and name != "orientation" else ""))
         elif k == "network":
             if v not in NETWORK:
                 out.append(f"{at} is {json.dumps(v)}; it takes {_words(NETWORK)}")
@@ -379,15 +414,53 @@ def _prompt_path(value: str, base: Path) -> Path:
 
 
 def read(path: Path, scope: str) -> dict[str, Any]:
-    """The file's object, validated, with each agent's `prompt` resolved to an absolute path; {} when there is none."""
+    """The file's object, validated, with each agent's `prompt` resolved to an absolute path and the keys it reads and
+    ignores left out (without_ignored); {} when there is none."""
     data = _raw(path)
     problems = _problems(data, scope, path.parent)
     if problems:
         raise ConfigError(f"thimble's config {path}: " + "; ".join(problems))
+    data = without_ignored(data)
     for conf in (data.get("agents") or {}).values():
         if isinstance(conf, dict) and isinstance(conf.get("prompt"), str):
             conf["prompt"] = str(_prompt_path(conf["prompt"], path.parent).resolve())
     return data
+
+
+def _ignored_paths(data: dict[str, Any]) -> list[tuple[str, ...]]:
+    """The paths in a file's object that are read and ignored (module note, one fence): IGNORED_TOP, IGNORED_KEYS, and
+    a `web` other than "off" of an agent other than the orientation that runs as a subagent."""
+    out = [(k,) for k in IGNORED_TOP if k in data]
+    agents = data.get("agents") if isinstance(data.get("agents"), dict) else {}
+    for name, conf in agents.items():
+        if not isinstance(conf, dict):
+            continue
+        out += [("agents", name, k) for k in IGNORED_KEYS.get(name, ()) if k in conf]
+        if name in SUBAGENT_ROLES and name != "orientation" and conf.get("web") not in (None, "off"):
+            out.append(("agents", name, "web"))
+    return out
+
+
+def without_ignored(data: dict[str, Any]) -> dict[str, Any]:
+    """A copy of a file's object without the keys it reads and ignores (_ignored_paths), and without an agent object
+    that leaves empty."""
+    out = copy.deepcopy(data)
+    for path in _ignored_paths(data):
+        _put(out, path, _MISSING)
+    return out
+
+
+def ignored(c: str | None = None) -> list[str]:
+    """The keys the config files of workspace `c` (thimble's home's alone without one) hold and this build reads and
+    ignores, each as `<key path>` (module note, one fence); a file that cannot be read adds none."""
+    out: list[str] = []
+    for path in [global_file(), *([workspace_file(c)] if c else [])]:
+        try:
+            data = _raw(path)
+        except (ConfigError, ValueError):
+            continue
+        out += [".".join(p) for p in _ignored_paths(data) if ".".join(p) not in out]
+    return out
 
 
 def _merge(low: dict[str, Any], high: dict[str, Any]) -> dict[str, Any]:
@@ -520,6 +593,9 @@ def save(c: str | None, patch: dict[str, Any]) -> None:
         for path, value in leaves(patch):
             target = next(p for p, _ in files if _get(held[p], path) is not _MISSING or p == global_file())
             _put(held[target], path, _MISSING if value is None else value)
+        for p, _ in files:  # a save from the Settings pane drops the keys this build ignores (module note, one fence)
+            if held[p] != before[p]:
+                held[p] = without_ignored(held[p])
         for p, scope in files:
             if held[p] != before[p]:
                 if problems := _problems(held[p], scope, p.parent):
@@ -537,19 +613,23 @@ _STRICT = {"manual": 0, "auto": 1, "bypass": 2}
 
 
 def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]:
-    """An earlier build's `models` (less main's) and `permission_modes` as settings of this file: each role's model,
-    effort and fast mode, the orientation subagents' model as the orientation's subagentModel, and the rows by agent,
-    `critic` for the critic and the checks alike and `views` for the dev agent where its own row is not set, the
-    stricter of the two when both are."""
+    """An earlier build's `models` (less main's) and `permission_modes` as settings of this file: each role's model and
+    effort, and its fast mode where the agent still takes one, the orientation subagents' model and effort as the
+    orientation's subagentModel and subagentEffort, and the dev agent's row, or `views` where its own row is not set, the
+    stricter of the two when both are. The other agents' rows are left out: they run in main's mode now (module note, one
+    fence)."""
     by_role = {role: name for name, role in ROLES.items()}
     agents: dict[str, dict[str, Any]] = {}
     for role, conf in models.items():
         if not isinstance(conf, dict):
             continue
+        effort = str(conf.get("effort") or "").strip().lower()
         if role in ("subagents", "readers"):
             model = conf.get("model")
             if isinstance(model, str) and model.strip():
                 agents.setdefault("orientation", {})["subagentModel"] = model.strip()
+            if effort in config.ROLE_EFFORTS:
+                agents.setdefault("orientation", {})["subagentEffort"] = effort
             continue
         name = by_role.get(role)
         if name is None:
@@ -557,37 +637,39 @@ def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]
         mine: dict[str, Any] = {}
         if isinstance(conf.get("model"), str) and conf["model"].strip():
             mine["model"] = conf["model"].strip()
-        effort = str(conf.get("effort") or "").strip().lower()
-        if effort and effort in config.role_efforts(role):
+        if effort and (effort in config.role_efforts(role) or role == "orient" and effort in config.LEGACY_EFFORTS):
             mine["effort"] = effort
-        if isinstance(conf.get("fast"), bool):
+        if isinstance(conf.get("fast"), bool) and "fast" in DEFAULTS["agents"][name]:
             mine["fast"] = conf["fast"]
         if mine:
             agents.setdefault(name, {}).update(mine)
-    got = {a: m for a, m in rows.items() if m in PERMISSION_MODES}
+    got = {a: m for a, m in rows.items() if m in PERMISSION_MODES and a in ("dev", "views")}
     if "views" in got:
         view = got.pop("views")
         got["dev"] = min(got.get("dev", view), view, key=_STRICT.__getitem__)
-    by_row = {"orient": ("orientation",), "writer": ("writer",), "critic": ("critic", "checks"), "dev": ("dev",),
-              "checks": ("checks",)}
-    for row, mode in got.items():
-        for name in by_row.get(row, ()):
-            agents.setdefault(name, {})["permissionMode"] = mode
+    if "dev" in got:
+        agents.setdefault("dev", {})["permissionMode"] = got["dev"]
     return {"agents": agents} if agents else {}
 
 
 def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> dict[str, Any]:
-    """The Settings pane's changes as settings of this file: `models` {role: {model?, effort?, fast?}} (main's left
-    out, '' for back to the default; an extension's agent, "<ext>:<name>", takes its model and effort only) and `rows`
-    {row of modes.AGENTS: mode, None for main's}, `views` being the dev agent's row of earlier builds."""
+    """The Settings pane's changes as settings of this file: `models` {role: {model?, effort?, fast?, off?}} (main's left
+    out, '' for back to the default; `subagents` is thimble:orient-helper's row, the orientation's subagentModel and
+    subagentEffort; `fast` only for an agent that takes it, `off` only for the refusal row; an extension's agent,
+    "<ext>:<name>", takes its model and effort only) and `rows` {row of modes.AGENTS: mode, None for main's}, `views`
+    being the dev agent's row of earlier builds. A row of an agent that runs in main's mode now, which an earlier tab may
+    send, is left out (modes.IGNORED_ROWS)."""
+    from . import modes  # noqa: PLC0415 — modes imports this module
+
     by_role = {role: name for name, role in ROLES.items()}
     agents: dict[str, dict[str, Any]] = {}
     for role, conf in (models or {}).items():
         if not isinstance(conf, dict) or role == "main":
             continue
         if role in ("subagents", "readers"):
-            if "model" in conf:
-                agents.setdefault("orientation", {})["subagentModel"] = str(conf["model"] or "").strip() or None
+            for k, key in (("model", "subagentModel"), ("effort", "subagentEffort")):
+                if k in conf:
+                    agents.setdefault("orientation", {})[key] = str(conf[k] or "").strip() or None
             continue
         name = by_role.get(role)
         if name is None and EXTENSION_AGENT_RE.match(role):
@@ -597,11 +679,13 @@ def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> di
             continue
         if name is None:
             raise ConfigError(f"no role {role!r}; one of {', '.join(by_role)}, or an extension's agent")
-        for k in ("model", "effort", "fast"):
-            if k in conf:
+        for k in ("model", "effort", "fast", "off"):
+            if k in conf and k in DEFAULTS["agents"][name]:
                 v = conf[k]
-                agents.setdefault(name, {})[k] = (str(v).strip() or None) if k != "fast" and v is not None else v
+                agents.setdefault(name, {})[k] = (str(v).strip() or None) if k in ("model", "effort") and v is not None else v
     for row, mode in (rows or {}).items():
+        if row in modes.IGNORED_ROWS:
+            continue
         agents.setdefault(agent_of_row("dev" if row == "views" else row), {})["permissionMode"] = mode
     return {"agents": agents} if agents else {}
 
@@ -660,8 +744,9 @@ def _move_settings(c: str) -> bool:
 
 
 def agent_of_row(row: str) -> str:
-    """The agent of a row of modes.AGENTS."""
-    return next(name for name, r in MODE_ROWS.items() if r == row)
+    """The agent of a row of modes.AGENTS, or of one of an earlier build's rows (modes.IGNORED_ROWS), which name the
+    agent's role."""
+    return next(name for name, r in {**ROLES, **MODE_ROWS}.items() if r == row)
 
 
 def mode_rows(c: str) -> dict[str, str]:
@@ -683,8 +768,7 @@ class Session:
 
     c: str | None
     agent: str
-    conf: dict[str, Any]  # the agent's settings
-    installs: str
+    conf: dict[str, Any]  # the agent's settings, with main's fence's keys for an agent that shares them (agent_conf)
     sandboxed: bool  # its Bash runs in Claude Code's sandbox
     own_bash: list[str] = field(default_factory=list)  # commands it runs unasked in every case (allow_own)
     hosted: bool = True  # False for a session nobody can answer, which is refused what it would ask for
@@ -714,19 +798,32 @@ class Session:
         except (OSError, ValueError, KeyError):
             return None
 
+    @staticmethod
+    def _edited(tool: str, inp: Any) -> Path | None:
+        """The file a call of `tool` writes, resolved, when it is an edit tool's call with an absolute path; else None."""
+        if tool not in EDIT_TOOLS or not isinstance(inp, dict):
+            return None
+        target = inp.get("notebook_path" if tool == "NotebookEdit" else "file_path")
+        if not isinstance(target, str) or not target.strip():
+            return None
+        path = Path(target.strip()).expanduser()
+        return Path(os.path.realpath(path)) if path.is_absolute() else None
+
     def edits_corpus(self, tool: str, inp: Any) -> bool:
         """Whether a call of `tool` writes a file in the corpus folder."""
-        if tool not in EDIT_TOOLS or not isinstance(inp, dict):
+        real, corpus = self._edited(tool, inp), self.corpus()
+        if real is None or corpus is None:
             return False
-        target = inp.get("notebook_path" if tool == "NotebookEdit" else "file_path")
-        corpus = self.corpus()
-        if not isinstance(target, str) or not target.strip() or corpus is None:
-            return False
-        path = Path(target.strip()).expanduser()
-        if not path.is_absolute():
-            return False
-        real = Path(os.path.realpath(path))
         return real == corpus or corpus in real.parents
+
+    def config_files(self) -> list[Path]:
+        """thimble's config files, whose edits ask (config_files)."""
+        return config_files(self.c)
+
+    def edits_config(self, tool: str, inp: Any) -> bool:
+        """Whether a call of `tool` writes one of thimble's config files (config_files)."""
+        real = self._edited(tool, inp)
+        return real is not None and any(real == Path(os.path.realpath(f)) for f in self.config_files())
 
     @property
     def bash_asks(self) -> bool:
@@ -735,16 +832,16 @@ class Session:
         return self.agent in ASK_WITHOUT_SANDBOX and not self.network and not self.sandboxed and self.hosted
 
     def settings(self) -> dict[str, Any]:
-        """The --settings keys of the config for the session: the install rules, Bash asked when bash_asks, the web
-        allowed or denied, auto memory when not inherited, and a deny of edits to the config's files and to main's kept
-        mode (main_modes_file)."""
-        files = [global_file(), main_modes_file(), *([workspace_file(self.c)] if self.c else [])]
-        perms: dict[str, list[str]] = {"deny": [*(f"Edit(/{f})" for f in files), *private_rules()]}
-        rules = [f"Bash({r})" for r in install_rules()]
-        if self.installs == "ask" and self.hosted:
-            perms["ask"] = rules
-        elif self.installs != "allow":
-            perms["deny"] += rules
+        """The --settings keys of the config for the session: Bash asked when bash_asks, the web allowed or denied, auto
+        memory when not inherited, an ask of edits to the config's files (a deny in a session nobody answers), and a deny
+        of edits to main's kept mode (main_modes_file). No rule for installs, which follow the session's permission mode
+        (module note, one fence)."""
+        config_rules = [f"Edit(/{f})" for f in self.config_files()]
+        perms: dict[str, list[str]] = {"deny": [f"Edit(/{main_modes_file()})", *private_rules()]}
+        if self.hosted:
+            perms["ask"] = config_rules
+        else:
+            perms["deny"] += config_rules
         if self.bash_asks:
             perms["ask"] = [*perms.get("ask", []), "Bash"]
         if self.web == "off":
@@ -757,38 +854,37 @@ class Session:
             out["autoMemoryEnabled"] = memory == "on"
         return out
 
-    def install_asks(self) -> bool:
-        """Whether the sandbox hook leaves install commands to the permission flow (sandbox_allow's --installs)."""
-        return self.installs != "allow"
-
     def may_ask(self) -> bool:
-        """Whether a call can go to the analyst whatever the permission mode (verdict)."""
-        return self.installs != "allow" or self.bash_asks or self.data == "ask"
+        """Whether a call can go to the analyst whatever the permission mode (verdict): in any session somebody answers,
+        since an edit of the config's files always does."""
+        return self.hosted or self.bash_asks or self.data == "ask"
 
     def verdict(self, tool: str, inp: Any) -> str:
         """`deny` or `ask` when the config refuses a call or sends it to the analyst whatever the permission mode: an
-        edit of the corpus by `data`; for a Bash call, an install command by `installs`, or refused when offline, and,
-        when bash_asks, any other command; `own` for one of the session's own commands then, which runs unasked; ''
-        for any other call."""
+        edit of the config's files (module note, edits of the config), refused in a session nobody answers; an edit of
+        the corpus by `data`; for a Bash call, an install command refused when offline (a view build with no network)
+        and, when bash_asks, any other command; `own` for one of the session's own commands then, which runs unasked; ''
+        for any other call, an install among them, which the permission mode decides (module note, one fence)."""
+        if self.edits_config(tool, inp):
+            return "ask" if self.hosted else "deny"
         if self.data != "allow" and self.edits_corpus(tool, inp):
             return "deny" if self.data == "off" else "ask"
         command = inp.get("command") if tool == "Bash" and isinstance(inp, dict) else None
         if not isinstance(command, str):
             return ""
-        if (self.offline or self.installs != "allow") and sandbox_allow.installs(command):
-            return "deny" if self.offline else self.installs
+        if self.offline and sandbox_allow.installs(command):
+            return "deny"
         if self.bash_asks:
             return "own" if allow_own(command, self.own_bash) else "ask"
         return ""
 
     def ask_cause(self, tool: str, inp: Any) -> str:
-        """What makes verdict() send a call to the analyst: `data` for an edit of the corpus, `installs` for an install
-        command, `commands` for any other command while bash_asks."""
+        """What makes verdict() send a call to the analyst: `config` for an edit of the config's files, `data` for an
+        edit of the corpus, `commands` for a command while bash_asks."""
+        if self.edits_config(tool, inp):
+            return "config"
         if self.data != "allow" and self.edits_corpus(tool, inp):
             return "data"
-        command = inp.get("command") if tool == "Bash" and isinstance(inp, dict) else None
-        if isinstance(command, str) and sandbox_allow.installs(command):
-            return "installs"
         return "commands"
 
 
@@ -815,15 +911,34 @@ NO_SANDBOX_WHY = {
 }
 
 
-def session(c: str | None, agent: str, *, sandbox: bool = True) -> Session:
-    """What the config asks of a session of `agent` in workspace `c`; `sandbox` False for a session the caller runs
-    outside the sandbox. An agent whose own `sandbox` is "off" runs outside it. ConfigError when the config has an
-    error, or requires the sandbox (`sandbox.enforce`, on by default) and the session of an agent whose sandbox is on
-    would run outside it (NO_SANDBOX)."""
+def agent_conf(conf: dict[str, Any], agent: str, *, program: bool = False) -> dict[str, Any]:
+    """The settings a session of `agent` runs with, from a loaded config: an agent that runs as a subagent of main takes
+    main's fence's `network`, `data` and `web` (the orientation's), and its own `web` only when that is "off" (module
+    note, one fence); the dev agent and the classifiers keep their own. With `program`, for an extension's program that
+    runs the agent, the agent's own PROGRAM_KEYS, each PROGRAM_DEFAULTS' where it sets none (module note, extensions'
+    programs)."""
+    mine = dict(conf["agents"][agent])
+    if agent not in SUBAGENT_ROLES:
+        return mine
+    own = {k: copy.deepcopy(mine[k]) if mine.get(k) is not None else copy.deepcopy(v) for k, v in PROGRAM_DEFAULTS.items()}
+    main = conf["agents"]["orientation"]
+    own_web = mine.get("web")
+    mine.update(network=main.get("network") or "on", data=main.get("data") or "ask",
+                web="off" if own_web == "off" else main.get("web") or "ask")
+    return {**mine, **own} if program else mine
+
+
+def session(c: str | None, agent: str, *, sandbox: bool = True, program: bool = False) -> Session:
+    """What the config asks of a session of `agent` in workspace `c` (agent_conf); `sandbox` False for a session the
+    caller runs outside the sandbox, `program` for an extension's program that runs the agent or one of its tasks
+    (module note, extensions' programs). The dev agent, or a program, runs outside the sandbox when its own `sandbox` is
+    "off". ConfigError when the config has an error, or requires the sandbox (`sandbox.enforce`, on by default) and the
+    session of an agent whose sandbox is on would run outside it (NO_SANDBOX)."""
     conf = load(c)
     box = conf["sandbox"]
-    if conf["agents"][agent].get("sandbox") == "off":
-        return Session(c, agent, conf["agents"][agent], conf["installs"], False)
+    mine = agent_conf(conf, agent, program=program)
+    if (program or agent not in SUBAGENT_ROLES) and mine.get("sandbox") == "off":
+        return Session(c, agent, mine, False)
     runs = box["use"] != "never" and sandbox_runs()
     if box["enforce"] and sandbox and not runs and box["use"] != "never":
         runs = sandbox_runs(refresh=True)  # the analyst may have installed what it needs since the last check
@@ -832,7 +947,83 @@ def session(c: str | None, agent: str, *, sandbox: bool = True) -> Session:
                "env" if os.environ.get("THIMBLE_SANDBOX", "").strip() == "0" else "missing")
         why, fix = NO_SANDBOX_WHY[key]
         raise ConfigError(NO_SANDBOX.format(why=why, agent=agent, fix=fix).strip())
-    return Session(c, agent, conf["agents"][agent], conf["installs"], sandbox and runs, enforced=bool(box["enforce"]))
+    return Session(c, agent, mine, sandbox and runs, enforced=bool(box["enforce"]))
+
+
+# --------------------------------------------------------------------------- main's fence
+
+
+def config_files(c: str | None) -> list[Path]:
+    """thimble's config files, whose edits ask (module note, edits of the config): the one in thimble's home and the
+    workspace's."""
+    return [global_file(), *([workspace_file(c)] if c else [])]
+
+
+class Rule(NamedTuple):
+    """One permission rule of main's fence (main_rules): Claude Code's `behavior` list it goes in (ask, deny or allow),
+    the rule, and its `cause`: `data` (an edit of the corpus), `config` (an edit of thimble's config), `web` (the web
+    tools), `private` (thimble's token files and the links folder) or `state` (the files thimble keeps its records in)."""
+
+    behavior: str
+    rule: str
+    cause: str
+
+
+LINKS_DIR = "links"  # under thimble's home: the dashboard link with its key, briefly (cli.LINKS_DIR)
+# the workspace's files and folders main and its agents may not edit, since thimble keeps its records there: the checks,
+# the chats, the extensions' state, the run record, the folder of the files the hooks trust (trusted/: subagents.json,
+# callers.jsonl, launch.json) and the views' state (proposals with their attempt counts, the versions readers are served)
+STATE_PATHS = ("checks/**", "chats/**", "extensions/**", "extension/extension.json", "orient/run.json", "trusted/**",
+               "views/**")
+TICKET_FILES = ("tickets.jsonl", "applies.jsonl")  # in a development install's dev folder: the code tickets' records
+
+
+def dev_files() -> list[Path]:
+    """The code tickets' records main may not edit in a development install (dev.DEV_DIR's rule, which this module does
+    not import), which hold the change their checks passed; none in an installed copy."""
+    if not (config.REPO_ROOT / ".git").exists():
+        return []
+    folder = Path(os.environ.get("THIMBLE_DEV_DIR") or config.REPO_ROOT / "dev")
+    return [folder / name for name in TICKET_FILES]
+
+
+def checkout_git() -> list[Path]:
+    """The live checkout's git folder in a development install, which main and its subagents may not edit: only
+    thimble's server commits to a code ticket's branch and moves the live branch (dev.commit_worktree); none in an
+    installed copy."""
+    git = config.REPO_ROOT / ".git"
+    return [git] if git.exists() else []
+
+
+def main_rules(c: str) -> list[Rule]:
+    """The permission rules of main's fence for workspace `c` (cli.main_fence; module note, one fence), each with its
+    cause: an edit of the corpus asks, or is denied or left to the mode, by the orientation's `data`; an edit of
+    thimble's config files or the workspace's settings.json asks; the web tools ask, are denied or are allowed by its
+    `web`; main's kept mode, the workspace's records (STATE_PATHS), the code tickets' (dev_files) and the live checkout's
+    git folder (checkout_git) are not edited; the
+    token files and the links folder are neither read nor edited; the critique folder is read unasked, since the critic
+    reads its digest and brief there. No rule for installs, which follow Claude Code's permission mode. A config with an
+    error gives the defaults' rules."""
+    conf = agent_conf(load_or_defaults(c)[0], "orientation")
+    ws = config.WORKSPACES_DIR.resolve() / c
+    out: list[Rule] = []
+    corpus = f"Edit(/{Path(os.path.realpath(config.corpus_dir(c)))}/**)"
+    if conf["data"] == "ask":
+        out.append(Rule("ask", corpus, "data"))
+    elif conf["data"] == "off":
+        out.append(Rule("deny", corpus, "data"))
+    out += [Rule("ask", f"Edit(/{f})", "config") for f in [*config_files(c), ws / "settings.json"]]
+    web = {"ask": "ask", "off": "deny", "allow": "allow"}[conf["web"] if conf["web"] in WEB else "ask"]
+    out += [Rule(web, t, "web") for t in WEB_TOOLS]
+    out.append(Rule("deny", f"Edit(/{main_modes_file()})", "state"))
+    out += [Rule("deny", f"Edit(/{ws / p})", "state") for p in STATE_PATHS]
+    out += [Rule("deny", f"Edit(/{f})", "state") for f in dev_files()]
+    out += [Rule("deny", f"Edit(/{g}/**)", "state") for g in checkout_git()]
+    out += [Rule("deny", r, "private") for r in private_rules()]
+    links = global_file().parent / LINKS_DIR
+    out += [Rule("deny", f"Read(/{links}/**)", "private"), Rule("deny", f"Edit(/{links}/**)", "private")]
+    out.append(Rule("allow", f"Read(/{ws / 'critique'}/**)", "state"))
+    return out
 
 
 # --------------------------------------------------------------------------- prompts

@@ -1,19 +1,26 @@
 // The Claude Code session behind the workspace, as the whole page shows it. While no session is attached to main, the
 // shell is greyed out and inert under a scrim and one card (portaled to the body, with every other body layer inert
-// too) that gives the command to reconnect. The sessions thimble started go on without main, so the permission card
-// with their requests shows under it, where it can be answered. It goes when a session attaches, and is not shown while
-// the stream is down. A session that takes main over from another terminal is followed at once, with a toast.
+// too) that gives the command to reconnect. thimble's agents are subagents of that session, so they stopped with it:
+// the card names them, and says that a message continues the orientation once the session is back
+// (stoppedAgentsLine). A code ticket's session goes on without main, so the permission card with its requests shows
+// under the card, where it can be answered. It goes when a session attaches, and is not shown while the stream is
+// down, unless main's session had ended before it went down (the server stops itself after a quit). A session that
+// takes main over from another terminal is followed at once, with a toast. A workspace `thimble demo` installed from a
+// pre-cache, and a worked example's that `thimble demo --examples` opened (the start page's `example` row), are static:
+// each is read without a session until the first attaches, so the card waits for that session's end there
+// (chat/Precached offers the attach command in a pre-cache's orientation thread).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ThreadsContext } from '../chat/Notes'
 import { PermissionCard } from '../chat/PermissionCard'
 import { pendingRequests } from '../chat/permissions'
+import { precachedMark } from '../chat/Precached'
 import { pickItems, threadLabels } from '../chat/threads'
 import { useChatMetas } from '../chat/waiting'
 import { Button } from '../components/Button'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import type { ChatMeta, CorpusInfo, SessionEnded } from '../lib/types'
+import type { ChatMeta, CorpusInfo, SessionEnded, WorkspaceRow } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
 import { copyText } from './ProblemReport'
 
@@ -69,9 +76,33 @@ function Wrapped({ text }: { text: string }) {
   )
 }
 
-/** Whether main's meta, once loaded, has no session attached while the stream is up. Pure. */
-export function isGone(main: ChatMeta | null | undefined, streamUp: boolean): boolean {
-  return !!main && !main.attached && streamUp
+/** The agents of thimble's that main's quit stopped (route `subagent`, stopped by `quit`), as the card names them: the
+ * orientation, the writer of a document, a check; '' when none. Pure. */
+export function stoppedAgentsLine(metas: Iterable<ChatMeta>): string {
+  const names: string[] = []
+  let orient = false
+  for (const m of metas) {
+    if (m.route !== 'subagent' || m.status !== 'stopped' || m.stopped_by !== 'quit') continue
+    const name = m.role === 'orient' ? 'the orientation' : m.role === 'writer' ? (m.doc ? `the writer of the ${m.doc}` : 'a writer') : m.role === 'check' ? (m.title ? `the ${m.title} check` : 'a check') : m.title || 'an agent'
+    if (m.role === 'orient') orient = true
+    if (!names.includes(name)) names.push(name)
+  }
+  if (!names.length) return ''
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0]
+  return `thimble's agents stopped with it: ${list}.${orient ? ' Once it is back, send the orientation a message to continue it.' : ''}`
+}
+
+/** Whether main's meta, once loaded, has no session attached while the stream is up, or after main's session ended
+ * (`ended`), also once the stream went down: the server stops itself soon after the analyst quits, and the card, not
+ * the server-down line, says what to run (live check L10); in a workspace read without a session (`readable`: a
+ * pre-cache's or a worked example's), only once a session attached and ended. Pure. */
+export function isGone(main: ChatMeta | null | undefined, streamUp: boolean, readable = false): boolean {
+  return !!main && !main.attached && (streamUp || !!main.ended) && !(readable && !main.ended)
+}
+
+/** Whether the workspace `ws` is a worked example's, as the start page lists it (backend start_page.py). Pure. */
+export function isExample(rows: readonly WorkspaceRow[], ws: string): boolean {
+  return rows.some((r) => r.name === ws && r.kind === 'example')
 }
 
 /** Whether main's session is `session`, which took main from `after` in another terminal, while this tab followed
@@ -86,20 +117,32 @@ export function useSessionGone(ws: string): Gone | null {
   const [up, setUp] = useState(true)
   const [due, setDue] = useState(false)
   const [corpus, setCorpus] = useState<CorpusInfo | null>(null)
+  const [precached, setPrecached] = useState(false)
+  // whether the workspace is a worked example's, null until the start page's rows are read: the card waits for them
+  const [example, setExample] = useState<boolean | null>(null)
   const followed = useRef<string | null>(null)
   useEffect(() => {
     let alive = true
     let timer: number | null = null
+    setExample(null)
     const load = () =>
       api
         .chats(ws)
-        .then((list) => alive && setMain(list.find((m) => m.kind === 'main') ?? null))
+        .then((list) => {
+          if (!alive) return
+          setMain(list.find((m) => m.kind === 'main') ?? null)
+          setPrecached(!!precachedMark(list))
+        })
         .catch(() => undefined)
     void load()
     api
       .corpora()
       .then((cs) => alive && setCorpus(cs.find((c) => c.name === ws) ?? null))
       .catch(() => undefined)
+    api
+      .workspaces()
+      .then((rows) => alive && setExample(isExample(rows, ws)))
+      .catch(() => alive && setExample(false))
     const offs = [
       bus.on('chat', (e) => {
         if (e.chat !== 'main') return
@@ -117,7 +160,7 @@ export function useSessionGone(ws: string): Gone | null {
       if (timer != null) window.clearTimeout(timer)
     }
   }, [ws])
-  const gone = isGone(main, up)
+  const gone = isGone(main, up, precached || example !== false)
   useEffect(() => {
     setDue(false)
     if (!gone) return
@@ -138,7 +181,8 @@ export function useSessionGone(ws: string): Gone | null {
   return { ended, folder }
 }
 
-/** The requests of the sessions that go on without main, as the chat panel's card lists them. */
+/** The requests of the sessions that go on without main (a code ticket's), as the chat panel's card lists them, and
+ * every chat's meta. */
 function useAsks(ws: string) {
   const metas = useChatMetas(ws)
   return useMemo(() => {
@@ -153,6 +197,7 @@ export function SessionGone({ gone, ws }: { gone: Gone; ws: string }) {
   const [copied, setCopied] = useState(false)
   const scrim = useRef<HTMLDivElement>(null)
   const { asks, metas, labels } = useAsks(ws)
+  const stopped = stoppedAgentsLine(metas.values())
   useEffect(() => {
     const others = [...document.body.children].filter((el) => el !== scrim.current && !el.hasAttribute('inert'))
     others.forEach((el) => el.setAttribute('inert', ''))
@@ -182,6 +227,7 @@ export function SessionGone({ gone, ws }: { gone: Gone; ws: string }) {
             {copied ? 'Copied' : 'Copy'}
           </Button>
         </div>
+        {stopped && <p className="shell-gone-text shell-gone-agents">{stopped}</p>}
       </div>
       {asks.length > 0 && (
         <div className="shell-gone-asks">

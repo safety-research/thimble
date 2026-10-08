@@ -1,13 +1,13 @@
-"""The MCP shim's routes take the proof the plugin's hooks give (app/hook_auth.py): the server answers a tool call, the
-channel subscription and a relayed permission prompt only when the request proves the token in server.json, and proves
-it back; the shim (plugin/bin/thimble-mcp) believes no answer without that proof."""
+"""The MCP shim's routes take the proof the plugin's hooks give (app/hook_auth.py): the server answers a tool call and
+the event subscription only when the request proves the token in server.json, and proves it back; the shim
+(plugin/bin/thimble-mcp) believes no answer without that proof."""
 from __future__ import annotations
 
 import time
 
 from conftest import UI_KEY
 from fastapi.testclient import TestClient
-from test_shim_channel import INITIALIZE, INITIALIZED, REQUEST, _read, _send, _Server, _start, _stop
+from test_shim import INITIALIZE, INITIALIZED, _read, _send, _Server, _start, _stop
 
 from app import config, hook_auth
 from app.main import create_app
@@ -18,8 +18,7 @@ CORPUS = "mini"
 def test_the_server_answers_the_shim_s_routes_only_to_a_request_that_proves_the_token(plugin_headers):
     cwd = str(config.corpus_dir(CORPUS))
     tool = {"args": {"ref": "events.jsonl#L1"}, "actor": "analyst", "cwd": cwd}
-    asks = [("POST", "/api/tools/read_ref", {"json": tool}), ("GET", "/api/channel", {"params": {"cwd": "/nowhere"}}),
-            ("POST", "/api/channel/permission", {"json": {**REQUEST, "cwd": "/nowhere", "session": None}}),
+    asks = [("POST", "/api/tools/read_ref", {"json": tool}), ("GET", "/api/events", {"params": {"cwd": "/nowhere"}}),
             ("POST", f"/api/ws/{CORPUS}/sessions/permission", {"json": {"session": "orient", "tool_name": "Bash"}})]
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
         wrong = hook_auth.headers("another-token", "n0nce")
@@ -37,18 +36,16 @@ def test_the_server_answers_the_shim_s_routes_only_to_a_request_that_proves_the_
 
 def test_the_shim_believes_no_answer_without_the_server_s_proof(tmp_path):
     """A process on the recorded port that cannot prove the token gets the shim's requests, but its tool answer is never
-    shown, and neither its channel event nor its permission verdict reaches Claude Code."""
+    shown."""
     call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": {"name": "message_orientation", "arguments": {"message": "more"}}}
     rogue = _Server(token=None)
     try:
-        p = _start(tmp_path, rogue.port, channel=True)
+        p = _start(tmp_path, rogue.port)
         try:
             _send(p, [INITIALIZE, INITIALIZED, call])
             out: list[dict] = []
             subscribed, end = None, time.monotonic() + 20
-            # the stand-in writes both events as it answers the subscription, so a shim that believed it would pass them
-            # on within the second after
             while time.monotonic() < end:
                 out += _read(p, lambda: False, 0.2)
                 subscribed = subscribed or (time.monotonic() if rogue.queries else None)
@@ -61,7 +58,6 @@ def test_the_shim_believes_no_answer_without_the_server_s_proof(tmp_path):
     assert rogue.queries and rogue.calls, "it was asked"
     answer = next(m for m in out if m.get("id") == 1)["result"]
     assert answer["isError"] and "ok" not in [c.get("text") for c in answer["content"]]
-    assert not [m for m in out if str(m.get("method", "")).startswith("notifications/claude/channel")]
 
 
 def test_the_analyst_s_cookie_goes_only_to_thimble_s_api_routes(analyst):

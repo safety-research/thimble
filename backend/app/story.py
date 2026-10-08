@@ -217,7 +217,7 @@ def block_records(blocks: list[dict[str, Any]], valid: _Refs, used: set[str], *,
 def normalize_outline(raw: dict[str, Any], valid: _Refs, slug: str) -> dict[str, Any]:
     """The stored story from parse_markdown's {title, sections}: blocks as paragraphs and figures, a headed section with
     no
-    card taking the first chart- or table-bearing card its text cites. 502 when no section has a sentence."""
+    card taking the first card that draws a figure its text cites. 502 when no section has a sentence."""
     used: set[str] = set()
     sections: list[dict[str, Any]] = []
     for s in raw.get("sections") if isinstance(raw.get("sections"), list) else []:
@@ -276,7 +276,7 @@ def section_cells(sec: dict[str, Any]) -> list[str]:
 
 
 def fallback_cell(sec: dict[str, Any], valid: _Refs) -> str | None:
-    """The first card the section cites that bears a chart or a table."""
+    """The first card the section cites that draws a figure (material.figure_kind)."""
     return next((cid for cid in section_cells(sec) if valid.artifact_id(f"card:{cid}")), None)
 
 

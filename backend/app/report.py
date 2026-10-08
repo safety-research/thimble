@@ -94,9 +94,9 @@ def _reflist(raw: Any) -> list[str]:
 
 
 class _Refs:
-    """Validates refs against the workspace: a cell of one of its notebooks, a concept, a corpus file. Knows the chart-
-    or
-    table-bearing cells a figure may show (`artifacts`, cell id to its title). Every notebook group counts."""
+    """Validates refs against the workspace: a cell of one of its notebooks, a concept, a corpus file. Knows the cards
+    that draw a figure, which a document's figure may show (`artifacts`, cell id to its title, by material.figure_kind).
+    Every notebook group counts."""
 
     def __init__(self, c: str):
         ws = config.workspace_dir(c)
@@ -109,7 +109,7 @@ class _Refs:
                 if not cid:
                     continue
                 self.cells.add(cid)
-                if material.has_chart(cell.get("outputs")) or material.has_table(cell.get("outputs")):
+                if material.figure_kind(cell):
                     self.artifacts[cid] = _collapse(cell.get("title"))
         try:
             from . import concepts  # noqa: PLC0415
@@ -153,7 +153,7 @@ class _Refs:
         return out
 
     def artifact_id(self, raw: Any) -> str | None:
-        """The id of the chart- or table-bearing card `raw` names, as card:<id> (or cell:<id>), a span, markup or a bare id."""
+        """The id of the card that draws a figure `raw` names, as card:<id> (or cell:<id>), a span, markup or a bare id."""
         found = _reflist(raw)
         s = found[0] if found else ""
         cid: str | None = None
@@ -174,7 +174,7 @@ class _Refs:
 def _normalize(raw: dict[str, Any], valid: _Refs) -> dict[str, Any]:
     """The stored report from the `document` tool's input: sections in the writer's order, roles by heading then
     position,
-    sentence records from each markdown body, figures on chart- or table-bearing cells. 502 when nothing survives."""
+    sentence records from each markdown body, figures on cards that draw one. 502 when nothing survives."""
     used: set[str] = set()
     wants_section: dict[str, str] = {}
 
@@ -252,7 +252,14 @@ def _normalize(raw: dict[str, Any], valid: _Refs) -> dict[str, Any]:
                 want = wants_section.get(x["id"])
                 if want:
                     x["section"] = by_heading.get(want)
-    title = _collapse(raw.get("title")) or (findings[0]["heading"] if findings else "") or "Report"
+    title = _collapse(raw.get("title"))
+    if not title and findings:
+        title = findings[0]["heading"]
+        if findings[0] is sections[0] and sections[0]["paragraphs"]:
+            # the headline is the title now, so its section is the opening and keeps no heading: drawn as both, it
+            # showed twice (live check term-fix10, quirk 3: the first save wrote `## headline` and no `# ` line)
+            sections[0]["heading"] = ""
+    title = title or "Report"
     return {"id": DOC_ID, "title": title, "title_ok": _title_ok(title), "sections": sections, "comments": []}
 
 
@@ -352,8 +359,9 @@ def _cell_of(ref: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _better_span_for_value(ws: Path, ref: str, display: str) -> str | None:
-    """A span of the same cell that shows `display` when `ref` does not, else None."""
+def _better_span_for_value(ws: Path, ref: str, display: str, text: str = "") -> str | None:
+    """A span of the same cell that shows `display` when `ref` does not, else None; never a td of another row when the
+    sentence `text` names the row `ref` cites (cite.off_named_row)."""
     cid = _cell_of(ref)
     if not cid:
         return None
@@ -386,6 +394,8 @@ def _better_span_for_value(ws: Path, ref: str, display: str) -> str | None:
                         matches.append((c_, r_))
         if len(matches) == 1:
             new_ref = cite.td_ref(cid, *matches[0])
+            if new_ref and cite.off_named_row(ref, new_ref, text):
+                return None
             return new_ref if new_ref and new_ref != ref else None
     return None
 
@@ -398,7 +408,7 @@ def repair_span_refs(ws: Path, sentences: Iterable[dict[str, Any]]) -> int:
         text = str(x.get("text") or "")
         refs_list = list(x.get("refs") or [])
         for display, r in _value_refs(text):
-            new_ref = _better_span_for_value(ws, r, display)
+            new_ref = _better_span_for_value(ws, r, display, text)
             if not new_ref:
                 continue
             marker = f"[[{display}|{r}]]"
@@ -516,7 +526,8 @@ async def heal_sentences(c: str, sentences: list[dict[str, Any]], *, unwrap: boo
                 external[(display, ref)] = "the cited span is gone"
                 continue
             excerpt = str(out.get("excerpt") or "")
-            external[(display, ref)] = None if _value_matches(display, excerpt) else {"why": "the value is not at this reference", "source": _source_numbers(excerpt)}
+            holds = _value_matches(display, excerpt) or not cite.shows_value(display)  # words that show no value name the link
+            external[(display, ref)] = None if holds else {"why": "the value is not at this reference", "source": _source_numbers(excerpt)}
 
         prior = x.get("healed") if isinstance(x.get("healed"), list) else ()
         res = await heal.heal(text, load=load, notebook=whole, analyst=x.get("edited_by") == "analyst",
@@ -579,6 +590,8 @@ async def verify_and_tag(c: str, sentences: list[dict[str, Any]]) -> dict[str, A
             continue
         out = outs.get(r)
         exc = None if out is None else str(out.get("excerpt") or "")
+        if exc is not None and not cite.is_card_ref(r) and not cite.shows_value(display):
+            continue  # a file place that resolves, cited by words that show no value: they name the link (heal_sentences)
         if exc is None or not _value_matches(display, exc):
             failed.append({"sentence_id": sid, "ref": r, "value": display})
     value_pairs = {(sid, r) for sid, r, _ in values}
@@ -611,7 +624,9 @@ async def verify_and_tag(c: str, sentences: list[dict[str, Any]]) -> dict[str, A
             if f.get("was"):
                 rec["said"].append(str(f["was"]))
         else:
-            item = str(f.get("value") or f.get("ref") or "") if f.get("quiet") else str(f["ref"])
+            # a value its cited place does not show is named with the place, so the note says which value is meant
+            item = (str(f.get("value") or f.get("ref") or "") if f.get("quiet")
+                    else f"{f['ref']} (for “{f['value']}”)" if f.get("value") else str(f["ref"]))
             if item and item not in rec["quiet"]:
                 rec["quiet"].append(item)
     for x in sentences:

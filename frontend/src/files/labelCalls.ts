@@ -2,7 +2,9 @@
 // stores take effect only during the analyst's own click or key press inside the frame. The frame's bridge sends one
 // only while the frame has transient user activation, with the key only it holds, and the page checks again here that
 // its document has the activation and the frame has the focus, so a page cannot turn labels on or off, filter by them
-// or mark records on load, on a timer or from its script alone.
+// or mark records on load, on a timer or from its script alone. The editor a page opens (`edit`) stands in a popover
+// over the page beside the control that asked (files/LabelEditor), which the page gives as a rect in its frame.
+import type { PopoverAnchor } from '../components/Menu'
 import { api, labelApi } from '../lib/api'
 import { recordKey, recordOf } from '../lib/refs'
 import type { Concept } from '../lib/types'
@@ -16,8 +18,52 @@ export interface ViewLabelActions {
   setOn: (id: string, on: boolean) => void
   /** give a label's value a palette colour (labels.ts PALETTE) */
   setColour: (id: string, value: string, colour: number) => void
-  /** open the label editor on a label, or on a new one with null */
-  edit?: (id: string | null) => void
+  /** open the label editor on a label, or on a new one with null, beside the control that asked */
+  edit?: (id: string | null, at?: LabelEditAt) => void
+}
+
+/** A rect of a view's page, in its frame's coordinates. */
+export interface FrameRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/** Where a view's page asked for the label editor: beside `anchor`, the control that asked, or a point inside the
+ * view's top-left corner when the page gave no rect (then `below` it); the focus goes back to the frame when the editor
+ * closes from inside, and `onClose` tells the page (labelEditorClosed), with whether it did. */
+export interface LabelEditAt {
+  anchor: PopoverAnchor
+  side: 'aside' | 'below' | 'left'
+  back: HTMLIFrameElement
+  onClose: (focused: boolean) => void
+}
+
+/** A rect the page sent, or null when it is not one. Pure. */
+export function frameRect(v: unknown): FrameRect | null {
+  if (!v || typeof v !== 'object') return null
+  const r = v as Record<string, unknown>
+  const n = [r.left, r.top, r.width, r.height]
+  if (!n.every((x) => typeof x === 'number' && Number.isFinite(x)) || (r.width as number) < 0 || (r.height as number) < 0) return null
+  return { left: r.left as number, top: r.top as number, width: r.width as number, height: r.height as number }
+}
+
+/** How far inside the view's top-left corner the editor stands when the page gave no rect. */
+const CORNER = 8
+
+/** A rect of the page in `frame` as a box in this page's coordinates, read again wherever the frame has moved; with no
+ * rect, a point inside the frame's top-left corner. */
+export function frameAnchor(frame: HTMLIFrameElement, rect: FrameRect | null): PopoverAnchor {
+  return {
+    get isConnected() {
+      return frame.isConnected
+    },
+    getBoundingClientRect: () => {
+      const f = frame.getBoundingClientRect()
+      return rect ? new DOMRect(f.left + rect.left, f.top + rect.top, rect.width, rect.height) : new DOMRect(f.left + CORNER, f.top + CORNER / 2, 0, 0)
+    },
+  }
 }
 
 export type LabelOp = 'on' | 'colour' | 'edit' | 'mark' | 'filter'
@@ -35,6 +81,10 @@ export interface LabelCallContext {
   /** the palette as the page heard it (labels.ts pagePalette) */
   palette: readonly string[]
   actions?: ViewLabelActions
+  /** the page's frame, which the editor stands over */
+  frame?: HTMLIFrameElement
+  /** the editor this call opened closed, `focused` when the focus went back to the frame */
+  onEditorClosed?: (focused: boolean) => void
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
@@ -77,7 +127,10 @@ export async function runLabelCall(op: string, args: unknown, ctx: LabelCallCont
     }
     case 'edit': {
       if (!actions?.edit) throw new Error('there is no label editor here')
-      actions.edit(a.id == null ? null : labelOf(byId, str(a.id)).id)
+      const id = a.id == null ? null : labelOf(byId, str(a.id)).id
+      const { frame, onEditorClosed } = ctx
+      const rect = frameRect(a.anchor)
+      actions.edit(id, frame ? { anchor: frameAnchor(frame, rect), side: rect && a.side !== 'below' ? (a.side === 'left' ? 'left' : 'aside') : 'below', back: frame, onClose: (focused) => onEditorClosed?.(focused) } : undefined)
       return
     }
     case 'mark': {

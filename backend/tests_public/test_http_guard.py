@@ -1,5 +1,5 @@
-"""http_guard: a state-changing request a browser sends from another origin is refused, the channel refuses a web page
-even on a GET, a JSON route refuses a body without a JSON content type, and every response carries nosniff,
+"""http_guard: a state-changing request a browser sends from another origin is refused, the plugin's routes refuse a web
+page even on a GET, a JSON route refuses a body without a JSON content type, and every response carries nosniff,
 frame-ancestors and a policy (the built UI's, or the API's)."""
 from __future__ import annotations
 
@@ -39,30 +39,30 @@ def test_a_post_from_another_origin_is_refused_before_it_reaches_the_route(app_p
     assert r.status_code == 403
 
 
-def test_the_channel_refuses_a_web_page_on_a_get_too(app_prod, monkeypatch):
-    """The shim's subscription is a GET that makes the session it names main (channel.subscribe): no browser request
+def test_the_plugin_s_routes_refuse_a_web_page_on_a_get_too(app_prod, monkeypatch):
+    """The shim's subscription is a GET that attaches the session it names (events.subscribe): no browser request
     may reach it, not even the app's own page (an <img> in markdown a model wrote sends Sec-Fetch-Site: same-origin and
     no Origin). The shim and the hooks send no Origin and no Sec-Fetch-* header, and pass."""
-    from app import channel, session
+    from app import events, session
 
     attached = []
     monkeypatch.setattr(config, "workspace_for_cwd", lambda cwd: "mini")
     monkeypatch.setattr(session, "connected", lambda *a, **k: attached.append(a))
     monkeypatch.setattr(session, "main_pid", lambda c: 4242)
     c = TestClient(app_prod)
-    q = "cwd=/corpus&session=evil&pid=1&delivery=channel"
+    q = "cwd=/corpus&session=evil&pid=1&delivery=hook"
     for headers in ({"Origin": "https://evil.example"}, {"Origin": "null"}, {"Origin": "http://127.0.0.1:1"},
                     {"Origin": "http://testserver"}, {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"},
                     {"Sec-Fetch-Site": "none"}, {"Sec-Fetch-Site": "same-origin"}, {"Sec-Fetch-Dest": "image"},
                     {"Sec-Fetch-Mode": "no-cors"}):
         # the subscription last: were it served, its stream would not end
-        for path in ("/api/channel/main?cwd=/corpus&pid=4242", f"/api/channel/pull?{q}&wait=0", f"/api/channel?{q}"):
+        for path in ("/api/events/main?cwd=/corpus&pid=4242", f"/api/events/pull?{q}&wait=0", f"/api/events?{q}"):
             r = c.get(path, headers=headers)
             assert r.status_code == 403, (path, headers)
-    assert not attached and not channel._subs.get("mini")
+    assert not attached and not events._subs.get("mini")
     # the hooks' curl: no Origin, no Sec-Fetch-Site
-    assert c.get("/api/channel/main?cwd=/corpus&pid=4242").json() == {"workspace": "mini", "main": True}
-    assert c.post("/api/channel/ack", json={"cwd": "/corpus", "id": "x"},
+    assert c.get("/api/events/main?cwd=/corpus&pid=4242").json() == {"workspace": "mini", "main": True}
+    assert c.post("/api/events/ack", json={"cwd": "/corpus", "id": "x"},
                   headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"}).status_code == 403
     # a read elsewhere is still never refused
     assert c.get("/api/health", headers={"Sec-Fetch-Site": "same-site"}).status_code == 200
@@ -218,39 +218,6 @@ def test_a_cookie_claimed_before_the_port_was_in_its_name_moves_on_the_next_work
     r = c2.get("/api/ws/mini/jobs")
     assert "set-cookie" not in r.headers
     assert c2.put(THEME_PATH, json=THEME).status_code == 403
-
-
-@pytest.mark.real_write_guard
-def test_a_view_builds_check_proves_the_token_so_its_post_passes(app_prod, plugin_headers, monkeypatch):
-    """view_check.py, the view build's check command, runs outside the session's sandbox and proves the token in the
-    server.json of the home its command names (a background session's environment names none), so its post passes the
-    guard that refuses a kernel's."""
-    import importlib.util
-    import os
-    import shlex
-    from pathlib import Path
-
-    from starlette.datastructures import Headers
-
-    from conftest import _record
-
-    from app import dev, hook_auth, views
-
-    _record(port="8300")  # beside the token plugin_headers recorded, as the supervisor writes them
-    home = os.environ["THIMBLE_HOME"]
-    words = shlex.split(dev.view_check_command("mini", "posts"))
-    assert words[3:5] == ["--home", home] and words[5:7] == ["--folder", str(views.views_dir("mini") / "posts")]
-    assert words[7].endswith("/api/ws/mini/views/posts/check")
-    spec = importlib.util.spec_from_file_location("view_check_t", Path(views.__file__).with_name("view_check.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    monkeypatch.delenv("THIMBLE_HOME")  # as in a background session's environment
-    headers = mod.proof(home)
-    monkeypatch.setenv("THIMBLE_HOME", home)
-    assert headers and hook_auth.hook_proof(Headers(headers=headers))
-    r = TestClient(app_prod).post("/api/ws/mini/views/none/check", json={"locators": []}, headers=headers)
-    assert r.json().get("detail") != hook_auth.WRITE_REFUSED
-    assert mod.proof(str(Path(home) / "nowhere")) == {}
 
 
 # the write routes 0.4.0 added: extensions, card types and a card's Keep and Open as view

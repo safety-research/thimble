@@ -13,14 +13,23 @@ import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { refreshProposals } from '../lib/proposals'
 import { fragmentIn, nearestLine, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
-import type { LabelsForPath, Proposal, SourceKind, SourcePage, SourceRecord, TranscriptHint, View } from '../lib/types'
+import type { Concept, LabelsForPath, Proposal, SourceKind, SourcePage, SourceRecord, TranscriptHint, View } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchCount, matchNumber, stepInLine, stepMatch, unfoldAt, type MatchAt } from './find'
 import { countsOf, FindBar, useSourceFind } from './FindBar'
 import { classesOf, colourVar, laneTags, litClass, marksOf, valueOf } from './labels'
+import { useScrollAnchor } from './anchor'
 import { ReaderLabelsContext, useReaderLabels } from './marks'
-import { FIND_MARK, findColumn, ReaderRuler, rulerColumns, useRuler, type LensTick, type RulerTick, type Seen, type Shown } from './Ruler'
+import { findColumn, rulerColumns, useRuler, type RulerTick, type Seen, type Shown } from './Ruler'
+import { ColorBy } from './ColorBy'
+import { choiceId, KEY_COLORS, keyPaint, keyValue, parseChoice, recordObject, type ColorChoice } from './colorChoice'
+import { ColorContext } from './colorContext'
+import { FilterBy } from './FilterBy'
+import { FilterContext, useFilterBy } from './useFilterBy'
+import { FoldContext, useFold } from './fold'
+import { labelPaint, PlaceFeed, ReaderTracks, ZOOM_SPAN, type DrawnRecord, type OverviewPaint, type PreviewRecord, type TrackLane } from './Tracks'
+import { useColorBy } from './useColorBy'
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { accepts, slugOf, viewValue } from './viewChoice'
@@ -29,20 +38,33 @@ import { ViewerFrame } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import { DeleteViewConfirm, ProposalOption } from './ViewsBar'
 import { useTypeViewers } from './typeViewers'
-import { errMsg, LaneHead, targetOf, type ViewDef, type ViewProps } from './views/common'
+import { compact, errMsg, LaneHead, recordExcerpt, targetOf, type ViewDef, type ViewProps } from './views/common'
+import { messageKeys, nameOf, pick, textOf, timeOf } from './views/transcript'
 import { withoutEscapes } from './views/raw'
 import { pickView, scoreViews, viewByType } from './views/registry'
+import { useDelimited } from './views/table'
 
 const PAGE = 100
 const CAP = 2000
 const SAMPLE = 20
 /** px from either end of the records at which the next page loads */
 const LOAD_AHEAD_PX = 400
-/** the records a drag of the scrollbar loads before and after its line while the thumb is held */
+/** the records a drag of the frame shows before and after its line while the frame is held */
 const DRAG_BEFORE = 5
 const DRAG_AFTER = 30
-/** ms after a page lands before a held drag loads the next, so the thumb keeps moving between them */
-const DRAG_LOAD_MS = 150
+/** a held drag of the frame reads ahead when it has not read this many lines past its place in its direction: a read
+ * takes AHEAD_READ lines that way and AHEAD_BEHIND the other (the server gives at most 250 a side), and the drag keeps
+ * AHEAD_MAX of them */
+const AHEAD_NEAR = 120
+const AHEAD_READ = 240
+const AHEAD_BEHIND = 40
+const AHEAD_MAX = 3000
+/** the records of a patch's first lines a click on the overview reads for the first in the patch's value, at most */
+const SNAP_LINES = 250
+/** ms between the records a held drag of the frame shows from what it read ahead: every other frame at least, and at
+ * most DRAG_SHOW_MAX_MS twice over where drawing them takes longer than a frame */
+const DRAG_SHOW_MS = 30
+const DRAG_SHOW_MAX_MS = 60
 /** ms between asks for the line count while the server's is an estimate (a big file whose line index is being built) */
 const LINES_POLL_MS = 1000
 /** the order of the built-in views in the mode switch */
@@ -470,6 +492,8 @@ interface Builtins {
   binary: boolean
   /** the file's size when the server said it is binary */
   binarySize: number | null
+  /** the Transcript mode found no turns to show: it is dropped for the mode the file would otherwise open in */
+  dropTranscript: () => void
 }
 
 /** The built-in views scored over the file's first records (views/registry.ts). */
@@ -477,7 +501,11 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
   const isDatabase = kind === 'forge'
   const [sample, setSample] = useState<any[] | null>(isDatabase ? [] : null)
   const [binarySize, setBinarySize] = useState<number | null>(null)
-  const [transcript, setTranscript] = useState<TranscriptHint | null>(null)
+  const [hint, setHint] = useState<TranscriptHint | null>(null)
+  // the file whose turns the server's whole parse did not find, though the sniff of its head promised them
+  const [noTurns, setNoTurns] = useState<string | null>(null)
+  const transcript = noTurns === path ? null : hint
+  const dropTranscript = useCallback(() => setNoTurns(path), [path])
   useEffect(() => {
     if (isDatabase) return
     let alive = true
@@ -486,7 +514,7 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
       .then((page) => {
         if (!alive) return
         if (page.binary) setBinarySize(page.size_bytes ?? 0)
-        setTranscript(page.transcript ?? null)
+        setHint(page.transcript ?? null)
         setSample(page.records.map((r) => r.record))
       })
       .catch(() => alive && setSample([]))
@@ -502,8 +530,8 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
       // a file that reads as binary lists Raw alone, and the reader says it is binary in place of its bytes
       .filter((v) => !binary || v.type === 'raw' || isDatabase)
       .sort((a, b) => ORDER.indexOf(a.type) - ORDER.indexOf(b.type))
-    return { listed, auto: pickView(scored), loaded: sample != null, transcript, binary, binarySize }
-  }, [path, kind, sample, isDatabase, binarySize, transcript])
+    return { listed, auto: pickView(scored), loaded: sample != null, transcript, binary, binarySize, dropTranscript }
+  }, [path, kind, sample, isDatabase, binarySize, transcript, dropTranscript])
 }
 
 /** The line of the first record the reader shows at its top, or null when it shows none. */
@@ -612,8 +640,68 @@ export function useRecordLines(ws: string, ref: string | undefined, path: string
   return { at: mine?.at ?? null, pending: asks && !mine }
 }
 
-const sameShown = (x: Shown, y: Shown) =>
-  x.top === y.top && x.height === y.height && x.seen.length === y.seen.length && x.seen.every((s, i) => s.line === y.seen[i].line && s.top === y.seen[i].top && s.bottom === y.seen[i].bottom)
+/** records the zoomed track draws at most */
+const ZOOM_RECORDS = 400
+
+/** The records the body draws for the zoomed track around its scroll: those within three ZOOM_SPAN heights of the body
+ * that hold every stretch the zoomed track can show at this scroll, on a grid of those heights so that they change only
+ * as the reader scrolls past a step of it, and at most ZOOM_RECORDS, those nearest the view. Null when the body draws
+ * none. */
+export function zoomRecordsOf(body: HTMLElement): DrawnRecord[] | null {
+  const cards = body.querySelectorAll<HTMLElement>('.reader-card[data-line]')
+  if (!cards.length) return null
+  const st = body.scrollTop
+  const unit = Math.max(1, body.clientHeight * ZOOM_SPAN)
+  const from = (Math.floor(st / unit) - 1) * unit
+  const to = from + 3 * unit
+  const base = body.getBoundingClientRect().top - st
+  const firstBelow = (y: number) => {
+    let lo = 0
+    let hi = cards.length - 1
+    let at = cards.length
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      if (cards[mid].getBoundingClientRect().bottom - base > y) {
+        at = mid
+        hi = mid - 1
+      } else lo = mid + 1
+    }
+    return at
+  }
+  // past ZOOM_RECORDS, those from half of them above the view on
+  const first = Math.max(firstBelow(from), firstBelow(st) - ZOOM_RECORDS / 2)
+  const recs: DrawnRecord[] = []
+  for (let i = first; i < cards.length && recs.length < ZOOM_RECORDS; i++) {
+    const r = cards[i].getBoundingClientRect()
+    const top = r.top - base
+    if (top >= to) break
+    recs.push({ line: Number(cards[i].dataset.line), top, bottom: r.bottom - base })
+  }
+  return recs
+}
+
+/** A record as the overview's hover shows it: its index, who and when (the sniff's keys, else those the record
+ * carries), and its first two lines of words. */
+export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color: string | null): PreviewRecord {
+  const first = (s: string) =>
+    s
+      .split('\n')
+      .filter((l) => l.trim())
+      .slice(0, 2)
+      .join('\n')
+      .slice(0, 280)
+  const obj = recordObject(rec)
+  if (!obj) return { line: rec.line, who: null, when: null, text: first(recordExcerpt(rec)), color }
+  const keys = hint?.keys ? { author: hint.keys.speaker, time: hint.keys.time, body: hint.keys.text } : messageKeys([obj])
+  const who = nameOf(pick(obj, keys.author)) ?? (typeof obj.type === 'string' ? obj.type : null)
+  const when = timeOf(pick(obj, keys.time))
+  const body = textOf(pick(obj, keys.body)) ?? rec.blocks.find((b) => b.kind !== 'raw')?.text ?? compact(obj, 300)
+  return { line: rec.line, who, when, text: first(body), color }
+}
+
+const NO_LANES: Concept[] = []
+const NO_OFF: ReadonlySet<string> = new Set()
+
 
 function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only, onMode, findAsk }: ReaderProps) {
   const isDatabase = kind === 'forge'
@@ -622,6 +710,12 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const [pick, setPick] = useState<string | null>(() => readStorage<string | null>(memoryKey, null))
   useEffect(() => bus.on('fileMode', (e) => e.path === path && setPick(e.mode)), [path])
   const fragment = fragmentIn(targetRef, path)
+  const picked = viewByType(only ?? pick)
+  const view: ViewDef | undefined = picked && (only || builtins.listed.includes(picked)) ? picked : builtins.auto
+  // the Transcript and Table modes color their records by Color by and mark the labels on the tracks, with no gutter
+  // of lanes
+  const isTranscript = view?.type === 'transcript'
+  const colored = isTranscript || view?.type === 'table'
   const [records, setRecords] = useState<SourceRecord[]>([])
   const [total, setTotal] = useState<number | null>(null)
   // the server estimated `total` (a big file whose line index is being built): it is asked for again until it is exact,
@@ -651,13 +745,14 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // the record the find or go to line moved to, which the view scrolls to and flashes as it does a followed ref's
   const [findRef, setFindRef] = useState<string | null>(null)
   const [cursor, setCursor] = useState<MatchAt>(NO_MATCH)
-  const [shown, setShown] = useState<Shown>({ top: 0, height: 1, seen: [] })
+  // where the reader stands and the records around it, which the tracks hear of each frame it scrolls without a render
+  // of the reader
+  const feed = useMemo(() => new PlaceFeed(), [])
   // columns lie past the right edge of the body (a wide table): a fade at the edge says so
   const [moreRight, setMoreRight] = useState(false)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const recordsRef = useRef(records)
   recordsRef.current = records
-  const pendingScroll = useRef<{ h: number; t: number } | null>(null)
   // a page is being read: the scroll, the fill below and a resize can each ask for the next page in the same frame,
   // before the `loading` they see has turned true
   const reading = useRef(false)
@@ -677,12 +772,13 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     setJumpLine(null)
     setFindRef(null)
   }, [targetRef, setJumpLine])
-  // every label over files that is on has a column in each record's gutter; a label over files marks each record of
-  // the file with the file's value
+  // every label over files that is on has a column in each record's gutter (but in the Transcript and Table modes,
+  // where the tracks mark them); a label over files marks each record of the file with the file's value
   const lanes = labels.on
+  const gutterLanes = colored ? NO_LANES : lanes
   const fileOf = useCallback((id: string) => labels.presence.get(id)?.[path], [labels.presence, path])
-  const readerLabels = useReaderLabels(workspace, path, on, lanes, labels.focus, fileOf)
-  const tags = useMemo(() => laneTags(lanes), [lanes])
+  const readerLabels = useReaderLabels(workspace, path, on, gutterLanes, labels.focus, fileOf)
+  const tags = useMemo(() => laneTags(gutterLanes), [gutterLanes])
   const fileLanes = useMemo(() => new Set(lanes.filter((k) => marksOf(k) === 'file').map((k) => k.id)), [lanes])
   const ruler = useRuler(workspace, path, lanes.length > 0)
   const columns = useMemo(() => rulerColumns(lanes, ruler, fileOf), [lanes, ruler, fileOf])
@@ -754,22 +850,23 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     const next =
       (total ? shownIn(el, total) : null) ??
       (!total || first == null || last == null ? { top: a, height: b - a, seen: [] } : { top: (first - 1 + a * (last - first + 1)) / total, height: ((b - a) * (last - first + 1)) / total, seen: [] })
-    setShown((cur) => (sameShown(cur, next) ? cur : next))
-  }, [total, first, last])
+    // what a body's height holds of the file on average: its share of the records loaded, as their share of the file
+    const span = total && first != null && last != null ? Math.min(1, (el.clientHeight / el.scrollHeight) * ((last - first + 1) / total)) : next.height
+    feed.set({ top: next.top, height: next.height, scroll: el.scrollTop, h: el.clientHeight, content: el.scrollHeight, start: first == null || first <= 1, end: total == null || (last != null && last >= total), span })
+    feed.setRecords(zoomRecordsOf(el))
+  }, [total, first, last, feed])
+
+  // the record at the top of the reader keeps its place while records above it change height: as they are drawn near
+  // the view, and across a page loaded above or records dropped above (hold, in loadMore)
+  const viewType = viewByType(only ?? pick)?.type ?? builtins.auto.type
+  const { hold } = useScrollAnchor(bodyRef, [records, viewType, pick])
 
   useLayoutEffect(() => {
-    const p = pendingScroll.current
-    const root = bodyRef.current
-    if (p && root) {
-      root.scrollTop = p.t + (root.scrollHeight - p.h)
-      pendingScroll.current = null
-    }
     measure()
   }, [records, measure])
 
   // the body or the view in it changed size (the reader resized, a label's column came in): measure again. A pick
   // (a file-type viewer's page in place of the body, and back) can mount a new body.
-  const viewType = viewByType(only ?? pick)?.type ?? builtins.auto.type
   useEffect(() => {
     const el = bodyRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
@@ -791,49 +888,112 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     measure()
   }, [jumpAt, records, first, last, measure])
 
-  // a scrollbar drag's target top, a fraction of the file. A place already loaded is scrolled to at once; another
-  // loads around its line first, one page at a time (DRAG_LOAD_MS apart while the thumb is held)
+  // a drag of the frame's target top, a fraction of the file. A place already loaded is scrolled to at once. While the
+  // frame is held the drag reads the file ahead of the pointer, in its direction, into `ahead`, and the records around
+  // each place it reaches show from there at once (DRAG_BEFORE and DRAG_AFTER of them), so that the reader follows
+  // every move of the pointer; a place not read yet shows once its read lands. Let go, a place not loaded loads as a
+  // jump does.
   const seeking = useRef<{ f: number; held: boolean } | null>(null)
   const loadingNow = useRef(loading)
   loadingNow.current = loading
-  const landedAt = useRef(0)
-  const seekTimer = useRef<number | null>(null)
-  const settleSeek = useCallback(() => {
+  const ahead = useRef(new Map<number, SourceRecord>())
+  const shownAt = useRef(0)
+  const showCost = useRef(0)
+  const showTimer = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (showTimer.current != null) window.clearTimeout(showTimer.current)
+  }, [])
+  const aheadAsk = useRef(false)
+  const aheadDir = useRef<{ line: number | null; dir: number }>({ line: null, dir: 1 })
+  const aheadOf = (line: number) => {
+    const lo = Math.max(1, line - DRAG_BEFORE)
+    const hi = Math.min(total ?? line, line + DRAG_AFTER)
+    const out: SourceRecord[] = []
+    for (let l = lo; l <= hi; l++) {
+      const r = ahead.current.get(l)
+      if (!r) return null
+      out.push(r)
+    }
+    return out.length ? out : null
+  }
+  const readAhead = (line: number) => {
+    const d = aheadDir.current
+    if (d.line != null && line !== d.line) d.dir = Math.sign(line - d.line)
+    d.line = line
+    if (aheadAsk.current || !total) return
+    const down = d.dir >= 0
+    const lo = Math.max(1, line - (down ? DRAG_BEFORE : AHEAD_NEAR))
+    const hi = Math.min(total, line + (down ? AHEAD_NEAR : DRAG_AFTER))
+    let missing = false
+    for (let l = lo; l <= hi && !missing; l++) missing = !ahead.current.has(l)
+    if (!missing) return
+    aheadAsk.current = true
+    api
+      .sourceAround(workspace, path, line, down ? AHEAD_BEHIND : AHEAD_READ, down ? AHEAD_READ : AHEAD_BEHIND, true)
+      .then((page) => {
+        const got = ahead.current
+        for (const r of page.records) got.set(r.line, r)
+        // the oldest reads go first past AHEAD_MAX
+        for (const k of got.keys()) {
+          if (got.size <= AHEAD_MAX) break
+          got.delete(k)
+        }
+        takeTotal(page.total_lines, page.total_estimated)
+      })
+      .catch(() => {})
+      .finally(() => {
+        aheadAsk.current = false
+        if (seeking.current) settleNow.current()
+      })
+  }
+  const settleSeek = () => {
     const s = seeking.current
     const el = bodyRef.current
     const recs = recordsRef.current
     if (!s || !el || !total || !recs.length) return
     const a = s.f * total
+    const line = Math.max(1, Math.min(total, Math.floor(a) + 1))
+    if (s.held) readAhead(line)
     if (a >= recs[0].line - 1 && (a < recs[recs.length - 1].line || recs[recs.length - 1].line >= total)) {
       const t = scrollTopFor(el, a)
       if (t != null) el.scrollTop = t
       if (!s.held) seeking.current = null
       return
     }
-    if (loadingNow.current || seekTimer.current != null) return
-    const wait = s.held ? landedAt.current + DRAG_LOAD_MS - performance.now() : 0
-    if (wait > 0) {
-      seekTimer.current = window.setTimeout(() => {
-        seekTimer.current = null
-        settleNow.current()
-      }, wait)
+    // read ahead already: those records show now, and the reader settles on the place once they are drawn; while the
+    // frame is held, at most every DRAG_SHOW_MS, or twice as long as the frame that last drew them took where that is
+    // longer, so that drawing them leaves the tracks their frames
+    const near = aheadOf(line)
+    if (near) {
+      const wait = s.held ? shownAt.current + Math.max(DRAG_SHOW_MS, 2 * showCost.current) - performance.now() : 0
+      if (wait > 0) {
+        if (showTimer.current == null)
+          showTimer.current = window.setTimeout(() => {
+            showTimer.current = null
+            settleNow.current()
+          }, wait)
+        return
+      }
+      shownAt.current = performance.now()
+      setRecords(near)
+      requestAnimationFrame((t0) => requestAnimationFrame((t1) => (showCost.current = Math.min(DRAG_SHOW_MAX_MS, t1 - t0))))
       return
     }
-    setJumpLine(Math.max(1, Math.min(total, Math.floor(a) + 1)), s.held)
-    if (!s.held) seeking.current = null
-  }, [total, setJumpLine])
+    if (s.held || loadingNow.current) return
+    setJumpLine(line)
+    seeking.current = null
+  }
   const settleNow = useRef(settleSeek)
   settleNow.current = settleSeek
   useLayoutEffect(() => {
-    landedAt.current = performance.now()
-    settleSeek()
-  }, [records, settleSeek])
-  useEffect(() => () => {
-    if (seekTimer.current != null) window.clearTimeout(seekTimer.current)
-  }, [])
-  const wheel = useCallback((px: number) => {
+    settleNow.current()
+  }, [records])
+  const scrollBy = useCallback((px: number) => {
     const el = bodyRef.current
-    if (el) el.scrollTop += px
+    if (!el) return 0
+    const was = el.scrollTop
+    el.scrollTop = was + px
+    return el.scrollTop - was
   }, [])
 
   const loadMore = useCallback(
@@ -849,8 +1009,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         if (dir === 'earlier') {
           const start = Math.max(1, f - PAGE)
           const page = await api.source(workspace, path, start, f - start)
-          const root = bodyRef.current
-          pendingScroll.current = root ? { h: root.scrollHeight, t: root.scrollTop } : null
+          hold()
           setRecords((c) => {
             const merged = [...page.records, ...c]
             return merged.length > CAP ? merged.slice(0, CAP) : merged
@@ -859,6 +1018,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         } else {
           const page = await api.source(workspace, path, l + 1, PAGE)
           if (!page.records.length) dryAfter.current = l
+          // records dropped from the start are above the view
+          if (recordsRef.current.length + page.records.length > CAP) hold()
           setRecords((c) => {
             const merged = [...c, ...page.records]
             return merged.length > CAP ? merged.slice(merged.length - CAP) : merged
@@ -872,7 +1033,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         setLoading(false)
       }
     },
-    [workspace, path, loading, total, takeTotal],
+    [workspace, path, loading, total, takeTotal, hold],
   )
 
   const frame = useRef<number | null>(null)
@@ -895,6 +1056,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     seeking.current = { f, held }
     settleSeek()
     if (held || !total) return
+    ahead.current.clear()
+    aheadDir.current = { line: null, dir: 1 }
     // the pages a held drag left unloaded around the place it let go of load as a scroll there would load them
     onScroll()
     track('reader-find', { target: `${path}#L${Math.max(1, Math.min(total, Math.floor(f * total) + 1))}`, detail: { from: 'scrollbar' } })
@@ -1032,36 +1195,74 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   }, [markText, shownMatch, shownK])
   const findStatus = !finder ? '' : lineAsk != null ? (total && !estimated ? `of ${linesText(total, estimated)}` : '') : search.error ? 'Could not search' : found ? matchCount(cursor.i < 0 ? -1 : matchNumber(cursor, countsOf(found)), found.matches ?? found.total, !found.complete) : ''
   const rulerCols = useMemo(() => (found && found.total && total ? [...columns, findColumn(found.lines, total, findText)] : columns), [columns, found, total, findText])
-  const foundLines = useMemo(() => new Set(found?.lines ?? []), [found])
-  // inside the ruler's thumb, per lane, the records on screen it marks: a label's highlighted value, or each place of a
-  // find's match where the record shows it marked (else the whole record)
-  const rows = readerLabels.rows
-  const lens = useMemo(() => {
-    const out = new Map<string, LensTick[]>()
-    for (const col of rulerCols) {
-      const ticks: LensTick[] = []
-      if (col.id === 'find') {
-        for (const s of shown.seen) {
-          const places = spots.get(s.line)
-          if (places?.length) for (const p of places) ticks.push({ line: s.line, top: s.top + p * (s.bottom - s.top), bottom: s.top + p * (s.bottom - s.top), colour: FIND_MARK, hit: true })
-          else if (foundLines.has(s.line)) ticks.push({ ...s, colour: FIND_MARK })
-        }
-      } else if (fileLanes.has(col.id)) {
-        // a label over files marks every record of the file with the file's value, its lane's one mark
-        const whole = col.ticks[0]
-        if (whole) for (const s of shown.seen) ticks.push({ ...s, colour: whole.colour })
-      } else {
-        const k = on.find((x) => x.id === col.id)
-        for (const s of k ? shown.seen : []) {
-          const row = rows.get(`${path}#L${s.line}`)?.get(k!.id)
-          const c = row ? litClass(k!, valueOf(row)) : undefined
-          if (c) ticks.push({ ...s, colour: colourVar(c.color) })
-        }
+
+  // ---- Color by and the tracks
+  // the labels Filter by turns on, which Color by leaves to it, and the one it filters by, which Color by leaves on
+  const quiet = useRef(new Set<string>())
+  const filterHolds = useRef<string | null>(null)
+  // a CSV or TSV file's records as the Table mode reads them, by its first line's names
+  const colorRecords = useDelimited(workspace, colored && !isTranscript ? path : '', records)
+  const color = useColorBy(workspace, path, colored && !binary && !isDatabase, labels, colorRecords, readerLabels.rows, total, quiet, filterHolds)
+  const filter = useFilterBy(workspace, path, isTranscript && !binary && !isDatabase, labels, color.fileLabels, color.keys, records, readerLabels.rows, total, quiet)
+  const filterLabel = isTranscript && filter.choice.by === 'label' ? filter.choice.id : null
+  useEffect(() => {
+    filterHolds.current = filterLabel
+  }, [filterLabel])
+  const fold = useFold(workspace, path)
+  const colorChoice = color.choice
+  // a choice's lane of the overview: a key's commonest value per bin, a label's value most records have per bin; the
+  // first choice's values turned off faded
+  const paintOf = useCallback(
+    (c: ColorChoice, off: ReadonlySet<string>): OverviewPaint | null => {
+      if (c.by === 'key') {
+        const k = color.keys?.keys.find((x) => x.key === c.key)
+        return k ? keyPaint(k, color.pickedOf(choiceId(c)), off) : null
       }
-      out.set(col.id, ticks)
+      if (c.by === 'label') {
+        const k = lanes.find((x) => x.id === c.id)
+        return k ? labelPaint(k, ruler, off) : null
+      }
+      return null
+    },
+    [color.keys, color.pickedOf, lanes, ruler],
+  )
+  // the overview's colors: the first choice's; with Off a plain track
+  const paint = useMemo<OverviewPaint>(() => (colored ? (paintOf(colorChoice, new Set(color.off)) ?? { kind: 'none' }) : { kind: 'none' }), [colored, paintOf, colorChoice, color.off])
+  // the markers: the find's matches. Each choice past the first has a lane of its own beside the first's, in its own
+  // colors, so that one choice is one lane and two are two
+  const markers = useMemo(() => rulerCols.filter((c) => c.id === 'find'), [rulerCols])
+  const nameOfChoice = useCallback((c: ColorChoice) => (c.by === 'key' ? c.key : c.by === 'label' ? (lanes.find((k) => k.id === c.id)?.name ?? '') : ''), [lanes])
+  const trackLanes = useMemo<TrackLane[]>(() => {
+    if (!colored) return []
+    const out: TrackLane[] = []
+    for (const c of color.picks.slice(1)) {
+      const got = paintOf(c, NO_OFF)
+      if (got) out.push({ id: choiceId(c), name: nameOfChoice(c), paint: got })
     }
     return out
-  }, [rulerCols, shown.seen, spots, foundLines, on, fileLanes, rows, path])
+  }, [colored, color.picks, paintOf, nameOfChoice])
+  const paintName = nameOfChoice(colorChoice)
+  const recordAtLine = useMemo(() => new Map(colorRecords.map((r) => [r.line, r])), [colorRecords])
+  // a record's color on the zoomed track, and its value of the choice for its hover
+  const zoomColor = useMemo(() => {
+    const names = new Map(color.values.map((v) => [v.id, v.name]))
+    return (line: number) => {
+      const rec = recordAtLine.get(line)
+      const chip = rec ? color.chipOf(rec) : undefined
+      return { color: color.colors?.get(line)?.color ?? null, title: (chip != null ? names.get(chip) : null) ?? '' }
+    }
+  }, [color, recordAtLine])
+  const hint = builtins.transcript
+  const preview = useCallback(
+    (line: number) =>
+      api.source(workspace, path, line, 3).then((p) =>
+        p.records.map((rec) => {
+          const chip = color.chipOf(rec)
+          return previewOf(rec, hint, chip != null ? (color.values.find((v) => v.id === chip)?.color ?? null) : null)
+        }),
+      ),
+    [workspace, path, color, hint],
+  )
   // the record a mark of the ruler stands for: its line when it stands for one, else the first of its lines whose value
   // of the label is the mark's, read from the server once per mark
   const markLines = useMemo(() => new Map<string, Promise<number | null>>(), [ruler, on])
@@ -1090,6 +1291,44 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     },
     [markLines, on, workspace, path],
   )
+  // a click near a patch of color on the overview goes to the first record of the patch's value on the lines where the
+  // patch starts (read from the server: a key's value from the records, a label's from its rows), and chooses it as the
+  // find does; the first of those lines when none is found
+  const snapTo = (from: number, to: number, value: number, lane: string | null) => {
+    const land = (line: number | null) => goTo(line ?? from, 'ruler')
+    // the choice whose lane it is: the first's, or another's by its id
+    const c = lane != null ? parseChoice(lane) : colorChoice
+    if (c?.by === 'key') {
+      const k = color.keys?.keys.find((x) => x.key === c.key)
+      if (!k) return land(from)
+      const inValue = (rec: SourceRecord) => {
+        const v = keyValue(rec, k.key)
+        if (v == null) return false
+        const rank = k.values.findIndex((x) => x.value === v)
+        return value < KEY_COLORS ? rank === value : rank < 0 || rank >= KEY_COLORS
+      }
+      void api
+        .source(workspace, path, from, Math.min(SNAP_LINES, to - from + 1))
+        .then((p) => land(p.records.find(inValue)?.line ?? null))
+        .catch(() => land(null))
+      return
+    }
+    const id = c?.by === 'label' ? c.id : null
+    const k = id != null ? lanes.find((x) => x.id === id) : undefined
+    const name = k ? classesOf(k).filter((c) => c.highlight)[value]?.name : undefined
+    if (!k || name == null) return land(from)
+    void scaleApi
+      .labelsForLines(workspace, path, from, to)
+      .then((list) => {
+        let line: number | null = null
+        for (const r of list.find((g) => g.concept_id === k.id)?.rows ?? []) {
+          const l = Number(/#L(\d+)$/.exec(r.ref)?.[1])
+          if (l >= from && l <= to && litClass(k, valueOf(r))?.name === name && (line == null || l < line)) line = l
+        }
+        land(line)
+      })
+      .catch(() => land(null))
+  }
   // a click on a mark goes to its record, or to the middle of its lines when none is found; a label over files' mark
   // stands for the whole file and goes nowhere
   const onMark = (column: string, tick: RulerTick) => {
@@ -1100,8 +1339,6 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     })
   }
 
-  const picked = viewByType(only ?? pick)
-  const view: ViewDef | undefined = picked && (only || builtins.listed.includes(picked)) ? picked : builtins.auto
   // a viewer for the file's type shows in its place: the one picked for this file, else, while no built-in mode is
   // picked and the best one is Raw, the first that reads the ref's fragment
   const rawBest = builtins.loaded && (builtins.auto.type === 'raw' || binary)
@@ -1138,11 +1375,13 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // the view is rendered again only when what it shows changes, not when the reader measures its scroll (the ruler's
   // thumb, the fade at the right edge) as the reader resizes or scrolls
   const transcript = builtins.transcript
+  // the Transcript mode is the one view that can find nothing it was offered for (the sniff reads only the head)
+  const unavailable = isTranscript ? builtins.dropTranscript : undefined
   const viewEl = useMemo(() => {
     if (!ViewComponent) return null
-    const viewProps: ViewProps = { workspace, path, kind, page, loadMore: loadPage, targetRef: viewTarget, transcript }
+    const viewProps: ViewProps = { workspace, path, kind, page, loadMore: loadPage, targetRef: viewTarget, transcript, unavailable }
     return <ViewComponent {...viewProps} />
-  }, [ViewComponent, workspace, path, kind, page, loadPage, viewTarget, transcript])
+  }, [ViewComponent, workspace, path, kind, page, loadPage, viewTarget, transcript, unavailable])
   // the built-in modes, then the file-type viewers, then Raw
   const builtinOptions = builtins.listed.map((v) => ({ value: v.type, label: v.title }))
   const options = [
@@ -1192,33 +1431,52 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         {viewer ? (
           <ReaderViewer key={viewer.slug} ws={workspace} view={viewer} path={path} targetRef={fragment != null && accepts(viewer, fragment) ? targetRef : undefined} labels={labels} onRaw={() => onPick('raw')} />
         ) : (
-          <div className="reader-main">
-            <div className="reader-scroll" data-more-right={moreRight || undefined}>
-              <div className={'reader-body' + (isDatabase ? ' reader-body-fill' : '')} ref={bodyRef} onScroll={onScroll} style={{ ...(tags.length ? { '--lanes': tags.length } : {}), '--digits': String(total ?? 0).length } as CSSProperties}>
-                {tags.length > 0 && view && GUTTERED.has(view.type) && loaded && !noViewReason && <LaneHead tags={tags} />}
-                {error && !noViewReason && <div className="reader-error-text">{error}</div>}
-                {noViewReason && (
-                  <div className="reader-noview">
-                    <div className="reader-noview-reason dim">{noViewReason}</div>
-                  </div>
-                )}
-                {ViewComponent && loaded && !noViewReason && (
-                  <ViewBoundary key={`${view!.type}|${path}`} viewType={view!.type} onFallback={() => onPick('raw')}>
-                    {viewEl}
-                  </ViewBoundary>
-                )}
-                {loading && (
-                  <div className="reader-more">
-                    <Spinner size={14} label="Loading" />
-                  </div>
+          <>
+            {colored && !binary && !isDatabase && loaded && !noViewReason && (
+              <div className="reader-colorbar">
+                {isTranscript && <FilterBy choice={filter.choice} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={filter.values} off={filter.off} onChoose={filter.choose} onToggle={filter.toggle} countsOf={fileOf} />}
+                <ColorBy choice={color.choice} picks={color.picks} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={color.values} off={color.off} onChoose={color.choose} onToggle={color.toggle} countsOf={fileOf} onColor={color.recolor} onResetColors={color.resetColors ?? undefined} pickedOf={color.pickedOf} />
+                {isTranscript && (
+                  <Button size="sm" className="reader-foldall" onClick={() => fold.setAll(fold.all === 'fold' ? 'open' : 'fold')}>
+                    {fold.all === 'fold' ? 'Expand all' : 'Collapse all'}
+                  </Button>
                 )}
               </div>
-              {moreRight && <div className="reader-edge" aria-hidden />}
-            </div>
-            {!isDatabase && !binary && (
-              <ReaderRuler columns={rulerCols} view={shown} lens={lens} onJump={jump} onMark={onMark} lineOf={markLine} onLine={(line) => goTo(line, 'ruler')} onSeek={seek} onWheel={wheel} />
             )}
-          </div>
+            <div className="reader-main">
+              <div className="reader-scroll" data-more-right={moreRight || undefined}>
+                <div className={'reader-body' + (isDatabase ? ' reader-body-fill' : '')} ref={bodyRef} onScroll={onScroll} style={{ ...(tags.length ? { '--lanes': tags.length } : {}), '--digits': String(total ?? 0).length } as CSSProperties}>
+                  {tags.length > 0 && view && GUTTERED.has(view.type) && loaded && !noViewReason && <LaneHead tags={tags} />}
+                  {error && !noViewReason && <div className="reader-error-text">{error}</div>}
+                  {noViewReason && (
+                    <div className="reader-noview">
+                      <div className="reader-noview-reason dim">{noViewReason}</div>
+                    </div>
+                  )}
+                  {ViewComponent && loaded && !noViewReason && (
+                    <ColorContext.Provider value={colored ? color.colors : null}>
+                      <FilterContext.Provider value={isTranscript ? filter.verdict : null}>
+                        <FoldContext.Provider value={isTranscript ? fold : null}>
+                          <ViewBoundary key={`${view!.type}|${path}`} viewType={view!.type} onFallback={() => onPick('raw')}>
+                            {viewEl}
+                          </ViewBoundary>
+                        </FoldContext.Provider>
+                      </FilterContext.Provider>
+                    </ColorContext.Provider>
+                  )}
+                  {loading && (
+                    <div className="reader-more">
+                      <Spinner size={14} label="Loading" />
+                    </div>
+                  )}
+                </div>
+                {moreRight && <div className="reader-edge" aria-hidden />}
+              </div>
+              {!isDatabase && !binary && (
+                <ReaderTracks total={total} feed={feed} paint={paint} paintName={paintName} lanes={trackLanes} markers={markers} colorOf={zoomColor} onSnap={snapTo} onJump={jump} onSeek={seek} onScrollBy={scrollBy} onMark={onMark} preview={preview} />
+              )}
+            </div>
+          </>
         )}
       </div>
     </ReaderLabelsContext.Provider>

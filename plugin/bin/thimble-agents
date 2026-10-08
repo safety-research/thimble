@@ -1,7 +1,8 @@
 #!/bin/sh
 ''''exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
-"""thimble's running agents, as its server lists them: its background sessions (the orientation, writers, the critic)
-with their state, and the threads and subagents of main's session.
+"""thimble's running agents, as its server lists them: the orientation, the writers and the critic with their state,
+the view builds, and the threads and subagents of main's session; on the statusline also the browser's messages the
+session has not got yet.
 
     thimble-agents --statusline [--chain <command>]
         one line for Claude Code's statusline, read from the statusline's JSON on stdin; with --chain, the analyst's
@@ -12,6 +13,11 @@ with their state, and the threads and subagents of main's session.
 The first two lines make this file both a shell script and a Python program, as in thimble-mcp. It uses only the
 standard library and prints nothing of thimble's when no server answers within WAIT_S, or when the answer does not
 prove it is thimble's (the token in server.json, as bin/.thimble-watch proves it; app/hook_auth.py).
+
+In terminal mode (THIMBLE_WS names the workspace folder, whose launch.json says `mode: terminal`) no server runs: the
+same line and list come from the workspace's files (file_agents): thimble's running agents from subagents.json, the
+orientation's cards from its deck's notebook, and the analyst's words main has not got yet from the event queue
+(app/event_files.py).
 """
 import hashlib
 import hmac
@@ -53,6 +59,9 @@ def sign(token: str, role: str, nonce: str) -> str:
 
 
 def agents(cwd: str, session: str | None) -> dict:
+    ws = term_ws()
+    if ws is not None:
+        return file_agents(ws)
     found = server()
     if found is None:
         return {}
@@ -70,6 +79,84 @@ def agents(cwd: str, session: str | None) -> dict:
     except (OSError, ValueError, urllib.error.URLError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "dev-ticket")  # subagent_files
+ROLE_WORDS = {"orientation": "orientation", "critic": "critique", "writer": "writer", "dev-ticket": "code ticket"}
+STATUS_CHARS = 110  # app/tray.py STATUS_CHARS
+SAID = "› "  # app/events.py SAID
+
+
+def term_ws() -> Path | None:
+    """The workspace folder THIMBLE_WS names when its launch.json says terminal mode (bin/.thimble-watch term_ws)."""
+    named = os.environ.get("THIMBLE_WS") or ""
+    if not named:
+        return None
+    try:
+        data = json.loads((Path(named) / "trusted" / "launch.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return Path(named) if isinstance(data, dict) and data.get("mode") == "terminal" else None
+
+
+def _json(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _cards(ws: Path) -> int:
+    """The cards of the latest orientation's deck (app/tray.py _cards)."""
+    run = _json(ws / "orient" / "run.json")
+    if "final" not in (run.get("passes") or []):
+        return 0
+    groups = run.get("groups") or {}
+    deck = str(groups.get("final") or groups.get("orientation") or "")
+    if not deck or not all(ch.isalnum() or ch in "-_" for ch in deck):
+        return 0
+    cells = _json(ws / "notebooks" / f"{deck}.json").get("cells") or []
+    return len([x for x in cells if isinstance(x, dict)])
+
+
+def file_agents(ws: Path) -> dict:
+    """{rows, line, text} as the server's /api/agents gives them (app/tray.py), from the workspace's files."""
+    agents = _json(ws / "trusted" / "subagents.json").get("agents") or {}
+    agents = {k: a for k, a in agents.items() if isinstance(a, dict)} if isinstance(agents, dict) else {}
+    rows = []
+    for agent_id, a in agents.items():
+        role = str(a.get("role") or "")
+        if role not in ROLES or a.get("status") not in ("running", "waiting"):
+            continue
+        key = str(a.get("key") or "")
+        what = key.split(":", 1)[1] if ":" in key and role != "critic" else ""
+        kids = [k for k in agents.values() if k.get("parent") == agent_id and k.get("status") in ("running", "waiting")]
+        waits = "waiting for its critique" if any(k.get("role") == "critic" for k in kids) else "waiting for its subagents"
+        word = ROLE_WORDS.get(role, role)
+        rows.append({"name": f"thimble:{role}", "label": f"{word}: {what}" if what else word, "role": role,
+                     "state": waits if a.get("status") == "waiting" else "working", "kind": "subagent"})
+    lines = []
+    orient = next((r for r in rows if r["role"] == "orientation"), None)
+    if orient is not None:
+        n = _cards(ws)
+        lines.append(f"thimble · orientation {orient['state']} · {n} card{'' if n == 1 else 's'}")
+    waiting = []
+    try:
+        recs = [json.loads(x) for x in (ws / "events" / "queue.jsonl").read_text("utf-8").splitlines() if x.strip()]
+    except (OSError, ValueError):
+        recs = []
+    taken = {str(r.get("taken")) for r in recs if isinstance(r, dict) and r.get("taken")}
+    for r in recs:
+        if isinstance(r, dict) and r.get("id") and str(r["id"]) not in taken and str(r.get("line") or "").startswith(SAID):
+            waiting.append(str(r["line"])[len(SAID):])
+    if waiting:
+        more = f" (and {len(waiting) - 1} more)" if len(waiting) > 1 else ""
+        lines.append(f"thimble · queued: {waiting[0]}{more}")
+    line = "\n".join(x if len(x) <= STATUS_CHARS else x[: STATUS_CHARS - 1] + "…" for x in lines)
+    width = max((len(r["label"]) for r in rows), default=0)
+    text = "\n".join(f"{r['label']:<{width}}  {r['state'].split()[0]}" for r in rows) or "No agent of thimble's runs."
+    return {"rows": rows, "line": line, "text": text}
 
 
 def statusline(args: list[str]) -> int:

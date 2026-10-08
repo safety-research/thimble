@@ -1,5 +1,5 @@
 """FastAPI app: the thimble server. A module in ROUTER_MODULES that has routes exposes `router`, and one that owns
-subprocesses or tasks (kernels, the job queue, the channel's streams) exposes `shutdown()`, which the lifespan calls."""
+subprocesses or tasks (kernels, the job queue, the shims' event streams) exposes `shutdown()`, which the lifespan calls."""
 from __future__ import annotations
 
 import asyncio
@@ -48,6 +48,57 @@ def stamp_uvicorn_logs() -> None:
 
 stamp_uvicorn_logs()
 
+OPEN_FILES = 8192  # the soft limit of open files the server raises its own to, within the hard limit
+ACCEPT_LOG_S = 60.0  # one line in this long says the server could not accept connections (quiet_accept_errors)
+ACCEPT_ERROR = "socket.accept() out of system resource"  # asyncio's message when accept() fails for want of descriptors
+
+
+def raise_open_files(want: int = OPEN_FILES) -> str:
+    """Raise this process's soft limit of open files to `want`, or to the hard limit when that is lower, and say what was
+    done, '' when nothing was. Each kernel's channels take about twenty descriptors here (more on macOS, whose default
+    soft limit is 256), so a few views open at once would otherwise run the server out of them: then no kernel starts
+    and no connection is accepted. The kernels the server starts inherit the limit."""
+    try:
+        import resource  # noqa: PLC0415 — Unix only
+
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    except (ImportError, OSError, ValueError):
+        return ""
+    target = want if hard == resource.RLIM_INFINITY else min(hard, want)
+    if soft == resource.RLIM_INFINITY or soft >= target:
+        return ""
+    hard_text = "unlimited" if hard == resource.RLIM_INFINITY else str(hard)
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+    except (OSError, ValueError) as e:
+        return f"open files: the soft limit stays {soft} (hard {hard_text}); raising it to {target} failed: {e}"
+    return f"open files: raised the soft limit from {soft} to {target} (hard {hard_text})"
+
+
+def quiet_accept_errors(loop: asyncio.AbstractEventLoop, every: float = ACCEPT_LOG_S) -> None:
+    """While the process is out of file descriptors, asyncio logs ACCEPT_ERROR with a traceback for every try at each
+    waiting connection, thousands of lines a second: here one line in `every` seconds says it, with how many tries
+    failed meanwhile. Other errors go to the handler the loop had."""
+    before = loop.get_exception_handler()
+    state = {"at": -every, "n": 0}
+
+    def handler(lp: asyncio.AbstractEventLoop, context: dict) -> None:
+        if context.get("message") != ACCEPT_ERROR:
+            if before is not None:
+                before(lp, context)
+            else:
+                lp.default_exception_handler(context)
+            return
+        state["n"] += 1
+        now = time.monotonic()
+        if now - state["at"] < every:
+            return
+        log.error("the server cannot accept connections: %s (tries that failed since the last such line: %d); restart "
+                  "it with `thimble server restart`", context.get("exception"), state["n"])
+        state["at"], state["n"] = now, 0
+
+    loop.set_exception_handler(handler)
+
 
 class QuietPolling(logging.Filter):
     """Drop uvicorn's access line for a successful GET or HEAD, and for a successful telemetry POST: the open tab's
@@ -70,8 +121,8 @@ if os.environ.get("THIMBLE_ACCESS_LOG", "").strip().lower() != "all":
 
 ROUTER_MODULES = [
     # storage and the corpus
-    "corpus", "transcripts", "pdfs", "ledger", "investigation", "notebook", "concepts", "views", "cardtypes",
-    "extensions",
+    "corpus", "transcripts", "source_keys", "pdfs", "ledger", "investigation", "notebook", "concepts", "views", "cardtypes",
+    "extensions", "precached",
     # the agent engine (main, threads, background agents) and the tools they call
     "agents", "tools", "jobs", "verify",
     # documents, and the report checks that comment on them (their runs shut down with the server)
@@ -80,15 +131,18 @@ ROUTER_MODULES = [
     "dev", "telemetry", "export", "feedback_routes",
     # undo and redo over the workspace's cards and documents
     "undo",
-    # the channel to the analyst's Claude Code session, and the mirror of its transcript (listed for its shutdown)
-    "channel", "session",
-    # the Claude Code sessions thimble starts beside main, the orientation's and each writer's: their permission
-    # requests (shut down with the server), and the orientation's calls, stored whole and citable
-    "agent_session", "calls", "orient_session",
+    # browser events to the analyst's Claude Code session, and the mirror of its transcript (listed for its shutdown)
+    "events", "session",
+    # the plugin's hooks module in main's session, which starts, messages and stops thimble's subagents on a click
+    "module_bridge",
+    # thimble's agents as subagents of main (their hooks' routes, Start it), the permission requests of an extension's
+    # programs and a code ticket's own questions (shut down with the server), and the orientation's calls, stored whole
+    # and citable
+    "subagents", "agent_session", "calls", "orient_session", "write_session",
     # the programs an extension runs a role with (an Agent SDK program or a command), and their sessions
     "harness",
-    # the orientation's, its critic's and the writers' Claude Code background sessions, and their tray entries
-    "bg_session",
+    # the orientation's, its critic's and the writers' tray entries in the analyst's terminal
+    "tray",
     # the card harness (a headless Chromium that draws every card offscreen) and the card check that reads it, and
     # where the check's records and fixes are kept (the Undo of a fix)
     "render", "card_check", "checkstore",
@@ -96,6 +150,8 @@ ROUTER_MODULES = [
     "view_review",
     # whether the product tour was offered on this install's first launch
     "tour",
+    # the workspaces the start page and the top bar's switcher list
+    "start_page",
 ]
 
 # The backend binds to 127.0.0.1, but a DNS-rebinding page can still reach it as same-origin unless the Host
@@ -105,8 +161,9 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get("THIMBLE_ALLOWED_HOSTS", "127
 # Request timing: a request slower than this many ms is logged at WARNING, every other one at DEBUG. Every response
 # carries `Server-Timing: app;dur=<ms>`, so the browser's Network panel shows the backend's own time.
 SLOW_REQUEST_MS = float(os.environ.get("THIMBLE_SLOW_MS", "300"))
-# the watcher's long polls (channel.py), slow by design: logged at DEBUG like a fast request
-LONG_POLLS = ("/api/channel/pull", "/api/channel/permission/hook")
+# the watcher's long polls (events.py) and the hooks module's (module_bridge.py, whose hello may wait for a rekey),
+# slow by design: logged at DEBUG like a fast request
+LONG_POLLS = ("/api/events/pull", "/api/events/permission", "/api/module/next", "/api/module/hello")
 timing_log = logging.getLogger("thimble.timing")
 
 class RequestTiming:
@@ -136,6 +193,28 @@ class RequestTiming:
             await send(message)
 
         await self.app(scope, receive, send_timed)
+
+
+class OldEventRoutes:
+    """Pure ASGI middleware, outermost: a request on a route thimble 0.5.0 named for Claude Code channels, which a
+    session started before the update still calls, goes on as its new route (events.OLD_PATHS), so every check and the
+    router see the new path. Each such route is logged once."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+        self.seen: set[str] = set()
+
+    async def __call__(self, scope, receive, send) -> None:
+        from . import events  # noqa: PLC0415
+
+        new = events.OLD_PATHS.get(scope.get("path", "")) if scope["type"] == "http" else None
+        if new is not None:
+            if scope["path"] not in self.seen:
+                self.seen.add(scope["path"])
+                log.info("%s answers as %s: a Claude Code session started before the update to thimble 0.6.0 calls "
+                         "it; restarting that session loads the new plugin", scope["path"], new)
+            scope = {**scope, "path": new, "raw_path": new.encode("latin-1")}
+        await self.app(scope, receive, send)
 
 
 class CompleteStreams:
@@ -211,6 +290,9 @@ class BuiltUI(StaticFiles):
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    if raised := raise_open_files():
+        log.info("%s", raised)
+    quiet_accept_errors(asyncio.get_running_loop())
     log.info("data dir %s, workspaces dir %s", config.DATA_DIR, config.WORKSPACES_DIR)
     # the versions in play, so a log sent with a problem report says what ran
     try:
@@ -336,7 +418,8 @@ def create_app() -> FastAPI:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.add_middleware(SecurityHeaders)  # outside the two checks, so their refusals carry the headers too
     app.add_middleware(RequestTiming)  # times the whole stack
-    app.add_middleware(CompleteStreams)  # added last = outermost: sees every response's last message
+    app.add_middleware(CompleteStreams)  # sees every response's last message
+    app.add_middleware(OldEventRoutes)  # added last = outermost: the checks see the new path
 
     for name in ROUTER_MODULES:
         try:
@@ -352,7 +435,7 @@ def create_app() -> FastAPI:
             continue
         app.include_router(router, prefix="/api")
 
-    from . import cli  # noqa: PLC0415 — imports config, procs and cc_channel only
+    from . import cli  # noqa: PLC0415 — imports config, procs and cc_plugin only
 
     install = {"home": str(cli.home().expanduser().resolve()), "app": str(Path(config.REPO_ROOT).resolve())}
 

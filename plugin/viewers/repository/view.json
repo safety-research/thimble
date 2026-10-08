@@ -1,6 +1,6 @@
 {
   "name": "Repository",
-  "description": "Several agent runs on one small library, read as a code forge shows them: any runs picked or compared issue by issue, pull requests, issues, discussions and agents in tabs filtered on every field, and a pull request's whole story with its commits, diffs, reviews and the file of each entry.",
+  "description": "Several agent runs on one small library, each run its own repository on a code forge, drawn the way the forge draws it: a switcher at the top chooses the run, and the run's tabs list its pull requests, issues, discussion threads and agents with their states and counts, colored by state, area or a label, each item opened as its page in the side panel: a pull request's conversation, commits and changed files, an issue's timeline, a thread's posts or an agent's profile.",
   "scope": ["runs/*.json", "runs/*.jsonl", "runs/*.csv"],
   "records": [
     {"name": "event", "one": "one opening, push, review, comment, merge, close, reopen, post or sign-off", "fields": [
@@ -13,40 +13,39 @@
     {"name": "pull request", "one": "one pull request of a run, with its records", "fields": [
       {"name": "state", "type": "category", "derived": "computed", "from": "its merge, close and reopen records", "how": "open, merged or closed"},
       {"name": "area", "type": "category", "derived": "computed", "from": "labels or area, else the issue it fixes", "how": "the first label, else the issue's area"},
+      {"name": "review", "type": "category", "derived": "computed", "from": "each reviewer's latest verdict and the run's approvals", "how": "changes requested while any reviewer asks for changes, approved once it has the approvals it needs, else review required"},
+      {"name": "flags", "type": "list", "derived": "computed", "from": "its merge, reviews and pushes", "how": "merged by its author, merged over a change request, pushed after its last approval, or waiting for approvals"},
+      {"name": "plus", "type": "number", "derived": "computed", "from": "its commits' diffs", "how": "the lines they add"},
+      {"name": "minus", "type": "number", "derived": "computed", "from": "its commits' diffs", "how": "the lines they remove"},
       {"name": "closes", "type": "number", "derived": "cleaned", "from": "fixes, closes or linked_issue", "how": "the first number in free text"},
-      {"name": "to_merge", "type": "number", "derived": "computed", "from": "its opening and its merge", "how": "hours between them"},
-      {"name": "first_review", "type": "number", "derived": "computed", "from": "its opening and its first review", "how": "hours between them"},
-      {"name": "flags", "type": "list", "derived": "computed", "from": "its merge, reviews and pushes", "how": "merged by its author, merged over a change request, pushed after its last approval, or waiting for approvals"}
+      {"name": "need", "type": "number", "derived": "cleaned", "from": "the manifest's approvals, required_approvals or policy", "how": "the first number in free text, 1 when none"}
     ]},
     {"name": "issue", "one": "one issue of a run, with its records", "fields": [
       {"name": "state", "type": "category", "derived": "computed", "from": "its close records and the pull requests that fix it", "how": "fixed once a pull request that fixes it merged"},
-      {"name": "area", "type": "category", "derived": "cleaned", "from": "labels or area", "how": "the first label"},
-      {"name": "origin", "type": "category", "derived": "computed", "from": "its opening and the run's start", "how": "backlog when opened before the run started, else found during the run"},
-      {"name": "fixed_by", "type": "number", "derived": "computed", "from": "the pull requests' closes", "how": "the merged pull request that fixes it"},
-      {"name": "prs", "type": "list", "derived": "computed", "from": "the pull requests' closes", "how": "the pull requests that fix it"},
-      {"name": "to_fix", "type": "number", "derived": "computed", "from": "its opening and the merge that fixed it", "how": "hours between them"},
-      {"name": "elsewhere", "type": "list", "derived": "computed", "from": "the issue's number and title", "how": "the same issue in each other run"}
+      {"name": "origin", "type": "category", "derived": "computed", "from": "when it was opened", "how": "from the backlog when opened as its run started, else found during the run"},
+      {"name": "elsewhere", "type": "list", "derived": "computed", "from": "the issue's number and title", "how": "the same issue in each other run"},
+      {"name": "area", "type": "category", "derived": "cleaned", "from": "labels or area", "how": "the first label"}
     ]},
-    {"name": "discussion", "one": "one thread of the board", "fields": [
-      {"name": "mentions", "type": "list", "derived": "cleaned", "from": "the posts' bodies", "how": "the #<n> numbers they name"}
+    {"name": "thread", "one": "one thread of a run's board, with its posts", "fields": [
+      {"name": "lead", "type": "text", "derived": "cleaned", "from": "the thread's first post", "how": "its first 400 characters"},
+      {"name": "last", "type": "time", "derived": "computed", "from": "its posts' times", "how": "the time of its last post"}
     ]},
-    {"name": "agent", "one": "one agent of a run", "fields": [
-      {"name": "partners", "type": "list", "derived": "computed", "from": "the reviews it gave", "how": "its approvals and change requests per author"}
+    {"name": "agent", "one": "one agent of a run, with every record it wrote", "fields": [
+      {"name": "did", "type": "list", "derived": "computed", "from": "the records it wrote", "how": "counted by kind: pull requests, issues, commits, reviews, merges, closes, comments and posts"},
+      {"name": "note", "type": "text", "derived": "cleaned", "from": "its transcript's last assistant text", "how": "its first 400 characters"}
     ]},
     {"name": "run", "one": "one run's folder", "fields": [
-      {"name": "started", "type": "time", "derived": "cleaned", "from": "the manifest's started, else the first record", "how": "in UTC"},
-      {"name": "hours", "type": "number", "derived": "computed", "from": "its records' times", "how": "hours from its start to its last record"},
-      {"name": "approvals", "type": "number", "derived": "cleaned", "from": "approvals, required_approvals or policy.approvals", "how": "the first number in free text"}
+      {"name": "start", "type": "time", "derived": "cleaned", "from": "the manifest's started or started_at, else the first record", "how": "in UTC"}
     ]}
   ],
   "accepts": [
-    {"form": "L<n>", "means": "the record on line <n> of a run's file, shown in its pull request, issue, discussion or agent, or a manifest's line, which opens its run"}
+    {"form": "L<n>", "means": "the record on line <n> of a run's file, marked on its pull request's, issue's, thread's or agent's page in the side panel, or a manifest's line, which opens its run's repository"}
   ],
   "units": [
-    {"form": "<run>", "means": "one run: its measures, with the view narrowed to it"},
-    {"form": "<run>/pull/<n>", "means": "one pull request with its commits, reviews, comments and merge or close"},
-    {"form": "<run>/issues/<n>", "means": "one issue with its comments and the pull requests that close it"},
-    {"form": "<run>/discussions/<n>", "means": "one discussion, every post in time order"},
-    {"form": "<run>/agents/<name>", "means": "one agent: its note, its activity and its review partners"}
+    {"form": "<run>", "means": "one run's repository, chosen in the switcher"},
+    {"form": "<run>/pull/<n>", "means": "one pull request's page: its conversation with its commits, reviews, comments and merge or close, its commits and its changed files"},
+    {"form": "<run>/issues/<n>", "means": "one issue's page: its timeline with its comments and the pull requests that fix it, and the same issue in the other runs"},
+    {"form": "<run>/discussions/<n>", "means": "one thread's page, every post in time order"},
+    {"form": "<run>/agents/<name>", "means": "one agent's page: its sign-off note and every record it wrote"}
   ]
 }

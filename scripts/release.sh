@@ -6,12 +6,14 @@
 # What it produces: <out>/thimble-<version>-<shortsha>.zip (default out: <repo>/release/, gitignored) whose single
 # top-level folder thimble-<version>-<shortsha>/ holds exactly what an install needs and nothing else:
 #   plugin/               the Claude Code plugin (skill, .mcp.json, bin/) — what the marketplace installs
-#   mods/thimble-cc-mod/  the marketplace's second plugin, thimble-cc-mod (`thimble cc-mod on`); never its tests/
+#   mods/thimble-term/    the terminal-mode renderer, which the `thimble` command loads with --plugin-dir in terminal
+#                         mode (`thimble mode terminal`); no marketplace lists it; never its tests/
 #   extensions/           the extensions thimble ships, which `thimble extension add <name>` copies into ~/.thimble/extensions
 #   backend/              the server (app/, tests_public/, pyproject.toml, uv.lock); never .venv or __pycache__
 #   backend/requirements.txt  uv.lock's runtime packages with the hashes of their files (uv export), which install.sh
 #                         installs with uv pip or pip from the package index the machine is set up with
 #   prompts/              read by the server at run time (prompts.py)
+#   demos/                the pre-cached orientations `thimble demo` installs (backend/app/demo.py, demos/README.md)
 #   frontend/dist/        the built UI (tsc --noEmit -p tsconfig.app.json + vite build here, or --dist DIR), served at /
 #                         by the server when THIMBLE_DEV is off (main.py)
 #   frontend/src/ public/ index.html package.json package-lock.json vite.config.ts tsconfig*.json
@@ -20,15 +22,19 @@
 #                         them) and builds dist when there is none. Never node_modules
 #   frontend/runtime/     package.json and package-lock.json of the frontend packages the server and its scripts load
 #                         (runtime_npm, below), cut from the frontend's own: what install.sh installs beside a built dist
-#   .claude-plugin/       marketplace.json listing ./plugin and ./mods/thimble-cc-mod, its name set to
-#                         --marketplace-name (default thimble-local, so a zip install and the repo-as-marketplace
-#                         "thimble" can coexist on one machine); every plugin it lists must have its folder in the zip
-#   scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh   what an install runs; scripts/dev/ never ships
+#   .claude-plugin/       marketplace.json listing ./plugin, its name set to --marketplace-name (default thimble-local,
+#                         so a zip install and the repo-as-marketplace "thimble" can coexist on one machine); every
+#                         plugin it lists must have its folder in the zip
+#   scripts/install.sh scripts/plugin.sh scripts/update.sh scripts/rebuild_ui.sh   what an install runs (plugin.sh is
+#                         `thimble plugin on|off`); scripts/dev/ never ships
 #   scripts/view_shot.mjs the headless page of a view's checks (backend/app/views.py runs it)
 #   scripts/ui_shot.mjs   the page screenshots of main's `screenshot` tool and of the dev agent (dev.py runs it)
 #   README.md LICENSE INSTALL.md docs/config.md docs/assets/thimble-banner.svg   the readme, the Apache-2.0 license,
 #                         the install guide, the config's reference it links and the banner the readme links; a link of
 #                         these pages to a file the zip does not carry points at that file on GitHub, at the release's commit
+#   docs/color.md docs/time-range.md docs/rows-and-filters.md   the view kit's Color by, time range, row controls,
+#                         lanes, side panel and transcript, which the view builder's prompt points to (prompts/dev-view.md)
+#   docs/terminal-views.md   the terminal view kit, which a view's view.term.js draws with (backend/app/term_kit)
 #   THIRD_PARTY_NOTICES   the licenses of the npm packages and fonts frontend/dist bundles, which ask for their notices
 #                         to travel with it; written by scripts/third_party_notices.py from frontend/node_modules, and
 #                         only when the zip carries frontend/dist
@@ -82,13 +88,14 @@ version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["v
 [ -n "$version" ] || die "plugin/.claude-plugin/plugin.json has no version"
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 full_sha="$(git -C "$repo" rev-parse HEAD)"
-allow=(plugin mods/thimble-cc-mod extensions backend prompts .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
-       scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
+allow=(plugin mods/thimble-term extensions backend prompts demos .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
+       docs/color.md docs/time-range.md docs/rows-and-filters.md docs/terminal-views.md
+       scripts/install.sh scripts/plugin.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
        frontend/src frontend/public frontend/index.html frontend/package.json
        frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
 dirty=false
-# what an install does not run: the backend's tests and the mod's
-not_shipped=(':(exclude)backend/tests' ':(exclude)mods/thimble-cc-mod/tests')
+# what an install does not run: the backend's tests, the mods' and the hooks module's
+not_shipped=(':(exclude)backend/tests' ':(exclude)mods/thimble-term/tests' ':(exclude,glob)plugin/hooks/*.test.ts')
 if [ -n "$(git -C "$repo" status --porcelain --untracked-files=no -- "${allow[@]}" "${not_shipped[@]}")" ]; then
   dirty=true
   echo "release.sh: tracked files the zip carries have uncommitted changes, which ship (RELEASE.json says dirty)" >&2
@@ -253,7 +260,7 @@ $bad"
 for top in "$stage"/* "$stage"/.[!.]*; do
   [ -e "$top" ] || continue
   case "$(basename "$top")" in
-    plugin | mods | extensions | backend | prompts | frontend | scripts | .claude-plugin | README.md | INSTALL.md | docs | LICENSE | \
+    plugin | mods | extensions | backend | prompts | demos | frontend | scripts | .claude-plugin | README.md | INSTALL.md | docs | LICENSE | \
       THIRD_PARTY_NOTICES | RELEASE.json) ;;
     *) die "unexpected top-level entry in the staged tree: $(basename "$top")";;
   esac

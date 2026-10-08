@@ -1,6 +1,6 @@
 ---
 name: ask
-description: Send a message to a thread from the terminal, as the thread's composer in the browser would. `/thimble:ask <thread> [message]` follows up a side thread with its anchor, or without a message asks its unanswered question again; `orientation` messages the orientation, and a view's build thread takes a change to the view.
+description: Send a message to a thread from the terminal, as the thread's own composer would. `/thimble:ask <thread> [message]` follows up a side thread with its anchor, or without a message asks its unanswered question again; `orientation` messages the orientation, and a view's build thread takes a change to the view.
 disable-model-invocation: true
 argument-hint: "<thread> [message]"
 ---

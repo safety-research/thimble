@@ -1,13 +1,10 @@
 // @vitest-environment jsdom
-// The model line at a composer's foot (src/chat/ModelLine.tsx): on the Start card the orientation's model is a menu of
-// the models the settings name and the current ones, as a role's is, and a pick is handed to the card's owner to save;
-// the card has one form, which also offers Ultracode, the critique and the permission mode (the orientation runs as a
-// background session that takes them all). Fast mode's bolt names itself in the
-// shared tooltip on hover and on keyboard focus, wherever it is drawn. Every request is answered by a stand-in fetch.
+// The model line at a composer's foot (src/chat/ModelLine.tsx): fast mode's bolt names itself in the shared tooltip on
+// hover and on keyboard focus, wherever it is drawn, and a line of one of thimble's agents, which runs with no fast mode
+// of its own, has none. The Start card's line is start-gate.test.tsx's.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { FastBolt, fastTip, noFastTip } from '../../src/chat/ModelLine.tsx'
-import { StartGate } from '../../src/chat/StartGate.tsx'
+import { FastBolt, ModelLine, fastTip, noFastTip } from '../../src/chat/ModelLine.tsx'
 import { TIP_DELAY_MS } from '../../src/components/Tooltip.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -39,43 +36,20 @@ const hover = async (el: Element) => {
   vi.useRealTimers()
 }
 
-describe("the Start card's model", () => {
-  test('is a menu of the models the settings name and the current ones, and a pick is handed on to be saved', async () => {
-    const picked: string[] = []
-    const el = await mount(<StartGate ws="mini" model="claude-opus-5-5" onModel={(m) => picked.push(m)} fast={true} onFast={() => {}} />)
-    await settle()
-    const trigger = el.querySelector<HTMLButtonElement>('button[aria-label="Model for the orientation"]')!
-    expect(trigger.textContent).toBe('Opus 5.5')
-    expect(el.querySelector('.model-line-model')).toBeNull()
-    await click(trigger)
-    const items = [...document.querySelectorAll<HTMLButtonElement>('.menu-item')]
-    const notes = items.map((b) => b.querySelector('.menu-item-note')?.textContent)
-    expect(notes.slice(0, 2)).toEqual(['claude-opus-5-5', 'claude-custom-9'])
-    expect(notes).toContain('claude-haiku-4-5-20251001')
-    expect(items.find((b) => b.classList.contains('checked'))?.querySelector('.menu-item-label')?.textContent).toBe('Opus 5.5')
-    await click(items.find((b) => b.textContent?.includes('claude-haiku-4-5-20251001'))!)
-    expect(picked).toEqual(['claude-haiku-4-5-20251001'])
-  })
-
-  test('sits beside an effort menu with Ultracode, and the options offer the critique and the permission mode', async () => {
-    const el = await mount(<StartGate ws="mini" model="claude-opus-5-5" onModel={() => {}} fast={false} onFast={() => {}} />)
-    await settle()
-    await click(el.querySelector<HTMLButtonElement>('button[aria-label="Effort for the orientation"]')!)
-    expect([...document.querySelectorAll('.menu-item')].some((b) => /ultracode/i.test(b.textContent ?? ''))).toBe(true)
-    await click(el.querySelector<HTMLButtonElement>('.chat-gate-options-toggle')!)
-    expect(el.querySelector('.chat-gate-row[data-pass="critique"]')).not.toBeNull()
-    expect(el.querySelector('.chat-gate-perms')).not.toBeNull()
-  })
-})
-
 describe("fast mode's bolt", () => {
-  test('names fast mode and its state in the tooltip on the Start card, on hover and on keyboard focus', async () => {
-    const el = await mount(<StartGate ws="mini" model="claude-opus-5-5" onModel={() => {}} fast={false} onFast={() => {}} />)
+  test("names fast mode and its state in the tooltip on main's line, on hover and on keyboard focus", async () => {
+    const el = await mount(<ModelLine model="claude-opus-5-5" effort="high" fast={false} onFast={() => {}} label="main" />)
     const bolt = el.querySelector<HTMLButtonElement>('.fast-bolt')!
-    expect(bolt.getAttribute('aria-label')).toBe('Fast mode for the orientation')
+    expect(bolt.getAttribute('aria-label')).toBe('Fast mode for main')
     await hover(bolt)
     expect(tip()).toBe('Fast mode: off')
     expect(bolt.getAttribute('aria-describedby')).toBe(document.querySelector('.tip')!.id)
+  })
+
+  test("is not drawn on the line of one of thimble's agents, which has no fast mode of its own", async () => {
+    const el = await mount(<ModelLine model="claude-opus-5-5" effort="high" noFast label="the orientation" />)
+    expect(el.querySelector('.fast-bolt')).toBeNull()
+    expect(el.querySelector('button[aria-label="Effort for the orientation"]')).not.toBeNull()
   })
 
   test('says why where it cannot be switched, and shows on keyboard focus too', async () => {

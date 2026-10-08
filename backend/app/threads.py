@@ -1,14 +1,16 @@
 """Side threads as forks of the analyst's Claude Code session.
 
 A thread starts in the browser from a ⌘-click or ⌘-drag (agents.new_thread); its meta keeps the anchor (ref, visible
-text, surface, selector, and a PNG under `anchors/`). Each message typed in it is a channel event of kind `thread`
+text, surface, selector, and a PNG under `anchors/`). Each message typed in it is a browser event of kind `thread`
 (`event`) naming the thread and its card group `thread:<id>`; the first one carries the anchor and what its refs
 hold.
-Main answers by forking with description `thread:<name>`, the thread's fork name (fork_name: its title as a slug, which
-the terminal shows); the mirror (session.py) matches the fork's transcript, copies
-its tool calls and its text into the thread's chat, with the messages the analyst typed to it in Claude Code's agent
-view and those main sent it for a question typed in the terminal, and calls fork_finished when it stops. The fork
-replies with `reply_in_thread` or its text.
+Main answers by forking with description and prompt `thread:<name>`, the thread's fork name (fork_name: its first
+question as a slug, which Claude Code's agent tray shows; in terminal mode thimble-term gives the call the question as its
+description, so the fork is known by its prompt, fork_ref; the event's line in main's terminal names the thread by its
+first question, line_name);
+the mirror (session.py) matches the fork's transcript, copies its tool calls and its text into the thread's chat, with
+the messages the analyst typed to it in Claude Code's agent view and those main sent it for a question typed in the
+terminal, and calls fork_finished when it stops. The fork replies with `reply_in_thread` or its text.
 
 A fork lives only as long as its session: after that, the next event forks anew and carries the earlier turns. A
 message typed while the first event waits for its fork is queued (`queued`) and sent once the fork is known (flush)."""
@@ -40,7 +42,7 @@ THREAD_REF_RE = re.compile(r"^thread:([A-Za-z0-9_-]{1,64})$")
 CHIP_KIND = "thread"
 CHIP_CHARS = 120
 FORK_NAME_KEY = "fork_name"  # on a thread's meta: the name its forks run under (fork_name)
-FORK_NAME_CHARS = 48
+FORK_NAME_CHARS = 24  # of a fork's name, which Claude Code's agent tray shows whole up to about 27 characters
 FORK_NAME_FALLBACK = "thread"
 RESERVED_NAMES = ("main", "team-lead", "user", "system")  # names Claude Code's Agent tool refuses for an agent
 WARM_S = 20.0  # the longest wait for the anchor's view refs to resolve before a thread's first event (warm)
@@ -72,6 +74,20 @@ def thread_of(description: Any) -> str | None:
     return m.group(1) if m else None
 
 
+def fork_ref(tool_input: Any) -> str | None:
+    """The `thread:<name>` an Agent call for a thread's fork carries: its description, else its prompt, else None. Main
+    writes `thread:<name>` as both (prompts/main.md); in terminal mode thimble-term gives the call the thread's
+    question as its description before it runs, so that Claude Code's agent tray and exit dialog name the thread by its
+    question (subagent_files.fork_ref)."""
+    if not isinstance(tool_input, dict):
+        return None
+    for key in ("description", "prompt"):
+        value = str(tool_input.get(key) or "")
+        if FORK_DESCRIPTION_RE.match(value):
+            return value.strip()
+    return None
+
+
 def slug(title: str) -> str:
     """A title as a fork name: its words in lower case joined by '-', cut at FORK_NAME_CHARS. Claude Code's Agent takes
     a name only in ASCII, so accents are dropped and words in other scripts left out."""
@@ -87,12 +103,17 @@ def slug(title: str) -> str:
     return f"{out}-{FORK_NAME_FALLBACK}" if out in RESERVED_NAMES or re.fullmatch(r"a[0-9a-f]{16}", out) else out
 
 
-def fork_name(c: str, meta: dict) -> str:
-    """The name the thread's next fork runs under: its title as a slug, with -2, -3 … when another thread's forks run
-    under that name, kept on the meta (FORK_NAME_KEY)."""
-    base = slug(str(meta.get("title") or ""))
+def fork_name(c: str, meta: dict, question: str = "") -> str:
+    """The name the thread's next fork runs under, which Claude Code's agent tray and exit dialog show: the name it has
+    (FORK_NAME_KEY), else its first question as a slug (`question` when its log holds none yet), else its title as one,
+    with -2, -3 … when another thread's forks run under that name, kept on the meta."""
     taken = {str(m.get(FORK_NAME_KEY)) for m in agents.list_chats(c)
              if m.get("kind") == agents.KIND_THREAD and m.get("id") != meta.get("id") and m.get(FORK_NAME_KEY)}
+    kept = str(meta.get(FORK_NAME_KEY) or "")
+    if kept and kept not in taken:
+        return kept
+    first = first_question(c, str(meta.get("id") or "")) or " ".join(str(question or "").split())
+    base = slug(first) if first and slug(first) != FORK_NAME_FALLBACK else slug(str(meta.get("title") or ""))
     name, n = base, 2
     while name in taken:
         name, n = f"{base}-{n}", n + 1
@@ -110,6 +131,16 @@ def by_fork_name(c: str, name: str) -> str | None:
         if m.get("kind") == agents.KIND_THREAD and str(m.get(FORK_NAME_KEY) or "").lower() == low:
             return str(m["id"])
     return None
+
+
+def first_question(c: str, thread_id: str) -> str:
+    """The thread's first question on one line, '' while its log holds none (or for no thread)."""
+    if not thread_id or agents.meta_or_none(c, thread_id) is None:
+        return ""
+    for r in agents.read_events(agents.paths(c, thread_id)[1]):
+        if r.get("type") == "user" and str(r.get("text") or "").strip():
+            return " ".join(str(r["text"]).split())
+    return ""
 
 
 def is_thread(c: str, chat_id: str | None) -> bool:
@@ -253,7 +284,7 @@ def _session_id(c: str) -> str | None:
 
 
 def event(c: str, payload: dict[str, Any], event_id: str) -> tuple[str, dict[str, Any], str] | None:
-    """channel.post's builder for kind `thread`: (body, attributes, thread id), or None when the message waits for the
+    """events.post's builder for kind `thread`: (body, attributes, thread id), or None when the message waits for the
     thread's fork (module note). The question is logged in the thread's chat and the thread is marked running until its
     fork stops."""
     thread_id = str(payload.get("thread") or "").strip()
@@ -269,9 +300,11 @@ def event(c: str, payload: dict[str, Any], event_id: str) -> tuple[str, dict[str
     waits = awaiting_fork(c, thread_id)
     agents.set_running(c, thread_id, True)
     if waits:
-        queued = [*(meta.get(QUEUED_KEY) or []), {"text": text, "event": event_id, "ts": _now()}]
-        agents.update_agent(c, thread_id, **{QUEUED_KEY: queued})
-        log.info("%s: thread %s: a message waits for its fork (%d queued)", c, thread_id, len(queued))
+        entry = {"text": text, "event": event_id, "ts": _now()}
+        # appended to the list as the meta holds it now, under its lock (agents.change_meta)
+        meta = agents.change_meta(c, thread_id, lambda m: m.update({QUEUED_KEY: [*(m.get(QUEUED_KEY) or []), entry]}))
+        agents._notify(c, thread_id)
+        log.info("%s: thread %s: a message waits for its fork (%d queued)", c, thread_id, len(meta[QUEUED_KEY]))
         return None
     return build(c, thread_id, [text])
 
@@ -296,12 +329,33 @@ def build(c: str, thread_id: str, questions: list[str]) -> tuple[str, dict[str, 
         ]
         _awaiting[(c, thread_id)] = _session_id(c)
     fields: dict[str, Any] = {"thread": thread_id, "group": group,
-                              "name": (fork.get("agent_id") and meta.get(FORK_NAME_KEY)) or fork_name(c, meta)}
+                              "name": (fork.get("agent_id") and meta.get(FORK_NAME_KEY))
+                              or fork_name(c, meta, questions[0] if questions else "")}
     if fork.get("agent_id"):
         fields["agent"] = fork["agent_id"]
     log.info("%s: thread %s asks %s (%d question%s)", c, thread_id, f"its fork {fork['agent_id']}" if fork.get("agent_id")
              else "main to fork", len(questions), "" if len(questions) == 1 else "s")
     return cite.canon_text("\n".join(ln for ln in lines if ln)), fields, thread_id
+
+
+LINE_NAME_CHARS = 40  # of the first question that names a thread in main's terminal (line_name)
+
+
+def line_name(c: str, thread_id: str, questions: list[str]) -> str:
+    """What names the thread in its event's line in main's terminal (events.terminal_line): its first question in
+    quotation marks, cut at LINE_NAME_CHARS; '' when the questions asked are its first, which the line shows whole
+    (`› new thread: …`). Never the fork's name, which is a slug."""
+    records = agents.read_events(agents.paths(c, thread_id)[1])
+    first = next((" ".join(str(r.get("text") or "").split()) for r in records
+                  if r.get("type") == "user" and str(r.get("text") or "").strip()), "")
+    asked = " ".join(" ".join(questions).split())
+    if not first or asked.startswith(first):
+        return ""
+    if len(first) > LINE_NAME_CHARS:
+        cut = first[: LINE_NAME_CHARS - 1]
+        word = cut.rsplit(" ", 1)[0]
+        first = (word if len(word) > LINE_NAME_CHARS // 2 else cut).rstrip(" ,;:.") + "…"
+    return f'"{first}"'
 
 
 def earlier(c: str, thread_id: str, asking: int = 1) -> str:
@@ -332,17 +386,26 @@ def awaiting_fork(c: str, thread_id: str) -> bool:
 def flush(c: str, thread_id: str) -> bool:
     """Send the messages queued while the thread waited for its fork, to the fork when it is known, else to main to
     fork anew; False when none wait or no session listens (they stay queued, and ask_again sends them)."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     meta = agents.meta_or_none(c, thread_id)
-    queued = [q for q in (meta or {}).get(QUEUED_KEY) or [] if isinstance(q, dict) and str(q.get("text") or "").strip()]
-    if not queued or not channel.reachable(c):
+    if not (meta or {}).get(QUEUED_KEY) or not events.reachable(c):
         return False
-    agents.update_agent(c, thread_id, **{QUEUED_KEY: []})
+    taken: list[Any] = []
+
+    def take(m: dict) -> None:  # the list as the meta holds it now, emptied under its lock (agents.change_meta)
+        taken.extend(m.get(QUEUED_KEY) or [])
+        m[QUEUED_KEY] = []
+
+    agents.change_meta(c, thread_id, take)
+    agents._notify(c, thread_id)
+    queued = [q for q in taken if isinstance(q, dict) and str(q.get("text") or "").strip()]
+    if not queued:
+        return False
     questions = [str(q["text"]) for q in queued]
     body, fields, _ = build(c, thread_id, questions)
-    channel.send(c, channel.THREAD, body, fields, thread=thread_id,
-                 line=channel.terminal_line(channel.THREAD, " ".join(questions), fields))
+    events.send(c, events.THREAD, body, fields, thread=thread_id,
+                 line=events.terminal_line(events.THREAD, " ".join(questions), {"name": line_name(c, thread_id, questions)}))
     agents.set_running(c, thread_id, True)
     return True
 
@@ -363,9 +426,9 @@ def unanswered(c: str, thread_id: str) -> list[str]:
 def ask_again(c: str, thread_id: str, *, hand: bool = False) -> dict[str, Any]:
     """Send the thread's unanswered questions to the session again, with no new line in the thread (the `again`
     record marks it for the export); with `hand`, the event is returned as `text` for a tool's result instead
-    (channel.hand). 400 for a chat that is no thread or has no question, 409 when the thread is working or no session
+    (events.hand). 400 for a chat that is no thread or has no question, 409 when the thread is working or no session
     listens."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     meta = agents.read_meta(c, thread_id)
     if meta.get("kind") != agents.KIND_THREAD:
@@ -375,16 +438,16 @@ def ask_again(c: str, thread_id: str, *, hand: bool = False) -> dict[str, Any]:
     questions = unanswered(c, thread_id)
     if not questions:
         raise HTTPException(400, "the thread has no question to ask again")
-    if not channel.reachable(c):
-        raise HTTPException(409, channel.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
+    if not events.reachable(c):
+        raise HTTPException(409, events.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     agents.update_agent(c, thread_id, **{QUEUED_KEY: []})
     body, fields, _ = build(c, thread_id, questions)
     if hand:
         event_id = secrets.token_hex(4)
-        out = {"text": channel.hand(c, event_id, body, fields, thread=thread_id)}
+        out = {"text": events.hand(c, event_id, body, fields, thread=thread_id)}
     else:
-        posted = channel.send(c, channel.THREAD, body, fields, thread=thread_id,
-                              line=channel.terminal_line(channel.THREAD, " ".join(questions), fields))
+        posted = events.send(c, events.THREAD, body, fields, thread=thread_id,
+                              line=events.terminal_line(events.THREAD, " ".join(questions), {"name": line_name(c, thread_id, questions)}))
         event_id, out = posted["id"], {}
     _, log_path = agents.paths(c, thread_id)
     agents.append(log_path, {"type": "again", "ts": _now(), "event": event_id, "questions": len(questions)})
@@ -431,6 +494,15 @@ def fork_started(c: str, thread_id: str, *, agent_id: str | None = None, tool_us
         flush(c, thread_id)
 
 
+def settled(c: str, thread_id: str) -> bool:
+    """Whether the thread's last question has an answer or an end after it (a reply, `done`, or an error that says why
+    its run stopped), or it has no question."""
+    records = agents.read_events(agents.paths(c, thread_id)[1])
+    last_user = max((i for i, r in enumerate(records) if r.get("type") == "user"), default=-1)
+    return last_user < 0 or any(r.get("type") in ("done", "error") or (r.get("type") == "text" and r.get("reply"))
+                                for r in records[last_user + 1:])
+
+
 def replied_since_question(c: str, thread_id: str) -> bool:
     """Whether a reply follows the analyst's last question in the thread's chat."""
     _, log_path = agents.paths(c, thread_id)
@@ -449,16 +521,31 @@ def _stop(c: str, thread_id: str, kind: str, detail: str | None = None) -> None:
     log.info("%s: thread %s stopped (%s)", c, thread_id, kind)
 
 
-def fork_finished(c: str, thread_id: str, status: str = "done", *, kind: str | None = None) -> None:
+def fork_finished(c: str, thread_id: str, status: str = "done", *, kind: str | None = None,
+                  tool_use_id: str | None = None, agent_id: str | None = None, refused: bool = False) -> None:
     """The fork stopped: the thread stops running, the run ends in its chat with `done` or why it did not finish, and a
-    run
-    with no reply leaves a chip in main pointing at the anchor. Waiting messages go to the fork now."""
-    from . import bg_session  # noqa: PLC0415 — bg_session imports session, which imports this module
+    run with no reply leaves a chip in main pointing at the anchor. Waiting messages go to the fork now.
+
+    The end of an Agent call that never ran (`refused`: a hook denied it, such as fork_check's second fork of a thread)
+    or that is not the thread's fork (its `tool_use_id` and `agent_id` are not those the meta's fork records) changes
+    nothing: the thread's own fork answers it. A failure after the thread replied to its last question leaves the
+    answer as it is."""
+    from . import subagents  # noqa: PLC0415 — subagents imports session, which imports this module
 
     meta = agents.meta_or_none(c, thread_id)
+    fork = (meta or {}).get("fork") or {}
+    if refused:
+        log.info("%s: thread %s: an Agent call that did not run (%s) leaves the thread as it is", c, thread_id,
+                 tool_use_id or "?")
+        return
+    if (tool_use_id and fork.get("tool_use_id") and fork["tool_use_id"] != tool_use_id
+            and not (agent_id and fork.get("agent_id") == agent_id)):
+        log.info("%s: thread %s: the end of call %s, which is not its fork's (%s), leaves the thread as it is", c,
+                 thread_id, tool_use_id, fork["tool_use_id"])
+        return
     agents.set_running(c, thread_id, False)
     _awaiting.pop((c, thread_id), None)
-    bg_session.fork_ended(c, thread_id)
+    subagents.fork_ended(c, thread_id)
     if meta is None:
         return
     _, log_path = agents.paths(c, thread_id)
@@ -476,6 +563,10 @@ def fork_finished(c: str, thread_id: str, status: str = "done", *, kind: str | N
         log.info("%s: thread %s: its fork was cut after its reply (%s)", c, thread_id, kind)
     elif kind:
         _stop(c, thread_id, kind)
+    elif replied_since_question(c, thread_id):
+        # the fork answered and then failed: the answer stands, and the run ends as done
+        agents.append(log_path, {"type": "done", "ts": _now(), "result": None})
+        log.info("%s: thread %s: its fork ended %s after its reply", c, thread_id, status)
     else:
         agents.append(log_path, {"type": "error", "ts": _now(), "message": status, "kind": status})
         log.info("%s: thread %s: its fork ended %s", c, thread_id, status)
@@ -544,6 +635,12 @@ def session_ended(c: str, sid: str) -> None:
             agents.update_agent(c, tid, fork=fork)
         if (c, tid) in _awaiting and _awaiting[(c, tid)] in (sid, None):
             _awaiting.pop((c, tid), None)
+        if fork.get("session") == sid:
+            # its fork is gone, so a new Agent call may fork it again at once, also when --continue resumes the session
+            # under the same id (fork_check)
+            from . import subagents  # noqa: PLC0415 — subagents imports session, which imports this module
+
+            subagents.fork_ended(c, tid)
         if agents.running(c, tid):
             agents.set_running(c, tid, False)
             if meta.get(QUEUED_KEY):
@@ -551,14 +648,150 @@ def session_ended(c: str, sid: str) -> None:
             if not replied_since_question(c, tid):
                 _stop(c, tid, SESSION_ENDED)
             agents.notify(c, tid)
+        elif (fork.get("session") in (None, sid) or fork.get("ended")) and not settled(c, tid):
+            # a question that no fork of this session answered or ended (terminal mode, where each pass of the mirror
+            # runs in its own process and none holds the thread's running mark): it stops and says so, as above
+            if meta.get(QUEUED_KEY):
+                agents.update_agent(c, tid, **{QUEUED_KEY: []})
+            _stop(c, tid, SESSION_ENDED)
+            agents.notify(c, tid)
 
 
-def reply(c: str, thread_id: str, text: str, *, by: str) -> None:
+POSTED_KEY = "posted"  # on a reply record: the words the fork posted with `reply_in_thread` (latest_answer)
+
+
+def reply(c: str, thread_id: str, text: str, *, by: str, posted: bool = False) -> None:
     """The thread's visible reply: a `text` record marked `reply`, so the fold shows it as the model's message and
-    fork_finished knows the run answered."""
+    fork_finished knows the run answered. Every reply is this one record, its citations in their chat form
+    (cite.from_links), so the browser and the terminal check them as they check any answer's; `posted` marks one
+    `reply_in_thread` wrote, which is the thread's answer when the fork also wrote other text (latest_answer)."""
     _, log_path = agents.paths(c, thread_id)
-    agents.append(log_path, {"type": "text", "delta": cite.from_links(text), "reply": True, "by": by})
+    agents.append(log_path, {"type": "text", "delta": cite.from_links(text), "reply": True, "by": by,
+                             **({POSTED_KEY: True} if posted else {})})
     agents.notify(c, thread_id)
+
+
+# --------------------------------------------------------------------------- hand back to main
+
+HANDED_KEY = "handed_answer"  # on a thread's meta: the log index of the answer the analyst handed back to main
+HAND_BACK_KEY = "hand_back"  # on a thread's meta as the chat and state routes give it (hand_back_state)
+OFFER, HANDED = "offer", "handed"
+HAND_BACK_QUESTION_CHARS = 300  # of the question the message to main names
+
+
+def latest_answer(records: list[dict[str, Any]]) -> tuple[int, str, str] | None:
+    """The answer to the thread's latest question once its run ended (a `done` record): (the log index of its last
+    reply, the question on one line, the answer's words), or None while it runs, before any question, or when its run
+    ended without a reply. Its words are what the fork posted with `reply_in_thread` (each post, in order), else its last
+    reply: the fork's last text, or its closing `↳` note (session._note_reply)."""
+    question, replies, ended = "", [], False
+    for i, r in enumerate(records):
+        kind = r.get("type")
+        if kind == "user":
+            question, replies, ended = str(r.get("text") or ""), [], False
+        elif kind == "again":  # the question asked again: a new run answers it
+            replies, ended = [], False
+        elif kind == "text" and r.get("reply") and str(r.get("delta") or "").strip():
+            replies.append((i, r))
+        elif kind == "done":
+            ended = True
+    if not replies or not ended:
+        return None
+    posted = [str(r.get("delta") or "").strip() for _, r in replies if r.get(POSTED_KEY)]
+    words = "\n\n".join(posted) if posted else str(replies[-1][1].get("delta") or "").strip()
+    return replies[-1][0], " ".join(question.split()), words
+
+
+def hand_back_state(c: str, meta: dict[str, Any], records: list[dict[str, Any]] | None = None) -> str:
+    """Whether the analyst can hand the thread's answer back to main: `offer` once its latest question has an answer and
+    its run ended, `handed` once they handed that answer back (HANDED_KEY), '' while it runs or has no answer. A later
+    question's answer is offered again."""
+    tid = str(meta.get("id") or "")
+    if meta.get("kind") != agents.KIND_THREAD or not tid or agents.running(c, tid):
+        return ""
+    if records is None:
+        records = agents.read_events(agents.paths(c, tid)[1])
+    got = latest_answer(records)
+    if got is None:
+        return ""
+    return HANDED if meta.get(HANDED_KEY) == got[0] else OFFER
+
+
+def hand_back_text(question: str, answer: str) -> str:
+    """The message to main that hands a thread's answer back, in the analyst's name: `From thread "<question>":
+    <answer>`, the answer with its citations as the thread holds them."""
+    q = question if len(question) <= HAND_BACK_QUESTION_CHARS else question[: HAND_BACK_QUESTION_CHARS - 1].rstrip() + "…"
+    return f'From thread "{q}": {answer}'
+
+
+def hand_back(c: str, thread_id: str) -> dict[str, Any]:
+    """Hand the thread's latest answer back to main: a `main` event in the analyst's name, which main's chat shows as
+    their message (events.post) and main answers as any message; the answer is then `handed` (hand_back_state). 400 for
+    a chat that is no thread or a thread with no answer, 409 while it runs, when that answer was handed back already, or
+    when no session listens."""
+    from . import events, ledger  # noqa: PLC0415
+
+    meta_path, log_path = agents.paths(c, thread_id)
+    with ledger.locked(meta_path):
+        meta = agents.read_meta(c, thread_id)
+        if meta.get("kind") != agents.KIND_THREAD:
+            raise HTTPException(400, f"{thread_id} is not a thread")
+        if agents.running(c, thread_id):
+            raise HTTPException(409, "the thread is still answering; hand its answer back once it ends")
+        got = latest_answer(agents.read_events(log_path))
+        if got is None:
+            raise HTTPException(400, "the thread has no answer to hand back")
+        index, question, words = got
+        if meta.get(HANDED_KEY) == index:
+            raise HTTPException(409, "this answer was handed back to main already")
+        text = hand_back_text(question or str(meta.get("title") or thread_id), words)
+        posted = events.post(c, events.MAIN, {"text": text})
+        agents.update_agent(c, thread_id, **{HANDED_KEY: index})
+    log.info("%s: thread %s: its answer was handed back to main (event %s)", c, thread_id, posted.get("id"))
+    return {"thread": thread_id, "event": posted.get("id"), "text": text, HAND_BACK_KEY: HANDED}
+
+
+SEEN_KEY = "seen"  # on a thread's meta: how many of its log's records the analyst had when they last opened it
+
+
+def _answers_after(records: list[dict[str, Any]], start: int) -> bool:
+    """Whether a question's answer came at or after record `start`: each question (a `user` record and the records after
+    it) answers once, at its first reply or `done` record, as local.answered counts them. A `done` record after a reply
+    the analyst saw is the same answer, not a new one (live check term-fix9, low quirk: a thread answered while its panel
+    showed it read `new` again after a relaunch, its fork's `done` coming after the reply)."""
+    got = False
+    for i, r in enumerate(records):
+        kind = r.get("type")
+        if kind == "user":
+            got = False
+        elif not got and (kind == "done" or (kind == "text" and r.get("reply"))):
+            got = True
+            if i >= start:
+                return True
+    return False
+
+
+def unread(c: str, meta: dict[str, Any]) -> bool:
+    """Whether the thread has an answer (a reply or a finished run) the analyst has not opened since it came: one in
+    its log after the records SEEN_KEY counts. A thread never opened counts from its start. Kept on the meta, so it
+    holds across a restart and in both modes."""
+    try:
+        records = agents.read_events(agents.paths(c, str(meta["id"]))[1])
+    except Exception:  # noqa: BLE001 — a thread that cannot be read shows nothing new
+        return False
+    seen = meta.get(SEEN_KEY)
+    return _answers_after(records, seen if isinstance(seen, int) and not isinstance(seen, bool) else 0)
+
+
+def mark_seen(c: str, thread_id: str) -> int:
+    """The analyst opened the thread: every record its log holds now is seen (SEEN_KEY). Returns that count; 404 for a
+    chat that does not exist, 400 for one that is no thread."""
+    meta = agents.read_meta(c, thread_id)
+    if meta.get("kind") != agents.KIND_THREAD:
+        raise HTTPException(400, f"{thread_id} is not a thread")
+    n = len(agents.read_events(agents.paths(c, thread_id)[1]))
+    agents.update_agent(c, thread_id, **{SEEN_KEY: n})
+    return n
 
 
 # --------------------------------------------------------------------------- tools
@@ -579,7 +812,7 @@ async def tool_reply_in_thread(ctx: Any, args: dict[str, Any]) -> Any:
     if not is_thread(ctx.c, thread_id):
         threads = [m["id"] for m in agents.list_chats(ctx.c) if m.get("kind") == agents.KIND_THREAD]
         return tools.err(f"reply_in_thread: no thread {thread_id!r}; the threads are {', '.join(threads) or '(none)'}")
-    reply(ctx.c, thread_id, text, by=ctx.cell_author)
+    reply(ctx.c, thread_id, text, by=ctx.cell_author, posted=True)
     return tools.ok(f"replied in thread {thread_id}")
 
 
@@ -588,12 +821,27 @@ LISTED_ROLES = ("orient", "writer", "check", "dev", agents.STEP_ROLE)
 _TICKET_PREFIX_RE = re.compile(r"^ticket #\d+:\s*", re.I)
 
 
-def _names(meta: dict) -> set[str]:
+def view_names(chats: list[dict]) -> dict[str, str]:
+    """The thread tree's names of a view's builds and reviews, by chat id, as the browser's tree gives them
+    (frontend chat/threads.ts): the first build `<view>`, its first review `<view>-review`, each later one the next
+    number (`<view>-2`, `<view>-review-2`), so no two share a name (live check L25)."""
+    out: dict[str, str] = {}
+    seen: dict[str, int] = {}
+    for m in sorted((m for m in chats if m.get("role") == "dev" and m.get("view")),
+                    key=lambda m: str(m.get("created_at") or "")):
+        base = f"{m['view']}-review" if m.get("review") else str(m["view"])
+        seen[base] = seen.get(base, 0) + 1
+        out[str(m["id"])] = base if seen[base] == 1 else f"{base}-{seen[base]}"
+    return out
+
+
+def _names(meta: dict, views: dict[str, str] | None = None) -> set[str]:
     """What names a chat in the thread tree, lower case: its title, the analyst's name for it, a ticket's slug as
-    the tree shows it (group-board-by-round), a view build's view, and a thread's fork name."""
+    the tree shows it (group-board-by-round), a view build's or review's tree name (view_names), and a thread's fork
+    name."""
     title = str(meta.get("title") or "")
     words = re.findall(r"[^\W_]+", _TICKET_PREFIX_RE.sub("", title))
-    view = str(meta.get("view") or "") if meta.get("role") == "dev" else ""
+    view = (views or {}).get(str(meta.get("id"))) or (str(meta.get("view") or "") if meta.get("role") == "dev" else "")
     return {n.lower() for n in (title, str(meta.get("name") or ""), "-".join(words[:4]), view,
                                 str(meta.get(FORK_NAME_KEY) or "")) if n.strip()}
 
@@ -609,7 +857,8 @@ def find_threads(c: str, name: str) -> list[dict]:
     if by_id or not q:
         return by_id
     low = q.lower()
-    return [m for m in listed if any(low == n or low.endswith(f"/{n}") for n in _names(m))]
+    names = view_names(listed)
+    return [m for m in listed if any(low == n or low.endswith(f"/{n}") for n in _names(m, names))]
 
 
 def _one_thread(c: str, tool: str, name: str) -> tuple[dict | None, str]:
@@ -675,10 +924,11 @@ def _ask_target(c: str, name: str) -> tuple[dict | None, str]:
 async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
     """The `message_thread` tool (the /thimble:ask command): a message typed in the terminal goes where the thread's
     composer in the browser would send it (the frontend's threads.composerTarget). A side thread logs it and hands main
-    its `thread` event in the result, so main answers in the same turn (channel.hand), and with no message asks its
-    unanswered questions again (ask_again); the latest orientation takes it as a follow-up (orient_session.message);
+    its `thread` event in the result, so main answers in the same turn (events.hand), and with no message asks its
+    unanswered questions again (ask_again); the latest orientation takes it as main's follow-up, the exact SendMessage
+    message_orientation gives (orient_session.tool_message_orientation);
     a view's build thread takes it as a change to the view (views.message). Any other chat's messages go to main."""
-    from . import channel, orient_session, orientation, tools, views  # noqa: PLC0415
+    from . import events, orient_session, orientation, tools, views  # noqa: PLC0415
 
     text = str(args.get("message") or "").strip()
     meta, why = _ask_target(ctx.c, str(args.get("thread") or ""))
@@ -690,28 +940,30 @@ async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
             if not text:
                 again = ask_again(ctx.c, tid, hand=True)
                 return tools.ok(tools.hint("message_thread-again", thread=name, event=again["text"]))
-            if not channel.reachable(ctx.c):
-                return tools.err(f"message_thread: {channel.NOT_LISTENING.format(cwd=config.corpus_dir(ctx.c))}")
+            if not events.reachable(ctx.c):
+                return tools.err(f"message_thread: {events.NOT_LISTENING.format(cwd=config.corpus_dir(ctx.c))}")
             event_id = secrets.token_hex(4)
             built = event(ctx.c, {"thread": tid, "text": text, "by": agents.TERMINAL}, event_id)
             if built is None:
                 return tools.ok(tools.hint("message_thread-queued", thread=name))
             body, fields, _ = built
             return tools.ok(tools.hint("message_thread-event", thread=name,
-                                       event=channel.hand(ctx.c, event_id, body, fields, thread=tid)))
+                                       event=events.hand(ctx.c, event_id, body, fields, thread=tid)))
         if not text:
             return tools.err(tools.hint("message_thread-empty", thread=name))
         latest = (((orientation.read_run(ctx.c) or {}).get("chats") or {}).get(orientation.ROLE))
-        if meta.get("role") == orientation.ROLE and tid == latest:
-            res = await orient_session.message(ctx.c, text, orient_session.BROWSER)
-            return tools.ok(tools.hint("message_orientation-queued" if res["status"] == "queued" else "message_orientation-started"))
+        if meta.get("role") == orientation.ROLE and tid == latest:  # main's follow-up: its exact SendMessage
+            return await orient_session.tool_message_orientation(ctx, {"message": text})
         if meta.get("role") == "dev" and meta.get("view"):
+            # a change typed in the terminal: main's exact Agent call starts its builder, as file_dev_ticket's does, so
+            # auto mode judges the start (a browser message is the analyst's click, views.message_route)
             views._bind_loop()
-            views.message(ctx.c, str(meta["view"]), text)
-            return tools.ok(tools.hint("message_thread-view", thread=name))
+            slug = str(meta["view"])
+            views.message(ctx.c, slug, text, by=agents.TERMINAL, route=views.TYPED)
+            return await tools._typed_build(ctx, slug)
     except HTTPException as e:
         return tools.err(f"message_thread: {e.detail}")
-    except (orient_session.NoOrientation, orient_session.Gone, RuntimeError) as e:
+    except (orient_session.NoOrientation, RuntimeError) as e:
         return tools.err(f"message_thread: {e}")
     return tools.err(tools.hint("message_thread-main", thread=name))
 

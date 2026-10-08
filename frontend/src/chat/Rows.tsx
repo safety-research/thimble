@@ -5,6 +5,7 @@
 // lines. Other runs of one kind of call are one card (Cards · 2 steps · 31s). Everything else is a quiet note with the
 // chips of what it points at. Label runs in a row are one Label card, a step per label.
 import { createContext, useContext, useEffect, useRef, useState, type DragEvent } from 'react'
+import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { CodeText } from '../components/Code'
 import { Icon } from '../components/Icon'
@@ -29,6 +30,7 @@ import { AgentCard, OrientLanding, openLabel } from './AgentCard'
 import { ApiErrorCard } from './ApiError'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
+import { autoModeRefusal } from './permissions'
 
 /** The working mark while a reply streams and no tool is pending: the spinner, the one thing that loops. */
 export function Working() {
@@ -143,6 +145,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             return (
               <div key={r.index} className="chat-msg chat-user" data-event={r.event}>
                 {r.by === 'main' && <Note className="chat-origin" text="From" chips={<ThreadChip id="main" />} />}
+                {byLabel(r.by, chat, r.tray) && <Note className="chat-origin chat-by" data-by={r.by} text={byLabel(r.by, chat, r.tray)!} />}
                 <UserMessage className="chat-message" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined} data-by={r.by}>
                   <RefText text={stripHarness(r.text)} workspace={ws} />
                 </UserMessage>
@@ -171,7 +174,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             if (r.role === 'orient' && (r.run ?? 0) > 0) return <AgentCard key={r.index} ws={ws} chat={r.chat} role="orient" title="Orientation" ts={r.ts} run={r.run} />
             if (r.role === 'orient') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Orientation started in" chips={<ThreadChip id={r.chat} />} />
             if (r.role === 'writer') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Writing started in" chips={<ThreadChip id={r.chat} />} />
-            if (r.role === 'dev') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Dev ticket started" chips={<ThreadChip id={r.chat} />} />
+            if (r.role === 'dev') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text={devStarted(r)} chips={<ThreadChip id={r.chat} />} />
             return <AgentCard key={r.index} ws={ws} chat={r.chat} role={r.role} title={r.title} ts={r.ts} />
           case 'branch':
             return (
@@ -205,6 +208,23 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
+
+/** Main's note for a dev chat that started: a view's build (`view`, on the backend's agent row), else a code ticket.
+ * Pure. */
+export function devStarted(r: { view?: string; title?: string | null }): string {
+  // the agent row's `view`; a row an earlier build wrote names a view build only by its title
+  return r.view || (r.title ?? '').startsWith('view: ') ? 'View build started in' : 'Dev ticket started'
+}
+
+/** Where a message to one of thimble's agents came from, in its thread: typed in Claude Code's agent tray (`terminal`
+ * with `tray`, the record's origin `human`) or sent from thimble's browser (`browser`); none for a prompt main's call
+ * sent (`terminal` alone), and none in main, whose own messages are the analyst's. Pure. */
+export function byLabel(by: string | undefined, chat: string | undefined, tray?: boolean): string | null {
+  if (!chat || chat === 'main') return null
+  if (by === 'terminal') return tray ? 'typed in the agent tray' : null
+  if (by === 'browser') return 'sent from thimble'
+  return null
+}
 
 // the input fields that hold code, each with the language it is coloured in (components/Code.tsx): a card's code runs
 // in the Python kernel, a command in the shell
@@ -286,6 +306,7 @@ function CallBody({ tool, ws, summary, stored = null, callRef: ref = null, focus
   const whole = ref && stored?.state === 'ok' ? stored : null
   const loading = !!ref && (stored == null || stored.state === 'loading')
   if (!rows.length && !result && !ref) return null
+  const refused = failed || whole?.failed ? autoModeRefusal(whole?.text || result) : null
   const fields = rows.length > 0 && (
     <div className="chat-tool-fields">
       {rows.map((r, i) => (
@@ -304,8 +325,9 @@ function CallBody({ tool, ws, summary, stored = null, callRef: ref = null, focus
       ))}
     </div>
   )
-  const output =
-    whole && ref ? (
+  const output = refused ? (
+    <div className="chat-tool-result chat-tool-refused">{refused}</div>
+  ) : whole && ref ? (
       running && !whole.text ? null : <CallOutput text={whole.text} callRef={ref} failed={whole.failed || failed} focus={focus} />
     ) : loading ? (
       <div className="chat-call-loading">
@@ -626,14 +648,15 @@ function CallOutput({ text, callRef: ref, failed, focus }: { text: string; callR
   )
 }
 
-/** A dev ticket's end in main, in a few words: applied, stopped, or failed (a change to a view that failed puts the view
- * back as it was); the thread its chip opens has the reason. Other chips keep their text. Pure. */
+/** A dev ticket's end in main, in a few words: applied, stopped, or failed (a change to a view that failed, or that the
+ * analyst's quit stopped, puts the view back as it was); the thread its chip opens has the reason. Other chips keep their
+ * text. Pure. */
 export function ticketChipText(item: Pick<ChipRowT, 'status' | 'text' | 'ref'>): string {
   switch (item.status) {
     case 'applied':
       return 'Dev ticket applied'
     case 'stopped':
-      return 'Dev ticket stopped'
+      return item.ref?.startsWith('view:') ? 'The change to the view stopped when your Claude Code session ended, so it is as it was' : 'Dev ticket stopped'
     case 'failed':
     case 'needs manual merge':
     case 'rolled back':
@@ -648,8 +671,52 @@ export function ticketChipText(item: Pick<ChipRowT, 'status' | 'text' | 'ref'>):
  * card. A chip that names a thread is a note with the thread's chip; one that points at a surface is a chip that goes
  * there (SurfaceChips), with a spinner while its work is in flight; anything else is a note.
  */
+/** The words of a follow-up that did not reach the orientation (orient_session.not_passed_on). */
+export const notPassedOn = (reason: string): string => `Your message was not passed on${reason ? `: ${reason.replace(/[.\s]+$/, '')}` : ''}.`
+
+/** Send again on a follow-up that was not passed on: the same message to the orientation, as a click. */
+function SendAgain({ ws, text }: { ws: string; text: string }) {
+  const [busy, setBusy] = useState(false)
+  const [sent, setSent] = useState(false)
+  if (sent) return <span className="chat-chip-settled">sent</span>
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      className="chat-send-again"
+      busy={busy}
+      onClick={() => {
+        setBusy(true)
+        track('ui-click', { target: 'chat:orient', detail: { action: 'send-again' } })
+        api
+          .messageOrientation(ws, text)
+          .then(() => setSent(true))
+          .catch((e: Error) => bus.emit('toast', { text: notPassedOn(e.message.replace(/^\d{3}\s+/, '')), kind: 'error' }))
+          .finally(() => setBusy(false))
+      }}
+    >
+      Send again
+    </Button>
+  )
+}
+
 export function ChipRow({ item, ws }: { item: ChipRowT; ws: string }) {
   const settled = useChipSettled(ws, item)
+  if (item.chip === 'not_passed_on') {
+    return (
+      <div className="chat-msg chat-not-passed" data-chip="not_passed_on" role="status">
+        <Note className="chat-chip-row" text={notPassedOn(item.text)} chips={item.message ? <SendAgain ws={ws} text={item.message} /> : undefined} />
+        {item.message && <p className="chat-not-passed-text">{item.message}</p>}
+      </div>
+    )
+  }
+  if (item.chip === 'follow_up_ran_on') return <Note className="chat-chip-row chat-ran-on" data-chip="follow_up_ran_on" text={item.text} />
+  if (item.chip === 'view_failed') {
+    // an orientation's proposal that failed through its repairs: the line, and the view's chip with ✕ and Retry
+    const target = item.ref ? parseRef(item.ref) : null
+    const slug = target?.kind === 'view' ? target.slug : null
+    return <Note className="chat-chip-row" data-chip="view_failed" text={item.text} chips={<ViewChip ws={ws} slug={slug} name={item.view || slug || ''} />} />
+  }
   if (item.chip === 'say') {
     return (
       <div className="chat-msg chat-assistant chat-say" data-chip="say">
@@ -769,8 +836,8 @@ function LabelRunsCard({ runs, ws }: { runs: AgentRowT[]; ws: string }) {
   )
 }
 
-/** Views proposed in a row, one note: each proposal's ViewChip, which follows its build. A proposal the orientation
- * dropped is left out, and a note left with none is not drawn. */
+/** Views proposed in a row, one note: each proposal's ViewChip, which follows its build. A proposal dropped when the
+ * analyst stopped the orientation is left out, and a note left with none is not drawn. */
 function ViewsNote({ chips, ws }: { chips: ChipRowT[]; ws: string }) {
   const proposals = useProposals(ws)
   const shown = chips

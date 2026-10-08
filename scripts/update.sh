@@ -3,9 +3,10 @@
 #
 #   scripts/update.sh [--dir DIR] [--from ZIP|URL] [--sums FILE] [--marketplace-name NAME] [--dry-run] [INSTALL FLAGS]
 #
-# INSTALL FLAGS are install.sh's answers to its questions (--browser, --sandbox-deps, --plugin, --trust-workspaces and
-# their no- forms) and --require-pinned, passed on to it: without a terminal it runs only with a flag for each question
-# it would ask.
+# INSTALL FLAGS are install.sh's answers to its questions (--browser, --sandbox-deps and its no- form), --plugin and
+# --no-plugin, --no-modify-path and --modify-path, and --require-pinned, passed on to it: without a terminal it runs only with a flag for each question that
+# remains. --trust-workspaces and --no-trust-workspaces, an earlier version's, are passed on too, and install.sh ignores
+# them.
 # The install: --dir, else the one $THIMBLE_HOME/app-dir names, else the tree this script is in. A git checkout gets
 # `git pull --ff-only` + install.sh in place; a release install needs --from (a release zip, path or https URL), which is
 # unpacked and installed over it with ITS install.sh (backend/.venv, frontend/node_modules, workspaces/ and data/ kept).
@@ -13,8 +14,8 @@
 # exist; for a path --sums FILE, else a SHA256SUMS in the zip's folder when there is one. A mismatch refuses the update.
 # Either way install.sh runs npm ci again when package-lock.json changed and Node 20+ is present, since custom views need
 # the frontend's packages; in a checkout it also rebuilds frontend/dist when the pull changed a file it is built from (a
-# release brings its own build). Claude Code takes the new plugin copy only when plugin.json's version changed; a running
-# server is not restarted here (one line says how).
+# release brings its own build). Claude Code takes the new plugin copy only when plugin.json's version changed, and a
+# running session only when it restarts; a running server is not restarted here (one line says how for each).
 set -euo pipefail
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -36,7 +37,7 @@ while [ $# -gt 0 ]; do
     --dry-run) dry=1; shift;;
     --browser) install_flags+=("$1" "${2:-}"); shift $(( $# > 1 ? 2 : 1 ));;
     --browser=* | --sandbox-deps | --no-sandbox-deps | --plugin | --no-plugin | --trust-workspaces | --no-trust-workspaces \
-      | --require-pinned) install_flags+=("$1"); shift;;
+      | --no-modify-path | --modify-path | --require-pinned) install_flags+=("$1"); shift;;
     -h|--help) usage; exit 0;;
     *) echo "update.sh: unknown argument $1" >&2; usage >&2; exit 2;;
   esac
@@ -150,6 +151,9 @@ if [ "$dry" != 1 ]; then
     say "version unchanged ($old_version): the files are updated, but Claude Code keeps its cached plugin copy until plugin.json's version changes"
   else
     say "thimble $old_version → $new_version"
+    # a running session keeps the plugin it loaded (its MCP shim, and the hooks of a cached copy) until it restarts
+    say "Claude Code sessions started before this update keep the previous plugin: quit each one and run" \
+      "\`thimble\` again (\`thimble -c\` continues the last session)"
   fi
   # a running server keeps the old code until restarted; the analyst picks the moment
   if [ -f "$home/server.json" ]; then

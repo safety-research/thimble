@@ -1,57 +1,44 @@
 {
   "name": "Linked sessions",
-  "description": "Runs of agent teams read as their sessions on one clock: any runs picked or compared side by side, one lane per session with each subagent under the session that spawned it, every tool call a mark coloured by the labels or by any field, filters on every field and on time, and a session's calls beside the lanes with the file they come from.",
+  "description": "A reader for many related agent transcripts: each run's sessions as a tree, a lead with the subagents it started, on one clock above, and the chosen session's transcript at the center, its turns as a conversation with tool calls folded, where each subagent was started and where its result came back, and a subagent's transcript beside its parent's in the side panel.",
   "scope": ["runs/*.jsonl", "runs/*/sessions-index.json"],
   "records": [
     {"name": "call", "one": "one tool call, its tool_use line and its tool_result line", "fields": [
-      {"name": "time", "type": "number", "derived": "cleaned", "from": "timestamp", "how": "seconds since the run's first line"},
+      {"name": "time", "type": "time", "derived": "cleaned", "from": "timestamp", "how": "seconds since 1970 in UTC, from ISO 8601 with any offset or epoch milliseconds"},
       {"name": "duration", "type": "number", "derived": "computed", "from": "the tool_use and tool_result timestamps", "how": "seconds between them"},
-      {"name": "duration band", "type": "category", "derived": "computed", "from": "duration", "how": "under 1 s, 1–10 s or over 10 s"},
+      {"name": "kind", "type": "category", "derived": "computed", "from": "the line's tool_use block", "how": "call, beside a message's prompt, text and result"},
       {"name": "tool", "type": "category", "derived": "cleaned", "from": "a tool_use block's name", "how": "Agent read as Task"},
+      {"name": "input", "type": "text", "derived": "cleaned", "from": "a tool_use block's input", "how": "as a line, its path, command, query or description, a Grep's pattern with its path and flags; whole, a Task's description and the prompt the subagent got, an Edit's file with the lines it took out and put in"},
       {"name": "outcome", "type": "category", "derived": "computed", "from": "is_error or isError, and the result's text", "how": "denied when the text says so, error when flagged, else ok"},
       {"name": "result", "type": "text", "derived": "cleaned", "from": "the tool_result's text", "how": "its first line, a denial's or an error's prefix dropped"},
       {"name": "exit", "type": "number", "derived": "cleaned", "from": "the result's text", "how": "the number after Exit code"},
-      {"name": "output", "type": "text", "derived": "cleaned", "from": "the tool_result's text", "how": "the text without its Exit code and agentId lines"},
-      {"name": "files", "type": "list", "derived": "computed", "from": "file_path, or a Bash command and its result", "how": "the paths named in them"},
-      {"name": "file type", "type": "category", "derived": "computed", "from": "files", "how": "the first file's extension, test files apart"},
-      {"name": "matches", "type": "list", "derived": "cleaned", "from": "a Grep's toolUseResult filenames, else its result's lines", "how": "the files a Grep matched"},
-      {"name": "child", "type": "text", "derived": "computed", "from": "the Task result's agentId, else the prompt a session got", "how": "the session the Task call spawned"},
-      {"name": "again", "type": "time", "derived": "computed", "from": "the session's later Bash calls", "how": "when the same command ran next, with its outcome"}
+      {"name": "output", "type": "text", "derived": "cleaned", "from": "the tool_result's text", "how": "the text as the record holds it, whole"},
+      {"name": "file type", "type": "category", "derived": "computed", "from": "file_path, or a Bash command and its result", "how": "the first path's extension, test files apart, none for a call with no file"},
+      {"name": "child", "type": "text", "derived": "computed", "from": "the Task result's agentId, else the prompt a session got", "how": "the session the Task call started"},
+      {"name": "run", "type": "category", "derived": "computed", "from": "the folder the transcript is in", "how": "the folder's name"},
+      {"name": "agent", "type": "category", "derived": "computed", "from": "the session's agent", "how": "the agent whose transcript holds the call"},
+      {"name": "speaker", "type": "category", "derived": "computed", "from": "the session's agent", "how": "the agent whose transcript holds the call"}
     ]},
     {"name": "message", "one": "one prompt or text of a session", "fields": [
-      {"name": "kind", "type": "category", "derived": "computed", "from": "the message's type and place", "how": "prompt, result for a session's last text, else text"}
-    ]},
-    {"name": "return", "one": "a subagent's last words to the session that spawned it", "fields": [
-      {"name": "ran", "type": "number", "derived": "computed", "from": "the subagent's first and last lines", "how": "seconds it ran"}
+      {"name": "time", "type": "time", "derived": "cleaned", "from": "timestamp", "how": "seconds since 1970 in UTC"},
+      {"name": "kind", "type": "category", "derived": "computed", "from": "the message's type and place", "how": "prompt, result for a session's last text, else text"},
+      {"name": "run", "type": "category", "derived": "computed", "from": "the folder the transcript is in", "how": "the folder's name"},
+      {"name": "agent", "type": "category", "derived": "computed", "from": "the session's agent", "how": "the agent whose transcript holds the message"},
+      {"name": "speaker", "type": "category", "derived": "computed", "from": "the session's agent and the session that spawned it", "how": "for a prompt the agent that started the session, or user for a lead, else the session's agent"}
     ]},
     {"name": "session", "one": "one transcript, a lead's or a subagent's", "fields": [
       {"name": "agent", "type": "category", "derived": "computed", "from": "a Task call's subagent_type, else the run's index", "how": "the subagent's type, else the index's name, else lead"},
-      {"name": "parent", "type": "text", "derived": "computed", "from": "the Task call that names its agentId or gave its prompt", "how": "the session that spawned it"},
+      {"name": "parent", "type": "text", "derived": "computed", "from": "the Task call that names its agentId or gave its prompt", "how": "the session that started it"},
       {"name": "depth", "type": "number", "derived": "computed", "from": "parent", "how": "sessions above it in its run's tree"},
-      {"name": "spawn", "type": "number", "derived": "computed", "from": "parent", "how": "the time of the Task call that spawned it"},
-      {"name": "start", "type": "number", "derived": "cleaned", "from": "its first line's timestamp", "how": "seconds since the run's first line"},
-      {"name": "end", "type": "number", "derived": "cleaned", "from": "its last line's timestamp", "how": "seconds since the run's first line"},
-      {"name": "waits", "type": "list", "derived": "computed", "from": "the Task calls it waited on", "how": "the spans it waited, overlaps merged"}
-    ]},
-    {"name": "moment", "one": "what another session of the run was doing at a call's time", "fields": [
-      {"name": "state", "type": "category", "derived": "computed", "from": "the session's times, waits and calls", "how": "starts, returned, waiting or call"}
-    ]},
-    {"name": "run", "one": "one run's folder of sessions", "fields": [
-      {"name": "started", "type": "time", "derived": "cleaned", "from": "the run's first line", "how": "in UTC"},
-      {"name": "span", "type": "number", "derived": "computed", "from": "its sessions' times", "how": "seconds from its first line to its last"}
-    ]},
-    {"name": "compared group", "one": "a run, or a session with its subagents, beside others", "fields": [
-      {"name": "wall clock", "type": "number", "derived": "computed", "from": "its first session's start and end", "how": "seconds its first session ran"},
-      {"name": "summed time", "type": "number", "derived": "computed", "from": "its sessions' starts and ends", "how": "the seconds its sessions ran, added up"},
-      {"name": "in tool calls", "type": "number", "derived": "computed", "from": "duration", "how": "its calls' durations added up, Task calls aside"},
-      {"name": "waiting", "type": "number", "derived": "computed", "from": "its first session's waits", "how": "seconds it waited on subagents"}
+      {"name": "start", "type": "time", "derived": "cleaned", "from": "its first line's timestamp", "how": "seconds since 1970 in UTC"},
+      {"name": "end", "type": "time", "derived": "cleaned", "from": "its last line's timestamp", "how": "seconds since 1970 in UTC"}
     ]}
   ],
   "accepts": [
-    {"form": "L<n>", "means": "the line <n>: a call (its tool_use or its tool_result line) or a message shown in its session's transcript, or in a run's index the run"}
+    {"form": "L<n>", "means": "the line <n>: a call (its tool_use or its tool_result line) or a message, its turn opened in its session's transcript, or in a run's index the run"}
   ],
   "units": [
-    {"form": "<run>", "means": "one run: its sessions, with the view narrowed to it"},
-    {"form": "<session>", "means": "one session: its lane and its whole transcript"}
+    {"form": "<run>", "means": "one run: the view filtered to its sessions, its lead's transcript read"},
+    {"form": "<session>", "means": "one session: its lane chosen and its transcript read"}
   ]
 }

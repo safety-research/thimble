@@ -1,7 +1,7 @@
 // The checks and comments of a document, pure: the checks the Checks pane lists with their colours, the open comments
 // a document carries, which passages they tint, the ruler's lanes, the margin's stacking so comment cards never
 // overlap, and the edits the pane makes to its list.
-import { colourVar } from '../files/labels'
+import { colourVar, LABEL_ORDER } from '../files/labels'
 import type { RulerColumn, RulerTick } from '../files/Ruler'
 import { hhmm } from '../lib/time'
 import type { Check, CheckRun, WriteupComment, WriteupSentence } from '../lib/types'
@@ -203,7 +203,7 @@ export function runLine(run: Pick<CheckRun, 'status' | 'chat' | 'started' | 'end
   const at = hhmm(run.ended || run.started)
   if (run.status === 'running') {
     if (run.waiting === 'writer') return 'Runs once the writer has finished'
-    if (!run.chat) return 'Waiting for a free session'
+    if (run.waiting === 'queued' || !run.chat) return 'Queued: at most 3 checks run at once'
     return hhmm(run.started) ? `Running since ${hhmm(run.started)}` : 'Running'
   }
   if (run.status === 'failed') return `Failed${at ? ` at ${at}` : ''}${run.summary ? `: ${run.summary}` : ''}`
@@ -232,11 +232,15 @@ export function withRun(checks: readonly Check[], id: string, doc: string, run: 
   })
 }
 
-/** The colour the server gives a new check: the first unused of the palette's eight, else the least used. */
+/** The places of the label palette a check's color may take, 1 to 8, in the order new checks take them, as new label
+ * values do (LABEL_ORDER; the server's checks.NEW_COLOURS). */
+export const CHECK_COLOURS: readonly number[] = LABEL_ORDER.filter((k) => k <= 8)
+
+/** The color the server gives a new check: the first unused of CHECK_COLOURS, else the least used. */
 export function freeColour(checks: readonly Pick<Check, 'colour'>[]): number {
   const uses = (k: number) => checks.filter((c) => c.colour === k).length
-  let best = 1
-  for (let k = 1; k <= 8; k++) {
+  let best = CHECK_COLOURS[0]
+  for (const k of CHECK_COLOURS) {
     if (!uses(k)) return k
     if (uses(k) < uses(best)) best = k
   }
