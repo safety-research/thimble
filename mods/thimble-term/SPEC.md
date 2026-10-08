@@ -682,7 +682,8 @@ out. A region under the pointer that is not a whole row is inverse, and its tip 
 below it; a chart's region (a strip, a lane) is never inverse: only the pointer's column is marked, `┊` in an empty cell
 and a bar in the text color, on every chart region over the same columns, with that cell's tip. Its keys reach it through the list's
 relay (↑↓, Enter, Space, Backspace, a sign typed) and as hotkeys (a letter, a digit); while a field of the view takes
-typing, every key. A view built in browser mode is one line that says so, and how to open it in browser mode.
+typing, every key. The wheel over it reaches it with the frame's cell under the pointer, so that it moves the list
+there alone. A view built in browser mode is one line that says so, and how to open it in browser mode.
 
 **The file browser**, after the browser's Files (`frontend/src/files`: its tree, its search, its reader's modes):
 

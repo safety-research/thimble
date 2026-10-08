@@ -837,8 +837,8 @@ async def test_repository_draws_what_its_browser_page_shows(repository, cols):
 async def test_repository_opens_a_pull_request_as_its_page_in_the_side_pane(repository):
     """Enter opens a pull request's page beside the list, never under its row: its facts named plainly, the issue it
     fixes and the same issue in the other runs, its flags, then its records in time order, each commit with its diff,
-    which ↑↓ move through and Enter opens at its place; a click on another run's issue opens that run's repository at
-    the issue's page."""
+    which ↑↓ move through once `l` gives them the keys and Enter opens at its place; a click on another run's issue
+    opens that run's repository at the issue's page."""
     out = await term_views.draw_text(repository, "repository", cols=120, rows=44, wrap=DRAW_WRAP,
                                      keys=["down", "down", "return"], panel=False)
     rows = out.splitlines()
@@ -1145,10 +1145,11 @@ async def _walk(c: str, slug: str, keys: list[str], text: str) -> list[list[str]
 @pytest.mark.parametrize("example", ["timeline", "linked", "repository"])
 async def test_each_worked_example_draws_in_the_panel_as_it_draws_as_text(example, request):
     """In the panel a list draws only its rows in view; as text (the checks, the reviewer) every row: each worked
-    example walked through its list, into its side pane and back by the wheel draws the same rows either way."""
+    example walked through its list, into its side pane (`l` gives a list the pane draws the keys) and back by the
+    wheel draws the same rows either way."""
     c = request.getfixturevalue(example)
     slug = {"timeline": "timeline", "linked": "linked-sessions", "repository": "repository"}[example]
-    keys = ["down"] * 12 + ["return", "down", "down", "up"] + ["down"] * 20 + ["wheel:5", "wheel:-3"]
+    keys = ["down"] * 12 + ["return", "l", "down", "down", "up"] + ["down"] * 20 + ["wheel:5", "wheel:-3"]
     live = await _walk(c, slug, keys, "")
     assert len({tuple(f) for f in live}) > 10
     assert live == await _walk(c, slug, keys, "plain")
@@ -1173,3 +1174,43 @@ async def test_each_worked_example_draws_every_choice_of_its_controls(example, p
         first = next(ch for q, ch in tried if q == p)
         assert first == ("Off" if p == "Color by" else "None") and (p, f"{first} (after the others)") in tried, tried
     assert not [x for x in d["choices"] if x["errors"]], d["choices"]
+
+
+# two lists in one view, as a builder's Wiki Page History draws them (Matt, 2026-10-08): the pages, and under them a
+# page's revisions
+TWO_LISTS = r"""
+import { draw, list } from 'thimble-term'
+const pages = list({ key: (p) => p.id })
+const revs = list({ key: (r) => r.id, enter: 'to read it' })
+const P = Array.from({ length: 30 }, (_, i) => ({ id: i, text: `page ${i}` }))
+const R = Array.from({ length: 30 }, (_, i) => ({ id: i, text: `rev ${i}` }))
+draw((d) => {
+  pages.draw(d, { title: 'pages', items: P, height: 6, row: (p, r) => r.add(p.text) })
+  d.rule()
+  revs.draw(d, { items: R, row: (x, r) => r.add(x.text) })
+})
+"""
+
+
+@needs_node
+async def test_the_wheel_over_one_of_two_lists_moves_that_list_alone(board, inproc):
+    """`wheel:<n>@<words>` is the wheel over the row that shows those words, with the frame's cell there as thimble-term
+    sends it: of a view's two lists, the pages and a page's revisions under them, the one under the pointer moves its
+    rows and has ↑↓ then, and the other stays; `wheel:<n>` names no cell and moves the list that has the keys, the main
+    one, the first drawn, until another has them."""
+    slug = _view(TWO_LISTS, "two")
+
+    async def firsts(keys: list[str]) -> tuple[int, int, str]:
+        """The first page and the first revision in view after `keys`, and the chosen revision's row where it shows."""
+        out = await term_views.draw_text(CORPUS, slug, cols=60, rows=20, keys=keys, wrap=DRAW_WRAP, panel=False)
+        rows = out.splitlines()
+        page, rev = (next(int(m.group(1)) for x in rows if (m := re.search(rf"{w} (\d+)", x))) for w in ("page", "rev"))
+        return page, rev, next((x.rstrip(" ▌") for x in rows if x.startswith("❯ rev")), "")
+
+    assert await firsts(["wheel:4@rev 2"]) == (0, 4, "")
+    assert await firsts(["wheel:3@page 1"]) == (3, 0, "❯ rev 0")
+    assert await firsts(["wheel:2"]) == (2, 0, "❯ rev 0")
+    # the revisions have the keys once the wheel moved them: ↓ chooses the next revision, and the window goes to it
+    assert await firsts(["wheel:4@rev 2", "down"]) == (0, 1, "❯ rev 1")
+    with pytest.raises(term_views.TermViewError, match="no row shows 'nowhere'"):
+        await term_views.draw_text(CORPUS, slug, cols=60, rows=20, keys=["wheel:2@nowhere"], wrap=DRAW_WRAP)

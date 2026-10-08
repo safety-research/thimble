@@ -570,7 +570,7 @@ test('keys · view · its hint row is one row of whole hints: ↑↓, Enter, b, 
   expect(row).toBe('↑↓ to choose · Enter to open · n p for lanes · ? for all keys · b to go back · x to close')
 })
 
-test('keys · view · a click on a row, a drag on a strip and the wheel are the view\'s; its acts open a place or a thread; b back ends its program', async ($, on) => {
+test('keys · view · a click on a row, a drag on a strip and the wheel (with the frame\'s cell under the pointer) are the view\'s; its acts open a place or a thread; b back ends its program', async ($, on) => {
   const w = world(on)
   w.states.home = { ...w.states.home, views: TERM_VIEWS } as never
   w.viewHost.acts = ev => (ev.t === 'click' && ev.i === 2 ? [{ kind: 'open', ref: 'README.md#L3' }] : [])
@@ -590,11 +590,24 @@ test('keys · view · a click on a row, a drag on a strip and the wheel are the 
   await w.clock.settle()
   await pane2.unmount()
   expect(events(w).find(e => e.t === 'drag')).toMatchObject({ t: 'drag', i: 4, x0: 1, x1: 4 })
-  // the wheel over the view
+  // the wheel over the view goes with the frame's cell under the pointer, so the view moves the list there alone: the
+  // pane's row 3 is the frame's second row (under the title row and the rule), its column 9 the frame's cell 8 (after
+  // the panel's cell of padding), on the frame drawn
   await (await look($, SHORT)).unmount()
-  await $.ui.scroll({ requestId: PANEL, component: 'Pane', by: 3, pointer: { x: 10, y: 10 }, origin: { kind: 'person' } } as never)
+  await $.ui.scroll({ requestId: PANEL, component: 'Pane', by: 3, pointer: { column: 9, row: 3 }, origin: { kind: 'person' } } as never)
   await w.clock.settle()
-  expect(events(w).find(e => e.t === 'wheel')).toMatchObject({ t: 'wheel', by: 3 })
+  const wheeled = events(w).filter(e => e.t === 'wheel')
+  expect(wheeled.at(-1)).toMatchObject({ t: 'wheel', by: 3, x: 8, y: 1 })
+  expect(typeof wheeled.at(-1)?.seq).toBe('number')
+  // with a subtitle under the title row, the frame stands a row lower
+  w.viewHost.frame = n => viewFrame(n, { sub: ['3 events'] })
+  await $.ui.scroll({ requestId: PANEL, component: 'Pane', by: 1, pointer: { column: 9, row: 3 }, origin: { kind: 'person' } } as never)
+  await w.clock.settle()
+  expect((await seen($, SHORT)).text).toContain('3 events')
+  await $.ui.scroll({ requestId: PANEL, component: 'Pane', by: -2, pointer: { column: 9, row: 4 }, origin: { kind: 'person' } } as never)
+  await w.clock.settle()
+  expect(events(w).filter(e => e.t === 'wheel').at(-1)).toMatchObject({ t: 'wheel', by: -2, x: 8, y: 1 })
+  w.viewHost.frame = n => viewFrame(n)
   // an act with the answer to the analyst's click: the record's place opens in the citation panel
   await takesKeys($)
   const pane3 = await look($, SHORT)
