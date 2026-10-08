@@ -1190,6 +1190,72 @@ describe('details', () => {
   })
 })
 
+// A record's text can hold control characters (a tool's colored output, a bell, a NUL, the C1 characters of text
+// decoded twice), and thimble-term draws no text that holds one: its Client's tree does not validate and the view is
+// not drawn. The kit keeps them out of every string of a frame.
+describe('control characters', () => {
+  const CONTROL = /[\u0000-\u001f\u007f-\u009f]/
+  // every string a frame hands thimble-term to draw
+  const strings = (f: any): string[] => [
+    ...f.lines.flatMap((l: any) => l.map((s: any) => s.s)),
+    ...f.hits.flatMap((h: any) => [h.tip ?? '', ...(h.tips ?? [])]),
+    ...f.hints,
+    ...f.sub,
+    f.field?.text ?? '',
+    f.error ?? '',
+  ]
+
+  test('a frame holds none: an escape sequence goes whole, a bell or a NUL goes, a tab is two spaces, a break in a run is a space, and the columns after them keep their places', async () => {
+    init({ cols: 60, rows: 8 })
+    kit.draw((d: any) => {
+      d.line('red \x1b[31mword\x1b[0m bell\x07 end')
+      d.row().add(kit.pad('tab\there', 12)).add('|', {}, { on: () => {}, tip: 'tip \x1b[1mbold\x1b[0m\x07' }).end()
+      d.row().add(kit.pad('page\u0000name', 12)).add('|').end()
+      d.row().add(kit.pad('quoteâ\u0080\u009d', 12)).add('|').end()
+      d.line([{ s: 'two\nlines' }, kit.dim(' and\r\nmore')])
+      d.key('z', 'to zap \x1b[2Kit', () => {})
+      d.sub('facts \x1b]0;a title\x07here')
+    })
+    await tick()
+    const f = last()
+    for (const s of strings(f)) expect(s).not.toMatch(CONTROL)
+    expect(text(f)).toEqual(['  red word bell end', '  tab  here   |', '  pagename    |', '  quoteâ      |', '  two lines and more'])
+    expect(f.hits[0]).toMatchObject({ y: 1, x0: 14, x1: 15, tip: 'tip bold' })
+    expect(f.hints).toContain('z to zap it')
+    expect(f.sub).toEqual(['facts here'])
+    // a field's text, as the view gave it
+    kit.draw((d: any) => d.typing({ text: 'typed\x1b[A\x07' }))
+    await tick()
+    expect(last().field).toEqual({ text: 'typed' })
+  })
+
+  test("a record's NUL, bell or escape sequence reaches no frame: in a list's row, in its details, in the error of a draw that throws", async () => {
+    init({ cols: 50, rows: 10 })
+    const recs = [{ id: 0, text: 'saved\u0000 by\u0007 bot' }, { id: 1, text: 'ok' }]
+    const list = kit.list({ key: (e: any) => e.id })
+    kit.draw((d: any) => list.draw(d, {
+      items: recs,
+      row: (e: any, r: any) => r.add(e.text),
+      detail: (e: any, dd: any) => kit.details(dd, { blocks: [{ text: `${e.text}\n\x1b[32mline\x1b[0m\ttwo` }], facts: [['by', 'a\u0000b']] }),
+      ask: (e: any) => ({ ref: `revisions.jsonl#L${e.id + 1}`, text: e.text }),
+    }))
+    await tick()
+    await key('return')
+    for (const s of strings(last())) expect(s).not.toMatch(CONTROL)
+    expect(text().slice(0, 4)).toEqual(['❯ saved by bot', '    saved by bot', '    line  two', '    by ab'])
+    // asking about it: the side thread's words, which thimble-term's panel draws
+    await key('a')
+    expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'ask', ref: 'revisions.jsonl#L1', text: 'saved by bot' })
+    kit.draw(() => {
+      throw new Error('a byte \x1b[31mhere\u0000')
+    })
+    await tick()
+    for (const s of strings(last())) expect(s).not.toMatch(CONTROL)
+    expect(text()).toEqual(['  × the view could not be drawn: a byte here'])
+    expect(last().error).toBe('a byte here')
+  })
+})
+
 describe('as text', () => {
   test('frameText draws a frame plain, or with escape codes for its styles and hues', () => {
     const f = { lines: [[{ s: '  ' }, { s: '●', fg: '#1d7fc0' }, { s: ' fired', d: true }, { s: ' x', bg: 'selectionBg' }]] }

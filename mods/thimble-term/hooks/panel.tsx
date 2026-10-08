@@ -51,7 +51,7 @@ import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, agreementLine, classColors, hueOf,
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
-import { closeView, onViewAct, openViewState, retryView, sendEvent, viewFor } from './viewhost'
+import { closeView, onViewAct, openViewState, retryView, sendEvent, viewFaultOf, viewFor } from './viewhost'
 import type { ViewFrame } from './viewhost'
 
 export type PaneEvent = MatchedEvent<'ui.render', { component: 'Pane'; requestId: string }>
@@ -3151,9 +3151,12 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // a first frame with no rows yet, while its first query is out
   if (!f.lines.length && f.loading) body.push(<Text key="view-loading" dimColor>◌ loading…</Text>)
   // the frame's rows bring their margin (`❯`); they stand under the title row (withWay) and the one row each element
-  // above them in `body` takes, the hotkeys taking none (hiddenKeys)
+  // above them in `body` takes, the hotkeys taking none (hiddenKeys); a frame its Client could not draw (register.tsx
+  // ui.fault) is one dim row saying why, until the view draws another
   viewAtDrawing = { top: 1 + body.length, offset: e.props.scroll?.offset ?? 0, seq: f.seq }
-  body.push(<Client key={marginKey('view-frame')} module="./viewclient.tsx" width={cols + MARGIN_W} height={Math.max(1, f.lines.length)} props={JSON.parse(JSON.stringify({ lines: f.lines, hits: f.hits, seq: f.seq, cols: cols + MARGIN_W })) as never} />)
+  const fault = viewFaultOf(f.seq)
+  if (fault) body.push(<Text key="view-fault" dimColor wrap="truncate-end">{`the view could not draw: ${fault}`}</Text>)
+  else body.push(<Client key={marginKey('view-frame')} module="./viewclient.tsx" width={cols + MARGIN_W} height={Math.max(1, f.lines.length)} props={JSON.parse(JSON.stringify({ lines: f.lines, hits: f.hits, seq: f.seq, cols: cols + MARGIN_W })) as never} />)
   if (ov.error) body.push(<Text key="view-error" color={COLORS.problem} wrap="truncate-end">{`× ${ov.error}`}</Text>)
   // a sign's key works only from the relay's field, so its hint shows only while the ring rests there
   const isSign = (k: string) => [...k].length === 1 && !/[a-z0-9]/.test(k)

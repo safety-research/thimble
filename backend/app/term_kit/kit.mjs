@@ -38,10 +38,27 @@ export const HUES = 6
 
 // ------------------------------------------------------------------------------------------------ text
 
-/** The cells a character takes: 2 for a wide one (CJK, emoji), 0 for a combining mark, else 1. */
+// a terminal's escape sequence (CSI, OSC, or one character after ESC), then any other control character: a record's
+// text can hold them (a tool's colored output, a bell, a NUL, the C1 characters of text decoded twice, `â\u0080\u009d`)
+const ESCAPES = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)?|[@-_])?/g
+const CONTROLS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g
+const ANY_CONTROL = /[\u0000-\u001f\u007f-\u009f]/
+
+/** Text as a frame may hold it: escape sequences and control characters left out, a tab as two spaces (as `clip`), a
+ *  line break as a space (a run is one row; `wrap` and a details block break rows at `\n` first). thimble-term draws
+ *  no text that holds a control character, so each run, tip, hint, fact and error of a frame is made of this. */
+export function printable(s) {
+  s = String(s ?? '')
+  if (!ANY_CONTROL.test(s)) return s
+  return s.replace(ESCAPES, '').replace(/\t/g, '  ').replace(/\r\n|[\r\n]/g, ' ').replace(CONTROLS, '')
+}
+
+/** The cells a character takes: 2 for a wide one (CJK, emoji) and for a tab (two spaces in a frame), 0 for a
+ *  combining mark and for a control character (left out of a frame), else 1. */
 export function charWidth(ch) {
   const c = ch.codePointAt(0) ?? 0
-  if (c === 0 || (c >= 0x300 && c <= 0x36f) || c === 0x200b || c === 0x200c || c === 0x200d || c === 0xfe0f) return 0
+  if (c === 9) return 2
+  if (c < 0x20 || (c >= 0x7f && c <= 0x9f) || (c >= 0x300 && c <= 0x36f) || c === 0x200b || c === 0x200c || c === 0x200d || c === 0xfe0f) return 0
   if (
     (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
     (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60) ||
@@ -86,14 +103,14 @@ export function cut(s, n) {
 
 /** A line of code or data cut at the cell edge, so a file's rows end together. */
 export function clip(s, n) {
-  s = String(s).replace(/\t/g, '  ').replace(/[\r\n]+/g, ' ')
+  s = printable(String(s).replace(/\t/g, '  ').replace(/[\r\n]+/g, ' '))
   if (width(s) <= n) return s
   return n <= 1 ? (n === 1 ? '…' : '') : `${prefix(s, n - 1)}…`
 }
 
-/** Whitespace runs as one space. */
+/** Whitespace runs as one space, with no control character (printable). */
 export function oneLine(s) {
-  return String(s ?? '').replace(/\s+/g, ' ').trim()
+  return printable(s).replace(/\s+/g, ' ').trim()
 }
 
 /** `s` padded with spaces to `n` cells (cut first when longer, and the cut padded, since it may end short of `n`). */
@@ -257,13 +274,13 @@ const STYLE_KEYS = ['fg', 'bg', 'b', 'd', 'i', 'u', 'inv']
 
 function segOf(x) {
   if (x == null || x === false) return null
-  if (typeof x === 'string' || typeof x === 'number') return { s: String(x) }
+  if (typeof x === 'string' || typeof x === 'number') return { s: printable(x) }
   if (typeof x === 'object' && 's' in x) {
-    const out = { s: String(x.s) }
+    const out = { s: printable(x.s) }
     for (const k of STYLE_KEYS) if (x[k]) out[k] = x[k]
     return out
   }
-  return { s: String(x) }
+  return { s: printable(x) }
 }
 
 const sameStyle = (a, b) => STYLE_KEYS.every((k) => (a[k] || undefined) === (b[k] || undefined))
@@ -491,7 +508,7 @@ export class Row {
    *  the pointer only its cell is marked, never inverse (thimble-term draws `┊` there, or the bar in the text color),
    *  with `opts.tips[i]` the words for cell i where they differ from `tip`. */
   add(text, style = {}, opts = {}) {
-    let s = String(text ?? '')
+    let s = printable(text)
     if (opts.max !== undefined) s = cut(s, opts.max)
     if (!s) return this
     const w = width(s)
@@ -722,16 +739,16 @@ export function frame() {
     seq,
     ack: state.ack,
     lines: lines.map(wireLine),
-    hits: hits.map((h) => ({ y: h.y, x0: h.x0 + 2, x1: Math.min(h.x1, state.cols) + 2, ...(h.row ? { row: true } : {}), ...(h.tip ? { tip: String(h.tip) } : {}), ...(h.drag ? { drag: true } : {}), ...(h.cursor ? { cursor: true } : {}), ...(h.cursor && Array.isArray(h.tips) ? { tips: h.tips.slice(0, h.x1 - h.x0).map((t) => (t ? String(t).slice(0, 160) : '')) } : {}) })),
-    hints,
+    hits: hits.map((h) => ({ y: h.y, x0: h.x0 + 2, x1: Math.min(h.x1, state.cols) + 2, ...(h.row ? { row: true } : {}), ...(h.tip ? { tip: printable(h.tip) } : {}), ...(h.drag ? { drag: true } : {}), ...(h.cursor ? { cursor: true } : {}), ...(h.cursor && Array.isArray(h.tips) ? { tips: h.tips.slice(0, h.x1 - h.x0).map((t) => (t ? printable(t).slice(0, 160) : '')) } : {}) })),
+    hints: hints.map(printable),
     // each hint's keys, so the panel names a sign's key only while its relay holds the ring (a Button's hotkey is a
     // letter or a digit; a sign reaches the view through the relay's field alone)
     hintKeys: d.typer ? d.typer.hints.map(() => []) : shownBinds.map((b) => b.keys.slice()),
     keys,
     typing: Boolean(d.typer),
     // the text of the field that takes typing, which the panel's field holds while it does
-    field: d.typer ? { text: d.typer.text } : null,
-    sub: [...new Set(d.facts)],
+    field: d.typer ? { text: printable(d.typer.text) } : null,
+    sub: [...new Set(d.facts.map(printable))],
   }
   // a reader query out long enough to say so, or the first one out before any came back: the panel says `◌ loading…`
   if (loading()) out.loading = true
@@ -826,9 +843,10 @@ function chartCells(line, x0, x1) {
   return part.length > 0 && part.every((ch) => CHART.has(ch)) && part.some((ch) => ch !== ' ')
 }
 
+// a run a part put on the line without segOf is made printable here too, so no frame holds a control character
 function wireLine(l) {
   const margin = l.margin ? [{ ...l.margin, s: pad(l.margin.s, 2) }] : [{ s: '  ' }]
-  return merged([...margin, ...l.runs])
+  return merged([...margin, ...l.runs].map((r) => (r && ANY_CONTROL.test(r.s) ? { ...r, s: printable(r.s) } : r)))
 }
 
 function describe(e) {
@@ -838,6 +856,7 @@ function describe(e) {
 }
 
 function errorFrame(why) {
+  why = printable(why)
   const seq = ++state.frameSeq
   state.binds = []
   state.typer = null

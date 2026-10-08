@@ -46,7 +46,7 @@ import { NAV_EMPTY } from './nav'
 import { FILES_UI_EMPTY, LABEL_UI_EMPTY, PANEL, checkQueued, closePanel, loadCards, loadCardsBatch, navOrigin, openHome, openPanel, openPending, paneTitle, panelColumns, placedLater, readSurface, readThread, retryPending, rt, surfaceValue, takeKeys, threadsNow, tick } from './term'
 import type { UiApply } from './term'
 import { turns } from './turns'
-import { PUMP_MS, closeView, openViewState, sendEvent, viewMessage, viewPump } from './viewhost'
+import { PUMP_MS, closeView, openViewState, sendEvent, viewFault, viewMessage, viewPump } from './viewhost'
 
 type Dollar = EngineInterface
 
@@ -1130,6 +1130,15 @@ export const register: Register = on => {
     } else if (d.type === 'files-open' && typeof d.path === 'string') {
       await openFile(cx, d.path)
     }
+    return next(e)
+  })
+
+  // a Client of thimble-term that could not draw (its tree did not validate, its module threw): why goes to the debug
+  // log, never to main's chat; the open view's own says so in the panel, dim, in its place (panel.tsx drawView), as
+  // the engine draws the panel again once this answers
+  on('ui.fault', async ($, e, next) => {
+    $.ui.log(`thimble-term: ${e.module} could not draw in ${e.component} (${e.phase}): ${e.reason}`, { to: 'debug' })
+    if (e.component === 'Pane' && e.requestId === PANEL && /(^|\/)viewclient\.tsx$/.test(e.module)) viewFault(e.reason)
     return next(e)
   })
 }
