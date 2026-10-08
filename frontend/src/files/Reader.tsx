@@ -52,6 +52,9 @@ const LOAD_AHEAD_PX = 400
 /** the records a drag of the frame shows before and after its line while the frame is held */
 const DRAG_BEFORE = 5
 const DRAG_AFTER = 30
+/** the most records past its place a held drag shows, where those after it leave the reader short of its bottom (a
+ * view or Filter by hides most of them): its window grows from DRAG_AFTER up to this many, from what it read ahead */
+const DRAG_AFTER_MAX = 240
 /** a held drag of the frame reads ahead when it has not read this many lines past its place in its direction: a read
  * takes AHEAD_READ lines that way and AHEAD_BEHIND the other (the server gives at most 250 a side), and the drag keeps
  * AHEAD_MAX of them */
@@ -756,6 +759,9 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // a page is being read: the scroll, the fill below and a resize can each ask for the next page in the same frame,
   // before the `loading` they see has turned true
   const reading = useRef(false)
+  // reads the page the reader is short of, if any (below, where `fill` is set): after each change of the records and
+  // each resize of what the body shows, which is how records a view or Filter by hides leave it short
+  const fill = useRef<() => void>(() => {})
   // the body's height as last measured; 0 while the reader is in a hidden tab
   const [bodyHeight, setBodyHeight] = useState(0)
   // the last line after which a page came back empty (the file changed under the reader): no page past it loads by itself
@@ -870,7 +876,10 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   useEffect(() => {
     const el = bodyRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => measure())
+    const ro = new ResizeObserver(() => {
+      measure()
+      fill.current()
+    })
     ro.observe(el)
     for (const c of Array.from(el.children)) ro.observe(c)
     return () => ro.disconnect()
@@ -883,16 +892,19 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     if (!root || !records.some((r) => r.line === jumpAt.line)) return
     landed.current = jumpAt
     const el = root.querySelector<HTMLElement>(`.reader-card[data-line="${jumpAt.line}"]`)
+    // a line whose record is not drawn (a view or Filter by hides it) lands where the records drawn put it
+    const t = el ? null : scrollTopFor(root, jumpAt.line - 1)
     if (el) root.scrollTop += el.getBoundingClientRect().top - root.getBoundingClientRect().top
+    else if (t != null) root.scrollTop = t
     else if (first != null && last != null) root.scrollTop = ((jumpAt.line - first) / Math.max(1, last - first + 1)) * root.scrollHeight
     measure()
   }, [jumpAt, records, first, last, measure])
 
   // a drag of the frame's target top, a fraction of the file. A place already loaded is scrolled to at once. While the
   // frame is held the drag reads the file ahead of the pointer, in its direction, into `ahead`, and the records around
-  // each place it reaches show from there at once (DRAG_BEFORE and DRAG_AFTER of them), so that the reader follows
-  // every move of the pointer; a place not read yet shows once its read lands. Let go, a place not loaded loads as a
-  // jump does.
+  // each place it reaches show from there at once (DRAG_BEFORE and DRAG_AFTER of them, more where those after it leave
+  // the reader short of its bottom), so that the reader follows every move of the pointer; a place not read yet shows
+  // once its read lands. Let go, a place not loaded loads as a jump does.
   const seeking = useRef<{ f: number; held: boolean } | null>(null)
   const loadingNow = useRef(loading)
   loadingNow.current = loading
@@ -905,13 +917,21 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   }, [])
   const aheadAsk = useRef(false)
   const aheadDir = useRef<{ line: number | null; dir: number }>({ line: null, dir: 1 })
+  // the records past its place a held drag shows, grown while they leave the reader short of its bottom
+  const dragAfter = useRef(DRAG_AFTER)
+  // the records read ahead around `line`: DRAG_BEFORE before it, and past it DRAG_AFTER at least and dragAfter at most,
+  // as far as they were read; null while those are not all read
   const aheadOf = (line: number) => {
     const lo = Math.max(1, line - DRAG_BEFORE)
-    const hi = Math.min(total ?? line, line + DRAG_AFTER)
+    const need = Math.min(total ?? line, line + DRAG_AFTER)
+    const hi = Math.min(total ?? line, line + Math.max(DRAG_AFTER, dragAfter.current))
     const out: SourceRecord[] = []
     for (let l = lo; l <= hi; l++) {
       const r = ahead.current.get(l)
-      if (!r) return null
+      if (!r) {
+        if (l <= need) return null
+        break
+      }
       out.push(r)
     }
     return out.length ? out : null
@@ -923,7 +943,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     if (aheadAsk.current || !total) return
     const down = d.dir >= 0
     const lo = Math.max(1, line - (down ? DRAG_BEFORE : AHEAD_NEAR))
-    const hi = Math.min(total, line + (down ? AHEAD_NEAR : DRAG_AFTER))
+    const hi = Math.min(total, line + (down ? Math.max(AHEAD_NEAR, dragAfter.current) : DRAG_AFTER))
     let missing = false
     for (let l = lo; l <= hi && !missing; l++) missing = !ahead.current.has(l)
     if (!missing) return
@@ -954,18 +974,29 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     const a = s.f * total
     const line = Math.max(1, Math.min(total, Math.floor(a) + 1))
     if (s.held) readAhead(line)
-    if (a >= recs[0].line - 1 && (a < recs[recs.length - 1].line || recs[recs.length - 1].line >= total)) {
+    const end = recs[recs.length - 1].line
+    // the window shown grows at once, before it is drawn short
+    let grow = false
+    if (a >= recs[0].line - 1 && (a < end || end >= total)) {
       const t = scrollTopFor(el, a)
-      if (t != null) el.scrollTop = t
-      if (!s.held) seeking.current = null
-      return
+      // the records loaded end too soon below the place for the reader to scroll it to its top (a view or Filter by
+      // hides most of them): while the frame is held, more of what was read ahead shows, the window growing
+      const short = s.held && t != null && t > el.scrollHeight - el.clientHeight + 1 && end < total
+      if (short) dragAfter.current = Math.min(DRAG_AFTER_MAX, dragAfter.current * 2)
+      const more = short ? aheadOf(line) : null
+      if (!more || more[more.length - 1].line <= end) {
+        if (t != null) el.scrollTop = t
+        if (!s.held) seeking.current = null
+        return
+      }
+      grow = true
     }
     // read ahead already: those records show now, and the reader settles on the place once they are drawn; while the
     // frame is held, at most every DRAG_SHOW_MS, or twice as long as the frame that last drew them took where that is
     // longer, so that drawing them leaves the tracks their frames
     const near = aheadOf(line)
     if (near) {
-      const wait = s.held ? shownAt.current + Math.max(DRAG_SHOW_MS, 2 * showCost.current) - performance.now() : 0
+      const wait = s.held && !grow ? shownAt.current + Math.max(DRAG_SHOW_MS, 2 * showCost.current) - performance.now() : 0
       if (wait > 0) {
         if (showTimer.current == null)
           showTimer.current = window.setTimeout(() => {
@@ -1036,6 +1067,22 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     [workspace, path, loading, total, takeTotal, hold],
   )
 
+  /** The page the reader is short of at its scroll position: the next while its records end within LOAD_AHEAD_PX of its
+   * bottom and the file goes on, else the one before while they start within LOAD_AHEAD_PX of its top. The next comes
+   * first: a page put in above a reader whose records end within its height cannot keep the record at its top in place,
+   * since the scroll position cannot pass the end. `own`: a scroll of the analyst's, which asks again past the line a
+   * page came back empty after; the one before only while the records kept leave room for a page (CAP), so that the two
+   * never take turns dropping each other's records. */
+  const shortOf = (el: HTMLElement, own: boolean): 'earlier' | 'later' | null => {
+    const cur = recordsRef.current
+    const f = cur[0]?.line
+    const l = cur[cur.length - 1]?.line
+    if (f == null || l == null) return null
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < LOAD_AHEAD_PX && total != null && l < total && (own || dryAfter.current !== l)) return 'later'
+    if (el.scrollTop < LOAD_AHEAD_PX && f > 1 && (own || cur.length + PAGE <= CAP)) return 'earlier'
+    return null
+  }
+
   const frame = useRef<number | null>(null)
   const onScroll = () => {
     if (frame.current != null) return
@@ -1045,8 +1092,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
       if (!el) return
       // the ruler is drawn in the frame the records scroll in
       flushSync(measure)
-      if (el.scrollTop < LOAD_AHEAD_PX) void loadMore('earlier')
-      if (el.scrollHeight - el.scrollTop - el.clientHeight < LOAD_AHEAD_PX) void loadMore('later')
+      const dir = shortOf(el, true)
+      if (dir) void loadMore(dir)
     })
   }
   useEffect(() => () => {
@@ -1058,6 +1105,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     if (held || !total) return
     ahead.current.clear()
     aheadDir.current = { line: null, dir: 1 }
+    dragAfter.current = DRAG_AFTER
     // the pages a held drag left unloaded around the place it let go of load as a scroll there would load them
     onScroll()
     track('reader-find', { target: `${path}#L${Math.max(1, Math.min(total, Math.floor(f * total) + 1))}`, detail: { from: 'scrollbar' } })
@@ -1075,13 +1123,17 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   }
 
   const binary = binarySize != null || builtins.binary
-  // the records shown leave room below them and the file goes on (a view hid some records): load the next page until
-  // the reader is full. A reader in a hidden tab has no height and loads nothing until shown.
-  useEffect(() => {
+  // the records shown leave room below them and the file goes on (a view or Filter by hides some records): load the next
+  // page until the reader is full, then the one before while the reader stands at the top of its records; again after
+  // each change of the records and each resize of what the body shows (records hidden or shown again). A reader in a
+  // hidden tab has no height and loads nothing until shown.
+  fill.current = () => {
     const el = bodyRef.current
-    if (!el || bodyHeight <= 0 || loading || !loaded || error || binary || last == null || total == null || last >= total || dryAfter.current === last) return
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < LOAD_AHEAD_PX) void loadMore('later')
-  }, [records, loading, loaded, error, binary, last, total, loadMore, viewType, bodyHeight])
+    if (!el || bodyHeight <= 0 || loading || !loaded || error || binary) return
+    const dir = shortOf(el, false)
+    if (dir) void loadMore(dir)
+  }
+  useEffect(() => fill.current(), [records, loading, loaded, error, binary, last, total, loadMore, viewType, bodyHeight])
 
   // ---- find in the file and go to a line
   const openFinder = useCallback((mode: 'find' | 'line') => setFinder((f) => ({ text: mode === 'line' ? ':' : f?.text ?? '', ask: (f?.ask ?? 0) + 1 })), [])
