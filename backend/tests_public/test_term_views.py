@@ -957,6 +957,27 @@ async def test_repository_colors_the_unit_its_value_belongs_to(repository):
     assert not any(re.search(r"\x1b\[38;2;[\d;]+m▌", x) for x in rows), "the track is plain"
 
 
+@needs_node
+async def test_repository_colors_an_agent_by_its_own_name_and_shows_its_records_mix_under_their_items_state(repository):
+    """Matt (10-08): Color by author did not color the Agents tab. An agent's row is the author itself, so under Author
+    its mark takes its own name's hue; under State, which the items it worked on carry, it stands for its records: no
+    mark of its own, their mix in a bar, a chip for each value the mixes draw, and a plain track."""
+    async def draw(by, ansi=False):
+        out = await term_views.draw_text(repository, "repository", cols=120, rows=12, wrap=DRAW_WRAP, ansi=ansi,
+                                         panel=False, keys=["4", "c", f"click:{by}"])
+        return out.splitlines()
+
+    plain, hued = await draw("Author"), await draw("Author", ansi=True)
+    at = [i for i, x in enumerate(plain) if re.match(r"(❯| ) ● (ash|birch|cedar) ", x)]
+    assert len(at) == 3 and all(re.search(r"\x1b\[38;2;[\d;]+m●", hued[i]) for i in at), plain
+    plain, hued = await draw("State"), await draw("State", ansi=True)
+    assert "Color by  State" in plain[2], plain[2]
+    assert all(c in plain[2] for c in ("● merged 3", "● fixed 3", "● closed 2", "● open 1", "● no state 3")), plain[2]
+    listed = [x for x in plain[5:] if re.search(r"  (ash|birch|cedar) ", x)]
+    assert len(listed) == 3 and all(re.match(r"(❯| ) █{6}  (ash|birch|cedar) ", x) for x in listed), listed
+    assert not any(re.search(r"\x1b\[38;2;[\d;]+m[●▌]", x) for x in hued[5:]), "no mark of its own, and a plain track"
+
+
 # ------------------------------------------------------------------------------------------------------ narrow panels
 
 
