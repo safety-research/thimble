@@ -5,8 +5,8 @@
 // inside Anthropic's sandbox runtime (or bubblewrap) with no network and no file of the user's. Node's permission model
 // lets it read this folder alone (the kit) and start no process, worker or addon; the program's source arrives in the
 // first message, so the program reads no file either. Messages are JSON, one per line: thimble's on stdin (init,
-// resize, key, click, drag, wheel, answer, labels, open), the program's on stdout (frame, query, cancel, act, state,
-// error, log). docs/terminal-views.md, "The protocol".
+// resize, key, click, drag, wheel, answer, labels, open, and the view checks' choices and choose), the program's on
+// stdout (frame, query, cancel, act, state, error, log, choices). docs/terminal-views.md, "The protocol".
 import { createInterface } from 'node:readline'
 
 import * as kit from './kit.mjs'

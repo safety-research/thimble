@@ -16,7 +16,9 @@ program, answers the program's reader queries through thimble's sandboxed views 
 of its own, `term-views`), keeps what the program asks to keep per view (terminal/views/<slug>.json in the workspace),
 and prints the frames the program draws on its own (after an answer) for thimble-term to draw. An act the program asks
 for (a record's place, a side thread, a label's panel) reaches thimble-term only with the frame that answers the
-analyst's own key or click, as the browser's label calls need the analyst's gesture.
+analyst's own key or click, as the browser's label calls need the analyst's gesture; a label the analyst checks in
+Color by, or chooses in Filter by or Rows, the host itself turns on in Files and every view, as show_label does
+(Program.show_labels).
 
 The sandbox (sandbox_argv): Node's permission model inside Anthropic's sandbox runtime (srt), or inside bubblewrap where
 srt does not run. Node lets the program read only the kit's folder and start no child process, worker, addon or WASI;
@@ -27,7 +29,8 @@ lives. A machine where neither runs draws no terminal view (the panel says why).
 `thimble view text <slug> --cwd <dir> --width 120` (draw_text) draws a view as text with no Claude Code, for the tests.
 draw_check draws a view's draft the same way for its checks (views.term_draws: at 120 and 200 columns, in light and
 dark) and its reviewer's pictures (view_review.py), and says whether the program failed, timed out or drew past the
-panel.
+panel; with `sweep`, the test label on, it then tries every choice of the kit's Color by, Filter by and Rows the program
+drew, as the browser's checks try a page's (Program.sweep), and says which gave an error.
 """
 from __future__ import annotations
 
@@ -72,6 +75,12 @@ ANSWER_MAX = 16 * 1024 * 1024
 # CHECK_ROWS tall, as a laptop's terminal and a large screen show the panel
 CHECK_DRAWS = ((120, "light"), (120, "dark"), (200, "light"), (200, "dark"))
 CHECK_ROWS = 40
+# the checks' sweep of the kit's choices (Program.sweep): the choices one sweep tries, and how long one is waited for
+SWEEP_MAX = 40
+CHOICE_WAIT_S = 10.0
+# the acts a program makes during the analyst's key or click: a record's place, a side thread, a label's panel, which
+# thimble-term does, and a label turned on or off in Files (`show`), which the host does (Program.show_labels)
+ACT_KINDS = ("open", "ask", "label", "show")
 IDLE_S = 600.0  # the host ends this long after its last view closed
 LINE_MAX = 8 * 1024 * 1024
 ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ")
@@ -141,6 +150,18 @@ def labels_list(c: str, claimed: list[str] | None = None) -> list[dict[str, Any]
         d["on"] = bool(k.get("shown") or f.get("concept") == k["id"])
         out.append(d)
     return out
+
+
+def probe_label() -> dict[str, Any]:
+    """The checks' test label (views.probe_context) as labels_list lists a label: on, over the view's files, its one
+    value marking about one record in PROBE_EVERY, as the browser's checks' `choices` state has it."""
+    from . import kernel_thimble, views  # noqa: PLC0415
+
+    name = kernel_thimble.PROBE_NAME
+    return {"id": kernel_thimble.PROBE_ID, "name": name, "kind": "", "text": "", "spec": "", "scope": "",
+            "values": [{"name": name, "highlight": True, "n": None,
+                        "meaning": f"the checks' test label: about one record in {views.PROBE_EVERY}"}],
+            "here": True, "on": True}
 
 
 def labels_signature(c: str) -> str:
@@ -312,10 +333,13 @@ class Program:
     """One open view's sandboxed program (module note)."""
 
     def __init__(self, c: str, slug: str, *, pid: str = "", push: Push | None = None, wrap: str | None = None,
-                 keep: bool = True, live: bool = False, answers: int = 0) -> None:
+                 keep: bool = True, live: bool = False, answers: int = 0, probe: bool = False) -> None:
         self.c, self.slug, self.id = c, slug, pid or secrets.token_hex(6)
         self.keep = keep  # whether it opens on what the view kept and keeps what changes (False: as the view opens)
         self.live = live  # whether it runs the view's draft and its reader calls read the draft (the view's checks)
+        # whether its one label is the checks' test label, on, in place of the workspace's (views.probe_context), as the
+        # browser's checks load the page with it
+        self.probe = probe
         self.answers_kept = answers  # how many of the reader's answers to keep (`answers`), for the view's checks
         self.answers: list[Any] = []
         self.fetches = 0
@@ -348,6 +372,22 @@ class Program:
         self.synced_at = 0.0
         self.settled = False
         self.unanswered = False
+        # the lists of choices the program answered (choices), and while the checks try them (sweeping) every error it
+        # said and every error frame it drew, in order (said)
+        self.asked: dict[int, asyncio.Future] = {}
+        self.ask_n = 0
+        self.sweeping = False
+        self.said: list[str] = []
+
+    def _labels(self) -> list[dict[str, Any]]:
+        """The labels the program lists: the workspace's (labels_list), or the checks' test label alone (probe)."""
+        return [probe_label()] if self.probe else labels_list(self.c, self.claimed)
+
+    def _ctx(self, want: list[str]) -> dict[str, Any]:
+        """The labels context its queries run under: the workspace's (_context), or the test label's (probe)."""
+        from . import views  # noqa: PLC0415
+
+        return views.probe_context() if self.probe else _context(self.c, want)
 
     async def start(self, cols: int, rows: int, theme: str = "dark", ref: str | None = None,
                     text: str = "") -> dict[str, Any]:
@@ -372,7 +412,7 @@ class Program:
         init = {"t": "init", "source": source, "cols": int(cols), "rows": int(rows), "theme": theme,
                 "view": {"slug": self.slug, "name": view.get("name") or self.slug},
                 "state": await asyncio.to_thread(read_state, self.c, self.slug) if self.keep else {},
-                "labels": await asyncio.to_thread(labels_list, self.c, self.claimed), "open": place, "text": text}
+                "labels": await asyncio.to_thread(self._labels), "open": place, "text": text}
         await self._send(init)
         try:
             return await asyncio.wait_for(asyncio.shield(self.first), START_WAIT_S)
@@ -429,7 +469,7 @@ class Program:
         why = self.errors[-1] if self.errors else "it ended"
         if not self.first.done():
             self.first.set_exception(TermViewError(f"the view's program ended: {why}"))
-        for f in [*self.waiting.values(), *self.syncs.values()]:
+        for f in [*self.waiting.values(), *self.syncs.values(), *self.asked.values()]:
             if not f.done():
                 f.set_result(None)
         self.activity.set()
@@ -449,6 +489,8 @@ class Program:
         elif t == "frame":
             self.frame = msg
             self.last_frame_at = time.monotonic()
+            if self.sweeping and msg.get("error"):
+                self.said.append(str(msg["error"])[:500])
             if not self.first.done():
                 self.first.set_result(msg)
                 return
@@ -470,14 +512,20 @@ class Program:
                 task.cancel()
         elif t == "act":
             n, a = msg.get("n"), msg.get("act")
-            if isinstance(n, int) and isinstance(a, dict) and a.get("kind") in ("open", "ask", "label"):
+            if isinstance(n, int) and isinstance(a, dict) and a.get("kind") in ACT_KINDS:
                 self.acts.setdefault(n, []).append({k: str(v)[:2000] for k, v in a.items()})
+        elif t == "choices":
+            f = self.asked.get(msg.get("id"))
+            if f is not None and not f.done():
+                f.set_result(msg.get("choices"))
         elif t == "state" and self.keep:
             with contextlib.suppress(OSError):
                 write_state(self.c, self.slug, msg.get("state"))
         elif t == "error":
             self.errors.append(str(msg.get("message") or "")[:500])
             del self.errors[:-20]
+            if self.sweeping:
+                self.said.append(self.errors[-1])
         elif t == "log":
             self.logs.append(str(msg.get("text") or "")[:500])
             del self.logs[:-50]
@@ -519,15 +567,15 @@ class Program:
         if isinstance(q, dict) and views.KIT_QUERY in q:
             what = q.get(views.KIT_QUERY)
             if what == "labels":
-                return await asyncio.to_thread(labels_list, self.c, self.claimed)
+                return await asyncio.to_thread(self._labels)
             if what == "marks":
                 refs = [str(r) for r in (q.get("refs") or [])][: views.MARKS_MAX]
-                ctx = await asyncio.to_thread(_context, self.c, want)
+                ctx = await asyncio.to_thread(self._ctx, want)
                 with self._reads():
                     marks = await views.marks_for(self.c, self.slug, refs, ctx)
                 return {r: {v["id"]: v["value"] for v in m.get("values") or []} for r, m in marks.items()}
             return (await asyncio.to_thread(views.kit_answer, self.c, q))[1]
-        ctx = await asyncio.to_thread(_context, self.c, want)
+        ctx = await asyncio.to_thread(self._ctx, want)
         self.fetches += 1
         with self._reads():
             return await views.reader_call(self.c, self.slug, "records", q, labels=ctx)
@@ -550,6 +598,8 @@ class Program:
         return {"frame": frame or self.frame, "acts": self.acts.pop(n, [])}
 
     async def labels_changed(self) -> None:
+        if self.probe:
+            return
         sig = await asyncio.to_thread(labels_signature, self.c)
         if sig == self.labels_sig:
             return
@@ -560,6 +610,68 @@ class Program:
         with contextlib.suppress(TermViewError, ConnectionError):
             await self._send({"t": "labels", "labels": await asyncio.to_thread(labels_list, self.c, self.claimed),
                               "filter": ctx.get("filter")})
+
+    async def show_labels(self, acts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The `show` acts among `acts` done: each label the analyst checked in Color by, or chose in Filter by or Rows,
+        turned on in Files and every view, or one unchecked turned off, as show_label does (concepts.show_concept), and
+        the labels sent to the program again. The other acts, for thimble-term."""
+        from . import concepts  # noqa: PLC0415
+
+        rest = [a for a in acts if a.get("kind") != "show"]
+        shown = [a for a in acts if a.get("kind") == "show" and a.get("id")]
+        for a in shown:
+            try:
+                await asyncio.to_thread(concepts.show_concept, self.c, str(a["id"]), a.get("on") != "off")
+            except Exception as e:  # noqa: BLE001 — a label gone or of cards: the view keeps its choice
+                log.info("view %s: label %s not turned %s: %s", self.slug, a.get("id"), a.get("on"), e)
+        if shown:
+            await self.labels_changed()
+        return rest
+
+    async def choices(self, wait: float = SYNC_WAIT_S) -> list[tuple[str, str]]:
+        """Every choice of the kit's parts the program drew, [(control, choice)] (kit.mjs `choices`), Color by's first;
+        none when it does not answer within `wait` seconds."""
+        self.ask_n += 1
+        n = self.ask_n
+        fut = asyncio.get_running_loop().create_future()
+        self.asked[n] = fut
+        try:
+            await self._send({"t": "choices", "id": n})
+            got = await asyncio.wait_for(fut, wait)
+        except (asyncio.TimeoutError, TermViewError, ConnectionError):
+            return []
+        finally:
+            self.asked.pop(n, None)
+        return [(str(x[0]), str(x[1])) for x in got or [] if isinstance(x, list) and len(x) == 2]
+
+    async def sweep(self, wait: float = CHOICE_WAIT_S) -> list[dict[str, Any]]:
+        """Every choice of the kit's parts the program drew tried in turn, as the analyst's own key makes it, Color by's
+        Off and Filter by's and Rows' None among them, then each part's first choice again after the others, as the
+        browser's checks try a page's (view_shot.mjs `sweep`): [{control, choice, errors}], `errors` what the program
+        said or drew as an error, and the fetches its reader could not answer, while it drew that choice, each choice
+        waited for until the program is idle or `wait` seconds pass."""
+        listing = (await self.choices())[:SWEEP_MAX]
+        firsts: dict[str, str] = {}
+        for control, choice in listing:
+            firsts.setdefault(control, choice)
+        out: list[dict[str, Any]] = []
+        self.sweeping = True
+        try:
+            for control, choice, again in [*((a, b, False) for a, b in listing), *((a, b, True) for a, b in firsts.items())]:
+                if self.closed:
+                    break
+                self.said.clear()
+                failed = len(self.failed)
+                await self.event({"t": "choose", "control": control, "choice": choice})
+                await self.settle(timeout=wait)
+                errors = [*self.said, *(f"a fetch failed: {e}" for e in self.failed[failed:])]
+                if self.closed:
+                    errors.append(f"the program ended: {self.errors[-1] if self.errors else 'it exited'}")
+                out.append({"control": control, "choice": f"{choice} (after the others)" if again else choice,
+                            "errors": list(dict.fromkeys(errors))[:3]})
+        finally:
+            self.sweeping = False
+        return out
 
     def quiet(self, quiet: float = SETTLE_QUIET_S) -> bool:
         """Whether the program is quiet: no query out and no new frame for `quiet` seconds."""
@@ -746,21 +858,23 @@ async def draw_text(c: str, slug: str, *, cols: int = 120, rows: int = 40, keys:
 
 async def draw_check(c: str, slug: str, *, cols: int, theme: str, rows: int = CHECK_ROWS, ref: str | None = None,
                      keys: list[str] | None = None, answers: int = 0, wrap: str | None = None,
-                     timeout: float | None = None) -> dict[str, Any]:
+                     timeout: float | None = None, sweep: bool = False) -> dict[str, Any]:
     """The view's draft (its live folder) drawn as draw_text draws it, for the view's checks (views.term_draws) and its
     reviewer's pictures: {cols, rows, theme, ref, ok, text, error, timeout, overflow, missed, answers, fetches}. Not ok
     for a program that fails (an error it throws, a fetch its reader cannot answer, a program that ends or draws
     nothing), one still busy after `timeout` seconds, SETTLE_MAX_S by default (a fetch still out, or frame after
     frame), or a frame that draws past the panel's rows or columns, which the kit cuts (the frame's `overflow`). `text`
     is the panel as draw_text shows it; `missed` the keys of `keys` that found no hot region; `answers` the first that
-    many reader answers."""
+    many reader answers. With `sweep` its one label is the checks' test label, on (probe_label), and once it is drawn
+    ok every choice of the kit's parts it drew is tried in turn (Program.sweep), each with its errors in `choices`,
+    which are no part of the draw's own: `ok`, `text` and the rest are the view as it opens."""
     from . import views  # noqa: PLC0415
 
     views._bind_loop()
     timeout = SETTLE_MAX_S if timeout is None else timeout
     out: dict[str, Any] = {"cols": cols, "rows": rows, "theme": theme, "ref": ref, "ok": False, "text": "",
                            "missed": [], "answers": [], "fetches": 0}
-    p = Program(c, slug, wrap=wrap, keep=False, live=True, answers=answers)
+    p = Program(c, slug, wrap=wrap, keep=False, live=True, answers=answers, probe=sweep)
     try:
         try:
             frame = await p.start(cols, rows, theme, ref, text="plain")
@@ -789,6 +903,9 @@ async def draw_check(c: str, slug: str, *, cols: int, theme: str, rows: int = CH
             out["overflow"] = dict(frame["overflow"])
         else:
             out["ok"] = True
+        if sweep and out["ok"]:
+            out["choices"] = await p.sweep()
+            out["fetches"] = p.fetches
         return out
     finally:
         await p.close()
@@ -938,7 +1055,9 @@ class Host:
 
                 ref = str(ev.get("ref") or "")
                 ev = {"t": "open", "place": await views.open_place(self.c, p.slug, ref, views.locator_of(ref))}
-            return await p.event(ev)
+            got = await p.event(ev)
+            # a label the analyst checked or chose is turned on here; the rest are thimble-term's to do
+            return {**got, "acts": await p.show_labels(got["acts"])}
         raise TermViewError(f"no route {path}")
 
 
