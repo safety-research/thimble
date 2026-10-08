@@ -1067,8 +1067,8 @@
     soon()
   }
   // ---------------------------------------------------------------- moving the viewfinder
-  // the viewfinder set to [a, b] (null for the whole span): drawn at once, the page told while it moves (onInput) and
-  // once it settles (onChange)
+  // the viewfinder set to [a, b] (null for the whole span): drawn at once, the page told while it moves (onInput, at
+  // each step of a drag or of the wheel) and once it settles (onChange)
   Range.prototype.set = function (w, how) {
     var was = this.win ? this.win.join() : ''
     this.win = this.clampWin(w)
@@ -1076,9 +1076,9 @@
     if (this.sc && this.axisEl && (was === '') !== !this.win) this.drawAxis()
     var now = this.win ? this.win.join() : ''
     if (now === was && how !== 'settle') return
-    if (how === 'input' || how === 'drag') {
+    if (how === 'input' || how === 'drag' || how === 'wheel') {
       if (this.onInput) this.call(this.onInput)
-      return
+      if (how !== 'wheel') return
     }
     this.settle(how === 'wheel' ? SETTLE : 0, how === 'quiet')
   }

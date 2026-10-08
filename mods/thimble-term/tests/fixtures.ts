@@ -221,6 +221,31 @@ export type World = {
   /** thimble's view host (`thimble view host`, hooks/viewhost.ts) as the test plays it: each request it got, and the
    *  frame and acts it answers an event with */
   viewHost: { requests: { path: string; body: Record<string, unknown> }[]; frame: (n: number, ev?: Record<string, unknown>) => Record<string, unknown>; acts: (ev: Record<string, unknown>) => Record<string, unknown>[]; started: number }
+  /** Claude Code's placement of panes (placing), when a test plays it; left out, every open is placed */
+  place?: Placement
+}
+
+/** How Claude Code places a pane (UiOpenResult): an open it was asked for (`asking`: a Button's handler still runs, or
+ *  the hook of a command the person typed) at any width; any other from 144 columns, 110 for an id once asked and not
+ *  closed by hand since; below that the pane waits undrawn (`waiting`) until the terminal is widened to that width
+ *  (`widen`). `log`: each open, asked or not, and whether it was placed. */
+export type Placement = { columns: number; asking: boolean; asked: Set<string>; waiting: Set<string>; log: { id: string; asked: boolean; placed: boolean }[]; widen: (columns: number) => void }
+
+/** Claude Code's placement played in world `w` at `columns` wide: from now on its opens answer as Claude Code's do. */
+export function placing(w: World, columns: number): Placement {
+  const pl: Placement = {
+    columns,
+    asking: false,
+    asked: new Set(),
+    waiting: new Set(),
+    log: [],
+    widen: n => {
+      pl.columns = n
+      for (const id of [...pl.waiting]) if (n >= (pl.asked.has(id) ? 110 : 144)) pl.waiting.delete(id)
+    },
+  }
+  w.place = pl
+  return pl
 }
 
 /** A terminal view's frame as a program draws it (backend/app/term_kit/kit.mjs): a top row with a control, a list of
@@ -450,19 +475,47 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     }
     return ok({ ok: true })
   })
+  const isOpen = (id: string) => w.opened.filter(x => x === id).length > w.closed.filter(x => x === id).length
   on('ui.open', ($, e) => {
     w.focusAsked.push(Boolean((e as { focus?: unknown }).focus))
     if (w.paneFocused === false && w.grantOnReopen && w.opened.includes(e.id) && (e as { focus?: unknown }).focus) w.paneFocused = true
+    const pl = w.place
+    // a pane drawn already is retitled, and stays drawn
+    const drawn = isOpen(e.id) && !pl?.waiting.has(e.id)
     w.opened.push(e.id)
     w.panes.push({ id: e.id, title: String((e as { title?: unknown }).title ?? ''), ...(typeof (e as { columns?: unknown }).columns === 'number' ? { columns: (e as { columns: number }).columns } : {}) })
-    return { value: { isPlaced: true } } as never
+    if (!pl || drawn) return { value: { isPlaced: true } } as never
+    const floor = pl.asked.has(e.id) ? 110 : 144
+    if (pl.asking) pl.asked.add(e.id)
+    const placed = pl.asking || pl.columns >= floor
+    pl.log.push({ id: e.id, asked: pl.asking, placed })
+    if (placed) {
+      pl.waiting.delete(e.id)
+      return { value: { isPlaced: true } } as never
+    }
+    pl.waiting.add(e.id)
+    return { value: { isPlaced: false, reason: `unasked below ${floor} columns (${pl.columns} now${floor === 110 ? ', an id the person opened before' : ''}): placed when the person opens it, or when the terminal is widened to ${floor} columns` } } as never
   })
   on('ui.close', ($, e) => {
     w.closed.push(e.id)
+    w.place?.waiting.delete(e.id)
+    // closed by hand, the pane is no longer one the person opened before
+    if (e.origin.kind === 'person') w.place?.asked.delete(e.id)
     return { value: undefined } as never
   })
-  // the panes open: each opened and not closed since, placed
-  on('ui.panes', () => ({ value: [...new Set(w.opened)].filter(id => w.opened.filter(x => x === id).length > w.closed.filter(x => x === id).length).map(id => ({ id, isPlaced: true, ...(w.paneFocused === undefined ? {} : { isFocused: w.paneFocused }) })) }) as never)
+  // the panes open: each opened and not closed since, placed unless it waits undrawn
+  on('ui.panes', () => ({ value: [...new Set(w.opened)].filter(isOpen).map(id => ({ id, isPlaced: !w.place?.waiting.has(id), ...(w.paneFocused === undefined ? {} : { isFocused: w.paneFocused }) })) }) as never)
+  // a press is the person's own while its Button's handler runs: an open made then is one Claude Code was asked for
+  on('ui.press', async ($, e, next) => {
+    const pl = w.place
+    if (!pl) return next(e)
+    pl.asking = true
+    try {
+      return await next(e)
+    } finally {
+      pl.asking = false
+    }
+  })
   on('ui.toast', ($, e) => {
     w.toasts.push(String((e as { text?: unknown }).text ?? ''))
     return { value: undefined } as never

@@ -1072,8 +1072,8 @@ button.label-chip:hover {
   flex: none;
   margin-top: 2px;
 }
-/* the line under the gate's field: how the orientation runs (as a subagent, in main's mode), or why Start is off (no
-   hooks module, plan mode) in the warning's colour */
+/* the line under the gate's field while Start is off: why (main not started by `thimble`, no session, no hooks module,
+   plan mode), a fault in the warning's color */
 .chat-gate-mode {
   display: flex;
   align-items: flex-start;

@@ -409,7 +409,7 @@ describe('the transcript', () => {
     { ref: 's.jsonl#L2', t: T0 + 5, speaker: 'lead', kind: 'tool', tool: 'Bash', input: 'pytest -q', output: 'FAILED test_a\n1 failed', error: true },
     { ref: 's.jsonl#L4', t: T0 + 86400, speaker: 'lead', kind: 'text', text: 'One test fails.' },
   ]
-  test("as thimble-term's file view draws a transcript: the clock dim, ● and the speaker bold, the words under the name, a tool call one dim ⎿ row, the day on a dim row where it changes", async () => {
+  test("as thimble-term's file view draws a transcript: the clock dim, ● and the speaker bold, the words under the name, a tool call one dim ⎿ row (a failed one with × and its tool in red), the day on a dim row where it changes", async () => {
     init({ cols: 70 })
     const tr = kit.transcript({})
     kit.draw((d: any) => tr.draw(d, { turns: TURNS, title: 'lead · Run 1' }))
@@ -421,7 +421,7 @@ describe('the transcript', () => {
       '❯ 09:00:00  ● user',
       '              Find the failing test and say why it fails, then',
       '              propose the smallest fix you can find in the code base.',
-      '  09:00:05  ⎿ Bash pytest -q',
+      '  09:00:05  ⎿ × Bash pytest -q',
       '  17 May 2026',
       '  09:00:00  ● lead',
       '              One test fails.',
@@ -429,6 +429,9 @@ describe('the transcript', () => {
     expect(runsAt(f, 1).find((r) => r.s.includes('16 May'))!.d).toBe(true)
     expect(runsAt(f, 2).find((r) => r.s.includes('user'))!.b).toBe(true)
     expect(runsAt(f, 5).find((r) => r.s.includes('⎿'))!.d).toBe(true)
+    // the failed call: × and its tool in the problem red, as the lanes draw it; its input dim
+    expect(runsAt(f, 5).find((r) => r.s.includes('× Bash'))!.fg).toBe(kit.COLORS.problem)
+    expect(runsAt(f, 5).find((r) => r.s.includes('pytest'))!.d).toBe(true)
     // Enter on the tool call opens it in place: what it ran in the code color, what came back in red
     await key('down')
     await key('return')

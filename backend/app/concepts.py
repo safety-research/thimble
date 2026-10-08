@@ -12,7 +12,8 @@ in a dedicated kernel. Units: `record` (a line, `<path>#L<n>`), `agent` (a file)
 card, `card:<id>`, `cell:<id>` read as the same unit) and `span` (a report sentence). An apply runs as a background task
 whose run record streams on GET .../events. A whole file (`agent`, a label that marks files) reaches code as the file
 whole (`data`, build_code_wrapper) beside its records, and a prompt as its records' texts, or a JSON document as itself,
-shortened to fit (iter_units, fit_json); either up to WHOLE_MAX_BYTES.
+as far as its model's context holds (whole_read_chars), a JSON document shortened to fit (iter_units, fit_json); either
+up to WHOLE_MAX_BYTES. A run that reads some only in part keeps them as its `cut` (read_cut).
 
 Trials: apply_label with a `limit` defines a trial (`trial: true`), left out of the Labels list and label counts until
 a run without a limit makes it a label; a limited run over files samples its units across files (trial_sample).
@@ -134,9 +135,15 @@ BACKOFF_POLL = 0.2        # seconds between cancel checks while a retry waits
 QUOTE_MAX = 4_000         # chars of a classifier's quote kept on a row
 WINDOW_TEXT_MAX = 30_000  # chars of a record's or a sentence's text in one classifier item; a longer one is read in windows
 WINDOW_OVERLAP = 400      # chars each window repeats of the one before it
-UNIT_TEXT_MAX = 30_000    # chars for an agent, run or cell unit, which are read no further
+UNIT_TEXT_MAX = 30_000    # chars of a card a prompt label reads, and of a unit a regex reads, which go no further
+# a prompt label over whole files or runs (WHOLE_UNITS) reads as much of each as fits its model's context (whole_read_chars):
+# the window less READ_RESERVE_TOKENS, at CHARS_PER_TOKEN, few as JSON-heavy text has them, so the count stays under it
+WHOLE_UNITS = ("agent", "run")
+CHARS_PER_TOKEN = 3
+READ_RESERVE_TOKENS = 100_000  # of the window, for the label's instructions and examples, Claude Code's own and the answer
+CUT_REFS_KEPT = 500       # the units a run read in part that its `cut` names, which the Labels pane lists
 # bytes of a file a whole-file unit holds whole: a code label's `data` (a JSON document parsed, a file's text), and the
-# JSON document a prompt label reads whole, shortened to UNIT_TEXT_MAX (fit_json); a larger file is read by its records
+# JSON document a prompt label reads whole, shortened to what it reads (fit_json); a larger file is read by its records
 WHOLE_MAX_BYTES = records.POINTER_PARSE_MAX_BYTES
 CHUNK = 500               # records read per corpus.load_records call
 RATIONALE_MAX = 500       # chars of a classifier's rationale kept on a row
@@ -177,6 +184,18 @@ def labels_model(c: str) -> dict[str, Any]:
     """The model, effort and speed of the labels role's calls for a workspace, and the refusal row's
     (config.call_settings)."""
     return config.call_settings(c, "labels")
+
+
+def label_model(c: str, concept: dict) -> str:
+    """The model a prompt label's calls run on: the label's own, else the labels role's (Settings' row for labels)."""
+    return str(concept.get("model") or "") or labels_model(c)["model"]
+
+
+def whole_read_chars(c: str, concept: dict) -> int:
+    """How many characters of a whole file or run a prompt label reads: what fits its model's context
+    (config.context_tokens) less READ_RESERVE_TOKENS, at CHARS_PER_TOKEN; UNIT_TEXT_MAX at the least."""
+    tokens = config.context_tokens(label_model(c, concept)) - READ_RESERVE_TOKENS
+    return max(UNIT_TEXT_MAX, tokens * CHARS_PER_TOKEN)
 
 
 # --------------------------------------------------------------------------- storage
@@ -1259,11 +1278,11 @@ def groups_for(sources: list[dict], unit: str) -> list[dict]:
 
 
 
-def iter_units(corpus_dir: Path, sources: list[dict], unit: str) -> Iterator[Unit]:
+def iter_units(corpus_dir: Path, sources: list[dict], unit: str, cap: int = UNIT_TEXT_MAX) -> Iterator[Unit]:
     """The file units of the matched sources, in corpus order. A whole file's or a run's text is each file's records'
-    texts, but a JSON document's is the document itself (whole_document), shortened to its share of UNIT_TEXT_MAX
-    (fit_json), since its records leave out every entry beside its lists (a store of messages by id, the conversations
-    that list them)."""
+    texts, but a JSON document's is the document itself (whole_document), shortened to its share of `cap`, the
+    characters read of the unit (fit_json), since its records leave out every entry beside its lists (a store of
+    messages by id, the conversations that list them)."""
     if unit == "record":
         for src in sources:
             for r in _iter_records(corpus_dir, src):
@@ -1274,7 +1293,7 @@ def iter_units(corpus_dir: Path, sources: list[dict], unit: str) -> Iterator[Uni
         srcs = [by_path[p] for p in g["paths"]]
         u = Unit(g["ref"], g["paths"], lambda: iter(()))
 
-        def texts(srcs=srcs, u=u, share=max(1, UNIT_TEXT_MAX // len(srcs))) -> Iterator[tuple[str, str]]:
+        def texts(srcs=srcs, u=u, share=max(1, cap // len(srcs))) -> Iterator[tuple[str, str]]:
             for s in srcs:
                 found, doc = whole_document(corpus_dir, s)
                 if found:
@@ -1849,7 +1868,7 @@ RUN_FIELDS: dict[str, Any] = {
     "run_id": None, "status": "running", "started": None, "created_by": None, "paths": None,
     "total": None, "matched_total": None, "done": 0, "labeled": 0, "failed": 0, "matches": 0,
     "files_total": None, "files_done": 0, "files_indexed": 0, "file": None, "bytes_total": None, "bytes_done": 0,
-    "eta_s": None, "message": None, "phase": None, "examples": 0,
+    "eta_s": None, "message": None, "phase": None, "examples": 0, "cut": None,
 }
 
 
@@ -2066,7 +2085,9 @@ def labels_tool(label: dict) -> Any:
 async def labels_task(c: str, inp: dict, *, model: str | None = None,
                       on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None) -> Any:
     """thimble's own labels task (tasks.py): one classifier batch through model.structured (never raises; read the
-    CallResult's status), on `model` when given, else the label's own model, else the labels role's."""
+    CallResult's status), on `model` when given, else the label's own model, else the labels role's. A batch longer than
+    a 200k-token window holds, a whole file read as far as the model's context holds (whole_read_chars), runs on the
+    model's 1M-token window, which Claude Code opens with `[1m]` (config.long_context), and so does its refusal rerun."""
     from . import model as model_mod
 
     from . import prompts, userconf  # noqa: PLC0415
@@ -2075,6 +2096,10 @@ async def labels_task(c: str, inp: dict, *, model: str | None = None,
         system, user = build_classify_prompt(inp)
     role = labels_model(c)
     model_name = model or str(inp["label"].get("model") or "") or role["model"]
+    refusal = role["refusal"]
+    if len(user) > (config.CONTEXT_TOKENS - READ_RESERVE_TOKENS) * CHARS_PER_TOKEN:
+        model_name = config.long_context(config.exact_model(model_name))
+        refusal = {**refusal, "model": config.long_context(config.exact_model(refusal["model"]))} if refusal else None
     with capture.scope("concepts labels", keep=True):
         return await model_mod.structured(
             user,
@@ -2082,7 +2107,7 @@ async def labels_task(c: str, inp: dict, *, model: str | None = None,
             model=model_name,
             effort=role["effort"],
             speed=role["speed"],
-            refusal=role["refusal"],
+            refusal=refusal,
             system=system,
             cwd=config.corpus_dir(c),
             on_retry=on_retry,
@@ -2154,23 +2179,24 @@ class _Item(NamedTuple):
     short: bool = False
 
 
-def _items(u: Unit, unit: str) -> list[_Item]:
+def _items(u: Unit, unit: str, cap: int = UNIT_TEXT_MAX) -> list[_Item]:
     """A unit's classifier items: a record or a sentence whole, in windows of WINDOW_TEXT_MAX when it is longer; any
-    other unit its first UNIT_TEXT_MAX characters."""
+    other unit its first `cap` characters (whole_read_chars for a whole file or run)."""
     if unit in ("record", "span"):
         parts = u.windows(WINDOW_TEXT_MAX)
         return [_Item(u, t, i, len(parts)) for i, t in enumerate(parts)]
-    t, cut = u.text_cut(UNIT_TEXT_MAX)
+    t, cut = u.text_cut(cap)
     return [_Item(u, t, cut=cut, short=u.shortened)]
 
 
-def _batches(units: Iterator[Unit], unit: str, per_call: int) -> Iterator[list[_Item]]:
-    """The units' items (_items) in the batches the classifier calls carry: `per_call` items at most, fewer when their
-    texts add up to more than BATCH_CHARS. A unit's windows follow one another."""
+def _batches(units: Iterator[Unit], unit: str, per_call: int, cap: int = UNIT_TEXT_MAX) -> Iterator[list[_Item]]:
+    """The units' items (_items, read to `cap`) in the batches the classifier calls carry: `per_call` items at most,
+    fewer when their texts add up to more than BATCH_CHARS, so an item longer than that goes in a call of its own. A
+    unit's windows follow one another."""
     batch: list[_Item] = []
     chars = 0
     for u in units:
-        for it in _items(u, unit):
+        for it in _items(u, unit, cap):
             if batch and (len(batch) >= per_call or chars + len(it.text) > BATCH_CHARS):
                 yield batch
                 batch, chars = [], 0
@@ -2236,16 +2262,52 @@ def _fallback_message(n: int, refused: str, fallback: str) -> str:
                                    fallback=model_label(fallback), them="it" if n == 1 else "them")
 
 
+def input_tokens(usage: dict | None) -> int:
+    """The input tokens of a call's usage (model.usage_of), the cached ones included; 0 when it says none."""
+    u = usage or {}
+    return sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+
+
+def tokens_word(n: int) -> str:
+    """A count of tokens in a few characters: 950, 31k, 912k, 1.2M."""
+    return f"{n:,}" if n < 1000 else f"{round(n / 1000):,}k" if n < 999_500 else f"{n / 1_000_000:.1f}M"
+
+
+def read_cut(refs: list[str], tokens: list[int], short: int, total: int | None, unit: str) -> dict:
+    """What a run of a prompt label over whole files or runs says of the units it read only in part: {n, of, short,
+    tokens, refs, line}, `tokens` the median of what it sent of each, `short` the JSON documents among them read whole with
+    their long parts shortened (fit_json), `refs` the first CUT_REFS_KEPT, and `line` the sentence the tool's result,
+    the Labels pane, the label's card and the terminal's label panel show."""
+    n = len(refs)
+    tok = sorted(tokens)[len(tokens) // 2] if tokens else 0
+    noun = "file" if unit == "agent" else unit
+    head = f"{n:,} of {total:,} {noun}s" if total else f"{n:,} {noun}{'' if n == 1 else 's'}"
+    line = f"{head} {'was' if n == 1 else 'were'} longer than the model reads; "
+    each = "it" if n == 1 else "each"
+    shortened = "long strings, lists and mappings shortened"
+    if short >= n:
+        line += f"it read {each} whole in ~{tokens_word(tok)} tokens, {'its' if n == 1 else 'their'} {shortened}"
+    elif short:
+        line += (f"it read the first ~{tokens_word(tok)} tokens of each, and {short:,} JSON document"
+                 f"{' whole with its' if short == 1 else 's whole with their'} {shortened}")
+    else:
+        line += f"it read the first ~{tokens_word(tok)} tokens of {each}"
+    return {"n": n, "of": total, "short": short, "tokens": tok, "refs": refs[:CUT_REFS_KEPT], "line": line}
+
+
 def _cancelled_message(n: int, unit: str) -> str:
     return f"cancelled by the analyst after {n:,} {unit}{'' if n == 1 else 's'}; the rows written so far are kept"
 
 
 async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path, cancel: threading.Event,
-                        files: list[str] | None = None, comment: bool = True) -> tuple[int, int, str | None]:
+                        files: list[str] | None = None, comment: bool = True,
+                        cap: int = UNIT_TEXT_MAX) -> tuple[int, int, str | None]:
     """The classifier calls of a prompt label, BATCH_ITEMS units per call and up to CONCURRENCY calls running: a 429 or
     529 halves the calls let run, and each round of answered calls lets one more run again. Rows are committed in the
     units' order. `cancel` stops new calls; a rate-limited call is retried with backoff; a batch that keeps ending without a
-    usable tool call is asked in halves; calls that ran on the fallback model are counted in the run's message."""
+    usable tool call is asked in halves; calls that ran on the fallback model are counted in the run's message. A whole
+    file or run is read to `cap` characters (whole_read_chars), and the units read in part are the run record's `cut`
+    (read_cut)."""
     await asyncio.to_thread(_require_model_access)
     unit = concept["unit"]
     per_call, in_flight = BATCH_ITEMS, CONCURRENCY
@@ -2263,6 +2325,10 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
     messages: list[str] = []
     fell_back: dict[tuple[str, str], int] = {}  # (refused model, fallback model) -> calls
     slots = asyncio.Semaphore(in_flight)  # the CLI processes of all calls, a batch's halves included
+    sent: dict[str, int] = {}  # a unit asked alone in one turn -> the input tokens its call counted
+    cut_refs: list[str] = []  # the whole files or runs read in part, in order
+    cut_tokens: list[int] = []  # the tokens sent of each, as its call counted them or estimated (CHARS_PER_TOKEN)
+    cut_short = 0  # of them, the JSON documents read whole with their long parts shortened (fit_json), not cut
 
     def note(msg: str | None) -> None:
         if msg and msg not in messages and len(messages) < MESSAGES_KEPT:
@@ -2296,6 +2362,8 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                 fell_back[pair] = fell_back.get(pair, 0) + 1
             if call.status == "ok":
                 grow()
+                if len(items) == 1 and call.attempts == 1 and (n := input_tokens(call.usage)):
+                    sent[items[0][0]] = n
                 break
             if call.status == "rate_limited":
                 slow(since)
@@ -2351,12 +2419,12 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
             msg = cause if msg is None else f"{cause}; {msg}"
         return answers, msg
 
-    batches = _batches(units, unit, per_call)
+    batches = _batches(units, unit, per_call, cap)
     windows: list[dict | None] = []  # the answers so far of the unit whose windows are being read
 
     def settle(b: list[_Item], answers: list[dict | None]) -> tuple[list[dict], int]:
         """The rows of the units whose last item is in `b`, and how many of those units failed."""
-        nonlocal cut, short
+        nonlocal cut, short, cut_short
         rows: list[dict] = []
         n_failed = 0
         for it, a in zip(b, answers):
@@ -2368,6 +2436,10 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
             r = merge_windows(labels, windows) if it.parts > 1 else a
             cut += it.cut
             short += it.short
+            if (it.cut or it.short) and unit in WHOLE_UNITS:
+                cut_refs.append(it.unit.ref)
+                cut_tokens.append(sent.pop(it.unit.ref, 0) or -(-len(it.text) // CHARS_PER_TOKEN))
+                cut_short += it.short and not it.cut
             if r is None:
                 n_failed += 1
             else:
@@ -2426,16 +2498,15 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
             done += len(rows) + n_failed
             note(msg)
             emit(b, force=not pending)
-        if cut:
+        # the whole files or runs read in part are the run's `cut`, the cards cut its message
+        read = read_cut(cut_refs, cut_tokens, cut_short, _runs[key].get("total"), unit) if cut_refs else None
+        if cut and not read:
             noun = {"agent": "file", "run": "run", "cell": "card"}.get(unit, unit)
-            note(f"{cut:,} {noun}{'' if cut == 1 else 's'} ran past {UNIT_TEXT_MAX:,} characters; the classifier read that much of each")
-        if short:
-            note(f"{short:,} JSON document{' was' if short == 1 else 's were'} longer than {UNIT_TEXT_MAX:,} characters; the "
-                 "classifier read each whole, its long strings, lists and mappings shortened to fit")
+            note(f"{cut:,} {noun}{'' if cut == 1 else 's'} ran past {cap:,} characters; the classifier read that much of each")
         if cancel.is_set() and (ready or not exhausted):
             note(_cancelled_message(labeled + failed, unit))
         if cut or short or cancel.is_set():
-            _progress(c, concept["id"], message=message())
+            _progress(c, concept["id"], message=message(), **({"cut": read} if read else {}))
     finally:
         for task, _b in pending:
             task.cancel()
@@ -3251,11 +3322,14 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                                  else as_changes(iter_units(corpus_dir, sources, unit), False))
                     labeled, failed, message = await _apply_regex_units(c, concept, units, out, cancel)
             elif concept["kind"] == "prompt":
-                stream: Iterator[Unit] = iter_units(corpus_dir, sources, unit) if unit in FILE_UNITS and not sampled else iter(units)
+                # a whole file or run is read as far as its model's context holds, a card to UNIT_TEXT_MAX
+                cap = whole_read_chars(c, concept) if unit in WHOLE_UNITS else UNIT_TEXT_MAX
+                stream: Iterator[Unit] = (iter_units(corpus_dir, sources, unit, cap) if unit in FILE_UNITS and not sampled
+                                          else iter(units))
                 if unit == "record":
                     stream = iter(await asyncio.to_thread(picked_as_changes, corpus_dir, units)) if sampled else as_changes(stream)
                 labeled, failed, message = await _apply_prompt(c, concept, stream, out, cancel, files=[s["path"] for s in sources],
-                                                               comment=comment)
+                                                               comment=comment, cap=cap)
             else:
                 labeled, failed, message = await _apply_code(c, concept, sources, None if unit in FILE_UNITS and not sampled else units,
                                                              None, out)
@@ -3288,10 +3362,11 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             # `matches` (the units this run gave the first value) is kept on the application, so the Files pane's
             # label row can say "468 of 2,392,002 records" after a restart, when the run record is gone.
             # `limit` and `stopped` say what the run covered, which an apply of the same predicate reads (covered)
+            # `cut`, the whole files or runs a prompt label read only in part (read_cut), stays on the label with its run
             app = {"ts": started, "paths": patterns, "total": total, "matched_total": matched, "labeled": labeled, "failed": failed,
                    "matches": int(state.get("matches") or 0), "status": "done", "message": message, "created_by": created_by,
                    "version": version, "examples": len(concept.get("examples") or []), "limit": limit, "stopped": cancel.is_set(),
-                   "within": within, "within_rev": within_rev}
+                   "within": within, "within_rev": within_rev, **({"cut": state["cut"]} if state.get("cut") else {})}
             concept = (_record_application(ws, concept_id, app, calibration, _stored_stats(file_key, stats), taught)
                        or {**concept, "calibration": calibration})
             summary = {**app, "run_id": run_id, "concept": concept_id, "name": concept["name"], "unit": concept["unit"],
@@ -4053,7 +4128,7 @@ def _follow(c: str, concept: dict) -> Callable[[Any], Any]:
 async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, values: list[str] | None, paths: list[str] | None,
                        limit: int | None, comment: bool, filter: bool, created_by: str, chat: str | None, group: str | None,
                        question: str | None = None, card: bool = True, within: Any = None, show: bool = False,
-                       defer: bool = False) -> dict:
+                       defer: bool = False, unit: str | None = None) -> dict:
     """Define a label from a predicate and apply it over one scope: the concept, its card in `group` asking `question` unless
     `card` is False or the label ran before without one, the run in the background followed by an agent chat of role
     `labels`, and with `filter` the scope's filter set to the positive value. `within` {label, value?} runs a label over
@@ -4063,24 +4138,29 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     run ends, when a prompt label has labeled APPLY_ENOUGH units and its eta is longer than the wait left, or after
     APPLY_WAIT_S, with `stale`, the ids of cards that read the label at an older revision. With `defer` (a code label
     in terminal mode, whose code runs through `thimble-run label`: cardrun.run_label) the label and its card are made
-    and nothing runs: the answer has `deferred: true` and the counts the label already holds."""
+    and nothing runs: the answer has `deferred: true` and the counts the label already holds. `unit`, for files, is what
+    one value goes to (FILE_UNITS: record, agent for a whole file, run for a run directory); without it a label that
+    exists keeps its unit, and a new one labels records. The answer's `cut` says which whole files or runs a prompt label
+    read only in part (read_cut)."""
     if scope not in SCOPES:
         raise HTTPException(400, f"scope must be one of {', '.join(SCOPES)}")
+    if unit is not None and (scope != "files" or unit not in FILE_UNITS):
+        raise HTTPException(400, f"unit is for a label over files, one of {', '.join(FILE_UNITS)}")
     if kind not in KINDS:
         raise HTTPException(400, f"kind must be one of {', '.join(KINDS)}")
     text = str(text or "").strip()
     if not text:
         raise HTTPException(400, "the predicate's text is required")
-    unit = SCOPES[scope]
+    ws = _ws(c)
+    prior = find_concept(ws, name)
+    unit = unit or (prior["unit"] if prior is not None and SCOPE_OF_UNIT.get(prior["unit"]) == scope else SCOPES[scope])
     author = f"chat:{chat}" if chat else created_by
     # what the run would refuse is refused before the label is defined, so a failed apply leaves no empty label behind
     if kind == "regex":
         _compiled({"spec": text})
-    ws = _ws(c)
     if within and unit != "record":
         raise HTTPException(400, "within narrows a label over records of files")
     narrowed = resolve_within(ws, within)
-    prior = find_concept(ws, name)
     if narrowed and prior is not None and prior["id"] == narrowed["label"]:
         raise HTTPException(400, f"within names the label {prior['name']!r} itself; narrow it by another label")
     sources = (await asyncio.to_thread(scope_sources, c, unit, kind, _patterns(paths), limit, bool(narrowed))
@@ -4128,7 +4208,8 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
             log.debug("the labels agent chat was not started", exc_info=True)
     chosen = _filter_to(c, scope, concept) if filter else None
     if unchanged:
-        result = {"total": concept["applications"][-1].get("total"), "counts": await asyncio.to_thread(_live_counts, ws, concept["id"])}
+        last = concept["applications"][-1]
+        result = {"total": last.get("total"), "counts": await asyncio.to_thread(_live_counts, ws, concept["id"]), "cut": last.get("cut")}
     else:
         result = await wait_apply(c, concept["id"], APPLY_WAIT_S, APPLY_ENOUGH if kind == "prompt" else None)
     partial = bool(result.get("partial"))
@@ -4137,7 +4218,7 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     return {"concept": concept["id"], "name": concept["name"], "unit": unit, "total": result.get("total"), "counts": counts or {},
             "failed": result.get("failed") or 0, "message": result.get("message"), "partial": partial,
             "cell": made["id"] if made else None, "filter": chosen, "labels_path": str(labels_file(ws, concept["id"])),
-            "unchanged": unchanged, "stale": [x["id"] for x in stale]}
+            "unchanged": unchanged, "stale": [x["id"] for x in stale], "cut": None if partial else result.get("cut")}
 
 
 def _filter_to(c: str, scope: str, concept: dict) -> dict:
@@ -4427,6 +4508,8 @@ def tell_when_done(c: str, concept_id: str) -> None:
         counts = await asyncio.to_thread(_live_counts, ws, concept_id)
         cards = await asyncio.to_thread(_label_cards, ws, concept_id)
         told = ", ".join(f"{v} {n:,}" for v, n in counts.items()) or "no values"
+        if (summary.get("cut") or {}).get("line"):
+            told += f". {summary['cut']['line']}"
         from . import cardrun  # noqa: PLC0415
 
         if reran and cardrun.defers(c):  # terminal mode: they ran nowhere (rerun_readers)

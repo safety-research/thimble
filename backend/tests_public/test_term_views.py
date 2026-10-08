@@ -645,11 +645,16 @@ LEAD1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576.jsonl"
 PORT1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576/subagents/agent-a07a4da7.jsonl"
 
 
-def _tree(body: list[str]) -> list[str]:
-    """The lanes' names, from the row under the time range's strip to the axis, whose key starts `× failed`."""
+def _axis(body: list[str]) -> int:
+    """The axis under the lanes: the first row after the time range's strip with a blank gutter, where no key stands."""
     top = next(i for i, x in enumerate(body) if re.match(r"\s+\d+ \w{3} \d\d:\d\d", x)) + 2
-    end = next(i for i, x in enumerate(body) if x.startswith("  × failed"))
-    return [re.match(r"\s*\S+(?: \S+)*", x[2:])[0] for x in body[top:end]]
+    return next(i for i in range(top, len(body)) if body[i].strip() and not body[i][:12].strip())
+
+
+def _tree(body: list[str]) -> list[str]:
+    """The lanes' names, from the row under the time range's strip to the axis."""
+    top = next(i for i, x in enumerate(body) if re.match(r"\s+\d+ \w{3} \d\d:\d\d", x)) + 2
+    return [re.match(r"\s*\S+(?: \S+)*", x[2:])[0] for x in body[top:_axis(body)]]
 
 
 def _linked_pane(rows: list[str], title: str) -> list[str]:
@@ -663,10 +668,10 @@ def _linked_pane(rows: list[str], title: str) -> list[str]:
 async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     """The worked example at 120 and 200 columns: the top row (search, Filter by, Rows, Color by with its chips), the
     time range's readout and its strip broken where the runs lie hours apart, each run's sessions as a tree of lanes (a
-    lead, the subagents it started under it with their guides), the axis with the key of the failed calls, what links
-    the lead read to the others, then its transcript under a title that names it and counts its turns: the user's
-    prompt, each tool call on one line, a Task call naming the subagent it started; its hint row names ↑↓, Enter, its
-    own n p and `?`."""
+    lead, the subagents it started under it with their guides), the axis alone (no key of the failed calls: a failed
+    call is × in red on its lane and before its tool in the transcript), what links the lead read to the others, then
+    its transcript under a title that names it and counts its turns: the user's prompt, each tool call on one line, a
+    Task call naming the subagent it started; its hint row names ↑↓, Enter, its own n p and `?`."""
     out = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP)
     lines = out.splitlines()
     assert lines[:2] == ["  Linked sessions", "  3 runs · 17 sessions · 352 turns"]
@@ -682,8 +687,10 @@ async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     # each run's lanes stand in its own stretch of the axis: Run 2's start after the first break, Run 3's after the second
     breaks = [i for i in range(len(body[2])) if body[2][i:i + 4] == " // "]
     assert body[3][22:breaks[0]].strip() and not body[10][22:breaks[0]].strip() and body[10][breaks[0]:breaks[1]].strip()
-    axis = next(i for i, x in enumerate(body) if x.startswith("  × failed"))
+    axis = _axis(body)
     assert body[axis].count("//") == 2 and "12 Sep 14:15" in body[axis] and "13 Sep 09:15" in body[axis]
+    assert "failed" not in "\n".join(body[:axis + 1]), "no key of the failed calls"
+    assert any("×" in x[22:] for x in body[3:axis]), "a failed call is × on its lane"
     assert body[axis + 1] == ""
     assert body[axis + 2].startswith("  lead of Run 1 · nested team · subagents survey 14:03:10, client-port 14:09:05, webhooks 14:09:06")
     assert body[axis + 3].startswith("  lead · Run 1 · nested team  20 turns · 14:02:00 – 14:46:10")
@@ -691,6 +698,7 @@ async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     assert rows[:2] == ["  12 Sep 2026", "❯ 14:02:00  ● user"]
     assert rows[2].strip().startswith("Upgrade invoicer from Brambleway API v2 to v3.")
     assert "  14:03:10  ⎿ Task → survey Find every v2 call site" in rows
+    assert "  14:30:20  ⎿ × Bash pytest -q" in rows, "a failed call's row gives × before its tool"
     assert hints == "↑↓ to choose · Enter to open · n p for the next or previous lane · ? for all keys · b to go back · x to close"
 
 
@@ -837,8 +845,8 @@ async def test_repository_draws_what_its_browser_page_shows(repository, cols):
 async def test_repository_opens_a_pull_request_as_its_page_in_the_side_pane(repository):
     """Enter opens a pull request's page beside the list, never under its row: its facts named plainly, the issue it
     fixes and the same issue in the other runs, its flags, then its records in time order, each commit with its diff,
-    which ↑↓ move through and Enter opens at its place; a click on another run's issue opens that run's repository at
-    the issue's page."""
+    which ↑↓ move through once `l` gives them the keys and Enter opens at its place; a click on another run's issue
+    opens that run's repository at the issue's page."""
     out = await term_views.draw_text(repository, "repository", cols=120, rows=44, wrap=DRAW_WRAP,
                                      keys=["down", "down", "return"], panel=False)
     rows = out.splitlines()
@@ -955,6 +963,27 @@ async def test_repository_colors_the_unit_its_value_belongs_to(repository):
     hued = [x for x in rows if HUE.search(x)]
     assert hued and all(re.search(r"\x1b\[38;2;[\d;]+m█", x) for x in hued), "a hue on the mix alone"
     assert not any(re.search(r"\x1b\[38;2;[\d;]+m▌", x) for x in rows), "the track is plain"
+
+
+@needs_node
+async def test_repository_colors_an_agent_by_its_own_name_and_shows_its_records_mix_under_their_items_state(repository):
+    """Matt (10-08): Color by author did not color the Agents tab. An agent's row is the author itself, so under Author
+    its mark takes its own name's hue; under State, which the items it worked on carry, it stands for its records: no
+    mark of its own, their mix in a bar, a chip for each value the mixes draw, and a plain track."""
+    async def draw(by, ansi=False):
+        out = await term_views.draw_text(repository, "repository", cols=120, rows=12, wrap=DRAW_WRAP, ansi=ansi,
+                                         panel=False, keys=["4", "c", f"click:{by}"])
+        return out.splitlines()
+
+    plain, hued = await draw("Author"), await draw("Author", ansi=True)
+    at = [i for i, x in enumerate(plain) if re.match(r"(❯| ) ● (ash|birch|cedar) ", x)]
+    assert len(at) == 3 and all(re.search(r"\x1b\[38;2;[\d;]+m●", hued[i]) for i in at), plain
+    plain, hued = await draw("State"), await draw("State", ansi=True)
+    assert "Color by  State" in plain[2], plain[2]
+    assert all(c in plain[2] for c in ("● merged 3", "● fixed 3", "● closed 2", "● open 1", "● no state 3")), plain[2]
+    listed = [x for x in plain[5:] if re.search(r"  (ash|birch|cedar) ", x)]
+    assert len(listed) == 3 and all(re.match(r"(❯| ) █{6}  (ash|birch|cedar) ", x) for x in listed), listed
+    assert not any(re.search(r"\x1b\[38;2;[\d;]+m[●▌]", x) for x in hued[5:]), "no mark of its own, and a plain track"
 
 
 # ------------------------------------------------------------------------------------------------------ narrow panels
@@ -1124,10 +1153,11 @@ async def _walk(c: str, slug: str, keys: list[str], text: str) -> list[list[str]
 @pytest.mark.parametrize("example", ["timeline", "linked", "repository"])
 async def test_each_worked_example_draws_in_the_panel_as_it_draws_as_text(example, request):
     """In the panel a list draws only its rows in view; as text (the checks, the reviewer) every row: each worked
-    example walked through its list, into its side pane and back by the wheel draws the same rows either way."""
+    example walked through its list, into its side pane (`l` gives a list the pane draws the keys) and back by the
+    wheel draws the same rows either way."""
     c = request.getfixturevalue(example)
     slug = {"timeline": "timeline", "linked": "linked-sessions", "repository": "repository"}[example]
-    keys = ["down"] * 12 + ["return", "down", "down", "up"] + ["down"] * 20 + ["wheel:5", "wheel:-3"]
+    keys = ["down"] * 12 + ["return", "l", "down", "down", "up"] + ["down"] * 20 + ["wheel:5", "wheel:-3"]
     live = await _walk(c, slug, keys, "")
     assert len({tuple(f) for f in live}) > 10
     assert live == await _walk(c, slug, keys, "plain")
@@ -1152,3 +1182,43 @@ async def test_each_worked_example_draws_every_choice_of_its_controls(example, p
         first = next(ch for q, ch in tried if q == p)
         assert first == ("Off" if p == "Color by" else "None") and (p, f"{first} (after the others)") in tried, tried
     assert not [x for x in d["choices"] if x["errors"]], d["choices"]
+
+
+# two lists in one view, as a builder's Wiki Page History draws them (Matt, 2026-10-08): the pages, and under them a
+# page's revisions
+TWO_LISTS = r"""
+import { draw, list } from 'thimble-term'
+const pages = list({ key: (p) => p.id })
+const revs = list({ key: (r) => r.id, enter: 'to read it' })
+const P = Array.from({ length: 30 }, (_, i) => ({ id: i, text: `page ${i}` }))
+const R = Array.from({ length: 30 }, (_, i) => ({ id: i, text: `rev ${i}` }))
+draw((d) => {
+  pages.draw(d, { title: 'pages', items: P, height: 6, row: (p, r) => r.add(p.text) })
+  d.rule()
+  revs.draw(d, { items: R, row: (x, r) => r.add(x.text) })
+})
+"""
+
+
+@needs_node
+async def test_the_wheel_over_one_of_two_lists_moves_that_list_alone(board, inproc):
+    """`wheel:<n>@<words>` is the wheel over the row that shows those words, with the frame's cell there as thimble-term
+    sends it: of a view's two lists, the pages and a page's revisions under them, the one under the pointer moves its
+    rows and has ↑↓ then, and the other stays; `wheel:<n>` names no cell and moves the list that has the keys, the main
+    one, the first drawn, until another has them."""
+    slug = _view(TWO_LISTS, "two")
+
+    async def firsts(keys: list[str]) -> tuple[int, int, str]:
+        """The first page and the first revision in view after `keys`, and the chosen revision's row where it shows."""
+        out = await term_views.draw_text(CORPUS, slug, cols=60, rows=20, keys=keys, wrap=DRAW_WRAP, panel=False)
+        rows = out.splitlines()
+        page, rev = (next(int(m.group(1)) for x in rows if (m := re.search(rf"{w} (\d+)", x))) for w in ("page", "rev"))
+        return page, rev, next((x.rstrip(" ▌") for x in rows if x.startswith("❯ rev")), "")
+
+    assert await firsts(["wheel:4@rev 2"]) == (0, 4, "")
+    assert await firsts(["wheel:3@page 1"]) == (3, 0, "❯ rev 0")
+    assert await firsts(["wheel:2"]) == (2, 0, "❯ rev 0")
+    # the revisions have the keys once the wheel moved them: ↓ chooses the next revision, and the window goes to it
+    assert await firsts(["wheel:4@rev 2", "down"]) == (0, 1, "❯ rev 1")
+    with pytest.raises(term_views.TermViewError, match="no row shows 'nowhere'"):
+        await term_views.draw_text(CORPUS, slug, cols=60, rows=20, keys=["wheel:2@nowhere"], wrap=DRAW_WRAP)

@@ -322,22 +322,22 @@ function diffText(b) {
   return (b.diff || []).map((l) => (l[0] === '~' ? `  … ${plural(l[1], 'unchanged line')}` : `${l[0] === '+' ? '+' : l[0] === '-' ? '−' : ' '} ${l[1]}`)).join('\n')
 }
 // the open page over time on the range's scale: its revisions in the Color by hues, its deletes, and the lines its
-// revisions added and removed per cell
+// revisions added and removed per cell, in a diff's green and red
 function pageChart(dd, items) {
   const gut = 8
   const scale = range.scale(Math.max(8, dd.cols - gut))
   const revs = items.filter((it) => it.k === 'r'), dels = items.filter((it) => it.k === 'd')
-  const sums = (key) => {
+  const sums = (key, fg) => {
     const n = new Array(scale.cols).fill(0)
     for (const it of revs) { const x = scale.binOf(it.t); if (x >= 0) n[x] += it[key] }
     const max = Math.max(1, ...n)
-    return n.map((k) => ({ s: bar(k, max), d: true }))
+    return n.map((k) => ({ s: bar(k, max), fg }))
   }
   const row = (name, runs) => dd.row().add(name.padEnd(gut), { d: true }).runsOf(runs).end()
   row('saves', strip(scale, revs, { value: (it) => colour.valueOf(it), colour }))
   if (dels.length) row('deletes', strip(scale, dels))
-  row('+ lines', sums('a'))
-  row('− lines', sums('rm'))
+  row('+ lines', sums('a', COLORS.added))
+  row('− lines', sums('rm', COLORS.removed))
 }
 
 // ---------------------------------------------------------------- places

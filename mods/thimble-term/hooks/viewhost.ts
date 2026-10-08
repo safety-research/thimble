@@ -21,6 +21,7 @@
 import type { Ctx } from './ctx'
 import type { Line } from './draw'
 import type { Scope } from './data'
+import { noControls } from './lib'
 
 /** A frame as the view's program drew it (term_kit/kit.mjs `frame`). */
 export type ViewFrame = {
@@ -68,6 +69,8 @@ let pumping = false
 let sessionCx: Ctx | null = null
 // what the panel does with an act (set by panel.tsx)
 let actSink: (cx: Ctx, a: ViewAct) => Promise<void> = async () => {}
+// the frame of the open view its Client could not draw (ui.fault), and why: the panel draws why in its place
+let fault: { seq: number; reason: string } | null = null
 
 // a redraw of the panel from the timer's work or the host's line
 const bump = (cx: Ctx): void => void cx.bumpPanel().catch(() => undefined)
@@ -80,6 +83,37 @@ export function onViewAct(fn: (cx: Ctx, a: ViewAct) => Promise<void>): void {
 /** The view open in the panel now, or null. */
 export function openViewState(): OpenView | null {
   return current
+}
+
+/** Text of a frame as the panel may draw it (lib.ts noControls): a frame is the view's program's, and its text a
+ *  record's, which can hold an escape sequence, a bell, a NUL or the C1 characters of text decoded twice; a drawing that
+ *  holds one does not validate. The kit leaves them out (term_kit/kit.mjs printable); this holds for any frame. */
+const printable = (s: unknown): string => noControls(String(s ?? ''))
+
+/** A frame with no control character in its rows, tips, hints, facts, field or error. Pure. */
+export function cleanFrame(f: ViewFrame): ViewFrame {
+  const lines = (Array.isArray(f.lines) ? f.lines : []).map(l => (Array.isArray(l) ? l : []).map(r => (typeof r?.s === 'string' && noControls(r.s) === r.s ? r : { ...r, s: printable(r?.s) })))
+  const hits = (Array.isArray(f.hits) ? f.hits : []).map(h => ({ ...h, ...(h.tip !== undefined ? { tip: printable(h.tip) } : {}), ...(Array.isArray(h.tips) ? { tips: h.tips.map(printable) } : {}) }))
+  return {
+    ...f,
+    lines,
+    hits,
+    hints: (Array.isArray(f.hints) ? f.hints : []).map(printable),
+    sub: (Array.isArray(f.sub) ? f.sub : []).map(printable),
+    ...(f.field ? { field: { text: printable(f.field.text) } } : {}),
+    ...(f.error !== undefined ? { error: printable(f.error) } : {}),
+  }
+}
+
+/** The open view's Client could not draw its frame (register.tsx, ui.fault): until the next frame the panel draws
+ *  `the view could not draw: <reason>` in its place, dim. */
+export function viewFault(reason: string): void {
+  if (current?.frame) fault = { seq: current.frame.seq, reason: printable(reason) }
+}
+
+/** Why the open view's Client could not draw the frame `seq`, or '' when it drew it (or has not tried). */
+export function viewFaultOf(seq: number): string {
+  return fault && fault.seq === seq ? fault.reason : ''
 }
 
 /**
@@ -148,6 +182,7 @@ async function pump(cx: Ctx): Promise<void> {
   const was = current
   if (was && (!w || was.slug !== w.slug || again)) {
     current = null
+    fault = null
     if (was.id && host) await call(cx, host, '/close', { id: was.id }).catch(() => undefined)
   }
   if (!w) return
@@ -158,7 +193,7 @@ async function pump(cx: Ctx): Promise<void> {
     const h = await ensureHost(cx, w.sc)
     if (current !== me) return
     if (!h) {
-      me.error = `thimble's view host did not start${hostError ? `: ${hostError}` : ''}`
+      me.error = `thimble's view host did not start${hostError ? `: ${printable(hostError)}` : ''}`
       me.opening = false
       return bump(cx)
     }
@@ -169,9 +204,9 @@ async function pump(cx: Ctx): Promise<void> {
         return
       }
       me.id = got.id
-      me.frame = got.frame
+      me.frame = cleanFrame(got.frame)
     } catch (err) {
-      me.error = String(err instanceof Error ? err.message : err).slice(0, 400)
+      me.error = printable(err instanceof Error ? err.message : err).slice(0, 400)
     }
     me.opening = false
     return bump(cx)
@@ -214,13 +249,13 @@ async function ensureHost(cx: Ctx, sc: Scope): Promise<Host | null> {
         errs.push(msg.error)
       } else if (msg.t === 'frame' && current && msg.id === current.id && msg.frame) {
         // a frame the program drew on its own: an answer came
-        const f = msg.frame as ViewFrame
+        const f = cleanFrame(msg.frame as ViewFrame)
         if (!current.frame || f.seq > current.frame.seq) {
           current.frame = f
           bump(cx)
         }
       } else if (msg.t === 'ended' && current && msg.id === current.id) {
-        current.error = `the view's program ended: ${String(msg.error ?? '')}`.slice(0, 300)
+        current.error = `the view's program ended: ${printable(msg.error)}`.slice(0, 300)
         bump(cx)
       }
     }
@@ -230,7 +265,7 @@ async function ensureHost(cx: Ctx, sc: Scope): Promise<Host | null> {
       host = null
       hostStop = null
       if (current) {
-        current.error = current.error || `thimble's view host ended${errs.length ? `: ${errs.at(-1)}` : ''}`
+        current.error = current.error || `thimble's view host ended${errs.length ? `: ${printable(errs.at(-1))}` : ''}`
         current.id = ''
         bump(cx)
       }
@@ -249,12 +284,13 @@ export async function sendEvent(cx: Ctx, event: Record<string, unknown>): Promis
   try {
     const got = await call<{ frame: ViewFrame | null; acts: ViewAct[] }>(cx, host, '/event', { id: v.id, event })
     if (current !== v) return
-    if (got.frame && (!v.frame || got.frame.seq >= v.frame.seq)) v.frame = got.frame
+    if (got.frame && (!v.frame || got.frame.seq >= v.frame.seq)) v.frame = cleanFrame(got.frame)
     bump(sessionCx ?? cx)
-    for (const a of got.acts ?? []) await actSink(cx, a)
+    // an ask's words are a record's, which the thread's panel draws
+    for (const a of got.acts ?? []) await actSink(cx, typeof a.text === 'string' ? { ...a, text: printable(a.text) } : a)
   } catch (err) {
     if (current === v) {
-      v.error = String(err instanceof Error ? err.message : err).slice(0, 400)
+      v.error = printable(err instanceof Error ? err.message : err).slice(0, 400)
       bump(sessionCx ?? cx)
     }
   }

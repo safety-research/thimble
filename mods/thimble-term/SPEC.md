@@ -55,6 +55,7 @@ Each channel has one meaning. A run the table does not cover is regular, in the 
 | a border | a card, and a text field | a panel's regions |
 | **bold** | a title or a heading (rule 7) | names in a list, values, the selected row, new |
 | green | new | anything else |
+| diff green and red | the lines a diff added and removed, and their marks | anything else |
 | dim | secondary | a name, a number in a number column, a flagged value, a control |
 | blue, underlined | a link: a citation's value, the place after `↗`, a label's name on a card | controls, rows a click selects |
 | blue, in brackets `[ … ]` | a chip: a citation that names only its place (`[ card ]`) | controls, a citation with words |
@@ -165,6 +166,7 @@ the type area runs from A0 to R.
 | inline code | `permission` | inline code in thimble-term's own paragraphs | code |
 | palette | `SERIES`, seven hues that keep 3:1 on both panels; `LABEL_HUES` and `PICKED_HUES`, the browser's eighteen label colors moved to keep it too | `●`, marks, bars, swatches | a value of the color field |
 | red | `error` | a problem's words and its `×` or `!` | a problem |
+| diff | `diffAddedWord`, `diffRemovedWord` | the lines a diff added and removed, and their marks | a diff, as Claude Code colors one |
 | selection | `selectionBg`, a background | a choice in use (rule 21) | |
 | panel | `composerSidebarBackground`, a background | the whole panel | |
 
@@ -187,7 +189,9 @@ and, given `startLine`, its dim gutter of line numbers.
 22. **Red** marks a problem and only a problem: a failure, a citation whose value is not at its place, a card that
     cannot be drawn, a run's error, a document's warning or caution. `×` is a failure and `!` something usable with a
     problem. Negative numbers are drawn as positive ones are.
-23. No other color: no warning amber, and no green except `new`.
+23. No other color: no warning amber, and no green except `new` and a diff's added lines. A diff's added and removed
+    lines and their marks take Claude Code's own diff colors, `diffAddedWord` and `diffRemovedWord`, not `success` or
+    `error`.
 
 ### 5. Symbols
 
@@ -409,6 +413,11 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - One row above the prompt, the toast, at column 2: `thimble` dim, what is new in the workspace since home was last opened
   (`3 new cards`), `open ›`, which opens home; the row is gone once home is opened. Side threads have their `↳` rows and
   thimble's agents Claude Code's agent tray, so no row repeats them.
+- The panel's row above the prompt, only while Claude Code leaves the panel undrawn (an open it was not asked for, from
+  main's tool or a click in a card, on a terminal narrower than 144 columns, or 110 for a panel opened before): `panel`
+  dim, `Home is ready`, then `open panel` and `dismiss`. `open panel` opens the panel from its press, as `/thimble`
+  does, at any width, and says so in a toast when the terminal is still too narrow; the row is gone once the panel is
+  drawn.
 - Claude Code's tool rows and subagent rows stay Claude Code's, folded as it folds them, with no hex id, in the row and
   in ctrl+o's detailed view: a thimble tool's row names a card by its question (a `card` value is the question alone,
   which the key says is a card; a card named inside other words is in curly quotation marks, which Claude Code does not
@@ -461,9 +470,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   under it, then the plot or body.
 - Below the plot: the readout row, the value of the mark under the pointer (`AgentRelent  317`), plain, or what
   thimble is doing to the card; the label rows; the params row; then the takeaway, drawn as main's chat draws a reply,
-  its citations links and its chips chips; then, when the card check rewrote the card, a dim note that is a sentence:
-  `The card check rewrote its takeaway: the takeaway named the wrong hour.` (a capital, the reason after the colon in
-  lower case unless it starts with a name, a full stop).
+  its citations links and its chips chips. A card the card check rewrote shows no note of it (Matt, 10-08: "don't show
+  this").
 - A label row, when the card read a label: `label` dim, the label's name in blue and underlined, then `↗`, then each
   value after its `●` in its hue (`label  edit purpose ↗  ● links or data  ● message to agents  ● other`), and
   `changed since` once the label changed after the card ran. A click on the name or the `↗` opens the label panel. A
@@ -678,7 +686,8 @@ out. A region under the pointer that is not a whole row is inverse, and its tip 
 below it; a chart's region (a strip, a lane) is never inverse: only the pointer's column is marked, `┊` in an empty cell
 and a bar in the text color, on every chart region over the same columns, with that cell's tip. Its keys reach it through the list's
 relay (↑↓, Enter, Space, Backspace, a sign typed) and as hotkeys (a letter, a digit); while a field of the view takes
-typing, every key. A view built in browser mode is one line that says so, and how to open it in browser mode.
+typing, every key. The wheel over it reaches it with the frame's cell under the pointer, so that it moves the list
+there alone. A view built in browser mode is one line that says so, and how to open it in browser mode.
 
 **The file browser**, after the browser's Files (`frontend/src/files`: its tree, its search, its reader's modes):
 

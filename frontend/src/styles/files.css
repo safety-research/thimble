@@ -748,16 +748,48 @@
 }
 /* how many records the apply could not label ("230 failed") and how many the analyst marked by hand, each on a line of
    its own under the outcome, so neither is cut */
-.files-label-status:has(.files-label-marked, .files-label-failed) {
+.files-label-status:has(.files-label-marked, .files-label-failed, .files-label-cut) {
   flex-wrap: wrap;
   row-gap: 0;
 }
 .files-label-marked,
-.files-label-failed {
+.files-label-failed,
+.files-label-cut {
   flex: 1 0 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* the whole files or runs a prompt label read only in part (ReadCutLine): a dim line that wraps, and opens to list them */
+.read-cut {
+  white-space: normal;
+}
+.read-cut-line {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.read-cut-line:hover {
+  color: var(--text-secondary);
+}
+.read-cut-refs {
+  max-height: 160px;
+  margin: 2px 0 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1.5 var(--font-mono);
+}
+.read-cut-refs li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .files-label-status.is-running {
   flex-direction: column;

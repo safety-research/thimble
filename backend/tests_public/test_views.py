@@ -1025,6 +1025,37 @@ async def test_every_record_a_worked_example_serves_lists_the_fields_its_lines_d
     assert not views.unlisted_derived(name, [{"answers": answers}], declared)
 
 
+async def test_the_repository_colors_an_agent_by_its_own_name_and_by_its_records_under_their_items_fields(samples, inproc,
+                                                                                                        bound):
+    """Matt (10-08): Color by author did not color the Agents tab. An agent's row carries its author, itself, so it
+    takes its own value as the other tabs' rows do (the page's colour.attr reads it). Under a field it does not carry,
+    a state or an area of the items it worked on, the row stands for its records: each takes the value of the pull
+    request, issue or thread it is about, `mix` counts them (its sign-off left out, so they add up to what the row
+    counts), the chips count the agent under each value, and the agent shows while any of its values is on. The other
+    tabs' rows keep their own values."""
+    slug = _save_example("repository")
+
+    async def view(field, tab="agents", off=()):
+        return await views.reader_call("repository", slug, "records", {"op": "view", "run": "r1", "tab": tab,
+                                                                        "colour": {"field": field, "off": list(off)}})
+
+    got = await view("author")
+    assert [(it["title"], it["author"], it["value"], "mix" in it) for it in got["items"]] == \
+        [("ash", "ash", "ash", False), ("birch", "birch", "birch", False), ("cedar", "cedar", "cedar", False)]
+    assert got["counts"] == {"ash": 1, "birch": 1, "cedar": 1}
+    got = await view("state")
+    ash = got["items"][0]
+    assert dict(map(tuple, ash["mix"])) == {None: 4, "fixed": 3, "merged": 13, "closed": 1} and ash["value"] == "merged"
+    assert sum(n for _, n in ash["mix"]) == sum(ash["did"].values()), "the mix divides the records the row counts"
+    assert got["counts"] == {"": 3, "fixed": 3, "merged": 3, "closed": 2, "open": 1}, "a chip for each value a mix draws"
+    got = await view("state", off=["merged", "fixed", "closed", None])
+    assert [(it["title"], it["mix"]) for it in got["items"]] == [("birch", [["open", 2]])], \
+        "a value turned off leaves the mixes, and an agent with no value on leaves the list"
+    assert got["tabs"]["agents"] == 1
+    got = await view("state", tab="pulls")
+    assert got["items"] and not any("mix" in it for it in got["items"]) and got["counts"] == {"merged": 7, "closed": 1}
+
+
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
 async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, samples, inproc, bound, tmp_path):
     """The whole check a view ticket's session runs, the headless page included, where this machine has Node and the

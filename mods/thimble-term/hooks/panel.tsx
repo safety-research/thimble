@@ -51,7 +51,7 @@ import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, agreementLine, classColors, hueOf,
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
-import { closeView, onViewAct, openViewState, retryView, sendEvent, viewFor } from './viewhost'
+import { closeView, onViewAct, openViewState, retryView, sendEvent, viewFaultOf, viewFor } from './viewhost'
 import type { ViewFrame } from './viewhost'
 
 export type PaneEvent = MatchedEvent<'ui.render', { component: 'Pane'; requestId: string }>
@@ -564,6 +564,21 @@ export async function relayInput(cx: Ctx, value: string): Promise<void> {
 // while a field of a terminal view takes typing (its search), the relay's Input is that field: it holds the field's
 // text, each change of which goes to the view whole, and Enter ends it (drawView)
 let viewField: { slug: string; text: string; send: (text: string) => Promise<void>; enter: () => Promise<void> } | null = null
+// where the open view's frame stands in the panel as last drawn: the pane tree's row of the frame's first row (under the
+// title row, the subtitle and the rule), the window's offset then, and the frame's seq (viewWheelAt); null with no
+// frame. viewAtDrawing is the drawing being made's, which becomes viewAt once it is done
+type ViewAt = { top: number; offset: number; seq: number }
+let viewAt: ViewAt | null = null
+let viewAtDrawing: ViewAt | null = null
+
+/** The cell of the open view's frame under the person's wheel (`pointer`, the pane body's cell, as ui.scroll gives it):
+ *  `{seq, x, y}`, `x` from the frame's left edge (its margin's two cells first) and `y` from its first row, as a click's
+ *  cell, so that the view moves the list under the pointer alone; none where the panel shows no frame. */
+export function viewWheelAt(pointer?: { row: number; column: number } | null): { seq?: number; x?: number; y?: number } {
+  if (!viewAt || !pointer || !Number.isFinite(pointer.row) || !Number.isFinite(pointer.column)) return {}
+  // the panel's cell of padding left of the frame (withWay)
+  return { seq: viewAt.seq, x: pointer.column - 1, y: pointer.row + viewAt.offset - viewAt.top }
+}
 // while a field of a panel's own takes typing (the file browser's find), the relay's Input is that field as it is for a
 // view's: the panel sets it on each drawing that types into it (relayField), and no other drawing keeps it
 type PanelField = { text: string; send: (text: string) => Promise<void>; enter: () => Promise<void> }
@@ -2317,6 +2332,9 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   rows.push(<Text key="lb-gap"> </Text>)
   rows.push(toggle('counts', 'counts', total, [setByYou ? `${num(setByYou)} set by you` : '', filtered ? `filtered to ${filtered}` : ''].filter(Boolean).join(' · ')))
   keys.push({ key: 'counts', hotkey: 'c', onPress: () => void flip('counts')() })
+  // the whole files or runs its last run read only in part, one dim line under the counts as the browser's Labels pane
+  // has it, until a run cuts none (backend concepts.read_cut)
+  if (!running && last?.cut?.line) rows.push(<Text key="lb-cut" wrap="wrap" dimColor>{`  ${last.cut.line}`}</Text>)
   if (opened('counts')) {
     const vw = Math.min(Math.max(12, Math.floor(cols / 3)), Math.max(4, ...values.map(v => width(v))))
     const cs = values.map(v => num(counts[v] ?? 0))
@@ -3132,8 +3150,13 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   }
   // a first frame with no rows yet, while its first query is out
   if (!f.lines.length && f.loading) body.push(<Text key="view-loading" dimColor>◌ loading…</Text>)
-  // the frame's rows bring their margin (`❯`)
-  body.push(<Client key={marginKey('view-frame')} module="./viewclient.tsx" width={cols + MARGIN_W} height={Math.max(1, f.lines.length)} props={JSON.parse(JSON.stringify({ lines: f.lines, hits: f.hits, seq: f.seq, cols: cols + MARGIN_W })) as never} />)
+  // the frame's rows bring their margin (`❯`); they stand under the title row (withWay) and the one row each element
+  // above them in `body` takes, the hotkeys taking none (hiddenKeys); a frame its Client could not draw (register.tsx
+  // ui.fault) is one dim row saying why, until the view draws another
+  viewAtDrawing = { top: 1 + body.length, offset: e.props.scroll?.offset ?? 0, seq: f.seq }
+  const fault = viewFaultOf(f.seq)
+  if (fault) body.push(<Text key="view-fault" dimColor wrap="truncate-end">{`the view could not draw: ${fault}`}</Text>)
+  else body.push(<Client key={marginKey('view-frame')} module="./viewclient.tsx" width={cols + MARGIN_W} height={Math.max(1, f.lines.length)} props={JSON.parse(JSON.stringify({ lines: f.lines, hits: f.hits, seq: f.seq, cols: cols + MARGIN_W })) as never} />)
   if (ov.error) body.push(<Text key="view-error" color={COLORS.problem} wrap="truncate-end">{`× ${ov.error}`}</Text>)
   // a sign's key works only from the relay's field, so its hint shows only while the ring rests there
   const isSign = (k: string) => [...k].length === 1 && !/[a-z0-9]/.test(k)
@@ -3187,6 +3210,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   windowed = ''
   scrollDrawing = null
   panelField = null
+  viewAtDrawing = null
   const body = await (async () => {
     switch (p.view) {
       case 'home':
@@ -3230,6 +3254,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   listExtra = listExtraDrawing
   shownWindow = windowed
   scrollShown = scrollDrawing
+  viewAt = viewAtDrawing
   rt.fields = fieldsDrawing
   return tree
 }

@@ -853,6 +853,130 @@ describe('the list', () => {
     expect(text().some((r: string) => r.startsWith('    more on event 7'))).toBe(true)
   })
 
+  // the frame's rows of a list's items, by their words (`page 3`, `rev 12`), and the first of them in view
+  const shownOf = (word: string) => text().flatMap((r: string) => (new RegExp(`${word} (\\d+)`).exec(r) ? [Number(new RegExp(`${word} (\\d+)`).exec(r)![1])] : []))
+  // the wheel over the frame's row that shows `words`, as thimble-term sends it (the cell under the pointer, its margin
+  // counted), or with no cell
+  async function wheel(by: number, words?: string) {
+    const f = last()
+    const y = words ? text(f).findIndex((r: string) => r.includes(words)) : -1
+    if (words) expect(y, `a row shows ${words}`).toBeGreaterThanOrEqual(0)
+    kit.handle({ t: 'wheel', by, n: ++n, ...(words ? { seq: f.seq, x: text(f)[y].indexOf(words), y } : {}) })
+    await tick()
+  }
+
+  test('two lists in one view (the pages, and under them a page\'s revisions): the wheel moves the rows of the list under the pointer alone, which then has ↑↓ and Enter; a click gives a list the keys; `l` gives them to the other, named in `?` alone; else the main list has them', async () => {
+    init({ cols: 60, rows: 24 })
+    const pages = kit.list({ key: (p: any) => p.id })
+    const revs = kit.list({ key: (r: any) => r.id, enter: 'to read it' })
+    const P = Array.from({ length: 40 }, (_, i) => ({ id: i, text: `page ${i}` }))
+    const R = Array.from({ length: 40 }, (_, i) => ({ id: i, text: `rev ${i}` }))
+    let open = true
+    kit.draw((d: any) => {
+      pages.draw(d, { title: 'pages', count: 40, items: P, height: 8, row: (p: any, r: any) => r.add(p.text) })
+      if (!open) return
+      d.rule()
+      d.line([{ s: 'dse/StartSeite', b: true }])
+      revs.draw(d, { items: R, row: (x: any, r: any) => r.add(x.text) })
+    })
+    await tick()
+    // the wheel over the revisions moves them, and the pages stay where they are
+    await wheel(5, 'rev 3')
+    expect(shownOf('page')[0]).toBe(0)
+    expect(shownOf('rev')[0]).toBe(5)
+    // the revisions have ↑↓ and Enter now
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to read it', '? for all keys'])
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([0, 1])
+    // the wheel over the pages' title, their rows or their track moves them alone
+    await wheel(3, 'pages')
+    await wheel(2, 'page 6')
+    expect(shownOf('page')[0]).toBe(5)
+    expect(shownOf('rev')[0]).toBe(1)
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([1, 1])
+    // the wheel over no list (the rule, the page's name) moves none
+    await wheel(4, 'dse/StartSeite')
+    expect([shownOf('page')[0], shownOf('rev')[0]]).toEqual([1, 1])
+    // with no cell (`thimble view text`'s wheel:<n>), the list that has the keys
+    await wheel(3)
+    expect([shownOf('page')[0], shownOf('rev')[0]]).toEqual([4, 1])
+    // a click on a revision chooses it and gives the revisions the keys
+    await click('rev 9')
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([1, 10])
+    // `l` gives the keys to the other list: `?` names it, the hint row does not
+    expect(last().keys).toContain('l')
+    expect(last().hints.join(' · ')).not.toContain('other list')
+    await key('?')
+    expect(text().some((r: string) => /l +to choose in the other list/.test(r))).toBe(true)
+    await key('l')
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([2, 10])
+    await key('l')
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([2, 11])
+    // the revisions gone (the page closed), the main list has the keys again, and `l` is bound no more
+    open = false
+    kit.redraw()
+    await tick()
+    expect(last().keys).not.toContain('l')
+    await key('down')
+    expect(pages.chosen).toBe(3)
+    // drawn again, the main list, the first drawn, has the keys until another is clicked, scrolled or chosen
+    open = true
+    kit.redraw()
+    await tick()
+    expect(last().hints).toEqual(['↑↓ to choose', 'Enter to open', '? for all keys'])
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([4, 11])
+    // the program choosing a row gives its list the keys (a citation opened it)
+    revs.show(20)
+    await tick()
+    await key('down')
+    expect([pages.chosen, revs.chosen]).toEqual([4, 21])
+  })
+
+  test('a list in a side pane: the wheel over the pane\'s rows moves its list, the wheel over the list beside it that list; a list in a row\'s details that shows every row passes the wheel to the list around it', async () => {
+    init({ cols: 100, rows: 20 })
+    const pane = kit.side({ key: 'page', width: 0.5 })
+    const pages = kit.list({ key: (p: any) => p.id })
+    const revs = kit.list({ key: (r: any) => r.id })
+    const P = Array.from({ length: 40 }, (_, i) => ({ id: i, text: `page ${i}` }))
+    const R = Array.from({ length: 40 }, (_, i) => ({ id: i, text: `rev ${i}` }))
+    kit.draw((d: any) => pages.draw(d, {
+      items: P,
+      side: pane,
+      sideTitle: (p: any) => p.text,
+      row: (p: any, r: any) => r.add(p.text),
+      detail: (p: any, dd: any) => {
+        dd.line(`facts of ${p.text}`)
+        revs.draw(dd, { items: R, row: (x: any, r: any) => r.add(x.text) })
+      },
+    }))
+    pane.show(0)
+    await tick()
+    expect(text()[1]).toContain('│ facts of page 0')
+    await wheel(4, 'facts of page 0')
+    expect([shownOf('page')[0], shownOf('rev')[0]]).toEqual([0, 4])
+    await wheel(3, 'page 2')
+    expect([shownOf('page')[0], shownOf('rev')[0]]).toEqual([3, 4])
+    // details in place, a list in them that shows every row: the wheel over it moves the list around it
+    init({ cols: 60, rows: 12 })
+    const outer = kit.list({ key: (p: any) => p.id })
+    const inner = kit.list({ key: (r: any) => r.id })
+    kit.draw((d: any) => outer.draw(d, {
+      items: P,
+      row: (p: any, r: any) => r.add(p.text),
+      detail: (p: any, dd: any) => inner.draw(dd, { items: R.slice(0, 3), row: (x: any, r: any) => r.add(x.text) }),
+    }))
+    outer.show(0)
+    await tick()
+    expect([shownOf('page')[0], shownOf('rev')[0]]).toEqual([0, 0])
+    await wheel(2, 'rev 1')
+    expect([shownOf('page')[0], shownOf('rev')[0]]).toEqual([1, 1])
+  })
+
   test('a row its details keep in view (d.focus) shows however far down the details it is, with the chosen row where both fit', async () => {
     init({ rows: 10 })
     const list = kit.list({ key: (e: any) => e.id })
@@ -1101,10 +1225,82 @@ describe('details', () => {
   })
 })
 
+// A record's text can hold control characters (a tool's colored output, a bell, a NUL, the C1 characters of text
+// decoded twice), and thimble-term draws no text that holds one: its Client's tree does not validate and the view is
+// not drawn. The kit keeps them out of every string of a frame.
+describe('control characters', () => {
+  const CONTROL = /[\u0000-\u001f\u007f-\u009f]/
+  // every string a frame hands thimble-term to draw
+  const strings = (f: any): string[] => [
+    ...f.lines.flatMap((l: any) => l.map((s: any) => s.s)),
+    ...f.hits.flatMap((h: any) => [h.tip ?? '', ...(h.tips ?? [])]),
+    ...f.hints,
+    ...f.sub,
+    f.field?.text ?? '',
+    f.error ?? '',
+  ]
+
+  test('a frame holds none: an escape sequence goes whole, a bell or a NUL goes, a tab is two spaces, a break in a run is a space, and the columns after them keep their places', async () => {
+    init({ cols: 60, rows: 8 })
+    kit.draw((d: any) => {
+      d.line('red \x1b[31mword\x1b[0m bell\x07 end')
+      d.row().add(kit.pad('tab\there', 12)).add('|', {}, { on: () => {}, tip: 'tip \x1b[1mbold\x1b[0m\x07' }).end()
+      d.row().add(kit.pad('page\u0000name', 12)).add('|').end()
+      d.row().add(kit.pad('quoteâ\u0080\u009d', 12)).add('|').end()
+      d.line([{ s: 'two\nlines' }, kit.dim(' and\r\nmore')])
+      d.key('z', 'to zap \x1b[2Kit', () => {})
+      d.sub('facts \x1b]0;a title\x07here')
+    })
+    await tick()
+    const f = last()
+    for (const s of strings(f)) expect(s).not.toMatch(CONTROL)
+    expect(text(f)).toEqual(['  red word bell end', '  tab  here   |', '  pagename    |', '  quoteâ      |', '  two lines and more'])
+    expect(f.hits[0]).toMatchObject({ y: 1, x0: 14, x1: 15, tip: 'tip bold' })
+    expect(f.hints).toContain('z to zap it')
+    expect(f.sub).toEqual(['facts here'])
+    // a field's text, as the view gave it
+    kit.draw((d: any) => d.typing({ text: 'typed\x1b[A\x07' }))
+    await tick()
+    expect(last().field).toEqual({ text: 'typed' })
+  })
+
+  test("a record's NUL, bell or escape sequence reaches no frame: in a list's row, in its details, in the error of a draw that throws", async () => {
+    init({ cols: 50, rows: 10 })
+    const recs = [{ id: 0, text: 'saved\u0000 by\u0007 bot' }, { id: 1, text: 'ok' }]
+    const list = kit.list({ key: (e: any) => e.id })
+    kit.draw((d: any) => list.draw(d, {
+      items: recs,
+      row: (e: any, r: any) => r.add(e.text),
+      detail: (e: any, dd: any) => kit.details(dd, { blocks: [{ text: `${e.text}\n\x1b[32mline\x1b[0m\ttwo` }], facts: [['by', 'a\u0000b']] }),
+      ask: (e: any) => ({ ref: `revisions.jsonl#L${e.id + 1}`, text: e.text }),
+    }))
+    await tick()
+    await key('return')
+    for (const s of strings(last())) expect(s).not.toMatch(CONTROL)
+    expect(text().slice(0, 4)).toEqual(['❯ saved by bot', '    saved by bot', '    line  two', '    by ab'])
+    // asking about it: the side thread's words, which thimble-term's panel draws
+    await key('a')
+    expect(sent.filter((m) => m.t === 'act').at(-1)!.act).toEqual({ kind: 'ask', ref: 'revisions.jsonl#L1', text: 'saved by bot' })
+    kit.draw(() => {
+      throw new Error('a byte \x1b[31mhere\u0000')
+    })
+    await tick()
+    for (const s of strings(last())) expect(s).not.toMatch(CONTROL)
+    expect(text()).toEqual(['  × the view could not be drawn: a byte here'])
+    expect(last().error).toBe('a byte here')
+  })
+})
+
 describe('as text', () => {
   test('frameText draws a frame plain, or with escape codes for its styles and hues', () => {
     const f = { lines: [[{ s: '  ' }, { s: '●', fg: '#1d7fc0' }, { s: ' fired', d: true }, { s: ' x', bg: 'selectionBg' }]] }
     expect(kit.frameText(f)).toBe('  ● fired x')
     expect(kit.frameText(f, { ansi: true })).toBe('  \x1b[38;2;29;127;192m●\x1b[0m\x1b[2m fired\x1b[0m\x1b[48;5;238m x\x1b[0m')
+  })
+
+  test("a diff's added and removed lines take Claude Code's diff colors, green and red as text", () => {
+    expect([kit.COLORS.added, kit.COLORS.removed]).toEqual(['diffAddedWord', 'diffRemovedWord'])
+    const f = { lines: [[{ s: '▆', fg: kit.COLORS.added }, { s: '▃', fg: kit.COLORS.removed }]] }
+    expect(kit.frameText(f, { ansi: true })).toBe('\x1b[32m▆\x1b[0m\x1b[31m▃\x1b[0m')
   })
 })

@@ -454,6 +454,9 @@
 .thimble-turn-tool {
   color: var(--text-secondary);
 }
+.thimble-turn-failed {
+  color: var(--status-negative);
+}
 .thimble-turn-body {
   min-width: 0;
   color: var(--text-secondary);

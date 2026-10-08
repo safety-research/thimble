@@ -77,7 +77,7 @@ function draw() {
 | `labels` | `false` leaves the overview's labels out; they go anyway once `thimble.timeAxis` draws the range's axis |
 | `key` | the name thimble keeps the range under, `'time'` by default; give each control of a page its own |
 | `onChange(range)` | the range settled: after a drag, a wheel, a click, a double click, `set()` or Reset. Draw what lies between `range.from` and `range.to`. |
-| `onInput(range)` | while the viewfinder moves, for a page that can draw that fast |
+| `onInput(range)` | while the viewfinder moves, at each step of a drag or of the wheel, for a page that can draw that fast: draw its charts of the range there, so they move with the overview |
 | `onMark(mark, range)` | a flag on the overview hovered (`null` when the pointer leaves it) |
 
 ## The control
@@ -97,7 +97,8 @@ function draw() {
 
 Draw the chart of the range on `range.scale(width)`, so its bins and its ticks match the overview and every chart of the
 view at that width reads as a small multiple of the same time: a row's strip, a lane and the main chart take the same
-`scale.bins(px)`.
+`scale.bins(px)`. Draw every one of them again in `onInput` as well as `onChange`, so that none waits for the range to
+settle while the overview moves.
 
 `thimble.timeAxis(mount, scale, {marks, onMark, px})` draws the chart's axis in `mount`, an element as wide as the
 chart: its ticks with labels at least `px` (72) apart, a `//` at each break, and the marks as flags on a row under it,

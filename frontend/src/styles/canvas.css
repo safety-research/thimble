@@ -1216,6 +1216,10 @@ audio.bcell-media {
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
 }
+/* the whole files or runs the label read only in part, under the counts (ReadCutLine, styled in files.css) */
+.bcell-label-cut {
+  font: 400 var(--text-xs) / 1.5 var(--font-body);
+}
 /* a value of a label over files: a 7px square in its colour before the chip, filled when the Files reader highlights it */
 .bcell-value-square {
   display: inline-block;

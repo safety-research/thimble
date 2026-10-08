@@ -4,11 +4,10 @@
 // off by default, Generate report). The field's text is the request (the focus) and may stay empty; its model line
 // (ModelLine) picks the run's model (a menu of lib/models modelChoices) and effort (Claude Code's levels, none for a
 // model that runs with none; a stored ultracode reads as xhigh), which start at Settings' orientation row and apply to
-// this run only, with no fast mode: thimble's agents run on exactly the model and effort Start or Settings name. One
-// line under it says how it runs: as a subagent of the analyst's Claude Code session, in that session's permission
-// mode. Start is a click: the server starts the orientation through thimble's plugin with no turn of main (POST
-// /ws/{c}/start), and the answer says whether it started. Start is off, with the reason on that line, while thimble's hooks module is not
-// running in main's session (main's meta `module: false`), and with the plain-`claude` warning
+// this run only, with no fast mode: thimble's agents run on exactly the model and effort Start or Settings name. Start
+// is a click: the server starts the orientation through thimble's plugin with no turn of main (POST /ws/{c}/start), and
+// the answer says whether it started. Start is off, with the reason on a line under the field, while thimble's hooks
+// module is not running in main's session (main's meta `module: false`), and with the plain-`claude` warning
 // while main is a session `thimble` did not start (`launched: false`), whose module stays idle for that reason, and in
 // plan mode, which thimble's module reports within seconds of a shift+tab while main is idle (the server's
 // --agent-check still refuses a start in plan mode from the mode as it runs). Skip leaves main to the analyst.
@@ -104,21 +103,6 @@ export function restoreOf(run: OrientRun | null | undefined): Restore | null {
     model: run.model ?? null,
     effort: agentEffort(run.effort),
   }
-}
-
-/** Claude Code's permission modes by the names its own mode line shows. */
-const MODE_WORDS: Readonly<Record<string, string>> = {
-  default: 'default mode',
-  acceptEdits: 'accept edits mode',
-  auto: 'auto mode',
-  bypassPermissions: 'bypass permissions mode',
-  dontAsk: "don't ask mode",
-}
-
-/** The line under the gate's field: how the orientation runs, from main's reported permission mode. Pure. */
-export function modeLine(mode: string | null | undefined): string {
-  const words = mode ? MODE_WORDS[mode] : null
-  return `Runs as a subagent of your Claude Code session, ${words ? `in ${words}` : 'in its permission mode'}.`
 }
 
 /** Why Start is off while main is in plan mode, where a subagent would ask before every card (U20). */
@@ -229,7 +213,6 @@ export function StartGate({ ws, main, model: rowModel, effort: rowEffort, restor
       setBusy(false)
     }
   }
-  const mode = main?.attached?.permission_mode
   return (
     <div className="chat-gate" data-panel="chat" role="group" aria-label="Start orientation" data-blocked={blocked?.kind}>
       <div className="chat-gate-top">
@@ -306,10 +289,12 @@ export function StartGate({ ws, main, model: rowModel, effort: rowEffort, restor
           </span>
         </div>
       </div>
-      <p className={`chat-gate-mode${fault ? ' chat-gate-blocked' : ''}`} data-mode={mode ?? undefined} role={fault ? 'alert' : undefined}>
-        {fault && <Icon name="warning" size={13} className="chat-gate-warn-ico" />}
-        <span>{blocked ? blocked.line : modeLine(mode)}</span>
-      </p>
+      {blocked && (
+        <p className={`chat-gate-mode${fault ? ' chat-gate-blocked' : ''}`} role={fault ? 'alert' : undefined}>
+          {fault && <Icon name="warning" size={13} className="chat-gate-warn-ico" />}
+          <span>{blocked.line}</span>
+        </p>
+      )}
       <div className="chat-gate-foot">
         {error && <span className="chat-gate-error">{error}</span>}
         {onSkip && (

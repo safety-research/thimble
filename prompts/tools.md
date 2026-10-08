@@ -90,7 +90,7 @@ Remove a copy of a card, or an attempt another card replaced. Fix a wrong card w
 
 ## apply_label
 
-Define a category, apply it to every unit of a scope, and get the counts per value and a card where the analyst checks each unit. A prompt label over many files takes minutes.
+Define a category, apply it to every unit of a scope, and get the counts per value and a card where the analyst checks each unit. In files, a unit is a record, a whole file or a run directory (`unit`). A prompt label over many files takes minutes.
 
 ```json
 {
@@ -102,13 +102,14 @@ Define a category, apply it to every unit of a scope, and get the counts per val
     "predicate": {
       "type": "object",
       "properties": {
-        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], a row of a database or a CSV file a dict of its columns, a record of a JSON document its value, a PDF page a dict with its page and text, and a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it. A record that saves a whole document again, such as a wiki page's revision, is read by a model or a regex as what it changed from the save before, and by code whole."},
+        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], a row of a database or a CSV file a dict of its columns, a record of a JSON document its value, a PDF page a dict with its page and text, a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it, a whole file a dict with its path, records and data, the whole file parsed or its text, and a run a dict with its paths, records and files, each file whole by its path. A record that saves a whole document again, such as a wiki page's revision, is read by a model or a regex as what it changed from the save before, and by code whole."},
         "text": {"type": "string", "description": "The description, pattern or function."}
       },
       "required": ["kind", "text"]
     },
     "values": {"type": "array", "items": {"type": "string"}, "description": "Positive first. Default yes and no."},
     "paths": {"type": "array", "items": {"type": "string"}, "description": "Globs, for files. A record of a file is a line of text, a row of a database's table, a page of a PDF, a value of a JSON document or a row of a CSV file. A glob followed by a record's place, such as `runs/*/forge.db#prs` for a table or `results.json#/runs`, keeps the records there."},
+    "unit": {"type": "string", "enum": ["records", "files", "runs"], "description": "For files: records, the default, files for one value per file, or runs for one value per run directory. A label keeps its unit when you apply it again without one. A prompt label reads as much of each file or run as fits its model's context, and the result says how many it read only in part."},
     "limit": {"type": "integer", "description": "Units to label, for a trial."},
     "within": {
       "type": "object",
@@ -401,7 +402,7 @@ Delete a thread and its chat from the workspace, stopping its session if it runs
 
 ## start_orientation
 
-Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which shows the analyst when it finishes the outputs its switches turn on. thimble shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. Call it when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished. Its result is the exact Agent call that starts the orientation, which you then make. Pass only the model, effort and switches the analyst named, so that the others take the values thimble's Settings give them. One orientation runs at a time, so while one runs the call starts nothing.
+Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which shows the analyst when it finishes the outputs its switches turn on. thimble shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. Call it when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished. A question about the corpus, even a broad one, is no request for an orientation: answer it yourself, and after your answer you can ask whether they want one. Its result is the exact Agent call that starts the orientation, which you then make. Pass only the model, effort and switches the analyst named, so that the others take the values thimble's Settings give them. One orientation runs at a time, so while one runs the call starts nothing.
 
 ```json
 {
@@ -1179,7 +1180,7 @@ Start the orientation now as a subagent of this session, with one Agent call who
 
 {input}
 
-Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the analyst sees the call.
+Change nothing in it, since thimble lets only this call through. Write no words about the call, since the analyst sees it. End the turn on it, unless the analyst also asked a question in this turn: then answer that question yourself after the call, while the orientation runs.
 
 ## start_orientation-program
 
@@ -1228,6 +1229,10 @@ thimble's agents can't start in this session: Claude Code's hooks modules are of
 ## module-started-note
 
 thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. Its report goes to the analyst in thimble, so when it hands back, reply in one short line, and do nothing about it unless the analyst asks.
+
+## module-started-note@terminal
+
+thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. When it hands back, reply as your prompt says for a hand-back, and do nothing more about it unless the analyst asks.
 
 ## follow-up-ran-on
 
@@ -1639,7 +1644,7 @@ none
 
 ## message_orientation-none
 
-No orientation has run in this workspace. Call `start_orientation` to start one.
+No orientation has run in this workspace. Answer the analyst yourself, and call `start_orientation` only when they ask for an orientation.
 
 ## message_orientation-gone
 
