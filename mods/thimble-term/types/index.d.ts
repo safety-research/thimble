@@ -159,6 +159,12 @@ export type TermPanel = {
   value?: string
 }
 
+/** A panel Claude Code left undrawn (its `$.ui.open` answered `isPlaced: false`), which the row above the prompt
+ *  offers: its pane's title, and why it waits, from the answer's `reason`: `floor` the width from which Claude Code
+ *  places a pane it was not asked for (144 columns, 110 for one the person opened before) and `columns` the width then;
+ *  `noScreen` when no attached screen draws panes. */
+export type TermPending = { title: string; floor?: number; columns?: number; noScreen?: boolean }
+
 /** A turn's answer (its last text part that cites or embeds a card, else its last), kept under its last row for the
  *  footer drawn there: its rows' uuids, its text, the cards it shows (embedded, or made in the turn). */
 export type TermAnswer = { rows: string[]; text: string; cards: string[] }
@@ -201,8 +207,8 @@ declare module 'claude-code' {
       nav: ChatNav
       // a count that draws the panel again when what it shows changed on disk
       panelTick: number
-      // a panel a click opened that waits undrawn on a narrow terminal: the row above the prompt offers it
-      pending: { title: string } | null
+      // a panel Claude Code left undrawn, and why: the row above the prompt offers it
+      pending: TermPending | null
       // the rows above the prompt: the workspace's counts, the agents, the threads
       home: TermHome | null
       // the workspace's counts when home was last opened: the row above the prompt shows only what is new since

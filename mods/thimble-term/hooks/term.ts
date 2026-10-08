@@ -3,7 +3,7 @@
 // panel.tsx draw.
 //
 // Nothing here writes the workspace: a read is `thimble state`, a change is `thimble act` (hooks/data.ts).
-import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermThreadRow } from '../types'
+import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThreadRow } from '../types'
 import { busyWords, cardOfCell, checkOf, fixOf, linksOf, printed } from './cell'
 import type { ThimbleCell, ThimbleLabel } from './cell'
 import type { CardData, CardLabel } from './draw'
@@ -67,6 +67,10 @@ export const rt = {
   termColumns: 0,
   // the terminal's width the docked panel was last opened or fitted at
   fittedFor: 0,
+  // the pane waits undrawn (its open answered `isPlaced: false`): its first drawing takes the row above the prompt
+  // away; and the width the row above the prompt last asked for it again at (retryPending)
+  waiting: false,
+  retriedAt: 0,
   // when the cards were last read (`cards --since`)
   cardsAt: '',
   // the cards some drawing shows, and the label each label card counts
@@ -551,10 +555,10 @@ async function threadChain(cx: Ctx, p: TermPanel, step: ChatNavStep): Promise<Ch
   return chain
 }
 
-/** Show `p` in the panel: its step on the panel's way, its data read, the pane opened with the keys. A pane opened
- *  from a click on a narrow terminal waits undrawn: the row above the prompt offers it (`pending`). `replace`: `p` takes
- *  the place of the step the panel shows, and back leads where it led (a line chosen in a file, a tab, a slide; the
- *  thread a new thread's form asked). */
+/** Show `p` in the panel: its step on the panel's way, its data read, the pane opened with the keys (placePanel). A pane
+ *  Claude Code leaves undrawn waits: the row above the prompt offers it (`pending`). `replace`: `p` takes the place of
+ *  the step the panel shows, and back leads where it led (a line chosen in a file, a tab, a slide; the thread a new
+ *  thread's form asked). */
 export async function openPanel(cx: Ctx, p: TermPanel, opts: { replace?: boolean } = {}): Promise<void> {
   const step = stepOf(p)
   let nav = rt.navTo
@@ -575,17 +579,72 @@ export async function openPanel(cx: Ctx, p: TermPanel, opts: { replace?: boolean
   await cx.setNav(nav)
   await cx.setPanel(p)
   void loadPanel(cx, p).then(() => cx.bumpPanel())
+  await placePanel(cx, p)
+}
+
+/** The pane opened for what the panel shows, `p`, with the keys. Claude Code places an open the person asked for at any
+ *  width: one made while the hook of a command they typed or the handler of a Button they pressed still runs (so a
+ *  press hands back the promise that opens the panel; a handler that returns first ends the asking). Any other open (a
+ *  timer's, a click in a card, main's tool) it places only from 144 columns, or 110 for a pane the person opened before
+ *  and has not closed by hand; below that it waits undrawn, the row above the prompt offers it and says why, and Claude
+ *  Code places it once the terminal is widened to that width (the Pane's first drawing then takes the row away). */
+async function placePanel(cx: Ctx, p: TermPanel): Promise<void> {
   try {
     const title = paneTitle(p)
     rt.fittedFor = rt.termColumns
     const r = await cx.open({ id: PANEL, title, focus: true, columns: panelColumns() })
-    await cx.setPending(r.isPlaced ? null : { title })
+    rt.waiting = !r.isPlaced
+    // placed, a later wait is asked for again at any width (retryPending)
+    if (r.isPlaced) rt.retriedAt = 0
+    await cx.setPending(r.isPlaced ? null : pendingOf(title, r.reason))
     // with a draft in the prompt the keys stay there (Claude Code keeps the person's typing)
     if (r.isPlaced && (await cx.promptText().catch(() => '')).trim()) cx.toast('the prompt holds a draft, so it keeps the keys: click the panel to use its keys')
     else if (r.isPlaced) giveKeys(cx, title, p.view === 'ask' ? ASK_FIELD : RELAY_PICK)
   } catch (err) {
     cx.log(`thimble-term: could not open the panel: ${String(err).slice(0, 200)}`)
   }
+}
+
+/** Why Claude Code left a pane undrawn, from its answer's `reason` (UiOpenResult): `unasked below 144 columns (120
+ *  now…)`, the width from which it places a pane it was not asked for and the width then, or `no attached surface
+ *  places panes`. */
+export function pendingOf(title: string, reason: string): TermPending {
+  const below = /below (\d+) columns \((\d+) now/.exec(reason)
+  if (below) return { title, floor: Number(below[1]), columns: Number(below[2]) }
+  return /no attached surface places panes/.test(reason) ? { title, noScreen: true } : { title }
+}
+
+/** The row above the prompt's `open panel`: the pane that waits opened again, as `/thimble` opens it, without a step
+ *  of its own on the panel's way (the open that waited put it there). Its Button hands back this promise, so the open
+ *  is the press's own and Claude Code places it at any width. */
+export async function openPending(cx: Ctx): Promise<void> {
+  const p = await cx.panel()
+  if (!p) return void (await cx.setPending(null))
+  await placePanel(cx, p)
+  void loadPanel(cx, p).then(() => cx.bumpPanel())
+}
+
+/** The row above the prompt gone once the panel is drawn: Claude Code placed a pane that waited (the terminal widened
+ *  to its width, or a screen that draws panes attached), and the Pane's drawing or the row's own drawing saw it. */
+export async function placedLater(cx: Ctx): Promise<void> {
+  rt.waiting = false
+  if ((await cx.pending()) === null) return
+  if ((await cx.panes()).some(x => x.id === PANEL && x.isPlaced)) {
+    rt.retriedAt = 0
+    await cx.setPending(null)
+  } else rt.waiting = true
+}
+
+/** The waiting pane asked for again, from a timer, once the terminal is as wide as the width Claude Code places it
+ *  from (the row above the prompt saw that width): placed at once rather than when Claude Code's own look at the new
+ *  width comes. Once per width until the pane is placed, so a refusal at that width is not asked again and again. */
+export async function retryPending(cx: Ctx, columns: number): Promise<void> {
+  if (rt.retriedAt === columns) return
+  rt.retriedAt = columns
+  const [w, p] = [await cx.pending(), await cx.panel()]
+  if (!w || !p || (w.floor ?? Infinity) > columns) return
+  if ((await cx.panes()).some(x => x.id === PANEL && x.isPlaced)) return void (await placedLater(cx))
+  await placePanel(cx, p)
 }
 
 /** The panel asks for the keys once more a moment after it opened, once the press that opened it is over: an open from
@@ -674,6 +733,7 @@ export function paneTitle(p: TermPanel): string {
 }
 
 export async function closePanel(cx: Ctx): Promise<void> {
+  rt.waiting = false
   await cx.setPending(null)
   await cx.close(PANEL).catch(() => undefined)
   await cx.setPanel(null)
