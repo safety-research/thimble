@@ -736,6 +736,12 @@ export THIMBLE_LAUNCHED=1
 # Claude Code aborts an MCP call that sends neither a result nor progress for 30 min. The shim reports progress every
 # minute; the longer limit (4 h, in ms) covers a Claude Code that ignores it. A value the analyst set is kept.
 export CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT="${CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT:-14400000}"
+# Claude Code watches a --plugin-dir folder in an interactive session, as a plugin being written: it reloads it on a save
+# and writes each hook or Client of it that fails into the transcript, main's chat here (`thimble-term: Client
+# hooks/viewclient.tsx: returned a tree that does not validate (…)`). thimble's plugin and thimble-term are not being
+# written in the analyst's session, so they load as an installed plugin does, unwatched, and such a line goes to the
+# debug log alone. A value the analyst set is kept (1 for a thimble developer who wants the reloads).
+export CLAUDE_CODE_PLUGIN_DIR_WATCH="${CLAUDE_CODE_PLUGIN_DIR_WATCH:-0}"
 # A turn that ends right after one of these tools needs no closing text, and main's prompt says so; empty when this
 # `claude` does not read the variable, and main's prompt then ends such turns with the end token (backend/app/terminal_tools.py).
 [ -z "$turn_tools" ] || export CLAUDE_CODE_TERMINAL_MCP_TOOLS="$turn_tools"

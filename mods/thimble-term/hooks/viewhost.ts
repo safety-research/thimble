@@ -69,6 +69,8 @@ let pumping = false
 let sessionCx: Ctx | null = null
 // what the panel does with an act (set by panel.tsx)
 let actSink: (cx: Ctx, a: ViewAct) => Promise<void> = async () => {}
+// the frame of the open view its Client could not draw (ui.fault), and why: the panel draws why in its place
+let fault: { seq: number; reason: string } | null = null
 
 // a redraw of the panel from the timer's work or the host's line
 const bump = (cx: Ctx): void => void cx.bumpPanel().catch(() => undefined)
@@ -101,6 +103,17 @@ export function cleanFrame(f: ViewFrame): ViewFrame {
     ...(f.field ? { field: { text: printable(f.field.text) } } : {}),
     ...(f.error !== undefined ? { error: printable(f.error) } : {}),
   }
+}
+
+/** The open view's Client could not draw its frame (register.tsx, ui.fault): until the next frame the panel draws
+ *  `the view could not draw: <reason>` in its place, dim. */
+export function viewFault(reason: string): void {
+  if (current?.frame) fault = { seq: current.frame.seq, reason: printable(reason) }
+}
+
+/** Why the open view's Client could not draw the frame `seq`, or '' when it drew it (or has not tried). */
+export function viewFaultOf(seq: number): string {
+  return fault && fault.seq === seq ? fault.reason : ''
 }
 
 /**
@@ -169,6 +182,7 @@ async function pump(cx: Ctx): Promise<void> {
   const was = current
   if (was && (!w || was.slug !== w.slug || again)) {
     current = null
+    fault = null
     if (was.id && host) await call(cx, host, '/close', { id: was.id }).catch(() => undefined)
   }
   if (!w) return

@@ -219,6 +219,12 @@ def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_vari
     seen = dict(line.split("=", 1) for line in Path(f"{argv_out}.env").read_text().splitlines() if "=" in line)
     assert seen["CLAUDE_CODE_DISABLE_AGENT_VIEW"] == "1" and seen["CLAUDE_DISABLE_ADOPT"] == "1"
     assert "CLAUDE_CODE_EFFORT_LEVEL" not in seen and "CLAUDE_CODE_SUBAGENT_MODEL" not in seen
+    # thimble's plugin folders load unwatched, so a hook or Client of theirs that fails is told in the debug log, not in
+    # main's chat; a value the analyst set is kept
+    assert seen["CLAUDE_CODE_PLUGIN_DIR_WATCH"] == "0"
+    subprocess.run(["bash", str(launcher)], check=True, capture_output=True, cwd=tmp_path,
+                   env={**env, "CLAUDE_CODE_PLUGIN_DIR_WATCH": "1"})
+    assert "CLAUDE_CODE_PLUGIN_DIR_WATCH=1" in Path(f"{argv_out}.env").read_text().splitlines()
     assert done.stderr.splitlines()[:2] == notes.split("\t")
     assert "--own-session" not in asked.read_text() and "--safe-mode" not in asked.read_text()
     told_pid = asked.read_text().splitlines()
