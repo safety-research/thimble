@@ -1,0 +1,316 @@
+// The Color by control of Files' Transcript and Table modes (colorChoice.ts), as a view's Color by (viewer_colour.js):
+// thimble's bordered button "Color by: <first choice> +<how many more> ▾", then a chip per value of the first choice (a
+// square swatch of its color, its name and its count, in thimble's small bordered box) that turns its records off and
+// on, on one line: the chips that do not fit go behind "N more", which lists every value, as a view's Color by does
+// (viewer_colour.js fit); Alt-click keeps that value alone. The menu takes several choices: Off, then the records' keys
+// under "Fields" and the labels that mark the file under "Labels", each a checkbox with how many values it has and, on a
+// second line, its values as chips (cut off with … where they do not fit). A click checks a key or a label, or
+// unchecks it, and the menu stays open; the first checked colors the records, each one after it is a lane of the tracks
+// and says "track". Off unchecks them all and closes the menu. Checking a label also opens its editor beside its row
+// (LabelEditor), and Escape there gives the focus back to the row. A chip of a label's value says what the value means on
+// hover, where the label's definition says it. A click on a chip's swatch opens the palette of thimble's label colors
+// around the color wheel (ValuePalette): the one picked recolors the value on the records, the chips and the tracks; a
+// label's value keeps it as the label's color (Files and every view), a key's value per file, and Reset colors gives the
+// key's values their own colors back.
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { Button } from '../components/Button'
+import { Icon } from '../components/Icon'
+import { Popover } from '../components/Menu'
+import { useTooltip } from '../components/Tooltip'
+import type { Concept, SourceKey } from '../lib/types'
+import { choiceId, keyChips, labelChips, NONE, pickedChips, type ColorChoice, type ColorValue } from './colorChoice'
+import { openLabelEditor } from './LabelEditor'
+import { mainColour } from './labels'
+import { ValuePalette } from './ValuePalette'
+
+interface Props {
+  /** the first choice; `off` for Off */
+  choice: ColorChoice
+  /** every choice in order, the first the color and each other a lane of the tracks; the first alone when not given */
+  picks?: readonly ColorChoice[]
+  keys: readonly SourceKey[]
+  /** the labels over files that mark this file, on or off */
+  labels: readonly Concept[]
+  values: readonly ColorValue[]
+  off: readonly string[]
+  /** Off, or a key or a label checked or unchecked */
+  onChoose: (c: ColorChoice) => void
+  onToggle: (value: string, alone: boolean) => void
+  /** a label's value counts on this file */
+  countsOf: (id: string) => Readonly<Record<string, number>> | undefined
+  /** give a value one of the palette's colors, 1 to LABEL_COLOURS; no palette without it */
+  onColor?: (value: string, color: number) => void
+  /** give the choice's values their own colors back; no Reset colors without it */
+  onResetColors?: () => void
+  /** the colors picked for a choice's values, by its id (choiceId), which the menu's previews show */
+  pickedOf?: (id: string) => Readonly<Record<string, number>> | undefined
+}
+
+export function choiceName(c: ColorChoice, labels: readonly Concept[]): string {
+  if (c.by === 'off') return 'Off'
+  if (c.by === 'key') return c.key
+  return labels.find((k) => k.id === c.id)?.name ?? 'label'
+}
+
+export function ColorBy({ choice, picks: given, keys, labels, values, off, onChoose, onToggle, countsOf, onColor, onResetColors, pickedOf }: Props) {
+  const picks = given ?? (choice.by === 'off' ? [] : [choice])
+  const extra = picks.slice(1)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const paletteAt = useRef<HTMLElement | null>(null)
+  const [open, setOpen] = useState(false)
+  const [painting, setPainting] = useState<string | null>(null)
+  const painted = painting != null ? values.find((v) => v.id === painting) : undefined
+  const root = useRef<HTMLDivElement>(null)
+  const chipsBox = useRef<HTMLDivElement>(null)
+  const more = useRef<HTMLButtonElement>(null)
+  const moreN = useRef<HTMLSpanElement>(null)
+  const [listOpen, setListOpen] = useState(false)
+  // the chips that do not fit the line go behind "N more", the last first (viewer_colour.js fit)
+  const fit = useCallback(() => {
+    const box = chipsBox.current
+    const btn = more.current
+    if (!box || !btn) return
+    const chips = box.querySelectorAll<HTMLElement>('.colorby-chip')
+    chips.forEach((c) => (c.hidden = false))
+    btn.hidden = true
+    if (box.scrollWidth <= box.clientWidth + 1) return
+    btn.hidden = false
+    let hid = 0
+    for (let j = chips.length - 1; j >= 0 && box.scrollWidth > box.clientWidth + 1; j--) {
+      chips[j].hidden = true
+      hid++
+      if (moreN.current) moreN.current.textContent = `${hid.toLocaleString()} more`
+    }
+  }, [])
+  useLayoutEffect(fit, [fit, values, off, choice])
+  useEffect(() => {
+    const el = root.current
+    if (!el || typeof ResizeObserver !== 'function') return
+    let frame: number | null = null
+    let width = -1
+    const ro = new ResizeObserver(() => {
+      if (frame != null) return
+      frame = requestAnimationFrame(() => {
+        frame = null
+        if (el.clientWidth === width) return
+        width = el.clientWidth
+        fit()
+      })
+    })
+    ro.observe(el.parentElement ?? el)
+    return () => {
+      ro.disconnect()
+      if (frame != null) cancelAnimationFrame(frame)
+    }
+  }, [fit])
+  return (
+    <div className="colorby" ref={root}>
+      <Button ref={trigger} variant="secondary" size="sm" className="colorby-trigger" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="colorby-k">Color by:</span> <b>{choiceName(choice, labels)}</b>
+        {extra.length > 0 && (
+          <span className="colorby-plus" title={`${extra.map((c) => choiceName(c, labels)).join(', ')}: a track each`}>
+            +{extra.length}
+          </span>
+        )}
+        <Icon name="chevron-down" size={12} className="colorby-caret" />
+      </Button>
+      {choice.by !== 'off' && (
+        <div className="colorby-chips" role="group" aria-label="Values" ref={chipsBox}>
+          {values.map((v) => (
+            <ValueChip
+              key={v.id}
+              v={v}
+              on={!off.includes(v.id)}
+              onToggle={onToggle}
+              quiet={painting != null}
+              onPalette={
+                onColor && v.color
+                  ? (el) => {
+                      paletteAt.current = el
+                      setPainting((p) => (p === v.id ? null : v.id))
+                    }
+                  : undefined
+              }
+            />
+          ))}
+          <Button ref={more} variant="ghost" size="sm" className="colorby-more" aria-haspopup="dialog" aria-expanded={listOpen} onClick={() => setListOpen((o) => !o)}>
+            <span ref={moreN} />
+            <Icon name="chevron-down" size={12} className="colorby-caret" />
+          </Button>
+        </div>
+      )}
+      <Popover anchor={more} open={listOpen && choice.by !== 'off'} onClose={() => setListOpen(false)} label="Values" className="colorby-values">
+        <div className="colorby-values-list" role="group" aria-label="Values">
+          {values.map((v) => (
+            <ValueChip key={v.id} v={v} on={!off.includes(v.id)} onToggle={onToggle} />
+          ))}
+        </div>
+      </Popover>
+      <Popover
+        anchor={trigger}
+        open={open}
+        onClose={(how) => {
+          setOpen(false)
+          if (how === 'escape') trigger.current?.focus()
+        }}
+        role="menu"
+        label="Color by"
+        className="colorby-menu"
+        width={300}
+      >
+        <ColorMenu
+          picks={picks}
+          keys={keys}
+          labels={labels}
+          countsOf={countsOf}
+          pickedOf={pickedOf}
+          onChoose={(c, row) => {
+            // Off closes the menu; a key or a label checked or unchecked leaves it open
+            if (c.by === 'off') setOpen(false)
+            const checked = c.by !== 'off' && !picks.some((p) => choiceId(p) === choiceId(c))
+            onChoose(c)
+            // a label checked: its editor beside its row, which the focus goes back to
+            if (c.by === 'label' && checked) openLabelEditor({ id: c.id, anchor: row, side: 'aside', back: row })
+          }}
+        />
+      </Popover>
+      {onColor && (
+        <Popover
+          anchor={paletteAt}
+          open={!!painted}
+          onClose={(how) => {
+            setPainting(null)
+            if (how === 'escape') paletteAt.current?.focus()
+          }}
+          label={painted ? `Color of ${painted.name}` : 'Color'}
+          className="colorby-palette"
+        >
+          {painted && (
+            <ValuePalette
+              value={painted}
+              onPick={(n) => {
+                setPainting(null)
+                onColor(painted.id, n)
+              }}
+              onReset={
+                onResetColors
+                  ? () => {
+                      setPainting(null)
+                      onResetColors()
+                    }
+                  : undefined
+              }
+            />
+          )}
+        </Popover>
+      )}
+    </div>
+  )
+}
+
+function ValueChip({ v, on, onToggle, onPalette, quiet }: { v: ColorValue; on: boolean; onToggle: (value: string, alone: boolean) => void; onPalette?: (chip: HTMLElement) => void; quiet?: boolean }) {
+  // no meaning beside the chip while the palette is open over it
+  const { props: tip, tip: tipEl } = useTooltip(quiet ? null : (v.meaning ?? null))
+  return (
+    <>
+      <button
+        type="button"
+        className="colorby-chip"
+        aria-pressed={on}
+        data-value={v.id}
+        style={v.color ? ({ '--c': v.color } as CSSProperties) : undefined}
+        onClick={(e: MouseEvent) => {
+          // the swatch: the palette, to pick the value's color
+          if (onPalette && (e.target as HTMLElement).closest?.('[data-palette]')) return onPalette(e.currentTarget as HTMLElement)
+          onToggle(v.id, e.altKey)
+        }}
+        {...(tip as object)}
+      >
+        <span className="colorby-sw" {...(onPalette ? { 'data-palette': '', title: `Color of ${v.name}` } : {})} />
+        <span className="colorby-name">{v.name}</span>
+        {v.n != null && <span className="colorby-n">{v.n.toLocaleString()}</span>}
+      </button>
+      {tipEl}
+    </>
+  )
+}
+
+/** "1 value", "12 values" */
+export const valuesWord = (n: number): string => `${n.toLocaleString()} ${n === 1 ? 'value' : 'values'}`
+
+/** A choice's values in the menu, on one line under its name: each a chip's square swatch and name, cut off with … */
+function ChipPreview({ values }: { values: readonly ColorValue[] }) {
+  return (
+    <span className="colorby-preview" aria-hidden>
+      {values.map((v) => (
+        <span key={v.id} className="colorby-preview-chip" style={v.color ? ({ '--c': v.color } as CSSProperties) : undefined}>
+          <span className="colorby-sw" />
+          {v.name}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** A choice's name, "track" when it is a choice past the first, how many values it has, and its values as chips on the
+ * line under them. */
+function ChoiceBody({ name, mono, count, values, swatch, track }: { name: string; mono?: boolean; count: number; values: readonly ColorValue[]; swatch?: string; track?: boolean }) {
+  return (
+    <span className="colorby-choice">
+      <span className="colorby-choice-top">
+        {swatch && <span className="colorby-sw" style={{ '--c': swatch } as CSSProperties} />}
+        <span className={'menu-item-label' + (mono ? ' mono' : '')}>{name}</span>
+        {track && <span className="colorby-track-n">track</span>}
+        <span className="menu-item-note">{valuesWord(count)}</span>
+      </span>
+      {values.length > 0 && <ChipPreview values={values} />}
+    </span>
+  )
+}
+
+function ColorMenu({ picks, keys, labels, countsOf, pickedOf, onChoose }: { picks: readonly ColorChoice[]; keys: readonly SourceKey[]; labels: readonly Concept[]; countsOf: Props['countsOf']; pickedOf?: Props['pickedOf']; onChoose: (c: ColorChoice, row: HTMLElement) => void }) {
+  const ids = picks.map(choiceId)
+  const item = (c: ColorChoice, body: (track: boolean) => ReactNode) => {
+    const id = choiceId(c)
+    const at = ids.indexOf(id)
+    return (
+      <div key={id} className="colorby-row">
+        <button type="button" role="menuitemcheckbox" aria-checked={at >= 0} data-by={id} className={'menu-item colorby-item' + (at >= 0 ? ' checked' : '')} onClick={(e) => onChoose(c, e.currentTarget)}>
+          <span className={'colorby-box' + (at >= 0 ? ' on' : '')}>{at >= 0 && <Icon name="check" size={10} />}</span>
+          {body(at > 0)}
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div className="colorby-list">
+      <div className="colorby-row">
+        <button type="button" role="menuitemradio" aria-checked={picks.length === 0} data-by="off" className={'menu-item colorby-item' + (picks.length === 0 ? ' checked' : '')} onClick={(e) => onChoose({ by: 'off' }, e.currentTarget)}>
+          <span className="colorby-tick">{picks.length === 0 && <Icon name="check" size={12} />}</span>
+          <span className="menu-item-label">Off</span>
+        </button>
+      </div>
+      {keys.length > 0 && (
+        <div className="menu-heading" role="presentation">
+          Fields
+        </div>
+      )}
+      {keys.map((k) =>
+        item({ by: 'key', key: k.key }, (track) => <ChoiceBody name={k.key} mono track={track} count={k.values.length + k.more.values} values={pickedChips(keyChips(k), pickedOf?.(choiceId({ by: 'key', key: k.key }))).filter((v) => v.id !== NONE)} />),
+      )}
+      {labels.length > 0 && (
+        <div className="menu-heading" role="presentation">
+          Labels
+        </div>
+      )}
+      {labels.map((k) => item({ by: 'label', id: k.id }, (track) => <LabelBody label={k} counts={countsOf(k.id)} track={track} />))}
+    </div>
+  )
+}
+
+/** A label's row in the menu: its color, its name, "track" past the first choice, how many values it colors by and those
+ * values as chips. */
+function LabelBody({ label: k, counts, track }: { label: Concept; counts?: Readonly<Record<string, number>>; track?: boolean }) {
+  const lit = labelChips(k, counts, null).filter((v) => v.id !== NONE)
+  return <ChoiceBody name={k.name} swatch={mainColour(k)} count={lit.length} values={lit} track={track} />
+}

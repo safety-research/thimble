@@ -70,7 +70,7 @@ def test_every_package_the_runtime_code_imports_is_a_runtime_dependency():
             if not any(_norm(d) in runtime for d in dists):
                 missing.append(f"{path.name}: {mod} ({', '.join(dists)})")
     assert missing == [], "imported at run time but a dev extra or absent from the runtime dependencies"
-    assert "httpx" in runtime, "the shim's channel stream and permission relay"
+    assert "httpx" in runtime, "the shim's tool calls and its subscription's stream"
 
 
 def test_every_frontend_package_the_runtime_code_loads_is_one_a_release_installs():

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // The Labels sidebar beside a view (src/files/ViewSide.tsx useViewSide): a view draws its own label controls and thimble
-// draws none in its head. A view whose page has them keeps the sidebar closed until its controls open a label's editor.
-// Beside a view built without them, the sidebar opens while a label is on or a label marks the view's files, so turning
-// the last label off keeps it, with the offer to add them, which asks for the change in the view's thread.
+// draws none in its head. A view whose page has them keeps the sidebar closed: its controls open the label editor in a
+// popover over the view (label-editor.test.tsx). Beside a view built without them, the sidebar opens while a label is on
+// or a label marks the view's files, so turning the last label off keeps it, with the offer to add them, which asks for
+// the change in the view's thread.
 import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
@@ -25,16 +26,14 @@ function labelsWith(on: Concept[], marks: string[] = []): FilesLabels {
     setClasses: () => undefined,
     setColour: () => undefined,
     save: async () => asks,
+    remove: async () => undefined,
   }
 }
 
 const VIEW: BuiltView = { slug: 'board', name: 'Board', claims: ['board.jsonl'] }
 
-let edit: ((id: string | null) => void) | null = null
-
 function Side({ own, labels }: { own: boolean; labels: FilesLabels }) {
   const side = useViewSide('w', { ...VIEW, label_controls: own }, labels)
-  edit = side.editLabel
   return <div>{side.side}</div>
 }
 
@@ -77,12 +76,10 @@ describe('the Labels sidebar beside a view', () => {
     expect(el.querySelector('.files-labels-note')?.textContent).toBe('Adding label controls to the view')
   })
 
-  test('beside a view with label controls of its own it stays closed until they open a label editor', async () => {
-    const el = await mount(<Side own labels={labelsWith([asks])} />)
+  test('beside a view with label controls of its own it stays closed, with a label on and one marking its files', async () => {
+    const el = await mount(<Side own labels={labelsWith([asks], ['board.jsonl'])} />)
     await settle()
     expect(sidebar(el)).toBeNull()
-    await act(async () => edit!('k1'))
-    expect(sidebar(el)).not.toBeNull()
     expect(offer(el), 'no offer beside a view that has them').toBeNull()
   })
 

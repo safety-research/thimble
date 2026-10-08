@@ -17,7 +17,12 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               (source, target[, label]) or dicts. A node's first line is its label, the rest its
                               detail. Output is DIAGRAM_MIME with a text/plain listing the model reads and cites
     thimble.marked(ref)       in a view's reader: the marks of the labels that are on for one record, each
-                              {label, value, colour}, [] outside a view's call
+                              {label, value, colour, id}, [] outside a view's call
+    thimble.colour_value(choice, ref=None, record=None)
+                              in a view's reader: the value a record takes under the page's Colour by (`choice`, the
+                              page's colour.query()), a label's value on `ref` or a field's in `record`; None for none
+    thimble.colour_on(choice, value)
+                              in a view's reader: whether the analyst left that value's chip on
     thimble.kept(ref)         in a view's reader: whether the record passes the analyst's label filter (True with none)
     thimble.kept_unit(refs)   in a view's reader: whether a unit that gathers the records `refs` passes that filter,
                               judged by its records in the files the filter's label ran over (True when it has records
@@ -59,7 +64,8 @@ from pathlib import Path
 
 WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.kernel_argv)
 
-__all__ = ["labels", "colours", "marked", "kept", "view_labels", "progress", "diagram", "timeline", "card"]
+__all__ = ["labels", "colours", "marked", "kept", "view_labels", "colour_value", "colour_on", "progress", "diagram", "timeline",
+           "card"]
 
 FRAME_ROWS = 500  # rows of a table card's DataFrame the card keeps and shows (frames.ROWS_MAX)
 
@@ -70,10 +76,16 @@ TIMELINE_MIME = "application/vnd.thimble.timeline+json"
 
 _COLUMNS = ["path", "line", "effective", "label", "source", "verdict", "confidence", "ref"]
 
-# A label class's colour by index (concepts.PALETTE): 0 is --label-none, the grey of a negative class; 1..12 are
-# --label-1..12 (styles/tokens.css).
-LABEL_COLOURS = ["#a09c93", "#025ac3", "#d0750a", "#08632f", "#1392d4", "#897301", "#009c85", "#844500", "#013c77", "#2aa02b", "#025a7c",
-                 "#622b01", "#0389a0"]
+# A label class's colour by index (concepts.PICKS): 0 is --label-none, the grey of a negative class; 1..18 are
+# --label-1..18 (styles/tokens.css), of which new values take 1..12 (LABEL_ORDER) and the analyst alone picks 13..18,
+# red, purple and pink.
+LABEL_COLOURS = ["#a09c93", "#025ac3", "#d0750a", "#06572a", "#1392d4", "#7d6702", "#009c85", "#844500", "#013c77", "#2aa02b", "#025a7c",
+                 "#622b01", "#0389a0", "#d0342c", "#8a1c1c", "#7b4fd6", "#4c2a91", "#d23f8b", "#8d1d5c"]
+# The order new values take the palette's places (indices into LABEL_COLOURS): blue, orange, green, gold, teal, brown,
+# sky, then navy, grass, cerulean, chestnut and cyan, so a label's first five values are five hues with no second blue.
+# A stored place keeps its hue; only the order new values take the places in differs. The frontend and the view kit
+# read the same order from label_order.json, which test_label_order holds equal to this.
+LABEL_ORDER = (1, 2, 3, 5, 6, 7, 4, 8, 9, 10, 11, 12)
 # A value a label does not define: --viz-ink-1, -2 and -4 in turn (the third step is the label grey's near twin).
 NEUTRAL_COLOURS = ["#1b1a18", "#6b675f", "#cfcbc2"]
 _QUIET = frozenset({"no", "none", "other", "no match", "not", "neither", "n/a", "unknown"})  # concepts.QUIET_VALUES
@@ -86,27 +98,10 @@ def _negative(value: str, index: int, n: int) -> bool:
     return v in _QUIET or (n == 2 and index == 1) or (n > 2 and index == n - 1 and v.split(" ", 1)[0] in _LEFTOVER)
 
 
-def _oklab(hex_colour: str) -> tuple:
-    """A colour's place in OKLab, where distance is how different two colours look."""
-    def lin(x: int) -> float:
-        c = x / 255
-        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-    r, g, b = (lin(int(hex_colour[i:i + 2], 16)) for i in (1, 3, 5))
-    lms = [(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3),
-           (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3),
-           (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b) ** (1 / 3)]
-    return tuple(sum(w * x for w, x in zip(row, lms)) for row in ((0.2104542553, 0.7936177850, -0.0040720468),
-                                                                  (1.9779984951, -2.4285922050, 0.4505937099),
-                                                                  (0.0259040371, 0.7827717662, -0.8086757660)))
-
-
-_LAB = [_oklab(h) for h in LABEL_COLOURS]
-
-
-def most_distinct(taken, candidates) -> int:
-    """The candidate colour index that looks most unlike the nearest of `taken`; the lowest index on a tie."""
-    return max(candidates, key=lambda m: (min((math.dist(_LAB[m], _LAB[t]) for t in taken), default=0.0), -m))
+def palette_from(start: int) -> tuple:
+    """The palette's places in LABEL_ORDER from `start` on, round the order; from the first when `start` is no place."""
+    i = LABEL_ORDER.index(start) if start in LABEL_ORDER else 0
+    return LABEL_ORDER[i:] + LABEL_ORDER[:i]
 
 
 def _ws() -> Path:
@@ -159,35 +154,32 @@ def _classes(k: dict) -> list:
 
 
 def _fill_colours(ks: list) -> list:
-    """Give every class without a colour the one concepts.fill_colours gives it, in place: while a colour is free, one no
-    class of any label has, a label's first class takes the first free one; else the colours in turn. A further class
-    takes the free colour, else any, that looks most unlike its label's colours (most_distinct). A negative class takes
-    the grey, and a label's classes do not repeat a colour while one remains."""
-    n_colours = len(LABEL_COLOURS) - 1
+    """Give every class without a color the one concepts.fill_colours gives it, in place, taking the places in
+    LABEL_ORDER: while a color is free, one no class of any label has, a label's first class takes the first free one;
+    else the colors in turn. A further class, i places after the first, takes the first free color from the one i
+    places after the first class's, else that one. A negative class takes the gray, and a label's classes do not repeat
+    a color while one remains."""
     used = {c[1] for k in ks for c in k["classes"] if c[1]}
-
-    def free(start: int):
-        return next((m for m in ((start - 1 + i) % n_colours + 1 for i in range(n_colours)) if m not in used), None)
-
     j = 0
     for k in ks:
         cs = k["classes"]
         if not cs:
             continue
         if cs[0][1] is None:
-            cs[0][1] = free(1)
+            cs[0][1] = next((m for m in LABEL_ORDER if m not in used), None)
             if cs[0][1] is None:
-                cs[0][1] = j % n_colours + 1
+                cs[0][1] = LABEL_ORDER[j % len(LABEL_ORDER)]
                 j += 1
             used.add(cs[0][1])
-        base = cs[0][1] or 1
+        base = cs[0][1] or LABEL_ORDER[0]
         taken = {base} if cs[0][1] else set()
         for i, c in enumerate(cs[1:], 1):
             if c[1] is None:
-                mine = [m for m in range(1, n_colours + 1) if m not in taken]
-                c[1] = 0 if _negative(c[0], i, len(cs)) else most_distinct(taken, [m for m in mine if m not in used] or mine or [base])
+                at = palette_from(base)[i % len(LABEL_ORDER)]
+                busy = used | taken
+                c[1] = 0 if _negative(c[0], i, len(cs)) else next((m for m in palette_from(at) if m not in busy), at)
             if c[1] and c[1] in taken:
-                c[1] = next((m for m in ((c[1] - 1 + j) % n_colours + 1 for j in range(1, n_colours)) if m not in taken), c[1])
+                c[1] = next((m for m in palette_from(c[1])[1:] if m not in taken), c[1])
             if c[1]:
                 taken.add(c[1])
                 used.add(c[1])
@@ -425,9 +417,17 @@ def _row_line(ref: str, row: dict):
     return path, line
 
 
+_LIST_COLUMNS = ["name", "id", "kind", "unit", "values", "n_labeled", "set_by_analyst"]
+
+
 def labels(name=None, negatives=False):
-    """thimble.labels() lists the labels; thimble.labels("<name>") returns one label's matches (every labeled unit with
-    negatives=True)."""
+    """thimble.labels() lists the labels, each with how many of its units the analyst set to another value
+    (`set_by_analyst`); thimble.labels("<name>") returns one label's matches (every labeled unit with negatives=True).
+
+    The analyst's verdicts override the label: a unit's `effective` value is the analyst's `verdict` where they set one,
+    else the label's own (`label`), and the matches are the units whose effective value is the label's first value. So a
+    value's rows here can differ from the count the label itself gave by the units the analyst set to another value; that
+    is the analyst's review, not a fault (the result's `attrs["set_by_analyst"]` counts them)."""
     import pandas as pd
 
     if (_view_ctx or {}).get("probe") and (name is None or name == PROBE_NAME):
@@ -435,8 +435,8 @@ def labels(name=None, negatives=False):
     if name is None:
         ks = [k for k in _concepts() if not k["superseded_by"]]
         return pd.DataFrame([{"name": k["name"], "id": k["id"], "kind": k["kind"], "unit": k["unit"], "values": k["values"],
-                              "n_labeled": k["n_labeled"]} for k in ks],
-                            columns=["name", "id", "kind", "unit", "values", "n_labeled"])
+                              "n_labeled": k["n_labeled"], "set_by_analyst": _set_by_analyst(k["id"])} for k in ks],
+                            columns=_LIST_COLUMNS)
     k = _find(name)
     if all(x["id"] != k["id"] for x in _LABELS_READ):
         _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
@@ -453,7 +453,37 @@ def labels(name=None, negatives=False):
     df = pd.DataFrame(out, columns=_COLUMNS, dtype=object)  # object: a missing label or verdict stays None, not NaN
     df["line"] = pd.array(df["line"].tolist(), dtype="Int64")
     df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce")
+    df.attrs["set_by_analyst"] = sum(1 for _p, _l, label, _s, verdict, _c, _r in rows
+                                     if verdict is not None and label is not None and str(verdict) != str(label))
     return df
+
+
+def _set_by_analyst(concept_id: str) -> int:
+    """How many units of a label the analyst set to another value than the label gave (concepts.verdicts_applied's
+    count): from the store when it reflects the labels file, else from the file."""
+    jsonl = _ws() / "labels" / f"{concept_id}.jsonl"
+    db = jsonl.with_suffix(".sqlite")
+    try:
+        if _store_fresh(jsonl, db):
+            # the analyst's rows alone, each with the value the label gave it: its own, or its cover's (a range of
+            # records the label gave one value)
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+            try:
+                rows = conn.execute("SELECT path, line, label, source, analyst, confidence, ref FROM current "
+                                    "WHERE analyst IS NOT NULL").fetchall()
+                try:
+                    covers = conn.execute("SELECT path, first, last, value, source FROM covers ORDER BY rowid").fetchall()
+                except sqlite3.Error:  # a store without covers
+                    covers = []
+            finally:
+                conn.close()
+            rows = _with_covers(rows, covers, False)
+        else:
+            rows = _rows_from_jsonl(jsonl)
+        return sum(1 for _p, _l, label, _s, verdict, _c, _r in rows
+                   if verdict is not None and label is not None and str(verdict) != str(label))
+    except (OSError, sqlite3.Error):
+        return 0
 
 
 def colours(name, values=None):
@@ -485,9 +515,9 @@ _view_paths: list = []  # the claimed files of the view whose reader call is run
 _left_out = None
 PROBE_NAME = "test label"
 PROBE_ID = "test-label"
-# the colour the analyst's first label takes (--label-1), so the pictures show a view's own colour that clashes with a
-# label where the analyst would see it
-PROBE_COLOUR = LABEL_COLOURS[1]
+# the colour the analyst's first label takes (--label-1, the first of LABEL_ORDER), so the pictures show a view's own
+# colour that clashes with a label where the analyst would see it
+PROBE_COLOUR = LABEL_COLOURS[LABEL_ORDER[0]]
 # labels file -> (the files' signature, (_Values, {path: [(first, last, value)]}, {path})), the most recently used last
 _MEMBERS: dict = {}
 # above the labels any context holds: labels that do not all fit here are read again on every call
@@ -699,8 +729,10 @@ def _value_of(label: dict, ref: str):
     values, spans, _paths = _label_members(label)
     v = values.get(ref)
     if v is None:
-        v = values.get(_canon(ref))
-    if v is not None:
+        c = _canon(ref)
+        if c != ref:
+            v = values.get(c)
+    if v is not None or not spans:
         return v
     path, line = _ref_parts(ref)
     if path is None or line is None:
@@ -713,6 +745,8 @@ _PDF_PAGE = re.compile(r"^(.+\.[Pp][Dd][Ff])#(?:p|page=?)(\d+)$")
 
 def _canon(ref: str) -> str:
     """A record's ref as label rows key it (records.canon): a PDF's `#page=<n>` as `#p<n>`."""
+    if "#p" not in ref:  # names no PDF page: skip the regex, which a view's reader runs on each record it marks
+        return ref
     m = _PDF_PAGE.match(ref)
     return f"{m[1]}#p{int(m[2])}" if m else ref
 
@@ -752,7 +786,7 @@ def _probe_labels(pd, name, negatives):
     every = int(_view_ctx["probe"])
     if name is None:
         return pd.DataFrame([{"name": PROBE_NAME, "id": PROBE_ID, "kind": "regex", "unit": "line", "values": [PROBE_NAME],
-                              "n_labeled": None}], columns=["name", "id", "kind", "unit", "values", "n_labeled"])
+                              "n_labeled": None, "set_by_analyst": 0}], columns=_LIST_COLUMNS)
     out = []
     for path in _view_paths:
         for line in range(1, _line_count(path) + 1):
@@ -779,9 +813,37 @@ def _probed(ref: str, every) -> bool:
 
 def marked(ref):
     """The marks of the labels that are on for the record `ref` (`<path>#L<n>`, or the ref of a record of another reader
-    such as `<db>#<table>/<key>` or `<pdf>#p<n>`): each {label, value, colour} whose value
+    such as `<db>#<table>/<key>` or `<pdf>#p<n>`): each {label, value, colour, id} whose value
     the record takes and the analyst highlights, in the labels' order. [] outside a view's reader call."""
     return _marked(_view_ctx, ref)
+
+
+def colour_value(choice, ref=None, record=None):
+    """The value a record takes under the view's Colour by, `choice` being what the page's colour.query() sent with its
+    fetch (viewer_colour.js): for a label, {label: id, name}, the label's highlighted value on the record `ref`, else
+    None; for a field of the view, {field}, record[field] (record a dict), else None. None for no choice."""
+    if not isinstance(choice, dict):
+        return None
+    if choice.get("label") is not None:
+        if ref is None:
+            return None
+        want = str(choice.get("label"))
+        hit = next((m for m in _marked(_view_ctx, ref) if m.get("id") == want), None)
+        return None if hit is None else hit.get("value")
+    field = choice.get("field")
+    if field is None or not isinstance(record, dict):
+        return None
+    v = record.get(field)
+    return None if _missing(v) or v == "" else str(v)
+
+
+def colour_on(choice, value):
+    """Whether the analyst left a value's chip on under the view's Colour by (`choice`, the page's colour.query()), None
+    standing for the records that take no value: True for every value with no choice."""
+    if not isinstance(choice, dict):
+        return True
+    off = choice.get("off") or []
+    return (None if value is None or value == "" else str(value)) not in off
 
 
 def kept(ref):
@@ -834,14 +896,32 @@ def _marked(ctx, ref) -> list:
         return []
     ref = str(ref)
     if ctx.get("probe"):
-        return [{"label": PROBE_NAME, "value": PROBE_NAME, "colour": PROBE_COLOUR}] if _probed(ref, ctx["probe"]) else []
+        return [{"label": PROBE_NAME, "value": PROBE_NAME, "colour": PROBE_COLOUR, "id": PROBE_ID}] if _probed(ref, ctx["probe"]) else []
     out = []
     for k in ctx.get("labels") or []:
+        lit = _label_lit(k)
+        if not lit:
+            continue
         v = _value_of(k, ref)
-        hit = next((x for x in k.get("values") or [] if x.get("highlight") and x.get("name") == v), None)
-        if hit is not None:
-            out.append({"label": k.get("name"), "value": v, "colour": hit.get("colour") or k.get("colour")})
+        if v in lit:
+            out.append({"label": k.get("name"), "value": v, "colour": lit[v], "id": k.get("id")})
     return out
+
+
+def _label_lit(label: dict) -> dict:
+    """{value: colour} of the label's highlighted values, the first of a name winning, looked up once per labels context
+    as _label_members is: _marked runs on every record a view's reader marks."""
+    lit = label.get("_lit")
+    if lit is None:
+        lit = {}
+        for x in label.get("values") or []:
+            if x.get("highlight"):
+                try:
+                    lit.setdefault(x.get("name"), x.get("colour") or label.get("colour"))
+                except TypeError:  # an unhashable name equals no value
+                    pass
+        label["_lit"] = lit
+    return lit
 
 
 def _kept(ctx, ref) -> bool:

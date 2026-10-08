@@ -6,18 +6,22 @@
 // one toggles its highlight. Under each name, the status of its last or running apply. A label over files has a palette
 // on hover that changes its colours (LabelPalette). Beside a view, a label's row (and each value's) has a funnel on
 // hover that sets the Files label filter, which the view keeps its records by; the funnel of the filter set stays
-// pressed, and a click on it clears the filter.
-import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+// pressed, and a click on it clears the filter. A row's ⋯ menu edits the label or deletes it, once confirmed
+// (DeleteLabelConfirm).
+import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
+import { Menu } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { TipButton } from '../components/Tooltip'
 import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptRun } from '../lib/types'
-import { classesOf, colourVar, isFilesLabel, isMultiClass, labelStatus, laneTags, mainColour, outcomeText, progressText, unitWord, type LabelFilter, type LabelStatus } from './labels'
+import { classesOf, colourVar, isFilesLabel, failedText, isMultiClass, labelStatus, mainColour, outcomeText, progressText, unitWord, type LabelFilter, type LabelStatus } from './labels'
+import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
 import { LabelMark } from './LabelMark'
 import { LabelPalette } from './LabelPalette'
+import { ReadCutLine } from './ReadCutLine'
 import type { FilesLabels } from './useLabels'
 
 interface Props {
@@ -46,7 +50,12 @@ interface Props {
 export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onHide, first, onFilter, filter = null, note }: Props) {
   const files = labels.all.filter(isFilesLabel)
   const ordered = first ? [...files.filter((k) => first.has(k.id)), ...files.filter((k) => !first.has(k.id))] : files
-  const nums = useMemo(() => new Map(laneTags(labels.on).map((t) => [t.id, t.n])), [labels.on])
+  const [deleting, setDeleting] = useState<DeleteLabelAsk | null>(null)
+  const remove = ({ id }: DeleteLabelAsk) => {
+    setDeleting(null)
+    if (editing === id) onEdit(null)
+    void labels.remove(id)
+  }
   return (
     <section className="files-labels" aria-label="Labels">
       <div className="files-side-head">
@@ -65,7 +74,6 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
               key={k.id}
               label={k}
               on={!!k.shown}
-              n={nums.get(k.id) ?? 0}
               focused={labels.focus === k.id}
               marked={labels.focus === k.id && labels.on.length > 1}
               editing={editing === k.id}
@@ -75,10 +83,12 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
               onRetry={onRetry}
               onFilter={isFilesLabel(k) ? onFilter : undefined}
               filter={filter?.concept === k.id ? filter.value : null}
+              onDelete={(at) => setDeleting({ id: k.id, name: k.name, at })}
             />
           ))}
         </div>
       )}
+      <DeleteLabelConfirm asked={deleting} onClose={() => setDeleting(null)} onDelete={remove} />
     </section>
   )
 }
@@ -86,8 +96,6 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
 interface RowProps {
   label: Concept
   on: boolean
-  /** a multi-class label's number among the multi-class labels that are on, 0 while it is off or single-class */
-  n: number
   /** the focused label */
   focused: boolean
   /** the focus is marked on its row: it is focused and another label is on */
@@ -100,15 +108,18 @@ interface RowProps {
   onFilter?: Props['onFilter']
   /** the value the Files label filter keeps of this label, null when the filter is not this label's */
   filter: string | null
+  /** Delete label in the row's menu: ask to confirm, by `at` */
+  onDelete: (at: HTMLElement) => void
 }
 
-function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, onEdit, onRetry, onFilter, filter }: RowProps) {
+function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEdit, onRetry, onFilter, filter, onDelete }: RowProps) {
   const classes = classesOf(k)
   const running = status?.state === 'running'
   const files = isFilesLabel(k)
   const byHand = k.n_marked ?? k.n_reviewed ?? 0
   const colour = mainColour(k)
   const paletteAt = useRef<HTMLButtonElement>(null)
+  const moreAt = useRef<HTMLButtonElement>(null)
   const [picking, setPicking] = useState(false)
   const turn = () => {
     if (!on) labels.setFocus(k.id)
@@ -124,7 +135,7 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
         {files ? (
           <>
             <TipButton tip={on ? 'Turn off' : 'Turn on'} className={'files-label-mark' + (on ? ' on' : '')} aria-pressed={on} aria-label={`${on ? 'Turn off' : 'Turn on'} ${k.name}`} onClick={turn}>
-              <LabelMark multi={isMultiClass(classes)} colour={colour} on={on} n={n} />
+              <LabelMark multi={isMultiClass(classes)} colour={colour} on={on} />
             </TipButton>
             <button type="button" className={'files-label-toggle' + (on ? ' on' : '')} aria-pressed={on} onClick={pick} style={{ '--c': colour } as CSSProperties}>
               <span className="files-label-name">{k.name}</span>
@@ -149,7 +160,16 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
         {onFilter && (classes.length <= 2 || !on) && (
           <FilterButton pressed={filter != null} label={`Show only the records ${k.name} marks`} onClick={() => onFilter(k.id, filter != null ? null : ((classes.find((c) => c.highlight) ?? classes[0])?.name ?? 'yes'))} />
         )}
-        <Button variant="icon" size="sm" icon="more-horizontal" title="Edit label" aria-label={`Edit ${k.name}`} className="files-label-edit" active={editing} onClick={() => onEdit(editing ? null : k.id)} />
+        <Menu
+          label={k.name}
+          align="end"
+          className="files-label-menu"
+          items={[
+            { id: 'edit', label: 'Edit label', icon: 'edit', onSelect: () => onEdit(k.id) },
+            { id: 'delete', label: 'Delete label', icon: 'trash', danger: true, onSelect: () => moreAt.current && onDelete(moreAt.current) },
+          ]}
+          trigger={<Button ref={moreAt} variant="icon" size="sm" icon="more-horizontal" title="Edit or delete" aria-label={`Edit or delete ${k.name}`} className="files-label-edit" active={editing} />}
+        />
       </div>
       {files && <LabelPalette label={k} anchor={paletteAt} open={picking} onClose={() => setPicking(false)} onPick={(value, n) => labels.setColour(k.id, value, n)} />}
       {status && <LabelStatusLine status={status} name={k.name} marked={byHand} onRetry={() => onRetry(k.id)} />}
@@ -191,8 +211,9 @@ function FilterButton({ pressed, label, onClick }: { pressed: boolean; label: st
   return <Button variant="icon" size="sm" icon="filter" title={pressed ? 'Show all records' : 'Show only these records'} aria-label={label} active={pressed} className="files-label-filter" onClick={onClick} />
 }
 
-/** The line under a label's name: the run's progress, its outcome with how many records the analyst marked by hand (in
- * a view, the Files reader or the label's card), or its failure with Retry. */
+/** The line under a label's name: the run's progress, its outcome with how many records it could not label, how many
+ * the analyst marked by hand (in a view, the Files reader or the label's card) and how many whole files it read only in
+ * part (ReadCutLine), each on a line of its own, or its failure with Retry. */
 function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelStatus; name: string; marked: number; onRetry: () => Promise<void> }) {
   const [retrying, setRetrying] = useState(false)
   if (s.state === 'running') {
@@ -227,6 +248,7 @@ function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelSt
       </div>
     )
   }
+  const failed = failedText(s)
   return (
     <div className="files-label-status">
       <span className="files-label-count">{outcomeText(s)}</span>
@@ -238,11 +260,13 @@ function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelSt
           </time>
         </>
       )}
+      {failed && <span className="files-label-failed">{failed}</span>}
       {marked > 0 && (
         <span className="files-label-marked">
           {marked.toLocaleString()} {unitWord(s.unit, marked)} marked by hand
         </span>
       )}
+      {s.cut && <ReadCutLine cut={s.cut} className="files-label-cut" />}
     </div>
   )
 }

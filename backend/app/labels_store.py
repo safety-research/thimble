@@ -762,10 +762,22 @@ class Store:
         finally:
             conn.close()
 
-    def calibration_pairs(self) -> list[tuple[str, str]]:
-        """(classifier label, analyst label) for every ref the analyst judged that has a classifier label, its cover's
-        value for a record a cover holds."""
-        return [(str(a), str(b)) for a, b in self._q(f"SELECT {_LABEL} AS l, analyst FROM current WHERE analyst IS NOT NULL AND l IS NOT NULL")]
+    def calibration_rows(self) -> list[tuple[str, str, str, str | None]]:
+        """(ref, classifier label, analyst label, the classifier row's ts) for every ref the analyst judged that has a
+        classifier label; a record a cover holds reads its cover's value and has no ts of its own."""
+        return [(str(r), str(a), str(b), t) for r, a, b, t in
+                self._q(f"SELECT ref, {_LABEL} AS l, analyst, ts FROM current WHERE analyst IS NOT NULL AND l IS NOT NULL")]
+
+    def model_ts(self, refs: Iterable[str]) -> dict[str, str]:
+        """{ref: ts} of the classifier rows of these refs that have one."""
+        wanted = sorted({canon_ref(r) for r in refs})
+        out: dict[str, str] = {}
+        for i in range(0, len(wanted), 500):
+            part = wanted[i:i + 500]
+            out.update({str(r): str(t) for r, t in self._q(
+                f"SELECT ref, ts FROM current WHERE label IS NOT NULL AND ts IS NOT NULL AND ref IN ({','.join('?' * len(part))})",
+                tuple(part))})
+        return out
 
     def refs(self) -> set[str]:
         """The refs of the rows (the records the covers hold without a row are not listed)."""
@@ -796,29 +808,37 @@ class Store:
     def line_bins(self, path: str, total: int, bins: int) -> dict[str, list[int]]:
         """{effective value: [bin, ...]}: the bins of `total` lines cut into `bins` holding at least one record of that
         value on `path` (the reader's overview ruler), covers included. Whole-file rows are left out."""
+        return {v: sorted(got) for v, got in self.line_counts(path, total, bins).items()}
+
+    def line_counts(self, path: str, total: int, bins: int) -> dict[str, dict[int, int]]:
+        """{effective value: {bin: records}}: per bin of `total` lines cut into `bins`, how many records on `path` have
+        that value, the records of covers without a row of their own included, for the bins that hold at least one. The
+        reader's overview draws each part of the file in the value most of its records have. Whole-file rows are left
+        out."""
         total, bins = max(1, int(total)), max(1, int(bins))
-        found: dict[str, set[int]] = {}
+        found: dict[str, dict[int, int]] = {}
         conn = self.connect()
         try:
-            for value, b in conn.execute("SELECT effective, MIN(?, ((line - 1) * ?) / ?) AS b FROM current "
-                                         "WHERE path = ? AND line IS NOT NULL AND effective IS NOT NULL GROUP BY effective, b",
-                                         (bins - 1, bins, total, path)):
-                found.setdefault(str(value), set()).add(int(b))
+            for value, b, n in conn.execute("SELECT effective, MIN(?, ((line - 1) * ?) / ?) AS b, COUNT(*) FROM current "
+                                            "WHERE path = ? AND line IS NOT NULL AND effective IS NOT NULL GROUP BY effective, b",
+                                            (bins - 1, bins, total, path)):
+                found.setdefault(str(value), {})[int(b)] = int(n)
             covers = conn.execute("SELECT first, last, value FROM covers WHERE path = ? ORDER BY first", (path,)).fetchall()
             if covers:
                 have = sorted(int(n) for (n,) in conn.execute("SELECT line FROM current WHERE path = ? AND line IS NOT NULL", (path,)))
                 for first, last, value in covers:
-                    got = found.setdefault(str(value), set())
+                    got = found.setdefault(str(value), {})
                     for b in range(min(bins - 1, (first - 1) * bins // total), min(bins - 1, (last - 1) * bins // total) + 1):
                         # the lines the query above puts in bin b: from ceil(b·total/bins) + 1 to ceil((b+1)·total/bins),
-                        # and every line after that in the last bin
+                        # and every line after that in the last bin; those with a row of their own are counted above
                         lo = max(first, -(-b * total // bins) + 1)
                         hi = last if b == bins - 1 else min(last, -(-(b + 1) * total // bins))
-                        if hi >= lo and hi - lo + 1 > bisect.bisect_right(have, hi) - bisect.bisect_left(have, lo):
-                            got.add(b)
+                        n = hi - lo + 1 - (bisect.bisect_right(have, hi) - bisect.bisect_left(have, lo)) if hi >= lo else 0
+                        if n > 0:
+                            got[b] = got.get(b, 0) + n
         finally:
             conn.close()
-        return {v: sorted(bs) for v, bs in found.items() if bs}
+        return {v: got for v, got in found.items() if got}
 
     def verdicts(self, limit: int | None = None) -> list[dict]:
         """The analyst's verdicts, latest first: {ref, analyst, analyst_note, label} per ref they judged."""

@@ -1,8 +1,9 @@
 // Shared pieces for the file views: the record row, the line row, the verbatim block with the texts a span label marks,
 // ref targets and the scroll-and-highlight hook. Rows carry `data-anchor="<path>#L<n>"` and the class `reader-card`;
 // a marked text carries its own span anchor (`<path>#L<n>.b<k>:c<a>-<b>`), so ⌘ picks records and spans alike.
-import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type RefObject } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from 'react'
 import { Button } from '../../components/Button'
+import { Icon } from '../../components/Icon'
 import { Tipped } from '../../components/Tooltip'
 import { findQuote } from '../../lib/quoteFind'
 import { parseRef } from '../../lib/refs'
@@ -11,6 +12,9 @@ import { UNFOLD_EVENT } from '../find'
 import { cellFill, markSegments, type LaneCell, type LaneTag, type RecordMarks, type Segment, type SpanMark } from '../labels'
 import { useMarksAt, useMarksOver } from '../marks'
 import { LabelMark } from '../LabelMark'
+import { ColorContext } from '../colorContext'
+import { FilterContext } from '../useFilterBy'
+import { FoldContext } from '../fold'
 
 export interface ViewProps {
   workspace: string
@@ -22,6 +26,9 @@ export interface ViewProps {
   targetRef?: string
   /** the server's sniff, when the file reads as a transcript */
   transcript?: TranscriptHint | null
+  /** the view found nothing in the file to show (the server's whole parse found no turns that its sniff of the head
+   * promised): the reader drops the view and opens the one it would otherwise use */
+  unavailable?: () => void
 }
 
 export interface ViewDef {
@@ -168,6 +175,15 @@ interface RecordProps {
   children?: ReactNode
   /** the last line of the records the card stands for (a chat turn's lines), whose labels its gutter shows too */
   end?: number
+  /** the one line the record folds to, and whether it starts folded; no fold without it */
+  fold?: RecordFold
+}
+
+/** How a record folds (fold.ts): the one line it folds to, after its head (the start of its words or its tool call),
+ * and whether it starts folded (foldsByDefault). */
+export interface RecordFold {
+  summary: ReactNode
+  folded: boolean
 }
 
 /** The tint of a highlighted value with nothing to mark, as style. */
@@ -186,6 +202,28 @@ export function LaneGutter({ cells }: { cells: readonly LaneCell[] }) {
     <span className="reader-gutter">
       {cells.map((c) => (
         <span key={c.id} className={'reader-gutter-cell' + (c.values.length ? ' is-lit' : '')} style={c.values.length ? { background: cellFill(c.values) } : undefined} title={cellTitle(c)} />
+      ))}
+    </span>
+  )
+}
+
+/** px between two bands at a record's left edge, as between two lanes of the tracks (Tracks.tsx LANE_GAP_PX) */
+export const BAND_GAP_PX = 1
+/** px of a record's left padding the bands take at most, so its text stays where it is with three of them */
+const BANDS_ROOM_PX = 9
+/** px: a band's width at a record's left edge for `n` choices of Color by: the one bar's 3 px for one or two, narrower
+ * as more come, as the tracks' lanes do, so that they all fit BANDS_ROOM_PX. Pure. */
+export const bandWidth = (n: number): number => Math.max(1, Math.min(3, Math.floor((BANDS_ROOM_PX - (Math.max(1, n) - 1) * BAND_GAP_PX) / Math.max(1, n))))
+
+/** A record's left edge under Color by, as a slice of the tracks: a band per choice, side by side from the left in the
+ * tracks' order (the first choice's at the edge), each in the color of the record's value of that choice and empty
+ * where it has none; nothing while no band has a color (Color by Off, or a record with no value of any choice). */
+export function EdgeBands({ bands }: { bands: readonly (string | null)[] | null | undefined }) {
+  if (!bands?.some(Boolean)) return null
+  return (
+    <span className="reader-bands" style={{ '--band-w': `${bandWidth(bands.length)}px` } as CSSProperties} aria-hidden>
+      {bands.map((c, i) => (
+        <span key={i} className={'reader-band' + (c ? '' : ' is-empty')} style={c ? { background: c } : undefined} />
       ))}
     </span>
   )
@@ -213,18 +251,75 @@ export function LaneHead({ tags }: { tags: readonly LaneTag[] }) {
 export const LANE_GLYPH_PX = 13
 
 /** One record as a row: the label gutter, the line number, the head in mono, the blocks under it; a highlighted value
- * with nothing to mark as a tint behind the text. */
-export function RecordCard({ path, line, target, hit, className, header, text, children, end }: RecordProps) {
+ * with nothing to mark as a tint behind the text. In the Transcript mode, a band per Color by choice on its left edge,
+ * in the color of its value of each (EdgeBands), and no row while its value of the first is turned off in Color by or
+ * Filter by, unless a ref points at it (ColorContext, FilterContext). With `fold`, a click on the head folds the record to one line, the head and the summary, and a click
+ * on that line opens it again (FoldContext keeps it per file); a ref's record shows open until it is folded under the
+ * ref. A folded record keeps its blocks in the page, hidden, so that the find finds them and opens it (UNFOLD_EVENT). */
+export function RecordCard({ path, line, target, hit, className, header, text, children, end, fold }: RecordProps) {
   const isT = isTargetLine(target, line)
   const marks = useMarksOver(path, line, end ?? line)
-  const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint'].filter(Boolean).join(' ')
+  const cb = useContext(ColorContext)?.get(line)
+  const filtered = useContext(FilterContext)?.hides(line) ?? false
+  const folds = useContext(FoldContext)
+  // outside the Transcript mode's reader, each record keeps its own fold
+  const [own, setOwn] = useState<boolean | null>(null)
+  // the ref the analyst folded the record under, which otherwise shows it open
+  const [shutUnder, setShutUnder] = useState<Target | null>(null)
+  const main = useRef<HTMLDivElement>(null)
+  const dflt = fold?.folded ?? false
+  const kept = folds ? folds.folded(line, dflt) : (own ?? dflt)
+  const folded = !!fold && (isT ? shutUnder === target : kept)
+  const setFolded = (f: boolean) => {
+    if (isT) setShutUnder(f ? target : null)
+    if (folds) folds.set(line, f, dflt)
+    else setOwn(f)
+  }
+  const shown = !((cb?.hidden || filtered) && !isT)
+  // the find's match inside a folded record opens it
+  const unfold = useRef(setFolded)
+  unfold.current = setFolded
+  useEffect(() => {
+    const el = main.current
+    if (!el || !folded) return
+    const open = () => unfold.current(false)
+    el.addEventListener(UNFOLD_EVENT, open)
+    return () => el.removeEventListener(UNFOLD_EVENT, open)
+  }, [folded, shown])
+  if (!shown) return null
+  // a click that ends a selection of the head's words selects them, and does not fold
+  const onFold = (e: MouseEvent<HTMLButtonElement>, f: boolean) => {
+    const sel = typeof window !== 'undefined' ? window.getSelection() : null
+    if (sel && !sel.isCollapsed && sel.anchorNode && e.currentTarget.contains(sel.anchorNode)) return
+    setFolded(f)
+  }
+  const banded = !!cb?.bands.some(Boolean)
+  const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint', banded && 'has-cb', folded && 'is-folded'].filter(Boolean).join(' ')
   return (
     <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={markStyle(marks)}>
+      {banded && <EdgeBands bands={cb!.bands} />}
       <LaneGutter cells={marks.cells} />
       <span className="reader-lineno mono">{line}</span>
-      <div className="reader-record-main">
-        {header != null && <div className="reader-record-head mono">{header}</div>}
-        <div className="reader-record-body">{children}</div>
+      <div className={'reader-record-main' + (folded ? ' reader-collapsed' : '')} ref={main}>
+        {folded ? (
+          <button type="button" className="reader-fold-line" aria-expanded={false} onClick={(e) => onFold(e, false)}>
+            <span className="reader-record-head mono">
+              <Icon name="chevron-right" size={12} className="reader-fold-caret" />
+              {header}
+            </span>
+            <span className="reader-fold-text">{fold!.summary}</span>
+          </button>
+        ) : fold ? (
+          <button type="button" className="reader-record-head reader-fold-head mono" aria-expanded onClick={(e) => onFold(e, true)}>
+            <Icon name="chevron-down" size={12} className="reader-fold-caret" />
+            {header}
+          </button>
+        ) : (
+          header != null && <div className="reader-record-head mono">{header}</div>
+        )}
+        <div className="reader-record-body" hidden={folded || undefined}>
+          {children}
+        </div>
       </div>
     </div>
   )
@@ -375,4 +470,47 @@ export function Collapsible({ lines, forced, children }: { lines: number; forced
   )
 }
 
-export const lineCount = (s: string) => s.split('\n').length
+/** characters of a line the reader shows on one line before it wraps, about (the record's width in its type) */
+export const WRAP_CHARS = 120
+
+/** The lines a text shows: each of its lines as the lines it wraps to at WRAP_CHARS, so a long unbroken line (a whole
+ * file as one JSON string) counts as the wall it draws. Counting stops past `cap`. Pure. */
+export function lineCount(s: string, cap = Infinity): number {
+  let n = 0
+  let from = 0
+  while (n <= cap) {
+    const at = s.indexOf('\n', from)
+    const len = (at < 0 ? s.length : at) - from
+    n += Math.max(1, Math.ceil(len / WRAP_CHARS))
+    if (at < 0) break
+    from = at + 1
+  }
+  return n
+}
+
+/** lines a record may show and still start open (fold.ts) */
+export const FOLD_LINES = 3
+
+/** Whether a record's blocks start folded: a tool call or a tool result, or more than FOLD_LINES lines. Pure. */
+export function foldsByDefault(blocks: readonly { kind: string; text: string }[]): boolean {
+  let n = 0
+  for (const b of blocks) {
+    if (b.kind === 'tool_use' || b.kind === 'tool_result') return true
+    n += lineCount(b.text, FOLD_LINES)
+    if (n > FOLD_LINES) return true
+  }
+  return false
+}
+
+/** characters of a text a folded record's one line holds at most */
+const ONE_LINE_CHARS = 400
+
+/** A text on one line, as a cell of the Table mode reads it: each run of white space as one space, none at either end,
+ * at most ONE_LINE_CHARS characters. Pure. */
+export function oneLine(s: string, max = ONE_LINE_CHARS): string {
+  return s
+    .slice(0, max * 4)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max)
+}

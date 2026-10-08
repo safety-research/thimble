@@ -1,7 +1,8 @@
 // A label card's details, as a drawer inside the card frame: DEFINITION (name and description, edited in place),
 // COMPUTED (kind, model, pattern or code), APPLIED TO (scope, units covered, globs, and the files not included),
-// CLASSES for a label over files (colour and highlight per value), EXAMPLES (rows per value with verdict buttons) and,
-// for a prompt label, CALIBRATE (re-apply with the verdicts as few-shot examples).
+// CLASSES for a label over files (colour and highlight per value), and EXAMPLES (rows per value with verdict buttons,
+// under the label's agreement with the values the analyst set). Every run of a prompt label carries the analyst's
+// latest values as examples, so there is nothing to ask for here.
 import { useContext, useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { Card } from '../components/Card'
@@ -20,7 +21,7 @@ import { loadSettings, modelLabel } from '../lib/models'
 import { track } from '../lib/telemetry'
 import type { ConceptCoverage, ConceptDetail, LabelClass, LabelRowText } from '../lib/types'
 import { CanvasContext } from './context'
-import { COVERAGE_PAGE, EXAMPLES_PAGE, effectiveValue, exampleCount, groupCoverage, labelValues, otherValues, pickValue, reapplyPaths, scopeWord, unitTotal } from './details'
+import { agreementLine, COVERAGE_PAGE, EXAMPLES_PAGE, effectiveValue, groupCoverage, labelValues, otherValues, pickValue, scopeWord, unitTotal } from './details'
 import { cutExcerpt, excerptOf } from './excerpts'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
@@ -45,7 +46,6 @@ export function LabelDetails({ concept, reload, set }: LabelDetailsProps) {
       <AppliedTo concept={concept} paths={last?.paths ?? []} />
       {isFilesLabel(concept) && <Classes concept={concept} set={set} />}
       <Examples concept={concept} values={values} reload={reload} />
-      {concept.kind === 'prompt' && <Calibrate concept={concept} paths={reapplyPaths(last)} reload={reload} />}
     </div>
   )
 }
@@ -323,9 +323,11 @@ function Examples({ concept, values, reload }: { concept: ConceptDetail; values:
     }
   }
   if (!values.length) return null
+  const agreed = agreementLine(concept.calibration)
   return (
     <section className="canvas-details-section">
       <span className="label">examples</span>
+      {agreed && <span className="canvas-label-agreed">{agreed}</span>}
       <Segmented label="Value" value={value ?? ''} onChange={(v) => setChosen(v)} options={values.map((v) => ({ value: v, label: v }))} />
       {state.rows.length > 0 ? (
         <div className="canvas-label-rows">
@@ -374,50 +376,6 @@ function Examples({ concept, values, reload }: { concept: ConceptDetail; values:
           <Chip kind="value">{`${state.rows.length.toLocaleString()} of ${state.total.toLocaleString()}`}</Chip>
         </div>
       ) : null}
-    </section>
-  )
-}
-
-/** CALIBRATE (prompt kind): re-apply the label with the analyst's verdicts as few-shot examples, with progress beside it. */
-function Calibrate({ concept, paths, reload }: { concept: ConceptDetail; paths: string[]; reload: () => Promise<void> }) {
-  const { ws } = useContext(CanvasContext)
-  const [starting, setStarting] = useState(false)
-  const n = exampleCount(concept.n_reviewed ?? concept.calibration?.n)
-  const run = concept.run ?? null
-  const running = run?.status === 'running'
-  const last = concept.applications?.length ? concept.applications[concept.applications.length - 1] : null
-  const apply = async () => {
-    if (starting || running || n === 0) return
-    setStarting(true)
-    try {
-      await labelApi.apply(ws, concept.id, { paths, examples: true, comment: true })
-      await reload()
-    } catch (e) {
-      fail(e)
-    } finally {
-      setStarting(false)
-    }
-  }
-  return (
-    <section className="canvas-details-section">
-      <span className="label">calibrate</span>
-      <div className="canvas-details-actions">
-        <Button size="sm" icon="run" busy={starting || running} disabled={n === 0 || running} onClick={() => void apply()}>
-          {`apply with ${n} ${n === 1 ? 'example' : 'examples'}`}
-        </Button>
-        {running ? (
-          <Chip kind="status" tone="accent">
-            {typeof run?.total === 'number' ? `${(run.done ?? 0).toLocaleString()} of ${run.total.toLocaleString()}` : (run?.done ?? 0).toLocaleString()}
-          </Chip>
-        ) : run?.status === 'error' ? (
-          <Chip kind="status" tone="negative">
-            failed
-          </Chip>
-        ) : last?.examples ? (
-          <Chip kind="value" icon="check">{`${last.examples} ${last.examples === 1 ? 'example' : 'examples'}`}</Chip>
-        ) : null}
-        {typeof concept.est_precision === 'number' ? <Chip kind="value">{`${Math.round(concept.est_precision * 100)}% agreed`}</Chip> : null}
-      </div>
     </section>
   )
 }

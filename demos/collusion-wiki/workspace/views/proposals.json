@@ -1,0 +1,40 @@
+[
+  {
+    "slug": "wiki-page-history",
+    "name": "Wiki Page History",
+    "why": "The corpus is the edit log of public wikis that AI agents used as a scratchpad and message board. Each revision in revisions.jsonl stores the whole page again, so the files hide what each edit added. Seeing one page as a wiki page with its edit history, each edit shown as what it added or removed, by which username and IP prefix, lets the analyst read a coordination page as the conversation it was, and see when the administrator deleted or restored it.",
+    "claims": [
+      "revisions.jsonl",
+      "pages.jsonl",
+      "events.jsonl"
+    ],
+    "arrangement": "Unit: One page, keyed by page_id (for example \"dse/DataUSAStateSequenceCollab2027\"); 4,579 pages in pages.jsonl. Its revisions are the lines of revisions.jsonl with the same page_id, ordered by seq (14,591 revisions). Delete events are the lines of events.jsonl with event_type \"delete\" and the same page_key (5,217 deletes, all by the username MartinHuber).\nOverview: A left list of pages, sortable by n_revs, first_write, last_write and number of distinct usernames (n_labels), grouped or filterable by wiki (dse 3,908 pages, probier 601, fractal 68, dorfwiki 2). Each row shows the page name, wiki, revision count, time span, and a mark if the page was later deleted (a delete event in events.jsonl with the same page_key). A small strip per row shows its revisions over time.\nZoom: Selecting a page shows its revisions top to bottom by seq. Each revision is a block with time, label (username; empty string means anonymous), ip16, change_summary, and the diff from the previous revision's body (added lines in green, removed in red), not the whole body. A toggle shows the full body of a revision. Delete events appear in the same list at their time. Many bodies contain \"[pre-2026 line withheld]\" placeholders; show them greyed.\nFilter: Filter pages by wiki, by username (label), by date range, by page-name substring, and by labels that are on (labels mark lines of revisions.jsonl, so a page shows a mark when any of its revisions carries a label value; a revision block shows its label marks). Filter revisions within a page by username.\nDetails: On demand: the revision's rev_id, body_len, lines, write_date, request_action; for the page, the pages.jsonl fields (n_revs_before, n_ips, n_ip16, labels list); clicking a username lists that username's other pages from labels.jsonl (pages, stored_revisions, first_write, last_write).",
+    "proposed_by": "terminal",
+    "status": "built",
+    "ts": "2026-10-06T03:44:41+00:00",
+    "spec": {
+      "unit": "One page, keyed by page_id (for example \"dse/DataUSAStateSequenceCollab2027\"); 4,579 pages in pages.jsonl. Its revisions are the lines of revisions.jsonl with the same page_id, ordered by seq (14,591 revisions). Delete events are the lines of events.jsonl with event_type \"delete\" and the same page_key (5,217 deletes, all by the username MartinHuber).",
+      "overview": "A left list of pages, sortable by n_revs, first_write, last_write and number of distinct usernames (n_labels), grouped or filterable by wiki (dse 3,908 pages, probier 601, fractal 68, dorfwiki 2). Each row shows the page name, wiki, revision count, time span, and a mark if the page was later deleted (a delete event in events.jsonl with the same page_key). A small strip per row shows its revisions over time.",
+      "zoom": "Selecting a page shows its revisions top to bottom by seq. Each revision is a block with time, label (username; empty string means anonymous), ip16, change_summary, and the diff from the previous revision's body (added lines in green, removed in red), not the whole body. A toggle shows the full body of a revision. Delete events appear in the same list at their time. Many bodies contain \"[pre-2026 line withheld]\" placeholders; show them greyed.",
+      "filter": "Filter pages by wiki, by username (label), by date range, by page-name substring, and by labels that are on (labels mark lines of revisions.jsonl, so a page shows a mark when any of its revisions carries a label value; a revision block shows its label marks). Filter revisions within a page by username.",
+      "details": "On demand: the revision's rev_id, body_len, lines, write_date, request_action; for the page, the pages.jsonl fields (n_revs_before, n_ips, n_ip16, labels list); clicking a username lists that username's other pages from labels.jsonl (pages, stored_revisions, first_write, last_write)."
+    },
+    "orientation": true,
+    "chat": "96f287de",
+    "attempts": 1,
+    "session": "2ea9aea9-34fb-47e3-8d60-40cee9b13abc/4",
+    "session_id": "2ea9aea9-34fb-47e3-8d60-40cee9b13abc",
+    "locators": [
+      "view:wiki-page-history/dse/DataUSAStateSequenceCollab2027",
+      "view:wiki-page-history/dse/HealthdataCVDSequenceCollab",
+      "view:wiki-page-history/HealthdataCVDSequenceCollab",
+      "view:wiki-page-history/dse/WillkommenImWiki",
+      "view:wiki-page-history/dse/TestSeite",
+      "revisions.jsonl#L5957",
+      "events.jsonl#L9966",
+      "events.jsonl#L4",
+      "labels.jsonl#L1624",
+      "pages.jsonl#L3804"
+    ]
+  }
+]

@@ -8,8 +8,11 @@
 //   - every step: each cutout lies inside the window, everything an example shows in a cutout lies inside that cutout,
 //     the popover lies inside the window, covers no cutout wherever the window has room for it beside the first, and its
 //     caret points at the first cutout;
-//   - step 1's example sits 8 px or more inside its cutout, which lies inside the chat panel; step 3 says what the
-//     orientation does, and its Start only shows the started state;
+//   - while the tour runs main draws no Start card, on every step; step 1's example sits 8 px or more inside its
+//     cutout, which lies inside the chat panel; step 3 says what the orientation does, its example Start card is the
+//     only one on the page, in the gate's place (as wide as the chat's foot holds, its bottom on the foot's), with
+//     the agents' efforts and no Ultracode or fast mode, and its Start only shows the started state, after which no
+//     Start card or empty box is left above the strip; once the tour ends, main's Start card is back;
 //   - step 5: the wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its
 //     height, the cutout and the Labels pane still and the ruler's thumb following, and the wheel over the ruler too;
 //   - step 6: inside the example view the wheel and a click work and reach nothing else; in its head no item meets
@@ -83,7 +86,7 @@ const MAIN = {
 const SETTINGS = {
   run_cell_result_lines: 40,
   models: Object.fromEntries(['orient', 'critic', 'writer', 'checks', 'verify', 'labels', 'dev'].map((r) => [r, { model: 'claude-opus-5-5', effort: 'high', fast: false }])),
-  permission_modes: {}, disabled_modes: [], config_error: '', untrusted: null,
+  permission_modes: {}, disabled_modes: [], config_error: '',
 }
 const FILES = ['README.md', 'deploys.csv', 'agents.log', 'chat/ops.json', 'tickets/index.csv'].map((p) => ({ path: p, kind: 'text', size_bytes: 1200, title: p.split('/').pop() }))
 /** One folder's own entries, as `GET /corpora/{c}/sources?path=&depth=1` answers. */
@@ -216,7 +219,10 @@ async function onStep(page: Page, n: number, title?: string) {
     { timeout: 15000 },
   )
   await sleep(500)
+  assert.equal(await realGates(page), 0, `step ${n}: main draws no Start card while the tour runs`)
 }
+/** How many Start cards main's own chat draws (the tour's example of one lies in the tour's layer). */
+const realGates = (page: Page) => page.evaluate(() => [...document.querySelectorAll('.chat-gate')].filter((g) => !g.closest('.tour-root')).length)
 const next = (page: Page) => page.click('.tour-pop [data-tour="next"]')
 
 // in the page: what a cutout shows lies inside it. Every element drawn in an example container (a size, visible, and
@@ -630,6 +636,24 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await measure(page, `${tag} 3`)
   assert.match(await body(page), /^A background agent explores your files and drafts an analysis for you to review\. Press Start/, `${tag} 3: what the orientation does`)
   assert.deepEqual(await buttons(page), ['back'], `${tag} 3: no Next before Start`)
+  // one Start card, the example, in the gate's place, offering what the gate offers now
+  const gate = await page.evaluate(() => {
+    const ex = [...document.querySelectorAll('.tour-ex .chat-gate')]
+    const foot = document.querySelector('.chat[data-panel="chat"] .chat-foot')!.getBoundingClientRect()
+    const slot = document.querySelector('.chat[data-panel="chat"] .chat-foot > :last-child')!.getBoundingClientRect()
+    const g = ex[0]?.getBoundingClientRect()
+    return {
+      cards: document.querySelectorAll('.chat-gate').length,
+      examples: ex.length,
+      off: g ? Math.max(Math.abs(g.left - slot.left), Math.abs(g.right - slot.right), Math.abs(g.bottom - foot.bottom)) : null,
+      effort: ex[0]?.querySelector('.model-line-effort')?.textContent ?? null,
+      fast: !!ex[0]?.querySelector('.fast-bolt, .model-line-fast, [data-fast]'),
+      ultracode: /ultracode/i.test(ex[0]?.textContent ?? ''),
+    }
+  })
+  assert.ok(gate.cards === 1 && gate.examples === 1, `${tag} 3: one Start card, the example ${JSON.stringify(gate)}`)
+  assert.ok(gate.off != null && gate.off <= 1, `${tag} 3: the example stands in the gate's place ${JSON.stringify(gate)}`)
+  assert.ok(['low', 'medium', 'high', 'xhigh', 'max'].includes(gate.effort ?? '') && !gate.fast && !gate.ultracode, `${tag} 3: the example's effort is an agent's level, with no Ultracode or fast mode ${JSON.stringify(gate)}`)
   const start = await page.evaluate(() => {
     const b = [...document.querySelectorAll('.tour-ex-gate button')].find((x) => x.textContent?.trim() === 'Start')!.getBoundingClientRect()
     return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
@@ -641,6 +665,14 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await measure(page, `${tag} 3 (started)`)
   assert.deepEqual(await buttons(page), ['back', 'next'], `${tag} 3: Next once started`)
   assert.deepEqual(await probe(page), [], `${tag} 3: Start reached nothing of the page`)
+  // nothing of the Start card is left: no card, and the started foot's box begins where its strip does
+  const started = await page.evaluate(() => {
+    const box = document.querySelector('.tour-ex-orient-foot')!.getBoundingClientRect()
+    const strip = document.querySelector('.tour-ex-orient-foot .chat-strip')!.getBoundingClientRect()
+    const foot = document.querySelector('.chat[data-panel="chat"] .chat-foot')!.getBoundingClientRect()
+    return { cards: document.querySelectorAll('.chat-gate').length, above: strip.top - box.top, below: Math.abs(box.bottom - foot.bottom) }
+  })
+  assert.ok(started.cards === 0 && Math.abs(started.above) <= 1 && started.below <= 1, `${tag} 3: no Start card or empty box above the strip once started ${JSON.stringify(started)}`)
   await next(page)
   // 4 Files
   await onStep(page, 4, 'Files')
@@ -1070,6 +1102,8 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await page.click('.tour-pop [data-tour="done"]')
   await sleep(500)
   assert.equal(await page.evaluate(() => !!document.querySelector('.tour-root, .tour-host')), false, `${tag}: Done removes the tour and its examples`)
+  // the tour started nothing, so main's own Start card is back
+  assert.equal(await realGates(page), 1, `${tag}: main's Start card is back once the tour ends`)
 }
 
 const fontOk = (page: Page) =>

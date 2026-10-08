@@ -1,0 +1,2300 @@
+{
+ "title": "Orientation",
+ "ts": "2026-10-06T03:44:49.062647+00:00",
+ "role": "exploration",
+ "kind": "sequence",
+ "parent": null,
+ "anchor": null,
+ "chat": null,
+ "investigation": null,
+ "finding": null,
+ "pos": null,
+ "order": null,
+ "cells": [
+  {
+   "id": "84aa5fe1",
+   "notebook": "519d3976",
+   "kind": "plot",
+   "title": "When did the cataloged agent-like activity happen?",
+   "takeaway": "The activity is a ten-week surge: [[36,836|card:84aa5fe1@out0#L2]] of the [[37,649|card:84aa5fe1@out0#L1]] included reports date from April 13 to June 21, [[2026|card:84aa5fe1@out0#L2]].",
+   "takeaway_author": "model",
+   "labels": [],
+   "locked": false,
+   "created_by": "chat:7e554e8e",
+   "created_at_event": null,
+   "edited": [
+    {
+     "by": "chat:7e554e8e",
+     "ts": "2026-10-06T03:53:27+00:00"
+    },
+    {
+     "by": "check",
+     "ts": "2026-10-06T03:53:50+00:00"
+    }
+   ],
+   "created_ts": "2026-10-06T03:47:28+00:00",
+   "ts": "2026-10-06T03:53:50+00:00",
+   "width": null,
+   "height": null,
+   "pos": null,
+   "starred": false,
+   "code": "import pandas as pd, altair as alt\ns_all = pd.read_csv('report-sources.csv', parse_dates=['report_date_utc'])\nday = s_all.report_date_utc.dt.strftime('%Y-%m-%d')\nprint('included reports, all dates:', len(s_all))\nprint('in 2026-04-13..2026-06-21:', int(((day >= '2026-04-13') & (day <= '2026-06-21')).sum()))\ns = s_all[s_all.report_date_utc >= '2025-11-01'].copy()\nprint('shown in chart (from 2025-11-01):', len(s))\ntop = s.data_source.value_counts().index[:6].tolist()\ns['source'] = s.data_source.where(s.data_source.isin(top), 'Other (34 sources)')\ns['week'] = s.report_date_utc.dt.tz_localize(None).dt.to_period('W-SUN').dt.start_time\nw = s.groupby(['week', 'source']).size().reset_index(name='reports')\norder = top + ['Other (34 sources)']\nprint(s_all.data_source.value_counts().head(6).to_string())\nalt.Chart(w).mark_bar().encode(\n    x=alt.X('week:T', title='Week (UTC)', axis=alt.Axis(format='%b %Y')),\n    y=alt.Y('reports:Q', title='Included reports per week'),\n    color=alt.Color('source:N', sort=order, title='Data source'),\n    order=alt.Order('source_order:Q'),\n    tooltip=['week:T', 'source:N', 'reports:Q'],\n).transform_calculate(source_order=f\"indexof({order}, datum.source)\").properties(width=620, height=300)",
+   "exec_count": 6,
+   "status": "ok",
+   "outputs": [
+    {
+     "text/plain": "included reports, all dates: 37649\nin 2026-04-13..2026-06-21: 36836\nshown in chart (from 2025-11-01): 37638\ndata_source\nUNCTAD                    19319\nThrill Data                5100\nAIHW                       4844\nWoodlands House School     2417\nMapillary                  1080\nGBBC                        773\n",
+     "_stream": "stdout"
+    },
+    {
+     "application/vnd.vegalite.v6.json": {
+      "config": {
+       "view": {
+        "continuousWidth": 300,
+        "continuousHeight": 300
+       }
+      },
+      "data": {
+       "name": "data-110be0ea3f48a340894dfe0f8cd63f93"
+      },
+      "mark": {
+       "type": "bar"
+      },
+      "encoding": {
+       "color": {
+        "field": "source",
+        "sort": [
+         "UNCTAD",
+         "Thrill Data",
+         "AIHW",
+         "Woodlands House School",
+         "Mapillary",
+         "GBBC",
+         "Other (34 sources)"
+        ],
+        "title": "Data source",
+        "type": "nominal"
+       },
+       "order": {
+        "field": "source_order",
+        "type": "quantitative"
+       },
+       "tooltip": [
+        {
+         "field": "week",
+         "type": "temporal"
+        },
+        {
+         "field": "source",
+         "type": "nominal"
+        },
+        {
+         "field": "reports",
+         "type": "quantitative"
+        }
+       ],
+       "x": {
+        "axis": {
+         "format": "%b %Y"
+        },
+        "field": "week",
+        "title": "Week (UTC)",
+        "type": "temporal"
+       },
+       "y": {
+        "field": "reports",
+        "title": "Included reports per week",
+        "type": "quantitative"
+       }
+      },
+      "height": 300,
+      "transform": [
+       {
+        "calculate": "indexof(['UNCTAD', 'Thrill Data', 'AIHW', 'Woodlands House School', 'Mapillary', 'GBBC', 'Other (34 sources)'], datum.source)",
+        "as": "source_order"
+       }
+      ],
+      "width": 620,
+      "$schema": "https://vega.github.io/schema/vega-lite/v6.4.1.json",
+      "datasets": {
+       "data-110be0ea3f48a340894dfe0f8cd63f93": [
+        {
+         "week": "2025-11-03T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 1
+        },
+        {
+         "week": "2025-11-10T00:00:00",
+         "source": "Thrill Data",
+         "reports": 49
+        },
+        {
+         "week": "2025-11-24T00:00:00",
+         "source": "Mapillary",
+         "reports": 1
+        },
+        {
+         "week": "2025-11-24T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 6
+        },
+        {
+         "week": "2025-11-24T00:00:00",
+         "source": "Thrill Data",
+         "reports": 61
+        },
+        {
+         "week": "2025-12-01T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 1
+        },
+        {
+         "week": "2025-12-08T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 3
+        },
+        {
+         "week": "2025-12-15T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 31
+        },
+        {
+         "week": "2025-12-29T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 1
+        },
+        {
+         "week": "2026-01-05T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 1
+        },
+        {
+         "week": "2026-01-12T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 12
+        },
+        {
+         "week": "2026-01-12T00:00:00",
+         "source": "Thrill Data",
+         "reports": 9
+        },
+        {
+         "week": "2026-01-19T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 2
+        },
+        {
+         "week": "2026-01-26T00:00:00",
+         "source": "Thrill Data",
+         "reports": 1
+        },
+        {
+         "week": "2026-02-02T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 4
+        },
+        {
+         "week": "2026-02-02T00:00:00",
+         "source": "Thrill Data",
+         "reports": 44
+        },
+        {
+         "week": "2026-02-09T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 34
+        },
+        {
+         "week": "2026-02-16T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 16
+        },
+        {
+         "week": "2026-02-16T00:00:00",
+         "source": "Thrill Data",
+         "reports": 120
+        },
+        {
+         "week": "2026-02-23T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 18
+        },
+        {
+         "week": "2026-03-02T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 39
+        },
+        {
+         "week": "2026-03-09T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 19
+        },
+        {
+         "week": "2026-03-16T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 3
+        },
+        {
+         "week": "2026-03-23T00:00:00",
+         "source": "Mapillary",
+         "reports": 1
+        },
+        {
+         "week": "2026-03-23T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 7
+        },
+        {
+         "week": "2026-03-23T00:00:00",
+         "source": "Thrill Data",
+         "reports": 41
+        },
+        {
+         "week": "2026-03-30T00:00:00",
+         "source": "Thrill Data",
+         "reports": 103
+        },
+        {
+         "week": "2026-04-06T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 30
+        },
+        {
+         "week": "2026-04-06T00:00:00",
+         "source": "Thrill Data",
+         "reports": 87
+        },
+        {
+         "week": "2026-04-13T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 5
+        },
+        {
+         "week": "2026-04-13T00:00:00",
+         "source": "Thrill Data",
+         "reports": 1373
+        },
+        {
+         "week": "2026-04-13T00:00:00",
+         "source": "UNCTAD",
+         "reports": 8
+        },
+        {
+         "week": "2026-04-20T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 1
+        },
+        {
+         "week": "2026-04-20T00:00:00",
+         "source": "Thrill Data",
+         "reports": 138
+        },
+        {
+         "week": "2026-04-20T00:00:00",
+         "source": "UNCTAD",
+         "reports": 692
+        },
+        {
+         "week": "2026-04-27T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 6
+        },
+        {
+         "week": "2026-04-27T00:00:00",
+         "source": "Thrill Data",
+         "reports": 6
+        },
+        {
+         "week": "2026-04-27T00:00:00",
+         "source": "UNCTAD",
+         "reports": 2464
+        },
+        {
+         "week": "2026-05-04T00:00:00",
+         "source": "GBBC",
+         "reports": 1
+        },
+        {
+         "week": "2026-05-04T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 7
+        },
+        {
+         "week": "2026-05-04T00:00:00",
+         "source": "Thrill Data",
+         "reports": 519
+        },
+        {
+         "week": "2026-05-04T00:00:00",
+         "source": "UNCTAD",
+         "reports": 2307
+        },
+        {
+         "week": "2026-05-04T00:00:00",
+         "source": "Woodlands House School",
+         "reports": 22
+        },
+        {
+         "week": "2026-05-11T00:00:00",
+         "source": "GBBC",
+         "reports": 772
+        },
+        {
+         "week": "2026-05-11T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 820
+        },
+        {
+         "week": "2026-05-11T00:00:00",
+         "source": "Thrill Data",
+         "reports": 777
+        },
+        {
+         "week": "2026-05-11T00:00:00",
+         "source": "UNCTAD",
+         "reports": 3637
+        },
+        {
+         "week": "2026-05-11T00:00:00",
+         "source": "Woodlands House School",
+         "reports": 2394
+        },
+        {
+         "week": "2026-05-18T00:00:00",
+         "source": "AIHW",
+         "reports": 1
+        },
+        {
+         "week": "2026-05-18T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 348
+        },
+        {
+         "week": "2026-05-18T00:00:00",
+         "source": "Thrill Data",
+         "reports": 207
+        },
+        {
+         "week": "2026-05-18T00:00:00",
+         "source": "UNCTAD",
+         "reports": 1654
+        },
+        {
+         "week": "2026-05-25T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 1602
+        },
+        {
+         "week": "2026-05-25T00:00:00",
+         "source": "Thrill Data",
+         "reports": 1223
+        },
+        {
+         "week": "2026-05-25T00:00:00",
+         "source": "UNCTAD",
+         "reports": 2705
+        },
+        {
+         "week": "2026-05-25T00:00:00",
+         "source": "Woodlands House School",
+         "reports": 1
+        },
+        {
+         "week": "2026-06-01T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 25
+        },
+        {
+         "week": "2026-06-01T00:00:00",
+         "source": "Thrill Data",
+         "reports": 183
+        },
+        {
+         "week": "2026-06-01T00:00:00",
+         "source": "UNCTAD",
+         "reports": 1566
+        },
+        {
+         "week": "2026-06-08T00:00:00",
+         "source": "Mapillary",
+         "reports": 206
+        },
+        {
+         "week": "2026-06-08T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 41
+        },
+        {
+         "week": "2026-06-08T00:00:00",
+         "source": "Thrill Data",
+         "reports": 147
+        },
+        {
+         "week": "2026-06-08T00:00:00",
+         "source": "UNCTAD",
+         "reports": 2101
+        },
+        {
+         "week": "2026-06-15T00:00:00",
+         "source": "AIHW",
+         "reports": 4843
+        },
+        {
+         "week": "2026-06-15T00:00:00",
+         "source": "Mapillary",
+         "reports": 872
+        },
+        {
+         "week": "2026-06-15T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 986
+        },
+        {
+         "week": "2026-06-15T00:00:00",
+         "source": "Thrill Data",
+         "reports": 10
+        },
+        {
+         "week": "2026-06-15T00:00:00",
+         "source": "UNCTAD",
+         "reports": 2166
+        },
+        {
+         "week": "2026-06-29T00:00:00",
+         "source": "Thrill Data",
+         "reports": 1
+        },
+        {
+         "week": "2026-06-29T00:00:00",
+         "source": "UNCTAD",
+         "reports": 16
+        },
+        {
+         "week": "2026-07-06T00:00:00",
+         "source": "UNCTAD",
+         "reports": 1
+        },
+        {
+         "week": "2026-07-13T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 2
+        },
+        {
+         "week": "2026-07-27T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 5
+        },
+        {
+         "week": "2026-07-27T00:00:00",
+         "source": "Thrill Data",
+         "reports": 1
+        },
+        {
+         "week": "2026-08-17T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 4
+        },
+        {
+         "week": "2026-08-31T00:00:00",
+         "source": "UNCTAD",
+         "reports": 1
+        },
+        {
+         "week": "2026-09-07T00:00:00",
+         "source": "UNCTAD",
+         "reports": 1
+        },
+        {
+         "week": "2026-09-14T00:00:00",
+         "source": "Other (34 sources)",
+         "reports": 25
+        }
+       ]
+      }
+     },
+     "text/plain": "<VegaLite 6 object>\n\nIf you see this message, it means the renderer has not been properly enabled\nfor the frontend that you are using. For more information, see\nhttps://altair-viz.github.io/user_guide/display_frontends.html#troubleshooting\n"
+    }
+   ],
+   "slug": "cataloged-agent-like-activit",
+   "started": "2026-10-06T03:53:27+00:00",
+   "out_memo": {
+    "next": 2,
+    "outs": [
+     {
+      "i": 0,
+      "d": "stream:stdout:6d1ffabb479ff577cb5cfc515d3b0547d45912a8"
+     },
+     {
+      "i": 1,
+      "d": "chart:0191061e50bd8246d6d5b307150457ed66dc5fa2"
+     }
+    ]
+   },
+   "duration_s": 0.745,
+   "label_revs": {},
+   "reads": [
+    "report-sources.csv"
+   ],
+   "verification": {
+    "exec_count": 6,
+    "links": {
+     "status": "partial",
+     "resolved": [
+      {
+       "value": "36,836",
+       "ref": "card:84aa5fe1@out0#L2",
+       "tier": 2
+      },
+      {
+       "value": "37,649",
+       "ref": "card:84aa5fe1@out0#L1",
+       "tier": 2
+      },
+      {
+       "value": "2026",
+       "ref": "card:84aa5fe1@out0#L2",
+       "tier": 2
+      }
+     ],
+     "unresolved": [
+      "13"
+     ],
+     "broken": [],
+     "quiet": [],
+     "checked": true,
+     "healed": {
+      "version": "f82cbcfec125",
+      "relinks": 0,
+      "changes": [],
+      "ms": 16
+     }
+    },
+    "attempts": 0,
+    "note": null,
+    "status": "ok"
+   },
+   "kernel": "519d3976",
+   "previous_code": "import pandas as pd, altair as alt\ns_all = pd.read_csv('report-sources.csv', parse_dates=['report_date_utc'])\nday = s_all.report_date_utc.dt.strftime('%Y-%m-%d')\nprint('included reports, all dates:', len(s_all))\nprint('in 2026-04-13..2026-06-21:', int(((day >= '2026-04-13') & (day <= '2026-06-21')).sum()))\ns = s_all[s_all.report_date_utc >= '2025-11-01'].copy()\nprint('shown in chart (from 2025-11-01):', len(s))\ntop = s.data_source.value_counts().index[:6].tolist()\ns['source'] = s.data_source.where(s.data_source.isin(top), 'Other (34 sources)')\ns['week'] = s.report_date_utc.dt.tz_localize(None).dt.to_period('W-SUN').dt.start_time\nw = s.groupby(['week', 'source']).size().reset_index(name='reports')\norder = top + ['Other (34 sources)']\nprint(s_all.data_source.value_counts().head(6).to_string())\nalt.Chart(w).mark_bar().encode(\n    x=alt.X('week:T', title='Week (UTC)'),\n    y=alt.Y('reports:Q', title='Included reports per week'),\n    color=alt.Color('source:N', sort=order, title='Data source'),\n    order=alt.Order('source_order:Q'),\n    tooltip=['week:T', 'source:N', 'reports:Q'],\n).transform_calculate(source_order=f\"indexof({order}, datum.source)\").properties(width=620, height=300)",
+   "check": {
+    "id": "chk_b6054952df46",
+    "basis": "667c3fc3a4bf6140",
+    "status": "fixed",
+    "stages": {
+     "render": {
+      "status": "ok",
+      "ms": 4037,
+      "image": "card-checks/84aa5fe1/chk_b6054952df46-card.png"
+     },
+     "critique": {
+      "status": "ok",
+      "ms": 12558,
+      "effort": "high",
+      "assessment": [
+       {
+        "problem": "The question asks two separate things: when the activity happened and which data sources it targeted."
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": "The x-axis shows months without years, so the analyst can't see that the window runs from 2025 into 2026 or that the surge is in 2026."
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       }
+      ],
+      "model": "claude-opus-5-5"
+     }
+    },
+    "started": "2026-10-06T03:53:31+00:00",
+    "ended": "2026-10-06T03:53:50+00:00",
+    "author": "orient"
+   },
+   "fixes": [
+    {
+     "id": "fix_d2b266b31067",
+     "check": "chk_b6054952df46",
+     "ts": "2026-10-06T03:53:50+00:00",
+     "by": "check",
+     "fields": [
+      "title",
+      "code",
+      "takeaway"
+     ],
+     "before": {
+      "title": "When did the cataloged agent-like activity happen, and which data sources did it target?",
+      "code": "import pandas as pd, altair as alt\ns_all = pd.read_csv('report-sources.csv', parse_dates=['report_date_utc'])\nday = s_all.report_date_utc.dt.strftime('%Y-%m-%d')\nprint('included reports, all dates:', len(s_all))\nprint('in 2026-04-13..2026-06-21:', int(((day >= '2026-04-13') & (day <= '2026-06-21')).sum()))\ns = s_all[s_all.report_date_utc >= '2025-11-01'].copy()\nprint('shown in chart (from 2025-11-01):', len(s))\ntop = s.data_source.value_counts().index[:6].tolist()\ns['source'] = s.data_source.where(s.data_source.isin(top), 'Other (34 sources)')\ns['week'] = s.report_date_utc.dt.tz_localize(None).dt.to_period('W-SUN').dt.start_time\nw = s.groupby(['week', 'source']).size().reset_index(name='reports')\norder = top + ['Other (34 sources)']\nprint(s_all.data_source.value_counts().head(6).to_string())\nalt.Chart(w).mark_bar().encode(\n    x=alt.X('week:T', title='Week (UTC)'),\n    y=alt.Y('reports:Q', title='Included reports per week'),\n    color=alt.Color('source:N', sort=order, title='Data source'),\n    order=alt.Order('source_order:Q'),\n    tooltip=['week:T', 'source:N', 'reports:Q'],\n).transform_calculate(source_order=f\"indexof({order}, datum.source)\").properties(width=620, height=300)",
+      "takeaway": "The activity is a ten-week surge aimed at a few public statistics sites: [[36,836|card:84aa5fe1@out0#L2]] of the [[37,649|card:84aa5fe1@out0#L1]] included reports date from April 13 to June 21, [[2026|card:84aa5fe1@out0#L2]]. UNCTAD's trade statistics alone account for [[19,319|card:84aa5fe1@out0#L5]] of them."
+     },
+     "after": {
+      "title": "When did the cataloged agent-like activity happen?",
+      "code": "import pandas as pd, altair as alt\ns_all = pd.read_csv('report-sources.csv', parse_dates=['report_date_utc'])\nday = s_all.report_date_utc.dt.strftime('%Y-%m-%d')\nprint('included reports, all dates:', len(s_all))\nprint('in 2026-04-13..2026-06-21:', int(((day >= '2026-04-13') & (day <= '2026-06-21')).sum()))\ns = s_all[s_all.report_date_utc >= '2025-11-01'].copy()\nprint('shown in chart (from 2025-11-01):', len(s))\ntop = s.data_source.value_counts().index[:6].tolist()\ns['source'] = s.data_source.where(s.data_source.isin(top), 'Other (34 sources)')\ns['week'] = s.report_date_utc.dt.tz_localize(None).dt.to_period('W-SUN').dt.start_time\nw = s.groupby(['week', 'source']).size().reset_index(name='reports')\norder = top + ['Other (34 sources)']\nprint(s_all.data_source.value_counts().head(6).to_string())\nalt.Chart(w).mark_bar().encode(\n    x=alt.X('week:T', title='Week (UTC)', axis=alt.Axis(format='%b %Y')),\n    y=alt.Y('reports:Q', title='Included reports per week'),\n    color=alt.Color('source:N', sort=order, title='Data source'),\n    order=alt.Order('source_order:Q'),\n    tooltip=['week:T', 'source:N', 'reports:Q'],\n).transform_calculate(source_order=f\"indexof({order}, datum.source)\").properties(width=620, height=300)",
+      "takeaway": "The activity is a ten-week surge: [[36,836|card:84aa5fe1@out0#L2]] of the [[37,649|card:84aa5fe1@out0#L1]] included reports date from April 13 to June 21, [[2026|card:84aa5fe1@out0#L2]]."
+     },
+     "reason": "The question asks two separate things: when the activity happened and which data sources it targeted.",
+     "state": "applied"
+    }
+   ]
+  },
+  {
+   "id": "a7856af1",
+   "notebook": "519d3976",
+   "kind": "diagram",
+   "title": "How do the 16 files in the package relate to each other?",
+   "takeaway": "all-reports.csv is reports.csv plus the [[82|card:a7856af1@out0#L3]] supplemental rows; report-sources.csv gives each of the [[37,649|card:a7856af1@out0#L5]] included reports one source bucket, and the daily tables count those from November 2025 on. Every recomputable README total and every manifest hash matched [[call:7e554e8e/377]] [[call:7e554e8e/29]].",
+   "takeaway_author": "model",
+   "labels": [],
+   "locked": false,
+   "created_by": "chat:7e554e8e",
+   "created_at_event": null,
+   "edited": [
+    {
+     "by": "chat:7e554e8e",
+     "ts": "2026-10-06T03:47:48+00:00"
+    },
+    {
+     "by": "check",
+     "ts": "2026-10-06T03:53:50+00:00"
+    }
+   ],
+   "created_ts": "2026-10-06T03:47:39+00:00",
+   "ts": "2026-10-06T03:53:50+00:00",
+   "width": null,
+   "height": null,
+   "pos": null,
+   "starred": false,
+   "code": "import thimble\nnodes = [\n    'reports.csv (38,078 main rows)',\n    'additional-cited-reports.csv (82 rows)',\n    'all-reports.csv (38,160 reports)',\n    'all-report-links.txt (38,160 URLs)',\n    'report-sources.csv (37,649 included)',\n    'daily-counts.csv (325 days)',\n    'daily-source-counts.csv (330 day-source pairs)',\n    'methods.json (52 rules)',\n    'search-coverage.json (41 searches)',\n    'supplement-classifications.json (82 decisions)',\n    'selection-provenance.csv (71 picks)',\n    'classification-overrides.json (2 changes)',\n    'summaries + manifest',\n]\nedges = [\n    ('reports.csv (38,078 main rows)', 'all-reports.csv (38,160 reports)', 'union'),\n    ('additional-cited-reports.csv (82 rows)', 'all-reports.csv (38,160 reports)', 'union'),\n    ('all-reports.csv (38,160 reports)', 'all-report-links.txt (38,160 URLs)', 'same URLs'),\n    ('all-reports.csv (38,160 reports)', 'report-sources.csv (37,649 included)', 'source per included'),\n    ('all-reports.csv (38,160 reports)', 'daily-counts.csv (325 days)', 'per UTC day'),\n    ('report-sources.csv (37,649 included)', 'daily-source-counts.csv (330 day-source pairs)', 'counted per day and source'),\n    ('methods.json (52 rules)', 'reports.csv (38,078 main rows)', 'queries found most rows'),\n    ('search-coverage.json (41 searches)', 'methods.json (52 rules)', 'audit of each query'),\n    ('supplement-classifications.json (82 decisions)', 'additional-cited-reports.csv (82 rows)', 'decision per row'),\n    ('selection-provenance.csv (71 picks)', 'supplement-classifications.json (82 decisions)', 'why 71 were picked'),\n    ('classification-overrides.json (2 changes)', 'reports.csv (38,078 main rows)', 'confidence raised for 2'),\n    ('summaries + manifest', 'all-reports.csv (38,160 reports)', 'totals and hashes'),\n]\nthimble.diagram(nodes, edges)\n",
+   "exec_count": 3,
+   "status": "ok",
+   "outputs": [
+    {
+     "application/vnd.thimble.diagram+json": {
+      "nodes": [
+       {
+        "id": "reports.csv (38,078 main rows)",
+        "label": "reports.csv (38,078 main rows)"
+       },
+       {
+        "id": "additional-cited-reports.csv (82 rows)",
+        "label": "additional-cited-reports.csv (82 rows)"
+       },
+       {
+        "id": "all-reports.csv (38,160 reports)",
+        "label": "all-reports.csv (38,160 reports)"
+       },
+       {
+        "id": "all-report-links.txt (38,160 URLs)",
+        "label": "all-report-links.txt (38,160 URLs)"
+       },
+       {
+        "id": "report-sources.csv (37,649 included)",
+        "label": "report-sources.csv (37,649 included)"
+       },
+       {
+        "id": "daily-counts.csv (325 days)",
+        "label": "daily-counts.csv (325 days)"
+       },
+       {
+        "id": "daily-source-counts.csv (330 day-source pairs)",
+        "label": "daily-source-counts.csv (330 day-source pairs)"
+       },
+       {
+        "id": "methods.json (52 rules)",
+        "label": "methods.json (52 rules)"
+       },
+       {
+        "id": "search-coverage.json (41 searches)",
+        "label": "search-coverage.json (41 searches)"
+       },
+       {
+        "id": "supplement-classifications.json (82 decisions)",
+        "label": "supplement-classifications.json (82 decisions)"
+       },
+       {
+        "id": "selection-provenance.csv (71 picks)",
+        "label": "selection-provenance.csv (71 picks)"
+       },
+       {
+        "id": "classification-overrides.json (2 changes)",
+        "label": "classification-overrides.json (2 changes)"
+       },
+       {
+        "id": "summaries + manifest",
+        "label": "summaries + manifest"
+       }
+      ],
+      "edges": [
+       {
+        "source": "reports.csv (38,078 main rows)",
+        "target": "all-reports.csv (38,160 reports)",
+        "label": "union"
+       },
+       {
+        "source": "additional-cited-reports.csv (82 rows)",
+        "target": "all-reports.csv (38,160 reports)",
+        "label": "union"
+       },
+       {
+        "source": "all-reports.csv (38,160 reports)",
+        "target": "all-report-links.txt (38,160 URLs)",
+        "label": "same URLs"
+       },
+       {
+        "source": "all-reports.csv (38,160 reports)",
+        "target": "report-sources.csv (37,649 included)",
+        "label": "source per included"
+       },
+       {
+        "source": "all-reports.csv (38,160 reports)",
+        "target": "daily-counts.csv (325 days)",
+        "label": "per UTC day"
+       },
+       {
+        "source": "report-sources.csv (37,649 included)",
+        "target": "daily-source-counts.csv (330 day-source pairs)",
+        "label": "counted per day and source"
+       },
+       {
+        "source": "methods.json (52 rules)",
+        "target": "reports.csv (38,078 main rows)",
+        "label": "queries found most rows"
+       },
+       {
+        "source": "search-coverage.json (41 searches)",
+        "target": "methods.json (52 rules)",
+        "label": "audit of each query"
+       },
+       {
+        "source": "supplement-classifications.json (82 decisions)",
+        "target": "additional-cited-reports.csv (82 rows)",
+        "label": "decision per row"
+       },
+       {
+        "source": "selection-provenance.csv (71 picks)",
+        "target": "supplement-classifications.json (82 decisions)",
+        "label": "why 71 were picked"
+       },
+       {
+        "source": "classification-overrides.json (2 changes)",
+        "target": "reports.csv (38,078 main rows)",
+        "label": "confidence raised for 2"
+       },
+       {
+        "source": "summaries + manifest",
+        "target": "all-reports.csv (38,160 reports)",
+        "label": "totals and hashes"
+       }
+      ]
+     },
+     "text/plain": "diagram: 13 nodes, 12 edges\nreports.csv (38,078 main rows) -> all-reports.csv (38,160 reports) (union)\nadditional-cited-reports.csv (82 rows) -> all-reports.csv (38,160 reports) (union)\nall-reports.csv (38,160 reports) -> all-report-links.txt (38,160 URLs) (same URLs)\nall-reports.csv (38,160 reports) -> report-sources.csv (37,649 included) (source per included)\nall-reports.csv (38,160 reports) -> daily-counts.csv (325 days) (per UTC day)\nreport-sources.csv (37,649 included) -> daily-source-counts.csv (330 day-source pairs) (counted per day and source)\nmethods.json (52 rules) -> reports.csv (38,078 main rows) (queries found most rows)\nsearch-coverage.json (41 searches) -> methods.json (52 rules) (audit of each query)\nsupplement-classifications.json (82 decisions) -> additional-cited-reports.csv (82 rows) (decision per row)\nselection-provenance.csv (71 picks) -> supplement-classifications.json (82 decisions) (why 71 were picked)\nclassification-overrides.json (2 changes) -> reports.csv (38,078 main rows) (confidence raised for 2)\nsummaries + manifest -> all-reports.csv (38,160 reports) (totals and hashes)"
+    }
+   ],
+   "slug": "files-package-relate",
+   "started": "2026-10-06T03:47:48+00:00",
+   "out_memo": {
+    "next": 1,
+    "outs": [
+     {
+      "i": 0,
+      "d": "text:2a9b707fe1cabfdfb44369ca793c724138f074ed"
+     }
+    ]
+   },
+   "duration_s": 0.024,
+   "label_revs": {},
+   "reads": [],
+   "verification": {
+    "exec_count": 3,
+    "links": {
+     "status": "partial",
+     "resolved": [
+      {
+       "value": "82",
+       "ref": "card:a7856af1@out0#L3",
+       "tier": 2
+      },
+      {
+       "value": "37,649",
+       "ref": "card:a7856af1@out0#L5",
+       "tier": 2
+      }
+     ],
+     "unresolved": [
+      "2025"
+     ],
+     "broken": [],
+     "quiet": [],
+     "checked": true,
+     "healed": {
+      "version": "c9a7ce78f2c7",
+      "relinks": 0,
+      "changes": [],
+      "ms": 15
+     }
+    },
+    "attempts": 0,
+    "note": null,
+    "status": "ok"
+   },
+   "kernel": "519d3976",
+   "previous_code": "import thimble\nnodes = [\n    'reports.csv (38,078 main rows)',\n    'additional-cited-reports.csv (82 rows)',\n    'all-reports.csv (38,160 reports)',\n    'all-report-links.txt (38,160 URLs)',\n    'report-sources.csv (37,649 included)',\n    'daily-counts.csv (325 days)',\n    'daily-source-counts.csv (330 day-source pairs)',\n    'methods.json (52 rules)',\n    'search-coverage.json (41 searches)',\n    'supplement-classifications.json (82 decisions)',\n    'selection-provenance.csv (71 picks)',\n    'classification-overrides.json (2 changes)',\n    'summaries + manifest',\n]\nedges = [\n    ('reports.csv (38,078 main rows)', 'all-reports.csv (38,160 reports)', 'union'),\n    ('additional-cited-reports.csv (82 rows)', 'all-reports.csv (38,160 reports)', 'union'),\n    ('all-reports.csv (38,160 reports)', 'all-report-links.txt (38,160 URLs)', 'same URLs'),\n    ('all-reports.csv (38,160 reports)', 'report-sources.csv (37,649 included)', 'one source per included report'),\n    ('all-reports.csv (38,160 reports)', 'daily-counts.csv (325 days)', 'counted per UTC day'),\n    ('report-sources.csv (37,649 included)', 'daily-source-counts.csv (330 day-source pairs)', 'counted per day and source'),\n    ('methods.json (52 rules)', 'reports.csv (38,078 main rows)', 'queries found most rows'),\n    ('search-coverage.json (41 searches)', 'methods.json (52 rules)', 'audit of each query'),\n    ('supplement-classifications.json (82 decisions)', 'additional-cited-reports.csv (82 rows)', 'decision per row'),\n    ('selection-provenance.csv (71 picks)', 'supplement-classifications.json (82 decisions)', 'why 71 were picked'),\n    ('classification-overrides.json (2 changes)', 'reports.csv (38,078 main rows)', 'confidence raised for 2'),\n    ('summaries + manifest', 'all-reports.csv (38,160 reports)', 'totals and hashes'),\n]\nthimble.diagram(nodes, edges)",
+   "check": {
+    "id": "chk_53497866813f",
+    "basis": "e4cc5ec75a1c0639",
+    "status": "ok",
+    "stages": {
+     "render": {
+      "status": "ok",
+      "ms": 311,
+      "image": "card-checks/a7856af1/chk_53497866813f-card.png"
+     },
+     "critique": {
+      "status": "ok",
+      "ms": 9790,
+      "effort": "high",
+      "assessment": [
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       }
+      ],
+      "model": "claude-opus-5-5"
+     }
+    },
+    "started": "2026-10-06T04:05:02+00:00",
+    "ended": "2026-10-06T04:05:12+00:00",
+    "author": "orient"
+   },
+   "fixes": [
+    {
+     "id": "fix_5d68202ef30f",
+     "check": "chk_3b908b2984ff",
+     "ts": "2026-10-06T03:53:50+00:00",
+     "by": "check",
+     "fields": [
+      "code"
+     ],
+     "before": {
+      "code": "import thimble\nnodes = [\n    'reports.csv (38,078 main rows)',\n    'additional-cited-reports.csv (82 rows)',\n    'all-reports.csv (38,160 reports)',\n    'all-report-links.txt (38,160 URLs)',\n    'report-sources.csv (37,649 included)',\n    'daily-counts.csv (325 days)',\n    'daily-source-counts.csv (330 day-source pairs)',\n    'methods.json (52 rules)',\n    'search-coverage.json (41 searches)',\n    'supplement-classifications.json (82 decisions)',\n    'selection-provenance.csv (71 picks)',\n    'classification-overrides.json (2 changes)',\n    'summaries + manifest',\n]\nedges = [\n    ('reports.csv (38,078 main rows)', 'all-reports.csv (38,160 reports)', 'union'),\n    ('additional-cited-reports.csv (82 rows)', 'all-reports.csv (38,160 reports)', 'union'),\n    ('all-reports.csv (38,160 reports)', 'all-report-links.txt (38,160 URLs)', 'same URLs'),\n    ('all-reports.csv (38,160 reports)', 'report-sources.csv (37,649 included)', 'one source per included report'),\n    ('all-reports.csv (38,160 reports)', 'daily-counts.csv (325 days)', 'counted per UTC day'),\n    ('report-sources.csv (37,649 included)', 'daily-source-counts.csv (330 day-source pairs)', 'counted per day and source'),\n    ('methods.json (52 rules)', 'reports.csv (38,078 main rows)', 'queries found most rows'),\n    ('search-coverage.json (41 searches)', 'methods.json (52 rules)', 'audit of each query'),\n    ('supplement-classifications.json (82 decisions)', 'additional-cited-reports.csv (82 rows)', 'decision per row'),\n    ('selection-provenance.csv (71 picks)', 'supplement-classifications.json (82 decisions)', 'why 71 were picked'),\n    ('classification-overrides.json (2 changes)', 'reports.csv (38,078 main rows)', 'confidence raised for 2'),\n    ('summaries + manifest', 'all-reports.csv (38,160 reports)', 'totals and hashes'),\n]\nthimble.diagram(nodes, edges)"
+     },
+     "after": {
+      "code": "import thimble\nnodes = [\n    'reports.csv (38,078 main rows)',\n    'additional-cited-reports.csv (82 rows)',\n    'all-reports.csv (38,160 reports)',\n    'all-report-links.txt (38,160 URLs)',\n    'report-sources.csv (37,649 included)',\n    'daily-counts.csv (325 days)',\n    'daily-source-counts.csv (330 day-source pairs)',\n    'methods.json (52 rules)',\n    'search-coverage.json (41 searches)',\n    'supplement-classifications.json (82 decisions)',\n    'selection-provenance.csv (71 picks)',\n    'classification-overrides.json (2 changes)',\n    'summaries + manifest',\n]\nedges = [\n    ('reports.csv (38,078 main rows)', 'all-reports.csv (38,160 reports)', 'union'),\n    ('additional-cited-reports.csv (82 rows)', 'all-reports.csv (38,160 reports)', 'union'),\n    ('all-reports.csv (38,160 reports)', 'all-report-links.txt (38,160 URLs)', 'same URLs'),\n    ('all-reports.csv (38,160 reports)', 'report-sources.csv (37,649 included)', 'source per included'),\n    ('all-reports.csv (38,160 reports)', 'daily-counts.csv (325 days)', 'per UTC day'),\n    ('report-sources.csv (37,649 included)', 'daily-source-counts.csv (330 day-source pairs)', 'counted per day and source'),\n    ('methods.json (52 rules)', 'reports.csv (38,078 main rows)', 'queries found most rows'),\n    ('search-coverage.json (41 searches)', 'methods.json (52 rules)', 'audit of each query'),\n    ('supplement-classifications.json (82 decisions)', 'additional-cited-reports.csv (82 rows)', 'decision per row'),\n    ('selection-provenance.csv (71 picks)', 'supplement-classifications.json (82 decisions)', 'why 71 were picked'),\n    ('classification-overrides.json (2 changes)', 'reports.csv (38,078 main rows)', 'confidence raised for 2'),\n    ('summaries + manifest', 'all-reports.csv (38,160 reports)', 'totals and hashes'),\n]\nthimble.diagram(nodes, edges)\n"
+     },
+     "reason": "The footnote marker for the daily-counts edge sits on top of the 'one source per included report' label, so it reads 'one source per i(1)luded report'. It also isn't clear which edge each label belongs to.",
+     "state": "applied"
+    }
+   ]
+  },
+  {
+   "id": "e095325f",
+   "notebook": "519d3976",
+   "kind": "example",
+   "title": "How do catalog rows of different evidence strength differ?",
+   "takeaway": "These three UNCTAD reports fall within 26 seconds on May 23, 2026 (UTC). One only [[matched the UNCTAD queries|all-reports.csv#row=18989]], one also [[used an intermediary or published task material|all-reports.csv#row=18990]], and only the one with [[task-specific code|all-reports.csv#row=18991]] is rated significant.",
+   "takeaway_author": "model",
+   "labels": [],
+   "locked": false,
+   "created_by": "chat:7e554e8e",
+   "created_at_event": null,
+   "edited": [],
+   "created_ts": "2026-10-06T03:47:59+00:00",
+   "ts": "2026-10-06T03:48:18+00:00",
+   "width": null,
+   "height": null,
+   "pos": null,
+   "starred": false,
+   "payload": {
+    "refs": [
+     "all-reports.csv#row=18989",
+     "all-reports.csv#row=18990",
+     "all-reports.csv#row=18991"
+    ]
+   },
+   "slug": "one-catalog-row",
+   "check": {
+    "id": "chk_6c588272eec2",
+    "basis": "0ed3da2e9d19b3f7",
+    "status": "ok",
+    "stages": {
+     "render": {
+      "status": "ok",
+      "ms": 207,
+      "image": "card-checks/e095325f/chk_6c588272eec2-card.png"
+     },
+     "critique": {
+      "status": "ok",
+      "ms": 14027,
+      "effort": "high",
+      "assessment": [
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       }
+      ],
+      "model": "claude-opus-5-5"
+     }
+    },
+    "started": "2026-10-06T04:05:07+00:00",
+    "ended": "2026-10-06T04:05:21+00:00",
+    "author": "orient"
+   },
+   "kernel": "519d3976",
+   "fixes": [
+    {
+     "id": "fix_24bfec40ad0a",
+     "check": "chk_5b322843bceb",
+     "ts": "2026-10-06T03:48:18+00:00",
+     "by": "check",
+     "fields": [
+      "title"
+     ],
+     "before": {
+      "title": "What does one catalog row say, and how do rows of different evidence strength differ?"
+     },
+     "after": {
+      "title": "How do catalog rows of different evidence strength differ?"
+     },
+     "reason": "The question asks two separate things: what one row says, and how rows of different evidence strength differ.",
+     "state": "applied"
+    }
+   ]
+  },
+  {
+   "id": "b2835e4f",
+   "notebook": "519d3976",
+   "kind": "plot",
+   "title": "What evidence do the included reports rest on, for each main data source?",
+   "takeaway": "By the rule-based label \"evidence basis\", most included reports, [[26,533|card:b2835e4f@out0#L3]] of [[37,649|card:b2835e4f@out0#L1]], rest only on a URL matching a source's domain or task identifier. Only [[6,464|card:b2835e4f@out0#L4]] carry submitted task code or a probe payload, [[4,853|card:b2835e4f#reports/26]] of them UNCTAD.",
+   "takeaway_author": "model",
+   "labels": [
+    "b436b78d"
+   ],
+   "locked": false,
+   "created_by": "chat:7e554e8e",
+   "created_at_event": null,
+   "edited": [
+    {
+     "by": "chat:7e554e8e",
+     "ts": "2026-10-06T03:48:10+00:00"
+    }
+   ],
+   "created_ts": "2026-10-06T03:48:06+00:00",
+   "ts": "2026-10-06T03:48:12+00:00",
+   "width": null,
+   "height": null,
+   "pos": null,
+   "starred": false,
+   "code": "import thimble, pandas as pd, altair as alt\nlab = thimble.labels('evidence basis', negatives=True)\nrep = pd.read_csv('all-reports.csv', dtype=str)\nrep['row'] = range(1, len(rep) + 1)\nlab['row'] = lab['line'] - 1\ndf = rep.merge(lab[['row', 'effective']], on='row')\nsrc = pd.read_csv('report-sources.csv', dtype=str)[['report_id', 'data_source']]\ndf = df.merge(src, on='report_id')          # included reports only\ntop = df.data_source.value_counts().index[:8].tolist()\ndf['source'] = df.data_source.where(df.data_source.isin(top), 'Other (32 sources)')\norder = top + ['Other (32 sources)']\ng = df.groupby(['source', 'effective']).size().reset_index(name='reports')\nbasis_order = ['task code or payload', 'intermediary', 'other evidence', 'source match only']\nprint('included reports:', len(df))\nprint(df.effective.value_counts().to_string())\nalt.Chart(g).mark_bar().encode(\n    y=alt.Y('source:N', sort=order, title='Data source'),\n    x=alt.X('reports:Q', title='Included reports'),\n    color=alt.Color('effective:N', title='Evidence basis (label)', sort=basis_order),\n    order=alt.Order('basis_rank:Q'),\n    tooltip=['source', 'effective', 'reports'],\n).transform_calculate(basis_rank=f\"indexof({basis_order}, datum.effective)\").properties(width=560, height=260)",
+   "exec_count": 5,
+   "status": "ok",
+   "outputs": [
+    {
+     "text/plain": "included reports: 37649\neffective\nsource match only       26533\ntask code or payload     6464\nintermediary             4480\nother evidence            172\n",
+     "_stream": "stdout"
+    },
+    {
+     "application/vnd.vegalite.v6.json": {
+      "config": {
+       "view": {
+        "continuousWidth": 300,
+        "continuousHeight": 300
+       }
+      },
+      "data": {
+       "name": "data-3a0add16ed857a31aea533720b03941c"
+      },
+      "mark": {
+       "type": "bar"
+      },
+      "encoding": {
+       "color": {
+        "field": "effective",
+        "sort": [
+         "task code or payload",
+         "intermediary",
+         "other evidence",
+         "source match only"
+        ],
+        "title": "Evidence basis (label)",
+        "type": "nominal"
+       },
+       "order": {
+        "field": "basis_rank",
+        "type": "quantitative"
+       },
+       "tooltip": [
+        {
+         "field": "source",
+         "type": "nominal"
+        },
+        {
+         "field": "effective",
+         "type": "nominal"
+        },
+        {
+         "field": "reports",
+         "type": "quantitative"
+        }
+       ],
+       "x": {
+        "field": "reports",
+        "title": "Included reports",
+        "type": "quantitative"
+       },
+       "y": {
+        "field": "source",
+        "sort": [
+         "UNCTAD",
+         "Thrill Data",
+         "AIHW",
+         "Woodlands House School",
+         "Mapillary",
+         "GBBC",
+         "MAX budget documents",
+         "Maryland school report cards",
+         "Other (32 sources)"
+        ],
+        "title": "Data source",
+        "type": "nominal"
+       }
+      },
+      "height": 260,
+      "transform": [
+       {
+        "calculate": "indexof(['task code or payload', 'intermediary', 'other evidence', 'source match only'], datum.effective)",
+        "as": "basis_rank"
+       }
+      ],
+      "width": 560,
+      "$schema": "https://vega.github.io/schema/vega-lite/v6.4.1.json",
+      "datasets": {
+       "data-3a0add16ed857a31aea533720b03941c": [
+        {
+         "source": "AIHW",
+         "effective": "intermediary",
+         "reports": 1483
+        },
+        {
+         "source": "AIHW",
+         "effective": "source match only",
+         "reports": 2988
+        },
+        {
+         "source": "AIHW",
+         "effective": "task code or payload",
+         "reports": 373
+        },
+        {
+         "source": "GBBC",
+         "effective": "intermediary",
+         "reports": 11
+        },
+        {
+         "source": "GBBC",
+         "effective": "other evidence",
+         "reports": 4
+        },
+        {
+         "source": "GBBC",
+         "effective": "source match only",
+         "reports": 756
+        },
+        {
+         "source": "GBBC",
+         "effective": "task code or payload",
+         "reports": 2
+        },
+        {
+         "source": "MAX budget documents",
+         "effective": "intermediary",
+         "reports": 318
+        },
+        {
+         "source": "MAX budget documents",
+         "effective": "source match only",
+         "reports": 278
+        },
+        {
+         "source": "MAX budget documents",
+         "effective": "task code or payload",
+         "reports": 1
+        },
+        {
+         "source": "Mapillary",
+         "effective": "intermediary",
+         "reports": 23
+        },
+        {
+         "source": "Mapillary",
+         "effective": "other evidence",
+         "reports": 20
+        },
+        {
+         "source": "Mapillary",
+         "effective": "source match only",
+         "reports": 642
+        },
+        {
+         "source": "Mapillary",
+         "effective": "task code or payload",
+         "reports": 395
+        },
+        {
+         "source": "Maryland school report cards",
+         "effective": "source match only",
+         "reports": 541
+        },
+        {
+         "source": "Maryland school report cards",
+         "effective": "task code or payload",
+         "reports": 5
+        },
+        {
+         "source": "Other (32 sources)",
+         "effective": "intermediary",
+         "reports": 440
+        },
+        {
+         "source": "Other (32 sources)",
+         "effective": "other evidence",
+         "reports": 130
+        },
+        {
+         "source": "Other (32 sources)",
+         "effective": "source match only",
+         "reports": 2148
+        },
+        {
+         "source": "Other (32 sources)",
+         "effective": "task code or payload",
+         "reports": 255
+        },
+        {
+         "source": "Thrill Data",
+         "effective": "intermediary",
+         "reports": 722
+        },
+        {
+         "source": "Thrill Data",
+         "effective": "source match only",
+         "reports": 3798
+        },
+        {
+         "source": "Thrill Data",
+         "effective": "task code or payload",
+         "reports": 580
+        },
+        {
+         "source": "UNCTAD",
+         "effective": "intermediary",
+         "reports": 776
+        },
+        {
+         "source": "UNCTAD",
+         "effective": "other evidence",
+         "reports": 17
+        },
+        {
+         "source": "UNCTAD",
+         "effective": "source match only",
+         "reports": 13673
+        },
+        {
+         "source": "UNCTAD",
+         "effective": "task code or payload",
+         "reports": 4853
+        },
+        {
+         "source": "Woodlands House School",
+         "effective": "intermediary",
+         "reports": 707
+        },
+        {
+         "source": "Woodlands House School",
+         "effective": "other evidence",
+         "reports": 1
+        },
+        {
+         "source": "Woodlands House School",
+         "effective": "source match only",
+         "reports": 1709
+        }
+       ]
+      }
+     },
+     "text/plain": "<VegaLite 6 object>\n\nIf you see this message, it means the renderer has not been properly enabled\nfor the frontend that you are using. For more information, see\nhttps://altair-viz.github.io/user_guide/display_frontends.html#troubleshooting\n"
+    }
+   ],
+   "slug": "evidence-included-reports",
+   "started": "2026-10-06T03:48:10+00:00",
+   "out_memo": {
+    "next": 2,
+    "outs": [
+     {
+      "i": 0,
+      "d": "stream:stdout:2ae79af90079e13b576fac0766dc869693522916"
+     },
+     {
+      "i": 1,
+      "d": "chart:3b0dbf6098f50cf23eb8c2c4ecb4b624d7e1213b"
+     }
+    ]
+   },
+   "duration_s": 1.807,
+   "label_revs": {
+    "b436b78d": 1
+   },
+   "reads": [
+    "file:@@THIMBLE_WORKSPACE@@/labels/b436b78d.sqlite?mode=ro",
+    "all-reports.csv",
+    "report-sources.csv"
+   ],
+   "verification": {
+    "exec_count": 5,
+    "links": {
+     "status": "ok",
+     "resolved": [
+      {
+       "value": "26,533",
+       "ref": "card:b2835e4f@out0#L3",
+       "tier": 2
+      },
+      {
+       "value": "37,649",
+       "ref": "card:b2835e4f@out0#L1",
+       "tier": 2
+      },
+      {
+       "value": "6,464",
+       "ref": "card:b2835e4f@out0#L4",
+       "tier": 2
+      },
+      {
+       "value": "4,853",
+       "ref": "card:b2835e4f#reports/26",
+       "tier": 2
+      }
+     ],
+     "unresolved": [],
+     "broken": [],
+     "quiet": [],
+     "checked": true,
+     "healed": {
+      "version": "efcfd5c03a84",
+      "relinks": 0,
+      "changes": [],
+      "ms": 8
+     }
+    },
+    "attempts": 0,
+    "note": null,
+    "status": "ok"
+   },
+   "kernel": "519d3976",
+   "previous_code": "import thimble, pandas as pd, altair as alt\nlab = thimble.labels('evidence basis', negatives=True)\nprint(lab.head(3).to_string())\nprint(lab.columns.tolist(), len(lab))",
+   "check": {
+    "id": "chk_0722d73298fc",
+    "basis": "f0bdd2a1766dd4c7",
+    "status": "ok",
+    "stages": {
+     "render": {
+      "status": "ok",
+      "ms": 274,
+      "image": "card-checks/b2835e4f/chk_0722d73298fc-card.png"
+     },
+     "critique": {
+      "status": "ok",
+      "ms": 9582,
+      "effort": "high",
+      "assessment": [
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       }
+      ],
+      "model": "claude-opus-5-5"
+     }
+    },
+    "started": "2026-10-06T04:05:04+00:00",
+    "ended": "2026-10-06T04:05:14+00:00",
+    "author": "orient"
+   }
+  },
+  {
+   "id": "e2e3a3fc",
+   "notebook": "519d3976",
+   "kind": "plot",
+   "title": "How much of the strongest evidence is also in the outside research-activity cohort?",
+   "takeaway": "Nearly all: [[6,315|card:e2e3a3fc@out0#L1]] of [[6,464|card:e2e3a3fc@out0#L1]] task-code reports also carry the outside cohort's tag, and the cohort's first report comes minutes before the first task code. The package does not say how that cohort was chosen [[methods.json#/48]].",
+   "takeaway_author": "model",
+   "labels": [
+    "b436b78d"
+   ],
+   "locked": false,
+   "created_by": "chat:7e554e8e",
+   "created_at_event": null,
+   "edited": [
+    {
+     "by": "chat:7e554e8e",
+     "ts": "2026-10-06T04:04:52+00:00"
+    }
+   ],
+   "created_ts": "2026-10-06T03:54:44+00:00",
+   "ts": "2026-10-06T04:04:52+00:00",
+   "width": null,
+   "height": null,
+   "pos": null,
+   "starred": false,
+   "code": "import thimble, pandas as pd, altair as alt\nlab = thimble.labels('evidence basis', negatives=True)\nrep = pd.read_csv('all-reports.csv', dtype=str).fillna('')\nrep['row'] = range(1, len(rep) + 1)\nlab['row'] = lab['line'] - 1\ndf = rep.merge(lab[['row', 'effective']], on='row')\ndf = df[df.disposition == 'included']\ndf['cohort'] = df.why_included.str.contains('externally selected research-activity cohort').map({True: 'in outside cohort', False: 'not in cohort'})\ng = df.groupby(['effective', 'cohort']).size().reset_index(name='reports')\ncode = df[df.effective == 'task code or payload']\nprint('task code or payload:', len(code), '| in outside cohort:', int((code.cohort == 'in outside cohort').sum()))\nsrc = df[df.effective == 'source match only']\nprint('source match only:', len(src), '| in outside cohort:', int((src.cohort == 'in outside cohort').sum()))\ncoh = df[df.cohort == 'in outside cohort']\nprint('first cohort report (UTC):', coh.report_date_utc.min())\nprint('first task-code report (UTC):', code.report_date_utc.min())\nprint('first task-code report not in cohort (UTC):', code[code.cohort == 'not in cohort'].report_date_utc.min())\norder = ['task code or payload', 'intermediary', 'other evidence', 'source match only']\nalt.Chart(g).mark_bar().encode(\n    y=alt.Y('effective:N', sort=order, title='Evidence basis (label)'),\n    x=alt.X('reports:Q', title='Included reports'),\n    color=alt.Color('cohort:N', title='Outside cohort'),\n    tooltip=['effective', 'cohort', 'reports'],\n).properties(width=560, height=180)",
+   "exec_count": 20,
+   "status": "ok",
+   "outputs": [
+    {
+     "text/plain": "task code or payload: 6464 | in outside cohort: 6315\nsource match only: 26533 | in outside cohort: 337\nfirst cohort report (UTC): 2026-03-06T19:46:36Z\nfirst task-code report (UTC): 2026-03-06T19:52:27Z\nfirst task-code report not in cohort (UTC): 2026-04-18T21:57:17Z\n",
+     "_stream": "stdout"
+    },
+    {
+     "application/vnd.vegalite.v6.json": {
+      "config": {
+       "view": {
+        "continuousWidth": 300,
+        "continuousHeight": 300
+       }
+      },
+      "data": {
+       "name": "data-aca802b0fe847b4907b4db1807242bd0"
+      },
+      "mark": {
+       "type": "bar"
+      },
+      "encoding": {
+       "color": {
+        "field": "cohort",
+        "title": "Outside cohort",
+        "type": "nominal"
+       },
+       "tooltip": [
+        {
+         "field": "effective",
+         "type": "nominal"
+        },
+        {
+         "field": "cohort",
+         "type": "nominal"
+        },
+        {
+         "field": "reports",
+         "type": "quantitative"
+        }
+       ],
+       "x": {
+        "field": "reports",
+        "title": "Included reports",
+        "type": "quantitative"
+       },
+       "y": {
+        "field": "effective",
+        "sort": [
+         "task code or payload",
+         "intermediary",
+         "other evidence",
+         "source match only"
+        ],
+        "title": "Evidence basis (label)",
+        "type": "nominal"
+       }
+      },
+      "height": 180,
+      "width": 560,
+      "$schema": "https://vega.github.io/schema/vega-lite/v6.4.1.json",
+      "datasets": {
+       "data-aca802b0fe847b4907b4db1807242bd0": [
+        {
+         "effective": "intermediary",
+         "cohort": "in outside cohort",
+         "reports": 2200
+        },
+        {
+         "effective": "intermediary",
+         "cohort": "not in cohort",
+         "reports": 2280
+        },
+        {
+         "effective": "other evidence",
+         "cohort": "in outside cohort",
+         "reports": 116
+        },
+        {
+         "effective": "other evidence",
+         "cohort": "not in cohort",
+         "reports": 56
+        },
+        {
+         "effective": "source match only",
+         "cohort": "in outside cohort",
+         "reports": 337
+        },
+        {
+         "effective": "source match only",
+         "cohort": "not in cohort",
+         "reports": 26196
+        },
+        {
+         "effective": "task code or payload",
+         "cohort": "in outside cohort",
+         "reports": 6315
+        },
+        {
+         "effective": "task code or payload",
+         "cohort": "not in cohort",
+         "reports": 149
+        }
+       ]
+      }
+     },
+     "text/plain": "<VegaLite 6 object>\n\nIf you see this message, it means the renderer has not been properly enabled\nfor the frontend that you are using. For more information, see\nhttps://altair-viz.github.io/user_guide/display_frontends.html#troubleshooting\n"
+    }
+   ],
+   "slug": "activity-follow-working",
+   "started": "2026-10-06T04:04:52+00:00",
+   "out_memo": {
+    "next": 2,
+    "outs": [
+     {
+      "i": 0,
+      "d": "stream:stdout:c1d1b78f76f921723e293774becb4fa05e2192fa"
+     },
+     {
+      "i": 1,
+      "d": "chart:df3cea0d279536e4ace20065daf7f62677d5ec3b"
+     }
+    ]
+   },
+   "duration_s": 0.365,
+   "label_revs": {
+    "b436b78d": 1
+   },
+   "reads": [
+    "file:@@THIMBLE_WORKSPACE@@/labels/b436b78d.sqlite?mode=ro",
+    "all-reports.csv"
+   ],
+   "verification": {
+    "exec_count": 20,
+    "links": {
+     "status": "ok",
+     "resolved": [
+      {
+       "value": "6,315",
+       "ref": "card:e2e3a3fc@out0#L1",
+       "tier": 2
+      },
+      {
+       "value": "6,464",
+       "ref": "card:e2e3a3fc@out0#L1",
+       "tier": 2
+      }
+     ],
+     "unresolved": [],
+     "broken": [],
+     "quiet": [],
+     "checked": true,
+     "healed": {
+      "version": "ec21400be595",
+      "relinks": 0,
+      "changes": [],
+      "ms": 25
+     }
+    },
+    "attempts": 0,
+    "note": null,
+    "status": "ok"
+   },
+   "kernel": "519d3976",
+   "previous_code": "import pandas as pd, altair as alt\ns = pd.read_csv('report-sources.csv', parse_dates=['report_date_utc'])\ns['hour'] = s.report_date_utc.dt.hour\ns['day'] = s.report_date_utc.dt.day_name()\nh = s.groupby('hour').size().reset_index(name='reports')\nprint('included reports:', len(s))\nprint('quietest UTC hour:', int(h.reports.min()), 'reports at', int(h.loc[h.reports.idxmin(), 'hour']), 'UTC')\nprint('busiest UTC hour:', int(h.reports.max()), 'reports at', int(h.loc[h.reports.idxmax(), 'hour']), 'UTC')\nwk = s.day.value_counts()\nprint('Saturday + Sunday:', int(wk.get('Saturday', 0) + wk.get('Sunday', 0)), 'of', len(s))\nprint(wk.to_string())\nalt.Chart(h).mark_bar().encode(\n    x=alt.X('hour:O', title='Hour of day (UTC)'),\n    y=alt.Y('reports:Q', title='Included reports'),\n    tooltip=['hour', 'reports'],\n).properties(width=600, height=260)",
+   "check": {
+    "id": "chk_5ad946c4972c",
+    "basis": "1a02ea1e1c18d4cc",
+    "status": "ok",
+    "stages": {
+     "render": {
+      "status": "ok",
+      "ms": 418,
+      "image": "card-checks/e2e3a3fc/chk_5ad946c4972c-card.png"
+     },
+     "critique": {
+      "status": "ok",
+      "ms": 12110,
+      "effort": "high",
+      "assessment": [
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       }
+      ],
+      "model": "claude-opus-5-5"
+     }
+    },
+    "started": "2026-10-06T04:04:59+00:00",
+    "ended": "2026-10-06T04:05:11+00:00",
+    "author": "orient"
+   }
+  },
+  {
+   "id": "67c6fe70",
+   "notebook": "519d3976",
+   "kind": "table",
+   "title": "Did the ten most-targeted sites have URLQuery reports before April 2026, or did their activity start abruptly then?",
+   "takeaway": "Mostly abruptly: [[7 of 10|card:67c6fe70@out0#L1]] have no included report before April 2026, though the catalog holds reports back to [[September 2023|all-reports.csv#row=1]]. Some are nearly one burst, such as AIHW, with [[4,837|card:67c6fe70#in%20largest%20burst/AIHW]] of [[4,844|card:67c6fe70#reports/AIHW]] reports in one stretch.",
+   "takeaway_author": "model",
+   "labels": [],
+   "locked": false,
+   "created_by": "chat:7e554e8e",
+   "created_at_event": null,
+   "edited": [
+    {
+     "by": "chat:7e554e8e",
+     "ts": "2026-10-06T03:53:59+00:00"
+    }
+   ],
+   "created_ts": "2026-10-06T03:53:56+00:00",
+   "ts": "2026-10-06T04:05:27+00:00",
+   "width": null,
+   "height": null,
+   "pos": null,
+   "starred": false,
+   "code": "import pandas as pd\ns = pd.read_csv('report-sources.csv', parse_dates=['report_date_utc']).sort_values('report_date_utc')\ntop = s.data_source.value_counts().index[:10]\nrows = []\nfor src in top:\n    d = s[s.data_source == src].report_date_utc\n    burst = (d.diff().dt.total_seconds().fillna(1e12) >= 6 * 3600).cumsum()   # new burst after a 6-hour gap\n    rows.append({\n        'data source': src,\n        'reports': len(d),\n        'first report (UTC)': d.iloc[0].strftime('%Y-%m-%d'),\n        'before Apr 2026': int((d < '2026-04-01').sum()),\n        'in largest burst': int(burst.value_counts().iloc[0]),\n    })\nt = pd.DataFrame(rows).set_index('data source')\nprint('sources whose first report is in Apr-Jun 2026:', int((t['first report (UTC)'] >= '2026-04-01').sum()), 'of', len(t))\nt",
+   "exec_count": 12,
+   "status": "ok",
+   "outputs": [
+    {
+     "text/plain": "sources whose first report is in Apr-Jun 2026: 7 of 10\n",
+     "_stream": "stdout"
+    },
+    {
+     "application/vnd.thimble.frame+json": {
+      "columns": [
+       "data source",
+       "reports",
+       "first report (UTC)",
+       "before Apr 2026",
+       "in largest burst"
+      ],
+      "types": {
+       "data source": "nominal",
+       "reports": "quantitative",
+       "first report (UTC)": "nominal",
+       "before Apr 2026": "quantitative",
+       "in largest burst": "quantitative"
+      },
+      "index": "data source",
+      "rows": [
+       [
+        "UNCTAD",
+        19319,
+        "2026-04-13",
+        0,
+        1747
+       ],
+       [
+        "Thrill Data",
+        5100,
+        "2025-11-12",
+        325,
+        1079
+       ],
+       [
+        "AIHW",
+        4844,
+        "2026-05-18",
+        0,
+        4837
+       ],
+       [
+        "Woodlands House School",
+        2417,
+        "2026-05-10",
+        0,
+        2412
+       ],
+       [
+        "Mapillary",
+        1080,
+        "2025-11-25",
+        2,
+        480
+       ],
+       [
+        "GBBC",
+        773,
+        "2026-05-10",
+        0,
+        768
+       ],
+       [
+        "MAX budget documents",
+        597,
+        "2024-05-02",
+        10,
+        585
+       ],
+       [
+        "Maryland school report cards",
+        546,
+        "2026-05-06",
+        0,
+        340
+       ],
+       [
+        "Drivelah",
+        542,
+        "2026-05-11",
+        0,
+        538
+       ],
+       [
+        "SEC county data",
+        455,
+        "2026-06-18",
+        0,
+        450
+       ]
+      ],
+      "total": 10,
+      "label": "data source",
+      "view": {
+       "columns": [
+        "reports",
+        "first report (UTC)",
+        "before Apr 2026",
+        "in largest burst"
+       ],
+       "formats": {
+        "reports": ",d",
+        "before Apr 2026": ",d",
+        "in largest burst": ",d"
+       },
+       "more": 0
+      }
+     },
+     "text/plain": "data source                   reports  first report (UTC)  before Apr 2026  in largest burst\nUNCTAD                        19,319   2026-04-13          0                1,747\nThrill Data                   5,100    2025-11-12          325              1,079\nAIHW                          4,844    2026-05-18          0                4,837\nWoodlands House School        2,417    2026-05-10          0                2,412\nMapillary                     1,080    2025-11-25          2                480\nGBBC                          773      2026-05-10          0                768\nMAX budget documents          597      2024-05-02          10               585\nMaryland school report cards  546      2026-05-06          0                340\nDrivelah                      542      2026-05-11          0                538\nSEC county data               455      2026-06-18          0                450"
+    }
+   ],
+   "slug": "ten-most-targeted-sites",
+   "started": "2026-10-06T03:53:59+00:00",
+   "out_memo": {
+    "next": 2,
+    "outs": [
+     {
+      "i": 0,
+      "d": "stream:stdout:31d7e7a9fb93c15df01294d137155f28be06105b"
+     },
+     {
+      "i": 1,
+      "d": "frame:53eb5a0c9d4d239fafca3005f6148c1a3acfdf85"
+     }
+    ]
+   },
+   "duration_s": 0.633,
+   "label_revs": {},
+   "reads": [
+    "report-sources.csv"
+   ],
+   "verification": {
+    "exec_count": 12,
+    "links": {
+     "status": "partial",
+     "resolved": [
+      {
+       "value": "7 of 10",
+       "ref": "card:67c6fe70@out0#L1",
+       "tier": 2
+      },
+      {
+       "value": "4,837",
+       "ref": "card:67c6fe70#in%20largest%20burst/AIHW",
+       "tier": 2
+      },
+      {
+       "value": "4,844",
+       "ref": "card:67c6fe70#reports/AIHW",
+       "tier": 2
+      }
+     ],
+     "unresolved": [
+      "2026"
+     ],
+     "broken": [
+      {
+       "value": "September 2023",
+       "ref": "all-reports.csv#row=1",
+       "tier": 0,
+       "why": "the cited place shows 2023",
+       "source": "2023"
+      }
+     ],
+     "quiet": [],
+     "checked": true,
+     "healed": {
+      "version": "9319368b3b1b",
+      "relinks": 0,
+      "changes": [
+       {
+        "value": "September 2023",
+        "ref": "all-reports.csv#row=1",
+        "state": "contradicted",
+        "how": "contradicted",
+        "to": "all-reports.csv#row=1",
+        "source": "2023",
+        "why": "the cited place shows 2023"
+       }
+      ],
+      "ms": 39
+     }
+    },
+    "attempts": 0,
+    "note": null,
+    "status": "ok"
+   },
+   "kernel": "519d3976",
+   "previous_code": "import pandas as pd\ns = pd.read_csv('report-sources.csv', parse_dates=['report_date_utc']).sort_values('report_date_utc')\ntop = s.data_source.value_counts().index[:10]\nrows = []\nfor src in top:\n    d = s[s.data_source == src].report_date_utc\n    gaps = d.diff().dt.total_seconds().fillna(1e12) >= 6 * 3600   # new burst after a 6-hour gap\n    burst = gaps.cumsum()\n    rows.append({\n        'data source': src,\n        'reports': len(d),\n        'first report (UTC)': d.iloc[0].strftime('%Y-%m-%d'),\n        'before Apr 2026': int((d < '2026-04-01').sum()),\n        'largest burst share': f\"{burst.value_counts().iloc[0] / len(d):.0%}\",\n    })\nt = pd.DataFrame(rows).set_index('data source')\nprint('sources whose first report is in Apr-Jun 2026:', int((t['first report (UTC)'] >= '2026-04-01').sum()), 'of', len(t))\nt",
+   "check": {
+    "id": "chk_3893a3f3ad4e",
+    "basis": "4ae70d0d5df7d4ff",
+    "status": "fixed",
+    "stages": {
+     "render": {
+      "status": "ok",
+      "ms": 213,
+      "image": "card-checks/67c6fe70/chk_3893a3f3ad4e-card.png"
+     },
+     "critique": {
+      "status": "ok",
+      "ms": 21844,
+      "effort": "high",
+      "assessment": [
+       {
+        "problem": "The question never defines \"their surge\", but the table measures a fixed April 2026 cutoff, not each site's own surge. Read as each site's largest burst, UNCTAD and Maryland did have reports before it."
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       }
+      ],
+      "model": "claude-opus-5-5"
+     }
+    },
+    "started": "2026-10-06T04:05:04+00:00",
+    "ended": "2026-10-06T04:05:27+00:00",
+    "author": "orient"
+   },
+   "fixes": [
+    {
+     "id": "fix_eab4131c5c80",
+     "check": "chk_3893a3f3ad4e",
+     "ts": "2026-10-06T04:05:27+00:00",
+     "by": "check",
+     "fields": [
+      "title"
+     ],
+     "before": {
+      "title": "Did the ten most-targeted sites have URLQuery reports before their surge, or did activity start abruptly?"
+     },
+     "after": {
+      "title": "Did the ten most-targeted sites have URLQuery reports before April 2026, or did their activity start abruptly then?"
+     },
+     "reason": "The question never defines \"their surge\", but the table measures a fixed April 2026 cutoff, not each site's own surge. Read as each site's largest burst, UNCTAD and Maryland did have reports before it.",
+     "state": "applied"
+    }
+   ]
+  },
+  {
+   "id": "0ee4c58f",
+   "notebook": "519d3976",
+   "kind": "timeline",
+   "title": "How did the methods in the reviewed episodes change from November 2025 to September 2026?",
+   "takeaway": "Across the reviewed episodes the methods grew more elaborate. All included reports before March 6, 2026 are [[source requests|call:7e554e8e/371]]; then come [[custom programs|all-reports.csv#row=745]], [[Base64 answer tables|all-reports.csv#row=773]], large bursts, and in June programs the reviewers grouped as [[URLQuery account attempts|all-reports.csv#row=29144]].",
+   "takeaway_author": "model",
+   "labels": [],
+   "locked": false,
+   "created_by": "chat:7e554e8e",
+   "created_at_event": null,
+   "edited": [
+    {
+     "by": "chat:7e554e8e",
+     "ts": "2026-10-06T03:54:24+00:00"
+    },
+    {
+     "by": "chat:7e554e8e",
+     "ts": "2026-10-06T04:05:09+00:00"
+    }
+   ],
+   "created_ts": "2026-10-06T03:54:12+00:00",
+   "ts": "2026-10-06T04:05:09+00:00",
+   "width": null,
+   "height": null,
+   "pos": null,
+   "starred": false,
+   "code": "import thimble\nevents = [\n    ('2025-11-12', 'Thrill Data: 44 source requests'),\n    ('2026-03-06', 'Thai ONCB: first custom programs'),\n    ('2026-03-11', 'Roi Et answer table posted as Base64'),\n    ('2026-03-15', 'Metals answer table posted as Base64'),\n    ('2026-04-17', 'Thrill Data: 1,079 reports in 2.5 h'),\n    ('2026-04-29', 'UNCTAD: 63 reports in one minute'),\n    ('2026-05-14', 'Archive split over 79 output URLs'),\n    ('2026-06-14', 'Disposable mailboxes, URLQuery accounts'),\n    ('2026-06-17', 'AIHW: 4,843 reports, June 17-21'),\n    ('2026-06-19', 'Mailbox, Browserless, token reuse'),\n    ('2026-06-20', 'Boomlify: 22 mailbox programs'),\n    ('2026-09-19', 'Quidax transaction API probes'),\n]\nthimble.timeline(events)",
+   "exec_count": 21,
+   "status": "ok",
+   "outputs": [
+    {
+     "application/vnd.thimble.timeline+json": {
+      "events": [
+       {
+        "time": "2025-11-12",
+        "label": "Thrill Data: 44 source requests"
+       },
+       {
+        "time": "2026-03-06",
+        "label": "Thai ONCB: first custom programs"
+       },
+       {
+        "time": "2026-03-11",
+        "label": "Roi Et answer table posted as Base64"
+       },
+       {
+        "time": "2026-03-15",
+        "label": "Metals answer table posted as Base64"
+       },
+       {
+        "time": "2026-04-17",
+        "label": "Thrill Data: 1,079 reports in 2.5 h"
+       },
+       {
+        "time": "2026-04-29",
+        "label": "UNCTAD: 63 reports in one minute"
+       },
+       {
+        "time": "2026-05-14",
+        "label": "Archive split over 79 output URLs"
+       },
+       {
+        "time": "2026-06-14",
+        "label": "Disposable mailboxes, URLQuery accounts"
+       },
+       {
+        "time": "2026-06-17",
+        "label": "AIHW: 4,843 reports, June 17-21"
+       },
+       {
+        "time": "2026-06-19",
+        "label": "Mailbox, Browserless, token reuse"
+       },
+       {
+        "time": "2026-06-20",
+        "label": "Boomlify: 22 mailbox programs"
+       },
+       {
+        "time": "2026-09-19",
+        "label": "Quidax transaction API probes"
+       }
+      ]
+     },
+     "text/plain": "timeline: 12 events\n2025-11-12  Thrill Data: 44 source requests\n2026-03-06  Thai ONCB: first custom programs\n2026-03-11  Roi Et answer table posted as Base64\n2026-03-15  Metals answer table posted as Base64\n2026-04-17  Thrill Data: 1,079 reports in 2.5 h\n2026-04-29  UNCTAD: 63 reports in one minute\n2026-05-14  Archive split over 79 output URLs\n2026-06-14  Disposable mailboxes, URLQuery accounts\n2026-06-17  AIHW: 4,843 reports, June 17-21\n2026-06-19  Mailbox, Browserless, token reuse\n2026-06-20  Boomlify: 22 mailbox programs\n2026-09-19  Quidax transaction API probes"
+    }
+   ],
+   "slug": "methods-reviewed-episodes",
+   "started": "2026-10-06T04:05:09+00:00",
+   "out_memo": {
+    "next": 1,
+    "outs": [
+     {
+      "i": 0,
+      "d": "text:171eacb1261923e44441190cf4ac3b6b0d322fd1"
+     }
+    ]
+   },
+   "duration_s": 0.007,
+   "label_revs": {},
+   "reads": [],
+   "verification": {
+    "exec_count": 21,
+    "links": {
+     "status": "partial",
+     "resolved": [
+      {
+       "value": "URLQuery account attempts",
+       "ref": "all-reports.csv#row=29144",
+       "tier": 0
+      }
+     ],
+     "unresolved": [
+      "6",
+      "2026"
+     ],
+     "broken": [
+      {
+       "value": "source requests",
+       "ref": "call:7e554e8e/371",
+       "tier": 0,
+       "why": "the cited place shows 10, 9, 38078",
+       "source": "10, 9, 38078"
+      },
+      {
+       "value": "custom programs",
+       "ref": "all-reports.csv#row=745",
+       "tier": 0,
+       "why": "the cited place shows 2026",
+       "source": "2026"
+      },
+      {
+       "value": "Base64 answer tables",
+       "ref": "all-reports.csv#row=773",
+       "tier": 0,
+       "why": "the cited place shows 2026",
+       "source": "2026"
+      }
+     ],
+     "quiet": [],
+     "checked": true,
+     "healed": {
+      "version": "9f9bd1d7a643",
+      "relinks": 0,
+      "changes": [
+       {
+        "value": "source requests",
+        "ref": "call:7e554e8e/371",
+        "state": "contradicted",
+        "how": "contradicted",
+        "to": "call:7e554e8e/371",
+        "source": "10, 9, 38078",
+        "why": "the cited place shows 10, 9, 38078"
+       },
+       {
+        "value": "custom programs",
+        "ref": "all-reports.csv#row=745",
+        "state": "contradicted",
+        "how": "contradicted",
+        "to": "all-reports.csv#row=745",
+        "source": "2026",
+        "why": "the cited place shows 2026"
+       },
+       {
+        "value": "Base64 answer tables",
+        "ref": "all-reports.csv#row=773",
+        "state": "contradicted",
+        "how": "contradicted",
+        "to": "all-reports.csv#row=773",
+        "source": "2026",
+        "why": "the cited place shows 2026"
+       }
+      ],
+      "ms": 66
+     }
+    },
+    "attempts": 0,
+    "note": null,
+    "status": "ok"
+   },
+   "kernel": "519d3976",
+   "previous_code": "import thimble\nevents = [\n    ('2025-11-12', 'Thrill Data: 44 direct requests'),\n    ('2026-03-06', 'Thai ONCB: first custom programs'),\n    ('2026-03-11', 'Roi Et answer table posted as Base64'),\n    ('2026-03-15', 'Metals answer table posted as Base64'),\n    ('2026-04-17', 'Thrill Data: 1,079 reports in 2.5 h'),\n    ('2026-04-29', 'UNCTAD: 63 reports in one minute'),\n    ('2026-05-14', 'UNCTAD archive split over 79 URLs'),\n    ('2026-06-14', 'Disposable mailboxes for URLQuery accounts'),\n    ('2026-06-17', 'AIHW: 4,837 reports in 4 days'),\n    ('2026-06-19', 'Mailbox, Browserless, token reuse'),\n    ('2026-06-20', 'Boomlify: 22 mailbox programs'),\n    ('2026-09-19', 'Quidax crypto API probes'),\n]\nthimble.timeline(events)",
+   "check": {
+    "id": "chk_775dba559b66",
+    "basis": "4324acdc2ae43ed0",
+    "status": "ok",
+    "stages": {
+     "render": {
+      "status": "ok",
+      "ms": 228,
+      "image": "card-checks/0ee4c58f/chk_775dba559b66-card.png"
+     },
+     "critique": {
+      "status": "ok",
+      "ms": 11929,
+      "effort": "high",
+      "assessment": [
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       }
+      ],
+      "model": "claude-opus-5-5"
+     }
+    },
+    "started": "2026-10-06T04:05:09+00:00",
+    "ended": "2026-10-06T04:05:21+00:00",
+    "author": "orient"
+   }
+  },
+  {
+   "id": "ca822fc8",
+   "notebook": "519d3976",
+   "kind": "table",
+   "title": "Which of the catalog's labels and controls should the analyst treat with care?",
+   "takeaway": "[[114|card:ca822fc8#reports/Included%20only%20through%20an%20outside%20cohort%20tag]] rows that still say \"needs review\" were included with no evidence except the outside cohort tag. And [[70|card:ca822fc8#reports/'Ordinary'%20MAX%20controls%20on%20May%2026%20(MAX%20burst%20day)]] of the [[73|card:ca822fc8#reports/'Ordinary'%20MAX%20controls,%20all%20dates]] \"ordinary\" MAX controls fall on the MAX burst day, so they may not be independent of it.",
+   "takeaway_author": "model",
+   "labels": [],
+   "locked": false,
+   "created_by": "chat:7e554e8e",
+   "created_at_event": null,
+   "edited": [
+    {
+     "by": "chat:7e554e8e",
+     "ts": "2026-10-06T03:54:55+00:00"
+    },
+    {
+     "by": "check",
+     "ts": "2026-10-06T03:55:11+00:00"
+    },
+    {
+     "by": "chat:7e554e8e",
+     "ts": "2026-10-06T04:05:09+00:00"
+    }
+   ],
+   "created_ts": "2026-10-06T03:54:50+00:00",
+   "ts": "2026-10-06T04:05:10+00:00",
+   "width": null,
+   "height": null,
+   "pos": null,
+   "starred": false,
+   "code": "import pandas as pd\nr = pd.read_csv('all-reports.csv', dtype=str).fillna('')\nr['row'] = range(1, len(r) + 1)\nsrc = pd.read_csv('report-sources.csv', dtype=str)[['report_id', 'data_source']]\nr = r.merge(src, on='report_id', how='left')\nw = r.why_included\ninc = r.disposition == 'included'\nDISC = w.str.contains('Explicit reference or discovery candidate')\nCOH = w.str.contains('externally selected research-activity cohort')\nSRC = w.str.contains('Related data source or exact task identifier')\nCODE = w.str.contains('Supplied task-specific code')\nINTER = w.str.contains('uses an intermediary')\nmaxord = w.str.contains('Ordinary MAX portal/login traffic')\niowa_cohort = w.str.contains('cohort: Iowa public health / CDC')\nchecks = [\n    (\"Included, but text still says 'needs review'\", inc & DISC),\n    (\"Included only through an outside cohort tag\", inc & DISC & COH & ~SRC & ~CODE & ~INTER),\n    (\"Significant, but no data source named\", (r.confidence == 'significant') & (r.data_source == 'Source not identified')),\n    (\"'Ordinary' MAX controls, all dates\", maxord),\n    (\"'Ordinary' MAX controls on May 26 (MAX burst day)\", maxord & r.report_date_utc.str.startswith('2026-05-26')),\n    (\"Iowa CDC cohort tag filed under thyroid statistics\", iowa_cohort & (r.data_source == 'Iowa thyroid statistics')),\n]\nt = pd.DataFrame([{'issue': name, 'reports': int(m.sum()), 'first row': int(r.row[m].iloc[0])} for name, m in checks]).set_index('issue')\nt",
+   "exec_count": 22,
+   "status": "ok",
+   "outputs": [
+    {
+     "application/vnd.thimble.frame+json": {
+      "columns": [
+       "issue",
+       "reports",
+       "first row"
+      ],
+      "types": {
+       "issue": "nominal",
+       "reports": "quantitative",
+       "first row": "quantitative"
+      },
+      "index": "issue",
+      "rows": [
+       [
+        "Included, but text still says 'needs review'",
+        239,
+        771
+       ],
+       [
+        "Included only through an outside cohort tag",
+        114,
+        12868
+       ],
+       [
+        "Significant, but no data source named",
+        124,
+        13347
+       ],
+       [
+        "'Ordinary' MAX controls, all dates",
+        73,
+        206
+       ],
+       [
+        "'Ordinary' MAX controls on May 26 (MAX burst day)",
+        70,
+        20022
+       ],
+       [
+        "Iowa CDC cohort tag filed under thyroid statistics",
+        18,
+        29159
+       ]
+      ],
+      "total": 6,
+      "label": "issue",
+      "view": {
+       "columns": [
+        "reports",
+        "first row"
+       ],
+       "formats": {
+        "reports": ",d",
+        "first row": ",d"
+       },
+       "more": 0
+      }
+     },
+     "text/plain": "issue                           reports  first row\nIncluded, but text still says 'needs review'  239      771\nIncluded only through an outside cohort tag  114      12,868\nSignificant, but no data source named  124      13,347\n'Ordinary' MAX controls, all dates  73       206\n'Ordinary' MAX controls on May 26 (MAX burst day)  70       20,022\nIowa CDC cohort tag filed under thyroid statistics  18       29,159"
+    }
+   ],
+   "slug": "catalog-s-labels",
+   "started": "2026-10-06T04:05:09+00:00",
+   "out_memo": {
+    "next": 1,
+    "outs": [
+     {
+      "i": 0,
+      "d": "frame:973a447cc17063b7f0d3f6ea16d5f3a2974e6ee8"
+     }
+    ]
+   },
+   "duration_s": 0.302,
+   "label_revs": {},
+   "reads": [
+    "all-reports.csv",
+    "report-sources.csv"
+   ],
+   "verification": {
+    "exec_count": 22,
+    "links": {
+     "status": "ok",
+     "resolved": [
+      {
+       "value": "114",
+       "ref": "card:ca822fc8#reports/Included%20only%20through%20an%20outside%20cohort%20tag",
+       "tier": 2
+      },
+      {
+       "value": "70",
+       "ref": "card:ca822fc8#reports/'Ordinary'%20MAX%20controls%20on%20May%2026%20(MAX%20burst%20day)",
+       "tier": 2
+      },
+      {
+       "value": "73",
+       "ref": "card:ca822fc8#reports/'Ordinary'%20MAX%20controls,%20all%20dates",
+       "tier": 2
+      }
+     ],
+     "unresolved": [],
+     "broken": [],
+     "quiet": [],
+     "checked": true,
+     "healed": {
+      "version": "dc2e0bc493a5",
+      "relinks": 0,
+      "changes": [],
+      "ms": 3
+     }
+    },
+    "attempts": 0,
+    "note": null,
+    "status": "ok"
+   },
+   "kernel": "519d3976",
+   "previous_code": "import pandas as pd\nr = pd.read_csv('all-reports.csv', dtype=str).fillna('')\nr['row'] = range(1, len(r) + 1)\nsrc = pd.read_csv('report-sources.csv', dtype=str)[['report_id', 'data_source']]\nr = r.merge(src, on='report_id', how='left')\nw = r.why_included\ninc = r.disposition == 'included'\nDISC = w.str.contains('Explicit reference or discovery candidate')\nCOH = w.str.contains('externally selected research-activity cohort')\nSRC = w.str.contains('Related data source or exact task identifier')\nCODE = w.str.contains('Supplied task-specific code')\nINTER = w.str.contains('uses an intermediary')\nmaxord = w.str.contains('Ordinary MAX portal/login traffic')\niowa_cohort = w.str.contains('cohort: Iowa public health / CDC')\nchecks = [\n    (\"Included, but text still says 'needs review'\", inc & DISC),\n    (\"Included only through an outside cohort tag\", inc & DISC & COH & ~SRC & ~CODE & ~INTER),\n    (\"Significant, but no data source named\", (r.confidence == 'significant') & (r.data_source == 'Source not identified')),\n    (\"'Ordinary' MAX controls on May 26 (MAX burst day)\", maxord & r.report_date_utc.str.startswith('2026-05-26')),\n    (\"'Ordinary' MAX controls, all dates\", maxord),\n    (\"Iowa CDC cohort tag filed under thyroid statistics\", iowa_cohort & (r.data_source == 'Iowa thyroid statistics')),\n]\nt = pd.DataFrame([{'issue': name, 'reports': int(m.sum()), 'first row': int(r.row[m].iloc[0])} for name, m in checks]).set_index('issue')\nt",
+   "check": {
+    "id": "chk_618d2d363ee1",
+    "basis": "38805d7702251707",
+    "status": "ok",
+    "stages": {
+     "render": {
+      "status": "ok",
+      "ms": 163,
+      "image": "card-checks/ca822fc8/chk_618d2d363ee1-card.png"
+     },
+     "critique": {
+      "status": "ok",
+      "ms": 13070,
+      "effort": "high",
+      "assessment": [
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       }
+      ],
+      "model": "claude-opus-5-5"
+     }
+    },
+    "started": "2026-10-06T04:05:10+00:00",
+    "ended": "2026-10-06T04:05:23+00:00",
+    "author": "orient"
+   },
+   "fixes": [
+    {
+     "id": "fix_c925a99a42de",
+     "check": "chk_b27299a78820",
+     "ts": "2026-10-06T03:55:11+00:00",
+     "by": "check",
+     "fields": [
+      "code",
+      "takeaway"
+     ],
+     "before": {
+      "code": "import pandas as pd\nr = pd.read_csv('all-reports.csv', dtype=str).fillna('')\nr['row'] = range(1, len(r) + 1)\nsrc = pd.read_csv('report-sources.csv', dtype=str)[['report_id', 'data_source']]\nr = r.merge(src, on='report_id', how='left')\nw = r.why_included\ninc = r.disposition == 'included'\nDISC = w.str.contains('Explicit reference or discovery candidate')\nCOH = w.str.contains('externally selected research-activity cohort')\nSRC = w.str.contains('Related data source or exact task identifier')\nCODE = w.str.contains('Supplied task-specific code')\nINTER = w.str.contains('uses an intermediary')\nmaxord = w.str.contains('Ordinary MAX portal/login traffic')\niowa_cohort = w.str.contains('cohort: Iowa public health / CDC')\nchecks = [\n    (\"Included, but text still says 'needs review'\", inc & DISC),\n    (\"Included only through an outside cohort tag\", inc & DISC & COH & ~SRC & ~CODE & ~INTER),\n    (\"Significant, but no data source named\", (r.confidence == 'significant') & (r.data_source == 'Source not identified')),\n    (\"'Ordinary' MAX controls on May 26 (MAX burst day)\", maxord & r.report_date_utc.str.startswith('2026-05-26')),\n    (\"'Ordinary' MAX controls, all dates\", maxord),\n    (\"Iowa CDC cohort tag filed under thyroid statistics\", iowa_cohort & (r.data_source == 'Iowa thyroid statistics')),\n]\nt = pd.DataFrame([{'issue': name, 'reports': int(m.sum()), 'first row': int(r.row[m].iloc[0])} for name, m in checks]).set_index('issue')\nt",
+      "takeaway": "Totals reconcile, but some labels break the rules: [[114|card:ca822fc8#reports/Included%20only%20through%20an%20outside%20cohort%20tag]] review candidates were included only because an outside cohort listed them, and [[70|card:ca822fc8#reports/'Ordinary'%20MAX%20controls%20on%20May%2026%20(MAX%20burst%20day)]] of [[73|card:ca822fc8#reports/'Ordinary'%20MAX%20controls,%20all%20dates]] \"ordinary\" MAX controls fall on the MAX burst day, so they are no clean baseline."
+     },
+     "after": {
+      "code": "import pandas as pd\nr = pd.read_csv('all-reports.csv', dtype=str).fillna('')\nr['row'] = range(1, len(r) + 1)\nsrc = pd.read_csv('report-sources.csv', dtype=str)[['report_id', 'data_source']]\nr = r.merge(src, on='report_id', how='left')\nw = r.why_included\ninc = r.disposition == 'included'\nDISC = w.str.contains('Explicit reference or discovery candidate')\nCOH = w.str.contains('externally selected research-activity cohort')\nSRC = w.str.contains('Related data source or exact task identifier')\nCODE = w.str.contains('Supplied task-specific code')\nINTER = w.str.contains('uses an intermediary')\nmaxord = w.str.contains('Ordinary MAX portal/login traffic')\niowa_cohort = w.str.contains('cohort: Iowa public health / CDC')\nchecks = [\n    (\"Included, but text still says 'needs review'\", inc & DISC),\n    (\"Included only through an outside cohort tag\", inc & DISC & COH & ~SRC & ~CODE & ~INTER),\n    (\"Significant, but no data source named\", (r.confidence == 'significant') & (r.data_source == 'Source not identified')),\n    (\"'Ordinary' MAX controls, all dates\", maxord),\n    (\"'Ordinary' MAX controls on May 26 (MAX burst day)\", maxord & r.report_date_utc.str.startswith('2026-05-26')),\n    (\"Iowa CDC cohort tag filed under thyroid statistics\", iowa_cohort & (r.data_source == 'Iowa thyroid statistics')),\n]\nt = pd.DataFrame([{'issue': name, 'reports': int(m.sum()), 'first row': int(r.row[m].iloc[0])} for name, m in checks]).set_index('issue')\nt",
+      "takeaway": "Some labels break the rules: [[114|card:ca822fc8#reports/Included%20only%20through%20an%20outside%20cohort%20tag]] review candidates were included only because an outside cohort listed them, and [[70|card:ca822fc8#reports/'Ordinary'%20MAX%20controls%20on%20May%2026%20(MAX%20burst%20day)]] of [[73|card:ca822fc8#reports/'Ordinary'%20MAX%20controls,%20all%20dates]] \"ordinary\" MAX controls fall on the MAX burst day, so they are no clean baseline."
+     },
+     "reason": "The May 26 subset (70) sits above the all-dates total (73) that it belongs to, so a reader meets the part before the whole.",
+     "state": "applied"
+    }
+   ]
+  }
+ ],
+ "id": "519d3976"
+}

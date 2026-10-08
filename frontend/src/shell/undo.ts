@@ -1,5 +1,5 @@
-// Undo and redo for the top bar (backend undo.py): what each would do, refreshed on every card or document change the
-// stream announces, and the two actions. ⌘Z undoes and ⇧⌘Z (or ⌘Y) redoes, except in a field or the report's editor,
+// Undo and redo for the top bar (backend undo.py): what each would do, refreshed on every card or document change and
+// every label's delete the stream announces, and the two actions. ⌘Z undoes and ⇧⌘Z (or ⌘Y) redoes, except in a field or the report's editor,
 // which run their own undo.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { undoApi } from '../lib/api'
@@ -53,9 +53,12 @@ export function useUndo(ws: string): { labels: UndoLabels; undo: () => void; red
     }
     const offCell = bus.on('cell', later)
     const offReport = bus.on('report', later)
+    // a label's delete is a step, and a label with no card makes no `cell` record
+    const offConcepts = bus.on('concepts', (e) => e.what === 'deleted' && later())
     return () => {
       offCell()
       offReport()
+      offConcepts()
       if (timer != null) window.clearTimeout(timer)
     }
   }, [read])

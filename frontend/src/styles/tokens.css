@@ -95,19 +95,29 @@
   --viz-5: #9e8901;
   --viz-6: #0b9a9e;
   --viz-7: #ab691c;
-  /* the label colours (below) stepped for Dark */
+  /* the label colors (below) stepped for Dark, each place the same hue as on the light papers. A dark hue cannot keep
+     3:1 here, so brown (7) and chestnut (11) are a muted khaki and a light tan, apart from orange, and navy (8) is a
+     pale periwinkle, apart from sky (4); gold (5) and teal (6) are lighter than orange and green, so the first five
+     colors new values take (blue, orange, green, gold, teal) stay 15 or more apart in OKLab */
   --label-1: #2275e8;
   --label-2: #da7306;
   --label-3: #17a973;
   --label-4: #0c9edc;
-  --label-5: #9e8901;
-  --label-6: #0b9a9e;
-  --label-7: #ab691c;
-  --label-8: #79b4fd;
+  --label-5: #beb222;
+  --label-6: #5fcfca;
+  --label-7: #9b7239;
+  --label-8: #9ebdff;
   --label-9: #50c14d;
   --label-10: #0985b4;
-  --label-11: #fd914e;
+  --label-11: #f6b896;
   --label-12: #0bb8d6;
+  /* the hues only the analyst picks, as on the light papers: red, purple and pink, each a strong and a light step */
+  --label-13: #ef5b51;
+  --label-14: #f7a39c;
+  --label-15: #a585f5;
+  --label-16: #cdb9ff;
+  --label-17: #ec6aa8;
+  --label-18: #f6b0d2;
 }
 
 /* -------- the accent: one of seven, iris by default. --accent is the fill, --accent-on the text on it (white or ink,
@@ -251,8 +261,8 @@
   --status-info-soft: var(--paper-1);
   --status-neutral: var(--ink-500);
   --status-neutral-soft: var(--paper-1);
-  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css), a cited
-     table cell or output line with its edge, and the stronger wash of the find's current match */
+  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css) and the
+     stronger wash of the find's current match (a cited table cell or output line is the accent's wash, refchip.css) */
   --hl-bg: rgba(var(--ink-rgb), 0.08);
   --hl-bg-strong: rgba(var(--ink-rgb), 0.18);
   --hl-edge: rgba(var(--ink-rgb), 0.4);
@@ -272,15 +282,20 @@
   --viz-7: #844500;
   --viz-8: var(--viz-ink-1);
   --viz-9: var(--viz-ink-3);
-  /* a label's colour, in the order the analyst's labels take them, and the colour of "no match". Like the nominal
-     hues, no red and no purple: the seven viz hues, then navy, grass, cerulean, chestnut and cyan, so a label with
-     more than eight values still gets a distinct colour for each. Each reads at 3:1 or more on every paper, and Dark
-     has its own steps of the same hues. */
+  /* a label's colors by place, and the color of "no match". A label's value stores its color as a place, so
+     --label-N is always the same hue: 1 blue, 2 orange, 3 green, 4 sky, 5 gold, 6 teal, 7 brown, 8 navy, 9 grass,
+     10 cerulean, 11 chestnut, 12 cyan (show_label's color names, concepts.COLOUR_NAMES). Like the nominal hues, no red
+     and no purple, and twelve so that a label with more than eight values still gets a distinct color for each. New
+     values take the places in another order, blue, orange, green, gold, teal, brown, sky, then 8 to 12
+     (backend/app/label_order.json), so the first five are five hues with no second blue among them, each pair 15 or
+     more apart in OKLab (8 under protan and deutan vision): gold (5) is a darker olive and green (3) a deeper green than
+     the chart colours, so gold stands apart from both orange and green. Each reads at 3:1 or more on every paper, and
+     Dark has its own steps of the same hues. */
   --label-1: #025ac3;
   --label-2: #d0750a;
-  --label-3: #08632f;
+  --label-3: #06572a;
   --label-4: #1392d4;
-  --label-5: #897301;
+  --label-5: #7d6702;
   --label-6: #009c85;
   --label-7: #844500;
   --label-8: #013c77;
@@ -288,6 +303,16 @@
   --label-10: #025a7c;
   --label-11: #622b01;
   --label-12: #0389a0;
+  /* the hues a value takes only when the analyst picks it (the picker, around the color wheel, or show_label as the
+     analyst asks): 13 red and 14 a dark red, 15 purple and 16 a dark purple, 17 pink and 18 a dark pink. New values
+     never take them, so red stays the problem's and purple the agents' unless the analyst chooses otherwise; each reads
+     at 3:1 or more on every paper */
+  --label-13: #d0342c;
+  --label-14: #8a1c1c;
+  --label-15: #7b4fd6;
+  --label-16: #4c2a91;
+  --label-17: #d23f8b;
+  --label-18: #8d1d5c;
   --label-none: #a09c93;
   /* a multi-class label as a whole: the plain ink */
   --label-multi: var(--text-secondary);

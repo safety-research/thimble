@@ -1,17 +1,20 @@
 """The card check: once a card has its takeaway, it is drawn offscreen, one model reading of the picture assesses it
 against five criteria (prompts/card-check.md) and gives the card that replaces it, and the replacement is applied in
-place, with Undo. Nothing of the check goes back to the card's author. Label cards are drawn from their label and get
-no reading.
+place, with Undo in the card's details. The card shows the check only for a real problem: a red ✕ for numbers its code
+types in, or for a replacement that would not run. Nothing of the check goes back to the card's author. Label cards
+are drawn from their label and get no reading.
 
 tools.call hands every thimble tool result to after_tool(); an add_card or edit_card result starts a check of its card
-when wants_check() holds and the workspace's automatic check is on (settings.json `card_check`). A new change to the
-card cancels a running check and starts the next. At most READ_CONCURRENCY readings run at once. Each check:
+when wants_check() holds and the workspace's automatic check is on (auto: thimble's config `agents.cardCheck.auto`). A
+new change to the card cancels a running check and starts the next. At most READ_CONCURRENCY readings run at once. Each check:
 1. Draw: render.render_card shoots the card with the app's own card face; a card that did not draw ends the check
    `error`. Where no card can be drawn (render.down), no check begins, and one that began is taken off the card.
 2. Critique: the `verify` role's model reads the question, takeaway, resolved links, code, the work that led to the
    card (context.render) and the picture, names what fails each criterion, and gives the replacement card.
 3. Replace: the parts that differ and that the check may change (checkstore.fixable) are tried on a copy of the card
-   and kept only when the code runs clean and the card draws, as one undo step with actor `check`.
+   and kept only when the code runs clean and the card draws, as one undo step with actor `check`. New code runs on the
+   card's kernel, and in terminal mode, where the check runs in the shim, through `thimble-run trial` in main's
+   sandbox, as a card run would (cardrun.trial).
 A check past check_timeout(effort) ends `error`; waits for API capacity are left out of that time. A trial run on the
 kernel is always settled, even when the check is stopped mid-trial. Timings go to
 workspaces/<c>/card-checks/timings.jsonl and pictures under workspaces/<c>/card-checks/<card>/. A refused reading
@@ -35,7 +38,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 
 from . import config, render, retry
 
@@ -46,10 +48,11 @@ CHECK_TOOLS = ("add_card", "edit_card")
 # card-check.md's five criteria. The reading states what fails each (empty when the card meets it) rather than a yes or
 # no per question, since a problem statement has no polarity to misread.
 CRITERIA = 5
-# How long a check may run, from its drawing to its replacement's, by the effort it reads the card at (read_effort).
-# A check past its time ends `error` with no mark. The drawing and the replacement's run keep their own limits
-# (render.RENDER_TIMEOUT_S, the card's timeout_s).
-CHECK_TIMEOUT_S = {"low": 45.0, "medium": 45.0, "high": 75.0, "xhigh": 120.0, "max": 180.0}
+# How long a check's own work may run (its reading and its revision's draft), by the effort it reads the card at
+# (read_effort). A check past its time ends `error` with no mark. Its clock stands while the card draws and while a
+# revision's code runs, which keep their own limits (render.RENDER_TIMEOUT_S, the card's timeout_s): a big corpus, or
+# terminal mode's fresh `thimble-run trial` process, would use the check's time otherwise.
+CHECK_TIMEOUT_S = {"low": 90.0, "medium": 120.0, "high": 180.0, "xhigh": 300.0, "max": 420.0}
 # How many readings run at once; a check waiting for one is `queued`, its clock stopped (_slot). The drawing and the
 # revision run outside the slots.
 READ_CONCURRENCY = max(1, int(os.environ.get("THIMBLE_CARD_CHECK_CONCURRENCY", "4") or "4"))
@@ -58,15 +61,15 @@ READ_CONCURRENCY = max(1, int(os.environ.get("THIMBLE_CARD_CHECK_CONCURRENCY", "
 CAPACITY_WAITS_S = (30.0, 60.0, 120.0)
 CAPACITY = ("overloaded", "rate_limited")  # the classes of retry.transient_class that mean the API is at capacity
 CAPACITY_WORDS = {"overloaded": "Anthropic's API is overloaded", "rate_limited": "Anthropic's API rate limit was reached"}
-AUTO_KEY = "card_check"  # settings.json: false turns the automatic check off for the workspace
+AUTO_KEY = "card_check"  # settings.json: the canvas's old switch, read while thimble's config leaves `auto` unset
 TIMINGS_FILE = "timings.jsonl"  # under SHOTS_DIR: one line per finished check
-# the reasons a check ends `stopped`, which the check mark's hover shows
+# the reasons a check ends `stopped`, which the card's details show
 STOPPED = ""  # the analyst stopped it: the hover says only when
-AUTO_OFF = "the automatic card check was turned off"
 CHANGED = "the card changed while it was checked"
 SERVER_STOPPED = "the server stopped while the check ran"
 SESSION_ENDED = "thimble stopped when its Claude Code session ended"  # a check stop_workspace ended
 FALLBACK_NOTE = "Downgrading {model} to {fallback}"  # the record's `note`
+UNTRIED = "its revision could not be tried"  # an `error` whose card runner gave no result (notebook.TrialUnavailable)
 READ_IDLE_S = 60.0  # a reading with no sign of life this long is stalled (model.structured's idle clock)
 PAUSE_POLL_S = 0.05  # how often a check waiting for a reading slot looks at its clock again (_within)
 MAX_EDGE = 2576  # the longest edge of an image the model reads at full resolution
@@ -91,10 +94,16 @@ def enabled() -> bool:
 
 
 def auto(c: str) -> bool:
-    """Whether a card add_card or edit_card wrote is checked by itself in workspace `c`: settings.json `card_check`,
-    on unless the analyst turned it off (auto_route)."""
-    from . import ledger  # noqa: PLC0415
+    """Whether a card add_card or edit_card wrote is checked by itself in workspace `c`: thimble's config
+    `agents.cardCheck.auto` (docs/config.md), the workspace's file over the one in thimble's home. While neither sets
+    it, the workspace's settings.json `card_check` that the canvas's old switch wrote, else on. A config with an error
+    leaves the check on, as a fresh workspace has it."""
+    from . import ledger, userconf  # noqa: PLC0415
 
+    conf, _err = userconf.load_or_defaults(c)
+    set_ = ((conf.get("agents") or {}).get("cardCheck") or {}).get("auto")
+    if isinstance(set_, bool):
+        return set_
     try:
         return ledger.stored_settings(c).get(AUTO_KEY) is not False
     except Exception:  # noqa: BLE001 — an unreadable settings file leaves the check on, as a fresh workspace has it
@@ -280,6 +289,22 @@ async def _within(run: _Run, coro: Any, limit: float) -> Any:
                 await task
 
 
+@contextlib.asynccontextmanager
+async def _clock_stands(run: _Run | None) -> Any:
+    """The check's clock stands while the work inside runs (a drawing, a revision's run), which keeps its own limit:
+    the deadline moves by the time it took, as a wait for a reading slot does (_slot)."""
+    if run is None or run.paused_at is not None:
+        yield
+        return
+    loop = asyncio.get_running_loop()
+    run.paused_at = loop.time()
+    try:
+        yield
+    finally:
+        run.deadline += loop.time() - run.paused_at
+        run.paused_at = None
+
+
 def _on_retry(run: _Run) -> Any:
     """model.structured's on_retry for the check's reading: the wait is added to the check's deadline, and the record
     says the check waits for capacity until then, back to `checking` once the wait is over."""
@@ -441,7 +466,8 @@ async def _check(run: _Run) -> None:
     timing = run.timing
     timing.update(card=cid, kind=cell.get("kind"), ts=time.time(), effort=run.effort)
     t0 = time.perf_counter()
-    drawn = await _draw(c, cell)
+    async with _clock_stands(run):
+        drawn = await _draw(c, cell)
     timing["render_ms"] = _ms(t0)
     if drawn is None:
         run.outcome = "skipped"
@@ -554,7 +580,7 @@ def merge_edit(field: str, before: str, after: str, new: str) -> str | None:
 # --------------------------------------------------------------------------- numbers typed into the code
 
 # A card whose code types in the numbers it shows shows numbers nothing on the card computes, so no rerun can catch one
-# that is wrong. The check flags them on its record (the render stage's `typed`), and the card's check mark shows it.
+# that is wrong. The check flags them on its record (the render stage's `typed`), and the card shows a red ✕ for it.
 # How many numbers one list, tuple, set or dict of the code must hold, and how many of them the card must show, for its
 # numbers to count as typed in rather than as settings of the code.
 TYPED_MIN = 3
@@ -749,11 +775,12 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
                    timing: dict[str, Any]) -> None:
     """Apply the replacement once, kept only when its code runs clean and the replaced card draws; otherwise the card stays,
     the replacement is recorded as a rejected fix and the check ends `error`. The fix's reason is the problem of the first
-    criterion the card failed.
+    criterion the card failed. A replacement whose code could not be tried at all (terminal mode's card runner gave no
+    result: notebook.TrialUnavailable) is no rejected fix: the check ends `error` saying so (UNTRIED).
 
     The trial on the card's kernel is settled however the check ends: a check stopped or past its time mid-trial leaves it
     running to its end in a task of its own, which then puts back the names it bound."""
-    from . import checkstore  # noqa: PLC0415
+    from . import checkstore, notebook  # noqa: PLC0415
 
     c, cid = run.c, run.cid
     t0 = time.perf_counter()
@@ -762,10 +789,17 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
         return
     trial = _spawn(checkstore.candidate(c, cid, patch))
     try:
-        cand = await asyncio.shield(trial)
+        async with _clock_stands(run):
+            cand = await asyncio.shield(trial)
     except asyncio.CancelledError:
         _spawn(_settle_after(c, cid, trial))
         raise
+    except notebook.TrialUnavailable as e:  # the revision was not tried, so nothing is known of it: no rejected fix
+        timing["replace_ms"] = _ms(t0)
+        timing["replacement"] = "untried"
+        log.warning("card check: the replacement of card:%s could not be tried (%s)", cid, e)
+        _end(run, "error", f"{UNTRIED}: {e}")
+        return
     except Exception as e:  # noqa: BLE001 — a card gone meanwhile, or code on a card that runs none
         cand = None
         log.info("card check: the replacement of card:%s cannot be applied (%s)", cid, e)
@@ -810,7 +844,8 @@ async def _not_kept(run: _Run, cand: dict[str, Any] | None, typed: str = "") -> 
     c = run.c if run is not None else None
     if typed and cardtypes.canonical(c, _type_of(cand)) != cardtypes.canonical(c, typed):
         return f"it drew no {cardtypes.canonical(c, typed)} card"
-    after = await _draw(run.c, cand)
+    async with _clock_stands(run):
+        after = await _draw(run.c, cand)
     if after is None:
         return "no picture could show the replaced card"
     if not after.ok:
@@ -988,9 +1023,9 @@ def _session_chat(c: str, cell: dict[str, Any], author: str) -> str | None:
     """The chat of the session that made a card that is not main's: the running session's, else the chat the card is
     stamped with, else the orientation's latest chat for the orientation's card, or a writer's latest chat for its
     document once the writer has ended; None when none is found."""
-    from . import agent_session, agents, orientation  # noqa: PLC0415
+    from . import agents, orientation, subagents  # noqa: PLC0415
 
-    run = agent_session.current(c, author)
+    run = subagents.current(c, author)
     if run is not None:
         return run.chat
     by = str(cell.get("created_by") or "")
@@ -1006,28 +1041,28 @@ def _session_chat(c: str, cell: dict[str, Any], author: str) -> str | None:
 
 
 def _role(c: str) -> dict[str, Any]:
-    return config.models_for(c).get("verify") or dict(config.ROLE_MODELS_DEFAULT["verify"])
+    """The model, effort and speed of the `verify` role's calls (config.call_settings)."""
+    return config.call_settings(c, "verify")
 
 
 def read_effort(c: str) -> str:
-    """The effort the card check reads a card at: the `verify` role's (config.models_for)."""
-    return str(_role(c).get("effort") or config.ROLE_MODELS_DEFAULT["verify"]["effort"])
+    """The effort the card check reads a card at: the `verify` role's (config.call_settings)."""
+    return _role(c)["effort"]
 
 
 async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], *, effort: str,
                 model: str | None = None) -> Any:
-    """The reading: one model.structured call on `model`, else the `verify` role's model, and that role's fast mode at
-    `effort`. Retry waits and a refused reading before the fallback are left out of the check's time (_on_retry,
-    _on_fallback)."""
+    """The reading: one model.structured call on `model`, else the `verify` role's model, at that role's speed and
+    `effort`, else the role's. Retry waits and a refused reading before the fallback are left out of the check's time
+    (_on_retry, _on_fallback)."""
     from . import model as model_mod  # noqa: PLC0415
 
     role = _role(c)
     run = _current.get()
     return await model_mod.structured(
-        user, tool=tool, model=model or role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"],
-        effort=effort or None,
-        system_append=system, cwd=config.corpus_dir(c),
-        speed="fast" if role.get("fast") else "standard", images=images, idle_timeout_s=READ_IDLE_S,
+        user, tool=tool, model=model or role["model"], effort=effort or role["effort"],
+        system=system, cwd=config.corpus_dir(c), refusal=role["refusal"],
+        speed=role["speed"], images=images, idle_timeout_s=READ_IDLE_S,
         on_retry=_on_retry(run) if run is not None else None,
         on_fallback=_on_fallback(run) if run is not None else None)
 
@@ -1165,7 +1200,7 @@ def _kept_text(c: str, cell: dict[str, Any], secs: dict[str, str]) -> str:
 
 
 def _read_failure(status: str, detail: str) -> str:
-    """Why a reading failed, in the words the check mark's hover shows."""
+    """Why a reading failed, in the words the card's details show."""
     lead = {"refused": "the model declined to read the card", "truncated": "the model's reading was cut off",
             "no_tool_call": "the model gave no assessment", "timeout": "the model stopped answering"}.get(
         status, "the model's reading failed")
@@ -1193,25 +1228,9 @@ async def status_route(c: str) -> dict[str, Any]:
             "timings": [t for t in _timings if not t.get("ws") or t.get("ws") == c]}
 
 
-class AutoBody(BaseModel):
-    on: bool
-
-
-@router.put("/ws/{c}/card-checks/auto")
-async def auto_route(c: str, body: AutoBody) -> dict[str, Any]:
-    """The canvas's switch: the automatic check on or off for the workspace (settings.json `card_check`). Off stops the
-    checks that run (stop_all); a card's mark still runs its check on a click. Answers status_route's record."""
-    from . import ledger  # noqa: PLC0415
-
-    ledger.put_settings(c, {AUTO_KEY: body.on})
-    if not body.on:
-        stop_all(c, AUTO_OFF)
-    return await status_route(c)
-
-
 @router.post("/ws/{c}/cells/{cid}/check/stop")
 async def stop_route(c: str, cid: str) -> dict[str, Any]:
-    """Stop the card's check (the click on a running mark): its record ends `stopped` and the card stays as it is. 404
+    """Stop the card's check (Stop in the card's details): its record ends `stopped` and the card stays as it is. 404
     for a card that is gone; `stopped` false when the card had no check running."""
     from . import notebook  # noqa: PLC0415
 
@@ -1228,8 +1247,9 @@ async def stop_all_route(c: str) -> dict[str, Any]:
 
 @router.post("/ws/{c}/cells/{cid}/check")
 async def again_route(c: str, cid: str) -> dict[str, Any]:
-    """Run the card's check again, from the click on its check mark, with the work of the author the last check named as its
-    context, else main's. 409 when the card gets no check (wants_check) or the check is off."""
+    """Run the card's check again, from Check again in the card's details or the hover of its ✕, with the work of the
+    author the last check named as its context, else main's. 409 when the card gets no check (wants_check) or the
+    check is off."""
     from . import checkstore, notebook  # noqa: PLC0415
 
     cell = notebook.get_cell(c, cid)

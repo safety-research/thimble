@@ -25,10 +25,11 @@ import types
 from pathlib import Path
 
 import pytest
+from conftest import Listener
 
 from fastapi import HTTPException
 
-from app import card_check, cardtypes, channel, concepts, config, extensions, notebook, render, tools, views
+from app import card_check, cardtypes, concepts, config, extensions, notebook, render, tools, views
 
 SWIMLANE = extensions.builtin_dir() / "multiagent-swimlane" / "cards" / "multiagent-swimlane"
 
@@ -227,25 +228,28 @@ def test_keep_rewrites_the_literal_arguments_of_the_one_card_call():
 
 
 async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values(crew):
-    q: asyncio.Queue = asyncio.Queue()
-    channel._subs.setdefault(CORPUS, set()).add(q)
+    q = Listener(CORPUS)
     try:
         cid = await _label("even", r"value is \d*[02468]\.", ["even", "odd"])
         concepts.tell_when_done(CORPUS, cid)
         note = await asyncio.wait_for(q.get(), 10)
         assert note["meta"]["kind"] == "label_done" and "label even" in note["content"] and "even 70" in note["content"]
     finally:
-        channel._subs.pop(CORPUS, None)
+        q.close()
     concepts.show_concept(CORPUS, "even", None, colours={"odd": "cyan", "even": "blue"})
     after = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
     assert after == {"even": 1, "odd": 12}
     concepts.show_concept(CORPUS, "even", None, colours={"odd": "blue"})
     swapped = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
     assert swapped == {"even": 12, "odd": 1}, "the value that had the colour takes the one the other left"
-    with pytest.raises(HTTPException, match="no label colour is named 'red'"):
-        concepts.show_concept(CORPUS, "even", None, colours={"odd": "red"})
+    # red, purple and pink, which no value takes by itself, when the analyst asks for them
+    concepts.show_concept(CORPUS, "even", None, colours={"odd": "red", "even": "purple"})
+    asked = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
+    assert asked == {"even": 15, "odd": 13}
+    with pytest.raises(HTTPException, match="no label colour is named 'magenta'"):
+        concepts.show_concept(CORPUS, "even", None, colours={"odd": "magenta"})
     named = tools.schema_of("show_label")["properties"]["colours"]["additionalProperties"]["enum"]
-    assert named == list(concepts.COLOUR_NAMES) and sorted(concepts.COLOUR_NAMES.values()) == list(range(1, concepts.PALETTE + 1))
+    assert named == list(concepts.COLOUR_NAMES) and sorted(concepts.COLOUR_NAMES.values()) == list(range(1, concepts.PICKS + 1))
 
 
 async def test_swarm_orient_ships_no_view_and_takes_back_the_one_it_installed(crew, monkeypatch, tmp_path):

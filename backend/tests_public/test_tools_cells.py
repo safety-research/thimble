@@ -92,9 +92,20 @@ async def test_add_cell_runs_code_and_reports_the_output(group):
     assert (await call("add_card", group, kind="table", question="q")).is_error
 
 
-async def test_an_agent_s_card_code_may_not_install_unless_the_config_allows_it(group, tmp_path, monkeypatch):
-    """Card code runs in the kernel, where no prompt reaches the analyst, so an agent's card that installs or downloads
-    is refused unless `installs` is "allow"; the analyst's own session is not bound by thimble's config."""
+async def test_a_question_s_escaped_quotation_marks_are_stored_as_marks(group):
+    """Live check term-fix5, new quirk 13: main wrote `\\"June\\"` inside a card's question, and the card's title showed
+    the backslashes. A question keeps its quotation marks and drops the backslashes, in add_card and edit_card."""
+    r = await call("add_card", group, kind="code", question='Which pages have \\"June\\" in their name?', code="print(33)")
+    cid = _cid(r)
+    assert notebook.get_cell(CORPUS, cid)["title"] == 'Which pages have "June" in their name?'
+    await call("edit_card", group, cell=cid, question='Which pages have \\"July\\" in their name?')
+    assert notebook.get_cell(CORPUS, cid)["title"] == 'Which pages have "July" in their name?'
+
+
+async def test_an_agent_s_card_code_may_not_install(group, tmp_path, monkeypatch):
+    """Card code runs in the kernel, where neither a prompt nor Claude Code's permission mode reaches it, so an agent's
+    card that installs or downloads is refused, also where an earlier config set `installs` to "allow" (read and
+    ignored); the analyst's own session is not bound by it."""
     import json
 
     from app import userconf
@@ -112,4 +123,4 @@ async def test_an_agent_s_card_code_may_not_install_unless_the_config_allows_it(
     assert "card-installs" not in (await add(None)).text
     userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
     userconf.global_file().write_text(json.dumps({"installs": "allow"}))
-    assert tools.hint("card-installs", tool="add_card") not in (await add("orient")).text
+    assert tools.hint("card-installs", tool="add_card") in (await add("orient")).text

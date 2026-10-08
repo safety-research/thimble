@@ -227,6 +227,17 @@ def _at_place(cell: dict, p: dict[str, Any]) -> tuple[bool, str | None]:
     return True, None
 
 
+def _dates_at(cell: dict, p: dict[str, Any]) -> str | None:
+    """The dates a span into `cell` writes in digits (cite.dates_shown), for a date in words cited there."""
+    outputs = cell.get("outputs") or []
+    if p.get("col") is not None and p.get("row") is not None:
+        hit = cite.find_td(outputs, str(p["col"]), str(p["row"]))
+        return cite.dates_shown(hit[0]) if hit else None
+    if p.get("out") is not None and p.get("line") is not None:
+        return cite.dates_shown(cite.output_line(outputs, int(p["out"]), int(p["line"])) or "")
+    return None
+
+
 def _is_whole_cell(p: dict[str, Any] | None) -> bool:
     return p is not None and p.get("col") is None and p.get("out") is None
 
@@ -423,6 +434,8 @@ class _Pass:
                 earlier = self._prior_correction(display, canon)
                 return f"[[{display}|{canon}]]", earlier or Change(display, ref, LINKED, KEPT, to=canon)
             exists, at = _at_place(cell, p)
+            if exists and cite.day_month(display) is not None:
+                at = _dates_at(cell, p) or at  # a date in words: the dates the place shows, not its numbers
             if exists and at is not None:
                 source = at
         elif not p:
@@ -433,6 +446,8 @@ class _Pass:
                 source = str(verdict.get("source") or "") or None
         # a cell that is gone (p and not cell) goes on to steps (c)–(e) with the other cited cells
         found = await self._search(display, negative_ok, p, own, notebook_ok=source is None)
+        if found.place and cite.off_named_row(ref_c, found.place.ref, self.text):
+            found = _Found()  # the words name the row cited: the value is wrong there, not misplaced
         if found.place:
             return f"[[{display}|{found.place.ref}]]", Change(display, ref, LINKED, found.how or CELL, to=found.place.ref, tier=2)
         canon = _canonical(ref_c, p) if p else ref

@@ -1,4 +1,6 @@
-// Popover: a sheet placed beside an anchor, portaled to <body>, closed by Escape or a click outside.
+// Popover: a sheet placed beside an anchor, portaled to <body>, closed by Escape or a click outside, a click in a view's
+// frame among them. The anchor is an element, or any box that says where it is (a control inside a view's frame, which
+// the page reports in the frame's coordinates: files/labelCalls frameAnchor).
 // Menu: a trigger that opens a Popover of items. A disabled item with a `tip` stays in the menu, dimmed, and says why in
 // the shared tooltip on hover and keyboard focus; it is aria-disabled rather than disabled, since a disabled button gets
 // neither focus nor, in every browser, hover.
@@ -8,12 +10,23 @@ import { Icon, type IconName } from './Icon'
 import { Tip } from './Tooltip'
 
 export type Align = 'start' | 'end'
-type AnchorLike = HTMLElement | RefObject<HTMLElement | null> | null | undefined
+
+/** What a sheet is placed beside: an element, or a box that is not one, which then holds no click of its own. */
+export interface PopoverAnchor {
+  getBoundingClientRect: () => DOMRect
+  contains?: (other: Node | null) => boolean
+  /** false once it is out of the page, where it has no box */
+  readonly isConnected?: boolean
+}
+type AnchorLike = PopoverAnchor | RefObject<HTMLElement | null> | null | undefined
 
 const GAP = 4
 const MARGIN = 8
 
-const anchorEl = (a: AnchorLike): HTMLElement | null => (a && 'current' in a ? a.current : (a ?? null))
+const anchorEl = (a: AnchorLike): PopoverAnchor | null => (a && 'current' in a ? a.current : (a ?? null))
+
+/** The open sheets, the last opened last: Escape closes the last alone (a menu or a palette a sheet opened). */
+const openSheets: object[] = []
 
 /** Where a sheet of `w`×`h` goes beside `rect`: below when it fits, else above, else clamped to the viewport. Pure. */
 export function placeBeside(rect: { left: number; right: number; top: number; bottom: number }, w: number, h: number, vw: number, vh: number, align: Align): { left: number; top: number } {
@@ -28,24 +41,29 @@ export function placeBeside(rect: { left: number; right: number; top: number; bo
 }
 
 /** Where a tip of `w`×`h` goes beside `rect` (the menu's sides, the item's top and bottom): to its right when it fits,
- * else to its left, level with the item's middle, clamped to the viewport. Pure. */
-export function placeAside(rect: { left: number; right: number; top: number; bottom: number }, w: number, h: number, vw: number, vh: number): { left: number; top: number } {
+ * else to its left (with `leftFirst`, to its left when it fits, else to its right), level with the item's middle,
+ * clamped to the viewport. Pure. */
+export function placeAside(rect: { left: number; right: number; top: number; bottom: number }, w: number, h: number, vw: number, vh: number, leftFirst = false): { left: number; top: number } {
   const right = rect.right + GAP
   const leftSide = rect.left - GAP - w
-  const left = right + w <= vw - MARGIN ? right : leftSide >= MARGIN ? leftSide : Math.max(MARGIN, vw - MARGIN - w)
+  const fitsRight = right + w <= vw - MARGIN
+  const fitsLeft = leftSide >= MARGIN
+  const left = leftFirst && fitsLeft ? leftSide : fitsRight ? right : fitsLeft ? leftSide : Math.max(MARGIN, vw - MARGIN - w)
   const top = Math.max(MARGIN, Math.min((rect.top + rect.bottom - h) / 2, vh - MARGIN - h))
   return { left, top }
 }
 
 export interface PopoverProps {
-  /** the element the sheet sits beside: an element, or a ref to one */
+  /** what the sheet sits beside: an element, a ref to one, or a box (PopoverAnchor) */
   anchor: AnchorLike
   open: boolean
-  onClose: () => void
+  /** Escape was pressed, or a click landed outside the sheet (where the focus then is the click's) */
+  onClose: (how: 'escape' | 'outside') => void
   /** which edge of the anchor the sheet's edge lines up with (default start, the left) */
   align?: Align
-  /** `aside`: to the anchor's right, else its left, level with its middle (placeAside), rather than below or above it */
-  side?: 'below' | 'aside'
+  /** `aside`: to the anchor's right, else its left, level with its middle (placeAside), rather than below or above it;
+   * `left`: the same to its left first, as a view asks for beside its scrollbar's tracks */
+  side?: 'below' | 'aside' | 'left'
   /** a fixed width in px; without one the sheet takes its content's width */
   width?: number
   role?: string
@@ -58,15 +76,19 @@ export interface PopoverProps {
 export function Popover({ anchor, open, onClose, align = 'start', side = 'below', width, role = 'dialog', label, className, children }: PopoverProps) {
   const el = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  // where the anchor was last: an anchor taken out of the page (a menu row that closed, a view's frame) keeps the sheet
+  // there
+  const was = useRef<DOMRect | null>(null)
 
   const place = useCallback(() => {
     const a = anchorEl(anchor)
     const sheet = el.current
     if (!a || !sheet) return
-    const r = a.getBoundingClientRect()
+    const r = a.isConnected === false && was.current ? was.current : a.getBoundingClientRect()
+    was.current = r
     const w = sheet.offsetWidth
     const h = sheet.offsetHeight
-    setPos(side === 'aside' ? placeAside(r, w, h, window.innerWidth, window.innerHeight) : placeBeside(r, w, h, window.innerWidth, window.innerHeight, align))
+    setPos(side === 'aside' || side === 'left' ? placeAside(r, w, h, window.innerWidth, window.innerHeight, side === 'left') : placeBeside(r, w, h, window.innerWidth, window.innerHeight, align))
   }, [anchor, align, side])
 
   useLayoutEffect(() => {
@@ -87,24 +109,47 @@ export function Popover({ anchor, open, onClose, align = 'start', side = 'below'
     }
   }, [open, place])
 
+  // its place among the open sheets, taken when it opens and kept while it is drawn again
+  const me = useRef({})
+  useEffect(() => {
+    if (!open) return
+    const sheet = me.current
+    openSheets.push(sheet)
+    return () => void openSheets.splice(openSheets.indexOf(sheet), 1)
+  }, [open])
+
   useEffect(() => {
     if (!open) return
     const onDown = (e: globalThis.MouseEvent) => {
       const t = e.target as Node
-      if (el.current?.contains(t) || anchorEl(anchor)?.contains(t)) return
-      onClose()
+      if (el.current?.contains(t) || anchorEl(anchor)?.contains?.(t)) return
+      onClose('outside')
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && openSheets[openSheets.length - 1] === me.current) {
         e.stopPropagation()
-        onClose()
+        onClose('escape')
       }
+    }
+    // a click in a view's frame reaches this document as no mousedown: the frame takes the focus and the window blurs,
+    // while the document keeps the focus (hasFocus), which it loses when the analyst leaves the browser
+    let blurred: number | null = null
+    const onBlur = () => {
+      if (blurred != null) window.clearTimeout(blurred)
+      blurred = window.setTimeout(() => {
+        blurred = null
+        const at = document.activeElement
+        if (at instanceof HTMLIFrameElement && document.hasFocus() && !el.current?.contains(at)) onClose('outside')
+      }, 0)
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
+    window.addEventListener('blur', onBlur)
     return () => {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
+      window.removeEventListener('blur', onBlur)
+      if (blurred != null) window.clearTimeout(blurred)
     }
   }, [open, onClose, anchor])
 

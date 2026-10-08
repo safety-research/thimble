@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
-from . import cc_channel, config
+from . import cc_plugin, config
 
 log = logging.getLogger("thimble.cc_settings")
 
@@ -42,7 +42,7 @@ MODEL_ENV = "ANTHROPIC_MODEL"  # the model a session runs when set, over every s
 EFFORT_ENV = "CLAUDE_CODE_EFFORT_LEVEL"
 LOCAL_SETTINGS = Path(".claude") / "settings.local.json"
 PROJECT_SETTINGS = Path(".claude") / "settings.json"
-MANAGED = {platform: d / cc_channel.MANAGED_FILE for platform, d in cc_channel.MANAGED_DIRS.items()}
+MANAGED = {platform: d / cc_plugin.MANAGED_FILE for platform, d in cc_plugin.MANAGED_DIRS.items()}
 
 
 def config_dir() -> Path:
@@ -66,10 +66,10 @@ def sources(cwd: Path) -> list[Path]:
 
 def analyst_tiers() -> list[dict[str, Any]]:
     """The settings that are the analyst's own wherever a session runs, lowest precedence first: the user's settings.json
-    and the org's managed tier (cc_channel.managed: server-managed settings, else the managed file with its drop-ins). A
+    and the org's managed tier (cc_plugin.managed: server-managed settings, else the managed file with its drop-ins). A
     corpus folder's .claude/ is left out, since a file planted there must not choose a permission mode or a command
     thimble runs."""
-    return [_read(config_dir() / "settings.json"), cc_channel.managed({config.CONFIG_DIR_ENV: str(config_dir())}) or {}]
+    return [_read(config_dir() / "settings.json"), cc_plugin.managed({config.CONFIG_DIR_ENV: str(config_dir())}) or {}]
 
 
 def model_key(model: str | None) -> str:
@@ -123,6 +123,17 @@ def _efforts(cwd: Path, environ: Mapping[str, str] | None = None) -> tuple[bool,
         elif top:
             unread = top
     return named, by_env, ultracode, level, unread
+
+
+def settings_env(cwd: Path, name: str) -> str | None:
+    """The value the `env` blocks of the analyst's settings files give the variable `name` for a session in `cwd`: the
+    highest file's that sets it (sources), '' included; None when none sets it."""
+    found = None
+    for path in sources(cwd):
+        block = _read(path).get("env")
+        if isinstance(block, dict) and name in block and block[name] is not None:
+            found = str(block[name])
+    return found
 
 
 def names_effort(cwd: Path, environ: dict[str, str] | None = None) -> bool:

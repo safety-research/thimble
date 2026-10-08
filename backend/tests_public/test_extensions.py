@@ -592,10 +592,18 @@ async def test_the_stored_state_names_only_extensions_of_thimble_s_home(corpus, 
     assert "Injected." not in orient_session.instructions_of(CORPUS)
 
 
-async def test_an_extension_switched_off_does_not_run_and_its_unchanged_view_goes(corpus):
+async def test_an_extension_switched_off_does_not_run_and_its_unchanged_view_goes(corpus, monkeypatch):
+    from app import ledger
+
+    pushed: list[str] = []
+    monkeypatch.setattr(ledger, "push_roles", pushed.append)
     _add()
     await extensions.refresh(CORPUS, wait=10)
     assert views.read_proposal(CORPUS, "tally") is not None
+    assert pushed, "the module registers the types again with the new extension's blocks and agents"
+    pushed.clear()
+    await extensions.refresh(CORPUS)
+    assert not pushed, "nothing changed"
 
     write_json(extensions.home() / "config.json", {"extensions": {"ext-min": {"enabled": False}}})
     e = (await extensions.refresh(CORPUS))["extensions"]["ext-min"]
@@ -607,9 +615,11 @@ async def test_an_extension_switched_off_does_not_run_and_its_unchanged_view_goe
     (extensions.home() / "config.json").unlink()
     extensions.set_enabled(CORPUS, "ext-min", False)
     assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["why"] == "off in this workspace"
+    pushed.clear()
     extensions.set_enabled(CORPUS, "ext-min", True)
     assert (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]["active"]
     assert views.read_proposal(CORPUS, "tally") is not None
+    assert pushed == [CORPUS]
 
 
 async def test_switching_on_an_extension_offers_to_run_its_orientation_instructions(corpus, monkeypatch, analyst):
@@ -622,7 +632,7 @@ async def test_switching_on_an_extension_offers_to_run_its_orientation_instructi
         sent.append((extension, text))
         return {"status": "resumed"}
 
-    monkeypatch.setattr(orient_session, "message", message)
+    monkeypatch.setattr(orient_session, "send", message)
     ran = {"yes": False}
     monkeypatch.setattr(extensions, "orientation_ran", lambda c: ran["yes"])
     _add()
@@ -681,7 +691,7 @@ async def test_an_orient_md_that_replaces_takes_the_place_of_thimble_s_instructi
         sent.append(extension)
         return {"status": "resumed"}
 
-    monkeypatch.setattr(orient_session, "message", message)
+    monkeypatch.setattr(orient_session, "send", message)
     monkeypatch.setattr(extensions, "orientation_ran", lambda c: True)
     write_json(config.workspace_dir(CORPUS) / "settings.json", {orient_session.SETTING: "My own way."})
     solo = _copy(tmp_path, "solo")
@@ -973,7 +983,7 @@ async def test_a_folder_used_in_place_cannot_link_to_files_outside_it(corpus, tm
     """thimble reads a folder used in place where it is, so a link in it that leads outside it (here to the file that
     holds thimble's local API token) is a problem: add refuses the folder, and a link made after the add unloads it,
     so the file never reaches the orientation's prompt."""
-    monkeypatch.setattr(orient_session, "message", lambda *a, **k: pytest.fail("nothing is sent"))
+    monkeypatch.setattr(orient_session, "send", lambda *a, **k: pytest.fail("nothing is sent"))
     secret = extensions.home() / "server.json"
     secret.parent.mkdir(parents=True, exist_ok=True)
     secret.write_text('{"token": "not-for-agents"}')
@@ -1070,20 +1080,21 @@ def test_shipping_leaves_a_folder_used_in_place_alone(corpus, tmp_path, monkeypa
 
 
 def test_an_orientation_counts_as_run_only_with_the_thread_a_follow_up_resumes(corpus, monkeypatch):
-    """Settings offers Run now only where a follow-up can reach the orientation: its record names a session and a
-    thread, the thread is there (orient_session._chat_of), and Claude Code still keeps the session's transcript."""
+    """Settings offers Run now only where a follow-up can reach the orientation: its record names a thread that is
+    there, run by an agent of main's session (orient_session.latest), not by an earlier version or session."""
     from app import agents, session
 
-    kept = {"s-1": "/transcripts/s-1.jsonl"}
-    monkeypatch.setattr(session, "find_transcript", lambda sid, config_dir=None: kept.get(sid))
     run = config.workspace_dir(CORPUS) / "orient" / "run.json"
     run.parent.mkdir(parents=True, exist_ok=True)
-    write_json(run, {"session": "s-1", "chats": {"orient": "orient-1"}})
+    write_json(run, {"chats": {"orient": "orient-1"}})
     assert not extensions.orientation_ran(CORPUS)
-    agents.write_meta(CORPUS, {"id": "orient-1", "kind": "agent", "role": "orient"})
+    agents.write_meta(CORPUS, {"id": "orient-1", "kind": "agent", "role": "orient", "session": "s-0"})
+    assert not extensions.orientation_ran(CORPUS), "an earlier version ran it, with no agent"
+    agents.write_meta(CORPUS, {"id": "orient-1", "kind": "agent", "role": "orient", "route": "subagent",
+                               "agent_id": "a1", "sessions": ["s-1"]})
     assert extensions.orientation_ran(CORPUS)
-    kept.clear()
-    assert not extensions.orientation_ran(CORPUS), "a follow-up could not resume it"
+    monkeypatch.setitem(session._live, CORPUS, session.Live(CORPUS, "s-2", "/c", None, None))
+    assert not extensions.orientation_ran(CORPUS), "its agent belongs to an earlier session"
 
 
 def _role_ext(root: Path, name: str, agents: dict[str, dict], files: dict[str, str] | None = None, **manifest) -> Path:
@@ -1146,7 +1157,7 @@ async def test_an_extension_s_task_prompts_and_report_checks_are_used(corpus, tm
     """A task's prompt adds to thimble's part of the task's prompt file, or takes its place with `replace` and pulls
     thimble's back in with {{default}}, wherever that part is (a whole file, its head or one section); two replacements
     leave thimble's own. A report check of an extension is offered among the checks, off, after the built-ins."""
-    from app import checks, prompts, tasks
+    from app import checks, prompts, tasks, view_review
 
     ext = _role_ext(tmp_path, "tuned", {}, {
         "tasks/view-fit/task.json": json.dumps({"description": "Stricter.", "prompt": "fit.md"}),
@@ -1170,6 +1181,15 @@ async def test_an_extension_s_task_prompts_and_report_checks_are_used(corpus, tm
     default = prompts.section("card-check", "check").strip()
     assert secs["check"].startswith(default[:200]) and "Also read every axis title of (none)." in secs["check"]
     assert "card" in secs and "## " not in secs["check"], "the other sections stay apart"
+    # live check L26 (live-d): an addition to the view review's section that opens with a `## ` heading was cut off
+    review = _role_ext(tmp_path, "headed", {}, {
+        "tasks/view-review/task.json": json.dumps({"description": "Restore.", "prompt": "r.md"}),
+        "tasks/view-review/r.md": "## A test of the restore\n\nBreak the view once.\n\n```\n# a comment in code\n```"})
+    _add(review)
+    await extensions.refresh(CORPUS)
+    with prompts.custom(tasks.files(CORPUS, view_review.PROMPT)):
+        reviewer = view_review.reviewer_prompt(CORPUS)
+    assert "#### A test of the restore\n\nBreak the view once." in reviewer and "\n# a comment in code\n" in reviewer
     with prompts.custom(userconf.prompt_files(CORPUS, "labels")):
         head = prompts.render_head("labels", {"name": "x", "unit": "record", "definition": "d", "labels": "a, b",
                                               "comment": "", "examples": ""})

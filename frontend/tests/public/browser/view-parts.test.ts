@@ -1,0 +1,233 @@
+// The view kit's row controls, side panel and lanes (backend/app/viewer_controls.js, viewer_side.js) in a real browser,
+// a page holding the view in a sandboxed frame as ViewerFrame does: Filter by's toggle hides the rows of its value;
+// Rows regroups the lanes by a field, a tree of them with its guides, and by a label, a class added to the label being a
+// new lane; hovering a lane draws a thin cursor line, never a band over the marks; the detail list's rows in view are a
+// tint across the lanes that follows the list as it scrolls; a record opens in a side panel beside the list that starts
+// wide enough to read it, a drag of its edge resizes it, and the page built again opens it at that width; the divider's
+// drag gives the overview its height, kept too. What the controls decide without layout is
+// tests/public/controls-kit.test.ts.
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { afterAll, beforeAll, describe, test } from 'vitest'
+import type { Browser, Frame, Page } from 'playwright'
+import { cleanup, FRONTEND, launch } from './page.ts'
+
+const APP = path.join(FRONTEND, '..', 'backend', 'app')
+const read = (name: string) => readFileSync(path.join(APP, name), 'utf8')
+const inline = (js: string) => js.replace(/<\/script/g, '<\\/script')
+// the kit as views.frame_document loads it
+const KIT =
+  `<script>${inline(read('viewer_bridge.js'))}</script><script>window.__thimbleLabelOrder = ${read('label_order.json')}</script>` +
+  ['viewer_colour.js', 'viewer_controls.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_range.js'].map((n) => `<script>${inline(read(n))}</script>`).join('') +
+  `<style>${read('viewer_kit.css')}</style><style>${read('viewer_parts.css')}</style>`
+const TOKENS =
+  ':root{--label-1:#025ac3;--label-2:#d0750a;--label-3:#08632f;--label-none:#a09c93;--ink-rgb:27,26,24;--surface-card:#fffdf8;' +
+  '--text-primary:#000;--text-secondary:#4a4844;--text-tertiary:#726f69;--text-placeholder:#a09c93;--accent:#5135ff;--radius-chip:4px;--radius-ui:6px;' +
+  '--h-row:28px;--control-sm:28px;--h-control:24px;--h-chip:20px;--text-xs:12px;--text-ui-sm:12px;--text-sm:13px;--text-mono-sm:11px;--border-subtle:rgba(27,26,24,0.12);' +
+  '--border-hairline:rgba(27,26,24,0.08);--border-strong:rgba(27,26,24,0.3);--status-negative:#c93a28;--surface-selected:rgba(27,26,24,0.06);--font-body:sans-serif;--font-mono:monospace}'
+const T0 = Date.UTC(2026, 4, 16, 9) / 1000
+
+// a lead and its subagents, forty calls each, every seventh failed, in a list that scrolls under the lanes
+const view = (kept?: unknown) => `<!doctype html><html><head><style>${TOKENS} html,body{margin:0;height:100%} body{font:12px sans-serif;background:#fffdf8;overflow:hidden}
+#view{height:100%;display:flex;flex-direction:column} .top{flex:none;display:flex;align-items:center;gap:8px;padding:8px}
+#overview{flex:none;height:180px;display:flex;flex-direction:column;min-height:0} #range{flex:none;margin-left:160px} #lanes{flex:1;min-height:0;overflow:auto}
+#body{flex:1;min-height:0} #list{overflow:auto} .row{box-sizing:border-box;height:24px;padding:4px 8px}</style>
+${kept ? `<script>window.__thimbleColour = ${JSON.stringify(kept)}</script>` : ''}${KIT}</head><body>
+<div id="view"><div class="top"><span id="filter"></span><span id="rows"></span><span id="colour"></span></div>
+<div id="overview"><div id="range"></div><div id="lanes"></div></div><div id="body"><div id="list"></div></div></div>
+<script>
+const PARENT = { lead: null, explore: 'lead', grep: 'explore', test: 'lead' }
+const tools = ['Bash', 'Read', 'Grep']
+const calls = []
+Object.keys(PARENT).forEach((s, si) => { for (let i = 0; i < 40; i++) calls.push({ ref: 'r1/' + s + '.jsonl#L' + (i + 1), t: ${T0} + si * 600 + i * 60, session: s, tool: tools[i % 3], outcome: i % 7 === 3 ? 'error' : 'ok' }) })
+calls.sort((a, b) => a.t - b.t)
+window.calls = calls
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }], onChange: draw })
+window.filter = thimble.filterBy({ mount: '#filter', fields: [{ name: 'outcome', title: 'Outcome', values: ['ok', 'error'] }], onChange: draw })
+window.range = thimble.timeRange({ mount: '#range', times: calls.map((c) => c.t), onChange: draw })
+window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session', parentOf: (k) => PARENT[k] }, { name: 'tool', title: 'Tool' }], onChange: draw })
+window.lanes = thimble.lanes({ mount: '#lanes', rows, range, names: 160, problem: (c) => c.outcome !== 'ok', follow: '#list', onMark: (c) => openCall(c) })
+window.side = thimble.side({ mount: '#body' })
+window.divider = thimble.divider({ top: '#overview' })
+function draw() {
+  const shown = calls.filter((c) => range.has(c.t) && filter.keeps(c))
+  lanes.draw(shown)
+  document.getElementById('list').innerHTML = shown.map((c) => '<div class="row" data-anchor="' + c.ref + '" data-t="' + c.t + '"' + colour.attr(c) + '>' + c.session + ' ' + c.tool + ' ' + c.outcome + '</div>').join('')
+}
+function openCall(c) { side.open({ title: c.tool + ' · ' + c.session, sub: c.ref, ref: c.ref, html: '<pre>' + JSON.stringify(c, null, 2) + '</pre>' }) }
+document.getElementById('list').addEventListener('click', (e) => { const r = e.target.closest('.row'); if (r) openCall(calls.find((c) => c.ref === r.dataset.anchor)) })
+draw()
+</script></body></html>`
+
+let browser: Browser
+
+beforeAll(async () => {
+  browser = await launch()
+})
+afterAll(async () => {
+  await browser?.close()
+  cleanup()
+})
+
+/** A page holding the view in a sandboxed frame 900 px wide; what the view asks thimble to keep is window.__kept. */
+async function framed(kept?: unknown): Promise<{ page: Page; frame: () => Frame }> {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
+  await page.setContent(`<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:900px;height:640px"></iframe></body></html>`)
+  await page.evaluate(() => {
+    const w = window as unknown as { __kept: unknown[] }
+    w.__kept = []
+    window.addEventListener('message', (e) => e.data && e.data.type === 'thimble:colour' && w.__kept.push(e.data.state))
+  })
+  await page.evaluate((doc) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = doc), view(kept))
+  const frame = () => page.frames().find((f) => f !== page.mainFrame())!
+  await page.waitForTimeout(300)
+  await frame().waitForSelector('.thimble-lane', { state: 'attached' })
+  return { page, frame }
+}
+const lastKept = (page: Page) => page.evaluate(() => (window as unknown as { __kept: any[] }).__kept.at(-1))
+const laneNames = (frame: () => Frame) => frame().evaluate(() => [...document.querySelectorAll('.thimble-lane-nm')].map((e) => e.textContent))
+const labels = (page: Page, values: string[], marks: Record<string, string>) =>
+  page.evaluate(
+    ([values, marks]) => {
+      const vs = (values as string[]).map((v) => ({ name: v, colour: '#025ac3', highlight: true }))
+      const m: Record<string, object> = {}
+      for (const [ref, v] of Object.entries(marks as Record<string, string>)) m[ref] = { bar: '#025ac3', names: ['Tactic'], values: [{ id: 'k1', label: 'Tactic', value: v, colour: '#025ac3' }], spans: [] }
+      ;(document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage(
+        { type: 'thimble:labels', marks: m, on: [{ id: 'k1', name: 'Tactic', colour: '#025ac3', values: vs }], filter: null, all: [{ id: 'k1', name: 'Tactic', on: true, here: true, colour: '#025ac3', values: vs, count: 2 }], palette: ['#025ac3'] },
+        '*',
+      )
+    },
+    [values, marks] as const,
+  )
+
+describe('the row controls in a frame', () => {
+  test("Filter by's menu picks a field and a toggle hides its value's rows from the list and the lanes", async () => {
+    const { page, frame } = await framed()
+    const rows = () => frame().evaluate(() => document.querySelectorAll('.row').length)
+    assert.equal(await rows(), 160)
+    await frame().locator('.thimble-filter-by').click()
+    await frame().locator('.thimble-colour-menu [data-by="f:outcome"]').click()
+    await page.waitForTimeout(100)
+    const chips = await frame().evaluate(() => [...document.querySelectorAll('.thimble-filter-chip')].map((c) => c.textContent))
+    assert.deepEqual(chips, ['ok136', 'error24'])
+    await frame().locator('.thimble-filter-chip', { hasText: 'error' }).click()
+    await page.waitForTimeout(100)
+    assert.equal(await rows(), 136)
+    assert.equal(await frame().evaluate(() => document.querySelectorAll('.thimble-lane-bad').length), 0, 'the lanes lose the failed calls too')
+    assert.deepEqual((await lastKept(page)).parts.filter, { by: 'f:outcome', off: { 'f:outcome': ['error'] } })
+    await page.close()
+  })
+
+  test('Rows regroups the lanes by a field and by a label; a class added to the label is a new lane, with no click', async () => {
+    const { page, frame } = await framed()
+    assert.deepEqual(await laneNames(frame), ['lead', 'explore', 'grep', 'test'])
+    // the tree's guides: drawn lines left-aligned, a cell a level, the child's guide reaching to its row's middle
+    const guides = await frame().evaluate(() => [...document.querySelectorAll('.thimble-lane')].map((l) => [...l.querySelectorAll('.thimble-lane-guide')].map((g) => g.className.replace('thimble-lane-guide thimble-lane-g-', ''))))
+    assert.deepEqual(guides, [[], ['tee'], ['pipe', 'elbow'], ['elbow']])
+    const lefts = await frame().evaluate(() => [...document.querySelectorAll('.thimble-lane-name')].map((n) => Math.round(n.getBoundingClientRect().left)))
+    assert.equal(new Set(lefts).size, 1, 'every name column starts on one edge')
+    // by the tool
+    await frame().locator('.thimble-rows-by').click()
+    await frame().locator('.thimble-colour-menu [data-by="f:tool"]').click()
+    await page.waitForTimeout(100)
+    assert.deepEqual(await laneNames(frame), ['Bash', 'Read', 'Grep'])
+    // by a label: its classes, then the calls it does not mark
+    await labels(page, ['explore', 'verify'], { 'r1/lead.jsonl#L1': 'explore', 'r1/test.jsonl#L5': 'verify' })
+    await page.waitForTimeout(100)
+    await frame().locator('.thimble-rows-by').click()
+    await frame().locator('.thimble-colour-menu [data-by="l:k1"]').click()
+    await page.waitForTimeout(150)
+    assert.deepEqual(await laneNames(frame), ['explore', 'verify', 'Not marked'])
+    await labels(page, ['explore', 'verify', 'plan'], { 'r1/lead.jsonl#L1': 'explore', 'r1/test.jsonl#L5': 'verify', 'r1/grep.jsonl#L2': 'plan' })
+    await page.waitForTimeout(150)
+    assert.deepEqual(await laneNames(frame), ['explore', 'verify', 'plan', 'Not marked'])
+    await page.close()
+  })
+
+  test('hovering a lane draws a thin cursor line across the lanes, never a band; the list\'s rows in view are a tint that follows its scroll', async () => {
+    const { page, frame } = await framed()
+    const lane = (await frame().locator('.thimble-lane-track').nth(1).boundingBox())!
+    await page.mouse.move(lane.x + lane.width / 2, lane.y + 9)
+    await page.waitForTimeout(100)
+    const cur = await frame().evaluate(() => {
+      const c = document.querySelector('.thimble-lanes-cursor') as HTMLElement
+      const r = c.getBoundingClientRect()
+      const body = document.querySelector('.thimble-lanes-body')!.getBoundingClientRect()
+      return { display: getComputedStyle(c).display, width: r.width, height: Math.round(r.height), bodyHeight: Math.round(body.height), tip: (document.querySelector('.thimble-tip') as HTMLElement)?.textContent ?? '' }
+    })
+    assert.equal(cur.display, 'block')
+    assert.equal(cur.width, 1, 'a 1 px line')
+    assert.ok(cur.height >= cur.bodyHeight - 1, `it crosses every lane: ${JSON.stringify(cur)}`)
+    assert.match(cur.tip, /^explore · /)
+    // no element over the marks is filled or inverted
+    const filled = await frame().evaluate(() => [...document.querySelectorAll('.thimble-lanes-body *')].filter((e) => getComputedStyle(e).mixBlendMode !== 'normal' || /invert/.test(getComputedStyle(e).filter)).length)
+    assert.equal(filled, 0)
+    // the tint: where the list's rows in view lie, moving right as the list scrolls
+    const tint = () => frame().evaluate(() => { const s = document.querySelector('.thimble-lanes-span') as HTMLElement; return { display: getComputedStyle(s).display, left: s.getBoundingClientRect().left, width: s.getBoundingClientRect().width } })
+    const t0 = await tint()
+    assert.equal(t0.display, 'block')
+    await frame().evaluate(() => (document.getElementById('list')!.scrollTop = 2000))
+    await page.waitForTimeout(150)
+    const t1 = await tint()
+    assert.ok(t1.left > t0.left + 20, `the tint follows the list: ${JSON.stringify([t0, t1])}`)
+    await page.close()
+  })
+})
+
+describe('the side panel and the divider in a frame', () => {
+  test('a record opens beside the list, wide enough to read it; a drag of its edge resizes it; the page built again opens it at that width', async () => {
+    const { page, frame } = await framed()
+    await frame().locator('.row').nth(2).click()
+    await page.waitForTimeout(100)
+    const open = await frame().evaluate(() => {
+      const s = document.querySelector('.thimble-side') as HTMLElement
+      const list = document.getElementById('list')!
+      return { width: Math.round(s.getBoundingClientRect().width), body: Math.round(document.getElementById('body')!.getBoundingClientRect().width), list: Math.round(list.getBoundingClientRect().width), title: s.querySelector('.thimble-side-title')!.textContent, under: list.querySelector('.thimble-side') !== null }
+    })
+    assert.ok(Math.abs(open.width - open.body * 0.4) <= 2, `it opens at two fifths of the view: ${JSON.stringify(open)}`)
+    assert.ok(open.list <= open.body - open.width + 1, 'the list narrows beside it')
+    assert.equal(open.under, false)
+    assert.match(open.title!, /· lead$/)
+    // drag its left edge 150 px to the left
+    const grip = (await frame().locator('.thimble-side-grip').boundingBox())!
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + 100)
+    await page.mouse.down()
+    await page.mouse.move(grip.x + grip.width / 2 - 150, grip.y + 100, { steps: 8 })
+    await page.mouse.up()
+    await page.waitForTimeout(100)
+    const wide = await frame().evaluate(() => Math.round(document.querySelector('.thimble-side')!.getBoundingClientRect().width))
+    assert.ok(Math.abs(wide - (open.width + 150)) <= 3, `${wide}`)
+    const kept = await lastKept(page)
+    assert.ok(Math.abs(kept.parts['side:body'].share - wide / open.body) < 0.01, JSON.stringify(kept.parts))
+    await page.close()
+    // built again on what thimble kept, it opens at that width
+    const again = await framed(kept)
+    await again.frame().locator('.row').nth(5).click()
+    await again.page.waitForTimeout(100)
+    const w2 = await again.frame().evaluate(() => Math.round(document.querySelector('.thimble-side')!.getBoundingClientRect().width))
+    assert.ok(Math.abs(w2 - wide) <= 3, `${w2} ${wide}`)
+    await again.page.close()
+  })
+
+  test("the divider's drag gives the overview its height, which the page built again keeps", async () => {
+    const { page, frame } = await framed()
+    const h0 = await frame().evaluate(() => Math.round(document.getElementById('overview')!.getBoundingClientRect().height))
+    const bar = (await frame().locator('.thimble-divider').boundingBox())!
+    await page.mouse.move(bar.x + 200, bar.y + bar.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(bar.x + 200, bar.y + bar.height / 2 + 120, { steps: 6 })
+    await page.mouse.up()
+    await page.waitForTimeout(100)
+    const h1 = await frame().evaluate(() => Math.round(document.getElementById('overview')!.getBoundingClientRect().height))
+    assert.ok(Math.abs(h1 - (h0 + 120)) <= 3, `${h0} ${h1}`)
+    const kept = await lastKept(page)
+    assert.ok(kept.parts['divider:overview'].share > 0.3, JSON.stringify(kept.parts))
+    await page.close()
+    const again = await framed(kept)
+    await again.page.waitForTimeout(100)
+    const h2 = await again.frame().evaluate(() => Math.round(document.getElementById('overview')!.getBoundingClientRect().height))
+    assert.ok(Math.abs(h2 - h1) <= 3, `${h1} ${h2}`)
+    await again.page.close()
+  })
+})

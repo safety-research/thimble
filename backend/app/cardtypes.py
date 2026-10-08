@@ -311,14 +311,14 @@ async def refresh_quietly(c: str, *, warm: bool = True) -> dict[str, dict[str, A
 
 async def announce(c: str) -> None:
     """Refresh the types when main's session connects, and tell main of the types its prompt did not list."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     before = set(read_registry(c))
     types = await refresh_quietly(c)
     new = {k: v for k, v in types.items() if k not in before}
-    if new and channel.reachable(c):
+    if new and events.reachable(c):
         try:
-            channel.post(c, "card_types", {"text": _block(new), "types": ", ".join(new)})
+            events.post(c, "card_types", {"text": _block(new), "types": ", ".join(new)})
         except HTTPException as e:
             log.info("%s: the card types were not announced: %s", c, e.detail)
 
@@ -425,6 +425,8 @@ async def records_route(c: str, name: str, body: RecordsBody) -> dict[str, Any]:
     t = find(c, name)
     if t is None:
         raise HTTPException(404, f"no card type {name!r} in this workspace")
+    if isinstance(body.query, dict) and views.KIT_QUERY in body.query:  # the view kit's own fetch (views.kit_answer)
+        return {"data": (await asyncio.to_thread(views.kit_answer, c, body.query))[1]}
     cell = await asyncio.to_thread(notebook.get_cell, c, body.card) if body.card else None
     made = card_of((cell or {}).get("outputs")) or {}
     ids = [str(x.get("id")) for x in made.get("labels") or [] if isinstance(x, dict) and x.get("id")]
@@ -760,6 +762,9 @@ async def tool_open_view(ctx: Any, args: dict[str, Any]) -> Any:
     except Exception:  # noqa: BLE001 — a page that misses the record stays as it is
         log.warning("open_view: could not send the view for %s", ctx.c, exc_info=True)
         return tools.err("open_view: the view could not be sent to the browser")
+    from . import local  # noqa: PLC0415
+
+    local.ui_note(ctx.c, "open_view", {"slug": slug, "query": query, **({"card": raw_card} if raw_card else {})})
     if query:
         return tools.ok(tools.hint("open_view-card", card=f"card:{raw_card}", view=slug))
     return tools.ok(tools.hint("open_view-view", view=slug))

@@ -2,10 +2,10 @@
 // fix it applied (a change of the card's question, code or takeaway). Read tolerantly, so a cell without check fields
 // reads as unchecked. Pure.
 //
-// The card's check mark (canvas/CardFace CheckMark) shows a spinner while running (click stops it), a check glyph once
-// checked (hover shows what a live fix changed, with Undo), a warning flag when the card types in numbers (typedLine),
-// and the run-again glyph when failed or stopped. A click on a finished mark runs the check again; an unchecked card
-// that could be checked (checkable) shows a faint mark on hover.
+// The card shows the check only when it found a real problem (checkProblem): a red ✕ at the takeaway's corner for
+// numbers its code types in, or for a revision the check made that would not run (canvas/CardFace ProblemMark). A
+// running check shimmers the card, and a fix lands in place; everything else, the fix's Undo among it, is in the card's
+// details (canvas/CheckDetails). ✓ is not the check's: it is kept for the analyst's own verification.
 import { hhmm } from './time'
 import type { Cell } from './types'
 
@@ -51,6 +51,11 @@ export interface CardCheck {
   /** checked: the numbers the card shows that its code types in rather than computing them (backend
      * card_check.typed_numbers), unless a fix has replaced the code since */
   typed?: string[]
+  /** failed: why the revision the check made was not kept (its code did not run clean, or the card did not draw), when
+   * the check recorded that revision as rejected (backend checkstore.record_rejected) */
+  unrun?: string
+  /** with `unrun`: what the check found wrong, the first problem of its reading (the critique stage's assessment) */
+  found?: string
 }
 
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null)
@@ -113,13 +118,43 @@ export function checkOf(cell: Checked): CardCheck | null {
     if (note && state !== 'running') out.note = note
     const typed = obj(obj(c.stages)?.render)?.typed
     if (state === 'checked' && Array.isArray(typed) && typed.length && !fix?.fields.includes('code')) out.typed = typed.map(text)
+    const rejected = state === 'failed' ? rejectedFix(cell, text(c.id)) : null
+    if (rejected) {
+      out.unrun = text(rejected.reason).trim() || 'it could not be applied'
+      const assessment = obj(obj(c.stages)?.critique)?.assessment
+      const first = Array.isArray(assessment) ? assessment.map((a) => text(obj(a)?.problem).trim()).find(Boolean) : ''
+      if (first) out.found = first
+    }
     return out
   }
   return fix ? { state: 'checked', at: fix.ts, fix } : null
 }
 
-/** What the check mark's hover says first, and the canvas's check menu beside each card: by the check's state and,
- * while it runs, its phase; the reason an ended check gives follows a colon. */
+/** The revision check `id` recorded as not kept (state `rejected`), or null. */
+function rejectedFix(cell: Pick<Checked, 'fixes'>, id: string): Record<string, unknown> | null {
+  if (!id || !Array.isArray(cell.fixes)) return null
+  for (let i = cell.fixes.length - 1; i >= 0; i--) {
+    const f = obj(cell.fixes[i])
+    if (f && f.state === 'rejected' && text(f.check) === id) return f
+  }
+  return null
+}
+
+/** The real problem the check found, in words, or '' when it found none the card should show: numbers its code types
+ * in (typedLine), or a revision that would not run (`unrun`). A check that passed, revised the card, runs, was stopped
+ * or could not finish shows nothing on the card. Pure. */
+export function checkProblem(check: CardCheck | null): string {
+  if (!check) return ''
+  const typed = typedLine(check)
+  if (typed) return typed
+  if (!check.unrun) return ''
+  const unrun = check.unrun.replace(/\.$/, '')
+  return check.found ? `${check.found.replace(/\.$/, '')}. Its revision of the card would not run: ${unrun}.` : `Its revision of the card would not run: ${unrun}.`
+}
+
+/** What the card's details say of its check first: by the check's state and, while it runs, its phase; the reason an
+ * ended check gives follows a colon. A check whose revision would not run read the card to the end, and its problem
+ * (checkProblem) says the rest. */
 export function checkLine(check: CardCheck): string {
   const at = hhmm(check.at)
   const why = check.why ? `: ${check.why}` : ''
@@ -129,13 +164,14 @@ export function checkLine(check: CardCheck): string {
     if (check.phase === 'revising') return 'Trying its revision of the card'
     return at ? `Checking the card since ${at}` : 'Checking the card'
   }
+  if (check.state === 'failed' && check.unrun) return at ? `Checked at ${at}` : 'Checked'
   if (check.state === 'failed') return (at ? `The check at ${at} could not finish` : 'The check could not finish') + why
   if (check.state === 'stopped') return (at ? `Stopped at ${at}` : 'Stopped') + why
   return at ? `Checked at ${at}` : 'Checked'
 }
 
-/** What the check mark's hover says of numbers the card's code types in (CardCheck.typed), '' for none: how many, the
- * first few, and that the data should compute them. */
+/** What the card says of numbers its code types in (CardCheck.typed), '' for none: how many, the first few, and that the
+ * data should compute them. */
 export function typedLine(check: CardCheck): string {
   const typed = check.typed ?? []
   if (!typed.length) return ''
@@ -157,8 +193,9 @@ export function checkable(cell: Readable): boolean {
 /** The kinds whose code the kernel runs (backend notebook.RUNNABLE_KINDS), unless the card carries a payload. */
 const RUNNABLE: readonly string[] = ['plot', 'table', 'code', 'timeline', 'diagram']
 
-/** A card's check state for the card filter (canvas/cardFilter.ts `checks`, backend filters.check_state). Verified:
- * checked to the end, revised or not. Unverified: running or stopped. Failed: could not finish. Unchecked: never read. */
+/** A card's check state for the card filter (canvas/cardFilter.ts `checks`, backend filters.check_state), by the mark
+ * the card shows. Failed: the red ✕, a real problem the check found (checkProblem). Verified: checked to the end with no
+ * such problem, revised or not. Unverified: running, stopped, or could not finish. Unchecked: never read. */
 export type CheckFilterState = 'verified' | 'unverified' | 'failed' | 'unchecked'
 /** The states in the order the Filter menu lists them, with the words it and the chips use. */
 export const CHECK_WORDS: Record<CheckFilterState, string> = { verified: 'Verified', unverified: 'Unverified', failed: 'Failed', unchecked: 'Not checked' }
@@ -168,7 +205,8 @@ export const CHECK_STATES = Object.keys(CHECK_WORDS) as CheckFilterState[]
 export function checkState(cell: Checked): CheckFilterState {
   const check = checkOf(cell)
   if (!check) return 'unchecked'
-  return check.state === 'checked' ? 'verified' : check.state === 'failed' ? 'failed' : 'unverified'
+  if (checkProblem(check)) return 'failed'
+  return check.state === 'checked' ? 'verified' : 'unverified'
 }
 
 /** Whether the card is being checked: its body and citations shimmer. */

@@ -6,14 +6,14 @@
 // src/files/views/registry.ts, src/files/Reader.tsx).
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { pdfPage, Reader } from '../../src/files/Reader.tsx'
+import { pdfPage, pickKey, Reader } from '../../src/files/Reader.tsx'
 import { ReaderLabelsContext, type ReaderLabels } from '../../src/files/marks.tsx'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
 import { segmentsFor, segmentsFrom } from '../../src/files/views/common.tsx'
 import { pickView, scoreViews, viewByType } from '../../src/files/views/registry.ts'
 import { OBJECTS_SCORE, tableScore } from '../../src/files/views/table.tsx'
 import { frontMatterLines, metaFields } from '../../src/files/views/text.tsx'
-import transcript, { chatTurns, conversationTurns, idKey, madeBlocks, nameOf, parsedLines, pick, shortId, shownLines, speakerIds, textOf, timeOf, unwrapStream } from '../../src/files/views/transcript.tsx'
+import transcript, { chatTurns, conversationTurns, idKey, madeBlocks, nameOf, noTurns, parsedLines, pick, shortId, shownLines, speakerIds, textOf, timeOf, unwrapStream } from '../../src/files/views/transcript.tsx'
 import { api } from '../../src/lib/api.ts'
 import type { Concept, SourcePage, SourceRecord, TranscriptHint, View } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -494,6 +494,32 @@ describe('a whole-file JSON transcript', () => {
     const el = await mount(<View workspace="w" path="sft.jsonl" kind="text" page={page} loadMore={() => undefined} transcript={hint} />)
     expect([...el.querySelectorAll('.reader-conv-speaker')].map((s) => s.textContent)).toEqual(['user'])
     expect(el.textContent).not.toContain('(empty)')
+  })
+})
+
+describe('a file whose whole parse finds no turns', () => {
+  test('opens in the mode it would otherwise use, not an error, and the Transcript mode is no longer offered', async () => {
+    vi.stubGlobal('fetch', async () => new Response('{"detail":"not found"}', { status: 404, headers: { 'content-type': 'application/json' } }))
+    const text = '{"items": {"k1": {"role": "user", "content": "hi"}, "k2": {"role": "assistant", "content": "hello"}}}'
+    const page: SourcePage = { path: 'logs/keyed.json', kind: 'text', total_lines: 1, start: 1, records: [line(1, text)], transcript: { format: 'json', score: 0.95 } }
+    vi.spyOn(api, 'source').mockResolvedValue(page)
+    const turns = vi.spyOn(api, 'sourceTurns').mockRejectedValue(new Error('415 logs/keyed.json holds no messages to show as a transcript'))
+    // a Transcript pick remembered for the file gives way too
+    localStorage.setItem(pickKey('w', 'logs/keyed.json'), JSON.stringify('transcript'))
+    const el = await mount(<Reader workspace="w" path="logs/keyed.json" kind="text" labels={NO_LABELS} lead={<span />} />)
+    await settle()
+    await settle()
+    expect(turns).toHaveBeenCalled()
+    expect(el.textContent).not.toContain('holds no messages')
+    const modes = [...el.querySelectorAll('.reader-modes [role="radio"], .reader-modes button')].map((b) => b.textContent)
+    expect(modes).not.toContain('Transcript')
+    expect(el.querySelector('.reader-turns')).toBeNull()
+    expect(el.textContent).toContain('"role": "user"')
+  })
+  test('a 415 says the file holds no turns; another failure is an error to show', () => {
+    expect(noTurns(new Error('415 logs/a.json holds no messages to show as a transcript'))).toBe(true)
+    expect(noTurns(new Error('404 no such file'))).toBe(false)
+    expect(noTurns(new Error('4150 bytes'))).toBe(false)
   })
 })
 

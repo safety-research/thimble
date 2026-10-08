@@ -9,8 +9,9 @@ Both draw the same boundary:
   read     the system, the backend venv and its interpreter, the corpus and the page's fonts and matplotlibrc
   write    the workspace directory, except settings.json and config.json (thimble's config for the workspace), which
            the kernel can neither read nor write, and telemetry.jsonl, viewed.jsonl (the view log, which the telemetry
-           export merges), the registry folder (REGISTRY_DIR), the views' state (VIEWS_DIR) and the workspace's local
-           extension (LOCAL_DIR), which it can read only.
+           export merges), the registry folder (REGISTRY_DIR), the views' state (VIEWS_DIR), the workspace's local
+           extension (LOCAL_DIR) and the folder of the files thimble's agents' hooks trust (TRUSTED_DIR), which it can
+           read only, and the lock of subagents.json's writers (LOCK_FILES), which it can neither read nor write.
            HOME and TMPDIR are fresh at each start: a private /tmp under bwrap, the kernel's kernels/<key>.home folder
            under srt
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
@@ -55,13 +56,23 @@ HIDDEN_FILES = ("settings.json", "config.json")
 EMPTY_FILE = "/dev/null"
 # read-only over the writable workspace (the server writes them from outside)
 READ_ONLY_FILES = ("telemetry.jsonl", "viewed.jsonl")
-# the workspace's folders that main's and the orientation's prompts are made from, which a card's code reads: read-only,
-# each as a folder so that what the server writes later (its atomic rewrites among it) shows inside; the server creates
-# them before the kernel starts
+# the lock subagents.json's writers take (subagent_files.LOCK), hidden as HIDDEN_FILES are rather than read-only: a
+# read-only file can still be opened and flocked, and a cell that held the lock would make every hook and the server
+# wait for it and then write without it, so that two writers no longer exclude each other; a cell that swapped it for a
+# file of its own would do the same. The server makes it before a kernel starts, and nothing renames it
+LOCK_FILES = ("subagents.json.lock",)
+# the workspace's folders that main's and the orientation's prompts are made from, which a card's code reads, and the
+# folder of the files thimble's hooks trust: read-only, each as a folder so that what the server writes later (its
+# atomic rewrites among it) shows inside. A file bound by itself would not hold: Linux takes the bind off a file that
+# the server renames a new file over, and the cell could then write it. The server creates them before the kernel starts
 REGISTRY_DIR = "registry"  # the card types and extensions as the server found them (cardtypes.py, extensions.py)
 VIEWS_DIR = "views"  # thimble's state of the views (views.state_dir): proposals, versions, reviews
 LOCAL_DIR = "extension"  # the workspace's local extension (views.local_dir), whose views the dev agent's builds write
-READ_ONLY_DIRS = (REGISTRY_DIR, VIEWS_DIR, LOCAL_DIR)
+# what the plugin's --agent-check hook and the gate tools trust (subagent_files.DIR): the pending requests and the agent
+# registry, the callers of thimble's tools and what main was launched with. A cell that could write them could make a
+# request a plugin start claims, or credit its call to an agent
+TRUSTED_DIR = "trusted"
+READ_ONLY_DIRS = (REGISTRY_DIR, VIEWS_DIR, LOCAL_DIR, TRUSTED_DIR)
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
 
 SRT_LAUNCHER = Path(__file__).with_name("kernel_srt.mjs")
@@ -147,7 +158,7 @@ def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | 
     config, hidden besides `home` and SRT_HIDDEN[platform] (sys.platform: linux or darwin)."""
     ws = Path(workspace_dir)
     system = "darwin" if platform == "darwin" else "linux"
-    hidden = [str(ws / name) for name in HIDDEN_FILES]
+    hidden = [str(ws / name) for name in (*HIDDEN_FILES, *LOCK_FILES)]
     deny_read = [str(home), *SRT_HIDDEN[system], *map(str, hide), *hidden]
     allow_read = [str(corpus_dir), str(ws), *map(str, interpreter_dirs(python)), *map(str, read)]
     if venv is not None:
@@ -218,7 +229,7 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
     for p in read:
         out += ["--ro-bind-try", str(p), str(p)]
     out += ["--ro-bind", str(corpus), str(corpus), "--bind", str(ws), str(ws), "--bind", str(conn), str(conn)]
-    for name in HIDDEN_FILES:
+    for name in (*HIDDEN_FILES, *LOCK_FILES):  # LOCK_FILES: a flock the cell takes is on EMPTY_FILE, never the lock
         out += ["--ro-bind", EMPTY_FILE, str(ws / name)]
     for name in READ_ONLY_FILES:  # read-only over the workspace bind (the server writes from outside)
         out += ["--ro-bind-try", str(ws / name), str(ws / name)]

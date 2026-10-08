@@ -10,7 +10,7 @@ import { Button } from '../components/Button'
 import { Card } from '../components/Card'
 import { Chip } from '../components/Chip'
 import { TextArea } from '../components/Field'
-import { chartLabels, isVegaLite, Output, outIndex, pickMime, primaryArtifact } from '../components/Outputs'
+import { CARD_MIME, chartLabels, figureKind, isVegaLite, Output, outIndex, pickMime, primaryArtifact } from '../components/Outputs'
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
@@ -31,8 +31,6 @@ export interface FigureBlockProps {
   block: { id: string; props: { cell: string; caption: string } }
   editor: BlockNoteEditor<any, any, any>
 }
-
-const artifactKind = (c: Cell) => primaryArtifact(c.outputs)?.kind ?? null
 
 const figureCells = new Map<string, Promise<Cell | null>>()
 
@@ -142,7 +140,8 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
   }, [box])
 
   const art = cell ? primaryArtifact(cell.outputs) : null
-  const shown = art && art.kind !== 'error' ? art.bundle : null
+  // a card type's graphic is drawn in the type's frame by the card's own body (CardFigure), and elsewhere is its listing
+  const shown = art && art.kind !== 'error' && !(CARD_MIME in art.bundle) ? art.bundle : null
   // a bare figure stands in a box its page scales it to fit (a slide's, a scene's)
   const wide = !bare && shown && width < FIGURE_CHART_MIN && isVegaLite(pickMime(shown) ?? '') ? FIGURE_CHART_MIN : undefined
   const body = pending ? (
@@ -157,7 +156,7 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
     <FigureOutput table={art?.kind === 'table'} wide={wide} out={outIndex(cell?.outputs, shown)}>
       <Output bundle={shown} fitWidth={wide ?? width} maxLines={30} maxRows={FIGURE_TABLE_ROWS} labels={chartLabels(cell?.labels, concepts)} />
     </FigureOutput>
-  ) : cell && !art && width > 0 ? (
+  ) : cell && (!art || CARD_MIME in art.bundle) && width > 0 ? (
     <CardFigure ws={ws} cell={cell} width={width} />
   ) : null
   if (bare) {
@@ -200,8 +199,9 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
   )
 }
 
-/** A card without a run to show, drawn by the canvas's own body for its kind (canvas/bodies CardBody), so a note, an
- * example, a label, a timeline or a custom card reads in the report as it does on the board. */
+/** A card without a run to show, or a card type's graphic, drawn by the canvas's own body for its kind (canvas/bodies
+ * CardBody), so a note, an example, a label, a timeline, a custom card or a card type's card reads in the report as it
+ * does on the board. */
 function CardFigure({ ws, cell, width }: { ws: string; cell: Cell; width: number }) {
   const board = useContext(CanvasContext)
   const ctx = useMemo(() => ({ ...board, ws }), [board, ws])
@@ -221,7 +221,7 @@ function CardFigure({ ws, cell, width }: { ws: string; cell: Cell; width: number
 }
 
 /**
- * The chart or table of a figure. A table wider than the column, or a chart laid out `wide` (px) in a narrower one,
+ * The chart, table or drawing of a figure. A table wider than the column, or a chart laid out `wide` (px) in a narrower one,
  * scrolls inside its box, and the box carries `wu-fig-overflow` while it does, so the stylesheet draws a fade at the
  * right edge where it continues.
  */
@@ -252,21 +252,21 @@ function FigureOutput({ table, wide, out, children }: { table?: boolean; wide?: 
   )
 }
 
-/** The cards a figure can show, from the canvas: a chart or a table each, one Card row per card with its kind and its time (who made it is not shown: the thread is the author). */
+/** The cards a figure can show, from the canvas: the cards that draw a figure (figureKind), one Card row per card with what it draws and its time (who made it is not shown: the thread is the author). */
 export function FigurePicker({ ws, onPick, onClose }: { ws: string; onPick: (cell: Cell) => void; onClose: () => void }) {
   const [state, setState] = useState<{ status: 'loading' } | { status: 'ok'; cells: Cell[] } | { status: 'error'; message: string }>({ status: 'loading' })
   useEffect(() => {
     let live = true
     api
       .canvas(ws)
-      .then((r) => live && setState({ status: 'ok', cells: figureCandidates(r.cells, artifactKind) }))
+      .then((r) => live && setState({ status: 'ok', cells: figureCandidates(r.cells, figureKind) }))
       .catch((e) => live && setState({ status: 'error', message: (e as Error).message }))
     return () => {
       live = false
     }
   }, [ws])
   return (
-    <div className="wu-picker" role="listbox" aria-label="Cards with a chart or a table">
+    <div className="wu-picker" role="listbox" aria-label="Cards that draw a figure">
       <div className="wu-picker-head">
         <span className="wu-head-spacer" />
         <Button variant="icon" size="sm" icon="x" title="Remove" aria-label="Remove" onClick={onClose} />
@@ -289,7 +289,7 @@ export function FigurePicker({ ws, onPick, onClose }: { ws: string; onPick: (cel
             head={c.title || undefined}
             meta={
               <>
-                <Chip kind="status">{artifactKind(c)}</Chip>
+                <Chip kind="status">{figureKind(c)}</Chip>
                 <time className="time" dateTime={c.created_ts ?? c.ts}>
                   {hhmm(c.created_ts ?? c.ts)}
                 </time>

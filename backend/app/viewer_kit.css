@@ -1,20 +1,47 @@
 /* thimble's own parts for a view's page, which views.frame_document puts before view.html's own styles. Each class
    draws as the app's part of the same name (frontend/src/styles/components.css) or as the Files view's table and tree
    rows (files.css), in the theme's tokens that the frame passes as CSS variables (frontend/src/lib/frame.ts
-   VIEW_TOKENS), so a view follows the paper, the accent and dark mode.
+   VIEW_TOKENS), so a view follows the paper, the accent and dark mode. The key chip (.chip-key), the menu trigger drawn
+   as a field (button.field, .field.active) and the Colour by control are the views' own: the app draws none of them.
      .chip             a value, a tag or a count: .chip-sans for a name in words, .chip-tone-neutral for a plain value,
-                       .chip-act when it can be clicked, .active when it is chosen
-     .btn              an action: .btn-primary, .btn-secondary or .btn-ghost, .btn-sm for the small size
+                       .chip-tone-evidence for a file, a record or a line, .chip-act when it can be clicked, .active
+                       when it is chosen, .chip-plain for a quiet one; .chip-text, .chip-ico and .chip-count inside it.
+                       .chip-key is a value with its colour, as a key or a toggle: a .chip-sw swatch, its name and its
+                       count, aria-pressed false when the value is off
+     .btn              an action: .btn-primary, .btn-secondary or .btn-ghost, .btn-sm for the small size,
+                       .btn-square for an icon alone; a toggle or a menu's trigger in a view's top row is
+                       .btn-secondary, so it reads as a button, .active (or aria-pressed) when on
      .seg + .seg-opt   an exclusive choice, the chosen option .active; .seg-track sets the options on a tint
-     .field            a text input or a select
+     .field            a text input or a select, or a button that opens a menu (button.field), .active when its menu
+                       has a choice set, aria-invalid when what was typed cannot be used
      .table            a table of records: caps header, hairline rows, .active on the chosen row
      .list-row         a row of a list: .active on the chosen one
      .avatar           a person or an agent: the initial of its name on a neutral disc, whose shade the page sets
-                       from the name as --a (0.08 to 0.24), so the label colours stay the only colours */
+                       from the name as --a (0.08 to 0.24), so the label colours stay the only colours
+     .thimble-colour-* the Color by control (viewer_colour.js, thimble.colorBy), which the page only mounts: Color by
+                       and the values' key chips in the top row, its menu with each label's definition, and a list's
+                       two tracks with their preview; .thimble-reset its Reset; .thimble-tip the kit's tip
+     .thimble-range-*  the time range selector (viewer_range.js, thimble.timeRange): the overview, its viewfinder and
+                       the readout; .thimble-axis-* the axis thimble.timeAxis draws under a chart of the range
+     .thimble-details  a row's details opened in place (thimble.expand) */
 
 body {
   font: 400 var(--text-sm) / 1.45 var(--font-body);
   color: var(--text-primary);
+}
+/* a view never scrolls sideways: the page fits its pane's width, a long line of code or data wraps, and a picture,
+   a video or a canvas scales down to the width it has */
+html {
+  overflow-x: hidden;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+img,
+video,
+canvas {
+  max-width: 100%;
 }
 
 .chip {
@@ -33,10 +60,15 @@ body {
   color: var(--text-accent);
   font: 400 var(--text-mono-sm) / 1 var(--font-mono);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
   white-space: nowrap;
   vertical-align: 1px;
   cursor: default;
   transition: var(--transition-color);
+}
+.chip[hidden] {
+  display: none;
 }
 .chip-sans {
   height: 22px;
@@ -44,10 +76,38 @@ body {
   border-radius: var(--radius-ui);
   font: 400 var(--text-ui-sm) / 1 var(--font-body);
 }
+/* the name, cut with an ellipsis */
+.chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 14px;
+}
+.chip-ico {
+  flex: none;
+  width: 10px;
+  height: 10px;
+}
+/* a count after the name, past a hairline */
+.chip-count {
+  flex: none;
+  padding: 0 0 0 5px;
+  margin-right: -1px;
+  border-left: 1px solid color-mix(in oklab, currentColor 25%, transparent);
+  font: 400 var(--text-mono-sm) / 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
 .chip-tone-neutral {
   border-color: rgba(var(--ink-rgb), 0.18);
   background: var(--surface-card);
   color: var(--text-primary);
+}
+/* what points at the data: a file, a record, a line */
+.chip-tone-evidence {
+  border-color: rgba(var(--ink-rgb), 0.18);
+  background: var(--surface-card);
+  color: var(--text-secondary);
 }
 .chip-tone-positive,
 .chip-tone-warning,
@@ -66,6 +126,12 @@ body {
   border-color: var(--status-negative);
   color: var(--status-negative);
 }
+.chip-plain,
+.chip-plain.chip-tone-neutral {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+}
 .chip-act {
   cursor: pointer;
 }
@@ -77,12 +143,80 @@ body {
   border-color: rgba(var(--ink-rgb), 0.3);
   background: var(--surface-card);
 }
+.chip-tone-evidence.chip-act:hover {
+  border-color: rgba(var(--ink-rgb), 0.3);
+  background: var(--surface-card);
+  color: var(--text-primary);
+}
+.chip-tone-positive.chip-act:hover,
+.chip-tone-warning.chip-act:hover,
+.chip-tone-negative.chip-act:hover {
+  background: var(--surface-card);
+}
+.chip-act:active {
+  transform: translateY(0.5px);
+}
+.chip-act:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .chip.active,
 .chip.active:hover,
 .chip[aria-pressed='true'] {
   border-color: var(--surface-inverse);
   background: var(--surface-inverse);
   color: var(--text-on-inverse);
+}
+.chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+/* a value with its colour, as a key or a toggle (Colour by's chips): the value's colour a square swatch before its name
+   (.chip-sw, its colour --c; the records with no value, which the marks draw grey, a grey one), the name in the body
+   face, the count in mono after it (.chip-count), on a hairline box at a control's height. Pressed, it keeps that look;
+   a value turned off (aria-pressed false) takes the quiet chip's look (.chip-plain), its swatch an outline, so a grey
+   swatch never reads as a value turned off. */
+.chip-key {
+  height: var(--h-control);
+  padding: 0 7px 0 6px;
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 400 var(--text-xs) / 1 var(--font-body);
+}
+.chip-key .chip-text {
+  max-width: 200px;
+}
+.chip.chip-key[aria-pressed='true'] {
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+}
+.chip.chip-key.chip-act:hover {
+  border-color: rgba(var(--ink-rgb), 0.3);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.chip.chip-key[aria-pressed='false'] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.chip.chip-key[aria-pressed='false']:hover {
+  border-color: var(--border-subtle);
+  background: transparent;
+}
+.chip-sw {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--c, rgba(var(--ink-rgb), 0.34));
+  box-shadow: inset 0 0 0 1px var(--c, rgba(var(--ink-rgb), 0.34));
+}
+.chip-key[aria-pressed='false'] .chip-sw {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--c, rgba(var(--ink-rgb), 0.3));
 }
 
 .btn {
@@ -108,6 +242,17 @@ body {
   padding: 0 9px;
   font-size: var(--text-mono);
 }
+/* an icon alone is a square */
+.btn-square {
+  width: var(--control-sm);
+  padding: 0;
+}
+.btn-sm.btn-square {
+  width: var(--h-control);
+}
+a.btn {
+  text-decoration: none;
+}
 .btn-ghost {
   padding: 0 6px;
 }
@@ -122,6 +267,11 @@ body {
 }
 .btn-secondary:hover {
   background: var(--surface-hover);
+}
+/* a toggle that is on, such as a view's Density or "Got through": the secondary button on a light fill */
+.btn-secondary.active,
+.btn-secondary[aria-pressed='true'] {
+  background: var(--surface-selected);
 }
 .btn-primary {
   border-color: var(--accent);
@@ -206,6 +356,28 @@ body {
   color: var(--text-placeholder);
   opacity: 1;
 }
+.field[aria-invalid='true'] {
+  border-color: var(--status-negative);
+}
+/* a button drawn as a field opens a menu, as a select does: its name, a count or the chosen value, then a chevron.
+   .active says its menu has a choice set, such as a filter. */
+button.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  text-align: left;
+  cursor: pointer;
+}
+button.field:hover,
+button.field[aria-expanded='true'],
+select.field:hover {
+  border-color: rgba(var(--ink-rgb), 0.28);
+}
+.field.active {
+  border-color: rgba(var(--ink-rgb), 0.28);
+  background-color: var(--surface-selected);
+}
 /* a select draws a chevron of two thin strokes in the theme's ink in place of the browser's arrow */
 select.field {
   appearance: none;
@@ -287,4 +459,874 @@ select.field {
   color: var(--text-primary);
   font: 600 11px / 1 var(--font-body);
   text-transform: uppercase;
+}
+
+/* -------- Colour by (viewer_colour.js). The control fills the element the page mounts it in, in its top row: the
+   Colour by button (thimble's small secondary button, its choice in it and a chevron, as a menu's trigger), then a key
+   chip per value (.chip.chip-key above: a square swatch of its colour, its name and its count) that turns the value
+   off and on. Values that do not fit go behind "N more". The records carry the colour as a bar on their left edge,
+   which the bridge draws. -------- */
+/* the mount takes the row's free width whatever its chips, so a chip hidden or shown never resizes it */
+.thimble-colour-mount {
+  display: flex;
+  align-items: center;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.thimble-colour {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.thimble-colour-ico {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.thimble-colour-by.btn {
+  flex: none;
+  gap: 5px;
+  padding: 0 7px 0 9px;
+  font-weight: 400;
+}
+.thimble-colour-by.btn[aria-expanded='true'] {
+  background: var(--surface-hover);
+}
+.thimble-colour-k {
+  color: var(--text-secondary);
+}
+.thimble-colour-by b {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.thimble-colour-plus {
+  color: var(--text-secondary);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+}
+.thimble-colour-by .thimble-colour-ico,
+.thimble-colour-more .thimble-colour-ico {
+  width: 12px;
+  height: 12px;
+  color: var(--text-tertiary);
+}
+.thimble-colour-chips {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.thimble-colour-chips > .chip {
+  flex: none;
+}
+.thimble-colour-n {
+  flex: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.thimble-colour-more.btn {
+  flex: none;
+  gap: 4px;
+  font-weight: 400;
+}
+.thimble-colour-more[hidden] {
+  display: none;
+}
+
+/* the menu: Off, then the view's fields and the labels, any of them checked together; a choice past the first says
+   it is a track */
+.thimble-colour-menu {
+  position: fixed;
+  z-index: 2147483000;
+  box-sizing: border-box;
+  min-width: 220px;
+  max-width: min(340px, calc(100vw - 16px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px;
+  border: var(--overlay-edge, 1px solid var(--surface-card));
+  border-radius: var(--radius-card);
+  background: var(--overlay-bg, var(--surface-card));
+  box-shadow: var(--shadow-popover, 0 0 0 1px rgba(var(--ink-rgb), 0.09), 0 10px 28px -18px rgba(var(--ink-rgb), 0.28));
+  color: var(--text-primary);
+  font: 400 var(--text-ui-sm) / 1.3 var(--font-body);
+}
+.thimble-colour-head {
+  padding: 6px 8px 3px;
+  color: var(--text-tertiary);
+  font: 400 var(--text-eyebrow, 11px) / 1.2 var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.thimble-colour-head:not(:first-child) {
+  margin-top: 4px;
+}
+.thimble-colour-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--h-row);
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.thimble-colour-item:hover,
+.thimble-colour-item:focus-visible {
+  outline: none;
+  background: var(--track-bg);
+}
+.thimble-colour-item[aria-checked='true'] {
+  font-weight: 500;
+}
+.thimble-colour-tick {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  color: var(--text-primary);
+}
+.thimble-colour-sw {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--c, rgba(var(--ink-rgb), 0.34));
+  box-shadow: inset 0 0 0 1px var(--c, rgba(var(--ink-rgb), 0.34));
+}
+.thimble-colour-nm {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* a field's or a label's row: its name and how many values it has, then its values as chips on one line, cut off with
+   … where they do not fit */
+.thimble-colour-item.thimble-colour-choice {
+  align-items: flex-start;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.thimble-colour-choice > .thimble-colour-tick,
+.thimble-colour-choice > .thimble-colour-box {
+  margin-top: 1px;
+}
+.thimble-colour-track-n {
+  flex: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1 var(--font-body);
+}
+.thimble-colour-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.thimble-colour-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 16px;
+}
+.thimble-colour-top .thimble-colour-n {
+  flex: none;
+  margin-left: auto;
+}
+.thimble-colour-preview {
+  display: block;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font: 400 var(--text-xs) / 18px var(--font-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.thimble-colour-pchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 18px;
+  margin-right: 4px;
+  padding: 0 5px 0 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-chip, 4px);
+  vertical-align: top;
+}
+.thimble-colour-note {
+  padding: 4px 8px 6px 30px;
+  color: var(--text-tertiary);
+}
+.thimble-colour-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border-hairline);
+}
+.thimble-colour-box {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--surface-card);
+  color: var(--text-on-inverse);
+}
+.thimble-colour-box.on {
+  border-color: var(--surface-inverse);
+  background: var(--surface-inverse);
+}
+.thimble-colour-box .thimble-colour-ico {
+  width: 10px;
+  height: 10px;
+  stroke-width: 2.25;
+}
+/* Reset at the row's end. Hidden, it keeps its place unseen (not focusable, not read out), so the chips fit one box
+   whether it shows or not (viewer_colour.js fit) and none moves behind "N more" when it shows */
+.thimble-colour {
+  flex: 1 1 auto;
+}
+.thimble-reset.btn {
+  flex: none;
+  gap: 5px;
+  margin-left: auto;
+  padding: 0 9px 0 7px;
+  font-weight: 400;
+}
+.thimble-reset.btn[hidden] {
+  display: inline-flex;
+  visibility: hidden;
+}
+/* a row too narrow for "N more" beside Color by and the unseen Reset: Reset gives up its place while hidden */
+.thimble-reset.btn.thimble-reset-gone[hidden] {
+  display: none;
+}
+.thimble-reset .thimble-colour-ico {
+  width: 12px;
+  height: 12px;
+  color: var(--text-secondary);
+}
+
+/* a chip's swatch opens the palette: the press lands a little around it */
+.thimble-colour-chip .chip-sw[data-palette] {
+  position: relative;
+  cursor: pointer;
+}
+.thimble-colour-chip .chip-sw[data-palette]::after {
+  content: '';
+  position: absolute;
+  inset: -6px -4px -6px -5px;
+}
+.thimble-colour-chip .chip-sw[data-palette]:hover {
+  box-shadow: inset 0 0 0 1.5px var(--c), 0 0 0 1.5px var(--surface-card), 0 0 0 2.5px var(--c);
+}
+/* the palette of a value's colours: thimble's label colours around the colour wheel, a column per hue with its light
+   above its dark, the value's own ringed, then Reset colors */
+.thimble-colour-menu.thimble-colour-palette {
+  min-width: 0;
+  padding: 6px 8px 8px;
+  border-radius: var(--radius-ui);
+}
+.thimble-colour-palette .thimble-colour-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 8px;
+  color: var(--text-primary);
+  font: 500 var(--text-ui-sm, 12px) / 1.2 var(--font-body);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.thimble-colour-picks {
+  display: grid;
+  grid-template-rows: repeat(2, 20px);
+  grid-auto-columns: 20px;
+  grid-auto-flow: column;
+  gap: 6px;
+}
+/* a value of "N more": its swatch opens the picker under it, in the menu */
+.thimble-colour-swbtn {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+.thimble-colour-swbtn::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+.thimble-colour-swbtn:hover,
+.thimble-colour-swbtn[aria-expanded='true'] {
+  box-shadow: inset 0 0 0 1.5px var(--c), 0 0 0 1.5px var(--overlay-bg, var(--surface-card)), 0 0 0 2.5px var(--c);
+}
+.thimble-colour-inpick {
+  padding: 4px 8px 8px 52px;
+}
+/* a group's mix of its records' values (thimble.mix): a small bar, each value's share in its colour */
+.thimble-mix {
+  display: inline-flex;
+  flex: none;
+  gap: 1px;
+  box-sizing: border-box;
+  width: 48px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 1px;
+  vertical-align: middle;
+}
+.thimble-mix[hidden] {
+  display: none;
+}
+.thimble-mix > span {
+  min-width: 1px;
+}
+.thimble-colour-pick {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-chip, 4px);
+  background: var(--c);
+  cursor: pointer;
+}
+.thimble-colour-pick:hover {
+  box-shadow: 0 0 0 2px var(--overlay-bg, var(--surface-card)), 0 0 0 3px rgba(var(--ink-rgb), 0.35);
+}
+.thimble-colour-pick.on {
+  box-shadow: 0 0 0 2px var(--overlay-bg, var(--surface-card)), 0 0 0 3.5px var(--text-primary);
+}
+.thimble-colour-pick:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--overlay-bg, var(--surface-card)), 0 0 0 3.5px var(--accent);
+}
+.thimble-colour-repick.btn {
+  gap: 5px;
+  margin-top: 8px;
+  padding: 0 6px;
+}
+
+/* the kit's tip: a few words beside the pointer, as the app's tooltips */
+.thimble-tip {
+  position: fixed;
+  z-index: 2147483100;
+  display: none;
+  box-sizing: border-box;
+  max-width: 300px;
+  padding: 5px 8px;
+  border: var(--overlay-edge, 1px solid var(--surface-card));
+  border-radius: var(--radius-ui);
+  background: var(--overlay-bg, var(--surface-card));
+  box-shadow: var(--shadow-popover, 0 0 0 1px rgba(var(--ink-rgb), 0.09), 0 10px 28px -18px rgba(var(--ink-rgb), 0.28));
+  color: var(--text-primary);
+  font: 400 var(--text-xs) / 1.4 var(--font-body);
+  pointer-events: none;
+}
+.thimble-tip-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+.thimble-tip-m {
+  color: var(--text-secondary);
+}
+
+/* a list's two tracks, as Files' Transcript mode draws them: the overview (one lane of the records' colours, a dark frame
+   around the part in view), then at the list's right edge the zoomed track, which
+   magnifies the frame: the part in view under a lens, two lines and a light wedge joining the frame to the lens; over
+   the list's own hidden scrollbar */
+.thimble-colour-scrolled {
+  scrollbar-width: none;
+}
+.thimble-colour-scrolled::-webkit-scrollbar {
+  display: none;
+}
+.thimble-colour-strip {
+  position: fixed;
+  z-index: 2147482000;
+  width: 12px;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+}
+.thimble-colour-track {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  background: rgba(var(--ink-rgb), 0.05);
+}
+.thimble-colour-track canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+/* a lane of the overview, over its colours, which names its label on hover */
+.thimble-colour-lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+/* the part in view on the overview: a frame as wide as the track in the full ink, a line of the paper inside it, so
+   that it stands out over any colour; square, so that the lines start at its corners; a drag of it moves the view */
+.thimble-colour-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  border: 2px solid var(--text-primary, rgb(var(--ink-rgb)));
+  border-radius: 0;
+  box-shadow: inset 0 0 0 1px var(--surface-card);
+  cursor: grab;
+  will-change: transform;
+}
+.thimble-colour-strip[data-drag] .thimble-colour-thumb {
+  cursor: grabbing;
+}
+/* a drag on the zoomed track scrolls the list, as a scrollbar's thumb does */
+.thimble-colour-zoom {
+  cursor: grab;
+}
+.thimble-colour-strip[data-drag],
+.thimble-colour-strip[data-drag] * {
+  cursor: grabbing;
+}
+/* the lens over the part in view on the zoomed track, a little wider than the track: its paper and float under the
+   records, its edge over them */
+.thimble-colour-lens,
+.thimble-colour-zoom .thimble-colour-thumb {
+  top: 0;
+  left: -3px;
+  right: -3px;
+  box-sizing: border-box;
+  border-radius: 4px; /* LENS_R: the lines meet the lens's left edge where its corners' curves end */
+  pointer-events: none;
+  will-change: transform;
+}
+.thimble-colour-lens {
+  position: absolute;
+  background: var(--surface-card);
+  box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.3);
+}
+.thimble-colour-zoom .thimble-colour-thumb {
+  border: 1px solid rgba(var(--ink-rgb), 0.55);
+  box-shadow: none;
+}
+.thimble-colour-strip[data-drag] .thimble-colour-zoom .thimble-colour-thumb {
+  border-color: rgba(var(--ink-rgb), 0.8);
+}
+/* the record a click on the overview snapped to, highlighted for a moment as a followed ref's record is */
+[data-thimble-snap] {
+  animation: thimble-snap 1.5s ease-out forwards;
+}
+@keyframes thimble-snap {
+  0%,
+  30% {
+    background-color: var(--hl-bg, rgba(255, 214, 0, 0.32));
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+/* the lines from the frame's top and bottom to the lens's, and the wedge between them */
+.thimble-colour-link {
+  position: absolute;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.thimble-colour-link polygon {
+  fill: rgba(var(--ink-rgb), 0.08);
+  shape-rendering: crispEdges;
+}
+.thimble-colour-link line {
+  stroke: rgba(var(--ink-rgb), 0.62);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+/* the preview of the records under the pointer on a track */
+.thimble-colour-peek {
+  position: fixed;
+  z-index: 2147482100;
+  display: none;
+  box-sizing: border-box;
+  width: min(320px, calc(100vw - 48px));
+  padding: 4px;
+  border: var(--overlay-edge, 1px solid var(--surface-card));
+  border-radius: var(--radius-ui);
+  background: var(--overlay-bg, var(--surface-card));
+  box-shadow: var(--shadow-popover, 0 0 0 1px rgba(var(--ink-rgb), 0.09), 0 10px 28px -18px rgba(var(--ink-rgb), 0.28));
+  color: var(--text-primary);
+  font: 400 var(--text-xs) / 1.35 var(--font-body);
+  pointer-events: none;
+}
+/* each record a plain row, its colour a straight bar on its left edge as a record's row carries it */
+.thimble-peek-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 6px 3px 9px;
+  box-shadow: inset 3px 0 0 var(--c, transparent);
+}
+.thimble-peek-row time {
+  flex: none;
+  color: var(--text-secondary);
+  font: 400 var(--text-mono-sm) / 1.35 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.thimble-peek-t {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* -------- the time range selector (viewer_range.js): the readout, then the overview of the whole span with the
+   viewfinder over it, the parts beside it dimmed, its edges' grips, the point events' flags, and light ticks under it.
+   -------- */
+.thimble-range-mount {
+  display: block;
+  min-width: 0;
+}
+.thimble-range {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.thimble-range.thimble-range-narrow {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+}
+.thimble-range-read {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 13.5em;
+  color: var(--text-primary);
+  font: 400 var(--text-mono-sm) / 1.35 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* the kit's own readout as wide as the widest this span gives (viewer_range.js), so the overview keeps its place; its
+   start and end each whole, wrapping only after the dash (on two lines for a span of years) */
+.thimble-range > .thimble-range-read {
+  width: var(--thimble-read-w, auto);
+}
+.thimble-range-dates {
+  white-space: normal;
+}
+.thimble-range-d {
+  white-space: nowrap;
+}
+.thimble-range-narrow .thimble-range-read {
+  flex-direction: row;
+  gap: 8px;
+  min-width: 0;
+}
+.thimble-range-narrow > .thimble-range-read {
+  width: auto;
+}
+.thimble-range-len {
+  color: var(--text-tertiary);
+}
+.thimble-range-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.thimble-range-strip {
+  position: relative;
+  border-radius: var(--radius-chip);
+  background: rgba(var(--ink-rgb), 0.035);
+  cursor: crosshair;
+  user-select: none;
+  touch-action: none;
+}
+.thimble-range-strip canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+.thimble-range-dim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: color-mix(in oklab, var(--surface-card) 66%, transparent);
+  pointer-events: none;
+}
+.thimble-range-dim-l {
+  border-radius: var(--radius-chip) 0 0 var(--radius-chip);
+}
+.thimble-range-dim-r {
+  border-radius: 0 var(--radius-chip) var(--radius-chip) 0;
+}
+/* the time the page has in view (range.visible, range.follow): a band under the viewfinder's frame, an ink tint with a
+   line at each edge, where the frame is an outline with no fill */
+.thimble-range-vis {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  box-sizing: border-box;
+  min-width: 3px;
+  border-right: 1px solid rgba(var(--ink-rgb), 0.5);
+  border-left: 1px solid rgba(var(--ink-rgb), 0.5);
+  background: rgba(var(--ink-rgb), 0.14);
+  pointer-events: none;
+}
+/* the viewfinder: a frame over the overview, its middle a drag that pans, its edges grips that zoom */
+.thimble-range-win {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  box-sizing: border-box;
+  border: 1.5px solid rgba(var(--ink-rgb), 0.62);
+  border-radius: var(--radius-chip);
+  cursor: grab;
+  outline: none;
+}
+.thimble-range-all .thimble-range-win {
+  border-color: rgba(var(--ink-rgb), 0.3);
+  cursor: crosshair;
+}
+.thimble-range-win:focus-visible {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.thimble-range[data-drag='pan'] .thimble-range-win {
+  cursor: grabbing;
+}
+.thimble-range[data-drag] .thimble-range-win {
+  border-color: var(--text-primary);
+}
+.thimble-range-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  cursor: ew-resize;
+  outline: none;
+}
+.thimble-range-grip-l {
+  left: -7px;
+}
+.thimble-range-grip-r {
+  right: -7px;
+}
+.thimble-range-grip span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  box-sizing: border-box;
+  width: 6px;
+  height: min(16px, 70%);
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(var(--ink-rgb), 0.62);
+  border-radius: 2px;
+  background: var(--surface-card);
+}
+.thimble-range-grip:hover span,
+.thimble-range[data-drag='l'] .thimble-range-grip-l span,
+.thimble-range[data-drag='r'] .thimble-range-grip-r span {
+  border-color: var(--text-primary);
+  background: var(--surface-hover);
+}
+/* a point event: a flag at the top of the overview, its label in the tip */
+.thimble-range-flags {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.thimble-range-flag {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  margin-left: -4px;
+  pointer-events: auto;
+  cursor: default;
+}
+.thimble-range-flag::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: var(--c, var(--text-secondary));
+  opacity: 0.55;
+}
+.thimble-range-flag::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 4px;
+  border-top: 5px solid var(--c, var(--text-secondary));
+  border-right: 5px solid transparent;
+}
+/* light ticks, and a few labels while the viewfinder frames part of the span and no chart's axis (thimble.timeAxis)
+   reads below it */
+.thimble-range-axis {
+  position: relative;
+  height: 12px;
+  overflow: hidden;
+}
+.thimble-range-tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 3px;
+  background: rgba(var(--ink-rgb), 0.18);
+}
+.thimble-range-tick.major {
+  height: 5px;
+  background: rgba(var(--ink-rgb), 0.3);
+}
+.thimble-range-lab {
+  position: absolute;
+  top: 1px;
+  transform: translateX(-50%);
+  color: var(--text-tertiary);
+  font: 400 9.5px / 11px var(--font-mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.thimble-range-lab:hover {
+  color: var(--text-primary);
+}
+
+/* the axis of a chart of the range (thimble.timeAxis): the view's one readable axis, then its point events' flags */
+.thimble-axis {
+  position: relative;
+  display: block;
+  min-width: 0;
+  letter-spacing: normal;
+  text-transform: none;
+  user-select: none;
+}
+.thimble-axis-row {
+  position: relative;
+  height: 18px;
+}
+.thimble-axis-tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 4px;
+  background: var(--border-strong);
+}
+.thimble-axis-tick.major {
+  height: 6px;
+}
+.thimble-axis-lab {
+  position: absolute;
+  top: 5px;
+  transform: translateX(-50%);
+  color: var(--text-tertiary);
+  font: 400 10px / 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.thimble-axis-lab.major {
+  color: var(--text-secondary);
+}
+.thimble-axis-break {
+  position: absolute;
+  top: 3px;
+  transform: translateX(-50%);
+  color: var(--text-tertiary);
+  font: 400 10px / 12px var(--font-mono);
+  letter-spacing: -1px;
+}
+.thimble-axis-flags {
+  position: relative;
+  height: 20px;
+}
+.thimble-axis-flag {
+  position: absolute;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 200px;
+  height: 18px;
+  margin: 0;
+  padding: 0 6px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 400 var(--text-xs) / 18px var(--font-body);
+  white-space: nowrap;
+  cursor: default;
+}
+.thimble-axis-flag.end {
+  flex-direction: row-reverse;
+  padding: 0 0 0 6px;
+  transform: translateX(-100%);
+}
+.thimble-axis-pin {
+  position: relative;
+  flex: none;
+  width: 1px;
+  height: 18px;
+  background: var(--c, var(--text-secondary));
+}
+.thimble-axis-pin::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-top: 6px solid var(--c, var(--text-secondary));
+  border-right: 7px solid transparent;
+}
+.thimble-axis-flag.end .thimble-axis-pin::after {
+  left: auto;
+  right: 0;
+  border-right: 0;
+  border-left: 7px solid transparent;
+}
+.thimble-axis-fl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thimble-axis-flag:hover {
+  color: var(--text-primary);
+}
+
+/* a row's details, opened in place under its line (thimble.expand) */
+.thimble-details {
+  overflow: hidden;
 }

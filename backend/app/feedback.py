@@ -3,7 +3,7 @@
 `build` writes <Downloads>/thimble-feedback-<YYYYMMDD-HHMMSS>.zip (else <home>, else the temp folder) holding
 contents.txt, description.txt, an optional screenshot, versions.txt, doctor.txt, import-error.txt when the supervisor
 could not be imported, and, unless the tester leaves the logs out: server and install log tails, the browser's recent
-errors, and the workspace's permissions, orientation record, checks, views, dev tickets, events, background sessions'
+errors, and the workspace's permissions, orientation record, checks, views, dev tickets, events, agent sessions'
 transcripts and chats.
 
 Only thimble's own files and the workspace's state are read, and transcripts only under a Claude Code projects folder;
@@ -620,7 +620,7 @@ def dev_tickets(c: str) -> list[dict[str, Any]]:
 
 
 def transcript_roots(ws: Path) -> list[Path]:
-    """The Claude Code projects folders a background session's transcript may be in. sessions.json's `config_dir` is
+    """The Claude Code projects folders an agent session's transcript may be in. sessions.json's `config_dir` is
     not read, since a cell can write that file."""
     dirs: list[Path] = []
     cfg = _lazy("config")
@@ -775,7 +775,7 @@ def _transcripts(b: Bundle, ws: Path, sessions: list[dict[str, Any]]) -> list[di
     kept = sum(1 for r in index if r.get("files"))
     if kept:
         b.notes.append(f"{'workspace/transcripts/':<32}the Claude Code transcripts of {kept} of the workspace's "
-                       f"{len(sessions)} background sessions and of their subagents, in the order of their chats "
+                       f"{len(sessions)} agent sessions and of their subagents, in the order of their chats "
                        f"(each cut to its last {human(TRANSCRIPT_MAX)}, a subagent's to {human(SUBAGENT_MAX)}); images "
                        "left out")
     return index
@@ -898,11 +898,11 @@ def _workspace(b: Bundle, c: str, ws: Path, description: str, focus: list[str]) 
                "the workspace event stream")
     metas = b.part("the chats' records", _chat_metas, ws) or []
     first = b.part("the chats the report names", first_chats, c, ws, metas, description, focus) or [*focus, "main"]
-    sessions = b.part("the background sessions", background_sessions, c, ws, metas, first) or []
+    sessions = b.part("the agent sessions", background_sessions, c, ws, metas, first) or []
     index = b.part("workspace/transcripts", _transcripts, b, ws, sessions) or []
     if index:
         b.rows("workspace/sessions.jsonl", [trimmed(r, 1000) for r in index], STATE_MAX,
-               "each background session: role, chat, state and the transcript files taken")
+               "each agent session: role, chat, state and the transcript files taken")
     b.part("workspace/chats", _chats, b, ws, first)
 
 

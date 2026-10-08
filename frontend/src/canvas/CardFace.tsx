@@ -1,7 +1,9 @@
 // A card as the analyst sees it at rest: its question, the Labels row, its body by kind (bodies.tsx) and its takeaway,
 // in the card's own box. The board's CellCard (Cell.tsx) adds hover chrome around it, and the card harness
 // (render.tsx) mounts it alone, so the image a check reads is the card the canvas draws. The face also shows the card
-// check's state: a shimmer while it runs, its replacement faded in once confirmed, and a mark at the takeaway's corner.
+// check, only as far as the analyst needs it at rest: a shimmer while it runs, its replacement faded in once confirmed,
+// and a red ✕ at the takeaway's corner only for a real problem it found (lib/cardCheck checkProblem). The rest of the
+// check, the fix's Undo among it, is in the card's details (CheckDetails).
 // The body shimmers the same way while the card's code runs, as when an edit_card call is changing it, and the card
 // shimmers as in a check while thimble runs it again because a label it read changed.
 import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
@@ -15,12 +17,12 @@ import { Mark } from '../components/Marks'
 import { Popover } from '../components/Menu'
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
-import { placeTip, TipButton, useTooltip } from '../components/Tooltip'
+import { placeTip, useTooltip } from '../components/Tooltip'
 import { LabelSheet } from '../files/LabelCard'
 import { classesOf, isFilesLabel, isMultiClass, mainColour } from '../files/labels'
 import { addAgentZone, tintElement } from '../lib/agentKey'
 import { bus } from '../lib/bus'
-import { checkable, checkLine, checkOf, typedLine, type CardCheck } from '../lib/cardCheck'
+import { checkOf, checkProblem } from '../lib/cardCheck'
 import { conceptLabel, ensureConceptName, hasConceptName, onCellNames } from '../lib/cellName'
 import { teleport } from '../lib/teleport'
 import type { Cell, Concept } from '../lib/types'
@@ -55,12 +57,8 @@ export interface CardFaceProps {
   asking?: boolean
   onTextDown?: (field: CardField) => (e: MouseEvent<HTMLElement>) => void
   onTextClick?: (field: CardField) => (e: MouseEvent<HTMLElement>) => void
-  /** Undo in the check mark's hover */
-  onUndoFix?: (check: CardCheck) => void
-  /** a click on the check mark: run the check again (none in the harness, whose card has no mark) */
+  /** Check again in the hover of the problem's ✕ (none in the harness, whose card has no mark) */
   onCheckAgain?: () => void
-  /** a click on a running check's mark: stop it */
-  onStopCheck?: () => void
   cardRef?: (el: HTMLElement | null) => void
 }
 
@@ -83,6 +81,7 @@ function Face(p: CardFaceProps) {
   const running = cell.status === 'running'
   const failed = cell.status === 'error' && !running
   const check = checkOf(cell)
+  const problem = p.onCheckAgain ? checkProblem(check) : ''
   const swapped = useSwap(check?.fix?.id ?? null)
   const cls = ['canvas-card']
   if (check?.state === 'running') cls.push('is-checking')
@@ -101,6 +100,7 @@ function Face(p: CardFaceProps) {
       data-concept={concept || undefined}
       data-status={cell.status || undefined}
       data-check={check?.state || undefined}
+      data-check-problem={problem ? '' : undefined}
     >
       {p.chrome}
       <div className="bcell-head">
@@ -146,12 +146,12 @@ function Face(p: CardFaceProps) {
           <div className={'chat-text bcell-take-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
             <ChatMarkdown text={cell.takeaway} />
           </div>
-          <CheckMark check={check} idle={!check && !!p.onCheckAgain && checkable(cell)} onUndo={p.onUndoFix} onAgain={p.onCheckAgain} onStop={p.onStopCheck} />
+          {problem && <ProblemMark text={problem} onAgain={p.onCheckAgain} />}
         </div>
-      ) : check ? (
+      ) : problem ? (
         <div className="bcell-take bcell-take-none">
           <div className="chat-text bcell-take-text" />
-          <CheckMark check={check} onUndo={p.onUndoFix} onAgain={p.onCheckAgain} onStop={p.onStopCheck} />
+          <ProblemMark text={problem} onAgain={p.onCheckAgain} />
         </div>
       ) : null}
       {p.after}
@@ -270,93 +270,27 @@ function LabelTag({ id, label: k, ws, why, ink }: { id: string; label: Concept |
   )
 }
 
-/**
- * The card check's mark at the takeaway's bottom right: a spinner while running, a check glyph when done, a run-again
- * glyph when it failed or was stopped. Its hover explains the state (with Undo for an applied replacement); a click
- * stops a running check or runs a finished one again. With `idle`, an unchecked card shows a faint mark on hover.
- */
-function CheckMark({ check, idle, onUndo, onAgain, onStop }: { check: CardCheck | null; idle?: boolean; onUndo?: (check: CardCheck) => void; onAgain?: () => void; onStop?: () => void }) {
-  if (!check && idle && onAgain) {
-    const stopIt = (e: MouseEvent) => e.stopPropagation()
-    return (
-      <span className="bcell-check bcell-check-idle" onMouseDown={stopIt} onClick={stopIt}>
-        <TipButton tip="Not checked. Click to check the card" className="bcell-check-mark is-idle" onClick={() => onAgain()}>
-          <Icon name="check" size={12} />
-        </TipButton>
-      </span>
-    )
-  }
-  if (!check) return null
-  const running = check.state === 'running'
-  const act = running ? onStop : onAgain
-  const fix = check.fix
-  const title = fix?.before.title
-  const takeaway = fix?.before.takeaway
-  const line = checkLine(check)
-  const typed = typedLine(check)
-  const ended = check.state === 'failed' || check.state === 'stopped'
+/** The card check's one mark, a red ✕ at the takeaway's bottom right for a real problem it found (checkProblem). Its
+ * hover says what is wrong and offers Check again. */
+function ProblemMark({ text, onAgain }: { text: string; onAgain?: () => void }) {
   return (
-    <SharedCheckMark
-      state={check.state}
-      phase={check.phase}
-      flagged={!!typed}
-      label={[line, typed.replace(/\.$/, ''), act ? (running ? 'Stop the check' : 'Check again') : ''].filter(Boolean).join('. ')}
-      popLabel="The card check"
-      onClick={act}
-    >
+    <SharedCheckMark state="failed" problem label={text} popLabel="The card check's problem">
       {(close) => (
         <>
-          <span className="bcell-check-when">{line}</span>
-          {typed && <span className="bcell-check-what">{typed}</span>}
-          {check.note && <span className="bcell-check-what">{check.note}.</span>}
-          {ended && <span className="bcell-check-what">This check changed nothing on the card.</span>}
-          {running && onStop && (
+          <span className="bcell-check-what">{text}</span>
+          {onAgain && (
             <span className="bcell-check-acts">
               <Button
                 variant="ghost"
                 size="sm"
-                icon="stop"
+                icon="refresh"
                 onClick={() => {
                   close()
-                  onStop()
+                  onAgain()
                 }}
               >
-                Stop
+                Check again
               </Button>
-            </span>
-          )}
-          {fix?.reason && <span className="bcell-check-what">Revised: {fix.reason}</span>}
-          {fix && (title != null || takeaway != null) && (
-            <span className="bcell-check-before">
-              <span className="bcell-check-label">Before</span>
-              {title != null && <span className="bcell-check-q">{title}</span>}
-              {takeaway != null && (
-                <span className="chat-text">
-                  <ChatMarkdown text={takeaway || '—'} />
-                </span>
-              )}
-            </span>
-          )}
-          {!running && (onAgain || (fix && onUndo)) && (
-            <span className="bcell-check-acts">
-              {fix && onUndo && (
-                <Button variant="ghost" size="sm" icon="undo" onClick={() => onUndo(check)}>
-                  Undo
-                </Button>
-              )}
-              {onAgain && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon="refresh"
-                  onClick={() => {
-                    close()
-                    onAgain()
-                  }}
-                >
-                  Check again
-                </Button>
-              )}
             </span>
           )}
         </>

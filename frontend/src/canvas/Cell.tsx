@@ -11,10 +11,10 @@ import { askMain, whenMainIdle } from '../lib/agentKey'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { pointKeyHeld } from '../lib/platform'
-import type { CardCheck } from '../lib/cardCheck'
 import { track } from '../lib/telemetry'
 import type { Cell } from '../lib/types'
 import { CardFace, type CardField } from './CardFace'
+import { checkAgain } from './checkActions'
 import { useConceptDetail } from './concepts'
 import { CanvasContext } from './context'
 import { DOUBLE_MS, hhmm, kindOf } from './layout'
@@ -174,9 +174,7 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
         asking={asking}
         onTextDown={textDown}
         onTextClick={textClick}
-        onUndoFix={(check) => void undoFix(ctx, cell, check)}
         onCheckAgain={() => void checkAgain(ctx, cell)}
-        onStopCheck={() => void stopCheck(ctx, cell)}
         stop={
           thread.chatId && thread.writable ? (
             <Button variant="ghost" size="sm" busy={stopping} onMouseDown={(e) => e.stopPropagation()} onClick={() => void stop()}>
@@ -244,40 +242,6 @@ async function save(ctx: { ws: string; refresh: () => void }, cell: Cell, field:
   track(field === 'title' ? 'cell-edit' : 'takeaway-edit', { target: `cell:${cell.id}`, detail: { field, via: 'inline' } })
   try {
     await api.updateCell(ctx.ws, cell.id, field === 'title' ? { title: next } : { takeaway: next })
-    ctx.refresh()
-  } catch (e) {
-    fail(e)
-  }
-}
-
-/** Undo in the check mark's hover: restore the card as it was before the check changed it. */
-async function undoFix(ctx: { ws: string; refresh: () => void }, cell: Cell, check: CardCheck) {
-  if (!check.fix) return
-  track('ui-click', { target: `cell:${cell.id}`, detail: { action: 'undo-fix', fix: check.fix.id } })
-  try {
-    await api.undoCardFix(ctx.ws, cell.id, check.fix.id)
-    ctx.refresh()
-  } catch (e) {
-    fail(e)
-  }
-}
-
-/** A click on the check mark: run the check again on the card as it stands. */
-async function checkAgain(ctx: { ws: string; refresh: () => void }, cell: Cell) {
-  track('ui-click', { target: `cell:${cell.id}`, detail: { action: 'check-again' } })
-  try {
-    await api.checkCardAgain(ctx.ws, cell.id)
-    ctx.refresh()
-  } catch (e) {
-    fail(e)
-  }
-}
-
-/** Stop a running check; the card stays as it is. */
-async function stopCheck(ctx: { ws: string; refresh: () => void }, cell: Cell) {
-  track('ui-click', { target: `cell:${cell.id}`, detail: { action: 'stop-check' } })
-  try {
-    await api.stopCardCheck(ctx.ws, cell.id)
     ctx.refresh()
   } catch (e) {
     fail(e)

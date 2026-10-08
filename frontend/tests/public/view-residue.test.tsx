@@ -5,7 +5,7 @@
 // file viewer's line speaks only of the file it shows, and of nothing when that file reads cleanly.
 import { act, useState } from 'react'
 import { afterEach, beforeAll, expect, test } from 'vitest'
-import { ResidueList, ViewHeadLine, type ViewNotes } from '../../src/files/ViewChrome.tsx'
+import { libPackages, ResidueList, ViewHeadLine, type ViewNotes } from '../../src/files/ViewChrome.tsx'
 import { mount, unmountAll } from './mount.tsx'
 
 beforeAll(() => {
@@ -48,7 +48,7 @@ function Head({ notes, picked, file = false, files }: { notes: ViewNotes; picked
   const [open, setOpen] = useState(false)
   return (
     <div>
-      <ViewHeadLine ws="ws" name="Runs" notes={notes} shownLabels={[]} residueOpen={open} onResidue={() => setOpen((o) => !o)} file={file} files={files ? { list: files, n: files.length, current: null, onPick: () => undefined } : undefined} />
+      <ViewHeadLine ws="ws" name="Runs" notes={notes} shownLabels={[]} residueOpen={open} onResidue={() => setOpen((o) => !o)} file={file} files={files ? { list: files, n: files.length, onPick: () => undefined } : undefined} />
       {open && <ResidueList notes={notes} onPick={(ref) => picked.push(ref)} />}
     </div>
   )
@@ -124,4 +124,10 @@ test("a file viewer's line speaks of its one file, and of nothing when the file 
   expect((await mount(<Head notes={unread} picked={[]} file />)).querySelector('.view-pane-sub')?.textContent).toBe('Not read')
   const clean: ViewNotes = { ...torn, problems: { count: 0, examples: [] } }
   expect((await mount(<Head notes={clean} picked={[]} file />)).innerHTML).toBe('<div></div>')
+})
+
+test('the line names the npm packages the page loads, each once (live check L31)', async () => {
+  const el = await mount(<ViewHeadLine ws="ws" name="Runs" notes={{ shown: null, problems: null }} shownLabels={[]} residueOpen={false} onResidue={() => undefined} libs={['marked@12', 'leaflet@1.9/dist/leaflet.css', 'leaflet@1.9', '@observablehq/plot@0.6']} />)
+  expect(el.querySelector('.view-pane-sub')?.textContent).toBe('Uses marked@12, leaflet@1.9, @observablehq/plot@0.6')
+  expect(libPackages([])).toEqual([])
 })

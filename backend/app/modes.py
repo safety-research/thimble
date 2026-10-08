@@ -1,15 +1,15 @@
-"""The permission mode of each agent thimble starts, one row per agent in the settings (AGENTS): the orientation with its
-subagents, the writers, the critic, the report checks, and the dev agent, whose sessions are its code tickets and view
-builds. Each runs in Manual, Auto or Bypass (MODES). The rows are thimble's config's `agents.<agent>.permissionMode`
-(userconf.MODE_ROWS).
+"""The permission mode of the agents thimble starts. Every agent of thimble's, code tickets' agents among them, is a
+subagent of main, the analyst's Claude Code session, and runs in main's mode, as Claude Code runs its own subagents. An
+extension's program that runs the dev agent stays a job of the server, with one row in thimble's config (AGENTS): the
+dev agent's, in Manual, Auto or Bypass (MODES), `agents.dev.permissionMode` (userconf.MODE_ROWS). The rows of earlier
+builds (IGNORED_ROWS) are read and ignored, so an earlier config or tab stays valid.
 
-A row the analyst has not set follows main, the Claude Code session that started thimble: the mode Claude Code reports
-to main's hooks (session.note_mode), which thimble keeps until main reports again, over a restart of the server under the
-same session too, Manual before the first report. So an agent runs
-in Bypass only when main does, or when the analyst chose Bypass for it in thimble's page: in Settings, on Start (the
-orientation's row), or on a session's card (that session alone, agent_session.set_mode), each a write only the
-analyst's browser may make (hook_auth.analyst). A mode the analyst's or the org's Claude Code settings turn off
-(disabled) is never used. Main's own mode is Claude Code's alone.
+A row the analyst has not set follows main: the mode Claude Code reports to main's hooks (session.note_mode), which
+thimble keeps until main reports again, over a restart of the server under the same session too, Manual before the first
+report. So such a program runs in Bypass only when main does, or when the analyst chose Bypass for it in thimble's
+config or on a session's card (that session alone, agent_session.set_mode), each a write only the analyst's browser may
+make (hook_auth.analyst). A mode the analyst's or the org's Claude Code settings turn off (disabled) is never used.
+Main's own mode is Claude Code's alone.
 
 Manual and Bypass both run Claude Code's manual mode (FLAGS): in Bypass thimble grants every request itself
 (agent_session.ask), so a card switches between them without restarting the session. Auto runs Claude Code's auto mode.
@@ -21,7 +21,8 @@ from typing import Any
 from . import cc_settings
 
 MODES = ("manual", "auto", "bypass")
-AGENTS = ("orient", "writer", "critic", "checks", "dev")
+AGENTS = ("dev",)
+IGNORED_ROWS = ("orient", "writer", "critic", "checks")  # rows of earlier builds: those agents run in main's mode
 SETTING = "permission_modes"  # in GET and PUT /settings: {agent: mode}, the rows set in thimble's config
 EARLIER = {"views": "dev"}  # rows of earlier builds, by the row they are now
 FLAGS = {"manual": "default", "auto": "auto", "bypass": "default"}  # each mode's --permission-mode
@@ -80,10 +81,13 @@ def mode_for(c: str, agent: str) -> str:
 
 
 def patch_error(patch: Any) -> str | None:
-    """Why a PUT's `permission_modes` ({agent: mode, or None for main's}) cannot be saved, or None when it can."""
+    """Why a PUT's `permission_modes` ({agent: mode, or None for main's}) cannot be saved, or None when it can. A row of
+    IGNORED_ROWS is taken and dropped (userconf.pane_patch)."""
     if not isinstance(patch, dict):
         return "permission_modes takes {agent: mode}"
     for agent, mode in patch.items():
+        if agent in IGNORED_ROWS:
+            continue
         if EARLIER.get(agent, agent) not in AGENTS:
             return f"no agent {agent!r}; one of {', '.join(AGENTS)}"
         if mode is not None and (why := refused(mode)):

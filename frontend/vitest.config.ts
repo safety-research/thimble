@@ -7,7 +7,8 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   esbuild: { jsx: 'automatic' },
   test: {
-    include: ['tests/public/**/*.test.{ts,tsx}'],
+    // and the plugin's hooks module (plugin/hooks/thimble.ts), against a fake Claude Code engine
+    include: ['tests/public/**/*.test.{ts,tsx}', '../plugin/hooks/*.test.ts'],
     exclude: ['tests/public/browser/**', '**/node_modules/**'],
     environment: 'node',
     // a component test that waits on React or DOMPurify finishes in well under a second; a hang fails fast

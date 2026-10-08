@@ -4,7 +4,8 @@ import type { Cell, Group } from '../lib/types'
 import { storageKey } from '../lib/workspace'
 
 export type CardSectionKey = 'starred' | 'orientation' | 'figures' | 'yours'
-/** what a card shows, for its glyph: a chart, a table, or text (a note, a takeaway, a shell's output) */
+/** what a card shows, for its glyph: a figure drawn (a chart, a timeline, a diagram, a custom page), a table, or text (a
+ * note, a takeaway, a shell's output) */
 export type CardShape = 'bars' | 'table' | 'text'
 
 export interface SideCard {
@@ -25,9 +26,10 @@ const SECTION_NAMES: Record<CardSectionKey, string> = { starred: 'Starred', orie
 /** the orientation's deck is a group of role `exploration`, as is an older workspace's Final group */
 const ROLE_SECTION: Record<string, CardSectionKey> = { exploration: 'orientation' }
 
-/** The glyph of what a card shows, from the kind of its primary artifact: a chart, a table, else text. */
-export function cardShape(artifact: string | null | undefined): CardShape {
-  return artifact === 'chart' ? 'bars' : artifact === 'table' ? 'table' : 'text'
+/** The glyph of what a card shows, from the figure it draws (components/Outputs figureKind): a table, another figure,
+ * else text. */
+export function cardShape(figure: string | null | undefined): CardShape {
+  return figure === 'table' ? 'table' : figure ? 'bars' : 'text'
 }
 
 /** The section a group's cards list under: Orientation; Figures for a writer's figure group and its subgroups; else
@@ -54,13 +56,13 @@ export function matches(card: Pick<SideCard, 'title' | 'takeaway'>, query: strin
 
 /** The sidebar's sections: Starred, then Orientation, Figures and Your work in canvas order, each card once. Cards
  * without a question are left out. With a query, only matching cards and non-empty sections. */
-export function cardSections(cells: readonly Cell[], groups: readonly Group[], query = '', artifactOf: (cell: Cell) => string | null = () => null): CardSection[] {
+export function cardSections(cells: readonly Cell[], groups: readonly Group[], query = '', figureOf: (cell: Cell) => string | null = () => null): CardSection[] {
   const byId = new Map(groups.map((g) => [g.id, g]))
   const lists: Record<CardSectionKey, SideCard[]> = { starred: [], orientation: [], figures: [], yours: [] }
   for (const c of cells) {
     const title = (c.title ?? '').trim()
     if (!title) continue
-    const card: SideCard = { id: c.id, title, takeaway: (c.takeaway ?? '').trim(), shape: cardShape(artifactOf(c)) }
+    const card: SideCard = { id: c.id, title, takeaway: (c.takeaway ?? '').trim(), shape: cardShape(figureOf(c)) }
     if (!matches(card, query)) continue
     if ((c as { starred?: boolean }).starred === true) lists.starred.push(card)
     lists[sectionOf(byId.get(c.notebook), byId)].push(card)

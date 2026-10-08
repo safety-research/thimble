@@ -1,6 +1,7 @@
 """What the end-to-end test (scripts/e2e_release.sh) must leave as it was in the caller's setup: the plugins Claude Code
-enables and has installed, its marketplaces, the folders its global config trusts, and where ~/.local/bin/thimble
-points. The test saves this before the install and compares it after the run.
+enables and has installed, its marketplaces, the folders its global config trusts, where ~/.local/bin/thimble points,
+and the lines thimble's installer added to the shell startup files (SHELL_MARK). The test saves this before the install
+and compares it after the run.
 
     python3 scripts/e2e/claude_files.py <the run's folder>                  print it, as one line of JSON
     python3 scripts/e2e/claude_files.py <the run's folder> --against FILE   compare it with the line saved in FILE
@@ -29,6 +30,24 @@ def read(path: Path):
             time.sleep(0.2)
 
 
+SHELL_MARK = "# added by thimble's installer"  # scripts/install.sh's mark at the end of each line it adds
+SHELL_FILES = (".zshrc", ".bashrc", ".bash_profile", ".bash_login", ".profile", ".config/fish/conf.d/thimble.fish")
+
+
+def shell_lines() -> dict:
+    """{startup file: the lines in it that end with SHELL_MARK}, for each of the caller's startup files that has one."""
+    zdot = Path(os.environ.get("ZDOTDIR") or Path.home())
+    out = {}
+    for f in {zdot / ".zshrc", *(Path.home() / n for n in SHELL_FILES)}:
+        try:
+            marked = [ln for ln in f.read_text("utf-8", errors="replace").splitlines() if ln.endswith(SHELL_MARK)]
+        except OSError:
+            continue
+        if marked:
+            out[str(f)] = marked
+    return out
+
+
 def snapshot() -> dict:
     custom = os.environ.get("CLAUDE_CONFIG_DIR")
     config = Path(custom).expanduser() if custom else Path.home() / ".claude"
@@ -44,6 +63,7 @@ def snapshot() -> dict:
         "marketplaces": {k: (v or {}).get("source") for k, v in markets.items()} if isinstance(markets, dict) else None,
         "trusted": sorted(k for k, v in projects.items() if isinstance(v, dict) and v.get("hasTrustDialogAccepted")),
         "local_bin_thimble": os.readlink(link) if link.is_symlink() else ("a file" if link.exists() else None),
+        "shell_startup": shell_lines(),
     }
 
 

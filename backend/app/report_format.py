@@ -379,9 +379,8 @@ def link_takeaways(sections: list[dict[str, Any]]) -> None:
 
 
 def figures(items: Any, valid: Any, para_ids: list[str], used: set[str]) -> list[dict[str, Any]]:
-    """The stored figures of one section: one per chart- or table-bearing cell, its 1-based `after_paragraph` resolved
-    to a
-    paragraph id; a figure whose card shows no chart or table is dropped."""
+    """The stored figures of one section: one per card that draws a figure (material.figure_kind), its 1-based
+    `after_paragraph` resolved to a paragraph id; a figure whose card draws none is dropped."""
     from . import report  # noqa: PLC0415
 
     out: list[dict[str, Any]] = []
@@ -399,7 +398,7 @@ def figures(items: Any, valid: Any, para_ids: list[str], used: set[str]) -> list
             pid = para_ids[min(after, len(para_ids)) - 1]
         cid = valid.artifact_id(f.get("cell"))
         if cid is None:
-            log.info("document: figure on %r dropped: not a chart- or table-bearing cell", f.get("cell"))
+            log.info("document: figure on %r dropped: not a card that draws a figure", f.get("cell"))
             continue
         if cid in seen:
             continue

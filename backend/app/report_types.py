@@ -26,7 +26,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import cite, config, investigation, notebook, prompts, refs, slides, undo
+from . import cite, config, investigation, ledger, material, notebook, prompts, refs, slides, undo
 from .ledger import atomic_write_text, read_json, unlinked, write_json
 from .report import (_Refs, _collapse, _cut, _new_id, _put_text, _replace_text, _title_ok, plain_text, reopen_comment,
                      settle_carried_comment)
@@ -73,7 +73,7 @@ def undescribed(schema: dict) -> dict:
 
 PLACEHOLDERS = ("$sentence", "$cell", "$graphic")
 _CELL_SCHEMA = {"type": "string", "pattern": CELL_REF,
-                "description": "A chart- or table-bearing card as card:<id> — one of the cards the material lists as bearing a chart or a table."}
+                "description": f"A card that draws a figure, as card:<id>: {material.FIGURE_WORDS}."}
 
 
 def _graphic_schema() -> dict[str, Any]:
@@ -596,12 +596,20 @@ def _inv(c: str, inv_id: str) -> Path:
 _UNREAD: Any = object()  # write_doc's `before` when the caller has not read the document as it was
 
 
+def docs_lock(c: str, inv_id: str = investigation.MAIN):
+    """The lock of an investigation's documents (ledger.locked on its folder): held from a document's read to its write
+    by a change that reads it first (comments.py), since more than one process can write documents in terminal mode."""
+    return ledger.locked(_inv(c, inv_id))
+
+
 def write_doc(c: str, inv_id: str, slug: str, doc: dict[str, Any], *, before: Any = _UNREAD) -> None:
-    """Store a document; a write that changes its text is an undo step (undo.doc_written) with the document as it was,
-    read here unless the caller hands it over (`before`, None for none)."""
+    """Store a document under the documents' lock (docs_lock); a write that changes its text is an undo step
+    (undo.doc_written) with the document as it was, read here unless the caller hands it over (`before`, None for
+    none)."""
     path = _inv(c, inv_id) / f"{slug}.json"
-    prior = read_json(path, None) if before is _UNREAD else before
-    write_json(path, doc)
+    with docs_lock(c, inv_id):
+        prior = read_json(path, None) if before is _UNREAD else before
+        write_json(path, doc)
     undo.doc_written(c, inv_id, slug, "doc", prior if isinstance(prior, dict) else None, doc)
 
 
@@ -1256,7 +1264,9 @@ def set_block_lock(c: str, inv_id: str, slug: str, bid: str, locked: bool) -> di
 def locked_block_ref(doc: dict[str, Any], slug: str, uid: str, *, whole: bool = False) -> str | None:
     """The ref of the locked block that holds the passage `uid` names (a sentence, a paragraph, a heading or a figure),
     None when that block is not locked: edit_document's check. With `whole` (a delete), a section's id names the
-    section with all it holds, so a locked block inside it counts too."""
+    section with all it holds, so a locked block inside it counts too. The title's id (`title`) names the title."""
+    if uid == TITLE_BLOCK and uid not in _ids(doc):
+        return block_ref(slug, "title", None) if doc.get("title_locked") is True else None
     for u in units(doc):
         if str(u.get("id")) == uid:
             if u.get("locked") is True:
@@ -1617,7 +1627,7 @@ def locked_block_lines(doc: dict[str, Any]) -> list[str]:
     the writer to see where each stands. Empty when nothing is locked."""
     lines: list[str] = []
     if doc.get("title_locked") is True:
-        lines.append(f"# {doc.get('title') or ''} · locked")
+        lines.append(f"# {doc.get('title') or ''} · #{TITLE_BLOCK} · locked")
     for u in units(doc):
         paras = [p for p in u.get("paragraphs") or [] if isinstance(p, dict)]
         figs = [f for f in u.get("figures") or [] if isinstance(f, dict) and f.get("locked") is True]
@@ -1653,6 +1663,11 @@ def carry_comments(prev: dict[str, Any] | None, doc: dict[str, Any], generation:
             continue
         cm = dict(cm)
         anchored = False
+        if str(cm.get("sentence_id")) == TITLE_BLOCK:  # a comment on the title stays on it while its words do
+            cm.setdefault("was_on", _collapse(prev.get("title")))
+            out.append(settle_carried_comment(cm, anchored=_collapse(prev.get("title")) == _collapse(doc.get("title")),
+                                              generation=generation))
+            continue
         try:
             t = find_target(prev, str(cm.get("sentence_id")))
             was_on = str(t["sentence"].get("text") or "") if t["kind"] == "sentence" else str(t["unit"].get("heading") or "")
@@ -1673,7 +1688,8 @@ def open_comments(doc: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 def anchor_ids(doc: dict[str, Any] | None) -> set[str]:
     d = doc or {}
-    return {str(x.get("id")) for x in all_sentences(d)} | {str(u.get("id")) for u in units(d)}
+    return ({str(x.get("id")) for x in all_sentences(d)} | {str(u.get("id")) for u in units(d)}
+            | ({TITLE_BLOCK} if _collapse(d.get("title")) else set()))
 
 
 def anchored_open_comments(doc: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -1807,10 +1823,15 @@ async def replace_passage(c: str, slug: str, uid: str, text: str, entry: dict[st
         new = report_format.sentence_units(text, _Refs(c), used)
     if not new:
         raise HTTPException(400, "the new passage has no sentence")
+    start = next((i for i, x in enumerate(holder) if passage and x is passage[0]), 0)
+    new, repeats = _drop_repeats(new, holder[start - 1] if start > 0 else None,
+                                 holder[start + len(passage)] if start + len(passage) < len(holder) else None)
+    if not new:
+        raise HTTPException(400, "the sentences next to this passage already say what the new text says: to remove "
+                                 "the passage, pass `delete`")
     await report.verify_and_tag(c, new)
     old_ids = [str(x.get("id")) for x in passage]
     passage_text = report_format.body_of(passage)
-    start = next((i for i, x in enumerate(holder) if passage and x is passage[0]), 0)
     holder[start:start + len(passage)] = new
     if para is not None and para.get("kind") == "divider":
         para.pop("kind")
@@ -1830,7 +1851,30 @@ async def replace_passage(c: str, slug: str, uid: str, text: str, entry: dict[st
     reverted = _save_edit(c, inv_id, slug, doc, before, str(entry.get("actor") or entry.get("by") or "model"))
     _emit(c, {"type": "report", "slug": slug, "status": "rewritten", "span": span or f"report:{slug}#{uid}"})
     return {"text": report_format.body_of(new), "ids": [str(x["id"]) for x in new],
-            "unverified": [str(x["id"]) for x in new if "unverified" in (x.get("tags") or [])], "reverted": reverted}
+            "unverified": [str(x["id"]) for x in new if "unverified" in (x.get("tags") or [])], "reverted": reverted,
+            "repeats": repeats}
+
+
+def _same_words(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
+    """Whether two sentence records read the same, as a reader sees them (plain_text), ignoring case."""
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    words = plain_text(str(a.get("text") or "")).casefold()
+    return bool(words) and words == plain_text(str(b.get("text") or "")).casefold()
+
+
+def _drop_repeats(new: list[dict[str, Any]], before: dict[str, Any] | None,
+                  after: dict[str, Any] | None) -> tuple[list[dict[str, Any]], list[str]]:
+    """(the new sentences without those at their ends that repeat the sentence just before or just after the replaced
+    passage, the words of each one left out). Live check term-fix10, quirk 2: the writer replaced a sentence with "A.
+    B." while B already followed it, twice, so the report showed B three times."""
+    keep = list(new)
+    dropped: list[str] = []
+    while keep and _same_words(keep[-1], after):
+        dropped.append(plain_text(str(keep.pop().get("text") or "")))
+    while keep and _same_words(keep[0], before):
+        dropped.append(plain_text(str(keep.pop(0).get("text") or "")))
+    return keep, dropped
 
 
 def replace_heading(c: str, slug: str, uid: str, text: str, actor: str, *, span: str | None = None,
@@ -1846,6 +1890,8 @@ def replace_heading(c: str, slug: str, uid: str, text: str, actor: str, *, span:
         return None
     if target["kind"] != "heading" or "heading" not in target["unit"]:
         return None
+    if _TITLE_MARK_RE.match(text.strip()):
+        raise HTTPException(400, title_mark_refusal(slug))
     heading = _collapse(re.sub(r"^#+[ \t]+", "", text.strip()))
     if not heading or "\n" in text.strip():
         raise HTTPException(400, "a heading is replaced by one line of text")
@@ -1856,6 +1902,48 @@ def replace_heading(c: str, slug: str, uid: str, text: str, actor: str, *, span:
         reverted = _save_edit(c, inv_id, slug, doc, before, actor)
         _emit(c, {"type": "report", "slug": slug, "status": "rewritten", "span": span or f"report:{slug}#{uid}"})
     return {"text": heading, "ids": [uid], "unverified": [], "reverted": reverted}
+
+
+# a line opening with one `#`: the title's mark in the document's markdown (a section's heading takes `##` or more)
+_TITLE_MARK_RE = re.compile(r"^#[ \t]+\S")
+# read_ref's id after the title (`# The title · #title`), which a writer may copy back with the words
+_TITLE_ID_RE = re.compile(r"\s+·\s+#" + TITLE_BLOCK + r"\b.*$")
+
+
+def title_mark_refusal(slug: str) -> str:
+    """edit_document's refusal of a `# ` line anywhere but the title: the document has one title, at
+    `report:<slug>#title` (live check term-fix9, quirk 2: a section's heading took the headline, so the report showed
+    two)."""
+    return (f"a `# ` line is the document's title, and a document has one: to change the title, edit "
+            f"report:{slug}#{TITLE_BLOCK} with the new words; a section's heading takes `## `")
+
+
+def replace_title(c: str, slug: str, text: str, actor: str, *, span: str | None = None,
+                  inv_id: str = investigation.MAIN) -> dict[str, Any]:
+    """The document's title replaced by `text`, one line, its `# ` mark and the marks read_ref writes after it
+    (`· #title`, `· locked`) dropped; the former title in `title_history`, as the analyst's edit keeps it (edit_title).
+    A locked title is put back by _save_edit (hold_locks). Returns {text, ids, unverified, reverted, ref}; 400 for no
+    words or more than one line."""
+    doc = _load(c, inv_id, slug)
+    before = copy.deepcopy(doc)
+    if "\n" in text.strip():
+        raise HTTPException(400, "a title is replaced by one line of text")
+    words, _ = strip_marks(re.sub(r"^#+[ \t]+", "", text.strip()))
+    title = _collapse(_TITLE_ID_RE.sub("", words))
+    if not title:
+        raise HTTPException(400, "a title is replaced by one line of text")
+    reverted: list[str] = []
+    if title != _collapse(doc.get("title")):
+        for cm in doc.get("comments") or []:  # a check's comment on the title it replaces is settled, as on a sentence
+            if isinstance(cm, dict) and str(cm.get("sentence_id")) == TITLE_BLOCK:
+                cm.setdefault("was_on", _collapse(doc.get("title")))
+                settle_carried_comment(cm, anchored=False, generation=int(doc.get("generation") or 1))
+        _replace_text(doc, "title", title, "edit", history="title_history", actor=actor)
+        if doc.get("renderer") == "document":
+            doc["title_ok"] = _title_ok(title)
+        reverted = _save_edit(c, inv_id, slug, doc, before, actor)
+        _emit(c, {"type": "report", "slug": slug, "status": "rewritten", "span": span or f"report:{slug}#{TITLE_BLOCK}"})
+    return {"text": title, "ids": [TITLE_BLOCK], "unverified": [], "reverted": reverted, "ref": f"report:{slug}#{TITLE_BLOCK}"}
 
 
 # --------------------------------------------------------------------------- a document written as markdown
@@ -1892,7 +1980,7 @@ def _md_sections(text: str, *, headlines: bool = False) -> tuple[str, list[dict[
     for line in str(text or "").replace("\r\n", "\n").split("\n"):
         st = line.strip()
         if not title and not sections and not "".join(cur["lines"]).strip() and (m := _MD_TITLE_RE.match(st)):
-            title = m.group(1)
+            title = _TITLE_ID_RE.sub("", m.group(1))
             continue
         if (m := _MD_HEADING_RE.match(st)) and not (headlines and st.startswith("###")):
             close()
@@ -1940,6 +2028,10 @@ def parse_markdown(text: str, form: str) -> dict[str, Any]:
             summary = [versions.plain(x) for x in _claims(changed)][:versions.SUMMARY_LINES]
             return video.parse(title, _claims([sec for sec in secs if sec not in changed]), html, summary)
         return {"title": title, "html": html, "claims": _claims(secs)}
+    # the citation forms the grammar does not know put right, as a takeaway's are (`[23 June|card:<id>#day/06-23]`, a
+    # Markdown link to a ref, `[[↗|ref]]`): a writer wrote `[v|ref]` and the document showed it as written (live check
+    # term-fix7)
+    text = cite.normalise_markup(str(text or ""))
     title, secs = _md_sections(text, headlines=form == "story")
     if form == "slides":
         out = []
@@ -2057,7 +2149,9 @@ def document_lines(doc: dict[str, Any]) -> list[str]:
     locked. A deck's slides carry their number as shown in the rail, since the deck's title is no slide."""
     from . import story  # noqa: PLC0415
 
-    lines = [f"# {doc.get('title') or '(no title)'}" + (" · locked" if doc.get("title_locked") is True else "")]
+    # the title with its block's id, so a writer asked to change the headline edits `report:<slug>#title` (live check
+    # term-fix9, quirk 2: with no id it set the first section's heading to the headline, and the report had two)
+    lines = [f"# {doc.get('title') or '(no title)'} · #{TITLE_BLOCK}" + (" · locked" if doc.get("title_locked") is True else "")]
     if doc.get("renderer") == "video":
         from . import video  # noqa: PLC0415
 
@@ -2164,13 +2258,12 @@ async def tool_read_ref(ctx: Any, args: dict[str, Any]) -> Any:
 
 
 # --------------------------------------------------------------------------- a write the analyst asked for
-# The Report tab's Write posts a `write` channel event, which main answers with start_writing (write_session.py).
-# write_requested (or begin_write, for a request made in the chat) marks the document as being written: the stream says
-# `report {status: generating}` until the document is saved whole or the writer's chat finishes (writer_finished),
-# ending
-# as `generated` or `failed`. A request nobody answers ends after WRITE_WAIT_S.
+# Write in the browser starts the document's writer through thimble's module, and main's start_writing makes a typed one
+# (write_session.py). begin_write marks the document as being written: the stream says `report {status: generating}`
+# until the document is saved whole or the writer's chat finishes (writer_finished), ending as `generated` or `failed`,
+# or `refused` when the writer did not start (write_refused). A request nobody answers ends after WRITE_WAIT_S.
 
-WRITE_EVENT = "write"
+WRITE_EVENT = "write"  # a writer's chat is titled `Write <doc>` (writer_finished)
 WRITER_AGENT = "writer"  # prompts/writer.md's name, the agent type of a writer's session chat (write_session.py)
 WRITE_WAIT_S = 30 * 60
 _writes: dict[tuple[str, str], dict[str, Any]] = {}
@@ -2185,15 +2278,10 @@ def write_pending(c: str, slug: str) -> dict[str, Any] | None:
     return w
 
 
-def write_requested(c: str, payload: dict[str, Any], posted: dict[str, Any]) -> None:
-    """The `write` event reached the session: its document is being written from now on."""
-    slug = str(payload.get("doc") or "").strip().lower()
-    if not SLUG_RE.match(slug) or read_type(c, slug) is None:
-        log.info("%s: a write event named no document type (%r)", c, payload.get("doc"))
-        return
-    _writes[(c, slug)] = {"event": posted.get("id"), "t0": time.monotonic(), "ts": _now(), "saved": False,
-                          "request": _collapse(payload.get("text")) or None, "after": payload.get("after")}
-    _emit(c, {"type": "report", "slug": slug, "status": "generating", "by": ANALYST, "run": posted.get("id")})
+def write_saved(c: str, slug: str) -> bool:
+    """Whether the pending write of `slug` saved the document."""
+    w = _writes.get((c, slug))
+    return bool(w and w.get("saved"))
 
 
 def write_for_orientation(c: str, slug: str, chat: str, run: int = 0) -> None:
@@ -2205,21 +2293,20 @@ def write_for_orientation(c: str, slug: str, chat: str, run: int = 0) -> None:
 
 
 def _writer_chat(ctx: Any) -> str | None:
-    """The chat of the writer session a call comes from (THIMBLE_SESSION `writer:<doc>`), named as `writer` on a save's
-    chip;
-    None for any other caller."""
+    """The chat of the writer a call comes from (its key `writer:<doc>`, subagents.caller), named as `writer` on a
+    save's chip; None for any other caller."""
     key = str(getattr(ctx, "session", None) or "")
     if not key.startswith("writer:"):
         return None
-    from . import agent_session  # noqa: PLC0415 — agent_session is the sessions' runner, loaded after this module
+    from . import subagents  # noqa: PLC0415 — subagents is loaded after this module
 
-    run = agent_session.current(ctx.c, key)
+    run = subagents.current(ctx.c, key)
     return run.chat if run is not None else None
 
 
 def begin_write(c: str, slug: str, request: str | None = None, after: str | None = None) -> dict[str, Any]:
-    """A writer's session is starting for `slug` (write_session.start): the write a `write` event opened, or a new one
-    when the analyst asked in the chat, so the Report tab shows the document as being written either way."""
+    """A writer is starting for `slug` (write_session.start): the pending write, or a new one, so the Report tab shows
+    the document as being written."""
     w = write_pending(c, slug)
     if w is not None:
         return w
@@ -2260,6 +2347,13 @@ def writer_finished(c: str, meta: dict[str, Any]) -> None:
             continue
         if w["saved"]:
             _emit(c, {"type": "report", "slug": slug, "status": "generated", "run": w.get("event")})
+        elif meta.get("plan_mode"):
+            # main went into plan mode while it wrote, and the writer with it, so it could only write a plan (live check
+            # L21): a failure the analyst can write again, never a document found to need no change
+            from . import subagents  # noqa: PLC0415
+
+            _emit(c, {"type": "report", "slug": slug, "status": "failed", "run": w.get("event"), "chat": meta.get("id"),
+                      "note": subagents.plan_failed_line(WRITER_AGENT)})
         elif meta.get("status") == "done" and read_doc(c, investigation.MAIN, slug) is not None:
             # a revision whose writer ended well and changed nothing (it read the document and found nothing to change)
             _emit(c, {"type": "report", "slug": slug, "status": "generated", "unchanged": True, "run": w.get("event"),
@@ -2268,6 +2362,15 @@ def writer_finished(c: str, meta: dict[str, Any]) -> None:
             # the writer's chat goes with it, so the browser's Report a problem can take that chat first
             _emit(c, {"type": "report", "slug": slug, "status": "failed", "run": w.get("event"), "chat": meta.get("id"),
                       "note": _cut(meta.get("result") or "the writer ended without saving the document", 300)})
+
+
+def write_refused(c: str, slug: str, reason: str, kind: str, **fields: Any) -> None:
+    """A writer's start that did not happen (write_session.subagent_refused): its pending write ends, and the stream
+    says `report {status: refused, refused: {reason, kind, …}}`, which the document's card shows with the kind's
+    buttons."""
+    _writes.pop((c, slug), None)
+    _emit(c, {"type": "report", "slug": slug, "status": "refused",
+              "refused": {"reason": reason, "kind": kind, **{k: v for k, v in fields.items() if v is not None}}})
 
 
 def cancel_workspace(c: str) -> list[str]:
@@ -2280,10 +2383,9 @@ def cancel_workspace(c: str) -> list[str]:
 
 
 def _listen() -> None:
-    """write_requested on the channel's `write` events and writer_finished on every agent chat's end."""
-    from . import agents, channel  # noqa: PLC0415
+    """writer_finished on every agent chat's end."""
+    from . import agents  # noqa: PLC0415
 
-    channel.observe(WRITE_EVENT, write_requested)
     agents.on_agent_finished(writer_finished)
 
 
@@ -2305,11 +2407,11 @@ def reverted_line(refs: list[str]) -> str:
 def writer_run(ctx: Any) -> str | None:
     """`<chat>:<run>` of the writer session a call comes from (its THIMBLE_SESSION is `writer:<doc>`), the key that
     makes its saves one generation; None for any other caller, whose every save is a generation of its own."""
-    from . import agent_session, tools  # noqa: PLC0415
+    from . import subagents, tools  # noqa: PLC0415
 
     if tools.session_kind(getattr(ctx, "session", None)) != tools.WRITER_SESSION:
         return None
-    run = agent_session.current(ctx.c, ctx.session)
+    run = subagents.current(ctx.c, ctx.session)
     return f"{run.chat}:{run.k}" if run is not None else None
 
 
@@ -2400,14 +2502,151 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
         line = (f"saved [[report:{slug}]] as {saved_as}, {_plural(len(units(doc)), 'section')}, "
                 f"{_plural(len(all_sentences(doc)), 'sentence')} and {_plural(kept, 'figure')}")
     if kept < len(asked):
-        line += f"\nleft out {_plural(len(asked) - kept, 'figure')} whose card shows no chart or table"
+        line += f"\nleft out {_plural(len(asked) - kept, 'figure')} whose card draws no figure: a figure shows {material.FIGURE_WORDS}"
     if refused:  # hold_locks put back the locked blocks the text changed, so the writer does not report those changes
         line += "\n" + reverted_line(refused)
-    flagged =[x for x in all_sentences(doc) if "unverified" in (x.get("tags") or [])]
-    if flagged:
-        line += f"\nthe citation check tagged {_plural(len(flagged), 'sentence')} unverified, " + " ".join(
-            f"[[report:{slug}#{x['id']}]]" for x in flagged[:12]) + (" …" if len(flagged) > 12 else "")
+    if flagged := flagged_lines(slug, all_sentences(doc)):
+        line += "\n" + flagged
+    if loose := loose_lines(slug, doc):
+        line += "\n" + loose
     return tools.ok(line)
+
+
+FLAGGED_MAX = 12  # the unverified sentences a save's result names, each with its words and why
+FLAGGED_CHARS = 200  # the words of each, cut after this many characters
+
+
+def flagged_lines(slug: str, sentences: list[dict[str, Any]], ids: list[str] | None = None) -> str:
+    """The sentences the citation check tagged unverified (of `ids`, when given), as a save's result names them: each
+    one's ref, its words as the reader reads them and why (its note), so the writer re-cites the sentence the check means
+    (live check term-fix7, new quirk 1: the result named only `report:report#307a473b`, and the writer replaced the
+    sentence before it). '' when none is tagged."""
+    want = set(ids) if ids is not None else None
+    flagged = [x for x in sentences if "unverified" in (x.get("tags") or []) and (want is None or str(x.get("id")) in want)]
+    if not flagged:
+        return ""
+    rows = [f"the citation check tagged {_plural(len(flagged), 'sentence')} unverified:"]
+    for x in flagged[:FLAGGED_MAX]:
+        words = _cut(plain_text(str(x.get("text") or "")), FLAGGED_CHARS)
+        note = _collapse((x.get("tag_notes") or {}).get("unverified"))
+        rows.append(f"- [[report:{slug}#{x['id']}]] “{words}”" + (f" {note}" if note else ""))
+    if len(flagged) > FLAGGED_MAX:
+        rows.append(f"- … and {len(flagged) - FLAGGED_MAX} more")
+    return "\n".join(rows)
+
+
+# --------------------------------------------------------------------------- numbers in the title and the headings
+# The citation check reads sentences, and the writer's title and headings carry claims too: live check term-fix8 had a
+# title saying "for seven weeks" (40 days in the data) and a slide heading "seven weeks before the busiest days", which
+# no card stated and no check read. A save's result names each title or heading that writes a number, or a span of
+# time, that no link shows: a link in the heading's own section and its subsections, or anywhere in the document for
+# the title. The analyst's locked title or heading, and a heading of the analyst's own frame, are left out, since they
+# are the analyst's words.
+
+# a unit of time after a number, which makes the number a span of time (`seven weeks`, `40-day`, `three more days`)
+_TIME_UNIT_RE = re.compile(r"[ -](?:(?:more|other|full|straight|whole|consecutive)\s+)?"
+                           r"(?:seconds?|minutes?|hours?|days?|nights?|weeks?|months?|years?)\b", re.I)
+_TIME_WORD_RE = re.compile(r"(?<![A-Za-z])(?:second|minute|hour|day|night|week|month|year)s?(?![A-Za-z])", re.I)
+_YEAR_RE = re.compile(r"^(?:19|20)\d\d$")
+LOOSE_MAX = 12  # the titles and headings a save's result names
+
+
+def _claims_of(heading: str) -> list[tuple[str, str, Any]]:
+    """(kind, words, value) of each claim a title or heading writes: a day and a month in words (`date`, the words), a
+    span of time, a number in digits or in words before a unit of time (`span`, the number's key), and any other number
+    in digits (`number`, its key; a year alone is left out, as a date's part)."""
+    text = plain_text(heading)
+    out: list[tuple[str, str, Any]] = []
+    taken: list[tuple[int, int]] = []
+    for start, end, words in cite.dates_in_text(text):
+        out.append(("date", words, words))
+        taken.append((start, end))
+    numbers = sorted([(m.start(), m.end(), cite._norm(m.group()), True) for m in cite._NUM_RE.finditer(text)]
+                     + [(a, b, str(v), False) for a, b, v in cite.number_words(text)])
+    for a, b, key, digits in numbers:
+        if any(x <= a < y for x, y in taken):
+            continue
+        unit = _TIME_UNIT_RE.match(text, b)
+        if unit:
+            out.append(("span", text[a:unit.end()], key))
+            taken.append((a, unit.end()))
+        elif digits and not _YEAR_RE.match(text[a:b]):
+            out.append(("number", text[a:b], key))
+    return out
+
+
+def _shown_by(claim: tuple[str, str, Any], sentences: list[dict[str, Any]]) -> bool:
+    """Whether a link among `sentences` shows a claim of a heading: its words the claim's number, in digits or in words
+    (for a span of time with a unit of time in its words or its place), or for a date the same day and month, in a
+    link's words or its place, or in a sentence that cites."""
+    import urllib.parse  # noqa: PLC0415
+
+    kind, words, key = claim
+    for x in sentences:
+        text = str(x.get("text") or "")
+        links = [(m.group(1).partition("|")[0].strip(), m.group(1).partition("|")[2].strip())
+                 for m in cite._SPAN_RE.finditer(text) if "|" in m.group(1)]
+        if kind == "date":
+            if any(cite.date_in(words, d) or cite.date_in(words, urllib.parse.unquote(r)) for d, r in links):
+                return True
+            if (links or x.get("refs")) and cite.date_in(words, plain_text(text)):
+                return True
+            continue
+        for d, r in links:
+            if key not in {cite._norm(t) for t in cite._NUM_RE.findall(d)} | {str(v) for _, _, v in cite.number_words(d)}:
+                continue
+            # a span's number counts where the link's words or its place name a unit of time too (`[[40 days|…]]`,
+            # `[[40|card:…#days/…]]`), not where the same number counts something else
+            if kind != "span" or _TIME_WORD_RE.search(d) or _TIME_WORD_RE.search(urllib.parse.unquote(r)):
+                return True
+    return False
+
+
+def loose_headings(doc: dict[str, Any], only: set[str] | None = None) -> list[tuple[str, str, list[str]]]:
+    """(id, words, the claims no link shows) of the title (`title`) and of each heading that writes a number or a span
+    of time no link shows (module note above), of `only` when given; the analyst's locked ones and the headings of the
+    analyst's frame left out."""
+    out: list[tuple[str, str, list[str]]] = []
+    title = _collapse(doc.get("title"))
+    if title and doc.get("title_locked") is not True and (only is None or TITLE_BLOCK in only):
+        missing = [w for k, w, v in _claims_of(title) if not _shown_by((k, w, v), all_sentences(doc))]
+        if missing:
+            out.append((TITLE_BLOCK, title, missing))
+    us = units(doc)
+    for i, u in enumerate(us):
+        heading = _collapse(u.get("heading"))
+        uid = str(u.get("id"))
+        if not heading or u.get("locked") is True or (u.get("pinned") and u.get("by") == ANALYST) \
+                or (only is not None and uid not in only):
+            continue
+        level = _level(u.get("level"))
+        scope = list(unit_sentences(u))
+        for sub in us[i + 1:]:
+            if not isinstance(sub.get("paragraphs"), list) or _level(sub.get("level")) <= level:
+                break
+            scope += unit_sentences(sub)
+        missing = [w for k, w, v in _claims_of(heading) if not _shown_by((k, w, v), scope)]
+        if missing:
+            out.append((uid, heading, missing))
+    return out
+
+
+def loose_lines(slug: str, doc: dict[str, Any], only: set[str] | None = None) -> str:
+    """The titles and headings loose_headings finds, as a save's result names them, in the form of the flagged
+    sentences (flagged_lines); '' when there are none."""
+    loose = loose_headings(doc, only)
+    if not loose:
+        return ""
+    rows = [f"the citation check found a number or a span of time that no link shows in {_plural(len(loose), 'heading')}:"]
+    for uid, words, missing in loose[:LOOSE_MAX]:
+        what = " or ".join(f"“{m}”" for m in missing)
+        where, whose = ("the document", "the title") if uid == TITLE_BLOCK else ("its section", "the heading")
+        rows.append(f"- [[report:{slug}#{uid}]] “{_cut(words, FLAGGED_CHARS)}” No link in {where} shows {what}. Cite it "
+                    f"in a sentence, compute it in a card first if no card states it, or reword {whose}, before you end. "
+                    f"A link in {whose} itself is not checked.")
+    if len(loose) > LOOSE_MAX:
+        rows.append(f"- … and {len(loose) - LOOSE_MAX} more")
+    return "\n".join(rows)
 
 
 async def insert_passage(c: str, slug: str, uid: str, text: str, actor: str, *, inv_id: str = investigation.MAIN) -> dict[str, Any]:
@@ -2439,10 +2678,11 @@ async def insert_passage(c: str, slug: str, uid: str, text: str, actor: str, *, 
         return await _insert_story_blocks(c, inv_id, slug, doc, before, unit, para, text, actor, valid, used)
     fig = _MD_FIGURE_RE.match(text.strip())
     if fig:
-        # a slide or a story's beat shows any card, a document's figure a chart or a table (report_format.figures)
+        # a slide or a story's beat shows any card, a document's figure a card that draws one (material.figure_kind)
         cid = slides.card_id(valid, fig.group(2)) if deck or doc.get("renderer") == "story" else valid.artifact_id(fig.group(2))
         if cid is None:
-            raise HTTPException(400, f"{fig.group(2)} is no card, or shows no chart or table, so it cannot be a figure")
+            raise HTTPException(400, f"{fig.group(2)} is no card, or draws no figure, so it cannot be one: a figure shows "
+                                     f"{material.FIGURE_WORDS}")
         if deck and len(slides.figures_of(unit)) >= slides.MAX_FIGURES:
             raise HTTPException(400, f"the slide shows {slides.MAX_FIGURES} figures already; insert a slide for another")
         rec = {"id": _new_id(used), "cell": f"card:{cid}", "caption": _collapse(fig.group(1)) or valid.artifacts.get(cid, ""),
@@ -2684,6 +2924,16 @@ async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
     try:
         slug, _ = parse_span(span)
         slug, uid = parse_span(span, read_doc(ctx.c, investigation.MAIN, slug) if SLUG_RE.match(slug) else None)
+        title = uid == TITLE_BLOCK and TITLE_BLOCK not in _ids(read_doc(ctx.c, investigation.MAIN, slug) or {})
+        if title and (args.get("delete") or args.get("insert") or layout or block_type or card or not text):
+            return tools.err(f"edit_document: report:{slug}#{TITLE_BLOCK} is the title, which takes new `text` alone")
+        # a `# ` line is the title's mark: on any other passage it would make a second headline
+        if not title and text and _TITLE_MARK_RE.match(text):
+            return tools.err(f"edit_document: {title_mark_refusal(slug)}")
+        # a figure line with other text would be stored as a sentence's words (live check term-fix10, quirk 1); a new
+        # section, which opens with its heading, reads its figure lines as figures, as write_document does
+        if text and _figure_with_text(text) and not (args.get("insert") and _opens_unit(text, (read_type(ctx.c, slug) or {}).get("renderer"))):
+            return tools.err(f"edit_document: {FIGURE_WITH_TEXT}")
         # a passage inside a block the analyst locked is refused; a passage inserted after it leaves it as it is
         held = None if args.get("insert") else locked_block_ref(read_doc(ctx.c, investigation.MAIN, slug) or {}, slug, uid,
                                                                 whole=bool(args.get("delete")))
@@ -2710,6 +2960,9 @@ async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
         elif args.get("insert"):
             out = await insert_passage(ctx.c, slug, uid, text, ctx.cell_author)
             chip, line = "added a passage", f"inserted [[{out['ref']}]] after [[{span}]]"
+        elif title:
+            out = replace_title(ctx.c, slug, text, ctx.cell_author, span=span)
+            chip, line = "edited the title", f"replaced the title [[{span}]]"
         elif _MD_FIGURE_RE.match(text):
             return tools.err("edit_document: a figure is a new passage, so pass `insert`")
         elif (out := replace_heading(ctx.c, slug, uid, text, ctx.cell_author, span=span)) is not None:
@@ -2726,14 +2979,36 @@ async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
                     writer=_writer_chat(ctx))
     except Exception:  # noqa: BLE001
         log.debug("chip not written", exc_info=True)
-    flagged = [i for i in out.get("unverified") or []]
-    if flagged:
-        line += "\nthe citation check tagged unverified " + " ".join(f"[[report:{slug}#{i}]]" for i in flagged)
     if out.get("text"):
         line += f": {out['text'][:300]}"
+    for words in out.get("repeats") or []:
+        line += f"\nleft out “{_cut(words, FLAGGED_CHARS)}”, since the sentence next to the passage already says it"
+    if ids := [str(i) for i in out.get("unverified") or []]:
+        # each flagged sentence by its words and why, never its id alone (flagged_lines)
+        line += "\n" + (flagged_lines(slug, all_sentences(read_doc(ctx.c, investigation.MAIN, slug) or {}), ids)
+                        or "the citation check tagged unverified " + " ".join(f"[[report:{slug}#{i}]]" for i in ids))
     if out.get("reverted"):
         line += "\n" + reverted_line(out["reverted"])
+    if chip in ("edited the title", "edited a heading") and (loose := loose_lines(
+            slug, read_doc(ctx.c, investigation.MAIN, slug) or {}, {str(i) for i in out.get("ids") or []})):
+        line += "\n" + loose
     return tools.ok(line)
+
+
+# edit_document's refusal of a figure line sent with sentences
+FIGURE_WITH_TEXT = ("a figure is a passage of its own, so its `![caption](card:<id>)` line cannot share `text` with "
+                    "sentences: send the sentences without it, then insert the figure after them with `insert` and "
+                    "that line alone as `text`")
+_FIGURE_MARK_RE = re.compile(r"!\[[^\n]*\]\(\s*(?:card|cell):[A-Za-z0-9_-]+")
+
+
+def _figure_with_text(text: str) -> bool:
+    """Whether `text` holds a figure's markup anywhere but as its one and only line: on a line of its own among
+    sentences, or inside a sentence."""
+    lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+    if len(lines) == 1 and _MD_FIGURE_RE.match(lines[0]):
+        return False
+    return any(_FIGURE_MARK_RE.search(ln) for ln in lines)
 
 
 def _opens_unit(text: str, renderer: str | None) -> bool:

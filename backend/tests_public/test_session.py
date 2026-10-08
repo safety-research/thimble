@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app import agents, cc_channel, channel, config, session, threads
+from app import agents, cc_plugin, config, events, session, threads
 
 CORPUS = "mini"
 SID = "e7b0a1f2-0000-4000-8000-000000000001"
@@ -27,12 +27,12 @@ def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     session._came_back.clear()
     session._shim_pids.clear()
     session._shim_configs.clear()
-    for table in (channel._subs, channel._routes, channel._pending, channel._taken):
+    for table in (events._subs, events._pending, events._taken):
         table.clear()
     agents._busy.clear()
     yield
     session._live.clear()
-    for table in (channel._subs, channel._routes, channel._pending, channel._taken):
+    for table in (events._subs, events._pending, events._taken):
         table.clear()
 
 
@@ -130,11 +130,10 @@ NEXT = "e7b0a1f2-0000-4000-8000-000000000003"
 MOVED_AT = "2026-10-01T21:17:45.528Z"
 
 
-def _subscribe(sid: str, delivery: str) -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
-    channel._subs.setdefault(CORPUS, set()).add(q)
-    channel._routes[q] = (sid, delivery)
-    return q
+def _subscribe(sid: str, delivery: str = cc_plugin.HOOK) -> events.Sub:
+    sub = events.Sub(sid, delivery)
+    events._subs.setdefault(CORPUS, set()).add(sub)
+    return sub
 
 
 def _stamped(sid: str, n: int, at: str, *recs: dict) -> list[dict]:
@@ -150,7 +149,7 @@ def _moved(sid: str, to: str, at: str = MOVED_AT) -> list[dict]:
     """The continued-in record, then an event queued for the parked session, which never reads it."""
     return [{"type": "continued-in", "timestamp": at, "sessionId": sid, "continuedInSessionId": to},
             {"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-10-01T22:41:21.160Z",
-             "sessionId": sid, "content": "<channel kind=\"main\">hello</channel>"}]
+             "sessionId": sid, "content": "<thimble-event kind=\"main\">hello</thimble-event>"}]
 
 
 def _copy(recs: list[dict], sid: str) -> list[dict]:
@@ -175,8 +174,7 @@ def _restart() -> None:
     """The server stops and starts again: what it held in memory is gone, and every shim subscribes anew."""
     session._live.clear()
     session._shim_pids.clear()
-    for table in (channel._subs, channel._routes):
-        table.clear()
+    events._subs.clear()
 
 
 @pytest.fixture()
@@ -208,27 +206,27 @@ def test_main_follows_its_session_into_a_background_job_and_the_parked_session_n
     job ends main does not fall back to it."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    old_sub = _subscribe(SID, cc_channel.CHANNEL)
+    old_sub = _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     asked = _turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts")
     _append(p, lv, asked)
-    channel._pending[(CORPUS, SID)] = deque([{"content": "x", "meta": {"event": "e1"}}])
+    events._pending[(CORPUS, SID)] = deque([{"content": "x", "meta": {"event": "e1"}}])
 
     _write(project / f"{JOB}.jsonl", [*_copy(asked, JOB), *_turn(JOB, 2, "2026-10-01T23:30:03.924Z", "the threads")])
     _write(p, _moved(SID, JOB))
     if first == "watcher":
-        assert channel._pull_state(CORPUS, JOB, 200) is None, "the job's watcher waits for events"
+        assert events._pull_state(CORPUS, JOB, 200) is None, "the job's watcher waits for events"
         assert session.current(CORPUS).sid == JOB
-    _subscribe(JOB, cc_channel.HOOK)
-    session.connected(CORPUS, JOB, cwd, 200, claim=False)
+    _subscribe(JOB, cc_plugin.HOOK)
+    session.connected(CORPUS, JOB, cwd, 200)
     job = session.current(CORPUS)
     assert job is not None and job.sid == JOB and job.pid == 200 and session.main_pid(CORPUS) == 200
     session.tail_once(job)
     assert _shown("user") == ["the board's posts", "the threads"]
     assert _shown("text") == ["About the board's posts", "About the threads"]
-    assert [n["meta"]["event"] for n in channel._pending[(CORPUS, JOB)]] == ["e1"]
-    assert not channel._pending.get((CORPUS, SID))
+    assert [n["meta"]["event"] for n in events._pending[(CORPUS, JOB)]] == ["e1"]
+    assert not events._pending.get((CORPUS, SID))
     states = tmp_path / "claude-config" / "sessions"
     states.mkdir(parents=True)
     (states / "100.json").write_text(json.dumps({"sessionId": SID, "status": "idle", "parkedJobId": JOB[:8]}))
@@ -237,13 +235,13 @@ def test_main_follows_its_session_into_a_background_job_and_the_parked_session_n
 
     assert session.sessions(CORPUS)[SID]["reason"] == session.CONTINUED and not session.may_return(CORPUS, SID)
     session.connected(CORPUS, SID, cwd, 100)
-    assert session.current(CORPUS) is job, "the parked session's shim subscribing again on the channel"
-    channel._subs[CORPUS].discard(old_sub)
+    assert session.current(CORPUS) is job, "the parked session's shim subscribing again"
+    events._subs[CORPUS].discard(old_sub)
     session.disconnected(CORPUS, SID)
     assert session.current(CORPUS) is job and quits == []
-    channel._subs[CORPUS].add(old_sub)
-    for q in [q for q in channel._subs[CORPUS] if channel._routes[q][0] == JOB]:
-        channel._subs[CORPUS].discard(q)
+    events._subs[CORPUS].add(old_sub)
+    for q in [q for q in events._subs[CORPUS] if q.session == JOB]:
+        events._subs[CORPUS].discard(q)
     session.disconnected(CORPUS, JOB)
     assert session.current(CORPUS) is None and quits == [CORPUS], "the job ended; the parked session is not main again"
 
@@ -254,7 +252,7 @@ def test_a_job_written_and_subscribed_after_main_followed_takes_the_open_turn_on
     shim subscribes first, and the turn the old session left open goes on from the job's first record of its own."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     asked = _stamped(SID, 1, "2026-10-01T20:26:31.492Z", _human("Add a card"),
@@ -268,11 +266,11 @@ def test_a_job_written_and_subscribed_after_main_followed_takes_the_open_turn_on
     _restart()
     _write(t, [*_copy(asked, JOB), *_stamped(JOB, 2, "2026-10-01T21:18:00.000Z", _result("toolu_ac", "card:cd34ef56"),
                                               _assistant(_say("card:cd34ef56")), END)])
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     session.connected(CORPUS, SID, cwd, 100)
     assert session.current(CORPUS) is None, "the parked session subscribing first is not main"
-    _subscribe(JOB, cc_channel.HOOK)
-    session.connected(CORPUS, JOB, cwd, 200, claim=False)
+    _subscribe(JOB, cc_plugin.HOOK)
+    session.connected(CORPUS, JOB, cwd, 200)
     job = session.current(CORPUS)
     assert job is not None and job.sid == JOB and job.pid == 200
     session.tail_once(job)
@@ -284,7 +282,7 @@ def test_a_record_the_job_writes_in_the_millisecond_of_the_move_is_shown(cwd, pr
     new uuids, so they are shown, and only the turn the job copied is skipped."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     asked = _turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts")
@@ -319,19 +317,19 @@ def test_main_follows_after_a_restart_past_the_move_and_again_when_the_job_comes
     threads = _turn(JOB, 2, "2026-10-01T23:30:03.924Z", "the threads")
     _write(t, [*_copy(asked, JOB), *threads])
     if back_first == "parked":
-        _subscribe(SID, cc_channel.CHANNEL)
+        _subscribe(SID, cc_plugin.HOOK)
         session.connected(CORPUS, SID, cwd, 100)
-    bg = _subscribe(JOB, cc_channel.HOOK)
-    session.connected(CORPUS, JOB, cwd, 200, claim=False)
+    bg = _subscribe(JOB, cc_plugin.HOOK)
+    session.connected(CORPUS, JOB, cwd, 200)
     job = session.current(CORPUS)
     assert job is not None and job.sid == JOB and job.pid == 200
     session.tail_once(job)
     assert _shown("text") == ["About the board's posts", "About the threads"]
 
-    _subscribe(JOB, cc_channel.CHANNEL)
+    _subscribe(JOB, cc_plugin.HOOK)
     session.connected(CORPUS, JOB, cwd, 300)
     assert session.current(CORPUS) is job and job.pid == 300 and session.main_pid(CORPUS) == 300
-    channel._subs[CORPUS].discard(bg)
+    events._subs[CORPUS].discard(bg)
     session.disconnected(CORPUS, JOB)
     assert session.current(CORPUS) is job and quits == [], "the background process's shim leaving ends nothing"
 
@@ -352,14 +350,14 @@ def test_a_session_replaced_before_its_move_was_read_is_parked_all_the_same(cwd,
     main, nor does the job's end."""
     p = project / f"{SID}.jsonl"
     _write(p, [*_turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts"), *_moved(SID, JOB)])
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     _attach(cwd, p, pid=100)
-    job_sub = _subscribe(JOB, cc_channel.HOOK)
+    job_sub = _subscribe(JOB, cc_plugin.HOOK)
     assert session.attach(CORPUS, JOB, cwd, None, 200) is not None
     assert session.sessions(CORPUS)[SID]["reason"] == "replaced" and not session.may_return(CORPUS, SID)
     session.connected(CORPUS, SID, cwd, 100)
     assert session.current(CORPUS).sid == JOB
-    channel._subs[CORPUS].discard(job_sub)
+    events._subs[CORPUS].discard(job_sub)
     session.disconnected(CORPUS, JOB)
     assert session.current(CORPUS) is None and quits == [CORPUS]
 
@@ -370,7 +368,7 @@ def test_a_subagent_at_work_when_the_session_moves_goes_on_in_the_job(cwd, proje
     job's task notification ends it with its result, after a server restart too."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     started = _stamped(SID, 1, "2026-10-01T20:27:52.417Z", _human("Count the posts in the background"),
@@ -383,8 +381,8 @@ def test_a_subagent_at_work_when_the_session_moves_goes_on_in_the_job(cwd, proje
     assert chat["status"] == "running" and chat["session"] == JOB
     if restart:
         _restart()
-        _subscribe(JOB, cc_channel.HOOK)
-        session.connected(CORPUS, JOB, cwd, 200, claim=False)
+        _subscribe(JOB, cc_plugin.HOOK)
+        session.connected(CORPUS, JOB, cwd, 200)
     note = ("<task-notification>\n<task-id>a1b2c3d4</task-id>\n<status>completed</status>\n<result>8 posts</result>\n"
             "</task-notification>")
     _write(project / f"{JOB}.jsonl", [*_copy(started, JOB), *_stamped(
@@ -403,27 +401,13 @@ class _Req:
         return False
 
 
-async def _job_subscribes_on_the_channel(cwd: str) -> dict:
-    """The job's shim subscribes on the channel route: the first event its stream carries after `ready`."""
-    resp = await channel.subscribe(_Req(), cwd=cwd, session=JOB, pid=200)
-    gen = resp.body_iterator
-    try:
-        assert (await gen.__anext__())["event"] == "ready"
-        return json.loads((await gen.__anext__())["data"])
-    finally:
-        await gen.aclose()
-
-
-@pytest.mark.parametrize("job_route", [cc_channel.HOOK, cc_channel.CHANNEL])
-@pytest.mark.parametrize("old_route", [cc_channel.CHANNEL, cc_channel.HOOK])
-def test_an_event_posted_after_the_move_and_before_the_job_s_shim_subscribes_waits_for_the_job(
-        cwd, project, old_route, job_route):
+def test_an_event_posted_after_the_move_and_before_the_job_s_shim_subscribes_waits_for_the_job(cwd, project):
     """The browser posts an event after Claude Code wrote the move, before the tail read it and before the job's shim
     subscribed: main follows first, and the event waits in the job's queue, never the parked session's, until the
-    job's watcher takes it or its channel subscribes."""
+    job's watcher takes it."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    old_sub = _subscribe(SID, old_route)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     asked = _turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts")
@@ -431,18 +415,14 @@ def test_an_event_posted_after_the_move_and_before_the_job_s_shim_subscribes_wai
     _write(project / f"{JOB}.jsonl", _copy(asked, JOB))
     _write(p, _moved(SID, JOB))
 
-    posted = channel.post(CORPUS, "main", {"text": "Which posts are new?"})
+    posted = events.post(CORPUS, "main", {"text": "Which posts are new?"})
     assert session.current(CORPUS).sid == JOB and posted["delivered"] == 1
-    assert old_sub.empty() and not channel._pending.get((CORPUS, SID))
-    assert [n["meta"]["event"] for n in channel._pending[(CORPUS, JOB)]] == [posted["id"]]
-    if job_route == cc_channel.HOOK:
-        _subscribe(JOB, cc_channel.HOOK)
-        session.connected(CORPUS, JOB, cwd, 200, claim=False)
-        got = asyncio.run(channel.pull_route(_Req(), cwd=cwd, session=JOB, wait=1, pid=200))
-        assert got["id"] == posted["id"]
-    else:
-        got = asyncio.run(_job_subscribes_on_the_channel(cwd))
-        assert got["meta"]["event"] == posted["id"] and not channel._pending.get((CORPUS, JOB))
+    assert not events._pending.get((CORPUS, SID))
+    assert [n["meta"]["event"] for n in events._pending[(CORPUS, JOB)]] == [posted["id"]]
+    _subscribe(JOB, cc_plugin.HOOK)
+    session.connected(CORPUS, JOB, cwd, 200)
+    got = asyncio.run(events.pull_route(_Req(), cwd=cwd, session=JOB, wait=1, pid=200))
+    assert got["id"] == posted["id"]
 
 
 def test_naming_the_job_after_an_unread_move_takes_over_from_no_session(cwd, project):
@@ -450,11 +430,11 @@ def test_naming_the_job_after_an_unread_move_takes_over_from_no_session(cwd, pro
     nothing of taking over from it."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     _write(p, [*_turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts"), *_moved(SID, JOB)])
-    out = asyncio.run(channel.session_route(CORPUS, channel.SessionBody(session=JOB, cwd=cwd)))
+    out = asyncio.run(events.session_route(CORPUS, events.SessionBody(session=JOB, cwd=cwd)))
     assert out["attached"] and out["replaced"] is None and session.current(CORPUS).sid == JOB
 
 
@@ -463,11 +443,11 @@ def test_a_thread_s_fork_at_work_when_the_session_moves_goes_on_in_the_job(cwd, 
     keeps running, and the job's task notification finishes it."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
-    channel.post(CORPUS, "thread", {"thread": thread["id"], "text": "On which days did it change?"})
+    events.post(CORPUS, "thread", {"thread": thread["id"], "text": "On which days did it change?"})
     name = agents.read_meta(CORPUS, thread["id"])[threads.FORK_NAME_KEY]
     forked = _stamped(SID, 1, "2026-10-01T20:27:52.417Z", _human("Look into the thread"),
                       _assistant(_use("toolu_fk", "Agent", {"description": f"thread:{name}", "prompt": "Answer it.",
@@ -495,7 +475,7 @@ def test_a_moved_job_s_subagent_transcript_links_to_the_old_one_and_each_line_sh
     once."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     old = project / SID / "subagents" / "agent-a1b2c3d4.jsonl"
@@ -541,3 +521,336 @@ def test_a_copied_record_is_known_by_its_uuid_or_its_time_and_a_session_that_goe
     assert not session._copied(lv.copied, {"uuid": "2-1", "timestamp": MOVED_AT})
     _write(old, _stamped(SID, 9, "2026-10-02T01:00:00.000Z", _human("back again")))
     assert session._continued_in(str(old)) is None
+
+
+def test_a_transcript_thimble_0_5_0_wrote_keeps_its_browser_events_in_the_context(tmp_path):
+    """A main session resumed after the update to 0.6.0 has 0.5.0's records before its own: its events as records of
+    origin `channel` (the channel route, meta records) and as `<channel source="plugin:thimble:thimble">` tags in task
+    notifications (the hook route). The context's conversation reads them as the analyst's messages, beside 0.6.0's
+    form, and another channel's tag stays a notification."""
+    from app import context
+
+    def user(content: str, origin: str, **extra) -> dict:
+        return {"type": "user", "origin": {"kind": origin}, "message": {"role": "user", "content": content}, **extra}
+
+    path = tmp_path / f"{SID}.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in [
+        user('<channel source="plugin:thimble:thimble" kind="main" event="a1">\nfirst, on the channel\n</channel>',
+             "channel", isMeta=True),
+        user('<task-notification>\n<channel source="plugin:thimble:thimble" kind="main" event="a2">\nsecond, by the '
+             'hook\n</channel>\n</task-notification>', "task-notification"),
+        user('<task-notification>\n<thimble-event kind="main" event="a3">\nthird, in 0.6.0\n</thimble-event>\n'
+             '</task-notification>', "task-notification"),
+    ]) + "\n")
+    said = [(e.head, e.body) for e in context._entries(path)]
+    assert said == [("[analyst]", "first, on the channel"), ("[analyst]", "second, by the hook"),
+                    ("[analyst]", "third, in 0.6.0")]
+    assert session.browser_events('<channel source="plugin:other:x" kind="main">not ours</channel>') == []
+
+
+def test_the_module_s_plan_mode_report_moves_main_s_mode_and_back(workspaces_tmp, monkeypatch):
+    """Live check L21: a shift+tab while main is idle reaches thimble through the module (session.note_plan): plan mode,
+    then on leaving it the mode main's hooks last reported, or default."""
+    from app import session as s
+
+    monkeypatch.setattr(s, "_live", {"mini": s.Live("mini", "sid-1", "/c", None, None)})
+    monkeypatch.setattr(s, "_modes", {})
+    monkeypatch.setattr(s, "_before_plan", {})
+    monkeypatch.setattr(s, "_keep_mode", lambda c, sid, mode: None)
+    s.note_mode("mini", "sid-1", "auto")
+    s.note_plan("mini", "sid-1", True)
+    assert s.main_mode("mini") == "plan"
+    s.note_plan("mini", "sid-1", True)
+    s.note_plan("mini", "sid-1", False)
+    assert s.main_mode("mini") == "auto", "back to the mode before"
+    s.note_plan("mini", "sid-1", False)
+    assert s.main_mode("mini") == "auto", "out of plan mode already: nothing changes"
+    s.note_plan("mini", "other-sid", True)
+    assert s.main_mode("mini") == "auto", "another session's report counts for nothing"
+
+
+# ----------------------------------------------------------------------------- a thread's fork called twice
+
+
+def _refused(tool_use_id: str, text: str) -> dict:
+    return {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tool_use_id, "content": text, "is_error": True}]}}
+
+
+def test_a_second_fork_call_a_hook_refused_leaves_the_thread_its_own_forks_answer(cwd, project, quits):
+    """Main forks a thread twice (live check: after --continue); the agent-check hook refuses the second call. The
+    refused call is never the thread's fork: the meta keeps the first call's, and its error ends nothing, so the
+    answered thread ends `done`, not `failed`."""
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_plugin.HOOK)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
+    tid = thread["id"]
+    events.post(CORPUS, "thread", {"thread": tid, "text": "On which days did the page change?"})
+    name = agents.read_meta(CORPUS, tid)[threads.FORK_NAME_KEY]
+    assert name == "on-which-days-did-the", "the fork's name is its first question's words, which the tray shows whole"
+    call = {"subagent_type": "fork", "name": name, "description": f"thread:{name}", "prompt": f"thread:{name}"}
+    _append(p, lv, [
+        _human("Look into the thread"),
+        _assistant(_use("toolu_f1", "Agent", call)),
+        _result("toolu_f1", "Async agent launched successfully.\nagentId: f0e1d2c3"),
+        _assistant(_use("toolu_f2", "Agent", call)),
+        _refused("toolu_f2", "PreToolUse:Agent hook error: The fork of thread “On which days did the page change?” is "
+                             "running already and answers in the thread, so this turn needs nothing more."),
+        END,
+    ])
+    fork = agents.read_meta(CORPUS, tid)["fork"]
+    assert fork["tool_use_id"] == "toolu_f1" and fork["agent_id"] == "f0e1d2c3"
+    assert agents.running(CORPUS, tid)
+    assert not [r for r in _log(tid) if r["type"] in ("done", "error")]
+    threads.reply(CORPUS, tid, "On 16 and 18 June.", by="terminal")
+    note = ("<task-notification>\n<task-id>f0e1d2c3</task-id>\n<tool-use-id>toolu_f1</tool-use-id>\n"
+            "<status>completed</status>\n<summary>Agent finished</summary>\n</task-notification>")
+    _append(p, lv, [{"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": note}},
+                    _assistant(_say("↳ thread answered.")), END])
+    assert not agents.running(CORPUS, tid)
+    assert [r["type"] for r in _log(tid) if r["type"] in ("done", "error")] == ["done"]
+
+
+def test_a_forks_end_from_another_call_or_a_refused_one_changes_nothing_and_a_failure_after_the_reply_is_no_error(cwd):
+    thread = agents.new_thread(CORPUS, None, None, "Days")
+    tid = thread["id"]
+    agents.append(agents.paths(CORPUS, tid)[1], {"type": "user", "text": "Which days?"})
+    threads.fork_started(CORPUS, tid, agent_id="a1", tool_use_id="toolu_f1", session=SID)
+    assert agents.running(CORPUS, tid)
+    threads.fork_finished(CORPUS, tid, "failed", tool_use_id="toolu_f2")
+    threads.fork_finished(CORPUS, tid, "failed", tool_use_id="toolu_f3", refused=True)
+    assert agents.running(CORPUS, tid) and not [r for r in _log(tid) if r["type"] in ("done", "error")]
+    threads.reply(CORPUS, tid, "Mondays.", by="terminal")
+    threads.fork_finished(CORPUS, tid, "failed", tool_use_id="toolu_f1", agent_id="a1")
+    assert not agents.running(CORPUS, tid)
+    assert [r["type"] for r in _log(tid) if r["type"] in ("done", "error")] == ["done"]
+    # with no reply since the question, a failure is the thread's error
+    agents.append(agents.paths(CORPUS, tid)[1], {"type": "user", "text": "And Tuesdays?"})
+    threads.fork_finished(CORPUS, tid, "failed", tool_use_id="toolu_f1", agent_id="a1")
+    assert [r["type"] for r in _log(tid) if r["type"] in ("done", "error")] == ["done", "error"]
+
+
+def test_a_fork_that_ends_with_its_session_may_be_forked_again_at_once(cwd, monkeypatch):
+    """--continue resumes main under the same session id: the fork the ended session ran is gone, so a new Agent call
+    for the thread is not refused as a second fork (subagents.json `forking` loses the thread)."""
+    from app import subagent_files as files
+    from app import subagents
+
+    monkeypatch.setattr(files, "terminal", lambda ws: True)
+    thread = agents.new_thread(CORPUS, None, None, "Days")
+    tid = thread["id"]
+    agents.update_agent(CORPUS, tid, **{threads.FORK_NAME_KEY: "which-days"})
+    with subagents.update(CORPUS) as state:
+        assert files.fork_check(state, {"subagent_type": "fork", "description": "thread:which-days", "prompt": "thread:which-days"}) is None
+    threads.fork_started(CORPUS, tid, agent_id="a1", tool_use_id="toolu_f1", session=SID)
+    threads.session_ended(CORPUS, SID)
+    with subagents.update(CORPUS) as state:
+        assert files.fork_check(state, {"subagent_type": "fork", "description": "thread:which-days", "prompt": "thread:which-days"}) is None
+
+
+# ----------------------------------------------------------------------------- a thread's fork linked to its thread
+
+
+QUESTION = "On which days did the page change?"
+
+
+def _fork_files(project: Path, agent: str, tool_use_id: str, name: str | None, call: dict | None) -> Path:
+    """A thread's fork's transcript and meta json as Claude Code writes them in terminal mode: the meta's description is
+    the thread's question, which thimble-term gave the call (live check term-fix5, new quirk 1), with `name` only when
+    main passed one; the file holds its copy of the call (`call`) when one is given."""
+    d = project / SID / "subagents"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"agent-{agent}.jsonl"
+    meta = {"agentType": "fork", "isFork": True, "description": f"thread: {QUESTION}",
+            "toolUseId": tool_use_id, **({"name": name} if name else {})}
+    path.with_name(f"agent-{agent}.meta.json").write_text(json.dumps(meta))
+    recs: list[dict] = [{"type": "fork-context-ref", "agentId": agent, "parentSessionId": SID}]
+    if call is not None:
+        recs.append({"type": "assistant", "isSidechain": True, "agentId": agent, "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": tool_use_id, "name": "Agent", "input": call}]}})
+    _write(path, recs)
+    return path
+
+
+def _fork_works(path: Path, agent: str) -> None:
+    _write(path, [
+        {"type": "assistant", "isSidechain": True, "agentId": agent, "message": {"role": "assistant", "content": [
+            _use("toolu_wc", "Bash", {"command": "wc -l pages.jsonl"})]}},
+        {"isSidechain": True, "agentId": agent, "type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_wc", "content": "500 pages.jsonl"}]}},
+        {"type": "assistant", "isSidechain": True, "agentId": agent, "message": {"role": "assistant", "content": [
+            _say("It changed on 16 and 18 June.")]}},
+    ])
+
+
+@pytest.mark.parametrize("named", [True, False], ids=["name", "no-name"])
+@pytest.mark.parametrize("first", ["file", "tool_use"])
+@pytest.mark.parametrize("known_by", ["hook", "file-call", "tool_use"])
+def test_a_thread_s_fork_joins_its_thread_whatever_main_passes_and_whichever_comes_first(cwd, project, quits, named,
+                                                                                         first, known_by):
+    """Live check term-fix5, new quirk 1: main passed no `name`, so the fork's meta json named the thread only by its
+    question (thimble-term's description), the mirror saw the file before main's tool_use, made a plain agent chat, and
+    the thread never got its fork. Now the fork joins its thread in either order, with or without a name: by the
+    agent-check hook's record of the call (`hook`), by the call the fork's own file holds (`file-call`), or, with
+    neither, by main's tool_use, which turns a plain agent chat made first into the thread's (`tool_use`). The fork's
+    steps and answer show in the thread, no agent chat is left in main, and its end finishes the thread."""
+    from app import subagent_files as files
+    from app import subagents
+
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_plugin.HOOK)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
+    tid = thread["id"]
+    events.post(CORPUS, "thread", {"thread": tid, "text": QUESTION})
+    name = agents.read_meta(CORPUS, tid)[threads.FORK_NAME_KEY]
+    call = {"subagent_type": "fork", "description": f"thread:{name}", "prompt": f"thread:{name}",
+            **({"name": name} if named else {})}
+    if known_by == "hook":  # what the agent-check hook saw: thimble-term's description, the prompt main wrote
+        with subagents.update(CORPUS) as state:
+            assert files.fork_check(state, {**call, "description": f"thread: {QUESTION}"}, None,
+                                    "toolu_f1") is None
+    file_call = call if known_by == "file-call" else None
+    named_meta = name if named else None
+    tool_use = [_human("Look into the thread"), _assistant(_use("toolu_f1", "Agent", call)),
+                _result("toolu_f1", "Async agent launched successfully.\nagentId: f0e1d2c3")]
+    if first == "file":
+        path = _fork_files(project, "f0e1d2c3", "toolu_f1", named_meta, file_call)
+        _fork_works(path, "f0e1d2c3")
+        session._scan_subs(lv)
+        session.tail_once(lv)
+        _append(p, lv, tool_use)
+    else:
+        _append(p, lv, tool_use)
+        path = _fork_files(project, "f0e1d2c3", "toolu_f1", named_meta, file_call)
+        _fork_works(path, "f0e1d2c3")
+        session._scan_subs(lv)
+    session.tail_once(lv)
+    fork = agents.read_meta(CORPUS, tid)["fork"]
+    assert fork["agent_id"] == "f0e1d2c3" and fork["tool_use_id"] == "toolu_f1" and fork["session"] == SID
+    assert not [m for m in agents.list_chats(CORPUS) if m.get("role") == session.SUBAGENT_ROLE], \
+        "no agent chat in main for the thread's fork"
+    log = _log(tid)
+    assert [r["name"] for r in log if r["type"] == "tool_use"] == ["Bash"], "the fork's steps show in the thread"
+    assert [r["delta"] for r in log if r["type"] == "text" and r.get("reply")] == ["It changed on 16 and 18 June."]
+    assert agents.running(CORPUS, tid)
+    note = ("<task-notification>\n<task-id>f0e1d2c3</task-id>\n<tool-use-id>toolu_f1</tool-use-id>\n"
+            "<status>completed</status>\n<summary>Agent finished</summary>\n</task-notification>")
+    _append(p, lv, [END, {"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": note}},
+                    _assistant(_say("The thread is answered.")), END])
+    assert not agents.running(CORPUS, tid)
+    assert [r["type"] for r in _log(tid) if r["type"] in ("done", "error")] == ["done"]
+
+
+def test_a_fork_whose_call_one_pass_read_joins_its_thread_when_a_later_pass_finds_its_file(cwd, project, quits):
+    """Terminal mode reads each hook's pass in its own process: one pass reads main's Agent call, a later one finds the
+    fork's file, whose meta json names the thread only by its question. The later pass picks up the starting fork from
+    the thread's meta and joins the file to it by the call's tool_use id."""
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_plugin.HOOK)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
+    tid = thread["id"]
+    events.post(CORPUS, "thread", {"thread": tid, "text": QUESTION})
+    name = agents.read_meta(CORPUS, tid)[threads.FORK_NAME_KEY]
+    call = {"subagent_type": "fork", "description": f"thread:{name}", "prompt": f"thread:{name}"}
+    _append(p, lv, [_human("Look into the thread"), _assistant(_use("toolu_f1", "Agent", call)),
+                    _result("toolu_f1", "Async agent launched successfully.")])
+    assert agents.read_meta(CORPUS, tid)["fork"]["tool_use_id"] == "toolu_f1"
+    _restart()
+    _subscribe(SID, cc_plugin.HOOK)
+    lv = _attach(cwd, p, pid=100)
+    path = _fork_files(project, "f0e1d2c3", "toolu_f1", None, None)
+    _fork_works(path, "f0e1d2c3")
+    session._scan_subs(lv)
+    session.tail_once(lv)
+    assert agents.read_meta(CORPUS, tid)["fork"]["agent_id"] == "f0e1d2c3"
+    assert not [m for m in agents.list_chats(CORPUS) if m.get("role") == session.SUBAGENT_ROLE]
+    assert [r["delta"] for r in _log(tid) if r["type"] == "text" and r.get("reply")] == ["It changed on 16 and 18 June."]
+
+
+def test_a_thread_no_fork_answered_stops_when_the_session_ends_and_an_answered_one_stays(cwd):
+    """A thread whose question no fork took (or whose fork the mirror never linked) and whose running mark no process
+    holds (terminal mode) ends `Stopped…` when main's session ends; a thread with its answer, or one already stopped,
+    is left as it is."""
+    asked = agents.new_thread(CORPUS, None, None, "Asked")["id"]
+    agents.append(agents.paths(CORPUS, asked)[1], {"type": "user", "text": "Which days?"})
+    answered = agents.new_thread(CORPUS, None, None, "Answered")["id"]
+    agents.append(agents.paths(CORPUS, answered)[1], {"type": "user", "text": "Which pages?"})
+    threads.reply(CORPUS, answered, "Two pages.", by="terminal")
+    elsewhere = agents.new_thread(CORPUS, None, None, "Elsewhere")["id"]
+    agents.append(agents.paths(CORPUS, elsewhere)[1], {"type": "user", "text": "Which wiki?"})
+    agents.update_agent(CORPUS, elsewhere, fork={"agent_id": "a9", "tool_use_id": "toolu_9", "session": "other"})
+    assert not agents.running(CORPUS, asked)
+    threads.session_ended(CORPUS, SID)
+    stops = [r for r in _log(asked) if r["type"] == "error"]
+    assert [r["kind"] for r in stops] == [threads.SESSION_ENDED]
+    assert not [r for r in _log(answered) if r["type"] == "error"]
+    assert not [r for r in _log(elsewhere) if r["type"] == "error"], "its fork runs on in another session"
+    threads.session_ended(CORPUS, SID)
+    assert len([r for r in _log(asked) if r["type"] == "error"]) == 1, "stopped once"
+
+
+def test_a_forks_closing_note_as_the_answer_drops_what_it_made_and_starts_with_a_capital():
+    """Live check term-fix6, new quirk 3: the `↳` fallback answer read `added a table card. Yes, 23 June…`."""
+    assert session.note_answer("added a table card. Yes, 23 June still has the most deletions (473).") == \
+        "Yes, 23 June still has the most deletions (473)."
+    assert session.note_answer("added a table card of the 25 deletions from 18:00 to 19:00 UTC on 18 June. MartinHuber "
+                               "made all of them.") == "MartinHuber made all of them."
+    assert session.note_answer("I added a table of the deletions per minute and answered in the thread. The 18:21 "
+                               "deletion is the first of 25.") == "The 18:21 deletion is the first of 25."
+    # a note that is only the clause, or holds none, keeps its words
+    assert session.note_answer("added a table card.") == "Added a table card."
+    assert session.note_answer("the count went from 2.5 to 3. Then it fell.") == "The count went from 2.5 to 3. Then it fell."
+
+
+def test_a_fork_whose_answer_is_only_its_closing_note_answers_the_thread_with_it(cwd, project, quits):
+    """Live check term-fix6: a thread's fork wrote its answer only as a `↳ thread <name>: …` line, which only main's
+    terminal shows, so the thread said `answered` with no words. Its last such line after its last tool call is the
+    thread's reply once it ends; a note before a tool call (what it is about to do) is not."""
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_plugin.HOOK)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    tid = agents.new_thread(CORPUS, None, None, "Days the page changed")["id"]
+    events.post(CORPUS, "thread", {"thread": tid, "text": QUESTION})
+    name = agents.read_meta(CORPUS, tid)[threads.FORK_NAME_KEY]
+    call = {"subagent_type": "fork", "description": f"thread:{name}", "prompt": f"thread:{name}"}
+    _append(p, lv, [_human("Look into the thread"), _assistant(_use("toolu_f1", "Agent", call)),
+                    _result("toolu_f1", "Async agent launched successfully.\nagentId: f0e1d2c3")])
+    path = _fork_files(project, "f0e1d2c3", "toolu_f1", name, None)
+    say = lambda text: {"type": "assistant", "isSidechain": True, "agentId": "f0e1d2c3",  # noqa: E731
+                        "message": {"role": "assistant", "content": [_say(text)]}}
+    _write(path, [say(f"↳ thread {name}: counting the saves per day."),
+                  {"type": "assistant", "isSidechain": True, "agentId": "f0e1d2c3", "message": {"role": "assistant",
+                   "content": [_use("toolu_wc", "Bash", {"command": "wc -l pages.jsonl"})]}},
+                  say(f"↳ Thread {name}: added a table card of the saves per day. it changed on 16 and 18 June.")])
+    session._scan_subs(lv)
+    session.tail_once(lv)
+    assert not [r for r in _log(tid) if r["type"] == "text"], "a note is no line of the thread while the fork works"
+    note = ("<task-notification>\n<task-id>f0e1d2c3</task-id>\n<tool-use-id>toolu_f1</tool-use-id>\n"
+            "<status>completed</status>\n<summary>Agent finished</summary>\n</task-notification>")
+    _append(p, lv, [END, {"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": note}},
+                    _assistant(_say("The thread is answered.")), END])
+    # without the clause that says what it made, a capital first (live check term-fix6, new quirk 3)
+    assert [r["delta"] for r in _log(tid) if r["type"] == "text" and r.get("reply")] == ["It changed on 16 and 18 June."]
+    assert [r["type"] for r in _log(tid) if r["type"] in ("done", "error")] == ["done"]
+
+
+def test_a_workflow_s_title_keeps_the_quotation_marks_its_script_escapes():
+    """Live check term-fix9, low quirk: a workflow whose meta said `description: 'Re-verify main\\'s answer'` was titled
+    `Re-verify main`, since the meta's string ended at the escaped quotation mark. An escaped mark is one of the string's
+    characters, and the title reads as the string does."""
+    script = ("export const meta = {name: 'reverify', description: 'Re-verify main\\'s answer: \"23 June\"\\nagain'}\n"
+              "export default async () => {}")
+    assert session.workflow_meta(script) == {"name": "reverify", "description": "Re-verify main's answer: \"23 June\" again"}
+    assert session.workflow_meta('export const meta = {name: "read", description: `the "board"`}') == \
+        {"name": "read", "description": 'the "board"'}

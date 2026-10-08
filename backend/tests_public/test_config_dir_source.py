@@ -28,10 +28,9 @@ def test_the_served_config_dir_is_the_one_the_shim_reported(served, monkeypatch,
 
     monkeypatch.setattr(session, "connected", connected_then_stop)
     client = TestClient(main.create_app())
-    q = f"cwd={_cwd()}&session={FIRST}&delivery=channel&config_dir={tmp_path / 'real-cc'}"
-    assert client.get(f"/api/channel?{q}", headers=plugin_headers()).status_code == 418
-    assert config.claude_config_dir() == tmp_path / "real-cc"
-
+    q = f"cwd={_cwd()}&session={FIRST}&delivery=hook&config_dir={tmp_path / 'real-cc'}"
+    assert client.get(f"/api/events?{q}", headers=plugin_headers()).status_code == 418
+    # /thimble names the session, which attaches it with the config dir its shim reported, not one the request names
     r = client.post(f"/api/ws/{CORPUS}/session", json={"session": FIRST, "cwd": _cwd(), "env_pid": 1,
                                                        "config_dir": str(tmp_path / "planted")})
     assert r.status_code == 200 and config.claude_config_dir() == tmp_path / "real-cc"

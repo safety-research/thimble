@@ -3,7 +3,7 @@
 // Enter), ✓ once the page shows it; and the Checks pane (Checks.tsx, the same pane every document type's sidebar has)
 // pinned to the bottom.
 import { useMemo, useState, type DragEvent } from 'react'
-import { primaryArtifact } from '../components/Outputs'
+import { figureKind } from '../components/Outputs'
 import type { Cell, Group } from '../lib/types'
 import { readStorage, writeStorage } from '../lib/workspace'
 import { CARD_MIME, cardSections, sectionsKey, type CardSectionKey } from './cards'
@@ -11,7 +11,6 @@ import { ChecksPane, type Checks } from './Checks'
 import type { DocComment } from './checkComments'
 import { Chevron, Glyph, IconButton } from './icons'
 
-const artifactOf = (c: Cell) => primaryArtifact(c.outputs)?.kind ?? null
 const DEFAULT_OPEN: Record<CardSectionKey, boolean> = { starred: true, orientation: true, figures: true, yours: true }
 
 export interface SidebarProps {
@@ -33,7 +32,7 @@ export interface SidebarProps {
 export function Sidebar({ ws, cells, groups, used, onInsert, onHide, over, doc, checks, comments }: SidebarProps) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState<Record<string, boolean>>(() => ({ ...DEFAULT_OPEN, ...readStorage<Record<string, boolean>>(sectionsKey(ws), {}) }))
-  const sections = useMemo(() => cardSections(cells, groups, query, artifactOf), [cells, groups, query])
+  const sections = useMemo(() => cardSections(cells, groups, query, figureKind), [cells, groups, query])
   const toggle = (key: string) => {
     const next = { ...open, [key]: !open[key] }
     setOpen(next)

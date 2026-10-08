@@ -108,11 +108,11 @@ describe('markdown', () => {
   })
 
   test('markdown and sanitized HTML load no app route but the media routes', async () => {
-    const el = await mount(<ChatMarkdown text={'![x](/api/channel?cwd=/c&session=s) ![y](/api/ws/w/media?path=a.png)'} />)
+    const el = await mount(<ChatMarkdown text={'![x](/api/events?cwd=/c&session=s) ![y](/api/ws/w/media?path=a.png)'} />)
     const srcs = Array.from(el.querySelectorAll('img')).map((i) => i.getAttribute('src'))
     expect(srcs).toEqual(['/api/ws/w/media?path=a.png'])
-    const out = purifyHtml('<img src="/api/channel?cwd=/c"><img src="/api/ws/w/media?path=b.png"><div style="background:url(/api/channel)">d</div>')
-    expect(out).not.toContain('/api/channel')
+    const out = purifyHtml('<img src="/api/events?cwd=/c"><img src="/api/ws/w/media?path=b.png"><div style="background:url(/api/events)">d</div>')
+    expect(out).not.toContain('/api/events')
     expect(out).toContain('/api/ws/w/media?path=b.png')
   })
 

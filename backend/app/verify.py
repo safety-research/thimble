@@ -172,13 +172,14 @@ def _enqueue_links(c: str, cell: dict, version: str) -> bool:
 def _save_cell(c: str, cid: str, mutate) -> dict | None:
     """Locate the cell, apply `mutate(cell)` (False from it = do not write), write the notebook, return the cell."""
     ws = config.workspace_dir(c)
-    hit = notebook._locate(ws, cid)
-    if hit is None:
-        return None
-    nb, cell = hit
-    if mutate(cell) is False:
-        return None
-    notebook.write_notebook(ws, nb)
+    with notebook.editing(ws):
+        hit = notebook._locate(ws, cid)
+        if hit is None:
+            return None
+        nb, cell = hit
+        if mutate(cell) is False:
+            return None
+        notebook.write_notebook(ws, nb)
     return cell
 
 
@@ -322,6 +323,8 @@ async def _links_job(c: str, cid: str, version: str) -> None:
         if cite.is_card_ref(ref) or (display, ref) in external:
             continue
         why = await _ref_check(corpus, ref, display, decrease=cite.says_decrease(text, start, end))
+        if why == WHY_VALUE and not cite.shows_value(display):
+            why = None  # the place resolves and the words show no value, so they only name the link: never red
         if why == WHY_VALUE:
             external[(display, ref)] = {"why": why, "source": await _source_at(corpus, ref)}
         else:
@@ -491,33 +494,34 @@ def rescan(c: str | None = None) -> int:
             ws = config.workspace_dir(name)
         except ValueError:
             continue
-        for info in notebook.list_notebooks(ws):
-            nb = notebook.read_notebook(ws, info["id"])
-            if nb is None:
-                continue
-            changed = False
-            for cell in nb.get("cells") or []:
-                if not isinstance(cell, dict) or cell.get("kind", "code") != "code" or not cell.get("id"):
+        with notebook.editing(ws):
+            for info in notebook.list_notebooks(ws):
+                nb = notebook.read_notebook(ws, info["id"])
+                if nb is None:
                     continue
-                if not _runnable(cell):
-                    continue
-                v = cell.get("verification")
-                if not isinstance(v, dict) or v.get("exec_count") != cell.get("exec_count"):
-                    on_cell_ran(name, nb, cell)
-                    changed = True
-                    touched += 1
-                    continue
-                links = v.get("links") if isinstance(v.get("links"), dict) else {}
-                hit = False
-                if str(cell.get("takeaway") or "").strip() and (links.get("status") == "pending" or _heals_at_start(links)):
-                    if links.get("status") != "pending":
-                        links.update(status="pending", checked=False)
+                changed = False
+                for cell in nb.get("cells") or []:
+                    if not isinstance(cell, dict) or cell.get("kind", "code") != "code" or not cell.get("id"):
+                        continue
+                    if not _runnable(cell):
+                        continue
+                    v = cell.get("verification")
+                    if not isinstance(v, dict) or v.get("exec_count") != cell.get("exec_count"):
+                        on_cell_ran(name, nb, cell)
                         changed = True
-                    hit |= _enqueue_links(name, cell, _links_version(cell))
-                if hit:
-                    touched += 1
-            if changed:
-                notebook.write_notebook(ws, nb)
+                        touched += 1
+                        continue
+                    links = v.get("links") if isinstance(v.get("links"), dict) else {}
+                    hit = False
+                    if str(cell.get("takeaway") or "").strip() and (links.get("status") == "pending" or _heals_at_start(links)):
+                        if links.get("status") != "pending":
+                            links.update(status="pending", checked=False)
+                            changed = True
+                        hit |= _enqueue_links(name, cell, _links_version(cell))
+                    if hit:
+                        touched += 1
+                if changed:
+                    notebook.write_notebook(ws, nb)
     if touched:
         log.info("verify: rescan enqueued checks for %d cell(s)", touched)
     return touched
@@ -536,6 +540,12 @@ def _relink(c: str, cell_id: str) -> dict[str, Any]:
     under a
     new version (the `relinks` count), so a finished check runs again and an earlier job lands stale."""
     ws = notebook._ws(c)
+    with notebook.editing(ws):
+        return _relink_locked(c, ws, cell_id)
+
+
+def _relink_locked(c: str, ws: Path, cell_id: str) -> dict[str, Any]:
+    """_relink with the groups' lock held."""
     hit = notebook._locate(ws, cell_id)
     if hit is None:
         raise HTTPException(404, f"no such card: {cell_id}")

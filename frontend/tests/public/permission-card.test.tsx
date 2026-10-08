@@ -8,7 +8,7 @@ import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
 import { ARM_MS, EXPIRED_TITLE, PermissionCard } from '../../src/chat/PermissionCard.tsx'
-import { askWhy, pendingRequests, type PendingAsk } from '../../src/chat/permissions.ts'
+import { askWhy, autoModeRefusal, pendingRequests, pluginSteered, subagentName, type PendingAsk } from '../../src/chat/permissions.ts'
 import { bus } from '../../src/lib/bus.ts'
 import { newest, STALE } from '../../src/lib/newest.ts'
 import type { ChatMeta, PermissionRequest } from '../../src/lib/types.ts'
@@ -38,13 +38,22 @@ afterEach(() => {
 const armed = () => act(async () => new Promise((r) => setTimeout(r, ARM_MS + 30)))
 
 const T = (m: number) => `2026-09-25T10:${String(m).padStart(2, '0')}:00Z`
-const chat = (id: string, extra: Partial<ChatMeta> = {}): ChatMeta => ({ id, kind: 'agent', role: 'orient', title: 'Orientation', created_at: T(0), parent: 'main', status: 'running', ...extra }) as ChatMeta
+const chat = (id: string, extra: Partial<ChatMeta> & { permission_mode?: string } = {}): ChatMeta => ({ id, kind: 'agent', role: 'orient', title: 'Orientation', created_at: T(0), parent: 'main', status: 'running', ...extra }) as ChatMeta
 const ORIENT = chat('or1', { permission_mode: 'manual' })
 const METAS = new Map([[ORIENT.id, ORIENT]])
 
 const req = (id: string, extra: Partial<PermissionRequest> = {}): PermissionRequest => ({ id, tool: 'Bash', what: 'Count the runs', ...extra }) as PermissionRequest
 
 describe('the requests and their words', () => {
+  test("a call auto mode refused reads as the plan's step: the reason as given and where to approve it", () => {
+    // live check L3: the orientation's own probing call was refused, and its thread showed Claude Code's whole tool
+    // result, with no word of /permissions
+    const result = 'Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Credential Exploration]. If you have other tasks that don\'t depend on this action, continue working on those.'
+    expect(autoModeRefusal(result)).toBe('Auto mode refused: [Credential Exploration]. To approve it, open /permissions → Recently denied in your terminal.')
+    expect(autoModeRefusal('Exit code 1\ntouch: cannot touch: Read-only file system')).toBeNull()
+    expect(autoModeRefusal(undefined)).toBeNull()
+  })
+
   test("every session's requests while it runs, main's among them, the one asked first first", () => {
     const main = { permissions: [req('m1', { since: T(5) })] }
     const metas: ChatMeta[] = [chat('main', { kind: 'main' } as Partial<ChatMeta>), { ...ORIENT, permissions: [req('o1', { since: T(3) }), req('o2', { since: T(7) })] }, chat('w1', { role: 'writer', status: 'done', permissions: [req('w1', { since: T(1) })] })]
@@ -111,6 +120,14 @@ describe('the card', () => {
     expect(w.querySelector('.chat-perm-why')?.textContent).toMatch(/every permission mode\. If nobody answers within a minute, it is declined\.$/)
   })
 
+  test("an edit of thimble's config names the config as the reason, in Bypass too", async () => {
+    const bypass = chat('or3', { permission_mode: 'bypass' })
+    const edit = req('c1', { tool: 'Edit', what: '/home/u/.thimble/config.json', asked_by: 'config', wait_s: 600 })
+    const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'or3', request: edit }]} metas={new Map([['or3', bypass]])} labels={new Map()} />)
+    expect(el.querySelector('.chat-perm-why')?.textContent).toBe(
+      "thimble asks before an agent changes thimble's config, in every permission mode. If nobody answers within 10 minutes, it is declined.")
+  })
+
   test("a code ticket's question says what it asks and why thimble asks, in Bypass too, with Allow and Deny", async () => {
     const dev = chat('d1', { role: 'dev', title: 'ticket #3: Fix the chart', permission_mode: 'bypass' })
     const what = "Apply this change to thimble's own code?"
@@ -119,19 +136,6 @@ describe('the card', () => {
     expect(el.querySelector('.chat-perm-who')?.textContent).toBe("dev · ticket #3asks to change thimble's own code")
     expect(el.querySelector('.chat-perm-what')?.textContent).toBe(what)
     expect(el.querySelector('.chat-perm-why')?.textContent).toBe(q.why)
-    expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])
-  })
-
-  test("a view build's package question names the package, its version, its size and what it needs", async () => {
-    const dev = chat('d2', { role: 'dev', title: 'view: Persona Graph', view: 'persona-graph' })
-    const what = "Install the npm package d3-force 3.0.0 for the view's page"
-    const fields = { description: what, size: '167 kB, with 3 packages it needs', needs: 'd3-dispatch 3.0.1, d3-quadtree 3.0.1, d3-timer 3.0.1' }
-    const q = req('q2', { tool: 'ThimblePackage', what, input: JSON.stringify(fields), why: "The view's page loads this package." })
-    const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'd2', request: q }]} metas={new Map([['d2', dev]])} labels={new Map()} />)
-    expect(el.querySelector('.chat-perm-who')?.textContent).toBe('dev · view Persona Graphasks to install a package')
-    expect(el.querySelector('.chat-perm-what')?.textContent).toBe(what)
-    const text = el.textContent ?? ''
-    for (const v of ['167 kB, with 3 packages it needs', 'd3-timer 3.0.1']) expect(text).toContain(v)
     expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])
   })
 
@@ -158,8 +162,54 @@ describe('the card', () => {
   })
 })
 
+describe("main's requests and those of thimble's agents, its subagents", () => {
+  const orient = chat('o9', { route: 'subagent', agent_id: 'ag1', started_by: 'click' })
+  const typed = chat('o8', { route: 'subagent', agent_id: 'ag2', started_by: 'typed' })
+  const metas = new Map([[orient.id, orient], [typed.id, typed]])
+
+  test("main's own request is answered here or in the terminal, and says nothing of a decline", () => {
+    expect(askWhy({ chat: 'main', request: req('m1') }, metas)).toBe('Answer here or in your terminal.')
+    expect(askWhy({ chat: 'main', request: req('m2', { asked_by: 'web', tool: 'WebFetch' }) }, metas)).toBe('Your settings ask before any agent fetches a web page or searches the web. Answer here or in your terminal.')
+  })
+
+  test('a subagent asks in the terminal; one a click started is shown by Claude Code as from the thimble plugin', () => {
+    expect(askWhy({ chat: 'main', request: req('t1', { terminal: true, chat: 'o8' }) }, metas)).toBe('The orientation asks in your terminal. Answer it there (↓ to the orientation in the agent tray if it is not shown).')
+    expect(askWhy({ chat: 'main', request: req('t2', { terminal: true, chat: 'o9', asked_by: 'data' }) }, metas)).toBe(
+      'thimble asks before an agent changes your files, in every permission mode. The orientation asks in your terminal. Answer it there (↓ to the orientation in the agent tray if it is not shown). Claude Code shows it as from the thimble plugin.',
+    )
+  })
+
+  test('a view\'s builder and reviewer are named as such, not by their chat\'s title (live check L31)', () => {
+    expect(subagentName({ role: 'dev', title: 'view: Stored Revisions By Label' })).toBe('The builder of the view Stored Revisions By Label')
+    expect(subagentName({ role: 'dev', title: 'review: Page Revisions' })).toBe('The reviewer of the view Page Revisions')
+    const builder = chat('b9', { role: 'dev', title: 'view: Posts', route: 'subagent', agent_id: 'ag5', started_by: 'click' })
+    expect(askWhy({ chat: 'main', request: req('t5', { terminal: true, chat: 'b9' }) }, new Map([[builder.id, builder]]))).toBe(
+      'The builder of the view Posts asks in your terminal. Answer it there (↓ to the builder of the view Posts in the agent tray if it is not shown). Claude Code shows it as from the thimble plugin.',
+    )
+  })
+
+  test("the critic of a click-started orientation is shown as from the thimble plugin too (live check L13)", () => {
+    const critic = chat('k9', { role: 'step', title: 'critique', parent: 'o9', route: 'subagent', agent_id: 'ag3', started_by: 'typed' })
+    const typedCritic = chat('k8', { role: 'step', title: 'critique', parent: 'o8', route: 'subagent', agent_id: 'ag4', started_by: 'typed' })
+    const all = new Map([...metas, [critic.id, critic], [typedCritic.id, typedCritic]])
+    expect(pluginSteered('k9', all)).toBe(true)
+    expect(pluginSteered('k8', all)).toBe(false)
+    expect(askWhy({ chat: 'main', request: req('t4', { terminal: true, chat: 'k9' }) }, all)).toMatch(/Claude Code shows it as from the thimble plugin\.$/)
+  })
+
+  test('the card shows a subagent\'s request with no buttons, and names the agent', async () => {
+    const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'main', request: req('t3', { terminal: true, chat: 'o9', command: 'rm -rf work' }) }]} metas={metas} labels={new Map()} />)
+    expect(el.querySelector('.chat-perm')?.getAttribute('data-terminal')).toBe('true')
+    expect(el.querySelector('.chat-perm-acts')).toBeNull()
+    expect(el.querySelectorAll('button.chat-perm-allow, button.chat-perm-deny')).toHaveLength(0)
+    expect(el.querySelector('.chat-perm-who')?.textContent).toMatch(/^The orientationasks to run a command/)
+    const main = await mount(<PermissionCard ws="mini" asks={[{ chat: 'main', request: req('m3') }]} metas={metas} labels={new Map()} />)
+    expect([...main.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])
+  })
+})
+
 describe('several requests at once', () => {
-  const dev = (id: string, title: string) => chat(id, { role: 'dev', title: `view: ${title}`, view: title.toLowerCase(), permission_mode: 'manual' } as Partial<ChatMeta>)
+  const dev = (id: string, title: string) => chat(id, { role: 'dev', title: `view: ${title}`, view: title.toLowerCase(), permission_mode: 'manual' })
   const DEVS = [dev('d1', 'Posts'), dev('d2', 'Reviews'), dev('d3', 'Board')]
   const metas = new Map(DEVS.map((m) => [m.id, m]))
   const ask = (chatId: string, id: string, minute: number, extra: Partial<PermissionRequest> = {}): PendingAsk => ({ chat: chatId, request: req(id, { since: T(minute), command: `echo ${id}`, wait_s: 600, ...extra }) })

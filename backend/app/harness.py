@@ -78,7 +78,9 @@ INPUT_FILE = ".thimble-input.json"  # in the work folder
 TMP_DIR = ".tmp"  # in the work folder: the program's TMPDIR
 CACHE_DIR = ".cache"
 ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "USER", "LOGNAME", "TERM", "HOME", "SHELL")
-ROWS = {"orientation": "orient", "critic": "critic", "writer": "writer", "dev": "dev"}  # modes.AGENTS
+# each role's row of the permission modes (modes.AGENTS): the dev agent's alone; a program of any other role runs its
+# sessions in main's mode, as thimble's own agents of that role run as main's subagents
+ROWS = {"dev": "dev"}
 # the roles whose sessions do their own work unasked, as thimble's own sessions of them do (agent_session.fence)
 UNASKED_ROLES = ("critic", "writer", "dev")
 STOP_WAIT_S = 5.0
@@ -150,7 +152,7 @@ class Job:
     @property
     def model_role(self) -> str:
         """Its role among config.MODEL_ROLES, whose model `ask` uses."""
-        return ROWS.get(self.role) or userconf.ROLES.get(self.role, self.role)
+        return userconf.ROLES.get(self.role, self.role)
 
     @property
     def mode_row(self) -> str:
@@ -433,9 +435,9 @@ async def ask(run: Run, payload: dict[str, Any]) -> Any:
     plain = not isinstance(schema, dict)
     images = await asyncio.to_thread(_images, run, payload["images"]) if payload.get("images") else []
     spec = model.ToolSpec("answer", "Give your answer with this tool.", ANSWER_TOOL if plain else schema)
-    role = config.models_for(run.c).get(run.job.model_role) or {}
-    chosen = str(payload.get("model") or role.get("model") or config.FALLBACK_MODEL)
-    res = await model.structured(prompt, tool=spec, model=chosen, effort=role.get("effort") or None,
+    role = config.call_settings(run.c, run.job.model_role)
+    res = await model.structured(prompt, tool=spec, model=str(payload.get("model") or role["model"]),
+                                 effort=role["effort"], speed=role["speed"], refusal=role["refusal"],
                                  cwd=str(run.job.work), images=images)
     if res.status != "ok" or res.output is None:
         raise HarnessError(f"the model call ended {res.status}: {res.detail or res.text[:300]}")
@@ -704,7 +706,7 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     data = conf.data if run.chat or conf.data != "ask" else "off"
     web = conf.web if run.chat or conf.web != "ask" else "off"
     fenced = agent_session.fence(corpus, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
-                                 auto_allow=not conf.install_asks(), required=conf.enforced, data=data)
+                                 auto_allow=False, required=conf.enforced, data=data)
     perms = {**settings["permissions"]}
     for k, rules in fenced["permissions"].items():
         perms[k] = list(dict.fromkeys([*(perms.get(k) or []), *rules])) if isinstance(rules, list) else rules
@@ -725,7 +727,7 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
                                            home=str(userconf.global_file().parent), wait=conf.may_ask())
     hooks.update(agent_session.scratch_hooks(work))
     if "sandbox" in fenced and unasked:
-        hooks.update(agent_session.sandbox_hooks(agent_session.sandbox_rule(corpus), conf.install_asks()))
+        hooks.update(agent_session.sandbox_hooks(agent_session.sandbox_rule(corpus), installs=True))
     settings["hooks"] = hooks
     shared = agent_session.shared_prompt(corpus)
     append = "\n\n".join([*appended, shared])
@@ -734,7 +736,7 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     work.mkdir(parents=True, exist_ok=True)
     settings["env"] = agent_session.settings_env(job.c, job.key, {**agent_session.fence_env(work),
                                                                   **agent_session.skill_prompts_env(corpus, work)})
-    settings = config.without_mod(agent_session.with_home_shell(settings))
+    settings = agent_session.with_home_shell(settings)
     final = [agent_session.CLAUDE_BIN, *kept, "--plugin-dir", str(agent_session.PLUGIN_DIR), "--add-dir", str(corpus), *added,
              "--settings", json.dumps(settings), "--append-system-prompt", append, "--permission-mode", permission_mode,
              "--allowedTools", ",".join(agent_session.own_rules()), "--disallowedTools", ",".join(deny)]
@@ -889,7 +891,7 @@ def _prepare(job: Job, part: roles.Part) -> tuple[Run, list[str]]:
     if running(job.c, job.key):
         raise RuntimeError(f"{job.what} of {job.key} is running")
     try:
-        conf = userconf.session(job.c, job.role, sandbox=True)
+        conf = userconf.session(job.c, job.role, sandbox=True, program=True)
     except userconf.ConfigError as e:
         raise RuntimeError(str(e)) from e
     token_id = secrets.token_hex(8)

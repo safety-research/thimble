@@ -1,12 +1,14 @@
 // The product tour's place in the shell. The first time this install's dashboard opens (backend tour.py, in thimble's
 // own home), once the shell is drawn with its session attached, a welcome asks whether to take the tour; the offer is
 // recorded as it shows, whatever the answer. Settings' Take the tour (the bus's `tour`) runs it again at any time. The
-// tour itself (../tour) loads only then. While it runs, telemetry records nothing. When it closes, the focused pane shows
-// the surface it showed before; a session that ends while it runs closes it.
+// tour itself (../tour) loads only then. While it runs, telemetry records nothing and main's chat draws no Start gate
+// (lib/touring). When it closes, the focused pane shows the surface it showed before; a session that ends while it runs
+// closes it.
 import { useEffect } from 'react'
 import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
 import { hold } from '../lib/telemetry'
+import { setTouring } from '../lib/touring'
 
 /** The chat column is open, not folded. */
 const chatOn = () => !!document.querySelector('.chat[data-panel="chat"]')
@@ -44,6 +46,7 @@ export function TourHost() {
         const shell = document.querySelector<HTMLElement>('.shell')
         const watch = new MutationObserver(() => shell?.dataset.session === 'gone' && tour.end())
         hold(true)
+        setTouring(true)
         const tour = runTour({
           welcome,
           chat: chatOn(),
@@ -53,12 +56,14 @@ export function TourHost() {
             watch.disconnect()
             if (before && focusedTab() !== before) bus.emit('showTab', { tab: before, from: null })
             hold(false)
+            setTouring(false)
           },
         })
         if (shell) watch.observe(shell, { attributes: true, attributeFilter: ['data-session'] })
       } catch (e) {
         running = false
         hold(false)
+        setTouring(false)
         console.warn('tour', e)
       }
     }

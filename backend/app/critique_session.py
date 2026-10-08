@@ -1,29 +1,27 @@
-"""A critique: the orientation's check of its own analysis, by a Claude Code session of its own running as the critic.
+"""A critique: the orientation's check of its own analysis, by `thimble:critic`, a subagent the orientation starts
+itself (depth 2) after its `critique` call returns.
 
 The critic reviews the orientation's whole transcript and cards for coverage and competing accounts, and checks the
-drafted deck's claims against the calls that should support them. The machinery shared with other agent sessions is
-agent_session.py; this module holds what is the critique's own.
-
-Start. Only the orientation's session lists `critique`. The server starts a Claude Code background session in the
-critic's work folder running as the critic agent (prompts/critic.md via `--agents`, shared.md appended), with the
-`critic` role's model settings. It has every tool of a default Claude Code session and, of thimble's, OWN_TOOLS, so it
-adds no card, and it runs in a work folder of its own with the corpus read-only (agent_session, the fence). One critique
-runs at a time, in the critic's row of the permission modes (modes.py). When it finishes, its subagents' `tmp_*` folders
-and the large files no card or document uses are deleted from its work folder (work_files.after_run).
+drafted deck's claims against the calls that should support them. Its registration (definition) is prompts/critic.md
+with shared.md loaded as the skill `thimble:shared`, the `critic` role's model and effort from Settings, and of thimble's
+tools OWN_TOOLS, so it adds no card. It writes only in its own work folder, critique-work/<chat>; when its run ends, its
+subagents' `tmp_*` folders and the large files no card uses are deleted there (work_files.after_run).
 
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
-renders the session's and its agents' transcripts into one digest, each tool call under its ref in the orientation's
-call store (`call:<chat>/<n>`) with its input and the first lines of its result. The digest is written to
-`<workspace>/critique/<chat>/transcript.md`, which the critic gets with `--add-dir`; the raw transcripts stay out of its
-reach. `chat:<orientation chat>` resolves to the same digest, a page at a time.
+renders the orientation's agent transcript and its descendants' into one digest, each tool call under its ref in the
+orientation's call store (`call:<chat>/<n>`) with its input and the first lines of its result. The digest is written to
+`<workspace>/critique/<chat>/transcript.md`, which main's fence lets every agent read. `chat:<orientation chat>`
+resolves to the same digest, a page at a time.
 
-The first message names what to review, the drafts, the digest, the orientation's context, the coverage checks'
-findings, and ends with the analyst's conversation with main.
+The brief. `critique` writes the critic's first message to `critique/<chat>/brief.md`: what to review, the drafts, the
+digest, the orientation's context, the coverage checks' findings led by the coverage line, and the analyst's
+conversation with main. It records a pending start of the critic for the orientation's run and returns the exact Agent
+call (`## critique-subagent`); the orientation makes it, ends its turn, and revises when the critic's report arrives as a
+message (F1). Meanwhile its chat is `paused: critique`. The critic's chat is a step of the orientation's chat titled
+`critique`.
 
-The chat is a step of the orientation's chat titled `critique`. The critic's last message is returned whole as the
-tool's result. A critique has no time limit: its chat says when it shows no activity (agent_session.wait_done), and the
-analyst's Stop ends it. A critique that fails or is stopped returns `## critique-ended` with whatever it wrote; a call
-the caller abandons stops the critique with it.
+An extension's program can run the critique instead (program_critique): it gets the same digest, through one Caller
+for both, and its report is the tool's result; the orientation's end stops it.
 """
 from __future__ import annotations
 
@@ -31,53 +29,105 @@ import asyncio
 import json
 import logging
 import textwrap
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import agent_session, agents, config, orient_checks, orientation, session, tools, work_files
+from . import agents, config, orient_checks, orientation, session, subagents, tools, work_files
+from .ledger import write_under
 
 log = logging.getLogger("thimble.critique_session")
 
-AGENT = "critic"  # prompts/critic.md, the agent the session runs as
+AGENT = "critic"  # prompts/critic.md, the critic's registered prompt
+ROLE = "critic"  # its role among subagents.TYPES
 TITLE = "critique"  # its step's title, so the browser names it `<caller>/critique`
-DEFAULT_EFFORT = "high"  # when critic.md names none
-DIGEST_DIR = "critique"  # the one folder outside the corpus the critic may read
-WORK_DIR = "work"  # critique/<chat>/work, the critic's own folder, where it may write
+DIGEST_DIR = "critique"  # the one folder outside the corpus and the work folders the critic reads
+WORK_DIR = "critique-work"  # critique-work/<chat>, the critic's own folder, where it may write
+BRIEF_FILE = "brief.md"  # in critique/<chat>: the critic's first message
+SKILLS = ("thimble:shared",)
 OWN_TOOLS = ("read_ref", "list_cards")  # the critic's thimble tools
+
+
 DIGEST_FILE = "transcript.md"
+
 RESULT_LINES = 8  # lines of a tool result the digest shows; a card reads whole with read_ref, a file with Read
+
 # lines of a Read's result: the critic reads the file itself, and the call's input says which part the agent saw
 READ_LINES = 2
+
 LINE_CHARS = 200  # chars of one of those lines
+
 VALUE_CHARS = 400  # chars of one string of a call's input, such as a card's code
+
 CALL_CHARS = 1_500  # chars of a call's line, under the 2,000 at which Read cuts a line
+
 DIGEST_CHARS = 2_000_000  # a guard against a runaway session
+
 DIGEST_PAGE_LINES = 600  # of the digest a `chat:` ref reads at once (resolve_chat)
+
 CONTEXT_CHARS = 400_000  # of the analyst's conversation with main in the first message
+
 INDENT = "    "
 
 
 def session_key(caller: str) -> str:
-    """The THIMBLE_SESSION of the session critiquing the analysis of the session `caller` (tools.session_kind reads its
-    kind)."""
+    """The key of the critic of the agent of `caller` (tools.session_kind reads its kind): `critique:orient`."""
     return f"{tools.CRITIQUE_SESSION}:{caller}"
 
 
-def agent_definition() -> tuple[str, dict[str, Any]]:
-    """(name, definition) of the critic agent for `--agents`, from prompts/critic.md."""
-    from . import cli  # noqa: PLC0415 — cli is large, and the definition's shape is the launcher's
+def definition(c: str) -> dict[str, Any]:
+    """The registration of `thimble:critic` for workspace `c` (subagents.roles adds its model, effort and
+    `background`): critic.md's body, its frontmatter's description, shared.md as the skill `thimble:shared`, and the
+    thimble tools that are not the critic's taken away."""
+    from . import cli, prompts, userconf  # noqa: PLC0415
 
-    return cli.agent_definition(AGENT)
+    with prompts.custom(userconf.prompt_files(c, "critic")):
+        _, agent = cli.agent_definition(AGENT)
+    out = {k: agent[k] for k in ("description", "prompt") if k in agent}
+    out["skills"] = list(dict.fromkeys([*SKILLS, *(agent.get("skills") or [])]))
+    out["disallowedTools"] = tools.not_own(OWN_TOOLS)
+    return out
 
 
-def orientation_run(c: str, key: str | None) -> agent_session.Run | None:
-    """The orientation's running session when `key`, the THIMBLE_SESSION of the call, is its; None for any other."""
+@dataclass
+class Caller:
+    """The orientation whose analysis a critique reviews, as thimble's critic and an extension's program both see it:
+    its key, chat, agent id, main's session, and the corpus folder its paths are relative to. `calls` is the chat whose
+    call store numbers the digest's refs."""
+
+    c: str
+    key: str
+    chat: str
+    agent_id: str | None
+    sid: str
+    cwd: str
+
+    @property
+    def calls(self) -> str:
+        return self.chat
+
+    def transcripts(self) -> list[tuple[str, Path]]:
+        if self.agent_id:
+            return agent_transcripts(self.c, self.chat, self.agent_id)
+        return transcripts_of(self.c, self.chat, self.sid)
+
+    def stopped(self) -> bool:
+        return not subagents.running(self.c, self.key)
+
+
+def orientation_caller(c: str, key: str | None) -> Caller | None:
+    """The Caller of the orientation's running agent when `key`, the session a call runs as, is its; None for any
+    other."""
     if tools.session_kind(key) != tools.ORIENT_SESSION:
         return None
-    return agent_session.current(c, key)
-
-
-# --------------------------------------------------------------------------- the transcript's digest
+    run = subagents.current(c, key)
+    if run is None:
+        return None
+    try:
+        root = str(config.corpus_dir(c))
+    except Exception:  # noqa: BLE001
+        root = ""
+    return Caller(c, run.key, run.chat, run.agent_id, run.sid, root)
 
 
 def _started(path: Path) -> str:
@@ -96,16 +146,10 @@ def _started(path: Path) -> str:
     return "~"  # after every timestamp
 
 
-def transcripts(run: agent_session.Run) -> list[tuple[str, Path]]:
-    """(title, path) of the session's transcript, then of each of its subagents' and workflow agents', in the order they
-    started; [] while the session's own is not found."""
-    main = run.main.path if run.main is not None and run.main.path is not None else None
-    return transcripts_of(run.c, run.chat, run.sid, main)
-
-
 def transcripts_of(c: str, chat: str, sid: str, main: Path | None = None) -> list[tuple[str, Path]]:
-    """transcripts for the session `sid` of the orientation chat `chat`, running or not: a title is the chat's for the
-    session, and for an agent its workflow phase, its description and its type, as the meta json names them."""
+    """The transcripts of an orientation an earlier version ran as a session of its own, `sid`, for its chat `chat`:
+    the session's, then each of its agents', in the order they started; a title is the chat's for the session, and for
+    an agent its workflow phase, its description and its type, as the meta json names them."""
     if main is None and sid:
         found = session.find_transcript(sid)
         main = Path(found) if found else None
@@ -126,9 +170,60 @@ def transcripts_of(c: str, chat: str, sid: str, main: Path | None = None) -> lis
     return out + [(t, p) for _, t, p in sorted(steps, key=lambda s: s[0])]
 
 
+def agent_files(c: str, agent_id: str, sessions: "list[str]") -> list[Path]:
+    """The transcript files of main's subagent `agent_id`, in the folder of each session it ran under (after /clear or
+    /resume Claude Code continues it in the new session's folder, U1), oldest first."""
+    out: list[Path] = []
+    for sid in dict.fromkeys(s for s in sessions if s):
+        found = session.find_transcript(sid)
+        if not found:
+            continue
+        path = Path(found).parent / sid / "subagents" / f"agent-{agent_id}.jsonl"
+        if path.is_file():
+            out.append(path)
+    return out
+
+
+def agent_transcripts(c: str, chat: str, agent_id: str) -> list[tuple[str, Path]]:
+    """(title, path) of the orientation agent `agent_id`'s transcript (each part of it, after /clear), then of each of
+    its descendants' (found by `parentAgentId` in their meta json, at any depth), in the order they started; [] while
+    the orientation's own is not found."""
+    a = subagents.agent(c, agent_id) or {}
+    meta = agents.meta_or_none(c, chat) or {}
+    sessions = [str(s) for s in (a.get("sessions") or meta.get("sessions") or [meta.get("session")]) if s]
+    own = agent_files(c, agent_id, sessions)
+    if not own:
+        return []
+    title = str(meta.get("title") or orientation.TITLE)
+    out = [(title, p) for p in own]
+    folders = list(dict.fromkeys(p.parent for p in own))
+    metas: dict[str, tuple[dict, Path]] = {}
+    for folder in folders:
+        for path in sorted(folder.glob("agent-*.jsonl")):
+            m = session.AGENT_FILE_RE.match(path.name)
+            if m and m.group(1) != agent_id:
+                metas.setdefault(m.group(1), (session._read_meta_json(path), path))
+    mine = {agent_id}
+    grew = True
+    while grew:
+        grew = False
+        for aid, (m, _) in metas.items():
+            if aid not in mine and str(m.get("parentAgentId") or "") in mine:
+                mine.add(aid)
+                grew = True
+    steps: list[tuple[str, str, Path]] = []
+    for aid, (m, path) in metas.items():
+        if aid not in mine:
+            continue
+        label = str(m.get("description") or m.get("agentType") or path.stem)
+        phase, kind = str(m.get("workflowPhase") or ""), str(m.get("agentType") or "")
+        name = f"{phase}: {label}" if phase else label
+        steps.append((_started(path), f"{name} ({kind})" if kind and kind != label else name, path))
+    return out + [(t, p) for _, t, p in sorted(steps, key=lambda s: s[0])]
+
+
 def _cut(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1].rstrip() + "…"
-
 
 def _short_values(v: Any) -> Any:
     if isinstance(v, str):
@@ -139,7 +234,6 @@ def _short_values(v: Any) -> Any:
         return [_short_values(x) for x in v]
     return v
 
-
 def _call_line(n: "int | str", name: str, inp: Any, root: str = "") -> str:
     """`<ref> <tool> <input as JSON>` (`<n>.` without a ref), strings cut to VALUE_CHARS, corpus paths relative to
     `root`, the line cut to CALL_CHARS."""
@@ -147,10 +241,8 @@ def _call_line(n: "int | str", name: str, inp: Any, root: str = "") -> str:
     lead = n if isinstance(n, str) else f"{n}."
     return _cut(f"{lead} {session._short(name)} {_relative(body, root)}".rstrip(), CALL_CHARS)
 
-
 def _relative(text: str, root: str) -> str:
     return text.replace(root.rstrip("/") + "/", "") if root.startswith("/") and root.rstrip("/") else text
-
 
 def _result_lines(text: str, is_error: bool, limit: int = RESULT_LINES, root: str = "") -> list[str]:
     """A result's first `limit` lines, indented under its call, paths relative to the corpus folder `root`, less a
@@ -164,7 +256,6 @@ def _result_lines(text: str, is_error: bool, limit: int = RESULT_LINES, root: st
     if is_error:
         shown = [INDENT + "✗ " + shown[0][len(INDENT):]] + shown[1:] if shown else [INDENT + "✗"]
     return shown
-
 
 def render(title: str, path: Path, root: str = "", refs: "tuple[str, str] | None" = None) -> str:
     """One transcript as the digest shows it: `# <title>`, then its brief, its text and each tool call under its ref
@@ -232,11 +323,10 @@ def render(title: str, path: Path, root: str = "", refs: "tuple[str, str] | None
     return "\n".join(out)
 
 
-def digest(run: agent_session.Run) -> str:
-    """The session's transcript and its agents', rendered (render) with the refs of the orientation's call store, one
-    after the other; '' while the session's own is not found."""
-    chat = run.calls or run.chat
-    return digest_of(run.c, chat, transcripts(run), str(run.cwd))
+def digest(caller: Caller) -> str:
+    """The orientation's transcript and its agents', rendered (render) with the refs of its call store, one after the
+    other; '' while its own is not found."""
+    return digest_of(caller.c, caller.calls, caller.transcripts(), caller.cwd)
 
 
 def digest_of(c: str, chat: str, parts: "list[tuple[str, Path]]", root: str) -> str:
@@ -246,17 +336,19 @@ def digest_of(c: str, chat: str, parts: "list[tuple[str, Path]]", root: str) -> 
         text = text[:DIGEST_CHARS] + "\n" + tools.hint("critique-transcript-cut", n=f"{left:,}")
     return text
 
-
 _digests: dict[tuple[str, str], tuple[tuple, str]] = {}  # (workspace, chat) -> (the transcripts' sizes, the digest)
 
 
 def chat_digest(c: str, chat: str) -> str:
-    """The digest of the orientation chat `chat` (its session's transcripts, running or not), '' when the chat is no
-    orientation's or its transcript is gone; kept while the transcripts do not grow."""
+    """The digest of the orientation chat `chat` (its agent's transcripts, or an earlier version's session's, running or
+    not), '' when the chat is no orientation's or its transcript is gone; kept while the transcripts do not grow."""
     meta = agents.meta_or_none(c, chat) or {}
-    if meta.get("role") != orientation.ROLE or not meta.get("session"):
+    if meta.get("role") != orientation.ROLE or not (meta.get("agent_id") or meta.get("session")):
         return ""
-    parts = transcripts_of(c, chat, str(meta["session"]))
+    if meta.get("route") == "subagent" and meta.get("agent_id"):
+        parts = agent_transcripts(c, chat, str(meta["agent_id"]))
+    else:
+        parts = transcripts_of(c, chat, str(meta.get("session") or ""))
     if not parts:
         return ""
     sizes = tuple(session._size(p) for _, p in parts)
@@ -296,28 +388,28 @@ def resolve_chat(c: str, p: dict[str, Any], ref: str) -> dict[str, Any]:
 
 
 def work_dir(c: str, chat: str) -> Path:
-    """The critic's own folder for the orientation chat `chat`, where it may write."""
-    return config.workspace_dir(c) / DIGEST_DIR / chat / WORK_DIR
+    """The critic's own folder for the orientation chat `chat`, where it may write (subagents.write_dirs)."""
+    return config.workspace_dir(c) / WORK_DIR / chat
 
 
-def write_digest(c: str, run: agent_session.Run) -> Path | None:
-    """The digest of the session `run`, written to its folder in workspace `c`; None when the transcript is not found or
-    the file cannot be written."""
-    text = digest(run)
+def digest_dir(c: str, chat: str) -> Path:
+    return config.workspace_dir(c) / DIGEST_DIR / chat
+
+
+def write_digest(c: str, caller: Caller) -> Path | None:
+    """The digest of the orientation `caller`, written to its folder in workspace `c`; None when its transcript is not
+    found or the file cannot be written."""
+    text = digest(caller)
     if not text:
-        log.info("%s: the transcript of session %s (%s) was not found", c, run.key, run.sid)
+        log.info("%s: the transcript of the orientation %s was not found", c, caller.chat)
         return None
-    path = config.workspace_dir(c) / DIGEST_DIR / run.chat / DIGEST_FILE
+    path = digest_dir(c, caller.chat) / DIGEST_FILE
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text + "\n", "utf-8")
+        write_under(config.workspace_dir(c), path, text + "\n")  # a kernel can write the workspace
     except OSError as e:
-        log.warning("%s: the transcript digest of session %s was not written (%s)", c, run.key, e)
+        log.warning("%s: the transcript digest of %s was not written (%s)", c, caller.chat, e)
         return None
     return path
-
-
-# --------------------------------------------------------------------------- the session
 
 
 def drafts(c: str) -> list[str]:
@@ -336,21 +428,20 @@ def drafts(c: str) -> list[str]:
         out.append(tools.hint("critique-proposals", proposals=rows))
     return out
 
-
-async def checks_text(c: str) -> str | None:
-    """What the coverage checks found for workspace `c`, as the first message lists it; None when they did not run or
-    failed. The checks run in a child process, which a cancelled critique kills."""
+async def checks_text(c: str, chat: str | None = None) -> str | None:
+    """What the coverage checks found for workspace `c`, as the first message lists it, with the coverage line of the
+    orientation chat `chat` in place of the unread line; None when they did not run or failed. The checks run in a
+    child process, which a cancelled critique kills."""
     try:
-        return orient_checks.text(await orient_checks.check_apart(c))
+        return orient_checks.text(await orient_checks.check_apart(c, coverage_of=chat))
     except ValueError as e:  # a corpus that is gone
         log.info("%s: the coverage checks did not run (%s)", c, e)
     except (TimeoutError, RuntimeError) as e:
         log.warning("%s: the coverage checks failed (%s)", c, e)
     return None
 
-
 def first_message(c: str, transcript: Path | None, context: str, checks: str | None = None) -> str:
-    """The session's first message, with `checks`, what checks_text found."""
+    """The critic's first message (its brief), with `checks`, what checks_text found."""
     parts = [tools.hint("critique-task"), *drafts(c),
              tools.hint("critique-transcript", path=str(transcript)) if transcript else tools.hint("critique-no-transcript")]
     if context.strip():
@@ -363,83 +454,21 @@ def first_message(c: str, transcript: Path | None, context: str, checks: str | N
     return "\n\n".join(p.strip() for p in parts if p.strip())
 
 
-async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[agent_session.Run, asyncio.Future]:
-    """Start the session critiquing the analysis of the session `caller` (the orientation's) for workspace `c`, as a
-    step of its chat, and follow it; returns the run and a future of (status, report) set when it ends. RuntimeError
-    with the text for the model when a critique of it runs or claude cannot be started."""
-    key = session_key(caller.key)
-    if agent_session.running(c, key):
-        raise RuntimeError(tools.hint("critique-running"))
-    # Rendering megabytes of transcript runs in a thread and the checks in a child process, off the event loop, which
-    # serves every other session meanwhile.
+async def brief(c: str, caller: Caller, context: str = "") -> tuple[Path | None, str]:
+    """(the digest's path, the brief): the digest written, the checks run in a child process and the brief rendered,
+    each off the event loop."""
     transcript = await asyncio.to_thread(write_digest, c, caller)
-    checks = await checks_text(c)
-    prompt = await asyncio.to_thread(first_message, c, transcript, context, checks)
-    if agent_session.running(c, key):  # a second call that started while this one rendered
-        raise RuntimeError(tools.hint("critique-running"))
-    agent_name, agent, conf, effort = _critic(c)
-    from . import roles  # noqa: PLC0415
-
-    done: asyncio.Future = asyncio.get_running_loop().create_future()
-
-    def ended(run: agent_session.Run, status: str, summary: str) -> None:
-        work_files.after_run(c, work_dir(c, caller.chat), status)
-        if not done.done():
-            done.set_result((status, agent_session.with_earlier(run, summary)))
-
-    # The digest's folder is the one place outside the corpus folder the critic may read.
-    readable = ["--add-dir", str(transcript.parent)] if transcript else []
-    fields = {"transcript": str(transcript)} if transcript else {}
-    run = await agent_session.start(
-        c, key, role=agent_session.STEP_ROLE, title=TITLE,
-        agent_args=["--agents", json.dumps({**roles.subagents(c, "critic"), agent_name: agent}, ensure_ascii=False),
-                    "--agent", agent_name, *readable],
-        effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])), prompt=prompt,
-        agent_type=agent_name, on_end=ended, parent=caller.chat, model=str(agent.get("model") or ""),
-        calls=caller.calls or caller.chat,  # numbered in the orientation's sequence
-        agent="critic", work=work_dir(c, caller.chat), unasked=True, disallowed=agent_session.not_own(OWN_TOOLS),
-        brief=prompt.split("\n\n", 1)[0], background=True, **fields)  # the critique-task line that opens the first message
-    return run, done
-
-
-def _relaunch(c: str, meta: dict[str, Any]) -> dict[str, Any]:
-    """The start arguments of a critic's background session that this server did not start, from its chat's meta
-    (agent_session.on_relaunch): a later turn of it is followed, and its Resume starts it again, with no critique
-    waiting on it."""
-    agent_name, agent, conf, effort = _critic(c)
-    transcript = str(meta.get("transcript") or "")
-    readable = ["--add-dir", str(Path(transcript).parent)] if transcript else []
-    parent = str(meta.get("parent") or agents.MAIN_ID)
-    return dict(role=agent_session.STEP_ROLE, title=TITLE,
-                agent_args=["--agents", json.dumps({agent_name: agent}, ensure_ascii=False), "--agent", agent_name, *readable],
-                effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])),
-                agent_type=agent_name, parent=parent, model=str(agent.get("model") or ""), work=work_dir(c, parent),
-                agent="critic", unasked=True, disallowed=agent_session.not_own(OWN_TOOLS), background=True)
-
-
-agent_session.on_relaunch(tools.CRITIQUE_SESSION, _relaunch)
-
-
-def _critic(c: str) -> tuple[str, dict[str, Any], dict[str, Any], str]:
-    """(name, definition, role settings, effort) of the critic for workspace `c`: critic.md's agent with the `critic`
-    role's model, effort and fast mode (config.models_for)."""
-    from . import prompts, userconf  # noqa: PLC0415
-
-    with prompts.custom(userconf.prompt_files(c, "critic")):
-        agent_name, agent = agent_definition()
-    conf = config.models_for(c)["critic"]
-    agent = agent_session.role_agent(agent, conf)
-    return agent_name, agent, conf, str(agent.get("effort") or DEFAULT_EFFORT)
+    checks = await checks_text(c, caller.chat)
+    text = await asyncio.to_thread(first_message, c, transcript, context, checks)
+    return transcript, text
 
 
 async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
-    """The `critique` tool: start the critique of the calling orientation's analysis and wait for the critic's report,
-    which it returns whole, for as long as the critique runs.
-
-    When this call is cancelled (the shim's request dropped, the orientation stopped, or the server stopping), the
-    checks' child and the critic's session end with it.
-    """
-    caller = orientation_run(ctx.c, ctx.session)
+    """The `critique` tool, the orientation's: the digest and the brief written (critique/<chat>/brief.md), a pending
+    start of the critic for the orientation's run, and the exact Agent call the orientation makes, then ends its turn
+    and revises when the report arrives (`## critique-subagent`). Its chat is `paused: critique` meanwhile. An
+    extension's program runs the critique instead (program_critique)."""
+    caller = orientation_caller(ctx.c, ctx.session)
     if caller is None:
         return tools.err(tools.hint("critique-not-orientation"))
     from . import roles  # noqa: PLC0415
@@ -447,42 +476,81 @@ async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
     agent = roles.agent_for(ctx.c, "critic")
     if agent.code and agent.replacing is not None:
         return await program_critique(ctx.c, caller, agent.replacing, str(args.get("context") or ""))
+    key = session_key(caller.key)
+    if subagents.running(ctx.c, key):
+        return tools.err(tools.hint("critique-running"))
+    _, text = await brief(ctx.c, caller, str(args.get("context") or ""))
+    path = digest_dir(ctx.c, caller.chat) / BRIEF_FILE
     try:
-        run, done = await start(ctx.c, caller, str(args.get("context") or ""))
-    except RuntimeError as e:
-        return tools.err(str(e))
-    waiting = asyncio.ensure_future(agent_session.wait_done(run, done))
-    gone = asyncio.ensure_future(_caller_ended(caller))
-    try:
-        await asyncio.wait({waiting, gone}, return_when=asyncio.FIRST_COMPLETED)
-        if not done.done():
-            log.info("%s: the orientation's session %s ended during its critique, which is stopped", ctx.c, caller.sid)
-            await asyncio.shield(agent_session.stop_run(run))
-            return tools.err(tools.hint("critique-ended", status="stopped", text="nothing"))
-        status, summary = done.result()
-    except asyncio.CancelledError:
-        # shielded, so a second cancellation (the server's last sweep of its tasks) cannot cut the stop short
-        await asyncio.shield(agent_session.stop_run(run))
-        raise
-    finally:
-        waiting.cancel()
-        gone.cancel()
-    if status != "done":
-        return tools.err(tools.hint("critique-ended", status=status, text=summary.strip() or "nothing"))
-    return tools.ok(summary.strip())
+        write_under(config.workspace_dir(ctx.c), path, text + "\n")  # a kernel can write the workspace
+    except OSError as e:
+        return tools.err(f"critique: the brief was not written ({e})")
+    task = "\n\n".join(x for x in (tools.hint("critique-task"), tools.hint("critic-brief-file", path=str(path))) if x)
+    ans = await subagents.start_job(ctx.c, ROLE, key, task, subagents.values_for(ctx.c, ROLE), subagents.TYPED,
+                                    description=TITLE, chat={"title": TITLE, "parent": caller.chat,
+                                                             "brief": tools.hint("critique-task")},
+                                    work=work_dir(ctx.c, caller.chat), call=ctx.tool_use_id,
+                                    caller_role="orientation")
+    if caller.agent_id:
+        subagents.set_paused(ctx.c, caller.agent_id, "critique")
+    return tools.ok(tools.hint("critique-subagent", input=json.dumps(ans["input"], ensure_ascii=False)))
 
 
-async def program_critique(c: str, caller: agent_session.Run, part: Any, context: str = "") -> Any:
+NEVER_STARTED = "the orientation ended its run without starting the critic"  # a critic start it never made (expire)
+
+
+def expire_pending(c: str, orient: subagents.Run) -> list[str]:
+    """The orientation's run ended: a critic start its `critique` call made and its own Agent call never claimed is
+    refused (kind no-call), so it waits no more and --agent-check denies a late call of it. The R3 check of main's turns
+    skips an agent's own starts, so nothing else ends it. The request ids refused."""
+    key = session_key(orient.key)
+    out = []
+    for rid, r in list((subagents.read(c).get("requests") or {}).items()):
+        if (isinstance(r, dict) and r.get("kind") == "start" and r.get("key") == key and r.get("caller_role")
+                and r.get("state") == "pending"):
+            subagents.refuse(c, rid, NEVER_STARTED, subagents.NO_CALL)
+            out.append(rid)
+    return out
+
+
+def subagent_started(c: str, run: subagents.Run, req: dict[str, Any]) -> None:
+    """The critic started: its orientation waits for its report (`paused: critique`, subagents.started_route)."""
+
+
+def subagent_ended(c: str, run: subagents.Run, status: str, summary: str) -> None:
+    """The critic's run ended: its work folder lets go of what it no longer needs; its report reaches the orientation
+    as Claude Code's hand-back, which continues the orientation's run (subagents.child_ended)."""
+    a = subagents.agent(c, run.agent_id) or {}
+    parent = str(a.get("parent") or "")
+    meta = agents.meta_or_none(c, run.chat) or {}
+    work_files.after_run(c, work_dir(c, str(meta.get("parent") or run.chat)), status)
+    if parent:
+        subagents.child_ended(c, parent)
+
+
+def subagent_refused(c: str, req: dict[str, Any]) -> None:
+    """A critic's start that did not happen: the orientation's thread says so, and it goes on without the critique
+    (its prompt says to revise without it and say so)."""
+    for agent_id, a in subagents.agents_of(c, "orientation").items():
+        if a.get("status") in ("running", "waiting") and a.get("chat"):
+            subagents.set_paused(c, agent_id, None)
+            try:
+                agents.chip(c, "critique_refused", str(req.get("reason") or ""), chat=str(a["chat"]),
+                            kind_refused=req.get("refused_kind"))
+            except Exception:  # noqa: BLE001
+                log.debug("%s: the refused critique did not reach %s", c, a["chat"], exc_info=True)
+
+
+async def program_critique(c: str, caller: Caller, part: Any, context: str = "") -> Any:
     """The critique run by an extension's program (harness.py): its input is the digest thimble's critic reads, and
-    what it returns is the report, which the orientation's call gets whole. It runs until it ends or is stopped."""
+    what it returns is the report, which the orientation's call gets whole. It runs until it ends, the orientation's
+    run ends (orient_session.subagent_ended stops it), or it is stopped."""
     from . import harness  # noqa: PLC0415
 
     key = session_key(caller.key)
-    if harness.running(c, key) or agent_session.running(c, key):
+    if harness.running(c, key) or subagents.running(c, key):
         return tools.err(tools.hint("critique-running"))
-    transcript = await asyncio.to_thread(write_digest, c, caller)
-    checks = await checks_text(c)
-    prompt = await asyncio.to_thread(first_message, c, transcript, context, checks)
+    transcript, prompt = await brief(c, caller, context)
     done: asyncio.Future = asyncio.get_running_loop().create_future()
 
     def ended(_run: Any, status: str, summary: str) -> None:
@@ -492,7 +560,7 @@ async def program_critique(c: str, caller: agent_session.Run, part: Any, context
 
     job = harness.Job(c, "critic", key, TITLE, {"digest": prompt, "transcript": str(transcript or ""),
                                                "context": context},
-                      OWN_TOOLS, work_dir(c, caller.chat), chat_role=agent_session.STEP_ROLE, parent=caller.chat,
+                      OWN_TOOLS, work_dir(c, caller.chat), chat_role=agents.STEP_ROLE, parent=caller.chat,
                       fields={"brief": prompt.split("\n\n", 1)[0]})
     try:
         harness.start(job, part, on_end=ended)
@@ -506,15 +574,3 @@ async def program_critique(c: str, caller: agent_session.Run, part: Any, context
     if status != "done":
         return tools.err(tools.hint("critique-ended", status=status, text=str(summary).strip() or "nothing"))
     return tools.ok(str(summary).strip())
-
-
-async def _caller_ended(caller: agent_session.Run) -> None:
-    """Return once the orientation's session `caller` no longer runs (agent_session._end took it out, or its follower
-    has finished)."""
-    while agent_session.current(caller.c, caller.key) is caller:
-        if caller.task is None:
-            await asyncio.sleep(agent_session.POLL_S)
-            continue
-        if caller.task.done():
-            return
-        await asyncio.wait({caller.task}, timeout=agent_session.POLL_S)

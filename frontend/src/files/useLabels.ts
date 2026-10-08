@@ -33,6 +33,9 @@ export interface FilesLabels {
   setColour: (id: string, value: string, colour: number) => void
   /** save any change; resolves with the stored label */
   save: (id: string, patch: ConceptPatch) => Promise<Concept>
+  /** delete a label with its marks, its card and any filter that uses it: it leaves the list at once, and comes back
+   * with a toast when the server refuses; resolves once the server has answered */
+  remove: (id: string) => Promise<void>
 }
 
 const PRESENCE_DEBOUNCE_MS = 250
@@ -80,15 +83,21 @@ export function useFilesLabels(ws: string): FilesLabels {
     }
   }, [ws])
 
+  // the labels deleted here that the concepts read may still hold
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    if (!gone.size || [...gone].some((id) => concepts.has(id))) return
+    setGone(new Set())
+  }, [concepts, gone])
   const all = useMemo(
     () =>
       [...concepts.values()]
-        .filter(listedInFiles)
+        .filter((k) => listedInFiles(k) && !gone.has(k.id))
         .map((k) => {
           const o = overrides.get(k.id)
           return o ? { ...k, ...o.patch } : k
         }),
-    [concepts, overrides],
+    [concepts, overrides, gone],
   )
   const byId = useMemo(() => new Map(all.map((k) => [k.id, k])), [all])
   // the ids of the labels on, in the order they were turned on as this browser saw them come on
@@ -180,7 +189,31 @@ export function useFilesLabels(ws: string): FilesLabels {
     [byId, put],
   )
 
-  return useMemo(() => ({ all, on, focus, setFocus, byId, presence, toggle, setClasses, setColour, save }), [all, on, focus, setFocus, byId, presence, toggle, setClasses, setColour, save])
+  const remove = useCallback(
+    async (id: string) => {
+      const name = byId.get(id)?.name ?? 'the label'
+      track('label-delete', { target: `concept:${id}` })
+      const hide = (on: boolean) =>
+        setGone((cur) => {
+          const next = new Set(cur)
+          if (on) next.add(id)
+          else next.delete(id)
+          return next
+        })
+      hide(true)
+      try {
+        await labelApi.remove(ws, id)
+        // every reader of the labels reads them again now, before the stream's own `concepts` event arrives
+        bus.emit('concepts', { concept: id, what: 'deleted' })
+      } catch (e) {
+        hide(false)
+        bus.emit('toast', { text: `Could not delete ${name}. ${(e as Error).message}`, kind: 'error' })
+      }
+    },
+    [ws, byId],
+  )
+
+  return useMemo(() => ({ all, on, focus, setFocus, byId, presence, toggle, setClasses, setColour, save, remove }), [all, on, focus, setFocus, byId, presence, toggle, setClasses, setColour, save, remove])
 }
 
 /** The Files label filter, {concept, value} or null: read once, then kept from the `filter` events of the Files scope. A

@@ -7,12 +7,14 @@ import {
   contentFromText,
   editorBlocksFromWire,
   origTexts,
+  passageOrder,
   plainOf,
   sameWire,
   TITLE_ID,
   wireFromEditor,
 } from '../../src/report/model.ts'
 import type { Writeup } from '../../src/lib/types.ts'
+import { openComments } from '../../src/report/checkComments.ts'
 
 type Doc = Pick<Writeup, 'title' | 'sections' | 'title_locked'>
 const sentence = (id: string, text: string, extra: object = {}) => ({ id, text, refs: [], tags: [], ...extra })
@@ -58,5 +60,19 @@ describe('blocks back to the document', () => {
     const back = wireFromEditor(blocks.map((b) => ({ ...b, children: [] })), origTexts(wire))
     expect(back).toEqual(wire)
     expect(sameWire(back, wire)).toBe(true)
+  })
+})
+
+describe('comments on the title', () => {
+  // the report checks read the title as a passage (report:<slug>#title), so a check's comment on it comes first
+  test('a comment on the title comes before the sections\' comments', () => {
+    const view = DOC as unknown as Writeup
+    expect(passageOrder(view)[0]).toBe(TITLE_ID)
+    const comments = [
+      { id: 'c2', sentence_id: 'a1', text: 'On a sentence.', check: 'unverified', status: 'open' },
+      { id: 'c1', sentence_id: TITLE_ID, text: 'No card shows seven weeks.', check: 'unverified', status: 'open' },
+    ] as unknown as Writeup['comments']
+    const open = openComments(comments, [], passageOrder(view))
+    expect(open.map((c) => [c.id, c.sid])).toEqual([['c1', TITLE_ID], ['c2', 'a1']])
   })
 })

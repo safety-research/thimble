@@ -11,6 +11,7 @@ Storage: `workspaces/<c>/chats/<id>.meta.json` and `<id>.jsonl`, append-only, a 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -22,10 +23,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from . import config, investigation, tools
+from . import config, investigation, ledger, tools
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.agents")
@@ -45,7 +46,7 @@ AGENT_STATUSES = ("running", "done", "failed", "stopped")
 # the browser's SSE reads these; a coalesced `chat` record on the workspace stream tells every other page to re-read
 EVENT_COALESCE_S = 0.25
 # `by` of the analyst's line: typed in the terminal (the mirror reads it from the transcript) or in the browser (logged
-# when the channel event is posted)
+# when the browser event is posted)
 TERMINAL, BROWSER = "terminal", "browser"
 ANCHOR_TEXT_CHARS = 2_000  # of what the pointed-at element showed, kept on the thread's meta
 
@@ -93,8 +94,23 @@ def meta_or_none(c: str, chat_id: str) -> dict | None:
 
 
 def write_meta(c: str, meta: dict) -> None:
+    """Replace the chat's meta whole, under its lock (ledger.locked), which a caller that read the meta to change it
+    holds already (change_meta)."""
     meta_path, _ = paths(c, meta["id"])
-    atomic_write_text(meta_path, json.dumps(meta, indent=1))
+    with ledger.locked(meta_path):
+        atomic_write_text(meta_path, json.dumps(meta, indent=1))
+
+
+def change_meta(c: str, chat_id: str, change: Callable[[dict], Any]) -> dict:
+    """Read the chat's meta, pass it to `change`, which changes it in place, and write it, all under the meta's lock:
+    the mirror, the tools and `thimble act` change metas from more than one process in terminal mode. 404 for a chat
+    that does not exist."""
+    meta_path, _ = paths(c, chat_id)
+    with ledger.locked(meta_path):
+        meta = read_meta(c, chat_id)
+        change(meta)
+        write_meta(c, meta)
+    return meta
 
 
 def _defaults(meta: dict) -> dict:
@@ -119,8 +135,12 @@ def _defaults(meta: dict) -> dict:
 
 
 def append(log_path: Path, record: dict) -> None:
-    with log_path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    """Append one record to a chat's log under the log's lock, since a record's line index is its id and more than one
+    process appends in terminal mode (the mirror, the tools)."""
+    with ledger.locked(log_path):
+        ledger.heal_tail(log_path)
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 # workspaces/<c>/permissions.jsonl: each permission request of the workspace's sessions and its answer, which a problem
@@ -317,13 +337,17 @@ def new_thread(c: str, anchor: str | None, anchor_text: str | None, title: str |
                image: str | None = None, parent: str | None = None) -> dict:
     """A thread born from a ⌘-click or ⌘-drag: `anchor` is what was pointed at (refs joined by ','), with its visible text,
     surface, element kind, CSS selector and a captured PNG. `parent` is the chat the analyst was reading (thread_parent).
-    Its first message is a channel event of kind `thread`, which main answers by forking."""
+    Its first message is a browser event of kind `thread`, which main answers by forking."""
     from . import threads  # noqa: PLC0415
 
     ensure_main(c)
     cid = secrets.token_hex(4)
     clean = lambda v, n=200: (str(v or "").strip()[:n] or None)  # noqa: E731
-    meta = _defaults({"id": cid, "kind": KIND_THREAD, "role": "thread", "title": _unique_title(c, (title or "").strip() or _title_from(anchor, anchor_text)),
+    named = (title or "").strip() or _title_from(anchor, anchor_text)
+    # the terminal names a thread by its first question and its subject by the citation's or the passage's words, which
+    # a -2 would change; its fork's name is kept apart from other threads' all the same (threads.fork_name)
+    named = named if surface == "terminal" else _unique_title(c, named)
+    meta = _defaults({"id": cid, "kind": KIND_THREAD, "role": "thread", "title": named,
                       "created_at": _now(), "parent": thread_parent(c, parent, anchor, element), "anchor": clean(anchor, 4000),
                       "anchor_text": clean(anchor_text, ANCHOR_TEXT_CHARS), "anchor_surface": clean(surface, 40),
                       "anchor_element": clean(element, 80), "anchor_selector": clean(selector, 400)})
@@ -453,14 +477,14 @@ def group_for(c: str, meta: dict) -> str:
     nb = notebook.create_notebook(_ws(c), f"main/{meta.get('title') or meta['id']}", role=notebook.DEFAULT_ROLE,
                                   parent=parent, anchor=m.group(1) if m else None, chat=meta["id"])
     meta["group"] = nb["id"]
-    write_meta(c, meta)
+    change_meta(c, str(meta["id"]), lambda m_: m_.update(group=nb["id"]))
     return nb["id"]
 
 
 # --------------------------------------------------------------------------- running, and the cards a chat made
 
 
-_busy: set[tuple[str, str]] = set()  # (workspace, chat) running for the channel and the mirror
+_busy: set[tuple[str, str]] = set()  # (workspace, chat) running for browser events and the mirror
 
 
 def set_running(c: str, chat_id: str, on: bool) -> None:
@@ -506,33 +530,41 @@ def claim_cell(c: str, cid: str, chat_id: str, *, edit: bool = False) -> None:
         from . import notebook  # noqa: PLC0415
 
         ws = notebook._ws(c)
-        hit = notebook._locate(ws, cid)
-        if hit is None:
-            return
-        nb, cell = hit
-        who = f"chat:{chat_id}"
-        changed = False
-        if edit:
-            last = (cell.get("edited") or [None])[-1]
-            if isinstance(last, dict) and last.get("by") == tools.TERMINAL:
-                try:
-                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(str(last.get("ts")))).total_seconds()
-                except ValueError:
-                    age = CLAIM_EDIT_S + 1
-                if age <= CLAIM_EDIT_S:
-                    last["by"] = who
-                    changed = True
-        elif cell.get("created_by") == tools.TERMINAL:
-            kernel = notebook._kernel_for(nb, None, cell, ws)
-            cell["created_by"] = who
-            if cell.get("kernel") is None and notebook._kernel_for(nb, None, cell, ws) != kernel:
-                cell["kernel"] = kernel or ""
-            changed = True
-        if changed:
-            notebook.write_notebook(ws, nb)
-            notebook._emit(c, cell)
+        with notebook.editing(ws):
+            _claim(c, ws, cid, chat_id, edit)
     except Exception:  # noqa: BLE001 — who made a card is bookkeeping; it never breaks the mirror
         log.debug("could not credit cell %s to chat %s", cid, chat_id, exc_info=True)
+
+
+def _claim(c: str, ws: Path, cid: str, chat_id: str, edit: bool) -> None:
+    """claim_cell's change, with the groups' lock held."""
+    from . import notebook  # noqa: PLC0415
+
+    hit = notebook._locate(ws, cid)
+    if hit is None:
+        return
+    nb, cell = hit
+    who = f"chat:{chat_id}"
+    changed = False
+    if edit:
+        last = (cell.get("edited") or [None])[-1]
+        if isinstance(last, dict) and last.get("by") == tools.TERMINAL:
+            try:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(str(last.get("ts")))).total_seconds()
+            except ValueError:
+                age = CLAIM_EDIT_S + 1
+            if age <= CLAIM_EDIT_S:
+                last["by"] = who
+                changed = True
+    elif cell.get("created_by") == tools.TERMINAL:
+        kernel = notebook._kernel_for(nb, None, cell, ws)
+        cell["created_by"] = who
+        if cell.get("kernel") is None and notebook._kernel_for(nb, None, cell, ws) != kernel:
+            cell["kernel"] = kernel or ""
+        changed = True
+    if changed:
+        notebook.write_notebook(ws, nb)
+        notebook._emit(c, cell)
 
 
 # --------------------------------------------------------------------------- workspace events (coalesced)
@@ -558,7 +590,7 @@ def _notify(c: str, chat_id: str) -> None:
     _pending_notify[key] = loop.call_later(EVENT_COALESCE_S, fire)
 
 
-notify = _notify  # the name the channel, the mirror and the thread module call
+notify = _notify  # the name the events module, the mirror and the thread module call
 
 
 def _emit_chat(c: str, chat_id: str) -> None:
@@ -584,7 +616,7 @@ def chip(c: str, kind: str, text: str, **fields: Any) -> dict:
 
 def mirror(c: str, type_: str, **data: Any) -> dict:
     """A record on main, appended and announced: the mirror's (session.py, `by: terminal`) and a browser message the
-    channel posted (channel.py, `by: browser`)."""
+    events module posted (events.py, `by: browser`)."""
     ensure_main(c)
     _, log_path = paths(c, MAIN_ID)
     rec = {"type": type_, "ts": _now(), **data}
@@ -647,7 +679,9 @@ def new_agent(c: str, role: str, title: str, *, parent: str = MAIN_ID, by: str |
     if parent and announce:
         _, main_log = paths(c, parent)
         append(main_log, {"type": "agent", "ts": _now(), "chat": cid, "role": role, "title": title, **({"by": by} if by else {}),
-                          **({"tool_use_id": call} if call else {})})
+                          **({"tool_use_id": call} if call else {}),
+                          # a view's build (a dev chat that is no code ticket), which main's note names so
+                          **({"view": str(fields["view"])} if fields.get("view") else {})})
         _notify(c, parent)
     _notify(c, cid)
     return meta
@@ -664,12 +698,13 @@ def on_agent_finished(fn: Callable[[str, dict], None]) -> None:
 
 
 def finish_agent(c: str, chat_id: str, status: str, result: str | None = None, **fields: Any) -> dict:
-    meta = read_meta(c, chat_id)
-    meta["status"] = status if status in AGENT_STATUSES else "done"
-    meta["result"] = result
-    meta["ts_end"] = _now()
-    meta.update({k: v for k, v in fields.items() if v is not None})
-    write_meta(c, meta)
+    def end(meta: dict) -> None:
+        meta["status"] = status if status in AGENT_STATUSES else "done"
+        meta["result"] = result
+        meta["ts_end"] = _now()
+        meta.update({k: v for k, v in fields.items() if v is not None})
+
+    meta = change_meta(c, chat_id, end)
     _, log_path = paths(c, chat_id)
     if status == "done":
         append(log_path, {"type": "done", "ts": _now(), "result": result})
@@ -687,9 +722,7 @@ def finish_agent(c: str, chat_id: str, status: str, result: str | None = None, *
 
 
 def update_agent(c: str, chat_id: str, **fields: Any) -> dict:
-    meta = read_meta(c, chat_id)
-    meta.update(fields)
-    write_meta(c, meta)
+    meta = change_meta(c, chat_id, lambda m: m.update(fields))
     _notify(c, chat_id)
     return meta
 
@@ -717,6 +750,20 @@ def start_agent(c: str, role: str, title: str, run: Callable[[Recorder], Awaitab
 
     _agent_tasks[(c, cid)] = asyncio.get_running_loop().create_task(go(), name=f"agent:{role}:{c}:{cid}")
     return meta
+
+
+def end_left_label_chats(c: str) -> list[str]:
+    """The chats that follow a label's run (role `labels`) still `running` with no task of this process behind them,
+    each ended `stopped`: the ids. A label's run is a task of the process that started it (the server, or in terminal
+    mode the session's own shim), so once main quit (subagents.hook_end) or a new shim starts (local._start), such a
+    chat follows nothing. Live check term-fix8, low quirk: the `label …` record stayed running after the quit."""
+    out = []
+    for m in list_chats(c):
+        cid = str(m.get("id") or "")
+        if m.get("kind") == KIND_AGENT and m.get("role") == "labels" and m.get("status") == "running" and (c, cid) not in _agent_tasks:
+            finish_agent(c, cid, "stopped", STOPPED_LINE)
+            out.append(cid)
+    return out
 
 
 async def stop_agent(c: str, chat_id: str) -> bool:
@@ -778,11 +825,20 @@ async def instance_route(c: str) -> dict:
     return {"stamp": ensure_main(c).get("created_at") or None}
 
 
+def _main_state(c: str) -> dict:
+    """What main's meta adds for the browser (module_bridge.main_meta): `fenced`, `launched`, `module` and `module_why`,
+    which the unfenced banner and Start's no-module line read."""
+    from . import module_bridge  # noqa: PLC0415 — module_bridge imports the session modules
+
+    return module_bridge.main_meta(c)
+
+
 @router.get("/ws/{c}/chats/main")
 async def main_route(c: str) -> Response:
     meta = ensure_main(c)
     meta["running"] = _running(c, MAIN_ID)
     meta["orientation"] = _orientation_status(c)
+    meta.update(_main_state(c))
     _, log_path = paths(c, MAIN_ID)
     return chat_response(meta, log_path)
 
@@ -790,20 +846,20 @@ async def main_route(c: str) -> Response:
 @router.post("/ws/{c}/chats", status_code=201)
 async def create_route(c: str, body: NewThread) -> dict:
     """A new thread. With `text` the question goes out as the thread's first event in the same call, and when no
-    session listens nothing is made (409, channel.post's message), so the browser keeps the draft and no thread is left
+    session listens nothing is made (409, events.post's message), so the browser keeps the draft and no thread is left
     empty."""
-    from . import channel, threads  # noqa: PLC0415 — both import this module
+    from . import events, threads  # noqa: PLC0415 — both import this module
 
     text = (body.text or "").strip()
-    if text and not channel.reachable(c):
-        raise HTTPException(409, channel.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
+    if text and not events.reachable(c):
+        raise HTTPException(409, events.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     meta = new_thread(c, body.anchor, body.anchor_text, body.title, surface=body.surface, element=body.element,
                       selector=body.selector, image=body.image, parent=body.parent)
     if not text:
         return meta
     await threads.warm(c, meta)
     try:
-        posted = channel.post(c, channel.THREAD, {"thread": meta["id"], "text": text})
+        posted = events.post(c, events.THREAD, {"thread": meta["id"], "text": text})
     except Exception:
         _trash(c, meta["id"])
         raise
@@ -820,11 +876,24 @@ async def get_route(c: str, chat_id: str) -> Response:
     meta["running"] = _running(c, chat_id)
     if chat_id == MAIN_ID:
         meta["orientation"] = _orientation_status(c)
+        meta.update(_main_state(c))
+    elif meta.get("kind") == KIND_THREAD:
+        from . import threads  # noqa: PLC0415
+
+        meta[threads.HAND_BACK_KEY] = threads.hand_back_state(c, meta)
     return chat_response(meta, log_path)
 
 
 @router.put("/ws/{c}/chats/{chat_id}")
 async def update_route(c: str, chat_id: str, body: ChatUpdate) -> dict:
+    with ledger.locked(paths(c, chat_id)[0]):
+        meta = _update(c, chat_id, body)
+    _notify(c, chat_id)
+    return meta
+
+
+def _update(c: str, chat_id: str, body: ChatUpdate) -> dict:
+    """update_route's change, with the meta's lock held."""
     meta = read_meta(c, chat_id)
     if body.title is not None:
         old = str(meta.get("title") or "")
@@ -841,7 +910,6 @@ async def update_route(c: str, chat_id: str, body: ChatUpdate) -> dict:
     if body.name is not None:
         _rename(c, meta, body.name)
     write_meta(c, meta)
-    _notify(c, chat_id)
     return meta
 
 
@@ -864,9 +932,7 @@ def _rename(c: str, meta: dict, name: str) -> None:
 
 def rename_chat(c: str, chat_id: str, name: str) -> dict:
     """Rename a chat as the thread tree lists it (_rename); the browser's Rename and main's rename_thread."""
-    meta = read_meta(c, chat_id)
-    _rename(c, meta, name)
-    write_meta(c, meta)
+    meta = change_meta(c, chat_id, lambda m: _rename(c, m, name))
     _notify(c, chat_id)
     return meta
 
@@ -875,10 +941,11 @@ def _rename_group(c: str, group: str, old: str, new: str) -> None:
     """A renamed thread's canvas group follows its name while the group still has the name the thread gave it."""
     from . import notebook  # noqa: PLC0415
 
-    nb = notebook.read_notebook(_ws(c), group)
-    if nb is not None and nb.get("title") == old:
-        nb["title"] = new
-        notebook.write_notebook(_ws(c), nb)
+    with notebook.editing(_ws(c)):
+        nb = notebook.read_notebook(_ws(c), group)
+        if nb is not None and nb.get("title") == old:
+            nb["title"] = new
+            notebook.write_notebook(_ws(c), nb)
 
 
 def _trash(c: str, chat_id: str) -> None:
@@ -896,14 +963,16 @@ DELETE_WAIT_S = 8.0  # the longest wait for a stopped server task to end before 
 
 
 async def _stop_for_delete(c: str, meta: dict) -> None:
-    """Stop an agent chat that runs: its Claude Code session (agent_session.stop_chat, which waits for the session to
-    end) or its server task. A thread's fork runs inside main's session, which the server cannot stop."""
-    from . import agent_session  # noqa: PLC0415 — agent_session imports this module
-
+    """Stop an agent chat that runs: one of thimble's agents (through the module, subagents.stop) or its server task.
+    A thread's fork runs inside main's session, which the server cannot stop."""
     if meta.get("kind") != KIND_AGENT:
         return
     cid = str(meta["id"])
-    if await agent_session.stop_chat(c, cid):
+    if _runs_as_subagent(meta):
+        from . import subagents  # noqa: PLC0415 — subagents imports this module
+
+        with contextlib.suppress(Exception):
+            await subagents.stop(c, str(meta["agent_id"]))
         return
     task = _agent_tasks.get((c, cid))
     if task is not None:
@@ -911,26 +980,53 @@ async def _stop_for_delete(c: str, meta: dict) -> None:
         await asyncio.wait({task}, timeout=DELETE_WAIT_S)
 
 
-async def delete_chat(c: str, chat_id: str) -> list[str]:
-    """Delete a chat and the chats of its steps, stopping each that runs, and move their files to the trash (_trash).
-    The ids deleted, the chat's first; 409 for main."""
+def _runs_as_subagent(meta: dict) -> bool:
+    """Whether an agent chat is one of thimble's agents that runs, which a delete stops through the module."""
+    return (meta.get("kind") == KIND_AGENT and meta.get("route") == "subagent" and bool(meta.get("agent_id"))
+            and meta.get("status") == "running")
+
+
+def _with_steps(c: str, chat_id: str) -> list[dict]:
+    """A chat's meta and its steps' metas, the chat's first; 409 for main."""
     meta = read_meta(c, chat_id)
     if meta.get("kind") == KIND_MAIN:
         raise HTTPException(409, "main cannot be deleted")
-    gone = [meta, *(m for m in list_chats(c) if m.get("role") == STEP_ROLE and m.get("parent") == chat_id)]
+    return [meta, *(m for m in list_chats(c) if m.get("role") == STEP_ROLE and m.get("parent") == chat_id)]
+
+
+async def delete_chat(c: str, chat_id: str) -> list[str]:
+    """Delete a chat and the chats of its steps, stopping each that runs, and move their files to the trash (_trash).
+    The ids deleted, the chat's first; 409 for main."""
+    gone = _with_steps(c, chat_id)
     for m in gone:
         await _stop_for_delete(c, m)
     for m in gone:
-        cid = str(m["id"])
-        _busy.discard((c, cid))
-        _trash(c, cid)
-        log.info("%s: chat %s (%s) deleted", c, cid, m.get("role"))
-        investigation.emit(c, investigation.MAIN, {"type": "chat", "chat": cid, "deleted": True})
+        discard_chat(c, str(m["id"]), str(m.get("role") or ""))
     return [str(m["id"]) for m in gone]
 
 
+def discard_chat(c: str, chat_id: str, role: str = "") -> None:
+    """A chat that runs no task goes to the trash, and the pages are told (delete_chat; the mirror's agent chat that
+    turned out to be a thread's fork, session._into_thread)."""
+    if chat_id == MAIN_ID:
+        return
+    _busy.discard((c, chat_id))
+    _trash(c, chat_id)
+    log.info("%s: chat %s (%s) deleted", c, chat_id, role or "?")
+    try:
+        investigation.emit(c, investigation.MAIN, {"type": "chat", "chat": chat_id, "deleted": True})
+    except Exception:  # noqa: BLE001 — off the event loop (a pass of terminal mode's mirror), no page listens
+        log.debug("chat deletion for %s/%s not emitted", c, chat_id, exc_info=True)
+
+
 @router.delete("/ws/{c}/chats/{chat_id}")
-async def delete_route(c: str, chat_id: str) -> dict:
+async def delete_route(c: str, chat_id: str, request: Request) -> dict:
+    """Delete a chat (delete_chat). Deleting one of thimble's agents that runs, or a chat one runs as a step of, stops it
+    through the module, which is a click, so it takes the analyst's cookie (403 without it), as Stop does."""
+    if any(_runs_as_subagent(m) for m in _with_steps(c, chat_id)):
+        from . import subagents  # noqa: PLC0415 — subagents imports this module
+
+        subagents.analyst_only(request)
     ids = await delete_chat(c, chat_id)
     return {"deleted": chat_id, "chats": ids}
 
@@ -944,37 +1040,54 @@ async def ask_again_route(c: str, chat_id: str) -> dict:
     return threads.ask_again(c, chat_id)
 
 
-@router.post("/ws/{c}/chats/{chat_id}/interrupt")
-async def interrupt_route(c: str, chat_id: str) -> dict:
-    """Stop an agent chat the server runs: a Claude Code session thimble started beside main or a server task. Main and its
-    threads run in the analyst's session, which the browser cannot interrupt."""
-    from . import agent_session  # noqa: PLC0415 — agent_session imports this module
+@router.post("/ws/{c}/chats/{chat_id}/hand-back")
+async def hand_back_route(c: str, chat_id: str) -> dict:
+    """Hand a finished thread's answer back to main as the analyst's message (threads.hand_back). 409 while the thread
+    runs, when that answer was handed back already, or when no session listens."""
+    from . import threads  # noqa: PLC0415
 
+    return threads.hand_back(c, chat_id)
+
+
+@router.post("/ws/{c}/chats/{chat_id}/interrupt")
+async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
+    """Stop: one of thimble's agents, any role's chat (route subagent), through the module (subagents.stop, TaskStop),
+    which is a click, so the analyst's cookie (403 without it); a stop of an agent that had ended counts as done
+    ({stopped, done}); without the module {stopped: false, kind: no-module}, and the card says to press Esc in the
+    agent's view. A server task stops as before. Main and its threads run in the analyst's session, which the browser
+    does not interrupt; the analyst's own subagent of main is main's to stop, so main is asked to."""
     meta = read_meta(c, chat_id)
     if meta.get("kind") != KIND_AGENT:
         return {"stopped": False}
-    if await agent_session.stop_chat(c, chat_id) or await stop_agent(c, chat_id):
+    if meta.get("route") == "subagent" and meta.get("agent_id"):
+        from . import subagents  # noqa: PLC0415 — subagents imports this module
+
+        subagents.analyst_only(request)
+        ans = await subagents.stop(c, str(meta["agent_id"]))
+        if ans.refused:
+            return {"stopped": False, "kind": ans.kind, "reason": ans.reason}
+        return {"stopped": True, **({"done": True} if ans.get("done") else {})}
+    if await stop_agent(c, chat_id):
         return {"stopped": True}
-    if meta.get("agent_id") and meta.get("parent") == MAIN_ID and not meta.get("pid") and meta.get("status") == "running":
-        # a subagent of the analyst's session: only main can stop it
-        from . import channel, tools  # noqa: PLC0415
+    if meta.get("agent_id") and meta.get("parent") == MAIN_ID and meta.get("status") == "running":
+        # the analyst's own subagent of main: only main can stop it
+        from . import events, tools  # noqa: PLC0415
 
         title = str(meta.get("title") or "a subagent")
         text = tools.hint("stop-subagent", title=title, agent_id=str(meta["agent_id"]))
-        channel.post(c, channel.MAIN, {"text": text}, mirror=False,
-                     line=channel.terminal_line(channel.MAIN, f"Stop {title}", {}))
+        events.post(c, events.MAIN, {"text": text}, mirror=False,
+                     line=events.terminal_line(events.MAIN, f"Stop {title}", {}))
         return {"stopped": False, "asked": "main"}
     return {"stopped": False}
 
 
 async def stop_all(c: str) -> list[str]:
     """Stop everything thimble runs for workspace `c`, main's session having ended with none taking over
-    (session.disconnected), so nothing works on after the analyst quit: its report checks and card checks, its dev
-    ticket and view builds (dev.stop_workspace), its label runs (concepts.stop_workspace), its sessions (agent_session.wind_down, which parks the orientation's and
-    the writers' for the next session that is main in `c`), its server tasks, its background sessions still alive with
-    no run open (`claude stop`, which keeps their conversations for `claude attach`) and its kernels. Returns what it
-    stopped, for the log."""
-    from . import agent_session, bg_session, card_check, checks, concepts, dev, notebook  # noqa: PLC0415 — each imports this module
+    (session.disconnected, or main's SessionEnd hook), so nothing works on after the analyst quit: its report checks and
+    card checks, its dev ticket and view builds (dev.stop_workspace), its label runs (concepts.stop_workspace), the
+    chats of thimble's agents, which died with main (subagents.close_running), its server tasks and its kernels.
+    Returns what it stopped, for the log."""
+    from . import card_check, checks, concepts, dev, notebook, subagents  # noqa: PLC0415 — each imports this module
 
     stopped: list[str] = []
     steps: list[tuple[str, Callable[[str], int]]] = [("report check", checks.stop_workspace),
@@ -985,17 +1098,13 @@ async def stop_all(c: str) -> list[str]:
             stopped += [what] * fn(c)
         except Exception:  # noqa: BLE001 — one part that will not stop leaves the others to stop
             log.warning("%s: could not stop the %ss", c, what, exc_info=True)
-    stopped += await agent_session.wind_down(c)
+    try:
+        stopped += [f"agent {a}" for a in subagents.close_running(c, subagents.STOPPED_QUIT)]
+    except Exception:  # noqa: BLE001
+        log.warning("%s: thimble's agents' chats were not closed", c, exc_info=True)
     for cc, chat in [k for k in _agent_tasks if k[0] == c]:
         if await stop_agent(cc, chat):
             stopped.append(str((meta_or_none(c, chat) or {}).get("title") or chat))
-    for e in bg_session.entries(c):
-        if bg_session.alive(e) and e.short:
-            try:
-                await asyncio.to_thread(bg_session.stop_cli, e.short)
-                stopped.append(e.name)
-            except Exception:  # noqa: BLE001
-                log.warning("%s: could not stop background session %s", c, e.name, exc_info=True)
     try:
         await notebook.shutdown_workspace(c)
     except Exception:  # noqa: BLE001
@@ -1005,11 +1114,9 @@ async def stop_all(c: str) -> list[str]:
 
 def at_work() -> set[str]:
     """The workspaces where this server runs something stop_all stops."""
-    from . import agent_session, bg_session, concepts, dev  # noqa: PLC0415
+    from . import concepts, dev  # noqa: PLC0415
 
-    return ({c for c, _ in agent_session._runs} | {c for c, _ in _agent_tasks} | dev.workspaces_at_work()
-            | concepts.workspaces_at_work()
-            | {e.c for e in bg_session.entries() if bg_session.alive(e)})
+    return {c for c, _ in _agent_tasks} | dev.workspaces_at_work() | concepts.workspaces_at_work()
 
 
 # --------------------------------------------------------------------------- text helpers other modules import
@@ -1045,5 +1152,6 @@ async def check_refs(c: str, refs_: list[str]) -> tuple[list[str], list[str]]:
 
 
 __all__ = ["KIND_MAIN", "KIND_THREAD", "KIND_AGENT", "MAIN_ID", "Recorder", "chip", "ensure_main", "finish_agent",
-           "list_chats", "mirror", "new_agent", "new_thread", "paths", "read_events", "read_meta", "start_agent", "stop_agent",
+           "end_left_label_chats", "list_chats", "mirror", "new_agent", "new_thread", "paths", "read_events", "read_meta", "start_agent",
+           "stop_agent",
            "set_running", "update_agent", "write_meta"]

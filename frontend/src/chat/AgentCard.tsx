@@ -1,13 +1,14 @@
 // A subagent or workflow agent as a chip (AgentChip): its name, steps, duration, state and the chips of what it made;
 // open, the files its calls read and its calls as plain-word steps (model.plainStep).
 //
-// The orientation and a writer, each a Claude Code session of its own, are a tool-call card whose steps are that
-// session's subagents and workflow agents (sessionSteps). While it runs the card shows what holds the session (Holds)
-// and Stop (in its own thread the composer's stop square is its Stop instead, ChatPanel); its permission requests wait
-// on the one permission card above the composer (PermissionCard), and its permission mode shows beside them
-// (ModeSwitch). In main, a finished orientation's card follows one line counting what it left for review. A follow-up
-// of the orientation is the same card for that run alone (`run`), with what it changed and Undo while the last undo
-// step is that follow-up's (backend undo.py).
+// The orientation, a writer and a report check, each one of thimble's agents run as a subagent of the analyst's Claude
+// Code session (backend subagents.py), are a tool-call card whose steps are that agent's own subagents (sessionSteps).
+// Its header names the model and effort the run used. While it runs the card shows Stop (in its own thread the
+// composer's stop square is its Stop instead, ChatPanel), which stops it through thimble's plugin; while the orientation
+// waits for its critic, "Waiting for the critique". Its permission requests wait on the one permission card above the
+// composer (PermissionCard), which the terminal answers. A run stopped by the analyst's quit says so, with Write again
+// on a writer's card. In main, a finished orientation's card follows one line counting what it left for review. A follow-up of the orientation is the same card for that run alone (`run`), with
+// what it changed and Undo while the last undo step is that follow-up's (backend undo.py).
 import { useContext, useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -22,10 +23,8 @@ import { bus, type Tab } from '../lib/bus'
 import { useProposals, withoutDropped } from '../lib/proposals'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
-import type { ChatMeta, ChatRecord, SessionAlert } from '../lib/types'
+import type { ChatMeta, ChatRecord } from '../lib/types'
 import { ApiErrorCard } from './ApiError'
-import { Holds } from './Holds'
-import { ModeSwitch } from './ModeSwitch'
 import { waitingAt } from './waiting'
 import { agentChipName, agentFiles, apiErrorAt, changeSummary, deckCards, durationText, foldRecords, followUpSummary, lastRowTs, leadText, madeBy, madeCards, orientMade, orientRuns, orientWriterOf, orientWriters, reviewList, sessionSteps, stripHarness, taskTitle, toolSteps, type Made, type OrientWriter, type Row } from './model'
 import { openThread, ThreadChip, ThreadsContext } from './Notes'
@@ -33,10 +32,11 @@ import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { RefText } from './markdown'
+import { NO_STOP_LINE, PAUSED_LINE, STOP_DONE_LINE, isSubagent, runValues, stopFailedLine, stoppedLine, valuesText } from './subagent'
 
 const REFETCH_DEBOUNCE_MS = 150
-/** The roles of the sessions thimble starts beside main (agent_session.py): their card lists their agents as steps and
- * carries what holds them and Stop. A report check's run is one (backend checks.py). */
+/** The roles of thimble's agents whose card lists their own subagents as steps and carries Stop: the orientation, a
+ * writer and a report check's run (backend subagents.TYPES). */
 const SESSION_ROLES = new Set(['orient', 'writer', 'check'])
 
 /** An agent chat's meta and records, refetched on the stream's `chat` events for it; nothing for a null chat. */
@@ -220,8 +220,6 @@ export interface AgentCardProps {
   report?: string | null
   /** the orientation's run the card stands for: 0 its first, then each follow-up; unset, its whole session */
   run?: number
-  /** a stopped background session's Resume shows on the card; its own thread shows it at the end instead */
-  resumeHere?: boolean
   /** a running session's Stop shows on the card; its own thread has it on the composer instead */
   stopHere?: boolean
   /** the analyst's instructions show as their own message above the card rather than inside it (the orientation in
@@ -229,51 +227,80 @@ export interface AgentCardProps {
   briefAbove?: boolean
 }
 
-/** The browser's Stop of a session thimble started (the orientation, a writer, a check's run): its chat is interrupted
- * (backend agents.interrupt_route). A subagent of main, which only main can stop, is asked of main, and a toast says so;
- * a toast also says when the server runs no session for it or the request fails. Resolves true when the stop went
- * through or was asked of main, false otherwise. */
+/** The browser's Stop of one of thimble's agents (the orientation, a writer, a check's run): its chat is interrupted
+ * (backend agents.interrupt_route), which stops it through thimble's plugin. A Stop that found the agent ended already
+ * counts as done; one thimble could not pass on says how to stop it in the terminal. The analyst's own subagent of main,
+ * which only main can stop, is asked of main, and a toast says so. Resolves true when the stop went through, was done
+ * already or was asked of main, false otherwise. */
 export function stopSession(ws: string, chat: string, role: string): Promise<boolean> {
   track('chat-interrupt', { target: `chat:${chat}`, detail: { role } })
   return api
     .interrupt(ws, chat)
     .then((r) => {
-      if (r.stopped) return true
+      if (r.stopped) return (r.done && bus.emit('toast', { text: STOP_DONE_LINE }), true)
       if (r.asked === 'main') return (bus.emit('toast', { text: 'Asked main to stop it.' }), true)
-      // the server answers `stopped: false` when it runs no session for this chat, which would otherwise look as if
-      // Stop had worked
-      return (bus.emit('toast', { text: 'Could not stop it: the server runs no session for it.', kind: 'error' }), false)
+      if (r.kind) return (bus.emit('toast', { text: stopFailedLine(r.reason ?? ''), kind: 'error' }), false)
+      // the server answers `stopped: false` when it runs nothing for this chat, which would otherwise look as if Stop
+      // had worked
+      return (bus.emit('toast', { text: 'Could not stop it: thimble runs nothing for it.', kind: 'error' }), false)
     })
-    .catch((e: Error) => (bus.emit('toast', { text: `Could not stop it: ${e.message}`, kind: 'error' }), false))
+    .catch((e: Error) => (bus.emit('toast', { text: stopFailedLine(e.message), kind: 'error' }), false))
 }
 
-/** The card of a session thimble started (the orientation, a writer, a check's run), or a subagent's chip. */
-/** The stopped notice of a session that had not finished its task; one that finished shows as done (backend
- * bg_session._stopped_while_idle). */
-export function stoppedAlert(meta: ChatMeta | null | undefined): SessionAlert | null {
-  return meta?.alert?.kind === 'stopped' && meta.status !== 'done' ? meta.alert : null
-}
-
-/** A background session whose process stopped (a crash, a kill, `claude stop`): what happened, and Resume, which
- * starts it again under its id with its conversation (backend agent_session.resume_chat). */
-export function StoppedHold({ ws, chat, text }: { ws: string; chat: string; text: string }) {
+/** Write again on a writer that main's quit stopped: its request made anew as a click (subagents.again). */
+function WriteAgain({ ws, request }: { ws: string; request: string }) {
   const [busy, setBusy] = useState(false)
-  const resume = () => {
-    setBusy(true)
-    track('ui-click', { target: `chat:${chat}`, detail: { action: 'resume-session' } })
-    api
-      .resumeSession(ws, chat)
-      .catch((e: Error) => bus.emit('toast', { text: `Could not resume it: ${e.message}`, kind: 'error' }))
-      .finally(() => setBusy(false))
-  }
   return (
-    <div className="chat-holds">
-      <div className="chat-hold chat-hold-stopped" data-kind="stopped" role="alert">
-        <span>{text}</span>
-        <Button variant="secondary" size="sm" busy={busy} onClick={resume}>
-          Resume
-        </Button>
-      </div>
+    <Button
+      variant="secondary"
+      size="sm"
+      className="chat-task-again"
+      busy={busy}
+      onClick={() => {
+        setBusy(true)
+        track('ui-click', { target: `request:${request}`, detail: { action: 'write-again' } })
+        api
+          .again(ws, request)
+          .then((a) => (a.agentId ? undefined : bus.emit('toast', { text: `The writer didn't start: ${a.reason || a.kind}`, kind: 'error' })))
+          .catch((e: Error) => bus.emit('toast', { text: `Could not write it again: ${e.message}`, kind: 'error' }))
+          .finally(() => setBusy(false))
+      }}
+    >
+      Write again
+    </Button>
+  )
+}
+
+/** What a subagent's card says under its steps, or null when it says nothing: that the orientation waits for its critic
+ * (`paused`), why it stopped (`stopped`), Write again on a writer that main's quit stopped (`again`, its request), and,
+ * while thimble's module is not in main's session, how to stop it in the terminal (`noStop`). Nothing says where the
+ * terminal shows the agent, in any state. Pure. */
+export function subagentNotes(meta: ChatMeta | null, running: boolean, noModule = false, back = false): { paused: boolean; stopped: string; again: string | null; noStop: boolean } | null {
+  if (!isSubagent(meta)) return null
+  const n = {
+    paused: running && meta?.paused === 'critique',
+    stopped: stoppedLine(meta, back && meta?.continue === 'here'),
+    again: (meta?.role === 'writer' && meta.stopped_by === 'quit' && !running && meta.request) || null,
+    noStop: running && noModule,
+  }
+  return n.paused || n.stopped || n.again || n.noStop ? n : null
+}
+
+/** The notes of a subagent's card (subagentNotes), drawn; nothing when there are none. */
+export function SubagentNotes({ ws, meta, running, noModule = false, back = false }: { ws: string; meta: ChatMeta | null; running: boolean; noModule?: boolean; back?: boolean }) {
+  const n = subagentNotes(meta, running, noModule, back)
+  if (!n) return null
+  return (
+    <div className="chat-sub-notes" data-paused={meta?.paused ?? undefined}>
+      {n.paused && (
+        <p className="chat-sub-paused" role="status">
+          <Spinner size={10} label={PAUSED_LINE} />
+          <span>{PAUSED_LINE}</span>
+        </p>
+      )}
+      {n.stopped && <p className="chat-sub-stopped" data-by={meta?.stopped_by ?? undefined}>{n.stopped}</p>}
+      {n.again && <WriteAgain ws={ws} request={n.again} />}
+      {n.noStop && <p className="chat-sub-nostop">{NO_STOP_LINE}</p>}
     </div>
   )
 }
@@ -398,7 +425,7 @@ function useUndoRun(ws: string, chat: string, run: number | undefined, want: boo
   return want && top === `${chat}/${run}`
 }
 
-function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = false, report, run, resumeHere = true, stopHere = true, briefAbove = false }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
+function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = false, report, run, stopHere = true, briefAbove = false }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
   const { meta, records, error } = log
   const all = useMemo(() => foldRecords(records), [records])
   // the run the card stands for, and whether a later one followed it (an earlier run has ended, whatever the chat's
@@ -415,7 +442,9 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
   const running = status === 'running'
   const followUp = !!scoped && scoped.k > 0
   const tools = useMemo(() => rows.filter((r) => r.kind === 'tool'), [rows])
-  const { metas } = useContext(ThreadsContext)
+  const { metas, main } = useContext(ThreadsContext)
+  // without thimble's module in main's session the browser cannot stop it (Q7): the terminal does
+  const noModule = main?.module === false
   const own = SESSION_ROLES.has(role)
   const steps = useMemo(
     () => (own ? sessionSteps(rows, metas ?? new Map(), running, (id) => openThread(id, 'step')) : toolSteps(tools, running, { plain: true })),
@@ -426,13 +455,8 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
     setStopping(true)
     void stopSession(ws, chat, role).finally(() => setStopping(false))
   }
-  const stopped = stoppedAlert(meta)
-  // what holds its session besides its permission requests, which wait on the permission card above the composer
-  const holds = running && own ? (
-    <Holds alert={meta?.alert} rules={meta?.session_rules} restarted={restartedNow(meta, run, running)} onRetry={() => api.retrySession(ws, chat)} />
-  ) : !running && own && resumeHere && stopped ? (
-    <StoppedHold ws={ws} chat={chat} text={stopped.text} />
-  ) : null
+  // what the card says of the agent besides its steps: its critic's wait, why it stopped
+  const notes = own && !followUp && subagentNotes(meta, running, noModule, !!main?.attached) ? <SubagentNotes ws={ws} meta={meta} running={running} noModule={noModule} back={!!main?.attached} /> : null
   // waiting for the analyst: on its own prompt, or on its critique's (chat/waiting.ts)
   const waitingFor = useMemo(() => {
     if (!running) return null
@@ -442,7 +466,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
   }, [running, chat, meta, metas])
   const waiting = !!waitingFor
   // the orientation's cards that name no group are in its deck (backend tools.default_group), so they count there; a
-  // view it proposed that could not be built was dropped and is not among what it made
+  // view it proposed that was dropped when the analyst stopped it is not among what it made
   const proposals = useProposals(ws)
   const made = useMemo(() => withoutDropped(role === 'orient' ? orientMade(madeBy(rows)) : madeBy(rows), proposals), [rows, role, proposals])
   const brief = useMemo(
@@ -461,7 +485,8 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
   const count = steps.length
   // what it changed: the server's counts from the run's undo steps when it kept them, else the log's calls
   const changed = followUp && !running ? (record && record.revised != null ? changeSummary(record) : followUpSummary(rows)) : ''
-  const metaText = changed || [count > 0 ? `${count} ${count === 1 ? 'step' : 'steps'}` : '', took].filter(Boolean).join(' · ')
+  const values = valuesText(runValues(meta, run))
+  const metaText = changed || [values, count > 0 ? `${count} ${count === 1 ? 'step' : 'steps'}` : '', took].filter(Boolean).join(' · ')
   const undoable = useUndoRun(ws, chat, run, followUp && !running && !!changed)
   const [undoing, setUndoing] = useState(false)
   const undo = () => {
@@ -484,26 +509,25 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
       title={<span className="chat-task-title">{role === 'orient' ? 'Orientation' : taskTitle(meta?.title || title)}</span>}
       meta={metaText || undefined}
       state={status}
+      flush
       lead={brief && !briefAbove ? <span className="chat-task-brief">{brief}</span> : undefined}
       steps={steps}
       body={error ? <div className="chat-error">{error}</div> : undefined}
       chips={
-        own && running ? (
+        notes || undoable || status === 'failed' ? (
           <>
-            {meta?.permission_mode ? <ModeSwitch ws={ws} chat={chat} meta={meta} /> : null}
-            {holds}
+            {notes}
+            {undoable ? (
+              <Button variant="ghost" size="sm" icon="undo" className="chat-task-undo" busy={undoing} onClick={undo}>
+                Undo
+              </Button>
+            ) : status === 'failed' ? (
+              <ReportProblemButton description={failureText(`${role === 'orient' ? 'The orientation' : taskTitle(meta?.title || title)} failed.`, meta?.result)} focus={[chat]} className="chat-task-report" />
+            ) : null}
           </>
-        ) : holds ? (
-          holds
-        ) : undoable ? (
-          <Button variant="ghost" size="sm" icon="undo" className="chat-task-undo" busy={undoing} onClick={undo}>
-            Undo
-          </Button>
-        ) : status === 'failed' ? (
-          <ReportProblemButton description={failureText(`${role === 'orient' ? 'The orientation' : taskTitle(meta?.title || title)} failed.`, meta?.result)} focus={[chat]} className="chat-task-report" />
         ) : undefined
       }
-      stop={own && running && stopHere ? { onStop: stop, busy: stopping, className: 'chat-task-stop' } : undefined}
+      stop={own && running && stopHere && !noModule ? { onStop: stop, busy: stopping, className: 'chat-task-stop' } : undefined}
       open={shownOpen}
       onToggle={(o) => {
         if (o) track('agent-row-expand', { target: `chat:${chat}`, detail: { role } })
@@ -548,13 +572,6 @@ function useOrientReport(ws: string, since: string | null | undefined): string |
     }
   }, [ws, since])
   return slug
-}
-
-/** Whether the card stands for a session run that resumed after the server restarted under it (backend agent_session).
- * Pure. */
-export function restartedNow(meta: Pick<ChatMeta, 'restarted' | 'run'> | null | undefined, run: number | undefined, running: boolean): boolean {
-  const at = meta?.restarted
-  return running && at != null && at.run === (run ?? meta?.run ?? 0)
 }
 
 /** Claude Code's API error line in a failed orientation's result, or null. Pure. */

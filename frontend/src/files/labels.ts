@@ -2,8 +2,10 @@
 // stripes a file row carries, the marks over the columns of the labels that are on and the focused one, a record's
 // gutter cells and marks, the marks a custom view's records take, and a text cut into segments at its spans. A class's
 // colour is an index into the label palette, --label-1..LABEL_COLOURS; 0 is --label-none, the grey of "no match".
+import labelOrder from '../../../backend/app/label_order.json'
+import labelWheel from '../../../backend/app/label_wheel.json'
 import { recordKey, recordOf } from '../lib/refs'
-import type { Concept, ConceptPatch, ConceptRun, ConceptUnit, LabelClass, LabelDraft, LabelMarks, LabelRow } from '../lib/types'
+import type { Concept, ConceptPatch, ConceptRun, ConceptUnit, LabelClass, LabelDraft, LabelMarks, LabelRow, ReadCut } from '../lib/types'
 
 const FILE_UNITS = new Set(['record', 'agent', 'run'])
 
@@ -33,11 +35,32 @@ export const marksWord = (k: Pick<Concept, 'unit' | 'marks'>): string => `marks 
 /** The patterns of a label's glob, comma-separated as the server keeps them. */
 export const globPatterns = (glob: string | null | undefined): string[] => (glob ?? '').split(',').map((p) => p.trim()).filter(Boolean)
 
-/** How many colours the label palette has, --label-1..12 (tokens.css; the server's concepts.PALETTE). */
+/** How many colours new values take, --label-1..12 (tokens.css; the server's concepts.PALETTE). */
 export const LABEL_COLOURS = 12
 
+/** How many colours a value can hold, --label-1..18 (the server's concepts.PICKS): the twelve, then red, a dark red,
+ * violet, a dark purple, pink and a dark pink, which a value takes only when the analyst picks it. */
+export const LABEL_PICKS = 18
+
+/** The palette's places as the pickers show them, around the color wheel: a column per hue (red, orange, gold, green,
+ * teal, sky, blue, purple, pink), its light place above its dark (backend/app/label_wheel.json, which the view kit's
+ * picker reads too). */
+export const LABEL_WHEEL: readonly (readonly number[])[] = labelWheel
+
+/** The order new values take the palette's places: blue, orange, green, gold, teal, brown, sky, then navy, grass,
+ * cerulean, chestnut and cyan, so the first five are five hues with no second blue. A stored color is a place, which
+ * keeps its hue; only the order new values take the places in differs. One list for the frontend and the view kit
+ * (backend/app/label_order.json, which views.frame_document hands the kit); the server's is kernel_thimble.LABEL_ORDER. */
+export const LABEL_ORDER: readonly number[] = labelOrder
+
+/** The palette's places in LABEL_ORDER from `at` on, round the order; from the first when `at` is no place. Pure. */
+export function paletteFrom(at: number): number[] {
+  const i = Math.max(0, LABEL_ORDER.indexOf(at))
+  return [...LABEL_ORDER.slice(i), ...LABEL_ORDER.slice(0, i)]
+}
+
 /** The name of the token that carries a class colour. */
-export const colourToken = (n: number | null | undefined): string => (n != null && n >= 1 && n <= LABEL_COLOURS ? `--label-${n}` : '--label-none')
+export const colourToken = (n: number | null | undefined): string => (n != null && n >= 1 && n <= LABEL_PICKS ? `--label-${n}` : '--label-none')
 
 /** A class colour as the token that carries it. */
 export const colourVar = (n: number | null | undefined): string => `var(${colourToken(n)})`
@@ -70,10 +93,10 @@ export function turnedOnOrder<T extends { id: string }>(on: readonly T[], order:
   return [...known, ...on.filter((k) => !at.has(k.id))]
 }
 
-/** A label's classes: the server's, else one per value with the positive highlighted in the first colour. */
+/** A label's classes: the server's, else one per value in LABEL_ORDER, with the positive highlighted in the first color. */
 export function classesOf(k: Pick<Concept, 'labels' | 'classes'>): LabelClass[] {
   if (k.classes && k.classes.length) return k.classes
-  return k.labels.map((name, i) => ({ name, color: isNegative(name, i, k.labels.length) ? 0 : (i % LABEL_COLOURS) + 1, highlight: !isNegative(name, i, k.labels.length) }))
+  return k.labels.map((name, i) => ({ name, color: isNegative(name, i, k.labels.length) ? 0 : LABEL_ORDER[i % LABEL_COLOURS], highlight: !isNegative(name, i, k.labels.length) }))
 }
 
 /** Whether classes are a multi-class label's: more than one of them takes a colour (a negative's grey aside). Such a
@@ -238,7 +261,7 @@ export const unitWord = (unit: string, n: number): string => (UNIT_WORDS[unit] ?
  * none it can state), or a failed run with its message. */
 export type LabelStatus =
   | { state: 'running'; done: number; total: number | null; unit: string }
-  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string }
+  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string; cut?: ReadCut | null }
   | { state: 'error'; message: string }
 
 /** A run's total as its outcome can state it: none when the run kept none, or kept one below the units that matched
@@ -255,7 +278,7 @@ const later = (a: string | null | undefined, b: string | null | undefined): bool
 /** A label's status from the run the pane last saw (`live`, else the concepts list's run record) and the last run kept
  * on the label. A run that ended after the kept one stands in for it until the list is read again (a failed run sends
  * no `concepts` event). The kept run's count is matchedCount over the label's counts; before counts are known, the
- * run's `matches`. */
+ * run's `matches`. `cut` is the whole files or runs that run read only in part. */
 export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'last_run' | 'run'>, live?: ConceptRun | null): LabelStatus | null {
   const run = live ?? k.run ?? null
   if (run?.status === 'running') {
@@ -267,20 +290,25 @@ export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'las
   if (run && (run.status === 'error' || run.status === 'done') && (!last || later(run.started, last.ts))) {
     if (run.status === 'error') return { state: 'error', message: run.message || 'the run failed' }
     const matches = run.matches ?? 0
-    return { state: 'done', matches, total: statedTotal(run.total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit }
+    return { state: 'done', matches, total: statedTotal(run.total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit, cut: run.cut ?? null }
   }
   if (!last) return null
   if (last.status === 'error') return { state: 'error', message: last.message || 'the run failed' }
   const total = last.total ?? last.matched_total ?? last.labeled
   const matches = k.counts ? matchedCount(k.labels, k.counts, total) : last.matches ?? 0
-  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit }
+  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null }
 }
 
 /** An outcome as the label row says it: "468 of 2,392,002 records", or "468 records" without a total, with "· 3 failed"
  * when units failed; the time follows it on the row. */
 export function outcomeText(s: Extract<LabelStatus, { state: 'done' }>): string {
-  const text = s.total == null ? `${s.matches.toLocaleString()} ${unitWord(s.unit, s.matches)}` : `${s.matches.toLocaleString()} of ${s.total.toLocaleString()} ${unitWord(s.unit, s.total)}`
-  return s.failed > 0 ? `${text} · ${s.failed.toLocaleString()} failed` : text
+  return s.total == null ? `${s.matches.toLocaleString()} ${unitWord(s.unit, s.matches)}` : `${s.matches.toLocaleString()} of ${s.total.toLocaleString()} ${unitWord(s.unit, s.total)}`
+}
+
+/** How many records a finished apply could not label, as the label row says it after the outcome: "230 failed"; ''
+ * when none did. */
+export function failedText(s: Extract<LabelStatus, { state: 'done' }>): string {
+  return s.failed > 0 ? `${s.failed.toLocaleString()} failed` : ''
 }
 
 /** A running apply as the label row says it: "1,204/2,392,002 records"; '' before any total is known. */
@@ -391,8 +419,12 @@ export interface ViewMark {
   bar: string
   /** the names of the labels that highlight the record, in the order of `on` */
   names: string[]
-  /** the texts to highlight in the record's element, each span cut into the pieces `needles` looks for */
-  spans: { text: string; colour: string }[]
+  /** each label that is on and highlights the record, with its value and that value's colour, in the order of `on`, so
+   * a page can colour its records by one of them */
+  values?: { id: string; label: string; value: string; colour: string }[]
+  /** the texts to highlight in the record's element, each span cut into the pieces `needles` looks for, with the id of
+   * the label that marks it, by which the bridge tells the Color by label's texts from the others' */
+  spans: { text: string; colour: string; id: string }[]
   /** with a label filter on, whether the record or unit passes it */
   keep?: boolean
 }
@@ -473,8 +505,12 @@ export function pageLabelList(all: Iterable<Concept>, resolve: (token: string) =
   })
 }
 
-/** The colours a label's value can take, in the palette's order: --label-1..LABEL_COLOURS, then the grey. */
-export const PALETTE: readonly number[] = [...Array.from({ length: LABEL_COLOURS }, (_, i) => i + 1), 0]
+/** The colours a label's value can take, in the palette's order: --label-1..LABEL_PICKS, then the grey. */
+export const PALETTE: readonly number[] = [...Array.from({ length: LABEL_PICKS }, (_, i) => i + 1), 0]
+
+/** The pickers' swatches in order, the wheel's columns one after another (each light then dark), for a grid that
+ * flows by column; `grey` adds the grey of a value with no color last. Pure. */
+export const pickerColours = (grey = false): number[] => [...LABEL_WHEEL.flat(), ...(grey ? [0] : [])]
 
 /** The palette as a view's page hears it (thimble.onLabels `palette`): each colour resolved. Pure. */
 export const pagePalette = (resolve: (token: string) => string): string[] => PALETTE.map((n) => resolve(colourToken(n)))
@@ -514,14 +550,28 @@ export function withKeeps(
   return out
 }
 
+/** A colour as a view's page gets it: a token reference, var(--label-3), resolved to the colour it stands for, so a
+ * canvas can draw it; any other colour as it is. Pure. */
+export function pageColour(colour: string, resolve: (token: string) => string): string {
+  const m = /^var\((--[\w-]+)\)$/.exec(colour.trim())
+  return m ? resolve(m[1]) || colour : colour
+}
+
 /** The marks a custom view's page draws (viewer_bridge.js `labels` message), keyed by record ref: for each ref, the
  * labels that are on and highlight the record's value (`rows`: ref -> label id -> row). A view may not show the record's
  * text verbatim, so every highlighting label gives it the bar, and its texts are highlighted wherever the page shows
- * them. Refs that name no highlighted record are left out. */
-export function viewMarks(on: readonly Concept[], rows: { get(ref: string): ReadonlyMap<string, LabelRow> | undefined }, refs: Iterable<string>): Record<string, ViewMark> {
+ * them; `values` names each such label with its value. `resolve` turns a token (--label-3) into the colour it stands
+ * for, so every colour is one a canvas can draw. Refs that name no highlighted record are left out. */
+export function viewMarks(
+  on: readonly Concept[],
+  rows: { get(ref: string): ReadonlyMap<string, LabelRow> | undefined },
+  refs: Iterable<string>,
+  resolve: (token: string) => string = () => '',
+): Record<string, ViewMark> {
   const out: Record<string, ViewMark> = {}
   if (!on.length) return out
   const rank = new Map(on.map((k, i) => [k.id, i]))
+  const real = (c: string) => pageColour(c, resolve)
   for (const ref of refs) {
     if (!recordOf(ref)) continue
     const mine = rows.get(recordKey(ref))
@@ -530,7 +580,12 @@ export function viewMarks(on: readonly Concept[], rows: { get(ref: string): Read
     const lit = [m.bar, m.tint, ...m.spans].filter((x): x is NonNullable<typeof x> => !!x).sort((a, b) => rank.get(a.concept)! - rank.get(b.concept)!)
     if (!lit.length) continue
     const names = [...new Map(lit.map((x) => [x.concept, x.name])).values()]
-    out[ref] = { bar: lit[0].colour, names, spans: m.spans.flatMap((s) => needles(s.text).map((text) => ({ text, colour: s.colour }))) }
+    out[ref] = {
+      bar: real(lit[0].colour),
+      names,
+      values: m.lit.map((x) => ({ id: x.concept, label: x.name, value: x.value, colour: real(x.colour) })),
+      spans: m.spans.flatMap((s) => needles(s.text).map((text) => ({ text, colour: real(s.colour), id: s.concept }))),
+    }
   }
   return out
 }
@@ -547,15 +602,11 @@ export function nextColour(n: number, others: readonly number[] = []): number {
   return 0
 }
 
-/** `want`, or the first palette colour after it that no class in `taken` has; `want` when every colour is taken or it
- * is the grey (the server's own_colour). Pure. */
+/** `want`, or the first palette color after it in LABEL_ORDER that no class in `taken` has; `want` when every color is
+ * taken or it is the gray (the server's own_colour). Pure. */
 export function ownColour(want: number, taken: readonly number[]): number {
   if (!want || !taken.includes(want)) return want
-  for (let j = 1; j < LABEL_COLOURS; j++) {
-    const m = ((want - 1 + j) % LABEL_COLOURS) + 1
-    if (!taken.includes(m)) return m
-  }
-  return want
+  return paletteFrom(want).slice(1).find((m) => !taken.includes(m)) ?? want
 }
 
 /** Every palette colour a class of the labels has (the grey aside). Pure. */
@@ -563,25 +614,22 @@ export function usedColours(labels: readonly Pick<Concept, 'labels' | 'classes'>
   return [...new Set(labels.flatMap((k) => classesOf(k).map((c) => c.color)).filter((c) => !!c))]
 }
 
-/** The first palette colour from `at` on, round the palette, that `used` does not hold; null when it holds every one
- * (the server's free_colour). Pure. */
+/** The first palette color from `at` on, in LABEL_ORDER and round it, that `used` does not hold; null when it holds
+ * every one (the server's free_colour). Pure. */
 export function freeColour(at: number, used: readonly number[]): number | null {
-  for (let j = 0; j < LABEL_COLOURS; j++) {
-    const m = ((at - 1 + j) % LABEL_COLOURS) + 1
-    if (!used.includes(m)) return m
-  }
-  return null
+  return paletteFrom(at).find((m) => !used.includes(m)) ?? null
 }
 
 /** The classes a drafted label is created with: the first value highlighted in `colour`, a negative value (isNegative)
- * in the grey and not highlighted, any other highlighted in the first colour after `colour` that neither `used` (the
- * other labels' colours) nor an earlier value has, while one is free, else the colour at its place after `colour`. Pure. */
+ * in the gray and not highlighted, any other highlighted in the first color from the one its place after `colour` in
+ * LABEL_ORDER that neither `used` (the other labels' colors) nor an earlier value has, while one is free, else the color
+ * at that place (the server's fill_colours). Pure. */
 export function draftClasses(values: readonly string[], colour: number, used: readonly number[] = []): LabelClass[] {
   const taken = [...used, colour]
   return values.map((name, i) => {
     if (i === 0) return { name, color: colour, highlight: true }
     if (isNegative(name, i, values.length)) return { name, color: 0, highlight: false }
-    const at = ((colour - 1 + i) % LABEL_COLOURS) + 1
+    const at = paletteFrom(colour)[i % LABEL_COLOURS]
     const color = freeColour(at, taken) ?? at
     taken.push(color)
     return { name, color, highlight: true }

@@ -47,6 +47,13 @@ export function hasFastMode(model: string | null | undefined): boolean {
   return m.includes('opus-5') || m.includes('opus-4-8') || m.split('[')[0] === 'opus'
 }
 
+/** Whether Claude Code runs a model at an effort (config.has_effort): every model but Haiku, which runs with none, so
+ * its row and its run show no effort menu. Pure. */
+export function hasEffort(model: string | null | undefined): boolean {
+  const m = (model ?? '').toLowerCase()
+  return !!m && !m.includes('haiku')
+}
+
 // ---- the settings, read once per workspace and shared by the composer and the settings popover ----
 import { api } from './api'
 

@@ -17,7 +17,8 @@ export type Events = {
   orient: { status: string; [k: string]: unknown }
   report: { slug: string; status: string; span?: string }
   /** `asked`: a view the analyst asked for is built (files/viewReady.ts); `version`: a new version of it passed its checks */
-  view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean; version?: string }
+  /** `held`: one of the orientation's proposals before its view first passes, which only its chip follows */
+  view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean; version?: string; held?: boolean }
   ticket: { id: string; n: number; status: string }
   /** `rows` false: the label's rows stayed as they were (turned on or off, recoloured, a filter set) */
   concepts: { concept: string; what: string; rows?: boolean }
@@ -39,7 +40,7 @@ export type Events = {
      * pane the request came from (lib/surfaces pressedPane), else the pane pressed last */
   showTab: { tab: Tab | `view:${string}`; from?: string | null }
   /** a ref Files places in a view, opened in the pane that shows that view on its own (files/ViewSurface) */
-  openInView: { slug: string; path: string; ref?: string; quote?: { record: string; text: string; span: string }; query?: ViewQuery }
+  openInView: { slug: string; path: string; ref?: string; quote?: { record: string; text: string; span: string }; query?: ViewQuery; picked?: boolean }
   /** open a view with a card's arguments (a card type's Open as view, canvas/TypeCard, or main's open_view), or with
    * none (null), in Files or in its own pane */
   openView: { slug: string; query: ViewQuery | null }
@@ -56,8 +57,10 @@ export type Events = {
   editLabel: { id: string }
   /** show a chat in the panel; `send` is a first message to post once it is shown */
   openChat: { chatId: string; send?: string }
-  /** `report` puts Report a problem on the toast, opened with that prefill (shell/ProblemReport) */
-  toast: { text: string; kind?: 'info' | 'error'; ref?: string; report?: ProblemPrefill }
+  /** A toast (shell/Toasts) only confirms or fails the analyst's own click, or reports news with a link to it: `ref`
+   * puts a chip of what it names on it, `thread` the chip of a thread (chat/Notes ThreadChip). A state that lasts, such
+   * as a refused start or a write that failed, shows once next to what it concerns and is never also a toast. */
+  toast: { text: string; kind?: 'info' | 'error'; ref?: string; thread?: { id: string; label: string } }
   /** open Report a problem under the top bar's bug, with what failed written in and the chats it concerns */
   reportProblem: ProblemPrefill
   /** a ⌘-click inside a view's frame (files/ViewerFrame): the pointer's box opens on that element, at `rect`; `view`

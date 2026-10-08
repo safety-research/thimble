@@ -202,6 +202,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: normal;
 }
 .files-caret {
   flex: none;
@@ -722,6 +723,11 @@
   height: 22px;
   color: var(--text-tertiary);
 }
+/* the ⋯'s menu (Edit label, Delete label) wraps it in its trigger's span */
+.files-label-menu {
+  display: inline-flex;
+  flex: none;
+}
 /* a label's status under its name: the run's progress, the last run's outcome and time, or a failure with Retry */
 .files-label-status {
   display: flex;
@@ -740,16 +746,50 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* how many records the analyst marked by hand, on a line of its own under the outcome */
-.files-label-status:has(.files-label-marked) {
+/* how many records the apply could not label ("230 failed") and how many the analyst marked by hand, each on a line of
+   its own under the outcome, so neither is cut */
+.files-label-status:has(.files-label-marked, .files-label-failed, .files-label-cut) {
   flex-wrap: wrap;
   row-gap: 0;
 }
-.files-label-marked {
+.files-label-marked,
+.files-label-failed,
+.files-label-cut {
   flex: 1 0 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* the whole files or runs a prompt label read only in part (ReadCutLine): a dim line that wraps, and opens to list them */
+.read-cut {
+  white-space: normal;
+}
+.read-cut-line {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.read-cut-line:hover {
+  color: var(--text-secondary);
+}
+.read-cut-refs {
+  max-height: 160px;
+  margin: 2px 0 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1.5 var(--font-mono);
+}
+.read-cut-refs li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .files-label-status.is-running {
   flex-direction: column;
@@ -1063,6 +1103,98 @@
   gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid var(--border-hairline);
+}
+/* a label that exists, compact: its type and scope as plain rows, a rule, its body clamped to four lines until it has
+   the focus (its last line faded while it holds more), its classes one line each, and More over the rest */
+.label-card-facts {
+  align-items: baseline;
+  row-gap: 6px;
+  padding-bottom: 10px;
+}
+.label-card-fact {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.label-card-rule {
+  margin: 0 12px 10px;
+  border: 0;
+  border-top: 1px solid var(--border-hairline);
+}
+.label-card-body {
+  position: relative;
+}
+.label-card-body.is-clamped .label-card-text {
+  overflow: hidden;
+}
+.label-card-body.is-cut::after {
+  content: '';
+  position: absolute;
+  left: 13px;
+  right: 13px;
+  bottom: 11px;
+  height: 22px;
+  border-radius: 0 0 var(--radius-ui) var(--radius-ui);
+  background: linear-gradient(to bottom, transparent, var(--surface-card));
+  pointer-events: none;
+}
+.label-card-more {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+  margin: 0 12px 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.label-card-more:hover,
+.label-card-more[aria-expanded='true'] {
+  color: var(--text-primary);
+}
+.label-card-more-body {
+  border-top: 1px solid var(--border-hairline);
+}
+/* Delete label, last in More, in the negative colour */
+.label-card-danger {
+  display: flex;
+  padding: 0 12px 10px;
+}
+.label-card-delete.btn {
+  color: var(--status-negative);
+}
+.label-card-hlname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--type-mono-sm);
+}
+
+/* what Re-run of a prompt label does with the analyst's values, at the foot's left */
+.label-card-note {
+  margin-right: auto;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+
+/* the same card in the popover beside the control that opened it (LabelEditor): the popover is its paper, its place
+   and its scroll, at the card's own width */
+.label-editor-pop.popover {
+  padding: 0;
+}
+.label-editor-body {
+  outline: none;
+}
+.label-card.in-popover {
+  position: static;
+  width: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 /* the edit card in a popover on a card (LabelCard LabelSheet): the card's head, the same fields, and each class's
@@ -1434,6 +1566,8 @@
   min-height: 0;
   overflow: auto;
   scrollbar-width: none;
+  /* the reader anchors its scroll itself, the same in every browser (anchor.ts): the browser's own would correct twice */
+  overflow-anchor: none;
 }
 /* columns past the right edge of the body: the paper fades in over the last 32px */
 .reader-edge {
@@ -1565,6 +1699,587 @@
   height: 1px;
   margin-top: -1px;
   background: var(--surface-card);
+}
+/* -------- the reader's two tracks (Tracks.tsx ReaderTracks), after an editor's navigator and zoom bar: the overview
+   (the whole file in one lane of the Color by colors or the file's density, the labels' grey ticks at its left) with a
+   dark frame over what the reader shows, then at the edge the zoomed track, which magnifies the frame: the stretch
+   around what the reader shows, its colors faded past it, what it shows under a lens; two lines and a light wedge join
+   the frame to the lens (the earlier ruler's magnifying viewfinder) -------- */
+.tracks {
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  padding: 6px;
+  background: var(--bg-sunken);
+  box-shadow: inset 1px 0 0 var(--border-hairline);
+  user-select: none;
+  touch-action: none;
+}
+.track {
+  position: relative;
+  flex: none;
+  background: rgba(var(--ink-rgb), 0.04);
+}
+.track-over {
+  overflow: hidden;
+  cursor: pointer;
+}
+.track-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+/* a lane of the overview, over its colors, which names its label on hover */
+.track-lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+/* the frame over what the reader shows on the overview: exactly as wide as its track, in the full ink with a line of
+   the paper inside it, so that it stands out over any color; square, so that the lines start at its corners */
+.track-frame-over {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  border: 2px solid var(--text-primary);
+  border-radius: 0;
+  box-shadow: inset 0 0 0 1px var(--surface-card);
+  cursor: grab;
+  will-change: transform;
+}
+.tracks[data-drag] .track-frame-over {
+  cursor: grabbing;
+}
+/* the lines from the frame's top and bottom to the lens's, and the wedge between them */
+.track-link {
+  flex: none;
+  align-self: stretch;
+  height: auto;
+  overflow: visible;
+  pointer-events: none;
+}
+.track-link polygon {
+  fill: rgba(var(--ink-rgb), 0.08);
+  shape-rendering: crispEdges;
+}
+.track-link line {
+  stroke: rgba(var(--ink-rgb), 0.62);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+/* a drag on the zoomed track scrolls the reader, as a scrollbar's thumb does */
+.track-zoom {
+  cursor: grab;
+}
+.tracks[data-drag='zoom'],
+.tracks[data-drag='zoom'] * {
+  cursor: grabbing;
+}
+.tracks[data-drag='frame'],
+.tracks[data-drag='frame'] * {
+  cursor: grabbing;
+}
+.track-zoom-faded,
+.track-zoom-shown {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+}
+.track-zoom-faded {
+  bottom: 0;
+}
+/* the records at their place in the reader's content, moved as one by the tracks' animation frame */
+.track-zoom-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  will-change: transform;
+}
+.track-zoom-shown {
+  will-change: transform;
+}
+/* the lens: a raised box of the paper, framed, over what the reader shows on the zoomed track, a margin of the paper
+   around the part shown (LENS_OUT_PX); the records it holds are drawn over it in full */
+.track-lens {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  right: -3px;
+  box-sizing: border-box;
+  border: 1px solid rgba(var(--ink-rgb), 0.55);
+  background: var(--surface-card);
+  box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  will-change: transform;
+}
+.tracks[data-drag] .track-lens {
+  border-color: rgba(var(--ink-rgb), 0.8);
+}
+/* a record on the zoomed track: a block of its height in its color, grey with no color; the labels on it that are not
+   the choice as grey ticks at its left */
+.track-rec {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: block;
+  background: rgba(var(--ink-rgb), 0.2);
+}
+.track-rec b {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: rgba(var(--ink-rgb), 0.45);
+  box-shadow: 1px 0 0 var(--surface-card);
+}
+/* the hover preview: the records at the point of the file under the pointer, beside the tracks, in thimble's popover
+   (its paper, ring and float, the radius of a control); each record a plain row with its color as a straight bar on
+   its left edge, as the reader's records carry it */
+.track-preview {
+  position: fixed;
+  z-index: var(--z-popover);
+  box-sizing: border-box;
+  width: 340px;
+  max-width: calc(100vw - 80px);
+  padding: 4px;
+  border-radius: var(--radius-ui);
+  pointer-events: none;
+}
+.track-preview-rec {
+  padding: 6px 8px 6px 11px;
+  box-shadow: inset 3px 0 0 var(--c, transparent);
+}
+.track-preview-rec + .track-preview-rec {
+  border-top: 1px solid var(--border-hairline);
+}
+.track-preview-head {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: var(--type-mono-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.track-preview-line {
+  margin-right: 8px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.track-preview-text {
+  display: -webkit-box;
+  margin-top: 2px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* -------- Color by in the Transcript and Table modes (ColorBy.tsx): thimble's bordered button with the choice, then a key chip per
+   value (a square swatch of its color, its name, its count, in a small bordered box; the view kit's .chip-key) that
+   turns its records off and on. A record carries the color as a bar on its left edge. -------- */
+.reader-colorbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border-hairline);
+  background: var(--surface-card);
+}
+.colorby {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.colorby-trigger.btn {
+  flex: none;
+  gap: 5px;
+  font-weight: 400;
+}
+.colorby-trigger .btn-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.colorby-trigger[aria-expanded='true'] {
+  background: var(--surface-hover);
+}
+.colorby-k {
+  color: var(--text-secondary);
+}
+.colorby-trigger b {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.colorby-caret {
+  color: var(--text-tertiary);
+}
+/* "+N": the choices past the first, a lane of the tracks each */
+.colorby-plus {
+  color: var(--text-secondary);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+}
+/* the values on one line: those that do not fit go behind "N more" (ColorBy fit) */
+.colorby-chips {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.colorby-chip[hidden],
+.colorby-more[hidden] {
+  display: none;
+}
+.colorby-more.btn {
+  flex: none;
+  gap: 4px;
+  font-weight: 400;
+}
+/* "N more": every value, one per line */
+.colorby-values.popover {
+  min-width: 0;
+  padding: 6px;
+}
+.colorby-values-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+}
+.colorby-chip {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 5px;
+  box-sizing: border-box;
+  height: var(--h-control);
+  margin: 0;
+  padding: 0 7px 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-chip);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 400 var(--text-xs) / 1 var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.colorby-chip:hover {
+  border-color: rgba(var(--ink-rgb), 0.3);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.colorby-chip[aria-pressed='false'] {
+  border-color: transparent;
+  color: var(--text-tertiary);
+}
+.colorby-chip[aria-pressed='false']:hover {
+  border-color: var(--border-subtle);
+  background: transparent;
+}
+.colorby-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.colorby-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: normal;
+}
+.colorby-sw {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--c, transparent);
+  box-shadow: inset 0 0 0 1px var(--c, rgba(var(--ink-rgb), 0.45));
+}
+.colorby-chip[aria-pressed='false'] .colorby-sw {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--c, rgba(var(--ink-rgb), 0.3));
+}
+/* a chip's swatch opens the palette: the press lands a little around it */
+.colorby-sw[data-palette] {
+  position: relative;
+  cursor: pointer;
+}
+.colorby-sw[data-palette]::after {
+  content: '';
+  position: absolute;
+  inset: -6px -4px -6px -5px;
+}
+.colorby-sw[data-palette]:hover {
+  box-shadow: inset 0 0 0 1.5px var(--c), 0 0 0 1.5px var(--surface-card), 0 0 0 2.5px var(--c);
+}
+/* the palette of a value's colors (ValuePalette): thimble's twelve label colors, the value's own ringed, then Reset
+   colors */
+.colorby-palette.popover {
+  min-width: 0;
+  padding: 6px 8px 8px;
+  border-radius: var(--radius-ui);
+}
+.colorby-palette-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 8px;
+  color: var(--text-primary);
+  font: 500 var(--text-ui-sm) / 1.2 var(--font-body);
+}
+/* the colors around the color wheel, a column per hue, its light above its dark (labels.ts LABEL_WHEEL) */
+.colorby-palette-grid {
+  display: grid;
+  grid-template-rows: repeat(2, 20px);
+  grid-auto-columns: 20px;
+  grid-auto-flow: column;
+  gap: 6px;
+}
+.colorby-pick {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: var(--c);
+  cursor: pointer;
+}
+.colorby-pick:hover {
+  box-shadow: 0 0 0 2px var(--overlay-bg), 0 0 0 3px rgba(var(--ink-rgb), 0.35);
+}
+.colorby-pick.on {
+  box-shadow: 0 0 0 2px var(--overlay-bg), 0 0 0 3.5px var(--text-primary);
+}
+.colorby-pick:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--overlay-bg), 0 0 0 3.5px var(--accent);
+}
+.colorby-repick.btn {
+  gap: 5px;
+  margin-top: 8px;
+  padding: 0 6px;
+}
+.colorby-n {
+  flex: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+/* the menu: Off, the keys, the labels */
+.colorby-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.colorby-item.menu-item {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  min-width: 0;
+}
+.colorby-tick {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+}
+.colorby-item .menu-item-note {
+  margin-left: auto;
+}
+/* a key's or a label's row: its name and how many values it has, then its values as chips on one line, cut off with …
+   where they do not fit */
+.colorby-item.menu-item:has(.colorby-choice) {
+  align-items: flex-start;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.colorby-item:has(.colorby-choice) .colorby-tick {
+  height: 16px;
+}
+/* a key's or a label's box: ticked in the ink while it is one of the choices */
+.colorby-box {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--surface-card);
+  color: var(--text-on-inverse);
+}
+.colorby-box.on {
+  border-color: var(--surface-inverse);
+  background: var(--surface-inverse);
+}
+.colorby-item:has(.colorby-choice) .colorby-box {
+  margin-top: 1px;
+}
+/* a choice past the first: "track" after its name */
+.colorby-track-n {
+  flex: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1 var(--font-body);
+}
+.colorby-choice {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.colorby-choice-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 16px;
+}
+.colorby-choice-top .menu-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.colorby-choice-top .menu-item-note {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+}
+.colorby-preview {
+  display: block;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font: 400 var(--text-xs) / 18px var(--font-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.colorby-preview-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 18px;
+  margin-right: 4px;
+  padding: 0 5px 0 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-chip);
+  vertical-align: top;
+}
+/* -------- Filter by in the Transcript mode (FilterBy.tsx), before Color by: the same bordered button, then a toggle
+   per value (a box ticked while its records show, its name and its count, in the small bordered box) with no color,
+   which is Color by's alone; at most a little under half the row, as the view kit's (viewer_parts.css) -------- */
+.filterby {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  margin-right: 14px;
+}
+.filterby-chips {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.filterby-chip[hidden],
+.filterby-more[hidden] {
+  display: none;
+}
+.filterby-chip {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 5px;
+  box-sizing: border-box;
+  height: var(--h-control);
+  margin: 0;
+  padding: 0 7px 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-chip);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 400 var(--text-xs) / 1 var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.filterby-chip:hover {
+  border-color: rgba(var(--ink-rgb), 0.3);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.filterby-chip[aria-pressed='false'] {
+  border-color: transparent;
+  color: var(--text-tertiary);
+}
+.filterby-chip[aria-pressed='false']:hover {
+  border-color: var(--border-subtle);
+  background: transparent;
+}
+.filterby-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+/* a value's box: ticked in the ink while its records show, empty while they are hidden */
+.filterby-box {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  color: var(--text-on-inverse);
+}
+.filterby-box.on {
+  border-color: var(--surface-inverse);
+  background: var(--surface-inverse);
+}
+.filterby-words {
+  color: var(--text-tertiary);
+}
+/* Collapse all and Expand all, at the row's end */
+.reader-foldall.btn {
+  flex: none;
+  margin-left: 8px;
+  color: var(--text-secondary);
+}
+/* a record's Color by colors on its left edge, as a slice of the tracks (views/common EdgeBands): a band per choice,
+   side by side from the edge in the tracks' order, --band-w wide and a pixel apart, empty where the record has no value
+   of that choice; in the record's left padding, so its text stays where it is */
+.reader-bands {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  gap: 1px;
+  pointer-events: none;
+}
+.reader-band {
+  flex: none;
+  width: var(--band-w, 3px);
 }
 .reader-more {
   display: flex;
@@ -1704,7 +2419,9 @@
   padding: 10px 20px 10px 12px;
   border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
 }
-/* records out of sight are neither laid out nor painted, so a resize or scroll reflows only those near the view */
+/* records out of sight are neither laid out nor painted, so a resize or scroll reflows only those near the view; the
+   records within a body's height and a half of the view are drawn ahead of it (anchor.ts data-near), so their real
+   heights replace the estimates out of sight, where the reader's scroll anchor makes up for them */
 .reader-record {
   content-visibility: auto;
   contain-intrinsic-size: auto 160px;
@@ -1712,6 +2429,90 @@
 .reader-line {
   content-visibility: auto;
   contain-intrinsic-size: auto 24px;
+}
+.reader-record[data-near],
+.reader-line[data-near] {
+  content-visibility: visible;
+}
+/* a record folded to one line (views/common RecordCard): a row of the Table mode's height, the head and the start of
+   its words cut with an ellipsis; its blocks stay in the page, hidden, for the find */
+.reader-record.is-folded {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  contain-intrinsic-size: auto 30px;
+}
+.reader-record.is-folded > .reader-gutter {
+  top: 4px;
+  bottom: 4px;
+}
+.reader-fold-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font: 400 var(--text-ui-sm) / 1.6 var(--font-body);
+}
+.reader-fold-line > .reader-record-head {
+  flex: none;
+  max-width: 45%;
+}
+.reader-fold-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reader-fold-line:hover .reader-fold-text {
+  color: var(--text-primary);
+}
+.reader-fold-mono {
+  font: var(--type-mono);
+}
+.reader-fold-sep {
+  color: var(--text-placeholder);
+}
+/* the head of a record that folds: a click on it folds the record */
+.reader-fold-head {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.reader-fold-head:hover {
+  color: var(--text-secondary);
+}
+.reader-fold-caret {
+  margin-right: 4px;
+  color: var(--text-placeholder);
+  vertical-align: -2px;
+}
+.reader-fold-line:hover .reader-fold-caret,
+.reader-fold-head:hover .reader-fold-caret {
+  color: var(--text-secondary);
+}
+.reader-fold-line:focus-visible,
+.reader-fold-head:focus-visible {
+  outline: none;
+  border-radius: var(--radius-hl);
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+/* a folded record is not a clipped block: no fade at its foot */
+.reader-record-main.reader-collapsed::after {
+  content: none;
 }
 /* the label gutter (views/common.tsx LaneGutter): a --lane-w column per label that is on, filled in the record's class
    colour; the line number moves right past it */
@@ -1946,13 +2747,14 @@
   margin-left: 4px;
   font-size: var(--text-mono-sm);
 }
-.reader-sys-summary {
-  max-width: 100%;
-  margin-left: -8px;
-  color: var(--text-tertiary);
+/* -------- an agent transcript (views/transcript AgentTranscript): the tool name in the head, the cleaned/raw toggle on
+   a tool result -------- */
+.reader-agent-toolname {
+  color: var(--text-secondary);
 }
-.reader-sys-summary .btn-label {
-  font: var(--type-mono-sm);
+.reader-raw-toggle {
+  margin: 2px 0 0;
+  color: var(--text-tertiary);
 }
 .reader-session {
   display: flex;
@@ -2249,6 +3051,17 @@
   box-shadow: inset 2px 0 0 var(--hl-edge);
   color: var(--text-primary);
 }
+/* a row's Color by colors: its bands on the edge of its pinned cell, as a record carries them (.reader-bands), and the
+   target's edge after them */
+.reader-table-row.has-cb.reader-target td.reader-table-gutter {
+  box-shadow: none;
+}
+.reader-table-row.reader-target .reader-bands::after {
+  content: '';
+  flex: none;
+  width: 2px;
+  background: var(--hl-edge);
+}
 /* the cell holding the words a followed ref quotes shows them over a few lines, the words highlighted (.hl) */
 .reader-table .reader-table-cell.cited .reader-table-clip {
   display: -webkit-box;
@@ -2339,11 +3152,6 @@
   font: var(--type-ui-sm);
   color: var(--text-tertiary);
 }
-.view-pane-file {
-  overflow-wrap: break-word;
-  font: var(--type-mono-sm);
-  color: var(--text-tertiary);
-}
 .view-pane-files {
   padding: 0;
   border: 0;
@@ -2422,8 +3230,7 @@
 .view-pane-list-item .mono {
   font: var(--type-mono-sm);
 }
-.view-pane-list-item:hover:not(:disabled),
-.view-pane-list-item.is-current {
+.view-pane-list-item:hover:not(:disabled) {
   background: var(--surface-hover);
 }
 .view-pane-list-why,
@@ -2478,12 +3285,6 @@
   border-radius: var(--radius-card);
   background: var(--surface-card);
   box-shadow: var(--ring-card), 0 0 0 1px var(--border-hairline);
-}
-.view-pane-raw {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
 }
 
 /* -------- database -------- */
@@ -2627,7 +3428,8 @@
 .reader-tab-pick,
 .reader-tab-x,
 .label-card-files,
-.label-card-model {
+.label-card-model,
+.label-card-more {
   justify-content: flex-start;
   min-height: 0;
 }
@@ -2635,13 +3437,15 @@
 .files-label-toggle:hover,
 .files-class-toggle:hover,
 .reader-tab-pick:hover,
-.label-card-files:hover {
+.label-card-files:hover,
+.label-card-more:hover {
   background: none;
 }
 .files-label-toggle,
 .files-class-toggle,
 .reader-tab-pick,
-.label-card-files {
+.label-card-files,
+.label-card-more {
   font-weight: 400;
 }
 .reader-md-file {
@@ -2721,7 +3525,9 @@
 }
 .label-palette-grid {
   display: grid;
-  grid-template-columns: repeat(7, 20px);
+  grid-template-rows: repeat(2, 20px);
+  grid-auto-columns: 20px;
+  grid-auto-flow: column;
   gap: 6px;
 }
 .label-palette-colour {
@@ -2794,7 +3600,7 @@
   border-radius: var(--radius-ui);
   background: var(--surface-card);
 }
-/* the mark of the review of the view's pictures, at the head's right end after the mode switch (ViewPane ReviewMark) */
+/* the mark of the review of the view's pictures, at the head's right end (ViewPane ReviewMark) */
 .view-pane-head .view-pane-review {
   align-self: center;
   margin: 0;

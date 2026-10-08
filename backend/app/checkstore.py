@@ -73,6 +73,21 @@ def basis(cell: dict) -> str:
     return hashlib.sha1(json.dumps(doc, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()[:16]
 
 
+def _changes(fn: Any) -> Any:
+    """Run a change to a card's check record under the groups' lock (notebook.editing), from the card's read to its
+    write, since the card check and `thimble-run` (terminal mode) write the same groups from two processes."""
+    import functools  # noqa: PLC0415
+
+    @functools.wraps(fn)
+    def wrapper(c: str, *args: Any, **kwargs: Any) -> Any:
+        from . import notebook  # noqa: PLC0415 — notebook imports the kernel machinery
+
+        with notebook.editing(config.workspace_dir(c)):
+            return fn(c, *args, **kwargs)
+
+    return wrapper
+
+
 def _locate(c: str, cid: str) -> tuple[dict, dict] | None:
     from . import notebook  # noqa: PLC0415 — notebook imports the kernel machinery
 
@@ -93,6 +108,7 @@ def current(c: str, cid: str) -> dict | None:
     return copy.deepcopy(rec) if isinstance(rec, dict) else None
 
 
+@_changes
 def begin(c: str, cid: str, *, author: str | None = None, again: bool = False) -> str | None:
     """Open a check of card `cid`: a fresh `pending` record naming the `author` whose work led to the card. Returns the
     check's id; None for a card that is gone, or one already read to the end as it stands, unless asked `again`."""
@@ -111,6 +127,7 @@ def begin(c: str, cid: str, *, author: str | None = None, again: bool = False) -
     return str(rec["id"])
 
 
+@_changes
 def drop_stale(c: str, cid: str) -> bool:
     """Take a stale record off card `cid` when no new check begins on it; True when one was dropped."""
     hit = _locate(c, cid)
@@ -125,6 +142,7 @@ def drop_stale(c: str, cid: str) -> bool:
     return True
 
 
+@_changes
 def discard(c: str, cid: str, check_id: str) -> bool:
     """Take check `check_id`'s record off card `cid` while it is pending, as if it never began; True when it did."""
     hit = _locate(c, cid)
@@ -147,6 +165,7 @@ def _live(cell: dict, check_id: str) -> dict | None:
     return rec
 
 
+@_changes
 def stage(c: str, cid: str, check_id: str, name: str, result: dict) -> bool:
     """Record one stage's result ($defs.stage) on check `check_id`. False, recording nothing, when the check is
     stale (the card changed since it began, or a newer check began), so the caller drops what it found."""
@@ -166,6 +185,7 @@ def stage(c: str, cid: str, check_id: str, name: str, result: dict) -> bool:
     return True
 
 
+@_changes
 def phase(c: str, cid: str, check_id: str, name: str, *, until: str | None = None, note: str = "") -> bool:
     """Say what pending check `check_id` does now (PHASES): `waiting` takes `until`, when it reads again, and `note`,
     why it waits. False, recording nothing, when the check is stale or has ended."""
@@ -198,9 +218,10 @@ def _clear_phase(rec: dict) -> None:
         rec.pop(k, None)
 
 
+@_changes
 def finish(c: str, cid: str, check_id: str, status: str, reason: str = "", note: str = "") -> bool:
     """End check `check_id`: `ok`, `fixed`, `error` or `stopped`, with `reason` for an error or a stop and `note` for a line
-    whatever the outcome, both shown in the check mark's hover. False when the check is stale."""
+    whatever the outcome, both shown in the card's details. False when the check is stale."""
     if status not in FINISHED:
         raise ValueError(f"a check ends {', '.join(FINISHED)}, not {status!r}")
     hit = _locate(c, cid)
@@ -220,6 +241,7 @@ def finish(c: str, cid: str, check_id: str, status: str, reason: str = "", note:
     return True
 
 
+@_changes
 def end_pending(c: str, cid: str, status: str, reason: str, check_id: str | None = None) -> bool:
     """End the card's record when it is still pending, whether or not the card changed since (the analyst's Stop, or a check
     that found the card changed under it). True when it ended one."""
@@ -316,6 +338,7 @@ def _before_path(c: str, cid: str, fix_id: str) -> Path:
     return d / f"{fix_id}-before.json"
 
 
+@_changes
 def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, reason: str) -> dict | None:
     """Apply a kept fix to card `cid` in place as one undo step by `check`, appending it to the card's `fixes`. None, changing
     nothing, when the check is stale, a field may not be fixed, or the code candidate did not run clean."""
@@ -364,6 +387,7 @@ def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, r
     return copy.deepcopy(fix)
 
 
+@_changes
 def record_rejected(c: str, cid: str, check_id: str, patch: dict, reason: str) -> dict | None:
     """Record a replacement the check did not keep (its code did not run, or its card did not draw) as a fix
     `rejected`, for the fix rate; the card is not changed. None when the card is gone."""
@@ -385,6 +409,7 @@ def _same(a: Any, b: Any) -> bool:
     return json.dumps(a, sort_keys=True, default=str) == json.dumps(b, sort_keys=True, default=str)
 
 
+@_changes
 def undo_fix(c: str, cid: str, fix_id: str) -> dict:
     """Put back what fix `fix_id` changed, as the analyst's own step, and mark it `undone`. 404 for a card or fix that does
     not exist, 409 for a fix that is not in effect."""

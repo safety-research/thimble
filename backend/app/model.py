@@ -1,10 +1,12 @@
 """model.structured: one structured call on a model, whose answer is the input of one output tool. Its callers are the
-labels classifier (concepts.classify_structured), the card check, view review and the viewer suggestion.
+labels classifier (concepts.classify_structured), the label draft, view fit, the card check, view review, the viewer
+suggestion and a program's `ask` (harness.ask), each at its role's model, effort and speed (config.call_settings).
 
 Each call is an Agent SDK session on the user's own `claude` (sdk.build) whose one in-process MCP tool's schema is the
 output schema. It returns a CallResult status (ok, refused, rate_limited, truncated, no_tool_call, timeout, error) and
-follows the retry rules in structured(). A refused call runs again once on config.FALLBACK_MODEL, with `refused_by`
-naming the model that refused it.
+follows the retry rules in structured(). A refused call runs again once on the model and effort of Settings' refusal row
+(config.call_settings' `refusal`), with `refused_by` naming the model that refused it, and not at all when that row is
+off.
 
 No time limit bounds a call, since a long generation is normal; instead a call with no sign of life for the idle window
 (DEFAULT_IDLE_TIMEOUT_S) is killed and retried once in a fresh session.
@@ -146,7 +148,7 @@ class CallResult:
     partial: dict | None = None
     # {input_tokens, output_tokens, …} as the CLI reported them; None when it did not say
     usage: dict | None = None
-    # the model that refused the call when this result is its rerun on config.FALLBACK_MODEL; "" otherwise
+    # the model that refused the call when this result is its rerun on the refusal row's model; "" otherwise
     refused_by: str = ""
 
 
@@ -294,17 +296,17 @@ def _out_server(spec: ToolSpec, state: CallState) -> Any:
     return create_sdk_mcp_server(_SERVER, tools=[sdk_tool(spec.name, spec.description, spec.input_schema)(out)])
 
 
-def _options(spec: ToolSpec, state: CallState, *, model: str | None, effort: str | None, system_append: str,
+def _options(spec: ToolSpec, state: CallState, *, model: str | None, effort: str | None, system: str,
              cwd: str | Path, speed: str = "standard") -> ClaudeAgentOptions:
     """The SDK options for one structured call (sdk.build): the output tool's server under `out`, in the served config
-    dir (config.claude_env). No transcript is kept."""
+    dir (config.claude_env), and the caller's `system` followed by the output tool's instruction as the whole system
+    prompt. No transcript is kept."""
     instruction = _instruction(spec)
-    append = f"{system_append}\n\n{instruction}" if system_append else instruction
     return sdk.build(
         cwd=cwd,
         tools=[f"mcp__{_SERVER}__{spec.name}"],
         mcp_servers={_SERVER: _out_server(spec, state)},
-        system_append=append,
+        system=f"{system}\n\n{instruction}" if system else instruction,
         model=model,
         effort=effort,
         env=config.claude_env({}),
@@ -560,45 +562,50 @@ async def structured(
     *,
     tool: ToolSpec,
     model: str,
-    effort: str | None = None,
-    system_append: str = "",
+    effort: str,
+    speed: str,
+    refusal: dict[str, str] | None,
+    system: str = "",
     cwd: str | Path,
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
     corrective_retries: int = 1,
-    speed: str | None = None,
     images: Sequence[tuple[bytes, str]] = (),
     on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None,
     on_fallback: Callable[[float], Any] | None = None,
 ) -> CallResult:
     """One structured call. Never raises; every failure is a CallResult.
 
-    `images` are (bytes, media type) pairs sent before the prompt's text. `on_retry(n, wait_s, error_class, exc)` hears
-    each wait before a rule 2 or 4 retry and `on_fallback(spent_s)` the time a refused call took, so a caller's own time
-    limit can exclude them. `speed` runs the call in fast mode on a model that has it.
+    `model`, `effort` and `speed` are the caller's role's and `refusal` the refusal row's {model, effort}, None when that
+    row is off (config.call_settings), always given, so nothing comes from the analyst's Claude Code settings; a call
+    without a model or an effort ends `error` before it starts. `speed` fast
+    runs the call in fast mode on a model that has it. `system` is the call's own system prompt, sent whole with the
+    output tool's instruction after it (no Claude Code preset). `images` are (bytes, media type) pairs sent before the
+    prompt's text. `on_retry(n, wait_s, error_class, exc)` hears each wait before a rule 2 or 4 retry and
+    `on_fallback(spent_s)` the time a refused call took, so a caller's own time limit can exclude them.
 
     Retry rules: (1) no_tool_call or schema-invalid: up to `corrective_retries` extra turns
     saying what was wrong; (2) a transient failure: a fresh conversation after each wait of retry.model_knobs()'s
     schedule; (3) a stall: one immediate retry in a fresh session; (4) a 429: one wait until the reset (at most
-    RATE_LIMIT_RETRY_MAX_S), then rate_limited; (5) refused: once more on config.FALLBACK_MODEL. Truncated and auth
-    errors are never retried here.
+    RATE_LIMIT_RETRY_MAX_S), then rate_limited; (5) refused: once more on `refusal`'s model and effort, at standard
+    speed, unless it is off or names the model that refused. Truncated and auth errors are never retried here.
     """
     await _bind_sdk_off_loop()
-    kw: dict[str, Any] = dict(tool=tool, effort=effort, system_append=system_append, cwd=cwd,
-                              idle_timeout_s=idle_timeout_s, corrective_retries=corrective_retries, speed=speed,
-                              images=images, on_retry=on_retry)
-    res = await _structured(prompt, model=model, **kw)
-    fallback = config.FALLBACK_MODEL
+    kw: dict[str, Any] = dict(tool=tool, system=system, cwd=cwd, idle_timeout_s=idle_timeout_s,
+                              corrective_retries=corrective_retries, images=images, on_retry=on_retry)
+    res = await _structured(prompt, model=model, effort=effort, speed=speed, **kw)
+    fallback = str((refusal or {}).get("model") or "")
     refused = res.model_requested
     if res.status != "refused" or not fallback or refused.startswith(fallback):
         return res
-    log.warning("structured %s: %s refused the call (%s); running it again on %s", tool.name, refused, res.detail,
-                fallback)
+    log.warning("structured %s: %s refused the call (%s); running it again on %s at effort %s", tool.name, refused,
+                res.detail, fallback, (refusal or {}).get("effort"))
     if on_fallback is not None:
         try:
             on_fallback(res.duration_s)
         except Exception:  # noqa: BLE001 — a listener never stops the fallback
             log.debug("structured %s: on_fallback raised", tool.name, exc_info=True)
-    again = await _structured(prompt, model=fallback, **kw)
+    again = await _structured(prompt, model=fallback, effort=str((refusal or {}).get("effort") or ""), speed="standard",
+                              **kw)
     again.refused_by = refused
     again.duration_s = round(res.duration_s + again.duration_s, 2)
     again.attempts += res.attempts
@@ -610,12 +617,12 @@ async def _structured(
     *,
     tool: ToolSpec,
     model: str,
-    effort: str | None = None,
-    system_append: str = "",
+    effort: str,
+    speed: str,
+    system: str = "",
     cwd: str | Path,
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
     corrective_retries: int = 1,
-    speed: str | None = None,
     images: Sequence[tuple[bytes, str]] = (),
     on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None,
 ) -> CallResult:
@@ -638,7 +645,8 @@ async def _structured(
         cap.finish(res.status, res.detail, attempts=attempts, model_used=res.model_used, cost_usd=res.cost_usd,
                    fallback_note=res.fallback_note)
         log.info("structured %s: %s after %.2f s (%s, effort %s%s; %d attempt(s))", tool.name, res.status,
-                 res.duration_s, res.model_used or requested, effort or "default", ", fast mode" if fast else "",
+                 res.duration_s, res.model_used or requested,
+                 effort if config.has_effort(requested) else "none", ", fast mode" if fast else "",
                  attempts)
         if res.status != "ok" and res.detail:
             log.warning("structured %s: %s (%s)", tool.name, res.status, res.detail)
@@ -646,14 +654,19 @@ async def _structured(
 
     if not config.CLI_PATH:
         return finish(CallResult(status="error", detail=config.NO_CLAUDE_FOUND))
+    if not str(requested or "").strip() or not str(effort or "").strip():
+        return finish(CallResult(status="error", detail=f"the {tool.name} call names no model or no effort, which "
+                                                        "it would take from Claude Code's settings (config.call_settings)"))
     try:
         # the metaschema walk, off the loop
         await asyncio.to_thread(jsonschema.Draft202012Validator.check_schema, tool.input_schema)
     except jsonschema.SchemaError as e:
         return finish(CallResult(status="error", detail=f"the {tool.name} tool's input_schema is invalid: {e.message}"))
 
-    log.info("structured %s: %s at effort %s%s", tool.name, requested, effort or "default", " in fast mode" if fast else "")
-    cap = capture.begin(capture.caller(tool.name), model=requested, effort=effort, path="sdk",
+    # a model with no effort runs with none (sdk.build), and the call's record says so
+    shown = effort if config.has_effort(requested) else "none (the model has none)"
+    log.info("structured %s: %s at effort %s%s", tool.name, requested, shown, " in fast mode" if fast else "")
+    cap = capture.begin(capture.caller(tool.name), model=requested, effort=shown, path="sdk",
                         speed="fast" if fast else "standard", output_tool=tool.name, cwd=str(cwd))
 
     async def run(life: _Life) -> CallResult:
@@ -663,7 +676,7 @@ async def _structured(
         rate_retry_used = False  # one wait-and-retry on a 429 before it is terminal
         while True:  # each flag is set at most once, so at most three sessions run per with_backoff attempt
             state = CallState(tool)
-            opts = _options(tool, state, model=requested, effort=effort, system_append=system_append, cwd=cwd,
+            opts = _options(tool, state, model=requested, effort=effort, system=system, cwd=cwd,
                             speed="fast" if fast else "standard")
             retry_note, retry_sleep = "", 0.0
             if attempts:

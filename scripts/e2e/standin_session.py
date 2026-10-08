@@ -2,9 +2,10 @@
 
     <tree>/backend/.venv/bin/python scripts/e2e/standin_session.py <tree> <corpus folder>
 
-It holds the subscription the plugin's MCP shim holds in a real session (GET /api/channel, signed with the token in
-$THIMBLE_HOME/server.json), which attaches a session to the workspace's main, so the UI is not greyed out under "No
-Claude Code session connected". Events the server sends are read and dropped: no model runs. It subscribes again
+It holds the subscription the plugin's MCP shim holds in a real session (GET /api/events, signed with the token in
+$THIMBLE_HOME/server.json) and names its session as /thimble does (POST /api/ws/<workspace>/session, the workspace
+being the one the subscription's `ready` event names), which makes it the workspace's main, so the UI is not greyed
+out under "No Claude Code session connected". No model runs, and no watcher takes the events. It subscribes again
 after a dropped connection and runs until it is killed.
 """
 import json
@@ -37,7 +38,7 @@ def server() -> tuple[str, str] | None:
 
 
 def main() -> None:
-    query = urllib.parse.urlencode({"cwd": corpus, "session": SESSION, "pid": os.getpid(), "delivery": "channel",
+    query = urllib.parse.urlencode({"cwd": corpus, "session": SESSION, "pid": os.getpid(), "delivery": "hook",
                                     "config_dir": ""})
     print(f"standin: session {SESSION}", flush=True)
     while True:
@@ -46,10 +47,15 @@ def main() -> None:
             try:
                 headers = hook_auth.headers(found[1], secrets.token_hex(16))
                 with httpx.Client(timeout=httpx.Timeout(None, connect=3.0)) as client:
-                    with client.stream("GET", f"{found[0]}/api/channel?{query}", headers=headers) as resp:
+                    with client.stream("GET", f"{found[0]}/api/events?{query}", headers=headers) as resp:
                         print(f"standin: subscribed, HTTP {resp.status_code}", flush=True)
-                        for _ in resp.iter_lines():
-                            pass
+                        for line in resp.iter_lines():
+                            if line.startswith("data:") and "workspace" in line:
+                                ws = json.loads(line[len("data:"):])["workspace"]
+                                named = httpx.post(f"{found[0]}/api/ws/{urllib.parse.quote(ws)}/session",
+                                                   json={"session": SESSION, "cwd": corpus}, timeout=10.0,
+                                                   headers=hook_auth.headers(found[1], secrets.token_hex(16)))
+                                print(f"standin: named the session, HTTP {named.status_code}", flush=True)
             except httpx.HTTPError as e:
                 print(f"standin: {type(e).__name__}: {e}", flush=True)
         time.sleep(1.0)

@@ -13,8 +13,9 @@ import re
 from types import SimpleNamespace
 
 import pytest
+from conftest import Listener
 
-from app import channel, concepts, config, notebook
+from app import concepts, config, notebook
 
 CORPUS = "relay"
 
@@ -78,8 +79,7 @@ async def test_a_label_run_reruns_its_two_cards_once_each_and_main_hears_which_n
     b = await _card(f"share reads {cid}", "Half are even.")
     other = await _card("no labels here")
     kernel.ran.clear()
-    q: asyncio.Queue = asyncio.Queue()
-    channel._subs.setdefault(CORPUS, set()).add(q)
+    q = Listener(CORPUS)
     seen: list[tuple[str, object, object]] = []
     real_emit = notebook._emit
 
@@ -95,7 +95,7 @@ async def test_a_label_run_reruns_its_two_cards_once_each_and_main_hears_which_n
         note = await asyncio.wait_for(q.get(), 10)
     finally:
         notebook._emit = real_emit
-        channel._subs.pop(CORPUS, None)
+        q.close()
     assert sorted(kernel.ran) == sorted([f"count reads {cid}", f"share reads {cid}"]), "each reader ran once, the other card not"
     for card in (a, b):
         assert (card, "running", [cid]) in seen, "while it runs the card says which label it runs again for"
@@ -116,8 +116,7 @@ async def test_label_done_carries_the_reruns_and_no_rerun_event_goes(kernel):
     cid = await _label("even", r"value \d*[02468]$")
     await _rerun_ends(cid)
     a = await _card(f"count reads {cid}", "Ten records are even.")
-    q: asyncio.Queue = asyncio.Queue()
-    channel._subs.setdefault(CORPUS, set()).add(q)
+    q = Listener(CORPUS)
     try:
         await concepts.start_apply(CORPUS, cid, ["log.jsonl"], None, "test")
         concepts.tell_when_done(CORPUS, cid)
@@ -125,7 +124,7 @@ async def test_label_done_carries_the_reruns_and_no_rerun_event_goes(kernel):
         await asyncio.sleep(0.2)
         assert q.empty(), "one event tells of the label and its cards"
     finally:
-        channel._subs.pop(CORPUS, None)
+        q.close()
     assert note["meta"]["kind"] == "label_done" and f"card:{a}" in note["content"]
 
 

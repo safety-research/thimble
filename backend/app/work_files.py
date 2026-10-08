@@ -1,6 +1,6 @@
 """What an agent's work folder keeps once its run ends. A session over a large corpus can leave gigabytes of extracts
 there (pickled indexes, copies of big files), so when a run finishes thimble deletes its subagents' scratch folders
-(`tmp_*`, scratch_hook) and every other file of at least EXTRACT_MIN bytes that nothing uses. A run that goes on (the
+(`tmp_*`, the plugin's --subagent-start hook) and every other file of at least EXTRACT_MIN bytes that nothing uses. A run that goes on (the
 analyst stopped it, or a message waits for it) loses only its scratch folders, and a failed run, which is resumed,
 keeps everything (the callers decide which).
 
@@ -25,7 +25,7 @@ log = logging.getLogger("thimble.work_files")
 
 EXTRACT_MIN = 1024 * 1024
 TEXT_MAX = 2 * 1024 * 1024
-TEMP_PREFIX = "tmp_"  # scratch_hook.PREFIX
+TEMP_PREFIX = "tmp_"  # plugin/bin/.thimble-watch SCRATCH_PREFIX
 SCRIPT_SUFFIXES = (".py", ".sh", ".sql", ".r", ".jl", ".js", ".mjs", ".ipynb", ".md", ".txt", ".json", ".yaml",
                    ".yml", ".toml", ".cfg", ".ini")
 CODE_KEYS = ("code", "previous_code")

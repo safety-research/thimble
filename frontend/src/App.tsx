@@ -1,25 +1,27 @@
-// The page shell for the workspace named in the URL. A URL that names no workspace goes to the one the server holds
-// (pickWorkspace). Before the shell mounts (it reads browser storage as it does), the workspace's instance is checked, so
-// a workspace made again under an old name does not open on the old one's state (lib/workspace.ts syncInstance); a
-// failure or a slow answer lets the shell mount with the state as it is.
+// The page shell for the workspace named in the URL. A URL that names no workspace, or one this server does not hold, is
+// thimble's start page (shell/StartPage), which lists the server's workspaces. A URL naming a workspace renamed since
+// (`thimble demo` renames a demo workspace demo-<dataset>: a row's `renamed_from`) goes to the new name, taking the
+// workspace's browser storage with it. Before the shell mounts (it reads browser storage as it does), the workspace's
+// instance is checked, so a workspace made again under an old name does not open on the old one's state
+// (lib/workspace.ts syncInstance); a failure or a slow answer lets the shell mount with the state as it is.
 import { useEffect, useState } from 'react'
 import { api } from './lib/api'
 import { useTheme } from './lib/theme'
-import { lastWorkspace, pickWorkspace, rememberWorkspace, syncInstance, urlForWorkspace, workspaceFromUrl } from './lib/workspace'
+import { moveWorkspaceStorage, renamedTo, syncInstance, withWorkspace, workspaceFromUrl } from './lib/workspace'
 import { Shell } from './shell/Shell'
-import { UnknownWorkspace } from './shell/UnknownWorkspace'
+import { StartPage } from './shell/StartPage'
 
 /** How long the page waits on the instance check before it mounts the shell anyway (ms). */
 const INSTANCE_WAIT = 1500
 
 export default function App() {
   const ws = workspaceFromUrl()
-  const [error, setError] = useState<string | null>(null)
-  // a URL naming a workspace this server does not hold (a tab kept from another run or another server): the folders it
-  // does hold, to offer instead
-  const [held, setHeld] = useState<string[] | null>(null)
+  // a URL naming a workspace this server does not hold (a tab kept from another run or another server): the start page
+  const [missing, setMissing] = useState(false)
   // the instance check has settled (INSTANCE_WAIT caps it)
   const [checked, setChecked] = useState(false)
+  // bumped when the URL goes to a renamed workspace's new name, so the page reads the URL again
+  const [, setMoved] = useState(0)
   const { paper, accent } = useTheme()
   // the card harness draws a card offscreen in the theme this browser last showed (backend/app/render.py)
   useEffect(() => {
@@ -50,37 +52,32 @@ export default function App() {
     }
   }, [ws])
   useEffect(() => {
-    if (ws) {
-      let alive = true
-      api
-        .corpora()
-        .then((cs) => {
-          const names = cs.map((c) => c.name)
-          if (!alive) return
-          if (names.includes(ws)) rememberWorkspace(ws)
-          else setHeld(names)
-        })
-        .catch(() => rememberWorkspace(ws))
-      return () => {
-        alive = false
-      }
-    }
+    if (!ws) return
+    let alive = true
     api
       .corpora()
-      .then((cs) => {
-        const name = pickWorkspace(
-          cs.map((c) => c.name),
-          lastWorkspace(),
-        )
-        // a navigation rather than a state change, so everything that reads the workspace from the URL at load sees it
-        if (name) window.location.replace(urlForWorkspace(name))
-        else setError('No folder is open. Run /thimble in a Claude Code session in the folder to open it.')
+      .then(async (cs) => {
+        if (!alive) return
+        if (cs.some((c) => c.name === ws)) return setMissing(false)
+        const to = await api
+          .workspaces()
+          .then((rows) => renamedTo(rows, ws))
+          .catch(() => null)
+        if (!alive) return
+        if (!to) return setMissing(true)
+        moveWorkspaceStorage(ws, to)
+        const { pathname, search, hash } = window.location
+        window.history.replaceState(null, '', withWorkspace(to, pathname, search, hash))
+        setMoved((n) => n + 1)
       })
-      .catch((e) => setError(`Could not reach the thimble server: ${(e as Error).message}`))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
   }, [ws])
-  if (!ws) return error ? <p className="app-error">{error}</p> : null
-  if (held) return <UnknownWorkspace ws={ws} held={held} />
+  if (!ws) return <StartPage />
+  if (missing) return <StartPage missing={ws} />
   if (!checked) return null
-  return <Shell ws={ws} />
+  return <Shell key={ws} ws={ws} />
 }
 

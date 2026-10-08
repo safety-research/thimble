@@ -14,7 +14,7 @@ import { hhmm } from '../lib/time'
 import type { ChatMeta } from '../lib/types'
 
 /** What a chat is: main, a thread (a fork of main), the orientation, a writer, a report check's run on a document, a
- * dev ticket's background session (a view build among them), or a step of the orientation or a writer (a subagent or
+ * dev ticket's session (a view build among them), or a step of the orientation or a writer (a subagent or
  * workflow agent of its session, nested under it and opened from its card). */
 export type ThreadKind = 'main' | 'thread' | 'orient' | 'writer' | 'check' | 'dev' | 'step'
 
@@ -63,6 +63,17 @@ export function threadKind(m: Pick<ChatMeta, 'kind' | 'role'>): ThreadKind | nul
   if (m.kind === 'agent' && m.role === 'dev') return 'dev'
   if (m.kind === 'agent' && m.role === 'step') return 'step'
   return null
+}
+
+/** Each thread's running flag, for answeredSince to compare with later. Pure. */
+export function threadsRunning(chats: readonly ChatMeta[]): Map<string, boolean> {
+  return new Map(chats.filter((m) => threadKind(m) === 'thread').map((m) => [m.id, !!m.running]))
+}
+
+/** The threads that stopped running since `was` (threadsRunning of an earlier list), other than the one shown
+ * (`current`): a thread the analyst left while it answered, which has its answer now. Pure. */
+export function answeredSince(was: ReadonlyMap<string, boolean>, chats: readonly ChatMeta[], current: string): string[] {
+  return chats.filter((m) => threadKind(m) === 'thread' && m.id !== current && was.get(m.id) === true && !m.running).map((m) => m.id)
 }
 
 /** Where a message typed in a thread's composer goes: `here`, the chat's own session (main, or a thread's fork); the
@@ -166,7 +177,16 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
   // a document's first writer is `write-<doc>` and each later one takes the next number, so a name never moves to
   // another run and a chip in main's history keeps pointing at the run it named
   for (const [doc, ms] of writes) ms.forEach((m, i) => labels.set(m.id, i === 0 ? `write-${doc}` : `write-${doc}-${i + 1}`))
-  for (const m of listedChats) if (threadKind(m) === 'dev') labels.set(m.id, `dev/${m.view || ticketSlug(m.title || m.id)}`)
+  // a view's builds and reviews each take a name of their own (live check L25: four threads were all called
+  // dev/wiki-page-history): the first build `dev/<view>`, its first review `dev/<view>-review`, and each later one the
+  // next number, as a document's writers do (backend threads.tree_names gives the same names)
+  const devs = new Map<string, ChatMeta[]>()
+  for (const m of listedChats) {
+    if (threadKind(m) !== 'dev') continue
+    const base = m.view ? `${m.view}${m.review ? '-review' : ''}` : ticketSlug(m.title || m.id)
+    devs.set(base, [...(devs.get(base) ?? []), m])
+  }
+  for (const [base, ms] of devs) ms.forEach((m, i) => labels.set(m.id, `dev/${base}${m.view && i > 0 ? `-${i + 1}` : ''}`))
   for (const m of listedChats) if (threadKind(m) === 'check') labels.set(m.id, checkLabel(m.title || m.id))
   for (const m of listedChats) {
     const known = labels.get(m.id)

@@ -18,7 +18,7 @@ Placeholders in an extension's prompt: {{default}} is thimble's own prompt for t
 
 The prompt way works through the prompt files: prompt_file renders a role's replacement or additions into a file in
 the workspace (PROMPTS_DIR), which userconf.prompt_files hands to prompts.custom, so every place that builds the role's
-prompt reads it. Main's additions join its prompt in channel.render_prompts. The orientation's prompt way is
+prompt reads it. Main's additions join its prompt in events.render_prompts. The orientation's prompt way is
 extensions.py's: its prompt adds to the orientation's instructions or replaces them, and its subagents join the
 orientation's session (extensions.agent_definitions), so prompt_text and subagents leave it out.
 """
@@ -50,7 +50,7 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the prompt file under prompts/ each role's prompt is built from (userconf.PROMPT_FILES); main's is main.md
 PROMPT_FILES = {"main": "main", "orientation": "orient", "critic": "critic", "writer": "writer", "dev": "dev"}
 PROMPTS_DIR = "agents"  # in the workspace: each role's prompt as its extensions change it (prompt_file)
-PROMPT_ELSEWHERE = ("main", "orientation")  # whose prompt way channel.py and extensions.py apply (module note)
+PROMPT_ELSEWHERE = ("main", "orientation")  # whose prompt way events.py and extensions.py apply (module note)
 FRONT_RE = re.compile(r"\A---\n.*?\n---\n", re.S)
 ADDED_HEADING = "## From the {name} extension"
 

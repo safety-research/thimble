@@ -16,7 +16,7 @@ import { commentsApi } from './commentsApi'
 import { ReportEditor, type DocFilter, type EditorHandle } from './Editor'
 import { forgetFigureCell } from './FigureBlock'
 import { Margin, RAIL_ROOM } from './Margin'
-import { allSentences, paragraphOf, passageOrder, readableText } from './model'
+import { allSentences, paragraphOf, passageOrder, readableText, TITLE_ID } from './model'
 import { Sidebar } from './Sidebar'
 
 const CANVAS_DEBOUNCE_MS = 400
@@ -92,7 +92,7 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
   )
 
   const texts = useMemo(() => {
-    const out = new Map<string, string>()
+    const out = new Map<string, string>([[TITLE_ID, readableText(doc.title ?? '')]])
     for (const sec of doc.sections ?? []) out.set(sec.id, readableText(sec.heading ?? ''))
     for (const s of allSentences(doc)) out.set(s.id, readableText(s.text))
     return out

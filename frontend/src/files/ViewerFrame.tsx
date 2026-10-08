@@ -18,11 +18,15 @@
 //   key       sent once the page is ready: the key the bridge puts on each labelCall
 //   labelCall the page's label controls (labelCalls.ts), answered by labelDone: done here as the Labels pane does them
 //             (`labelActions`), a mark stored as the analyst's verdict and the label filter set, each only during the
-//             analyst's own gesture in the frame; labelRefused says the bridge refused one for want of a gesture
+//             analyst's own gesture in the frame; labelRefused says the bridge refused one for want of a gesture. `edit`
+//             opens the label editor in a popover over the page (LabelEditor), beside its `anchor` rect, and the page
+//             hears labelEditorClosed {id, focus} when it closes: the call's id, and whether the focus came back
 //   hidden    how many anchored refs the bridge hides for the label filter, which with what the reader left out for
 //             it (the records answers' `hidden`) is the count the view's head shows (onHidden)
 //   state     what the analyst is looking at (the element they picked, scroll positions, fields), asked for through
 //             `handle` before a newer version replaces the page, and sent back as `restore` once that version is ready
+//   colour    the page's Colour by choice (backend/app/viewer_colour.js), kept in this browser per view and put in the
+//             page as window.__thimbleColour when it is built again
 // plus ready, error, point and cmd (for the ⌘ pointer). A new ref is sent as a new `open` without reloading the page.
 // The page and every call it makes are of the view's `version`, so the page stays as it was loaded while the view
 // changes (backend views.VERSIONS_SUBDIR).
@@ -41,6 +45,7 @@ import { notePress } from '../lib/surfaces'
 import { teleport } from '../lib/teleport'
 import { useTheme } from '../lib/theme'
 import { token } from '../lib/vizTheme'
+import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { cmdCursors } from '../pointer/cursor'
 import type { Concept, LabelRow, ViewOpen, ViewQuery } from '../lib/types'
 import { callKey, inGesture, NO_GESTURE, runLabelCall, type ViewLabelActions } from './labelCalls'
@@ -141,6 +146,20 @@ export interface CardFrame {
 export interface ViewQuote {
   record: string
   text: string
+}
+
+/** Where this browser keeps a view's Colour by choice (backend/app/viewer_colour.js), per workspace and view. */
+export const colourKey = (ws: string, slug: string): string => storageKey(ws, `view-colour:${slug}`)
+
+/** The largest Colour by choice kept, in characters of JSON: a page cannot fill the browser's storage. */
+const COLOUR_MAX = 64_000
+
+/** The script that hands a view's page its Colour by choice as window.__thimbleColour, '' when none is kept. The JSON is
+ * escaped so that nothing in it ends the script. Pure. */
+export function colourScript(state: unknown): string {
+  if (state == null || typeof state !== 'object') return ''
+  const json = JSON.stringify(state).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+  return `<script>window.__thimbleColour=${json}</script>`
 }
 
 /** A rect the frame reports, in the page's coordinates. */
@@ -348,7 +367,7 @@ function useViewLabels(
       }
     }
     const rowsOf = { get: (ref: string) => rows.current.get(recordOf(ref)?.path ?? '')?.get(ref) }
-    const marks = { ...withKeeps(viewMarks(on, rowsOf, refs.current), filter, rowsOf, refs.current, filterFiles), ...(labelled ? unitMarks.current : {}) }
+    const marks = { ...withKeeps(viewMarks(on, rowsOf, refs.current, token), filter, rowsOf, refs.current, filterFiles), ...(labelled ? unitMarks.current : {}) }
     const state = pageLabels(on, filter, filterLabel ? new Map([[filterLabel.id, filterLabel]]) : byId, (name) => token(name) || `var(${name})`)
     const answered = !filter || (everyOne(refs.current, (ref) => keepKnown(ws, ref, filterFiles)) && everyOne(units.current, (u) => unitsAnswered.current.has(u))) ? seqNow.current : -1
     const text = JSON.stringify([marks, state, all, palette, answered])
@@ -426,7 +445,13 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   }, [ws, slug, version, cardType])
   // the theme's tokens are read when the page is built, so a theme change reloads the page with the new colours; the
   // page waits for the app's faces so it is drawn once, in them
-  const doc = useMemo(() => (page == null || fonts == null ? null : withFrameStyle(page, viewStyle(resolved) + fonts)), [page, fonts, resolved, key]) // key: the tokens are read again when the paper or the accent changes
+  // the Colour by choice kept for the view is read as the page is built, so the page starts on it; the page's later
+  // choices are kept (the `colour` message) without building it again
+  const doc = useMemo(
+    () => (page == null || fonts == null ? null : withFrameStyle(page, viewStyle(resolved) + fonts + (card ? '' : colourScript(readStorage<unknown>(colourKey(ws, slug), null))))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [page, fonts, resolved, key], // key: the tokens are read again when the paper or the accent changes
+  )
   const post = (msg: unknown) => ref.current?.contentWindow?.postMessage(msg, '*')
   const resolveToken = (name: string) => token(name) || `var(${name})`
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -646,7 +671,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           if (typeof d.key !== 'string' || !pageKey.current || d.key !== pageKey.current) return done('this label call did not come through thimble')
           if (!inGesture(frame)) return done(NO_GESTURE)
           notePress(frame)
-          runLabelCall(String(d.op), d.args, { ws, byId: known.current, palette: colours.current, actions: actions.current }).then(
+          const closed = (focused: boolean) => post({ type: P + 'labelEditorClosed', id: d.id, focus: focused })
+          runLabelCall(String(d.op), d.args, { ws, byId: known.current, palette: colours.current, actions: actions.current, frame, onEditorClosed: closed }).then(
             () => done(),
             (err: Error) => done(err.message || String(err)),
           )
@@ -656,6 +682,12 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           hidden.current.page = typeof d.n === 'number' && Number.isFinite(d.n) ? d.n : null
           tellHidden()
           return
+        case P + 'colour': {
+          if (drawn.current || !d.state || typeof d.state !== 'object') return
+          const text = JSON.stringify(d.state)
+          if (text.length <= COLOUR_MAX) writeStorage(colourKey(ws, slug), d.state)
+          return
+        }
       }
     }
     window.addEventListener('message', onMessage)

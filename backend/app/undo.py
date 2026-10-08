@@ -3,7 +3,9 @@
 A step is one change to a card (recorded by canvas_history.record via notebook._emit: add, delete, edit, move,
 resize;
 a code change keeps the outputs on either side, RUN_FIELDS) or one saved edit of a document's text
-(report_types.write_doc/write_frame). Labels, groups and frames are not undoable. Steps made inside batching() share
+(report_types.write_doc/write_frame), or a label's delete (concepts.delete_concept_route), whose files wait in
+TRASH_NAME/<id> until Undo restores them or the step leaves the journal. Other changes to labels, groups and frames are
+not undoable. Steps made inside batching() share
 a
 `batch` (an orientation follow-up), and one Undo reverts the whole batch. Steps of a session thimble started carry
 its
@@ -11,7 +13,9 @@ THIMBLE_SESSION; while it runs, Undo passes over them, refusing when one of them
 
 The journal, workspaces/<c>/undo.jsonl, holds `step`, `undo`, `redo` and `ran` lines, replayed into the two stacks
 and
-rewritten to MAX_STEPS per stack past MAX_LINES lines. POST /ws/{c}/undo and /redo apply a step inside `applying()`,
+rewritten to MAX_STEPS per stack past MAX_LINES lines. In terminal mode a second process writes it (`thimble-run`, whose
+runs fill in `ran` lines), so each line is appended under the journal's lock (ledger.locked), and the stacks held in
+memory are replayed again when the file is not as this process left it. POST /ws/{c}/undo and /redo apply a step inside `applying()`,
 so those writes make no step of their own; GET /ws/{c}/undo names {undo, redo, held}."""
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -37,6 +42,7 @@ log = logging.getLogger("thimble.undo")
 router = APIRouter()
 
 LOG_NAME = "undo.jsonl"
+TRASH_NAME = "undo-trash"  # a deleted label's files, a folder per step, until Undo restores them or the step is dropped
 MAX_STEPS = 100  # kept on each stack when the journal is rewritten
 MAX_LINES = 400  # the journal's length that makes it rewritten
 # the card's fields a step restores: what an edit, a move or a resize changes, with the fields derived from them
@@ -60,6 +66,7 @@ _SESSION: contextvars.ContextVar[tuple[str, Any] | None] = contextvars.ContextVa
 GENERIC_BY = ("", "terminal", "analyst")
 _lock = threading.RLock()
 _stacks: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}  # workspace -> (undo, redo)
+_sigs: dict[str, tuple[int, int, int] | None] = {}  # workspace -> its journal's (inode, size, mtime) as _stacks holds it
 
 
 @contextmanager
@@ -134,9 +141,18 @@ def _now() -> str:
 # --------------------------------------------------------------------------- the stacks
 
 
+def _sig(c: str) -> tuple[int, int, int] | None:
+    try:
+        st = log_path(c).stat()
+    except (OSError, ValueError, HTTPException):
+        return None
+    return st.st_ino, st.st_size, st.st_mtime_ns
+
+
 def _load(c: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """The workspace's stacks, replayed from its journal on first use."""
-    if c in _stacks:
+    """The workspace's stacks, replayed from its journal on first use and again when another process changed the
+    journal since (module note)."""
+    if c in _stacks and _sigs.get(c) == _sig(c):
         return _stacks[c]
     undo: list[dict[str, Any]] = []
     redo: list[dict[str, Any]] = []
@@ -168,6 +184,7 @@ def _load(c: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             if step is not None and isinstance(step.get("after"), dict):
                 step["after"].update(r["after"])
     _stacks[c] = (undo, redo)
+    _sigs[c] = _sig(c)
     if lines > MAX_LINES:
         _rewrite(c)
     return _stacks[c]
@@ -181,23 +198,53 @@ def _index(stack: list[dict[str, Any]], step_id: Any) -> int | None:
 def _rewrite(c: str) -> None:
     """The journal as the newest MAX_STEPS steps of each stack, each in order: the undo stack's, then the redo stack's
     marked for it."""
-    undo, redo = _stacks[c]
-    del undo[:-MAX_STEPS]
-    del redo[:-MAX_STEPS]
-    plain = lambda s: {k: v for k, v in s.items() if k != "stack"}  # noqa: E731
-    lines = [json.dumps(plain(s), ensure_ascii=False) for s in undo]
-    lines += [json.dumps({**plain(s), "stack": "redo"}, ensure_ascii=False) for s in redo]
-    ledger.atomic_write_text(log_path(c), "\n".join(lines) + ("\n" if lines else ""))
+    with ledger.locked(log_path(c)):
+        if _sigs.get(c) != _sig(c):
+            _stacks.pop(c, None)
+            _load(c)  # another process's lines first: the rewrite keeps them
+        undo, redo = _stacks[c]
+        del undo[:-MAX_STEPS]
+        del redo[:-MAX_STEPS]
+        plain = lambda s: {k: v for k, v in s.items() if k != "stack"}  # noqa: E731
+        lines = [json.dumps(plain(s), ensure_ascii=False) for s in undo]
+        lines += [json.dumps({**plain(s), "stack": "redo"}, ensure_ascii=False) for s in redo]
+        ledger.atomic_write_text(log_path(c), "\n".join(lines) + ("\n" if lines else ""))
+        _sigs[c] = _sig(c)
+        _prune_trash(c, undo + redo)
+
+
+def _prune_trash(c: str, steps: list[dict[str, Any]]) -> None:
+    """Delete the trash folders no step on either stack names: a deleted label's files once its step left the journal."""
+    try:
+        root = config.workspace_dir(c) / TRASH_NAME
+        if not root.is_dir():
+            return
+        kept = {str(s.get("trash")) for s in steps if s.get("trash")}
+        for d in root.iterdir():
+            if d.is_dir() and d.name not in kept:
+                shutil.rmtree(d, ignore_errors=True)
+    except (OSError, ValueError, HTTPException):
+        log.exception("%s: the undo trash was not pruned", c)
 
 
 def _append(c: str, line: dict[str, Any]) -> None:
-    ledger.append_jsonl(log_path(c), line)
+    """Append a line under the journal's lock. When another process wrote the journal since this one read it, the
+    stacks are dropped, to be replayed with both processes' lines at their next use."""
+    path = log_path(c)
+    with ledger.locked(path):
+        before = _sig(c)
+        ledger.heal_tail(path)
+        ledger.append_jsonl(path, line)
+        if c in _stacks and before == _sigs.get(c):
+            _sigs[c] = _sig(c)
+        else:
+            _stacks.pop(c, None)
 
 
 def push(c: str, step: dict[str, Any]) -> None:
     """Add a step: onto the undo stack, into the journal; a new change empties the redo stack. Never raises."""
     try:
-        with _lock:
+        with _lock, ledger.locked(log_path(c)):
             undo, redo = _load(c)
             step = {"type": "step", "id": secrets.token_hex(4), "ts": _now(), **step}
             batch = _BATCH.get()
@@ -243,9 +290,9 @@ def _running(c: str, stack: list[dict[str, Any]]) -> set[str]:
     keys = {str(s["session"]) for s in stack if s.get("session")}
     if not keys:
         return set()
-    from . import agent_session  # noqa: PLC0415 — agent_session reaches this module through the tools it runs
+    from . import subagents  # noqa: PLC0415 — subagents reaches this module through the tools its agents call
 
-    return {k for k in keys if agent_session.running(c, k)}
+    return {k for k in keys if subagents.running(c, k)}
 
 
 def session_name(key: str) -> str:
@@ -268,7 +315,7 @@ def _pick(c: str, stack: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], st
     touched = {(s.get("kind"), str(s.get("target"))) for s in group}
     for later in stack[at + 1:]:
         if (later.get("kind"), str(later.get("target"))) in touched:
-            what = f"the {later['target']}" if later.get("kind") == "doc" else f"card {later.get('target')}"
+            what = f"the {later['target']}" if later.get("kind") == "doc" else f"{later.get('kind') or 'card'} {later.get('target')}"
             return [], f"{session_name(str(later.get('session')))} has changed {what} since and is still running; undo it once that ends"
     return group, None
 
@@ -310,8 +357,10 @@ def forget(c: str | None = None) -> None:
     with _lock:
         if c is None:
             _stacks.clear()
+            _sigs.clear()
         else:
             _stacks.pop(c, None)
+            _sigs.pop(c, None)
 
 
 # --------------------------------------------------------------------------- recording
@@ -392,7 +441,7 @@ def card_ran(c: str, cell: dict[str, Any]) -> None:
         return
     try:
         cid = str(cell.get("id") or "")
-        with _lock:
+        with _lock, ledger.locked(log_path(c)):
             undo_stack, _ = _load(c)
             step = next((s for s in reversed(undo_stack) if s.get("kind") == "card" and s.get("target") == cid), None)
             after = step.get("after") if step is not None else None
@@ -436,6 +485,26 @@ def doc_written(c: str, inv_id: str, slug: str, which: str, before: dict[str, An
         log.exception("%s: the save of %s made no undo step", c, slug)
 
 
+def new_trash(c: str) -> Path | None:
+    """The folder a label's delete moves its files to, for its undo step (label_deleted); None inside an undo or a
+    redo, which makes no step."""
+    if is_applying():
+        return None
+    return config.workspace_dir(c) / TRASH_NAME / secrets.token_hex(6)
+
+
+def label_deleted(c: str, concept: dict[str, Any], cards: list[dict[str, Any]], filters: dict[str, Any],
+                  trash: Path, by: str = "") -> None:
+    """A label deleted, its files in `trash` (new_trash): a step whose undo restores it with its cards ({card, after})
+    and the filters that named it. Never raises."""
+    try:
+        push(c, {"kind": "label", "op": "deleted", "target": str(concept.get("id") or ""), "by": by,
+                 "label": f"delete label {concept.get('name') or concept.get('id')}", "trash": trash.name,
+                 "cards": copy.deepcopy(cards), "filters": copy.deepcopy(filters)})
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the delete of label %s made no undo step", c, concept.get("id"))
+
+
 # --------------------------------------------------------------------------- applying
 
 
@@ -459,6 +528,14 @@ def _set_card(c: str, cid: str, fields: dict[str, Any]) -> None:
     from . import notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
+    with notebook.editing(ws):
+        _set_card_locked(c, ws, cid, fields)
+
+
+def _set_card_locked(c: str, ws: Path, cid: str, fields: dict[str, Any]) -> None:
+    """_set_card with the groups' lock held (notebook.editing)."""
+    from . import notebook  # noqa: PLC0415
+
     hit = notebook._locate(ws, cid)
     if hit is None:
         raise HTTPException(409, f"card {cid} is no longer on the canvas")
@@ -523,6 +600,16 @@ def _apply(c: str, step: dict[str, Any], forward: bool) -> None:
         if step["kind"] == "doc":
             _write_doc(c, step, step.get("after") if forward else step.get("before"))
             return
+        if step["kind"] == "label":
+            from . import concepts  # noqa: PLC0415 — concepts records this step
+
+            trash = config.workspace_dir(c) / TRASH_NAME / str(step.get("trash") or "")
+            if forward:
+                concepts.delete_again(c, str(step["target"]), trash)
+            else:
+                concepts.restore_concept(c, str(step["target"]), trash, list(step.get("cards") or []),
+                                         dict(step.get("filters") or {}))
+            return
         op, cid = step["op"], str(step["target"])
         if op == "created":
             if forward:
@@ -538,15 +625,20 @@ def _apply(c: str, step: dict[str, Any], forward: bool) -> None:
             _set_card(c, cid, step["after"] if forward else step["before"])
 
 
-def undo(c: str) -> dict[str, Any]:
+def undo(c: str, expect: tuple[str, str] | None = None) -> dict[str, Any]:
     """Revert the top step of the undo stack, or its batch, passing over the steps of a running session; 409 when there
     is
-    none, a running session holds it, or nothing of it can be reverted (then it is dropped)."""
+    none, a running session holds it, or nothing of it can be reverted (then it is dropped). With `expect` (kind,
+    target), only when that step is the one it reverts, else 409 and nothing changes: the terminal's undo of a label's
+    delete (`thimble act label-undelete`), which must not revert a later change."""
     with _lock:
         stack, redo = _load(c)
         if not stack:
             raise HTTPException(409, "nothing to undo")
         group, held = _pick(c, stack)
+        if expect is not None and not (group and (group[0].get("kind"), str(group[0].get("target"))) == expect):
+            what = "delete" if expect[0] == "label" else "change"
+            raise HTTPException(409, f"the {expect[0]}'s {what} is no longer the last change, so it is not undone here")
         if held:
             raise HTTPException(409, held)
         label, failure, applied = _label(group[0]), None, 0

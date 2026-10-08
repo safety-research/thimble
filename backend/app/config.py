@@ -1,6 +1,7 @@
 """Paths, the `claude` thimble runs and its environment, corpora, model defaults."""
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import logging
@@ -75,6 +76,16 @@ def has_fast_mode(model: str | None) -> bool:
     return any(k in m for k in FAST_MODE_MODELS) or m.split("[", 1)[0] == "opus"
 
 
+# the models Claude Code runs with no effort (spike m6, Claude Code's documented behaviour): a call on one passes none
+NO_EFFORT_MODELS = ("haiku",)
+
+
+def has_effort(model: str | None) -> bool:
+    """Whether Claude Code runs `model` at an effort (NO_EFFORT_MODELS, matched in the id as FAST_MODE_MODELS are)."""
+    m = (model or "").lower()
+    return bool(m) and not any(k in m for k in NO_EFFORT_MODELS)
+
+
 def fast_mode_for(model: str | None, speed: str | None = None) -> bool:
     """Whether a call on `model` runs in fast mode: `speed` (an override; None = model_speed()) is fast and the model
     has fast mode."""
@@ -100,12 +111,8 @@ NO_CLAUDE_FOUND = "the `claude` CLI was not found (not on PATH, not at ~/.local/
 NO_CLAUDE = f"{NO_CLAUDE_FOUND}: install Claude Code, or name its path with THIMBLE_CLAUDE_BIN"
 
 # thimble's marketplace (install.sh registers this tree under its name: thimble in a checkout, thimble-local from a
-# release zip) lists two plugins: thimble and thimble-cc-mod (mods/thimble-cc-mod), a single-agent thimble inside
-# Claude Code. They are switched on independently (`thimble cc-mod on|off` changes only the mod, in the folder's
-# settings). Every session thimble starts, main and the background sessions, turns the mod off in its --settings
-# (without_mod), so the two never run in one session; `claude` started in a folder where the mod is on loads it.
+# release zip) lists one plugin, thimble (./plugin)
 MARKETPLACE_FILE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
-MOD_PLUGIN = "thimble-cc-mod"
 
 
 def marketplace_name() -> str:
@@ -115,16 +122,6 @@ def marketplace_name() -> str:
     except (OSError, ValueError, AttributeError):
         return ""
     return name if isinstance(name, str) else ""
-
-
-def without_mod(settings: dict[str, Any]) -> dict[str, Any]:
-    """`settings` (the --settings of a session thimble starts: main's or a background session's) with thimble-cc-mod of
-    this install's marketplace off in `enabledPlugins`, the analyst's other entries kept."""
-    name = marketplace_name()
-    if not name:
-        return settings
-    enabled = settings.get("enabledPlugins")
-    return {**settings, "enabledPlugins": {**(enabled if isinstance(enabled, dict) else {}), f"{MOD_PLUGIN}@{name}": False}}
 
 
 # --------------------------------------------------------------------------- the kernel wrapper
@@ -256,9 +253,12 @@ def auth_problem(status: dict[str, Any] | None = None) -> str:
     return ""
 
 
-# The model a session (agent_session) or a structured call (model.structured) runs on again, once, when a safety
-# classifier stopped its model's response (`stop_reason: refusal`); THIMBLE_FALLBACK_MODEL names another, '' turns it off.
+# The default model of the `refusal` row (models_for): the model a structured call (model.structured) runs on again, once,
+# when a safety classifier stopped its model's response (`stop_reason: refusal`). THIMBLE_FALLBACK_MODEL names another,
+# '' turns the rerun off; Settings' refusal row does the same per workspace. A session thimble still runs itself
+# (agent_session) reruns on this model.
 FALLBACK_MODEL = os.environ.get("THIMBLE_FALLBACK_MODEL", "claude-opus-4-8").strip()
+FALLBACK_EFFORT = "high"  # the refusal row's default effort
 
 
 # Claude Code's config dir: CLAUDE_CONFIG_DIR, else ~/.claude (transcripts, sessions/<pid>.json, settings.json, the
@@ -321,17 +321,16 @@ def claude_env(env: dict[str, str]) -> dict[str, str]:
     return out
 
 
-# Claude Code's background service is shared by every session of the user's: the first `claude` that needs it starts
-# it, and it gives the environment of that process to every background session it runs later, the user's own
-# included. So a `claude` thimble runs has none of thimble's variables in its own environment (launch_environ), and a
-# session thimble starts gets them in its --settings `env` (session_env), which reaches that session alone. There every
-# name below that the session does not set is given this server's value or "", so a value the service kept from
-# another session or another thimble never reaches it.
+# A `claude` thimble runs has none of thimble's variables in its own environment (launch_environ), and a session
+# thimble starts gets them in its --settings `env` (session_env), which reaches that session alone. There every name
+# below that the session does not set is given this server's value or "", so a value meant for another session or
+# another thimble never reaches it.
 # The names thimble sets for one session: a THIMBLE_* one is "" unless the session sets it; another is the server's
-# own value, else "".
+# own value, else "". THIMBLE_MODE and THIMBLE_WS name a terminal-mode session and its workspace (launch_mode), which
+# no session the server starts is.
 SESSION_VARS = ("THIMBLE_SESSION", "THIMBLE_SESSION_TOKEN", "THIMBLE_RENDERED_PROMPTS", "THIMBLE_AGENT_TOKEN",
-                "THIMBLE_API", "THIMBLE_CHANNEL", "THIMBLE_CALLER_CWD", "THIMBLE_CWD", "XDG_CACHE_HOME", "MPLCONFIGDIR",
-                "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD")
+                "THIMBLE_API", "THIMBLE_LAUNCHED", "THIMBLE_CALLER_CWD", "THIMBLE_CWD", "THIMBLE_MODE", "THIMBLE_WS",
+                "XDG_CACHE_HOME", "MPLCONFIGDIR", "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD")
 # The names that place a stack and tune its plugin and hooks, which the code a session runs reads: the server's value
 # in a session that talks to this server (session_env's `stack`), else "". Every reader takes "" as unset.
 STACK_VARS = ("THIMBLE_HOME", "THIMBLE_PORT", "THIMBLE_UI_PORT", "THIMBLE_WORKSPACES_DIR", "THIMBLE_DATA_DIR",
@@ -382,6 +381,9 @@ def _valid_name(name: str) -> bool:
     return bool(name) and NAME_RE.fullmatch(name) is not None and name not in {".", ".."}
 
 
+OUT_OF_FILES = (errno.EMFILE, errno.ENFILE)  # a process, or the machine, at its limit of open files
+
+
 def sidecar_path(name: str) -> Path:
     return DATA_DIR / f"{name}{SIDECAR_SUFFIX}"
 
@@ -389,13 +391,18 @@ def sidecar_path(name: str) -> Path:
 def read_sidecar(name: str, data_dir: Path | None = None) -> dict | None:
     """The registration record {name, root, path, registered_at, manifest} of a registered corpus, else None: under
     DATA_DIR, or under `data_dir` for a caller that resolves the data folder itself (cli). A record without `root` reads
-    root as the path."""
+    root as the path. A process out of file descriptors raises (OUT_OF_FILES) rather than taking the corpus for one
+    that is not registered."""
     if not _valid_name(name):
         return None
     try:
         path = sidecar_path(name) if data_dir is None else data_dir / f"{name}{SIDECAR_SUFFIX}"
         rec = json.loads(path.read_text("utf-8"))
-    except (OSError, ValueError):
+    except OSError as e:
+        if e.errno in OUT_OF_FILES:
+            raise
+        return None
+    except ValueError:
         return None
     if not isinstance(rec, dict) or not isinstance(rec.get("path"), str):
         return None
@@ -483,10 +490,10 @@ def _shortened(part: str, n: int) -> str:
 
 
 def session_name(role: str, workspace: str | None) -> str:
-    """The name a Claude Code session thimble starts goes by (`claude -n`), as `claude agents`, the agent view, the
-    /resume picker and SendMessage's `to` know it: `thimble:<role> · <workspace>`, such as `thimble:main · logs-2` or
-    `thimble:writer-story · logs-2`, since those lists hold the sessions of every folder, so two workspaces must not share
-    a name; `thimble:<role>` alone for a session of no workspace (`thimble fix`'s code ticket). A name is at most
+    """The name a Claude Code session thimble starts goes by: main's (`claude -n`), as `claude agents`, the /resume
+    picker and SendMessage's `to` know it, and each agent's in the agent tray (tray.py): `thimble:<role> · <workspace>`,
+    such as `thimble:main · logs-2` or `thimble:writer-story · logs-2`, since those lists hold the sessions of every
+    folder, so two workspaces must not share a name; `thimble:<role>` alone for a session of no workspace (`thimble fix`'s code ticket). A name is at most
     SESSION_NAME_MAX characters: a longer one shortens its workspace first, down to SESSION_PART_MIN characters, then its
     role (_shortened), so distinct roles and workspaces keep distinct names."""
     room = SESSION_NAME_MAX - len(SESSION_PREFIX) - (len(SESSION_SEP) if workspace else 0)
@@ -650,15 +657,20 @@ def shown_alias(shown: object, p: Path) -> str | None:
         return None
 
 
-def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KEEP_SHOWN) -> dict:
-    """Register a directory as a corpus and return its record {name, root, path, registered_at, manifest, shown?}.
-    `shown` is the folder as the analyst named it when that was another path to it, through a symlink (shown_alias),
-    which the dashboard shows in place of `path`: a string records it, None clears it, KEEP_SHOWN leaves it.
+def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KEEP_SHOWN, name: str | None = None) -> dict:
+    """Register a directory as a corpus and return its record {name, root, path, registered_at, manifest, shown?,
+    renamed_from?}. `shown` is the folder as the analyst named it when that was another path to it, through a symlink
+    (shown_alias), which the dashboard shows in place of `path`: a string records it, None clears it, KEEP_SHOWN leaves
+    it. `name` is the name a new registration takes in place of the basename (`thimble demo` registers demo-<dataset>);
+    a folder registered already keeps its own name. `renamed_from` lists the names rename_corpus moved the corpus from.
 
     A path inside DATA_DIR/<c> is corpus c: nothing written. A path inside (not at) a registered directory is that
     directory's corpus unless `exact`, which registers the folder itself. Exactly a registered working directory refreshes
     its sidecar; exactly a root writes nothing. Otherwise the sidecar DATA_DIR/<name>.corpus.json is written atomically,
-    <name> being the basename or the next free `-2`, `-3` …. Raises ValueError for a path that is not a directory."""
+    <name> being `name` (else the basename) or the next free `-2`, `-3` …. Raises ValueError for a path that is not a
+    directory and for a `name` that is not a valid corpus name."""
+    if name is not None and not _valid_name(name):
+        raise ValueError(f"invalid corpus name: {name!r}")
     p = Path(path).expanduser().resolve()
     if not p.is_dir():
         raise ValueError(f"not a directory: {path}")
@@ -683,7 +695,7 @@ def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KE
             return {"name": kname, "root": str(bases.get("root", kbase)), "path": str(corpus_dir(kname)),
                     "registered_at": rec.get("registered_at"), "manifest": corpus_manifest(kname)}
         # inside (not at) a registered directory with `exact`: the folder becomes a corpus of its own
-    name = prev["name"] if prev else free_name(corpus_name_for(p))
+    name = prev["name"] if prev else free_name(name or corpus_name_for(p))
     # the working directory again: the root stays what the first registration recorded
     root = str(_sidecar_bases(prev).get("root", p)) if prev is not None else str(p)
     rec = {"name": name, "root": root, "path": str(p), "registered_at": (prev or {}).get("registered_at") or _now(),
@@ -691,6 +703,8 @@ def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KE
     alias = shown_alias((prev or {}).get("shown"), p) if shown is KEEP_SHOWN else shown_alias(shown, p)
     if alias:
         rec["shown"] = alias
+    if (prev or {}).get("renamed_from"):
+        rec["renamed_from"] = prev["renamed_from"]
     _write_sidecar(rec)
     log.info("registered corpus %r at %s (sidecar %s)", name, p, sidecar_path(name))
     return rec
@@ -726,6 +740,38 @@ def _write_sidecar(rec: dict) -> None:
         except OSError:
             pass
         raise
+
+
+def name_taken(name: str) -> bool:
+    """Whether a corpus of DATA_DIR holds `name`: a corpus directory DATA_DIR/<name>, or a sidecar, readable or not."""
+    return _dir_corpus(name) is not None or sidecar_path(name).exists()
+
+
+def rename_corpus(old: str, new: str) -> dict:
+    """The registration of `old` moved to the name `new` (ledger.move_workspace moves its workspace with it): the sidecar
+    DATA_DIR/<new>.corpus.json written with the same record, `old` added to its `renamed_from` (which the start page
+    gives the browser, so a tab or a bookmark on the old name finds the new one), then DATA_DIR/<old>.corpus.json
+    removed. The new record. ValueError when `new` is not a valid name or is taken, and when `old` is no registered
+    folder's: a corpus directory DATA_DIR/<old> is never renamed."""
+    if not _valid_name(new):
+        raise ValueError(f"invalid corpus name: {new!r}")
+    rec = read_sidecar(old)
+    if rec is None or _dir_corpus(old) is not None:
+        raise ValueError(f"{old!r} is not a registered folder's corpus")
+    if name_taken(new):
+        raise ValueError(f"the name {new!r} is taken")
+    was = [str(n) for n in rec.get("renamed_from") or [] if n not in (old, new)]
+    moved = {**rec, "name": new, "renamed_from": [*was, old]}
+    _write_sidecar(moved)
+    try:
+        sidecar_path(old).unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        sidecar_path(new).unlink(missing_ok=True)
+        raise
+    log.info("renamed corpus %r to %r (%s)", old, new, rec["path"])
+    return moved
 
 
 def _registry_holds(data_dir: Path, name: str) -> str | None:
@@ -820,11 +866,15 @@ def private_dir(p: Path) -> Path:
 
 
 def workspace_dir(name: str) -> Path:
-    """workspace_path, created on demand, private (private_dir): for the writers."""
+    """workspace_path, created on demand, private (private_dir): for the writers. A workspace made here has the files
+    thimble's agents' hooks trust from the start (subagent_files.ensure), so no kernel starts before them."""
     p = workspace_path(name)
     if not p.is_dir():
         private_dir(WORKSPACES_DIR)
         p.mkdir(mode=0o700, exist_ok=True)
+        from . import subagent_files  # noqa: PLC0415 — standard library only
+
+        subagent_files.ensure(p)
     return p
 
 
@@ -852,31 +902,44 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 
 # --------------------------------------------------------------------------- models per role
 #
-# Every role that runs a model, with its model, effort and fast mode. main is the analyst's own session: its model is the
-# session's, and the composer chip's effort and fast mode for it are kept as settings.json `models.main` and applied at
-# its next launch (cli.launch_args), so main is not a role here. Every other role is set in thimble's config
-# (userconf: `agents.<agent>.model`, `effort` and `fast`, userconf.ROLES naming each agent's role), applied to the next
-# session:
-#   orient     the orientation's session (orient_session)
-#   subagents  the orientation's subagents and workflow agents (CLAUDE_CODE_SUBAGENT_MODEL); by default the
-#              orientation's model without the 1M tag, at its effort and speed
-#   critic     a critique's session (critique_session)
-#   writer     a writer's session (write_session)
-#   checks     each run of a report check (checks.py)
-#   verify     the card check's reading of a card's picture (card_check)
-#   labels     the labels classifier (concepts)
-#   dev        a dev ticket's session (dev.py)
-# Layered: the role's default (ROLE_MODELS_DEFAULT; an agent file's frontmatter, ROLE_AGENTS; for the orientation the
-# analyst's own settings, else ORIENT_DEFAULT_MODEL at ORIENT_DEFAULT_EFFORT), then THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST,
-# then thimble's config. Every role resolves to a model id (exact_model); the orientation's carries `[1m]` where
-# the model has a 1M-token window (long_context). An effort of '' is the level of the session the agent runs in. `fast`
-# is kept only on a model that has fast mode, and only for ROLES_WITH_FAST.
-MODEL_ROLES = ("orient", "subagents", "critic", "writer", "checks", "verify", "labels", "dev")
+# Every role that runs a model, with exactly the model and effort it runs on. main is the analyst's own session: its
+# model is the session's, and the composer chip's effort and fast mode for it are kept as settings.json `models.main` and
+# applied at its next launch (cli.launch_args), so main is not a role here. Every other role is set in thimble's config
+# (userconf: `agents.<agent>.model` and `effort`, and `fast` for a classifier; userconf.ROLES naming each agent's role),
+# applied to the next start:
+#   orient     the orientation, a subagent of main (thimble:orientation)
+#   subagents  the orientation's own subagents, which it starts as thimble:orient-helper; by default the orientation's model
+#              without the 1M tag, at its effort
+#   critic     the critic, a subagent of the orientation (thimble:critic)
+#   writer     a writer, a subagent of main (thimble:writer)
+#   checks     each run of a report check (thimble:check)
+#   dev        a view build or review (thimble:view-builder, thimble:view-reviewer), a code ticket's agent
+#              (thimble:dev-ticket) and `thimble fix`'s session (dev.py)
+#   verify     the card check's reading of a card's picture (card_check), a classifier
+#   labels     the labels classifier (concepts), the label draft and the view fit
+#   suggest    the viewer suggestion (views._suggest_call), a classifier
+#   refusal    the model and effort a classifier's call runs on again once its model refused it (model.structured);
+#              `off` turns the rerun off
+# Layered: the role's default (ROLE_MODELS_DEFAULT; an agent file's frontmatter where it names one, ROLE_AGENTS; for the
+# orientation the analyst's own model setting, else ORIENT_DEFAULT_MODEL, at ORIENT_DEFAULT_EFFORT), then
+# THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, then thimble's config. Every role resolves to a model id (exact_model) and an
+# effort, never '' (models_for); the orientation's model carries `[1m]` where the model has a 1M-token window
+# (long_context). A stored `ultracode` (LEGACY_EFFORTS) runs at xhigh. `fast` is kept only on a model that has fast mode,
+# and only for ROLES_WITH_FAST: the classifiers, and the dev row for `thimble fix`, the one `claude -p` job of the
+# server (dev.py). thimble's agents are subagents of main, which have no fast mode of their own (Claude Code's agent
+# definition has none), so a view build, a review and a code ticket's agent run without the dev row's (chosen leaves it
+# out).
+MODEL_ROLES = ("orient", "subagents", "critic", "writer", "checks", "verify", "labels", "dev", "suggest", "refusal")
 ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
-    "subagents": {"model": "", "effort": "", "fast": False},  # '' is the orientation's model (models_for)
+    "subagents": {"model": "", "effort": "", "fast": False},  # '' is the orientation's model and effort (models_for)
+    "critic": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/critic.md's frontmatter
+    "writer": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/writer.md's
+    "checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False},  # under prompts/check.md's
     "labels": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
-    "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},
+    "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},  # fast mode for `thimble fix` alone
     "verify": {"model": "claude-opus-5-5", "effort": "high", "fast": True},
+    "suggest": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
+    "refusal": {"model": FALLBACK_MODEL, "effort": FALLBACK_EFFORT, "fast": False, "off": not FALLBACK_MODEL},
 }
 ORIENT_DEFAULT_MODEL = "claude-opus-5-5"  # the orientation's model when the analyst's own settings name none
 # Claude Code's model aliases and the ids they stand for, as Claude Code 2.1.282 resolves them. A role whose model is an
@@ -886,13 +949,17 @@ MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5", "haiku"
 # (plugin/agents/<name>.md) for `plugin:<name>`.
 ROLE_AGENTS: dict[str, str] = {"critic": "critic", "writer": "writer", "checks": "check"}
 PLUGIN_AGENTS_DIR = REPO_ROOT / "plugin" / "agents"
-# `verify` is here because its card check is a call the server makes, which runs at its own speed; without it models_for
-# would turn its fast mode off
-ROLES_WITH_FAST = ("orient", "critic", "writer", "checks", "labels", "dev", "verify")
+# the classifiers, each a call the server makes, which runs at its own speed, and the dev row's `thimble fix`, the one
+# `claude -p` job of the server, which keeps the fast mode it had (on by default)
+ROLES_WITH_FAST = ("labels", "verify", "suggest", "dev")
+# the rows whose fast mode reaches only some of their runs: the dev row's, `thimble fix`'s alone (chosen)
+FAST_OF_TICKETS = ("dev",)
 ROLE_EFFORTS = ("low", "medium", "high", "xhigh", "max")  # the levels Claude Code takes (cc_settings.EFFORTS)
-ORIENT_EFFORTS = (*ROLE_EFFORTS, "ultracode")  # the orientation also runs with Ultracode (orient_session)
-# The orientation's effort until the analyst picks one for its role, whatever their own Claude Code settings name.
-ORIENT_DEFAULT_EFFORT = "ultracode"
+# efforts earlier builds stored, read as the level they ran at: Ultracode ran at xhigh (cc_settings.ULTRACODE_EFFORT)
+LEGACY_EFFORTS = {"ultracode": "xhigh"}
+# The orientation's effort until the analyst picks one for its role, whatever their own Claude Code settings name:
+# xhigh, the level Ultracode ran at (cc_settings.ULTRACODE_EFFORT), which is an ordinary effort now.
+ORIENT_DEFAULT_EFFORT = "xhigh"
 SUBAGENT_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
 MODELS_KEY = "models"  # settings.json: models.main
 # The models with a 1M-token context window, as parts of their ids; Claude Code gives a model id with `[1m]` after it
@@ -901,10 +968,16 @@ LONG_CONTEXT_MODELS = ("opus-5", "opus-4-8", "opus-4-7", "opus-4-6", "sonnet-5",
 
 
 def role_efforts(role: str) -> tuple[str, ...]:
-    """The efforts a role takes: the levels, Ultracode for the orientation, and '' (the session's) for a subagent."""
-    if role == "orient":
-        return ORIENT_EFFORTS
-    return ("", *ROLE_EFFORTS) if role == "subagents" else ROLE_EFFORTS
+    """The efforts a role takes: the levels Claude Code takes, for every role (a stored LEGACY_EFFORTS value is read as
+    its level)."""
+    return ROLE_EFFORTS
+
+
+def effort_level(effort: Any) -> str:
+    """A stored effort as the level it runs at: a level as it is, a LEGACY_EFFORTS value as its level, '' for anything
+    else."""
+    e = str(effort or "").strip().lower()
+    return LEGACY_EFFORTS.get(e, e) if e in (*ROLE_EFFORTS, *LEGACY_EFFORTS) else ""
 
 
 def exact_model(model: str) -> str:
@@ -928,6 +1001,16 @@ def long_context(model: str) -> str:
     if not m or "[" in m or not any(k in m.lower() for k in LONG_CONTEXT_MODELS):
         return m
     return f"{m}[1m]"
+
+
+CONTEXT_TOKENS = 200_000  # the context window of a model without a 1M-token one (LONG_CONTEXT_MODELS), as Haiku's
+LONG_CONTEXT_TOKENS = 1_000_000
+
+
+def context_tokens(model: str) -> int:
+    """The context window, in tokens, of `model` (an alias read as its id) run on long_context(model):
+    LONG_CONTEXT_TOKENS for a model with a 1M-token window, else CONTEXT_TOKENS."""
+    return LONG_CONTEXT_TOKENS if long_context(exact_model(model)).lower().endswith("[1m]") else CONTEXT_TOKENS
 
 
 def agent_front(name: str) -> dict[str, Any]:
@@ -973,19 +1056,16 @@ def _analyst_default(c: str | None, key: str) -> Any:
 
 
 def role_default(role: str, c: str | None = None) -> dict[str, Any]:
-    """A role's model, effort and fast mode before the environment and the workspace's settings."""
-    fast = model_speed() == "fast"
+    """A role's model and effort (and fast mode, for a classifier) before the environment and the workspace's settings."""
     if role == "orient":
-        own_fast = _analyst_default(c, "fastMode")
         own_model = _analyst_default(c, "model")
-        return {"model": str(own_model or ORIENT_DEFAULT_MODEL), "effort": ORIENT_DEFAULT_EFFORT,
-                "fast": own_fast if isinstance(own_fast, bool) else fast}
+        return {"model": str(own_model or ORIENT_DEFAULT_MODEL), "effort": ORIENT_DEFAULT_EFFORT, "fast": False}
+    base = dict(ROLE_MODELS_DEFAULT[role])
     if role in ROLE_AGENTS:
         front = agent_front(ROLE_AGENTS[role])
-        effort = str(front.get("effort") or "").strip().lower()
-        return {"model": str(front.get("model") or "").strip(), "effort": effort if effort in role_efforts(role) else "",
-                "fast": fast}
-    return dict(ROLE_MODELS_DEFAULT[role])
+        model, effort = str(front.get("model") or "").strip(), effort_level(front.get("effort"))
+        base.update({"model": model} if model else {}, **({"effort": effort} if effort else {}))
+    return base
 
 
 def _env_role(role: str, base: dict[str, Any]) -> dict[str, Any]:
@@ -1004,40 +1084,66 @@ def _env_role(role: str, base: dict[str, Any]) -> dict[str, Any]:
 
 
 def _configured(c: str | None) -> dict[str, dict[str, Any]]:
-    """{role: {model, effort, fast}} as thimble's config sets them for workspace `c`, each field it leaves unset left
-    out; the orientation subagents' model under `subagents`. A config with an error sets none (userconf.load_or_defaults)."""
+    """{role: {model, effort, fast, off}} as thimble's config sets them for workspace `c`, each field it leaves unset
+    left out; thimble:orient-helper's model and effort (the orientation's subagentModel and subagentEffort) under `subagents`. A
+    config with an error sets none (userconf.load_or_defaults)."""
     from . import userconf  # noqa: PLC0415 — userconf imports this module
 
     agents = userconf.load_or_defaults(c)[0]["agents"]
     out: dict[str, dict[str, Any]] = {}
     for name, role in userconf.ROLES.items():
-        out[role] = {k: agents[name][k] for k in ("model", "effort", "fast") if agents[name].get(k) is not None}
-    sub = agents["orientation"].get("subagentModel")
-    out["subagents"] = {"model": sub} if sub else {}
+        out[role] = {k: agents[name][k] for k in ("model", "effort", "fast", "off") if agents[name].get(k) is not None}
+    orient = agents["orientation"]
+    out["subagents"] = {k: orient[key] for k, key in (("model", "subagentModel"), ("effort", "subagentEffort"))
+                        if orient.get(key)}
     return out
 
 
 def chosen(c: str | None, role: str) -> set[str]:
     """The fields of a role (model, effort, fast) set for workspace `c` in thimble's config or with
-    THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, as models_for reads them."""
+    THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, as models_for reads them. The dev row's fast mode is `thimble fix`'s alone
+    (FAST_OF_TICKETS), so it is never a field a subagent takes from it."""
     out = set(_configured(c).get(role) or {})
     env = {f for f in ("model", "effort", "fast") if os.environ.get(f"THIMBLE_{role.upper()}_{f.upper()}", "").strip()}
-    return out | env
+    return (out | env) - ({"fast"} if role in FAST_OF_TICKETS else set())
 
 
 def models_for(c: str | None = None) -> dict[str, dict[str, Any]]:
     """{role: {model, effort, fast}} for a workspace, every role of MODEL_ROLES: its default under the environment under
-    thimble's config. The orientation's default reads the analyst's settings for the folder of `c` when it is given."""
+    thimble's config, with a full model id and an explicit effort, never '' (module note above): thimble:orient-helper's
+    (`subagents`) take the orientation's where nothing sets them, with `follows: orient`, and a stored LEGACY_EFFORTS
+    value its level. The `refusal` row adds `off`. The orientation's default reads the analyst's settings for the folder
+    of `c` when it is given."""
     over = _configured(c)
     out: dict[str, dict[str, Any]] = {}
     for role in MODEL_ROLES:
         conf = _env_role(role, role_default(role, c))
         conf.update(over.get(role) or {})
-        if role == "subagents" and not conf["model"]:
-            conf["model"], conf["follows"] = base_model(out["orient"]["model"]), "orient"
-        conf["model"] = exact_model(conf["model"])
+        conf["effort"] = effort_level(conf.get("effort"))
+        if role == "subagents":
+            if not conf["model"]:
+                conf["model"], conf["follows"] = base_model(out["orient"]["model"]), "orient"
+            conf["effort"] = conf["effort"] or out["orient"]["effort"]
+        conf["model"] = exact_model(conf["model"]) or ROLE_MODELS_DEFAULT.get(role, {}).get("model") or ORIENT_DEFAULT_MODEL
+        conf["effort"] = conf["effort"] or ROLE_MODELS_DEFAULT.get(role, {}).get("effort") or ORIENT_DEFAULT_EFFORT
         if role == "orient":
             conf["model"] = long_context(conf["model"])
         conf["fast"] = role in ROLES_WITH_FAST and bool(conf.get("fast")) and has_fast_mode(conf["model"])
+        if role == "refusal":
+            conf["off"] = bool(conf.get("off")) or not conf["model"]
+        else:
+            conf.pop("off", None)
         out[role] = conf
     return out
+
+
+def call_settings(c: str | None, role: str) -> dict[str, Any]:
+    """The model, effort and speed of a structured call (model.structured) made for `role` in workspace `c`, and the
+    `refusal` row's model and effort it runs on again when its model refuses it (None when that row is off): the values
+    models_for resolves and GET /settings reports, so a call takes none of them from the analyst's Claude Code settings.
+    Every caller passes them all, and model.structured refuses a call without a model or an effort."""
+    models = models_for(c)
+    conf, again = models[role], models["refusal"]
+    return {"model": str(conf["model"]), "effort": str(conf["effort"]),
+            "speed": "fast" if conf.get("fast") else "standard",
+            "refusal": None if again.get("off") else {"model": str(again["model"]), "effort": str(again["effort"])}}

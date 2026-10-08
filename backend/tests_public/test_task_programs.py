@@ -8,6 +8,7 @@ stand."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import shutil
 import sys
@@ -240,7 +241,6 @@ OUTPUTS = {"labels": {"labels": [{"i": 1, "label": "friendly", "confidence": 0.8
            "label": {"name": "Curt", "scope": "files", "kind": "prompt", "text": "Is it curt?",
                      "values": ["curt", "not curt"], "marks": "span"},
            "critique": {"assessment": [{"problem": ""}] * 5, "question": "Q?", "code": "", "takeaway": "T."},
-           "findings": {"problems": ["The legend covers the chart."]},
            "decision": {"fits": True, "reason": "Each record is a post."},
            "proposal": {"help": False, "name": "", "why": "", "arrangement": ""}}
 
@@ -248,13 +248,18 @@ OUTPUTS = {"labels": {"labels": [{"i": 1, "label": "friendly", "confidence": 0.8
 async def test_every_task_s_own_implementation_takes_its_input_from_a_program(tmp_path, data_tmp, workspaces_tmp, active,
                                                                              unboxed, monkeypatch):
     """thimble.default(input) runs thimble's own implementation on the input the program got, so each task's input
-    carries all its implementation reads."""
+    carries all its implementation reads. Each implementation calls model.structured with arguments it takes, and a
+    task with a system prompt of its own passes it as `system`."""
     from app import card_check
 
     seen: dict[str, str] = {}
+    systems: dict[str, str] = {}
+    takes = set(inspect.signature(model.structured).parameters)
 
-    async def structured(prompt, *, tool, model, system_append="", images=(), **k):
-        seen[tool.name] = f"{system_append}\n{prompt}\n{len(images)} images"
+    async def structured(prompt, *, tool, model, system="", images=(), **k):
+        assert set(k) <= takes, f"model.structured takes no {sorted(set(k) - takes)}"
+        seen[tool.name] = f"{system}\n{prompt}\n{len(images)} images"
+        systems[tool.name] = system
         return model_result(OUTPUTS[tool.name])
 
     monkeypatch.setattr(model, "structured", structured)
@@ -269,19 +274,15 @@ async def test_every_task_s_own_implementation_takes_its_input_from_a_program(tm
         "card-check": {"card": {"id": "c1", "kind": "code", "question": "How many curt replies?", "takeaway": "Two.",
                                 "citations": "", "code": "print(2)", "context": "", "typed": "", "kept": ""},
                        "picture": str(picture), "effort": "low"},
-        "view-review": {"view": {"slug": "board", "name": "Board", "description": "The posts by thread.",
-                                 "claims": ["board.jsonl"], "spec": "Unit: a post", "checks": []},
-                        "pictures": [{"path": str(picture), "about": "the view as it opens, 840 px wide"}],
-                        "controls": ["Day"], "records": "", "ask": False},
         "view-fit": {"view": {"name": "Board", "description": "The posts by thread."}, "files": "board.jsonl",
                      "samples": "board.jsonl\n  line 1: a post"},
         "file-viewer": {"path": "a.cast", "size": "2.0 KB", "count": "3", "suffix": ".cast",
                         "what": "its first 2 lines", "head": "{\"version\": 2}"},
     }
     marks = {"labels": "Thanks so much!", "label": "messages that sound curt", "critique": "How many curt replies?",
-             "findings": "the view as it opens, 840 px wide", "decision": "The posts by thread.", "proposal": "a.cast"}
-    names = {"labels": "labels", "label-draft": "label", "card-check": "critique", "view-review": "findings",
-             "view-fit": "decision", "file-viewer": "proposal"}
+             "decision": "The posts by thread.", "proposal": "a.cast"}
+    names = {"labels": "labels", "label-draft": "label", "card-check": "critique", "view-fit": "decision",
+             "file-viewer": "proposal"}
     for task, inp in inputs.items():
         active[:] = [_program(tmp_path / task, "own", task, DEFAULT)]
         res = await tasks.call(CORPUS, task, inp)
@@ -289,7 +290,10 @@ async def test_every_task_s_own_implementation_takes_its_input_from_a_program(tm
         tool = names[task]
         assert res.output == OUTPUTS[tool], task
         assert marks[tool] in seen[tool], (task, seen[tool][-400:])
-    assert seen["critique"].endswith("1 images") and seen["findings"].endswith("1 images")
+    assert seen["critique"].endswith("1 images")
+    assert systems["labels"].startswith("You are a text classifier.")
+    titles = {"critique": "# Card check", "proposal": "# A viewer for a file type"}
+    assert all(systems[tool].startswith(title) for tool, title in titles.items()), systems
 
 
 def model_result(output: dict) -> model.CallResult:
@@ -358,7 +362,6 @@ async def test_a_task_program_s_sessions_refuse_what_they_would_ask_since_nobody
     asked = settings["permissions"].get("ask") or []
     assert not any(str(corpus) in r or r.startswith("Bash(") or r.startswith("Web") for r in asked), asked
     assert {"WebFetch", "WebSearch"} <= set(argv[argv.index("--disallowedTools") + 1].split(","))
-    assert settings["enabledPlugins"] == {f"thimble-cc-mod@{config.marketplace_name()}": False}, "never the mod"
     key = start["session"]
     assert key.startswith("task:labels:")
     agent_session.unanswered(CORPUS, key, True)

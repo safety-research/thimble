@@ -1,6 +1,6 @@
 [
-  {"name": "Test runs", "kind": "regex", "spec": "\\bpytest\\b", "labels": ["pytest", "other"],
-   "paths": ["runs/*.jsonl"]},
   {"name": "Pagination", "kind": "regex", "spec": "(?i)paginat|\\bcursor\\b", "labels": ["pagination", "other"],
+   "paths": ["runs/*.jsonl"]},
+  {"name": "Test runs", "kind": "regex", "spec": "\\bpytest\\b", "labels": ["pytest", "other"],
    "paths": ["runs/*.jsonl"]}
 ]

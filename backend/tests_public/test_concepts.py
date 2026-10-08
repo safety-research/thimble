@@ -212,6 +212,54 @@ async def test_one_labels_request_reads_the_rows_of_several_line_ranges(api, wor
         assert r.status_code == 400, bad
 
 
+CURT = {"id": "curt", "name": "Curt reply", "unit": "record", "kind": "prompt", "spec": "The reply is short and unfriendly.",
+        "description": "", "labels": ["curt", "not curt"]}
+CURT_ITEMS = [("runs/a.jsonl#L1", "Do it now."), ("runs/a.jsonl#L2", "Thanks so much!")]
+
+
+async def test_a_prompt_label_s_system_prompt_is_a_plain_classifier_prompt(monkeypatch):
+    """A prompt label's call gets labels.md's head as its whole system prompt: a text classifier's prompt that names the
+    category, its definition and its values and says nothing of thimble or the analyst, asks for a rationale only with
+    `comment` and leaves no blank lines where a slot was empty; the items keep their numbered headings."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    system, user = concepts.build_classify_prompt(concepts.label_input(CURT, CURT_ITEMS))
+    assert system.startswith("You are a text classifier.") and system.endswith("Return exactly one entry for each record.")
+    assert "Category: Curt reply\n\nDefinition:\nThe reply is short and unfriendly.\n\nAllowed values: curt, not curt" in system
+    assert "also give `rationale`" in system and "\n\n\n" not in system
+    assert "thimble" not in system.lower() and "analyst" not in system.lower()
+    assert user == "### item 1 [runs/a.jsonl#L1]\nDo it now.\n\n### item 2 [runs/a.jsonl#L2]\nThanks so much!"
+    bare, _ = concepts.build_classify_prompt(concepts.label_input(CURT, CURT_ITEMS, comment=False))
+    assert "rationale" not in bare and "\n\n\n" not in bare
+    shown = concepts.label_input({**CURT, "examples": [{"ref": "runs/b.jsonl#L4", "text": "No.", "value": "curt",
+                                                        "note": "too short"}]}, CURT_ITEMS)
+    with_examples, _ = concepts.build_classify_prompt(shown)
+    assert "### example 1 [runs/b.jsonl#L4]\nNo." in with_examples and "\n\n\n" not in with_examples
+    assert "too short" in with_examples and "analyst" not in with_examples.lower()
+    assert with_examples.index("### example 1") < with_examples.index("Return exactly one entry for each record.")
+
+    seen: dict = {}
+
+    async def structured(prompt, **kw):
+        seen.update(kw, prompt=prompt)
+        return model_mod.CallResult(status="ok", output={"labels": []})
+
+    monkeypatch.setattr(model_mod, "structured", structured)
+    inp = concepts.label_input(CURT, CURT_ITEMS)
+    await concepts.labels_task(CORPUS, inp)
+    assert (seen["system"], seen["prompt"]) == concepts.build_classify_prompt(inp) and seen["tool"].name == "labels"
+
+
+def test_a_classifier_call_carries_fifty_records_and_fewer_long_ones():
+    """A prompt label asks BATCH_ITEMS (50) units a call, and fewer when their texts pass BATCH_CHARS."""
+    def units(n: int, text: str) -> list:
+        return [concepts.Unit(f"a.jsonl#L{i}", ["a.jsonl"], lambda: iter([("", text)])) for i in range(1, n + 1)]
+
+    assert concepts.BATCH_ITEMS == 50
+    assert [len(b) for b in concepts._batches(iter(units(120, "a short reply")), "record", concepts.BATCH_ITEMS)] == [50, 50, 20]
+    long = list(concepts._batches(iter(units(20, "x" * 5_000)), "record", concepts.BATCH_ITEMS))
+    assert [len(b) for b in long] == [8, 8, 4] and all(sum(len(it.text) for it in b) <= concepts.BATCH_CHARS for b in long)
+
+
 async def test_prompt_apply_batches_rows(api, workspaces_tmp, fake_classify, monkeypatch):
     monkeypatch.setattr(concepts, "BATCH_ITEMS", 3)
     k = await _create(api, description="a board post that claims a PR")
@@ -445,3 +493,133 @@ async def test_the_server_s_shutdown_ends_the_label_scan_pool_s_workers():
         except ProcessLookupError:
             continue
         raise AssertionError(f"the pool's worker {pid} still runs")
+
+
+async def test_every_prompt_run_learns_from_the_analysts_values_and_agreement_leaves_those_out(api, fake_classify):
+    """A prompt label's run always carries the analyst's latest values as examples, with no switch to ask for it, and
+    "% agreed" counts only the values the classifier was not given as examples: a value it was shown is no test of it.
+    The calibration says how many it left out."""
+    k = await _create(api, description="a board post that claims a PR")
+    base = f"/api/ws/{CORPUS}/concepts/{k['id']}"
+    s = (await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
+    assert s["status"] == "done" and s["examples"] == 0 and fake_classify.calls[-1]["concept"]["examples"] == []
+    model = {r["ref"]: r["label"] for r in (await api.get(f"{base}/labels", params={"path": "board.jsonl"})).json()["rows"]}
+    flip = {"yes": "no", "no": "yes"}
+    ordered = sorted(model)
+    judged = {ordered[0]: flip[model[ordered[0]]], ordered[1]: flip[model[ordered[1]]], ordered[2]: model[ordered[2]]}
+    for ref, value in judged.items():
+        cal = (await api.post(f"{base}/labels", json={"ref": ref, "label": value})).json()["calibration"]
+    assert (cal["n"], cal["agreed"], cal["taught"]) == (3, 1, 0), cal
+
+    # the next run carries those values as examples, though nothing asked for them, and they leave the agreement
+    s = (await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
+    shown = {ex["ref"]: ex["value"] for ex in fake_classify.calls[-1]["concept"]["examples"]}
+    assert shown == judged and s["examples"] == 3
+    assert (s["calibration"]["n"], s["calibration"]["taught"]) == (0, 3) and s["calibration"]["est_precision"]["no"] is None
+    card = (await api.get(base)).json()
+    assert card["est_precision"] is None and card["calibration"]["taught"] == 3 and "taught" not in card
+
+    # a value set after that run was no example of it, so it counts
+    cal = (await api.post(f"{base}/labels", json={"ref": ordered[3], "label": model[ordered[3]]})).json()["calibration"]
+    assert (cal["n"], cal["agreed"], cal["taught"]) == (1, 1, 3), cal
+    assert (await api.get(base)).json()["est_precision"] == 1.0
+    excerpt = refs.resolve(MINI, f"concept:{k['id']}")["excerpt"]  # what an agent reads of the label
+    assert "not counting the 3 it was given as examples" in excerpt, excerpt
+
+
+def test_a_value_counts_again_once_a_run_writes_its_row_without_it_as_an_example():
+    """held_out and taught_after: a ref is left out while its classifier row is the one a run wrote with it among the
+    examples; a later run that writes the row again without it makes it count."""
+    rows = [("a.jsonl#L1", "yes", "yes", "t2"), ("a.jsonl#L2", "no", "yes", "t2"), ("a.jsonl#L3", "yes", "yes", None)]
+    assert concepts.held_out(rows, {"a.jsonl#L1": "t2", "a.jsonl#L2": "t1"}) == ([("no", "yes"), ("yes", "yes")], 1)
+
+    class Store:
+        def __init__(self, ts):
+            self.ts = ts
+
+        def model_ts(self, refs_):
+            return {r: self.ts[r] for r in refs_ if r in self.ts}
+
+    before = {"a.jsonl#L1": "2026-10-06T04:00:00+00:00", "a.jsonl#L2": "2026-10-06T04:00:00+00:00"}
+    st = Store({"a.jsonl#L1": "2026-10-06T04:00:00+00:00", "a.jsonl#L2": "2026-10-06T05:00:01+00:00",
+                "a.jsonl#L3": "2026-10-06T05:00:02+00:00", "a.jsonl#L4": "2026-10-06T03:00:00+00:00"})
+    after = concepts.taught_after(st, ["a.jsonl#L3", "a.jsonl#L4"], "2026-10-06T05:00:00+00:00", before)
+    # L1 was not written again; L2 was, without it as an example; L3 was an example the run labeled; L4 one it did not
+    assert after == {"a.jsonl#L1": "2026-10-06T04:00:00+00:00", "a.jsonl#L3": "2026-10-06T05:00:02+00:00"}
+
+
+async def test_a_run_that_fails_after_labeling_its_examples_still_leaves_them_out(api, fake_classify, monkeypatch):
+    """A prompt run stores its examples when it starts (`teaching`), so the agreement leaves out the values whose rows it
+    wrote also when it fails before its end; the next run that ends folds them in."""
+    monkeypatch.setattr(concepts, "BATCH_ITEMS", 3)
+    monkeypatch.setattr(concepts, "CONCURRENCY", 1)
+    k = await _create(api, description="a board post that claims a PR")
+    base = f"/api/ws/{CORPUS}/concepts/{k['id']}"
+    await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})
+    model = {r["ref"]: r["label"] for r in (await api.get(f"{base}/labels", params={"path": "board.jsonl"})).json()["rows"]}
+    first = [f"board.jsonl#L{i}" for i in (1, 2, 3)]  # the first call's records
+    for ref in first:
+        await api.post(f"{base}/labels", json={"ref": ref, "label": model[ref]})
+
+    def broken(_items):
+        raise RuntimeError("the classifier broke")
+
+    fake_classify.plan = [lambda items: _ok(FakeClassify.rule(items)), broken]
+    r = await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})
+    assert r.status_code >= 400 or r.json().get("status") == "error", r.text
+    assert sorted(ex["ref"] for ex in fake_classify.calls[-2]["concept"]["examples"]) == first
+    # a value on a record the failed run never reached counts; the three it labeled with them as examples do not
+    cal = (await api.post(f"{base}/labels", json={"ref": "board.jsonl#L6", "label": model["board.jsonl#L6"]})).json()["calibration"]
+    assert (cal["n"], cal["taught"]) == (1, 3), cal
+
+    s = (await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
+    assert s["status"] == "done" and s["examples"] == 4 and (s["calibration"]["n"], s["calibration"]["taught"]) == (0, 4)
+
+
+def test_a_scan_worker_ends_once_the_process_that_made_its_pool_is_killed(tmp_path):
+    """The terminal mode's shim makes the scan pool and is ended by a signal as Claude Code quits, before it can end its
+    workers; each worker then ends by itself (concepts._watch_parent; live check T9 found one left)."""
+    import os
+    import signal
+    import subprocess
+    import sys
+    import time
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    script = tmp_path / "pool.py"
+    script.write_text(
+        "import sys, time\n"
+        f"sys.path.insert(0, {str(backend)!r})\n"
+        "from app import concepts\n"
+        "if __name__ == '__main__':\n"
+        "    pool = concepts._pool_get()\n"
+        "    pool.submit(time.sleep, 0.1).result(timeout=60)\n"
+        "    print(' '.join(str(p) for p in pool._processes), flush=True)\n"
+        "    time.sleep(300)\n")
+    proc = subprocess.Popen([sys.executable, str(script)], stdout=subprocess.PIPE, text=True)
+    pids = [int(p) for p in proc.stdout.readline().split()]
+    assert pids
+    os.kill(proc.pid, signal.SIGKILL)
+    proc.wait(timeout=30)
+    deadline = time.monotonic() + 20
+    left = pids
+    while left and time.monotonic() < deadline:
+        time.sleep(0.2)
+        left = [p for p in left if os.path.exists(f"/proc/{p}") and "Z" not in open(f"/proc/{p}/stat").read().split()[2]]
+    assert not left, f"the pool's workers {left} still run after the process that made the pool was killed"
+
+
+def test_a_json_record_s_example_quotes_the_fields_the_label_read_never_the_first_line_of_its_json():
+    """The label tool quoted every example of a code label over pages.jsonl as `{` (live check New 13): the first line
+    of the record's pretty-printed JSON. It quotes the fields the rule reads, else its words field, else the record on
+    one line of JSON."""
+    rec = {"page_id": "dse/AgentJune", "name": "AgentJune2026", "wiki": "dse", "n_revs": 19, "tags": ["a"]}
+    code = {"kind": "code", "spec": "def label(unit):\n    return ('yes' if 'June' in unit['name'] else 'no', 1.0)"}
+    assert concepts.record_words(rec, code) == "name: AgentJune2026"
+    both = {"kind": "code", "spec": "w = unit.get('wiki'); n = unit['n_revs']"}
+    assert concepts.record_words(rec, both) == "wiki: dse · n_revs: 19"
+    prompt = {"kind": "prompt", "spec": "Is the page's name about June? Read the n revs too."}
+    assert concepts.record_words(rec, prompt) == "name: AgentJune2026 · n_revs: 19"
+    assert concepts.record_words({"text": "a post\nover two lines", "id": 3}, {"kind": "prompt", "spec": "A post?"}) == "text: a post over two lines"
+    assert concepts.record_words({"id": 3, "ok": True}, {"kind": "regex", "spec": "x"}) == '{"id": 3, "ok": true}'

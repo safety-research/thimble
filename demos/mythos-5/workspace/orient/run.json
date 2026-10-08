@@ -1,0 +1,27 @@
+{
+ "status": "done",
+ "passes": [
+  "final",
+  "views",
+  "report"
+ ],
+ "query": null,
+ "effort": "xhigh",
+ "critique": false,
+ "ultracode": true,
+ "requested": "2026-10-06T04:25:58+00:00",
+ "started": "2026-10-06T04:25:58+00:00",
+ "ended": "2026-10-06T04:34:18+00:00",
+ "groups": {
+  "orientation": "6a8bb309"
+ },
+ "chats": {
+  "orient": "0526d347"
+ },
+ "error": null,
+ "run": 0,
+ "report_asked": true,
+ "revised_cards": [],
+ "queue": [],
+ "followups": []
+}

@@ -40,6 +40,9 @@ from collections import OrderedDict
 from typing import Any
 
 SENTINEL = "\x1ethimble-view\x1e"
+# between an answer's other fields and its result on the answer's line: json.dumps writes no control character
+# unescaped, so neither JSON text holds it
+RESULT_SEP = "\x1f"
 TRACEBACK_MAX = 3000
 
 _readers: dict[str, tuple[tuple[int, int], object]] = {}  # reader.py's path -> ((mtime_ns, size), module)
@@ -467,6 +470,7 @@ def answer(req: dict) -> dict:
     read, and `view_paths`, else the claimed paths but those shown whole (shown_whole), as its _view_paths; its answer's
     `left_out_n` counts the refs thimble.kept and kept_unit refused for the filter, and `left_out` lists them when there
     are at most LEFT_OUT_MAX. With `root` the call runs in that folder, a copy of the corpus the paths are relative to.
+    A request's `raw` is call's (_result_json).
     The answer's `held` lists the indexes in memory afterwards (_held), `dropped` those it let go, and `unpickled` is
     true while one of them has no pickle."""
     t0 = time.monotonic()
@@ -544,10 +548,27 @@ def _held() -> list[list]:
 
 
 def call(req_json: str) -> None:
-    """Answer the request and print it on one line after SENTINEL. A result that is not JSON is sent as its str."""
-    out = answer(json.loads(req_json))
+    """Answer the request and print it on one line after SENTINEL: the answer without its result as JSON, then
+    RESULT_SEP and the result as JSON (_result_json), so the server reads the result only where it needs it
+    (views._answer_from). A value of the result that is not JSON is sent as its str."""
+    req = json.loads(req_json)
+    out = answer(req)
     try:
-        text = json.dumps(out, ensure_ascii=False, default=str)
+        result = _result_json(out.pop("result"), bool(req.get("raw"))) if "result" in out else None
+        text = json.dumps(out, ensure_ascii=False, default=str) + ("" if result is None else RESULT_SEP + result)
     except (TypeError, ValueError) as e:
         text = json.dumps({"ok": False, "error": f"the reader's answer is not JSON: {e}"})
     print(SENTINEL + text, flush=True)
+
+
+def _result_json(result: Any, raw: bool) -> str:
+    """The result as JSON; with `raw`, for a request whose result the server sends to the page as it is, compact and
+    with NaN and the infinities, which JSON has no word for, as null, as the server's routes write them."""
+    if not raw:
+        return json.dumps(result, ensure_ascii=False, default=str)
+    try:
+        return json.dumps(result, ensure_ascii=False, default=str, allow_nan=False, separators=(",", ":"))
+    except ValueError:  # NaN or an infinity; a circular value raises again in the next dumps
+        text = json.dumps(result, ensure_ascii=False, default=str)
+        return json.dumps(json.loads(text, parse_constant=lambda _name: None), ensure_ascii=False, allow_nan=False,
+                          separators=(",", ":"))

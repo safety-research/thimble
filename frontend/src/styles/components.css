@@ -48,13 +48,13 @@
   width: 12px;
   height: 12px;
 }
-/* the name, cut with an ellipsis; its line is taller than the chip's so the cut leaves underscores and descenders
-   whole at high zoom */
+/* the name, cut with an ellipsis; line-height normal (the font's ascent plus descent) is taller than the chip's, so
+   the cut leaves underscores and descenders whole at any size and zoom */
 .chip-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 14px;
+  line-height: normal;
 }
 .chip-ico {
   flex: none;
@@ -194,10 +194,13 @@
 .btn-ico {
   flex: none;
 }
+/* a label cut with an ellipsis: line-height normal (the font's ascent plus descent) keeps its descenders inside the box
+   that overflow: hidden clips, where the button's line-height of 1 cuts them; the button centers it in its fixed height */
 .btn-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: normal;
 }
 .btn-ghost:hover {
   background: var(--track-bg);
@@ -376,10 +379,12 @@
   font: var(--type-mono);
   line-height: 1;
 }
+/* line-height normal, as a button's label (.btn-label) */
 .seg-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: normal;
 }
 .seg-opt:hover {
   background: var(--surface-hover);
@@ -657,6 +662,7 @@ a.card:hover {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: normal;
 }
 .menu-item-note {
   flex: none;

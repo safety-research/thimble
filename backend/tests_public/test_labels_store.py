@@ -59,3 +59,19 @@ def test_a_store_made_before_is_read_as_it_is_and_drops_the_covered_index_at_its
     assert st.state()[0] == "fresh", "no rebuild"
     st.connect(write=True).close()
     assert "current_path" not in _indexes(st.db) and st.state()[0] == "fresh"
+
+
+def test_a_files_records_per_bin_count_each_value_with_the_covers_records_that_have_no_row(tmp_path):
+    """line_counts: per bin of the file's lines, how many records have each value (the reader's overview draws each part
+    of the file in the value most of its records have); a cover's records count but those with a row of their own,
+    which count for their own value; line_bins is the bins that hold a value."""
+    rows = [{"ref": f"turns.jsonl#L{i}", "label": "gui" if i % 4 == 0 else "shell", "source": "code"} for i in range(1, 21)]
+    rows += [labels_store.cover_row("other.jsonl", 1, 40, "quiet", "regex", "t"),
+             {"ref": "other.jsonl#L7", "label": "loud", "source": "code"}]
+    jsonl = tmp_path / "k.jsonl"
+    jsonl.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    st = labels_store.Store(jsonl)
+    st.rebuild()
+    assert st.line_counts("turns.jsonl", 20, 2) == {"shell": {0: 8, 1: 7}, "gui": {0: 2, 1: 3}}
+    assert st.line_counts("other.jsonl", 40, 4) == {"quiet": {0: 9, 1: 10, 2: 10, 3: 10}, "loud": {0: 1}}
+    assert st.line_bins("other.jsonl", 40, 4) == {"quiet": [0, 1, 2, 3], "loud": [0]}

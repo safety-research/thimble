@@ -46,6 +46,7 @@ HEALTH_WAIT_S = 90.0
 
 SRT_FAILED = "thimble's sandbox runtime could not start a sandbox: {why}"
 LINKED = (Path("backend") / ".venv", Path("frontend") / "node_modules")  # the live checkout's, linked into a worktree
+TREE_LINKED = "the worktree is a link, not a folder, so thimble ran nothing from it in the sandbox"
 LINK_MOVED = ("the worktree's {link} no longer links to the live checkout's {link}, so thimble ran nothing from it in "
               "the sandbox")
 
@@ -134,7 +135,11 @@ def _runtime_reads(live: Path) -> list[Path]:
 
 
 def link_problem(tree: Path, live: Path) -> str:
-    """'' while each of LINKED in the worktree `tree` is missing or leads to the live checkout's, else why not."""
+    """'' while the worktree `tree` is a folder, not a link, and each of LINKED in it is missing or leads to the live
+    checkout's, else why not. The folder that holds the worktrees is one main's Bash and its subagents write, so a link
+    there in place of a worktree would make the box write where the link leads (Box.settings resolves the tree)."""
+    if Path(tree).is_symlink():
+        return TREE_LINKED
     for rel in LINKED:
         link = tree / rel
         if (link.exists() or link.is_symlink()) and _real(link) != _real(live / rel):

@@ -56,7 +56,7 @@ KINDS = frozenset({
     # the chat: the Start card, agent rows, chips, the ⌘ pointer, threads
     "start-toggle", "start-run", "agent-row-expand", "chip-teleport", "pointer-open", "pointer-send",
     "chat-open", "chat-interrupt", "chat-settings", "thread-open", "thread-switch", "thread-fold", "thread-rename", "thread-delete",
-    "thread-ask-again", "chat-retry",
+    "thread-ask-again", "thread-hand-back", "chat-retry",
     "ask-send",
     # files
     "file-close", "file-save", "search", "reader-find", "view-open", "view-build", "view-dismiss", "concept-layer",

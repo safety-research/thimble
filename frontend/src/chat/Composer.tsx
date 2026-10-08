@@ -1,6 +1,6 @@
 // The chat's composer: the shared composer (components/Composer) with main's model line at its foot (ModelLine). Main
 // runs in the analyst's Claude Code session, so its model is chosen in the terminal with /model. Its effort and fast mode
-// are kept for its next launch (channel.effort_route, channel.fast_route). A thread whose message goes to a session thimble starts shows that role's line instead
+// are kept for its next launch (events.effort_route, events.fast_route). A thread whose message goes to a session thimble starts shows that role's line instead
 // (`chip`, RoleChip). The browser cannot stop main's turn, so main and its threads have no Stop; a thread whose agent
 // the browser can stop (the orientation, a writer, a check's run, a dev ticket, a view's build or its review) passes
 // `stop`, and while that agent runs the send square is its Stop until text is typed (ComposerFrame). Each thread keeps

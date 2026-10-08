@@ -39,7 +39,7 @@ export type ChipKind = 'say' | 'filter' | 'label' | 'ticket' | 'artifact' | 'vie
 
 /** One line of `chats/<id>.jsonl`; its index in the log is its id. */
 export type ChatRecord =
-  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension'; event?: string; run?: number; extension?: string }
+  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension'; tray?: boolean; event?: string; run?: number; extension?: string }
   | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy }
   | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
   | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string }
@@ -47,7 +47,7 @@ export type ChatRecord =
   | { type: 'done'; ts?: string; session_id?: string | null; cells?: string[]; result?: string | null }
   | { type: 'error'; ts?: string; message: string; kind?: string; detail?: string }
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
-  | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string }
+  | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
 
 export interface ChatDetail {
@@ -104,8 +104,8 @@ export interface ChatPatch {
 export type WsEvent = { ts?: string; seq?: number } & (
   | { type: 'chat'; chat: string; deleted?: boolean }
   | { type: 'cell'; notebook: string; cell: string; kind: 'ran' | 'note' | 'verified' | string }
-  | { type: 'orient'; status: 'started' | 'done' | 'failed' | 'stopped' | string; [k: string]: unknown }
-  | { type: 'report'; slug: string; status: 'generating' | 'generated' | 'failed' | 'verified' | 'figures' | 'rewritten' | string; span?: string; run?: string }
+  | { type: 'orient'; status: 'started' | 'done' | 'failed' | 'stopped' | 'refused' | string; kind?: string; reason?: string; [k: string]: unknown }
+  | { type: 'report'; slug: string; status: 'generating' | 'generated' | 'failed' | 'refused' | 'verified' | 'figures' | 'rewritten' | string; span?: string; run?: string; refused?: Refusal }
   | { type: 'view'; slug: string; status: 'queued' | 'building' | 'built' | 'failed' | 'deleted' | string; path?: string; chat?: string; version?: string }
   | { type: 'ticket'; id: string; n: number; status: string }
   | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string; rows?: boolean }
@@ -302,12 +302,13 @@ export interface LabelPresence {
   paths: Record<string, Record<string, number>>
 }
 
-/** `GET /ws/{c}/labels/ruler?path=`: where on one file each label's values fall, the file's lines cut into `bins`. */
+/** `GET /ws/{c}/labels/ruler?path=`: where on one file each label's values fall, the file's lines cut into `bins`: per
+ * value the bins that hold it, and in `counts`, in the same order, how many of its records each holds. */
 export interface LabelRuler {
   path: string
   total: number
   bins: number
-  labels: { concept_id: string; bins: Record<string, number[]> }[]
+  labels: { concept_id: string; bins: Record<string, number[]>; counts?: Record<string, number[]> }[]
 }
 
 /** `PUT /concepts/{id}`: what the Files pane's edit card changes. */
@@ -424,12 +425,29 @@ export interface Proposal {
   attempts?: number
   /** the review of the built view's pictures (backend view_review) */
   review?: ViewReview
+  /** the builder's agent id, a subagent of main (`thimble:view-builder`), while one builds or built it last */
+  agent_id?: string | null
+  /** the builder's gate attempts so far (finish_view), of MAX_ATTEMPTS */
+  attempt?: number
+  /** the repairs of an orientation's proposal so far: a fresh builder after a build that failed for good, of
+   * VIEW_REPAIRS (dev.py build_ended); while one builds, its number. Absent or 0 for the first build */
+  repairs?: number
+  /** why a build stopped before its end: `quit` when the analyst's Claude Code session ended (Retry starts it again) */
+  stopped_by?: StoppedBy | null
+  /** a build's start that did not happen, with its kind and the pending request Start it starts again */
+  refused?: Refusal | null
+  /** the build's exact model and effort (its Build menu, else Settings' dev row), as the backend keeps them
+   * (dev.start_build's `values`) */
+  values?: { model?: string; effort?: string } | null
+  model?: string | null
+  effort?: string | null
 }
 
 /** The review of a built view's pictures: running, done (with what it revised and what problems are left), failed
  * or stopped, with a note that says why; `undo` once the analyst put the view back as it was built. */
 export interface ViewReview {
-  state: 'running' | 'done' | 'failed' | 'stopped'
+  /** `queued`: its start waits for a free subagent, Claude Code's limit reached */
+  state: 'running' | 'queued' | 'done' | 'failed' | 'stopped'
   round?: number
   ts?: string
   revised?: string[]
@@ -438,6 +456,8 @@ export interface ViewReview {
   undo?: boolean
   /** the pictures the review took */
   shots?: number
+  /** the reviewer's agent id, a subagent of main (`thimble:view-reviewer`) */
+  agent_id?: string | null
 }
 
 /** `GET /ws/{c}/views/suggestions?path=`: whether a viewer may be proposed for the type of a file opened in the File
@@ -564,20 +584,22 @@ export interface ViewOpen {
 
 // ---- orientation ----
 
-/** The Start card's switches: the orientation's deck (`final`), its view proposals, the report, and its critic's
- * review. Ultracode is the effort menu's highest level (StartGate). */
+/** The Start card's switches, start_orientation's: the orientation's deck (`final`), its view proposals, the report,
+ * and its critic's review. */
 export type OrientPass = 'final' | 'views' | 'critique' | 'report'
 
-/** The orientation's reasoning effort below Ultracode, Claude Code's level names (orientation.EFFORTS). */
+/** The efforts Claude Code takes, lowest first (cc_settings.EFFORTS): every effort menu of thimble's agents offers
+ * these. Main's composer adds Ultracode (MainEffort). */
 export type OrientEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
-/** An effort menu's choice, the Start gate's for the orientation and the composer's for main and its threads: Claude
- * Code's levels, then Ultracode, which runs at xhigh with workflows (cc_settings.EFFORTS and ultracode). */
+/** Main's effort menu in the composer: Claude Code's levels, then Ultracode, which runs main at xhigh with workflows
+ * (cc_settings.EFFORTS and ultracode). thimble's agents run at a level, never Ultracode. */
 export type MainEffort = OrientEffort | 'ultracode'
 
-/** A permission request waiting for the analyst: main's, relayed by the shim (channel.py), or one of a session thimble
- * started beside main, the orientation's or a writer's (agent_session.ask). `what` is what the call would do, `input`
- * its arguments as text. */
+/** A permission request waiting for the analyst. Main's are relayed by its PermissionRequest hook (events._hold), and
+ * so are those of thimble's subagents and their descendants, which the terminal answers (`terminal`); a code ticket's
+ * session asks through its chat's meta (agent_session.ask). `what` is what the call would do, `input` its arguments as
+ * text. */
 export interface PermissionRequest {
   id: string
   tool: string
@@ -596,22 +618,23 @@ export interface PermissionRequest {
   /** what Claude Code's own "don't ask again" would add for the session (`Bash(npm test *)`, `all edits`), when the
    * request suggests it: the card's third choice (backend agent_session, don't ask again) */
   always?: string
-  /** on main's meta: the thread or subagent chat whose agent asked, when the hook said which (backend channel._hold) */
+  /** on main's meta: the thread or subagent chat whose agent asked, when the hook said which (backend events._hold) */
   chat?: string | null
-  /** why auto mode refused the call, when the request is one it refused and the analyst may allow (backend
-   * agent_session, auto mode) */
+  /** on main's meta: a request of one of thimble's subagents, which Claude Code asks in the terminal at once (it shows
+   * no dialog while a hook holds a background subagent's request, U6b); the card shows it without buttons */
+  terminal?: boolean
+  /** why auto mode refused the call, when the request is one it refused and the analyst may allow (a code ticket's) */
   refused?: string
   /** how many times thimble sent the call back to auto mode after its classifier gave no verdict, before asking */
   rechecked?: number
   /** how long a request auto mode could not judge waits unanswered before it is declined, in seconds */
   deny_after_s?: number
-  /** when nobody answered it in time and it was declined: it stays on the card until dismissed (backend agent_session,
-   * permissions) */
+  /** when nobody answered it in time and it was declined: it stays on the card until dismissed (a code ticket's) */
   expired?: string
-  /** the seconds it waits before it is declined unanswered; absent for main's, which Claude Code also asks in the
-   * terminal */
+  /** the seconds it waits before it is declined unanswered (a code ticket's `cardWait`); absent for main's and its
+   * subagents', which Claude Code asks in the terminal */
   wait_s?: number
-  /** the mode of the session that asks (manual, auto, bypass) */
+  /** the mode of the session that asks (a code ticket's) */
   mode?: string
   /** the later calls for the same site, or later searches, that wait on this request's answer, each listed whole */
   also?: string[]
@@ -622,9 +645,9 @@ export interface PermissionRequest {
   cut?: number
   /** why thimble itself asks, which the card says in place of the mode's reason (backend dev.CODE_WHY) */
   why?: string
-  /** what in thimble's config sends the call to the analyst in every permission mode: an edit of the corpus, an
-   * install, or any command (backend userconf.Session.ask_cause) */
-  asked_by?: 'data' | 'installs' | 'commands'
+  /** the rule of main's fence that sends the call to the analyst (userconf.main_rules): an edit of thimble's config, an
+   * edit of the corpus, or a web call; `installs` and `commands` only on a code ticket's */
+  asked_by?: 'config' | 'data' | 'web' | 'installs' | 'commands'
 }
 
 /** A session held where the browser cannot answer: the model-switch dialog after a safety stop (session.py). */
@@ -632,35 +655,104 @@ export interface SessionAlert {
   kind: string
   text: string
   since?: string
-  /** kind `retry` (agent_session's retry): why the session waits, "Anthropic's API is overloaded" */
   reason?: string
-  /** kind `retry`: when it starts again, ISO */
   until?: string
-  /** kind `retry`: the retry this wait comes before, from 1 */
   attempt?: number
 }
 
-/** The body of the `start` event (prompts/main.md, the `start` bullet; orientation.start_requested). */
-/** The `start` event's body: start_orientation's three switches, which main passes on (`final_notebook` turns on the
- * deck, the group Orientation), then the settings the server keeps for the orientation's session
- * (orientation.start_requested). */
+/** The body of Start (`POST /ws/{c}/start`, orient_session.StartBody): the request (focus), start_orientation's four
+ * switches, and the run's exact model and effort, each defaulting to Settings' orientation row. */
 export interface StartBody {
-  final_notebook: boolean
-  propose_views: boolean
-  generate_report: boolean
-  critique: boolean
-  ultracode: boolean
-  effort: OrientEffort
   text?: string
+  deck: boolean
+  views: boolean
+  critique: boolean
+  report: boolean
+  model?: string
+  effort?: string
 }
 
-/** A permission mode of the sessions thimble starts (backend modes.MODES): `manual` sends each request Claude Code makes
- * to the card, `auto` runs in Claude Code's auto mode and sends the calls it refuses there, `bypass` grants every
- * request without asking. */
+/** The kinds of a start or a follow-up that did not happen (backend subagents: run.json `refused.kind`). */
+export type RefusalKind = 'auto-mode' | 'no-call' | 'limit' | 'not-launched' | 'hook' | 'earlier-session' | 'no-module' | 'error' | (string & {})
+
+/** A start that did not happen (run.json `refused`, a document's `report {status: refused}`, a proposal's): Claude
+ * Code's or thimble's reason, as given, its kind, when, the pending request it was (Start it and Try again start it
+ * again), and `expired` for a click the module did not answer in time. */
+export interface Refusal {
+  reason: string
+  kind: RefusalKind
+  at?: string
+  request?: string | null
+  expired?: boolean
+}
+
+/** What a click start answers (Start, Write, Start it, Try again; subagents.Answer): the agent id when it started,
+ * else the refusal's kind and reason; `request` is the pending request either way, `program` an extension's program
+ * that runs it instead. */
+export interface StartAnswer {
+  agentId?: string
+  /** the started agent's chat, which the browser opens (its thread, on its first steps) */
+  chat?: string
+  request?: string
+  kind?: RefusalKind
+  reason?: string
+  expired?: boolean
+  program?: string
+}
+
+/** A pending request as the refused card shows it before Start it (`GET /ws/{c}/subagents/requests/{id}`): its role,
+ * the exact call (the text the agent gets), its values and its state. */
+export interface SubagentRequest {
+  id: string
+  kind?: 'start' | 'message' | 'stop' | string
+  route?: 'click' | 'follow-on' | 'typed' | string
+  role?: string | null
+  key?: string | null
+  input?: { subagent_type?: string; description?: string; prompt?: string; to?: string; message?: string } | null
+  values?: RunValues | null
+  state?: string | null
+  reason?: string | null
+  refused_kind?: string | null
+}
+
+/** A run's exact model and effort; `effort` is '' for a model Claude Code runs with no effort. */
+export interface RunValues {
+  model?: string
+  effort?: string
+}
+
+/** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): its status, the request and switches, the
+ * run's exact model and effort, who started it, the pending request, and for a start that did not happen its refusal.
+ * {} before any orientation was asked for. */
+export interface OrientRun {
+  status?: 'requested' | 'starting' | 'running' | 'done' | 'failed' | 'stopped' | 'refused' | (string & {})
+  query?: string | null
+  passes?: string[]
+  critique?: boolean
+  model?: string | null
+  effort?: string | null
+  route?: 'subagent' | 'program' | (string & {}) | null
+  started_by?: 'click' | 'typed' | (string & {}) | null
+  agent_id?: string | null
+  request?: string | null
+  refused?: Refusal | null
+  requested?: string | null
+  started?: string | null
+  ended?: string | null
+  chats?: { orient?: string }
+}
+
+/** Why a run of one of thimble's agents stopped (subagents.STOPPED_*): the analyst's Stop, main's quit, a refusal, or
+ * Esc in its agent view (`user`), after which Claude Code resumes it no more. */
+export type StoppedBy = 'analyst' | 'quit' | 'refused' | 'user' | (string & {})
+
+/** The code tickets' permission mode, the one agent with a mode of its own (backend modes.AGENTS): `manual` sends each
+ * request to the card, `auto` runs in Claude Code's auto mode, `bypass` grants every request. */
 export type OrientPermissions = 'manual' | 'auto' | 'bypass'
 
-/** The agents that each run in a permission mode of their own (backend modes.AGENTS). */
-export type ModeAgent = 'orient' | 'writer' | 'critic' | 'checks' | 'dev'
+/** The agents with a permission mode of their own: only the code tickets' dev agent; every other agent runs in your
+ * Claude Code session's mode (backend modes.AGENTS). */
+export type ModeAgent = 'dev'
 
 // ---- documents ----
 
@@ -882,8 +974,16 @@ export interface CheckRun {
   seen: string[]
   comments: number
   summary: string
-  /** `writer` while the run is queued until the document's writer ends (backend checks.py, while a writer runs) */
+  /** `writer` while the run is queued until the document's writer ends; `queued` while it waits for one of the
+   * MAX_SESSIONS slots (backend checks.py) */
   waiting?: string | null
+  /** the passages that changed since the run checked them (checks.to_cover after the analyst's own edits): the row
+   * says so, with Run, and nothing runs by itself (Q8) */
+  stale?: number | null
+  /** the run's agent, a subagent of main (`thimble:check`) */
+  agent_id?: string | null
+  /** a run's start that did not happen */
+  refused?: Refusal | null
 }
 
 /** A report check (`GET /ws/{c}/checks`): a prompt a session reads a written document against, commenting on its
@@ -911,7 +1011,8 @@ export interface CheckPatch {
 }
 
 /** `GET /ws/{c}/card-checks` (backend card_check.status_route): whether the card check runs, whether it starts by
- * itself on a new card (`auto`, the canvas's switch), and the checks running now, each with its phase. */
+ * itself on a new card (`auto`, thimble's config `agents.cardCheck.auto`), and the checks running now, each with its
+ * phase. */
 export interface CardCheckStatus {
   enabled: boolean
   auto: boolean
@@ -951,6 +1052,10 @@ export interface Ticket {
   chat?: string | null
   ts?: string
   error?: string | null
+  /** main's ticket that waits for the analyst's Start while another ticket runs (backend dev.start_typed) */
+  held?: boolean | null
+  /** the id of its agent, a `thimble:dev-ticket` subagent of the analyst's Claude Code session, once it started */
+  agent_id?: string | null
 }
 
 export interface NewTicketBody {
@@ -958,42 +1063,76 @@ export interface NewTicketBody {
   title: string
   body: string
   target?: unknown
+  /** where it was filed: `ui` for the browser's File a code ticket (backend dev.SOURCES) */
+  source?: 'ui'
+}
+
+/** The ticket runner's state (`GET /dev/status`): `tickets` is '' where code tickets run here (a development install),
+ * else why they do not (backend dev.ticket_problem). */
+export interface DevStatus {
+  running: boolean
+  tickets: string
+  queued: number
 }
 
 // ---- settings ----
 
-/** Every role that runs a model, as the settings popover lists them (backend config.MODEL_ROLES, with main first, whose
- * model, effort and fast mode are its session's and the composer chip's). */
-export const ROLES = ['main', 'orient', 'subagents', 'critic', 'writer', 'checks', 'verify', 'labels', 'dev'] as const
+/** Every role that runs a model, as the settings popover lists them (backend config.MODEL_ROLES), main first, whose
+ * model, effort and fast mode are its session's and the composer chip's: the agents (each runs exactly the model and
+ * effort of its row), then the classifiers, then the row a refused classifier call runs again on. */
+export const ROLES = ['main', 'orient', 'subagents', 'critic', 'writer', 'dev', 'checks', 'labels', 'verify', 'suggest', 'refusal'] as const
 export type Role = (typeof ROLES)[number]
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 export type Effort = (typeof EFFORTS)[number]
 
 export interface ModelConf {
   model: string
+  /** '' for a model Claude Code runs with no effort (Haiku) */
   effort: Effort | string
+  /** fast mode: the classifiers' rows only (labels, verify, suggest); the agents have none */
   fast: boolean
   /** the role whose model this one takes while the analyst has picked none (the orientation's subagents: `orient`) */
   follows?: string
+  /** the refusal row: no second call when a classifier's model refuses */
+  off?: boolean
 }
 
-/** `GET /ws/{c}/settings` layers the effective `models` and permission modes in from thimble's config; a PUT merges
- * what it is given. */
+/** `GET /ws/{c}/settings` layers the effective `models` and the code tickets' permission mode in from thimble's
+ * config; a PUT merges what it is given. */
 export interface Settings {
   models: Record<string, ModelConf>
-  /** the agents whose permission mode the analyst set; any other runs in the mode of their Claude Code session */
+  /** the code tickets' permission mode, when the analyst set one; else their Claude Code session's */
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions>>
   /** the modes the analyst's Claude Code settings turn off */
   disabled_modes?: OrientPermissions[]
   /** why thimble's config cannot be used, '' when it can (backend userconf.problem) */
   config_error?: string
-  /** while Claude Code does not trust thimble's workspaces folder: the folder and the command that trusts it (shell/Untrusted) */
-  untrusted?: { folder: string; command: string } | null
-  /** who runs each agent thimble starts and what it may do, by its permission-mode row (backend ledger.agent_rows) */
-  agents?: Partial<Record<ModeAgent | CallAgent, AgentRow>> & { main?: { additions: string[] } }
+  /** the keys thimble's config files hold that this build reads and ignores, each as its key path (userconf.ignored) */
+  config_ignored?: string[]
+  /** who runs each agent and what it may do (backend ledger.agent_rows): `main` carries main's fence, which thimble's
+   * agents share as its subagents; orient, writer, critic and checks name who runs them and their own `web`; `dev`,
+   * labels and cardCheck keep fences of their own */
+  agents?: Partial<Record<AgentRowKey, AgentRow>> & { main?: MainFence }
   /** who runs each of thimble's seven tasks (backend ledger.task_rows) */
   tasks?: TaskRow[]
+  /** the minutes a code ticket's permission request waits before it is declined (thimble's config `cardWait`) */
+  card_wait?: number
   [k: string]: unknown
+}
+
+/** The agent rows of the settings: thimble's subagents, the code tickets' dev agent and the two classifiers. */
+export type AgentRowKey = 'orient' | 'writer' | 'critic' | 'checks' | 'dev' | CallAgent
+
+/** Main's fence, which thimble's agents share (backend ledger.agent_rows `main`): the extensions adding to main's
+ * prompt, its sandbox, whether the sandbox can run here, its network, web tools and edits of the corpus. */
+export interface MainFence {
+  additions: string[]
+  sandbox?: 'on' | 'off'
+  sandbox_runs?: boolean
+  network?: 'on' | 'off'
+  web?: 'ask' | 'off' | 'allow'
+  data?: 'ask' | 'allow' | 'off'
+  config?: string
 }
 
 /** One of thimble's tasks in the settings (backend tasks.public): thimble's own or an extension's prompt, Agent SDK
@@ -1020,19 +1159,23 @@ export interface AgentRow {
   extension: string
   additions: string[]
   conflict: string[]
-  sandbox: 'on' | 'off'
-  sandbox_runs: boolean
-  network: 'on' | 'off'
+  /** the fence keys of an agent with a fence of its own (dev, labels, cardCheck); a subagent of main has main's */
+  sandbox?: 'on' | 'off'
+  sandbox_runs?: boolean
+  network?: 'on' | 'off'
+  /** a subagent of main: `off` keeps it off WebFetch and WebSearch, anything else is main's rule */
   web: 'ask' | 'off' | 'allow'
-  data: 'ask' | 'allow' | 'off'
+  data?: 'ask' | 'allow' | 'off'
   config: string
 }
 
 /** `PUT /ws/{c}/settings`: `models` merges per role and within a role, so a role's patch names only what changes;
- * `permission_modes` merges per agent, null putting an agent back on the session's mode. */
+ * `permission_modes` merges per agent, null putting an agent back on the session's mode; `web` sets a subagent's web
+ * off, or back on main's rule with null. */
 export interface SettingsPatch {
   models?: Record<string, Partial<ModelConf>>
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions | null>>
+  web?: Partial<Record<'orient' | 'writer' | 'critic' | 'checks', 'off' | null>>
   [k: string]: unknown
 }
 
@@ -1125,6 +1268,29 @@ export interface CorpusInfo {
   shown?: string
 }
 
+/** One row of `GET /workspaces` (backend start_page.py): a workspace as the start page and the top bar's switcher list
+ * it. `demo`: a dataset `thimble demo` downloaded, with its one-sentence blurb, `ready` when its pre-cached orientation
+ * is installed; `example`: a worked example `thimble demo --examples` opened, with the view it shows; `folder`: any
+ * other folder. */
+export interface WorkspaceRow {
+  name: string
+  kind: 'demo' | 'example' | 'folder'
+  /** what the page shows for it: a demo's dataset name, an example's workspace name, a folder's own name */
+  label?: string
+  /** the folder's own name */
+  folder: string
+  /** the folder as the analyst opened it */
+  path: string
+  dataset?: string
+  title?: string
+  blurb?: string
+  ready?: boolean
+  /** the view the row opens the workspace on: a demo dataset's pre-cache's main view, an example's view */
+  view?: { slug: string; name: string } | null
+  /** the names the workspace was renamed from (`thimble demo` renames a demo workspace demo-<dataset>) */
+  renamed_from?: string[]
+}
+
 export type SourceKind = 'agent' | 'board' | 'events' | 'forge' | 'prompt' | 'text' | 'dir'
 
 export interface SourceInfo {
@@ -1138,6 +1304,28 @@ export interface SourceInfo {
 export interface Block {
   kind: 'text' | 'tool_use' | 'tool_result' | 'thinking' | 'event' | 'raw'
   text: string
+}
+
+/** One key of `GET /corpora/{c}/source/keys`: its commonest values with their counts, most frequent first, how many
+ * values and records the rest hold, how many records have none, and per bin of the file's lines the rank of its most
+ * frequent value (-1 for none). */
+export interface SourceKey {
+  key: string
+  values: { value: string; n: number }[]
+  more: { values: number; n: number }
+  none: number
+  at: number[]
+}
+
+/** `GET /corpora/{c}/source/keys?path=`: the keys of a file's records that name a kind or a who, over the whole file
+ * (backend source_keys.py), and each bin's bytes. */
+export interface SourceKeys {
+  path: string
+  total: number
+  bins: number
+  partial: boolean
+  bytes: number[]
+  keys: SourceKey[]
 }
 
 export interface SourceRecord {
@@ -1159,6 +1347,9 @@ export interface TranscriptHint {
   keys?: { speaker: string; text: string; time?: string; list?: string }
   pair?: [string, string]
   lines?: boolean
+  /** the records interleave spoken turns with tool records ({tool_name, tool_call, tool_result}): the view shows each
+   * message as one line, a tool call and its result as blocks, terminal output cleaned */
+  tools?: boolean
   /** a stream whose records each nest a Claude Code stream record under this key */
   wrap?: string
   style?: string
@@ -1393,10 +1584,24 @@ export interface ConceptApplication {
   message?: string | null
   created_by?: string
   version?: number
-  /** the few-shot examples the run carried (prompt kind, `examples: true`) */
+  /** how many of the analyst's values the run carried as examples (every prompt run carries them) */
   examples?: number
   /** the units the run gave the first value (may be absent) */
   matches?: number
+  /** the whole files or runs a prompt label's run read only in part; absent when it read every one whole */
+  cut?: ReadCut | null
+}
+
+/** The whole files or runs a prompt label's run read only in part, since they were longer than its model's context
+ * holds (backend concepts.read_cut): how many, of how many, the JSON documents among them read whole with their long
+ * parts shortened, the median tokens it sent of each, the first of them, and the line that says it. */
+export interface ReadCut {
+  n: number
+  of?: number | null
+  short?: number
+  tokens: number
+  refs: string[]
+  line: string
 }
 
 /** The live run record GET /concepts/{id} carries as `run` while and after an apply on this server. */
@@ -1416,6 +1621,8 @@ export interface ConceptRun {
   /** the files the run covers and the ones indexed so far, while `total` is not known yet */
   files_total?: number | null
   files_indexed?: number
+  /** the whole files or runs it read only in part, once its classifier calls end */
+  cut?: ReadCut | null
   [k: string]: unknown
 }
 
@@ -1423,7 +1630,8 @@ export interface ConceptRun {
 export interface ConceptDetail extends Concept {
   n_reviewed?: number
   est_precision?: number | null
-  calibration?: { n: number; agreed: number; disagreed: number; est_precision: Record<string, number | null> }
+  /** the agreement with the analyst's values the classifier was not given as examples; `taught`, how many it was */
+  calibration?: { n: number; agreed: number; disagreed: number; est_precision: Record<string, number | null>; taught?: number }
   applications?: ConceptApplication[]
   last_run?: ConceptApplication | null
   run?: ConceptRun | null
@@ -1456,15 +1664,13 @@ export interface ApplyBody {
   paths?: string[]
   limit?: number | null
   comment?: boolean
-  /** prompt kind: carry the analyst's verdicts as few-shot examples */
-  examples?: boolean
   wait?: boolean
 }
 
 /** POST /concepts/{id}/labels: the analyst's verdict on one unit. */
 export interface VerdictResult {
   row: LabelRow
-  calibration: { n: number; agreed: number; disagreed: number; est_precision: Record<string, number | null> }
+  calibration: { n: number; agreed: number; disagreed: number; est_precision: Record<string, number | null>; taught?: number }
 }
 
 // --- documents: the Report tab's switcher, the story, the deck and the page (report/) ---
@@ -1692,55 +1898,98 @@ export interface ChatMeta {
   attached?: Attached | null
   /** main only: the session that was main last, while none is attached */
   ended?: SessionEnded | null
-  /** main only: the orientation's status from orient/run.json (requested, running, done, failed or stopped), null
-   * before any orientation was asked for */
+  /** main only: the orientation's status from orient/run.json (requested, starting, running, done, failed, stopped or
+   * refused), null before any orientation was asked for */
   orientation?: string | null
+  /** a thread, as the chat route gives it: `offer` once its latest question's run ended with an answer the analyst can
+   * hand back to main, `handed` once they did, '' while it runs or has none (backend threads.hand_back_state) */
+  hand_back?: 'offer' | 'handed' | ''
   /** a dev ticket's agent chat: the ticket it runs (dev.py) */
   ticket?: string | null
   /** a view ticket's agent chat: the slug of the proposal it builds (dev.run_view) */
   view?: string | null
+  /** a view's agent chat that reviews it (view_review), not one that builds it */
+  review?: boolean | null
   /** a view ticket's agent chat: the analyst asked for the view, so it is their dev thread; the orientation's builds
    * are not listed (dev._view_chat, chat/threads.ts) */
   asked?: boolean | null
-  /** main, the orientation or a writer: a dialog holds the session where the browser cannot answer it */
+  /** main, or a code ticket's session: a dialog holds the session where the browser cannot answer it */
   alert?: SessionAlert | null
-  /** main, the orientation or a writer: permission requests waiting for Allow or Deny */
+  /** main: the permission requests waiting, its own and its subagents' (thimble's agents among them, `terminal`); a
+   * code ticket's session: its own */
   permissions?: PermissionRequest[]
-  /** a session thimble started: what the analyst's "don't ask again" answers added for the rest of it, each in Claude
-   * Code's words (backend agent_session, don't ask again) */
+  /** a code ticket's session: what the analyst's "don't ask again" answers added for the rest of it */
   session_rules?: { text: string }[]
-  /** a session thimble started: the permission mode it runs in now, which its card's switcher shows and changes
-   * (agent_session, permissions) */
-  permission_mode?: OrientPermissions
-  /** the mode a switch into or out of Auto goes to, while the session waits for a pause to restart in it */
-  mode_switch?: OrientPermissions | null
-  /** a session thimble runs as a Claude Code background session (backend bg_session) */
-  background?: boolean
-  /** a session thimble started: its agent's row of the permission modes (backend modes.AGENTS), which a pick its card
-   * cannot make while it runs saves to (ModeSwitch) */
-  mode_agent?: ModeAgent
-  /** the agent a session or a program runs as: an extension's program's is `<extension>:<role or task>` (backend
-   * harness.start) */
+  /** the agent a session or a program runs as: thimble's own as `thimble:<role>`, an extension's program's as
+   * `<extension>:<role or task>` (backend harness.start) */
   agent_type?: string | null
-  /** the orientation's session: whether it runs with Ultracode, and its critique */
-  ultracode?: boolean
+  /** the orientation: its critique */
   critique?: boolean
-  /** a writer's session: the document it writes (write_session.py) */
+  /** a writer: the document it writes (write_session.py) */
   doc?: string | null
-  /** a session thimble started beside main: what it was asked, for its card, when its first message is longer (a
-   * writer's task) */
+  /** one of thimble's agents: what it was asked, for its card, when its first message is longer (a writer's task) */
   brief?: string | null
-  /** the orientation: the messages sent while a run of it went on, which go together when it ends (backend
-   * orientation.message) */
-  queued?: QueuedMessage[]
   /** the orientation: each follow-up, its run's number, state and times, and once it ends what it changed, counted from
    * its undo steps (backend orientation.run_finished) */
   followups?: FollowUpRecord[]
-  /** a session thimble started: the run the next server resumed after the server stopped or died under it, and when;
-   * null once a later run starts (backend agent_session, restart) */
-  restarted?: { run: number; ts?: string } | null
-  /** a session thimble started: its run's number, 0 for its start, then one per resume */
+  /** one of thimble's agents: its run's number, 0 for its start, then one per follow-up */
   run?: number
+  /** the orientation, in a workspace `thimble demo` installed from a pre-cache: it ran in advance, and its session was
+   * kept only from a full export (backend precached.py, demo.install) */
+  precached?: PrecachedMark | null
+  // ---- one of thimble's agents, a subagent of main (backend subagents.ensure_chat) ----
+  /** `subagent` for a chat of one of thimble's agents run as a subagent of the analyst's Claude Code session */
+  route?: 'subagent' | (string & {}) | null
+  /** its agent id in Claude Code */
+  agent_id?: string | null
+  /** the run's exact model and effort */
+  values?: RunValues | null
+  /** what each run actually ran on, read from its transcript, by run number */
+  ran?: Record<string, RunValues> | null
+  /** main's session the agent runs in, and every session its records are under (after /clear or /resume) */
+  session?: string | null
+  sessions?: string[]
+  /** who started it: a click in the browser (through thimble's plugin), or main's Agent call */
+  started_by?: 'click' | 'typed' | (string & {}) | null
+  /** the pending request it took up (Try again and Start it start it anew) */
+  request?: string | null
+  /** why it stopped: the analyst's Stop, main's quit, a refusal */
+  stopped_by?: StoppedBy | null
+  /** where a follow-up can continue it: `here` (after `thimble --continue`), an earlier Claude Code session, or an
+   * earlier version of thimble; nowhere after Esc in its agent view (`stopped-by-user`) */
+  continue?: 'here' | 'earlier-session' | 'earlier-version' | 'stopped-by-user' | (string & {}) | null
+  /** a job waiting in its queue (a view build, a report check) */
+  waiting?: 'queued' | (string & {}) | null
+  /** the orientation while it waits for its critic's report */
+  paused?: 'critique' | (string & {}) | null
+  /** the latest run began with a message the analyst typed in Claude Code's agent tray */
+  typed_in_tray?: boolean | null
+  // ---- main only (lane L: cc_plugin.main_fenced, launch.json, module_bridge) ----
+  /** main runs inside thimble's fence (cc_plugin.main_fenced) */
+  fenced?: boolean | null
+  /** `thimble` launched main (launch.json names its session) */
+  launched?: boolean | null
+  /** thimble's hooks module holds the long poll for main (module_bridge.live) */
+  module?: boolean | null
+  /** why it does not (module_bridge.why_not), '' while it does */
+  module_why?: string | null
+}
+
+/** What `thimble demo` installed a workspace from (backend demo.install): the dataset, when its orientation ran and on
+ * what model, the folder of the files it ran on, the orientation's chat, and whether its session came with it. */
+export interface PrecachedMark {
+  dataset?: string | null
+  created?: string | null
+  /** when the orientation ended (or started) */
+  ran?: string | null
+  installed?: string | null
+  folder?: string | null
+  orientation?: string | null
+  model?: string | null
+  /** `full` for a full export, `outputs-only` for the outputs alone (what demos/ holds) */
+  format?: string | null
+  /** whether the orientation's Claude Code session came with it, so a message in its thread continues it */
+  kept?: boolean | null
 }
 
 /** A follow-up of the orientation as its chat's meta keeps it. */
@@ -1756,12 +2005,6 @@ export interface FollowUpRecord {
   views?: number
 }
 
-/** A message to the orientation waiting for its run to end: from the analyst in its thread (`browser`) or from main. */
-export interface QueuedMessage {
-  text: string
-  by?: string
-  ts?: string
-}
 /** Where the analyst's line was typed: the terminal of the Claude Code session, or the browser's composer. */
 export type RecordBy = 'terminal' | 'browser'
 

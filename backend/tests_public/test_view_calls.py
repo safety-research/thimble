@@ -10,7 +10,9 @@ import asyncio
 import contextlib
 import io
 import json
+import logging
 import os
+import shutil
 import sys
 import threading
 import time
@@ -159,7 +161,7 @@ def data(tmp_path, monkeypatch) -> Path:
 
 @pytest.fixture(autouse=True)
 def _fresh(monkeypatch):
-    for d in (view_calls._pools, view_calls._affinity, view_calls._calls, view_calls._cancelled):
+    for d in (view_calls._pools, view_calls._affinity, view_calls._calls, view_calls._cancelled, view_calls._spare_failed):
         d.clear()
     views._memo.clear()
     views._ready.clear()
@@ -169,7 +171,7 @@ def _fresh(monkeypatch):
     views._folder_cache.clear()
     sys.modules.pop("_thimble_views", None)
     yield
-    for d in (view_calls._pools, view_calls._affinity, view_calls._calls, view_calls._cancelled):
+    for d in (view_calls._pools, view_calls._affinity, view_calls._calls, view_calls._cancelled, view_calls._spare_failed):
         d.clear()
     sys.modules.pop("_thimble_views", None)
 
@@ -283,6 +285,108 @@ async def test_a_workspace_s_kernels_shut_down_elsewhere_are_forgotten(ws, kerne
     assert [w.name for w in view_calls._pools[CORPUS]] == ["views"]
     await notebook.shutdown_workspace(CORPUS)
     assert CORPUS not in view_calls._pools and not any(k[0] == CORPUS for k in view_calls._affinity)
+
+
+async def _settle() -> None:
+    """Let the spare kernel's task run to its end."""
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+
+async def test_a_spare_kernel_that_does_not_start_is_tried_again_after_a_wait_that_grows_and_is_logged_once(
+        ws, kernels, monkeypatch, caplog):
+    """A spare kernel that does not start (the server out of file descriptors, say) is not tried again at each slow
+    call, which made one try about every second: the next waits SPARE_BACKOFF_S, doubled at each failure in a row up to
+    SPARE_BACKOFF_MAX_S; the log says it once, with its traceback, while the error stays the same; and a start that
+    works ends the wait."""
+    tries: list[str] = []
+
+    async def fails(c: str, name: str) -> None:
+        tries.append(name)
+        raise RuntimeError("the kernel died before answering kernel_info")
+
+    monkeypatch.setattr(view_calls, "_start", fails)
+    with caplog.at_level(logging.DEBUG, logger="thimble.view_calls"):
+        view_calls._spare(CORPUS)
+        await _settle()
+        assert tries == ["views"] and not view_calls._pools.get(CORPUS), "the worker that did not start is forgotten"
+        failing = view_calls._spare_failed[CORPUS]
+        assert failing.n == 1 and failing.until - time.monotonic() == pytest.approx(view_calls.SPARE_BACKOFF_S, abs=1)
+        for _ in range(5):
+            view_calls._spare(CORPUS)
+            await _settle()
+        assert tries == ["views"], "slow calls within the wait start no spare"
+        failing.until = 0.0  # the wait is over
+        view_calls._spare(CORPUS)
+        await _settle()
+        failing = view_calls._spare_failed[CORPUS]
+        assert len(tries) == 2 and failing.n == 2
+        assert failing.until - time.monotonic() == pytest.approx(2 * view_calls.SPARE_BACKOFF_S, abs=1)
+        view_calls._spare_failed[CORPUS] = view_calls.Failing(20, 0.0, failing.error)
+        view_calls._spare(CORPUS)
+        await _settle()
+        assert view_calls._spare_failed[CORPUS].until - time.monotonic() == pytest.approx(view_calls.SPARE_BACKOFF_MAX_S, abs=1)
+    said = [r for r in caplog.records if r.levelno >= logging.WARNING and "did not start" in r.getMessage()]
+    assert len(said) == 1 and said[0].exc_info, [r.getMessage() for r in said]
+
+    monkeypatch.setattr(view_calls, "_start", kernels.start)
+    view_calls._spare_failed[CORPUS].until = 0.0
+    view_calls._spare(CORPUS)
+    await _settle()
+    assert CORPUS not in view_calls._spare_failed and kernels.started == ["views"]
+    assert [(w.name, w.busy) for w in view_calls._pools[CORPUS]] == [("views", False)]
+
+
+async def test_a_workspace_that_is_gone_gets_no_spare_kernel_and_its_kernels_are_shut_down(ws, data, kernels, monkeypatch):
+    """When the workspace's corpus is gone (its folder or its registration), a slow call starts no spare kernel: the
+    workspace's kernels are shut down and its pool and failures forgotten, so nothing retries for it."""
+    from app import notebook  # noqa: PLC0415
+
+    shut: list[str] = []
+
+    async def shutdown_workspace(c: str) -> None:
+        shut.append(c)
+        view_calls.forget_workspace(c)
+
+    monkeypatch.setattr(notebook, "shutdown_workspace", shutdown_workspace)
+    view_calls._pool(CORPUS).append(view_calls.Worker(CORPUS, "views", busy=True))
+    view_calls._spare_failed[CORPUS] = view_calls.Failing(1, 0.0, "RuntimeError: x")
+    shutil.rmtree(data / CORPUS)
+    view_calls._spare(CORPUS)
+    await _settle()
+    assert kernels.started == [] and shut == [CORPUS]
+    assert CORPUS not in view_calls._pools and CORPUS not in view_calls._spare_failed
+
+
+async def test_a_spare_kernel_that_starts_after_its_workspace_s_kernels_were_forgotten_is_shut_down(ws, kernels, monkeypatch):
+    """A spare kernel still starting when its workspace's kernels are shut down elsewhere (a reset, a removal) is shut
+    down once it has started, rather than left running outside any pool."""
+    gate = asyncio.Event()
+
+    async def slow(c: str, name: str) -> None:
+        await gate.wait()
+
+    monkeypatch.setattr(view_calls, "_start", slow)
+    view_calls._spare(CORPUS)
+    await _settle()
+    view_calls.forget_workspace(CORPUS)
+    gate.set()
+    await _settle()
+    assert kernels.stopped == ["views"] and CORPUS not in view_calls._pools
+
+
+def test_registering_a_workspace_s_folder_again_lets_its_next_spare_kernel_start(ws, data):
+    """A folder registered again (`thimble demo --examples --refresh` registers each example's) gets a spare kernel at
+    its next slow call, without waiting out the failures before."""
+    from app import corpus  # noqa: PLC0415
+
+    view_calls._spare_failed[CORPUS] = view_calls.Failing(4, time.monotonic() + 100, "RuntimeError: x")
+    folder = data.parent / "logs"
+    folder.mkdir()
+    name = corpus.register_corpus(corpus.RegisterBody(path=str(folder)))["name"]
+    view_calls._spare_failed[name] = view_calls.Failing(4, time.monotonic() + 100, "RuntimeError: x")
+    corpus.register_corpus(corpus.RegisterBody(path=str(folder)))
+    assert name not in view_calls._spare_failed and CORPUS in view_calls._spare_failed
 
 
 async def test_cancelling_a_call_interrupts_its_kernel_which_settles_before_its_next_call(ws, kernels):

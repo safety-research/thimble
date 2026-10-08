@@ -423,6 +423,141 @@ async def test_a_prompt_label_reads_each_record_s_text(api, corpus, workspaces_t
         "runs.json#/runs/1": records.read(corpus / "runs.json", "runs.json", "/runs/1")["line"]}
 
 
+async def test_a_prompt_label_asks_one_call_per_fifty_records(api, corpus, workspaces_tmp, monkeypatch):
+    """Over short records a prompt label makes ceil(n / 50) classifier calls, each of up to 50 records in order."""
+    sizes: list[int] = []
+
+    async def classify(c, concept, items, comment=True, on_retry=None):
+        from app import model
+
+        sizes.append(len(items))
+        return model.CallResult(status="ok", output={"labels": [
+            {"i": n, "label": "no", "confidence": 0.9} for n in range(1, len(items) + 1)]})
+
+    monkeypatch.setattr(concepts, "classify_structured", classify)
+    (corpus / "many.jsonl").write_text("".join(json.dumps({"text": f"reply {n}"}) + "\n" for n in range(1, 121)))
+    k = await _label(api, name="refund", kind="prompt", description="asks for a refund")
+    s = await _apply(api, k, ["many.jsonl"])
+    assert s["status"] == "done" and s["labeled"] == 120 and sorted(sizes) == [20, 50, 50]
+
+
+def _agent_store(fork: bool) -> dict:
+    """An agent's conversations as one store of messages by id that each conversation lists in order (the shape of a
+    harness's per-agent file): a system prompt in a list of blocks, the only list at its top, then the store and the
+    conversations, `c2` forked from `c1` when `fork`."""
+    msgs = {f"m{i}": {"id": f"m{i}", "role": "user" if i % 2 == 0 else "assistant",
+                      "content": [{"type": "text", "text": f"message {i} " + "words " * 40}], "first_seen_ts": 1_790_000_000 + i}
+            for i in range(6)}
+    return {"agent": "a7", "system": [{"type": "text", "text": "You maintain a small app."}], "messages": msgs,
+            "conversations": {"c1": {"id": "c1", "messages": ["m0", "m1", "m2", "m3"], "forked_from": None, "forked_at": 0},
+                              "c2": {"id": "c2", "messages": ["m0", "m1", "m4", "m5"] if fork else ["m4", "m5"],
+                                     "forked_from": "c1" if fork else None, "forked_at": 2 if fork else 0}}}
+
+
+def _stores(corpus: Path) -> None:
+    (corpus / "transcripts").mkdir()
+    (corpus / "transcripts" / "a.json").write_text(json.dumps(_agent_store(True)))
+    (corpus / "transcripts" / "b.json").write_text(json.dumps(_agent_store(False)))
+    (corpus / "transcripts" / "c.json").write_text(json.dumps(_agent_store(True), indent=2))
+
+
+FORKS = ("def label(unit):\n"
+         "    convs = (unit['data'] or {}).get('conversations') or {}\n"
+         "    return 'fork' if any(c.get('forked_from') for c in convs.values()) else 'no fork'\n")
+
+
+async def test_a_file_label_s_code_gets_the_file_whole(api, corpus, workspaces_tmp, monkeypatch):
+    """A label that marks files gives its code each file whole as `data`: a JSON document parsed (whatever its records,
+    which leave out every entry beside its lists), a JSON lines file's records, a CSV file's rows, else its text; beside
+    `path` and the records a record label gets."""
+    from app import notebook
+
+    _stores(corpus)
+    monkeypatch.setattr(notebook, "execute_on", _code_inproc)
+    k = await _label(api, name="transcript forks", kind="code", spec=FORKS, marks="file", labels=["fork", "no fork"])
+    assert k["unit"] == "agent" and k["marks"] == "file"
+    s = await _apply(api, k, ["transcripts/*.json"])
+    assert s["status"] == "done" and s["failed"] == 0 and s["total"] == 3, s
+    assert await _values(workspaces_tmp / CORPUS, k) == {"transcripts/a.json": "fork", "transcripts/b.json": "no fork",
+                                                         "transcripts/c.json": "fork"}
+    shape = ("def label(unit):\n"
+             "    d = unit['data']\n"
+             "    kind = 'list' if isinstance(d, list) else 'text' if isinstance(d, str) else 'dict' if isinstance(d, dict) else 'none'\n"
+             "    first = unit['records'][0] if unit['records'] else None\n"
+             "    return (kind, 1.0, [unit['path'], type(first).__name__, 'records ' + str(len(unit['records'])), 'files ' + str(len(unit['files']))])\n")
+    k2 = await _label(api, name="shape", kind="code", spec=shape, marks="file", labels=["dict", "list", "text", "none"])
+    s = await _apply(api, k2, ["transcripts/a.json", "notes.jsonl", "orders.csv", "report.pdf", "runs.json"])
+    assert s["status"] == "done" and s["failed"] == 0, s
+    rows = {r["ref"]: (r["label"], r.get("spans")) for r in concepts.read_labels(workspaces_tmp / CORPUS, k2["id"])}
+    assert rows["transcripts/a.json"] == ("dict", ["transcripts/a.json", "dict", "records 1", "files 1"]), "its records: system/0 alone"
+    assert rows["runs.json"] == ("dict", ["runs.json", "dict", "records 2", "files 1"]), "its records: the runs, as a record label's"
+    assert rows["notes.jsonl"][0] == "list" and rows["orders.csv"] == ("list", ["orders.csv", "dict", "records 3", "files 1"])
+    assert rows["report.pdf"] == ("list", ["report.pdf", "dict", "records 3", "files 1"])
+
+
+async def test_a_file_too_large_to_hold_whole_gives_its_code_none_and_its_records(api, corpus, workspaces_tmp, monkeypatch):
+    from app import notebook
+
+    _stores(corpus)
+    monkeypatch.setattr(notebook, "execute_on", _code_inproc)
+    monkeypatch.setattr(concepts, "WHOLE_MAX_BYTES", 100)
+    spec = "def label(unit):\n    return 'none' if unit['data'] is None and unit['records'] else 'held'\n"
+    k = await _label(api, name="held", kind="code", spec=spec, marks="file", labels=["held", "none"])
+    s = await _apply(api, k, ["transcripts/a.json", "notes.jsonl"])
+    assert s["status"] == "done", s
+    assert await _values(workspaces_tmp / CORPUS, k) == {"transcripts/a.json": "none", "notes.jsonl": "held"}
+
+
+async def test_a_file_label_s_prompt_reads_a_json_document_whole_shortened_to_fit(api, corpus, workspaces_tmp, monkeypatch):
+    """A prompt label that marks files reads a JSON document as itself, not its records, as far as its model's context
+    holds (concepts.whole_read_chars); one longer than that keeps every part of it in view, its long strings and its
+    long lists and mappings shortened, and the run's `cut` says so."""
+    seen: dict[str, str] = {}
+
+    async def classify(c, concept, items, comment=True, on_retry=None):
+        from app import model
+
+        seen.update(items)
+        return model.CallResult(status="ok", output={"labels": [
+            {"i": n, "label": "fork" if '"forked_from": "c' in t else "no fork", "confidence": 0.9, "rationale": "r"}
+            for n, (_ref, t) in enumerate(items, 1)]})
+
+    monkeypatch.setattr(concepts, "classify_structured", classify)
+    _stores(corpus)
+    big = _agent_store(True)
+    big["messages"].update({f"x{i}": {"id": f"x{i}", "role": "user", "content": "padding " * 300} for i in range(400)})
+    (corpus / "transcripts" / "d.json").write_text(json.dumps(big))
+    assert (corpus / "transcripts" / "d.json").stat().st_size > 30 * concepts.UNIT_TEXT_MAX
+    k = await _label(api, name="transcript forks", kind="prompt", description="any conversation forks from another",
+                     marks="file", labels=["fork", "no fork"])
+    s = await _apply(api, k, ["transcripts/*.json"])
+    assert s["status"] == "done" and s["labeled"] == 4, s
+    assert await _values(workspaces_tmp / CORPUS, k) == {"transcripts/a.json": "fork", "transcripts/b.json": "no fork",
+                                                         "transcripts/c.json": "fork", "transcripts/d.json": "fork"}
+    assert json.loads(seen["transcripts/b.json"]) == _agent_store(False), "a document that fits, whole"
+    assert json.loads(seen["transcripts/d.json"]) == big and not s.get("cut"), "a million characters fit the model's context"
+    # a model that reads 30,000 characters of a file
+    monkeypatch.setattr(concepts, "READ_RESERVE_TOKENS", config.LONG_CONTEXT_TOKENS - concepts.UNIT_TEXT_MAX // concepts.CHARS_PER_TOKEN)
+    k = await _label(api, name="transcript forks 2", kind="prompt", description="any conversation forks from another",
+                     marks="file", labels=["fork", "no fork"])
+    s = await _apply(api, k, ["transcripts/*.json"])
+    assert s["status"] == "done" and s["labeled"] == 4, s
+    short = seen["transcripts/d.json"]
+    assert len(short) <= concepts.UNIT_TEXT_MAX and '"conversations"' in short and "more entries" in short
+    assert s["cut"]["n"] == 1 and s["cut"]["short"] == 1 and s["cut"]["refs"] == ["transcripts/d.json"], s
+    assert "shortened" in s["cut"]["line"] and "tokens" in s["cut"]["line"], s
+
+
+def test_fit_json_keeps_every_part_of_a_document_in_view():
+    doc = {"title": "t", "notes": ["x" * 5000, "short"], "rows": [{"id": i, "v": "y" * 50} for i in range(2000)], "end": 1}
+    text, short = concepts.fit_json(doc, 4000)
+    assert short and len(text) <= 4000
+    got = json.loads(text)
+    assert got["end"] == 1 and got["title"] == "t" and got["notes"][1] == "short"
+    assert got["rows"][-1].startswith("…[") and got["rows"][-1].endswith(" more]")
+    assert concepts.fit_json({"a": 1}, 100) == ('{"a": 1}', False)
+
+
 # --------------------------------------------------------------------------- marks in a view
 
 
