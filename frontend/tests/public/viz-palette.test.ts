@@ -7,7 +7,7 @@
 // apart from orange and sky.
 import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
-import { LABEL_ORDER } from '../../src/files/labels.ts'
+import { LABEL_ORDER, LABEL_WHEEL } from '../../src/files/labels.ts'
 import { MPL_CYCLE, restyle } from '../../src/lib/svg.ts'
 import { token } from '../../src/lib/vizTheme.ts'
 
@@ -179,6 +179,24 @@ test("the label colours' copies are the light paper's: the charts' fallbacks and
   const tour = readFileSync(new URL('../../public/tour/timeline/assets/frame-base.css', import.meta.url), 'utf8')
   const snap = Object.fromEntries([...tour.matchAll(/(--(?:label|viz)-[\w-]+):(#[0-9a-fA-F]{6})/g)].map((m) => [m[1], m[2].toLowerCase()]))
   for (const name of [...SLOTS, ...LABELS, '--label-none']) expect(snap[name], `${name} in the tour's frame-base.css`).toBe(BASE[name])
+})
+
+test("thimble-term's copies: its picker's places around the wheel, show_label's names, and each place's hue the light paper's", () => {
+  // the mod imports nothing outside its folder, so it keeps its own copies, each an array on one line
+  const mod = (file: string) => readFileSync(new URL(`../../../mods/thimble-term/hooks/${file}`, import.meta.url), 'utf8')
+  const list = (src: string, name: string): unknown[] => JSON.parse(new RegExp(`^export const ${name}\\b[^=]*= (\\[.*\\])(?: as const)?$`, 'm').exec(src)![1].replace(/'/g, '"'))
+  const labels = mod('labels.ts')
+  expect(list(labels, 'LABEL_WHEEL')).toEqual(LABEL_WHEEL)
+  expect(Object.fromEntries(list(labels, 'COLOR_NAMES').map((n, i) => [n, i + 1]))).toEqual(NAMES)
+  // one hue a place for the terminal's light and dark panels (its test holds each at 3:1 on both): the light paper's
+  // hue, its lightness moved
+  const paint = mod('paint.ts')
+  const hues = [...list(paint, 'LABEL_HUES'), ...list(paint, 'PICKED_HUES')] as string[]
+  expect(hues).toHaveLength(LABELS.length + PICKED.length)
+  hues.forEach((c, i) => {
+    const d = Math.abs(chromaHue(c)[1] - chromaHue(BASE[`--label-${i + 1}`])[1])
+    expect(Math.min(d, 360 - d), `thimble-term's color ${i + 1} ${c} and --label-${i + 1} ${BASE[`--label-${i + 1}`]}`).toBeLessThanOrEqual(6)
+  })
 })
 
 describe.each(Object.keys(PAPERS))('the picked colours on the %s paper', (paper) => {

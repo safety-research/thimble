@@ -163,7 +163,7 @@ the type area runs from A0 to R.
 | new | `success` | the word `new` and `N new` | new |
 | tip | `userMessageBackground`, a background | the tip of the citation under the pointer | |
 | inline code | `permission` | inline code in thimble-term's own paragraphs | code |
-| palette | `SERIES`, seven hues that keep 3:1 on both panels; `LABEL_HUES`, the browser's twelve label colors moved to keep it too | `●`, marks, bars, swatches | a value of the color field |
+| palette | `SERIES`, seven hues that keep 3:1 on both panels; `LABEL_HUES` and `PICKED_HUES`, the browser's eighteen label colors moved to keep it too | `●`, marks, bars, swatches | a value of the color field |
 | red | `error` | a problem's words and its `×` or `!` | a problem |
 | selection | `selectionBg`, a background | a choice in use (rule 21) | |
 | panel | `composerSidebarBackground`, a background | the whole panel | |
@@ -177,8 +177,8 @@ and, given `startLine`, its dim gutter of line numbers.
     text color (`● dse 3,908`). A chart with no color field is one series, drawn in the first hue. The bar or mark
     under the pointer turns the text color and its readout stays plain. A field colors at most six values, past which
     its marks take the text color (transcripts cycle the hues). A label's values take the colors their classes have,
-    the browser's label colors (`LABEL_HUES`, which the analyst picks in the label panel by the names show_label
-    takes), wherever they show: the label panel, home, a label card and a card that read the label; a label with no
+    the browser's label colors (`LABEL_HUES`, then `PICKED_HUES` for red, purple and pink, which the analyst picks in
+    the label panel by the names show_label takes), wherever they show: the label panel, home, a label card and a card that read the label; a label with no
     classes takes the series in its values' order. A label's catch-all value ("other", a class with no color) takes dim
     marks. A field with one value draws dim marks.
 21. **The selection background** marks a choice in use among choices shown together: a card's parameter, a label's
@@ -824,9 +824,11 @@ typing, every key. A view built in browser mode is one line that says so, and ho
   share (`7%` beside `93%`; one decimal under 1%); the values to edit. The counts apply the analyst's verdicts, as
   thimble.labels() reads the rows: a record set to another value counts under that value, and the toggle row says how
   many (`▸ counts  500 · 1 set by you`). After each value's share, its controls: `color` (a label over files) shows the
-  label colors under it at A4, each `●` in its hue and its name as show_label names it, the one it has on the
-  selection background, a click giving it that color (`thimble act label-show`, a value that had it taking the old
-  one); `filter` keeps only the units of that value in the label's scope (Files, the canvas or the report, `thimble
+  eighteen label colors under it at A4 around the color wheel, as the browser's pickers show them: a column per hue
+  (red, orange, gold, green, teal, sky, blue, purple, pink), its light place above its dark, each `●` in its hue and
+  its name as show_label names it, the one it has on the selection background, a click giving it that color (`thimble
+  act label-show`, a value that had it taking the old one); a narrow pane wraps the columns, a blank row between their
+  rows; `filter` keeps only the units of that value in the label's scope (Files, the canvas or the report, `thimble
   act label-filter`, as a label card's value does), the value then on the selection background, its control `clear
   filter` and the toggle row saying `filtered to <value>`. In a pane too narrow for them beside a bar of 8 cells, the
   controls stand on a row of their own under each value. A link to the label in a reply (`[33](concept:<id>/yes)`) opens the panel with

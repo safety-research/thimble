@@ -99,12 +99,12 @@ Claude Code's panel chrome, no right-click menu.
   column (`hooks/field.tsx`: a click gives it the keyboard, Enter saves it, `thimble act label`); `run on a sample` and
   `run on all N`, which save what was typed first and run it (`thimble act label-run`), and `stop` (s) while it runs
   (`thimble act label-stop`), `rename` (n) and `delete` (k), whose undo the labels list then offers (u, `thimble act
-  label-undelete`); then `▸ counts` (with the values to edit, and each value's `color`, the label colors by the names
-  show_label takes, and `filter`, `thimble act label-show` and `label-filter`), `▸ examples` (the held-out agreement;
-  each record under its value, `agree` or another value, `thimble act verdict`; `… N more` per value, `thimble state
-  label --rows`; a JSON record's other fields on one dim row cut at whole pairs) and
+  label-undelete`); then `▸ counts` (with the values to edit, and each value's `color`, the eighteen label colors
+  around the color wheel by the names show_label takes, and `filter`, `thimble act label-show` and `label-filter`),
+  `▸ examples` (the held-out agreement; each record under its value, `agree` or another value, `thimble act verdict`;
+  `… N more` per value, `thimble state label --rows`; a JSON record's other fields on one dim row cut at whole pairs) and
   `▸ cards` (the cards that use it, each a click away), folded. A label's values take their classes' colors wherever
-  they show (`hooks/labels.ts`, `paint.ts` `LABEL_HUES`).
+  they show (`hooks/labels.ts`, `paint.ts` `LABEL_HUES` and `PICKED_HUES`).
   Nothing else shows until it is opened. A code label's code runs only in main's Bash: its run asks main to run the
   `thimble-run label` command it gives.
 - **Side threads.** The `?` beside a passage or a card, a press on a card's title or mark, a selection's "ask", or `ask

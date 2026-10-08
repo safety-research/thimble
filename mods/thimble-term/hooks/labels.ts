@@ -1,16 +1,22 @@
 // The label panel's parts that draw nothing themselves (SPEC.md, section 7, "The label panel"):
 //
-// - the colors of a label's values: its classes' colors, the browser's --label-1..12 (paint.ts LABEL_HUES) by the
-//   names show_label takes (backend concepts.COLOUR_NAMES), 0 dim;
+// - the colors of a label's values: its classes' colors, the browser's --label-1..18 (paint.ts LABEL_HUES, then
+//   PICKED_HUES) by the names show_label takes (backend concepts.COLOUR_NAMES), 0 dim, and the picker's places around
+//   the color wheel (backend/app/label_wheel.json);
 // - the held-out agreement line, in the browser's words (frontend canvas/details.ts agreementLine);
 // - what the panel asks of `thimble state label` (`--rows`, the records of a value its `… N more` asked for);
 // - the label deleted last, whose delete the labels list offers to undo (`thimble act label-undelete`).
 import { COLORS, LABEL_HUES, PICKED_HUES } from './paint'
 
-/** The label colors by the names show_label takes, in the palette's order: `blue` is color 1. */
-export const COLOR_NAMES = ['blue', 'orange', 'green', 'sky blue', 'olive', 'teal', 'brown', 'navy', 'grass green', 'cerulean', 'chestnut', 'cyan'] as const
+/** The label colors by the names show_label takes, in the palette's order: `blue` is color 1, `cyan` 12, then red,
+ *  purple and pink (13 to 18), which a value takes only when the analyst picks it (backend concepts.COLOUR_NAMES). */
+export const COLOR_NAMES = ['blue', 'orange', 'green', 'sky blue', 'olive', 'teal', 'brown', 'navy', 'grass green', 'cerulean', 'chestnut', 'cyan', 'red', 'dark red', 'purple', 'dark purple', 'pink', 'dark pink'] as const
 
-/** A value of a label as the concept keeps it: its name, its color (1 to 12, 0 for none) and whether Files marks it. */
+/** The picker's places around the color wheel, as the browser's pickers show them: a column per hue (red, orange, gold,
+ *  green, teal, sky, blue, purple, pink), its light place above its dark (backend/app/label_wheel.json). */
+export const LABEL_WHEEL: readonly (readonly [number, number])[] = [[13, 14], [2, 11], [5, 7], [9, 3], [12, 6], [4, 10], [1, 8], [15, 16], [17, 18]]
+
+/** A value of a label as the concept keeps it: its name, its color (1 to 18, 0 for none) and whether Files marks it. */
 export type LabelClass = { name?: string; color?: number | null; highlight?: boolean }
 
 /** Each value's color by its name, from a label's classes; undefined when it has none, so the colors follow the
@@ -29,9 +35,9 @@ export function hueOf(n: number): string {
   return n > 0 ? LABEL_HUES[(n - 1) % LABEL_HUES.length]! : COLORS.dim
 }
 
-/** The name of label color `n`, as show_label takes it; '' for 0. */
+/** The name of label color `n` (1 to 18), as show_label takes it; '' for 0 and for a number that is no color. */
 export function colorName(n: number | undefined): string {
-  return typeof n === 'number' && n > 0 ? (COLOR_NAMES[(n - 1) % COLOR_NAMES.length] ?? '') : ''
+  return typeof n === 'number' && Number.isInteger(n) && n > 0 ? (COLOR_NAMES[n - 1] ?? '') : ''
 }
 
 /** The label's agreement with the values the analyst set, not counting those its runs took as examples (the concept's

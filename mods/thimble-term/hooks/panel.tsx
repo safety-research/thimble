@@ -47,7 +47,7 @@ import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, th
 import { COLORS, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, citeStatus, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
 import { PANEL, citePage, closePanel, deleteLabel, filterLabel, handBack, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
-import { COLOR_NAMES, MORE_ROWS, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, setLabelGone } from './labels'
+import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, setLabelGone } from './labels'
 import type { LabelPatch } from './term'
 import type { Ctx } from './ctx'
 import { act } from './data'
@@ -2370,16 +2370,27 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
             {controls}
           </Box>,
         )
-      // the label colors under the value whose `color` was pressed, each `●` in its hue and its name, the one it has
-      // on the selection background (as show_label names them)
+      // the eighteen label colors under the value whose `color` was pressed, around the color wheel as the browser's
+      // pickers show them: a column per hue, its light place above its dark (LABEL_WHEEL), each `●` in its hue and its
+      // name as show_label names it, the one it has on the selection background; a narrow pane wraps the columns, a
+      // blank row between their rows
       if (files && labelPainting === `${id}\n${v}`) {
         const now = colors?.[v]
+        const swatch = (n: number) => {
+          const c = COLOR_NAMES[n - 1]!
+          return (
+            <Box key={`lb-pick-${v}-${c}`} flexDirection="row">
+              <Text color={hueOf(n)}>{'● '}</Text>
+              {now === n ? <Text backgroundColor={COLORS.selected}>{c}</Text> : <Button key={`lb-pick-${v}-${n}`} label={c} plain onPress={() => void pick(v, c)()} />}
+            </Box>
+          )
+        }
         rows.push(
-          <Box key={`lb-colors-${v}`} flexDirection="row" flexWrap="wrap" columnGap={2} marginLeft={4}>
-            {COLOR_NAMES.map((c, k) => (
-              <Box key={`lb-pick-${v}-${c}`} flexDirection="row">
-                <Text color={hueOf(k + 1)}>{'● '}</Text>
-                {now === k + 1 ? <Text backgroundColor={COLORS.selected}>{c}</Text> : <Button key={`lb-pick-${v}-${k + 1}`} label={c} plain onPress={() => void pick(v, c)()} />}
+          <Box key={`lb-colors-${v}`} flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={1} marginLeft={4}>
+            {LABEL_WHEEL.map(([light, dark]) => (
+              <Box key={`lb-hue-${v}-${light}`} flexDirection="column">
+                {swatch(light)}
+                {swatch(dark)}
               </Box>
             ))}
           </Box>,

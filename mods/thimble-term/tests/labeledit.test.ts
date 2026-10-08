@@ -6,7 +6,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { LABEL_HUES, PICKED_HUES } from '../hooks/paint'
-import { hueOf } from '../hooks/labels'
+import { COLOR_NAMES, LABEL_WHEEL, colorName, hueOf } from '../hooks/labels'
 import { CWD, LABEL, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -101,20 +101,24 @@ function rows(n: unknown, w: number): string[] {
       const cw = x.grow ? Math.floor(left / Math.max(1, grown)) : natural[i]!
       return { cw, lines: rows(x.k, Math.max(1, cw)) }
     })
-    const h = Math.max(1, ...cols.map(c => c.lines.length))
-    body = Array.from({ length: h }, (_, y) => cols.map(c => (c.lines[y] ?? '').padEnd(c.cw)).join(' '.repeat(gap)).replace(/\s+$/, ''))
-    if (p.flexWrap === 'wrap' && body.length === 1 && body[0]!.length > inner) {
-      // a wrapping row: its parts on as many rows as they need
-      const out: string[] = []
-      let line = ''
+    // one line of parts side by side, as tall as its tallest part
+    const side = (line: typeof cols) =>
+      Array.from({ length: Math.max(1, ...line.map(c => c.lines.length)) }, (_, y) => line.map(c => (c.lines[y] ?? '').padEnd(c.cw)).join(' '.repeat(gap)).replace(/\s+$/, ''))
+    body = side(cols)
+    if (p.flexWrap === 'wrap' && Math.max(...body.map(r => r.length)) > inner) {
+      // a wrapping row: its parts on as many lines as they need, `rowGap` blank rows between the lines
+      const lines: (typeof cols)[] = []
+      let at = 0
       for (const c of cols) {
-        const s = c.lines[0] ?? ''
-        if (line && line.length + gap + s.length > inner) {
-          out.push(line)
-          line = s
-        } else line = line ? `${line}${' '.repeat(gap)}${s}` : s
+        if (lines.length && at + gap + c.cw <= inner) {
+          lines[lines.length - 1]!.push(c)
+          at += gap + c.cw
+        } else {
+          lines.push([c])
+          at = c.cw
+        }
       }
-      body = [...out, line]
+      body = lines.flatMap((line, i) => [...Array.from({ length: i ? Number(p.rowGap ?? 0) : 0 }, () => ''), ...side(line)])
     }
   }
   if (border) {
@@ -132,10 +136,10 @@ function flat(n: unknown): string {
   return flat(o.children ?? o.props?.children)
 }
 
-/** The panel at 120 columns as rows of text, printed for a reader of the test's output. */
-async function drawing(pane: M, what: string): Promise<string> {
-  const text = rows(await pane.drawn(), 118).map(r => r.replace(/\s+$/, '')).join('\n')
-  console.log(`\n--- ${what} (120 columns)\n${text}\n---`)
+/** The panel at 120 columns (or `columns`) as rows of text, printed for a reader of the test's output. */
+async function drawing(pane: M, what: string, columns = 120): Promise<string> {
+  const text = rows(await pane.drawn(), columns - 2).map(r => r.replace(/\s+$/, '')).join('\n')
+  console.log(`\n--- ${what} (${columns} columns)\n${text}\n---`)
   return text
 }
 
@@ -161,7 +165,7 @@ test('a label over files is turned on or off in Files from its panel: `in files:
   await pane.unmount()
 })
 
-test("a value's `color` shows the label colors by name under it, the one it has lit; a pick sends `label-show` with the name and its marks take the hue", async ($, on) => {
+test("a value's `color` shows the eighteen label colors by name under it around the color wheel, the one it has lit; a pick sends `label-show` with the name and its marks take the hue", async ($, on) => {
   const w = world(on)
   label(w).classes = [{ name: 'proxy-link', color: 2, highlight: true }, { name: 'none', color: 0, highlight: false }]
   let pane = await labelPanel($, w)
@@ -170,13 +174,20 @@ test("a value's `color` shows the label colors by name under it, the one it has 
   pane = await press($, w, pane, 'hk-counts')
   pane = await press($, w, pane, 'lb-color-proxy-link')
   const text = shown(await pane.drawn())
-  for (const c of ['blue', 'orange', 'green', 'sky blue', 'olive', 'teal', 'brown', 'navy', 'grass green', 'cerulean', 'chestnut', 'cyan']) expect(text).toContain(c)
+  for (const c of ['blue', 'orange', 'green', 'sky blue', 'olive', 'teal', 'brown', 'navy', 'grass green', 'cerulean', 'chestnut', 'cyan', 'red', 'dark red', 'purple', 'dark purple', 'pink', 'dark pink']) expect(text).toContain(c)
   // the color it has on the selection background, each other a click away, each ● in its hue
   const tree = JSON.stringify(await pane.drawn())
   expect(tree).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":["orange"]}')
   expect(await pane.find({ type: 'Button', key: 'lb-pick-proxy-link-6' })).toBeDefined()
+  expect(await pane.find({ type: 'Button', key: 'lb-pick-proxy-link-13' })).toMatchObject({ props: { label: 'red' } })
   expect(tree).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[5]}"},"children":["● "]}`)
-  await drawing(pane, "the label panel, its counts open and proxy-link's colors shown")
+  expect(tree).toContain(`{"type":"Text","props":{"color":"${PICKED_HUES[3]}"},"children":["● "]}`)
+  // as the browser's pickers: a column per hue, red to pink, its light place above its dark, each column one width
+  const drawn = (await drawing(pane, "the label panel, its counts open and proxy-link's colors shown")).split('\n')
+  const top = drawn.findIndex(r => /● red {2}/.test(r))
+  expect(drawn[top]).toMatch(/^ +● red +● orange +● olive +● grass green +● cyan +● sky blue +● blue +● purple +● pink$/)
+  expect(drawn[top + 1]).toMatch(/^ +● dark red +● chestnut +● brown +● green +● teal +● cerulean +● navy +● dark purple +● dark pink$/)
+  for (const [light, dark] of LABEL_WHEEL) expect(drawn[top]!.indexOf(`● ${COLOR_NAMES[light - 1]}`)).toBe(drawn[top + 1]!.indexOf(`● ${COLOR_NAMES[dark - 1]}`))
   // thimble answers with proxy-link teal (show_label's names)
   label(w).classes = [{ name: 'proxy-link', color: 6, highlight: true }, { name: 'none', color: 0, highlight: false }]
   pane = await press($, w, pane, 'lb-pick-proxy-link-6')
@@ -187,6 +198,30 @@ test("a value's `color` shows the label colors by name under it, the one it has 
   expect(after).toContain(`{"type":"Text","props":{"color":"${LABEL_HUES[5]}"},"children":["● "]}`)
   expect(after).toMatch(new RegExp(`"color":"${LABEL_HUES[5]}"\\},"children":\\["█+"\\]`))
   expect(after).toContain('{"type":"Text","props":{"dimColor":true},"children":["● "]}')
+  // a color only the analyst picks, by the name show_label takes: dark purple, color 16
+  pane = await press($, w, pane, 'lb-color-proxy-link')
+  label(w).classes = [{ name: 'proxy-link', color: 16, highlight: true }, { name: 'none', color: 0, highlight: false }]
+  pane = await press($, w, pane, 'lb-pick-proxy-link-16')
+  expect(w.acts).toContainEqual({ kind: 'label-show', payload: { label: LABEL.id, colours: { 'proxy-link': 'dark purple' } } })
+  expect(JSON.stringify(await pane.drawn())).toMatch(new RegExp(`"color":"${PICKED_HUES[3]}"\\},"children":\\["█+"\\]`))
+  await pane.unmount()
+})
+
+test("in a narrow pane a value's colors wrap by hue, each hue's light place still above its dark", async ($, on) => {
+  const w = world(on)
+  label(w).classes = [{ name: 'proxy-link', color: 2, highlight: true }, { name: 'none', color: 0, highlight: false }]
+  let pane = await labelPanel($, w)
+  pane = await press($, w, pane, 'hk-counts')
+  pane = await press($, w, pane, 'lb-color-proxy-link')
+  await pane.unmount()
+  const NARROW = { ...(PANE as unknown as Record<string, unknown>), viewport: { columns: 54, rows: 60 }, props: { title: 'thimble', isFocused: true, bodyColumns: 50, placement: 'dock', scroll: { bodyRows: 56 }, view: {} } } as never
+  pane = (await $.ui.mount(NARROW)) as unknown as M
+  const wheel = (await pane.find({ type: 'Box', key: 'lb-colors-proxy-link' })) as Node | undefined
+  expect(wheel?.props).toMatchObject({ flexDirection: 'row', flexWrap: 'wrap' })
+  const hues = (wheel?.children ?? wheel?.props?.children ?? []) as Node[]
+  expect(hues.map(h => [h.props?.flexDirection, shown(h)])).toEqual(LABEL_WHEEL.map(([light, dark]) => ['column', `● ${COLOR_NAMES[light - 1]}● ${COLOR_NAMES[dark - 1]}`]))
+  const text = await drawing(pane, "proxy-link's colors in a narrow pane", 54)
+  expect(text).toMatch(/● red +● orange +● olive\n +● dark red +● chestnut +● brown\n/)
   await pane.unmount()
 })
 
@@ -334,6 +369,13 @@ test('each label color keeps 3:1 against white, a light panel, black and a dark 
   for (const hue of PICKED_HUES) for (const bg of ['#ffffff', '#f0f0f0', '#000000', '#1e1e1e']) expect(ratio(hue, bg)).toBeGreaterThanOrEqual(3)
   expect([13, 18].map(hueOf)).toEqual([PICKED_HUES[0], PICKED_HUES[5]])
   expect(hueOf(1)).toBe(LABEL_HUES[0])
+})
+
+test('each label color has the name show_label takes for it, and the wheel holds each of the eighteen once', () => {
+  expect([1, 2, 12, 13, 14, 15, 16, 17, 18].map(colorName)).toEqual(['blue', 'orange', 'cyan', 'red', 'dark red', 'purple', 'dark purple', 'pink', 'dark pink'])
+  expect([0, 19, undefined].map(colorName)).toEqual(['', '', ''])
+  expect(COLOR_NAMES.length).toBe(LABEL_HUES.length + PICKED_HUES.length)
+  expect(LABEL_WHEEL.flat().sort((a, b) => a - b)).toEqual(Array.from({ length: 18 }, (_, i) => i + 1))
 })
 
 test("a label's values take their classes' colors on its card in the chat and on home, the negative dim", async ($, on) => {
