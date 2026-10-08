@@ -1,7 +1,7 @@
 // The view kit's time range selector (backend/app/viewer_range.js) and a list's two tracks (viewer_colour.js) in a real
 // browser, a page holding the view in a sandboxed frame: the viewfinder's edge zooms, its middle pans, a double click
 // shows the whole span, a drag across the whole span frames a new range, the keys zoom and pan, and Ctrl with the wheel
-// zooms around the pointer; the hover tip stands under the overview, and the readout keeps the overview in place as it
+// zooms around the pointer, telling onInput at each step and onChange once it stops; the hover tip stands under the overview, and the readout keeps the overview in place as it
 // zooms; the overview draws its records in the Color by
 // colours, grey with Off, one colour per pixel row; a long list gets the zoomed track at the outer edge beside the
 // overview, its colours faded beyond the part in view, which lies under a lens joined to the overview's frame by two
@@ -252,6 +252,29 @@ describe('the time range selector in a frame', () => {
     const under = span[0] + (span[1] - span[0]) * 0.25
     assert.ok(s.from < under && s.to > under, JSON.stringify(s))
     assert.ok(Math.abs((under - s.from) / (s.to - s.from) - 0.25) < 0.05, 'and keeps its place in the viewfinder')
+    await page.close()
+  })
+
+  test('the wheel tells onInput at each step that moves the viewfinder, and onChange once it stops', async () => {
+    const doc = VIEW.replace('const rows = Array.from', 'window.inputs = []; window.changes = []\nconst rows = Array.from').replace(
+      'onChange: draw })\nfunction draw',
+      'onInput: (r) => inputs.push([r.from, r.to]), onChange: (r) => { changes.push([r.from, r.to]); draw() } })\nfunction draw',
+    )
+    const { page, frame } = await framed(1, doc)
+    const seen = () => frame().evaluate(() => ({ inputs: (window as any).inputs.slice() as number[][], changes: (window as any).changes.slice() as number[][] }))
+    const box = (await frame().locator('.thimble-range-strip').boundingBox())!
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2)
+    await page.keyboard.down('Control')
+    for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -100)
+    await page.keyboard.up('Control')
+    const a = await seen()
+    assert.equal(a.inputs.length, 3, `one onInput per step: ${JSON.stringify(a)}`)
+    await page.waitForTimeout(400)
+    const b = await seen()
+    assert.ok(b.changes.length >= 1 && b.changes.length <= 3, JSON.stringify(b))
+    assert.deepEqual(b.changes.at(-1), a.inputs.at(-1), 'the range settles where the last step left it')
+    const s = await state(frame)
+    assert.deepEqual([s.from, s.to], a.inputs.at(-1))
     await page.close()
   })
 

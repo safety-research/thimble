@@ -55,6 +55,7 @@ Each channel has one meaning. A run the table does not cover is regular, in the 
 | a border | a card, and a text field | a panel's regions |
 | **bold** | a title or a heading (rule 7) | names in a list, values, the selected row, new |
 | green | new | anything else |
+| diff green and red | the lines a diff added and removed, and their marks | anything else |
 | dim | secondary | a name, a number in a number column, a flagged value, a control |
 | blue, underlined | a link: a citation's value, the place after `↗`, a label's name on a card | controls, rows a click selects |
 | blue, in brackets `[ … ]` | a chip: a citation that names only its place (`[ card ]`) | controls, a citation with words |
@@ -165,6 +166,7 @@ the type area runs from A0 to R.
 | inline code | `permission` | inline code in thimble-term's own paragraphs | code |
 | palette | `SERIES`, seven hues that keep 3:1 on both panels; `LABEL_HUES` and `PICKED_HUES`, the browser's eighteen label colors moved to keep it too | `●`, marks, bars, swatches | a value of the color field |
 | red | `error` | a problem's words and its `×` or `!` | a problem |
+| diff | `diffAddedWord`, `diffRemovedWord` | the lines a diff added and removed, and their marks | a diff, as Claude Code colors one |
 | selection | `selectionBg`, a background | a choice in use (rule 21) | |
 | panel | `composerSidebarBackground`, a background | the whole panel | |
 
@@ -187,7 +189,9 @@ and, given `startLine`, its dim gutter of line numbers.
 22. **Red** marks a problem and only a problem: a failure, a citation whose value is not at its place, a card that
     cannot be drawn, a run's error, a document's warning or caution. `×` is a failure and `!` something usable with a
     problem. Negative numbers are drawn as positive ones are.
-23. No other color: no warning amber, and no green except `new`.
+23. No other color: no warning amber, and no green except `new` and a diff's added lines. A diff's added and removed
+    lines and their marks take Claude Code's own diff colors, `diffAddedWord` and `diffRemovedWord`, not `success` or
+    `error`.
 
 ### 5. Symbols
 
