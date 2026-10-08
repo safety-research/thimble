@@ -901,16 +901,12 @@ export const register: Register = on => {
       const columns = (e.surface === 'terminal' ? e.viewport?.columns : 0) || pending.columns || 0
       const more = pending.floor && columns ? pending.floor - columns : 0
       if (pending.floor && columns && more <= 0) $.clock.after(0, () => void retryPending(cx, columns))
-      const why = more > 0 ? ` · opens on its own at ${pending.floor} columns (${more} more)` : pending.noScreen ? ' · no attached screen draws panels' : ''
       rows.push(
         <Box key="above-panel" flexDirection="row">
           {label('panel')}
           <Box flexDirection="row" columnGap={2} flexShrink={1}>
             <Box flexShrink={1}>
-              <Text wrap="truncate-end">
-                {`${pending.title} is ready`}
-                {why ? <Text dimColor>{why}</Text> : null}
-              </Text>
+              <Text wrap="truncate-end">{`${pending.title} is ready`}</Text>
             </Box>
             <Box flexDirection="row" columnGap={2} flexShrink={0}>
               <Button key="above-panel-open" label="open panel" plain onPress={() => openPending(cx)} />

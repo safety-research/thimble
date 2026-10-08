@@ -621,6 +621,9 @@ export async function openPending(cx: Ctx): Promise<void> {
   const p = await cx.panel()
   if (!p) return void (await cx.setPending(null))
   await placePanel(cx, p)
+  // still not placed after the press: the terminal is too narrow for the panel (Matt, 10-08: just the button, and
+  // feedback when it is too narrow)
+  if (rt.waiting) cx.toast('the terminal is too narrow for thimble\'s panel: widen it, then press open panel')
   void loadPanel(cx, p).then(() => cx.bumpPanel())
 }
 

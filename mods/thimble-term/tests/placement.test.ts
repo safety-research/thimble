@@ -36,7 +36,7 @@ test('Claude Code leaves home undrawn when main opens it on a terminal 120 colum
   await homeFromMain(w)
   expect(pl.log).toEqual([{ id: PANEL, asked: false, placed: false }])
   const above = (await $.ui.mount(aboveAt(120))) as unknown as M
-  expect(shown(await above.find({ type: 'Box', key: 'above-panel' }))).toBe('  panelHome is ready · opens on its own at 144 columns (24 more)open paneldismiss')
+  expect(shown(await above.find({ type: 'Box', key: 'above-panel' }))).toBe('  panelHome is readyopen paneldismiss')
   // the press hands back the open, so Claude Code counts it as the person's and places it at this width
   await above.press({ key: 'above-panel-open' })
   expect(pl.log.at(-1)).toEqual({ id: PANEL, asked: true, placed: true })
@@ -80,7 +80,7 @@ test('`/thimble` and a press in main\'s chat open the panel at 90 columns; a cli
   await w.clock.settle()
   expect(pl.log.at(-1)).toEqual({ id: PANEL, asked: false, placed: false })
   const above = (await $.ui.mount(aboveAt(90))) as unknown as M
-  expect(shown(await above.find({ type: 'Box', key: 'above-panel' }))).toBe('  panelCitation is ready · opens on its own at 110 columns (20 more)open paneldismiss')
+  expect(shown(await above.find({ type: 'Box', key: 'above-panel' }))).toBe('  panelCitation is readyopen paneldismiss')
   await above.press({ key: 'above-panel-open' })
   expect(pl.log.at(-1)).toEqual({ id: PANEL, asked: true, placed: true })
   expect(await above.find({ type: 'Box', key: 'above-panel' })).toBeUndefined()

@@ -415,8 +415,9 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   thimble's agents Claude Code's agent tray, so no row repeats them.
 - The panel's row above the prompt, only while Claude Code leaves the panel undrawn (an open it was not asked for, from
   main's tool or a click in a card, on a terminal narrower than 144 columns, or 110 for a panel opened before): `panel`
-  dim, `Home is ready`, why in dim (`· opens on its own at 144 columns (24 more)`), then `open panel` and `dismiss`.
-  `open panel` opens the panel from its press, as `/thimble` does, at any width; the row is gone once the panel is drawn.
+  dim, `Home is ready`, then `open panel` and `dismiss`. `open panel` opens the panel from its press, as `/thimble`
+  does, at any width, and says so in a toast when the terminal is still too narrow; the row is gone once the panel is
+  drawn.
 - Claude Code's tool rows and subagent rows stay Claude Code's, folded as it folds them, with no hex id, in the row and
   in ctrl+o's detailed view: a thimble tool's row names a card by its question (a `card` value is the question alone,
   which the key says is a card; a card named inside other words is in curly quotation marks, which Claude Code does not
