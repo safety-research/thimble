@@ -248,6 +248,45 @@ def test_main_and_the_orientation_say_how_subagents_end_and_start(monkeypatch):
     assert "thimble:orient-helper" in prompts.load("orient")
 
 
+def test_main_answers_a_question_itself_and_in_terminal_mode_answers_from_an_agents_outputs(tmp_path, monkeypatch):
+    """Main answers a question itself, even a broad one, and starts an orientation only when the analyst asks for one,
+    then still answers a question asked with it, as start_orientation's description and hints say in both modes. In
+    terminal mode, once the orientation or a writer finished, main answers from its outputs with a link to each card
+    and says where the rest is; browser mode keeps "never summarize", since the browser shows the agent's thread."""
+    from app import events, subagent_files, tools
+
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    names = ("start_orientation-subagent", "message_orientation-none", "module-started-note")
+    note = {"role": "writer", "agent": "a1", "what": "report", "how": "x"}
+    main, hints, desc = {}, {}, {}
+    for mode in prompts.MODES:
+        with prompts.rendering(mode):
+            main[mode] = events.render_prompts(["main"], str(tmp_path), True)
+            hints[mode] = {n: tools.hint(n, input="<input>", **note) for n in names}
+            desc[mode] = tools.tool_sections(["start_orientation"])["start_orientation"][0]
+    for mode in prompts.MODES:
+        assert "Start an orientation only when the analyst asks for one." in main[mode], mode
+        assert ('even a broad one such as "what\'s going on in this dataset?", is no such request: answer it yourself '
+                "in that turn, with a quick look and a few cards") in main[mode], mode
+        assert "start the orientation, then answer the question yourself while it runs" in main[mode], mode
+        assert "is no request for an orientation: answer it yourself" in desc[mode], mode
+        assert "then answer that question yourself after the call" in hints[mode]["start_orientation-subagent"], mode
+        assert "only when they ask for an orientation" in hints[mode]["message_orientation-none"], mode
+    [answer] = [line for line in main["terminal"].splitlines() if line.startswith("- When the orientation or a writer")]
+    assert all(part in answer for part in ("under the `↳` line", "`list_cards` on the group `Orientation`",
+                                           "`read_ref`", "in a few sentences", "[↗](card:<id>)",
+                                           "the Orientation cards in thimble's panel", "[↗](report:report)"))
+    assert "Never summarize" not in main["terminal"] and "Start nothing because of it" in main["terminal"]
+    assert ("Never summarize its report, and start nothing because of it, since the analyst reads the result in "
+            "thimble and decides what comes next.") in main["browser"]
+    assert "When the orientation or a writer finished" not in main["browser"]
+    assert "reply in one short line" in hints["browser"]["module-started-note"]
+    assert "reply as your prompt says for a hand-back" in hints["terminal"]["module-started-note"]
+    # the hooks' own reader of prompts/tools.md picks the same section by the session's mode
+    raw = {m: subagent_files.hint("module-started-note", session_mode=m, **note) for m in prompts.MODES}
+    assert raw == {m: hints[m]["module-started-note"] for m in prompts.MODES}
+
+
 def test_agent_definitions_name_a_fixed_description_and_render_clean(monkeypatch):
     """Each agent file a registered role comes from, and the helper's, names the agent and carries the fixed
     description main's agent list shows, and renders with its own slots and no {{...}} left."""
@@ -428,6 +467,7 @@ TERMINAL_HINTS = {
     "screenshot-terminal": set(),
     "thimble-terminal-home": set(),
     "ticket-terminal": set(),
+    "module-started-note": {"role", "agent", "what", "how"},
 }
 
 

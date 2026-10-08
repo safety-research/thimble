@@ -401,7 +401,7 @@ Delete a thread and its chat from the workspace, stopping its session if it runs
 
 ## start_orientation
 
-Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which shows the analyst when it finishes the outputs its switches turn on. thimble shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. Call it when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished. Its result is the exact Agent call that starts the orientation, which you then make. Pass only the model, effort and switches the analyst named, so that the others take the values thimble's Settings give them. One orientation runs at a time, so while one runs the call starts nothing.
+Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which shows the analyst when it finishes the outputs its switches turn on. thimble shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. Call it when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished. A question about the corpus, even a broad one, is no request for an orientation: answer it yourself. Its result is the exact Agent call that starts the orientation, which you then make. Pass only the model, effort and switches the analyst named, so that the others take the values thimble's Settings give them. One orientation runs at a time, so while one runs the call starts nothing.
 
 ```json
 {
@@ -1179,7 +1179,7 @@ Start the orientation now as a subagent of this session, with one Agent call who
 
 {input}
 
-Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the analyst sees the call.
+Change nothing in it, since thimble lets only this call through. Write no words about the call, since the analyst sees it. End the turn on it, unless the analyst also asked a question in this turn: then answer that question yourself after the call, while the orientation runs.
 
 ## start_orientation-program
 
@@ -1228,6 +1228,10 @@ thimble's agents can't start in this session: Claude Code's hooks modules are of
 ## module-started-note
 
 thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. Its report goes to the analyst in thimble, so when it hands back, reply in one short line, and do nothing about it unless the analyst asks.
+
+## module-started-note@terminal
+
+thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. When it hands back, reply as your prompt says for a hand-back, and do nothing more about it unless the analyst asks.
 
 ## follow-up-ran-on
 
@@ -1639,7 +1643,7 @@ none
 
 ## message_orientation-none
 
-No orientation has run in this workspace. Call `start_orientation` to start one.
+No orientation has run in this workspace. Answer the analyst yourself, and call `start_orientation` only when they ask for an orientation.
 
 ## message_orientation-gone
 
