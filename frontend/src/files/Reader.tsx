@@ -975,21 +975,22 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     const line = Math.max(1, Math.min(total, Math.floor(a) + 1))
     if (s.held) readAhead(line)
     const end = recs[recs.length - 1].line
-    // the window shown grows at once, before it is drawn short
+    // a window that starts at the place and is short grows at once, before it is drawn short
     let grow = false
     if (a >= recs[0].line - 1 && (a < end || end >= total)) {
       const t = scrollTopFor(el, a)
-      // the records loaded end too soon below the place for the reader to scroll it to its top (a view or Filter by
-      // hides most of them): while the frame is held, more of what was read ahead shows, the window growing
+      if (t != null) el.scrollTop = t
+      // the records loaded end too soon below the place for the reader to scroll it to its top: while the frame is
+      // held, the window moves to the place, and where it starts there already (a view or Filter by hides most of the
+      // records after it) it grows, from what was read ahead
       const short = s.held && t != null && t > el.scrollHeight - el.clientHeight + 1 && end < total
-      if (short) dragAfter.current = Math.min(DRAG_AFTER_MAX, dragAfter.current * 2)
+      grow = short && recs[0].line >= line - DRAG_BEFORE - 1
+      if (grow) dragAfter.current = Math.min(DRAG_AFTER_MAX, dragAfter.current * 2)
       const more = short ? aheadOf(line) : null
       if (!more || more[more.length - 1].line <= end) {
-        if (t != null) el.scrollTop = t
         if (!s.held) seeking.current = null
         return
       }
-      grow = true
     }
     // read ahead already: those records show now, and the reader settles on the place once they are drawn; while the
     // frame is held, at most every DRAG_SHOW_MS, or twice as long as the frame that last drew them took where that is
