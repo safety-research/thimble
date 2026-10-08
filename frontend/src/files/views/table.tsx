@@ -4,10 +4,9 @@
 // The labels that are on tint rows and highlight marked texts in cells (a cell starts a little before its first mark
 // when the mark would fall past what it shows), and the pinned line-number column holds a slot per label in the gutter's
 // lanes, under the label's mark (LabelMark). Color by (ColorContext) gives a row's left edge a band per choice, as the
-// Transcript mode gives a record's (EdgeBands), and a row whose value is turned off is not drawn, unless a ref points at
-// it. Only
-// rows near the view are drawn, with spacer rows for the rest; hidden width holders in the header keep column widths
-// stable.
+// Transcript mode gives a record's (EdgeBands), none of the first choice where its value is turned off: Color by hides no
+// row. Only rows near the view are drawn, with spacer rows for the rest; hidden width holders in the header keep column
+// widths stable.
 import { Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
 import { Tipped } from '../../components/Tooltip'
@@ -400,10 +399,9 @@ export function Table({ workspace, path, page, targetRef }: ViewProps) {
   const n = tags.length
   const focus = useMemo(() => (target && targetRef ? { key: targetRef, line: target.line } : null), [target, targetRef])
   const cited = useMemo(() => citedCell(records, cols, target), [records, cols, target])
-  // the rows Color by leaves: those whose value is on, and the one a ref points at
+  // Color by colors the rows and hides none: a value turned off only takes its color off them
   const colors = useContext(ColorContext)
-  const shown = useMemo(() => (colors ? records.filter((r) => !colors.get(r.line)?.hidden || isTargetLine(target, r.line)) : records), [records, colors, target])
-  const drawn = useDrawnRows(rootRef, bodyRef, shown, focus)
+  const drawn = useDrawnRows(rootRef, bodyRef, records, focus)
   const digits = String(records[records.length - 1]?.line ?? 0).length
   // on each dots element, not on the table: a custom property set on the table would restyle every cell when a label
   // is turned on or off
@@ -445,7 +443,7 @@ export function Table({ workspace, path, page, targetRef }: ViewProps) {
         </thead>
         <tbody ref={bodyRef}>
           {drawn.above > 0 && pad(drawn.above)}
-          {shown.slice(drawn.from, drawn.to).map((rec) => (
+          {records.slice(drawn.from, drawn.to).map((rec) => (
             <TableRow key={rec.line} path={path} rec={rec} row={rowOf.get(rec.line)} cols={cols} wide={wide} dots={n} bands={colors?.get(rec.line)?.bands ?? null} target={isTargetLine(target, rec.line)} hit={hit && isTargetLine(target, rec.line)} cited={cited?.line === rec.line ? cited : null} />
           ))}
           {drawn.below > 0 && pad(drawn.below)}

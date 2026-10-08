@@ -1211,7 +1211,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const fold = useFold(workspace, path)
   const colorChoice = color.choice
   // a choice's lane of the overview: a key's commonest value per bin, a label's value most records have per bin; the
-  // first choice's values turned off faded
+  // first choice's values turned off without color, as their records are
   const paintOf = useCallback(
     (c: ColorChoice, off: ReadonlySet<string>): OverviewPaint | null => {
       if (c.by === 'key') {
@@ -1258,7 +1258,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
       api.source(workspace, path, line, 3).then((p) =>
         p.records.map((rec) => {
           const chip = color.chipOf(rec)
-          return previewOf(rec, hint, chip != null ? (color.values.find((v) => v.id === chip)?.color ?? null) : null)
+          return previewOf(rec, hint, chip != null && !color.off.includes(chip) ? (color.values.find((v) => v.id === chip)?.color ?? null) : null)
         }),
       ),
     [workspace, path, color, hint],

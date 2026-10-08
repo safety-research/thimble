@@ -1,8 +1,8 @@
 // Color by in Files' Table mode (src/files/Reader.tsx, views/table.tsx), in a real browser: Chromium and, where
 // Playwright's WebKit starts, WebKit. A file of JSON lines and a CSV file in the Table mode show the same Color by control
 // as the Transcript mode, its choice the file's first key; each row carries its value's color as a band on its left
-// edge (views/common.tsx EdgeBands), in the chip's color; the overview track is painted in those colors; a chip turned off leaves out the rows of its value
-// and turned on again brings them back.
+// edge (views/common.tsx EdgeBands), in the chip's color; the overview track is painted in those colors. A chip turned
+// off takes its value's color off its rows, which stay, and off the overview; turned on again it brings the color back.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -92,19 +92,24 @@ const drawn = (page: Page) =>
     return { rows, chips, choice: document.querySelector('.reader-colorbar .colorby-trigger b')?.textContent ?? null }
   })
 
-/** The colors on the overview's canvas, as rgb() strings, each with how many pixels show it. */
+/** The colors on the overview's canvas, as rgb() strings, each with how many pixels show it; `painted`: the pixels
+ * painted in any color, faded or not, past the plain track's faint ink. */
 const overview = (page: Page) =>
   page.evaluate(() => {
     const c = document.querySelector<HTMLCanvasElement>('.track-over .track-canvas')!
     const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data
     const n = new Map<string, number>()
-    for (let i = 0; i < d.length; i += 4) if (d[i + 3] === 255) n.set(`rgb(${d[i]}, ${d[i + 1]}, ${d[i + 2]})`, (n.get(`rgb(${d[i]}, ${d[i + 1]}, ${d[i + 2]})`) ?? 0) + 1)
-    return Object.fromEntries(n)
+    let painted = 0
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] > 40) painted++
+      if (d[i + 3] === 255) n.set(`rgb(${d[i]}, ${d[i + 1]}, ${d[i + 2]})`, (n.get(`rgb(${d[i]}, ${d[i + 1]}, ${d[i + 2]})`) ?? 0) + 1)
+    }
+    return { colors: Object.fromEntries(n), painted }
   })
 
 for (const [name, engine] of ENGINES)
   for (const file of ['jsonl', 'csv'])
-    test(`${name}, a ${file === 'csv' ? 'CSV file' : 'file of JSON lines'} in the Table mode: Color by colors each row's edge and the overview, and a value turned off leaves its rows out`, async (ctx) => {
+    test(`${name}, a ${file === 'csv' ? 'CSV file' : 'file of JSON lines'} in the Table mode: Color by colors each row's edge and the overview, and a value turned off keeps its rows, without its color`, async (ctx) => {
       const browser = await engine.launch({ headless: true }).catch(() => null)
       if (!browser) return ctx.skip()
       try {
@@ -120,16 +125,26 @@ for (const [name, engine] of ENGINES)
         for (const r of got.rows) assert.equal(r.edge, got.chips[valueOf(r.line)], `row ${r.line}'s edge is its value's color: ${JSON.stringify(r)}`)
         // the overview in the values' colors
         const px = await overview(page)
-        for (const v of [on, other]) assert.ok((px[got.chips[v]] ?? 0) > 50, `the overview shows ${v} (${got.chips[v]}): ${JSON.stringify(px)}`)
-        // the other value turned off: its rows are left out; on again, they are back
+        for (const v of [on, other]) assert.ok((px.colors[got.chips[v]] ?? 0) > 50, `the overview shows ${v} (${got.chips[v]}): ${JSON.stringify(px)}`)
+        // the other value turned off: its rows stay, every line in order, without its color; the overview shows the
+        // value that is on and no trace of the other, as the rows do
         await page.locator(`.reader-colorbar .colorby-chip[data-value="${other}"]`).click()
         await page.waitForTimeout(200)
         const off = await drawn(page)
-        assert.ok(off.rows.length > 10 && off.rows.every((r) => valueOf(r.line) === on), `only ${on} rows drawn: ${off.rows.map((r) => r.line).slice(0, 20)}`)
+        assert.ok(off.rows.length > 10 && off.rows.some((r) => valueOf(r.line) === other), `${other} rows still drawn: ${off.rows.map((r) => r.line).slice(0, 20)}`)
+        const lines = off.rows.map((r) => r.line)
+        assert.ok(lines.every((l, i) => i === 0 || l === lines[i - 1] + 1), `no row left out: ${lines.slice(0, 30)}`)
+        for (const r of off.rows) assert.equal(r.edge, valueOf(r.line) === on ? got.chips[on] : null, `row ${r.line}: ${valueOf(r.line) === on ? 'its color' : 'no color'}: ${JSON.stringify(r)}`)
+        const pxOff = await overview(page)
+        assert.ok((pxOff.colors[got.chips[on]] ?? 0) > 50, `the overview still shows ${on}: ${JSON.stringify(pxOff)}`)
+        assert.equal(pxOff.colors[got.chips[other]] ?? 0, 0, `the overview shows no ${other}: ${JSON.stringify(pxOff)}`)
+        assert.equal(pxOff.painted, pxOff.colors[got.chips[on]], `nothing else is painted on the overview, faded or not: ${JSON.stringify(pxOff)}`)
+        // on again: the color is back on its rows and the overview
         await page.locator(`.reader-colorbar .colorby-chip[data-value="${other}"]`).click()
         await page.waitForTimeout(200)
         const back = await drawn(page)
-        assert.ok(back.rows.some((r) => valueOf(r.line) === other), `${other} rows drawn again`)
+        for (const r of back.rows) assert.equal(r.edge, got.chips[valueOf(r.line)], `row ${r.line}'s edge is its value's color again: ${JSON.stringify(r)}`)
+        assert.ok(((await overview(page)).colors[got.chips[other]] ?? 0) > 50, `the overview shows ${other} again`)
       } finally {
         await browser.close()
       }
