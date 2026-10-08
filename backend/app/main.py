@@ -124,7 +124,7 @@ ROUTER_MODULES = [
     "corpus", "transcripts", "source_keys", "pdfs", "ledger", "investigation", "notebook", "concepts", "views", "cardtypes",
     "extensions", "precached",
     # the agent engine (main, threads, background agents) and the tools they call
-    "agents", "tools", "jobs", "verify",
+    "agents", "tools", "plans", "jobs", "verify",
     # documents, and the report checks that comment on them (their runs shut down with the server)
     "report_types", "exports", "checks",
     # the developer agent, telemetry, the workspace export, the problem report

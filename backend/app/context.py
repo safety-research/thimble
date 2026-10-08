@@ -513,7 +513,7 @@ def session_part(c: str, chat: str | None, focus: tuple[str, ...] = ()) -> _Part
 
 
 def canvas(c: str) -> str:
-    """Every card by group, in the tree's order: its ref, kind and question, and its takeaway."""
+    """Every card by group, in the tree's order: its ref, kind and question, and its takeaway, or a plan's steps."""
     from . import notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -536,6 +536,9 @@ def canvas(c: str) -> str:
             takeaway = " ".join(cite.canon_text(str(cell.get("takeaway") or "")).split())
             if takeaway:
                 lines.append(f"  takeaway: {takeaway}")
+            if follows := (cell.get("payload") or {}).get(notebook.PLAN_FOLLOWS) if kind == notebook.PLAN_KIND else None:
+                lines.append(f"  follows: card:{follows}")
+            lines += [f"  {line}" for line in notebook.plan_lines(cell)]
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks) or _hint("context-no-cards")
 

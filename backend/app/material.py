@@ -148,7 +148,8 @@ def outputs_as_text(outputs: Any) -> str:
 
 
 def _payload_text(cell: dict[str, Any]) -> str:
-    """A data card as the writer reads it: a note's text, an example's refs, a label's concept, a dataset as JSON."""
+    """A data card as the writer reads it: a note's text, an example's refs, a label's concept, a plan's steps, a dataset
+    as JSON."""
     payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
     kind = cell.get("kind")
     if kind in ("note", "md"):
@@ -159,4 +160,6 @@ def _payload_text(cell: dict[str, Any]) -> str:
         return f"label [[concept:{payload.get('concept')}]]" if payload.get("concept") else ""
     if kind == "custom":
         return str(payload.get("html") or "").strip()
+    if kind == notebook.PLAN_KIND:
+        return "\n".join(notebook.plan_lines(cell))
     return json.dumps(payload.get("dataset"), ensure_ascii=False) if payload.get("dataset") is not None else ""
