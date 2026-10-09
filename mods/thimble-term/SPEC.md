@@ -644,7 +644,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - The title, the title row's current step after `citation` (in the accent and bold), is the cited value, bold, in blue
   and underlined (a link to its place, in place of the accent), `◌` after it while it is checked; red, with a red `×`, when it is not at its place. A citation in a card's takeaway takes the
   card's links check as the chat does: `◌` while it runs, `✓` and `, and a script got the same number` once it ran, a
-  red `×` when it got another value. A citation with no value is titled by its place in words, and then has no `from`
+  red `×` when it got another value, or when the card's code types the value in (`, but typed in the code, line 4, not
+  computed`). A citation with no value is titled by its place in words, and then has no `from`
   row and no subtitle while its place is there (`not found` and why when it is not), so the place is named once; its
   `source` marks its chip in the sentence (blue, `[ agent-chat.jsonl line 2 ]`), and its step on the title row is its
   chip's words (`citation agent-chat.jsonl line 2`). Under a `from` row, which names the place, a citation found says `found` alone (then what thimble's

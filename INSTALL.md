@@ -18,7 +18,7 @@ it runs in bubblewrap on Linux and with your user's access on macOS.
 
 ## Requirements
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.291), logged in (`claude auth status`), with
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.295), logged in (`claude auth status`), with
   its hooks modules on, which thimble's agents need: managed settings with `disableAllHooks` or
   `allowManagedHooksOnly`, or a folder Claude Code doesn't trust, turn them off.
 - macOS or Linux, and Python 3.12+. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it

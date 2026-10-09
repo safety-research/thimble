@@ -43,6 +43,20 @@ async function chipsOf(m: M, key: string) {
   return ((await m.find({ type: 'Client', key })) as unknown as ChipProps).props.props.chips
 }
 
+test("a takeaway's citation of a value the card's code types in is a red × that says so, as a refuted one is", async ($, on) => {
+  const w = world(on)
+  Object.assign(w.cells.ff73e071!, {
+    verification: { status: 'ok', links: { status: 'partial', checked: true, resolved: [{ value: '14592', ref: 'card:ff73e071#revisions/TOTAL' }], broken: [], typed: [{ value: '4579', ref: 'card:ff73e071#pages/TOTAL', line: 4, why: 'typed in the code, line 4, not computed' }] } },
+  })
+  await start($, w)
+  await turn($, w, [['r1', 'Here.']])
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const chips = await chipsOf(ui, 'para-tk-t0-1')
+  expect(chips[0]).toMatchObject({ label: '4579', state: 'failed', mark: '×', spin: false })
+  expect(chips[0]!.tip).toBe('found on the card, but typed in the code, line 4, not computed')
+  await ui.unmount()
+})
+
 test("a takeaway's citations take thimble's links check: ✓ once it found the value, a red × with what the place shows, ◌ while it runs", async ($, on) => {
   const w = world(on)
   Object.assign(w.cells.ff73e071!, {

@@ -266,18 +266,18 @@ def test_claude_code_too_old_for_mods_older_or_newer_than_tested_each_get_their_
                                               "thimble again.")
     assert cli.claude_code_warning(tested) is None and cli.claude_code_warning(None) is None
     assert cli.claude_code_warning("no version") is None
-    newer = (f"thimble: Claude Code 2.1.293 is newer than {tested}, the version thimble {thimble} was tested with. If "
+    newer = (f"thimble: Claude Code 2.1.297 is newer than {tested}, the version thimble {thimble} was tested with. If "
              "agents do not start or their chats stop updating, run `thimble doctor` and report it.")
     seen = home / cli.CLAUDE_CODE_SEEN_FILE
     assert not seen.exists()
-    assert cli.claude_code_warning("2.1.293") == newer
-    assert json.loads(seen.read_text()) == {"newer_told": ["2.1.293"]}
-    assert cli.claude_code_warning("2.1.293") is None, "once per version on this machine"
-    assert cli.claude_code_warning("2.1.293", once=False) == newer, "the doctor's, each time"
-    assert cli.claude_code_warning("2.1.294") == newer.replace("2.1.293", "2.1.294"), "a newer one is told again"
-    assert cli.claude_code_warning("2.1.293") is None and json.loads(seen.read_text())["newer_told"] == ["2.1.293", "2.1.294"]
+    assert cli.claude_code_warning("2.1.297") == newer
+    assert json.loads(seen.read_text()) == {"newer_told": ["2.1.297"]}
+    assert cli.claude_code_warning("2.1.297") is None, "once per version on this machine"
+    assert cli.claude_code_warning("2.1.297", once=False) == newer, "the doctor's, each time"
+    assert cli.claude_code_warning("2.1.298") == newer.replace("2.1.297", "2.1.298"), "a newer one is told again"
+    assert cli.claude_code_warning("2.1.297") is None and json.loads(seen.read_text())["newer_told"] == ["2.1.297", "2.1.298"]
     seen.write_text("not json")
-    assert cli.claude_code_warning("2.1.293") == newer, "an unreadable record tells again"
+    assert cli.claude_code_warning("2.1.297") == newer, "an unreadable record tells again"
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
     monkeypatch.setattr(cli, "listening", lambda p: False)
     for v, doctor, for_a_model in (
@@ -289,9 +289,9 @@ def test_claude_code_too_old_for_mods_older_or_newer_than_tested_each_get_their_
             ("2.1.290", f"Claude Code 2.1.290 is older than {tested}, the version thimble is tested with; if something "
                         "fails, run `claude update` and start thimble again.",
              f"2.1.290, older than {tested}, the version thimble is tested with"),
-            ("2.1.293", f"Claude Code 2.1.293 is newer than {tested}, the version thimble {thimble} was tested with. If "
+            ("2.1.297", f"Claude Code 2.1.297 is newer than {tested}, the version thimble {thimble} was tested with. If "
                         "agents do not start or their chats stop updating, report it (`thimble feedback`).",
-             f"2.1.293, newer than {tested}, the version thimble {thimble} was tested with"),
+             f"2.1.297, newer than {tested}, the version thimble {thimble} was tested with"),
             (tested, f"{tested} (thimble is tested with {tested})", f"{tested} (thimble is tested with {tested})")):
         claude_at(tmp_path, monkeypatch, v)
         assert line(cli.doctor_text(), "claude code:") == f"  claude code: {doctor}"

@@ -1,16 +1,15 @@
 // What Color by gives each record of Files' Transcript and Table modes (colorChoice.ts, Reader): per line, the color of
-// its value of the first choice (null for a record with no value), a band per choice for its left edge (views/common
-// EdgeBands), and whether its value is turned off, which hides the record. Null outside those modes, or with Color by
-// off.
+// its value of the first choice (null for a record with no value, or with its value turned off) and a band per choice for
+// its left edge (views/common EdgeBands). Color by only colors: a value turned off takes its color off its records, which
+// stay; Filter by is what hides records. Null outside those modes, or with Color by off.
 import { createContext } from 'react'
 
 export interface RecordColor {
-  /** the first choice's color of the record's value; null for a record with no value */
+  /** the first choice's color of the record's value; null for a record with no value or a value turned off */
   color: string | null
   /** one per choice, in the tracks' order: the color of the record's value of that choice, null where it has none. The
    * same array for the same colors (bandsOf), so a row that keeps its colors keeps its props */
   bands: readonly (string | null)[]
-  hidden: boolean
 }
 
 export const ColorContext = createContext<ReadonlyMap<number, RecordColor> | null>(null)

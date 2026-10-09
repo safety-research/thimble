@@ -138,13 +138,15 @@ export function whereWords(ref: string): string {
 
 /** What thimble's links check of a card's takeaway says of one of its citations (backend verify.py): `running` while
  *  it runs, `verified` once it found the value at its place, `refuted` with why and the value the place shows when it
- *  found another. */
+ *  found another, `typed` with why when the card's code types the value in rather than computes it. */
 export function linkCheck(l: TermLinks | undefined, c: Citation): { state?: string; why?: string; source?: string } {
   if (!l) return {}
   const key = `${c.display ?? ''}|${c.ref}`
   const mine = (k: string) => k === key || k.endsWith(`|${c.ref}`)
   const b = l.broken.find(x => x.key === key) ?? l.broken.find(x => mine(x.key))
   if (b) return { state: 'refuted', why: b.why, source: b.source }
+  const t = (l.typed ?? []).find(x => x.key === key) ?? (l.typed ?? []).find(x => mine(x.key))
+  if (t) return { state: 'typed', why: t.why }
   if (l.pending) return { state: 'running' }
   if (l.checked && l.ok.some(mine)) return { state: 'verified' }
   return {}
@@ -154,7 +156,7 @@ export function linkCheck(l: TermLinks | undefined, c: Citation): { state?: stri
  *  card`, `found in revisions.jsonl line 10566`, `found in the command's output, line 1`, `found in …; its value is not
  *  checked` for words that show no value, `not found …`; after thimble's links check, `…, and a script got the same
  *  number`, `…, but a script got 5,883` or `…; ◌ being checked`. It agrees with the link's colour and mark. */
-export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefined, check: { state?: string; source?: string } = {}): Promise<string> {
+export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefined, check: { state?: string; why?: string; source?: string } = {}): Promise<string> {
   const where = whereWords(c.ref)
   const status = v?.status ?? 'pending'
   const place =
@@ -169,6 +171,7 @@ export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefine
             : `found ${where}`
   if (check.state === 'verified') return `${place}, and a script got the same number`
   if (check.state === 'refuted') return `${place}, but a script got ${check.source || 'another value'}`
+  if (check.state === 'typed') return `${place}, but ${check.why || 'typed in the code, not computed'}`
   if (check.state === 'running') return `${place}; ◌ being checked`
   return place
 }
