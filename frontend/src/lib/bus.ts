@@ -27,6 +27,8 @@ export type Events = {
   cardRequest: { request: string; card: string }
   /** a report check's run on a document started or ended (the stream's `check` record) */
   check: { id: string; doc: string; status: string; run?: string; chat?: string }
+  /** the comments on the cards changed (the stream's `canvas-comments` record) */
+  canvasComments: { card?: string }
   /** the stream connected or dropped */
   wsStream: { connected: boolean }
   /** a lazy chunk did not load and the server serves another build: ask for a reload (lib/chunkRecovery) */

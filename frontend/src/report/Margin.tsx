@@ -1,14 +1,17 @@
 // The report's margin: a card for every comment the page shows (a check's, Claude's note, or the analyst's), aligned
 // with its passage and stacked so no two meet (checkComments.ts stackCards). A click makes a card active and shows the
-// reply field, whose text starts a thread on the passage with the comment as context; ✓ resolves a stored comment. A
-// new comment from the toolbar is a card with a field until Enter stores it.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+// reply field, whose text starts a thread on the passage with the comment as context; ✓ resolves a stored comment, and
+// Know it resolves one that opens with a tag ("Heads up", "You should know"), which its check then never raises again.
+// Such a comment shows Claude and its tag, its title in bold and the rest under it. A new comment from the toolbar is a
+// card with a field until Enter stores it.
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from 'react'
 import { TextArea } from '../components/Field'
 import { RefChip } from '../components/RefChip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
-import { commentName, NOTE_COLOR, stackCards, type CheckLook, type DocComment } from './checkComments'
+import type { ResolveHow } from './commentsApi'
+import { commentName, knowable, noteParts, NOTE_COLOR, stackCards, type CheckLook, type DocComment } from './checkComments'
 import { Glyph, IconButton } from './icons'
 
 /** the room the margin takes beside the page's column: report.css `.wu-rail`, 228 wide with 12 before it and 16 after */
@@ -27,7 +30,7 @@ export interface MarginProps {
   look: CheckLook
   active: string | null
   onActivate: (id: string | null) => void
-  onResolve: (comment: DocComment) => Promise<void>
+  onResolve: (comment: DocComment, how: ResolveHow) => Promise<void>
   /** the passage a new comment of the analyst's is being written on */
   draft: string | null
   onDraft: (sid: string, text: string) => Promise<void>
@@ -99,7 +102,7 @@ export function Margin({ ws, slug, comments, look, active, onActivate, onResolve
   return (
     <div className="wu-rail" ref={rail} aria-label="Comments">
       {comments.map((c) => (
-        <CommentCard key={c.id} ws={ws} slug={slug} comment={c} look={look} active={c.id === active} top={tops.get(c.id)} cardRef={setCard(c.id)} onActivate={() => onActivate(c.id)} onResolve={() => onResolve(c)} textOf={textOf} />
+        <CommentCard key={c.id} ws={ws} slug={slug} comment={c} look={look} active={c.id === active} top={tops.get(c.id)} cardRef={setCard(c.id)} onActivate={() => onActivate(c.id)} onResolve={(how) => onResolve(c, how)} textOf={textOf} />
       ))}
       {draft && <DraftCard key={draft} top={tops.get(DRAFT_ID)} cardRef={setCard(DRAFT_ID)} onSave={(text) => onDraft(draft, text)} onCancel={onDraftCancel} />}
     </div>
@@ -116,7 +119,7 @@ interface CardProps {
   top: number | undefined
   cardRef: (el: HTMLDivElement | null) => void
   onActivate: () => void
-  onResolve: () => Promise<void>
+  onResolve: (how: ResolveHow) => Promise<void>
   textOf: (sid: string) => string
 }
 
@@ -124,6 +127,12 @@ function CommentCard({ ws, slug, comment, look, active, top, cardRef, onActivate
   const [busy, setBusy] = useState(false)
   const note = comment.check == null
   const meta = comment.tag ? 'citation check' : note ? 'comment' : 'check'
+  const parts = noteParts(comment)
+  const act = (how: ResolveHow) => (e: MouseEvent) => {
+    e.stopPropagation()
+    setBusy(true)
+    void onResolve(how).finally(() => setBusy(false))
+  }
   return (
     <div
       ref={cardRef}
@@ -134,24 +143,27 @@ function CommentCard({ ws, slug, comment, look, active, top, cardRef, onActivate
     >
       <div className="wu-cm-head">
         <span className="wu-cm-sq" style={{ background: look.colour(comment.check) }} />
-        <span className="wu-cm-name">{commentName(comment, look)}</span>
-        <span className="wu-cm-meta">{meta}</span>
+        <span className="wu-cm-name">{parts.tag ? 'Claude' : commentName(comment, look)}</span>
+        {parts.tag ? (
+          <span className="wu-cm-tag" data-tag={parts.tag}>
+            {parts.tag}
+          </span>
+        ) : (
+          <span className="wu-cm-meta">{meta}</span>
+        )}
+        {!comment.tag && knowable(comment) && (
+          <button type="button" className="wu-cm-know" disabled={busy} onClick={act('known')}>
+            Know it
+          </button>
+        )}
         {!comment.tag && (
-          <IconButton
-            label="Resolve"
-            className="wu-cm-resolve"
-            disabled={busy}
-            onClick={(e) => {
-              e.stopPropagation()
-              setBusy(true)
-              void onResolve().finally(() => setBusy(false))
-            }}
-          >
+          <IconButton label="Resolve" className="wu-cm-resolve" disabled={busy} onClick={act('done')}>
             <Glyph name="check" size={13} strokeWidth={2} />
           </IconButton>
         )}
       </div>
-      <div className="wu-cm-text">{comment.text}</div>
+      {parts.title && <div className="wu-cm-title">{parts.title}</div>}
+      {parts.body && <div className="wu-cm-text">{parts.body}</div>}
       {active && comment.evidence.length > 0 && (
         <div className="wu-cm-refs">
           {comment.evidence.map((r) => (

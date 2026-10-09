@@ -513,11 +513,18 @@ def session_part(c: str, chat: str | None, focus: tuple[str, ...] = ()) -> _Part
 
 
 def canvas(c: str) -> str:
-    """Every card by group, in the tree's order: its ref, kind and question, and its takeaway."""
-    from . import notebook  # noqa: PLC0415
+    """Every card by group, in the tree's order: its ref, kind and question, its takeaway, and the open comments on it
+    and its steps."""
+    from . import canvas_comments, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
     rows = notebook.tree_order(notebook.list_notebooks(ws, figures=False))
+    try:
+        notes: dict[str, list[str]] = {}
+        for cm in canvas_comments.open_comments(c):
+            notes.setdefault(str(cm["card"]), []).append(canvas_comments.line(c, cm))
+    except (OSError, ValueError):
+        notes = {}
     blocks = []
     for row in rows:
         nb = notebook.read_notebook(ws, row["id"]) or {}
@@ -536,6 +543,7 @@ def canvas(c: str) -> str:
             takeaway = " ".join(cite.canon_text(str(cell.get("takeaway") or "")).split())
             if takeaway:
                 lines.append(f"  takeaway: {takeaway}")
+            lines += [f"  {n}" for n in notes.get(str(cell["id"]), [])]
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks) or _hint("context-no-cards")
 

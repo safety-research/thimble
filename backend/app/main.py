@@ -126,7 +126,7 @@ ROUTER_MODULES = [
     # the agent engine (main, threads, background agents) and the tools they call
     "agents", "tools", "jobs", "verify",
     # documents, and the report checks that comment on them (their runs shut down with the server)
-    "report_types", "exports", "checks",
+    "report_types", "exports", "checks", "canvas_comments",
     # the developer agent, telemetry, the workspace export, the problem report
     "dev", "telemetry", "export", "feedback_routes",
     # undo and redo over the workspace's cards and documents

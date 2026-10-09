@@ -1920,6 +1920,9 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
         lines += ["takeaway:", str(cell["takeaway"]).strip()]
     if cell.get("labels"):
         lines.append("labels: " + ", ".join(f"concept:{l}" for l in cell["labels"]))
+    from . import canvas_comments  # noqa: PLC0415
+
+    lines += canvas_comments.lines(ctx.c, cid)
     if "#" in ref or "@out" in ref:
         try:
             res = refs.resolve(config.corpus_dir(ctx.c), ref)

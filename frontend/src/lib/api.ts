@@ -682,14 +682,14 @@ export const undoApi = {
 }
 
 // --- report checks: the Checks pane's rows (report/Checks.tsx, backend checks.py) ---
-import type { CardCheckStatus, Check, CheckPatch, CheckRun } from './types'
+import type { CardCheckStatus, Check, CheckCover, CheckPatch, CheckRun } from './types'
 
 export const checksApi = {
   /** `GET /checks`: every check of the workspace, the built-ins first, each with its latest run per document. */
   list: (c: string) => j<Check[]>(`${ws(c)}/checks`),
   /** `POST /checks`: a new check from a name and a prompt (201), which the server turns on and runs; a 409 when the
    * name is taken. */
-  create: (c: string, body: { name: string; prompt: string }) => j<Check>(`${ws(c)}/checks`, { method: 'POST', body: JSON.stringify(body) }),
+  create: (c: string, body: { name: string; prompt: string; covers?: CheckCover[] }) => j<Check>(`${ws(c)}/checks`, { method: 'POST', body: JSON.stringify(body) }),
   /** `PATCH /checks/{id}`: turned on or off, renamed, its prompt or colour changed; answers the check. The server runs
    * a check turned on, and one that is on given a new prompt, wherever it has passages it has not seen. */
   update: (c: string, id: string, patch: CheckPatch) => j<Check>(`${ws(c)}/checks/${enc(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),

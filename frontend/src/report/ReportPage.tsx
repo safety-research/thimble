@@ -12,7 +12,7 @@ import { ReadProbe, useDock } from '../shell/dock'
 import { usedCells } from './cards'
 import { SidebarShow, useChecks, useSidebar } from './Checks'
 import { checkColumns, openComments, passageFlags, shownComments, type DocComment } from './checkComments'
-import { commentsApi } from './commentsApi'
+import { commentsApi, type ResolveHow } from './commentsApi'
 import { ReportEditor, type DocFilter, type EditorHandle } from './Editor'
 import { forgetFigureCell } from './FigureBlock'
 import { Margin, RAIL_ROOM } from './Margin'
@@ -128,10 +128,10 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
     setActive(cids[(at + 1) % cids.length])
   }
 
-  const resolve = async (cm: DocComment) => {
+  const resolve = async (cm: DocComment, how: ResolveHow = 'done') => {
     try {
-      const saved = await commentsApi.resolve(ws, slug, cm.id)
-      track('ui-click', { target: `report:${slug}#${cm.sid}`, detail: { action: 'comment-resolve', check: cm.check } })
+      const saved = await commentsApi.resolve(ws, slug, cm.id, how)
+      track('ui-click', { target: `report:${slug}#${cm.sid}`, detail: { action: how === 'known' ? 'comment-know' : 'comment-resolve', check: cm.check } })
       onSaved(saved as Writeup)
     } catch (e) {
       bus.emit('toast', { text: `Could not resolve the comment. ${(e as Error).message}`, kind: 'error' })

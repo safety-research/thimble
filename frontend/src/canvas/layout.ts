@@ -726,3 +726,78 @@ export const isRunnable = (c: Cell): boolean => {
   if (k === 'timeline' || k === 'diagram') return !!c.code || (c.payload as { dataset?: unknown } | undefined)?.dataset == null
   return true
 }
+
+// ---- the comments beside the cards ----
+
+/** a comment's width on the plane, the gap between its card's outermost frame and it, the gap between two stacked
+ * comments, and how far below its card's top a comment on the card sits */
+export const COMMENT_W = 300
+export const COMMENT_GAP_X = 18
+export const COMMENT_GAP_Y = 8
+export const COMMENT_LIFT = 14
+/** how far above its step's row a comment on a step sits */
+export const COMMENT_STEP_LIFT = 4
+
+/** A comment to place: its card, its height, and where in the card it points (`dy`, plane px below the card's top:
+ * COMMENT_LIFT for the card, its step row's offset less COMMENT_STEP_LIFT for a step). */
+export interface CommentSpot {
+  id: string
+  card: string
+  dy: number
+  h: number
+}
+
+/** Where a comment sits on the plane (`x`, `y`, its top left), and the point of its card it points at (`ax`, `ay`: the
+ * card's right edge, level with the comment's wanted top). */
+export interface CommentPlace {
+  x: number
+  y: number
+  ax: number
+  ay: number
+}
+
+/** The frame at the root of the frames a card is in, or null for a loose card. */
+export function rootFrameOf(board: Board, card: string): string | null {
+  let g = board.cellById.get(card)?.parent ?? null
+  const seen = new Set<string>()
+  while (g && !seen.has(g)) {
+    seen.add(g)
+    const up = board.group.get(g)?.parent ?? null
+    if (!up) return g
+    g = up
+  }
+  return g
+}
+
+/**
+ * Where each comment sits beside the canvas: COMMENT_GAP_X right of its card's outermost frame (a loose card's own
+ * right edge), at its card's top plus its `dy`; the comments of one column (one x) are stacked in the order of their
+ * wanted tops, each pushed below the one before it by COMMENT_GAP_Y, so none overlap. A comment whose card is not
+ * drawn gets no place. Pure.
+ */
+export function commentPlaces(board: Board, lay: Layout, spots: readonly CommentSpot[]): Map<string, CommentPlace> {
+  const columns = new Map<string, { id: string; want: number; h: number; x: number; ax: number }[]>()
+  for (const s of spots) {
+    const r = lay.rects.get(s.card)
+    if (!r) continue
+    const root = rootFrameOf(board, s.card)
+    const outer = (root && lay.rects.get(root)) || r
+    const x = outer.x + outer.w + COMMENT_GAP_X
+    // the comments at one x make one column, beside one frame or beside frames and loose cards that end at one edge
+    const key = String(Math.round(x))
+    const list = columns.get(key) ?? []
+    list.push({ id: s.id, want: r.y + s.dy, h: s.h, x, ax: r.x + r.w })
+    columns.set(key, list)
+  }
+  const out = new Map<string, CommentPlace>()
+  for (const list of columns.values()) {
+    list.sort((a, b) => a.want - b.want)
+    let low = -Infinity
+    for (const it of list) {
+      const y = Math.max(it.want, low)
+      out.set(it.id, { x: it.x, y, ax: it.ax, ay: it.want })
+      low = y + it.h + COMMENT_GAP_Y
+    }
+  }
+  return out
+}

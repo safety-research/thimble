@@ -4345,11 +4345,23 @@ async def post_comment(c: str, inv_id: str, slug: str, body: CommentBody) -> dic
     return comment
 
 
+class DismissBody(BaseModel):
+    how: str = "done"  # the margin's ✓ (done) or Know it (known), canvas_comments.HOWS
+
+
 @router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/comments/{cid}/dismiss")
-async def dismiss(c: str, inv_id: str, slug: str, cid: str) -> dict[str, Any]:
+async def dismiss(c: str, inv_id: str, slug: str, cid: str, body: DismissBody | None = None) -> dict[str, Any]:
+    """The analyst resolved a comment: Done, or Know it (`how: known`), which a check's later runs never raise again
+    (checks.known_titles). Returns the document."""
+    from . import canvas_comments  # noqa: PLC0415
+
+    how = body.how if body is not None else "done"
+    if how not in canvas_comments.HOWS:
+        raise HTTPException(400, f"how is one of {', '.join(canvas_comments.HOWS)}")
     investigation.inv_dir(c, inv_id)
     slug, doc = _any_doc(c, inv_id, slug)
-    _find_comment(doc, cid)["status"] = "dismissed"
+    cm = _find_comment(doc, cid)
+    cm.update(status="dismissed", resolution=how, resolved_ts=_now())
     write_doc(c, inv_id, slug, doc)
     return doc
 
