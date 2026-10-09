@@ -2935,6 +2935,47 @@
     return mixHtml(target)
   }
 
+  // A record as a card or a tile (viewer_kit.css .thimble-card), as html: the head (`key` at its left, `meta` and `chips`
+  // at its right), then the `title`, the `body` and the `foot`, each left out when not given. A part is text, which the
+  // card escapes, or {html} for markup the page made, such as a key chip; `chips` are words, each a neutral chip. `ref`
+  // is the record's data-anchor. `record` hands the record to Color by (colour.attr), so the bridge draws its value's
+  // colour as the bar on the card's left edge: a card takes no colour of its own. `active` marks the chosen card,
+  // `act: false` a card a click does nothing on, and `attrs` ({name: value}) gives it more attributes, such as a key the
+  // page's click reads. (thimble.card is a card type's stored data, in a card's frame: viewer_bridge.js.)
+  function hasPart(v) {
+    return v != null && v !== '' && v !== false
+  }
+  function cardText(v) {
+    return typeof v === 'object' && v.html != null ? String(v.html) : esc(v)
+  }
+  function cardPart(v, cls) {
+    return hasPart(v) ? '<div class="' + cls + '">' + cardText(v) + '</div>' : ''
+  }
+  /** a record as a card (above): thimble.recordCard({ref, record, key, title, meta, chips, body, foot, active, act,
+   *  attrs}) gives its html */
+  thimble.recordCard = function (o) {
+    o = o || {}
+    var cls = 'thimble-card' + (o.act === false ? '' : ' thimble-card-act') + (o.active ? ' active' : '')
+    var attrs = hasPart(o.ref) ? ' data-anchor="' + esc(o.ref) + '"' : ''
+    if (o.record != null && control) attrs += control.api.attr(o.record)
+    var extra = o.attrs || {}
+    for (var name in extra) {
+      // a name an attribute can have, never an event handler's
+      if (!/^[a-zA-Z_:][\w:.-]*$/.test(name) || /^on/i.test(name) || extra[name] == null || extra[name] === false) continue
+      attrs += ' ' + name + '="' + esc(extra[name] === true ? '' : extra[name]) + '"'
+    }
+    var meta = (hasPart(o.meta) ? '<span>' + cardText(o.meta) + '</span>' : '') +
+      (o.chips || []).filter(hasPart).map(function (c) {
+        return '<span class="chip chip-sans chip-tone-neutral"><span class="chip-text">' + esc(c) + '</span></span>'
+      }).join('')
+    var head = hasPart(o.key) || meta
+      ? '<div class="thimble-card-head">' + (hasPart(o.key) ? '<span class="thimble-card-key">' + cardText(o.key) + '</span>' : '') +
+        (meta ? '<span class="thimble-card-meta">' + meta + '</span>' : '') + '</div>'
+      : ''
+    return '<div class="' + cls + '"' + attrs + '>' + head + cardPart(o.title, 'thimble-card-title') +
+      cardPart(o.body, 'thimble-card-body') + cardPart(o.foot, 'thimble-card-foot') + '</div>'
+  }
+
   /** What Reset puts back of the page's own state: `changed()` says whether it differs from how the view opens (a menu's
    *  choice, a selection, a mode), `reset()` puts it back and draws the page again, after the kit has put back its
    *  chips, its time ranges and the search fields of the row. Called again, it replaces the last. `check()` on what it

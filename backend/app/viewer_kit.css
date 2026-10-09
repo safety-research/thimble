@@ -16,7 +16,11 @@
                        has a choice set, aria-invalid when what was typed cannot be used
      .table            a table of records: caps header, hairline rows, .active on the chosen row
      .list-row         a row of a list: .active on the chosen one
-     .avatar           a person or an agent: the initial of its name on a neutral disc, whose shade the page sets
+     .thimble-card     a record as a card or a tile (thimble.card): .thimble-card-head with .thimble-card-key and
+                       .thimble-card-meta, then .thimble-card-title, .thimble-card-body and .thimble-card-foot;
+                       .thimble-card-act when a click opens it, .active on the chosen one; .thimble-cards stacks cards
+                       in a column, .thimble-cards-grid lays them out as tiles
+     .avatar          a person or an agent: the initial of its name on a neutral disc, whose shade the page sets
                        from the name as --a (0.08 to 0.24), so the label colours stay the only colours
      .thimble-colour-* the Color by control (viewer_colour.js, thimble.colorBy), which the page only mounts: Color by
                        and the values' key chips in the top row, its menu with each label's definition, and a list's
@@ -445,6 +449,113 @@ select.field {
 .list-row.active,
 .list-row.active:hover {
   background: var(--surface-selected);
+}
+
+/* a record as a card or a tile (thimble.card): a hairline box on the paper with a chip's corners, its parts in a
+   column. A card has no colour of its own: Color by's bar, which the bridge draws on its left edge as on a row, is its
+   only colour, and its left corners go square under the bar so that the bar stays straight. */
+.thimble-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.thimble-cards-grid {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--thimble-tile-w, 220px)), 1fr));
+  align-items: start;
+}
+.thimble-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0;
+  padding: 7px 10px 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-chip);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font: 400 var(--text-ui-sm) / 1.35 var(--font-body);
+  text-align: left;
+  overflow-wrap: anywhere;
+  transition: var(--transition-color);
+}
+button.thimble-card {
+  width: 100%;
+}
+.thimble-card-act {
+  cursor: pointer;
+}
+.thimble-card-act:hover {
+  border-color: var(--border-strong);
+}
+.thimble-card.active,
+.thimble-card.active:hover {
+  border-color: var(--border-strong);
+  background: color-mix(in oklab, rgb(var(--ink-rgb)) 6%, var(--surface-card));
+}
+.thimble-card:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 1px;
+}
+/* under Color by's bar (the bridge's data-thimble-edge), the left corners are square, as a row's are */
+.thimble-card[data-thimble-edge],
+.list-row[data-thimble-edge] {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+/* the head: a short key in mono at the left (a number, a time), the meta at the right (neutral chips, a count) */
+.thimble-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 20px;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1.4 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.thimble-card-key {
+  flex: none;
+  white-space: nowrap;
+}
+.thimble-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.thimble-card-title,
+.thimble-card-body {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+}
+.thimble-card-title {
+  -webkit-line-clamp: 2;
+  color: var(--text-primary);
+  font: 400 var(--text-ui-sm) / 1.35 var(--font-body);
+}
+.thimble-card-body {
+  -webkit-line-clamp: 3;
+  color: var(--text-secondary);
+  font: 400 var(--text-xs) / 1.45 var(--font-body);
+}
+.thimble-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1.4 var(--font-mono);
 }
 
 .avatar {

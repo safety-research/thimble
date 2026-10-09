@@ -57,6 +57,8 @@
   .item:hover { background: var(--surface-hover); }
   .item.active { background: var(--surface-selected); }
   .item:last-child { border-radius: 0 0 var(--radius-card) var(--radius-card); }
+  /* under Color by's bar (the bridge's data-thimble-edge) the last row's corner and the box's go square, so the bar stays straight */
+  .item:last-child[data-thimble-edge], .box:has(> .item:last-child[data-thimble-edge]) { border-bottom-left-radius: 0; }
   .state { color: var(--text-secondary); align-self: start; padding-top: 2px; }
   .main { min-width: 0; }
   .line1 { display: flex; align-items: center; gap: 6px; min-width: 0; }

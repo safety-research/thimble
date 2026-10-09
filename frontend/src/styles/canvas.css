@@ -1486,7 +1486,7 @@ audio.bcell-media {
   height: 14px;
   padding: 0 3px;
   box-sizing: border-box;
-  border-radius: 7px;
+  border-radius: var(--radius-chip);
   background: var(--accent);
   color: var(--accent-on);
   font: 500 var(--text-xs) / 14px var(--font-mono);
