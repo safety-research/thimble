@@ -62,7 +62,7 @@ def test_the_row_controls_side_panel_and_transcript_are_thimble_s_parts_too():
 
 def test_the_record_card_is_one_of_thimble_s_parts():
     """A page lays out the kit's record card (viewer_kit.css .thimble-card) and its column or grid, but does not give it
-    corners, an edge or a colour of its own, such as a coloured side stripe in place of Color by's bar."""
+    corners, an edge or a color of its own, such as a colored side stripe in place of Color by's bar."""
     css = ("<style>.col .thimble-card { margin: 0 0 6px } .thimble-cards { gap: 8px; background: #f4f4f4 }"
            " .thimble-cards-grid { --thimble-tile-w: 180px } .thimble-card-title { -webkit-line-clamp: 3 }"
            " .thimble-card { border-radius: 12px } .thimble-card.hot { border-left: 3px solid #d0750a }"

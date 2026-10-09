@@ -2939,9 +2939,10 @@
   // at its right), then the `title`, the `body` and the `foot`, each left out when not given. A part is text, which the
   // card escapes, or {html} for markup the page made, such as a key chip; `chips` are words, each a neutral chip. `ref`
   // is the record's data-anchor. `record` hands the record to Color by (colour.attr), so the bridge draws its value's
-  // colour as the bar on the card's left edge: a card takes no colour of its own. `active` marks the chosen card,
+  // color as the bar on the card's left edge: a card takes no color of its own. `active` marks the chosen card,
   // `act: false` a card a click does nothing on, and `attrs` ({name: value}) gives it more attributes, such as a key the
-  // page's click reads. (thimble.card is a card type's stored data, in a card's frame: viewer_bridge.js.)
+  // page's click reads; a `class` there is added to the card's own. (thimble.card is a card type's stored data, in a
+  // card's frame: viewer_bridge.js.)
   function hasPart(v) {
     return v != null && v !== '' && v !== false
   }
@@ -2962,7 +2963,9 @@
     for (var name in extra) {
       // a name an attribute can have, never an event handler's
       if (!/^[a-zA-Z_:][\w:.-]*$/.test(name) || /^on/i.test(name) || extra[name] == null || extra[name] === false) continue
-      attrs += ' ' + name + '="' + esc(extra[name] === true ? '' : extra[name]) + '"'
+      // a second class attribute would be dropped by the parser, so the page's classes join the card's
+      if (name.toLowerCase() === 'class') cls += extra[name] === true ? '' : ' ' + String(extra[name])
+      else attrs += ' ' + name + '="' + esc(extra[name] === true ? '' : extra[name]) + '"'
     }
     var meta = (hasPart(o.meta) ? '<span>' + cardText(o.meta) + '</span>' : '') +
       (o.chips || []).filter(hasPart).map(function (c) {
@@ -2972,7 +2975,7 @@
       ? '<div class="thimble-card-head">' + (hasPart(o.key) ? '<span class="thimble-card-key">' + cardText(o.key) + '</span>' : '') +
         (meta ? '<span class="thimble-card-meta">' + meta + '</span>' : '') + '</div>'
       : ''
-    return '<div class="' + cls + '"' + attrs + '>' + head + cardPart(o.title, 'thimble-card-title') +
+    return '<div class="' + esc(cls) + '"' + attrs + '>' + head + cardPart(o.title, 'thimble-card-title') +
       cardPart(o.body, 'thimble-card-body') + cardPart(o.foot, 'thimble-card-foot') + '</div>'
   }
 

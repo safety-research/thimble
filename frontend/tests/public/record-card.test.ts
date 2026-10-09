@@ -51,6 +51,10 @@ test('a card holds its parts in order, escapes text, keeps {html} and anchors it
   expect(bare.hasAttribute('hidden')).toBe(true)
   expect(bare.hasAttribute('onclick')).toBe(false)
   expect(bare.hasAttribute('data-anchor')).toBe(false)
+  // a class the page gives joins the card's, escaped, rather than a second class attribute the parser drops
+  const dim = card({ title: 't', attrs: { class: 'still "x"', 'data-n': 3 } })
+  expect(dim.className).toBe('thimble-card thimble-card-act still "x"')
+  expect(dim.getAttribute('data-n')).toBe('3')
   for (const el2 of [el, bare]) {
     expect(el2.getAttribute('style')).toBeNull()
     expect(el2.innerHTML).not.toMatch(/style=/)

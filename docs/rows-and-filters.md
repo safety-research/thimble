@@ -220,9 +220,10 @@ col.innerHTML = '<div class="thimble-cards">' + prs.map((pr) => thimble.recordCa
 ```
 
 Each part is text, which `recordCard` escapes, or `{html}`. `act: false` gives a card a click does nothing on, and
-`attrs` (`{name: value}`) more attributes, such as a key the page's click reads. `.thimble-cards` stacks cards in a
-column with a gap between them, and `.thimble-cards-grid` lays them out as tiles at least `--thimble-tile-w` (220 px)
-wide. A list of records with no box is the kit's `.list-row` or `.table`.
+`attrs` (`{name: value}`) more attributes, such as a key the page's click reads or a `class` of the page's, which joins
+the card's own. `.thimble-cards` stacks cards in a column with a gap between them, and `.thimble-cards-grid` lays them
+out as tiles at least `--thimble-tile-w` (220 px) wide. A list of records with no box is the kit's `.list-row` or
+`.table`.
 
 ## The side panel
 

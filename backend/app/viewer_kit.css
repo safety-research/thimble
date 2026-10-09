@@ -16,11 +16,11 @@
                        has a choice set, aria-invalid when what was typed cannot be used
      .table            a table of records: caps header, hairline rows, .active on the chosen row
      .list-row         a row of a list: .active on the chosen one
-     .thimble-card     a record as a card or a tile (thimble.card): .thimble-card-head with .thimble-card-key and
-                       .thimble-card-meta, then .thimble-card-title, .thimble-card-body and .thimble-card-foot;
+     .thimble-card     a record as a card or a tile (thimble.recordCard): .thimble-card-head with .thimble-card-key
+                       and .thimble-card-meta, then .thimble-card-title, .thimble-card-body and .thimble-card-foot;
                        .thimble-card-act when a click opens it, .active on the chosen one; .thimble-cards stacks cards
                        in a column, .thimble-cards-grid lays them out as tiles
-     .avatar          a person or an agent: the initial of its name on a neutral disc, whose shade the page sets
+     .avatar           a person or an agent: the initial of its name on a neutral disc, whose shade the page sets
                        from the name as --a (0.08 to 0.24), so the label colours stay the only colours
      .thimble-colour-* the Color by control (viewer_colour.js, thimble.colorBy), which the page only mounts: Color by
                        and the values' key chips in the top row, its menu with each label's definition, and a list's
@@ -451,9 +451,9 @@ select.field {
   background: var(--surface-selected);
 }
 
-/* a record as a card or a tile (thimble.card): a hairline box on the paper with a chip's corners, its parts in a
-   column. A card has no colour of its own: Color by's bar, which the bridge draws on its left edge as on a row, is its
-   only colour, and its left corners go square under the bar so that the bar stays straight. */
+/* a record as a card or a tile (thimble.recordCard): a hairline box on the paper with a chip's corners, its parts in a
+   column. A card has no color of its own: Color by's bar, which the bridge draws on its left edge as on a row, is its
+   only color, and its left corners go square under the bar so that the bar stays straight. */
 .thimble-cards {
   display: flex;
   flex-direction: column;
