@@ -4,10 +4,11 @@
 // plan as main made it; then the same card is drawn again with the steps an edit gave it: steps 1 and 2 done, step 3
 // running, step 4 with details. Its statuses and times change in place, step 4 has Show more under it and no details at
 // rest, Show more opens the details under the line, their citation a chip, and Show less folds them. Then main changes
-// the plan on the analyst's feedback: a changed step says Changed and its Show more shows its text as it was, a new step
-// says New, the removed step is listed folded under the steps, and the marks go with the next edit or Clear marks
-// (POST /cards/{id}/plan-edit/clear). Matt 2026-10-09: "instead of the >, use text like 'Show more'"; "more realistic
-// is feedback on the upcoming plan itself. and i don't see what changed or updated in the plan".
+// the plan on the analyst's feedback: a changed step says Changed and a new step New, quiet words after their text, with
+// no text as it was and no removed step on the card (the card's history has them), and the marks go with the next edit
+// or Clear marks (POST /cards/{id}/plan-edit/clear). Matt 2026-10-09: "instead of the >, use text like 'Show more'";
+// "more realistic is feedback on the upcoming plan itself. and i don't see what changed or updated in the plan"; "we
+// should not keep 'Before' with a strikethrough. maybe cards have a history button?".
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -179,13 +180,9 @@ const FEEDBACK = [
   step('s6', 'Check that every agent can build pandas offline', ['checks/offline-builds.csv']),
   { ...MADE[4], text: 'Pilot: 4 agents per condition on 10 PRs', makes: ['pilot/', 'pilot/builds.csv'] },
 ]
-const MARKS = {
-  ts: ago(1),
-  steps: { s4: { was: { details: '' } }, s6: { new: true }, s5: { was: { text: MADE[4].text, makes: ['pilot/'] } } },
-  removed: [{ id: 's3', text: MADE[2].text, makes: ['board/'] }],
-}
+const MARKS = { ts: ago(1), steps: { s4: { changed: ['details'] }, s6: { new: true }, s5: { changed: ['text', 'makes'] } } }
 
-test("main's edit on the analyst's feedback: Changed and New beside the steps, the old text on request, the removed step folded", async () => {
+test("main's edit on the analyst's feedback: Changed and New beside the steps, and no text as it was or removed step", async () => {
   await page.evaluate(([s, m]) => (window as any).__t.draw(s, m), [FEEDBACK, MARKS] as const)
   const got = await steps()
   assert.deepEqual(got.map((s) => s.id), ['s1', 's2', 's4', 's6', 's5'])
@@ -199,21 +196,22 @@ test("main's edit on the analyst's feedback: Changed and New beside the steps, t
   })
   assert.ok(look.after && look.size <= 12.5 && look.border === '0px', `a quiet word after the step's text ${JSON.stringify(look)}`)
   assert.ok(look.rows.every((w) => w === '0px'), 'no colored stripe beside a marked step')
-  // the pilot's old text waits behind its Show more
-  const pilot = page.locator(S(5))
-  assert.equal(await pilot.locator('.plan-was').count(), 0)
-  await pilot.locator('.plan-more').click()
-  assert.equal(await pilot.locator('.plan-was-text').textContent(), MADE[4].text)
-  assert.deepEqual(await pilot.locator('.plan-was .plan-make').allTextContents(), ['pilot/'])
-  await pilot.locator('.plan-more').click()
-  assert.equal(await pilot.locator('.plan-was').count(), 0)
-  // the message board step, removed, is listed folded under the steps
+  // the pilot has nothing to open: neither its old text nor a struck-through Before is on the card
+  assert.equal(await page.locator(`${S(5)} .plan-more`).count(), 0)
+  assert.equal(await page.locator(`${S(5)} .plan-mark`).getAttribute('title'), 'The last edit changed its text and what it makes')
+  // the container step's Show more (third now) opens its details alone
+  await page.locator(`${S(3)} .plan-more`).click()
+  await page.waitForSelector(`${S(3)} .plan-details`)
+  const card = await page.evaluate(() => ({
+    text: document.querySelector('.canvas-card')!.textContent ?? '',
+    struck: [...document.querySelectorAll<HTMLElement>('.canvas-card *')].filter((e) => getComputedStyle(e).textDecorationLine.includes('line-through')).length,
+  }))
+  assert.ok(!card.text.includes('Before') && !card.text.includes(MADE[2].text) && !card.text.includes(MADE[4].text), card.text)
+  assert.equal(card.struck, 0, 'nothing struck through')
+  await page.locator(`${S(3)} .plan-more`).click()
+  // Clear marks, alone under the steps
   const foot = page.locator('.plan-edit')
-  assert.equal(await foot.locator('.plan-edit-removed').textContent(), '1 step removed')
-  assert.equal(await foot.locator('.plan-removed-step').count(), 0)
-  await foot.getByRole('button', { name: 'Show more' }).click()
-  assert.deepEqual(await foot.locator('.plan-removed-step').allTextContents(), [MADE[2].text])
-  assert.equal(await foot.locator('.plan-edit-clear').textContent(), 'Clear marks')
+  assert.deepEqual(await foot.locator('button').allTextContents(), ['Clear marks'])
   const out = process.env.THIMBLE_PLAN_MARKS_SHOT
   if (out) writeFileSync(path.resolve(out), await page.screenshot({ fullPage: true }))
 })

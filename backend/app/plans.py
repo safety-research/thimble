@@ -10,9 +10,11 @@ leaves out, such as its runs; a status that changes is stamped (stamp), so the c
 run so far, unless the agent gives a time. The next phase can still be a new plan card whose `follows` names this one.
 
 An edit that changes what the plan is (a step's text, what it makes or its details; a step added or removed) leaves its
-marks in the payload (edit_marks, LAST_EDIT), so the card shows the analyst what changed: Changed, with the text as it
-was, New, and the removed steps. They stay until the next edit that changes the plan, through edits of progress alone
-(marks_after), or until the analyst clears them (POST /ws/{c}/cards/{id}/plan-edit/clear).
+marks in the payload (edit_marks, LAST_EDIT), so the card shows the analyst which steps it changed (Changed) and added
+(New); the plan as it was is in the card's history (notebook.version_of). The marks stay until the next edit that
+changes the plan, through edits of progress alone (marks_after), or until the analyst clears them (POST
+/ws/{c}/cards/{id}/plan-edit/clear). Matt 2026-10-09: "we should not keep 'Before' with a strikethrough. maybe cards
+have a history button?"
 
 A step's `runs` names the Agent calls that do it, by their description, as Claude Code's agent tray names them.
 plan_runs matches each name to main's subagent chat of that title (session.py mirrors each Agent call of main's as an
@@ -173,9 +175,9 @@ def removed_ids(payload: dict | None, steps: "builtins.list[dict]") -> "builtins
 
 
 def edit_marks(old: "builtins.list[dict]", new: "builtins.list[dict]", now: str | None = None) -> dict | None:
-    """What an edit changed in a plan, for the card to mark: {ts, steps: {id: {new: true} | {was: {field: before}}},
-    removed: [{id, text, makes}]}, where a changed step's `was` holds the MARKED_FIELDS the edit changed, as they were.
-    The steps match by id, as merge_steps leaves them. None when the edit changed none of them, as when it changed only
+    """What an edit changed in a plan, for the card to mark: {ts, steps: {id: {new: true} | {changed: [field, ...]}}},
+    where a changed step names the MARKED_FIELDS the edit changed; a step it removed leaves no mark. The steps match by
+    id, as merge_steps leaves them. None when the edit changed none of them and removed no step, as when it changed only
     statuses, notes or runs."""
     by_id = {str(s.get("id")): s for s in old}
     steps: dict[str, dict] = {}
@@ -183,29 +185,42 @@ def edit_marks(old: "builtins.list[dict]", new: "builtins.list[dict]", now: str 
         was = by_id.get(str(s.get("id")))
         if was is None:
             steps[str(s["id"])] = {"new": True}
-        elif changed := {k: was.get(k) for k in MARKED_FIELDS if was.get(k) != s.get(k)}:
-            steps[str(s["id"])] = {"was": changed}
+        elif changed := [k for k in MARKED_FIELDS if was.get(k) != s.get(k)]:
+            steps[str(s["id"])] = {"changed": changed}
     kept = {str(s.get("id")) for s in new}
-    removed = [{"id": str(s.get("id")), "text": str(s.get("text") or ""), "makes": list(s.get("makes") or [])}
-               for s in old if str(s.get("id")) not in kept]
-    if not steps and not removed:
+    if not steps and all(str(s.get("id")) in kept for s in old):
         return None
-    return {"ts": now or _now(), "steps": steps, "removed": removed}
+    return {"ts": now or _now(), "steps": steps}
 
 
 def marks_after(payload: dict | None, old: "builtins.list[dict]", new: "builtins.list[dict]") -> dict | None:
-    """A plan's marks after an edit from steps `old` to `new`: the edit's own (edit_marks) when it changed the plan, else
-    the marks the payload held, so an edit of progress alone (a status, a note, runs) leaves the analyst's view of the
-    last change; ids of steps gone since are dropped."""
-    if marks := edit_marks(old, new):
-        return marks
+    """A plan's marks after an edit from steps `old` to `new`: the edit's own (edit_marks) when it changed the plan, None
+    when that change marks no step (it only removed steps), else the marks the payload held, so an edit of progress alone
+    (a status, a note, runs) leaves the analyst's view of the last change; ids of steps gone since are dropped."""
+    if (marks := edit_marks(old, new)) is not None:
+        return marks if marks["steps"] else None
     held = (payload or {}).get(LAST_EDIT) if isinstance(payload, dict) else None
     if not isinstance(held, dict):
         return None
     ids = {str(s.get("id")) for s in new}
     steps = {k: v for k, v in (held.get("steps") or {}).items() if k in ids} if isinstance(held.get("steps"), dict) else {}
-    removed = held.get("removed") if isinstance(held.get("removed"), list) else []
-    return {**held, "steps": steps, "removed": removed} if steps or removed else None
+    return {"ts": held.get("ts"), "steps": steps} if steps else None
+
+
+def restored_payload(held: dict | None, version: dict | None) -> dict:
+    """A plan's payload when the analyst restores an earlier version of it (notebook.restore_version): that version's
+    steps as they were, their ids, statuses and clocks with them; the plan's `follows` as it is now; the ids of the steps
+    it no longer has kept (removed_ids); and its steps marked against the steps it has now (marks_after), as any edit
+    that changes the plan marks them."""
+    p = held if isinstance(held, dict) else {}
+    old = notebook.plan_steps_of(p.get("steps"))
+    steps = notebook.plan_steps_of((version or {}).get("steps") if isinstance(version, dict) else None)
+    payload: dict[str, Any] = {"steps": steps, "follows": p.get("follows")}
+    if removed := removed_ids(p, steps):
+        payload[REMOVED] = removed
+    if marks := marks_after(p, old, steps):
+        payload[LAST_EDIT] = marks
+    return payload
 
 
 def clear_edit(c: str, cid: str) -> bool:

@@ -63,6 +63,30 @@ describe('where the comments beside the cards sit', () => {
     expect(low.ay).toBe(p.y + 40)
   })
 
+  test('the open comment stands level with its step and the comments above it that it would meet move up, none overlapping', () => {
+    // Matt 2026-10-09: the comment "foregrounded … and moves up", as Google Docs moves the active comment beside its text
+    const lay = layoutBoard(board, new Set(['g', 'n']), heights)
+    const p = lay.rects.get('p')!
+    const spots = [
+      { id: 'top', card: 'p', dy: 14, h: 120 },
+      { id: 'low', card: 'p', dy: 40, h: 100 },
+      { id: 'third', card: 'p', dy: 60, h: 50 },
+    ]
+    const rest = commentPlaces(board, lay, spots)
+    expect(rest.get('low')!.y).toBe(p.y + 14 + 120 + COMMENT_GAP_Y)
+    const open = commentPlaces(board, lay, spots, 'low')
+    const [top, low, third] = ['top', 'low', 'third'].map((id) => open.get(id)!)
+    expect(low.y).toBe(p.y + 40)
+    expect(top.y).toBe(low.y - 120 - COMMENT_GAP_Y)
+    expect(third.y).toBe(low.y + 100 + COMMENT_GAP_Y)
+    // each still points at its own place on the card, and an anchor that is not shown changes nothing
+    expect([top.ay, low.ay, third.ay]).toEqual([p.y + 14, p.y + 40, p.y + 60])
+    expect(commentPlaces(board, lay, spots, 'gone')).toEqual(rest)
+    // a comment in a column the open one does not meet stays put
+    const both = commentPlaces(board, lay, [...spots, { id: 'loose', card: 'l', dy: COMMENT_LIFT, h: 60 }], 'low')
+    expect(both.get('loose')!.y).toBe(lay.rects.get('l')!.y + COMMENT_LIFT)
+  })
+
   test("comments beside edges closer than a comment's width stack together, none overlapping; a column farther off stays put", () => {
     // as live: a document's figures in a second, narrower root frame below the plan's, its comments 27 px left of the
     // plan's long column, drew over it

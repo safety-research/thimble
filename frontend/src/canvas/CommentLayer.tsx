@@ -2,13 +2,17 @@
 // or main's own, beside its card, aligned with the card's top or with the row of the plan step it is about
 // (`[data-anchor="card:<id>#step-<n>"]`), outside the card's outermost frame, stacked so none overlap (layout.ts
 // commentPlaces). As in the Report, each step or card a comment is on is highlighted in its check's color (its step's
-// text, or the card's question) and no line joins them at rest; while a comment is hovered, has the keyboard's focus or
-// is open, its highlight is stronger, as the Report's active comment's is, and one thin line runs from the card's right
-// edge at that step to the comment alone. Matt 2026-10-09: "what about highlights, just like in the report?". Each is
-// the comment card the Report's margin draws too (report/CommentCard.tsx): its check's name and its statement, its
-// details on request, Ask, Know it and ✓ (Done), and a thread for Ask anchored to its card or step. A comment hides with
-// its check, when its card is not drawn (a collapsed frame) or when the filters leave its card out. The box the
-// comments cover goes to the canvas, whose Fit and minimap take it in.
+// text, or the card's question), and no line joins them. While a comment is hovered, has the keyboard's focus or is
+// open, its highlight is darker and the comment comes to the front with a little more shadow (canvas.css); the open
+// comment, or the one the keyboard is on, also moves to stand level with its step, the comments above it moving up, as
+// the Report's margin stands its active comment at its passage. A hovered comment does not move, so it never slides out
+// from under the pointer. Matt 2026-10-09: "what about highlights, just like in the report?"; "we don't need an
+// underline in addition to darkened highlight … and we don't need the line connecting it to the comment if it's
+// foregrounded (e.g., slightly more shadow?) and moves up". Each is the comment card the Report's margin draws too
+// (report/CommentCard.tsx): its check's name and its statement, its details on request, Ask, Know it and ✓ (Done), and
+// a thread for Ask anchored to its card or step. A comment hides with its check, when its card is not drawn (a
+// collapsed frame) or when the filters leave its card out. The box the comments cover goes to the canvas, whose Fit
+// and minimap take it in.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
@@ -101,17 +105,6 @@ function pointOf(card: HTMLElement | undefined, c: CanvasComment): number {
   return Math.max(0, (row.getBoundingClientRect().top - box.top) / (scale || 1) - COMMENT_STEP_LIFT)
 }
 
-/** The line from a comment's card to the comment, on the plane: from the card's right edge, level with the step's first
- * line (or the card's question), to the comment's left edge, level with its header; straight when the comment stands
- * level with its step, else a curve that leaves and meets each end level. */
-export function linePath(p: CommentPlace): string {
-  const y0 = p.ay + 13
-  const y1 = p.y + 13
-  if (Math.abs(y1 - y0) < 1) return `M${p.ax} ${y0}H${p.x}`
-  const k = Math.max(8, (p.x - p.ax) / 2)
-  return `M${p.ax} ${y0}C${p.ax + k} ${y0} ${p.x - k} ${y1} ${p.x} ${y1}`
-}
-
 export interface CommentLayerProps {
   ws: string
   board: Board
@@ -143,10 +136,11 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
   useEffect(() => {
     if (focused && !els.current.get(focused)?.contains(document.activeElement)) setFocused(null)
   })
-  // the one comment whose place shows: the hovered one, else the one the keyboard is on, else the open one
-  const hotId = [hovered, focused, active].find((id) => id != null && comments.some((c) => c.id === id)) ?? null
-  const hot = hotId ? comments.find((c) => c.id === hotId) : undefined
-  const hotColour = hot ? look.colour(hot.check) : ''
+  // the one comment whose place shows: the hovered one, else the one the keyboard is on, else the open one; and the one
+  // that stands level with its step: the one the keyboard is on, else the open one, never the hovered one
+  const shown = (id: string | null) => id != null && comments.some((c) => c.id === id)
+  const hotId = [hovered, focused, active].find(shown) ?? null
+  const anchor = [focused, active].find(shown) ?? null
 
   // every step or card a shown comment is on is highlighted in its check's color, as the Report highlights a commented
   // passage (report.css .wu-flag: the color of the hot comment there, else of the first check in the pane's order), and
@@ -201,7 +195,7 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
       if (!el) continue
       spots.push({ id: c.id, card: c.card, dy: pointOf(cardEl(c.card), c), h: el.offsetHeight })
     }
-    const next = commentPlaces(board, lay, spots)
+    const next = commentPlaces(board, lay, spots, anchor)
     const same = (a: CommentPlace | undefined, b: CommentPlace) => !!a && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.ax - b.ax) < 0.5 && Math.abs(a.ay - b.ay) < 0.5
     setPlaces((prev) => (prev.size === next.size && [...next].every(([k, v]) => same(prev.get(k), v)) ? prev : next))
     const box = extentOf(spots.flatMap((sp) => (next.has(sp.id) ? [{ x: next.get(sp.id)!.x, y: next.get(sp.id)!.y, w: COMMENT_W, h: sp.h }] : [])))
@@ -224,9 +218,6 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
   if (!comments.length) return null
   return (
     <>
-      <svg className="ccm-lines" aria-hidden="true">
-        {hot && places.get(hot.id) && <path data-line={hot.id} d={linePath(places.get(hot.id)!)} style={{ stroke: hotColour }} />}
-      </svg>
       {comments.map((c) => {
         const place = places.get(c.id)
         return (

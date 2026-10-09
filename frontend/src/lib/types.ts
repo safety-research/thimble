@@ -1591,8 +1591,29 @@ export interface Cell {
   /** the corpus files the last run read, and how many more it read than are listed */
   reads?: string[]
   reads_more?: number
-  /** who changed its code, payload or question, and when */
-  edited?: { by: string; ts: string }[]
+  /** who changed its question, code, payload or takeaway, and when, oldest first (backend notebook.stamp_edit) */
+  edited?: CellEdit[]
+}
+
+/** One edit of a card: who made it and when, the fields it changed, and `id`, by which the card as it was before it
+ * opens (CardVersion); an edit made before thimble kept what edits replaced has no id. */
+export interface CellEdit {
+  by: string
+  ts: string
+  id?: string
+  fields?: string[]
+}
+
+/** A card as it stood before one of its edits, to read (backend notebook.card_version_route): its question, code,
+ * payload, takeaway and outputs as stored then. */
+export interface CardVersion {
+  card: string
+  /** the edit it stood before */
+  before: string
+  by: string
+  ts: string
+  fields: string[]
+  version: Pick<Cell, 'id' | 'notebook' | 'kind' | 'title' | 'code' | 'payload' | 'takeaway' | 'outputs' | 'status' | 'text'>
 }
 
 export interface CellPatch {

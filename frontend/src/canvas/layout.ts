@@ -773,9 +773,12 @@ export function rootFrameOf(board: Board, card: string): string | null {
  * Where each comment sits beside the canvas: COMMENT_GAP_X right of its card's outermost frame (a loose card's own
  * right edge), at its card's top plus its `dy`; the comments are stacked in the order of their wanted tops, each pushed
  * by COMMENT_GAP_Y below every comment placed before it that it would share columns with (two frames whose right edges
- * differ by less than COMMENT_W), so none overlap. A comment whose card is not drawn gets no place. Pure.
+ * differ by less than COMMENT_W), so none overlap. The `anchor` comment (the open one, or the one the keyboard is on)
+ * stands at its wanted top, level with its step, and the comments above it that it would meet move up instead, as
+ * the Report's margin stands its active comment at its passage (report/checkComments stackCards). A comment whose card
+ * is not drawn gets no place. Pure.
  */
-export function commentPlaces(board: Board, lay: Layout, spots: readonly CommentSpot[]): Map<string, CommentPlace> {
+export function commentPlaces(board: Board, lay: Layout, spots: readonly CommentSpot[], anchor: string | null = null): Map<string, CommentPlace> {
   const list: { id: string; want: number; h: number; x: number; ax: number }[] = []
   for (const s of spots) {
     const r = lay.rects.get(s.card)
@@ -785,13 +788,25 @@ export function commentPlaces(board: Board, lay: Layout, spots: readonly Comment
     list.push({ id: s.id, want: r.y + s.dy, h: s.h, x: outer.x + outer.w + COMMENT_GAP_X, ax: r.x + r.w })
   }
   list.sort((a, b) => a.want - b.want)
-  const out = new Map<string, CommentPlace>()
-  const placed: { x: number; low: number }[] = []
-  for (const it of list) {
-    const low = placed.reduce((m, p) => (Math.abs(p.x - it.x) < COMMENT_W ? Math.max(m, p.low) : m), -Infinity)
-    const y = Math.max(it.want, low)
-    out.set(it.id, { x: it.x, y, ax: it.ax, ay: it.want })
-    placed.push({ x: it.x, low: y + it.h + COMMENT_GAP_Y })
+  const meet = (a: { x: number }, b: { x: number }) => Math.abs(a.x - b.x) < COMMENT_W
+  const k = anchor == null ? -1 : list.findIndex((it) => it.id === anchor)
+  const ys: number[] = []
+  list.forEach((it, i) => {
+    if (i === k) {
+      ys.push(it.want)
+      return
+    }
+    // below each comment before it in its columns; past the anchor, not below one that will move up above the anchor
+    let low = -Infinity
+    for (let j = 0; j < i; j++) {
+      if (!meet(list[j], it) || (k >= 0 && j < k && i > k && meet(list[j], list[k]) && meet(it, list[k]))) continue
+      low = Math.max(low, ys[j] + list[j].h + COMMENT_GAP_Y)
+    }
+    ys.push(Math.max(it.want, low))
+  })
+  // the comments before the anchor move up above every later comment they would meet
+  for (let i = k - 1; i >= 0; i--) {
+    for (let j = i + 1; j < list.length; j++) if (meet(list[j], list[i])) ys[i] = Math.min(ys[i], ys[j] - list[i].h - COMMENT_GAP_Y)
   }
-  return out
+  return new Map(list.map((it, i) => [it.id, { x: it.x, y: ys[i], ax: it.ax, ay: it.want }]))
 }

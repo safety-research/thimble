@@ -1,10 +1,11 @@
 """Plan cards: add_card's `plan` kind stores numbered steps with stable ids and no takeaway; edit_card replaces a plan's
 steps at any time, as for any card, and each step it replaces keeps its id, its clock while its text is unchanged and
 what the edit leaves out, such as its runs, with a changed status stamped; update_plan is gone. A step's details are
-stored, served and read, and an edit that changes the plan marks what it changed until the next such edit or the
-analyst's Clear marks. The next phase is a new plan that `follows` the last, and read_ref, list_cards, the canvas
-context and refs read the steps. plan_runs matches a step's runs to main's subagent chats. Called through tools.call as
-main's browser chat, as the other card tools' tests are."""
+stored, served and read, and an edit that changes the plan marks the steps it changed and added until the next such
+edit or the analyst's Clear marks; the plan as it was is in the card's history (test_card_history.py). The next phase
+is a new plan that `follows` the last, and read_ref, list_cards, the canvas context and refs read the steps. plan_runs
+matches a step's runs to main's subagent chats. Called through tools.call as main's browser chat, as the other card
+tools' tests are."""
 from __future__ import annotations
 
 import re
@@ -289,18 +290,18 @@ async def test_an_edit_that_changes_the_plan_marks_what_changed_until_the_next_s
         STEPS[0], {"text": "Write the prompts", "makes": ["prompts/"]}, {**STEPS[1], "makes": ["Dockerfile.agent", "wheelhouse/"]}])
     assert not res.is_error, res.text
     marks = _cell(cid)["payload"][plans.LAST_EDIT]
-    assert marks["steps"] == {"s4": {"new": True}, "s2": {"was": {"makes": ["Dockerfile.agent"]}}}
-    assert marks["removed"] == [{"id": "s3", "text": STEPS[2]["text"], "makes": ["pilot/"]}] and marks["ts"]
+    # the marks name the steps alone, no text as it was (that is the card's history) and no removed step
+    assert marks["steps"] == {"s4": {"new": True}, "s2": {"changed": ["makes"]}}
+    assert set(marks) == {"ts", "steps"} and marks["ts"]
     served = await notebook.canvas_route(CORPUS)
     assert next(c for c in served["cells"] if c["id"] == cid)["payload"][plans.LAST_EDIT] == marks
     # an edit of progress alone (a status, a note) keeps the marks of the last change
     steps = [{"text": s["text"]} for s in notebook.plan_steps(_cell(cid))]
     await call("edit_card", group, card=f"card:{cid}", steps=[{**steps[0], "status": "running", "note": "cloning"}, *steps[1:]])
     assert _cell(cid)["payload"][plans.LAST_EDIT] == marks
-    # the next edit that changes the plan replaces them with its own: a step reworded keeps its old text
+    # the next edit that changes the plan replaces them with its own: a step reworded is Changed by its text
     await call("edit_card", group, card=f"card:{cid}", steps=[steps[0], {"text": "Write the prompts for both conditions"}, steps[2]])
-    assert _cell(cid)["payload"][plans.LAST_EDIT]["steps"] == {"s4": {"was": {"text": "Write the prompts"}}}
-    assert _cell(cid)["payload"][plans.LAST_EDIT]["removed"] == []
+    assert _cell(cid)["payload"][plans.LAST_EDIT]["steps"] == {"s4": {"changed": ["text"]}}
     # the marks are no part of what a check reads of the card
     assert canvas_comments._card_fp(_cell(cid)) == fp
     # Clear marks takes them off with no edit of the card, once
@@ -319,8 +320,12 @@ def test_edit_marks_match_steps_by_id_and_mark_nothing_for_progress_alone():
     old = notebook.plan_steps_of([{"id": "s1", "text": "Mirror", "makes": ["mirror/"]}, {"id": "s2", "text": "Build"}])
     assert plans.edit_marks(old, [{**old[0], "status": "done", "note": "6 repos"}, old[1]]) is None
     got = plans.edit_marks(old, [{**old[0], "details": "Every PR head."}, {"id": "s3", "text": "Pilot"}], now="t")
-    assert got == {"ts": "t", "steps": {"s1": {"was": {"details": ""}}, "s3": {"new": True}},
-                   "removed": [{"id": "s2", "text": "Build", "makes": []}]}
+    assert got == {"ts": "t", "steps": {"s1": {"changed": ["details"]}, "s3": {"new": True}}}
+    # an edit that only removes a step changes the plan but marks no step, so it takes the last edit's marks off
+    assert plans.edit_marks(old, [old[0]], now="t") == {"ts": "t", "steps": {}}
+    held = {"steps": old, plans.LAST_EDIT: {"ts": "t0", "steps": {"s1": {"new": True}}}}
+    assert plans.marks_after(held, old, [old[0]]) is None
+    assert plans.marks_after(held, old, [{**old[0], "status": "done"}, old[1]]) == {"ts": "t0", "steps": {"s1": {"new": True}}}
 
 
 async def test_the_next_phase_is_a_new_plan_that_follows_the_last(group):

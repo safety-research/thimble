@@ -9,7 +9,7 @@
 // no frame kept open in the browser, the analyst's frame, Your work, starts open. Matt 2026-10-09: "it shows a short
 // comment, then you expand for details ... and can ask follow ups"; "what does comment menu look like? should be
 // analogous to menu in reports"; "instead of the >, use text like 'Show more' or something that's placed below the
-// short description".
+// short description"; "we don't need an underline in addition to darkened highlight".
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -172,6 +172,33 @@ test('the menu is the same on both surfaces: Ask and Know it on hover, before âœ
   assert.equal(menus[0].moreText, 'Show more')
   assert.deepEqual(menus[1], menus[0], 'the canvas menu looks as the Report menu does')
   assert.ok(menus[0].order && menus[0].below && menus[0].inside, JSON.stringify(menus[0]))
+})
+
+test('hovered, a comment comes to the front with a little more shadow on both surfaces, and an active passage has no underline', async () => {
+  // Matt 2026-10-09: "we don't need an underline in addition to darkened highlight â€¦ and we don't need the line
+  // connecting it to the comment if it's foregrounded (e.g., slightly more shadow?)"
+  const look = (sel: string) => page.locator(sel).evaluate((el) => ({ z: Number(getComputedStyle(el).zIndex) || 0, shadow: getComputedStyle(el).boxShadow }))
+  for (const sel of [R, C]) {
+    await page.mouse.move(5, 5)
+    await page.waitForTimeout(250)
+    const rest = await look(sel)
+    await page.locator(sel).hover()
+    await page.waitForTimeout(250)
+    const hot = await look(sel)
+    assert.ok(hot.z > rest.z && hot.shadow !== rest.shadow, `${sel}: in front, with more shadow ${JSON.stringify({ rest, hot })}`)
+  }
+  await page.mouse.move(5, 5)
+  const flag = await page.evaluate(() => {
+    const el = document.createElement('span')
+    el.className = 'wu-s wu-flag wu-flag-active'
+    el.style.setProperty('--flag', 'rgb(200, 100, 0)')
+    document.body.appendChild(el)
+    const cs = getComputedStyle(el)
+    const got = { underline: cs.boxShadow, line: cs.textDecorationLine, bg: cs.backgroundColor }
+    el.remove()
+    return got
+  })
+  assert.ok(flag.underline === 'none' && flag.line === 'none' && flag.bg !== 'rgba(0, 0, 0, 0)', JSON.stringify(flag))
 })
 
 test('Show more opens the details, their citation a chip, and Show less under them folds them again, on both surfaces', async () => {

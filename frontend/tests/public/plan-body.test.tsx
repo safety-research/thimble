@@ -177,55 +177,49 @@ describe('a plan card', () => {
     expect(errors).toEqual([])
   })
 
-  test("the last edit's marks: Changed with the text as it was behind Show more, New, the removed steps folded, and Clear marks", async () => {
+  test("the last edit's marks: a quiet Changed and New, no text as it was and no removed steps, and Clear marks", async () => {
+    // Matt 2026-10-09: "we should not keep 'Before' with a strikethrough. maybe cards have a history button?"
     const posted: string[] = []
     vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') posted.push(String(url))
       return new Response(JSON.stringify({ cleared: true }), { status: 200, headers: { 'content-type': 'application/json' } })
     })
-    const last_edit = {
-      ts: at(1),
-      steps: { s2: { was: { text: 'Pilot: 2 agents per condition', makes: ['pilot/'] } }, s3: { new: true } },
-      removed: [{ id: 's9', text: 'Write the report', makes: ['report.md'] }],
-    }
+    const last_edit = { ts: at(1), steps: { s2: { changed: ['text', 'makes'] }, s3: { new: true } } }
     const cell = plan([
       { text: 'Mirror pandas', makes: ['mirror/'] },
-      { text: 'Pilot: 4 agents per condition on 10 PRs', makes: ['pilot/', 'pilot/builds.csv'] },
+      { text: 'Pilot: 4 agents per condition on 10 PRs', makes: ['pilot/', 'pilot/builds.csv'], details: 'Ten PRs, chosen once.' },
       { text: 'Check that every agent builds pandas offline', makes: ['checks/offline.csv'] },
     ])
     const el = await face({ ...cell, payload: { ...(cell.payload as object), last_edit } })
     const [mirror, pilot, check] = rows(el)
     expect(mirror.querySelector('.plan-mark')).toBeNull()
     expect(pilot.querySelector('.plan-mark')?.textContent).toBe('Changed')
+    expect(pilot.querySelector('.plan-mark')?.getAttribute('title')).toBe('The last edit changed its text and what it makes')
     expect(check.querySelector('.plan-mark')?.textContent).toBe('New')
+    expect(check.querySelector('.plan-mark')?.getAttribute('title')).toBe('Added by the last edit')
     expect(pilot.getAttribute('data-mark')).toBe('changed')
-    // the text as it was waits behind Show more
-    expect(pilot.querySelector('.plan-was')).toBeNull()
-    const more = pilot.querySelector<HTMLButtonElement>('.plan-more')!
-    expect(more.textContent).toBe('Show more')
+    // a changed step's Show more opens its details alone: how it was is in the card's history, not on the card
     expect(check.querySelector('.plan-more')).toBeNull()
-    await act(async () => more.click())
-    const was = pilot.querySelector<HTMLElement>('.plan-was')!
-    expect(was.querySelector('.plan-was-text')?.textContent).toBe('Pilot: 2 agents per condition')
-    expect([...was.querySelectorAll('.plan-make')].map((c) => c.textContent)).toEqual(['pilot/'])
-    // the removed step, folded under the steps
+    await act(async () => pilot.querySelector<HTMLButtonElement>('.plan-more')!.click())
+    expect(pilot.querySelector('.plan-details')?.textContent).toBe('Ten PRs, chosen once.')
+    expect(el.querySelector('.plan-was, .plan-removed, .plan-edit-removed')).toBeNull()
+    expect(el.textContent).not.toContain('Before')
+    // Clear marks, alone under the steps, asks the server to take them off
     const foot = el.querySelector<HTMLElement>('.plan-edit')!
-    expect(foot.querySelector('.plan-edit-removed')?.textContent).toBe('1 step removed')
-    expect(foot.textContent).not.toContain('Write the report')
-    const show = [...foot.querySelectorAll<HTMLButtonElement>('.plan-more')].find((b) => b.textContent === 'Show more')!
-    await act(async () => show.click())
-    expect([...foot.querySelectorAll('.plan-removed-step')].map((r) => r.textContent)).toEqual(['Write the report'])
-    // Clear marks asks the server to take them off
+    expect([...foot.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Clear marks'])
     await act(async () => foot.querySelector<HTMLButtonElement>('.plan-edit-clear')!.click())
     await settle()
     expect(posted).toEqual(['/api/ws/w/cards/p1an0001/plan-edit/clear'])
+    // a mark stored with the text as it was (before marks named fields) reads as Changed in those fields
+    const old = planEdit({ kind: 'plan', payload: { steps: [], last_edit: { steps: { s2: { was: { text: 'Pilot' } } }, removed: [{ id: 's9', text: 'Report' }] } } })
+    expect([...old!.steps]).toEqual([['s2', { kind: 'changed', fields: ['text'] }]])
     expect(errors).toEqual([])
   })
 
   test('a plan with no marks has no footer, and marks of progress alone are none', async () => {
     const el = await face(plan([{ text: 'Mirror pandas' }]))
     expect(el.querySelector('.plan-edit, .plan-mark')).toBeNull()
-    expect(planEdit({ kind: 'plan', payload: { steps: [], last_edit: { steps: {}, removed: [] } } })).toBeNull()
+    expect(planEdit({ kind: 'plan', payload: { steps: [], last_edit: { steps: {} } } })).toBeNull()
     expect(planEdit({ kind: 'note', payload: { text: 'x', last_edit: { steps: { s1: { new: true } } } } })).toBeNull()
   })
 })

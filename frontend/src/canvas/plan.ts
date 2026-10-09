@@ -62,62 +62,49 @@ export function statusWords(step: PlanStep, now?: number): string {
 /** Whether a step has more than its line to show: what it makes, a note or runs. */
 export const hasMore = (step: PlanStep): boolean => step.makes.length > 0 || !!step.note || step.runs.length > 0
 
-/** What the plan's last edit changed in a step (backend plans.edit_marks): new, or changed from what `was` holds of it. */
+/** What the plan's last edit did to a step (backend plans.edit_marks): added it, or changed `fields` of it (its text,
+ * what it makes, its details). How it was is in the card's history (DetailPanel's History). */
 export interface StepMark {
   kind: 'new' | 'changed'
-  /** the step's text, what it made and its details before the edit, those of them the edit changed */
-  was: { text?: string; makes?: string[]; details?: string }
-}
-
-/** A step the plan's last edit removed, as it was. */
-export interface RemovedStep {
-  id: string
-  text: string
-  makes: string[]
+  fields: string[]
 }
 
 /** The marks of what the plan's last edit changed (backend plans.LAST_EDIT), which the card shows until the next edit
- * that changes the plan or the analyst clears them: each changed or new step's mark by its id, and the steps removed;
- * null when it has none. */
-export function planEdit(cell: Pick<Cell, 'kind' | 'payload'>): { steps: Map<string, StepMark>; removed: RemovedStep[] } | null {
+ * that changes the plan or the analyst clears them: each changed or new step's mark by its id; null when it has none.
+ * A mark stored before the marks named fields (`was`, the old text) reads as changed in the fields `was` held. */
+export function planEdit(cell: Pick<Cell, 'kind' | 'payload'>): { steps: Map<string, StepMark> } | null {
   if (cell.kind !== 'plan') return null
   const raw = (cell.payload as { last_edit?: unknown } | undefined)?.last_edit
   if (!raw || typeof raw !== 'object') return null
-  const e = raw as { steps?: unknown; removed?: unknown }
+  const e = raw as { steps?: unknown }
   const steps = new Map<string, StepMark>()
   if (e.steps && typeof e.steps === 'object') {
     for (const [id, m] of Object.entries(e.steps as Record<string, unknown>)) {
       if (!m || typeof m !== 'object') continue
-      const mark = m as { new?: unknown; was?: unknown }
-      if (mark.new) steps.set(id, { kind: 'new', was: {} })
-      else if (mark.was && typeof mark.was === 'object') {
-        const w = mark.was as Record<string, unknown>
-        const was: StepMark['was'] = {}
-        if ('text' in w) was.text = String(w.text ?? '')
-        if ('makes' in w) was.makes = strs(w.makes)
-        if ('details' in w) was.details = String(w.details ?? '')
-        steps.set(id, { kind: 'changed', was })
-      }
+      const mark = m as { new?: unknown; changed?: unknown; was?: unknown }
+      if (mark.new) steps.set(id, { kind: 'new', fields: [] })
+      else if (Array.isArray(mark.changed)) steps.set(id, { kind: 'changed', fields: strs(mark.changed) })
+      else if (mark.was && typeof mark.was === 'object') steps.set(id, { kind: 'changed', fields: Object.keys(mark.was) })
     }
   }
-  const removed = (Array.isArray(e.removed) ? e.removed : [])
-    .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
-    .map((r) => ({ id: String(r.id ?? ''), text: String(r.text ?? ''), makes: strs(r.makes) }))
-    .filter((r) => r.text)
-  return steps.size || removed.length ? { steps, removed } : null
+  return steps.size ? { steps } : null
 }
 
-/** What a changed step shows of how it was, under its details on request: its text before, when that changed, and what
- * it made before, when that changed and it made something. */
-export const hasWas = (mark: StepMark | undefined): boolean => !!mark && mark.kind === 'changed' && (mark.was.text != null || !!mark.was.makes?.length)
+/** A changed step's tag's title: what the last edit changed of it, in words. */
+export function markTitle(mark: StepMark): string {
+  if (mark.kind === 'new') return 'Added by the last edit'
+  const words: Record<string, string> = { text: 'its text', makes: 'what it makes', details: 'its details' }
+  const what = mark.fields.map((f) => words[f] ?? f)
+  const list = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what.at(-1)}` : what[0]
+  return list ? `The last edit changed ${list}` : 'Changed by the last edit'
+}
 
 /** Whether a step's line opens on a click: a done step, drawn as one line, with more than its line to show (what it
- * makes, a note, runs, details or how it was before the last edit). */
-export const opens = (step: PlanStep, mark?: StepMark): boolean => step.status === 'done' && (hasMore(step) || !!step.details || hasWas(mark))
+ * makes, a note, runs or details). */
+export const opens = (step: PlanStep): boolean => step.status === 'done' && (hasMore(step) || !!step.details)
 
-/** Whether a step has Show more under it: a step that is not done, with details or with how it was before the last edit
- * to show on request. */
-export const showsMore = (step: PlanStep, mark?: StepMark): boolean => step.status !== 'done' && (!!step.details || hasWas(mark))
+/** Whether a step has Show more under it: a step that is not done, with details to show on request. */
+export const showsMore = (step: PlanStep): boolean => step.status !== 'done' && !!step.details
 
 /** Whether a step is drawn as one line: a done step, unless the analyst opened it. */
 export const isCompact = (step: PlanStep, opened: ReadonlySet<string>): boolean => step.status === 'done' && !opened.has(step.id)

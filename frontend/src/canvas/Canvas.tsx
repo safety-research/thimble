@@ -184,6 +184,11 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const [drag, setDrag] = useState<Drag | null>(null)
   const [marquee, setMarquee] = useState<Rect | null>(null)
   const [detail, setDetail] = useState<string | null>(null)
+  // the card whose History button was pressed, and how many times, so each press opens its history in the panel
+  const [historyOf, setHistoryOf] = useState<{ cell: string; seq: number } | null>(null)
+  useEffect(() => {
+    if (detail == null) setHistoryOf(null)
+  }, [detail])
   // the lines of a card's output a citation opened its details at, while those details are open
   const [cite, setCite] = useState<(OutputCite & { cell: string }) | null>(null)
   useEffect(() => {
@@ -970,7 +975,15 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         track('card-code-toggle', { target: `cell:${id}`, detail: { open: detail !== id } })
         setSel([id])
         setLabelPanel(null)
+        setHistoryOf(null)
         setDetail((d) => (d === id ? null : id))
+        return
+      case 'history':
+        track('ui-click', { target: `cell:${id}`, detail: { action: 'history' } })
+        setSel([id])
+        setLabelPanel(null)
+        setDetail(id)
+        setHistoryOf((h) => ({ cell: id, seq: (h?.seq ?? 0) + 1 }))
         return
       case 'ask':
         if (el) bus.emit('askAbout', { el })
@@ -1532,7 +1545,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                 checks={checks}
                 comments={notes.comments}
               />
-              {detailCell && <DetailPanel key={detailCell.id} cell={detailCell} cite={cite?.cell === detailCell.id ? cite : null} onClose={() => setDetail(null)} />}
+              {detailCell && <DetailPanel key={detailCell.id} cell={detailCell} cite={cite?.cell === detailCell.id ? cite : null} history={historyOf?.cell === detailCell.id ? historyOf.seq : 0} onClose={() => setDetail(null)} />}
               {labelPanel && !detailCell && <LabelPanel key={labelPanel} conceptId={labelPanel} onClose={() => setLabelPanel(null)} />}
               {focusCell && <Focus cell={focusCell} list={focusList} frame={(focusCell && board.group.get(board.cellById.get(focusCell.id)?.parent ?? '')?.name) || 'Canvas'} onPick={setFocus} onClose={() => setFocus(null)} onAskNew={(id, text) => void askNew(id, text)} />}
             </ChipContext.Provider>

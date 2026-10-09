@@ -1277,8 +1277,9 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   outline: 1px dashed rgba(var(--ink-rgb), 0.24);
 }
 
-/* -------- the checks on the passages: a commented passage takes its check's colour (--flag) at 16%, at 30% with an
-   underline while its card is active, in the editor and in the other documents' prose -------- */
+/* -------- the checks on the passages: a commented passage takes its check's colour (--flag) at 16%, at 30% while its
+   card is active, in the editor and in the other documents' prose; no underline (Matt 2026-10-09: "we don't need an
+   underline in addition to darkened highlight") -------- */
 .wu-s {
   border-radius: var(--radius-hl);
   box-decoration-break: clone;
@@ -1290,11 +1291,10 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out);
 }
 .wu-flag.wu-flag-active {
   background: color-mix(in oklab, var(--flag) 30%, transparent);
-  box-shadow: 0 2px 0 var(--flag);
 }
 /* in the editor a tint is one element per text node and citation (decorations.ts tintEdges): the pieces meet square
    and only a run's first and last piece round their outer corners */
@@ -1353,11 +1353,16 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
     left var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
 }
+/* hovered or active, a comment comes to the front with a little more shadow; the active one also stands at its
+   passage (Margin.tsx) and out from the others */
+.wu-cm:hover,
+.wu-cm.wu-cm-active {
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.14), 0 14px 32px -12px rgba(0, 0, 0, 0.26);
+  z-index: 2;
+}
 .wu-cm.wu-cm-active {
   left: -12px;
-  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.12), var(--shadow-float);
   cursor: default;
-  z-index: 1;
 }
 .wu-cm-head {
   display: flex;

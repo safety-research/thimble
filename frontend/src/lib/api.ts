@@ -4,6 +4,7 @@ import type {
   Extensions,
   LocalExtension,
   Cell,
+  CardVersion,
   CellName,
   PlanRun,
   CellPatch,
@@ -322,6 +323,10 @@ export const api = {
   addCell: (c: string, nb: string, body: NewCellBody) => j<Cell>(`${ws(c)}/notebooks/${enc(nb)}/cells`, { method: 'POST', body: JSON.stringify(body) }),
   updateCell: (c: string, id: string, patch: CellPatch) => j<Cell>(`${ws(c)}/cells/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   runCell: (c: string, id: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/run`, { method: 'POST' }),
+  /** the card as it stood before its edit `entry` (backend notebook.card_version_route) */
+  cardVersion: (c: string, id: string, entry: string) => j<CardVersion>(`${ws(c)}/cells/${enc(id)}/versions/${enc(entry)}`),
+  /** make the card as it stood before its edit `entry` again, as an edit of the analyst's (backend notebook.restore_version) */
+  restoreVersion: (c: string, id: string, entry: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/versions/${enc(entry)}/restore`, { method: 'POST' }),
   /** `POST …/cells/{id}/fixes/{fix}/undo`: restore the card from before a check's fix (backend checkstore.undo_fix); the
      * fix is marked undone and is not applied again. */
   undoCardFix: (c: string, id: string, fix: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/fixes/${enc(fix)}/undo`, { method: 'POST' }),

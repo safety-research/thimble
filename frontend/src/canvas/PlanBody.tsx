@@ -4,9 +4,10 @@
 // short before its status, which a click opens. A step with details shows its line first, as a comment shows its
 // statement, with Show more under it that opens the details, their citations as chips, and Show less that folds them.
 // What the plan's last edit changed (backend plans.edit_marks) stays marked until the next edit that changes the plan
-// or the analyst clears it: a changed step says Changed and its Show more opens its text as it was, a new step says
-// New, and the steps the edit removed are listed folded under the steps. A plan has no takeaway. Each step's row
-// carries its ref as its anchor, so a comment can sit beside it.
+// or the analyst's Clear marks: a quiet Changed after a changed step's text, New after a new step's. How the plan was
+// before is in the card's history (DetailPanel), not on the card. Matt 2026-10-09: "we should not keep 'Before' with
+// a strikethrough. maybe cards have a history button?". A plan has no takeaway. Each step's row carries its ref as its
+// anchor, so a comment can sit beside it.
 import { useContext, useEffect, useState } from 'react'
 import { ChatMarkdown, ChipContext } from '../chat/markdown'
 import { Icon } from '../components/Icon'
@@ -14,7 +15,7 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import type { Cell, PlanRun, PlanStep } from '../lib/types'
 import { CanvasContext } from './context'
-import { hasMore, hasWas, isCompact, isMade, opens as opensOnClick, planEdit, planSteps, showsMore, statusWords, stepRef, type RemovedStep, type StepMark } from './plan'
+import { hasMore, isCompact, isMade, markTitle, opens as opensOnClick, planEdit, planSteps, showsMore, statusWords, stepRef, type StepMark } from './plan'
 
 const NO_REFS: ReadonlySet<string> = new Set()
 
@@ -30,6 +31,17 @@ export function PlanBody({ cell }: { cell: Cell }) {
   const running = steps.some((s) => s.status === 'running')
   const now = useClock(running)
   const runs = usePlanRuns(ws, cell.id, steps)
+  return (
+    <div className="plan" data-body="" data-settled="true" data-anchor={`card:${cell.id}`}>
+      <PlanSteps ws={ws} cellId={cell.id} steps={steps} marks={edit?.steps} runs={runs} now={now} />
+      {edit && <EditFoot ws={ws} cellId={cell.id} />}
+    </div>
+  )
+}
+
+/** A plan's numbered steps, each opened and folded on request. `anchors` off for a copy drawn away from its card, as the
+ * card's history draws an earlier version (DetailPanel), so nothing takes it for the card's own steps. */
+export function PlanSteps({ ws, cellId, steps, marks, runs = [], now, anchors = true }: { ws: string; cellId: string; steps: PlanStep[]; marks?: ReadonlyMap<string, StepMark>; runs?: PlanRun[]; now: number; anchors?: boolean }) {
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set())
   const toggle = (id: string) =>
     setOpened((cur) => {
@@ -39,35 +51,31 @@ export function PlanBody({ cell }: { cell: Cell }) {
       return next
     })
   return (
-    <div className="plan" data-body="" data-settled="true" data-anchor={`card:${cell.id}`}>
-      <ol className="plan-steps">
-        {steps.map((s, i) => (
-          <StepRow key={s.id} ws={ws} cellId={cell.id} n={i + 1} step={s} mark={edit?.steps.get(s.id)} now={now} runs={runs.filter((r) => r.step === i + 1)} compact={isCompact(s, opened)} open={opened.has(s.id)} onToggle={() => toggle(s.id)} />
-        ))}
-      </ol>
-      {edit && <EditFoot ws={ws} cellId={cell.id} removed={edit.removed} />}
-    </div>
+    <ol className="plan-steps">
+      {steps.map((s, i) => (
+        <StepRow key={s.id} ws={ws} cellId={cellId} n={i + 1} step={s} mark={marks?.get(s.id)} now={now} runs={runs.filter((r) => r.step === i + 1)} compact={isCompact(s, opened)} open={opened.has(s.id)} onToggle={() => toggle(s.id)} anchors={anchors} />
+      ))}
+    </ol>
   )
 }
 
-function StepRow({ ws, cellId, n, step, mark, now, runs, compact, open, onToggle }: { ws: string; cellId: string; n: number; step: PlanStep; mark?: StepMark; now: number; runs: PlanRun[]; compact: boolean; open: boolean; onToggle: () => void }) {
+function StepRow({ ws, cellId, n, step, mark, now, runs, compact, open, onToggle, anchors }: { ws: string; cellId: string; n: number; step: PlanStep; mark?: StepMark; now: number; runs: PlanRun[]; compact: boolean; open: boolean; onToggle: () => void; anchors: boolean }) {
   const ref = stepRef(cellId, n)
-  const opens = opensOnClick(step, mark)
-  const more = showsMore(step, mark)
+  const opens = opensOnClick(step)
+  const more = showsMore(step)
   // a done step opens to all it holds; any other step shows what it makes, its note and runs, and its Show more opens
-  // its details and how it was before the last edit
+  // its details
   const shut = step.status === 'done' ? compact : !open
   const made = isMade(step)
-  const was = hasWas(mark) ? mark!.was : null
   // a run the server has not answered for yet shows by its name alone
   const rows = step.runs.map((name) => runs.find((r) => r.name === name) ?? { step: n, name, chat: null, state: '', latest: '', elapsed: '' })
   const tag = mark && (
-    <span className={`plan-mark is-${mark.kind}`} title={mark.kind === 'new' ? 'Added by the last edit' : 'Changed by the last edit'}>
+    <span className={`plan-mark is-${mark.kind}`} title={markTitle(mark)}>
       {mark.kind === 'new' ? 'New' : 'Changed'}
     </span>
   )
   return (
-    <li className={`plan-step is-${step.status.replace(' ', '-')}${compact ? ' is-compact' : ''}`} data-step={step.id} data-n={n} data-anchor={ref} data-anchor-text={step.text} data-mark={mark?.kind}>
+    <li className={`plan-step is-${step.status.replace(' ', '-')}${compact ? ' is-compact' : ''}`} data-step={step.id} data-n={n} data-anchor={anchors ? ref : undefined} data-anchor-text={anchors ? step.text : undefined} data-mark={mark?.kind}>
       <span className="plan-n">{n}</span>
       {opens ? (
         <button type="button" className="plan-text plan-toggle" aria-expanded={!shut} title={compact ? step.text : undefined} onMouseDown={(e) => e.stopPropagation()} onClick={onToggle}>
@@ -82,7 +90,7 @@ function StepRow({ ws, cellId, n, step, mark, now, runs, compact, open, onToggle
         </span>
       )}
       <span className={`plan-status is-${step.status.replace(' ', '-')}`}>{statusWords(step, now)}</span>
-      {!compact && (hasMore(step) || more || (!shut && (!!step.details || !!was))) && (
+      {!compact && (hasMore(step) || more || (!shut && !!step.details)) && (
         <div className="plan-under">
           {step.makes.length > 0 && (
             <div className="plan-makes">
@@ -109,21 +117,6 @@ function StepRow({ ws, cellId, n, step, mark, now, runs, compact, open, onToggle
               </div>
             </ChipContext.Provider>
           )}
-          {!shut && was && (
-            <div className="plan-was" onMouseDown={(e) => e.stopPropagation()}>
-              <span className="plan-was-label">Before</span>
-              {was.text != null && <span className="plan-was-text">{was.text}</span>}
-              {!!was.makes?.length && (
-                <span className="plan-makes">
-                  {was.makes.map((m) => (
-                    <span key={m} className="plan-make is-will">
-                      {m}
-                    </span>
-                  ))}
-                </span>
-              )}
-            </div>
-          )}
           {more && (
             <button type="button" className="plan-more" aria-expanded={open} onMouseDown={(e) => e.stopPropagation()} onClick={onToggle}>
               {open ? 'Show less' : 'Show more'}
@@ -138,10 +131,9 @@ function StepRow({ ws, cellId, n, step, mark, now, runs, compact, open, onToggle
   )
 }
 
-/** Under the steps while the last edit is marked: the steps it removed, folded behind Show more as their count, and
- * Clear marks, which takes every mark off (POST /cards/{id}/plan-edit/clear). */
-function EditFoot({ ws, cellId, removed }: { ws: string; cellId: string; removed: RemovedStep[] }) {
-  const [open, setOpen] = useState(false)
+/** Under the steps while the last edit is marked: Clear marks, which takes the Changed and New tags off (POST
+ * /cards/{id}/plan-edit/clear); the next edit that changes the plan replaces them anyway. */
+function EditFoot({ ws, cellId }: { ws: string; cellId: string }) {
   const [busy, setBusy] = useState(false)
   const clear = () => {
     setBusy(true)
@@ -152,26 +144,9 @@ function EditFoot({ ws, cellId, removed }: { ws: string; cellId: string; removed
   }
   return (
     <div className="plan-edit" onMouseDown={(e) => e.stopPropagation()}>
-      <div className="plan-edit-row">
-        {removed.length > 0 && <span className="plan-edit-removed">{removed.length === 1 ? '1 step removed' : `${removed.length} steps removed`}</span>}
-        <button type="button" className="plan-more plan-edit-clear" disabled={busy} onClick={clear}>
-          Clear marks
-        </button>
-      </div>
-      {open && (
-        <ul className="plan-removed">
-          {removed.map((r) => (
-            <li key={r.id || r.text} className="plan-removed-step">
-              {r.text}
-            </li>
-          ))}
-        </ul>
-      )}
-      {removed.length > 0 && (
-        <button type="button" className="plan-more" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-          {open ? 'Show less' : 'Show more'}
-        </button>
-      )}
+      <button type="button" className="plan-more plan-edit-clear" disabled={busy} onClick={clear}>
+        Clear marks
+      </button>
     </div>
   )
 }
