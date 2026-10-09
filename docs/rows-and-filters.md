@@ -102,11 +102,12 @@ value's words where they are not the value.
 | `values` | the toggles: `[{value, name, on, n}]`, `value` null for the records with no value |
 | `keeps(record)` | whether a record shows: its value is on, every record with None |
 | `valueOf(record)`, `isOn(value)` | a record's value, and whether a value is on |
-| `query()` | the choice for the reader, in Color by's form: `{field, off}`, `{label, name, off}`, or null |
+| `query()` | the choice for the reader: `{field, off}`, `{label, name, off}`, or null |
 | `counts(map)` | the reader's counts of the choice's values, `''` for no value; without them, the records the page hands `keeps` and `valueOf` are counted |
 | `choose(name \| {label} \| null)`, `toggle(value)` | change it from the page |
 
-A reader that filters takes the query as it takes Color by's: `thimble.colour_on(f, thimble.colour_value(f, ref, r))`.
+A reader that filters takes the query with `thimble.colour_on(f, thimble.colour_value(f, ref, r))`. Filter by is the
+only part that hides records: Color by only colors.
 
 ## Rows
 

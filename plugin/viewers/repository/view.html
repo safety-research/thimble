@@ -158,7 +158,7 @@
 // repository. Overview: the repository's head, whose switcher chooses the run (one run at a time, the others a click
 // away), the forge's tabs with their counts, and the chosen tab's items as the forge lists them: pull requests and
 // issues with their states, reviews and comments, threads as a board's feed, agents as people. Zoom and filter: Filter
-// by any field or label, Color by's chips the values left on, and the search the items whose words hold it. Details on
+// by any field or label, and the search the items whose words hold it; Color by's chips only color. Details on
 // demand: an item opens as its page in the side panel: a pull request's conversation, commits and changed files, an
 // issue's timeline, a thread's posts, an agent's profile. Color marks the unit its value belongs to: a field of the
 // items colors their rows and the scrollbar beside them, an agent's row under Author by its own name; a label marks
@@ -249,7 +249,7 @@ const FIELDS = [
   { name: 'author', title: 'Author', description: 'Who opened the pull request or the issue, or started the thread' },
 ]
 const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, onChange: load })
-const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, chips: 'filter', onChange: load })
+const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, onChange: load })
 const side = thimble.side({ mount: '#body', width: 0.45, onClose: () => { open = null; draw() } })
 // Reset puts back the run the view opens on, as it puts back the chips
 const first = () => (data && data.runs.length ? data.runs[0].run : null)

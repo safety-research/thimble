@@ -1158,10 +1158,11 @@
   // view, every anchored element that says its value in data-colour takes the bar in that value's colour, with
   // data-thimble-colour (an SVG shape the page colours itself), and a group's row, which has no anchor, takes none; the
   // labels that are on then draw no bar, and their texts stay highlighted. An element whose value
-  // the analyst turned off is hidden or dimmed (data-thimble-off), as the hook says. With Color by Off (mode 'off') no
-  // element takes a bar. One colour encoding: with Colour by in the page, only the chosen label's texts are highlighted in
-  // its colours; the texts of the other labels that are on, and every label's with a field or Off chosen, are
-  // highlighted in the plain ink of a highlight (--hl-bg). A span names its label (`id`); one from before spans did is
+  // the analyst turned off takes no bar, nor a band of the first choice, and stays: Color by only colors, and a label's
+  // texts of that value take the plain ink (the hook's `off`). With Color by Off (mode 'off') no element takes a bar.
+  // One colour encoding: with Colour by in the page, only the chosen label's texts are highlighted in its colours; the
+  // texts of the other labels that are on, and every label's with a field or Off chosen, are highlighted in the plain
+  // ink of a highlight (--hl-bg). A span names its label (`id`); one from before spans did is
   // the chosen label's when it has the colour of that label's value on the record.
   // The colours bars and highlights take, the sets of bands, the colours behind them and the views' own shadows, each by
   // a number kept from paint to paint, so an element keeps its attributes and the sheet its text while the page
@@ -1176,11 +1177,9 @@
     return k < 0 ? list.push(v) - 1 : k
   }
   var SVG_EDGE = { edge: 'svg', own: null }
-  var offed = new Set()
   var spanRanges = new Map() // element -> {key, out: [[colour, or null for the plain ink, Range]]}, as last found
   var textChanged = new Set() // elements with ranges whose text changed since (the observer)
   var greyShown = false
-  var OFF = '[data-thimble-off="hide"]{display:none!important}[data-thimble-off="dim"]{opacity:.25!important}'
   function unbar(el) {
     unset(el, 'data-thimble-label')
     unset(el, 'data-thimble-colour')
@@ -1284,7 +1283,6 @@
       measureTurn++
     }
     var todo = [] // [element, bar colour (null for bands), what it shows, 'label' or 'colour', mark, bands or null]
-    var offs = []
     var spanned = []
     if (hasMarks() || hook) {
       var els = document.querySelectorAll(hook && hook.mode === 'field' ? '[data-anchor],[data-colour]' : '[data-anchor]')
@@ -1307,8 +1305,9 @@
           shows = (m.names || []).join(', ')
         } else if (hook.mode === 'label') {
           if (!ref || !outermost(el, ref)) continue
+          // a value turned off draws no bar
           var hit = valueIn(m, hook)
-          offs.push([el, hook.off(hit ? hit.value : null)])
+          if (hit && hook.off(hit.value)) hit = null
           if (m && !unmarked) spanned.push([el, m])
           if (unmarked) continue
           bar = hit ? hit.colour : null
@@ -1319,9 +1318,9 @@
           var own = el.hasAttribute('data-colour')
           var v = own ? el.getAttribute('data-colour') : null
           if (v === '') v = null
-          if (own) offs.push([el, hook.off(v)])
           if (m && !unmarked && outermost(el, ref)) spanned.push([el, m])
-          // the bar marks a record, the element the view anchors: a group's row (no anchor) takes none
+          // the bar marks a record, the element the view anchors: a group's row (no anchor) takes none; a value turned
+          // off has no colour (hook.colourOf)
           if (!own || !ref || unmarked || el instanceof SVGElement) continue
           if (v != null) bar = hook.colourOf(v)
           if (n > 1) bands = bandsAt(el, m, bar, tracks)
@@ -1339,19 +1338,8 @@
         if (!hook) spanned.push([el, m])
       }
     }
-    // what hides elements first (the label filter, the values turned off), so the elements measured below are read as
-    // they will be drawn
+    // what hides elements first (the label filter), so the elements measured below are read as they will be drawn
     var dropOn = drop()
-    var offNow = new Set()
-    for (var f = 0; f < offs.length; f++) {
-      if (!offs[f][1]) continue
-      set(offs[f][0], 'data-thimble-off', offs[f][1] === 'hide' && !(offs[f][0] instanceof SVGElement) ? 'hide' : 'dim')
-      offNow.add(offs[f][0])
-    }
-    offed.forEach(function (e) {
-      if (!offNow.has(e) && unset(e, 'data-thimble-off')) hiddenTurn++
-    })
-    offed = offNow
     // the reads, of the elements to bar not measured yet; one that draws a bar already has its edge taken off, since the
     // view's own shadow is read without the bar's
     var reads = []
@@ -1380,6 +1368,8 @@
       var spans = HL && sm && Array.isArray(sm.spans) ? sm.spans : []
       if (!spans.length) continue
       var chosen = hook && hook.mode === 'label' ? valueIn(sm, hook) : null
+      // the texts of a value turned off take the plain ink, as its record takes no bar
+      if (chosen && hook.off(chosen.value)) chosen = null
       var list = []
       for (var s = 0; s < spans.length; s++) {
         var sp = spans[s] || {}
@@ -1466,7 +1456,7 @@
     spanRanges = ranged
     textChanged.clear()
     if (HL && lit2) light()
-    var css = (marked.size ? BARS : '') + (usedBands.size ? BANDS : '') + (dropOn ? DROP : '') + (offed.size ? OFF : '')
+    var css = (marked.size ? BARS : '') + (usedBands.size ? BANDS : '') + (dropOn ? DROP : '')
     sendHidden()
     for (var k2 = 0; k2 < colourSlots.length; k2++) {
       css += '[data-thimble-bar="' + k2 + '"]{--thimble-label:' + colourSlots[k2] + '}'

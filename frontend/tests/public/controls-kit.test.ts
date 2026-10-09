@@ -308,12 +308,20 @@ describe('the lanes and their key', () => {
     // a click on a bar opens the first record of its bin
     ;(explore.querySelector('.thimble-lane-bar') as unknown as HTMLElement).dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, clientX: 200 + Number(explore.querySelector('.thimble-lane-bar')!.getAttribute('x')) + 1 }))
     expect(w.marked).toEqual(['r1/explore.jsonl#L2'])
-    // a value turned off leaves the bars
+    // a value turned off keeps its part of the bars, in the lanes' gray (no fill of its own); ok keeps its colour
     ;(doc().querySelectorAll('.thimble-colour-chip')[1] as HTMLElement).click()
     await wait()
     expect(w.colour.isOn('error')).toBe(false)
     w.lanes.draw()
-    expect(doc().querySelector('.thimble-lane[data-key="explore"]')!.querySelectorAll('.thimble-lane-bar')).toHaveLength(1)
+    const after = [...doc().querySelector('.thimble-lane[data-key="explore"]')!.querySelectorAll('.thimble-lane-bar')].map((b) => (b as HTMLElement).style.fill)
+    expect(after).toEqual([fills[0], ''])
+    // in Events too: every mark stays, explore's error call with no fill of its own beside its ok call in ok's colour
+    w.dense = false
+    w.lanes.draw()
+    await wait()
+    expect(doc().querySelectorAll('.thimble-lane-mark[data-i]')).toHaveLength(6)
+    const exploreMarks = [...doc().querySelector('.thimble-lane[data-key="explore"]')!.querySelectorAll('.thimble-lane-mark[data-i]')].map((m) => (m as HTMLElement).style.fill)
+    expect(exploreMarks).toEqual([fills[0], ''])
   })
 
   test("a click on a lane's name chooses it and tells the page; ▾ folds a parent's lanes into its own", async () => {

@@ -146,7 +146,7 @@ describe('Colour by in a frame', () => {
     await page.close()
   })
 
-  test("the records with no value are the marks' grey on the scrollbar, under any value's colour, and leave it when their chip is off", async () => {
+  test("the records with no value are the marks' grey on the scrollbar, under any value's colour, and keep it when their chip or a value's is off", async () => {
     const { page, frame } = await framed()
     // 1,000 rows: the first half take no value, but every tenth of them is With links; the second half Text only
     await frame().evaluate(() => (window as any).colour.strip('#list', { rows: Array.from({ length: 1000 }, (_, i) => (i < 500 ? (i % 10 === 0 ? 'With links' : null) : 'Text only')) }))
@@ -184,25 +184,49 @@ describe('Colour by in a frame', () => {
     // the list's own records all take a value, so the page says how many take none, as a reader does
     await frame().evaluate(() => (window as any).colour.counts({ 'Text only': 500, '': 500 }))
     await page.waitForTimeout(200)
-    // their chip turned off: they leave the scrollbar as any value does
+    // their chip turned off: they stay on the scrollbar in the same grey, as Color by hides no record
     await frame().locator('.thimble-colour-chip', { hasText: 'No kind' }).click()
     await page.waitForTimeout(200)
-    const gone = (await rows()).slice(2, half - 2)
-    assert.equal(gone.filter((c) => c.split(',')[3] !== '0' && c === grey[0]).length, 0)
+    const kept = (await rows()).slice(2, half - 2)
+    assert.deepEqual([...new Set(kept)], [grey[0]])
+    // a value turned off is drawn in that grey too, where its records are, while another value keeps its colour: rows
+    // 500 to 899 Text only, the last hundred With links
+    await frame().evaluate(() => (window as any).colour.strip('#list', { rows: Array.from({ length: 1000 }, (_, i) => (i < 500 ? null : i < 900 ? 'Text only' : 'With links')) }))
+    await frame().evaluate(() => (window as any).colour.counts({ 'Text only': 400, 'With links': 100, '': 500 }))
+    await page.waitForTimeout(200)
+    const all = await rows()
+    const textOnly = (px: string[]) => px.slice(half + 2, Math.floor(px.length * 0.9) - 2)
+    assert.ok(textOnly(all).every((c) => c !== grey[0]), 'Text only in its colour while it is on')
+    await frame().locator('.thimble-colour-chip', { hasText: 'Text only' }).click()
+    await page.waitForTimeout(200)
+    const after = await rows()
+    assert.deepEqual([...new Set(textOnly(after))], [grey[0]])
+    assert.deepEqual([...new Set(after.slice(Math.ceil(after.length * 0.9) + 2, -2))], [links], 'With links keeps its colour')
     await page.close()
   })
 
-  test('a value turned off has its records dimmed and leaves the scrollbar', async () => {
+  test('a value turned off keeps its records, neither hidden nor dimmed, without the bar, and in grey on the scrollbar', async () => {
     const { page, frame } = await framed()
     await frame().locator('.thimble-colour-chip').nth(1).click()
     await page.waitForTimeout(200)
     const s = await frame().evaluate(() => {
       const cv = document.querySelector('.thimble-colour-strip canvas') as HTMLCanvasElement
-      const px = [...cv.getContext('2d')!.getImageData(Math.floor(cv.width / 2), Math.floor(cv.height * 0.95), 1, 1).data].slice(0, 3)
-      return { opacity: getComputedStyle(document.querySelector('[data-anchor="m.jsonl#L60"]')!).opacity, px, pressed: document.querySelectorAll('.thimble-colour-chip')[1].getAttribute('aria-pressed') }
+      const px = [...cv.getContext('2d')!.getImageData(Math.floor(cv.width / 2), Math.floor(cv.height * 0.95), 1, 1).data]
+      const last = document.querySelector('[data-anchor="m.jsonl#L60"]') as HTMLElement
+      const cs = getComputedStyle(last)
+      return {
+        opacity: cs.opacity, display: cs.display, height: last.getBoundingClientRect().height, shadow: cs.boxShadow, bar: last.hasAttribute('data-thimble-bar'),
+        first: last.parentElement!.children.length, px, plain: document.querySelector('.thimble-colour-strip')!.hasAttribute('data-plain'),
+        pressed: document.querySelectorAll('.thimble-colour-chip')[1].getAttribute('aria-pressed'),
+      }
     })
-    assert.deepEqual([s.opacity, s.pressed], ['0.25', 'false'])
-    assert.notDeepEqual(s.px, [208, 117, 10])
+    assert.deepEqual([s.opacity, s.display, s.height, s.pressed, s.first], ['1', 'block', 30, 'false', 60])
+    assert.equal(s.bar, false)
+    assert.doesNotMatch(s.shadow, /208, 117, 10/)
+    // drawn in grey on the scrollbar, which keeps its colours: no orange, a grey that is drawn
+    assert.equal(s.plain, false)
+    const [r, g, b, a] = s.px
+    assert.ok(a > 0 && Math.max(r, g, b) - Math.min(r, g, b) <= 6 && !(r === 208 && g === 117), JSON.stringify(s.px))
     await page.close()
   })
 

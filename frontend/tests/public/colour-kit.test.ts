@@ -1,7 +1,7 @@
 // The view kit's Colour by (backend/app/viewer_colour.js, thimble.colourBy) and what it needs of the bridge
 // (backend/app/viewer_bridge.js), in a jsdom window of their own: one menu lists the view's fields and every label, the
-// chosen field's values are chips with their counts that turn a value off and on, the bridge draws the chosen value's
-// bar and hides or dims what is off, a label the analyst turns on takes the colour, a label chosen in the menu asks for
+// chosen field's values are chips with their counts that turn a value's colour off and on, the bridge draws the chosen
+// value's bar and none on what is off, whose records stay, a label the analyst turns on takes the colour, a label chosen in the menu asks for
 // thimble's label editor beside the menu, and the choice is kept through the `colour` message and handed back as
 // window.__thimbleColour. The marks the page hands over name each label's value
 // with colours a canvas can draw (src/files/labels.ts viewMarks, src/files/ViewerFrame.tsx colourScript). Layout and
@@ -71,31 +71,48 @@ describe('Colour by', () => {
     expect(doc().querySelector('[data-anchor="a.jsonl#L1"]')!.getAttribute('data-thimble-bar')).toBe(doc().querySelector('[data-anchor="a.jsonl#L3"]')!.getAttribute('data-thimble-bar'))
   })
 
-  test('a chip turns its value off and on; a filter hides its records, a highlight dims them; Alt keeps it alone', async () => {
+  test("a chip turns its value's colour off and on: its records stay, without the bar, under 'filter' as under the default; Alt keeps it alone", async () => {
     await load()
+    // 'filter' once hid the records of a value turned off; it is still taken, and does nothing
     const c = mount({ chips: 'filter' })
     await wait()
     const chip = (i: number) => doc().querySelectorAll<HTMLElement>('.thimble-colour-chip')[i]
+    const barred = () => [...doc().querySelectorAll('[data-thimble-bar]')].map((e) => e.getAttribute('data-anchor'))
+    const off = () => c.values.filter((v: { on: boolean }) => !v.on).map((v: { value: string | null }) => v.value)
+    expect(barred()).toEqual(['a.jsonl#L1', 'a.jsonl#L2', 'a.jsonl#L3'])
     chip(0).click()
     await wait()
     expect(chips()[0][2]).toBe('false')
     expect(c.isOn('Text only')).toBe(false)
-    expect(c.keeps({ kind: 'Text only' })).toBe(false)
-    expect([...doc().querySelectorAll('[data-thimble-off="hide"]')].map((e) => e.getAttribute('data-anchor'))).toEqual(['a.jsonl#L1', 'a.jsonl#L3'])
-    expect(c.query()).toEqual({ field: 'kind', off: ['Text only'] })
+    expect(off()).toEqual(['Text only'])
+    // Color by only colors: the records of a value turned off stay, drawn with no colour (Filter by hides records)
+    expect(c.keeps({ kind: 'Text only' })).toBe(true)
+    expect(c.colourOf('Text only')).toBeNull()
+    expect(c.colourOf('With links')).toBe('var(--label-2)')
+    expect(barred()).toEqual(['a.jsonl#L2'])
+    expect(doc().querySelectorAll('[data-thimble-off],[data-thimble-drop]')).toHaveLength(0)
+    expect([...doc().querySelectorAll('.msg')].map((e) => dom.window.getComputedStyle(e).display)).toEqual(['block', 'block', 'block', 'block'])
+    // the reader hears no value turned off, so it keeps and counts every record
+    expect(c.query()).toEqual({ field: 'kind' })
     chip(0).click()
     await wait()
-    expect(doc().querySelectorAll('[data-thimble-off]')).toHaveLength(0)
+    expect(barred()).toEqual(['a.jsonl#L1', 'a.jsonl#L2', 'a.jsonl#L3'])
     chip(2).dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, altKey: true, detail: 1 }))
     await wait()
     expect(chips().map((x) => x[2])).toEqual(['false', 'false', 'true'])
-    expect(c.query()).toEqual({ field: 'kind', off: ['Text only', 'With links'] })
+    expect(off()).toEqual(['Text only', 'With links'])
+    expect(c.query()).toEqual({ field: 'kind' })
+    expect(barred()).toEqual([])
+    expect(doc().querySelectorAll('.msg')).toHaveLength(4)
     await load()
     mount()
     await wait()
     chip(1).click()
     await wait()
-    expect(doc().querySelector('[data-anchor="a.jsonl#L2"]')!.getAttribute('data-thimble-off')).toBe('dim')
+    const l2 = doc().querySelector('[data-anchor="a.jsonl#L2"]')!
+    expect(l2.hasAttribute('data-thimble-bar')).toBe(false)
+    expect(l2.hasAttribute('data-thimble-off')).toBe(false)
+    expect(barred()).toEqual(['a.jsonl#L1', 'a.jsonl#L3'])
   })
 
   test('one menu lists Off, the fields and every label, any checked together: the first the colour, each other a track', async () => {
@@ -162,7 +179,18 @@ describe('Colour by', () => {
     expect(c.valueOf({ ref: 'a.jsonl#L2' })).toBe('deadline')
     expect(c.valueOf('a.jsonl#L1')).toBeNull()
     expect(c.attr({ kind: 'Text only' })).toBe('')
-    expect(c.query()).toEqual({ label: 'k1', name: 'Deadline', off: [] })
+    expect(c.query()).toEqual({ label: 'k1', name: 'Deadline' })
+    // its value turned off: the record keeps its place and loses its bar; on again, the bar is back
+    ;(doc().querySelector('.thimble-colour-chip') as HTMLElement).click()
+    await wait()
+    expect(c.isOn('deadline')).toBe(false)
+    expect(doc().querySelectorAll('[data-thimble-label]')).toHaveLength(0)
+    expect(doc().querySelectorAll('[data-thimble-off]')).toHaveLength(0)
+    expect(c.keeps({ ref: 'a.jsonl#L2' })).toBe(true)
+    expect(c.query()).toEqual({ label: 'k1', name: 'Deadline' })
+    ;(doc().querySelector('.thimble-colour-chip') as HTMLElement).click()
+    await wait()
+    expect([...doc().querySelectorAll('[data-thimble-label]')].map((e) => e.getAttribute('data-anchor'))).toEqual(['a.jsonl#L2'])
     // the label turned off again: the field the analyst chose last is the colour again
     labels(false)
     await wait()
@@ -505,18 +533,22 @@ describe("a field's values past the palette's twelve colours", () => {
     // the page still hears of every value, each in its place
     expect(c.values.map((v: { value: string }) => v.value)).toEqual(names)
     expect(c.colourOf('v14')).toBe('var(--label-none)')
+    const off = () => c.values.filter((v: { on: boolean }) => !v.on).map((v: { value: string }) => v.value)
     other.click()
     await wait()
     expect(chips().at(-1)![2]).toBe('false')
-    expect(c.query()).toEqual({ field: 'kind', off: ['v13', 'v14', 'v15'] })
+    expect(off()).toEqual(['v13', 'v14', 'v15'])
     expect(['v12', 'v13', 'v15'].map((v) => c.isOn(v))).toEqual([true, false, false])
+    // turned off, they draw in no colour, and the reader hears none of them
+    expect(c.colourOf('v14')).toBeNull()
+    expect(c.query()).toEqual({ field: 'kind' })
     doc().querySelector<HTMLElement>('.thimble-colour-chip[data-other]')!.click()
     await wait()
-    expect(c.query()).toEqual({ field: 'kind', off: [] })
+    expect(off()).toEqual([])
     // Alt keeps the values under it alone
     doc().querySelector<HTMLElement>('.thimble-colour-chip[data-other]')!.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, altKey: true, detail: 1 }))
     await wait()
-    expect(c.query()).toEqual({ field: 'kind', off: names.slice(0, 12) })
+    expect(off()).toEqual(names.slice(0, 12))
     // hovering it names the values it stands for
     doc().querySelector('.thimble-colour-chip[data-other]')!.dispatchEvent(new dom.window.MouseEvent('pointerover', { bubbles: true }))
     expect(doc().querySelector('.thimble-tip .thimble-tip-m')!.textContent).toBe('v13 88 · v14 87 · v15 86')
@@ -591,21 +623,26 @@ describe('color marks the records alone', () => {
     expect(chips()[0]).toEqual(['Text only', '2', 'true'])
   })
 
-  test("thimble.mix draws a group's share of each value in its colour, the values off left out, nothing for Off", async () => {
+  test("thimble.mix draws a group's share of each value in its colour, a value off in gray, nothing for Off", async () => {
     await load()
     const c = mount()
     await wait()
     const el = doc().body.appendChild(doc().createElement('span'))
     win().thimble.mix(el, { 'With links': 1, 'Text only': 3, '': 2 })
     const parts = () => [...el.querySelectorAll('.thimble-mix > span')].map((s) => (s as HTMLElement).style.flexGrow)
+    const fills = () => [...el.querySelectorAll('.thimble-mix > span')].map((s) => (s as HTMLElement).style.background)
     // the chips' order, the records with no value last
     expect(parts()).toEqual(['3', '1', '2'])
     expect(el.querySelector('.thimble-mix')!.getAttribute('title')).toBe('Kind: Text only 3 · With links 1 · No kind 2')
+    const [textOnly, withLinks, none] = fills()
+    expect(textOnly).not.toBe(none)
     expect(win().thimble.mix({ 'Text only': 1 })).toContain('class="thimble-mix"')
     doc().querySelectorAll<HTMLElement>('.thimble-colour-chip')[0].click()
     await wait()
-    win().thimble.mix(el, { 'With links': 1, 'Text only': 3 })
-    expect(parts()).toEqual(['1'])
+    // a value turned off keeps its share, in the gray of the records with no value
+    win().thimble.mix(el, { 'With links': 1, 'Text only': 3, '': 2 })
+    expect(parts()).toEqual(['3', '1', '2'])
+    expect(fills()).toEqual([none, withLinks, none])
     ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
     ;(doc().querySelector('.thimble-colour-menu [data-by="off"]') as HTMLElement).click()
     await wait()

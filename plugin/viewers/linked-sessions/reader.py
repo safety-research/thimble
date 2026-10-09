@@ -46,9 +46,9 @@
 #   {"op": "overview", "colour": <colour.query()>, "filter": <filter.query()>, "rows": <rows.query()>, "search": <words>}
 #       every run and session the label filter keeps, as trees; the Task calls that started them (`spawns`), which the
 #       filters never drop, so the links between sessions always show; and the calls and messages (`items`) that hold
-#       the words and whose Filter by and Color by values are on, with the counts of each control's values. With a label
-#       chosen, `colours` and `groups` give its value on each item by ref, since the page holds a label's marks only for
-#       the records it shows.
+#       the words and whose Filter by value is on (Color by only colors), with the counts of each control's values.
+#       With a label chosen, `colours` and `groups` give its value on each item by ref, since the page holds a label's
+#       marks only for the records it shows.
 #   {"op": "turns", "session": <id>} or {"op": "turns", "refs": [<ref>, ...]}
 #       a session's turns in order, or those of the refs, each item as the overview gives it with a message's whole text.
 #   {"op": "record", "ref": <a call's or a message's ref>}
@@ -490,10 +490,9 @@ def _overview(index, query):
             fcounts["" if fv is None else fv] += 1
             if not thimble.colour_on(filt, fv):
                 continue
+            # Color by only colors: a value turned off there keeps its records
             cv = thimble.colour_value(colour, it["ref"], it)
             counts["" if cv is None else cv] += 1
-            if not thimble.colour_on(colour, cv):
-                continue
             if isinstance(colour, dict) and colour.get("label") is not None and cv is not None:
                 colours[it["ref"]] = cv
             if isinstance(rows, dict) and rows.get("label") is not None:
