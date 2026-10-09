@@ -908,6 +908,177 @@ body[data-cmd] .board-stage .outputs-vega * {
 .bcell-note p + p {
   margin-top: 6px;
 }
+/* a plan (canvas/PlanBody): numbered steps, each its number, its text and its status at the right, and under them what it
+   makes (dashed until it runs), its note and a live row per run; a done step is one line */
+.plan {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: 400 var(--text-sm) / 1.45 var(--font-body);
+}
+.plan-step {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 2px 8px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.plan-step:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.plan-step:last-child {
+  padding-bottom: 0;
+}
+.plan-step.is-compact {
+  padding: 4px 0;
+}
+.plan-n {
+  font: 500 var(--text-mono-sm) / 1.45 var(--font-mono);
+  color: var(--text-tertiary);
+}
+.plan-text {
+  min-width: 0;
+  color: var(--text-primary);
+}
+.plan-toggle {
+  display: block;
+  justify-self: start;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.plan-toggle:hover,
+button.plan-run-name:hover {
+  background: none;
+  color: var(--text-primary);
+}
+.plan-caret {
+  margin-left: 4px;
+  color: var(--text-tertiary);
+  vertical-align: -1px;
+}
+.plan-status {
+  font: 400 var(--text-xs) / 1.45 var(--font-body);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.plan-status.is-running {
+  color: var(--accent);
+}
+.plan-status.is-done {
+  color: var(--status-positive);
+}
+.plan-status.is-needs-you {
+  color: var(--status-warning);
+}
+.plan-under {
+  grid-column: 2 / 4;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.plan-makes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.plan-make {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in oklab, var(--accent) 28%, transparent);
+  border-radius: var(--radius-chip);
+  background: color-mix(in oklab, var(--accent) 6%, var(--surface-card));
+  color: var(--accent);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+}
+.plan-make.is-will {
+  border-style: dashed;
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+}
+.plan-note {
+  color: var(--text-primary);
+}
+.plan-run {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0 0;
+}
+.plan-run-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+}
+.plan-run-name {
+  display: block;
+  justify-self: start;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font: inherit;
+  color: var(--text-primary);
+  text-align: left;
+}
+button.plan-run-name {
+  cursor: pointer;
+}
+button.plan-run-name:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+}
+.plan-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--text-tertiary);
+}
+.plan-run.is-running .plan-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+}
+.plan-run.is-done .plan-dot {
+  background: var(--status-positive);
+}
+.plan-run.is-failed .plan-dot {
+  background: var(--status-negative);
+}
+.plan-run.is-not-started .plan-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--text-tertiary);
+}
+.plan-run-meta,
+.plan-run-latest {
+  font: 400 var(--text-mono-sm) / 1.45 var(--font-mono);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.plan-run-latest {
+  padding-left: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* an example: the evidence chip with the record's address (which opens Files at the passage), the record behind a faint
    rule, and in it the cited words highlighted (.hl) among the surrounding words in the tertiary. A record quoted
    without a passage reads whole, in ink */

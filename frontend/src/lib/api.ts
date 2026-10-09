@@ -5,6 +5,7 @@ import type {
   LocalExtension,
   Cell,
   CellName,
+  PlanRun,
   CellPatch,
   ChatDetail,
   ChatMeta,
@@ -344,6 +345,8 @@ export const api = {
   },
   ipynbUrl: (c: string, nb: string) => `${ws(c)}/notebooks/${enc(nb)}/ipynb`,
   cellNames: (c: string) => j<CellName[]>(`${ws(c)}/cells/names`),
+  /** the live rows of a plan card's runs (backend plans.plan_runs_route) */
+  planRuns: (c: string, id: string) => j<{ runs: PlanRun[] }>(`${ws(c)}/cards/${enc(id)}/plan-runs`),
 
   // ---- labels and filters ----
   concepts: (c: string) => j<Concept[]>(`${ws(c)}/concepts`),

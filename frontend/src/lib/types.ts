@@ -135,7 +135,7 @@ export interface Group {
   session?: string
 }
 
-export type CellKind = 'plot' | 'table' | 'code' | 'example' | 'note' | 'diagram' | 'timeline' | 'label' | 'custom'
+export type CellKind = 'plot' | 'table' | 'code' | 'example' | 'note' | 'diagram' | 'timeline' | 'label' | 'custom' | 'plan'
 
 export type MimeBundle = Record<string, any> & { _stream?: 'stdout' | 'stderr'; _out?: number; truncated?: OutputTruncation }
 
@@ -196,6 +196,34 @@ export interface Cell {
   check?: unknown
   /** the changes checks made to the card, oldest first (lib/cardCheck) */
   fixes?: unknown[]
+}
+
+/** A plan card's step status (backend notebook.PLAN_STATUSES). */
+export type PlanStatus = 'not started' | 'running' | 'done' | 'needs you'
+
+/** One step of a plan card's payload (backend notebook.plan_step_of): its id never changes, `makes` names what it makes,
+ * `runs` the Agent calls that do it, `time` a time the agent gave, `started`/`ended` thimble's stamps. */
+export interface PlanStep {
+  id: string
+  text: string
+  makes: string[]
+  status: PlanStatus
+  note: string
+  runs: string[]
+  time: string
+  started: string | null
+  ended: string | null
+}
+
+/** The live row of one run of a plan's step (backend plans.plan_runs): the subagent chat of that name, its state, its
+ * latest event and how long it has run. */
+export interface PlanRun {
+  step: number
+  name: string
+  chat: string | null
+  state: string
+  latest: string
+  elapsed: string
 }
 
 export interface CanvasResponse {

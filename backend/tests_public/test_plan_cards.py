@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app import agents, config, context, material, notebook, plans, refs, tools
+from app import agents, concepts, config, context, material, notebook, plans, refs, tools
 
 CORPUS = "mini"
 STEPS = [
@@ -205,6 +205,7 @@ async def test_read_ref_list_cards_the_canvas_context_and_the_writer_read_the_st
     assert f"card:{cid} · plan" in ctx and "  1. [done] Mirror pandas" in ctx and "     note: mirrored" in ctx
     row = next(r for r in material.notebook_cells(CORPUS, ("analyst",)) if r["id"] == cid)
     assert "3. [not started] Pilot" in row["text"]
+    assert "2. [not started] Build the agent container" in concepts.cell_text(_cell(cid)), "a label over cards reads the steps"
     step = (await call("read_ref", group, ref=f"card:{cid}#step-2")).text
     assert f"span card:{cid}#step-2: 2. [not started] Build the agent container" in step
 

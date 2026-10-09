@@ -67,6 +67,25 @@ test('an example card lists its records; a note is prose; a custom card its word
   expect(text('k0code00')).toEqual(['revisions.jsonl 14591', 'events.jsonl 19913'])
 })
 
+test("a plan card is a note of its numbered steps: each step's status and time, what it makes, and its note under it", () => {
+  const plan = {
+    id: 'p0plan00', kind: 'plan', title: 'Plan: build the environment', outputs: [],
+    payload: { steps: [
+      { id: 's1', text: 'Mirror pandas', makes: ['mirror/'], status: 'done', note: 'six repos', started: '2026-10-08T10:00:00+00:00', ended: '2026-10-08T10:06:00+00:00' },
+      { id: 's2', text: 'Run the pilot', makes: [], status: 'running', time: '40 m' },
+      { id: 's3', text: 'Compare the conditions', makes: ['results/'], status: 'not started' },
+    ] },
+  } as unknown as ThimbleCell
+  const { card } = cardOfCell(plan)
+  expect(card.kind).toBe('note')
+  expect(card.note.split('\n')).toEqual([
+    '1. [done · 6 m] Mirror pandas → mirror/',
+    '   six repos',
+    '2. [running · 40 m] Run the pilot',
+    '3. [not started] Compare the conditions → results/',
+  ])
+})
+
 test("a card whose run failed says why; one waiting for its run says so", () => {
   const { error } = cardOfCell(of('x0err000'))
   expect(error).toBe("KeyError: 'wiki'")
