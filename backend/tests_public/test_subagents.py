@@ -586,27 +586,25 @@ async def test_main_s_own_call_runs_at_once_and_a_subagent_s_is_found_by_its_tra
         session._live.pop(CORPUS, None)
 
 
-async def test_a_thread_s_fork_s_start_tool_call_is_refused_at_once_and_another_subagent_s_runs(bridge, monkeypatch):
+async def test_a_thread_s_fork_s_start_tool_call_runs_as_main_s_and_another_subagent_s_runs(bridge, monkeypatch):
     """U5: Claude Code tells a thread's fork not to start subagents (its fork boilerplate; live: the fork would not
-    make the Agent call). A fork's start_orientation is refused at once with a plain line that names Start in the
-    browser; nothing is recorded, since one orientation runs at a time and the analyst starts it. Its propose_view,
-    file_dev_ticket, start_writing and run_check run as main's calls, and main makes their Agent call
-    (test_view_subagents.py, test_code_tickets.py, test_fork_starts.py), so nothing sends the analyst to Report a
-    problem. A subagent of main's own (general-purpose) makes the call itself, so its start tool call runs, and its
-    other thimble calls run as main's for a fork too."""
+    make the Agent call). So a fork's start_orientation, propose_view, file_dev_ticket, start_writing and run_check run
+    as main's calls, and main makes their Agent call (test_view_subagents.py, test_code_tickets.py,
+    test_fork_starts.py): none is refused at once, and no hint sends the analyst to Start, Write or Report a problem.
+    A subagent of main's own (general-purpose) makes the call itself, so its start tool call runs, and its other
+    thimble calls run as main's for a fork too."""
     from app import tools
 
     ws = config.workspace_dir(CORPUS)
     sf.add_caller(ws, "toolu_fork_sw", "fork1", "fork")
     sf.add_caller(ws, "toolu_gp_sw", "gp1", "general-purpose")
     sf.add_caller(ws, "toolu_fork_card", "fork1", "fork")
-    refused, _ = await tools._as_caller(CORPUS, "start_orientation", "toolu_fork_sw")
-    assert refused == tools.hint("start-refused-fork")
-    assert "Start" in refused and "Write" in refused and "browser" in refused
-    for name in ("propose_view", "file_dev_ticket", "start_writing", "run_check"):
+    for name in ("start_orientation", "propose_view", "file_dev_ticket", "start_writing", "run_check"):
         assert await tools._as_caller(CORPUS, name, "toolu_fork_sw") == ("", None), \
             f"a fork's {name} runs as main's call, whose Agent call main makes"
+    assert not tools.hint("start-refused-fork"), "no hint sends the analyst to start a fork's agent by hand"
     assert not tools.hint("start-refused-fork-ticket"), "no hint sends the analyst to file a fork's ticket by hand"
+    assert await tools._as_caller(CORPUS, "start_orientation", "toolu_gp_sw") == ("", None)
     assert await tools._as_caller(CORPUS, "file_dev_ticket", "toolu_gp_sw") == ("", None)
     assert await tools._as_caller(CORPUS, "start_writing", "toolu_gp_sw") == ("", None)
     assert await tools._as_caller(CORPUS, "add_card", "toolu_fork_card") == ("", None)

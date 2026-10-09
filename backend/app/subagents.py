@@ -9,12 +9,12 @@ answer ends the request ({agentId}, a deny of thimble's own --agent-check, Claud
 module). A follow-on start (a run's own next step, such as the orientation's report pass) goes the same way. A typed
 request goes through main: the start tool records the pending request and returns the exact Agent call, which main
 makes; the plugin's --agent-check hook lets only that call through, and the mirror watches for a start that does not
-happen (R1–R3, session.py). The typed start of a thread's fork's propose_view, file_dev_ticket, start_writing or
-run_check, whose Agent call Claude Code does not let a fork make, main makes on a `start_agent` event that carries the
-exact call (ask_main, tools._ask_main), with no step of the analyst's; a turn that missed the event gets it once more
-(ask_again). Every click route takes the analyst's browser cookie (hook_auth.analyst), never the server's token alone,
-since a start through the module is not judged by auto mode. There is no second route: without the module thimble's
-agents cannot start (start-refused-no-module).
+happen (R1–R3, session.py). The typed start of a thread's fork's start_orientation, propose_view, file_dev_ticket,
+start_writing or run_check, whose Agent call Claude Code does not let a fork make, main makes on a `start_agent` event
+that carries the exact call (ask_main, tools._ask_main), with no step of the analyst's; a turn that missed the event
+gets it once more (ask_again). Every click route takes the analyst's browser cookie (hook_auth.analyst), never the
+server's token alone, since a start through the module is not judged by auto mode. There is no second route: without
+the module thimble's agents cannot start (start-refused-no-module).
 
 Run values. Every run gets exactly the model and effort its arguments or Settings name (values_for). A click registers
 the role with them first (the module); a typed start gets them from the module's spawn and step hooks, which read the

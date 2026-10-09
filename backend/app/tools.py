@@ -2703,14 +2703,14 @@ DEV_AGENT = "the dev agent"  # the agent main starts for a thread's fork's ticke
 
 async def _ask_main(ctx: Ctx, ans: Any, *, what: str, thread: dict[str, Any], agent: str = DEV_AGENT,
                     view: str | None = None) -> ToolResult:
-    """A typed start a thread's fork asked for, by its propose_view, file_dev_ticket, start_writing or run_check.
-    Claude Code does not let a fork start subagents, so main makes the Agent call: the request keeps the id of a
-    `start_agent` event (subagents.ask_main), which carries the exact call and names what was filed (`what`), the agent
-    main starts (`agent`), the view and the thread's anchor, and wakes main as any event does, so main starts the agent
-    with no step of the analyst's, judged by auto mode as main's own start is. A start for the same agent that main has
-    not made yet is replaced by this one. The fork is told to say in one line in the thread that it is filed and main is
-    starting the agent (`## start_agent-fork`). A refused start, or a session that does not listen, is an error
-    result."""
+    """A typed start a thread's fork asked for, by its start_orientation, propose_view, file_dev_ticket, start_writing
+    or run_check. Claude Code does not let a fork start subagents, so main makes the Agent call: the request keeps the
+    id of a `start_agent` event (subagents.ask_main), which carries the exact call and names what was filed (`what`),
+    the agent main starts (`agent`), the view and the thread's anchor, and wakes main as any event does, so main starts
+    the agent with no step of the analyst's, judged by auto mode as main's own start is. A start for the same agent that
+    main has not made yet is replaced by this one. The fork is told to say in one line in the thread that it is filed
+    and main is starting the agent (`## start_agent-fork`). A refused start, or a session that does not listen, is an
+    error result."""
     from . import subagents  # noqa: PLC0415
 
     if ans.refused or "input" not in ans:
@@ -2913,25 +2913,20 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
 
 # the start tools, whose result is an Agent call for the caller to make: a thread's fork may not make one, since
 # Claude Code tells its forks not to start subagents; another subagent of main's makes the call itself
-# (subagents.typed_caller). A fork's propose_view, file_dev_ticket, start_writing and run_check, which start a view's
-# builder, a code ticket's agent, a writer or a check's runs, run, and main makes their Agent call (_ask_main), so a
-# request the analyst makes in a thread reaches its agent with no step of theirs. A fork's start_orientation is
-# refused at once with start-refused-fork (U5): one orientation runs at a time, and the analyst starts it.
-FORK_REFUSED = ("start_orientation",)
-
-
+# (subagents.typed_caller). A fork's start_orientation, propose_view, file_dev_ticket, start_writing and run_check,
+# which start the orientation, a view's builder, a code ticket's agent, a writer or a check's runs, run as main's
+# calls, and main makes their Agent call (_ask_main), so a request the analyst makes in a thread reaches its agent with
+# no step of theirs.
 async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, str | None]:
     """(why the call is refused, '' when it runs; the session it runs as) for a call through main's shim: the key of the
     agent of thimble's that made it (subagents.caller, from the caller hook's line, else the transcript that holds the
     call), or None for main's own. A call its caller may not make is refused (subagents.allowed): main's `critique`, the
-    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on), a thread's fork's
-    start_orientation (FORK_REFUSED)."""
+    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on). A thread's fork's call
+    runs as main's own (_fork_of)."""
     from . import orientation, orient_session, subagents  # noqa: PLC0415 — each imports this module
 
     canon = canonical(name)
     who = await subagents.caller(c, tool_use_id) if tool_use_id else None
-    if who is None and canon in FORK_REFUSED and subagents.fork_call(c, tool_use_id):
-        return hint("start-refused-fork"), None
     if who is None:
         spec = REGISTRY[canon]
         if spec.sessions and None not in spec.sessions:
