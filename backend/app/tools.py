@@ -169,8 +169,6 @@ REGISTRY: dict[str, Spec] = {
         Spec("list_cards", ANALYSIS_ROLES, _H + "list_cards", aliases=("list_cells",)),
         Spec("add_card", ANALYSIS_ROLES, _H + "add_card", aliases=("add_cell",)),
         Spec("edit_card", (ANALYST,), _H + "edit_card", aliases=("edit_cell",)),
-        # one step of a plan card changed: its status, note, runs or time (plans.py)
-        Spec("update_plan", (ANALYST,), "app.plans:tool_update_plan"),
         Spec("delete_card", (ANALYST,), _H + "delete_card", aliases=("delete_cell",)),
         Spec("apply_label", (ANALYST,), _H + "apply_label"),
         # a label over files on or off in Files and the views, which runs nothing (concepts.show_concept)
@@ -1309,7 +1307,8 @@ PLAN_NO_TAKEAWAY = "{tool}: a plan card has no takeaway: its steps say where the
 
 def _plan_payload(raw: Any, tool: str) -> tuple[dict | None, str]:
     """(a plan's payload {steps} from add_card's or edit_card's `steps`, the error line): each step needs its `text`, and
-    a status it is given must be one of notebook.PLAN_STATUSES. Steps are numbered from 1 in the error lines."""
+    a status it is given must be one of notebook.PLAN_STATUSES. Steps are numbered from 1 in the error lines. A step
+    keeps only the fields it gives, so that edit_card's merge (plans.merge_steps) keeps the others."""
     from . import notebook
 
     items = raw if isinstance(raw, builtins.list) else []
@@ -1322,7 +1321,7 @@ def _plan_payload(raw: Any, tool: str) -> tuple[dict | None, str]:
             return None, f"{tool}: step {n} has no `text`"
         if step.get("status") not in (None, "") and notebook.plan_status_of(step["status"]) is None:
             return None, f"{tool}: step {n}'s status must be one of {', '.join(notebook.PLAN_STATUSES)}"
-        steps.append({k: step[k] for k in ("text", "makes", "status", "note", "runs", "time") if k in step})
+        steps.append({k: step[k] for k in ("id", "text", "makes", "status", "note", "details", "runs", "time") if k in step})
     return {"steps": steps}, ""
 
 
@@ -1403,6 +1402,10 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             return err(problem)
         if follows:
             (payload or {})["follows"] = follows
+        if kind == "plan" and payload is not None:  # a step given as running starts its clock now (plans.merge_steps)
+            from . import plans  # noqa: PLC0415
+
+            payload["steps"] = plans.merge_steps([], payload["steps"])
     elif not code.strip():
         return err(_needs_code("add_card", kind, args))
     elif problem := _content_on_code("add_card", kind, args) or _card_installs(ctx, code, "add_card"):
@@ -1522,13 +1525,9 @@ def _edit_data_cell(ctx: Ctx, nb_id: str, cid: str, cell: dict, args: dict[str, 
     key = notebook.PAYLOAD_KEYS.get(kind)
     payload: dict | None = None
     if key in CONTENT_FIELDS and args.get(key) is not None:
-        if kind == notebook.PLAN_KIND and notebook.plan_started(cell):
-            return err(hint("plan-started", cid=cid))
         payload, problem = _payload_args(kind, args, "edit_card", ctx.c)
         if problem:
             return err(problem)
-        if kind == notebook.PLAN_KIND and payload is not None:
-            payload["follows"] = (cell.get("payload") or {}).get("follows")
     lines: builtins.list[str] = []
     if group:
         nb_id = _move_to_group(ctx, cid, nb_id, group, lines)
@@ -1540,10 +1539,31 @@ def _edit_data_cell(ctx: Ctx, nb_id: str, cid: str, cell: dict, args: dict[str, 
             return ok(f"card:{cid}" + "".join(f"\n\n{line}" for line in lines))
         what = f"`code` that ends in {KIND_ENDINGS[kind]}" if kind in KIND_ENDINGS else f"its new `{key or 'content'}`"
         return err(f"edit_card: card:{cid} is of kind {kind}, so pass {what} or a new question")
-    updated = notebook.edit_cell(ctx.c, cid, payload=payload, title=title, by=ctx.cell_author)
+    if kind == notebook.PLAN_KIND and payload is not None:
+        updated = _edit_plan(ctx, cid, payload["steps"], title)
+    else:
+        updated = notebook.edit_cell(ctx.c, cid, payload=payload, title=title, by=ctx.cell_author)
     _remember_cell(ctx, nb_id, cid)
     return ok(f"card:{cid}\n\n" + "\n".join(_payload_lines(kind, updated.get("payload") or {}))
               + "".join(f"\n\n{line}" for line in lines))
+
+
+def _edit_plan(ctx: Ctx, cid: str, steps: "builtins.list[dict]", title: str | None) -> dict:
+    """edit_card's new `steps` for plan `cid`, at any time: merged with the steps the card holds under the groups' lock
+    (plans.merge_steps), so each step it replaces keeps its id, its clock while its text is unchanged and what the edit
+    leaves out, and a status that changes is stamped. Its `follows` stays, and the ids of the steps it removes are kept
+    (plans.removed_ids), so no later step takes one."""
+    from . import notebook, plans
+
+    with notebook.editing(ctx.ws):
+        hit = notebook.find_cell(ctx.ws, cid)
+        held = (hit[1] if hit else None) or {}
+        was = held.get("payload") if isinstance(held.get("payload"), dict) else {}
+        merged = plans.merge_steps(notebook.plan_steps(held), steps, removed=was.get(plans.REMOVED) or ())
+        payload = {"steps": merged, "follows": was.get("follows")}
+        if removed := plans.removed_ids(was, merged):
+            payload[plans.REMOVED] = removed
+        return notebook.edit_cell(ctx.c, cid, payload=payload, title=title, by=ctx.cell_author)
 
 
 def _move_to_group(ctx: Ctx, cid: str, nb_id: str, group: str, lines: "builtins.list[str]") -> str:

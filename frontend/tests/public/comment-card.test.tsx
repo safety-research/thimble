@@ -133,6 +133,7 @@ describe("a comment's menu", () => {
         surface: 'canvas',
         element: 'comment',
         text: 'Which two libraries?',
+        comment: 'k1',
       },
     ])
     expect(opened).toEqual(['t1'])

@@ -334,11 +334,13 @@ def ensure_main(c: str) -> dict:
 
 def new_thread(c: str, anchor: str | None, anchor_text: str | None, title: str | None = None, *,
                surface: str | None = None, element: str | None = None, selector: str | None = None,
-               image: str | None = None, parent: str | None = None) -> dict:
+               image: str | None = None, parent: str | None = None, comment: str | None = None) -> dict:
     """A thread born from a ⌘-click or ⌘-drag: `anchor` is what was pointed at (refs joined by ','), with its visible text,
     surface, element kind, CSS selector and a captured PNG. `parent` is the chat the analyst was reading (thread_parent).
-    Its first message is a browser event of kind `thread`, which main answers by forking."""
-    from . import threads  # noqa: PLC0415
+    `comment` is the id of the comment whose Ask opened it, kept as `anchor_comment` (comments.thread_comment), so its
+    anchor line names the comment as well as its passage or step. Its first message is a browser event of kind `thread`,
+    which main answers by forking."""
+    from . import comments, threads  # noqa: PLC0415
 
     ensure_main(c)
     cid = secrets.token_hex(4)
@@ -352,6 +354,11 @@ def new_thread(c: str, anchor: str | None, anchor_text: str | None, title: str |
                       "anchor_text": clean(anchor_text, ANCHOR_TEXT_CHARS), "anchor_surface": clean(surface, 40),
                       "anchor_element": clean(element, 80), "anchor_selector": clean(selector, 400)})
     meta["anchor_image"] = threads.save_image(c, cid, image) if image else None
+    try:
+        meta["anchor_comment"] = comments.thread_comment(c, comment) if comment else None
+    except Exception:  # noqa: BLE001 — a thread whose line cannot name its comment still opens
+        log.warning("%s: thread %s: comment %s not read", c, cid, comment, exc_info=True)
+        meta["anchor_comment"] = None
     write_meta(c, meta)
     _, log_path = paths(c, cid)
     log_path.touch()
@@ -794,6 +801,7 @@ class NewThread(BaseModel):
     image: str | None = None  # a data:image/png;base64 URL of the element, captured at the click
     parent: str | None = None  # the chat the analyst was reading when they asked (thread_parent)
     text: str | None = None  # the first question, posted as the thread's first event (create_route)
+    comment: str | None = None  # the id of the comment whose Ask opened it (new_thread)
 
 
 class ChatUpdate(BaseModel):
@@ -854,7 +862,7 @@ async def create_route(c: str, body: NewThread) -> dict:
     if text and not events.reachable(c):
         raise HTTPException(409, events.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     meta = new_thread(c, body.anchor, body.anchor_text, body.title, surface=body.surface, element=body.element,
-                      selector=body.selector, image=body.image, parent=body.parent)
+                      selector=body.selector, image=body.image, parent=body.parent, comment=body.comment)
     if not text:
         return meta
     await threads.warm(c, meta)

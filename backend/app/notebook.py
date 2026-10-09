@@ -430,16 +430,18 @@ def _payload_of(kind: str, raw: Any) -> dict:
 # --- plan cards ---
 #
 # A plan card is a data card whose payload is {steps: [...], follows}: the steps a piece of work takes, which the agent
-# keeps current (plans.update_step), and the id of the plan it is the next phase of. A step is {id, text, makes,
-# status, note, runs, time, started, ended}: its id never changes, `makes` names what it makes, `runs` the Agent calls
-# that do it (plans.plan_runs), `time` a time the agent states, and `started`/`ended` thimble's stamps of its status
-# changes. A plan has no takeaway.
+# keeps current by replacing them with edit_card (plans.merge_steps), and the id of the plan it is the next phase of. A
+# step is {id, text, makes, status, note, details, runs, time, started, ended}: its id never changes, `makes` names
+# what it makes, `details` what the card shows under the step on request, `runs` the Agent calls that do it
+# (plans.plan_runs), `time` a time the agent states, and `started`/`ended` thimble's stamps of its status changes. A
+# plan has no takeaway.
 
 PLAN_KIND = "plan"
 PLAN_STATUSES = ("not started", "running", "done", "needs you")
 PLAN_NOT_STARTED, PLAN_RUNNING, PLAN_DONE, PLAN_NEEDS_YOU = PLAN_STATUSES
 PLAN_FOLLOWS = "follows"
 STEP_ID_PREFIX = "s"
+STEP_DETAILS_CHARS = 4_000  # of a step's details, kept
 
 
 def _words(v: Any) -> str:
@@ -477,13 +479,20 @@ def plan_status_of(v: Any) -> str | None:
     return word if word in PLAN_STATUSES else None
 
 
+def step_details_of(v: Any) -> str:
+    """A step's details as kept: its lines without trailing space, no run of blank lines, cut at STEP_DETAILS_CHARS."""
+    lines = [ln.rstrip() for ln in str(v or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    out = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    return out if len(out) <= STEP_DETAILS_CHARS else out[:STEP_DETAILS_CHARS].rstrip() + " …"
+
+
 def plan_step_of(raw: Any, sid: str) -> dict:
     """One step with every field: a dict as given, or a bare string as the step's text."""
     s = raw if isinstance(raw, dict) else {"text": raw}
     return {"id": sid, "text": _words(s.get("text")), "makes": _word_list(s.get("makes")),
             "status": plan_status_of(s.get("status")) or PLAN_NOT_STARTED, "note": str(s.get("note") or "").strip(),
-            "runs": _word_list(s.get("runs")), "time": _words(s.get("time")), "started": _stamp(s.get("started")),
-            "ended": _stamp(s.get("ended"))}
+            "details": step_details_of(s.get("details")), "runs": _word_list(s.get("runs")),
+            "time": _words(s.get("time")), "started": _stamp(s.get("started")), "ended": _stamp(s.get("ended"))}
 
 
 def plan_steps_of(v: Any) -> list[dict]:
@@ -522,11 +531,6 @@ def plans_following(ws: Path, cell_id: str) -> list[str]:
             if c.get("kind") == PLAN_KIND and (c.get("payload") or {}).get(PLAN_FOLLOWS) == cell_id and c.get("id"):
                 out.append(str(c["id"]))
     return out
-
-
-def plan_started(cell: dict | None) -> bool:
-    """Whether any step of a plan has left `not started`."""
-    return any(s["status"] != PLAN_NOT_STARTED or s["started"] for s in plan_steps(cell))
 
 
 def duration_words(seconds: float) -> str:
@@ -573,15 +577,21 @@ def step_line(n: int, step: dict, now: datetime | None = None) -> str:
     return f"{n}. [{step['status']}{f' · {t}' if t else ''}] {step['text']}{makes}"
 
 
+def step_extra_lines(step: dict) -> list[str]:
+    """What a model reads under a step's line: its note, its details and its runs, each line indented."""
+    lines = [f"   note: {ln.strip()}" for ln in step["note"].splitlines() if ln.strip()]
+    lines += [f"   details: {ln.strip()}" for ln in step.get("details", "").splitlines() if ln.strip()]
+    if step["runs"]:
+        lines.append(f"   runs: {'; '.join(step['runs'])}")
+    return lines
+
+
 def plan_lines(cell: dict | None, now: datetime | None = None) -> list[str]:
-    """A plan's steps as a model reads them: a line per step (step_line), with its note and its runs under it."""
+    """A plan's steps as a model reads them: a line per step (step_line), with its note, details and runs under it."""
     lines: list[str] = []
     for n, step in enumerate(plan_steps(cell), 1):
         lines.append(step_line(n, step, now))
-        if step["note"]:
-            lines += [f"   note: {ln.strip()}" for ln in step["note"].splitlines() if ln.strip()]
-        if step["runs"]:
-            lines.append(f"   runs: {'; '.join(step['runs'])}")
+        lines += step_extra_lines(step)
     return lines
 
 

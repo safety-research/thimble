@@ -230,6 +230,27 @@
   gap: 5px;
   min-width: 0;
 }
+/* the comment a thread is about, on its own line under the anchor's chip: its square and check's name start the text,
+   which wraps under them, three lines at most */
+.chat-anchor-comment {
+  flex-basis: 100%;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  color: var(--text-secondary);
+}
+.chat-anchor-comment .wu-cm-sq {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+.chat-anchor-comment-name {
+  margin-right: 6px;
+  font-weight: 500;
+}
 .chat-row-word {
   color: inherit;
 }

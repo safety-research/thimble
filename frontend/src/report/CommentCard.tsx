@@ -177,7 +177,7 @@ function Reply({ ws, comment, name, thread, focus }: { ws: string; comment: Comm
     setBusy(true)
     try {
       // the question goes with the thread, so no empty thread is left when no session listens
-      const meta = await api.createThread(ws, { anchor: thread.anchor, anchor_text: threadText(comment, name, thread), surface: thread.surface, element: 'comment', text: msg })
+      const meta = await api.createThread(ws, { anchor: thread.anchor, anchor_text: threadText(comment, name, thread), surface: thread.surface, element: 'comment', text: msg, ...(comment.fixed ? {} : { comment: comment.id }) })
       track('thread-open', { target: thread.anchor, detail: { from: `${thread.surface}-comment`, comment: comment.id } })
       bus.emit('openChat', { chatId: meta.id })
       setText('')

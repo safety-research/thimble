@@ -372,8 +372,6 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
       )
     case 'delete_card':
       return str(inp.card ?? inp.cell ?? '')
-    case 'update_plan':
-      return planStepRef(inp)
     case 'apply_label':
       return [str(inp.name), inp.scope ? `on ${str(inp.scope)}` : ''].filter(Boolean).join(' ')
     case 'show_label':
@@ -466,7 +464,6 @@ export const TOOL_WORDS: Record<string, string> = {
   add_card: 'Add card',
   edit_card: 'Edit card',
   delete_card: 'Delete card',
-  update_plan: 'Update plan',
   read_ref: 'Look up',
   list_cards: 'List cards',
   apply_label: 'Apply label',
@@ -504,7 +501,6 @@ export const TOOL_GROUPS: Record<string, string> = {
   edit_card: 'Cards',
   delete_card: 'Cards',
   list_cards: 'Cards',
-  update_plan: 'Cards',
   apply_label: 'Label',
   show_label: 'Label',
   delete_label: 'Label',
@@ -645,15 +641,6 @@ export function toolMeta(tools: readonly ToolRow[]): string {
   return `${n} ${n === 1 ? 'step' : 'steps'}${secs != null ? ` · ${secs}s` : ''}`
 }
 
-/** The step an update_plan call changed, as its ref `card:<id>#step-<n>` (lib/refs), so its chip names the plan and the
- * step; the card alone when the call names no step. Pure. */
-export function planStepRef(inp: Record<string, unknown>): string {
-  const card = str(inp.card ?? inp.cell).trim()
-  if (!card) return ''
-  const base = /^(?:card|cell):/.test(card) ? card.split('#')[0] : `card:${card}`
-  return inp.step != null && inp.step !== '' ? `${base}#step-${str(inp.step).replace(/^step-/, '')}` : card
-}
-
 /** A call as one step of its card: its wire name and what it was about (add_card · Agents per run). */
 export function stepText(t: ToolRow): string {
   const summary = toolSummary(t.name, t.input)
@@ -746,8 +733,6 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
       return with_('Edited card', oneLine(str(inp.question ?? inp.title)) || cellQ(inp.card ?? inp.cell) || oneLine(str(inp.takeaway ?? '').replace(/\[\[([^\]|]*)\|[^\]]*\]\]/g, '$1')))
     case 'delete_card':
       return with_('Deleted card', cellQ(inp.card ?? inp.cell))
-    case 'update_plan':
-      return with_('Updated plan', [cellQ(inp.card ?? inp.cell), inp.step != null && inp.step !== '' ? `step ${str(inp.step)}` : '', str(inp.status)].filter(Boolean).join(' · '))
     case 'list_cards': {
       const g = str(inp.group).trim()
       return g && g.toLowerCase() !== 'all' ? `Listed cards in ${g}` : 'Listed cards'

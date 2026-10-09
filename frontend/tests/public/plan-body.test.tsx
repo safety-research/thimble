@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { CardFace } from '../../src/canvas/CardFace.tsx'
 import { CanvasContext } from '../../src/canvas/context.ts'
 import { durationWords, isCompact, newPlans, planSteps, statusWords, stepRef, stepTime } from '../../src/canvas/plan.ts'
-import { planStepRef, plainStep, toolGroupName, toolSummary } from '../../src/chat/model.ts'
+import { plainStep, toolGroupName, toolSummary } from '../../src/chat/model.ts'
 import { cardPartLabel, parseRef, refLabel } from '../../src/lib/refs.ts'
 import type { Cell, PlanStep } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -16,7 +16,7 @@ const MIN = 60_000
 const now = Date.parse('2026-10-08T12:00:00Z')
 const at = (minsAgo: number) => new Date(now - minsAgo * MIN).toISOString()
 
-const step = (over: Partial<PlanStep>): PlanStep => ({ id: 's1', text: 'Run it', makes: [], status: 'not started', note: '', runs: [], time: '', started: null, ended: null, ...over })
+const step = (over: Partial<PlanStep>): PlanStep => ({ id: 's1', text: 'Run it', makes: [], status: 'not started', note: '', details: '', runs: [], time: '', started: null, ended: null, ...over })
 
 function plan(steps: Partial<PlanStep>[], over: Partial<Cell> = {}): Cell {
   return {
@@ -140,6 +140,39 @@ describe('a plan card', () => {
     expect(el.querySelector('.plan-toggle')).toBeNull()
     expect(el.querySelector('.plan-status')?.textContent).toBe('done · 4 m')
   })
+
+  test("a step's details show under it only once a click on its line opens them, their citations as chips", async () => {
+    const details = 'The image keeps a cache of the meson subprojects, filled once with the web on.\n\n- Agents then build offline [[card:abc123]].'
+    const el = await face(
+      plan([
+        { text: 'Build the agent container', makes: ['Dockerfile.agent'], status: 'running', started: at(5), details },
+        { text: 'Mirror pandas', makes: ['mirror/'], status: 'done', note: 'six repos', started: at(70), ended: at(64), details: 'Cloned with every PR head.' },
+        { text: 'Pilot', makes: ['pilot/'] },
+      ]),
+    )
+    const [build, mirror, pilot] = rows(el)
+    // at rest: the running step shows its chips but not its details, behind a caret that says it opens
+    expect(build.querySelector('.plan-make')?.textContent).toBe('Dockerfile.agent')
+    expect(build.querySelector('.plan-details')).toBeNull()
+    const toggle = build.querySelector<HTMLButtonElement>('button.plan-toggle')!
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(pilot.querySelector('.plan-toggle')).toBeNull()
+    await act(async () => toggle.click())
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    const shown = build.querySelector<HTMLElement>('.plan-details')!
+    expect(shown.textContent).toContain('The image keeps a cache of the meson subprojects')
+    expect(shown.querySelector('li')?.textContent).toContain('Agents then build offline')
+    expect(shown.textContent).not.toContain('[[')
+    expect(build.querySelector('.plan-make')?.textContent).toBe('Dockerfile.agent')
+    await act(async () => toggle.click())
+    expect(build.querySelector('.plan-details')).toBeNull()
+    // a done step opens to its note and its details together
+    expect(mirror.classList.contains('is-compact')).toBe(true)
+    await act(async () => mirror.querySelector<HTMLButtonElement>('button.plan-toggle')!.click())
+    expect(mirror.querySelector('.plan-note')?.textContent).toBe('six repos')
+    expect(mirror.querySelector('.plan-details')?.textContent).toBe('Cloned with every PR head.')
+    expect(errors).toEqual([])
+  })
 })
 
 describe('plan steps, times and refs', () => {
@@ -168,20 +201,19 @@ describe('plan steps, times and refs', () => {
     expect(isCompact(step({ status: 'running' }), new Set())).toBe(false)
   })
 
-  test("a step's ref parses, names its step on a chip, and update_plan's call names it", () => {
+  test("a step's ref parses and names its step on a chip, and edit_card's call on a plan names the plan", () => {
     expect(stepRef('p1an0001', 2)).toBe('card:p1an0001#step-2')
     expect(parseRef('card:p1an0001#step-2')).toEqual({ kind: 'cell', cellId: 'p1an0001', step: 2 })
     expect(parseRef('cell:p1an0001#step-12')).toEqual({ kind: 'cell', cellId: 'p1an0001', step: 12 })
     expect(refLabel('card:p1an0001#step-2')).toBe('card · step 2')
     expect(cardPartLabel({ step: 2 }, 'Plan: build it', false)).toBe('Plan: build it · step 2')
     expect(cardPartLabel({ step: 2 }, 'Plan: build it', true)).toBe('step 2')
-    expect(planStepRef({ card: 'card:p1an0001', step: 3, status: 'done' })).toBe('card:p1an0001#step-3')
-    expect(planStepRef({ card: 'p1an0001', step: '3' })).toBe('card:p1an0001#step-3')
-    const call = `mcp__plugin_thimble_thimble__update_plan`
-    expect(toolSummary(call, { card: 'card:p1an0001', step: 1, status: 'running' })).toBe('card:p1an0001#step-1')
+    const call = `mcp__plugin_thimble_thimble__edit_card`
+    const input = { card: 'card:p1an0001', steps: [{ text: 'Mirror pandas', status: 'done' }, { text: 'Pilot', status: 'running' }] }
+    expect(toolSummary(call, input)).toBe('card:p1an0001')
     expect(toolGroupName(call)).toBe('Cards')
-    const row = { kind: 'tool', name: call, input: { card: 'card:p1an0001', step: 1, status: 'running' }, children: [] } as never
-    expect(plainStep(row, new Map([['p1an0001', 'Plan: build it']]))).toBe('Updated plan · Plan: build it · step 1 · running')
+    const row = { kind: 'tool', name: call, input, children: [] } as never
+    expect(plainStep(row, new Map([['p1an0001', 'Plan: build it']]))).toBe('Edited card · Plan: build it')
   })
 })
 

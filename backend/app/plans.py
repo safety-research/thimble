@@ -1,10 +1,13 @@
-"""Plan cards' steps after the card is made: update_plan, which changes one step, and the live rows of a step's runs.
+"""Plan cards' steps after the card is made: edit_card replaces them (merge_steps), and the live rows of a step's runs.
 
-A plan card (notebook.PLAN_KIND) holds numbered steps, each with a status the agent keeps current. update_plan changes
-one step through notebook.edit_cell, under the groups' lock, and stamps `started` and `ended` when its status changes,
-so the card shows how long a step took, or has run so far, unless the agent gives a time. A plan is not rewritten for a
-new phase: once a step has started, edit_card refuses new steps (tools.py, `## plan-started`), and the next phase is a
-new plan card whose `follows` names this one.
+A plan card (notebook.PLAN_KIND) holds numbered steps, each with a status the agent keeps current. The agent changes a
+plan as it changes any card: edit_card with the whole list of steps, at any time, such as to mark a step running or
+done, add a note or details, or add a step. merge_steps matches each new step to the step it replaces, so the step keeps
+its id (which a comment on it follows) and its clock: by the id it gives, else by the same text (at its place, else
+anywhere, as when a step was put before it), else by its place. A matched step keeps `started` and `ended` while its
+text is unchanged (or it names its id), and keeps every field it leaves out, such as its runs; a status that changes is
+stamped (stamp), so the card shows how long a step took, or has run so far, unless the agent gives a time. The next
+phase can still be a new plan card whose `follows` names this one.
 
 A step's `runs` names the Agent calls that do it, by their description, as Claude Code's agent tray names them.
 plan_runs matches each name to main's subagent chat of that title (session.py mirrors each Agent call of main's as an
@@ -28,33 +31,13 @@ SUBAGENT_ROLE = "subagent"  # session.SUBAGENT_ROLE: the role of the agent chat 
 LATEST_CHARS = 120  # of a run's latest event on its row
 # the argument of a tool call its row names, first found first (a Bash command, a file, a search, a prompt)
 CALL_ARGS = ("description", "command", "file_path", "path", "pattern", "query", "url", "prompt", "card", "ref")
-
-
-class PlanError(ValueError):
-    """A change update_plan refuses: `hint` names the `## <hint>` section of prompts/tools.md, else the message is the
-    line itself."""
-
-    def __init__(self, message: str, hint: str = "", **values: Any):
-        super().__init__(message)
-        self.hint = hint
-        self.values = values
+# the fields of a step an edit may leave out, which a matched step then keeps (merge_steps)
+KEPT_FIELDS = ("makes", "status", "note", "details", "runs", "time")
+REMOVED = "removed_steps"  # a plan payload's ids of the steps edits removed (removed_ids)
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def step_number(raw: Any) -> int | None:
-    """The 1-based number of a step as a call names it: 2, "2", "step-2" or card:<id>#step-2; None for anything else."""
-    if isinstance(raw, bool):
-        return None
-    if isinstance(raw, int):
-        return raw
-    text = str(raw or "").strip()
-    if "#" in text:
-        text = text.rsplit("#", 1)[1]
-    text = text.removeprefix("step-").removeprefix("step ").strip()
-    return int(text) if text.isdigit() else None
 
 
 def stamp(step: dict, status: str, now: str) -> None:
@@ -74,70 +57,92 @@ def stamp(step: dict, status: str, now: str) -> None:
         step["started"] = step["ended"] = None
 
 
-def update_step(c: str, cid: str, n: int, *, status: str | None = None, note: str | None = None,
-                runs: "builtins.list[str] | None" = None, time: str | None = None, by: str | None = None) -> dict:
-    """Change step `n` (from 1) of plan `cid` and return the card: its status (with its times stamped, stamp), its note,
-    its runs or the time it shows. PlanError for a card that is not a plan, an unknown step or a status that is not one
-    of notebook.PLAN_STATUSES. The analyst's lock is the caller's to check (tools.card_locked)."""
-    ws = config.workspace_dir(c)
-    with notebook.editing(ws):
-        hit = notebook.find_cell(ws, cid)
-        if hit is None:
-            raise PlanError(f"card:{cid} does not exist", "edit_card-gone", cid=cid)
-        cell = hit[1]
-        if cell.get("kind") != notebook.PLAN_KIND:
-            raise PlanError(f"update_plan: card:{cid} is a {cell.get('kind') or notebook.DEFAULT_KIND} card, not a plan")
-        steps = notebook.plan_steps(cell)
-        if not 1 <= n <= len(steps):
-            raise PlanError(f"update_plan: card:{cid} has no step {n}", "plan-step-unknown", cid=cid, step=n,
-                            count=len(steps))
-        word = None
-        if status is not None:
-            word = notebook.plan_status_of(status)
-            if word is None:
-                raise PlanError(f"update_plan: `status` must be one of {', '.join(notebook.PLAN_STATUSES)}")
-        step = steps[n - 1]
+def _text_key(v: Any) -> str:
+    return " ".join(str(v or "").split()).casefold()
+
+
+def match_steps(old: "builtins.list[dict]", new: "builtins.list[dict]") -> "builtins.list[int | None]":
+    """For each new step, the index of the old step it replaces, or None for a new one: by the `id` it gives, else by
+    the same text at its place, else by the same text anywhere, else by its place among the steps matched so far (the
+    first old step left between the old steps of the matched new steps before and after it, so a step put in between
+    two kept steps is new and a step reworded in place is the same); each old step matched once."""
+    out: builtins.list[int | None] = [None] * len(new)
+    used: set[int] = set()
+    by_id = {str(s.get("id")): i for i, s in enumerate(old) if s.get("id")}
+
+    def take(i: int, j: int | None) -> None:
+        if j is not None and j not in used:
+            out[i] = j
+            used.add(j)
+
+    for i, s in enumerate(new):  # the ids it gives
+        if s.get("id") not in (None, ""):
+            take(i, by_id.get(str(s["id"])))
+    for i, s in enumerate(new):  # the same text at its place
+        if out[i] is None and i < len(old) and _text_key(old[i].get("text")) == _text_key(s.get("text")):
+            take(i, i)
+    for i, s in enumerate(new):  # the same text elsewhere, as when a step was put before it
+        if out[i] is None:
+            take(i, next((j for j, o in enumerate(old)
+                          if j not in used and _text_key(o.get("text")) == _text_key(s.get("text"))), None))
+    for i in range(len(new)):  # its place between the matched steps around it
+        if out[i] is not None:
+            continue
+        lo = max((j for j in out[:i] if j is not None), default=-1)
+        hi = min((j for j in out[i + 1:] if j is not None), default=len(old))
+        take(i, next((j for j in range(lo + 1, hi) if j not in used), None))
+    return out
+
+
+def merge_steps(old: "builtins.list[dict]", new: "builtins.list[dict]", now: str | None = None,
+                removed: "builtins.list[str] | tuple[str, ...]" = ()) -> "builtins.list[dict]":
+    """A plan's steps after an edit that replaces them with `new` (each {text, makes, status, note, details, runs,
+    time, id?} as add_card's or edit_card's `steps` give it), every step whole (notebook.plan_step_of). A step matched
+    to an old one (match_steps) keeps its id, the fields it leaves out, and its status, `started` and `ended` while its
+    text is unchanged or it names its id; a status that changes is stamped from there (stamp). A new step gets the id
+    it gives when no step had it, else the next free s<n>, never the id of a step before it or one `removed` before
+    (removed_ids), so a comment on a removed step stays off the new one; its status, unless not started, is stamped as
+    a change from not started."""
+    now = now or _now()
+    olds = [notebook.plan_step_of(s, str(s.get("id") or "")) for s in old if isinstance(s, dict)]
+    pairs = match_steps(olds, new)
+    taken = {o["id"] for o in olds if o["id"]} | {str(x) for x in removed}
+    out: builtins.list[dict] = []
+    n = 0
+    for given, j in zip(new, pairs):
+        prev = olds[j] if j is not None else None
+        own = str(given.get("id") or "")
+        if prev is not None and prev["id"]:
+            sid = prev["id"]
+        elif own and notebook.ID_RE.match(own) and own not in taken:
+            sid = own
+        else:
+            n += 1
+            while f"{notebook.STEP_ID_PREFIX}{n}" in taken:
+                n += 1
+            sid = f"{notebook.STEP_ID_PREFIX}{n}"
+        taken.add(sid)
+        fields = {k: given[k] for k in ("text", *KEPT_FIELDS) if k in given}
+        if prev is not None:
+            fields = {**{k: prev[k] for k in KEPT_FIELDS}, **fields}
+        step = notebook.plan_step_of({k: v for k, v in fields.items() if k != "status"}, sid)
+        if prev is not None and (_text_key(prev["text"]) == _text_key(step["text"]) or own == prev["id"]):
+            step.update(status=prev["status"], started=prev["started"], ended=prev["ended"])
+        word = notebook.plan_status_of(fields.get("status"))
         if word is not None and word != step["status"]:
-            stamp(step, word, _now())
-        if note is not None:
-            step["note"] = str(note).strip()
-        if runs is not None:
-            step["runs"] = notebook.plan_step_of({"runs": runs}, step["id"])["runs"]
-        if time is not None:
-            step["time"] = " ".join(str(time).split())
-        payload = {**(cell.get("payload") or {}), "steps": steps}
-        return notebook.edit_cell(c, cid, payload=payload, by=by)
+            stamp(step, word, now)
+        out.append(step)
+    return out
 
 
-async def tool_update_plan(ctx: Any, args: dict[str, Any]) -> Any:
-    """update_plan: one step of a plan card, by its number, changed (update_step); the result is the plan's steps."""
-    from . import tools  # noqa: PLC0415 — tools imports this module lazily, through the registry
-
-    raw_card = args.get("card") if args.get("card") not in (None, "") else args.get("cell")
-    cid = tools._cell_id_of(raw_card) or str(ctx.anchor or "").strip()
-    if not cid:
-        return tools.err(tools.hint("edit_card-no-card") or "update_plan: name the plan with `card`")
-    raw_step = args.get("step")
-    if raw_step in (None, "") and "#step-" in str(raw_card or ""):
-        raw_step = raw_card
-    n = step_number(raw_step)
-    if n is None:
-        return tools.err("update_plan: `step` is the step's number, from 1")
-    hit = notebook.find_cell(ctx.ws, cid)
-    if hit is not None and (refused := tools.card_locked(ctx, cid, hit[1], tool="update_plan")):
-        return refused
-    fields = {k: args.get(k) for k in ("status", "note", "runs", "time") if args.get(k) is not None}
-    if not fields:
-        return tools.err("update_plan: pass `status`, `note`, `runs` or `time`")
-    runs = fields.get("runs")
-    if runs is not None and not isinstance(runs, builtins.list):
-        runs = [runs]
-    try:
-        cell = update_step(ctx.c, cid, n, status=fields.get("status"), note=fields.get("note"), runs=runs,
-                           time=fields.get("time"), by=ctx.cell_author)
-    except PlanError as e:
-        return tools.err((tools.hint(e.hint, **e.values) if e.hint else "") or str(e))
-    return tools.ok(f"card:{cid}\n\n" + "\n".join(notebook.plan_lines(cell)))
+def removed_ids(payload: dict | None, steps: "builtins.list[dict]") -> "builtins.list[str]":
+    """The ids of a plan's steps that edits removed, the payload's REMOVED with those of its steps before an edit that
+    `steps` (the steps after it) no longer has, which no new step takes (merge_steps)."""
+    p = payload if isinstance(payload, dict) else {}
+    before = [str(x) for x in p.get(REMOVED) or [] if str(x)]
+    before += [str(s.get("id")) for s in notebook.plan_steps_of(p.get("steps")) if s.get("id")]
+    now = {str(s.get("id")) for s in steps}
+    return sorted({x for x in before if x not in now})
 
 
 # --------------------------------------------------------------------------- the live rows of a step's runs

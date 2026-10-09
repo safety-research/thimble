@@ -74,7 +74,6 @@ def _args(c: str, corpus: Path) -> dict[str, dict]:
         "add_card": {"question": "What is this corpus?", "kind": "note", "text": "A small synthetic corpus."},
         "edit_card": {"card": "card:nope", "question": "?"},
         "delete_card": {"card": "card:nope"},
-        "update_plan": {"card": "card:nope", "step": 1, "status": "done"},
         "apply_label": {"scope": "files", "name": "bash", "predicate": {"kind": "regex", "text": "Bash"},
                         "paths": ["agents/*.jsonl"]},
         "show_label": {"name": "bash", "on": True},

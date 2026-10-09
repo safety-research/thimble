@@ -1,7 +1,9 @@
-"""Plan cards: add_card's `plan` kind stores numbered steps with stable ids and no takeaway, update_plan changes one step
-and stamps its times, edit_card keeps a started plan's steps, the next phase is a new plan that `follows` the last, and
-read_ref, list_cards, the canvas context and refs read the steps. plan_runs matches a step's runs to main's subagent
-chats. Called through tools.call as main's browser chat, as the other card tools' tests are."""
+"""Plan cards: add_card's `plan` kind stores numbered steps with stable ids and no takeaway; edit_card replaces a plan's
+steps at any time, as for any card, and each step it replaces keeps its id, its clock while its text is unchanged and
+what the edit leaves out, such as its runs, with a changed status stamped; update_plan is gone. A step's details are
+stored, served and read. The next phase is a new plan that `follows` the last, and read_ref, list_cards, the canvas
+context and refs read the steps. plan_runs matches a step's runs to main's subagent chats. Called through tools.call as
+main's browser chat, as the other card tools' tests are."""
 from __future__ import annotations
 
 import re
@@ -9,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app import agents, concepts, config, context, material, notebook, plans, refs, tools
+from app import agents, canvas_comments, concepts, config, context, material, notebook, plans, refs, tools
 
 CORPUS = "mini"
 STEPS = [
@@ -54,6 +56,11 @@ def _cell(cid: str) -> dict:
     return cell
 
 
+def _with(n: int, **fields) -> list[dict]:
+    """STEPS as edit_card passes them back, with step `n` (from 1) given `fields`."""
+    return [{**s, **fields} if i == n else dict(s) for i, s in enumerate(STEPS, 1)]
+
+
 async def test_add_card_stores_a_plans_steps_with_ids_and_no_takeaway(group):
     res = await call("add_card", group, kind="plan", question="Plan: build the environment and pilot it", steps=STEPS)
     cid = _cid(res)
@@ -86,47 +93,57 @@ async def test_add_card_refuses_a_plan_with_a_takeaway_no_steps_or_a_bad_status(
     assert not [c for _, nb in notebook._stored(config.workspace_dir(CORPUS)) for c in nb["cells"]], "nothing was stored"
 
 
-async def test_update_plan_changes_one_step_and_stamps_its_times(group):
+async def test_edit_card_changes_statuses_and_stamps_their_times(group):
     cid = await _plan(group)
-    res = await call("update_plan", group, card=f"card:{cid}", step=1, status="running", runs=["Mirror pandas"])
+    res = await call("edit_card", group, card=f"card:{cid}", steps=_with(1, status="running", runs=["Mirror pandas"]))
     assert not res.is_error, res.text
     assert res.text.splitlines()[1] == f"card:{cid}"
     s1 = notebook.plan_steps(_cell(cid))[0]
     assert s1["status"] == "running" and s1["started"] and s1["ended"] is None and s1["runs"] == ["Mirror pandas"]
+    started = s1["started"]
     assert re.search(r"^1\. \[running · \d+ s\] Mirror pandas", res.text, re.M), res.text
-    res = await call("update_plan", group, card=f"card:{cid}", step="1", status="Done", note="6 repos mirrored")
+    # the step's runs are left out of this edit, so it keeps them, and its clock, since its text is unchanged
+    res = await call("edit_card", group, card=f"card:{cid}", steps=_with(1, status="Done", note="6 repos mirrored"))
     s1 = notebook.plan_steps(_cell(cid))[0]
-    assert s1["status"] == "done" and s1["ended"] and s1["note"] == "6 repos mirrored"
+    assert s1["status"] == "done" and s1["ended"] and s1["started"] == started and s1["note"] == "6 repos mirrored"
+    assert s1["runs"] == ["Mirror pandas"]
     assert "note: 6 repos mirrored" in res.text
-    # the step's id and the others stay as they were
+    # the steps' ids and the others stay as they were
     steps = notebook.plan_steps(_cell(cid))
     assert [s["id"] for s in steps] == ["s1", "s2", "s3"] and steps[1]["status"] == "not started"
-    # a step ref names the step too, and `time` overrides thimble's count
-    res = await call("update_plan", group, card=f"card:{cid}#step-3", status="needs you", time="22 m")
+    # a step whose status the edit leaves out keeps it, and `time` overrides thimble's count
+    res = await call("edit_card", group, card=f"card:{cid}", steps=_with(3, status="needs you", time="22 m"))
     assert not res.is_error, res.text
-    assert notebook.plan_steps(_cell(cid))[2]["status"] == "needs you"
+    steps = notebook.plan_steps(_cell(cid))
+    assert steps[2]["status"] == "needs you" and steps[0]["status"] == "done" and steps[0]["started"] == started
     assert "3. [needs you · 22 m] Pilot" in res.text
     # every change is an edit of the card by its caller
     assert len(_cell(cid)["edited"]) == 3
 
 
-async def test_update_plan_refuses_an_unknown_step_a_bad_status_a_locked_card_and_a_card_that_is_no_plan(group):
+async def test_edit_card_refuses_a_bad_status_a_step_without_text_and_a_locked_plan(group):
     cid = await _plan(group)
-    res = await call("update_plan", group, card=f"card:{cid}", step=4, status="done")
-    assert res.is_error and res.text.endswith(tools.hint("plan-step-unknown", cid=cid, step=4, count=3))
-    res = await call("update_plan", group, card=f"card:{cid}", step=0, status="done")
-    assert res.is_error
-    res = await call("update_plan", group, card=f"card:{cid}", step=1, status="finished")
+    res = await call("edit_card", group, card=f"card:{cid}", steps=_with(1, status="finished"))
     assert res.is_error and "needs you" in res.text
-    res = await call("update_plan", group, card=f"card:{cid}", step=1)
-    assert res.is_error and "`status`" in res.text
-    note = _cid(await call("add_card", group, kind="note", question="A note", text="x"))
-    res = await call("update_plan", group, card=f"card:{note}", step=1, status="done")
-    assert res.is_error and "not a plan" in res.text
+    res = await call("edit_card", group, card=f"card:{cid}", steps=[*STEPS, {"makes": ["x/"]}])
+    assert res.is_error and "step 4" in res.text
     notebook.edit_cell(CORPUS, cid, locked=True)
-    res = await call("update_plan", group, card=f"card:{cid}", step=1, status="done")
+    res = await call("edit_card", group, card=f"card:{cid}", steps=_with(1, status="done"))
     assert res.is_error and res.text.endswith(tools.hint("card-locked", cid=cid))
     assert notebook.plan_steps(_cell(cid))[0]["status"] == "not started"
+    assert len(notebook.plan_steps(_cell(cid))) == 3
+
+
+async def test_update_plan_is_gone_from_the_tools_and_their_descriptions(group):
+    assert "update_plan" not in tools.REGISTRY
+    from app import prompts
+
+    assert "update_plan" not in prompts.load("tools") and "## plan-started" not in prompts.load("tools")
+    assert "update_plan" not in prompts.load("main") and "`edit_card`" in prompts.load("main")
+    assert tools.hint("plan-started", cid="x") == ""
+    assert "update_plan" not in {t["name"] for t in tools.list()}
+    with pytest.raises(KeyError):
+        await call("update_plan", group, card="card:nope", step=1, status="done")
 
 
 async def test_stamps_follow_status_changes():
@@ -147,7 +164,7 @@ async def test_stamps_follow_status_changes():
     assert notebook.duration_words(42) == "42 s" and notebook.duration_words(3600) == "1 h"
 
 
-async def test_edit_card_replaces_steps_until_one_starts_then_refuses(group):
+async def test_edit_card_replaces_a_plans_steps_at_any_time_but_takes_no_takeaway(group):
     cid = await _plan(group)
     res = await call("edit_card", group, card=f"card:{cid}", steps=[*STEPS, {"text": "Write the prompts", "makes": ["prompts/"]}])
     assert not res.is_error, res.text
@@ -155,19 +172,102 @@ async def test_edit_card_replaces_steps_until_one_starts_then_refuses(group):
     res = await call("edit_card", group, card=f"card:{cid}", takeaway="Four steps.")
     assert res.is_error and "takeaway" in res.text
     assert _cell(cid)["takeaway"] == ""
-    await call("update_plan", group, card=f"card:{cid}", step=1, status="running")
-    res = await call("edit_card", group, card=f"card:{cid}", steps=STEPS[:1])
-    assert res.is_error and res.text.endswith(tools.hint("plan-started", cid=cid))
-    assert len(notebook.plan_steps(_cell(cid))) == 4
+    await call("edit_card", group, card=f"card:{cid}", steps=_with(1, status="running"))
+    # once a step has started, the steps can still change: no refusal, no hint
+    res = await call("edit_card", group, card=f"card:{cid}", steps=[{**STEPS[0], "status": "done"}])
+    assert not res.is_error, res.text
+    assert "plan-started" not in res.text and "update_plan" not in res.text
+    steps = notebook.plan_steps(_cell(cid))
+    assert [(s["id"], s["status"]) for s in steps] == [("s1", "done")] and steps[0]["started"] and steps[0]["ended"]
+    assert _cell(cid)["payload"]["follows"] is None
     # its question can still change
     res = await call("edit_card", group, card=f"card:{cid}", question="Plan: build it")
     assert not res.is_error and _cell(cid)["title"] == "Plan: build it"
 
 
+async def test_edit_card_after_a_step_started_keeps_the_ids_times_runs_and_comments_of_the_steps_it_keeps(group):
+    cid = await _plan(group)
+    await call("edit_card", group, card=f"card:{cid}", steps=_with(1, status="running"))
+    await call("edit_card", group, card=f"card:{cid}", steps=[{**STEPS[0], "status": "done"},
+                                                              {**STEPS[1], "status": "running", "runs": ["Build it"]}, STEPS[2]])
+    before = {s["id"]: s for s in notebook.plan_steps(_cell(cid))}
+    assert before["s1"]["started"] and before["s1"]["ended"] and before["s2"]["started"]
+    on_two, _ = canvas_comments.add(CORPUS, card=cid, step="s2", text="The image has no web.", author="claude")
+    on_three, _ = canvas_comments.add(CORPUS, card=cid, step="s3", text="Two agents is few.", author="claude")
+    # a new step put in before step 2, step 3 reworded, nothing said of the done step's status or step 2's runs
+    res = await call("edit_card", group, card=f"card:{cid}", steps=[
+        {"text": STEPS[0]["text"], "makes": STEPS[0]["makes"]},
+        {"text": "Write the prompts", "makes": ["prompts/"]},
+        {"text": STEPS[1]["text"], "makes": STEPS[1]["makes"], "details": "The image caches the meson subprojects."},
+        {"text": "Pilot: 4 agents, one PR each", "makes": ["pilot/"]},
+    ])
+    assert not res.is_error, res.text
+    steps = notebook.plan_steps(_cell(cid))
+    assert [s["id"] for s in steps] == ["s1", "s4", "s2", "s3"], "a kept step keeps its id; the new one takes a new id"
+    one, new, two, three = steps
+    assert (one["status"], one["started"], one["ended"]) == ("done", before["s1"]["started"], before["s1"]["ended"])
+    assert (new["status"], new["started"], new["ended"]) == ("not started", None, None)
+    assert (two["status"], two["started"], two["ended"]) == ("running", before["s2"]["started"], None)
+    assert two["runs"] == ["Build it"] and two["details"] == "The image caches the meson subprojects."
+    assert three["text"] == "Pilot: 4 agents, one PR each" and three["started"] is None
+    # the comments follow their steps to their new places
+    refs_now = {cm["id"]: cm["ref"] for cm in canvas_comments.all_comments(CORPUS)}
+    assert refs_now[on_two["id"]] == f"card:{cid}#step-3" and refs_now[on_three["id"]] == f"card:{cid}#step-4"
+    # a running step's live row still names it, at its new place
+    assert [(r["step"], r["name"]) for r in plans.plan_runs(CORPUS, cid)] == [(3, "Build it")]
+    # a step left out is gone with its comment, and no later step takes its id
+    await call("edit_card", group, card=f"card:{cid}", steps=[{"text": s["text"]} for s in steps[:3]])
+    assert on_three["id"] not in {cm["id"] for cm in canvas_comments.all_comments(CORPUS)}
+    await call("edit_card", group, card=f"card:{cid}", steps=[*({"text": s["text"]} for s in steps[:3]), {"text": "Report"}])
+    assert [s["id"] for s in notebook.plan_steps(_cell(cid))] == ["s1", "s4", "s2", "s5"]
+    assert on_three["id"] not in {cm["id"] for cm in canvas_comments.all_comments(CORPUS)}
+
+
+def test_steps_match_by_id_then_text_then_place():
+    old = notebook.plan_steps_of([{"id": "a", "text": "Mirror"}, {"id": "b", "text": "Build"}, {"id": "c", "text": "Pilot"}])
+    assert plans.match_steps(old, [{"text": "Mirror"}, {"text": "Build"}, {"text": "Pilot"}]) == [0, 1, 2]
+    assert plans.match_steps(old, [{"text": "Pilot"}, {"text": "Mirror"}]) == [2, 0], "by text, wherever it stands"
+    assert plans.match_steps(old, [{"text": "Mirror"}, {"text": "Build it"}, {"text": "Pilot"}]) == [0, 1, 2], "reworded in place"
+    assert plans.match_steps(old, [{"text": "Mirror"}, {"text": "New"}, {"text": "Build"}, {"text": "Pilot 2"}]) == [0, None, 1, 2]
+    assert plans.match_steps(old, [{"id": "c", "text": "Pilot, reworded"}, {"text": "Mirror"}]) == [2, 0]
+    merged = plans.merge_steps(old, [{"id": "c", "text": "Pilot, reworded", "status": "running"}], now="2026-10-09T10:00:00+00:00")
+    assert merged[0]["id"] == "c" and merged[0]["started"] == "2026-10-09T10:00:00+00:00"
+    made = plans.merge_steps([], [{"text": "Run", "status": "running"}, {"text": "Wait", "status": "needs you"}, {"text": "Next"}],
+                             now="2026-10-09T10:00:00+00:00")
+    assert [(s["id"], s["status"], s["started"]) for s in made] == [("s1", "running", "2026-10-09T10:00:00+00:00"),
+                                                                     ("s2", "needs you", None), ("s3", "not started", None)]
+
+
+async def test_a_steps_details_are_stored_served_and_read(group):
+    details = "The image caches every meson subproject pandas downloads.\nSo the agents build offline."
+    cid = _cid(await call("add_card", group, kind="plan", question="Plan: build it",
+                          steps=[STEPS[0], {**STEPS[1], "details": details}, STEPS[2]]))
+    assert notebook.plan_steps(_cell(cid))[1]["details"] == details
+    assert notebook.plan_steps(_cell(cid))[0]["details"] == ""
+    served = await notebook.canvas_route(CORPUS)
+    cell = next(c for c in served["cells"] if c["id"] == cid)
+    assert cell["payload"]["steps"][1]["details"] == details
+    read = (await call("read_ref", group, ref=f"card:{cid}")).text
+    assert "   details: The image caches every meson subproject pandas downloads." in read
+    assert "   details: So the agents build offline." in read
+    step = (await call("read_ref", group, ref=f"card:{cid}#step-2")).text
+    assert "details: So the agents build offline." in step
+    assert "details: The image caches" in context.canvas(CORPUS)
+    ps = canvas_comments.passages(CORPUS)
+    assert "details: The image caches" in canvas_comments.card_lines(CORPUS, [p["ref"] for p in ps], ps)
+    # a check reads a step again once its details change, and a step without details keeps its fingerprint
+    fps = {p["ref"]: p["fp"] for p in ps}
+    await call("edit_card", group, card=f"card:{cid}", steps=[STEPS[0], {**STEPS[1], "details": "Changed."}, STEPS[2]])
+    after = {p["ref"]: p["fp"] for p in canvas_comments.passages(CORPUS)}
+    assert after[f"card:{cid}#step-2"] != fps[f"card:{cid}#step-2"]
+    assert after[f"card:{cid}#step-1"] == fps[f"card:{cid}#step-1"]
+
+
 async def test_the_next_phase_is_a_new_plan_that_follows_the_last(group):
     first = await _plan(group)
     for n in (1, 2, 3):
-        await call("update_plan", group, card=f"card:{first}", step=n, status="done")
+        await call("edit_card", group, card=f"card:{first}", steps=[{**s, "status": "done"} for s in STEPS[:n]] + STEPS[n:])
+    assert {s["status"] for s in notebook.plan_steps(_cell(first))} == {"done"}
     before = _cell(first)
     # the caller's own group is another one, where a card that names no group would land
     other = notebook.create_notebook(config.workspace_dir(CORPUS), "Elsewhere", role="analyst")["id"]
@@ -194,7 +294,7 @@ async def test_the_next_phase_is_a_new_plan_that_follows_the_last(group):
 
 async def test_read_ref_list_cards_the_canvas_context_and_the_writer_read_the_steps(group):
     cid = await _plan(group)
-    await call("update_plan", group, card=f"card:{cid}", step=1, status="done", note="mirrored")
+    await call("edit_card", group, card=f"card:{cid}", steps=_with(1, status="done", note="mirrored"))
     read = (await call("read_ref", group, ref=f"card:{cid}")).text
     assert f"card:{cid} (group {group}, plan)" in read
     assert "steps:" in read and "1. [done] Mirror pandas" in read and "2. [not started] Build the agent container" in read
@@ -267,9 +367,9 @@ async def test_plan_runs_match_a_steps_runs_to_mains_subagent_chats(group):
     ])
     done = _subagent("Run the managed condition", created=now - timedelta(minutes=30), status="done",
                      ended=now - timedelta(minutes=10), records=[{"type": "done", "result": "48 agents ran.\nDetails"}])
-    await call("update_plan", group, card=f"card:{cid}", step=1, status="running",
-               runs=["Run the emergent condition", "run the  managed condition"])
-    await call("update_plan", group, card=f"card:{cid}", step=2, runs=["Not started yet"])
+    await call("edit_card", group, card=f"card:{cid}", steps=_with(1, status="running",
+                                                                   runs=["Run the emergent condition", "run the  managed condition"]))
+    await call("edit_card", group, card=f"card:{cid}", steps=_with(2, runs=["Not started yet"]))
     rows = plans.plan_runs(CORPUS, cid)
     assert [(r["step"], r["name"]) for r in rows] == [(1, "Run the emergent condition"), (1, "run the managed condition"),
                                                       (2, "Not started yet")]

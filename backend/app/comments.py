@@ -244,3 +244,42 @@ async def tool_stop_check(ctx: Any, args: dict[str, Any]) -> Any:
     if not docs:
         return tools.ok(tools.hint("stop_check-off", check=check["name"]))
     return tools.ok(tools.hint("stop_check-stopped", check=check["name"], docs=", ".join(checks.target_name(d) for d in docs)))
+
+
+# --------------------------------------------------------------------------- the comment a thread is about
+
+
+STATEMENT_CHARS = 300  # of a comment's statement, kept on the thread Ask opens on it
+
+
+def thread_comment(c: str, cid: str | None) -> dict[str, Any] | None:
+    """{id, check, name, colour, text} of the comment `cid`, on the cards or in a written document, which the thread
+    that Ask opens on it keeps (agents.new_thread, `anchor_comment`) so its anchor line names the comment: its check's id,
+    name and color (the analyst's own comment is `You`, main's `Claude`, with no check) and its statement. None for no
+    such comment."""
+    from . import canvas_comments, checks, report_types  # noqa: PLC0415
+
+    want = _clean_ref(cid)
+    if not want or not _BARE_ID_RE.match(want):
+        return None
+    found = next((cm for cm in canvas_comments.all_comments(c) if str(cm.get("id")) == want), None)
+    if found is None:
+        for slug in checks._written(c):
+            doc = report_types.read_doc(c, investigation.MAIN, slug) or {}
+            found = next((cm for cm in doc.get("comments") or [] if isinstance(cm, dict) and str(cm.get("id")) == want),
+                         None)
+            if found is not None:
+                break
+    if found is None:
+        return None
+    check = str(found.get("check") or "") or None
+    record = next((x for x in checks.list_checks(c) if x["id"] == check), None) if check else None
+    if check:
+        name = str((record or {}).get("name") or check)
+    else:
+        name = "Claude" if str(found.get("author") or "") == AUTHOR else "You"
+    text = _collapse(canvas_comments.note_of(found)["text"])
+    if len(text) > STATEMENT_CHARS:
+        text = text[: STATEMENT_CHARS - 1].rstrip() + "…"
+    colour = (record or {}).get("colour")
+    return {"id": want, "check": check, "name": name, "colour": colour if isinstance(colour, int) else None, "text": text}

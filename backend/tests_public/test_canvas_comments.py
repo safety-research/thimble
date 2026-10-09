@@ -404,17 +404,18 @@ async def test_a_check_reads_the_steps_of_a_plan_that_follows_a_finished_one_and
         assert not res.is_error, res.text
         return res
 
-    build = (await call("add_card", kind="plan", question="Plan: build the environment and pilot it",
-                        steps=[{"text": "Build the agent container", "makes": ["Dockerfile.agent"]},
-                               {"text": "Pilot: 2 agents, one PR each", "makes": ["pilot/"]}])).text
+    build_steps = [{"text": "Build the agent container", "makes": ["Dockerfile.agent"]},
+                   {"text": "Pilot: 2 agents, one PR each", "makes": ["pilot/"]}]
+    build = (await call("add_card", kind="plan", question="Plan: build the environment and pilot it", steps=build_steps)).text
     build = re.search(r"^card:([A-Za-z0-9_-]+)$", build, re.M).group(1)
     for n in (1, 2):
-        await call("update_plan", card=f"card:{build}", step=n, status="done")
+        await call("edit_card", card=f"card:{build}",
+                   steps=[{**s, "status": "done"} for s in build_steps[:n]] + build_steps[n:])
+    run_steps = [{"text": "Run the emergent condition: 48 agents, 2 hours", "makes": ["runs/emergent/"]},
+                 {"text": "Run the managed condition: 48 agents and a manager, 2 hours", "makes": ["runs/managed/"]},
+                 {"text": "Compare the conditions", "makes": ["results/"]}]
     run = (await call("add_card", kind="plan", question="Plan: run the experiment", follows=f"card:{build}",
-                      steps=[{"text": "Run the emergent condition: 48 agents, 2 hours", "makes": ["runs/emergent/"]},
-                             {"text": "Run the managed condition: 48 agents and a manager, 2 hours",
-                              "makes": ["runs/managed/"]},
-                             {"text": "Compare the conditions", "makes": ["results/"]}])).text
+                      steps=run_steps)).text
     run = re.search(r"^card:([A-Za-z0-9_-]+)$", run, re.M).group(1)
     assert notebook.get_cell(CORPUS, run)["notebook"] == group, "the next phase lands beside the plan it follows"
 
@@ -433,7 +434,8 @@ async def test_a_check_reads_the_steps_of_a_plan_that_follows_a_finished_one_and
     await _until(lambda: _run()["status"] == "done", "the run never ended")
 
     # step 1 starts: the next turn's check covers that step alone, and the comment on step 2 stays beside it
-    await call("update_plan", card=f"card:{run}", step=1, status="running", runs=["emergent"])
+    await call("edit_card", card=f"card:{run}", steps=[{**run_steps[0], "status": "running", "runs": ["emergent"]},
+                                                       *run_steps[1:]])
     act = await _turn_ended()
     assert _run()["covered"] == [f"card:{run}#step-1"]
     subagents.run_ended(CORPUS, act.agent, "done", "Nothing new.", source="handback")
@@ -445,3 +447,40 @@ async def test_a_check_reads_the_steps_of_a_plan_that_follows_a_finished_one_and
     assert f"comment {cm['id']} on card:{run}#step-2" in context.canvas(CORPUS)
     got = await canvas_comments.resolve_route(CORPUS, cm["id"], canvas_comments.ResolveBody(how="done"))
     assert got["comments"] == [], "a resolved comment does not show"
+
+
+async def test_a_thread_ask_opens_on_a_comment_names_the_comment_on_its_anchor_line(board):
+    """Live check plan-cards: a thread a comment's Ask opened showed only its step. The thread now keeps the comment
+    (`anchor_comment`): its check's id, name and color and its statement, for a check's comment on a step and for a
+    check's comment in a document, Claude's note named Claude; an id that names no comment keeps none, and the thread
+    still opens."""
+    from app import agents
+
+    plan = _card("Plan: build it", steps=_steps("not started", "not started", "not started"))
+    cm, _ = canvas_comments.add(CORPUS, card=plan, step="s2", check=YSK, run="r1", author=canvas_comments.CHECK_AUTHOR,
+                                text="Blocking the web also blocks GitHub.", details="The build fetches two libraries.")
+    meta = await agents.create_route(CORPUS, agents.NewThread(anchor=f"card:{plan}#step-2", anchor_text="Plan: build it",
+                                                               surface="canvas", element="comment", comment=cm["id"]))
+    colour = checks.read(CORPUS, YSK)["colour"]
+    want = {"id": cm["id"], "check": YSK, "name": "You should know", "colour": colour,
+            "text": "Blocking the web also blocks GitHub."}
+    assert meta["anchor_comment"] == want
+    assert agents.read_meta(CORPUS, meta["id"])["anchor_comment"] == want, "kept with the thread"
+    note, _ = canvas_comments.add(CORPUS, card=plan, step=None, author=canvas_comments.CLAUDE, text="A note of mine.")
+    got = agents.new_thread(CORPUS, f"card:{plan}", "Plan: build it", element="comment", comment=note["id"])
+    assert got["anchor_comment"] == {"id": note["id"], "check": None, "name": "Claude", "colour": None,
+                                     "text": "A note of mine."}
+    r = await tools.call(CORPUS, "write_document", {"doc": "report", "text": "# R\n\n## One\n\nAll the saves came from one bot.\n"},
+                         actor="analyst")
+    assert not r.is_error, r.text
+    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
+    sid = report_types.all_sentences(d)[-1]["id"]
+    d.setdefault("comments", []).append({"id": "c9", "sentence_id": sid, "check": YSK, "author": "check",
+                                         "text": "The bot is the importer.", "details": "It runs nightly.",
+                                         "status": "open"})
+    report_types.write_doc(CORPUS, investigation.MAIN, "report", d)
+    got = agents.new_thread(CORPUS, f"report:report#{sid}", "All the saves came from one bot.", element="comment",
+                            comment="c9")
+    assert (got["anchor_comment"]["name"], got["anchor_comment"]["text"]) == ("You should know", "The bot is the importer.")
+    assert agents.new_thread(CORPUS, f"card:{plan}", "x", comment="nope")["anchor_comment"] is None
+    assert agents.new_thread(CORPUS, f"card:{plan}", "x")["anchor_comment"] is None

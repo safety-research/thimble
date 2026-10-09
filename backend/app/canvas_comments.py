@@ -19,7 +19,7 @@ later run of its check covered its card or step). A comment on a card that is go
 The passages of the canvas (passages()) are the cards a check covers, in the tree's order, each followed by its steps:
 the cards of the analyst's groups and the threads' (not the orientation's deck, a document's figures or labels' cards).
 A card is fingerprinted on what a reader of it sees (checkstore.basis, a plan's steps left out), a step on its text,
-what it makes, its status and its note. Each change emits `canvas-comments` on the workspace's stream.
+what it makes, its status, its note and its details. Each change emits `canvas-comments` on the workspace's stream.
 """
 from __future__ import annotations
 
@@ -54,6 +54,7 @@ SKIPPED_KINDS = ("label",)  # a label's card is the label's review, which its ow
 DETAILS_CHARS = 2_000  # of a comment's details, kept
 WHOLE_AUTHORS = ("analyst", "terminal")  # the analyst's own comments, read whole: never split into statement and details
 KNOWN_MAX = 30  # the statements a run's task lists as known
+PLAN_STEP_KEYS = ("steps", "removed_steps")  # a plan payload's keys of its steps (plans.REMOVED), left out of its card's fp
 _REF_RE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:#step-(\d+))?$")
 _TAG_RE = re.compile(r"^\s*\**\s*(heads[ -]up|you should know)\s*\**\s*[:—–-]\s*\**\s*", re.I)
 # a sentence's end: its mark, then any closing quote, bracket or emphasis, then a space or the end; the next sentence can
@@ -155,7 +156,8 @@ def steps_of(cell: dict[str, Any] | None) -> list[dict[str, Any]]:
     for any other card."""
     from . import notebook  # noqa: PLC0415 — notebook imports the kernel machinery
 
-    return [{**s, "n": i, "note": _collapse(s.get("note"))} for i, s in enumerate(notebook.plan_steps(cell), 1)]
+    return [{**s, "n": i, "note": _collapse(s.get("note")), "details": _collapse(s.get("details"))}
+            for i, s in enumerate(notebook.plan_steps(cell), 1)]
 
 
 def step_ref(card: str, n: int | None) -> str:
@@ -170,8 +172,8 @@ def _card_fp(cell: dict[str, Any]) -> str:
     from . import checkstore  # noqa: PLC0415 — checkstore imports the notebook lazily
 
     payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else None
-    if payload is not None and isinstance(payload.get("steps"), list):
-        cell = {**cell, "payload": {k: v for k, v in payload.items() if k != "steps"}}
+    if payload is not None and isinstance(payload.get("steps"), list):  # a plan: its steps are passages of their own
+        cell = {**cell, "payload": {k: v for k, v in payload.items() if k not in PLAN_STEP_KEYS}}
     return "c" + checkstore.basis(cell)
 
 
@@ -252,7 +254,8 @@ def passages(c: str, since: str | None = None) -> list[dict[str, Any]]:
             for s in steps_of(cell):
                 ref = step_ref(cid, s["n"])
                 out.append({**base, "ref": ref, "kind": "step", "step": s["id"], "n": s["n"],
-                            "fp": _fp("step", [cid, s["text"], *s["makes"], s["status"], s["note"]]), "ids": [ref]})
+                            "fp": _fp("step", [cid, s["text"], *s["makes"], s["status"], s["note"],
+                                               *([s["details"]] if s["details"] else [])]), "ids": [ref]})
     return out
 
 
@@ -272,8 +275,8 @@ def key_of(p: dict[str, Any]) -> tuple[str, str | None]:
 
 def card_lines(c: str, refs: list[str], ps: list[dict[str, Any]] | None = None) -> str:
     """The cards a canvas run covers, for its task: each card that has a passage in `refs` with its ref, kind and
-    question, its takeaway, and each step of a plan with its status and note; a step the run does not cover says it was
-    checked before."""
+    question, its takeaway, and each step of a plan with its status, note and details; a step the run does not cover
+    says it was checked before."""
     from . import notebook  # noqa: PLC0415
 
     ps = passages(c) if ps is None else ps
@@ -297,7 +300,8 @@ def card_lines(c: str, refs: list[str], ps: list[dict[str, Any]] | None = None) 
             ref = step_ref(cid, s["n"])
             seen = "" if ref in want else " · checked before"
             line = notebook.step_line(s["n"], s).split("] ", 1)[-1]  # the step's text and what it makes
-            lines.append(f"  {ref} · {s['status']}{seen} · {line}" + (f" · {s['note']}" if s["note"] else ""))
+            lines.append(f"  {ref} · {s['status']}{seen} · {line}" + (f" · {s['note']}" if s["note"] else "")
+                         + (f" · details: {s['details']}" if s["details"] else ""))
     return "\n".join(lines)
 
 

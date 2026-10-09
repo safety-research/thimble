@@ -1032,6 +1032,27 @@ button.plan-run-name:hover {
 .plan-note {
   color: var(--text-primary);
 }
+/* a step's details, opened by a click on its line: prose with citations as chips, as a comment's details show */
+.plan-details.chat-text {
+  padding: 2px 0 0;
+  font: inherit;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  user-select: text;
+}
+.plan-details.chat-text p {
+  margin: 0 0 4px;
+}
+.plan-details.chat-text ul,
+.plan-details.chat-text ol {
+  margin: 0 0 4px 1.1em;
+}
+.plan-details.chat-text li {
+  margin: 1px 0;
+}
+.plan-details.chat-text > :last-child {
+  margin-bottom: 0;
+}
 .plan-run {
   display: flex;
   flex-direction: column;

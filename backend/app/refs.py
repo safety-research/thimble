@@ -1002,7 +1002,7 @@ def _resolve_cell(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
             meta["span_missing"] = True
         else:
             line = notebook.step_line(n, steps[n - 1])
-            excerpt = "\n".join([line, *(f"note: {ln}" for ln in steps[n - 1]["note"].splitlines() if ln.strip())])
+            excerpt = "\n".join([line, *(ln.strip() for ln in notebook.step_extra_lines(steps[n - 1]))])
             meta["span"] = {"step": n, "id": steps[n - 1]["id"], "text": line}
     elif p.get("col") is not None and p.get("row") is not None:
         hit = cite.find_td(cell.get("outputs"), p["col"], p["row"])

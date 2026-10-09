@@ -206,10 +206,10 @@ test("in the Report, a comment's chevron opening its details moves the comment b
 
 test("Ask puts the caret in the comment's field, and the question opens a thread anchored to the comment, on both surfaces", async () => {
   const cases = [
-    { sel: R, anchor: 'report:report#s1', surface: 'report', who: `${PASSAGE}\n\nThe comment c1 of the check “You should know”: Most saves came from one bot account.` },
-    { sel: C, anchor: 'card:plan1#step-2', surface: 'canvas', who: 'Plan: build the environment and pilot it\n\nThe comment k1 of the check “You should know” (on step 2): Blocking the web also blocks GitHub.' },
+    { sel: R, id: 'c1', anchor: 'report:report#s1', surface: 'report', who: `${PASSAGE}\n\nThe comment c1 of the check “You should know”: Most saves came from one bot account.` },
+    { sel: C, id: 'k1', anchor: 'card:plan1#step-2', surface: 'canvas', who: 'Plan: build the environment and pilot it\n\nThe comment k1 of the check “You should know” (on step 2): Blocking the web also blocks GitHub.' },
   ]
-  for (const [i, { sel, anchor, surface, who }] of cases.entries()) {
+  for (const [i, { sel, id, anchor, surface, who }] of cases.entries()) {
     await page.locator(sel).hover()
     await page.locator(`${sel} .wu-cm-ask`).click()
     await page.waitForSelector(`${sel}.wu-cm-active .wu-cm-reply textarea`)
@@ -218,8 +218,8 @@ test("Ask puts the caret in the comment's field, and the question opens a thread
     await page.keyboard.press('Enter')
     for (let k = 0; k < 50 && threads.length <= i; k++) await page.waitForTimeout(50)
     assert.equal(threads.length, i + 1, `${sel}: one thread`)
-    const t = threads[i] as { anchor: string; anchor_text: string; surface: string; element: string; text: string }
-    assert.deepEqual([t.anchor, t.surface, t.element, t.text], [anchor, surface, 'comment', 'Which one?'])
+    const t = threads[i] as { anchor: string; anchor_text: string; surface: string; element: string; text: string; comment: string }
+    assert.deepEqual([t.anchor, t.surface, t.element, t.text, t.comment], [anchor, surface, 'comment', 'Which one?', id], 'the thread names its comment, whose line the anchor line shows')
     assert.ok(t.anchor_text.startsWith(who), `${sel}: ${t.anchor_text}`)
     assert.ok(t.anchor_text.includes('Bake them') || t.anchor_text.includes('Leave the bot out'), 'the thread knows the details too')
     await page.mouse.click(5, 900)

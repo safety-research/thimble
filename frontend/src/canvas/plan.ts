@@ -22,6 +22,7 @@ export function planSteps(cell: Pick<Cell, 'kind' | 'payload'>): PlanStep[] {
         makes: strs(s.makes),
         status: PLAN_STATUSES.includes(status) ? status : 'not started',
         note: typeof s.note === 'string' ? s.note.trim() : '',
+        details: typeof s.details === 'string' ? s.details.trim() : '',
         runs: strs(s.runs),
         time: typeof s.time === 'string' ? s.time.trim() : '',
         started: stamp(s.started),
@@ -60,6 +61,10 @@ export function statusWords(step: PlanStep, now?: number): string {
 
 /** Whether a step has more than its line to show: what it makes, a note or runs. */
 export const hasMore = (step: PlanStep): boolean => step.makes.length > 0 || !!step.note || step.runs.length > 0
+
+/** Whether a step opens on a click: a done step with more than its line, or any step with details, which show under it
+ * only once it is opened. */
+export const opens = (step: PlanStep): boolean => (step.status === 'done' && hasMore(step)) || !!step.details
 
 /** Whether a step is drawn as one line: a done step, unless the analyst opened it. */
 export const isCompact = (step: PlanStep, opened: ReadonlySet<string>): boolean => step.status === 'done' && !opened.has(step.id)

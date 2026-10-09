@@ -23,7 +23,9 @@ passages changed since it checked them (`stale`, mark_stale), and Run is one cli
 The cache: a passage (paragraph, heading, slide, beat or free sentence) is fingerprinted by the sentence_key of its
 words. A run covers only passages whose fingerprint its check has not seen on that document; a run that ends `done`
 supersedes the check's earlier open comments on those passages and records their fingerprints in `seen`. Main hears
-`checked {check, doc, status, comments}` when a run run_check started ends.
+`checked {check, doc, status, comments}` when a run run_check started ends with no agent of main's, such as an
+extension's program; a run that ran as main's subagent says nothing more, since its hand-back already tells main, which
+answers it in one line.
 
 The cards. A check `covers` the documents, the cards or both (COVERS; the built-ins say so in their frontmatter, a new
 check covers the documents unless made for the cards). The cards are one more run target beside the documents' slugs,
@@ -1019,7 +1021,7 @@ def _finish(act: _Active, status: str, summary: str) -> None:
         rec["stale"] = len(to_cover(check, act.doc, doc)) if doc is not None and check.get("shown") else 0
         save(c, check)
         _stream(c, act.check, act.doc, status, act.run, str(rec.get("chat") or ""), stale=rec["stale"])
-        if act.notify:
+        if act.notify and not act.agent:  # main's subagent hands back itself: one line in main's chat, not two
             try:
                 events.post(c, CHECKED_KIND, {"text": rec["summary"] or status, "check": act.check,
                                                "doc": CANVAS_NAME if canvas else act.doc, "status": status,
