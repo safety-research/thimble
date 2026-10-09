@@ -2937,7 +2937,8 @@
   // at its right), then the `title`, the `body` and the `foot`, each left out when not given. A part is text, which the
   // card escapes, or {html} for markup the page made, such as a key chip; `chips` are words, each a neutral chip. `ref`
   // is the record's data-anchor. `record` hands the record to Color by (colour.attr), so the bridge draws its value's
-  // color as the bar on the card's left edge: a card takes no color of its own. `active` marks the chosen card,
+  // color as the bar on the card's left edge, and with several choices a band per choice there, in their order, a
+  // label's from its mark on `ref`: a card takes no color of its own. `active` marks the chosen card,
   // `act: false` a card a click does nothing on, and `attrs` ({name: value}) gives it more attributes, such as a key the
   // page's click reads; a `class` there is added to the card's own. (thimble.card is a card type's stored data, in a
   // card's frame: viewer_bridge.js.)

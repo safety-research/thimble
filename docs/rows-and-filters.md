@@ -13,7 +13,7 @@ these parts, so a page lays them out and fills them rather than drawing its own:
 | the lanes | `thimble.lanes` | the overview: a lane per group of Rows on the range's scale |
 | the key | `thimble.key` | the series the overview draws beside Color by's, each a toggle |
 | the divider | `thimble.divider` | the bar between the overview and the list, which a drag moves |
-| the cards | `thimble.recordCard` | a record as a card or a tile, its color Color by's bar on its edge |
+| the cards | `thimble.recordCard` | a record as a card or a tile, its colors Color by's bars on its edge, one per choice |
 | the side panel | `thimble.side` | a record, or a row's children, in a wide panel beside the list |
 | the transcript | `thimble.transcript` | a transcript's turns, as the File browser's Transcript mode draws them |
 
@@ -194,8 +194,11 @@ focus, a double click or Home puts it back. thimble keeps its place per view as 
 A record drawn as a card or a tile, such as a pull request on a board's column or a tile in a grid, is the kit's card,
 `.thimble-card`: a hairline box on the paper with a chip's corners (`var(--radius-chip)`). A card takes no color of its
 own. Color by draws its value's color as the bar on the card's left edge, as on a row, and the card's left corners go
-square under the bar, so the bar stays straight. Draw no side stripe, colored edge or corners of the page's own on it:
-the view checks note a rule that changes its edges, fills, corners, colors or type (views.own_parts).
+square under the bar, so the bar stays straight. With several Color by choices each is a straight bar of its own, side
+by side from the edge in the order of the choices and as wide and as far apart as on a row, empty where the record has
+no value of that choice or its value's color is turned off; the card's left padding holds them and widens when more
+come than it holds, so its text never sits under a bar. Draw no side stripe, colored edge or corners of the page's own
+on it: the view checks note a rule that changes its edges, fills, corners, colors or type (views.own_parts).
 `thimble.recordCard` gives a card's html, and a page that builds its own markup uses the same classes:
 
 ```js

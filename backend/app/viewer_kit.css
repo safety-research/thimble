@@ -453,7 +453,10 @@ select.field {
 
 /* a record as a card or a tile (thimble.recordCard): a hairline box on the paper with a chip's corners, its parts in a
    column. A card has no color of its own: Color by's bar, which the bridge draws on its left edge as on a row, is its
-   only color, and its left corners go square under the bar so that the bar stays straight. */
+   only color, and its left corners go square under the bar so that the bar stays straight. With several Color by
+   choices the bar is a band per choice, side by side in the order of the choices, as wide and as far apart as a row's;
+   they stay in the card's left padding, which widens with them (the bridge's --thimble-bands-w) once more come than
+   its 12px holds, so the text never sits under a band. */
 .thimble-cards {
   display: flex;
   flex-direction: column;
@@ -474,7 +477,7 @@ select.field {
   box-sizing: border-box;
   min-width: 0;
   margin: 0;
-  padding: 7px 10px 8px 12px;
+  padding: 7px 10px 8px max(12px, calc(var(--thimble-bands-w, 0px) + 3px));
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-chip);
   background: var(--surface-card);
@@ -502,7 +505,7 @@ button.thimble-card {
   outline: 1.5px solid var(--accent);
   outline-offset: 1px;
 }
-/* under Color by's bar (the bridge's data-thimble-edge), the left corners are square, as a row's are */
+/* under Color by's bar or bands (the bridge's data-thimble-edge), the left corners are square, as a row's are */
 .thimble-card[data-thimble-edge],
 .list-row[data-thimble-edge] {
   border-top-left-radius: 0;
