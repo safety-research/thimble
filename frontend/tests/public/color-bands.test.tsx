@@ -3,8 +3,9 @@
 // views/common.tsx EdgeBands): a band per choice, in the tracks' order, each in the color of the record's value of that
 // choice, as its lane of the tracks colors it: a key's value in its colors, a label's highlighted value in the label's.
 // A record with no value of a choice has no band there, an empty place and not gray; a record with a value of any
-// choice has its bands; Off has none. The bands of one set of colors are one array, so a row given them keeps its
-// props. How the bands look in a browser is tests/public/browser/color-bands.test.ts.
+// choice has its bands; Off has none. A value turned off takes its color off its records, which stay drawn. The bands
+// of one set of colors are one array, so a row given them keeps its props. How the bands look in a browser is
+// tests/public/browser/color-bands.test.ts.
 import { act, useState } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { colourVar } from '../../src/files/labels'
@@ -127,6 +128,50 @@ test('one choice is one band, as the one bar was; Off gives no colors', async ()
   expect(got!.colors).toBeNull()
 })
 
+test("a value turned off only takes its color off its records: they stay, with no band of the first choice and the other choices' bands kept; on again, the color is back", async () => {
+  writeColor('w', PATH, { by: 'k:type', picks: ['k:type', 'l:a'], off: {} })
+  function Records() {
+    got = useColorBy('w', PATH, true, labels, RECORDS, ROWS, 5)
+    return (
+      <ColorContext.Provider value={got.colors}>
+        {RECORDS.map((r) => (
+          <RecordCard key={r.line} path={PATH} line={r.line} target={null} hit={false} header="turn">
+            words
+          </RecordCard>
+        ))}
+      </ColorContext.Provider>
+    )
+  }
+  const el = await mount(<Records />)
+  await settle()
+  await act(async () => got!.toggle('user', false))
+  expect(got!.off).toEqual(['user'])
+  // lines 1 and 3 say "user": no color and an empty first band; the label leaves them none either
+  expect(got!.colors!.get(1)!.color).toBeNull()
+  expect(bands(1)).toEqual([null, null])
+  expect(bands(3)).toEqual([null, null])
+  expect(bands(2)).toEqual([ASSISTANT, PURPLE])
+  expect(bands(4)).toEqual([ASSISTANT, null])
+  expect(bands(5)).toEqual([null, PURPLE])
+  // every record is still drawn, those of "user" with no edge
+  const cards = () => [...el.querySelectorAll<HTMLElement>('.reader-record')]
+  expect(cards().map((c) => c.dataset.line)).toEqual(['1', '2', '3', '4', '5'])
+  expect(cards()[0].querySelector('.reader-bands')).toBeNull()
+  expect(cards()[0].classList.contains('has-cb')).toBe(false)
+  expect(cards()[1].classList.contains('has-cb')).toBe(true)
+  // "assistant" alone: its records keep their color, and every other record stays, without one
+  await act(async () => got!.toggle('assistant', true))
+  expect(got!.off).toContain('user')
+  expect(cards()).toHaveLength(5)
+  expect(bands(2)).toEqual([ASSISTANT, PURPLE])
+  expect(bands(1)).toEqual([null, null])
+  // every value on again
+  await act(async () => got!.toggle('assistant', true))
+  expect(got!.off).toEqual([])
+  expect(bands(1)).toEqual([USER, null])
+  expect(cards()).toHaveLength(5)
+})
+
 /** A record drawn with the colors `colors` give its line. */
 function Card({ colors, line }: { colors: ReadonlyMap<number, RecordColor> | null; line: number }) {
   return (
@@ -141,10 +186,10 @@ const drawn = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('.reader
 
 test("a record's edge draws its bands side by side from the left, an empty place where it has no value; Off draws none", async () => {
   const colors = new Map<number, RecordColor>([
-    [1, { color: 'rgb(1, 2, 3)', bands: bandsOf(['rgb(1, 2, 3)', 'rgb(4, 5, 6)']), hidden: false }],
-    [2, { color: 'rgb(1, 2, 3)', bands: bandsOf(['rgb(1, 2, 3)', null]), hidden: false }],
-    [3, { color: null, bands: bandsOf([null, 'rgb(4, 5, 6)']), hidden: false }],
-    [4, { color: null, bands: bandsOf([null, null]), hidden: false }],
+    [1, { color: 'rgb(1, 2, 3)', bands: bandsOf(['rgb(1, 2, 3)', 'rgb(4, 5, 6)']) }],
+    [2, { color: 'rgb(1, 2, 3)', bands: bandsOf(['rgb(1, 2, 3)', null]) }],
+    [3, { color: null, bands: bandsOf([null, 'rgb(4, 5, 6)']) }],
+    [4, { color: null, bands: bandsOf([null, null]) }],
   ])
   const two = await mount(<Card colors={colors} line={1} />)
   expect(drawn(two)).toEqual(['rgb(1, 2, 3)', 'rgb(4, 5, 6)'])

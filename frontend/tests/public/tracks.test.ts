@@ -115,7 +115,7 @@ describe('the overview takes one value per pixel row', () => {
     expect(fine.every((v) => v >= -1 && v <= 2)).toBe(true)
   })
 
-  test("a label's paint is its highlighted values' records per bin, from the ruler's counts, those turned off faded", () => {
+  test("a label's paint is its highlighted values' records per bin, from the ruler's counts, those turned off without color", () => {
     const k = {
       id: 'k1',
       labels: ['coordination', 'link posting', 'other'],
@@ -132,7 +132,7 @@ describe('the overview takes one value per pixel row', () => {
       labels: [{ concept_id: 'k1', bins: { coordination: [0, 2], 'link posting': [0, 1, 2], other: [3] }, counts: { coordination: [9, 1], 'link posting': [2, 7, 4], other: [30] } }],
     }
     const paint = labelPaint(k, ruler, new Set(['link posting']))
-    expect(paint).toEqual({ kind: 'counts', counts: [[9, 0, 1, 0], [2, 7, 4, 0]], colors: ['var(--label-1)', 'var(--label-2)'], faded: [false, true] })
+    expect(paint).toEqual({ kind: 'counts', counts: [[9, 0, 1, 0], [2, 7, 4, 0]], colors: ['var(--label-1)', 'var(--label-2)'], off: [false, true] })
     // a ruler that gives no counts: a bin that holds a value counts one
     const bare = labelPaint(k, { ...ruler, labels: [{ concept_id: 'k1', bins: ruler.labels[0].bins }] }, new Set())
     expect(bare && bare.kind === 'counts' && bare.counts).toEqual([[1, 0, 1, 0], [1, 1, 1, 0]])
@@ -155,9 +155,9 @@ test("a marker says the label's name, with its value when the label has several"
 
 describe('a click on the overview snaps to a thin patch of color near it', () => {
   test("each row's value is the one its paint colors it in, none for a value turned off or with no color", () => {
-    const bins = { kind: 'bins' as const, at: [0, 0, 1, -1, 2, 0, 0, 0], colors: ['blue', 'orange', null], faded: [false, false, false] }
+    const bins = { kind: 'bins' as const, at: [0, 0, 1, -1, 2, 0, 0, 0], colors: ['blue', 'orange', null], off: [false, false, false] }
     expect(Array.from(rowValues(bins, 8))).toEqual([0, 0, 1, -1, -1, 0, 0, 0])
-    expect(Array.from(rowValues({ ...bins, faded: [false, true, false] }, 8))).toEqual([0, 0, -1, -1, -1, 0, 0, 0])
+    expect(Array.from(rowValues({ ...bins, off: [false, true, false] }, 8))).toEqual([0, 0, -1, -1, -1, 0, 0, 0])
     expect(Array.from(rowValues({ kind: 'density', bytes: [1, 2, 3] }, 3))).toEqual([-1, -1, -1])
   })
 

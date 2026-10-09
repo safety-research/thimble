@@ -1441,3 +1441,329 @@ def resolve(cell_id: str, answer: str, outputs: list[dict] | None, *, keep_stale
     res.annotated = "".join(out)
     return res
 
+
+
+# --------------------------------------------------------------------------- numbers typed into the code
+#
+# A citation can point at a number the card's code writes out as text rather than computes, such as a diagram's label
+# typed as "revisions.jsonl: 14,591 saves". The place shows the value, so the link resolves, but nothing on the card
+# computes it and no rerun would change it. typed_citations finds such a citation: its value is a literal of the card's
+# code (a number, or a number inside a string, never in a comment) and the literal accounts for what the cited place
+# shows. It re-points the citation at a place that shows the same value and that the code computed, when there is one,
+# and else names it typed, with the literal's line. A literal the takeaway does not cite (a threshold, a parameter)
+# changes nothing.
+
+WHY_TYPED = "typed in the code, line {line}, not computed"
+COMPUTED = "computed"  # how a citation moved: off a typed place, to one the code computed (the record's `how`)
+TYPED_WINDOW = 12  # characters of a string's words on each side of a number that the place must show with it
+# a number written with a scale, `14.6k`, `3.2M`, `1B`: what a string or a takeaway may show in place of the digits
+_SCALED_RE = re.compile(r"(?<![\w:./#\-\u2212])[-\u2212]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?([kKMB])(?![\w%])")
+_SCALES = {"k": Decimal(1000), "K": Decimal(1000), "M": Decimal(10) ** 6, "B": Decimal(10) ** 9}
+# a backslash escape inside a string's source, which _string_literals reads as a break between words, like a quote
+_ESCAPE_RE = re.compile(r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|N\{[^}\n]*\}|[0-7]{1,3}|.)")
+_BREAK = "\x01"
+
+
+def number_tokens(text: str) -> list[tuple[int, int, str]]:
+    """(start, end, token) of each number `text` writes, plain (_NUM_RE) or with a scale (`14.6k`), in order; the digits
+    of a scaled number are never read as a plain one as well."""
+    scaled = [(m.start(), m.end(), m.group()) for m in _SCALED_RE.finditer(text or "")]
+    plain = [(m.start(), m.end(), m.group()) for m in _NUM_RE.finditer(text or "")
+             if not any(s <= m.start() < e for s, e, _ in scaled)]
+    return sorted(scaled + plain)
+
+
+def _scaled(tok: str) -> tuple[Decimal, Decimal] | None:
+    """(the value, the unit of its last written digit) of one number, plain or scaled: `14.6k` is (14600, 100), `14,591`
+    (14591, 1), `91.2%` (91.2, 0.1); None for anything else."""
+    t = tok.strip()
+    m = _SCALED_RE.fullmatch(t)
+    scale = _SCALES[m.group(1)] if m else Decimal(1)
+    parts = _num_parts(t[:-1] if m else t)
+    if parts is None:
+        return None
+    v, decimals = parts
+    return v * scale, Decimal(1).scaleb(-decimals) * scale
+
+
+def same_number(shown: str, at: str) -> bool:
+    """Whether a number as one place writes it (`shown`, a takeaway's `14.6k`) is the number written at `at` (a
+    literal's `14591`): the same value in any form, or `at`'s value rounded to the last digit `shown` writes, with its
+    scale (`14.6k` for 14591, `91%` for 91.2). Commas and a percent sign are formatting, as in _norm."""
+    a, b = _scaled(shown), _scaled(at)
+    if a is None or b is None:
+        return False
+    (va, ua), (vb, ub) = a, b
+    if va == vb:
+        return True
+    if ua <= ub:
+        return False
+    return any((vb / ua).quantize(Decimal(1), rounding=r) * ua == va for r in (ROUND_HALF_UP, ROUND_HALF_EVEN))
+
+
+def display_number(display: str) -> str | None:
+    """The one number a citation's words show (`14,591`, `14,591 saves`, `14.6k`); None for words that show none or
+    several, or a date in words or in digits."""
+    d = (display or "").strip()
+    if day_month(d) is not None or _ISO_DATE_RE.search(d):
+        return None
+    toks = number_tokens(d)
+    return toks[0][2] if len(toks) == 1 else None
+
+
+@dataclass(frozen=True)
+class Literal:
+    """A number the card's code writes out: the number as written (`14,591`, `14591`, `20.`), its line in the code from
+    1, and for a number inside a string with words around it, those words with the number as the place must show them
+    (`revisions.jsonl: 14,591 saves`), else ''."""
+    text: str
+    line: int
+    window: str = ""
+
+
+def _parse_code(code: str) -> Any:
+    """The code's syntax tree; IPython's own lines (`!ls`, `%time`) are blanked first when it does not parse as it is.
+    None for code that still does not parse."""
+    import ast  # noqa: PLC0415
+
+    try:
+        return ast.parse(code)
+    except (SyntaxError, ValueError):
+        pass
+    lines = ["" if ln.lstrip().startswith(("!", "%")) else ln for ln in code.split("\n")]
+    try:
+        return ast.parse("\n".join(lines))
+    except (SyntaxError, ValueError):
+        return None
+
+
+def _setting(node: Any, up: Any, parent: dict[int, Any]) -> bool:
+    """Whether a number the code writes is a setting that is never shown as itself: a keyword's value (`width=600`,
+    `figsize=(10, 6)`; not `dict(saves=14591)`), an argument of a call that sets an axis or a range
+    (card_check.SETTING_CALLS: `set_ylim(0, 100)`, `range(100)`), an operand of arithmetic (`* 100`; not `"%d saves" %
+    14591`), or a subscript's index or slice. A comparison's number (a threshold) is no setting: it counts when a
+    citation's value equals it."""
+    import ast  # noqa: PLC0415
+
+    from .card_check import SETTING_CALLS  # noqa: PLC0415 — the card check's list of the calls that take settings
+
+    if isinstance(up, (ast.Tuple, ast.List)) and isinstance(parent.get(id(up)), (ast.keyword, ast.Call)) \
+            and all(isinstance(e, (ast.Constant, ast.UnaryOp)) for e in up.elts):
+        node, up = up, parent.get(id(up))
+    if isinstance(up, ast.keyword):
+        call = parent.get(id(up))
+        return not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "dict")
+    if isinstance(up, ast.Call) and any(a is node for a in up.args):
+        f = up.func
+        return (f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else "") in SETTING_CALLS
+    if isinstance(up, ast.BinOp):
+        texts = (ast.JoinedStr,)
+        return not (isinstance(up.op, ast.Mod) and (isinstance(up.left, texts) or
+                                                    (isinstance(up.left, ast.Constant) and isinstance(up.left.value, str))))
+    if isinstance(up, (ast.AugAssign, ast.Slice)):
+        return True
+    if isinstance(up, ast.Tuple) and isinstance(parent.get(id(up)), ast.Subscript) and parent[id(up)].slice is up:
+        return True
+    return isinstance(up, ast.Subscript) and up.slice is node
+
+
+def _number_literal(code: str, node: Any, parent: dict[int, Any]) -> Literal | None:
+    """A number literal of the code, as written (a minus before it kept), unless it is a setting (_setting) or settles
+    nothing alone (_bare_counts)."""
+    import ast  # noqa: PLC0415
+
+    raw = (ast.get_source_segment(code, node) or "").replace("_", "")
+    if not _PLAIN_NUM_RE.fullmatch(raw):
+        try:
+            raw = format(Decimal(raw), "f")  # `1e3`
+        except (InvalidOperation, ValueError):
+            return None  # hex, octal, binary, complex
+    at, up = node, parent.get(id(node))
+    if isinstance(up, ast.UnaryOp) and isinstance(up.op, (ast.USub, ast.UAdd)):
+        raw = ("-" if isinstance(up.op, ast.USub) else "") + raw
+        at, up = up, parent.get(id(up))
+    if _setting(at, up, parent) or not _bare_counts(raw.lstrip("-")):
+        return None
+    return Literal(raw, int(node.lineno))
+
+
+def _bare_counts(tok: str) -> bool:
+    """Whether a number the code writes with no words around it can make a citation typed: not a one- or two-digit
+    whole number (_specific) or a year, which settle nothing alone."""
+    parts = _num_parts(tok)
+    year = parts is not None and parts[1] == 0 and 1900 <= parts[0] <= 2100 and "," not in tok
+    return _specific(tok) and not year
+
+
+def _string_literals(code: str, node: Any, in_fstring: bool) -> list[Literal]:
+    """The numbers a string of the code writes (number_tokens), each with its line and the words around it on that
+    line (TYPED_WINDOW each side, up to a quote or an escape). A string that is only a number is read as a number
+    literal is (_bare_counts)."""
+    import ast  # noqa: PLC0415
+
+    raw = ast.get_source_segment(code, node)
+    if not raw:
+        return []
+    if in_fstring:  # a literal part of an f-string: `{{` writes `{`
+        raw = raw.replace("{{", "{").replace("}}", "}")
+    body = _ESCAPE_RE.sub(lambda m: _BREAK * len(m.group()), raw)
+    out: list[Literal] = []
+    for k, ln in enumerate(body.split("\n")):
+        for start, end, tok in number_tokens(ln):
+            before, after = ln[max(0, start - TYPED_WINDOW):start], ln[end:end + TYPED_WINDOW]
+            for q in ("'", '"', _BREAK):
+                before, after = before.rpartition(q)[2], after.partition(q)[0]
+            window = (before + tok + after).strip() if (before.strip() or after.strip()) else ""
+            if window or _bare_counts(tok):
+                out.append(Literal(tok, int(node.lineno) + k, window))
+    return out
+
+
+def code_literals(code: str) -> list[Literal]:
+    """The numbers a card's code writes out, in the code's order: number literals (_number_literal) and the numbers in
+    its strings and in the literal parts of its f-strings (_string_literals), never in a comment or an f-string's
+    format spec. [] for code that does not parse."""
+    import ast  # noqa: PLC0415
+
+    tree = _parse_code(code or "") if (code or "").strip() else None
+    if tree is None:
+        return []
+    parent: dict[int, Any] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parent[id(child)] = node
+    specs: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FormattedValue) and node.format_spec is not None:
+            specs.update(id(sub) for sub in ast.walk(node.format_spec))
+    out: list[Literal] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or id(node) in specs:
+            continue
+        v = node.value
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            lit = _number_literal(code, node, parent)
+            out += [lit] if lit else []
+        elif isinstance(v, str):
+            out += _string_literals(code, node, isinstance(parent.get(id(node)), ast.JoinedStr))
+    return sorted(out, key=lambda lit: lit.line)
+
+
+@dataclass(frozen=True)
+class _Shown:
+    """One number a card's output shows: the span that names it, the number as written there, the text it stands in (a
+    table's cell, a line), the output's index, and its line for a line of text."""
+    ref: str
+    token: str
+    text: str
+    out: int
+    line: int | None = None
+
+
+def _shown_numbers(cell_id: str, outputs: list | None) -> list[_Shown]:
+    """Every number a card's outputs show, in output order, read as _output_sources reads them: a table's, a frame's or a
+    chart's cells, and the lines of other text; a chart's or an image's text is never a value."""
+    out: list[_Shown] = []
+    for i, b in iter_outputs(outputs):
+        if frames.FRAME_MIME in b or table_html(b):
+            for col, row, val in bundle_cells(b):
+                ref = td_ref(cell_id, col, row)
+                if ref:
+                    out += [_Shown(ref, tok, val, i) for _, _, tok in number_tokens(val)]
+            continue
+        if any(k.startswith("image/") or "vega" in k for k in b):
+            continue
+        for ln, line in numbered_lines(b):
+            out += [_Shown(f"card:{cell_id}@out{i}#L{ln}", tok, line, i, ln) for _, _, tok in number_tokens(line)]
+    return out
+
+
+def _accounts(lit: Literal, shown: _Shown) -> bool:
+    """Whether a literal accounts for a number an output shows: a number in a string with words around it is written
+    there as the string writes it, with those words; any other the same value in any form."""
+    if lit.window:
+        return shown.token == lit.text and lit.window in shown.text
+    return same_number(shown.token, lit.text)
+
+
+_RANGE_SPAN_RE = re.compile(r"^" + CARD_RE + r"[A-Za-z0-9_-]+@out(\d+)#L(\d+)-L(\d+)$")
+
+
+def _cited(shown: _Shown, ref: str, cell_id: str) -> bool:
+    """Whether a citation's ref names the place `shown`: its td or its line, a line inside its range, or its output as
+    a whole; a ref of the whole card names every place."""
+    ref = canon(ref.strip())
+    if ref == f"card:{cell_id}":
+        return True
+    if m := _RANGE_SPAN_RE.match(ref):
+        return shown.out == int(m[1]) and shown.line is not None and int(m[2]) <= shown.line <= int(m[3])
+    if m := _WHOLE_OUTPUT_RE.match(ref):
+        return ref == f"card:{cell_id}@out{shown.out}"
+    return shown.ref == canonical_td_ref(ref)
+
+
+@dataclass
+class Typed:
+    """typed_citations's verdict: the text with citations re-pointed off typed places; each citation left at a typed
+    place, {value, ref, line, why}; and (value, the ref now) -> the typed ref it was cited at, for each one re-pointed."""
+    text: str
+    typed: list[dict[str, Any]] = field(default_factory=list)
+    moved: dict[tuple[str, str], str] = field(default_factory=dict)
+
+
+def typed_citations(text: str, load: Any) -> Typed:
+    """The citations of `text` into cards whose code types the cited value in rather than computes it. `load(card_id)`
+    returns the card (its `code` and `outputs`) or None. A citation is typed when its number equals a literal of its
+    card's code (code_literals, same_number) and every number its place shows with that value is accounted for by such a
+    literal (_accounts). It is re-pointed at the first place of its card that shows the value, that no literal accounts
+    for and that holds the citation's words (_Sources.verify); with none, it stays where it is and is named typed, with
+    the line of the literal. A citation of a whole card or a whole output is never re-pointed."""
+    cards: dict[str, tuple[list[Literal], list[_Shown], _Sources] | None] = {}
+
+    def card(cid: str) -> tuple[list[Literal], list[_Shown], _Sources] | None:
+        if cid not in cards:
+            try:
+                cell = load(cid)
+            except Exception:  # noqa: BLE001 — a card that cannot be read is no card to judge
+                cell = None
+            lits = code_literals(str(cell.get("code") or "")) if isinstance(cell, dict) else []
+            cards[cid] = (lits, _shown_numbers(cid, cell.get("outputs")), _Sources(cid, cell.get("outputs"))) if lits else None
+        return cards[cid]
+
+    res = Typed(text="")
+    out: list[str] = []
+    pos = 0
+    for m in _SPAN_RE.finditer(text or ""):
+        display, bar, ref = m.group(1).partition("|")
+        display, ref = display.strip(), ref.strip()
+        cm = re.match(r"^" + CARD_RE + r"([A-Za-z0-9_-]+)", ref)
+        num = display_number(display) if bar and cm else None
+        got = card(cm[1]) if num is not None and cm else None
+        if got is None:
+            continue
+        cid = cm[1]
+        lits, shown, src = got
+        mine = [lit for lit in lits if same_number(num, lit.text)]
+        showing = [s for s in shown if same_number(num, s.token)]
+        cited = [s for s in showing if _cited(s, ref, cid)]
+        if not mine or not cited:
+            continue
+        typed_by = [next((lit for lit in mine if _accounts(lit, s)), None) for s in cited]
+        if any(lit is None for lit in typed_by):
+            continue  # the code computed what the cited place shows
+        out.append(text[pos:m.start()])
+        pos = m.end()
+        whole = canon(ref) == f"card:{cid}" or _WHOLE_OUTPUT_RE.match(canon(ref)) is not None
+        neg = says_decrease(text, m.start(), m.end())
+        to = None if whole else next((v for s in showing if s not in cited and not any(_accounts(lit, s) for lit in mine)
+                                      and (v := src.verify(s.ref, display, negative_ok=neg))), None)
+        if to:
+            out.append(f"[[{display}|{to}]]")
+            res.moved[(display, to)] = ref
+            continue
+        out.append(m.group())
+        line = typed_by[0].line  # type: ignore[union-attr]
+        res.typed.append({"value": display, "ref": ref, "line": line, "why": WHY_TYPED.format(line=line)})
+    out.append((text or "")[pos:])
+    res.text = "".join(out)
+    return res

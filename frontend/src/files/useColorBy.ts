@@ -1,6 +1,7 @@
 // Color by's state in Files' Transcript and Table modes (colorChoice.ts): the file's keys from the server, the choices,
 // the values turned off and the colors picked, kept per file, the labels that mark the file, each value's chip of the
-// first choice, and per record loaded its color, a band for its left edge per choice and whether it is hidden. The
+// first choice, and per record loaded its color and a band for its left edge per choice. A value turned off only takes
+// its color off its records (no color, no band of the first choice), which stay: Filter by is what hides records. The
 // choices go in order: the first colors the records, each other one has a lane of the tracks (Reader) and a band beside
 // the first's. Checking a label that is off turns it on, and unchecking
 // one turns it off unless Filter by filters by it (`holds`). A label the analyst turns on anywhere else in thimble takes
@@ -25,7 +26,8 @@ export interface ColorBy {
   fileLabels: Concept[]
   values: ColorValue[]
   off: string[]
-  /** per line loaded, its color, its bands (one per choice) and whether it is hidden; null with Color by off */
+  /** per line loaded, its color and its bands (one per choice), none of the first choice for a value turned off; null
+   * with Color by off */
   colors: ReadonlyMap<number, RecordColor> | null
   /** the chip a record falls under */
   chipOf: (rec: SourceRecord) => string | undefined
@@ -167,10 +169,11 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
     const out = new Map<number, RecordColor>()
     for (const rec of records) {
       const chip = chipOf(rec)
-      const color = chip != null ? (colorOf.get(chip) ?? null) : null
+      // a value turned off keeps its records, without its color
+      const color = chip != null && !offSet.has(chip) ? (colorOf.get(chip) ?? null) : null
       const bands = bandsOf([color, ...trackColors.map((f) => f(rec))])
       if (chip == null && !bands.some(Boolean)) continue
-      out.set(rec.line, { color, bands, hidden: chip != null && offSet.has(chip) })
+      out.set(rec.line, { color, bands })
     }
     return out
   }, [on, choice.by, key, label, values, off, records, chipOf, trackColors])

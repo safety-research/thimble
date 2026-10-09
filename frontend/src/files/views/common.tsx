@@ -252,8 +252,8 @@ export const LANE_GLYPH_PX = 13
 
 /** One record as a row: the label gutter, the line number, the head in mono, the blocks under it; a highlighted value
  * with nothing to mark as a tint behind the text. In the Transcript mode, a band per Color by choice on its left edge,
- * in the color of its value of each (EdgeBands), and no row while its value of the first is turned off in Color by or
- * Filter by, unless a ref points at it (ColorContext, FilterContext). With `fold`, a click on the head folds the record to one line, the head and the summary, and a click
+ * in the color of its value of each (EdgeBands), none of the first while its value is turned off in Color by, and no
+ * row while its value is turned off in Filter by, unless a ref points at it (ColorContext, FilterContext). With `fold`, a click on the head folds the record to one line, the head and the summary, and a click
  * on that line opens it again (FoldContext keeps it per file); a ref's record shows open until it is folded under the
  * ref. A folded record keeps its blocks in the page, hidden, so that the find finds them and opens it (UNFOLD_EVENT). */
 export function RecordCard({ path, line, target, hit, className, header, text, children, end, fold }: RecordProps) {
@@ -275,7 +275,7 @@ export function RecordCard({ path, line, target, hit, className, header, text, c
     if (folds) folds.set(line, f, dflt)
     else setOwn(f)
   }
-  const shown = !((cb?.hidden || filtered) && !isT)
+  const shown = !(filtered && !isT)
   // the find's match inside a folded record opens it
   const unfold = useRef(setFolded)
   unfold.current = setFolded

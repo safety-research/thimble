@@ -111,8 +111,8 @@ test("a place reads in words: a file's line or lines, a row, a JSON list's item,
 })
 
 test("a card's takeaway as thimble's links check left it: linked and contradicted citations by value and ref", () => {
-  const links = linksOf({ id: 'x', verification: { links: { status: 'partial', checked: true, resolved: [{ value: '4579', ref: 'card:x#pages/TOTAL' }], broken: [{ value: '12', ref: 'a.csv#row=1', why: 'the place shows 13', source: '13' }] } } } as ThimbleCell)
-  expect(links).toEqual({ pending: false, checked: true, ok: ['4579|card:x#pages/TOTAL'], broken: [{ key: '12|a.csv#row=1', why: 'the place shows 13', source: '13' }] })
+  const links = linksOf({ id: 'x', verification: { links: { status: 'partial', checked: true, resolved: [{ value: '4579', ref: 'card:x#pages/TOTAL' }], broken: [{ value: '12', ref: 'a.csv#row=1', why: 'the place shows 13', source: '13' }], typed: [{ value: '14,591', ref: 'card:x@out1#L2', line: 4, why: 'typed in the code, line 4, not computed' }] } } } as ThimbleCell)
+  expect(links).toEqual({ pending: false, checked: true, ok: ['4579|card:x#pages/TOTAL'], broken: [{ key: '12|a.csv#row=1', why: 'the place shows 13', source: '13' }], typed: [{ key: '14,591|card:x@out1#L2', why: 'typed in the code, line 4, not computed' }] })
   expect(linksOf({ id: 'y' } as ThimbleCell)).toBeUndefined()
 })
 

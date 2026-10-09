@@ -71,21 +71,21 @@ export const ZOOM_OFF = 10
 export const FADE = 0.28
 
 /** What colors the overview: a key's most frequent value's rank per bin (each rank's color, and whether it is turned
- * off, which fades it), a label's records per value per bin (each pixel row in the value most of its records have,
- * its color, faded when it is turned off), or the file's density. */
+ * off, which leaves its rows without color, as its records are), a label's records per value per bin (each pixel row in
+ * the value most of its records have, in its color, none when it is turned off), or the file's density. */
 export type OverviewPaint =
   | {
       kind: 'bins'
       at: readonly number[]
       colors: readonly (string | null)[]
-      faded: readonly boolean[]
+      off: readonly boolean[]
     }
   | {
       kind: 'counts'
       /** per value, its records in each bin, every value over the same bins */
       counts: readonly (readonly number[])[]
       colors: readonly string[]
-      faded: readonly boolean[]
+      off: readonly boolean[]
     }
   | { kind: 'density'; bytes: readonly number[] }
   | { kind: 'none' }
@@ -293,7 +293,7 @@ export function labelPaint(k: Pick<Concept, 'id' | 'labels' | 'classes'>, ruler:
     })
     return row
   })
-  return { kind: 'counts', counts, colors: lit.map((c) => colourVar(c.color)), faded: lit.map((c) => off.has(c.name)) }
+  return { kind: 'counts', counts, colors: lit.map((c) => colourVar(c.color)), off: lit.map((c) => off.has(c.name)) }
 }
 
 /** The line of a file of `total` lines at a fraction of it. Pure. */
@@ -314,11 +314,11 @@ export function rowValues(paint: OverviewPaint, rows: number): Int32Array {
   if (paint.kind === 'bins' && paint.at.length) {
     for (let y = 0; y < rows; y++) {
       const r = paint.at[binOfRow(y, rows, paint.at.length)]
-      if (r >= 0 && paint.colors[Math.min(r, paint.colors.length - 1)] && !paint.faded[Math.min(r, paint.faded.length - 1)]) out[y] = r
+      if (r >= 0 && paint.colors[Math.min(r, paint.colors.length - 1)] && !paint.off[Math.min(r, paint.off.length - 1)]) out[y] = r
     }
   } else if (paint.kind === 'counts' && paint.counts.length) {
     const at = majorityRows(paint.counts, rows)
-    for (let y = 0; y < rows; y++) if (at[y] >= 0 && !paint.faded[at[y]]) out[y] = at[y]
+    for (let y = 0; y < rows; y++) if (at[y] >= 0 && !paint.off[at[y]]) out[y] = at[y]
   }
   return out
 }
@@ -382,7 +382,8 @@ function drawnSpan(from: number, to: number, k: number, h: number): [number, num
 }
 
 /** One lane of the overview drawn from its paint, `x0` to `x0 + cw` device px of a canvas `H` device rows tall: each row
- * in its value's color (faded when the value is turned off), or the file's density in the ink. */
+ * in its value's color (none when the value is turned off, as its records have none), or the file's density in the
+ * ink. */
 function paintLane(ctx: CanvasRenderingContext2D, paint: OverviewPaint, x0: number, cw: number, H: number, colourOf: (c: string) => string) {
   ctx.fillStyle = colourOf('rgba(var(--ink-rgb), 0.05)')
   ctx.fillRect(x0, 0, cw, H)
@@ -390,25 +391,20 @@ function paintLane(ctx: CanvasRenderingContext2D, paint: OverviewPaint, x0: numb
     const bins = paint.at.length
     let runStart = 0
     let runColour: string | null = null
-    let runAlpha = 1
     const flush = (end: number) => {
       if (runColour) {
-        ctx.globalAlpha = runAlpha
         ctx.fillStyle = runColour
         ctx.fillRect(x0, runStart, cw, end - runStart)
-        ctx.globalAlpha = 1
       }
     }
     for (let y = 0; y < H; y++) {
       const rank = paint.at[binOfRow(y, H, bins)]
-      const c = rank >= 0 ? paint.colors[Math.min(rank, paint.colors.length - 1)] : null
+      const c = rank >= 0 && !paint.off[Math.min(rank, paint.off.length - 1)] ? paint.colors[Math.min(rank, paint.colors.length - 1)] : null
       const colour = c ? colourOf(c) : null
-      const alpha = rank >= 0 && paint.faded[Math.min(rank, paint.faded.length - 1)] ? 0.18 : 1
-      if (colour !== runColour || alpha !== runAlpha) {
+      if (colour !== runColour) {
         flush(y)
         runStart = y
         runColour = colour
-        runAlpha = alpha
       }
     }
     flush(H)
@@ -420,14 +416,12 @@ function paintLane(ctx: CanvasRenderingContext2D, paint: OverviewPaint, x0: numb
       const v = at[y]
       let end = y + 1
       while (end < H && at[end] === v) end++
-      if (v >= 0) {
-        ctx.globalAlpha = paint.faded[v] ? 0.18 : 1
+      if (v >= 0 && !paint.off[v]) {
         ctx.fillStyle = colourOf(paint.colors[v])
         ctx.fillRect(x0, y, cw, end - y)
       }
       y = end
     }
-    ctx.globalAlpha = 1
   } else if (paint.kind === 'density' && paint.bytes.length) {
     const bins = paint.bytes.length
     const most = Math.max(1, ...paint.bytes)

@@ -1,9 +1,10 @@
 // The Color by control of Files' Transcript and Table modes (colorChoice.ts), as a view's Color by (viewer_colour.js):
 // thimble's bordered button "Color by: <first choice> +<how many more> ▾", then a chip per value of the first choice (a
-// square swatch of its color, its name and its count, in thimble's small bordered box) that turns its records off and
-// on, on one line: the chips that do not fit go behind "N more", which lists every value, as a view's Color by does
-// (viewer_colour.js fit); Alt-click keeps that value alone. The menu takes several choices: Off, then the records' keys
-// under "Fields" and the labels that mark the file under "Labels", each a checkbox with how many values it has and, on a
+// square swatch of its color, its name and its count, in thimble's small bordered box) that turns its color off and on
+// (its records stay, without the color: Filter by is what hides records), on one line: the chips that do not fit go
+// behind "N more", which lists every value, as a view's Color by does (viewer_colour.js fit); Alt-click keeps that
+// value's color alone. The menu takes several choices: Off, then the records' keys under "Fields" and the labels that
+// mark the file under "Labels", each a checkbox with how many values it has and, on a
 // second line, its values as chips (cut off with … where they do not fit). A click checks a key or a label, or
 // unchecks it, and the menu stays open; the first checked colors the records, each one after it is a lane of the tracks
 // and says "track". Off unchecks them all and closes the menu. Checking a label also opens its editor beside its row

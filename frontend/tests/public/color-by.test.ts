@@ -200,8 +200,8 @@ describe('several choices', () => {
     expect(withPicks({ by: null, key: 'wiki', off: {} }, [l]).key).toBe('wiki')
   })
 
-  test("a key's lane is its commonest value per bin in its colors, the one picked for a value, and a value off faded", () => {
+  test("a key's lane is its commonest value per bin in its colors, the one picked for a value, and a value off without color", () => {
     const k: SourceKey = { key: 'kind', values: [{ value: 'a', n: 5 }, { value: 'b', n: 3 }], more: { values: 0, n: 0 }, none: 0, at: [0, 1, -1] }
-    expect(keyPaint(k, { b: 15 }, new Set(['a']))).toEqual({ kind: 'bins', at: [0, 1, -1], colors: ['var(--label-1)', 'var(--label-15)'], faded: [true, false] })
+    expect(keyPaint(k, { b: 15 }, new Set(['a']))).toEqual({ kind: 'bins', at: [0, 1, -1], colors: ['var(--label-1)', 'var(--label-15)'], off: [true, false] })
   })
 })
