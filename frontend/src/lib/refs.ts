@@ -4,6 +4,7 @@
 //   <path>.pdf#p<n> (`#page=<n>` reads the same) | <path>.json#/<json pointer> | <path>.csv|.tsv#row=<n>
 //                      a page, a JSON document's value, a CSV's row after its header: a record of the file (records.py)
 //   card:<id> | card:<id>@<exec> | card:<id>#<col>/<row> | card:<id>@out<i>#L<n>[-L<m>]   (`cell:` is an alias)
+//   card:<id>#step-<n>   step n (from 1) of a plan card
 //   card:<id>#<path>#L<n>…   a file's line cited through the card that shows it: read as the file's line (<path>#L<n>…)
 //   group:<id> | report:<slug>#<sid> | report:<slug>#p<pid> | concept:<id> | chat:<id>[#<index>] | ui:<name>
 //   concept:<id>/<value>   one value of a label (the value raw or encoded)
@@ -16,7 +17,7 @@
 // line grammar (`L` alone or `L<digit>…`) that the line forms refused is no ref, as in refs.py.
 
 export type ParsedRef =
-  | { kind: 'cell'; cellId: string; exec?: number; col?: string; row?: string; out?: number; line?: number; endLine?: number }
+  | { kind: 'cell'; cellId: string; exec?: number; col?: string; row?: string; out?: number; line?: number; endLine?: number; step?: number }
   | { kind: 'group'; groupId: string }
   | { kind: 'report'; slug: string; unit?: string }
   | { kind: 'view'; slug: string; key?: string }
@@ -47,6 +48,7 @@ export const cardRef = (id: string): string => `${CARD}${id}`
 const CELL_RE = /^(?:card|cell):([A-Za-z0-9_-]+)(?:@(out)?(\d+))?(?:#(.*))?$/
 const CELL_LINES_RE = /^L(\d+)(?:-L?(\d+))?$/
 const CELL_TD_RE = /^([^/]+)\/(.+)$/
+const CELL_STEP_RE = /^step-(\d+)$/
 
 function parseCellRef(ref: string): ParsedRef | null {
   const m = CELL_RE.exec(ref)
@@ -61,6 +63,8 @@ function parseCellRef(ref: string): ParsedRef | null {
   // an example card's excerpt) is the file's line, where it opens, as refs.py reads it
   const line = isOut ? null : fileLine(frag)
   if (line) return line
+  const step = isOut || num != null ? null : CELL_STEP_RE.exec(frag)
+  if (step) return { kind: 'cell', cellId, step: +step[1] }
   const lines = CELL_LINES_RE.exec(frag)
   if (lines) {
     if (!isOut) return whole
@@ -262,12 +266,13 @@ const PART_LABEL_MAX = 20
  * `column · row`, printed lines as `line 8` or `lines 8–9`, after the card's name when the chip sits outside that card
  * (`own` false). Null for a ref to a whole card.
  */
-export function cardPartLabel(p: { col?: string; row?: string; out?: number; line?: number; endLine?: number }, name: string, own: boolean): string | null {
+export function cardPartLabel(p: { col?: string; row?: string; out?: number; line?: number; endLine?: number; step?: number }, name: string, own: boolean): string | null {
   let part: string | null = null
   // each label cut so the chip stays short; the hover shows the cell in its table
   const short = (s: string) => (s.length > PART_LABEL_MAX ? `${s.slice(0, PART_LABEL_MAX - 1).trimEnd()}…` : s)
   if (p.col != null && p.row != null) part = `${short(decodeLabel(p.col))} · ${short(decodeLabel(p.row))}`
   else if (p.out != null && p.line != null) part = p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`
+  else if (p.step != null) part = `step ${p.step}`
   if (part == null) return null
   return own ? part : `${name} · ${part}`
 }
@@ -287,7 +292,7 @@ export function refLabel(ref: string): string {
   const runOf = runPrefix
   switch (p.kind) {
     case 'cell':
-      return `card${p.col != null ? ` · ${p.col}/${p.row}` : p.out != null ? ` · ${cellSpanLabel(p)}` : ''}`
+      return `card${p.col != null ? ` · ${p.col}/${p.row}` : p.out != null ? ` · ${cellSpanLabel(p)}` : p.step != null ? ` · step ${p.step}` : ''}`
     case 'group':
       return 'group'
     case 'report':

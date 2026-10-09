@@ -39,11 +39,13 @@ Add a card, with its question and its content in one call. {{if:browser}}thimble
   "type": "object",
   "properties": {
     "question": {"type": "string", "description": "The one question the card answers."},
-    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom"], "description": "table, code, diagram, plot and timeline run `code`, example shows `refs`, note `text`, custom `html`. Default code."},
+    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan"], "description": "table, code, diagram, plot and timeline run `code`, example shows `refs`, note `text`, custom `html`, plan `steps`. Default code."},
     "code": {"type": "string", "description": "Python run in the corpus root. A table ends in a DataFrame of a few short columns indexed by what names each row, a plot in an Altair or matplotlib chart, its colours left to thimble's theme, and after import thimble a diagram in thimble.diagram(nodes, edges), each edge a (source, target, label), and a timeline in thimble.timeline(events), each event a (time, label). Name nodes, edges and events in a few words, their numbers computed, as in f\"revisions.jsonl: {len(R):,} saves\"; an edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, colour a label's values with thimble.colours(label, values), a {value: colour} dict. A plot can also be a card type's graphic, thimble.card(type, labels=[...], **args), from the card types under Cards."},
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] }, "description": "The records an example card shows, usually about three, adding one only when it shows something the others don't. Each is a ref, a moment of a video as <path>#t=<m:ss>, or {ref, quote} to highlight one passage of a long record, quoted exactly."},
     "text": {"type": "string", "description": "The markdown a note card shows."},
     "html": {"type": "string", "description": "The page a custom card shows, for what no other kind can show. Scripts run, the network does not."},
+    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} } }, "required": ["text"] }, "description": "A plan card's steps in order, each what it does and the files or results it makes. A plan has no takeaway."},
+    "follows": {"type": "string", "description": "For a plan of the next phase, card:<id> of the plan it follows."},
     "group": {"type": "string", "description": "The group's title or id. A new title makes a group."},
     "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, each number the card shows links to where the card shows it. Wrap the whole quantity and cite where you read the value, as in `[[31|card:<id>#outcome/merged]] of [[40|card:<id>#outcome/all]] runs`. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right. The card's own id is written `card:<id>`, which thimble fills in."}
   },
@@ -61,16 +63,36 @@ Change a card in place and run it again, rather than adding a second card. It ta
   "properties": {
     "card": {"type": "string"},
     "question": {"type": "string"},
-    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom"]},
+    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan"]},
     "code": {"type": "string"},
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] } },
     "text": {"type": "string"},
     "html": {"type": "string"},
+    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} } }, "required": ["text"] }, "description": "A plan's steps, only before any step has started."},
     "group": {"type": "string", "description": "The group to move the card to, its title or id. A new title makes a group."},
     "after": {"type": "string", "description": "The card to place it right after, card:<id>, or first."},
     "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, each number the card shows links to where the card shows it. Wrap the whole quantity and cite where you read the value, as in `[[31|card:<id>#outcome/merged]] of [[40|card:<id>#outcome/all]] runs`. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right."}
   },
   "required": ["card"]
+}
+```
+
+## update_plan
+
+Change one step of a plan card as the work goes: its status, a note on what happened, or the Agent calls that run it.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "card": {"type": "string"},
+    "step": {"type": "integer", "description": "The step's number, from 1."},
+    "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]},
+    "note": {"type": "string", "description": "What happened in the step, in a line or two."},
+    "runs": {"type": "array", "items": {"type": "string"}, "description": "The description of each Agent call that runs the step, as you pass it to Agent. The card shows each one live."},
+    "time": {"type": "string", "description": "The time the step took, when thimble's own count is wrong, such as 2 h."}
+  },
+  "required": ["card", "step"]
 }
 ```
 
@@ -699,6 +721,14 @@ The card errored, so the takeaway was not saved. Fix the code, then give the tak
 ## edit_card-after-group
 
 card:{after} is not in the group this card can go to. Name a card of that group in `after`, or leave `group` out.
+
+## plan-started
+
+A step of card:{cid} has started, so its steps stay as they are. Change a step with `update_plan`, or add a new plan card with `follows` set to card:{cid} for the next phase.
+
+## plan-step-unknown
+
+card:{cid} has no step {step}. Its steps are 1 to {count}.
 
 ## frame-rows
 

@@ -332,9 +332,9 @@ DEFAULT_GROUP_KIND = "sequence"
 LOOSE_KIND = "loose"
 LOOSE_TITLE = "Loose cards"
 
-CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom")
+CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom", "plan")
 RUNNABLE_KINDS = ("plot", "table", "code", "timeline", "diagram")  # carry code and outputs
-DATA_KINDS = ("example", "note", "label", "custom")  # carry a payload
+DATA_KINDS = ("example", "note", "label", "custom", "plan")  # carry a payload
 DEFAULT_KIND = "code"
 KEPT_ARGS = "kept_args"  # a card type's call arguments Keep set, which the card check gives back as they are
 TAKEAWAY_STALE = "takeaway_stale"  # the takeaway was written before the card's last run changed its outputs
@@ -342,7 +342,8 @@ TAKEAWAY_STALE = "takeaway_stale"  # the takeaway was written before the card's 
 # run ends
 REGENERATING_FOR = "regenerating_for"
 # the payload key per data shape; a diagram or a timeline without code carries a dataset
-PAYLOAD_KEYS = {"example": "refs", "note": "text", "label": "concept", "custom": "html", "diagram": "dataset", "timeline": "dataset"}
+PAYLOAD_KEYS = {"example": "refs", "note": "text", "label": "concept", "custom": "html", "diagram": "dataset", "timeline": "dataset",
+                "plan": "steps"}
 # The canvas layout fields. A group's `pos` {x, y} is on the board for a root group, inside its parent's frame for a
 # nested one; null for the default placement. A cell's `pos` works the same way (on the board for a loose card), with
 # `width` and `height` in px (null: default width, content height) and `starred`.
@@ -419,8 +420,169 @@ def _payload_of(kind: str, raw: Any) -> dict:
         v = str(v or "")
     elif key == "concept":
         v = str(v) if v else None
+    elif key == "steps":
+        v = plan_steps_of(v)
+        p[PLAN_FOLLOWS] = plan_id_of(p.get(PLAN_FOLLOWS))
     p[key] = v
     return p
+
+
+# --- plan cards ---
+#
+# A plan card is a data card whose payload is {steps: [...], follows}: the steps a piece of work takes, which the agent
+# keeps current (plans.update_step), and the id of the plan it is the next phase of. A step is {id, text, makes,
+# status, note, runs, time, started, ended}: its id never changes, `makes` names what it makes, `runs` the Agent calls
+# that do it (plans.plan_runs), `time` a time the agent states, and `started`/`ended` thimble's stamps of its status
+# changes. A plan has no takeaway.
+
+PLAN_KIND = "plan"
+PLAN_STATUSES = ("not started", "running", "done", "needs you")
+PLAN_NOT_STARTED, PLAN_RUNNING, PLAN_DONE, PLAN_NEEDS_YOU = PLAN_STATUSES
+PLAN_FOLLOWS = "follows"
+STEP_ID_PREFIX = "s"
+
+
+def _words(v: Any) -> str:
+    return " ".join(str(v or "").split())
+
+
+def _word_list(v: Any) -> list[str]:
+    items = v if isinstance(v, (list, tuple)) else [v] if v else []
+    return [w for w in (_words(x) for x in items) if w]
+
+
+def _stamp(v: Any) -> str | None:
+    """An ISO time as stored, else None."""
+    if not isinstance(v, str) or not v.strip():
+        return None
+    try:
+        datetime.fromisoformat(v.strip())
+    except ValueError:
+        return None
+    return v.strip()
+
+
+def plan_id_of(v: Any) -> str | None:
+    """The card id a plan's `follows` names, given as an id or a card ref; None for anything else."""
+    text = str(v or "").strip().strip("[]")
+    for prefix in ("card:", "cell:"):
+        text = text.removeprefix(prefix)
+    return text if ID_RE.match(text) else None
+
+
+def plan_status_of(v: Any) -> str | None:
+    """A step's status as stored ("running", "needs you", ...), from the word given in any case; None for a word that
+    is not one."""
+    word = _words(v).lower().replace("_", " ").replace("-", " ")
+    return word if word in PLAN_STATUSES else None
+
+
+def plan_step_of(raw: Any, sid: str) -> dict:
+    """One step with every field: a dict as given, or a bare string as the step's text."""
+    s = raw if isinstance(raw, dict) else {"text": raw}
+    return {"id": sid, "text": _words(s.get("text")), "makes": _word_list(s.get("makes")),
+            "status": plan_status_of(s.get("status")) or PLAN_NOT_STARTED, "note": str(s.get("note") or "").strip(),
+            "runs": _word_list(s.get("runs")), "time": _words(s.get("time")), "started": _stamp(s.get("started")),
+            "ended": _stamp(s.get("ended"))}
+
+
+def plan_steps_of(v: Any) -> list[dict]:
+    """A plan's steps as stored: each step whole (plan_step_of), its id kept, or the next free s<n> for a step without
+    one."""
+    items = [x for x in (v if isinstance(v, list) else []) if isinstance(x, (dict, str)) and x]
+    given = [str(x.get("id") or "") if isinstance(x, dict) else "" for x in items]
+    taken = {i for i in given if ID_RE.match(i)}
+    out: list[dict] = []
+    seen: set[str] = set()
+    n = 0
+    for x, sid in zip(items, given):
+        if not ID_RE.match(sid) or sid in seen:
+            n += 1
+            while f"{STEP_ID_PREFIX}{n}" in taken or f"{STEP_ID_PREFIX}{n}" in seen:
+                n += 1
+            sid = f"{STEP_ID_PREFIX}{n}"
+        seen.add(sid)
+        out.append(plan_step_of(x, sid))
+    return out
+
+
+def plan_steps(cell: dict | None) -> list[dict]:
+    """A plan card's steps in order; [] for any other card."""
+    if not cell or cell.get("kind") != PLAN_KIND:
+        return []
+    payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
+    return plan_steps_of(payload.get("steps"))
+
+
+def plans_following(ws: Path, cell_id: str) -> list[str]:
+    """The ids of the plans whose `follows` names plan `cell_id`, the next phases of its work, in store order."""
+    out: list[str] = []
+    for _, nb in _stored(ws):
+        for c in nb["cells"]:
+            if c.get("kind") == PLAN_KIND and (c.get("payload") or {}).get(PLAN_FOLLOWS) == cell_id and c.get("id"):
+                out.append(str(c["id"]))
+    return out
+
+
+def plan_started(cell: dict | None) -> bool:
+    """Whether any step of a plan has left `not started`."""
+    return any(s["status"] != PLAN_NOT_STARTED or s["started"] for s in plan_steps(cell))
+
+
+def duration_words(seconds: float) -> str:
+    """A step's time as the card shows it: 40 s, 12 m, 2 h or 1 h 20 m."""
+    sec = max(0, int(round(seconds)))
+    if sec < 60:
+        return f"{sec} s"
+    if sec < 3600:
+        return f"{sec // 60} m"
+    h, m = divmod(sec // 60, 60)
+    return f"{h} h" if m == 0 else f"{h} h {m} m"
+
+
+def step_time(step: dict, now: datetime | None = None) -> str:
+    """The time a step shows: the time the agent gave, else from its start to its end, or to now while it runs; '' when
+    neither is known."""
+    if step.get("time"):
+        return str(step["time"])
+    try:
+        start = datetime.fromisoformat(str(step.get("started") or ""))
+    except ValueError:
+        return ""
+    end_text = step.get("ended")
+    if end_text:
+        try:
+            end = datetime.fromisoformat(str(end_text))
+        except ValueError:
+            return ""
+    elif step.get("status") == PLAN_RUNNING:
+        end = now or datetime.now(timezone.utc)
+    else:
+        return ""
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    return duration_words((end - start).total_seconds())
+
+
+def step_line(n: int, step: dict, now: datetime | None = None) -> str:
+    """One step on one line, numbered from 1: `2. [running · 40 m] Run the managed condition → runs/managed/`."""
+    t = step_time(step, now)
+    makes = f" → {', '.join(step['makes'])}" if step.get("makes") else ""
+    return f"{n}. [{step['status']}{f' · {t}' if t else ''}] {step['text']}{makes}"
+
+
+def plan_lines(cell: dict | None, now: datetime | None = None) -> list[str]:
+    """A plan's steps as a model reads them: a line per step (step_line), with its note and its runs under it."""
+    lines: list[str] = []
+    for n, step in enumerate(plan_steps(cell), 1):
+        lines.append(step_line(n, step, now))
+        if step["note"]:
+            lines += [f"   note: {ln.strip()}" for ln in step["note"].splitlines() if ln.strip()]
+        if step["runs"]:
+            lines.append(f"   runs: {'; '.join(step['runs'])}")
+    return lines
 
 
 def _id_or_none(v: Any) -> str | None:
@@ -1329,6 +1491,8 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
         raise HTTPException(400, f"a {kind} card has no code")
     if payload is not None and run:
         raise HTTPException(400, f"a {kind} card has code, not a payload")
+    if kind == PLAN_KIND and (takeaway or "").strip():
+        raise HTTPException(400, "a plan card has no takeaway: its steps say where the work stands")
     changed = False
     if code is not None and code != cell.get("code"):
         cell["code"] = code
@@ -3213,7 +3377,7 @@ def append_takeaway(workspace: str, cell_id: str, text: str, *, only_if_empty: b
                     author: str | None = None) -> bool:
     """Attach a takeaway to a cell: appended by default, replaced with `overwrite`, left alone with `only_if_empty`
     when the cell has one. `author` is recorded as `takeaway_author` (model, thimble, analyst). False when the cell
-    is gone."""
+    is gone or is a plan."""
     text = (text or "").strip()
     if not text:
         return False
@@ -3222,6 +3386,8 @@ def append_takeaway(workspace: str, cell_id: str, text: str, *, only_if_empty: b
     if hit is None:
         return False
     nb, cell = hit
+    if cell.get("kind") == PLAN_KIND:  # a plan has no takeaway (plan cards, above)
+        return False
     existing = cell.get("takeaway") or ""
     if only_if_empty and existing.strip():
         return True
@@ -3306,7 +3472,7 @@ async def _run_code(
 # routes
 # ----------------------------------------------------------------------------------------------------------
 
-CellKind = Literal["plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom"]
+CellKind = Literal["plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom", "plan"]
 RunnableKind = Literal["plot", "table", "code", "timeline", "diagram"]
 GroupKind = Literal["sequence", "split", "grid"]  # the loose group is made by move_cells alone
 Role = Literal["exploration", "finding", "analyst", "figures"]
@@ -3910,6 +4076,8 @@ def _data_ipynb(cell: dict) -> dict:
         body = "\n".join(f"- [[{r}]]" for r in payload.get("refs") or [])
     elif kind == "label":
         body = f"Label `{payload.get('concept') or ''}`"
+    elif kind == PLAN_KIND:
+        body = "\n".join(f"- {line}" for line in plan_lines(cell))
     else:
         body = "```json\n" + json.dumps(payload.get("dataset"), ensure_ascii=False, indent=1, default=str) + "\n```"
     return _md_ipynb(cell["id"], body, kind)

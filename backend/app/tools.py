@@ -89,10 +89,10 @@ LABEL_SCOPES = ("files", "canvas", "report")
 UNIT_WORDS = {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}
 # apply_label's `unit` for files: what one value goes to, as concepts.FILE_UNITS names it
 LABEL_UNITS = {"records": "record", "files": "agent", "runs": "run"}
-CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom")
-# add_card's and edit_card's enum, in the order of thimble's grammar of cards, then custom. The grammar's classifier is
-# the label card, which apply_label makes.
-ADD_CELL_KINDS = ("example", "table", "code", "diagram", "plot", "timeline", "note", "custom")
+CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom", "plan")
+# add_card's and edit_card's enum, in the order of thimble's grammar of cards, then custom and plan. The grammar's
+# classifier is the label card, which apply_label makes.
+ADD_CELL_KINDS = ("example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan")
 EDIT_CELL_KINDS = ADD_CELL_KINDS
 RUN_KINDS = ("plot", "table", "code", "timeline", "diagram")  # notebook.RUNNABLE_KINDS: the kinds that run `code`
 INSTRUCTIONS_HINT = "instructions"  # prompts/tools.md `## instructions`: the shim's MCP server instructions (instructions)
@@ -169,6 +169,8 @@ REGISTRY: dict[str, Spec] = {
         Spec("list_cards", ANALYSIS_ROLES, _H + "list_cards", aliases=("list_cells",)),
         Spec("add_card", ANALYSIS_ROLES, _H + "add_card", aliases=("add_cell",)),
         Spec("edit_card", (ANALYST,), _H + "edit_card", aliases=("edit_cell",)),
+        # one step of a plan card changed: its status, note, runs or time (plans.py)
+        Spec("update_plan", (ANALYST,), "app.plans:tool_update_plan"),
         Spec("delete_card", (ANALYST,), _H + "delete_card", aliases=("delete_cell",)),
         Spec("apply_label", (ANALYST,), _H + "apply_label"),
         # a label over files on or off in Files and the views, which runs nothing (concepts.show_concept)
@@ -1187,13 +1189,13 @@ def _note_group(ctx: Ctx, nb_id: str) -> None:
 
 
 # add_card's content fields beside `code`, by the data kind that shows each (notebook.PAYLOAD_KEYS)
-CONTENT_FIELDS = ("refs", "text", "html")
+CONTENT_FIELDS = ("refs", "text", "html", "steps")
 # what a diagram's and a timeline's code ends in (kernel_thimble.diagram and .timeline), for the line that asks for it
 KIND_ENDINGS = {"diagram": "thimble.diagram(nodes, edges)", "timeline": "thimble.timeline(events)"}
 
 
 # the data kind whose content each field is (add_card's schema: example shows `refs`, note `text` and custom `html`)
-FIELD_KINDS = {"refs": "example", "text": "note", "html": "custom"}
+FIELD_KINDS = {"refs": "example", "text": "note", "html": "custom", "steps": "plan"}
 
 
 def _given(args: dict[str, Any], field: str) -> bool:
@@ -1297,7 +1299,46 @@ def _payload_args(kind: str, args: dict[str, Any], tool: str = "add_card", c: st
         return ({"html": html}, "") if html.strip() else (None, f"{tool}: a custom card needs `html`")
     if kind == "label":
         return None, f"{tool}: a label card is made by `apply_label`"
+    if kind == "plan":
+        return _plan_payload(args.get("steps"), tool)
     return None, _needs_code(tool, kind)
+
+
+PLAN_NO_TAKEAWAY = "{tool}: a plan card has no takeaway: its steps say where the work stands"
+
+
+def _plan_payload(raw: Any, tool: str) -> tuple[dict | None, str]:
+    """(a plan's payload {steps} from add_card's or edit_card's `steps`, the error line): each step needs its `text`, and
+    a status it is given must be one of notebook.PLAN_STATUSES. Steps are numbered from 1 in the error lines."""
+    from . import notebook
+
+    items = raw if isinstance(raw, builtins.list) else []
+    if not items:
+        return None, f"{tool}: a plan card needs `steps`, each {{text, makes}}"
+    steps: builtins.list[dict] = []
+    for n, item in enumerate(items, 1):
+        step = {"text": item} if isinstance(item, str) else item if isinstance(item, dict) else {}
+        if not " ".join(str(step.get("text") or "").split()):
+            return None, f"{tool}: step {n} has no `text`"
+        if step.get("status") not in (None, "") and notebook.plan_status_of(step["status"]) is None:
+            return None, f"{tool}: step {n}'s status must be one of {', '.join(notebook.PLAN_STATUSES)}"
+        steps.append({k: step[k] for k in ("text", "makes", "status", "note", "runs", "time") if k in step})
+    return {"steps": steps}, ""
+
+
+def _plan_follows(ctx: "Ctx", raw: Any, tool: str) -> tuple[str | None, str]:
+    """(the id of the plan a new plan's `follows` names, the error line): it must be a plan card that exists."""
+    from . import notebook
+
+    if raw in (None, ""):
+        return None, ""
+    pid = notebook.plan_id_of(raw)
+    hit = notebook.find_cell(ctx.ws, pid) if pid else None
+    if hit is None:
+        return None, f"{tool}: `follows` must name a plan card, card:<id>, and {str(raw)!r} is no card"
+    if hit[1].get("kind") != notebook.PLAN_KIND:
+        return None, f"{tool}: `follows` must name a plan card, and card:{pid} is a {hit[1].get('kind')} card"
+    return pid, ""
 
 
 def _kind_mismatch(kind: str, cell: dict) -> str:
@@ -1348,12 +1389,20 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     code = str(args.get("code") or "")
     data = kind in notebook.DATA_KINDS
     payload: dict | None = None
+    follows: str | None = None
     if data:
         await _warm_view_refs(ctx.c, args)
         payload, problem = _payload_args(kind, args, "add_card", ctx.c)
         problem = problem or _code_on_data("add_card", kind, args)
+        if kind == "plan" and not problem:
+            if str(args.get("takeaway") or "").strip():
+                problem = PLAN_NO_TAKEAWAY.format(tool="add_card")
+            else:
+                follows, problem = _plan_follows(ctx, args.get("follows"), "add_card")
         if problem:
             return err(problem)
+        if follows:
+            (payload or {})["follows"] = follows
     elif not code.strip():
         return err(_needs_code("add_card", kind, args))
     elif problem := _content_on_code("add_card", kind, args) or _card_installs(ctx, code, "add_card"):
@@ -1361,7 +1410,7 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     group = " ".join(str(args.get("group") or "").split())
     request = request_of(group)
     made: builtins.list[str] = []
-    nb_id = _group_id(ctx, group, made) if group else default_group(ctx)
+    nb_id = _group_id(ctx, group, made) if group else _plan_group(ctx, follows) or default_group(ctx)
     _note_group(ctx, nb_id)
     lines: builtins.list[str] = [f"made the group {t!r}" for t in made]  # what the result says after the card's result
     warn = ""
@@ -1370,7 +1419,7 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         pc = notebook.get_cell(ctx.c, prev)
         # the caller's last card still has no takeaway: a card of code that ran clean, or an example, note or custom
         # card, whose content the caller chose
-        shown = pc and (pc.get("status") == "ok" or (not notebook.runnable(pc) and pc.get("kind") != "label"))
+        shown = pc and (pc.get("status") == "ok" or (not notebook.runnable(pc) and pc.get("kind") not in ("label", "plan")))
         if shown and not str(pc.get("takeaway") or "").strip():
             note = hint("takeaway-reminder", cid=prev)
             warn = f"{note}\n\n" if note else ""
@@ -1382,6 +1431,9 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             return res
         new = res.text.split("\n", 1)[0].removeprefix("card:")
         _answer_request(ctx, request, new)
+        if kind == "plan":  # a plan has no takeaway: the result is its steps
+            cell = notebook.get_cell(ctx.c, new) or {}
+            return ok(warn + res.text + "\n\n" + "\n".join(notebook.plan_lines(cell)))
         line, _ = _takeaway_after(ctx, new, takeaway, None)
         if takeaway is None:
             # an example, note or custom card is asked for its takeaway as a clean run is (_takeaway_missing), since
@@ -1440,6 +1492,17 @@ def _add_data_cell(ctx: Ctx, nb_id: str, kind: str, title: str, payload: dict,
     return ok(f"card:{cid}" + "".join(f"\n\n{line}" for line in lines))
 
 
+def _plan_group(ctx: Ctx, follows: str | None) -> str | None:
+    """The group of the plan a new plan follows, where the next phase lands when add_card names no group; None when the
+    caller has a group of its own (the orientation, a writer) or that group is gone."""
+    from . import notebook
+
+    if not follows or session_kind(ctx.session) == ORIENT_SESSION or own_group_session(ctx.session):
+        return None
+    hit = notebook.find_cell(ctx.ws, follows)
+    return _live_group(ctx.ws, hit[0]) if hit else None
+
+
 def _edit_data_cell(ctx: Ctx, nb_id: str, cid: str, cell: dict, args: dict[str, Any], group: str,
                     place: "tuple[str, str | None] | None" = None, *, allow_empty: bool = False) -> ToolResult:
     """edit_card for a card that carries a payload and no code (a note, example, custom card, or a dataset-backed
@@ -1459,9 +1522,13 @@ def _edit_data_cell(ctx: Ctx, nb_id: str, cid: str, cell: dict, args: dict[str, 
     key = notebook.PAYLOAD_KEYS.get(kind)
     payload: dict | None = None
     if key in CONTENT_FIELDS and args.get(key) is not None:
+        if kind == notebook.PLAN_KIND and notebook.plan_started(cell):
+            return err(hint("plan-started", cid=cid))
         payload, problem = _payload_args(kind, args, "edit_card", ctx.c)
         if problem:
             return err(problem)
+        if kind == notebook.PLAN_KIND and payload is not None:
+            payload["follows"] = (cell.get("payload") or {}).get("follows")
     lines: builtins.list[str] = []
     if group:
         nb_id = _move_to_group(ctx, cid, nb_id, group, lines)
@@ -1595,6 +1662,8 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     nb_id, cell = hit
     if refused := card_locked(ctx, cid, cell):
         return refused
+    if cell.get("kind") == notebook.PLAN_KIND and takeaway is not None:
+        return err(PLAN_NO_TAKEAWAY.format(tool="edit_card"))
     args, kept = _kept_by_check(ctx.c, cid, args)
     if kept:
         takeaway = str(args["takeaway"]) if str(args.get("takeaway") or "").strip() else None
@@ -1781,6 +1850,8 @@ def _takeaway_on(ctx: Ctx, cid: str, raw: Any) -> tuple[bool, str]:
     cell = notebook.get_cell(ctx.c, cid, full_outputs=True)
     if cell is None:
         return False, hint("edit_card-gone", cid=cid) or f"takeaway: card:{cid} does not exist"
+    if cell.get("kind") == notebook.PLAN_KIND:
+        return False, PLAN_NO_TAKEAWAY.format(tool="edit_card")
     return _attach_takeaway(ctx.c, cid, raw, cell)
 
 
@@ -1856,6 +1927,11 @@ def _payload_lines(kind: str, payload: dict) -> "builtins.list[str]":
         if len(html) > CELL_READ_LIMIT:
             html = html[:CELL_READ_LIMIT] + f"\n... [truncated, {len(html) - CELL_READ_LIMIT} more chars]"
         return ["html:", html]
+    if kind == "plan":
+        from . import notebook
+
+        follows = [f"follows: card:{payload['follows']}"] if payload.get("follows") else []
+        return [*follows, "steps:", *notebook.plan_lines({"kind": kind, "payload": payload})]
     body = json.dumps(payload.get("dataset"), ensure_ascii=False, default=str)
     if len(body) > CELL_READ_LIMIT:
         body = body[:CELL_READ_LIMIT] + f"\n... [truncated, {len(body) - CELL_READ_LIMIT} more chars]"
@@ -1916,6 +1992,8 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
             lines.append(f"({', '.join(sorted(extras))} output rendered; thimble shows it)")
     else:
         lines += _payload_lines(kind, cell.get("payload") or {})
+        if kind == notebook.PLAN_KIND and (after := notebook.plans_following(ctx.ws, cid)):
+            lines.append("followed by: " + ", ".join(f"card:{x}" for x in after))
     if str(cell.get("takeaway") or "").strip():
         lines += ["takeaway:", str(cell["takeaway"]).strip()]
     if cell.get("labels"):
@@ -1978,6 +2056,9 @@ def _cell_line(cell: dict, filtered_out: bool = False) -> str:
     takeaway = cite.canon_text(str(cell.get("takeaway") or "").strip())
     if takeaway:
         line += f" — {_first_clause(takeaway)}"
+    elif steps := notebook.plan_steps(cell):
+        done = sum(1 for s in steps if s["status"] == notebook.PLAN_DONE)
+        line += f" — {done} of {len(steps)} steps done"
     return line
 
 

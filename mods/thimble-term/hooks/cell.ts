@@ -353,6 +353,31 @@ export function htmlText(html: string): string {
     .join('\n')
 }
 
+/** A plan card's steps as the lines of a note (backend notebook.step_line): `2. [running · 40 m] Run it → runs/`, with
+ * a step's note under it. The time is the one the agent gave or, for a step that ended, the time it took. */
+export function planText(steps: unknown): string {
+  const list = Array.isArray(steps) ? steps.filter((s): s is Record<string, unknown> => Boolean(s) && typeof s === 'object') : []
+  const took = (s: Record<string, unknown>): string => {
+    if (typeof s.time === 'string' && s.time.trim()) return s.time.trim()
+    const a = Date.parse(String(s.started ?? '')), b = Date.parse(String(s.ended ?? ''))
+    if (Number.isNaN(a) || Number.isNaN(b)) return ''
+    const sec = Math.max(0, Math.round((b - a) / 1000))
+    if (sec < 60) return `${sec} s`
+    if (sec < 3600) return `${Math.floor(sec / 60)} m`
+    const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60
+    return m ? `${h} h ${m} m` : `${h} h`
+  }
+  return list
+    .flatMap((s, i) => {
+      const t = took(s)
+      const makes = Array.isArray(s.makes) && s.makes.length ? ` → ${s.makes.map(String).join(', ')}` : ''
+      const head = `${i + 1}. [${String(s.status ?? 'not started')}${t ? ` · ${t}` : ''}] ${String(s.text ?? '')}${makes}`
+      const note = typeof s.note === 'string' ? s.note.split('\n').map(l => l.trim()).filter(Boolean).map(l => `   ${l}`) : []
+      return [head, ...note]
+    })
+    .join('\n')
+}
+
 /** The card a cell draws as, and the error its last run ended in ('' for none). */
 export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Drawn {
   const err = first(cell, k => k === ERROR) as { ename?: string; evalue?: string } | undefined
@@ -361,6 +386,7 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
   const payload = cell.payload && typeof cell.payload === 'object' ? cell.payload : null
   if (kind === 'note') return { card: { ...blank(cell, 'note'), note: String(payload?.text ?? cell.text ?? '') }, error }
   if (kind === 'custom') return { card: { ...blank(cell, 'note'), note: htmlText(String(payload?.html ?? '')) || 'a custom card: the browser draws it' }, error }
+  if (kind === 'plan') return { card: { ...blank(cell, 'note'), note: planText(payload?.steps) }, error }
   if (kind === 'example') {
     const refs = Array.isArray(payload?.refs) ? (payload!.refs as unknown[]) : []
     const examples: CardExample[] = refs.map(r =>

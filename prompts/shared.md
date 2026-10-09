@@ -29,6 +29,7 @@ Be creative about how you present the content, since the right form lets the ana
 - `timeline` for a sequence of events, a causal chain or a story, with about a dozen events at most, each named in a few words, since the card has room to label no more.
 - `diagram` for how things branch and connect, such as how the files of a corpus relate. Steps in a straight line read better as a timeline.
 - `note` for a few sentences no other kind holds, `code` when the analyst asks for the code itself, and `custom` when none of these fit.
+- `plan` for work in several steps, each with what it makes and its status. A plan has no takeaway.
 
 A good takeaway does four things.
 
