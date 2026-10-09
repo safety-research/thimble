@@ -29,8 +29,9 @@ the view as text, a glyph or a gray pattern, never in a second palette. Filter b
   overview every record in gray, and the labels' texts highlighted in gray, a label on or not.
 - The values of the chosen field show as key chips in the top row (`chip chip-key` in the view kit): a square of the
   value's color, its name and its count. The chip of the records with no value ("Not marked", "No kind") has the gray
-  square the marks draw those records in. A click turns a value off or on. An Alt-click, or a double click, shows that
-  value alone. A value turned off is hidden or dimmed, as the view says, and its chip goes quiet with an empty square.
+  square the marks draw those records in. A click turns a value's color off or on. An Alt-click, or a double click,
+  keeps that value's color alone. A value turned off keeps its records, drawn in gray as the records with no value are
+  (Filter by is what hides records), and its chip goes quiet with an empty square.
   Hovering a value shows what it means: a label's value what the label says, a field's value what the page declares
   for it, else what the field is.
 - The chips that do not fit the row go behind "N more", which lists those values with what a chip offers: a box that
@@ -38,7 +39,7 @@ the view as text, a glyph or a gray pattern, never in a second palette. Filter b
   what it means on hover.
 - A field has twelve colors its values take by themselves. The values past the twelfth would share one gray, so they
   sit under one chip, "Other", in that gray with their counts summed: a click turns them all off or on, an Alt-click
-  shows them alone, and hovering it names them. The page still hears of each of them in `values`, in the gray.
+  keeps them alone, and hovering it names them. The page still hears of each of them in `values`, in the gray.
 - A click on a chip's square opens the color picker: every hue around the color wheel, a column per hue with its light
   color above its dark one, red, orange, gold, green, teal, sky, blue, purple and pink (backend/app/label_wheel.json,
   which the app's pickers read too). The color picked recolors the value everywhere in the view: its chip, the
@@ -89,7 +90,6 @@ const colour = thimble.colorBy({
     { name: 'kind', title: 'Kind', values: ['Text only', 'With links'] },
     { name: 'channel', title: 'Channel' },
   ],
-  chips: 'filter',
   strip: '#list',
   onChange: load,
 })
@@ -110,7 +110,7 @@ load()
 | `mount` | an element or a selector in the view's top row. The control fills it and takes the row's free width. |
 | `fields` | the view's own fields it can color by, in menu order: `{name, title, description?, values?, meanings?, value?}`. `name` is the field as the records hold it. `description` says what the field is, on its chips' hover and its menu row. `values` fixes the order of the values and their colors. A value given as `{name, colour}` takes the label palette's color `colour` (1 to 12: 1 blue, 2 orange, 3 green, 4 sky, 5 gold, 6 teal, 7 brown, 8 navy, 9 grass, 10 cerulean, 11 chestnut, 12 cyan), for example so that two values that often sit side by side do not take two blues; `{name, meaning}` says what the value means, on its chip's hover. `meanings`, `{value: meaning}`, says what values mean without declaring them, so they keep the order and colors the records give them. `value(record)` gives a record's value when it is not `record[name]`. |
 | `initial` | the field chosen before the analyst picks one; the first field by default |
-| `chips` | `'highlight'` (the default) dims the records of a value turned off; `'filter'` hides them |
+| `chips` | does nothing: a value turned off keeps its records, in gray, whatever it says (`'filter'` hid them once). Filter by hides records ([rows-and-filters.md](rows-and-filters.md)) |
 | `strip` | the list that gets the tracks: an element, a selector, or `true` for the page |
 | `onChange(colour)` | runs when the choice changes (Off among them), when a value is turned off or on, and when the values or colors of the label colored by change. Fetch and draw again here. |
 
@@ -124,14 +124,14 @@ load()
   `data-colour-tracks`) off the page until the page draws again in `onChange`.
 - Draw a group's row (a page, an agent, a session) with no `data-colour` and no color of its own. To show the mix of
   its records' values, put `thimble.mix(counts)` in it, `{value: n}` with `''` for the records with no value: a small
-  bar, 48 px wide, each value's share in its color in the chips' order, the records with no value gray and last, the
-  values turned off left out, and nothing with Off. `thimble.mix(el, counts)` draws it into `el`.
-- Pass `colour.query()` with each fetch, so the reader can count, filter and chart by the choice (below). It is `null`
-  for Off.
+  bar, 48 px wide, each value's share in its color in the chips' order, a value turned off in gray, the records with
+  no value gray and last, and nothing with Off. `thimble.mix(el, counts)` draws it into `el`.
+- Pass `colour.query()` with each fetch, so the reader can count and chart by the choice (below). It is `null` for
+  Off.
 - Give the counts with `colour.counts({value: n})`, the key `''` for records with no value. Without them, the control
   counts the elements on the page, which is right only when the page draws every record.
-- Draw charts in `colour.colourOf(value)`, a color a canvas can draw, and leave out the values for which
-  `colour.isOn(value)` is false. `colourOf` gives `null` for Off: draw those marks in one gray.
+- Draw charts in `colour.colourOf(value)`, a color a canvas can draw. `colourOf` gives `null` for no value, for a value
+  turned off and for Off: draw those marks in one gray, and keep them.
 - A chart's key gives every series a mark drawn as the series is: a series in the Color by colors shows the chips'
   colors (or the field's name), one in a single color its swatch, and with Off a gray swatch.
 - Draw no color control, legend or label list of your own. The control is the page's label control: a view that
@@ -150,8 +150,8 @@ scrollbar in tracks at its right edge:
 
 - The overview track is the whole list in one lane for the first choice: each pixel row in the color of the value that
   is on which most of the records there take, never two colors side by side. The records with no value ("No kind",
-  "Not marked") are the gray their chip has, and only where no record of the pixel row takes a value, so a value is
-  never hidden under them; turned off, they leave the tracks as any value does. Each of Color by's choices past the
+  "Not marked") and those of a value turned off are the gray the no-value chip has, and only where no record of the
+  pixel row takes a value that is on, so a value is never hidden under them. Each of Color by's choices past the
   first has a lane of its own beside it, in its colors (a label's own, a field's values'), so that one choice is one
   lane and two are two; a label that is on but no choice has no lane. Each lane names its choice on hover, and the
   lanes narrow as more come (one is 12 px; more share 24 px, 3 px each at least). Only the first choice colors the
@@ -216,8 +216,8 @@ the page changes its state without a click or a key, so Reset shows or hides.
 
 ## In the reader
 
-`colour.query()` is `{field, off}`, `{label, name, off}` or `null` (Off), with `off` the values turned off (`null` for
-no value). The reader takes it with two calls:
+`colour.query()` is `{field}`, `{label, name}` or `null` (Off). It names no value turned off, since Color by hides no
+record. The reader takes it with `thimble.colour_value`:
 
 ```python
 import thimble
@@ -231,8 +231,7 @@ def records(index, query):
             continue
         value = thimble.colour_value(choice, ref, r)   # r["kind"], or a label's value on ref; None for Off
         counts["" if value is None else value] += 1
-        if thimble.colour_on(choice, value):          # its chip is on
-            out.append({**r, "ref": ref})
+        out.append({**r, "ref": ref})
     return {"messages": out, "counts": dict(counts)}
 ```
 
@@ -262,8 +261,8 @@ for a record the label does not mark.
   cerulean, chestnut and cyan, so the first five are five hues with no second blue among them, each pair 15 or more
   apart in OKLab on every paper, Dark as well. A color's number is its place in the palette, so `colour: 4` is always
   sky, whatever the order. The chips of values the page did not declare come in the order of their colors.
-- A value turned off is hidden (`chips: 'filter'`) or dimmed (`'highlight'`) wherever its records show on the page.
-  A page that leaves those records out itself, as the reader above does, loses nothing.
+- A value turned off takes its color off its records wherever they show on the page: no bar, and the chosen label's
+  texts of that value in gray. thimble never hides or dims them; Filter by is what hides records.
 - What a label's values mean comes from thimble itself: the control asks with `thimble.fetch({$thimble: 'label',
   id})`, which thimble answers without calling the reader.
 - The label editor opens through `thimble.editLabel(id, {anchor: menu})` during the analyst's click (the bridge's
@@ -282,11 +281,12 @@ for a record the label does not mark.
 | `field`, `label` | the field colored by, or the label's id; `null` for the other and for Off |
 | `values` | the chips' values: `[{value, name, colour, on, n}]`, `value` `null` for no value, each value under "Other" in its place; none for Off |
 | `valueOf(record)` | a record's value: its field's, or for a label the label's value on `record.ref` (or on a ref given as a string); `null` for Off |
-| `colourOf(value)` | the value's color, `rgb()` or a hex, which a canvas can draw; `null` for no value and for Off |
-| `isOn(value)`, `keeps(record)` | whether a value, or a record's value, is on |
+| `colourOf(value)` | the value's color, `rgb()` or a hex, which a canvas can draw; `null` for no value, for a value turned off and for Off |
+| `isOn(value)` | whether a value's color is on |
+| `keeps(record)` | always `true`: Color by hides no record (Filter by's `keeps` does) |
 | `attr(record)` | ` data-colour="<value>"` while a field is the color, `''` while a label is or for Off; with ` data-colour-tracks` for the fields past the first choice |
 | `counts(map)` | the counts of the current choice's values from the reader; `null` counts the page's elements again |
-| `query()` | the choice for the reader: `{field, off}`, `{label, name, off}`, or `null` for Off |
+| `query()` | the choice for the reader: `{field}`, `{label, name}`, or `null` for Off |
 | `strip(list, {rows, refs, records, preview, whole}?)` | the tracks on another list, or the rows of one already on |
 
 `thimble.markOf(ref)` gives each label's value on a record as `values: [{id, label, value, colour}]`, and every color

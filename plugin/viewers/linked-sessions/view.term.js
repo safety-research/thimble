@@ -55,7 +55,6 @@ const colour = colorBy({
     { name: 'file type', title: 'File type', description: "The extension of the call's first path, test files apart; none for a call with no file", meanings: FILE_TYPES },
     { name: 'outcome', title: 'Outcome', description: 'denied when the result says so, error when it is flagged, else ok', meanings: OUTCOMES },
   ],
-  chips: 'filter',
   onChange: load,
 })
 // Filter by: which turns show, in the lanes and the transcript; the reader leaves out those of a value turned off

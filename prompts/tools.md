@@ -1220,13 +1220,22 @@ Your Claude Code session is in plan mode, where thimble's agents would have to a
 
 This session was not started with `thimble`, so it and its subagents run without thimble's sandbox and can change your files, and thimble's agents cannot start in it. Quit and run `thimble` in this folder.
 
-## start-refused-fork
+## start_agent-fork
 
-A thread's fork cannot start thimble's agents, since Claude Code does not let a fork start subagents. Tell the analyst in one line in the thread that they can start it {{if:browser}}in the browser: Start for the orientation, or Write on a document for its writer{{end}}{{if:terminal}}from main: `/thimble:orient` for the orientation, or `/thimble:write` for a writer{{end}}.
+Filed {what}. Main is starting {agent}, and the analyst has nothing to do. Tell the analyst in one line in the thread that it is filed and main is starting {agent}.
 
-## start-refused-fork-ticket
+## start_agent-event
 
-A thread's fork cannot file a ticket, since its agent is a subagent and Claude Code does not let a fork start subagents. Tell the analyst in one line in the thread that they can file it {{if:browser}}in the browser{{end}}{{if:terminal}}in browser mode{{end}} with Report a problem.
+The fork of {thread} filed {what}. A fork cannot start subagents, so start {agent} for it now as a subagent of this session, with one Agent call whose input is exactly this:
+
+{input}
+
+Change nothing in it, since thimble lets only this call through. The call needs no words before or after it: the analyst sees it, and the fork told them in the thread.
+
+## ticket-from-thread
+
+The analyst asked for this in the side thread {thread}, which they opened on this:
+{anchor}
 
 ## start-refused-no-module
 
