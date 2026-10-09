@@ -5,7 +5,8 @@
 // the list draws only the rows near its view and keeps them as it scrolls, a diff draws its first lines until Show
 // all, the history draws only the items around its view and reads them in full as they come near, a Color by change
 // reads nothing again, and the history's revisions have Color by's tracks while the list of pages, groups, has the
-// kit's plain track.
+// kit's plain track. Color by only colors: a value turned off keeps its pages and revisions, without its colour; Filter
+// by, over the same fields, is what hides them.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -18,7 +19,11 @@ const APP = path.join(ROOT, 'backend', 'app')
 const VIEW_HTML = readFileSync(path.join(ROOT, 'demos', 'collusion-wiki', 'workspace', 'extension', 'views', 'wiki-page-history', 'view.html'), 'utf8')
 const read = (name: string) => readFileSync(path.join(APP, name), 'utf8')
 const inline = (js: string) => js.replace(/<\/script/g, '<\\/script')
-const KIT = `<script>${inline(read('viewer_bridge.js'))}</script><script>window.__thimbleLabelOrder = ${read('label_order.json')}</script><script>${inline(read('viewer_colour.js'))}</script><script>${inline(read('viewer_range.js'))}</script><style>${read('viewer_kit.css')}</style>`
+// the kit as views.frame_document loads it: the view's Filter by is viewer_controls.js's
+const KIT =
+  `<script>${inline(read('viewer_bridge.js'))}</script><script>window.__thimbleLabelOrder = ${read('label_order.json')}</script>` +
+  ['viewer_colour.js', 'viewer_controls.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_range.js'].map((n) => `<script>${inline(read(n))}</script>`).join('') +
+  `<style>${read('viewer_kit.css')}</style><style>${read('viewer_parts.css')}</style>`
 const TOKENS =
   ':root{--label-1:#025ac3;--label-2:#d0750a;--label-3:#08632f;--label-4:#56b4e9;--label-5:#7a7a00;--label-none:#a09c93;--ink-rgb:27,26,24;' +
   '--surface-card:#fffdf8;--surface-selected:#ece8df;--surface-hover:#f3f0e8;--raised-bg:#fffdf8;--track-bg:#ece8df;--viz-ink-2:#77736b;' +
@@ -250,15 +255,89 @@ describe('the Wiki Page History demo view', () => {
     }))
     // a Color by change draws the history again from what was read
     const pages = await page.evaluate(() => (window as any).__fetches.filter((x: string) => x === 'page').length)
-    await frame.locator('.thimble-colour-by').click()
+    // Color by's trigger, not Filter by's beside it (which shares its look)
+    await frame.locator('.thimble-colour-by:not(.thimble-filter-by)').click()
     await frame.locator('.thimble-colour-menu [data-by="f:save"]').click()
     // Color by takes several choices: the ones before Kind of save unchecked, it alone colors
     for (const by of await frame.evaluate(() => [...document.querySelectorAll('.thimble-colour-menu [data-by][aria-checked="true"]')].map((e) => e.getAttribute('data-by')!).filter((b) => b !== 'f:save')))
       await frame.locator(`.thimble-colour-menu [data-by="${by}"]`).click()
-    await frame.waitForFunction(() => document.querySelector('.thimble-colour-by b')?.textContent === 'Kind of save')
+    await frame.waitForFunction(() => document.querySelector('.thimble-colour-by:not(.thimble-filter-by) b')?.textContent === 'Kind of save')
     await page.waitForTimeout(200)
     assert.equal(await page.evaluate(() => (window as any).__fetches.filter((x: string) => x === 'page').length), pages, 'a Color by change read the page again')
     assert.ok(await frame.evaluate(() => document.querySelector('#blocks .blk.rev')!.getAttribute('data-colour') === 'New page'))
+    await page.close()
+  })
+
+  test('Color by only colors: a wiki turned off keeps its pages and revisions, drawn without its colour', async () => {
+    const { page, frame, errors } = await open()
+    const look = () => frame.evaluate(() => {
+      const sw = [...document.querySelectorAll('.thimble-colour-chip')].find((c) => c.querySelector('.chip-text')!.textContent === 'dse')!
+      const dse = getComputedStyle(sw.querySelector('.chip-sw')!).backgroundColor
+      const fills = [...document.querySelectorAll('#hs rect')].map((r) => getComputedStyle(r).fill)
+      const rev = document.querySelector('#blocks .blk.rev')!
+      return {
+        count: document.querySelector('#count')!.textContent,
+        dseRows: [...document.querySelectorAll('#vl .row .meta')].filter((m) => m.textContent!.startsWith('dse ·')).length,
+        chart: fills.filter((f) => f === dse).length,
+        gray: fills.filter((f) => f === 'rgb(161, 157, 148)').length,
+        revColour: rev.getAttribute('data-colour'),
+        revBar: rev.hasAttribute('data-thimble-bar'),
+        revShown: getComputedStyle(rev).display !== 'none' && getComputedStyle(rev).opacity === '1',
+        pressed: sw.getAttribute('aria-pressed'),
+      }
+    })
+    const before = await look()
+    assert.match(String(before.count), /4,458/)
+    assert.ok(before.dseRows > 0 && before.chart > 0 && before.revColour === 'dse' && before.revBar, JSON.stringify(before))
+    await frame.locator('.thimble-colour-chip', { hasText: 'dse' }).click()
+    await page.waitForTimeout(300)
+    const after = await look()
+    // every page and revision stays: the count, the rows of dse, the open dse page's revisions, now with no bar
+    assert.equal(after.pressed, 'false')
+    assert.equal(after.count, before.count)
+    assert.ok(after.dseRows > 0, JSON.stringify(after))
+    assert.ok(after.revColour === 'dse' && !after.revBar && after.revShown, JSON.stringify(after))
+    // the chart keeps dse's revisions, in the gray of the revisions with no value
+    assert.equal(after.chart, 0)
+    assert.ok(after.gray > before.gray, JSON.stringify({ before, after }))
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
+  test('Filter by, beside Color by over the same fields, hides the pages of a wiki turned off and shows them again', async () => {
+    const { page, frame, errors } = await open()
+    const state = () => frame.evaluate(() => ({
+      count: document.querySelector('#count')!.textContent,
+      dseRows: [...document.querySelectorAll('#vl .row .meta')].filter((m) => m.textContent!.startsWith('dse ·')).length,
+      rows: document.querySelectorAll('#vl .row').length,
+    }))
+    // in the control row, before Color by, with no choice until the analyst makes one
+    const row = await frame.evaluate(() => [...document.getElementById('ctl')!.children].map((e) => e.id || e.className))
+    assert.ok(row.indexOf('filter') >= 0 && row.indexOf('filter') < row.indexOf('colour'), JSON.stringify(row))
+    assert.equal(await frame.locator('.thimble-filter-by').textContent(), 'Filter by')
+    await frame.locator('.thimble-filter-by').click()
+    // its menu lists the fields Color by offers
+    const fields = await frame.evaluate(() => [...document.querySelectorAll('.thimble-colour-menu [data-by^="f:"]')].map((e) => e.getAttribute('data-by')))
+    assert.deepEqual(fields, ['f:wiki', 'f:save', 'f:status', 'f:kind', 'f:signed'])
+    await frame.locator('.thimble-colour-menu [data-by="f:wiki"]').click()
+    await page.waitForTimeout(200)
+    assert.deepEqual(await frame.locator('.thimble-filter-chip .chip-text').allTextContents(), ['dse', 'probier', 'fractal', 'dorfwiki'])
+    // dse turned off: its 1,115 pages leave the list, the others stay
+    await frame.locator('.thimble-filter-chip', { hasText: 'dse' }).click()
+    await page.waitForTimeout(300)
+    const hidden = await state()
+    assert.match(String(hidden.count), /3,343/)
+    assert.equal(hidden.dseRows, 0)
+    assert.ok(hidden.rows > 0, JSON.stringify(hidden))
+    // Color by is untouched: every chip on
+    assert.ok((await frame.locator('.thimble-colour-chip[aria-pressed="false"]').count()) === 0)
+    // on again: every page is back
+    await frame.locator('.thimble-filter-chip', { hasText: 'dse' }).click()
+    await page.waitForTimeout(300)
+    const back = await state()
+    assert.match(String(back.count), /4,458/)
+    assert.ok(back.dseRows > 0, JSON.stringify(back))
+    assert.deepEqual(errors, [])
     await page.close()
   })
 })

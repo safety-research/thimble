@@ -7,19 +7,20 @@ at a time, urgent first, and only in a development install (a git checkout of th
 The ticket's agent. A code ticket is worked by a `thimble:dev-ticket`, a subagent of the analyst's Claude Code session
 (subagents.py), on Settings' dev row's model and effort. A ticket filed in the browser, Retry and Start are clicks: the
 server prepares the ticket, then starts its agent through thimble's plugin module. Main's file_dev_ticket prepares it
-and answers the exact Agent call, which main makes and auto mode judges (start_typed); while another ticket runs, main's
-ticket waits for the analyst's Start (`held`), since no ticket starts without a click or main's call. Preparing cuts a git
-worktree off the live branch (worktree_path, under worktrees_dir, the one folder of thimble's home that main's fence
-lets main's Bash and its subagents write), takes the before shot, and opens the ticket's thread, which the agent's chat
-takes over (subagents.ensure_chat, `adopt`). The agent edits the worktree, checks its change with the `ticket_checks`
-tool as often as it wants, and calls `finish_ticket`, where the server commits every change in the worktree to the
-ticket's branch and runs the gates of record, counting the attempts (ticket_tools.py). Its end (ticket_ended,
-_settle_ticket) is the backstop: an agent that ended without finish_ticket but left a change gets the gates once. A change
-that passed is put back as it passed, then the after shot, the analyst's Allow, a fast-forward of the live branch
-(rebasing once if it moved), a UI rebuild, and a restart when backend or plugin files changed, deferred while an
-orientation runs. Only a supervised server (`thimble server up`) restarts itself. Stop on the ticket stops its agent
-through the module; main's quit stops it with main, and it ends stopped with Retry. `revert_last_apply` is
-`thimble revert`.
+and answers the exact Agent call, which main makes and auto mode judges (start_typed); a thread's fork's file_dev_ticket
+is prepared the same way, and main gets the call in a `start_agent` event (tools._ask_main), since a fork may not start
+subagents. While another ticket runs, main's ticket waits for the analyst's Start (`held`), since no ticket starts
+without a click or main's call. Preparing cuts a git worktree off the live branch (worktree_path, under worktrees_dir,
+the one folder of thimble's home that main's fence lets main's Bash and its subagents write), takes the before shot, and
+opens the ticket's thread, which the agent's chat takes over (subagents.ensure_chat, `adopt`). The agent edits the
+worktree, checks its change with the `ticket_checks` tool as often as it wants, and calls `finish_ticket`, where the
+server commits every change in the worktree to the ticket's branch and runs the gates of record, counting the attempts
+(ticket_tools.py). Its end (ticket_ended, _settle_ticket) is the backstop: an agent that ended without finish_ticket but
+left a change gets the gates once. A change that passed is put back as it passed, then the after shot, the analyst's
+Allow, a fast-forward of the live branch (rebasing once if it moved), a UI rebuild, and a restart when backend or plugin
+files changed, deferred while an orientation runs. Only a supervised server (`thimble server up`) restarts itself. Stop
+on the ticket stops its agent through the module; main's quit stops it with main, and it ends stopped with Retry.
+`revert_last_apply` is `thimble revert`.
 
 `thimble fix`. With the server down there is no workspace and no plugin module, so `thimble fix` (fix_offline) keeps
 the one `claude -p` run thimble still makes: a Claude Code session, one process per turn (Sessions), in a worktree,
@@ -35,9 +36,10 @@ short, ends stopped with Retry.
 
 View builds. A view proposal is built at once by a `thimble:view-builder`, a subagent of the analyst's Claude Code
 session (subagents.py), at most VIEW_POOL at once (queue_view); the others wait queued, and a start Claude Code refuses
-at its subagent limit goes back to the queue. A build is part of the start that asked for it: an orientation's
-proposal a follow-on start of the orientation's, Build, Retry and a change asked for in the browser clicks, each
-started through thimble's plugin module; main's propose_view gives main the exact Agent call (start_build). The builder
+at its subagent limit goes back to the queue. A build is part of the start that asked for it: an orientation's proposal
+a follow-on start of the orientation's, Build, Retry and a change asked for in the browser clicks, each started through
+thimble's plugin module; main's propose_view gives main the exact Agent call (start_build), and a thread's fork's
+propose_view or file_dev_ticket on a view gives it to main in a `start_agent` event (tools._ask_main). The builder
 writes the view's three files in the view's folder, checks its draft with the `view_check` tool as often as it wants,
 and calls `finish_view`, where the server runs the gates of record and counts its attempts (view_tools.py). Its end
 (build_ended, _settle) is the backstop: a builder that ended without a pass gets the gate once; an orientation's

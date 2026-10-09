@@ -1,6 +1,7 @@
 // Wiki Page History in the terminal, as view.html draws it in the browser. The top row searches the pages by name and
-// holds Color by: a revision's wiki, its kind of save, its page's status, its kind of message, its signature, or any
-// label. The time range's strip picks the time the chart, the list and the history show; under it the range's
+// holds Filter by and Color by over the same fields: a revision's wiki, its kind of save, its page's status, its kind
+// of message, its signature, or any label; Filter by hides the records of a value turned off, Color by keeps them,
+// dim. The time range's strip picks the time the chart, the list and the history show; under it the range's
 // revisions per cell in the Color by hues, and its deletes. The list holds the pages in the range, the most revisions
 // first, each with the mix of its revisions' colors (a page is a group, so it takes no color of its own, and the list
 // has a plain track), its counts and its revisions over the range. A page opens in the side pane: its revisions over
@@ -9,8 +10,8 @@
 // its place. One fetch gives every page and revision the label filter keeps; a page's history comes when it opens, its
 // items in full as they come into view.
 import {
-  COLORS, axis, bar, colorBy, columns, cut, dayName, dayOf, details, divider, draw, fetch, hms, list, merged, num, onLabels,
-  onOpen, onReset, pad, plural, redraw, search, side, strip, timeRange, width,
+  COLORS, axis, bar, colorBy, columns, cut, dayName, dayOf, details, divider, draw, fetch, filterBy, hms, list, merged, num,
+  onLabels, onOpen, onReset, pad, plural, redraw, search, side, strip, timeRange, width,
 } from 'thimble-term'
 
 const G = 14 // the gutter that names the chart's rows, which the strip and the axis leave too
@@ -49,7 +50,7 @@ const FIELDS = [
     },
   },
 ]
-const PAGE_FIELDS = new Set(['wiki', 'status']) // the page's own fields, which its row is filtered by
+const PAGE_FIELDS = new Set(['wiki', 'status']) // the page's own fields, which Filter by hides its row by
 
 // ---------------------------------------------------------------- state
 let O = null // the reader's overview
@@ -67,7 +68,8 @@ const asked = new Set()
 let readMode = null // 'messages' or 'diff' when the analyst chose, else the page's own way
 const S = { item: null } // the history item a citation opened
 
-const colour = colorBy({ fields: FIELDS, chips: 'filter', onChange: () => assign() })
+const filter = filterBy({ fields: FIELDS, onChange: () => assign() })
+const colour = colorBy({ fields: FIELDS, onChange: () => assign() })
 const q = search({ words: 'search pages', onChange: () => redraw() })
 const range = timeRange({ onChange: () => {} })
 const pane = side({ key: 'page', width: 0.56 })
@@ -160,9 +162,9 @@ async function load() {
   if (PG) openPage(PG.page.p, null, true)
 }
 
-// a label's value among a record's marks, given as bits of indices into `marks`
-function labelOf(bits, marks) {
-  const by = colour.by
+// a control's label's value among a record's marks, given as bits of indices into `marks`
+function labelOf(bits, marks, ctl = colour) {
+  const by = ctl.by
   if (!by || !by.label || !bits || !marks) return null
   for (let j = 0; j < marks.length; j++) if (bits & (1 << j) && marks[j].label === by.title) return marks[j].value
   return null
@@ -179,18 +181,24 @@ function assign() {
   feedRange()
   redraw()
 }
-// a page's own value for the chips that filter pages: its wiki or status; none under the other fields and the labels
-const pageKeeps = (pg) => !colour.field || !PAGE_FIELDS.has(colour.field) || colour.isOn(pg[colour.field])
+// whether Filter by keeps a page (or a delete of a page with no stored revision): by its own wiki or status; always
+// under the other fields and the labels, which its records take
+const pageKeeps = (pg) => !filter.field || !PAGE_FIELDS.has(filter.field) || filter.isOn(pg[filter.field])
+// a record's value under Filter by: a label's from its marks (`marks` the overview's or the open page's), else its
+// field's
+const filterValue = (x, marks = O.marks) => (filter.label ? labelOf(x.mb, marks, filter) : filter.field ? x[filter.field] ?? null : null)
+// whether Filter by keeps a revision
+const revKept = (x, marks) => filter.isOn(filterValue(x, marks))
 const named = (pg) => { const t = q.text.trim().toLowerCase(); return !t || pg.name.toLowerCase().includes(t) }
 const deleteValue = (x) => (colour.label ? x.value ?? null : PAGE_FIELDS.has(colour.field) ? x[colour.field] : null)
 function feedRange() {
   const times = [], values = []
   for (const pg of PAGES) {
     if (!pageKeeps(pg)) continue
-    for (const x of pg.revs) { times.push(x.t); values.push(colour.valueOf(x)) }
+    for (const x of pg.revs) if (revKept(x)) { times.push(x.t); values.push(colour.valueOf(x)) }
     for (const x of pg.dels) { times.push(x.t); values.push(deleteValue(x)) }
   }
-  for (const x of GONE) { times.push(x.t); values.push(PAGE_FIELDS.has(colour.field) ? x[colour.field] : null) }
+  for (const x of GONE) if (pageKeeps(x)) { times.push(x.t); values.push(PAGE_FIELDS.has(colour.field) ? x[colour.field] : null) }
   range.data({ times, values, span: [O.t0 + O.span[0], O.t0 + O.span[1]] })
 }
 // What a frame draws of the pages, worked out again only when what it depends on changes (the range, the colour, the
@@ -198,24 +206,30 @@ function feedRange() {
 let memo = { sig: null, pages: [], keptRevs: [], keptDels: [], mix: new Map(), spark: new Map(), strips: null, rows: new Map() }
 let labelsV = 0
 function pagesNow() {
-  const sig = JSON.stringify([range.from, range.to, colour.query(), colour.off, q.text, pane.key, labelsV, loaded])
+  const sig = JSON.stringify([range.from, range.to, colour.query(), colour.off, colour.values.filter((v) => !v.on).map((v) => v.value), filter.query(), q.text, pane.key, labelsV, loaded])
   if (memo.sig === sig) return memo.pages
   const pages = shownPages()
-  // the chart's records and the chips' counts: the revisions in the range of the pages shown, a value turned off
-  // counted too; their deletes, and those of pages with no stored revision where the search and the chips keep them
-  const keptRevs = [], keptDels = [], counts = {}
+  // the chart's records and the two controls' counts: Filter by's over the revisions in the range of the pages the
+  // search keeps, a value turned off counted too; Color by's over those Filter by keeps of the pages shown, which are
+  // the chart's; their deletes, and those of pages with no stored revision where the search and Filter by keep them
+  const keptRevs = [], keptDels = [], counts = {}, fcounts = {}
+  for (const pg of PAGES) {
+    if (!named(pg)) continue
+    for (const x of pg.revs) if (range.has(x.t)) { const v = filterValue(x); fcounts[v ?? ''] = (fcounts[v ?? ''] || 0) + 1 }
+  }
   for (const pg of pages) {
     for (const x of pg.revs) {
-      if (!range.has(x.t)) continue
+      if (!range.has(x.t) || !revKept(x)) continue
       const v = colour.valueOf(x)
       counts[v ?? ''] = (counts[v ?? ''] || 0) + 1
-      if (colour.isOn(v)) keptRevs.push(x)
+      keptRevs.push(x)
     }
     for (const x of pg.dels) if (range.has(x.t)) keptDels.push(x)
   }
   const t = q.text.trim().toLowerCase()
   for (const x of GONE) if (range.has(x.t) && (!t || x.name.toLowerCase().includes(t)) && pageKeeps(x)) keptDels.push(x)
   memo = { sig, pages, keptRevs, keptDels, mix: new Map(), spark: new Map(), strips: null, rows: new Map() }
+  filter.counts(fcounts)
   colour.counts(counts)
   return pages
 }
@@ -226,10 +240,10 @@ function mixOf(pg) {
 }
 function sparkOf(pg, scale) {
   let m = memo.spark.get(pg.p)
-  if (!m) memo.spark.set(pg.p, (m = strip(scale, pg.revs.filter((x) => range.has(x.t) && colour.keeps(x)), { value: (x) => colour.valueOf(x), colour })))
+  if (!m) memo.spark.set(pg.p, (m = strip(scale, pg.revs.filter((x) => range.has(x.t) && revKept(x)), { value: (x) => colour.valueOf(x), colour })))
   return m
 }
-// the pages in the range that the search and the chips keep, the most revisions first
+// the pages in the range that the search and Filter by keep, the most revisions first
 function shownPages() {
   const out = []
   for (const pg of PAGES) {
@@ -241,14 +255,16 @@ function shownPages() {
   }
   return out.sort((a, b) => b.n - a.n || (a.name < b.name ? -1 : 1))
 }
-// a page's mix of its revisions' colors in the range, in MIX cells: the kit's colour.mix of its records' values, blank
-// with Color by Off or no value on
+// a page's mix of its revisions' colors in the range, in MIX cells: the kit's colour.mix of the values of its records
+// that Filter by keeps (a delete and the page's line under a label it holds by their value of it), a value turned off
+// dim; blank with Color by Off or no record
 function mixRuns(pg) {
   const n = {}
   const add = (v) => { const k = v ?? ''; n[k] = (n[k] || 0) + 1 }
-  for (const x of pg.revs) if (range.has(x.t)) add(colour.valueOf(x))
-  for (const x of pg.dels) if (range.has(x.t)) add(deleteValue(x))
-  if (colour.label && pg.value != null) add(pg.value)
+  const kept = (bits) => !filter.label || filter.isOn(labelOf(bits, O.marks, filter))
+  for (const x of pg.revs) if (range.has(x.t) && revKept(x)) add(colour.valueOf(x))
+  for (const x of pg.dels) if (range.has(x.t) && kept(x.mb)) add(deleteValue(x))
+  if (colour.label && pg.value != null && kept(pg.pb)) add(pg.value)
   const runs = colour.mix(n, MIX)
   return runs.length ? runs : [{ s: ' '.repeat(MIX) }]
 }
@@ -282,10 +298,10 @@ async function openPage(p, focus, again) {
   assign()
 }
 const mode = () => readMode || (PG && PG.page.thread ? 'messages' : 'diff')
-// the open page's items the pane lists: in the range, kept by the chips (an event takes a field's no value and shows)
+// the open page's items the pane lists: in the range, kept by Filter by (an event takes a field's no value and shows)
 function listedItems() {
   if (!PG) return []
-  return PG.items.filter((it) => range.has(it.t) && (it.k === 'r' ? colour.keeps(it) : !colour.label || colour.isOn(it.value ?? null)))
+  return PG.items.filter((it) => range.has(it.t) && (it.k === 'r' ? revKept(it, PG.marks) : !filter.label || filter.isOn(filterValue(it, PG.marks))))
 }
 // the items in view not read yet, read CHUNK at a time
 let reading = false
@@ -376,7 +392,13 @@ async function opening(t) {
 draw((d) => {
   // while a page or a place opens, the subtitle says so, its dots moving, so the frames show the view still reads
   if (loaded && waits) d.sub(`◌ reading${dots()}`)
-  colour.draw(d, (r) => q.add(r).gap())
+  // the top row: the search, Filter by and Color by with its chips, Reset at R; in a narrow panel the search on a row
+  // of its own, Filter by on the next
+  if (d.cols < 80) {
+    q.add(d.row()).end()
+    filter.add(d.row(), { max: d.cols }).end()
+    colour.draw(d)
+  } else colour.draw(d, (r) => { q.add(r).gap(); filter.add(r, { max: Math.max(14, Math.floor(d.cols * 0.32)) }).gap() })
   if (!loaded) {
     d.row().add(`◌ reading the pages${partsGot ? ` · ${num(Math.min(partsGot * PART, 1e9))}` : ''}${dots()}`, { d: true }).end()
     return

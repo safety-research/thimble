@@ -157,7 +157,8 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
 - The view opens colored by a label that is on in Files and marks its files (not one Rows groups by), as the browser's
   view does, else by its `initial` field; a label turned on while the view is away or open takes the color, the one turned on last.
 - The row reads `Color by  Kind` and the chosen field's values as chips: `●` in the value's hue, its name, its count
-  dim. A click on a chip turns the value off (`○`, dim) or on. Values past the sixth share one chip, `other`, with no
+  dim. A click on a chip turns the value's hue off (`○`, dim) or on: its records stay, dim as those with no value.
+  Values past the sixth share one chip, `other`, with no
   hue of their own, and draw dim wherever they show; the records with no value have `no kind`, with a dim mark. A value
   with no records in the reader's counts has no chip, `other` too, unless it is turned off. A label's chips are the
   values it colors by (a regex label's `other` is not one), each with its count, then `not marked`.
@@ -193,15 +194,16 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
 |---|---|
 | `fields` | `[{name, title, description?, values?, meanings?, value?(record)}]`, as the browser's |
 | `initial` | the field chosen first; the first field by default |
-| `chips` | `'filter'` or `'highlight'`: what the page does with a value turned off (from `isOn`) |
+| `chips` | does nothing: a value turned off keeps its records, dim (`'filter'` hid them once); `filterBy` hides records |
 | `onChange(colour)` | the choice changed, or a value was turned off or on: fetch and draw again |
 
 | member | what it gives |
 |---|---|
-| `query()` | `{field, off}`, `{label, name, off}` or null for Off: pass it with each fetch, as the browser's |
+| `query()` | `{field}`, `{label, name}` or null for Off: pass it with each fetch, as the browser's |
 | `counts(map)` | the reader's counts of the choice's values, `''` for no value |
-| `valueOf(record)`, `colourOf(value)`, `dot(value)` | a record's value, a value's hue, its `●` (`○` when off) |
-| `isOn(value)`, `keeps(record)` | whether a value, or a record's value, is on |
+| `valueOf(record)`, `colourOf(value)`, `dot(value)` | a record's value, a value's hue (null when off), its `●` (dim when off) |
+| `isOn(value)` | whether a value's hue is on |
+| `keeps(record)` | always true: Color by hides no record (`filterBy`'s `keeps` does) |
 | `tally(record)` | count a record's values of every field for the menu (a list hands over its records, which the menu counts when it opens) |
 | `by`, `field`, `label`, `off`, `values` | the choice and its chips |
 | `choose(field \| {label} \| null)`, `toggle(value)` | change it from the page |
@@ -241,7 +243,7 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 off, never in a hue (only Color by colors), each with its count, `+N` for those past `max` cells; a click on one turns
 it off or on, its tip says what it means. `f`, or a click on the choice, opens the menu: none, the fields with their
 values in words, then every label with its definition a step away. `filter.keeps(record)` says whether a record shows,
-`query()` gives the reader the choice in Color by's form (`{field, off}` or `{label, name, off}`), `counts(map)` takes
+`query()` gives the reader the choice (`{field, off}` or `{label, name, off}`), `counts(map)` takes
 the reader's counts, and `valueOf`, `isOn`, `values`, `by`, `choose` and `toggle` read and change it. Reset turns every
 value back on.
 

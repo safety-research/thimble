@@ -491,7 +491,8 @@
   // Filter by in the top row: its trigger with the choice in it, "Filter by: Outcome", and the chosen field's or label's
   // values as toggles (a box ticked while the value shows), "N more" for those that do not fit. A click turns a value
   // off or on; an Alt-click or a double click shows that value alone; hovering a value says what it means. The page
-  // hides a record whose value is off (keeps), or sends query() to its reader, which takes it as Color by's choice.
+  // hides a record whose value is off (keeps), or sends query() to its reader, which takes it with thimble.colour_value
+  // and colour_on. Filter by alone hides records: Color by only colors.
   function Filter(opts) {
     Choice.call(this, opts, typeof opts.key === 'string' ? 'filter:' + opts.key : 'filter')
     var self = this
@@ -778,7 +779,7 @@
         var c = f.choice()
         return !c || f.isOn(f.valueOf(record, c))
       },
-      /** the choice for the reader, as Color by's query(): {field, off}, {label, name, off}, or null for None */
+      /** the choice for the reader: {field, off}, {label, name, off}, or null for None */
       query: function () {
         var c = f.choice()
         if (!c) return null
@@ -1282,8 +1283,8 @@
     var d = this.opts.density
     return typeof d === 'function' ? !!safe(d, false) : !!d
   }
-  // Density: each lane's records whose value is on, per bin of the scale (at least DENSE_BIN px wide), by value in the
-  // chips' order, the records with no value last; a bar's height is its bin's records on one scale for every lane.
+  // Density: each lane's records per bin of the scale (at least DENSE_BIN px wide), by value in the chips' order, a value
+  // turned off in gray, the records with no value last; a bar's height is its bin's records on one scale for every lane.
   // {bins, step, of(t), per: [Map bin -> {n: [per value], total, first}] per lane, max, names, colours}
   Lanes.prototype.binned = function (sc, colour) {
     var self = this
@@ -1299,7 +1300,7 @@
       bn = { bins: list, of: function (t) { var b = Math.floor((t - sc.from) / step); return b >= 0 && b < n ? b : t === sc.to ? n - 1 : -1 } }
     }
     var vals = colour && !colour.off ? colour.values || [] : []
-    var order = vals.filter(function (v) { return v.value != null && v.on }).map(function (v) { return String(v.value) })
+    var order = vals.filter(function (v) { return v.value != null }).map(function (v) { return String(v.value) })
     var slot = {}
     order.forEach(function (v, i) { slot[v] = i })
     var K = order.length + 1
@@ -1315,7 +1316,6 @@
       var its = node.heading && !node.folded ? [] : node.items || []
       for (var i = 0; i < its.length; i++) {
         var it = its[i]
-        if (colour && !colour.keeps(it)) continue
         var t = self.time(it)
         var b = bn.of(t)
         if (b < 0) continue
@@ -1392,7 +1392,6 @@
           var t = self.time(it)
           var e = self.end ? safe(function () { return self.end(it) }, t) : t
           if (e < sc.from || t > sc.to) continue
-          if (colour && !colour.keeps(it)) continue
           var x = sc.x(Math.max(t, sc.from))
           var w = Math.max(MARK_MIN, sc.x(Math.min(e, sc.to)) - x)
           var c = colour ? colour.colourOf(colour.valueOf(it)) : null
@@ -1524,7 +1523,6 @@
     var its = node.items || []
     for (var i = 0; i < its.length; i++) {
       var it = its[i]
-      if (colour && !colour.keeps(it)) continue
       var t = this.time(it)
       var e = this.end ? safe(function () { return this.end(it) }.bind(this), t) : t
       if (e < sc.from || t > sc.to) continue

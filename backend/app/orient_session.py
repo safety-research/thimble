@@ -3,11 +3,12 @@ analyst's Claude Code session with a fresh context (subagents.py). The machinery
 is subagents.py; this module holds what is the orientation's own.
 
 Start. Start in the browser is a click (start_route): the module spawns the orientation with no turn of main. Typed in
-the terminal, main calls `start_orientation`, whose result is the exact Agent call main makes (tool_start_orientation).
-Both take the request (the focus), the four switches (the deck, the views, the critique and the report) and the run's
-model and effort, each defaulting to Settings. Once an orientation has ended, the tool starts another only when someone
-asked for it since (asked_for). Without thimble's plugin module, in plan mode, or in a session the launcher did not
-start, no orientation starts (subagents.refusal_before).
+the terminal, main calls `start_orientation`, whose result is the exact Agent call main makes (tool_start_orientation);
+a thread's fork's call gives that call to main in a `start_agent` event (tools._ask_main). Both take the request (the
+focus), the four switches (the deck, the views, the critique and the report) and the run's model and effort, each
+defaulting to Settings. Once an orientation has ended, the tool starts another only when someone asked for it since
+(asked_for). Without thimble's plugin module, in plan mode, or in a session the launcher did not start, no orientation
+starts (subagents.refusal_before).
 
 The prompt. The registration (subagent_definition) holds prompts/orient.md's body rendered for the workspace with every
 part, its instructions (prompts/orient-instructions.md, or the workspace's `orient_instructions` setting) and the active
@@ -120,6 +121,9 @@ FAILED_LINES = ("The orientation stopped because of an error: {error}",
                 "The orientation's follow-up stopped because of an error: {error}")
 
 ASKED_WAIT_S = 2.0  # how long start_orientation waits for main's chat to show the analyst's latest message (asked_for)
+# what a thread's fork's start_orientation filed, and the agent main starts for it, as its start_agent event and the
+# fork's line name them (tools._ask_main)
+FORK_WHAT, FORK_AGENT = "the request for an orientation", "the orientation"
 SCRATCH_GLOB = "tmp_*"  # the scratch folders of the orientation's own subagents (the --subagent-start hook)
 
 
@@ -1159,29 +1163,36 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     """The `start_orientation` tool: the pending start of the orientation with the request, the four switches and the
     run's model and effort (choices_of), and the exact Agent call main makes (`## start_orientation-subagent`).
     Refused while one runs, when nobody asked for a new one since the latest ended (asked_for), without the module, in
-    plan mode, and in a session the launcher did not start."""
+    plan mode, and in a session the launcher did not start. A thread's fork's call starts the orientation the same way,
+    by main's Agent call on a `start_agent` event (tools._ask_main), since the fork may not make it."""
     from . import session  # noqa: PLC0415
 
     brief, passes, critique, values = choices_of(args)
     if running(ctx.c) or starting(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
+    fork = await tools._fork_of(ctx) if ctx.session is None else None
     # a subagent of main's may start it (U5). A thread's fork answers to the analyst's messages in its thread; any other
     # answers to the analyst's messages to main, since the prompt its own chat holds is main's words, not the analyst's
     from . import threads  # noqa: PLC0415
 
-    caller = await subagents.typed_caller(ctx.c, ctx.tool_use_id)
-    asker = session.chat_of_agent(ctx.c, caller) if caller else None
+    asker = str((fork or {}).get("id") or "") or None
+    if asker is None:
+        caller = await subagents.typed_caller(ctx.c, ctx.tool_use_id)
+        asker = session.chat_of_agent(ctx.c, caller) if caller else None
     if not await asked_for(ctx.c, asker if asker and threads.is_thread(ctx.c, asker) else agents.MAIN_ID):
         return tools.err(tools.hint("start_orientation-unasked"))
     try:
+        # a fork's start keeps no call of the fork's: main's Agent call claims it (tools._ask_main)
         ans = await start(ctx.c, brief, passes, critique=critique, values=values, route=subagents.TYPED,
-                          call=ctx.tool_use_id)
+                          call=None if fork is not None else ctx.tool_use_id)
     except (RuntimeError, ValueError) as e:
         return tools.err(f"start_orientation: {e}")
     if ans.get("program"):
         return tools.ok(tools.hint("start_orientation-program", extension=ans["program"]))
     if ans.refused:
         return tools.err(ans.reason or f"start_orientation: {ans.kind}")
+    if fork is not None:
+        return await tools._ask_main(ctx, ans, what=FORK_WHAT, thread=fork, agent=FORK_AGENT)
     return tools.ok(tools.hint("start_orientation-subagent", input=json.dumps(ans["input"], ensure_ascii=False)))
 
 

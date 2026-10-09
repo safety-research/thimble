@@ -161,7 +161,7 @@ const FIELDS = [
   },
 ]
 
-const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, initial: 'service', chips: 'filter', onChange: load })
+const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, initial: 'service', onChange: load })
 const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, initial: 'incident', onChange: load })
 const rows = thimble.rows({ mount: '#rows', fields: FIELDS, initial: 'source', onChange: () => { pick(null); load() } })
 const range = thimble.timeRange({ mount: '#range', readout: '#read', onChange: draw })

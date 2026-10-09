@@ -162,7 +162,6 @@ const colour = thimble.colorBy({
     { name: 'role', title: 'Role', description: FIELDS[1].description, value: (it) => (it && it.role) || null },
   ],
   initial: 'tool',
-  chips: 'filter',
   strip: '#list',
   onChange: colourChanged,
 })
@@ -227,7 +226,7 @@ const lanes = thimble.lanes({
 
 // ---------------------------------------------------------------- the list: the records of the range, in the side panel
 const side = thimble.side({ mount: '#body', onClose: () => { S.open = null; S.detail = null; drawList(); pageCheck && pageCheck() } })
-const listRows = () => laneItems().filter((i) => colour.isOn(colour.valueOf(i)) && (!S.lane || laneKeyOf(i) === S.lane))
+const listRows = () => laneItems().filter((i) => !S.lane || laneKeyOf(i) === S.lane)
 // a record's lane key, as the Rows control groups it (its reader-given group under the current Rows choice)
 const laneKeyOf = (i) => { const g = rowsCtl.groupOf(i); return g == null ? '\u0000none' : String(g) }
 

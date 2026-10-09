@@ -117,18 +117,18 @@
   },
   {
    "path": "extension/views/wiki-page-history/view.html",
-   "bytes": 108792,
-   "sha256": "6adcff8c46da994621c4dffbfbc11ac271b73953cb07b3a78f217470c8bfeab5"
+   "bytes": 109767,
+   "sha256": "188d2138992bdd435aa8a900f915cc121037e7578a875543c39a948c7a658a9b"
   },
   {
    "path": "extension/views/wiki-page-history/view.json",
    "bytes": 6540,
-   "sha256": "15ad78fd56f174f8869765dc81ccd25d22af5fa6e3c99cff22ad37c091861ae2"
+   "sha256": "08f6dbaaa5cd6372bf0b3e1e1aa9616aa96ba5a8b0693765432d37feb44dbb71"
   },
   {
    "path": "extension/views/wiki-page-history/view.term.js",
-   "bytes": 26415,
-   "sha256": "6807e88750ee77047fb45ca3e425cbecd8d54cebd04d55dbb7127b476214c178"
+   "bytes": 28115,
+   "sha256": "78485b5b0bb9b2dc8ecf33d9422b0d7554f8d14390e6b59e83311ac4cb44093c"
   },
   {
    "path": "investigations/main/investigation.json",
@@ -1739,10 +1739,10 @@
   {
    "slug": "wiki-page-history",
    "name": "Wiki Page History",
-   "version": "5649cc7ed0e4",
+   "version": "8d7e645300ee",
    "from": "wiki-page-history",
-   "from_version": "5649cc7ed0e4",
-   "picked": "live at 5649cc7ed0e4"
+   "from_version": "8d7e645300ee",
+   "picked": "live at 8d7e645300ee"
   }
  ]
 }

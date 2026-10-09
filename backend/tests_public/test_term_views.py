@@ -897,7 +897,7 @@ async def test_repository_switches_runs_and_follows_its_citations_its_filter_and
     """One run's repository at a time: the switcher (p) lists every run with its tabs' counts and opens the one chosen,
     and Reset puts back the run the view opens on; a citation of a record opens its run's repository at its item's
     page, the record chosen and in view, and a run's citation that run's repository; a Filter by toggle leaves out the
-    items of a value, and a Color by chip turned off the items of its value."""
+    items of a value, and a Color by chip turned off only takes its value's hue off its items, which stay."""
     out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, keys=["p"], panel=False)
     rows = out.splitlines()
     menu = [re.sub(r"^❯ ", "", x.strip(" │")).split(None, 1) for x in rows if x.startswith("  │")]
@@ -937,7 +937,16 @@ async def test_repository_switches_runs_and_follows_its_citations_its_filter_and
     rows = out.splitlines()
     assert "○ closed 1" in rows[2]
     states = {m[1] for x in rows if re.match(r"(❯| ) ● #\d+", x) and (m := re.search(r" (merged|closed|open) ", x))}
-    assert states == {"merged"}
+    assert states == {"merged", "closed"}, "Color by only colors: the closed pull request stays"
+    assert rows[1].split()[:3] == ["pull", "requests", "8"]
+    # its mark drawn with no hue, the merged ones' in theirs
+    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP, keys=["click:closed 1"],
+                                     ansi=True, panel=False)
+    plain = lambda x: re.sub(r"\x1b\[[0-9;]*m", "", x)  # noqa: E731
+    marks = {m[1]: x[:x.index("#")] for x in out.splitlines()
+             if re.match(r"(❯| ) ● #\d+", plain(x)) and (m := re.search(r" (merged|closed) ", plain(x)))}
+    assert set(marks) == {"merged", "closed"}
+    assert HUE.search(marks["merged"]) and not HUE.search(marks["closed"]), marks
 
 
 @needs_node

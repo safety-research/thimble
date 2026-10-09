@@ -217,6 +217,7 @@
 <div id="ctl">
   <label class="search"><svg class="ico" viewBox="0 0 24 24"><path d="M4 10.5a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0M15.2 15.2L20 20"/></svg><input id="q" class="field" type="search" placeholder="Page name" autocomplete="off" spellcheck="false"></label>
   <button id="f-user" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
+  <span id="filter"></span>
   <span id="colour"></span>
 </div>
 <div id="hist"><div id="range"></div><div id="chart"><div id="gut"></div><svg id="hs"></svg></div><div id="ax"></div></div>
@@ -244,9 +245,10 @@
 <div id="tip"></div>
 <script>
 'use strict'
-// Wiki Page History. The control row narrows the pages by name and username, and holds thimble's Color by control: a
-// revision's wiki, its kind of save, its page's status (deleted or never deleted), its kind of message and its
-// signature, or any label, each value a chip that filters. Below it, thimble's time range selector is the one control
+// Wiki Page History. The control row narrows the pages by name and username, and holds thimble's Filter by and Color by
+// controls over the same fields: a revision's wiki, its kind of save, its page's status (deleted or never deleted), its
+// kind of message and its signature, or any label. Filter by's toggles hide the records of a value turned off, and
+// Color by's chips only color, their records kept in gray. Below it, thimble's time range selector is the one control
 // for time: its overview holds every revision over the whole span and its viewfinder frames the range the view shows.
 // The chart of the range counts the revisions (above the line, stacked by the colour's values) and deletes (below it)
 // of those pages per bin, on the chart's one axis, and a drag on it sets the range. The list on the left holds the
@@ -408,24 +410,24 @@ function inRange(r) {
   return false
 }
 // whether row r meets every filter but those `skip` names (one name or a list); a page whose wiki or status the analyst
-// turned off in Color by meets none
+// turned off in Filter by meets none
 function passes(r, skip) {
   const sk = (k) => skip === k || (Array.isArray(skip) && skip.includes(k))
   if (S.q && !LN[r].includes(S.q)) return false
-  if (!sk('colour') && pageLevel() && !colour.isOn(pageValue(r))) return false
+  if (!sk('filter') && pageLevel(filter) && !filter.isOn(pageValue(r, filter))) return false
   if (!sk('user') && S.user != null && !(userAt.has(S.user) && userRows(userAt.get(S.user)).has(r))) return false
   if (!sk('range') && S.range && !inRange(r)) return false
   return true
 }
 let rows = [] // the rows that pass, in order
 let charted = [] // the rows that pass every filter but the range, which the chart counts
-let counted = [] // and those of a value turned off too, which the chips count
+let counted = [] // and those of a value turned off in Filter by too, which its toggles count
 function compute() {
   rows = []; charted = []; counted = []
   for (let r = 0; r < N; r++) {
-    if (!passes(r, ['range', 'colour'])) continue
+    if (!passes(r, ['range', 'filter'])) continue
     counted.push(r)
-    if (pageLevel() && !colour.isOn(pageValue(r))) continue
+    if (pageLevel(filter) && !filter.isOn(pageValue(r, filter))) continue
     charted.push(r)
     if (!S.range || inRange(r)) rows.push(r)
   }
@@ -440,11 +442,13 @@ function clearFilters() {
 }
 
 // ---------------------------------------------------------------- colour
-// thimble's Color by control, in the control row: a revision's wiki, its kind of save (the base its diff is against),
-// its page's status, deleted or never deleted, its kind of message (whether the text it added holds a link) or its
-// signature, or any label, in one menu; the values as chips, each with its revisions in the chart, that filter their
-// records when turned off. A record the control is handed is {wiki, save, status, kind, signed} for a revision, {wiki,
-// status} for a page; a label's value is that label's among the record's marks, which the reader sends.
+// thimble's Filter by and Color by controls, in the control row, over the same fields: a revision's wiki, its kind of
+// save (the base its diff is against), its page's status, deleted or never deleted, its kind of message (whether the
+// text it added holds a link) or its signature, or any label, in one menu each. Filter by's values are toggles, each
+// with its revisions, that hide their records when turned off; Color by's are chips, each with its revisions in the
+// chart, whose records keep their place in gray when turned off. A record a control is handed is {wiki, save, status,
+// kind, signed} for a revision, {wiki, status} for a page; a label's value is that label's among the record's marks,
+// which the reader sends.
 const NONE = () => token('--viz-ink-3') || '#a19d94'
 const BASE_NAME = ['New page', 'Edit', 'After a delete', 'First stored'] // the reader's BASES: new, prev, deleted, withheld
 const BASE_MEANS = [
@@ -463,38 +467,36 @@ const SIGNED_MEANS = [
   "The text the revision added ends in a signature that is not the revision's username",
   'The text the revision added ends in no signature',
 ]
-const colour = thimble.colorBy({
-  mount: '#colour',
-  fields: [
-    // a fourth value names olive, so it does not take the sky blue that sits beside the first value's blue
-    { name: 'wiki', title: 'Wiki', description: 'The wiki the page belongs to', values: ['dse', 'probier', 'fractal', { name: 'dorfwiki', colour: 5 }] },
-    {
-      name: 'save', title: 'Kind of save', description: "What the revision's diff is against",
-      values: BASE_NAME.map((name, j) => ({ name, meaning: BASE_MEANS[j], ...(j === 3 ? { colour: 5 } : {}) })),
-    },
-    {
-      name: 'status', title: 'Status', description: 'Whether a delete event names the page',
-      values: STATUS.map((name, j) => ({ name, meaning: STATUS_MEANS[j] })),
-    },
-    {
-      name: 'kind', title: 'Kind of message',
-      description: 'What the text a revision added holds, once blanks, the stock new-page line and withheld placeholders are dropped; a revision that adds none takes no kind',
-      values: KIND_NAME.slice(1).map((name, j) => ({ name, meaning: KIND_MEANS[j] })),
-    },
-    {
-      name: 'signed', title: 'Signature', description: "Whether the text a revision added ends in a signature (-- name), and whether that name is the revision's username",
-      values: SIGNED.map((name, j) => ({ name, meaning: SIGNED_MEANS[j] })),
-    },
-  ],
-  chips: 'filter',
-  // the open page's history is drawn again from what was read: what the reader answers does not depend on the colour
-  onChange: () => { if (O) { compute(); renderAll(); if (!dropGone() && PG && S.sel != null) { renderHead(); renderPageStrip(); rerenderBlocks() } } },
-})
-// whether the colour is a field of the page itself, which a page's row takes and is filtered by
-const pageLevel = () => colour.field === 'wiki' || colour.field === 'status'
-// the value of a label among marks given as bits of indices into `marks`, null for none
-function labelValue(bits, marks) {
-  const lab = colour.label
+const FIELDS = [
+  // a fourth value names olive, so it does not take the sky blue that sits beside the first value's blue
+  { name: 'wiki', title: 'Wiki', description: 'The wiki the page belongs to', values: ['dse', 'probier', 'fractal', { name: 'dorfwiki', colour: 5 }] },
+  {
+    name: 'save', title: 'Kind of save', description: "What the revision's diff is against",
+    values: BASE_NAME.map((name, j) => ({ name, meaning: BASE_MEANS[j], ...(j === 3 ? { colour: 5 } : {}) })),
+  },
+  {
+    name: 'status', title: 'Status', description: 'Whether a delete event names the page',
+    values: STATUS.map((name, j) => ({ name, meaning: STATUS_MEANS[j] })),
+  },
+  {
+    name: 'kind', title: 'Kind of message',
+    description: 'What the text a revision added holds, once blanks, the stock new-page line and withheld placeholders are dropped; a revision that adds none takes no kind',
+    values: KIND_NAME.slice(1).map((name, j) => ({ name, meaning: KIND_MEANS[j] })),
+  },
+  {
+    name: 'signed', title: 'Signature', description: "Whether the text a revision added ends in a signature (-- name), and whether that name is the revision's username",
+    values: SIGNED.map((name, j) => ({ name, meaning: SIGNED_MEANS[j] })),
+  },
+]
+// the open page's history is drawn again from what was read: what the reader answers depends on neither control
+const controlsChanged = () => { if (O) { compute(); renderAll(); if (!dropGone() && PG && S.sel != null) { renderHead(); renderPageStrip(); rerenderBlocks() } } }
+const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, onChange: controlsChanged })
+const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, onChange: controlsChanged })
+// whether a control's choice is a field of the page itself, which a page's row takes and Filter by hides it by
+const pageLevel = (ctl = colour) => ctl.field === 'wiki' || ctl.field === 'status'
+// the value of a control's label among marks given as bits of indices into `marks`, null for none
+function labelValue(bits, marks, ctl = colour) {
+  const lab = ctl.label
   const l = lab && (labelState.all || labelState.labels || []).find((x) => x.id === lab)
   if (!l || !bits || !marks) return null
   for (let j = 0; j < marks.length; j++) if (bits & (1 << j) && marks[j].label === l.name) return marks[j].value
@@ -503,9 +505,9 @@ function labelValue(bits, marks) {
 const pageStatus = (r) => (O.pages.d[r] ? STATUS[0] : STATUS[1])
 // revision k of the overview, on row r
 const signedName = (j) => (j >= 0 ? SIGNED[j] : null)
-function revValue(k, r) {
-  if (colour.label) return labelValue(O.revs.rb[k], O.marks)
-  const f = colour.field
+function revValue(k, r, ctl = colour) {
+  if (ctl.label) return labelValue(O.revs.rb[k], O.marks, ctl)
+  const f = ctl.field
   return f === 'wiki' ? O.wikis[O.pages.w[r]] : f === 'save' ? BASE_NAME[O.revs.rk[k]] : f === 'status' ? pageStatus(r)
     : f === 'kind' ? KIND_NAME[O.revs.rg[k]] : f === 'signed' ? signedName(O.revs.rs[k]) : null
 }
@@ -518,21 +520,23 @@ function itemRec(st, i) {
 }
 const itemRef = (st, i) => `${st.k[i] === 'r' ? PG.files.revisions : PG.files.events}#L${st.ln[i]}`
 // item i of the open page's strip
-function stripValue(st, i) {
-  if (colour.label) return labelValue(st.b[i], PG.marks)
+function stripValue(st, i, ctl = colour) {
+  if (ctl.label) return labelValue(st.b[i], PG.marks, ctl)
   if (st.k[i] !== 'r') return null
-  const f = colour.field
+  const f = ctl.field
   return f === 'wiki' ? PG.page.wiki : f === 'save' ? BASE_NAME[st.kb[i]] : f === 'status' ? openStatus()
     : f === 'kind' ? KIND_NAME[st.g[i]] : f === 'signed' ? signedName(st.sg[i]) : null
 }
 // a page's own value, which its row is filtered by: its wiki or its status; the other fields and the labels belong to
 // its records
-function pageValue(r) {
-  const f = colour.field
+function pageValue(r, ctl = colour) {
+  const f = ctl.field
   return f === 'wiki' ? O.wikis[O.pages.w[r]] : f === 'status' ? pageStatus(r) : null
 }
-// a value's colour where it is on, the dim ink where the analyst turned it off, the plain ink for no value
-const valueInk = (v, ink, dim) => (v == null ? ink : colour.isOn(v) ? colour.colourOf(v) || ink : dim)
+// whether Filter by keeps revision k of row r, and a delete of a page with no stored revision, which no row holds, of
+// wiki `wk`: by its wiki or its status (deleted) when Filter by is either, else always
+const revKept = (k, r) => filter.isOn(revValue(k, r, filter))
+const goneKept = (wk) => !pageLevel(filter) || filter.isOn(filter.field === 'wiki' ? wk : STATUS[0])
 
 // ---------------------------------------------------------------- popovers
 let openPop = null
@@ -624,17 +628,20 @@ $('f-user').onclick = (e) => {
     if (S.sel != null) openPage(S.sel)
   }
 }
-// the chips' counts: the revisions in the range of the pages the other filters keep that take each value, a value
-// turned off counted too
+// the counts of the two controls' values: Filter by's, the revisions in the range of the pages the other filters keep,
+// a value turned off counted too; Color by's, the revisions in the range that every filter keeps
 function renderCounts() {
-  const counts = {}
+  const counts = {}, fcounts = {}
+  const add = (into, v) => { const key = v == null ? '' : v; into[key] = (into[key] || 0) + 1 }
   for (const r of counted) {
     for (let k = RS[r]; k < RE[r]; k++) {
       if (!inR(O.revs.rt[k])) continue
-      const v = revValue(k, r), key = v == null ? '' : v
-      counts[key] = (counts[key] || 0) + 1
+      const fv = revValue(k, r, filter)
+      add(fcounts, fv)
+      if (filter.isOn(fv)) add(counts, revValue(k, r))
     }
   }
+  filter.counts(fcounts)
   colour.counts(counts)
 }
 
@@ -682,7 +689,7 @@ function drawPlots() {
 function renderRange() {
   const times = [], values = [], lvl = pageLevel()
   for (const r of charted) {
-    for (let k = RS[r]; k < RE[r]; k++) { times.push(O.t0 + O.revs.rt[k]); values.push(revValue(k, r)) }
+    for (let k = RS[r]; k < RE[r]; k++) if (revKept(k, r)) { times.push(O.t0 + O.revs.rt[k]); values.push(revValue(k, r)) }
     for (let k = DS[r]; k < DE[r]; k++) { times.push(O.t0 + O.dels.dt[k]); values.push(lvl ? pageValue(r) : null) }
   }
   if (S.user == null) {
@@ -690,9 +697,8 @@ function renderRange() {
     for (let k = 0; k < G2.ot.length; k++) {
       const wk = O.wikis[G2.ow[k]]
       if (S.q && !String(G2.on[k]).toLowerCase().includes(S.q)) continue
-      const v = colour.field === 'wiki' ? wk : colour.field === 'status' ? STATUS[0] : null
-      if (lvl && !colour.isOn(v)) continue
-      times.push(O.t0 + G2.ot[k]); values.push(v)
+      if (!goneKept(wk)) continue
+      times.push(O.t0 + G2.ot[k]); values.push(colour.field === 'wiki' ? wk : colour.field === 'status' ? STATUS[0] : null)
     }
   }
   range.data({ times, values, span: [O.t0 + O.span[0], O.t0 + O.span[1]] })
@@ -703,10 +709,10 @@ function renderRange() {
   return true
 }
 
-// The chart of the range: the revisions of the pages that pass every filter, per bin of the range, above the line, each
-// bin's bar stacked by the colour's values that are on, in the chips' order; the deletes of those pages, and of pages
-// known only from a delete, below it in one series. Its bins are the rows' bins, so each row's strip is a small multiple
-// of it. A drag on it sets the range, a double click shows the whole span.
+// The chart of the range: the revisions that pass every filter, per bin of the range, above the line, each bin's bar
+// stacked by the colour's values in the chips' order, a value turned off in gray; the deletes of those pages, and of
+// pages known only from a delete, below it in one series. Its bins are the rows' bins, so each row's strip is a small
+// multiple of it. A drag on it sets the range, a double click shows the whole span.
 let H = null // the chart's geometry: {x0, x1, sc, bins, slot, fills, ...}
 let stripW = 120
 const stripWidth = () => Math.round(clamp($('list').clientWidth * 0.36, 70, 200))
@@ -721,9 +727,10 @@ function renderHist() {
   const sc = range.scale(x1 - x0)
   const bins = sc.bins((3 * (x1 - x0)) / stripW)
   const nb = bins.length
-  const vals = colour.values.filter((v) => v.value != null && v.on).map((v) => v.value)
+  const vals = colour.values.filter((v) => v.value != null).map((v) => v.value)
   const slot = new Map(vals.map((v, j) => [v, j])), NS = vals.length + 1
   const ink = NONE(), red = delInk()
+  // a value turned off has no colour (colourOf), so its revisions are drawn in the gray of those with no value
   const fills = [...vals.map((v) => colour.colourOf(v) || ink), ink]
   H = { x0, x1, sc, bins, slot, NS, fills, base, vals }
   const revs = new Int32Array(nb), dels = new Int32Array(nb), gone = new Int32Array(nb), by = Array.from({ length: nb }, () => new Int32Array(NS))
@@ -733,9 +740,8 @@ function renderHist() {
       const t = O.revs.rt[k]
       if (!inPlot(t)) continue
       const i = sc.binOf(O.t0 + t)
-      if (i < 0) continue
+      if (i < 0 || !revKept(k, r)) continue
       const v = revValue(k, r)
-      if (!colour.isOn(v)) continue
       revs[i]++; nr++
       by[i][v == null || !slot.has(v) ? NS - 1 : slot.get(v)]++
     }
@@ -747,15 +753,14 @@ function renderHist() {
       dels[i]++; nd++
     }
   }
-  // deletes of pages with no stored revision, which no row holds: counted where the name and Color by filters let
+  // deletes of pages with no stored revision, which no row holds: counted where the name filter and Filter by let
   // them (each is a deleted page), and while no username is filtered by, since a delete has no author's revisions
   if (S.user == null) {
     const G2 = O.gone
-    const lvl = pageLevel()
     for (let k = 0; k < G2.ot.length; k++) {
       const wk = O.wikis[G2.ow[k]]
       if (S.q && !String(G2.on[k]).toLowerCase().includes(S.q)) continue
-      if (lvl && !colour.isOn(colour.field === 'wiki' ? wk : STATUS[0])) continue
+      if (!goneKept(wk)) continue
       const t = G2.ot[k]
       if (!inPlot(t)) continue
       const i = sc.binOf(O.t0 + t)
@@ -789,8 +794,9 @@ function renderHist() {
   svg.setAttribute('width', w); svg.setAttribute('height', h)
   svg.innerHTML = s
   // the key: each series with a mark drawn as it is, the revisions in the colours of the values that are on (one grey
-  // with Color by Off), the deletes in theirs
-  const sw = vals.length ? vals.slice(0, 8).map((v) => `<i style="--c:${esc(colour.colourOf(v) || ink)}"></i>`).join('') : `<i style="--c:${esc(ink)}"></i>`
+  // with Color by Off or none on), the deletes in theirs
+  const lit = vals.filter((v) => colour.isOn(v))
+  const sw = lit.length ? lit.slice(0, 8).map((v) => `<i style="--c:${esc(colour.colourOf(v) || ink)}"></i>`).join('') : `<i style="--c:${esc(ink)}"></i>`
   $('gut').innerHTML = `<span class="k"><span class="msw">${sw}</span><b>${fmt(nr)}</b>${nr === 1 ? 'revision' : 'revisions'}</span>` +
     `<span class="k"><span class="sw" style="--c:${red}"></span><b>${fmt(nd)}</b>${nd === 1 ? 'delete' : 'deletes'}</span>`
   svg.bins = { revs, dels, gone, nb, by, vals, fills }
@@ -871,9 +877,8 @@ function stripSvg(r) {
     const t = O.revs.rt[k]
     if (!inPlot(t)) continue
     const i = sc.binOf(O.t0 + t)
-    if (i < 0) continue
+    if (i < 0 || !revKept(k, r)) continue
     const v = revValue(k, r)
-    if (!colour.isOn(v)) continue
     let a = revs.get(i)
     if (!a) revs.set(i, (a = new Int32Array(NS)))
     a[v == null || !H.slot.has(v) ? NS - 1 : H.slot.get(v)]++
@@ -922,31 +927,31 @@ function nameHtml(r) {
 }
 const anchorOf = (r) => (O.keys[r] ? unitRef(O.keys[r]) : O.pages.ln[r] ? `pages.jsonl#L${O.pages.ln[r]}` : '')
 // A group's mix of its records' colours (rowMix's counts), as the kit's proportion bar, in a holder that carries
-// `attrs`; nothing with Color by Off or no value on
+// `attrs`; nothing with Color by Off or no record
 const mixBar = (n, attrs = '') => (n ? `<span class="mixw"${attrs}>${thimble.mix(n)}</span>` : '')
-// a page's records by the colour's values that are on, {value: n} with '' for no value: its revisions and deletes in
-// the range, and its own line; a delete and the page's line take a label's value, or the page's wiki or status, and no
-// value of a revision's own fields; null with Color by Off or none on
+// a page's records that Filter by keeps by the colour's values, {value: n} with '' for no value: its revisions and
+// deletes in the range, and its own line; a delete and the page's line take a label's value, or the page's wiki or
+// status, and no value of a revision's own fields; a value turned off counts too, and the mix draws it in gray; null
+// with Color by Off or no record
 function rowMix(r) {
   if (colour.off) return null
   const n = {}
   let all = 0
-  const add = (v) => { if (colour.isOn(v)) { const k = v == null ? '' : String(v); n[k] = (n[k] || 0) + 1; all++ } }
-  for (let k = RS[r]; k < RE[r]; k++) if (inR(O.revs.rt[k])) add(revValue(k, r))
+  const add = (v) => { const k = v == null ? '' : String(v); n[k] = (n[k] || 0) + 1; all++ }
+  // a delete and the page's line under a label Filter by holds: by their value of it
+  const kept = (bits) => !filter.label || filter.isOn(labelValue(bits, O.marks, filter))
+  for (let k = RS[r]; k < RE[r]; k++) if (inR(O.revs.rt[k]) && revKept(k, r)) add(revValue(k, r))
   const own = colour.label ? null : pageValue(r)
-  for (let k = DS[r]; k < DE[r]; k++) if (inR(O.dels.dt[k])) add(colour.label ? labelValue(O.dels.db[k], O.marks) : own)
-  if (O.pages.ln[r]) {
+  for (let k = DS[r]; k < DE[r]; k++) if (inR(O.dels.dt[k]) && kept(O.dels.db[k])) add(colour.label ? labelValue(O.dels.db[k], O.marks) : own)
+  if (O.pages.ln[r] && kept(O.pages.pb[r])) {
     const v = colour.label ? labelValue(O.pages.pb[r], O.marks) : own
     if (v != null) add(v)
   }
   return all ? n : null
 }
-// a label colored by with a value turned off: the rows are not anchored, since thimble hides an anchored element whose
-// unit takes a value turned off, and a page takes none of its own
-const unitsAnchored = () => !(colour.label && colour.values.some((v) => !v.on))
 function rowHtml(r) {
   const P = O.pages, p = P.p[r]
-  const anchor = unitsAnchored() ? anchorOf(r) : ''
+  const anchor = anchorOf(r)
   const d = P.d[r]
   const meta = `${esc(O.wikis[P.w[r]])} · ${esc(shortSpan(O.t0 + P.f[r], O.t0 + P.l[r]))}`
   const mix = rowMix(r)
@@ -1161,8 +1166,8 @@ function renderPageStrip() {
     if (st.k[i] === 'd') { dels.set(b, (dels.get(b) || 0) + 1); nd++ }
     else if (st.k[i] === 'q') reqs.set(b, (reqs.get(b) || 0) + 1)
     else {
+      if (!filter.isOn(stripValue(st, i, filter))) continue
       const v = stripValue(st, i)
-      if (!colour.isOn(v)) continue
       let a = revs.get(b)
       if (!a) revs.set(b, (a = new Int32Array(NS)))
       a[v == null || !H.slot.has(v) ? NS - 1 : H.slot.get(v)]++
@@ -1394,14 +1399,14 @@ function skelHtml(pos) {
     `<div class="bh" data-thimble-chrome><span class="seq">r${st.s[i]}</span><span class="tm">${hms(t)}</span>${who(u || '')}<span class="br">${statHtml(BASE_KEY[st.kb[i]], st.a[i], st.r[i])}</span></div>` +
     `<div class="skb" style="height:${body - 8}px"></div></article>`
 }
-// whether the Color by chips keep an item of the history: a revision by its value; a delete or a request, which takes no
+// whether Filter by keeps an item of the history: a revision by its value; a delete or a request, which takes no
 // field's value, always under a field, and by its label value under a label
 function keptAt(pos) {
   const st = PG.strip, i = LP[pos]
-  if (st.k[i] !== 'r') return !colour.label || colour.keeps({ ref: itemRef(st, i) })
-  return colour.keeps(itemRec(st, i))
+  if (st.k[i] !== 'r' && !filter.label) return true
+  return filter.isOn(stripValue(st, i, filter))
 }
-// The whole history in the range, with a line for each day: a model of every item the chips keep, each with its height
+// The whole history in the range, with a line for each day: a model of every item Filter by keeps, each with its height
 // (as drawn, or worked out from what the history says of it until it is), and the items drawn only around the part in
 // view, between two spacers that hold the room of the rest. The items drawn are read in full, CHUNK at a time, and
 // drawn in place, the item at the top of the view kept where it stands. The day of the item at the top stands over the
@@ -1411,7 +1416,7 @@ const M = { pos: [], top: new Float64Array(0), h: new Float64Array(0), day: [], 
 const measured = new Map() // place -> the height an item was drawn at, its day's line included
 let dayH = DAY_H
 let win = [0, 0] // the items of M drawn, [from, to)
-// the model: the places the chips keep, each one's day line, its height and where it stands
+// the model: the places Filter by keeps, each one's day line, its height and where it stands
 function buildModel() {
   const pos = [], day = []
   let d = null
@@ -1751,7 +1756,8 @@ function rescope() {
   dropGone()
 }
 // Reset, in Color by's row: the username, the sort, the page picked and how its revisions read go back to how the view
-// opens (the first page of the list); the kit puts back the search field, the chips and the range itself
+// opens (the first page of the list); the kit puts back the search field, the chips, Filter by's toggles and the range
+// itself
 thimble.onReset({
   changed: () => S.user != null || S.sort !== 'n' || S.dir !== -1 || S.picked || S.pinfo || S.event != null || S.read != null,
   reset: () => {

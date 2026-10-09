@@ -172,8 +172,8 @@
 // its columns and of a label from the marks the reader hands it, so every label over the files groups, filters and
 // colors the same way. Color by is the only color, and it colors the reports (the bars, the marks and the panel's report
 // rows): a lane or an episode is never colored whole, it shows the mix of its reports' values as the kit's small
-// proportion bar (thimble.mix), and the list of lanes has the kit's plain track. A value whose chip is off leaves the
-// bars, the counts and the lists.
+// proportion bar (thimble.mix), and the list of lanes has the kit's plain track. A value whose chip is off keeps its
+// reports in the bars, the counts and the lists, in gray; Filter by is what hides them.
 // Labels: the reader keeps only the reports the label filter keeps and hands each its marks; the lanes, their rows and
 // the episodes carry their units as data-anchor, the panel's report rows their row's ref, so thimble marks them.
 const slug = (thimble.view && thimble.view.slug) || 'activity-timeline'
@@ -337,11 +337,10 @@ const R = () => EXT
 const W = () => (range.full ? [EXT[0], EXT[1]] : [range.from, range.to])
 const isWhole = () => range.full
 function lowerBound(t) { let lo = 0, hi = N; while (lo < hi) { const m = (lo + hi) >> 1; if (T[m] < t) lo = m + 1; else hi = m } return lo }
-// whether a report shows: the search holds it, Filter by keeps its value and Color by's chip of its value is on
+// whether a report shows: the search holds it and Filter by keeps its value (Color by only colors)
 function passes(i, skip) {
   if (S.found && !S.found.has(C.r[i])) return false
   if (skip !== 'filter' && !FON[FVAL[i]]) return false
-  if (skip !== 'colour' && !VON[VAL[i]]) return false
   return true
 }
 
@@ -439,7 +438,6 @@ const noneColour = () => token('--label-none') || '#a09c93'
 const colour = thimble.colorBy({
   mount: '#colour',
   fields: FIELDS_BY.map((f) => ({ ...f, value: (i) => fieldValue(f.name, i) })),
-  chips: 'filter',
   onChange: () => { if (D) { assignValues(); rescope() } },
 })
 function assignValues() {
@@ -447,10 +445,10 @@ function assignValues() {
   ;[VALS, VAL] = valuesUnder(colour.by)
   syncChips()
 }
-// the chips' counts: the window's reports that pass every other filter, by value
+// the chips' counts: the window's reports that pass every filter, by value
 function chipCounts() {
   const [a, b] = W(), n = new Int32Array(VALS.length)
-  for (let i = lowerBound(a), z = lowerBound(b); i < z; i++) if (passes(i, 'colour')) n[VAL[i]]++
+  for (let i = lowerBound(a), z = lowerBound(b); i < z; i++) if (passes(i)) n[VAL[i]]++
   const map = {}
   VALS.forEach((v, k) => { const key = v == null ? '' : v; map[key] = (map[key] || 0) + n[k] })
   colour.counts(map)
@@ -470,12 +468,9 @@ function syncChips() {
   }
   for (let k = 0; k < VALS.length; k++) if (!ORD.includes(k)) ORD.push(k)
 }
-// thimble hides every anchored element whose label value is turned off, a unit's value being the one most of its
-// records take, so while a label is the colour with a value off the lanes, bars and episodes are not anchored as units
-const unitsAnchored = () => !(colour.label && colour.values.some((v) => !v.on))
 // while a label is the colour thimble would draw a unit's value as a solid edge on it, so a unit is anchored unmarked
 // and its row shows its reports' mix itself
-const UNIT = (key, rest) => (unitsAnchored() ? ` data-anchor="view:${slug}/${key}"${colour.label ? ' data-anchor-unmarked' : ''}${rest}` : '')
+const UNIT = (key, rest) => ` data-anchor="view:${slug}/${key}"${colour.label ? ' data-anchor-unmarked' : ''}${rest}`
 const catColour = (k) => VCOL[k] || noneColour()
 const catName = (k) => VNAME[k] || 'none'
 const colourOf = (i) => catColour(VAL[i])

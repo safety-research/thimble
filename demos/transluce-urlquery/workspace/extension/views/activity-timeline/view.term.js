@@ -89,7 +89,7 @@ let loaded = false
 const records = new Map() // a report opened in full -> its record
 const S = { report: null } // the report the pane shows in full
 
-const colour = colorBy({ fields: FIELDS_BY, chips: 'filter', onChange: () => assign() })
+const colour = colorBy({ fields: FIELDS_BY, onChange: () => assign() })
 const q = search({ words: 'search reports', onChange: (text) => doSearch(text) })
 const range = timeRange({ onChange: () => {} })
 let rowsC = null
@@ -251,11 +251,10 @@ function assign() {
   redraw()
 }
 
-// whether a report shows: the search holds it, Filter by keeps its value, its Color by chip is on
+// whether a report shows: the search holds it and Filter by keeps its value (Color by only colors)
 function passes(rec, skip) {
   if (found && !found.has(rec.r)) return false
   if (skip !== 'filter' && filter && filter.by && !filter.isOn(rec.fv)) return false
-  if (skip !== 'colour' && !colour.keeps(rec)) return false
   return true
 }
 

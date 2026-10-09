@@ -8,7 +8,7 @@
 // words; an agent's sign-off). Enter opens the item's page in the side pane: a pull request's or an issue's timeline
 // with each commit's diff, a thread's posts as replies under the first, an agent's sign-off and what it did; ↑↓ then
 // move through its records and Enter opens a record's place. One fetch gives the run's items of the tab that the label
-// filter, Filter by and Color by keep; the search narrows them here. Color marks the unit its value belongs to: a field
+// filter and Filter by keep; the search narrows them here. Color marks the unit its value belongs to: a field
 // colors the rows' marks and the track, an agent's under author by its own name; a label marks records, so a row, which
 // stands for its records, shows their mix, as an agent's row does under a field of the items it worked on (state, area).
 import { COLORS, choice, colorBy, columns, cut, dayName, details, draw, dur, fetch, filterBy, list, num, onLabels, onOpen, open as openPlace, plural, search, side, view, width, wrap } from 'thimble-term'
@@ -89,7 +89,7 @@ const FIELDS = [
   { name: 'area', title: 'Area', description: 'The part of the library: the first label, else the area of the issue it fixes' },
   { name: 'author', title: 'Author', description: 'Who opened the pull request or the issue, or started the thread' },
 ]
-const colour = colorBy({ fields: FIELDS, chips: 'filter', onChange: () => load() })
+const colour = colorBy({ fields: FIELDS, onChange: () => load() })
 const filter = filterBy({ fields: FIELDS, onChange: () => load() })
 const q = search({ words: 'search' })
 // the run switcher, made once the reader named the runs: Reset puts back the run the view opens on

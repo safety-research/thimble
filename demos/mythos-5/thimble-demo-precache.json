@@ -87,18 +87,18 @@
   },
   {
    "path": "extension/views/activity-timeline/view.html",
-   "bytes": 23691,
-   "sha256": "b8628063efe042ffe590bd4cc03c6875794726c6fd8e7ad93fbac2c38e5a6ad1"
+   "bytes": 23636,
+   "sha256": "5d5f881c703b2e0962cd20185e84747f1a1b20078565e6f8bf766c700111b382"
   },
   {
    "path": "extension/views/activity-timeline/view.json",
    "bytes": 2139,
-   "sha256": "b35ce65e4e53821962f037b7fa3a9088d60daabd43c36d99dad720747822aa20"
+   "sha256": "37d51b052e4db879e5d6ca6060a12a6f7812ab540b154219fdfae314183c231c"
   },
   {
    "path": "extension/views/activity-timeline/view.term.js",
-   "bytes": 9955,
-   "sha256": "a9721d752f02ff7d7b7c6e684b1f1933d39175594ff29788a52ccae9ac714564"
+   "bytes": 9899,
+   "sha256": "d4f2e51e196e0e6326f2c3721740a2bdfe4a96e026e40e1fb8cc4edf2500724e"
   },
   {
    "path": "investigations/main/investigation.json",
@@ -906,10 +906,10 @@
   {
    "slug": "activity-timeline",
    "name": "Activity Timeline",
-   "version": "31d9d9e1db75",
+   "version": "607c82a16a8a",
    "from": "activity-timeline",
-   "from_version": "31d9d9e1db75",
-   "picked": "live at 31d9d9e1db75"
+   "from_version": "607c82a16a8a",
+   "picked": "live at 607c82a16a8a"
   }
  ]
 }

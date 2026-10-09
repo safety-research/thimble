@@ -11,12 +11,15 @@
 //                                              order and colors stay the records': { meanings: { payments: 'the
 //                                              payments API' } }; `description` says what the field is; a chip's hover
 //                                              gives them
-//     chips: 'filter',                         a value turned off hides its records; 'highlight' (the default) dims them
 //     strip: '#list',                          the list that gets the colored tracks, or true for the page; another
 //                                              list gets them with colour.strip(el, {rows}) or {whole: true}, and is
 //                                              a plain track otherwise
 //     onChange: (colour) => draw(),            the choice, a value turned on or off, or the label values changed
 //   })
+//
+// Color by only colors: a value turned off takes its color off its records, which stay, drawn in gray as the records
+// with no value are; Filter by (viewer_controls.js) is what hides records. `chips: 'filter'`, which hid them once, is
+// still taken and does nothing, as `chips: 'highlight'` does.
 //
 // One menu takes several choices: Off, then the view's own fields under "Fields" and every label over files under
 // "Labels", those that mark the view's files first, a label a choice as a field is (no switch of its own). The first
@@ -38,9 +41,9 @@
 // a plain scrollbar. Colour marks the records alone, the anchored elements: a group's row takes none, and may show its
 // records' mix with thimble.mix.
 // Color by is thimble's small secondary button with the choice in it. The chosen field's values are key chips in the
-// top row (viewer_kit.css .chip-key), each a square swatch of its colour, its name and its count; a click turns a value
-// off or on, an Alt-click or a double click keeps that value alone, and hovering a value shows what it means: a label's
-// as the label says, a field's as the page declares it (or what the field is). A click on a chip's swatch opens the picker of thimble's label colours
+// top row (viewer_kit.css .chip-key), each a square swatch of its colour, its name and its count; a click turns a
+// value's color off or on, an Alt-click or a double click keeps that value's alone, and hovering a value shows what it
+// means: a label's as the label says, a field's as the page declares it (or what the field is). A click on a chip's swatch opens the picker of thimble's label colours
 // around the colour wheel (label_wheel.json, window.__thimbleLabelWheel); "N more" lists the chips it hides, each with
 // its box, its swatch (the picker under it) and its meaning on hover. The one picked
 // recolours the value everywhere in the view (its chip, the records' bars, the tracks, and what the page draws through
@@ -467,7 +470,6 @@
     this.tallies = {}
     this.seenRecs = typeof WeakSet === 'function' ? new WeakSet() : null
     this.seenRows = {}
-    this.mode = opts.chips === 'filter' ? 'filter' : 'highlight'
     this.initial = typeof opts.initial === 'string' ? opts.initial : this.fields.length ? this.fields[0].name : null
     this.onChange = typeof opts.onChange === 'function' ? opts.onChange : null
     this.mount = el(opts.mount)
@@ -539,7 +541,7 @@
         }
       }
       if (any) self.soon()
-    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-colour', 'data-colour-tracks', 'data-anchor', 'data-thimble-off'] })
+    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-colour', 'data-colour-tracks', 'data-anchor'] })
     if (opts.strip) this.strip(opts.strip, { whole: true })
   }
 
@@ -660,6 +662,10 @@
     var vs = (l && l.values) || []
     for (var i = 0; i < vs.length; i++) if (vs[i].name === String(value)) return vs[i].colour || l.colour || null
     return (l && l.colour) || null
+  }
+  // the colour a record of the value is drawn in: none for a value turned off, which keeps its records without its colour
+  Control.prototype.drawnColour = function (value) {
+    return this.isOn(value) ? this.colourOf(value) : null
   }
   Control.prototype.valueOf = function (record) {
     var c = this.choice()
@@ -849,12 +855,11 @@
     }
     for (var i = 0; i < this.strips.length; i++) this.strips[i].refreshed()
   }
-  // the hook the bridge draws the marks by
+  // the hook the bridge draws the marks by: a value turned off draws no bar, and its label's texts the plain ink
   Control.prototype.hook = function () {
     var c = this.choice()
     var self = this
     var off = this.offSet(c)
-    var how = this.mode === 'filter' ? 'hide' : 'dim'
     kit.colour(
       c && c.off
         ? { mode: 'off' }
@@ -864,10 +869,10 @@
               label: c.label || null,
               name: c.title,
               colourOf: function (v) {
-                return self.colourOf(v)
+                return self.drawnColour(v)
               },
               off: function (v) {
-                return off.indexOf(keyOf(v)) >= 0 ? how : null
+                return off.indexOf(keyOf(v)) >= 0
               },
               // the choices past the first, a band each beside the first's on every record: a label's value from its
               // mark, a field's from the record's data-colour-tracks (attr), at its place there
@@ -1845,8 +1850,7 @@
     return n * laneWidth(n) + (n - 1) * LANE_GAP
   }
   // every record of the list: [top, bottom] as fractions of the list's height, its colour (the marks' grey for a record
-  // that takes no value, as for every record with Color by Off), its element or its row; a record of a value turned off
-  // is left out, the records with no value too when their chip is off
+  // that takes no value or a value turned off, as for every record with Color by Off), its element or its row
   Strip.prototype.measure = function (peeking) {
     this.measured++
     // a list the strip cannot know whole is a plain track, whose records are read only when the preview asks for them
@@ -1867,16 +1871,11 @@
     var ch = c.choice()
     var recs = []
     var plain = !ch || ch.off
-    var off = c.offSet(ch)
     var by = ch && ch.label ? ch.label : null
     var g = grey()
     if (this.rows) {
       var n = this.rows.length
-      for (var i = 0; i < n; i++) {
-        var key = plain ? '' : keyOf(this.rows[i])
-        if (!plain && off.indexOf(key) >= 0) continue
-        recs.push([i / n, (i + 1) / n, plain || key === NONE ? g : c.colourOf(this.rows[i]) || g, i])
-      }
+      for (var i = 0; i < n; i++) recs.push([i / n, (i + 1) / n, plain ? g : c.drawnColour(this.rows[i]) || g, i])
     } else {
       var box = this.box
       var H = Math.max(1, box.scrollHeight)
@@ -1896,12 +1895,10 @@
           seen[ref] = true
           if (by) v = c.valueOf(ref)
         }
-        var k2 = plain ? '' : keyOf(v)
-        if (!plain && off.indexOf(k2) >= 0) continue
         var rr = e.getBoundingClientRect()
         if (!rr.height) continue
         var y = rr.top - top0
-        recs.push([y / H, (y + rr.height) / H, plain || k2 === NONE ? g : c.colourOf(v) || g, e])
+        recs.push([y / H, (y + rr.height) / H, plain ? g : c.drawnColour(v) || g, e])
       }
       recs.sort(function (a, b) {
         return a[0] - b[0]
@@ -2763,8 +2760,8 @@
         var ch = c.choice()
         return ch && ch.label ? ch.label : null
       },
-      /** the chips' values: [{value, name, colour, on, n}], value null for the records that take none, each value under
-       *  the chip "Other" in its place; none for Off */
+      /** the chips' values: [{value, name, colour, on, n}], value null for the records that take none, colour the
+       *  chip's whether the value is on or off, each value under the chip "Other" in its place; none for Off */
       get values() {
         var off = c.offSet()
         return c.flat().map(function (v) {
@@ -2778,18 +2775,20 @@
         c.tally(record)
         return c.valueOf(record)
       },
-      /** the colour of a value, one a canvas can draw; null for no value and for Off */
+      /** the colour a value's records are drawn in, one a canvas can draw; null for no value, for a value turned off
+       *  and for Off: draw those in one gray */
       colourOf: function (value) {
-        return c.colourOf(value)
+        return c.drawnColour(value)
       },
-      /** whether the analyst left a value on */
+      /** whether the analyst left a value's colour on */
       isOn: function (value) {
         return c.isOn(value)
       },
-      /** whether a record's value is on: the records a page keeps in a list, a count or a chart */
+      /** always true: Color by only colors, and a value turned off keeps its records (Filter by's keeps hides them);
+       *  kept for the pages that ask */
       keeps: function (record) {
         c.tally(record)
-        return c.isOn(c.valueOf(record))
+        return true
       },
       /** ` data-colour="<value>"` for a record's element while a field is colored by, '' while a label is or for Off:
        *  the bar thimble draws on the element */
@@ -2822,13 +2821,13 @@
         }
         c.refresh()
       },
-      /** the choice as the reader takes it with a fetch (thimble.colour_value and colour_on in reader.py); null for Off */
+      /** the choice as the reader takes it with a fetch (thimble.colour_value in reader.py): {field} or {label, name};
+       *  null for Off. It names no value turned off, so a reader keeps and counts every record */
       query: function () {
         var ch = c.choice()
         if (!ch || ch.off) return null
-        var off = c.offSet(ch).map(function (k) { return k === NONE ? null : k })
-        if (ch.label) return { label: ch.label, name: ch.title, off: off }
-        return { field: ch.field, off: off }
+        if (ch.label) return { label: ch.label, name: ch.title }
+        return { field: ch.field }
       },
       /** the colored tracks on a list (an element or a selector, or true for the page); `opts.rows` gives every row's
        *  value in order for a list that draws only the rows in view, `opts.refs` every row's record, `opts.preview(i or
@@ -2891,7 +2890,8 @@
 
   // A group's mix: a group (a page, an agent, a run, a session) takes no colour of its own, so its row shows how its
   // records divide among Color by's values as a small proportion bar, each value's share in its colour, in the chips'
-  // order, the records with no value grey and last; the values turned off are left out, and with Off it is empty.
+  // order, the records with no value gray and last; a value turned off keeps its share, in gray, and with Off it is
+  // empty.
   function mixHtml(counts) {
     var c = control
     var ch = c && c.choice()
@@ -2905,14 +2905,12 @@
       var ib = b === NONE ? 1e9 : order.indexOf(b) < 0 ? 1e8 : order.indexOf(b)
       return ia - ib || got[b] - got[a]
     })
-    var off = c.offSet(ch)
     var parts = ''
     var words = []
     for (var k = 0; k < keys.length; k++) {
       var key = keys[k]
-      if (off.indexOf(key) >= 0) continue
       var name = key === NONE ? (ch.label ? 'Not marked' : 'No ' + String(ch.title).toLowerCase()) : key
-      var col = key === NONE ? grey() : c.colourOf(key) || grey()
+      var col = key === NONE ? grey() : c.drawnColour(key) || grey()
       parts += '<span style="flex-grow:' + got[key] + ';flex-basis:0;background:' + esc(col) + '"></span>'
       words.push(name + ' ' + num(got[key]))
     }

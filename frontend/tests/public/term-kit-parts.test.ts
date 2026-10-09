@@ -302,6 +302,43 @@ describe('lanes', () => {
     expect(lane('lead').replace(/ /g, '')).toBe('▌▌')
   })
 
+  test('a value turned off in Color by keeps its records in the lanes and the time range\'s strip, dim, with no hue', async () => {
+    init()
+    const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }] })
+    const rows = kit.rows({ fields: [{ name: 'session', title: 'Session' }] })
+    const range = kit.timeRange({})
+    range.data({ times: CALLS.map((c) => c.t), values: (i: number) => colour.valueOf(CALLS[i]) })
+    const ln = kit.lanes({ rows, colour })
+    kit.draw((d: any) => {
+      range.draw(d, { gutter: 16 })
+      const scale = range.scale(d.cols - 16)
+      ln.draw(d, { items: CALLS, scale, gutter: 16, density: false })
+    })
+    colour.counts({ Grep: 2, Task: 1, Read: 1, Bash: 1 })
+    await tick()
+    const grep = colour.colourOf('Grep')
+    expect(grep).toBeTruthy()
+    // the grep lane's one record, and the strip's cells (row 1) of the two Grep calls, in Grep's hue
+    const markOf = () => {
+      const f = last()
+      const y = text(f).findIndex((r: string) => r.trimStart().startsWith('grep'))
+      return cell(f, y, [...text(f)[y]].indexOf('▌', 18))!
+    }
+    const stripCells = () => runsAt(last(), 1).flatMap((r) => [...r.s].map((ch) => ({ ch, fg: r.fg, d: r.d }))).filter((c) => c.ch.trim())
+    expect(markOf().fg).toBe(grep)
+    const glyphs = stripCells().length
+    expect(stripCells().filter((c) => c.fg === grep)).toHaveLength(2)
+    colour.toggle('Grep')
+    await tick()
+    expect(colour.isOn('Grep')).toBe(false)
+    // its records stay, drawn dim: the lane's mark, and every glyph of the strip
+    expect(markOf().s).toBe('▌')
+    expect(markOf().fg).toBeUndefined()
+    expect(markOf().d).toBe(true)
+    expect(stripCells()).toHaveLength(glyphs)
+    expect(stripCells().filter((c) => c.fg === grep)).toHaveLength(0)
+  })
+
   test('the lanes past their room fold a top group, and past that wait behind … N more', async () => {
     scene({ room: 2 })
     await tick()

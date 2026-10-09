@@ -530,14 +530,14 @@ def _kept(index, i, keep=()):
 
 def _overview(index, query, keep):
     """The events the page shows, from row `from` on and at most OVERVIEW_ROWS of them a fetch: the rows the label
-    filter keeps whose values hold the words `q`, ignoring case, and whose values under the page's Filter by (`filter`,
-    its filter.query()) and Color by (`colour`, its colour.query()) the analyst left on; and those in `keep`, which a
-    citation asked for, whatever the filters. They come as columns: `r` the row, `t` its time in seconds since 1970,
-    `ref`, a column per field, `text` cut to TEXT_MAX characters, `value` its value under Color by and `group` its group
-    under the page's Rows (`rows`, its rows.query()). `counts` counts Color by's values for its chips and `fcounts`
-    Filter by's for its toggles, each over the rows the other keeps, so a value turned off keeps its count. `next` is
-    the row the next page starts at, None after the last. The first page also holds `span`, the first and the last time
-    of all the rows."""
+    filter keeps whose values hold the words `q`, ignoring case, and whose value under the page's Filter by (`filter`,
+    its filter.query()) the analyst left on; and those in `keep`, which a citation asked for, whatever the filters.
+    Color by only colors, so a value turned off there keeps its rows. They come as columns: `r` the row, `t` its time in
+    seconds since 1970, `ref`, a column per field, `text` cut to TEXT_MAX characters, `value` its value under Color by
+    (`colour`, its colour.query()) and `group` its group under the page's Rows (`rows`, its rows.query()). `counts`
+    counts Color by's values for its chips over the rows Filter by keeps, and `fcounts` Filter by's for its toggles over
+    every row, so a value turned off keeps its count. `next` is the row the next page starts at, None after the last.
+    The first page also holds `span`, the first and the last time of all the rows."""
     rows = index["rows"]
     choice, only, group_by = query.get("colour"), query.get("filter"), query.get("rows")
     q = _str(query.get("q")).lower()
@@ -557,12 +557,11 @@ def _overview(index, query, keep):
             if not _kept(index, j, keep):
                 continue
             value, shown = thimble.colour_value(choice, ref, r), thimble.colour_value(only, ref, r)
-            on, shows = thimble.colour_on(choice, value), thimble.colour_on(only, shown)
+            shows = thimble.colour_on(only, shown)
+            fcounts[shown or ""] = fcounts.get(shown or "", 0) + 1
             if shows:
                 counts[value or ""] = counts.get(value or "", 0) + 1
-            if on:
-                fcounts[shown or ""] = fcounts.get(shown or "", 0) + 1
-            if not (on and shows) and not asked:
+            if not shows and not asked:
                 continue
             for k, v in zip(cols, (j, rows[j][T], ref, *(_text(r, f) for f in FIELDS), _text(r, "text")[:TEXT_MAX],
                                    value, thimble.colour_value(group_by, ref, r)), strict=True):
