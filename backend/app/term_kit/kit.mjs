@@ -1305,8 +1305,9 @@ function frameMenu(d, box, [a, b], title, y = d.y) {
  * shows it under the label's row). As in the browser, the view opens colored by a label that is on in Files and marks
  * its files, and a label turned on while the view is away or open takes the color.
  *
- * opts: fields [{name, title, description?, values?, meanings?, value?(record)}], initial (a field's name), chips
- * ('filter' hides the records of a value turned off, 'highlight' dims them; the page does either, from isOn), onChange.
+ * opts: fields [{name, title, description?, values?, meanings?, value?(record)}], initial (a field's name), onChange.
+ * Color by only colors: a value turned off takes its hue off its records, which stay, dim as the records with no value
+ * are; filterBy is what hides records. `chips` ('filter' once hid them) is still taken and does nothing.
  */
 export function colorBy(opts = {}) {
   const fields = (opts.fields || []).map((f) => ({ ...f, title: f.title || f.name }))
@@ -1515,12 +1516,12 @@ export function colorBy(opts = {}) {
       }).filter(Boolean)
     },
     /** A group's mix (a page, an agent, a session takes no color of its own): runs of `cells` cells, each value's share
-     *  of `counts` ({value: n}, '' for no value) in its hue, the chips' order, no value dim and last, the values turned
-     *  off left out; none for Off. Add them to the group's row. */
+     *  of `counts` ({value: n}, '' for no value) in its hue, the chips' order, a value turned off dim, no value dim and
+     *  last; none for Off. Add them to the group's row. */
     mix(counts, cells = 8) {
       if (c.choice === 'off' || !counts) return []
       const order = chips().map((ch) => (ch.value === null ? '' : String(ch.value)))
-      const keys = Object.keys(counts).filter((k) => Number(counts[k]) > 0 && api.isOn(k === '' ? null : k))
+      const keys = Object.keys(counts).filter((k) => Number(counts[k]) > 0)
       keys.sort((a, b) => (a === '' ? 1 : b === '' ? -1 : (order.indexOf(a) + 1 || 1e9) - (order.indexOf(b) + 1 || 1e9)))
       const total = keys.reduce((n, k) => n + Number(counts[k]), 0)
       if (!total) return []
@@ -1547,14 +1548,13 @@ export function colorBy(opts = {}) {
       const l = labelOf(c.choice)
       return l ? l.id : null
     },
-    /** The choice for the reader: `{field, off}`, `{label, name, off}` or null for Off; `off` the values turned off
-     *  (null for the records with no value). */
+    /** The choice for the reader: `{field}`, `{label, name}` or null for Off. It names no value turned off, so the
+     *  reader keeps and counts every record. */
     query() {
-      const off = [...c.off].map((v) => (v === '' ? null : v))
       const f = fieldOf(c.choice)
-      if (f) return { field: f.name, off }
+      if (f) return { field: f.name }
       const l = labelOf(c.choice)
-      return l ? { label: l.id, name: l.name, off } : null
+      return l ? { label: l.id, name: l.name } : null
     },
     /** The counts of the current choice's values, from the reader (`''` for no value). */
     counts(map) {
@@ -1575,31 +1575,23 @@ export function colorBy(opts = {}) {
       if (typeof record === 'object' && 'value' in record) return record.value === undefined || record.value === '' ? null : record.value
       return labelValue(l.id, record)
     },
-    /** A value's hue (a palette color), dim for a value past six and a label's value that does not color, null for Off
-     *  and for no value. */
+    /** The hue a value's records are drawn in (a palette color), dim for a value past six and a label's value that
+     *  does not color, null for Off, for no value and for a value turned off. */
     colourOf(value) {
-      if (value === null || value === undefined || value === '') return null
-      const f = fieldOf(c.choice)
-      if (f) {
-        fieldValues(f)
-        const h = c.hues.get(f.name).get(String(value))
-        return h || COLORS.dim
-      }
-      const l = labelOf(c.choice)
-      return l ? labelHue(l, String(value)) : null
+      return api.isOn(value) ? hueOf(value) : null
     },
-    /** The mark of a value: `●` in its hue, dim for no value; `○` for a value turned off. */
+    /** The mark of a value: `●` in its hue, dim for no value and for a value turned off. */
     dot(value, glyph = '●') {
-      if (!api.isOn(value)) return { s: '○', d: true }
       return mark(api.colourOf(value), glyph)
     },
-    /** Whether a value's chip is on (null standing for no value). */
+    /** Whether a value's chip is on, its hue drawn (null standing for no value). */
     isOn(value) {
       if (c.choice === 'off') return true
       return !c.off.has(value === null || value === undefined ? '' : String(value))
     },
+    /** Always true: Color by only colors, and a value turned off keeps its records (filterBy's keeps hides them). */
     keeps(record) {
-      return api.isOn(api.valueOf(record))
+      return true
     },
     /** Count a record's values of every field, as the browser's kit counts the records a page hands it: the menu
      *  shows them for a field that declares none. A list hands over the records it holds (drew). */
@@ -1661,6 +1653,19 @@ export function colorBy(opts = {}) {
     },
   }
 
+  // a value's hue, whether it is on or off: its chip's
+  function hueOf(value) {
+    if (value === null || value === undefined || value === '') return null
+    const f = fieldOf(c.choice)
+    if (f) {
+      fieldValues(f)
+      const h = c.hues.get(f.name).get(String(value))
+      return h || COLORS.dim
+    }
+    const l = labelOf(c.choice)
+    return l ? labelHue(l, String(value)) : null
+  }
+
   function noValueName() {
     const f = fieldOf(c.choice)
     return f ? `no ${f.title.toLowerCase()}` : 'not marked'
@@ -1703,7 +1708,7 @@ export function colorBy(opts = {}) {
         continue
       }
       if (c.counts && !n && !c.off.has(v) && !(f.values || []).some((x) => (typeof x === 'object' ? x.name : x) === v)) continue
-      out.push({ value: v, name: v, colour: api.colourOf(v), on: api.isOn(v), n })
+      out.push({ value: v, name: v, colour: hueOf(v), on: api.isOn(v), n })
     }
     // like a value with no records, `other` with none is left out once the counts are in, unless one of its values is off
     if (other.members.length && (!c.counts || other.n || other.members.some((v) => c.off.has(v)))) {
@@ -2235,7 +2240,8 @@ export function timeRange(opts = {}) {
       if (brk.has(x)) return { glyph: brk.get(x), brk: true }
       let best = ''
       let bn = 0
-      for (const [v, m] of by[x]) if (v !== '' && m > bn) [best, bn] = [v, m]
+      // a value with no hue (turned off) counts as no value, so it never hides one that has a hue
+      for (const [v, m] of by[x]) if (v !== '' && m > bn && colourOf(v)) [best, bn] = [v, m]
       return { glyph: bar(k, max), colour: best ? colourOf(best) : null, n: k }
     })
   }
@@ -2927,7 +2933,7 @@ function drawTrack(d, y0, total, top, height, off, items, valueOf, hueOf, tracks
     if (!any) return { s: ' ' }
     let best = ''
     let bn = 0
-    for (const [v, n] of counts) if (v !== '' && n > bn) [best, bn] = [v, n]
+    for (const [v, n] of counts) if (v !== '' && n > bn && hue(v)) [best, bn] = [v, n]
     const h = best ? hue(best) : null
     return h && h !== COLORS.dim ? { s: '▌', fg: h } : { s: '▌', d: true }
   }
@@ -3520,7 +3526,8 @@ function chooser(opts, name, initial) {
  * Filter by: which rows show, by a field of the view or a label (docs/terminal-views.md, "Filter by and Rows"). In the
  * top row, `Filter by  Outcome` and the chosen one's values as toggles, `●` while a value shows and `○` while it is off,
  * never in a hue (only Color by colors); `f`, or a click on the choice, opens its menu. The page hides a record whose
- * value is off (`keeps`), or sends `query()` to its reader, which takes it as Color by's.
+ * value is off (`keeps`), or sends `query()` to its reader, which takes it with thimble.colour_value and colour_on.
+ * Filter by alone hides records: Color by only colors.
  *
  * opts: fields [{name, title, description?, values?, meanings?, value?(record), nameOf?(value)}], initial (a field's
  * name; none by default), key (the name it is kept under), onChange(filter).
@@ -3571,7 +3578,7 @@ export function filterBy(opts = {}) {
     tally(record) {
       ch.tally(record)
     },
-    /** The choice for the reader, as Color by's: `{field, off}`, `{label, name, off}`, or null for none. */
+    /** The choice for the reader: `{field, off}`, `{label, name, off}`, or null for none. */
     query() {
       const b = ch.by()
       if (!b) return null
@@ -3905,7 +3912,7 @@ export function lanes(opts = {}) {
       if (!counts[x]) continue
       let best = ''
       let bn = 0
-      for (const [v, m] of values[x]) if (v !== '' && m > bn) [best, bn] = [v, m]
+      for (const [v, m] of values[x]) if (v !== '' && m > bn && hue(v)) [best, bn] = [v, m]
       const c = best ? hue(best) : null
       const glyph = dense ? bar(counts[x], max) : EVENT
       out[x] = c && c !== COLORS.dim ? { s: glyph, fg: c } : { s: glyph, d: true }
@@ -3961,7 +3968,7 @@ export function lanes(opts = {}) {
       const dense = o.density !== false
       const all = layout(items, room)
       st.counts = { band: 0, problem: 0 }
-      const groups = all.map((n) => n.items.filter((it) => !colour || colour.keeps(it)))
+      const groups = all.map((n) => n.items)
       const max = maxBin(scale, groups, time)
       const whens = Array.from({ length: scale.cols }, (_, x) => when(scale.t(x), Math.max(1, scale.step)))
       // the rows past the room wait behind `… N more`, which shows the next of them

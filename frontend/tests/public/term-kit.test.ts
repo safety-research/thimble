@@ -222,25 +222,34 @@ describe('Color by', () => {
     { name: 'source', title: 'Source', values: ['alert', 'deploy'] },
   ]
 
-  test('the top row: Color by, the choice, its values as chips with their counts; a click turns a value off; the reader hears it', async () => {
+  test('the top row: Color by, the choice, its values as chips with their counts; a click turns a value\'s hue off and its records stay', async () => {
     let heard = 0
     const colour = kit.colorBy({ fields: FIELDS, onChange: () => heard++ })
     kit.draw((d: any) => colour.draw(d))
     colour.counts({ fired: 12, resolved: 10, '': 2 })
     await tick()
     expect(text()[0]).toMatch(/^ {2}Color by {2}Kind {2}● fired 12 {2}● resolved 10 {2}● no kind 2$/)
-    expect(colour.query()).toEqual({ field: 'kind', off: [] })
+    expect(colour.query()).toEqual({ field: 'kind' })
     const fired = last().lines[0].find((s: any) => s.s === '●')
     expect(fired.fg).toBe(kit.SERIES[0])
+    const off = () => colour.values.filter((v: any) => !v.on).map((v: any) => v.value)
     await click('fired')
-    expect(colour.query()).toEqual({ field: 'kind', off: ['fired'] })
     expect(colour.isOn('fired')).toBe(false)
+    expect(off()).toEqual(['fired'])
     expect(text()[0]).toContain('○ fired 12')
     expect(heard).toBe(1)
+    // Color by only colors: the value's records stay (keeps), drawn dim with no hue, and the reader hears no value off
+    expect(colour.keeps({ kind: 'fired' })).toBe(true)
+    expect(colour.colourOf('fired')).toBeNull()
+    expect(colour.colourOf('resolved')).toBe(kit.SERIES[1])
+    expect(colour.dot('fired')).toEqual({ s: '●', d: true })
+    expect(colour.dot('resolved')).toEqual({ s: '●', fg: kit.SERIES[1] })
+    expect(colour.query()).toEqual({ field: 'kind' })
     // Reset shows while a value is off, and puts it back
     expect(text()[0]).toMatch(/reset$/)
     await click('reset')
-    expect(colour.query()).toEqual({ field: 'kind', off: [] })
+    expect(off()).toEqual([])
+    expect(colour.colourOf('fired')).toBe(kit.SERIES[0])
     // the choice and the values turned off are kept for the view
     expect(sent.filter((m) => m.t === 'state').at(-1)!.state.colour).toEqual({ by: 'field:kind', picks: ['field:kind'], off: [], seen: [] })
   })
@@ -306,7 +315,7 @@ describe('Color by', () => {
     // the menu stays open on the label (the panel showed the label's own meanwhile)
     await key('return')
     expect(colour.by).toEqual({ label: 'k1', title: 'Database connections' })
-    expect(colour.query()).toEqual({ label: 'k1', name: 'Database connections', off: [] })
+    expect(colour.query()).toEqual({ label: 'k1', name: 'Database connections' })
     // the label's values take the hues in order, its catch-all last value dim; its name's ↗ opens its panel
     expect(colour.colourOf('connections')).toBe(kit.SERIES[0])
     expect(colour.colourOf('other')).toBe('inactive')
@@ -320,7 +329,8 @@ describe('Color by', () => {
     init({ state: { colour: { by: 'label:gone', off: ['x'] } } })
     const colour = kit.colorBy({ fields: FIELDS })
     expect(colour.by).toEqual({ field: 'kind', title: 'Kind' })
-    expect(colour.query()).toEqual({ field: 'kind', off: [] })
+    expect(colour.query()).toEqual({ field: 'kind' })
+    expect(colour.values.every((v: any) => v.on)).toBe(true)
   })
 
   // a label as thimble lists it: its values with whether each colors (a regex label's `other` does not), on in Files
@@ -378,7 +388,8 @@ describe('Color by', () => {
     expect(text().slice(0, 3)).toEqual(['  / search events  incident  all', '  Color by  Database connections ↗', '    ● connections 22  ● not marked 176'])
     // the chips still turn their values off
     await click('not marked')
-    expect(colour.query()).toEqual({ label: 'k1', name: 'Database connections', off: [null] })
+    expect(colour.isOn(null)).toBe(false)
+    expect(colour.values.filter((v: any) => !v.on).map((v: any) => v.value)).toEqual([null])
     // Reset stands at R on the top row
     expect(text()[0]).toMatch(/ {2}reset$/)
   })
@@ -514,7 +525,7 @@ describe('Color by takes several choices', () => {
     expect(text().slice(1).some((r: string) => r.endsWith('▌'))).toBe(true)
   })
 
-  test("a group's mix: its records' share of each value in the value's hue, none for Off", async () => {
+  test("a group's mix: its records' share of each value in the value's hue, a value turned off dim, none for Off", async () => {
     init({ cols: 80 })
     const colour = kit.colorBy({ fields: FIELDS })
     colour.counts({ fired: 3, resolved: 1 })
@@ -522,6 +533,12 @@ describe('Color by takes several choices', () => {
     expect(runs.map((r: any) => r.s.length)).toEqual([3, 1, 4])
     expect(runs[0].fg).toBe(colour.colourOf('fired'))
     expect(runs[2].d).toBe(true)
+    // a value turned off keeps its share, dim as the records with no value
+    colour.toggle('fired')
+    const off = colour.mix({ fired: 3, resolved: 1, '': 4 }, 8)
+    expect(off.map((r: any) => r.s.length)).toEqual([3, 1, 4])
+    expect(off[0]).toEqual({ s: '███', d: true })
+    expect(off[1].fg).toBe(colour.colourOf('resolved'))
     colour.choose(null)
     expect(colour.mix({ fired: 3 })).toEqual([])
   })

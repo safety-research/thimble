@@ -741,11 +741,10 @@
           return colour.valueOf(i)
         }
     }
+    // a value turned off stays on the overview, in the gray of the records with no value, as it stays in the lists
     var keepValue = function (v) {
-      // a value turned off leaves the overview, as it leaves the lists
       if (v == null || v === '') return none
-      if (slot[v] != null) return slot[v]
-      return colour.isOn(v) ? none : -1
+      return slot[v] != null ? slot[v] : none
     }
     if (this.times) {
       for (var j = 0; j < this.times.length; j++) {
@@ -758,7 +757,6 @@
             v = valueAt(j)
           } catch (e) {}
           s = keepValue(v)
-          if (s < 0) continue
         }
         add(sc.x(t), s, 1)
       }
@@ -770,8 +768,7 @@
         if (typeof c === 'number') add(x, none, c)
         else if (c && typeof c === 'object')
           for (var name in c) {
-            var s2 = plain ? none : keepValue(name === '' ? null : name)
-            if (s2 >= 0) add(x, s2, Number(c[name]) || 0)
+            add(x, plain ? none : keepValue(name === '' ? null : name), Number(c[name]) || 0)
           }
       }
     }
