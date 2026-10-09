@@ -7,7 +7,7 @@ A comment has the fields a document's comment has, with `card` and `step` in pla
 
     {id, card, step, check, run, author, tag, title, body, text, evidence, fp, ts, status, resolution}
 
-`step` is the stable id of a plan card's step (payload.steps[i].id, else `s<n>`), named to a model as
+`step` is the stable id of a plan card's step (notebook.plan_steps, `s<n>` as it was made), named to a model as
 `card:<id>#step-<n>` by its place. `author` is `check` for a run's comment and `claude` for main's. `text` is the comment
 as written, citations flattened for reading and kept as `evidence`; a leading "Heads up:" or "You should know:" sets
 `tag`, the next sentence is `title` and the rest `body` (parse_note), so a check's prompt asks for that shape in its
@@ -18,7 +18,7 @@ is gone is not served.
 The passages of the canvas (passages()) are the cards a check covers, in the tree's order, each followed by its steps:
 the cards of the analyst's groups and the threads' (not the orientation's deck, a document's figures or labels' cards).
 A card is fingerprinted on what a reader of it sees (checkstore.basis, a plan's steps left out), a step on its text,
-status and note. Each change emits `canvas-comments` on the workspace's stream.
+what it makes, its status and its note. Each change emits `canvas-comments` on the workspace's stream.
 """
 from __future__ import annotations
 
@@ -103,17 +103,12 @@ def parse_ref(ref: str) -> tuple[str, int | None] | None:
     return m.group(1), (int(m.group(2)) if m.group(2) else None)
 
 
-def steps_of(cell: dict[str, Any]) -> list[dict[str, Any]]:
-    """A plan card's steps in order, each {id, n, text, status, note}; [] for any other card. A step's id is its stored
-    `id`, else `s<n>`."""
-    payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
-    raw = payload.get("steps") if isinstance(payload.get("steps"), list) else []
-    out = []
-    for i, s in enumerate(raw, 1):
-        s = s if isinstance(s, dict) else {"text": str(s)}
-        out.append({"id": str(s.get("id") or f"s{i}"), "n": i, "text": _collapse(s.get("text")),
-                    "status": _collapse(s.get("status")) or "not started", "note": _collapse(s.get("note"))})
-    return out
+def steps_of(cell: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """A plan card's steps in order (notebook.plan_steps), each with its place `n` from 1 and its note on one line; []
+    for any other card."""
+    from . import notebook  # noqa: PLC0415 — notebook imports the kernel machinery
+
+    return [{**s, "n": i, "note": _collapse(s.get("note"))} for i, s in enumerate(notebook.plan_steps(cell), 1)]
 
 
 def step_ref(card: str, n: int | None) -> str:
@@ -210,7 +205,7 @@ def passages(c: str, since: str | None = None) -> list[dict[str, Any]]:
             for s in steps_of(cell):
                 ref = step_ref(cid, s["n"])
                 out.append({**base, "ref": ref, "kind": "step", "step": s["id"], "n": s["n"],
-                            "fp": _fp("step", [cid, s["text"], s["status"], s["note"]]), "ids": [ref]})
+                            "fp": _fp("step", [cid, s["text"], *s["makes"], s["status"], s["note"]]), "ids": [ref]})
     return out
 
 
@@ -249,10 +244,13 @@ def card_lines(c: str, refs: list[str], ps: list[dict[str, Any]] | None = None) 
         takeaway = _collapse(cite.canon_text(str(cell.get("takeaway") or "")))
         if takeaway:
             lines.append(f"  takeaway: {takeaway}")
+        if follows := (cell.get("payload") or {}).get(notebook.PLAN_FOLLOWS) if kind == notebook.PLAN_KIND else None:
+            lines.append(f"  follows: card:{follows}")
         for s in steps_of(cell):
             ref = step_ref(cid, s["n"])
             seen = "" if ref in want else " · checked before"
-            lines.append(f"  {ref} · {s['status']}{seen} · {s['text']}" + (f" · {s['note']}" if s["note"] else ""))
+            line = notebook.step_line(s["n"], s).split("] ", 1)[-1]  # the step's text and what it makes
+            lines.append(f"  {ref} · {s['status']}{seen} · {line}" + (f" · {s['note']}" if s["note"] else ""))
     return "\n".join(lines)
 
 

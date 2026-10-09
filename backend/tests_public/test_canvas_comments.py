@@ -5,11 +5,12 @@ and stores the comment's tag, title and body; Done and Know it hide a comment; a
 earlier comments on what it covered; a deleted card's comments are not served; main's run_check with `on: cards` gives
 the exact Agent call, and main's own add_comment on a card is Claude's note. "You should know" is a built-in, on, that
 covers the documents and the cards. The module is the fake bridge (subagent_fakes); an agent's end is
-subagents.run_ended. A plan card's steps are written as builder A's payload holds them (payload.steps)."""
+subagents.run_ended. A plan card is the plan kind, its steps in payload.steps."""
 from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import datetime, timezone
 
 import pytest
@@ -32,15 +33,15 @@ def board(workspaces_tmp, monkeypatch):
 
 
 def _card(title: str, *, group: str = notebook.MAIN, takeaway: str = "", steps: list[dict] | None = None) -> str:
-    cell = notebook.new_cell("note", "model", title, notebook=group, payload={"text": title})
+    """A note card, or with `steps` a plan card (notebook.PLAN_KIND) holding them."""
+    if steps is not None:
+        cell = notebook.new_cell(notebook.PLAN_KIND, "model", title, notebook=group, payload={"steps": steps})
+    else:
+        cell = notebook.new_cell("note", "model", title, notebook=group, payload={"text": title})
     notebook.insert_cell(CORPUS, group, cell)
-    if takeaway or steps is not None:
+    if takeaway:
         nb = notebook.load_notebook(CORPUS, group)
-        stored = next(c for c in nb["cells"] if c["id"] == cell["id"])
-        if takeaway:
-            stored["takeaway"] = takeaway
-        if steps is not None:
-            stored["payload"]["steps"] = steps
+        next(c for c in nb["cells"] if c["id"] == cell["id"])["takeaway"] = takeaway
         notebook.save_notebook(CORPUS, nb)
     return cell["id"]
 
@@ -120,7 +121,7 @@ async def test_main_s_turn_end_runs_you_should_know_on_the_unseen_cards_with_a_t
     assert not any(deck in r for r in covered), "the orientation's deck has its own critic"
     task = (checks.work_dir(CORPUS, YSK, checks.CANVAS) / checks.TASK_FILE).read_text()
     assert "Leave a comment on a passage only when" in task
-    assert f"- card:{plan} · note · Plan: build the environment and pilot it" in task
+    assert f"- card:{plan} · plan · Plan: build the environment and pilot it" in task
     assert f"card:{plan}#step-2 · running · Build the agent container" in task
     assert "takeaway: Both agents merged their PR." in task
     subagents.run_ended(CORPUS, act.agent, "done", "No comment clears the bar.", source="handback")
@@ -294,3 +295,56 @@ def test_main_s_turn_end_in_the_mirror_asks_the_checks_over_the_cards(board, mon
     session._end_turn(lv)
     session._end_turn(lv)
     assert heard == [(CORPUS, since)], "once per turn, from the turn's start"
+
+
+async def test_a_check_reads_the_steps_of_a_plan_that_follows_a_finished_one_and_comments_beside_a_step(board, bridge):
+    """Plan cards and comments together, through the tools main calls: the build plan finishes, the run plan follows it,
+    the turn's check reads the new plan's steps with what each makes and the plan it follows, its comment on step 2
+    stays while step 1 starts (the step's own words did not change), and Done hides it."""
+    group = notebook.create_notebook(config.workspace_dir(CORPUS), "Your work", role="analyst")["id"]
+
+    async def call(name: str, **args):
+        res = await tools.call(CORPUS, name, args, actor="analyst", notebook=group, terminal=False)
+        assert not res.is_error, res.text
+        return res
+
+    build = (await call("add_card", kind="plan", question="Plan: build the environment and pilot it",
+                        steps=[{"text": "Build the agent container", "makes": ["Dockerfile.agent"]},
+                               {"text": "Pilot: 2 agents, one PR each", "makes": ["pilot/"]}])).text
+    build = re.search(r"^card:([A-Za-z0-9_-]+)$", build, re.M).group(1)
+    for n in (1, 2):
+        await call("update_plan", card=f"card:{build}", step=n, status="done")
+    run = (await call("add_card", kind="plan", question="Plan: run the experiment", follows=f"card:{build}",
+                      steps=[{"text": "Run the emergent condition: 48 agents, 2 hours", "makes": ["runs/emergent/"]},
+                             {"text": "Run the managed condition: 48 agents and a manager, 2 hours",
+                              "makes": ["runs/managed/"]},
+                             {"text": "Compare the conditions", "makes": ["results/"]}])).text
+    run = re.search(r"^card:([A-Za-z0-9_-]+)$", run, re.M).group(1)
+    assert notebook.get_cell(CORPUS, run)["notebook"] == group, "the next phase lands beside the plan it follows"
+
+    act = await _turn_ended()
+    covered = set(_run()["covered"])
+    assert {f"card:{run}#step-1", f"card:{run}#step-2", f"card:{run}#step-3", f"card:{build}#step-2"} <= covered
+    task = (checks.work_dir(CORPUS, YSK, checks.CANVAS) / checks.TASK_FILE).read_text()
+    assert f"- card:{run} · plan · Plan: run the experiment\n  follows: card:{build}" in task
+    assert (f"card:{run}#step-2 · not started · Run the managed condition: 48 agents and a manager, 2 hours "
+            "→ runs/managed/") in task
+    assert f"card:{build}#step-1 · done · Build the agent container → Dockerfile.agent" in task
+    res = await _comment(act, f"card:{run}#step-2", "Heads up: only the versions on pandas' main branch are in the "
+                         "image. PR branches that pin other versions will still fail to build.", "toolu_p1")
+    assert not res.is_error, res.text
+    subagents.run_ended(CORPUS, act.agent, "done", "One comment.", source="handback")
+    await _until(lambda: _run()["status"] == "done", "the run never ended")
+
+    # step 1 starts: the next turn's check covers that step alone, and the comment on step 2 stays beside it
+    await call("update_plan", card=f"card:{run}", step=1, status="running", runs=["emergent"])
+    act = await _turn_ended()
+    assert _run()["covered"] == [f"card:{run}#step-1"]
+    subagents.run_ended(CORPUS, act.agent, "done", "Nothing new.", source="handback")
+    await _until(lambda: _run()["status"] == "done", "the run never ended")
+    [cm] = (await canvas_comments.list_route(CORPUS))["comments"]
+    assert (cm["ref"], cm["step"], cm["title"]) == (f"card:{run}#step-2", "s2",
+                                                   "Only the versions on pandas' main branch are in the image")
+    assert f"comment {cm['id']} on card:{run}#step-2" in context.canvas(CORPUS)
+    got = await canvas_comments.resolve_route(CORPUS, cm["id"], canvas_comments.ResolveBody(how="done"))
+    assert got["comments"] == [], "a resolved comment does not show"
