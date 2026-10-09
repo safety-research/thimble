@@ -1,11 +1,14 @@
 // The comments beside the cards, on the board's plane: each open comment (backend canvas_comments.py) whose check is on,
 // or main's own, beside its card, aligned with the card's top or with the row of the plan step it is about
 // (`[data-anchor="card:<id>#step-<n>"]`), outside the card's outermost frame, stacked so none overlap (layout.ts
-// commentPlaces), with a hairline from the card's edge to it. Each is the comment card the Report's margin draws too
-// (report/CommentCard.tsx): its check's name and its statement, its details on request, Ask, Know it and ✓ (Done), and
-// a thread for Ask anchored to its card or step. A comment hides with its check, when its card is not drawn (a
-// collapsed frame) or when the filters leave its card out. The box the comments cover goes to the canvas, whose Fit and
-// minimap take it in.
+// commentPlaces). As in the Report, each step or card a comment is on is highlighted in its check's color (its step's
+// text, or the card's question) and no line joins them at rest; while a comment is hovered, has the keyboard's focus or
+// is open, its highlight is stronger, as the Report's active comment's is, and one thin line runs from the card's right
+// edge at that step to the comment alone. Matt 2026-10-09: "what about highlights, just like in the report?". Each is
+// the comment card the Report's margin draws too (report/CommentCard.tsx): its check's name and its statement, its
+// details on request, Ask, Know it and ✓ (Done), and a thread for Ask anchored to its card or step. A comment hides with
+// its check, when its card is not drawn (a collapsed frame) or when the filters leave its card out. The box the
+// comments cover goes to the canvas, whose Fit and minimap take it in.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
@@ -67,15 +70,46 @@ export function shownCanvasComments(comments: readonly CanvasComment[], on: Read
 
 const esc = (s: string) => (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&'))
 
+/** The row of the step a comment is on, as its card draws it; null for a comment on the whole card, or a step the card
+ * does not draw. */
+function rowOf(card: HTMLElement | undefined, c: CanvasComment): HTMLElement | null {
+  if (!card || c.n == null) return null
+  return card.querySelector<HTMLElement>(`[data-anchor="${esc(c.ref)}"]`) ?? card.querySelector<HTMLElement>(`[data-step="${esc(String(c.n))}"]`) ?? (c.step ? card.querySelector<HTMLElement>(`[data-step="${esc(c.step)}"]`) : null)
+}
+
+/** What a comment highlights on its card, as the Report highlights a passage's words: its step's text (the row itself
+ * where a card draws its steps otherwise), else the card's question. */
+function flagOf(card: HTMLElement | undefined, c: CanvasComment): HTMLElement | null {
+  if (!card) return null
+  const row = rowOf(card, c)
+  if (row) return row.querySelector<HTMLElement>('.plan-line') ?? row
+  return card.querySelector<HTMLElement>('.bcell-q-text') ?? card.querySelector<HTMLElement>('.bcell-q')
+}
+
+function unflag(el: HTMLElement) {
+  el.classList.remove('wu-flag', 'wu-flag-active', 'ccm-flag')
+  el.style.removeProperty('--flag')
+}
+
 /** How far below its card's top a comment points, in plane px: its step's row, when the card draws it, else the card's
  * top. */
 function pointOf(card: HTMLElement | undefined, c: CanvasComment): number {
-  if (!card || c.n == null) return COMMENT_LIFT
-  const row = card.querySelector<HTMLElement>(`[data-anchor="${esc(c.ref)}"]`) ?? card.querySelector<HTMLElement>(`[data-step="${esc(String(c.n))}"]`) ?? (c.step ? card.querySelector<HTMLElement>(`[data-step="${esc(c.step)}"]`) : null)
-  if (!row) return COMMENT_LIFT
+  const row = rowOf(card, c)
+  if (!card || !row) return COMMENT_LIFT
   const box = card.getBoundingClientRect()
   const scale = card.offsetWidth ? box.width / card.offsetWidth : 1
   return Math.max(0, (row.getBoundingClientRect().top - box.top) / (scale || 1) - COMMENT_STEP_LIFT)
+}
+
+/** The line from a comment's card to the comment, on the plane: from the card's right edge, level with the step's first
+ * line (or the card's question), to the comment's left edge, level with its header; straight when the comment stands
+ * level with its step, else a curve that leaves and meets each end level. */
+export function linePath(p: CommentPlace): string {
+  const y0 = p.ay + 13
+  const y1 = p.y + 13
+  if (Math.abs(y1 - y0) < 1) return `M${p.ax} ${y0}H${p.x}`
+  const k = Math.max(8, (p.x - p.ax) / 2)
+  return `M${p.ax} ${y0}C${p.ax + k} ${y0} ${p.x - k} ${y1} ${p.x} ${y1}`
 }
 
 export interface CommentLayerProps {
@@ -100,13 +134,51 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
   const extent = useRef<Rect | null>(null)
   const [places, setPlaces] = useState<Map<string, CommentPlace>>(new Map())
   const [active, setActive] = useState<string | null>(null)
+  const [hovered, setHovered] = useState<string | null>(null)
+  const [focused, setFocused] = useState<string | null>(null)
   useEffect(() => {
     if (active && !comments.some((c) => c.id === active)) setActive(null)
   }, [active, comments])
+  // a field that held the focus goes when its comment is let go, with no blur to say so
+  useEffect(() => {
+    if (focused && !els.current.get(focused)?.contains(document.activeElement)) setFocused(null)
+  })
+  // the one comment whose place shows: the hovered one, else the one the keyboard is on, else the open one
+  const hotId = [hovered, focused, active].find((id) => id != null && comments.some((c) => c.id === id)) ?? null
+  const hot = hotId ? comments.find((c) => c.id === hotId) : undefined
+  const hotColour = hot ? look.colour(hot.check) : ''
+
+  // every step or card a shown comment is on is highlighted in its check's color, as the Report highlights a commented
+  // passage (report.css .wu-flag: the color of the hot comment there, else of the first check in the pane's order), and
+  // the hot comment's place more strongly (.wu-flag-active). The cards' elements are the board's, so the marks are set
+  // on them here after every render, which follows the cards' own renders, and taken off what no longer has one
+  const flagged = useRef(new Set<HTMLElement>())
+  useEffect(() => {
+    const on = new Map<HTMLElement, CanvasComment[]>()
+    for (const c of comments) {
+      const el = flagOf(cardEl(c.card), c)
+      if (el) on.set(el, [...(on.get(el) ?? []), c])
+    }
+    for (const el of flagged.current) if (!on.has(el)) unflag(el)
+    for (const [el, list] of on) {
+      const lit = list.find((c) => c.id === hotId)
+      const first = list.reduce((a, b) => (look.rank(b.check) < look.rank(a.check) ? b : a))
+      el.classList.add('wu-flag', 'ccm-flag')
+      el.classList.toggle('wu-flag-active', !!lit)
+      el.style.setProperty('--flag', look.colour((lit ?? first).check))
+    }
+    flagged.current = new Set(on.keys())
+  })
+  useEffect(
+    () => () => {
+      for (const el of flagged.current) unflag(el)
+    },
+    [],
+  )
 
   // a commented card's body that grows or shrinks moves the step rows its comments stand at (a plan's live rows
-  // arriving, a done step opened), even in a card whose own height is set, and a comment whose chevron opens or folds
-  // its details moves the comments below it, so each change places them again
+  // arriving, a done step opened), even in a card whose own height is set, and a comment whose details open or fold
+  // moves the comments below it, so each change places them again
   const [, setMoved] = useState(0)
   const cardsKey = [...new Set(comments.map((c) => c.card))].join(' ')
   const idsKey = comments.map((c) => c.id).join(' ')
@@ -153,13 +225,7 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
   return (
     <>
       <svg className="ccm-lines" aria-hidden="true">
-        {comments.map((c) => {
-          const p = places.get(c.id)
-          if (!p) return null
-          const mid = p.x - 9
-          const head = p.y + 13
-          return <path key={c.id} d={`M${p.ax} ${p.ay + 13}H${mid}V${head}H${p.x}`} />
-        })}
+        {hot && places.get(hot.id) && <path data-line={hot.id} d={linePath(places.get(hot.id)!)} style={{ stroke: hotColour }} />}
       </svg>
       {comments.map((c) => {
         const place = places.get(c.id)
@@ -179,6 +245,8 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
               else els.current.delete(c.id)
             }}
             onActivate={() => setActive(c.id)}
+            onHover={(on) => setHovered((cur) => (on ? c.id : cur === c.id ? null : cur))}
+            onFocusIn={(on) => setFocused((cur) => (on ? c.id : cur === c.id ? null : cur))}
             onResolve={(how) => onResolve(c, how)}
             thread={{ anchor: c.ref, passage: titleOf(c.card), where: c.n != null ? `step ${c.n}` : undefined, surface: 'canvas' }}
           />

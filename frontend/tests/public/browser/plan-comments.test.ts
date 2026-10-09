@@ -2,7 +2,8 @@
 // finished build plan and the run plan that follows it, each drawn by PlanBody, and a check's comment on step 2 of the
 // run plan (GET /canvas/comments). The comment sits right of the frame, level with step 2's row; it stays level with
 // that row when step 1's live rows arrive above it (GET /cards/{id}/plan-runs) and push the row down inside a card whose
-// height is set; ✓ resolves it through POST /canvas/comments/{id}/resolve and it no longer shows.
+// height is set; step 2's text is highlighted, more strongly while the comment is hovered, with one line to it then;
+// ✓ resolves it through POST /canvas/comments/{id}/resolve and it no longer shows, nor does the highlight.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -154,6 +155,30 @@ test('the comment on step 2 sits beside the frame, level with step 2, and stays 
   assert.ok(after.row.top > before.row.top + 8, `the live row pushed step 2 down: ${before.row.top} -> ${after.row.top}`)
 })
 
+test("step 2's text is highlighted at rest; hovering the comment strengthens it and draws one line from the card's edge at step 2", async () => {
+  await page.mouse.move(5, 5)
+  await page.waitForTimeout(150)
+  const flags = () => page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.wu-flag')].map((f) => [f.className, f.closest<HTMLElement>('[data-anchor]')?.dataset.anchor]))
+  assert.equal(await page.evaluate(() => document.querySelectorAll('.ccm-lines path').length), 0, 'no line at rest')
+  assert.deepEqual(await flags(), [['plan-line wu-flag ccm-flag', 'card:run1#step-2']], "step 2's text alone is highlighted")
+  await page.locator('[data-canvas-comment="k1"]').hover()
+  await page.waitForTimeout(150)
+  const got = await page.evaluate(() => {
+    const paths = [...document.querySelectorAll<SVGPathElement>('.ccm-lines path')]
+    const card = document.querySelector('[data-cell="run1"]')!.getBoundingClientRect()
+    const row = document.querySelector('[data-anchor="card:run1#step-2"]')!.getBoundingClientRect()
+    const p = paths[0]
+    const a = p ? new DOMPoint(p.getPointAtLength(0).x, p.getPointAtLength(0).y).matrixTransform(p.getScreenCTM()!) : null
+    return { lines: paths.length, x0: a?.x, y0: a?.y, right: card.right, top: row.top, bottom: row.bottom }
+  })
+  assert.equal(got.lines, 1)
+  assert.ok(Math.abs(got.x0! - got.right) <= 3 && got.y0! >= got.top && got.y0! <= got.bottom, JSON.stringify(got))
+  assert.deepEqual(await flags(), [['plan-line wu-flag ccm-flag wu-flag-active', 'card:run1#step-2']])
+  await page.mouse.move(5, 5)
+  await page.waitForTimeout(150)
+  assert.deepEqual(await flags(), [['plan-line wu-flag ccm-flag', 'card:run1#step-2']])
+})
+
 test('✓ resolves the comment on step 2, which no longer shows', async () => {
   await page.locator('[data-canvas-comment="k1"]').hover()
   await page.locator('[data-canvas-comment="k1"] .wu-cm-resolve').click()
@@ -163,4 +188,5 @@ test('✓ resolves the comment on step 2, which no longer shows', async () => {
   await page.waitForTimeout(400)
   assert.equal(await page.locator('[data-canvas-comment]').count(), 0)
   assert.equal(await page.evaluate(() => document.querySelectorAll('.ccm-lines path').length), 0)
+  assert.equal(await page.locator('.wu-flag').count(), 0, 'the highlight goes with the comment')
 })

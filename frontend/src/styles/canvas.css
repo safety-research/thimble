@@ -911,10 +911,15 @@ body[data-cmd] .board-stage .outputs-vega * {
 /* a plan (canvas/PlanBody): numbered steps, each its number, its text and its status at the right, and under them what it
    makes (dashed until it runs), its note and a live row per run; a done step is one line */
 .plan {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font: 400 var(--text-sm) / 1.45 var(--font-body);
+}
+.plan-steps {
   margin: 0;
   padding: 0;
   list-style: none;
-  font: 400 var(--text-sm) / 1.45 var(--font-body);
 }
 .plan-step {
   display: grid;
@@ -983,6 +988,81 @@ button.plan-run-name:hover {
   margin-left: 4px;
   color: var(--text-tertiary);
   vertical-align: -1px;
+}
+/* what the plan's last edit did to a step: a quiet word after its text */
+.plan-mark {
+  flex: none;
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--radius-chip);
+  background: var(--surface-tonal);
+  font: 500 var(--text-xs) / 1.45 var(--font-body);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+/* Show more under a step and under the removed steps, as under a comment's statement: quiet text */
+.plan-more {
+  align-self: flex-start;
+  min-height: 0;
+  margin-left: -2px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  font: 500 var(--text-xs) / 1.45 var(--font-body);
+  color: var(--text-secondary);
+}
+.plan-more:hover:not(:disabled) {
+  background: none;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+}
+/* a changed step's text and what it made before the last edit, on request */
+.plan-was {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  color: var(--text-tertiary);
+  user-select: text;
+}
+.plan-was-label {
+  font-weight: 500;
+}
+.plan-was-text {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--text-tertiary) 60%, transparent);
+}
+/* under the steps while the last edit is marked: the steps it removed, folded, and Clear marks */
+.plan-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.plan-edit-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.plan-edit-clear {
+  margin-left: auto;
+}
+.plan-removed {
+  margin: 0;
+  padding: 0 0 0 26px;
+  list-style: none;
+  color: var(--text-tertiary);
+}
+.plan-removed-step {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--text-tertiary) 60%, transparent);
 }
 .plan-status {
   font: 400 var(--text-xs) / 1.45 var(--font-body);
@@ -2818,8 +2898,8 @@ audio.bcell-media {
   flex: 1;
 }
 
-/* the comments beside the cards (CommentLayer.tsx): a hairline from the card's edge to each, under the cards, and the
-   comment above them */
+/* the comments beside the cards (CommentLayer.tsx): no line at rest; while a comment is hovered, focused or open, one
+   thin line in its check's color from its card's edge to it, over the cards and under the comments */
 .ccm-lines {
   position: absolute;
   left: 0;
@@ -2828,12 +2908,16 @@ audio.bcell-media {
   height: 1px;
   overflow: visible;
   pointer-events: none;
-  z-index: 1;
+  z-index: 5;
 }
 .ccm-lines path {
   fill: none;
-  stroke: rgba(var(--ink-rgb), 0.3);
-  stroke-width: 1;
+  stroke-width: 1.25;
+}
+/* a commented step's text or card's question is highlighted as the Report highlights a commented passage (report.css
+   .wu-flag, .wu-flag-active, its check's color as --flag); a click on it does what a click on that text does */
+.wu-flag.ccm-flag {
+  cursor: inherit;
 }
 /* a comment beside the cards is the margin's comment card (report.css .wu-cm), placed on the plane: its own left, top
    and width, over the cards' hairlines, with a shadow that lifts it off the board */

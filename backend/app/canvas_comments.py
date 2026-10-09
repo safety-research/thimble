@@ -54,7 +54,8 @@ SKIPPED_KINDS = ("label",)  # a label's card is the label's review, which its ow
 DETAILS_CHARS = 2_000  # of a comment's details, kept
 WHOLE_AUTHORS = ("analyst", "terminal")  # the analyst's own comments, read whole: never split into statement and details
 KNOWN_MAX = 30  # the statements a run's task lists as known
-PLAN_STEP_KEYS = ("steps", "removed_steps")  # a plan payload's keys of its steps (plans.REMOVED), left out of its card's fp
+# a plan payload's keys of its steps (plans.REMOVED, plans.LAST_EDIT), left out of its card's fp
+PLAN_STEP_KEYS = ("steps", "removed_steps", "last_edit")
 _REF_RE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:#step-(\d+))?$")
 _TAG_RE = re.compile(r"^\s*\**\s*(heads[ -]up|you should know)\s*\**\s*[:—–-]\s*\**\s*", re.I)
 # a sentence's end: its mark, then any closing quote, bracket or emphasis, then a space or the end; the next sentence can

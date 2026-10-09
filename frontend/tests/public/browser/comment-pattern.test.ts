@@ -2,13 +2,14 @@
 // real Margin (src/report/Margin.tsx) beside two passages, and the real Canvas (src/canvas/Canvas.tsx) holding a plan card
 // in the analyst's frame with a comment on its step 2 (GET /canvas/comments). Each comment is one card
 // (src/report/CommentCard.tsx): its header is its check's name in the check's color, the color square matching, with no
-// "Claude"; it shows its statement, and its details only once its chevron opens them, their citation a chip, which moves
-// the comment below it down in the margin; on hover its
-// menu shows Ask and Know it before the chevron and ✓, alike on both surfaces; Ask puts the caret in its field, whose
+// "Claude"; it shows its statement, and its details only once Show more under the statement opens them (by pointer or
+// keyboard), their citation a chip, which moves the comment below it down in the margin; on hover its menu shows Ask and
+// Know it before ✓, alike on both surfaces; Ask puts the caret in its field, whose
 // question opens a thread (POST /chats) anchored to the comment's passage or step with the comment's id and words. With
 // no frame kept open in the browser, the analyst's frame, Your work, starts open. Matt 2026-10-09: "it shows a short
 // comment, then you expand for details ... and can ask follow ups"; "what does comment menu look like? should be
-// analogous to menu in reports".
+// analogous to menu in reports"; "instead of the >, use text like 'Show more' or something that's placed below the
+// short description".
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -134,7 +135,7 @@ test("each comment shows its check's name in the check's color and its statement
   }
 })
 
-test('the menu is the same on both surfaces: Ask and Know it on hover, before the chevron and ✓', async () => {
+test('the menu is the same on both surfaces: Ask and Know it on hover, before ✓, and Show more under the statement', async () => {
   const menus = []
   for (const sel of [R, C]) {
     assert.equal(await visible(`${sel} .wu-cm-menu`), false, `${sel}: the menu waits for the pointer`)
@@ -155,51 +156,76 @@ test('the menu is the same on both surfaces: Ask and Know it on hover, before th
           act: look('.wu-cm-ask'),
           know: look('.wu-cm-know'),
           done: look('.wu-cm-resolve'),
+          more: look('.wu-cm-more'),
+          moreText: card.querySelector('.wu-cm-more')!.textContent,
           card: [cs.paddingTop, cs.paddingLeft, cs.borderRadius, cs.fontSize, cs.backgroundColor].join(' '),
-          order: box('.wu-cm-know').right <= box('.wu-cm-more').left + 1 && box('.wu-cm-more').right <= box('.wu-cm-resolve').left + 1,
+          order: box('.wu-cm-know').right <= box('.wu-cm-resolve').left + 1,
+          // Show more stands under the statement, at its left
+          below: box('.wu-cm-more').top >= box('.wu-cm-statement').bottom - 1 && Math.abs(box('.wu-cm-more').left - box('.wu-cm-statement').left) <= 4,
           inside: box('.wu-cm-menu').left >= box('.wu-cm-head').left && box('.wu-cm-resolve').right <= card.getBoundingClientRect().right,
         }
       }, sel),
     )
     await page.mouse.move(5, 5)
   }
-  assert.deepEqual(menus[0].buttons, ['Ask', 'Know it', 'Details', 'Done'])
+  assert.deepEqual(menus[0].buttons, ['Ask', 'Know it', 'Done'])
+  assert.equal(menus[0].moreText, 'Show more')
   assert.deepEqual(menus[1], menus[0], 'the canvas menu looks as the Report menu does')
-  assert.ok(menus[0].order && menus[0].inside, JSON.stringify(menus[0]))
+  assert.ok(menus[0].order && menus[0].below && menus[0].inside, JSON.stringify(menus[0]))
 })
 
-test('the chevron opens the details, their citation a chip, and folds them again, on both surfaces', async () => {
+test('Show more opens the details, their citation a chip, and Show less under them folds them again, on both surfaces', async () => {
   for (const [sel, words] of [[R, 'Leave the bot out'], [C, 'Bake them into the image']] as const) {
     await page.locator(sel).hover()
     await page.locator(`${sel} .wu-cm-more`).click()
     await page.waitForSelector(`${sel} .wu-cm-details`)
     const got = await page.evaluate((s) => {
       const d = document.querySelector<HTMLElement>(`${s} .wu-cm-details`)!
-      return { text: d.innerText, items: d.querySelectorAll('li').length, chips: [...d.querySelectorAll<HTMLElement>('.refchip')].map((c) => c.dataset.ref), field: !!document.querySelector(`${s} .wu-cm-reply`) }
+      const more = document.querySelector<HTMLElement>(`${s} .wu-cm-more`)!
+      return { text: d.innerText, items: d.querySelectorAll('li').length, chips: [...d.querySelectorAll<HTMLElement>('.refchip')].map((c) => c.dataset.ref), field: !!document.querySelector(`${s} .wu-cm-reply`), less: more.textContent, under: more.getBoundingClientRect().top >= d.getBoundingClientRect().bottom - 1 }
     }, sel)
     assert.ok(got.text.includes(words) && got.items === 2, `${sel}: ${got.text}`)
     assert.deepEqual(got.chips, ['card:box1'])
-    assert.equal(got.field, false, `${sel}: the chevron opens the details alone`)
+    assert.equal(got.field, false, `${sel}: Show more opens the details alone`)
+    assert.ok(got.less === 'Show less' && got.under, `${sel}: Show less under the details ${JSON.stringify(got)}`)
     await page.locator(`${sel} .wu-cm-more`).click()
     await page.waitForFunction((s) => !document.querySelector(`${s} .wu-cm-details`), sel)
     await page.mouse.move(5, 5)
   }
 })
 
-test("in the Report, a comment's chevron opening its details moves the comment below it down, and folding them moves it back", async () => {
+test('the keyboard opens and folds the details: Tab to Show more, then Enter', async () => {
+  for (const sel of [R, C]) {
+    await page.locator(`${sel} .wu-cm-more`).focus()
+    assert.ok(await page.evaluate((s) => document.activeElement === document.querySelector(`${s} .wu-cm-more`), sel), `${sel}: Show more takes the focus`)
+    await page.keyboard.press('Enter')
+    await page.waitForSelector(`${sel} .wu-cm-details`)
+    assert.equal(await page.textContent(`${sel} .wu-cm-more`), 'Show less')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction((s) => !document.querySelector(`${s} .wu-cm-details`), sel)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  }
+})
+
+test("in the Report, a comment's Show more opening its details moves the comment below it down, and folding them moves it back", async () => {
   const c2 = '#report [data-comment="c2"]'
   const top = (s: string) => page.evaluate((q) => document.querySelector(q)!.getBoundingClientRect().top, s)
   const was = await top(c2)
   await page.locator(R).hover()
-  // the pointer stays on the chevron: nothing but the details' own height may move the comment below
+  // nothing but the details' own height may move the comment below
   await page.locator(`${R} .wu-cm-more`).click()
   await page.waitForSelector(`${R} .wu-cm-details`)
+  // the margin places its cards on the next frame and slides them there (report.css .wu-cm transition), so the test
+  // waits until they stand still, up to 3 s, before it measures
+  const settled = () => page.waitForFunction(([a, b]) => [a, b].every((q) => !document.querySelector(q)!.getAnimations().length), [R, c2], { timeout: 3000 }).catch(() => undefined)
   await page.waitForTimeout(300)
+  await settled()
   const [r, b] = await page.evaluate((qs) => qs.map((q) => document.querySelector(q)!.getBoundingClientRect().toJSON()), [R, c2])
   assert.ok(b.top >= r.bottom, `c2 below c1's open details: ${b.top} vs ${r.bottom}`)
   await page.locator(`${R} .wu-cm-more`).click()
   await page.waitForFunction((s) => !document.querySelector(`${s} .wu-cm-details`), R)
   await page.waitForTimeout(300)
+  await settled()
   assert.ok(Math.abs((await top(c2)) - was) <= 1, 'c2 back in its place')
   await page.mouse.move(5, 5)
 })

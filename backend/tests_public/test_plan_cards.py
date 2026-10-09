@@ -1,7 +1,8 @@
 """Plan cards: add_card's `plan` kind stores numbered steps with stable ids and no takeaway; edit_card replaces a plan's
 steps at any time, as for any card, and each step it replaces keeps its id, its clock while its text is unchanged and
 what the edit leaves out, such as its runs, with a changed status stamped; update_plan is gone. A step's details are
-stored, served and read. The next phase is a new plan that `follows` the last, and read_ref, list_cards, the canvas
+stored, served and read, and an edit that changes the plan marks what it changed until the next such edit or the
+analyst's Clear marks. The next phase is a new plan that `follows` the last, and read_ref, list_cards, the canvas
 context and refs read the steps. plan_runs matches a step's runs to main's subagent chats. Called through tools.call as
 main's browser chat, as the other card tools' tests are."""
 from __future__ import annotations
@@ -230,6 +231,22 @@ def test_steps_match_by_id_then_text_then_place():
     assert plans.match_steps(old, [{"text": "Mirror"}, {"text": "Build it"}, {"text": "Pilot"}]) == [0, 1, 2], "reworded in place"
     assert plans.match_steps(old, [{"text": "Mirror"}, {"text": "New"}, {"text": "Build"}, {"text": "Pilot 2"}]) == [0, None, 1, 2]
     assert plans.match_steps(old, [{"id": "c", "text": "Pilot, reworded"}, {"text": "Mirror"}]) == [2, 0]
+    # every step reworded and one put in before the pilot: each reworded step is the old step it reads most like, and
+    # the step put in is new rather than the pilot's place (the live check after Matt's feedback, 2026-10-09)
+    four = notebook.plan_steps_of([{"text": "Mirror pandas"}, {"text": "Build the agent image with a meson cache"},
+                                   {"text": "Pilot: two agents, one PR each"}, {"text": "Run and compare the conditions"}])
+    assert plans.match_steps(four, [{"text": "Mirror pandas"}, {"text": "Build the agent image from the existing Dockerfile with a meson cache"},
+                                    {"text": "Check that every agent builds pandas offline"}, {"text": "Pilot: 4 agents on 10 PRs"},
+                                    {"text": "Compare the conditions: PRs merged and reverted"}]) == [0, 1, None, 2, 3]
+    assert plans.likeness("Pilot: two agents, one PR each", "Pilot: 4 agents on 10 PRs") > plans.likeness(
+        "Pilot: two agents, one PR each", "Check that every agent builds pandas offline")
+    # the second live check: the check put in before the pilot reads more like the old pilot than any step but the new
+    # pilot, which takes it; the full runs after them are new
+    six = notebook.plan_steps_of([{"text": "Write the two conditions"}, {"text": "Pilot with 2 agents: each builds pandas, picks a PR and gets it merged"}])
+    assert plans.match_steps(six, [{"text": "Write the two conditions with the same issues"},
+                                   {"text": "Check that every agent can build pandas offline: start each agent's container with no web, build pandas"},
+                                   {"text": "Pilot with 4 agents on the same 10 PRs, once per condition, through the local GitHub and the message board"},
+                                   {"text": "Full runs of both conditions"}]) == [0, None, 1, None]
     merged = plans.merge_steps(old, [{"id": "c", "text": "Pilot, reworded", "status": "running"}], now="2026-10-09T10:00:00+00:00")
     assert merged[0]["id"] == "c" and merged[0]["started"] == "2026-10-09T10:00:00+00:00"
     made = plans.merge_steps([], [{"text": "Run", "status": "running"}, {"text": "Wait", "status": "needs you"}, {"text": "Next"}],
@@ -261,6 +278,49 @@ async def test_a_steps_details_are_stored_served_and_read(group):
     after = {p["ref"]: p["fp"] for p in canvas_comments.passages(CORPUS)}
     assert after[f"card:{cid}#step-2"] != fps[f"card:{cid}#step-2"]
     assert after[f"card:{cid}#step-1"] == fps[f"card:{cid}#step-1"]
+
+
+async def test_an_edit_that_changes_the_plan_marks_what_changed_until_the_next_such_edit_or_the_analyst_clears_it(group):
+    cid = await _plan(group)
+    assert plans.LAST_EDIT not in _cell(cid)["payload"], "a plan as made has nothing marked"
+    fp = canvas_comments._card_fp(_cell(cid))
+    # the analyst's feedback: a step put in before step 2, step 2 makes more, the pilot dropped
+    res = await call("edit_card", group, card=f"card:{cid}", steps=[
+        STEPS[0], {"text": "Write the prompts", "makes": ["prompts/"]}, {**STEPS[1], "makes": ["Dockerfile.agent", "wheelhouse/"]}])
+    assert not res.is_error, res.text
+    marks = _cell(cid)["payload"][plans.LAST_EDIT]
+    assert marks["steps"] == {"s4": {"new": True}, "s2": {"was": {"makes": ["Dockerfile.agent"]}}}
+    assert marks["removed"] == [{"id": "s3", "text": STEPS[2]["text"], "makes": ["pilot/"]}] and marks["ts"]
+    served = await notebook.canvas_route(CORPUS)
+    assert next(c for c in served["cells"] if c["id"] == cid)["payload"][plans.LAST_EDIT] == marks
+    # an edit of progress alone (a status, a note) keeps the marks of the last change
+    steps = [{"text": s["text"]} for s in notebook.plan_steps(_cell(cid))]
+    await call("edit_card", group, card=f"card:{cid}", steps=[{**steps[0], "status": "running", "note": "cloning"}, *steps[1:]])
+    assert _cell(cid)["payload"][plans.LAST_EDIT] == marks
+    # the next edit that changes the plan replaces them with its own: a step reworded keeps its old text
+    await call("edit_card", group, card=f"card:{cid}", steps=[steps[0], {"text": "Write the prompts for both conditions"}, steps[2]])
+    assert _cell(cid)["payload"][plans.LAST_EDIT]["steps"] == {"s4": {"was": {"text": "Write the prompts"}}}
+    assert _cell(cid)["payload"][plans.LAST_EDIT]["removed"] == []
+    # the marks are no part of what a check reads of the card
+    assert canvas_comments._card_fp(_cell(cid)) == fp
+    # Clear marks takes them off with no edit of the card, once
+    edits = len(_cell(cid).get("edited") or [])
+    assert plans.clear_edit_route(CORPUS, cid) == {"cleared": True}
+    assert plans.LAST_EDIT not in _cell(cid)["payload"] and len(_cell(cid).get("edited") or []) == edits
+    assert [s["text"] for s in notebook.plan_steps(_cell(cid))][1] == "Write the prompts for both conditions"
+    assert plans.clear_edit_route(CORPUS, cid) == {"cleared": False}
+    note = _cid(await call("add_card", group, kind="note", question="A note", text="Hello."))
+    with pytest.raises(Exception) as e:
+        plans.clear_edit_route(CORPUS, note)
+    assert getattr(e.value, "status_code", None) == 404
+
+
+def test_edit_marks_match_steps_by_id_and_mark_nothing_for_progress_alone():
+    old = notebook.plan_steps_of([{"id": "s1", "text": "Mirror", "makes": ["mirror/"]}, {"id": "s2", "text": "Build"}])
+    assert plans.edit_marks(old, [{**old[0], "status": "done", "note": "6 repos"}, old[1]]) is None
+    got = plans.edit_marks(old, [{**old[0], "details": "Every PR head."}, {"id": "s3", "text": "Pilot"}], now="t")
+    assert got == {"ts": "t", "steps": {"s1": {"was": {"details": ""}}, "s3": {"new": True}},
+                   "removed": [{"id": "s2", "text": "Build", "makes": []}]}
 
 
 async def test_the_next_phase_is_a_new_plan_that_follows_the_last(group):

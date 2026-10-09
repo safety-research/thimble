@@ -1551,6 +1551,25 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
 
 
 @_changes
+def drop_payload_key(workspace: str, cell_id: str, key: str) -> bool:
+    """Drop `key` from a data card's payload and announce the card, with no `edited` stamp: for what the card shows
+    beside its content, such as a plan's marks of its last edit (plans.clear_edit). Whether the payload held it. 404
+    for an unknown cell."""
+    ws = _ws(workspace)
+    hit = _locate(ws, cell_id)
+    if hit is None:
+        raise HTTPException(404, f"no such card: {cell_id}")
+    nb, cell = hit
+    payload = cell.get("payload")
+    if not isinstance(payload, dict) or key not in payload:
+        return False
+    cell["payload"] = {k: v for k, v in payload.items() if k != key}
+    write_notebook(ws, nb)
+    _emit(workspace, cell)
+    return True
+
+
+@_changes
 def delete_cell(workspace: str, cell_id: str) -> None:
     """Remove a cell from its group, with its outputs' side files. 404 for an unknown cell."""
     ws = _ws(workspace)

@@ -2,8 +2,12 @@
 // stylesheets, in a real browser. Matt 2026-10-09: a plan works like any card, so main replaces its steps with edit_card
 // at any time, and a step can carry details that show under it on request, as a comment's do. The card first shows the
 // plan as main made it; then the same card is drawn again with the steps an edit gave it: steps 1 and 2 done, step 3
-// running, step 4 with details. Its statuses and times change in place, step 4's line has a caret and no details at
-// rest, a click on it opens the details under the line, their citation a chip, and a second click folds them.
+// running, step 4 with details. Its statuses and times change in place, step 4 has Show more under it and no details at
+// rest, Show more opens the details under the line, their citation a chip, and Show less folds them. Then main changes
+// the plan on the analyst's feedback: a changed step says Changed and its Show more shows its text as it was, a new step
+// says New, the removed step is listed folded under the steps, and the marks go with the next edit or Clear marks
+// (POST /cards/{id}/plan-edit/clear). Matt 2026-10-09: "instead of the >, use text like 'Show more'"; "more realistic
+// is feedback on the upcoming plan itself. and i don't see what changed or updated in the plan".
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -13,6 +17,7 @@ import { bundle, cleanup, launch, ORIGIN, src } from './page.ts'
 
 let browser: Browser
 let page: Page
+const cleared: string[] = []
 
 const MIN = 60_000
 const ago = (m: number) => new Date(Date.now() - m * MIN).toISOString()
@@ -47,8 +52,8 @@ beforeAll(async () => {
       `const el = document.createElement('div'); el.className = 'canvas-card-box'; el.style.width = '700px'; el.style.margin = '16px'; document.body.appendChild(el)`,
       `const root = createRoot(el)`,
       // the same card, drawn again with each payload the canvas reads after an edit
-      `window.__t = { draw: (steps) => {`,
-      `  const cell = { id: 'p1anedit', notebook: 'nb', kind: 'plan', title: 'Plan: build the offline pandas environment and pilot it', created_by: 'chat:main', ts: '', takeaway: '', payload: { steps, follows: null } }`,
+      `window.__t = { draw: (steps, last_edit) => {`,
+      `  const cell = { id: 'p1anedit', notebook: 'nb', kind: 'plan', title: 'Plan: build the offline pandas environment and pilot it', created_by: 'chat:main', ts: '', takeaway: '', payload: { steps, follows: null, ...(last_edit ? { last_edit } : {}) } }`,
       `  flushSync(() => root.render(<CanvasContext.Provider value={ctx}><CardFace cell={cell} width={660} label={{ concept: null, error: null }} /></CanvasContext.Provider>))`,
       `} }`,
     ],
@@ -60,6 +65,10 @@ beforeAll(async () => {
   await page.route('**/*', (route) => {
     const p = new URL(route.request().url()).pathname
     if (p === '/bundle.css') return route.fulfill({ status: 200, contentType: 'text/css', body: readFileSync(css) })
+    if (route.request().method() === 'POST' && p.endsWith('/plan-edit/clear')) {
+      cleared.push(p)
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{"cleared":true}' })
+    }
     if (p.startsWith('/api/')) return route.fulfill({ status: 404, contentType: 'application/json', body: '{"detail":"not found"}' })
     return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body></body></html>' })
   })
@@ -83,6 +92,8 @@ const steps = () =>
       compact: s.classList.contains('is-compact'),
       details: !!s.querySelector('.plan-details'),
       caret: !!s.querySelector('.plan-caret'),
+      more: s.querySelector('.plan-more')?.textContent ?? null,
+      mark: s.querySelector('.plan-mark')?.textContent ?? null,
     })),
   )
 
@@ -91,6 +102,8 @@ test('the plan main made, then the same card after edit_card replaced its steps:
   const made = await steps()
   assert.deepEqual(made.map((s) => s.status), Array(5).fill('not started'))
   assert.deepEqual(made.map((s) => s.caret), [false, false, false, false, false], 'no step opens before it has more to show')
+  assert.deepEqual(made.map((s) => s.more), [null, null, null, null, null])
+  assert.deepEqual(made.map((s) => s.mark), [null, null, null, null, null], 'a plan as made has nothing marked')
   await page.evaluate((s) => (window as any).__t.draw(s), EDITED)
   const edited = await steps()
   assert.deepEqual(edited.map((s) => s.id), ['s1', 's2', 's3', 's4', 's5'], 'each row is the same step')
@@ -109,14 +122,21 @@ test('the plan main made, then the same card after edit_card replaced its steps:
   assert.equal(await page.locator(`${S(3)} .plan-make`).evaluate((c) => getComputedStyle(c).borderTopStyle), 'solid', 'what the running step makes is solid')
 })
 
-test("step 4's details: none at rest, a click on its line opens them under it with their citation as a chip, a second folds them", async () => {
+test("step 4's details: none at rest, Show more under it opens them with their citation as a chip, Show less folds them", async () => {
   await page.evaluate((s) => (window as any).__t.draw(s), EDITED)
   const s4 = page.locator(S(4))
   assert.equal(await s4.locator('.plan-details').count(), 0, 'no details at rest')
-  assert.ok(await s4.locator('.plan-caret').isVisible(), "the step's caret says it opens")
+  assert.equal(await s4.locator('.plan-caret').count(), 0, 'no caret: the words under the step say it opens')
+  assert.equal(await s4.locator('.plan-more').textContent(), 'Show more')
+  const under = await page.evaluate((sel) => {
+    const step = document.querySelector<HTMLElement>(sel)!
+    const r = (q: string) => step.querySelector(q)!.getBoundingClientRect()
+    return { below: r('.plan-more').top >= r('.plan-line').bottom - 1, left: Math.abs(r('.plan-more').left - r('.plan-line').left) <= 4 }
+  }, S(4))
+  assert.ok(under.below && under.left, `Show more stands under the step's line, at its left ${JSON.stringify(under)}`)
   assert.equal(await s4.locator('.plan-make').first().textContent(), 'Dockerfile.agent', 'what it makes shows at rest')
   const rest = (await s4.boundingBox())!
-  await s4.locator('.plan-toggle').click()
+  await s4.locator('.plan-more').click()
   await page.waitForSelector(`${S(4)} .plan-details`)
   const open = await page.evaluate((sel) => {
     const step = document.querySelector<HTMLElement>(sel)!
@@ -143,7 +163,70 @@ test("step 4's details: none at rest, a click on its line opens them under it wi
   assert.ok(grown.height > rest.height + 30, `the step grows to hold them ${rest.height} → ${grown.height}`)
   const out = process.env.THIMBLE_PLAN_SHOT
   if (out) writeFileSync(path.resolve(out), await page.screenshot({ fullPage: true }))
-  await s4.locator('.plan-toggle').click()
+  assert.equal(await s4.locator('.plan-more').textContent(), 'Show less')
+  await s4.locator('.plan-more').press('Enter')
   await page.waitForSelector(`${S(4)} .plan-details`, { state: 'detached' })
+  assert.equal(await s4.locator('.plan-more').textContent(), 'Show more', 'the keyboard folds them too')
   assert.equal(await s4.locator('.plan-make').first().textContent(), 'Dockerfile.agent', 'what it makes still shows')
+})
+
+// the analyst's feedback before go: pilot with 4 agents on 10 PRs, and check that every agent builds pandas offline;
+// main reworded the pilot, put in the check before it and dropped the separate message board step
+const FEEDBACK = [
+  MADE[0],
+  MADE[1],
+  { ...MADE[3], details: DETAILS },
+  step('s6', 'Check that every agent can build pandas offline', ['checks/offline-builds.csv']),
+  { ...MADE[4], text: 'Pilot: 4 agents per condition on 10 PRs', makes: ['pilot/', 'pilot/builds.csv'] },
+]
+const MARKS = {
+  ts: ago(1),
+  steps: { s4: { was: { details: '' } }, s6: { new: true }, s5: { was: { text: MADE[4].text, makes: ['pilot/'] } } },
+  removed: [{ id: 's3', text: MADE[2].text, makes: ['board/'] }],
+}
+
+test("main's edit on the analyst's feedback: Changed and New beside the steps, the old text on request, the removed step folded", async () => {
+  await page.evaluate(([s, m]) => (window as any).__t.draw(s, m), [FEEDBACK, MARKS] as const)
+  const got = await steps()
+  assert.deepEqual(got.map((s) => s.id), ['s1', 's2', 's4', 's6', 's5'])
+  assert.deepEqual(got.map((s) => s.mark), [null, null, 'Changed', 'New', 'Changed'])
+  const look = await page.evaluate(() => {
+    const m = document.querySelector<HTMLElement>('.plan-mark')!
+    const cs = getComputedStyle(m)
+    const line = m.closest('.plan-step')!.querySelector('.plan-line')!.getBoundingClientRect()
+    const r = m.getBoundingClientRect()
+    return { radius: cs.borderTopLeftRadius, size: parseFloat(cs.fontSize), border: cs.borderLeftWidth, after: r.left >= line.right - 1 && r.top < line.bottom, rows: [...document.querySelectorAll<HTMLElement>('.plan-step')].map((s) => getComputedStyle(s).borderLeftWidth) }
+  })
+  assert.ok(look.after && look.size <= 12.5 && look.border === '0px', `a quiet word after the step's text ${JSON.stringify(look)}`)
+  assert.ok(look.rows.every((w) => w === '0px'), 'no colored stripe beside a marked step')
+  // the pilot's old text waits behind its Show more
+  const pilot = page.locator(S(5))
+  assert.equal(await pilot.locator('.plan-was').count(), 0)
+  await pilot.locator('.plan-more').click()
+  assert.equal(await pilot.locator('.plan-was-text').textContent(), MADE[4].text)
+  assert.deepEqual(await pilot.locator('.plan-was .plan-make').allTextContents(), ['pilot/'])
+  await pilot.locator('.plan-more').click()
+  assert.equal(await pilot.locator('.plan-was').count(), 0)
+  // the message board step, removed, is listed folded under the steps
+  const foot = page.locator('.plan-edit')
+  assert.equal(await foot.locator('.plan-edit-removed').textContent(), '1 step removed')
+  assert.equal(await foot.locator('.plan-removed-step').count(), 0)
+  await foot.getByRole('button', { name: 'Show more' }).click()
+  assert.deepEqual(await foot.locator('.plan-removed-step').allTextContents(), [MADE[2].text])
+  assert.equal(await foot.locator('.plan-edit-clear').textContent(), 'Clear marks')
+  const out = process.env.THIMBLE_PLAN_MARKS_SHOT
+  if (out) writeFileSync(path.resolve(out), await page.screenshot({ fullPage: true }))
+})
+
+test('the marks go with the next edit, and Clear marks asks the server to take them off', async () => {
+  await page.evaluate(([s, m]) => (window as any).__t.draw(s, m), [FEEDBACK, MARKS] as const)
+  await page.locator('.plan-edit-clear').click()
+  for (let k = 0; k < 40 && !cleared.length; k++) await page.waitForTimeout(25)
+  assert.deepEqual(cleared, ['/api/ws/w/cards/p1anedit/plan-edit/clear'])
+  // the server's next read of the card has no marks, as after the next edit that changes the plan
+  await page.evaluate((s) => (window as any).__t.draw(s), FEEDBACK)
+  const got = await steps()
+  assert.deepEqual(got.map((s) => s.mark), [null, null, null, null, null])
+  assert.equal(await page.locator('.plan-edit').count(), 0)
+  assert.deepEqual(got.map((s) => s.more), [null, null, 'Show more', null, null], 'Show more stays where a step has details')
 })

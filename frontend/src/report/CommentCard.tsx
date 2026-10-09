@@ -1,9 +1,10 @@
 // One comment as the Report's margin (Margin.tsx) and the canvas (canvas/CommentLayer.tsx) draw it, the same on both:
-// its check's name in the check's color beside the color square, then its statement. The chevron opens its details,
-// whose citations show as chips. A click makes it active, which opens its details and a field whose text asks Thimble
-// about it in a thread anchored to the comment's passage, card or step, with the comment's id and words; Ask does the
-// same and puts the caret in the field. On hover, Ask and Know it (a check's comment, which its check then never raises
-// again) stand before ✓ (Done); Know it and Done resolve the comment, which hides it.
+// its check's name in the check's color beside the color square, then its statement. Show more under the statement
+// opens its details, whose citations show as chips, and Show less folds them. A click makes it active, which opens its
+// details and a field whose text asks Thimble about it in a thread anchored to the comment's passage, card or step,
+// with the comment's id and words; Ask does the same and puts the caret in the field. On hover, Ask and Know it (a check's comment, which its check then never raises
+// again) stand before ✓ (Done); Know it and Done resolve the comment, which hides it. The canvas hears when the pointer
+// or the keyboard's focus comes onto a card, to show where its comment points (CommentLayer.tsx).
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react'
 import { ChatMarkdown, ChipContext } from '../chat/markdown'
 import { TextArea } from '../components/Field'
@@ -14,7 +15,7 @@ import { track } from '../lib/telemetry'
 import { commentName, CLAUDE_AUTHOR, extraEvidence, type CheckLook } from './checkComments'
 import type { ResolveHow } from './commentsApi'
 import { noteText } from './NoteText'
-import { Chevron, Glyph, IconButton } from './icons'
+import { Glyph, IconButton } from './icons'
 
 const NO_REFS: ReadonlySet<string> = new Set()
 
@@ -61,6 +62,19 @@ export interface CommentCardProps {
   /** the surface's own data attributes */
   attrs?: Record<string, string>
   onMouseDown?: (e: MouseEvent) => void
+  /** the pointer came onto the card (true) or left it (false) */
+  onHover?: (on: boolean) => void
+  /** the keyboard brought the focus into the card (true), or the focus left it (false) */
+  onFocusIn?: (on: boolean) => void
+}
+
+/** Whether the focus came to `el` from the keyboard (a click on a button gives it no :focus-visible). */
+function keyboardFocus(el: Element): boolean {
+  try {
+    return el.matches(':focus-visible')
+  } catch {
+    return false
+  }
 }
 
 /** The words the thread's first lines show of the comment: who left it, its id, where, its statement and details. */
@@ -71,7 +85,7 @@ export function threadText(c: CommentView, name: string, thread: CommentThread):
   return `${thread.passage ? `${thread.passage}\n\n` : ''}${who}${where}: ${said}`
 }
 
-export function CommentCard({ ws, comment, look, active, onActivate, onResolve, thread, cardRef, className, style, attrs, onMouseDown }: CommentCardProps) {
+export function CommentCard({ ws, comment, look, active, onActivate, onResolve, thread, cardRef, className, style, attrs, onMouseDown, onHover, onFocusIn }: CommentCardProps) {
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
   const [asking, setAsking] = useState(0)
@@ -79,7 +93,7 @@ export function CommentCard({ ws, comment, look, active, onActivate, onResolve, 
   const colour = look.colour(comment.check)
   const extra = extraEvidence(comment.evidence, comment.details)
   const more = !!comment.details.trim() || extra.length > 0
-  // a comment let go folds its details again; one opened by its chevron alone stays open
+  // a comment let go folds its details again; one opened by Show more alone stays open
   const wasActive = useRef(active)
   useEffect(() => {
     if (wasActive.current && !active) setOpen(false)
@@ -101,7 +115,19 @@ export function CommentCard({ ws, comment, look, active, onActivate, onResolve, 
     setAsking((n) => n + 1)
   }
   return (
-    <div ref={cardRef} className={`wu-cm${active ? ' wu-cm-active' : ''}${className ? ` ${className}` : ''}`} style={style} onClick={activate} onMouseDown={onMouseDown} data-comment={comment.id} {...attrs}>
+    <div
+      ref={cardRef}
+      className={`wu-cm${active ? ' wu-cm-active' : ''}${className ? ` ${className}` : ''}`}
+      style={style}
+      onClick={activate}
+      onMouseDown={onMouseDown}
+      onMouseEnter={onHover && (() => onHover(true))}
+      onMouseLeave={onHover && (() => onHover(false))}
+      onFocus={onFocusIn && ((e) => keyboardFocus(e.target) && onFocusIn(true))}
+      onBlur={onFocusIn && ((e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && onFocusIn(false))}
+      data-comment={comment.id}
+      {...attrs}
+    >
       <div className="wu-cm-head">
         <span className="wu-cm-sq" style={{ background: colour }} />
         <span className="wu-cm-name" style={{ color: colour }}>
@@ -118,19 +144,6 @@ export function CommentCard({ ws, comment, look, active, onActivate, onResolve, 
               </button>
             )}
           </span>
-          {more && (
-            <IconButton
-              label={open ? 'Hide details' : 'Details'}
-              className="wu-cm-more"
-              aria-expanded={open}
-              onClick={(e) => {
-                e.stopPropagation()
-                setOpen((o) => !o)
-              }}
-            >
-              <Chevron open={open} size={13} />
-            </IconButton>
-          )}
           {!comment.fixed && (
             <IconButton label="Done" className="wu-cm-resolve" disabled={busy} onClick={act('done')}>
               <Glyph name="check" size={13} strokeWidth={2} />
@@ -156,6 +169,19 @@ export function CommentCard({ ws, comment, look, active, onActivate, onResolve, 
             </div>
           )}
         </div>
+      )}
+      {more && (
+        <button
+          type="button"
+          className="wu-cm-more"
+          aria-expanded={open}
+          onClick={(e) => {
+            e.stopPropagation()
+            setOpen((o) => !o)
+          }}
+        >
+          {open ? 'Show less' : 'Show more'}
+        </button>
       )}
       {active && <Reply ws={ws} comment={comment} name={name} thread={thread} focus={asking} />}
     </div>

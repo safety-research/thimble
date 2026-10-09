@@ -1551,18 +1551,21 @@ def _edit_data_cell(ctx: Ctx, nb_id: str, cid: str, cell: dict, args: dict[str, 
 def _edit_plan(ctx: Ctx, cid: str, steps: "builtins.list[dict]", title: str | None) -> dict:
     """edit_card's new `steps` for plan `cid`, at any time: merged with the steps the card holds under the groups' lock
     (plans.merge_steps), so each step it replaces keeps its id, its clock while its text is unchanged and what the edit
-    leaves out, and a status that changes is stamped. Its `follows` stays, and the ids of the steps it removes are kept
-    (plans.removed_ids), so no later step takes one."""
+    leaves out, and a status that changes is stamped. Its `follows` stays, the ids of the steps it removes are kept
+    (plans.removed_ids), so no later step takes one, and what it changed is marked for the analyst (plans.marks_after)."""
     from . import notebook, plans
 
     with notebook.editing(ctx.ws):
         hit = notebook.find_cell(ctx.ws, cid)
         held = (hit[1] if hit else None) or {}
         was = held.get("payload") if isinstance(held.get("payload"), dict) else {}
-        merged = plans.merge_steps(notebook.plan_steps(held), steps, removed=was.get(plans.REMOVED) or ())
+        old = notebook.plan_steps(held)
+        merged = plans.merge_steps(old, steps, removed=was.get(plans.REMOVED) or ())
         payload = {"steps": merged, "follows": was.get("follows")}
         if removed := plans.removed_ids(was, merged):
             payload[plans.REMOVED] = removed
+        if marks := plans.marks_after(was, old, merged):
+            payload[plans.LAST_EDIT] = marks
         return notebook.edit_cell(ctx.c, cid, payload=payload, title=title, by=ctx.cell_author)
 
 

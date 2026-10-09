@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 // One comment card for every comment, in the Report's margin and on the canvas (src/report/CommentCard.tsx): its
 // header is its check's name in the check's color beside the color square, with no "Claude" before it; it shows its
-// statement, and its details only once the chevron opens them, their citations as chips; Know it (a check's comment)
+// statement, and its details only once Show more under the statement opens them (Show less folds them again), their
+// citations as chips; Know it (a check's comment)
 // and ✓ (Done) resolve it; Ask makes it active and puts the caret in its field, whose text opens a thread anchored to
 // the comment's place with the comment's id and words. Matt 2026-10-09: "it shows a short comment, then you expand for
-// details (which can contain some citations), and can ask follow ups".
+// details (which can contain some citations), and can ask follow ups"; "instead of the >, use text like 'Show more' or
+// something that's placed below the short description".
 import { act, useState } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { CommentCard, threadText, type CommentThread, type CommentView } from '../../src/report/CommentCard.tsx'
@@ -40,7 +42,7 @@ function Held({ comment, onResolve, thread = ON_STEP }: { comment: CommentView; 
 const click = (el: Element | null) => act(async () => (el as HTMLElement).click())
 
 describe('what a comment shows', () => {
-  test("its check's name in the check's color and its statement; its details only once the chevron opens them", async () => {
+  test("its check's name in the check's color and its statement; its details only once Show more under it opens them", async () => {
     const el = await mount(<Held comment={YSK} />)
     const name = el.querySelector<HTMLElement>('.wu-cm-name')!
     expect(name.textContent).toBe('You should know')
@@ -52,21 +54,32 @@ describe('what a comment shows', () => {
     expect(el.querySelector('.wu-cm-details')).toBeNull()
     expect(el.textContent).not.toContain('Bake them')
 
+    // no chevron in the header: the control is a button of words, after the statement
+    expect(el.querySelector('.wu-cm .wu-chev')).toBeNull()
+    expect([...el.querySelectorAll('.wu-cm-head button')].map((b) => b.textContent?.trim() || b.getAttribute('aria-label'))).toEqual(['Ask', 'Know it', 'Done'])
     const more = el.querySelector<HTMLButtonElement>('.wu-cm-more')!
+    expect(more.tagName).toBe('BUTTON')
+    expect(more.textContent).toBe('Show more')
     expect(more.getAttribute('aria-expanded')).toBe('false')
+    const order = (a: Element, b: Element) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
+    expect(order(el.querySelector('.wu-cm-statement')!, more)).toBeTruthy()
     await click(more)
     expect(more.getAttribute('aria-expanded')).toBe('true')
+    expect(more.textContent).toBe('Show less')
     const details = el.querySelector('.wu-cm-details')!
+    expect(order(details, more)).toBeTruthy() // Show less stands under the details it folds
     expect([...details.querySelectorAll('li')].map((li) => li.textContent?.trim())).toEqual(['The pandas build fetches two libraries from GitHub 2.', 'Bake them into the image.'])
     expect([...details.querySelectorAll<HTMLElement>('.refchip')].map((c) => c.dataset.ref)).toEqual(['card:abc123#libs/TOTAL'])
-    expect(el.querySelector('.wu-cm-reply')).toBeNull() // the chevron opens the details, not the field
+    expect(el.querySelector('.wu-cm-reply')).toBeNull() // Show more opens the details, not the field
     await click(more)
     expect(el.querySelector('.wu-cm-details')).toBeNull()
+    expect(more.textContent).toBe('Show more')
   })
 
-  test('a comment with no details has no chevron; the refs its statement cited show as chips in its details', async () => {
+  test('a comment with no details has no Show more; the refs its statement cited show as chips in its details', async () => {
     const plain = await mount(<Held comment={{ ...YSK, details: '', evidence: [] }} />)
     expect(plain.querySelector('.wu-cm-more')).toBeNull()
+    expect(plain.textContent).not.toContain('Show more')
     expect(extraEvidence(['card:a', 'card:b'], 'see [[card:a]]')).toEqual(['card:b'])
     const cited = await mount(<Held comment={{ ...YSK, details: '', evidence: ['card:abc123'] }} />)
     await click(cited.querySelector('.wu-cm-more'))

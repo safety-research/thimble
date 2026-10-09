@@ -112,7 +112,8 @@ function Face(p: CardFaceProps) {
           <InlineField className="bcell-q" value={cell.title} onDone={(v) => p.onEdited?.('title', v)} onAsk={p.onAsk ? (v) => p.onAsk?.('title', v) : undefined} />
         ) : (
           <span className="bcell-q" data-anchor={`card:${cell.id}`} data-anchor-text={cell.title} onMouseDown={p.onTextDown?.('title')} onClick={p.onTextClick?.('title')}>
-            {cell.title}
+            {/* its words alone, which a comment on the card highlights (CommentLayer.tsx) */}
+            <span className="bcell-q-text">{cell.title}</span>
           </span>
         )}
       </div>

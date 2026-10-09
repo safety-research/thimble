@@ -4,10 +4,15 @@ A plan card (notebook.PLAN_KIND) holds numbered steps, each with a status the ag
 plan as it changes any card: edit_card with the whole list of steps, at any time, such as to mark a step running or
 done, add a note or details, or add a step. merge_steps matches each new step to the step it replaces, so the step keeps
 its id (which a comment on it follows) and its clock: by the id it gives, else by the same text (at its place, else
-anywhere, as when a step was put before it), else by its place. A matched step keeps `started` and `ended` while its
-text is unchanged (or it names its id), and keeps every field it leaves out, such as its runs; a status that changes is
-stamped (stamp), so the card shows how long a step took, or has run so far, unless the agent gives a time. The next
-phase can still be a new plan card whose `follows` names this one.
+anywhere, as when a step was put before it), else by its place, the old step it reads most like first (likeness). A
+matched step keeps `started` and `ended` while its text is unchanged (or it names its id), and keeps every field it
+leaves out, such as its runs; a status that changes is stamped (stamp), so the card shows how long a step took, or has
+run so far, unless the agent gives a time. The next phase can still be a new plan card whose `follows` names this one.
+
+An edit that changes what the plan is (a step's text, what it makes or its details; a step added or removed) leaves its
+marks in the payload (edit_marks, LAST_EDIT), so the card shows the analyst what changed: Changed, with the text as it
+was, New, and the removed steps. They stay until the next edit that changes the plan, through edits of progress alone
+(marks_after), or until the analyst clears them (POST /ws/{c}/cards/{id}/plan-edit/clear).
 
 A step's `runs` names the Agent calls that do it, by their description, as Claude Code's agent tray names them.
 plan_runs matches each name to main's subagent chat of that title (session.py mirrors each Agent call of main's as an
@@ -17,7 +22,9 @@ shows under the step while it runs (GET /ws/{c}/cards/{id}/plan-runs).
 from __future__ import annotations
 
 import builtins
+import difflib
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -34,6 +41,10 @@ CALL_ARGS = ("description", "command", "file_path", "path", "pattern", "query", 
 # the fields of a step an edit may leave out, which a matched step then keeps (merge_steps)
 KEPT_FIELDS = ("makes", "status", "note", "details", "runs", "time")
 REMOVED = "removed_steps"  # a plan payload's ids of the steps edits removed (removed_ids)
+_WORD = re.compile(r"[^\W_]+")
+LAST_EDIT = "last_edit"  # a plan payload's marks of what its last edit changed (edit_marks)
+# the fields of a step that say what the plan is, whose change the card marks; status, note, runs and time are progress
+MARKED_FIELDS = ("text", "makes", "details")
 
 
 def _now() -> str:
@@ -61,11 +72,21 @@ def _text_key(v: Any) -> str:
     return " ".join(str(v or "").split()).casefold()
 
 
+def likeness(a: Any, b: Any) -> float:
+    """How alike two steps' texts read, 0 to 1: the share of their words in the same order (difflib's ratio over the
+    words, case and punctuation aside)."""
+    wa, wb = _WORD.findall(str(a or "").casefold()), _WORD.findall(str(b or "").casefold())
+    if not wa or not wb:
+        return 0.0
+    return difflib.SequenceMatcher(None, wa, wb, autojunk=False).ratio()
+
+
 def match_steps(old: "builtins.list[dict]", new: "builtins.list[dict]") -> "builtins.list[int | None]":
     """For each new step, the index of the old step it replaces, or None for a new one: by the `id` it gives, else by
-    the same text at its place, else by the same text anywhere, else by its place among the steps matched so far (the
-    first old step left between the old steps of the matched new steps before and after it, so a step put in between
-    two kept steps is new and a step reworded in place is the same); each old step matched once."""
+    the same text at its place, else by the same text anywhere, else by an old step left between the old steps of the
+    matched new steps before and after it, the most alike pairs first (likeness), then in order. So a step put in
+    between two kept steps is new, a step reworded in place is the same, and a step put before a reworded one is new
+    rather than taking its place; each old step matched once."""
     out: builtins.list[int | None] = [None] * len(new)
     used: set[int] = set()
     by_id = {str(s.get("id")): i for i, s in enumerate(old) if s.get("id")}
@@ -85,12 +106,18 @@ def match_steps(old: "builtins.list[dict]", new: "builtins.list[dict]") -> "buil
         if out[i] is None:
             take(i, next((j for j, o in enumerate(old)
                           if j not in used and _text_key(o.get("text")) == _text_key(s.get("text"))), None))
-    for i in range(len(new)):  # its place between the matched steps around it
-        if out[i] is not None:
-            continue
+
+    def window(i: int) -> range:  # the old steps between those of the matched new steps around new step i
         lo = max((j for j in out[:i] if j is not None), default=-1)
         hi = min((j for j in out[i + 1:] if j is not None), default=len(old))
-        take(i, next((j for j in range(lo + 1, hi) if j not in used), None))
+        return range(lo + 1, hi)
+
+    # reworded: an old step left between the matched steps around it, the most alike pairs first, then in order
+    alike = sorted(((likeness(o.get("text"), s.get("text")), i, j) for i, s in enumerate(new) if out[i] is None
+                    for j, o in enumerate(old) if j not in used), key=lambda t: -t[0])
+    for _, i, j in alike:
+        if out[i] is None and j not in used and j in window(i):
+            take(i, j)
     return out
 
 
@@ -143,6 +170,61 @@ def removed_ids(payload: dict | None, steps: "builtins.list[dict]") -> "builtins
     before += [str(s.get("id")) for s in notebook.plan_steps_of(p.get("steps")) if s.get("id")]
     now = {str(s.get("id")) for s in steps}
     return sorted({x for x in before if x not in now})
+
+
+def edit_marks(old: "builtins.list[dict]", new: "builtins.list[dict]", now: str | None = None) -> dict | None:
+    """What an edit changed in a plan, for the card to mark: {ts, steps: {id: {new: true} | {was: {field: before}}},
+    removed: [{id, text, makes}]}, where a changed step's `was` holds the MARKED_FIELDS the edit changed, as they were.
+    The steps match by id, as merge_steps leaves them. None when the edit changed none of them, as when it changed only
+    statuses, notes or runs."""
+    by_id = {str(s.get("id")): s for s in old}
+    steps: dict[str, dict] = {}
+    for s in new:
+        was = by_id.get(str(s.get("id")))
+        if was is None:
+            steps[str(s["id"])] = {"new": True}
+        elif changed := {k: was.get(k) for k in MARKED_FIELDS if was.get(k) != s.get(k)}:
+            steps[str(s["id"])] = {"was": changed}
+    kept = {str(s.get("id")) for s in new}
+    removed = [{"id": str(s.get("id")), "text": str(s.get("text") or ""), "makes": list(s.get("makes") or [])}
+               for s in old if str(s.get("id")) not in kept]
+    if not steps and not removed:
+        return None
+    return {"ts": now or _now(), "steps": steps, "removed": removed}
+
+
+def marks_after(payload: dict | None, old: "builtins.list[dict]", new: "builtins.list[dict]") -> dict | None:
+    """A plan's marks after an edit from steps `old` to `new`: the edit's own (edit_marks) when it changed the plan, else
+    the marks the payload held, so an edit of progress alone (a status, a note, runs) leaves the analyst's view of the
+    last change; ids of steps gone since are dropped."""
+    if marks := edit_marks(old, new):
+        return marks
+    held = (payload or {}).get(LAST_EDIT) if isinstance(payload, dict) else None
+    if not isinstance(held, dict):
+        return None
+    ids = {str(s.get("id")) for s in new}
+    steps = {k: v for k, v in (held.get("steps") or {}).items() if k in ids} if isinstance(held.get("steps"), dict) else {}
+    removed = held.get("removed") if isinstance(held.get("removed"), list) else []
+    return {**held, "steps": steps, "removed": removed} if steps or removed else None
+
+
+def clear_edit(c: str, cid: str) -> bool:
+    """Take off plan `cid`'s marks of its last edit, as the analyst's Clear marks does: whether it had any. 404 for a
+    card that is not a plan."""
+    cell = notebook.get_cell(c, cid)
+    if cell is None or cell.get("kind") != notebook.PLAN_KIND:
+        raise HTTPException(404, f"no plan card {cid}")
+    return notebook.drop_payload_key(c, cid, LAST_EDIT)
+
+
+@router.post("/ws/{c}/cards/{cell_id}/plan-edit/clear")
+def clear_edit_route(c: str, cell_id: str) -> dict:
+    """Clear marks on a plan card (clear_edit)."""
+    try:
+        config.workspace_dir(c)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    return {"cleared": clear_edit(c, cell_id)}
 
 
 # --------------------------------------------------------------------------- the live rows of a step's runs

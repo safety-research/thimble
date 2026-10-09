@@ -347,6 +347,8 @@ export const api = {
   cellNames: (c: string) => j<CellName[]>(`${ws(c)}/cells/names`),
   /** the live rows of a plan card's runs (backend plans.plan_runs_route) */
   planRuns: (c: string, id: string) => j<{ runs: PlanRun[] }>(`${ws(c)}/cards/${enc(id)}/plan-runs`),
+  /** take off a plan's marks of what its last edit changed (backend plans.clear_edit_route) */
+  clearPlanEdit: (c: string, id: string) => j<{ cleared: boolean }>(`${ws(c)}/cards/${enc(id)}/plan-edit/clear`, { method: 'POST' }),
 
   // ---- labels and filters ----
   concepts: (c: string) => j<Concept[]>(`${ws(c)}/concepts`),

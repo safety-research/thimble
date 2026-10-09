@@ -67,7 +67,7 @@ export function Margin({ ws, slug, comments, look, active, onActivate, onResolve
   }, [column, key]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // placed after every render, and again whenever the column's text moves (an edit, a figure loading, a resize) or a
-  // comment's chevron opens or folds its details
+  // comment's Show more opens or Show less folds its details
   useLayoutEffect(() => {
     layout()
   })

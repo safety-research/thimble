@@ -1383,8 +1383,8 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   font: 400 10.5px / 1.2 var(--font-body);
   color: var(--text-tertiary);
 }
-/* the head's end: the chevron of the details and ✓ (Done); Ask and Know it show on a hovered or active card, over the
-   end of the name before them, since the margin is narrow */
+/* the head's end: ✓ (Done); Ask and Know it show on a hovered or active card, over the end of the name before them,
+   since the margin is narrow */
 .wu-cm-tools {
   position: relative;
   flex: none;
@@ -1422,15 +1422,6 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   cursor: pointer;
 }
 .wu-cm-act:hover:not(:disabled) {
-  color: var(--text-primary);
-}
-.wu-cm-more {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  color: var(--text-tertiary);
-}
-.wu-cm-more:hover:not(:disabled) {
   color: var(--text-primary);
 }
 .wu-cm-resolve {
@@ -1472,6 +1463,26 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
 }
 .wu-cm-md.chat-text li {
   margin: 1px 0;
+}
+/* Show more under the statement, Show less under the open details: quiet text in the margin's secondary ink */
+.wu-cm-more {
+  align-self: flex-start;
+  min-height: 0;
+  margin-top: -2px;
+  padding: 0 2px;
+  margin-left: -2px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  font: 500 var(--text-xs) / 1.4 var(--font-body);
+  color: var(--text-secondary);
+}
+.wu-cm-more:hover {
+  background: none;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
 }
 /* a card at rest shows four lines of its comment, so the cards stay near their passages; the active one shows all */
 .wu-cm:not(.wu-cm-active) .wu-cm-text {
