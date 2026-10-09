@@ -2,7 +2,8 @@
 // the analyst does to it (drag, resize, marquee select, group, delete, rename, pan and zoom, teleports to a ref) and
 // writes every change through the notebook routes before re-reading. With no view kept it opens on the orientation's
 // deck; a switch to the tab while it has its dot lands by landing.ts. Every card carries `data-anchor`, so ⌘-click
-// reaches it.
+// reaches it. The comments the checks over the cards leave sit beside the cards (CommentLayer.tsx), and the top bar's
+// Comments lists those checks with their switches (Controls.tsx, report/Checks.tsx CheckRows).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react'
 import { ChipContext } from '../chat/markdown'
 import { readSeen } from '../chat/seen'
@@ -25,7 +26,9 @@ import type { CanvasResponse, Cell, ChatMeta, Filters, Pos } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { anchorElement, capturePng, describeElement } from '../pointer/capture'
 import { NO_FILTER, activeParts, bothKeep, cardParts, keepShown, keptBy, readFilter, searchText, type CardFilter, type FilterCard, type FilterPart } from './cardFilter'
+import { useChecks } from '../report/Checks'
 import { CellCard, type CardAction, type CardField, type Edge } from './Cell'
+import { CommentLayer, shownCanvasComments, useCanvasComments } from './CommentLayer'
 import { conceptName, useConcepts } from './concepts'
 import { CanvasContext, type CanvasCtx } from './context'
 import { Controls, type CanvasLabel } from './Controls'
@@ -192,6 +195,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   // the viewport has been measured (a hidden tab measures 0 wide), so a view can be placed in it
   const [vpReady, setVpReady] = useState(false)
   const concepts = useConcepts(ws)
+  const checks = useChecks(ws)
+  const notes = useCanvasComments(ws)
   const vp = useRef<HTMLDivElement>(null)
 
   useEffect(() => setOpenState(new Set(readStorage<string[]>(openKey, []))), [openKey])
@@ -513,6 +518,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     }
   }
   const ctx: CanvasCtx = useMemo(() => ({ ws, filters, keep: kept, concepts, threadOf, unread, refresh, openThread }), [ws, filters, kept, concepts, threadOf, unread, refresh, openThread])
+  // the comments beside the cards: a check's while it is on, on a card that is drawn and that the filters keep
+  const shownNotes = useMemo(() => (lay ? shownCanvasComments(notes.comments, checks.on, (id) => lay.rects.has(id), kept) : []), [notes.comments, checks.on, lay, kept])
+  const cardEl = useCallback((id: string) => cardEls.current.get(id), [])
+  const titleOf = useCallback((id: string) => board?.cellById.get(id)?.cell.title ?? '', [board])
 
   // ---- pan and zoom ----
 
@@ -1451,6 +1460,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                       />
                     )
                   })}
+                  <CommentLayer ws={ws} board={board} lay={lay} comments={shownNotes} look={checks.look} cardEl={cardEl} onResolve={notes.resolve} titleOf={titleOf} />
                   {drag?.ins && <div className="board-ins" style={{ left: drag.ins.bar.x, top: drag.ins.bar.y, width: drag.ins.bar.w, height: drag.ins.bar.h }} />}
                   {tag && drag && (
                     <div className="board-tag" style={{ left: drag.x + 8, top: drag.y - 30 }}>
@@ -1489,6 +1499,9 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                 onLabel={(concept, value) => void setLabelFilter(concept, value)}
                 keep={kept}
                 filterReady={filters != null}
+                ws={ws}
+                checks={checks}
+                comments={notes.comments}
               />
               {detailCell && <DetailPanel key={detailCell.id} cell={detailCell} cite={cite?.cell === detailCell.id ? cite : null} onClose={() => setDetail(null)} />}
               {labelPanel && !detailCell && <LabelPanel key={labelPanel} conceptId={labelPanel} onClose={() => setLabelPanel(null)} />}

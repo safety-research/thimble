@@ -911,6 +911,34 @@ export interface WriteupComment {
   generation?: number | null
   section?: string | null
   proposal?: string | null
+  /** a comment that opens with "Heads up:" or "You should know:": that `tag`, the first sentence after it as `title`
+   * and the rest as `body` (backend canvas_comments.parse_note) */
+  title?: string | null
+  body?: string | null
+  /** why it is resolved: the analyst's Done or Know it, or superseded by a later run of its check */
+  resolution?: 'done' | 'known' | 'superseded' | string | null
+}
+
+/** A comment beside a card or a step of a plan card (`GET /ws/{c}/canvas/comments`, backend canvas_comments.py): a
+ * check's run over the cards left it (`check`), or main did (author `claude`). `ref` is `card:<id>`, or
+ * `card:<id>#step-<n>` with `n` the step's place. Only open comments on cards that are there are served. */
+export interface CanvasComment {
+  id: string
+  card: string
+  /** the step's stable id; null for a comment on the card */
+  step: string | null
+  n: number | null
+  ref: string
+  check: string | null
+  run: string | null
+  author: 'check' | 'claude' | string
+  tag: 'Heads up' | 'You should know' | string | null
+  title: string | null
+  body: string | null
+  text: string
+  evidence?: string | null
+  ts: string
+  status: 'open' | 'dismissed' | string
 }
 
 /** A written document, or (`frame: true`) the frame of pinned figures and bullets before any write. */
@@ -1028,7 +1056,12 @@ export interface Check {
   ts: string
   version: number
   runs: Record<string, CheckRun>
+  /** what it comments on: the documents, the cards (its runs on them are `runs['@canvas']`) or both */
+  covers?: CheckCover[]
 }
+
+/** What a check comments on (backend checks.COVERS). */
+export type CheckCover = 'documents' | 'cards'
 
 /** `PATCH /ws/{c}/checks/{id}`: what the sidebar changes. */
 export interface CheckPatch {
@@ -1036,6 +1069,7 @@ export interface CheckPatch {
   name?: string
   prompt?: string
   colour?: number
+  covers?: CheckCover[]
 }
 
 /** `GET /ws/{c}/card-checks` (backend card_check.status_route): whether the card check runs, whether it starts by

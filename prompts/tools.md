@@ -308,13 +308,13 @@ Replace one sentence, paragraph or heading of a written document, insert a passa
 
 ## add_comment
 
-Comment on one sentence, paragraph or heading of a written document, a note the analyst reads beside it. In a check's session, comment only on the document you are checking.
+Comment on one sentence, paragraph or heading of a written document, or on a card or a step of a plan, a note the analyst reads beside it. In a check's session, comment only on what you are checking.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph."},
+    "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph, card:<id> of a card, card:<id>#step-<n> of a plan's step."},
     "text": {"type": "string"}
   },
   "required": ["ref", "text"]
@@ -323,13 +323,14 @@ Comment on one sentence, paragraph or heading of a written document, a note the 
 
 ## resolve_comment
 
-Resolve a comment on a document, as the analyst's ✓ beside it does, or open a resolved one again.
+Resolve a comment on a document or a card, as the analyst's ✓ beside it does, or open a resolved one again.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "comment": {"type": "string", "description": "The comment's id, as add_comment's result names it, or report:<doc>#<id> of a passage, which resolves every open comment on it."},
+    "comment": {"type": "string", "description": "The comment's id, as add_comment's result names it, or report:<doc>#<id> of a passage or card:<id> of a card, which resolves every open comment on it."},
+    "how": {"type": "string", "enum": ["done", "known"], "description": "known when the analyst says they know it, as Know it does, so the check does not raise it again. Default done."},
     "reopen": {"type": "boolean"}
   },
   "required": ["comment"]
@@ -490,7 +491,7 @@ Send the orientation a message, such as a question its analysis did not answer, 
 
 ## run_check
 
-Run a report check over the written documents, a question asked of every passage that leaves a comment beside each passage it applies to. A new name creates the check and a known one reruns it, and either way it is turned on. It runs again by itself after a writer saves a document, and after the analyst's own edits it shows the passages that changed until they run it. Its result is the exact Agent call that starts the check as a subagent of this session, which you then make. For one note on one passage, use `add_comment`.
+Run a report check over the written documents or the cards, a question asked of every passage that leaves a comment beside each passage it applies to. A new name creates the check and a known one reruns it, and either way it is turned on. It runs again by itself after a writer saves a document, and after the analyst's own edits it shows the passages that changed until they run it. Its result is the exact Agent call that starts the check as a subagent of this session, which you then make. For one note on one passage, use `add_comment`.
 
 ```json
 {
@@ -498,7 +499,8 @@ Run a report check over the written documents, a question asked of every passage
   "properties": {
     "name": {"type": "string", "description": "The check's name, such as Unverified, or a new one."},
     "instructions": {"type": "string", "description": "What to comment on, in the analyst's words. Needed for a new check, and it replaces the instructions of an existing one."},
-    "passages": {"type": "array", "items": {"type": "string"}, "description": "Passages to check again, report:<doc>#<id>. Default every passage but the locked ones already checked."}
+    "passages": {"type": "array", "items": {"type": "string"}, "description": "Passages to check again, report:<doc>#<id>. Default every passage but the locked ones already checked."},
+    "on": {"type": "string", "enum": ["documents", "cards"], "description": "Run it on the documents or on the cards alone. A new check then covers that alone. Default what the check covers."}
   },
   "required": ["name"]
 }
@@ -506,7 +508,7 @@ Run a report check over the written documents, a question asked of every passage
 
 ## stop_check
 
-Turn a report check off, {{if:browser}}as the switch in the Checks pane does, {{end}}which hides its {{if:browser}}tints and {{end}}comments and stops its runs. Its comments are kept, and `run_check` turns it on again.{{if:terminal}} The terminal has no switch for a check, so the analyst asks you to turn one on or off.{{end}}
+Turn a report check off, {{if:browser}}as the switch in the Comments pane does, {{end}}which hides its {{if:browser}}tints and {{end}}comments and stops its runs. Its comments are kept, and `run_check` turns it on again.{{if:terminal}} The terminal has no switch for a check, so the analyst asks you to turn one on or off.{{end}}
 
 ```json
 {
@@ -1306,11 +1308,15 @@ There is no document {doc}. The documents are {docs}. To make a new one, pass it
 
 ## run_check-started
 
-check {check} started ({how}) on report:{doc}, {passages}
+check {check} started ({how}) on {doc}, {passages}
 
 ## run_check-no-doc
 
 No document is written yet, so the check {check} has nothing to read. It is on, and it runs once a document is written.
+
+## run_check-no-cards
+
+The check {check} is on, and has no card to read yet.
 
 ## run_check-no-instructions
 
@@ -1343,6 +1349,22 @@ Only the analyst's session and a check's own session comment with `add_comment`.
 ## add_comment-added
 
 commented on report:{doc}#{sid}, comment {comment}
+
+## add_comment-no-card
+
+{ref} is no card, or no step of a plan card. A card is card:<id>, and a plan's step card:<id>#step-<n>.
+
+## check-canvas
+
+The cards to comment on, each with its ref, kind and question, then its takeaway and a plan's steps. Comment on a card by its ref, or on one step of a plan by card:<id>#step-<n>. `read_ref` on a card gives its code and outputs.
+
+{cards}
+
+## check-known
+
+The analyst said they know these. Do not raise them again.
+
+{titles}
 
 ## resolve_comment-done
 

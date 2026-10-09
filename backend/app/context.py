@@ -513,11 +513,18 @@ def session_part(c: str, chat: str | None, focus: tuple[str, ...] = ()) -> _Part
 
 
 def canvas(c: str) -> str:
-    """Every card by group, in the tree's order: its ref, kind and question, and its takeaway, or a plan's steps."""
-    from . import notebook  # noqa: PLC0415
+    """Every card by group, in the tree's order: its ref, kind and question, its takeaway or a plan's steps, and the open
+    comments on it and its steps."""
+    from . import canvas_comments, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
     rows = notebook.tree_order(notebook.list_notebooks(ws, figures=False))
+    try:
+        notes: dict[str, list[str]] = {}
+        for cm in canvas_comments.open_comments(c):
+            notes.setdefault(str(cm["card"]), []).append(canvas_comments.line(c, cm))
+    except (OSError, ValueError):
+        notes = {}
     blocks = []
     for row in rows:
         nb = notebook.read_notebook(ws, row["id"]) or {}
@@ -539,6 +546,7 @@ def canvas(c: str) -> str:
             if follows := (cell.get("payload") or {}).get(notebook.PLAN_FOLLOWS) if kind == notebook.PLAN_KIND else None:
                 lines.append(f"  follows: card:{follows}")
             lines += [f"  {line}" for line in notebook.plan_lines(cell)]
+            lines += [f"  {n}" for n in notes.get(str(cell["id"]), [])]
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks) or _hint("context-no-cards")
 

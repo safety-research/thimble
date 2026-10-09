@@ -245,6 +245,7 @@ class Live:
         self.sends: dict[str, str] = {}  # tool_use id of main's SendMessage to a thread's fork -> the thread
         self.wrote = False  # the turn wrote something to main
         self.turn_calls: set[str] = set()  # the ids of main's tool calls in the turn (R3, _end_turn)
+        self.turn_since: str | None = None  # when the turn opened, which the checks over the cards look from (_end_turn)
         self.turn_text = ""  # main's last text in the turn, the reason R3 quotes
         self.thimble_calls: dict[str, dict] = {}  # tool_use id of main's call for one of thimble's agents -> {name, input}
         # tool_use id of main's SendMessage to a subagent -> (its Sub, the call's input): shown in its chat once the call
@@ -1156,7 +1157,7 @@ def _open_turn(lv: Live) -> None:
     if not lv.turn_open or not lv.fresh:
         lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
-        lv.turn_calls, lv.turn_text = set(), ""
+        lv.turn_calls, lv.turn_text, lv.turn_since = set(), "", _now()
     agents.set_running(lv.c, agents.MAIN_ID, True)
 
 
@@ -1178,8 +1179,21 @@ def _end_turn(lv: Live) -> None:
         _stopped(lv, SAFETY_STOP_TEXT)
     if lv.wrote:
         agents.mirror(lv.c, "done", by=TERMINAL, session_id=lv.sid)
+    was_open = lv.turn_open
     lv.turn_open = lv.fresh = lv.wrote = False
     agents.set_running(lv.c, agents.MAIN_ID, False)
+    if was_open:
+        _cards_checked(lv)
+
+
+def _cards_checked(lv: Live) -> None:
+    """The shown checks that cover the cards run on the ones that changed (checks.main_turn_ended)."""
+    from . import checks  # noqa: PLC0415 — checks reads the session's mode lazily
+
+    try:
+        checks.main_turn_ended(lv.c, lv.turn_since or lv.since)
+    except Exception:  # noqa: BLE001 — a check that does not run is no reason to fail the mirror
+        log.exception("%s: the checks over the cards did not start at main's turn end", lv.c)
 
 
 def _no_call(lv: Live) -> None:

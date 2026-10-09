@@ -29,6 +29,7 @@ def doc(workspaces_tmp, monkeypatch):
     monkeypatch.setattr(config, "models_for", lambda c=None: {**real(c), **{k: dict(v) for k, v in rows.items()}})
     for cid in ("unverified", "judgment"):
         checks.edit(CORPUS, cid, shown=True)
+    checks.edit(CORPUS, "you-should-know", shown=False)  # the built-in thimble ships on: these two are the shown checks
 
 
 async def _write(text: str = TEXT) -> None:

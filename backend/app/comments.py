@@ -1,6 +1,9 @@
-"""Comments and checks from the chat: main's own note beside a passage of a written document (`add_comment` from main's
-shim), a comment resolved or opened again (`resolve_comment`), and a report check turned off (`stop_check`), the chat
-counterparts of the margin's Comment and ✓ and the Checks pane's switch.
+"""Comments and checks from the chat: main's own note beside a passage of a written document or beside a card or a plan
+step (`add_comment` from main's shim), a comment resolved or opened again (`resolve_comment`), and a check turned off
+(`stop_check`), the chat counterparts of the margin's Comment, ✓ and Know it and the Comments pane's switch.
+
+A note on a card goes to the cards' comments (canvas_comments.add) with author `claude`; `resolve_comment` takes such a
+comment's id, or `card:<id>` (`#step-<n>`) for every open comment there, and `how: known` for Know it.
 
 Main's note is stored as the analyst's comments are, `{id, sentence_id, text, author: "claude", ts, status: open}`,
 with no check and no run, so no run supersedes it. A note on a paragraph goes on its first sentence marked `paragraph`.
@@ -53,13 +56,33 @@ async def tool_add_comment(ctx: Any, args: dict[str, Any]) -> Any:
         return _add_comment(ctx, args)
 
 
+def _add_card_note(ctx: Any, ref: str, text: str) -> Any:
+    """Main's note beside a card or a plan step of any group (canvas_comments.add, author claude)."""
+    from . import canvas_comments, checks, notebook  # noqa: PLC0415
+
+    hit = canvas_comments.parse_ref(ref)
+    cell = notebook.get_cell(ctx.c, hit[0]) if hit else None
+    steps = canvas_comments.steps_of(cell) if cell else []
+    step = next((s for s in steps if s["n"] == hit[1]), None) if hit and hit[1] is not None else None
+    if hit is None or cell is None or (hit[1] is not None and step is None):
+        return tools.err(tools.hint("add_comment-no-card", ref=ref))
+    shown, evidence = checks.card_note(ctx.c, text)
+    if not shown:
+        return tools.err("add_comment: `text` holds nothing but citations")
+    cm, _ = canvas_comments.add(ctx.c, card=hit[0], step=step["id"] if step else None, text=shown, author=AUTHOR,
+                                evidence=evidence)
+    return tools.ok(f"commented on {canvas_comments.step_ref(*hit)}, comment {cm['id']}")
+
+
 def _add_comment(ctx: Any, args: dict[str, Any]) -> Any:
-    from . import checks, refs, report, report_types  # noqa: PLC0415
+    from . import canvas_comments, checks, refs, report, report_types  # noqa: PLC0415
 
     ref = _clean_ref(args.get("ref"))
     text = _collapse(args.get("text"))
     if not text:
         return tools.err("add_comment: `text` is empty")
+    if canvas_comments.parse_ref(ref) is not None:
+        return _add_card_note(ctx, ref, text)
     m = checks._REF_RE.match(ref)
     slug = m.group(1) if m else ""
     doc = report_types.read_doc(ctx.c, investigation.MAIN, slug) if slug else None
@@ -82,8 +105,8 @@ def _add_comment(ctx: Any, args: dict[str, Any]) -> Any:
                  and bool(cm.get("paragraph")) == whole and _collapse(cm.get("text")) == shown), None)
     if same is None:
         same = {"id": report._new_id(used), "sentence_id": uid, **({"paragraph": True} if whole else {}), "text": shown,
-                "author": AUTHOR, "evidence": " ".join(cited), "ts": _now(), "status": "open",
-                "generation": int(doc.get("generation") or 1)}
+                **canvas_comments.parse_note(shown), "author": AUTHOR, "evidence": " ".join(cited), "ts": _now(),
+                "status": "open", "generation": int(doc.get("generation") or 1)}
         comments.append(same)
         report_types.write_doc(ctx.c, investigation.MAIN, slug, doc)
         _emit(ctx.c, slug, f"report:{slug}#{uid}")
@@ -135,16 +158,46 @@ async def tool_resolve_comment(ctx: Any, args: dict[str, Any]) -> Any:
         return _resolve_comment(ctx, args)
 
 
+def _resolve_card_comments(ctx: Any, value: str, reopen: bool, how: str) -> Any | None:
+    """resolve_comment on the cards' comments: a comment's id, or a card's or a step's ref for every comment there in
+    the state asked; None when `value` names none of them."""
+    from . import canvas_comments  # noqa: PLC0415
+
+    hit = canvas_comments.parse_ref(value)
+    pool = [cm for cm in canvas_comments.all_comments(ctx.c) if ((cm.get("status") or "open") == "open") != reopen]
+    if hit is not None:
+        found = [cm for cm in pool if cm["card"] == hit[0] and (hit[1] is None or cm.get("n") == hit[1])]
+    else:
+        found = [cm for cm in pool if str(cm["id"]) == value]
+    if not found:
+        return None
+    ids = [str(cm["id"]) for cm in found]
+    if reopen:
+        canvas_comments.reopen(ctx.c, ids)
+    else:
+        canvas_comments.resolve(ctx.c, ids, how, by=AUTHOR)
+    return tools.ok("\n".join(tools.hint("resolve_comment-done", action="reopened" if reopen else "resolved",
+                                         comment=cm["id"], ref=cm["ref"], who=canvas_comments._who(ctx.c, cm),
+                                         text=_collapse(cm.get("text"))) for cm in found))
+
+
 def _resolve_comment(ctx: Any, args: dict[str, Any]) -> Any:
-    from . import report, report_types  # noqa: PLC0415
+    from . import canvas_comments, report, report_types  # noqa: PLC0415
 
     value = _clean_ref(args.get("comment"))
     reopen = args.get("reopen") is True
-    if not value or not (value.startswith("report:") or _BARE_ID_RE.match(value)):
+    how = _collapse(args.get("how")).lower() or "done"
+    if how not in canvas_comments.HOWS:
+        return tools.err(f"resolve_comment: `how` is one of {', '.join(canvas_comments.HOWS)}")
+    is_card = canvas_comments.parse_ref(value) is not None
+    if not value or not (value.startswith("report:") or is_card or _BARE_ID_RE.match(value)):
         return tools.err(tools.hint("resolve_comment-none", comment=value or "(no comment)",
                                     state="resolved" if reopen else "open"))
-    slug, found, doc = _targets(ctx.c, value, want_open=not reopen)
+    slug, found, doc = _targets(ctx.c, value, want_open=not reopen) if not is_card else ("", [], None)
     if not found or doc is None:
+        on_cards = None if value.startswith("report:") else _resolve_card_comments(ctx, value, reopen, how)
+        if on_cards is not None:
+            return on_cards
         return tools.err(tools.hint("resolve_comment-none", comment=value, state="resolved" if reopen else "open"))
     from . import checks  # noqa: PLC0415
 
@@ -160,6 +213,8 @@ def _resolve_comment(ctx: Any, args: dict[str, Any]) -> Any:
         else:
             cm["status"] = report.SETTLED_STATUS
             cm[RESOLVED_BY] = AUTHOR
+            cm["resolution"] = how
+            cm["resolved_ts"] = _now()
         lines.append(tools.hint("resolve_comment-done", action="reopened" if reopen else "resolved", comment=cm.get("id"),
                                 ref=where, who=_who(ctx.c, cm), text=_collapse(cm.get("text"))))
     report_types.write_doc(ctx.c, investigation.MAIN, slug, doc)
@@ -187,4 +242,4 @@ async def tool_stop_check(ctx: Any, args: dict[str, Any]) -> Any:
     checks._stream(ctx.c, check["id"], "", OFF, "", "")  # no document: the open tabs read the checks again
     if not docs:
         return tools.ok(tools.hint("stop_check-off", check=check["name"]))
-    return tools.ok(tools.hint("stop_check-stopped", check=check["name"], docs=", ".join(f"report:{d}" for d in docs)))
+    return tools.ok(tools.hint("stop_check-stopped", check=check["name"], docs=", ".join(checks.target_name(d) for d in docs)))
