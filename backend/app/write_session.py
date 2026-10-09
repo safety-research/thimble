@@ -5,9 +5,10 @@ role's model and effort from Settings, and of thimble's tools OWN_TOOLS. Its run
 file, writers/<doc>/context.md, that holds the whole context (context.render, CONTEXT_CHARS) followed by the task, which
 it reads first. One writer runs per document. Write in the browser is a click (write_route), the orientation's report
 pass a follow-on start of the same click or typed start (follow_on), both through thimble's plugin module; main's
-`start_writing` gives the exact Agent call main makes (tool_start_writing). Main hears a `written` browser event when a
-writer ends. A writer answering the orientation's report pass carries `orient` and `orient_run` on its chat. A writer
-stopped when Claude Code quit is started again with Write again (subagents.again)."""
+`start_writing` gives the exact Agent call main makes (tool_start_writing), and a thread's fork's gives it to main in a
+`start_agent` event (tools._ask_main). Main hears a `written` browser event when a writer ends. A writer answering the
+orientation's report pass carries `orient` and `orient_run` on its chat. A writer stopped when Claude Code quit is
+started again with Write again (subagents.again)."""
 from __future__ import annotations
 
 import asyncio
@@ -203,7 +204,9 @@ def subagent_refused(c: str, req: dict[str, Any]) -> None:
 async def tool_start_writing(ctx: Any, args: dict[str, Any]) -> Any:
     """The `start_writing` tool: the pending start of the writer of `doc` with the analyst's request and passage and
     the run's model and effort, and the exact Agent call main makes (`## start_writing-subagent`). A `doc` no type
-    holds is made first when the call names its `type` and `name`."""
+    holds is made first when the call names its `type` and `name`. A thread's fork's call starts the writer the same
+    way, by main's Agent call on a `start_agent` event (tools._ask_main), since the fork may not make it."""
+    fork = await tools._fork_of(ctx) if ctx.session is None else None
     doc = str(args.get("doc") or "").strip().lower().removeprefix("report:").split("#", 1)[0]
     kind = str(args.get("type") or "").strip().lower()
     made = None
@@ -227,13 +230,24 @@ async def tool_start_writing(ctx: Any, args: dict[str, Any]) -> Any:
     after = str(args.get("after") or "").strip() or str(pending.get("after") or "")
     values = {k: str(args[k]) for k in ("model", "effort") if args.get(k)}
     try:
-        ans = await start(ctx.c, doc, request, after, route=subagents.TYPED, values=values, call=ctx.tool_use_id)
+        # a fork's start keeps no call of the fork's: main's Agent call claims it (tools._ask_main)
+        ans = await start(ctx.c, doc, request, after, route=subagents.TYPED, values=values,
+                          call=None if fork is not None else ctx.tool_use_id)
     except (RuntimeError, ValueError) as e:
         return tools.err(f"start_writing: {e}")
     if ans.refused:
         return tools.err(ans.reason or f"start_writing: {ans.kind}")
-    started = (tools.hint("start_writing-program", doc=doc) if ans.get("program")
-               else tools.hint("start_writing-subagent", input=json.dumps(ans["input"], ensure_ascii=False)))
+    if ans.get("program"):
+        started = tools.hint("start_writing-program", doc=doc)
+    elif fork is not None:
+        title = str((report_types.read_type(ctx.c, doc) or {}).get("name") or doc)
+        res = await tools._ask_main(ctx, ans, what=f"the request to write {title} (report:{doc})", thread=fork,
+                                    agent="the writer")
+        if res.is_error:
+            return res
+        started = res.text
+    else:
+        started = tools.hint("start_writing-subagent", input=json.dumps(ans["input"], ensure_ascii=False))
     if made is not None:
         started = tools.hint("start_writing-made", doc=doc, title=str(made["name"])) + "\n" + started
     return tools.ok(started)

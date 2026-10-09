@@ -28,7 +28,6 @@ const colour = colorBy({
     { name: 'role', title: 'Role', description: FIELDS[1].description, value: (it) => it && it.role },
   ],
   initial: 'tool',
-  chips: 'filter',
   onChange: () => redraw(),
 })
 const filter = filterBy({ fields: FIELDS, onChange: () => redraw() })
@@ -111,7 +110,7 @@ const inWin = (it) => range.has(it.t)
 const scoped = () => items.filter((it) => filter.keeps(it) && (!q.text.trim() || (texts.get(it.r) || '').toLowerCase().includes(q.text.trim().toLowerCase())))
 const laneItems = () => scoped().filter(inWin)
 const laneKeyOf = (it) => { const g = rowsCtl.groupOf(it); return g == null ? '' : String(g) }
-const listItems = () => laneItems().filter((it) => colour.isOn(colour.valueOf(it)) && (S.lane === null || laneKeyOf(it) === (S.lane === '\u0000none' || S.lane === 'none' ? '' : S.lane)))
+const listItems = () => laneItems().filter((it) => S.lane === null || laneKeyOf(it) === (S.lane === '\u0000none' || S.lane === 'none' ? '' : S.lane))
 
 function laneName(key) {
   for (const n of laneView.lanes) if (String(n.key) === String(key)) return n.name

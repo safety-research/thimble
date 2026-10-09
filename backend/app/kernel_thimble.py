@@ -22,7 +22,8 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               in a view's reader: the value a record takes under the page's Colour by (`choice`, the
                               page's colour.query()), a label's value on `ref` or a field's in `record`; None for none
     thimble.colour_on(choice, value)
-                              in a view's reader: whether the analyst left that value's chip on
+                              in a view's reader: whether the analyst left that value's toggle on under Filter by
+                              (`choice`, the page's filter.query()); True for every value of Color by's query
     thimble.kept(ref)         in a view's reader: whether the record passes the analyst's label filter (True with none)
     thimble.kept_unit(refs)   in a view's reader: whether a unit that gathers the records `refs` passes that filter,
                               judged by its records in the files the filter's label ran over (True when it has records
@@ -838,8 +839,9 @@ def colour_value(choice, ref=None, record=None):
 
 
 def colour_on(choice, value):
-    """Whether the analyst left a value's chip on under the view's Colour by (`choice`, the page's colour.query()), None
-    standing for the records that take no value: True for every value with no choice."""
+    """Whether the analyst left a value's toggle on under the view's Filter by (`choice`, the page's filter.query()),
+    None standing for the records that take no value: True for every value with no choice, and for every value of Color
+    by's colour.query(), which names no value turned off since Color by hides no record."""
     if not isinstance(choice, dict):
         return True
     off = choice.get("off") or []

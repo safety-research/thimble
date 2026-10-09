@@ -64,7 +64,7 @@
 #   {"op": "view", "run": <a run>, "tab": "pulls" | "issues" | "discussions" | "agents", "colour": <colour.query()>,
 #    "filter": <filter.query()>}
 #       one run's repository, as a forge shows one repository at a time: the run's units of the tab that the label
-#       filter keeps (thimble.kept_unit) and Filter by and Color by keep (thimble.colour_on), each with the facts its
+#       filter keeps (thimble.kept_unit) and Filter by keeps (thimble.colour_on), each with the facts its
 #       list row shows, its value under the Color by choice (thimble.colour_value) and, under a label, how many of its
 #       records take each value; the counts of every value for Filter by's and Color by's chips; how many units each
 #       tab of the run holds under the same filters; and each run's facts with its tabs' counts, which the run switcher
@@ -638,11 +638,11 @@ def _facts(index, u):
 def _view(index, query):
     """One run's tab as rows: {tab, run, items: [{<_facts>, value, search, mix?}], counts: {value: units} (Color by's),
     filtered: {value: units} (Filter by's), tabs: {tab: units}, runs: [{run, start, end, team, approvals, agents,
-    tabs}]}. A unit shows when the label filter keeps one of its records and its values under Filter by and Color by
-    are on; each tab's count is of the units that show, in each run for the run switcher. Under a label, `mix` is
-    [[value, records]] of the unit's records the label filter keeps, the values turned off left out. An agent under a
-    field it does not carry stands for its records too: it counts under each value they take, shows while any of those
-    is on, and its `mix` and `value` are its records' (_by_records)."""
+    tabs}]}. A unit shows when the label filter keeps one of its records and its values under Filter by are on: Color by
+    only colors, so a value turned off there keeps its units. Each tab's count is of the units that show, in each run
+    for the run switcher. Under a label, `mix` is [[value, records]] of the unit's records the label filter keeps. An
+    agent under a field it does not carry stands for its records too: it counts under each value they take, shows while
+    any of those is on under Filter by, and its `mix` and `value` are its records' (_by_records)."""
     tab = query.get("tab") if query.get("tab") in TABS else "pulls"
     names = sorted(index["runs"])
     run = query.get("run") if query.get("run") in index["runs"] else (names[0] if names else None)
@@ -664,8 +664,6 @@ def _view(index, query):
         values = _values(colour, u, got)
         if here:
             counts.update("" if v is None else v for v in values)
-        if not any(thimble.colour_on(colour, v) for v in values):
-            continue
         tabs[u["run"]][u["tab"]] += 1
         if not here:
             continue
@@ -680,7 +678,7 @@ def _view(index, query):
         elif got is not None:
             mix = Counter(got)
         if mix is not None:
-            item["mix"] = [[v, n] for v, n in mix.items() if thimble.colour_on(colour, v)]
+            item["mix"] = [[v, n] for v, n in mix.items()]
         items.append(item)
     runs = [{"run": r, "start": info["start"], "end": info["end"], "team": info["team"], "approvals": info["approvals"],
              "agents": info["agents"], "tabs": {t: tabs[r][t] for t in TABS}} for r, info in sorted(index["runs"].items())]

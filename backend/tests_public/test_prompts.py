@@ -425,12 +425,15 @@ def test_tools_md_reads_in_the_session_mode(tmp_path, monkeypatch):
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     _session_mode(monkeypatch, _FakeLaunchMode("terminal"))
     terminal = tools.tool_sections(["add_card"])["add_card"][0]
+    proposed = {"view": "Runs", "slug": "runs", "claims": "runs/*.jsonl"}
     with prompts.rendering("browser"):
         browser = tools.tool_sections(["add_card"])["add_card"][0]
-        assert tools.hint("start-refused-fork") != ""
-        refused_browser = tools.hint("start-refused-fork")
+        assert tools.hint("propose_view-proposed", **proposed) != ""
+        proposed_browser = tools.hint("propose_view-proposed", **proposed)
     assert "Bash" in terminal and "Bash" not in browser
-    assert "/thimble:orient" in tools.hint("start-refused-fork") and "/thimble:orient" not in refused_browser
+    proposed_terminal = tools.hint("propose_view-proposed", **proposed)
+    assert "panel in the terminal" in proposed_terminal and "panel in the terminal" not in proposed_browser
+    assert "opens in Files" in proposed_browser and "opens in Files" not in proposed_terminal
 
 
 def test_the_event_kinds_are_the_same_in_both_modes(monkeypatch):

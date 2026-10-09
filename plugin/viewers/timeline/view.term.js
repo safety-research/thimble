@@ -66,7 +66,7 @@ const FIELDS = [
   },
 ]
 
-const colour = colorBy({ fields: FIELDS, initial: 'service', chips: 'filter', onChange: load })
+const colour = colorBy({ fields: FIELDS, initial: 'service', onChange: load })
 const filter = filterBy({ fields: FIELDS, initial: 'incident', onChange: load })
 const rows = rowsBy({ fields: FIELDS, initial: 'source', onChange: () => { pick(null); load() } })
 const range = timeRange({ onChange: () => {} })
