@@ -1220,11 +1220,11 @@ A thread's fork cannot start thimble's agents, since Claude Code does not let a 
 
 ## start_agent-fork
 
-Filed {what}. Main starts the dev agent for it now, since a thread's fork cannot start subagents, and the analyst has nothing to do. Tell the analyst in one line in the thread that it is filed and the dev agent is working on it.
+Filed {what}. Main is starting {agent}, and the analyst has nothing to do. Tell the analyst in one line in the thread that it is filed and main is starting {agent}.
 
 ## start_agent-event
 
-The fork of {thread} filed {what}. A fork cannot start subagents, so start the dev agent for it now as a subagent of this session, with one Agent call whose input is exactly this:
+The fork of {thread} filed {what}. A fork cannot start subagents, so start {agent} for it now as a subagent of this session, with one Agent call whose input is exactly this:
 
 {input}
 

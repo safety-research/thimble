@@ -331,7 +331,9 @@ async def test_a_fork_s_ticket_is_prepared_and_main_starts_its_agent_on_an_event
         res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Bigger font", "body": "the labels are small"},
                                tool_use_id="toolu_fork1")
         assert not res.is_error, res.text
-        assert res.text.endswith(tools.hint("start_agent-fork", what="ticket #1: Bigger font"))
+        assert res.text.endswith(tools.hint("start_agent-fork", what="ticket #1: Bigger font", agent=tools.DEV_AGENT))
+        assert "main is starting the dev agent" in res.text and "working on it" not in res.text, \
+            "the fork says only what happened: it is filed and main is starting the dev agent"
         assert "AGENT CALL" not in res.text and "Report a problem" not in res.text
         assert not bridge.ops("spawn"), "main makes the call, not the module"
         [t] = [x for x in dev._read() if x["title"] == "Bigger font"]

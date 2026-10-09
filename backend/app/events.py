@@ -73,7 +73,7 @@ PROMPT = "main"  # main's system-prompt append, whose events section names the k
 EVENTS_SECTION = "Events from the browser"
 SESSION_PROMPTS = (PROMPT,)
 MAIN, THREAD = "main", "thread"
-START_AGENT = "start_agent"  # asks main to start the agent of a ticket or a view a thread's fork filed (tools._ask_main)
+START_AGENT = "start_agent"  # asks main to start the agent of what a thread's fork filed (tools._ask_main)
 ATTR_CHARS = 120  # a payload value longer than this, or with a newline, goes into the body instead of an attribute
 # the event body's ceiling: an event stays in main's context for the rest of the session. A START_AGENT event's body is
 # never cut, since its text is the exact Agent call main makes, which a cut would break (main's own start tool's result
@@ -281,7 +281,7 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"a check of the {fields.get('doc') or 'document'} ended"
     elif kind == START_AGENT:
         asked = f" (thread {fields['from_thread']})" if fields.get("from_thread") else ""
-        line = f"start the dev agent for {fields.get('filed') or 'a thread'}{asked}"
+        line = f"start {fields.get('agent') or 'the dev agent'} for {fields.get('filed') or 'a thread'}{asked}"
     else:
         line = words
     return _cut(line, LINE_CHARS)

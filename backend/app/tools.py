@@ -2698,30 +2698,73 @@ async def _fork_build(ctx: Ctx, slug: str, what: str, thread: dict[str, Any],
     return await _ask_main(ctx, ans, what=what, thread=thread, view=slug)
 
 
-async def _ask_main(ctx: Ctx, ans: Any, *, what: str, thread: dict[str, Any], view: str | None = None) -> ToolResult:
-    """A typed start a thread's fork asked for, by its propose_view or its file_dev_ticket. Claude Code does not let a
-    fork start subagents, so main makes the Agent call: the request keeps the id of a `start_agent` event
-    (subagents.ask_main), which carries the exact call and names what was filed (`what`), the view and the thread's
-    anchor, and wakes main as any event does, so main starts the agent with no step of the analyst's, judged by auto mode
-    as main's own start is. A start for the same agent that main has not made yet is replaced by this one. The fork is
-    told to say in one line in the thread that it is filed (`## start_agent-fork`). A refused start, or a session that
-    does not listen, is an error result."""
-    from . import events, subagents  # noqa: PLC0415
+DEV_AGENT = "the dev agent"  # the agent main starts for a thread's fork's ticket or view (_ask_main)
+
+
+async def _ask_main(ctx: Ctx, ans: Any, *, what: str, thread: dict[str, Any], agent: str = DEV_AGENT,
+                    view: str | None = None) -> ToolResult:
+    """A typed start a thread's fork asked for, by its propose_view, file_dev_ticket, start_writing or run_check.
+    Claude Code does not let a fork start subagents, so main makes the Agent call: the request keeps the id of a
+    `start_agent` event (subagents.ask_main), which carries the exact call and names what was filed (`what`), the agent
+    main starts (`agent`), the view and the thread's anchor, and wakes main as any event does, so main starts the agent
+    with no step of the analyst's, judged by auto mode as main's own start is. A start for the same agent that main has
+    not made yet is replaced by this one. The fork is told to say in one line in the thread that it is filed and main is
+    starting the agent (`## start_agent-fork`). A refused start, or a session that does not listen, is an error
+    result."""
+    from . import subagents  # noqa: PLC0415
 
     if ans.refused or "input" not in ans:
-        return err(ans.reason or f"the dev agent did not start: {ans.kind}")
+        return err(ans.reason or f"{agent} did not start: {ans.kind}")
     rid, event_id = str(ans["request"]), secrets.token_hex(4)
-    name = str(thread.get("title") or "")
-    subagents.ask_main(ctx.c, rid, event_id, **({"from_thread": thread["id"]} if thread.get("id") else {}))
-    text = hint("start_agent-event", thread=f"the thread {name}" if name else "a side thread", what=what,
-                input=json.dumps(ans["input"], ensure_ascii=False))
-    payload = {"text": text, "filed": what, "view": view, "from_thread": name or None, "anchor": thread.get("anchor")}
+    ask = {"what": what, "agent": agent, "thread": str(thread.get("title") or "") or None, "view": view,
+           "anchor": thread.get("anchor")}
+    subagents.ask_main(ctx.c, rid, event_id, ask=ask, **({"from_thread": thread["id"]} if thread.get("id") else {}))
     try:
-        events.post(ctx.c, events.START_AGENT, payload, event_id=event_id)
+        _post_start_agent(ctx.c, event_id, ask, ans["input"])
     except HTTPException as e:
         subagents.refuse(ctx.c, rid, _detail_text(e.detail), subagents.NO_CALL)
-        return err(f"the dev agent did not start: {_detail_text(e.detail)}")
-    return ok(hint("start_agent-fork", what=what))
+        return err(f"{agent} did not start: {_detail_text(e.detail)}")
+    return ok(hint("start_agent-fork", what=what, agent=agent))
+
+
+def _post_start_agent(c: str, event_id: str, ask: dict[str, Any], inp: dict[str, Any]) -> None:
+    """The `start_agent` event `event_id`: the exact Agent call `inp` main makes (`## start_agent-event`), and as its
+    attributes what was filed, the view and the thread with its anchor (`ask`, as _ask_main gives it). Its body is
+    never cut (events.build_note). HTTPException when no session listens."""
+    from . import events  # noqa: PLC0415
+
+    name, agent = str(ask.get("thread") or ""), str(ask.get("agent") or DEV_AGENT)
+    text = hint("start_agent-event", thread=f"the thread {name}" if name else "a side thread", what=ask.get("what"),
+                agent=agent, input=json.dumps(inp, ensure_ascii=False))
+    payload = {"text": text, "filed": ask.get("what"), "view": ask.get("view"), "from_thread": name or None,
+               "anchor": ask.get("anchor")}
+    events.post(c, events.START_AGENT, payload, event_id=event_id,
+                line=events.terminal_line(events.START_AGENT, "", {**payload, "agent": agent}))
+
+
+def ask_main_again(c: str, rid: str, call: str) -> bool:
+    """R3 for a start a `start_agent` event asked main for (session._no_call): main's turn that got the event `call`
+    ended without the Agent call. That happens when the event came in the same turn as the end-the-turn note of an
+    earlier start (`## agent-launched`), and main ended the turn as the note says. The event is posted once more, under
+    a new id that the request keeps (subagents.ask_again), so main gets it in a turn of its own; a turn that misses it
+    again refuses the start. False when it could not be posted (the request keeps no `ask`, or no session listens), and
+    the caller refuses the start as before; True when it was posted, or when the request moved on meanwhile (claimed,
+    replaced, or posted again by another process), so nothing is refused."""
+    from . import subagents  # noqa: PLC0415
+
+    event_id = secrets.token_hex(4)
+    r = subagents.ask_again(c, rid, call, event_id)
+    if r is None:
+        return True
+    if not isinstance(r.get("ask"), dict) or not r.get("input"):
+        return False
+    try:
+        _post_start_agent(c, event_id, r["ask"], r["input"])
+    except HTTPException as e:
+        log.info("%s: the start %s main missed was not asked for again: %s", c, rid, _detail_text(e.detail))
+        return False
+    log.info("%s: main's turn ended without the start %s; it is asked for again in the event %s", c, rid, event_id)
+    return True
 
 
 async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
@@ -2868,20 +2911,21 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
     return (await work).as_dict()
 
 
-# the start tools, whose result is an Agent call for the caller to make: a thread's fork may not make one, since Claude
-# Code tells its forks not to start subagents, so a fork's call is refused at once with start-refused-fork (U5); another
-# subagent of main's makes the call itself (subagents.typed_caller). A fork's propose_view and file_dev_ticket, which
-# start a view's builder or a code ticket's agent, run, and main makes their Agent call (_ask_main), so a request the
-# analyst makes in a thread on a view reaches the dev agent with no step of theirs.
-FORK_REFUSED = ("start_orientation", "start_writing", "run_check")
+# the start tools, whose result is an Agent call for the caller to make: a thread's fork may not make one, since
+# Claude Code tells its forks not to start subagents; another subagent of main's makes the call itself
+# (subagents.typed_caller). A fork's propose_view, file_dev_ticket, start_writing and run_check, which start a view's
+# builder, a code ticket's agent, a writer or a check's runs, run, and main makes their Agent call (_ask_main), so a
+# request the analyst makes in a thread reaches its agent with no step of theirs. A fork's start_orientation is
+# refused at once with start-refused-fork (U5): one orientation runs at a time, and the analyst starts it.
+FORK_REFUSED = ("start_orientation",)
 
 
 async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, str | None]:
     """(why the call is refused, '' when it runs; the session it runs as) for a call through main's shim: the key of the
     agent of thimble's that made it (subagents.caller, from the caller hook's line, else the transcript that holds the
     call), or None for main's own. A call its caller may not make is refused (subagents.allowed): main's `critique`, the
-    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on), a thread's fork's start
-    tool (FORK_REFUSED)."""
+    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on), a thread's fork's
+    start_orientation (FORK_REFUSED)."""
     from . import orientation, orient_session, subagents  # noqa: PLC0415 — each imports this module
 
     canon = canonical(name)

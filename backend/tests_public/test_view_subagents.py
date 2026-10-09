@@ -247,7 +247,8 @@ async def test_a_fork_s_ticket_on_a_view_asks_main_to_start_its_builder_with_the
                                                        "body": "The C and F headers don't line up with their columns."},
                            tool_use_id=call())
     assert not res.is_error, res.text
-    assert res.text.endswith(tools.hint("start_agent-fork", what=f"the change to the view Tasks (view:{slug})"))
+    assert res.text.endswith(tools.hint("start_agent-fork", what=f"the change to the view Tasks (view:{slug})",
+                                        agent=tools.DEV_AGENT))
     assert "AGENT CALL" not in res.text and "Report a problem" not in res.text, "the fork makes no call and sends nobody"
     assert not bridge.ops("spawn"), "main makes the call, not the module"
     note, inp = _start_event(q)
@@ -295,7 +296,7 @@ async def test_a_fork_s_propose_view_asks_main_to_start_its_build_once(board, br
     res = await tools.call(CORPUS, "propose_view", {"name": "Tasks", **SPEC}, tool_use_id=call())
     assert not res.is_error, res.text
     slug = next(p["slug"] for p in views.list_proposals(CORPUS) if p["name"] == "Tasks")
-    assert res.text.endswith(tools.hint("start_agent-fork", what=f"the view Tasks (view:{slug})"))
+    assert res.text.endswith(tools.hint("start_agent-fork", what=f"the view Tasks (view:{slug})", agent=tools.DEV_AGENT))
     note, inp = _start_event(q)
     assert note["meta"]["view"] == slug and note["meta"]["from_thread"] == "C and F headers"
     assert inp["subagent_type"] == "thimble:view-builder" and not bridge.ops("spawn")
@@ -351,8 +352,10 @@ async def test_a_fork_s_start_that_cannot_reach_main_is_refused_and_the_fork_say
 
 
 async def test_main_s_turn_that_got_a_fork_s_start_and_made_no_call_refuses_it(board, bridge, gates, fork_thread):
-    """R3 for a fork's start: the turn of main's that got the start_agent event ended without its Agent call, so the
-    start is refused (no-call) and the view says why with Retry; a turn that made the call refuses nothing."""
+    """R3 for a fork's start: a turn of main's that got the start_agent event and made its Agent call refuses nothing.
+    A turn that got it and ended without the call does not refuse it at once: the event is posted once more (see
+    test_a_fork_s_start_main_s_turn_missed_is_asked_for_once_more_then_refused). A turn that misses that event too
+    refuses the start (no-call), the view says why with Retry, and main is asked for nothing more."""
     _, q, call = fork_thread
     slug = _propose("Tasks", asked=True, route=views.TYPED)
     lv = session._live[CORPUS]
@@ -365,14 +368,81 @@ async def test_main_s_turn_that_got_a_fork_s_start_and_made_no_call_refuses_it(b
         if made:
             assert _main_claims(inp, "toolu_main_made") is None
         session._end_turn(lv)
+        if not made:  # the event posted once more, which main's next turn misses too
+            again, _ = _start_event(q)
+            session._browser_event(lv, events.render(again), mid_turn=False)
+            session._end_turn(lv)
         req = subagents.request(CORPUS, _rid(inp))
         if made:
             assert req["state"] == "claimed"
+            assert q.empty(), "a start main made is asked for no more"
             dev._view_runs.pop((CORPUS, slug), None)  # the builder it started, which this test does not follow
             views.update_proposal(CORPUS, slug, status="built")
         else:
             assert (req["state"], req["refused_kind"]) == ("refused", subagents.NO_CALL)
             assert _prop(slug)["refused"]["kind"] == subagents.NO_CALL
+            assert q.empty(), "a start missed twice is posted no third time"
+
+
+async def test_a_fork_s_start_main_s_turn_missed_is_asked_for_once_more_then_refused(board, bridge, gates, fork_thread):
+    """Two fork starts reach main in one turn, as when the second start_agent event comes with the end-the-turn note
+    of the first start (`## agent-launched`): main makes the first call and ends the turn. The second start is not
+    refused: its event is posted once more, with the same Agent call under a new id that the request keeps, and main's
+    call from it in its next turn starts the second builder."""
+    _, q, call = fork_thread
+    tasks, posts = _propose("Tasks", asked=True, route=views.TYPED), _propose("Posts", asked=True, route=views.TYPED)
+    lv = session._live[CORPUS]
+    for view in ("Tasks", "Posts"):
+        res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Align", "view": view, "body": "Align C."},
+                               tool_use_id=call())
+        assert not res.is_error, res.text
+    (first, first_inp), (second, second_inp) = _start_event(q), _start_event(q)
+    session._browser_event(lv, events.render(first), mid_turn=False)
+    session._browser_event(lv, events.render(second), mid_turn=True)
+    assert _main_claims(first_inp, "toolu_main_first") is None
+    session._end_turn(lv)
+    assert subagents.request(CORPUS, _rid(first_inp))["state"] == "claimed"
+    req = subagents.request(CORPUS, _rid(second_inp))
+    assert req["state"] == "pending" and req["asked_again"] and req["call"] != second["meta"]["event"]
+    assert _prop(posts)["status"] == "building" and not _prop(posts).get("refused")
+    again, again_inp = _start_event(q)
+    assert again_inp == second_inp, "the same Agent call, which thimble still lets through"
+    assert again["meta"]["event"] == req["call"]
+    for k in ("filed", "view", "from_thread", "anchor"):
+        assert again["meta"][k] == second["meta"][k], k
+    assert again["terminal"] == second["terminal"] and q.empty()
+    session._browser_event(lv, events.render(again), mid_turn=False)
+    assert _main_claims(again_inp, "toolu_main_second") is None
+    session._end_turn(lv)
+    assert subagents.request(CORPUS, _rid(second_inp))["state"] == "claimed" and q.empty()
+    assert _prop(tasks)["status"] == _prop(posts)["status"] == "building"
+
+
+async def test_a_fork_s_start_main_missed_is_refused_when_its_turn_was_stopped_or_its_event_cannot_be_posted(
+        board, bridge, gates, fork_thread):
+    """A start main's turn missed is refused (no-call) at the end of that turn, as before, and asked for no more, when
+    the turn was stopped (the analyst's Esc, or the safety check's stop), or when its event cannot be posted again since
+    no session of main's listens any more."""
+    _, q, call = fork_thread
+    slug = _propose("Tasks", asked=True, route=views.TYPED)
+    lv = session._live[CORPUS]
+    for case in ("stopped", "not listening"):
+        res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Align", "view": "Tasks", "body": "Align C."},
+                               tool_use_id=call())
+        assert not res.is_error, res.text
+        note, inp = _start_event(q)
+        session._browser_event(lv, events.render(note), mid_turn=False)
+        if case == "stopped":
+            session._interrupted(lv)
+        else:
+            events._subs[CORPUS].discard(q.sub)  # main's shim dropped its subscription: no event reaches main
+        session._end_turn(lv)
+        req = subagents.request(CORPUS, _rid(inp))
+        assert (req["state"], req["refused_kind"]) == ("refused", subagents.NO_CALL), case
+        assert q.empty(), case
+        if case == "stopped":
+            assert not req.get("asked_again"), "a stopped turn's start is not asked for again"
+        assert _prop(slug)["refused"]["kind"] == subagents.NO_CALL
 
 
 async def test_an_orientation_s_proposal_builds_as_a_follow_on_start_when_the_pool_has_room(board, bridge, gates,
