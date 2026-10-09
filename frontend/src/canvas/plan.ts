@@ -69,3 +69,11 @@ export const isMade = (step: PlanStep): boolean => step.status === 'running' || 
 
 /** `card:<id>#step-<n>`, the ref of a plan's step numbered from 1 (backend refs.py). */
 export const stepRef = (cellId: string, n: number): string => `card:${cellId}#step-${n}`
+
+/** The plan cards among `cells` that are new since `before`, the ids the canvas last drew: a plan main just added, such
+ * as the next phase's plan, whose frames the canvas opens so it shows rather than sitting under the first card of a
+ * collapsed frame. [] on the canvas's first read (`before` null). */
+export function newPlans(cells: readonly Pick<Cell, 'id' | 'kind'>[], before: ReadonlySet<string> | null): string[] {
+  if (before == null) return []
+  return cells.filter((c) => c.kind === 'plan' && !before.has(c.id)).map((c) => c.id)
+}

@@ -918,7 +918,7 @@ body[data-cmd] .board-stage .outputs-vega * {
 }
 .plan-step {
   display: grid;
-  grid-template-columns: 18px 1fr auto;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
   gap: 2px 8px;
   align-items: baseline;
   padding: 7px 0;
@@ -942,17 +942,36 @@ body[data-cmd] .board-stage .outputs-vega * {
   min-width: 0;
   color: var(--text-primary);
 }
+/* a done step's text is a button: it wraps in the text's column like any step's, and its caret follows the text */
 .plan-toggle {
-  display: block;
-  justify-self: start;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  justify-self: stretch;
+  gap: 0;
+  min-width: 0;
   min-height: 0;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: none;
+  color: var(--text-primary);
   font: inherit;
+  white-space: normal;
   text-align: left;
   cursor: pointer;
+}
+.plan-line {
+  min-width: 0;
+}
+/* a done step at rest is one line, cut short before its status */
+.plan-step.is-compact .plan-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-step.is-compact > .plan-text:not(.plan-toggle) {
+  display: flex;
 }
 .plan-toggle:hover,
 button.plan-run-name:hover {
@@ -960,6 +979,7 @@ button.plan-run-name:hover {
   color: var(--text-primary);
 }
 .plan-caret {
+  flex: none;
   margin-left: 4px;
   color: var(--text-tertiary);
   vertical-align: -1px;
@@ -2885,6 +2905,15 @@ audio.bcell-media {
 .ccm-text {
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+/* a comment at rest shows four lines of its body, so the comments stay near their steps; the active one shows all, as
+   in the documents' margin */
+.ccm:not(.is-active) .ccm-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
 }
 .ccm-reply {
   display: flex;

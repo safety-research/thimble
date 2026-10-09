@@ -2,9 +2,10 @@
 // or main's own, beside its card, aligned with the card's top or with the row of the plan step it is about
 // (`[data-anchor="card:<id>#step-<n>"]`), outside the card's outermost frame, stacked so none overlap (layout.ts
 // commentPlaces), with a hairline from the card's edge to it. A comment shows Claude and its tag (Heads up, You should
-// know) or its check's name, its title in bold and one or two sentences. Done (✓) and Know it resolve it, which hides
-// it. A click makes it active and shows a field whose text opens a thread on the card with the comment as context. A
-// comment hides with its check, when its card is not drawn (a collapsed frame) or when the filters leave its card out.
+// know) or its check's name, its title in bold and one or two sentences, four lines of them until it is active. Done (✓)
+// and Know it resolve it, which hides it. A click makes it active and shows a field whose text opens a thread on the
+// card with the comment as context. A comment hides with its check, when its card is not drawn (a collapsed frame) or
+// when the filters leave its card out. The box the comments cover goes to the canvas, whose Fit and minimap take it in.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { TextArea } from '../components/Field'
 import { api } from '../lib/api'
@@ -13,8 +14,9 @@ import { track } from '../lib/telemetry'
 import type { CanvasComment } from '../lib/types'
 import { knowable, noteParts, NOTE_COLOR, type CheckLook } from '../report/checkComments'
 import { canvasCommentsApi, type ResolveHow } from '../report/commentsApi'
+import { noteText } from '../report/NoteText'
 import { Glyph, IconButton } from '../report/icons'
-import { COMMENT_LIFT, COMMENT_STEP_LIFT, COMMENT_W, commentPlaces, type Board, type CommentPlace, type CommentSpot, type Layout } from './layout'
+import { COMMENT_LIFT, COMMENT_STEP_LIFT, COMMENT_W, commentPlaces, extentOf, type Board, type CommentPlace, type CommentSpot, type Layout, type Rect } from './layout'
 
 const REFETCH_DEBOUNCE_MS = 200
 
@@ -91,10 +93,14 @@ export interface CommentLayerProps {
   onResolve: (c: CanvasComment, how: ResolveHow) => Promise<void>
   /** a card's question, for the thread a reply opens */
   titleOf: (card: string) => string
+  /** the box the placed comments cover on the plane, or null for none, whenever it changes: Fit and the minimap take it
+   * in with the cards */
+  onExtent?: (box: Rect | null) => void
 }
 
-export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve, titleOf }: CommentLayerProps) {
+export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve, titleOf, onExtent }: CommentLayerProps) {
   const els = useRef(new Map<string, HTMLDivElement>())
+  const extent = useRef<Rect | null>(null)
   const [places, setPlaces] = useState<Map<string, CommentPlace>>(new Map())
   const [active, setActive] = useState<string | null>(null)
   useEffect(() => {
@@ -126,6 +132,11 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
     const next = commentPlaces(board, lay, spots)
     const same = (a: CommentPlace | undefined, b: CommentPlace) => !!a && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.ax - b.ax) < 0.5 && Math.abs(a.ay - b.ay) < 0.5
     setPlaces((prev) => (prev.size === next.size && [...next].every(([k, v]) => same(prev.get(k), v)) ? prev : next))
+    const box = extentOf(spots.flatMap((sp) => (next.has(sp.id) ? [{ x: next.get(sp.id)!.x, y: next.get(sp.id)!.y, w: COMMENT_W, h: sp.h }] : [])))
+    const was = extent.current
+    if (box === was || (box && was && Math.abs(box.x - was.x) + Math.abs(box.y - was.y) + Math.abs(box.w - was.w) + Math.abs(box.h - was.h) < 1)) return
+    extent.current = box
+    onExtent?.(box)
   })
 
   // a click outside the active comment lets it go
@@ -222,8 +233,8 @@ function CommentCard({ ws, comment, look, place, active, cardRef, onActivate, on
           <Glyph name="check" size={13} strokeWidth={2} />
         </IconButton>
       </div>
-      {parts.title && <div className="ccm-title">{parts.title}</div>}
-      {parts.body && <div className="ccm-text">{parts.body}</div>}
+      {parts.title && <div className="ccm-title">{noteText(parts.title)}</div>}
+      {parts.body && <div className="ccm-text">{noteText(parts.body)}</div>}
       {active && <Reply ws={ws} comment={comment} name={name} titleOf={titleOf} />}
     </div>
   )

@@ -1,7 +1,8 @@
 // A plan card's body (backend notebook.py, plan cards): its numbered steps, each with its status at the right, what it
 // makes as chips (dashed until the step runs), its note, and a live row per run under a step, as Claude Code's agent
-// tray shows a subagent: its name, its state and time, and its latest event. A done step is one line, which a click
-// opens. A plan has no takeaway. Each step's row carries its ref as its anchor, so a comment can sit beside it.
+// tray shows a subagent: its name, its state and time, and its latest event. A done step is one line, its text cut
+// short before its status, which a click opens. A plan has no takeaway. Each step's row carries its ref as its anchor,
+// so a comment can sit beside it.
 import { useContext, useEffect, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { api } from '../lib/api'
@@ -48,12 +49,14 @@ function StepRow({ cellId, n, step, now, runs, compact, onToggle }: { cellId: st
     <li className={`plan-step is-${step.status.replace(' ', '-')}${compact ? ' is-compact' : ''}`} data-step={step.id} data-n={n} data-anchor={ref} data-anchor-text={step.text}>
       <span className="plan-n">{n}</span>
       {opens ? (
-        <button type="button" className="plan-text plan-toggle" aria-expanded={!compact} onMouseDown={(e) => e.stopPropagation()} onClick={onToggle}>
-          {step.text}
+        <button type="button" className="plan-text plan-toggle" aria-expanded={!compact} title={compact ? step.text : undefined} onMouseDown={(e) => e.stopPropagation()} onClick={onToggle}>
+          <span className="plan-line">{step.text}</span>
           <Icon name={compact ? 'chevron-right' : 'chevron-down'} size={11} className="plan-caret" />
         </button>
       ) : (
-        <span className="plan-text">{step.text}</span>
+        <span className="plan-text" title={compact ? step.text : undefined}>
+          <span className="plan-line">{step.text}</span>
+        </span>
       )}
       <span className={`plan-status is-${step.status.replace(' ', '-')}`}>{statusWords(step, now)}</span>
       {!compact && hasMore(step) && (

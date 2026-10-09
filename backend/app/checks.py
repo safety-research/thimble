@@ -12,7 +12,8 @@ work folder of its own, check-work/<id>-<doc>/. Its task file there, task.md, ho
 (context.render) and then the document, the check's prompt and the passages it covers; its prompt names that file
 (`## check-task-file`). It comments with add_comment and hands back one line, its run's summary. At most MAX_SESSIONS
 run at once; the others wait queued. A run has no time limit, and the analyst's Stop ends it (through thimble's plugin
-module, subagents.stop).
+module, subagents.stop). A check made or changed (its name, prompt, colour, shown or covers) emits `checks` on the
+stream, so every Comments pane, the Report's and the canvas's in any tab, reads the checks again.
 
 How a run starts: a writer's end starts each shown check on its document, a follow-on start of the writer's own start
 (_writer_ended); Run on a check's row, or turning a check on, is the analyst's click; main's run_check gives main the
@@ -219,6 +220,15 @@ def save(c: str, check: dict[str, Any]) -> dict[str, Any]:
     return check
 
 
+def _announce(c: str, cid: str) -> None:
+    """A check was made or changed (its name, prompt, colour, shown or covers): a `checks` record on the stream, so every
+    surface that lists the checks (the Report's and the canvas's Comments panes, in any tab) reads them again."""
+    try:
+        investigation.emit(c, investigation.MAIN, {"type": "checks", "id": cid})
+    except Exception:  # noqa: BLE001 — a surface reads the checks again on its next record
+        log.debug("%s: checks record not emitted for %s", c, cid, exc_info=True)
+
+
 def _new_id(c: str, name: str) -> str:
     base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "check"
     base = base if ID_RE.match(base) else "check"
@@ -243,9 +253,11 @@ def create(c: str, name: str, prompt: str, *, created_by: str, covers: Any = Non
         raise HTTPException(400, "a check needs a name and a prompt")
     if by_name(c, name) is not None:
         raise HTTPException(409, f"a check named {name!r} exists")
-    return save(c, {"id": _new_id(c, name), "name": name, "prompt": prompt, "colour": _free_colour(c), "shown": False,
+    made = save(c, {"id": _new_id(c, name), "name": name, "prompt": prompt, "colour": _free_colour(c), "shown": False,
                     "builtin": False, "covers": covers_of(covers), "created_by": created_by, "ts": _now(), "version": 1,
                     "runs": {}})
+    _announce(c, str(made["id"]))
+    return made
 
 
 def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None, colour: int | None = None,
@@ -283,7 +295,9 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
         check["shown"] = bool(shown)
     if covers is not None:
         check["covers"] = covers_of(covers)
-    return save(c, check)
+    saved = save(c, check)
+    _announce(c, cid)
+    return saved
 
 
 # --------------------------------------------------------------------------- passages

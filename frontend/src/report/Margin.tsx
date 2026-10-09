@@ -11,6 +11,7 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { ResolveHow } from './commentsApi'
+import { noteText } from './NoteText'
 import { commentName, knowable, noteParts, NOTE_COLOR, stackCards, type CheckLook, type DocComment } from './checkComments'
 import { Glyph, IconButton } from './icons'
 
@@ -162,8 +163,8 @@ function CommentCard({ ws, slug, comment, look, active, top, cardRef, onActivate
           </IconButton>
         )}
       </div>
-      {parts.title && <div className="wu-cm-title">{parts.title}</div>}
-      {parts.body && <div className="wu-cm-text">{parts.body}</div>}
+      {parts.title && <div className="wu-cm-title">{noteText(parts.title)}</div>}
+      {parts.body && <div className="wu-cm-text">{noteText(parts.body)}</div>}
       {active && comment.evidence.length > 0 && (
         <div className="wu-cm-refs">
           {comment.evidence.map((r) => (

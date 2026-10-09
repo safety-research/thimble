@@ -55,7 +55,11 @@ TITLE_CHARS = 140  # a first sentence longer than this is no title
 KNOWN_MAX = 30  # the titles a run's task lists as known
 _REF_RE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:#step-(\d+))?$")
 _TAG_RE = re.compile(r"^\s*\**\s*(heads[ -]up|you should know)\s*\**\s*[:—–-]\s*\**\s*", re.I)
-_SENTENCE_END_RE = re.compile(r"[.!?](?=\s+[\"'“(\[]?[A-Z0-9]|\s*$)")
+# a sentence's end: its mark, then any closing quote, bracket or emphasis, then a space or the end; the next sentence can
+# start with anything, such as a file name or a code span
+_SENTENCE_END_RE = re.compile(r"[.!?][\"'”’)\]*_`]*(?=\s|$)")
+# what before a full stop ends no sentence: a common abbreviation, a single letter or an initialism (e.g., U.S.)
+_ABBREV_RE = re.compile(r"(?:^|[\s(\[])(?:e\.g|i\.e|etc|vs|cf|approx|incl|no|fig|eq|[A-Za-z]|(?:[A-Za-z]\.)+[A-Za-z])$", re.I)
 
 
 def _now() -> str:
@@ -82,14 +86,25 @@ def parse_note(text: str) -> dict[str, Any]:
     if not m:
         return {"tag": None, "title": None, "body": text}
     tag = TAGS[0] if m.group(1).lower().startswith("heads") else TAGS[1]
-    rest = text[m.end():].strip().strip("*").strip()
-    end = _SENTENCE_END_RE.search(rest)
-    first = rest[: end.end()] if end else rest
+    rest = text[m.end():].strip()
+    rest = rest[2:].lstrip() if rest.startswith("**") else rest
+    end = _first_end(rest)
+    first = rest[:end] if end else rest
     if not first or len(first) > TITLE_CHARS:
-        return {"tag": tag, "title": None, "body": rest}
-    title = first.rstrip(".").strip()
+        return {"tag": tag, "title": None, "body": rest.strip("*").strip()}
+    title = first.strip().strip("*").rstrip(".").strip("*").strip()
     title = title[:1].upper() + title[1:]
     return {"tag": tag, "title": title, "body": rest[len(first):].strip()}
+
+
+def _first_end(text: str) -> int | None:
+    """Where the first sentence of `text` ends (after its mark and any closing quote or emphasis), or None for one
+    sentence: a full stop after an abbreviation or a single letter ends none."""
+    for m in _SENTENCE_END_RE.finditer(text):
+        if text[m.start()] == "." and _ABBREV_RE.search(text[: m.start()]):
+            continue
+        return m.end()
+    return None
 
 
 # --------------------------------------------------------------------------- the cards a check covers
@@ -300,7 +315,8 @@ def _cards(c: str) -> dict[str, dict[str, Any]]:
 
 
 def _served(cm: dict[str, Any], cards: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
-    """A comment as the browser and the tools read it, with its `ref`; None when its card, or its step, is gone."""
+    """A comment as the browser and the tools read it, with its `ref` and its tag, title and body read from its text
+    again (parse_note as it reads now); None when its card, or its step, is gone."""
     cell = cards.get(str(cm.get("card") or ""))
     if cell is None:
         return None
@@ -309,7 +325,8 @@ def _served(cm: dict[str, Any], cards: dict[str, dict[str, Any]]) -> dict[str, A
         n = next((s["n"] for s in steps_of(cell) if s["id"] == cm["step"]), None)
         if n is None:
             return None
-    return {**cm, "ref": step_ref(str(cm["card"]), n), "n": n}
+    note = parse_note(str(cm["text"])) if cm.get("text") else {}
+    return {**cm, **note, "ref": step_ref(str(cm["card"]), n), "n": n}
 
 
 def all_comments(c: str) -> list[dict[str, Any]]:

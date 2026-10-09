@@ -107,6 +107,49 @@ def test_a_comment_s_tag_title_and_body_are_read_from_its_words():
                                                                       "body": "No card shows this count."}
 
 
+def test_a_title_ends_where_its_sentence_ends_when_the_next_starts_with_a_file_name_or_code():
+    """Live check plan-cards: 3 of 15 comments lost their title because the next sentence started with a lowercase file
+    name or a code span, so the first sentence ran on past TITLE_CHARS."""
+    got = canvas_comments.parse_note("Heads up: the prompts promise test checks on merges that no step builds. "
+                                     "conditions/shared/environment.md line 20 says a PR merges with green tests.")
+    assert (got["title"], got["body"]) == ("The prompts promise test checks on merges that no step builds",
+                                           "conditions/shared/environment.md line 20 says a PR merges with green tests.")
+    got = canvas_comments.parse_note("Heads up: there is no forge code in this folder. `forge/` holds only a test.")
+    assert (got["title"], got["body"]) == ("There is no forge code in this folder", "`forge/` holds only a test.")
+    got = canvas_comments.parse_note("You should know: **Blocking the web also blocks GitHub.** The build fails.")
+    assert (got["title"], got["body"]) == ("Blocking the web also blocks GitHub", "The build fails.")
+    got = canvas_comments.parse_note("Heads up: the U.S. mirror is slow, e.g. at night. Use another one.")
+    assert (got["title"], got["body"]) == ("The U.S. mirror is slow, e.g. at night", "Use another one.")
+
+
+async def test_a_stored_comment_is_served_with_its_title_read_again_from_its_words(board, bridge):
+    a = _card("A card")
+    act = await _turn_ended()
+    await _comment(act, f"card:{a}", "Heads up: the manager's table no longer fits. manager.md asks for one row each.",
+                   "toolu_t1")
+
+    def untitled(items):  # as a comment left before parse_note read a lowercase next sentence
+        for x in items:
+            x.update(title=None, body=x["text"].split(": ", 1)[1])
+
+    canvas_comments._change(CORPUS, untitled)
+    [cm] = canvas_comments.open_comments(CORPUS)
+    assert (cm["title"], cm["body"]) == ("The manager's table no longer fits", "manager.md asks for one row each.")
+
+
+async def test_a_check_turned_on_or_off_is_a_checks_record_on_the_stream(board):
+    """Live check plan-cards: the Report's switch turned You should know off and the canvas kept showing it on until a
+    reload, since only a run's start and end reached the stream."""
+    def records() -> list[dict]:
+        path = investigation.inv_dir(CORPUS, investigation.MAIN) / "events.jsonl"
+        return [e for e in investigation._read_jsonl(path) if e.get("type") == "checks"] if path.exists() else []
+
+    checks.edit(CORPUS, YSK, shown=False)
+    assert [e["id"] for e in records()] == [YSK]
+    made = checks.create(CORPUS, "Risks", "Mark the risky cards.", created_by="analyst", covers=["cards"])
+    assert [e["id"] for e in records()] == [YSK, made["id"]]
+
+
 async def test_main_s_turn_end_runs_you_should_know_on_the_unseen_cards_with_a_task_file(board, bridge):
     old = _card("What did the pilot show?", takeaway="Both agents merged their PR.")
     orientation = notebook.create_notebook(config.workspace_dir(CORPUS), "Orientation", role="exploration")

@@ -3,8 +3,8 @@
 // count of open comments (or a spinner while it runs, ✕ when it failed), and ⋯ to open its card (CheckCard). + opens the
 // new-check card. Whether a check is on is kept on the server (`shown`), so one switch covers a check's comments in the
 // documents and on the cards, and the server runs what the pane asks for (backend checks.py); `check` stream records
-// say when a run starts and ends. `useChecks` holds the list; `useSidebar` is the sidebar's state (shown or hidden,
-// beside the document or over it).
+// say when a run starts and ends, and `checks` records when a check changes, so both panes follow one switch.
+// `useChecks` holds the list; `useSidebar` is the sidebar's state (shown or hidden, beside the document or over it).
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Button } from '../components/Button'
 import { TextArea, TextInput } from '../components/Field'
@@ -45,7 +45,7 @@ export interface Checks {
 
 const toast = (what: string, e: unknown) => bus.emit('toast', { text: `${what} ${(e as Error).message}`, kind: 'error' })
 
-/** The workspace's checks, read again when the stream says a run started or ended. */
+/** The workspace's checks, read again when the stream says a run started or ended or a check changed. */
 export function useChecks(ws: string): Checks {
   const [list, setList] = useState<Check[]>([])
   const current = useRef<Check[]>(list)
@@ -76,6 +76,8 @@ export function useChecks(ws: string): Checks {
         put(withRun(current.current, e.id, e.doc, { status: e.status, run: e.run, chat: e.chat }))
         later()
       }),
+      // a check made or changed anywhere, such as turned on or off in the other Comments pane or by main
+      bus.on('checks', later),
       bus.on('wsStream', (e) => e.connected && later()),
     ]
     return () => {

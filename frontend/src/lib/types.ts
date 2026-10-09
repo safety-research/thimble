@@ -111,6 +111,7 @@ export type WsEvent = { ts?: string; seq?: number } & (
   | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string; rows?: boolean }
   | { type: 'filter'; scope: FilterScope; concept?: string; value?: string }
   | { type: 'check'; id: string; doc: string; status: CheckRunStatus | string; run?: string; chat?: string }
+  | { type: 'checks'; id: string }
   | { type: 'job'; status: string }
   | { type: 'server'; status: string }
   | { type: string; [k: string]: unknown }

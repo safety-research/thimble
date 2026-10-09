@@ -24,6 +24,8 @@ const BUILD = [
   step('s4', 'Pilot: 2 agents, one PR each', ['pilot/']),
 ]
 
+const LONG = "Freeze a copy of pandas at one cutoff date, built fresh in the work folder: clone the repo, fetch every open PR's code as refs/pull/*/head (most PR branches live on contributors' forks), and download every open PR and issue from the GitHub API."
+
 /** the plan in each state, by name: its steps */
 const STATES: Record<string, unknown[]> = {
   new: BUILD,
@@ -33,6 +35,8 @@ const STATES: Record<string, unknown[]> = {
     { ...BUILD[2], status: 'running', started: ago(40), runs: ['Run the emergent condition', 'Run the managed condition'] },
     BUILD[3],
   ],
+  // live check plan-cards: a done step's text of several lines ran under its status, and a click on it scrolled the card
+  long: [LONG, LONG.replace('Freeze', 'Then freeze'), LONG.replace('Freeze', 'And freeze')].map((t, i) => ({ ...step(`s${i + 1}`, t, ['mirror/pandas.git', 'mirror/prs.jsonl']), status: 'done', started: ago(70), ended: ago(64), note: 'mirrored' })),
   needs: [
     { ...BUILD[0], status: 'done', started: ago(70), ended: ago(64) },
     { ...BUILD[1], status: 'needs you', note: 'Open the web for GitHub, or bake the two libraries into the image?' },
@@ -195,6 +199,30 @@ test('a click opens a done step and shows its note and what it made', async () =
   assert.ok(after.height > before.height + 10, `the opened step grows ${before.height} → ${after.height}`)
   assert.equal(await page.textContent(`${sel} .plan-note`), 'six repos mirrored')
   assert.equal(await page.locator(`${sel} .plan-make`).first().evaluate((c) => getComputedStyle(c).borderTopStyle), 'solid')
+  await page.click(`${sel} .plan-toggle`)
+  await page.waitForSelector(`${sel} .plan-note`, { state: 'detached' })
+})
+
+test("a done step's long text is cut short on its line before its status, and opening it wraps it and moves nothing", async () => {
+  const got = await stepsOf(page, 'long')
+  oneLine(got)
+  for (const s of got.steps) assert.ok(s.box!.height <= s.lineHeight + 12, `a done step is one line ${JSON.stringify(s.box)}`)
+  const sel = '[data-state="long"] .plan-step[data-n="2"]'
+  const cut = await page.locator(`${sel} .plan-line`).evaluate((el) => el.scrollWidth > el.clientWidth)
+  assert.ok(cut, 'the text is cut short, with its whole text in its title')
+  assert.ok(await page.locator(`${sel} .plan-caret`).isVisible(), "the step's caret shows")
+  await page.click(`${sel} .plan-toggle`)
+  await page.waitForSelector(`${sel} .plan-note`)
+  const open = await page.evaluate((sel) => {
+    const card = document.querySelector<HTMLElement>('[data-state="long"] .canvas-card')!
+    const step = document.querySelector<HTMLElement>(sel)!
+    const line = step.querySelector<HTMLElement>('.plan-line')!
+    const r = (el: Element) => el.getBoundingClientRect()
+    return { scrolled: card.scrollLeft, lines: r(line).height / parseFloat(getComputedStyle(line).lineHeight), textRight: r(line).right, statusLeft: r(step.querySelector('.plan-status')!).left, cardRight: r(card).right, statusRight: r(step.querySelector('.plan-status')!).right }
+  }, sel)
+  assert.equal(open.scrolled, 0, 'a click on the step scrolls no part of the card out of view')
+  assert.ok(open.lines >= 2, `the opened step's text wraps ${JSON.stringify(open)}`)
+  assert.ok(open.textRight <= open.statusLeft + 1 && open.statusRight <= open.cardRight, `the text stays left of its status ${JSON.stringify(open)}`)
   await page.click(`${sel} .plan-toggle`)
   await page.waitForSelector(`${sel} .plan-note`, { state: 'detached' })
 })
