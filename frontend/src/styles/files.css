@@ -1,4 +1,4 @@
-/* The Files pane: the views bar, the sidebar (tree and Labels pane), the reader with tabs and the overview ruler, the
+/* The Files pane: the views bar, the sidebar (tree and Labels pane), the reader with tabs and its strip, the
    status strip. Label colours are the data palette (--label-1..12, --label-none), set per element as --c; a mark is
    the colour at 24% behind the text. */
 .files-tab {
@@ -1587,27 +1587,18 @@
   flex-direction: column;
   overflow: hidden;
 }
-/* the overview ruler and scrollbar beside the reader and the report (Ruler.tsx ReaderRuler): one rail while its track
-   resolves every mark (needsDetail), the lanes drawn in the track under a thumb that frames what is on screen; past
-   that two, the lanes over the whole file with a band over what is on screen, then the scrollbar, whose thumb holds
-   the lanes of what is on screen */
+/* the ruler beside the report (Ruler.tsx ReaderRuler): one strip at every length, the scrollbar's track holding a lane
+   per check under a thumb that frames what is on screen, or with no lane a plain scrollbar */
 .reader-ruler {
+  position: relative;
   flex: none;
   box-sizing: border-box;
   display: flex;
-  gap: 10px;
   padding: 6px;
   background: var(--bg-sunken);
   box-shadow: inset 1px 0 0 var(--border-hairline);
   user-select: none;
   touch-action: none;
-}
-.reader-ruler-lanes {
-  position: relative;
-  flex: none;
-  display: flex;
-  gap: 1px;
-  cursor: pointer;
 }
 /* the lanes' stripes and marks, on one canvas whose box Marks sizes to its pixels */
 .reader-ruler-marks {
@@ -1618,24 +1609,17 @@
   height: 100%;
   pointer-events: none;
 }
-.reader-ruler-band {
-  position: absolute;
-  top: 0;
-  left: -2px;
-  right: -2px;
-  border-radius: 1px;
-  background: rgba(var(--ink-rgb), 0.14);
-  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.55);
-  pointer-events: none;
-}
-.reader-ruler-bar {
+.reader-ruler-bar,
+.track-over {
   position: relative;
   flex: none;
   border-radius: var(--radius-hl);
   background: rgba(var(--ink-rgb), 0.05);
   cursor: pointer;
 }
-.reader-ruler-thumb {
+/* the thumb: a frame over the lanes, as wide as the track, a light fill so the marks under it read */
+.reader-ruler-thumb,
+.track-frame-over {
   position: absolute;
   top: 0;
   left: 0;
@@ -1643,69 +1627,25 @@
   box-sizing: border-box;
   border: 1px solid rgba(var(--ink-rgb), 0.5);
   border-radius: var(--radius-chip);
-  background: var(--surface-card);
+  background: rgba(var(--ink-rgb), 0.08);
   cursor: grab;
 }
-.reader-ruler[data-drag] .reader-ruler-thumb {
+.reader-ruler[data-drag] .reader-ruler-thumb,
+.tracks[data-drag] .track-frame-over {
   border-color: rgba(var(--ink-rgb), 0.75);
   cursor: grabbing;
 }
-/* one rail: the thumb frames the span on screen over the lanes in the track */
-.reader-ruler-thumb.finder {
-  background: rgba(var(--ink-rgb), 0.08);
-}
-.reader-ruler-thumb.plain {
+/* a plain scrollbar's thumb, with no lane under it */
+.reader-ruler-thumb.plain,
+.track-over.plain .track-frame-over {
   border: 0;
   border-radius: var(--radius-hl);
   background: rgba(var(--ink-rgb), 0.22);
 }
-.reader-ruler-zoom {
-  position: absolute;
-  inset: 2px;
-  display: flex;
-  gap: 2px;
-  overflow: hidden;
-  border-radius: 2px;
-}
-.reader-ruler-zl {
-  position: relative;
-  flex: 1;
-  background: rgba(var(--ink-rgb), 0.04);
-}
-.reader-ruler-zl i {
-  position: absolute;
-  left: 0;
-  right: 0;
-}
-/* a find's match in a record on screen: a 3px mark at its place, ringed in the paper */
-.reader-ruler-zl i.hit {
-  left: -1px;
-  right: -1px;
-  height: 3px;
-  margin-top: -1.5px;
-  border-radius: 1px;
-  box-shadow: 0 0 0 1px var(--surface-card);
-}
-/* a 1px line of the paper between the records on screen */
-.reader-ruler-seps {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.reader-ruler-seps i {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 1px;
-  margin-top: -1px;
-  background: var(--surface-card);
-}
-/* -------- the reader's two tracks (Tracks.tsx ReaderTracks), after an editor's navigator and zoom bar: the overview
-   (the whole file in one lane of the Color by colors or the file's density, the labels' grey ticks at its left) with a
-   dark frame over what the reader shows, then at the edge the zoomed track, which magnifies the frame: the stretch
-   around what the reader shows, its colors faded past it, what it shows under a lens; two lines and a light wedge join
-   the frame to the lens (the earlier ruler's magnifying viewfinder) -------- */
+/* -------- the reader's strip (Tracks.tsx ReaderTracks): the scrollbar's track drawn as the whole file, the find's
+   ticks and a lane per choice of Color by, under a thumb over what the reader shows -------- */
 .tracks {
+  position: relative;
   flex: none;
   box-sizing: border-box;
   display: flex;
@@ -1715,14 +1655,8 @@
   user-select: none;
   touch-action: none;
 }
-.track {
-  position: relative;
-  flex: none;
-  background: rgba(var(--ink-rgb), 0.04);
-}
 .track-over {
   overflow: hidden;
-  cursor: pointer;
 }
 .track-canvas {
   position: absolute;
@@ -1730,156 +1664,53 @@
   left: 0;
   pointer-events: none;
 }
-/* a lane of the overview, over its colors, which names its label on hover */
+/* a lane of colors, over its colors */
 .track-lane {
   position: absolute;
   top: 0;
   bottom: 0;
 }
-/* the frame over what the reader shows on the overview: exactly as wide as its track, in the full ink with a line of
-   the paper inside it, so that it stands out over any color; square, so that the lines start at its corners */
 .track-frame-over {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  box-sizing: border-box;
-  border: 2px solid var(--text-primary);
-  border-radius: 0;
-  box-shadow: inset 0 0 0 1px var(--surface-card);
-  cursor: grab;
   will-change: transform;
 }
-.tracks[data-drag] .track-frame-over {
+.tracks[data-drag],
+.tracks[data-drag] * {
   cursor: grabbing;
 }
-/* the lines from the frame's top and bottom to the lens's, and the wedge between them */
-.track-link {
-  flex: none;
-  align-self: stretch;
-  height: auto;
-  overflow: visible;
-  pointer-events: none;
-}
-.track-link polygon {
-  fill: rgba(var(--ink-rgb), 0.08);
-  shape-rendering: crispEdges;
-}
-.track-link line {
-  stroke: rgba(var(--ink-rgb), 0.62);
-  stroke-width: 1;
-  shape-rendering: crispEdges;
-}
-/* a drag on the zoomed track scrolls the reader, as a scrollbar's thumb does */
-.track-zoom {
-  cursor: grab;
-}
-.tracks[data-drag='zoom'],
-.tracks[data-drag='zoom'] * {
-  cursor: grabbing;
-}
-.tracks[data-drag='frame'],
-.tracks[data-drag='frame'] * {
-  cursor: grabbing;
-}
-.track-zoom-faded,
-.track-zoom-shown {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  overflow: hidden;
-}
-.track-zoom-faded {
-  bottom: 0;
-}
-/* the records at their place in the reader's content, moved as one by the tracks' animation frame */
-.track-zoom-layer {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  will-change: transform;
-}
-.track-zoom-shown {
-  will-change: transform;
-}
-/* the lens: a raised box of the paper, framed, over what the reader shows on the zoomed track, a margin of the paper
-   around the part shown (LENS_OUT_PX); the records it holds are drawn over it in full */
-.track-lens {
-  position: absolute;
-  top: 0;
-  left: -3px;
-  right: -3px;
-  box-sizing: border-box;
-  border: 1px solid rgba(var(--ink-rgb), 0.55);
-  background: var(--surface-card);
-  box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.3);
-  pointer-events: none;
-  will-change: transform;
-}
-.tracks[data-drag] .track-lens {
-  border-color: rgba(var(--ink-rgb), 0.8);
-}
-/* a record on the zoomed track: a block of its height in its color, grey with no color; the labels on it that are not
-   the choice as grey ticks at its left */
-.track-rec {
-  position: absolute;
-  left: 0;
-  right: 0;
-  display: block;
-  background: rgba(var(--ink-rgb), 0.2);
-}
-.track-rec b {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: rgba(var(--ink-rgb), 0.45);
-  box-shadow: 1px 0 0 var(--surface-card);
-}
-/* the hover preview: the records at the point of the file under the pointer, beside the tracks, in thimble's popover
-   (its paper, ring and float, the radius of a control); each record a plain row with its color as a straight bar on
-   its left edge, as the reader's records carry it */
-.track-preview {
+/* -------- the loupe beside a strip (Loupe.tsx): the records around the pointer, larger, in thimble's popover; the
+   paper at its right, between it and the strip, is the way the pointer moves into it -------- */
+.loupe {
   position: fixed;
   z-index: var(--z-popover);
-  box-sizing: border-box;
-  width: 340px;
-  max-width: calc(100vw - 80px);
-  padding: 4px;
+  box-sizing: content-box;
+}
+.loupe:not([data-open]) {
+  display: none;
+}
+.loupe-box {
   border-radius: var(--radius-ui);
+}
+.loupe-box canvas {
+  display: block;
+  font: var(--type-mono-sm);
+}
+.loupe[data-frozen] .loupe-box {
+  border-color: rgba(var(--ink-rgb), 0.45);
+  cursor: pointer;
+}
+/* a bracket beside the strip, on the loupe's side, over the stretch the loupe shows: unlike the thumb, it frames no
+   lanes */
+.loupe-bracket {
+  position: absolute;
+  top: 0;
+  width: 4px;
+  box-sizing: border-box;
+  border: 1px solid rgba(var(--ink-rgb), 0.8);
+  border-right: 0;
   pointer-events: none;
 }
-.track-preview-rec {
-  padding: 6px 8px 6px 11px;
-  box-shadow: inset 3px 0 0 var(--c, transparent);
-}
-.track-preview-rec + .track-preview-rec {
-  border-top: 1px solid var(--border-hairline);
-}
-.track-preview-head {
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font: var(--type-mono-sm);
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.track-preview-line {
-  margin-right: 8px;
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-.track-preview-text {
-  display: -webkit-box;
-  margin-top: 2px;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  color: var(--text-primary);
-  font: var(--type-ui-sm);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+.loupe-bracket:not([data-open]) {
+  display: none;
 }
 /* -------- Color by in the Transcript and Table modes (ColorBy.tsx): thimble's bordered button with the choice, then a key chip per
    value (a square swatch of its color, its name, its count, in a small bordered box; the view kit's .chip-key) that

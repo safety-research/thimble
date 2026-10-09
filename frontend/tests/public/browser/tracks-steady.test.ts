@@ -1,9 +1,9 @@
-// Files' reader (src/files/Reader.tsx) and its tracks (src/files/Tracks.tsx) while it scrolls a transcript, in
+// Files' reader (src/files/Reader.tsx) and its strip (src/files/Tracks.tsx) while it scrolls a transcript, in
 // Chromium and, where Playwright's WebKit starts, in WebKit: a file of 300 messages with Color by on, whose posts are of
 // many heights and with runs of records the Transcript mode hides, so that what the reader shows of the file at once
-// changes many times over as it scrolls. The zoomed track neither comes nor goes while the reader scrolls (each change
-// of it was a change of the reader's width, which reflowed the records and moved the reader back), the reader's width
-// stays the same, and a steady wheel scroll down never moves the reader up, nor one up moves it down.
+// changes many times over as it scrolls. The strip keeps its width while the reader scrolls (a change of it is a change
+// of the reader's width, which reflows the records and moves the reader back), the reader's width stays the same, and
+// a steady wheel scroll down never moves the reader up, nor one up moves it down.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -67,10 +67,10 @@ const ENGINES: [string, BrowserType][] = [
   ['webkit', webkit],
 ]
 
-type Sample = { st: number; zoom: boolean; width: number; line: number }
+type Sample = { st: number; strip: number; width: number; line: number }
 
 for (const [name, engine] of ENGINES)
-  test(`${name}: the zoomed track stays as it is while the reader scrolls a transcript, which never moves back`, async (ctx) => {
+  test(`${name}: the strip keeps its width while the reader scrolls a transcript, which never moves back`, async (ctx) => {
     const browser = await engine.launch({ headless: true }).catch(() => null)
     if (!browser) return ctx.skip()
     try {
@@ -88,17 +88,17 @@ for (const [name, engine] of ENGINES)
       await page.waitForTimeout(600)
       const box = (await page.locator('.reader-body').boundingBox())!
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-      // after every painted frame: the body's scroll, whether the zoomed track shows, the body's width and its top post
+      // after every painted frame: the body's scroll, the strip's width, the body's width and its top post
       await page.evaluate(() => {
         const w = window as any
         w.__samples = []
         w.__on = true
         const body = document.querySelector('.reader-body') as HTMLElement
         const tick = () => {
-          const z = document.querySelector('.track-zoom')
+          const z = document.querySelector('.tracks') as HTMLElement | null
           const top = body.getBoundingClientRect().top
           const card = Array.from(body.querySelectorAll<HTMLElement>('.reader-card[data-line]')).find((el) => el.getBoundingClientRect().bottom > top + 1)
-          w.__samples.push({ st: body.scrollTop, zoom: !!z && getComputedStyle(z).display !== 'none', width: body.clientWidth, line: Number(card?.dataset.line ?? 0) })
+          w.__samples.push({ st: body.scrollTop, strip: z?.offsetWidth ?? 0, width: body.clientWidth, line: Number(card?.dataset.line ?? 0) })
           if (w.__on) requestAnimationFrame(tick)
         }
         requestAnimationFrame(tick)
@@ -128,8 +128,8 @@ for (const [name, engine] of ENGINES)
       // the scroll went through the runs of hidden records, where one post stands for 50 lines, and back
       assert.ok(Math.max(...lines) > 230 && Math.min(...up.map((s) => s.line)) < 40, `the scroll went from ${Math.min(...lines)} to ${Math.max(...lines)} and back to ${Math.min(...up.map((s) => s.line))}`)
       for (const [dir, run] of [['down', down], ['up', up]] as const) {
-        const zooms = new Set(run.map((s) => s.zoom))
-        assert.equal(zooms.size, 1, `scrolling ${dir}, the zoomed track came and went: ${run.filter((s, i) => i && s.zoom !== run[i - 1].zoom).map((s) => `${s.zoom ? 'on' : 'off'} at ${s.line}`).join(', ')}`)
+        const strips = new Set(run.map((s) => s.strip))
+        assert.equal(strips.size, 1, `scrolling ${dir}, the strip's width changed: ${run.filter((s, i) => i && s.strip !== run[i - 1].strip).map((s) => `${s.strip} at ${s.line}`).join(', ')}`)
         const widths = new Set(run.map((s) => s.width))
         assert.equal(widths.size, 1, `scrolling ${dir}, the reader's width changed: ${[...widths].join(', ')}`)
         const back = run.filter((s, i) => i && (dir === 'down' ? s.st < run[i - 1].st - 0.5 : s.st > run[i - 1].st + 0.5)).map((s) => `at ${s.line}`)
