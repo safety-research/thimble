@@ -119,11 +119,14 @@ async function watch(page: Page, act: () => Promise<void>): Promise<At[]> {
  * anew), which is no step back */
 const SLIVER_PX = 12
 const said = (seen: At[]) => seen.map((a) => (a ? `${a.line}` : 'none')).join(' ')
+/** lines a drag let go may settle back: the place the frame is let go at is read anew from the tracks (Tracks.tsx
+ * letGo), a few lines from the last place its drag asked for, as a pixel of the overview spans several lines */
+const LET_GO_LINES = 5
 /** The first row in view only ever goes down the file, a row in view at each step: a step back is at most a sliver of
- * the row just before it. */
-function onward(seen: At[], what: string) {
+ * the row just before it, or with `slack` that many lines. */
+function onward(seen: At[], what: string, slack = 0) {
   assert.ok(seen.every((a) => a != null), `${what}: a row is in view at each step: ${said(seen)}`)
-  const back = seen.findIndex((a, i) => i > 0 && a!.line < seen[i - 1]!.line && !(a!.next === seen[i - 1]!.line && a!.shows <= SLIVER_PX))
+  const back = seen.findIndex((a, i) => i > 0 && a!.line < seen[i - 1]!.line && !(a!.next === seen[i - 1]!.line && a!.shows <= SLIVER_PX) && seen[i - 1]!.line - a!.line > slack)
   assert.equal(back, -1, back < 0 ? '' : `${what}: the first row in view went back from line ${seen[back - 1]!.line} to ${seen[back]!.line} (${Math.round(seen[back]!.shows)} px of it in view): ${said(seen)}`)
 }
 const lastLine = (seen: At[]) => seen[seen.length - 1]?.line ?? 0
@@ -164,7 +167,7 @@ for (const [name, engine] of ENGINES)
           }
           await page.mouse.up()
         })
-        onward(drag, 'the drag')
+        onward(drag, 'the drag', LET_GO_LINES)
         assert.ok(lastLine(drag) > 150, `the drag goes down the file: ${said(drag)}`)
         // a trackpad's flicks: quick wheel steps that die away
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
