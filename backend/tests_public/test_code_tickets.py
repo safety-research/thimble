@@ -20,11 +20,11 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import UI_KEY, _record, card_wait
+from conftest import UI_KEY, Listener, _record, card_wait
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app import agent_session, agents, config, dev, hook_auth, ledger, modes, subagents, ticket_box, tools
+from app import agent_session, agents, config, dev, events, hook_auth, ledger, modes, session, subagents, ticket_box, tools
 from app import subagent_files as sf
 from subagent_fakes import bridge, hints  # noqa: F401 — fixtures
 
@@ -313,6 +313,54 @@ async def test_main_s_file_dev_ticket_prepares_the_ticket_and_gives_the_exact_ag
     subagents.run_ended(CORPUS, "a0000000000000ticket", "done", "nothing to do", source="handback")
     await _until(lambda: (dev._get(w["id"]) or {}).get("agent_id"), "the waiting ticket did not start")
     assert bridge.ops("spawn")[-1]["route"] == subagents.CLICK
+
+
+async def test_a_fork_s_ticket_is_prepared_and_main_starts_its_agent_on_an_event_naming_its_thread(ticketing, bridge):
+    """A thread's fork may not start subagents, so its file_dev_ticket no longer sends the analyst to Report a problem:
+    the ticket is prepared as main's is, with the thread's anchor in its body, and main gets a start_agent event that
+    names the ticket and the anchor and carries the exact Agent call, which main makes with no step of the analyst's.
+    The fork is told to say in one line that it is filed. A second ticket while the first runs waits for Start, and
+    main is asked for nothing more."""
+    meta = agents.new_thread(CORPUS, "card:c1", "Agent 3", "the agents chart", surface="canvas",
+                             selector="svg g.bar:nth-child(3)")
+    q = Listener(CORPUS)
+    try:
+        session._live[CORPUS].subs.append(session.Sub(CORPUS, meta["id"], "toolu_forked", "fork1", thread=True))
+        ws = config.workspace_dir(CORPUS)
+        sf.add_caller(ws, "toolu_fork1", "fork1", sf.FORK_TYPE)
+        res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Bigger font", "body": "the labels are small"},
+                               tool_use_id="toolu_fork1")
+        assert not res.is_error, res.text
+        assert res.text.endswith(tools.hint("start_agent-fork", what="ticket #1: Bigger font"))
+        assert "AGENT CALL" not in res.text and "Report a problem" not in res.text
+        assert not bridge.ops("spawn"), "main makes the call, not the module"
+        [t] = [x for x in dev._read() if x["title"] == "Bigger font"]
+        assert t["status"] == "running" and Path(t["worktree"]).is_dir() and t["route"] == "typed"
+        assert "the labels are small" in t["body"] and "- selector: svg g.bar:nth-child(3)" in t["body"]
+        assert "- ref: card:c1" in t["body"] and "the agents chart" in t["body"]
+        note = q.get_nowait()
+        assert note["meta"]["kind"] == events.START_AGENT
+        assert (note["meta"]["filed"], note["meta"]["anchor"], note["meta"]["from_thread"]) == (
+            "ticket #1: Bigger font", "card:c1", "the agents chart")
+        inp = json.loads(next(ln for ln in note["content"].splitlines() if ln.startswith("{")))
+        assert inp["subagent_type"] == "thimble:dev-ticket" and "svg g.bar:nth-child(3)" in inp["prompt"]
+        rid = sf.REQUEST_RE.search(inp["prompt"].split("\n", 1)[0]).group(0)
+        req = subagents.request(CORPUS, rid)
+        assert t["request"] == rid and (req["route"], req["call"], req["via_main"]) == (
+            subagents.TYPED, note["meta"]["event"], True)
+        assert not req.get("caller_agent"), "main's Agent call claims it, not the fork's"
+        with subagents.update(CORPUS) as state:
+            assert sf.check_call(state, {"tool_name": "Agent", "tool_use_id": "toolu_main_x", "tool_input": inp}) is None
+
+        sf.add_caller(ws, "toolu_fork2", "fork1", sf.FORK_TYPE)
+        res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Wider pane", "body": "the pane is narrow"},
+                               tool_use_id="toolu_fork2")
+        assert "one at a time" in res.text and "Start on its card" in res.text
+        [w] = [x for x in dev._read() if x["title"] == "Wider pane"]
+        assert (w["status"], w["held"]) == ("queued", True)
+        assert q.empty(), "a held ticket asks main for no start"
+    finally:
+        q.close()
 
 
 async def test_stop_stops_the_agent_through_the_module_and_main_s_quit_stops_it_with_retry(ticketing, bridge):

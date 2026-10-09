@@ -23,9 +23,9 @@ record in main's transcript), and a descendant of one, a `thimble:orient-helper`
 ancestor. The ends of their runs come from their hand-back (the SubagentHandback call in the agent's transcript, or the
 hand-back in main's), a task notification, or the hooks' and the module's turn ends (subagents.run_ended, stopped,
 ended); a message from main or the analyst to one that finished starts its next run (subagents.run_again). For a typed
-start or follow-up the mirror watches main's call (R2: its result) and main's turn (R3: the turn in which main called the
-start tool ends without the call), and refuses the request when it did not happen. A Workflow call is one agent chat
-whose members are the run's agent transcripts.
+start or follow-up the mirror watches main's call (R2: its result) and main's turn (R3: the turn in which main called
+the start tool, or got the `start_agent` event that carries a thread's fork's start, ends without the call), and refuses
+the request when it did not happen. A Workflow call is one agent chat whose members are the run's agent transcripts.
 
 Terminal mode (launch.json names a session in terminal mode, subagent_files.session_mode) has no server to follow main.
 Main is the session launch.json names, followed through the moves --rekey recorded, and current() gives every process a
@@ -1183,9 +1183,10 @@ def _end_turn(lv: Live) -> None:
 
 
 def _no_call(lv: Live) -> None:
-    """R3 (module note): the turn in which main called a start tool, or message_orientation, ended, and the request
-    that call made was never claimed by main's Agent call or SendMessage: it is refused, kind `no-call`, with main's last
-    text in the turn (its first two lines) as the reason."""
+    """R3 (module note): the turn in which main called a start tool, or message_orientation, or got the `start_agent`
+    event of a thread's fork's start (subagents.ask_main), ended, and the request that call or event stands for was
+    never claimed by main's Agent call or SendMessage: it is refused, kind `no-call`, with main's last text in the turn
+    (its first two lines) as the reason."""
     if not lv.turn_calls:
         return
     from . import subagents  # noqa: PLC0415
@@ -1242,6 +1243,8 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
         _open_turn(lv)
     if kind == "thread" and thread:
         lv.turn_threads.append(thread)
+    if event_id:  # a start_agent event's start is refused when this turn ends without its Agent call (R3, _no_call)
+        lv.turn_calls.add(event_id)
     if event_id and event_id in _expected:
         _expected.discard(event_id)
         return

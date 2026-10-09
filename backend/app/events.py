@@ -73,6 +73,7 @@ PROMPT = "main"  # main's system-prompt append, whose events section names the k
 EVENTS_SECTION = "Events from the browser"
 SESSION_PROMPTS = (PROMPT,)
 MAIN, THREAD = "main", "thread"
+START_AGENT = "start_agent"  # asks main to start the agent of a ticket or a view a thread's fork filed (tools._ask_main)
 ATTR_CHARS = 120  # a payload value longer than this, or with a newline, goes into the body instead of an attribute
 BODY_CHARS = 12_000  # the event body's ceiling: an event stays in main's context for the rest of the session
 PING_S = 15  # the stream's keep-alive, so a proxy or the shim's read timeout never drops an idle subscription
@@ -274,6 +275,9 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"the {fields.get('doc') or 'document'} writer ended"
     elif kind == "checked":
         line = f"a check of the {fields.get('doc') or 'document'} ended"
+    elif kind == START_AGENT:
+        asked = f" (thread {fields['from_thread']})" if fields.get("from_thread") else ""
+        line = f"start the dev agent for {fields.get('filed') or 'a thread'}{asked}"
     else:
         line = words
     return _cut(line, LINE_CHARS)
@@ -289,11 +293,12 @@ def _cut(line: str, n: int) -> str:
 
 
 def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind: bool = True,
-         mirror: bool = True, line: str | None = None) -> dict[str, Any]:
+         mirror: bool = True, line: str | None = None, event_id: str | None = None) -> dict[str, Any]:
     """Send one event to the workspace's session: {id, kind, delivered, thread?}. A `main` event shows in main's chat
     as the analyst's line unless `mirror` is False, for a request server code writes to main, which passes the `line`
-    main's terminal shows instead of terminal_line's. 409 when no session listens, 400 for a kind main.md names no
-    bullet for (when `check_kind`), or for a message with no text."""
+    main's terminal shows instead of terminal_line's. `event_id` is the event's id when the caller recorded it first
+    (a START_AGENT event's request keeps it). 409 when no session listens, 400 for a kind main.md names no bullet for
+    (when `check_kind`), or for a message with no text."""
     from . import agents, session, threads  # noqa: PLC0415
 
     kind = str(kind or "").strip()
@@ -303,7 +308,7 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
     ws = _terminal_ws(c)
     if not reachable(c):
         raise HTTPException(409, NOT_LISTENING.format(cwd=config.corpus_dir(c)))
-    event_id = secrets.token_hex(4)
+    event_id = event_id or secrets.token_hex(4)
     out: dict[str, Any] = {"id": event_id, "kind": kind}
     seen = dict(payload)  # what an observer reads, before the builders below take their keys out
     if kind == MAIN:

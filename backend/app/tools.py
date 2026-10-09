@@ -20,6 +20,7 @@ import inspect
 import json
 import logging
 import re
+import secrets
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -2595,7 +2596,8 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     the analyst accepts it. A claim that matches no corpus file is refused, naming real paths near it; where views
     cannot be built the proposal fails at once. A proposal from main's shim is one the analyst asked for: its result is
     the exact Agent call that starts its builder, which main makes (`## start_job-subagent`), and the browser opens the
-    view once built."""
+    view once built. A thread's fork's proposal is built the same way, by main's Agent call on a `start_agent` event
+    (_ask_main), since the fork may not make it."""
     from . import views
 
     claims = args.get("claims")
@@ -2613,6 +2615,7 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return err(" ".join(hint("propose_view-unmatched", claims=", ".join(unmatched), near=near).split()))
     orient = session_kind(ctx.session) == ORIENT_SESSION
     typed = ctx.session is None  # main's own call: the build is main's Agent call
+    fork = await _fork_of(ctx) if typed else None  # a thread's fork's call: main makes that Agent call (_ask_main)
     values = {k: str(args[k]) for k in ("model", "effort") if args.get(k)}
     if typed:
         from . import subagents  # noqa: PLC0415
@@ -2635,6 +2638,9 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         if typed:
             views.update_proposal(ctx.c, str(prop["slug"]), status="failed", error=why)
         return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=prop.get("slug"), why=why))
+    if fork is not None:
+        what = f"the view {prop.get('name')} (view:{prop.get('slug')})"
+        return await _fork_build(ctx, str(prop["slug"]), what, fork, values)
     if typed:
         return await _typed_build(ctx, str(prop["slug"]), values)
     if prop.get("revised") and not prop.get("held"):  # a view built under this name is changed in place (views.revise)
@@ -2655,6 +2661,69 @@ async def _typed_build(ctx: Ctx, slug: str, values: dict[str, str] | None = None
     return ok(hint("start_job-subagent", input=json.dumps(ans["input"], ensure_ascii=False)))
 
 
+async def _fork_of(ctx: Ctx) -> dict[str, Any] | None:
+    """For a call through main's shim that a thread's fork made: the thread's meta, with what the analyst pointed at
+    (subagents.fork_thread), or {} when the mirror does not know the fork's thread; None for any other caller's call."""
+    from . import subagents  # noqa: PLC0415
+
+    if not subagents.fork_call(ctx.c, ctx.tool_use_id):
+        return None
+    return await subagents.fork_thread(ctx.c, ctx.tool_use_id) or {}
+
+
+# what a thread's anchor names (agents.new_thread), as the lines a ticket from the thread adds (_with_anchor)
+ANCHOR_LINES = (("anchor", "ref"), ("anchor_surface", "surface"), ("anchor_element", "element"),
+                ("anchor_selector", "selector"), ("anchor_text", "text"), ("anchor_image", "picture"))
+
+
+def _with_anchor(body: str, thread: dict[str, Any]) -> str:
+    """A ticket's body as a thread's fork wrote it, then the thread and what the analyst pointed at to open it
+    (`## ticket-from-thread`), so the dev agent sees the view and the element the request is about."""
+    lines = [f"- {name}: {' '.join(str(thread[k]).split())}" for k, name in ANCHOR_LINES if thread.get(k)]
+    if not lines:
+        return body
+    title = str(thread.get("title") or thread.get("id") or "")
+    return f"{body}\n\n{hint('ticket-from-thread', thread=title, anchor=chr(10).join(lines))}"
+
+
+async def _fork_build(ctx: Ctx, slug: str, what: str, thread: dict[str, Any],
+                      values: dict[str, str] | None = None) -> ToolResult:
+    """The build of the view `slug` a thread's fork asked for: a typed start, as main's own (_typed_build), whose Agent
+    call main makes on a `start_agent` event (_ask_main)."""
+    from . import dev  # noqa: PLC0415
+
+    ans = await dev.start_build(ctx.c, slug, "typed", values or None)
+    if ans.get("program"):
+        return ok(hint("view-changing", view=slug, slug=slug))
+    return await _ask_main(ctx, ans, what=what, thread=thread, view=slug)
+
+
+async def _ask_main(ctx: Ctx, ans: Any, *, what: str, thread: dict[str, Any], view: str | None = None) -> ToolResult:
+    """A typed start a thread's fork asked for, by its propose_view or its file_dev_ticket. Claude Code does not let a
+    fork start subagents, so main makes the Agent call: the request keeps the id of a `start_agent` event
+    (subagents.ask_main), which carries the exact call and names what was filed (`what`), the view and the thread's
+    anchor, and wakes main as any event does, so main starts the agent with no step of the analyst's, judged by auto mode
+    as main's own start is. A start for the same agent that main has not made yet is replaced by this one. The fork is
+    told to say in one line in the thread that it is filed (`## start_agent-fork`). A refused start, or a session that
+    does not listen, is an error result."""
+    from . import events, subagents  # noqa: PLC0415
+
+    if ans.refused or "input" not in ans:
+        return err(ans.reason or f"the dev agent did not start: {ans.kind}")
+    rid, event_id = str(ans["request"]), secrets.token_hex(4)
+    name = str(thread.get("title") or "")
+    subagents.ask_main(ctx.c, rid, event_id, **({"from_thread": thread["id"]} if thread.get("id") else {}))
+    text = hint("start_agent-event", thread=f"the thread {name}" if name else "a side thread", what=what,
+                input=json.dumps(ans["input"], ensure_ascii=False))
+    payload = {"text": text, "filed": what, "view": view, "from_thread": name or None, "anchor": thread.get("anchor")}
+    try:
+        events.post(ctx.c, events.START_AGENT, payload, event_id=event_id)
+    except HTTPException as e:
+        subagents.refuse(ctx.c, rid, _detail_text(e.detail), subagents.NO_CALL)
+        return err(f"the dev agent did not start: {_detail_text(e.detail)}")
+    return ok(hint("start_agent-fork", what=what))
+
+
 async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     from . import local  # noqa: PLC0415
 
@@ -2668,6 +2737,10 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return err("file_dev_ticket: `title` is required")
     if not body:
         return err("file_dev_ticket: `body` is required")
+    typed = ctx.session is None  # main's own call: the change is main's Agent call
+    fork = await _fork_of(ctx) if typed else None  # a thread's fork's call: main makes that Agent call (_ask_main)
+    if fork:
+        body = _with_anchor(body, fork)
     if view := " ".join(str(args.get("view") or "").split()):
         # a change to a view the dev agent built is a view ticket on that view, in the workspace, not a change to
         # thimble's code
@@ -2679,12 +2752,14 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         if slug is None:
             names = [v["name"] for v in views.list_views(ctx.c) if v.get("origin") == "workspace"]
             return err(hint("file_dev_ticket-no-view", view=view, views=", ".join(names) or "none"))
-        typed = ctx.session is None  # main's own call: the change is main's Agent call
         prop = views.revise(ctx.c, slug, f"{title}\n\n{body}", proposed_by=ctx.created_by,  # on the loop: it queues
                             asked=typed, route=views.TYPED if typed else views.FOLLOW_ON)
         _chip(ctx.c, "view", str(prop.get("name") or slug), ref=f"view:{slug}", status="queued")
         if why := await asyncio.to_thread(views.build_problem_for, ctx.c):
             return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=slug, why=why))
+        if fork is not None:
+            what = f"the change to the view {prop.get('name') or slug} (view:{slug})"
+            return await _fork_build(ctx, slug, what, fork)
         if typed:
             return await _typed_build(ctx, slug)
         return ok(hint("view-changing", view=prop.get("name"), slug=slug))
@@ -2697,12 +2772,15 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     rec = await _maybe_await(fn(ctx.c, title, body, urgent=bool(args.get("urgent")), source=source, start=False,
                                 route="typed"))
     label = dev._label(rec)
-    # main's ticket: prepared, then the exact Agent call that starts its agent, which auto mode judges (dev.start_typed)
-    ans = await dev.start_typed(rec, call=ctx.tool_use_id)
+    # main's ticket: prepared, then the exact Agent call that starts its agent, which auto mode judges (dev.start_typed);
+    # a thread's fork's, whose Agent call main makes (_ask_main), keeps no call of the fork's
+    ans = await dev.start_typed(rec, call=None if fork is not None else ctx.tool_use_id)
     if ans.get("held"):
         return ok(hint("file_dev_ticket-waits", label=label, running=str(ans.get("running") or "another ticket")))
     if ans.refused or "input" not in ans:
         return ok(hint("file_dev_ticket-cannot-run", label=label, why=ans.reason or str(ans.kind or "")))
+    if fork is not None:
+        return await _ask_main(ctx, ans, what=f"{label}: {title}", thread=fork)
     return ok(hint("file_dev_ticket-start", label=label, title=title,
                    start=hint("start_job-subagent", input=json.dumps(ans["input"], ensure_ascii=False))))
 
@@ -2791,10 +2869,11 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
 
 
 # the start tools, whose result is an Agent call for the caller to make: a thread's fork may not make one, since Claude
-# Code tells its forks not to start subagents, so a fork's call is refused at once with start-refused-fork (U5), and its
-# file_dev_ticket, which starts a code ticket's agent or a view's builder, with start-refused-fork-ticket; another
-# subagent of main's makes the call itself (subagents.typed_caller)
-FORK_REFUSED = ("start_orientation", "start_writing", "propose_view", "run_check", "file_dev_ticket")
+# Code tells its forks not to start subagents, so a fork's call is refused at once with start-refused-fork (U5); another
+# subagent of main's makes the call itself (subagents.typed_caller). A fork's propose_view and file_dev_ticket, which
+# start a view's builder or a code ticket's agent, run, and main makes their Agent call (_ask_main), so a request the
+# analyst makes in a thread on a view reaches the dev agent with no step of theirs.
+FORK_REFUSED = ("start_orientation", "start_writing", "run_check")
 
 
 async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, str | None]:
@@ -2808,8 +2887,6 @@ async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, s
     canon = canonical(name)
     who = await subagents.caller(c, tool_use_id) if tool_use_id else None
     if who is None and canon in FORK_REFUSED and subagents.fork_call(c, tool_use_id):
-        if canon == "file_dev_ticket":
-            return hint("start-refused-fork-ticket"), None
         return hint("start-refused-fork"), None
     if who is None:
         spec = REGISTRY[canon]

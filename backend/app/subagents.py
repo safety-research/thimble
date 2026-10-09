@@ -9,9 +9,11 @@ answer ends the request ({agentId}, a deny of thimble's own --agent-check, Claud
 module). A follow-on start (a run's own next step, such as the orientation's report pass) goes the same way. A typed
 request goes through main: the start tool records the pending request and returns the exact Agent call, which main
 makes; the plugin's --agent-check hook lets only that call through, and the mirror watches for a start that does not
-happen (R1–R3, session.py). Every click route takes the analyst's browser cookie (hook_auth.analyst), never the server's
-token alone, since a start through the module is not judged by auto mode. There is no second route: without the module
-thimble's agents cannot start (start-refused-no-module).
+happen (R1–R3, session.py). The typed start of a thread's fork's propose_view or file_dev_ticket, whose Agent call
+Claude Code does not let a fork make, main makes on a `start_agent` event that carries the exact call (ask_main,
+tools._ask_main), with no step of the analyst's. Every click route takes the analyst's browser cookie
+(hook_auth.analyst), never the server's token alone, since a start through the module is not judged by auto mode. There
+is no second route: without the module thimble's agents cannot start (start-refused-no-module).
 
 Run values. Every run gets exactly the model and effort its arguments or Settings name (values_for). A click registers
 the role with them first (the module); a typed start gets them from the module's spawn and step hooks, which read the
@@ -634,6 +636,48 @@ async def typed_caller(c: str, call: str | None) -> str | None:
     if not agent_id or agent(c, agent_id) is not None:
         return None
     return agent_id
+
+
+async def fork_thread(c: str, call: str | None) -> dict[str, Any] | None:
+    """The thread whose fork made the thimble call `call`: its chat's meta, which holds what the analyst pointed at
+    (agents.new_thread: the anchor's refs, text, surface, element, selector and picture). The fork is found by the caller
+    hook's line, else by the transcript that holds the call (session.call_holder); None when the mirror follows no such
+    fork."""
+    from . import session  # noqa: PLC0415
+
+    if not call:
+        return None
+    line = files.find_caller(ws(c), call)
+    chat = session.chat_of_agent(c, str((line or {}).get("agent_id") or "") or None)
+    if chat is None:
+        held = await session.call_holder(c, call, CALLER_WAIT_S)
+        chat = held.chat if isinstance(held, session.Sub) and held.thread else None
+    meta = agents.meta_or_none(c, chat) if chat else None
+    return meta if meta is not None and meta.get("kind") == agents.KIND_THREAD else None
+
+
+def ask_main(c: str, rid: str, event_id: str, **fields: Any) -> list[str]:
+    """The typed start `rid` that a thread's fork asked for, which main makes on the event `event_id` (tools._ask_main),
+    since a fork may not start subagents: the request keeps the event as its `call`, so that the turn of main's that got
+    the event and ended without the Agent call refuses it (R3, session._no_call), and is marked `via_main`. A start of
+    the same agent that an earlier event asked for and main has not made yet is replaced by this one: no Agent call
+    claims it from now on, and its role's refusal handler does not run, since this start takes up its work. The ids of
+    the requests it replaced."""
+    replaced: list[str] = []
+    with update(c) as state:
+        reqs = files.requests(state)
+        r = reqs.get(rid)
+        if not isinstance(r, dict):
+            return replaced
+        r.update(call=event_id, via_main=True, **fields)
+        for other, o in reqs.items():
+            if (other != rid and isinstance(o, dict) and o.get("kind") == "start" and o.get("key") == r.get("key")
+                    and o.get("state") == "pending" and o.get("via_main")):
+                o.update(state="replaced", replaced_by=rid, at=files.now())
+                replaced.append(other)
+    if replaced:
+        log.info("%s: the start %s main is asked for replaces %s", c, rid, ", ".join(replaced))
+    return replaced
 
 
 async def start_job(c: str, role: str, key: str, task: str, values: dict[str, Any], route: str, *,

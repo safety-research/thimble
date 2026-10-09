@@ -15,9 +15,10 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import Listener
 from fastapi.testclient import TestClient
 
-from app import agents, config, dev, orient_session, orientation, session, subagents, tools, view_review, view_tools, views
+from app import agents, config, dev, events, orient_session, orientation, session, subagents, tools, view_review, view_tools, views
 from app import subagent_files as sf
 from subagent_fakes import bridge, hints  # noqa: F401 — fixtures
 
@@ -185,6 +186,152 @@ async def test_main_s_message_to_a_view_s_build_thread_gives_the_exact_agent_cal
     await asyncio.sleep(0.05)
     assert (len(builders()), len(bridge.ops("send"))) == (spawned, sent), "main makes the call, not the module"
     assert _prop(slug)["route"] == "typed" and "Make the rows blue." in _prop(slug)["change"]
+
+
+# --------------------------------------------------------------------------- a thread's fork's start, which main makes
+
+
+SPEC = {"why": "to read the tasks", "claims": ["board.jsonl"], "unit": "a task", "overview": "a table",
+        "zoom": "a task", "filter": "labels", "details": "the body"}
+
+
+@pytest.fixture()
+def fork_thread(board):
+    """A side thread the analyst opened with a ⌘-click on a header of the view `tasks`, answered by the fork `fork1`,
+    which main's session (a Listener) follows into the thread's chat. (thread meta, the Listener, a function that
+    writes the caller hook's line of one of the fork's calls and gives its id.)"""
+    meta = agents.new_thread(CORPUS, "view:tasks/col-c", "C", "C and F headers", surface="view",
+                             element="view:tasks", selector="table thead th:nth-child(3)")
+    q = Listener(CORPUS)
+    session._live[CORPUS].subs.append(session.Sub(CORPUS, meta["id"], "toolu_forked", "fork1", thread=True))
+    n = [0]
+
+    def call() -> str:
+        n[0] += 1
+        tid = f"toolu_fork{n[0]:04d}"
+        sf.add_caller(config.workspace_dir(CORPUS), tid, "fork1", sf.FORK_TYPE)
+        return tid
+
+    yield meta, q, call
+    q.close()
+
+
+def _start_event(q: Listener) -> tuple[dict, dict]:
+    """The start_agent event main got: its note, and the exact Agent call its text carries."""
+    note = q.get_nowait()
+    assert note["meta"]["kind"] == events.START_AGENT, note
+    line = next(ln for ln in note["content"].splitlines() if ln.startswith("{"))
+    return note, json.loads(line)
+
+
+def _rid(inp: dict) -> str:
+    return sf.REQUEST_RE.search(inp["prompt"].split("\n", 1)[0]).group(0)
+
+
+def _main_claims(inp: dict, call: str) -> str | None:
+    """Main's own Agent call with `inp`, as thimble's --agent-check decides it: None when it goes on."""
+    with subagents.update(CORPUS) as state:
+        return sf.check_call(state, {"tool_name": "Agent", "tool_use_id": call, "tool_input": inp})
+
+
+async def test_a_fork_s_ticket_on_a_view_asks_main_to_start_its_builder_with_the_thread_s_anchor(board, bridge, gates,
+                                                                                               fork_thread):
+    """Matt's thread on a custom view ("I think C and F aren't aligned properly here"): its fork files the change with
+    file_dev_ticket, which Claude Code does not let it start. The change is recorded on the view as main's typed one,
+    and main gets a start_agent event that names it and the thread's anchor and carries the exact Agent call, so main
+    starts the builder in its next turn with no step of the analyst's; the builder's task holds what the analyst
+    ⌘-clicked. The fork is told to say in one line that it is filed, and nothing tells the analyst to file it by hand."""
+    meta, q, call = fork_thread
+    slug = _propose("Tasks", asked=True, route=views.TYPED)
+    res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Align the C and F headers", "view": "Tasks",
+                                                       "body": "The C and F headers don't line up with their columns."},
+                           tool_use_id=call())
+    assert not res.is_error, res.text
+    assert res.text.endswith(tools.hint("start_agent-fork", what=f"the change to the view Tasks (view:{slug})"))
+    assert "AGENT CALL" not in res.text and "Report a problem" not in res.text, "the fork makes no call and sends nobody"
+    assert not bridge.ops("spawn"), "main makes the call, not the module"
+    note, inp = _start_event(q)
+    assert note["meta"]["filed"] == f"the change to the view Tasks (view:{slug})" and note["meta"]["view"] == slug
+    assert (note["meta"]["from_thread"], note["meta"]["anchor"]) == ("C and F headers", "view:tasks/col-c")
+    assert note["terminal"] == f"start the dev agent for the change to the view Tasks (view:{slug}) (thread C and F headers)"
+    assert inp["subagent_type"] == "thimble:view-builder"
+    req = subagents.request(CORPUS, _rid(inp))
+    assert (req["route"], req["state"], req["call"], req["via_main"], req["from_thread"]) == (
+        "typed", "pending", note["meta"]["event"], True, meta["id"])
+    assert not req.get("caller_agent"), "main's Agent call claims it, not the fork's"
+    prop = _prop(slug)
+    assert prop["status"] == "building" and prop["route"] == "typed" and prop["asked"]
+    for part in ("don't line up", "- selector: table thead th:nth-child(3)", "- element: view:tasks", "- text: C",
+                 "C and F headers"):
+        assert part in prop["change"] and part in inp["prompt"], part
+    assert _main_claims(inp, "toolu_main_start") is None and subagents.request(CORPUS, _rid(inp))["state"] == "claimed"
+
+
+async def test_a_second_fork_call_before_main_s_start_replaces_the_first_so_one_builder_starts(board, bridge, gates,
+                                                                                              fork_thread):
+    """A second change the fork files before main made the first start replaces that start: main's call from the first
+    event is denied, and the one from the second, whose task holds both changes, starts the only builder."""
+    _, q, call = fork_thread
+    slug = _propose("Tasks", asked=True, route=views.TYPED)
+    for body in ("Align the C header.", "Align the F header."):
+        res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Align", "view": "Tasks", "body": body},
+                               tool_use_id=call())
+        assert not res.is_error, res.text
+    (_, first), (_, second) = _start_event(q), _start_event(q)
+    assert subagents.request(CORPUS, _rid(first))["state"] == "replaced"
+    assert "Align the C header." in second["prompt"] and "Align the F header." in second["prompt"]
+    assert _main_claims(first, "toolu_main_a") is not None, "the replaced start is denied"
+    assert _main_claims(second, "toolu_main_b") is None
+    open_starts = [r for r in subagents.read(CORPUS)["requests"].values()
+                   if r.get("key") == view_tools.build_key(slug) and r.get("state") in sf.OPEN]
+    assert len(open_starts) == 1 and open_starts[0]["state"] == "claimed", "one builder starts"
+    assert not bridge.ops("spawn")
+
+
+async def test_a_fork_s_propose_view_asks_main_to_start_its_build_once(board, bridge, gates, fork_thread):
+    """A fork's propose_view is built as main's is, by main's Agent call on a start_agent event; proposing it again
+    before main's start leaves one start that can still be made."""
+    _, q, call = fork_thread
+    res = await tools.call(CORPUS, "propose_view", {"name": "Tasks", **SPEC}, tool_use_id=call())
+    assert not res.is_error, res.text
+    slug = next(p["slug"] for p in views.list_proposals(CORPUS) if p["name"] == "Tasks")
+    assert res.text.endswith(tools.hint("start_agent-fork", what=f"the view Tasks (view:{slug})"))
+    note, inp = _start_event(q)
+    assert note["meta"]["view"] == slug and note["meta"]["from_thread"] == "C and F headers"
+    assert inp["subagent_type"] == "thimble:view-builder" and not bridge.ops("spawn")
+    prop = _prop(slug)
+    assert (prop["status"], prop["route"], prop["asked"]) == ("building", "typed", True)
+    res = await tools.call(CORPUS, "propose_view", {"name": "Tasks", **SPEC}, tool_use_id=call())
+    assert not res.is_error, res.text
+    _, again = _start_event(q)
+    assert _main_claims(inp, "toolu_main_a") is not None and _main_claims(again, "toolu_main_b") is None
+    assert len([r for r in subagents.read(CORPUS)["requests"].values()
+                if r.get("key") == view_tools.build_key(slug) and r.get("state") in sf.OPEN]) == 1
+
+
+async def test_main_s_turn_that_got_a_fork_s_start_and_made_no_call_refuses_it(board, bridge, gates, fork_thread):
+    """R3 for a fork's start: the turn of main's that got the start_agent event ended without its Agent call, so the
+    start is refused (no-call) and the view says why with Retry; a turn that made the call refuses nothing."""
+    _, q, call = fork_thread
+    slug = _propose("Tasks", asked=True, route=views.TYPED)
+    lv = session._live[CORPUS]
+    for made in (True, False):
+        res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Align", "view": "Tasks", "body": "Align C."},
+                               tool_use_id=call())
+        assert not res.is_error, res.text
+        note, inp = _start_event(q)
+        session._browser_event(lv, events.render(note), mid_turn=False)
+        if made:
+            assert _main_claims(inp, "toolu_main_made") is None
+        session._end_turn(lv)
+        req = subagents.request(CORPUS, _rid(inp))
+        if made:
+            assert req["state"] == "claimed"
+            dev._view_runs.pop((CORPUS, slug), None)  # the builder it started, which this test does not follow
+            views.update_proposal(CORPUS, slug, status="built")
+        else:
+            assert (req["state"], req["refused_kind"]) == ("refused", subagents.NO_CALL)
+            assert _prop(slug)["refused"]["kind"] == subagents.NO_CALL
 
 
 async def test_an_orientation_s_proposal_builds_as_a_follow_on_start_when_the_pool_has_room(board, bridge, gates,
