@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 // The comments beside the cards (src/canvas/layout.ts commentPlaces, src/canvas/CommentLayer.tsx shownCanvasComments)
 // and the Comments pane's rows per surface (src/report/Checks.tsx CheckRows, src/report/checkComments.ts): a comment
-// sits right of its card's outermost frame at its card's top, or at its step's row; the comments of one column stack
-// without overlapping; a comment hides with its check, its card's frame collapsed or its card filtered out; a check's
-// rows show where it comments (the documents, the cards), each with its count on that surface. What a comment card
-// shows is comment-card.test.tsx.
+// sits right of its card's outermost frame at its card's top, or at its step's row; the comments of one column, or of
+// columns closer than a comment's width, stack without overlapping; a comment hides with its check, its card's frame
+// collapsed or its card filtered out; a check's rows show where it comments (the documents, the cards), each with its
+// count on that surface. What a comment card shows is comment-card.test.tsx.
 import { afterEach, describe, expect, test } from 'vitest'
 import { CheckRows, type Checks } from '../../src/report/Checks.tsx'
 import { CANVAS, checksFor, coversSurface } from '../../src/report/checkComments.ts'
@@ -61,6 +61,24 @@ describe('where the comments beside the cards sit', () => {
     expect(low.y).toBe(top.y + 120 + COMMENT_GAP_Y)
     expect(third.y).toBe(low.y + 100 + COMMENT_GAP_Y)
     expect(low.ay).toBe(p.y + 40)
+  })
+
+  test("comments beside edges closer than a comment's width stack together, none overlapping; a column farther off stays put", () => {
+    // as live: a document's figures in a second, narrower root frame below the plan's, its comments 27 px left of the
+    // plan's long column, drew over it
+    const d2 = { groups: [group('loose', { kind: 'loose' })], cells: [{ ...cell('l1', 'loose'), pos: { x: 2000, y: 100 } }, { ...cell('l2', 'loose'), pos: { x: 1973, y: 300 } }, { ...cell('l3', 'loose'), pos: { x: 2400, y: 300 } }] } as unknown as CanvasResponse
+    const b2 = boardOf(d2)
+    const lay = layoutBoard(b2, new Set(), { l1: 120, l2: 120, l3: 120 })
+    const places = commentPlaces(b2, lay, [
+      { id: 'long', card: 'l1', dy: COMMENT_LIFT, h: 400 },
+      { id: 'near', card: 'l2', dy: COMMENT_LIFT, h: 60 },
+      { id: 'far', card: 'l3', dy: COMMENT_LIFT, h: 60 },
+    ])
+    const [long, near, far] = ['long', 'near', 'far'].map((id) => places.get(id)!)
+    expect(long.x - near.x).toBe(27)
+    expect(near.y).toBe(long.y + 400 + COMMENT_GAP_Y)
+    expect(near.ay).toBe(lay.rects.get('l2')!.y + COMMENT_LIFT)
+    expect(far.y).toBe(lay.rects.get('l3')!.y + COMMENT_LIFT)
   })
 
   test("a loose card's comment sits right of the card itself, and a card that is not drawn gets no place", () => {

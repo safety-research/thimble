@@ -105,9 +105,11 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
   }, [active, comments])
 
   // a commented card's body that grows or shrinks moves the step rows its comments stand at (a plan's live rows
-  // arriving, a done step opened), even in a card whose own height is set, so each change places them again
+  // arriving, a done step opened), even in a card whose own height is set, and a comment whose chevron opens or folds
+  // its details moves the comments below it, so each change places them again
   const [, setMoved] = useState(0)
   const cardsKey = [...new Set(comments.map((c) => c.card))].join(' ')
+  const idsKey = comments.map((c) => c.id).join(' ')
   useEffect(() => {
     if (!cardsKey || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => setMoved((n) => n + 1))
@@ -115,8 +117,9 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
       const body = cardEl(id)?.querySelector('[data-body]')
       if (body) ro.observe(body)
     }
+    for (const el of els.current.values()) ro.observe(el)
     return () => ro.disconnect()
-  }, [cardsKey, cardEl])
+  }, [cardsKey, idsKey, cardEl])
 
   // placed after every render: the cards' heights, a step row's place and the comments' own heights all move them
   useLayoutEffect(() => {

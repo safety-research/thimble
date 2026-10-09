@@ -771,33 +771,27 @@ export function rootFrameOf(board: Board, card: string): string | null {
 
 /**
  * Where each comment sits beside the canvas: COMMENT_GAP_X right of its card's outermost frame (a loose card's own
- * right edge), at its card's top plus its `dy`; the comments of one column (one x) are stacked in the order of their
- * wanted tops, each pushed below the one before it by COMMENT_GAP_Y, so none overlap. A comment whose card is not
- * drawn gets no place. Pure.
+ * right edge), at its card's top plus its `dy`; the comments are stacked in the order of their wanted tops, each pushed
+ * by COMMENT_GAP_Y below every comment placed before it that it would share columns with (two frames whose right edges
+ * differ by less than COMMENT_W), so none overlap. A comment whose card is not drawn gets no place. Pure.
  */
 export function commentPlaces(board: Board, lay: Layout, spots: readonly CommentSpot[]): Map<string, CommentPlace> {
-  const columns = new Map<string, { id: string; want: number; h: number; x: number; ax: number }[]>()
+  const list: { id: string; want: number; h: number; x: number; ax: number }[] = []
   for (const s of spots) {
     const r = lay.rects.get(s.card)
     if (!r) continue
     const root = rootFrameOf(board, s.card)
     const outer = (root && lay.rects.get(root)) || r
-    const x = outer.x + outer.w + COMMENT_GAP_X
-    // the comments at one x make one column, beside one frame or beside frames and loose cards that end at one edge
-    const key = String(Math.round(x))
-    const list = columns.get(key) ?? []
-    list.push({ id: s.id, want: r.y + s.dy, h: s.h, x, ax: r.x + r.w })
-    columns.set(key, list)
+    list.push({ id: s.id, want: r.y + s.dy, h: s.h, x: outer.x + outer.w + COMMENT_GAP_X, ax: r.x + r.w })
   }
+  list.sort((a, b) => a.want - b.want)
   const out = new Map<string, CommentPlace>()
-  for (const list of columns.values()) {
-    list.sort((a, b) => a.want - b.want)
-    let low = -Infinity
-    for (const it of list) {
-      const y = Math.max(it.want, low)
-      out.set(it.id, { x: it.x, y, ax: it.ax, ay: it.want })
-      low = y + it.h + COMMENT_GAP_Y
-    }
+  const placed: { x: number; low: number }[] = []
+  for (const it of list) {
+    const low = placed.reduce((m, p) => (Math.abs(p.x - it.x) < COMMENT_W ? Math.max(m, p.low) : m), -Infinity)
+    const y = Math.max(it.want, low)
+    out.set(it.id, { x: it.x, y, ax: it.ax, ay: it.want })
+    placed.push({ x: it.x, low: y + it.h + COMMENT_GAP_Y })
   }
   return out
 }

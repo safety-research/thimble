@@ -20,7 +20,7 @@ Judge each passage by its evidence, not by how it reads. Read the cards and reco
 
 ## Comments
 
-Comment with `add_comment` only where the check's instructions apply, since each comment asks for the analyst's attention and a comment on every passage hides the few that matter. A comment is one short, atomic, clear statement of what you found, its `text`, which the analyst reads first. Its `details` hold the evidence: what you checked, what the source shows, and a citation of where, so the analyst can confirm it in one click. Comment on a sentence when the finding is about that sentence, and on a paragraph when it is about the paragraph as a whole.
+Comment with `add_comment` only where the check's instructions apply, since each comment asks for the analyst's attention and a comment on every passage hides the few that matter. A comment is one short, atomic, clear statement of what you found, its `text`, which the analyst reads first. Its `details` hold the evidence: what you checked, what the source shows, and a citation of where, so the analyst can confirm it in one click. A citation is `[[<ref>]]`, such as `[[card:<id>]]` or `[[<path>#L<n>]]`. Comment on a sentence when the finding is about that sentence, and on a paragraph when it is about the paragraph as a whole.
 
     Analyst   Mark the sentences that no cited source shows.
     Passage   411 of the 4,120 tickets ended in a disputed charge [[card:<id>]].

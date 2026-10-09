@@ -2,7 +2,7 @@
 // holding a plan card and a table card in the analyst's frame, its comments read from GET /canvas/comments
 // (src/canvas/CommentLayer.tsx) and its checks from GET /checks. Each comment sits right of the frame, the one on a step
 // level with that step's row (`[data-anchor="card:<id>#step-<n>"]`, as a plan card draws its steps) and the others level
-// with their card's top, none overlapping, each its check's name and its statement; ✓ (Done) resolves one through POST /canvas/comments/{id}/resolve and it goes;
+// with their card's top, none overlapping, even when a comment's chevron opens its details, each its check's name and its statement; ✓ (Done) resolves one through POST /canvas/comments/{id}/resolve and it goes;
 // Know it does the same with `how: known`. Comments in the top bar lists the check that covers the cards, with its count
 // of open comments, and its square turns it off and on, which hides and shows its comments.
 import assert from 'node:assert/strict'
@@ -27,7 +27,7 @@ const CANVAS = {
 const note = (id: string, card: string, n: number | null, text: string, details: string) => ({ id, card, step: n == null ? null : `s${n}`, n, ref: n == null ? `card:${card}` : `card:${card}#step-${n}`, check: 'you-should-know', run: 'r1', author: 'check', text, details, ts: '', status: 'open' })
 let COMMENTS = [
   note('k1', 'plan1', 4, 'Blocking the web also blocks GitHub.', 'The pandas build downloads two of its libraries from GitHub, not PyPI. Unless they are baked into the image, the pilot will fail.'),
-  note('k2', 'plan1', null, 'The pilot only tests the emergent prompt.', "The manager agent's prompt runs for the first time in the full run."),
+  note('k2', 'plan1', null, 'The pilot only tests the emergent prompt.', ["The manager agent's prompt runs for the first time in the full run.", ...['assigns', 'reassigns', 'reviews', 'merges', 'reverts', 'waits', 'retries', 'stops'].map((w) => `- How the manager ${w} work is never tried in the pilot, so the full run is the first time anyone sees it.`)].join('\n')),
   note('k3', 'box1', null, 'Each agent builds pandas from source on 1 CPU.', 'A build takes about a minute; 48 agents at once can slow the machine.'),
 ]
 const run = { run: 'r1', status: 'done', chat: '', started: '', covered: [], seen: [], comments: 3, summary: '' }
@@ -142,6 +142,28 @@ test('each comment sits right of the frame, level with its step row or its card,
   assert.ok(head!.includes('You should know') && !head!.includes('Claude') && !head!.includes('Heads up'), head!)
   assert.equal(await page.textContent('[data-canvas-comment="k1"] .wu-cm-statement'), 'Blocking the web also blocks GitHub.')
   assert.ok(!(await page.textContent('[data-canvas-comment="k1"]'))!.includes('baked into the image'), 'the details stay folded')
+})
+
+test("a comment's chevron opening its details moves the comments below it down, and folding them moves them back", async () => {
+  const tops = () => page.evaluate(() => Object.fromEntries([...document.querySelectorAll<HTMLElement>('[data-canvas-comment]')].map((e) => [e.dataset.canvasComment!, e.getBoundingClientRect().top])))
+  const before = await tops()
+  assert.ok(before.k2 < before.k1, 'the comment on the plan stands above the one on its step 4')
+  const sel = '[data-canvas-comment="k2"]'
+  await page.locator(sel).hover()
+  // the pointer stays on the chevron: nothing but the details' own height may move the others
+  await page.locator(`${sel} .wu-cm-more`).click()
+  await page.waitForSelector(`${sel} .wu-cm-details`)
+  await page.waitForTimeout(300)
+  const open = (await Promise.all(['k1', 'k2', 'k3'].map((id) => box(`[data-canvas-comment="${id}"]`)))).map((b) => b!)
+  assert.ok(open[0].top > before.k1 + 1, `k1 moved down: ${open[0].top} vs ${before.k1}; ${JSON.stringify(open)}`)
+  const all = [...open].sort((x, y) => x.top - y.top)
+  for (let i = 1; i < all.length; i++) assert.ok(all[i].top >= all[i - 1].bottom, `no overlap with the details open: ${JSON.stringify(all)}`)
+  await page.locator(`${sel} .wu-cm-more`).click()
+  await page.waitForFunction((s) => !document.querySelector(`${s} .wu-cm-details`), sel)
+  await page.waitForTimeout(300)
+  const after = await tops()
+  for (const id of Object.keys(before)) assert.ok(Math.abs(after[id] - before[id]) <= 1, `${id} back in its place: ${after[id]} vs ${before[id]}`)
+  await page.mouse.move(5, 5)
 })
 
 test('Comments in the top bar lists the check over the cards with its count, and its square turns it off and on', async () => {

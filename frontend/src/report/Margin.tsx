@@ -66,7 +66,8 @@ export function Margin({ ws, slug, comments, look, active, onActivate, onResolve
     setTops((prev) => (prev.size === next.size && [...next].every(([k, v]) => prev.get(k) === v) ? prev : next))
   }, [column, key]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // placed after every render, and again whenever the column's text moves: an edit, a figure loading, a resize
+  // placed after every render, and again whenever the column's text moves (an edit, a figure loading, a resize) or a
+  // comment's chevron opens or folds its details
   useLayoutEffect(() => {
     layout()
   })
@@ -80,6 +81,7 @@ export function Margin({ ws, slug, comments, look, active, onActivate, onResolve
     }
     const ro = new ResizeObserver(later)
     ro.observe(col)
+    for (const card of cards.current.values()) ro.observe(card)
     const mo = new MutationObserver(later)
     mo.observe(col, { subtree: true, childList: true, characterData: true })
     return () => {

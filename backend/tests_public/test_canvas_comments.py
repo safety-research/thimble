@@ -224,6 +224,15 @@ def test_add_comment_names_its_statement_and_its_details():
     assert "`text` first" in desc and "`details`" in desc
 
 
+def test_a_check_is_told_how_to_cite_so_its_details_show_chips():
+    """A check over the cards reads no document that cites, so its prompt names the citation's form: without it the
+    details named files in backticks, which open nothing (live run 2026-10-09)."""
+    from app import prompts  # noqa: PLC0415
+
+    text = prompts.load("check")
+    assert "`[[<ref>]]`" in text and "`[[card:<id>]]`" in text and "`[[<path>#L<n>]]`" in text
+
+
 async def test_add_comment_refuses_a_card_the_run_does_not_cover(board, bridge):
     seen = _card("A card checked before")
     act = await _turn_ended()

@@ -1,8 +1,9 @@
 // One comment pattern in the Report's margin and on the canvas, in a real browser with thimble's own stylesheets: the
-// real Margin (src/report/Margin.tsx) beside a passage, and the real Canvas (src/canvas/Canvas.tsx) holding a plan card
+// real Margin (src/report/Margin.tsx) beside two passages, and the real Canvas (src/canvas/Canvas.tsx) holding a plan card
 // in the analyst's frame with a comment on its step 2 (GET /canvas/comments). Each comment is one card
 // (src/report/CommentCard.tsx): its header is its check's name in the check's color, the color square matching, with no
-// "Claude"; it shows its statement, and its details only once its chevron opens them, their citation a chip; on hover its
+// "Claude"; it shows its statement, and its details only once its chevron opens them, their citation a chip, which moves
+// the comment below it down in the margin; on hover its
 // menu shows Ask and Know it before the chevron and ✓, alike on both surfaces; Ask puts the caret in its field, whose
 // question opens a thread (POST /chats) anchored to the comment's passage or step with the comment's id and words. With
 // no frame kept open in the browser, the analyst's frame, Your work, starts open. Matt 2026-10-09: "it shows a short
@@ -26,7 +27,8 @@ const DETAILS = '- The pandas build fetches two of its libraries from GitHub [[2
 const COMMENTS = [{ id: 'k1', card: 'plan1', step: 's2', n: 2, ref: 'card:plan1#step-2', check: 'you-should-know', run: 'r1', author: 'check', text: 'Blocking the web also blocks GitHub.', details: DETAILS, evidence: 'card:box1', ts: '', status: 'open' }]
 const YSK = { id: 'you-should-know', name: 'You should know', prompt: 'Leave a comment…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {}, covers: ['documents', 'cards'] }
 const PASSAGE = 'Most saves came in one week of June.'
-const STORED = [{ id: 'c1', sentence_id: 's1', text: 'Most saves came from one bot account.', details: '- The table counts [[612|card:box1]] of 900 saves.\n- Leave the bot out, or say so.', author: 'check', check: 'you-should-know', status: 'open', evidence: 'card:box1' }]
+const PASSAGE2 = 'Half of them were from new accounts.'
+const STORED = [{ id: 'c1', sentence_id: 's1', text: 'Most saves came from one bot account.', details: '- The table counts [[612|card:box1]] of 900 saves.\n- Leave the bot out, or say so.', author: 'check', check: 'you-should-know', status: 'open', evidence: 'card:box1' }, { id: 'c2', sentence_id: 's2', text: 'New accounts here means made in June.', details: 'The table dates each account by its first save.', author: 'check', check: 'you-should-know', status: 'open', evidence: '' }]
 
 const R = '#report [data-comment="c1"]'
 const C = '[data-canvas-comment="k1"]'
@@ -48,7 +50,7 @@ beforeAll(async () => {
       `  const [active, setActive] = useState<string | null>(null)`,
       `  return (`,
       `    <div style={{ display: 'flex', padding: 24 }}>`,
-      `      <div ref={column} style={{ width: 380, paddingTop: 60 }}><p><span data-sid="s1">${PASSAGE}</span></p></div>`,
+      `      <div ref={column} style={{ width: 380, paddingTop: 60 }}><p><span data-sid="s1">${PASSAGE}</span> <span data-sid="s2">${PASSAGE2}</span></p></div>`,
       `      <Margin ws="w" slug="report" comments={comments} look={look} active={active} onActivate={setActive} onResolve={async () => {}} draft={null} onDraft={async () => {}} onDraftCancel={() => {}} column={column} textOf={() => '${PASSAGE}'} />`,
       `    </div>`,
       `  )`,
@@ -182,6 +184,24 @@ test('the chevron opens the details, their citation a chip, and folds them again
     await page.waitForFunction((s) => !document.querySelector(`${s} .wu-cm-details`), sel)
     await page.mouse.move(5, 5)
   }
+})
+
+test("in the Report, a comment's chevron opening its details moves the comment below it down, and folding them moves it back", async () => {
+  const c2 = '#report [data-comment="c2"]'
+  const top = (s: string) => page.evaluate((q) => document.querySelector(q)!.getBoundingClientRect().top, s)
+  const was = await top(c2)
+  await page.locator(R).hover()
+  // the pointer stays on the chevron: nothing but the details' own height may move the comment below
+  await page.locator(`${R} .wu-cm-more`).click()
+  await page.waitForSelector(`${R} .wu-cm-details`)
+  await page.waitForTimeout(300)
+  const [r, b] = await page.evaluate((qs) => qs.map((q) => document.querySelector(q)!.getBoundingClientRect().toJSON()), [R, c2])
+  assert.ok(b.top >= r.bottom, `c2 below c1's open details: ${b.top} vs ${r.bottom}`)
+  await page.locator(`${R} .wu-cm-more`).click()
+  await page.waitForFunction((s) => !document.querySelector(`${s} .wu-cm-details`), R)
+  await page.waitForTimeout(300)
+  assert.ok(Math.abs((await top(c2)) - was) <= 1, 'c2 back in its place')
+  await page.mouse.move(5, 5)
 })
 
 test("Ask puts the caret in the comment's field, and the question opens a thread anchored to the comment, on both surfaces", async () => {
