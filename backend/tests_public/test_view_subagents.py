@@ -309,6 +309,47 @@ async def test_a_fork_s_propose_view_asks_main_to_start_its_build_once(board, br
                 if r.get("key") == view_tools.build_key(slug) and r.get("state") in sf.OPEN]) == 1
 
 
+async def test_a_fork_s_start_whose_call_is_longer_than_an_event_s_body_reaches_main_whole(board, bridge, gates,
+                                                                                        fork_thread):
+    """An event's body is cut at events.BODY_CHARS, but a start_agent event's text is the exact Agent call, which main
+    makes unchanged: a call longer than that (here a second change added to a start main has not made yet, whose task
+    holds both) reaches main whole, and main's call from it starts the builder."""
+    _, q, call = fork_thread
+    slug = _propose("Tasks", asked=True, route=views.TYPED)
+    for body in ("The C header is one column left of its values. " * 120, "The F header is off too. " * 200):
+        res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Align", "view": "Tasks", "body": body},
+                               tool_use_id=call())
+        assert not res.is_error, res.text
+    _start_event(q)
+    note, inp = _start_event(q)
+    assert len(note["content"]) > events.BODY_CHARS
+    assert inp == subagents.request(CORPUS, _rid(inp))["input"], "the call main gets is the one thimble lets through"
+    assert _main_claims(inp, "toolu_main_long") is None
+    assert subagents.request(CORPUS, _rid(inp))["state"] == "claimed" and _prop(slug)["status"] == "building"
+
+
+async def test_a_fork_s_start_that_cannot_reach_main_is_refused_and_the_fork_says_why(board, bridge, gates, fork_thread,
+                                                                                    monkeypatch):
+    """A fork's change in plan mode, or with no session of main's listening, starts nothing and asks main for nothing:
+    the view's change fails with the refusal, and the fork's result says why, never that it is filed."""
+    _, q, call = fork_thread
+    slug = _propose("Tasks", asked=True, route=views.TYPED)
+    monkeypatch.setattr(session, "main_mode", lambda c: "plan")
+    res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Align", "view": "Tasks", "body": "Align C."},
+                           tool_use_id=call())
+    assert res.is_error and tools.hint("start-plan-mode") in res.text and "Filed" not in res.text
+    assert q.empty() and _prop(slug)["status"] == "failed" and _prop(slug)["refused"]["kind"] == subagents.HOOK
+    monkeypatch.setattr(session, "main_mode", lambda c: "default")
+    events._subs[CORPUS].discard(q.sub)  # main's shim dropped its subscription: no event reaches main
+    res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Align", "view": "Tasks", "body": "Align F."},
+                           tool_use_id=call())
+    assert res.is_error and "no Claude Code session is listening" in res.text and "Filed" not in res.text
+    assert q.empty() and not bridge.ops("spawn")
+    prop = _prop(slug)
+    assert prop["status"] == "failed" and prop["refused"]["kind"] == subagents.NO_CALL
+    assert not [r for r in subagents.read(CORPUS)["requests"].values() if r.get("state") in sf.OPEN]
+
+
 async def test_main_s_turn_that_got_a_fork_s_start_and_made_no_call_refuses_it(board, bridge, gates, fork_thread):
     """R3 for a fork's start: the turn of main's that got the start_agent event ended without its Agent call, so the
     start is refused (no-call) and the view says why with Retry; a turn that made the call refuses nothing."""
