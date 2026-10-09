@@ -1372,6 +1372,10 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   border-radius: 2px;
 }
 .wu-cm-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font: 500 var(--text-xs) / 1.2 var(--font-body);
   color: var(--text-primary);
 }
@@ -1379,49 +1383,55 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   font: 400 10.5px / 1.2 var(--font-body);
   color: var(--text-tertiary);
 }
-/* a comment that opens with a tag: Heads up in the warning colour, You should know in the accent */
-.wu-cm-tag {
-  font: 500 var(--text-xs) / 1.2 var(--font-body);
-  color: var(--accent);
-  white-space: nowrap;
-}
-.wu-cm-tag[data-tag='Heads up'] {
-  color: var(--status-warning);
-}
-.wu-cm-title {
-  font: 600 var(--text-sm) / 1.35 var(--font-body);
-  color: var(--text-primary);
-  overflow-wrap: anywhere;
-}
-/* Know it shows on a hovered or active card, over the end of the head beside ✓, since the margin is narrow */
-.wu-cm-head {
+/* the head's end: the chevron of the details and ✓ (Done); Ask and Know it show on a hovered or active card, over the
+   end of the name before them, since the margin is narrow */
+.wu-cm-tools {
   position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
 }
-.wu-cm-know {
+.wu-cm-menu {
   position: absolute;
   top: 0;
-  right: 24px;
+  right: 100%;
   display: none;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+  padding-left: 2px;
+  background: var(--surface-card);
+  box-shadow: -10px 0 8px var(--surface-card);
+}
+.wu-cm:hover .wu-cm-menu,
+.wu-cm-active .wu-cm-menu,
+.wu-cm-menu:focus-within {
+  display: flex;
+}
+.wu-cm-act {
   padding: 0 6px;
   height: 20px;
   border: 0;
   border-radius: var(--radius-chip);
-  background: var(--surface-card);
-  box-shadow: -10px 0 8px var(--surface-card);
+  background: transparent;
   font: 500 var(--text-xs) / 1 var(--font-body);
   color: var(--text-tertiary);
+  white-space: nowrap;
   cursor: pointer;
 }
-.wu-cm:hover .wu-cm-know,
-.wu-cm-active .wu-cm-know,
-.wu-cm-know:focus-visible {
-  display: block;
-}
-.wu-cm-know:hover:not(:disabled) {
+.wu-cm-act:hover:not(:disabled) {
   color: var(--text-primary);
 }
-.wu-cm-resolve {
-  margin-left: 0;
+.wu-cm-more {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--text-tertiary);
+}
+.wu-cm-more:hover:not(:disabled) {
+  color: var(--text-primary);
 }
 .wu-cm-resolve {
   margin-left: auto;
@@ -1436,6 +1446,32 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   color: var(--text-secondary);
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+/* the statement, which the card shows first */
+.wu-cm-statement {
+  color: var(--text-primary);
+}
+/* the details, on request: plain sentences or a few bullets, their citations as chips */
+.wu-cm-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wu-cm-md.chat-text {
+  padding: 0;
+  font: inherit;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.wu-cm-md.chat-text p {
+  margin: 0 0 4px;
+}
+.wu-cm-md.chat-text ul,
+.wu-cm-md.chat-text ol {
+  margin: 0 0 4px 1.1em;
+}
+.wu-cm-md.chat-text li {
+  margin: 1px 0;
 }
 /* a card at rest shows four lines of its comment, so the cards stay near their passages; the active one shows all */
 .wu-cm:not(.wu-cm-active) .wu-cm-text {

@@ -308,14 +308,15 @@ Replace one sentence, paragraph or heading of a written document, insert a passa
 
 ## add_comment
 
-Comment on one sentence, paragraph or heading of a written document, or on a card or a step of a plan, a note the analyst reads beside it. In a check's session, comment only on what you are checking.
+Comment on one sentence, paragraph or heading of a written document, or on a card or a step of a plan, a note the analyst reads beside it. The analyst sees `text` first and opens `details` when they want more. In a check's session, comment only on what you are checking.
 
 ```json
 {
   "type": "object",
   "properties": {
     "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph, card:<id> of a card, card:<id>#step-<n> of a plan's step."},
-    "text": {"type": "string"}
+    "text": {"type": "string", "description": "The statement: one short, clear sentence of about 20 words."},
+    "details": {"type": "string", "description": "The evidence for the statement, with its citations, in plain sentences or a few bullets of about 120 words at most."}
   },
   "required": ["ref", "text"]
 }
@@ -1356,7 +1357,7 @@ commented on report:{doc}#{sid}, comment {comment}
 
 ## check-canvas
 
-The cards to comment on, each with its ref, kind and question, then its takeaway and a plan's steps. Comment on a card by its ref, or on one step of a plan by card:<id>#step-<n>. `read_ref` on a card gives its code and outputs. The analyst reads all of a card's comments beside it at once, so leave only the few that matter most on any one card, each its title and one or two short sentences, about 40 words in all.
+The cards to comment on, each with its ref, kind and question, then its takeaway and a plan's steps. Comment on a card by its ref, or on one step of a plan by card:<id>#step-<n>. `read_ref` on a card gives its code and outputs. The analyst reads all of a card's comments beside it at once, so leave only the few that matter most on any one card.
 
 {cards}
 

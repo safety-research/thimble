@@ -5,15 +5,16 @@ about while its check is on, and Done or Know it resolves it, which hides it.
 The store is `workspaces/<c>/canvas-comments.json` = {comments: [Comment]}, changed under its lock (ledger.update_json).
 A comment has the fields a document's comment has, with `card` and `step` in place of `sentence_id`:
 
-    {id, card, step, check, run, author, tag, title, body, text, evidence, fp, ts, status, resolution}
+    {id, card, step, check, run, author, text, details, evidence, fp, ts, status, resolution}
 
 `step` is the stable id of a plan card's step (notebook.plan_steps, `s<n>` as it was made), named to a model as
-`card:<id>#step-<n>` by its place. `author` is `check` for a run's comment and `claude` for main's. `text` is the comment
-as written, citations flattened for reading and kept as `evidence`; a leading "Heads up:" or "You should know:" sets
-`tag`, the next sentence is `title` and the rest `body` (parse_note), so a check's prompt asks for that shape in its
-own words. `status` is `open` or `dismissed` (report.SETTLED_STATUS) and `resolution` says why: `done` or `known` (the
-analyst's Done and Know it), `superseded` (a later run of its check covered its card or step). A comment on a card that
-is gone is not served.
+`card:<id>#step-<n>` by its place. `author` is `check` for a run's comment and `claude` for main's. Every comment is a
+short statement, `text`, which the analyst reads first, and optional `details`, which they open on request: `text` has
+its citations flattened for reading, `details` keeps them as chips, and both cite into `evidence`. A comment stored
+before `details` (no such key) is read as its first sentence and the rest (note_of), and a leading "Heads up:" or
+"You should know:" is dropped, since a comment shows its check's name. `status` is `open` or `dismissed`
+(report.SETTLED_STATUS) and `resolution` says why: `done` or `known` (the analyst's Done and Know it), `superseded` (a
+later run of its check covered its card or step). A comment on a card that is gone is not served.
 
 The passages of the canvas (passages()) are the cards a check covers, in the tree's order, each followed by its steps:
 the cards of the analyst's groups and the threads' (not the orientation's deck, a document's figures or labels' cards).
@@ -43,7 +44,6 @@ router = APIRouter()
 FILE = "canvas-comments.json"
 CANVAS = "@canvas"  # the run target of a check over the cards, among a check's runs beside the documents' slugs
 EVENT = "canvas-comments"  # the stream record a change emits
-TAGS = ("Heads up", "You should know")
 HOWS = ("done", "known")  # how the analyst resolved a comment: Done, Know it
 RESOLUTION_SUPERSEDED = "superseded"
 SETTLED = "dismissed"  # report.SETTLED_STATUS
@@ -51,8 +51,9 @@ CHECK_AUTHOR = "check"
 CLAUDE = "claude"
 COVERED_ROLES = ("analyst",)  # notebook.DEFAULT_ROLE: the analyst's groups and every thread's
 SKIPPED_KINDS = ("label",)  # a label's card is the label's review, which its own pane shows
-TITLE_CHARS = 140  # a first sentence longer than this is no title
-KNOWN_MAX = 30  # the titles a run's task lists as known
+DETAILS_CHARS = 2_000  # of a comment's details, kept
+WHOLE_AUTHORS = ("analyst", "terminal")  # the analyst's own comments, read whole: never split into statement and details
+KNOWN_MAX = 30  # the statements a run's task lists as known
 _REF_RE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:#step-(\d+))?$")
 _TAG_RE = re.compile(r"^\s*\**\s*(heads[ -]up|you should know)\s*\**\s*[:—–-]\s*\**\s*", re.I)
 # a sentence's end: its mark, then any closing quote, bracket or emphasis, then a space or the end; the next sentence can
@@ -77,24 +78,55 @@ def _path(c: str) -> Path:
 # --------------------------------------------------------------------------- what a comment says
 
 
-def parse_note(text: str) -> dict[str, Any]:
-    """{tag, title, body} of a comment's text: a leading "Heads up:" or "You should know:" sets `tag`, the first sentence
-    after it is `title` (without its full stop, its first letter capitalized) and the rest is `body`. A text with no tag,
-    or whose first sentence is longer than TITLE_CHARS, has no title, and its body is the text after the tag."""
+def parse_note(text: str) -> dict[str, str]:
+    """{statement, details} of a comment's words as one text: a leading "Heads up:" or "You should know:" dropped, the
+    first sentence the statement (its bold taken off, its first letter capitalized) and the rest the details."""
+    rest = _untagged(text)
+    end = _first_end(rest)
+    first = rest[:end] if end else rest
+    return {"statement": first.replace("**", "").strip(), "details": rest[len(first):].strip()}
+
+
+def _untagged(text: str) -> str:
+    """`text` on one line without a leading tag, its first letter capitalized when a tag stood before it."""
     text = _collapse(text)
     m = _TAG_RE.match(text)
     if not m:
-        return {"tag": None, "title": None, "body": text}
-    tag = TAGS[0] if m.group(1).lower().startswith("heads") else TAGS[1]
+        return text
     rest = text[m.end():].strip()
-    rest = rest[2:].lstrip() if rest.startswith("**") else rest
-    end = _first_end(rest)
-    first = rest[:end] if end else rest
-    if not first or len(first) > TITLE_CHARS:
-        return {"tag": tag, "title": None, "body": rest.strip("*").strip()}
-    title = first.strip().strip("*").rstrip(".").strip("*").strip()
-    title = title[:1].upper() + title[1:]
-    return {"tag": tag, "title": title, "body": rest[len(first):].strip()}
+    lead = "**" if rest.startswith("**") else ""
+    rest = rest[len(lead):]
+    return lead + rest[:1].upper() + rest[1:]
+
+
+def clean_details(details: Any) -> str:
+    """A comment's details as kept: its lines without trailing space, no run of blank lines, cut at DETAILS_CHARS."""
+    lines = [ln.rstrip() for ln in str(details or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    out = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    return out if len(out) <= DETAILS_CHARS else out[:DETAILS_CHARS].rstrip() + " …"
+
+
+def note_of(cm: dict[str, Any]) -> dict[str, str]:
+    """{text, details} of a stored comment as the analyst reads it: its statement and its details. The analyst's own
+    comment is whole; one stored with `details` is its `text` without a tag; one stored before `details` is split into
+    its first sentence and the rest (parse_note)."""
+    text = str(cm.get("text") or "")
+    if str(cm.get("author") or "") in WHOLE_AUTHORS:
+        return {"text": _collapse(text), "details": clean_details(cm.get("details"))}
+    if "details" in cm:
+        return {"text": _untagged(text), "details": clean_details(cm.get("details"))}
+    got = parse_note(text)
+    return {"text": got["statement"], "details": got["details"]}
+
+
+def split_stored(cm: dict[str, Any]) -> bool:
+    """A comment stored before `details`, made a statement and its details in place (note_of); whether it changed."""
+    if not isinstance(cm, dict) or "details" in cm or not cm.get("text"):
+        return False
+    cm.update(note_of(cm))
+    for k in ("tag", "title", "body"):
+        cm.pop(k, None)
+    return True
 
 
 def _first_end(text: str) -> int | None:
@@ -315,8 +347,8 @@ def _cards(c: str) -> dict[str, dict[str, Any]]:
 
 
 def _served(cm: dict[str, Any], cards: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
-    """A comment as the browser and the tools read it, with its `ref` and its tag, title and body read from its text
-    again (parse_note as it reads now); None when its card, or its step, is gone."""
+    """A comment as the browser and the tools read it, with its `ref` and its statement (`text`) and `details` as the
+    analyst reads them (note_of); None when its card, or its step, is gone."""
     cell = cards.get(str(cm.get("card") or ""))
     if cell is None:
         return None
@@ -325,8 +357,8 @@ def _served(cm: dict[str, Any], cards: dict[str, dict[str, Any]]) -> dict[str, A
         n = next((s["n"] for s in steps_of(cell) if s["id"] == cm["step"]), None)
         if n is None:
             return None
-    note = parse_note(str(cm["text"])) if cm.get("text") else {}
-    return {**cm, **note, "ref": step_ref(str(cm["card"]), n), "n": n}
+    kept = {k: v for k, v in cm.items() if k not in ("tag", "title", "body")}
+    return {**kept, **note_of(cm), "ref": step_ref(str(cm["card"]), n), "n": n}
 
 
 def all_comments(c: str) -> list[dict[str, Any]]:
@@ -348,20 +380,20 @@ def _new_id(used: set[str]) -> str:
             return i
 
 
-def add(c: str, *, card: str, step: str | None, text: str, author: str, check: str | None = None,
+def add(c: str, *, card: str, step: str | None, text: str, author: str, details: str = "", check: str | None = None,
         run: str | None = None, evidence: str = "", fp: str = "") -> tuple[dict[str, Any], bool]:
-    """Store a comment, or find the same open one (same author, check, run, place and words). Returns (the comment,
-    whether it is new)."""
-    note = parse_note(text)
+    """Store a comment, its statement `text` and its `details`, or find the same open one (same author, check, run,
+    place and words). Returns (the comment, whether it is new)."""
+    text, details = _collapse(text), clean_details(details)
 
     def fn(items: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
         same = next((x for x in items if x.get("card") == card and x.get("step") == step and x.get("author") == author
                      and x.get("check") == check and x.get("run") == run and (x.get("status") or "open") == "open"
-                     and _collapse(x.get("text")) == _collapse(text)), None)
+                     and _collapse(x.get("text")) == text and clean_details(x.get("details")) == details), None)
         if same is not None:
             return same, False
         cm = {"id": _new_id({str(x["id"]) for x in items}), "card": card, "step": step, "check": check, "run": run,
-              "author": author, **note, "text": _collapse(text), "evidence": evidence, "fp": fp, "ts": _now(),
+              "author": author, "text": text, "details": details, "evidence": evidence, "fp": fp, "ts": _now(),
               "status": "open", "resolution": None}
         items.append(cm)
         return cm, True
@@ -437,11 +469,10 @@ def count(c: str, check: str, run: str) -> int:
 
 
 def known_titles(c: str, check: str) -> list[str]:
-    """What the analyst marked Know it among `check`'s comments on the cards, newest first: each comment's title, else
-    its text."""
+    """What the analyst marked Know it among `check`'s comments on the cards, newest first: each comment's statement."""
     out = [x for x in _read(c) if x.get("check") == check and x.get("resolution") == "known"]
     out.sort(key=lambda x: str(x.get("resolved_ts") or x.get("ts") or ""), reverse=True)
-    return [_collapse(x.get("title") or x.get("text")) for x in out]
+    return [note_of(x)["text"] for x in out]
 
 
 def _who(c: str, cm: dict[str, Any]) -> str:
@@ -453,9 +484,12 @@ def _who(c: str, cm: dict[str, Any]) -> str:
 
 
 def line(c: str, cm: dict[str, Any]) -> str:
-    """One comment as the tools read it: `comment <id> on <ref> · <who> · <text>`."""
-    text = _collapse(cite.canon_text(str(cm.get("text") or "")))
-    return f"comment {cm['id']} on {cm['ref']} · {_who(c, cm)} · {text}"
+    """One comment as the tools read it: `comment <id> on <ref> · <who> · <statement>`, then ` — <details>` on the same
+    line when it has details."""
+    note = note_of(cm)
+    text = _collapse(cite.canon_text(note["text"]))
+    details = _collapse(cite.canon_text(note["details"]))
+    return f"comment {cm['id']} on {cm['ref']} · {_who(c, cm)} · {text}" + (f" — {details}" if details else "")
 
 
 def lines(c: str, card: str) -> list[str]:

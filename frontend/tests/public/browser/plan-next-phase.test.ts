@@ -1,10 +1,10 @@
-// The next phase's plan and a long comment, in a real browser with thimble's own stylesheets and the real Canvas. The
-// frame "Your work" starts collapsed (no frame kept open), holding the finished build plan and a check's comment of
-// several sentences on it. The comment shows four lines of its body at rest, with its code spans as code, and all of
-// it once a click makes it active; Fit takes the comment in with the cards; and when main adds the run plan that
-// follows the build plan (a `cell` record, then GET /canvas again), the frame opens so the run plan shows below it.
-// Live check plan-cards: the next plan sat under the finished one in a collapsed frame, long comments stood far below
-// their steps, Fit cut them off, and the comments showed their backticks.
+// The next phase's plan and a comment with long details, in a real browser with thimble's own stylesheets and the real
+// Canvas. The frame "Your work" starts collapsed (the analyst shut it, so the browser keeps it shut), holding the
+// finished build plan and a check's comment on it. The comment shows its statement at rest, with its code spans as
+// code, and its details once a click makes it active; Fit takes the comment in with the cards; and when main adds the
+// run plan that follows the build plan (a `cell` record, then GET /canvas again), the frame opens so the run plan shows
+// below it. Live check plan-cards: the next plan sat under the finished one in a collapsed frame, long comments stood far
+// below their steps, Fit cut them off, and the comments showed their backticks.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -29,9 +29,9 @@ const BUILD = plan(
 )
 const RUN = plan('run1', 'Plan: run the experiment', [step('s1', 'Run the emergent condition: 48 agents, 2 hours', ['runs/emergent/']), step('s2', 'Compare the conditions', ['results/'])], 'build1')
 const canvas = { groups: [{ id: 'g', title: 'Your work', parent: null, kind: 'sequence', anchor: null, chat: null, role: 'analyst' }], cells: [BUILD] as unknown[] }
-const BODY =
-  'Most pandas PRs live on contributors’ forks, so a clone of pandas-dev/pandas has none of their branches. Fetch them as `refs/pull/<n>/head`, or the forge will have PRs with no code behind them. The existing test only covers a PR an agent opened. Block approval from anyone who pushed commits to the PR, since the imported PRs were opened by upstream people and an agent who pushed a fix could approve its own work.'
-const COMMENTS = [{ id: 'k1', card: 'build1', step: 's1', n: 1, ref: 'card:build1#step-1', check: 'you-should-know', run: 'r1', author: 'check', tag: 'You should know', title: "Cloning every branch won't get the open PRs' code", body: BODY, text: `You should know: cloning every branch won't get the open PRs' code. ${BODY}`, ts: '', status: 'open' }]
+const DETAILS =
+  'Most pandas PRs live on contributors’ forks, so a clone of pandas-dev/pandas has none of their branches. The existing test only covers a PR an agent opened. Block approval from anyone who pushed commits to the PR, since the imported PRs were opened by upstream people and an agent who pushed a fix could approve its own work.'
+const COMMENTS = [{ id: 'k1', card: 'build1', step: 's1', n: 1, ref: 'card:build1#step-1', check: 'you-should-know', run: 'r1', author: 'check', text: "Cloning every branch won't get the open PRs' code: fetch them as `refs/pull/<n>/head`.", details: DETAILS, ts: '', status: 'open' }]
 const YSK = { id: 'you-should-know', name: 'You should know', prompt: 'Leave a comment…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: {}, covers: ['documents', 'cards'] }
 
 beforeAll(async () => {
@@ -62,6 +62,8 @@ beforeAll(async () => {
     return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root" style="position:absolute;inset:0;display:flex"></div></body></html>' })
   })
   await page.goto(`${ORIGIN}/`)
+  // every frame shut, as the analyst left them (with nothing kept, Your work would open on the first read)
+  await page.evaluate(() => localStorage.setItem('thimble:w:canvas-open', JSON.stringify([])))
   await page.addScriptTag({ path: script })
   await page.waitForSelector('[data-cell="build1"] [data-anchor="card:build1#step-1"]')
   await page.waitForSelector('[data-canvas-comment="k1"]')
@@ -79,15 +81,17 @@ const lines = (sel: string) =>
     return Math.round(el.offsetHeight / parseFloat(getComputedStyle(el).lineHeight))
   }, sel)
 
-test('a long comment shows four lines of its body at rest, its code spans as code, and all of it when active', async () => {
-  assert.equal(await lines('[data-canvas-comment="k1"] .ccm-text'), 4)
-  assert.deepEqual(await page.$$eval('[data-canvas-comment="k1"] .ccm-text code', (els) => els.map((e) => e.textContent)), ['refs/pull/<n>/head'])
-  assert.ok(!(await page.textContent('[data-canvas-comment="k1"] .ccm-text'))!.includes('`'), 'no backticks show')
-  await page.click('[data-canvas-comment="k1"] .ccm-title')
-  await page.waitForSelector('[data-canvas-comment="k1"].is-active')
-  assert.ok((await lines('[data-canvas-comment="k1"] .ccm-text')) > 4, 'the active comment shows its whole body')
-  await page.mouse.click(5, 450) // a click on the bare board lets it go
-  await page.waitForSelector('[data-canvas-comment="k1"]:not(.is-active)')
+test('a comment shows its statement at rest, its code spans as code, and its details when active', async () => {
+  assert.ok((await lines('[data-canvas-comment="k1"] .wu-cm-statement')) <= 4, 'the statement is short')
+  assert.deepEqual(await page.$$eval('[data-canvas-comment="k1"] .wu-cm-statement code', (els) => els.map((e) => e.textContent)), ['refs/pull/<n>/head'])
+  assert.ok(!(await page.textContent('[data-canvas-comment="k1"] .wu-cm-statement'))!.includes('`'), 'no backticks show')
+  assert.equal(await page.$('[data-canvas-comment="k1"] .wu-cm-details'), null, 'the details wait')
+  await page.click('[data-canvas-comment="k1"] .wu-cm-statement')
+  await page.waitForSelector('[data-canvas-comment="k1"].wu-cm-active')
+  assert.ok((await lines('[data-canvas-comment="k1"] .wu-cm-details .wu-cm-md')) > 4, 'the active comment shows all of its details')
+  await page.mouse.click(5, 450) // a click on the bare board lets it go, and its details fold again
+  await page.waitForSelector('[data-canvas-comment="k1"]:not(.wu-cm-active)')
+  assert.equal(await page.$('[data-canvas-comment="k1"] .wu-cm-details'), null)
 })
 
 test('Fit takes the comment in with the cards', async () => {

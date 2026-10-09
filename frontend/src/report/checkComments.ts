@@ -17,10 +17,6 @@ export const TAG_PREFIX = 'tag:'
 export const CLAUDE_AUTHOR = 'claude'
 /** The cards as a check's run target, beside the documents' slugs (backend checks.CANVAS). */
 export const CANVAS = '@canvas'
-/** The tags a comment can open with (backend canvas_comments.TAGS): a decision Claude made or a result that may be
- * off, and how something works that matters. */
-export const HEADS_UP = 'Heads up'
-export const YOU_SHOULD_KNOW = 'You should know'
 
 /** What the pane, the tints and the margin read of a check. */
 export type CheckInfo = Pick<Check, 'id' | 'name' | 'colour'>
@@ -43,21 +39,15 @@ export interface DocComment {
   evidence: string[]
   /** the citation check's tag, which is no comment: nothing to resolve */
   tag: boolean
-  /** "Heads up" or "You should know" when the comment opens with one, with its title and the rest as its body */
-  noteTag?: string | null
-  title?: string | null
-  body?: string | null
+  /** what supports the statement (`text`), shown on request (backend canvas_comments.note_of) */
+  details?: string
 }
 
-/** What a comment card shows: its tag, its bold title and its sentences; a comment with no tag shows its text alone. */
-export function noteParts(c: { tag?: unknown; noteTag?: string | null; title?: string | null; body?: string | null; text: string }): { tag: string | null; title: string | null; body: string } {
-  const tag = c.noteTag ?? (typeof c.tag === 'string' ? c.tag : null)
-  if (!tag) return { tag: null, title: null, body: c.text }
-  return { tag, title: c.title || null, body: c.title ? (c.body ?? '') : (c.body ?? c.text) }
+/** The refs a comment cites that its details do not show as chips already, such as those its statement's citations,
+ * flattened for reading, left in its evidence. */
+export function extraEvidence(evidence: readonly string[], details: string): string[] {
+  return evidence.filter((r) => !details.includes(r))
 }
-
-/** Whether Know it fits a comment: one with a tag, which says how something works or what Claude decided. */
-export const knowable = (c: { tag?: unknown; noteTag?: string | null }): boolean => !!(c.noteTag ?? (typeof c.tag === 'string' ? c.tag : null))
 
 /** The refs a check's comment rests on, from its `evidence` (refs joined by spaces), each once, without the punctuation
  * a ref can carry from the prose it was cut from. */
@@ -89,12 +79,11 @@ export function openComments(comments: readonly WriteupComment[] | undefined, se
     const check = commentCheck(cm)
     if (check === UNVERIFIED) marked.add(sid)
     const span = cm.paragraph ? [...(paragraphs.get(sid) ?? [sid])] : [sid]
-    const noteTag = cm.tag === HEADS_UP || cm.tag === YOU_SHOULD_KNOW ? cm.tag : null
-    out.push({ id: cm.id, sid, span, check, text, author: cm.author, evidence: evidenceRefs(cm.evidence), tag: false, ...(noteTag ? { noteTag, title: cm.title ?? null, body: cm.body ?? null } : {}) })
+    out.push({ id: cm.id, sid, span, check, text, author: cm.author, evidence: evidenceRefs(cm.evidence), tag: false, details: String(cm.details ?? '').trim() })
   }
   for (const s of sentences) {
     if (!(s.tags ?? []).includes('unverified') || marked.has(s.id)) continue
-    out.push({ id: TAG_PREFIX + s.id, sid: s.id, span: [s.id], check: UNVERIFIED, text: s.tag_notes?.unverified?.trim() || 'Not checked', author: 'check', evidence: [], tag: true })
+    out.push({ id: TAG_PREFIX + s.id, sid: s.id, span: [s.id], check: UNVERIFIED, text: s.tag_notes?.unverified?.trim() || 'Not checked', author: 'check', evidence: [], tag: true, details: '' })
   }
   if (!order.length) return out
   const rank = new Map(order.map((id, i) => [id, i]))

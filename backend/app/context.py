@@ -582,6 +582,8 @@ def _comment_lines(c: str, doc: dict[str, Any]) -> list[str]:
     for cm in report_types.anchored_open_comments(doc):
         who = names.get(str(cm.get("check") or ""), str(cm.get("check") or "")) if cm.get("check") else str(cm.get("author") or report_types.ANALYST)
         text = " ".join(cite.canon_text(str(cm.get("text") or "")).split())
+        details = " ".join(cite.canon_text(str(cm.get("details") or "")).split())
+        text += f" — {details}" if details else ""
         if len(text) > COMMENT_CHARS:
             text = text[: COMMENT_CHARS - 1] + "…"
         out.append(f"comment on #{cm.get('sentence_id')} · {who} · {text}")

@@ -169,6 +169,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const [missing, setMissing] = useState(false)
   const openKey = storageKey(ws, 'canvas-open')
   const [open, setOpenState] = useState<ReadonlySet<string>>(() => new Set(readStorage<string[]>(openKey, [])))
+  // no frame kept open or shut yet in this browser: the analyst's own frame, Your work, opens on the first read
+  const firstOpen = useRef(readStorage<string[] | null>(openKey, null) == null)
   // the card filter as the analyst sets it, shown at once; the server's canvas filter holds it (filters, loadFilters)
   const [cardFilter, setCardFilterState] = useState<CardFilter>(NO_FILTER)
   const viewKey = storageKey(ws, 'canvas-view')
@@ -201,7 +203,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const notes = useCanvasComments(ws)
   const vp = useRef<HTMLDivElement>(null)
 
-  useEffect(() => setOpenState(new Set(readStorage<string[]>(openKey, []))), [openKey])
+  useEffect(() => {
+    setOpenState(new Set(readStorage<string[]>(openKey, [])))
+    firstOpen.current = readStorage<string[] | null>(openKey, null) == null
+  }, [openKey])
   useEffect(() => {
     const kept = readView(viewKey)
     placed.current = kept != null
@@ -387,6 +392,13 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   useEffect(() => {
     drawnCells.current = null
   }, [ws])
+  useEffect(() => {
+    if (!data || !firstOpen.current) return
+    const own = analystGroup(data.groups)
+    if (!own) return
+    firstOpen.current = false
+    setOpen((cur) => (cur.has(own.id) ? cur : new Set([...cur, own.id])))
+  }, [data, setOpen])
   useEffect(() => {
     if (!data || !board) return
     const fresh = newPlans(data.cells, drawnCells.current)

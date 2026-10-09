@@ -3,11 +3,11 @@
 // and the Comments pane's rows per surface (src/report/Checks.tsx CheckRows, src/report/checkComments.ts): a comment
 // sits right of its card's outermost frame at its card's top, or at its step's row; the comments of one column stack
 // without overlapping; a comment hides with its check, its card's frame collapsed or its card filtered out; a check's
-// rows show where it comments (the documents, the cards), each with its count on that surface; a tagged comment shows
-// its tag, its title and the rest.
+// rows show where it comments (the documents, the cards), each with its count on that surface. What a comment card
+// shows is comment-card.test.tsx.
 import { afterEach, describe, expect, test } from 'vitest'
 import { CheckRows, type Checks } from '../../src/report/Checks.tsx'
-import { CANVAS, checksFor, coversSurface, knowable, noteParts } from '../../src/report/checkComments.ts'
+import { CANVAS, checksFor, coversSurface } from '../../src/report/checkComments.ts'
 import { shownCanvasComments } from '../../src/canvas/CommentLayer.tsx'
 import { boardOf, COMMENT_GAP_X, COMMENT_GAP_Y, COMMENT_LIFT, commentPlaces, layoutBoard, rootFrameOf } from '../../src/canvas/layout.ts'
 import type { CanvasComment, CanvasResponse, Cell, Check, Group } from '../../src/lib/types.ts'
@@ -17,7 +17,7 @@ afterEach(unmountAll)
 
 const group = (id: string, over: Partial<Group> = {}): Group => ({ id, title: id, parent: null, kind: 'sequence', anchor: null, chat: null, ...over }) as Group
 const cell = (id: string, notebook: string): Cell => ({ id, notebook, kind: 'note', title: id, takeaway: '' }) as unknown as Cell
-const comment = (id: string, card: string, over: Partial<CanvasComment> = {}): CanvasComment => ({ id, card, step: null, n: null, ref: `card:${card}`, check: 'ysk', run: 'r1', author: 'check', tag: 'Heads up', title: 'A title', body: 'A sentence.', text: 'Heads up: a title. A sentence.', ts: '', status: 'open', ...over })
+const comment = (id: string, card: string, over: Partial<CanvasComment> = {}): CanvasComment => ({ id, card, step: null, n: null, ref: `card:${card}`, check: 'ysk', run: 'r1', author: 'check', text: 'A statement.', details: 'A sentence.', ts: '', status: 'open', ...over })
 
 // a root frame `g` holding the plan card `p` and a nested frame `n` holding the card `t`, and a loose card `l`
 const data = { groups: [group('g'), group('n', { parent: 'g' }), group('loose', { kind: 'loose' })], cells: [cell('p', 'g'), cell('t', 'n'), { ...cell('l', 'loose'), pos: { x: 2000, y: 100 } }] } as unknown as CanvasResponse
@@ -85,16 +85,6 @@ describe('where the comments beside the cards sit', () => {
     expect(shownCanvasComments(list, new Set(['ysk']), drawn, null).map((c) => c.id)).toEqual(['a', 'd', 'e'])
     expect(shownCanvasComments(list, new Set(['ysk']), drawn, new Set(['p'])).map((c) => c.id)).toEqual(['a'])
     expect(shownCanvasComments(list, new Set(), drawn, null).map((c) => c.id)).toEqual(['d'])
-  })
-})
-
-describe("a comment's words", () => {
-  test('a tagged comment shows its tag, its title and the rest; one with no tag shows its text', () => {
-    expect(noteParts(comment('a', 'p'))).toEqual({ tag: 'Heads up', title: 'A title', body: 'A sentence.' })
-    expect(noteParts({ text: 'No card shows this.', tag: false })).toEqual({ tag: null, title: null, body: 'No card shows this.' })
-    expect(noteParts({ text: 'You should know: x', noteTag: 'You should know', title: null, body: 'x' })).toEqual({ tag: 'You should know', title: null, body: 'x' })
-    expect(knowable(comment('a', 'p'))).toBe(true)
-    expect(knowable({ tag: true })).toBe(false)
   })
 })
 

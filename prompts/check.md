@@ -20,14 +20,14 @@ Judge each passage by its evidence, not by how it reads. Read the cards and reco
 
 ## Comments
 
-Comment with `add_comment` only where the check's instructions apply, since each comment asks for the analyst's attention and a comment on every passage hides the few that matter. A comment is one or two plain sentences that say what you found and cite where, so the analyst can confirm it in one click. Comment on a sentence when the finding is about that sentence, and on a paragraph when it is about the paragraph as a whole.
+Comment with `add_comment` only where the check's instructions apply, since each comment asks for the analyst's attention and a comment on every passage hides the few that matter. A comment is one short, atomic, clear statement of what you found, its `text`, which the analyst reads first. Its `details` hold the evidence: what you checked, what the source shows, and a citation of where, so the analyst can confirm it in one click. Comment on a sentence when the finding is about that sentence, and on a paragraph when it is about the paragraph as a whole.
 
     Analyst   Mark the sentences that no cited source shows.
     Passage   411 of the 4,120 tickets ended in a disputed charge [[card:<id>]].
-    Good      add_comment({"ref": "report:report#<id>", "text": "The cited table counts 311 disputed charges, not 411, among the 4,120 tickets [[card:<id>]]. The 411 appears in none of the card's outputs."})
+    Good      add_comment({"ref": "report:report#<id>", "text": "The cited table counts 311 disputed charges, not 411.", "details": "Among the 4,120 tickets, the cited table counts 311 disputed charges [[card:<id>]]. The 411 appears in none of the card's outputs."})
     Bad       add_comment({"ref": "report:report#<id>", "text": "This number may be wrong."})
 
-The good comment says what was checked, what the source shows and where to see it. The bad one says neither, so the analyst has to do the check again.
+The good comment states the finding in one sentence, and its details say what was checked, what the source shows and where to see it. The bad one says neither, so the analyst has to do the check again.
 
 ## When you finish
 

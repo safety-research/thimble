@@ -2,7 +2,7 @@
 // holding a plan card and a table card in the analyst's frame, its comments read from GET /canvas/comments
 // (src/canvas/CommentLayer.tsx) and its checks from GET /checks. Each comment sits right of the frame, the one on a step
 // level with that step's row (`[data-anchor="card:<id>#step-<n>"]`, as a plan card draws its steps) and the others level
-// with their card's top, none overlapping; ✓ (Done) resolves one through POST /canvas/comments/{id}/resolve and it goes;
+// with their card's top, none overlapping, each its check's name and its statement; ✓ (Done) resolves one through POST /canvas/comments/{id}/resolve and it goes;
 // Know it does the same with `how: known`. Comments in the top bar lists the check that covers the cards, with its count
 // of open comments, and its square turns it off and on, which hides and shows its comments.
 import assert from 'node:assert/strict'
@@ -24,11 +24,11 @@ const CANVAS = {
     cell('box1', 'What can an agent do in its container?', 'Agents can install from PyPI and conda but cannot browse the web.'),
   ],
 }
-const note = (id: string, card: string, n: number | null, tag: string, title: string, body: string) => ({ id, card, step: n == null ? null : `s${n}`, n, ref: n == null ? `card:${card}` : `card:${card}#step-${n}`, check: 'you-should-know', run: 'r1', author: 'check', tag, title, body, text: `${tag}: ${title}. ${body}`, ts: '', status: 'open' })
+const note = (id: string, card: string, n: number | null, text: string, details: string) => ({ id, card, step: n == null ? null : `s${n}`, n, ref: n == null ? `card:${card}` : `card:${card}#step-${n}`, check: 'you-should-know', run: 'r1', author: 'check', text, details, ts: '', status: 'open' })
 let COMMENTS = [
-  note('k1', 'plan1', 4, 'Heads up', 'Blocking the web also blocks GitHub', 'The pandas build downloads two of its libraries from GitHub, not PyPI. Unless they are baked into the image, the pilot will fail.'),
-  note('k2', 'plan1', null, 'You should know', 'The pilot only tests the emergent prompt', "The manager agent's prompt runs for the first time in the full run."),
-  note('k3', 'box1', null, 'You should know', 'Each agent builds pandas from source on 1 CPU', 'A build takes about a minute; 48 agents at once can slow the machine.'),
+  note('k1', 'plan1', 4, 'Blocking the web also blocks GitHub.', 'The pandas build downloads two of its libraries from GitHub, not PyPI. Unless they are baked into the image, the pilot will fail.'),
+  note('k2', 'plan1', null, 'The pilot only tests the emergent prompt.', "The manager agent's prompt runs for the first time in the full run."),
+  note('k3', 'box1', null, 'Each agent builds pandas from source on 1 CPU.', 'A build takes about a minute; 48 agents at once can slow the machine.'),
 ]
 const run = { run: 'r1', status: 'done', chat: '', started: '', covered: [], seen: [], comments: 3, summary: '' }
 let YSK = { id: 'you-should-know', name: 'You should know', prompt: 'Leave a comment…', colour: 2, shown: true, builtin: true, created_by: 'thimble', ts: '', version: 1, runs: { '@canvas': run }, covers: ['documents', 'cards'] }
@@ -137,8 +137,11 @@ test('each comment sits right of the frame, level with its step row or its card,
   for (let i = 1; i < all.length; i++) assert.ok(all[i].top >= all[i - 1].bottom, `no overlap: ${JSON.stringify(all)}`)
   // a hairline runs from each card's edge to its comment
   assert.equal(await page.evaluate(() => document.querySelectorAll('.ccm-lines path').length), 3)
-  const text = await page.evaluate(() => document.querySelector('[data-canvas-comment="k1"]')!.textContent)
-  assert.ok(text!.includes('Claude') && text!.includes('Heads up') && text!.includes('Blocking the web also blocks GitHub'), text!)
+  // a comment's header is its check's name alone, and it shows its statement; its details wait for its chevron
+  const head = await page.textContent('[data-canvas-comment="k1"] .wu-cm-head')
+  assert.ok(head!.includes('You should know') && !head!.includes('Claude') && !head!.includes('Heads up'), head!)
+  assert.equal(await page.textContent('[data-canvas-comment="k1"] .wu-cm-statement'), 'Blocking the web also blocks GitHub.')
+  assert.ok(!(await page.textContent('[data-canvas-comment="k1"]'))!.includes('baked into the image'), 'the details stay folded')
 })
 
 test('Comments in the top bar lists the check over the cards with its count, and its square turns it off and on', async () => {
@@ -160,11 +163,11 @@ test('Comments in the top bar lists the check over the cards with its count, and
 
 test('✓ resolves a comment, which goes, and Know it resolves one as known', async () => {
   await page.locator('[data-canvas-comment="k2"]').hover()
-  await page.locator('[data-canvas-comment="k2"] .ccm-done').click()
+  await page.locator('[data-canvas-comment="k2"] .wu-cm-resolve').click()
   await page.waitForFunction(() => !document.querySelector('[data-canvas-comment="k2"]'))
   assert.deepEqual(resolved, [{ id: 'k2', how: 'done' }])
   await page.locator('[data-canvas-comment="k3"]').hover()
-  await page.locator('[data-canvas-comment="k3"] .ccm-know').click()
+  await page.locator('[data-canvas-comment="k3"] .wu-cm-know').click()
   await page.waitForFunction(() => !document.querySelector('[data-canvas-comment="k3"]'))
   assert.deepEqual(resolved.at(-1), { id: 'k3', how: 'known' })
   await page.waitForTimeout(400)

@@ -52,10 +52,8 @@ let COMMENTS = [
     check: 'you-should-know',
     run: 'r1',
     author: 'check',
-    tag: 'Heads up',
-    title: "Only the versions on pandas' main branch are in the image",
-    body: 'PR branches that pin other versions of fast_float or xsimd will still fail to build.',
-    text: "Heads up: only the versions on pandas' main branch are in the image. PR branches that pin other versions of fast_float or xsimd will still fail to build.",
+    text: "Only the versions on pandas' main branch are in the image.",
+    details: 'PR branches that pin other versions of fast_float or xsimd will still fail to build.',
     ts: '',
     status: 'open',
   },
@@ -147,7 +145,7 @@ test('the comment on step 2 sits beside the frame, level with step 2, and stays 
   const before = await levelWithStep2('before the live rows')
   assert.ok(before.k1.left >= frame.right + 10 * s && before.k1.left <= frame.right + 26 * s, `beside the frame: ${before.k1.left} vs ${frame.right}`)
   const text = await page.evaluate(() => document.querySelector('[data-canvas-comment="k1"]')!.textContent)
-  assert.ok(text!.includes('Heads up') && text!.includes("Only the versions on pandas' main branch are in the image"), text!)
+  assert.ok(text!.includes('You should know') && text!.includes("Only the versions on pandas' main branch are in the image."), text!)
   // step 1's live row arrives and pushes step 2 down; the comment moves with it
   await page.evaluate(() => (window as unknown as { releaseRuns: () => void }).releaseRuns())
   await page.waitForSelector('[data-cell="run1"] .plan-run-latest')
@@ -158,7 +156,7 @@ test('the comment on step 2 sits beside the frame, level with step 2, and stays 
 
 test('✓ resolves the comment on step 2, which no longer shows', async () => {
   await page.locator('[data-canvas-comment="k1"]').hover()
-  await page.locator('[data-canvas-comment="k1"] .ccm-done').click()
+  await page.locator('[data-canvas-comment="k1"] .wu-cm-resolve').click()
   await page.waitForFunction(() => !document.querySelector('[data-canvas-comment="k1"]'))
   assert.deepEqual(resolved, [{ id: 'k1', how: 'done' }])
   // a later read of the comments (the stream's next record) does not bring it back

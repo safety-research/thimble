@@ -1,21 +1,18 @@
 // The comments beside the cards, on the board's plane: each open comment (backend canvas_comments.py) whose check is on,
 // or main's own, beside its card, aligned with the card's top or with the row of the plan step it is about
 // (`[data-anchor="card:<id>#step-<n>"]`), outside the card's outermost frame, stacked so none overlap (layout.ts
-// commentPlaces), with a hairline from the card's edge to it. A comment shows Claude and its tag (Heads up, You should
-// know) or its check's name, its title in bold and one or two sentences, four lines of them until it is active. Done (✓)
-// and Know it resolve it, which hides it. A click makes it active and shows a field whose text opens a thread on the
-// card with the comment as context. A comment hides with its check, when its card is not drawn (a collapsed frame) or
-// when the filters leave its card out. The box the comments cover goes to the canvas, whose Fit and minimap take it in.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
-import { TextArea } from '../components/Field'
-import { api } from '../lib/api'
+// commentPlaces), with a hairline from the card's edge to it. Each is the comment card the Report's margin draws too
+// (report/CommentCard.tsx): its check's name and its statement, its details on request, Ask, Know it and ✓ (Done), and
+// a thread for Ask anchored to its card or step. A comment hides with its check, when its card is not drawn (a
+// collapsed frame) or when the filters leave its card out. The box the comments cover goes to the canvas, whose Fit and
+// minimap take it in.
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { CanvasComment } from '../lib/types'
-import { knowable, noteParts, NOTE_COLOR, type CheckLook } from '../report/checkComments'
+import { evidenceRefs, type CheckLook } from '../report/checkComments'
+import { CommentCard } from '../report/CommentCard'
 import { canvasCommentsApi, type ResolveHow } from '../report/commentsApi'
-import { noteText } from '../report/NoteText'
-import { Glyph, IconButton } from '../report/icons'
 import { COMMENT_LIFT, COMMENT_STEP_LIFT, COMMENT_W, commentPlaces, extentOf, type Board, type CommentPlace, type CommentSpot, type Layout, type Rect } from './layout'
 
 const REFETCH_DEBOUNCE_MS = 200
@@ -161,119 +158,29 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
           return <path key={c.id} d={`M${p.ax} ${p.ay + 13}H${mid}V${head}H${p.x}`} />
         })}
       </svg>
-      {comments.map((c) => (
-        <CommentCard
-          key={c.id}
-          ws={ws}
-          comment={c}
-          look={look}
-          place={places.get(c.id)}
-          active={active === c.id}
-          cardRef={(el) => {
-            if (el) els.current.set(c.id, el)
-            else els.current.delete(c.id)
-          }}
-          onActivate={() => setActive(c.id)}
-          onResolve={(how) => onResolve(c, how)}
-          titleOf={titleOf}
-        />
-      ))}
+      {comments.map((c) => {
+        const place = places.get(c.id)
+        return (
+          <CommentCard
+            key={c.id}
+            ws={ws}
+            comment={{ id: c.id, check: c.check, author: c.author, text: c.text, details: c.details ?? '', evidence: evidenceRefs(c.evidence) }}
+            look={look}
+            active={active === c.id}
+            className="ccm"
+            style={{ left: place?.x ?? 0, top: place?.y ?? 0, width: COMMENT_W, visibility: place ? undefined : 'hidden' }}
+            attrs={{ 'data-canvas-comment': c.id, 'data-comment-ref': c.ref }}
+            onMouseDown={(e) => e.stopPropagation()}
+            cardRef={(el) => {
+              if (el) els.current.set(c.id, el)
+              else els.current.delete(c.id)
+            }}
+            onActivate={() => setActive(c.id)}
+            onResolve={(how) => onResolve(c, how)}
+            thread={{ anchor: c.ref, passage: titleOf(c.card), where: c.n != null ? `step ${c.n}` : undefined, surface: 'canvas' }}
+          />
+        )
+      })}
     </>
-  )
-}
-
-interface CardProps {
-  ws: string
-  comment: CanvasComment
-  look: CheckLook
-  place: CommentPlace | undefined
-  active: boolean
-  cardRef: (el: HTMLDivElement | null) => void
-  onActivate: () => void
-  onResolve: (how: ResolveHow) => Promise<void>
-  titleOf: (card: string) => string
-}
-
-function CommentCard({ ws, comment, look, place, active, cardRef, onActivate, onResolve, titleOf }: CardProps) {
-  const [busy, setBusy] = useState(false)
-  const parts = noteParts(comment)
-  const name = parts.tag || comment.check == null ? 'Claude' : look.name(comment.check)
-  const colour = comment.check == null ? NOTE_COLOR : look.colour(comment.check)
-  const act = (how: ResolveHow) => (e: MouseEvent) => {
-    e.stopPropagation()
-    setBusy(true)
-    void onResolve(how).finally(() => setBusy(false))
-  }
-  return (
-    <div
-      ref={cardRef}
-      className={`ccm${active ? ' is-active' : ''}`}
-      style={{ left: place?.x ?? 0, top: place?.y ?? 0, width: COMMENT_W, visibility: place ? undefined : 'hidden' }}
-      data-canvas-comment={comment.id}
-      data-comment-ref={comment.ref}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={onActivate}
-    >
-      <div className="ccm-head">
-        <span className="ccm-sq" style={{ background: colour }} />
-        <span className="ccm-name">{name}</span>
-        {parts.tag ? (
-          <span className="ccm-tag" data-tag={parts.tag}>
-            {parts.tag}
-          </span>
-        ) : comment.check == null ? null : (
-          <span className="ccm-meta">check</span>
-        )}
-        {knowable(comment) && (
-          <button type="button" className="ccm-know" disabled={busy} onClick={act('known')}>
-            Know it
-          </button>
-        )}
-        <IconButton label="Done" className="ccm-done" disabled={busy} onClick={act('done')}>
-          <Glyph name="check" size={13} strokeWidth={2} />
-        </IconButton>
-      </div>
-      {parts.title && <div className="ccm-title">{noteText(parts.title)}</div>}
-      {parts.body && <div className="ccm-text">{noteText(parts.body)}</div>}
-      {active && <Reply ws={ws} comment={comment} name={name} titleOf={titleOf} />}
-    </div>
-  )
-}
-
-/** The active comment's field: its text goes to Thimble as the first message of a thread on the comment's card or step. */
-function Reply({ ws, comment, name, titleOf }: { ws: string; comment: CanvasComment; name: string; titleOf: (card: string) => string }) {
-  const [text, setText] = useState('')
-  const [busy, setBusy] = useState(false)
-  const field = useRef<HTMLTextAreaElement | null>(null)
-  useEffect(() => field.current?.focus({ preventScroll: true }), [])
-  const send = async () => {
-    const msg = text.trim()
-    if (!msg || busy) return
-    setBusy(true)
-    const anchor = `card:${comment.card}`
-    const who = comment.check != null && !comment.tag ? `The comment of the check “${name}”` : 'Claude’s comment'
-    const where = comment.n != null ? ` (on step ${comment.n})` : ''
-    try {
-      const meta = await api.createThread(ws, { anchor, anchor_text: `${titleOf(comment.card)}\n\n${who}${where}: ${comment.text}`, text: msg })
-      track('thread-open', { target: comment.ref, detail: { from: 'canvas-comment', comment: comment.id } })
-      bus.emit('openChat', { chatId: meta.id })
-      setText('')
-    } catch (e) {
-      bus.emit('toast', { text: `Could not open a thread. ${(e as Error).message}`, kind: 'error' })
-    } finally {
-      setBusy(false)
-    }
-  }
-  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    e.stopPropagation()
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      void send()
-    }
-  }
-  return (
-    <div className="ccm-reply" onClick={(e) => e.stopPropagation()}>
-      <TextArea ref={field} bare block autoGrow rows={1} maxHeight={120} value={text} onChange={setText} onKeyDown={onKey} disabled={busy} placeholder="Reply, or ask Thimble to fix…" aria-label="Reply" />
-    </div>
   )
 }

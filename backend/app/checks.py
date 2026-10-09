@@ -28,9 +28,9 @@ supersedes the check's earlier open comments on those passages and records their
 The cards. A check `covers` the documents, the cards or both (COVERS; the built-ins say so in their frontmatter, a new
 check covers the documents unless made for the cards). The cards are one more run target beside the documents' slugs,
 CANVAS (`@canvas`), whose passages are canvas_comments.passages: each card of the analyst's and the threads' groups and
-each step of a plan card. Its comments are canvas_comments' store, and Done or Know it resolves them; the titles marked
-Know it are listed in each run's task (`## check-known`), on a document as on the cards, so a run never raises them
-again. Main's turn end starts each shown check that covers the cards, a follow-on start (main_turn_ended), on the cards
+each step of a plan card. Its comments are canvas_comments' store, and Done or Know it resolves them; the statements
+marked Know it are listed in each run's task (`## check-known`), on a document as on the cards, so a run never raises
+them again. Main's turn end starts each shown check that covers the cards, a follow-on start (main_turn_ended), on the cards
 that changed since its last run there and that it has not seen; Run on its row in the canvas's Comments pane and main's
 run_check with `on: cards` start one too.
 """
@@ -592,14 +592,14 @@ def _stream(c: str, cid: str, doc: str, status: str, run: str, chat: str, **extr
 
 def known_titles(c: str, cid: str) -> list[str]:
     """What the analyst marked Know it among check `cid`'s comments, on the cards and in the documents, newest first,
-    each once: a comment's title, else its text."""
+    each once: a comment's statement (canvas_comments.note_of)."""
     from . import report_types  # noqa: PLC0415
 
-    found = [(str(x.get("resolved_ts") or x.get("ts") or ""), str(x.get("title") or x.get("text") or ""))
+    found = [(str(x.get("resolved_ts") or x.get("ts") or ""), canvas_comments.note_of(x)["text"])
              for x in canvas_comments._read(c) if x.get("check") == cid and x.get("resolution") == "known"]
     for doc in _written(c):
         d = report_types.read_doc(c, investigation.MAIN, doc) or {}
-        found += [(str(x.get("resolved_ts") or x.get("ts") or ""), str(x.get("title") or x.get("text") or ""))
+        found += [(str(x.get("resolved_ts") or x.get("ts") or ""), canvas_comments.note_of(x)["text"])
                   for x in d.get("comments") or [] if isinstance(x, dict) and x.get("check") == cid
                   and x.get("resolution") == "known"]
     found.sort(reverse=True)
@@ -1261,7 +1261,7 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
 
 async def tool_add_comment(ctx: Any, args: dict[str, Any]) -> Any:
     """The `add_comment` tool. From main's shim it is a note of main's (comments.tool_add_comment); in a check's session it is
-    a comment of the run beside a passage it covers, citations flattened for reading and kept as `evidence`. A paragraph's
+    a comment of the run beside a passage it covers: its statement `text` and its `details` (note_parts). A paragraph's
     comment goes on its first sentence, marked `paragraph`."""
     from . import report, report_types  # noqa: PLC0415
 
@@ -1288,20 +1288,18 @@ async def tool_add_comment(ctx: Any, args: dict[str, Any]) -> Any:
     whole = m is not None and bool(m.group(2))  # a comment on a paragraph (`#p<id>`), which goes on its first sentence
     uid = p["anchor"] if m is None or whole else m.group(3)
     used = report_types._ids(doc)
-    from . import refs  # noqa: PLC0415
-
-    cited = list(dict.fromkeys(refs.extract_refs(text)))
-    shown = report_types.readable_ids(report.plain_text(text), cells=report_types.workspace_cell_ids(ctx.c), doc_ids=used)
+    shown, details, evidence = note_parts(ctx.c, text, args.get("details"), doc_ids=used)
     if not shown:
         return tools.err("add_comment: `text` holds nothing but citations")
     comments = doc.setdefault("comments", [])
     same = next((cm for cm in comments if isinstance(cm, dict) and cm.get("check") == act.check and cm.get("run") == act.run
                  and str(cm.get("sentence_id")) == uid and bool(cm.get("paragraph")) == whole
-                 and _collapse(cm.get("text")) == shown), None)
+                 and _collapse(cm.get("text")) == shown and canvas_comments.clean_details(cm.get("details")) == details),
+                None)
     if same is None:
         comments.append({"id": report._new_id(used), "sentence_id": uid, **({"paragraph": True} if whole else {}),
-                         "text": shown, **canvas_comments.parse_note(shown), "author": AUTHOR, "check": act.check,
-                         "run": act.run, "evidence": " ".join(cited), "ts": _now(), "status": "open",
+                         "text": shown, "details": details, "author": AUTHOR, "check": act.check, "run": act.run,
+                         "evidence": evidence, "ts": _now(), "status": "open",
                          "generation": int(doc.get("generation") or 1)})
         report_types.write_doc(ctx.c, investigation.MAIN, act.doc, doc)
         act.comments += 1
@@ -1314,14 +1312,18 @@ async def tool_add_comment(ctx: Any, args: dict[str, Any]) -> Any:
     return tools.ok(f"commented on report:{act.doc}#{uid}")
 
 
-def card_note(c: str, text: str) -> tuple[str, str]:
-    """(the text a reader sees, its citations) of a comment on a card: its [[…]] markup flattened to the values, a card
-    named by its id read as card:<id>, the refs it cites kept as evidence."""
+def note_parts(c: str, text: str, details: Any = None, doc_ids: set[str] | None = None) -> tuple[str, str, str]:
+    """(the statement a reader sees, its details, the refs both cite) of a comment: the statement's [[…]] markup
+    flattened to the values, the details' kept for the chips they show, a card named by its id read as card:<id> in
+    both, a document's own ids (`doc_ids`) dropped, and every ref cited kept as evidence."""
     from . import refs, report, report_types  # noqa: PLC0415
 
-    cited = list(dict.fromkeys(refs.extract_refs(text)))
-    shown = report_types.readable_ids(report.plain_text(text), cells=report_types.workspace_cell_ids(c))
-    return shown, " ".join(cited)
+    cells = report_types.workspace_cell_ids(c)
+    details = canvas_comments.clean_details(details)
+    cited = list(dict.fromkeys([*refs.extract_refs(text), *refs.extract_refs(details)]))
+    shown = report_types.readable_ids(report.plain_text(text), cells=cells, doc_ids=doc_ids)
+    more = report_types.readable_ids(details, cells=cells, doc_ids=doc_ids) if details else ""
+    return shown, more, " ".join(cited)
 
 
 def _add_card_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
@@ -1339,11 +1341,11 @@ def _add_card_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
     if p["ref"] not in covered and not (p["kind"] == "card" and any(q["card"] == p["card"] and q["ref"] in covered
                                                                      for q in ps)):
         return tools.err(tools.hint("add_comment-uncovered", ref=ref))
-    shown, evidence = card_note(ctx.c, text)
+    shown, details, evidence = note_parts(ctx.c, text, args.get("details"))
     if not shown:
         return tools.err("add_comment: `text` holds nothing but citations")
-    _, new = canvas_comments.add(ctx.c, card=p["card"], step=p["step"], text=shown, author=AUTHOR, check=act.check,
-                                 run=act.run, evidence=evidence, fp=p["fp"])
+    _, new = canvas_comments.add(ctx.c, card=p["card"], step=p["step"], text=shown, details=details, author=AUTHOR,
+                                 check=act.check, run=act.run, evidence=evidence, fp=p["fp"])
     if new:
         act.comments += 1
         check = read(ctx.c, act.check)

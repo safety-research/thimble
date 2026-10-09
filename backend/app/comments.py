@@ -5,9 +5,10 @@ step (`add_comment` from main's shim), a comment resolved or opened again (`reso
 A note on a card goes to the cards' comments (canvas_comments.add) with author `claude`; `resolve_comment` takes such a
 comment's id, or `card:<id>` (`#step-<n>`) for every open comment there, and `how: known` for Know it.
 
-Main's note is stored as the analyst's comments are, `{id, sentence_id, text, author: "claude", ts, status: open}`,
-with no check and no run, so no run supersedes it. A note on a paragraph goes on its first sentence marked `paragraph`.
-Its citations are flattened to their values for reading and kept as `evidence`. `resolve_comment` takes a comment's id
+Main's note is stored as the analyst's comments are, `{id, sentence_id, text, details, author: "claude", ts, status:
+open}`, with no check and no run, so no run supersedes it. A note on a paragraph goes on its first sentence marked
+`paragraph`. Its statement `text` has its citations flattened to their values for reading, its `details` keep theirs,
+and both cite into `evidence` (checks.note_parts). `resolve_comment` takes a comment's id
 or a passage's ref (every open comment on it); both it and `reopen` leave the comment in the document. `stop_check`
 sets the check's `shown` false and stops its runs; its comments stay stored. Each change emits
 `report {status: commented}` for the document it changed.
@@ -56,7 +57,7 @@ async def tool_add_comment(ctx: Any, args: dict[str, Any]) -> Any:
         return _add_comment(ctx, args)
 
 
-def _add_card_note(ctx: Any, ref: str, text: str) -> Any:
+def _add_card_note(ctx: Any, ref: str, text: str, details: Any) -> Any:
     """Main's note beside a card or a plan step of any group (canvas_comments.add, author claude)."""
     from . import canvas_comments, checks, notebook  # noqa: PLC0415
 
@@ -66,23 +67,23 @@ def _add_card_note(ctx: Any, ref: str, text: str) -> Any:
     step = next((s for s in steps if s["n"] == hit[1]), None) if hit and hit[1] is not None else None
     if hit is None or cell is None or (hit[1] is not None and step is None):
         return tools.err(tools.hint("add_comment-no-card", ref=ref))
-    shown, evidence = checks.card_note(ctx.c, text)
+    shown, more, evidence = checks.note_parts(ctx.c, text, details)
     if not shown:
         return tools.err("add_comment: `text` holds nothing but citations")
-    cm, _ = canvas_comments.add(ctx.c, card=hit[0], step=step["id"] if step else None, text=shown, author=AUTHOR,
-                                evidence=evidence)
+    cm, _ = canvas_comments.add(ctx.c, card=hit[0], step=step["id"] if step else None, text=shown, details=more,
+                                author=AUTHOR, evidence=evidence)
     return tools.ok(f"commented on {canvas_comments.step_ref(*hit)}, comment {cm['id']}")
 
 
 def _add_comment(ctx: Any, args: dict[str, Any]) -> Any:
-    from . import canvas_comments, checks, refs, report, report_types  # noqa: PLC0415
+    from . import canvas_comments, checks, report, report_types  # noqa: PLC0415
 
     ref = _clean_ref(args.get("ref"))
     text = _collapse(args.get("text"))
     if not text:
         return tools.err("add_comment: `text` is empty")
     if canvas_comments.parse_ref(ref) is not None:
-        return _add_card_note(ctx, ref, text)
+        return _add_card_note(ctx, ref, text, args.get("details"))
     m = checks._REF_RE.match(ref)
     slug = m.group(1) if m else ""
     doc = report_types.read_doc(ctx.c, investigation.MAIN, slug) if slug else None
@@ -95,18 +96,18 @@ def _add_comment(ctx: Any, args: dict[str, Any]) -> Any:
     whole = bool(m.group(2))  # a note on a paragraph (`#p<id>`), which goes on its first sentence
     uid = p["anchor"] if whole else m.group(3)
     used = report_types._ids(doc)
-    cited = list(dict.fromkeys(refs.extract_refs(text)))
-    shown = report_types.readable_ids(report.plain_text(text), cells=report_types.workspace_cell_ids(ctx.c), doc_ids=used)
+    shown, details, evidence = checks.note_parts(ctx.c, text, args.get("details"), doc_ids=used)
     if not shown:
         return tools.err("add_comment: `text` holds nothing but citations")
     comments = doc.setdefault("comments", [])
     same = next((cm for cm in comments if isinstance(cm, dict) and cm.get("author") == AUTHOR and not cm.get("check")
                  and (cm.get("status") or "open") == "open" and str(cm.get("sentence_id")) == uid
-                 and bool(cm.get("paragraph")) == whole and _collapse(cm.get("text")) == shown), None)
+                 and bool(cm.get("paragraph")) == whole and _collapse(cm.get("text")) == shown
+                 and canvas_comments.clean_details(cm.get("details")) == details), None)
     if same is None:
         same = {"id": report._new_id(used), "sentence_id": uid, **({"paragraph": True} if whole else {}), "text": shown,
-                **canvas_comments.parse_note(shown), "author": AUTHOR, "evidence": " ".join(cited), "ts": _now(),
-                "status": "open", "generation": int(doc.get("generation") or 1)}
+                "details": details, "author": AUTHOR, "evidence": evidence, "ts": _now(), "status": "open",
+                "generation": int(doc.get("generation") or 1)}
         comments.append(same)
         report_types.write_doc(ctx.c, investigation.MAIN, slug, doc)
         _emit(ctx.c, slug, f"report:{slug}#{uid}")

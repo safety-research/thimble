@@ -912,10 +912,9 @@ export interface WriteupComment {
   generation?: number | null
   section?: string | null
   proposal?: string | null
-  /** a comment that opens with "Heads up:" or "You should know:": that `tag`, the first sentence after it as `title`
-   * and the rest as `body` (backend canvas_comments.parse_note) */
-  title?: string | null
-  body?: string | null
+  /** what supports the statement `text`, shown on request: markdown whose citations show as chips (backend
+   * canvas_comments.note_of; a comment stored before it is read as its first sentence and the rest) */
+  details?: string | null
   /** why it is resolved: the analyst's Done or Know it, or superseded by a later run of its check */
   resolution?: 'done' | 'known' | 'superseded' | string | null
 }
@@ -933,10 +932,10 @@ export interface CanvasComment {
   check: string | null
   run: string | null
   author: 'check' | 'claude' | string
-  tag: 'Heads up' | 'You should know' | string | null
-  title: string | null
-  body: string | null
+  /** the statement, shown first */
   text: string
+  /** what supports it, shown on request: markdown whose citations show as chips */
+  details: string
   evidence?: string | null
   ts: string
   status: 'open' | 'dismissed' | string
