@@ -2908,7 +2908,7 @@ def terminal_checks_line() -> str:
 # free disk, who holds the port, how a session started here would hear the browser, and whether the API host answers.
 # Each reader returns a short phrase and never raises, since the doctor must print even on a broken machine.
 
-TESTED_CLAUDE_CODE = "2.1.293"  # INSTALL.md and README.md name the same version (test_cli.py)
+TESTED_CLAUDE_CODE = "2.1.295"  # INSTALL.md and README.md name the same version (test_cli.py)
 MODS_CLAUDE_CODE = "2.1.287"  # the first Claude Code that loads plugin mods, thimble's hooks module, by default
 CLAUDE_CODE_SEEN_FILE = "claude_code.json"  # in <home>: the newer Claude Codes the analyst was told about
 NODE_MIN_MAJOR = 20  # custom views are built with Node 20+ (views.py)

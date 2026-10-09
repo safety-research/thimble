@@ -26,8 +26,8 @@ def first_line(tmp_path: Path, *flags: str) -> str:
 def test_the_report_s_first_line_names_claude_code_and_flags_a_version_thimble_is_not_tested_with(tmp_path):
     assert first_line(tmp_path, "--claude-code", TESTED, "--tested-claude-code", TESTED) == (
         f"# thimble end-to-end test, Claude Code {TESTED}, the tested version")
-    assert first_line(tmp_path, "--claude-code", "2.1.295", "--tested-claude-code", TESTED) == (
-        f"# thimble end-to-end test, Claude Code 2.1.295: NOT the tested version (TESTED_CLAUDE_CODE is {TESTED})")
+    assert first_line(tmp_path, "--claude-code", "2.1.297", "--tested-claude-code", TESTED) == (
+        f"# thimble end-to-end test, Claude Code 2.1.297: NOT the tested version (TESTED_CLAUDE_CODE is {TESTED})")
     assert first_line(tmp_path, "--claude-code", "", "--tested-claude-code", TESTED) == (
         "# thimble end-to-end test, Claude Code not found")
     assert first_line(tmp_path, "--claude-code", TESTED) == (
