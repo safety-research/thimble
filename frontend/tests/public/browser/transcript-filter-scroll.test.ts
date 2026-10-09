@@ -3,8 +3,8 @@
 // in stretches where they are 50% to 99% of the records, with "user" (the tool results) turned off in Filter by once
 // the file is open, and with every value on. The records Filter by hides leave the reader short of rows, and it reads
 // on until it is full: the wheel scrolls it, a drag of the overview's frame down the file and a trackpad's flicks after
-// it move the first record in view only down the file, never back to records it passed, and the reader stays where
-// the drag lets go.
+// it move the first record in view only down the file, never back to records it passed (a sliver of the record before
+// it as the reader settles is no step back), and the reader stays where the drag lets go.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -83,23 +83,29 @@ async function open(page: Page, query: string) {
   await page.waitForTimeout(300)
 }
 
-/** The line of the first record whose bottom is below the reader's top, null when none is. */
-const firstInView = (page: Page) =>
-  page.evaluate(() => {
+/** The first record in view: its line, how many px of it show below the reader's top, and the line of the record after it;
+ * null when none is in view. */
+type At = { line: number; shows: number; next: number | null } | null
+const firstInView = (page: Page): Promise<At> =>
+  page.evaluate((sel) => {
     const body = document.querySelector<HTMLElement>('.reader-body')!
     const top = body.getBoundingClientRect().top
-    const row = [...body.querySelectorAll<HTMLElement>('.reader-record[data-line]')].find((r) => r.getBoundingClientRect().bottom > top + 1)
-    return row ? Number(row.dataset.line) : null
-  })
+    const rows = [...body.querySelectorAll<HTMLElement>(sel)]
+    const i = rows.findIndex((r) => r.getBoundingClientRect().bottom > top + 1)
+    if (i < 0) return null
+    return { line: Number(rows[i].dataset.line), shows: rows[i].getBoundingClientRect().bottom - top, next: rows[i + 1] ? Number(rows[i + 1].dataset.line) : null }
+  }, '.reader-record[data-line]')
 
-/** The first record in view every frame while `act` runs and a moment after, each change once. */
-async function watch(page: Page, act: () => Promise<void>): Promise<(number | null)[]> {
-  const seen: (number | null)[] = []
+/** The first record in view every frame while `act` runs and a moment after, each change of it once. */
+async function watch(page: Page, act: () => Promise<void>): Promise<At[]> {
+  const seen: At[] = []
+  const add = (at: At) => {
+    if (!seen.length || seen[seen.length - 1]?.line !== at?.line) seen.push(at)
+  }
   let going = true
   const loop = (async () => {
     while (going) {
-      const l = await firstInView(page)
-      if (!seen.length || seen[seen.length - 1] !== l) seen.push(l)
+      add(await firstInView(page))
       await page.waitForTimeout(16)
     }
   })()
@@ -107,17 +113,23 @@ async function watch(page: Page, act: () => Promise<void>): Promise<(number | nu
   await page.waitForTimeout(500)
   going = false
   await loop
-  const l = await firstInView(page)
-  if (seen[seen.length - 1] !== l) seen.push(l)
+  add(await firstInView(page))
   return seen
 }
 
-/** `lines` only ever go down the file, a record in view at each. */
-function onward(lines: (number | null)[], what: string) {
-  assert.ok(lines.every((l) => l != null), `${what}: a record is in view at each step: ${lines.join(' ')}`)
-  const back = lines.findIndex((l, i) => i > 0 && l! < lines[i - 1]!)
-  assert.equal(back, -1, `${what}: the first record in view went back from line ${lines[back - 1]} to ${lines[back]}: ${lines.join(' ')}`)
+/** px of the record before the first in view that may show at the reader's top as the reader settles (a height measured
+ * anew), which is no step back */
+const SLIVER_PX = 12
+const said = (seen: At[]) => seen.map((a) => (a ? `${a.line}` : 'none')).join(' ')
+/** The first record in view only ever goes down the file, a record in view at each step: a step back is at most a sliver of
+ * the record just before it. */
+function onward(seen: At[], what: string) {
+  assert.ok(seen.every((a) => a != null), `${what}: a record is in view at each step: ${said(seen)}`)
+  const back = seen.findIndex((a, i) => i > 0 && a!.line < seen[i - 1]!.line && !(a!.next === seen[i - 1]!.line && a!.shows <= SLIVER_PX))
+  assert.equal(back, -1, back < 0 ? '' : `${what}: the first record in view went back from line ${seen[back - 1]!.line} to ${seen[back]!.line} (${Math.round(seen[back]!.shows)} px of it in view): ${said(seen)}`)
 }
+const lastLine = (seen: At[]) => seen[seen.length - 1]?.line ?? 0
+const firstLine = (seen: At[]) => seen[0]?.line ?? 0
 
 for (const [name, engine] of ENGINES)
   for (const off of [true, false])
@@ -146,7 +158,7 @@ for (const [name, engine] of ENGINES)
           }
         })
         onward(wheel, 'the wheel')
-        assert.ok(wheel[wheel.length - 1]! > wheel[0]!, `the wheel scrolls the reader: ${wheel.join(' ')}`)
+        assert.ok(lastLine(wheel) > firstLine(wheel), `the wheel scrolls the reader: ${said(wheel)}`)
         // the overview's frame dragged down the file and let go
         const fr = (await page.locator('.track-frame-over').boundingBox())!
         const x = fr.x + fr.width / 2
@@ -161,7 +173,7 @@ for (const [name, engine] of ENGINES)
           await page.mouse.up()
         })
         onward(drag, 'the drag')
-        assert.ok(drag[drag.length - 1]! > 150, `the drag goes down the file: ${drag.join(' ')}`)
+        assert.ok(lastLine(drag) > 150, `the drag goes down the file: ${said(drag)}`)
         // a trackpad's flicks: quick wheel steps that die away
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
         const flicks = await watch(page, async () => {
@@ -172,7 +184,7 @@ for (const [name, engine] of ENGINES)
             }
         })
         onward(flicks, 'the flicks')
-        assert.ok(flicks[flicks.length - 1]! > flicks[0]!, `the flicks scroll on: ${flicks.join(' ')}`)
+        assert.ok(lastLine(flicks) > firstLine(flicks), `the flicks scroll on: ${said(flicks)}`)
       } finally {
         await browser.close()
       }
