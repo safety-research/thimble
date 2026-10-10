@@ -127,5 +127,14 @@ export function vegaConfig(): Record<string, unknown> {
     rule: { color: note },
     // notes and values on the marks: the annotation ink in the body face, which a dark paper lightens with the text
     text: { color: note, font, fontSize: size },
+    // the marks thimble.chart names by their job (backend kernel_thimble FAINT_STYLE and on): a box plot's values faint
+    // behind its boxes, the boxes light enough to show them, its medians in ink; areas side by side overlapping lightly.
+    // Each keeps its series or label color but the median
+    style: {
+      'thimble-faint': { opacity: 0.3 },
+      'thimble-box': { opacity: 0.55 },
+      'thimble-median': { color: ink, opacity: 1, thickness: 2 },
+      'thimble-overlap': { opacity: 0.4 },
+    },
   }
 }

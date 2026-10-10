@@ -1169,13 +1169,20 @@ CHART_ROWS_MAX = 5000  # the rows a chart draws at most; a histogram bins any nu
 BINS = 20  # the most bins a histogram makes when it picks its own step
 BINS_MAX = 200  # the most bins a histogram's given step may make
 LINE_DOTS_MAX = 30  # a line marks each value with a dot while its longest series has at most this many
-STACK_FIELD = "__thimble_stack"  # a row's group's place, which a bar's segments are stacked in
+STACK_FIELD = "__thimble_stack"  # a row's group's place, which a bar's segments or an area's series are stacked in
+BOX_MIN = 5  # a box plot draws a box for a group of at least this many values, and a group of fewer as a strip of them
+BOX_REACH = 1.5  # a box's whiskers reach the farthest values within this many box widths of it (Tukey's)
+# the marks a chart names by their job, which the theme draws (frontend lib/vizTheme vegaConfig's `style`): a box plot's
+# values faint behind its boxes, the boxes light enough to show them, its medians in ink; areas overlapping lightly
+FAINT_STYLE, BOX_STYLE, MEDIAN_STYLE, OVERLAP_STYLE = "thimble-faint", "thimble-box", "thimble-median", "thimble-overlap"
 # each kind's columns in order, how many of them it needs, and its options
 CHARTS = {
-    "bar": (("category", "value", "group"), 2, ("sort", "stack", "label", "marks")),
+    "bar": (("category", "value", "group"), 2, ("sort", "stack", "label", "marks", "interval")),
     "line": (("x", "y", "series"), 2, ("label", "marks", "panels")),
+    "area": (("x", "y", "series"), 2, ("stack", "label", "marks")),
     "scatter": (("x", "y", "group"), 2, ("label", "marks")),
-    "dots": (("x", "row", "group"), 2, ("sort", "label", "marks")),
+    "dots": (("x", "row", "group"), 2, ("sort", "label", "marks", "interval")),
+    "box": (("value", "group"), 2, ("sort", "label")),
     "histogram": (("value",), 1, ("step", "marks")),
     "heatmap": (("x", "y", "value"), 3, ("log",)),
 }
@@ -1192,27 +1199,32 @@ def _shape(kind: str) -> str:
 
 def chart(kind, data, **options):
     """Show a common chart of `data`, a DataFrame whose columns come in the kind's order and are named as the axes and
-    the legend read; a Series is its index, then its values (a histogram's, its values). Returns nothing, so the card
-    shows the chart once.
+    the legend read; a Series is its index, then its values (a histogram's, its values; a box plot's, its values, then
+    its index when that is named). Returns nothing, so the card shows the chart once.
 
-        bar        (category, value[, group])   sort, stack, label, marks
+        bar        (category, value[, group])   sort, stack, label, marks, interval
         line       (x, y[, series])             label, marks, panels
+        area       (x, y[, series])             stack, label, marks
         scatter    (x, y[, group])              label, marks
-        dots       (x, row[, group])            sort, label, marks
+        dots       (x, row[, group])            sort, label, marks, interval
+        box        (value, group)               sort, label
         histogram  (value)                      step, marks
         heatmap    (x, y, value)                log
 
-    A value, y or histogram value is a number; a line's, a scatter's and a dots chart's x is numbers or times.
-    sort    a list of the categories (bar) or rows (dots) in order, or None for the frame's order; by default the largest
-            first (bar), the earliest first (dots), a label's values in the label's order
-    stack   with a group: True stacks the groups (the default), False sets them side by side, "share" stacks each
-            category to 100%
-    label   a label's name: the group column, else the category or row column, holds its values, drawn in its colors
-            and order
-    marks   {text: x}: a line across the chart at each x, with its text
-    panels  True draws each series in a panel of its own, with its own y scale
-    step    the width of a histogram's bins; by default a round width that makes at most 20
-    log     True colors a heatmap's values on a log scale"""
+    A value, y or histogram value is a number; a line's, an area's, a scatter's and a dots chart's x is numbers or times.
+    sort      a list of the categories (bar), rows (dots) or groups (box) in order, or None for the frame's order; by
+              default the largest first (bar), the earliest first (dots), the largest median first (box), a label's
+              values in the label's order (bar, dots)
+    stack     with a group or series: True stacks them (the default), False sets bars side by side and overlaps areas
+              lightly, "share" stacks each category or x to 100%
+    label     a label's name: the group or series column, else the category or row column, holds its values, drawn in
+              its colors and, but in a box plot, its order
+    marks     {text: x}: a line across the chart at each x, with its text
+    interval  (lo, hi): the names of two more columns of the frame, the low and high ends of an interval around each
+              value or x, such as a Wilson interval's, drawn as a line in ink; a bar chart's groups go side by side
+    panels    True draws each series in a panel of its own, with its own y scale
+    step      the width of a histogram's bins; by default a round width that makes at most 20
+    log       True colors a heatmap's values on a log scale"""
     if not isinstance(kind, str) or kind not in CHARTS:
         raise ValueError(f"thimble.chart: no chart kind {kind!r}; the kinds are "
                          + "; ".join(f"{k} {_shape(k)}" for k in CHARTS))
@@ -1220,20 +1232,33 @@ def chart(kind, data, **options):
     for name in options:
         if name not in allowed:
             raise TypeError(f"thimble.chart({kind!r}) takes the options {', '.join(allowed)}, not {name!r}")
-    df = _chart_frame(kind, data)
+    iv = options.get("interval")
+    if iv is not None:
+        if isinstance(iv, (str, bytes, dict)) or not hasattr(iv, "__iter__") or len(iv := tuple(iv)) != 2 \
+                or not all(isinstance(c, str) for c in iv) or iv[0] == iv[1]:
+            raise ValueError(f"thimble.chart({kind!r}): `interval` is the names of the two columns that hold each value's "
+                             f"low and high ends, such as (\"lo\", \"hi\"), not {options['interval']!r}")
+        options = {**options, "interval": iv}
+    df = _chart_frame(kind, data, iv or ())
     spec = _CHART_SPECS[kind](df, options)
     _show({VEGALITE_MIME: {"$schema": VEGALITE_SCHEMA, **spec},
            "text/plain": f"thimble.chart({kind!r}): {len(df):,} rows"})
 
 
-def _chart_frame(kind: str, data):
-    """`data` as a DataFrame of named columns: a Series as its index and its values (a histogram's as its values), a
-    named index as the first columns; ValueError naming the kind's columns when their number is wrong."""
+def _chart_frame(kind: str, data, extra=()):
+    """`data` as a DataFrame of named columns: a Series as its index and its values (a histogram's as its values, a box
+    plot's as its values and then its index when that is named), a named index as the first columns; the columns that
+    `extra` names (an interval's) after the kind's own. ValueError naming the kind's columns when their number is wrong."""
     import pandas as pd
 
     if isinstance(data, pd.Series):
         data = data.to_frame(name="value" if data.name is None else data.name)
-        data = data.reset_index() if len(CHARTS[kind][0]) > 1 else data.reset_index(drop=True)
+        if kind == "box":  # its values, then its index as the groups when it is named
+            named = any(n is not None for n in data.index.names)
+            data = data.reset_index() if named else data.reset_index(drop=True)
+            data = data[[data.columns[-1], *data.columns[:-1]]]
+        else:
+            data = data.reset_index() if len(CHARTS[kind][0]) > 1 else data.reset_index(drop=True)
     elif isinstance(data, pd.DataFrame):
         if any(n is not None for n in data.index.names):
             data = data.reset_index()
@@ -1242,8 +1267,14 @@ def _chart_frame(kind: str, data):
     names = [" / ".join(str(p) for p in c if str(p)) if isinstance(c, tuple) else str(c) for c in data.columns]
     got = ", ".join(names) or "none"
     cols, need, _opts = CHARTS[kind]
-    if not need <= len(names) <= len(cols):
-        raise ValueError(f"thimble.chart({kind!r}) takes {_shape(kind)} columns, in that order; got {len(names)}: {got}")
+    for name in extra:
+        if name not in names:
+            raise ValueError(f"thimble.chart({kind!r}): `interval` names `{name}`, which the frame lacks; its columns are {got}")
+    own = [n for n in names if n not in extra]
+    if not need <= len(own) <= len(cols):
+        besides = f", beside the interval's {' and '.join(extra)}" if extra else ""
+        raise ValueError(f"thimble.chart({kind!r}) takes {_shape(kind)} columns, in that order{besides}; got {len(own)}: "
+                         + (", ".join(own) or "none"))
     if len(set(names)) < len(names):
         raise ValueError(f"thimble.chart({kind!r}): each column needs a name of its own; got {got}")
     if len(data) > CHART_ROWS_MAX and kind != "histogram":
@@ -1251,7 +1282,7 @@ def _chart_frame(kind: str, data):
                          "or bin them first")
     data = data.copy()
     data.columns = names
-    return data
+    return data[own + list(extra)] if extra else data
 
 
 def _col_kind(s) -> str:
@@ -1452,18 +1483,63 @@ def _with_marks(kind: str, spec: dict, marks, x: str, xkind: str) -> dict:
     ]}
 
 
+def _check_interval(kind: str, df, interval: tuple, val: str, at: str) -> None:
+    """ValueError when the interval's columns do not hold each value's low and high ends: numbers, the low at most the
+    high, and not every value outside them (they would be widths, not ends)."""
+    lo, hi = interval
+    for c in interval:
+        k = _col_kind(df[c])
+        if k != "number":
+            got = {"time": "times", "duration": "durations"}.get(k, k)
+            raise ValueError(f"thimble.chart({kind!r}): `interval` names the columns of each value's low and high ends, "
+                             f"numbers; `{c}` holds {got}")
+    inside = outside = 0
+    for a, v, low, high in zip(df[at].tolist(), df[val].tolist(), df[lo].tolist(), df[hi].tolist()):
+        if _missing(low) or _missing(high):
+            continue
+        if low > high:
+            raise ValueError(f"thimble.chart({kind!r}): `interval` is (low, high), and `{lo}` is above `{hi}` where "
+                             f"`{at}` is {_json_value(a)!r}")
+        if not _missing(v):
+            inside, outside = (inside + 1, outside) if low <= v <= high else (inside, outside + 1)
+    if outside and not inside:
+        raise ValueError(f"thimble.chart({kind!r}): every `{val}` lies outside its interval; `{lo}` and `{hi}` are the "
+                         "interval's low and high ends, such as a Wilson interval's, not its widths")
+
+
+def _with_interval(spec: dict, interval: tuple, title: str, ch: str, enc: dict, offset=None) -> dict:
+    """The chart as a layer under a rule from each row's low end to its high end along channel `ch`, at its place on the
+    other channel (and `offset`'s): the rule mark, which the theme draws in ink."""
+    lo, hi = interval
+    other = "y" if ch == "x" else "x"
+    rule = {ch: _enc(lo, "quantitative", title=title), f"{ch}2": {"field": _field(hi)}, other: enc[other]}
+    if offset:
+        rule[offset] = enc[offset]
+    rule["tooltip"] = enc["tooltip"]
+    data = spec.pop("data")
+    return {"data": data, "layer": [spec, {"mark": "rule", "encoding": rule}]}
+
+
 def _bar_spec(df, opts: dict) -> dict:
     kind = "bar"
-    cols = list(df.columns)
+    iv = opts.get("interval")
+    cols = [c for c in df.columns if c not in (iv or ())]
     cat, val, grp = cols[0], cols[1], cols[2] if len(cols) > 2 else None
     kinds = _chart_kinds(kind, df, number=(1,))
-    stack = opts.get("stack", True)
+    stack = opts.get("stack", not iv)
     if not (stack is True or stack is False or stack == "share"):
         raise ValueError(f"thimble.chart({kind!r}): `stack` is True, False or \"share\", not {stack!r}")
     if "stack" in opts and grp is None:
         raise ValueError(f"thimble.chart({kind!r}): `stack` stacks the groups of a third column, which this frame lacks")
     label = _label_values(kind, opts["label"], df[grp or cat], grp or cat) if opts.get("label") is not None else None
     ck = kinds[cat]
+    if iv:
+        if ck == "time":
+            raise ValueError(f"thimble.chart({kind!r}): `interval` draws around bars of text or number categories; "
+                             f"`{cat}` holds times")
+        if grp and stack is not False:
+            raise ValueError(f"thimble.chart({kind!r}): `interval` sets the groups side by side; leave out `stack`")
+        _check_interval(kind, df, iv, val, cat)
     if ck == "time" and "sort" in opts:
         raise ValueError(f"thimble.chart({kind!r}): `sort` orders text or number categories; times keep their order")
     if ck == "time" and stack is False:
@@ -1516,15 +1592,22 @@ def _bar_spec(df, opts: dict) -> dict:
         enc["color"] = _enc(cat, "nominal", sort=order, legend=None)
     enc["tooltip"] = _tooltip(df, kinds)
     spec = _unit(rows, mark, enc, **more)
+    if iv:
+        spec = _with_interval(spec, iv, val, value, enc, offset if grp else None)
     return _with_marks(kind, spec, opts["marks"], cat, ck) if opts.get("marks") is not None else spec
 
 
 def _xy_spec(kind: str, df, opts: dict) -> dict:
     """A line, a scatter or a dots chart: x numbers or times; y numbers, or a dots chart's rows; a third column's groups
     in color."""
-    cols = list(df.columns)
+    iv = opts.get("interval")
+    cols = [c for c in df.columns if c not in (iv or ())]
     x, y, grp = cols[0], cols[1], cols[2] if len(cols) > 2 else None
     kinds = _chart_kinds(kind, df, number=() if kind == "dots" else (1,), axis=(0,))
+    if iv:
+        if kinds[x] != "number":
+            raise ValueError(f"thimble.chart({kind!r}): `interval` draws around an x of numbers; `{x}` holds times")
+        _check_interval(kind, df, iv, x, y)
     on = grp or (y if kind == "dots" else None)  # the column a label colors
     if opts.get("label") is not None and on is None:
         raise ValueError(f"thimble.chart({kind!r}): `label` colors the {CHARTS[kind][0][2]} column, which this frame lacks")
@@ -1547,6 +1630,8 @@ def _xy_spec(kind: str, df, opts: dict) -> dict:
         weights = df[y] if kind == "line" else df[grp].map(lambda _v: 1)
         groups = _ordered(kind, df[grp], _ranked(df[grp], weights), label=label)
         enc["color"] = _enc(grp, "nominal", sort=groups)
+        if iv:  # each row's groups side by side on its line, so their intervals do not overprint
+            enc["yOffset"] = {"field": _field(grp), "type": "nominal", "sort": groups}
         if panels:
             enc["row"] = {"field": _field(grp), "type": "nominal", "sort": groups, "title": None}
             more["resolve"] = {"scale": {"y": "independent"}}
@@ -1559,7 +1644,113 @@ def _xy_spec(kind: str, df, opts: dict) -> dict:
     else:
         mark = "point"
     spec = _unit(rows, mark, enc, **more)
+    if iv:
+        spec = _with_interval(spec, iv, x, "x", enc, "yOffset" if grp else None)
     return _with_marks(kind, spec, opts["marks"], x, kinds[x]) if opts.get("marks") is not None else spec
+
+
+def _area_spec(df, opts: dict) -> dict:
+    """Areas over numbers or times, a third column's series stacked in the legend's order, side by side overlapping
+    lightly, or stacked to 100% of each x."""
+    kind = "area"
+    cols = list(df.columns)
+    x, y, ser = cols[0], cols[1], cols[2] if len(cols) > 2 else None
+    kinds = _chart_kinds(kind, df, number=(1,), axis=(0,))
+    stack = opts.get("stack", True)
+    if not (stack is True or stack is False or stack == "share"):
+        raise ValueError(f"thimble.chart({kind!r}): `stack` is True, False or \"share\", not {stack!r}")
+    if ser is None and ("stack" in opts or opts.get("label") is not None):
+        raise ValueError(f"thimble.chart({kind!r}): `{'stack' if 'stack' in opts else 'label'}` takes the series of a "
+                         "third column, which this frame lacks")
+    label = _label_values(kind, opts["label"], df[ser], ser) if opts.get("label") is not None else None
+    rows = _chart_rows(df, kinds)
+    enc: dict = {"x": _enc(x, "temporal" if kinds[x] == "time" else "quantitative"), "y": _enc(y, "quantitative")}
+    mark: dict = {"type": "area"}
+    more: dict = {}
+    if ser:
+        series = _ordered(kind, df[ser], _ranked(df[ser], df[y]), label=label)
+        enc["color"] = _enc(ser, "nominal", sort=series)
+        if stack is False:
+            enc["y"]["stack"] = None
+            mark["style"] = OVERLAP_STYLE
+        else:
+            if stack == "share":
+                enc["y"] = {**enc["y"], "stack": "normalize", "axis": {"format": "%"}}
+            # Vega-Lite stacks the areas by the series' names; this stacks them in the legend's order, the first lowest
+            more["transform"] = [{"calculate": f"indexof({json.dumps(series)}, datum[{json.dumps(ser)}])", "as": STACK_FIELD}]
+            enc["order"] = {"field": STACK_FIELD, "type": "quantitative"}
+    enc["tooltip"] = _tooltip(df, kinds)
+    # a dot at each value while the series are short, which also gives each value its hover tip
+    longest = int(df.groupby(ser, sort=False).size().max()) if ser and len(df) else len(df)
+    if longest <= LINE_DOTS_MAX:
+        mark["point"] = True
+    spec = _unit(rows, mark if len(mark) > 1 else "area", enc, **more)
+    return _with_marks(kind, spec, opts["marks"], x, kinds[x]) if opts.get("marks") is not None else spec
+
+
+def _num(v: float):
+    """A computed number as a chart's row holds it: whole numbers as ints, the rest without float noise."""
+    v = round(float(v), 10)
+    return int(v) if v.is_integer() else v
+
+
+def _box_spec(df, opts: dict) -> dict:
+    """A box per group lying down, from its first quartile to its third, with its median in ink and whiskers to the
+    farthest values within BOX_REACH box widths; every value a faint dot behind it, a group of fewer than BOX_MIN values
+    a strip of its dots alone. The chart's rows are each group's summary, which a takeaway cites; the dots' rows are
+    their layers' own."""
+    import pandas as pd
+
+    kind = "box"
+    val, grp = list(df.columns)
+    kinds = _chart_kinds(kind, df, number=(0,))
+    label = _label_values(kind, opts["label"], df[grp], grp) if opts.get("label") is not None else None
+    # the groups as text, as the sort and the label read them
+    values = [r for r in _chart_rows(df, {**kinds, grp: "text"}) if r[val] is not None and r[grp] is not None]
+    by: dict = {}
+    for r in values:
+        by.setdefault(json.dumps(r[grp]), (r[grp], []))[1].append(r[val])
+    names: list = []
+    for c in ("n", "low", "q1", "median", "q3", "high"):
+        names.append(_free(c, [val, grp, *names]))
+    n, low, q1, median, q3, high = names
+    stats: dict = {}
+    for key, (g, vs) in by.items():
+        a, m, b = pd.Series(vs, dtype=float).quantile([0.25, 0.5, 0.75]).tolist()
+        reach = BOX_REACH * (b - a)
+        stats[key] = {grp: g, n: len(vs), low: _num(min(v for v in vs if v >= a - reach)), q1: _num(a), median: _num(m),
+                      q3: _num(b), high: _num(max(v for v in vs if v <= b + reach))}
+    ranked = [stats[k][grp] for k in sorted(stats, key=lambda k: -stats[k][median])]
+    order = _ordered(kind, df[grp], ranked, opts.get("sort", _DEFAULT), what="groups")
+    rows = sorted(stats.values(), key=lambda r: order.index(r[grp]) if r[grp] in order else len(order))
+    boxed = {k for k, r in stats.items() if r[n] >= BOX_MIN}
+    y = _enc(grp, "nominal", sort=order)
+    color = {"color": _enc(grp, "nominal", sort=order, legend=None)} if label is not None else {}
+    dot_tip = _tooltip(df, {**kinds, grp: "text"})
+    tip = [{"field": _field(c), "type": "nominal" if c == grp else "quantitative", "title": c} for c in (grp, *names)]
+
+    def along(field: str) -> dict:
+        return _enc(field, "quantitative", title=val)
+
+    layer: list = []
+    for faint, mark in ((True, {"type": "point", "style": FAINT_STYLE}), (False, "point")):
+        dots = [r for r in values if (json.dumps(r[grp]) in boxed) == faint]
+        if dots:
+            layer.append({"data": {"values": dots}, "mark": mark,
+                          "encoding": {"x": along(val), "y": y, **color, "tooltip": dot_tip}})
+    if boxed:
+        only = [{"filter": f"datum[{json.dumps(n)}] >= {BOX_MIN}"}]
+        layer += [
+            {"transform": only, "mark": "rule", "encoding": {"x": along(low), "x2": {"field": _field(q1)}, "y": y, "tooltip": tip}},
+            {"transform": only, "mark": "rule", "encoding": {"x": along(q3), "x2": {"field": _field(high)}, "y": y, "tooltip": tip}},
+            {"transform": only, "mark": {"type": "bar", "style": BOX_STYLE},
+             "encoding": {"x": along(q1), "x2": {"field": _field(q3)}, "y": y, **color, "tooltip": tip}},
+            {"transform": only, "mark": {"type": "tick", "style": MEDIAN_STYLE},
+             "encoding": {"x": along(median), "y": y, "tooltip": tip}},
+        ]
+    if not layer:
+        raise ValueError(f"thimble.chart({kind!r}): `{val}` holds no numbers with a group to draw")
+    return {"data": {"values": rows}, "layer": layer}
 
 
 def _histogram_spec(df, opts: dict) -> dict:
@@ -1631,9 +1822,9 @@ def _heatmap_spec(df, opts: dict) -> dict:
     return _unit(rows, "rect", enc)
 
 
-_CHART_SPECS = {"bar": _bar_spec, "line": lambda df, o: _xy_spec("line", df, o),
+_CHART_SPECS = {"bar": _bar_spec, "line": lambda df, o: _xy_spec("line", df, o), "area": _area_spec,
                 "scatter": lambda df, o: _xy_spec("scatter", df, o), "dots": lambda df, o: _xy_spec("dots", df, o),
-                "histogram": _histogram_spec, "heatmap": _heatmap_spec}
+                "box": _box_spec, "histogram": _histogram_spec, "heatmap": _heatmap_spec}
 
 
 # Card types (backend cardtypes.py): a viewer folder whose view.json has a `card` block. The server writes the types a
