@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, test } from 'vitest'
+import { refLabel } from '../../src/lib/refs'
 
 const APP = path.resolve(__dirname, '../../../backend/app')
 const read = (n: string) => readFileSync(path.join(APP, n), 'utf8')
@@ -69,7 +70,8 @@ describe('thimble.record', () => {
     expect(got).toEqual({ hits: 0 })
     const root = doc().querySelector('#rec .thimble-record')!
     expect(root.getAttribute('data-anchor')).toBe('runs/r1/explorer.jsonl#L12')
-    expect(texts('.thimble-record-cite .chip-text')).toEqual(['r1/explorer.jsonl L12'])
+    expect(texts('.thimble-record-cite .chip-text')).toEqual(['r1 › explorer.jsonl L12'])
+    expect(doc().querySelector('.thimble-record-cite .chip')!.getAttribute('title')).toBe('runs/r1/explorer.jsonl#L12')
     const top = doc().querySelector('#rec .thimble-record-tree')!
     const keys = [...top.children].filter((r) => r.classList.contains('thimble-record-row')).map((r) => texts('.thimble-record-key', r)[0])
     expect(keys).toEqual(['type', 'tool', 'turns', 'ok', 'note', 'blank', 'input', 'output', 'tags', 'steps'])
@@ -94,7 +96,10 @@ describe('thimble.record', () => {
     await load()
     win().thimble.record({ mount: '#rec', value: REC, ref: 'r1/explorer.jsonl#L12' })
     const more = () => doc().querySelector('[data-long="/output"]')!
-    expect(more().textContent).toBe('Show more' + `${REC.output.length} characters`)
+    expect(more().textContent).toBe('Show more12 lines')
+    // a long string on few lines says its characters
+    win().thimble.record({ mount: '#c', value: { essay: 'word '.repeat(200) }, ref: 'r1/essay.jsonl#L1' })
+    expect(texts('#c [data-long="/essay"]')).toEqual(['Show more1,000 characters'])
     expect(doc().querySelector('.thimble-record-text')!.classList.contains('is-folded')).toBe(true)
     click(more())
     expect(more().textContent).toBe('Show less')
@@ -139,6 +144,16 @@ describe('thimble.record', () => {
     expect(doc().querySelector('#rec .thimble-record-cite')).toBeNull()
   })
 
+  test("names its citation as thimble's chips do", async () => {
+    await load()
+    const refs = ['runs/r1/explorer.jsonl#L12', 'runs/team-6/agents/a.jsonl#L3-L9', 'a/b/c/trial-03/x/y/notes.jsonl#L5.b2', 'deploys.csv#row=3',
+      'chat/ops.json#/messages/12', 'papers/x.pdf#p4', 'logs/run.db#calls/41', 'top.jsonl#L1', 'view:board/INC-311', 'src/app.py#parse_args', 'README.md']
+    for (const ref of refs) {
+      win().thimble.record({ mount: '#rec', value: { a: 1 }, ref })
+      expect(texts('#rec .thimble-record-cite .chip-text')[0], ref).toBe(refLabel(ref))
+    }
+  })
+
   test('draws in the side panel as its body, and takes Color by\'s bar', async () => {
     await load('<span id="colour"></span><div id="body"><div id="list"></div></div>')
     const colour = win().thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }] })
@@ -147,6 +162,11 @@ describe('thimble.record', () => {
     const rec = side.body.querySelector('.thimble-record')!
     expect(rec.getAttribute('data-anchor')).toBe('a.jsonl#L1')
     expect(rec.getAttribute('data-colour')).toBe('Read')
+    // the panel's next body, the page's own, is the page's: a click in it draws no record
+    side.open({ title: 'Other', html: '<button id="mine" data-more="/steps">mine</button>' })
+    click(side.body.querySelector('#mine'))
+    expect(side.body.querySelector('.thimble-record')).toBeNull()
+    expect(side.body.querySelector('#mine')).not.toBeNull()
   })
 })
 

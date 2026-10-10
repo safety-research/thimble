@@ -644,6 +644,12 @@ button.thimble-record-key {
 button.thimble-record-key:hover {
   color: var(--text-primary);
 }
+button.thimble-record-key:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-chip);
+  color: var(--text-primary);
+}
 .thimble-record-caret,
 .thimble-record-gap {
   flex: none;
