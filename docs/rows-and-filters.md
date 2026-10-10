@@ -289,7 +289,7 @@ Each part is text, which `recordCard` escapes, or `{html}`. `act: false` gives a
 the card's own. `.thimble-cards` stacks cards in a column with a gap between them, and `.thimble-cards-grid` lays them
 out as tiles at least `--thimble-tile-w` (220 px) wide. A list of records with no box is the kit's `.list-row` or
 `.table`. A card keeps its bars as Color by changes, so the page need not draw it again; `color: false`
-(or `color: false`) gives it none.
+(or `colour: false`) gives it none.
 
 ## The side panel
 
