@@ -1,5 +1,0 @@
-{"monitor": "4.0.2", "started": 1778976000000, "rules": 38}
-{"id": "alr-64", "ts": 1779006615000, "state": "FIRING", "service": "passes", "severity": "warning", "incident": null, "summary": "passes queue: 620 jobs waiting (limit 500)"}
-{"id": "alr-65", "ts": 1779007315000, "state": "RESOLVED", "service": "passes", "severity": "warning", "incident": null, "summary": "passes queue: 40 jobs waiting", "resolves": "alr-64"}
-{"id": "alr-66", "ts": 1779032430000, "state": "FIRING", "service": null, "severity": "warning", "incident": null, "summary": "web-2: log disk 85% full"}
-{"id": "alr-67", "ts": 1779033730000, "state": "RESOLVED", "service": "web", "severity": "warning", "incident": null, "summary": "web-2: log disk 62% full after rotation", "resolves": "alr-66"}
