@@ -156,7 +156,7 @@ const side = thimble.side({ mount: '#body', onClose: () => { open = null } })
 const table = thimble.table({
   mount: '#list', side, search, colour: painted,
   columns: [
-    { name: 't', title: 'Time', type: 'time' },
+    { name: 't', title: 'Time', type: 'time', drop: false },
     { name: 'source', title: 'Source', width: 64 },
     { name: 'kind', title: 'Kind', width: 96, html: (e) => (FAILED(e) ? `<span class="failed" title="failed">✕ ${esc(e.kind)}</span>` : esc(e.kind)) },
     { name: 'actor', title: 'Actor', width: 110, drop: 2 },
