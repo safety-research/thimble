@@ -5,7 +5,8 @@
 // guides, or a label, every class of the label a group, so a class added to it is a new lane; the lanes draw a lane per
 // group, a failure underlined in the problem red, and the key's entries turn their series off and on, an entry whose
 // series never shows left out; Reset turns every value and series back on; each control's choice is kept through the
-// `colour` message; a transcript folds a tool call to one line until opened. Layout (the side panel's width, the
+// `colour` message; a transcript folds a tool call to one line until opened, opened and folded again by the chevron at
+// the start of its head, and a long block to six lines, with Show more under it and Show less in its place. Layout (the side panel's width, the
 // divider's drag, the lanes' cursor line and the tint of the list's rows in view) is
 // tests/public/browser/view-parts.test.ts.
 import { readFileSync } from 'node:fs'
@@ -376,7 +377,7 @@ describe('the side panel and the transcript', () => {
     expect(w.side.isOpen).toBe(false)
   })
 
-  test("a transcript: speaker, tool and time in the head, a failed call's ✕ before its tool; a tool call folded to one line until opened; a long result folded to six lines; a cited turn opened", async () => {
+  test("a transcript: speaker, tool and time in the head, a failed call's ✕ before its tool; a tool call folded to one line until opened, its head's chevron opening and folding it; a long result folded to six lines, Show more and Show less in one place under it; a cited turn opened", async () => {
     await load()
     const w = win()
     const long = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n')
@@ -389,6 +390,10 @@ describe('the side panel and the transcript', () => {
     expect([texts('.thimble-transcript-title'), texts('.thimble-transcript-n')]).toEqual([['lead · Run 1'], ['3 turns']])
     expect(texts('.thimble-turn-head')).toEqual(['user · 2026-05-16 09:00:00', 'lead · ✕ Bash · 2026-05-16 09:00:05', 'lead · 2026-05-16 09:00:09'])
     expect(texts('.thimble-turn-line')).toEqual(['Bash pytest -q'])
+    // the turn that folds opens and folds by its head, a chevron at its start; a turn that does not fold has a plain head
+    const toggle = () => doc().querySelector<HTMLElement>('[data-anchor="s.jsonl#L2"] .thimble-turn-head')!
+    expect([toggle().tagName, toggle().getAttribute('aria-expanded'), !!toggle().querySelector('.thimble-turn-caret')]).toEqual(['BUTTON', 'false', true])
+    expect(doc().querySelectorAll('.thimble-turn-toggle')).toHaveLength(1)
     // a failed call: ✕ and its tool in the problem red in its head, folded or open, its hover the failure's word
     const failed = doc().querySelector('.thimble-turn-failed')!
     expect([failed.textContent, failed.getAttribute('title')]).toEqual(['✕ Bash', 'failed'])
@@ -404,15 +409,36 @@ describe('the side panel and the transcript', () => {
     ])
     ;(doc().querySelector('.thimble-turn-line') as HTMLElement).click()
     expect(w.opened).toEqual(['s.jsonl#L2'])
+    // open, the same head folds it, its chevron turned; nothing else closes the turn
+    expect([toggle().getAttribute('aria-expanded'), !!toggle().querySelector('.thimble-turn-caret')]).toEqual(['true', true])
+    expect(doc().querySelector('[data-close], .thimble-turn-close')).toBe(null)
+    expect(doc().getElementById('turns')!.textContent).not.toContain('Collapse')
     const call = doc().querySelector('.thimble-turn-call')!
     expect(call.querySelector('.thimble-turn-toolname')!.textContent).toBe('Bash')
     const result = doc().querySelector('.thimble-turn-result')!
     expect(result.classList.contains('is-error')).toBe(true)
     expect(result.parentElement!.classList.contains('is-folded')).toBe(true)
-    expect(texts('.thimble-turn-expand')[0]).toBe('Expand12 lines')
-    ;(doc().querySelector('[data-expand]') as HTMLElement).click()
+    // Show more under the cut text, and Show less in the same place once it is open; the control keeps the focus as its
+    // turn is drawn again
+    const more = () => doc().querySelector<HTMLElement>('.thimble-turn-more')!
+    const place = () => [texts('.thimble-turn-more'), more().getAttribute('aria-expanded'), more().previousElementSibling === doc().querySelector('.thimble-turn-result')]
+    expect(place()).toEqual([['Show more'], 'false', true])
+    more().focus()
+    more().click()
     expect(doc().querySelector('.thimble-turn-result')!.parentElement!.classList.contains('is-folded')).toBe(false)
-    ;(doc().querySelector('[data-close]') as HTMLElement).click()
+    expect(place()).toEqual([['Show less'], 'true', true])
+    expect(doc().activeElement).toBe(more())
+    more().click()
+    expect(doc().querySelector('.thimble-turn-result')!.parentElement!.classList.contains('is-folded')).toBe(true)
+    expect(place()).toEqual([['Show more'], 'false', true])
+    // the head folds the turn back to its line and keeps the focus, and opens it again
+    toggle().focus()
+    toggle().click()
+    expect(doc().querySelector('.thimble-turn-call')).toBe(null)
+    expect([toggle().getAttribute('aria-expanded'), doc().activeElement === toggle(), texts('.thimble-turn-line')]).toEqual(['false', true, ['Bash pytest -q']])
+    toggle().click()
+    expect(doc().querySelector('.thimble-turn-call')).not.toBe(null)
+    toggle().click()
     expect(doc().querySelector('.thimble-turn-call')).toBe(null)
     // a citation opens the turn it names
     expect(w.tr.reveal('s.jsonl#L2')).toBe(true)

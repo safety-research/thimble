@@ -2,7 +2,9 @@
 // Folding the records of Files' Transcript mode (src/files/fold.ts, views/common.tsx RecordCard, views/transcript.tsx):
 // a long line counts as the lines it wraps to; a tool call, a tool result, a system record and a message of more than
 // a few lines start folded to one line, the head and the start of the words or the call, while a short reply shows; a
-// click on the line opens the record and a click on its head folds it again; a ref's record shows open until it is
+// click on the line opens the record and a click on its head folds it again, the chevron at the head's start turned; a
+// long block shows Show more under its cut text and Show less in the same place once open; a ref's record shows open
+// until it is
 // folded under the ref; the find's match inside a folded record opens it; Collapse all and Expand all fold and open
 // every record, and the choice and the records set one by one are kept per file. Records Filter by hides have no row,
 // and a long run of them says how many it hides, merged with a run of hidden system records.
@@ -117,13 +119,22 @@ describe('a stream transcript folds its records', () => {
     expect(isFolded(el, 5)).toBe(true)
     expect(card(el, 5)!.querySelector('.reader-fold-text')?.textContent).toBe('system · thinking_tokens')
   })
-  test('a click on the line opens a record and a click on its head folds it; an opened call holding a whole file is clipped with Expand', async () => {
+  test('a click on the line opens a record and a click on its head folds it, its chevron turned; an opened call holding a whole file is clipped with Show more, and Show less in the same place clips it again', async () => {
     const el = await mount(<View workspace="w" path="run.jsonl" kind="text" page={pageOf(RECORDS)} loadMore={() => undefined} transcript={STREAM} />)
+    const caret = () => card(el, 3)!.querySelector('.reader-fold-caret')!
+    expect([caret().closest('button')!.getAttribute('aria-expanded'), caret().classList.contains('icon-chevron-right')]).toEqual(['false', true])
     await click(card(el, 3)!.querySelector('.reader-fold-line')!)
     expect(isFolded(el, 3)).toBe(false)
-    const block = card(el, 3)!.querySelector('.reader-tool_use')!
-    expect(block.parentElement?.classList.contains('reader-collapsed')).toBe(true)
-    expect(card(el, 3)!.querySelector('.reader-expand')?.textContent).toMatch(/^Expand\d+ lines$/)
+    expect([caret().closest('button')!.classList.contains('reader-fold-head'), caret().closest('button')!.getAttribute('aria-expanded'), caret().classList.contains('icon-chevron-down')]).toEqual([true, 'true', true])
+    const block = () => card(el, 3)!.querySelector('.reader-tool_use')!
+    const more = () => card(el, 3)!.querySelector<HTMLElement>('.reader-more')!
+    const place = () => [more().textContent, more().getAttribute('aria-expanded'), more().parentElement === block().parentElement, block().parentElement?.classList.contains('reader-collapsed')]
+    expect(place()).toEqual(['Show more', 'false', true, true])
+    await click(more())
+    expect(place()).toEqual(['Show less', 'true', true, false])
+    expect(card(el, 3)!.textContent).not.toContain('Collapse')
+    await click(more())
+    expect(place()).toEqual(['Show more', 'false', true, true])
     await click(card(el, 3)!.querySelector('.reader-fold-head')!)
     expect(isFolded(el, 3)).toBe(true)
   })
