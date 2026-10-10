@@ -676,6 +676,40 @@ def agent_check(inp: dict) -> int:
 SCRATCH_PREFIX = "tmp_"  # app/work_files.py: the scratch folders a run's end deletes
 
 
+DATA_BRIEF = "data-brief.md"  # app/dev.py's DATA_BRIEF
+
+
+def data_brief(entry: dict) -> str:
+    """Views round 5 (exploration): what a view's builder gets as context at its first start, the description of the
+    data and its profile that the server wrote in the build's work folder (app/dev.py write_data_brief); '' for any
+    other agent, a builder that starts again, or a build with no brief."""
+    if entry.get("descendant") or entry.get("role") != "view-builder" or int(entry.get("starts") or 0) != 1:
+        return ""
+    try:
+        return (Path(str(entry.get("work") or "")) / DATA_BRIEF).read_text("utf-8").strip() if entry.get("work") else ""
+    except OSError:
+        return ""
+
+
+def waiting_brief(sf, state: dict, waiting: dict | None) -> str:
+    """Views round 5 (exploration): the brief of a view's builder that waits for its own start, since main started two
+    or more builds in one turn (app/subagent_files.py register): the brief of every start it could have, when they are
+    one text. Each build's brief is main's last description of the data as the build started, so they are one text
+    unless main described the data again between the builds; then the builder gets none, as no start is guessed."""
+    if not waiting or sf.role_of(waiting.get("type")) != "view-builder":
+        return ""
+    calls = set(waiting.get("claims") or [])
+    texts = set()
+    for r in sf.requests(state).values():
+        if isinstance(r, dict) and r.get("claimed_by") in calls:
+            work = str(r.get("work") or "")
+            try:
+                texts.add((Path(work) / DATA_BRIEF).read_text("utf-8").strip() if work else "")
+            except OSError:
+                texts.add("")
+    return texts.pop() if len(texts) == 1 else ""
+
+
 def subagent_start(inp: dict) -> int:
     """The SubagentStart hook (module note): the agent registered, then the scratch line for a descendant of one of
     thimble's agents, a folder of its own in its ancestor's work folder (## session-scratch). An agent of one of
@@ -689,14 +723,18 @@ def subagent_start(inp: dict) -> int:
     settled: list = []
     with sf.update(ws) as state:
         entry = sf.register(state, inp, settled)
-        unsettled = sf.unsettled(state, str(inp.get("agent_id") or "")) is not None
-    if entry is None and not unsettled:
+        waiting = sf.unsettled(state, str(inp.get("agent_id") or ""))
+        brief = data_brief(entry) if entry is not None else waiting_brief(sf, state, waiting)
+    if entry is None and waiting is None:
         return 0
     if sf.terminal(ws):
         spawn_local("started", inp)
     elif entry is not None:
         post("/api/subagents/started", {"cwd": folder(inp), "hook": inp})
     tell_started(sf, ws, inp, settled)
+    if brief:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": brief}}))
+        return 0
     if entry is None:
         return 0
     work = entry.get("work") if entry.get("descendant") else None
