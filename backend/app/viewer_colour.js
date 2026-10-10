@@ -3272,7 +3272,8 @@
   })
   // How many records the page's lists that draw only the rows near their view hold, for the view's checks
   // (view_shot.mjs `held`): the refs of every row given to a strip with `rows` (colour.strip, the kit's table), each
-  // anchored once it is drawn
+  // anchored once it is drawn. A list counts only when the rows it drew carry those refs as their data-anchor, so a
+  // page that gives a strip refs but anchors none of its rows is not counted.
   Object.defineProperty(thimble, '__held', {
     value: function () {
       var refs = new Set()
@@ -3280,7 +3281,12 @@
       for (var i = 0; i < all.length; i++) {
         var s = all[i]
         if (!s.rows || !s.refs || !s.el.isConnected) continue
-        for (var k = 0; k < s.refs.length; k++) if (s.refs[k] != null && s.refs[k] !== '') refs.add(String(s.refs[k]))
+        var given = new Set()
+        for (var k = 0; k < s.refs.length; k++) if (s.refs[k] != null && s.refs[k] !== '') given.add(String(s.refs[k]))
+        var drawn = (s.page ? document : s.box).querySelectorAll('[data-anchor]')
+        var anchored = false
+        for (var d = 0; d < drawn.length && !anchored; d++) anchored = given.has(drawn[d].getAttribute('data-anchor'))
+        if (anchored) given.forEach(function (r) { refs.add(r) })
       }
       return refs.size
     },
