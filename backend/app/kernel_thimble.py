@@ -1596,7 +1596,9 @@ def _histogram_spec(df, opts: dict) -> dict:
     end = _free(f"{col} end", [col])
     count = _free("count", [col, end])
     rows = [{col: edge(i), end: edge(i + 1), count: c} for i, c in enumerate(counts)]
-    enc = {"x": _enc(col, "quantitative", bin={"binned": True, "step": step}), "x2": {"field": _field(end)},
+    # plain numbers on the axis (Vega-Lite labels bins of a round step as 1.2e+2 otherwise)
+    enc = {"x": _enc(col, "quantitative", bin={"binned": True, "step": step}, axis={"format": ",~r"}),
+           "x2": {"field": _field(end)},
            "y": _enc(count, "quantitative"),
            "tooltip": [{"field": _field(c), "type": "quantitative", "title": c} for c in (col, end, count)]}
     spec = _unit(rows, "bar", enc)

@@ -190,6 +190,7 @@ def test_a_histogram_bins_every_value_in_round_steps():
     bins = spec["data"]["values"]
     assert sum(r["count"] for r in bins) == 100 and len(bins) <= kt.BINS
     assert spec["layer"][0]["encoding"]["x"]["bin"] == {"binned": True, "step": 1.0}
+    assert spec["layer"][0]["encoding"]["x"]["axis"] == {"format": ",~r"}, "plain numbers, not 1.2e+2"
     assert len(spec_of("histogram", days, step=5)["data"]["values"]) == 4
     with pytest.raises(ValueError, match="makes 19,801 bins"):
         kt.chart("histogram", days, step=0.001)
