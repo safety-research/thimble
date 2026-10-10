@@ -2651,9 +2651,10 @@ export function list(opts = {}) {
     item() {
       return s.items.find((it) => !it.heading && keyOf(it) === s.chosen) || null
     },
-    /** The first and last times of the items in view, `[t0, t1]`, by `time(item)` (`item.t` or `item.time`); null
-     *  when none shows. A part drawn above the list (the lanes) reads them before the list draws: they are the rows
-     *  the list will show, foreseen from its last drawing and the row chosen since. */
+    /** The first and last times of the items in view, `[t0, t1]`, by `time(item)` (`item.t` or `item.time`), read as
+     *  the lanes place a record (a date as text in seconds, one with no zone in UTC); null when none shows. A part drawn
+     *  above the list (the lanes) reads them before the list draws: they are the rows the list will show, foreseen from
+     *  its last drawing and the row chosen since. */
     span(time = (it) => (it.t ?? it.time)) {
       let shown = s.shown
       if (state.drawing && s.drawnAt !== state.drawNo) {
@@ -2661,7 +2662,7 @@ export function list(opts = {}) {
         if (f) shown = f
         s.foreseen = { at: state.drawNo, key: f ? shownKeyOf(f) : null }
       }
-      const ts = shown.map((it) => Number(time(it))).filter((t) => Number.isFinite(t))
+      const ts = shown.map((it) => placeOf(time(it), 's')).filter((t) => t !== null)
       return ts.length ? [Math.min(...ts), Math.max(...ts)] : null
     },
     /** The items in view, as last drawn. */

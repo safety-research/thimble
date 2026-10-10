@@ -629,6 +629,9 @@ describe('the transcript', () => {
       const rows = text().filter((r: string) => r.includes('●'))
       expect(rows.map((r: string) => r.slice(2, 10))).toEqual(['09:00:01', '09:00:02', '09:00:03', '09:00:04', '09:00:05', '09:00:06', '09:00:07', '        '])
       expect(text().filter((r: string) => /^ {2}1[67] May 2026$/.test(r))).toEqual(['  16 May 2026', '  17 May 2026'])
+      // the turns in view give the lanes above the list their times in seconds, read the same way (`span`), a Date too
+      expect(tr.list.span()).toEqual([T0 + 1, T0 + 86400 + 7])
+      expect(tr.list.span((it: any) => (it.ref === 's.jsonl#L3' ? new Date((T0 + 3) * 1000) : null))).toEqual([T0 + 3, T0 + 3])
     } finally {
       if (zone === undefined) delete process.env.TZ
       else process.env.TZ = zone
