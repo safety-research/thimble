@@ -362,4 +362,28 @@ window.tree = thimble.tree({ mount: '#tree', rows, items: calls, mix: true })`)
     assert.deepEqual((await drawn(frame)).map((r) => r.name), ['Bash', 'Read', 'Grep'])
     await page.close()
   })
+
+  test('with Rows grouped by another choice, its groups open as they fit; the folds made in a choice come back with it', async () => {
+    const { page, frame } = await framed(`
+const PARENT = { lead: null, explore: 'lead', test: 'lead', solo: null }
+const PLACE = { Bash: 'shell', Read: 'files', Grep: 'files' }
+window.calls = []
+Object.keys(PARENT).forEach((s, si) => ['Bash', 'Read', 'Grep'].forEach((tool) => calls.push({ session: s, tool })))
+window.rows = thimble.rows({ fields: [{ name: 'session', title: 'Session', parentOf: (k) => PARENT[k] }, { name: 'tool', title: 'Tool', parentOf: (k) => PLACE[k] || null }], onChange: () => tree.draw() })
+window.tree = thimble.tree({ mount: '#tree', rows, items: calls, key: 'calls' })`)
+    const names = async () => (await drawn(frame)).map((r) => r.name)
+    assert.deepEqual(await names(), ['lead', 'explore', 'test', 'solo'])
+    await frame().evaluate(() => (window as any).tree.fold('lead', true))
+    await page.waitForTimeout(50)
+    assert.deepEqual(await names(), ['lead', 'solo'])
+    // by tool, a tree of its own: every group fits, so every group opens
+    await frame().evaluate(() => (window as any).rows.choose('tool'))
+    await page.waitForTimeout(100)
+    assert.deepEqual(await names(), ['shell', 'Bash', 'files', 'Read', 'Grep'])
+    // back by session: lead folded, as it was left
+    await frame().evaluate(() => (window as any).rows.choose('session'))
+    await page.waitForTimeout(100)
+    assert.deepEqual(await names(), ['lead', 'solo'])
+    await page.close()
+  })
 })

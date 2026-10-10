@@ -233,6 +233,7 @@
       },
       reset: function () {
         delete ctl.kept(self.name).open
+        delete ctl.kept(self.name).openFor
         ctl.save()
         self.open = new Set(self.initial || [])
         self.query = ''
@@ -459,6 +460,8 @@
       k.push(x)
     })
     this.kept().open = k
+    // with Rows, the choice the folds were made in
+    if (this.rows) this.kept().openFor = this.initialFor
     ctl.save()
     this.checkReset()
   }
@@ -558,13 +561,17 @@
     var kept = this.kept()
     // how it opens, worked out for the first nodes with folders, and again for another choice of Rows
     var sig = this.rows ? JSON.stringify(this.rows.by) : 'items'
-    var fresh = !this.initial || this.initialFor !== sig || !this.initialNested
+    var regrouped = !!this.initial && this.initialFor !== sig
+    var fresh = !this.initial || regrouped || !this.initialNested
     if (fresh) {
       this.initial = this.opening()
       this.initialFor = sig
       this.initialNested = this.nested
     }
-    if (!this.open || (fresh && !Array.isArray(kept.open))) this.open = Array.isArray(kept.open) ? new Set(kept.open.map(String)) : new Set(this.initial)
+    // the folds thimble kept, for the groups they were made in: with Rows grouped by another choice the groups open
+    // as they fit, and those folds come back with that choice
+    var mine = Array.isArray(kept.open) && (kept.openFor == null || kept.openFor === sig)
+    if (!this.open || regrouped || (fresh && !mine)) this.open = mine ? new Set(kept.open.map(String)) : new Set(this.initial)
     this.mount.classList.toggle('is-tree', this.nested)
     this.search()
     this.relayout()
