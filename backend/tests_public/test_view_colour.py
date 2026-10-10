@@ -38,7 +38,7 @@ def test_every_view_page_loads_the_colour_control_after_the_bridge_and_before_th
 
 
 def test_the_row_controls_side_panel_and_transcript_load_between_colour_by_and_the_range(tmp_path):
-    """viewer_controls.js (Filter by, Rows, the lanes, the key, the divider), viewer_side.js and viewer_transcript.js
+    """viewer_controls.js (Filter by, Rows, the timeline, the key, the divider), viewer_side.js and viewer_transcript.js
     take the bridge's part after Color by has shared what it keeps, and before the range takes the part away; their
     styles, viewer_parts.css, come after the kit's own and before the page's."""
     d = tmp_path / "view"
@@ -46,7 +46,8 @@ def test_the_row_controls_side_panel_and_transcript_load_between_colour_by_and_t
     (d / views.VIEW_HTML).write_text("<style>.mine{}</style><script>const f = thimble.filterBy({ mount: '#f', fields: [] })</script>")
     doc = views.frame_document({"dir": str(d), "slug": "board", "name": "Board"})
     order = [doc.index(s) for s in ("thimble.colorBy = function", "thimble.filterBy = function", "thimble.rows = function",
-                                    "thimble.lanes = function", "thimble.divider = function", "thimble.side = function",
+                                    "thimble.timeline = function", "thimble.lanes = thimble.timeline",
+                                    "thimble.divider = function", "thimble.side = function",
                                     "thimble.transcript = function", "thimble.timeRange = function",
                                     "const f = thimble.filterBy(")]
     assert order == sorted(order), order

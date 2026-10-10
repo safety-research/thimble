@@ -166,6 +166,12 @@ export function num(n) {
   return r > -1000 && r < 1000 ? String(r) : String(r).replace(/\B(?=(\d{3})+$)/g, ',')
 }
 
+// a plain number as precise as `step` needs: 0.25 to a step of 0.05, 12 to a step of 1
+function numTo(n, step) {
+  const d = step > 0 && step < 1 ? Math.min(6, Math.ceil(-Math.log10(step) - 1e-9)) : 0
+  return d ? Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: d }) : num(n)
+}
+
 /** `n word` or `n words`. */
 export function plural(n, word, many = `${word}s`) {
   return `${num(n)} ${n === 1 ? word : many}`
@@ -2143,8 +2149,8 @@ export function timeRange(opts = {}) {
     fit() {
       api.set(null)
     },
-    /** The scale of the range across `cols` cells: `{from, to, cols, x(t), t(x), binOf(t), step, ticks(gap)}`; x(t) the
-     *  cell a time falls in, binOf(t) the same or -1 outside the range, step the time a cell spans. */
+    /** The scale of the range across `cols` cells: `{from, to, cols, unit, x(t), t(x), binOf(t), step, ticks(gap)}`;
+     *  x(t) the cell a time falls in, binOf(t) the same or -1 outside the range, step the time a cell spans. */
     scale(cols) {
       return scaleOf(api.from, api.to, Math.max(1, cols | 0), unit, r.segs)
     },
@@ -2271,7 +2277,8 @@ function breakGlyphs(sc) {
   return out
 }
 
-function scaleOf(from, to, cols, unit, segs = null) {
+// `fine`: plain numbers that are not all whole, such as scores, whose ticks may step by less than one
+function scaleOf(from, to, cols, unit, segs = null, fine = false) {
   // the stretches that hold data within the range; a stretch that only touches an end of the range is none
   const parts = []
   for (const [a0, b0] of segs || []) {
@@ -2279,7 +2286,7 @@ function scaleOf(from, to, cols, unit, segs = null) {
     const b = Math.min(to, b0)
     if (b > a || (b === a && a !== from && b !== to)) parts.push([a, b])
   }
-  if (parts.length > 1 && cols >= parts.length * (MIN_SEG + BREAK)) return brokenScale(from, to, cols, unit, parts)
+  if (parts.length > 1 && cols >= parts.length * (MIN_SEG + BREAK)) return brokenScale(from, to, cols, unit, parts, fine)
   const len = Math.max(1e-9, to - from)
   const step = len / cols
   const x = (t) => Math.min(cols - 1, Math.max(0, Math.floor(((t - from) / len) * cols)))
@@ -2288,6 +2295,7 @@ function scaleOf(from, to, cols, unit, segs = null) {
     to,
     cols,
     step,
+    unit,
     x,
     t: (cx) => from + (cx + 0.5) * step,
     /** The position of a time in cells, fractional (0 to cols), and the time at a position. */
@@ -2302,9 +2310,9 @@ function scaleOf(from, to, cols, unit, segs = null) {
       if (unit === 'n') {
         const raw = (gap * len) / cols
         const p = 10 ** Math.floor(Math.log10(raw))
-        const tick = [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p
+        const tick = Math.max(fine ? 0 : 1, [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p)
         const out = []
-        for (let t = Math.ceil(from / tick) * tick; t <= to; t += tick) out.push({ t, x: x(t), label: num(t) })
+        for (let k = Math.ceil(from / tick); k * tick <= to; k++) out.push({ t: k * tick, x: x(k * tick), label: numTo(k * tick, tick) })
         return out
       }
       const tick = TICKS.find((s) => s / step >= gap) || TICKS.at(-1)
@@ -2323,7 +2331,7 @@ function scaleOf(from, to, cols, unit, segs = null) {
 
 // a scale with breaks: each stretch its share of the cells by its length (at least MIN_SEG), the empty time between
 // two stretches BREAK cells, as the browser's broken scale lays them out
-function brokenScale(from, to, cols, unit, parts) {
+function brokenScale(from, to, cols, unit, parts, fine = false) {
   const room = cols - BREAK * (parts.length - 1)
   const total = parts.reduce((n, [a, b]) => n + (b - a), 0)
   let ws = parts.map(([a, b]) => (total > 0 ? ((b - a) / total) * room : room / parts.length))
@@ -2375,6 +2383,7 @@ function brokenScale(from, to, cols, unit, parts) {
     to,
     cols,
     step,
+    unit,
     x,
     t: (cx) => at(cx + 0.5),
     pos,
@@ -2389,10 +2398,10 @@ function brokenScale(from, to, cols, unit, parts) {
       if (unit === 'n') {
         const raw = gap * step
         const p = 10 ** Math.floor(Math.log10(raw))
-        const tick = [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p
+        const tick = Math.max(fine ? 0 : 1, [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p)
         return segs.flatMap((g) => {
           const out = []
-          for (let t = Math.ceil(g.a / tick) * tick; t <= g.b; t += tick) out.push({ t, x: x(t), label: num(t) })
+          for (let k = Math.ceil(g.a / tick); k * tick <= g.b; k++) out.push({ t: k * tick, x: x(k * tick), label: numTo(k * tick, tick) })
           return out
         })
       }
@@ -2417,7 +2426,7 @@ function brokenScale(from, to, cols, unit, parts) {
 /** The chart's axis under it: the ticks' labels dim at their cells, `gutter` cells in, none overlapping; `legend`, in
  *  the gutter before them, the key of the marks the chart draws other than Color by's (`─ running  × failed`): runs, or
  *  entries `{glyph, fg, name, on, toggle, tip}`, each a control that hides or shows its series (dim while off), as a
- *  lanes part gives them (`legend()`); then, with `marks` ([{t, label}]), their labels on a row of their own, each a
+ *  timeline gives them (`legend()`); then, with `marks` ([{t, label}]), their labels on a row of their own, each a
  *  control when `onMark(mark)` is given. */
 export function axis(d, scale, o = {}) {
   const gutter = o.gutter || 0
@@ -2542,7 +2551,7 @@ export function maxBin(scale, groups, time = (it) => it.t) {
  * and the colored track at its right edge when it is taller than its room (docs/terminal-views.md, "The list"). ↑↓
  * choose, Enter or a click opens and closes the chosen row's details, `a` asks a side thread about it, while the list
  * has the keys (SWITCH); the wheel over it moves its rows. `span(time)` gives the times of the rows in view, which a
- * lanes part marks on the overview.
+ * timeline marks on the overview.
  *
  * opts: key(item) its identity; enter (the hint's words, `to open`).
  */
@@ -3791,24 +3800,54 @@ export function rows(opts = {}) {
   return api
 }
 
-// ------------------------------------------------------------------------------------------------ lanes
+// ------------------------------------------------------------------------------------------------ the timeline
 
 /**
- * The overview as lanes on the time range's scale (docs/terminal-views.md, "Lanes"): a lane per group of Rows, its name
- * in the gutter at the left with its tree guide (a top group's `▾` `▸` folds the lanes under it into its own), its
+ * The timeline: the overview as lanes on one axis of times or numbers (docs/terminal-views.md, "The timeline"; `lanes`
+ * is its old name): a lane per group of `rows` (the Rows control, a field's name or a function of a record), its name in
+ * the gutter at the left with its tree guide (a top group's `▾` `▸` folds the lanes under it into its own), its
  * records' bars in the Color by hues on one height, `─` in the rule gray where it ran (`band`) and in a record's hue
- * while that record ran (`end`), and `×` in red where most of a cell's records failed (`problem`). Under the pointer a
- * lane marks only its cell, `┊` or the bar in the text color, with the cell's time and records in the tip; a click opens
- * the record nearest there (`onMark`), a click on a name chooses the lane (`onPick`). The list's rows in view are on the
- * selection background across the lanes (`span`, or a list's `span()`). `legend()` is the key for `axis`, each entry a
- * toggle that hides or shows its series.
+ * while that record ran (`end`), and `×` in red where most of a cell's records failed (`problem`). The axis is the
+ * scale `draw` gets (the time range's), else the records' own span in `unit`, with an axis of its own under the lanes;
+ * with no `rows`, one lane with no name. Under the pointer a lane marks only its cell, `┊` or the bar in the text color,
+ * with the cell's time and records in the tip; a click opens the record nearest there (`onMark`), a click on a name
+ * chooses the lane (`onPick`). The list's rows in view are on the selection background across the lanes (`span`, or a
+ * list's `span()`). `legend()` is the key for `axis`, each entry a toggle that hides or shows its series.
  *
- * opts: rows (a Rows control) or groups(items), colour (Color by; the view's by default), time(item), end(item),
- * band(lane) [[start, end]], problem(item), onPick(lane), onMark(item), words {band, problem, record}, key.
+ * opts: rows (a Rows control, a field's name or a function of a record) or groups(items), colour (Color by; the view's
+ * by default), time(item), end(item), unit ('s' or 'n', for an axis of its own), band(lane) [[start, end]],
+ * problem(item), onPick(lane), onMark(item), words {band, problem, record}, key.
  */
 const EVENT = '▌' // a lane's cell that holds a record, while the lanes draw Events rather than density
 
-export function lanes(opts = {}) {
+// a record's place on the axis, a number in `unit`: a number as it is, a string that holds one as that number, and on
+// an axis of time a Date or an ISO time too, in seconds; else null, a record with no place
+function placeOf(v, unit) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v)
+  if (unit === 'n') return null
+  const ms = v instanceof Date ? v.getTime() : typeof v === 'string' ? Date.parse(v) : NaN
+  return Number.isFinite(ms) ? ms / 1000 : null
+}
+
+// the lanes of a field or a function of a record (`rows` with no Rows control): its values as the records first take
+// them, then a lane for the records with none
+function groupsOf(items, rowOf, word) {
+  const by = new Map()
+  const none = []
+  for (const it of items) {
+    const v = rowOf(it)
+    if (v === null || v === undefined || v === '' || typeof v === 'object') none.push(it)
+    else if (by.has(String(v))) by.get(String(v)).push(it)
+    else by.set(String(v), [it])
+  }
+  const node = (key, name, its) => ({ key, value: key === '' ? null : key, name, depth: 0, guide: '', last: true, heading: false, parent: null, children: 0, items: its })
+  const out = [...by].map(([k, its]) => node(k, k, its))
+  if (none.length) out.push(node('', word ? `no ${word}` : 'no value', none))
+  return out
+}
+
+export function timeline(opts = {}) {
   const name = opts.key ? `lanes:${opts.key}` : 'lanes'
   const keptL = kept(name) || {}
   const st = {
@@ -3820,7 +3859,19 @@ export function lanes(opts = {}) {
     counts: { band: 0, problem: 0 },
   }
   const words = { band: 'running', problem: 'failed', record: 'record', ...(opts.words || {}) }
-  const time = typeof opts.time === 'function' ? opts.time : (it) => (it.t ?? it.time)
+  let unit = opts.unit === 'n' ? 'n' : 's'
+  const at = typeof opts.time === 'function' ? opts.time : (it) => (it.t ?? it.time)
+  const time = (it) => placeOf(at(it), unit)
+  // a record's end, no earlier than its place
+  const endOf = (it, t) => {
+    const e = typeof opts.end === 'function' ? placeOf(opts.end(it), unit) : null
+    return e === null || e < t ? t : e
+  }
+  const by = opts.rows
+  const rowsControl = by && typeof by === 'object' && typeof by.groups === 'function' ? by : null
+  const rowOf = typeof by === 'function' ? by : typeof by === 'string' && by ? (it) => (it && typeof it === 'object' ? it[by] : null) : null
+  // with nothing to tell lanes apart, one lane and no names
+  const bare = !rowsControl && !rowOf && typeof opts.groups !== 'function'
   const save = () => keep(name, { off: [...st.off], folded: [...st.folded] })
   const isOn = (series) => !st.off.has(series)
   const toggle = (series) => {
@@ -3832,7 +3883,7 @@ export function lanes(opts = {}) {
   // the lanes in `room` rows: a top group with children folds by itself, the largest first, until they fit, the
   // analyst's ▸ ▾ first; then the rows past the room wait behind `… N more`
   function layout(items, room) {
-    const nodes = typeof opts.groups === 'function' ? opts.groups(items) : opts.rows ? opts.rows.groups(items) : [{ key: '*', name: 'all', depth: 0, guide: '', items: items.slice(), children: 0 }]
+    const nodes = typeof opts.groups === 'function' ? opts.groups(items) : rowsControl ? rowsControl.groups(items) : rowOf ? groupsOf(items, rowOf, typeof by === 'string' ? by : '') : [{ key: '*', name: 'all', depth: 0, guide: '', items: items.slice(), children: 0 }]
     const tops = nodes.filter((n) => n.depth === 0 && n.children)
     const below = (n) => {
       const i = nodes.indexOf(n)
@@ -3875,10 +3926,11 @@ export function lanes(opts = {}) {
     }
     if (typeof opts.end === 'function')
       for (const it of its) {
-        const e = opts.end(it)
-        if (!(e > time(it)) || e - time(it) < scale.step) continue
+        const t = time(it)
+        const e = endOf(it, t)
+        if (!(e > t) || e - t < scale.step) continue
         const hue = colour ? colour.colourOf(colour.valueOf(it)) : null
-        fill(time(it), e, hue && hue !== COLORS.dim ? { s: '─', fg: hue } : { s: '─', d: true })
+        fill(t, e, hue && hue !== COLORS.dim ? { s: '─', fg: hue } : { s: '─', d: true })
       }
     // each cell's records, those that failed and their Color by values, in one pass over the lane's records
     const counts = new Int32Array(scale.cols)
@@ -3920,7 +3972,7 @@ export function lanes(opts = {}) {
     const tips = Array.from({ length: scale.cols }, (_, x) => {
       const k = counts[x]
       const bad = failed[x]
-      return `${n.name} · ${whens[x]}${k ? ` · ${plural(k, words.record)}` : ''}${bad ? ` · ${num(bad)} ${words.problem}` : ''}`
+      return `${bare ? '' : `${n.name} · `}${whens[x]}${k ? ` · ${plural(k, words.record)}` : ''}${bad ? ` · ${num(bad)} ${words.problem}` : ''}`
     })
     return { runs: out, tips, its }
   }
@@ -3945,14 +3997,25 @@ export function lanes(opts = {}) {
       if (typeof opts.problem === 'function' && st.counts.problem) out.push({ id: 'problem', glyph: '×', fg: COLORS.problem, name: words.problem, on: isOn('problem'), toggle: () => toggle('problem') })
       return out
     },
-    /** Draw the lanes: `o.items` (those of the range), `o.scale` (range.scale), `o.gutter` (the names' cells), `o.room`
-     *  (rows, the rows left by default), `o.span` ([t0, t1] or a list whose rows in view it marks), `o.density` (false:
-     *  Events, a mark `▌` in each cell with a record, in place of the bars of its records). */
+    /** Draw the lanes: `o.items` (those of the range; a record with no place on the axis is left out), `o.scale`
+     *  (range.scale; without it the records' own span, with its axis under the lanes), `o.gutter` (the names' cells),
+     *  `o.room` (rows, the rows left by default), `o.span` ([t0, t1] or a list whose rows in view it marks), `o.density`
+     *  (false: Events, a mark `▌` in each cell with a record, in place of the bars of its records). */
     draw(d, o = {}) {
-      const items = o.items || []
-      const scale = o.scale
-      const gutter = o.gutter || 14
-      const room = Math.max(1, Math.min(o.room ?? d.left, d.left))
+      if (o.scale && (o.scale.unit === 'n' || o.scale.unit === 's')) unit = o.scale.unit
+      else if (!o.scale) unit = opts.unit === 'n' ? 'n' : 's'
+      const placed = (it) => it !== null && it !== undefined && time(it) !== null
+      const items = (o.items || []).every(placed) ? o.items || [] : o.items.filter(placed)
+      // plain numbers not all whole, such as scores: their ticks and tips keep the decimals a cell needs
+      const fine = unit === 'n' && items.some((it) => time(it) % 1 || endOf(it, time(it)) % 1)
+      const gutter = o.gutter || (bare ? 0 : 14)
+      // an axis of its own takes a row under the lanes, and one more where its key has no room in the gutter; none
+      // with no records to place
+      const keyW = [typeof opts.band === 'function' && `─ ${words.band}`, typeof opts.problem === 'function' && `× ${words.problem}`].filter(Boolean).reduce((w, s, i) => w + (i ? 2 : 0) + width(s), 0)
+      const ownAxis = !o.scale && items.length > 0
+      const axisRows = ownAxis ? (keyW && keyW > gutter - 2 ? 2 : 1) : 0
+      const room = Math.max(1, Math.min(o.room ?? d.left, d.left) - axisRows)
+      const scale = o.scale || ownScale(items, Math.max(10, d.cols - gutter), fine)
       const colour = opts.colour || state.colour
       const span = o.span && typeof o.span.span === 'function' ? o.span.span(time) : Array.isArray(o.span) ? o.span : null
       const dense = o.density !== false
@@ -3960,7 +4023,7 @@ export function lanes(opts = {}) {
       st.counts = { band: 0, problem: 0 }
       const groups = all.map((n) => n.items)
       const max = maxBin(scale, groups, time)
-      const whens = Array.from({ length: scale.cols }, (_, x) => when(scale.t(x), Math.max(1, scale.step)))
+      const whens = Array.from({ length: scale.cols }, (_, x) => (unit === 'n' ? (fine ? numTo(scale.t(x), scale.step) : num(scale.t(x))) : when(scale.t(x), Math.max(1, scale.step))))
       // the rows past the room wait behind `… N more`, which shows the next of them
       const fits = all.length <= room ? all.length : Math.max(1, room - 1)
       if (st.top >= all.length || all.length <= room) st.top = 0
@@ -3970,19 +4033,21 @@ export function lanes(opts = {}) {
         const its = groups[all.indexOf(n)]
         const r = d.row()
         const own = n.depth === 0
-        if (own && n.children) r.add(n.folded ? '▸' : '▾', {}, { on: () => { st.folded.set(n.key, !n.folded); save(); redraw() }, tip: n.folded ? 'show the lanes under it' : 'fold the lanes under it into its own' }).gap(1)
-        else r.gap(2)
-        if (n.guide) r.add(n.guide, { fg: COLORS.rule })
-        const nameStyle = st.chosen === n.key ? { fg: COLORS.accent } : n.heading ? { b: true } : {}
-        r.add(n.name, nameStyle, {
-          on: () => {
-            st.chosen = n.key
-            if (typeof opts.onPick === 'function') opts.onPick(n)
-            redraw()
-          },
-          tip: `${n.name}: ${plural(n.items.length, words.record)}`,
-          max: Math.max(3, gutter - 2 - r.x),
-        })
+        if (!bare) {
+          if (own && n.children) r.add(n.folded ? '▸' : '▾', {}, { on: () => { st.folded.set(n.key, !n.folded); save(); redraw() }, tip: n.folded ? 'show the lanes under it' : 'fold the lanes under it into its own' }).gap(1)
+          else r.gap(2)
+          if (n.guide) r.add(n.guide, { fg: COLORS.rule })
+          const nameStyle = st.chosen === n.key ? { fg: COLORS.accent } : n.heading ? { b: true } : {}
+          r.add(n.name, nameStyle, {
+            on: () => {
+              st.chosen = n.key
+              if (typeof opts.onPick === 'function') opts.onPick(n)
+              redraw()
+            },
+            tip: `${n.name}: ${plural(n.items.length, words.record)}`,
+            max: Math.max(3, gutter - 2 - r.x),
+          })
+        }
         r.at(gutter)
         if (!(n.heading && !n.folded)) {
           const x0 = r.x
@@ -3993,7 +4058,7 @@ export function lanes(opts = {}) {
             x1: x0 + scale.cols,
             cursor: true,
             tips: lane.tips,
-            tip: `${n.name}: a click opens the ${words.record} nearest that time`,
+            tip: `${bare ? '' : `${n.name}: `}a click opens the ${words.record} nearest there`,
             on: (x) => {
               const t = scale.t(x)
               const near = lane.its.filter((it) => Math.abs(time(it) - t) <= scale.step * 3).sort((a, b) => Math.abs(time(a) - t) - Math.abs(time(b) - t))[0]
@@ -4008,11 +4073,32 @@ export function lanes(opts = {}) {
         const words2 = left > 0 ? `… ${num(left)} more` : '… back to the first'
         d.row().gap(2).add(words2, { d: true }, { on: () => { st.top = left > 0 ? st.top + fits : 0; redraw() }, tip: left > 0 ? 'show the next lanes' : 'show the first lanes' }).end()
       }
+      if (ownAxis) axis(d, scale, { gutter, legend: api.legend() })
     },
+  }
+  // without a scale from the page: the records' whole span across `cols` cells; one record's moment, or none, in the
+  // middle of a minute (of one unit for plain numbers)
+  function ownScale(items, cols, fine) {
+    let a = Infinity
+    let b = -Infinity
+    for (const it of items) {
+      const t = time(it)
+      const e = endOf(it, t)
+      if (t < a) a = t
+      if (e > b) b = e
+    }
+    if (!Number.isFinite(a)) a = b = 0
+    if (b <= a) {
+      const half = unit === 'n' ? 0.5 : 30
+      a -= half
+      b += half
+    }
+    return scaleOf(a, b, cols, unit, null, fine)
   }
   state.resets.push({ changed: () => st.off.size > 0, reset: () => { st.off.clear(); save() } })
   return api
 }
+export { timeline as lanes }
 
 // ------------------------------------------------------------------------------------------------ the transcript
 

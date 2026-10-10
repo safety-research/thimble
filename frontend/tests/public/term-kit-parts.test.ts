@@ -2,7 +2,8 @@
 // docs/terminal-views.md), drawn as text: Filter by's values are toggles in the top row, `●` while a value shows and
 // `○` while it is off, never in a hue, and a value turned off hides its rows; Rows groups by a field, a tree of them
 // with its guides left-aligned, or a label, each class a lane, a class added to the label a new lane; the lanes draw a
-// failure as `×` in red and their key's entries are toggles; a chart's cells are marked under the pointer rather than
+// failure as `×` in red and their key's entries are toggles, and the timeline works alone, on its records' own span of
+// times or numbers with its axis under it; a chart's cells are marked under the pointer rather than
 // drawn inverse, with a tip per cell; the list's rows in view are on the selection background across the lanes; a row
 // opens in a side pane beside the list, or under it in a narrow panel, never under the row; `{` `}` resize the
 // overview; a transcript draws its turns as thimble-term's file view does; and the view says it loads while a reader
@@ -345,6 +346,84 @@ describe('lanes', () => {
     const rows = text()
     expect(rows[2].slice(0, 16).trim()).toBe('▸ Run 1')
     expect(rows.slice(2, 4).some((r: string) => r.includes('lead'))).toBe(false)
+  })
+})
+
+describe('the timeline on its own', () => {
+  test("with no scale it lays out its records' own span and draws its axis under the lanes; lanes from a field's name, one for the records with none; a record with no place left out; `lanes` is the same call", async () => {
+    init({ cols: 80 })
+    expect(kit.lanes).toBe(kit.timeline)
+    const commits = [
+      { t: '2026-05-16T09:00:00Z', author: 'ana', ok: true },
+      { t: T0 + 600, author: 'bo', ok: true },
+      { t: T0 + 900, author: 'ana', ok: false },
+      { t: new Date((T0 + 3000) * 1000), ok: true },
+      { t: 'soon', author: 'bo', ok: true },
+    ]
+    const tl = kit.timeline({ rows: 'author', problem: (c: any) => c.ok === false })
+    kit.draw((d: any) => tl.draw(d, { items: commits }))
+    await tick()
+    const rows = text()
+    expect(rows.slice(0, 3).map((r: string) => r.slice(0, 14).trim())).toEqual(['ana', 'bo', 'no author'])
+    expect(tl.lanes.map((l: any) => l.items.length)).toEqual([2, 1, 1])
+    // the first record in the first cell, the last in the last, failed × in red; the axis under them with its key
+    expect([...rows[0]][2 + 14]).toMatch(/[▁▂▃▄▅▆▇█]/)
+    expect(rows[2].length).toBe(2 + 80)
+    expect(rows[0]).toContain('×')
+    expect(rows[3]).toMatch(/^ {2}× failed +16 May 09:00 +09:15/)
+    const hit = last().hits.find((h: any) => h.cursor)
+    expect(hit.tips[0]).toMatch(/^ana · 16 May 09:00:\d\d · 1 record$/)
+  })
+
+  test("on plain numbers (unit 'n'): the axis and the tips in numbers; with no rows, one lane with no name, its tips the place alone", async () => {
+    init({ cols: 60 })
+    const steps = [{ turn: 1 }, { turn: '12' }, { turn: 30 }, { turn: '2026-05-16' }]
+    const tl = kit.timeline({ unit: 'n', time: (s: any) => s.turn })
+    kit.draw((d: any) => tl.draw(d, { items: steps }))
+    await tick()
+    const rows = text()
+    // the one lane from the panel's edge, no name before it; the date is no turn
+    expect(tl.lanes[0].items).toHaveLength(3)
+    expect(rows[0].slice(2)).toMatch(/^[▁▂▃▄▅▆▇█]/)
+    expect(rows[1].trim().split(/\s+/).every((l: string) => /^\d+$/.test(l))).toBe(true)
+    const hit = last().hits.find((h: any) => h.cursor)
+    expect(hit.tips[0]).toBe('1 · 1 record')
+    expect(hit.tip).toBe('a click opens the record nearest there')
+  })
+
+  test("under the time range's scale of numbers, its unit: a time is no place there", async () => {
+    init()
+    const range = kit.timeRange({ unit: 'n' })
+    range.data({ times: [0, 10, 40] })
+    const tl = kit.timeline({ rows: (s: any) => s.agent, time: (s: any) => s.turn })
+    kit.draw((d: any) => tl.draw(d, { items: [{ turn: 0, agent: 'lead' }, { turn: 10, agent: 'sub' }, { turn: 40, agent: 'lead' }, { turn: '2026-05-16T09:00:00Z', agent: 'sub' }], scale: range.scale(d.cols - 14), gutter: 14 }))
+    await tick()
+    expect(tl.lanes.map((l: any) => l.items.length)).toEqual([2, 1])
+    const hit = last().hits.find((h: any) => h.cursor)
+    expect(hit.tips[0]).toBe('lead · 0 · 1 record')
+  })
+
+  test('on plain numbers not all whole, such as scores: the ticks and the tips in decimals, each tick once; whole numbers never step under one; no records, no axis', async () => {
+    init({ cols: 80 })
+    const runs = [0.05, 0.31, 0.5, 0.72, 0.95].map((score) => ({ score }))
+    const tl = kit.timeline({ unit: 'n', time: (r: any) => r.score })
+    kit.draw((d: any) => tl.draw(d, { items: runs }))
+    await tick()
+    const ticks = text()[1].trim().split(/\s+/)
+    expect(ticks).toEqual(expect.arrayContaining(['0.2', '0.4']))
+    expect(new Set(ticks).size).toBe(ticks.length)
+    // the first cell's middle, to the hundredth a cell spans
+    expect(last().hits.find((h: any) => h.cursor).tips[0]).toMatch(/^0\.0\d · 1 record$/)
+    // turns 0 to 3: a tick at each whole turn, never 0.5
+    const turns = kit.timeline({ unit: 'n', time: (r: any) => r.turn })
+    kit.draw((d: any) => turns.draw(d, { items: [0, 1, 2, 3].map((turn) => ({ turn })) }))
+    await tick()
+    expect(text()[1].trim().split(/\s+/)).toEqual(['0', '1', '2', '3'])
+    // nothing to place: no axis of 1970 under no lanes
+    const none = kit.timeline({ rows: 'author' })
+    kit.draw((d: any) => none.draw(d, { items: [] }))
+    await tick()
+    expect(text().filter(Boolean)).toEqual([])
   })
 })
 

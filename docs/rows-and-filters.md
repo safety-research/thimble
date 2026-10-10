@@ -10,7 +10,7 @@ these parts, so a page lays them out and fills them rather than drawing its own:
 | Rows | `thimble.rows` | in the top row: what the lanes or rows are grouped by, a field or a label |
 | Color by | `thimble.colorBy` | in the top row: the one color ([color.md](color.md)) |
 | the time range | `thimble.timeRange` | over the overview: the time the view shows ([time-range.md](time-range.md)) |
-| the lanes | `thimble.lanes` | the overview: a lane per group of Rows on the range's scale |
+| the timeline | `thimble.timeline` | the overview: a lane per group of Rows on one axis of times or numbers |
 | the key | `thimble.key` | the series the overview draws beside Color by's, each a toggle |
 | the divider | `thimble.divider` | the bar between the overview and the list, which a drag moves |
 | the cards | `thimble.recordCard` | a record as a card or a tile, its colors Color by's bars on its edge, one per choice |
@@ -65,7 +65,7 @@ const rows = thimble.rows({
   ],
   onChange: draw,
 })
-const lanes = thimble.lanes({
+const lanes = thimble.timeline({
   mount: '#lanes', keyMount: '#key', rows, range, names: 200,
   end: (call) => call.t + call.duration,                 // a mark as wide as the call ran
   band: (lane) => [[lane.items[0].t, lane.items.at(-1).t]], // where the session ran
@@ -142,21 +142,30 @@ items}`:
 it anchors (the marks of `thimble.markOf`); a record the reader gave its group as `group` keeps it, for a view that does
 not anchor every record.
 
-## The lanes
+## The timeline
 
-`thimble.lanes(opts)` draws the overview in `mount`: a lane per group of `rows` (or of `groups(items)`), its name in a
-column `names` px wide (200 by default) with its tree guide, and its records on the time range's scale as marks in the
-Color by colors, gray with Off. Lay the range and its axis out over the lanes with the same names column, so the lanes
-stand under them.
+`thimble.timeline(opts)` draws the overview in `mount` as lanes on one axis of times or numbers: a lane per group of
+`rows` (or of `groups(items)`), its name in a column `names` px wide (200 by default; with no range, as wide as its
+longest name, up to 200 and a third of the width) with its tree guide, and its records as marks in the Color by colors,
+gray with Off. It needs no other part: with no `range` it lays out its records' whole span and draws its own axis under
+the lanes, with no `rows` it draws one lane and no names, and with no Color by its marks are gray. With a range, lay the
+range and its axis out over the lanes with the same names column, so the lanes stand under them. `thimble.lanes` is its
+old name.
+
+```js
+const tl = thimble.timeline({ mount: '#timeline', rows: 'author', onMark: (c) => show(c) })
+tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
+```
 
 | option | what it is |
 |---|---|
-| `rows`, `range`, `colour` | the Rows control, the time range (its `scale(width)`), and Color by (the page's by default) |
-| `time(item)`, `end(item)` | a record's time (`item.t` by default), and its end, for a mark as wide as the record ran |
+| `rows`, `range`, `colour` | the lanes: the Rows control, a field's name or a function of a record; the time range (its `scale(width)`); and Color by (the page's by default) |
+| `time(item)`, `end(item)` | a record's place on the axis (`item.t` by default), a number, or a Date or an ISO time on an axis of time, else the record is left out; and its end, for a mark as wide as the record ran |
+| `unit` | the axis's unit with no range, as the time range's: `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a turn, a line or a score |
 | `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band (the key's "running") |
 | `problem(item)` | whether a record failed: its mark is underlined in the problem red (the key's "failed") |
 | `words` | the key's words: `{band, problem}` |
-| `keyMount` | where the key goes; at the lanes' top by default |
+| `keyMount` | where the key goes; at the lanes' top by default, or with no range beside the axis, under it where it has no room there |
 | `follow` | the detail list, whose rows carry `data-t`: the rows in view are a light tint across the lanes |
 | `density` | a flag, or a function the page answers at each draw: each lane as bars on the scale's bins in place of marks (an Events \| Density choice) |
 | `anchor(lane)` | a lane's `data-anchor`, such as a session's unit |
