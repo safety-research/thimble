@@ -37,6 +37,10 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               events on a time axis: (time, label[, lane]) or {time, label, lane, end}; TIMELINE_MIME
                               with a text/plain listing. Clock times ("HH:MM[:SS]") are read on CLOCK_DAY, rolling over
                               midnight when a time goes backwards
+    thimble.chart(kind, data, **options)
+                              a common chart (CHARTS) of a DataFrame whose columns come in the kind's order, such as
+                              bar (category, value[, group]): VEGALITE_MIME with the rows inline and no color, font or
+                              size of its own, which the card draws in thimble's theme (docs/charts.md)
     thimble.card(type, labels=None, **args)
                               a card of a card type (the workspace's CARD_TYPES_FILE): the arguments checked against the
                               type's schema, the type's card.py run on its reader's index with `labels` as the labels
@@ -66,7 +70,7 @@ from pathlib import Path
 WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.kernel_argv)
 
 __all__ = ["labels", "colours", "marked", "kept", "view_labels", "colour_value", "colour_on", "progress", "diagram", "timeline",
-           "card"]
+           "chart", "card"]
 
 FRAME_ROWS = 500  # rows of a table card's DataFrame the card keeps and shows (frames.ROWS_MAX)
 
@@ -1153,6 +1157,481 @@ def timeline(events=(), spacing="time"):
     lines += [f"{t}  {ev['label']}" + (f" [{ev['lane']}]" if ev.get("lane") else "") for t, ev in zip(given, evs)]
     _show({TIMELINE_MIME: {"events": evs, **({"spacing": "even"} if spacing == "even" else {})},
            "text/plain": "\n".join(lines)})
+
+
+# Charts (docs/charts.md): thimble.chart(kind, data, **options) draws a common chart from a DataFrame whose columns come
+# in the kind's order, as plain Vega-Lite with its rows inline and no color, font or size of its own. The card draws it
+# as it draws any chart, in thimble's theme (frontend lib/vizTheme, lib/chartDefaults, which also gives a label's values
+# the label's colors when the card read the label), and its rows are the table a takeaway cites (cite.chart_table).
+VEGALITE_MIME = "application/vnd.vegalite.v6.json"  # the mime Altair's mimetype renderer (notebook.SHELL_LINES) shows
+VEGALITE_SCHEMA = "https://vega.github.io/schema/vega-lite/v6.json"
+CHART_ROWS_MAX = 5000  # the rows a chart draws at most; a histogram bins any number of values
+BINS = 20  # the most bins a histogram makes when it picks its own step
+BINS_MAX = 200  # the most bins a histogram's given step may make
+LINE_DOTS_MAX = 30  # a line marks each value with a dot while its longest series has at most this many
+STACK_FIELD = "__thimble_stack"  # a row's group's place, which a bar's segments are stacked in
+# each kind's columns in order, how many of them it needs, and its options
+CHARTS = {
+    "bar": (("category", "value", "group"), 2, ("sort", "stack", "label", "marks")),
+    "line": (("x", "y", "series"), 2, ("label", "marks", "panels")),
+    "scatter": (("x", "y", "group"), 2, ("label", "marks")),
+    "dots": (("x", "row", "group"), 2, ("sort", "label", "marks")),
+    "histogram": (("value",), 1, ("step", "marks")),
+    "heatmap": (("x", "y", "value"), 3, ("log",)),
+}
+_DEFAULT = object()  # an option left out
+# text a chart reads as times: an ISO date, a month ("2025-04") or a date and time, with or without its zone
+_ISO_TIME = re.compile(r"^\d{4}-\d{2}(-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?)?$")
+
+
+def _shape(kind: str) -> str:
+    """A kind's columns as its errors name them: "(x, y) or (x, y, series)"."""
+    cols, need, _opts = CHARTS[kind]
+    return " or ".join("(" + ", ".join(cols[:n]) + ")" for n in range(need, len(cols) + 1))
+
+
+def chart(kind, data, **options):
+    """Show a common chart of `data`, a DataFrame whose columns come in the kind's order and are named as the axes and
+    the legend read; a Series is its index, then its values (a histogram's, its values). Returns nothing, so the card
+    shows the chart once.
+
+        bar        (category, value[, group])   sort, stack, label, marks
+        line       (x, y[, series])             label, marks, panels
+        scatter    (x, y[, group])              label, marks
+        dots       (x, row[, group])            sort, label, marks
+        histogram  (value)                      step, marks
+        heatmap    (x, y, value)                log
+
+    A value, y or histogram value is a number; a line's, a scatter's and a dots chart's x is numbers or times.
+    sort    a list of the categories (bar) or rows (dots) in order, or None for the frame's order; by default the largest
+            first (bar), the earliest first (dots), a label's values in the label's order
+    stack   with a group: True stacks the groups (the default), False sets them side by side, "share" stacks each
+            category to 100%
+    label   a label's name: the group column, else the category or row column, holds its values, drawn in its colors
+            and order
+    marks   {text: x}: a line across the chart at each x, with its text
+    panels  True draws each series in a panel of its own, with its own y scale
+    step    the width of a histogram's bins; by default a round width that makes at most 20
+    log     True colors a heatmap's values on a log scale"""
+    if not isinstance(kind, str) or kind not in CHARTS:
+        raise ValueError(f"thimble.chart: no chart kind {kind!r}; the kinds are "
+                         + "; ".join(f"{k} {_shape(k)}" for k in CHARTS))
+    allowed = CHARTS[kind][2]
+    for name in options:
+        if name not in allowed:
+            raise TypeError(f"thimble.chart({kind!r}) takes the options {', '.join(allowed)}, not {name!r}")
+    df = _chart_frame(kind, data)
+    spec = _CHART_SPECS[kind](df, options)
+    _show({VEGALITE_MIME: {"$schema": VEGALITE_SCHEMA, **spec},
+           "text/plain": f"thimble.chart({kind!r}): {len(df):,} rows"})
+
+
+def _chart_frame(kind: str, data):
+    """`data` as a DataFrame of named columns: a Series as its index and its values (a histogram's as its values), a
+    named index as the first columns; ValueError naming the kind's columns when their number is wrong."""
+    import pandas as pd
+
+    if isinstance(data, pd.Series):
+        data = data.to_frame(name="value" if data.name is None else data.name)
+        data = data.reset_index() if len(CHARTS[kind][0]) > 1 else data.reset_index(drop=True)
+    elif isinstance(data, pd.DataFrame):
+        if any(n is not None for n in data.index.names):
+            data = data.reset_index()
+    else:
+        raise TypeError(f"thimble.chart({kind!r}) takes a DataFrame of {_shape(kind)} columns, not {type(data).__name__}")
+    names = [" / ".join(str(p) for p in c if str(p)) if isinstance(c, tuple) else str(c) for c in data.columns]
+    got = ", ".join(names) or "none"
+    cols, need, _opts = CHARTS[kind]
+    if not need <= len(names) <= len(cols):
+        raise ValueError(f"thimble.chart({kind!r}) takes {_shape(kind)} columns, in that order; got {len(names)}: {got}")
+    if len(set(names)) < len(names):
+        raise ValueError(f"thimble.chart({kind!r}): each column needs a name of its own; got {got}")
+    if len(data) > CHART_ROWS_MAX and kind != "histogram":
+        raise ValueError(f"thimble.chart({kind!r}): {len(data):,} rows, and a chart draws {CHART_ROWS_MAX:,} at most; count "
+                         "or bin them first")
+    data = data.copy()
+    data.columns = names
+    return data
+
+
+def _col_kind(s) -> str:
+    """A column as a chart reads it: "number", "time" (times, dates, or text that is all ISO dates), "duration" or
+    "text"."""
+    from pandas.api import types as pt
+
+    if pt.is_timedelta64_dtype(s.dtype):
+        return "duration"
+    t = _type_of(s)
+    if t == "quantitative":
+        return "number"
+    if t == "temporal":
+        return "time"
+    vals = s.dropna()
+    return "time" if len(vals) and all(isinstance(v, str) and _ISO_TIME.match(v) for v in vals) else "text"
+
+
+def _chart_kinds(kind: str, df, number=(), axis=()) -> dict:
+    """{column: its kind (_col_kind)}; ValueError naming the kind's columns when a column that must hold numbers (the
+    places in `number`), or numbers or times (the places in `axis`), holds something else."""
+    cols = list(df.columns)
+    kinds = {c: _col_kind(df[c]) for c in cols}
+    names = CHARTS[kind][0]
+    for i in [*number, *axis]:
+        if i < len(cols) and kinds[cols[i]] not in (("number",) if i in number else ("number", "time")):
+            want = "numbers" if i in number else "numbers or times"
+            got = {"time": "times", "duration": "durations"}.get(kinds[cols[i]], kinds[cols[i]])
+            hint = (", which .dt.total_seconds() gives as numbers" if got == "durations"
+                    else '; draw categories with "bar"' if i in axis and kind != "bar" else "")
+            raise ValueError(f"thimble.chart({kind!r}) takes {_shape(kind)} columns, the {names[i]} {want}; `{cols[i]}` "
+                             f"holds {got}{hint}")
+    return kinds
+
+
+def _times(s):
+    """A column of times as timestamps without a zone, each at its own zone's clock time (a column of mixed zones at
+    UTC's): Vega-Lite reads a time without a zone as the clock shows it, and one with a zone in the reader's zone."""
+    import pandas as pd
+
+    if not pd.api.types.is_datetime64_any_dtype(s.dtype):
+        fmt = {"format": "ISO8601"} if all(isinstance(v, str) for v in s.dropna()) else {}
+        try:
+            s = pd.to_datetime(s, **fmt)
+        except (ValueError, TypeError):
+            s = pd.to_datetime(s, utc=True, **fmt)
+    if getattr(s.dt, "tz", None) is not None:
+        s = s.dt.tz_localize(None)
+    return s
+
+
+def _time_format(ts) -> str:
+    """The d3 format that shows a column of times whole: the date, with the minute or the second when any has one."""
+    vals = ts.dropna()
+    if ((vals.dt.second != 0) | (vals.dt.microsecond != 0)).any():
+        return "%Y-%m-%d %H:%M:%S"
+    return "%Y-%m-%d %H:%M" if ((vals.dt.hour != 0) | (vals.dt.minute != 0)).any() else "%Y-%m-%d"
+
+
+def _json_value(v):
+    """A value as a chart's row holds it: a number, a bool, text, a time in ISO form, None for a missing one."""
+    if _missing(v):
+        return None
+    if isinstance(v, bool) or type(v).__name__ == "bool_":
+        return bool(v)
+    if isinstance(v, numbers.Integral):
+        return int(v)
+    if isinstance(v, numbers.Real):
+        f = float(v)
+        return f if math.isfinite(f) else None
+    return _text(v)
+
+
+def _chart_rows(df, kinds: dict) -> list:
+    """The frame's rows as a chart's inline data, its time columns as times (_times)."""
+    cols = {c: (_times(df[c]) if kinds[c] == "time" else df[c]).tolist() for c in df.columns}
+    return [dict(zip(cols, vals)) for vals in zip(*[[_json_value(v) for v in vs] for vs in cols.values()])]
+
+
+def _distinct(values) -> list:
+    """The values as a chart's rows hold them, each once, in their first order, none missing."""
+    out, seen = [], set()
+    for v in values:
+        j = _json_value(v)
+        key = json.dumps(j)
+        if j is not None and key not in seen:
+            seen.add(key)
+            out.append(j)
+    return out
+
+
+def _ranked(s, by, earliest=False) -> list:
+    """The values of `s` by the rows' `by`: the largest absolute sum first, or with `earliest` the least first; ties,
+    and values with no `by`, in the frame's order."""
+    key: dict = {}
+    for v, w in zip(s.tolist(), by.tolist()):
+        j, w = _json_value(v), None if _missing(w) else w
+        if j is not None and w is not None:
+            k = json.dumps(j)
+            key[k] = (min(key[k], w) if k in key else w) if earliest else key.get(k, 0) - abs(float(w))
+    vals = _distinct(s.tolist())
+    return sorted([v for v in vals if json.dumps(v) in key], key=lambda v: key[json.dumps(v)]) \
+        + [v for v in vals if json.dumps(v) not in key]
+
+
+def _ordered(kind: str, s, default: list, sort=_DEFAULT, label=None, what="categories") -> list:
+    """The values of `s` in the order the chart shows them: the frame's with `sort` None; else `default`, after a
+    label's values in the label's order or a categorical column's categories, with `sort`'s list first."""
+    vals = _distinct(s.tolist())
+    if sort is None:
+        return vals
+    base = list(default)
+    head = [v for v in label if v in vals] if label is not None else \
+        [v for v in _distinct(s.cat.categories) if v in vals] if hasattr(s, "cat") else []
+    if sort is not _DEFAULT:
+        if isinstance(sort, (str, bytes, dict)) or not hasattr(sort, "__iter__"):
+            raise ValueError(f"thimble.chart({kind!r}): `sort` is a list of the {what} in order, or None for the "
+                             f"frame's order, not {sort!r}")
+        head = [v for v in _distinct(sort) if v in vals]
+    return head + [v for v in base if v not in head]
+
+
+def _label_values(kind: str, name, s, col: str) -> list:
+    """The values of the label `name` in its order, once column `col` is seen to hold some of them; the card notes the
+    label as read, which draws those values in the label's colors."""
+    if not isinstance(name, str):
+        raise TypeError(f"thimble.chart({kind!r}): `label` is a label's name, not {name!r}")
+    k = _find(name)
+    values = [v for v, _c in k["classes"]]
+    if not {str(v) for v in s.dropna().tolist()} & set(values):
+        raise ValueError(f"thimble.chart({kind!r}): the column `{col}` holds none of the label {k['name']!r}'s values, "
+                         + ", ".join(map(repr, values)))
+    if all(x["id"] != k["id"] for x in _LABELS_READ):
+        _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
+    return values
+
+
+def _field(name: str) -> str:
+    """A column's name as a Vega-Lite field, whose dots and brackets would otherwise read as a path into the row."""
+    return re.sub(r"([\\.\[\]])", r"\\\1", name)
+
+
+def _enc(name: str, type_: str, **more) -> dict:
+    return {"field": _field(name), "type": type_, "title": name, **more}
+
+
+def _free(name: str, taken) -> str:
+    """`name`, or `name (2)` and on, whichever no column of `taken` has."""
+    n, out = 1, name
+    while out in taken:
+        n += 1
+        out = f"{name} ({n})"
+    return out
+
+
+def _tooltip(df, kinds: dict) -> list:
+    """Every column of the chart's rows, in the hover tip: times whole (_time_format)."""
+    out = []
+    for c in df.columns:
+        t = {"number": "quantitative", "time": "temporal"}.get(kinds[c], "nominal")
+        tip = {"field": _field(c), "type": t, "title": c}
+        if t == "temporal":
+            tip["format"] = _time_format(_times(df[c]))
+        out.append(tip)
+    return out
+
+
+def _unit(rows: list, mark, enc: dict, **more) -> dict:
+    return {"data": {"values": rows}, "mark": mark, "encoding": enc, **more}
+
+
+def _with_marks(kind: str, spec: dict, marks, x: str, xkind: str) -> dict:
+    """The chart as a layer under a rule across it at each of `marks`' x values ({text: x}), the text at the rule's top."""
+    import pandas as pd
+
+    if not isinstance(marks, dict) or not marks:
+        raise ValueError(f"thimble.chart({kind!r}): `marks` is a dict of {{text: x}}, not {marks!r}")
+    if xkind not in ("time", "number"):
+        raise ValueError(f"thimble.chart({kind!r}): `marks` need an x axis of times or numbers; `{x}` holds text")
+    at = pd.Series(list(marks.values()), dtype=object)
+    if xkind == "time":
+        try:
+            at = _times(at)
+        except (ValueError, TypeError):
+            raise ValueError(f"thimble.chart({kind!r}): `marks` are at times, as `{x}` holds; got "
+                             f"{list(marks.values())!r}") from None
+    elif not all(isinstance(v, numbers.Real) and not isinstance(v, bool) for v in at):
+        raise ValueError(f"thimble.chart({kind!r}): `marks` are at numbers, as `{x}` holds; got {list(marks.values())!r}")
+    text = _free("mark", [x])
+    rows = [{x: _json_value(v), text: str(t)} for t, v in zip(marks, at.tolist())]
+    xenc = _enc(x, "temporal" if xkind == "time" else "quantitative")
+    data = spec.pop("data")
+    return {"data": data, "layer": [
+        spec,
+        {"data": {"values": rows}, "mark": "rule", "encoding": {"x": xenc}},
+        {"data": {"values": rows}, "mark": {"type": "text", "align": "left", "baseline": "top", "dx": 4, "dy": 4},
+         "encoding": {"x": xenc, "y": {"value": 0}, "text": {"field": _field(text), "type": "nominal"}}},
+    ]}
+
+
+def _bar_spec(df, opts: dict) -> dict:
+    kind = "bar"
+    cols = list(df.columns)
+    cat, val, grp = cols[0], cols[1], cols[2] if len(cols) > 2 else None
+    kinds = _chart_kinds(kind, df, number=(1,))
+    stack = opts.get("stack", True)
+    if not (stack is True or stack is False or stack == "share"):
+        raise ValueError(f"thimble.chart({kind!r}): `stack` is True, False or \"share\", not {stack!r}")
+    if "stack" in opts and grp is None:
+        raise ValueError(f"thimble.chart({kind!r}): `stack` stacks the groups of a third column, which this frame lacks")
+    label = _label_values(kind, opts["label"], df[grp or cat], grp or cat) if opts.get("label") is not None else None
+    ck = kinds[cat]
+    if ck == "time" and "sort" in opts:
+        raise ValueError(f"thimble.chart({kind!r}): `sort` orders text or number categories; times keep their order")
+    if ck == "time" and stack is False:
+        raise ValueError(f"thimble.chart({kind!r}): stack=False sets groups side by side over text or number "
+                         "categories; draw groups over time with \"line\"")
+    if opts.get("marks") is not None and ck != "time":
+        raise ValueError(f"thimble.chart({kind!r}): `marks` need categories that are times; `{cat}` holds {ck}")
+    rows = _chart_rows(df, kinds)
+    sort = opts.get("sort", _DEFAULT)
+    enc: dict = {}
+    order = None
+    if ck == "text":
+        order = _ordered(kind, df[cat], _ranked(df[cat], df[val]), sort, None if grp else label)
+        enc["y"] = _enc(cat, "nominal", sort=order)
+        enc["x"] = _enc(val, "quantitative")
+        value, offset = "x", "yOffset"
+    elif ck == "number":
+        order = _ordered(kind, df[cat], sorted(_distinct(df[cat].tolist())), sort, None if grp else label)
+        enc["x"] = _enc(cat, "ordinal", sort=order)
+        enc["y"] = _enc(val, "quantitative")
+        value, offset = "y", "xOffset"
+    else:  # times: each bar spans its time to the next, the least step between two of them, else a day
+        import pandas as pd
+
+        ts = _times(df[cat])
+        steps = ts.dropna().drop_duplicates().sort_values().diff().dropna()
+        step = steps.min() if len(steps) else pd.Timedelta(days=1)
+        end = _free(f"{cat} end", cols)
+        for r, t in zip(rows, ts.tolist()):
+            r[end] = None if _missing(t) else _json_value(t + step)
+        enc["x"] = _enc(cat, "temporal")
+        enc["x2"] = {"field": _field(end)}
+        enc["y"] = _enc(val, "quantitative")
+        value, offset = "y", None
+    # a bar over times is told it stands upright, since Vega-Lite takes a bar from x to x2 for one lying down
+    mark = {"type": "bar", "orient": "vertical"} if ck == "time" else "bar"
+    more: dict = {}
+    if grp:
+        if stack == "share":
+            enc[value] = {**enc[value], "stack": "normalize", "axis": {"format": "%"}}
+        groups = _ordered(kind, df[grp], _ranked(df[grp], df[val]), label=label)
+        enc["color"] = _enc(grp, "nominal", sort=groups)
+        if stack is False:
+            enc[offset] = {"field": _field(grp), "type": "nominal", "sort": groups}
+        else:
+            # Vega-Lite stacks a bar's segments by the group's name; this stacks them in the legend's order
+            more["transform"] = [{"calculate": f"indexof({json.dumps(groups)}, datum[{json.dumps(grp)}])", "as": STACK_FIELD}]
+            enc["order"] = {"field": STACK_FIELD, "type": "quantitative"}
+    elif label is not None:
+        enc["color"] = _enc(cat, "nominal", sort=order, legend=None)
+    enc["tooltip"] = _tooltip(df, kinds)
+    spec = _unit(rows, mark, enc, **more)
+    return _with_marks(kind, spec, opts["marks"], cat, ck) if opts.get("marks") is not None else spec
+
+
+def _xy_spec(kind: str, df, opts: dict) -> dict:
+    """A line, a scatter or a dots chart: x numbers or times; y numbers, or a dots chart's rows; a third column's groups
+    in color."""
+    cols = list(df.columns)
+    x, y, grp = cols[0], cols[1], cols[2] if len(cols) > 2 else None
+    kinds = _chart_kinds(kind, df, number=() if kind == "dots" else (1,), axis=(0,))
+    on = grp or (y if kind == "dots" else None)  # the column a label colors
+    if opts.get("label") is not None and on is None:
+        raise ValueError(f"thimble.chart({kind!r}): `label` colors the {CHARTS[kind][0][2]} column, which this frame lacks")
+    label = _label_values(kind, opts["label"], df[on], on) if opts.get("label") is not None else None
+    panels = opts.get("panels", False)
+    if panels not in (True, False) or (panels and grp is None):
+        raise ValueError(f"thimble.chart({kind!r}): `panels` is True or False and needs a series column")
+    if panels and opts.get("marks") is not None:
+        raise ValueError(f"thimble.chart({kind!r}): `panels` take no `marks`")
+    rows = _chart_rows(df, kinds)
+    at = _times(df[x]) if kinds[x] == "time" else df[x]
+    enc: dict = {"x": _enc(x, "temporal" if kinds[x] == "time" else "quantitative")}
+    if kind == "dots":
+        order = _ordered(kind, df[y], _ranked(df[y], at, earliest=True), opts.get("sort", _DEFAULT), None if grp else label, "rows")
+        enc["y"] = _enc(y, "nominal", sort=order)
+    else:
+        enc["y"] = _enc(y, "quantitative")
+    more: dict = {}
+    if grp:
+        weights = df[y] if kind == "line" else df[grp].map(lambda _v: 1)
+        groups = _ordered(kind, df[grp], _ranked(df[grp], weights), label=label)
+        enc["color"] = _enc(grp, "nominal", sort=groups)
+        if panels:
+            enc["row"] = {"field": _field(grp), "type": "nominal", "sort": groups, "title": None}
+            more["resolve"] = {"scale": {"y": "independent"}}
+    elif label is not None:
+        enc["color"] = _enc(y, "nominal", sort=enc["y"]["sort"], legend=None)
+    enc["tooltip"] = _tooltip(df, kinds)
+    if kind == "line":
+        longest = int(df.groupby(grp, sort=False).size().max()) if grp and len(df) else len(df)
+        mark = {"type": "line", "point": True} if longest <= LINE_DOTS_MAX else "line"
+    else:
+        mark = "point"
+    spec = _unit(rows, mark, enc, **more)
+    return _with_marks(kind, spec, opts["marks"], x, kinds[x]) if opts.get("marks") is not None else spec
+
+
+def _histogram_spec(df, opts: dict) -> dict:
+    kind = "histogram"
+    col = df.columns[0]
+    _chart_kinds(kind, df, number=(0,))
+    vals = [float(v) for v in df[col].tolist() if not _missing(v)]
+    if not vals:
+        raise ValueError(f"thimble.chart({kind!r}): `{col}` holds no numbers to bin")
+    lo, hi = min(vals), max(vals)
+    whole = all(v.is_integer() for v in vals)
+    step = opts.get("step")
+    if step is None:
+        raw = (hi - lo) / BINS or (abs(lo) / BINS if lo else 1.0)
+        e = 10 ** math.floor(math.log10(raw))
+        step = next(m * e for m in (1, 2, 5, 10) if m * e >= raw * (1 - 1e-9))
+        step = max(step, 1.0) if whole else step
+    elif isinstance(step, bool) or not isinstance(step, numbers.Real) or not step > 0:
+        raise ValueError(f"thimble.chart({kind!r}): `step` is a bin's width, a number above 0, not {step!r}")
+    step = float(step)
+    start = math.floor(lo / step + 1e-9) * step
+    n = int(math.floor((hi - start) / step + 1e-9)) + 1
+    if n > BINS_MAX:
+        raise ValueError(f"thimble.chart({kind!r}): a step of {step:g} makes {n:,} bins, and a histogram takes {BINS_MAX} "
+                         "at most")
+    counts = [0] * n
+    for v in vals:
+        counts[min(n - 1, int(math.floor((v - start) / step + 1e-9)))] += 1
+
+    def edge(i):
+        v = round(start + i * step, 10)
+        return int(v) if v.is_integer() else v
+
+    end = _free(f"{col} end", [col])
+    count = _free("count", [col, end])
+    rows = [{col: edge(i), end: edge(i + 1), count: c} for i, c in enumerate(counts)]
+    enc = {"x": _enc(col, "quantitative", bin={"binned": True, "step": step}), "x2": {"field": _field(end)},
+           "y": _enc(count, "quantitative"),
+           "tooltip": [{"field": _field(c), "type": "quantitative", "title": c} for c in (col, end, count)]}
+    spec = _unit(rows, "bar", enc)
+    return _with_marks(kind, spec, opts["marks"], col, "number") if opts.get("marks") is not None else spec
+
+
+def _heatmap_spec(df, opts: dict) -> dict:
+    kind = "heatmap"
+    x, y, val = list(df.columns)
+    kinds = _chart_kinds(kind, df, number=(2,))
+    log = opts.get("log", False)
+    if log not in (True, False):
+        raise ValueError(f"thimble.chart({kind!r}): `log` is True or False, not {log!r}")
+    rows = _chart_rows(df, {c: "number" if kinds[c] == "number" else "text" for c in df.columns})
+    enc: dict = {}
+    for ch, c in (("x", x), ("y", y)):
+        if kinds[c] == "time":  # times as the text of their cells' places, in time order
+            ts = _times(df[c])
+            labels = [None if _missing(t) else t.strftime(_time_format(ts)) for t in ts.tolist()]
+            for r, t in zip(rows, labels):
+                r[c] = t
+            order = sorted(set(t for t in labels if t is not None))
+        elif kinds[c] == "number":
+            order = sorted(_distinct(df[c].tolist()))
+        else:
+            order = _ordered(kind, df[c], _ranked(df[c], df[val]))
+        enc[ch] = _enc(c, "nominal" if kinds[c] == "text" else "ordinal", sort=order)
+    enc["color"] = _enc(val, "quantitative", **({"scale": {"type": "symlog"}} if log else {}))
+    enc["tooltip"] = [{"field": _field(c), "type": "quantitative" if c == val else "nominal", "title": c} for c in (x, y, val)]
+    return _unit(rows, "rect", enc)
+
+
+_CHART_SPECS = {"bar": _bar_spec, "line": lambda df, o: _xy_spec("line", df, o),
+                "scatter": lambda df, o: _xy_spec("scatter", df, o), "dots": lambda df, o: _xy_spec("dots", df, o),
+                "histogram": _histogram_spec, "heatmap": _heatmap_spec}
 
 
 # Card types (backend cardtypes.py): a viewer folder whose view.json has a `card` block. The server writes the types a
