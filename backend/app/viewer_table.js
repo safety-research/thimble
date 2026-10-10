@@ -445,6 +445,7 @@
       else if (col.type === 'text' && textCols.length < 2) textCols.push(col)
     })
     shared.strip(this.mount, {
+      bare: this.bars.off,
       rows: this.shown.map(function (r) {
         return c ? c.valueOf(r) : null
       }),

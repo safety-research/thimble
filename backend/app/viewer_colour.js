@@ -1878,6 +1878,8 @@
     this.preview = opts && typeof opts.preview === 'function' ? opts.preview : null
     // each row's record, which the lanes of Color by's fields past the first read
     this.records = opts && Array.isArray(opts.records) ? opts.records : null
+    // a list whose part takes no Color by (`colour: false`): a plain scrollbar, as with Color by Off
+    this.bare = !!(opts && opts.bare)
   }
   Strip.prototype.remove = function () {
     if (this.raf != null) {
@@ -2034,7 +2036,7 @@
     var c = this.c
     var ch = c.choice()
     var recs = []
-    var plain = !ch || ch.off
+    var plain = !ch || ch.off || this.bare
     var by = ch && ch.label ? ch.label : null
     var g = grey()
     if (this.rows) {
@@ -2975,11 +2977,13 @@
           var refs = 'refs' in opts ? (Array.isArray(opts.refs) ? opts.refs : null) : s.refs
           var recs = 'records' in opts ? (Array.isArray(opts.records) ? opts.records : null) : s.records
           var whole = 'whole' in opts ? !!opts.whole : s.complete
-          if (!same(rows, s.rows) || !same(refs, s.refs) || !same(recs, s.records) || whole !== s.complete) s.dataVer++
+          var bare = 'bare' in opts ? !!opts.bare : s.bare
+          if (!same(rows, s.rows) || !same(refs, s.refs) || !same(recs, s.records) || whole !== s.complete || bare !== s.bare) s.dataVer++
           s.rows = rows
           s.refs = refs
           s.records = recs
           s.complete = whole
+          s.bare = bare
           if ('preview' in opts) s.preview = typeof opts.preview === 'function' ? opts.preview : null
         }
         s.refreshed()
