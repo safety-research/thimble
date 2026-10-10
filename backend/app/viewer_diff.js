@@ -494,13 +494,11 @@
     if (!this.mount || this.dead) return
     var files = this.patch != null ? parsePatch(this.patch) : null
     var got = files ? null : rows(this.before, this.after)
-    var all = files
-      ? files.reduce(function (acc, f) {
-          return f.hunks.reduce(function (a, h) {
-            return a.concat(h.rows)
-          }, acc)
-        }, [])
-      : got.rows
+    var all = got ? got.rows : []
+    if (files)
+      for (var fi = 0; fi < files.length; fi++)
+        for (var hi = 0; hi < files[fi].hunks.length; hi++)
+          for (var ri = 0; ri < files[fi].hunks[hi].rows.length; ri++) all.push(files[fi].hunks[hi].rows[ri])
     // one side empty: every line added, or every line removed
     var olds = 0
     var news = 0
