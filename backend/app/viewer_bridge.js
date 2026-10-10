@@ -1492,9 +1492,11 @@
   }
   // A quoted passage inside a record the view shows whole: `open` brings quote {record, text}, and the bridge finds the
   // text in the outermost element anchored at the record (else anywhere), whitespace collapsed and case ignored, then
-  // highlights it, scrolls to it and posts `quoted {found}`. The search reruns after each page change until the page is
-  // quiet for QUOTE_QUIET ms with no fetch pending, or QUOTE_MAX ms pass; a found passage is kept in view for
-  // QUOTE_SETTLE ms.
+  // highlights it, scrolls to it and posts `quoted {found}`. In an element that holds the kit's formatted text
+  // (viewer_text.js), which shows a record's markdown rendered, the quote of its source is also tried with the markdown
+  // taken out. A passage in a fold (data-thimble-fold, hidden) has the part that folded it open it. The search reruns
+  // after each page change until the page is quiet for QUOTE_QUIET ms with no fetch pending, or QUOTE_MAX ms pass; a
+  // found passage is kept in view for QUOTE_SETTLE ms.
   var QUOTE_QUIET = 800
   var QUOTE_MAX = 20000
   var QUOTE_SETTLE = 1000
@@ -1504,7 +1506,28 @@
   function squeeze(s) {
     return String(s).replace(/\s+/g, ' ').trim().toLowerCase()
   }
-  function quoteNeedles(text) {
+  // A quote of a markdown source as its rendered text reads: without the markers of emphasis, strikethrough and code,
+  // a heading's #, a list's, a task's and a block quote's markers, and with a link's or an image's text alone
+  function unmarked(text) {
+    return String(text)
+      .split('\n')
+      .map(function (l) {
+        return l
+          .replace(/^\s*(?:>\s?)+/, '')
+          .replace(/^\s{0,3}#{1,6}(?:\s+|$)/, '')
+          .replace(/\s+#+\s*$/, '')
+          .replace(/^\s*(?:[-*+]|\d{1,9}[.)])\s+(?:\[[ xX]\]\s+)?/, '')
+      })
+      .join('\n')
+      .replace(/!?\[([^\]]*)\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+(?:"[^"]*"|'[^']*'))?\)/g, '$1')
+      .replace(/!?\[([^\]]*)\]\[[^\]]*\]/g, '$1')
+      .replace(/<((?:https?|mailto):[^>\s]+)>/gi, '$1')
+      .replace(/`+/g, '')
+      .replace(/\*\*|__|~~/g, '')
+      .replace(/(^|[\s([{"'])[*_]+(?=\S)/g, '$1')
+      .replace(/(\S)[*_]+(?=$|[\s)\]}.,;:!?"'])/gm, '$1')
+  }
+  function quoteNeedles(text, md) {
     var out = []
     function add(n) {
       if (n && out.indexOf(n) < 0) out.push(n)
@@ -1519,6 +1542,7 @@
         break
       }
     }
+    if (md) quoteNeedles(unmarked(text)).forEach(add)
     return out
   }
   // the first place a squeezed needle shows in the element's squeezed text, as a range over the element's own text
@@ -1565,6 +1589,15 @@
         if (r) return r
       }
     }
+    // a quote of a record's markdown, in its rendered text
+    var ms = quoteNeedles(q.text, true).slice(ns.length)
+    for (var m = 0; m < ms.length; m++) {
+      for (var t = 0; t < scopes.length; t++) {
+        if (!scopes[t].matches('.thimble-text') && !scopes[t].querySelector('.thimble-text')) continue
+        var rm = squeezedRange(scopes[t], ms[m])
+        if (rm) return rm
+      }
+    }
     return null
   }
   // scrolls every scrolling box around the range, then the page, so that the range sits a third of the way down
@@ -1583,6 +1616,9 @@
   // the evidence highlight in ink, at the find's stronger step so it reads over the ring views draw around the record a
   // citation opened
   function showQuote(r) {
+    var at = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement
+    var fold = at && at.closest('[data-thimble-fold]')
+    if (fold && fold.hidden) fold.dispatchEvent(new CustomEvent('thimble-unfold', { bubbles: true }))
     if (HL) {
       if (!quoteSheet) {
         quoteSheet = document.createElement('style')

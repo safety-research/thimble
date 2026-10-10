@@ -79,8 +79,9 @@
   }
   // The runs of text under `root` in document order, each the text nodes that run on inside one element (through inline
   // elements such as a span or a link, so a phrase across them is found): {nodes, text, block, fold}, `fold` the
-  // element with data-thimble-fold around it, if any. The kit's controls and hidden elements (a fold's text apart) are
-  // left out.
+  // element with data-thimble-fold around it, if any; a run ends where a fold starts or ends, since a fold may be an
+  // inline element, such as the rest of a line thimble.text folds. The kit's controls and hidden elements (a fold's text
+  // apart) are left out.
   function runs(root) {
     var out = []
     if (!root) return out
@@ -97,8 +98,9 @@
       if (!v) continue
       var block = n.parentElement
       while (block && block !== root && INLINE[block.tagName]) block = block.parentElement
-      if (!last || last.block !== block) {
-        last = { nodes: [], text: '', block: block, fold: block && block.closest ? block.closest('[' + FOLD + ']') : null }
+      var fold = n.parentElement.closest('[' + FOLD + ']')
+      if (!last || last.block !== block || last.fold !== fold) {
+        last = { nodes: [], text: '', block: block, fold: fold }
         out.push(last)
       }
       last.nodes.push(n)
@@ -395,10 +397,12 @@
     }
     return out
   }
-  // where a match stands on the screen: its range's box, or for one in a folded fold the fold's place
+  // where a match stands on the screen: its range's box, or for one in a folded fold the fold's place, the nearest
+  // element before it that shows
   Search.prototype.rectOf = function (m) {
     if (m.fold && m.fold.hidden) {
-      var at = m.fold.previousElementSibling || m.fold.parentElement
+      var at = m.fold
+      while (at && !(at.getClientRects().length && !at.hidden)) at = at.previousElementSibling || at.parentElement
       return at ? at.getBoundingClientRect() : null
     }
     if (m.range === undefined) m.range = m.run ? rangeIn(m.run, m.a, m.b) : null
