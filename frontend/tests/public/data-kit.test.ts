@@ -1264,6 +1264,43 @@ describe('the messages', () => {
     expect(texts('.thimble-msg-author')).toEqual(['new'])
   })
 
+  test("a boxed message: a box beside its avatar, its head the author, what they did and the time over its subject, `to` and words; it shares no head; one with no words is its head alone; an event is never boxed", async () => {
+    await load('<span id="colour"></span><div id="c"></div>')
+    const w = win()
+    w.eval(`thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }] })
+      window.conv = thimble.messages({ mount: '#c' })`)
+    w.conv.draw([
+      { ref: 'pr#1', t: T, author: 'ana', box: true, said: 'opened this pull request', text: 'Fixes the **parser**.' },
+      { ref: 'pr#2', t: T + 60, author: 'ana', text: 'A first comment, a minute on' },
+      { ref: 'pr#3', t: T + 90, author: 'ana', text: 'A second comment' },
+      { ref: 'pr#4', t: T + 120, author: 'bo', box: true, said: { html: 'wrote to <b>ops</b>' }, title: 'Gale warning', to: 'ops', text: '' },
+      { ref: 'pr#5', t: T + 130, author: 'bo', box: true, text: '' },
+      { ref: 'pr#6', t: T + 140, author: 'cy', kind: 'event', icon: 'merge', said: 'merged this', box: true },
+    ])
+    const m = (n: number) => doc().querySelector(`[data-anchor="pr#${n}"]`)!
+    // the opening: its avatar in the rail, its box's head and its words drawn by thimble.text inside the box
+    expect(m(1).classList.contains('is-boxed')).toBe(true)
+    expect(m(1).querySelector(':scope > .thimble-msg-rail .avatar')!.textContent).toBe('a')
+    const head = m(1).querySelector('.thimble-msg-box > .thimble-msg-boxhead')!
+    expect(head.hasAttribute('data-thimble-chrome')).toBe(true)
+    expect(head.querySelector('.thimble-msg-said')!.textContent).toBe('ana opened this pull request')
+    expect(head.querySelector('.thimble-msg-time')!.getAttribute('title')).toBe('2026-08-27 23:30:00')
+    expect(texts('[data-anchor="pr#1"] .thimble-msg-box > .thimble-msg-boxbody .thimble-msg-text')).toEqual([expect.stringContaining('parser')])
+    expect(m(1).getAttribute('data-colour')).toBe('ana')
+    // the comments by the same author a minute later share no head with it, and share one with each other
+    expect(heads().slice(0, 3)).toEqual([['pr#1', 'head', ''], ['pr#2', 'head', ''], ['pr#3', 'same head', '']])
+    // a mail in a box: what they did as html, its `to` and subject in the box over no words
+    expect(m(4).querySelector('.thimble-msg-said')!.innerHTML).toBe('<b class="thimble-msg-author">bo</b> wrote to <b>ops</b>')
+    expect(texts('[data-anchor="pr#4"] .thimble-msg-boxbody > *')).toEqual(['to ops', 'Gale warning'])
+    expect(m(4).querySelector('.thimble-msg-body')).toBe(null)
+    // no words, subject or `to`: the head alone, the author alone in it
+    expect(m(5).querySelector('.thimble-msg-boxbody')).toBe(null)
+    expect(m(5).querySelector('.thimble-msg-said')!.textContent).toBe('bo')
+    expect(heads()[4]).toEqual(['pr#5', 'head', ''])
+    // an event stays one line
+    expect([m(6).classList.contains('is-boxed'), m(6).querySelector('.thimble-msg-box')]).toEqual([false, null])
+  })
+
   test('a loop of parents draws every message of it; an event with no author says what happened alone', async () => {
     await load('<div id="c"></div>')
     const w = win()

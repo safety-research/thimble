@@ -16,7 +16,7 @@
      .thimble-turn-*
      .thimble-msg-*         messages between people or agents, as a chat app draws them: an avatar in a rail, the
                             author and the time in a head, a date line for each day, a reply one level in, an event
-                            on one line, quoted mail behind "…" and a long body behind Show more
+                            on one line, a boxed message, quoted mail behind "…" and a long body behind Show more
      .thimble-record-*      a record's fields as a tree under its citation: a key and a value per row, a nested value
                             folded behind its key, a long string folded with Show more
      .thimble-chart-*       a chart in the canvas's theme (the drawing's own look is the chart style's, not CSS), and
@@ -1079,6 +1079,31 @@
 }
 .thimble-msg-event .thimble-msg-body {
   margin-top: 2px;
+}
+/* a boxed message (`box`), as a forge draws a pull request's opening post and a mail app a message: a box beside the
+   avatar, its head on a light tint as an event's line (the author, what they did and the time at the right), the words
+   under it; the box takes the row's own background, so a message chosen or under the pointer shows through it */
+.thimble-msg.is-boxed {
+  padding-bottom: 8px;
+}
+.thimble-msg-box {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+}
+.thimble-msg-boxhead {
+  padding: 5px 10px;
+  background: rgba(var(--ink-rgb), 0.035);
+}
+.thimble-msg-boxhead:not(:last-child) {
+  border-bottom: 1px solid var(--border-subtle);
+}
+.thimble-msg-boxbody {
+  padding: 8px 10px 10px;
+}
+.thimble-msg-boxbody > .thimble-msg-body:first-child {
+  margin-top: 0;
 }
 .thimble-msg-none {
   padding: 28px 16px;

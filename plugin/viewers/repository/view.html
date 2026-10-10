@@ -362,12 +362,13 @@ const badge = (state, t) => { const [i, w] = STATE[t][state] || STATE[t].open; r
 const elsewhere = (d) => (d.elsewhere || []).filter((x) => x.run !== d.facts.run).map((x) => goTo(x, `${esc(x.run)} #${esc(x.key.split('/')[2])} ${esc(x.state)}`)).join('')
 const dl = (rows) => `<dl class="facts">${rows.filter((r) => r[1]).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`
 
-// One record on a conversation's timeline as thimble.messages takes it: an opening or a comment a message, any other
-// record an event on one line, its words under it
+// One record on a conversation's timeline as thimble.messages takes it: the opening in a box, as the forge draws it, a
+// comment a message, any other record an event on one line, its words under it
 function message(r, d) {
   const own = d.facts.number
   const base = { ref: r.ref, t: tOf(r.at), author: r.author }
-  if (r.kind === 'comment' || r.kind === 'post' || (['pr', 'issue'].includes(r.kind) && r.number === own)) return { ...base, text: r.text || '' }
+  if (['pr', 'issue'].includes(r.kind) && r.number === own) return { ...base, text: r.text || '', box: true, said: r.kind === 'pr' ? 'opened this pull request' : 'opened this issue' }
+  if (r.kind === 'comment' || r.kind === 'post') return { ...base, text: r.text || '' }
   const ev = { ...base, kind: 'event', text: r.text || '' }
   if (r.kind === 'commit') {
     const what = r.forced ? `force-pushed <code>${esc(r.sha)}</code> over <code>${esc(r.before)}</code>` : `pushed <code>${esc(r.sha)}</code>`

@@ -3,7 +3,8 @@
 // later ones under it at the same left edge; a date line stands between two days; a reply is one level in under its
 // parent's group, a deeper reply at the same level; an event is one line, its icon in the avatars' rail and its time at
 // the right; quoted mail is folded behind "…" and the search finds a word in it and opens it; the bars follow Color by
-// as it changes, with no onChange of the page's; and the part works alone on a page with no other part mounted. What
+// as it changes, with no onChange of the page's; a boxed message is a box beside its avatar, its head on a tint and its
+// words inside, light and dark; and the part works alone on a page with no other part mounted. What
 // the part decides without layout (the grouping rule, the folds' markup) is tests/public/data-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -235,6 +236,55 @@ conv.draw(ms, { title: '# long' })
     assert.deepEqual(errors, [])
     await p.close()
   })
+})
+
+describe('a boxed message', () => {
+  for (const dark of [false, true]) {
+    test(`a pull request's opening post: a box beside its avatar, the author, what they did and the time on a tinted head, the words inside; a comment after it unboxed (${dark ? 'dark' : 'light'})`, async () => {
+      const doc = page(`<div id="msgs"></div>
+<script>
+${dark ? "document.documentElement.setAttribute('data-paper', 'dark')" : ''}
+window.conv = thimble.messages({ mount: '#msgs' })
+conv.draw(${JSON.stringify([
+        { ref: 'b.jsonl#L1', t: T0, author: 'agent-03', box: true, said: 'opened this pull request', text: 'Fixes the zanzibar case.\n\nThe parser read a time with no zone in the machine\'s.' },
+        { ref: 'b.jsonl#L2', t: T0 + 60, author: 'agent-03', text: 'Tests pass on main.' },
+      ])})
+</script>`)
+      const { page: p, frame, errors } = await framed(doc)
+      const [row, avatar, box, head, said, time, body, next] = await Promise.all(
+        [msg(1), msg(1, '.avatar'), msg(1, '.thimble-msg-box'), msg(1, '.thimble-msg-boxhead'), msg(1, '.thimble-msg-said'), msg(1, '.thimble-msg-time'), msg(1, '.thimble-msg-body'), msg(2)].map((s) => boxOf(frame, s)),
+      )
+      // the avatar in the rail at the box's left, the box inside its row, its head on top, the words inside under it
+      assert.ok(avatar.right <= box.x && box.x - avatar.right < 16 && Math.abs(avatar.y - box.y) < 4, `the avatar beside the box (${JSON.stringify({ avatar, box })})`)
+      assert.ok(box.x >= row.x && box.right <= row.right && box.y >= row.y && box.bottom <= row.bottom, 'the box inside its row')
+      assert.ok(Math.abs(head.y - box.y) <= 1.5 && head.bottom <= body.y && body.bottom < box.bottom && body.x > box.x + 4 && body.right < box.right - 4, `the head on top, the words inside (${JSON.stringify({ box, head, body })})`)
+      assert.ok(Math.abs(time.y - said.y) < 3 && box.right - time.right < 24 && time.x > said.right, `the time at the right of the head (${JSON.stringify({ said, time, box })})`)
+      assert.equal(await frame().evaluate((s) => document.querySelector(s)!.textContent, msg(1, '.thimble-msg-said')), 'agent-03 opened this pull request')
+      // the box's edge in the theme's subtle border and its radius, the head on a tint of the ink that stands apart from the paper
+      const look = await frame().evaluate((s) => {
+        const b = getComputedStyle(document.querySelector(s + ' .thimble-msg-box')!)
+        const h = getComputedStyle(document.querySelector(s + ' .thimble-msg-boxhead')!)
+        const probe = document.createElement('div')
+        probe.style.cssText = 'border:1px solid var(--border-subtle);border-radius:var(--radius-card)'
+        document.body.appendChild(probe)
+        const want = getComputedStyle(probe)
+        const out = { edge: b.borderTopColor, want: want.borderTopColor, width: b.borderTopWidth, radius: b.borderTopLeftRadius, wantRadius: want.borderTopLeftRadius, head: h.backgroundColor, line: h.borderBottomColor }
+        probe.remove()
+        return out
+      }, msg(1))
+      assert.equal(look.edge, look.want)
+      assert.equal(look.width, '1px')
+      assert.equal(look.radius, look.wantRadius)
+      assert.equal(look.line, look.want, 'a hairline under the head')
+      const alpha = Number((/rgba\([^)]*,\s*([\d.]+)\)/.exec(look.head) || [])[1])
+      assert.ok(alpha > 0.02 && alpha < 0.1, `the head on a light tint (${look.head})`)
+      // the comment by the same author a minute later has its own head and avatar, and no box
+      assert.ok(next.y >= row.bottom, 'the comment under the box')
+      assert.deepEqual(await frame().evaluate((s) => [!!document.querySelector(s + ' .thimble-msg-head'), !!document.querySelector(s + ' .avatar'), !!document.querySelector(s + ' .thimble-msg-box')], msg(2)), [true, true, false])
+      assert.deepEqual(errors, [])
+      await p.close()
+    })
+  }
 })
 
 describe('the messages alone', () => {

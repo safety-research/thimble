@@ -352,7 +352,10 @@ minutes, with the same parent, share one head, each still its own record; a date
 `parent` is drawn under its parent's group, one level in, and a reply to a reply at that level too, as boards and forges
 draw threads. `kind: 'event'` is one line, an icon in the ink, the author, what they did (`said`) and the time at the
 right, as a forge's timeline draws it; `icon` is one of `comment`, `commit`, `pull`, `issue`, `merge`, `close`,
-`reopen`, `approve`, `changes`, `edit`, `delete` and `mail`.
+`reopen`, `approve`, `changes`, `edit`, `delete` and `mail`. `box: true` draws a message in a box beside the author's
+avatar, as a forge draws a pull request's opening post or a comment and a mail app a message: the box's head names the
+author, what they did (`said`, such as "opened this pull request") and the time, over the `to`, the `title` and the
+words. A boxed message shares no head.
 
 ```js
 const side = thimble.side({ mount: '#body' })
@@ -360,7 +363,7 @@ const conv = thimble.messages({ mount: '#thread', onPick: (m) => side.open({ tit
 conv.draw(posts.filter((p) => p.thread === chosen).map((p) => ({ ref: p.ref, t: p.time, author: p.author, text: p.text, parent: p.reply_to })), { title: '# ' + names[chosen] })
 ```
 
-A message is `{ref, t, author, text, title, to, parent, kind, icon, said, record}`, `t` in seconds since 1970 (or a date
+A message is `{ref, t, author, text, title, to, parent, kind, icon, said, box, record}`, `t` in seconds since 1970 (or a date
 such as an ISO time, one with no zone in UTC, as the transcript reads it).
 Quoted mail, a run of lines that start with `>` with the "On … wrote:" line before it, folds behind
 a `…` button, and a body longer than twelve lines shows its first lines with Show more and Show less; both keep their
