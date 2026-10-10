@@ -6,7 +6,7 @@
 // src/files/views/registry.ts, src/files/Reader.tsx).
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { pdfPage, pickKey, Reader } from '../../src/files/Reader.tsx'
+import { pdfPage, pickKey, previewOf, Reader } from '../../src/files/Reader.tsx'
 import { ReaderLabelsContext, type ReaderLabels } from '../../src/files/marks.tsx'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
 import { segmentsFor, segmentsFrom } from '../../src/files/views/common.tsx'
@@ -145,6 +145,17 @@ describe('messages in any shape', () => {
     expect(clockOf(12.5)).toBe('12.5')
     expect(clockOf('yesterday')).toBe('yesterday')
     expect(clockOf(null)).toBe(null)
+  })
+  test("the loupe's who and when of a JSON line: the keys the Transcript mode reads, the time from the record where the sniff names none, and an event's agent where no key names a speaker", () => {
+    const json = (n: number, obj: object) => line(n, JSON.stringify(obj))
+    const event = json(7, { id: 7, ts: '2026-08-28T06:11:15.240+00:00', agent: 'agent-03', action: 'pr.claim', params: { pr: 66191 } })
+    expect(previewOf(event, null, null)).toMatchObject({ line: 7, who: 'agent-03', when: '06:11:15' })
+    const said = json(8, { ts: '2026-08-28T06:12:00Z', agent: 'agent-04', type: 'message', text: 'claimed it' })
+    const hint: TranscriptHint = { format: 'messages', score: 0.9, keys: { speaker: 'agent', text: 'text' } }
+    expect(previewOf(said, hint, null)).toMatchObject({ who: 'agent-04', when: '06:12:00', text: 'claimed it' })
+    // a speaker's key wins over the agent, and a record with neither names its type
+    expect(previewOf(json(9, { role: 'user', agent: 'agent-05', content: 'hi' }), null, null)).toMatchObject({ who: 'user' })
+    expect(previewOf(json(10, { type: 'assistant', timestamp: '2026-08-28T06:13:09Z' }), null, null)).toMatchObject({ who: 'assistant', when: '06:13:09' })
   })
   test('a CSV file’s rows show as posts under the columns the sniff named', async () => {
     const rows = ['timestamp,speaker,message', '2024-10-01T09:00:00Z,customer,"hello, there"', '2024-10-01T09:01:00Z,agent,hi']

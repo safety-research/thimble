@@ -39,7 +39,7 @@ import { usePinnedView, ViewUpdated } from './viewVersion'
 import { DeleteViewConfirm, ProposalOption } from './ViewsBar'
 import { useTypeViewers } from './typeViewers'
 import { compact, errMsg, LaneHead, recordExcerpt, targetOf, type ViewDef, type ViewProps } from './views/common'
-import { clockOf, messageKeys, nameOf, pick, textOf } from './views/transcript'
+import { clockOf, keysFor, nameOf, pick, textOf } from './views/transcript'
 import { withoutEscapes } from './views/raw'
 import { pickView, scoreViews, viewByType } from './views/registry'
 import { useDelimiter } from './views/table'
@@ -643,8 +643,12 @@ export function useRecordLines(ws: string, ref: string | undefined, path: string
   return { at: mine?.at ?? null, pending: asks && !mine }
 }
 
-/** A record as the loupe and a record's tooltip name it: its index, who and when (the sniff's keys, else those the
- * record carries, as the Transcript mode reads them; when as its time of day), and its first two lines of words. */
+/** the keys where a record of a log, such as an event, names its agent (backend transcripts.OWNER_KEYS) */
+const AGENT_KEYS = 'agent|agent_name|agent_id'
+
+/** A record as the loupe and a record's tooltip name it: its index, who and when (the keys the Transcript mode reads,
+ * the sniff's else those the record carries; who, without a speaker, the agent the record names, else its type; when as
+ * its time of day), and its first two lines of words. */
 export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color: string | null): PreviewRecord {
   const first = (s: string) =>
     s
@@ -655,8 +659,8 @@ export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color:
       .slice(0, 280)
   const obj = recordObject(rec)
   if (!obj) return { line: rec.line, who: null, when: null, text: first(recordExcerpt(rec)), color }
-  const keys = hint?.keys ? { author: hint.keys.speaker, time: hint.keys.time, body: hint.keys.text } : messageKeys([obj])
-  const who = nameOf(pick(obj, keys.author)) ?? (typeof obj.type === 'string' ? obj.type : null)
+  const keys = keysFor(hint, [obj])
+  const who = nameOf(pick(obj, keys.author)) ?? nameOf(pick(obj, AGENT_KEYS)) ?? (typeof obj.type === 'string' ? obj.type : null)
   const when = clockOf(pick(obj, keys.time))
   const body = textOf(pick(obj, keys.body)) ?? rec.blocks.find((b) => b.kind !== 'raw')?.text ?? compact(obj, 300)
   return { line: rec.line, who, when, text: first(body), color }
