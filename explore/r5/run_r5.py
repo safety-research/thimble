@@ -1709,6 +1709,8 @@ def cmd_matrix(a: argparse.Namespace) -> int:
                    "--minutes", str(a.minutes), "--propose-minutes", str(a.propose_minutes)]
             if a.no_review:
                 cmd.append("--no-review")
+            if a.setup_only:
+                cmd.append("--setup-only")
             proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env={**os.environ, "VABS_REEXEC": "1"})
             live.append(((rep, c, pipe), n, proc, log))
             print(f"{now()} started {pipe} {c} rep {rep} on slot {n} (pid {proc.pid})", flush=True)
@@ -1906,6 +1908,7 @@ def main() -> int:
     p.add_argument("--minutes", type=float, default=120)
     p.add_argument("--propose-minutes", type=float, default=40)
     p.add_argument("--no-review", action="store_true")
+    p.add_argument("--setup-only", action="store_true", help="each run checks its prompts and server, starts no main")
     lane_options(p)
     p = sub.add_parser("summary")
     p.add_argument("folders", nargs="+")
