@@ -188,11 +188,12 @@ const search = thimble.search({ mount: '#search', placeholder: 'Search', onChang
 const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, onChange: load })
 const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, onChange: load })
 const side = thimble.side({ mount: '#body', width: 0.45, onClose: () => { open = null } })
-// Reset puts back the run the view opens on, as it puts back the chips
+// Reset puts back the run the view opens on, as it puts back the chips and empties the search, and the page draws again
+// with what they keep
 const first = () => (data && data.runs.length ? data.runs[0].run : null)
 const resetRun = thimble.onReset({
   changed: () => !!data && run !== first(),
-  reset: () => { if (run !== first()) choose(first()) },
+  reset: () => (run !== first() ? choose(first()) : load()),
 })
 
 async function load() {
