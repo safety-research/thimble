@@ -4125,7 +4125,7 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
     # holds count as shown
     held = max(int(x.get("held") or 0) for _, x in seen)
     if not units and max(records, held) < max(1, fetched // ANCHORED_SHARE):
-        problems.append(_hint("view-few-anchors", fetched=fetched, records=records))
+        problems.append(_hint("view-few-anchors", fetched=fetched, records=records, slug=view["slug"]))
     for name, x in seen:
         due, drawn = int(x.get("due") or 0), int(x.get("drawn") or 0)
         if drawn < due:
