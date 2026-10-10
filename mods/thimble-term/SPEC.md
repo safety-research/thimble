@@ -488,8 +488,9 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   the part under the pointer and its series (`24 May · page deleted  14 events`). Labels that are timestamps read as the
   browser's date axis writes them, all in one form: `24 May`, the time only when one is not midnight (`24 May 12:30`),
   the year only when they span more than one, never an ISO stamp.
-- A line chart: y labels right-aligned in a column, axes in the rule gray, x labels dim at the ends and the middle, a
-  legend row of `● series` entries; the pointer's column `┊` with its readout on the readout row.
+- A line chart: y labels right-aligned in a column, axes in the rule gray, x labels dim at the ends and the middle
+  (timestamps in the bars' one form, `18 May`, never an ISO stamp), a legend row of `● series` entries; the pointer's
+  column `┊` with its readout on the readout row.
 - A table: the column names bold, a `─` rule under each name as wide as its column, the rows right under it; numbers
   right-aligned in the card's column formats, as the browser's table writes them (`1,446`). Markdown tables in a reply take the same header.
 - A timeline: the axis across the content with its `●` marks in hue on a rule-gray line, its two end times dim under
