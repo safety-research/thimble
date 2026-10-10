@@ -146,7 +146,7 @@
   // the spec as the page asked: Color by's colours, the plot's height, with ROW_MOST px a row at most
   function finished(spec, options) {
     var out = spec
-    var colour = options.colour !== undefined ? options.colour : options.color
+    var colour = kit.shared.withColourOf(options.colour !== undefined ? options.colour : options.color)
     if (colour && typeof colour.colourOf === 'function') out = coloured(out, colour)
     var h = Number(options.height)
     var rows = h > 0 ? rowsOf(out) : 0

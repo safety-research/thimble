@@ -105,6 +105,12 @@
     return out
   })(window.__thimbleLabelOrder)
   var MAX_KEPT = 200 // values whose colour is kept per field
+  // A record's value of the field colored by, as attr writes it, data-color, or as a page written before may write it,
+  // data-colour, the British spelling
+  var VALUED = '[data-anchor][data-color],[data-anchor][data-colour]'
+  function valueAttr(e) {
+    return e.hasAttribute('data-color') ? e.getAttribute('data-color') : e.getAttribute('data-colour')
+  }
   var DEF_FOR = 60000 // ms what a label's values mean is kept before it is asked for again
   var ICON = {
     down: 'M6 9l6 6 6-6',
@@ -447,7 +453,7 @@
       var name = String(obj ? v.name : v)
       if (values.indexOf(name) >= 0) continue
       if (obj && typeof v.meaning === 'string' && v.meaning) meanings[name] = v.meaning
-      var c = obj ? Number(v.colour) : NaN
+      var c = obj ? Number(v.color !== undefined ? v.color : v.colour) : NaN
       var at = c >= 1 && c <= PALETTE && Math.floor(c) === c && !taken[c - 1] ? c - 1 : -1
       if (at >= 0) taken[at] = true
       values.push(name)
@@ -580,7 +586,7 @@
         }
       }
       if (any) self.soon()
-    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-colour', 'data-colour-tracks', 'data-anchor', 'data-thimble-drop', 'hidden', 'class', 'style'] })
+    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-color', 'data-color-tracks', 'data-colour', 'data-colour-tracks', 'data-anchor', 'data-thimble-drop', 'hidden', 'class', 'style'] })
     if (opts.strip) this.strip(opts.strip, { whole: true })
   }
 
@@ -799,7 +805,7 @@
       for (var si = 0; si < strips.length; si++)
         if (strips[si].box === x.el && strips[si].refs) for (var r = 0; r < strips[si].refs.length; r++) if (strips[si].refs[r] != null) seen[String(strips[si].refs[r])] = true
     }
-    var els = document.querySelectorAll(c.field ? '[data-anchor][data-colour]' : '[data-anchor]')
+    var els = document.querySelectorAll(c.field ? VALUED : '[data-anchor]')
     for (var i = 0; i < els.length; i++) {
       var e = els[i]
       if (e.closest('.thimble-colour-mount,.thimble-colour-menu') || !shown(e)) continue
@@ -811,7 +817,7 @@
         seen[ref] = true
       }
       if (c.field) {
-        var k = keyOf(e.getAttribute('data-colour'))
+        var k = keyOf(valueAttr(e))
         out[k] = (out[k] || 0) + 1
         continue
       }
@@ -1009,12 +1015,19 @@
     this.tracksKey = tracks
     this.choiceKey = key
     if (newTracks) {
-      var ts = document.querySelectorAll('[data-colour-tracks]')
-      for (var t = 0; t < ts.length; t++) ts[t].removeAttribute('data-colour-tracks')
+      var ts = document.querySelectorAll('[data-color-tracks],[data-colour-tracks]')
+      for (var t = 0; t < ts.length; t++) {
+        ts[t].removeAttribute('data-color-tracks')
+        ts[t].removeAttribute('data-colour-tracks')
+      }
     }
     if (newChoice) {
-      var els = document.querySelectorAll('[data-colour]')
-      for (var i = 0; i < els.length; i++) if (!els[i].closest('.thimble-colour-mount,.thimble-colour-menu')) els[i].removeAttribute('data-colour')
+      var els = document.querySelectorAll('[data-color],[data-colour]')
+      for (var i = 0; i < els.length; i++)
+        if (!els[i].closest('.thimble-colour-mount,.thimble-colour-menu')) {
+          els[i].removeAttribute('data-color')
+          els[i].removeAttribute('data-colour')
+        }
       if (this.givenBy !== key) {
         this.given = null
         this.givenBy = null
@@ -1351,7 +1364,7 @@
     if (!c || c.off || key === NONE) return
     if (c.label) {
       var v = this.valueByKey(key)
-      if (v && v.value != null) thimble.setLabelColour(c.label, v.value, paletteColour(i)).catch(function (e) { kit.report(e) })
+      if (v && v.value != null) thimble.setLabelColor(c.label, v.value, paletteColour(i)).catch(function (e) { kit.report(e) })
       return
     }
     var map = S.picked[c.field] || (S.picked[c.field] = {})
@@ -2154,14 +2167,14 @@
       var top0 = this.page ? -box.scrollTop : this.rect().top + box.clientTop - box.scrollTop
       var scope = this.page ? document : box
       // the records alone: the anchored elements (a group's row, which carries no anchor, is no record)
-      var els = scope.querySelectorAll(ch && ch.field ? '[data-anchor][data-colour]' : '[data-anchor]')
+      var els = scope.querySelectorAll(ch && ch.field ? VALUED : '[data-anchor]')
       var seen = {}
       for (var j = 0; j < els.length; j++) {
         var e = els[j]
         if (e.tagName === 'CANVAS' || e.closest('.thimble-colour-mount,.thimble-colour-menu,[data-thimble-chrome]')) continue
         var ref = e.getAttribute('data-anchor')
         var v = null
-        if (ch && ch.field) v = e.getAttribute('data-colour')
+        if (ch && ch.field) v = valueAttr(e)
         else {
           if (!ref || seen[ref]) continue
           seen[ref] = true
@@ -2201,7 +2214,7 @@
         return v == null || v === '' ? null : c.fieldColour(lane.field, v)
       }
       var tracksOf = function (e) {
-        var raw = e.getAttribute('data-colour-tracks')
+        var raw = e.getAttribute('data-color-tracks') || e.getAttribute('data-colour-tracks')
         if (!raw) return null
         try {
           var got = JSON.parse(raw)
@@ -3265,12 +3278,12 @@
       sweepCards(true)
     })
   }
-  var STAMP = /\s(data-colour(?:-tracks)?)="([^"]*)"/g
+  var STAMP = /\s(data-colou?r(?:-tracks)?)="([^"]*)"/g
   var UNESC = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" }
   // an element's data-colour and data-colour-tracks set as `html` (what attr gives) writes them, each written only when
   // it differs, so stamping what is already there changes nothing the observers hear
   function stampAs(node, html) {
-    var want = { 'data-colour': null, 'data-colour-tracks': null }
+    var want = { 'data-color': null, 'data-color-tracks': null, 'data-colour': null, 'data-colour-tracks': null }
     var m
     STAMP.lastIndex = 0
     while ((m = STAMP.exec(html)))
@@ -3284,12 +3297,22 @@
       } else if (now !== want[name]) node.setAttribute(name, want[name])
     }
   }
+  // A Color by the page made of its own for a part, such as {valueOf, colorOf}: the kit's parts call its colourOf, so a
+  // colorOf serves for it
+  function withColourOf(c) {
+    if (!c || typeof c !== 'object' || typeof c.colourOf === 'function' || typeof c.colorOf !== 'function') return c
+    var out = Object.create(c)
+    out.colourOf = function (v) {
+      return c.colorOf(v)
+    }
+    return out
+  }
   /** a part's bars, from its options (above): `off` with `colour: false`; colour() the Color by they follow now, or
    *  null; attr(record) a record's attributes; stamp(el, record) an element's set again; watch(element, fn), called at
    *  each draw, has fn() stamp the part's elements again on each change of the choices while the element is in the
    *  page */
   function bars(opts) {
-    var given = opts && opts.colour !== undefined ? opts.colour : opts ? opts.color : undefined
+    var given = withColourOf(opts && opts.colour !== undefined ? opts.colour : opts ? opts.color : undefined)
     var b = {
       off: given === false,
       colour: function () {
@@ -3358,12 +3381,13 @@
         var ch = c.choice()
         return ch && ch.label ? ch.label : null
       },
-      /** the chips' values: [{value, name, colour, on, n}], value null for the records that take none, colour the
-       *  chip's whether the value is on or off, each value under the chip "Other" in its place; none for Off */
+      /** the chips' values: [{value, name, color, on, n}], value null for the records that take none, color the
+       *  chip's whether the value is on or off, each value under the chip "Other" in its place; none for Off. `colour`,
+       *  the British spelling, is the same */
       get values() {
         var off = c.offSet()
         return c.flat().map(function (v) {
-          return { value: v.value, name: v.name, colour: v.colour, on: off.indexOf(v.key) < 0, n: v.n }
+          return { value: v.value, name: v.name, color: v.colour, colour: v.colour, on: off.indexOf(v.key) < 0, n: v.n }
         })
       },
       /** the value a record takes: its field's (record[field], or the field's own value(record), which may take any
@@ -3375,6 +3399,10 @@
       },
       /** the colour a value's records are drawn in, one a canvas can draw; null for no value, for a value turned off
        *  and for Off: draw those in one gray */
+      colorOf: function (value) {
+        return c.drawnColour(value)
+      },
+      /** colorOf, by its British spelling, which pages written before it use */
       colourOf: function (value) {
         return c.drawnColour(value)
       },
@@ -3388,7 +3416,7 @@
         c.tally(record)
         return true
       },
-      /** ` data-colour="<value>"` for a record's element while a field is colored by, '' while a label is or for Off:
+      /** ` data-color="<value>"` for a record's element while a field is colored by, '' while a label is or for Off:
        *  the bar thimble draws on the element */
       attr: function (record) {
         c.tally(record)
@@ -3396,11 +3424,11 @@
         var out = ''
         if (ch && ch.field) {
           var v = c.valueOf(record)
-          out = ' data-colour="' + esc(v == null ? '' : v) + '"'
+          out = ' data-color="' + esc(v == null ? '' : v) + '"'
         }
         // the record's values of the fields past the first choice, which their tracks draw
         var ex = c.extra()
-        if (ex.some(function (x) { return x.field })) out += ' data-colour-tracks="' + esc(JSON.stringify(ex.map(function (x) { return x.field ? c.fieldValue(x.field, record) : null }))) + '"'
+        if (ex.some(function (x) { return x.field })) out += ' data-color-tracks="' + esc(JSON.stringify(ex.map(function (x) { return x.field ? c.fieldValue(x.field, record) : null }))) + '"'
         return out
       },
       /** the counts of the current choice's values from the reader, {value: n} (the key '' for no value) or [[value, n]];
@@ -3665,6 +3693,8 @@
     },
     // a part's bars, from its `colour` or `color` option (the bars of the kit's parts, above)
     bars: bars,
+    // a Color by the page made, with colourOf when it gives colorOf (above)
+    withColourOf: withColourOf,
     part: function (p) {
       parts.push(p)
       checkReset()

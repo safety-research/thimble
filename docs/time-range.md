@@ -24,7 +24,7 @@ way.
 - One readable axis: the overview carries light ticks, and at most a few labels while the viewfinder frames part of the
   span, none while it shows the whole span, and none at all once the page draws the range's axis with
   `thimble.timeAxis`. The chart of the range below it holds the axis with its labels. On an axis of hours, the first
-  time after a break or on a new day gives its date ("13 Sep 09:30"), and so does the first time of an axis that covers
+  time after a break or on a new day gives its date ("Sep 13 09:30"), and so does the first time of an axis that covers
   more than a day; where that does not fit, the date alone. A label that would stand on a break's `//` moves just past
   it, beside its tick.
 - Point events, such as a context compaction, are flags: a pin on the overview with its label on hover, and on the
@@ -36,16 +36,16 @@ way.
 ## Mount it
 
 ```html
-<div class="top"><input class="field" id="q" type="search"><span id="colour"></span></div>
+<div class="top"><input class="field" id="q" type="search"><span id="color"></span></div>
 <div id="range"></div>
 <div id="axis"></div>
 <div id="lanes"></div>
 <script>
-const colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], onChange: draw })
+const color = thimble.colorBy({ mount: '#color', fields: [{ name: 'kind', title: 'Kind' }], onChange: draw })
 const range = thimble.timeRange({
   mount: '#range',
   times: rows.map((r) => r.t),                 // seconds since 1970
-  values: (i) => colour.valueOf(rows[i]),      // each record's Color by value, for the overview's colors
+  values: (i) => color.valueOf(rows[i]),      // each record's Color by value, for the overview's colors
   gap: 3600,                                   // an hour with no record is drawn as a narrow break
   marks: [{ t: compaction, label: 'context compaction' }],
   onChange: draw,
@@ -64,13 +64,13 @@ function draw() {
 |---|---|
 | `mount` | an element or a selector the control fills, as wide as the time the view draws below it. The readout stands at its left, above the overview when the mount is narrow. |
 | `times` | each record's time, an array or a typed array |
-| `values` | each record's Color by value, an array beside `times` or a function of the record's index; by default `colour.valueOf(i)` |
+| `values` | each record's Color by value, an array beside `times` or a function of the record's index; by default `color.valueOf(i)` |
 | `bins` | counts already binned, in place of `times`: `{from, step, counts}`, `counts[i]` a number or `{value: n}` for the bin starting at `from + i * step` |
 | `span` | the whole span `[first, last]`, when it is not that of `times` or `bins`; the readout gives it while the range is whole |
 | `unit` | `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a row or a turn |
 | `utc` | times shown in UTC (the default); `false` shows them in the browser's zone |
 | `gap` | an empty stretch longer than this, in the units, is drawn as a narrow break on the overview and on the range's scale; an edge of the range that lands in a break moves to the data beside it |
-| `marks` | point events, `[{t, label, colour?}]`, drawn as flags |
+| `marks` | point events, `[{t, label, color?}]`, drawn as flags |
 | `min` | the shortest range, in the units |
 | `height` | the overview's height in px, 28 by default |
 | `readout` | `false` for none, or an element or a selector to put it in (the page then sets its width) |

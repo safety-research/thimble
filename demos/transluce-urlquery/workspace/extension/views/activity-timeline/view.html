@@ -210,15 +210,15 @@ const isoMin = (t) => dt(t).toISOString().slice(0, 16)
 const isoSec = (t) => dt(t).toISOString().slice(0, 19) + 'Z'
 const hms = (t) => dt(t).toISOString().slice(11, 19)
 const hm = (t) => dt(t).toISOString().slice(11, 16)
-const dmy = (t) => { const d = dt(t); return `${d.getUTCDate()} ${MONTH[d.getUTCMonth()]} ${d.getUTCFullYear()}` }
-const dm = (t) => { const d = dt(t); return `${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}` }
+const dmy = (t) => { const d = dt(t); return `${MONTH[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}` }
+const dm = (t) => { const d = dt(t); return `${MONTH[d.getUTCMonth()]} ${d.getUTCDate()}` }
 const monthStart = (t, k = 0) => { const d = dt(t); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + k, 1) / 1000 }
 function spanWords(a, b) {
   // a window in words: its days, and its times when it is not whole days
   const whole = a % DAY === 0 && b % DAY === 0
   if (whole) {
     const last = b - DAY
-    if (last === a) return `${WEEKDAY[dt(a).getUTCDay()]} ${dmy(a)}`
+    if (last === a) return `${WEEKDAY[dt(a).getUTCDay()]}, ${dmy(a)}`
     if (a === monthStart(a) && b === monthStart(a, 1)) return `${MONTH[dt(a).getUTCMonth()]} ${dt(a).getUTCFullYear()}`
     return dt(a).getUTCFullYear() === dt(last).getUTCFullYear() ? `${dm(a)} – ${dmy(last)}` : `${dmy(a)} – ${dmy(last)}`
   }
@@ -230,7 +230,7 @@ function spanWords(a, b) {
 }
 // an episode's span: its first report's day and time to its last report's time, the day again when it changes
 function epWords(a, b) {
-  const head = `${WEEKDAY[dt(a).getUTCDay()]} ${dmy(a)} ${hm(a)}`
+  const head = `${WEEKDAY[dt(a).getUTCDay()]}, ${dmy(a)} ${hm(a)}`
   if (b <= a) return head
   return `${head} – ${isoDay(a) === isoDay(b) ? hm(b) : `${dm(b)} ${hm(b)}`}`
 }
@@ -884,7 +884,7 @@ function hover(ev) {
     const [jj, x] = bar.dataset.b.split(':').map(Number), r = drawn.rows[jj], t0 = drawn.first + x * drawn.B
     let lines = ''
     for (const k of ORD) { const c = drawn.binned[jj][x * drawn.K + k]; if (c) lines += `<div class="k"><span class="sw" style="--c:${catColour(k)}"></span>${esc(catName(k))}<span class="n">${fmt(c)}</span></div>` }
-    return showTip(`<div class="h">${esc(GROUPS[r.g].name)}</div><div class="w">${esc(drawn.B === DAY ? `${WEEKDAY[dt(t0).getUTCDay()]} ${dmy(t0)}` : spanWords(t0, t0 + drawn.B))}</div>${lines}`, ev)
+    return showTip(`<div class="h">${esc(GROUPS[r.g].name)}</div><div class="w">${esc(drawn.B === DAY ? `${WEEKDAY[dt(t0).getUTCDay()]}, ${dmy(t0)}` : spanWords(t0, t0 + drawn.B))}</div>${lines}`, ev)
   }
   const mk = ev.target.closest && ev.target.closest('.mk')
   if (mk) {
@@ -923,9 +923,9 @@ function listCols(w) {
   const ends = w >= 560
   const cols = [['nm', `minmax(${w >= 400 ? 80 : 0}px, 1.1fr)`], ['n', '64px']]
   if (w >= 620) cols.push(['ep', '58px'])
-  if (ends) cols.push(['first', full ? '126px' : '82px'])
+  if (ends) cols.push(['first', full ? '126px' : '84px'])
   if (w >= 400) cols.push(['spark', 'minmax(40px, 1fr)'])
-  if (ends) cols.push(['last', full ? '126px' : '82px'])
+  if (ends) cols.push(['last', full ? '126px' : '84px'])
   if (mix) cols.push(['mix', full ? 'minmax(70px, 0.4fr)' : '64px'])
   return { keys: cols.map((c) => c[0]), tmpl: cols.map((c) => c[1]).join(' '), full }
 }
@@ -1160,7 +1160,7 @@ function drawDetail() {
   const conf = name('confidence', C.confidence[i]) || NO_CONF
   const tag = (t) => `<span class="chip chip-tone-neutral">${esc(t)}</span>`
   const tags = `${tag(conf)}${tag(name('disposition', C.disposition[i]))}${tag(name('broad_class', C.broad_class[i]))}${name('catalog', C.catalog[i]) === 'supplemental' ? tag('supplemental catalog') : ''}`
-  const when = `${WEEKDAY[dt(T[i]).getUTCDay()]} ${dmy(T[i])} · ${hms(T[i])} UTC`
+  const when = `${WEEKDAY[dt(T[i]).getUTCDay()]}, ${dmy(T[i])} · ${hms(T[i])} UTC`
   let body = '<div class="det-sec empty">Reading the report</div>'
   if (d) {
     const marks = (d.marks || []).length ? `<div class="det-sec"><div class="h">Labels</div><div class="marks">${d.marks.map((m) => { const l = labelOf(m.id) || (labelState.all || []).find((x) => x.name === m.label); return `<span class="chip chip-key" data-label="${esc(l ? l.id : '')}" style="--c:${esc(m.colour)}"><span class="chip-sw"></span><span class="chip-text">${esc(m.label === m.value ? m.label : `${m.label}: ${m.value}`)}</span></span>` }).join('')}</div></div>` : ''

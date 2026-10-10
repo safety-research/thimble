@@ -101,7 +101,7 @@ orientation's thread with the coverage line the manifest's `orientation` keeps, 
 the workspace pre-cached: `precached.json` in the workspace, and `precached` in the orientation's record and its thread's
 meta. In the browser, the orientation's thread then opens with a card titled "This is a frozen demo session": "To start
 a live session from scratch with this dataset, run" and the command, `cd <folder> && thimble`, with a Copy button.
-Until a session first attaches, the page stays readable rather than greyed under the card that asks for one, and the
+Until a session first attaches, the page stays readable rather than grayed under the card that asks for one, and the
 composer gives way to the same sentence and command. A message to the orientation is refused, since its session was not
 kept.
 

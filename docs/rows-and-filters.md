@@ -31,7 +31,7 @@ from keywords.
 Every choice of each part must draw the view: None for Rows and Filter by, Off for Color by, each field and each
 label. The view checks try every choice the page's parts offer, and each part's first choice again after the others,
 and fail the view on the one whose drawing gives a script error, naming it ("Rows: None"). Read `rows.by`,
-`filter.by` and `colour.by` as what they are with None or Off, null, and draw the records in one group, unfiltered or
+`filter.by` and `color.by` as what they are with None or Off, null, and draw the records in one group, unfiltered or
 uncolored then.
 
 No part scrolls sideways: the kit keeps the page to its pane's width, and the overview under the divider scrolls down
@@ -47,7 +47,7 @@ Color by's row, turns every value and series back on and closes the side panel.
 <div id="view">
   <div class="top">
     <input class="field" id="q" type="search" placeholder="Search">
-    <span id="filter"></span><span id="rows"></span><span id="colour"></span>
+    <span id="filter"></span><span id="rows"></span><span id="color"></span>
   </div>
   <div id="overview">
     <div class="time"><div id="readout"></div><div id="range"></div><div id="key"></div><div id="axis"></div></div>
@@ -56,7 +56,7 @@ Color by's row, turns every value and series back on and closes the side panel.
   <div id="body"><div id="list"></div></div>
 </div>
 <script>
-const colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }], strip: '#list', onChange: draw })
+const color = thimble.colorBy({ mount: '#color', fields: [{ name: 'tool', title: 'Tool' }], strip: '#list', onChange: draw })
 const filter = thimble.filterBy({ mount: '#filter', fields: [{ name: 'outcome', title: 'Outcome', values: ['ok', 'error'] }], onChange: draw })
 const range = thimble.timeRange({ mount: '#range', readout: '#readout', times, onChange: draw })
 const rows = thimble.rows({
@@ -110,7 +110,7 @@ value's words where they are not the value.
 | `counts(map)` | the reader's counts of the choice's values, `''` for no value; without them, the records the page hands `keeps` and `valueOf` are counted |
 | `choose(name \| {label} \| null)`, `toggle(value)` | change it from the page |
 
-A reader that filters takes the query with `thimble.colour_on(f, thimble.colour_value(f, ref, r))`. Filter by is the
+A reader that filters takes the query with `thimble.color_on(f, thimble.color_value(f, ref, r))`. Filter by is the
 only part that hides records: Color by only colors.
 
 ## Rows
@@ -140,7 +140,7 @@ items}`:
   left-aligned on one edge.
 
 `groupOf(record)` is a record's group, `query()` the choice for the reader (`{field}`, `{label, name}`, or null), and
-`thimble.colour_value(rows, ref, record)` a record's group there. A label's value reaches the page only on the records
+`thimble.color_value(rows, ref, record)` a record's group there. A label's value reaches the page only on the records
 it anchors (the marks of `thimble.markOf`); a record the reader gave its group as `group` keeps it, for a view that does
 not anchor every record.
 
@@ -161,7 +161,7 @@ tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
 
 | option | what it is |
 |---|---|
-| `rows`, `range`, `colour` | the lanes: the Rows control, a field's name or a function of a record; the time range (its `scale(width)`); and Color by (`colour` or `color`: the page's by default, `false` for gray marks) |
+| `rows`, `range`, `color` | the lanes: the Rows control, a field's name or a function of a record; the time range (its `scale(width)`); and Color by (`color` or `colour`: the page's by default, `false` for gray marks) |
 | `time(item)`, `end(item)` | a record's place on the axis (`item.t` by default), a number, or a Date or an ISO time on an axis of time, else the record is left out; and its end, for a mark as wide as the record ran |
 | `unit` | the axis's unit with no range, as the time range's: `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a turn, a line or a score |
 | `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band (the key's "running") |
@@ -191,7 +191,7 @@ too.
 
 ## The key
 
-`thimble.key(mount, entries, {key, onChange})` draws a key whose entries are toggles: `[{id, name, mark, colour, n,
+`thimble.key(mount, entries, {key, onChange})` draws a key whose entries are toggles: `[{id, name, mark, color, n,
 count}]`, `mark` drawn as the series is drawn (`band`, `mark`, `problem`, `line`). A click hides or shows the series;
 an entry with `n` 0 is left out, so a key never names a series the view does not draw. `isOn(id)` says whether a series
 shows and `set(entries)` draws new ones. The lanes draw their own key with it.
@@ -276,7 +276,7 @@ col.innerHTML = '<div class="thimble-cards">' + prs.map((pr) => thimble.recordCa
 ```
 
 ```html
-<div class="thimble-card thimble-card-act" data-anchor="forge.db#prs/66599" data-colour="agent-08">
+<div class="thimble-card thimble-card-act" data-anchor="forge.db#prs/66599" data-color="agent-08">
   <div class="thimble-card-head"><span class="thimble-card-key">#66599</span>
     <span class="thimble-card-meta"><span class="chip chip-sans chip-tone-neutral"><span class="chip-text">agent-08</span></span></span></div>
   <div class="thimble-card-title">DOC: fix url in concat docs to copy-on-write</div>
@@ -288,8 +288,8 @@ Each part is text, which `recordCard` escapes, or `{html}`. `act: false` gives a
 `attrs` (`{name: value}`) more attributes, such as a key the page's click reads or a `class` of the page's, which joins
 the card's own. `.thimble-cards` stacks cards in a column with a gap between them, and `.thimble-cards-grid` lays them
 out as tiles at least `--thimble-tile-w` (220 px) wide. A list of records with no box is the kit's `.list-row` or
-`.table`. A card keeps its bars as Color by changes, so the page need not draw it again; `colour: false`
-(or `color: false`) gives it none.
+`.table`. A card keeps its bars as Color by changes, so the page need not draw it again; `color: false`
+(or `colour: false`) gives it none.
 
 ## The side panel
 
@@ -314,7 +314,7 @@ double click on the edge puts it back, and thimble keeps its width per view. Esc
 
 ## The transcript
 
-`thimble.transcript({mount, colour, onOpen, fold})` draws a transcript's turns as the File browser's Transcript mode
+`thimble.transcript({mount, color, onOpen, fold})` draws a transcript's turns as the File browser's Transcript mode
 draws them: a card per turn, its number in a column at the left (a click opens its lines in the File browser), its
 speaker, tool and time in a mono head, its words under it; a tool call and what came back, and a system record, folded
 to one line until opened, a chevron at the start of its head that opens and folds it and turns as it does; a block
@@ -322,8 +322,8 @@ longer than six lines folded with Show more under it, Show less in the same plac
 in the problem red, a failed tool call's head with `✕` before its tool (`error` true, or the failure's word, which its
 hover gives); a line between sessions. Each turn is anchored with its ref and carries `data-t`, so a label marks it, a
 ⌘-click asks about it, Color by draws its bar and the lanes follow it. Its bars are the page's Color by's, and it
-stamps them again when the choices change, its folds and scroll as they are. `colour` is optional: give it (or
-`color`, the same option) for another Color by, or `false` for no bars.
+stamps them again when the choices change, its folds and scroll as they are. `color` is optional: give it (or
+`colour`, the same option) for another Color by, or `false` for no bars.
 
 ```js
 const tr = thimble.transcript({ mount: '#list', onOpen: async (turn) => tr.set(turn.ref, await thimble.fetch({ op: 'turn', ref: turn.ref })) })
@@ -343,7 +343,7 @@ hears of a turn it opens.
 
 ## The messages
 
-`thimble.messages({mount, colour, format, mentions, onPick})` draws messages between people or agents as a chat app, a
+`thimble.messages({mount, color, format, mentions, onPick})` draws messages between people or agents as a chat app, a
 forge's conversation or a mail thread draws them: each author's avatar in a rail at the left, a head with the author in
 bold and the time in mono (the full date and time on hover), a `title` such as a subject in bold over the words, `to` as
 a quiet line under the head, and the words drawn by `thimble.text` in `format` (`'markdown'`, the default, or `'plain'`
@@ -369,7 +369,7 @@ Quoted mail, a run of lines that start with `>` with the "On … wrote:" line be
 a `…` button, and a body longer than twelve lines shows its first lines with Show more and Show less; both keep their
 text in the page, hidden, so `thimble.search` finds it and opens the fold. Each message is anchored with its ref and
 carries `data-t`, so a label marks it, a ⌘-click asks about it and the lanes follow it. Its bars are the page's Color
-by's and follow the choices as they change; `colour` is optional: give it (or `color`) for another Color by, or `false`
+by's and follow the choices as they change; `color` is optional: give it (or `colour`) for another Color by, or `false`
 for no bars. Color by reads `record`, the record the message shows, when it is given, so a field named as a message's
 own, such as `kind`, colors it; else the message. A click on a message, or Enter on it, calls `onPick(message)` and
 marks it as the chosen one until another is picked or Reset; ↑ and ↓ go to the message above or below.
@@ -379,7 +379,7 @@ changes one, such as its whole text once the reader sent it; `messages` gives th
 
 ## The record
 
-`thimble.record({mount, value, ref, open, find, mono, colour})` draws one record, a JSON value, in `mount` as a tree under
+`thimble.record({mount, value, ref, open, find, mono, color})` draws one record, a JSON value, in `mount` as a tree under
 its citation: a row per field, its key in mono at the left and its value at the right, each level's values lined up;
 numbers, `true`, `false` and `null` in mono; a nested object or list folded to one line that names its size and its
 first fields, which a click on its key opens. The record's fields and the level under them show at first (`open`, 2);
@@ -394,7 +394,7 @@ side.open({ title: 'Read · explorer', ref, render: (body) => thimble.record({ m
 
 The record is anchored with `ref`, so a label marks it and a ⌘-click asks about it, and its citation opens it in the
 File browser. `find`, such as the search field's words, highlights their matches and opens what holds them. Its bar is
-the page's Color by's and follows the choices as they change. `colour` is optional: give it (or `color`) for another
+the page's Color by's and follows the choices as they change. `color` is optional: give it (or `colour`) for another
 Color by, or `false` for no bar. Called again on the same mount with the same ref, it keeps what the analyst opened and
 folded, and with another ref it starts as it opens. It returns `{hits}`, how many places match `find`. The search
 (`thimble.search`) finds the words its folds hide and opens what holds them; a record keeps 200,000 characters of folded

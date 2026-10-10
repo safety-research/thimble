@@ -30,7 +30,7 @@ export function limiter(max: number): <T>(start: () => Promise<T>, signal?: Abor
       const drop = () => {
         const k = waiting.indexOf(go)
         if (k >= 0) waiting.splice(k, 1)
-        reject(signal?.reason ?? new DOMException('The call was cancelled.', 'AbortError'))
+        reject(signal?.reason ?? new DOMException('The call was canceled.', 'AbortError'))
       }
       if (signal?.aborted) return drop()
       if (running < max) return go()

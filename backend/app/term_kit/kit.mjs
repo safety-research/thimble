@@ -182,14 +182,20 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const two = (n) => String(n).padStart(2, '0')
 
-/** A time in seconds since 1970, in UTC, as precise as `step` seconds need: `16 May 2026`, `16 May 04:31`,
- *  `16 May 04:31:07`. */
+/** A time in seconds since 1970, in UTC, as precise as `step` seconds need: `May 16, 2026`, `May 16 04:31`,
+ *  `May 16 04:31:07`. */
 export function when(t, step = 60) {
   const d = new Date(t * 1000)
-  const day = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`
-  if (step >= 86400) return `${day} ${d.getUTCFullYear()}`
+  const day = monthDay(t)
+  if (step >= 86400) return `${day}, ${d.getUTCFullYear()}`
   const hm = `${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`
   return step >= 60 ? `${day} ${hm}` : `${day} ${hm}:${two(d.getUTCSeconds())}`
+}
+
+// a day without its year, as an axis's tick names it: `May 16`, in UTC
+function monthDay(t) {
+  const d = new Date(t * 1000)
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`
 }
 
 /** The time of day, `04:31:07`, in UTC. */
@@ -211,10 +217,10 @@ export function dayOf(t) {
 }
 const DAYS_SEEN = new Map()
 
-/** A day's heading, `Sat 16 May 2026`. */
+/** A day's heading, `Sat, May 16, 2026`. */
 export function dayName(t) {
   const d = new Date(t * 1000)
-  return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+  return `${DAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
 }
 
 // A time in seconds since 1970 as a record gives it, read as the browser kit reads it (viewer_colour.js secs): a number
@@ -1458,7 +1464,8 @@ export function colorBy(opts = {}) {
     const declared = (f.values || []).map((v) => (typeof v === 'object' ? v : { name: v }))
     for (const v of declared) {
       if (hues.has(v.name)) continue
-      const want = Number(v.colour) >= 1 && Number(v.colour) <= SERIES.length ? SERIES[Number(v.colour) - 1] : null
+      const named = Number(v.color !== undefined ? v.color : v.colour)
+      const want = named >= 1 && named <= SERIES.length ? SERIES[named - 1] : null
       hues.set(v.name, want && ![...hues.values()].includes(want) ? want : nextHue(hues))
     }
     const counts = (fieldOf(c.choice) === f && c.counts) || {}
@@ -1547,13 +1554,14 @@ export function colorBy(opts = {}) {
       return c.picks.map(resolve).filter(Boolean)
     },
     /** The tracks of the choices past the first, which the list draws beside its own and a mark each on its rows:
-     *  `[{title, valueOf(record), colourOf(value)}]`, a label's with its id (`label`). */
+     *  `[{title, valueOf(record), colorOf(value)}]`, a label's with its id (`label`); colourOf, the British spelling, is
+     *  the same. */
     get tracks() {
       return c.picks.slice(1).map((key) => {
         const f = fieldOf(key)
-        if (f) return { title: f.title, valueOf: (r) => { const v = r && (typeof f.value === 'function' ? f.value(r) : r[f.name]); return v === undefined || v === null || v === '' ? null : String(v) }, colourOf: (v) => (v === null ? null : hueFor(f, String(v))) }
+        if (f) return withColorOf({ title: f.title, valueOf: (r) => { const v = r && (typeof f.value === 'function' ? f.value(r) : r[f.name]); return v === undefined || v === null || v === '' ? null : String(v) }, colourOf: (v) => (v === null ? null : hueFor(f, String(v))) })
         const l = labelOf(key)
-        return l ? { title: l.name, label: l.id, valueOf: (r) => labelValue(l.id, r), colourOf: (v) => (v === null ? null : labelHue(l, String(v))) } : null
+        return l ? withColorOf({ title: l.name, label: l.id, valueOf: (r) => labelValue(l.id, r), colourOf: (v) => (v === null ? null : labelHue(l, String(v))) }) : null
       }).filter(Boolean)
     },
     /** A group's mix (a page, an agent, a session takes no color of its own): runs of `cells` cells, each value's share
@@ -1618,8 +1626,12 @@ export function colorBy(opts = {}) {
     },
     /** The hue a value's records are drawn in (a palette color), dim for a value past six and a label's value that
      *  does not color, null for Off, for no value and for a value turned off. */
-    colourOf(value) {
+    colorOf(value) {
       return api.isOn(value) ? hueOf(value) : null
+    },
+    /** colorOf, by its British spelling, which programs written before it use */
+    colourOf(value) {
+      return api.colorOf(value)
     },
     /** The mark of a value: `●` in its hue, dim for no value and for a value turned off. */
     dot(value, glyph = '●') {
@@ -1644,7 +1656,8 @@ export function colorBy(opts = {}) {
     drew(items) {
       if (Array.isArray(items)) tallied().lists.push(items)
     },
-    /** The chips: `[{value, name, colour, on, n}]`, `value` null for no value; none for Off. */
+    /** The chips: `[{value, name, color, on, n}]`, `value` null for no value; none for Off. `colour`, the British
+     *  spelling, is the same. */
     get values() {
       return chips()
     },
@@ -1732,15 +1745,15 @@ export function colorBy(opts = {}) {
     // a label's values that color, each with its count, then `not marked`, as the browser's chips
     if (l) {
       const vs = labelValues(l)
-      const out = vs.map((v) => ({ value: v, name: v, colour: labelHue(l, v), on: api.isOn(v), n: counts[v] || 0 }))
+      const out = vs.map((v) => ({ value: v, name: v, color: labelHue(l, v), colour: labelHue(l, v), on: api.isOn(v), n: counts[v] || 0 }))
       const rest = (l.values || []).map((x) => x.name).filter((v) => !vs.includes(v))
       const n = (counts[''] || 0) + rest.reduce((k, v) => k + (counts[v] || 0), 0)
-      out.push({ value: null, name: noValueName(), colour: null, on: api.isOn(null), n })
+      out.push({ value: null, name: noValueName(), color: null, colour: null, on: api.isOn(null), n })
       return out
     }
     const names = fieldValues(f)
     const out = []
-    const other = { value: '\u0000other', name: 'other', colour: null, on: true, n: 0, members: [] }
+    const other = { value: '\u0000other', name: 'other', color: null, colour: null, on: true, n: 0, members: [] }
     for (const v of names) {
       const n = counts[v] || 0
       if (!c.hues.get(f.name).get(v)) {
@@ -1749,14 +1762,14 @@ export function colorBy(opts = {}) {
         continue
       }
       if (c.counts && !n && !c.off.has(v) && !(f.values || []).some((x) => (typeof x === 'object' ? x.name : x) === v)) continue
-      out.push({ value: v, name: v, colour: hueOf(v), on: api.isOn(v), n })
+      out.push({ value: v, name: v, color: hueOf(v), colour: hueOf(v), on: api.isOn(v), n })
     }
     // like a value with no records, `other` with none is left out once the counts are in, unless one of its values is off
     if (other.members.length && (!c.counts || other.n || other.members.some((v) => c.off.has(v)))) {
       other.on = other.members.some((v) => api.isOn(v))
       out.push(other)
     }
-    if (counts[''] || c.off.has('')) out.push({ value: null, name: noValueName(), colour: null, on: api.isOn(null), n: counts[''] || 0 })
+    if (counts[''] || c.off.has('')) out.push({ value: null, name: noValueName(), color: null, colour: null, on: api.isOn(null), n: counts[''] || 0 })
     return out
   }
 
@@ -2193,7 +2206,7 @@ export function timeRange(opts = {}) {
     format(t, step = (api.to - api.from) / 60) {
       return unit === 'n' ? numAt(t, 1) : when(t, step)
     },
-    /** The range's readout: start, end and length, `16 May 04:31 – 05:10 · 39m`. */
+    /** The range's readout: start, end and length, `May 16 04:31 – 05:10 · 39m`. */
     readout() {
       const a = api.from
       const b = api.to
@@ -2275,7 +2288,7 @@ export function timeRange(opts = {}) {
       by[x].set(k, (by[x].get(k) || 0) + 1)
     })
     const max = Math.max(1, ...n)
-    const colourOf = hueFn(opts.colour)
+    const colourOf = hueFn(colorOption(opts))
     const brk = breakGlyphs(ov)
     return n.map((k, x) => {
       if (brk.has(x)) return { glyph: brk.get(x), brk: true }
@@ -2301,8 +2314,25 @@ export function timeRange(opts = {}) {
 // a value's hue from a Color by control, a function, or the view's Color by when none is given
 function hueFn(c) {
   if (typeof c === 'function') return c
-  const by = c && typeof c.colourOf === 'function' ? c : state.colour
+  const by = c && (typeof c.colourOf === 'function' || typeof c.colorOf === 'function') ? withColourOf(c) : state.colour
   return by ? (v) => by.colourOf(v) : () => null
+}
+
+// A part's Color by option: `colour` or `color`, the same option, as the browser kit takes them; a Color by the program
+// made of its own, such as {valueOf, colorOf}, with colourOf, which the parts call (withColourOf)
+function colorOption(o) {
+  return withColourOf(o && o.colour !== undefined ? o.colour : o ? o.color : undefined)
+}
+function withColourOf(c) {
+  if (!c || typeof c !== 'object' || typeof c.colourOf === 'function' || typeof c.colorOf !== 'function') return c
+  const out = Object.create(c)
+  out.colourOf = (v) => c.colorOf(v)
+  return out
+}
+// a track as the control gives it, with colorOf beside colourOf
+function withColorOf(t) {
+  t.colorOf = t.colourOf
+  return t
 }
 
 // the cells of a broken scale's breaks, each with its glyph: ` // ` across the BREAK cells
@@ -2355,7 +2385,7 @@ function scaleOf(from, to, cols, unit, segs = null, fine = false) {
       let lastDay = ''
       for (let t = Math.ceil(from / tick) * tick; t <= to; t += tick) {
         const day = dayOf(t)
-        const label = tick >= 86400 ? when(t, 86400).split(' ').slice(0, 2).join(' ') : day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
+        const label = tick >= 86400 ? monthDay(t) : day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
         lastDay = day
         out.push({ t, x: x(t), label })
       }
@@ -2447,7 +2477,7 @@ function brokenScale(from, to, cols, unit, parts, fine = false) {
         let first = true
         for (let t = Math.ceil(g.a / tick) * tick; t <= g.b; t += tick) {
           const day = dayOf(t)
-          const label = tick >= 86400 ? when(t, 86400).split(' ').slice(0, 2).join(' ') : first || day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
+          const label = tick >= 86400 ? monthDay(t) : first || day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
           lastDay = day
           first = false
           out.push({ t, x: x(t), label, full: tick >= 86400 ? label : when(t, tick) })
@@ -2554,7 +2584,7 @@ export function strip(scale, items, o = {}) {
     let best = ''
     let bn = 0
     for (const [v, m] of by[x]) if (v !== '' && m > bn) [best, bn] = [v, m]
-    const colour = best ? hueFn(o.colour)(best) : null
+    const colour = best ? hueFn(colorOption(o))(best) : null
     // a value with no hue of its own (past six, a label's value that does not color) is dim, as no value is
     return colour && colour !== COLORS.dim ? { s: bar(k, max), fg: colour } : { s: bar(k, max), d: true }
   })
@@ -2704,14 +2734,14 @@ export function list(opts = {}) {
         }
       }
       const pane = o.side || o.sideOpen || null
-      const colour = o.colour
+      const colour = colorOption(o)
       // Color by's choices past the first, each a column of its own beside the track (at most TRACKS_MAX) and a mark of
       // its own after the row's first
       const tracks = colour && Array.isArray(colour.tracks) ? colour.tracks.slice(0, TRACKS_MAX) : []
       // a header row (the columns' names) stands above the rows and does not scroll with them, over their columns
       if (o.header) {
         const hr = d.row()
-        if (o.colour || o.value) hr.gap(2 + (o.mark !== false ? tracks.length : 0))
+        if (colour || o.value) hr.gap(2 + (o.mark !== false ? tracks.length : 0))
         o.header(hr)
         hr.end()
       }
@@ -4052,7 +4082,7 @@ export function timeline(opts = {}) {
       const axisRows = ownAxis ? (keyW && keyW > gutter - 2 ? 2 : 1) : 0
       const room = Math.max(1, Math.min(o.room ?? d.left, d.left) - axisRows)
       const scale = o.scale || ownScale(items, Math.max(10, d.cols - gutter), fine)
-      const colour = opts.colour || state.colour
+      const colour = colorOption(opts) || state.colour
       const span = o.span && typeof o.span.span === 'function' ? o.span.span(time) : Array.isArray(o.span) ? o.span : null
       const dense = o.density !== false
       const all = layout(items, room)
@@ -4164,7 +4194,7 @@ export function transcript(opts = {}) {
     const s = secsOf(t)
     if (s === null) return ''
     const d = new Date(s * 1000)
-    return `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+    return `${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
   }
   const firstLine = (s) => oneLine(String(s ?? '').split('\n').find((l) => l.trim()) || '')
   const api = {
@@ -4175,7 +4205,7 @@ export function transcript(opts = {}) {
     },
     draw(d, o = {}) {
       const turns = o.turns || []
-      const colour = o.colour || null
+      const colour = colorOption(o) || null
       // Color by's choices past the first: a mark each after the speaker's
       const tracks = colour && Array.isArray(colour.tracks) ? colour.tracks.slice(0, TRACKS_MAX) : []
       const withTime = turns.some((t) => clockOf(t))

@@ -465,7 +465,7 @@ TRANSLUCE_URLQUERY = Dataset(
     transforms="None: the zip's 16 files as Transluce published them, without its top folder "
                "(urlquery-agent-activity-2026-09-22-v5/). reports.csv and additional-cited-reports.csv together make "
                "up all-reports.csv, as its README says.",
-    licence="No licence stated. Published by Transluce with its report at https://transluce.org/agent-activity; "
+    licence="No license stated. Published by Transluce with its report at https://transluce.org/agent-activity; "
             "thimble downloads it from there and does not redistribute it.",
     credit="Published by Transluce (Cable, Chiu, Pernice, Zhang, Anthony, Bas, Shen, Stosz, Steinhardt) with \"Early "
            "rogue AI agent activity and attempts to hack found on urlquery.net\", 2026-09-23. " + TL_NOT_OURS,

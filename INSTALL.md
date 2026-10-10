@@ -214,7 +214,7 @@ publisher on your machine.
 
 Each build is checked against the copy the demo's orientations ran on; a source that changed since is named in a
 warning, and the Transluce build goes on with what it got. `~/.thimble/demo/SOURCES.md` lists who published each
-dataset, where it was downloaded from and what each build changes. The Transluce dataset states no licence.
+dataset, where it was downloaded from and what each build changes. The Transluce dataset states no license.
 
 The command then registers each folder. Where [demos/](demos/README.md) in the repository has a pre-cached
 orientation for the dataset, it installs it as the folder's workspace: the cards, labels, views and report. A
@@ -279,7 +279,7 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - thimble's agents don't start, and the browser says Claude Code's hooks modules are off: managed settings
   (`disableAllHooks`, `allowManagedHooksOnly`) turn them off, or Claude Code doesn't trust the folder. `thimble doctor`
   names the reason. Fix it, then run `thimble -c`. Claude, its threads, cards and labels work meanwhile.
-- Start is greyed out with a line about plan mode: your session is in plan mode, where an agent would ask before every
+- Start is grayed out with a line about plan mode: your session is in plan mode, where an agent would ask before every
   card. Leave it with shift+tab in the terminal.
 - An empty `.claude/.cc-writes/` folder appears in the folder you start `thimble` in: Claude Code's sandbox makes it
   for Bash, and thimble runs your session in that sandbox. Your Claude Code settings files stay as they are.
@@ -287,7 +287,7 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
   browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
   libraries. thimble never downloads a browser by itself. `install.sh --browser system` or `--browser bundled` sets one
   up, and `thimble doctor` names the command for missing libraries. Then run `thimble restart`.
-- `/thimble` is not recognised in a `claude` session: a session started with plain `claude` doesn't load thimble. Quit
+- `/thimble` is not recognized in a `claude` session: a session started with plain `claude` doesn't load thimble. Quit
   it and run `thimble` in that folder; sessions you start with `thimble` have `/thimble`.
 - To report a problem, run `thimble feedback "<what went wrong>"`. It writes a zip of the logs, chats and Claude
   Code transcripts, with keys removed, and says where to send it. The chats and transcripts quote your corpus.

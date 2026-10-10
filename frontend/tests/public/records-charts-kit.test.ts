@@ -194,7 +194,7 @@ describe('thimble.record', () => {
     side.open({ title: 'Read', ref: 'a.jsonl#L1', render: (body: HTMLElement) => win().thimble.record({ mount: body, value: REC, ref: 'a.jsonl#L1', colour }) })
     const rec = side.body.querySelector('.thimble-record')!
     expect(rec.getAttribute('data-anchor')).toBe('a.jsonl#L1')
-    expect(rec.getAttribute('data-colour')).toBe('Read')
+    expect(rec.getAttribute('data-color')).toBe('Read')
     // the panel's next body, the page's own, is the page's: a click in it draws no record
     side.open({ title: 'Other', html: '<button id="mine" data-more="/steps">mine</button>' })
     click(side.body.querySelector('#mine'))
@@ -302,6 +302,9 @@ describe('thimble.chart', () => {
     await win().thimble.chart('#c', 'bar', ROWS, { color: colour })
     expect(win().__drawn.at(-1).spec.encoding.color.scale.range).toEqual([colour.colourOf('Bash'), 'var(--label-none)'])
     expect(of('fetch').length).toBe(fetches)
+    // a Color by the page made of its own with colorOf, the American name, alone
+    await win().thimble.chart('#c', 'bar', ROWS, { color: { colorOf: (v: string) => (v === 'Bash' ? '#123456' : null) } })
+    expect(win().__drawn.at(-1).spec.encoding.color.scale.range).toEqual(['#123456', 'var(--label-none)'])
     const labelled = win().thimble.chart('#c', 'bar', [{ activity: 'money', n: 2 }], { label: 'activity type' })
     await wait()
     expect(of('fetch').at(-1)!.query).toMatchObject({ options: { label: 'activity type' } })

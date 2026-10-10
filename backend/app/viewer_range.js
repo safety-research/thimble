@@ -151,7 +151,7 @@
   }
   Units.prototype.dm = function (t, year) {
     var p = this.parts(t)
-    return p.d + ' ' + MONTH[p.mo] + (year ? ' ' + p.y : '')
+    return MONTH[p.mo] + ' ' + p.d + (year ? ', ' + p.y : '')
   }
   Units.prototype.sameDay = function (a, b) {
     var x = this.parts(a)
@@ -185,7 +185,7 @@
   // the characters of the widest readout of a span to `hi` (to the minute; a range under two minutes, which adds the
   // seconds, wraps at its dash), and of the widest one end
   Units.prototype.widest = function (hi, years) {
-    var one = this.time ? 12 + (years ? 5 : 0) : numAt(hi, 1).length + 1
+    var one = this.time ? 12 + (years ? 6 : 0) : numAt(hi, 1).length + 1
     return { all: 2 * one + 3, one: one }
   }
   // a moment, as precise as `step` (in the units) needs
@@ -363,7 +363,7 @@
       return null
     }
     // an axis of hours: the first label after a break or on a new day gives the date with its time, so every time can be
-    // told apart ("13 Sep 09:30"); where that does not fit, the date alone
+    // told apart ("Sep 13 09:30"); where that does not fit, the date alone
     var hours = u.time && typeof step !== 'object' && ms < DAY
     var dayOf = function (t) {
       var p = u.parts(t)
@@ -893,7 +893,7 @@
       var m = this.marksIn[i]
       var x = sc.x(m.t)
       if (x < 0 || x > sc.width) continue
-      html += '<span class="thimble-range-flag" data-i="' + i + '" style="left:' + x.toFixed(1) + 'px' + (m.colour ? ';--c:' + esc(m.colour) : '') + '"></span>'
+      html += '<span class="thimble-range-flag" data-i="' + i + '" style="left:' + x.toFixed(1) + 'px' + (m.color || m.colour ? ';--c:' + esc(m.color || m.colour) : '') + '"></span>'
     }
     this.flagsEl.innerHTML = html
   }
@@ -1454,7 +1454,7 @@
         var lb = right ? [fx - lw, fx] : [fx, fx + lw]
         var clear = used.every(function (u2) { return lb[1] + 4 <= u2[0] || lb[0] >= u2[1] + 4 })
         if (clear) used.push(lb)
-        html += '<button type="button" class="thimble-axis-flag' + (right ? ' end' : '') + '" data-i="' + order[o][1] + '" title="' + esc(text) + '" style="left:' + fx.toFixed(1) + 'px' + (mk.colour ? ';--c:' + esc(mk.colour) : '') + '"><span class="thimble-axis-pin"></span>' + (clear ? '<span class="thimble-axis-fl">' + esc(text) + '</span>' : '') + '</button>'
+        html += '<button type="button" class="thimble-axis-flag' + (right ? ' end' : '') + '" data-i="' + order[o][1] + '" title="' + esc(text) + '" style="left:' + fx.toFixed(1) + 'px' + (mk.color || mk.colour ? ';--c:' + esc(mk.color || mk.colour) : '') + '"><span class="thimble-axis-pin"></span>' + (clear ? '<span class="thimble-axis-fl">' + esc(text) + '</span>' : '') + '</button>'
       }
       html += '</div>'
     }

@@ -66,16 +66,16 @@ const FIELDS = [
   },
 ]
 
-const colour = colorBy({ fields: FIELDS, initial: 'service', onChange: load })
+const color = colorBy({ fields: FIELDS, initial: 'service', onChange: load })
 const filter = filterBy({ fields: FIELDS, initial: 'incident', onChange: load })
 const rows = rowsBy({ fields: FIELDS, initial: 'source', onChange: () => { pick(null); load() } })
 const range = timeRange({ onChange: () => {} })
 const q = search({ words: 'search events', onChange: load })
 // the lanes draw each event in the value the reader gave it, which holds for a label too; a cell where most events
 // failed is `×` in red, always shown (there is no key that hides them)
-const painted = { keeps: () => true, valueOf: (e) => e.value, colourOf: (v) => colour.colourOf(v) }
+const painted = { keeps: () => true, valueOf: (e) => e.value, colorOf: (v) => color.colorOf(v) }
 const ln = timeline({
-  rows, colour: painted, problem: (e) => e.outcome === 'failed', words: { problem: 'failed', record: 'event' },
+  rows, color: painted, problem: (e) => e.outcome === 'failed', words: { problem: 'failed', record: 'event' },
   onPick: (lane) => pick(picked && picked.key === lane.key ? null : lane),
   onMark: (e) => show(e.r),
 })
@@ -89,7 +89,7 @@ onLabels(() => load())
 
 async function load() {
   const my = ++seq
-  const query = { op: 'overview', colour: colour.query(), filter: filter.query(), rows: rows.query(), q: q.text.trim(), keep }
+  const query = { op: 'overview', color: color.query(), filter: filter.query(), rows: rows.query(), q: q.text.trim(), keep }
   const cols = {}
   const counts = {}
   const fcounts = {}
@@ -109,7 +109,7 @@ async function load() {
     throw e
   }
   E = (cols.r || []).map((_, i) => Object.fromEntries(Object.keys(cols).map((k) => [k, cols[k][i]])))
-  colour.counts(counts)
+  color.counts(counts)
   filter.counts(fcounts)
   // the overview keeps the whole span whatever the filters keep, so the window stays where it was
   const pad = (span[1] - span[0]) * 0.005
@@ -211,7 +211,7 @@ draw((d) => {
   q.add(top).gap()
   filter.add(top)
   top.end()
-  colour.draw(d, (r) => rows.add(r).gap())
+  color.draw(d, (r) => rows.add(r).gap())
   if (!loaded) {
     d.row().add('◌ loading the events…', { d: true }).end()
     return
@@ -235,7 +235,7 @@ draw((d) => {
     title: picked ? `${rows.by ? `${rows.by.title}: ` : ''}${picked.name}` : 'In the range',
     count: plural(items.length, 'event'),
     items,
-    colour,
+    color,
     value: (e) => e.value,
     side: pane,
     sideTitle: (e) => `${e.source} ${e.kind} · ${hms(e.t)}`,

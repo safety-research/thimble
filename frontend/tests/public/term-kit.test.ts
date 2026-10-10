@@ -59,7 +59,7 @@ describe('text', () => {
     expect(kit.pad('Brambleway API v3 migration guide', 20)).toBe('Brambleway API v3…  ')
     expect(kit.padStart('Brambleway API v3 migration guide', 20)).toBe('  Brambleway API v3…')
     expect(kit.dur(130)).toBe('2m 10s')
-    expect(kit.when(Date.UTC(2026, 4, 16, 4, 31) / 1000)).toBe('16 May 04:31')
+    expect(kit.when(Date.UTC(2026, 4, 16, 4, 31) / 1000)).toBe('May 16 04:31')
     expect(kit.placeWords('alerts/x.jsonl#L12')).toBe('alerts/x.jsonl line 12')
     expect(kit.placeWords('deploys.csv#row=3')).toBe('deploys.csv row 3')
     expect(kit.placeWords('chat/ops.json#/messages/0')).toBe('chat/ops.json message 1')
@@ -252,6 +252,20 @@ describe('Color by', () => {
     expect(colour.colourOf('fired')).toBe(kit.SERIES[0])
     // the choice and the values turned off are kept for the view
     expect(sent.filter((m) => m.t === 'state').at(-1)!.state.colour).toEqual({ by: 'field:kind', picks: ['field:kind'], off: [], seen: [] })
+  })
+
+  test('colorOf, a chip\'s color and a declared value\'s color beside their British names; a strip takes `color`, or a Color by of the program\'s own with colorOf', async () => {
+    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind', values: [{ name: 'fired', color: 3 }, { name: 'resolved', colour: 4 }] }] })
+    kit.draw((d: any) => colour.draw(d))
+    colour.counts({ fired: 2, resolved: 1 })
+    await tick()
+    expect([colour.colorOf('fired'), colour.colorOf('resolved')]).toEqual([kit.SERIES[2], kit.SERIES[3]])
+    expect(colour.colourOf('fired')).toBe(colour.colorOf('fired'))
+    expect(colour.values.length && colour.values.every((v: any) => v.color === v.colour)).toBe(true)
+    const sc = { cols: 1, binOf: (t: number) => t, step: 1 }
+    const own = { colorOf: (v: string) => (v === 'x' ? kit.SERIES[5] : null) }
+    expect(kit.strip(sc, [{ t: 0, k: 'x' }], { value: (it: any) => it.k, color: own })[0]).toMatchObject({ fg: kit.SERIES[5] })
+    expect(kit.strip(sc, [{ t: 0, k: 'fired' }], { value: (it: any) => it.k, color: colour })[0]).toMatchObject({ fg: kit.SERIES[2] })
   })
 
   test('a chip\'s tip says what its value means; values past six share one chip, `other`, with no hue of their own', async () => {
@@ -576,7 +590,7 @@ describe('the time range', () => {
     kit.draw((d: any) => range.draw(d, { gutter: 8 }))
     await tick()
     expect(range.full).toBe(true)
-    expect(text()[0]).toBe('  16 May 00:00 – 20 May 03:00 · 4d 3h')
+    expect(text()[0]).toBe('  May 16 00:00 – May 20 03:00 · 4d 3h')
     expect(text()[1].length).toBe(2 + 8 + 72)
     // the mouse moves it: it binds no key
     expect(last().keys).toEqual([])
@@ -637,9 +651,17 @@ describe('the time range', () => {
     expect(sc.x(times.at(-1))).toBe(99)
     expect(sc.binOf(times[0] - 10)).toBe(-1)
     const ticks = sc.ticks(12)
-    expect(ticks[0].label).toMatch(/^\d+ May \d\d:00$/)
+    expect(ticks[0].label).toMatch(/^May \d+ \d\d:00$/)
     for (let i = 1; i < ticks.length; i++) expect(ticks[i].x - ticks[i - 1].x).toBeGreaterThanOrEqual(12)
-    expect(ticks.some((t: any) => /^17 May/.test(t.label))).toBe(true)
+    expect(ticks.some((t: any) => /^May 17/.test(t.label))).toBe(true)
+  })
+
+  test('over weeks, the ticks name the day alone, month first, with no year and no comma', () => {
+    const range = kit.timeRange({})
+    range.data({ times: Array.from({ length: 80 }, (_, i) => T0 + i * 6 * 3600) })
+    const labels = range.scale(100).ticks(12).map((t: any) => t.label)
+    expect(labels.length).toBeGreaterThan(1)
+    for (const l of labels) expect(l).toMatch(/^(May|Jun) \d{1,2}$/)
   })
 
   test('with gap, an empty stretch longer than it is a break: each stretch takes its share of the cells, a break 4, drawn // on the strip and the axis', async () => {
@@ -660,7 +682,7 @@ describe('the time range', () => {
     expect(sc.binOf(B[0]! + 3 * 3600)).toBeGreaterThanOrEqual(31)
     // the first tick of each stretch gives its date
     const ticks = sc.ticks(8)
-    expect(ticks.filter((t: any) => / \d\d:\d\d$/.test(t.label) && /May/.test(t.label)).map((t: any) => t.label)).toEqual(['16 May 14:00', '16 May 17:00', '17 May 09:00'])
+    expect(ticks.filter((t: any) => / \d\d:\d\d$/.test(t.label) && /May/.test(t.label)).map((t: any) => t.label)).toEqual(['May 16 14:00', 'May 16 17:00', 'May 17 09:00'])
     kit.draw((d: any) => {
       range.draw(d, { gutter: 0 })
       kit.axis(d, range.scale(d.cols), { gap: 8 })
@@ -670,24 +692,24 @@ describe('the time range', () => {
     expect(rows[1].slice(2 + 31, 2 + 35)).toBe(' // ')
     expect(rows[1].slice(2 + 66, 2 + 70)).toBe(' // ')
     expect(rows[2].slice(2 + 32, 2 + 34)).toBe('//')
-    expect(rows[2]).toContain('17 May 09:00')
+    expect(rows[2]).toContain('May 17 09:00')
     expect(last().lines[2].find((s: any) => s.s === '//').fg).toBe('subtle')
     // a legend stands whole in the gutter before the ticks, leaving a gutter's space; none where it has no room
     const legend = [{ s: '─', fg: 'subtle' }, { s: ' running  × failed', d: true }]
     kit.draw((d: any) => kit.axis(d, range.scale(d.cols - 22), { gutter: 22, gap: 8, legend }))
     await tick()
-    expect(text()[0]).toMatch(/^ {2}─ running {2}× failed {4}16 May 14:00/)
+    expect(text()[0]).toMatch(/^ {2}─ running {2}× failed {4}May 16 14:00/)
     expect(last().lines[0][1]).toMatchObject({ s: '─', fg: 'subtle' })
     kit.draw((d: any) => kit.axis(d, range.scale(d.cols - 12), { gutter: 12, gap: 8, legend }))
     await tick()
-    expect(text()[0]).toMatch(/^ +16 May 14:00/)
+    expect(text()[0]).toMatch(/^ +May 16 14:00/)
     // a stretch with no room for a time and its date gives the date alone
     init({ cols: 40 })
     const narrow = kit.timeRange({ gap: 1200 })
     narrow.data({ times: ts })
     kit.draw((d: any) => kit.axis(d, narrow.scale(d.cols), { gap: 4 }))
     await tick()
-    expect(text()[0].split(/\s+/).filter(Boolean)).toEqual(['16', 'May', '//', '16', 'May', '//', '17', 'May'])
+    expect(text()[0].split(/\s+/).filter(Boolean)).toEqual(['May', '16', '//', 'May', '16', '//', 'May', '17'])
   })
 
   test('data with no record keeps the span and its breaks, as the browser does, so the axis does not jump to 1970', () => {
@@ -698,7 +720,7 @@ describe('the time range', () => {
     range.data({ times: [] })
     expect(range.span).toEqual(span)
     expect(range.scale(80).broken).toBe(true)
-    expect(range.readout()).toMatch(/^16 May 00:00 – 05:40/)
+    expect(range.readout()).toMatch(/^May 16 00:00 – 05:40/)
   })
 
   test('on a broken scale an edge never stays in a break, and a drag moves the window across one', async () => {
@@ -752,7 +774,7 @@ describe('the time range', () => {
     expect(sc.x(bursts[6])).toBe(gaps[0][1])
     expect(sc.x(bursts.at(-1))).toBe(79)
     // each burst's first tick gives its date; the axis draws the breaks and no label runs into one
-    const days = sc.ticks(8).filter((t: any) => / May /.test(t.label)).map((t: any) => t.label.split(' ')[0])
+    const days = sc.ticks(8).filter((t: any) => /^May \d+ /.test(t.label)).map((t: any) => t.label.split(' ')[1])
     expect(days).toEqual(['16', '17', '18'])
     for (const [g0] of gaps) expect(text()[2].slice(2 + g0 + 1, 2 + g0 + 3)).toBe('//')
     // zoomed to the first burst, the range's scale has no break
@@ -770,7 +792,7 @@ describe('the list', () => {
     const list = kit.list({ key: (e: any) => e.id })
     const opened: number[] = []
     kit.draw((d: any) => list.draw(d, {
-      items: [{ heading: 'Sat 16 May 2026' }, ...items],
+      items: [{ heading: 'Sat, May 16, 2026' }, ...items],
       colour,
       row: (e: any, r: any) => r.add(e.text),
       detail: (e: any, dd: any) => kit.details(dd, { text: `all of ${e.text}`, facts: [['kind', e.kind]], place: `log.txt#L${e.id + 1}` }),
@@ -779,7 +801,7 @@ describe('the list', () => {
     }))
     await tick()
     let rows = text()
-    expect(rows[0]).toMatch(/^ {2}Sat 16 May 2026/)
+    expect(rows[0]).toMatch(/^ {2}Sat, May 16, 2026/)
     expect(last().lines[0][1]).toMatchObject({ b: true })
     expect(rows[1]).toMatch(/^❯ ● event 0/)
     expect(last().hints).toEqual(['↑↓ to choose', 'Enter to open', '? for all keys'])

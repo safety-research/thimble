@@ -40,7 +40,7 @@ Add a card, with its question and its content in one call. {{if:browser}}thimble
   "properties": {
     "question": {"type": "string", "description": "The one question the card answers."},
     "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan"], "description": "table, code, diagram, plot and timeline run `code`, example shows `refs`, note `text`, custom `html`, plan `steps`. Default code."},
-    "code": {"type": "string", "description": "Python run in the corpus root. A table ends in a DataFrame of a few short columns indexed by what names each row, a plot in thimble.chart(kind, df) after import thimble when a kind fits, else in an Altair or matplotlib chart, its colours left to thimble's theme, and after import thimble a diagram in thimble.diagram(nodes, edges), each edge a (source, target, label), and a timeline in thimble.timeline(events), each event a (time, label). thimble.chart takes the DataFrame's columns in the kind's order, named as the axes: bar (category, value[, group]), line (x, y[, series]), area (x, y[, series]), scatter (x, y[, group]), dots (x, row[, group]), box (value, group), histogram (value[, group]), density (value[, group]), ecdf (value[, group]), range (item, before, after[, group]) or heatmap (x, y, value), and label=<label> draws a label's values in its colors; interval=(lo, hi) on bar or dots names the columns of each value's low and high ends; panels=True draws each group in a panel of its own; fit=\"linear\" or \"smooth\" on scatter adds a trend line. thimble.chart(..., show=False) returns the chart as an Altair chart to layer your own marks on, such as a few events called out above a daily bar chart, colored with thimble.theme.accent, .ink, .muted, .pale or .series[i]. Name nodes, edges and events in a few words, their numbers computed, as in f\"revisions.jsonl: {len(R):,} saves\"; an edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, colour a label's values with thimble.colours(label, values), a {value: colour} dict. A plot can also be a card type's graphic, thimble.card(type, labels=[...], **args), from the card types under Cards."},
+    "code": {"type": "string", "description": "Python run in the corpus root. A table ends in a DataFrame of a few short columns indexed by what names each row, a plot in thimble.chart(kind, df) after import thimble when a kind fits, else in an Altair or matplotlib chart, its colors left to thimble's theme, and after import thimble a diagram in thimble.diagram(nodes, edges), each edge a (source, target, label), and a timeline in thimble.timeline(events), each event a (time, label). thimble.chart takes the DataFrame's columns in the kind's order, named as the axes: bar (category, value[, group]), line (x, y[, series]), area (x, y[, series]), scatter (x, y[, group]), dots (x, row[, group]), box (value, group), histogram (value[, group]), density (value[, group]), ecdf (value[, group]), range (item, before, after[, group]) or heatmap (x, y, value), and label=<label> draws a label's values in its colors; interval=(lo, hi) on bar or dots names the columns of each value's low and high ends; panels=True draws each group in a panel of its own; fit=\"linear\" or \"smooth\" on scatter adds a trend line. thimble.chart(..., show=False) returns the chart as an Altair chart to layer your own marks on, such as a few events called out above a daily bar chart, colored with thimble.theme.accent, .ink, .muted, .pale or .series[i]. Name nodes, edges and events in a few words, their numbers computed, as in f\"revisions.jsonl: {len(R):,} saves\"; an edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, color a label's values with thimble.colors(label, values), a {value: color} dict. A plot can also be a card type's graphic, thimble.card(type, labels=[...], **args), from the card types under Cards."},
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] }, "description": "The records an example card shows, usually about three, adding one only when it shows something the others don't. Each is a ref, a moment of a video as <path>#t=<m:ss>, or {ref, quote} to highlight one passage of a long record, quoted exactly."},
     "text": {"type": "string", "description": "The markdown a note card shows."},
     "html": {"type": "string", "description": "The page a custom card shows, for what no other kind can show. Scripts run, the network does not. A chart in it takes thimble's chart style from CSS variables: `--viz-1` to `--viz-7` for series in order, `--viz-seq-1` to `--viz-seq-5` for an amount, `--viz-other` for the rest, `--viz-font` and `--viz-size`. Scripts also have thimble.colors.series, thimble.colors.seq and thimble.vegaConfig, the config of thimble's own Vega-Lite charts."},
@@ -136,7 +136,7 @@ Define a category, apply it to every unit of a scope, and get the counts per val
 
 ## show_label
 
-Turn a label over files on or off in Files and the views, where it marks the records that have the values it highlights, or give its values colours. It runs nothing, so a label is shown or hidden with it rather than with `apply_label`. The analyst turns labels on and off in Files too, so call it whenever they ask to show or hide one, or to colour a value.
+Turn a label over files on or off in Files and the views, where it marks the records that have the values it highlights, or give its values colors. It runs nothing, so a label is shown or hidden with it rather than with `apply_label`. The analyst turns labels on and off in Files too, so call it whenever they ask to show or hide one, or to color a value.
 
 ```json
 {
@@ -145,7 +145,7 @@ Turn a label over files on or off in Files and the views, where it marks the rec
     "name": {"type": "string", "description": "The label's name or id."},
     "on": {"type": "boolean", "description": "Left out, the label stays on or off as it is."},
     "values": {"type": "array", "items": {"type": "string"}, "description": "The values to highlight while it is on, when not the ones it highlights now."},
-    "colours": {"type": "object", "additionalProperties": {"type": "string", "enum": ["blue", "orange", "green", "sky blue", "olive", "teal", "brown", "navy", "grass green", "cerulean", "chestnut", "cyan", "red", "dark red", "purple", "dark purple", "pink", "dark pink"]}, "description": "A colour for each value named, which every card, view and Files show. A value that had the colour takes the one the other leaves."}
+    "colors": {"type": "object", "additionalProperties": {"type": "string", "enum": ["blue", "orange", "green", "sky blue", "olive", "teal", "brown", "navy", "grass green", "cerulean", "chestnut", "cyan", "red", "dark red", "purple", "dark purple", "pink", "dark pink"]}, "description": "A color for each value named, which every card, view and Files show. A value that had the color takes the one the other leaves."}
   },
   "required": ["name"]
 }
@@ -557,7 +557,7 @@ Take pictures of the view you review, whose paths Read opens. The first call of 
     "states": {
       "type": "array",
       "maxItems": 3,
-      "description": "States to see beside the overview: `control`, the view as it opens after clicking `controls` in turn, each named by its text as the list of controls gives it, or by an option of a select; `labels`, the view as it opens with a test label on that marks about one record in seven in the colour the analyst's first label takes; `filtered`, the same filtered to the test label, which should keep only what it marks; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `narrow`, the view as it opens 798 px wide; `wide`, the view as it opens 1528 px wide.",
+      "description": "States to see beside the overview: `control`, the view as it opens after clicking `controls` in turn, each named by its text as the list of controls gives it, or by an option of a select; `labels`, the view as it opens with a test label on that marks about one record in seven in the color the analyst's first label takes; `filtered`, the same filtered to the test label, which should keep only what it marks; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `narrow`, the view as it opens 798 px wide; `wide`, the view as it opens 1528 px wide.",
       "items": {
         "type": "object",
         "properties": {
@@ -934,11 +934,11 @@ The browser that takes the checks' and the review's pictures cannot play H.264 v
 
 ## view-purple
 
-The page writes purple colours: {colours}. Purple is thimble's colour for agents' work, so if any of them colours a category of the view, such as a speaker or a kind of record, give that category a viz colour (`--viz-*`) instead.
+The page writes purple colors: {colours}. Purple is thimble's color for agents' work, so if any of them colors a category of the view, such as a speaker or a kind of record, give that category a viz color (`--viz-*`) instead.
 
 ## view-own-parts
 
-The page's styles change how thimble's parts look, or draw chips of their own: {found}. A view looks like the rest of thimble only when it uses thimble's parts as the frame styles them: `chip` (with `chip-sans`, `chip-tone-neutral`, `chip-tone-evidence`, `chip-act`, and `chip-key` with a `chip-sw` swatch for a value with its colour), `btn`, `seg` with `seg-opt`, and `field`. Set their width, margins, padding and place, but not their edges, fills, corners, colours, type or height. Give no chip, tag or small button corners rounder than `var(--radius-chip)`.
+The page's styles change how thimble's parts look, or draw chips of their own: {found}. A view looks like the rest of thimble only when it uses thimble's parts as the frame styles them: `chip` (with `chip-sans`, `chip-tone-neutral`, `chip-tone-evidence`, `chip-act`, and `chip-key` with a `chip-sw` swatch for a value with its color), `btn`, `seg` with `seg-opt`, and `field`. Set their width, margins, padding and place, but not their edges, fills, corners, colors, type or height. Give no chip, tag or small button corners rounder than `var(--radius-chip)`.
 
 ## view-built
 
@@ -1046,11 +1046,11 @@ In the {state} state, {missing} of the {due} shown records or units the test lab
 
 ## view-marks-unseen
 
-In the {state} state, a picture of the page does not show the test label's colour on {unseen} of the {checked} marked records or units in view, such as {refs}. thimble draws a mark as a 3 px bar in the label's colour along the left edge of the outermost element whose `data-anchor` names the record, inside the element when its left padding is 6 px or more or when a box that hides overflow would cut a bar outside it, else just outside. The bar does not show when the page's CSS sets `box-shadow` on that element with `!important`, or when another element or a cell's background covers the element's left edge. An element with `data-anchor-unmarked` gets no bar, so the page must draw the label's colour on it itself, at full strength, such as a dot or a fill in the colour `thimble.markOf(ref).bar` gives, redrawn in `thimble.onMarks`.
+In the {state} state, a picture of the page does not show the test label's color on {unseen} of the {checked} marked records or units in view, such as {refs}. thimble draws a mark as a 3 px bar in the label's color along the left edge of the outermost element whose `data-anchor` names the record, inside the element when its left padding is 6 px or more or when a box that hides overflow would cut a bar outside it, else just outside. The bar does not show when the page's CSS sets `box-shadow` on that element with `!important`, or when another element or a cell's background covers the element's left edge. An element with `data-anchor-unmarked` gets no bar, so the page must draw the label's color on it itself, at full strength, such as a dot or a fill in the color `thimble.markOf(ref).bar` gives, redrawn in `thimble.onMarks`.
 
 ## view-no-label-controls
 
-The page draws no label controls: {why}. thimble draws none above a view, so the page lists the labels `thimble.onLabels` gives in `all`, each with its colours and a switch that calls `thimble.setLabel(id, on)` on the analyst's click, and shows each label that is on in view, such as in a legend, each such element carrying `data-label` with the label's id.
+The page draws no label controls: {why}. thimble draws none above a view, so the page lists the labels `thimble.onLabels` gives in `all`, each with its colors and a switch that calls `thimble.setLabel(id, on)` on the analyst's click, and shows each label that is on in view, such as in a legend, each such element carrying `data-label` with the label's id.
 
 ## view-labels-by-itself
 
@@ -1066,7 +1066,7 @@ The claims expect files the corpus lacks, which the analyst sees above the view 
 
 ## view-choice-error
 
-{count} choices of the view's controls gave a script error when chosen: {choices}. Every choice the analyst can make must draw the view, None and Off among them: guard what the page reads of a choice that can be null (`rows.by`, `colour.by`, `filter.by`), and draw the records in one group, or uncolored, for it.
+{count} choices of the view's controls gave a script error when chosen: {choices}. Every choice the analyst can make must draw the view, None and Off among them: guard what the page reads of a choice that can be null (`rows.by`, `color.by`, `filter.by`), and draw the records in one group, or uncolored, for it.
 
 ## view-term-error
 

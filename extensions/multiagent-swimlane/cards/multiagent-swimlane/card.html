@@ -118,7 +118,7 @@ function avatar(name) {
 function colHead(t) {
   const d = t ? new Date(t) : null
   if (!d || Number.isNaN(d.getTime())) return ['Time', 'unknown']
-  return [`${d.getUTCDate()} ${MON[d.getUTCMonth()]}`, `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`]
+  return [`${MON[d.getUTCMonth()]} ${d.getUTCDate()}`, `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`]
 }
 let measureCtx = null
 function measure(font, text, face = '--font-body') {

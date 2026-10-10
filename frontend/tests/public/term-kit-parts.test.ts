@@ -260,10 +260,10 @@ describe('lanes', () => {
     expect(hit).toBeTruthy()
     expect(hit.x0).toBe(2 + 16)
     expect(hit.tips).toHaveLength(100 - 16)
-    expect(hit.tips[0]).toMatch(/^lead · 16 May 09:00:\d\d · 1 record$/)
+    expect(hit.tips[0]).toMatch(/^lead · May 16 09:00:\d\d · 1 record$/)
     // the time range's strip is a chart too, with its own tips
     const strip = f.hits.find((h: any) => h.y === 1 && h.cursor)
-    expect(strip && strip.tips[0]).toMatch(/16 May 09:00.* · 1 record/)
+    expect(strip && strip.tips[0]).toMatch(/May 16 09:00.* · 1 record/)
     kit.handle({ t: 'click', i: f.hits.indexOf(hit), seq: f.seq, x: 0, n: ++n })
     await tick()
     expect(marked).toEqual(['r1/lead.jsonl#L3'])
@@ -370,9 +370,9 @@ describe('the timeline on its own', () => {
     expect([...rows[0]][2 + 14]).toMatch(/[▁▂▃▄▅▆▇█]/)
     expect(rows[2].length).toBe(2 + 80)
     expect(rows[0]).toContain('×')
-    expect(rows[3]).toMatch(/^ {2}× failed +16 May 09:00 +09:15/)
+    expect(rows[3]).toMatch(/^ {2}× failed +May 16 09:00 +09:15/)
     const hit = last().hits.find((h: any) => h.cursor)
-    expect(hit.tips[0]).toMatch(/^ana · 16 May 09:00:\d\d · 1 record$/)
+    expect(hit.tips[0]).toMatch(/^ana · May 16 09:00:\d\d · 1 record$/)
   })
 
   test("on plain numbers (unit 'n'): the axis and the tips in numbers; with no rows, one lane with no name, its tips the place alone", async () => {
@@ -410,13 +410,13 @@ describe('the timeline on its own', () => {
       await tick()
       expect(tl.lanes.map((l: any) => [l.name, l.items.length])).toEqual([['ana', 2], ['bo', 2], ['cy', 1]])
       // the axis from the first record, 09:00 in UTC, to the last, 09:20, the records five minutes apart in their cells
-      expect(text()[3]).toMatch(/^ +16 May 09:00 +09:05 +09:10 +09:15$/)
+      expect(text()[3]).toMatch(/^ +May 16 09:00 +09:05 +09:10 +09:15$/)
       const marks = (row: string) => [...row].map((ch, i) => (ch === ' ' ? -1 : i)).filter((i) => i >= 16)
       const at = [...marks(text()[0]), ...marks(text()[1]), ...marks(text()[2])]
       expect(at[0]).toBe(16)
       expect(at.at(-1)).toBe(2 + 80 - 1)
       expect(at.slice(1).map((x, i) => x - at[i]).every((g) => Math.abs(g - 16) <= 1)).toBe(true)
-      expect(last().hits.find((h: any) => h.cursor).tips[0]).toMatch(/^ana · 16 May 09:00:\d\d · 1 record$/)
+      expect(last().hits.find((h: any) => h.cursor).tips[0]).toMatch(/^ana · May 16 09:00:\d\d · 1 record$/)
     } finally {
       if (zone === undefined) delete process.env.TZ
       else process.env.TZ = zone
@@ -581,16 +581,16 @@ describe('the transcript', () => {
     const f = last()
     expect(text(f)).toEqual([
       '  lead · Run 1  3 turns',
-      '  16 May 2026',
+      '  May 16, 2026',
       '❯ 09:00:00  ● user',
       '              Find the failing test and say why it fails, then',
       '              propose the smallest fix you can find in the code base.',
       '  09:00:05  ⎿ × Bash pytest -q',
-      '  17 May 2026',
+      '  May 17, 2026',
       '  09:00:00  ● lead',
       '              One test fails.',
     ])
-    expect(runsAt(f, 1).find((r) => r.s.includes('16 May'))!.d).toBe(true)
+    expect(runsAt(f, 1).find((r) => r.s.includes('May 16'))!.d).toBe(true)
     expect(runsAt(f, 2).find((r) => r.s.includes('user'))!.b).toBe(true)
     expect(runsAt(f, 5).find((r) => r.s.includes('⎿'))!.d).toBe(true)
     // the failed call: × and its tool in the problem red, as the lanes draw it; its input dim
@@ -628,7 +628,7 @@ describe('the transcript', () => {
       await tick()
       const rows = text().filter((r: string) => r.includes('●'))
       expect(rows.map((r: string) => r.slice(2, 10))).toEqual(['09:00:01', '09:00:02', '09:00:03', '09:00:04', '09:00:05', '09:00:06', '09:00:07', '        '])
-      expect(text().filter((r: string) => /^ {2}1[67] May 2026$/.test(r))).toEqual(['  16 May 2026', '  17 May 2026'])
+      expect(text().filter((r: string) => /^ {2}May 1[67], 2026$/.test(r))).toEqual(['  May 16, 2026', '  May 17, 2026'])
       // the turns in view give the lanes above the list their times in seconds, read the same way (`span`), a Date too
       expect(tr.list.span()).toEqual([T0 + 1, T0 + 86400 + 7])
       expect(tr.list.span((it: any) => (it.ref === 's.jsonl#L3' ? new Date((T0 + 3) * 1000) : null))).toEqual([T0 + 3, T0 + 3])

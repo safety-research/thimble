@@ -1040,7 +1040,7 @@ async function relabel(cx: Ctx, id: string): Promise<void> {
  *  row. */
 export async function showLabel(cx: Ctx, id: string, change: { on?: boolean; colors?: Record<string, string> }): Promise<string> {
   if (!rt.sc) return 'thimble is not in terminal mode in this session'
-  const got = await act(cx, rt.sc, 'label-show', { label: id, ...(change.on !== undefined ? { on: change.on } : {}), ...(change.colors ? { colours: change.colors } : {}) })
+  const got = await act(cx, rt.sc, 'label-show', { label: id, ...(change.on !== undefined ? { on: change.on } : {}), ...(change.colors ? { colors: change.colors } : {}) })
   if (!got.ok) {
     await labelSaid(cx, id, `× not changed: ${got.error}`)
     return got.error

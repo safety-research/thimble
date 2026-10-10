@@ -1047,7 +1047,7 @@ async def test_the_repository_colors_an_agent_by_its_own_name_and_by_its_records
 
     async def view(field, tab="agents", off=(), hide=None):
         return await views.reader_call("repository", slug, "records", {
-            "op": "view", "run": "r1", "tab": tab, "colour": {"field": field, "off": list(off)},
+            "op": "view", "run": "r1", "tab": tab, "color": {"field": field, "off": list(off)},
             **({"filter": {"field": field, "off": list(hide)}} if hide is not None else {})})
 
     got = await view("author")
@@ -1281,7 +1281,7 @@ async def test_the_checks_look_for_the_label_s_colour_in_a_picture_of_the_page(n
     else:
         n = p["checked"]
         assert p["seen"] == 0 and len(problems) == 1, (p, problems)
-        assert f"does not show the test label's colour on {n} of the {n}" in problems[0], problems
+        assert f"does not show the test label's color on {n} of the {n}" in problems[0], problems
 
 async def test_the_end_to_end_test_s_fixture_view_passes_the_checks(workspaces_tmp, tmp_path, monkeypatch, inproc, bound):
     """scripts/e2e/fixture-view, the view the release test opens with a label on, passes the whole check as the tab in

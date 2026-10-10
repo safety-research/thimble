@@ -187,7 +187,7 @@ def test_the_registry_pins_every_dataset_and_its_sources():
     assert len(uq.expected) == 16
     assert uq.sources[0].startswith("https://transluce.org/data/")
     assert "Published by Transluce" in uq.credit and "does not redistribute" in uq.credit
-    assert uq.licence.startswith("No licence stated")
+    assert uq.licence.startswith("No license stated")
     # the repository's pre-caches read as this thimble reads them
     for name in demo.precaches(demo.PRECACHES):
         assert name in demo_data.DATASETS

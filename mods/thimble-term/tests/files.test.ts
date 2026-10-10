@@ -194,14 +194,14 @@ test("a transcript's turn shows its words in up to three rows; its time column t
   let pane = await browser($, w)
   pane = await openRow($, w, pane, 'agent-chat.jsonl')
   const rows = ((((await pane.drawn({ in: 'm:file-body' })) as { children?: unknown[] }).children ?? []) as unknown[]).map(r => shown(r).replace(/\s+$/, ''))
-  expect(rows[0]!.trim()).toBe('18 Jun 2026')
+  expect(rows[0]!.trim()).toBe('Jun 18, 2026')
   expect(rows[1]).toMatch(/^ {2}07:40:01 {2}● alice$/)
   // the long words: three rows, the last cut with `…`
   const words = rows.slice(2, 5)
   expect(words.every(r => r.startsWith(' '.repeat(2 + 8 + 2 + 2)))).toBe(true)
   expect(words[2]).toMatch(/…$/)
   expect(rows[5]).toMatch(/^ {2}07:41:30 {2}● bob$/)
-  expect(rows).toContain('  19 Jun 2026')
+  expect(rows).toContain('  Jun 19, 2026')
   expect(rows.join('\n')).not.toContain('T07:40')
   // its type: what it opens as, a transcript (its tab says so), not `text` or its format
   expect(shown(await pane.drawn())).toContain('transcript · 3 records')

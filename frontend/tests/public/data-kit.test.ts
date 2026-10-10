@@ -598,7 +598,7 @@ describe('the table', () => {
     const first = rows()[0]
     expect(first.getAttribute('data-anchor')).toBe('mail.jsonl#L1')
     expect(first.getAttribute('data-thimble-row')).toBe('0')
-    expect(first.hasAttribute('data-colour')).toBe(false)
+    expect(first.hasAttribute('data-color')).toBe(false)
     expect([...first.children].map((c) => c.textContent)).toEqual(['ana', 'Note 0', '0', '2026-04-01 09:00'])
     expect((doc().querySelector('.thimble-table-body') as HTMLElement).style.height).toBe(5000 * 28 + 'px')
     // the view's checks count every row it holds as shown, since it anchors each one it draws
@@ -646,8 +646,8 @@ describe('the table', () => {
     `)
     await wait(120)
     const row = (i: number) => doc().querySelector(`.thimble-table-row[data-thimble-row="${i}"]`) as HTMLElement
-    expect(row(0).getAttribute('data-colour')).toBe('Inbox')
-    expect(row(1).getAttribute('data-colour')).toBe('Ops')
+    expect(row(0).getAttribute('data-color')).toBe('Inbox')
+    expect(row(1).getAttribute('data-color')).toBe('Ops')
     // the chips count every row, not only those drawn
     expect(texts('.thimble-colour-chip')).toEqual(['Inbox2,500', 'Ops2,500'])
     // Filter by hides the rows it does not keep
@@ -1291,7 +1291,7 @@ describe('the text', () => {
 })
 
 describe('times', () => {
-  // 09:00 on 16 May 2026 in UTC
+  // 09:00 on May 16, 2026 in UTC
   const T = Date.UTC(2026, 4, 16, 9) / 1000
   test("the messages and the timeline read a record's time as the transcript does: a number, its digits, an ISO time or a mail's date, one with no zone in UTC on a machine in any zone, and text with no date in it as no time", async () => {
     const zone = process.env.TZ
@@ -1354,7 +1354,7 @@ describe('the messages', () => {
     expect(texts('[data-anchor="m#1"] .thimble-msg-head')).toEqual(['ana23:30'])
     expect(doc().querySelector('[data-anchor="m#1"] .thimble-msg-time')!.getAttribute('title')).toBe('2026-08-27 23:30:00')
     // a date line opens each day; the header names the list and counts its messages and events
-    expect(texts('.thimble-msg-day')).toEqual(['Thu 27 Aug 2026', 'Fri 28 Aug 2026'])
+    expect(texts('.thimble-msg-day')).toEqual(['Thu, Aug 27, 2026', 'Fri, Aug 28, 2026'])
     expect(doc().querySelector('[data-anchor="m#10"]')!.previousElementSibling!.className).toBe('thimble-msg-day')
     expect(texts('.thimble-msg-header')).toEqual(['# ferries11 messages · 1 event'])
     expect([...doc().querySelectorAll('.thimble-msg-header, .thimble-msg-day, .thimble-msg-head')].every((e) => e.hasAttribute('data-thimble-chrome'))).toBe(true)
@@ -1470,7 +1470,7 @@ describe('the messages', () => {
     expect(head.querySelector('.thimble-msg-said')!.textContent).toBe('ana opened this pull request')
     expect(head.querySelector('.thimble-msg-time')!.getAttribute('title')).toBe('2026-08-27 23:30:00')
     expect(texts('[data-anchor="pr#1"] .thimble-msg-box > .thimble-msg-boxbody .thimble-msg-text')).toEqual([expect.stringContaining('parser')])
-    expect(m(1).getAttribute('data-colour')).toBe('ana')
+    expect(m(1).getAttribute('data-color')).toBe('ana')
     // the comments by the same author a minute later share no head with it, and share one with each other
     expect(heads().slice(0, 3)).toEqual([['pr#1', 'head', ''], ['pr#2', 'head', ''], ['pr#3', 'same head', '']])
     // a mail in a box: what they did as html, its `to` and subject in the box over no words

@@ -338,7 +338,7 @@ colored is said under each.
 **Main's chat:**
 
 ```
-⏺ The dse wiki holds most of the corpus [ card ], and most of its edits came on one day, 18 June.
+⏺ The dse wiki holds most of the corpus [ card ], and most of its edits came on one day, June 18.
   ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
   │ How many pages does each wiki have?                                                                            │
   │                                                                                                                │
@@ -361,7 +361,7 @@ colored is said under each.
 The same reply's first row under the pointer, and a passage a thread was asked about:
 
 ```
-? The dse wiki holds most of the corpus [ card ], and most of its edits came on one day, 18 June.
+? The dse wiki holds most of the corpus [ card ], and most of its edits came on one day, June 18.
 ↳ Most of the deletions came later.
 ```
 
@@ -485,11 +485,11 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   of a whole runs on a `─` track to the whole. The total has its own row (`all  4,579`). A chart with a color field
   (two series or more) has one row per label, its series stacked on it in their hues in the data's order, the label's
   total against the right edge, and its key on a row under the bars (`● page saved  ● page deleted`); the readout names
-  the part under the pointer and its series (`24 May · page deleted  14 events`). Labels that are timestamps read as the
-  browser's date axis writes them, all in one form: `24 May`, the time only when one is not midnight (`24 May 12:30`),
+  the part under the pointer and its series (`May 24 · page deleted  14 events`). Labels that are timestamps read as the
+  browser's date axis writes them, all in one form: `May 24`, the time only when one is not midnight (`May 24 12:30`),
   the year only when they span more than one, never an ISO stamp.
 - A line chart: y labels right-aligned in a column, axes in the rule gray, x labels dim at the ends and the middle
-  (timestamps in the bars' one form, `18 May`, never an ISO stamp), a legend row of `● series` entries; the pointer's
+  (timestamps in the bars' one form, `May 18`, never an ISO stamp), a legend row of `● series` entries; the pointer's
   column `┊` with its readout on the readout row.
 - A table: the column names bold, a `─` rule under each name as wide as its column, the rows right under it; numbers
   right-aligned in the card's column formats, as the browser's table writes them (`1,446`). Markdown tables in a reply take the same header.
@@ -521,11 +521,11 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   ● Wiki Pages                                                                     pages.jsonl  new
 
   Documents (1)
-  ● On 18 June, agents rewrote the dse wiki's welcome page 2,299 times…                     report
+  ● On June 18, agents rewrote the dse wiki's welcome page 2,299 times…                     report
 
   Threads (2)  1 new
   ● "How many delete events are in events.jsonl? One number."                                new
-  ● "Which wiki got the most revisions on 18 June, and from how many labels?"
+  ● "Which wiki got the most revisions on June 18, and from how many labels?"
 
   Cards (12)
 ❯ ▾ Your work                                                                             3 cards
@@ -583,8 +583,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   main
 ❯ ├ "How many delete events are in events.jsonl? One number."                               new
   │ There are 5,217 delete events in events.jsonl.
-  └ "Which wiki got the most revisions on 18 June, and from how many labels?"
-    dse got the most revisions on 18 June: 5,884 of the 6,543.
+  └ "Which wiki got the most revisions on June 18, and from how many labels?"
+    dse got the most revisions on June 18: 5,884 of the 6,543.
   ──────────────────────────────────────────────────────────────────────────────────────────────
   about events.jsonl line 12
      11  {"event": "save", "page": "Welcome", "ts": "2026-06-16T08:59:58Z"}

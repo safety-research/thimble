@@ -1100,7 +1100,7 @@
         var mark = e.mark || 'mark'
         // a failure's swatch is its ✕, as the lanes draw it
         var x = mark === 'problem' ? '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2.25 2.25l5.5 5.5M7.75 2.25l-5.5 5.5"/></svg>' : ''
-        return '<button type="button" class="chip chip-key chip-act thimble-key-chip" data-id="' + esc(e.id) + '" aria-pressed="' + on + '"' + (e.about ? ' title="' + esc(e.about) + '"' : '') + '><span class="thimble-key-sw thimble-key-' + esc(mark) + '"' + (e.colour ? ' style="--c:' + esc(e.colour) + '"' : '') + '>' + x + '</span><span class="chip-text">' + esc(e.name) + '</span>' + (typeof e.n === 'number' && e.count !== false ? '<span class="chip-count">' + num(e.n) + '</span>' : '') + '</button>'
+        return '<button type="button" class="chip chip-key chip-act thimble-key-chip" data-id="' + esc(e.id) + '" aria-pressed="' + on + '"' + (e.about ? ' title="' + esc(e.about) + '"' : '') + '><span class="thimble-key-sw thimble-key-' + esc(mark) + '"' + (e.color || e.colour ? ' style="--c:' + esc(e.color || e.colour) + '"' : '') + '>' + x + '</span><span class="chip-text">' + esc(e.name) + '</span>' + (typeof e.n === 'number' && e.count !== false ? '<span class="chip-count">' + num(e.n) + '</span>' : '') + '</button>'
       })
       .join('')
   }
@@ -1762,7 +1762,7 @@
     if (this.range && typeof this.range.format === 'function') return this.range.format(t, step)
     return this.unit === 'n' ? String(Math.round(t * 1000) / 1000) : new Date(this.unit === 'ms' ? t : t * 1000).toISOString().slice(11, 19)
   }
-  // a bin's span in words, the day said once where both ends fall on it: 16 May 09:03–09:04
+  // a bin's span in words, the day said once where both ends fall on it: May 16 09:03–09:04
   Lanes.prototype.between = function (t0, t1) {
     var a = this.when(t0, t1 - t0)
     var b = this.when(t1, t1 - t0)

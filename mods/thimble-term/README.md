@@ -21,7 +21,7 @@ its `trusted/launch.json`.
 Its look is [SPEC.md](SPEC.md) ("The visual system"): one left edge, links blue and underlined, `new` in green,
 Claude Code's panel chrome, no right-click menu.
 
-- **Main's replies.** The model's Markdown as Claude Code draws it (bold bold, headings bold, inline code coloured). The
+- **Main's replies.** The model's Markdown as Claude Code draws it (bold bold, headings bold, inline code colored). The
   prose and the cards share one left edge, column 2, Claude Code's own (the ⏺ row's text), and one width: the
   terminal's, less 2 and the margin, with no measure; the cards follow the text and each other border to border. Each citation, `[[value|ref]]` or
   the Markdown link main writes for the terminal, is a link, blue and underlined; red when its place does not exist or
@@ -46,15 +46,15 @@ Claude Code's panel chrome, no right-click menu.
   pane, the citation panel, a document), has a full round border; inside it, the title in bold (in inverse under the
   pointer, a press asks a side thread), one blank row, then the plot or body directly; below the plot the readout (the
   value under the pointer, or the card's state), the label rows (the label's name a link with `↗`, which opens its
-  panel; its values in their colours, `changed since` once the label changed after the card ran), the params and the
-  takeaway. A card that read a label colours its marks by the label's values. A label card is a bar card of the label's
+  panel; its values in their colors, `changed since` once the label changed after the card ran), the params and the
+  takeaway. A card that read a label colors its marks by the label's values. A label card is a bar card of the label's
   counts: its records are in the label panel. A card that cannot be read is one red line (`× card 2 cannot be drawn:
   …`). Claude Code's tool rows stay its own, folded, and no hex id is drawn, in the row or in ctrl+o's detailed view: a
   thimble tool's row names a card by its question (cut at a word, without straight quotation marks Claude Code would
   escape) and a citation by its words, a label tool's result its name and counts, and a side thread's fork row and the
   notice that it finished the thread by its first question, and so does the fork's prompt in ctrl+o; a tool's words draw
   their straight quotation marks curly, which Claude Code does not escape; thimble's tool results keep their card ids, which main
-  cites. A bar card keeps the order its chart's label axis sorts, and a bar chart with its values written on its bars is a bar card too; a bar chart with a color field has one row per label, its series stacked in their hues and its key below, and timestamps as labels read as the browser's axis writes them (`24 May`). A table, a timeline, a diagram, an example and a label draw
+  cites. A bar card keeps the order its chart's label axis sorts, and a bar chart with its values written on its bars is a bar card too; a bar chart with a color field has one row per label, its series stacked in their hues and its key below, and timestamps as labels read as the browser's axis writes them (`May 24`). A table, a timeline, a diagram, an example and a label draw
   directly; a simple bar or line chart draws as text; any other chart as a table of its rows; a note, a custom card, a
   code card and a card type's card as their words.
 - **Rows under main's replies.** `↳ thread · "<the turn's question>" · answered` when a side thread's turn ends while the
@@ -67,7 +67,7 @@ Claude Code's panel chrome, no right-click menu.
   green), `open ›` opening home, gone once it is opened. Side threads have their `↳` rows and thimble's agents Claude
   Code's agent tray, so no row repeats them.
 - **One panel**, on Claude Code's panel chrome: one title row, the path from home, its earlier steps dim and a click
-  away and the current step last in the accent colour and bold (`home › Threads`; on home, `show all threads` and
+  away and the current step last in the accent color and bold (`home › Threads`; on home, `show all threads` and
   `N new` at the right; no `‹ back`, b goes back), a dim subtitle, a rule, the actions at the bottom after a second rule, and a dim italic row of key hints (`b to go back` only where there is a way back),
   which goes on to a second row where it does not fit, never cut. Claude Code's
   pane title says what it shows (`Citation`, `Threads`, `Label: …`, a card's question, a document's title). Its views:
@@ -92,7 +92,7 @@ Claude Code's panel chrome, no right-click menu.
   and the views (a view built in terminal mode drawn by its program, `view.term.js` on the terminal view kit, which
   thimble's view host runs sandboxed while the view shows: docs/terminal-views.md; a view built in browser mode as one
   line that says so).
-- **The label panel**, as Matt laid it out: `name:` its name in the accent and bold after a `●` in its colour, `type:`
+- **The label panel**, as Matt laid it out: `name:` its name in the accent and bold after a `●` in its color, `type:`
   (`prompt  regex  code`, the one in use on the selection background, the others a click away), `scope:` (its files, a
   field, and how many records), for a label over files `in files:` (`on  off`, o, `thimble act label-show`), then a
   rule; the prompt (or pattern, or code) whole in a field to edit, on the same
@@ -137,7 +137,7 @@ route for it:
 | `thimble act thread-message --cwd <dir> {thread, message}` | a question in a thread |
 | `thimble act verdict --cwd <dir> {label, ref, value}` | the analyst's value for a record |
 | `thimble act label --cwd <dir> {label, name?, kind?, body?, glob?, values?}` | the label panel's edit, saved as the browser's label editor saves it |
-| `thimble act label-show --cwd <dir> {label, on?, values?, colours?}` | a label over files on or off in Files and the views, or its values given colors by name, as the Labels pane and show_label do |
+| `thimble act label-show --cwd <dir> {label, on?, values?, colors?}` | a label over files on or off in Files and the views, or its values given colors by name, as the Labels pane and show_label do |
 | `thimble act label-filter --cwd <dir> {label, value?}` | the label's scope's filter set to `value`, or cleared when it names the label and no value is given |
 | `thimble act label-delete --cwd <dir> {label}` / `label-undelete --cwd <dir> {label}` | a label deleted with its marks, card and filters / its delete undone while it is the last change |
 | `thimble act label-run --cwd <dir> {label, limit?}` | a run on a sample (`limit`) or on every record; it answers once the run ends, so the renderer starts it beside the session (`$.process.spawn`), which it ends with; a code label's answer is the `thimble-run label` command (`deferred`) |
@@ -145,7 +145,7 @@ route for it:
 | `thimble act seen --cwd <dir> {thread}` | the thread's answers read |
 | `thimble act hand-back --cwd <dir> {thread}` | a finished thread's answer sent to main as the analyst's message, `From thread "<question>": <answer>` (the thread's meta then says `hand_back: handed`) |
 | `thimble act stop --cwd <dir> {agent}` | stop one of thimble's agents, or a side thread's fork |
-| `thimble state checks --cwd <dir>` | the report checks route's list: each check's name, colour, `shown` and runs, which name a document's comments |
+| `thimble state checks --cwd <dir>` | the report checks route's list: each check's name, color, `shown` and runs, which name a document's comments |
 | `thimble act comment-resolve --cwd <dir> {doc, comment}` / `comment-reopen` | a document's comment resolved, as the browser's margin's ✓ does, or opened again |
 | `thimble act doc-save --cwd <dir> {doc, title?, blocks}` | a report edited as Markdown, saved as the browser's editor saves it (PUT …/blocks): each block with the id of the unit it was built from, so a kept passage keeps its id and its comments |
 | `thimble view host --cwd <dir>` | thimble's view host, started beside the session the first time a view opens (`$.process.spawn`): it prints `{t: ready, socket, token}`, then the frames a view's program draws on its own; the panel posts `/open`, `/event` and `/close` to the socket (`$.http.fetch`, `hooks/viewhost.ts`) |

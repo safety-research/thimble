@@ -232,7 +232,7 @@ function Classes({ concept, set }: { concept: ConceptDetail; set: (k: ConceptDet
       <div className="canvas-label-classes">
         {classes.map((c, i) => (
           <div key={c.name} className="canvas-label-class">
-            <TipButton tip="Change colour" className="canvas-label-colour" style={{ '--c': colourVar(c.color) } as CSSProperties} aria-label={`Change the colour of ${c.name}`} disabled={saving} onClick={() => change(i, { color: nextColour(c.color, classes.filter((_, j) => j !== i).map((x) => x.color)) })} />
+            <TipButton tip="Change color" className="canvas-label-colour" style={{ '--c': colourVar(c.color) } as CSSProperties} aria-label={`Change the color of ${c.name}`} disabled={saving} onClick={() => change(i, { color: nextColour(c.color, classes.filter((_, j) => j !== i).map((x) => x.color)) })} />
             <span className="canvas-label-classname">{c.name}</span>
             <span className="canvas-label-classcount">{(concept.counts?.[c.name] ?? 0).toLocaleString()}</span>
             <Switch checked={c.highlight} onChange={(v) => change(i, { highlight: v })} label={`Highlight ${c.name}`} disabled={saving} />

@@ -157,12 +157,12 @@ test("a turn's words in up to three rows, the last cut; a transcript's times as 
   expect(wrapRows('x'.repeat(30), 12, 3)).toEqual(['x'.repeat(12), 'x'.repeat(12), 'x'.repeat(6)])
   expect(wrapRows('x'.repeat(40), 12, 3)).toEqual(['x'.repeat(12), 'x'.repeat(12), `${'x'.repeat(11)}…`])
   expect(turnTimes(['2026-06-18T07:40:01Z', '2026-06-18T07:41:00Z', '2026-06-19T09:00:00Z'])).toEqual([
-    { clock: '07:40:01', day: '18 Jun 2026' },
+    { clock: '07:40:01', day: 'Jun 18, 2026' },
     { clock: '07:41:00', day: '' },
-    { clock: '09:00:00', day: '19 Jun 2026' },
+    { clock: '09:00:00', day: 'Jun 19, 2026' },
   ])
   expect(turnTimes(['10:00', '10:01'])).toEqual([{ clock: '10:00', day: '' }, { clock: '10:01', day: '' }])
-  expect(turnTimes(['2026-06-18T07:40:00Z', ''])).toEqual([{ clock: '07:40', day: '18 Jun 2026' }, { clock: '', day: '' }])
+  expect(turnTimes(['2026-06-18T07:40:00Z', ''])).toEqual([{ clock: '07:40', day: 'Jun 18, 2026' }, { clock: '', day: '' }])
 })
 
 test('the threads list keeps side threads, each with its answers and those not read', () => {

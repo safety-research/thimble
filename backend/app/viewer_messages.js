@@ -75,10 +75,10 @@
     var d = utc(s)
     return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate())
   }
-  // a date line's words: Thu 28 Aug 2026, in UTC as the kit writes times
+  // a date line's words: Thu, Aug 28, 2026, in UTC as the kit writes times
   function dayName(s) {
     var d = utc(s)
-    return DAYS[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear()
+    return DAYS[d.getUTCDay()] + ', ' + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCDate() + ', ' + d.getUTCFullYear()
   }
   function hm(s) {
     var d = utc(s)
@@ -91,7 +91,7 @@
   function timeHtml(s, cls, day) {
     if (s == null) return ''
     var d = utc(s)
-    var words = (day ? d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ' ' : '') + hm(s)
+    var words = (day ? MONTHS[d.getUTCMonth()] + ' ' + d.getUTCDate() + ' ' : '') + hm(s)
     return '<time class="' + cls + '" datetime="' + esc(d.toISOString()) + '" title="' + esc(full(s)) + '">' + esc(words) + '</time>'
   }
   // an avatar's shade from its name, so people tell apart without a color (the repository example's shade)

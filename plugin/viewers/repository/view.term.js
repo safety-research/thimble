@@ -89,7 +89,7 @@ const FIELDS = [
   { name: 'area', title: 'Area', description: 'The part of the library: the first label, else the area of the issue it fixes' },
   { name: 'author', title: 'Author', description: 'Who opened the pull request or the issue, or started the thread' },
 ]
-const colour = colorBy({ fields: FIELDS, onChange: () => load() })
+const color = colorBy({ fields: FIELDS, onChange: () => load() })
 const filter = filterBy({ fields: FIELDS, onChange: () => load() })
 const q = search({ words: 'search' })
 // the run switcher, made once the reader named the runs: Reset puts back the run the view opens on
@@ -111,14 +111,14 @@ function load() {
 async function reload() {
   let got
   try {
-    got = await fetch({ op: 'view', run, tab, colour: colour.query(), filter: filter.query() }, { key: 'view' })
+    got = await fetch({ op: 'view', run, tab, color: color.query(), filter: filter.query() }, { key: 'view' })
   } catch (e) {
     if (e.name === 'AbortError') return
     throw e
   }
   data = got
   run = got.run
-  colour.counts(got.counts)
+  color.counts(got.counts)
   filter.counts(got.filtered)
   const values = got.runs.map((r) => ({ name: r.run, value: r.run, right: tally(r) }))
   if (!runs) runs = choice({ title: 'run', values, all: false, initial: got.run, key: 'p', tip: 'switch run', onChange: (r) => chooseRun(r) })
@@ -298,11 +298,11 @@ function page(it, d) {
 // ------------------------------------------------------------------------------------------------ the view
 
 // a row that stands for its records (any under a label, an agent's under a field it does not carry) takes no mark of
-// its own: the kit's colour.mix of its records' values in `n` cells, where any of them takes a value
+// its own: the kit's color.mix of its records' values in `n` cells, where any of them takes a value
 const MIX = 6
 function mixCells(it, n = MIX) {
   const parts = it.mix || []
-  const runs = parts.some(([v]) => v !== null) ? colour.mix(Object.fromEntries(parts.map(([v, m]) => [v ?? '', m])), n) : []
+  const runs = parts.some(([v]) => v !== null) ? color.mix(Object.fromEntries(parts.map(([v, m]) => [v ?? '', m])), n) : []
   return runs.length ? runs : [{ s: ' '.repeat(n) }]
 }
 
@@ -332,7 +332,7 @@ draw((d) => {
   if (data && runs) headRow(d)
   tabsRow(d)
   // the top row: the search, Filter by with its toggles, Color by with its chips, Reset at R
-  colour.draw(d, (r) => {
+  color.draw(d, (r) => {
     q.add(r).gap()
     filter.add(r, { max: Math.max(20, Math.floor((d.cols - r.x) / 2)) }).gap()
   })
@@ -347,7 +347,7 @@ draw((d) => {
   const items = data.items.filter((it) => !words || it.search.includes(words))
   // a field colors the rows' marks and the track; a label, whose marks are on records, colors neither: the rows show
   // their records' mix and the track is plain, as the agents' rows do under a field they do not carry
-  const group = !!colour.label || data.items.some((it) => it.mix)
+  const group = !!color.label || data.items.some((it) => it.mix)
   // the columns the list's width holds after the item's number, laid out as its header draws, in the width the side pane
   // leaves it less the mark and the track
   const idW = tab === 'pulls' || tab === 'issues' ? Math.max(3, ...data.items.map((it) => width(`#${it.number}`))) : 0
@@ -356,7 +356,7 @@ draw((d) => {
   const mixW = group ? MIX + 2 : 0
   rows.draw(d, {
     items,
-    ...(group ? {} : { colour, value: (it) => it.value }),
+    ...(group ? {} : { color, value: (it) => it.value }),
     empty: `no ${name}`,
     header: (r) => {
       const room = r.d.cols - 5 - (idW ? idW + 2 : 0) - mixW + (group ? 2 : 0)

@@ -293,7 +293,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
 
 // ---------------------------------------------------------------- time: T is seconds since 1970, shown in UTC
 const date = (T) => new Date(T * 1000)
-const dm = (T) => { const d = date(T); return `${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}` }
+const dm = (T) => { const d = date(T); return `${MONTH[d.getUTCMonth()]} ${d.getUTCDate()}` }
 const hm = (T) => date(T).toISOString().slice(11, 16)
 const hms = (T) => date(T).toISOString().slice(11, 19)
 const dayKey = (T) => date(T).toISOString().slice(0, 10)
@@ -306,8 +306,8 @@ function spanText(a, b) {
   return `${dm(a)} ${hm(a)} – ${dm(b)} ${hm(b)}`
 }
 function binText(t0, t1) {
-  if (t1 - t0 >= 86400) return t1 - t0 === 86400 ? `${weekday(t0).slice(0, 3)} ${dm(t0)}` : `${dm(t0)} – ${dm(t1 - 1)}`
-  return `${weekday(t0).slice(0, 3)} ${dm(t0)} ${hm(t0)}–${dayKey(t1) !== dayKey(t0) && hm(t1) === '00:00' ? '24:00' : hm(t1)}`
+  if (t1 - t0 >= 86400) return t1 - t0 === 86400 ? `${weekday(t0).slice(0, 3)}, ${dm(t0)}` : `${dm(t0)} – ${dm(t1 - 1)}`
+  return `${weekday(t0).slice(0, 3)}, ${dm(t0)} ${hm(t0)}–${dayKey(t1) !== dayKey(t0) && hm(t1) === '00:00' ? '24:00' : hm(t1)}`
 }
 function shortSpan(a, b) {
   if (b - a < 60) return `${dm(a)} ${hm(a)}`
@@ -1458,7 +1458,7 @@ const estItem = (pos) => {
 // an item with its day's line, as the pane draws it
 function itemHtml(k) {
   const pos = M.pos[k], b = got.get(pos)
-  const day = M.day[k] ? (() => { const T = O.t0 + PG.strip.t[LP[pos]]; return `<div class="day">${weekday(T)} ${dm(T)}</div>` })() : ''
+  const day = M.day[k] ? (() => { const T = O.t0 + PG.strip.t[LP[pos]]; return `<div class="day">${weekday(T)}, ${dm(T)}</div>` })() : ''
   return `<div class="vi" data-k="${k}">${day}${b ? blockHtml(b, pos) : skelHtml(pos)}</div>`
 }
 // the item at the top of the view and how far above the view's top it starts, to keep it there across a change
@@ -1546,7 +1546,7 @@ function dayHead() {
   const el = $('dayhead')
   if (k < 0 || (M.day[k] && top - M.top[k] < dayH)) { el.textContent = ''; return }
   const T = O.t0 + PG.strip.t[LP[M.pos[k]]]
-  const s = `${weekday(T)} ${dm(T)}`
+  const s = `${weekday(T)}, ${dm(T)}`
   if (el.textContent !== s) el.textContent = s
 }
 let ignoreScroll = false, scrollRaf = 0
@@ -1687,7 +1687,7 @@ async function showEvent(line) {
   const T = isoT(res.time)
   const kind = res.event_type === 'delete' ? `Deleted ${res.page || res.page_key || 'page'}` : res.event_type === 'request' ? 'Request' : res.event_type
   const facts = Object.entries(res).filter(([k]) => k !== 'ref').map(([k, v]) => fact(k, v == null ? 'null' : typeof v === 'object' ? JSON.stringify(v) : String(v))).join('')
-  $('blocks').innerHTML = `<div class="evcard" data-anchor="${esc(res.ref)}" data-anchor-text="${esc(res.request || res.change_summary || res.request_action || '')}"><h3>${esc(kind)}</h3><div class="h2 mono">${T != null ? `${weekday(T)} ${dm(T)} ${hms(T)} UTC` : ''}</div><dl class="facts">${facts}</dl></div>`
+  $('blocks').innerHTML = `<div class="evcard" data-anchor="${esc(res.ref)}" data-anchor-text="${esc(res.request || res.change_summary || res.request_action || '')}"><h3>${esc(kind)}</h3><div class="h2 mono">${T != null ? `${weekday(T)}, ${dm(T)} ${hms(T)} UTC` : ''}</div><dl class="facts">${facts}</dl></div>`
 }
 
 // ---------------------------------------------------------------- a username and its pages
