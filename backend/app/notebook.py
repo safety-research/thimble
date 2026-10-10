@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import atexit
-import base64
 import contextlib
 import copy
 import fcntl
@@ -33,7 +32,6 @@ import subprocess
 import sys
 import threading
 import time
-import zlib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -2110,8 +2108,7 @@ def startup_lines(roots: tuple[str, ...] | None = None, workspace: Path | None =
     if roots:
         lines.append(f"exec({_READS_SRC!r}, {{'ROOTS': {tuple(str(r) for r in roots)!r}, 'CAP': {READS_CAP!r}, 'MIME': {READS_MIME!r}}})")
     if workspace is not None:
-        packed = base64.b64encode(zlib.compress(_thimble_src().encode("utf-8"), 9)).decode("ascii")
-        lines.append(f"exec({_THIMBLE_INSTALL!r}, {{'SRC': {packed!r}, 'WS': {str(workspace)!r}}})")
+        lines.append(f"exec({_THIMBLE_INSTALL!r}, {{'PATH': {str(THIMBLE_MODULE)!r}, 'WS': {str(workspace)!r}}})")
     return lines
 
 
@@ -2144,21 +2141,23 @@ _FIGURE_FORMAT_SRC = ("import IPython.core.pylabtools as _pt\n"
                       "del _pt, _once\n")
 
 # matplotlib's defaults for a card's figure, read when a card imports matplotlib, so a kernel starts no slower.
-MATPLOTLIBRC = Path(__file__).with_name("matplotlibrc")
+MATPLOTLIBRC = Path(__file__).resolve().with_name("matplotlibrc")
 
-# The `thimble` module (kernel_thimble.py) installed in the kernel: a module built from the file's source with WS set
-# and registered in sys.modules (the source is read once, at first use). The source comes compressed (zlib, then
-# base64): a sandboxed kernel's whole command line is one shell argument of at most MAX_ARG_STRLEN bytes, which the
-# source as text would soon fill.
+# The `thimble` module installed in the kernel: a module built from kernel_thimble.py, which the kernel reads in place
+# (a wrapped kernel too: _kernel_reads), with WS set, and registered in sys.modules. The command line names only the
+# file: a sandboxed kernel's whole command line is one shell argument of at most MAX_ARG_STRLEN bytes, which the
+# module's source would fill.
 MAX_ARG_STRLEN = 131072  # Linux's limit on one argument, which srt's wrapped command must fit (kernel_srt.mjs)
-_THIMBLE_INSTALL = ("import sys, types, zlib, base64\nm = types.ModuleType('thimble')\nm.WS = WS\n"
-                    "exec(zlib.decompress(base64.b64decode(SRC)).decode('utf-8'), m.__dict__)\nsys.modules['thimble'] = m\n")
-_THIMBLE_SRC_CACHE: list[str] = []
+THIMBLE_MODULE = Path(__file__).resolve().with_name("kernel_thimble.py")
+_THIMBLE_INSTALL = ("import sys, types\nm = types.ModuleType('thimble')\nm.__file__, m.WS = PATH, WS\n"
+                    "with open(PATH, encoding='utf-8') as f:\n    exec(compile(f.read(), PATH, 'exec'), m.__dict__)\n"
+                    "sys.modules['thimble'] = m\n")
+_THIMBLE_SRC_CACHE: list[str] = []  # the source as this server first read it, which _refresh_thimble sends
 
 
 # A reconnected kernel holds the `thimble` module of the server that started it, so on reconnecting the current source
 # is run again into that module, silently and without waiting; the reply is skipped by _execute, which reads only its
-# own.
+# own. The source goes in the message, since a kernel an older server started may not be allowed to read the file.
 _THIMBLE_REFRESH = ("import sys as _s\n"
                     "if 'thimble' in _s.modules:\n"
                     "    exec(SRC, _s.modules['thimble'].__dict__)\n"
@@ -2176,7 +2175,7 @@ def _refresh_thimble(k: _Kernel) -> None:
 
 def _thimble_src() -> str:
     if not _THIMBLE_SRC_CACHE:
-        _THIMBLE_SRC_CACHE.append((Path(__file__).with_name("kernel_thimble.py")).read_text("utf-8"))
+        _THIMBLE_SRC_CACHE.append(THIMBLE_MODULE.read_text("utf-8"))
     return _THIMBLE_SRC_CACHE[0]
 
 
@@ -2539,8 +2538,10 @@ def _venv() -> Path | None:
 
 
 def _kernel_reads() -> list[Path]:
-    """Files of the backend a wrapped kernel reads: the page's fonts (page_fonts) and thimble's matplotlibrc."""
-    return [page_fonts.FONTS_DIR, MATPLOTLIBRC]
+    """Files of the backend a wrapped kernel reads: the page's fonts (page_fonts), thimble's matplotlibrc and the
+    `thimble` module's source (startup_lines). Each is named by its real path, as the kernel opens it: srt hides the
+    install tree by its real path (_kernel_hides), so a path through a link into it would stay hidden."""
+    return [page_fonts.FONTS_DIR, MATPLOTLIBRC, THIMBLE_MODULE]
 
 
 def _kernel_hides() -> list[Path]:

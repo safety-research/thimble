@@ -506,6 +506,16 @@ def test_without_a_server_each_new_hook_writes_its_record(tmp_path, ws):
     assert sf.read(ws)["agents"][AGENT]["sessions"] == [MAIN_SID, "new-sid"]
 
 
+def test_the_caller_hook_writes_main_s_own_call_as_a_line_with_no_agent(tmp_path, ws):
+    """Main's own thimble call gets a line too, naming no agent, so the server knows it is main's before Claude Code
+    writes the call to main's transcript, which it does only once the call has returned (subagents.caller)."""
+    out = run_hook(tmp_path, "--caller", {"hook_event_name": "PreToolUse", "session_id": MAIN_SID,
+                                          "tool_name": "mcp__plugin_thimble_thimble__add_card", "tool_use_id": "toolu_main1"})
+    assert out.returncode == 0 and out.stdout == ""
+    line = sf.find_caller(ws, "toolu_main1")
+    assert line is not None and line["agent_id"] == "" and line["agent_type"] == ""
+
+
 def test_without_a_server_a_fork_s_turn_end_refuses_its_unclaimed_typed_start_in_the_file(tmp_path, ws):
     with sf.update(ws) as state:
         pending_start(state, "req_hookfork01", "typed", "req_hookfork01\nw", role="writer", key="writer:report",

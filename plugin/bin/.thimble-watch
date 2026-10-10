@@ -762,15 +762,15 @@ def subagent_stop(inp: dict) -> int:
 
 
 def caller(inp: dict) -> int:
-    """The caller hook (module note): the line of callers.jsonl that names the agent making a thimble call, and the
-    parent of a descendant whose nested start was ambiguous, from its meta.json."""
+    """The caller hook (module note): the line of callers.jsonl that names the agent making a thimble call, or no agent
+    for main's own call, and the parent of a descendant whose nested start was ambiguous, from its meta.json."""
     agent = str(inp.get("agent_id") or "")
-    if not agent:
-        return 0
     sf, ws = workspace(inp)
     if ws is None:
         return 0
     sf.add_caller(ws, str(inp.get("tool_use_id") or ""), agent, str(inp.get("agent_type") or ""))
+    if not agent:
+        return 0
     entry = sf.registry(sf.read(ws)).get(agent)
     if isinstance(entry, dict) and entry.get("candidates") and not entry.get("parent"):
         parent = parent_of(inp, agent)

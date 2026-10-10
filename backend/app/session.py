@@ -2429,8 +2429,9 @@ async def caller_sub(c: str, tool_use_id: str | None) -> "Sub | None":
 
 async def call_holder(c: str, tool_use_id: str | None, wait_s: float = CALL_WAIT_S) -> "Sub | Live | None":
     """The subagent, or main (its Live), whose transcript holds the call `tool_use_id`, waiting `wait_s` at most for its
-    line; None when no session is attached or no transcript holds it by then. Main's own call is found as soon as
-    Claude Code has written it to main's transcript, which it does before it makes the call."""
+    line; None when no session is attached or no transcript holds it by then. Claude Code writes a call to main's
+    transcript only once the call has returned (2.1.295), so main's own call is told by the caller hook's line instead
+    (subagents.caller)."""
     lv = _live.get(c)
     if lv is None or not tool_use_id:
         return None

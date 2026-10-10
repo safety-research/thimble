@@ -221,19 +221,54 @@ def test_a_workspace_set_to_srt_never_runs_unwrapped(monkeypatch, workspaces_tmp
 def test_the_kernel_s_command_leaves_srt_room_in_its_one_shell_argument(tmp_path):
     """srt wraps the kernel's whole command in one shell argument of at most MAX_ARG_STRLEN bytes, its own words with
     it (2026-10-10: 133,125 bytes of a 131,071 limit when the `thimble` module's source went as text, and every kernel
-    died before answering). The source goes compressed, and the quoted command takes at most half the argument."""
+    died before answering; 59,943 bytes when it went compressed). The command names the module's file, which the
+    kernel reads, so the quoted command takes at most an eighth of the argument however the module grows."""
     import shlex
 
     argv = notebook.kernel_argv(tmp_path / "k.conn.json", tmp_path / "k.json", roots=(str(tmp_path),), workspace=tmp_path)
-    assert len(" ".join(shlex.quote(a) for a in argv)) < notebook.MAX_ARG_STRLEN // 2
-    # the compressed source installs the same module
+    assert len(" ".join(shlex.quote(a) for a in argv)) < notebook.MAX_ARG_STRLEN // 8
+    # the line installs the module from its file, with the workspace set, and tracebacks name that file
     line = next(a for a in argv if "types.ModuleType('thimble')" in a).split("=", 1)[1]
     try:
         exec(line, {})  # noqa: S102 — the kernel's own exec line
         mod = sys.modules["thimble"]
         assert mod.WS == str(tmp_path) and mod.CHARTS.keys() >= {"bar", "box", "area"}
+        assert mod.__file__ == str(notebook.THIMBLE_MODULE) == mod.labels.__code__.co_filename
     finally:
         sys.modules.pop("thimble", None)
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_a_wrapped_kernel_imports_the_thimble_module_from_its_file(wrap, monkeypatch, workspaces_tmp):
+    """In the wrapped kernel `import thimble` gives the module the start line built from kernel_thimble.py, which the
+    sandbox lets the kernel read, with the workspace set; the rest of the backend's folder stays hidden."""
+    if not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    code = ("import os, thimble\n"
+            "print(thimble.WS == os.path.realpath('..'), thimble.__file__, thimble.chart.__module__,\n"
+            "      os.path.exists(os.path.join(os.path.dirname(thimble.__file__), 'notebook.py')))\n")
+    try:
+        cell = await notebook.run_code("mini", code, "main")
+        said = "".join(b.get("text/plain", "") for b in cell["outputs"]).split()
+        assert said == ["True", str(notebook.THIMBLE_MODULE), "thimble", "False"], cell["outputs"]
+    finally:
+        await notebook.shutdown_all()
+
+
+def test_a_backend_imported_through_a_link_names_the_files_a_wrapped_kernel_reads_by_their_real_paths(tmp_path):
+    """srt hides the install tree by its real path (notebook._kernel_hides), so each file a wrapped kernel reads is
+    named by its real path even when the backend is imported through a link (a PYTHONPATH naming a linked checkout):
+    else srt kept kernel_thimble.py hidden and the kernel's `import thimble` failed with No module named 'thimble'."""
+    link = tmp_path / "tree"
+    link.symlink_to(config.REPO_ROOT, target_is_directory=True)
+    code = "from app import notebook\nprint(notebook.THIMBLE_MODULE)\nfor p in notebook._kernel_reads(): print(p)"
+    out = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, capture_output=True, text=True, timeout=60,
+                         env={"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path), "PYTHONPATH": str(link / "backend")})
+    assert out.returncode == 0, out.stderr
+    module, *reads = out.stdout.split()
+    assert len(reads) == 3 and module in reads
+    assert all(p == os.path.realpath(p) and p.startswith(f"{config.REPO_ROOT}{os.sep}") for p in reads), reads
 
 
 def test_the_start_up_sweep_leaves_a_sandboxed_kernel_s_processes_alone():
