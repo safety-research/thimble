@@ -134,8 +134,7 @@ in place of its value as text; `sort: false` for a column a click does not sort.
 
 | member | what it gives |
 |---|---|
-| `set(rows)` | new rows, such as after a fetch, drawn at once; the sort and the chosen row are kept |
-| `draw()` | drawn again, such as after Filter by changed |
+| `draw(rows)`, `draw()` | drawn with new rows, such as after a fetch, the sort and the chosen row kept; with none, drawn again, such as after Filter by changed |
 | `reveal(ref)`, `open(ref)` | a cited row scrolled to, chosen and highlighted, or opened as a click opens it; `false` when no row shows it |
 | `sortBy(name, desc)` | sorted by a column, as a click on its head without `desc` |
 | `rows`, `sort`, `selected` | the rows that show in order, the sort (`{by, desc}` or null), and the chosen row's ref |
@@ -149,7 +148,7 @@ against the one before or a memory file rewritten:
   the positive green with +, and in a changed line the words that changed in a stronger tint of the same color.
 - Side by side (`mode: 'split'`) the older version is on the left and the newer on the right, a changed line level
   with the line it became. Inline (`'inline'`) a changed line is the old line over the new one, each with both line
-  numbers. `'auto'`, the default, is side by side in a mount 640 px wide or more, and inline in a narrower one such as
+  numbers. `'auto'`, the default, is side by side in a mount 760 px wide or more, and inline in a narrower one such as
   the side panel or when one version is empty, as for a page created.
 - Unchanged lines more than `context` lines from a change fold to one line, "120 unchanged lines", with Show more;
   Show less folds them again. A stretch of fewer than 4 lines shows. The folded lines stay in the page, so the search

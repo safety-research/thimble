@@ -25,7 +25,8 @@
   var esc = shared.esc
   var num = shared.num
 
-  var SPLIT_PX = 640 // px a mount is wide at least for `auto` to set the versions side by side
+  var SPLIT_PX = 760 // px a mount's content is wide at least for `auto` to set the versions side by side, about 45
+  // characters a side
   var CONTEXT = 3 // unchanged lines kept beside a change
   var MIN_FOLD = 4 // unchanged lines a fold hides at least; a shorter stretch shows
   var CELLS = 4000000 // the largest table a longest common subsequence is found in; past it, unique lines anchor it
@@ -324,8 +325,10 @@
   Diff.prototype.resolved = function () {
     if (this.mode !== 'auto') return this.mode
     if (!linesOf(this.before).length || !linesOf(this.after).length) return 'inline'
-    var w = this.mount.clientWidth
-    return !w || w >= SPLIT_PX ? 'split' : 'inline'
+    // the width the lines get: the mount's less its padding, as the side panel's body has
+    var cs = getComputedStyle(this.mount)
+    var w = this.mount.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
+    return w <= 0 || w >= SPLIT_PX ? 'split' : 'inline'
   }
   Diff.prototype.draw = function () {
     if (!this.mount || this.dead) return

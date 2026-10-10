@@ -15,7 +15,7 @@
 //     side, details: (m) => ({ title: m.subject, sub: m.from, html: body(m) }),   a row opens in thimble.side
 //     search, filter,                       a thimble.search finds in its rows, a thimble.filterBy hides rows
 //   })
-//   table.set(rows)                         new rows, such as after a fetch; table.draw() after Filter by changed
+//   table.draw(rows)                        new rows, such as after a fetch; table.draw() after Filter by changed
 //
 // Each row is a record: its data-anchor is its ref, so a label marks it, a ⌘-click asks about it and a citation reveals
 // it (table.reveal(ref)), and with the page's Color by its value's colour is the bar on its left edge; the list's strip
@@ -615,13 +615,11 @@
   thimble.table = function (opts) {
     var t = new Table(opts || {})
     return {
-      /** new rows, drawn at once; the chosen row and the sort are kept */
-      set: function (rows) {
-        t.all = Array.isArray(rows) ? rows : []
-        t.draw()
-      },
-      /** drawn again, such as after Filter by changed */
-      draw: function () {
+      /** drawn with these rows, such as after a fetch, the sort and the chosen row kept; with none, drawn again, such
+       *  as after Filter by changed */
+      draw: function (rows) {
+        // anything but a list (or null for none) draws again, so `onChange: table.draw` keeps the rows
+        if (Array.isArray(rows) || rows === null) t.all = rows || []
         t.draw()
       },
       /** a cited row scrolled to, chosen and highlighted for a moment; false when no row shows it */

@@ -230,9 +230,9 @@ describe('the table', () => {
     // a table made again on the same mount takes its place; the one before draws nothing more there
     const before = w.table
     w.eval(`window.table = thimble.table({ mount: '#list', rows: window.MAIL.slice(0, 3), columns: ${JSON.stringify(COLUMNS)} })`)
-    before.set(w.MAIL)
+    before.draw(w.MAIL)
     expect(doc().querySelectorAll('.thimble-table-row')).toHaveLength(3)
-    w.table.set(w.MAIL)
+    w.table.draw(w.MAIL)
     // numbers sort as numbers, the largest first; the row with no size last
     ;(doc().querySelector('[data-col="size"]') as HTMLElement).click()
     expect(w.table.sort).toEqual({ by: 'size', desc: true })

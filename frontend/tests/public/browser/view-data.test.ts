@@ -54,9 +54,11 @@ const BEFORE = ['# Memory', '- Ana runs the timetable.', ...Array.from({ length:
 const AFTER = ['# Memory', '- Ana runs the timetable and the roster, every week of the summer season.', ...Array.from({ length: 30 }, (_, i) => `- note ${i}`), '- Dee is the harbor master.'].join('\n')
 const DIFF = (dark: boolean) =>
   page(`<div id="wide" style="width:900px"></div><div id="narrow" style="width:360px"></div>
+<div id="padded" style="box-sizing:border-box;width:800px;padding:0 40px"></div>
 <script>
 window.wide = thimble.diff({ mount: '#wide', before: ${JSON.stringify(BEFORE)}, after: ${JSON.stringify(AFTER)} })
 window.narrow = thimble.diff({ mount: '#narrow', before: ${JSON.stringify(BEFORE)}, after: ${JSON.stringify(AFTER)} })
+window.padded = thimble.diff({ mount: '#padded', before: ${JSON.stringify(BEFORE)}, after: ${JSON.stringify(AFTER)} })
 </script>`, dark)
 
 let browser: Browser
@@ -243,7 +245,7 @@ describe('the diff', () => {
         const bg = (sel: string) => getComputedStyle(document.querySelector(sel)!).backgroundColor
         const paper = getComputedStyle(document.body).backgroundColor
         return {
-          modes: [w.wide.mode, w.narrow.mode],
+          modes: [w.wide.mode, w.narrow.mode, w.padded.mode],
           level: Math.abs(l.top - r.top) < 1 && Math.abs(l.height - r.height) < 1,
           sideBySide: r.left > l.right - 1,
           del: bg('#wide .thimble-diff-del'),
@@ -254,7 +256,8 @@ describe('the diff', () => {
           folded: document.querySelectorAll('#wide [data-thimble-fold][hidden]').length,
         }
       })
-      assert.deepEqual(got.modes, ['split', 'inline'])
+      // a mount whose padding leaves its lines too little width, as the side panel's body, is inline
+      assert.deepEqual(got.modes, ['split', 'inline', 'inline'])
       assert.equal(got.level, true)
       assert.equal(got.sideBySide, true)
       assert.notEqual(got.del, got.ins)
