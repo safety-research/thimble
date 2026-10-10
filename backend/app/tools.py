@@ -2450,13 +2450,23 @@ _REPORT_SIZE = ("const r = document.getElementById('vis').getBoundingClientRect(
                 "parent.postMessage({w: Math.ceil(r.right), h: Math.ceil(r.bottom)}, '*')")
 
 
+# This page draws without thimble's theme, so a color a card's code names by the theme's CSS variable (thimble.theme, which
+# the card resolves: frontend lib/vizTheme withTokens) takes the matching color of Vega's default look here, else the
+# mark it colors would draw black or not at all
+_TOKEN_REF = re.compile(r'"var\(\s*--((?:viz|label)-[A-Za-z0-9-]+)\s*\)"')
+_VEGA_SERIES = ("#4c78a8", "#f58518", "#e45756", "#72b7b2", "#54a24b", "#eeca3b", "#b279a2")  # Vega's tableau10
+_VEGA_TOKENS = {"viz-highlight": _VEGA_SERIES[0], "viz-ink-1": "#222222", "viz-ink-2": "#555555", "viz-ink-3": "#888888",
+                "viz-other": "#888888", "viz-ink-4": "#cccccc", **{f"viz-{i + 1}": c for i, c in enumerate(_VEGA_SERIES)}}
+
+
 def chart_page(spec: dict[str, Any]) -> str:
     """A Vega or Vega-Lite chart's page (figure_page): the spec as data, never as markup, without the embed options
-    it may carry, drawn by the frontend's vega, vega-lite and vega-embed builds inlined."""
+    it may carry, drawn by the frontend's vega, vega-lite and vega-embed builds inlined, a theme color it names in the
+    matching color of Vega's default look (_VEGA_TOKENS)."""
     meta = spec.get("usermeta")
     if isinstance(meta, dict) and "embedOptions" in meta:
         spec = {**spec, "usermeta": {k: v for k, v in meta.items() if k != "embedOptions"}}
-    data = json.dumps(spec).replace("<", "\\u003c")
+    data = _TOKEN_REF.sub(lambda m: json.dumps(_VEGA_TOKENS.get(m[1], "#888888")), json.dumps(spec)).replace("<", "\\u003c")
     scripts = "".join(f"<script>{_inline_script(p.read_text('utf-8'))}</script>" for p in VEGA_BUILDS)
     body = (f"<div id='vis' style='display:inline-block'></div><script>vegaEmbed('#vis', {data}, "
             f"{{renderer: 'svg', actions: false}}).then(() => {{ {_REPORT_SIZE} }})"

@@ -674,6 +674,19 @@ def test_theme_names_the_theme_s_roles_as_the_css_variables_the_card_reads():
         kt.theme.accent = "#f00"
 
 
+def test_the_screenshot_page_without_the_theme_draws_theme_colors_in_vega_s_own(monkeypatch):
+    """The page a card's chart is shot on when neither the card harness nor the UI is up draws without thimble's theme,
+    so a mark colored with thimble.theme takes the matching color of Vega's default look, never black or nothing."""
+    from app import tools
+
+    monkeypatch.setattr(tools, "VEGA_BUILDS", ())
+    spec = {"layer": [{"mark": {"type": "rule", "color": kt.theme.pale}}, {"mark": {"type": "text", "color": kt.theme.accent}},
+                      {"mark": {"type": "point", "color": kt.theme.series[2]}}, {"mark": {"type": "text", "text": "var(--accent)"}}]}
+    page = tools.chart_page(spec)
+    assert "var(--viz" not in page and all(c in page for c in ("#cccccc", "#4c78a8", "#e45756"))
+    assert "var(--accent)" in page, "only the chart tokens thimble.theme names"
+
+
 def test_the_doc_s_example_of_events_called_out_above_a_daily_bar_chart_runs_as_written(monkeypatch):
     """docs/charts.md's example of an agent's own marks, run as a card runs it."""
     import ast
