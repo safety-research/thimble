@@ -4,8 +4,8 @@
 // words do not show takes the matches' tint for a moment, and its ticks on the list's strip (viewer_colour.js) are the
 // accent as text; the tree's and the record's own find (viewer_parts.css) and Files' find (files.css
 // ::highlight(reader-find), the folder search's marks) take the same tints. On every paper and accent the text and the
-// secondary text read at 4.5:1 or more on the current match's tint, each tint stands apart from the cell and from the
-// other, and a tick reads at 3:1 or more on the cell. Files' strip draws its find's ticks in the same color
+// secondary text read at 4.5:1 or more on the current match's tint, each tint stands as far apart from the cell and from
+// the other as on iris (the accent's --find-mix), and a tick reads at 3:1 or more on the cell. Files' strip draws its find's ticks in the same color
 // (tests/public/browser/tracks.test.ts).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -38,13 +38,23 @@ const lum = (c: number[]) => {
 }
 const contrast = (a: number[], b: number[]) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05)
 const apart = (a: number[], b: number[]) => Math.max(...a.slice(0, 3).map((v, i) => Math.abs(v - b[i])))
+/** the distance of two colors in OKLab, times 100 */
+const oklab = (c: number[]) => {
+  const [r, g, b] = c.slice(0, 3).map((v) => (v / 255 <= 0.04045 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4))
+  const [l, m, s] = [0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b, 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b, 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b].map(Math.cbrt)
+  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s]
+}
+const dE = (a: number[], b: number[]) => 100 * Math.hypot(...oklab(a).map((v, i) => v - oklab(b)[i]))
 
 // the papers' cells and the accents' fills and inks, as tokens.css sets them
 const CELL: Record<string, RGB> = { light: hex('#fffdf8'), dark: hex('#25252a') }
 const FILL: Record<string, RGB> = { iris: hex('#5135ff'), pink: hex('#d6336c') }
 const INK: Record<string, RGB> = { iris: hex('#5135ff'), pink: hex('#b4295a') }
-// the tints' shares of the accent: the match's and the current match's, on the light papers and on Dark
-const SHARE = { light: [0.2, 0.32], dark: [0.25, 0.4] }
+// the tints' shares of the accent (its --find-mix): the match's and the current match's, on the light papers and on Dark
+const SHARE: Record<string, Record<string, [number, number]>> = {
+  light: { iris: [0.2, 0.32], pink: [0.26, 0.4] },
+  dark: { iris: [0.32, 0.5], pink: [0.32, 0.5] },
+}
 const THEMES = [
   ['light', 'iris'],
   ['light', 'pink'],
@@ -143,7 +153,7 @@ describe("the view kit's search", () => {
       const cur = (await inRange('thimble-search-current')(page))!
       const other = (await inRange('thimble-search')(page))!
       assert.ok(cur && other, 'a current match and another on screen')
-      const [m, s] = SHARE[theme]
+      const [m, s] = SHARE[theme][accent]
       const want = { match: over(FILL[accent], m, CELL[theme]), current: over(FILL[accent], s, CELL[theme]) }
       const got = { match: await pixel(page, other.x, other.y), current: await pixel(page, cur.x, cur.y) }
       assert.ok(near(got.match, want.match), `the match's tint: ${got.match}, want ${want.match}`)
@@ -197,7 +207,7 @@ describe("the view kit's search", () => {
     })
     assert.deepEqual([row.ref, row.snap, row.anim], ['log.jsonl#L3', 'search', 'thimble-snap-search'])
     const got = await pixel(page, row.x, row.y)
-    const want = over(FILL.pink, SHARE.light[0], CELL.light)
+    const want = over(FILL.pink, SHARE.light.pink[0], CELL.light)
     assert.ok(near(got, want, 4), `the kept record's tint: ${got}, want ${want}`)
     await page.close()
   })
@@ -227,7 +237,7 @@ CSS.highlights.set('reader-find-current', new Highlight(at(9)))
           return { x: b.left + b.width / 2, y: b.top + 3 }
         }),
       )
-      const [m, s] = SHARE[theme]
+      const [m, s] = SHARE[theme][accent]
       const match = await pixel(page, spots[0].x, spots[0].y)
       const current = await pixel(page, spots[1].x, spots[1].y)
       assert.ok(near(match, over(FILL[accent], m, CELL[theme])), `the match's tint: ${match}`)
@@ -285,6 +295,9 @@ test('on every paper and accent, the text reads on the tints, each tint stands a
         for (const t of ['--text-primary', '--text-secondary']) if (contrast(c[t], cur) < 4.5) bad.push(`${at}: ${t} on the current match ${contrast(c[t], cur).toFixed(2)}`)
         if (apart(match, c[ground]) < 16) bad.push(`${at}: the match's tint ${match} too near the ground ${c[ground]}`)
         if (apart(cur, match) < 12) bad.push(`${at}: the current match's tint ${cur} too near the match's ${match}`)
+        // as far as on iris, whose match is 11.8 from Warm's cell and its current match 7.2 from a match
+        if (dE(match, c[ground]) < 10) bad.push(`${at}: the match's tint ${match} only ${dE(match, c[ground]).toFixed(1)} from the ground ${c[ground]}`)
+        if (dE(cur, match) < 6) bad.push(`${at}: the current match's tint ${cur} only ${dE(cur, match).toFixed(1)} from the match's ${match}`)
       }
       if (contrast(c['--text-accent'], c['--surface-card']) < 3) bad.push(`${paper} ${accent}: a tick on the cell ${contrast(c['--text-accent'], c['--surface-card']).toFixed(2)}`)
     }
