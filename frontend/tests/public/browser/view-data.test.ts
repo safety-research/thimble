@@ -680,6 +680,44 @@ describe('the search over every part on screen', () => {
     await p.close()
   })
 
+  test("`in` holding the table and the thread, the thread with a strip of its own (Color by's): the thread's matches tick on its strip, the table's on the table's", async () => {
+    const doc = SIDE_BY_SIDE.replace("in: '#thread' })", "in: '#body' })\nwindow.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }], strip: '#thread' })")
+      .replace('<div style="display:flex;height:560px">', '<div id="body" style="display:flex;height:560px">')
+      .replace('<span id="search"></span></div>', '<span id="search"></span><span id="colour"></span></div>')
+    assert.ok(doc.includes("in: '#body'") && doc.includes('id="body"') && doc.includes('id="colour"'))
+    const { page: p, frame } = await framed(doc)
+    // each strip, the table's then the thread's: its lanes' names while it has more than one (the search's first while it
+    // has matches in that list, then Color by's), and the pixels drawn in its first lane
+    const strips = () =>
+      frame().evaluate(() =>
+        [...document.querySelectorAll('.thimble-colour-strip')]
+          .map((el) => {
+            const cv = el.querySelector('canvas') as HTMLCanvasElement
+            const dpr = window.devicePixelRatio || 1
+            const data = cv.width && cv.height ? cv.getContext('2d')!.getImageData(Math.round(6 * dpr), 0, 1, cv.height).data : []
+            let drawn = 0
+            for (let i = 3; i < data.length; i += 4) if (data[i] > 200) drawn++
+            return { x: el.getBoundingClientRect().left, lanes: [...el.querySelectorAll('.thimble-colour-lane')].map((l) => (l as HTMLElement).title), drawn }
+          })
+          .sort((a, b) => a.x - b.x)
+          .map(({ lanes, drawn }) => ({ lanes, drawn })),
+      )
+    await typeIn(frame, 'gale')
+    assert.equal(await frame().evaluate(() => (window as any).search.count), 12)
+    await p.waitForTimeout(200)
+    // the table's plain strip ticks its four rows; the thread's takes the search's lane before Color by's, with the
+    // ticks of its four messages
+    const both = await strips()
+    assert.deepEqual(both[1].lanes, ['“gale”', 'Author'])
+    assert.ok(both[0].drawn >= 4 && both[1].drawn >= 4, `ticks drawn: ${JSON.stringify(both)}`)
+    // a word only the thread holds: the search's lane on the thread's strip alone
+    await typeIn(frame, 'heron')
+    await p.waitForTimeout(200)
+    const one = await strips()
+    assert.ok(one[0].drawn === 0 && one[1].lanes[0] === '“heron”' && one[1].drawn > 0, `ticks drawn: ${JSON.stringify(one)}`)
+    await p.close()
+  })
+
   test("a page's own list of rows with no box, beside a table: each row's matches are its own list's, the current one where the step went", async () => {
     const { page: p, frame } = await framed(page(`<div class="top"><span id="search"></span></div>
 <div id="own"><div data-thimble-row="0">a gale at noon</div><div data-thimble-row="1">the gale again</div></div><div id="list" style="height:300px"></div>

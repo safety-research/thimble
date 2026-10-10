@@ -2049,7 +2049,6 @@
   Strip.prototype.marks = function (m) {
     m = m && Array.isArray(m.ticks) && m.ticks.length ? m : null
     if (!m && !this.find) return
-    var had = !!this.find
     this.find = m
     this.findVer++
     if (FINDS) {
@@ -2057,7 +2056,8 @@
       else FINDS.delete(this.box)
     }
     this.bareLook()
-    if (had !== !!m && this.fitWidth()) this.dirty()
+    // the lane taken away or added changes the strip's width; its name on hover follows the text searched for
+    if (this.fitWidth()) this.dirty()
     else this.relayout()
   }
   // the match whose tick lies within TICK_HIT_PX of a click in the search's lane, the nearest; -1 for none

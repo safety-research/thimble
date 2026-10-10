@@ -53,7 +53,7 @@ const search = thimble.search({ mount: '#search', in: '#list', placeholder: 'Sea
 | option | what it is |
 |---|---|
 | `mount` | an element or a selector in the top row, which the box fills; the page sets its width |
-| `in` | the element whose records it searches, an element or a selector; the page by default. Give the element that holds the records and the side panel, so the page's tabs and headings are not searched. Its strip, or that of the box it scrolls in, gets the ticks. A list that gives its rows is searched wherever it is |
+| `in` | the element whose records it searches, an element or a selector; the page by default. Give the element that holds the records and the side panel, so the page's tabs and headings are not searched. Its strip, or that of the box it scrolls in, gets the ticks, and a list in it with a strip of its own, such as the one Color by's `strip` names, those of the matches in it. A list that gives its rows is searched wherever it is |
 | `placeholder` | the box's words while it is empty, `Search` by default |
 | `onChange(search)` | the text changed, once typing pauses, or Reset emptied it |
 

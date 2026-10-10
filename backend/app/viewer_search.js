@@ -445,6 +445,7 @@
     // in a row of a list; with `kept`, a record the page kept, {row, box, rec} a list's row or {el, rec, ms} its own
     // element with the matches in it
     this.matches = []
+    this.homes = [] // the box each result's tick stands in (boxesOf)
     this.at = -1
     this.key = null // what the current result is, to find it again once the page draws again (keyOf)
     this.sources = [] // every list's rows (rows), by its box: {texts, low, ids, go, box}
@@ -577,9 +578,38 @@
     var r = this.within ? ctl.el(this.within) : null
     return r ? scrollerOf(r) : true
   }
-  // the box a result's tick stands in: its list's box, else the page text's
-  Search.prototype.boxOf = function (m) {
-    return m.row != null ? m.box : this.pageBox()
+  // The box each result's tick stands in (find): a row's list's box; for a match in the page's text, the nearest box
+  // around it inside `in` with a strip of its own, such as a list Color by gives one, so that a list in it and the side
+  // panel beside it each tick their own, else the box `in` scrolls in
+  Search.prototype.boxesOf = function (ms) {
+    var page = this.pageBox()
+    var root = this.root()
+    var striped = new Set()
+    var all = typeof shared.strips === 'function' ? shared.strips() : []
+    for (var i = 0; i < all.length; i++) if (all[i] && !all[i].page && all[i].box) striped.add(all[i].box)
+    var near = new Map() // an element's box, found once for every result in it
+    var out = []
+    for (var k = 0; k < ms.length; k++) {
+      var m = ms[k]
+      if (m.row != null) {
+        out.push(m.box)
+        continue
+      }
+      var at = placeOf(m)
+      var el = at && (at.nodeType === 1 ? at : at.parentElement)
+      var box = near.get(el)
+      if (box === undefined) {
+        box = page
+        for (var e = el; e && e !== root; e = e.parentElement)
+          if (striped.has(e)) {
+            box = e
+            break
+          }
+        near.set(el, box)
+      }
+      out.push(box)
+    }
+    return out
   }
   // the list that shows with this box
   Search.prototype.listOf = function (box) {
@@ -878,6 +908,7 @@
     } else this.last = null
     this.more = left.n <= 0
     this.matches = out
+    this.homes = this.boxesOf(out)
     this.at = -1
     if (this.key) {
       for (var m = 0; m < out.length; m++) if (sameKey(out[m], this.key)) this.at = m
@@ -970,11 +1001,11 @@
     return interleave(out, rest)
   }
   // each result's [top, bottom] as fractions of its box's height: a row's place among its list's rows, a match's in the
-  // page's text (or its fold's, or its record's) in the box it scrolls in
+  // page's text (or its fold's, or its record's) in the box it ticks in (boxesOf)
   Search.prototype.ticks = function () {
     var ms = this.matches
     var out = []
-    var frame = null
+    var frames = new Map()
     var seen = new Map() // an element that stands for matches, measured once for all of them
     for (var i = 0; i < ms.length; i++) {
       var m = ms[i]
@@ -984,11 +1015,13 @@
         out.push([m.row / n, (m.row + 1) / n])
         continue
       }
+      var box = this.homes[i]
+      var frame = frames.get(box)
       if (!frame) {
-        var box = this.pageBox()
         var page = box === true
         var el = page ? document.scrollingElement || document.documentElement : box
         frame = { H: Math.max(1, el.scrollHeight), top0: page ? -window.scrollY : el.getBoundingClientRect().top + el.clientTop - el.scrollTop }
+        frames.set(box, frame)
       }
       var r = this.rectOf(m, seen)
       out.push(r ? [(r.top - frame.top0) / frame.H, (r.bottom - frame.top0) / frame.H] : [0, 0])
@@ -1046,7 +1079,7 @@
   Search.prototype.firstFrom = function (ticks) {
     var froms = new Map()
     for (var i = 0; i < ticks.length; i++) {
-      var box = this.boxOf(this.matches[i])
+      var box = this.homes[i]
       var from = froms.get(box)
       if (from === undefined) {
         from = 0
@@ -1062,12 +1095,12 @@
   Search.prototype.mark = function (ticks) {
     var self = this
     var groups = new Map()
-    var page = this.pageBox()
-    if (page === true && document.documentElement.scrollHeight <= innerHeight) page = null
+    // the page's own strip, while the page scrolls
+    var flat = document.documentElement.scrollHeight <= innerHeight
     for (var i = 0; i < this.matches.length; i++) {
       var m = this.matches[i]
-      var box = m.row != null ? m.box : page
-      if (!box) continue
+      var box = this.homes[i]
+      if (!box || (box === true && flat)) continue
       var g = groups.get(box)
       if (!g) groups.set(box, (g = { ticks: [], at: [], rows: new Set(), recs: new Set() }))
       g.ticks.push(ticks[i])
