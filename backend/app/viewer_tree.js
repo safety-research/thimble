@@ -258,21 +258,8 @@
     var k = this.kept().chosen
     return k == null ? null : String(k)
   }
-  // a key as the nodes hold it: with `split`, a path without empty parts
-  Tree.prototype.norm = function (key) {
-    if (key == null) return null
-    key = String(key)
-    return this.split
-      ? key
-          .split(this.split)
-          .filter(function (s) {
-            return s !== ''
-          })
-          .join(this.split)
-      : key
-  }
   Tree.prototype.indexOf = function (key) {
-    var i = this.at.get(this.norm(key))
+    var i = key == null ? null : this.at.get(String(key))
     return i == null ? -1 : i
   }
 
@@ -311,18 +298,24 @@
         var key = String(o.key)
         var up = o.parent == null || o.parent === '' ? null : String(o.parent)
         if (sep) {
-          var parts = key.split(sep).filter(function (s) {
-            return s !== ''
-          })
-          if (!parts.length) continue
+          // the folders are the key's prefixes up to each separator after a part, each named by that part; the node
+          // keeps its key as given, so 'dse/StartSeite' and 'dse/StartSeite/' stay two pages, the second named
+          // 'StartSeite/'
+          var parts = key.split(sep)
+          var last = parts.length - 1
+          while (last >= 0 && parts[last] === '') last--
+          if (last < 0) continue
           up = null
-          for (var j = 0; j < parts.length - 1; j++) {
-            var fk = parts.slice(0, j + 1).join(sep)
-            node(fk, parts[j], up)
-            up = fk
+          for (var j = 0, at0 = 0; j < last; j++) {
+            at0 += parts[j].length
+            if (parts[j] !== '') {
+              var fk = key.slice(0, at0)
+              node(fk, parts[j], up)
+              up = fk
+            }
+            at0 += sep.length
           }
-          key = parts.join(sep)
-          n = node(key, parts[parts.length - 1], up)
+          n = node(key, parts.slice(last).join(sep), up)
         } else {
           // a parent that no item names is a folder of its own, named by its key
           if (up === key) up = null
@@ -858,7 +851,7 @@
       choose: function (key) {
         var i = t.indexOf(key)
         if (i >= 0) t.cursor = i
-        t.setChosen(key == null ? null : t.norm(key))
+        t.setChosen(key == null ? null : String(key))
         t.paintCursor()
       },
       /** the key of the chosen node, kept per view, or null */

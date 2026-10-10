@@ -236,7 +236,8 @@ keeps the names that match, with the folders above them open.
 
 A click or Enter picks a row: it is chosen (`.active`), a folder opens (a click on the chosen folder folds it), and
 `onPick(node)` hears it. ↑ and ↓ move, ← folds or goes to the parent, → opens. A node is `{key, name, parent, depth, children, n, item}`, and with `rows` also
-`items` and `value`, its group's records and value. The tree opens with the folders that fit its height open. thimble
+`items` and `value`, its group's records and value. A node's `key` is its item's key as given, and a folder's with `split`
+the path up to it. The tree opens with the folders that fit its height open. thimble
 keeps the folds and the chosen key per view (under `key`, else the mount's id); Reset puts back the folds the tree opened
 with and empties the find, and keeps the choice.
 

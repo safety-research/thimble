@@ -268,6 +268,25 @@ window.tree = thimble.tree({ mount: '#tree', split: '/', items: files, key: 'rep
     await again.page.close()
   })
 
+  test('with split, each item is a node under its key as given', async () => {
+    const { page, frame, errors } = await framed(`
+window.tree = thimble.tree({ mount: '#tree', split: '/', items: [{ key: 'dse/StartSeite', n: 456 }, { key: 'dse/StartSeite/', n: 1 }, { key: 'dse/Hilfe', n: 7 }, { key: '/src/a.py', n: 2 }] })`)
+    // two pages whose keys differ by a slash stay two nodes, each with its own number
+    const nodes = await frame().evaluate(() => (window as any).tree.nodes.map((n: any) => [n.key, n.name, n.parent, n.n]))
+    assert.deepEqual(nodes, [
+      ['dse', 'dse', null, 464],
+      ['dse/Hilfe', 'Hilfe', 'dse', 7],
+      ['dse/StartSeite', 'StartSeite', 'dse', 456],
+      ['dse/StartSeite/', 'StartSeite/', 'dse', 1],
+      ['/src', 'src', null, 2],
+      ['/src/a.py', 'a.py', '/src', 2],
+    ])
+    assert.equal(await frame().evaluate(() => (window as any).tree.reveal('dse/StartSeite/')), true)
+    assert.equal((await drawn(frame)).find((r) => r.active)!.name, 'StartSeite/')
+    assert.deepEqual(errors, [])
+    await page.close()
+  })
+
   test("with Rows, the nodes are rows.groups's with their records counted, by a tree of fields and by another field", async () => {
     const { page, frame } = await framed(`
 const PARENT = { lead: null, explore: 'lead', grep: 'explore', test: 'lead', solo: null }
