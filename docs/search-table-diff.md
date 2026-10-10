@@ -86,9 +86,9 @@ draw, such as a pull request kept for a comment; the box would count only the ma
 while more records show. `search.kept(refs)` says which records the page kept, once it has drawn them: the box counts
 those records and steps through them, each once, in place of the matches in them, and a record whose words do not show
 is highlighted for a moment when gone to, as a cited record is. The page calls it each time it keeps records for a new
-text, in `onChange` or once its fetch returns; until it does, the box shows no count. A kept record counts where it
-first shows, as a list's row or an element with its `data-anchor`; shown again, such as in the side panel, it counts
-its matches.
+text, in `onChange` or once its fetch returns; until it does, the box shows no count and its steps are off. A kept
+record counts once, as its row in a list, else as the first element with its `data-anchor`; shown again, such as in the
+side panel, it counts its matches.
 
 ```js
 const search = thimble.search({ mount: '#search', in: '#body', onChange: draw })
