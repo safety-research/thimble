@@ -16,7 +16,7 @@ The analyst uses the view to understand records, often thousands of them, withou
 
 {{include:view-guidelines.md}}
 
-The first screen shows only the form the proposal chose. The list of raw records sits behind a control and opens on demand. Use a time range only when the task is about time.
+{{include:view-first-screen.md}}
 
 The rest is your judgment. Aim for the page a demanding designer would ship, one that reads at once without instructions:
 

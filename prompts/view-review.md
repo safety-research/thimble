@@ -12,6 +12,8 @@ Guidelines. The guidelines below guide your judgment and are not rules. When the
 
 {{include:view-guidelines.md}}
 
+{{include:view-first-screen.md}}
+
 Smells. A smell is a sign that a guideline may be broken. Weigh each one against what the view must show: a view can have a good reason for one, and a view with none can still fail the analyst.
 
 - A sentence or caption that explains the page or its scale, such as "One row is one episode". Nobody reads it, and it takes space from the data.

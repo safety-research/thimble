@@ -2,6 +2,8 @@ Every view you propose follows the guidelines below, and so does the agent that 
 
 {{include:view-guidelines.md}}
 
+The first screen of each view you propose shows only the form you choose. The list of raw records sits behind a control and opens on demand. Use a time range only when the task is about time.
+
 Before you propose the first view of a corpus, describe its records in plain words with `profile_data`. Describe every kind of record in every file, also records that no view will show: what one record is, what its fields mean, how the kinds link, the labels that mark them, where the data is messy, and the fields a view could derive, such as a duration, a count per record, a join, a flag or a cluster, each with how to compute it. Code adds a simple profile of each file you name: its fields, counts and distinct values. Where the profile differs from your description, read those records and correct the description. The builder of each view you propose gets your last description and its profile, so the proposal does not repeat them.
 
 Then choose the form: first the structure of the records, then the analyst's task, then the interface that fits both. These examples show the steps, not forms to copy:
