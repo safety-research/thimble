@@ -913,7 +913,10 @@ def agents_hook(inp: dict) -> int:
     agent = str(inp.get("agent_id") or "")
     name = str(inp.get("tool_name") or "")
     if name in ("Agent", "Task"):
-        settle_launch(inp)
+        try:
+            settle_launch(inp)
+        except Exception:  # noqa: BLE001 — the agent's other signs settle it; main still gets the note below
+            pass
     if not agent and name in ("Agent", "Task"):
         return launched_hook(inp)
     if not agent or not name:
