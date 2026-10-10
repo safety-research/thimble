@@ -185,6 +185,22 @@
   var labelState = null
   var labelsVer = 0 // bumps whenever the labels or their marks change, so that a strip measures its colours again
   var control = null // the one Color by control of the page
+  // The strips a part of the kit gives a list while the page has no Color by (kit.shared.strip), such as the search's
+  // ticks on the list it finds in: plain scrollbars, owned by a stand-in for the control that colours nothing, and
+  // handed to Color by when the page mounts it
+  var BARE = {
+    strips: [],
+    choice: function () { return null },
+    extra: function () { return [] },
+    offSet: function () { return [] },
+    drawnColour: function () { return null },
+    fieldColour: function () { return null },
+    fieldValue: function () { return null },
+    valueOf: function () { return null },
+  }
+  function allStrips() {
+    return (control ? control.strips : []).concat(BARE.strips)
+  }
 
   // ---------------------------------------------------------------- the labels
   function onLabels() {
@@ -337,7 +353,7 @@
   var CLEAR = 6 // px a popover keeps from the tracks
   function stripRects() {
     var out = []
-    var all = control ? control.strips : []
+    var all = allStrips()
     for (var i = 0; i < all.length; i++) {
       var el = all[i].el
       if (!el || !el.isConnected || el.style.display === 'none') continue
@@ -451,7 +467,12 @@
     this.domCounts = {}
     this.values = [] // the current choice's values: [{key, value, name, colour, n}]
     this.menu = null
-    this.strips = []
+    // the strips the kit's other parts gave lists before Color by was mounted are its own from now on
+    this.strips = BARE.strips.splice(0)
+    for (var si = 0; si < this.strips.length; si++) {
+      this.strips[si].c = this
+      this.strips[si].dirty()
+    }
     this.changeTimer = null
     this.countTimer = null
     this.lastKey = ''
@@ -1624,6 +1645,11 @@
   var BRACKET_PX = 4 // px, the bracket's width beside the strip
   var TEXT_CHARS = 200 // the characters of a record's text the loupe writes; its row cuts the rest with an ellipsis
   var KEY_CHARS = 12 // the characters of a record's line or key its first column holds at most
+  // The search's matches (viewer_search.js) are a lane of their own at the strip's left, as Files' find: a tick in the
+  // ink per match, like a cue point on a timeline, never a colour, and a click within TICK_HIT_PX of one goes to that
+  // match. With Color by Off the strip is that lane alone; with no search and Off, a plain scrollbar.
+  var TICK_HIT_PX = 4
+  var FINDS = typeof WeakMap === 'function' ? new WeakMap() : null // a list's box -> its matches, {name, ticks, has, go}
 
   // the strip's width for `n` lanes, px: the lanes, or a plain scrollbar
   function stripWidth(n) {
@@ -1723,6 +1749,10 @@
     this.touched = true // a change of the page inside the list since its elements were measured
     this.stale = true
     this.plain = !(this.rows || this.complete)
+    // the search's matches in the list, a lane of ticks at the strip's left (marks), kept by the list's box so that a
+    // strip made again for it has them
+    this.find = (FINDS && FINDS.get(this.box)) || null
+    this.findVer = 0
     // what a drag holds: the thumb's top in px of the strip, whether the list is yet to go there, and from where the
     // thumb glides back to the list's place once a hold ends
     this.hold = { frame: null, seek: false, glide: null }
@@ -1734,6 +1764,7 @@
     this.el.className = 'thimble-colour-strip'
     this.el.setAttribute('data-thimble-chrome', '')
     this.el.setAttribute('aria-hidden', 'true')
+    this.bareLook()
     this.track = document.createElement('div')
     this.track.className = 'thimble-colour-track thimble-colour-whole'
     this.canvas = document.createElement('canvas')
@@ -1863,9 +1894,11 @@
   // the strip's width, a lane per choice of Color by or a plain scrollbar, and the room the list leaves it; each lane
   // named on hover, when there are several
   Strip.prototype.fitWidth = function () {
-    var n = this.plain ? 0 : 1 + (this.lanes ? this.lanes.length : 0)
+    var nf = this.find ? 1 : 0
+    var nc = this.plain ? 0 : 1 + (this.lanes ? this.lanes.length : 0)
+    var n = nf + nc
     var w = stripWidth(n)
-    var names = n > 1 ? [this.choiceName()].concat(this.lanes.map(function (l) { return l.name })) : []
+    var names = n > 1 ? (nf ? [this.find.name || ''] : []).concat(nc ? [this.choiceName()].concat(this.lanes.map(function (l) { return l.name })) : []) : []
     var key = names.join('\u0000')
     if (key !== this.laneKey) {
       this.laneKey = key
@@ -1891,6 +1924,52 @@
   Strip.prototype.choiceName = function () {
     var ch = this.c.choice()
     return ch && !ch.off ? ch.title || '' : ''
+  }
+  // a plain scrollbar's look (data-plain): no lane of colours and no search's ticks
+  Strip.prototype.bareLook = function () {
+    if (this.plain && !this.find) this.el.setAttribute('data-plain', '')
+    else this.el.removeAttribute('data-plain')
+  }
+  // The search's matches in the list, drawn as ticks in a lane at the strip's left: {name, ticks, has(row), go(k)},
+  // `ticks` each match's [top, bottom] as fractions of the list's height in the matches' order, `has(row)` whether a
+  // record (its element, or its row's index in a list given rows) holds one, for the loupe's cell, and `go(k)` the step
+  // to match k a click on its tick takes; null takes the lane away
+  Strip.prototype.marks = function (m) {
+    m = m && Array.isArray(m.ticks) && m.ticks.length ? m : null
+    if (!m && !this.find) return
+    var had = !!this.find
+    this.find = m
+    this.findVer++
+    if (FINDS) {
+      if (m) FINDS.set(this.box, m)
+      else FINDS.delete(this.box)
+    }
+    this.bareLook()
+    if (had !== !!m && this.fitWidth()) this.dirty()
+    else this.relayout()
+  }
+  // the match whose tick lies within TICK_HIT_PX of a click in the search's lane, the nearest; -1 for none
+  Strip.prototype.findAt = function (p) {
+    var f = this.find
+    if (!f || laneAt(p.x, this.lanesN()) !== 0) return -1
+    var h = Math.max(1, this.h || 0)
+    var best = -1
+    var bestD = TICK_HIT_PX + 1
+    for (var k = 0; k < f.ticks.length; k++) {
+      var t = f.ticks[k]
+      var y0 = t[0] * h
+      var y1 = Math.max(t[1] * h, y0 + MIN_MARK)
+      var d = p.y < y0 ? y0 - p.y : p.y > y1 ? p.y - y1 : 0
+      if (d < bestD) {
+        bestD = d
+        best = k
+      }
+    }
+    return best
+  }
+  // the lanes the strip draws: the search's, then one per Color by choice
+  Strip.prototype.lanesN = function () {
+    return (this.find ? 1 : 0) + (this.plain ? 0 : 1 + this.lanes.length)
   }
   // what the records' colours depend on besides the page's elements: the choice, the values turned off, the field's
   // colours, the labels and their marks, and the rows the page gave
@@ -1941,7 +2020,7 @@
       this.lanes = []
       this.sigDone = this.sig()
       this.plain = true
-      this.el.setAttribute('data-plain', '')
+      this.bareLook()
       if (this.fitWidth()) {
         this.stale = true
         this.dirty()
@@ -2079,10 +2158,8 @@
     for (var lq = 0; lq < lanes.length && !coloured; lq++) coloured = lanes[lq].recs.length > 0
     this.sigDone = this.sig()
     this.plain = !complete || !coloured
-    if (this.plain) {
-      lanes = []
-      this.el.setAttribute('data-plain', '')
-    } else this.el.removeAttribute('data-plain')
+    if (this.plain) lanes = []
+    this.bareLook()
     this.lanes = lanes
     // lanes that change the strip's width change the room the list leaves it, and the records' places with it
     if (this.fitWidth()) {
@@ -2122,7 +2199,7 @@
     this.el.style.height = h + 'px'
     this.h = h
     // the canvas drawn again only for records measured again or a strip of another size
-    var painted = [h, dpr, this.width, this.measured].join()
+    var painted = [h, dpr, this.width, this.measured, this.findVer].join()
     if (painted !== this.painted) {
       this.painted = painted
       this.paint()
@@ -2132,8 +2209,9 @@
     this.kick()
     if (this.lp.open) this.lpDraw(this.lpMeasure())
   }
-  // the strip's canvas: a lane for the Color by choice, then one for each choice past the first, each on its stripe, in
-  // whole device pixels; each keeps its rows' colours, for a click to snap to. A plain scrollbar draws none
+  // the strip's canvas: the search's lane of ticks when it finds something, a lane for the Color by choice, then one for
+  // each choice past the first, each on its stripe, in whole device pixels; each lane of colours keeps its rows'
+  // colours, for a click to snap to. A plain scrollbar draws none
   Strip.prototype.paint = function () {
     var h = this.h || 0
     var dpr = window.devicePixelRatio || 1
@@ -2149,12 +2227,34 @@
     var ctx = cv.getContext && cv.getContext('2d')
     if (!ctx) return
     ctx.clearRect(0, 0, cv.width, cv.height)
-    if (this.plain || !this.recs) return
-    var boxes = laneBoxes(1 + this.lanes.length, dpr)
+    var nf = this.find ? 1 : 0
+    var nc = this.plain || !this.recs ? 0 : 1 + this.lanes.length
+    if (!nf && !nc) return
+    var boxes = laneBoxes(nf + nc, dpr)
     ctx.fillStyle = kit.realColour('rgba(var(--ink-rgb), 0.035)')
     for (var b = 0; b < boxes.length; b++) ctx.fillRect(boxes[b][0], 0, boxes[b][1], Hp)
-    this.rowColours = this.fill(ctx, this.recs, boxes[0][0], boxes[0][1])
-    for (var i = 0; i < this.lanes.length; i++) this.laneRows.push(this.fill(ctx, this.lanes[i].recs, boxes[i + 1][0], boxes[i + 1][1]))
+    if (nf) this.ticks(ctx, boxes[0][0], boxes[0][1])
+    if (!nc) return
+    this.rowColours = this.fill(ctx, this.recs, boxes[nf][0], boxes[nf][1])
+    for (var i = 0; i < this.lanes.length; i++) this.laneRows.push(this.fill(ctx, this.lanes[i].recs, boxes[nf + i + 1][0], boxes[nf + i + 1][1]))
+  }
+  // the search's lane, `x` to `x + w` device px: a tick in the ink per match, at least MIN_MARK px tall
+  Strip.prototype.ticks = function (ctx, x, w) {
+    var h = this.h || 0
+    var dpr = window.devicePixelRatio || 1
+    var Hp = Math.ceil(h * dpr)
+    var ts = this.find.ticks
+    ctx.fillStyle = kit.realColour('var(--text-primary)')
+    for (var k = 0; k < ts.length; k++) {
+      var y0 = Math.max(0, Math.min(1, ts[k][0])) * h
+      var y1 = Math.max(0, Math.min(1, ts[k][1])) * h
+      if (y1 - y0 < MIN_MARK) {
+        y0 = Math.max(0, Math.min(h - MIN_MARK, (y0 + y1 - MIN_MARK) / 2))
+        y1 = y0 + MIN_MARK
+      }
+      var a = Math.round(y0 * dpr)
+      ctx.fillRect(x, a, w, Math.max(1, Math.min(Hp, Math.round(y1 * dpr)) - a))
+    }
   }
   // one lane of the canvas, `x` to `x + w` device px: each pixel row in the one colour most of its records take (the
   // records' share of the row), grey where its records take no value; each row's colour
@@ -2221,7 +2321,7 @@
     var h = this.h || 0
     v = v || this.view()
     var vh = Math.max(0, v[1] - v[0])
-    var frameH = Math.min(h, Math.max(this.plain ? PLAIN_THUMB_MIN : THUMB_MIN, vh * h))
+    var frameH = Math.min(h, Math.max(this.plain && !this.find ? PLAIN_THUMB_MIN : THUMB_MIN, vh * h))
     var room = Math.max(0, h - frameH)
     var hold = this.hold
     var f = hold.frame != null ? (room > 0 ? Math.max(0, Math.min(1, hold.frame / room)) : 0) : vh < 1 ? Math.max(0, Math.min(1, v[0] / (1 - vh))) : 0
@@ -2319,7 +2419,9 @@
   // colour from where the run starts. Null when none does: a click in a taller patch, or far from any, goes where it is
   Strip.prototype.snapAt = function (p) {
     if (this.plain) return null
-    var lane = laneAt(p.x, this.lanes.length + 1)
+    var nf = this.find ? 1 : 0
+    var lane = laneAt(p.x, this.lanesN()) - nf
+    if (lane < 0) return null
     var rows = lane ? this.laneRows && this.laneRows[lane - 1] : this.rowColours
     var recs = (lane ? this.lanes[lane - 1].recs : this.recs) || []
     if (!rows || !rows.length) return null
@@ -2440,11 +2542,15 @@
       return
     }
     if (!d.moved) {
-      // a click: near a patch of colour, the first record of the patch; elsewhere off the thumb, the thumb's middle
-      // comes under the pointer
+      // a click: on a tick of the search's lane, that match; near a patch of colour, the first record of the patch;
+      // elsewhere off the thumb, the thumb's middle comes under the pointer
       var p = this.at(e)
-      var t = this.snapAt(p)
-      if (t) this.choose(t)
+      var fk = this.findAt(p)
+      var t = fk < 0 ? this.snapAt(p) : null
+      if (fk >= 0) {
+        var go = this.find.go
+        safe(function () { go(fk) })
+      } else if (t) this.choose(t)
       else if (!d.onThumb) {
         var g = this.drawn || this.geom()
         var room = Math.max(1e-9, (this.h || 0) - g.frameH)
@@ -2562,6 +2668,8 @@
     var rec = this.recs[i]
     var t = rec[3]
     var cells = []
+    var f = this.find
+    if (f) cells.push(typeof f.has === 'function' && safe(function () { return f.has(t) }, false) ? kit.realColour('var(--text-primary)') : null)
     if (!this.plain) {
       cells.push(rec[2] && rec[2] !== this.grey ? rec[2] : null)
       for (var l = 0; l < this.lanes.length; l++) cells.push(this.lanes[l].by.get(t) || null)
@@ -2628,8 +2736,9 @@
     } else if (L.c >= total || L.start > total - n) this.lpAim(L.c)
     var box = this.loupeBox
     // a plain scrollbar draws no lane, so its rows have no cells
-    if (this.loupeEl.hasAttribute('data-bare') !== !!this.plain) {
-      if (this.plain) this.loupeEl.setAttribute('data-bare', '')
+    var bare = this.plain && !this.find
+    if (this.loupeEl.hasAttribute('data-bare') !== bare) {
+      if (bare) this.loupeEl.setAttribute('data-bare', '')
       else this.loupeEl.removeAttribute('data-bare')
     }
     var kw = this.keyChars()
@@ -3315,6 +3424,15 @@
       return clearOfStrips(left, top, w, h)
     },
     editorSide: editorSide,
+    // a list's strip (an element, a selector or true for the page), made when it has none: Color by's, which colours
+    // it as colour.strip does with the same `opts`, or with no Color by a plain scrollbar that Color by takes over once
+    // mounted; strip.marks({ticks, has, go, name}) draws the search's ticks on it. strips() lists them all
+    strip: function (target, opts) {
+      var t = el(target)
+      if (!t) return null
+      return Control.prototype.strip.call(control || BARE, t, opts)
+    },
+    strips: allStrips,
     tip: tip,
     untip: untip,
     esc: esc,

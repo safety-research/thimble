@@ -800,9 +800,9 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
     v = dict(views.read_view(CORPUS, "threads"), libs=views._libs(["vega-embed"]))
     with_libs = views.frame_document(v)
     if views.LIBS["vega"].is_file():
-        assert with_libs.count("<script>") == 11, \
-            "the view's name, the bridge, the kit's Color by, row controls, side panel, transcript and time range, vega, " \
-            "vega-lite, vega-embed and the view's own"
+        assert with_libs.count("<script>") == 14, \
+            "the view's name, the bridge, the kit's Color by, row controls, side panel, transcript, search, table, diff " \
+            "and time range, vega, vega-lite, vega-embed and the view's own"
     assert views._script_text("a</script>b") == "a<\\/script>b"
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
 

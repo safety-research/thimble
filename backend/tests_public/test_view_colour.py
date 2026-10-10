@@ -53,6 +53,19 @@ def test_the_row_controls_side_panel_and_transcript_load_between_colour_by_and_t
     assert doc.index(".thimble-colour-chips") < doc.index(".thimble-lane-guide") < doc.index(".mine{}")
 
 
+def test_the_search_table_and_diff_load_after_the_transcript_and_before_the_range(tmp_path):
+    """viewer_search.js, viewer_table.js and viewer_diff.js take the bridge's part after the side panel and the
+    transcript (whose shared helpers they use) and before the range takes the part away; their styles are the kit's."""
+    d = tmp_path / "view"
+    d.mkdir()
+    (d / views.VIEW_HTML).write_text("<script>const s = thimble.search({ mount: '#s' })</script>")
+    doc = views.frame_document({"dir": str(d), "slug": "inbox", "name": "Inbox"})
+    order = [doc.index(s) for s in ("thimble.transcript = function", "thimble.search = function", "thimble.table = function",
+                                    "thimble.diff = function", "thimble.timeRange = function", "const s = thimble.search(")]
+    assert order == sorted(order), order
+    assert ".thimble-search-input" in doc and ".thimble-table-row" in doc and ".thimble-diff-row" in doc
+
+
 def test_a_page_that_mounts_colour_by_has_label_controls(tmp_path):
     """The control lists every label with its switch (data-label, thimble.setLabel), so a page that mounts it need not
     draw its own; a page that does neither has none."""
