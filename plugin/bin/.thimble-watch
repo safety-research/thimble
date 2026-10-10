@@ -66,6 +66,9 @@ when the work folder of its thimble ancestor holds more than WORK_BUDGET (`## wo
 once per budget step and every CHECK_S. For main it prints only after main's own Agent call launched a thread's fork or
 one of thimble's agents: the note that the turn ends on that call (app/subagent_files.py launched_note, `## agent-launched`),
 since Claude Code's launch result asks main to go on, and main then made a call that does nothing or the same start again.
+After an Agent call, main's or a subagent's, that launched one of thimble's agents, it records that agent as the one the
+call started (app/subagent_files.py settle): the SubagentStart hook cannot tell apart two agents of one type started in
+one turn, so such an agent waits for this record, or for the call's result in main's transcript, to take up its start.
 
 The agent-check hook runs on main's Agent and SendMessage calls and on those of its subagents (app/subagent_files.py
 check_call): it lets a start of one of thimble's roles through only when it matches a pending request exactly, records a
@@ -675,18 +678,27 @@ SCRATCH_PREFIX = "tmp_"  # app/work_files.py: the scratch folders a run's end de
 
 def subagent_start(inp: dict) -> int:
     """The SubagentStart hook (module note): the agent registered, then the scratch line for a descendant of one of
-    thimble's agents, a folder of its own in its ancestor's work folder (## session-scratch)."""
+    thimble's agents, a folder of its own in its ancestor's work folder (## session-scratch). An agent of one of
+    thimble's roles whose own start is not known yet (main started two or more of its type in one turn) waits for the
+    sign that names its call (app/subagent_files.py settle); in terminal mode the backend's call still runs, so that
+    its pass reads main's transcript, where the call's result names the agent. An agent that took its start can leave
+    an unsettled agent one start, which it takes too (`settled`): the backend's call runs for it as well."""
     sf, ws = workspace(inp)
     if ws is None:
         return 0
+    settled: list = []
     with sf.update(ws) as state:
-        entry = sf.register(state, inp)
-    if entry is None:
+        entry = sf.register(state, inp, settled)
+        unsettled = sf.unsettled(state, str(inp.get("agent_id") or "")) is not None
+    if entry is None and not unsettled:
         return 0
     if sf.terminal(ws):
         spawn_local("started", inp)
-    else:
+    elif entry is not None:
         post("/api/subagents/started", {"cwd": folder(inp), "hook": inp})
+    tell_started(sf, ws, inp, settled)
+    if entry is None:
+        return 0
     work = entry.get("work") if entry.get("descendant") else None
     agent = "".join(ch for ch in str(inp.get("agent_id") or "") if ch.isalnum() or ch in "-_")[:64]
     if work and agent:
@@ -699,6 +711,35 @@ def subagent_start(inp: dict) -> int:
         if text:
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": text}}))
     return 0
+
+
+def tell_started(sf, ws: Path, inp: dict, agents: list) -> None:
+    """The backend's call for each agent in `agents` that took up its start after its own SubagentStart hook ran (app/
+    subagent_files.py settle): its chat and its role's start handler, as the server's started route, or in terminal
+    mode the local hooks' `started`, gives them."""
+    for agent in agents:
+        hook = {"hook_event_name": "SubagentStart", "session_id": inp.get("session_id"), "cwd": inp.get("cwd"),
+                "agent_id": agent}
+        if sf.terminal(ws):
+            spawn_local("started", hook)
+        else:
+            post("/api/subagents/started", {"cwd": folder(inp), "hook": hook})
+
+
+def settle_launch(inp: dict) -> None:
+    """The PostToolUse hook of an Agent call, main's or a subagent's, that launched one of thimble's agents: Claude
+    Code's answer names the agent (app/subagent_files.py launched_agent), which takes up the start the call claimed, or
+    takes it up at its SubagentStart when that hook has not run yet (settle)."""
+    sf = files()
+    agent = sf.launched_agent(inp)
+    if not agent:
+        return
+    _, ws = workspace(inp)
+    if ws is None:
+        return
+    with sf.update(ws) as state:
+        settled = sf.settle(state, agent, str(inp.get("tool_use_id") or ""))
+    tell_started(sf, ws, inp, settled)
 
 
 def subagent_stop(inp: dict) -> int:
@@ -871,6 +912,8 @@ def agents_hook(inp: dict) -> int:
     """The agents hook (module note)."""
     agent = str(inp.get("agent_id") or "")
     name = str(inp.get("tool_name") or "")
+    if name in ("Agent", "Task"):
+        settle_launch(inp)
     if not agent and name in ("Agent", "Task"):
         return launched_hook(inp)
     if not agent or not name:

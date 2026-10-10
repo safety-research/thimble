@@ -1592,7 +1592,7 @@ def _thimble_result(lv: Live, tool_use_id: str, call: dict, content: Any, is_err
     """R2 (module note): the result of main's call for one of thimble's agents. An error is a start or message that did
     not happen, its kind read from Claude Code's text (_refused_kind); so is a SendMessage that answers `success: false`
     because the agent belongs to another session (earlier-session). A TaskStop that finds the agent ended counts as
-    done."""
+    done. A start that launched names its agent, which takes up the start the call claimed (_settle)."""
     from . import subagents  # noqa: PLC0415
 
     text = response_text(content)
@@ -1619,20 +1619,33 @@ def _thimble_result(lv: Live, tool_use_id: str, call: dict, content: Any, is_err
         m = AUTO_MODE_RE.search(text) if kind == subagents.AUTO_MODE else None
         subagents.refuse(lv.c, rid, m.group(1).strip() if m else text.strip(), kind)
         return
-    # the agent this call started takes up the start this call claimed (views round 5: two builds of one turn)
     m = AGENT_ID_RE.search(text) if name in AGENT_TOOLS else None
     if m:
-        with contextlib.suppress(Exception):
-            subagents.rebind(lv.c, m.group(1), tool_use_id)
+        _settle(lv, m.group(1), tool_use_id)
+
+
+def _settle(lv: Live, agent_id: str, tool_use_id: str) -> None:
+    """The agent an Agent call launched takes up the start the call claimed (subagents.settle): main can start two or
+    more agents of one type in one turn, and their SubagentStart hooks cannot tell them apart."""
+    from . import subagents  # noqa: PLC0415
+
+    try:
+        subagents.settle(lv.c, agent_id, tool_use_id)
+    except Exception:  # noqa: BLE001 — the mirror reads on
+        log.exception("%s: the start of the agent %s that the call %s launched", lv.c, agent_id, tool_use_id)
 
 
 def _sub_start_result(lv: Live, tool_use_id: str, inp: dict, content: Any, is_error: bool) -> None:
     """R2 for a subagent that is no agent of thimble's (a thread's fork, U5): the result of its Agent call for one of
     thimble's roles. An error is a start that did not happen, its kind read from Claude Code's text (_refused_kind),
-    such as thimble's own deny of a call that differs from the one the start tool gave, or the concurrency limit."""
+    such as thimble's own deny of a call that differs from the one the start tool gave, or the concurrency limit. A
+    start that launched names its agent, which takes up the start the call claimed (_settle)."""
     from . import subagents  # noqa: PLC0415
 
     if not is_error:
+        m = AGENT_ID_RE.search(response_text(content))
+        if m:
+            _settle(lv, m.group(1), tool_use_id)
         return
     rid = _request_of(lv, tool_use_id, AGENT_TOOLS[0], inp)
     if rid is None:
@@ -2136,7 +2149,9 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
         meta = _read_meta_json(path)
         if not meta:
             lv.pending_paths[key] = lv.pending_paths.get(key, 0) + 1
-            if lv.pending_paths[key] <= META_WAIT_SCANS and _sub_by(lv, agent_id=agent_id) is None:
+            # an agent of thimble's whose own start is not known yet has no chat to go to until a sign names its call
+            if _sub_by(lv, agent_id=agent_id) is None and (lv.pending_paths[key] <= META_WAIT_SCANS
+                                                          or _unsettled(lv, agent_id)):
                 continue
         lv.pending_paths.pop(key, None)
         lv.sub_paths.add(key)
@@ -2160,6 +2175,17 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
             _take_place(sub, path, (places or {}).get(key), at_end=read_before)
     for owner in [s for s in lv.subs if s.workflow and s.workflow_dir is not None]:
         _scan_workflow(lv, owner, replay, places)
+
+
+def _unsettled(lv: Live, agent_id: str) -> bool:
+    """Whether `agent_id` is an agent of one of thimble's roles whose own start is not known yet
+    (subagent_files.UNSETTLED)."""
+    from . import subagents  # noqa: PLC0415
+
+    try:
+        return sfiles.unsettled(subagents.read(lv.c), agent_id) is not None
+    except Exception:  # noqa: BLE001 — an unreadable record holds no agent
+        return False
 
 
 def _scan_workflow(lv: Live, owner: Sub, replay: bool, places: dict[str, dict] | None = None) -> None:
