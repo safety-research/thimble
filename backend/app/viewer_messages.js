@@ -251,7 +251,8 @@
     this.mentions = Array.isArray(opts.mentions) ? opts.mentions : null // as thimble.text takes them, such as #123 or @agent-08
     this.onPick = typeof opts.onPick === 'function' ? opts.onPick : null
     this.list = [] // the messages as given
-    this.rows = [] // as drawn: {m, key, s, cont, reply, day (its date differs from the line above it)}
+    this.rows = [] // as drawn: {m, key, s, cont, reply, day (its date differs from the line above it), line and lineNode
+    //                (the date line it opens), lead (it takes its group's head under the label filter), node}
     this.opened = {} // `${key}\n${fold}` -> true while a fold shows, `fold` "more" or "q<i>"
     this.chosen = null // the key of the message picked last, marked as the open one is (.active)
     this.o = {}
@@ -304,7 +305,7 @@
     if (typeof shared.part === 'function')
       this.checkReset = shared.part({
         changed: function () {
-          return !self.dead && self.chosen != null
+          return !self.dead && self.chosen != null && self.mount.isConnected
         },
         reset: function () {
           if (!self.dead) self.choose(null)
