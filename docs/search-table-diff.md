@@ -104,7 +104,7 @@ const table = thimble.table({
   rows: emails,                                 // plain records, each with its `ref`
   columns: [
     { name: 'from', title: 'From', width: 180 },
-    { name: 'subject', title: 'Subject', min: 200 },
+    { name: 'subject', title: 'Subject' },
     { name: 't', title: 'Date', type: 'time' },
   ],
   sort: { by: 't', desc: true },
