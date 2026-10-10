@@ -696,6 +696,43 @@ def test_show_false_returns_an_altair_chart_to_layer_marks_on_and_shows_nothing(
         kt.chart("bar", POSTS, show="no")
 
 
+def test_a_chart_layered_in_plain_altair_cites_its_data_not_the_marks_on_it():
+    """The live QA of 0.7.0 (2026-10-10): main layered its own Altair, a pale span behind daily bars with notes on them,
+    without thimble.chart(show=False), and the card's table was the span's one row. A layered chart's table is its
+    layer with the most rows, in a panel of a concatenated chart too, while a ref into another layer's rows still reads
+    its value."""
+    import altair as alt
+
+    daily = pd.DataFrame({"day": pd.date_range("2026-06-14", periods=6, freq="D"), "saves": [40, 2610, 6543, 312, 97, 5]})
+    span = alt.Chart(pd.DataFrame({"start": ["2026-06-16"], "end": ["2026-06-20"]})).mark_rect(color=kt.theme.pale)
+    notes = alt.Chart(pd.DataFrame({"day": ["2026-06-16"], "y": [6800], "t": ["Jun 16: 6,543 saves"]}))
+    bars = alt.Chart(daily).mark_bar().encode(x="day:T", y="saves:Q")
+    layered = (span.encode(x="start:T", x2="end:T") + bars + notes.mark_rule().encode(x="day:T")
+               + notes.mark_text(color=kt.theme.accent).encode(x="day:T", y="y:Q", text="t:N"))
+    bundle = {kt.VEGALITE_MIME: layered.to_dict()}
+    table = cite.chart_table(bundle)
+    assert (table.label, table.columns, table.total) == ("day", ["saves"], 6)
+    assert table.labels[2] == "2026-06-16T00:00:00" and table.cells[2] == ["6543"]
+    assert cite.data_totals([bundle])[:2] == ["6", "9607"], "the totals are the days'"
+    # the takeaway's numbers link to the days; a ref the model wrote into the span's row still resolves
+    res = cite.resolve("q2", "Saves peaked at 6,543 on June 16; the span ends [[2026-06-20|card:q2#end/2026-06-16]].",
+                       [bundle], keep_stale=True)
+    assert [(link.token, link.ref) for link in res.links] == [
+        ("6,543", "card:q2#saves/2026-06-16T00:00:00"), ("June 16", "card:q2#day/2026-06-16T00:00:00"),
+        ("2026-06-20", "card:q2#end/2026-06-16")]
+    assert not res.stale and not res.unresolved
+    assert cite.find_td([bundle], "end", "2026-06-16")[0] == "2026-06-20"
+    # a panel of a concatenated chart is read the same way, the first panel first, and a facet by its data
+    other = alt.Chart(POSTS).mark_bar().encode(x="agent", y="posts")
+    side = cite.chart_table({kt.VEGALITE_MIME: alt.hconcat(layered, other).to_dict()})
+    assert (side.label, side.columns) == ("day", ["saves"])
+    rows = pd.DataFrame({"day": list(daily["day"]) * 2, "saves": list(daily["saves"]) * 2, "wiki": ["a"] * 6 + ["b"] * 6})
+    base = alt.Chart(rows).encode(x="day:T", y="saves:Q")
+    panels = (base.mark_bar() + base.mark_text().encode(text="saves:Q")).facet(row="wiki")
+    faceted = cite.chart_table({kt.VEGALITE_MIME: panels.to_dict()})
+    assert (faceted.columns, faceted.total) == (["day", "saves", "wiki"], 12)
+
+
 def test_theme_names_the_theme_s_roles_as_the_css_variables_the_card_reads():
     theme = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib" / "vizTheme.ts").read_text()
     roles = [kt.theme.accent, kt.theme.ink, kt.theme.muted, kt.theme.pale, *kt.theme.series]

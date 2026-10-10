@@ -1311,7 +1311,7 @@ def _altair(spec: dict):
     Altair's from_dict, which would make an object of every row (seconds for a few thousand): each inline `values` is
     held out under a name while the rest is read, then put back. No $schema, which Altair writes when it shows the chart
     and refuses in a layer. The chart's own rows keep a name of CHART_ROWS_NAME's (Altair leaves named rows inline), by
-    which they stay the table a takeaway cites wherever the chart stands among the code's layers (cite._inline_rows)."""
+    which they stay the table a takeaway cites wherever the chart stands among the code's layers (cite._main_part)."""
     import altair as alt
 
     own = spec["data"]["values"]

@@ -110,7 +110,7 @@ need one: `accent` (one thing set against the rest), `ink` (text that leads), `m
 and spans), and `series[0]` to `series[6]` (a chart's groups in order). Each is a CSS variable, such as
 `var(--viz-highlight)`, that the card reads when it draws the chart, so the marks follow the accent and the paper, dark
 included. The chart's rows stay the table a takeaway cites wherever the chart stands among the layers, so a shaded
-span can come first and lie behind it.
+span can come first and lie behind it. A chart layered in plain Altair takes its layer with the most rows as its table.
 
 A daily bar chart with a few events called out above it, each a date in the accent over a few words, with a thin pale
 leader line down to its bar:

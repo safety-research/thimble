@@ -199,7 +199,9 @@ function chartRows(spec: VegaLite): Record<string, unknown>[] | null {
   return null
 }
 
-/** Every dataset a chart holds: thimble.chart's own rows (chartRows), else the first that has rows. */
+/** The rows of a chart's table, as the backend reads them (cite._main_part): thimble.chart's own rows (chartRows), else
+ *  a part's own rows, else of its layers' rows the most, the first on a tie (the marks a chart's code layers on take a
+ *  row or a few, the data they mark many), else the first of its other parts' that has rows. */
 function anyRows(spec: VegaLite, root: VegaLite = spec): Record<string, unknown>[] {
   if (spec === root && !spec.data) {
     const marked = chartRows(spec)
@@ -207,7 +209,9 @@ function anyRows(spec: VegaLite, root: VegaLite = spec): Record<string, unknown>
   }
   const own = vegaRows(spec, root)
   if (own.length) return own
-  for (const sub of [spec.spec, ...(spec.layer ?? []), ...(spec.hconcat ?? []), ...(spec.vconcat ?? []), ...(spec.concat ?? [])]) {
+  const most = (spec.layer ?? []).map(sub => anyRows(sub, root)).reduce((a, b) => (b.length > a.length ? b : a), [])
+  if (most.length) return most
+  for (const sub of [spec.spec, ...(spec.hconcat ?? []), ...(spec.vconcat ?? []), ...(spec.concat ?? [])]) {
     if (!sub) continue
     const got = anyRows(sub, root)
     if (got.length) return got

@@ -222,6 +222,20 @@ test("a chart the code layered its own marks on shows thimble.chart's rows as it
   expect([drawn.kind, drawn.columns, drawn.rows]).toEqual(['table', ['day', 'merged'], [['2026-08-01', 3], ['2026-08-02', 9]]])
 })
 
+test('a chart layered in plain Altair shows the rows of its layer with the most rows, not the marks on it', () => {
+  // the live QA of 0.7.0: a pale span behind daily bars and a note on them, each layer with rows of its own
+  const card = (spec: unknown) => cardOfCell({ id: 'k2', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
+  const span = { data: { name: 'data-1' }, mark: { type: 'rect' }, encoding: { x: { field: 'a', type: 'temporal' }, x2: { field: 'b' } } }
+  const bars = { data: { name: 'data-2' }, mark: 'bar', encoding: { x: { field: 'day', type: 'temporal' }, y: { field: 'saves', type: 'quantitative' } } }
+  const note = { data: { name: 'data-3' }, mark: 'text', encoding: { x: { field: 'day', type: 'temporal' }, text: { field: 't', type: 'nominal' } } }
+  const datasets = { 'data-1': [{ a: '2026-06-16', b: '2026-06-20' }], 'data-2': [{ day: '2026-06-15', saves: 2610 }, { day: '2026-06-16', saves: 6543 }], 'data-3': [{ day: '2026-06-16', t: 'peak' }] }
+  const drawn = card({ layer: [span, bars, note], datasets })
+  expect([drawn.kind, drawn.columns, drawn.rows]).toEqual(['table', ['day', 'saves'], [['2026-06-15', 2610], ['2026-06-16', 6543]]])
+  // a panel of a concatenated chart the same way, the first panel first
+  const side = card({ hconcat: [{ layer: [span, bars, note] }, { data: { name: 'data-1' }, mark: 'rect' }], datasets })
+  expect(side.columns).toEqual(['day', 'saves'])
+})
+
 test('text cut short has no space before `…`; a question in a row is cut at a word; shares side by side read in whole percent', () => {
   expect(cut('removed in under an hour', 12)).toBe('removed in…')
   expect(clip('Two of the three card checks', 8)).toBe('Two of…')
