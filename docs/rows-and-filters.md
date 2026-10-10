@@ -358,13 +358,15 @@ const conv = thimble.messages({ mount: '#thread', onPick: (m) => side.open({ tit
 conv.draw(posts.filter((p) => p.thread === chosen).map((p) => ({ ref: p.ref, t: p.time, author: p.author, text: p.text, parent: p.reply_to })), { title: '# ' + names[chosen] })
 ```
 
-A message is `{ref, t, author, text, title, to, parent, kind, icon, said}`, `t` in seconds since 1970 (or a date the
-browser reads). Quoted mail, a run of lines that start with `>` with the "On … wrote:" line before it, folds behind a
-`…` button, and a body longer than twelve lines shows its first lines with Show more and Show less; both keep their text
-in the page, hidden, so `thimble.search` finds it and opens the fold. Each message is anchored with its ref and carries
-`data-t`, so a label marks it, a ⌘-click asks about it and the lanes follow it; Color by, the page's or `colour`, draws
-its bar and follows the choice as it changes. A click on a message, or Enter on it, calls `onPick(message)` and marks
-it as the chosen one until another is picked or Reset; ↑ and ↓ go to the message above or below.
+A message is `{ref, t, author, text, title, to, parent, kind, icon, said, record}`, `t` in seconds since 1970 (or a date
+the browser reads). Quoted mail, a run of lines that start with `>` with the "On … wrote:" line before it, folds behind
+a `…` button, and a body longer than twelve lines shows its first lines with Show more and Show less; both keep their
+text in the page, hidden, so `thimble.search` finds it and opens the fold. Each message is anchored with its ref and
+carries `data-t`, so a label marks it, a ⌘-click asks about it and the lanes follow it. Its bars are the page's Color
+by's and follow the choices as they change; `colour` is optional: give it (or `color`) for another Color by, or `false`
+for no bars. Color by reads `record`, the record the message shows, when it is given, so a field named as a message's
+own, such as `kind`, colors it; else the message. A click on a message, or Enter on it, calls `onPick(message)` and
+marks it as the chosen one until another is picked or Reset; ↑ and ↓ go to the message above or below.
 `draw(messages, {title, sub, empty})` draws them, with the transcript's header (the title and how many messages);
 `reveal(ref)` opens a cited message's folds and scrolls it to the middle, its highlight fading; `set(ref, patch)`
 changes one, such as its whole text once the reader sent it; `messages` gives them as last drawn.

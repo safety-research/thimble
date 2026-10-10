@@ -10,13 +10,15 @@
 // wrote:" line before it) folds behind a "…" button, and a body longer than twelve lines shows its first lines with
 // Show more and Show less; both keep their text in the page (data-thimble-fold), so thimble.search finds it and opens
 // the fold. Each message is anchored with its ref and carries data-t, so a label marks it, a ⌘-click asks about it, the
-// lanes follow it and Color by (the page's, or `colour`) draws its bar; when the label filter hides a message that
-// held its group's head, the next one shown takes the head. A click, Enter or Space picks a message (onPick), marked
+// lanes follow it and Color by draws its bar. Its bars follow the page's Color by unless it is given `colour` (or
+// `color`; false for none), and it keeps them as Color by changes, stamping each message again in place; Color by reads
+// a message's `record` when it has one, so a field of the record named as a message's own, such as `kind`, colors it.
+// When the label filter hides a message that held its group's head, the next one shown takes the head. A click, Enter or Space picks a message (onPick), marked
 // as the chosen one; ↑ and ↓ go to the message above or below.
 //
 //   const conv = thimble.messages({ mount: '#thread', format: 'plain', mentions, onPick: (m) => side.open({ ... }) })
 //   conv.draw(messages, { title: '# backlog', sub, empty })   messages: [{ref, t, author, text, title, to, parent,
-//                                                             kind: 'message' | 'event', icon, said}]
+//                                                             kind: 'message' | 'event', icon, said, record}]
 //   conv.reveal(ref)                                         a cited message: its folds opened, scrolled to the
 //                                                             middle, its highlight fading
 //   conv.set(ref, patch)                                     a message changed, such as its whole text from the reader
@@ -246,7 +248,10 @@
     var self = this
     this.mount = ctl.el(opts.mount)
     this.dead = false
-    this.colour = opts.colour && typeof opts.colour.attr === 'function' ? opts.colour : null
+    this.bars = shared.bars(opts)
+    this.restampAll = function () {
+      if (!self.dead) self.recolour()
+    }
     this.format = opts.format === 'plain' ? 'plain' : 'markdown'
     this.mentions = Array.isArray(opts.mentions) ? opts.mentions : null // as thimble.text takes them, such as #123 or @agent-08
     this.onPick = typeof opts.onPick === 'function' ? opts.onPick : null
@@ -311,11 +316,6 @@
           if (!self.dead) self.choose(null)
         },
       })
-    // with no Color by of the page's own given, the bars follow the page's Color by as it changes
-    if (typeof shared.onColour === 'function')
-      shared.onColour(function () {
-        if (!self.dead && self.mount.isConnected) self.recolour()
-      })
   }
   // made again on its mount: the one before hears and draws nothing more
   Messages.prototype.retire = function () {
@@ -360,27 +360,19 @@
     for (var i = at + dir; at >= 0 && i >= 0 && i < all.length; i += dir) if (!gone(all[i])) return all[i]
     return null
   }
-  Messages.prototype.colourAttr = function (m) {
-    var c = this.colour || shared.colour()
-    if (!c || typeof c.attr !== 'function') return ''
-    return ctl.safe(function () {
-      return c.attr(m)
-    }, '') || ''
+  // what Color by reads of a message: its record, else the message
+  function recordOf(m) {
+    return m.record != null ? m.record : m
   }
-  // the bars again after Color by changed, in place, so the folds and the scroll stay
+  Messages.prototype.colourAttr = function (m) {
+    return this.bars.attr(recordOf(m))
+  }
+  // Color by's choices changed: each message's bar stamped again in place, so the folds and the scroll stay
   Messages.prototype.recolour = function () {
     var nodes = this.mount.querySelectorAll('.thimble-msg')
-    var tmp = document.createElement('div')
     for (var i = 0; i < nodes.length; i++) {
       var row = this.rowOf(nodes[i])
-      if (!row) continue
-      tmp.innerHTML = '<i' + this.colourAttr(row.m) + '></i>'
-      var want = tmp.firstChild
-      ;['data-colour', 'data-colour-tracks'].forEach(function (a) {
-        var v = want.getAttribute(a)
-        if (v == null) nodes[i].removeAttribute(a)
-        else if (nodes[i].getAttribute(a) !== v) nodes[i].setAttribute(a, v)
-      })
+      if (row) this.bars.stamp(nodes[i], recordOf(row.m))
     }
   }
   Messages.prototype.rowOf = function (node) {
@@ -591,6 +583,7 @@
     if (!this.rows.length) out.push('<div class="thimble-msg-none">' + esc(o2.empty || 'No messages') + '</div>')
     this.mount.classList.toggle('thimble-msg-headed', o2.title != null)
     this.mount.innerHTML = out.join('')
+    this.bars.watch(this.mount, this.restampAll)
     this.fill(this.mount)
     var nodes = this.mount.querySelectorAll('.thimble-msg')
     for (var k = 0; k < nodes.length; k++) {

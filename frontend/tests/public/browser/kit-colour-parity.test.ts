@@ -1,5 +1,5 @@
-// Every part of the view kit that draws records (backend/app/viewer_table.js, viewer_transcript.js, viewer_record.js,
-// viewer_colour.js recordCard, viewer_controls.js timeline) in a real browser, in a sandboxed frame as ViewerFrame holds
+// Every part of the view kit that draws records (backend/app/viewer_table.js, viewer_transcript.js, viewer_messages.js,
+// viewer_record.js, viewer_colour.js recordCard, viewer_controls.js timeline) in a real browser, in a sandboxed frame as ViewerFrame holds
 // a view, on a page whose Color by's onChange draws nothing again: each part colors its records by the page's Color by
 // with no `colour` given, mounted before or after it, and keeps its bars itself as the choice changes, a second choice
 // comes and goes, a value is turned off and a value is recolored, with its elements, folds and scroll kept; `color` is
@@ -17,7 +17,7 @@ const inline = (js: string) => js.replace(/<\/script/g, '<\\/script')
 // the kit as views.frame_document loads it
 const KIT =
   `<script>window.__thimbleLabelOrder = ${read('label_order.json')}; window.__thimbleLabelWheel = ${read('label_wheel.json')}</script>` +
-  ['viewer_bridge.js', 'viewer_colour.js', 'viewer_controls.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_search.js', 'viewer_table.js', 'viewer_record.js', 'viewer_range.js']
+  ['viewer_bridge.js', 'viewer_colour.js', 'viewer_controls.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_messages.js', 'viewer_search.js', 'viewer_table.js', 'viewer_record.js', 'viewer_range.js']
     .map((n) => `<script>${inline(read(n))}</script>`)
     .join('') +
   `<style>${read('viewer_kit.css')}</style><style>${read('viewer_parts.css')}</style>`
@@ -54,6 +54,7 @@ const view = (mount: Mount) => `<!doctype html><html><head><style>${TOKENS} html
 <div class="grid">
   <div id="t" style="height:220px"></div><div id="off-t" style="height:220px"></div>
   <div id="tr" class="tall"></div><div id="off-tr" class="tall"></div>
+  <div id="msg"></div><div id="off-msg"></div>
   <div id="rec"></div><div id="off-rec"></div>
   <div id="cards" class="thimble-cards"></div><div id="off-cards" class="thimble-cards"></div>
   <div id="tl"></div><div id="off-tl"></div>
@@ -71,6 +72,8 @@ thimble.table({ mount: '#t', rows: rows('t'), columns: ['author', 'role', 'text'
 thimble.table({ mount: '#off-t', rows: rows('off-t'), columns: ['author', 'role', 'text'], colour: false })
 thimble.transcript({ mount: '#tr' }).draw(turns('tr'))
 thimble.transcript({ mount: '#off-tr', color: false }).draw(turns('off-tr'))
+thimble.messages({ mount: '#msg' }).draw(rows('msg'))
+thimble.messages({ mount: '#off-msg', colour: false }).draw(rows('off-msg'))
 thimble.record({ mount: '#rec', value: RECS[1], ref: 'rec.jsonl#L2' })
 thimble.record({ mount: '#off-rec', value: RECS[1], ref: 'off-rec.jsonl#L2', colour: false })
 document.getElementById('cards').innerHTML = cards('cards', {})
@@ -143,11 +146,13 @@ const look = (frame: Frame): Promise<Look> =>
       seen: {
         t: seen('#t .thimble-table-row'),
         tr: seen('#tr > .thimble-turn'),
+        msg: seen('#msg .thimble-msg'),
         rec: seen('#rec > .thimble-record'),
         cards: seen('#cards > .thimble-card'),
         aliasTr: seen('#alias-tr > .thimble-turn'),
         offT: seen('#off-t .thimble-table-row'),
         offTr: seen('#off-tr > .thimble-turn'),
+        offMsg: seen('#off-msg .thimble-msg'),
         offRec: seen('#off-rec > .thimble-record'),
         offCards: seen('#off-cards > .thimble-card'),
       },
@@ -166,8 +171,8 @@ const place = (frame: Frame, k: number) =>
     i.remove()
     return got
   }, k)
-const ON = ['t', 'tr', 'rec', 'cards'] as const
-const OFF = ['offT', 'offTr', 'offRec', 'offCards'] as const
+const ON = ['t', 'tr', 'msg', 'rec', 'cards'] as const
+const OFF = ['offT', 'offTr', 'offMsg', 'offRec', 'offCards'] as const
 /** the records each part draws, in order: all six, or the record viewer's one (the second) */
 const recsOf = (part: string) => (part === 'rec' || part === 'offRec' ? [RECS[1]] : RECS)
 
@@ -215,7 +220,7 @@ test("with onChange drawing nothing, every part's bars follow the choice, a seco
   await f.click('#tr [data-anchor="tr.jsonl#L3"] .thimble-turn-line')
   await f.evaluate(() => {
     const w = window as any
-    w.__kept = ['#tr > .thimble-turn', '#rec > .thimble-record', '#cards > .thimble-card', '#alias-tr > .thimble-turn'].map((s) => [...document.querySelectorAll(s)])
+    w.__kept = ['#tr > .thimble-turn', '#msg .thimble-msg', '#rec > .thimble-record', '#cards > .thimble-card', '#alias-tr > .thimble-turn'].map((s) => [...document.querySelectorAll(s)])
     document.getElementById('tr')!.scrollTop = 40
   })
   await settle(page)
@@ -239,7 +244,7 @@ test("with onChange drawing nothing, every part's bars follow the choice, a seco
   plain(got)
   const kept = await f.evaluate(() => {
     const w = window as any
-    const now = ['#tr > .thimble-turn', '#rec > .thimble-record', '#cards > .thimble-card', '#alias-tr > .thimble-turn'].map((s) => [...document.querySelectorAll(s)])
+    const now = ['#tr > .thimble-turn', '#msg .thimble-msg', '#rec > .thimble-record', '#cards > .thimble-card', '#alias-tr > .thimble-turn'].map((s) => [...document.querySelectorAll(s)])
     return {
       same: now.map((els, i) => els.length === w.__kept[i].length && els.every((el: Element, j: number) => el === w.__kept[i][j])),
       open: !!document.querySelector('#tr [data-anchor="tr.jsonl#L3"] .thimble-turn-call'),
@@ -247,7 +252,7 @@ test("with onChange drawing nothing, every part's bars follow the choice, a seco
       changes: w.__changes,
     }
   })
-  assert.deepEqual(kept.same, [true, true, true, true], 'the transcripts, the record and the cards keep their elements: stamped, not drawn again')
+  assert.deepEqual(kept.same, [true, true, true, true, true], 'the transcripts, the messages, the record and the cards keep their elements: stamped, not drawn again')
   assert.equal(kept.open, true, 'the tool call opened stays open')
   assert.equal(kept.scroll, 40, 'the transcript keeps its scroll')
   assert.ok(kept.changes >= 2, 'the page heard each change and drew nothing')
@@ -299,12 +304,13 @@ test('each part draws alone with no Color by, its records with no bar, and takes
 
 // A page that makes its parts again in their elements, as a page that makes them in its draw() does, with Color by's
 // first choice Kind: two transcripts made again in #again (the last given `colour: false` in #quiet), turns whose
-// `kind` is the transcript's own and whose `record` holds the post's kind, and two tables of forty rows, one given
+// `kind` is the transcript's own and whose `record` holds the post's kind, messages made again the same way in
+// #again-msg and #quiet-msg, whose `kind` is the messages' own, and two tables of forty rows, one given
 // `colour: false`. `value()` counts what Color by reads of the turns' records.
 const again = `<!doctype html><html><head><style>${TOKENS} html,body{margin:0} body{font:12px sans-serif;background:#fffdf8}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 12px}</style>${KIT}</head><body>
 <div style="padding:8px"><span id="colour"></span></div>
-<div class="grid"><div id="again"></div><div id="quiet"></div><div id="t" style="height:160px"></div><div id="off-t" style="height:160px"></div></div>
+<div class="grid"><div id="again"></div><div id="quiet"></div><div id="again-msg"></div><div id="quiet-msg"></div><div id="t" style="height:160px"></div><div id="off-t" style="height:160px"></div></div>
 <script>
 const POSTS = Array.from({ length: 40 }, (_, i) => ({ n: i + 1, kind: ['review', 'claim'][i % 2], author: ['ana', 'bo', 'cy'][i % 3], text: 'Post ' + (i + 1) }))
 window.__reads = 0
@@ -315,6 +321,11 @@ const turns = (p) => POSTS.slice(0, 4).map((r) => ({ ref: p + '#L' + r.n, speake
 for (let k = 0; k < 20; k++) thimble.transcript({ mount: '#again' }).draw(turns('again'))
 thimble.transcript({ mount: '#quiet' }).draw(turns('quiet'))
 thimble.transcript({ mount: '#quiet', colour: false }).draw(turns('quiet'))
+// the messages' records are copies, so that the reads count the transcripts' alone
+const msgs = (p) => POSTS.slice(0, 4).map((r) => ({ ref: p + '#L' + r.n, author: r.author, kind: 'message', text: r.text, record: { ...r } }))
+for (let k = 0; k < 20; k++) thimble.messages({ mount: '#again-msg' }).draw(msgs('again-msg'))
+thimble.messages({ mount: '#quiet-msg' }).draw(msgs('quiet-msg'))
+thimble.messages({ mount: '#quiet-msg', colour: false }).draw(msgs('quiet-msg'))
 thimble.table({ mount: '#t', rows: POSTS.map((r) => ({ ...r, ref: 't#L' + r.n })), columns: ['kind', 'author', 'text'] })
 thimble.table({ mount: '#off-t', rows: POSTS.map((r) => ({ ...r, ref: 'o#L' + r.n })), columns: ['kind', 'author', 'text'], colour: false })
 </script></body></html>`
@@ -330,6 +341,8 @@ test("a part made again in its element takes the place of the one before; a turn
   const stamps = (sel: string) => f.evaluate((sel) => [...document.querySelectorAll(sel)].map((el) => el.getAttribute('data-colour')), sel)
   assert.deepEqual(await stamps('#again > .thimble-turn'), ['review', 'claim', 'review', 'claim'], "each turn stamped with its record's kind, not its own")
   assert.deepEqual(await stamps('#quiet > .thimble-turn'), [null, null, null, null], 'the transcript made again with colour: false shows no stamp')
+  assert.deepEqual(await stamps('#again-msg .thimble-msg'), ['review', 'claim', 'review', 'claim'], "each message stamped with its record's kind, not its own")
+  assert.deepEqual(await stamps('#quiet-msg .thimble-msg'), [null, null, null, null], 'the messages made again with colour: false show no stamp')
 
   // Author then Kind again: only the last transcript in #again stamps its turns, and none stamps #quiet's
   for (const by of ['author', 'kind']) {
@@ -345,6 +358,8 @@ test("a part made again in its element takes the place of the one before; a turn
   }
   assert.deepEqual(await stamps('#again > .thimble-turn'), ['review', 'claim', 'review', 'claim'], 'stamped again from the records')
   assert.deepEqual(await stamps('#quiet > .thimble-turn'), [null, null, null, null], 'the transcript before the one given colour: false stamps nothing')
+  assert.deepEqual(await stamps('#again-msg .thimble-msg'), ['review', 'claim', 'review', 'claim'], 'the messages stamped again from their records')
+  assert.deepEqual(await stamps('#quiet-msg .thimble-msg'), [null, null, null, null], 'the messages before the ones given colour: false stamp nothing')
 
   // Kind and Author together: the table that follows Color by has a strip of both, the one given colour: false a plain one
   await menuClick(f, 'author')
