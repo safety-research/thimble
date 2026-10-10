@@ -4,8 +4,9 @@
 // parent's group, a deeper reply at the same level; an event is one line, its icon in the avatars' rail and its time at
 // the right; quoted mail is folded behind "…" and the search finds a word in it and opens it; the bars follow Color by
 // as it changes, with no onChange of the page's; a boxed message is a box beside its avatar, its head on a tint and its
-// words inside, light and dark; and the part works alone on a page with no other part mounted. What
-// the part decides without layout (the grouping rule, the folds' markup) is tests/public/data-kit.test.ts.
+// words inside, light and dark; the part works alone on a page with no other part mounted; and a user and an
+// assistant's chat draws its tool calls as events, the kit's generic icon and the page's own alike, light and dark.
+// What the part decides without layout (the grouping rule, the folds' markup) is tests/public/data-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -368,4 +369,48 @@ describe('the messages alone', () => {
     assert.deepEqual(errors, [])
     await p.close()
   })
+})
+
+describe('any conversation', () => {
+  for (const dark of [false, true]) {
+    test(`a user and an assistant, its tool calls as events: the generic icon in the ink at the avatars' middle, an icon of the page's own drawn the same way, the call's output under its line (${dark ? 'dark' : 'light'})`, async () => {
+      const doc = page(`<div id="msgs"></div>
+<script>
+${dark ? "document.documentElement.setAttribute('data-paper', 'dark')" : ''}
+window.conv = thimble.messages({ mount: '#msgs' })
+conv.draw(${JSON.stringify([
+        { ref: 's.jsonl#L1', t: T0, author: 'user', text: 'Why does the parser test fail?' },
+        { ref: 's.jsonl#L2', t: T0 + 20, author: 'assistant', text: 'I will run it.' },
+        { ref: 's.jsonl#L3', t: T0 + 30, author: 'assistant', kind: 'event', icon: 'run', said: { html: 'ran <code>pytest -q tests/test_parse.py</code>' }, text: '1 failed, 41 passed' },
+        { ref: 's.jsonl#L4', t: T0 + 40, author: 'assistant', kind: 'event', icon: { html: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg>' }, said: 'waited for the build' },
+        { ref: 's.jsonl#L5', t: T0 + 60, author: 'assistant', text: 'The test reads a time with no zone in the machine\'s zone.' },
+      ])})
+</script>`)
+      const { page: p, frame, errors } = await framed(doc)
+      const [a1, run, own, said, out] = await Promise.all(
+        [msg(1, '.avatar'), msg(3, '.thimble-msg-ico'), msg(4, '.thimble-msg-ico'), msg(3, '.thimble-msg-said'), msg(3, '.thimble-msg-body')].map((s) => boxOf(frame, s.replace(/b\.jsonl/g, 's.jsonl'))),
+      )
+      // both icons 16 px, at the middle of the avatars' rail, beside their lines
+      for (const ico of [run, own]) {
+        assert.ok(Math.abs(ico.width - 16) < 0.5 && Math.abs(ico.height - 16) < 0.5, `16 px (${JSON.stringify(ico)})`)
+        assert.ok(Math.abs(ico.x + ico.width / 2 - (a1.x + a1.width / 2)) < 1, "at the middle of the avatars' rail")
+      }
+      assert.ok(Math.abs(run.y - said.y) < 6, 'the icon beside its line')
+      // the call's output under its line, as the event's words
+      assert.ok(out.y >= said.bottom - 1 && out.x === said.x, `the output under the line (${JSON.stringify({ said, out })})`)
+      assert.equal(await frame().evaluate(() => document.querySelector('[data-anchor="s.jsonl#L3"] .thimble-msg-said')!.textContent), 'assistant ran pytest -q tests/test_parse.py')
+      // the page's own svg takes the ink and the stroke the kit's icons draw in, in either paper
+      const ink = await frame().evaluate(() => {
+        const look = (s: string) => {
+          const c = getComputedStyle(document.querySelector(s)!)
+          return [c.stroke, c.fill, c.strokeWidth]
+        }
+        return { kit: look('[data-anchor="s.jsonl#L3"] .thimble-msg-ico path'), own: look('[data-anchor="s.jsonl#L4"] .thimble-msg-ico path'), secondary: getComputedStyle(document.querySelector('[data-anchor="s.jsonl#L3"] .thimble-msg-ico')!).color }
+      })
+      assert.deepEqual(ink.own, ink.kit)
+      assert.equal(ink.own[0], ink.secondary)
+      assert.deepEqual(errors, [])
+      await p.close()
+    })
+  }
 })

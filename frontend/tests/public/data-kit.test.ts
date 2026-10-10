@@ -11,7 +11,8 @@
 // text (viewer_text.js, with the markdown parser of src/lib/kitMarkdown.ts) turns mentions into links that open their
 // record, shows raw HTML as text, takes every link's address off, and folds a long text with Show more.
 // The messages (viewer_messages.js) share a head between one author's messages that follow each other within five
-// minutes with the same parent on one day, and keep each message its own anchored element.
+// minutes with the same parent on one day, and keep each message its own anchored element; an event's icon is one of a
+// few generic ones (a forge's names draw the nearest of them) or the page's own.
 // Layout (the highlights, the strip's ticks drawn, the table's rows as it scrolls, the diff's columns, the text's look
 // and its quotes) is tests/public/browser/view-data.test.ts and view-text.test.ts, and the messages' is
 // tests/public/browser/kit-messages.test.ts.
@@ -1501,15 +1502,28 @@ describe('the messages', () => {
     expect(doc().querySelector('[data-anchor="l#4"]')!.getAttribute('data-anchor-text')).toBe('Branch deleted')
   })
 
-  test("an event's icon: a forge's pull request and issue opened each its own drawing, an icon the kit lacks a dot", async () => {
+  test("an event's icon: the generic few each their own drawing, a forge's or a mailbox's name the generic one nearest it, a name the kit lacks a dot, and {html} the page's own", async () => {
     await load('<div id="c"></div>')
     const w = win()
     w.eval('window.conv = thimble.messages({ mount: "#c" })')
-    w.conv.draw(['pull', 'issue', 'commit', 'nonesuch'].map((icon, i) => ({ ref: 'e#' + i, t: T + i * 600, author: 'ana', kind: 'event', icon, said: 'did ' + icon })))
-    const drawing = (i: number) => doc().querySelector(`[data-anchor="e#${i}"] .thimble-msg-ico`)!.innerHTML
-    const all = [0, 1, 2, 3].map(drawing)
-    expect(new Set(all).size).toBe(4)
-    expect(all[3]).toBe('<circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"></circle>')
+    const generic = ['note', 'start', 'change', 'done', 'stop', 'again', 'link', 'send', 'remove', 'warn', 'run']
+    const aliases: Record<string, string> = { comment: 'note', pull: 'start', issue: 'start', commit: 'change', edit: 'change', merge: 'done', approve: 'done', close: 'stop', reopen: 'again', changes: 'warn', delete: 'remove', mail: 'send' }
+    const names = [...generic, ...Object.keys(aliases), 'nonesuch', 'constructor']
+    w.conv.draw(names.map((icon, i) => ({ ref: 'e#' + icon, t: T + i * 600, author: 'ana', kind: 'event', icon, said: 'did ' + icon })))
+    const drawing = (icon: string) => doc().querySelector(`[data-anchor="e#${icon}"] .thimble-msg-rail > .thimble-msg-ico`)!.innerHTML
+    const dot = '<circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"></circle>'
+    expect(new Set(generic.map(drawing)).size).toBe(generic.length)
+    expect(generic.map(drawing)).not.toContain(dot)
+    for (const [alias, to] of Object.entries(aliases)) expect([alias, drawing(alias)]).toEqual([alias, drawing(to)])
+    expect([drawing('nonesuch'), drawing('constructor')]).toEqual([dot, dot])
+    // an icon of the page's own: its markup in the rail, in the place the kit's own icons stand
+    w.conv.draw([
+      { ref: 'o#1', t: T, author: 'ana', kind: 'event', icon: { html: '<svg viewBox="0 0 16 16"><path d="M2 8h12"/></svg>' }, said: 'paused' },
+      { ref: 'o#2', t: T + 60, author: 'ana', kind: 'event', icon: { html: '§' }, said: 'cited a section' },
+    ])
+    const own = (n: number) => doc().querySelector(`[data-anchor="o#${n}"] .thimble-msg-rail > .thimble-msg-ico`)!
+    expect([own(1).tagName, own(1).classList.contains('is-own'), own(1).innerHTML]).toEqual(['SPAN', true, '<svg viewBox="0 0 16 16"><path d="M2 8h12"></path></svg>'])
+    expect([own(2).textContent, own(2).getAttribute('aria-hidden')]).toEqual(['§', 'true'])
   })
 
   test('a pick marks the message chosen, kept when drawn again; ↑ and ↓ go to the message above or below; mentions reach thimble.text', async () => {

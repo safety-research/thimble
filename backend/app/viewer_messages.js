@@ -1,18 +1,19 @@
 // thimble's messages for a view's page, part of the view kit: views.frame_document loads it after viewer_transcript.js
-// and before viewer_search.js; viewer_parts.css styles it (.thimble-msg-*). It draws messages between people or agents
-// as a chat app, a forge's conversation or a mail thread draws them: each author's avatar in a rail at the left, a head
-// with the author in bold and the time quiet in mono (HH:MM, the full date and time on hover), a subject in bold over
-// the words, `to` as a quiet line under the head, and the words drawn by thimble.text in `format`. Consecutive
-// messages by one author, within five minutes and with the same parent, share one head; a date line opens each day; a
-// reply (`parent`) is drawn under its parent, one level in, deeper replies at that level too, as boards and forges draw
-// them; an event (`kind: 'event'`) is one line, an icon in the ink, the author in bold, what they did (`said`) and the
-// time at the right, as a forge's timeline draws it; a boxed message (`box`), such as a pull request's opening post or a
-// mail, is a box beside the avatar, its head the author, what they did (`said`) and the time, over the words. Quoted
-// mail (a run of lines that start with ">", with the "On … wrote:" line before it) folds behind a "…" button, and a
-// body longer than twelve lines shows its first lines with
-// Show more and Show less; both keep their text in the page (data-thimble-fold), so thimble.search finds it and opens
-// the fold. Each message is anchored with its ref and carries data-t, so a label marks it, a ⌘-click asks about it, the
-// lanes follow it and Color by draws its bar. Its bars follow the page's Color by unless it is given `color` (false
+// and before viewer_search.js; viewer_parts.css styles it (.thimble-msg-*). It draws any conversation between people or
+// agents as a chat app draws it: agents in a chat or on a board, a user and an assistant, people by mail, a pull
+// request's comments. Each author's avatar stands in a rail at the left, a head with the author in bold and the time
+// quiet in mono (HH:MM, the full date and time on hover), a subject in bold over the words, `to` as a quiet line under
+// the head, and the words drawn by thimble.text in `format`. Consecutive messages by one author, within five minutes
+// and with the same parent, share one head; a date line opens each day; a reply (`parent`) is drawn under its parent,
+// one level in, deeper replies at that level too, as a board draws a thread; an event (`kind: 'event'`), something
+// that happened rather than something said, such as a tool call, a task closed or a member who joined, is one line, an
+// icon in the ink, the author in bold, what they did (`said`) and the time at the right; a boxed message (`box`), one
+// that stands apart from the chat, such as a mail or a task's opening post, is a box beside the avatar, its head the
+// author, what they did (`said`) and the time, over the words. Quoted mail (a run of lines that start with ">", with
+// the "On … wrote:" line before it) folds behind a "…" button, and a body longer than twelve lines shows its first
+// lines with Show more and Show less; both keep their text in the page (data-thimble-fold), so thimble.search finds it
+// and opens the fold. Each message is anchored with its ref and carries data-t, so a label marks it, a ⌘-click asks
+// about it, the lanes follow it and Color by draws its bar. Its bars follow the page's Color by unless it is given `color` (false
 // for none), and it keeps them as Color by changes, stamping each message again in place; Color by reads
 // a message's `record` when it has one, so a field of the record named as a message's own, such as `kind`, colors it.
 // When the label filter hides a message that held its group's head, the next one shown takes the head. A click, Enter or Space picks a message (onPick), marked
@@ -21,6 +22,8 @@
 //   const conv = thimble.messages({ mount: '#thread', format: 'plain', mentions, onPick: (m) => side.open({ ... }) })
 //   conv.draw(messages, { title: '# backlog', sub, empty })   messages: [{ref, t, author, text, title, to, parent,
 //                                                             kind: 'message' | 'event', icon, said, box, record}]
+//                                                             an event's icon: one of ICONS' names, or {html} of the
+//                                                             page's own, such as an <svg viewBox="0 0 16 16">
 //   conv.reveal(ref)                                         a cited message: its folds opened, scrolled to the
 //                                                             middle, its highlight fading
 //   conv.set(ref, patch)                                     a message changed, such as its whole text from the reader
@@ -42,22 +45,31 @@
   var HIT_MS = 1500 // how long a revealed message keeps its highlight (the transcript's)
   var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  // the events' icons, line drawings in the ink: a forge's and a mailbox's few kinds; any other is a dot
+  // the events' icons, line drawings in the ink, a few that fit any conversation; any other name is a dot
   var ICONS = {
-    comment: '<path d="M2.5 3h11v7.5H7l-3 2.5v-2.5H2.5z"/>',
-    commit: '<circle cx="8" cy="8" r="2.5"/><path d="M1 8h4.5M10.5 8H15"/>',
-    pull: '<circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><circle cx="12" cy="12.5" r="1.6"/><path d="M12 10.9V6.5a2 2 0 0 0-2-2H7.5M9 3L7.5 4.5 9 6"/>',
-    issue: '<circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/>',
-    merge: '<circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><circle cx="12" cy="8" r="1.6"/><path d="M4 5.1c0 2.2 2.3 2.9 6.4 2.9"/>',
-    close: '<circle cx="8" cy="8" r="6"/><path d="M5.6 5.6l4.8 4.8"/>',
-    reopen: '<path d="M12.6 7.2A4.7 4.7 0 1 0 11.4 11"/><path d="M13 3.5v3.7H9.3"/>',
-    approve: '<path d="M3.5 8.5l3 3 6-6.5"/>',
-    changes: '<path d="M8 2.5v6M5 5.5h6M5 12.5h6"/>',
-    edit: '<path d="M10.5 2.5l3 3L6 13H3v-3z"/><path d="M9 4l3 3"/>',
-    delete: '<path d="M2.5 4.5h11M6.5 4.5V2.5h3v2M4 4.5l.7 9h6.6l.7-9"/>',
-    mail: '<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M2.5 4.5L8 9l5.5-4.5"/>',
+    note: '<path d="M2.5 3h11v7.5H7l-3 2.5v-2.5H2.5z"/>', // said aside: a comment, a remark, a review
+    start: '<circle cx="8" cy="8" r="6"/><path d="M6.7 5.6v4.8L10.6 8z" fill="currentColor" stroke="none"/>', // opened, began, joined, claimed
+    change: '<path d="M10.5 2.5l3 3L6 13H3v-3z"/><path d="M9 4l3 3"/>', // edited, pushed, updated, renamed
+    done: '<circle cx="8" cy="8" r="6"/><path d="M5.3 8.2l1.9 1.9 3.5-3.8"/>', // finished, approved, merged, resolved
+    stop: '<circle cx="8" cy="8" r="6"/><rect x="5.9" y="5.9" width="4.2" height="4.2" rx=".6" fill="currentColor" stroke="none"/>', // closed, cancelled, left, ended
+    again: '<path d="M12.6 7.2A4.7 4.7 0 1 0 11.4 11"/><path d="M13 3.5v3.7H9.3"/>', // reopened, retried, resumed
+    link: '<path d="M7 9a2.4 2.4 0 0 0 3.4 0l2.2-2.2a2.4 2.4 0 0 0-3.4-3.4l-.7.7"/><path d="M9 7a2.4 2.4 0 0 0-3.4 0L3.4 9.2a2.4 2.4 0 0 0 3.4 3.4l.7-.7"/>', // linked, referenced, mentioned
+    send: '<path d="M14 2L7.4 8.6"/><path d="M14 2L9.8 14 7.4 8.6 2 6.2z"/>', // sent, forwarded, handed off
+    remove: '<path d="M2.5 4.5h11M6.5 4.5V2.5h3v2M4 4.5l.7 9h6.6l.7-9"/>', // deleted, removed
+    warn: '<path d="M8 2.3l6.2 10.9H1.8z"/><path d="M8 6.6v3"/><circle cx="8" cy="11.4" r=".55" fill="currentColor" stroke="none"/>', // failed, blocked, changes asked for
+    run: '<path d="M3 4.5L6.5 8 3 11.5"/><path d="M8.5 11.5H13"/>', // ran a tool or a command
   }
+  // the names a forge's or a mailbox's events go by, each drawn as the icon nearest it
+  var ALIASES = { comment: 'note', pull: 'start', issue: 'start', commit: 'change', edit: 'change', merge: 'done', approve: 'done', close: 'stop', reopen: 'again', changes: 'warn', delete: 'remove', mail: 'send' }
   var DOT = '<circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"/>'
+  // an event's icon in the rail: a name of ICONS or ALIASES, a dot for any other, or {html} of the page's own (an svg,
+  // which takes the ink and the stroke as the kit's own do, or a character)
+  function iconHtml(icon) {
+    if (icon != null && typeof icon === 'object' && icon.html != null) return '<span class="thimble-msg-ico is-own" aria-hidden="true">' + String(icon.html) + '</span>'
+    var name = typeof icon === 'string' && Object.prototype.hasOwnProperty.call(ALIASES, icon) ? ALIASES[icon] : icon
+    var drawing = typeof name === 'string' && Object.prototype.hasOwnProperty.call(ICONS, name) ? ICONS[name] : DOT
+    return '<svg class="thimble-msg-ico" viewBox="0 0 16 16" aria-hidden="true">' + drawing + '</svg>'
+  }
   var QUOTE = /^\s*>/
   var WROTE = /\swrote:\s*$/i
   var FENCE = /^\s{0,3}(`{3,}|~{3,})/
@@ -232,7 +244,7 @@
   function isEvent(m) {
     return m.kind === 'event'
   }
-  // a message drawn in a box of its own, as a forge draws an opening post or a comment and a mail app a message
+  // a message drawn in a box of its own, one that stands apart from the chat, such as a mail or a task's opening post
   function isBoxed(m) {
     return !!m.box && !isEvent(m)
   }
@@ -539,10 +551,10 @@
       (this.onPick ? ' tabindex="0"' : '')
     var body = this.bodyHtml(row, textOf(m))
     if (ev) {
-      // an event with no author, such as a branch deleted, says what happened alone
+      // an event with no author, such as a session that ended, says what happened alone
       return (
         '<div class="' + cls + '"' + attrs + '>' +
-        '<div class="thimble-msg-rail" data-thimble-chrome><svg class="thimble-msg-ico" viewBox="0 0 16 16" aria-hidden="true">' + (ICONS[m.icon] || DOT) + '</svg></div>' +
+        '<div class="thimble-msg-rail" data-thimble-chrome>' + iconHtml(m.icon) + '</div>' +
         '<div class="thimble-msg-main"><div class="thimble-msg-line">' +
         '<span class="thimble-msg-said">' + (signed ? '<b class="thimble-msg-author" data-thimble-chrome>' + esc(author) + '</b> ' : '') + words(m.said) + '</span>' +
         timeHtml(row.s, 'thimble-msg-time', row.day) + '</div>' + body + '</div></div>'
@@ -716,7 +728,7 @@
     else this.draw(this.list, this.o)
   }
 
-  /** a conversation's messages as a chat app or a forge's conversation draws them (see the top of this file) */
+  /** a conversation's messages as a chat app draws them, whoever writes them (see the top of this file) */
   thimble.messages = function (opts) {
     var conv = new Messages(opts || {})
     return {

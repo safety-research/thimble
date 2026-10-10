@@ -935,7 +935,7 @@
 .thimble-msg.is-cont {
   padding-top: 0;
 }
-/* a reply: one level in, under its parent's words, with a smaller avatar, as a board or a forge draws a thread */
+/* a reply: one level in, under its parent's words, with a smaller avatar, as a board draws a thread */
 .thimble-msg.is-reply {
   grid-template-columns: 24px minmax(0, 1fr);
   margin-left: 42px;
@@ -1069,7 +1069,7 @@
   margin-top: 6px;
   color: var(--text-secondary);
 }
-/* an event: one line, its icon in the rail in the ink, the time at the right, as a forge's timeline draws it */
+/* an event: one line, its icon in the rail in the ink, the time at the right */
 .thimble-msg-event {
   padding-top: 4px;
   padding-bottom: 4px;
@@ -1086,6 +1086,19 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   color: var(--text-secondary);
+}
+/* an icon of the page's own ({html}): an svg in it takes the box, the ink and the stroke; a character is set small */
+.thimble-msg-ico.is-own {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font: 600 11px / 1 var(--font-body);
+}
+.thimble-msg-ico.is-own > svg {
+  width: 100%;
+  height: 100%;
 }
 .thimble-msg-line {
   display: flex;
@@ -1104,16 +1117,16 @@
   font: 600 var(--text-ui-sm) / 1.5 var(--font-body);
   white-space: normal;
 }
-/* a commit's sha or a file's path in what an event says ({html}), in the mono face as the forge writes it */
+/* a command, a sha or a path in what an event says ({html}), in the mono face */
 .thimble-msg-said code {
   font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
 }
 .thimble-msg-event .thimble-msg-body {
   margin-top: 2px;
 }
-/* a boxed message (`box`), as a forge draws a pull request's opening post and a mail app a message: a box beside the
-   avatar, its head on a light tint as an event's line (the author, what they did and the time at the right), the words
-   under it; the box takes the row's own background, so a message chosen or under the pointer shows through it */
+/* a boxed message (`box`), one that stands apart from the chat, such as a mail or a task's opening post: a box beside
+   the avatar, its head on a light tint as an event's line (the author, what they did and the time at the right), the
+   words under it; the box takes the row's own background, so a message chosen or under the pointer shows through it */
 .thimble-msg.is-boxed {
   padding-bottom: 8px;
 }
