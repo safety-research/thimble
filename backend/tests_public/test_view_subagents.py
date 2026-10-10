@@ -187,7 +187,7 @@ async def test_a_design_the_analyst_asked_main_for_reaches_the_builder_and_the_r
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
-def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_proposal_asks_for(board, hints, mode):
+def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_proposal_asks_for(board, mode):
     # prompts/dev-view.md's "A good view" and prompts/view-review.md's principles say so in both modes, and each reaches
     # its agent's registered prompt as the module registers it (subagents.roles)
     with prompts.rendering(mode):
