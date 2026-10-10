@@ -3079,12 +3079,26 @@ def build_task(c: str, prop: dict[str, Any], *, repair: str = "") -> str:
     more = [repair] if repair else []
     if prop.get("changed") or prop.get("change"):
         more.append(change_text(c, prop))
-    if data := data_text(c):
-        more.append(data)
     return prompts.render("dev-view-task", {
         "name": str(prop.get("name") or slug), "slug": slug, "folder": str(views.views_dir(c) / slug),
         "work": str(view_work_dir(c, slug)), "proposal": view_tools.fenced_proposal(prop),
         "more": "\n\n".join(more)})
+
+
+DATA_BRIEF = "data-brief.md"  # in a build's work folder: data_text as the build starts, which the builder gets
+
+
+def write_data_brief(c: str, slug: str) -> None:
+    """Views round 5 (exploration): data_text in the build's work folder (DATA_BRIEF), or no such file when it is ''.
+    The SubagentStart hook (plugin/bin/.thimble-watch) gives it to the view's builder as context when the builder
+    starts. It is not in the build's task, since main's Agent call must copy the task exactly and the profile is long
+    and full of numbers: in a smoke run main miscopied one time in it, and thimble refused the start twice."""
+    p = view_work_dir(c, slug) / DATA_BRIEF
+    text = data_text(c)
+    if text:
+        p.write_text(text + "\n", "utf-8")
+    else:
+        p.unlink(missing_ok=True)
 
 
 def data_text(c: str) -> str:
@@ -3147,6 +3161,7 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
     views.ensure_local(config.workspace_dir(c))
     (views.views_dir(c) / slug).mkdir(parents=True, exist_ok=True)
     view_work_dir(c, slug).mkdir(parents=True, exist_ok=True)
+    write_data_brief(c, slug)
     vals = subagents.values_for(c, _builder(), values or prop.get("values") or None)
     fields: dict[str, Any] = {"values": vals, "error": None, "refused": None, "route": route, "stopped_by": None}
     if route == subagents.CLICK:
