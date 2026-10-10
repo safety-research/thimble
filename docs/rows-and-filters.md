@@ -16,6 +16,8 @@ these parts, so a page lays them out and fills them rather than drawing its own:
 | the cards | `thimble.recordCard` | a record as a card or a tile, its colors Color by's bars on its edge, one per choice |
 | the side panel | `thimble.side` | a record, or a row's children, in a wide panel beside the list |
 | the transcript | `thimble.transcript` | a transcript's turns, as the File browser's Transcript mode draws them |
+| the record | `thimble.record` | one record's fields as a tree under its citation, such as in the side panel |
+| a chart | `thimble.chart` | a chart of a card's `thimble.chart` kinds, in the canvas's style ([charts.md](charts.md#in-a-view)) |
 
 Only Color by draws in colors, and only on the records. Filter by's toggles and the lanes' names are words; a failure
 may take the problem red beside the Color by colors, with a shape (✕ or an underline) so that it stays apart from a
@@ -270,6 +272,25 @@ A turn is `{ref, t, speaker, kind, tool, text, input, output, error, session, se
 names what the list shows (the run, the session or the selection) and how many turns; `reveal(ref)` opens a cited turn
 and scrolls it to the middle, its highlight fading as Files' does; `open(ref, on)` folds or opens one; `set(ref, patch)`
 gives a turn its words once the reader sent them whole.
+
+## The record
+
+`thimble.record({mount, value, ref, open, find, colour})` draws one record, a JSON value, in `mount` as a tree under
+its citation: a row per field, its key in mono at the left and its value at the right, each level's values lined up;
+numbers, `true`, `false` and `null` in mono; a nested object or list folded to one line that names its size and its
+first fields, which a click on its key opens. The record's fields and the level under them show at first (`open`, 2);
+a string longer than six lines or 480 characters folds to six lines with Show more and Show less, and a list of more
+than 110 items shows its first 100 with Show N more. `value` may be JSON text, such as the record's line, which draws as
+the object it holds.
+
+```js
+side.open({ title: 'Read · explorer', ref, render: (body) => thimble.record({ mount: body, value: rec, ref, find: q.value }) })
+```
+
+The record is anchored with `ref`, so a label marks it and a ⌘-click asks about it, and its citation opens it in the
+File browser. `find`, such as the search field's words, highlights their matches and opens what holds them; `colour`,
+Color by, gives the record its bar. Called again on the same mount with the same ref, it keeps what the analyst opened
+and folded, and with another ref it starts as it opens. It returns `{hits}`, how many places match `find`.
 
 ## What the list says it shows
 

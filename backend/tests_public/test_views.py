@@ -791,7 +791,11 @@ def test_a_viewer_thimble_ships_runs_from_a_copy_in_the_workspace(ws, tmp_path, 
     assert Path(req["reader"]).read_text("utf-8") == THREADS_READER
 
 
-def test_the_frame_document_blocks_every_host_before_any_script(ws):
+def test_the_frame_document_blocks_every_host_before_any_script(ws, tmp_path, monkeypatch):
+    # the built interface's chart drawing (views.KIT_CHART_JS), a stand-in, so the count does not hang on a build
+    (tmp_path / "dist" / "kit").mkdir(parents=True)
+    (tmp_path / "dist" / views.KIT_CHART_JS).write_text("window.__thimbleCharts = {}")
+    monkeypatch.setattr(config, "FRONTEND_DIST", tmp_path / "dist")
     doc = views.frame_document(views.read_view(CORPUS, "threads"))
     assert doc.lower().startswith("<!doctype html>")
     csp = doc.index("Content-Security-Policy")
@@ -800,9 +804,9 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
     v = dict(views.read_view(CORPUS, "threads"), libs=views._libs(["vega-embed"]))
     with_libs = views.frame_document(v)
     if views.LIBS["vega"].is_file():
-        assert with_libs.count("<script>") == 11, \
-            "the view's name, the bridge, the kit's Color by, row controls, side panel, transcript and time range, vega, " \
-            "vega-lite, vega-embed and the view's own"
+        assert with_libs.count("<script>") == 14, \
+            "the view's name, the bridge, the kit's Color by, row controls, side panel, transcript, record viewer, " \
+            "chart drawing, charts and time range, vega, vega-lite, vega-embed and the view's own"
     assert views._script_text("a</script>b") == "a<\\/script>b"
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
 

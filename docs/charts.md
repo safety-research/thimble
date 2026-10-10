@@ -84,3 +84,33 @@ at their zone's clock time.
 
 A chart of another form is still Altair or matplotlib code in a plot card. The code is in
 `backend/app/kernel_thimble.py` (`chart`, `CHARTS`), the tests in `backend/tests_public/test_charts.py`.
+
+## In a view
+
+A view's page draws the same charts with the view kit's `thimble.chart(mount, kind, rows, options)`: the same kinds,
+columns and options, with `rows` a list of objects whose keys come in the kind's order, as a DataFrame's columns do,
+and times as ISO text. The page names `vega-embed` in view.json's `libs`.
+
+```js
+thimble.chart('#posts', 'bar', counts.map((c) => ({ Agent: c.agent, Posts: c.n })), { height: 140 })
+```
+
+Beside the options above it takes three of the kit's own:
+
+- `colour`: Color by. The group or series column's values take Color by's colors, the colors of their records' bars,
+  and the chart draws no legend, since Color by's chips are its key; a value with no color, as with Off or a value
+  turned off, is gray. A page groups its records by `colour.valueOf(record)` for that column.
+- `onPick(row)`: a mark clicked, with its row, such as to filter by its category or to open it in the side panel.
+- `height`: the plot's height in px.
+
+The chart takes its mount's width and follows it. Called again on the same mount, it replaces the chart, so a page draws
+it in its `draw()` with the rows Filter by keeps. A chart of no rows says so, and a wrong call says what is wrong in the
+chart's place, in the words a card's chart fails with. `thimble.chart(mount, spec, options)` draws any other Vega-Lite
+spec the same way. It returns a promise of the chart's Vega view, or null when it draws none.
+
+Each half of the chart has one source. The kit builds no spec: it asks thimble for it with the kit's own fetch,
+`{"$thimble": "chart", kind, rows, options}`, which thimble answers with the code a card's `thimble.chart` runs
+(`kernel_thimble.chart_spec`, through `views.chart_answer`), so a view's chart takes a card's kinds and options and
+fails as a card's does. And it draws the spec with the code the canvas draws every chart with (frontend
+`lib/vegaDraw.ts`, with `lib/chartDefaults.ts` and the chart style of `lib/vizTheme.ts`), which `vite build` writes
+beside the app as `kit/chart.js` and every view page inlines, so a view's charts follow the theme as a card's do.

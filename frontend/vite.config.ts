@@ -1,5 +1,6 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { build } from 'esbuild'
 
 // the config runs under node; this is the one node global it reads
 declare const process: { env: Record<string, string | undefined> }
@@ -29,8 +30,36 @@ export function ownOriginToTarget(req: ProxyReq, incoming: Incoming, target: str
 
 const target = `http://127.0.0.1:${backend}`
 
+/** The canvas's chart drawing as the one script a view's page inlines for the view kit's thimble.chart (src/lib/kitChart,
+ * backend views.KIT_CHART_JS): written beside the app as kit/chart.js on every build, so a view's charts and the
+ * canvas's are drawn by the same code. */
+export function kitChart(): Plugin {
+  let root = '.'
+  return {
+    name: 'thimble-kit-chart',
+    apply: 'build',
+    configResolved(config) {
+      root = config.root
+    },
+    async generateBundle() {
+      const out = await build({
+        entryPoints: [`${root}/src/lib/kitChart.ts`],
+        bundle: true,
+        format: 'iife',
+        platform: 'browser',
+        target: 'es2020',
+        minify: true,
+        legalComments: 'none',
+        write: false,
+        logLevel: 'error',
+      })
+      this.emitFile({ type: 'asset', fileName: 'kit/chart.js', source: out.outputFiles[0].text })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), kitChart()],
   cacheDir,
   server: {
     port: 5300,

@@ -40,7 +40,8 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
     thimble.chart(kind, data, **options)
                               a common chart (CHARTS) of a DataFrame whose columns come in the kind's order, such as
                               bar (category, value[, group]): VEGALITE_MIME with the rows inline and no color, font or
-                              size of its own, which the card draws in thimble's theme (docs/charts.md)
+                              size of its own, which the card draws in thimble's theme (docs/charts.md). chart_spec
+                              builds the spec without showing it, for the view kit's charts too (views.chart_answer)
     thimble.card(type, labels=None, **args)
                               a card of a card type (the workspace's CARD_TYPES_FILE): the arguments checked against the
                               type's schema, the type's card.py run on its reader's index with `labels` as the labels
@@ -56,6 +57,7 @@ Rows come from labels/<id>.sqlite when it reflects the labels file, else from la
 A cover over a range of records supplies their negative value. Only the standard library at import; pandas is imported
 when a DataFrame is made.
 """
+import contextvars
 import io
 import json
 import math
@@ -115,10 +117,11 @@ def _ws() -> Path:
     return Path(str(WS))
 
 
-def _concepts() -> list:
-    """Every concept file of the workspace, oldest first (the fields a cell needs)."""
+def _concepts(ws=None) -> list:
+    """Every concept file of the workspace, oldest first (the fields a cell needs); of the workspace folder `ws` when
+    given, else the kernel's."""
     out = []
-    d = _ws() / "concepts"
+    d = (Path(ws) if ws is not None else _ws()) / "concepts"
     for p in sorted(d.glob("*.json")) if d.is_dir() else []:
         try:
             with open(p, "r", encoding="utf-8") as f:
@@ -198,11 +201,13 @@ def _rev(v) -> int:
         return 0
 
 
-def _find(name: str) -> dict:
+def _find(name: str, ws=None) -> dict:
+    """A label by its id or its name (the newest of that name not superseded), in the workspace folder `ws` when given,
+    else the kernel's."""
     key = " ".join(str(name or "").split())
     if not key:
         raise ValueError("thimble.labels: give the label's name (thimble.labels() lists them)")
-    ks = _concepts()
+    ks = _concepts(ws)
     for k in ks:
         if k["id"] == key:
             return k
@@ -1187,6 +1192,9 @@ CHARTS = {
     "heatmap": (("x", "y", "value"), 3, ("log",)),
 }
 _DEFAULT = object()  # an option left out
+# the workspace folder whose labels a chart's `label` names, while chart_spec draws for a caller other than a card
+# (views.chart_answer); None in a kernel, which reads its own workspace's and notes the label as read
+_CHART_WS: contextvars.ContextVar = contextvars.ContextVar("thimble_chart_ws", default=None)
 # text a chart reads as times: an ISO date, a month ("2025-04") or a date and time, with or without its zone
 _ISO_TIME = re.compile(r"^\d{4}-\d{2}(-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?)?$")
 
@@ -1225,6 +1233,16 @@ def chart(kind, data, **options):
     panels    True draws each series in a panel of its own, with its own y scale
     step      the width of a histogram's bins; by default a round width that makes at most 20
     log       True colors a heatmap's values on a log scale"""
+    spec, n = chart_spec(kind, data, options)
+    _show({VEGALITE_MIME: spec, "text/plain": f"thimble.chart({kind!r}): {n:,} rows"})
+
+
+def chart_spec(kind, data, options: dict, ws=None) -> tuple:
+    """thimble.chart's spec without showing it: (the Vega-Lite spec, the rows the chart draws), `data` and `options`
+    checked as chart() checks them, with the same errors. A card's chart shows the spec; the view kit's thimble.chart
+    (viewer_chart.js) asks thimble for the same spec (views.chart_answer), so a view's chart and a card's take the same
+    kinds, data and options from this one code. `ws` is the workspace folder whose labels `label` names, for a chart
+    drawn outside a kernel, which notes no label as read; the kernel's own by default."""
     if not isinstance(kind, str) or kind not in CHARTS:
         raise ValueError(f"thimble.chart: no chart kind {kind!r}; the kinds are "
                          + "; ".join(f"{k} {_shape(k)}" for k in CHARTS))
@@ -1240,9 +1258,12 @@ def chart(kind, data, **options):
                              f"low and high ends, such as (\"lo\", \"hi\"), not {options['interval']!r}")
         options = {**options, "interval": iv}
     df = _chart_frame(kind, data, iv or ())
-    spec = _CHART_SPECS[kind](df, options)
-    _show({VEGALITE_MIME: {"$schema": VEGALITE_SCHEMA, **spec},
-           "text/plain": f"thimble.chart({kind!r}): {len(df):,} rows"})
+    at = _CHART_WS.set(None if ws is None else str(ws))
+    try:
+        spec = _CHART_SPECS[kind](df, options)
+    finally:
+        _CHART_WS.reset(at)
+    return {"$schema": VEGALITE_SCHEMA, **spec}, len(df)
 
 
 def _chart_frame(kind: str, data, extra=()):
@@ -1406,16 +1427,18 @@ def _ordered(kind: str, s, default: list, sort=_DEFAULT, label=None, what="categ
 
 
 def _label_values(kind: str, name, s, col: str) -> list:
-    """The values of the label `name` in its order, once column `col` is seen to hold some of them; the card notes the
-    label as read, which draws those values in the label's colors."""
+    """The values of the label `name` in its order, once column `col` is seen to hold some of them; in a kernel the card
+    notes the label as read, which draws those values in the label's colors (outside one, chart_spec's `ws` names the
+    workspace, and the caller colors them)."""
     if not isinstance(name, str):
         raise TypeError(f"thimble.chart({kind!r}): `label` is a label's name, not {name!r}")
-    k = _find(name)
+    ws = _CHART_WS.get()
+    k = _find(name, ws)
     values = [v for v, _c in k["classes"]]
     if not {str(v) for v in s.dropna().tolist()} & set(values):
         raise ValueError(f"thimble.chart({kind!r}): the column `{col}` holds none of the label {k['name']!r}'s values, "
                          + ", ".join(map(repr, values)))
-    if all(x["id"] != k["id"] for x in _LABELS_READ):
+    if ws is None and all(x["id"] != k["id"] for x in _LABELS_READ):
         _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
     return values
 

@@ -164,12 +164,19 @@ BRIDGE_JS = Path(__file__).with_name("viewer_bridge.js")
 KIT_CSS = Path(__file__).with_name("viewer_kit.css")  # thimble's chips, buttons, segmented controls, tables and list rows
 COLOUR_JS = Path(__file__).with_name("viewer_colour.js")  # the view kit's Color by control, thimble.colorBy
 RANGE_JS = Path(__file__).with_name("viewer_range.js")  # the view kit's time range selector, thimble.timeRange
-# the view kit's row controls (thimble.filterBy, rows, lanes, key, divider), its side panel (thimble.side) and its
-# transcript (thimble.transcript), loaded between Color by and the range, which takes the bridge's part away; their styles
+# the view kit's row controls (thimble.filterBy, rows, lanes, key, divider), its side panel (thimble.side), its
+# transcript (thimble.transcript), its record viewer (thimble.record) and its charts (thimble.chart), loaded between
+# Color by and the range, which takes the bridge's part away; their styles
 CONTROLS_JS = Path(__file__).with_name("viewer_controls.js")
 SIDE_JS = Path(__file__).with_name("viewer_side.js")
 TRANSCRIPT_JS = Path(__file__).with_name("viewer_transcript.js")
+RECORD_JS = Path(__file__).with_name("viewer_record.js")
+CHART_JS = Path(__file__).with_name("viewer_chart.js")
 PARTS_CSS = Path(__file__).with_name("viewer_parts.css")
+# the canvas's own chart drawing (frontend lib/vizTheme, lib/chartDefaults, lib/vegaDraw) as one script, which vite
+# build writes beside the app (frontend/vite.config.ts kitChart) and thimble.chart draws with, so a view's chart and a
+# card's take one theme from one code; a page without it (an unbuilt checkout) says so where it draws a chart
+KIT_CHART_JS = "kit/chart.js"
 # the order new values take the label palette's places, which the kit's Color by reads as window.__thimbleLabelOrder
 # (the frontend imports the same file; kernel_thimble.LABEL_ORDER is the server's)
 LABEL_ORDER_JSON = Path(__file__).with_name("label_order.json")
@@ -3206,12 +3213,21 @@ def _style_text(css: str) -> str:
     return re.sub(r"</(style)", r"<\\/\1", css, flags=re.I)
 
 
+def _kit_chart() -> str:
+    """The canvas's chart drawing for thimble.chart (KIT_CHART_JS in the built UI), '' when the UI is not built."""
+    try:
+        return (Path(config.FRONTEND_DIST) / KIT_CHART_JS).read_text("utf-8")
+    except OSError:
+        return ""
+
+
 def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool = False,
                    derived: list[dict[str, str]] | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
     (viewer_bridge.js), the order new values take the label palette (label_order.json, for Color by), the kit's Color by
-    control (viewer_colour.js), its row controls, side panel and transcript (viewer_controls.js, viewer_side.js,
-    viewer_transcript.js) and its time range selector (viewer_range.js),
+    control (viewer_colour.js), its row controls, side panel, transcript, record viewer and charts (viewer_controls.js,
+    viewer_side.js, viewer_transcript.js, viewer_record.js, viewer_chart.js, with the canvas's chart drawing,
+    KIT_CHART_JS) and its time range selector (viewer_range.js),
     thimble's parts (viewer_kit.css, viewer_parts.css), the vendored
     libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
@@ -3240,6 +3256,9 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
             f"<script>{_script_text(CONTROLS_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(SIDE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(TRANSCRIPT_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(RECORD_JS.read_text('utf-8'))}</script>",
+            *([f"<script>{_script_text(drawing)}</script>"] if (drawing := _kit_chart()) else []),
+            f"<script>{_script_text(CHART_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(RANGE_JS.read_text('utf-8'))}</script>",
             f"<style>{KIT_CSS.read_text('utf-8')}</style>",
             f"<style>{_style_text(PARTS_CSS.read_text('utf-8'))}</style>"]
@@ -4543,12 +4562,12 @@ def purple_note(html: str) -> str:
 
 # thimble's parts as a view's styles may touch them: the frame styles .chip, .btn, .seg, .field, the record card, the
 # Color by control and the time range selector (viewer_kit.css), Filter by, Rows, the lanes, the key, the divider, the
-# side panel and the transcript (viewer_parts.css), and a view lays them out but does not restyle them or draw chips of
-# its own
+# side panel, the transcript, the record viewer and the charts (viewer_parts.css), and a view lays them out but does not
+# restyle them or draw chips of its own
 _STYLE_RE = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.S | re.I)
 _CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
 _KIT_PART_RE = re.compile(r"\.(?:chip|btn|seg|field|thimble-(?:colour|range|axis|def|peek|reset|tip|filter|rows|ctl|key|lanes?|"
-                          r"divider|side|transcript|turn|card))(?:-[\w-]+)?(?![\w-])")
+                          r"divider|side|transcript|turn|card|record|chart))(?:-[\w-]+)?(?![\w-])")
 _CLASS_RE = re.compile(r"\.(-?[_a-zA-Z][\w-]*)")
 # what a part looks like, which the kit sets: its edge, fill, corners, colours, type and height. Its width, margins,
 # padding, flex and place are the page's layout.
@@ -5307,8 +5326,8 @@ async def card_media_route(c: str, path: str) -> FileResponse:
     return FileResponse(f, media_type=media_type, headers=MEDIA_HEADERS)
 
 
-# A fetch the view kit sends (viewer_colour.js), {"$thimble": <what>, ...}, which thimble answers itself rather than the
-# view's reader: "label", a label's definition for Color by's menu.
+# A fetch the view kit sends, {"$thimble": <what>, ...}, which thimble answers itself rather than the view's reader:
+# "label", a label's definition for Color by's menu (viewer_colour.js); "chart", a chart's spec (viewer_chart.js).
 KIT_QUERY = "$thimble"
 _MEANING_SPLIT = re.compile(r"(?<=[.;?!])\s+|\n+")
 
@@ -5357,6 +5376,37 @@ def label_definition(c: str, concept_id: str) -> dict[str, Any] | None:
                         "meaning": meant.get(cl["name"], "")} for cl in (k.get("classes") or [])]}
 
 
+def chart_answer(c: str, query: dict[str, Any]) -> dict[str, Any]:
+    """The view kit's chart (viewer_chart.js thimble.chart) as a card's would draw it: the Vega-Lite spec of `rows`, a
+    list of objects whose keys come in the kind's order as a DataFrame's columns do, built by the code a card's
+    thimble.chart runs (kernel_thimble.chart_spec), so the two take the same kinds, data and options and draw the same
+    spec. {spec, n} and, when `options` names a label of workspace `c`, `label`, its classes as [[value, colour
+    index]]; {error} with the line a card's chart fails with."""
+    import pandas as pd  # noqa: PLC0415
+
+    from . import kernel_thimble  # noqa: PLC0415
+
+    rows, options = query.get("rows"), query.get("options")
+    options = {} if options is None else options
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        return {"error": "thimble.chart takes its data as a list of rows, each an object whose keys come in the kind's "
+                         "order"}
+    if not isinstance(options, dict):
+        return {"error": "thimble.chart takes its options as an object"}
+    labelled = options.get("label") is not None
+    try:
+        ws = config.workspace_dir(c) if labelled else None
+        spec, n = kernel_thimble.chart_spec(query.get("kind"), pd.DataFrame.from_records(rows), options, ws=ws)
+        label = kernel_thimble._find(options["label"], ws)["classes"] if labelled else None
+    except (ValueError, TypeError) as e:
+        return {"error": str(e)}
+    except KeyError as e:
+        return {"error": str(e.args[0]) if e.args else "thimble.chart: no such label"}
+    except HTTPException as e:
+        return {"error": f"thimble.chart: {e.detail}"}
+    return {"spec": spec, "n": n, **({"label": label} if label is not None else {})}
+
+
 def kit_answer(c: str, query: Any) -> tuple[bool, Any]:
     """(True, the answer) for a fetch the view kit sent ({KIT_QUERY: ...}), which never reaches the reader; (False, None)
     for any other query."""
@@ -5364,6 +5414,8 @@ def kit_answer(c: str, query: Any) -> tuple[bool, Any]:
         return False, None
     if query.get(KIT_QUERY) == "label" and isinstance(query.get("id"), str):
         return True, label_definition(c, query["id"])
+    if query.get(KIT_QUERY) == "chart":
+        return True, chart_answer(c, query)
     return True, None
 
 
