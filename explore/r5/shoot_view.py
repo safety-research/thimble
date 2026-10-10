@@ -49,6 +49,11 @@ CAPTURE = (("overview", "first-load.jpg", None), ("hook-color", "hooks/color-by.
            ("hook-filter", "hooks/filter-by.jpg", "@hook:filter"), ("hook-rows", "hooks/rows.jpg", "@hook:rows"),
            ("hook-range", "hooks/time-range.jpg", "@hook:range"), ("record", "hooks/record.jpg", "@record"))
 KEY = ("controls", "text_nodes", "words")
+# The first settle (view_shot.mjs: quiet QUIET_MS after the last fetch is answered) can end while a page still draws
+# what it fetched in steps, so the first load was pictured as "Loading…" (round 5's first smoke runs: p1's Activity
+# Timeline on collusion-wiki). Each state waits FIRST_WAIT_MS more and settles again before it is pictured.
+FIRST_SETTLE = "    await settle(Date.now(), MIN_MS)\n"
+FIRST_WAIT_MS = 3000
 SKIP = shutil.ignore_patterns("__pycache__", "cache", "*.lock")
 
 
@@ -64,6 +69,11 @@ def metrics_script(tree: Path, out: Path) -> tuple[Path, list[str]]:
                           + (HERE / "hook_click.js").read_text("utf-8"), 1)
     else:
         notes.append("findControl changed: the '@record' and '@hook:' actions are unavailable")
+    if FIRST_SETTLE in src:
+        src = src.replace(FIRST_SETTLE, FIRST_SETTLE + f"    await page.waitForTimeout({FIRST_WAIT_MS})\n"
+                          "    await settle(Date.now(), QUIET_MS)\n", 1)
+    else:
+        notes.append("the first settle changed: no extra wait before the first load is pictured")
     if RESULT_AT in src:
         src = src.replace(RESULT_AT, RESULT_AT + "\n      first_load: await frame.evaluate(firstLoad, { sel: CONTROLS })"
                           ".catch((e) => ({ error: String(e) })),\n      clicked: await frame.evaluate(() => "
