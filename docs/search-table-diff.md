@@ -97,7 +97,8 @@ stays at the top and hairline rows, one line each with a cell's overflow cut by 
   thimble keeps the sort per view, and Reset puts back the one it opens with.
 - Each row is a record: its `data-anchor` is the row's `ref`. A label marks it, a ⌘-click asks about it, and
   `table.reveal(ref)` scrolls a cited row to the middle and highlights it for a moment. The view checks count every row
-  the table holds as shown, since it anchors each row it draws.
+  the table holds as shown, since it anchors each row it draws. Its time in the first column of times is its `data-t`,
+  so a timeline over the table that `follow`s it tints the rows in view ([rows-and-filters.md](rows-and-filters.md)).
 - With the page's Color by, a row's value takes the bar on its left edge, the chips count every row (not only those
   drawn) while a field is the color, and the strip shows every row's color, scrolled to or not. The table draws its
   rows again when Color by changes. `colour: false` gives it no bars and a plain strip.

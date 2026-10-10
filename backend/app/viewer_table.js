@@ -20,7 +20,8 @@
 //   table.draw(rows)                        new rows, such as after a fetch; table.draw() after Filter by changed
 //
 // Each row is a record: its data-anchor is its ref, so a label marks it, a ⌘-click asks about it and a citation reveals
-// it (table.reveal(ref)), and with the page's Color by its value's colour is the bar on its left edge; the list's strip
+// it (table.reveal(ref)), and its time in the first column of times is its data-t, so the lanes tint the rows in view
+// (thimble.timeline's `follow`); with the page's Color by its value's colour is the bar on its left edge; the list's strip
 // shows the colours of every row, scrolled to or not, and the chips count the rows. A click or Enter opens a row in the
 // side panel (`details`, by default its columns), ↑ and ↓ move the chosen row, which an open side panel follows.
 // thimble keeps the sort per view, and Reset puts back the one it opens with. A table too narrow for its columns, such
@@ -127,6 +128,8 @@
       if (!(typeof cc.width === 'number' && cc.width > 0)) this.main = ci
     }
     if (this.main < 0) this.main = firstText
+    this.timeCol = null // the first column of times, whose value is a row's data-t
+    for (var tc = 0; tc < this.columns.length && !this.timeCol; tc++) if (this.columns[tc].type === 'time') this.timeCol = this.columns[tc]
     this.drawnCols = this.columns // the columns drawn, those that fit the table's width
     this.all = Array.isArray(opts.rows) ? opts.rows : []
     this.initial = this.sortOf(opts.sort)
@@ -677,19 +680,33 @@
     if (!add.length) return
     var tmp = document.createElement('div')
     tmp.innerHTML = html
+    // the rows in the page in their order, so a part that reads them in order, such as the lanes' tint of the rows in
+    // view (`follow`), reads them as they stand: each before the first row drawn below it
+    var drawn = this.drawn
     for (var j = 0; j < add.length; j++) {
       var el = tmp.firstChild
-      this.drawn.set(add[j], el)
-      this.body.appendChild(el)
+      var below = null
+      var at = Infinity
+      drawn.forEach(function (e, k) {
+        if (k > add[j] && k < at) {
+          at = k
+          below = e
+        }
+      })
+      drawn.set(add[j], el)
+      this.body.insertBefore(el, below)
     }
   }
   Table.prototype.rowHtml = function (i) {
     var r = this.shown[i]
     var ref = this.refOf(r)
     var self = this
+    // its time, from the first column of times, so the lanes tint the rows in view (`follow`)
+    var t = this.timeCol ? this.value(this.timeCol, r) : null
     return (
       '<div class="thimble-table-row' + (this.same(r, this.chosen) ? ' active' : '') + '" role="row" data-thimble-row="' + i + '"' +
-      (ref != null ? ' data-anchor="' + esc(ref) + '"' : '') + this.bars.attr(r) + ' style="top:' + i * this.rowH + 'px">' +
+      (ref != null ? ' data-anchor="' + esc(ref) + '"' : '') + (typeof t === 'number' && isFinite(t) ? ' data-t="' + seconds(t) + '"' : '') +
+      this.bars.attr(r) + ' style="top:' + i * this.rowH + 'px">' +
       this.drawnCols
         .map(function (col) {
           return '<div class="thimble-table-td thimble-table-' + col.type + '" role="gridcell">' + self.cell(col, r) + '</div>'

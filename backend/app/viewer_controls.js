@@ -1644,8 +1644,9 @@
     this.spanEl.style.width = b - a + 'px'
     this.spanEl.style.height = this.body.scrollHeight + 'px'
   }
-  // the list's rows that carry data-t and stand in its box: their first and last times, told as the list scrolls,
-  // resizes or is drawn again
+  // the list's rows that carry data-t and stand in its box: the earliest and latest of their times, told as the list
+  // scrolls, resizes or is drawn again; the rows are in the page in the order they stand, though not in time order (a
+  // table sorted by another column)
   Lanes.prototype.follow = function (list) {
     var box = el(list)
     if (!box) return
@@ -1675,9 +1676,17 @@
         else hi = md - 1
       }
       var last = lo
-      var t0 = Number(rows[first].getAttribute('data-t'))
-      var t1 = Number(rows[last].getAttribute('data-t'))
-      if (!isFinite(t0) || !isFinite(t1) || rows[first].getBoundingClientRect().top >= bottom) return self.visible(null)
+      if (rows[first].getBoundingClientRect().top >= bottom) return self.visible(null)
+      var t0 = Infinity
+      var t1 = -Infinity
+      for (var i = first; i <= last; i++) {
+        var v = rows[i].getAttribute('data-t')
+        var t = v ? Number(v) : NaN
+        if (!isFinite(t)) continue
+        if (t < t0) t0 = t
+        if (t > t1) t1 = t
+      }
+      if (!isFinite(t0)) return self.visible(null)
       self.visible(t0, t1)
     }
     var soon = function () {

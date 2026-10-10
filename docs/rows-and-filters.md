@@ -168,7 +168,7 @@ tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
 | `problem(item)` | whether a record failed: its mark is underlined in the problem red (the key's "failed") |
 | `words` | the key's words: `{band, problem}` |
 | `keyMount` | where the key goes; at the lanes' top by default, or with no range beside the axis, under it where it has no room there |
-| `follow` | the detail list, whose rows carry `data-t`: the rows in view are a light tint across the lanes |
+| `follow` | the detail list, whose rows carry `data-t`, as the table's, the transcript's and the messages' do: the rows in view, from the earliest of their times to the latest, are a light tint across the lanes |
 | `density` | a flag, or a function the page answers at each draw: each lane as bars on the scale's bins in place of marks (an Events \| Density choice) |
 | `anchor(lane)` | a lane's `data-anchor`, such as a session's unit |
 | `onPick(lane)`, `onMark(item)` | a lane's name clicked, which marks it chosen; a mark clicked |

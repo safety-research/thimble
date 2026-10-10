@@ -222,6 +222,64 @@ window.table = thimble.table({ mount: '#list', rows: Array.from({ length: 200 },
   })
 })
 
+describe('the table under the lanes', () => {
+  test('its rows carry their times in the order they stand, so the lanes tint the rows in view as it scrolls, sorted by time or not', async () => {
+    const doc = page(`<div id="lanes" style="width:800px"></div><div id="list" style="height:300px"></div>
+<script>
+const T0 = Date.UTC(2026, 4, 16) / 1000
+window.events = Array.from({ length: 2000 }, (_, i) => ({ ref: 'e.jsonl#L' + (i + 1), t: T0 + i * 60, source: ['alert', 'chat', 'deploy'][i % 3], text: 'event ' + i }))
+window.lanes = thimble.timeline({ mount: '#lanes', rows: 'source', follow: '#list' })
+window.lanes.draw(events)
+window.table = thimble.table({ mount: '#list', rows: events, sort: { by: 't', desc: true },
+  columns: [{ name: 't', title: 'Time', type: 'time' }, { name: 'source', title: 'Source', width: 90 }, { name: 'text', title: 'Text' }] })
+</script>`)
+    const { page: p, frame } = await framed(doc)
+    // the rows drawn, in the page's order: their places among the rows and their times; and the times of those in view
+    const state = () =>
+      frame().evaluate(() => {
+        const box = document.getElementById('list')!.getBoundingClientRect()
+        const rows = [...document.querySelectorAll('#list .thimble-table-row')] as HTMLElement[]
+        const seen = rows.filter((r) => r.getBoundingClientRect().bottom > box.top && r.getBoundingClientRect().top < box.bottom).map((r) => +r.dataset.t!)
+        const span = document.querySelector('.thimble-lanes-span') as HTMLElement
+        const sc = (window as any).lanes.scale
+        return {
+          order: rows.map((r) => +r.dataset.thimbleRow!),
+          timed: rows.every((r) => r.dataset.t === String((window as any).table.rows[+r.dataset.thimbleRow!].t)),
+          shown: span.style.display,
+          span: [parseFloat(span.style.left), parseFloat(span.style.left) + parseFloat(span.style.width)],
+          want: [sc.x(Math.min(...seen)), sc.x(Math.max(...seen))],
+          names: parseFloat(getComputedStyle(document.getElementById('lanes')!).getPropertyValue('--thimble-names')) || 0,
+        }
+      })
+    const tinted = (s: Awaited<ReturnType<typeof state>>) => Math.abs(s.span[0] - s.names - s.want[0]) <= 2.5 && Math.abs(s.span[1] - s.names - s.want[1]) <= 2.5
+    const ordered = (s: Awaited<ReturnType<typeof state>>) => s.order.every((k, i) => !i || k > s.order[i - 1])
+    let s = await state()
+    assert.equal(s.timed, true)
+    assert.equal(s.shown, 'block')
+    assert.ok(tinted(s), JSON.stringify(s))
+    // to the middle, then back up a little, which draws rows above those kept: still in the order they stand
+    await frame().evaluate(async () => {
+      const list = document.getElementById('list')!
+      list.scrollTop = 28 * 1000
+      await new Promise((r) => setTimeout(r, 120))
+      list.scrollTop -= 28 * 20
+      await new Promise((r) => setTimeout(r, 120))
+    })
+    s = await state()
+    assert.ok(ordered(s), JSON.stringify(s.order))
+    assert.ok(tinted(s), JSON.stringify(s))
+    // sorted by the source: the tint spans the earliest and the latest of the rows in view
+    await frame().evaluate(async () => {
+      ;(document.querySelector('[data-col="source"]') as HTMLElement).click()
+      await new Promise((r) => setTimeout(r, 120))
+    })
+    s = await state()
+    assert.ok(ordered(s), JSON.stringify(s.order))
+    assert.ok(tinted(s), JSON.stringify(s))
+    await p.close()
+  })
+})
+
 // A forge's pull requests, five columns: their times share a year and have seconds
 const PULLS = (columns: object[], pane = '') =>
   page(`<div class="top"><span id="search"></span><span id="colour"></span></div><div id="body" style="${pane}"><div id="list"></div></div>
