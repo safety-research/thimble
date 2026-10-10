@@ -81,13 +81,26 @@ def test_a_view_s_chart_is_the_spec_a_card_s_chart_shows_for_the_same_rows(kit_w
     assert got == {"spec": card_spec(kind, pd.DataFrame(rows), **options), "n": len(rows)}
 
 
+@pytest.mark.parametrize(("kind", "options"), [("density", {}), ("ecdf", {}), ("histogram", {"panels": True}),
+                                                ("range", {}), ("scatter", {"fit": "linear"})])
+def test_a_view_s_chart_takes_the_density_ecdf_and_range_kinds_panels_and_fit_as_a_card_s_does(kit_ws, kind, options):
+    """The kinds and options thimble.chart gained after the view kit's chart came from the same code, so a view draws
+    them as a card does."""
+    values = [{"posts": float(p), "agent": f"agent-{i % 3 + 1}"} for i, p in enumerate((3, 4, 9, 5, 7, 2, 8, 6, 4, 5, 3, 9))]
+    rows = {"density": values, "ecdf": values, "histogram": values,
+            "range": [{"agent": f"agent-{i}", "before": float(i), "after": float(i * 2 + 1)} for i in range(1, 5)],
+            "scatter": [{"day": float(i), "posts": float(i * 2 + i % 3), "agent": f"agent-{i % 2 + 1}"} for i in range(12)]}[kind]
+    got = chart(rows, kind, **options)
+    assert got == {"spec": card_spec(kind, pd.DataFrame(rows), **options), "n": len(rows)}
+
+
 def test_a_wrong_chart_fails_with_the_words_a_card_s_chart_fails_with(kit_ws):
     with pytest.raises(ValueError) as card:
         kt.chart("bar", pd.DataFrame([{"agent": "a"}]))
     assert chart([{"agent": "a"}]) == {"error": str(card.value)}
     assert chart(ROWS, "pie") == {"error": "thimble.chart: no chart kind 'pie'; the kinds are "
                                   + "; ".join(f"{k} {kt._shape(k)}" for k in kt.CHARTS)}
-    assert chart(ROWS, step=2)["error"] == "thimble.chart('bar') takes the options sort, stack, label, marks, interval, not 'step'"
+    assert chart(ROWS, step=2)["error"] == "thimble.chart('bar') takes the options sort, stack, label, marks, interval, panels, not 'step'"
     assert "a list of rows" in chart({"agent": "a"})["error"]
     assert "a list of rows" in chart(["agent"])["error"]
     assert "no label named 'nope'" in chart([{"activity": "money", "n": 1}], label="nope")["error"]
