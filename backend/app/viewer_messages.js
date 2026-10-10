@@ -576,7 +576,7 @@
       if (row.line) out.push('<div class="thimble-msg-day" data-thimble-chrome><span>' + esc(row.line) + '</span></div>')
       out.push(self.rowHtml(row, i))
     })
-    if (!this.rows.length) out.push('<div class="thimble-msg-none">' + esc(o2.empty || 'No messages') + '</div>')
+    if (!this.rows.length) out.push('<div class="thimble-msg-none" data-thimble-chrome>' + esc(o2.empty || 'No messages') + '</div>')
     this.mount.classList.toggle('thimble-msg-headed', o2.title != null)
     this.mount.innerHTML = out.join('')
     this.bars.watch(this.mount, this.restampAll)

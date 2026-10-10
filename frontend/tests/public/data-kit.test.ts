@@ -552,6 +552,21 @@ describe('the search', () => {
     await wait(60)
     expect(w.search.count).toBe(5)
   })
+
+  test("the line an empty transcript or thread shows is the part's own wording, which the search never finds", async () => {
+    await load(`<div class="top"><span id="search"></span></div><div id="body"><div id="turns"></div><div id="thread"></div></div>`)
+    const w = win()
+    w.eval(`
+      window.search = thimble.search({ mount: '#search', in: '#body' })
+      thimble.transcript({ mount: '#turns' }).draw([], { empty: 'No turn holds the search or passes the filters' })
+      thimble.messages({ mount: '#thread' }).draw([])
+    `)
+    expect(texts('#body > div')).toEqual(['No turn holds the search or passes the filters', 'No messages'])
+    await type('passes the filters')
+    expect(texts('.thimble-search-count')).toEqual(['No results'])
+    await type('no messages')
+    expect(texts('.thimble-search-count')).toEqual(['No results'])
+  })
 })
 
 const T0 = Date.UTC(2026, 3, 1, 9) / 1000
