@@ -385,8 +385,9 @@ function layoutCounts() {
     if (![...el.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim())) continue
     const cs = getComputedStyle(el)
     if (!['hidden', 'clip'].includes(cs.overflowX) || cs.textOverflow === 'ellipsis') continue
-    // a box drawn 0 wide hides its text on purpose, as the kit's table hides the year a narrow column of times leaves out
-    if (el.clientWidth === 0 || el.scrollWidth <= el.clientWidth + 2 || !visible(el)) continue
+    // the kit's table draws the year or the seconds a narrow column of times leaves out 0 wide on purpose; any other box
+    // squeezed to nothing still cuts its text off
+    if (el.classList.contains('thimble-table-cut') || el.scrollWidth <= el.clientWidth + 2 || !visible(el)) continue
     cut++
     if (cuts.length < EXAMPLES) cuts.push(el.textContent.replace(/\s+/g, ' ').trim().slice(0, 40))
   }
