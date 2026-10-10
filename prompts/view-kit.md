@@ -30,10 +30,11 @@ const rows = thimble.rows({ mount: '#rows', fields: [{ name: 'team', title: 'Tea
 for (const g of rows.groups(shown)) drawGroup(g.guide + g.name, g.items)   // g.guide is its tree guide, such as '├ '
 ```
 
-The search, in the top row. It finds text in the records, folded text included, and ticks the matches on the strip:
+The search, in the top row. It finds text in every part on the screen, folded text included, and ticks the matches on each list's strip. A page that keeps only the matching records says which it kept:
 
 ```js
-const search = thimble.search({ mount: '#search', in: '#list', onChange: draw })   // search.text, search.has(text)
+const search = thimble.search({ mount: '#search', in: '#body', onChange: draw })   // search.text, search.has(text)
+search.kept(shown.map((r) => r.ref))                       // after drawing the records kept for search.text
 ```
 
 The time range, for a chart on a time axis, and that chart's axis:
