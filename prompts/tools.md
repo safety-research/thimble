@@ -1351,6 +1351,12 @@ The analyst said they know these. Do not raise them again.
 
 {titles}
 
+## check-replaces
+
+When you finish, your comments replace the open comments this check left before on these passages, listed below. Leave again each one that still holds.
+
+{comments}
+
 ## resolve_comment-done
 
 {action} comment {comment} on {ref} · {who} · {text}

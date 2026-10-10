@@ -168,6 +168,30 @@ async def test_a_run_s_end_supersedes_its_covered_comments_and_records_what_it_s
     assert cm["status"] != "open" and cm["superseded_by"] == second.run
 
 
+async def test_a_run_s_task_lists_its_check_s_open_comments_its_end_replaces(doc, bridge):
+    """Live check 0.7.0 (on the cards): a run read its check's open comments as said, left none of them again, and its
+    end superseded them. A run's task lists them as the ones it replaces; another check's comments are not listed."""
+    await _write()
+    first = await _started("judgment")
+    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
+    sid = report_types.all_sentences(d)[0]["id"]
+    sf.add_caller(config.workspace_dir(CORPUS), "toolu_r1", first.agent, "thimble:check")
+    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this.",
+                                                   "details": "The log has no account field."},
+                           session=checks.session_key("judgment", "report"), tool_use_id="toolu_r1")
+    assert not res.is_error, res.text
+    subagents.run_ended(CORPUS, first.agent, "done", "Commented on 1 passage.", source="handback")
+    replaces = tools.hint("check-replaces", comments="").strip()
+    task_of = lambda cid: (checks.work_dir(CORPUS, cid, "report") / checks.TASK_FILE).read_text()  # noqa: E731
+    await _started("judgment")
+    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
+    [cm] = [c for c in d.get("comments") or [] if c.get("check") == "judgment"]
+    listed = task_of("judgment").split(replaces, 1)[1]
+    assert f"- comment {cm['id']} on report:report#{sid} · No card shows this. — The log has no account field." in listed
+    await _started("unverified")
+    assert replaces not in task_of("unverified"), "a run replaces only its own check's comments"
+
+
 async def test_a_run_main_started_that_ran_as_its_subagent_ends_with_one_line_its_hand_back(doc, bridge, monkeypatch):
     """Live check plan-cards: main wrote two lines for each check it started, one for thimble's `checked` event and one
     for the check's hand-back. A run that ran as main's subagent posts no `checked`, since its hand-back reaches main

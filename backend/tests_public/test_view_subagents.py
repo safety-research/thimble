@@ -168,6 +168,24 @@ async def test_main_s_propose_view_gives_the_exact_agent_call_its_hook_lets_thro
     assert _prop(slug)["status"] == "building" and (CORPUS, slug) in dev._view_runs
 
 
+async def test_a_design_the_analyst_asked_main_for_reaches_the_builder_and_the_reviewer_word_for_word(board, bridge,
+                                                                                                     gates, hints):
+    # the reviewer keeps a visual design the proposal asks for (prompts/view-review.md), so main's propose_view fields,
+    # which carry the analyst's request, reach the builder's task and the reviewer's task whole
+    why = "Each post as the board drew it, in the old forum's look: serif titles, blue links, quoted replies indented."
+    overview = "The thread list in a dense grid in the style of a spreadsheet, one row per post, with no gaps."
+    res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "why": why, "claims": ["board.jsonl"],
+                                                    "unit": "a post", "overview": overview, "zoom": "a post",
+                                                    "filter": "labels", "details": "the body"},
+                           tool_use_id="toolu_main2")
+    assert not res.is_error, res.text
+    builder = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])["prompt"]
+    slug = next(p["slug"] for p in views.list_proposals(CORPUS))
+    reviewer = view_review.task(CORPUS, _prop(slug))
+    for prompt in (builder, reviewer):
+        assert why in prompt and overview in prompt
+
+
 async def test_main_s_message_to_a_view_s_build_thread_gives_the_exact_agent_call(board, bridge, gates, hints):
     """/thimble:ask typed into a view's build thread (message_thread, main's tool) is a typed change, as main's
     file_dev_ticket on a view is: main's exact Agent call starts its builder, so auto mode judges the start, and the

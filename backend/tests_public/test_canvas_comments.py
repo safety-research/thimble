@@ -289,6 +289,42 @@ async def test_a_run_s_end_supersedes_its_check_s_comments_on_the_cards_it_cover
     assert (gone["status"], gone["resolution"], gone["superseded_by"]) == ("dismissed", "superseded", second.run)
 
 
+async def test_a_run_s_task_lists_the_open_comments_its_end_replaces_so_it_leaves_again_those_that_hold(board, bridge):
+    """Live check 0.7.0: the analyst asked main to run You should know on unchanged cards. The task showed the check's
+    six open comments among the cards, the run took them as said and left one, and its end superseded the six. A run's
+    task lists its check's open comments on what it covers as the ones its end replaces, and no others."""
+    a = _card("Which condition merged more PRs?", takeaway="Managed merged more.")
+    b = _card("Did any agent still fail to build?")
+    first = await _turn_ended()
+    await _comment(first, f"card:{a}", "The counts aren't comparable.", "toolu_r1", details="Managed ran 6 h, emergent 8 h.")
+    await _comment(first, f"card:{b}", "Six agents could not build.", "toolu_r2")
+    subagents.run_ended(CORPUS, first.agent, "done", "Two.", source="handback")
+    await _until(lambda: _run()["status"] == "done", "the run never ended")
+    replaces = tools.hint("check-replaces", comments="").strip()
+
+    def listed() -> str:
+        task = (checks.work_dir(CORPUS, YSK, checks.CANVAS) / checks.TASK_FILE).read_text()
+        assert task.count(replaces) == 1, "the task says once which comments the run replaces"
+        return task.split(replaces, 1)[1]
+
+    [mine] = canvas_comments.open_comments(CORPUS, a)
+    notebook.edit_cell(CORPUS, a, title="Which condition merged more PRs, per agent?", by="model")
+    second = await _turn_ended()
+    assert _run()["covered"] == [f"card:{a}"]
+    got = listed()
+    assert f"- comment {mine['id']} on card:{a} · You should know · The counts aren't comparable. — Managed ran 6 h, emergent 8 h." in got
+    assert "Six agents could not build." not in got, "a card the run does not cover keeps its comment, unlisted"
+    subagents.run_ended(CORPUS, second.agent, "done", "Nothing new.", source="handback")
+    await _until(lambda: _run()["status"] == "done", "the run never ended")
+    rec = await checks.start_run(CORPUS, YSK, checks.CANVAS, force=True, route="click")  # Run, on unchanged cards
+    assert rec is not None and {f"card:{a}", f"card:{b}"} <= set(rec["covered"])
+    act = checks._active[(CORPUS, YSK, checks.CANVAS)]
+    await _until(lambda: act.agent or act.ended, "the run's agent never started")
+    got = listed()
+    assert "Six agents could not build." in got and "The counts aren't comparable." not in got, \
+        "the open comment is listed, the one the last run superseded is not"
+
+
 async def test_a_deleted_card_s_comments_are_not_served(board, bridge):
     a = _card("A card")
     act = await _turn_ended()
