@@ -88,7 +88,7 @@ AUTO_MODE, NO_CALL, LIMIT, NOT_LAUNCHED, HOOK, EARLIER, NO_MODULE, ERROR = (
 HANDBACK_WAIT_S = 5.0  # a turn's end with no running child ends the run once no hand-back follows within this
 # in auto mode Claude Code makes an agent that ended with text call SubagentHandback, a model step later
 AUTO_HANDBACK_WAIT_S = 30.0
-CALLER_WAIT_S = 2.0  # how long caller() waits for the caller hook's line before the mirror's transcript search
+CALLER_WAIT_S = 2.0  # how long caller() waits for a transcript to hold a call the caller hook wrote no line for
 STOPPED_QUIT = "quit"  # `stopped_by` of a chat that main's quit stopped
 STOPPED_ANALYST = "analyst"
 STOPPED_REFUSED = "refused"
@@ -639,7 +639,7 @@ async def typed_caller(c: str, call: str | None) -> str | None:
         return None
     line = files.find_caller(ws(c), call)
     agent_id = str((line or {}).get("agent_id") or "")
-    if not agent_id:
+    if line is None:  # a line with no agent is main's own call (caller)
         held = await session.call_holder(c, call, CALLER_WAIT_S)
         agent_id = str(held.agent_id or "") if isinstance(held, session.Sub) else ""
     if not agent_id or agent(c, agent_id) is not None:
@@ -1481,14 +1481,17 @@ async def caller(c: str, tool_use_id: str | None) -> Caller | None:
     mirror's search of the transcripts (session.call_holder), which waits up to CALLER_WAIT_S for one to hold the call.
     None for main's own call and for a call of an agent that is not thimble's.
 
-    The caller hook runs, and writes its line, before Claude Code makes a subagent's call, and main's own calls get no
-    line. So a missing line is not waited for: main's transcript holds main's call as soon as the call comes, and each
-    of main's calls (add_card among them) runs at once."""
+    The caller hook runs, and writes its line, before Claude Code makes the call: a subagent's line names the agent, and
+    main's own names none. Main's line is what lets each of main's calls (add_card among them) run at once, since Claude
+    Code writes a call to main's transcript only once the call has returned (2.1.295): the transcripts are searched only
+    for a call with no line, such as one a hook of an older thimble made."""
     from . import session  # noqa: PLC0415
 
     if not tool_use_id:
         return None
     line = files.find_caller(ws(c), tool_use_id)
+    if line is not None and not line.get("agent_id"):  # main's own call
+        return None
     if line is None:
         held = await session.call_holder(c, tool_use_id, CALLER_WAIT_S)
         line = files.find_caller(ws(c), tool_use_id)  # a line written meanwhile names the agent best
