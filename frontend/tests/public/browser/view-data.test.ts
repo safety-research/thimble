@@ -736,6 +736,34 @@ describe('the search over a long transcript', () => {
     assert.ok(Date.now() - t0 < FIRST_MS, `the search took ${Date.now() - t0} ms`)
     await p.close()
   })
+
+  test("what the page's styles hide is not found, in its own rows that draw as they come into view (content-visibility) too, as a class, a mode of the page's or a new width shows or hides it", async () => {
+    const { page: p, frame } = await framed(
+      page(`<style>.row{content-visibility:auto;contain-intrinsic-size:auto 40px;padding:6px} .row .body{display:none} .row.open .body{display:block} .narrow .num{display:none}
+.compact .row .body{display:none} #list{container-type:inline-size} @container (max-width: 500px) {.num{display:none}}</style>
+<div class="top"><span id="search"></span></div><div id="list" class="narrow" style="height:600px;overflow-y:auto">
+${Array.from({ length: 300 }, (_, i) => `<div class="row${i === 3 ? ' open' : ''}" data-anchor="m.jsonl#L${i + 1}"><span>Subject ${i}</span> <span class="num">gale ${i}</span><div class="body">a gale in the body ${i}</div></div>`).join('')}</div>
+<script>window.search = thimble.search({ mount: '#search', in: '#list' })</script>`),
+    )
+    const count = (fn: string) => frame().evaluate(async (fn) => {
+      const w = window as any
+      new Function(fn)()
+      await new Promise((r) => setTimeout(r, 50))
+      w.search.set('gale')
+      return w.search.count
+    }, fn)
+    // the open row's body alone shows its gale
+    assert.equal(await count(''), 1)
+    // a row far down opened by its class, then the cells the list's class hid shown
+    assert.equal(await count(`document.querySelector('[data-anchor="m.jsonl#L250"]').classList.add('open')`), 2)
+    assert.equal(await count(`document.getElementById('list').classList.remove('narrow')`), 302)
+    // the list narrowed, which hides the cells again by a container query
+    assert.equal(await count(`document.getElementById('list').style.width = '400px'`), 2)
+    // a mode of the page's, a class on the body, that hides the rows' bodies
+    assert.equal(await count(`document.body.classList.add('compact')`), 0)
+    assert.equal(await count(`document.body.classList.remove('compact')`), 2)
+    await p.close()
+  })
 })
 
 describe('the diff', () => {

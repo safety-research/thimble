@@ -101,10 +101,12 @@
   // element around it whose content a list may leave unrendered (content-visibility), such as a turn. The kit's
   // controls and hidden elements (a fold's text apart) are left out. An element's style tells whether it shows, not its
   // boxes, which in a list that draws its rows as they come into view (content-visibility) would lay out every row; and
-  // inside a hidden fold, or inside an element whose content such a list may leave unrendered, its `hidden` attribute and
-  // its own style attribute alone tell, since reading the style of each element there would compute it: seconds over a
-  // long transcript. The search reads the page once into an index and finds in it, reading again only the elements the
-  // page changes (patch); step(ms) reads it a slice at a time, so a long page is read without holding up typing.
+  // inside a turn or a message of the kit's own lists, which such a list may leave unrendered and whose styles hide
+  // nothing in it, its `hidden` attribute and its own style attribute alone tell, since reading the style of each element
+  // there would compute it: seconds over a long transcript. A page's own rows are read by their styles, which may hide a
+  // part of a row, such as a cell a narrow layout leaves out. The search reads the page once into an index and finds in
+  // it, reading again only the elements the page changes (patch); step(ms) reads it a slice at a time, so a long page is
+  // read without holding up typing.
   function Index(root) {
     var self = this
     this.root = root
@@ -113,7 +115,7 @@
     this.last = null
     this.parent = null
     this.fold = null
-    this.light = null // the hidden fold or the element with content-visibility whose elements are read by attribute
+    this.light = null // the kit's turn or message whose elements are read by attribute
     this.cv = null // the element with content-visibility the walk is in
     if (root)
       this.walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
@@ -127,16 +129,16 @@
     if (n.matches(SKIP)) return NodeFilter.FILTER_REJECT
     if (this.light && !this.light.contains(n)) this.light = null
     if (this.cv && !this.cv.contains(n)) this.cv = null
-    if (n.hasAttribute(FOLD)) {
-      if (n.hidden && !this.light) this.light = n
-      return NodeFilter.FILTER_SKIP
-    }
+    if (n.hasAttribute(FOLD)) return NodeFilter.FILTER_SKIP
     // hidden, or hidden by the label filter (viewer_bridge.js data-thimble-drop)
     if (n.hidden || n.getAttribute(DROP) === 'hide') return NodeFilter.FILTER_REJECT
     if (this.light) return n.style.display === 'none' ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP
     var cs = getComputedStyle(n)
     if (cs.display === 'none') return NodeFilter.FILTER_REJECT
-    if (cs.contentVisibility && cs.contentVisibility !== 'visible') this.light = this.cv = n
+    if (cs.contentVisibility && cs.contentVisibility !== 'visible') {
+      this.cv = n
+      if (n.classList.contains('thimble-turn') || n.classList.contains('thimble-msg')) this.light = n
+    }
     return NodeFilter.FILTER_SKIP
   }
   // read on for about `ms` milliseconds (to the end with Infinity); true once the whole page is read
@@ -174,7 +176,7 @@
   }
   // The index brought up to date with the elements the page changed since it was read (`units`, each read again whole),
   // rather than read again whole: the runs in an element the page took away or in a unit go, and each unit's runs are
-  // read again in its place. A unit's elements are read as the whole read would reach them, from the hidden folds, the
+  // read again in its place. A unit's elements are read as the whole read would reach them, from the kit's turns, the
   // elements with content-visibility and the hidden elements around it. False when it cannot be, so the page is read
   // again whole.
   Index.prototype.patch = function (units) {
@@ -347,6 +349,7 @@
     this.reading = null // the timer of the next slice of an index read a slice at a time (prepare)
     this.waiting = false // a search waits for that index
     this.last = null // the last search of the page's text, {idx, needle, hit}: `hit` the runs that hold its needle
+    this.sized = null // the ResizeObserver of the root's width
     if (this.mount) {
       this.mount.classList.add('thimble-search-mount', 'thimble-part')
       this.mount.setAttribute('data-thimble-chrome', '')
@@ -419,6 +422,7 @@
   Search.prototype.retire = function () {
     this.dead = true
     this.observer.disconnect()
+    if (this.sized) this.sized.disconnect()
     clearTimeout(this.timer)
     this.timer = null
     clearTimeout(this.reading)
@@ -447,11 +451,28 @@
   Search.prototype.observe = function () {
     var r = this.root()
     if (r === this.observed) return
+    var self = this
     this.observer.disconnect()
+    if (this.sized) this.sized.disconnect()
     this.observed = r
+    if (!r) return
     // `hidden` too: a fold opened or closed (the diff's Show more), an element the label filter hides; and a class or a
     // style, which may show or hide an element, such as a tab
-    if (r) this.observer.observe(r, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true, attributeFilter: ['hidden', DROP, 'class', 'style'] })
+    this.observer.observe(r, { childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true, attributeFilter: ['hidden', DROP, 'class', 'style'] })
+    // and on the elements around it, whose class or style may hide a part of each record by the page's styles, such as
+    // a mode that leaves out the tool calls
+    for (var up = r.parentElement; up; up = up.parentElement) this.observer.observe(up, { attributes: true, attributeOldValue: true, attributeFilter: ['hidden', 'class', 'style'] })
+    // a new width may show or hide a part of each record by the page's styles (a media or container query, such as a
+    // narrow layout's cells): the page read again for the next search
+    if (typeof ResizeObserver === 'function') {
+      var width = null
+      this.sized = new ResizeObserver(function (es) {
+        var w = es[es.length - 1].contentRect.width
+        if (width != null && w !== width) self.stale = true
+        width = w
+      })
+      this.sized.observe(r)
+    }
   }
   // the page's changes the observer heard: any that can change what the search finds has its elements read again
   // (note), and one other than a class or a style finds the matches again in a frame
@@ -466,17 +487,15 @@
     if (again && this.needle) this.soon()
   }
   // A change the index must take: the elements it touched to be read again before the next search, or the page read
-  // again whole while it is being read, for a change of the root itself, or past UNITS elements, as when a page draws
-  // its list again
+  // again whole while it is being read, for a change of the root itself or of an element around it, or past UNITS
+  // elements, as when a page draws its list again
   Search.prototype.note = function (r) {
     if (this.stale) return
-    if (!this.idx || !this.idx.done || this.units.length > UNITS) {
+    var root = this.idx && this.idx.root
+    if (!root || !this.idx.done || this.units.length > UNITS || (r.type === 'attributes' && r.target.contains(root))) {
       this.stale = true
       return
     }
-    var root = this.idx.root
-    // the root's own class or style, such as the kit's strip on it, hides none of what it holds: the read never asks
-    if (r.type === 'attributes' && r.target === root) return
     var add = []
     if (r.type === 'childList') {
       var inline = false
