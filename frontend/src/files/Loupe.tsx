@@ -221,7 +221,8 @@ export interface Loupe {
   isOpen: () => boolean
 }
 
-const fmt = (n: number) => Math.round(n).toLocaleString('en-US')
+/** a line number as the loupe writes it: plain, as the reader writes its line numbers */
+const fmt = (n: number) => String(Math.round(n))
 const CELL_CLASS = 'loupe-cell'
 
 /** One row's element: its number, its cells and its text, in that order. */

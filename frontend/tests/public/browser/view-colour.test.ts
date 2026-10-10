@@ -192,6 +192,33 @@ describe('Colour by in a frame', () => {
     await page.close()
   })
 
+  test("the loupe writes a ref's line and a row's place plain, never with a thousands separator", async () => {
+    const { page, frame } = await framed()
+    // 2,000 rows: the first thousand at lines 12,001 to 13,000 of their file, the others with no ref, named by their place
+    await frame().evaluate(() => (window as any).colour.strip('#list', {
+      rows: Array.from({ length: 2000 }, (_, i) => (i % 2 ? 'Text only' : 'With links')),
+      refs: Array.from({ length: 2000 }, (_, i) => (i < 1000 ? 'm.jsonl#L' + (12001 + i) : null)),
+      preview: (i: number) => 'row ' + (i + 1),
+    }))
+    await page.waitForTimeout(150)
+    const box = (await frame().locator('.thimble-colour-strip').boundingBox())!
+    const at = async (f: number) => {
+      await page.mouse.move(5, 5)
+      await page.waitForTimeout(80)
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height * f)
+      await page.waitForTimeout(400)
+      return (await loupeRows(frame)).rows
+    }
+    const lines = await at(0.25)
+    assert.equal(lines.length, 17)
+    for (const r of lines) assert.equal(r.n, String(12000 + Number(r.text!.slice(4))), JSON.stringify(lines))
+    const places = await at(0.9)
+    assert.equal(places.length, 17)
+    for (const r of places) assert.equal(r.n, r.text!.slice(4), JSON.stringify(places))
+    assert.ok(places.every((r) => /^\d{4}$/.test(r.n!)), JSON.stringify(places))
+    await page.close()
+  })
+
   test("each pixel row of the scrollbar takes the one value most of its records have", async () => {
     const { page, frame } = await framed()
     // 1,000 rows, three to a pixel row: in the first half two of every three Text only, in the second two of three With links

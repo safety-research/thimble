@@ -483,7 +483,7 @@ export function recordRow(line: number, total: number, rec: LoupeRecord | null |
       cells.push(c ? { colour: c } : null)
     }
   })
-  return { num: line.toLocaleString('en-US'), cells, who: rec?.who ?? null, text: rec?.text ?? '' }
+  return { num: String(line), cells, who: rec?.who ?? null, text: rec?.text ?? '' }
 }
 
 /** ms the thumb takes to go from where a drag left it to where the reader stands */
