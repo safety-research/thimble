@@ -853,6 +853,22 @@
     }
     return '--thimble-bands:linear-gradient(to right,' + grad.join(',') + ');--thimble-bands-in:' + inner.join(',') + ';--thimble-bands-out:' + outer.join(',')
   }
+  // The width the bar or the bands take now, as --thimble-bands-w on the root (BAR for one choice, bandsW(n) for n), so
+  // that a part that keeps them in its left padding (viewer_kit.css .thimble-card) widens that padding when more come
+  // than BANDS_ROOM holds, and its text never sits under a band. In a sheet of its own, written before the elements are
+  // measured, so that they are read with the padding they will have; written once Color by first takes two choices.
+  var roomSheet = null
+  var roomW = null
+  function setRoom(w) {
+    if (w === roomW) return
+    roomW = w
+    if (!roomSheet) {
+      roomSheet = document.createElement('style')
+      roomSheet.setAttribute('data-thimble', 'bands-room')
+      ;(document.head || document.documentElement).appendChild(roomSheet)
+    }
+    roomSheet.textContent = ':root{--thimble-bands-w:' + w + 'px}'
+  }
   var DROP = '[data-thimble-drop="hide"]{display:none!important}[data-thimble-drop="dim"]{opacity:.25!important}'
   var COLOUR = /^[\w\s(),.#%-]+$/
   var SHADOW = /^[\w\s(),.#%\/-]+$/ // a computed box-shadow: colours, lengths, inset, commas between shadows
@@ -1282,6 +1298,7 @@
       bandsN = n
       measureTurn++
     }
+    if (n > 1 || roomSheet) setRoom(n > 1 ? bandsW(n) : BAR)
     var todo = [] // [element, bar colour (null for bands), what it shows, 'label' or 'colour', mark, bands or null]
     var spanned = []
     if (hasMarks() || hook) {

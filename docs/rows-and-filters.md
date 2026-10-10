@@ -1,4 +1,4 @@
-# Rows, filters, lanes, the side panel and the transcript
+# Rows, filters, lanes, cards, the side panel and the transcript
 
 Most views share one layout: the top row with the controls that act on the whole view, an overview of the records on a
 time axis, the records themselves in a list under it, and the details of the record chosen. The view kit draws each of
@@ -13,6 +13,7 @@ these parts, so a page lays them out and fills them rather than drawing its own:
 | the lanes | `thimble.lanes` | the overview: a lane per group of Rows on the range's scale |
 | the key | `thimble.key` | the series the overview draws beside Color by's, each a toggle |
 | the divider | `thimble.divider` | the bar between the overview and the list, which a drag moves |
+| the cards | `thimble.recordCard` | a record as a card or a tile, its colors Color by's bars on its edge, one per choice |
 | the side panel | `thimble.side` | a record, or a row's children, in a wide panel beside the list |
 | the transcript | `thimble.transcript` | a transcript's turns, as the File browser's Transcript mode draws them |
 
@@ -187,6 +188,46 @@ shows and `set(entries)` draws new ones. The lanes draw their own key with it.
 `thimble.divider({top, key, min})` puts a bar under `top`, the overview's box, which a drag moves: the overview takes
 the height it leaves and scrolls down inside it, never sideways, and the list under it takes the rest. ↑ and ↓ move it while it has the
 focus, a double click or Home puts it back. thimble keeps its place per view as a share of the height the two share.
+
+## The cards
+
+A record drawn as a card or a tile, such as a pull request on a board's column or a tile in a grid, is the kit's card,
+`.thimble-card`: a hairline box on the paper with a chip's corners (`var(--radius-chip)`). A card takes no color of its
+own. Color by draws its value's color as the bar on the card's left edge, as on a row, and the card's left corners go
+square under the bar, so the bar stays straight. With several Color by choices each is a straight bar of its own, side
+by side from the edge in the order of the choices and as wide and as far apart as on a row, empty where the record has
+no value of that choice or its value's color is turned off; the card's left padding holds them and widens when more
+come than it holds, so its text never sits under a bar. Draw no side stripe, colored edge or corners of the page's own
+on it: the view checks note a rule that changes its edges, fills, corners, colors or type (views.own_parts).
+`thimble.recordCard` gives a card's html, and a page that builds its own markup uses the same classes:
+
+```js
+col.innerHTML = '<div class="thimble-cards">' + prs.map((pr) => thimble.recordCard({
+  ref: pr.ref,                     // its data-anchor
+  record: pr,                      // Color by reads its value: the bar on the card's edge
+  key: '#' + pr.number,            // the head's left, in mono
+  chips: [pr.claimedBy],           // the head's right, neutral chips; or meta: text or {html}
+  title: pr.title,                 // two lines at most
+  body: pr.summary,                // three lines at most, the secondary text
+  foot: { html: dots(pr.reviews) },
+  active: pr.ref === open,         // the chosen card
+})).join('') + '</div>'
+```
+
+```html
+<div class="thimble-card thimble-card-act" data-anchor="forge.db#prs/66599" data-colour="agent-08">
+  <div class="thimble-card-head"><span class="thimble-card-key">#66599</span>
+    <span class="thimble-card-meta"><span class="chip chip-sans chip-tone-neutral"><span class="chip-text">agent-08</span></span></span></div>
+  <div class="thimble-card-title">DOC: fix url in concat docs to copy-on-write</div>
+  <div class="thimble-card-foot">13 reviews</div>
+</div>
+```
+
+Each part is text, which `recordCard` escapes, or `{html}`. `act: false` gives a card a click does nothing on, and
+`attrs` (`{name: value}`) more attributes, such as a key the page's click reads or a `class` of the page's, which joins
+the card's own. `.thimble-cards` stacks cards in a column with a gap between them, and `.thimble-cards-grid` lays them
+out as tiles at least `--thimble-tile-w` (220 px) wide. A list of records with no box is the kit's `.list-row` or
+`.table`.
 
 ## The side panel
 
