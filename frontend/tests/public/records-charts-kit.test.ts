@@ -278,6 +278,11 @@ describe('thimble.chart', () => {
     read.click()
     await win().thimble.chart('#c', 'bar', ROWS, { colour })
     expect(win().__drawn.at(-1).spec.encoding.color.scale.range).toEqual([colour.colourOf('Bash'), 'var(--label-none)'])
+    // `color` is the same option, the kit's own, which thimble is not asked for
+    const fetches = of('fetch').length
+    await win().thimble.chart('#c', 'bar', ROWS, { color: colour })
+    expect(win().__drawn.at(-1).spec.encoding.color.scale.range).toEqual([colour.colourOf('Bash'), 'var(--label-none)'])
+    expect(of('fetch').length).toBe(fetches)
     const labelled = win().thimble.chart('#c', 'bar', [{ activity: 'money', n: 2 }], { label: 'activity type' })
     await wait()
     expect(of('fetch').at(-1)!.query).toMatchObject({ options: { label: 'activity type' } })
