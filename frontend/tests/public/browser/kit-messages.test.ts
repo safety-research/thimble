@@ -371,6 +371,45 @@ describe('the messages alone', () => {
   })
 })
 
+describe("a strip's loupe over the messages", () => {
+  test('each row names the time and the author in the gray, the words in the ink, an event without its author again', async () => {
+    // 200 messages, one author after another, every fifth an event
+    const many = Array.from({ length: 200 }, (_, i) => ({ ref: `b.jsonl#L${i + 1}`, t: T0 + i * 600, author: `agent-0${i % 4}`, ...(i % 5 === 4 ? { kind: 'event', icon: 'approve', said: `approved #${i + 1}` } : { text: `message ${i + 1}` }) }))
+    const doc = page(`<div class="top"><span id="colour"></span></div><div id="msgs"></div>
+<script>
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }], strip: '#msgs' })
+window.conv = thimble.messages({ mount: '#msgs' })
+conv.draw(${JSON.stringify(many)})
+</script>`)
+    const { page: p, frame, errors } = await framed(doc)
+    await frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
+    await p.waitForTimeout(250)
+    const track = (await frame().locator('.thimble-colour-track').boundingBox())!
+    await p.mouse.move(track.x + track.width / 2, track.y + track.height * 0.4)
+    await p.waitForTimeout(400)
+    const rows = await frame().evaluate(() => {
+      const el = [...document.querySelectorAll('.thimble-colour-loupe')].find((e) => e.hasAttribute('data-open'))
+      return el ? [...el.querySelectorAll('.thimble-colour-loupe-row')].map((r) => {
+        const t = r.querySelector('.thimble-colour-loupe-t') as HTMLElement
+        const meta = [...t.querySelectorAll('.thimble-colour-loupe-m')]
+        return { n: r.querySelector('.thimble-colour-loupe-n')!.textContent, meta: meta.map((m) => m.textContent), metaInk: meta.map((m) => getComputedStyle(m).color), text: [...t.childNodes].filter((c) => c.nodeType === 3).map((c) => c.textContent).join(''), textInk: getComputedStyle(t).color }
+      }) : []
+    })
+    assert.ok(rows.length > 8, JSON.stringify(rows))
+    const gray = await frame().evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-tertiary'))
+    for (const r of rows) {
+      const i = Number(r.n) - 1
+      assert.equal(r.meta.length, 2, JSON.stringify(r))
+      assert.equal(r.meta[1], `agent-0${i % 4}`, JSON.stringify(r))
+      assert.equal(r.text, i % 5 === 4 ? `approved #${i + 1}` : `message ${i + 1}`, JSON.stringify(r))
+      assert.notEqual(r.metaInk[1], r.textInk, 'the author in the gray, the words in the ink')
+    }
+    assert.ok(gray.trim(), 'the theme names its gray')
+    assert.deepEqual(errors, [])
+    await p.close()
+  })
+})
+
 describe('any conversation', () => {
   for (const dark of [false, true]) {
     test(`a user and an assistant, its tool calls as events: the generic icon in the ink at the avatars' middle, an icon of the page's own drawn the same way, the call's output under its line (${dark ? 'dark' : 'light'})`, async () => {
