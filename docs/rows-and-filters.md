@@ -1,8 +1,6 @@
 # Rows, filters, lanes, cards, the side panel and the transcript
 
-Most views share one layout: the top row with the controls that act on the whole view, an overview of the records on a
-time axis, the records themselves in a list under it, and the details of the record chosen. The view kit draws each of
-these parts, so a page lays them out and fills them rather than drawing its own:
+The view kit draws the parts that views share, so a page uses the parts it needs rather than drawing its own:
 
 | part | call | what it is |
 |---|---|---|
@@ -40,53 +38,6 @@ inside the height it has.
 thimble keeps each part's state per view, with Color by's choice: Filter by's and Rows' choices, the values turned off,
 the series of the key turned off, the lanes folded, the divider's place and the side panel's width. Reset, at the end of
 Color by's row, turns every value and series back on and closes the side panel.
-
-## Mount them
-
-```html
-<div id="view">
-  <div class="top">
-    <input class="field" id="q" type="search" placeholder="Search">
-    <span id="filter"></span><span id="rows"></span><span id="colour"></span>
-  </div>
-  <div id="overview">
-    <div class="time"><div id="readout"></div><div id="range"></div><div id="key"></div><div id="axis"></div></div>
-    <div id="lanes"></div>
-  </div>
-  <div id="body"><div id="list"></div></div>
-</div>
-<script>
-const colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }], strip: '#list', onChange: draw })
-const filter = thimble.filterBy({ mount: '#filter', fields: [{ name: 'outcome', title: 'Outcome', values: ['ok', 'error'] }], onChange: draw })
-const range = thimble.timeRange({ mount: '#range', readout: '#readout', times, onChange: draw })
-const rows = thimble.rows({
-  mount: '#rows',
-  fields: [
-    { name: 'session', title: 'Session', nameOf: (id) => names[id], parentOf: (id) => parents[id] },   // a tree
-    { name: 'tool', title: 'Tool' },
-  ],
-  onChange: draw,
-})
-const lanes = thimble.timeline({
-  mount: '#lanes', keyMount: '#key', rows, range, names: 200,
-  end: (call) => call.t + call.duration,                 // a mark as wide as the call ran
-  band: (lane) => [[lane.items[0].t, lane.items.at(-1).t]], // where the session ran
-  problem: (call) => call.outcome !== 'ok',              // a failure, underlined in the problem red
-  follow: '#list',                                       // the list's rows in view, as a tint
-  onPick: (lane) => { session = lane.key; draw() },      // a lane's name: its session's transcript
-  onMark: (call) => show(call),                          // a mark: the call in the side panel
-})
-const side = thimble.side({ mount: '#body' })
-thimble.divider({ top: '#overview' })
-
-function draw() {
-  thimble.timeAxis('#axis', range.scale(document.getElementById('axis').clientWidth))
-  const shown = calls.filter((c) => range.has(c.t) && filter.keeps(c))
-  lanes.draw(shown)
-  list(shown.filter((c) => !session || c.session === session))
-}
-</script>
-```
 
 ## Filter by
 
