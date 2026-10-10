@@ -10,7 +10,8 @@
 // wrote:" line before it) folds behind a "…" button, and a body longer than twelve lines shows its first lines with
 // Show more and Show less; both keep their text in the page (data-thimble-fold), so thimble.search finds it and opens
 // the fold. Each message is anchored with its ref and carries data-t, so a label marks it, a ⌘-click asks about it, the
-// lanes follow it and Color by (the page's, or `colour`) draws its bar.
+// lanes follow it and Color by (the page's, or `colour`) draws its bar; when the label filter hides a message that
+// held its group's head, the next one shown takes the head.
 //
 //   const conv = thimble.messages({ mount: '#thread', format: 'plain', onPick: (m) => side.open({ ... }) })
 //   conv.draw(messages, { title: '# backlog', sub, empty })   messages: [{ref, t, author, text, title, to, parent,
@@ -281,6 +282,13 @@
       },
     }
     for (var type in this.heard) this.mount.addEventListener(type, this.heard[type])
+    // the label filter hides a record's element (viewer_bridge.js data-thimble-drop): the heads and date lines follow
+    if (typeof MutationObserver === 'function') {
+      this.watch = new MutationObserver(function () {
+        if (!self.dead) self.relead()
+      })
+      this.watch.observe(this.mount, { subtree: true, attributes: true, attributeFilter: ['data-thimble-drop'] })
+    }
     // with no Color by of the page's own given, the bars follow the page's Color by as it changes
     if (typeof shared.onColour === 'function')
       shared.onColour(function () {
@@ -291,6 +299,37 @@
   Messages.prototype.retire = function () {
     this.dead = true
     for (var type in this.heard) this.mount.removeEventListener(type, this.heard[type])
+    if (this.watch) this.watch.disconnect()
+  }
+  function gone(node) {
+    return node.getAttribute('data-thimble-drop') === 'hide'
+  }
+  // The heads and date lines as the label filter leaves the messages: a message whose group lost every message above it
+  // takes the head itself (row.lead), and a date line with no message left under it hides. Only the messages whose head
+  // changes are drawn again.
+  Messages.prototype.relead = function () {
+    var headShown = false
+    var day = null // the date line over the rows since, and whether a message under it shows
+    var dayShown = false
+    for (var i = 0; i < this.rows.length; i++) {
+      var row = this.rows[i]
+      if (!row.node) continue
+      if (row.lineNode) {
+        if (day) day.hidden = !dayShown
+        day = row.lineNode
+        dayShown = false
+      }
+      if (!row.cont) headShown = false
+      if (gone(row.node)) continue
+      dayShown = true
+      var lead = row.cont && !headShown
+      headShown = true
+      if (!!row.lead !== lead) {
+        row.lead = lead
+        this.redraw(row)
+      }
+    }
+    if (day) day.hidden = !dayShown
   }
   Messages.prototype.colourAttr = function (m) {
     var c = this.colour || shared.colour()
@@ -463,7 +502,9 @@
     var ev = isEvent(m)
     var signed = m.author != null && m.author !== ''
     var author = signed ? String(m.author) : '(unsigned)'
-    var cls = 'thimble-msg' + (ev ? ' thimble-msg-event' : '') + (row.cont ? ' is-cont' : '') + (row.reply ? ' is-reply' : '') + (this.onPick ? ' is-act' : '')
+    // under a shared head, unless the label filter hid every message above it in its group (relead)
+    var cont = row.cont && !row.lead
+    var cls = 'thimble-msg' + (ev ? ' thimble-msg-event' : '') + (cont ? ' is-cont' : '') + (row.reply ? ' is-reply' : '') + (this.onPick ? ' is-act' : '')
     var said = ev ? plainOf(m.said) : ''
     var gist = ev ? (signed ? author + ' ' : '') + said + (textOf(m) ? ' ' + textOf(m) : '') : (m.title ? plainOf(m.title) + ' · ' : '') + textOf(m)
     var attrs =
@@ -484,9 +525,9 @@
       )
     }
     var prev = i > 0 ? this.rows[i - 1] : null
-    var to = m.to != null && m.to !== '' && !(row.cont && prev && String(prev.m.to) === String(m.to)) ? '<div class="thimble-msg-to" data-thimble-chrome>to ' + words(m.to) + '</div>' : ''
-    var head = row.cont ? '' : '<div class="thimble-msg-head" data-thimble-chrome><b class="thimble-msg-author">' + esc(author) + '</b>' + timeHtml(row.s, 'thimble-msg-time', row.day) + '</div>'
-    var rail = row.cont ? timeHtml(row.s, 'thimble-msg-railtime', row.day) : avatarHtml(m.author)
+    var to = m.to != null && m.to !== '' && !(cont && prev && String(prev.m.to) === String(m.to)) ? '<div class="thimble-msg-to" data-thimble-chrome>to ' + words(m.to) + '</div>' : ''
+    var head = cont ? '' : '<div class="thimble-msg-head" data-thimble-chrome><b class="thimble-msg-author">' + esc(author) + '</b>' + timeHtml(row.s, 'thimble-msg-time', row.day) + '</div>'
+    var rail = cont ? timeHtml(row.s, 'thimble-msg-railtime', row.day) : avatarHtml(m.author)
     return (
       '<div class="' + cls + '"' + attrs + '>' +
       '<div class="thimble-msg-rail" data-thimble-chrome>' + rail + '</div>' +
@@ -518,12 +559,15 @@
       out.push(self.rowHtml(row, i))
     })
     if (!this.rows.length) out.push('<div class="thimble-msg-none">' + esc(o2.empty || 'No messages') + '</div>')
+    this.mount.classList.toggle('thimble-msg-headed', o2.title != null)
     this.mount.innerHTML = out.join('')
     this.fill(this.mount)
     var nodes = this.mount.querySelectorAll('.thimble-msg')
     for (var k = 0; k < nodes.length; k++) {
       var r = this.rows[Number(nodes[k].getAttribute('data-msg'))]
-      if (r) r.node = nodes[k]
+      if (!r) continue
+      r.node = nodes[k]
+      if (r.line) r.lineNode = nodes[k].previousElementSibling
     }
   }
   // one message drawn again in its place; a fold's button that had the focus keeps it
@@ -596,10 +640,11 @@
     if (changed) this.redraw(row)
     var node = row.node
     var box = this.mount
-    if (typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: node.getBoundingClientRect().height > (box.clientHeight || innerHeight) ? 'start' : 'center' })
+    // highlighted first, which draws it even out of view (content-visibility), so its height is its own
     node.classList.remove('thimble-msg-hit')
     void node.offsetWidth
     node.classList.add('thimble-msg-hit')
+    if (typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: node.getBoundingClientRect().height > (box.clientHeight || innerHeight) ? 'start' : 'center' })
     setTimeout(function () {
       node.classList.remove('thimble-msg-hit')
     }, HIT_MS)

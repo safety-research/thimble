@@ -177,6 +177,66 @@ describe('the messages in a frame, with Color by and the search', () => {
   })
 })
 
+describe('the messages under the label filter and in a long list', () => {
+  test("the label filter hides a message that held its group's head: the next one shown takes the head; a day with none shown hides its date line", async () => {
+    const { page: p, frame, errors } = await framed(CHAT)
+    // thimble's label filter keeps every message but the first and the next day's two (viewer_bridge.js, `keep`)
+    const filter = (dropped: string[]) =>
+      p.evaluate((dropped) => {
+        const col = '#d0750a'
+        const marks: Record<string, object> = {}
+        for (let n = 1; n <= 7; n++) {
+          const ref = 'b.jsonl#L' + n
+          marks[ref] = { bar: col, names: ['L'], values: [{ id: 'l1', label: 'L', value: 'yes', colour: col }], keep: !dropped.includes(ref) }
+        }
+        const w = (document.getElementById('f') as HTMLIFrameElement).contentWindow!
+        w.postMessage({ type: 'thimble:labels', marks, filter: { label: 'l1', value: 'yes', colour: col }, on: [{ id: 'l1', name: 'L', colour: col, values: [] }], answered: 99 }, '*')
+      }, dropped)
+    const shown = () =>
+      frame().evaluate(() =>
+        [...document.querySelectorAll('.thimble-msg, .thimble-msg-day')].filter((e) => e.getClientRects().length).map((e) => {
+          const ref = e.getAttribute('data-anchor')
+          return ref ? [ref, e.querySelector(':scope > .thimble-msg-main > .thimble-msg-head .thimble-msg-author')?.textContent ?? null, !!e.querySelector('.avatar')] : e.textContent
+        }),
+      )
+    await filter(['b.jsonl#L1', 'b.jsonl#L6', 'b.jsonl#L7'])
+    await p.waitForTimeout(400)
+    assert.deepEqual(await shown(), [
+      'Thu 27 Aug 2026',
+      ['b.jsonl#L2', 'agent-03', true],
+      ['b.jsonl#L3', 'agent-08', true],
+      ['b.jsonl#L4', 'agent-03', true],
+      ['b.jsonl#L5', null, false],
+    ])
+    // the filter lifted: the head back on the first message alone, the date line back
+    await filter([])
+    await p.waitForTimeout(400)
+    const all = await shown()
+    assert.deepEqual(all.slice(0, 3), ['Thu 27 Aug 2026', ['b.jsonl#L1', 'agent-03', true], ['b.jsonl#L2', null, false]])
+    assert.deepEqual(all.slice(6), ['Fri 28 Aug 2026', ['b.jsonl#L6', 'agent-01', true], ['b.jsonl#L7', null, false]])
+    assert.deepEqual(errors, [])
+    await p.close()
+  })
+
+  test('reveal brings a long message far down a long list to the top, clear of the sticky header', async () => {
+    const LONG = page(`<div id="msgs"></div>
+<script>
+const ms = []
+for (let i = 0; i < 2000; i++) ms.push({ ref: 'h#L' + i, t: ${T0} + i * 97, author: 'agent-' + (i % 48), text: 'message ' + i + (i === 1600 ? '\\n'.repeat(3) + 'x\\n'.repeat(40) : '') })
+window.conv = thimble.messages({ mount: '#msgs' })
+conv.draw(ms, { title: '# long' })
+</script>`)
+    const { page: p, frame, errors } = await framed(LONG)
+    assert.equal(await frame().evaluate(() => (window as any).conv.reveal('h#L1600')), true)
+    await p.waitForTimeout(300)
+    const [m, head, list] = [await boxOf(frame, '[data-anchor="h#L1600"]'), await boxOf(frame, '.thimble-msg-header'), await boxOf(frame, '#msgs')]
+    assert.ok(m.height > list.height, `taller than the list (${m.height}px)`)
+    assert.ok(m.y >= head.bottom && m.y - head.bottom < 12, `its top just under the header (${m.y}, ${head.bottom})`)
+    assert.deepEqual(errors, [])
+    await p.close()
+  })
+})
+
 describe('the messages alone', () => {
   test('drawn with no other part: folds open and close, a long body behind Show more, a pick, reveal', async () => {
     const { page: p, frame, errors } = await framed(ALONE)

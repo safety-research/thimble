@@ -697,6 +697,15 @@
 .thimble-msg-list {
   min-width: 0;
 }
+/* a long title, such as a pull request's beside the side panel, wraps, and the count goes under it whole */
+.thimble-msg-header {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+.thimble-msg-header-n,
+.thimble-msg-header-sub {
+  white-space: nowrap;
+}
 .thimble-msg {
   position: relative;
   display: grid;
@@ -719,6 +728,18 @@
 }
 .thimble-msg.is-act:hover {
   background: var(--surface-hover);
+}
+/* under the list's sticky header, a message scrolled to stands clear of it; a cited one is drawn even out of view, so
+   reveal measures its own height */
+.thimble-msg-headed > .thimble-msg {
+  scroll-margin-top: 40px;
+}
+.thimble-msg.thimble-msg-hit {
+  content-visibility: visible;
+}
+/* a day whose messages the label filter hid all */
+.thimble-msg-day[hidden] {
+  display: none;
 }
 .thimble-msg:focus-visible {
   outline: 1.5px solid var(--accent);
