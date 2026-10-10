@@ -1400,15 +1400,15 @@ button.thimble-record-key:focus-visible {
 /* a link that opens a corpus path or a view in thimble, as the app's links; a URL, which opens nothing in a view, a
    dotted underline that shows its address on hover */
 .thimble-text-ref {
-  color: var(--text-accent);
+  color: var(--text-link);
   text-decoration: underline;
-  text-decoration-color: color-mix(in oklab, var(--text-accent) 35%, transparent);
+  text-decoration-color: color-mix(in oklab, var(--text-link) 35%, transparent);
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
   cursor: pointer;
 }
 .thimble-text-ref:hover {
-  text-decoration-color: var(--text-accent);
+  text-decoration-color: var(--text-link);
 }
 .thimble-text-ref:focus-visible {
   outline: none;
