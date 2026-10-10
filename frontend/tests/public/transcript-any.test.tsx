@@ -13,7 +13,7 @@ import { segmentsFor, segmentsFrom } from '../../src/files/views/common.tsx'
 import { pickView, scoreViews, viewByType } from '../../src/files/views/registry.ts'
 import { OBJECTS_SCORE, tableScore } from '../../src/files/views/table.tsx'
 import { frontMatterLines, metaFields } from '../../src/files/views/text.tsx'
-import transcript, { chatTurns, conversationTurns, idKey, madeBlocks, nameOf, noTurns, parsedLines, pick, shortId, shownLines, speakerIds, textOf, timeOf, unwrapStream } from '../../src/files/views/transcript.tsx'
+import transcript, { chatTurns, clockOf, conversationTurns, idKey, madeBlocks, nameOf, noTurns, parsedLines, pick, shortId, shownLines, speakerIds, textOf, timeOf, unwrapStream } from '../../src/files/views/transcript.tsx'
 import { api } from '../../src/lib/api.ts'
 import type { Concept, SourcePage, SourceRecord, TranscriptHint, View } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -136,6 +136,15 @@ describe('messages in any shape', () => {
     expect(timeOf('2024-10-01T09:00:00Z')).toBe('2024-10-01 09:00')
     expect(timeOf(12.5)).toBe('12.5')
     expect(textOf({ content_type: 'text', parts: ['a', 'b'] })).toBe('a\n\nb')
+  })
+  test("the loupe's time: the time of day, its seconds where it has them, and any other value as the head writes it", () => {
+    expect(clockOf('2024-10-01T09:00:07.123Z')).toBe('09:00:07')
+    expect(clockOf('2024-10-01 09:00')).toBe('09:00')
+    expect(clockOf(1700000000)).toBe('22:13:20')
+    expect(clockOf('1700000000000')).toBe('22:13:20')
+    expect(clockOf(12.5)).toBe('12.5')
+    expect(clockOf('yesterday')).toBe('yesterday')
+    expect(clockOf(null)).toBe(null)
   })
   test('a CSV file’s rows show as posts under the columns the sniff named', async () => {
     const rows = ['timestamp,speaker,message', '2024-10-01T09:00:00Z,customer,"hello, there"', '2024-10-01T09:01:00Z,agent,hi']

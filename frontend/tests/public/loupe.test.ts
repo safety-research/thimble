@@ -28,9 +28,9 @@ describe("the loupe's rows", () => {
     expect(loupeStart(5, 9, 9)).toBe(0)
   })
 
-  test('its size: the lines, the paper above and below, its edge; as wide as the room leaves, 200 to 360 px', () => {
+  test('its size: the lines, the paper above and below, its edge; as wide as the room leaves, 200 to 320 px', () => {
     expect(loupeHeight(17)).toBe(17 * 16 + 2 * LOUPE_PAD_PX + 2)
-    expect(loupeWidth(1000)).toBe(360)
+    expect(loupeWidth(1000)).toBe(320)
     expect(loupeWidth(300)).toBe(276)
     expect(loupeWidth(100)).toBe(200)
   })
@@ -60,10 +60,12 @@ describe("the loupe's rows", () => {
     expect(oneLine('  drafting the next\n update  for the page ')).toBe('drafting the next update for the page')
     expect(oneLine('x'.repeat(400))).toHaveLength(200)
     expect(oneLine('x'.repeat(400)).endsWith('…')).toBe(true)
-    const row = { num: '3,998', cells: [null, { colour: 'blue' }], who: 'GPT-5.4', text: 'drafting' }
+    const row = { num: '3,998', cells: [null, { colour: 'blue' }], meta: ['09:12:04', 'GPT-5.4'], text: 'drafting' }
     expect(rowKey(row)).toBe(rowKey({ ...row }))
     expect(rowKey(row)).not.toBe(rowKey({ ...row, cells: [null, { colour: 'blue', faded: true }] }))
     expect(rowKey(row)).not.toBe(rowKey({ ...row, text: 'drafted' }))
+    expect(rowKey(row)).not.toBe(rowKey({ ...row, meta: ['09:12:04', 'GPT-5.5'] }))
+    expect(rowKey(row)).not.toBe(rowKey({ ...row, meta: ['09:12:04 GPT-5.4'] }))
   })
 })
 

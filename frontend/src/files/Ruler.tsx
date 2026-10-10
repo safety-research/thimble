@@ -392,7 +392,7 @@ export function ReaderRuler({ columns, view, onJump, onMark, onSeek, onWheel, ti
   // ---- the loupe, a line per passage, on a page long enough
   const tops = useMemo(() => passages.map((p) => p.top), [passages])
   const cells = useMemo(() => passageCells(passages, columns), [passages, columns])
-  const rowOf = (i: number): LoupeRow => ({ num: null, cells: cells[i] ?? [], who: null, text: passages[i]?.text ?? '', heading: passages[i]?.heading })
+  const rowOf = (i: number): LoupeRow => ({ num: null, cells: cells[i] ?? [], meta: [], text: passages[i]?.text ?? '', heading: passages[i]?.heading })
   const P = passages.length
   const hasLoupe = n > 0 && P > 0 && pageLoupe(total, trackPx, view.height * total)
   const unitOf = (y: number) => passageAt(tops, y, total)

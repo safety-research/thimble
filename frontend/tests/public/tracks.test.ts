@@ -3,7 +3,7 @@
 // have; a label's paint comes from the ruler's counts per bin; the strip is as wide as its lanes in the scrollbar's
 // geometry, or a plain scrollbar with none; a record's row in the loupe and its one-line tooltip carry its line, a cell
 // per lane (the find's in the ink, each color lane the record's own color once it is read, the strip's color for its
-// bin, faded, until then), who said it and the start of its text.
+// bin, faded, until then), its metadata (its time and who said it) and the start of its text.
 import { describe, expect, test } from 'vitest'
 import { binOfRow, colorLanes, followOf, frameGeom, frameOf, FRAME_MIN_PX, labelPaint, lineAt, majorityRows, paintAt, PLAIN_PX, recordRow, rowValues, snap, snapPatch, stripWidth, ticksIn, type LoupeRecord, type OverviewPaint } from '../../src/files/Tracks'
 import type { LabelRuler } from '../../src/lib/types'
@@ -143,15 +143,15 @@ describe('the loupe shows each record in its own color', () => {
     expect(ticksIn(ticks, 1, 1).map((t) => t.from)).toEqual([1])
   })
 
-  test("a record's row: its line, a cell per lane (the find's in the ink, a record read in its own color, one not read in the strip's, faded), who said it and its text", () => {
-    const rec: LoupeRecord = { line: 102, lanes: ['blue', null], who: 'GPT-5.4', text: 'drafting the next update\n for the page' }
+  test("a record's row: its line, a cell per lane (the find's in the ink, a record read in its own color, one not read in the strip's, faded), its metadata and its text", () => {
+    const rec: LoupeRecord = { line: 102, lanes: ['blue', null], meta: ['09:12:04', 'GPT-5.4'], text: 'drafting the next update\n for the page' }
     const paints = [counts, { kind: 'none' } as OverviewPaint]
     const ink = 'var(--text-primary)'
-    expect(recordRow(102, 400, rec, [ink], paints)).toEqual({ num: '102', cells: [{ colour: ink }, { colour: 'blue' }, null], who: 'GPT-5.4', text: 'drafting the next update\n for the page' })
+    expect(recordRow(102, 400, rec, [ink], paints)).toEqual({ num: '102', cells: [{ colour: ink }, { colour: 'blue' }, null], meta: ['09:12:04', 'GPT-5.4'], text: 'drafting the next update\n for the page' })
     // not read yet: the strip's color for its bin, faded, and no text
-    expect(recordRow(150, 400, undefined, [null], paints)).toEqual({ num: '150', cells: [null, { colour: 'blue', faded: true }, null], who: null, text: '' })
+    expect(recordRow(150, 400, undefined, [null], paints)).toEqual({ num: '150', cells: [null, { colour: 'blue', faded: true }, null], meta: [], text: '' })
     // read and found to have none: no cell
-    expect(recordRow(150, 400, null, [], paints)).toEqual({ num: '150', cells: [null, null], who: null, text: '' })
+    expect(recordRow(150, 400, null, [], paints)).toEqual({ num: '150', cells: [null, null], meta: [], text: '' })
     // a line number is plain, as the reader writes it, never with a thousands separator
     expect(recordRow(3998, 10_000, { ...rec, line: 3998 }, [], paints).num).toBe('3998')
     expect(recordRow(12_150, 20_000, null, [], paints).num).toBe('12150')

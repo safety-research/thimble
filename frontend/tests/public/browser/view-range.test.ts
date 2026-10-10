@@ -443,7 +443,7 @@ describe("a long list's strip and its loupe", () => {
       const el = document.querySelector('.thimble-colour-loupe') as HTMLElement
       const box = el.querySelector('.thimble-colour-loupe-box') as HTMLElement
       const rows = [...el.querySelectorAll('.thimble-colour-loupe-row')].map((r) => {
-        const who = r.querySelector('.thimble-colour-loupe-t b')?.textContent ?? ''
+        const who = [...r.querySelectorAll('.thimble-colour-loupe-m')].map((m) => m.textContent).join('')
         return {
           n: r.querySelector('.thimble-colour-loupe-n')!.textContent ?? '',
           cells: [...r.querySelectorAll('.thimble-colour-loupe-c i')].map((i) => getComputedStyle(i).backgroundColor),

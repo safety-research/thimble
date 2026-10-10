@@ -351,6 +351,18 @@ export function timeOf(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? stamp(v.trim()) : null
 }
 
+/** A time value as the loupe writes it, its time of day: `HH:MM:SS` (`HH:MM` without seconds) for an ISO stamp or
+ * seconds or milliseconds since 1970 in UTC, any other value as timeOf writes it. */
+export function clockOf(v: unknown): string | null {
+  if (typeof v === 'string' && /^\d{9,13}(\.\d+)?$/.test(v.trim())) v = Number(v)
+  if (typeof v === 'number' && v >= 1e8) {
+    const d = new Date(v > 1e11 ? v : v * 1000)
+    if (!Number.isNaN(d.getTime())) v = d.toISOString()
+  }
+  const m = typeof v === 'string' ? /^\d{4}-\d{2}-\d{2}[T ](\d{2}:\d{2}(?::\d{2})?)/.exec(v.trim()) : null
+  return m ? m[1] : timeOf(v)
+}
+
 /** A JSON line's record parsed from its text, for a file the server pages as text; any other record as it is. Pure. */
 export function parsedLines(records: SourceRecord[]): SourceRecord[] {
   return records.map((rec) => {

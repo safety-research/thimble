@@ -191,6 +191,51 @@ describe('the table, with Color by and the search', () => {
     assert.equal(await frame().evaluate(() => (window as any).search.at), 11)
     await p.close()
   })
+
+  test("the strip's loupe: a row's time and its first other column of text in the quiet gray, its main column in the ink", async () => {
+    const { page: p, frame } = await framed(INBOX)
+    const box = await frame().evaluate(() => {
+      const r = document.querySelector('.thimble-colour-strip .thimble-colour-track')!.getBoundingClientRect()
+      return { x: r.left, y: r.top, w: r.width, h: r.height }
+    })
+    const frameBox = (await p.locator('#f').boundingBox())!
+    await p.mouse.move(frameBox.x + box.x + box.w / 2, frameBox.y + box.y + box.h * 0.5)
+    await p.waitForTimeout(450)
+    const got = await frame().evaluate(() => {
+      const el = [...document.querySelectorAll('.thimble-colour-loupe')].find((e) => e.hasAttribute('data-open'))!
+      const probe = document.createElement('span')
+      document.body.appendChild(probe)
+      probe.style.color = 'var(--text-tertiary)'
+      const gray = getComputedStyle(probe).color
+      probe.remove()
+      return {
+        gray,
+        rows: [...el.querySelectorAll('.thimble-colour-loupe-row')].map((r) => {
+          const t = r.querySelector('.thimble-colour-loupe-t') as HTMLElement
+          const meta = [...t.querySelectorAll('.thimble-colour-loupe-m')]
+          return {
+            n: r.querySelector('.thimble-colour-loupe-n')!.textContent,
+            meta: meta.map((m) => m.textContent),
+            metaInk: meta.map((m) => getComputedStyle(m).color),
+            text: [...t.childNodes].filter((c) => c.nodeType === 3).map((c) => c.textContent).join(''),
+            textInk: getComputedStyle(t).color,
+          }
+        }),
+      }
+    })
+    assert.equal(got.rows.length, 17)
+    for (const r of got.rows) {
+      // the mail on the line its ref names: from, subject and time as the table writes them
+      const i = Number(r.n) - 1
+      assert.equal(r.text, (i % 997 === 5 ? 'Gale warning ' : 'Note ') + i, JSON.stringify(r))
+      assert.equal(r.meta.length, 2, JSON.stringify(r))
+      assert.match(r.meta[0]!, /\d\d:\d\d/, 'its time')
+      assert.equal(r.meta[1], ['ana', 'bo', 'cy', 'dee'][i % 4], 'its sender')
+      assert.deepEqual(r.metaInk, [got.gray, got.gray])
+      assert.notEqual(r.textInk, got.gray)
+    }
+    await p.close()
+  })
 })
 
 describe('the table in a narrow pane', () => {

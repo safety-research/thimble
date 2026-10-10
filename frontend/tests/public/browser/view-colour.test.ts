@@ -137,7 +137,7 @@ describe('Colour by in a frame', () => {
         rows: [...el.querySelectorAll('.thimble-colour-loupe-row')].map((r) => ({
           n: r.querySelector('.thimble-colour-loupe-n')!.textContent,
           cells: r.querySelectorAll('.thimble-colour-loupe-c i').length,
-          who: r.querySelector('.thimble-colour-loupe-t b')?.textContent ?? '',
+          who: [...r.querySelectorAll('.thimble-colour-loupe-m')].map((m) => m.textContent).join(''),
           text: r.querySelector('.thimble-colour-loupe-t')!.textContent,
         })),
       }
@@ -764,6 +764,92 @@ describe("a lane of the tracks for each of Color by's choices past the first", (
     assert.deepEqual(two.marks.map((m) => m.title), ['Kind', 'Who'])
     assert.ok(two.at[1][0] !== two.at[0][0] || two.at[1][1] !== two.at[0][1], `the second lane is Who's: ${JSON.stringify(two.at)}`)
     assert.equal(await frame().locator('.thimble-colour-by').textContent(), 'Color by:Kind+1')
+    await page.close()
+  })
+})
+
+describe('what the loupe writes of a record', () => {
+  /** each row of the open loupe: its line and whether it shows whole, its cells' widths, its metadata and their ink, its
+   * text and its ink, whether the text is cut, and the boxes of its parts */
+  const written = (frame: () => Frame) =>
+    frame().evaluate(() => {
+      const el = [...document.querySelectorAll('.thimble-colour-loupe')].find((e) => e.hasAttribute('data-open'))
+      if (!el) return null
+      const box = el.querySelector('.thimble-colour-loupe-box')!.getBoundingClientRect()
+      return {
+        box: { left: box.left, right: box.right },
+        rows: [...el.querySelectorAll('.thimble-colour-loupe-row')].map((r) => {
+          const n = r.querySelector('.thimble-colour-loupe-n') as HTMLElement
+          const t = r.querySelector('.thimble-colour-loupe-t') as HTMLElement
+          const cells = [...r.querySelectorAll('.thimble-colour-loupe-c i')].map((i) => i.getBoundingClientRect())
+          const meta = [...t.querySelectorAll('.thimble-colour-loupe-m')]
+          return {
+            n: n.textContent ?? '',
+            nWhole: n.scrollWidth <= n.clientWidth,
+            nLeft: n.getBoundingClientRect().left,
+            cells: cells.map((c) => c.width),
+            cellsRight: cells.length ? cells[cells.length - 1].right : 0,
+            meta: meta.map((m) => m.textContent ?? ''),
+            metaInk: meta.map((m) => getComputedStyle(m).color),
+            text: [...t.childNodes].filter((c) => c.nodeType === 3).map((c) => c.textContent).join(''),
+            textInk: getComputedStyle(t).color,
+            textLeft: t.getBoundingClientRect().left,
+            cut: t.scrollWidth > t.clientWidth && getComputedStyle(t).textOverflow === 'ellipsis',
+            height: r.getBoundingClientRect().height,
+          }
+        }),
+      }
+    })
+  const GRAY = 'rgb(114, 111, 105)' // --text-tertiary in TOKENS
+  const INK = 'rgb(0, 0, 0)' // --text-primary
+
+  test("the view's preview: its metadata in the quiet gray, its text in the ink on one line cut with an ellipsis; in a narrow loupe the whole line and every lane's cell still show", async () => {
+    // 3,000 rows at lines 1,000,001 on, three choices of Color by (a lane each), the first sixty drawn on the page
+    const drawn = Array.from({ length: 60 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${1000001 + i}">row ${i + 1}</div>`).join('')
+    const script = `const recs = Array.from({ length: 3000 }, (_, i) => ({ ref: 'm.jsonl#L' + (1000001 + i), kind: i % 2 ? 'Text only' : 'With links', size: ['s', 'm', 'l'][i % 3], mood: i % 5 ? 'calm' : 'gale' }))
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }, { name: 'size', title: 'Size' }, { name: 'mood', title: 'Mood' }] })
+colour.strip('#list', { rows: recs.map((r) => r.kind), refs: recs.map((r) => r.ref), records: recs,
+  preview: (i) => ({ meta: ['10:' + String(i % 60).padStart(2, '0') + ':05', 'agent-0' + (i % 8)], text: 'row ' + (i + 1) + ' ' + 'lorem ipsum dolor sit amet '.repeat(8) }) })`
+    const { page, frame } = await own(drawn, script, 260, { v: 1, by: 'f:kind', picks: ['f:kind', 'f:size', 'f:mood'], field: 'kind', seen: [] })
+    await frame().waitForFunction(() => document.querySelectorAll('.thimble-colour-lane').length === 3)
+    await page.waitForTimeout(250)
+    const box = (await frame().locator('.thimble-colour-track').boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.6)
+    await page.waitForTimeout(400)
+    const l = (await written(frame))!
+    assert.ok(l, 'the loupe is open')
+    assert.ok(l.box.right - l.box.left <= 220, `a narrow loupe: ${JSON.stringify(l.box)}`)
+    assert.equal(l.rows.length, 17)
+    for (const r of l.rows) {
+      const i = Number(r.n) - 1000001
+      assert.ok(/^\d{7}$/.test(r.n) && r.nWhole && r.nLeft >= l.box.left, `the whole line: ${JSON.stringify(r)}`)
+      assert.deepEqual(r.cells, [4, 4, 4], `a cell per lane, each whole: ${JSON.stringify(r)}`)
+      assert.deepEqual(r.meta, ['10:' + String(i % 60).padStart(2, '0') + ':05', 'agent-0' + (i % 8)])
+      assert.deepEqual(r.metaInk, [GRAY, GRAY], 'the metadata in the quiet gray')
+      assert.ok(r.text.startsWith(`row ${i + 1} lorem ipsum`), r.text)
+      assert.equal(r.textInk, INK, 'the text in the ink')
+      assert.ok(r.cut, `the text, alone, cut with an ellipsis: ${JSON.stringify(r)}`)
+      assert.ok(r.cellsRight <= r.textLeft, 'the text after the cells, never over them')
+      assert.equal(r.height, 16, 'one line')
+    }
+    await page.close()
+  })
+
+  test("a list of elements and no preview: each one's <time> is its metadata, in the gray, and the rest its text", async () => {
+    const rows = Array.from({ length: 200 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 100 ? 'Text only' : 'With links'}"><time>09:${String(i % 60).padStart(2, '0')}</time> message ${i + 1}</div>`).join('')
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`)
+    await frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
+    await page.waitForTimeout(250)
+    const box = (await frame().locator('.thimble-colour-track').boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.3)
+    await page.waitForTimeout(400)
+    const l = (await written(frame))!
+    assert.equal(l.rows.length, 17)
+    for (const r of l.rows) {
+      const n = Number(r.n)
+      assert.deepEqual([r.meta, r.text], [[`09:${String((n - 1) % 60).padStart(2, '0')}`], `message ${n}`], JSON.stringify(r))
+      assert.deepEqual([r.metaInk, r.textInk], [[GRAY], INK])
+    }
     await page.close()
   })
 })

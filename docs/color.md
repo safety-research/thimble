@@ -166,8 +166,9 @@ scrollbar in one strip at its right edge, at every length:
 - While the view's search finds something ([search-table-diff.md](search-table-diff.md)), a lane of ticks in the ink,
   one per match, stands at the strip's left, before Color by's lanes; a click on a tick goes to that match.
 - Where the strip draws a record shorter than 3 px, resting on it for 250 ms opens the loupe beside it: a short list,
-  a line per record around the pointer, each its line or key, a cell per lane in the record's color (an empty cell for
-  none) and the start of its text; the record under the pointer darker, those in view tinted, and a bracket beside the
+  a line per record around the pointer, each its whole line or key, a cell per lane in the record's color (an empty
+  cell for none), its metadata in gray and the start of its text in the ink, on one line that cuts only the text; the
+  record under the pointer darker, those in view tinted, and a bracket beside the
   strip over the stretch the loupe shows. It follows the pointer along the strip, and moves to the thumb only on a real
   scroll: the wheel over the strip or the loupe, or a drag of the thumb. Once the pointer is in it, it holds still: a
   click goes to that record, highlights it for a moment and leaves the loupe's rows where they are, and the wheel
@@ -182,13 +183,14 @@ scrollbar in one strip at its right edge, at every length:
   frame; once still, every edge goes onto the device's pixel grid.
 
 For a list that draws only the rows in view, give every row's value in order: `color.strip('#list', {rows: values})`,
-with `preview(i)` (what the loupe says of row `i`: a string, or `{when, text}`; without it, the text of the row's
-element where the page draws it), `refs` (each row's ref, which the labels' lanes read and whose line, `#L12`, or key
-the loupe's line starts with) and `records` (each row's record, which the lanes of fields past the first choice read).
-For a list of elements the loupe reads each record's `<time>` and its text, or `preview(element)`, and its
-`data-anchor`. Call `strip` again with the same list when they change; rows given again unchanged, as a list drawn
-again on each scroll gives them, are not measured again. The view checks count each row given with its ref as shown,
-once the rows the list draws carry those refs as their `data-anchor`.
+with `preview(i)` (what the loupe says of row `i`: its text as a string, or `{meta, text}`, `meta` a string or a list
+of the fields that tell records apart at a glance, such as `[time, agent]`, and `text` its words; without it, the text
+of the row's element where the page draws it), `refs` (each row's ref, which the labels' lanes read and whose line,
+`#L12`, or key the loupe's line starts with) and `records` (each row's record, which the lanes of fields past the
+first choice read). For a list of elements the loupe reads each record's `<time>` as its metadata and the rest of its
+text, or `preview(element)`, and its `data-anchor`. Call `strip` again with the same list when they change; rows given
+again unchanged, as a list drawn again on each scroll gives them, are not measured again. The view checks count each
+row given with its ref as shown, once the rows the list draws carry those refs as their `data-anchor`.
 
 The tracks show colors only on a list of the records the color marks, and only where they reflect the whole list:
 Color by's own `strip`, a list given `rows`, or another list whose elements are all of its records, which says so

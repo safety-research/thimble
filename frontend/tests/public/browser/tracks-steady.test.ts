@@ -4,7 +4,8 @@
 // changes many times over as it scrolls. The strip keeps its width while the reader scrolls (a change of it is a change
 // of the reader's width, which reflows the records and moves the reader back), the reader's width stays the same, and
 // a steady wheel scroll down never moves the reader up, nor one up moves it down. Resting on the strip opens the loupe:
-// a line per message, its number, who said it and the start of what they said; moved along the strip while the reader
+// a line per message, its number, its time of day and who said it in the quiet gray, and the start of what they said in
+// the ink; moved along the strip while the reader
 // moves by itself under it (as records load and a browser rounds its scroll), it stays at the pointer and never jumps
 // to the thumb.
 import assert from 'node:assert/strict'
@@ -150,7 +151,7 @@ for (const [name, engine] of ENGINES)
   }, 180_000)
 
 for (const [name, engine] of ENGINES)
-  test(`${name}: the loupe over a transcript names who said each message, and moving along the strip as the reader moves under it never jumps it to the thumb`, async (ctx) => {
+  test(`${name}: the loupe over a transcript names each message's time and who said it in the gray, its words in the ink, and moving along the strip as the reader moves under it never jumps it to the thumb`, async (ctx) => {
     const browser = await engine.launch({ headless: true }).catch(() => null)
     if (!browser) return ctx.skip()
     try {
@@ -173,7 +174,28 @@ for (const [name, engine] of ENGINES)
           return {
             mid: loupe ? (loupe.top + loupe.bottom) / 2 : null,
             thumb: (frame.top + frame.bottom) / 2,
-            rows: [...document.querySelectorAll('.loupe[data-open] .loupe-row')].map((row) => ({ n: row.querySelector('.loupe-n')!.textContent ?? '', who: row.querySelector('.loupe-t b')?.textContent ?? '', text: row.querySelector('.loupe-t')!.textContent ?? '', at: row.classList.contains('at') })),
+            rows: [...document.querySelectorAll('.loupe[data-open] .loupe-row')].map((row) => {
+              const t = row.querySelector('.loupe-t')!
+              const meta = [...t.querySelectorAll('.loupe-m')]
+              return {
+                n: row.querySelector('.loupe-n')!.textContent ?? '',
+                meta: meta.map((m) => m.textContent ?? ''),
+                metaInk: meta.map((m) => getComputedStyle(m).color),
+                text: [...t.childNodes].filter((c) => c.nodeType === 3).map((c) => c.textContent).join(''),
+                textInk: getComputedStyle(t).color,
+                at: row.classList.contains('at'),
+              }
+            }),
+            ink: (() => {
+              const probe = document.createElement('span')
+              document.body.appendChild(probe)
+              probe.style.color = 'var(--text-tertiary)'
+              const gray = getComputedStyle(probe).color
+              probe.style.color = 'var(--text-primary)'
+              const main = getComputedStyle(probe).color
+              probe.remove()
+              return { gray, main }
+            })(),
           }
         })
       // rest on the strip well below the thumb, where the loupe has room to stand at the pointer
@@ -185,10 +207,14 @@ for (const [name, engine] of ENGINES)
       assert.equal(a.rows.length, 17)
       for (const r of a.rows) {
         const n = Number(r.n.replace(/,/g, ''))
-        assert.equal(r.who, ['user', 'assistant', 'tool'][n % 3], `line ${n} said by ${r.who}`)
-        // a message with words: who said it, then its start
-        if (!(n % 120 > 61 && n % 120 < 110)) assert.ok(r.text.startsWith(`${r.who}message ${n} lorem ipsum`), `line ${n}: ${r.text}`)
+        // its time of day and who said it, as the Transcript mode reads them, in the quiet gray
+        assert.deepEqual(r.meta, [`20:${String(n % 60).padStart(2, '0')}:00`, ['user', 'assistant', 'tool'][n % 3]], `line ${n}: ${JSON.stringify(r)}`)
+        assert.deepEqual(r.metaInk, [a.ink.gray, a.ink.gray], `line ${n}: the metadata in the quiet gray`)
+        // a message with words: its start, in the ink
+        if (!(n % 120 > 61 && n % 120 < 110)) assert.ok(r.text.startsWith(`message ${n} lorem ipsum`), `line ${n}: ${r.text}`)
+        assert.equal(r.textInk, a.ink.main, `line ${n}: the text in the ink`)
       }
+      assert.notEqual(a.ink.gray, a.ink.main)
       assert.ok(a.rows[8].at, "the pointer's message darker")
       // up the strip a little at a time while the reader moves by itself by a pixel or two: the loupe stays at the
       // pointer

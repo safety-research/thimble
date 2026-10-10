@@ -253,13 +253,13 @@ for (const [name, engine] of ENGINES) {
       }
       const { samples, moves } = await stopSampling(page)
       // the loupe's lines once the records there are read: a line per record around the thumb, its number and the start
-      // of its text (in a transcript, who said it first)
+      // of its text (in a transcript, its time and who said it first)
       await page.waitForTimeout(400)
       const lines = await page.evaluate(() => [...document.querySelectorAll('.loupe[data-open] .loupe-row')].map((r) => ({ n: Number((r.querySelector('.loupe-n')!.textContent ?? '').replace(/,/g, '')), text: r.querySelector('.loupe-t')!.textContent ?? '', seen: r.classList.contains('seen') })))
       await page.mouse.up()
       assert.equal(lines.length, 17)
       assert.ok(lines.every((r, i) => !i || r.n === lines[i - 1].n + 1), `numbered in order: ${lines.map((r) => r.n)}`)
-      for (const r of lines) assert.ok(mode === 'transcript' ? r.text.startsWith(`Agent${r.n % 4}message ${r.n} lorem`) : r.text.length > 0, `line ${r.n}: ${r.text}`)
+      for (const r of lines) assert.ok(mode === 'transcript' ? r.text.startsWith(`20:${String(r.n % 60).padStart(2, '0')}:00Agent${r.n % 4}message ${r.n} lorem`) : r.text.length > 0, `line ${r.n}: ${r.text}`)
       const rows = motion(samples, moves)
       const driven = rows.filter((r) => Math.abs(r.dy) > 1e-3)
       const followed = driven.filter((r) => r.top).length / driven.length

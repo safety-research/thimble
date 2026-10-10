@@ -1677,9 +1677,10 @@
 .tracks[data-drag] * {
   cursor: grabbing;
 }
-/* -------- the loupe beside a strip (Loupe.tsx): a short list in thimble's popover, a line per record (its number, a
-   cell per lane in the record's color, the start of its text), the record under the pointer darker and those on
-   screen lightly tinted; the paper at its right, between it and the strip, is the way the pointer moves into it -------- */
+/* -------- the loupe beside a strip (Loupe.tsx): a short list in thimble's popover, a line per record (its whole
+   number, a cell per lane in the record's color, its metadata in the quiet gray, the start of its text in the ink, which
+   alone gives up room), the record under the pointer darker and those on screen lightly tinted; the paper at its right,
+   between it and the strip, is the way the pointer moves into it -------- */
 .loupe {
   position: fixed;
   z-index: var(--z-popover);
@@ -1698,7 +1699,7 @@
   box-sizing: border-box;
   height: 16px;
   display: grid;
-  grid-template-columns: var(--loupe-num, 2px) auto minmax(0, 1fr);
+  grid-template-columns: minmax(var(--loupe-num, 2px), max-content) max-content minmax(0, 1fr);
   gap: 6px;
   align-items: center;
   padding-right: 8px;
@@ -1717,6 +1718,7 @@
   gap: 1px;
 }
 .loupe-cell {
+  flex: none;
   width: 4px;
   height: 11px;
   border-radius: 1px;
@@ -1729,10 +1731,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.loupe-t b {
-  margin-right: 4px;
-  color: var(--text-secondary);
-  font-weight: 500;
+/* each of the record's metadata, such as its time and who said it, in the quiet gray before its text */
+.loupe-m {
+  margin-right: 6px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
 }
 .loupe-row.heading .loupe-t {
   font-weight: 500;

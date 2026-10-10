@@ -76,12 +76,12 @@ export type OverviewPaint =
   | { kind: 'density'; bytes: readonly number[] }
   | { kind: 'none' }
 
-/** A record as the loupe and a record's tooltip show it: its line, per color lane its color (null for none), who said
- * it and the start of its text. */
+/** A record as the loupe and a record's tooltip show it: its line, per color lane its color (null for none), its
+ * metadata (such as its time and who said it) and the start of its text. */
 export interface LoupeRecord {
   line: number
   lanes: readonly (string | null)[]
-  who: string | null
+  meta: readonly string[]
   text: string
 }
 
@@ -470,8 +470,8 @@ export function ticksIn(ticks: readonly RulerTick[], a: number, b: number): Rule
 
 /** A record as a row of the loupe and its one-line tooltip: its line; a cell per marker lane (its ink where the line
  * holds a mark, `marked`), then per color lane the record's own color once it is read, the strip's color for its
- * stretch, faded, while it is not (`rec` undefined), and none once read without one; who said it and the start of its
- * text. Pure. */
+ * stretch, faded, while it is not (`rec` undefined), and none once read without one; its metadata and the start of
+ * its text. Pure. */
 export function recordRow(line: number, total: number, rec: LoupeRecord | null | undefined, marked: readonly (string | null)[], paints: readonly OverviewPaint[]): LoupeRow {
   const cells: (LoupeCell | null)[] = marked.map((c) => (c ? { colour: c } : null))
   paints.forEach((p, j) => {
@@ -483,7 +483,7 @@ export function recordRow(line: number, total: number, rec: LoupeRecord | null |
       cells.push(c ? { colour: c } : null)
     }
   })
-  return { num: String(line), cells, who: rec?.who ?? null, text: rec?.text ?? '' }
+  return { num: String(line), cells, meta: rec?.meta ?? [], text: rec?.text ?? '' }
 }
 
 /** ms the thumb takes to go from where a drag left it to where the reader stands */
