@@ -83,6 +83,8 @@ CARDS = {
     "diagram": ("diagram", "import thimble\nthimble.diagram(['a', 'b'], [('a', 'b', 'calls')])"),
     "timeline": ("timeline", "import thimble\n"
                              "thimble.timeline([('2026-03-12T09:00:00', 'start'), ('2026-03-12T09:30:00', 'end')])"),
+    "chart": ("plot", "import thimble, pandas as pd\n"
+                      "thimble.chart('bar', pd.DataFrame({'agent': ['a', 'b'], 'posts': [3, 1]}))"),
     "streams": ("code", "import sys\nprint('hello')\nprint('err', file=sys.stderr)\nprint('again')\n1 + 1"),
     "display": ("code", "from IPython.display import display, Markdown\n"
                         "h = display(Markdown('one'), display_id=True)\nh.update(Markdown('two'))\nprint('done')"),
