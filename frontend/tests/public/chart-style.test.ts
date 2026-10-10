@@ -31,6 +31,17 @@ describe('the Vega-Lite theme', () => {
     expect(c.legend).toMatchObject({ labelFont: token('--viz-font-label'), labelFontSize: 11, titleFontSize: 11 })
     expect(c.title).toMatchObject({ fontSize: 13 })
   })
+
+  test("draws the marks thimble.chart names by their job: faint values behind a box plot's lighter boxes, its medians in ink, areas overlapping lightly", () => {
+    const s = c.style as Record<string, Record<string, unknown>>
+    // each keeps its series or label color: the theme gives only how strongly it shows
+    for (const name of ['thimble-faint', 'thimble-box', 'thimble-overlap']) {
+      expect(s[name].color, name).toBeUndefined()
+      expect(s[name].opacity as number, name).toBeLessThan(1)
+    }
+    expect(s['thimble-faint'].opacity as number).toBeLessThan(s['thimble-box'].opacity as number)
+    expect(s['thimble-median']).toMatchObject({ color: token('--viz-ink-1'), opacity: 1 })
+  })
 })
 
 test("a timeline's lanes take the series in the order they first appear, and the muted other past seven", () => {

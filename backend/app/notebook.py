@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import base64
 import contextlib
 import copy
 import fcntl
@@ -32,6 +33,7 @@ import subprocess
 import sys
 import threading
 import time
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -2108,7 +2110,8 @@ def startup_lines(roots: tuple[str, ...] | None = None, workspace: Path | None =
     if roots:
         lines.append(f"exec({_READS_SRC!r}, {{'ROOTS': {tuple(str(r) for r in roots)!r}, 'CAP': {READS_CAP!r}, 'MIME': {READS_MIME!r}}})")
     if workspace is not None:
-        lines.append(f"exec({_THIMBLE_INSTALL!r}, {{'SRC': {_thimble_src()!r}, 'WS': {str(workspace)!r}}})")
+        packed = base64.b64encode(zlib.compress(_thimble_src().encode("utf-8"), 9)).decode("ascii")
+        lines.append(f"exec({_THIMBLE_INSTALL!r}, {{'SRC': {packed!r}, 'WS': {str(workspace)!r}}})")
     return lines
 
 
@@ -2144,8 +2147,12 @@ _FIGURE_FORMAT_SRC = ("import IPython.core.pylabtools as _pt\n"
 MATPLOTLIBRC = Path(__file__).with_name("matplotlibrc")
 
 # The `thimble` module (kernel_thimble.py) installed in the kernel: a module built from the file's source with WS set
-# and registered in sys.modules (the source is read once, at first use).
-_THIMBLE_INSTALL = "import sys, types\nm = types.ModuleType('thimble')\nm.WS = WS\nexec(SRC, m.__dict__)\nsys.modules['thimble'] = m\n"
+# and registered in sys.modules (the source is read once, at first use). The source comes compressed (zlib, then
+# base64): a sandboxed kernel's whole command line is one shell argument of at most MAX_ARG_STRLEN bytes, which the
+# source as text would soon fill.
+MAX_ARG_STRLEN = 131072  # Linux's limit on one argument, which srt's wrapped command must fit (kernel_srt.mjs)
+_THIMBLE_INSTALL = ("import sys, types, zlib, base64\nm = types.ModuleType('thimble')\nm.WS = WS\n"
+                    "exec(zlib.decompress(base64.b64decode(SRC)).decode('utf-8'), m.__dict__)\nsys.modules['thimble'] = m\n")
 _THIMBLE_SRC_CACHE: list[str] = []
 
 

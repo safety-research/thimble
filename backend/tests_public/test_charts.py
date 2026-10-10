@@ -3,6 +3,7 @@ order, drawn as plain Vega-Lite that carries no color, font or size of its own, 
 (2026-10-09): "for those defaults you just provide data in the right format and not the plotting code by hand every
 time". The kernel's display is caught; no kernel, no browser."""
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -67,6 +68,8 @@ def test_every_kind_draws_its_rows_inline_as_vega_lite_with_no_style_of_its_own(
         "dots": (pd.DataFrame({"time": t[:3], "agent": ["a", "b", "a"], "outcome": ["passed", "failed", "passed"]}),),
         "histogram": (pd.Series([1.5, 2.5, 2.6, 9.0], name="days"),),
         "heatmap": (pd.DataFrame({"tactic": ["probe", "trick"], "site": ["Navy", "Navy"], "captures": [5, 30]}),),
+        "area": (pd.DataFrame({"time": t, "captures": [1, 3, 6, 9], "site": ["a", "a", "b", "b"]}),),
+        "box": (pd.DataFrame({"turns": [3, 5, 8, 9, 12, 40, 2], "agent": ["a"] * 6 + ["b"]}),),
     }
     assert set(charts) == set(kt.CHARTS)
     for kind, args in charts.items():
@@ -210,3 +213,159 @@ def test_a_column_name_with_a_dot_is_a_field_and_not_a_path():
     assert spec["encoding"]["x"] == {"field": "p\\.value", "type": "quantitative", "title": "p.value"}
     assert spec["encoding"]["y"]["field"] == "n \\[runs\\]"
     assert spec["data"]["values"][0] == {"p.value": 0.1, "n [runs]": 3}
+
+
+EVALS = pd.DataFrame({"model": ["m1", "m2", "m3"], "accuracy": [0.62, 0.81, 0.40], "lo": [0.55, 0.75, 0.31],
+                      "hi": [0.69, 0.86, 0.50]})
+
+
+def test_an_interval_draws_a_rule_in_ink_from_each_value_s_low_end_to_its_high_end_and_its_ends_are_cited():
+    bundle = drawn("bar", EVALS, interval=("lo", "hi"))
+    spec = bundle[kt.VEGALITE_MIME]
+    bars, rule = spec["layer"]
+    assert bars["mark"] == "bar" and bars["encoding"]["y"]["sort"] == ["m2", "m1", "m3"]
+    # the rule mark, which the theme draws in its annotation ink (frontend lib/vizTheme), with no color of its own
+    assert rule["mark"] == "rule" and "color" not in rule["encoding"]
+    assert rule["encoding"]["x"] == {"field": "lo", "type": "quantitative", "title": "accuracy"}
+    assert rule["encoding"]["x2"] == {"field": "hi"} and rule["encoding"]["y"] == bars["encoding"]["y"]
+    assert spec["data"]["values"][0] == {"model": "m1", "accuracy": 0.62, "lo": 0.55, "hi": 0.69}
+    table = cite.chart_table(bundle)
+    assert table.label == "model" and table.cells[table.labels.index("m2")] == ["0.81", "0.75", "0.86"]
+    # the interval's columns may stand anywhere in the frame; the rest keep the kind's order
+    moved = spec_of("bar", EVALS[["lo", "model", "hi", "accuracy"]], interval=("lo", "hi"))
+    assert moved["layer"][0]["encoding"]["y"]["field"] == "model" and moved["layer"][0]["encoding"]["x"]["field"] == "accuracy"
+
+
+def test_an_interval_sets_groups_side_by_side_lying_down_or_upright():
+    ev = pd.DataFrame({"model": ["m1", "m1", "m2", "m2"], "accuracy": [0.6, 0.7, 0.8, 0.5], "condition": ["cot", "plain"] * 2,
+                       "lo": [0.5, 0.6, 0.7, 0.4], "hi": [0.7, 0.8, 0.9, 0.6]})
+    bars, rule = spec_of("bar", ev, interval=("lo", "hi"))["layer"]
+    assert bars["encoding"]["yOffset"]["field"] == "condition" and "order" not in bars["encoding"]
+    assert rule["encoding"]["yOffset"] == bars["encoding"]["yOffset"] and "color" not in rule["encoding"]
+    # number categories stand up: the interval runs along y, side by side on x
+    steps = ev.assign(model=[1, 1, 2, 2])
+    bars, rule = spec_of("bar", steps, interval=("lo", "hi"))["layer"]
+    assert bars["encoding"]["x"]["type"] == "ordinal" and bars["encoding"]["xOffset"]["field"] == "condition"
+    assert (rule["encoding"]["y"]["field"], rule["encoding"]["y2"]) == ("lo", {"field": "hi"})
+    assert rule["encoding"]["xOffset"] == bars["encoding"]["xOffset"]
+    with pytest.raises(ValueError, match="`interval` sets the groups side by side; leave out `stack`"):
+        kt.chart("bar", ev, interval=("lo", "hi"), stack=True)
+
+
+def test_dots_with_an_interval_put_each_row_s_groups_side_by_side_on_its_line():
+    ev = pd.DataFrame({"accuracy": [0.6, 0.7, 0.8], "model": ["m1", "m1", "m2"], "condition": ["cot", "plain", "cot"],
+                       "lo": [0.5, 0.6, 0.7], "hi": [0.7, 0.8, 0.9]})
+    spec = spec_of("dots", ev, interval=("lo", "hi"), marks={"chance": 0.5})
+    dots, rule = spec["layer"][0]["layer"]
+    assert dots["mark"] == "point" and dots["encoding"]["yOffset"] == {"field": "condition", "type": "nominal",
+                                                                       "sort": ["cot", "plain"]}
+    assert rule["mark"] == "rule" and rule["encoding"]["x"]["field"] == "lo" and rule["encoding"]["yOffset"]["field"] == "condition"
+    assert spec["layer"][1]["data"]["values"] == [{"accuracy": 0.5, "mark": "chance"}]
+    # without an interval a dots chart's groups share their row's line, as before
+    assert "yOffset" not in spec_of("dots", ev[["accuracy", "model", "condition"]])["encoding"]
+
+
+def test_a_wrong_interval_fails_with_one_line_that_names_what_it_takes():
+    t = pd.DataFrame({"week": pd.to_datetime(["2026-01-05", "2026-01-12"]), "n": [3, 5], "lo": [2, 4], "hi": [4, 6]})
+    cases = [
+        (("bar", EVALS), {"interval": "lo"}, "`interval` is the names of the two columns that hold each value's low and "
+                                             "high ends, such as (\"lo\", \"hi\"), not 'lo'"),
+        (("bar", EVALS), {"interval": ("lo", "upper")}, "`interval` names `upper`, which the frame lacks; its columns are "
+                                                        "model, accuracy, lo, hi"),
+        (("bar", EVALS.drop(columns="model")), {"interval": ("lo", "hi")}, "(category, value, group) columns, in that "
+                                                                         "order, beside the interval's lo and hi; got 1: accuracy"),
+        (("bar", EVALS.assign(hi=["a", "b", "c"])), {"interval": ("lo", "hi")}, "numbers; `hi` holds text"),
+        (("bar", EVALS), {"interval": ("hi", "lo")}, "`interval` is (low, high), and `hi` is above `lo` where `model` is 'm1'"),
+        (("bar", EVALS.assign(lo=0.05, hi=0.06)), {"interval": ("lo", "hi")},
+         "every `accuracy` lies outside its interval; `lo` and `hi` are the interval's low and high ends"),
+        (("bar", t), {"interval": ("lo", "hi")}, "`interval` draws around bars of text or number categories; `week` holds times"),
+        (("dots", t), {"interval": ("lo", "hi")}, "`interval` draws around an x of numbers; `week` holds times"),
+        (("line", EVALS), {"interval": ("lo", "hi")}, "takes the options label, marks, panels, not 'interval'"),
+    ]
+    for args, opts, words in cases:
+        with pytest.raises((ValueError, TypeError)) as e:
+            kt.chart(*args, **opts)
+        assert words in str(e.value) and "\n" not in str(e.value), str(e.value)
+    # a frame of four columns without `interval` is still a wrong bar chart
+    with pytest.raises(ValueError, match="got 4: model, accuracy, lo, hi"):
+        kt.chart("bar", EVALS)
+
+
+TURNS = pd.DataFrame({"turns": [1, 2, 3, 4, 100, 10, 20, 30, 40, 50, 7, 9],
+                      "agent": ["a"] * 5 + ["b"] * 5 + ["c"] * 2})
+
+
+def test_a_box_plot_s_rows_are_each_group_s_summary_ordered_by_median_and_cited_by_group():
+    bundle = drawn("box", TURNS)
+    spec = bundle[kt.VEGALITE_MIME]
+    # quartiles as pandas and Vega-Lite take them; whiskers to the farthest values within 1.5 box widths
+    assert spec["data"]["values"] == [
+        {"agent": "b", "n": 5, "low": 10, "q1": 20, "median": 30, "q3": 40, "high": 50},
+        {"agent": "c", "n": 2, "low": 7, "q1": 7.5, "median": 8, "q3": 8.5, "high": 9},
+        {"agent": "a", "n": 5, "low": 1, "q1": 2, "median": 3, "q3": 4, "high": 4},
+    ]
+    table = cite.chart_table(bundle)
+    assert table.label == "agent" and table.cells[table.labels.index("b")][table.columns.index("median")] == "30"
+    layers = spec["layer"]
+    faint, strip, low, high, box, median = layers
+    # every value is a faint dot behind its box; a group of fewer than BOX_MIN values is a strip of its dots alone
+    assert faint["mark"] == {"type": "point", "style": kt.FAINT_STYLE}
+    assert {r["agent"] for r in faint["data"]["values"]} == {"a", "b"} and len(faint["data"]["values"]) == 10
+    assert strip["mark"] == "point" and strip["data"]["values"] == [{"turns": 7, "agent": "c"}, {"turns": 9, "agent": "c"}]
+    assert all(l["transform"] == [{"filter": f'datum["n"] >= {kt.BOX_MIN}'}] for l in (low, high, box, median))
+    assert (low["mark"], low["encoding"]["x"]["field"], low["encoding"]["x2"]) == ("rule", "low", {"field": "q1"})
+    assert (high["encoding"]["x"]["field"], high["encoding"]["x2"]) == ("q3", {"field": "high"})
+    assert box["mark"] == {"type": "bar", "style": kt.BOX_STYLE} and box["encoding"]["x2"] == {"field": "q3"}
+    assert median["mark"] == {"type": "tick", "style": kt.MEDIAN_STYLE} and median["encoding"]["x"]["field"] == "median"
+    assert all(l["encoding"]["y"]["sort"] == ["b", "c", "a"] for l in layers)
+    assert all(l["encoding"]["x"]["title"] == "turns" for l in layers) and "color" not in box["encoding"]
+    assert spec_of("box", TURNS, sort=["a"])["layer"][0]["encoding"]["y"]["sort"] == ["a", "b", "c"]
+    # a Series is its values, grouped by its index when that is named
+    s = spec_of("box", TURNS.set_index("agent")["turns"])
+    assert s["data"]["values"][0]["agent"] == "b"
+    with pytest.raises(ValueError, match=r"takes \(value, group\) columns, in that order; got 1: turns"):
+        kt.chart("box", TURNS["turns"])
+    with pytest.raises(ValueError, match="the value numbers; `agent` holds text"):
+        kt.chart("box", TURNS[["agent", "turns"]])
+
+
+def test_a_box_plot_takes_a_label_s_colors_on_its_boxes_and_dots_and_keeps_its_median_order(label_ws):
+    act = pd.DataFrame({"records": [1, 2, 3, 4, 5, 50, 60, 70, 80, 90],
+                        "activity": ["money"] * 5 + ["captcha"] * 5})
+    spec = spec_of("box", act, label="activity type")
+    faint, low, high, box, median = spec["layer"]
+    color = {"field": "activity", "type": "nominal", "title": "activity", "sort": ["captcha", "money"], "legend": None}
+    assert faint["encoding"]["color"] == color and box["encoding"]["color"] == color
+    assert "color" not in median["encoding"], "the median is in ink"
+    assert kt._LABELS_READ == [{"id": "k1", "rev": 0}]
+
+
+def test_an_area_stacks_its_series_in_the_legend_s_order_overlaps_them_lightly_or_shares():
+    t = pd.date_range("2026-06-16", periods=3, freq="D")
+    posts = pd.DataFrame({"day": list(t) * 2, "posts": [1, 2, 3, 9, 8, 7], "site": ["a"] * 3 + ["b"] * 3})
+    spec = spec_of("area", posts)
+    enc = spec["encoding"]
+    assert spec["mark"] == {"type": "area", "point": True} and enc["x"]["type"] == "temporal"
+    assert enc["color"] == {"field": "site", "type": "nominal", "title": "site", "sort": ["b", "a"]}
+    assert enc["order"] == {"field": kt.STACK_FIELD, "type": "quantitative"}
+    assert spec["transform"] == [{"calculate": 'indexof(["b", "a"], datum["site"])', "as": kt.STACK_FIELD}]
+    over = spec_of("area", posts, stack=False)
+    assert over["mark"] == {"type": "area", "style": kt.OVERLAP_STYLE, "point": True}
+    assert over["encoding"]["y"]["stack"] is None and "order" not in over["encoding"]
+    share = spec_of("area", posts, stack="share")["encoding"]["y"]
+    assert share["stack"] == "normalize" and share["axis"] == {"format": "%"}
+    # a long series is a plain area; marks across it at an x
+    long = spec_of("area", pd.DataFrame({"step": range(40), "loss": range(40)}), marks={"warmup": 10})
+    assert long["layer"][0]["mark"] == "area" and long["layer"][1]["data"]["values"] == [{"step": 10, "mark": "warmup"}]
+    with pytest.raises(ValueError, match='the x numbers or times; `site` holds text; draw categories with "bar"'):
+        kt.chart("area", posts[["site", "posts"]])
+    with pytest.raises(ValueError, match="`stack` takes the series of a third column, which this frame lacks"):
+        kt.chart("area", posts[["day", "posts"]], stack=False)
+
+
+def test_the_marks_a_chart_names_by_their_job_are_styled_by_the_theme():
+    """A faint dot, a box, a median and an overlapping area carry no style of their own: the theme's `style` config gives
+    each its look (frontend lib/vizTheme vegaConfig)."""
+    theme = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib" / "vizTheme.ts").read_text()
+    for name in (kt.FAINT_STYLE, kt.BOX_STYLE, kt.MEDIAN_STYLE, kt.OVERLAP_STYLE):
+        assert f"'{name}':" in theme, name
