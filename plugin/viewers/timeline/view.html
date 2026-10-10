@@ -139,9 +139,10 @@ const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, initial: 'ser
 const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, initial: 'incident', onChange: load })
 const rows = thimble.rows({ mount: '#rows', fields: FIELDS, initial: 'source', onChange: () => { pick(null); load() } })
 const range = thimble.timeRange({ mount: '#range', readout: '#read', onChange: draw })
-// the lanes draw each event in the value the reader gave it, which holds for a label too, whose marks reach only the
-// rows the table draws; a failed event is underlined in the problem red; the table's rows in view are a tint across them
-const painted = { keeps: () => true, valueOf: (e) => e.value, colourOf: (v) => colour.colourOf(v) }
+// the lanes and the table's strip draw each event in the value the reader gave it, which holds for a label too, whose
+// marks reach only the rows the table draws; a row's bar is Color by's own (attr). In the lanes a failed event is
+// underlined in the problem red, and the table's rows in view are a tint across them
+const painted = { keeps: () => true, valueOf: (e) => e.value, colourOf: (v) => colour.colourOf(v), attr: (e) => colour.attr(e) }
 const lanes = thimble.timeline({
   mount: '#lanes', keyMount: '#key', rows, range, colour: painted, names: 112, follow: '#list',
   problem: FAILED, words: { problem: 'failed' },
@@ -153,7 +154,7 @@ const side = thimble.side({ mount: '#body', onClose: () => { open = null } })
 // the events in the range as a table: the time, the source, the kind (✕ before a failure), the actor and the incident,
 // which a narrow table drops first, and the text; a row opens in the side panel, and ↑ ↓ move it to the next
 const table = thimble.table({
-  mount: '#list', side, search,
+  mount: '#list', side, search, colour: painted,
   columns: [
     { name: 't', title: 'Time', type: 'time' },
     { name: 'source', title: 'Source', width: 64 },
