@@ -3,9 +3,10 @@
 // vega builds a view names in its libs, and the canvas's chart drawing (src/lib/kitChart.ts, bundled here as vite build
 // bundles it into kit/chart.js). A chart is drawn by the canvas's own code in the page's own theme: its one series in
 // --viz-1, its axis labels in --viz-font-label, on the paper; its groups in Color by's colours, as its records' bars
-// are, with no legend; a label's classes in the label's colours; refitted when its box narrows; and in a box too
-// narrow for its long names, the names are cut so the plot keeps its room, as on a card. A record's values line up at
-// each level, a long string is folded to six lines, and nothing runs past the side panel's width. thimble's answers to
+// are, with no legend; a label's classes in the label's colours; refitted when its box narrows, a chart of panels too,
+// which fills its box as on a card; and in a box too narrow for its long names, the names are cut so the plot keeps its
+// room, as on a card. A record's values line up at each level, a long string is folded to six lines, and nothing runs
+// past the side panel's width. thimble's answers to
 // the kit's chart fetches are given here as kernel_thimble.chart_spec writes them; that they are the card's spec is
 // backend/tests_public/test_view_kit_records_charts.py, and the kit's plumbing is tests/public/records-charts-kit.test.ts.
 import assert from 'node:assert/strict'
@@ -50,6 +51,15 @@ const ANSWERS: Record<string, object> = {
       encoding: { y: { field: 'agent', type: 'nominal', title: 'agent', sort: ['agent-2', 'agent-1'] }, x: { field: 'posts', type: 'quantitative', title: 'posts' },
         color: { field: 'tool', type: 'nominal', title: 'tool', sort: ['Read'] }, tooltip: tip(['agent', 'posts', 'tool']) } },
     n: 2,
+  },
+  // a line chart with panels=True: a composite, whose panels the drawing sizes to the room it is given
+  panels: {
+    spec: { $schema: SCHEMA, data: { values: [1, 2, 3].flatMap((day) => ['Read', 'Bash'].map((tool) => ({ day, posts: day + (tool === 'Read' ? 2 : 0), tool }))) },
+      mark: { type: 'line', point: true },
+      encoding: { x: { field: 'day', type: 'quantitative', title: 'day' }, y: { field: 'posts', type: 'quantitative', title: 'posts' },
+        color: { field: 'tool', type: 'nominal', title: 'tool', sort: ['Read', 'Bash'] }, row: { field: 'tool', type: 'nominal', sort: ['Read', 'Bash'], title: null } },
+      resolve: { scale: { y: 'independent' } } },
+    n: 6,
   },
   long: {
     spec: { $schema: SCHEMA, data: { values: [0, 1, 2].map((i) => ({ page: `Wikipedia:Requests for comment/the longest page name of them all, number ${i}`, posts: 3 + i })) }, mark: 'bar',
@@ -213,6 +223,20 @@ test('it is refitted when its box narrows, and cuts long names in a narrow box s
   assert.ok(got.svg <= 320, `inside its 320 px box: ${got.svg}`)
   assert.ok(got.plot >= 320 * 0.3, `the plot keeps its room: ${got.plot} px`)
   assert.ok(got.widest <= 320 * 0.35 + 4, `the names cut to fit: ${got.widest} px`)
+  await page.close()
+})
+
+test('a chart of panels fills its box, as on a card, and is fitted again when the box narrows', async () => {
+  const frame = await framed()
+  assert.equal(await chart(frame, '#a', 'panels'), true)
+  const wide = await frame.evaluate(() => document.querySelector('#a svg')!.getBoundingClientRect().width)
+  // the panels share the box with their legend's room, as on a card (they were drawn at Vega-Lite's own width, 369 px)
+  assert.ok(wide > 480 && wide <= 600, `as wide as its 600 px box: ${wide}`)
+  await frame.evaluate(() => ((document.getElementById('a') as HTMLElement).style.width = '400px'))
+  await frame.waitForFunction(() => {
+    const w = document.querySelector('#a svg')?.getBoundingClientRect().width ?? 0
+    return w > 300 && w <= 400
+  })
   await page.close()
 })
 

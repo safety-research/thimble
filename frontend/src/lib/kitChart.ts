@@ -8,11 +8,12 @@ import { drawChart, refitChart, type DrawnChart, type VegaModule } from './vegaD
 
 /** What viewer_chart.js finds as window.__thimbleCharts. */
 export interface KitCharts {
-  /** draw a Vega-Lite spec in `el` as the canvas draws a chart (lib/vegaDraw drawChart), with these labels' colours */
+  /** draw a Vega-Lite spec in `el` as the canvas draws a chart (lib/vegaDraw drawChart), with these labels' colours, a
+   * composite fitted to `fitWidth` */
   draw: (
     el: HTMLElement,
     spec: Record<string, unknown>,
-    opts: { labels?: readonly (readonly LabelClassColour[])[]; alive?: () => boolean; replace?: () => void; drawn?: (chart: DrawnChart) => void },
+    opts: { fitWidth?: number; labels?: readonly (readonly LabelClassColour[])[]; alive?: () => boolean; replace?: () => void; drawn?: (chart: DrawnChart) => void },
   ) => Promise<DrawnChart | null>
   /** a chart that takes its box's width read again after a resize; false when nothing changed or it cannot refit */
   refit: (chart: DrawnChart, el: HTMLElement) => boolean

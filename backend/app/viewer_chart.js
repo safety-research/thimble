@@ -288,6 +288,8 @@
     var last = st.last
     return (st.drawing = charts
       .draw(st.plot, last.spec, {
+        // the room it has, which a chart of panels is fitted to, as a card's is to its body's width
+        fitWidth: st.plot.clientWidth || el.clientWidth,
         labels: last.labels,
         alive: alive,
         replace: function () {
