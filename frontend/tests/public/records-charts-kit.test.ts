@@ -130,6 +130,20 @@ describe('thimble.record', () => {
     expect(doc().querySelector('[data-fold="/tags"]')!.getAttribute('aria-expanded')).toBe('false')
     win().thimble.record({ mount: '#rec', value: REC, ref: 'a.jsonl#L2' })
     expect(doc().querySelector('[data-fold="/tags"]')!.getAttribute('aria-expanded')).toBe('true')
+    // new words show every match: a branch folded by hand opens, and a long list shows the item past its first 100
+    click(doc().querySelector('[data-fold="/input"]'))
+    got = win().thimble.record({ mount: '#rec', value: REC, ref: 'a.jsonl#L2', find: 'recursive' })
+    expect(got.hits).toBe(1)
+    expect(doc().querySelector('[data-fold="/input"]')!.getAttribute('aria-expanded')).toBe('true')
+    // the same words again leave a branch the analyst folded since
+    click(doc().querySelector('[data-fold="/input"]'))
+    expect(win().thimble.record({ mount: '#rec', value: REC, ref: 'a.jsonl#L2', find: 'recursive' }).hits).toBe(0)
+    expect(doc().querySelector('[data-fold="/input"]')!.getAttribute('aria-expanded')).toBe('false')
+    expect(doc().querySelector('[data-more="/steps"]')).not.toBeNull()
+    got = win().thimble.record({ mount: '#rec', value: { ...REC, steps: REC.steps.map(String) }, ref: 'a.jsonl#L2', find: '142' })
+    expect(got.hits).toBe(1)
+    expect(doc().querySelector('[data-more="/steps"]')).toBeNull()
+    expect(texts('mark.thimble-record-hit')).toEqual(['142'])
   })
 
   test('draws JSON text as what it holds, a plain value alone, and with `open` 1 folds every nested value', async () => {

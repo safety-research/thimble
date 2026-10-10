@@ -119,6 +119,7 @@
     this.folds = {} // path -> true (opened) or false (folded) by hand
     this.longs = {} // path -> true while a long string is open
     this.more = {} // path -> true once all its items show
+    this.q = ''
     this.args = null
     this.hits = 0
     mount.addEventListener('click', function (e) {
@@ -145,7 +146,13 @@
     var hit = key != null && String(key).toLowerCase().indexOf(q) >= 0
     if (isBranch(v)) {
       var es = entries(v)
-      for (var i = 0; i < es.length; i++) if (this.scan(es[i][1], step(path, es[i][0]), Array.isArray(v) ? null : es[i][0])) hit = true
+      var list = Array.isArray(v)
+      for (var i = 0; i < es.length; i++) {
+        if (!this.scan(es[i][1], step(path, es[i][0]), list ? null : es[i][0])) continue
+        hit = true
+        // a match past the items a long list shows at first
+        if (list && i >= MANY && es.length > MANY + 10) this.beyond[path] = true
+      }
     } else if (plain(v).toLowerCase().indexOf(q) >= 0) hit = true
     if (hit) this.found[path] = true
     return hit
@@ -228,19 +235,32 @@
     this.args = args
     var v = parsed(args.value)
     var ref = args.ref == null || args.ref === '' ? null : String(args.ref)
-    if (ref !== this.ref) {
+    var fresh = ref !== this.ref
+    if (fresh) {
       this.ref = ref
       this.folds = {}
       this.longs = {}
       this.more = {}
     }
     this.open = Number(args.open) >= 0 ? Number(args.open) : OPEN
-    this.q = typeof args.find === 'string' ? args.find.trim().toLowerCase() : ''
+    var q = typeof args.find === 'string' ? args.find.trim().toLowerCase() : ''
+    fresh = fresh || q !== this.q
+    this.q = q
     this.hits = 0
     this.found = null
     if (this.q && isBranch(v)) {
       this.found = {}
+      this.beyond = {}
       this.scan(v, '', null)
+      // words just asked for show every match: what holds one opens, though it was folded by hand, and a long list
+      // shows all its items when one past its first matches; the same words again leave what the analyst folded since
+      if (fresh) {
+        for (var p in this.found) {
+          delete this.folds[p]
+          delete this.longs[p]
+        }
+        for (var b in this.beyond) this.more[b] = true
+      }
     }
     var colour = args.colour && typeof args.colour.attr === 'function' ? ctl.safe(function () { return args.colour.attr(v) }, '') || '' : ''
     var text = ''
