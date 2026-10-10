@@ -3,6 +3,7 @@ extension used (colour) still works as its alias: the `thimble` module's colors,
 "color" of a mark and of a label a reader gets, show_label's `colors`, and the `color` of a check's front matter and of
 an extension's check.json."""
 import json
+import re
 from pathlib import Path
 
 from app import checks, kernel_thimble, prompts, tools, views
@@ -56,3 +57,20 @@ def test_a_check_s_color_and_its_british_alias(monkeypatch, tmp_path):
     assert (got["ext-new"]["colour"], got["ext-old"]["colour"]) == (5, 7)
     schema = json.loads((Path(checks.__file__).with_name("extension.schema.json")).read_text())
     assert {"color", "colour"} <= set(schema["$defs"]["check"]["properties"])
+
+
+BRITISH = re.compile(r"(?<![\w-])(colour\w*|grey\w*|behaviours?|centre[sd]?|neighbour\w*|labell(?:ed|ing)|organis\w*|"
+                     r"recognis\w*|summaris\w*|normalis\w*|favour\w*|licence)(?![\w-])", re.I)
+CODE = re.compile(r"`[^`\n]*`|\{\w+\}")  # inline code (identifiers, the British aliases) and a prompt's {placeholders}
+
+
+def test_the_prompts_and_docs_are_written_in_american_english():
+    """Matt (10-10): "Colour > Color (not british)". What the agents and the analyst read is spelled the American way;
+    an inline code span may still name a British alias."""
+    root = Path(__file__).resolve().parents[2]
+    files = [*root.glob("prompts/**/*.md"), *root.glob("docs/*.md"), *root.glob("plugin/skills/**/*.md"),
+             *root.glob("extensions/*/cards/*/card.md"), root / "mods/thimble-term/README.md",
+             root / "mods/thimble-term/SPEC.md", root / "README.md", root / "INSTALL.md", root / "CONTRIBUTING.md"]
+    found = [f"{p.relative_to(root)}:{n}: {m.group(0)}" for p in files for n, line in enumerate(p.read_text().splitlines(), 1)
+             for m in BRITISH.finditer(CODE.sub(" ", line))]
+    assert not found, found

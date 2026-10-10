@@ -196,7 +196,7 @@
     post({ type: P + 'error', message: String((err && (err.message || err.reason)) || err) })
   }
   function aborted() {
-    var err = new Error('the fetch was cancelled')
+    var err = new Error('the fetch was canceled')
     err.name = 'AbortError'
     return err
   }

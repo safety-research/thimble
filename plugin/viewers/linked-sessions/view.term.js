@@ -25,7 +25,7 @@ const FILE_TYPES = {
   'test .json': 'A JSON file under tests/, such as a fixture', '.md': 'A Markdown file', '.toml': 'A TOML file, such as pyproject.toml',
 }
 
-let data = null // the reader's overview: {runs, sessions, spawns, items, counts, fcounts, colours, groups}
+let data = null // the reader's overview: {runs, sessions, spawns, items, counts, fcounts, colors, groups}
 let items = [] // the calls and messages the filters keep, in time order
 let chosen = null // the lane read: a session's id, or a group's key under another Rows choice
 let seq = 0
@@ -44,7 +44,7 @@ const runTitle = (id) => (teams[id] ? `${runName(id)} · ${teams[id]}` : runName
 const bySession = () => ln.field === 'session'
 
 // Color by, the one color: the speaker, the tool, the file type, the outcome or a label
-const colour = colorBy({
+const color = colorBy({
   // each field says what it is, and `meanings` what the values the transcripts' format fixes mean (reader.py's notes)
   fields: [
     {
@@ -93,14 +93,14 @@ const q = search({ words: 'search', onChange: load })
 // the one control for time: every turn over the whole span, a break where the runs lie hours apart
 const range = timeRange({ gap: GAP })
 // with a label chosen, a turn's value is the reader's, so the lanes need not ask thimble for each turn's marks
-const valueOf = (it) => (colour.label ? (data && data.colours[it.ref]) ?? null : colour.valueOf(it))
-const laneColour = { keeps: () => true, valueOf, colourOf: (v) => colour.colourOf(v) }
+const valueOf = (it) => (color.label ? (data && data.colors[it.ref]) ?? null : color.valueOf(it))
+const laneColor = { keeps: () => true, valueOf, colorOf: (v) => color.colorOf(v) }
 // the lanes: each turn's bar in its hue, a call that ran past its cell (a Task call while its subagent ran) a line in its
 // hue, a cell where most calls failed a red ×, always shown, as the transcript gives `× Bash`; the transcript's turns
 // in view on the selection background
 const overview = timeline({
   rows: ln,
-  colour: laneColour,
+  color: laneColor,
   time: (it) => it.time,
   end: (it) => it.time + (it.duration || 0),
   problem: (it) => it.kind === 'call' && it.outcome !== 'ok',
@@ -120,14 +120,14 @@ async function load() {
   const my = ++seq
   let got
   try {
-    got = await fetch({ op: 'overview', colour: colour.query(), filter: filter.query(), rows: ln.query(), search: q.text.trim() }, { key: 'overview' })
+    got = await fetch({ op: 'overview', color: color.query(), filter: filter.query(), rows: ln.query(), search: q.text.trim() }, { key: 'overview' })
   } catch (e) {
     if (e.name === 'AbortError') return
     throw e
   }
   if (my !== seq) return
   data = got
-  colour.counts(data.counts)
+  color.counts(data.counts)
   filter.counts(data.fcounts)
   sessions()
   // under a label, a turn's lane is the reader's value of it (`group`); under a field, the kit reads the field
@@ -271,9 +271,9 @@ draw((d) => {
     const r = d.row()
     q.add(r).gap()
     filter.add(r, { max: r.room }).end()
-    colour.draw(d, (rr) => ln.add(rr).gap())
+    color.draw(d, (rr) => ln.add(rr).gap())
   } else {
-    colour.draw(d, (r) => {
+    color.draw(d, (r) => {
       q.add(r).gap()
       filter.add(r, { max: Math.max(24, Math.floor(d.cols * 0.45)) }).gap()
       ln.add(r).gap()
@@ -325,7 +325,7 @@ draw((d) => {
   // how many turns it shows, and when the session ran or how many sessions the lane holds, where the panel has room
   const span = session ? `${hms(session.start)} – ${hms(session.end)}` : plural(new Set(turns.map((t) => t.session)).size, 'session')
   const count = `${turns.length < total ? `${turns.length} of ${total}` : turns.length} turns${d.cols >= 72 ? ` · ${span}` : ''}`
-  tr.draw(d, { turns, title, count, colour, side: pane, onOpen: opened, empty: range.full ? 'no turn holds the search or passes the filters' : 'no turn in this time range' })
+  tr.draw(d, { turns, title, count, color, side: pane, onOpen: opened, empty: range.full ? 'no turn holds the search or passes the filters' : 'no turn in this time range' })
   // moving between sessions: the next or previous lane, the subagent the chosen Task call started, the session that
   // started this one
   const at = ls.findIndex((l) => String(l.key) === chosen)

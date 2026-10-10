@@ -167,9 +167,9 @@ thimble.chart('#posts', 'bar', counts.map((c) => ({ Agent: c.agent, Posts: c.n }
 
 Beside the options above it takes three of the kit's own:
 
-- `colour`: Color by. The group or series column's values take Color by's colors, the colors of their records' bars,
+- `color`: Color by. The group or series column's values take Color by's colors, the colors of their records' bars,
   and the chart draws no legend, since Color by's chips are its key; a value with no color, as with Off or a value
-  turned off, is gray. A page groups its records by `colour.valueOf(record)` for that column.
+  turned off, is gray. A page groups its records by `color.valueOf(record)` for that column.
 - `onPick(row)`: a mark clicked, with its row, such as to filter by its category or to open it in the side panel.
 - `height`: the plot's height in px, at most 36 px a row for the rows a chart names down its side, so a few bars stay
   bars.

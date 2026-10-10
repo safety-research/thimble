@@ -27,7 +27,7 @@ export function LabelPalette({ label, anchor, open, onClose, onPick }: Props) {
   }, [open, lead])
   const current = classes.find((c) => c.name === value)?.color
   return (
-    <Popover anchor={anchor} open={open} onClose={onClose} label={`Colours of ${label.name}`} className="label-palette">
+    <Popover anchor={anchor} open={open} onClose={onClose} label={`Colors of ${label.name}`} className="label-palette">
       {multi && (
         <div className="label-palette-values" role="radiogroup" aria-label="Value">
           {classes.map((c) => (
@@ -53,7 +53,7 @@ export function LabelPalette({ label, anchor, open, onClose, onPick }: Props) {
             type="button"
             className={'label-palette-colour' + (n === current ? ' is-current' : '')}
             style={{ '--c': colourVar(n) } as CSSProperties}
-            aria-label={n ? `Colour ${n}` : 'Grey'}
+            aria-label={n ? `Color ${n}` : 'Gray'}
             aria-pressed={n === current}
             onClick={() => {
               onPick(value, n)

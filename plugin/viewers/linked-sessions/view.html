@@ -12,7 +12,7 @@
   .top { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border-subtle); }
   #search { flex: 0 1 260px; min-width: 200px; }
   /* Color by takes the row's free width, and a row of its own where less than that is left, so the row never runs past the pane */
-  #colour { min-width: min(100%, 280px); }
+  #color { min-width: min(100%, 280px); }
   /* the overview: the range and its axis over the lanes, the names in a column at the left. It never scrolls, down or
      sideways, though the divider sets it to: the lanes take the height it has, the divider's or about half the page */
   #overview { flex: none; min-height: 0; overflow: hidden !important; }
@@ -47,7 +47,7 @@
     <span id="search"></span>
     <span id="filter"></span>
     <span id="rows"></span>
-    <span id="colour"></span>
+    <span id="color"></span>
   </div>
   <div id="overview">
     <div class="time">
@@ -86,7 +86,7 @@ const FILE_TYPES = {
   'test .json': 'A JSON file under tests/, such as a fixture', '.md': 'A Markdown file', '.toml': 'A TOML file, such as pyproject.toml',
 }
 
-let data = null // the reader's overview: {runs, sessions, spawns, items, counts, fcounts, colours, groups}
+let data = null // the reader's overview: {runs, sessions, spawns, items, counts, fcounts, colors, groups}
 let items = [] // the calls and messages the filters keep, in time order
 let chosen = null // the lane read in the transcript: a session's id, or a group's key under another Rows choice
 let drawn = '' // what the transcript last drew, so a redraw that changes nothing leaves it and its scroll alone
@@ -108,8 +108,8 @@ const runTitle = (id) => (teams[id] ? `${runName(id)} · ${teams[id]}` : runName
 // holds them; the reader keeps only the turns that hold them, so the lanes show those alone
 const search = thimble.search({ mount: '#search', in: '#body', placeholder: 'Search the transcripts', onChange: () => load() })
 // Color by, the one color: the speaker, the tool, the file type, the outcome or a label that is on
-const colour = thimble.colorBy({
-  mount: '#colour',
+const color = thimble.colorBy({
+  mount: '#color',
   // each field says what it is, and `meanings` what the values the transcripts' format fixes mean (reader.py's notes),
   // which the menu and a chip's hover give
   fields: [
@@ -161,15 +161,15 @@ const rows = thimble.rows({
 // apart, and a viewfinder over the part the lanes and the transcript show
 const range = thimble.timeRange({ mount: '#range', readout: '#readout', gap: 1200, onChange: draw })
 // with a label chosen, a turn's value is the reader's, since the page holds a label's marks only for what it shows
-const valueOf = (it) => (colour.label ? (data && data.colours[it.ref]) ?? null : colour.valueOf(it))
-const laneColour = { keeps: () => true, valueOf, colourOf: (v) => colour.colourOf(v) }
+const valueOf = (it) => (color.label ? (data && data.colors[it.ref]) ?? null : color.valueOf(it))
+const laneColor = { keeps: () => true, valueOf, colorOf: (v) => color.colorOf(v) }
 const bySession = () => rows.field === 'session'
 // the lanes: each turn a mark as wide as its call took (a Task call as long as its subagent ran), a failed call a ✕
 // in the problem red at its mark's foot; the transcript's turns in view tinted across them; the groups of Rows in the
 // room the overview has
 const failed = (it) => it.kind === 'call' && it.outcome !== 'ok'
 const lanes = thimble.timeline({
-  mount: '#lanes', keyMount: '#key', range, colour: laneColour, names: NAMES,
+  mount: '#lanes', keyMount: '#key', range, color: laneColor, names: NAMES,
   groups: (its) => fitted(rows.groups(its)),
   time: (it) => it.time,
   end: (it) => it.time + (it.duration || 0),
@@ -182,20 +182,20 @@ const lanes = thimble.timeline({
 })
 // the transcript: a card per turn as the File browser draws it, a tool call folded to its line; a Task call opened
 // shows the subagent's transcript beside it in the side panel
-const tr = thimble.transcript({ mount: '#turns', colour, onOpen: (turn) => opened(turn) })
+const tr = thimble.transcript({ mount: '#turns', color, onOpen: (turn) => opened(turn) })
 const side = thimble.side({ mount: '#body', width: 0.42, key: 'subagent' })
 let sideTr = null
 
 async function load() {
   let got
   try {
-    got = await thimble.fetch({ op: 'overview', colour: colour.query(), filter: filter.query(), rows: rows.query(), search: search.text.trim() }, { key: 'overview' })
+    got = await thimble.fetch({ op: 'overview', color: color.query(), filter: filter.query(), rows: rows.query(), search: search.text.trim() }, { key: 'overview' })
   } catch (e) {
     if (e.name === 'AbortError') return
     throw e
   }
   data = got
-  colour.counts(data.counts)
+  color.counts(data.counts)
   filter.counts(data.fcounts)
   sessions()
   // under a label, a turn's lane is the reader's value of it (`group`); under a field, the page reads the field
@@ -443,7 +443,7 @@ async function transcript() {
     turns.length < total ? `of ${total}` : '',
     session ? `${hms(session.start)} – ${hms(session.end)}` : `${new Set(turns.map((t) => t.session)).size} sessions`,
   ].filter(Boolean).join(' · ')
-  const sig = JSON.stringify([key, turns.map((t) => t.ref), colour.query()])
+  const sig = JSON.stringify([key, turns.map((t) => t.ref), color.query()])
   if (sig === drawn) return
   drawn = sig
   tr.draw(turns, { title, sub, empty: range.full ? 'No turn holds the search or passes the filters' : 'No turn in this time range' })
@@ -508,7 +508,7 @@ async function beside(id) {
     ref: `view:${slug}/${id}`,
     render: (body) => {
       body.innerHTML = `<div class="side-acts"><button class="btn btn-secondary btn-sm" data-read="${esc(id)}">Read ${esc(names[id])} here</button></div><div class="side-turns"></div>`
-      sideTr = thimble.transcript({ mount: body.querySelector('.side-turns'), colour, onOpen: (turn) => opened(turn) })
+      sideTr = thimble.transcript({ mount: body.querySelector('.side-turns'), color, onOpen: (turn) => opened(turn) })
       sideTr.draw(turns, { empty: 'No turn passes the filters' })
       if (search.text.trim()) wholeFor(turns)
     },
@@ -595,7 +595,7 @@ thimble.onLabels((state) => {
   if (labelFilter != null && now !== labelFilter) soon()
   labelFilter = now
 })
-thimble.onMarks(() => { if (colour.label || filter.label || rows.label) soon() })
+thimble.onMarks(() => { if (color.label || filter.label || rows.label) soon() })
 load()
 </script>
 </body>

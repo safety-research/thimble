@@ -156,7 +156,7 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
 }
 
 /** The change a view built without label controls is asked for (AddLabelControls), in the analyst's words. */
-export const ADD_LABEL_CONTROLS = 'Add label controls to this view: the labels over its files, each with a switch to turn it on or off and its colours.'
+export const ADD_LABEL_CONTROLS = 'Add label controls to this view: the labels over its files, each with a switch to turn it on or off and its colors.'
 
 /** Beside a view whose page draws no label controls of its own, as views built before they were required: one quiet
  * line that asks the dev agent to add them, as a change to the view, which then builds as any change does. */

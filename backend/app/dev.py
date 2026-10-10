@@ -1943,9 +1943,9 @@ APPLY_UNANSWERED = "not applied because nobody answered within {wait}. The chang
 CODE_QUESTION = ("This edits thimble's own code, which then runs outside the sandbox (its test server, its checks and "
                  "git). Allow?")
 CODE_WHY = ("The ticket's checks can't run in a sandbox here ({why}), so thimble asks this before every code ticket, in "
-            "every permission mode. Unanswered, the ticket is cancelled after {wait}.")
+            "every permission mode. Unanswered, the ticket is canceled after {wait}.")
 CODE_NOT_ALLOWED = "the analyst did not allow it to edit thimble's own code, so it did not start"
-CODE_UNANSWERED = "cancelled because nobody answered within {wait} whether it may edit thimble's own code"
+CODE_UNANSWERED = "canceled because nobody answered within {wait} whether it may edit thimble's own code"
 CODE_NOBODY = ("it has no workspace, so no permission card could ask the analyst about thimble's own code, and it did "
                "not start")
 FILES_SHOWN = 8

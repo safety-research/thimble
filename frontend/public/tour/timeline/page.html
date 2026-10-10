@@ -195,10 +195,10 @@ const thimble = (() => {
     const lg = vals.map(([k, n, c]) => {
       const isLabel = st.by === 'labels' && k !== 'No label'
       const cls = st.hidden.has(k) ? ' is-off' : st.iso === k ? ' is-iso' : st.iso ? ' is-dim' : ''
-      return `<button class="th-lg${cls}" type="button" data-k="${esc(k)}" title="Click to show only ${esc(k)}, ⌥-click to hide it"><span class="th-swb" data-sw="${esc(k)}" title="Change the colour"><span class="th-sw" style="--c:${c}"></span></span><span class="${isLabel ? 'th-lname' : ''}">${esc(k)}</span><span class="th-n">${n}</span></button>`
+      return `<button class="th-lg${cls}" type="button" data-k="${esc(k)}" title="Click to show only ${esc(k)}, ⌥-click to hide it"><span class="th-swb" data-sw="${esc(k)}" title="Change the color"><span class="th-sw" style="--c:${c}"></span></span><span class="${isLabel ? 'th-lname' : ''}">${esc(k)}</span><span class="th-n">${n}</span></button>`
     }).join('')
     const onlyBtn = st.iso && st.by === 'labels' && st.iso !== 'No label' ? `<button class="btn btn-ghost btn-sm th-only" type="button">Only these</button>` : ''
-    el.innerHTML = `<span class="th-colour"><button class="btn btn-ghost btn-sm th-colour-by" type="button" aria-haspopup="menu">${ico('palette')}Colour by <b>${by}</b>${ico('down')}</button><span class="th-legend">${lg}</span>${onlyBtn}</span>`
+    el.innerHTML = `<span class="th-colour"><button class="btn btn-ghost btn-sm th-colour-by" type="button" aria-haspopup="menu">${ico('palette')}Color by <b>${by}</b>${ico('down')}</button><span class="th-legend">${lg}</span>${onlyBtn}</span>`
     el.querySelector('.th-colour-by').onclick = (ev) => menu(ev.currentTarget)
     for (const b of el.querySelectorAll('.th-lg')) b.onclick = (ev) => {
       const sw = ev.target.closest('[data-sw]')
@@ -216,7 +216,7 @@ const thimble = (() => {
     for (const e of D.events) for (const m of e.marks) vals.set(m, (vals.get(m) || 0) + 1)
     const byRows = [['labels', 'Labels'], ...fields].map(([k, n]) => `<button class="th-item${st.by === k ? ' is-on' : ''}" data-by="${k}"><span class="th-lab">${n}</span>${st.by === k ? ico('check', 'ico th-tick') : ''}</button>`).join('')
     const labRows = LABELS.map((l) => `<button class="th-item" data-lab="${esc(l.name)}"><span class="th-switch${st.on[l.name] ? ' on' : ''}"></span><span class="th-sw" style="--c:${st.colours[l.name]}"></span><span class="th-lab">${esc(l.name)}</span><span class="th-n">${vals.get(l.name) || 0}</span></button>`).join('')
-    const p = pop(anchor, `<div class="th-head">Colour by</div>${byRows}<div class="th-head">Labels over these files</div>${labRows}<div class="th-sep"></div><form class="th-prompt"><input placeholder="Label from prompt…" aria-label="Label from prompt"><button class="th-prompt-go" type="submit" title="Make the label">${ico('up')}</button></form>`, 'right')
+    const p = pop(anchor, `<div class="th-head">Color by</div>${byRows}<div class="th-head">Labels over these files</div>${labRows}<div class="th-sep"></div><form class="th-prompt"><input placeholder="Label from prompt…" aria-label="Label from prompt"><button class="th-prompt-go" type="submit" title="Make the label">${ico('up')}</button></form>`, 'right')
     p.style.width = '260px'
     p.onclick = (ev) => {
       const b = ev.target.closest('[data-by],[data-lab]')

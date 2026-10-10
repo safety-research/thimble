@@ -10,7 +10,7 @@
   #view { height: 100%; display: flex; flex-direction: column; }
   .top { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border-subtle); }
   #search { flex: 0 1 260px; min-width: 200px; }
-  #colour { min-width: min(300px, 100%); max-width: 100%; }
+  #color { min-width: min(300px, 100%); max-width: 100%; }
   /* the overview: the readout, the range and its axis over the lanes, one column of time with the lanes' names in its
      gutter; the time stays put while the lanes scroll under it, and the divider under it sets its height; it is as wide
      as the pane, so it never scrolls sideways */
@@ -47,7 +47,7 @@
     <span id="search"></span>
     <span id="filter"></span>
     <span id="rows"></span>
-    <span id="colour"></span>
+    <span id="color"></span>
   </div>
   <div id="overview">
     <div class="time">
@@ -135,16 +135,16 @@ const FIELDS = [
 // the search marks the words in the table's rows and in the event open beside them, and the reader keeps only the
 // events that hold them, so the lanes show those alone; the table counts the events it keeps (drawList)
 const search = thimble.search({ mount: '#search', in: '#body', placeholder: 'Search events', onChange: () => load() })
-const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, initial: 'service', onChange: load })
+const color = thimble.colorBy({ mount: '#color', fields: FIELDS, initial: 'service', onChange: load })
 const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, initial: 'incident', onChange: load })
 const rows = thimble.rows({ mount: '#rows', fields: FIELDS, initial: 'source', onChange: () => { pick(null); load() } })
 const range = thimble.timeRange({ mount: '#range', readout: '#read', onChange: draw })
 // the lanes and the table's strip draw each event in the value the reader gave it, which holds for a label too, whose
 // marks reach only the rows the table draws; a row's bar is Color by's own (attr). In the lanes a failed event is
 // a ✕ in the problem red, and the table's rows in view are a tint across them
-const painted = { keeps: () => true, valueOf: (e) => e.value, colourOf: (v) => colour.colourOf(v), attr: (e) => colour.attr(e) }
+const painted = { keeps: () => true, valueOf: (e) => e.value, colorOf: (v) => color.colorOf(v), attr: (e) => color.attr(e) }
 const lanes = thimble.timeline({
-  mount: '#lanes', keyMount: '#key', rows, range, colour: painted, names: 112, follow: '#list',
+  mount: '#lanes', keyMount: '#key', rows, range, color: painted, names: 112, follow: '#list',
   problem: FAILED, words: { problem: 'failed' },
   tip: (e) => `${e.kind}${FAILED(e) ? ' · failed' : ''} · ${e.actor} · ${e.text}`,
   onPick: (lane) => pick(picked && picked.key === lane.key ? null : lane),
@@ -155,7 +155,7 @@ const side = thimble.side({ mount: '#body', onClose: () => { open = null } })
 // failure), the actor and the incident, which a narrow table drops first, and the text; a row opens in the side panel,
 // and ↑ ↓ move it to the next
 const table = thimble.table({
-  mount: '#list', side, search, colour: painted,
+  mount: '#list', side, search, color: painted,
   columns: [
     { name: 't', title: 'Time', type: 'time', drop: false, days: true },
     { name: 'source', title: 'Source', width: 64 },
@@ -172,7 +172,7 @@ const reset = thimble.onReset({ changed: () => picked != null || keep.length > 0
 
 async function load() {
   const my = ++seq
-  const query = { op: 'overview', colour: colour.query(), filter: filter.query(), rows: rows.query(), q: search.text.trim(), keep }
+  const query = { op: 'overview', color: color.query(), filter: filter.query(), rows: rows.query(), q: search.text.trim(), keep }
   const cols = {}, counts = {}, fcounts = {}
   let from = 0
   busy = true
@@ -194,7 +194,7 @@ async function load() {
     if (my === seq) busy = false
   }
   E = (cols.r || []).map((_, i) => Object.fromEntries(Object.keys(cols).map((k) => [k, cols[k][i]])))
-  colour.counts(counts)
+  color.counts(counts)
   filter.counts(fcounts)
   // the overview keeps the whole span whatever the filters keep, so the viewfinder stays where it was
   const pad = (span[1] - span[0]) * 0.005
@@ -273,7 +273,7 @@ async function details(body, e) {
     '<div class="rec"></div>'
   thimble.text(box.querySelector('.words'), text || kind, { format: 'plain' })
   // its bar the event's Color by value, which its fields may leave out
-  thimble.record({ mount: box.querySelector('.rec'), value: { ...fields, [d.raw.length > 1 ? 'lines' : 'line']: d.raw.map(([, s]) => s).join('\n') }, ref: d.ref, mono: ['line', 'lines'], colour: { attr: () => painted.attr(e) } })
+  thimble.record({ mount: box.querySelector('.rec'), value: { ...fields, [d.raw.length > 1 ? 'lines' : 'line']: d.raw.map(([, s]) => s).join('\n') }, ref: d.ref, mono: ['line', 'lines'], color: { attr: () => painted.attr(e) } })
 }
 $('body').addEventListener('click', (ev) => {
   const go = ev.target.closest('[data-go]')
@@ -294,7 +294,7 @@ const moved = (id, e, v) => {
 }
 let later = null
 thimble.onMarks(() => {
-  if ((colour.label || rows.label) && E.some((e) => moved(colour.label, e, e.value) || moved(rows.label, e, e.group))) { clearTimeout(later); later = setTimeout(load, 300) }
+  if ((color.label || rows.label) && E.some((e) => moved(color.label, e, e.value) || moved(rows.label, e, e.group))) { clearTimeout(later); later = setTimeout(load, 300) }
 })
 
 // the viewfinder on an incident's main burst, with a little room on each side: the run of its events with no gap over

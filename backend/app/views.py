@@ -3171,7 +3171,7 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
                          "units shown"
                          + (f", {int(x.get('drawn') or 0)} of the {int(x.get('due') or 0)} the test label marks drawn marked"
                             if s.get("state", "overview") in LABELLED_STATES else "")
-                         + (f", its colour seen on {int(p.get('seen') or 0)} of the {int(p.get('checked') or 0)} in view"
+                         + (f", its color seen on {int(p.get('seen') or 0)} of the {int(p.get('checked') or 0)} in view"
                             if s.get("state", "overview") in LABELLED_STATES and p.get("checked") else "")
                          + (f", {int(x.get('unkept') or 0)} records shown that the filter drops"
                             if s.get("state") == "filtered" else ""))
@@ -4049,7 +4049,7 @@ def choice_problems(shots: list[dict[str, Any]]) -> list[str]:
     return [_hint("view-choice-error", count=len(bad), choices=named + more)
             or f"{_plural(len(bad), 'choice')} of the view's controls gave a script error when chosen: {named}{more}. "
                "Every choice the analyst can make must draw the view, None and Off among them: guard what the page "
-               "reads of a choice that can be null (rows.by, colour.by, filter.by) and draw the records in one group, "
+               "reads of a choice that can be null (rows.by, color.by, filter.by) and draw the records in one group, "
                "or uncolored, for it."]
 
 
@@ -5472,7 +5472,7 @@ async def records_route(c: str, slug: str, body: RecordsBody, request: Request,
         return {"data": (await asyncio.to_thread(kit_answer, c, body.query))[1]}
     cid = view_calls.call_id(body.call)
     if view_calls.cancelled_before(c, cid):
-        raise HTTPException(409, {"message": "the call was cancelled", "cancelled": True})
+        raise HTTPException(409, {"message": "the call was canceled", "cancelled": True})
     sink: dict[str, Any] = {}
     work = asyncio.ensure_future(reader_call(c, slug, "records", body.query, version=v, call=cid, sink=sink, raw=True))
     call = view_calls.begin(c, slug, cid, indexes_dir(c))
@@ -5493,7 +5493,7 @@ async def records_route(c: str, slug: str, body: RecordsBody, request: Request,
     except asyncio.CancelledError:
         task = asyncio.current_task()
         if work.cancelled() and not (task is not None and task.cancelling()):
-            raise HTTPException(409, {"message": "the call was cancelled", "cancelled": True}) from None
+            raise HTTPException(409, {"message": "the call was canceled", "cancelled": True}) from None
         work.cancel()
         raise
     finally:

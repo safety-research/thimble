@@ -2297,7 +2297,7 @@ def read_cut(refs: list[str], tokens: list[int], short: int, total: int | None, 
 
 
 def _cancelled_message(n: int, unit: str) -> str:
-    return f"cancelled by the analyst after {n:,} {unit}{'' if n == 1 else 's'}; the rows written so far are kept"
+    return f"canceled by the analyst after {n:,} {unit}{'' if n == 1 else 's'}; the rows written so far are kept"
 
 
 async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path, cancel: threading.Event,
