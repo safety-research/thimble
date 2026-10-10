@@ -761,9 +761,11 @@ export function diagramLayout(g: GraphDataset, opts: DiagramLayoutOptions = {}):
     return { e, rev, path, line, spots }
   })
   // a label's box is clear where no box, no other label and no other edge's line runs under it, so it is read as its
-  // own edge's; where no spot is that clear, one clear of the boxes and the labels does
+  // own edge's; where no spot is that clear, one clear of the boxes and the labels does. A line is tested only where its
+  // bounds (a pixel wider) meet the box, since a number may try every point of its edge
+  const bounds = drawn.map(({ line }) => ({ x0: Math.min(...line.map((p) => p.x)) - 1, y0: Math.min(...line.map((p) => p.y)) - 1, x1: Math.max(...line.map((p) => p.x)) + 1, y1: Math.max(...line.map((p) => p.y)) + 1 }))
   const clearOf = (bx: Box, own: Pt[], strict: boolean) =>
-    !taken.some((t) => hits(t, bx)) && (!strict || !drawn.some((d) => d.line !== own && lineHits(d.line, bx)))
+    !taken.some((t) => hits(t, bx)) && (!strict || !drawn.some((d, i) => d.line !== own && hits(bounds[i], bx) && lineHits(d.line, bx)))
   const ring = (s: Pt): Box => ({ x0: s.x - MARK_R, y0: s.y - MARK_R, x1: s.x + MARK_R, y1: s.y + MARK_R })
   const overlap = (a: Box, b: Box) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0))
   const covered = (bx: Box) => taken.reduce((a, t) => a + overlap(t, bx), 0)
