@@ -255,7 +255,7 @@ def test_an_interval_sets_groups_side_by_side_lying_down_or_upright():
         kt.chart("bar", ev, interval=("lo", "hi"), stack=True)
 
 
-def test_dots_with_an_interval_put_each_row_s_groups_side_by_side_on_its_line():
+def test_dots_put_each_row_s_groups_side_by_side_on_its_line_with_or_without_an_interval():
     ev = pd.DataFrame({"accuracy": [0.6, 0.7, 0.8], "model": ["m1", "m1", "m2"], "condition": ["cot", "plain", "cot"],
                        "lo": [0.5, 0.6, 0.7], "hi": [0.7, 0.8, 0.9]})
     spec = spec_of("dots", ev, interval=("lo", "hi"), marks={"chance": 0.5})
@@ -264,8 +264,13 @@ def test_dots_with_an_interval_put_each_row_s_groups_side_by_side_on_its_line():
                                                                        "sort": ["cot", "plain"]}
     assert rule["mark"] == "rule" and rule["encoding"]["x"]["field"] == "lo" and rule["encoding"]["yOffset"]["field"] == "condition"
     assert spec["layer"][1]["data"]["values"] == [{"accuracy": 0.5, "mark": "chance"}]
-    # without an interval a dots chart's groups share their row's line, as before
-    assert "yOffset" not in spec_of("dots", ev[["accuracy", "model", "condition"]])["encoding"]
+    # without an interval too (QA 2026-10-10: two groups at one value on a row blended into a dark dot the legend does
+    # not show), so every dot keeps its own color; in panels each group has its row's line to itself
+    plain = spec_of("dots", ev[["accuracy", "model", "condition"]])["encoding"]
+    assert plain["yOffset"] == {"field": "condition", "type": "nominal", "sort": ["cot", "plain"]}
+    assert "yOffset" not in spec_of("dots", ev[["accuracy", "model", "condition"]], panels=True)["encoding"]
+    # a chart with no group column has no groups to set apart
+    assert "yOffset" not in spec_of("dots", ev[["accuracy", "model"]])["encoding"]
 
 
 def test_a_wrong_interval_fails_with_one_line_that_names_what_it_takes():
