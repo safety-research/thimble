@@ -7,8 +7,8 @@
 // viewer_record.js), ticks them where they stand, and going to one opens its fold so the match shows; a table beside the
 // side panel keeps its main column of text, drops columns in their order rather than draw a cell under the strip, and
 // draws them again when the panel closes; the diff sets the two versions side by side, a changed line level with the line
-// it became, inline in a narrow mount, and its tints follow the paper. What the parts decide without layout is
-// tests/public/data-kit.test.ts.
+// it became, inline in a narrow mount, and its tints follow the paper; a patch's file head and hunk lines span both
+// sides. What the parts decide without layout is tests/public/data-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -63,6 +63,15 @@ window.wide = thimble.diff({ mount: '#wide', before: ${JSON.stringify(BEFORE)}, 
 window.narrow = thimble.diff({ mount: '#narrow', before: ${JSON.stringify(BEFORE)}, after: ${JSON.stringify(AFTER)} })
 window.padded = thimble.diff({ mount: '#padded', before: ${JSON.stringify(BEFORE)}, after: ${JSON.stringify(AFTER)} })
 </script>`, dark)
+// a commit's patch of one file in two hunks, as a forge stores it
+const PATCH = ['--- a/brindle/schedules.py', '+++ b/brindle/schedules.py', '@@ -112,3 +112,4 @@ class Schedule:', '     def _occurrence(self, n):',
+  '-        at = self.anchor + n * self.period', '+        local = self.anchor.replace(tzinfo=None)', '+        at = local + n * self.period', '         return at',
+  '@@ -140,2 +141,2 @@ class Schedule:', '-        return None', '+        return self.anchor', '     # end'].join('\n')
+const PATCHED = page(`<div id="wide" style="width:900px"></div><div id="narrow" style="width:360px"></div>
+<script>
+window.wide = thimble.diff({ mount: '#wide', patch: ${JSON.stringify(PATCH)} })
+window.narrow = thimble.diff({ mount: '#narrow', patch: ${JSON.stringify(PATCH)} })
+</script>`)
 
 let browser: Browser
 
@@ -690,4 +699,28 @@ describe('the diff', () => {
       assert.equal(got.folded, 1)
       await p.close()
     })
+
+  test("a patch: its file's head and each hunk's line across both sides, its lines numbered from the hunk's line", async () => {
+    const { page: p, frame } = await framed(PATCHED)
+    const got = await frame().evaluate(() => {
+      const w = window as any
+      const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect()
+      const diff = box('#wide .thimble-diff')
+      const hunks = [...document.querySelectorAll('#wide .thimble-diff-hunk')].map((h) => h.getBoundingClientRect())
+      const first = document.querySelector('#wide .thimble-diff-row')!
+      return {
+        modes: [w.wide.mode, w.narrow.mode],
+        head: [box('#wide .thimble-diff-file').width, diff.width],
+        hunks: hunks.map((h) => Math.round(h.width) === Math.round(diff.width)),
+        numbers: [...first.querySelectorAll('.thimble-diff-no')].map((n) => getComputedStyle(n, '::before').content),
+        tint: getComputedStyle(document.querySelector('#wide .thimble-diff-hunk')!).backgroundColor,
+      }
+    })
+    assert.deepEqual(got.modes, ['split', 'inline'])
+    assert.equal(Math.round(got.head[0]), Math.round(got.head[1]))
+    assert.deepEqual(got.hunks, [true, true])
+    assert.deepEqual(got.numbers, ['"112"', '"112"'])
+    assert.notEqual(got.tint, 'rgba(0, 0, 0, 0)')
+    await p.close()
+  })
 })

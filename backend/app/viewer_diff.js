@@ -4,6 +4,7 @@
 //
 //   const diff = thimble.diff({ mount: '#diff', before: older.text, after: newer.text, titles: ['Rev 41', 'Rev 42'] })
 //   diff.set({ before, after })               another pair, such as the next revision
+//   thimble.diff({ mount: '#commit', patch: commit.diff, ref: commit.ref })   a change as git or a forge stores it
 //
 // The lines are aligned, a line removed in the problem red's tint with − before it and a line added in the positive
 // green's with +, and in a changed line the words that changed in a stronger tint. Side by side (`mode: 'split'`) the
@@ -14,7 +15,9 @@
 // folds them again; the folded lines stay in the page, hidden, so thimble.search finds them and opens their fold. Line
 // numbers and signs are drawn by the style alone, so they are neither found, copied nor quoted. `ref` is the newer
 // version's record, the diff's data-anchor: a label marks it, a ⌘-click asks about it and a citation's quote is found
-// in it.
+// in it. `patch`, in place of the two texts, is a unified diff as git or a forge stores a change: each file it names
+// under a head with its path and its lines added and removed, each hunk under its `@@ -12,7 +12,8 @@` line, its lines
+// numbered from it; a patch of hunks alone, such as a forge's patch of one file, has no head.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -182,10 +185,28 @@
     }
     return out
   }
+  // A stretch of changes as rows: the removed lines ([number, text]) set against the added ones in order, as a code
+  // forge does, a pair alike enough a changed line ('mod', its words marked) and the rest removed or added whole; the
+  // two lists are emptied
+  function pairUp(dels, inss, out) {
+    var k = Math.max(dels.length, inss.length)
+    for (var i = 0; i < k; i++) {
+      var d = i < dels.length ? dels[i] : null
+      var s = i < inss.length ? inss[i] : null
+      if (d && s && likeness(d[1], s[1]) >= ALIKE) {
+        var w = words(d[1], s[1])
+        out.push({ kind: 'mod', a: d[0], b: s[0], ta: d[1], tb: s[1], pa: w[0], pb: w[1] })
+      } else {
+        if (d) out.push({ kind: 'del', a: d[0], b: null, ta: d[1], tb: null, pair: !!s })
+        if (s) out.push({ kind: 'ins', a: null, b: s[0], ta: null, tb: s[1], pair: !!d })
+      }
+    }
+    dels.length = 0
+    inss.length = 0
+  }
   // The rows of a diff: {kind, a, b, ta, tb, pa, pb} with kind 'same', 'del', 'ins' or 'mod' (a line changed, beside
   // the line it became), a and b the lines' numbers from 1 (null where a side has none), ta and tb their texts, pa and
-  // pb a changed line's parts. In a stretch of changes the removed lines are set against the added ones in order, as a
-  // code forge does, and a pair alike enough is a changed line; the rest are removed or added whole.
+  // pb a changed line's parts (pairUp).
   function rows(before, after) {
     var A = linesOf(before)
     var B = linesOf(after)
@@ -194,32 +215,100 @@
     var out = []
     var dels = []
     var inss = []
-    var flush = function () {
-      var k = Math.max(dels.length, inss.length)
-      for (var i = 0; i < k; i++) {
-        var d = i < dels.length ? dels[i] : null
-        var s = i < inss.length ? inss[i] : null
-        if (d != null && s != null && likeness(A[d], B[s]) >= ALIKE) {
-          var w = words(A[d], B[s])
-          out.push({ kind: 'mod', a: d + 1, b: s + 1, ta: A[d], tb: B[s], pa: w[0], pb: w[1] })
-        } else {
-          if (d != null) out.push({ kind: 'del', a: d + 1, b: null, ta: A[d], tb: null, pair: s != null })
-          if (s != null) out.push({ kind: 'ins', a: null, b: s + 1, ta: null, tb: B[s], pair: d != null })
-        }
-      }
-      dels = []
-      inss = []
-    }
     for (var k = 0; k < st.length; k++) {
       var s = st[k]
       if (s[0] === 0) {
-        flush()
+        pairUp(dels, inss, out)
         out.push({ kind: 'same', a: s[1] + 1, b: s[2] + 1, ta: A[s[1]], tb: B[s[2]] })
-      } else if (s[0] === 1) dels.push(s[1])
-      else inss.push(s[2])
+      } else if (s[0] === 1) dels.push([s[1] + 1, A[s[1]]])
+      else inss.push([s[2] + 1, B[s[2]]])
     }
-    flush()
+    pairUp(dels, inss, out)
     return { rows: out, lines: [A.length, B.length] }
+  }
+
+  // ---------------------------------------------------------------- a patch
+  // A unified diff as git or a forge stores a change: [{from, to, named, binary, hunks: [{range, heading, rows}]}], a
+  // file for each that it names (`diff --git`, or `---` over `+++`), its paths without git's a/ and b/, null for
+  // /dev/null (a file created or deleted); a patch of hunks alone, as a forge gives one file's, is one file with no
+  // name. A hunk's lines are read by the counts its `@@ -12,7 +12,8 @@` line gives (1 where it leaves one out), so a
+  // removed line that starts with `--` is never taken for a file's header and what follows the last hunk, such as a
+  // mail's signature, is left out; its rows are numbered from that line, as rows() gives them.
+  var HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$/
+  function pathOf(s) {
+    s = s.replace(/\t.*$/, '').replace(/\s+$/, '') // a time after a tab, as diff -u writes one
+    if (s === '/dev/null') return null
+    if (s.charAt(0) === '"')
+      try {
+        s = JSON.parse(s) // git quotes a path with odd characters
+      } catch (e) {}
+    return s.replace(/^[ab]\//, '')
+  }
+  function parsePatch(text) {
+    var lines = linesOf(text)
+    var files = []
+    var file = null
+    var open = function () {
+      file = { from: null, to: null, named: false, binary: false, hunks: [] }
+      files.push(file)
+    }
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i]
+      var m = HUNK.exec(l)
+      if (m) {
+        if (!file) open()
+        var a = Number(m[1])
+        var b = Number(m[3])
+        var left = [m[2] == null ? 1 : Number(m[2]), m[4] == null ? 1 : Number(m[4])]
+        var hunk = { range: l.slice(0, l.indexOf('@@', 2) + 2), heading: m[5].trim(), rows: [] }
+        var dels = []
+        var inss = []
+        while (i + 1 < lines.length && (left[0] > 0 || left[1] > 0)) {
+          var x = lines[i + 1]
+          var c = x.charAt(0)
+          if (c === '\\') {
+            i++ // \ No newline at end of file
+            continue
+          }
+          if (c === '-' && left[0] > 0) {
+            dels.push([a++, x.slice(1)])
+            left[0]--
+          } else if (c === '+' && left[1] > 0) {
+            inss.push([b++, x.slice(1)])
+            left[1]--
+          } else if ((c === ' ' || x === '') && left[0] > 0 && left[1] > 0) {
+            pairUp(dels, inss, hunk.rows)
+            hunk.rows.push({ kind: 'same', a: a++, b: b++, ta: x.slice(1), tb: x.slice(1) })
+            left[0]--
+            left[1]--
+          } else break
+          i++
+        }
+        pairUp(dels, inss, hunk.rows)
+        file.hunks.push(hunk)
+        continue
+      }
+      if (l.indexOf('diff --git ') === 0) {
+        open()
+        file.named = true
+        var g = /^diff --git (?:a\/)?(.+?) (?:b\/)?(\1)$/.exec(l) || /^diff --git a\/(.+) b\/(.+)$/.exec(l)
+        if (g) {
+          file.from = g[1]
+          file.to = g[2]
+        }
+      } else if (l.indexOf('--- ') === 0 && i + 1 < lines.length && lines[i + 1].indexOf('+++ ') === 0) {
+        // a file's header: the one `diff --git` opened, else a file of its own
+        if (!file || file.hunks.length || file.headed) open()
+        file.named = file.headed = true
+        file.from = pathOf(l.slice(4))
+        file.to = pathOf(lines[++i].slice(4))
+      } else if (file && /^new file mode /.test(l)) file.from = null
+      else if (file && /^deleted file mode /.test(l)) file.to = null
+      else if (file && (m = /^rename from (.+)$/.exec(l))) file.from = m[1]
+      else if (file && (m = /^rename to (.+)$/.exec(l))) file.to = m[1]
+      else if (file && (/^Binary files .* differ$/.test(l) || l === 'GIT binary patch')) file.binary = true
+    }
+    return files
   }
 
   // ---------------------------------------------------------------- drawing it
@@ -287,6 +376,7 @@
     this.dead = false
     this.before = opts.before
     this.after = opts.after
+    this.patch = opts.patch != null ? String(opts.patch) : null
     this.mode = opts.mode === 'split' || opts.mode === 'inline' ? opts.mode : 'auto'
     this.context = Number(opts.context) >= 0 ? Math.floor(Number(opts.context)) : CONTEXT
     this.titles = Array.isArray(opts.titles) ? opts.titles : null
@@ -320,25 +410,20 @@
     this.dead = true
     if (this.resized) this.resized.disconnect()
   }
-  // the mode drawn: `auto` side by side in a wide mount, inline in a narrow one or when one version is empty (a page
-  // created or deleted), which leaves one side nothing to show
+  // the mode drawn: `auto` side by side in a wide mount, inline in a narrow one or when one side is empty (a page created
+  // or deleted, a patch that only adds or only removes lines), which leaves that side nothing to show
   Diff.prototype.resolved = function () {
     if (this.mode !== 'auto') return this.mode
-    if (!linesOf(this.before).length || !linesOf(this.after).length) return 'inline'
+    if (this.oneSided) return 'inline'
     // the width the lines get: the mount's less its padding, as the side panel's body has
     var cs = getComputedStyle(this.mount)
     var w = this.mount.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
     return w <= 0 || w >= SPLIT_PX ? 'split' : 'inline'
   }
-  Diff.prototype.draw = function () {
-    if (!this.mount || this.dead) return
-    var got = rows(this.before, this.after)
-    var list = got.rows
-    var mode = this.resolved()
-    this.shown = mode
-    this.added = 0
-    this.removed = 0
-    this.changes = 0
+  // The rows of one stretch (the two texts, or a hunk) drawn: the changes with the `context` lines beside them, each run
+  // of unchanged lines further from a change folded under a bar with Show more, numbered on from this.folds; the
+  // counts of lines added and removed and of changes added to
+  Diff.prototype.stretch = function (list, rowsHtml) {
     // the lines a change keeps in view: those within `context` lines of one
     var near = new Array(list.length)
     var lastChange = -Infinity
@@ -351,9 +436,7 @@
         for (var k = Math.max(0, i - this.context); k <= i; k++) near[k] = true
       } else if (i - lastChange <= this.context) near[i] = true
     }
-    var rowsHtml = mode === 'split' ? splitRows : inlineRows
     var out = ''
-    var fold = 0
     var j = 0
     while (j < list.length) {
       if (near[j] || list[j].kind !== 'same') {
@@ -365,20 +448,80 @@
       }
       var end = j
       while (end < list.length && !near[end]) end++
-      var stretch = list.slice(j, end)
-      if (stretch.length < MIN_FOLD) out += rowsHtml(stretch)
+      var run = list.slice(j, end)
+      if (run.length < MIN_FOLD) out += rowsHtml(run)
       else {
+        var fold = this.folds++
         var open = !!this.opened[fold]
         out +=
-          '<div class="thimble-diff-gap" data-thimble-chrome><span class="thimble-diff-n">' + num(stretch.length) + (stretch.length === 1 ? ' unchanged line' : ' unchanged lines') + '</span>' +
+          '<div class="thimble-diff-gap" data-thimble-chrome><span class="thimble-diff-n">' + num(run.length) + (run.length === 1 ? ' unchanged line' : ' unchanged lines') + '</span>' +
           '<button type="button" class="btn btn-ghost btn-sm thimble-diff-more" data-fold-button="' + fold + '" aria-expanded="' + open + '">' + (open ? 'Show less' : 'Show more') + '</button></div>' +
-          '<div class="thimble-diff-fold" data-thimble-fold data-fold="' + fold + '"' + (open ? '' : ' hidden') + '>' + rowsHtml(stretch) + '</div>'
-        fold++
+          '<div class="thimble-diff-fold" data-thimble-fold data-fold="' + fold + '"' + (open ? '' : ' hidden') + '>' + rowsHtml(run) + '</div>'
       }
       j = end
     }
-    if (!list.length) out = '<div class="thimble-diff-empty">Both versions are empty</div>'
-    var digits = String(Math.max(got.lines[0], got.lines[1], 1)).length
+    return out
+  }
+  // A patch's files drawn: a file it names under its head (its path, `from → to` when it was renamed, and its lines added
+  // and removed), each hunk under its `@@` line, whose heading (the function it is in) is the file's text and whose
+  // range is the diff's own wording
+  Diff.prototype.files = function (files, rowsHtml) {
+    var self = this
+    var out = ''
+    files.forEach(function (f) {
+      var added = self.added
+      var removed = self.removed
+      var body = ''
+      f.hunks.forEach(function (h) {
+        body +=
+          '<div class="thimble-diff-hunk"><span class="thimble-diff-range" data-thimble-chrome>' + esc(h.range) + '</span>' +
+          (h.heading ? ' <span class="thimble-diff-heading">' + esc(h.heading) + '</span>' : '') + '</div>' + self.stretch(h.rows, rowsHtml)
+      })
+      if (f.binary && !f.hunks.length) body += '<div class="thimble-diff-empty">Binary file, not shown</div>'
+      else if (!f.hunks.length) body += '<div class="thimble-diff-empty">No lines changed</div>'
+      if (f.named) {
+        var path = f.from != null && f.to != null && f.from !== f.to ? f.from + ' → ' + f.to : f.to != null ? f.to : f.from || ''
+        var counts = f.binary && !f.hunks.length ? '' : '+' + num(self.added - added) + ' \u2212' + num(self.removed - removed)
+        body =
+          '<div class="thimble-diff-file"><span class="thimble-diff-path">' + esc(path) + '</span>' +
+          (counts ? '<span class="thimble-diff-count" data-thimble-chrome>' + counts + '</span>' : '') + '</div>' + body
+      }
+      out += body
+    })
+    return out
+  }
+  Diff.prototype.draw = function () {
+    if (!this.mount || this.dead) return
+    var files = this.patch != null ? parsePatch(this.patch) : null
+    var got = files ? null : rows(this.before, this.after)
+    var all = files
+      ? files.reduce(function (acc, f) {
+          return f.hunks.reduce(function (a, h) {
+            return a.concat(h.rows)
+          }, acc)
+        }, [])
+      : got.rows
+    // one side empty: every line added, or every line removed
+    var olds = 0
+    var news = 0
+    var most = 1
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].a != null) olds++
+      if (all[i].b != null) news++
+      most = Math.max(most, all[i].a || 0, all[i].b || 0)
+    }
+    this.oneSided = !olds || !news
+    var mode = this.resolved()
+    this.shown = mode
+    this.added = 0
+    this.removed = 0
+    this.changes = 0
+    this.folds = 0
+    var rowsHtml = mode === 'split' ? splitRows : inlineRows
+    var out = files ? this.files(files, rowsHtml) : this.stretch(got.rows, rowsHtml)
+    if (files && !files.length) out = '<div class="thimble-diff-empty">No changes in the patch</div>'
+    else if (!files && !got.rows.length) out = '<div class="thimble-diff-empty">Both versions are empty</div>'
+    var digits = String(most).length
     var head = ''
     if (this.titles && mode === 'split') head = '<div class="thimble-diff-head" data-thimble-chrome><span>' + esc(this.titles[0] == null ? '' : this.titles[0]) + '</span><span>' + esc(this.titles[1] == null ? '' : this.titles[1]) + '</span></div>'
     else if (this.titles) head = '<div class="thimble-diff-head" data-thimble-chrome><span>' + esc(this.titles[0] == null ? '' : this.titles[0]) + ' → ' + esc(this.titles[1] == null ? '' : this.titles[1]) + '</span></div>'
@@ -402,16 +545,19 @@
   thimble.diff = function (opts) {
     var d = new Diff(opts || {})
     return {
-      /** another pair or other options, drawn at once: {before, after, mode, context, titles, ref}; the folds close */
+      /** another pair or patch, or other options, drawn at once: {before, after, patch, mode, context, titles, ref}; the
+       *  folds close. Two texts draw in place of a patch, and a patch in place of two texts */
       set: function (o) {
         o = o || {}
         if ('before' in o) d.before = o.before
         if ('after' in o) d.after = o.after
+        if ('patch' in o) d.patch = o.patch != null ? String(o.patch) : null
+        else if ('before' in o || 'after' in o) d.patch = null
         if ('mode' in o) d.mode = o.mode === 'split' || o.mode === 'inline' ? o.mode : 'auto'
         if ('context' in o && Number(o.context) >= 0) d.context = Math.floor(Number(o.context))
         if ('titles' in o) d.titles = Array.isArray(o.titles) ? o.titles : null
         if ('ref' in o) d.ref = o.ref != null ? String(o.ref) : null
-        if ('before' in o || 'after' in o || 'context' in o) d.opened = {}
+        if ('before' in o || 'after' in o || 'patch' in o || 'context' in o) d.opened = {}
         d.draw()
       },
       /** every fold opened (true) or folded again (false) */

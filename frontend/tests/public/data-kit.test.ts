@@ -6,7 +6,8 @@
 // strip, and Reset empties it; the table draws only the rows near its view, sorts by a
 // click on a column's head with the rows with no value last, hides what Filter by does not keep, gives Color by its bars
 // and the counts of every row, opens a row in the side panel and keeps its sort; the diff aligns the lines, marks the
-// words that changed, folds the unchanged stretches with Show more and Show less, and draws side by side or inline; the
+// words that changed, folds the unchanged stretches with Show more and Show less, and draws side by side or inline, and
+// draws a patch, each file under its head and each hunk numbered from its @@ line; the
 // text (viewer_text.js, with the markdown parser of src/lib/kitMarkdown.ts) turns mentions into links that open their
 // record, shows raw HTML as text, takes every link's address off, and folds a long text with Show more.
 // The messages (viewer_messages.js) share a head between one author's messages that follow each other within five
@@ -585,6 +586,117 @@ describe('the diff', () => {
     w.diff.set({ before: c.join('\n'), after: d.join('\n') })
     expect(w.diff.added).toBeGreaterThan(0)
     expect(Date.now() - t0).toBeLessThan(8000)
+  })
+})
+
+// a change as git writes it: a file changed in two hunks (a removed line that starts with `--` among its lines, the
+// last line without a newline), a file renamed with a line changed, a file created, a binary file, and a signature after
+// the last hunk, as git format-patch ends a mail
+const PATCH = [
+  'diff --git a/brindle/parse.py b/brindle/parse.py',
+  'index 1a2b3c4..5d6e7f8 100644',
+  '--- a/brindle/parse.py',
+  '+++ b/brindle/parse.py',
+  '@@ -88,4 +88,4 @@ def next_weekday(start, weekday):',
+  '     """The first `weekday` after `start`."""',
+  '-    days = (weekday - start.weekday()) % 7',
+  '+    days = (weekday - start.weekday() - 1) % 7 + 1',
+  '-- a line that starts with two dashes',
+  '     return start + timedelta(days=days)',
+  '@@ -120,2 +120,3 @@ class Parser:',
+  '     def close(self):',
+  '-        pass',
+  '\\ No newline at end of file',
+  '+        self.done = True',
+  '+        return self',
+  '\\ No newline at end of file',
+  'diff --git a/docs/old.md b/docs/new.md',
+  'similarity index 90%',
+  'rename from docs/old.md',
+  'rename to docs/new.md',
+  '--- a/docs/old.md',
+  '+++ b/docs/new.md',
+  '@@ -1 +1 @@',
+  '-# Old title',
+  '+# New title',
+  'diff --git a/tests/test_parse.py b/tests/test_parse.py',
+  'new file mode 100644',
+  '--- /dev/null',
+  '+++ b/tests/test_parse.py',
+  '@@ -0,0 +1,2 @@',
+  '+def test_next_weekday():',
+  '+    assert True',
+  'diff --git a/logo.png b/logo.png',
+  'Binary files a/logo.png and b/logo.png differ',
+  '-- ',
+  '2.44.0',
+].join('\n')
+
+describe('the diff of a patch', () => {
+  test('each file it names under its head, each hunk under its @@ line, its lines numbered from it; what follows the last hunk left out', async () => {
+    await load(`<div id="d"></div>`)
+    const w = win()
+    w.eval(`window.diff = thimble.diff({ mount: '#d', patch: ${JSON.stringify(PATCH)}, mode: 'inline', ref: 'runs/r1/events.jsonl#L12' })`)
+    expect(doc().querySelector('.thimble-diff')!.getAttribute('data-anchor')).toBe('runs/r1/events.jsonl#L12')
+    expect(texts('.thimble-diff-path')).toEqual(['brindle/parse.py', 'docs/old.md → docs/new.md', 'tests/test_parse.py', 'logo.png'])
+    expect(texts('.thimble-diff-count')).toEqual(['+3 −3', '+1 −1', '+2 −0'])
+    expect(texts('.thimble-diff-empty')).toEqual(['Binary file, not shown'])
+    // each hunk's line: its range the diff's own wording, its heading the file's text
+    expect(texts('.thimble-diff-hunk')).toEqual(['@@ -88,4 +88,4 @@ def next_weekday(start, weekday):', '@@ -120,2 +120,3 @@ class Parser:', '@@ -1 +1 @@', '@@ -0,0 +1,2 @@'])
+    expect([...doc().querySelectorAll('.thimble-diff-range')].every((e) => e.hasAttribute('data-thimble-chrome'))).toBe(true)
+    expect(doc().querySelector('.thimble-diff-heading')!.hasAttribute('data-thimble-chrome')).toBe(false)
+    // the first hunk: numbered from 88 on both sides, the changed line marked word by word, the line that starts with
+    // `--` a removed line of its own
+    const rows = [...doc().querySelectorAll('.thimble-diff-row')]
+    const line = (r: Element) => {
+      const tx = r.querySelector('.thimble-diff-tx')!
+      return [...r.querySelectorAll('.thimble-diff-no')].map((n) => n.getAttribute('data-n')).concat(tx.className.replace('thimble-diff-tx thimble-diff-', '') + ':' + tx.textContent)
+    }
+    expect(rows.slice(0, 5).map(line)).toEqual([
+      ['88', '88', 'same:    """The first `weekday` after `start`."""'],
+      ['89', null, 'del:    days = (weekday - start.weekday()) % 7'],
+      [null, '89', 'ins:    days = (weekday - start.weekday() - 1) % 7 + 1'],
+      ['90', null, 'del:- a line that starts with two dashes'],
+      ['91', '90', 'same:    return start + timedelta(days=days)'],
+    ])
+    expect(texts('#d ins.thimble-diff-w')[0]).toBe('- 1')
+    // the second hunk from 120, its lines without a newline at the end read as lines
+    expect(rows.slice(5, 9).map(line)).toEqual([
+      ['120', '120', 'same:    def close(self):'],
+      ['121', null, 'del:        pass'],
+      [null, '121', 'ins:        self.done = True'],
+      [null, '122', 'ins:        return self'],
+    ])
+    // a file created: its lines from 1; the signature is no line of the diff
+    expect(rows.slice(-2).map(line)).toEqual([[null, '1', 'ins:def test_next_weekday():'], [null, '2', 'ins:    assert True']])
+    expect(doc().querySelector('#d')!.textContent).not.toContain('2.44.0')
+    expect([w.diff.added, w.diff.removed, w.diff.changes]).toEqual([6, 4, 4])
+  })
+
+  test("hunks alone, as a forge gives one file's patch: no head; a long hunk folds its unchanged stretch; set() turns between a patch and two texts", async () => {
+    await load(`<div id="d"></div>`)
+    const w = win()
+    const hunk = ['@@ -10,12 +10,12 @@ def run():', '     a = 1', ...Array.from({ length: 9 }, (_, i) => `     x${i} = ${i}`), '-    return a', '+    return a + 1', '     # end'].join('\n')
+    w.eval(`window.diff = thimble.diff({ mount: '#d', patch: ${JSON.stringify(hunk)} })`)
+    expect(doc().querySelectorAll('.thimble-diff-file')).toHaveLength(0)
+    expect(texts('.thimble-diff-hunk')).toEqual(['@@ -10,12 +10,12 @@ def run():'])
+    // the 7 lines more than 3 from the change fold, numbered from the hunk's line
+    expect(texts('.thimble-diff-gap .thimble-diff-n')).toEqual(['7 unchanged lines'])
+    const fold = doc().querySelector('[data-thimble-fold]') as HTMLElement
+    expect(fold.hidden).toBe(true)
+    expect(fold.querySelector('.thimble-diff-no')!.getAttribute('data-n')).toBe('10')
+    fold.dispatchEvent(new dom.window.CustomEvent('thimble-unfold', { bubbles: true }))
+    expect(fold.hidden).toBe(false)
+    // a patch that only adds lines is inline wherever it is
+    w.diff.set({ patch: '@@ -0,0 +1 @@\n+only' })
+    expect(w.diff.mode).toBe('inline')
+    expect([w.diff.added, w.diff.removed]).toEqual([1, 0])
+    // two texts in place of the patch, and a patch with no hunk
+    w.diff.set({ before: 'a', after: 'b' })
+    expect(doc().querySelectorAll('.thimble-diff-hunk')).toHaveLength(0)
+    expect([w.diff.added, w.diff.removed]).toEqual([1, 1])
+    w.diff.set({ patch: 'not a patch' })
+    expect(texts('.thimble-diff-empty')).toEqual(['No changes in the patch'])
   })
 })
 

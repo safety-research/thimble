@@ -7,7 +7,7 @@ code forge's commit, a wiki page's history) in thimble's parts rather than parts
 |---|---|---|
 | the search | `thimble.search` | a box in the top row that finds text in the records, as Files' find does |
 | the table | `thimble.table` | records in columns a click sorts by, for thousands of rows |
-| the diff | `thimble.diff` | two versions of a text side by side or inline, the words that changed marked |
+| the diff | `thimble.diff` | two versions of a text, or a patch, side by side or inline, the words that changed marked |
 | the text | `thimble.text` | a record's text, such as a pull request's body or an email, as markdown or plain text |
 
 Each works alone on any element with plain records: none needs Color by, a time range or the side panel. Each works
@@ -179,10 +179,26 @@ const diff = thimble.diff({ mount: '#diff', before: older.text, after: newer.tex
 diff.set({ before: newer.text, after: next.text, ref: next.ref })   // the next pair
 ```
 
+A code forge and git store a change as a unified patch, the lines it changed with a few lines around them, not the two
+versions. `patch` takes one in place of `before` and `after`, such as a commit's:
+
+```js
+thimble.diff({ mount: box, patch: commit.diff, ref: commit.ref })
+```
+
+- Each file the patch names (`diff --git`, or `---` over `+++`) is under a head with its path, `old → new` when it was
+  renamed, and its lines added and removed. A patch of hunks alone, as a forge gives one file's, has no head.
+- Each hunk is under its `@@ -88,3 +88,4 @@` line and the function it is in, its lines numbered from that line. The
+  lines between two hunks are not in the patch, so they do not show.
+- A binary file is its head and "Binary file, not shown". What is not a file's header or a hunk, such as `index` lines
+  or a mail's signature, is left out.
+- A patch that only adds or only removes lines, such as a file created, is inline in any mount.
+
 | option | what it is |
 |---|---|
 | `mount` | the element the diff fills |
 | `before`, `after` | the two texts; `null` or `''` for none, as for a page created or deleted |
+| `patch` | a unified diff, in place of `before` and `after` |
 | `mode` | `'auto'` (the default), `'split'` or `'inline'` |
 | `context` | the unchanged lines kept beside a change, 3 by default |
 | `titles` | `[older, newer]`, the two versions' names over their columns (inline, on one line) |
@@ -190,7 +206,7 @@ diff.set({ before: newer.text, after: next.text, ref: next.ref })   // the next 
 
 | member | what it gives |
 |---|---|
-| `set({before, after, mode, context, titles, ref})` | any of them changed and drawn at once; a new pair folds its stretches again |
+| `set({before, after, patch, mode, context, titles, ref})` | any of them changed and drawn at once; a new pair or patch folds its stretches again, and two texts draw in place of a patch |
 | `expand(on)` | every fold opened, or with `false` folded again |
 | `mode` | the mode drawn, `'split'` or `'inline'` |
 | `added`, `removed`, `changes` | the lines added and removed (a changed line counts in both) and the stretches of changes, for the page's own header such as "+12 −3" |
