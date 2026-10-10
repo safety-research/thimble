@@ -5,6 +5,7 @@
      .thimble-filter-*      Filter by in the top row: its trigger (Color by's look) and its values as toggles, a box
                             ticked while the value shows, no colour
      .thimble-rows-*        Rows in the top row: its trigger
+     .thimble-tree-*        a list of groups to navigate (viewer_tree.js), as Files' tree draws its folders
      .thimble-key-*         a key whose entries are toggles, each swatch drawn as its series is drawn
      .thimble-lanes-*,      the timeline's lanes: a name column with tree guides, a track per lane on one axis (the
      .thimble-lane-*        range's scale, or an axis of its own), the problem red under a failure, the cursor line on
@@ -78,6 +79,184 @@
 .thimble-ctl-def .thimble-colour-ico {
   width: 13px;
   height: 13px;
+}
+
+/* -------- the tree (viewer_tree.js, thimble.tree): a list of groups as Files' tree draws the corpus's folders
+   (files.css .files-row): 24px rows indented by depth on guide lines that show while the pointer is over the tree, a
+   folder's chevron turned down while it is open, the name cut with an ellipsis, then the mix and the number in mono at
+   the row's right, never under the name. Only the rows near its view are drawn, each placed at its line. -------- */
+.thimble-tree {
+  position: relative;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  outline: none;
+  color: var(--text-primary);
+  font: 400 var(--text-sm) / 1.45 var(--font-body);
+}
+/* the find over the rows, which stays at the top as they scroll, as the kit's search box looks; its padding keeps the
+   focus ring clear of the edges the tree scrolls in */
+.thimble-tree-find {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 2px 2px 6px;
+  background: var(--surface-card);
+}
+.thimble-tree-box {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--h-control);
+  padding: 0 2px 0 7px;
+  border: 1px solid rgba(var(--ink-rgb), 0.14);
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  cursor: text;
+}
+.thimble-tree-box:hover {
+  border-color: rgba(var(--ink-rgb), 0.28);
+}
+.thimble-tree-box:focus-within {
+  border-color: transparent;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.thimble-tree-glyph {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  color: var(--text-tertiary);
+}
+.thimble-tree-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0 4px 0 5px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: 400 var(--text-ui-sm) / 22px var(--font-body);
+}
+.thimble-tree-input::placeholder {
+  color: var(--text-placeholder);
+  opacity: 1;
+}
+.thimble-tree-body {
+  position: relative;
+  outline: none;
+}
+.thimble-tree-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0 6px 0 8px;
+  border-radius: var(--radius-chip);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.thimble-tree.is-tree .thimble-tree-row {
+  padding-left: calc(20px + var(--depth, 0) * 14px);
+}
+.thimble-tree-row:hover {
+  background: rgba(var(--ink-rgb), 0.04);
+}
+.thimble-tree-row.active,
+.thimble-tree-row.active:hover {
+  background: var(--surface-selected);
+}
+/* the row the keys are on, while they move it (is-keys, from Tab or a key until the next click) */
+.thimble-tree-body.is-keys:focus .thimble-tree-row.is-cursor {
+  outline: 1.5px solid var(--accent);
+  outline-offset: -1.5px;
+}
+/* a label's bar on a row's left edge keeps it straight */
+.thimble-tree-row[data-thimble-edge] {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.thimble-tree-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid rgba(var(--ink-rgb), 0.14);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s linear;
+}
+.thimble-tree:hover .thimble-tree-guide {
+  opacity: 1;
+}
+.thimble-tree-fold,
+.thimble-tree-gap {
+  display: inline-flex;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--text-tertiary);
+}
+.thimble-tree-chev {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.12s ease-out;
+}
+.thimble-tree-row[aria-expanded='true'] .thimble-tree-chev {
+  transform: rotate(90deg);
+}
+/* in a row too narrow for all of it, the name gives way down to its first letters (its far larger shrink), then the
+   mix down to nothing, so that the number keeps its room */
+.thimble-tree-name {
+  flex: 0 1000 auto;
+  min-width: 3em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* the find's words in a name, as Files' search marks them */
+.thimble-tree-hit {
+  border-radius: var(--radius-hl, 3px);
+  background: var(--hl-bg);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.thimble-tree-end {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 4px;
+}
+.thimble-tree-end > .thimble-mix {
+  flex: 0 1 auto;
+  width: 32px;
+  min-width: 0;
+}
+.thimble-tree-n {
+  flex: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.thimble-tree-none {
+  padding: 6px 8px;
+  color: var(--text-tertiary);
+  font: 400 var(--text-ui-sm) / 1.4 var(--font-body);
 }
 
 /* -------- a key whose entries are toggles -------- */

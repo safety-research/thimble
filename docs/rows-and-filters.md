@@ -13,6 +13,7 @@ these parts, so a page lays them out and fills them rather than drawing its own:
 | the timeline | `thimble.timeline` | the overview: a lane per group of Rows on one axis of times or numbers |
 | the key | `thimble.key` | the series the overview draws beside Color by's, each a toggle |
 | the divider | `thimble.divider` | the bar between the overview and the list, which a drag moves |
+| the tree | `thimble.tree` | a list of groups to navigate beside the records: channels, folders, files, pages |
 | the cards | `thimble.recordCard` | a record as a card or a tile, its colors Color by's bars on its edge, one per choice |
 | the side panel | `thimble.side` | a record, or a row's children, in a wide panel beside the list |
 | the transcript | `thimble.transcript` | a transcript's turns, as the File browser's Transcript mode draws them |
@@ -200,6 +201,54 @@ shows and `set(entries)` draws new ones. The lanes draw their own key with it.
 `thimble.divider({top, key, min})` puts a bar under `top`, the overview's box, which a drag moves: the overview takes
 the height it leaves and scrolls down inside it, never sideways, and the list under it takes the rest. ↑ and ↓ move it while it has the
 focus, a double click or Home puts it back. thimble keeps its place per view as a share of the height the two share.
+
+## The tree
+
+`thimble.tree({mount, items, split, rows, count, mix, anchor, find, key, onPick})` lists groups to navigate beside the
+records, as Files' tree lists folders: a chat's channels, an inbox's folders, a repository's files, a wiki's pages under
+their wikis, agents and their sessions. It needs no other part, and it draws only the rows near its view, so 50,000
+nodes open at once. `mount` is the element it fills and scrolls in, which the page gives a height.
+
+```js
+const tree = thimble.tree({
+  mount: '#pages', split: '/', find: true,
+  items: pages.map((p) => ({ key: p.wiki + '/' + p.title, n: p.revisions })),   // 'dse/StartSeite'
+  anchor: (node) => node.item && 'view:wiki/' + node.key,
+  onPick: (node) => { page = node.key; draw() },
+})
+```
+
+`items` gives the nodes one of three ways:
+
+- `[{key, name, parent, n}]`, a tree as given. A `parent` that no item names is a folder named by its key.
+- With `split: '/'`, the keys are paths and the folders come from their prefixes, before the leaves, each in natural
+  order.
+- With `rows`, a `thimble.rows`, the items are records and the nodes are `rows.groups(items)`, each with its records, so
+  the tree and the lanes group alike. Draw it again with the records Filter by keeps in Rows' and Filter by's
+  `onChange`.
+
+A row is 24 px, indented by its depth, with a chevron that folds a folder. Its name is cut with an ellipsis and shown
+whole on hover, and its number stands right-aligned in mono after it, never under it: `n`, a group's records with
+`rows`, else the sum of a folder's children. `count(node)` gives another number, such as a folder's unread messages, and
+`count: false` none. A group takes no color of its own: `mix: (node) => counts` draws `thimble.mix` in its row, and with
+`rows`, `mix: true` counts each group's records by Color by. `anchor(node)` gives a row its `data-anchor`, such as a
+unit `view:<slug>/<key>`, so a label marks it and a ⌘-click asks about it. `find: true` puts a field over the tree that
+keeps the names that match, with the folders above them open; the page's `thimble.search` leaves the tree to it.
+
+A click or Enter picks a row: it is chosen (`.active`), a folder opens (a click on the chosen folder folds it), and
+`onPick(node)` hears it. ↑ and ↓ move, ← folds or goes to the parent, → opens. A node is `{key, name, parent, depth, children, n, item}`, and with `rows` also
+`items` and `value`, its group's records and value. A node's `key` is its item's key as given, and a folder's with `split`
+the path up to it. The tree opens with the folders that fit its height open. thimble
+keeps the folds and the chosen key per view (under `key`, else the mount's id); Reset puts back the folds the tree opened
+with and empties the find, and keeps the choice.
+
+| member | what it gives |
+|---|---|
+| `draw(items)` | the tree drawn with these items, the folds and the choice kept; `draw()` draws it again |
+| `chosen`, `choose(key)` | the chosen node's key, and a node chosen without telling the page |
+| `reveal(key)` | a node shown: its folders opened, scrolled to, chosen and highlighted for a moment |
+| `fold(key, on)` | a folder folded (`true`), opened (`false`) or turned over |
+| `nodes` | every node, in the order the tree lists them |
 
 ## The cards
 

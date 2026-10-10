@@ -36,10 +36,11 @@
   var WAIT_MS = 120 // ms after the last key before the search runs
   var BIG = 20000 // rows past which a search of rows waits as long again, so typing stays quick
   var MOST = 20000 // matches found at most; the count says "+" past them, as Files' find does
-  // the kit's own controls, the page's own wording around its records (data-thimble-chrome, as the bridge reads it) and
-  // its action buttons (.btn, such as Show more), whose text is no record's
+  // the kit's own controls, the lanes' and the tree's groups (the tree has its own find), the page's own wording around
+  // its records (data-thimble-chrome, as the bridge reads it) and its action buttons (.btn, such as Show more), whose
+  // text is no record's
   var SKIP = '.thimble-part,.thimble-colour-mount,.thimble-colour-menu,.thimble-search,.thimble-tip,.thimble-colour-strip,' +
-    '.thimble-colour-loupe,.thimble-colour-bracket,.thimble-range-mount,.thimble-axis,.thimble-lanes,[data-thimble-chrome]:not([data-anchor]),' +
+    '.thimble-colour-loupe,.thimble-colour-bracket,.thimble-range-mount,.thimble-axis,.thimble-lanes,.thimble-tree,[data-thimble-chrome]:not([data-anchor]),' +
     '.btn,script,style,template,noscript,textarea,select,input,option,svg'
   // the elements text runs on inside, so a phrase across them is found; any other element ends a run
   var INLINE = { SPAN: 1, B: 1, I: 1, EM: 1, STRONG: 1, A: 1, CODE: 1, MARK: 1, SMALL: 1, SUB: 1, SUP: 1, S: 1, DEL: 1, INS: 1, U: 1, TIME: 1, ABBR: 1, Q: 1, CITE: 1, KBD: 1, VAR: 1, SAMP: 1, LABEL: 1, FONT: 1, BDI: 1, BDO: 1, DFN: 1, WBR: 1 }
