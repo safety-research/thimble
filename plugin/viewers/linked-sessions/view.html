@@ -58,7 +58,7 @@
   </div>
   <div id="body">
     <div id="main">
-      <div id="rel"></div>
+      <div id="rel" data-thimble-chrome></div>
       <div id="turns"><div class="empty">Loading the sessions…</div></div>
     </div>
   </div>
@@ -104,9 +104,9 @@ const ready = new Promise((ok) => { loaded = ok })
 const laneName = (id) => (S[id] ? (S[id].parent ? names[id] : `${runName(S[id].run)} · ${names[id]}`) : id)
 const runTitle = (id) => (teams[id] ? `${runName(id)} · ${teams[id]}` : runName(id))
 
-// the search finds the words in the transcript, folded calls among them, and opens what holds them; the reader keeps only
-// the turns that hold them, so the lanes show those alone
-const search = thimble.search({ mount: '#search', in: '#turns', placeholder: 'Search the transcripts', onChange: () => load() })
+// the search finds the words in the transcript and in a subagent's beside it, folded calls among them, and opens what
+// holds them; the reader keeps only the turns that hold them, so the lanes show those alone
+const search = thimble.search({ mount: '#search', in: '#body', placeholder: 'Search the transcripts', onChange: () => load() })
 // Color by, the one color: the speaker, the tool, the file type, the outcome or a label that is on
 const colour = thimble.colorBy({
   mount: '#colour',
@@ -510,6 +510,7 @@ async function beside(id) {
       body.innerHTML = `<div class="side-acts"><button class="btn btn-secondary btn-sm" data-read="${esc(id)}">Read ${esc(names[id])} here</button></div><div class="side-turns"></div>`
       sideTr = thimble.transcript({ mount: body.querySelector('.side-turns'), colour, onOpen: (turn) => opened(turn) })
       sideTr.draw(turns, { empty: 'No turn passes the filters' })
+      if (search.text.trim()) wholeFor(turns)
     },
   })
 }

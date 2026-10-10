@@ -881,7 +881,8 @@
     }
     if (this.onOpen) ctl.safe(function () { self.onOpen(r) })
   }
-  // a row's columns as the side panel's list, each value whole
+  // a row's columns as the side panel's list, each value whole under its title, the table's own words, which the search
+  // leaves out (data-thimble-chrome)
   Table.prototype.fieldsHtml = function (r) {
     var self = this
     return (
@@ -889,7 +890,7 @@
       this.columns
         .map(function (col) {
           var sub = self.subHtml(col, r)
-          return '<dt>' + esc(col.title) + '</dt><dd class="thimble-table-' + col.type + '">' + (col.html ? self.cell(col, r) : esc(self.text(col, r)) || '<span class="thimble-table-dim">—</span>') +
+          return '<dt data-thimble-chrome>' + esc(col.title) + '</dt><dd class="thimble-table-' + col.type + '">' + (col.html ? self.cell(col, r) : esc(self.text(col, r)) || '<span class="thimble-table-dim">—</span>') +
             (sub ? '<div class="thimble-table-sub">' + sub + '</div>' : '') + '</dd>'
         })
         .join('') +

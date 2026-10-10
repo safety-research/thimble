@@ -24,7 +24,7 @@ const inline = (js: string) => js.replace(/<\/script/g, '<\\/script')
 // the kit as views.frame_document loads it
 const KIT =
   `<script>${inline(read('viewer_bridge.js'))}</script><script>window.__thimbleLabelOrder = ${read('label_order.json')}</script>` +
-  ['viewer_colour.js', 'viewer_controls.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_search.js', 'viewer_table.js', 'viewer_diff.js', 'viewer_record.js', 'viewer_range.js']
+  ['viewer_colour.js', 'viewer_controls.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_messages.js', 'viewer_search.js', 'viewer_table.js', 'viewer_diff.js', 'viewer_record.js', 'viewer_range.js']
     .map((n) => `<script>${inline(read(n))}</script>`)
     .join('') +
   `<style>${read('viewer_kit.css')}</style><style>${read('viewer_parts.css')}</style>`
@@ -408,8 +408,9 @@ describe('the table beside the side panel', () => {
     assert.equal(held.count, 18)
     // the PR number, a number column titled '#', is an identifier: written as it is
     assert.deepEqual(held.fields, [['#', '65000'], ['Title', 'BUG: a title that says what the change fixes 0'], ['Author', 'gh:contributor-0'], ['State', 'open'], ['Opened', '2026-04-01 00:00:00']])
-    // "o" is twice in each dropped Author and once in a State "open" or "closed": every one counts, and the current
-    // match, the first of the top row, is washed in its State cell
+    // "o" is twice in each dropped Author and once in a State "open" or "closed": every one counts, and so do the three
+    // in the side panel's details beside the table (its Author and State, not the titles); the current match, the
+    // first of the top row, is washed in its State cell
     const shown = await frame().evaluate(() => {
       const w = window as any
       w.search.set('o')
@@ -417,8 +418,8 @@ describe('the table beside the side panel', () => {
       const cell = cur.startContainer.parentElement!.closest('.thimble-table-td')!
       return { count: w.search.count, at: w.search.at, cell: cell.textContent, row: cell.parentElement!.getAttribute('data-anchor') }
     })
-    assert.deepEqual(shown, { count: 800, at: 0, cell: 'open', row: 'forge.db#prs/65000' })
-    // closed: every column is back
+    assert.deepEqual(shown, { count: 803, at: 0, cell: 'open', row: 'forge.db#prs/65000' })
+    // closed: every column is back, and the panel's matches are gone with it
     await frame().evaluate(() => (window as any).side.close())
     await p.waitForTimeout(150)
     const back = await columnsOf(frame)
@@ -611,6 +612,135 @@ describe('the search alone', () => {
       return { text: cur.toString(), inView: r.top >= c.top && r.bottom <= c.bottom, record: cur.startContainer.parentElement!.closest('[data-anchor]')!.getAttribute('data-anchor') }
     })
     assert.deepEqual(shown, { text: 'gale', inView: true, record: 'chat.jsonl#L360' })
+    await p.close()
+  })
+})
+
+// A table of mail beside a thread of messages that scrolls on its own: the search finds in both at once, each with the
+// ticks of its own matches on its strip
+const SIDE_BY_SIDE = page(`<div class="top"><span id="search"></span></div><div style="display:flex;height:560px">
+<div id="list" style="flex:1;min-width:0"></div><div id="thread" style="width:420px;overflow-y:auto"></div></div>
+<script>
+const T0 = Date.UTC(2026, 3, 1) / 1000
+window.search = thimble.search({ mount: '#search', in: '#thread' })
+window.table = thimble.table({ mount: '#list', search, columns: [{ name: 'subject', title: 'Subject' }],
+  rows: Array.from({ length: 400 }, (_, i) => ({ ref: 'mail.jsonl#L' + (i + 1), subject: (i % 100 === 50 ? 'Gale warning ' : 'Note ') + i })) })
+thimble.messages({ mount: '#thread' }).draw(Array.from({ length: 80 }, (_, i) => ({ ref: 'chat.jsonl#L' + (i + 1), author: ['ana', 'bo'][i % 2], t: T0 + i * 600,
+  text: i % 20 === 3 ? 'the gale is near, a gale' : i === 70 ? 'a heron near the weir' : 'calm sea ' + i })))
+</script>`)
+
+describe('the search over every part on screen', () => {
+  test("a table and a thread beside it: both washed and counted, in the order they stand; each strip ticks its own matches, and a step from the table's last goes into the thread", async () => {
+    const { page: p, frame } = await framed(SIDE_BY_SIDE)
+    // the pixels drawn in the search's lane of the strip at the left half of the page and of the one at the right
+    const lanes = () =>
+      frame().evaluate(() =>
+        [...document.querySelectorAll('.thimble-colour-strip')]
+          .map((el) => {
+            const cv = el.querySelector('canvas') as HTMLCanvasElement
+            const dpr = window.devicePixelRatio || 1
+            const data = cv.width && cv.height ? cv.getContext('2d')!.getImageData(Math.round(6 * dpr), 0, 1, cv.height).data : []
+            let drawn = 0
+            for (let i = 3; i < data.length; i += 4) if (data[i] > 200) drawn++
+            return { x: el.getBoundingClientRect().left, drawn }
+          })
+          .sort((a, b) => a.x - b.x)
+          .map((s) => s.drawn),
+      )
+    await typeIn(frame, 'gale')
+    const got = await frame().evaluate(() => {
+      const s = (window as any).search
+      const hl = (CSS as any).highlights
+      const where = (r: Range) => (r.startContainer.parentElement!.closest('#list') ? 'list' : r.startContainer.parentElement!.closest('#thread') ? 'thread' : 'other')
+      return { count: s.count, at: s.at, label: document.querySelector('.thimble-search-count')!.textContent, current: where([...hl.get('thimble-search-current')][0]),
+        washed: [...hl.get('thimble-search')].map(where).filter((w, i, a) => a.indexOf(w) === i).sort() }
+    })
+    // four rows, and two in each of four messages; the current match in the table's first, whose other matches are in
+    // rows it has not drawn, and the thread's washed
+    assert.deepEqual(got, { count: 12, at: 0, label: '1 of 12', current: 'list', washed: ['thread'] })
+    await p.waitForTimeout(200)
+    const both = await lanes()
+    assert.equal(both.length, 2, JSON.stringify(both))
+    assert.ok(both[0] >= 4 && both[1] >= 4, `ticks drawn: ${JSON.stringify(both)}`)
+    // from the table's last match into the thread's first, which scrolls into view
+    await frame().evaluate(() => (window as any).search.go(3))
+    await frame().locator('.thimble-search-input').press('Enter')
+    const next = await frame().evaluate(() => {
+      const cur = [...(CSS as any).highlights.get('thimble-search-current')][0] as Range
+      const r = cur.getBoundingClientRect()
+      const c = document.getElementById('thread')!.getBoundingClientRect()
+      return { at: (window as any).search.at, record: cur.startContainer.parentElement!.closest('[data-anchor]')!.getAttribute('data-anchor'), inView: r.top >= c.top && r.bottom <= c.bottom }
+    })
+    assert.deepEqual(next, { at: 4, record: 'chat.jsonl#L4', inView: true })
+    // a word only the thread holds: no ticks on the table's strip
+    await typeIn(frame, 'heron')
+    await p.waitForTimeout(200)
+    const one = await lanes()
+    assert.ok(one[0] === 0 && one[1] > 0, `ticks drawn: ${JSON.stringify(one)}`)
+    await p.close()
+  })
+
+  test("`in` holding the table and the thread, the thread with a strip of its own (Color by's): the thread's matches tick on its strip, the table's on the table's", async () => {
+    const doc = SIDE_BY_SIDE.replace("in: '#thread' })", "in: '#body' })\nwindow.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }], strip: '#thread' })")
+      .replace('<div style="display:flex;height:560px">', '<div id="body" style="display:flex;height:560px">')
+      .replace('<span id="search"></span></div>', '<span id="search"></span><span id="colour"></span></div>')
+    assert.ok(doc.includes("in: '#body'") && doc.includes('id="body"') && doc.includes('id="colour"'))
+    const { page: p, frame } = await framed(doc)
+    // each strip, the table's then the thread's: its lanes' names while it has more than one (the search's first while it
+    // has matches in that list, then Color by's), and the pixels drawn in its first lane
+    const strips = () =>
+      frame().evaluate(() =>
+        [...document.querySelectorAll('.thimble-colour-strip')]
+          .map((el) => {
+            const cv = el.querySelector('canvas') as HTMLCanvasElement
+            const dpr = window.devicePixelRatio || 1
+            const data = cv.width && cv.height ? cv.getContext('2d')!.getImageData(Math.round(6 * dpr), 0, 1, cv.height).data : []
+            let drawn = 0
+            for (let i = 3; i < data.length; i += 4) if (data[i] > 200) drawn++
+            return { x: el.getBoundingClientRect().left, lanes: [...el.querySelectorAll('.thimble-colour-lane')].map((l) => (l as HTMLElement).title), drawn }
+          })
+          .sort((a, b) => a.x - b.x)
+          .map(({ lanes, drawn }) => ({ lanes, drawn })),
+      )
+    await typeIn(frame, 'gale')
+    assert.equal(await frame().evaluate(() => (window as any).search.count), 12)
+    await p.waitForTimeout(200)
+    // the table's plain strip ticks its four rows; the thread's takes the search's lane before Color by's, with the
+    // ticks of its four messages
+    const both = await strips()
+    assert.deepEqual(both[1].lanes, ['“gale”', 'Author'])
+    assert.ok(both[0].drawn >= 4 && both[1].drawn >= 4, `ticks drawn: ${JSON.stringify(both)}`)
+    // a word only the thread holds: the search's lane on the thread's strip alone
+    await typeIn(frame, 'heron')
+    await p.waitForTimeout(200)
+    const one = await strips()
+    assert.ok(one[0].drawn === 0 && one[1].lanes[0] === '“heron”' && one[1].drawn > 0, `ticks drawn: ${JSON.stringify(one)}`)
+    await p.close()
+  })
+
+  test("a page's own list of rows with no box, beside a table: each row's matches are its own list's, the current one where the step went", async () => {
+    const { page: p, frame } = await framed(page(`<div class="top"><span id="search"></span></div>
+<div id="own"><div data-thimble-row="0">a gale at noon</div><div data-thimble-row="1">the gale again</div></div><div id="list" style="height:300px"></div>
+<script>
+window.search = thimble.search({ mount: '#search' })
+window.table = thimble.table({ mount: '#list', search, columns: [{ name: 'subject', title: 'Subject' }],
+  rows: [{ ref: 'mail.jsonl#L1', subject: 'calm' }, { ref: 'mail.jsonl#L2', subject: 'gale warning' }] })
+search.rows({ texts: ['a gale at noon', 'the gale again'], refs: ['own#1', 'own#2'] })
+</script>`))
+    await typeIn(frame, 'gale')
+    const at = () =>
+      frame().evaluate(() => {
+        const hl = (CSS as any).highlights
+        const where = (r: Range) => (r.startContainer.parentElement!.closest('#own') ? 'own' : 'table') + ' ' + r.toString()
+        return { at: (window as any).search.at, current: [...hl.get('thimble-search-current')].map(where), washed: [...hl.get('thimble-search')].map(where).sort() }
+      })
+    // the own list's two rows, then the table's second, whose row is drawn under the same number as the own list's
+    // second: each match washed once, and the current one in the list the step went to
+    assert.deepEqual(await at(), { at: 0, current: ['own gale'], washed: ['own gale', 'table gale'] })
+    await frame().evaluate(() => (window as any).search.step(1))
+    assert.deepEqual(await at(), { at: 1, current: ['own gale'], washed: ['own gale', 'table gale'] })
+    await frame().evaluate(() => (window as any).search.step(1))
+    assert.deepEqual(await at(), { at: 2, current: ['table gale'], washed: ['own gale', 'own gale'] })
     await p.close()
   })
 })
