@@ -610,7 +610,7 @@ export function OrientLanding({ ws, chat }: { ws: string; chat: string }) {
         {status === 'failed' && <ReportProblemButton description={failureText('The orientation failed.', log.meta?.result)} focus={[chat]} className="chat-landing-report" />}
         {list && (
           <>
-            {' Thimble has '}
+            {' thimble has '}
             <ReviewCounts views={made.views.length} cells={cards} labels={made.labels.length} report={!!report} />
             {' for you to review.'}
           </>

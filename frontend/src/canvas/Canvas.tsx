@@ -1094,13 +1094,16 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     }
   })
 
-  // ---- a ref to a card, a frame or a label: open the frames it sits in, centre it once it is drawn, flash it; a ref
-  // to a cell of a card's table opens the card at that cell, marked, and one to lines of a card's printed output opens
-  // them where they are drawn (the card, or focus mode on it, else the card's details), marked ----
+  // ---- a ref to a card, a frame or a label: open the frames it sits in, centre it once it is drawn, select and flash
+  // it (neither for a ref opened still, bus openRef); a ref to a cell of a card's table opens the card at that cell,
+  // marked, and one to lines of a card's printed output opens them where they are drawn (the card, or focus mode on it,
+  // else the card's details), marked ----
 
   const pendingRef = useRef<string | null>(null)
   // the ref waiting asks for focus mode on its frame's first card (a canvas group's chip, teleport's `focus`)
   const pendingFocus = useRef(false)
+  // the ref waiting opens its card still: not selected and not flashed (the screenshot tool's `?ref=`, Shell)
+  const pendingStill = useRef(false)
   const pendingSince = useRef(0)
   const settling = useRef<{ ref: string; timer: number } | null>(null)
   const [, bump] = useState(0)
@@ -1111,6 +1114,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         if (!p || (p.kind !== 'cell' && p.kind !== 'group' && p.kind !== 'concept')) return
         pendingRef.current = e.ref
         pendingFocus.current = !!e.focus
+        pendingStill.current = !!e.still
         pendingSince.current = 0
         bump((n) => n + 1)
         // a render once the wait is over, so a card that never arrives is given up on even when nothing else changes
@@ -1190,8 +1194,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     if (settling.current?.ref === ref) return
     if (settling.current) window.clearTimeout(settling.current.timer)
     const cellId = board.cellById.has(id) ? id : null
-    if (cellId) setSel([cellId])
+    const still = pendingStill.current
+    if (cellId && !still) setSel([cellId])
     const el = cellId ? cardEls.current.get(cellId)?.querySelector<HTMLElement>('.canvas-card') : null
+    const flash = still ? () => undefined : flashCard
     // the view centres on a part of a card it opened when that part is outside the viewport (a card taller than it)
     const centreOnPart = (part: HTMLElement) => {
       const box = vp.current?.getBoundingClientRect()
@@ -1206,7 +1212,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       const cited = { col: p.col, row: p.row }
       window.setTimeout(() => {
         void revealCell(el, cited.col, cited.row, '.outputs-html table').then((td) => {
-          if (!td) return flashCard(el)
+          if (!td) return flash(el)
           centreOnPart(td)
         })
       }, 120)
@@ -1232,7 +1238,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         setDetail(cited.cell)
         setCite({ ...cited, seq: Date.now() })
       }, 120)
-    } else if (el) flashCard(el)
+    } else if (el) flash(el)
     settling.current = {
       ref,
       timer: window.setTimeout(() => {

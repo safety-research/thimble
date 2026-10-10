@@ -7,7 +7,7 @@
 // under it, Show less in the same place once open; a thought quiet; an error in the problem red, a failed call's head
 // with ✕ before its tool; a line between sessions. Each turn is anchored with its ref, so a label marks it, a ⌘-click
 // asks about it and Color by draws its bar, and its number opens its lines in the File browser. Its bars follow the
-// page's Color by unless it is given `colour` (or `color`; false for none), and it keeps them as Color by changes,
+// page's Color by unless it is given `color` (false for none), and it keeps them as Color by changes,
 // stamping each turn again from its turn, its folds and the scroll as they were. Color by reads a turn's `record` when
 // it has one, as a card's, so a field of the record named as a turn's own, such as `kind`, colors it; else the turn.
 // What a fold hides stays in the page, hidden, in an element with data-thimble-fold, so thimble.search finds it and

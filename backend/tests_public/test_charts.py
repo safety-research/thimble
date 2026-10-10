@@ -728,7 +728,7 @@ def test_a_chart_layered_in_plain_altair_cites_its_data_not_the_marks_on_it():
     # a rule at a value drawn first, which Altair gives one empty row, is no table either
     ruled = cite.chart_table({kt.VEGALITE_MIME: (alt.Chart().mark_rule().encode(y=alt.datum(3000)) + bars).to_dict()})
     assert (ruled.label, ruled.columns) == ("day", ["saves"])
-    # a panel of a concatenated chart is read the same way, the first panel first, and a facet by its data
+    # a panel of a concatenated chart is read the same way, and a facet by its data
     other = alt.Chart(POSTS).mark_bar().encode(x="agent", y="posts")
     side = cite.chart_table({kt.VEGALITE_MIME: alt.hconcat(layered, other).to_dict()})
     assert (side.label, side.columns) == ("day", ["saves"])
@@ -737,6 +737,32 @@ def test_a_chart_layered_in_plain_altair_cites_its_data_not_the_marks_on_it():
     panels = (base.mark_bar() + base.mark_text().encode(text="saves:Q")).facet(row="wiki")
     faceted = cite.chart_table({kt.VEGALITE_MIME: panels.to_dict()})
     assert (faceted.columns, faceted.total) == (["day", "saves", "wiki"], 12)
+
+
+def test_a_concatenated_chart_cites_its_panel_with_the_most_rows_not_a_header_over_it():
+    """The live QA of 0.7.0 (2026-10-10): a concatenated chart took its table from its first panel, so a panel of text
+    set first as a header was the table. Its table is its panel with the most rows, as a layered chart's is its layer
+    with the most, while each other panel's rows still answer a ref, so a takeaway written when the first panel was the
+    table keeps its links."""
+    import altair as alt
+
+    daily = pd.DataFrame({"day": pd.date_range("2026-06-14", periods=6, freq="D"), "saves": [40, 2610, 6543, 312, 97, 5]})
+    bars = alt.Chart(daily).mark_bar().encode(x="day:T", y="saves:Q")
+    header = alt.Chart(pd.DataFrame({"t": ["Saves per day"]})).mark_text(size=14).encode(text="t:N")
+    bare = alt.Chart().mark_text(size=14, text="Saves per day")  # Altair gives a chart with no data one empty row
+    for head in (header, bare):
+        for concat in (alt.vconcat, alt.hconcat, alt.concat):
+            table = cite.chart_table({kt.VEGALITE_MIME: concat(head, bars).to_dict()})
+            assert (table.label, table.columns, table.total) == ("day", ["saves"], 6), concat.__name__
+    bundle = {kt.VEGALITE_MIME: alt.hconcat(alt.Chart(POSTS).mark_bar().encode(x="agent", y="posts"), bars).to_dict()}
+    assert [(t.label, t.columns) for t in cite.chart_tables(bundle)] == [("day", ["saves"]), ("agent", ["posts"])]
+    assert cite.data_totals([bundle])[:2] == ["6", "9607"], "the totals are the days'"
+    res = cite.resolve("q3", "agent-2 posted [[9|card:q3#posts/agent-2]] times; saves peaked at 6,543 on June 16.",
+                       [bundle], keep_stale=True)
+    assert [(link.token, link.ref) for link in res.links] == [
+        ("9", "card:q3#posts/agent-2"), ("6,543", "card:q3#saves/2026-06-16T00:00:00"),
+        ("June 16", "card:q3#day/2026-06-16T00:00:00")]
+    assert not res.stale and not res.unresolved
 
 
 def test_theme_names_the_theme_s_roles_as_the_css_variables_the_card_reads():

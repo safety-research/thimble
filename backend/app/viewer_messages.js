@@ -12,8 +12,8 @@
 // body longer than twelve lines shows its first lines with
 // Show more and Show less; both keep their text in the page (data-thimble-fold), so thimble.search finds it and opens
 // the fold. Each message is anchored with its ref and carries data-t, so a label marks it, a ⌘-click asks about it, the
-// lanes follow it and Color by draws its bar. Its bars follow the page's Color by unless it is given `colour` (or
-// `color`; false for none), and it keeps them as Color by changes, stamping each message again in place; Color by reads
+// lanes follow it and Color by draws its bar. Its bars follow the page's Color by unless it is given `color` (false
+// for none), and it keeps them as Color by changes, stamping each message again in place; Color by reads
 // a message's `record` when it has one, so a field of the record named as a message's own, such as `kind`, colors it.
 // When the label filter hides a message that held its group's head, the next one shown takes the head. A click, Enter or Space picks a message (onPick), marked
 // as the chosen one; ↑ and ↓ go to the message above or below.

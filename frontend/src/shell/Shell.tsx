@@ -196,13 +196,14 @@ export function Shell({ ws }: { ws: string }) {
     return () => offs.forEach((off) => off())
   }, [patch])
   // a `?ref=` in the URL opens its element once the surfaces are mounted (their effects run before this one), as a
-  // click on its chip would. Without one, the first time this browser opens the workspace it opens at the view the
-  // workspace's row names (openingRef: a demo dataset's main view, an example's), as that row on the start page does
+  // click on its chip would, but still: a card it opens is neither selected nor flashed (refFromUrl). Without one, the
+  // first time this browser opens the workspace it opens at the view the workspace's row names (openingRef: a demo
+  // dataset's main view, an example's), as that row on the start page does
   const [firstOpen] = useState(() => !openedBefore(ws))
   useEffect(() => {
     noteOpened(ws)
     const ref = refFromUrl()
-    if (ref) return teleport(ref)
+    if (ref) return teleport(ref, { still: true })
     if (!firstOpen) return
     let alive = true
     api
