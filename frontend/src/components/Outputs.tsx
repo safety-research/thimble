@@ -9,7 +9,7 @@ import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, use
 import type { Cell, Concept, MimeBundle, OutputTruncation } from '../lib/types'
 import { frameStyle, frameTokens, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { useTheme } from '../lib/theme'
-import { token, vegaConfig, VIZ_NEUTRAL, VIZ_SERIES } from '../lib/vizTheme'
+import { token, vegaConfig, VIZ_NEUTRAL, VIZ_SERIES, withTokens } from '../lib/vizTheme'
 import { useVisibleSize } from '../lib/visibleSize'
 import { rehypeNumericCells } from '../lib/markdownCells'
 import { tidyTable } from '../lib/tables'
@@ -956,7 +956,7 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
     const embed = async (w: number | undefined, fit: Refit, tries: number, step?: { w: number; over: number }): Promise<void> => {
       // the palette is read per theme, so a folded group's grey and the kept groups' colours are the theme's
       const classes = (JSON.parse(colours) as [string, number][][]).map((k): LabelClassColour[] => k.map(([name, n]) => ({ name, colour: token(colourToken(n)), none: !n })))
-      const shown = chartDefaults(plain, { width: fitWidth ?? el.clientWidth, card, palette: VIZ_SERIES.map(token), other: token('--viz-other'), labels: classes, neutral: VIZ_NEUTRAL.map(token) })
+      const shown = chartDefaults(withTokens(plain), { width: fitWidth ?? el.clientWidth, card, palette: VIZ_SERIES.map(token), other: token('--viz-other'), labels: classes, neutral: VIZ_NEUTRAL.map(token) })
       const sized = onPaper(applyRefit(responsive(shown, w, w === fitWidth ? undefined : MIN_VIEW_REFIT), fit))
       const m = await loadChunk(() => import('vega-embed'))
       if (!alive) return

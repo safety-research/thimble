@@ -4,7 +4,7 @@
 import { describe, expect, test } from 'vitest'
 import { laneColors } from '../../src/canvas/DataViz.tsx'
 import { CHART_TOKENS, FRAME_TOKENS, VIEW_TOKENS } from '../../src/lib/frame.ts'
-import { token, vegaConfig, VIZ_DIV, VIZ_SEQ, VIZ_SERIES } from '../../src/lib/vizTheme.ts'
+import { token, vegaConfig, VIZ_DIV, VIZ_SEQ, VIZ_SERIES, withTokens } from '../../src/lib/vizTheme.ts'
 
 describe('the Vega-Lite theme', () => {
   const c = vegaConfig() as Record<string, Record<string, unknown>>
@@ -41,7 +41,31 @@ describe('the Vega-Lite theme', () => {
     }
     expect(s['thimble-faint'].opacity as number).toBeLessThan(s['thimble-box'].opacity as number)
     expect(s['thimble-median']).toMatchObject({ color: token('--viz-ink-1'), opacity: 1 })
+    // a scatter's fitted line in ink unless its group colors it; a range's before end a ring of its color
+    expect(s['thimble-fit'].color).toBe(token('--viz-ink-1'))
+    expect(s['thimble-start']).toMatchObject({ filled: false })
+    expect(s['thimble-start'].color).toBeUndefined()
   })
+})
+
+test("a mark a card's code colors with thimble.theme takes the theme's color now, so it follows the accent and the paper", () => {
+  const spec = {
+    $schema: 'https://vega.github.io/schema/vega-lite/v6.json',
+    layer: [
+      { mark: 'bar', encoding: { x: { field: 'day', type: 'temporal' } } },
+      { mark: { type: 'text', color: 'var(--viz-highlight)' }, encoding: { color: { condition: { test: 'true', value: 'var(--viz-other)' }, value: 'var( --viz-ink-4 )' } } },
+      { mark: { type: 'rule', color: 'var(--accent)' }, encoding: { text: { value: 'var(--viz-nothing)' } } },
+    ],
+  }
+  const paper: Record<string, string> = { '--viz-highlight': '#e26101', '--viz-other': '#85827a', '--viz-ink-4': '#4d4b47' }
+  const out = withTokens(spec, (name) => paper[name] ?? '') as typeof spec
+  expect(out.layer[1]).toEqual({ mark: { type: 'text', color: '#e26101' }, encoding: { color: { condition: { test: 'true', value: '#85827a' }, value: '#4d4b47' } } })
+  // only the chart's tokens: the interface's own and a name the theme lacks stay as written
+  expect(out.layer[2]).toBe(spec.layer[2])
+  expect(out.layer[0]).toBe(spec.layer[0])
+  expect(withTokens({ a: [1, 'x'] })).toEqual({ a: [1, 'x'] })
+  // read from the document by default, with the Warm paper's values where the page sets none
+  expect(withTokens('var(--viz-ink-1)')).toBe(token('--viz-ink-1'))
 })
 
 test("a timeline's lanes take the series in the order they first appear, and the muted other past seven", () => {

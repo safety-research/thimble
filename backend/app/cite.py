@@ -24,6 +24,7 @@ from typing import Any, Iterator
 from urllib.parse import unquote
 
 from . import frames
+from .kernel_thimble import CHART_ROWS_NAME
 
 # A number token: optional sign, digits with optional thousands commas, optional decimals, optional trailing %. Not
 # preceded by a word char or ref punctuation (digits inside cell:ab12, L44, out3), and not followed by a word char, "%"
@@ -534,12 +535,15 @@ def chart_spec(bundle: Any) -> dict | None:
 
 def _inline_rows(spec: dict, datasets: dict | None = None) -> list | None:
     """The rows a spec draws when they are inline: its `data.values`, or the `datasets` entry its `data.name` names
-    (Altair's form). A layered, concatenated or faceted spec with no data of its own reads its first part's; a Vega
-    spec's `data` list gives its first entry with values; a spec whose only inline data is one dataset reads that.
-    None when the rows are not in the spec (a URL, a generator, no data at all)."""
+    (Altair's form). A layered, concatenated or faceted spec with no data of its own reads its first part's, or the
+    part of thimble.chart's own rows (kernel_thimble CHART_ROWS_NAME) wherever it stands, so the code's own marks may
+    come before it; a Vega spec's `data` list gives its first entry with values; a spec whose only inline data is one
+    dataset reads that. None when the rows are not in the spec (a URL, a generator, no data at all)."""
     own = spec.get("datasets")
     datasets = {**(datasets or {}), **(own if isinstance(own, dict) else {})}
     data = spec.get("data")
+    if data is None and (part := _chart_part(spec)) is not None:
+        return part["data"]["values"]
     if isinstance(data, list):
         return next((d["values"] for d in data if isinstance(d, dict) and isinstance(d.get("values"), list)), None)
     if isinstance(data, dict):
@@ -557,6 +561,21 @@ def _inline_rows(spec: dict, datasets: dict | None = None) -> list | None:
     if len(datasets) == 1:
         rows = next(iter(datasets.values()))
         return rows if isinstance(rows, list) else None
+    return None
+
+
+def _chart_part(spec: dict) -> dict | None:
+    """The part of a spec that holds thimble.chart's own rows inline, named CHART_ROWS_NAME… (kernel_thimble _altair):
+    the spec itself or a layer or concatenated part at any depth; None when no part does."""
+    data = spec.get("data")
+    if isinstance(data, dict) and str(data.get("name") or "").startswith(CHART_ROWS_NAME) \
+            and isinstance(data.get("values"), list):
+        return spec
+    for key in ("layer", "hconcat", "vconcat", "concat"):
+        for part in spec.get(key) if isinstance(spec.get(key), list) else []:
+            found = _chart_part(part) if isinstance(part, dict) else None
+            if found is not None:
+                return found
     return None
 
 
@@ -607,8 +626,11 @@ def _label_text(v: Any) -> str:
 def chart_table(bundle: Any) -> ChartTable | None:
     """The table of a chart bundle's inline rows (ChartTable), the first CHART_ROWS_MAX of them; None when the bundle is no
     chart or draws no inline rows. The row label is the first column whose values are all distinct, non-empty text, else
-    the x (then y) axis field when its values are distinct and not a numeric y measure, else the row's position from 0."""
+    the x (then y) axis field when its values are distinct and not a numeric y measure, else the row's position from 0.
+    The rows and axes of thimble.chart's own part are read wherever it stands among a chart's layers (_chart_part)."""
     spec = chart_spec(bundle)
+    if spec is not None and spec.get("data") is None:
+        spec = _chart_part(spec) or spec
     raw = _inline_rows(spec) if spec is not None else None
     if not isinstance(raw, list):
         return None

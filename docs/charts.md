@@ -11,36 +11,46 @@ thimble.chart("bar", posts.groupby("agent").size().rename("posts"))
 
 `data` is a DataFrame whose columns come in the kind's order. Their names are what the axes and the legend say. A
 Series is its index, then its values, so `value_counts()` and `groupby(...).size()` are bar charts as they are; a
-histogram takes a Series as its values, and a box plot its values grouped by its index when that is named
-(`df.set_index("model")["score"]`). A named index counts as the first columns.
+histogram, a density and an ecdf take a Series as its values, and a box plot its values grouped by its index when that
+is named (`df.set_index("model")["score"]`). A named index counts as the first columns.
 
 | kind | columns, in order | options | draws |
 |---|---|---|---|
-| `bar` | category, value[, group] | sort, stack, label, marks, interval | named categories as bars lying down, the largest first; number categories as upright bars in order; times as upright bars, each spanning its time to the next |
+| `bar` | category, value[, group] | sort, stack, label, marks, interval, panels | named categories as bars lying down, the largest first; number categories as upright bars in order; times as upright bars, each spanning its time to the next |
 | `line` | x, y[, series] | label, marks, panels | a line per series over numbers or times, with a dot at each value while a series has 30 or fewer |
-| `area` | x, y[, series] | stack, label, marks | the series as areas stacked over numbers or times, the legend's first lowest, with a dot at each value while a series has 30 or fewer |
-| `scatter` | x, y[, group] | label, marks | a point per row |
-| `dots` | x, row[, group] | sort, label, marks, interval | a point per row on its row's line, such as each agent's test runs over time; rows earliest first |
+| `area` | x, y[, series] | stack, label, marks, panels | the series as areas stacked over numbers or times, the legend's first lowest, with a dot at each value while a series has 30 or fewer |
+| `scatter` | x, y[, group] | label, marks, fit, panels | a point per row |
+| `dots` | x, row[, group] | sort, label, marks, interval, panels | a point per row on its row's line, such as each agent's test runs over time; rows earliest first |
 | `box` | value, group | sort, label | a box per group lying down, the largest median first, over its values as faint dots; a group of fewer than 5 values as a strip of its dots |
-| `histogram` | value | step, marks | the values counted in bins of a round width, at most 20 bins |
+| `histogram` | value[, group] | step, label, marks, panels | the values counted in bins of a round width, at most 20 bins; groups stacked in each bin |
+| `density` | value[, group] | bandwidth, sort, label, marks, panels | each group's values as a smooth curve; up to 4 groups overlap lightly, 5 or more stand one over another (a ridgeline), the largest median on top |
+| `ecdf` | value[, group] | label, marks | each group's cumulative share: at each value, the share of its values at or below it, such as the share of PRs merged within x minutes |
+| `range` | item, before, after[, group] | sort, label, marks | a dumbbell per item lying down, a line from its before (a ring) to its after (a dot); the largest after first, or with times the earliest before |
 | `heatmap` | x, y, value | log | a cell per row, colored by its value; names by their totals, numbers and times in order |
 
-A value, a y and a histogram's or box plot's value are numbers. A line's, an area's, a scatter's and a dots chart's x
-is numbers or times. Text that is all ISO dates or months ("2026-06-18", "2025-04") reads as times.
+A value, a y and a histogram's, density's, ecdf's or box plot's value are numbers. A line's, an area's, a scatter's and
+a dots chart's x is numbers or times, as are a range's before and after (both numbers or both times). Text that is all
+ISO dates or months ("2026-06-18", "2025-04") reads as times. A histogram, a density and an ecdf take any number of
+values and leave out missing and infinite ones; the other kinds draw 5,000 rows at most.
 
 ## Options
 
-- `sort`: a list of the categories (bar), rows (dots) or groups (box) in the order to show, the others after them in
-  the default order; `None` keeps the frame's order.
+- `sort`: a list of the categories (bar), rows (dots), groups (box, density) or items (range) in the order to show,
+  the others after them in the default order; `None` keeps the frame's order.
 - `stack`: with a group or series column, `True` (the default) stacks them in the legend's order; `False` sets bars side
   by side and overlaps areas lightly; `"share"` stacks each category or x to 100%.
-- `label`: a label's name, when the group or series column (else the category or row column) holds the label's values.
-  They take the label's order and the label's colors, the same colors as its tags in Files; a box plot keeps its median
-  order and takes the colors.
+- `label`: a label's name, when the group or series column (else the category, row or item column) holds the label's
+  values. They take the label's order and the label's colors, the same colors as its tags in Files; a box plot and a
+  density keep their median order and take the colors.
 - `marks`: `{text: x}`, a line across the chart at each x with its text, such as `{"#118 merged": "2026-08-30T16:02"}`.
   For charts whose x is numbers or times.
-- `panels`: `True` draws each series of a line chart in a panel of its own, with its own y scale.
+- `panels`: `True` draws each group or series in a panel of its own, one under another. The panels share their scales,
+  so they compare, but a line chart's, whose panels each have their own y scale. Marks repeat in every panel.
+- `fit`: `"linear"` or `"smooth"` on a scatter, a trend line for each group: least squares, or a local regression
+  (LOESS, as ggplot's smooth draws it, that an outlier barely moves). Each row's fitted value is a column of the chart's
+  rows (`cost fit` for a y named `cost`), so a takeaway cites it.
 - `step`: a histogram's bin width.
+- `bandwidth`: how widely a density smooths, in the value's units; by default each group's own, by Silverman's rule.
 - `log`: `True` colors a heatmap's values on a log scale.
 - `interval`: `(lo, hi)`, the names of two more columns of a bar or dots chart's frame that hold each value's low and
   high ends, such as a Wilson interval's. Each value gets a line from its low end to its high end, in the theme's ink. A
@@ -69,18 +79,76 @@ only a strip of its dots. The chart's rows, the table a takeaway cites, are each
 (the whiskers' ends), `q1`, `median` and `q3`, so a takeaway cites a group's median by the group's name. The values
 behind the boxes are in the dots' own rows.
 
+## Density, ecdf and range
+
+A density computes each group's curve in Python (a Gaussian kernel's) over a range the curves share, at 100 to 400
+points, enough that the narrowest curve shows its bumps. The range stops at 0 when no value is below it, and the
+smoothing that would pass 0 is folded back inside, so a curve of values crowding 0 stays high there. Each curve's area
+is 1, so the curves compare shapes, not counts. The chart's rows are those points: the value, `density` and the group.
+With 5 or more groups and no panels, the groups stand one over another, each curve on a baseline of its own named on the
+y axis, the curves scaled alike. The places of the ridges are laid out by the chart, not held in its rows.
+
+An ecdf's rows are each group's distinct values with `share`, the share of the group's values at or below it, drawn as
+steps; a group of more than 500 distinct values keeps 500 of them, evenly spread, the last at 100%. Its legend lists the
+groups by their median, the least first, as their curves stand from the top.
+
+A range's rows are the frame's own. Its x axis is titled by the two columns, as in `base → tuned`, and the ends are
+places rather than lengths, so the axis spans them rather than starting at 0. An item in several groups has their
+dumbbells side by side on its line.
+
+```python
+thimble.chart("range", evals[["model", "base", "tuned"]])
+```
+
+## Your own marks on a chart
+
+`thimble.chart(kind, data, show=False, **options)` shows nothing and returns the chart as an Altair chart, which the
+card's code layers its own marks on: text, rules, shaded spans (a `rect` with `x` and `x2`), arrows, callouts with
+leader lines. The marks take the theme's face, sizes and colors: a mark given no color takes the first series color,
+and text and rules the theme's annotation ink. `thimble.theme` names the theme's colors by role, for the marks that
+need one: `accent` (one thing set against the rest), `ink` (text that leads), `muted` (the rest), `pale` (leader lines
+and spans), and `series[0]` to `series[6]` (a chart's groups in order). Each is a CSS variable, such as
+`var(--viz-highlight)`, that the card reads when it draws the chart, so the marks follow the accent and the paper, dark
+included. The chart's rows stay the table a takeaway cites wherever the chart stands among the layers, so a shaded
+span can come first and lie behind it.
+
+A daily bar chart with a few events called out above it, each a date in the accent over a few words, with a thin pale
+leader line down to its bar:
+
+```python
+import altair as alt
+import pandas as pd
+import thimble
+
+bars = thimble.chart("bar", daily, show=False)  # daily: day, merged
+top = daily["merged"].max() * 1.3
+ev = alt.Chart(events.merge(daily, on="day").assign(  # events: day, note
+    at=lambda d: d["day"] + pd.Timedelta(hours=12),  # the middle of its day's bar
+    top=top, date=lambda d: d["day"].dt.strftime("%b %-d")))
+(bars
+ + ev.mark_rule(color=thimble.theme.pale).encode(x="at:T", y="merged:Q", y2="top:Q")
+ + ev.mark_text(color=thimble.theme.accent, baseline="bottom", dy=-16).encode(x="at:T", y="top:Q", text="date:N")
+ + ev.mark_text(baseline="bottom", dy=-3).encode(x="at:T", y="top:Q", text="note:N"))
+```
+
 ## How it draws
 
 `thimble.chart` shows a Vega-Lite chart (`application/vnd.vegalite.v6.json`, as Altair does) with its rows inline and no
 color, font or size of its own. The card draws it in thimble's theme, as it draws every chart (frontend
 `lib/vizTheme.ts` and `lib/chartDefaults.ts`), so these charts change with the theme and look alike. A mark that only a
-job sets apart names that job as a Vega-Lite style, and the theme's `style` config gives it its look: `thimble-faint`
-(a box plot's values), `thimble-box` (its boxes), `thimble-median` (its medians, in ink) and `thimble-overlap` (areas
-side by side). An interval is a rule, which the theme draws in its annotation ink. A chart colored by
-a label takes the label's colors because the call notes the label as read (as `thimble.labels` does), and the card gives
-a label it read its colors. The inline rows are the chart's table: the model reads them in the card's output and a
-takeaway cites a value by column and row, as for any chart. Times without a zone show as they are, and times with a zone
-at their zone's clock time.
+job sets apart names that job as a Vega-Lite style, and the theme's `style` config gives it its look: `thimble-faint` (a
+box plot's values), `thimble-box` (its boxes), `thimble-median` (its medians, in ink), `thimble-overlap` (areas side by
+side, and density curves), `thimble-fit` (a scatter's fitted line, in ink unless its group colors it) and
+`thimble-start` (a range's before end, a ring). An interval is a rule, which the theme draws in its annotation ink. A
+chart colored by a label takes the label's colors because the call notes the label as read (as `thimble.labels` does),
+and the card gives a label it read its colors. The inline rows are the chart's table: the model reads them in the card's
+output and a takeaway cites a value by column and row, as for any chart. Times without a zone show as they are, and
+times with a zone at their zone's clock time.
+
+Panels one under another each get 150 px unless the chart sizes them, and a y axis that names each of its ticks (a
+ridgeline's) gets room for every name (`lib/chartDefaults.ts`). The terminal draws a one-layer bar, line, point or
+area chart from its rows, so a density of a few groups and an ecdf draw there as lines; a ridgeline, a range and a
+chart with a fit or marks show their rows as a table.
 
 A chart of another form is still Altair or matplotlib code in a plot card. The code is in
 `backend/app/kernel_thimble.py` (`chart`, `CHARTS`), the tests in `backend/tests_public/test_charts.py`.

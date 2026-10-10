@@ -186,8 +186,25 @@ function vegaRows(spec: VegaLite, root: VegaLite): Record<string, unknown>[] {
   return []
 }
 
-/** Every dataset a chart holds, the first that has rows. */
+/** The start of the name thimble.chart(..., show=False) gives its own rows (backend kernel_thimble CHART_ROWS_NAME). */
+const CHART_ROWS_NAME = 'thimble-chart-'
+
+/** The rows of thimble.chart's own part of a chart the code layered its marks on, wherever that part stands. */
+function chartRows(spec: VegaLite): Record<string, unknown>[] | null {
+  if (spec.data?.name?.startsWith(CHART_ROWS_NAME) && Array.isArray(spec.data.values)) return spec.data.values
+  for (const sub of [...(spec.layer ?? []), ...(spec.hconcat ?? []), ...(spec.vconcat ?? []), ...(spec.concat ?? [])]) {
+    const got = chartRows(sub)
+    if (got) return got
+  }
+  return null
+}
+
+/** Every dataset a chart holds: thimble.chart's own rows (chartRows), else the first that has rows. */
 function anyRows(spec: VegaLite, root: VegaLite = spec): Record<string, unknown>[] {
+  if (spec === root && !spec.data) {
+    const marked = chartRows(spec)
+    if (marked?.length) return marked
+  }
   const own = vegaRows(spec, root)
   if (own.length) return own
   for (const sub of [spec.spec, ...(spec.layer ?? []), ...(spec.hconcat ?? []), ...(spec.vconcat ?? []), ...(spec.concat ?? [])]) {
@@ -281,7 +298,10 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
   const color = spec.encoding?.color
   if (!x?.field || !y?.field || x.aggregate || y.aggregate) return null
   const rows = vegaRows(spec, spec)
-  if (!rows.length) return null
+  // an axis whose field the chart computes (a ridgeline's places) is in no row: the rows' table draws instead
+  const xf = x.field
+  const yf = y.field
+  if (!rows.some(r => xf in r && yf in r)) return null
   if (mark === 'bar') {
     // the quantitative axis is the value, the other the label
     const horizontal = x.type === 'quantitative' && y.type !== 'quantitative'
