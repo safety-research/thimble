@@ -1,8 +1,8 @@
 // The File browser's reader: a file in the built-in view that fits it best (views/registry.ts), with the others in the
 // mode switch; the pick is remembered per file. Records load a page at a time around the ref's line and as the reader
-// scrolls, up to CAP in memory, with the overview ruler beside them (Ruler.tsx). ⌘F opens the find bar (FindBar.tsx);
-// media files show as themselves (MediaReader), a PDF in the browser's own viewer beside the viewers made for PDFs
-// (PdfReader), and other binary files show only their size.
+// scrolls, up to CAP in memory, with the strip and its loupe beside them (Tracks.tsx). ⌘F opens the find bar
+// (FindBar.tsx); media files show as themselves (MediaReader), a PDF in the browser's own viewer beside the viewers made
+// for PDFs (PdfReader), and other binary files show only their size.
 import { Component, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ErrorInfo, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import { Button, Segmented } from '../components/Button'
@@ -20,7 +20,7 @@ import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchC
 import { countsOf, FindBar, useSourceFind } from './FindBar'
 import { classesOf, colourVar, laneTags, litClass, marksOf, valueOf } from './labels'
 import { useScrollAnchor } from './anchor'
-import { ReaderLabelsContext, useReaderLabels } from './marks'
+import { ReaderLabelsContext, rowsByRef, useReaderLabels } from './marks'
 import { findColumn, rulerColumns, useRuler, type RulerTick, type Seen, type Shown } from './Ruler'
 import { ColorBy } from './ColorBy'
 import { choiceId, KEY_COLORS, keyPaint, keyValue, parseChoice, recordObject, type ColorChoice } from './colorChoice'
@@ -28,7 +28,7 @@ import { ColorContext } from './colorContext'
 import { FilterBy } from './FilterBy'
 import { FilterContext, useFilterBy } from './useFilterBy'
 import { FoldContext, useFold } from './fold'
-import { labelPaint, PlaceFeed, ReaderTracks, ZOOM_SPAN, type DrawnRecord, type OverviewPaint, type PreviewRecord, type TrackLane } from './Tracks'
+import { labelPaint, PlaceFeed, ReaderTracks, type LoupeRecord, type OverviewPaint, type PreviewRecord, type TrackLane } from './Tracks'
 import { useColorBy } from './useColorBy'
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
@@ -42,7 +42,7 @@ import { compact, errMsg, LaneHead, recordExcerpt, targetOf, type ViewDef, type 
 import { messageKeys, nameOf, pick, textOf, timeOf } from './views/transcript'
 import { withoutEscapes } from './views/raw'
 import { pickView, scoreViews, viewByType } from './views/registry'
-import { useDelimited } from './views/table'
+import { useDelimiter } from './views/table'
 
 const PAGE = 100
 const CAP = 2000
@@ -643,48 +643,8 @@ export function useRecordLines(ws: string, ref: string | undefined, path: string
   return { at: mine?.at ?? null, pending: asks && !mine }
 }
 
-/** records the zoomed track draws at most */
-const ZOOM_RECORDS = 400
-
-/** The records the body draws for the zoomed track around its scroll: those within three ZOOM_SPAN heights of the body
- * that hold every stretch the zoomed track can show at this scroll, on a grid of those heights so that they change only
- * as the reader scrolls past a step of it, and at most ZOOM_RECORDS, those nearest the view. Null when the body draws
- * none. */
-export function zoomRecordsOf(body: HTMLElement): DrawnRecord[] | null {
-  const cards = body.querySelectorAll<HTMLElement>('.reader-card[data-line]')
-  if (!cards.length) return null
-  const st = body.scrollTop
-  const unit = Math.max(1, body.clientHeight * ZOOM_SPAN)
-  const from = (Math.floor(st / unit) - 1) * unit
-  const to = from + 3 * unit
-  const base = body.getBoundingClientRect().top - st
-  const firstBelow = (y: number) => {
-    let lo = 0
-    let hi = cards.length - 1
-    let at = cards.length
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1
-      if (cards[mid].getBoundingClientRect().bottom - base > y) {
-        at = mid
-        hi = mid - 1
-      } else lo = mid + 1
-    }
-    return at
-  }
-  // past ZOOM_RECORDS, those from half of them above the view on
-  const first = Math.max(firstBelow(from), firstBelow(st) - ZOOM_RECORDS / 2)
-  const recs: DrawnRecord[] = []
-  for (let i = first; i < cards.length && recs.length < ZOOM_RECORDS; i++) {
-    const r = cards[i].getBoundingClientRect()
-    const top = r.top - base
-    if (top >= to) break
-    recs.push({ line: Number(cards[i].dataset.line), top, bottom: r.bottom - base })
-  }
-  return recs
-}
-
-/** A record as the overview's hover shows it: its index, who and when (the sniff's keys, else those the record
- * carries), and its first two lines of words. */
+/** A record as the loupe and a record's tooltip name it: its index, who and when (the sniff's keys, else those the
+ * record carries), and its first two lines of words. */
 export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color: string | null): PreviewRecord {
   const first = (s: string) =>
     s
@@ -748,8 +708,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // the record the find or go to line moved to, which the view scrolls to and flashes as it does a followed ref's
   const [findRef, setFindRef] = useState<string | null>(null)
   const [cursor, setCursor] = useState<MatchAt>(NO_MATCH)
-  // where the reader stands and the records around it, which the tracks hear of each frame it scrolls without a render
-  // of the reader
+  // where the reader stands, which the strip hears of each frame it scrolls without a render of the reader
   const feed = useMemo(() => new PlaceFeed(), [])
   // columns lie past the right edge of the body (a wide table): a fade at the edge says so
   const [moreRight, setMoreRight] = useState(false)
@@ -859,7 +818,6 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     // what a body's height holds of the file on average: its share of the records loaded, as their share of the file
     const span = total && first != null && last != null ? Math.min(1, (el.clientHeight / el.scrollHeight) * ((last - first + 1) / total)) : next.height
     feed.set({ top: next.top, height: next.height, scroll: el.scrollTop, h: el.clientHeight, content: el.scrollHeight, start: first == null || first <= 1, end: total == null || (last != null && last >= total), span })
-    feed.setRecords(zoomRecordsOf(el))
   }, [total, first, last, feed])
 
   // the record at the top of the reader keeps its place while records above it change height: as they are drawn near
@@ -1254,7 +1212,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const quiet = useRef(new Set<string>())
   const filterHolds = useRef<string | null>(null)
   // a CSV or TSV file's records as the Table mode reads them, by its first line's names
-  const colorRecords = useDelimited(workspace, colored && !isTranscript ? path : '', records)
+  const delimit = useDelimiter(workspace, colored && !isTranscript ? path : '', records)
+  const colorRecords = useMemo(() => (delimit ? delimit(records) : records), [delimit, records])
   const color = useColorBy(workspace, path, colored && !binary && !isDatabase, labels, colorRecords, readerLabels.rows, total, quiet, filterHolds)
   const filter = useFilterBy(workspace, path, isTranscript && !binary && !isDatabase, labels, color.fileLabels, color.keys, records, readerLabels.rows, total, quiet)
   const filterLabel = isTranscript && filter.choice.by === 'label' ? filter.choice.id : null
@@ -1295,27 +1254,24 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     return out
   }, [colored, color.picks, paintOf, nameOfChoice])
   const paintName = nameOfChoice(colorChoice)
-  const recordAtLine = useMemo(() => new Map(colorRecords.map((r) => [r.line, r])), [colorRecords])
-  // a record's color on the zoomed track, and its value of the choice for its hover
-  const zoomColor = useMemo(() => {
-    const names = new Map(color.values.map((v) => [v.id, v.name]))
-    return (line: number) => {
-      const rec = recordAtLine.get(line)
-      const chip = rec ? color.chipOf(rec) : undefined
-      return { color: color.colors?.get(line)?.color ?? null, title: (chip != null ? names.get(chip) : null) ?? '' }
-    }
-  }, [color, recordAtLine])
   const hint = builtins.transcript
-  const preview = useCallback(
-    (line: number) =>
-      api.source(workspace, path, line, 3).then((p) =>
-        p.records.map((rec) => {
-          const chip = color.chipOf(rec)
-          return previewOf(rec, hint, chip != null && !color.off.includes(chip) ? (color.values.find((v) => v.id === chip)?.color ?? null) : null)
-        }),
-      ),
-    [workspace, path, color, hint],
+  // the records the loupe shows and a record's tooltip names, read from the server: per choice of Color by its color (a
+  // label's read from its rows on those lines), who said it, and the start of its text
+  const laneOf = color.laneOf
+  const pickLabels = useMemo(() => colored && color.picks.some((c) => c.by === 'label'), [colored, color.picks])
+  const loupeRecords = useCallback(
+    async (from: number, to: number): Promise<LoupeRecord[]> => {
+      const [page, rows] = await Promise.all([api.source(workspace, path, from, to - from + 1), pickLabels ? scaleApi.labelsForLines(workspace, path, from, to).then(rowsByRef) : Promise.resolve(null)])
+      const recs = delimit ? delimit(page.records) : page.records
+      return recs.map((rec) => {
+        const lanes = colored ? laneOf(rec, (id) => rows?.get(`${path}#L${rec.line}`)?.get(id)) : []
+        const p = previewOf(rec, hint, null)
+        return { line: rec.line, lanes: lanes.map((l) => l.color), who: p.who, text: p.text }
+      })
+    },
+    [workspace, path, pickLabels, delimit, colored, laneOf, hint],
   )
+  const toLine = useCallback((line: number) => goTo(line, 'ruler'), [goTo])
   // the record a mark of the ruler stands for: its line when it stands for one, else the first of its lines whose value
   // of the label is the mark's, read from the server once per mark
   const markLines = useMemo(() => new Map<string, Promise<number | null>>(), [ruler, on])
@@ -1526,7 +1482,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
                 {moreRight && <div className="reader-edge" aria-hidden />}
               </div>
               {!isDatabase && !binary && (
-                <ReaderTracks total={total} feed={feed} paint={paint} paintName={paintName} lanes={trackLanes} markers={markers} colorOf={zoomColor} onSnap={snapTo} onJump={jump} onSeek={seek} onScrollBy={scrollBy} onMark={onMark} preview={preview} />
+                <ReaderTracks total={total} feed={feed} paint={paint} paintName={paintName} lanes={trackLanes} markers={markers} onSnap={snapTo} onJump={jump} onSeek={seek} onScrollBy={scrollBy} onMark={onMark} onLine={toLine} records={loupeRecords} />
               )}
             </div>
           </>

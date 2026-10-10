@@ -1,78 +1,64 @@
-// The reader's two tracks at its right edge, after a music or video editor's navigator and zoom bar (ReaderTracks).
+// The reader's strip at its right edge: the scrollbar's track drawn as the whole file, with a loupe on rest
+// (ReaderTracks).
 //
-// The overview track, at the left, is the whole file: its lines top to bottom in one lane, each pixel row in the color
-// of Color by's first choice that most of its records take (a key's commonest value, a label's value most of the records
-// there have), or, with Color by off or no choice to make, no color (a plain track); never two colors side by side. Each
-// other choice of Color by has a lane of its own beside it, in its own colors (laneWidth: the lanes narrower as more
-// come), named on hover; only the first choice colors the zoomed track. At the overview's left the
-// find's matches leave ticks in the ink, like cue points on a timeline, which say what is found on hover and go to the
-// first match on a click (a marker lane of another kind is drawn in grey, never in a color). Over the lane, a dark
-// frame exactly as wide as the track outlines what the reader shows; a drag of it scrubs the reader, a click elsewhere
-// on the track sends the frame there, and a drag from there scrubs on (a press moves nothing until the pointer has
-// moved DRAG_PX or let go). A click within SNAP_PX of a thin patch of a color (THIN_PX tall at most, a lone record of a
-// value that the overview shows) snaps to it: the reader goes to the patch's first record and chooses it as the find
-// does. Hovering the track shows, beside it, the first records at that point of the file (their index, who and when,
-// their first lines), as a video scrubber's hover shows its frame, without scrolling. A jump of the reader (a click,
-// the find) makes the tracks glide to its new place.
+// The strip is one track at every length, its lanes the scrollbar's (TRACK_LANES: 7 px lanes 2 px apart, 3 px in from
+// its edges): at its left a lane for the find's matches, ticks in the ink like cue points on a timeline, which go to the
+// first match on a click (a marker lane of another kind is drawn in grey, never in a color); then a lane for Color by's
+// first choice, each pixel row in the color that most of its records take (a key's commonest value, a label's value most
+// of the records there have), never two colors side by side, and a lane in its own colors for each other choice. With
+// Color by off and no find the strip is a plain scrollbar. Over the lanes a thumb frames what the reader shows; a drag
+// of it scrubs the reader, a click elsewhere on the track sends the thumb there, and a drag from there scrubs on (a
+// press moves nothing until the pointer has moved DRAG_PX or let go). A click within SNAP_PX of a thin patch of a color
+// (THIN_PX tall at most, a lone record of a value that the strip shows) snaps to it: the reader goes to the patch's
+// first record and chooses it as the find does. A jump of the reader (a click, the find) makes the thumb glide to its new
+// place. The wheel over the strip scrolls the reader.
 //
-// The zoomed track, at the outer edge, shows only on a file ZOOM_AT times what the reader shows on average, where the
-// overview no longer tells its records apart (it goes again below ZOOM_OFF); it neither comes nor goes as the reader
-// scrolls. It magnifies the frame: the stretch of the reader around what it shows, larger, each record a block of its
-// height in its color, grey with Color by off, past what the reader shows faded. What the reader shows lies under a
-// lens (a raised box of the paper, framed), and two lines join the frame's top and bottom on the overview to the
-// lens's, so the lens reads as the frame magnified. The lens stands as far down the zoomed track as the frame stands
-// down the overview (both as a scrollbar's thumb does), so the two move together: in the middle of the file the lens is
-// in the middle, at its top and end the lens goes to the track's top and end. A drag on the zoomed track scrolls the
-// reader at its scale, as a scrollbar's thumb: the lens follows the pointer over the records, which hold still, and a
-// pixel of the track is a few of the reader; a press off the lens brings the lens's middle there first. Let go, the
-// lens glides back to where the frame puts it. The wheel over either track scrolls the reader.
+// Where the strip draws a record shorter than TELL_APART_PX, resting on it opens the loupe beside it (Loupe.tsx): a
+// line per record around the pointer, its line number, a cell per lane of the strip in the record's own color, and the
+// start of its text (for a transcript, who said it, then the start of the message); the record under the pointer
+// darker, those the reader shows tinted, and a bracket beside the strip over the stretch it shows. It follows the
+// pointer along the strip, and the scroll position after the wheel over the strip or a drag of the thumb; moved into,
+// it holds still, goes to a record on a click, its rows staying where they are, and scrolls the reader on the wheel, its
+// rows following. On a touch screen a press on the strip opens it, a drag scrubs and the release goes there. A strip
+// that tells every record apart names the record under the pointer on rest instead, on one line: its number, its
+// cells, the start of its text.
 //
-// The reader publishes where it stands each frame it scrolls (PlaceFeed), and one animation frame moves the frame, the
-// lens, the zoomed track's records and the lines between them, with transforms alone: nothing renders in React while
-// the reader scrolls or a drag moves. While they move they stand where they are computed; once still, every edge goes
-// onto the device's pixel grid.
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type RefObject, type WheelEvent } from 'react'
-import { createPortal } from 'react-dom'
+// The reader publishes where it stands each frame it scrolls (PlaceFeed), and one animation frame moves the thumb (and
+// an open loupe) with transforms alone: nothing renders in React while the reader scrolls or a drag moves. While it
+// moves it stands where it is computed; once still, its edges go onto the device's pixel grid.
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from 'react'
 import { Tip } from '../components/Tooltip'
 import { useTheme } from '../lib/theme'
 import type { Concept, LabelRuler } from '../lib/types'
 import { classesOf, colourVar } from './labels'
-import { laneAt, laneBoxes, nearestTick, type LaneGeometry, type RulerColumn, type RulerTick } from './Ruler'
+import { recordLoupe, RowLine, rowKey, useLoupe, type LoupeCell, type LoupeRow } from './Loupe'
+import { laneAt, laneBoxes, nearestTick, TRACK_LANES, type RulerColumn, type RulerTick } from './Ruler'
 
-/** px: the overview's colored column, a marker lane and the gap after it, the zoomed track */
-export const OVER_PX = 12
-export const MARKER_PX = 3
-const MARKER_GAP_PX = 1
-export const ZOOM_PX = 20
-/** px between the overview and the zoomed track, which the lines from the frame to the lens cross */
-export const LINK_PX = 16
-/** px the lens stands out past the part it shows at every side: its edge and a margin of the paper inside it */
-export const LENS_OUT_PX = 3
-/** px: the lens's corners; the lines from the frame meet its left edge where the corners' curves end */
-export const LENS_RADIUS_PX = 4
-/** px: the frame's least height on the overview */
-export const FRAME_MIN_PX = 8
-/** the grey of a marker's tick other than the find's: nothing but the Color by choice takes a color on the tracks */
+/** px: the strip's width with no lane (a plain scrollbar) */
+export const PLAIN_PX = 10
+/** px: the thumb's least height over lanes, and on a plain scrollbar */
+export const FRAME_MIN_PX = 14
+export const PLAIN_FRAME_MIN_PX = 32
+/** the grey of a marker's tick other than the find's: nothing but the Color by choice takes a color on the strip */
 const MARKER_INK = 'rgba(var(--ink-rgb), 0.45)'
+/** the find's ticks, in the ink as the find's highlight is */
+const FIND_INK = 'var(--text-primary)'
 /** a mark's least height, px */
 const MIN_MARK_PX = 2
 /** px either side of a marker within which the pointer is on it */
 const HIT_PX = 3
 /** px the pointer moves before a press becomes a drag */
 const DRAG_PX = 3
-/** ms the pointer rests on the overview before its records are asked for */
-const PREVIEW_DELAY_MS = 90
-/** how much of the reader the zoomed track spans: this many of its heights, what it shows in the middle */
-export const ZOOM_SPAN = 5
-/** the zoomed track shows once the file is this many times what the reader shows, and goes again below ZOOM_OFF */
-export const ZOOM_AT = 12
-export const ZOOM_OFF = 10
-/** the opacity of the colors past what the reader shows, on the zoomed track */
-export const FADE = 0.28
+/** ms the pointer rests on a strip that tells every record apart before the record under it is named */
+const NAME_DELAY_MS = 120
+/** the records the loupe reads at once, on lines CHUNK apart; how many reads at once, and how many it keeps */
+const CHUNK = 100
+const CHUNKS_FLYING = 2
+const CHUNKS_KEPT = 64
 
-/** What colors the overview: a key's most frequent value's rank per bin (each rank's color, and whether it is turned
- * off, which leaves its rows without color, as its records are), a label's records per value per bin (each pixel row in
- * the value most of its records have, in its color, none when it is turned off), or the file's density. */
+/** What colors a lane of the strip: a key's most frequent value's rank per bin (each rank's color, and whether it is
+ * turned off, which leaves its rows without color, as its records are), a label's records per value per bin (each pixel
+ * row in the value most of its records have, in its color, none when it is turned off), or the file's density. */
 export type OverviewPaint =
   | {
       kind: 'bins'
@@ -90,19 +76,16 @@ export type OverviewPaint =
   | { kind: 'density'; bytes: readonly number[] }
   | { kind: 'none' }
 
-/** A record the zoomed track draws: its line, its top and bottom in the reader's content, px, its color
- * and the colors of the labels' markers on it, per marker lane. */
-export interface ZoomRecord {
+/** A record as the loupe and a record's tooltip show it: its line, per color lane its color (null for none), who said
+ * it and the start of its text. */
+export interface LoupeRecord {
   line: number
-  top: number
-  bottom: number
-  color: string | null
-  marks: readonly (string | null)[]
-  /** what its hover says: its value of the choice, its labels' values */
-  title: string
+  lanes: readonly (string | null)[]
+  who: string | null
+  text: string
 }
 
-/** A record as the hover preview shows it. */
+/** A record as a preview of it says: who and when, the start of its text, its color. */
 export interface PreviewRecord {
   line: number
   who: string | null
@@ -112,39 +95,24 @@ export interface PreviewRecord {
 }
 
 /** How far through the file the reader stands, 0 at its top to 1 at its end: its top through the part of the file it
- * can scroll over, as a scrollbar's thumb stands. The overview's frame and the zoomed track's lens both stand there.
- * Pure. */
+ * can scroll over, as a scrollbar's thumb stands. Pure. */
 export function followOf(view: { top: number; height: number }): number {
   const free = 1 - view.height
   return free > 0 ? Math.max(0, Math.min(1, view.top / free)) : 0
 }
 
-/** The stretch the zoomed track shows for a reader `h` px tall scrolled to `top` of `content` px, `f` through the file
- * (followOf): ZOOM_SPAN heights, with what the reader shows as far down the stretch as `f`, so that the lens moves
- * down the zoomed track as the frame moves down the overview. While the reader holds the file's first record (`start`)
- * or its last (`end`) the stretch stays inside the content at that end; while it holds the whole file the stretch is
- * at most the content. Pure. */
-export function zoomWindow(top: number, h: number, content: number, f: number, start = true, end = true): [number, number] {
-  const span = start && end ? Math.max(h, Math.min(content, h * ZOOM_SPAN)) : h * ZOOM_SPAN
-  let from = top - Math.max(0, Math.min(1, f)) * (span - h)
-  if (end) from = Math.min(from, content - span)
-  if (start) from = Math.max(0, from)
-  return [from, from + span]
-}
-
-/** The frame over the overview for what the reader shows, px of a track `px` tall: as tall as its share of the file
- * and at least FRAME_MIN_PX, as far down the room the track leaves it as the reader is through the file (followOf), as
- * a scrollbar's thumb stands, so that the frame at the track's end is the file's end. Pure. */
-export function frameOf(view: { top: number; height: number }, px: number): { top: number; height: number } {
-  const height = Math.min(px, Math.max(FRAME_MIN_PX, view.height * px))
+/** The thumb over the strip for what the reader shows, px of a track `px` tall: as tall as its share of the file and at
+ * least `min`, as far down the room the track leaves it as the reader is through the file (followOf), as a scrollbar's
+ * thumb stands, so that the thumb at the track's end is the file's end. Pure. */
+export function frameOf(view: { top: number; height: number }, px: number, min = FRAME_MIN_PX): { top: number; height: number } {
+  const height = Math.min(px, Math.max(min, view.height * px))
   return { top: followOf(view) * Math.max(0, px - height), height }
 }
 
 /** Where the reader stands, as it measures it each frame it moves: the share of the file above its top and the share
  * it shows (as Shown), and px of its body: how far it is scrolled, its height and its content's height, and whether the
- * content holds the file's first record and its last. `span` is the share of the file a body's height holds on
- * average over the records loaded, which tells whether the zoomed track shows: unlike `height` it stays the same as
- * the reader scrolls past records it hides or records much taller than the rest (`height` when not given). */
+ * content holds the file's first record and its last. `span` is the share of the file a body's height holds on average
+ * over the records loaded (`height` when not given). */
 export interface TrackPlace {
   top: number
   height: number
@@ -158,32 +126,15 @@ export interface TrackPlace {
 
 const samePlace = (a: TrackPlace, b: TrackPlace) => a.top === b.top && a.height === b.height && a.scroll === b.scroll && a.h === b.h && a.content === b.content && a.start === b.start && a.end === b.end && a.span === b.span
 
-/** A record the reader draws, px of its content. */
-export interface DrawnRecord {
-  line: number
-  top: number
-  bottom: number
-}
-
-const sameRecords = (x: readonly DrawnRecord[] | null, y: readonly DrawnRecord[] | null) => x === y || (!!x && !!y && x.length === y.length && x.every((r, i) => r.line === y[i].line && r.top === y[i].top && r.bottom === y[i].bottom))
-
-/** The reader's place and the records around it, as it publishes them each frame it scrolls: the tracks draw the place
- * in the same frame with transforms alone, and render again only when the records change, so that a scroll renders
- * nothing of the reader in React. */
+/** The reader's place, as it publishes it each frame it scrolls: the strip draws it in the same frame with transforms
+ * alone, so that a scroll renders nothing of the reader in React. */
 export class PlaceFeed {
   place: TrackPlace = { top: 0, height: 1, scroll: 0, h: 0, content: 0, start: true, end: true }
-  records: readonly DrawnRecord[] | null = null
   private heard = new Set<() => void>()
-  private heardRecords = new Set<() => void>()
   set(p: TrackPlace): void {
     if (samePlace(p, this.place)) return
     this.place = p
     this.heard.forEach((f) => f())
-  }
-  setRecords(r: readonly DrawnRecord[] | null): void {
-    if (sameRecords(r, this.records)) return
-    this.records = r
-    this.heardRecords.forEach((f) => f())
   }
   on(f: () => void): () => void {
     this.heard.add(f)
@@ -191,66 +142,20 @@ export class PlaceFeed {
       this.heard.delete(f)
     }
   }
-  onRecords(f: () => void): () => void {
-    this.heardRecords.add(f)
-    return () => {
-      this.heardRecords.delete(f)
-    }
-  }
 }
 
-/** Where the tracks stand for a place: the frame's top and height on an overview `px` tall, how far through the file
- * that is (`f`, as followOf), and on a zoomed track `zpx` tall its scale (`k`, track px per px of the content), the
- * content at its top (`from`) and the part shown (`vTop`, `vH`). A drag of the frame holds it at `frame` px, and the
- * part shown then stands as far down the zoomed track as the frame stands down the overview, wherever the reader has
- * got to yet; a drag on the zoomed track holds the part shown at `lens` px, and the content moves under it. Otherwise
- * the zoomed track shows zoomWindow's stretch. Pure. */
-export interface TrackGeom {
-  frameTop: number
-  frameH: number
-  f: number
-  k: number
-  from: number
-  vTop: number
-  vH: number
-}
-
-export function trackGeom(p: TrackPlace, px: number, zpx: number, frame: number | null, lens: number | null): TrackGeom {
-  const frameH = Math.min(px, Math.max(FRAME_MIN_PX, p.height * px))
+/** Where the thumb stands for a place on a strip `px` tall: its top and height, and how far through the file that is
+ * (`f`, as followOf). A drag holds its top at `frame` px, wherever the reader has got to yet. Pure. */
+export function frameGeom(p: { top: number; height: number }, px: number, frame: number | null, min = FRAME_MIN_PX): { frameTop: number; frameH: number; f: number } {
+  const frameH = Math.min(px, Math.max(min, p.height * px))
   const room = Math.max(0, px - frameH)
   const f = frame != null ? (room > 0 ? Math.max(0, Math.min(1, frame / room)) : 0) : followOf(p)
-  const span = p.start && p.end ? Math.max(p.h, Math.min(p.content, p.h * ZOOM_SPAN)) : p.h * ZOOM_SPAN
-  const k = span > 0 && zpx > 0 ? zpx / span : 0
-  const vH = p.h * k
-  let vTop: number
-  if (lens != null) vTop = Math.max(0, Math.min(Math.max(0, zpx - vH), lens))
-  else if (frame != null) vTop = f * Math.max(0, zpx - vH)
-  else vTop = (p.scroll - zoomWindow(p.scroll, p.h, p.content, f, p.start, p.end)[0]) * k
-  return { frameTop: f * room, frameH, f, k, from: p.scroll - (k > 0 ? vTop / k : 0), vTop, vH }
+  return { frameTop: f * room, frameH, f }
 }
+type FrameGeom = ReturnType<typeof frameGeom>
 
 /** A length in css px moved onto the device's pixel grid at `dpr`, so that an edge there is drawn sharp. Pure. */
 export const snap = (v: number, dpr: number): number => Math.round(v * dpr) / dpr
-
-/** The lens over what the reader shows on the zoomed track, px of it: the box LENS_OUT_PX outside the part shown (`top`
- * to `bottom`), so that its edge and its margin of the paper cover none of it. Pure. */
-export const lensOf = (top: number, bottom: number): { top: number; height: number } => ({ top: top - LENS_OUT_PX, height: Math.max(2, bottom - top) + 2 * LENS_OUT_PX })
-
-/** The two 1px lines that join the overview's frame to the lens, across the LINK_PX between the tracks, and the wedge
- * between them, px from the overview's right edge and the tracks' top: from the frame's top right corner to the lens's
- * left edge where its top corner's curve ends, and from the frame's bottom right corner to where its bottom corner's
- * curve begins. At a `dpr` where a 1px line is an odd number of device pixels wide, each line's ends move half a device
- * pixel into the frame's and the lens's edges, so that the line lies on whole device pixels there; the wedge reaches
- * the edges themselves. Pure. */
-export function linkOf(frame: { top: number; height: number }, lens: { top: number; height: number }, dpr = 1): { top: [number, number, number, number]; bottom: [number, number, number, number]; points: string } {
-  const x1 = LINK_PX - LENS_OUT_PX
-  const o = Math.round(dpr) % 2 === 1 ? 0.5 / dpr : 0
-  const r = Math.min(LENS_RADIUS_PX, lens.height / 2)
-  const x0 = o ? -o : 0
-  const top: [number, number, number, number] = [x0, frame.top + o, x1 + o, lens.top + r]
-  const bottom: [number, number, number, number] = [x0, frame.top + frame.height - o, x1 + o, lens.top + lens.height - r]
-  return { top, bottom, points: `0,${frame.top} ${x1},${lens.top + r} ${x1},${lens.top + lens.height - r} 0,${frame.top + frame.height}` }
-}
 
 /** Per device pixel row of a track `h` rows tall, the value most records in it have: of `counts` (per value, its
  * records in each bin, every value over the same bins), the one with the most records in the bins the row covers, the
@@ -277,9 +182,9 @@ export function majorityRows(counts: readonly (ArrayLike<number>)[], h: number):
   return out
 }
 
-/** The overview's paint for a label that is the Color by choice: per highlighted value of `k`, in its order, its
- * records in each bin of the ruler (its counts; 1 for a bin that holds the value when the ruler gives none), its color,
- * and whether it is turned off (`off`). Null when the ruler has nothing of the label. Pure. */
+/** The strip's paint for a label that is a Color by choice: per highlighted value of `k`, in its order, its records in
+ * each bin of the ruler (its counts; 1 for a bin that holds the value when the ruler gives none), its color, and whether
+ * it is turned off (`off`). Null when the ruler has nothing of the label. Pure. */
 export function labelPaint(k: Pick<Concept, 'id' | 'labels' | 'classes'>, ruler: LabelRuler | null, off: ReadonlySet<string>): OverviewPaint | null {
   const got = ruler?.labels.find((l) => l.concept_id === k.id)
   if (!ruler || !got || ruler.bins <= 0) return null
@@ -296,19 +201,44 @@ export function labelPaint(k: Pick<Concept, 'id' | 'labels' | 'classes'>, ruler:
   return { kind: 'counts', counts, colors: lit.map((c) => colourVar(c.color)), off: lit.map((c) => off.has(c.name)) }
 }
 
+/** The color a paint gives the bin line `line` of `total` falls in, as the strip draws it: a key's rank's, a label's
+ * value most records there have; null for none, a value turned off, or a paint of no colors. What the loupe shows of a
+ * record until its own value is read. Pure. */
+export function paintAt(p: OverviewPaint, line: number, total: number): string | null {
+  const binOf = (bins: number) => Math.max(0, Math.min(bins - 1, Math.floor(((line - 1) / Math.max(1, total)) * bins)))
+  if (p.kind === 'bins' && p.at.length) {
+    const r = p.at[binOf(p.at.length)]
+    if (r < 0 || p.off[Math.min(r, p.off.length - 1)]) return null
+    return p.colors[Math.min(r, p.colors.length - 1)] ?? null
+  }
+  if (p.kind === 'counts' && p.counts.length && p.counts[0].length) {
+    const b = binOf(p.counts[0].length)
+    let best = -1
+    let most = 0
+    p.counts.forEach((c, v) => {
+      if ((c[b] || 0) > most) {
+        most = c[b]
+        best = v
+      }
+    })
+    return best >= 0 && !p.off[best] ? p.colors[best] : null
+  }
+  return null
+}
+
 /** The line of a file of `total` lines at a fraction of it. Pure. */
 export const lineAt = (f: number, total: number): number => Math.max(1, Math.min(total, Math.floor(Math.max(0, Math.min(1, f)) * total) + 1))
 
 /** Per device pixel row of a track `h` rows tall, the bin of `bins` it shows. Pure. */
 export const binOfRow = (y: number, h: number, bins: number): number => Math.max(0, Math.min(bins - 1, Math.floor(((y + 0.5) / h) * bins)))
 
-/** px either side of a click on the overview within which it snaps to a thin patch of color, and the most a patch may
- * be tall to be thin: a click in a taller patch goes where it is clicked */
+/** px either side of a click on the strip within which it snaps to a thin patch of color, and the most a patch may be
+ * tall to be thin: a click in a taller patch goes where it is clicked */
 export const SNAP_PX = 4
 export const THIN_PX = 8
 
-/** Per device pixel row of an overview `rows` tall, the value its paint colors the row in (a key's rank, a label's
- * value), as the overview draws it; -1 for a row in no value, in grey or in a value turned off. Pure. */
+/** Per device pixel row of a strip `rows` tall, the value its paint colors the row in (a key's rank, a label's value),
+ * as the strip draws it; -1 for a row in no value, in grey or in a value turned off. Pure. */
 export function rowValues(paint: OverviewPaint, rows: number): Int32Array {
   const out = new Int32Array(Math.max(0, rows)).fill(-1)
   if (paint.kind === 'bins' && paint.at.length) {
@@ -323,10 +253,9 @@ export function rowValues(paint: OverviewPaint, rows: number): Int32Array {
   return out
 }
 
-/** The patch of color a click at device row `y` of an overview snaps to: of `values` (rowValues), the runs of rows in
- * one value at most `thin` rows tall that come within `reach` rows of the click, the nearest (the upper on a tie), as
- * its first row and its value. Null when none does: a click in a taller patch, or far from any, goes where it is.
- * Pure. */
+/** The patch of color a click at device row `y` of a strip snaps to: of `values` (rowValues), the runs of rows in one
+ * value at most `thin` rows tall that come within `reach` rows of the click, the nearest (the upper on a tie), as its
+ * first row and its value. Null when none does: a click in a taller patch, or far from any, goes where it is. Pure. */
 export function snapPatch(values: ArrayLike<number>, y: number, reach: number, thin: number): { row: number; value: number } | null {
   const n = values.length
   if (!n) return null
@@ -352,23 +281,11 @@ export function snapPatch(values: ArrayLike<number>, y: number, reach: number, t
   return best
 }
 
-const MARKER_LANES: LaneGeometry = {
-  lane: MARKER_PX,
-  gap: MARKER_GAP_PX,
-  inset: 0,
-}
+/** The strip's width for `n` lanes (markers and colors together), px: the scrollbar's lanes, or a plain scrollbar. */
+export const stripWidth = (n: number): number => (n ? n * TRACK_LANES.lane + (n - 1) * TRACK_LANES.gap + 2 * TRACK_LANES.inset : PLAIN_PX)
 
-/** px: the gap between the overview's lanes, and what the lanes take together at most past one lane of OVER_PX */
-const LANE_GAP_PX = 1
-const LANES_MAX_PX = 24
-const LANE_MIN_PX = 3
-
-/** The width of each of `n` lanes of the overview, px: one lane OVER_PX wide; more share LANES_MAX_PX, each narrower as
- * more come, down to LANE_MIN_PX. Pure. */
-export const laneWidth = (n: number): number => (n <= 1 ? OVER_PX : Math.max(LANE_MIN_PX, Math.min(OVER_PX, Math.floor((LANES_MAX_PX - (n - 1) * LANE_GAP_PX) / n))))
-
-/** The overview's width for `n` marker lanes and `lanes` lanes of colors, px. */
-export const overviewWidth = (n: number, lanes = 1): number => (n ? n * (MARKER_PX + MARKER_GAP_PX) + 1 : 0) + lanes * laneWidth(lanes) + (lanes - 1) * LANE_GAP_PX
+/** The lanes of colors the strip draws for a paint and the other choices' lanes: none with Color by off. */
+export const colorLanes = (paint: OverviewPaint, lanes: number): number => (paint.kind === 'none' && !lanes ? 0 : 1 + lanes)
 
 /** Where a mark over `from`..`to` (lines, `from` exclusive) is drawn on a rail of `k` px per line `h` px tall. */
 function drawnSpan(from: number, to: number, k: number, h: number): [number, number] {
@@ -381,33 +298,29 @@ function drawnSpan(from: number, to: number, k: number, h: number): [number, num
   return [y0, y1]
 }
 
-/** One lane of the overview drawn from its paint, `x0` to `x0 + cw` device px of a canvas `H` device rows tall: each row
- * in its value's color (none when the value is turned off, as its records have none), or the file's density in the
- * ink. */
-function paintLane(ctx: CanvasRenderingContext2D, paint: OverviewPaint, x0: number, cw: number, H: number, colourOf: (c: string) => string) {
-  ctx.fillStyle = colourOf('rgba(var(--ink-rgb), 0.05)')
-  ctx.fillRect(x0, 0, cw, H)
+/** One lane of colors drawn from its paint, `x0` to `x0 + cw` device px of a canvas `H` device rows tall: each row in
+ * its value's color (none when the value is turned off, as its records have none), or the file's density in the ink. A
+ * run of rows in one color shorter than `min` rows (a lone record of a value) is drawn `min` rows tall, centred on its
+ * place, over its neighbours, so that the eye finds it. */
+function paintLane(ctx: CanvasRenderingContext2D, paint: OverviewPaint, x0: number, cw: number, H: number, min: number, colourOf: (c: string) => string) {
+  const runs: [number, number, string][] = []
   if (paint.kind === 'bins' && paint.at.length) {
     const bins = paint.at.length
     let runStart = 0
     let runColour: string | null = null
-    const flush = (end: number) => {
-      if (runColour) {
-        ctx.fillStyle = runColour
-        ctx.fillRect(x0, runStart, cw, end - runStart)
+    for (let y = 0; y <= H; y++) {
+      let colour: string | null = null
+      if (y < H) {
+        const rank = paint.at[binOfRow(y, H, bins)]
+        const c = rank >= 0 && !paint.off[Math.min(rank, paint.off.length - 1)] ? paint.colors[Math.min(rank, paint.colors.length - 1)] : null
+        colour = c ? colourOf(c) : null
       }
-    }
-    for (let y = 0; y < H; y++) {
-      const rank = paint.at[binOfRow(y, H, bins)]
-      const c = rank >= 0 && !paint.off[Math.min(rank, paint.off.length - 1)] ? paint.colors[Math.min(rank, paint.colors.length - 1)] : null
-      const colour = c ? colourOf(c) : null
-      if (colour !== runColour) {
-        flush(y)
+      if (colour !== runColour || y === H) {
+        if (runColour) runs.push([runStart, y, runColour])
         runStart = y
         runColour = colour
       }
     }
-    flush(H)
   } else if (paint.kind === 'counts' && paint.counts.length) {
     // each row in the one value most of its records have
     const at = majorityRows(paint.counts, H)
@@ -416,10 +329,7 @@ function paintLane(ctx: CanvasRenderingContext2D, paint: OverviewPaint, x0: numb
       const v = at[y]
       let end = y + 1
       while (end < H && at[end] === v) end++
-      if (v >= 0 && !paint.off[v]) {
-        ctx.fillStyle = colourOf(paint.colors[v])
-        ctx.fillRect(x0, y, cw, end - y)
-      }
+      if (v >= 0 && !paint.off[v]) runs.push([y, end, colourOf(paint.colors[v])])
       y = end
     }
   } else if (paint.kind === 'density' && paint.bytes.length) {
@@ -435,21 +345,23 @@ function paintLane(ctx: CanvasRenderingContext2D, paint: OverviewPaint, x0: numb
     }
     ctx.globalAlpha = 1
   }
+  // the runs as they stand, then the short ones at `min` rows over them
+  for (const [a, b, c] of runs) {
+    if (b - a < min) continue
+    ctx.fillStyle = c
+    ctx.fillRect(x0, a, cw, b - a)
+  }
+  for (const [a, b, c] of runs) {
+    if (b - a >= min) continue
+    const y = Math.max(0, Math.min(H - min, Math.round((a + b - min) / 2)))
+    ctx.fillStyle = c
+    ctx.fillRect(x0, y, cw, min)
+  }
 }
 
-/** The overview's left edges of its lanes of colors, device px at `dpr`, past `lead` css px of marker lanes: each lane
- * a whole number of device pixels wide, so that its rows stand in one column. */
-function laneEdges(lead: number, n: number, dpr: number): [number, number][] {
-  const w = laneWidth(n)
-  return Array.from({ length: n }, (_, i) => {
-    const a = Math.round((lead + i * (w + LANE_GAP_PX)) * dpr)
-    return [a, Math.round((lead + i * (w + LANE_GAP_PX) + w) * dpr) - a] as [number, number]
-  })
-}
-
-/** The overview's canvas: the marker lanes, then a lane of colors for Color by's first choice and one for each other
- * choice. */
-const OverviewCanvas = memo(function OverviewCanvas({ paint, lanes, markers }: { paint: OverviewPaint; lanes: readonly OverviewPaint[]; markers: readonly RulerColumn[] }) {
+/** The strip's canvas: the marker lanes, then a lane of colors for Color by's first choice and one for each other
+ * choice, each on its stripe, in whole device pixels (laneBoxes). */
+const StripCanvas = memo(function StripCanvas({ paints, markers }: { paints: readonly OverviewPaint[]; markers: readonly RulerColumn[] }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState<[number, number]>([0, 0])
   const theme = useTheme().key
@@ -482,27 +394,29 @@ const OverviewCanvas = memo(function OverviewCanvas({ paint, lanes, markers }: {
       return v
     }
     const H = el.height
-    // the markers: grey ticks, no lane drawn under them and no color of the label's (the find's matches in the ink)
-    const boxes = laneBoxes(markers.length, MARKER_LANES, dpr)
+    const boxes = laneBoxes(markers.length + paints.length, TRACK_LANES, dpr)
+    ctx.fillStyle = colourOf('rgba(var(--ink-rgb), 0.035)')
+    for (const [x, cw] of boxes) ctx.fillRect(x, 0, cw, H)
+    // the markers: ticks in the ink for the find's matches, grey for another kind, no color of a label's
     markers.forEach((col, i) => {
       const [x, cw] = boxes[i]
       const k = h / Math.max(1, col.total)
-      ctx.fillStyle = colourOf(col.id === 'find' ? 'var(--text-primary)' : MARKER_INK)
+      ctx.fillStyle = colourOf(col.id === 'find' ? FIND_INK : MARKER_INK)
       for (const t of col.ticks) {
         const [y0, y1] = drawnSpan(t.from - 1, t.to, k, h)
         const a = Math.round(y0 * dpr)
         ctx.fillRect(x, a, cw, Math.max(1, Math.round(y1 * dpr) - a))
       }
     })
-    // the lanes of colors
-    const lead = markers.length ? markers.length * (MARKER_PX + MARKER_GAP_PX) + 1 : 0
-    const all = [paint, ...lanes]
-    laneEdges(lead, all.length, dpr).forEach(([x0, cw], i) => paintLane(ctx, all[i], x0, cw, H, colourOf))
-  }, [paint, lanes, markers, size, theme])
+    paints.forEach((p, i) => {
+      const [x, cw] = boxes[markers.length + i]
+      paintLane(ctx, p, x, cw, H, Math.max(1, Math.round(MIN_MARK_PX * dpr)), colourOf)
+    })
+  }, [paints, markers, size, theme])
   return <canvas ref={ref} className="track-canvas" />
 })
 
-/** A lane of the overview for a choice of Color by past the first: its records in its own colors; `id` the choice's
+/** A lane of the strip for a choice of Color by past the first: its records in its own colors; `id` the choice's
  * (colorChoice choiceId). */
 export interface TrackLane {
   id: string
@@ -518,250 +432,177 @@ interface TracksProps {
   /** where the reader stands, which it publishes each frame it moves */
   feed: PlaceFeed
   paint: OverviewPaint
-  /** what the overview's first lane of colors shows, which its hover names */
+  /** what the first lane of colors shows, which a record's tooltip names */
   paintName?: string
   /** a lane beside it for each other choice of Color by, in its own colors */
   lanes?: readonly TrackLane[]
   /** a lane each, in grey or for the find's matches the ink: the reader gives the find's matches alone */
   markers: readonly RulerColumn[]
-  /** a record's color on the zoomed track and what its hover says */
-  colorOf?: (line: number) => { color: string | null; title: string }
-  onJump: (fraction: number) => void
-  /** a click on the overview snapped to a patch of color: go to the first record in `value` (a key's rank, a label's
+  onJump?: (fraction: number) => void
+  /** a click on the strip snapped to a patch of color: go to the first record in `value` (a key's rank, a label's
    * value, as the paint gives them) on lines `from` to `to`, where the patch starts; `lane` the choice's id for the lane
    * of a choice past the first, null for the first's */
   onSnap?: (from: number, to: number, value: number, lane: string | null) => void
-  /** the fraction of the file at the reader's top to go to; `held` while the pointer still holds the frame */
+  /** the fraction of the file at the reader's top to go to; `held` while the pointer still holds the thumb */
   onSeek: (fraction: number, held: boolean) => void
   /** scroll the reader by `px`; how far it went */
   onScrollBy: (px: number) => number
   onMark: (column: string, tick: RulerTick) => void
-  /** the first records at a line of the file, for the hover preview */
-  preview?: (line: number) => Promise<PreviewRecord[]>
+  /** go to a line and choose its record, as the find does: a click in the loupe, a touch let go */
+  onLine?: (line: number) => void
+  /** the records on lines `from` to `to` as the loupe and a record's tooltip show them */
+  records?: (from: number, to: number) => Promise<LoupeRecord[]>
 }
 
-/** What a marker's hover says: the label's name, and its value when the label has more than one. */
-export const markerText = (col: RulerColumn, tick: RulerTick): string => (col.valued && tick.value ? `${col.name}: ${tick.value}` : col.name)
+/** The marks of `ticks` (sorted by their lines) on lines `a` to `b`, from the first that ends at `a` or after. Pure. */
+export function ticksIn(ticks: readonly RulerTick[], a: number, b: number): RulerTick[] {
+  let lo = 0
+  let hi = ticks.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (ticks[mid].to < a) lo = mid + 1
+    else hi = mid
+  }
+  const out: RulerTick[] = []
+  for (let i = lo; i < ticks.length && ticks[i].from <= b; i++) if (ticks[i].to >= a) out.push(ticks[i])
+  return out
+}
 
-/** ms the tracks take to go from where a drag left them to where the reader stands */
+/** A record as a row of the loupe and its one-line tooltip: its line; a cell per marker lane (its ink where the line
+ * holds a mark, `marked`), then per color lane the record's own color once it is read, the strip's color for its
+ * stretch, faded, while it is not (`rec` undefined), and none once read without one; who said it and the start of its
+ * text. Pure. */
+export function recordRow(line: number, total: number, rec: LoupeRecord | null | undefined, marked: readonly (string | null)[], paints: readonly OverviewPaint[]): LoupeRow {
+  const cells: (LoupeCell | null)[] = marked.map((c) => (c ? { colour: c } : null))
+  paints.forEach((p, j) => {
+    if (rec === undefined) {
+      const c = paintAt(p, line, total)
+      cells.push(c ? { colour: c, faded: true } : null)
+    } else {
+      const c = rec?.lanes[j]
+      cells.push(c ? { colour: c } : null)
+    }
+  })
+  return { num: line.toLocaleString('en-US'), cells, who: rec?.who ?? null, text: rec?.text ?? '' }
+}
+
+/** ms the thumb takes to go from where a drag left it to where the reader stands */
 const GLIDE_MS = 160
-/** ms the tracks stay still before every edge on them goes onto the device's pixel grid */
+/** ms the thumb stays still before its edges go onto the device's pixel grid */
 const SETTLE_MS = 60
-/** ms a released frame waits for the reader to move before it goes where the reader stands */
+/** ms a released thumb waits for the reader to move before it goes where the reader stands */
 const RELEASE_MS = 400
-/** px the frame moves at once, with nothing held, past which the tracks glide to the reader's new place */
+/** px the thumb moves at once, with nothing held, past which it glides to the reader's new place */
 const JUMP_PX = 12
 const ease = (t: number) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3)
 
-/** The parts the tracks' animation frame moves: what it wrote last, so that it writes only what changed. */
-interface Written {
-  frameTop: number
-  frameH: number
-  vTop: number
-  vH: number
-  layer: number
-}
+type Chunk = ReadonlyMap<number, LoupeRecord> | 'asked' | 'failed'
 
-export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, markers, colorOf, onSnap, onSeek, onScrollBy, onMark, preview }: TracksProps) {
+export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, markers, onSnap, onSeek, onScrollBy, onMark, onLine, records }: TracksProps) {
+  const root = useRef<HTMLDivElement>(null)
   const over = useRef<HTMLDivElement>(null)
-  const zoomEl = useRef<HTMLDivElement>(null)
   const frameEl = useRef<HTMLDivElement>(null)
-  const lensEl = useRef<HTMLDivElement>(null)
-  const fadedEl = useRef<HTMLDivElement>(null)
-  const shownEl = useRef<HTMLDivElement>(null)
-  const shownInner = useRef<HTMLDivElement>(null)
-  const wedge = useRef<SVGPolygonElement>(null)
-  const topLine = useRef<SVGLineElement>(null)
-  const bottomLine = useRef<SVGLineElement>(null)
   const [px, setPx] = useState(0)
-  const [zpx, setZpx] = useState(0)
   useEffect(() => {
     const el = over.current
-    const z = zoomEl.current
-    if (!el || !z || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => {
-      setPx(el.clientHeight)
-      setZpx(z.clientHeight)
-    })
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setPx(el.clientHeight))
     ro.observe(el)
-    ro.observe(z)
     return () => ro.disconnect()
   }, [])
   const n = markers.length
-  const lanesPx = n ? n * (MARKER_PX + MARKER_GAP_PX) + 1 : 0
   const lanePaints = useMemo(() => lanes.map((l) => l.paint), [lanes])
-  const laneW = laneWidth(lanes.length + 1)
-  /** the lane of colors under a point `x` css px from the overview's left edge: 0 the choice's, i for lanes[i - 1] */
-  const laneAtX = (x: number) => Math.max(0, Math.min(lanes.length, Math.floor((x - lanesPx + LANE_GAP_PX / 2) / (laneW + LANE_GAP_PX))))
+  const colorN = colorLanes(paint, lanes.length)
+  const paints = useMemo(() => (colorN ? [paint, ...lanePaints] : []), [colorN, paint, lanePaints])
+  const laneCount = n + colorN
+  const minFrame = laneCount ? FRAME_MIN_PX : PLAIN_FRAME_MIN_PX
   const sorted = useMemo(() => markers.map((c) => [...c.ticks].sort((a, b) => a.from - b.from)), [markers])
-  // the records around the reader's place that the zoomed track draws, as the reader last published them
-  const [drawn, setDrawn] = useState(feed.records)
-  useEffect(() => {
-    setDrawn(feed.records)
-    return feed.onRecords(() => setDrawn(feed.records))
-  }, [feed])
-  const records = useMemo<ZoomRecord[] | null>(() => drawn?.map((r) => ({ ...r, ...(colorOf ? colorOf(r.line) : { color: null, title: '' }), marks: [] })) ?? null, [drawn, colorOf])
-  // what the zoomed track draws at: track px per px of the reader's content, as the place last gave it
-  const [scale, setScale] = useState(0)
-  const [dragging, setDragging] = useState<'frame' | 'zoom' | null>(null)
+  const [dragging, setDragging] = useState(false)
 
-  // ---- one animation frame moves the frame, the lens, the zoomed track's records and the lines between them, with
-  // transforms only. While anything moves they stand where they are computed; once still, every edge goes onto the
-  // device's pixel grid.
+  // ---- one animation frame moves the thumb, with transforms only. While it moves it stands where it is computed;
+  // once still, its edges go onto the device's pixel grid.
   const m = useRef({
     raf: 0,
-    /** the frame's top on the overview while a drag of it holds it, px */
+    /** the thumb's top while a drag of it holds it, px */
     frame: null as number | null,
-    /** a released frame waits for the reader to move from the place it had then */
+    /** a released thumb waits for the reader to move from the place it had then */
     release: null as { at: number; place: TrackPlace } | null,
-    /** the top of the part shown on the zoomed track while a drag on it holds it, px */
-    lens: null as number | null,
-    /** from where the tracks glide to the reader's place, after a hold ends */
-    glide: null as { at: number; frame: number; vTop: number } | null,
-    /** the held frame moved since the reader was last asked to go there */
+    /** from where the thumb glides to the reader's place, after a hold ends */
+    glide: null as { at: number; frame: number } | null,
+    /** the held thumb moved since the reader was last asked to go there */
     seek: false,
-    /** px of the zoomed track the pointer moved since the reader last scrolled for it */
-    pull: 0,
-    /** px the reader scrolled for the zoomed track since the place was last published */
-    adj: 0,
     /** inside a call to the reader, which may publish its place at once: that waits for the next frame */
     busy: false,
     /** the share of the file above the reader's top when last drawn, to tell a jump from a scroll */
     top: null as number | null,
     /** the geometry last drawn, and whether on the pixel grid */
-    drawn: null as TrackGeom | null,
-    written: null as Written | null,
+    drawn: null as FrameGeom | null,
+    written: null as { top: number; h: number } | null,
     snapped: false,
     movedAt: 0,
   })
   const px$ = useRef(0)
-  const zpx$ = useRef(0)
-  const scale$ = useRef(0)
   px$.current = px
-  zpx$.current = zpx
-  scale$.current = scale
+  const min$ = useRef(minFrame)
+  min$.current = minFrame
   const calls = useRef({ onSeek, onScrollBy })
   calls.current = { onSeek, onScrollBy }
-  // the zoomed track shows only where the overview cannot tell the file's records apart: a file ZOOM_AT times what the
-  // reader shows on average (the place's span), until it is less than ZOOM_OFF times (a reader resized, a file grown);
-  // with records drawn to zoom. Never what the reader shows at this place, which a scroll past a run of records the
-  // view hides, or one record taller than the reader, changes many times over: the track would come and go as the
-  // reader scrolls, and the records reflow at each change of the reader's width.
-  const longOf = (h: number, was: boolean) => h <= 1 / (was ? ZOOM_OFF : ZOOM_AT)
-  const [long, setLong] = useState(true)
-  const long$ = useRef(long)
-  long$.current = long
-  const hasZoom = records != null && long
 
-  const write = (g: TrackGeom, grid: boolean) => {
+  const write = (g: FrameGeom, grid: boolean) => {
     const dpr = window.devicePixelRatio || 1
     const q = (v: number) => (grid ? snap(v, dpr) : v)
     const w = m.current.written
-    const frameTop = q(g.frameTop)
-    const frameH = q(g.frameH)
+    const top = q(g.frameTop)
+    const h = q(g.frameH)
     const fr = frameEl.current
     if (fr) {
-      if (!w || w.frameTop !== frameTop) fr.style.transform = `translateY(${frameTop}px)`
-      if (!w || w.frameH !== frameH) fr.style.height = `${frameH}px`
+      if (!w || w.top !== top) fr.style.transform = `translateY(${top}px)`
+      if (!w || w.h !== h) fr.style.height = `${h}px`
     }
-    const vTop = q(g.vTop)
-    const vH = Math.max(2, q(g.vTop + g.vH) - vTop)
-    // the records stand at their place in the reader's content, at the scale they were drawn at
-    const k = scale$.current || g.k
-    const layer = q(-g.from * k)
-    const lens = lensOf(vTop, vTop + vH)
-    if (hasZoom) {
-      const le = lensEl.current
-      if (le && (!w || w.vTop !== vTop || w.vH !== vH)) {
-        le.style.transform = `translateY(${lens.top}px)`
-        le.style.height = `${lens.height}px`
-      }
-      if (fadedEl.current && (!w || w.layer !== layer)) fadedEl.current.style.transform = `translateY(${layer}px)`
-      const se = shownEl.current
-      if (se && (!w || w.vTop !== vTop || w.vH !== vH)) {
-        se.style.transform = `translateY(${vTop}px)`
-        se.style.height = `${vH}px`
-      }
-      if (shownInner.current && (!w || w.layer !== layer || w.vTop !== vTop)) shownInner.current.style.transform = `translateY(${layer - vTop}px)`
-      const link = linkOf({ top: frameTop, height: frameH }, lens, dpr)
-      const set = (el: SVGLineElement | null, v: readonly number[]) => {
-        if (!el) return
-        el.setAttribute('x1', String(v[0]))
-        el.setAttribute('y1', String(v[1]))
-        el.setAttribute('x2', String(v[2]))
-        el.setAttribute('y2', String(v[3]))
-      }
-      if (!w || w.frameTop !== frameTop || w.frameH !== frameH || w.vTop !== vTop || w.vH !== vH) {
-        wedge.current?.setAttribute('points', link.points)
-        set(topLine.current, link.top)
-        set(bottomLine.current, link.bottom)
-      }
-    }
-    m.current.written = { frameTop, frameH, vTop, vH, layer }
+    m.current.written = { top, h }
   }
 
-  /** Compute and draw this frame's geometry; whether the tracks still move. `quiet` (drawn as the reader publishes its
-   * place, inside its own frame) asks nothing of the reader. */
+  /** Compute and draw this frame's thumb; whether it still moves. `quiet` (drawn as the reader publishes its place,
+   * inside its own frame) asks nothing of the reader. */
   const draw = (now: number, quiet = false): boolean => {
     const s = m.current
     const P = px$.current
-    const Z = zpx$.current
     const place = feed.place
     if (P <= 0) return false
-    // a drag on the zoomed track: the reader scrolls by what the pointer moved, at the zoomed track's scale, and the
-    // part shown moves on the track by as much as the reader went
-    if (!quiet && s.pull && s.lens != null) {
-      const k = s.drawn?.k || trackGeom(place, P, Z, null, null).k
-      if (k > 0) {
-        s.busy = true
-        const went = calls.current.onScrollBy(s.pull / k)
-        s.busy = false
-        // a reader that publishes its place at once has counted the scroll there already
-        if (feed.place === place) s.adj += went
-        s.lens += went * k
-      }
-      s.pull = 0
-    }
-    // a released frame goes where the reader stands once the reader has moved, or after a while
+    // a released thumb goes where the reader stands once the reader has moved, or after a while
     if (s.release && (place !== s.release.place || now - s.release.at > RELEASE_MS)) {
-      if (s.drawn) s.glide = { at: now, frame: s.drawn.frameTop, vTop: s.drawn.vTop }
+      if (s.drawn) s.glide = { at: now, frame: s.drawn.frameTop }
       s.frame = null
       s.release = null
     }
-    const now$ = feed.place
-    const p = s.adj ? { ...now$, scroll: now$.scroll + s.adj } : now$
-    const g = trackGeom(p, P, Z, s.frame, s.lens)
-    if (s.lens != null) s.lens = g.vTop
+    const g = frameGeom(place, P, s.frame, min$.current)
     if (!quiet && s.seek && s.frame != null) {
       s.seek = false
       s.busy = true
-      calls.current.onSeek(g.f * Math.max(0, 1 - now$.height), true)
+      calls.current.onSeek(g.f * Math.max(0, 1 - place.height), true)
       s.busy = false
     }
     // a jump of the reader (a click, the find, a link) with nothing held, past twice what it shows of the file at once
-    // where a scroll goes by frames: the tracks glide there
+    // where a scroll goes by frames: the thumb glides there
     const d0 = s.drawn
-    const jumped = s.top != null && Math.abs(now$.top - s.top) > 2 * now$.height
-    s.top = now$.top
-    if (jumped && !s.glide && s.frame == null && s.lens == null && d0 && Math.abs(d0.frameTop - g.frameTop) > JUMP_PX) s.glide = { at: now, frame: d0.frameTop, vTop: d0.vTop }
+    const jumped = s.top != null && Math.abs(place.top - s.top) > 2 * place.height
+    s.top = place.top
+    if (jumped && !s.glide && s.frame == null && d0 && Math.abs(d0.frameTop - g.frameTop) > JUMP_PX) s.glide = { at: now, frame: d0.frameTop }
     let shown = g
     if (s.glide) {
       const e = ease((now - s.glide.at) / GLIDE_MS)
       if (e >= 1) s.glide = null
-      else {
-        const vTop = g.vTop + (s.glide.vTop - g.vTop) * (1 - e)
-        shown = { ...g, frameTop: g.frameTop + (s.glide.frame - g.frameTop) * (1 - e), vTop, from: p.scroll - (g.k > 0 ? vTop / g.k : 0) }
-      }
+      else shown = { ...g, frameTop: g.frameTop + (s.glide.frame - g.frameTop) * (1 - e) }
     }
-    const k = shown.k
-    if (k > 0 && Math.abs(k - scale$.current) > 1e-9 * Math.max(1, k)) setScale(k)
     const d = s.drawn
-    const moved = !d || Math.abs(d.frameTop - shown.frameTop) > 1e-3 || Math.abs(d.frameH - shown.frameH) > 1e-3 || Math.abs(d.vTop - shown.vTop) > 1e-3 || Math.abs(d.vH - shown.vH) > 1e-3 || Math.abs(d.from * d.k - shown.from * shown.k) > 1e-3
+    const moved = !d || Math.abs(d.frameTop - shown.frameTop) > 1e-3 || Math.abs(d.frameH - shown.frameH) > 1e-3
     if (moved) s.movedAt = now
-    const still = !moved && !s.glide && s.frame == null && s.lens == null && now - s.movedAt >= SETTLE_MS
+    const still = !moved && !s.glide && s.frame == null && now - s.movedAt >= SETTLE_MS
     if (moved || (still && !s.snapped)) write(shown, still)
     s.drawn = shown
     s.snapped = still
+    // an open loupe follows the reader, and the thumb as it glides
+    loupe$.current?.moved()
     return !still
   }
   const draw$ = useRef(draw)
@@ -778,23 +619,19 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
   useEffect(
     () =>
       feed.on(() => {
-        const want = longOf(feed.place.span ?? feed.place.height, long$.current)
-        if (want !== long$.current) setLong(want)
-        // the place measured now holds every scroll the zoomed track asked for; drawn in the frame the reader scrolled in
-        m.current.adj = 0
         if (!m.current.busy) draw$.current(performance.now(), true)
         kick()
       }),
     [feed, kick],
   )
-  // drawn again at once when what is drawn changes size or scale, so that nothing stands a frame out of place
+  // drawn again at once when the strip changes size, so that nothing stands a frame out of place
   useLayoutEffect(() => {
     const s = m.current
     s.written = null
     s.drawn = null
     draw$.current(performance.now())
     kick()
-  }, [px, zpx, scale, records, kick])
+  }, [px, minFrame, kick])
   useEffect(
     () => () => {
       if (m.current.raf) cancelAnimationFrame(m.current.raf)
@@ -802,17 +639,116 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
     [],
   )
 
-  // ---- the frame and its drag
-  const grab = useRef<{ dy: number; y0: number; moved: boolean; onFrame: boolean } | null>(null)
+  // ---- the records the loupe and a record's tooltip read, CHUNK lines at a time, kept per source
+  const chunks = useRef<{ src: TracksProps['records']; map: Map<number, Chunk>; flying: number }>({ src: records, map: new Map(), flying: 0 })
+  if (chunks.current.src !== records) chunks.current = { src: records, map: new Map(), flying: 0 }
+  const heard = useRef<() => void>(() => {})
+  /** The records of lines `a` to `b` that are read, asking for those that are not (a few reads at a time). */
+  const recordsIn = (a: number, b: number): ((line: number) => LoupeRecord | null | undefined) => {
+    const c = chunks.current
+    const T = total ?? 0
+    if (c.src && T > 0) {
+      for (let k = Math.floor((a - 1) / CHUNK); k <= Math.floor((b - 1) / CHUNK); k++) {
+        if (c.map.has(k) || c.flying >= CHUNKS_FLYING) continue
+        c.map.set(k, 'asked')
+        c.flying++
+        const read = c.src
+        read(k * CHUNK + 1, Math.min(T, (k + 1) * CHUNK))
+          .then((list) => {
+            if (chunks.current !== c) return
+            c.map.delete(k)
+            c.map.set(k, new Map(list.map((r) => [r.line, r])))
+            // the oldest dropped past CHUNKS_KEPT
+            for (const key of c.map.keys()) {
+              if (c.map.size <= CHUNKS_KEPT) break
+              if (c.map.get(key) !== 'asked') c.map.delete(key)
+            }
+          })
+          .catch(() => chunks.current === c && c.map.set(k, 'failed'))
+          .finally(() => {
+            c.flying--
+            if (chunks.current === c) heard.current()
+          })
+      }
+    }
+    return (line: number) => {
+      const got = c.map.get(Math.floor((line - 1) / CHUNK))
+      return got && typeof got !== 'string' ? (got.get(line) ?? null) : got === 'failed' ? null : undefined
+    }
+  }
+  /** Per marker lane, its ink where `line` holds a mark of it (the find's in the ink, another kind's in grey). */
+  const markedOn = (line: number): (string | null)[] => markers.map((col, i) => (ticksIn(sorted[i], line, line).length ? (col.id === 'find' ? FIND_INK : MARKER_INK) : null))
+  /** The rows of lines `a` to `b`, as the loupe and a record's tooltip show them. */
+  const rowsOf = (a: number, b: number): LoupeRow[] => {
+    const got = recordsIn(a, b)
+    const out: LoupeRow[] = []
+    for (let line = a; line <= b; line++) out.push(recordRow(line, total ?? 0, got(line), markedOn(line), paints))
+    return out
+  }
+
+  // ---- the loupe
+  const T = total ?? 0
+  const rows = records ? recordLoupe(T, px) : 0
+  const loupe = useLoupe({
+    strip: over,
+    bounds: root,
+    total: T,
+    rows,
+    numbered: true,
+    pxOf: (u) => (T > 0 ? (u / T) * px$.current : 0),
+    unitAt: (y) => (T > 0 ? Math.max(0, Math.min(T, (y / Math.max(1, px$.current)) * T)) : 0),
+    thumbMid: () => {
+      const d = m.current.drawn
+      return d ? d.frameTop + d.frameH / 2 : 0
+    },
+    view: () => [feed.place.top * T, (feed.place.top + feed.place.height) * T],
+    // the unit the thumb stands for as drawn: where a drag holds it or a glide has got to, the reader's place otherwise
+    center: () => {
+      const d = m.current.drawn
+      const h = feed.place.height
+      if (!d) return (feed.place.top + h / 2) * T
+      const room = px$.current - d.frameH
+      return ((room > 0 ? Math.max(0, Math.min(1, d.frameTop / room)) : 0) * Math.max(0, 1 - h) + h / 2) * T
+    },
+    rowsAt: (start, k) => rowsOf(start + 1, Math.min(T, start + k)),
+    act: (i) => onLine?.(Math.max(1, Math.min(T, i + 1))),
+    wheel: (d) => calls.current.onScrollBy(d),
+  })
+  const loupe$ = useRef<typeof loupe | null>(null)
+  loupe$.current = loupe
+  useEffect(() => loupe$.current?.refresh(), [paints, markers, records])
+
+  // ---- a record named on rest, where the strip tells every record apart
+  const [tip, setTip] = useState<{ row: LoupeRow; y: number } | null>(null)
+  const named = useRef<{ line: number; y: number } | null>(null)
+  const nameTimer = useRef(0)
+  const nameAt = () => {
+    const at = named.current
+    if (!at || !T) return
+    setTip({ row: rowsOf(at.line, at.line)[0], y: at.y })
+  }
+  heard.current = () => {
+    loupe$.current?.refresh()
+    if (named.current) nameAt()
+  }
+  const unname = () => {
+    window.clearTimeout(nameTimer.current)
+    named.current = null
+    setTip(null)
+  }
+  useEffect(() => () => window.clearTimeout(nameTimer.current), [])
+
+  // ---- the thumb and its drag
+  const grab = useRef<{ dy: number; y0: number; moved: boolean; onFrame: boolean; touch?: boolean } | null>(null)
   const yIn = (e: { clientY: number }) => e.clientY - (over.current?.getBoundingClientRect().top ?? 0)
-  const geom = () => m.current.drawn ?? trackGeom(feed.place, px$.current, zpx$.current, null, null)
+  const geom = () => m.current.drawn ?? frameGeom(feed.place, px$.current, null, min$.current)
   const markerAt = (e: { clientX: number; clientY: number }): { col: RulerColumn; tick: RulerTick } | null => {
     const el = over.current
     if (!el || !n) return null
     const r = el.getBoundingClientRect()
-    const x = e.clientX - r.left
-    if (x > lanesPx || r.height <= 0) return null
-    const i = laneAt(x, MARKER_LANES, n)
+    if (r.height <= 0) return null
+    const i = laneAt(e.clientX - r.left, TRACK_LANES, laneCount)
+    if (i >= n) return null
     const col = markers[i]
     const k = col.total / r.height
     const tick = nearestTick(sorted[i], (e.clientY - r.top) * k, (HIT_PX + MIN_MARK_PX / 2) * k)
@@ -822,10 +758,10 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
     try {
       e.currentTarget.setPointerCapture?.(e.pointerId)
     } catch {
-      /* a pointer the browser no longer tracks: the drag goes on while it stays over the track */
+      /* a pointer the browser no longer tracks: the drag goes on while it stays over the strip */
     }
   }
-  /** Hold the frame with its top at `top`, px of the overview, and ask the reader to go there. */
+  /** Hold the thumb with its top at `top`, px of the strip, and ask the reader to go there. */
   const holdFrame = (top: number) => {
     const s = m.current
     const g = geom()
@@ -835,12 +771,12 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
     s.seek = true
     kick()
   }
-  /** Let the frame go where it is held: the reader goes there for good, and the frame stays until it has. */
+  /** Let the thumb go where it is held: the reader goes there for good, and the thumb stays until it has. */
   const letGo = () => {
     const s = m.current
     if (s.frame == null) return
     s.seek = false
-    const g = trackGeom(feed.place, px$.current, zpx$.current, s.frame, null)
+    const g = frameGeom(feed.place, px$.current, s.frame, min$.current)
     calls.current.onSeek(g.f * Math.max(0, 1 - feed.place.height), false)
     s.release = { at: performance.now(), place: feed.place }
     kick()
@@ -848,33 +784,43 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
   const onDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
     e.preventDefault()
-    clearPreview()
+    unname()
     const hit = markerAt(e)
     if (hit) return onMark(hit.col.id, hit.tick)
     const y = yIn(e)
     const g = geom()
     const onFrame = y >= g.frameTop && y <= g.frameTop + g.frameH
-    grab.current = { dy: onFrame ? y - g.frameTop : g.frameH / 2, y0: e.clientY, moved: false, onFrame }
     capture(e)
+    // a touch off the thumb scrubs with the loupe, where the strip has one
+    if (e.pointerType === 'touch' && !onFrame && rows) {
+      grab.current = { dy: 0, y0: e.clientY, moved: false, onFrame: false, touch: true }
+      loupe.touchStart(e)
+      return
+    }
+    // the thumb held: the loupe at it
+    if (onFrame) loupe.thumb()
+    grab.current = { dy: onFrame ? y - g.frameTop : g.frameH / 2, y0: e.clientY, moved: false, onFrame }
   }
   const onMove = (e: PointerEvent<HTMLDivElement>) => {
     const g = grab.current
     if (!g) return hover(e)
+    if (g.touch) return loupe.touchMove(e)
     if (!g.moved && Math.abs(e.clientY - g.y0) < DRAG_PX) return
     if (!g.moved) {
       g.moved = true
-      setDragging('frame')
+      setDragging(true)
+      if (!g.onFrame) loupe.thumb()
     }
     holdFrame(yIn(e) - g.dy)
   }
   /** A click within SNAP_PX of a thin patch of color (THIN_PX at most): the reader goes to the patch's first record.
    * Whether it snapped. */
   const snapAt = (e: { clientX: number; clientY: number }): boolean => {
-    if (!onSnap || !total || px <= 0) return false
+    if (!onSnap || !total || px <= 0 || !colorN) return false
     const dpr = window.devicePixelRatio || 1
     const rows = Math.ceil(px * dpr)
-    // the lane clicked: the choice's, or another label's
-    const lane = laneAtX(e.clientX - (over.current?.getBoundingClientRect().left ?? 0))
+    // the lane clicked: the choice's, or another's
+    const lane = Math.max(0, laneAt(e.clientX - (over.current?.getBoundingClientRect().left ?? 0), TRACK_LANES, laneCount) - n)
     const hit = snapPatch(rowValues(lane ? lanes[lane - 1].paint : paint, rows), yIn(e) * dpr, Math.round(SNAP_PX * dpr), Math.round(THIN_PX * dpr))
     if (!hit) return false
     const from = Math.max(1, Math.min(total, Math.floor((hit.row / rows) * total) + 1))
@@ -885,8 +831,15 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
     const g = grab.current
     grab.current = null
     if (!g) return
-    setDragging(null)
-    // a click near a patch of color goes to its first record; elsewhere off the frame it sends the frame there, its
+    if (g.touch) {
+      // let go, the reader goes to the record under the loupe's line
+      const u = loupe.touchEnd()
+      if (u != null && T > 0) onLine?.(Math.max(1, Math.min(T, Math.floor(u) + 1)))
+      return
+    }
+    setDragging(false)
+    if (e.pointerType === 'touch') loupe.close()
+    // a click near a patch of color goes to its first record; elsewhere off the thumb it sends the thumb there, its
     // middle under the pointer
     if (!g.moved) {
       if (snapAt(e) || g.onFrame) return
@@ -898,199 +851,66 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
     letGo()
   }
   const wheel = (e: WheelEvent<HTMLDivElement>) => {
+    // a real scroll: an open loupe follows the scroll position
+    loupe.wheel()
     calls.current.onScrollBy(e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * Math.max(1, px) : e.deltaY)
   }
 
-  // ---- the hover: a marker's name, else the records at that point
-  const [tip, setTip] = useState<{ text: string; y: number } | null>(null)
-  const [shown, setShown] = useState<{
-    y: number
-    line: number
-    records: PreviewRecord[] | null
-  } | null>(null)
-  const timer = useRef<number | null>(null)
-  const asked = useRef(0)
-  const cache = useRef(new Map<number, Promise<PreviewRecord[]>>())
-  useEffect(() => cache.current.clear(), [preview])
-  const clearPreview = useCallback(() => {
-    if (timer.current != null) window.clearTimeout(timer.current)
-    timer.current = null
-    asked.current++
-    setShown(null)
-  }, [])
+  // ---- the hover: the loupe follows the pointer; where the strip has none, the record of a marker under the pointer at
+  // once, else the record there on rest
   const hover = (e: PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'touch') return
+    if (rows) return loupe.move(e)
     const hit = markerAt(e)
-    if (hit) {
-      clearPreview()
-      return setTip({ text: markerText(hit.col, hit.tick), y: e.clientY })
-    }
-    setTip(null)
-    if (!preview || !total || px <= 0) return
-    const line = lineAt(yIn(e) / px, total)
-    setShown((s) => (s ? { ...s, y: e.clientY } : s))
-    if (timer.current != null) window.clearTimeout(timer.current)
-    const y = e.clientY
-    const ask = ++asked.current
-    timer.current = window.setTimeout(() => {
-      timer.current = null
-      let p = cache.current.get(line)
-      if (!p) {
-        p = preview(line).catch(() => [])
-        cache.current.set(line, p)
+    window.clearTimeout(nameTimer.current)
+    if (hit && T) {
+      const line = Math.max(1, Math.min(T, hit.tick.from))
+      if (named.current?.line !== line) {
+        named.current = { line, y: e.clientY }
+        nameAt()
       }
-      setShown((s) => ({
-        y: s?.y ?? y,
-        line,
-        records: s?.line === line ? s.records : null,
-      }))
-      void p.then((records) => ask === asked.current && setShown((s) => (s ? { ...s, line, records } : s)))
-    }, PREVIEW_DELAY_MS)
+      return
+    }
+    if (!records || !T || px <= 0) return setTip(null)
+    const line = lineAt(yIn(e) / px, T)
+    const y = e.clientY
+    if (named.current?.line === line) return
+    setTip((t) => (t ? { ...t, y } : t))
+    nameTimer.current = window.setTimeout(() => {
+      named.current = { line, y }
+      nameAt()
+    }, NAME_DELAY_MS)
   }
-  const leave = () => {
-    setTip(null)
-    clearPreview()
+  const enter = (e: PointerEvent<HTMLDivElement>) => loupe.enter(e)
+  const leave = (e: PointerEvent<HTMLDivElement>) => {
+    unname()
+    loupe.leave(e)
   }
-  useEffect(() => () => clearPreview(), [clearPreview])
+  const tipY = tip?.y
   const tipPlace = useCallback(
     (w: number, h: number) => {
-      const r = over.current?.parentElement?.getBoundingClientRect()
-      const y = tip?.y ?? 0
-      return {
-        left: Math.max(8, (r?.left ?? 0) - 8 - w),
-        top: Math.max(8, Math.min(window.innerHeight - 8 - h, y - h / 2)),
-      }
+      const r = root.current?.getBoundingClientRect()
+      const y = tipY ?? 0
+      return { left: Math.max(8, (r?.left ?? 0) - 8 - w), top: Math.max(8, Math.min(window.innerHeight - 8 - h, y - h / 2)) }
     },
-    [tip?.y],
+    [tipY],
   )
 
-  // ---- the zoomed track: a drag scrolls the reader at its scale, as a scrollbar's thumb does; a press off the lens
-  // brings the lens there first
-  const zgrab = useRef<{ y0: number; last: number; moved: boolean } | null>(null)
-  const zy = (e: { clientY: number }) => e.clientY - (zoomEl.current?.getBoundingClientRect().top ?? 0)
-  const onZDown = (e: PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return
-    e.preventDefault()
-    const s = m.current
-    const g = geom()
-    const y = zy(e)
-    zgrab.current = { y0: e.clientY, last: y, moved: false }
-    s.lens = g.vTop
-    s.glide = null
-    // off the lens: the lens's middle comes under the pointer
-    if (y < g.vTop - LENS_OUT_PX || y > g.vTop + g.vH + LENS_OUT_PX) s.pull += y - (g.vTop + g.vH / 2)
-    setDragging('zoom')
-    capture(e)
-    kick()
-  }
-  const onZMove = (e: PointerEvent<HTMLDivElement>) => {
-    const g = zgrab.current
-    if (!g) return
-    if (!g.moved && Math.abs(e.clientY - g.y0) < DRAG_PX) return
-    g.moved = true
-    const y = zy(e)
-    m.current.pull += y - g.last
-    g.last = y
-    kick()
-  }
-  const onZUp = () => {
-    const g = zgrab.current
-    zgrab.current = null
-    if (!g) return
-    setDragging(null)
-    const s = m.current
-    if (s.drawn) s.glide = { at: performance.now(), frame: s.drawn.frameTop, vTop: s.drawn.vTop }
-    s.lens = null
-    kick()
-  }
-
-  // every edge on the tracks stands on the device's pixel grid once they are still
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
-  const zLanes = records?.find((r) => r.marks.length)?.marks.length ?? 0
-  // a record's block, in its color or grey, with a grey tick at its left for each marker lane that marks it, at its
-  // place in the reader's content at the zoomed track's scale
-  const blocks = useMemo(
-    () =>
-      (layer: 'faded' | 'shown') =>
-        records?.map((r) => {
-          const top = snap(r.top * scale, dpr)
-          const h = Math.max(1 / dpr, snap(r.bottom * scale, dpr) - top - 1)
-          return (
-            <i key={r.line} className={'track-rec' + (r.color ? '' : ' plain')} data-line={r.line} title={layer === 'shown' ? r.title : undefined} style={{ top, height: h, ...(r.color ? { background: r.color } : {}) } as CSSProperties}>
-              {r.marks.map((mk, i) => (mk ? <b key={i} style={{ left: i * (MARKER_PX + MARKER_GAP_PX) }} /> : null))}
-            </i>
-          )
-        }),
-    [records, scale, dpr],
-  )
-  const faded = useMemo(() => blocks('faded'), [blocks])
-  const full = useMemo(() => blocks('shown'), [blocks])
+  const names = [paintName ?? '', ...lanes.map((l) => l.name)]
   return (
-    <div className="tracks" data-drag={dragging ?? undefined} onWheel={wheel} aria-hidden>
-      <div ref={over} className="track track-over" style={{ width: overviewWidth(n, lanes.length + 1) }} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onPointerLeave={leave}>
-        <OverviewCanvas paint={paint} lanes={lanePaints} markers={markers} />
-        {lanes.length > 0 &&
-          [paintName ?? '', ...lanes.map((l) => l.name)].map((name, i) => <span key={i} className="track-lane" style={{ left: lanesPx + i * (laneW + LANE_GAP_PX), width: laneW }} title={name || undefined} />)}
+    <div ref={root} className="tracks" data-drag={dragging || undefined} onWheel={wheel} aria-hidden>
+      <div ref={over} className={'track track-over' + (laneCount ? '' : ' plain')} style={{ width: stripWidth(laneCount) }} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onPointerEnter={enter} onPointerLeave={leave}>
+        {laneCount > 0 && <StripCanvas paints={paints} markers={markers} />}
+        {colorN > 1 && names.map((name, i) => <span key={i} className="track-lane" data-name={name || undefined} style={{ left: TRACK_LANES.inset + (n + i) * (TRACK_LANES.lane + TRACK_LANES.gap), width: TRACK_LANES.lane }} />)}
         <div ref={frameEl} className="track-frame-over" />
       </div>
-      <svg className="track-link" width={LINK_PX} style={hasZoom ? undefined : { display: 'none' }}>
-        {hasZoom && px > 0 && (
-          <>
-            <polygon ref={wedge} />
-            <line ref={topLine} data-edge="top" />
-            <line ref={bottomLine} data-edge="bottom" />
-          </>
-        )}
-      </svg>
-      <div ref={zoomEl} className="track track-zoom" style={{ width: ZOOM_PX + (zLanes ? zLanes * (MARKER_PX + MARKER_GAP_PX) : 0), ...(hasZoom ? {} : { display: 'none' }) }} onPointerDown={onZDown} onPointerMove={onZMove} onPointerUp={onZUp} onPointerCancel={onZUp}>
-        {hasZoom && (
-          <>
-            <div className="track-zoom-faded" style={{ opacity: FADE }}>
-              <div ref={fadedEl} className="track-zoom-layer">
-                {faded}
-              </div>
-            </div>
-            <div ref={lensEl} className="track-lens" style={{ borderRadius: LENS_RADIUS_PX }} />
-            <div ref={shownEl} className="track-zoom-shown">
-              <div ref={shownInner} className="track-zoom-layer">
-                {full}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-      {tip && <Tip text={tip.text} place={tipPlace} className="reader-ruler-tip" />}
-      {shown && <Preview at={shown} anchor={over} />}
-    </div>
-  )
-}
-
-/** The hover preview: the records at the point of the file under the pointer, beside the tracks. */
-function Preview({ at, anchor }: { at: { y: number; line: number; records: PreviewRecord[] | null }; anchor: RefObject<HTMLDivElement | null> }) {
-  const el = useRef<HTMLDivElement>(null)
-  const [h, setH] = useState(0)
-  useLayoutEffect(() => setH(el.current?.offsetHeight ?? 0), [at.records])
-  const r = anchor.current?.parentElement?.getBoundingClientRect()
-  const top = Math.max(8, Math.min(window.innerHeight - 8 - h, at.y - h / 2))
-  const right = r ? window.innerWidth - r.left + 8 : 60
-  return createPortal(
-    <div ref={el} className="track-preview overlay" style={{ top, right }} role="tooltip">
-      {at.records == null ? (
-        <div className="track-preview-rec">
-          <div className="track-preview-head mono">{at.line.toLocaleString()}</div>
-        </div>
-      ) : (
-        at.records.map((p) => (
-          <div key={p.line} className="track-preview-rec" style={p.color ? ({ '--c': p.color } as CSSProperties) : undefined}>
-            <div className="track-preview-head mono">
-              <span className="track-preview-line">{p.line.toLocaleString()}</span>
-              {[p.who, p.when].filter(Boolean).join(' · ')}
-            </div>
-            <div className="track-preview-text">{p.text}</div>
-          </div>
-        ))
+      <div ref={loupe.bracket} className="loupe-bracket" />
+      {loupe.element}
+      {tip && (
+        <Tip text={rowKey(tip.row)} place={tipPlace} className="tip-one reader-ruler-tip">
+          <RowLine row={tip.row} />
+        </Tip>
       )}
-    </div>,
-    document.body,
+    </div>
   )
 }
