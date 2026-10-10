@@ -280,10 +280,10 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
 - `span`, `[t0, t1]` or a list (its `span()`), is the list's rows in view, on the selection background across the lanes.
 - `density: false` draws Events: a mark `▌` in the hue of each cell that holds a record, in place of its bars.
 - `drawLane(lane, ctx)` draws the view's own cells in each lane under its records' marks, as the browser's does:
-  `ctx.span(t0, t1, {color, name, series})` a shaded span `░` (its name in its cells' tips), `ctx.put(x, run)` one cell,
-  `ctx.x(t)` a time's cell, `ctx.colorOf(record)` its hue and `ctx.on(id)` whether a series of `series` shows (`[{id,
-  name, mark, color, glyph}]`, each a key entry while a lane draws it). `marks: false`, or a function of a record, leaves
-  Events' marks to the view; the tips and a click still find the records.
+  `ctx.shade(t0, t1, {color, name, series})` a shaded span `░` (its name in its cells' tips), `ctx.put(x, run)` one cell,
+  `ctx.x(t)` a time's cell (-1 off the axis), `ctx.colorOf(record)` its hue and `ctx.on(id)` whether a series of
+  `series` shows (`[{id, name, mark, color, glyph}]`, each a key entry while a lane draws it). `marks: false`, or a
+  function of a record, leaves Events' marks to the view; the tips and a click still find the records.
 - `tl.legend()` is the key for `axis`: an entry for each series the lanes drew (`─ running`, `× failed`), each a toggle.
 - It needs no other part. With no `scale` it lays out its records' whole span and draws its own axis, with its key,
   under the lanes. `rows` is the Rows control, a field's name or a function of a record; with none it draws one lane and

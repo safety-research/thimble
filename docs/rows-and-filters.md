@@ -185,16 +185,17 @@ as the list scrolls; where the time range marks a span on its own overview (`ran
 too.
 
 `drawLane(lane, ctx)` draws the view's own marks in each lane after the kit has drawn its own: shaded spans of time, a
-line or a small chart, or marks in place of the kit's (`marks: false`). It runs at each paint, so it follows Color by,
-the range, the key and the records the page draws (`lane.items`, those Filter by keeps). The tip and a click find the
-lane's records by their place on the axis, so marks the view draws itself answer them too.
+line or a small chart, or marks in place of the kit's (`marks: false`). `lane` is `{key, name, depth, heading, folded,
+items}`. It runs at each paint, in Events and in Density (a taller lane, every record in a bar), so it follows Color
+by, the range, the key and the records the page draws (`lane.items`, those Filter by keeps). The tip and a click find
+the lane's records by their place on the axis, so marks the view draws itself answer them too.
 
 | `ctx` | what it is |
 |---|---|
-| `g`, `over` | SVG groups as tall as the lane, behind the kit's marks and over them (under the failures' ✕), which take SVG markup (`insertAdjacentHTML`) or elements |
+| `g`, `over` | SVG elements the size of the lane's track, behind the kit's marks and over them (under the failures' ✕), which take SVG markup (`insertAdjacentHTML`) or elements; what falls outside the track is cut off |
 | `x(t)`, `scale`, `width`, `height` | a time's x on the lanes' scale (a number, a Date or an ISO time), the scale itself (`t(x)`, `from`, `to`), and the track's size in px |
 | `colorOf(record)` | the record's Color by color, null with Off or a value turned off |
-| `span(t0, t1, {color, name, series, over})` | a shaded span as tall as the lane (a moment, a line), light gray or `color` at a low opacity; `name` is said in the tip over it; with `series` it shows while that series is on |
+| `shade(t0, t1, {color, name, series, over})` | a shaded span as tall as the lane (a moment, a line), light gray or `color` at a low opacity; `name` is said in the tip over it; with `series` it shows while that series is on |
 | `on(id)` | whether a series of `series` shows; asking puts its entry in the key |
 
 ```js
@@ -202,7 +203,7 @@ const tl = thimble.timeline({
   mount: '#lanes', rows, range,
   series: [{ id: 'freeze', name: 'deploy freeze' }],
   drawLane: (lane, ctx) => {
-    for (const f of freezes) ctx.span(f.start, f.end, { name: f.reason, series: 'freeze' })   // across every lane
+    for (const f of freezes) ctx.shade(f.start, f.end, { name: f.reason, series: 'freeze' })   // across every lane
     for (const c of lane.items.filter((c) => c.cost)) ctx.over.insertAdjacentHTML('beforeend',
       `<circle cx="${ctx.x(c.t)}" cy="${ctx.height / 2}" r="2.5" fill="${ctx.colorOf(c) || 'gray'}"/>`)
   },

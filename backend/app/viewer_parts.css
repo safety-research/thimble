@@ -460,7 +460,11 @@
 .thimble-lane-band {
   fill: rgba(var(--ink-rgb), 0.07);
 }
-/* a shaded span of the page's own (drawLane's ctx.span), as light as a band, or its color at a low opacity */
+/* the page's own drawing in a lane (drawLane's ctx.g and ctx.over), cut off at the track's edges */
+.thimble-lane-own {
+  overflow: hidden;
+}
+/* a shaded span of the page's own (drawLane's ctx.shade), as light as a band, or its color at a low opacity */
 .thimble-lane-shade {
   fill: rgba(var(--ink-rgb), 0.07);
 }

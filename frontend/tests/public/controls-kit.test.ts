@@ -417,8 +417,8 @@ describe("the page's own marks in the lanes", () => {
         series: [{ id: 'freeze', name: 'freeze', color: '#aa0000' }, { id: 'unused', name: 'never drawn' }],
         drawLane: (lane, ctx) => {
           window.heard.push({ key: lane.key, n: lane.items.length, width: ctx.width, height: ctx.height, x: ctx.x(${T0 + 60}), iso: ctx.x('2026-05-16T09:01:00Z') })
-          if (lane.key === 'explore') ctx.span(${T0 + 50}, ${T0 + 95}, { name: 'deploy freeze', series: 'freeze', color: '#aa0000' })
-          if (lane.key === 'lead') ctx.span(${T0 - 5000}, ${T0 + 10})
+          if (lane.key === 'explore') ctx.shade(${T0 + 50}, ${T0 + 95}, { name: 'deploy freeze', series: 'freeze', color: '#aa0000' })
+          if (lane.key === 'lead') ctx.shade(${T0 - 5000}, ${T0 + 10})
           for (const it of lane.items) ctx.over.insertAdjacentHTML('beforeend', '<circle class="own-dot" cx="' + ctx.x(it.t) + '" cy="9" r="2" style="fill:' + (ctx.colorOf(it) || 'gray') + '"/>')
         },
       })
@@ -457,6 +457,8 @@ describe("the page's own marks in the lanes", () => {
     // the tip over the span names it, beside the record there
     hover(lane('explore'), 200 + Number(exMark.getAttribute('x')) + 1)
     expect(tipOf()).toContain('deploy freeze')
+    // after the swatch of its key entry, in its color, so it reads apart from the record's words
+    expect((doc().querySelector('.thimble-tip .thimble-key-band') as HTMLElement).style.getPropertyValue('--c')).toBe('#aa0000')
     hover(lane('explore'), 200 + sc.x(T0 + 200))
     expect(tipOf()).not.toContain('deploy freeze')
     // the key: the series drawn, never one no lane drew; a click hides its spans, and Reset shows them again

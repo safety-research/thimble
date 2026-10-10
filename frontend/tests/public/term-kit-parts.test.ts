@@ -314,7 +314,7 @@ describe('lanes', () => {
         series: [{ id: 'freeze', name: 'freeze', mark: 'band' }],
         drawLane: (lane: any, ctx: any) => {
           seen.push({ key: lane.key, cols: ctx.cols, hue: lane.items.length ? ctx.colorOf(lane.items[0]) : null })
-          if (lane.key === 'explore') ctx.span(T0 + 300, T0 + 1500, { name: 'deploy freeze', series: 'freeze' })
+          if (lane.key === 'explore') ctx.shade(T0 + 300, T0 + 1500, { name: 'deploy freeze', series: 'freeze' })
           if (lane.key === 'lead') for (const it of lane.items) ctx.put(ctx.x(it.t), { s: '◆', fg: '#123456' })
         },
       })

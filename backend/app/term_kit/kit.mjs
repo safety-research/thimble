@@ -3936,7 +3936,7 @@ export function rows(opts = {}) {
  * chooses the lane (`onPick`). The list's rows in view are on the selection background across the lanes (`span`, or a
  * list's `span()`). `legend()` is the key for `axis`, each entry a toggle that hides or shows its series.
  * `drawLane(lane, ctx)` draws the view's own cells in each lane under its records' marks, as the browser's does:
- * `ctx.span(t0, t1, {color, name, series})` a shaded span `░`, its name in the cells' tips, `ctx.put(x, run)` a cell,
+ * `ctx.shade(t0, t1, {color, name, series})` a shaded span `░`, its name in the cells' tips, `ctx.put(x, run)` a cell,
  * `ctx.x(t)` a time's cell, `ctx.colorOf(record)` its hue and `ctx.on(id)` whether a series of `series` shows.
  *
  * opts: rows (a Rows control, a field's name or a function of a record) or groups(items), color (Color by; the view's
@@ -4083,7 +4083,7 @@ export function timeline(opts = {}) {
           st.drawn.add(String(id))
           return isOn(String(id))
         },
-        span: (t0, t1, o = {}) => {
+        shade: (t0, t1, o = {}) => {
           if (o.series !== undefined && o.series !== null && !ctx.on(o.series)) return
           let a = placeOf(t0, unit)
           let b = t1 === undefined || t1 === null ? a : placeOf(t1, unit)
