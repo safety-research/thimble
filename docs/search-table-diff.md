@@ -32,7 +32,7 @@ rule that does).
   at the ends. The list scrolls the current match into view. ⌘F (Ctrl+F) puts the focus in the box, and Escape
   empties it.
 - Each list's strip (the kit's scrollbar, [color.md](color.md)) gets a lane of ticks at its left, one per match in it,
-  in the ink as Files' find draws them, and a click on a tick goes to that match. The loupe marks the records that hold
+  in the accent as Files' find draws them, and a click on a tick goes to that match. The loupe marks the records that hold
   one. Without Color by the list gets the kit's strip all the same: a plain scrollbar, with that lane alone while
   something is found.
 - It finds the text a record shows, through its inline elements (a phrase across a link or a bold word is one
@@ -85,7 +85,7 @@ A page that keeps only the matching records, by `has` or by its reader, may keep
 draw, such as a pull request kept for a comment; the box would count only the matches drawn, "No results" or "1 of 1"
 while more records show. `search.kept(refs)` says which records the page kept, once it has drawn them: the box counts
 those records and steps through them, each once, in place of the matches in them, and a record whose words do not show
-is highlighted for a moment when gone to, as a cited record is. The page calls it each time it keeps records for a new
+is highlighted for a moment when gone to, in the matches' tint. The page calls it each time it keeps records for a new
 text, in `onChange` or once its fetch returns; until it does, the box shows no count and its steps are off. A kept
 record counts once, as its row in a list, else as the first element with its `data-anchor`; shown again, such as in the
 side panel, it counts its matches.

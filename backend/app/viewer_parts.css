@@ -229,7 +229,7 @@
 /* the find's words in a name, as Files' search marks them */
 .thimble-tree-hit {
   border-radius: var(--radius-hl, 3px);
-  background: var(--hl-bg);
+  background: var(--find-bg, var(--hl-bg));
   color: var(--text-primary);
   font-weight: 500;
 }
@@ -1263,7 +1263,7 @@ button.thimble-record-key:focus-visible {
 /* the words found, as Files' find marks them */
 .thimble-record-hit {
   border-radius: var(--radius-hl, 3px);
-  background: var(--hl-bg-strong, var(--hl-bg));
+  background: var(--find-bg, var(--hl-bg-strong, var(--hl-bg)));
   color: inherit;
 }
 

@@ -29,7 +29,7 @@
                        the readout; .thimble-axis-* the axis thimble.timeAxis draws under a chart of the range
      .thimble-details  a row's details opened in place (thimble.expand)
      .thimble-search-* the search in the top row (viewer_search.js, thimble.search): the box, its count and steps, and
-                       the find's wash on the matches (::highlight(thimble-search), the current one's stronger)
+                       a tint of the accent on the matches (::highlight(thimble-search), the current one's stronger)
      .thimble-table-*  a table of records with sortable columns that draws only the rows near its view
                        (viewer_table.js, thimble.table)
      .thimble-diff-*   two versions of a text, or a patch, side by side or inline (viewer_diff.js, thimble.diff) */
@@ -1476,8 +1476,9 @@ button.thimble-card {
 }
 
 /* -------- the search (viewer_search.js): a box drawn as a field, its glyph, the text, the count ("3 of 120") and the
-   steps; the find's wash on every match on screen and a stronger one on the current match, as Files' find
-   (files.css ::highlight(reader-find)). The page sets the box's width as its layout. -------- */
+   steps; a tint of the accent on every match on screen (--find-bg) and a stronger one on the current match
+   (--find-bg-strong), as Files' find (files.css ::highlight(reader-find)). The page sets the box's width as its
+   layout. -------- */
 .thimble-search-mount {
   display: inline-flex;
   min-width: 0;
@@ -1551,10 +1552,24 @@ button.thimble-card {
   display: none;
 }
 ::highlight(thimble-search) {
-  background-color: var(--hl-bg);
+  background-color: var(--find-bg, var(--hl-bg));
 }
 ::highlight(thimble-search-current) {
-  background-color: var(--hl-bg-strong);
+  background-color: var(--find-bg-strong, var(--hl-bg-strong));
+}
+/* a kept record gone to whose words do not show (viewer_search.js snap): the matches' tint for a moment, the lighter
+   one, since it covers the whole record */
+[data-thimble-snap='search'] {
+  animation-name: thimble-snap-search;
+}
+@keyframes thimble-snap-search {
+  0%,
+  30% {
+    background-color: var(--find-bg, var(--hl-bg));
+  }
+  100% {
+    background-color: transparent;
+  }
 }
 
 /* -------- the table (viewer_table.js): the kit's .table as a list that draws only the rows near its view, each row

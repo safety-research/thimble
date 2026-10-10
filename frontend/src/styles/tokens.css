@@ -391,13 +391,18 @@
   --status-info-soft: var(--paper-1);
   --status-neutral: var(--ink-500);
   --status-neutral-soft: var(--paper-1);
-  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css) and the
-     stronger wash of the find's current match (a cited table cell or output line is the accent's wash, refchip.css) */
+  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css) and a stronger
+     wash, such as a quote's words (a cited table cell or output line is the accent's wash, refchip.css) */
   --hl-bg: rgba(var(--ink-rgb), 0.08);
   --hl-bg-strong: rgba(var(--ink-rgb), 0.18);
   --hl-edge: rgba(var(--ink-rgb), 0.4);
   --hl-unverified: var(--status-warning-soft);
   --hl-unverified-ink: var(--status-warning);
+  /* the find's matches (Files' find, the view kit's search): every match on a tint of the accent and the current one on
+     a stronger tint, on which the text and the secondary text read at 4.5:1 or more on every paper and accent. Their
+     ticks on a strip are the accent as text (--text-accent), so they stand apart from Color by's colors */
+  --find-bg: color-mix(in oklab, var(--accent) 20%, transparent);
+  --find-bg-strong: color-mix(in oklab, var(--accent) 32%, transparent);
 
   /* data: the chart's color roles (lib/vizTheme), past the series and ramps the accent sets above. Series one is a step
      of the accent's family, not the accent's hex, and the interface's own uses of the accent (a selection, the find's
@@ -566,6 +571,10 @@
   --hl-bg: rgba(var(--ink-rgb), 0.14);
   --hl-bg-strong: rgba(var(--ink-rgb), 0.26);
   --hl-edge: rgba(var(--ink-rgb), 0.5);
+  /* the find's tints a step stronger, so a dark accent such as iris shows on a dark cell, and no more, since a light
+     accent such as yellow takes contrast from the light text */
+  --find-bg: color-mix(in oklab, var(--accent) 25%, transparent);
+  --find-bg-strong: color-mix(in oklab, var(--accent) 40%, transparent);
   /* the code colours lightened toward Dark's text ink */
   --code-keyword: color-mix(in oklab, #cc79a7 70%, var(--ink-900));
   --code-string: color-mix(in oklab, #009e73 64%, var(--ink-900));
@@ -576,6 +585,9 @@
 }
 :root[data-paper='dark'][data-accent='graphite'] {
   --text-accent: color-mix(in oklab, var(--accent) 45%, white);
+  /* graphite's fill is too near Dark's cell to tint it, so the find's tints take its text color */
+  --find-bg: color-mix(in oklab, var(--text-accent) 25%, transparent);
+  --find-bg-strong: color-mix(in oklab, var(--text-accent) 40%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {

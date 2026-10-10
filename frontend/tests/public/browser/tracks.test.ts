@@ -3,7 +3,8 @@
 //
 // The strip is one track at every length: the find's lane and a lane of colors in the scrollbar's geometry, no second
 // track, a thumb exactly as wide as the strip, its edges on whole device pixels at a pixel ratio of 1 and 2 once still;
-// each pixel row of a lane is one color and the find's matches are ticks in the ink. Resting on the strip opens the loupe
+// each pixel row of a lane is one color and the find's matches are ticks in the accent as text, following the accent
+// and the paper the analyst picks. Resting on the strip opens the loupe
 // beside it after LOUPE_REST_MS, not before, with a bracket beside the strip over the stretch it shows: a line per
 // record, its number, its cells in its own colors once read, and the start of its text, the pointer's record in the
 // middle line and darker. It follows the pointer along the strip, never jumping to the thumb while the reader's place
@@ -63,7 +64,9 @@ beforeAll(async () => {
       `import { useRef } from 'react'`,
       `import { PlaceFeed, ReaderTracks } from '${src('files/Tracks.tsx')}'`,
       `import { PageRuler } from '${src('files/Ruler.tsx')}'`,
+      `import { setAccent, setPaper } from '${src('lib/theme.ts')}'`,
       `const w = window as any`,
+      `w.__theme = { setAccent, setPaper }`,
       `const TOTAL = Number(new URLSearchParams(location.search).get('total') || 10000)`,
       `Object.assign(w, { __seeks: [], __asked: [], __scrolled: [], __lines: [], __marks: [] })`,
       `const root = createRoot(document.getElementById('root')!)`,
@@ -193,7 +196,7 @@ for (const dpr of [1, 2]) {
   })
 }
 
-test("each pixel row of the lane of colors is one color, and the find's matches leave ticks in the ink, no color", async () => {
+test("each pixel row of the lane of colors is one color, and the find's matches leave ticks in the accent as text, following the accent and the paper", async () => {
   await page.evaluate(() => document.documentElement.setAttribute('data-paper', 'warm'))
   await reset()
   const rows = await page.evaluate(() => {
@@ -212,13 +215,42 @@ test("each pixel row of the lane of colors is one color, and the find's matches 
       if (row.size > 1) mixed++
       colours.add([...row][0])
     }
-    // the find's tick over 40% to 42% of the file, in its lane
-    return { mixed, colours: colours.size, tick: px(Math.round(6 * dpr), Math.round(cv.height * 0.41)) }
+    return { mixed, colours: colours.size }
   })
   assert.equal(rows.mixed, 0, 'no row holds two colors side by side')
   assert.equal(rows.colours, 2, 'the first two thirds the first value, the last third the second')
-  const [r, g, b, a] = rows.tick
-  assert.ok(a > 0 && Math.max(r, g, b) - Math.min(r, g, b) < 12, `the find's tick has no color: ${rows.tick}`)
+  // the find's tick over 40% to 42% of the file, in its lane: the accent as text (tokens.css --text-accent), which the
+  // strip draws again when the analyst picks another accent or paper
+  const tick = () =>
+    page.evaluate(() => {
+      const cv = document.querySelector('.track-over canvas') as HTMLCanvasElement
+      const dpr = window.devicePixelRatio || 1
+      const got = Array.from(cv.getContext('2d')!.getImageData(Math.round(6 * dpr), Math.round(cv.height * 0.41), 1, 1).data)
+      const probe = document.createElement('i')
+      probe.style.color = 'var(--text-accent)'
+      document.body.appendChild(probe)
+      const c = document.createElement('canvas').getContext('2d')!
+      c.fillStyle = getComputedStyle(probe).color
+      c.fillRect(0, 0, 1, 1)
+      probe.remove()
+      return { got, accent: Array.from(c.getImageData(0, 0, 1, 1).data) }
+    })
+  const want: Record<string, number[] | null> = { 'warm iris': [81, 53, 255], 'warm pink': [180, 41, 90], 'dark iris': null, 'dark pink': null }
+  try {
+    for (const at of Object.keys(want)) {
+      const [paper, accent] = at.split(' ')
+      await page.evaluate(([p, a]) => ((window as any).__theme.setPaper(p), (window as any).__theme.setAccent(a)), [paper, accent])
+      await page.waitForTimeout(120)
+      const t = await tick()
+      const expected = want[at] ?? t.accent
+      assert.ok(t.got.slice(0, 3).every((v, i) => Math.abs(v - expected[i]) <= 2) && t.got[3] > 250, `${at}: the find's tick ${t.got}, want ${expected}`)
+      // never the text's ink: a color with a hue
+      assert.ok(Math.max(...t.got.slice(0, 3)) - Math.min(...t.got.slice(0, 3)) > 40, `${at}: the find's tick has the accent's hue: ${t.got}`)
+    }
+  } finally {
+    await page.evaluate(() => ((window as any).__theme.setPaper('warm'), (window as any).__theme.setAccent('iris')))
+    await page.waitForTimeout(120)
+  }
 })
 
 const num = (n: string) => Number(n.replace(/,/g, ''))

@@ -163,7 +163,7 @@ scrollbar in one strip at its right edge, at every length:
   lane and two are two; a label that is on but no choice has no lane. Each lane names its choice on hover; each is 7
   px wide, 2 px from the next. Only the first choice colors the records' bars. A thumb as wide as the strip frames the
   part in view; drag it to move the view.
-- While the view's search finds something ([search-table-diff.md](search-table-diff.md)), a lane of ticks in the ink,
+- While the view's search finds something ([search-table-diff.md](search-table-diff.md)), a lane of ticks in the accent,
   one per match, stands at the strip's left, before Color by's lanes; a click on a tick goes to that match.
 - Where the strip draws a record shorter than 3 px, resting on it for 250 ms opens the loupe beside it: a short list,
   a line per record around the pointer, each its line or key, a cell per lane in the record's color (an empty cell for
