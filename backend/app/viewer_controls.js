@@ -16,8 +16,9 @@
 //                                                        in the Color by colours (or with `density` bars of the records
 //                                                        per bin), a failure a ✕ in the problem red, a quiet
 //                                                        cursor line on hover, the detail list's rows in view marked as a
-//                                                        tint, and the key's entries as toggles; thimble.lanes, its old
-//                                                        name, is the same call
+//                                                        tint, the key's entries as toggles, and the page's own marks in
+//                                                        each lane (`drawLane`); thimble.lanes, its old name, is the same
+//                                                        call
 //   thimble.key(mount, entries, { onChange })            a key whose entries turn their series off and on
 //   thimble.divider({ top, key })                        a bar between the overview and the detail list that a drag moves
 //
@@ -1157,8 +1158,11 @@
   // chosen; ▾ folds a parent's lanes into its own. The detail list's rows in view (`follow`, rows with data-t) are a
   // light tint across the lanes, and the range's own overview marks them too where it can (range.visible). With
   // `density` (a flag, or a function the page answers at each draw) each lane is bars on the scale's bins instead, a
-  // bar's height its bin's records on one scale for every lane, stacked by their Color by values in the chips' order;
-  // hovering a bin gives its time and its records per value, a click opens its first record (onMark).
+  // bar's height its bin's records on one scale for every lane, stacked by their Color by values in the chips' order,
+  // with no band behind them; hovering a bin gives its time and its records per value, a click opens its first record
+  // (onMark). `drawLane(lane, ctx)` draws the page's own marks in each lane on its scale (drawOwn), such as shaded spans
+  // of time, a line or a small chart; `marks` (false, or a function of a record) leaves a record's mark to the page,
+  // and `series` gives the key entries of the page's own series.
   // a tree guide (`│ ├ `, `  └ `) as cells a level wide, each drawn as lines that meet the lanes above and below, as a
   // file view draws its folders; the glyphs stay as the cells' text
   var GUIDE = { '│': 'pipe', '├': 'tee', '└': 'elbow' }
@@ -1243,6 +1247,13 @@
       : null
     this.band = typeof opts.band === 'function' ? opts.band : null
     this.problem = typeof opts.problem === 'function' ? opts.problem : null
+    // the page's own drawing in each lane (drawLane), whether Events draws a record's mark (`marks`), and the key's
+    // entries of the page's own series (`series`)
+    this.drawLane = typeof opts.drawLane === 'function' ? opts.drawLane : null
+    this.marks = opts.marks === false ? function () { return false } : typeof opts.marks === 'function' ? opts.marks : null
+    this.series = (Array.isArray(opts.series) ? opts.series : []).filter(function (s) {
+      return s && s.id != null && s.id !== 'band' && s.id !== 'problem'
+    })
     // with nothing to tell lanes apart, one lane and no column of names; with no range to line up with and no `names`,
     // a column as wide as the longest name (fitNames)
     this.bare = !this.rows && !this.rowOf && typeof opts.groups !== 'function'
@@ -1512,10 +1523,12 @@
     var H = dense ? DENSE_H : LANE_H
     this.mount.classList.toggle('is-density', dense)
     this.dens = dense ? this.binned(sc, colour) : null
+    var own = !!this.drawLane
     var html = this.nodes
       .map(function (n, ni) {
         var svg = ''
-        if (self.band && !n.heading) {
+        // a band where the lane ran, in Events only: Density draws its bars alone, with nothing behind them
+        if (self.band && !n.heading && !dense) {
           var spans = safe(function () { return self.band(n) }, []) || []
           for (var s = 0; s < spans.length; s++) {
             var a = Math.max(0, sc.x(spans[s][0]))
@@ -1526,6 +1539,9 @@
             }
           }
         }
+        // the page's own drawing behind the marks (drawLane's ctx.g), drawn once the lanes are in the page, on an svg of
+        // the track's size that cuts off what falls outside it (a record before the range's start, a line past its end)
+        if (own) svg += '<svg class="thimble-lane-own" width="' + W + '" height="' + H + '"></svg>'
         var its = n.items || []
         var bad = ''
         if (self.dens) {
@@ -1574,14 +1590,19 @@
           })
         for (var j = 0; j < marks.length; j++) {
           var mk = marks[j]
-          var c = colour ? colour.colourOf(colour.valueOf(mk.it)) : null
-          svg += '<rect class="thimble-lane-mark" data-i="' + mk.i + '" x="' + mk.x.toFixed(1) + '" y="3" width="' + mk.w.toFixed(1) + '" height="' + (LANE_H - 6) + '"' + (c ? ' style="fill:' + esc(c) + '"' : '') + '/>'
+          // a record the page draws itself (`marks`) takes no mark of the kit's, and still answers the tip and a click
+          if (!self.marks || safe(function () { return !!self.marks(mk.it) }, true)) {
+            var c = colour ? colour.colourOf(colour.valueOf(mk.it)) : null
+            svg += '<rect class="thimble-lane-mark" data-i="' + mk.i + '" x="' + mk.x.toFixed(1) + '" y="3" width="' + mk.w.toFixed(1) + '" height="' + (LANE_H - 6) + '"' + (c ? ' style="fill:' + esc(c) + '"' : '') + '/>'
+          }
           if (self.problem && safe(function () { return self.problem(mk.it) }, false)) {
             problems++
             if (self.on('problem')) bad += badX(mk.x + mk.w / 2, LANE_H - 3)
           }
         }
-        // the failures' ✕ over every mark, so no mark drawn later hides one
+        // the page's own drawing over the marks (ctx.over), then the failures' ✕ over every mark, so no mark drawn later
+        // hides one
+        if (own) svg += '<svg class="thimble-lane-own is-over" width="' + W + '" height="' + H + '"></svg>'
         svg += bad
         var anchor = typeof self.opts.anchor === 'function' ? safe(function () { return self.opts.anchor(n) }, null) : null
         var fold = n.children ? '<button type="button" class="thimble-lane-fold" data-fold="' + esc(n.key) + '" aria-expanded="' + !n.folded + '" aria-label="' + esc((n.folded ? 'Show the lanes under ' : 'Fold the lanes under ') + n.name) + '">' + (n.folded ? '▸' : '▾') + '</button>' : '<span class="thimble-lane-fold-gap"></span>'
@@ -1599,6 +1620,17 @@
     }
     this.body.innerHTML = html
     this.body.classList.toggle('has-tree', this.nodes.some(function (n) { return n.children > 0 || n.depth > 0 }))
+    // the page's own drawing in each lane, and the series it drew, which take their entries in the key
+    this.shades = []
+    var drew = {}
+    if (own)
+      for (var li = 0; li < this.nodes.length; li++) {
+        var row = this.body.children[li]
+        var gs = row ? row.querySelectorAll('.thimble-lane-own') : []
+        if (gs.length === 2) this.drawOwn(this.nodes[li], li, gs[0], gs[1], H, colour, drew)
+      }
+    // the lanes' height, measured before the tint and the cursor line, which stand over every lane, are put back
+    this.lanesH = this.body.scrollHeight
     this.body.appendChild(this.spanEl)
     this.body.appendChild(this.cursorEl)
     this.cursorEl.style.display = 'none'
@@ -1606,6 +1638,10 @@
     var entries = []
     if (this.band) entries.push({ id: 'band', name: this.words.band, mark: 'band', n: bands, count: false })
     if (this.problem) entries.push({ id: 'problem', name: this.words.problem, mark: 'problem', n: problems })
+    this.series.forEach(function (s) {
+      var id = String(s.id)
+      entries.push({ id: id, name: String(s.name || id), mark: s.mark || 'band', color: s.color || s.colour || null, about: s.about || null, n: drew[id] ? 1 : 0, count: false })
+    })
     if (this.key) {
       var sig = JSON.stringify(entries)
       if (sig !== this.keySig) {
@@ -1627,6 +1663,94 @@
   function badX(x, y) {
     var d = 'M' + (x - BAD_X).toFixed(2) + ' ' + (y - BAD_X).toFixed(2) + 'l' + 2 * BAD_X + ' ' + 2 * BAD_X + 'M' + (x + BAD_X).toFixed(2) + ' ' + (y - BAD_X).toFixed(2) + 'l' + -2 * BAD_X + ' ' + 2 * BAD_X
     return '<g class="thimble-lane-bad"><path class="thimble-lane-bad-halo" d="' + d + '"/><path class="thimble-lane-bad-x" d="' + d + '"/></g>'
+  }
+  // The page's own drawing in a lane (drawLane(lane, ctx)), after the kit has drawn its marks: `ctx.g` an svg behind
+  // the marks and `ctx.over` one over them (under the failures' ✕), each the track's size and cutting off what falls
+  // outside it; `x(t)` a time's x on the lanes' scale (a number, a Date or an ISO time, as a record's place) and `scale`
+  // the scale itself, `width` and `height` the track's px; `colorOf(record)` its Color by colour, null with Off or a
+  // value turned off; `on(id)` whether a series of `series` shows, which puts its entry in the key; and `shade(t0, t1,
+  // {color, name, series, over})` a shaded span of time as tall as the lane, a moment a line a px wide, `name` said in
+  // the tip over it, `series` drawn only while that series shows. Each paint draws it again: as Color by, the range, the
+  // key or the records change.
+  var SVG_NS = 'http://www.w3.org/2000/svg'
+  var SHADE = 0.16 // the opacity of a shaded span drawn in a color of its own
+  Lanes.prototype.drawOwn = function (node, ni, under, over, H, colour, drew) {
+    var self = this
+    var sc = this.sc
+    var shades = (this.shades[ni] = [])
+    var place = function (v) {
+      return placeOf(v, self.unit)
+    }
+    var ctx = {
+      g: under,
+      over: over,
+      scale: sc,
+      width: sc.width,
+      height: H,
+      x: function (t) {
+        var p = place(t)
+        return p == null ? NaN : sc.x(p)
+      },
+      colorOf: function (record) {
+        return (colour && colour.colourOf(colour.valueOf(record))) || null
+      },
+      on: function (id) {
+        drew[String(id)] = true
+        return self.on(String(id))
+      },
+      shade: function (t0, t1, o) {
+        o = o || {}
+        if (o.series != null && !ctx.on(o.series)) return null
+        var a = place(t0)
+        var b = t1 == null ? a : place(t1)
+        if (a == null || b == null) return null
+        if (b < a) {
+          var sw = a
+          a = b
+          b = sw
+        }
+        if (b < sc.from || a > sc.to) return null
+        var x0 = clamp(sc.x(Math.max(a, sc.from)), 0, sc.width)
+        var x1 = clamp(sc.x(Math.min(b, sc.to)), 0, sc.width)
+        if (x1 - x0 < 1) {
+          var m = (x0 + x1) / 2
+          x0 = m - 0.5
+          x1 = m + 0.5
+        }
+        var r = document.createElementNS(SVG_NS, 'rect')
+        r.setAttribute('class', 'thimble-lane-shade')
+        r.setAttribute('x', x0.toFixed(1))
+        r.setAttribute('y', '0')
+        r.setAttribute('width', (x1 - x0).toFixed(1))
+        r.setAttribute('height', String(H))
+        var c = o.color || o.colour
+        if (c) {
+          r.style.fill = String(c)
+          r.style.fillOpacity = String(SHADE)
+        }
+        ;(o.over ? over : under).appendChild(r)
+        if (o.name != null && o.name !== '') shades.push({ x0: x0, x1: x1, name: String(o.name), color: c ? String(c) : null })
+        return r
+      },
+    }
+    ctx.colourOf = ctx.colorOf
+    safe(function () {
+      self.drawLane(node, ctx)
+    })
+  }
+  // the names of a lane's shaded spans under the pointer's x, as lines of the tip, each after the swatch its key entry
+  // would have, so that it reads apart from the record's words
+  Lanes.prototype.shadeTip = function (node, x) {
+    var list = (this.shades && this.shades[this.nodes.indexOf(node)]) || []
+    var out = ''
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i]
+      var m = (s.x0 + s.x1) / 2
+      var half = Math.max(HIT, (s.x1 - s.x0) / 2)
+      if (Math.abs(x - m) <= half)
+        out += '<div class="thimble-tip-m thimble-lanes-row"><span class="thimble-key-sw thimble-key-band"' + (s.color ? ' style="--c:' + esc(s.color) + '"' : '') + '></span><span class="thimble-lanes-rn">' + esc(s.name.slice(0, 200)) + '</span></div>'
+    }
+    return out
   }
   // the detail list's rows in view, as a tint across the lanes, and on the range's overview where it marks them
   Lanes.prototype.visible = function (t0, t1) {
@@ -1661,7 +1785,7 @@
     this.spanEl.style.display = 'block'
     this.spanEl.style.left = this.namesW + a + 'px'
     this.spanEl.style.width = b - a + 'px'
-    this.spanEl.style.height = this.body.scrollHeight + 'px'
+    this.spanEl.style.height = this.lanesH + 'px'
   }
   // the list's rows that carry data-t and stand in its box: the earliest and latest of their times, told as the list
   // scrolls, resizes or is drawn again; the rows are in the page in the order they stand, though not in time order (a
@@ -1782,7 +1906,7 @@
     // a thin cursor line across the lanes at the pointer, never a band over the marks
     this.cursorEl.style.display = 'block'
     this.cursorEl.style.left = this.namesW + Math.round(x) + 'px'
-    this.cursorEl.style.height = this.body.scrollHeight + 'px'
+    this.cursorEl.style.height = this.lanesH + 'px'
     var t = this.sc.t(x)
     var rr = at.row.getBoundingClientRect()
     var html
@@ -1799,7 +1923,7 @@
             if (bin.n[k]) html += '<div class="thimble-tip-m thimble-lanes-row"><span class="chip-sw"' + (d.colours[k] ? ' style="--c:' + esc(d.colours[k]) + '"' : '') + '></span><span class="thimble-lanes-rn">' + esc(d.names[k]) + '</span><span class="thimble-lanes-rc">' + num(bin.n[k]) + '</span></div>'
         if (bin.bad) html += '<div class="thimble-tip-m thimble-lanes-bad">' + num(bin.bad) + ' ' + esc(this.words.problem) + '</div>'
       }
-      return tip(html, e.clientX, rr.bottom, 'under', rr.top)
+      return tip(html + this.shadeTip(at.node, x), e.clientX, rr.bottom, 'under', rr.top)
     }
     var it = this.itemAt(at.node, x)
     html = this.head(at.node, this.when(t))
@@ -1808,7 +1932,7 @@
       if (words) html += '<div class="thimble-tip-m">' + esc(String(words).slice(0, 200)) + '</div>'
       if (this.problem && safe(function () { return this.problem(it) }.bind(this), false)) html += '<div class="thimble-tip-m thimble-lanes-bad">' + esc(this.words.problem) + '</div>'
     }
-    tip(html, e.clientX, rr.bottom, 'under', rr.top)
+    tip(html + this.shadeTip(at.node, x), e.clientX, rr.bottom, 'under', rr.top)
   }
   Lanes.prototype.unhover = function () {
     if (this.cursorEl) this.cursorEl.style.display = 'none'
@@ -1875,7 +1999,7 @@
       visible: function (t0, t1) {
         l.visible(t0, t1)
       },
-      /** whether a series of the key shows: 'band' or 'problem' */
+      /** whether a series of the key shows: 'band', 'problem' or the id of one of `series` */
       isOn: function (series) {
         return l.on(series)
       },

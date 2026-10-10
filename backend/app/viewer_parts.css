@@ -274,7 +274,7 @@
 .thimble-key-band {
   width: 12px;
   height: 8px;
-  background: rgba(var(--ink-rgb), 0.12);
+  background: color-mix(in oklab, var(--c, rgba(var(--ink-rgb), 0.43)) 28%, transparent);
 }
 .thimble-key-mark {
   width: 4px;
@@ -366,11 +366,12 @@
   align-items: center;
   height: 18px;
 }
+/* a name as tall as its lane, so that the tree guides meet the lanes above and below in Density's taller lanes too */
 .thimble-lane-name {
   display: flex;
+  align-self: stretch;
   align-items: center;
   min-width: 0;
-  height: 18px;
   padding: 0 10px 0 8px;
   overflow: hidden;
   color: var(--text-primary);
@@ -457,6 +458,14 @@
   overflow: visible;
 }
 .thimble-lane-band {
+  fill: rgba(var(--ink-rgb), 0.07);
+}
+/* the page's own drawing in a lane (drawLane's ctx.g and ctx.over), cut off at the track's edges */
+.thimble-lane-own {
+  overflow: hidden;
+}
+/* a shaded span of the page's own (drawLane's ctx.shade), as light as a band, or its color at a low opacity */
+.thimble-lane-shade {
   fill: rgba(var(--ink-rgb), 0.07);
 }
 .thimble-lane-mark {

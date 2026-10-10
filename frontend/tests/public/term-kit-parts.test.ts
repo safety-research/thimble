@@ -2,7 +2,8 @@
 // docs/terminal-views.md), drawn as text: Filter by's values are toggles in the top row, `●` while a value shows and
 // `○` while it is off, never in a hue, and a value turned off hides its rows; Rows groups by a field, a tree of them
 // with its guides left-aligned, or a label, each class a lane, a class added to the label a new lane; the lanes draw a
-// failure as `×` in red and their key's entries are toggles, and the timeline works alone, on its records' own span of
+// failure as `×` in red and their key's entries are toggles, Density draws no band, drawLane draws the view's own
+// cells (a shaded span `░`, a cell) under the records' marks, and the timeline works alone, on its records' own span of
 // times or numbers with its axis under it; a chart's cells are marked under the pointer rather than
 // drawn inverse, with a tip per cell; the list's rows in view are on the selection background across the lanes; a row
 // opens in a side pane beside the list, or under it in a narrow panel, never under the row; `{` `}` resize the
@@ -208,7 +209,7 @@ describe('Rows', () => {
 })
 
 describe('lanes', () => {
-  function scene(o: { rows?: number; span?: any; room?: number } = {}) {
+  function scene(o: { rows?: number; span?: any; room?: number; density?: boolean } = {}) {
     init({ rows: o.rows ?? 30 })
     const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }] })
     const rows = kit.rows({ fields: [{ name: 'session', title: 'Session', parentOf: (k: string) => (k === 'lead' ? 'run' : k === 'run' ? null : PARENT[k]), nameOf: (k: string) => (k === 'run' ? 'Run 1' : k) }] })
@@ -220,14 +221,14 @@ describe('lanes', () => {
     kit.draw((d: any) => {
       range.draw(d, { gutter: 16 })
       const scale = range.scale(d.cols - 16)
-      lanes.draw(d, { items: CALLS, scale, gutter: 16, room: o.room, span: o.span })
+      lanes.draw(d, { items: CALLS, scale, gutter: 16, room: o.room, span: o.span, density: o.density })
       kit.axis(d, scale, { gutter: 16, legend: lanes.legend() })
     })
     return { lanes, picked, marked }
   }
 
   test('a lane per group: the top group with its ▾, the others with their guides at A2, left-aligned; a failure × in red; the key\'s entries are toggles', async () => {
-    const { lanes, picked } = scene()
+    const { lanes, picked } = scene({ density: false })
     await tick()
     const rows = text()
     const names = rows.slice(2, 7).map((r: string) => r.slice(0, 16).trimEnd())
@@ -278,6 +279,86 @@ describe('lanes', () => {
     const bgs = runsAt(f, explore).filter((r) => r.bg === kit.COLORS.selected).map((r) => r.s).join('')
     expect(bgs.length).toBeGreaterThan(5)
     expect(runsAt(f, explore).slice(0, 2).some((r) => r.bg)).toBe(false)
+  })
+
+  test('Density draws its bars alone: no band `─` where a lane ran, and no `running` in the key; Events draws the band', async () => {
+    scene()
+    await tick()
+    const lane = (rows: string[], name: string) => rows.find((r: string) => r.includes(name))!.slice(18)
+    // explore ran from its first call to its last: in Density only its bars, no ─ between them
+    expect(lane(text(), '├ explore')).toMatch(/[▁▂▃▄▅▆▇█×]/)
+    expect(lane(text(), '├ explore')).not.toContain('─')
+    expect(text().some((r: string) => r.includes('─ running'))).toBe(false)
+    expect(text().some((r: string) => r.includes('× failed'))).toBe(true)
+    init()
+    scene({ density: false })
+    await tick()
+    expect(lane(text(), '├ explore')).toContain('─')
+    expect(text().some((r: string) => r.includes('─ running'))).toBe(true)
+  })
+
+  test("drawLane draws the view's own cells under the records' marks: a shaded span ░ named in its cells' tips, its series a key entry that hides it; marks: false leaves the records' cells to the view, and a click still opens the nearest record", async () => {
+    init()
+    const colour = kit.colorBy({ fields: [{ name: 'tool', title: 'Tool' }] })
+    const rows = kit.rows({ fields: [{ name: 'session', title: 'Session' }] })
+    const range = kit.timeRange({})
+    range.data({ times: CALLS.map((c) => c.t) })
+    const marked: string[] = []
+    const seen: any[] = []
+    let marks: any = undefined
+    let ln: any
+    kit.draw((d: any) => {
+      const scale = range.scale(d.cols - 16)
+      ln = kit.timeline({
+        key: 'own', rows, colour, marks, onMark: (c: any) => marked.push(c.ref),
+        series: [{ id: 'freeze', name: 'freeze', mark: 'band' }],
+        drawLane: (lane: any, ctx: any) => {
+          seen.push({ key: lane.key, cols: ctx.cols, hue: lane.items.length ? ctx.colorOf(lane.items[0]) : null })
+          if (lane.key === 'explore') ctx.shade(T0 + 300, T0 + 1500, { name: 'deploy freeze', series: 'freeze' })
+          if (lane.key === 'lead') for (const it of lane.items) ctx.put(ctx.x(it.t), { s: '◆', fg: '#123456' })
+        },
+      })
+      ln.draw(d, { items: CALLS, scale, gutter: 16, density: false })
+      kit.axis(d, scale, { gutter: 16, legend: ln.legend() })
+    })
+    colour.counts({ Grep: 2, Task: 1, Read: 1, Bash: 1 })
+    await tick()
+    const y = (name: string) => text().findIndex((r: string) => r.trimStart().startsWith(name))
+    // the span's cells ░ in the rule gray, the records' marks ▌ over them; its name in the tips of its cells alone
+    const explore = text()[y('explore')]
+    expect(explore).toContain('░')
+    expect(explore.replace(/[^▌]/g, '')).toBe('▌▌')
+    const x = [...explore].indexOf('░')
+    expect(cell(last(), y('explore'), x)!.fg).toBe(kit.COLORS.rule)
+    const hit = last().hits.find((h: any) => h.y === y('explore') && h.cursor)
+    expect(hit.tips[x - hit.x0]).toMatch(/ · deploy freeze$/)
+    expect(hit.tips[0]).not.toContain('deploy freeze')
+    // drawLane hears each lane with the lane's cells, and the Color by hue of a record
+    expect(seen.slice(-4).map((s) => s.key)).toEqual(['lead', 'explore', 'grep', 'test'])
+    expect(seen[0].cols).toBe(100 - 16)
+    const hue = seen.filter((s) => s.key === 'grep').at(-1).hue
+    expect(hue).toBe(colour.colourOf('Grep'))
+    expect(hue).not.toBe(kit.COLORS.dim)
+    // the series' key entry hides it; Reset shows it again
+    expect(text().some((r: string) => r.includes('░ freeze'))).toBe(true)
+    await click('░ freeze')
+    expect(ln.isOn('freeze')).toBe(false)
+    expect(text()[y('explore')]).not.toContain('░')
+    expect(text().some((r: string) => r.includes('░ freeze'))).toBe(true)
+    // the lead's own ◆ stand under its ▌ marks; with marks: false the ◆ show, and a click still opens the nearest record
+    expect(text()[y('lead')]).not.toContain('◆')
+    marks = false
+    kit.redraw()
+    await tick()
+    const lead = text()[y('lead')]
+    expect(lead).not.toContain('▌')
+    expect(lead.replace(/[^◆]/g, '')).toBe('◆◆')
+    const lx = [...lead].indexOf('◆')
+    expect(cell(last(), y('lead'), lx)!.fg).toBe('#123456')
+    const leadHit = last().hits.find((h: any) => h.y === y('lead') && h.cursor)
+    kit.handle({ t: 'click', i: last().hits.indexOf(leadHit), seq: last().seq, x: lx - leadHit.x0, n: ++n })
+    await tick()
+    expect(marked).toEqual(['r1/lead.jsonl#L3'])
   })
 
   test('Events draws a mark ▌ in each cell that holds a record, in place of the bars of its records', async () => {
