@@ -679,6 +679,32 @@ describe('the search over every part on screen', () => {
     assert.ok(one[0] === 0 && one[1] > 0, `ticks drawn: ${JSON.stringify(one)}`)
     await p.close()
   })
+
+  test("a page's own list of rows with no box, beside a table: each row's matches are its own list's, the current one where the step went", async () => {
+    const { page: p, frame } = await framed(page(`<div class="top"><span id="search"></span></div>
+<div id="own"><div data-thimble-row="0">a gale at noon</div><div data-thimble-row="1">the gale again</div></div><div id="list" style="height:300px"></div>
+<script>
+window.search = thimble.search({ mount: '#search' })
+window.table = thimble.table({ mount: '#list', search, columns: [{ name: 'subject', title: 'Subject' }],
+  rows: [{ ref: 'mail.jsonl#L1', subject: 'calm' }, { ref: 'mail.jsonl#L2', subject: 'gale warning' }] })
+search.rows({ texts: ['a gale at noon', 'the gale again'], refs: ['own#1', 'own#2'] })
+</script>`))
+    await typeIn(frame, 'gale')
+    const at = () =>
+      frame().evaluate(() => {
+        const hl = (CSS as any).highlights
+        const where = (r: Range) => (r.startContainer.parentElement!.closest('#own') ? 'own' : 'table') + ' ' + r.toString()
+        return { at: (window as any).search.at, current: [...hl.get('thimble-search-current')].map(where), washed: [...hl.get('thimble-search')].map(where).sort() }
+      })
+    // the own list's two rows, then the table's second, whose row is drawn under the same number as the own list's
+    // second: each match washed once, and the current one in the list the step went to
+    assert.deepEqual(await at(), { at: 0, current: ['own gale'], washed: ['own gale', 'table gale'] })
+    await frame().evaluate(() => (window as any).search.step(1))
+    assert.deepEqual(await at(), { at: 1, current: ['own gale'], washed: ['own gale', 'table gale'] })
+    await frame().evaluate(() => (window as any).search.step(1))
+    assert.deepEqual(await at(), { at: 2, current: ['table gale'], washed: ['own gale', 'own gale'] })
+    await p.close()
+  })
 })
 
 // A transcript and a record that fold words away: a text turn of 20 lines whose lines wrap, a word at its line 15; a tool

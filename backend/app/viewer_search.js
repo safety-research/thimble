@@ -410,6 +410,12 @@
     while (d < dom.length) out.push(dom[d++])
     return out
   }
+  // whether a row on the page is the list's with this box (null for a list with none): no other list's box around it
+  // inside that box
+  function ownRow(row, box, boxes) {
+    for (var e = row.parentElement; e && e !== box; e = e.parentElement) if (boxes.indexOf(e) >= 0) return false
+    return true
+  }
   // what of a result is a match in the page's text: the result itself, a kept record's first match, or null (a row, or a
   // kept record whose words do not show)
   function target(m) {
@@ -1100,12 +1106,15 @@
     var all = []
     var cur = null
     var cm = this.matches[this.at] || null
-    // each list's rows on the page: their matches in order, the k-th of a row its k-th match in the list's rows
+    // each list's rows on the page: their matches in order, the k-th of a row its k-th match in the list's rows; a row in
+    // another list's box is that list's
+    var boxes = this.boxes()
     for (var p = 0; p < this.lists.length && this.needle; p++) {
       var list = this.lists[p]
       var host = list.box || (this.within && ctl.el(this.within)) || document.body
       var rows = host.querySelectorAll('[data-thimble-row]')
       for (var i = 0; i < rows.length; i++) {
+        if (!ownRow(rows[i], list.box, boxes)) continue
         var row = Number(rows[i].getAttribute('data-thimble-row'))
         var mine = cm && cm.row === row && cm.box === list.box
         var rs = runs(rows[i])
