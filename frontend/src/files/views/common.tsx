@@ -2,7 +2,6 @@
 // ref targets and the scroll-and-highlight hook. Rows carry `data-anchor="<path>#L<n>"` and the class `reader-card`;
 // a marked text carries its own span anchor (`<path>#L<n>.b<k>:c<a>-<b>`), so ⌘ picks records and spans alike.
 import { useContext, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from 'react'
-import { Button } from '../../components/Button'
 import { Icon } from '../../components/Icon'
 import { Tipped } from '../../components/Tooltip'
 import { findQuote } from '../../lib/quoteFind'
@@ -443,8 +442,9 @@ export function BlockEl({ block, path, line, index, target, hit, className, from
 
 export const COLLAPSE_LINES = 6
 
-/** A block folded to COLLAPSE_LINES lines while it is longer, with Expand and Collapse. It opens on UNFOLD_EVENT, which
- * the reader's find sends when its current match is inside. */
+/** A block folded to COLLAPSE_LINES lines while it is longer, with Show more under its cut text and Show less in the
+ * same place once it is open. It opens on UNFOLD_EVENT, which the reader's find sends when its current match is
+ * inside. */
 export function Collapsible({ lines, forced, children }: { lines: number; forced?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
@@ -461,10 +461,9 @@ export function Collapsible({ lines, forced, children }: { lines: number; forced
     <div ref={box} className={'reader-collapse' + (expanded ? '' : ' reader-collapsed')}>
       {children}
       {long && (
-        <Button size="sm" className="reader-expand" onClick={() => setOpen((o) => !o)}>
-          {expanded ? 'Collapse' : 'Expand'}
-          {!expanded && <span className="dim">{lines} lines</span>}
-        </Button>
+        <button type="button" className="reader-more" aria-expanded={expanded} onClick={() => setOpen((o) => !o)}>
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
       )}
     </div>
   )

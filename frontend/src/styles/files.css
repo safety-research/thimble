@@ -2388,7 +2388,8 @@
   color: var(--text-secondary);
 }
 .reader-fold-line:focus-visible,
-.reader-fold-head:focus-visible {
+.reader-fold-head:focus-visible,
+.reader-more:focus-visible {
   outline: none;
   border-radius: var(--radius-hl);
   box-shadow: 0 0 0 1.5px var(--accent);
@@ -2614,18 +2615,31 @@
   position: absolute;
   left: 2px;
   right: 0;
-  bottom: 26px;
+  bottom: 22px;
   height: 20px;
   background: linear-gradient(transparent, var(--bg-sunken));
   pointer-events: none;
 }
-.reader-expand {
-  margin: 2px 0;
-  color: var(--text-tertiary);
+/* Show more under a long block's cut text, Show less in the same place once it is open: quiet text, as under a
+   comment's statement (report.css .wu-cm-more) */
+.reader-more {
+  display: block;
+  height: 18px;
+  min-height: 0;
+  margin: 2px 0 0 -2px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-secondary);
+  font: 500 var(--text-xs) / 18px var(--font-body);
 }
-.reader-expand .dim {
-  margin-left: 4px;
-  font-size: var(--text-mono-sm);
+.reader-more:hover {
+  background: none;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
 }
 /* -------- an agent transcript (views/transcript AgentTranscript): the tool name in the head, the cleaned/raw toggle on
    a tool result -------- */

@@ -497,6 +497,39 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* the head of a turn that folds: a click on it, or Enter, opens or folds the turn, and the chevron at its start turns
+   down while it is open (files.css .reader-fold-head) */
+.thimble-turn-toggle {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.thimble-turn-toggle:hover {
+  color: var(--text-secondary);
+}
+.thimble-turn-caret {
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: -2px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--text-placeholder);
+}
+.thimble-turn-toggle[aria-expanded='true'] .thimble-turn-caret {
+  transform: rotate(90deg);
+}
+.thimble-turn-toggle:hover .thimble-turn-caret {
+  color: var(--text-secondary);
+}
 .thimble-turn-tool {
   color: var(--text-secondary);
 }
@@ -551,28 +584,41 @@
   position: absolute;
   left: 2px;
   right: 0;
-  bottom: 26px;
+  bottom: 22px;
   height: 20px;
   background: linear-gradient(transparent, var(--bg-sunken));
   pointer-events: none;
 }
-.thimble-turn-expand.btn {
-  margin: 2px 0;
-  color: var(--text-tertiary);
+/* Show more under a long block's cut text, Show less in the same place once it is open: quiet text, as under a
+   comment's statement (report.css .wu-cm-more) */
+.thimble-turn-more {
+  display: block;
+  height: 18px;
+  margin: 2px 0 0 -2px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-secondary);
+  font: 500 var(--text-xs) / 18px var(--font-body);
+  cursor: pointer;
 }
-.thimble-turn-dim {
-  margin-left: 4px;
-  font-size: var(--text-mono-sm);
+.thimble-turn-more:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
 }
-/* a folded turn's one line: the whole row, its overflow cut; a tool call reads in mono */
+.thimble-turn-toggle:focus-visible,
+.thimble-turn-more:focus-visible {
+  outline: none;
+  border-radius: var(--radius-hl);
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+/* a folded turn's one line: the whole row, its overflow cut; a click on it opens the turn; a tool call reads in mono */
 .thimble-turn-line {
   display: block;
-  width: 100%;
-  margin: 0;
-  padding: 0;
   overflow: hidden;
-  border: 0;
-  background: none;
   color: var(--text-secondary);
   font: 400 var(--text-ui-sm) / 1.6 var(--font-body);
   text-align: left;
@@ -587,10 +633,6 @@
 }
 .thimble-turn-line:hover {
   color: var(--text-primary);
-}
-.thimble-turn-line::before {
-  content: '▸ ';
-  color: var(--text-placeholder);
 }
 .thimble-turn-empty {
   color: var(--text-tertiary);
