@@ -45,6 +45,8 @@
   var ICONS = {
     comment: '<path d="M2.5 3h11v7.5H7l-3 2.5v-2.5H2.5z"/>',
     commit: '<circle cx="8" cy="8" r="2.5"/><path d="M1 8h4.5M10.5 8H15"/>',
+    pull: '<circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><circle cx="12" cy="12.5" r="1.6"/><path d="M12 10.9V6.5a2 2 0 0 0-2-2H7.5M9 3L7.5 4.5 9 6"/>',
+    issue: '<circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/>',
     merge: '<circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><circle cx="12" cy="8" r="1.6"/><path d="M4 5.1c0 2.2 2.3 2.9 6.4 2.9"/>',
     close: '<circle cx="8" cy="8" r="6"/><path d="M5.6 5.6l4.8 4.8"/>',
     reopen: '<path d="M12.6 7.2A4.7 4.7 0 1 0 11.4 11"/><path d="M13 3.5v3.7H9.3"/>',

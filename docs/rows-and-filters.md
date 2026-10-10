@@ -349,8 +349,8 @@ for mail), with `mentions` as `thimble.text` takes them. One author's messages t
 minutes, with the same parent, share one head, each still its own record; a date line opens each day. A message with a
 `parent` is drawn under its parent's group, one level in, and a reply to a reply at that level too, as boards and forges
 draw threads. `kind: 'event'` is one line, an icon in the ink, the author, what they did (`said`) and the time at the
-right, as a forge's timeline draws it; `icon` is one of `comment`, `commit`, `merge`, `close`, `reopen`, `approve`,
-`changes`, `edit`, `delete` and `mail`.
+right, as a forge's timeline draws it; `icon` is one of `comment`, `commit`, `pull`, `issue`, `merge`, `close`,
+`reopen`, `approve`, `changes`, `edit`, `delete` and `mail`.
 
 ```js
 const side = thimble.side({ mount: '#body' })

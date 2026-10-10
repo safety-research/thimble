@@ -1042,6 +1042,17 @@ describe('the messages', () => {
     expect(doc().querySelector('[data-anchor="l#4"]')!.getAttribute('data-anchor-text')).toBe('Branch deleted')
   })
 
+  test("an event's icon: a forge's pull request and issue opened each its own drawing, an icon the kit lacks a dot", async () => {
+    await load('<div id="c"></div>')
+    const w = win()
+    w.eval('window.conv = thimble.messages({ mount: "#c" })')
+    w.conv.draw(['pull', 'issue', 'commit', 'nonesuch'].map((icon, i) => ({ ref: 'e#' + i, t: T + i * 600, author: 'ana', kind: 'event', icon, said: 'did ' + icon })))
+    const drawing = (i: number) => doc().querySelector(`[data-anchor="e#${i}"] .thimble-msg-ico`)!.innerHTML
+    const all = [0, 1, 2, 3].map(drawing)
+    expect(new Set(all).size).toBe(4)
+    expect(all[3]).toBe('<circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"></circle>')
+  })
+
   test('a pick marks the message chosen, kept when drawn again; ↑ and ↓ go to the message above or below; mentions reach thimble.text', async () => {
     await load('<div id="c"></div>')
     const w = win()
