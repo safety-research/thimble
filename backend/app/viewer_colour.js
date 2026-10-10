@@ -2889,6 +2889,8 @@
     var H = loupeHeight(L.one ? 1 : L.n)
     var right = Math.max(0, document.documentElement.clientWidth - g.left)
     var top = Math.max(g.lo, Math.min(g.hi - H, y - H / 2))
+    // a loupe taller than the part of the strip that shows stays in the frame
+    top = Math.max(LOUPE_INSET, Math.min(innerHeight - LOUPE_INSET - H, top))
     L.mid = y
     var at = [right, top, w, L.one].join()
     if (at === L.place) return
