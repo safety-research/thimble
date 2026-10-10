@@ -1,5 +1,6 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { build, context, type BuildOptions } from 'esbuild'
 
 // the config runs under node; this is the one node global it reads
 declare const process: { env: Record<string, string | undefined> }
@@ -29,8 +30,46 @@ export function ownOriginToTarget(req: ProxyReq, incoming: Incoming, target: str
 
 const target = `http://127.0.0.1:${backend}`
 
+/** The canvas's chart drawing as the one script a view's page inlines for the view kit's thimble.chart (src/lib/kitChart,
+ * backend views.KIT_CHART_JS): written beside the app as kit/chart.js on every build, so a view's charts and the
+ * canvas's are drawn by the same code. Under the dev server it is written into the build's folder as it starts and again
+ * on every change to what it bundles, so a view's charts follow the chart style there too. */
+export function kitChart(): Plugin {
+  let root = '.'
+  let outDir = 'dist'
+  const options = (): BuildOptions => ({
+    entryPoints: [`${root}/src/lib/kitChart.ts`],
+    bundle: true,
+    format: 'iife',
+    platform: 'browser',
+    target: 'es2020',
+    minify: true,
+    legalComments: 'none',
+    logLevel: 'error',
+  })
+  return {
+    name: 'thimble-kit-chart',
+    configResolved(config) {
+      root = config.root
+      outDir = config.build.outDir.startsWith('/') ? config.build.outDir : `${root}/${config.build.outDir}`
+    },
+    async generateBundle() {
+      const out = await build({ ...options(), write: false })
+      this.emitFile({ type: 'asset', fileName: 'kit/chart.js', source: out.outputFiles[0].text })
+    },
+    configureServer(server) {
+      context({ ...options(), outfile: `${outDir}/kit/chart.js`, write: true })
+        .then(async (ctx) => {
+          await ctx.watch()
+          server.httpServer?.once('close', () => void ctx.dispose())
+        })
+        .catch((e: Error) => server.config.logger.warn(`kit/chart.js, the view kit's chart drawing, was not written: ${e.message}`))
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), kitChart()],
   cacheDir,
   server: {
     port: 5300,

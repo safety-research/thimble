@@ -1,6 +1,7 @@
-/* the view kit's row controls, side panel and transcript (viewer_controls.js, viewer_side.js, viewer_transcript.js),
-   which views.frame_document puts after viewer_kit.css and before view.html's own styles, in the theme's tokens
-   (frontend/src/lib/frame.ts VIEW_TOKENS). A page lays them out but does not restyle them (views.own_parts).
+/* the view kit's row controls, side panel, transcript, record viewer and charts (viewer_controls.js, viewer_side.js,
+   viewer_transcript.js, viewer_record.js, viewer_chart.js), which views.frame_document puts after viewer_kit.css and
+   before view.html's own styles, in the theme's tokens (frontend/src/lib/frame.ts VIEW_TOKENS). A page lays them out
+   but does not restyle them (views.own_parts).
      .thimble-filter-*      Filter by in the top row: its trigger (Color by's look) and its values as toggles, a box
                             ticked while the value shows, no colour
      .thimble-rows-*        Rows in the top row: its trigger
@@ -10,7 +11,11 @@
      .thimble-divider       the bar between the overview and the detail list
      .thimble-side-*        the side panel at the list's right, its edge a drag resizes
      .thimble-transcript-*, a transcript's turns, as the File browser's Transcript mode draws them (files.css .reader-*)
-     .thimble-turn-* */
+     .thimble-turn-*
+     .thimble-record-*      a record's fields as a tree under its citation: a key and a value per row, a nested value
+                            folded behind its key, a long string folded with Show more
+     .thimble-chart-*       a chart in the canvas's theme (the drawing's own look is the chart style's, not CSS), and
+                            the line in its place when it draws none */
 
 /* -------- Filter by and Rows in the top row -------- */
 .thimble-filter-mount {
@@ -586,4 +591,188 @@
   100% {
     opacity: 0;
   }
+}
+
+/* -------- a record's fields as a tree (thimble.record): its citation, then a row per field, each level a grid of its
+   own so its values line up; a nested value under its key, inset past a hairline guide -------- */
+.thimble-record {
+  min-width: 0;
+  color: var(--text-primary);
+  font: 400 var(--text-ui-sm) / 1.55 var(--font-body);
+}
+.thimble-record-cite {
+  display: flex;
+  margin: 0 0 8px;
+}
+.thimble-record-tree,
+.thimble-record-kids {
+  display: grid;
+  grid-template-columns: fit-content(40%) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 3px 12px;
+}
+.thimble-record-tree.is-one {
+  display: block;
+}
+.thimble-record-kids {
+  grid-column: 1 / -1;
+  margin: 0 0 2px 5px;
+  padding-left: 9px;
+  border-left: 1px solid var(--border-hairline);
+}
+.thimble-record-row {
+  display: contents;
+}
+/* a key: mono, quiet, after its caret or the caret's room, so every key at a level starts at one edge */
+.thimble-record-key {
+  display: flex;
+  align-items: baseline;
+  justify-self: start;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+button.thimble-record-key {
+  cursor: pointer;
+}
+button.thimble-record-key:hover {
+  color: var(--text-primary);
+}
+button.thimble-record-key:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-chip);
+  color: var(--text-primary);
+}
+.thimble-record-caret,
+.thimble-record-gap {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  align-self: center;
+}
+.thimble-record-caret {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.12s ease;
+}
+.thimble-record-row.is-open .thimble-record-caret {
+  transform: rotate(90deg);
+}
+.thimble-record-val {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.thimble-record-val.is-num,
+.thimble-record-val.is-bool,
+.thimble-record-val.is-null,
+.thimble-record-val.is-empty {
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.thimble-record-val.is-bool {
+  color: var(--text-secondary);
+}
+.thimble-record-val.is-null,
+.thimble-record-val.is-empty {
+  color: var(--text-tertiary);
+}
+/* a folded value's one line: its size and its first fields or items */
+.thimble-record-sum {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* a long string folded to six lines, fading out above Show more */
+.thimble-record-text {
+  display: block;
+}
+.thimble-record-text.is-folded {
+  max-height: calc(6 * 1.55em);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 65%, transparent);
+  mask-image: linear-gradient(to bottom, #000 65%, transparent);
+}
+.thimble-record-more.btn {
+  margin: 2px 0 0 -6px;
+  color: var(--text-tertiary);
+}
+.thimble-record-dim {
+  margin-left: 4px;
+  font-size: var(--text-mono-sm);
+}
+/* the words found, as Files' find marks them */
+.thimble-record-hit {
+  border-radius: var(--radius-hl, 3px);
+  background: var(--hl-bg-strong, var(--hl-bg));
+  color: inherit;
+}
+
+/* -------- a chart (thimble.chart): Vega's drawing in the chart style, or the line in its place -------- */
+.thimble-chart {
+  min-width: 0;
+}
+/* as wide as its box; a chart whose columns cannot all be named at that width scrolls inside it, as on a card */
+.thimble-chart-plot {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  user-select: none;
+}
+.thimble-chart-plot [tabindex]:focus,
+.thimble-chart-plot svg:focus,
+.thimble-chart-plot canvas:focus,
+.thimble-chart-plot .vega-embed:focus {
+  outline: none;
+}
+.thimble-chart[data-pick] .role-mark > * {
+  cursor: pointer;
+}
+.thimble-chart-note {
+  box-sizing: border-box;
+  padding: 12px 0;
+  color: var(--text-tertiary);
+  font: 400 var(--text-ui-sm) / 1.5 var(--font-body);
+}
+.thimble-chart-note.is-error {
+  color: var(--status-negative);
+  font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Vega's hover tip as the canvas draws it (frontend/src/styles/outputs.css): vega-tooltip prepends its own sheet to the
+   head, so these rules win by order */
+#vg-tooltip-element,
+#vg-tooltip-element.dark-theme {
+  padding: 6px 8px;
+  border: var(--overlay-edge, 1px solid var(--border-subtle));
+  border-radius: var(--radius-card);
+  background: var(--overlay-bg, var(--surface-card));
+  box-shadow: var(--shadow-popover, 0 0 0 1px rgba(var(--ink-rgb), 0.09), 0 10px 28px -18px rgba(var(--ink-rgb), 0.28));
+  color: var(--text-primary);
+  font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+#vg-tooltip-element h2 {
+  margin: 0 0 4px;
+  font: 500 var(--text-mono-sm) / 1.5 var(--font-mono);
+}
+#vg-tooltip-element table tr td.key,
+#vg-tooltip-element.dark-theme td.key {
+  color: var(--text-tertiary);
 }
