@@ -501,7 +501,7 @@ def register(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] | No
                    if isinstance(r, dict) and r.get("kind") == "start" and r.get("state") == "claimed" and not r.get("agent")
                    and (r.get("input") or {}).get("subagent_type") == agent_type]
         if claimed:
-            rid, req = max(claimed, key=lambda x: float(x[1].get("claimed_at") or 0))
+            rid, req = _claim_of(hook, agent_id, claimed)
             entry = {"key": req.get("key"), "type": agent_type, "role": role, "request": rid,
                      "parent": req.get("caller"), "chat": req.get("chat"), "run": 0,
                      "values": req.get("values") or {}, "route": req.get("route"),
@@ -528,6 +528,43 @@ def register(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] | No
         state["nested"] = [n for n in state.get("nested") or [] if n is not nested[-1]]
     agents[agent_id] = entry
     return entry
+
+
+CLAIM_WINDOW_S = 300.0  # a claimed start older than this that no agent took up is passed over (its agent never started)
+
+
+def spawn_call(hook: dict[str, Any], agent_id: str) -> str | None:
+    """The tool_use id of the Agent call that spawned `agent_id`: the `toolUseId` of the meta.json Claude Code writes
+    beside its transcript (<session>/subagents/agent-<id>.meta.json, the session's transcript being the hook's
+    `transcript_path`) as it spawns the agent; None when it cannot be read."""
+    path = str(hook.get("transcript_path") or "")
+    if not path.endswith(".jsonl") or not re.fullmatch(r"[A-Za-z0-9_-]+", agent_id):
+        return None
+    meta = Path(path[:-len(".jsonl")]) / "subagents" / f"agent-{agent_id}.meta.json"
+    try:
+        got = json.loads(meta.read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    call = got.get("toolUseId") if isinstance(got, dict) else None
+    return str(call) if call else None
+
+
+def _claim_of(hook: dict[str, Any], agent_id: str, claimed: list[tuple[str, dict[str, Any]]]) -> tuple[str, dict]:
+    """The claimed start a new agent of one of thimble's roles takes up, among those of its type no agent took up: the
+    one its own Agent call claimed (spawn_call), when its meta.json is there already; else the oldest recent claim, as
+    calls are claimed in order; else the latest. Main can start two agents of one type in one turn, such as two views'
+    builders, and Claude Code may spawn them together and in either order, writing their meta.json after this hook, so
+    this can still give each the other's start: the mirror puts that right once main's call names its agent
+    (subagents.rebind; views round 5, where two builds took each other's view)."""
+    call = spawn_call(hook, agent_id)
+    mine = [x for x in claimed if call and x[1].get("claimed_by") == call]
+    if mine:
+        return mine[0]
+    t = now()
+    recent = [x for x in claimed if t - float(x[1].get("claimed_at") or 0) <= CLAIM_WINDOW_S]
+    if recent:
+        return min(recent, key=lambda x: float(x[1].get("claimed_at") or 0))
+    return max(claimed, key=lambda x: float(x[1].get("claimed_at") or 0))
 
 
 def _inherit(state: dict[str, Any], agent_id: str, entry: dict[str, Any], parent: str) -> None:

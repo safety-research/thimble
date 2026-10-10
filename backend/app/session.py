@@ -1618,6 +1618,12 @@ def _thimble_result(lv: Live, tool_use_id: str, call: dict, content: Any, is_err
         kind = _refused_kind(text)
         m = AUTO_MODE_RE.search(text) if kind == subagents.AUTO_MODE else None
         subagents.refuse(lv.c, rid, m.group(1).strip() if m else text.strip(), kind)
+        return
+    # the agent this call started takes up the start this call claimed (views round 5: two builds of one turn)
+    m = AGENT_ID_RE.search(text) if name in AGENT_TOOLS else None
+    if m:
+        with contextlib.suppress(Exception):
+            subagents.rebind(lv.c, m.group(1), tool_use_id)
 
 
 def _sub_start_result(lv: Live, tool_use_id: str, inp: dict, content: Any, is_error: bool) -> None:
