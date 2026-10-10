@@ -15,10 +15,13 @@
 // A list that draws only the rows in view, such as thimble.table, gives the search every row's text instead:
 // search.rows({texts, refs, go, box}), each row's text as drawn ('\n' between parts drawn apart, such as cells), go(i) to
 // bring row i into view, and the box that scrolls; the rows on the page carry data-thimble-row="<i>". A part that folds
-// text away, such as thimble.diff, keeps it in the page in an element with data-thimble-fold, hidden: the search counts
-// what it holds, ticks it where the fold stands, and sends the element a `thimble-unfold` event when it goes to a match
-// inside it, so the part opens it. Reset empties the box. The search hides nothing: search.has(text) tells a page that
-// wants to filter by it.
+// text away, such as thimble.diff, thimble.transcript and thimble.record, keeps it in the page in an element with
+// data-thimble-fold, hidden: the search counts what it holds, ticks it where the fold stands, and sends the element a
+// `thimble-unfold` event when it goes to a match inside it, so the part opens it. A fold may hold another: the event goes
+// to the innermost one folded around the match, and again while the match stays folded, so a part may open one level at
+// a time. A match that a box cuts from view by its size (its overflow hidden, such as a long block whose height is cut to
+// six lines) sends that box the same event. Reset empties the box. The search hides nothing: search.has(text) tells a
+// page that wants to filter by it.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -41,6 +44,7 @@
   // the elements text runs on inside, so a phrase across them is found; any other element ends a run
   var INLINE = { SPAN: 1, B: 1, I: 1, EM: 1, STRONG: 1, A: 1, CODE: 1, MARK: 1, SMALL: 1, SUB: 1, SUP: 1, S: 1, DEL: 1, INS: 1, U: 1, TIME: 1, ABBR: 1, Q: 1, CITE: 1, KBD: 1, VAR: 1, SAMP: 1, LABEL: 1, FONT: 1, BDI: 1, BDO: 1, DFN: 1, WBR: 1 }
   var FOLD = 'data-thimble-fold'
+  var UNFOLD_MAX = 32 // the times going to a match sends `thimble-unfold` at most, one fold level each
   var ICON = {
     search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
     up: '<path d="M6 15l6-6 6 6"/>',
@@ -72,15 +76,28 @@
     }
     return out
   }
+  // whether an element is left out with its text: hidden, or not displayed, unless it is a fold. Its style alone tells,
+  // not its boxes, which in a list that draws its rows as they come into view (content-visibility) would lay out
+  // every row
   function hidden(el) {
-    if (el.hidden && !el.hasAttribute(FOLD)) return true
-    if (el.getClientRects && el.getClientRects().length) return false
-    return getComputedStyle(el).display === 'none' && !el.hasAttribute(FOLD)
+    if (el.hasAttribute(FOLD)) return false
+    return el.hidden || getComputedStyle(el).display === 'none'
+  }
+  // the fold a text is in: the innermost element with data-thimble-fold around it that is hidden, else the innermost one,
+  // else null; a fold may hold another, such as a folded turn holding a long block's folded lines
+  function foldOf(el) {
+    var first = null
+    for (var e = el; e && e.nodeType === 1; e = e.parentElement)
+      if (e.hasAttribute(FOLD)) {
+        if (e.hidden) return e
+        if (!first) first = e
+      }
+    return first
   }
   // The runs of text under `root` in document order, each the text nodes that run on inside one element (through inline
-  // elements such as a span or a link, so a phrase across them is found): {nodes, text, block, fold}, `fold` the
-  // element with data-thimble-fold around it, if any. The kit's controls and hidden elements (a fold's text apart) are
-  // left out.
+  // elements such as a span or a link, so a phrase across them is found): {nodes, folds, folded, text, block}, `folds`
+  // each node's fold as foldOf gives it, `folded` whether any has one. The kit's controls and hidden elements (a fold's
+  // text apart) are left out.
   function runs(root) {
     var out = []
     if (!root) return out
@@ -92,19 +109,66 @@
       },
     })
     var last = null
+    var parent = null
+    var fold = null
     for (var n = walker.nextNode(); n; n = walker.nextNode()) {
       var v = n.nodeValue
       if (!v) continue
-      var block = n.parentElement
+      if (n.parentElement !== parent) {
+        parent = n.parentElement
+        fold = foldOf(parent)
+      }
+      var block = parent
       while (block && block !== root && INLINE[block.tagName]) block = block.parentElement
       if (!last || last.block !== block) {
-        last = { nodes: [], text: '', block: block, fold: block && block.closest ? block.closest('[' + FOLD + ']') : null }
+        last = { nodes: [], folds: [], folded: false, text: '', block: block }
         out.push(last)
       }
       last.nodes.push(n)
+      last.folds.push(fold)
+      if (fold) last.folded = true
       last.text += v
     }
     return out
+  }
+  // the fold a match from character `a` to `b` of `run` is in: that of the first text it covers in a hidden fold, so a
+  // phrase across a fold's edge opens the fold, else that of its first text, else null
+  function foldAt(run, a, b) {
+    if (!run.folded) return null
+    var first
+    for (var i = 0, at = 0; i < run.nodes.length && at < b; i++) {
+      var len = run.nodes[i].nodeValue.length
+      if (at + len > a) {
+        var f = run.folds[i]
+        if (f && f.hidden) return f
+        if (first === undefined) first = f
+      }
+      at += len
+    }
+    return first || null
+  }
+  // `el`, or where a list leaves it unlaid out of view (content-visibility: auto) the nearest element around it that is
+  // laid out; `el` itself where the browser cannot tell
+  function laidOut(el) {
+    if (!el || typeof el.checkVisibility !== 'function' || el.checkVisibility({ contentVisibilityAuto: true }) || !el.checkVisibility()) return el
+    for (var e = el.parentElement; e; e = e.parentElement) if (e.checkVisibility({ contentVisibilityAuto: true })) return e
+    return el
+  }
+  // The box that cuts a range from view by its size, such as a long block whose height is cut to six lines: the innermost
+  // element around it whose overflow is hidden or clipped and whose box the range runs past, inside the box it scrolls
+  // in; null where none does
+  function clipOf(r) {
+    var rect = r && typeof r.getBoundingClientRect === 'function' ? r.getBoundingClientRect() : null
+    if (!rect || (!rect.width && !rect.height)) return null
+    var n = r.startContainer
+    for (var e = n.nodeType === 1 ? n : n.parentElement; e && e !== document.body && e !== document.documentElement; e = e.parentElement) {
+      var cs = getComputedStyle(e)
+      if (/(auto|scroll|overlay)/.test(cs.overflowY)) return null
+      if (!/(hidden|clip)/.test(cs.overflowY + ' ' + cs.overflowX)) continue
+      var c = e.getBoundingClientRect()
+      if (rect.top < c.top - 1 || rect.bottom > c.bottom + 1 || rect.left < c.left - 1 || rect.right > c.right + 1) return e
+    }
+    return null
   }
   // a range over `run` from character `a` to `b`
   function rangeIn(run, a, b) {
@@ -355,7 +419,7 @@
           for (var h = 0; h < hits.length; h++) {
             var kk = perRec.get(rec) || 0
             perRec.set(rec, kk + 1)
-            out.push({ run: run, a: hits[h][0], b: hits[h][1], fold: run.fold, rec: rec, k: kk })
+            out.push({ run: run, a: hits[h][0], b: hits[h][1], fold: foldAt(run, hits[h][0], hits[h][1]), rec: rec, k: kk })
           }
         }
       }
@@ -389,20 +453,44 @@
     var el = page ? document.scrollingElement || document.documentElement : box
     var H = Math.max(1, el.scrollHeight)
     var top0 = page ? -window.scrollY : el.getBoundingClientRect().top + el.clientTop - el.scrollTop
+    var places = new Map() // an element that stands for matches, measured once for all of them
     for (var j = 0; j < ms.length; j++) {
-      var r = this.rectOf(ms[j])
+      var r = this.rectOf(ms[j], places)
       out.push(r ? [(r.top - top0) / H, (r.bottom - top0) / H] : [0, 0])
     }
     return out
   }
-  // where a match stands on the screen: its range's box, or for one in a folded fold the fold's place
-  Search.prototype.rectOf = function (m) {
-    if (m.fold && m.fold.hidden) {
-      var at = m.fold.previousElementSibling || m.fold.parentElement
-      return at ? at.getBoundingClientRect() : null
+  // Where a match stands on the screen: its range's box, within its block's, so that one its block cuts from view by its
+  // size (a long block's height cut to six lines) stands at the block's edge; for one in a folded fold the place of the
+  // outermost fold folded around it, the element before it or, in a line of text, its block; and for one in a row a list
+  // leaves unlaid out of view (content-visibility: auto), the row's box, since measuring the text would lay the row out,
+  // one row at a time. `places` keeps each element measured for the next match.
+  Search.prototype.rectOf = function (m, places) {
+    var place = function (el) {
+      if (places && places.has(el)) return places.get(el)
+      var p = el.getBoundingClientRect()
+      if (places) places.set(el, p)
+      return p
     }
-    if (m.range === undefined) m.range = m.run ? rangeIn(m.run, m.a, m.b) : null
-    return m.range && typeof m.range.getBoundingClientRect === 'function' ? m.range.getBoundingClientRect() : null
+    var at
+    if (m.fold && m.fold.hidden) {
+      var f = m.fold
+      for (var up = f.parentElement; up; up = up.parentElement) if (up.hidden && up.hasAttribute(FOLD)) f = up
+      // a fold in a line of text, such as a long block's lines past the sixth, stands in its block
+      at = laidOut(INLINE[f.tagName] ? f.parentElement : f.previousElementSibling || f.parentElement)
+    } else {
+      if (!m.run) return null
+      at = laidOut(m.run.block)
+      if (at === m.run.block) {
+        if (m.range === undefined) m.range = rangeIn(m.run, m.a, m.b)
+        var r = m.range && typeof m.range.getBoundingClientRect === 'function' ? m.range.getBoundingClientRect() : null
+        var b = r && at ? place(at) : null
+        if (!b || (!b.width && !b.height) || (r.top >= b.top && r.bottom <= b.bottom)) return r
+        var top = Math.min(Math.max(r.top, b.top), b.bottom)
+        return { top: top, bottom: Math.max(top, Math.min(r.bottom, b.bottom)) }
+      }
+    }
+    return at ? place(at) : null
   }
   // the first match at or after the top of what the list shows, as Files' find; the first of all past the last
   Search.prototype.firstFrom = function (ticks) {
@@ -516,14 +604,37 @@
     this.at = k
     var m = this.matches[k]
     this.key = [m.rec, m.k]
-    // a match in a fold: the part that folded it opens it, and the matches are found again in what it drew
-    if (m.fold && m.fold.hidden) {
-      m.fold.dispatchEvent(new CustomEvent('thimble-unfold', { bubbles: true }))
+    // a match in a fold, or cut from view by its box's size: the part that folded it opens it, and the matches are found
+    // again in what it drew; a part that opens one level at a time, such as a record's nested values, is sent the event
+    // again while the match stays folded
+    var fold = this.closed(m)
+    for (var tries = 0; fold && tries < UNFOLD_MAX; tries++) {
+      fold.dispatchEvent(new CustomEvent('thimble-unfold', { bubbles: true }))
+      // the page drew nothing again: no part opens it
+      if (!this.changed()) break
       this.find(false)
-      for (var i = 0; i < this.matches.length; i++) if (this.matches[i].rec === this.key[0] && this.matches[i].k === this.key[1]) this.at = i
-      this.paint()
+      m = this.matches[this.at]
+      // the match not found again, or the same fold around it: the part did not open it
+      if (!m || m.rec !== this.key[0] || m.k !== this.key[1]) break
+      var next = this.closed(m)
+      if (next === fold) break
+      fold = next
     }
     this.show(true)
+  }
+  // what keeps a match from view: the fold folded around it, else the box that cuts it from view by its size; null for
+  // neither
+  Search.prototype.closed = function (m) {
+    if (!m || !m.run) return null
+    if (m.fold && m.fold.hidden) return m.fold
+    if (m.range === undefined) m.range = rangeIn(m.run, m.a, m.b)
+    return clipOf(m.range)
+  }
+  // whether the page changed what the search finds since the observer last told, its changes taken from the observer
+  Search.prototype.changed = function () {
+    var rs = this.observer.takeRecords()
+    for (var i = 0; i < rs.length; i++) if (this.counts(rs[i])) return true
+    return false
   }
   // the current match brought into view and drawn as current
   Search.prototype.show = function (paint) {

@@ -2,7 +2,8 @@
 // window of their own with the rest of the kit as views.frame_document loads it. Each works alone on plain records, with
 // no Color by, time range or side panel: the search finds text case ignored across a record's inline elements and never
 // in the kit's own controls, steps through the matches and wraps, finds in the rows a list gives it and in a fold it
-// opens, puts its ticks on the list's strip, and Reset empties it; the table draws only the rows near its view, sorts by a
+// opens (the words a transcript or a record folds away among them, kept in the page hidden), puts its ticks on the list's
+// strip, and Reset empties it; the table draws only the rows near its view, sorts by a
 // click on a column's head with the rows with no value last, hides what Filter by does not keep, gives Color by its bars
 // and the counts of every row, opens a row in the side panel and keeps its sort; the diff aligns the lines, marks the
 // words that changed, folds the unchanged stretches with Show more and Show less, and draws side by side or inline.
@@ -20,7 +21,7 @@ const script = (js: string) => `<script>${js.replace(/<\/script/gi, '<\\/script'
 const KIT =
   script(read('viewer_bridge.js')) +
   script(`window.__thimbleLabelOrder = ${read('label_order.json')}`) +
-  ['viewer_colour.js', 'viewer_controls.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_search.js', 'viewer_table.js', 'viewer_diff.js', 'viewer_range.js'].map((n) => script(read(n))).join('')
+  ['viewer_colour.js', 'viewer_controls.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_search.js', 'viewer_table.js', 'viewer_diff.js', 'viewer_record.js', 'viewer_range.js'].map((n) => script(read(n))).join('')
 
 type Msg = { type: string; [k: string]: unknown }
 let dom: JSDOM
@@ -182,6 +183,114 @@ describe('the search', () => {
     await type('more gale')
     expect(w.search.at).toBe(0)
     expect(w.opened).toBe(true)
+  })
+
+  test("a transcript keeps a folded turn's words and a long block's lines past the sixth in the page, hidden; going to a match there opens the turn, as a click does, then the block", async () => {
+    await load(`<div class="top"><span id="search"></span></div><div id="turns"></div>`)
+    const w = win()
+    w.TURNS = [
+      { ref: 's.jsonl#L1', speaker: 'lead', kind: 'tool', tool: 'Bash', input: 'grep -n . birds.txt', output: Array.from({ length: 12 }, (_, i) => (i === 8 ? 'osprey, near the dam' : `gull ${i + 1}`)).join('\n') },
+      { ref: 's.jsonl#L2', speaker: 'lead', kind: 'text', text: Array.from({ length: 20 }, (_, i) => (i === 14 ? 'a kestrel hovers' : `line ${i + 1}`)).join('\n') },
+    ]
+    w.eval(`
+      window.opened = []
+      window.tr = thimble.transcript({ mount: '#turns', onOpen: (t) => window.opened.push(t.ref) })
+      tr.draw(window.TURNS)
+      window.search = thimble.search({ mount: '#search', in: '#turns' })
+    `)
+    const tool = doc().querySelector('[data-anchor="s.jsonl#L1"]')!
+    const notes = doc().querySelector('[data-anchor="s.jsonl#L2"]')!
+    // the folded call: its one line is the page's wording, its call and what came back in a hidden fold
+    expect(tool.querySelector('.thimble-turn-line')!.hasAttribute('data-thimble-chrome')).toBe(true)
+    expect(tool.querySelector('.thimble-turn-call')).toBeNull()
+    const words = tool.querySelector<HTMLElement>('[data-thimble-fold]')!
+    expect(words.hidden).toBe(true)
+    expect([...words.children].map((c) => c.textContent)).toEqual(['Bash\ngrep -n . birds.txt', w.TURNS[0].output])
+    // the long block: its first six lines, then the rest in a hidden fold in the same block
+    const block = notes.querySelector('.thimble-turn-block')!
+    const rest = block.querySelector<HTMLElement>('[data-thimble-fold]')!
+    expect(rest.hidden).toBe(true)
+    expect(block.textContent!.slice(0, block.textContent!.length - rest.textContent!.length).split('\n')).toEqual(['line 1', 'line 2', 'line 3', 'line 4', 'line 5', 'line 6'])
+    expect(rest.textContent!.startsWith('\nline 7')).toBe(true)
+    // a word only in the output: counted; going to it opens the turn (onOpen told) and then its output's lines past the sixth
+    await type('osprey')
+    expect([w.search.count, w.search.at]).toEqual([1, 0])
+    expect(w.opened).toEqual(['s.jsonl#L1'])
+    const out = () => doc().querySelector('[data-anchor="s.jsonl#L1"] .thimble-turn-result')!
+    expect(out().querySelector<HTMLElement>('[data-thimble-fold]')!.hidden).toBe(false)
+    expect(out().nextElementSibling!.textContent).toBe('Show less')
+    // the word on line 15: counted, shown; Show less folds it again, still counted
+    await type('kestrel')
+    expect(w.search.count).toBe(1)
+    const more = () => doc().querySelector<HTMLElement>('[data-anchor="s.jsonl#L2"] .thimble-turn-more')!
+    const restNow = () => doc().querySelector<HTMLElement>('[data-anchor="s.jsonl#L2"] [data-thimble-fold]')!
+    expect([restNow().hidden, more().textContent]).toEqual([false, 'Show less'])
+    more().click()
+    await wait(60)
+    expect([restNow().hidden, more().textContent, w.search.count]).toEqual([true, 'Show more', 1])
+  })
+
+  test("a record keeps its folded values, a long string's rest and a long list's items past its first 100 in the page, hidden, to a cap; going to a match opens every level around it", async () => {
+    await load(`<div class="top"><span id="search"></span></div><div id="rec"></div>`)
+    const w = win()
+    w.REC = {
+      deep: { a: { b: { c: { d: 'a heron' } } } },
+      notes: Array.from({ length: 20 }, (_, i) => (i === 11 ? 'a plover' : `line ${i + 1}`)).join('\n'),
+      steps: Array.from({ length: 150 }, (_, i) => (i === 140 ? 'lapwing' : `step ${i}`)),
+      big: { a: { x: 'x'.repeat(150000), y: 'y'.repeat(60000) + ' curlew' } },
+    }
+    w.eval(`
+      thimble.record({ mount: '#rec', value: window.REC, ref: 'r.jsonl#L1' })
+      window.search = thimble.search({ mount: '#search', in: '#rec' })
+    `)
+    // a folded value's values, each on its own line (its keys are the tree's wording), a long string's text past its
+    // sixth line, a long list's items past its first 100
+    const fold = (sel: string) => doc().querySelector<HTMLElement>(sel)!
+    expect([fold('[data-fold-path="/deep/a"]').hidden, fold('[data-fold-path="/deep/a"]').hasAttribute('data-thimble-fold'), fold('[data-fold-path="/deep/a"]').textContent]).toEqual([true, true, 'a heron'])
+    expect([fold('[data-fold-long="/notes"]').hidden, fold('[data-fold-long="/notes"]').textContent!.startsWith('\nline 7')]).toEqual([true, true])
+    expect([fold('[data-fold-more="/steps"]').hidden, fold('[data-fold-more="/steps"]').textContent!.split('\n').slice(0, 2)]).toEqual([true, ['step 100', 'step 101']])
+    // the record's folds hold 200,000 characters at most: a word past them is not found
+    expect(fold('[data-fold-path="/big/a"]').textContent!.length).toBeLessThanOrEqual(200000)
+    await type('curlew')
+    expect(w.search.count).toBe(0)
+    // a word four levels under an open one: going to it opens each level in turn, until it shows
+    await type('heron')
+    expect([w.search.count, w.search.at]).toEqual([1, 0])
+    expect(doc().querySelector('[data-fold="/deep/a/b/c"]')!.getAttribute('aria-expanded')).toBe('true')
+    const hit = [...doc().querySelectorAll('#rec .thimble-record-val')].find((e) => e.textContent === 'a heron')
+    expect(hit && !hit.closest('[data-thimble-fold][hidden]')).toBe(true)
+    // the items past the first 100, and a long string's lines past the sixth
+    await type('lapwing')
+    expect([w.search.count, doc().querySelector('[data-more="/steps"]')]).toEqual([1, null])
+    await type('plover')
+    expect([w.search.count, fold('[data-fold-long="/notes"]').hidden, texts('[data-long="/notes"]')]).toEqual([1, false, ['Show less']])
+  })
+
+  test("a block cut to six lines by its height opens when the event is sent to the block itself, as the search sends it for a match the height cuts from view", async () => {
+    await load(`<div id="turns"></div><div id="rec"></div>`)
+    const w = win()
+    w.LONG = Array.from({ length: 9 }, (_, i) => `line ${i + 1}`).join('\n')
+    w.eval(`
+      window.tr = thimble.transcript({ mount: '#turns' })
+      tr.draw([{ ref: 's.jsonl#L1', speaker: 'lead', kind: 'text', text: window.LONG }])
+      thimble.record({ mount: '#rec', value: { notes: window.LONG }, ref: 'r.jsonl#L1' })
+    `)
+    const unfold = (sel: string) => doc().querySelector(sel)!.dispatchEvent(new w.CustomEvent('thimble-unfold', { bubbles: true }))
+    unfold('#turns .thimble-turn-block')
+    expect([doc().querySelector<HTMLElement>('#turns [data-thimble-fold]')!.hidden, texts('#turns .thimble-turn-more')]).toEqual([false, ['Show less']])
+    unfold('#rec .thimble-record-text')
+    expect([doc().querySelector<HTMLElement>('#rec [data-fold-long="/notes"]')!.hidden, texts('[data-long="/notes"]')]).toEqual([false, ['Show less']])
+  })
+
+  test("a quote a citation opens in folded text: its fold opens, as the search's match does, and the quote is found", async () => {
+    await load(`<div id="rec"></div>`)
+    const w = win()
+    w.eval(`thimble.record({ mount: '#rec', value: { deep: { a: { b: { c: 'the heron by the weir' } } } }, ref: 'r.jsonl#L1' })`)
+    expect(doc().querySelector('[data-fold="/deep/a"]')!.getAttribute('aria-expanded')).toBe('false')
+    w.dispatchEvent(new dom.window.MessageEvent('message', { data: { type: 'thimble:open', open: { ref: 'r.jsonl#L1' }, quote: { record: 'r.jsonl#L1', text: 'heron by the weir' } }, source: w.parent as any }))
+    await wait(150)
+    expect(of('quoted')).toEqual([{ type: 'thimble:quoted', found: true }])
+    expect(doc().querySelector('[data-fold="/deep/a/b"]')!.getAttribute('aria-expanded')).toBe('true')
   })
 
   test("Reset, in Color by's row, empties the box and tells the page once", async () => {
