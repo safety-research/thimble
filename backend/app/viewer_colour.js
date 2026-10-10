@@ -3191,15 +3191,23 @@
         if (given && typeof given === 'object') return given
         return control ? control.api : null
       },
+      // a record the page's Color by cannot read, such as a turn for a field whose value(i) takes a row's index, takes
+      // no bar; a Color by the part was given says why, as the view's error
       attr: function (record) {
         var c = b.colour()
-        return c && typeof c.attr === 'function' ? safe(function () { return String(c.attr(record) || '') }, '') : ''
+        if (!c || typeof c.attr !== 'function') return ''
+        try {
+          return String(c.attr(record) || '')
+        } catch (e) {
+          if (given) kit.report(e)
+          return ''
+        }
       },
       stamp: function (node, record) {
         stampAs(node, b.attr(record))
       },
-      // one part an element: a part made again in an element takes the place of the one before, and leaves none
-      // there with `colour: false`, so the one before never stamps its records again
+      // an element holds one part: a part made again in an element takes the place of the one before there, or with
+      // `colour: false` leaves none, so the one before never stamps its records again
       watch: function (node, fn) {
         if (!node) return
         var many = stampers.length >= STAMPERS_ROOM

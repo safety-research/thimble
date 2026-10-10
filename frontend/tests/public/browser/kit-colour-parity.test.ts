@@ -365,3 +365,36 @@ test("a part made again in its element takes the place of the one before; a turn
   assert.ok(strips[1]!.width < strips[0]!.width, 'the plain strip is narrower than the strip with a lane')
   await page.close()
 })
+
+test("a part whose records the page's Color by cannot read draws them with no bar and no error; one given that Color by reports it", async () => {
+  // the page colors its own list by each row's index (color.md's value(i)), which a turn, a record or a card is not
+  const doc = `<!doctype html><html><head><style>${TOKENS} body{margin:0;background:#fffdf8}</style>${KIT}</head><body>
+<span id="colour"></span><ul id="list"></ul><div id="tr"></div><div id="rec"></div><div id="cards"></div><div id="given"></div>
+<script>
+const ROWS = [{ kind: 'a', text: 'one' }, { kind: 'b', text: 'two' }]
+const colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', value: (i) => ROWS[i].kind }], onChange: () => {} })
+document.getElementById('list').innerHTML = ROWS.map((r, i) => '<li data-anchor="l#L' + (i + 1) + '"' + colour.attr(i) + '>' + r.text + '</li>').join('')
+const turns = (p) => ROWS.map((r, i) => ({ ref: p + '#L' + (i + 1), speaker: 'x', kind: 'text', text: r.text }))
+thimble.transcript({ mount: '#tr' }).draw(turns('t'))
+thimble.record({ mount: '#rec', value: ROWS[0], ref: 'r#L1' })
+document.getElementById('cards').innerHTML = thimble.recordCard({ ref: 'c#L1', record: ROWS[0], title: 'one' })
+thimble.transcript({ mount: '#given', colour }).draw(turns('g'))
+</script></body></html>`
+  const page = await browser.newPage({ viewport: { width: 600, height: 400 } })
+  await page.setContent('<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:580px;height:380px"></iframe></body></html>')
+  await page.evaluate(() => {
+    const w = window as unknown as { __errors: string[] }
+    w.__errors = []
+    window.addEventListener('message', (e) => e.data && e.data.type === 'thimble:error' && w.__errors.push(String(e.data.message)))
+  })
+  await page.evaluate((d) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = d), doc)
+  await page.waitForTimeout(300)
+  const f = page.frames().find((x) => x !== page.mainFrame())!
+  await f.waitForSelector('.thimble-colour-chip', { state: 'attached' })
+  await settle(page)
+  const got = await f.evaluate(() => [...document.querySelectorAll('[data-anchor]')].map((e) => [e.getAttribute('data-anchor'), e.getAttribute('data-colour')]))
+  assert.deepEqual(got, [['l#L1', 'a'], ['l#L2', 'b'], ['t#L1', null], ['t#L2', null], ['r#L1', null], ['c#L1', null], ['g#L1', null], ['g#L2', null]])
+  const errs = await errors(page)
+  assert.equal(errs.length, 2, `only the transcript given colour reports, once a turn: ${errs.join(' | ')}`)
+  await page.close()
+})
