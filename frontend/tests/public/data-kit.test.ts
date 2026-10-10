@@ -317,6 +317,66 @@ describe('the search', () => {
     expect(w.search.count).toBe(0)
     expect(w.changes).toEqual(['gale', ''])
   })
+
+  test("the page read once into an index, then only what changed read again: it finds what a search that reads the page afresh finds", async () => {
+    const rec = (i: number, text: string) => `<div class="rec" data-anchor="log.jsonl#L${i}"><b data-thimble-chrome>who ${i}</b> <span>${text}</span></div>`
+    await load(`<style>.gone{display:none}</style><div class="top"><span id="search"></span><span id="fresh"></span></div>
+<div id="list">${Array.from({ length: 6 }, (_, i) => rec(i + 1, i % 2 ? 'a gale at sea' : 'calm water')).join('')}</div>`)
+    const w = win()
+    // the elements each read starts from
+    w.eval(`
+      window.walks = []
+      const walker = document.createTreeWalker.bind(document)
+      document.createTreeWalker = (root, ...rest) => (window.walks.push(root), walker(root, ...rest))
+      window.search = thimble.search({ mount: '#search', in: '#list' })
+      window.fresh = thimble.search({ mount: '#fresh', in: '#list' })
+    `)
+    const list = doc().getElementById('list')!
+    const at = (i: number) => doc().querySelector(`[data-anchor="log.jsonl#L${i}"]`) as HTMLElement
+    const name = (e: Element) => e.id || e.getAttribute('data-anchor') || e.tagName
+    // the search's count of `needle` and the elements it read to find it, beside the count of a search that reads the
+    // page whole (refresh)
+    const find = (needle: string) => {
+      const n = w.walks.length
+      w.search.set(needle)
+      const read = w.walks.slice(n).map(name)
+      w.fresh.refresh()
+      w.fresh.set(needle)
+      return { count: w.search.count, read, whole: w.fresh.count }
+    }
+    expect(find('gale')).toEqual({ count: 3, read: ['list'], whole: 3 })
+    // found again with nothing read: the index holds the page
+    expect(find('calm')).toEqual({ count: 3, read: [], whole: 3 })
+    // a record drawn again in its place: that record read
+    at(2).replaceWith(Object.assign(doc().createElement('div'), { innerHTML: rec(2, 'a storm, then calm') }).firstChild!)
+    expect(find('calm')).toEqual({ count: 4, read: ['log.jsonl#L2'], whole: 4 })
+    // a text changed: the record its text runs in
+    ;(at(4).querySelector('span')!.firstChild as Text).data = 'calm again'
+    expect(find('calm')).toEqual({ count: 5, read: ['log.jsonl#L4'], whole: 5 })
+    // a record added, and one taken away, which needs no read
+    list.insertAdjacentHTML('beforeend', rec(7, 'calm and a gale'))
+    expect(find('gale')).toEqual({ count: 2, read: ['log.jsonl#L7'], whole: 2 })
+    at(1).remove()
+    expect(find('calm')).toEqual({ count: 5, read: [], whole: 5 })
+    // hidden, by the attribute, a class or the label filter: left out
+    at(3).hidden = true
+    at(5).classList.add('gone')
+    at(7).setAttribute('data-thimble-drop', 'hide')
+    expect(find('calm')).toEqual({ count: 2, read: ['log.jsonl#L3', 'log.jsonl#L5', 'log.jsonl#L7'], whole: 2 })
+    at(5).classList.remove('gone')
+    expect(find('calm')).toEqual({ count: 3, read: ['log.jsonl#L5'], whole: 3 })
+    // a phrase across an inline element added in the text
+    at(4).querySelector('span')!.innerHTML = 'a <i>gale</i> warning'
+    expect(find('gale warning')).toEqual({ count: 1, read: ['log.jsonl#L4'], whole: 1 })
+    // the list drawn again whole: the page read again whole
+    list.innerHTML = Array.from({ length: 80 }, (_, i) => rec(i + 1, i % 4 ? 'calm' : 'a gale')).join('')
+    expect(find('gale')).toEqual({ count: 20, read: ['list'], whole: 20 })
+    // typing reads the page a slice at a time once the box has the focus, and finds in what it read
+    list.insertAdjacentHTML('afterbegin', rec(0, 'gale force'))
+    ;(doc().querySelector('#search .thimble-search-input') as HTMLInputElement).dispatchEvent(new dom.window.FocusEvent('focus'))
+    await type('gale f')
+    expect(w.search.count).toBe(1)
+  })
 })
 
 const T0 = Date.UTC(2026, 3, 1, 9) / 1000
