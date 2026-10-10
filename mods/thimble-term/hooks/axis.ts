@@ -107,24 +107,22 @@ function stepped(lo: number, hi: number, st: Step): number[] {
 
 const two = (n: number) => String(n).padStart(2, '0')
 
-/** The ticks of about `count` over the times [lo, hi] (ms, wall clock as UTC), named as the module note says:
- *  `09:00`, `09:00:30`, `Aug 28 06:00`, `May 24`, `Dec 29, 2019`, `Oct 2019`. */
-export function timeTicks(lo: number, hi: number, count: number): Ticks {
+type Form = 'clock' | 'day-clock' | 'day' | 'month'
+
+// how the times of [lo, hi] are named, as the module note says
+function formOf(lo: number, hi: number): Form {
   const span = hi - lo
-  const a = new Date(lo)
-  const b = new Date(hi)
-  const sameDay = a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10)
-  const form = sameDay ? 'clock' : span < 3 * DAY ? 'day-clock' : span < 540 * DAY ? 'day' : 'month'
-  // a label names no finer part than its form, so its ticks step by at least that part
-  const least = form === 'month' ? 28 * DAY : form === 'day' ? DAY : span <= FEW_MINUTES ? SEC : MIN
-  const want = Math.max(span / Math.max(1, count), least)
-  const ms = STEPS.find(s => s >= want)
-  const st: Step = ms ? { ms, months: 0 } : { ms: 0, months: MONTH_STEPS.find(m => m * MONTH_DAYS * DAY >= want) ?? MONTH_STEPS.at(-1)! }
-  const at = stepped(lo, hi, st)
-  const seconds = !st.months && st.ms < MIN
-  const years = a.getUTCFullYear() !== b.getUTCFullYear()
+  const sameDay = new Date(lo).toISOString().slice(0, 10) === new Date(hi).toISOString().slice(0, 10)
+  return sameDay ? 'clock' : span < 3 * DAY ? 'day-clock' : span < 540 * DAY ? 'day' : 'month'
+}
+
+// times named in their span's form, with seconds where `seconds`; where [lo, hi] crosses a year, the first time and
+// the first of each new year name it
+function timeLabels(at: readonly number[], lo: number, hi: number, seconds: boolean): string[] {
+  const form = formOf(lo, hi)
+  const years = new Date(lo).getUTCFullYear() !== new Date(hi).getUTCFullYear()
   let before = NaN
-  const labels = at.map((t, i) => {
+  return at.map((t, i) => {
     const d = new Date(t)
     const y = d.getUTCFullYear()
     const named = years && (i === 0 || y !== before)
@@ -134,7 +132,20 @@ export function timeTicks(lo: number, hi: number, count: number): Ticks {
     const clock = `${two(d.getUTCHours())}:${two(d.getUTCMinutes())}${seconds ? `:${two(d.getUTCSeconds())}` : ''}`
     return form === 'clock' ? clock : form === 'day-clock' ? `${day} ${clock}` : day
   })
-  return { at, labels }
+}
+
+/** The ticks of about `count` over the times [lo, hi] (ms, wall clock as UTC), named as the module note says:
+ *  `09:00`, `09:00:30`, `Aug 28 06:00`, `May 24`, `Dec 29, 2019`, `Oct 2019`. */
+export function timeTicks(lo: number, hi: number, count: number): Ticks {
+  const span = hi - lo
+  const form = formOf(lo, hi)
+  // a label names no finer part than its form, so its ticks step by at least that part
+  const least = form === 'month' ? 28 * DAY : form === 'day' ? DAY : span <= FEW_MINUTES ? SEC : MIN
+  const want = Math.max(span / Math.max(1, count), least)
+  const ms = STEPS.find(s => s >= want)
+  const st: Step = ms ? { ms, months: 0 } : { ms: 0, months: MONTH_STEPS.find(m => m * MONTH_DAYS * DAY >= want) ?? MONTH_STEPS.at(-1)! }
+  const at = stepped(lo, hi, st)
+  return { at, labels: timeLabels(at, lo, hi, !st.months && st.ms < MIN) }
 }
 
 /** Where each label stands on an axis `cols` cells wide, from the axis's first cell: centered on its tick's cell
@@ -151,6 +162,25 @@ export function placeLabels(cells: readonly number[], labels: readonly string[],
     end = x + w
   }
   return out
+}
+
+/** An x axis's own ticks (Vega-Lite's `axis.values`, which thimble.chart sets at each time of weekly or monthly data, so
+ *  the browser's axis names those): the values in [lo, hi], each where they fit `cols` cells with 2 between labels, else
+ *  every second, third …, as Vega leaves out labels that overlap; named as axisTicks names them. None when not even
+ *  one fits. */
+export function ownTicks(kind: 'num' | 'time', values: readonly number[], lo: number, hi: number, cols: number, cellOf: (v: number) => number): Ticks & { cells: number[]; x: number[] } {
+  const all = [...new Set(values)].filter(v => v >= lo && v <= hi).sort((a, b) => a - b)
+  const gaps = all.slice(1).map((v, i) => v - all[i]!)
+  const step = gaps.length ? Math.min(...gaps) : 1
+  const top = Math.max(0, ...all.map(Math.abs))
+  for (let k = 1; k <= all.length; k++) {
+    const at = all.filter((_, i) => i % k === 0)
+    const labels = kind === 'time' ? timeLabels(at, lo, hi, at.some(t => t % MIN !== 0)) : at.map(v => numberLabel(v, step, top, true))
+    const cells = at.map(cellOf)
+    const x = placeLabels(cells, labels, cols)
+    if (x) return { at, labels, cells, x }
+  }
+  return { at: [], labels: [], cells: [], x: [] }
 }
 
 /** An x axis's ticks over [lo, hi] (numbers, or times in ms), as many as fit `cols` cells with 2 between labels: their

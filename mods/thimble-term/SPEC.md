@@ -499,8 +499,9 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   without separators (`2019`, never `2,019`). Times tick as the browser's date axis names their span: `09:00` within a
   day, `Aug 28 12:00` within three days, `May 24` within 540 days, else `Oct 2019`; seconds only over a few minutes;
   where the span crosses a year, the first tick and the first of each new year name it (`Dec 1, 2019 … Jan 1, 2020 …
-  Feb 1`). Categories stand at the ends and the middle. A legend row of `● series` entries; the pointer's column `┊`
-  with its readout on the readout row.
+  Feb 1`). An axis that names its own values (Vega-Lite's `axis.values`, as thimble.chart's weekly and monthly lines
+  do) ticks at those, as the browser's does, every second or third where they do not all fit. Categories stand at the
+  ends and the middle. A legend row of `● series` entries; the pointer's column `┊` with its readout on the readout row.
 - A table: the column names bold, a `─` rule under each name as wide as its column, the rows right under it; numbers
   right-aligned in the card's column formats, as the browser's table writes them (`1,446`). Markdown tables in a reply take the same header.
 - A timeline: the axis across the content with its `●` marks in hue on a rule-gray line, its two end times dim under

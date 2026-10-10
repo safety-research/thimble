@@ -83,7 +83,7 @@ export const CARD_TYPE = 'application/vnd.thimble.card+json'
 const READS = 'application/vnd.thimble.reads+json'
 
 type Frame = { columns?: string[]; index?: string | null; label?: string; rows?: Cell[][]; total?: number; view?: { columns?: string[]; formats?: Record<string, string> } }
-type Enc = { field?: string; type?: string; aggregate?: string; sort?: unknown }
+type Enc = { field?: string; type?: string; aggregate?: string; sort?: unknown; axis?: { values?: unknown } | null }
 type VegaLite = {
   mark?: string | { type?: string }
   encoding?: Record<string, Enc | undefined>
@@ -323,9 +323,25 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
       const xv = r[x.field]
       by.set(s, [...(by.get(s) ?? []), [typeof xv === 'number' ? xv : String(xv ?? ''), Number(r[y.field] ?? 0)]])
     }
-    return { ...blank(cell, 'line'), x: x.field, y: y.field, series: [...by].map(([name, points]) => ({ name, points })) }
+    const xTicks = axisValues(x)
+    return { ...blank(cell, 'line'), x: x.field, y: y.field, series: [...by].map(([name, points]) => ({ name, points })), ...(xTicks.length ? { xTicks } : {}) }
   }
   return null
+}
+
+/** The values an axis names itself (Vega-Lite's `axis.values`, which thimble.chart sets at each time of weekly or
+ *  monthly data): numbers and text as written, a DateTime as its wall clock written out (`2026-05-18T00:00:00`), as a
+ *  row's time is. */
+function axisValues(enc: Enc): (string | number)[] {
+  const values = enc.axis?.values
+  if (!Array.isArray(values)) return []
+  const two = (n: unknown) => String(typeof n === 'number' ? n : 0).padStart(2, '0')
+  return values.flatMap(v => {
+    if (typeof v === 'number' || typeof v === 'string') return [v]
+    const d = v as { year?: unknown; month?: unknown; date?: unknown; hours?: unknown; minutes?: unknown; seconds?: unknown } | null
+    if (!d || typeof d.year !== 'number' || [d.month, d.date].some(n => n !== undefined && typeof n !== 'number')) return []
+    return [`${d.year}-${two(d.month ?? 1)}-${two(d.date ?? 1)}T${two(d.hours)}:${two(d.minutes)}:${two(d.seconds)}`]
+  })
 }
 
 function rowsTable(cell: ThimbleCell, rows: Record<string, unknown>[]): CardData | null {

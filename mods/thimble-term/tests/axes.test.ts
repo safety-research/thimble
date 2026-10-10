@@ -13,7 +13,7 @@ import type { CardData } from '../hooks/draw'
 // the test's own output: its drawings, for a reader
 declare const console: { log: (...args: unknown[]) => void }
 
-const chart = (mark: string, x: { field: string; type: string }, rows: Record<string, unknown>[], color?: string): CardData => {
+const chart = (mark: string, x: { field: string; type: string; axis?: unknown }, rows: Record<string, unknown>[], color?: string): CardData => {
   const cell: ThimbleCell = {
     id: 'a1axes00',
     kind: 'plot',
@@ -100,6 +100,23 @@ test('an axis over years names the month and the year; one that crosses a year n
   expect(xLabels(draw(chart('line', { field: 't', type: 'temporal' }, years), 80, 'a line over two years'))).toEqual(['Jan 2020', 'Jul 2020', 'Jan 2021', 'Jul 2021'])
   const winter = Array.from({ length: 40 }, (_, i) => ({ t: new Date(Date.UTC(2019, 10, 20) + i * 2 * 86_400_000).toISOString().slice(0, 10), merged: ((i * 7) % 13) + 0.5 }))
   expect(xLabels(draw(chart('area', { field: 't', type: 'temporal' }, winter), 80, 'an area across a new year'))).toEqual(['Dec 1, 2019', 'Jan 1, 2020', 'Feb 1'])
+})
+
+test("an axis that names its own values ticks at them, as the browser's does: thimble.chart's weekly line at its weeks' Mondays, never round Sundays", () => {
+  // thimble.chart sets `axis.values` at each time of weekly or monthly data (kernel_thimble.py _step_ticks)
+  const mondays = Array.from({ length: 5 }, (_, i) => new Date(Date.UTC(2026, 4, 18) + i * 7 * 86_400_000))
+  const rows = mondays.map((d, i) => ({ week: d.toISOString().slice(0, 19), merged: i * 4 }))
+  const values = mondays.map(d => ({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, date: d.getUTCDate() }))
+  const weekly = chart('line', { field: 'week', type: 'temporal', axis: { values } }, rows)
+  const wide = draw(weekly, 80, 'a weekly line with its own ticks')
+  expect(xLabels(wide)).toEqual(['May 18', 'May 25', 'Jun 1', 'Jun 8', 'Jun 15'])
+  expect([...xAxis(wide).axis].filter(c => c === '┬').length).toBe(5)
+  // where they do not all fit, every second, as Vega leaves out labels that overlap
+  expect(xLabels(draw(weekly, 30, 'a weekly line with its own ticks'))).toEqual(['May 18', 'Jun 1', 'Jun 15'])
+  // across a new year, the first and the first of the new year name it
+  const winter = [new Date(Date.UTC(2025, 11, 22)), new Date(Date.UTC(2025, 11, 29)), new Date(Date.UTC(2026, 0, 5))]
+  const across = chart('line', { field: 'week', type: 'temporal', axis: { values: winter.map(d => ({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, date: d.getUTCDate() })) } }, winter.map((d, i) => ({ week: d.toISOString().slice(0, 10), merged: i })))
+  expect(xLabels(draw(across, 60, 'weeks across a new year'))).toEqual(['Dec 22, 2025', 'Dec 29', 'Jan 5, 2026'])
 })
 
 test('bars over time and a timeline name the year of times that span more than one, and seconds only where two share a minute', () => {

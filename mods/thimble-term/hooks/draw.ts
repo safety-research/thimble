@@ -2,7 +2,7 @@
 // static drawing where no Client runs). Each layout takes the width it may use and the item under the pointer, and
 // returns its lines and a hit test from a cell to an item. The `note` and `text` kinds (noteLayout, textLayout) are the
 // cards drawn as their words.
-import { axisTicks, numberTicks, placeLabels, wallClock } from './axis'
+import { axisTicks, numberTicks, ownTicks, placeLabels, wallClock } from './axis'
 import { cut, cw, fmt, formatted, quoted, width } from './lib'
 import type { Run, TableRuns } from './lib'
 import { COLORS } from './paint'
@@ -39,6 +39,9 @@ export type CardData = {
   total?: number
   columns?: string[]
   series?: { name: string; points: [string | number, number][] }[]
+  /** a line card's x axis's own ticks, as its x values are written (Vega-Lite's `axis.values`: thimble.chart's at each
+   *  time of weekly or monthly data), which the axis names in place of round ones */
+  xTicks?: (string | number)[]
   events?: { time: string; label: string; ref: string; shown?: string }[]
   examples?: CardExample[]
   nodes?: DiagramNode[]
@@ -626,11 +629,14 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
     }
     lines.push(row)
   }
-  // the x labels, dim, each under a ┬ on the axis: numbers and times at round steps (axis.ts), as many as fit with 2
-  // cells between; one x alone named under its point; categories at the ends and the middle
+  // the x labels, dim, each under a ┬ on the axis: numbers and times at the axis's own values, else at round steps
+  // (axis.ts), as many as fit with 2 cells between; one x alone named under its point; categories at the ends and the
+  // middle
   const ticks: { cell: number; x: number; label: string }[] = []
   if (kind !== 'cat' && x1 > x0) {
-    const t = axisTicks(kind, x0, x1, pw, v => px(v) >> 1, kind === 'num' && xv.every(v => Number.isInteger(v)))
+    const cellOf = (v: number) => px(v) >> 1
+    const own = ownTicks(kind, (card.xTicks ?? []).map((v, i) => xNumber(v, kind, i)), x0, x1, pw, cellOf)
+    const t = own.at.length ? own : axisTicks(kind, x0, x1, pw, cellOf, kind === 'num' && xv.every(v => Number.isInteger(v)))
     t.at.forEach((_, i) => ticks.push({ cell: t.cells[i]!, x: t.x[i]!, label: t.labels[i]! }))
   } else if (kind !== 'cat' && all.length) {
     const label = xName(all[0]![0])
