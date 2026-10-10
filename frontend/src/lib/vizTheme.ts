@@ -143,7 +143,9 @@ export function vegaConfig(): Record<string, unknown> {
     // uneven
     axisQuantitative: { labelOverlap: 'parity' },
     axisTemporal: { labelOverlap: 'parity' },
-    legend: { labelColor: label, titleColor: label, labelFont: mono, labelFontSize: size, titleFont: font, titleFontSize: size, titleFontWeight: 500, labelLimit: LABEL_LIMIT, symbolType: 'square' },
+    // a legend of another channel than a colored chart's color (a range's ends by strength) draws its symbols in the
+    // labels' ink, which a dark paper lightens, where Vega-Lite would draw them black
+    legend: { labelColor: label, titleColor: label, labelFont: mono, labelFontSize: size, titleFont: font, titleFontSize: size, titleFontWeight: 500, labelLimit: LABEL_LIMIT, symbolType: 'square', symbolBaseFillColor: label },
     // a facet's panels are named across, in the body face: a row's name over its panel at the left rather than turned
     // on end beside it, where it took the width and ran into the y title
     header: { labelColor: ink, labelFont: font, labelFontSize: size + 0.5, labelFontWeight: 500, titleColor: label, titleFont: font, titleFontSize: size, titleFontWeight: 500 },
@@ -159,20 +161,27 @@ export function vegaConfig(): Record<string, unknown> {
     bar: { cornerRadiusEnd: px('--viz-bar-radius', 2) },
     line: { strokeWidth: px('--viz-line', 1.5) },
     point: { filled: true },
+    // a channel of strength (a range's two ends when the dumbbells have colors of their own) keeps its faintest step in
+    // view and its strongest solid
+    scale: { minOpacity: 0.4, maxOpacity: 1 },
     rule: { color: note },
     // notes and values on the marks: the annotation ink in the body face, which a dark paper lightens with the text
     text: { color: note, font, fontSize: size },
-    // the marks thimble.chart names by their job (backend kernel_thimble FAINT_STYLE and on): a box plot's values faint
-    // behind its boxes, the boxes light enough to show them and square, its medians in ink; areas side by side
-    // overlapping lightly; a scatter's fitted line in ink, or its group's color; a range's before end a ring, its after
-    // end the dot. Each keeps its series or label color but the median and a fitted line of one group
+    // the marks thimble.chart names by their job (backend kernel_thimble FAINT_STYLE and on): a band faint behind its
+    // line (a line's interval); a box plot's boxes and a violin's body lighter than their color and square, its medians
+    // in ink; areas side by side overlapping lightly; a scatter's fitted line in ink, or its group's color; the line
+    // between a range's two ends muted, the ends solid and larger than a dot; an area's points unseen and wider than a
+    // dot, so a hover finds its values. Each keeps its series or label color but the median, a fitted line of one group
+    // and a range's line
     style: {
-      'thimble-faint': { opacity: 0.3 },
+      'thimble-faint': { opacity: 0.2 },
       'thimble-box': { opacity: 0.55, cornerRadiusEnd: 0 },
       'thimble-median': { color: ink, opacity: 1, thickness: 2 },
       'thimble-overlap': { opacity: 0.4 },
       'thimble-fit': { color: ink, strokeWidth: px('--viz-line', 1.5) + 0.5 },
-      'thimble-start': { filled: false, strokeWidth: px('--viz-line', 1.5) },
+      'thimble-span': { color: token('--viz-other'), strokeWidth: px('--viz-line', 1.5) + 0.5 },
+      'thimble-end': { size: 56, opacity: 1 },
+      'thimble-hover': { fillOpacity: 0, size: 300 },
     },
   }
 }

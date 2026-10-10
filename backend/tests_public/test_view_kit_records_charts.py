@@ -82,14 +82,16 @@ def test_a_view_s_chart_is_the_spec_a_card_s_chart_shows_for_the_same_rows(kit_w
 
 
 @pytest.mark.parametrize(("kind", "options"), [("density", {}), ("ecdf", {}), ("histogram", {"panels": True}),
-                                                ("range", {}), ("scatter", {"fit": "linear"})])
+                                                ("range", {}), ("scatter", {"fit": "linear"}), ("violin", {}),
+                                                ("line", {"interval": ["lo", "hi"]})])
 def test_a_view_s_chart_takes_the_density_ecdf_and_range_kinds_panels_and_fit_as_a_card_s_does(kit_ws, kind, options):
     """The kinds and options thimble.chart gained after the view kit's chart came from the same code, so a view draws
-    them as a card does."""
+    them as a card does: the violin and a line's interval too."""
     values = [{"posts": float(p), "agent": f"agent-{i % 3 + 1}"} for i, p in enumerate((3, 4, 9, 5, 7, 2, 8, 6, 4, 5, 3, 9))]
-    rows = {"density": values, "ecdf": values, "histogram": values,
+    rows = {"density": values, "ecdf": values, "histogram": values, "violin": values,
             "range": [{"agent": f"agent-{i}", "before": float(i), "after": float(i * 2 + 1)} for i in range(1, 5)],
-            "scatter": [{"day": float(i), "posts": float(i * 2 + i % 3), "agent": f"agent-{i % 2 + 1}"} for i in range(12)]}[kind]
+            "scatter": [{"day": float(i), "posts": float(i * 2 + i % 3), "agent": f"agent-{i % 2 + 1}"} for i in range(12)],
+            "line": [{"day": float(i), "posts": float(i), "lo": i - 0.5, "hi": i + 0.5} for i in range(5)]}[kind]
     got = chart(rows, kind, **options)
     assert got == {"spec": card_spec(kind, pd.DataFrame(rows), **options), "n": len(rows)}
 

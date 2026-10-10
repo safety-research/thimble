@@ -35,7 +35,7 @@ describe('the Vega-Lite theme', () => {
     expect(c.title).toMatchObject({ fontSize: 13 })
   })
 
-  test("draws the marks thimble.chart names by their job: faint values behind a box plot's lighter boxes, its medians in ink, areas overlapping lightly", () => {
+  test("draws the marks thimble.chart names by their job: a faint band behind a line, a box plot's lighter boxes, its medians in ink, areas overlapping lightly", () => {
     const s = c.style as Record<string, Record<string, unknown>>
     // each keeps its series or label color: the theme gives only how strongly it shows
     for (const name of ['thimble-faint', 'thimble-box', 'thimble-overlap']) {
@@ -44,10 +44,17 @@ describe('the Vega-Lite theme', () => {
     }
     expect(s['thimble-faint'].opacity as number).toBeLessThan(s['thimble-box'].opacity as number)
     expect(s['thimble-median']).toMatchObject({ color: token('--viz-ink-1'), opacity: 1 })
-    // a scatter's fitted line in ink unless its group colors it; a range's before end a ring of its color
+    // a scatter's fitted line in ink unless its group colors it; a range's line muted between two solid ends of their
+    // colors, larger than a dot (Matt, 2026-10-10: the custom dumbbell "a bit better with a solid fill")
     expect(s['thimble-fit'].color).toBe(token('--viz-ink-1'))
-    expect(s['thimble-start']).toMatchObject({ filled: false })
-    expect(s['thimble-start'].color).toBeUndefined()
+    expect(s['thimble-span'].color).toBe(token('--viz-other'))
+    expect(s['thimble-end']).toMatchObject({ opacity: 1 })
+    expect(s['thimble-end'].color).toBeUndefined()
+    expect(s['thimble-end'].filled).toBeUndefined()
+    expect(s['thimble-end'].size as number).toBeGreaterThan(30)
+    // an area's hover points unseen and wider than a dot, its fill and its color kept for the tooltip's swatch
+    expect(s['thimble-hover']).toMatchObject({ fillOpacity: 0 })
+    expect(s['thimble-hover'].size as number).toBeGreaterThan(4 * 30)
   })
 
   test("rounds a bar's end by --viz-bar-radius, and leaves a box plot's box square", () => {
