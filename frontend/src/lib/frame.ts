@@ -1,10 +1,12 @@
 // A sandboxed iframe's document painted on the card, not on a white sheet of its own: the page's colour scheme (an
 // iframe whose scheme differs from its parent's gets an opaque backdrop), a transparent body in the card's text colour,
 // the theme's tokens as CSS variables for the html to use, and the page's own faces. Shared by the custom card, kernel
-// html outputs and the views' pages.
+// html outputs and the views' pages. A custom card's frame also gets the chart style as a script (chartScript) and the
+// libraries the card names (useCardLibs).
 import { useEffect, useState } from 'react'
+import { api } from './api'
 import type { Resolved } from './theme'
-import { token } from './vizTheme'
+import { token, vegaConfig, VIZ_INK, VIZ_SERIES } from './vizTheme'
 
 /** Takes WebRTC away from a frame before its own scripts run, since no content security policy covers it. A frame the
  * page opens inside itself has it again, so this is no boundary; the headless shots take it from every frame
@@ -31,7 +33,20 @@ export function withFrameStyle(html: string, style: string): string {
   return style + html
 }
 
-export const FRAME_TOKENS = ['--text-primary', '--text-secondary', '--text-tertiary', '--surface-card', '--bg-sub', '--bg-sunken', '--border-subtle', '--accent', '--font-body', '--font-mono']
+/** thimble's chart style (vizTheme.ts, tokens.css): the nominal hues, the ink ramp, the chart chrome and the label
+ * palette, which a custom card's scripts draw in */
+export const CHART_TOKENS = [
+  ...VIZ_SERIES,
+  ...VIZ_INK,
+  '--viz-grid',
+  '--viz-axis',
+  '--viz-label',
+  '--viz-annotation',
+  ...Array.from({ length: 18 }, (_, i) => `--label-${i + 1}`),
+  '--label-none',
+]
+
+export const FRAME_TOKENS = ['--text-primary', '--text-secondary', '--text-tertiary', '--surface-card', '--bg-sub', '--bg-sunken', '--border-subtle', '--accent', '--font-body', '--font-mono', ...CHART_TOKENS]
 
 /** The current values of the frame tokens, read from the document. */
 export function frameTokens(): Record<string, string> {
@@ -40,7 +55,7 @@ export function frameTokens(): Record<string, string> {
 
 /** The tokens a view's page reads (views.frame_document; plugin/viewers use them with light fallbacks), those the parts
  * of backend/app/viewer_kit.css are drawn in (its Colour by menu among them), and the label palette the marks of the labels that are on are drawn in
- * (viewer_bridge.js), so they match the Labels pane's. */
+ * (viewer_bridge.js, from FRAME_TOKENS' CHART_TOKENS), so they match the Labels pane's. */
 export const VIEW_TOKENS = [
   ...FRAME_TOKENS,
   '--ink-rgb',
@@ -88,36 +103,6 @@ export const VIEW_TOKENS = [
   '--status-positive',
   '--status-negative',
   '--status-warning',
-  '--viz-1',
-  '--viz-2',
-  '--viz-3',
-  '--viz-4',
-  '--viz-5',
-  '--viz-6',
-  '--viz-7',
-  '--viz-ink-1',
-  '--viz-ink-2',
-  '--viz-ink-3',
-  '--viz-ink-4',
-  '--label-1',
-  '--label-2',
-  '--label-3',
-  '--label-4',
-  '--label-5',
-  '--label-6',
-  '--label-7',
-  '--label-8',
-  '--label-9',
-  '--label-10',
-  '--label-11',
-  '--label-12',
-  '--label-13',
-  '--label-14',
-  '--label-15',
-  '--label-16',
-  '--label-17',
-  '--label-18',
-  '--label-none',
 ]
 
 /** The head for a view's page: NO_RTC, then the colour scheme and the tokens as CSS variables, and no font import,
@@ -202,6 +187,64 @@ export function useFrameFonts(): string | null {
     }
   }, [fonts])
   return fonts
+}
+
+/** Text for an inline <script> or JSON in one: a `<` can end no element. */
+const scriptSafe = (text: string) => text.replace(/</g, '\\u003c')
+
+/** thimble's chart style for a custom card's scripts, read from the document as the tokens are: `thimble.colors`, the
+ * nominal hues (series) and the ink ramp (ink), and `thimble.vegaConfig`, the config of the canvas's own Vega-Lite
+ * charts (vizTheme vegaConfig), for vega-embed. */
+export function chartScript(): string {
+  const style = { colors: { series: VIZ_SERIES.map(token), ink: VIZ_INK.map(token) }, vegaConfig: vegaConfig() }
+  return `<script>window.thimble=Object.assign(window.thimble||{},${scriptSafe(JSON.stringify(style))})</script>`
+}
+
+const cardLibs = new Map<string, Promise<string>>()
+/** the lists kept, newest last: vega's three builds are 830 kB, and the card harness's page draws each card under a
+ * workspace key of its own (render.tsx) */
+const CARD_LIBS_KEPT = 8
+
+/** A custom card's libraries (backend card_libs) as one head of inline scripts and styles, fetched once per workspace
+ * and list; an answer with a problem (a package not bundled yet) or a failed fetch is asked again by the next frame,
+ * and draws the frame with the problem in its console. */
+function loadCardLibs(ws: string, query: string): Promise<string> {
+  const key = `${ws}\n${query}`
+  let got = cardLibs.get(key)
+  if (!got) {
+    const fail = (why: string) => {
+      cardLibs.delete(key)
+      return `<script>console.error(${scriptSafe(JSON.stringify(why))})</script>`
+    }
+    got = api.cardLibs(ws, query).then(
+      (r) => {
+        if (r.problems?.length) cardLibs.delete(key)
+        return r.head ?? ''
+      },
+      (e: unknown) => fail(`the libraries ${query} did not load: ${(e as Error)?.message ?? String(e)}`),
+    )
+    cardLibs.set(key, got)
+    for (const old of cardLibs.keys()) if (cardLibs.size > CARD_LIBS_KEPT) cardLibs.delete(old)
+  }
+  return got
+}
+
+/** The head of the libraries a custom card names, for its frame: '' when it names none, null until they are fetched,
+ * so the frame is drawn once, with them. */
+export function useCardLibs(ws: string, libs: readonly string[] | undefined): string | null {
+  const query = (libs ?? []).join(',')
+  const key = `${ws}\n${query}`
+  const [got, setGot] = useState<{ key: string; head: string } | null>(null)
+  useEffect(() => {
+    if (!query) return
+    let alive = true
+    void loadCardLibs(ws, query).then((head) => alive && setGot({ key, head }))
+    return () => {
+      alive = false
+    }
+  }, [ws, query, key])
+  if (!query) return ''
+  return got?.key === key ? got.head : null
 }
 
 /** The page's faces for a view's page, in a style element. */

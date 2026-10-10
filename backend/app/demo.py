@@ -683,7 +683,9 @@ FULL_LEFT_OUT = {
     "telemetry.jsonl": "the browser's telemetry",
 }
 FULL_SKIPPED_PARTS = {"__pycache__": "compiled Python", "cache": "a cache, rebuilt", "tmp": "a temporary file",
-                      ".claude": "Claude Code's settings for one session, written again when it starts"}
+                      ".claude": "Claude Code's settings for one session, written again when it starts",
+                      "node_modules": "an npm install, whose packages are bundled into lib/ (view_libs)",
+                      ".npm-cache": "npm's cache"}
 FULL_SKIPPED_SUFFIXES = (".sqlite", ".sqlite-wal", ".sqlite-shm", ".lock", ".pyc")
 SECRET_KEY_RE = re.compile(r"key|token|secret|password|credential", re.I)
 # what install takes out of a chat's meta in a full export: the process that ran it, and the session attached to main

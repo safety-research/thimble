@@ -122,7 +122,7 @@ if os.environ.get("THIMBLE_ACCESS_LOG", "").strip().lower() != "all":
 ROUTER_MODULES = [
     # storage and the corpus
     "corpus", "transcripts", "source_keys", "pdfs", "ledger", "investigation", "notebook", "concepts", "views", "cardtypes",
-    "extensions", "precached",
+    "card_libs", "extensions", "precached",
     # the agent engine (main, threads, background agents) and the tools they call
     "agents", "tools", "jobs", "verify",
     # documents, and the report checks that comment on them (their runs shut down with the server)

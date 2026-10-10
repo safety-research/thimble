@@ -56,7 +56,8 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
     }
     case 'custom': {
       const html = typeof payload.html === 'string' ? payload.html : ''
-      return html ? <CustomFrame html={html} title={cell.title} height={typeof payload.height === 'number' ? payload.height : undefined} /> : null
+      const libs = Array.isArray(payload.libs) ? (payload.libs as unknown[]).filter((x): x is string => typeof x === 'string') : undefined
+      return html ? <CustomFrame html={html} title={cell.title} height={typeof payload.height === 'number' ? payload.height : undefined} ws={ws} libs={libs} /> : null
     }
     default: {
       if ((kind === 'timeline' || kind === 'diagram') && !cell.code && payload.dataset != null) return <DatasetView kind={kind} dataset={payload.dataset} fitWidth={width} />

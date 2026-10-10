@@ -60,7 +60,7 @@ def test_the_fence_keeps_the_corpus_read_only_and_lets_main_write_only_the_agent
     assert box["failIfUnavailable"] is True, "sandbox.enforce, on by default"
     fs = box["filesystem"]
     assert fs["allowWrite"] == [str(ws / d) for d in ("orient/work", "writers", "critique-work", "check-work",
-                                                       "views-work", "extension/views")]
+                                                       "views-work", "extension/views", "card-libs")]
     assert fs["allowWrite"] == [str(p) for p in cli.write_dirs("logs")]
     assert fs["denyWrite"] == [str(corpus.resolve()), str(ws / "config.json"), str(ws / "settings.json")]
     assert fs["denyRead"] == [*userconf.private_paths(), str(cli.home() / "links")]
