@@ -194,6 +194,29 @@ export function withoutWriterLines(text: string): string {
   return text.split('\n').filter(l => !WRITER_LINE.test(l)).join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
+/** The subagent run a prompt of main's reports on: Claude Code's hand-back of the agent's last report (`<agent-message
+ *  from="<id>">` around its `[Subagent hand-back]` frame) or its task notification (`<task-id><id></task-id>`). One run
+ *  of one of thimble's agents brings both, one after the other, and main answers each with a `↳` line
+ *  (prompts/main.md). null for any other prompt. */
+export function reportOf(text: string): { agent: string; kind: 'hand-back' | 'notice' } | null {
+  const notice = /<task-notification>[\s\S]*?<task-id>\s*([^<\s]+)\s*<\/task-id>/.exec(text)
+  if (notice) return { agent: notice[1]!, kind: 'notice' }
+  const back = /<agent-message from="([^"]+)">\s*\[Subagent hand-back\]/.exec(text)
+  return back ? { agent: back[1]!, kind: 'hand-back' } : null
+}
+
+/** A reply's `↳` lines, each trimmed. */
+export function noteLines(text: string): string[] {
+  return text.split('\n').map(l => l.trim()).filter(l => l.startsWith('↳'))
+}
+
+/** A reply without the lines given (trimmed, as noteLines gives them). */
+export function withoutLines(text: string, lines: readonly string[]): string {
+  const drop = new Set(lines)
+  const kept = text.split('\n').filter(l => !drop.has(l.trim()))
+  return kept.length === text.split('\n').length ? text : kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 /** An Agent call's description or a task notification's words with each thread's fork (`thread:<slug>`, in quotation
  *  marks or not) named by the thread's first question, as everywhere else: `thread "How many of the 2,994…"`. A fork
  *  of a thread not listed keeps its words. */

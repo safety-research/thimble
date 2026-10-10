@@ -9,7 +9,7 @@ import { showsValue } from '../hooks/cite'
 import { signalEnd } from '../hooks/signal'
 import { threadState } from '../hooks/nav'
 import { labelCard } from '../hooks/cell'
-import { agentsOf, aroundLine, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelCountNow, labelIdOf, labelLinkStale, labelOf, labelsOf, namedForks, namedThreads, recordLine, resolutionOf, runShown, saysWriter, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from '../hooks/model'
+import { agentsOf, aroundLine, cardsOfCall, cellsOf, docsOf, forkDescription, homeOf, jsonLine, labelCountNow, labelIdOf, labelLinkStale, labelOf, labelsOf, namedForks, namedThreads, recordLine, reportOf, resolutionOf, runShown, saysWriter, threadOf, threadRowsOf, verdictOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from '../hooks/model'
 import { turnTimes, wrapRows } from '../hooks/draw'
 import { AGENTS, CELLS, RESOLVE, STATES, THREAD_T1, THREADS } from './fixtures'
 
@@ -85,6 +85,16 @@ test("main's `↳ The writer …` line is found and left out; its other lines st
   expect(saysWriter('The writer of this page is A.')).toBe(false)
   expect(saysWriter('↳ thread "Who is the writer?": answered.')).toBe(false)
   expect(withoutWriterLines('↳ The writer finished the report; thimble shows it.\n\nThe thread is asked.')).toBe('The thread is asked.')
+})
+
+test("a prompt that reports on a subagent run names the agent: Claude Code's hand-back and its task notification; any other prompt none", () => {
+  // as Claude Code 2.1.295 writes them in main's transcript
+  expect(reportOf('Another Claude session sent a message:\n<agent-message from="a4bd4d0fe90cf1a5f">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to.')).toEqual({ agent: 'a4bd4d0fe90cf1a5f', kind: 'hand-back' })
+  expect(reportOf('<task-notification>\n<task-id>a4bd4d0fe90cf1a5f</task-id>\n<tool-use-id>toolu_01L</tool-use-id>\n<status>completed</status>\n</task-notification>')).toEqual({ agent: 'a4bd4d0fe90cf1a5f', kind: 'notice' })
+  // thimble's watcher wakes main with a notification of no task, and another session's message is no hand-back
+  expect(reportOf('<task-notification>\n<summary>thimble</summary>\n</task-notification>\nthimble browser event: <thimble-event kind="main">')).toBeNull()
+  expect(reportOf('Another Claude session sent a message:\n<agent-message from="s1">\nCan you look at this?')).toBeNull()
+  expect(reportOf('What else is in the export?')).toBeNull()
 })
 
 test("a day and a month in words cite a date written in digits: ISO or month and day, the year when both give one", () => {
