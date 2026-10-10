@@ -282,7 +282,8 @@ ran (`end(item)`), and `×` in red where most of a cell's records failed (`probl
 - `tl.legend()` is the key for `axis`: an entry for each series the lanes drew (`─ running`, `× failed`), each a toggle.
 - It needs no other part. With no `scale` it lays out its records' whole span and draws its own axis, with its key,
   under the lanes. `rows` is the Rows control, a field's name or a function of a record; with none it draws one lane and
-  no names. `time(item)` is a record's place (`item.t` by default), a number, or a Date or an ISO time on an axis of time
+  no names. `time(item)` is a record's place (`item.t` by default), a number, or a Date or a date such as an ISO time
+  (one with no zone in UTC) on an axis of time
   (`unit` `'s'`, the default, or `'n'` for plain numbers such as turns), and a record with none is left out. `lanes` is
   its old name.
 
@@ -354,7 +355,8 @@ for each choice past the first) and the speaker bold, and its words under the na
 failed one (`error`) with `× Bash` in red as the lanes draw it; the day stands on a dim row of its own where it changes.
 It is a list: ↑↓ choose a turn, Enter opens it in place, or in the side pane with `side` (a turn's words whole; a tool
 call's input in the code color and what came back, in red for an error), `a` asks about it, and its track shows where
-the Color by values are. A turn is `{ref, t, speaker, kind, tool, text, input, output, error}`, `kind` one of `text`,
+the Color by values are. A turn is `{ref, t, speaker, kind, tool, text, input, output, error}`, `t` in seconds since
+1970 or a date such as an ISO time (one with no zone in UTC), `kind` one of `text`,
 `prompt`, `tool`, `thinking` and `system`; `title` names what it shows, with the count of its turns. `tr.list` is the
 list under it, for `span` and `choose`.
 

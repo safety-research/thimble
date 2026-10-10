@@ -4,8 +4,8 @@
 // new lane; hovering a lane draws a thin cursor line, never a band over the marks; the detail list's rows in view are a
 // tint across the lanes that follows the list as it scrolls; a record opens in a side panel beside the list that starts
 // wide enough to read it, a drag of its edge resizes it, and the page built again opens it at that width; the divider's
-// drag gives the overview its height, kept too. What the controls decide without layout is
-// tests/public/controls-kit.test.ts.
+// drag gives the overview its height, kept too; a failure in the lanes is a ✕ in the problem red that stands out from
+// the marks and the paper, light and dark. What the controls decide without layout is tests/public/controls-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -100,6 +100,75 @@ const labels = (page: Page, values: string[], marks: Record<string, string>) =>
     },
     [values, marks] as const,
   )
+
+// the lanes of three sessions in the theme's own tokens, light or dark, their marks in Color by's colours, every fifth
+// call failed
+const THEME = readFileSync(path.join(FRONTEND, 'src', 'styles', 'tokens.css'), 'utf8') + ':root{--font-body:sans-serif;--font-mono:monospace}'
+const failures = (dark: boolean) => `<!doctype html><html${dark ? ' data-paper="dark"' : ''}><head><style>${THEME} html,body{margin:0} body{background:var(--surface-card)}
+#lanes{width:860px;padding:8px}</style>${KIT}</head><body><span id="colour"></span><div id="lanes"></div>
+<script>
+const calls = []
+;['lead', 'explore', 'test'].forEach((s, si) => { for (let i = 0; i < 30; i++) calls.push({ ref: 'r1/' + s + '.jsonl#L' + (i + 1), t: ${T0} + si * 40 + i * 120, session: s, tool: ['Bash', 'Read', 'Grep', 'Edit'][i % 4], outcome: i % 5 === 2 ? 'error' : 'ok' }) })
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }] })
+window.lanes = thimble.timeline({ mount: '#lanes', rows: 'session', problem: (c) => c.outcome !== 'ok' })
+lanes.draw(calls)
+</script></body></html>`
+
+describe('a failure in the lanes', () => {
+  for (const dark of [false, true]) {
+    test(`a ✕ in the problem red at its mark's foot, over a halo of the paper, easy to see beside the marks' colours (${dark ? 'dark' : 'light'})`, async () => {
+      const page = await browser.newPage({ viewport: { width: 900, height: 300 } })
+      await page.setContent(failures(dark))
+      await page.waitForSelector('.thimble-lane-bad', { state: 'attached' })
+      const got = await page.evaluate(() => {
+        const probe = document.createElement('div')
+        probe.style.cssText = 'color:var(--status-negative);background:var(--surface-card)'
+        document.body.appendChild(probe)
+        const want = getComputedStyle(probe)
+        const bads = [...document.querySelectorAll('.thimble-lane-bad')]
+        const x = getComputedStyle(bads[0].querySelector('.thimble-lane-bad-x')!)
+        const halo = getComputedStyle(bads[0].querySelector('.thimble-lane-bad-halo')!)
+        const r = bads[0].getBoundingClientRect()
+        return { n: bads.length, red: want.color, paper: want.backgroundColor, stroke: x.stroke, width: parseFloat(x.strokeWidth), halo: halo.stroke, box: { x: r.x, y: r.y, w: r.width, h: r.height } }
+      })
+      // one ✕ for each failed call, six of thirty in each of three lanes
+      assert.equal(got.n, 18)
+      assert.equal(got.stroke, got.red)
+      assert.equal(got.halo, got.paper)
+      assert.ok(got.width >= 1.5 && got.box.w >= 6 && got.box.h >= 6, `a ✕ big enough to see (${JSON.stringify(got)})`)
+      // in a picture of the page, the ✕'s red stands out: many of its pixels in the problem red, which keeps 3:1 or more
+      // against the paper
+      const png = await page.screenshot({ clip: { x: Math.floor(got.box.x) - 1, y: Math.floor(got.box.y) - 1, width: Math.ceil(got.box.w) + 2, height: Math.ceil(got.box.h) + 2 } })
+      const seen = await page.evaluate(
+        async ([b64, red, paper]) => {
+          const rgb = (c: string) => (c.match(/[\d.]+/g) || []).slice(0, 3).map(Number)
+          const lum = ([r, g, b]: number[]) => {
+            const f = (v: number) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+            return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+          }
+          const [a, b] = [lum(rgb(red)), lum(rgb(paper))]
+          const img = new Image()
+          img.src = 'data:image/png;base64,' + b64
+          await img.decode()
+          const c = document.createElement('canvas')
+          c.width = img.width
+          c.height = img.height
+          const g = c.getContext('2d')!
+          g.drawImage(img, 0, 0)
+          const d = g.getImageData(0, 0, img.width, img.height).data
+          const want = rgb(red)
+          let near = 0
+          for (let i = 0; i < d.length; i += 4) if (Math.hypot(d[i] - want[0], d[i + 1] - want[1], d[i + 2] - want[2]) < 70) near++
+          return { near, contrast: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) }
+        },
+        [png.toString('base64'), got.red, got.paper] as const,
+      )
+      assert.ok(seen.near >= 12, `the ✕ draws its red (${JSON.stringify(seen)})`)
+      assert.ok(seen.contrast >= 3, `the problem red keeps 3:1 against the paper (${JSON.stringify(seen)})`)
+      await page.close()
+    })
+  }
+})
 
 describe('the row controls in a frame', () => {
   test("Filter by's menu picks a field and a toggle hides its value's rows from the list and the lanes", async () => {
