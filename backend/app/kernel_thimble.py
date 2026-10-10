@@ -2027,10 +2027,11 @@ def _area_spec(df, opts: dict) -> dict:
             more["transform"] = [{"calculate": f"indexof({json.dumps(series)}, datum[{json.dumps(ser)}])", "as": STACK_FIELD}]
             enc["order"] = {"field": STACK_FIELD, "type": "quantitative"}
     enc["tooltip"] = _tooltip(df, kinds)
-    # a hover tip at each value while the series are short, at a point the theme draws unseen and wider than a dot
+    # a hover tip at each value while the series are short, at a point the theme draws wider than a dot, unseen by its
+    # own fillOpacity: Vega-Lite gives a style's fillOpacity to the legend's swatches too, which overlapping areas show
     longest = int(df.groupby(ser, sort=False).size().max()) if ser and len(df) else len(df)
     if longest <= LINE_DOTS_MAX:
-        mark["point"] = {"style": HOVER_STYLE}
+        mark["point"] = {"style": HOVER_STYLE, "fillOpacity": 0}
     spec = _unit(rows, mark if len(mark) > 1 else "area", enc, **more)
     if opts.get("marks") is not None:
         spec = _with_marks(kind, spec, opts["marks"], x, kinds[x])
