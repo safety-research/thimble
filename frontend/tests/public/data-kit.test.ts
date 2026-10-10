@@ -486,6 +486,46 @@ describe('the table', () => {
     doc().getElementById('other')!.innerHTML = '<p data-anchor="b#L2">y</p>'
     expect(w.thimble.__held()).toBe(5)
   })
+
+  test("numbers: amounts with thousands separators, identifiers as they are (type 'id', or a name or title that names one); the search, the side panel, a card and the record viewer find and write an identifier as it is", async () => {
+    await load(`<div class="top"><span id="search"></span></div><div id="body" style="height:300px"><div id="list"></div></div><div id="cards"></div><div id="rec"></div>`)
+    const w = win()
+    w.PRS = [
+      { ref: 'forge.db#prs/67028', number: 67028, title: 'Fix the parser', additions: 12345, year: 2024, line: 10234, review: 4501, ratio: 1234.5 },
+      { ref: 'forge.db#prs/9001', number: 9001, title: 'Docs', additions: 7, year: 2023, line: 3, review: 900, ratio: 0.5 },
+    ]
+    w.eval(`
+      window.side = thimble.side({ mount: '#body' })
+      window.search = thimble.search({ mount: '#search' })
+      window.table = thimble.table({ mount: '#list', rows: PRS, side, search, columns: [
+        { name: 'number', title: 'PR #', type: 'number' },
+        { name: 'title', title: 'Title' },
+        { name: 'additions', title: 'Added', type: 'number' },
+        { name: 'year', title: 'Year', type: 'number' },
+        { name: 'line', title: 'At', type: 'number' },
+        { name: 'review', title: 'Review', type: 'id' },
+        { name: 'ratio', title: 'Ratio', type: 'number' },
+      ] })
+      document.getElementById('cards').innerHTML = thimble.recordCard({ ref: PRS[0].ref, key: PRS[0].number, meta: PRS[0].year, title: PRS[0].title })
+      thimble.record({ mount: '#rec', value: PRS[0], ref: PRS[0].ref })
+    `)
+    const first = ['67028', 'Fix the parser', '12,345', '2024', '10234', '4501', '1,234.5']
+    expect(texts('.thimble-table-row[data-thimble-row="0"] .thimble-table-td')).toEqual(first)
+    // an identifier is laid out and sorted as a number
+    expect(doc().querySelector('.thimble-table-row .thimble-table-td')!.classList.contains('thimble-table-number')).toBe(true)
+    w.table.sortBy('review', false)
+    expect(w.table.rows.map((r: any) => r.review)).toEqual([900, 4501])
+    // the search finds it as it is written
+    await type('67028')
+    expect(w.search.count).toBe(1)
+    // the side panel's default details, a card and the record viewer write it alike
+    w.table.open('forge.db#prs/67028')
+    expect(texts('.thimble-table-fields dd')).toEqual(first)
+    expect(texts('#cards .thimble-card-key')).toEqual(['67028'])
+    expect(texts('#cards .thimble-card-meta')).toEqual(['2024'])
+    // the record viewer writes each value as the record holds it
+    expect(texts('#rec .thimble-record-val')).toEqual(expect.arrayContaining(['67028', '12345', '2024', '1234.5']))
+  })
 })
 
 const BEFORE = ['# Memory', '', '- Ana runs the timetable.', '- Bo handles billing.', ...Array.from({ length: 20 }, (_, i) => `- note ${i + 1}`), '- Cy is the harbor master.', '- Old line to drop.'].join('\n')

@@ -275,7 +275,8 @@ describe('the table beside the side panel', () => {
       return { count: w.search.count, fields }
     })
     assert.equal(held.count, 18)
-    assert.deepEqual(held.fields, [['#', '65,000'], ['Title', 'BUG: a title that says what the change fixes 0'], ['Author', 'gh:contributor-0'], ['State', 'open'], ['Opened', '2026-04-01 00:00:00']])
+    // the PR number, a number column titled '#', is an identifier: written as it is
+    assert.deepEqual(held.fields, [['#', '65000'], ['Title', 'BUG: a title that says what the change fixes 0'], ['Author', 'gh:contributor-0'], ['State', 'open'], ['Opened', '2026-04-01 00:00:00']])
     // "o" is twice in each dropped Author and once in a State "open" or "closed": every one counts, and the current
     // match, the first of the top row, is washed in its State cell
     const shown = await frame().evaluate(() => {

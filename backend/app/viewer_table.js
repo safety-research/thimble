@@ -8,7 +8,7 @@
 //     columns: [
 //       { name: 'from', title: 'From', width: 180, drop: 1 },  the first to drop in a narrow table
 //       { name: 'subject', title: 'Subject', min: 200 },     text takes the width left, at least `min`, cut with an ellipsis
-//       { name: 't', title: 'Date', type: 'time' },          seconds since 1970, shown in UTC; or 'number'
+//       { name: 't', title: 'Date', type: 'time' },          seconds since 1970, shown in UTC; or 'number', or 'id'
 //     ],
 //     rows: emails,                         plain records, each with its `ref`, which is its row's data-anchor
 //     sort: { by: 't', desc: true },        how it opens; a click on a column's head sorts by it, again the other way
@@ -27,6 +27,9 @@
 // as one beside the side panel, first writes its times shorter, then narrows its columns of text to their `min`, then
 // drops columns in `drop` order (with none, the rightmost first, the one the rows are sorted by last, and never the main
 // column, the first column of text that takes the width left), and draws them again when the room comes back.
+// A column of numbers writes amounts with thousands separators (12,345) and identifiers as they are (67028): a column of
+// `type: 'id'`, and one of numbers whose name or title names an identifier (ID_WORDS), such as an id, a key, a PR, issue
+// or line number, or a year, so the search finds an identifier as it is written.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -50,6 +53,9 @@
   var STAMP = 16 // characters of a time as the kit writes it, YYYY-MM-DD HH:MM; 3 more with the seconds, 5 fewer without the year
   var SAMPLE = 2000 // rows read to fit a column of numbers or times to its values
   var FR = /^\d*\.?\d+fr$/ // a track that shares what is left
+  // the last word of a column's name or title that makes its numbers identifiers: `pr_number`, `issueId`, `Year`,
+  // `PR #`; a name that ends in another word, such as `lines_added` or `comment_count`, is of amounts
+  var ID_WORDS = /^(#|id|ids|uid|uuid|guid|key|pk|no|nr|num|number|pr|issue|ticket|line|lineno|row|page|port|index|idx|seq|rev|revision|version|build|pid|code|zip|year)$/
   var collator = typeof Intl !== 'undefined' ? new Intl.Collator('en', { numeric: true, sensitivity: 'base' }) : null
   var ARROW = {
     up: '<svg class="thimble-colour-ico thimble-table-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
@@ -89,6 +95,15 @@
   function empty(v) {
     return v == null || v === '' || (typeof v === 'number' && !isFinite(v))
   }
+  // whether a column's name or title names an identifier (ID_WORDS), its words split at case, punctuation and space
+  function idName(s) {
+    var words = String(s == null ? '' : s)
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .toLowerCase()
+      .split(/[^a-z0-9#]+|(?=#)/)
+      .filter(Boolean)
+    return words.length > 0 && ID_WORDS.test(words[words.length - 1])
+  }
 
   var HOSTED = typeof WeakMap === 'function' ? new WeakMap() : null // a mount -> the table it holds, which a new one there retires
 
@@ -103,11 +118,14 @@
       })
       .map(function (c) {
         if (typeof c === 'string') c = { name: c }
-        var type = c.type === 'number' || c.type === 'time' ? c.type : 'text'
+        var type = c.type === 'number' || c.type === 'time' ? c.type : c.type === 'id' ? 'number' : 'text'
+        var title = String(c.title == null ? c.name : c.title)
         return {
           name: String(c.name),
-          title: String(c.title == null ? c.name : c.title),
+          title: title,
           type: type,
+          // a column of identifiers: its numbers as they are, laid out and sorted as numbers
+          plain: c.type === 'id' || (type === 'number' && (idName(c.name) || idName(title))),
           width: c.width,
           value: typeof c.value === 'function' ? c.value : null,
           html: typeof c.html === 'function' ? c.html : null,
@@ -305,7 +323,7 @@
     var v = this.value(col, r)
     if (empty(v)) return ''
     if (col.type === 'time') return stamp(v, col.secs)
-    if (col.type === 'number' && typeof v === 'number') return num(v)
+    if (col.type === 'number' && typeof v === 'number') return col.plain ? String(v) : num(v)
     return typeof v === 'object' ? JSON.stringify(v) : String(v)
   }
   // a cell's markup. A time in a column too narrow for its whole stamp keeps the year and the seconds it leaves out in
