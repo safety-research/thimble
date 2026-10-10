@@ -6,7 +6,8 @@
 // and the lens) move too, never standing still to jump after (a step more than twice their share of the move and a
 // pixel), the reader's records follow the drag rather than a page at a time, and a frame that draws only the strip takes
 // under 16 ms (in Chromium; headless WebKit's times are logged, its software drawing of the records spilling into the
-// frames around them). Each run logs its numbers: the frames that moved, the largest step, and the frames' times. A
+// frames around them); held there, the loupe's lines are the records around the thumb, each its number and the start of
+// its text. Each run logs its numbers: the frames that moved, the largest step, and the frames' times. A
 // click a pixel or two off a lone record that Color by colors snaps to it: the reader goes there and chooses it, in
 // Files and in the kit. In Files, two labels that are Color by's choices are two lanes of the strip in their colors, and
 // one turned off leaves one; a label on that is no choice has no lane; a key checked after a label is a lane in its
@@ -251,7 +252,14 @@ for (const [name, engine] of ENGINES) {
         await page.waitForTimeout(8)
       }
       const { samples, moves } = await stopSampling(page)
+      // the loupe's lines once the records there are read: a line per record around the thumb, its number and the start
+      // of its text (in a transcript, who said it first)
+      await page.waitForTimeout(400)
+      const lines = await page.evaluate(() => [...document.querySelectorAll('.loupe[data-open] .loupe-row')].map((r) => ({ n: Number((r.querySelector('.loupe-n')!.textContent ?? '').replace(/,/g, '')), text: r.querySelector('.loupe-t')!.textContent ?? '', seen: r.classList.contains('seen') })))
       await page.mouse.up()
+      assert.equal(lines.length, 17)
+      assert.ok(lines.every((r, i) => !i || r.n === lines[i - 1].n + 1), `numbered in order: ${lines.map((r) => r.n)}`)
+      for (const r of lines) assert.ok(mode === 'transcript' ? r.text.startsWith(`Agent${r.n % 4}message ${r.n} lorem`) : r.text.length > 0, `line ${r.n}: ${r.text}`)
       const rows = motion(samples, moves)
       const driven = rows.filter((r) => Math.abs(r.dy) > 1e-3)
       const followed = driven.filter((r) => r.top).length / driven.length

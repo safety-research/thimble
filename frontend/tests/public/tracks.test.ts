@@ -1,11 +1,11 @@
 // The reader's strip (src/files/Tracks.tsx): its thumb stands for what the reader shows, at least FRAME_MIN_PX tall,
 // as a scrollbar's thumb (a drag holds it where it is held); each pixel row takes the one value most of its records
 // have; a label's paint comes from the ruler's counts per bin; the strip is as wide as its lanes in the scrollbar's
-// geometry, or a plain scrollbar with none; the loupe's lanes show each record in its own color once it is read, the
-// strip's color for its bin, faded, until then, and the find's matches as ticks; a record's tooltip names its line, the
-// matches and values on it, who and when, and the start of its text.
+// geometry, or a plain scrollbar with none; a record's row in the loupe and its one-line tooltip carry its line, a cell
+// per lane (the find's in the ink, each color lane the record's own color once it is read, the strip's color for its
+// bin, faded, until then), who said it and the start of its text.
 import { describe, expect, test } from 'vitest'
-import { binOfRow, colorLanes, followOf, frameGeom, frameOf, FRAME_MIN_PX, labelPaint, lineAt, loupeLanesOf, majorityRows, markerText, paintAt, PLAIN_PX, recordText, rowValues, snap, snapPatch, stripWidth, ticksIn, type LoupeRecord, type OverviewPaint } from '../../src/files/Tracks'
+import { binOfRow, colorLanes, followOf, frameGeom, frameOf, FRAME_MIN_PX, labelPaint, lineAt, majorityRows, paintAt, PLAIN_PX, recordRow, rowValues, snap, snapPatch, stripWidth, ticksIn, type LoupeRecord, type OverviewPaint } from '../../src/files/Tracks'
 import type { LabelRuler } from '../../src/lib/types'
 
 describe('the thumb stands as a scrollbar\'s', () => {
@@ -96,11 +96,6 @@ test('a point of the overview names its line and its bin', () => {
   expect(binOfRow(99, 100, 1000)).toBe(995)
 })
 
-test("a marker says the label's name, with its value when the label has several", () => {
-  expect(markerText({ id: 'a', name: 'edit purpose', valued: true, total: 10, ticks: [] }, { from: 1, to: 1, colour: '', value: 'posts links' })).toBe('edit purpose: posts links')
-  expect(markerText({ id: 'b', name: 'says so', total: 10, ticks: [] }, { from: 1, to: 1, colour: '', value: 'says so' })).toBe('says so')
-})
-
 describe('a click on the overview snaps to a thin patch of color near it', () => {
   test("each row's value is the one its paint colors it in, none for a value turned off or with no color", () => {
     const bins = { kind: 'bins' as const, at: [0, 0, 1, -1, 2, 0, 0, 0], colors: ['blue', 'orange', null], off: [false, false, false] }
@@ -148,27 +143,15 @@ describe('the loupe shows each record in its own color', () => {
     expect(ticksIn(ticks, 1, 1).map((t) => t.from)).toEqual([1])
   })
 
-  test("a record read takes its own color; one not read the strip's for its bin, faded; the find's matches are ticks in the ink", () => {
-    const read = new Map<number, LoupeRecord | null>([
-      [101, { line: 101, lanes: [null, 'green'], marks: [null, 'links'], who: null, when: null, text: '' }],
-      [102, { line: 102, lanes: ['blue', null], marks: ['passed on', null], who: null, when: null, text: '' }],
-      [103, null],
-    ])
-    const lanes = loupeLanesOf(101, 104, 400, [{ id: 'find', ticks: [{ from: 102, to: 103, colour: 'x' }] }], [counts, { kind: 'none' }], (l) => (read.has(l) ? read.get(l) : undefined))
-    expect(lanes).toHaveLength(3)
-    expect(lanes[0].marks).toEqual([{ from: 101, to: 103, colour: 'var(--text-primary)' }])
-    // the first lane: 102 read as blue, 101 and 103 read with none, 104 not read: the strip's blue, faded
-    expect(lanes[1].marks).toEqual([{ from: 101, to: 102, colour: 'blue' }, { from: 103, to: 104, colour: 'blue', faded: true }])
-    expect(lanes[2].marks).toEqual([{ from: 100, to: 101, colour: 'green' }])
-    // a strip with no lane: the loupe keeps one, empty
-    expect(loupeLanesOf(1, 4, 400, [], [], () => undefined)).toEqual([{ marks: [] }])
-  })
-
-  test("a record's tooltip: its line, the matches and values on it, who and when, and the start of its text", () => {
-    const rec: LoupeRecord = { line: 3998, lanes: ['blue', null], marks: ['passed on', null], who: 'GPT-5.4', when: '2026-06-18 20:15', text: 'drafting the next update\n for the page' }
-    expect(recordText(3998, rec, ['“county”'])).toBe('Line 3,998 · “county” · passed on\nGPT-5.4 · 2026-06-18 20:15\ndrafting the next update for the page')
-    // not read yet: its line alone
-    expect(recordText(12, undefined, [])).toBe('Line 12')
-    expect(recordText(12, { ...rec, text: 'x'.repeat(400) }, []).split('\n')[2]).toHaveLength(160)
+  test("a record's row: its line, a cell per lane (the find's in the ink, a record read in its own color, one not read in the strip's, faded), who said it and its text", () => {
+    const rec: LoupeRecord = { line: 102, lanes: ['blue', null], who: 'GPT-5.4', text: 'drafting the next update\n for the page' }
+    const paints = [counts, { kind: 'none' } as OverviewPaint]
+    const ink = 'var(--text-primary)'
+    expect(recordRow(102, 400, rec, [ink], paints)).toEqual({ num: '102', cells: [{ colour: ink }, { colour: 'blue' }, null], who: 'GPT-5.4', text: 'drafting the next update\n for the page' })
+    // not read yet: the strip's color for its bin, faded, and no text
+    expect(recordRow(150, 400, undefined, [null], paints)).toEqual({ num: '150', cells: [null, { colour: 'blue', faded: true }, null], who: null, text: '' })
+    // read and found to have none: no cell
+    expect(recordRow(150, 400, null, [], paints)).toEqual({ num: '150', cells: [null, null], who: null, text: '' })
+    expect(recordRow(3998, 10_000, { ...rec, line: 3998 }, [], paints).num).toBe('3,998')
   })
 })

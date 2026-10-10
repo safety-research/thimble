@@ -13,13 +13,15 @@
 // first record and chooses it as the find does. A jump of the reader (a click, the find) makes the thumb glide to its new
 // place. The wheel over the strip scrolls the reader.
 //
-// Where the strip draws a record shorter than LOUPE_ROW_PX, resting on it opens the loupe beside it (Loupe.tsx): the
-// records around the pointer a few px each, a lane per lane of the strip in each record's own color, every 10th line
-// numbered, what the reader shows tinted with a bar beside it, and a bracket beside the strip over the stretch it
-// shows. It follows the pointer, and the thumb once the reader scrolls; moved into, it holds still, names the record
-// under the pointer in thimble's tooltip (its line, its values, who and when, the start of its text), goes there on a
-// click, and scrolls the reader on the wheel. On a touch screen a press on the strip opens it, a drag scrubs and the
-// release goes there. A strip that tells every record apart names the record under the pointer on rest instead.
+// Where the strip draws a record shorter than TELL_APART_PX, resting on it opens the loupe beside it (Loupe.tsx): a
+// line per record around the pointer, its line number, a cell per lane of the strip in the record's own color, and the
+// start of its text (for a transcript, who said it, then the start of the message); the record under the pointer
+// darker, those the reader shows tinted, and a bracket beside the strip over the stretch it shows. It follows the
+// pointer along the strip, and the scroll position after the wheel over the strip or a drag of the thumb; moved into,
+// it holds still, goes to a record on a click, its rows staying where they are, and scrolls the reader on the wheel, its
+// rows following. On a touch screen a press on the strip opens it, a drag scrubs and the release goes there. A strip
+// that tells every record apart names the record under the pointer on rest instead, on one line: its number, its
+// cells, the start of its text.
 //
 // The reader publishes where it stands each frame it scrolls (PlaceFeed), and one animation frame moves the thumb (and
 // an open loupe) with transforms alone: nothing renders in React while the reader scrolls or a drag moves. While it
@@ -29,7 +31,7 @@ import { Tip } from '../components/Tooltip'
 import { useTheme } from '../lib/theme'
 import type { Concept, LabelRuler } from '../lib/types'
 import { classesOf, colourVar } from './labels'
-import { recordLoupe, useLoupe, type LoupeLane, type LoupeMark } from './Loupe'
+import { recordLoupe, RowLine, rowKey, useLoupe, type LoupeCell, type LoupeRow } from './Loupe'
 import { laneAt, laneBoxes, nearestTick, TRACK_LANES, type RulerColumn, type RulerTick } from './Ruler'
 
 /** px: the strip's width with no lane (a plain scrollbar) */
@@ -74,14 +76,12 @@ export type OverviewPaint =
   | { kind: 'density'; bytes: readonly number[] }
   | { kind: 'none' }
 
-/** A record as the loupe shows it: its line, per color lane its color (null for none) and what its value is called
- * (null for none), and who and when and the start of its text for its tooltip. */
+/** A record as the loupe and a record's tooltip show it: its line, per color lane its color (null for none), who said
+ * it and the start of its text. */
 export interface LoupeRecord {
   line: number
   lanes: readonly (string | null)[]
-  marks: readonly (string | null)[]
   who: string | null
-  when: string | null
   text: string
 }
 
@@ -454,9 +454,6 @@ interface TracksProps {
   records?: (from: number, to: number) => Promise<LoupeRecord[]>
 }
 
-/** What a marker says of a record: the label's name, and its value when the label has more than one. */
-export const markerText = (col: RulerColumn, tick: RulerTick): string => (col.valued && tick.value ? `${col.name}: ${tick.value}` : col.name)
-
 /** The marks of `ticks` (sorted by their lines) on lines `a` to `b`, from the first that ends at `a` or after. Pure. */
 export function ticksIn(ticks: readonly RulerTick[], a: number, b: number): RulerTick[] {
   let lo = 0
@@ -471,35 +468,22 @@ export function ticksIn(ticks: readonly RulerTick[], a: number, b: number): Rule
   return out
 }
 
-/** A record's tooltip: its line and the matches and values on it, who and when, and the start of its text. Pure. */
-export function recordText(line: number, rec: LoupeRecord | null | undefined, found: readonly string[]): string {
-  const head = [`Line ${line.toLocaleString('en-US')}`, ...found, ...(rec?.marks.filter((m): m is string => !!m) ?? [])].join(' · ')
-  const who = rec ? [rec.who, rec.when].filter(Boolean).join(' · ') : ''
-  const t = rec?.text.replace(/\s+/g, ' ').trim() ?? ''
-  return [head, who, t.length > 160 ? `${t.slice(0, 159)}…` : t].filter(Boolean).join('\n')
-}
-
-/** The loupe's lanes for lines `a` to `b`: a lane per marker, its ticks; then a lane per color lane, each record in its
- * own color where `got` has read it (`undefined` for a record not read yet, which takes the strip's color for its bin,
- * faded); one empty lane when the strip has none. Pure. */
-export function loupeLanesOf(a: number, b: number, total: number, markers: readonly { id: string; ticks: readonly RulerTick[] }[], paints: readonly OverviewPaint[], got: (line: number) => LoupeRecord | null | undefined): LoupeLane[] {
-  const out: LoupeLane[] = markers.map((col) => ({ marks: ticksIn(col.ticks, a, b).map((t) => ({ from: t.from - 1, to: t.to, colour: col.id === 'find' ? FIND_INK : MARKER_INK })) }))
+/** A record as a row of the loupe and its one-line tooltip: its line; a cell per marker lane (its ink where the line
+ * holds a mark, `marked`), then per color lane the record's own color once it is read, the strip's color for its
+ * stretch, faded, while it is not (`rec` undefined), and none once read without one; who said it and the start of its
+ * text. Pure. */
+export function recordRow(line: number, total: number, rec: LoupeRecord | null | undefined, marked: readonly (string | null)[], paints: readonly OverviewPaint[]): LoupeRow {
+  const cells: (LoupeCell | null)[] = marked.map((c) => (c ? { colour: c } : null))
   paints.forEach((p, j) => {
-    const marks: LoupeMark[] = []
-    for (let line = a; line <= b; line++) {
-      const r = got(line)
-      if (r === undefined) {
-        const c = paintAt(p, line, total)
-        if (c) marks.push({ from: line - 1, to: line, colour: c, faded: true })
-      } else {
-        const c = r?.lanes[j]
-        if (c) marks.push({ from: line - 1, to: line, colour: c })
-      }
+    if (rec === undefined) {
+      const c = paintAt(p, line, total)
+      cells.push(c ? { colour: c, faded: true } : null)
+    } else {
+      const c = rec?.lanes[j]
+      cells.push(c ? { colour: c } : null)
     }
-    out.push({ marks })
   })
-  if (!out.length) out.push({ marks: [] })
-  return out
+  return { num: line.toLocaleString('en-US'), cells, who: rec?.who ?? null, text: rec?.text ?? '' }
 }
 
 /** ms the thumb takes to go from where a drag left it to where the reader stands */
@@ -692,25 +676,25 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
       return got && typeof got !== 'string' ? (got.get(line) ?? null) : got === 'failed' ? null : undefined
     }
   }
-  const foundOn = (line: number): string[] => {
-    const out: string[] = []
-    markers.forEach((col, i) => {
-      const t = ticksIn(sorted[i], line, line)[0]
-      if (t) out.push(markerText(col, t))
-    })
+  /** Per marker lane, its ink where `line` holds a mark of it (the find's in the ink, another kind's in grey). */
+  const markedOn = (line: number): (string | null)[] => markers.map((col, i) => (ticksIn(sorted[i], line, line).length ? (col.id === 'find' ? FIND_INK : MARKER_INK) : null))
+  /** The rows of lines `a` to `b`, as the loupe and a record's tooltip show them. */
+  const rowsOf = (a: number, b: number): LoupeRow[] => {
+    const got = recordsIn(a, b)
+    const out: LoupeRow[] = []
+    for (let line = a; line <= b; line++) out.push(recordRow(line, total ?? 0, got(line), markedOn(line), paints))
     return out
   }
 
   // ---- the loupe
   const T = total ?? 0
-  const sizes = recordLoupe(T, px)
+  const rows = records ? recordLoupe(T, px) : 0
   const loupe = useLoupe({
     strip: over,
     bounds: root,
     total: T,
-    units: records ? sizes.units : 0,
-    rowPx: sizes.rowPx,
-    records: true,
+    rows,
+    numbered: true,
     pxOf: (u) => (T > 0 ? (u / T) * px$.current : 0),
     unitAt: (y) => (T > 0 ? Math.max(0, Math.min(T, (y / Math.max(1, px$.current)) * T)) : 0),
     thumbMid: () => {
@@ -726,15 +710,8 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
       const room = px$.current - d.frameH
       return ((room > 0 ? Math.max(0, Math.min(1, d.frameTop / room)) : 0) * Math.max(0, 1 - h) + h / 2) * T
     },
-    lanes: (start, units) => {
-      const a = Math.floor(start) + 1
-      const b = Math.min(T, Math.floor(start) + units)
-      return loupeLanesOf(a, b, T, markers.map((c, i) => ({ id: c.id, ticks: sorted[i] })), paints, colorN ? recordsIn(a, b) : () => null)
-    },
-    pick: (u) => {
-      const line = Math.max(1, Math.min(T, Math.floor(u) + 1))
-      return { from: line - 1, to: line, text: recordText(line, recordsIn(line, line)(line), foundOn(line)), act: () => onLine?.(line) }
-    },
+    rowsAt: (start, k) => rowsOf(start + 1, Math.min(T, start + k)),
+    act: (i) => onLine?.(Math.max(1, Math.min(T, i + 1))),
     wheel: (d) => calls.current.onScrollBy(d),
   })
   const loupe$ = useRef<typeof loupe | null>(null)
@@ -742,13 +719,13 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
   useEffect(() => loupe$.current?.refresh(), [paints, markers, records])
 
   // ---- a record named on rest, where the strip tells every record apart
-  const [tip, setTip] = useState<{ text: string; y: number } | null>(null)
+  const [tip, setTip] = useState<{ row: LoupeRow; y: number } | null>(null)
   const named = useRef<{ line: number; y: number } | null>(null)
   const nameTimer = useRef(0)
   const nameAt = () => {
     const at = named.current
     if (!at || !T) return
-    setTip({ text: recordText(at.line, recordsIn(at.line, at.line)(at.line), foundOn(at.line)), y: at.y })
+    setTip({ row: rowsOf(at.line, at.line)[0], y: at.y })
   }
   heard.current = () => {
     loupe$.current?.refresh()
@@ -815,7 +792,7 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
     const onFrame = y >= g.frameTop && y <= g.frameTop + g.frameH
     capture(e)
     // a touch off the thumb scrubs with the loupe, where the strip has one
-    if (e.pointerType === 'touch' && !onFrame && records && sizes.units) {
+    if (e.pointerType === 'touch' && !onFrame && rows) {
       grab.current = { dy: 0, y0: e.clientY, moved: false, onFrame: false, touch: true }
       loupe.touchStart(e)
       return
@@ -874,18 +851,25 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
     letGo()
   }
   const wheel = (e: WheelEvent<HTMLDivElement>) => {
+    // a real scroll: an open loupe follows the scroll position
+    loupe.wheel()
     calls.current.onScrollBy(e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * Math.max(1, px) : e.deltaY)
   }
 
-  // ---- the hover: the loupe follows the pointer; where the strip has none, a marker's name, else the record there
+  // ---- the hover: the loupe follows the pointer; where the strip has none, the record of a marker under the pointer at
+  // once, else the record there on rest
   const hover = (e: PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'touch') return
-    if (records && sizes.units) return loupe.move(e)
+    if (rows) return loupe.move(e)
     const hit = markerAt(e)
     window.clearTimeout(nameTimer.current)
-    if (hit) {
-      named.current = null
-      return setTip({ text: markerText(hit.col, hit.tick), y: e.clientY })
+    if (hit && T) {
+      const line = Math.max(1, Math.min(T, hit.tick.from))
+      if (named.current?.line !== line) {
+        named.current = { line, y: e.clientY }
+        nameAt()
+      }
+      return
     }
     if (!records || !T || px <= 0) return setTip(null)
     const line = lineAt(yIn(e) / px, T)
@@ -922,7 +906,11 @@ export function ReaderTracks({ total, feed, paint, paintName, lanes = NO_LANES, 
       </div>
       <div ref={loupe.bracket} className="loupe-bracket" />
       {loupe.element}
-      {tip && <Tip text={tip.text} place={tipPlace} className="tip-lines reader-ruler-tip" />}
+      {tip && (
+        <Tip text={rowKey(tip.row)} place={tipPlace} className="tip-one reader-ruler-tip">
+          <RowLine row={tip.row} />
+        </Tip>
+      )}
     </div>
   )
 }

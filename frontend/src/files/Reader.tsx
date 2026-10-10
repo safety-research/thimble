@@ -643,8 +643,8 @@ export function useRecordLines(ws: string, ref: string | undefined, path: string
   return { at: mine?.at ?? null, pending: asks && !mine }
 }
 
-/** A record as the loupe's tooltip names it: its index, who and when (the sniff's keys, else those the record
- * carries), and its first two lines of words. */
+/** A record as the loupe and a record's tooltip name it: its index, who and when (the sniff's keys, else those the
+ * record carries), and its first two lines of words. */
 export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color: string | null): PreviewRecord {
   const first = (s: string) =>
     s
@@ -1255,8 +1255,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   }, [colored, color.picks, paintOf, nameOfChoice])
   const paintName = nameOfChoice(colorChoice)
   const hint = builtins.transcript
-  // the records the loupe shows and a record's tooltip names, read from the server: per choice of Color by its color and
-  // its value (a label's read from its rows on those lines), who and when, and the start of its text
+  // the records the loupe shows and a record's tooltip names, read from the server: per choice of Color by its color (a
+  // label's read from its rows on those lines), who said it, and the start of its text
   const laneOf = color.laneOf
   const pickLabels = useMemo(() => colored && color.picks.some((c) => c.by === 'label'), [colored, color.picks])
   const loupeRecords = useCallback(
@@ -1266,7 +1266,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
       return recs.map((rec) => {
         const lanes = colored ? laneOf(rec, (id) => rows?.get(`${path}#L${rec.line}`)?.get(id)) : []
         const p = previewOf(rec, hint, null)
-        return { line: rec.line, lanes: lanes.map((l) => l.color), marks: lanes.map((l) => l.name), who: p.who, when: p.when, text: p.text }
+        return { line: rec.line, lanes: lanes.map((l) => l.color), who: p.who, text: p.text }
       })
     },
     [workspace, path, pickLabels, delimit, colored, laneOf, hint],

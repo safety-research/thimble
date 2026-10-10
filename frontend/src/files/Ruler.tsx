@@ -4,9 +4,10 @@
 // One strip at every length: the scrollbar's track holds a lane per column (the report's checks), each covering the
 // whole page, drawn on a canvas, under a thumb that frames the span on screen; with no lane it is a plain scrollbar. A
 // drag, a press on the track or a wheel scrolls the page; a click on a mark goes to it. Where the page is long enough
-// that the strip draws it at a small part of its size, resting on the strip opens the loupe beside it (Loupe.tsx): a few
-// screens of the page around the pointer, larger, the lanes' marks apart, what is on screen tinted with a bar beside it.
-// Moved into, it names the mark under the pointer and goes to it on a click. Elsewhere a mark is named on hover.
+// that the strip draws it at a small part of its size, resting on the strip opens the loupe beside it (Loupe.tsx): a
+// line per passage around the pointer (a heading, a paragraph, a list item), a cell per lane in its check's color where
+// the check comments on it, and the start of its text; those on screen tinted. A click on a line goes to its passage.
+// Elsewhere a mark names its passage on hover, on one line: its cells and the start of its text.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type RefObject, type WheelEvent } from 'react'
 import { flushSync } from 'react-dom'
 import { Tip } from '../components/Tooltip'
@@ -15,7 +16,7 @@ import { bus } from '../lib/bus'
 import { useTheme } from '../lib/theme'
 import type { Concept, LabelRuler } from '../lib/types'
 import { classesOf, colourVar, marksOf } from './labels'
-import { LOUPE_PX, useLoupe, type LoupeLane } from './Loupe'
+import { loupeHeight, LOUPE_ROWS, RowLine, rowKey, useLoupe, type LoupeCell, type LoupeRow } from './Loupe'
 
 /** the bins the file is cut into for the label lanes (the server's most) */
 export const RULER_BINS = 2000
@@ -31,9 +32,12 @@ const HIT_PX = 3
 const DRAG_PX = 3
 /** ms a released thumb stays where it was dropped while the page catches up */
 const SETTLE_MS = 400
-/** the screens of the page the loupe shows, and how many times the strip's size it must show them at to open */
+/** the loupe opens on a page where LOUPE_SCREENS screens of it at the loupe's height are LOUPE_GAIN times the strip's
+ * size or more */
 const LOUPE_SCREENS = 2
 const LOUPE_GAIN = 2
+/** px of the page from a passage's top that a click on it in the loupe brings to the top half of the screen at most */
+const PASSAGE_LEAD_PX = 24
 
 /** A mark on a lane: the lines it stands for, `from` to `to`, and the value it shows. */
 export interface RulerTick {
@@ -284,15 +288,58 @@ export function markText(col: RulerColumn, tick: RulerTick, line: number | null)
   return `${where} · ${col.name}${col.valued && tick.value ? `: ${tick.value}` : ''}`
 }
 
-/** The page the loupe shows beside a ruler `trackPx` tall over a page of `total` px, `screen` px of which are on screen:
- * LOUPE_SCREENS screens of it, at the px of the loupe a px of the page takes (`rowPx`); none (0) while that is less than
- * LOUPE_GAIN times the strip's own, the strip then showing the page large enough, or while the page is that short.
- * Pure. */
-export function pageLoupe(total: number, trackPx: number, screen: number): { units: number; rowPx: number } {
-  const units = LOUPE_SCREENS * screen
-  if (total <= 0 || trackPx <= 0 || units <= 0 || units >= total) return { units: 0, rowPx: 1 }
-  const rowPx = LOUPE_PX / units
-  return rowPx >= LOUPE_GAIN * (trackPx / total) ? { units, rowPx } : { units: 0, rowPx }
+/** Whether the loupe opens beside a ruler `trackPx` tall over a page of `total` px, `screen` px of which are on screen:
+ * on a page where LOUPE_SCREENS screens of it, at the loupe's height, are drawn LOUPE_GAIN times the strip's size or
+ * more; never on a page that short, or with none. Pure. */
+export function pageLoupe(total: number, trackPx: number, screen: number): boolean {
+  const span = LOUPE_SCREENS * screen
+  if (total <= 0 || trackPx <= 0 || span <= 0 || span >= total) return false
+  return loupeHeight(LOUPE_ROWS) / span >= LOUPE_GAIN * (trackPx / total)
+}
+
+/** A passage of the page (a heading, a paragraph, a list item): its top and bottom, px of the page from its top, its
+ * text, and whether it is a heading. In reading order, their tops never going up. */
+export interface Passage {
+  top: number
+  bottom: number
+  text: string
+  heading?: boolean
+}
+
+/** The passage unit at `y` px of a page `total` px tall, the passages' tops `tops`: passage i from its top to the next
+ * one's (the last to the page's end), fractions between; 0 above the first. Pure. */
+export function passageAt(tops: readonly number[], y: number, total: number): number {
+  const n = tops.length
+  if (!n || y <= tops[0]) return 0
+  let lo = 0
+  let hi = n - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (tops[mid] <= y) lo = mid
+    else hi = mid - 1
+  }
+  const next = lo + 1 < n ? tops[lo + 1] : Math.max(total, tops[lo])
+  return lo + (next > tops[lo] ? Math.min(1, (y - tops[lo]) / (next - tops[lo])) : 0)
+}
+
+/** The page's px at passage unit `u`: passageAt's inverse. Pure. */
+export function passagePx(tops: readonly number[], u: number, total: number): number {
+  const n = tops.length
+  if (!n) return 0
+  const i = Math.max(0, Math.min(n - 1, Math.floor(u)))
+  const next = i + 1 < n ? tops[i + 1] : Math.max(total, tops[i])
+  return tops[i] + Math.max(0, Math.min(1, u - i)) * (next - tops[i])
+}
+
+/** Per passage, a cell per lane: the color of the lane's first mark over the passage (a mark over the px `from − 1` to
+ * `to`), null where none is. Pure. */
+export function passageCells(passages: readonly Passage[], columns: readonly RulerColumn[]): (LoupeCell | null)[][] {
+  return passages.map((p) =>
+    columns.map((col) => {
+      const t = col.ticks.find((k) => k.from - 1 < p.bottom - 0.5 && k.to > p.top + 0.5)
+      return t ? { colour: t.colour } : null
+    }),
+  )
 }
 
 interface Hover {
@@ -314,11 +361,15 @@ interface ReaderRulerProps {
   onSeek: (fraction: number, held: boolean) => void
   /** a wheel over the ruler, px down */
   onWheel: (px: number) => void
-  /** a mark's tooltip, markText by default */
+  /** a mark's tooltip where no passage is known, markText by default */
   tipOf?: (col: RulerColumn, tick: RulerTick, line: number | null) => string
+  /** the page's passages, a line each in the loupe; a mark's tooltip names the passage it is on */
+  passages?: readonly Passage[]
 }
 
-export function ReaderRuler({ columns, view, onJump, onMark, onSeek, onWheel, tipOf = markText }: ReaderRulerProps) {
+const NO_PASSAGES: readonly Passage[] = []
+
+export function ReaderRuler({ columns, view, onJump, onMark, onSeek, onWheel, tipOf = markText, passages = NO_PASSAGES }: ReaderRulerProps) {
   const n = columns.length
   const root = useRef<HTMLDivElement>(null)
   const bar = useRef<HTMLDivElement>(null)
@@ -332,37 +383,42 @@ export function ReaderRuler({ columns, view, onJump, onMark, onSeek, onWheel, ti
   }, [])
   const place = thumbPlace(view, trackPx, THUMB_MIN_PX)
   const [drag, setDrag] = useState<{ top: number; held: boolean } | null>(null)
-  const latest = useRef({ view, place, trackPx, onSeek })
-  latest.current = { view, place, trackPx, onSeek }
+  const latest = useRef({ view, place, trackPx, onSeek, onJump })
+  latest.current = { view, place, trackPx, onSeek, onJump }
   const sorted = useMemo(() => columns.map((c) => [...c.ticks].sort((a, b) => a.from - b.from)), [columns])
   const total = columns[0]?.total ?? 0
   const thumbTop = drag ? drag.top : place.top
 
-  // ---- the loupe, on a page long enough
-  const sizes = pageLoupe(total, trackPx, view.height * total)
+  // ---- the loupe, a line per passage, on a page long enough
+  const tops = useMemo(() => passages.map((p) => p.top), [passages])
+  const cells = useMemo(() => passageCells(passages, columns), [passages, columns])
+  const rowOf = (i: number): LoupeRow => ({ num: null, cells: cells[i] ?? [], who: null, text: passages[i]?.text ?? '', heading: passages[i]?.heading })
+  const P = passages.length
+  const hasLoupe = n > 0 && P > 0 && pageLoupe(total, trackPx, view.height * total)
+  const unitOf = (y: number) => passageAt(tops, y, total)
   const loupe = useLoupe({
     strip: bar,
     bounds: root,
-    total,
-    units: n ? sizes.units : 0,
-    rowPx: sizes.rowPx,
-    records: false,
-    pxOf: (u) => (total > 0 ? (u / total) * latest.current.trackPx : 0),
-    unitAt: (y) => (total > 0 ? Math.max(0, Math.min(total, (y / Math.max(1, latest.current.trackPx)) * total)) : 0),
+    total: P,
+    rows: hasLoupe ? Math.min(LOUPE_ROWS, P) : 0,
+    numbered: false,
+    pxOf: (u) => (total > 0 ? (passagePx(tops, u, total) / total) * latest.current.trackPx : 0),
+    unitAt: (y) => (total > 0 ? unitOf(Math.max(0, Math.min(total, (y / Math.max(1, latest.current.trackPx)) * total))) : 0),
     thumbMid: () => (drag$.current ? drag$.current.top : latest.current.place.top) + latest.current.place.height / 2,
-    view: () => [latest.current.view.top * total, (latest.current.view.top + latest.current.view.height) * total],
+    view: () => [unitOf(latest.current.view.top * total), unitOf((latest.current.view.top + latest.current.view.height) * total)],
     // where a drag holds the thumb, ahead of the page
     center: () => {
       const { view: v, place: p, trackPx: t } = latest.current
       const top = drag$.current ? viewTopAt(drag$.current.top, p.height, t, v.height) : v.top
-      return (top + v.height / 2) * total
+      return unitOf((top + v.height / 2) * total)
     },
-    lanes: (start, units): LoupeLane[] => sorted.map((ticks) => ({ marks: ticks.filter((t) => t.to >= start && t.from - 1 <= start + units).map((t) => ({ from: t.from - 1, to: t.to, colour: t.colour })) })),
-    pick: (u, lane) => {
-      if (lane == null || !columns[lane]) return null
-      const col = columns[lane]
-      const tick = nearestTick(sorted[lane], u, HIT_PX / Math.max(1e-6, sizes.rowPx))
-      return tick ? { from: tick.from - 1, to: tick.to, text: tipOf(col, tick, null), act: () => onMark(col.id, tick) } : null
+    rowsAt: (start, k) => Array.from({ length: Math.max(0, Math.min(P, start + k) - start) }, (_, j) => rowOf(start + j)),
+    // to the passage: its middle, or for a passage taller than half the screen its top near the screen's top
+    act: (i) => {
+      const p = passages[i]
+      if (!p || total <= 0) return
+      const screen = latest.current.view.height * total
+      latest.current.onJump(Math.min((p.top + p.bottom) / 2, p.top + screen / 2 - PASSAGE_LEAD_PX) / total)
     },
     wheel: (px) => onWheel(px),
   })
@@ -372,8 +428,7 @@ export function ReaderRuler({ columns, view, onJump, onMark, onSeek, onWheel, ti
   loupe$.current = loupe
   // an open loupe follows the page as it scrolls and the thumb as it is dragged
   useLayoutEffect(() => loupe$.current.moved(), [view.top, view.height, drag])
-  useEffect(() => loupe$.current.refresh(), [columns])
-  const hasLoupe = n > 0 && sizes.units > 0
+  useEffect(() => loupe$.current.refresh(), [columns, passages])
 
   // ---- the scrollbar
   const grab = useRef<{ dy: number; y0: number; moved: boolean; top: number; touch?: boolean } | null>(null)
@@ -471,9 +526,13 @@ export function ReaderRuler({ columns, view, onJump, onMark, onSeek, onWheel, ti
   useEffect(() => () => {
     if (frame.current != null) cancelAnimationFrame(frame.current)
   }, [])
-  const wheel = (e: WheelEvent<HTMLDivElement>) => onWheel(e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * Math.max(1, trackPx) : e.deltaY)
+  const wheel = (e: WheelEvent<HTMLDivElement>) => {
+    // a real scroll: an open loupe follows the scroll position
+    loupe.wheel()
+    onWheel(e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * Math.max(1, trackPx) : e.deltaY)
+  }
 
-  // ---- the hover: the loupe follows the pointer; on a page it does not open for, a mark's name
+  // ---- the hover: the loupe follows the pointer; on a page it does not open for, the passage a mark is on
   const [hover, setHover] = useState<Hover | null>(null)
   useEffect(() => setHover(null), [columns])
   const hoverAt = (e: PointerEvent<HTMLDivElement>) => {
@@ -487,6 +546,15 @@ export function ReaderRuler({ columns, view, onJump, onMark, onSeek, onWheel, ti
     setHover(null)
     loupe.leave(e)
   }
+  /** the passage a hovered mark is on, by its middle */
+  const hoverRow = useMemo(() => {
+    if (!hover || !P) return null
+    const t = hover.tick
+    const i = Math.floor(passageAt(tops, (t.from - 1 + t.to) / 2, total))
+    const p = passages[i]
+    return p && t.from - 1 < p.bottom - 0.5 && t.to > p.top + 0.5 ? rowOf(i) : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hover, passages, tops, total, cells])
   const hoverY = hover?.y
   const tipPlace = useCallback(
     (w: number, h: number) => {
@@ -504,7 +572,13 @@ export function ReaderRuler({ columns, view, onJump, onMark, onSeek, onWheel, ti
       </div>
       <div ref={loupe.bracket} className="loupe-bracket" />
       {loupe.element}
-      {hover && <Tip text={tipOf(hover.col, hover.tick, null)} place={tipPlace} className="reader-ruler-tip" />}
+      {hover && (hoverRow ? (
+        <Tip text={rowKey(hoverRow)} place={tipPlace} className="tip-one reader-ruler-tip">
+          <RowLine row={hoverRow} />
+        </Tip>
+      ) : (
+        <Tip text={tipOf(hover.col, hover.tick, null)} place={tipPlace} className="reader-ruler-tip" />
+      ))}
     </div>
   )
 }
@@ -519,11 +593,13 @@ interface PageRulerProps {
   /** a click on a mark */
   onMark: (column: string, tick: RulerTick) => void
   tipOf?: (col: RulerColumn, tick: RulerTick) => string
+  /** the page's passages, px from its top, as ReaderRuler's */
+  passages?: readonly Passage[]
 }
 
 /** ReaderRuler beside a page that scrolls as one element. It reads the page's scroll itself and draws it in the same
  * frame, so a scroll renders the ruler alone. */
-export function PageRuler({ scroller, columns, onJump, onMark, tipOf }: PageRulerProps) {
+export function PageRuler({ scroller, columns, onJump, onMark, tipOf, passages }: PageRulerProps) {
   const [view, setView] = useState<{ top: number; height: number; px: number }>({ top: 0, height: 1, px: 0 })
   useEffect(() => {
     const box = scroller.current
@@ -553,5 +629,5 @@ export function PageRuler({ scroller, columns, onJump, onMark, tipOf }: PageRule
     const box = scroller.current
     if (box) box.scrollTop += px
   }
-  return <ReaderRuler columns={columns} view={view} onJump={onJump} onMark={onMark} onSeek={seek} onWheel={wheel} tipOf={tipOf} />
+  return <ReaderRuler columns={columns} view={view} onJump={onJump} onMark={onMark} onSeek={seek} onWheel={wheel} tipOf={tipOf} passages={passages} />
 }

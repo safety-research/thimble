@@ -4,14 +4,17 @@
 // The strip is one track at every length: the find's lane and a lane of colors in the scrollbar's geometry, no second
 // track, a thumb exactly as wide as the strip, its edges on whole device pixels at a pixel ratio of 1 and 2 once still;
 // each pixel row of a lane is one color and the find's matches are ticks in the ink. Resting on the strip opens the loupe
-// beside it after LOUPE_REST_MS, not before, with a bracket beside the strip over the stretch it shows, the records there
-// read and drawn in their own colors; it follows the pointer along the strip, and the thumb once the reader scrolls (the
-// wheel, a drag of the thumb); moved into, it holds still, names the record under the pointer in thimble's tooltip, goes
-// there on a click, and scrolls the reader on the wheel while it keeps its place; out of both, it closes. A touch press
-// on the strip opens it, a drag scrubs and the release goes to the record under its line. A strip that tells every
-// record apart opens no loupe and names the record under the pointer. A click on a find's tick goes to it, and a press
-// on the strip sends the thumb there and scrubs. The report's ruler is the same one strip: a mark named on hover on a
-// short page, the loupe on a long one, and a click on a mark, in the strip or the loupe, goes to it.
+// beside it after LOUPE_REST_MS, not before, with a bracket beside the strip over the stretch it shows: a line per
+// record, its number, its cells in its own colors once read, and the start of its text, the pointer's record in the
+// middle line and darker. It follows the pointer along the strip, never jumping to the thumb while the reader's place
+// moves under it, and the thumb once the reader scrolls on the wheel or the thumb is dragged; moved into, it holds still
+// with no tooltip, the line under the pointer darker; a click goes to that record and leaves its lines where they are,
+// and the wheel scrolls the reader once per turn while the loupe keeps its place and its lines follow; out of both, it
+// closes. A touch press on the strip opens it, a drag scrubs and the release goes to the record under its line. A strip
+// that tells every record apart opens no loupe and names the record under the pointer on one line. A click on a find's
+// tick goes to it, and a press on the strip sends the thumb there and scrubs. The report's ruler is the same one strip:
+// a mark names its passage on hover on a short page, on one line; the loupe opens on a long one, a line per passage, and
+// a click on a line goes to its passage.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -70,15 +73,17 @@ beforeAll(async () => {
       `w.__feed = feed`,
       `const markers = [{ id: 'find', name: '"county"', total: TOTAL, ticks: [{ from: Math.round(TOTAL * 0.4), to: Math.round(TOTAL * 0.42), colour: 'var(--text-primary)' }] }]`,
       // every 7th record of the first value (blue), every 11th of the second (orange), read after a moment
-      `const records = (from, to) => { w.__asked.push([from, to]); const out = []; for (let l = from; l <= to; l++) out.push({ line: l, lanes: [l % 7 === 0 ? 'var(--label-1)' : l % 11 === 0 ? 'var(--label-2)' : null], marks: [l % 7 === 0 ? 'kind: first' : null], who: 'AgentRelent', when: '2026-06-18 20:15', text: 'message ' + l + ' about the county' }); return new Promise((r) => setTimeout(() => r(out), 30)) }`,
+      `const records = (from, to) => { w.__asked.push([from, to]); const out = []; for (let l = from; l <= to; l++) out.push({ line: l, lanes: [l % 7 === 0 ? 'var(--label-1)' : l % 11 === 0 ? 'var(--label-2)' : null], who: 'AgentRelent', text: 'message ' + l + ' about the county' }); return new Promise((r) => setTimeout(() => r(out), 30)) }`,
       // the reader in the middle of the file, showing 25 records of it, as it publishes its place
       `const place = (top) => ({ top, height: 25 / TOTAL, scroll: top * TOTAL * 28, h: 600, content: TOTAL * 28, start: false, end: false })`,
-      `root.render(<div style={{ height: 600, display: 'flex', justifyContent: 'flex-end' }}><ReaderTracks total={TOTAL} feed={feed} paint={{ kind: 'counts', counts, colors: ['var(--label-1)', 'var(--label-2)'], off: [false, false] }} markers={markers} onSeek={(f, held) => w.__seeks.push([f, held])} onScrollBy={(px) => { w.__scrolled.push(px); const p = feed.place; flushSync(() => feed.set(place(Math.max(0, Math.min(1, p.top + px / (TOTAL * 28)))))); return px }} onMark={(c, t) => w.__marks.push([c, t.from])} onLine={(l) => w.__lines.push(l)} records={records} /></div>)`,
+      `root.render(<div style={{ height: 600, display: 'flex', justifyContent: 'flex-end' }}><ReaderTracks total={TOTAL} feed={feed} paint={{ kind: 'counts', counts, colors: ['var(--label-1)', 'var(--label-2)'], off: [false, false] }} markers={markers} onSeek={(f, held) => w.__seeks.push([f, held])} onScrollBy={(px) => { w.__scrolled.push(px); const p = feed.place; flushSync(() => feed.set(place(Math.max(0, Math.min(1, p.top + px / (TOTAL * 28)))))); return px }} onMark={(c, t) => w.__marks.push([c, t.from])} onLine={(l) => { w.__lines.push(l); flushSync(() => feed.set(place(Math.max(0, (l - 13) / TOTAL)))) }} records={records} /></div>)`,
       `w.__render = (top) => { flushSync(() => feed.set(place(top))); return new Promise((r) => setTimeout(r, 250)) }`,
+      // the reader's place moving by a hair, as it does while records load or a browser rounds its scroll
+      `w.__nudge = (k) => flushSync(() => feed.set(place(0.5 + k * 3e-5)))`,
       `w.__render(0.5)`,
       // the report: a page of \`screens\` screens of 560 px beside its ruler, a lane of marks over passages
       `const reportRoot = createRoot(document.getElementById('report')!)`,
-      `function Report({ screens }) { const box = useRef(null); const H = 560 * screens; const ticks = [0.1, 0.104, 0.108, 0.3, 0.6].map((f) => ({ from: Math.round(f * H) + 1, to: Math.round(f * H) + 40, colour: 'var(--label-3)', value: 'x' })); return <div style={{ position: 'fixed', inset: 0, display: 'flex', background: 'var(--bg-app)' }}><div ref={box} className="wu-page" style={{ flex: 1, overflow: 'auto', height: 560 }}><div style={{ height: H }} /></div><PageRuler scroller={box} columns={[{ id: 'check', name: 'Alternative explanations', total: H, ticks }]} onJump={(f) => w.__marks.push(['jump', f])} onMark={(c, t) => w.__marks.push([c, t.from])} tipOf={(col) => col.name} /></div> }`,
+      `function Report({ screens }) { const box = useRef(null); const H = 560 * screens; const ticks = [0.1, 0.104, 0.108, 0.3, 0.6].map((f) => ({ from: Math.round(f * H) + 1, to: Math.round(f * H) + 40, colour: 'var(--label-3)', value: 'x' })); const passages = Array.from({ length: Math.floor(H / 80) }, (_, i) => ({ top: i * 80, bottom: i * 80 + 70, text: (i % 10 ? 'Passage ' : 'Section ') + i + ' of the report, which goes on for a while', heading: i % 10 === 0 })); return <div style={{ position: 'fixed', inset: 0, display: 'flex', background: 'var(--bg-app)' }}><div ref={box} className="wu-page" style={{ flex: 1, overflow: 'auto', height: 560 }}><div style={{ height: H }} /></div><PageRuler scroller={box} columns={[{ id: 'check', name: 'Alternative explanations', total: H, ticks }]} onJump={(f) => w.__marks.push(['jump', f])} onMark={(c, t) => w.__marks.push([c, t.from])} tipOf={(col) => col.name} passages={passages} /></div> }`,
       `w.__report = (screens) => { flushSync(() => reportRoot.render(<Report key={screens} screens={screens} />)); return new Promise((r) => setTimeout(r, 300)) }`,
     ],
     {
@@ -122,8 +127,19 @@ const layout = (pg: Page = page) =>
       frameRadius: parseFloat(getComputedStyle(frame).borderTopLeftRadius),
       frameFill: getComputedStyle(frame).backgroundColor,
       chip: parseFloat(getComputedStyle(document.body).getPropertyValue('--radius-chip')),
-      tip: document.querySelector('.loupe-tip')?.textContent ?? null,
+      tips: document.querySelectorAll('.tip').length,
       rulerTip: document.querySelector('.reader-ruler-tip')?.textContent ?? null,
+      rulerTipOne: document.querySelector('.reader-ruler-tip')?.classList.contains('tip-one') ?? false,
+      rulerTipH: (document.querySelector('.reader-ruler-tip') as HTMLElement | null)?.offsetHeight ?? 0,
+      rows: [...document.querySelectorAll('.loupe[data-open] .loupe-row')].map((r) => ({
+        n: r.querySelector('.loupe-n')!.textContent ?? '',
+        text: r.querySelector('.loupe-t')!.textContent ?? '',
+        cells: [...r.querySelectorAll('.loupe-cell')].map((i) => (i as HTMLElement).style.background),
+        seen: r.classList.contains('seen'),
+        at: r.classList.contains('at'),
+        top: r.getBoundingClientRect().top,
+        height: r.getBoundingClientRect().height,
+      })),
     }
   })
 
@@ -205,7 +221,9 @@ test("each pixel row of the lane of colors is one color, and the find's matches 
   assert.ok(a > 0 && Math.max(r, g, b) - Math.min(r, g, b) < 12, `the find's tick has no color: ${rows.tick}`)
 })
 
-test('resting on the strip opens the loupe beside it, not before, with a bracket over the stretch it shows and its records read', async () => {
+const num = (n: string) => Number(n.replace(/,/g, ''))
+
+test('resting on the strip opens the loupe beside it, not before: a line per record, its number, its cells in its own colors, the start of its text', async () => {
   await reset()
   await page.evaluate(() => ((window as any).__asked = []))
   const over = (await page.locator('.track-over').boundingBox())!
@@ -219,40 +237,60 @@ test('resting on the strip opens the loupe beside it, not before, with a bracket
   // beside the strip, its middle at the pointer
   assert.ok(g.loupe!.right <= g.over.left && g.loupe!.right > g.over.left - 16, JSON.stringify([g.loupe, g.over]))
   assert.ok(near((g.loupe!.top + g.loupe!.bottom) / 2, y, 2), `the loupe's middle ${(g.loupe!.top + g.loupe!.bottom) / 2}, the pointer ${y}`)
-  // the bracket beside the strip, on the loupe's side, over the 72 records around the pointer's
+  assert.ok(g.loupe!.width >= 200 && g.loupe!.width <= 360, `as wide as the room leaves, 200 to 360 px: ${g.loupe!.width}`)
+  // the bracket beside the strip, on the loupe's side, over the records it shows
   assert.equal(g.bracketOpen, true)
   assert.ok(g.bracket!.right <= g.over.left && g.bracket!.right >= g.over.left - 2 && g.bracket!.left > g.loupe!.right - 1, JSON.stringify([g.bracket, g.over, g.loupe]))
   assert.ok(near((g.bracket!.top + g.bracket!.bottom) / 2, y, 2), JSON.stringify([g.bracket, y]))
-  // the records around line 3,000 asked for, and drawn in their own colors once read
+  // 17 lines of 16 px, in order, the pointer's record in the middle one and darker
+  assert.equal(g.rows.length, 17)
+  assert.ok(g.rows.every((r) => r.height === 16))
+  const ns = g.rows.map((r) => num(r.n))
+  assert.ok(ns.every((n, i) => !i || n === ns[i - 1] + 1), `numbered in order: ${ns}`)
+  assert.equal(g.rows.findIndex((r) => r.at), 8)
+  assert.ok(Math.abs(ns[8] - 3001) <= 2, `the pointer's record ${ns[8]}`)
+  assert.ok(g.rows.every((r) => !r.seen), 'none of them on screen')
+  // the records around it asked for, and once read each line says who and the start of its text, its cell in its own
+  // color (every 7th record blue, every 11th orange), the find's cell empty
   const asked = await page.evaluate(() => (window as any).__asked as [number, number][])
-  const line = Math.floor(0.3 * 10_000)
-  assert.ok(asked.some(([a, b]) => a <= line && b >= line), `asked ${JSON.stringify(asked)}`)
+  assert.ok(ns.every((n) => asked.some(([a, b]) => a <= n && b >= n)), `asked ${JSON.stringify(asked)}`)
   await page.waitForTimeout(150)
-  const full = await page.evaluate(() => {
-    const cv = document.querySelector('.loupe canvas') as HTMLCanvasElement
-    const probe = document.createElement('i')
-    probe.style.color = 'var(--label-1)'
-    document.body.appendChild(probe)
-    const blue = getComputedStyle(probe).color.match(/\d+/g)!.slice(0, 3).map(Number)
-    probe.remove()
-    const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data
-    let n = 0
-    for (let i = 0; i < d.length; i += 4) if (d[i + 3] === 255 && Math.abs(d[i] - blue[0]) < 3 && Math.abs(d[i + 1] - blue[1]) < 3 && Math.abs(d[i + 2] - blue[2]) < 3) n++
-    return n
-  })
-  assert.ok(full > 0, 'the records read are drawn in their own color, at full strength')
+  const h = await layout()
+  for (const r of h.rows) {
+    const n = num(r.n)
+    assert.equal(r.text, `AgentRelentmessage ${n} about the county`)
+    assert.equal(r.cells.length, 2)
+    assert.equal(r.cells[0], '')
+    assert.equal(r.cells[1], n % 7 === 0 ? 'var(--label-1)' : n % 11 === 0 ? 'var(--label-2)' : '')
+  }
+  assert.ok(h.rows.some((r) => r.cells[1] === 'var(--label-1)'))
+  assert.equal(h.tips, 0, 'no tooltip beside the loupe')
 })
 
-test('the loupe follows the pointer along the strip, then the thumb once the reader scrolls on the wheel', async () => {
+test('the loupe follows the pointer along the strip and never jumps to the thumb as the reader moves under it; the wheel moves it to the thumb', async () => {
   await reset()
   const over = await rest(0.3)
+  const x = over.x + over.width / 2
   const a = await layout()
-  await page.mouse.move(over.x + over.width / 2, over.y + over.height * 0.6, { steps: 5 })
+  // along the strip a little at a time, the reader's place moving by a hair at each step
+  for (let i = 1; i <= 12; i++) {
+    await page.evaluate((k) => (window as any).__nudge(k), i)
+    const y = over.y + over.height * (0.3 + i * 0.01)
+    await page.mouse.move(x, y)
+    await page.evaluate((k) => (window as any).__nudge(k + 0.5), i)
+    await page.waitForTimeout(20)
+    const g = await layout()
+    const mid = (g.loupe!.top + g.loupe!.bottom) / 2
+    assert.ok(near(mid, y, 2), `step ${i}: the loupe's middle ${mid}, the pointer ${y}, the thumb ${(g.frame.top + g.frame.bottom) / 2}`)
+    assert.ok(g.rows[8].at && !g.rows.some((r) => r.seen), `step ${i}: the pointer's record darker, none on screen`)
+  }
+  await page.mouse.move(x, over.y + over.height * 0.6, { steps: 5 })
   await page.waitForTimeout(50)
   const b = await layout()
   assert.ok(b.loupe!.top - a.loupe!.top > over.height * 0.25, `followed: ${a.loupe!.top} → ${b.loupe!.top}`)
   assert.ok(b.bracket!.top - a.bracket!.top > over.height * 0.25)
-  // the wheel over the strip scrolls the reader: the loupe goes to the thumb, in the middle of the file
+  // the wheel over the strip scrolls the reader: the loupe goes to the thumb, in the middle of the file, its lines those
+  // on screen
   await page.evaluate(() => ((window as any).__scrolled = []))
   for (let i = 0; i < 3; i++) await page.mouse.wheel(0, 100)
   await page.waitForTimeout(150)
@@ -262,13 +300,14 @@ test('the loupe follows the pointer along the strip, then the thumb once the rea
   assert.equal(c.open, true)
   assert.ok(near((c.loupe!.top + c.loupe!.bottom) / 2, (c.frame.top + c.frame.bottom) / 2, 2), `at the thumb: ${JSON.stringify([c.loupe, c.frame])}`)
   assert.ok(near((c.bracket!.top + c.bracket!.bottom) / 2, (c.frame.top + c.frame.bottom) / 2, 2))
+  assert.ok(c.rows.every((r) => r.seen) && !c.rows.some((r) => r.at), 'its lines on screen, tinted, none darker')
   // out of the strip to the right, away from the loupe: it closes
   await page.mouse.move(over.x + over.width + 3, over.y + over.height * 0.6)
   await page.waitForTimeout(50)
   assert.equal((await layout()).open, false)
 })
 
-test('moved into, the loupe holds still: a record named in the tooltip, a click goes there, the wheel scrolls the reader', async () => {
+test('moved into, the loupe holds still: a click goes to the record and keeps its lines, the wheel scrolls the reader and its lines follow', async () => {
   await reset()
   const over = await rest(0.3)
   const a = await layout()
@@ -280,27 +319,35 @@ test('moved into, the loupe holds still: a record named in the tooltip, a click 
   await page.waitForTimeout(150)
   const b = await layout()
   assert.equal(b.frozen, true, 'held')
-  assert.match(b.tip ?? '', /^Line [\d,]+/, `the tooltip: ${b.tip}`)
-  assert.match(b.tip!, /AgentRelent · 2026-06-18 20:15/)
-  assert.match(b.tip!, /message \d+ about the county/)
-  const line = Number(b.tip!.match(/^Line ([\d,]+)/)![1].replace(/,/g, ''))
-  // a click goes to that record
+  assert.equal(b.tips, 0, 'no tooltip')
+  const k = b.rows.findIndex((r) => r.at)
+  assert.ok(k >= 0 && b.rows[k].top <= y && y < b.rows[k].top + 16, `the line under the pointer darker: ${k}`)
+  const line = num(b.rows[k].n)
+  // a click goes to that record; the reader moves there, and the lines stay where they are, the record on screen now
   await page.mouse.click(a.loupe!.right - 12, y)
   assert.deepEqual(await page.evaluate(() => (window as any).__lines), [line])
-  // the wheel over it scrolls the reader, and the loupe keeps its place
-  await page.evaluate(() => ((window as any).__scrolled = []))
-  await page.mouse.wheel(0, 200)
-  await page.waitForTimeout(100)
+  await page.waitForTimeout(300)
   const c = await layout()
-  assert.ok((await page.evaluate(() => ((window as any).__scrolled as number[]).length)) > 0, 'the reader scrolled')
-  assert.equal(c.loupe!.top, b.loupe!.top, 'the loupe kept its place')
-  assert.equal(c.frozen, true)
+  assert.deepEqual(c.rows.map((r) => r.n), b.rows.map((r) => r.n), 'a click leaves the lines where they are')
+  assert.equal(c.loupe!.top, b.loupe!.top)
+  assert.ok(c.rows[k].seen && c.rows[k].at, 'the record gone to is on screen, still under the pointer')
+  // the wheel over it scrolls the reader once a turn, and the loupe keeps its place while its lines follow
+  await page.evaluate(() => ((window as any).__scrolled = []))
+  await page.mouse.wheel(0, 2800)
+  await page.waitForTimeout(150)
+  const d = await layout()
+  assert.deepEqual(await page.evaluate(() => (window as any).__scrolled), [2800], 'the reader scrolled once')
+  assert.equal(d.loupe!.top, b.loupe!.top, 'the loupe kept its place')
+  assert.equal(d.frozen, true)
+  assert.ok(num(d.rows[0].n) - num(c.rows[0].n) > 50, `its lines followed the scroll: ${c.rows[0].n} → ${d.rows[0].n}`)
+  assert.ok(d.rows.some((r) => r.seen))
+  assert.equal(d.rows.findIndex((r) => r.at), k, 'the line under the pointer still darker')
   // back on the strip it follows the pointer again; out of both it closes
   await page.mouse.move(over.x + over.width / 2, over.y + over.height * 0.7, { steps: 4 })
   await page.waitForTimeout(50)
-  const d = await layout()
-  assert.equal(d.frozen, false)
-  assert.ok(d.loupe!.top > c.loupe!.top + 50)
+  const e = await layout()
+  assert.equal(e.frozen, false)
+  assert.ok(e.loupe!.top > d.loupe!.top + 50)
   await page.mouse.move(over.x + over.width / 2, over.y - 40)
   await page.waitForTimeout(50)
   assert.equal((await layout()).open, false)
@@ -373,15 +420,22 @@ test('a touch press on the strip opens the loupe, a drag scrubs it, and the rele
   assert.equal((await layout()).open, false, 'let go, it closes')
 })
 
-test('a strip that tells every record apart opens no loupe, and names the record under the pointer', async () => {
+test('a strip that tells every record apart opens no loupe, and names the record under the pointer on one line', async () => {
   const pg = await open(1, 150)
   const over = (await pg.locator('.track-over').boundingBox())!
   await pg.mouse.move(over.x + over.width / 2, over.y + over.height * 0.5)
   await pg.waitForTimeout(500)
   const g = await layout(pg)
   assert.equal(g.open, false)
-  assert.match(g.rulerTip ?? '', /^Line 76\n/, `the record named: ${g.rulerTip}`)
-  assert.match(g.rulerTip!, /message 76 about the county/)
+  // its number, no word before it, then who said it and the start of its text, on one line
+  assert.equal(g.rulerTip, '76AgentRelentmessage 76 about the county')
+  assert.ok(g.rulerTipOne && g.rulerTipH < 36, `one line: ${g.rulerTipH} px`)
+  // a record of the first value: its cell in its color
+  await pg.mouse.move(over.x + over.width / 2, over.y + (over.height * 69.5) / 150)
+  await pg.waitForTimeout(500)
+  const cells = await pg.evaluate(() => [...document.querySelectorAll('.reader-ruler-tip .tip-c i')].map((i) => (i as HTMLElement).style.background))
+  assert.match((await layout(pg)).rulerTip ?? '', /^70Agent/)
+  assert.deepEqual(cells, ['var(--label-1)'])
   await pg.close()
 })
 
@@ -396,11 +450,20 @@ const ruler = (pg: Page) =>
       second: document.querySelectorAll('#report .reader-ruler-lanes, #report .reader-ruler-zoom, #report .reader-ruler-band').length,
       open: loupes.some((l) => l.hasAttribute('data-open')),
       box: r('.loupe[data-open] .loupe-box'),
-      tip: document.querySelector('.reader-ruler-tip')?.textContent ?? document.querySelector('.loupe-tip')?.textContent ?? null,
+      tip: document.querySelector('.reader-ruler-tip')?.textContent ?? null,
+      tipOne: document.querySelector('.reader-ruler-tip')?.classList.contains('tip-one') ?? false,
+      tips: document.querySelectorAll('.tip').length,
+      rows: [...document.querySelectorAll('.loupe[data-open] .loupe-row')].map((row) => ({
+        n: row.querySelector('.loupe-n')!.textContent ?? '',
+        text: row.querySelector('.loupe-t')!.textContent ?? '',
+        cells: [...row.querySelectorAll('.loupe-cell')].map((i) => (i as HTMLElement).style.background),
+        heading: row.classList.contains('heading'),
+        at: row.classList.contains('at'),
+      })),
     }
   })
 
-test("the report's ruler is one strip: on a short page a mark named on hover and gone to on a click, on a long page the loupe", async () => {
+test("the report's ruler is one strip: on a short page a mark names its passage on one line, on a long page the loupe, a line per passage", async () => {
   const pg = await open(1)
   await pg.evaluate(() => (window as any).__report(4))
   const short = await ruler(pg)
@@ -408,32 +471,45 @@ test("the report's ruler is one strip: on a short page a mark named on hover and
   assert.equal(short.bar!.width, 13, 'one lane in the scrollbar')
   assert.match(short.thumb!, /finder/)
   const bar = short.bar!
-  // the mark at 30% of a page of four screens
+  // the mark at 30% of a page of four screens, on passage 8
   const y = bar.top + bar.height * 0.3 + 2
   await pg.mouse.move(bar.left + bar.width / 2, y)
   await pg.waitForTimeout(450)
   const hover = await ruler(pg)
   assert.equal(hover.open, false, 'a page the strip shows large enough opens no loupe')
-  assert.equal(hover.tip, 'Alternative explanations')
+  assert.equal(hover.tip, 'Passage 8 of the report, which goes on for a while')
+  assert.equal(hover.tipOne, true)
   await pg.evaluate(() => ((window as any).__marks = []))
   await pg.mouse.click(bar.left + bar.width / 2, y)
   assert.deepEqual((await pg.evaluate(() => (window as any).__marks))[0], ['check', Math.round(0.3 * 560 * 4) + 1])
   await pg.mouse.move(5, 5)
-  // a page of forty screens: the loupe, and a click on a mark in it goes to the mark
+  // a page of forty screens: the loupe, a line per passage around the pointer's, those the marks are on in the check's
+  // color, the headings heavier, no numbers
   await pg.evaluate(() => (window as any).__report(40))
   const long = (await ruler(pg)).bar!
   await pg.mouse.move(long.left + long.width / 2, long.top + long.height * 0.104)
   await pg.waitForTimeout(450)
   const opened = await ruler(pg)
   assert.equal(opened.open, true, 'the loupe opens on a long page')
+  assert.equal(opened.rows.length, 17)
+  // 10.4% of 22,400 px is in passage 29, the middle line, from passage 21
+  assert.deepEqual(opened.rows.map((r) => r.text.split(' ')[1]), Array.from({ length: 17 }, (_, i) => String(21 + i)))
+  assert.ok(opened.rows[8].at)
+  assert.ok(opened.rows.every((r) => r.n === ''), 'no numbers in the report')
+  assert.deepEqual(opened.rows.map((r) => r.cells[0]), opened.rows.map((_, i) => ([28, 29, 30].includes(21 + i) ? 'var(--label-3)' : '')))
+  assert.deepEqual(opened.rows.filter((r) => r.heading).map((r) => r.text.split(' ')[1]), ['30'])
+  // into it, and a click on the middle line goes to passage 29
   const box = opened.box!
   await pg.mouse.move(long.left - 4, long.top + long.height * 0.104, { steps: 2 })
-  // the loupe shows two screens of the page around the pointer: the mark at 10.4% in its middle
   await pg.mouse.move(box.right - 12, (box.top + box.bottom) / 2 + 1, { steps: 3 })
   await pg.waitForTimeout(100)
-  assert.equal((await ruler(pg)).tip, 'Alternative explanations', 'the mark under the pointer named')
+  const held = await ruler(pg)
+  assert.equal(held.tips, 0, 'no tooltip in the loupe')
+  assert.ok(held.rows[8].at)
   await pg.evaluate(() => ((window as any).__marks = []))
   await pg.mouse.click(box.right - 12, (box.top + box.bottom) / 2 + 1)
-  assert.deepEqual((await pg.evaluate(() => (window as any).__marks))[0], ['check', Math.round(0.104 * 560 * 40) + 1])
+  const [jump] = await pg.evaluate(() => (window as any).__marks)
+  assert.equal(jump[0], 'jump')
+  assert.ok(Math.abs(jump[1] - (29 * 80 + 35) / 22_400) < 1e-9, `went to ${jump[1] * 22_400} px`)
   await pg.close()
 })

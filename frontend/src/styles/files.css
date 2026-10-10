@@ -1677,8 +1677,9 @@
 .tracks[data-drag] * {
   cursor: grabbing;
 }
-/* -------- the loupe beside a strip (Loupe.tsx): the records around the pointer, larger, in thimble's popover; the
-   paper at its right, between it and the strip, is the way the pointer moves into it -------- */
+/* -------- the loupe beside a strip (Loupe.tsx): a short list in thimble's popover, a line per record (its number, a
+   cell per lane in the record's color, the start of its text), the record under the pointer darker and those on
+   screen lightly tinted; the paper at its right, between it and the strip, is the way the pointer moves into it -------- */
 .loupe {
   position: fixed;
   z-index: var(--z-popover);
@@ -1688,11 +1689,62 @@
   display: none;
 }
 .loupe-box {
+  box-sizing: border-box;
+  padding-block: 4px;
   border-radius: var(--radius-ui);
+  overflow: hidden;
 }
-.loupe-box canvas {
-  display: block;
-  font: var(--type-mono-sm);
+.loupe-row {
+  box-sizing: border-box;
+  height: 16px;
+  display: grid;
+  grid-template-columns: var(--loupe-num, 2px) auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  padding-right: 8px;
+  color: var(--text-primary);
+  font: 400 11.5px/16px var(--font-body);
+  white-space: nowrap;
+}
+.loupe-n {
+  color: var(--text-tertiary);
+  font: 400 10.5px/16px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.loupe-c {
+  display: flex;
+  gap: 1px;
+}
+.loupe-cell {
+  width: 4px;
+  height: 11px;
+  border-radius: 1px;
+  background: rgba(var(--ink-rgb), 0.06);
+}
+.loupe-cell.faded {
+  opacity: 0.35;
+}
+.loupe-t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.loupe-t b {
+  margin-right: 4px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.loupe-row.heading .loupe-t {
+  font-weight: 500;
+}
+.loupe-row.seen {
+  background: rgba(var(--ink-rgb), 0.05);
+}
+.loupe-row.at {
+  background: rgba(var(--ink-rgb), 0.13);
+}
+.loupe-row.at .loupe-n {
+  color: var(--text-primary);
 }
 .loupe[data-frozen] .loupe-box {
   border-color: rgba(var(--ink-rgb), 0.45);
