@@ -1191,6 +1191,7 @@ RIDGE_RISE = 1.5  # how many baselines the highest ridge rises
 RIDGE_BASE, RIDGE_TOP = "__thimble_base", "__thimble_top"  # a ridge's baseline and its curve, in baselines from the bottom
 ECDF_STEPS_MAX = 500  # a group's cumulative share is kept at this many of its values at most, evenly spread
 RANGE_PAD = 8  # px a range's axis reaches past its outermost ends, so their marks clear the axis line
+TIME_TICKS_MAX = 40  # times more than a day apart (weeks, months) of a bar, line or area get a tick each up to this many
 FITS = ("linear", "smooth")  # the trend lines a scatter fits: least squares, or a local regression (LOESS)
 SMOOTH_SPAN = 0.75  # the share of the points each point of a smooth fit is fitted to (R's loess and ggplot's default)
 SMOOTH_AT = 200  # a smooth fit is computed at this many x values at most and read between them
@@ -1443,6 +1444,35 @@ def _time_format(ts) -> str:
     if ((vals.dt.second != 0) | (vals.dt.microsecond != 0)).any():
         return "%Y-%m-%d %H:%M:%S"
     return "%Y-%m-%d %H:%M" if ((vals.dt.hour != 0) | (vals.dt.minute != 0)).any() else "%Y-%m-%d"
+
+
+def _time_label_format(ts) -> str:
+    """The d3 format an axis names a column of times in, as a date axis's labels read (frontend chartDefaults
+    timeFormat): the month and day, the year too when the times span more than one, and the clock when _time_format
+    shows one."""
+    day = "%b %-d" if ts.dropna().dt.year.nunique() <= 1 else "%b %-d, %Y"
+    return day + _time_format(ts)[len("%Y-%m-%d"):]
+
+
+def _datetime(t) -> dict:
+    """A time as a Vega-Lite DateTime, which Vega-Lite reads at the reader's clock, as it reads a row's time without a
+    zone."""
+    d = {"year": t.year, "month": t.month, "date": t.day}
+    d.update({k: v for k, v in (("hours", t.hour), ("minutes", t.minute), ("seconds", t.second)) if v})
+    return d
+
+
+def _step_ticks(ts) -> dict:
+    """The axis options of a bar's, a line's or an area's times when they lie more than a day apart, such as weeks or
+    months: a tick at each, which the axis names, up to TIME_TICKS_MAX of them, in place of the ticks Vega spaces by
+    their count, which name days between the times ({} otherwise)."""
+    import pandas as pd
+
+    times = ts.dropna().drop_duplicates().sort_values()
+    steps = times.diff().dropna()
+    if not len(steps) or steps.min() <= pd.Timedelta(days=1) or len(times) > TIME_TICKS_MAX:
+        return {}
+    return {"axis": {"values": [_datetime(t) for t in times]}}
 
 
 def _json_value(v):
@@ -1700,7 +1730,7 @@ def _bar_spec(df, opts: dict) -> dict:
         end = _free(f"{cat} end", cols)
         for r, t in zip(rows, ts.tolist()):
             r[end] = None if _missing(t) else _json_value(t + step)
-        enc["x"] = _enc(cat, "temporal")
+        enc["x"] = _enc(cat, "temporal", **_step_ticks(ts))  # bars of a week each named by the day it starts
         enc["x2"] = {"field": _field(end)}
         enc["y"] = _enc(val, "quantitative")
         value, offset = "y", None
@@ -1752,7 +1782,8 @@ def _xy_spec(kind: str, df, opts: dict) -> dict:
         raise ValueError(f"thimble.chart({kind!r}): `fit` is \"linear\" or \"smooth\", not {fit!r}")
     rows = _chart_rows(df, kinds)
     at = _times(df[x]) if kinds[x] == "time" else df[x]
-    enc: dict = {"x": _enc(x, "temporal" if kinds[x] == "time" else "quantitative")}
+    ticks = _step_ticks(at) if kind == "line" and kinds[x] == "time" else {}
+    enc: dict = {"x": _enc(x, "temporal" if kinds[x] == "time" else "quantitative", **ticks)}
     if kind == "dots":
         order = _ordered(kind, df[y], _ranked(df[y], at, earliest=True), opts.get("sort", _DEFAULT), None if grp else label, "rows")
         enc["y"] = _enc(y, "nominal", sort=order)
@@ -1871,7 +1902,9 @@ def _area_spec(df, opts: dict) -> dict:
                          "third column, which this frame lacks")
     label = _label_values(kind, opts["label"], df[ser], ser) if opts.get("label") is not None else None
     rows = _chart_rows(df, kinds)
-    enc: dict = {"x": _enc(x, "temporal" if kinds[x] == "time" else "quantitative"), "y": _enc(y, "quantitative")}
+    ticks = _step_ticks(_times(df[x])) if kinds[x] == "time" else {}
+    enc: dict = {"x": _enc(x, "temporal" if kinds[x] == "time" else "quantitative", **ticks),
+                 "y": _enc(y, "quantitative")}
     mark: dict = {"type": "area"}
     more: dict = {}
     if ser:
@@ -2255,17 +2288,22 @@ def _heatmap_spec(df, opts: dict) -> dict:
     rows = _chart_rows(df, {c: "number" if kinds[c] == "number" else "text" for c in df.columns})
     enc: dict = {}
     for ch, c in (("x", x), ("y", y)):
+        more: dict = {}
         if kinds[c] == "time":  # times as the text of their cells' places, in time order
             ts = _times(df[c])
-            labels = [None if _missing(t) else t.strftime(_time_format(ts)) for t in ts.tolist()]
+            fmt = _time_format(ts)
+            labels = [None if _missing(t) else t.strftime(fmt) for t in ts.tolist()]
             for r, t in zip(rows, labels):
                 r[c] = t
             order = sorted(set(t for t in labels if t is not None))
+            # the axis names them as a date axis does ("Jun 18"), short enough that a few weeks of days read across
+            more["axis"] = {"labelExpr": f"datum.value == null ? '' : utcFormat(utcParse(datum.value, '{fmt}'), "
+                                         f"'{_time_label_format(ts)}')"}
         elif kinds[c] == "number":
             order = sorted(_distinct(df[c].tolist()))
         else:
             order = _ordered(kind, df[c], _ranked(df[c], df[val]))
-        enc[ch] = _enc(c, "nominal" if kinds[c] == "text" else "ordinal", sort=order)
+        enc[ch] = _enc(c, "nominal" if kinds[c] == "text" else "ordinal", sort=order, **more)
     enc["color"] = _enc(val, "quantitative", **({"scale": {"type": "symlog"}} if log else {}))
     enc["tooltip"] = [{"field": _field(c), "type": "quantitative" if c == val else "nominal", "title": c} for c in (x, y, val)]
     return _unit(rows, "rect", enc)
