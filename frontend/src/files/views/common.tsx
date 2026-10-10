@@ -404,8 +404,8 @@ interface BlockElProps {
   from?: number
 }
 
-/** A piece of text a label marks: the focused label's colour at 24% behind it, another label's colour as a thin
- * underline; its own ⌘ anchor, the span. */
+/** A piece of text a label marks: the focused label's colour at 24% behind it, another label's colour faintly
+ * behind it; its own ⌘ anchor, the span. */
 export function SpanEl({ seg, anchor, children }: { seg: Seg; anchor?: string; children: ReactNode }) {
   const m = seg.mark!
   return (
