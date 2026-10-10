@@ -45,14 +45,15 @@
   .ico .fill { fill: currentColor; stroke: none; }
   .dim { color: var(--text-tertiary); }
 
-  /* a row's cells: the state's icon before the title, which takes the forge's weight; a label as the forge's, in words;
-     the counts with their icons; a person's avatar before the name */
-  .state { margin-right: 6px; color: var(--text-secondary); }
-  .title { font-weight: 600; }
-  .thimble-mix { margin-left: 6px; vertical-align: middle; }
-  .area { margin-left: 6px; }
+  /* a row's cells: the state's icon or the author's avatar; the title in the forge's weight, cut before the records' mix
+     and the area, a label as the forge's, in words; the counts with their icons; who replied, their avatars overlapping */
+  .state { color: var(--text-secondary); }
+  .line1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .line1 .chip, .line1 .thimble-mix { flex: none; }
   .num .ico { width: 13px; height: 13px; margin-right: 2px; }
-  .who-cell .avatar { width: 18px; height: 18px; margin-right: 6px; font-size: 9px; vertical-align: middle; }
+  .people { display: inline-flex; margin-right: 6px; vertical-align: middle; }
+  .people .avatar { width: 18px; height: 18px; margin-right: -4px; font-size: 9px; box-shadow: 0 0 0 1.5px var(--surface-card); }
 
   /* an item's page in the side panel: its state and facts, the links to its issue or pull requests, then its parts */
   .page-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 2px 0 10px; color: var(--text-secondary); }
@@ -63,7 +64,7 @@
   .go { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--text-primary); cursor: pointer; text-align: left; }
   .go:hover { text-decoration: underline; }
   .go .ico { width: 14px; height: 14px; color: var(--text-secondary); }
-  .parts { margin: 4px 0 12px; }
+  .parts { flex-wrap: wrap; margin: 4px 0 12px; }
   /* the changed files: each commit's patch under its sha and message */
   .change { margin: 0 0 16px; }
   .change-head { display: flex; gap: 8px; align-items: baseline; margin: 0 0 6px; color: var(--text-secondary); }
@@ -266,50 +267,53 @@ async function choose(r) {
 // the records' mix of the values ([[value, n]]) as the kit's proportion bar, where any of them takes a value
 const mix = (it) => (it.mix && it.mix.some(([v]) => v != null) ? thimble.mix(it.mix) : '')
 // the area as the forge's label, in words: only Color by colors
-const areaChip = (it) => (!it.area ? '' : `<span class="chip chip-sans chip-tone-neutral area"><span class="chip-text">${esc(it.area)}</span></span>`)
+const areaChip = (it) => (!it.area ? '' : `<span class="chip chip-sans chip-tone-neutral"><span class="chip-text">${esc(it.area)}</span></span>`)
 const stateIcon = (t, it) => { const [i, w] = STATE[t][it.state] || STATE[t].open; return `<span class="state" title="${w}">${ico(i)}</span>` }
-const titleCell = (t) => (it) => `${stateIcon(t, it)}<span class="title">${esc(it.title)}</span>${mix(it)}${areaChip(it)}`
-const person = (name) => `<span class="who-cell">${avatar(name)}${esc(name)}</span>`
-const number = (n) => (n != null ? `#${n}` : '')
+// a row's first line: the title in the forge's weight, cut first, then the records' mix and the area
+const titleLine = (it) => `<span class="line1"><span class="title">${esc(it.title)}</span>${mix(it)}${areaChip(it)}</span>`
+// a row's second line, what the forge writes under the title: its facts joined by ·, whole on hover
+const metaLine = (parts) => { const s = parts.filter(Boolean).join(' · '); return { html: `<span title="${esc(s)}">${esc(s)}</span>` } }
 const counted = (icon, n) => `<span class="num">${ico(icon)}${n}</span>`
 const changes = (it) => it.reviewers.filter(([, v]) => v === 'changes requested').length
+// the state's icon, or the author's avatar, in a narrow column of its own at the row's left
+const stateCol = (t) => ({ name: 'state', title: '', width: 32, drop: false, html: (it) => stateIcon(t, it) })
+const avatarCol = (name) => ({ name, title: '', width: 40, drop: false, html: (it) => avatar(it[name]) })
 
-// each tab's columns, as the forge lists its items; a narrow table, such as one beside the side panel, drops them in
-// `drop` order, the highest first
+// each tab's columns, as the forge lists its items: the title over a line of its facts, then its numbers
 const COLUMNS = {
   pulls: [
-    { name: 'number', title: '#', type: 'number', html: (it) => number(it.number) },
-    { name: 'title', title: 'Pull request', min: 220, html: titleCell('pulls') },
-    { name: 'author', title: 'Author', width: 84, drop: 3 },
-    { name: 'opened', title: 'Opened', type: 'time', drop: 4 },
-    { name: 'closes', title: 'Fixes', type: 'number', html: (it) => number(it.closes), drop: 2 },
-    { name: 'review', title: 'Review', width: 136, value: (it) => cap(it.review), drop: 5 },
+    stateCol('pulls'),
+    {
+      name: 'title', title: 'Pull request', html: titleLine,
+      sub: (it) => metaLine([`#${it.number} opened ${hm(it.opened)} by ${it.author}`, it.closes != null && `fixes #${it.closes}`, cap(it.review),
+        it.state === 'merged' && !it.flags.includes('merged by its author') && `merged by ${it.merged_by}`,
+        it.state === 'closed' && `closed by ${it.closed_by}${it.reason ? ` as ${it.reason}` : ''}`, ...it.flags]),
+    },
     { name: 'approvals', title: 'Reviews', type: 'number', html: (it) => counted('approved', it.approvals) + (changes(it) ? ' ' + counted('changes', changes(it)) : '') },
     { name: 'comments', title: 'Comments', type: 'number', html: (it) => counted('comment', it.comments) },
     { name: 'lines', title: 'Lines', type: 'number', value: (it) => it.plus + it.minus, html: (it) => `+${it.plus} −${it.minus}` },
-    { name: 'flags', title: 'Flags', value: (it) => it.flags.join(' · '), drop: 6 },
   ],
   issues: [
-    { name: 'number', title: '#', type: 'number', html: (it) => number(it.number) },
-    { name: 'title', title: 'Issue', min: 220, html: titleCell('issues') },
-    { name: 'author', title: 'Author', width: 84, drop: 3 },
-    { name: 'opened', title: 'Opened', type: 'time', drop: 4 },
-    { name: 'origin', title: 'Origin', width: 150, value: (it) => (it.origin === 'backlog' ? 'from the backlog' : it.origin), drop: 5 },
-    { name: 'prs', title: 'Fixed by', width: 84, value: (it) => it.prs.map(number).join(' '), drop: 2 },
-    { name: 'fixed', title: 'Fixed after', type: 'number', value: (it) => (it.state === 'fixed' ? it.ended - it.opened : null), html: (it) => (it.state === 'fixed' ? took(it.opened, it.ended) : ''), drop: 1 },
+    stateCol('issues'),
+    {
+      name: 'title', title: 'Issue', html: titleLine,
+      sub: (it) => metaLine([`#${it.number} opened ${hm(it.opened)} by ${it.author}`, it.origin === 'backlog' ? 'from the backlog' : it.origin,
+        it.state === 'fixed' && `fixed after ${took(it.opened, it.ended)}`]),
+    },
+    { name: 'prs', title: 'Fixed by', type: 'number', width: 96, value: (it) => it.prs[0] ?? null, html: (it) => (it.prs.length ? `<span class="num">${ico('pr')}${it.prs.map((n) => `#${n}`).join(' ')}</span>` : '') },
     { name: 'comments', title: 'Comments', type: 'number', html: (it) => counted('comment', it.comments) },
   ],
   discussions: [
-    { name: 'title', title: 'Thread', min: 200, html: (it) => `<span class="title">${esc(it.title)}</span>${mix(it)}` },
-    { name: 'author', title: 'Started by', width: 110, html: (it) => person(it.author), drop: 3 },
-    { name: 'lead', title: 'First post', drop: 1 },
-    { name: 'replied', title: 'Replied', width: 130, value: (it) => it.posters.filter((p) => p !== it.author).join(', '), drop: 2 },
+    avatarCol('author'),
+    { name: 'title', title: 'Thread', html: titleLine, sub: (it) => `${it.author} · ${hm(it.opened)} · ${it.lead}` },
+    { name: 'replied', title: 'Replied', width: 150, drop: 1, value: (it) => it.posters.filter((p) => p !== it.author).join(', '),
+      html: (it) => { const others = it.posters.filter((p) => p !== it.author); return `<span class="people">${others.map(avatar).join('')}</span>${esc(others.join(', '))}` } },
     { name: 'posts', title: 'Posts', type: 'number', html: (it) => counted('comment', it.posts) },
-    { name: 'last', title: 'Last post', type: 'time' },
+    { name: 'last', title: 'Last post', type: 'time', html: (it) => (it.last ? hm(it.last) : '') },
   ],
   agents: [
-    { name: 'title', title: 'Agent', width: 170, min: 150, html: (it) => `${person(it.title)}${mix(it)}`, drop: false },
-    { name: 'note', title: 'Sign-off', value: (it) => (it.note ? `“${it.note}”` : 'left no transcript') },
+    avatarCol('title'),
+    { name: 'title', title: 'Agent', html: titleLine, sub: (it) => (it.note ? `“${it.note}”` : 'left no transcript') },
     ...['pull requests', 'reviews', 'merges', 'comments'].map((k) => ({ name: k, title: cap(k), type: 'number', value: (it) => it.did[k] || 0 })),
   ],
 }
@@ -372,7 +376,7 @@ function message(r, d) {
   if (r.kind === 'merge') return r.number === own ? { ...ev, icon: 'merge', said: 'merged this' } : { ...ev, icon: 'merge', said: 'merged', text: `#${r.number}, which fixed this` }
   if (r.kind === 'close') return { ...ev, icon: 'close', said: `closed this${r.reason ? ` as ${r.reason}` : ''}` }
   if (r.kind === 'reopen') return { ...ev, icon: 'reopen', said: 'reopened this' }
-  if (r.kind === 'pr') return { ...ev, said: 'opened', text: `#${r.number} ${r.title || ''}, which fixes this` }
+  if (r.kind === 'pr') return { ...ev, icon: 'pull', said: 'opened', text: `#${r.number} ${r.title || ''}, which fixes this` }
   return { ...ev, icon: 'comment', said: r.action || r.kind }
 }
 
@@ -385,7 +389,7 @@ function activity(r) {
   if (r.kind === 'commit') return { ...ev, icon: 'commit', said: { html: `pushed <code>${esc(r.sha)}</code> to${esc(on)}` }, text: firstLine(r.text) }
   if (r.kind === 'post') return { ...ev, icon: 'comment', said: 'posted in a thread', text: r.text || '' }
   if (r.kind === 'comment') return { ...ev, icon: 'comment', said: `commented on${on}`, text: r.text || '' }
-  const icon = { merge: 'merge', close: 'close', reopen: 'reopen' }[r.kind]
+  const icon = { merge: 'merge', close: 'close', reopen: 'reopen', pr: 'pull', issue: 'issue' }[r.kind]
   return { ...ev, icon, said: `${r.action}${on}` }
 }
 
