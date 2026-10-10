@@ -5,21 +5,27 @@ signed in by workload identity), types the corpus's request, lets main describe 
 the dev agent build them, waits for the gates and the reviews, then saves what came out. Nothing it starts outlives it.
 Adapted from views-abstraction round 4's run_views.py (its capture, per view now, since pipeline 5 builds two).
 
-    PY=<tree>/backend/.venv/bin/python
-    $PY explore/r5/run_r5.py run --pipeline new --corpus collusion-wiki --home /mnt/store/scratch/rel/vr5/a \
-        --port-base 26400 --slots 1 --slot 0 [--tag 1]
-    $PY explore/r5/run_r5.py summary /mnt/store/scratch/rel/views-r5/runs/...
+    PY=<tree>/backend/.venv/bin/python          (RUN.md in /mnt/store/scratch/rel/views-r5 has the full commands)
+    $PY explore/r5/run_r5.py run --pipeline p2 --corpus rosetta --tag 1 \
+        --leaf /mnt/store/scratch/rel/views-r5/runs/rosetta/p2/1 --home /mnt/store/scratch/rel/vr5/h \
+        --port-base 26410 --slots 10 --slot 0
+    $PY explore/r5/run_r5.py matrix --pipelines p1,p2,p3,p4,p5 --corpora rosetta,pilot --reps 3 --parallel 5 ...
+    $PY explore/r5/run_r5.py summary /mnt/store/scratch/rel/views-r5/runs
     $PY explore/r5/run_r5.py shoot <output folder>          # pictures again, from the instance
     $PY explore/r5/run_r5.py status | stop <instance> | clean <instance> ...
 
-Pipelines (explore/r5/pipelines.json, --pipeline NAME): each names its tree (a checkout with backend/.venv and
-frontend/dist), the prompts diff against origin/main it runs on (none for the baseline) and the environment it adds.
-The run copies the tree's prompts/ and docs/ into the instance, applies the diff there (a diff the tree holds already is
-left as it is) and points THIMBLE_PROMPTS_DIR and THIMBLE_VIEW_DOCS_DIR at the copies, so no tree is edited. The
-pipelines' trees differ in code only: origin/main for the baseline; for the others a tree with profile_data and
-pick_views (tools listed only where the prompts give them a section) and without plugin/viewers' worked examples,
-which the examples pipeline points THIMBLE_VIEW_EXAMPLES_DIR at a copy of (/mnt/store/scratch/rel/views-r5/examples).
---tree, --overlay and --prompts-ref still work as in round 4 when no --pipeline is given.
+Pipelines (explore/r5/pipelines.json, --pipeline NAME): p1 to p5, each a tree of its own (a checkout with backend/.venv,
+frontend/node_modules and frontend/dist) on a branch explore/views-r5-<name>, which holds the pipeline's code and
+prompts. The run copies the tree's prompts/ into the instance and points THIMBLE_PROMPTS_DIR at the copy (prompts.diff
+is the copy and the tree's docs/ against origin/main's). A pipeline may still name a prompts `diff` to apply to the
+copy and an `env` to add, as the first smoke runs did. --tree, --overlay and --prompts-ref still work as in round 4
+when no --pipeline is given.
+
+Slots and confinement: a run holds a slot, four ports from --port-base and the folder <home>/s<slot>, which holds the
+run's instance (inst/<pipeline>/<corpus>-<tag>-<time>), its TMPDIR (t) and a new Claude Code config folder (cc). The
+config folder's settings.json keeps every agent of the run to the run's own folders and its pipeline's tree (confine):
+every other path under /home, /mnt, /tmp and /var/tmp (but the venvs' Python) is denied to the file tools and to the Bash
+sandbox's reads. --no-confine turns this off.
 
 Requests (explore/r5/requests.json): the text typed to main per corpus, the same in every pipeline; --request
 overrides it.
@@ -37,7 +43,7 @@ Each run writes its output folder:
   transcripts/      main's and each subagent's Claude Code transcript; agents.md the agents' last words
   run.json, log.jsonl, screen.txt, prompts.diff   the run's record and steps, main's last screen, the run's prompts and
                     docs against origin/main's
-Every picture is a JPEG. The instance stays under <home>/runs/<pipeline>/<corpus>-<time>/ until `clean` deletes it.
+Every picture is a JPEG. The instance stays in its slot's folder until `clean` (or matrix --clean-instances) deletes it.
 
 Rules it keeps: CLAUDE_CONFIG_DIR is the run's config folder for main and the server; the WIF variables exist only in
 the run's server and main's tmux server (wif.wif_env), never printed; ANTHROPIC_API_KEY is never set or read; every
@@ -64,10 +70,18 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 DEFAULT_TREE = HERE.parent.parent
 R5 = Path("/mnt/store/scratch/rel/views-r5")
-HOME_ROOT = Path("/mnt/store/scratch/rel/vr5/home")  # --home changes it (configure); TMPDIR lives under it
+HOME_ROOT = Path("/mnt/store/scratch/rel/vr5/home")  # --home changes it (configure); each slot's folders live under it
 CORPORA = (R5 / "corpora",)  # where --corpus looks for a name
 OUT_ROOT = R5 / "runs"
-CC = HOME_ROOT / "cc"  # --cc, or <home>/cc with --home
+CC = HOME_ROOT / "cc"  # --cc; else each run's own, <home>/s<slot>/cc, made new (Run.prepare)
+CC_GIVEN = False  # --cc named the config folder: used as it is, never emptied
+# What the agents of a run (main, its builders and reviewers) may read and edit: their run's own folders. Claude Code's
+# settings in the run's config folder deny the file tools (Read, Glob, Grep, Edit) every path under these roots outside
+# the allowed ones, and its Bash sandbox reads none of the roots but the allowed folders (confine). In round 5's first
+# smoke runs, builders with no worked example in their prompt searched the whole disk (find / -name view.json) and read
+# other trees' examples, other runs' views and the analyst's own files.
+CONFINE_ROOTS = (Path("/home"), Path("/mnt"), Path("/tmp"), Path("/var/tmp"))
+HOME_KEEP = (Path.home() / ".local" / "share" / "uv" / "python",)  # the venvs' Python, which sandboxed commands run
 CC_TEMPLATE = Path("/mnt/store/scratch/rel/views-abstraction-cc/.claude.json")  # the onboarding keys a new one copies
 PIPELINES = HERE / "pipelines.json"
 REQUESTS = HERE / "requests.json"
@@ -139,12 +153,13 @@ def corpus_path(c: str) -> Path:
 def configure(a: argparse.Namespace) -> None:
     """The scratch home, Claude Code's config folder and the ports this process uses (--home, --cc, --port-base,
     --slots)."""
-    global HOME_ROOT, CC, PORT_BASE, SLOTS
+    global HOME_ROOT, CC, CC_GIVEN, PORT_BASE, SLOTS
     if getattr(a, "home", None):
         HOME_ROOT = Path(a.home).resolve()
         CC = HOME_ROOT / "cc"
     if getattr(a, "cc", None):
         CC = Path(a.cc).resolve()
+        CC_GIVEN = True
     if getattr(a, "port_base", None):
         PORT_BASE = int(a.port_base)
     if getattr(a, "slots", None):
@@ -194,6 +209,55 @@ def seed_cc(cc: Path) -> None:
     tmp.unlink(missing_ok=True)
 
 
+def denied_under(roots: tuple[Path, ...], allowed: list[Path]) -> list[Path]:
+    """The paths under `roots` that hold none of the `allowed` folders: a root with no allowed folder in it whole, else
+    each of its entries that is not an allowed folder or above one, the same way down. A link is passed over, since
+    denying it would deny where it leads."""
+    keep = [p.resolve() for p in allowed]
+    out: list[Path] = []
+
+    def walk(d: Path) -> None:
+        if not any(a == d or d in a.parents for a in keep):
+            out.append(d)
+            return
+        if d in keep:
+            return
+        try:
+            kids = sorted(d.iterdir())
+        except OSError:
+            return
+        for k in kids:
+            if not k.is_symlink():
+                walk(k)
+
+    for r in roots:
+        if r.exists() and not r.is_symlink():
+            walk(r)
+    return out
+
+
+def confine(cc: Path, allowed: list[Path]) -> dict[str, Any]:
+    """Write the run's Claude Code settings (settings.json in its config folder `cc`): the light theme, and what keeps
+    its agents to their run (CONFINE_ROOTS): every path under the roots outside `allowed` and HOME_KEEP (denied_under)
+    denied to Read and Edit, which also hold Glob, Grep and Write, and to the Bash sandbox's reads (Claude Code joins
+    it to the sandbox thimble's --settings give main). The sandbox gets the same list rather than the roots with
+    `allowRead`, since an allowed folder is bound read-only over the folders main writes in it (its TMPDIR). Folders
+    made after the run starts are not on the list, so the run makes every slot's folder first. What it denied."""
+    keep = [*allowed, *HOME_KEEP]
+    paths = denied_under(CONFINE_ROOTS, keep)
+    rules = []
+    for p in paths:
+        rules.append(f"Read(/{p})")
+        rules.append(f"Edit(/{p})")
+        if p.is_dir():
+            rules.append(f"Read(/{p}/**)")
+            rules.append(f"Edit(/{p}/**)")
+    settings = {"theme": "light", "permissions": {"deny": rules},
+                "sandbox": {"filesystem": {"denyRead": [str(p) for p in paths]}}}
+    write_json(cc / "settings.json", settings)
+    return {"allowed": [str(p) for p in keep], "denied_paths": len(paths), "rules": len(rules)}
+
+
 def to_jpeg(src: Path, dest: Path) -> bool:
     """A PNG saved as a JPEG (the tree's venv has Pillow)."""
     try:
@@ -232,8 +296,14 @@ def slot_ports(slot: int) -> list[int]:
     return [PORT_BASE + 4 * slot + i for i in range(4)]
 
 
+def slot_dir(slot: int) -> Path:
+    """The slot's folder, which holds all a run in it reads and writes: inst/ (its instances), t/ (TMPDIR) and cc/
+    (Claude Code's config folder, made new for each run)."""
+    return HOME_ROOT / f"s{slot}"
+
+
 def slot_tmp(slot: int) -> Path:
-    return HOME_ROOT / "t" / str(slot)
+    return slot_dir(slot) / "t"
 
 
 def slot_socket(slot: int) -> str:
@@ -590,10 +660,11 @@ class Run:
         leaf = self.name + (f"-{slug(a.tag)}" if a.tag else "")
         self.out = Path(a.leaf).resolve() if a.leaf else Path(a.out).resolve() / slug(a.variant) / leaf
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        self.inst = HOME_ROOT / "runs" / slug(a.variant) / f"{leaf}-{stamp}"
+        self.inst_name = f"{leaf}-{stamp}"
+        self.inst = HOME_ROOT / "pending" / self.inst_name  # take_slot puts it in its slot's folder
         self.rec: dict[str, Any] = {"variant": a.variant, "corpus": self.name, "corpus_source": str(self.corpus),
                                     "tag": a.tag, "status": "starting", "out": str(self.out),
-                                    "instance": str(self.inst), "times": {"start": now()}, "nudges": [],
+                                    "instance": None, "times": {"start": now()}, "nudges": [],
                                     "main_model": a.model, "review_on": not a.no_review,
                                     "pipeline": a.pipeline, "pipeline_config": self.pipeline}
         self.t0 = time.monotonic()
@@ -616,6 +687,19 @@ class Run:
         write_json(self.out / "run.json", self.rec)
 
     # -- setup ---------------------------------------------------------------------------------------------------------
+    def take_slot(self) -> None:
+        """The run's slot (ports, tmux server, folder), held until it ends; its instance folder in the slot's folder;
+        and, unless --cc names one, a new Claude Code config folder there (the last run's is emptied first, so that no
+        agent reads an earlier run's transcripts)."""
+        global CC
+        self.slot = Slot(self.a.slot)
+        self.inst = slot_dir(self.slot.n) / "inst" / slug(self.a.variant) / self.inst_name
+        self.rec["instance"] = str(self.inst)
+        if not CC_GIVEN:
+            CC = slot_dir(self.slot.n) / "cc"
+            if CC.exists():
+                shutil.rmtree(CC)
+
     def claim_out(self) -> bool:
         """The output folder, made empty for this run; False when one exists and --force is not given."""
         if self.out.exists():
@@ -636,7 +720,7 @@ class Run:
             diff = Path(self.pipeline["diff"]) if self.pipeline.get("diff") else None
             self.rec["prompts"] = make_pipeline_prompts(self.tree, diff, self.inst / "pp")
             self.prompts, docs = self.inst / "pp" / "prompts", self.inst / "pp" / "docs"
-            extra = {"THIMBLE_VIEW_DOCS_DIR": str(docs), **{k: str(v) for k, v in (self.pipeline.get("env") or {}).items()}}
+            extra = {k: str(v) for k, v in (self.pipeline.get("env") or {}).items()}
             (self.out / "prompts.diff").write_text(prompts_diff(self.tree, self.prompts, self.inst, docs), "utf-8")
         else:
             overlay = Path(self.a.overlay).resolve() if self.a.overlay else None
@@ -644,8 +728,15 @@ class Run:
             self.rec["prompts"] = make_prompts(self.tree, self.a.prompts_ref, overlay, self.prompts)
             (self.out / "prompts.diff").write_text(prompts_diff(self.tree, self.prompts, self.inst), "utf-8")
         self.rec["extra_env"] = extra
+        self.rec["prompts_dir"] = str(self.prompts)
         seed_cc(CC)
-        self.slot = Slot(self.a.slot)
+        if not self.a.no_confine:
+            for n in range(max(SLOTS, self.slot.n + 1)):  # a slot's folder made later would not be denied
+                slot_dir(n).mkdir(parents=True, exist_ok=True)
+            OUT_ROOT.mkdir(parents=True, exist_ok=True)
+            (HOME_ROOT / "bin").mkdir(parents=True, exist_ok=True)
+            self.rec["confine"] = confine(CC, [self.tree, self.inst, self.slot.tmp, CC, HOME_ROOT / "bin"])
+            shutil.copy2(CC / "settings.json", self.out / "cc-settings.json")
         self.rec["slot"] = {"n": self.slot.n, "ports": self.slot.ports, "socket": self.slot.socket}
         self.rec["home"], self.rec["claude_config_dir"], self.rec["tree"] = str(HOME_ROOT), str(CC), str(self.tree)
         self.server_env = instance_env(self.inst, self.slot, self.tree, self.prompts, self.a, extra)
@@ -1510,7 +1601,9 @@ def describe_run(out: Path, rec: dict[str, Any], views: list[dict[str, Any]], no
 
 def run_one(a: argparse.Namespace) -> int:
     run = Run(a)
+    run.take_slot()
     if not run.claim_out():
+        run.slot.release()
         print(f"run_r5: {run.out} exists (use --tag, or --force to move it aside)", file=sys.stderr)
         return 2
     run.inst.mkdir(parents=True, exist_ok=True)
@@ -1608,6 +1701,8 @@ def run_args(a: argparse.Namespace, corpus: str) -> list[str]:
         out.append("--hello-only")
     if a.force:
         out.append("--force")
+    if a.no_confine:
+        out.append("--no-confine")
     for k in ("home", "cc", "port_base", "slots"):
         if getattr(a, k, None):
             out += [f"--{k.replace('_', '-')}", str(getattr(a, k))]
@@ -1666,19 +1761,21 @@ def cmd_batch(a: argparse.Namespace) -> int:
 
 def cmd_matrix(a: argparse.Namespace) -> int:
     """Every pipeline on every corpus, --reps times, at most --parallel at once: each run a child `run` with a slot of
-    its own (ports, tmux server, TMPDIR) and a Claude Code config folder of its own (<home>/cc<slot>), its output in
-    <out>/<pipeline>/<corpus>-<rep>, its log beside it (<corpus>-<rep>.runner.log). Runs start 20 s apart; one that
-    ends frees its slot for the next. A run whose output folder exists already is skipped, so a matrix can be resumed.
-    SIGTERM stops every run (each stops its own instance)."""
+    its own (ports, tmux server, TMPDIR, a new Claude Code config folder: <home>/s<slot>), its output in
+    <out>/<corpus>/<pipeline>/<rep>, its log beside it (<rep>.runner.log). Runs start 20 s apart; one that ends frees
+    its slot for the next. A run whose output folder exists already is skipped, so a matrix can be resumed; --reps-from
+    starts the count higher, to add runs to a finished matrix. --clean-instances deletes each run's instance once its
+    output is saved. SIGTERM stops every run (each stops its own instance)."""
     table = read(PIPELINES) or {}
     pipes = [x for x in a.pipelines.split(",") if x]
     for x in pipes:
         if x not in table:
             raise SystemExit(f"run_r5: no pipeline {x!r} in {PIPELINES}")
     corpora = [x for x in a.corpora.split(",") if x]
-    combos = [(r, c, p) for r in range(1, a.reps + 1) for c in corpora for p in pipes]  # spread pipelines over time
+    first = a.reps_from
+    combos = [(r, c, p) for r in range(first, first + a.reps) for c in corpora for p in pipes]  # pipelines spread in time
     out_root = Path(a.out).resolve()
-    pending = [(r, c, p) for r, c, p in combos if not (out_root / p / f"{c}-{r}").exists()]
+    pending = [(r, c, p) for r, c, p in combos if not (out_root / c / p / str(r)).exists()]
     free = list(range(a.parallel))
     live: list[tuple[tuple[int, str, str], int, subprocess.Popen, Any]] = []
     codes: dict[str, int] = {}
@@ -1700,17 +1797,19 @@ def cmd_matrix(a: argparse.Namespace) -> int:
             rep, c, pipe = pending.pop(0)
             n = free.pop(0)
             tree = Path(table[pipe]["tree"]).resolve()
-            leaf = out_root / pipe / f"{c}-{rep}"
+            leaf = out_root / c / pipe / str(rep)
             leaf.parent.mkdir(parents=True, exist_ok=True)
-            log = open(leaf.parent / f"{c}-{rep}.runner.log", "a")
+            log = open(leaf.parent / f"{rep}.runner.log", "a")
             cmd = [str(venv_python(tree)), str(Path(__file__).resolve()), "run", "--pipeline", pipe, "--corpus", c,
-                   "--tag", str(rep), "--leaf", str(leaf), "--home", str(HOME_ROOT), "--cc", str(HOME_ROOT / f"cc{n}"),
+                   "--tag", str(rep), "--leaf", str(leaf), "--home", str(HOME_ROOT),
                    "--port-base", str(PORT_BASE), "--slots", str(a.parallel), "--slot", str(n),
                    "--minutes", str(a.minutes), "--propose-minutes", str(a.propose_minutes)]
             if a.no_review:
                 cmd.append("--no-review")
             if a.setup_only:
                 cmd.append("--setup-only")
+            if a.no_confine:
+                cmd.append("--no-confine")
             proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env={**os.environ, "VABS_REEXEC": "1"})
             live.append(((rep, c, pipe), n, proc, log))
             print(f"{now()} started {pipe} {c} rep {rep} on slot {n} (pid {proc.pid})", flush=True)
@@ -1718,11 +1817,14 @@ def cmd_matrix(a: argparse.Namespace) -> int:
         for item in list(live):
             (rep, c, pipe), n, proc, log = item
             if proc.poll() is not None:
-                codes[f"{pipe}/{c}-{rep}"] = proc.returncode
+                codes[f"{c}/{pipe}/{rep}"] = proc.returncode
                 log.close()
                 live.remove(item)
                 free.append(n)
                 print(f"{now()} ended {pipe} {c} rep {rep} with {proc.returncode}", flush=True)
+                inst = (read(out_root / c / pipe / str(rep) / "run.json") or {}).get("instance")
+                if a.clean_instances and inst:
+                    cmd_clean(argparse.Namespace(instances=[inst]))
         time.sleep(5)
     print(json.dumps(codes))
     return 0 if all(v == 0 for v in codes.values()) else 1
@@ -1759,7 +1861,7 @@ def run_env_of(r: dict[str, Any], tree: Path) -> dict[str, str]:
     env.update({"PATH": clean_path(tree), "THIMBLE_HOME": str(home), "THIMBLE_WORKSPACES_DIR": str(home / "workspaces"),
                 "THIMBLE_DATA_DIR": str(home / "data"), "THIMBLE_DEV_DIR": str(home / "dev"),
                 "THIMBLE_PORT": str(r["slot"]["ports"][0]), "THIMBLE_UI_PORT": str(r["slot"]["ports"][1]),
-                "TMPDIR": str(slot_tmp(r["slot"]["n"])), "THIMBLE_PROMPTS_DIR": str(inst / "prompts"),
+                "TMPDIR": str(slot_tmp(r["slot"]["n"])), "THIMBLE_PROMPTS_DIR": str(r.get("prompts_dir") or inst / "prompts"),
                 "CLAUDE_CONFIG_DIR": str(CC), "VABS_TREE": str(tree)})
     Path(env["TMPDIR"]).mkdir(parents=True, exist_ok=True)
     return env
@@ -1774,7 +1876,7 @@ def adopt_home(r: dict[str, Any]) -> None:
     global HOME_ROOT, CC
     if r.get("home") and HOME_ROOT == Path("/mnt/store/scratch/rel/vr5/home"):
         HOME_ROOT = Path(r["home"])
-    if r.get("claude_config_dir") and CC == Path("/mnt/store/scratch/rel/vr5/home/cc"):
+    if r.get("claude_config_dir") and not CC_GIVEN:
         CC = Path(r["claude_config_dir"])
 
 
@@ -1819,8 +1921,8 @@ def cmd_clean(a: argparse.Namespace) -> int:
     its folders are made writable, never its files."""
     for x in a.instances:
         inst = Path(x).resolve()
-        if inst.parent.parent != HOME_ROOT / "runs":
-            print(f"skip {inst}: not an instance under {HOME_ROOT / 'runs'} (--home names the scratch home)")
+        if inst.parent.parent.name != "inst" or inst.parent.parent.parent.parent != HOME_ROOT:
+            print(f"skip {inst}: not an instance under {HOME_ROOT}/s<slot>/inst (--home names the scratch home)")
             continue
         if pids_of_home(inst / "home"):
             print(f"skip {inst}: processes still name its home (run_views.py stop it first)")
@@ -1896,6 +1998,8 @@ def main() -> int:
         p.add_argument("--click", action="append", help="extra pictures: control texts clicked in turn, joined by >>")
         p.add_argument("--setup-only", action="store_true", help="check the variant and the server, start no main")
         p.add_argument("--hello-only", action="store_true", help="start main, wait for its hello, quit; no request")
+        p.add_argument("--no-confine", action="store_true",
+                       help="let the agents read outside their run's folders (see CONFINE_ROOTS)")
         lane_options(p)
         if name == "batch":
             p.add_argument("--parallel", type=int)
@@ -1903,7 +2007,10 @@ def main() -> int:
     p.add_argument("--pipelines", required=True, help="comma-separated names from pipelines.json")
     p.add_argument("--corpora", required=True, help="comma-separated names under views-r5/corpora")
     p.add_argument("--reps", type=int, default=1)
+    p.add_argument("--reps-from", type=int, default=1, help="the first rep's number (to add reps to a matrix)")
     p.add_argument("--parallel", type=int, default=2, help="runs at once, each a slot of four ports from --port-base")
+    p.add_argument("--clean-instances", action="store_true", help="delete each run's instance once its output is saved")
+    p.add_argument("--no-confine", action="store_true", help="let the agents read outside their run's folders")
     p.add_argument("--out", default=str(OUT_ROOT))
     p.add_argument("--minutes", type=float, default=120)
     p.add_argument("--propose-minutes", type=float, default=40)

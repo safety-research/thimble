@@ -1,32 +1,32 @@
 {
-  "baseline": {
-    "tree": "/mnt/store/scratch/rel/views-r5/trees/baseline",
+  "p1": {
+    "tree": "/mnt/store/scratch/rel/views-r5/trees/p1",
     "diff": null,
     "env": {},
-    "note": "thimble's prompts today: origin/main 63a8b849 (0.6.2), its worked example views in plugin/viewers"
+    "note": "baseline: origin/main 63a8b849 (0.6.2), its prompts and worked examples; plus the fix for two builds started in one turn (in all five trees)"
   },
-  "new": {
-    "tree": "/mnt/store/scratch/rel/views-r5/trees/mech",
-    "diff": "/mnt/store/scratch/rel/views-r5/prompts/new.diff",
+  "p2": {
+    "tree": "/mnt/store/scratch/rel/views-r5/trees/p2",
+    "diff": null,
     "env": {},
-    "note": "principles, structure-task-interface examples, typed profile (profile_data), kit snippets; no worked examples"
+    "note": "new: the seven principles, structure-task-interface examples, TypeScript types checked with profile_data, kit snippets with recordCard; no worked examples, no demos"
   },
-  "new-examples": {
-    "tree": "/mnt/store/scratch/rel/views-r5/trees/mech",
-    "diff": "/mnt/store/scratch/rel/views-r5/prompts/new-examples.diff",
-    "env": {"THIMBLE_VIEW_EXAMPLES_DIR": "/mnt/store/scratch/rel/views-r5/examples"},
-    "note": "new, with the worked example views back: the builder's {{examples}} is a copy of origin/main's plugin/viewers"
-  },
-  "new-description": {
-    "tree": "/mnt/store/scratch/rel/views-r5/trees/mech",
-    "diff": "/mnt/store/scratch/rel/views-r5/prompts/new-description.diff",
+  "p3": {
+    "tree": "/mnt/store/scratch/rel/views-r5/trees/p3",
+    "diff": null,
     "env": {},
-    "note": "new, with a plain description and a simple per-file profile (profile_data's description and files) for types"
+    "note": "new + examples: p2 with the worked example views (plugin/viewers) back in the builder's prompt and the docs"
   },
-  "new-many": {
-    "tree": "/mnt/store/scratch/rel/views-r5/trees/mech",
-    "diff": "/mnt/store/scratch/rel/views-r5/prompts/new-many.diff",
+  "p4": {
+    "tree": "/mnt/store/scratch/rel/views-r5/trees/p4",
+    "diff": null,
     "env": {},
-    "note": "new, with about eight concepts and a picker that keeps two (pick_views); both views are built"
+    "note": "new, plain description: p2 with a description in plain words and a simple per-file profile in place of types"
+  },
+  "p5": {
+    "tree": "/mnt/store/scratch/rel/views-r5/trees/p5",
+    "diff": null,
+    "env": {},
+    "note": "new, propose many: p2 with about eight concepts and a picker that keeps two (pick_views); both are built"
   }
 }
