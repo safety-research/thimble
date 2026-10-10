@@ -631,6 +631,41 @@ describe('the side panel and the transcript', () => {
     expect(doc().querySelector('.thimble-turn-call')).not.toBe(null)
     expect(doc().querySelector('.thimble-turn-hit')!.getAttribute('data-anchor')).toBe('s.jsonl#L2')
   })
+
+  test("a transcript's head writes each turn's time as the kit writes times, in UTC, however the record gives it, a time with no zone in UTC on a machine in any zone; a time it cannot read as written", async () => {
+    const zone = process.env.TZ
+    // a machine seven hours behind UTC in May, where the browser reads a date with no zone in its own
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      await load()
+      const w = win()
+      const at = (i: number, t: unknown, key = 't') => ({ ref: `s.jsonl#L${i}`, [key]: t, speaker: 'lead', kind: 'text', text: 'ok', line: i })
+      const read = [
+        T0,
+        (T0 + 1) * 1000,
+        '2026-05-16T09:00:02.250000+00:00',
+        '2026-05-16T11:00:03+02:00',
+        '2026-05-16T09:00:04',
+        '2026-05-16 09:00:05',
+        String(T0 + 6),
+        '2026-05-16T09:00:07Z',
+        'Sat, 16 May 2026 09:00:08',
+        'Sat, 16 May 2026 02:00:09 -0700',
+        '2026/05/16 09:00:10',
+        '2026-05-16 09:00:11 UTC',
+      ]
+      w.TURNS = [...read.map((t, i) => at(i + 1, t, i === 7 ? 'time' : 't')), at(13, 'step 4'), at(14, null)]
+      w.eval(`thimble.transcript({ mount: '#turns' }).draw(window.TURNS)`)
+      expect(texts('.thimble-turn-head')).toEqual([...read.map((_, i) => `lead · 2026-05-16 09:00:${String(i).padStart(2, '0')}`), 'lead · step 4', 'lead'])
+      // the lanes follow a time given as text too, in seconds; a number as given
+      expect([...doc().querySelectorAll('.thimble-turn')].map((e) => e.getAttribute('data-t'))).toEqual(
+        [T0, (T0 + 1) * 1000, T0 + 2.25, ...read.slice(3).map((_, i) => T0 + 3 + i)].map(String).concat([null, null] as never[]),
+      )
+    } finally {
+      if (zone === undefined) delete process.env.TZ
+      else process.env.TZ = zone
+    }
+  })
 })
 
 describe("every choice of the kit's controls draws", () => {

@@ -70,7 +70,8 @@ text: `search.rows({texts, refs, go, box})`, `texts` each row's text as it draws
 apart such as cells (a match never spans them), `refs` each row's ref, so the current match stays on its row when the
 rows are sorted again, `go(i)` to bring row `i` into view, and `box` the element that scrolls, whose strip gets the
 ticks. The rows on the page carry `data-thimble-row="<i>"`, so the matches in the rows drawn are washed. The kit's
-table does this itself when it is given the search.
+table does this itself when it is given the search. Lists in tabs, such as a table in each, each give their rows by
+their `box`: the search finds in the one that shows, and in the page's text while none does.
 
 ### Text folded away
 
@@ -140,7 +141,7 @@ A column is `{name, title, type, width, min, drop, value(row), html(row), sort}`
 |---|---|
 | `name` | the field as the records hold it |
 | `title` | its head, the name by default. A head is never cut: a column takes its title on one line while the table has room, wraps it to two lines in a narrower table, and keeps its title's width on two lines before it drops |
-| `type` | `'text'` (the default), `'number'` (right-aligned, in the mono face) or `'time'` (seconds since 1970, shown as `2026-04-01 09:30` in UTC, with the seconds when the column's times have them; a string as written). A column too narrow for its times leaves out the seconds, then the year when every row has the same one |
+| `type` | `'text'` (the default), `'number'` (right-aligned, in the mono face, with thousands separators: `12,345`), `'id'` (a number that names a record, such as a pull request's, an issue's or a line's, written as it is: `67028`; laid out and sorted as a number) or `'time'` (seconds since 1970, shown as `2026-04-01 09:30` in UTC, with the seconds when the column's times have them; a string as written). A column of numbers whose name or title ends in a word that names an identifier, such as `id`, `key`, `number`, `PR`, `issue`, `line`, `#` or `year`, is written as `'id'` is. A column too narrow for its times leaves out the seconds, then the year when every row has the same one |
 | `width` | px or a CSS track such as `'2fr'` (text shares what is left; numbers and times fit their widest value) |
 | `min` | the px a column of text keeps before columns drop: 120 for the main column, the first column of text without a `width` in px (else the first column of text), and 64 for the others by default, and never more than its `width` |
 | `drop` | in a table too narrow for its columns, such as one beside the side panel, the order they drop in until the rest fit, the highest first; `false` for one that never drops. A column without one drops after those with one, the rightmost first but the one the rows are sorted by last, and the main column never does. A dropped column comes back when the table widens, and the search and the default `details` still hold it |

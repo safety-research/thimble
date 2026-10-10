@@ -38,7 +38,6 @@
   var SHOW_LINES = 8 // what a folded body shows of itself, at most
   var LINE_CHARS = 100 // characters a drawn line holds, about: a longer line of text counts as several
   var HIT_MS = 1500 // how long a revealed message keeps its highlight (the transcript's)
-  var MS_FROM = 1e11 // a time past this is in milliseconds (viewer_table.js)
   var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   // the events' icons, line drawings in the ink: a forge's and a mailbox's few kinds; any other is a dot
@@ -62,14 +61,9 @@
   function pad2(n) {
     return (n < 10 ? '0' : '') + n
   }
-  // a time in seconds since 1970: a number (milliseconds past MS_FROM), or a date the browser reads; null when none
-  function secs(t) {
-    var s = null
-    if (typeof t === 'number' && isFinite(t)) s = Math.abs(t) >= MS_FROM ? t / 1000 : t
-    else if (typeof t === 'string' && t.trim()) s = Date.parse(t) / 1000
-    // a date can be no further than 100,000,000 days from 1970
-    return s != null && isFinite(s) && Math.abs(s) <= 864e10 ? s : null
-  }
+  // a time in seconds since 1970 from a number, its digits, a Date or a date as text, one with no zone in UTC; null for
+  // none, such as "step 4" (kit.shared.secs, as the transcript reads times)
+  var secs = shared.secs
   function utc(s) {
     return new Date(s * 1000)
   }

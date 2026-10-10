@@ -330,7 +330,9 @@ const tr = thimble.transcript({ mount: '#list', onOpen: async (turn) => tr.set(t
 tr.draw(turns.filter((t) => t.session === session), { title: `${names[session]} · ${runName}` })
 ```
 
-A turn is `{ref, t, speaker, kind, tool, text, input, output, error, session, sessionName, line, record}`, `kind` one of
+A turn is `{ref, t, speaker, kind, tool, text, input, output, error, session, sessionName, line, record}`, `t` in seconds
+since 1970 or a date such as an ISO time (one with no zone in UTC), which the head writes as `2026-04-01 09:30:12` in
+UTC, and `kind` one of
 `text`, `prompt`, `tool`, `thinking` and `system`. Color by reads `record`, the record the turn shows, when it is given,
 so a field named as a turn's own, such as `kind`, colors it; else the turn. `draw(turns, {title, sub, empty})` draws
 them, with a header that names what the list shows (the run, the session or the selection) and how many turns;
@@ -359,7 +361,8 @@ conv.draw(posts.filter((p) => p.thread === chosen).map((p) => ({ ref: p.ref, t: 
 ```
 
 A message is `{ref, t, author, text, title, to, parent, kind, icon, said, record}`, `t` in seconds since 1970 (or a date
-the browser reads). Quoted mail, a run of lines that start with `>` with the "On … wrote:" line before it, folds behind
+such as an ISO time, one with no zone in UTC, as the transcript reads it).
+Quoted mail, a run of lines that start with `>` with the "On … wrote:" line before it, folds behind
 a `…` button, and a body longer than twelve lines shows its first lines with Show more and Show less; both keep their
 text in the page, hidden, so `thimble.search` finds it and opens the fold. Each message is anchored with its ref and
 carries `data-t`, so a label marks it, a ⌘-click asks about it and the lanes follow it. Its bars are the page's Color

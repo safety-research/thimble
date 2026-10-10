@@ -427,7 +427,7 @@ function turnOf(it) {
   const call = it.kind === 'call'
   const w = whole.get(it.ref)
   return {
-    ...it, t: it.time, time: null, kind: call ? 'tool' : it.kind === 'prompt' ? 'prompt' : 'text',
+    ...it, t: it.time, kind: call ? 'tool' : it.kind === 'prompt' ? 'prompt' : 'text',
     input: call ? inputOf(it, w) : undefined, output: w ? w.output : undefined,
     error: failed(it) && it.outcome, sessionName: S[it.session] ? `${names[it.session]} · ${runTitle(S[it.session].run)}` : it.session,
   }

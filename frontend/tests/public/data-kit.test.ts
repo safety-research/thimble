@@ -317,6 +317,72 @@ describe('the search', () => {
     expect(w.search.count).toBe(0)
     expect(w.changes).toEqual(['gale', ''])
   })
+
+  test("the page read once into an index, then only what changed read again: it finds what a search that reads the page afresh finds", async () => {
+    const rec = (i: number, text: string) => `<div class="rec" data-anchor="log.jsonl#L${i}"><b data-thimble-chrome>who ${i}</b> <span>${text}</span></div>`
+    await load(`<style>.gone{display:none}</style><div class="top"><span id="search"></span><span id="fresh"></span></div>
+<div id="list">${Array.from({ length: 6 }, (_, i) => rec(i + 1, i % 2 ? 'a gale at sea' : 'calm water')).join('')}</div>`)
+    const w = win()
+    // the elements each read starts from
+    w.eval(`
+      window.walks = []
+      const walker = document.createTreeWalker.bind(document)
+      document.createTreeWalker = (root, ...rest) => (window.walks.push(root), walker(root, ...rest))
+      window.search = thimble.search({ mount: '#search', in: '#list' })
+      window.fresh = thimble.search({ mount: '#fresh', in: '#list' })
+    `)
+    const list = doc().getElementById('list')!
+    const at = (i: number) => doc().querySelector(`[data-anchor="log.jsonl#L${i}"]`) as HTMLElement
+    const name = (e: Element) => e.id || e.getAttribute('data-anchor') || e.tagName
+    // the search's count of `needle` and the elements it read to find it, beside the count of a search that reads the
+    // page whole (refresh)
+    const find = (needle: string) => {
+      const n = w.walks.length
+      w.search.set(needle)
+      const read = w.walks.slice(n).map(name)
+      w.fresh.refresh()
+      w.fresh.set(needle)
+      return { count: w.search.count, read, whole: w.fresh.count }
+    }
+    expect(find('gale')).toEqual({ count: 3, read: ['list'], whole: 3 })
+    // found again with nothing read: the index holds the page
+    expect(find('calm')).toEqual({ count: 3, read: [], whole: 3 })
+    // a record drawn again in its place: that record read
+    at(2).replaceWith(Object.assign(doc().createElement('div'), { innerHTML: rec(2, 'a storm, then calm') }).firstChild!)
+    expect(find('calm')).toEqual({ count: 4, read: ['log.jsonl#L2'], whole: 4 })
+    // a text changed: the record its text runs in
+    ;(at(4).querySelector('span')!.firstChild as Text).data = 'calm again'
+    expect(find('calm')).toEqual({ count: 5, read: ['log.jsonl#L4'], whole: 5 })
+    // a record added, and one taken away, which needs no read
+    list.insertAdjacentHTML('beforeend', rec(7, 'calm and a gale'))
+    expect(find('gale')).toEqual({ count: 2, read: ['log.jsonl#L7'], whole: 2 })
+    at(1).remove()
+    expect(find('calm')).toEqual({ count: 5, read: [], whole: 5 })
+    // hidden, by the attribute, a class or the label filter: left out
+    at(3).hidden = true
+    at(5).classList.add('gone')
+    at(7).setAttribute('data-thimble-drop', 'hide')
+    expect(find('calm')).toEqual({ count: 2, read: ['log.jsonl#L3', 'log.jsonl#L5', 'log.jsonl#L7'], whole: 2 })
+    at(5).classList.remove('gone')
+    expect(find('calm')).toEqual({ count: 3, read: ['log.jsonl#L5'], whole: 3 })
+    // a phrase across an inline element added in the text
+    at(4).querySelector('span')!.innerHTML = 'a <i>gale</i> warning'
+    expect(find('gale warning')).toEqual({ count: 1, read: ['log.jsonl#L4'], whole: 1 })
+    // a block put in between the words splits the phrase, and taken out joins it again: the record they run in read
+    const span = at(4).querySelector('span')!
+    const block = span.insertBefore(Object.assign(doc().createElement('div'), { textContent: 'storm' }), span.lastChild)
+    expect(find('gale warning')).toEqual({ count: 0, read: ['log.jsonl#L4'], whole: 0 })
+    block.remove()
+    expect(find('gale warning')).toEqual({ count: 1, read: ['log.jsonl#L4'], whole: 1 })
+    // the list drawn again whole: the page read again whole
+    list.innerHTML = Array.from({ length: 80 }, (_, i) => rec(i + 1, i % 4 ? 'calm' : 'a gale')).join('')
+    expect(find('gale')).toEqual({ count: 20, read: ['list'], whole: 20 })
+    // typing reads the page a slice at a time once the box has the focus, and finds in what it read
+    list.insertAdjacentHTML('afterbegin', rec(0, 'gale force'))
+    ;(doc().querySelector('#search .thimble-search-input') as HTMLInputElement).dispatchEvent(new dom.window.FocusEvent('focus'))
+    await type('gale f')
+    expect(w.search.count).toBe(1)
+  })
 })
 
 const T0 = Date.UTC(2026, 3, 1, 9) / 1000
@@ -485,6 +551,116 @@ describe('the table', () => {
     // and is once it draws them anchored
     doc().getElementById('other')!.innerHTML = '<p data-anchor="b#L2">y</p>'
     expect(w.thimble.__held()).toBe(5)
+  })
+
+  test("tabs of different lists and one search: it finds in the table of the tab in view, in the page's text while no table shows, and follows the tab shown", async () => {
+    await load(`<style>.tab:not(.on){display:none}</style><div class="top"><span id="search"></span></div>
+<div id="tabs"><div id="prs" class="tab on" style="height:300px"></div><div id="issues" class="tab" style="height:300px"></div><div id="agent" class="tab"></div></div>`)
+    const w = win()
+    const rows = (kind: string, titles: string[]) => titles.map((title, i) => ({ ref: `forge.db#${kind}/${i + 1}`, title }))
+    w.PRS = rows('prs', ['a gale at sea', 'calm'])
+    w.ISSUES = rows('issues', ['gale one', 'gale two', 'calm'])
+    w.TURNS = Array.from({ length: 4 }, (_, i) => ({ ref: `s.jsonl#L${i + 1}`, speaker: 'lead', kind: 'text', text: `the gale, turn ${i + 1}`, line: i + 1 }))
+    w.eval(`
+      window.search = thimble.search({ mount: '#search', in: '#tabs' })
+      const columns = [{ name: 'title', title: 'Title' }]
+      thimble.table({ mount: '#prs', rows: PRS, columns, search })
+      thimble.table({ mount: '#issues', rows: ISSUES, columns, search })
+      thimble.transcript({ mount: '#agent' }).draw(TURNS)
+    `)
+    const show = async (id: string) => {
+      doc().querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.id === id))
+      await wait(120)
+      return w.search.count
+    }
+    // the pull requests' tab, though the issues' table gave its rows last
+    w.search.set('gale')
+    expect(w.search.count).toBe(1)
+    expect(await show('issues')).toBe(2)
+    // a tab with no table: the transcript's turns, in the page's text
+    expect(await show('agent')).toBe(4)
+    expect(await show('prs')).toBe(1)
+  })
+
+  test("tabs of different records: Color by's chips count the records of the tab in view, a table's and the page's own alike, and follow the tab shown", async () => {
+    await load(`<style>.tab:not(.on){display:none}</style><div class="top"><span id="colour"></span></div>
+<div id="prs" class="tab on" style="height:300px"></div><div id="issues" class="tab" style="height:300px"></div><div id="notes" class="tab"></div>`)
+    const w = win()
+    const records = (kind: string, states: string[]) => states.map((state, i) => ({ ref: `forge.db#${kind}/${i + 1}`, title: `${kind} ${i + 1}`, state }))
+    w.PRS = records('prs', ['open', 'open', 'open', 'merged'])
+    w.ISSUES = records('issues', ['open', 'closed', 'closed', 'closed', 'closed', 'closed'])
+    w.NOTES = records('notes', ['draft', 'draft'])
+    w.eval(`
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'state', title: 'State' }] })
+      const columns = [{ name: 'title', title: 'Title' }, { name: 'state', title: 'State' }]
+      window.prs = thimble.table({ mount: '#prs', rows: PRS, columns, key: 'prs' })
+      window.issues = thimble.table({ mount: '#issues', rows: ISSUES, columns, key: 'issues' })
+      document.getElementById('notes').innerHTML = NOTES.map((n) => '<div data-anchor="' + n.ref + '"' + colour.attr(n) + '>' + n.title + '</div>').join('')
+    `)
+    const chips = async () => {
+      await wait(120)
+      return w.colour.values.filter((v: any) => v.n).map((v: any) => `${v.name} ${v.n}`).sort()
+    }
+    const show = (id: string) => doc().querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.id === id))
+    // the pull requests' tab, though the issues' table was drawn last
+    expect(await chips()).toEqual(['merged 1', 'open 3'])
+    show('issues')
+    expect(await chips()).toEqual(['closed 5', 'open 1'])
+    show('notes')
+    expect(await chips()).toEqual(['draft 2'])
+    // a tab shown by its hidden attribute, and two lists in view at once: both counted
+    doc().querySelectorAll('.tab').forEach((t) => t.classList.add('on'))
+    ;(doc().getElementById('notes') as HTMLElement).hidden = true
+    expect(await chips()).toEqual(['closed 5', 'merged 1', 'open 4'])
+    // the pull requests drawn again, filtered: the counts of the rows they show
+    w.prs.draw(w.PRS.slice(0, 2))
+    show('prs')
+    expect(await chips()).toEqual(['open 2'])
+  })
+
+  test("numbers: amounts with thousands separators, identifiers as they are (type 'id', or a name or title that names one); the search, the side panel, a card and the record viewer find and write an identifier as it is", async () => {
+    await load(`<div class="top"><span id="search"></span></div><div id="body" style="height:300px"><div id="list"></div></div><div id="cards"></div><div id="rec"></div>`)
+    const w = win()
+    w.PRS = [
+      { ref: 'forge.db#prs/67028', number: 67028, title: 'Fix the parser', additions: 12345, year: 2024, line: 10234, review: 4501, ratio: 1234.5, parentPRNumber: 66990, lineCount: 23456, turn: 12001 },
+      { ref: 'forge.db#prs/9001', number: 9001, title: 'Docs', additions: 7, year: 2023, line: 3, review: 900, ratio: 0.5, parentPRNumber: 8999, lineCount: 12, turn: 3 },
+    ]
+    w.eval(`
+      window.side = thimble.side({ mount: '#body' })
+      window.search = thimble.search({ mount: '#search' })
+      window.table = thimble.table({ mount: '#list', rows: PRS, side, search, columns: [
+        { name: 'number', title: 'PR #', type: 'number' },
+        { name: 'title', title: 'Title' },
+        { name: 'additions', title: 'Added', type: 'number' },
+        { name: 'year', title: 'Year', type: 'number' },
+        { name: 'line', title: 'At', type: 'number' },
+        { name: 'review', title: 'Review', type: 'id' },
+        { name: 'ratio', title: 'Ratio', type: 'number' },
+        { name: 'parentPRNumber', type: 'number' },
+        { name: 'lineCount', type: 'number' },
+        { name: 'turn', title: 'Turn', type: 'number' },
+      ] })
+      document.getElementById('cards').innerHTML = thimble.recordCard({ ref: PRS[0].ref, key: PRS[0].number, meta: PRS[0].year, title: PRS[0].title })
+      thimble.record({ mount: '#rec', value: PRS[0], ref: PRS[0].ref })
+    `)
+    // a name's last word tells, an acronym's end among its words: parentPRNumber names a pull request, lineCount counts,
+    // and a turn is written as the transcript writes its number
+    const first = ['67028', 'Fix the parser', '12,345', '2024', '10234', '4501', '1,234.5', '66990', '23,456', '12001']
+    expect(texts('.thimble-table-row[data-thimble-row="0"] .thimble-table-td')).toEqual(first)
+    // an identifier is laid out and sorted as a number
+    expect(doc().querySelector('.thimble-table-row .thimble-table-td')!.classList.contains('thimble-table-number')).toBe(true)
+    w.table.sortBy('review', false)
+    expect(w.table.rows.map((r: any) => r.review)).toEqual([900, 4501])
+    // the search finds it as it is written
+    await type('67028')
+    expect(w.search.count).toBe(1)
+    // the side panel's default details, a card and the record viewer write it alike
+    w.table.open('forge.db#prs/67028')
+    expect(texts('.thimble-table-fields dd')).toEqual(first)
+    expect(texts('#cards .thimble-card-key')).toEqual(['67028'])
+    expect(texts('#cards .thimble-card-meta')).toEqual(['2024'])
+    // the record viewer writes each value as the record holds it
+    expect(texts('#rec .thimble-record-val')).toEqual(expect.arrayContaining(['67028', '12345', '2024', '1234.5']))
   })
 })
 
@@ -734,6 +910,34 @@ describe('the text', () => {
     const long = drawn(w.thimble.text.html(Array.from({ length: 300 }, (_, i) => `word${i}`).join(' '), { format: 'plain', fold: 2 }))
     expect(shown(long).length).toBeGreaterThan(150)
     expect(shown(long).length).toBeLessThan(260)
+  })
+})
+
+describe('times', () => {
+  // 09:00 on 16 May 2026 in UTC
+  const T = Date.UTC(2026, 4, 16, 9) / 1000
+  test("the messages and the timeline read a record's time as the transcript does: a number, its digits, an ISO time or a mail's date, one with no zone in UTC on a machine in any zone, and text with no date in it as no time", async () => {
+    const zone = process.env.TZ
+    // a machine seven hours behind UTC in May, where the browser reads a date with no zone in its own
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      await load('<div id="c"></div><div id="lanes" style="width:600px"></div>')
+      const w = win()
+      const read = [T, (T + 60) * 1000, String(T + 120), '2026-05-16T09:03:00', '2026-05-16T11:04:00+02:00', 'Sat, 16 May 2026 09:05:00', 'Sat, 16 May 2026 02:06:00 -0700']
+      w.MSGS = [...read.map((t, i) => ({ ref: `m#${i + 1}`, t, author: i % 2 ? 'ana' : 'bo', text: 'ok' })), { ref: 'm#8', t: 'step 4', author: 'cy', text: 'no time' }]
+      w.eval(`thimble.messages({ mount: '#c' }).draw(window.MSGS)
+        window.line = thimble.timeline({ mount: '#lanes' })
+        window.line.draw(window.MSGS.slice(3))`)
+      expect([...doc().querySelectorAll('.thimble-msg')].map((e) => e.getAttribute('data-t'))).toEqual([...read.map((_, i) => String(T + 60 * i)), null])
+      expect([...doc().querySelectorAll('.thimble-msg-time')].map((e) => e.getAttribute('title'))).toEqual(read.map((_, i) => `2026-05-16 09:0${i}:00`))
+      // the timeline's scale holds the times of text from 09:03 to 09:06 within the hour around them, "step 4" placed
+      // nowhere
+      const sc = w.line.scale
+      expect([sc.from <= T + 180 && sc.from > T - 3600, sc.to >= T + 360 && sc.to < T + 3600]).toEqual([true, true])
+    } finally {
+      if (zone === undefined) delete process.env.TZ
+      else process.env.TZ = zone
+    }
   })
 })
 

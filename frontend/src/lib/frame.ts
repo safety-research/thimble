@@ -71,6 +71,7 @@ export const VIEW_TOKENS = [
   '--ink-rgb',
   '--accent-hover',
   '--text-accent',
+  '--text-link',
   '--text-on-accent',
   '--text-on-inverse',
   '--text-placeholder',

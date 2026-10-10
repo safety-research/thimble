@@ -303,7 +303,8 @@ describe('the table beside the side panel', () => {
       return { count: w.search.count, fields }
     })
     assert.equal(held.count, 18)
-    assert.deepEqual(held.fields, [['#', '65,000'], ['Title', 'BUG: a title that says what the change fixes 0'], ['Author', 'gh:contributor-0'], ['State', 'open'], ['Opened', '2026-04-01 00:00:00']])
+    // the PR number, a number column titled '#', is an identifier: written as it is
+    assert.deepEqual(held.fields, [['#', '65000'], ['Title', 'BUG: a title that says what the change fixes 0'], ['Author', 'gh:contributor-0'], ['State', 'open'], ['Opened', '2026-04-01 00:00:00']])
     // "o" is twice in each dropped Author and once in a State "open" or "closed": every one counts, and the current
     // match, the first of the top row, is washed in its State cell
     const shown = await frame().evaluate(() => {
@@ -735,6 +736,90 @@ describe('the search in folded text', () => {
     assert.deepEqual(await currentIn(frame, `${CUT_TURN} .thimble-turn-block`, '#turns'), { text: 'dunlin', within: true, shown: true })
     assert.equal(await frame().evaluate((sel) => document.querySelector(sel + ' .thimble-turn-more')!.textContent, CUT_TURN), 'Show less')
     tickAt(await ticksDrawn(frame), await placeIn(frame, '#turns', null), 'dunlin', 2)
+    await p.close()
+  })
+})
+
+// 8,000 turns, a third of them tool calls folded with their output, a word in one turn near the end. Each key's wait is
+// the time from the browser's event to its handler, so a key typed while the page is busy waits.
+const LONG_TRANSCRIPT = page(`<div class="top"><span id="search"></span><span id="colour"></span></div><div id="list" style="height:600px;overflow-y:auto"></div>
+<script>
+const words = 'the agent read a file and then ran the tests again before it wrote a short note about what failed'.split(' ')
+const text = (i, n) => Array.from({ length: n }, (_, k) => words[(i * 7 + k * 3) % words.length]).join(' ')
+const T0 = Date.UTC(2026, 3, 1) / 1000
+window.turns = Array.from({ length: 8000 }, (_, i) => i % 3 === 1
+  ? { ref: 's.jsonl#L' + (i + 1), t: T0 + i * 7, speaker: 'lead', kind: 'tool', tool: 'Bash', input: 'pytest -q tests/test_' + i + '.py', output: Array.from({ length: 12 }, (_, k) => text(i + k, 12)).join('\\n'), line: i + 1 }
+  : { ref: 's.jsonl#L' + (i + 1), t: T0 + i * 7, speaker: ['user', 'lead'][i % 2], kind: 'text', text: text(i, 40) + (i === 7950 ? ' zephyrine' : ''), line: i + 1 })
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'speaker', title: 'Speaker' }], strip: '#list' })
+window.search = thimble.search({ mount: '#search', in: '#list' })
+window.tr = thimble.transcript({ mount: '#list' })
+tr.draw(turns, { title: 'lead · Run 1' })
+window.keys = []
+window.shown = []
+const input = document.querySelector('.thimble-search-input')
+input.addEventListener('keydown', (e) => keys.push([performance.now(), performance.now() - e.timeStamp]))
+new MutationObserver(() => shown.push([performance.now(), document.querySelector('.thimble-search-count').textContent])).observe(document.querySelector('.thimble-search-count'), { childList: true, characterData: true, subtree: true })
+</script>`)
+// Bounds many times what a step takes in headless Chromium, so a slower machine passes: the first search over the 8,000
+// turns shows its count about 0.25 s after the last key here (0.12 s of it the wait for typing to pause), and a key typed
+// while it runs waits about 0.1 s. Reading the page whole on each search took 4 to 8 s, and a key typed meanwhile waited
+// as long.
+const FIRST_MS = 2000
+const KEY_MS = 600
+
+describe('the search over a long transcript', () => {
+  test('8,000 turns: the first search shows its count soon after the last key, a key typed while it runs waits little, and a match in a folded turn is gone to', async () => {
+    const { page: p, frame } = await framed(LONG_TRANSCRIPT)
+    await frame().locator('.thimble-search-input').click()
+    // typing, a pause long enough for the search to start, then more keys while it runs
+    await p.keyboard.type('pyt', { delay: 40 })
+    await p.waitForTimeout(140)
+    await p.keyboard.type('est', { delay: 40 })
+    await frame().waitForFunction(() => (window as any).keys.length === 6 && /^1 of 2,667$/.test(document.querySelector('.thimble-search-count')!.textContent!), null, { timeout: 30000 })
+    const got = await frame().evaluate(() => {
+      const w = window as any
+      const after = (k: number) => w.shown.find(([t, s]: [number, string]) => t > w.keys[k][0] && / of /.test(s))[0] - w.keys[k][0]
+      return { firstMs: after(2), lastMs: after(5), waits: w.keys.map((k: number[]) => k[1]), open: document.querySelector('[data-anchor="s.jsonl#L2"] .thimble-turn-call') != null }
+    })
+    assert.ok(got.firstMs < FIRST_MS, `the first search showed its count ${Math.round(got.firstMs)} ms after its last key`)
+    assert.ok(got.lastMs < FIRST_MS, `the next showed its count ${Math.round(got.lastMs)} ms after its last key`)
+    const worst = Math.max(...got.waits)
+    assert.ok(worst < KEY_MS, `a key waited ${Math.round(worst)} ms (${got.waits.map(Math.round)})`)
+    // the first match is in a folded tool call: the turn opened
+    assert.equal(got.open, true)
+    // a search in the index already read: the one turn near the end
+    await frame().locator('.thimble-search-input').fill('zephyrine')
+    const t0 = Date.now()
+    await frame().waitForFunction(() => document.querySelector('.thimble-search-count')!.textContent === '1 of 1', null, { timeout: 30000 })
+    assert.ok(Date.now() - t0 < FIRST_MS, `the search took ${Date.now() - t0} ms`)
+    await p.close()
+  })
+
+  test("what the page's styles hide is not found, in its own rows that draw as they come into view (content-visibility) too, as a class, a mode of the page's or a new width shows or hides it", async () => {
+    const { page: p, frame } = await framed(
+      page(`<style>.row{content-visibility:auto;contain-intrinsic-size:auto 40px;padding:6px} .row .body{display:none} .row.open .body{display:block} .narrow .num{display:none}
+.compact .row .body{display:none} #list{container-type:inline-size} @container (max-width: 500px) {.num{display:none}}</style>
+<div class="top"><span id="search"></span></div><div id="list" class="narrow" style="height:600px;overflow-y:auto">
+${Array.from({ length: 300 }, (_, i) => `<div class="row${i === 3 ? ' open' : ''}" data-anchor="m.jsonl#L${i + 1}"><span>Subject ${i}</span> <span class="num">gale ${i}</span><div class="body">a gale in the body ${i}</div></div>`).join('')}</div>
+<script>window.search = thimble.search({ mount: '#search', in: '#list' })</script>`),
+    )
+    const count = (fn: string) => frame().evaluate(async (fn) => {
+      const w = window as any
+      new Function(fn)()
+      await new Promise((r) => setTimeout(r, 50))
+      w.search.set('gale')
+      return w.search.count
+    }, fn)
+    // the open row's body alone shows its gale
+    assert.equal(await count(''), 1)
+    // a row far down opened by its class, then the cells the list's class hid shown
+    assert.equal(await count(`document.querySelector('[data-anchor="m.jsonl#L250"]').classList.add('open')`), 2)
+    assert.equal(await count(`document.getElementById('list').classList.remove('narrow')`), 302)
+    // the list narrowed, which hides the cells again by a container query
+    assert.equal(await count(`document.getElementById('list').style.width = '400px'`), 2)
+    // a mode of the page's, a class on the body, that hides the rows' bodies
+    assert.equal(await count(`document.body.classList.add('compact')`), 0)
+    assert.equal(await count(`document.body.classList.remove('compact')`), 2)
     await p.close()
   })
 })

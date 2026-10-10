@@ -133,7 +133,9 @@ load()
 - Pass `colour.query()` with each fetch, so the reader can count and chart by the choice (below). It is `null` for
   Off.
 - Give the counts with `colour.counts({value: n})`, the key `''` for records with no value. Without them, the control
-  counts the elements on the page, which is right only when the page draws every record.
+  counts the elements on the page, which is right only when the page draws every record. The chips count only what
+  shows, so a tab out of view counts nothing: `colour.counts(map, el)` gives the counts of the records in `el`, such as
+  a tab's list, as the kit's table gives those of its rows.
 - Draw charts in `colour.colourOf(value)`, a color a canvas can draw. `colourOf` gives `null` for no value, for a value
   turned off and for Off: draw those marks in one gray, and keep them.
 - A chart's key gives every series a mark drawn as the series is: a series in the Color by colors shows the chips'
@@ -293,7 +295,7 @@ for a record the label does not mark.
 | `isOn(value)` | whether a value's color is on |
 | `keeps(record)` | always `true`: Color by hides no record (Filter by's `keeps` does) |
 | `attr(record)` | ` data-colour="<value>"` while a field is the color, `''` while a label is or for Off; with ` data-colour-tracks` for the fields past the first choice |
-| `counts(map)` | the counts of the current choice's values from the reader; `null` counts the page's elements again |
+| `counts(map, el?)` | the counts of the current choice's values from the reader; `null` counts the page's elements again. With `el`, the counts of the records in that element, which the chips count while it shows |
 | `query()` | the choice for the reader: `{field}`, `{label, name}`, or `null` for Off |
 | `strip(list, {rows, refs, records, preview, whole}?)` | the tracks on another list, or the rows of one already on |
 

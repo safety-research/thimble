@@ -123,6 +123,40 @@
   function num(n) {
     return Number(n || 0).toLocaleString('en-US')
   }
+  // A time in seconds since 1970 as a record gives it, for the kit's parts that write or place times (the transcript,
+  // the messages, the lanes): a number (in milliseconds past MS_FROM, which no time in seconds reaches before the year
+  // 5000), its digits as text, a Date, or a date as text, such as an ISO time or a mail's date, one with no zone read in
+  // UTC as the kit writes times; null for none, such as text with no date in it ("step 4"), which the browser would
+  // read a date into
+  var MS_FROM = 1e11
+  var ISO = /^(\d{4}-\d\d-\d\d)(?:[T ](\d\d:\d\d(?::\d\d(?:[.,]\d+)?)?)\s*(Z|UTC|GMT|[+-]\d\d(?::?\d\d)?)?)?$/i
+  var DATE = /\d{4}[-/]\d\d?[-/]\d\d?|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s.*\b\d{4}\b|\b\d{4}\b.*\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i
+  var ZONE = /\d:\d\d(?::\d\d(?:\.\d+)?)?\s*(?:Z|[+-]\d\d:?\d\d|UTC|GMT|UT|[ECMP][SD]T)\b|\b(?:UTC|GMT)\b/i
+  function secs(t) {
+    var s = null
+    if (Object.prototype.toString.call(t) === '[object Date]') s = t.getTime() / 1000
+    else {
+      if (typeof t === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(t)) t = Number(t)
+      if (typeof t === 'number') s = Math.abs(t) >= MS_FROM ? t / 1000 : t
+      else if (typeof t === 'string') {
+        var d = t.trim()
+        var iso = ISO.exec(d)
+        var ms = NaN
+        // an ISO time as every browser reads it: a T, at most milliseconds, an offset with its minutes, Z for none
+        if (iso) {
+          var z = !iso[3] || /^(z|utc|gmt)$/i.test(iso[3]) ? 'Z' : iso[3].slice(0, 3) + ':' + (iso[3].slice(3).replace(':', '') || '00')
+          ms = Date.parse(iso[1] + 'T' + (iso[2] || '00:00').replace(',', '.').replace(/(\.\d{3})\d+/, '$1') + z)
+        } else if (DATE.test(d)) {
+          ms = Date.parse(d)
+          // a date with no zone, which the browser reads in its own: in UTC
+          if (isFinite(ms) && !ZONE.test(d)) ms -= new Date(ms).getTimezoneOffset() * 60000
+        }
+        s = ms / 1000
+      }
+    }
+    // a date can be no further than 100,000,000 days from 1970
+    return s != null && isFinite(s) && Math.abs(s) <= 864e10 ? s : null
+  }
   function keyOf(v) {
     return v == null || v === '' ? NONE : String(v)
   }
@@ -465,6 +499,7 @@
     this.mount = el(opts.mount)
     this.given = null // counts the page gave for the current choice: {key: n}
     this.givenBy = null
+    this.held = [] // the counts given for the records in an element, such as a table's rows: [{el, by, counts}]
     this.domCounts = {}
     this.values = [] // the current choice's values: [{key, value, name, colour, n}]
     this.menu = null
@@ -522,12 +557,21 @@
           })
         }).observe(this.mount)
     }
-    // the page's own redraws change what is counted and where each value's records are
+    // the page's own redraws change what is counted and where each value's records are; and an element around records
+    // shown or hidden, such as a tab, changes what is counted
     new MutationObserver(function (records) {
       var any = false
       for (var i = 0; i < records.length; i++) {
         var t = records[i].target
         if (t && t.nodeType === 1 && t.closest && t.closest('.thimble-colour-mount,.thimble-colour-menu,.thimble-colour-strip,.thimble-range,.thimble-tip,.thimble-colour-loupe,.thimble-part')) continue
+        // a class, a style or `hidden` that may show or hide what it is on: only a record hidden or shown, or an element
+        // around records, such as a tab; never a row chosen or a fold opened inside a record
+        var a = records[i].attributeName
+        if (a === 'hidden' || a === 'class' || a === 'style') {
+          if (!showsOrHides(records[i])) continue
+          var rec = t.closest('[data-anchor]')
+          if (rec ? rec !== t || a !== 'hidden' : !holdsRecords(t, self.held)) continue
+        }
         any = true
         // a strip of a list of elements measures them again only when a change is inside its list
         for (var j = 0; j < self.strips.length; j++) {
@@ -536,7 +580,7 @@
         }
       }
       if (any) self.soon()
-    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-colour', 'data-colour-tracks', 'data-anchor'] })
+    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-colour', 'data-colour-tracks', 'data-anchor', 'data-thimble-drop', 'hidden', 'class', 'style'] })
     if (opts.strip) this.strip(opts.strip, { whole: true })
   }
 
@@ -686,8 +730,52 @@
   }
 
   // ---------------------------------------------------------------- counts and values
-  // the values of the records the page shows, each record once: for a field, the elements with data-colour; for a
-  // label, the anchored records, or the view's own units when it anchors no record
+  // Whether a change of an attribute, heard with its old value, may show or hide the element it is on: `hidden`, a class
+  // other than the kit's own (thimble-*, such as the strip's thimble-colour-scrolled on a list as it scrolls), or a
+  // style that sets display
+  function showsOrHides(r) {
+    var name = r.attributeName
+    var now = r.target.getAttribute(name) || ''
+    var was = r.oldValue || ''
+    if (name === 'style') return /display/.test(was) || /display/.test(now)
+    if (name !== 'class') return true
+    var a = was.split(/\s+/)
+    var b = now.split(/\s+/)
+    for (var i = 0; i < a.length; i++) if (a[i] && a[i].indexOf('thimble-') !== 0 && b.indexOf(a[i]) < 0) return true
+    for (var j = 0; j < b.length; j++) if (b[j] && b[j].indexOf('thimble-') !== 0 && a.indexOf(b[j]) < 0) return true
+    return false
+  }
+  // whether an element holds records, or an element that counts its own (held), so showing it or hiding it, as a tab,
+  // changes what the chips count
+  function holdsRecords(t, held) {
+    if (!t || t.nodeType !== 1) return false
+    if (t.querySelector('[data-anchor]')) return true
+    for (var i = 0; i < held.length; i++) if (t.contains(held[i].el)) return true
+    return false
+  }
+  // Whether an element shows, asked of each element once per count: its own hidden attribute and the label filter's
+  // (viewer_bridge.js data-thimble-drop), and the style of each element around it, such as a tab that is not in view;
+  // with `whole` its own style too
+  function shownTest() {
+    var memo = new Map()
+    function styled(e) {
+      if (!e || e.nodeType !== 1) return true
+      var v = memo.get(e)
+      if (v === undefined) {
+        v = !e.hidden && getComputedStyle(e).display !== 'none' && styled(e.parentElement)
+        memo.set(e, v)
+      }
+      return v
+    }
+    return function (e, whole) {
+      if (e.hidden || e.getAttribute('data-thimble-drop') === 'hide') return false
+      return styled(whole ? e : e.parentElement)
+    }
+  }
+  // The values of the records the page shows, each record once: those that elements which count their own records gave
+  // (held, such as the table of the tab in view), then for a field the other elements with data-colour, for a label the
+  // other anchored records, or the view's own units when it anchors no record. A record in an element that does not show,
+  // such as a tab not in view, is not counted.
   Control.prototype.countDom = function () {
     var c = this.choice()
     var out = {}
@@ -695,10 +783,28 @@
     if (!c || c.off) return out
     var seen = {}
     var records = 0
+    var shown = shownTest()
+    var held = []
+    var strips = allStrips()
+    for (var h = 0; h < this.held.length; h++) {
+      var x = this.held[h]
+      if (x.by !== c.key || !x.el.isConnected || !shown(x.el, true)) continue
+      held.push(x.el)
+      for (var hk in x.counts) {
+        out[hk] = (out[hk] || 0) + x.counts[hk]
+        if (hk !== NONE) records += x.counts[hk]
+      }
+      // its records by ref, from the strip of its list (colour.strip's refs), so that one drawn elsewhere too, such as
+      // in the side panel, is counted once
+      for (var si = 0; si < strips.length; si++)
+        if (strips[si].box === x.el && strips[si].refs) for (var r = 0; r < strips[si].refs.length; r++) if (strips[si].refs[r] != null) seen[String(strips[si].refs[r])] = true
+    }
     var els = document.querySelectorAll(c.field ? '[data-anchor][data-colour]' : '[data-anchor]')
     for (var i = 0; i < els.length; i++) {
       var e = els[i]
-      if (e.closest('.thimble-colour-mount,.thimble-colour-menu')) continue
+      if (e.closest('.thimble-colour-mount,.thimble-colour-menu') || !shown(e)) continue
+      for (var hi = 0; hi < held.length && !held[hi].contains(e); hi++);
+      if (hi < held.length) continue
       var ref = e.getAttribute('data-anchor')
       if (ref) {
         if (seen[ref]) continue
@@ -3298,18 +3404,25 @@
         return out
       },
       /** the counts of the current choice's values from the reader, {value: n} (the key '' for no value) or [[value, n]];
-       *  null counts the elements on the page again */
-      counts: function (map) {
+       *  null counts the elements on the page again. With `within` (an element or a selector), the counts of the records
+       *  in that element, such as a tab's list, which the chips count while it shows */
+      counts: function (map, within) {
         var ch = c.choice()
-        if (map == null) {
-          c.given = null
-          c.givenBy = null
-        } else {
-          var got = {}
+        var got = null
+        if (map != null) {
+          got = {}
           var pairs = Array.isArray(map) ? map : Object.keys(map).map(function (k) { return [k, map[k]] })
           for (var i = 0; i < pairs.length; i++) if (pairs[i]) got[keyOf(pairs[i][0])] = Number(pairs[i][1]) || 0
+        }
+        var at = within != null ? el(within) : null
+        if (at && at !== true) {
+          c.held = c.held.filter(function (h) {
+            return h.el !== at && h.el.isConnected
+          })
+          if (got) c.held.push({ el: at, by: ch ? ch.key : null, counts: got })
+        } else {
           c.given = got
-          c.givenBy = ch ? ch.key : null
+          c.givenBy = got && ch ? ch.key : null
         }
         c.refresh()
       },
@@ -3586,6 +3699,8 @@
     untip: untip,
     esc: esc,
     num: num,
+    secs: secs,
+    showsOrHides: showsOrHides,
     // the labels as Color by reads them, for the kit's other parts (viewer_controls.js): every label over files, one by
     // its id, whether it is on, its value on a record, and what its values mean
     labels: allLabels,

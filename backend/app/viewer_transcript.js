@@ -15,8 +15,9 @@
 //
 //   const tr = thimble.transcript({ mount: '#turns', onOpen: (turn) => fetchWhole(turn) })
 //   tr.draw(turns, { title: 'explorer · Run 2' })   turns: [{ref, t, speaker, kind, tool, text, input, output, error,
-//                                                    session, line, record}], kind text | prompt | tool | thinking |
-//                                                    system, error true or the failure's word (✕'s hover gives it)
+//                                                    session, line, record}], t seconds since 1970 or a date such
+//                                                    as an ISO time, kind text | prompt | tool | thinking | system,
+//                                                    error true or the failure's word (✕'s hover gives it)
 //   tr.reveal(ref)                                  a cited turn: opened, scrolled to the middle, its highlight fading
 //   tr.set(ref, {text, input, output})              a turn's words once the reader sent them whole
 ;(function () {
@@ -62,12 +63,21 @@
     var line = String(s == null ? '' : s).split('\n').filter(function (l) { return l.trim() })[0] || ''
     return line.length > LINE_MAX ? line.slice(0, LINE_MAX) + '…' : line
   }
-  // a time as the reader's head writes it: seconds since 1970 as YYYY-MM-DD HH:MM:SS in UTC, a string as written
+  // a time in seconds since 1970 from a number, its digits, a Date or a date as text, one with no zone in UTC; null for
+  // none, such as "step 4" (kit.shared.secs, which the messages and the lanes read times by too)
+  var secs = shared.secs
+  // a turn's time as the reader's head writes it, YYYY-MM-DD HH:MM:SS in UTC, from its `t` (or `time`); text that holds
+  // no date as written
   function stamp(turn) {
-    if (turn.time != null && turn.time !== '') return String(turn.time)
-    var t = turn.t
-    if (typeof t !== 'number' || !isFinite(t)) return ''
-    return new Date(t * 1000).toISOString().slice(0, 19).replace('T', ' ')
+    var t = turn.t != null && turn.t !== '' ? turn.t : turn.time
+    var s = secs(t)
+    if (s != null) return new Date(s * 1000).toISOString().slice(0, 19).replace('T', ' ')
+    return t == null || typeof t === 'object' ? '' : String(t)
+  }
+  // a turn's time on its element, for the lanes: its `t` as given when a number, else in seconds since 1970
+  function placeOf(turn) {
+    if (typeof turn.t === 'number') return isFinite(turn.t) ? turn.t : null
+    return secs(turn.t != null && turn.t !== '' ? turn.t : turn.time)
   }
   // a turn's one line while it is folded: a tool call's tool and the first telling line of its input
   function summary(turn) {
@@ -136,7 +146,8 @@
     // a failed call: ✕ and its tool in the problem red, whether the turn is folded or open
     var failed = kind === 'tool' && turn.error
     var tool = failed ? '<span class="thimble-turn-failed" title="' + esc(typeof turn.error === 'string' ? turn.error : 'failed') + '">✕ ' + esc(turn.tool || 'tool') + '</span>' : esc(turn.tool)
-    var head = esc(turn.speaker || '(unsigned)') + ((turn.tool || failed) && kind === 'tool' ? '<span class="thimble-turn-tool"> · ' + tool + '</span>' : '') + (stamp(turn) ? ' · ' + esc(stamp(turn)) : '')
+    var when = stamp(turn)
+    var head = esc(turn.speaker || '(unsigned)') + ((turn.tool || failed) && kind === 'tool' ? '<span class="thimble-turn-tool"> · ' + tool + '</span>' : '') + (when ? ' · ' + esc(when) : '')
     var body = ''
     var bs = blocks(turn)
     if (!open) {
@@ -153,8 +164,9 @@
     }
     var colour = this.bars.attr(recordOf(turn))
     var no = turn.line != null ? turn.line : i + 1
+    var at = placeOf(turn)
     return (
-      '<div class="thimble-turn thimble-turn-k-' + esc(kind) + '" data-anchor="' + esc(turn.ref) + '" data-anchor-text="' + esc(summary(turn).slice(0, 300)) + '"' + (typeof turn.t === 'number' ? ' data-t="' + turn.t + '"' : '') + colour + '>' +
+      '<div class="thimble-turn thimble-turn-k-' + esc(kind) + '" data-anchor="' + esc(turn.ref) + '" data-anchor-text="' + esc(summary(turn).slice(0, 300)) + '"' + (at != null ? ' data-t="' + at + '"' : '') + colour + '>' +
       '<button type="button" class="thimble-turn-no" data-place="' + esc(turn.ref) + '" title="Open its lines in the File browser" data-thimble-chrome>' + esc(no) + '</button>' +
       '<div class="thimble-turn-main">' +
       (folds ? '<button type="button" class="thimble-turn-head thimble-turn-toggle" data-toggle="' + esc(turn.ref) + '" aria-expanded="' + (open ? 'true' : 'false') + '" data-thimble-chrome>' + CARET + head + '</button>' : '<div class="thimble-turn-head" data-thimble-chrome>' + head + '</div>') +
