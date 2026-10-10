@@ -579,7 +579,12 @@
 .thimble-turn-thinking {
   color: var(--text-tertiary);
 }
-/* a long block folded: its first six lines show (the rest hidden in the page, viewer_transcript.js), the last fading */
+/* a long block folded: its height cut to six lines, the last fading; its lines past the sixth are hidden in the page
+   (viewer_transcript.js) */
+.thimble-turn-fold.is-folded > .thimble-turn-block {
+  max-height: calc(6 * 1.5em + 8px);
+  overflow: hidden;
+}
 .thimble-turn-fold.is-folded::after {
   content: '';
   position: absolute;
@@ -782,12 +787,14 @@ button.thimble-record-key:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* a long string folded to its first six lines (the rest hidden in the page, viewer_record.js), the last fading out
-   above Show more */
+/* a long string folded: its height cut to six lines, the last fading out above Show more; its text past its first six
+   lines is hidden in the page (viewer_record.js) */
 .thimble-record-text {
   display: block;
 }
 .thimble-record-text.is-folded {
+  max-height: calc(6 * 1.55em);
+  overflow: hidden;
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.55em), transparent);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 1.55em), transparent);
 }

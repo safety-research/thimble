@@ -344,62 +344,6 @@
       (ref ? '<div class="thimble-record-cite" data-thimble-chrome><button type="button" class="chip chip-tone-evidence chip-act" data-record-file title="' + esc(ref) + '"><span class="chip-text">' + esc(citeLabel(ref)) + '</span></button></div>' : '') +
       body +
       '</div>'
-    this.fit()
-  }
-  // A folded long string cut to six lines as drawn, as a clamp would show it: what wraps past them moves to the start of
-  // its fold (the hidden element at its end), where the search finds it. Each string is measured before any is cut, so
-  // the record is laid out once; one that is not laid out keeps its cut by lines.
-  Record.prototype.fit = function () {
-    var boxes = this.mount.querySelectorAll('.thimble-record-text.is-folded')
-    var cuts = []
-    var r = document.createRange()
-    for (var i = 0; i < boxes.length; i++) {
-      var box = boxes[i]
-      var rest = box.lastElementChild
-      var lh = parseFloat(getComputedStyle(box).lineHeight)
-      if (!rest || !rest.hidden || !(lh > 0) || !box.getClientRects().length) continue
-      var nodes = []
-      var len = 0
-      var walk = document.createTreeWalker(box, NodeFilter.SHOW_TEXT)
-      for (var t = walk.nextNode(); t && !rest.contains(t); t = walk.nextNode()) {
-        nodes.push([t, len])
-        len += t.nodeValue.length
-      }
-      if (!len) continue
-      var at = function (k) {
-        var j = nodes.length - 1
-        while (j > 0 && nodes[j][1] > k) j--
-        return j
-      }
-      var top = function (k) {
-        var n = nodes[at(k)]
-        r.setStart(n[0], k - n[1])
-        r.setEnd(n[0], k - n[1] + 1)
-        var rs = r.getClientRects()
-        return rs.length ? rs[0].top : r.getBoundingClientRect().top
-      }
-      var limit = top(0) + (LONG_LINES - 0.5) * lh
-      if (top(len - 1) < limit) continue
-      // the first character of the line after the sixth
-      var lo = 0
-      var hi = len - 1
-      while (lo < hi) {
-        var mid = (lo + hi) >> 1
-        if (top(mid) >= limit) hi = mid
-        else lo = mid + 1
-      }
-      var n = nodes[at(lo)]
-      cuts.push([box, rest, n[0], lo - n[1]])
-    }
-    for (var c = 0; c < cuts.length; c++) {
-      var cr = document.createRange()
-      // a found word's mark moves whole
-      var mark = cuts[c][2].parentElement && cuts[c][2].parentElement.closest('mark')
-      if (mark && cuts[c][0].contains(mark)) cr.setStartBefore(mark)
-      else cr.setStart(cuts[c][2], cuts[c][3])
-      cr.setEndBefore(cuts[c][1])
-      cuts[c][1].insertBefore(cr.extractContents(), cuts[c][1].firstChild)
-    }
   }
   // a click on a key, Show more or less, Show N more or the citation; the focus stays on what was clicked
   Record.prototype.click = function (e) {
@@ -436,11 +380,12 @@
     for (var i = 0; i < all.length; i++) if (all[i].getAttribute(attr) === path) return all[i].focus()
   }
 
-  // the search goes to a match folded away: the folded value, long string or long list it is in opens, with every value
-  // around it, and the record is drawn again, as a click opens them
+  // the search goes to a match folded away, or cut from view by a folded string's height: the folded value, long string
+  // or long list it is in opens, with every value around it, and the record is drawn again, as a click opens them
   Record.prototype.unfold = function (el) {
     var root = el && el.closest ? el.closest('.thimble-record') : null
     if (!root || root !== this.mount.firstElementChild || !this.args) return
+    if (el.classList.contains('thimble-record-text')) el = el.querySelector(':scope > [data-fold-long]') || el
     var p
     if ((p = el.getAttribute('data-fold-path')) != null) this.folds[p] = true
     else if ((p = el.getAttribute('data-fold-long')) != null) this.longs[p] = true

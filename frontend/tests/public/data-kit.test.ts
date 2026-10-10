@@ -266,6 +266,22 @@ describe('the search', () => {
     expect([w.search.count, fold('[data-fold-long="/notes"]').hidden, texts('[data-long="/notes"]')]).toEqual([1, false, ['Show less']])
   })
 
+  test("a block cut to six lines by its height opens when the event is sent to the block itself, as the search sends it for a match the height cuts from view", async () => {
+    await load(`<div id="turns"></div><div id="rec"></div>`)
+    const w = win()
+    w.LONG = Array.from({ length: 9 }, (_, i) => `line ${i + 1}`).join('\n')
+    w.eval(`
+      window.tr = thimble.transcript({ mount: '#turns' })
+      tr.draw([{ ref: 's.jsonl#L1', speaker: 'lead', kind: 'text', text: window.LONG }])
+      thimble.record({ mount: '#rec', value: { notes: window.LONG }, ref: 'r.jsonl#L1' })
+    `)
+    const unfold = (sel: string) => doc().querySelector(sel)!.dispatchEvent(new w.CustomEvent('thimble-unfold', { bubbles: true }))
+    unfold('#turns .thimble-turn-block')
+    expect([doc().querySelector<HTMLElement>('#turns [data-thimble-fold]')!.hidden, texts('#turns .thimble-turn-more')]).toEqual([false, ['Show less']])
+    unfold('#rec .thimble-record-text')
+    expect([doc().querySelector<HTMLElement>('#rec [data-fold-long="/notes"]')!.hidden, texts('[data-long="/notes"]')]).toEqual([false, ['Show less']])
+  })
+
   test("a quote a citation opens in folded text: its fold opens, as the search's match does, and the quote is found", async () => {
     await load(`<div id="rec"></div>`)
     const w = win()

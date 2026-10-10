@@ -321,6 +321,25 @@ const tickAt = (ticks: number[][], place: number[], what: string, n = 1) => {
   assert.ok(ticks.some((t) => t[1] >= place[0] - slack && t[0] <= place[1] + slack), `${what}: a tick at its place ${JSON.stringify(place)}, ${JSON.stringify(ticks)}`)
 }
 
+// A transcript in a narrow pane, every turn open: a word on line 3 of a long block whose first lines wrap, so it lies past
+// the block's sixth line as drawn, and once in a short turn above it; a tool's output of long paths, which break at their
+// hyphens rather than fill their lines
+const CUT = Array.from({ length: 9 }, (_, i) => (i === 2 ? `line 3: a dunlin on the mud ${WIDE}` : `line ${i + 1} ${WIDE}`)).join('\n')
+const PATHS = Array.from({ length: 9 }, (_, i) => JSON.stringify({ i, path: '/usr/lib/python3/site-packages/pandas/core/frame.py', msg: 'x'.repeat(60 + i * 30) })).join('\n')
+const CUT_TRANSCRIPT = page(`<div class="top"><span id="search"></span><span id="colour"></span></div><div id="turns" style="width:380px;height:420px;overflow-y:auto"></div>
+<script>
+window.colour = thimble.colorBy({ mount: '#colour', fields: [] })
+window.search = thimble.search({ mount: '#search', in: '#turns' })
+window.tr = thimble.transcript({ mount: '#turns', fold: () => false })
+tr.draw(${JSON.stringify([
+  { ref: 'c.jsonl#L1', speaker: 'lead', kind: 'text', text: 'a dunlin flies past' },
+  ...calm(2, 4),
+  { ref: 'c.jsonl#L6', speaker: 'lead', kind: 'text', text: CUT },
+  { ref: 'c.jsonl#L7', speaker: 'lead', kind: 'tool', tool: 'Bash', input: 'cat log.jsonl', output: PATHS },
+  ...calm(8, 12),
+])}, { title: 'lead · Run 2' })
+</script>`)
+
 describe('the search in folded text', () => {
   test("a transcript: a word on a long block's line 15 and one in a folded tool call's output, counted, ticked and shown; Show less folds it again; Reset leaves it open", async () => {
     const { page: p, frame } = await framed(FOLDED_TRANSCRIPT)
@@ -413,6 +432,32 @@ describe('the search in folded text', () => {
       open: document.querySelector('[data-fold="/meta/source"]')!.getAttribute('aria-expanded'),
     }))
     assert.deepEqual(after, { text: '', count: 0, open: 'true' })
+    await p.close()
+  })
+
+  test("a word past a long block's sixth line as drawn, though on its third: counted, ticked on its block, and shown once gone to; a block of long paths shows six lines", async () => {
+    const { page: p, frame } = await framed(CUT_TRANSCRIPT)
+    const CUT_TURN = '[data-anchor="c.jsonl#L6"]'
+    // each folded block shows six lines as drawn, whatever its lines wrap to: the words past them are cut by its height
+    const shown = await frame().evaluate(() =>
+      [...document.querySelectorAll('.thimble-turn-fold.is-folded > .thimble-turn-block')].map((b) => {
+        const cs = getComputedStyle(b)
+        return (b.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) / parseFloat(cs.lineHeight)
+      }),
+    )
+    assert.equal(shown.length, 2)
+    for (const n of shown) assert.ok(n > 5.5 && n < 7, `six lines show: ${shown}`)
+    // the word in the short turn is gone to; the one cut from view is counted and ticked on its block
+    await typeIn(frame, 'dunlin')
+    assert.deepEqual(await frame().evaluate(() => [(window as any).search.count, (window as any).search.at]), [2, 0])
+    await p.waitForTimeout(150)
+    tickAt(await ticksDrawn(frame), await placeIn(frame, '#turns', `${CUT_TURN} .thimble-turn-block`), 'dunlin cut', 2)
+    // Enter goes to it: its block shows whole, and the match shows inside its turn and the box that scrolls
+    await frame().locator('.thimble-search-input').press('Enter')
+    await p.waitForTimeout(200)
+    assert.deepEqual(await currentIn(frame, `${CUT_TURN} .thimble-turn-block`, '#turns'), { text: 'dunlin', within: true, shown: true })
+    assert.equal(await frame().evaluate((sel) => document.querySelector(sel + ' .thimble-turn-more')!.textContent, CUT_TURN), 'Show less')
+    tickAt(await ticksDrawn(frame), await placeIn(frame, '#turns', null), 'dunlin', 2)
     await p.close()
   })
 })
