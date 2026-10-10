@@ -2420,8 +2420,6 @@ async def _shot_type_card(ctx: Ctx, cid: str, cell: dict) -> ToolResult:
 # and the canvas at 100%.
 CARD_SHOT_VIEWPORT = "1280x2400"
 CARD_SHOT_SCALE = 2
-# after the page is quiet: the card opened by `?ref=` flashes for 1.6 s (Canvas.flashCard), and charts settle
-CARD_SHOT_WAIT_MS = 2200
 
 
 def ui_base() -> str | None:
@@ -2439,8 +2437,9 @@ def ui_base() -> str | None:
 
 async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
     """The card shot in the workspace's page opened at `?ref=card:<id>` in a headless browser (dev.run_shot), canvas at
-    100%
-    with the chat closed. None when the page could not be shot or did not show the card, so the caller falls back."""
+    100% with the chat closed, once the card is drawn (`settle`): the page opens a card its URL names neither selected
+    nor flashed (frontend lib/teleport refFromUrl), so the shot waits only for the card's charts and tables. None when
+    the page could not be shot or did not show the card, so the caller falls back."""
     from urllib.parse import urlencode
 
     run_shot = _optional("dev", "run_shot")
@@ -2453,8 +2452,7 @@ async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
         png = Path(d) / "card.png"
         try:
             code = await _maybe_await(run_shot(url, png, f'article.canvas-card[data-cell="{cid}"]', viewport=CARD_SHOT_VIEWPORT,
-                                               scale=CARD_SHOT_SCALE, storage=storage, press=["Escape"],
-                                               wait_ms=CARD_SHOT_WAIT_MS))
+                                               scale=CARD_SHOT_SCALE, storage=storage, settle=True, wait_ms=0))
         except headless.Missing:
             return None
         except Exception:  # noqa: BLE001 — a missing node is the fallback's case, not an error to the model

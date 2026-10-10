@@ -3,17 +3,22 @@
 //   node scripts/ui_shot.mjs --url <url> --out <png> [--selector <css>] [--wait <ms>]
 //                            [--click <css>]... [--scroll-to <css>] [--viewport <w>x<h>] [--highlight]
 //                            [--element-out <png>] [--info <json path>] [--scale <n>] [--storage <key>=<json>]...
-//                            [--press <key>]... [--offline] [--own-origin]
+//                            [--press <key>]... [--settle] [--offline] [--own-origin]
 // Loads the URL at 1440x900 (or --viewport), at device scale 1 (or --scale: 2 draws every CSS pixel as four, as a
 // high-density screen does), with each --storage key set in the page's localStorage before any of its scripts run, and waits for the page's own requests to go quiet (no request in flight
 // for 500 ms, the SSE streams ignored, hard cap 15 s). Then the actions, in command-line order, each followed by the
 // same quiet wait: --click clicks the first match of a CSS selector (repeatable); --scroll-to scrolls the first match
-// into view; --press presses a key on the page (repeatable, such as Escape to clear a selection). Then --wait ms (default 500) to settle, then the png: the element's bounding box padded by 24 px when
-// --selector is given and found, else the full viewport. --highlight outlines the --selector match; --element-out
-// writes the padded element crop to a second png, and --out is then the full viewport; --info writes the result JSON
-// to a file as well as stdout. --offline refuses every request but the page's own, as for a figure's page whose
-// content a model or a kernel wrote. --own-origin refuses every request and WebSocket that leaves the page's origin, and
-// sends the browser's other traffic to a proxy that isn't there, for an app whose code a dev ticket wrote.
+// into view; --press presses a key on the page (repeatable, such as Escape to clear a selection). With --settle, it
+// then waits until the --selector match is drawn: no part of it still drawing (a `data-settled="false"` body, a chart
+// with no svg yet: the card harness's test, frontend/src/render.tsx settled), the page's fonts loaded, and its box and
+// content unchanged for 100 ms, at most 5 s; and the png shows every CSS animation and transition at its end, so a
+// highlight fading out is not half there. Then --wait ms (default 500) to settle, then the png: the element's bounding
+// box padded by 24 px when --selector is given and found, else the full viewport. --highlight outlines the --selector
+// match; --element-out writes the padded element crop to a second png, and --out is then the full viewport; --info
+// writes the result JSON to a file as well as stdout. --offline refuses every request but the page's own, as for a
+// figure's page whose content a model or a kernel wrote. --own-origin refuses every request and WebSocket that leaves
+// the page's origin, and sends the browser's other traffic to a proxy that isn't there, for an app whose code a dev
+// ticket wrote.
 // Read-only: PUT/POST/DELETE/PATCH to /api/** are answered 204 and never reach the backend, and every request carries
 // `X-Thimble-Peek: 1`, so the files a shot loads are not logged as opened by the analyst.
 // Exit 0 on success, 2 if --selector or an action target was not found (the shot is still written), 1 on error.
@@ -33,13 +38,15 @@ const IDLE_QUIET_MS = 500
 const IDLE_TIMEOUT_MS = 15_000
 const IDLE_POLL_MS = 50
 const ACTION_TIMEOUT_MS = 5_000
+const SETTLE_QUIET_MS = 100
+const SETTLE_MAX_MS = 5_000
 const STREAM_RE = /\/(events|stream)$/
 const MUTATING = new Set(['PUT', 'POST', 'DELETE', 'PATCH'])
 
 const USAGE =
   'usage: node scripts/ui_shot.mjs --url <url> --out <png> [--selector <css>] [--wait <ms>] ' +
   '[--click <css>]... [--scroll-to <css>] [--press <key>]... [--viewport <w>x<h>] [--highlight] [--element-out <png>] ' +
-  '[--info <json path>] [--scale <n>] [--storage <key>=<json>]... [--offline] [--own-origin]'
+  '[--info <json path>] [--scale <n>] [--storage <key>=<json>]... [--settle] [--offline] [--own-origin]'
 
 function parseViewport(v) {
   const m = /^(\d{3,5})x(\d{3,5})$/.exec(String(v).trim())
@@ -48,7 +55,7 @@ function parseViewport(v) {
 }
 
 function parseArgs(argv) {
-  const out = { url: null, out: null, selector: null, wait: 500, actions: [], viewport: null, highlight: false, elementOut: null, info: null, scale: 1, storage: [], offline: false, ownOrigin: false }
+  const out = { url: null, out: null, selector: null, wait: 500, actions: [], viewport: null, highlight: false, elementOut: null, info: null, scale: 1, storage: [], settle: false, offline: false, ownOrigin: false }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => {
@@ -71,6 +78,7 @@ function parseArgs(argv) {
     }
     else if (a === '--viewport') out.viewport = parseViewport(next())
     else if (a === '--highlight') out.highlight = true
+    else if (a === '--settle') out.settle = true
     else if (a === '--offline') out.offline = true
     else if (a === '--own-origin') out.ownOrigin = true
     else if (a === '--element-out') out.elementOut = next()
@@ -81,6 +89,7 @@ function parseArgs(argv) {
     } else throw new Error(`unknown argument ${a}`)
   }
   if (!out.url || !out.out) throw new Error('--url and --out are required')
+  if (out.settle && !out.selector) throw new Error('--settle needs --selector')
   if (!Number.isFinite(out.wait) || out.wait < 0) throw new Error('--wait must be a non-negative number of ms')
   if (!Number.isFinite(out.scale) || out.scale < 1 || out.scale > 3) throw new Error('--scale must be a number from 1 to 3')
   for (const act of out.actions) if (!act.target.trim()) throw new Error(`empty value for --${act.kind}`)
@@ -149,6 +158,41 @@ async function perform(page, act) {
   }
 }
 
+/** Runs in the page: resolves true once the first match of `selector` is drawn (--settle), false when `max` ms passed
+ * first. */
+async function drawn([selector, quiet, max]) {
+  const start = performance.now()
+  let el = null
+  let seen = ''
+  let last = start
+  const mo = new MutationObserver(() => (last = performance.now()))
+  try {
+    for (;;) {
+      await new Promise((r) => requestAnimationFrame(() => r()))
+      const now = performance.now()
+      const cur = document.querySelector(selector)
+      if (cur !== el) {
+        mo.disconnect()
+        el = cur
+        last = now
+        if (el) mo.observe(el, { subtree: true, childList: true, attributes: true, characterData: true })
+      }
+      if (el) {
+        const r = el.getBoundingClientRect()
+        const box = `${r.x},${r.y},${r.width},${r.height}`
+        const drawing = el.querySelector('[data-settled="false"], [data-settling]') || Array.from(el.querySelectorAll('.outputs-vega')).some((c) => !c.querySelector('svg, canvas') && !c.parentElement?.querySelector('.outputs-error'))
+        if (box !== seen || drawing || document.fonts.status !== 'loaded') {
+          seen = box
+          last = now
+        } else if (now - last >= quiet) return true
+      }
+      if (now - start > max) return false
+    }
+  } finally {
+    mo.disconnect()
+  }
+}
+
 /** Runs in the page: a fixed box over the element with an accent outline. */
 function highlightBox(box) {
   const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#3b6ef5'
@@ -205,6 +249,8 @@ try {
     actions.push({ ...act, found })
     if (found) await waitQuiet(page, inflight)
   }
+  if (args.settle && !(await page.evaluate(drawn, [args.selector, SETTLE_QUIET_MS, SETTLE_MAX_MS])))
+    console.error(`--settle: ${JSON.stringify(args.selector)} not drawn within ${SETTLE_MAX_MS} ms; shot as it stands`)
   if (args.wait > 0) await page.waitForTimeout(args.wait)
 
   let found = false
@@ -229,14 +275,15 @@ try {
   if (found && args.highlight) await page.evaluate(highlightBox, raw)
 
   let elementOut = null
+  const animations = args.settle ? 'disabled' : 'allow'
   if (elementOutPath) {
-    await page.screenshot({ path: outPath })
+    await page.screenshot({ path: outPath, animations })
     if (found) {
-      await page.screenshot({ path: elementOutPath, clip: box })
+      await page.screenshot({ path: elementOutPath, clip: box, animations })
       elementOut = elementOutPath
     }
-  } else if (found) await page.screenshot({ path: outPath, clip: box })
-  else await page.screenshot({ path: outPath })
+  } else if (found) await page.screenshot({ path: outPath, clip: box, animations })
+  else await page.screenshot({ path: outPath, animations })
 
   const missed = (args.selector && !found) || actions.some((a) => !a.found)
   code = missed ? 2 : 0

@@ -38,8 +38,9 @@ export type Events = {
   /** the workspace's log was replaced (`/thimble fresh` or `resume`): what the page shows is from the log that is gone */
   wsReset: { workspace: string }
   /** show the surface that owns `ref` and bring the element into view; `browser` opens a file's ref in the File browser
-   * at its place, the passage highlighted, rather than in a view that claims the file (an example card's address) */
-  openRef: { ref: string; browser?: boolean; focus?: boolean }
+   * at its place, the passage highlighted, rather than in a view that claims the file (an example card's address);
+   * `still` opens a canvas card neither selected nor flashed (a `?ref=` in the page's URL, lib/teleport refFromUrl) */
+  openRef: { ref: string; browser?: boolean; focus?: boolean; still?: boolean }
   /** show a surface (shell/panes.ts show): `tab` is Files, Canvas, Report, or a view as `view:<slug>`; `from` is the
      * pane the request came from (lib/surfaces pressedPane), else the pane pressed last */
   showTab: { tab: Tab | `view:${string}`; from?: string | null }

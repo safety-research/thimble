@@ -1226,16 +1226,16 @@ def shot_script() -> Path:
 
 async def run_shot(url: str, out: Path, selector: str | None = None, *, info_out: Path | None = None,
                    viewport: str | None = None, scale: float | None = None, storage: dict[str, str] | None = None,
-                   press: list[str] | None = None, wait_ms: int | None = None, offline: bool = False,
-                   own_origin: bool = False) -> int:
+                   press: list[str] | None = None, wait_ms: int | None = None, settle: bool = False,
+                   offline: bool = False, own_origin: bool = False) -> int:
     """`node scripts/ui_shot.mjs`: 0 ok, 2 selector not found (the viewport is written instead), 1 error, -1 timeout.
     Options map to the script's options of the same names. headless.Missing when the browser is missing, which stays so
     for the rest of the server run."""
     path = headless.launch(headless.PAGES)
     if path is None or headless.missing(headless.PAGES):
         raise headless.Missing(headless.missing(headless.PAGES))
-    cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--offline"] if offline else []),
-           *(["--own-origin"] if own_origin else [])]
+    cmd = ["node", str(shot_script()), "--url", url, "--out", str(out), *(["--settle"] if settle else []),
+           *(["--offline"] if offline else []), *(["--own-origin"] if own_origin else [])]
     if selector:
         cmd += ["--selector", selector]
     if info_out is not None:
