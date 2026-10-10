@@ -431,6 +431,9 @@ export const api = {
   viewProblems: (c: string, slug: string, version?: string, path?: string) => j<ViewProblems>(`${ws(c)}/views/${enc(slug)}/problems${q({ v: version, path })}`),
   viewShown: (c: string, slug: string, version?: string, path?: string) => j<ViewShown>(`${ws(c)}/views/${enc(slug)}/shown${q({ v: version, path })}`),
   viewOpen: (c: string, slug: string, ref: string, version?: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref, v: version })}`),
+  /** the libraries a custom card names (`libs`, comma-separated) as inline elements for its frame's head (backend
+   * card_libs.libs_route) */
+  cardLibs: (c: string, libs: string) => j<{ head: string; problems: string[] }>(`${ws(c)}/card-libs${q({ libs })}`),
   /** a card type's page as a card's frame loads it (backend cardtypes.frame_route) */
   cardTypeFrame: async (c: string, type: string): Promise<string> => {
     const res = await fetch(`${ws(c)}/cardtypes/${enc(type)}/frame`)

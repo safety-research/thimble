@@ -572,12 +572,23 @@ def type_frames(c: str, cell: dict[str, Any]) -> dict[str, Any]:
         return {}
 
 
+def card_libs_part(c: str, cell: dict[str, Any]) -> dict[str, Any]:
+    """{"cardLibs": {the browser's libs query: GET /ws/{c}/card-libs's answer}} for a custom card that names libraries
+    (card_libs), so its frame loads them from the request; {} for any other card."""
+    payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
+    if cell.get("kind") != "custom" or not payload.get("libs"):
+        return {}
+    from . import card_libs  # noqa: PLC0415 — imports views
+
+    return {"cardLibs": {card_libs.key(payload["libs"]): card_libs.head(c, payload["libs"])}}
+
+
 def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> dict[str, Any]:
     """The render request for one card as it stands (module note, the page): the card as the canvas reads it, its refs
     resolved, the cards they name, the theme and the width, for a label card its label (label_data), whose rows
-    without their own text are quoted from the records their refs resolve to, and for a card of a card type the type's
+    without their own text are quoted from the records their refs resolve to, for a card of a card type the type's
     page (type_frames) and at least TYPE_W of width, since the type's page lays its whole graphic out in the width it
-    gets."""
+    gets, and for a custom card the libraries it names (card_libs_part)."""
     refs = cited_refs(cell)
     label = label_data(c, cell)
     for rows in (label or {}).get("rows", {}).values():
@@ -602,6 +613,7 @@ def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> di
         "width": int(w) if isinstance(w, (int, float)) and w > 0 else CARD_W,
         **({"label": label} if label else {}),
         **frames,
+        **card_libs_part(c, cell),
     }
 
 

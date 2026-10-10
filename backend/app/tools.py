@@ -1295,7 +1295,11 @@ def _payload_args(kind: str, args: dict[str, Any], tool: str = "add_card", c: st
         return ({"text": text}, "") if text.strip() else (None, f"{tool}: a note card needs `text`")
     if kind == "custom":
         html = str(args.get("html") or "")
-        return ({"html": html}, "") if html.strip() else (None, f"{tool}: a custom card needs `html`")
+        from . import view_libs  # noqa: PLC0415
+
+        libs = view_libs.entries(args.get("libs"))  # the libraries its frame loads (card_libs)
+        payload = {"html": html, **({"libs": libs} if libs else {})}
+        return (payload, "") if html.strip() else (None, f"{tool}: a custom card needs `html`")
     if kind == "label":
         return None, f"{tool}: a label card is made by `apply_label`"
     if kind == "plan":
@@ -1399,6 +1403,10 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                 problem = PLAN_NO_TAKEAWAY.format(tool="add_card")
             else:
                 follows, problem = _plan_follows(ctx, args.get("follows"), "add_card")
+        if not problem and kind == "custom" and (payload or {}).get("libs"):
+            from . import card_libs  # noqa: PLC0415
+
+            problem = "; ".join(f"add_card: {p}" for p in await card_libs.ensure(ctx.c, payload["libs"]))
         if problem:
             return err(problem)
         if follows:
@@ -1658,6 +1666,7 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     raw_takeaway = args.get("takeaway")
     takeaway = str(raw_takeaway) if raw_takeaway is not None and str(raw_takeaway).strip() else None
     changes = any(str(args.get(k) or "").strip() for k in ("code", "question", "title", "kind", *CONTENT_FIELDS))
+    changes = changes or args.get("libs") is not None  # a custom card's libraries
     given = changes
     card_arg = args.get("card") if args.get("card") not in (None, "") else args.get("cell")
     moves = bool(str(args.get("group") or "").strip() or str(args.get("after") or "").strip())
@@ -1708,6 +1717,14 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                     and bool(str(args.get("code") or "").strip()))
     if not notebook.runnable(cell) and not from_dataset:
         await _warm_view_refs(ctx.c, args)
+        if cell.get("kind") == "custom" and (args.get("html") is not None or args.get("libs") is not None):
+            # the html or the libraries alone change, and the other is kept
+            from . import card_libs  # noqa: PLC0415
+
+            old = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
+            args = {**args, **{k: old.get(k) for k in ("html", "libs") if args.get(k) is None}}
+            if problems := await card_libs.ensure(ctx.c, args.get("libs")):
+                return err("; ".join(f"edit_card: {p}" for p in problems))
         res = _edit_data_cell(ctx, nb_id, cid, cell, args, group, place, allow_empty=takeaway is not None or bool(kept))
         if res.is_error:
             return res
@@ -1950,7 +1967,10 @@ def _payload_lines(kind: str, payload: dict) -> "builtins.list[str]":
         html = str(payload.get("html") or "")
         if len(html) > CELL_READ_LIMIT:
             html = html[:CELL_READ_LIMIT] + f"\n... [truncated, {len(html) - CELL_READ_LIMIT} more chars]"
-        return ["html:", html]
+        from . import view_libs  # noqa: PLC0415
+
+        libs = view_libs.entries(payload.get("libs"))
+        return [*([f"libs: {', '.join(libs)}"] if libs else []), "html:", html]
     if kind == "plan":
         from . import notebook
 

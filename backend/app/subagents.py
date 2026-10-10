@@ -105,7 +105,7 @@ PLAN_FAILED = {"orientation": ("the orientation", "it could not finish its work"
                "dev-ticket": ("the ticket's agent", "it could not finish the change", "choose Retry on the ticket")}
 USER_STOP_RE = re.compile(r"stopped by (the )?user", re.I)  # Esc's task notification and a SendMessage's error say so
 QUIT_LINE = "Stopped when Claude Code quit."  # a chat's end line, its card's text is the browser's (AgentCard)
-WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
+WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views", "card-libs")
 LIMIT_RE_WORDS = ("concurrent", "subagents")  # Claude Code's concurrency-limit text holds both (R2, the module's answer)
 # the label Claude Code puts before a PreToolUse hook's deny in what $.agent.spawn and $.tool.call answer
 HOOK_ERROR_RE = re.compile(r"^\s*PreToolUse:[A-Za-z]+ hook error:\s*")
@@ -306,7 +306,8 @@ def extension_types(c: str) -> dict[str, dict[str, Any]]:
 
 def write_dirs(c: str) -> list[Path]:
     """The folders main's Bash may write in workspace `c`, its agents' work folders: orient/work, writers,
-    critique-work, check-work, views-work and the local extension's views. They need not exist yet."""
+    critique-work, check-work, views-work, the local extension's views and card-libs, where main installs the npm
+    packages its custom cards load (card_libs). They need not exist yet."""
     ws = config.workspace_path(c)
     return [ws / d for d in WORK_DIRS]
 

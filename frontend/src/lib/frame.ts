@@ -1,10 +1,12 @@
 // A sandboxed iframe's document painted on the card, not on a white sheet of its own: the page's colour scheme (an
 // iframe whose scheme differs from its parent's gets an opaque backdrop), a transparent body in the card's text colour,
 // the theme's tokens as CSS variables for the html to use, and the page's own faces. Shared by the custom card, kernel
-// html outputs and the views' pages.
+// html outputs and the views' pages. A custom card's frame also gets the chart style as a script (chartScript) and the
+// libraries the card names (useCardLibs).
 import { useEffect, useState } from 'react'
+import { api } from './api'
 import type { Resolved } from './theme'
-import { token } from './vizTheme'
+import { token, vegaConfig, VIZ_DIV, VIZ_INK, VIZ_SEQ, VIZ_SERIES } from './vizTheme'
 
 /** Takes WebRTC away from a frame before its own scripts run, since no content security policy covers it. A frame the
  * page opens inside itself has it again, so this is no boundary; the headless shots take it from every frame
@@ -33,14 +35,14 @@ export function withFrameStyle(html: string, style: string): string {
 
 /** The chart style (tokens.css, lib/vizTheme) a frame's html can draw a chart in: the series in order, the sequential and
  * diverging ramps, the muted "other" and the highlight, the inks, the chrome, the faces and sizes, and a label's
- * colors for a chart colored by a label. */
+ * colors for a chart colored by a label. A custom card's scripts also get the colors as thimble.colors (chartScript). */
 export const CHART_TOKENS = [
-  ...[1, 2, 3, 4, 5, 6, 7].map((n) => `--viz-${n}`),
-  ...[1, 2, 3, 4, 5].map((n) => `--viz-seq-${n}`),
-  ...[1, 2, 3, 4, 5].map((n) => `--viz-div-${n}`),
+  ...VIZ_SERIES,
+  ...VIZ_SEQ,
+  ...VIZ_DIV,
   '--viz-other',
   '--viz-highlight',
-  ...[1, 2, 3, 4].map((n) => `--viz-ink-${n}`),
+  ...VIZ_INK,
   '--viz-grid',
   '--viz-axis',
   '--viz-label',
@@ -63,7 +65,7 @@ export function frameTokens(): Record<string, string> {
 
 /** The tokens a view's page reads (views.frame_document; plugin/viewers use them with light fallbacks), those the parts
  * of backend/app/viewer_kit.css are drawn in (its Color by menu among them), and, with the frame's, the chart style and
- * the label palette the marks of the labels that are on are drawn in (viewer_bridge.js), so they match the Labels pane's. */
+ * the label palette the marks of the labels that are on are drawn in (viewer_bridge.js, from FRAME_TOKENS' CHART_TOKENS), so they match the Labels pane's. */
 export const VIEW_TOKENS = [
   ...FRAME_TOKENS,
   '--ink-rgb',
@@ -195,6 +197,66 @@ export function useFrameFonts(): string | null {
     }
   }, [fonts])
   return fonts
+}
+
+/** Text for an inline <script> or JSON in one: a `<` can end no element. */
+const scriptSafe = (text: string) => text.replace(/</g, '\\u003c')
+
+/** thimble's chart style for a custom card's scripts, read from the document as the tokens are: `thimble.colors`, the
+ * series in order (series), the sequential and diverging ramps (seq, div), the muted other and the highlight, and the
+ * ink ramp (ink), and `thimble.vegaConfig`, the config of the canvas's own Vega-Lite charts (vizTheme vegaConfig), for
+ * vega-embed. */
+export function chartScript(): string {
+  const colors = { series: VIZ_SERIES.map(token), seq: VIZ_SEQ.map(token), div: VIZ_DIV.map(token), other: token('--viz-other'), highlight: token('--viz-highlight'), ink: VIZ_INK.map(token) }
+  const style = { colors, vegaConfig: vegaConfig() }
+  return `<script>window.thimble=Object.assign(window.thimble||{},${scriptSafe(JSON.stringify(style))})</script>`
+}
+
+const cardLibs = new Map<string, Promise<string>>()
+/** the lists kept, newest last: vega's three builds are 830 kB, and the card harness's page draws each card under a
+ * workspace key of its own (render.tsx) */
+const CARD_LIBS_KEPT = 8
+
+/** A custom card's libraries (backend card_libs) as one head of inline scripts and styles, fetched once per workspace
+ * and list; an answer with a problem (a package not bundled yet) or a failed fetch is asked again by the next frame,
+ * and draws the frame with the problem in its console. */
+function loadCardLibs(ws: string, query: string): Promise<string> {
+  const key = `${ws}\n${query}`
+  let got = cardLibs.get(key)
+  if (!got) {
+    const fail = (why: string) => {
+      cardLibs.delete(key)
+      return `<script>console.error(${scriptSafe(JSON.stringify(why))})</script>`
+    }
+    got = api.cardLibs(ws, query).then(
+      (r) => {
+        if (r.problems?.length) cardLibs.delete(key)
+        return r.head ?? ''
+      },
+      (e: unknown) => fail(`the libraries ${query} did not load: ${(e as Error)?.message ?? String(e)}`),
+    )
+    cardLibs.set(key, got)
+    for (const old of cardLibs.keys()) if (cardLibs.size > CARD_LIBS_KEPT) cardLibs.delete(old)
+  }
+  return got
+}
+
+/** The head of the libraries a custom card names, for its frame: '' when it names none, null until they are fetched,
+ * so the frame is drawn once, with them. */
+export function useCardLibs(ws: string, libs: readonly string[] | undefined): string | null {
+  const query = (libs ?? []).join(',')
+  const key = `${ws}\n${query}`
+  const [got, setGot] = useState<{ key: string; head: string } | null>(null)
+  useEffect(() => {
+    if (!query) return
+    let alive = true
+    void loadCardLibs(ws, query).then((head) => alive && setGot({ key, head }))
+    return () => {
+      alive = false
+    }
+  }, [ws, query, key])
+  if (!query) return ''
+  return got?.key === key ? got.head : null
 }
 
 /** The page's faces for a view's page, in a style element. */

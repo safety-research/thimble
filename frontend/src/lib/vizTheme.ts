@@ -66,6 +66,8 @@ export const VIZ_SERIES = ['--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5'
 export const VIZ_SEQ = ['--viz-seq-1', '--viz-seq-2', '--viz-seq-3', '--viz-seq-4', '--viz-seq-5']
 /** the diverging ramp, low to high: a family far from the accent's, a gray near the paper, the accent's family */
 export const VIZ_DIV = ['--viz-div-1', '--viz-div-2', '--viz-div-3', '--viz-div-4', '--viz-div-5']
+/** the ink ramp, darkest first: rules, text and the chrome, never a series */
+export const VIZ_INK = ['--viz-ink-1', '--viz-ink-2', '--viz-ink-3', '--viz-ink-4']
 /** the inks a value no label defines takes, in turn, in a chart of a label's classes (lib/chartDefaults labelColours):
  * the ink ramp without its third step, which is the near twin of the label grey, --label-none */
 export const VIZ_NEUTRAL = ['--viz-ink-1', '--viz-ink-2', '--viz-ink-4']

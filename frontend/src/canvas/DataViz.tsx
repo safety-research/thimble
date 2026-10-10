@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useTheme } from '../lib/theme'
 import type { GraphDataset, TimelineDataset } from '../lib/types'
-import { frameStyle, frameTokens, useFrameFonts, withFrameStyle } from '../lib/frame'
+import { chartScript, frameStyle, frameTokens, useCardLibs, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { useVisibleSize } from '../lib/visibleSize'
 import { VIZ_SERIES } from '../lib/vizTheme'
 
@@ -936,8 +936,9 @@ export const clampCustomHeight = (h: number): number => Math.min(CUSTOM_MAX_H, M
 export const CUSTOM_OPEN_MAX_H = 8000
 
 /** A custom card's page in a sandboxed frame, as tall as its content up to CUSTOM_MAX_H; taller pages fade out with a
- * Show all under them. */
-export function CustomFrame({ html, title, height }: { html: string; title: string; height?: number }) {
+ * Show all under them. Its head carries the theme, the chart style (chartScript) and the libraries the card names in
+ * workspace `ws` (useCardLibs), before the page's own scripts. */
+export function CustomFrame({ html, title, height, ws = '', libs }: { html: string; title: string; height?: number; ws?: string; libs?: readonly string[] }) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [full, setFull] = useState(() => Math.max(CUSTOM_MIN_H, Math.ceil(typeof height === 'number' ? height : 160)))
   const [open, setOpen] = useState(false)
@@ -945,8 +946,9 @@ export function CustomFrame({ html, title, height }: { html: string; title: stri
   const [sized, setSized] = useState(false)
   const { resolved, key } = useTheme()
   const fonts = useFrameFonts()
-  // the tokens are read at embed time, once per theme. It waits for the page's fonts, so the page is drawn once
-  const doc = useMemo(() => (fonts == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts))), [html, resolved, key, fonts]) // key: the tokens are read again when the paper or the accent changes
+  const head = useCardLibs(ws, libs)
+  // the tokens are read at embed time, once per theme. It waits for the page's fonts and libraries, so the page is drawn once
+  const doc = useMemo(() => (fonts == null || head == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts) + chartScript() + head)), [html, resolved, key, fonts, head]) // key: the tokens are read again when the paper or the accent changes
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (!ref.current || e.source !== ref.current.contentWindow) return

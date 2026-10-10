@@ -99,7 +99,8 @@ def test_values_for_takes_the_run_s_arguments_over_settings(models):
 def test_the_work_folders_main_s_bash_may_write():
     ws = config.workspace_path(CORPUS)
     assert subagents.write_dirs(CORPUS) == [ws / "orient/work", ws / "writers", ws / "critique-work",
-                                             ws / "check-work", ws / "views-work", ws / "extension/views"]
+                                             ws / "check-work", ws / "views-work", ws / "extension/views",
+                                             ws / "card-libs"]
 
 
 # --------------------------------------------------------------------------- the files the hooks trust
