@@ -1660,6 +1660,21 @@ button.thimble-card {
 .thimble-table-td.thimble-table-number {
   text-align: right;
 }
+/* a cell with a second line (`sub`): its value on the first, the second quiet under it, each cut with an ellipsis */
+.thimble-table-line,
+.thimble-table-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thimble-table-sub {
+  margin-top: 1px;
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1.4 var(--font-body);
+}
+.thimble-table-fields .thimble-table-sub {
+  white-space: pre-wrap;
+}
 /* the year or the seconds a narrow column of times leaves out: still in the page, which the search finds, drawn 0 wide */
 .thimble-table-cut {
   display: inline-block;

@@ -503,6 +503,37 @@ describe('the table', () => {
     expect(rows[1].hasAttribute('onclick')).toBe(false)
     expect(rows[1].getAttribute('data-anchor')).toBe('mail.jsonl#L2')
   })
+
+  test("a column's second line (sub): under the value in each row, which is two lines tall, found by the search and shown by the default details", async () => {
+    await load(`<div class="top"><span id="search"></span></div><div id="body"><div id="list" style="height:400px"></div></div>`)
+    const w = win()
+    w.MAIL = MAIL
+    const cols = COLUMNS.map((c) => (c.name === 'subject' ? { ...c, sub: '§' } : c))
+    w.eval(`
+      window.search = thimble.search({ mount: '#search', in: '#list' })
+      window.side = thimble.side({ mount: '#body' })
+      const cols = ${JSON.stringify(cols)}.map((c) => c.sub ? { ...c, sub: (m) => m.from === 'cy' ? { html: '<b>by</b> ' + m.from } : m.from === 'bo' ? '' : 'from <' + m.from + '>' } : c)
+      window.table = thimble.table({ mount: '#list', rows: window.MAIL, columns: cols, search: window.search, side: window.side })`)
+    const rows = [...doc().querySelectorAll('.thimble-table-row')] as HTMLElement[]
+    // the value on its line, the second line under it: text escaped, {html} as given, none where it gives none
+    const cell = (r: HTMLElement) => r.children[1]
+    expect(cell(rows[0]).querySelector('.thimble-table-line')!.textContent).toBe('Note 0')
+    expect(cell(rows[0]).querySelector('.thimble-table-sub')!.textContent).toBe('from <ana>')
+    expect(cell(rows[1]).querySelector('.thimble-table-sub')).toBe(null)
+    expect(cell(rows[2]).querySelector('.thimble-table-sub b')!.textContent).toBe('by')
+    // only the column with a second line holds one; every row is two lines tall
+    expect(rows[0].children[0].querySelector('.thimble-table-line')).toBe(null)
+    expect((doc().querySelector('.thimble-table-body') as HTMLElement).style.height).toBe(5000 * 48 + 'px')
+    expect(rows[1].style.top).toBe('48px')
+    // the search finds the second line in every row, drawn or not
+    await type('from <ana>')
+    expect(w.search.count).toBe(Math.ceil(5000 / 3))
+    await type('by cy')
+    expect(w.search.count).toBe(Math.floor(5000 / 3))
+    // the default details show it under the value
+    rows[0].click()
+    expect(texts('.thimble-side-body .thimble-table-fields dd .thimble-table-sub')).toEqual(['from <ana>'])
+  })
 })
 
 const BEFORE = ['# Memory', '', '- Ana runs the timetable.', '- Bo handles billing.', ...Array.from({ length: 20 }, (_, i) => `- note ${i + 1}`), '- Cy is the harbor master.', '- Old line to drop.'].join('\n')

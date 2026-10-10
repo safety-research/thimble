@@ -8,6 +8,7 @@
 //     columns: [
 //       { name: 'from', title: 'From', width: 180, drop: 1 },  the first to drop in a narrow table
 //       { name: 'subject', title: 'Subject', min: 200 },     text takes the width left, at least `min`, cut with an ellipsis
+//       { name: 'subject', sub: (m) => m.snippet },        a second line under it, in the secondary ink: two-line rows
 //       { name: 't', title: 'Date', type: 'time' },          seconds since 1970, shown in UTC; or 'number'
 //     ],
 //     rows: emails,                         plain records, each with its `ref`, which is its row's data-anchor
@@ -41,6 +42,7 @@
 
   var OVER = 12 // rows drawn above and below the view, so a scroll shows drawn rows
   var ROW = 28 // px, a row's height when the theme gives no --h-row
+  var SUB_ROW = 20 // px a row takes more when a column draws a second line under its value (`sub`)
   var CHAR = 7 // px, a character of the mono face when it cannot be measured
   var PAD = 16 // px, a cell's padding, both sides
   var SORT_ROOM = 14 // px, the sort's arrow beside a head's title
@@ -116,6 +118,7 @@
           sorts: c.sort !== false,
           drop: c.drop === false ? false : typeof c.drop === 'number' && isFinite(c.drop) ? c.drop : null,
           min: typeof c.min === 'number' && c.min > 0 ? c.min : null,
+          sub: typeof c.sub === 'function' ? c.sub : null,
         }
       })
     // the main column: the first column of text that takes the width left (no width in px), else the first column of
@@ -165,6 +168,8 @@
     this.body = this.root.children[1]
     this.none = this.root.children[2]
     this.rowH = parseFloat(getComputedStyle(this.mount).getPropertyValue('--h-row')) || ROW
+    // a column with a second line under its value makes every row two lines tall
+    if (this.columns.some(function (c) { return c.sub })) this.rowH += SUB_ROW
     this.root.style.setProperty('--thimble-table-row', this.rowH + 'px')
     this.head.addEventListener('click', function (e) {
       var th = e.target.closest && e.target.closest('[data-col]')
@@ -312,6 +317,13 @@
     if (col.type === 'time') return stamp(v, col.secs)
     if (col.type === 'number' && typeof v === 'number') return num(v)
     return typeof v === 'object' ? JSON.stringify(v) : String(v)
+  }
+  // a column's second line under a row's value (`sub`): text, or {html} as thimble.recordCard takes its parts; '' for none
+  Table.prototype.subHtml = function (col, r) {
+    if (!col.sub) return ''
+    var v = ctl.safe(function () { return col.sub(r) }, null)
+    if (v == null || v === '' || v === false) return ''
+    return typeof v === 'object' && v.html != null ? String(v.html) : esc(v)
   }
   // a cell's markup. A time in a column too narrow for its whole stamp keeps the year and the seconds it leaves out in
   // the page, drawn 0 wide (.thimble-table-cut), so that the search finds the same text at every width.
@@ -595,7 +607,8 @@
       texts: this.shown.map(function (r) {
         return cols
           .map(function (col) {
-            return self.text(col, r)
+            var sub = col.sub ? textOfHtml(self.subHtml(col, r)) : ''
+            return self.text(col, r) + (sub ? '\n' + sub : '')
           })
           .join('\n')
       }),
@@ -723,7 +736,9 @@
       this.bars.attr(r) + more + ' style="top:' + i * this.rowH + 'px">' +
       this.drawnCols
         .map(function (col) {
-          return '<div class="thimble-table-td thimble-table-' + col.type + '" role="gridcell">' + self.cell(col, r) + '</div>'
+          var sub = col.sub ? self.subHtml(col, r) : ''
+          var body = col.sub ? '<div class="thimble-table-line">' + self.cell(col, r) + '</div>' + (sub ? '<div class="thimble-table-sub">' + sub + '</div>' : '') : self.cell(col, r)
+          return '<div class="thimble-table-td thimble-table-' + col.type + '" role="gridcell">' + body + '</div>'
         })
         .join('') +
       '</div>'
@@ -799,7 +814,9 @@
       '<dl class="thimble-table-fields">' +
       this.columns
         .map(function (col) {
-          return '<dt>' + esc(col.title) + '</dt><dd class="thimble-table-' + col.type + '">' + (col.html ? self.cell(col, r) : esc(self.text(col, r)) || '<span class="thimble-table-dim">—</span>') + '</dd>'
+          var sub = self.subHtml(col, r)
+          return '<dt>' + esc(col.title) + '</dt><dd class="thimble-table-' + col.type + '">' + (col.html ? self.cell(col, r) : esc(self.text(col, r)) || '<span class="thimble-table-dim">—</span>') +
+            (sub ? '<div class="thimble-table-sub">' + sub + '</div>' : '') + '</dd>'
         })
         .join('') +
       '</dl>'

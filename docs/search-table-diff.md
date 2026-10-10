@@ -88,7 +88,8 @@ folded or cut text opens its fold the same way. A hidden element without `data-t
 ## The table
 
 `thimble.table({mount, columns, rows, ...})` draws records in `mount` as the kit's `.table` looks, a caps head that
-stays at the top and hairline rows, one line each with a cell's overflow cut by an ellipsis:
+stays at the top and hairline rows, one line each with a cell's overflow cut by an ellipsis, or two where a column has a
+second line (`sub`), as an inbox draws a message's first words under its subject:
 
 - It draws only the rows near its view and keeps those it drew as it scrolls, so a table of 50,000 rows opens and
   sorts in a fraction of a second. `mount` scrolls; the page gives it a height (`flex: 1; min-height: 0` in a column).
@@ -136,7 +137,7 @@ const table = thimble.table({
 | `attrs(row)` | more attributes of a row's element, `{name: value}`, as `thimble.recordCard` takes them, such as `data-anchor-unmarked` for a row that stands for records and draws their labels' colors itself (`thimble.mix` in a cell) |
 | `key` | the name thimble keeps the sort under, the mount's id by default; give each table of a page its own |
 
-A column is `{name, title, type, width, min, drop, value(row), html(row), sort}`:
+A column is `{name, title, type, width, min, drop, value(row), html(row), sub(row), sort}`:
 
 | key | what it is |
 |---|---|
@@ -148,6 +149,7 @@ A column is `{name, title, type, width, min, drop, value(row), html(row), sort}`
 | `drop` | in a table too narrow for its columns, such as one beside the side panel, the order they drop in until the rest fit, the highest first; `false` for one that never drops. A column without one drops after those with one, the rightmost first but the one the rows are sorted by last, and the main column never does. A dropped column comes back when the table widens, and the search and the default `details` still hold it |
 | `value(row)` | the value it shows and sorts by when it is not `row[name]` |
 | `html(row)` | the cell's markup in place of its value as text |
+| `sub(row)` | a second line under the cell's value in the secondary ink, text or `{html}`, such as an email's first words under its subject or a pull request's number, author and time under its title; with one, every row is two lines tall. The search finds it and the default `details` show it |
 | `sort` | `false` for a column a click does not sort |
 
 | member | what it gives |
