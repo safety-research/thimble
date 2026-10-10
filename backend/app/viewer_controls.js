@@ -1147,8 +1147,8 @@
   // The overview as lanes on one axis of times or numbers (thimble.timeline; thimble.lanes is its old name): a lane per
   // group of `rows` (the Rows control, a field's name or a function of a record) or of `groups(items)`, its name in a
   // column at the left with its tree guide, its records as marks in the Color by colours (grey with Off or with no Color
-  // by), as wide as each ran (`end`), a band where the group ran (`band`), and a record that failed (`problem`) a ✕ in
-  // the problem red at its mark's foot, over a halo of the paper so it reads beside any colour. The axis is the time range's scale (`range`), else the records' own span in `unit`,
+  // by), as wide as each ran (`end`), a band where the group ran (`band`), and a record that failed (`problem`)
+  // a ✕ in the problem red. The axis is the time range's scale (`range`), else the records' own span in `unit`,
   // with an axis of its own under the lanes; with no `rows`, one lane with no name. It needs no other part of the kit,
   // and it follows the page's Color by as it changes, or the `colour` (or `color`) it is given; `colour: false` draws
   // its marks gray.

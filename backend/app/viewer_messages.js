@@ -7,8 +7,9 @@
 // reply (`parent`) is drawn under its parent, one level in, deeper replies at that level too, as boards and forges draw
 // them; an event (`kind: 'event'`) is one line, an icon in the ink, the author in bold, what they did (`said`) and the
 // time at the right, as a forge's timeline draws it; a boxed message (`box`), such as a pull request's opening post or a
-// mail, is a box beside the avatar, its head the author, what they did (`said`) and the time, over the words. Quoted mail (a run of lines that start with ">", with the "On …
-// wrote:" line before it) folds behind a "…" button, and a body longer than twelve lines shows its first lines with
+// mail, is a box beside the avatar, its head the author, what they did (`said`) and the time, over the words. Quoted
+// mail (a run of lines that start with ">", with the "On … wrote:" line before it) folds behind a "…" button, and a
+// body longer than twelve lines shows its first lines with
 // Show more and Show less; both keep their text in the page (data-thimble-fold), so thimble.search finds it and opens
 // the fold. Each message is anchored with its ref and carries data-t, so a label marks it, a ⌘-click asks about it, the
 // lanes follow it and Color by draws its bar. Its bars follow the page's Color by unless it is given `colour` (or

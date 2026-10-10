@@ -423,7 +423,7 @@
     }
     var heads = []
     var headLeast = [] // px a column keeps so that its head shows its whole title, with the cell's padding and the arrow
-    this.wordLeast = [] // px a column of text keeps, in a table too narrow even for the columns that never drop, before its head breaks a word
+    this.wordLeast = [] // px a column keeps before its head breaks its title's longest word
     var k = this.columns.length
     this.columns.forEach(function (c, i) {
       heads[i] = wide(i)
