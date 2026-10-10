@@ -6,9 +6,15 @@ The corpus folder is {{corpus}}. Leave its files unchanged, since every citation
 
 A proposal whose claim is one extension's glob, such as `**/*.vtt`, asks for a viewer of that file type, so its page lays out one file.
 
+## The data
+
+Your prompt can end with types that the analyst's session wrote for the corpus's records, across all the files, and a profile that code made of every field: its records, distinct values, ranges, top values and nulls, how well it fits, such as "ts parses for 97%", and how well each join holds. Read them before the files. A fit under 100% is how the data is: the reader handles the rest and reports it in `problems(index)`. When the page shows a derived field, compute it in the reader with the code its type gives, and list it in view.json's `records` as computed.
+
 ## A good view
 
-The analyst uses the view to understand records, often thousands of them, without reading every file. Build it to "overview first, zoom and filter, details on demand". The page opens on the whole of what it covers at a glance, with records in view, so the analyst sees the shape of the data before any detail. They narrow it to what they care about, and any one record opens in full beside the list while the rest stays where it was, so they keep their place.
+The analyst uses the view to understand records, often thousands of them, without reading every file. Build it on these principles:
+
+{{include:view-principles.md}}
 
 The rest is your judgment. Aim for the page a demanding designer would ship, one that reads at once without instructions:
 
@@ -21,14 +27,12 @@ The rest is your judgment. Aim for the page a demanding designer would ship, one
 {{if:terminal}}
 - The layout is fluid. The panel is 120 columns wide in a laptop's terminal and 200 columns on a large screen.
 {{end}}
-- Records from a system the analyst knows, such as a code forge, a message board or a chat, can be drawn the way that system draws them, in thimble's parts and colors, as `repository` draws a forge's pull requests and a board's threads.
 - The page explains nothing in words. The analyst learns it by using it, so a line that explains the page, a hint or a caption is clutter, even where the proposal asks for one.
-- The reviewer judges the page by established principles, so design with them from the start: zoom and filter by acting on the data's own marks and axes, details that open in a side panel, each control once in the top row, one visual channel for each attribute with color only for the one the analyst colors by, one scale and mark for each quantity in every part, keys that match the marks, no ink that shows no data, each encoding's meaning one click away, and thimble's own parts and readers.
 
 {{if:browser}}
 thimble's parts are in every page, so a view can look like the rest of thimble: `chip`, `btn` (`btn-secondary`, `btn-ghost`, `btn-sm`), `seg` with `seg-opt` (`active` on the chosen one), `field`, `table` and `list-row`.
 
-The view kit draws the controls every view shares, so use its parts rather than drawing your own. `thimble.colorBy({mount, fields, strip, onChange})` is the one color control, mounted once in the top row: its menu takes several choices among Off, the `fields` you give and every label, each with its definition: the first colors the records and each other one is a lane of the list's tracks; its chips show the chosen field's values with their counts and turn each one's color off or on, and `strip` gives a long list of records its tracks. Anything on a time axis takes `thimble.timeRange` for its range and `thimble.timeAxis` for its chart's axis. `thimble.filterBy` sits beside Color by and picks the rows that show, by a field or a label, its values as toggles. `thimble.rows` picks what the lanes are grouped by, a field, a tree of fields or a label, and `thimble.lanes` draws them on the range's scale with tree guides, a key whose entries are toggles and the list's rows in view. `thimble.side` opens a record or a row's children in a wide side panel beside the list, never under the row. `thimble.divider` lets the analyst drag the line between the overview and the list, and `thimble.transcript` draws an agent's turns as the File browser does. `thimble.onReset` tells Reset the page's own state. Draw no color control, legend that restates the chips, label menu, zoom buttons, date presets or paging text of your own. `{{docs}}/color.md`, `{{docs}}/time-range.md` and `{{docs}}/rows-and-filters.md` give each call and the reader's side of it.
+{{include:view-kit.md}}
 {{end}}
 {{if:terminal}}
 The terminal view kit draws the parts every view shares, so use its parts rather than drawing your own: `colorBy`, the one color control, `filterBy` for the rows that show and `rows` for what the lanes group by, in the top row; `timeRange` and `axis` for anything on a time axis; `lanes` for the overview, with tree guides and a key whose entries are toggles; `list` with `details` for records, which open in `side`, a pane beside the list; `divider` for the overview's rows; `transcript` for an agent's turns; `search` and `choice`. Draw no color control, legend that restates the Color by values, label menu, zoom keys or paging text of your own. `{{docs}}/terminal-views.md` gives each part, the keys a view may bind and how the program runs.
@@ -56,18 +60,6 @@ Code checks three things in every view and shows the first two to the analyst ab
 - Purple is thimble's colour for agents' work, so no category of the view, such as a speaker or a kind of record, is purple, violet or magenta. The checks note any such colour.
 {{if:browser}}
 - Controls. thimble draws no label controls above the view. Color by draws them, each label with `data-label`, so a page that mounts it has them and passes the check for them. `thimble.mark(ref, id, value)` gives a record a value and `thimble.editLabel(id)` opens a label's editor (a new label's with no id). Each takes effect only during the analyst's own click or key press in the view, never on load or on a timer, and returns a promise that rejects with thimble's reason. The page never hardcodes a label's name or color.
-{{end}}
-
-## Worked examples
-
-Three example views in {{examples}} show the contract above on invented data, each with its files described at the top of its `reader.py`. They are examples only, never views of this corpus. Each sample is several files with the mess a real corpus has, such as renamed fields, mixed time formats, duplicates and a torn last line, and the reader cleans it, lists what it derived and reports what it could not parse. Read the one closest to your task for how a reader and a page meet the contract. Their layouts fit their invented data, so lay out yours for the data you counted.
-
-- `timeline` is for events on a time axis, the base layout: lanes on the time range, the events in a list with its columns' names, Filter by, Rows and Color by in the top row, and an event's details in the side panel.
-- `repository` is for records from a system the analyst knows, drawn the way that system draws them: a code forge's pull requests and issues, and a message board's threads.
-- `linked-sessions` is for reading many related transcripts: sessions as a tree, the chosen session's transcript at the center, and the links between sessions.
-{{if:terminal}}
-
-Each example's `view.term.js` draws the same view in the terminal on the kit. Start from the `view.term.js` of the closest one and change it for your data: it shows how a program uses the kit's parts, fetches and keeps its state, and fits the panel at each width.
 {{end}}
 
 ## The three files
