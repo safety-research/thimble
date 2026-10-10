@@ -2794,9 +2794,13 @@
     var e = typeof t === 'number' ? this.rowEl(t) : t
     if (!e || !e.getAttribute) return { meta: [], text: '' }
     var time = e.querySelector && e.querySelector('time')
-    var when = (e.getAttribute('data-time') || (time ? time.textContent : '') || '').trim()
-    var text = (e.getAttribute('data-preview') || e.getAttribute('data-anchor-text') || e.textContent || '').replace(/\s+/g, ' ').trim()
-    if (when && text.indexOf(when) === 0) text = text.slice(when.length).trim()
+    var when = (e.getAttribute('data-time') || (time ? time.textContent : '') || '').replace(/\s+/g, ' ').trim()
+    var own = e.getAttribute('data-preview') || e.getAttribute('data-anchor-text')
+    var text = (own || e.textContent || '').replace(/\s+/g, ' ').trim()
+    // the time once, as metadata: out of the element's text wherever it stands (a row may name its author first), out
+    // of the words the page gave only where they start with it
+    var at = when ? text.indexOf(when) : -1
+    if (at === 0 || (at > 0 && !own)) text = (text.slice(0, at) + ' ' + text.slice(at + when.length)).replace(/\s+/g, ' ').trim()
     return { meta: metaList(when), text: text }
   }
   // a record's ref: the row's in `refs`, or the element's data-anchor

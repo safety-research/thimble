@@ -852,6 +852,23 @@ colour.strip('#list', { rows: recs.map((r) => r.kind), refs: recs.map((r) => r.r
     }
     await page.close()
   })
+
+  test('a row that names its author before its <time>: the time once, as metadata, and the rest its text', async () => {
+    const rows = Array.from({ length: 200 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 100 ? 'Text only' : 'With links'}"><b>agent-0${i % 8}</b> <time>09:${String(i % 60).padStart(2, '0')}\n</time> message ${i + 1}</div>`).join('')
+    const { page, frame } = await own(rows, `window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }], strip: '#list' })`)
+    await frame().waitForFunction(() => document.querySelector('.thimble-colour-strip') != null)
+    await page.waitForTimeout(250)
+    const box = (await frame().locator('.thimble-colour-track').boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.3)
+    await page.waitForTimeout(400)
+    const l = (await written(frame))!
+    assert.equal(l.rows.length, 17)
+    for (const r of l.rows) {
+      const n = Number(r.n)
+      assert.deepEqual([r.meta, r.text], [[`09:${String((n - 1) % 60).padStart(2, '0')}`], `agent-0${(n - 1) % 8} message ${n}`], JSON.stringify(r))
+    }
+    await page.close()
+  })
 })
 
 describe('popovers beside the tracks', () => {
