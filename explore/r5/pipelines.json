@@ -3,19 +3,19 @@
     "tree": "/mnt/store/scratch/rel/views-r5/trees/p1",
     "diff": null,
     "env": {},
-    "note": "baseline: origin/main 63a8b849 (0.6.2), its prompts and worked examples; plus the fix for two builds started in one turn (in all five trees)"
+    "note": "baseline: origin/0.7.0 exactly (branch explore/views-r5-p1-070), its prompts and worked examples"
   },
   "p2": {
     "tree": "/mnt/store/scratch/rel/views-r5/trees/p2",
     "diff": null,
     "env": {},
-    "note": "new: the seven principles, structure-task-interface examples, TypeScript types checked with profile_data, kit snippets with recordCard; no worked examples, no demos"
+    "note": "new: 0.7.0 with the four guidelines, the first screen (chosen form only, raw records on demand, a time range only for time), structure-task-interface examples, TypeScript types checked with profile_data, view-kit.md by snippets; no worked examples, no demos"
   },
   "p3": {
     "tree": "/mnt/store/scratch/rel/views-r5/trees/p3",
     "diff": null,
     "env": {},
-    "note": "new + examples: p2 with the worked example views (plugin/viewers) back in the builder's prompt and the docs"
+    "note": "new + examples: p2 with the worked examples (plugin/viewers) on disk, in the builder's prompt and in the docs"
   },
   "p4": {
     "tree": "/mnt/store/scratch/rel/views-r5/trees/p4",

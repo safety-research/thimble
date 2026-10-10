@@ -17,7 +17,7 @@ Adapted from views-abstraction round 4's run_views.py (its capture, per view now
 Pipelines (explore/r5/pipelines.json, --pipeline NAME): p1 to p5, each a tree of its own (a checkout with backend/.venv,
 frontend/node_modules and frontend/dist) on a branch explore/views-r5-<name>, which holds the pipeline's code and
 prompts. The run copies the tree's prompts/ into the instance and points THIMBLE_PROMPTS_DIR at the copy (prompts.diff
-is the copy and the tree's docs/ against origin/main's). A pipeline may still name a prompts `diff` to apply to the
+is the copy and the tree's docs/ against BASE_REF's, origin/0.7.0). A pipeline may still name a prompts `diff` to apply to the
 copy and an `env` to add, as the first smoke runs did. --tree, --overlay and --prompts-ref still work as in round 4
 when no --pipeline is given.
 
@@ -42,7 +42,7 @@ Each run writes its output folder:
                     hooks/*.jpg, shots.json), facts.json
   transcripts/      main's and each subagent's Claude Code transcript; agents.md the agents' last words
   run.json, log.jsonl, screen.txt, prompts.diff   the run's record and steps, main's last screen, the run's prompts and
-                    docs against origin/main's
+                    docs against BASE_REF's (origin/0.7.0)
 Every picture is a JPEG. The instance stays in its slot's folder until `clean` (or matrix --clean-instances) deletes it.
 
 Rules it keeps: CLAUDE_CONFIG_DIR is the run's config folder for main and the server; the WIF variables exist only in
@@ -84,6 +84,7 @@ CONFINE_ROOTS = (Path("/home"), Path("/mnt"), Path("/tmp"), Path("/var/tmp"))
 HOME_KEEP = (Path.home() / ".local" / "share" / "uv" / "python",)  # the venvs' Python, which sandboxed commands run
 CC_TEMPLATE = Path("/mnt/store/scratch/rel/views-abstraction-cc/.claude.json")  # the onboarding keys a new one copies
 PIPELINES = HERE / "pipelines.json"
+BASE_REF = "origin/0.7.0"  # the trees' base: prompts.diff is the run's prompts and docs against its own
 REQUESTS = HERE / "requests.json"
 PORT_BASE, SLOTS = 26400, 2  # ports 26400-26407, four per slot; --port-base and --slots change them
 TMP_MAX = 64  # TMPDIR's length at most: Claude Code's sandbox puts unix sockets (108 bytes at most) under it
@@ -511,19 +512,19 @@ def make_prompts(tree: Path, ref: str | None, overlay: Path | None, dest: Path) 
 
 
 def prompts_diff(tree: Path, prompts: Path, work: Path, docs: Path | None = None) -> str:
-    """The run's prompts (and docs) against origin/main's (diff -ru)."""
-    main = work / "prompts-origin-main"
+    """The run's prompts (and docs) against BASE_REF's (diff -ru)."""
+    main = work / "prompts-base"
     shutil.rmtree(main, ignore_errors=True)
     main.mkdir(parents=True)
-    arch = subprocess.run(["git", "-C", str(tree), "archive", "origin/main", "prompts", "docs"], capture_output=True)
+    arch = subprocess.run(["git", "-C", str(tree), "archive", BASE_REF, "prompts", "docs"], capture_output=True)
     if arch.returncode != 0:
-        return "(origin/main not found)\n"
+        return f"({BASE_REF} not found)\n"
     subprocess.run(["tar", "-x", "-C", str(main)], input=arch.stdout, check=True)
     out = subprocess.run(["diff", "-ruN", str(main / "prompts"), str(prompts)], capture_output=True, text=True).stdout
     if docs is not None:
         out += subprocess.run(["diff", "-ruN", str(main / "docs"), str(docs)], capture_output=True, text=True).stdout
     shutil.rmtree(main, ignore_errors=True)
-    return out or "(no difference from origin/main)\n"
+    return out or f"(no difference from {BASE_REF})\n"
 
 
 def instance_env(inst: Path, slot: Slot, tree: Path, prompts: Path, a: argparse.Namespace,
@@ -758,7 +759,7 @@ class Run:
         a prompt edit; the prompts main, the builder and the reviewer start from load too."""
         names = [f[:-3] for f in (self.rec["prompts"].get("overlay_files") or []) if f.endswith(".md")]
         names += [n for n in ("main", "tools", "dev", "dev-view", "dev-view-task", "view-review") if n not in names]
-        names += [n for n in ("dev-view-data", "view-pick", "views", "view-kit", "view-principles")
+        names += [n for n in ("dev-view-data", "view-pick", "views", "view-kit", "view-guidelines", "view-principles")
                   if (self.prompts / f"{n}.md").is_file() and n not in names]
         code = "import sys\nfrom app import prompts\nfor n in sys.argv[1:]: prompts.load(n)\nprint('ok')"
         r = subprocess.run([str(venv_python(self.tree)), "-c", code, *names], capture_output=True, text=True,
