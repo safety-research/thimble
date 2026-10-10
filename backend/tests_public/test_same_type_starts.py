@@ -194,6 +194,30 @@ def test_a_start_refused_and_started_again_is_never_taken_by_the_agent_that_wait
     assert s0[3] not in sf.registry(state)
 
 
+def test_a_subagent_that_a_waiting_agent_starts_is_its_descendant(tmp_path):
+    """A builder can start a subagent of its own before any sign of its own start comes. The subagent's SubagentStart
+    first gives the builder its start from the builder's meta.json, which Claude Code wrote once the builder's
+    SubagentStart hooks ended, so the subagent is the builder's descendant; the other builder takes the start left."""
+    state: dict = {}
+    starts = [_claim(state, 0), _claim(state, 1)]
+    main = tmp_path / f"{SID}.jsonl"
+    for *_, agent in starts:
+        assert sf.register(state, _start(agent, transcript_path=str(main))) is None
+    _, _, call, agent = starts[0]
+    meta = tmp_path / SID / "subagents" / f"agent-{agent}.meta.json"
+    meta.parent.mkdir(parents=True)
+    meta.write_text(json.dumps({"agentType": sf.type_name(BUILDER), "toolUseId": call}))
+    assert sf.check_call(state, {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_use_id": "toolu_0child",
+                                 "agent_id": agent, "session_id": SID,
+                                 "tool_input": {"subagent_type": "general-purpose", "prompt": "read the files"}}) is None
+    settled: list[str] = []
+    child = sf.register(state, {"hook_event_name": "SubagentStart", "session_id": SID, "agent_id": "a000000000child",
+                                "agent_type": "general-purpose", "transcript_path": str(main)}, settled)
+    assert child is not None and child["parent"] == agent
+    assert settled == [agent, starts[1][3]]
+    _all_own(state, starts)
+
+
 def test_an_agent_takes_its_start_from_its_meta_json_at_a_later_start(tmp_path):
     """Claude Code writes the agent's meta.json after its SubagentStart hooks end; once it is there, a later
     SubagentStart of the same agent (spawn_call) names its call."""

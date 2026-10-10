@@ -498,8 +498,8 @@ def register(state: dict[str, Any], hook: dict[str, Any], settled: list[str] | N
     by the first sign that names its call (settle), or when every other start it could have is taken (eliminate). An
     agent that takes its start can leave an unsettled agent one start: that agent takes it too, and its id goes to
     `settled`. Any other new agent is a descendant of one of thimble's agents when a nested start of its type names that
-    agent as its caller; when two callers' nested starts share its type, its parent waits for its first call
-    (resolve_parent)."""
+    agent as its caller (a caller still unsettled takes up its own start first, _settle_callers, and goes to `settled`);
+    when two callers' nested starts share its type, its parent waits for its first call (resolve_parent)."""
     agent_id = str(hook.get("agent_id") or "")
     agent_type = str(hook.get("agent_type") or "")
     session = str(hook.get("session_id") or "")
@@ -537,6 +537,9 @@ def register(state: dict[str, Any], hook: dict[str, Any], settled: list[str] | N
             if settled is not None:
                 settled.extend(left)
             return entry
+    left = _settle_callers(state, agent_type)
+    if settled is not None:
+        settled.extend(left)
     nested = [n for n in state.get("nested") or [] if isinstance(n, dict) and n.get("subagent_type") == agent_type
               and isinstance(agents.get(str(n.get("caller") or "")), dict)]
     if not nested:
@@ -551,6 +554,25 @@ def register(state: dict[str, Any], hook: dict[str, Any], settled: list[str] | N
         state["nested"] = [n for n in state.get("nested") or [] if n is not nested[-1]]
     agents[agent_id] = entry
     return entry
+
+
+def _settle_callers(state: dict[str, Any], agent_type: str) -> list[str]:
+    """The callers of the nested starts of `agent_type` that are unsettled (UNSETTLED) take up their own start, from the
+    meta.json Claude Code wrote once their SubagentStart hooks ended (spawn_call), so that the new agent of that type is
+    their descendant: an agent of thimble's can start a subagent before any sign of its own start comes. The agents that
+    took their start (settle)."""
+    table = state.get(UNSETTLED)
+    if not isinstance(table, dict) or not table:
+        return []
+    callers = dict.fromkeys(str(n.get("caller") or "") for n in state.get("nested") or []
+                            if isinstance(n, dict) and n.get("subagent_type") == agent_type)
+    out: list[str] = []
+    for caller in callers:
+        u = unsettled(state, caller)
+        call = spawn_call(u, caller) if u is not None else None
+        if call:
+            out.extend(settle(state, caller, call))
+    return out
 
 
 def open_claims(state: dict[str, Any], agent_type: Any) -> list[tuple[str, dict[str, Any]]]:
