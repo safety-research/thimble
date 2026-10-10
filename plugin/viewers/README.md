@@ -12,4 +12,4 @@ and the sample labels `thimble demo --examples` defines over them (labels.json).
   in the side panel: a conversation, a timeline and a thread drawn by `thimble.messages`, a commit's patch by
   `thimble.diff`.
 - `linked-sessions`: reading many related transcripts. Sessions as a tree, the chosen session's transcript at the
-  center, drawn by `thimble.transcript` and found in by the search, and the links between sessions.
+  center, drawn by `thimble.transcript` and searched by `thimble.search`, and the links between sessions.
