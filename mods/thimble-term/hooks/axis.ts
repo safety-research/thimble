@@ -47,23 +47,24 @@ const UNITS: [number, number, string][] = [
 ]
 
 /** A tick's number as precise as the axis's step needs, all of one axis alike: `0.4` to a step of 0.2, `1,500`, and
- *  from 10,000 (`top`, the axis's largest tick) in thousands, millions or billions (`20k`, `1.5M`). */
-export function numberLabel(v: number, step: number, top = Math.abs(v)): string {
+ *  from 10,000 (`top`, the axis's largest tick) in thousands, millions or billions (`20k`, `1.5M`). `plain` writes it
+ *  without separators, as the browser's view axis writes a place such as a year (`2019`, never `2,019`). */
+export function numberLabel(v: number, step: number, top = Math.abs(v), plain = false): string {
   const [, div, unit] = UNITS.find(([from]) => top >= from) ?? [1, 1, '']
   if (unit && v === 0) return '0'
   const d = decimals(step / div)
-  return `${(v / div || 0).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}${unit}`
+  return `${(v / div || 0).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: !plain })}${unit}`
 }
 
 /** The ticks of about `count` over [lo, hi]: each multiple of niceStep that lies in it, labeled by numberLabel. */
-export function numberTicks(lo: number, hi: number, count: number, whole = false): Ticks {
+export function numberTicks(lo: number, hi: number, count: number, whole = false, plain = false): Ticks {
   const step = niceStep(hi - lo, count, whole)
   const d = decimals(step)
   const at: number[] = []
   // each multiple rounded to the step's decimals, so 3 × 0.1 is 0.3; -0 is 0
   for (let k = Math.ceil(lo / step - 1e-9); k * step <= hi + step * 1e-9 && at.length < MAX_TICKS; k++) at.push(+(k * step).toFixed(d) || 0)
   const top = Math.max(0, ...at.map(Math.abs))
-  return { at, labels: at.map(v => numberLabel(v, step, top)) }
+  return { at, labels: at.map(v => numberLabel(v, step, top, plain)) }
 }
 
 const WALL = /^(\d{4})-(\d{2})(?:-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(\.\d+)?)?)?)?\s*(?:Z|[+-]\d{2}(?::?\d{2})?)?$/
@@ -153,10 +154,11 @@ export function placeLabels(cells: readonly number[], labels: readonly string[],
 }
 
 /** An x axis's ticks over [lo, hi] (numbers, or times in ms), as many as fit `cols` cells with 2 between labels: their
- *  values, labels, cells (`cellOf` a value's) and where each label starts. None when not even one fits. */
+ *  values, labels (numbers plain: an x is a place, such as a year), cells (`cellOf` a value's) and where each label
+ *  starts. None when not even one fits. */
 export function axisTicks(kind: 'num' | 'time', lo: number, hi: number, cols: number, cellOf: (v: number) => number, whole = false): Ticks & { cells: number[]; x: number[] } {
   for (let count = Math.max(3, Math.floor(cols / 12)); count >= 1; count--) {
-    const t = kind === 'time' ? timeTicks(lo, hi, count) : numberTicks(lo, hi, count, whole)
+    const t = kind === 'time' ? timeTicks(lo, hi, count) : numberTicks(lo, hi, count, whole, true)
     const cells = t.at.map(cellOf)
     const x = placeLabels(cells, t.labels, cols)
     if (x && t.at.length) return { ...t, cells, x }

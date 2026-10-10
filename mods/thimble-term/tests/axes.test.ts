@@ -69,6 +69,11 @@ test('a number x axis ticks at round numbers, 0 1 … 8 for 0 to 8.05 hours, nev
   expect(rows.join('\n')).not.toMatch(/4\.024|8\.05/)
   for (const l of labels) expect(axis[l.mid]).toBe('┬')
   expect([...axis].filter(c => c === '┬').length).toBe(labels.length)
+  // an x is a place, written without separators: years read 2016, never 2,016; the y axis's counts keep theirs
+  const years = Array.from({ length: 10 }, (_, i) => ({ year: 2015 + i, merged: 1000 + i * 400 }))
+  const yearRows = draw(chart('line', { field: 'year', type: 'ordinal' }, years), 80, 'merged PRs by year')
+  expect(xLabels(yearRows)).toEqual(['2016', '2018', '2020', '2022', '2024'])
+  expect(yLabels(yearRows)).toContain('4,000')
 })
 
 test('a time axis names its span as the browser does: the hour within a day (08:00 … 15:00, no seconds), the day and hour within three days, seconds only over a few minutes', () => {
