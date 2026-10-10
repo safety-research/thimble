@@ -30,6 +30,7 @@
 
   var OWN = { colour: true, onPick: true, height: true } // the kit's own options; the others are thimble.chart's
   var KEPT = 32 // the specs kept, by what they were asked with, so drawing the same chart again asks thimble nothing
+  var SCHEMA = 'https://vega.github.io/schema/vega-lite/v6.json' // kernel_thimble.VEGALITE_SCHEMA
   var KEPT_CHARS = 4e6 // and at most this many characters of what they were asked with, since a chart's rows can be many
 
   var specs = {}
@@ -304,7 +305,8 @@
     if (!el) return Promise.resolve(null)
     var spec = null
     if (kind && typeof kind === 'object' && !Array.isArray(kind)) {
-      spec = kind
+      // a spec written by hand often names no schema, which the drawing needs to know it for Vega-Lite and fit it
+      spec = typeof kind.$schema === 'string' ? kind : Object.assign({ $schema: SCHEMA }, kind)
       options = data
       data = null
     }

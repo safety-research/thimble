@@ -294,5 +294,9 @@ describe('thimble.chart', () => {
     expect(of('fetch').length).toBe(asked)
     expect(win().__drawn.at(-1).spec).toMatchObject({ mark: 'bar', height: 90 })
     expect(doc().querySelector<HTMLElement>('#c .thimble-chart-note')!.hidden).toBe(true)
+    // a spec written by hand with no schema is drawn as Vega-Lite, so it is fitted to its box as the others are
+    const { $schema: _schema, ...bare } = BAR
+    await win().thimble.chart('#c', bare)
+    expect(win().__drawn.at(-1).spec.$schema).toBe(BAR.$schema)
   })
 })
