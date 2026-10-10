@@ -1265,7 +1265,7 @@ The writer of {doc} is running already, and thimble shows it, so this turn needs
 
 ## agent-launched
 
-{who} runs in the background, and the analyst sees it. End the turn now, with no words and no other call, unless the analyst asked for more in this turn. Do not make this call again.
+{who} runs in the background, and the analyst sees it. End the turn now, with no words and no other call, unless the analyst asked for more in this turn. One short sentence is fine when it tells the analyst something thimble does not show. Do not make this call again.
 
 ## start_writing-subagent
 

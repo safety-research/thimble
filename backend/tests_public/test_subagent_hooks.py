@@ -160,6 +160,18 @@ def test_main_s_start_of_a_fork_or_one_of_thimble_s_agents_ends_its_turn():
         assert sf.launched_note(quiet) == "", quiet
 
 
+def test_the_launch_note_lets_main_say_what_thimble_does_not_show():
+    """Live QA 2, ask 5: the analyst asked for the wiki's pages drawn the way the wiki drew them, the corpus holds only
+    their markup, and main had to say so after it started the view's builder. The note said to end the turn with no
+    words, so main wrote the warning anyway and drafted a Claude Code feedback report about the hook. The note now
+    allows the one short sentence main's prompt allows on its other turns."""
+    allowed = "something thimble does not show"
+    main = (Path(__file__).resolve().parents[2] / "prompts" / "main.md").read_text("utf-8")
+    note = sf.launched_note(launched("thimble:view-builder"))
+    assert note.startswith("thimble's view-builder runs in the background") and "End the turn now" in note
+    assert allowed in main and allowed in note
+
+
 def test_the_agents_hook_gives_main_the_launch_note_as_context_alone(tmp_path, ws):
     """The note goes to main as added context, with no systemMessage, so the terminal draws no row for it."""
     out = run_hook(tmp_path, "--agents", launched("thimble:writer"))
