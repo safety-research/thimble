@@ -101,7 +101,8 @@ Beside the options above it takes three of the kit's own:
   and the chart draws no legend, since Color by's chips are its key; a value with no color, as with Off or a value
   turned off, is gray. A page groups its records by `colour.valueOf(record)` for that column.
 - `onPick(row)`: a mark clicked, with its row, such as to filter by its category or to open it in the side panel.
-- `height`: the plot's height in px.
+- `height`: the plot's height in px, at most 36 px a row for the rows a chart names down its side, so a few bars stay
+  bars.
 
 The chart takes its mount's width and follows it. Called again on the same mount, it replaces the chart and leaves the
 same chart as it is, so a page draws it in its `draw()` with the rows Filter by keeps. A chart of no rows says so, and a

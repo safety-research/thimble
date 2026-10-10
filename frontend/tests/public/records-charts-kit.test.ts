@@ -201,32 +201,32 @@ describe('thimble.chart', () => {
   test("asks thimble for thimble.chart's spec with the kit's own fetch, once for the same chart, and draws it", async () => {
     await load()
     const picked: object[] = []
-    const done = win().thimble.chart('#c', 'bar', ROWS, { stack: false, height: 120, onPick: (row: object) => picked.push(row) })
+    const done = win().thimble.chart('#c', 'bar', ROWS, { stack: false, height: 60, onPick: (row: object) => picked.push(row) })
     expect(of('fetch').map((m) => m.query)).toEqual([{ $thimble: 'chart', kind: 'bar', rows: ROWS, options: { stack: false } }])
     answer(BAR)
     const view = await done
     expect(view).toBe(win().__drawn[0].d.view)
     const drawn = win().__drawn[0]
     expect(drawn.el.className).toBe('thimble-chart-plot')
-    expect(drawn.spec.height).toBe(120)
+    expect(drawn.spec.height).toBe(60)
     expect(drawn.spec.encoding.color.scale).toBeUndefined()
     // a mark clicked: its row, by the columns the chart's rows hold
     win().__click({}, { datum: { agent: 'agent-2', posts: 9, tool: 'Bash', posts_end: 9, __thimble_stack: 1 } })
     expect(picked).toEqual([{ agent: 'agent-2', posts: 9, tool: 'Bash' }])
     // the same chart again asks nothing and keeps the one drawn, a click going to the new call's onPick
     const again: object[] = []
-    expect(await win().thimble.chart('#c', 'bar', ROWS, { stack: false, height: 120, onPick: (row: object) => again.push(row) })).toBe(view)
+    expect(await win().thimble.chart('#c', 'bar', ROWS, { stack: false, height: 60, onPick: (row: object) => again.push(row) })).toBe(view)
     expect(of('fetch').length).toBe(1)
     expect(win().__drawn.length).toBe(1)
     win().__click({}, { datum: { agent: 'agent-1', posts: 3, tool: 'Read' } })
     expect(again).toEqual([{ agent: 'agent-1', posts: 3, tool: 'Read' }])
     expect(picked.length).toBe(1)
     // the same rows drawn otherwise ask nothing and replace it
-    await win().thimble.chart('#c', 'bar', ROWS, { stack: false, height: 90 })
+    await win().thimble.chart('#c', 'bar', ROWS, { stack: false, height: 50 })
     expect(of('fetch').length).toBe(1)
     expect(win().__drawn.length).toBe(2)
     expect(win().__drawn[0].d.gone).toBe(true)
-    expect(win().__drawn[1].spec.height).toBe(90)
+    expect(win().__drawn[1].spec.height).toBe(50)
     expect(doc().querySelector('#c')!.hasAttribute('data-pick')).toBe(false)
   })
 
@@ -304,9 +304,15 @@ describe('thimble.chart', () => {
     expect(of('fetch').length).toBe(asked)
     expect(texts('#c .thimble-chart-note')).toEqual(['No data'])
     expect(doc().querySelector<HTMLElement>('#c .thimble-chart-note')!.classList.contains('is-error')).toBe(false)
-    await win().thimble.chart('#c', BAR, { height: 90 })
+    await win().thimble.chart('#c', BAR, { height: 60 })
     expect(of('fetch').length).toBe(asked)
-    expect(win().__drawn.at(-1).spec).toMatchObject({ mark: 'bar', height: 90 })
+    expect(win().__drawn.at(-1).spec).toMatchObject({ mark: 'bar', height: 60 })
+    // rows named down its side take 36 px each at most, so two bars stay bars; a y of numbers takes the height asked
+    await win().thimble.chart('#c', BAR, { height: 200 })
+    expect(win().__drawn.at(-1).spec.height).toBe(72)
+    const line = { ...BAR, mark: 'line', encoding: { x: { field: 'posts', type: 'quantitative' }, y: { field: 'posts', type: 'quantitative' } } }
+    await win().thimble.chart('#c', line, { height: 200 })
+    expect(win().__drawn.at(-1).spec.height).toBe(200)
     expect(doc().querySelector<HTMLElement>('#c .thimble-chart-note')!.hidden).toBe(true)
     // rows that are no JSON say so in the chart's place too
     const loop: Record<string, unknown> = { a: 'x' }
