@@ -673,7 +673,10 @@ def test_a_range_draws_a_dumbbell_per_item_a_muted_line_between_two_solid_ends_i
     bundle = drawn("range", EVAL2[["model", "base", "tuned"]])
     spec = bundle[kt.VEGALITE_MIME]
     rule, start, end = spec["layer"]
-    assert rule["mark"] == {"type": "rule", "style": kt.SPAN_STYLE}
+    # the line from one end's edge to the other's, whichever way it runs, so a lighter end shows no line through it
+    way = '(datum["tuned"] > datum["base"] ? 1 : datum["tuned"] < datum["base"] ? -1 : 0)'
+    assert rule["mark"] == {"type": "rule", "style": kt.SPAN_STYLE, "xOffset": {"expr": f"{way} * {kt.RANGE_GAP}"},
+                            "x2Offset": {"expr": f"{way} * {-kt.RANGE_GAP}"}}
     assert (rule["encoding"]["x"]["field"], rule["encoding"]["x2"]) == ("base", {"field": "tuned"})
     ends = {"field": kt.RANGE_END, "type": "nominal", "scale": {"domain": ["base", "tuned"]}, "title": None}
     for layer, col in ((start, "base"), (end, "tuned")):
@@ -687,10 +690,11 @@ def test_a_range_draws_a_dumbbell_per_item_a_muted_line_between_two_solid_ends_i
     assert start["encoding"]["y"]["sort"] == ["m2", "m3", "m1"], "the largest after first"
     table = cite.chart_table(bundle)
     assert table.label == "model" and table.cells[table.labels.index("m2")] == ["0.55", "0.81"]
-    # with groups in color, the ends are told apart by how strongly they show, the before end the lighter
+    # with groups in color, the ends are told apart by how strongly they show, the before end the lighter, in a legend
+    # titled, so it does not read as the groups' own
     grouped = spec_of("range", EVAL2)["layer"]
     assert grouped[1]["encoding"]["color"]["field"] == "family" and "color" not in grouped[0]["encoding"]
-    assert grouped[1]["encoding"]["opacity"] == {**ends, "type": "ordinal"} == grouped[2]["encoding"]["opacity"]
+    assert grouped[1]["encoding"]["opacity"] == {**ends, "type": "ordinal", "title": "end"} == grouped[2]["encoding"]["opacity"]
     # times: a span per item, the earliest first
     spans = pd.DataFrame({"agent": ["a", "b"], "first": pd.to_datetime(["2026-08-02", "2026-08-01"]),
                           "last": pd.to_datetime(["2026-08-09", "2026-08-03"])})

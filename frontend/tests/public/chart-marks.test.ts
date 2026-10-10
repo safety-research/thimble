@@ -95,6 +95,23 @@ test("an area's hover points draw no dot", async () => {
   expect(points.every((p) => p.opacity === 0)).toBe(true)
 })
 
+test("a range's line runs from one end's edge to the other's, whichever way it runs", async () => {
+  const rows = [{ model: 'up', base: 0.4, tuned: 0.8 }, { model: 'down', base: 0.8, tuned: 0.4 }, { model: 'same', base: 0.5, tuned: 0.5 }]
+  // as thimble.chart writes a range's line (backend kernel_thimble _range_spec, RANGE_GAP)
+  const way = '(datum["tuned"] > datum["base"] ? 1 : datum["tuned"] < datum["base"] ? -1 : 0)'
+  const marks = await scene({ data: { values: rows }, layer: [
+    { mark: { type: 'rule', style: 'thimble-span', xOffset: { expr: `${way} * 4` }, x2Offset: { expr: `${way} * -4` } }, encoding: { x: field('base', 'quantitative'), x2: { field: 'tuned' }, y: field('model', 'nominal') } },
+    { mark: { type: 'point', style: 'thimble-end' }, encoding: { x: field('base', 'quantitative'), y: field('model', 'nominal') } },
+  ] })
+  const rules = marks.find((m) => m.type === 'rule')!.items
+  const ends = marks.find((m) => m.type === 'symbol')!.items
+  const [up, down, same] = rules
+  expect(up!.x - ends[0]!.x).toBe(4)
+  expect(down!.x - ends[1]!.x).toBe(-4)
+  expect(Math.abs(up!.x2! - up!.x) + 8).toBeCloseTo(Math.abs(down!.x2! - down!.x) + 8)
+  expect([same!.x, same!.x2]).toEqual([ends[2]!.x, ends[2]!.x])
+})
+
 test("a violin's curves each reach the same width at their widest, however tall their densities", async () => {
   // as thimble.chart writes a violin's body (backend kernel_thimble _violin_spec): two curves, one ten times as tall
   const rows = [0, 1, 2].flatMap((x) => [{ v: x, density: [0.1, 0.5, 0.1][x]!, g: 'wide' }, { v: x, density: [1, 5, 1][x]!, g: 'narrow' }])

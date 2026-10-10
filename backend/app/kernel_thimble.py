@@ -1211,6 +1211,8 @@ VIOLIN_MOST = "__thimble_most"  # the largest density of a violin's curve, which
 ECDF_STEPS_MAX = 500  # a group's cumulative share is kept at this many of its values at most, evenly spread
 RANGE_PAD = 8  # px a range's axis reaches past its outermost ends, so their marks clear the axis line
 RANGE_END = "__thimble_end"  # a range's end, as its before or after column's name
+RANGE_GAP = 4  # px the line between a range's ends stops short of each, about the radius of an end's dot (the theme's
+# thimble-end), so a lighter end shows no line through it
 VIOLIN_HALF = 0.45  # a violin's widest point reaches this far either side of its line, in lines, so neighbors never touch
 TIME_TICKS_MAX = 40  # times more than a day apart (weeks, months) of a bar, line or area get a tick each up to this many
 FITS = ("linear", "smooth")  # the trend lines a scatter fits: least squares, or a local regression (LOESS)
@@ -2419,9 +2421,10 @@ def _ecdf_spec(df, opts: dict) -> dict:
 
 def _range_spec(df, opts: dict) -> dict:
     """A dumbbell per item lying down: a muted line from its before to its after, both numbers or both times, and a
-    solid dot at each end; the x axis titled "before → after" by the columns' names. The two ends take two series
-    colors, named in the legend by their columns; when a group column, or a label on the items, colors the dumbbells,
-    the ends are told apart by how strongly they show, the before end the lighter, in a legend of their own. Items by
+    solid dot at each end, the line stopping at the dots' edges; the x axis titled "before → after" by the columns'
+    names. The two ends take two series colors, named in the legend by their columns; when a group column, or a label
+    on the items, colors the dumbbells, the ends are told apart by how strongly they show, the before end the lighter,
+    in a legend of their own titled "end". Items by
     their after, the largest first, or with times by their before, the earliest first; a group column's groups side by
     side on the line of an item that is in several."""
     kind = "range"
@@ -2456,16 +2459,20 @@ def _range_spec(df, opts: dict) -> dict:
     # the ends in order by the scale's domain, which a view's Color by leaves as it is (viewer_chart.js colors a field
     # that its rows hold, or that a `sort` lists)
     end = {"field": RANGE_END, "type": "ordinal" if color else "nominal", "scale": {"domain": [before, after]},
-           "title": None}
+           "title": "end" if color else None}
     ends = {**color, ("opacity" if color else "color"): end}
     tip = _tooltip(df, kinds)
+    # the line runs from one end's edge to the other's: 1 when the after lies past the before, -1 before it, 0 at it
+    b, a = f"datum[{json.dumps(before)}]", f"datum[{json.dumps(after)}]"
+    way = f"({a} > {b} ? 1 : {a} < {b} ? -1 : 0)"
 
     def dot(c: str) -> dict:
         return {"transform": [{"calculate": json.dumps(c), "as": RANGE_END}], "mark": {"type": "point", "style": END_STYLE},
                 "encoding": {"x": _enc(c, xt, title=title, **scale), **y, **ends, "tooltip": tip}}
 
     spec = {"data": {"values": rows}, "layer": [
-        {"mark": {"type": "rule", "style": SPAN_STYLE},
+        {"mark": {"type": "rule", "style": SPAN_STYLE, "xOffset": {"expr": f"{way} * {RANGE_GAP}"},
+                  "x2Offset": {"expr": f"{way} * {-RANGE_GAP}"}},
          "encoding": {"x": _enc(before, xt, title=title, **scale), "x2": {"field": _field(after)}, **y, "tooltip": tip}},
         dot(before),
         dot(after),
