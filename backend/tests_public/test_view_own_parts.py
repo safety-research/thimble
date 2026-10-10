@@ -60,6 +60,20 @@ def test_the_row_controls_side_panel_and_transcript_are_thimble_s_parts_too():
     ]
 
 
+def test_the_record_card_is_one_of_thimble_s_parts():
+    """A page lays out the kit's record card (viewer_kit.css .thimble-card) and its column or grid, but does not give it
+    corners, an edge or a color of its own, such as a colored side stripe in place of Color by's bar."""
+    css = ("<style>.col .thimble-card { margin: 0 0 6px } .thimble-cards { gap: 8px; background: #f4f4f4 }"
+           " .thimble-cards-grid { --thimble-tile-w: 180px } .thimble-card-title { -webkit-line-clamp: 3 }"
+           " .thimble-card { border-radius: 12px } .thimble-card.hot { border-left: 3px solid #d0750a }"
+           " .thimble-card-key { color: #d0750a }</style>")
+    assert views.own_parts(css) == [
+        "`.thimble-card` sets border-radius",
+        "`.thimble-card.hot` sets border-left",
+        "`.thimble-card-key` sets color",
+    ]
+
+
 def test_the_note_names_them_and_the_worked_examples_get_none():
     note = views.own_parts_note(PAGE)
     assert "`.chip` sets border-radius" in note and "and 2 more" in note and "chip-key" in note

@@ -4541,13 +4541,14 @@ def purple_note(html: str) -> str:
     return _hint("view-purple", colours=shown)
 
 
-# thimble's parts as a view's styles may touch them: the frame styles .chip, .btn, .seg, .field, the Color by control
-# and the time range selector (viewer_kit.css), Filter by, Rows, the lanes, the key, the divider, the side panel and the
-# transcript (viewer_parts.css), and a view lays them out but does not restyle them or draw chips of its own
+# thimble's parts as a view's styles may touch them: the frame styles .chip, .btn, .seg, .field, the record card, the
+# Color by control and the time range selector (viewer_kit.css), Filter by, Rows, the lanes, the key, the divider, the
+# side panel and the transcript (viewer_parts.css), and a view lays them out but does not restyle them or draw chips of
+# its own
 _STYLE_RE = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.S | re.I)
 _CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
 _KIT_PART_RE = re.compile(r"\.(?:chip|btn|seg|field|thimble-(?:colour|range|axis|def|peek|reset|tip|filter|rows|ctl|key|lanes?|"
-                          r"divider|side|transcript|turn))(?:-[\w-]+)?(?![\w-])")
+                          r"divider|side|transcript|turn|card))(?:-[\w-]+)?(?![\w-])")
 _CLASS_RE = re.compile(r"\.(-?[_a-zA-Z][\w-]*)")
 # what a part looks like, which the kit sets: its edge, fill, corners, colours, type and height. Its width, margins,
 # padding, flex and place are the page's layout.
@@ -4651,10 +4652,10 @@ def _chip_like(decls: dict[str, str], radius: float) -> bool:
 
 def own_parts(html: str) -> list[str]:
     """What a view's page (`html`) does in its styles that makes its parts look unlike thimble's: a rule that restyles
-    one of thimble's parts (.chip, .btn, .seg, .field or the Colour by control, or a class the page puts on one of
-    them in the same selector, such as `.fbtn.field`), setting its edge, fill, corners, colours, type or height; and a
-    rule that draws a chip-like element (_chip_like) with corners rounder than var(--radius-chip). Each once, in the
-    page's order, as `selector` and what it sets."""
+    one of thimble's parts (.chip, .btn, .seg, .field, the record card or the Colour by control, or a class the page
+    puts on one of them in the same selector, such as `.fbtn.field`), setting its edge, fill, corners, colours, type or
+    height; and a rule that draws a chip-like element (_chip_like) with corners rounder than var(--radius-chip). Each
+    once, in the page's order, as `selector` and what it sets."""
     css = _CSS_COMMENT_RE.sub("", "\n".join(_STYLE_RE.findall(html or "")))
     rules = [(sel.strip(), _declarations(body)) for group, body in _css_rules(css) for sel in group.split(",")]
     aliases: set[str] = set()
