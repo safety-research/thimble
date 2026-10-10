@@ -430,6 +430,45 @@ window.table = thimble.table({ mount: '#list', sort: { by: 't', desc: true },
   })
 })
 
+describe("a narrow table's heads", () => {
+  test("a narrow table never cuts a head: a title wraps to two lines in a column narrower than it, and a column keeps its title's width on two lines before it drops", async () => {
+    // Live check 0.7.0: beside the side panel a forge's Claimed by and Merged/closed by read CLAIMED… and MERGED/CL…
+    const doc = page(`<div id="pane" style="width:900px;height:300px;display:flex"><div id="list" style="flex:1;min-height:0"></div></div>
+<script>
+window.table = thimble.table({ mount: '#list', sort: { by: 'claimed', desc: false },
+  rows: Array.from({ length: 50 }, (_, i) => ({ ref: 'forge.db#issues/' + (100 + i), number: 100 + i, title: 'An issue that needs a fix ' + i, claimed: 'agent-' + (i % 7), closer: i % 3 ? 'agent-' + (i % 5) : '', state: ['open', 'closed'][i % 2] })),
+  columns: [{ name: 'number', title: '#', type: 'number' }, { name: 'title', title: 'Title' }, { name: 'claimed', title: 'Claimed by', width: 90 },
+    { name: 'closer', title: 'Merged/closed by', width: 90 }, { name: 'state', title: 'State', width: 70 }] })
+</script>`)
+    const { page: p, frame } = await framed(doc)
+    /** each head drawn: its title, whether its words pass its box, how many lines it takes, and whether the cells pass each other */
+    const heads = () =>
+      frame().evaluate(() => {
+        const ths = [...document.querySelectorAll('.thimble-table-th')]
+        const line = parseFloat(getComputedStyle(document.querySelector('.thimble-table-title')!).lineHeight)
+        return ths.map((th, i) => {
+          const t = th.querySelector('.thimble-table-title') as HTMLElement
+          const prev = ths[i - 1]?.getBoundingClientRect().right ?? -Infinity
+          return { title: t.textContent!, cut: t.scrollWidth > t.clientWidth + 0.5, lines: Math.round(t.getBoundingClientRect().height / line), over: th.getBoundingClientRect().left < prev - 0.5 }
+        })
+      })
+    const wrapped = new Set<string>()
+    for (const width of [900, 640, 520, 440, 380, 320, 900]) {
+      await frame().evaluate((w) => ((document.getElementById('pane') as HTMLElement).style.width = w + 'px'), width)
+      await p.waitForTimeout(150)
+      const hs = await heads()
+      for (const h of hs) {
+        assert.ok(!h.cut && !h.over && h.lines <= 2, `${width}px: ${JSON.stringify(hs)}`)
+        if (h.lines === 2) wrapped.add(h.title)
+      }
+      if (width === 900) assert.deepEqual(hs.map((h) => [h.title, h.lines]), [['#', 1], ['Title', 1], ['Claimed by', 2], ['Merged/closed by', 2], ['State', 1]], 'a column given less width than its title takes it on two lines')
+      if (width === 320) assert.ok(hs.length < 5, `${width}px: columns drop rather than cut a head ${JSON.stringify(hs)}`)
+    }
+    assert.ok(wrapped.has('Merged/closed by'), 'the slash is a place to wrap')
+    await p.close()
+  })
+})
+
 describe('the search alone', () => {
   test('on a list with no Color by: a strip of its own with the lane of ticks, which a scroll to the match follows', async () => {
     const { page: p, frame } = await framed(CHAT)
