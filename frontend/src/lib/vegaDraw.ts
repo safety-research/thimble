@@ -1,10 +1,10 @@
 // How thimble draws a Vega-Lite chart, in one place for every surface that draws one: the canvas's charts
 // (components/Outputs Vega) and a view's charts (lib/kitChart, which vite build writes as the script a view's page
 // inlines for the view kit's thimble.chart, backend/app/viewer_chart.js). drawChart gives the spec a card's defaults
-// (lib/chartDefaults), fits it to its box (responsive, fitComposite), puts it on the paper (onPaper), embeds it in the
-// chart style (lib/vizTheme vegaConfig) with no URL loaded but a data: one (lib/vegaLoader), and once drawn measures it
-// against its box and embeds it again to fit: wide legends wrap into columns, wide composites narrow, squeezed plots get
-// shorter labels, dense x axes get labels on end (xLabelsFit), and overflowing labels get padding.
+// (lib/chartDefaults), fits it to its box (responsive, fitComposite, fitAfterCompile), puts it on the paper (onPaper),
+// embeds it in the chart style (lib/vizTheme vegaConfig) with no URL loaded but a data: one (lib/vegaLoader), and once
+// drawn measures it against its box and embeds it again to fit: wide legends wrap into columns, wide composites narrow,
+// squeezed plots get shorter labels, dense x axes get labels on end (xLabelsFit), and overflowing labels get padding.
 import { chartDefaults, legendAtRight, type LabelClassColour } from './chartDefaults'
 import { dataOnly, withoutEmbedOptions } from './vegaLoader'
 import { token, vegaConfig, VIZ_NEUTRAL, VIZ_SERIES, withTokens } from './vizTheme'
@@ -23,6 +23,10 @@ export function currentSchema(schema: string): string {
   return schema.replace(/\/vega-lite\/v[45](?:\.[\d.]+)?\.json$/, '/vega-lite/v6.json')
 }
 
+/** The fit responsive gives a chart that is no composite, beside its `container` width: the whole chart, its padding
+ * included, as wide as its box. */
+const FIT_X = { type: 'fit-x', contains: 'padding' }
+
 /** Make a Vega-Lite spec fill the room it is shown in; other specs are untouched. `minView` is the narrowest view a
  * composite's views may take (the refit after a measured overflow goes below the default). */
 export function responsive(spec: unknown, fitWidth?: number, minView: number = MIN_VIEW): unknown {
@@ -31,7 +35,7 @@ export function responsive(spec: unknown, fitWidth?: number, minView: number = M
   const isVL = typeof s0.$schema === 'string' && s0.$schema.includes('vega-lite')
   if (!isVL) return spec
   const s = unroundClippedBars(fixScaleBindings(wrapTitle({ ...s0, $schema: currentSchema(s0.$schema as string) }, fitWidth)))
-  if (!isComposite(s)) return { ...s, width: 'container', autosize: s.autosize ?? { type: 'fit-x', contains: 'padding' } }
+  if (!isComposite(s)) return { ...s, width: 'container', autosize: s.autosize ?? FIT_X }
   return fitWidth && fitWidth > 0 ? fitComposite(s, fitWidth, s, minView) : s
 }
 
@@ -606,26 +610,29 @@ export function labelTooltips(vg: Record<string, unknown>): Record<string, unkno
  * the globals its libs give it. */
 export interface VegaModule {
   default: (el: HTMLElement, spec: any, opts: any) => Promise<{ view: unknown; finalize: () => void }>
-  vega: { loader: () => any; logger: (level: number, method?: undefined, handler?: LogHandler) => unknown }
+  vega: { loader: () => any }
 }
 
-type LogHandler = (method: string, level: string, args: readonly unknown[]) => void
+/** the width signal Vega-Lite compiles a `container` width to (vega-lite's layoutsize sizeSignals) */
+const CONTAINER_WIDTH = { name: 'width', init: 'isFinite(containerSize()[0]) ? containerSize()[0] : 300', on: [{ update: 'isFinite(containerSize()[0]) ? containerSize()[0] : 300', events: 'window:resize' }] }
 
-/** The warning Vega-Lite gives every chart that fits its width to its box (responsive's fit-x) and sizes its rows by a
- * step (a discrete y axis): it drops nothing, since the chart keeps fit-x (vega-lite's compile getTopLevelProperties
- * warns for any fit beside a step height, then sets the fit it had), and no spec with both avoids it. */
-export const FIT_Y_DROPPED = 'Dropping "fit-y" because spec has discrete height.'
-/** vega's level for warnings and errors, vega-embed's own */
-const WARN = 2
-
-/** The logger a chart is embedded with: vega's own at vega-embed's level, which writes to the console, less
- * FIT_Y_DROPPED, so a chart that draws as it should logs nothing. */
-export function chartLogger(vega: VegaModule['vega']): unknown {
-  if (typeof vega.logger !== 'function') return undefined
-  return vega.logger(WARN, undefined, (method, level, args) => {
-    if (args.length === 1 && args[0] === FIT_Y_DROPPED) return
-    ;(console as unknown as Record<string, (...a: unknown[]) => void>)[method](level, ...args)
-  })
+/**
+ * A chart fitted to its box's width (responsive's `container` width and FIT_X) as Vega-Lite is given it, a fixed width
+ * and no fit, and the patch that gives the Vega it compiles the width signal and the fit Vega-Lite would have compiled.
+ * Vega-Lite then warns of nothing: given the fit beside rows sized by a step (a discrete y axis) it warns that it drops
+ * "fit-y", and given no fit that a `container` width wants one, though the chart loses nothing. Any other spec is given
+ * as it is, with no patch. Pure.
+ */
+export function fitAfterCompile(spec: unknown): { spec: unknown; patch: (vg: Spec) => Spec } {
+  const s = obj(spec)
+  if (!s || s.width !== 'container' || s.height === 'container' || JSON.stringify(s.autosize) !== JSON.stringify(FIT_X)) return { spec, patch: (vg) => vg }
+  const { autosize: _fit, ...rest } = s
+  const patch = (vg: Spec): Spec => {
+    const { width: _width, ...out } = vg
+    return { ...out, autosize: FIT_X, signals: [CONTAINER_WIDTH, ...(Array.isArray(vg.signals) ? vg.signals : [])] }
+  }
+  // any width: the patch takes it out
+  return { spec: { ...rest, width: 300 }, patch }
 }
 
 /** A chart as drawChart left it in its box: its view, which a resize refits (refitChart), and how to take it away. */
@@ -671,7 +678,9 @@ export async function drawChart(el: HTMLElement, spec: Spec, load: () => Promise
     opts.replace?.()
     current = null
     // the spec's embed options are dropped and Vega fetches no URL but a data: one (lib/vegaLoader)
-    const r = await m.default(el, withoutEmbedOptions(sized) as any, { actions: false, config: vegaConfig() as any, patch: labelTooltips as any, loader: dataOnly(m.vega.loader()), logger: chartLogger(m.vega) })
+    const compiled = fitAfterCompile(withoutEmbedOptions(sized))
+    const patch = (vg: Spec) => labelTooltips(compiled.patch(vg))
+    const r = await m.default(el, compiled.spec as any, { actions: false, config: vegaConfig() as any, patch, loader: dataOnly(m.vega.loader()) })
     if (!alive()) return r.finalize()
     const container = usesContainerWidth(sized)
     current = { view: r.view as unknown as FitView, finalize: r.finalize, container }
