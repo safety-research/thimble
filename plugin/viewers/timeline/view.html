@@ -148,7 +148,7 @@ const lanes = thimble.timeline({
   problem: FAILED, words: { problem: 'failed' },
   tip: (e) => `${e.kind}${FAILED(e) ? ' · failed' : ''} · ${e.actor} · ${e.text}`,
   onPick: (lane) => pick(picked && picked.key === lane.key ? null : lane),
-  onMark: (e) => show(e.r),
+  onMark: (e) => show(e.r, true),
 })
 const side = thimble.side({ mount: '#body', onClose: () => { open = null } })
 // the events in the range as a table: the time, the source, the kind (✕ before a failure), the actor and the incident,
@@ -235,7 +235,7 @@ function pick(lane) {
 
 // an event in the side panel from anywhere: a lane, a link in another event, a citation; the table opens its row, so
 // the row is chosen and in view
-async function show(r) {
+async function show(r, keys) {
   if (!E.some((e) => e.r === r)) { keep = [r]; await load() }
   const e = E.find((x) => x.r === r)
   if (!e) return
@@ -243,6 +243,8 @@ async function show(r) {
   if (picked && (rows.groupOf(e) ?? null) !== picked.value) pick(null)
   drawList()
   table.open(e.ref)
+  // opened by a click in the page, a mark or a link: the table takes the keys, so ↑ ↓ go on from the event
+  if (keys) $('list').focus({ preventScroll: true })
 }
 
 // an event's details, once the reader sends it whole: its words, the event it answers and those that answer it, each a
@@ -269,7 +271,7 @@ async function details(body, e) {
 }
 $('body').addEventListener('click', (ev) => {
   const go = ev.target.closest('[data-go]')
-  if (go && !ev.metaKey && !ev.ctrlKey) show(+go.dataset.go)
+  if (go && !ev.metaKey && !ev.ctrlKey) show(+go.dataset.go, true)
 })
 $('lhead').addEventListener('click', (ev) => { if (ev.target.closest('[data-all]')) pick(null) })
 addEventListener('resize', draw)
