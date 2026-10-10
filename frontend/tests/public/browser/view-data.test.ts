@@ -8,7 +8,8 @@
 // side panel keeps its main column of text, drops columns in their order rather than draw a cell under the strip, and
 // draws them again when the panel closes; the diff sets the two versions side by side, a changed line level with the line
 // it became, inline in a narrow mount, and its tints follow the paper; a patch's file head and hunk lines span both
-// sides. What the parts decide without layout is tests/public/data-kit.test.ts.
+// sides; a table column's second line (sub) stands under its value inside the row. What the parts decide without layout
+// is tests/public/data-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -219,6 +220,41 @@ window.table = thimble.table({ mount: '#list', rows: Array.from({ length: 200 },
     assert.ok(fits(wide), JSON.stringify(wide))
     assert.equal(wide[0][1] - wide[0][0], 220)
     await p.close()
+  })
+})
+
+describe('the table with a second line', () => {
+  test("a column's sub: under its value, both lines inside the row's height and cut with an ellipsis, light and dark", async () => {
+    for (const dark of [false, true]) {
+      const doc = page(`<div id="pane" style="width:600px;height:400px;display:flex"><div id="list" style="flex:1;min-height:0"></div></div>
+<script>
+window.table = thimble.table({ mount: '#list', rows: Array.from({ length: 50 }, (_, i) => ({ ref: 'pr#' + (i + 1), title: 'A pull request whose title runs on and on past its column, as a long title does in a narrow pane ' + i, n: i, by: 'ash' })),
+  columns: [{ name: 'title', title: 'Pull request', sub: (r) => '#' + r.n + ' opened 09:24 by ' + r.by + ' · fixes #1 · approved · merged by its author · merged over a change request' },
+    { name: 'n', title: 'Comments', type: 'number' }] })
+</script>`, dark)
+      const { page: p, frame } = await framed(doc)
+      const got = await frame().evaluate(() => {
+        const row = document.querySelector('.thimble-table-row') as HTMLElement
+        const box = (sel: string) => row.querySelector(sel)!.getBoundingClientRect()
+        const rr = row.getBoundingClientRect()
+        const line = row.querySelector('.thimble-table-line') as HTMLElement
+        const sub = row.querySelector('.thimble-table-sub') as HTMLElement
+        return {
+          row: [rr.top, rr.bottom], line: [box('.thimble-table-line').top, box('.thimble-table-line').bottom], sub: [box('.thimble-table-sub').top, box('.thimble-table-sub').bottom],
+          cut: [line.scrollWidth > line.clientWidth, sub.scrollWidth > sub.clientWidth], ellipsis: getComputedStyle(sub).textOverflow,
+          inks: [getComputedStyle(line).color, getComputedStyle(sub).color],
+          next: (document.querySelectorAll('.thimble-table-row')[1] as HTMLElement).getBoundingClientRect().top,
+        }
+      })
+      // both lines inside the row, the second under the first, and the next row below it
+      assert.ok(got.line[0] >= got.row[0] && got.sub[0] >= got.line[1] - 1 && got.sub[1] <= got.row[1], JSON.stringify(got))
+      assert.ok(got.next >= got.row[1] - 1, JSON.stringify(got))
+      // each cut at the column's edge with an ellipsis, the second line in a quieter ink than the first
+      assert.deepEqual(got.cut, [true, true])
+      assert.equal(got.ellipsis, 'ellipsis')
+      assert.notEqual(got.inks[0], got.inks[1])
+      await p.close()
+    }
   })
 })
 
