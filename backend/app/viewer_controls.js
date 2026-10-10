@@ -1529,9 +1529,11 @@
         var its = n.items || []
         var bad = ''
         if (self.dens) {
-          // Density: a bar per bin, its values stacked in the chips' order, a bin with a failure a ✕ in red at its foot
+          // Density: a bar per bin, its values stacked in the chips' order, a bin with a failure a ✕ in red at its foot,
+          // unless the ✕ of a bin just before stands there already, so that a run of failing bins reads as ✕s, not a scrawl
           var d = self.dens
           var room = H - 6
+          var lastX = -Infinity
           d.per[ni].forEach(function (bin, bi) {
             var bx0 = Math.max(0, sc.x(d.bins[bi][0]))
             var bx1 = Math.min(W, sc.x(d.bins[bi][1]))
@@ -1547,7 +1549,11 @@
             }
             if (bin.bad) {
               problems += bin.bad
-              if (self.on('problem')) bad += badX(bx0 + bw / 2, Math.min(H - 2, H - BAD_X))
+              var cx = bx0 + bw / 2
+              if (self.on('problem') && cx - lastX > 2 * BAD_X) {
+                bad += badX(cx, Math.min(H - 2, H - BAD_X))
+                lastX = cx
+              }
             }
           })
           its = []

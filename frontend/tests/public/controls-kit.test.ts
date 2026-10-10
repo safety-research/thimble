@@ -506,6 +506,28 @@ describe('the timeline on its own', () => {
     expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(1)
   })
 
+  test("Density with a failure in every bin: a ✕ at the foot of a bin, none over the ✕ of a bin just before, so a run of failing bins reads as ✕s one beside another", async () => {
+    await load()
+    const w = win()
+    w.eval(`thimble.timeline({ mount: '#lanes', unit: 'n', density: true, problem: (r) => r.bad }).draw(Array.from({ length: 3000 }, (_, i) => ({ t: i, bad: i % 2 === 0 })))`)
+    await wait()
+    const xs = [...doc().querySelectorAll('#lanes .thimble-lane-bar')].map((b) => Number(b.getAttribute('x')))
+    const bins = new Set(xs).size
+    const centers = [...doc().querySelectorAll('#lanes .thimble-lane-bad-x')].map((p) => {
+      const [x0, dx] = (/^M([\d.]+) [\d.]+l([\d.]+)/.exec(p.getAttribute('d')!) || []).slice(1).map(Number)
+      return x0 + dx / 2
+    })
+    // bins narrower than a ✕, each with a failure: a ✕ on every other bin, each 6 px wide and more than 6 px from the one
+    // before
+    expect(bins).toBeGreaterThan(60)
+    expect(xs[1] - xs[0]).toBeLessThan(6)
+    expect(centers.length).toBeGreaterThanOrEqual(Math.floor(bins / 2))
+    expect(centers.length).toBeLessThan(bins)
+    expect(centers.slice(1).every((x, i) => x - centers[i] > 6)).toBe(true)
+    // the key counts every failure all the same
+    expect(texts('.thimble-key-chip')).toEqual(['failed1,500'])
+  })
+
   test("Density's tip gives a bin's day once: 16 May 09:00–09:01", async () => {
     await load()
     const w = win()
