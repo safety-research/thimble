@@ -1733,6 +1733,14 @@
     if (this.range && typeof this.range.format === 'function') return this.range.format(t, step)
     return this.unit === 'n' ? num(t) : new Date(this.unit === 'ms' ? t : t * 1000).toISOString().slice(11, 19)
   }
+  // a bin's span in words, the day said once where both ends fall on it: 16 May 09:03–09:04
+  Lanes.prototype.between = function (t0, t1) {
+    var a = this.when(t0, t1 - t0)
+    var b = this.when(t1, t1 - t0)
+    var cut = a.lastIndexOf(' ')
+    if (cut > 0 && /^\d\d:\d\d/.test(a.slice(cut + 1)) && b.slice(0, cut + 1) === a.slice(0, cut + 1)) b = b.slice(cut + 1)
+    return a + '–' + b
+  }
   // a tip's head: the lane's name, but for the one lane with no name, and the time
   Lanes.prototype.head = function (node, when) {
     return '<div class="thimble-tip-h">' + (this.bare ? '' : esc(node.name) + ' · ') + esc(when) + '</div>'
@@ -1752,7 +1760,7 @@
     if (this.dens) {
       // Density: the bin's time, its records, and how many take each value, in the chips' colours
       var hit = this.binAt(at.node, x)
-      html = this.head(at.node, hit ? this.when(hit.t0, hit.t1 - hit.t0) + '–' + this.when(hit.t1, hit.t1 - hit.t0) : this.when(t))
+      html = this.head(at.node, hit ? this.between(hit.t0, hit.t1) : this.when(t))
       if (hit) {
         var d = this.dens
         var bin = hit.bin

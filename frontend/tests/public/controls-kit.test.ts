@@ -468,6 +468,19 @@ describe('the timeline on its own', () => {
     expect(texts('#tl2 .thimble-axis-lab')).toEqual(['0', '1', '2', '3'])
   })
 
+  test("Density's tip gives a bin's day once: 16 May 09:00–09:01", async () => {
+    await load()
+    const w = win()
+    w.eval(`
+      window.tl = thimble.timeline({ mount: '#lanes', density: true })
+      window.tl.draw(Array.from({ length: 120 }, (_, i) => ({ t: ${T0} + i * 30 })))
+    `)
+    await wait()
+    const bar = doc().querySelector('#lanes .thimble-lane-bar')!
+    hover(doc().querySelector('#lanes .thimble-lane')!, Number(bar.getAttribute('x')) + 1)
+    expect(tipOf()![0]).toMatch(/^16 May \d\d:\d\d(:\d\d)?–\d\d:\d\d(:\d\d)?$/)
+  })
+
   test('a mark as wide as its record ran: the longest drawn first, so that it never hides a short one under it', async () => {
     await load()
     const w = win()
