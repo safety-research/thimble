@@ -92,7 +92,7 @@ stays at the top and hairline rows, one line each with a cell's overflow cut by 
   the table holds as shown, since it anchors each row it draws.
 - With the page's Color by, a row's value takes the bar on its left edge, the chips count every row (not only those
   drawn) while a field is the color, and the strip shows every row's color, scrolled to or not. The table draws its
-  rows again when Color by changes.
+  rows again when Color by changes. `colour: false` gives it no bars and a plain strip.
 - A click, or Enter on the chosen row, opens the row in `side` (`thimble.side`) and tells `onOpen`. ↑ and ↓ move the
   chosen row while the table has the focus, and an open side panel follows it.
 - With `filter` (`thimble.filterBy`) it leaves out the rows Filter by does not keep; call `table.draw()` in Filter by's
@@ -122,6 +122,7 @@ const table = thimble.table({
 | `side` | a `thimble.side` that a row opens in |
 | `details(row)` | what the side panel shows of a row: `{title, sub, html}` or `{title, sub, render(body)}`, or html alone; by default its first column as the title and every column's value whole |
 | `search`, `filter` | a `thimble.search` that finds in every row, a `thimble.filterBy` whose kept rows show |
+| `colour` | the Color by of its bars and strip (or `color`, the same option): the page's by default, `false` for none |
 | `onOpen(row)` | a row opened, by a click or Enter |
 | `key` | the name thimble keeps the sort under, the mount's id by default; give each table of a page its own |
 

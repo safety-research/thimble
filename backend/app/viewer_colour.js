@@ -14,7 +14,8 @@
 //     strip: '#list',                          the list that gets the colored strip, or true for the page; another
 //                                              list gets it with colour.strip(el, {rows}) or {whole: true}, and is
 //                                              a plain scrollbar otherwise
-//     onChange: (colour) => draw(),            the choice, a value turned on or off, or the label values changed
+//     onChange: (colour) => draw(),            the choice, a value turned on or off, or the label values changed; the
+//                                              kit's parts keep their own bars, so it draws only the page's own markup
 //   })
 //
 // Color by only colors: a value turned off takes its color off its records, which stay, drawn in gray as the records
@@ -889,28 +890,31 @@
   // the choice or the values turned off changed: kept, drawn, and the page told once
   // A record's data-colour is its value of the field coloured by, so a new choice takes every one off the page until
   // the page draws its records again (onChange): a value of the field before is never drawn, counted or given a colour
-  // of the new one.
+  // of the new one. The kit's own parts stamp theirs again at once (stampParts), before anything is counted, as they do
+  // when the control is first mounted.
   Control.prototype.forget = function () {
     var c = this.choice()
     var key = c ? c.key : ''
     // the tracks' values, which the page writes for the choices past the first (attr), go with those choices
     var tracks = JSON.stringify(this.extra().map(function (x) { return x.key }))
-    if (this.tracksKey !== undefined && this.tracksKey !== tracks) {
+    var first = this.choiceKey === undefined
+    var newTracks = this.tracksKey !== undefined && this.tracksKey !== tracks
+    var newChoice = !first && this.choiceKey !== key
+    this.tracksKey = tracks
+    this.choiceKey = key
+    if (newTracks) {
       var ts = document.querySelectorAll('[data-colour-tracks]')
       for (var t = 0; t < ts.length; t++) ts[t].removeAttribute('data-colour-tracks')
     }
-    this.tracksKey = tracks
-    if (this.choiceKey === undefined || this.choiceKey === key) {
-      this.choiceKey = key
-      return
+    if (newChoice) {
+      var els = document.querySelectorAll('[data-colour]')
+      for (var i = 0; i < els.length; i++) if (!els[i].closest('.thimble-colour-mount,.thimble-colour-menu')) els[i].removeAttribute('data-colour')
+      if (this.givenBy !== key) {
+        this.given = null
+        this.givenBy = null
+      }
     }
-    this.choiceKey = key
-    var els = document.querySelectorAll('[data-colour]')
-    for (var i = 0; i < els.length; i++) if (!els[i].closest('.thimble-colour-mount,.thimble-colour-menu')) els[i].removeAttribute('data-colour')
-    if (this.givenBy !== key) {
-      this.given = null
-      this.givenBy = null
-    }
+    if (first || newTracks || newChoice) stampParts()
   }
   Control.prototype.changed = function () {
     this.forget()
@@ -3132,6 +3136,69 @@
     }, 0)
   }
 
+  // ---------------------------------------------------------------- the bars of the kit's parts
+  // Each part of the kit that draws records (the table, the transcript, the record, the cards, the timeline) colors
+  // them by the page's Color by, mounted before or after it, unless it is given `colour` (or `color`, the same option):
+  // false for none, or an object with Color by's calls to draw with. A part writes a record's attributes with
+  // bars.attr(record) as it draws, and keeps them itself: when Color by's choices change, the control takes every
+  // data-colour off the page (forget) and has each part stamp the elements it drew again from their own records
+  // (bars.watch), so the page draws again only its own markup, and a part's folds and scroll stay. A value turned off
+  // or recolored changes no attribute: the bridge draws the bars again from the hook.
+  var stampers = [] // [element, fn]: a part's element in the page and how it stamps its records again
+  function stampParts() {
+    stampers = stampers.filter(function (s) {
+      return s[0].isConnected
+    })
+    for (var i = 0; i < stampers.length; i++) safe(stampers[i][1])
+  }
+  var STAMP = /\s(data-colour(?:-tracks)?)="([^"]*)"/g
+  var UNESC = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" }
+  // an element's data-colour and data-colour-tracks set as `html` (what attr gives) writes them, each written only when
+  // it differs, so stamping what is already there changes nothing the observers hear
+  function stampAs(node, html) {
+    var want = { 'data-colour': null, 'data-colour-tracks': null }
+    var m
+    STAMP.lastIndex = 0
+    while ((m = STAMP.exec(html)))
+      want[m[1]] = m[2].replace(/&(?:amp|lt|gt|quot|#39);/g, function (e) {
+        return UNESC[e]
+      })
+    for (var name in want) {
+      var now = node.getAttribute(name)
+      if (want[name] == null) {
+        if (now != null) node.removeAttribute(name)
+      } else if (now !== want[name]) node.setAttribute(name, want[name])
+    }
+  }
+  /** a part's bars, from its options (above): `off` with `colour: false`; colour() the Color by they follow now, or
+   *  null; attr(record) a record's attributes; stamp(el, record) an element's set again; watch(element, fn), called at
+   *  each draw, has fn() stamp the part's elements again on each change of the choices while the element is in the
+   *  page */
+  function bars(opts) {
+    var given = opts && opts.colour !== undefined ? opts.colour : opts ? opts.color : undefined
+    var b = {
+      off: given === false,
+      colour: function () {
+        if (given === false) return null
+        if (given && typeof given === 'object') return given
+        return control ? control.api : null
+      },
+      attr: function (record) {
+        var c = b.colour()
+        return c && typeof c.attr === 'function' ? safe(function () { return String(c.attr(record) || '') }, '') : ''
+      },
+      stamp: function (node, record) {
+        stampAs(node, b.attr(record))
+      },
+      watch: function (node, fn) {
+        if (b.off || !node) return
+        for (var i = 0; i < stampers.length; i++) if (stampers[i][1] === fn) return
+        stampers.push([node, fn])
+      },
+    }
+    return b
+  }
+
   // ---------------------------------------------------------------- what the page holds
   function api(c) {
     var out = {
@@ -3363,7 +3430,9 @@
   // card escapes, or {html} for markup the page made, such as a key chip; `chips` are words, each a neutral chip. `ref`
   // is the record's data-anchor. `record` hands the record to Color by (colour.attr), so the bridge draws its value's
   // color as the bar on the card's left edge, and with several choices a band per choice there, in their order, a
-  // label's from its mark on `ref`: a card takes no color of its own. `active` marks the chosen card,
+  // label's from its mark on `ref`: a card takes no color of its own. It keeps its bars as Color by changes: the kit
+  // keeps its record by its data-thimble-card and stamps the cards on the page again from their records (cards), and
+  // `colour: false` gives it none. `active` marks the chosen card,
   // `act: false` a card a click does nothing on, and `attrs` ({name: value}) gives it more attributes, such as a key the
   // page's click reads; a `class` there is added to the card's own. (thimble.card is a card type's stored data, in a
   // card's frame: viewer_bridge.js.)
@@ -3376,13 +3445,52 @@
   function cardPart(v, cls) {
     return hasPart(v) ? '<div class="' + cls + '">' + cardText(v) + '</div>' : ''
   }
+  // The cards' records by their data-thimble-card, [record, bars]. Each change of Color by's choices stamps the cards
+  // on the page again and drops the records whose card has left it; so does a sweep once more cards were made than
+  // `cardsRoom`. A card made since the last sweep is kept though it is not on the page yet, as a page may add its html
+  // after a fetch.
+  var cards = new Map()
+  var cardN = 0
+  var cardsSwept = 0 // the last card made before the last sweep
+  var CARDS_ROOM = 2000
+  var cardsRoom = CARDS_ROOM
+  var sweepTimer = null
+  function sweepCards(stamp) {
+    if (!cards.size) return
+    var els = document.querySelectorAll('[data-thimble-card]')
+    var live = {}
+    for (var i = 0; i < els.length; i++) {
+      var n = Number(els[i].getAttribute('data-thimble-card'))
+      var kept = cards.get(n)
+      if (!kept) continue
+      live[n] = true
+      if (stamp) stampAs(els[i], kept[1].attr(kept[0]))
+    }
+    cards.forEach(function (_, k) {
+      if (!live[k] && k <= cardsSwept) cards.delete(k)
+    })
+    cardsSwept = cardN
+    cardsRoom = Math.max(CARDS_ROOM, cards.size * 2)
+  }
+  stampers.push([document.documentElement, function () {
+    sweepCards(true)
+  }])
   /** a record as a card (above): thimble.recordCard({ref, record, key, title, meta, chips, body, foot, active, act,
-   *  attrs}) gives its html */
+   *  attrs, colour}) gives its html */
   thimble.recordCard = function (o) {
     o = o || {}
     var cls = 'thimble-card' + (o.act === false ? '' : ' thimble-card-act') + (o.active ? ' active' : '')
     var attrs = hasPart(o.ref) ? ' data-anchor="' + esc(o.ref) + '"' : ''
-    if (o.record != null && control) attrs += control.api.attr(o.record)
+    var b = bars(o)
+    if (o.record != null && !b.off) {
+      cards.set(++cardN, [o.record, b])
+      attrs += ' data-thimble-card="' + cardN + '"' + b.attr(o.record)
+      if (cards.size > cardsRoom && sweepTimer == null)
+        sweepTimer = setTimeout(function () {
+          sweepTimer = null
+          sweepCards(false)
+        }, 0)
+    }
     var extra = o.attrs || {}
     for (var name in extra) {
       // a name an attribute can have, never an event handler's
@@ -3424,6 +3532,8 @@
     onColour: function (fn) {
       colourFns.push(fn)
     },
+    // a part's bars, from its `colour` or `color` option (the bars of the kit's parts, above)
+    bars: bars,
     part: function (p) {
       parts.push(p)
       checkReset()

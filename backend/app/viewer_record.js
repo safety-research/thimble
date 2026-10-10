@@ -11,9 +11,11 @@
 //   thimble.record({ mount, value, ref, open, find, colour })   value: an object, a list, a plain value, or JSON text;
 //                                                              open: the levels of nested values open at first (2);
 //                                                              find: words whose matches are highlighted and opened;
-//                                                              colour: Color by, whose bar the record takes
+//                                                              colour (or color): the Color by whose bar the record
+//                                                              takes, the page's by default; false for none
 //
-// Called again on the same mount with the same ref, it keeps what the analyst opened and folded.
+// Called again on the same mount with the same ref, it keeps what the analyst opened and folded. Its bar follows Color
+// by as it changes, with nothing drawn again.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -122,6 +124,13 @@
     this.q = ''
     this.args = null
     this.hits = 0
+    this.bars = null
+    this.drawn = null // the value as last drawn
+    // Color by's choices changed: the record's bar stamped again from its value
+    this.restamp = function () {
+      var root = self.mount.firstElementChild
+      if (root && root.classList.contains('thimble-record') && self.bars) self.bars.stamp(root, self.drawn)
+    }
     mount.addEventListener('click', function (e) {
       self.click(e)
     })
@@ -262,7 +271,9 @@
         for (var b in this.beyond) this.more[b] = true
       }
     }
-    var colour = args.colour && typeof args.colour.attr === 'function' ? ctl.safe(function () { return args.colour.attr(v) }, '') || '' : ''
+    this.bars = shared.bars(args)
+    this.drawn = v
+    var colour = this.bars.attr(v)
     var text = ''
     try {
       text = typeof v === 'string' ? v : JSON.stringify(v) || ''
@@ -277,6 +288,7 @@
       (ref ? '<div class="thimble-record-cite" data-thimble-chrome><button type="button" class="chip chip-tone-evidence chip-act" data-record-file title="' + esc(ref) + '"><span class="chip-text">' + esc(citeLabel(ref)) + '</span></button></div>' : '') +
       body +
       '</div>'
+    this.bars.watch(this.mount, this.restamp)
   }
   // a click on a key, Show more or less, Show N more or the citation; the focus stays on what was clicked
   Record.prototype.click = function (e) {

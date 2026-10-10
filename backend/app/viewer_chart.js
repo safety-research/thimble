@@ -15,13 +15,13 @@
 // style of lib/vizTheme read from the page's own tokens, the fixes of lib/chartDefaults, the fitting to the box). The
 // page names "vega-embed" in view.json's libs, which brings vega and vega-lite with it.
 //
-// Beside thimble.chart's options it takes three of its own: `colour`, Color by, whose colours the group or series
-// column's values take, in place of a legend, since Color by's chips are the key (gray with Off or for a value turned
-// off); `onPick(row)`, a mark clicked, with its row; and `height`, the plot's height in px (at most ROW_MOST a row for
-// rows named down its side). Called again on the same mount it replaces the chart, so a page draws it in its draw():
-// the same chart again is kept as it is, and a mount asks thimble one call at a time, the latest. A chart with no rows
-// draws none, and a wrong call says what is wrong in the chart's place, as a card's chart does, in a line as tall as
-// the chart it replaces.
+// Beside thimble.chart's options it takes three of its own: `colour` (or `color`), Color by, whose colours the group or
+// series column's values take, in place of a legend, since Color by's chips are the key (gray with Off or for a value
+// turned off); `onPick(row)`, a mark clicked, with its row; and `height`, the plot's height in px (at most ROW_MOST a
+// row for rows named down its side). Called again on the same mount it replaces the chart, so a page draws it in its
+// draw(): the same chart again is kept as it is, and a mount asks thimble one call at a time, the latest. A chart with
+// no rows draws none, and a wrong call says what is wrong in the chart's place, as a card's chart does, in a line as
+// tall as the chart it replaces.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -29,7 +29,7 @@
   var thimble = window.thimble
   var ctl = kit.shared.controls
 
-  var OWN = { colour: true, onPick: true, height: true } // the kit's own options; the others are thimble.chart's
+  var OWN = { colour: true, color: true, onPick: true, height: true } // the kit's own options, the rest thimble.chart's
   var KEPT = 32 // the specs kept, by what they were asked with, so drawing the same chart again asks thimble nothing
   var SCHEMA = 'https://vega.github.io/schema/vega-lite/v6.json' // kernel_thimble.VEGALITE_SCHEMA
   var ROW_MOST = 36 // px a row named down the y axis takes at most, so a bar chart of a few bars keeps thin bars
@@ -146,7 +146,8 @@
   // the spec as the page asked: Color by's colours, the plot's height, with ROW_MOST px a row at most
   function finished(spec, options) {
     var out = spec
-    if (options.colour && typeof options.colour.colourOf === 'function') out = coloured(out, options.colour)
+    var colour = options.colour !== undefined ? options.colour : options.color
+    if (colour && typeof colour.colourOf === 'function') out = coloured(out, colour)
     var h = Number(options.height)
     var rows = h > 0 ? rowsOf(out) : 0
     if (rows) h = Math.min(h, rows * ROW_MOST)
