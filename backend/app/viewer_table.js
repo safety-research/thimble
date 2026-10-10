@@ -75,9 +75,12 @@
     return v == null || v === '' || (typeof v === 'number' && !isFinite(v))
   }
 
+  var HOSTED = typeof WeakMap === 'function' ? new WeakMap() : null // a mount -> the table it holds, which a new one there retires
+
   function Table(opts) {
     var self = this
     this.mount = ctl.el(opts.mount)
+    this.dead = false
     this.name = 'table:' + (opts.key || (this.mount && this.mount.id) || 'table')
     this.columns = (Array.isArray(opts.columns) ? opts.columns : [])
       .filter(function (c) {
@@ -113,6 +116,10 @@
     this.chosen = null // the chosen row's record
     this.colourKey = ''
     if (!this.mount) return
+    // a table made again on the same mount takes its place: the one before hears nothing more
+    var before = HOSTED && HOSTED.get(this.mount)
+    if (before) before.retire()
+    if (HOSTED) HOSTED.set(this.mount, this)
     this.mount.classList.add('thimble-table-host')
     if (!this.mount.hasAttribute('tabindex')) this.mount.tabIndex = 0
     this.mount.innerHTML =
@@ -163,37 +170,42 @@
         if (frame != null) return
         frame = requestAnimationFrame(function () {
           frame = null
-          self.window()
+          if (!self.dead) self.window()
         })
       },
       { passive: true },
     )
     if (typeof ResizeObserver === 'function') {
       var h = -1
-      new ResizeObserver(function () {
-        if (self.mount.clientHeight === h) return
+      this.resized = new ResizeObserver(function () {
+        if (self.dead || self.mount.clientHeight === h) return
         h = self.mount.clientHeight
         self.window()
       }).observe(this.mount)
     }
     // Color by changed: the rows' bars, the chips' counts and the strip's colours drawn again
     shared.onColour(function () {
-      if (self.colourSig() !== self.colourKey) self.recolour(true)
+      if (!self.dead && self.colourSig() !== self.colourKey) self.recolour(true)
     })
     // a label colored by reaches the rows as they come into view: the strip's colours follow
     var marksFrame = null
     thimble.onMarks(function () {
       var c = shared.colour()
-      if (!c || !c.label || marksFrame != null) return
+      if (self.dead || !c || !c.label || marksFrame != null) return
       marksFrame = requestAnimationFrame(function () {
         marksFrame = null
         self.colourStrip()
       })
     })
+    // the columns of numbers and times fitted again once the page's faces have loaded, which are wider than the fallback
+    if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function')
+      document.fonts.ready.then(function () {
+        if (!self.dead) self.layout()
+      })
     // Reset puts back the sort the table opens with
     this.checkReset = shared.part({
       changed: function () {
-        return !self.sameSort(self.sort, self.initial)
+        return !self.dead && !self.sameSort(self.sort, self.initial)
       },
       reset: function () {
         delete ctl.kept(self.name).sort
@@ -203,6 +215,11 @@
       },
     })
     this.draw()
+  }
+  // the table made again on its mount: it hears nothing more and draws nothing more
+  Table.prototype.retire = function () {
+    this.dead = true
+    if (this.resized) this.resized.disconnect()
   }
   // a sort as given, {by, desc}, for a column that sorts; null for none
   Table.prototype.sortOf = function (s) {
@@ -240,7 +257,7 @@
   // equal share of what is left
   Table.prototype.layout = function () {
     var self = this
-    var charW = this.charW || (this.charW = measureChar(this.mount) || CHAR)
+    var charW = measureChar(this.mount) || CHAR
     var sample = this.all.length > SAMPLE ? this.all.slice(0, SAMPLE) : this.all
     // a column of times shows their seconds when one of them has any, so that every time in it reads alike
     this.columns.forEach(function (c) {
@@ -323,7 +340,7 @@
   // Everything drawn again: the head, the rows that show and those near the view, the chips' counts, the strip and the
   // search's rows
   Table.prototype.draw = function () {
-    if (!this.mount) return
+    if (!this.mount || this.dead) return
     var self = this
     this.shown = this.order()
     this.layout()

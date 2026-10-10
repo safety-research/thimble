@@ -180,7 +180,8 @@ element where the page draws it), `refs` (each row's ref, which the labels' lane
 the loupe's line starts with) and `records` (each row's record, which the lanes of fields past the first choice read).
 For a list of elements the loupe reads each record's `<time>` and its text, or `preview(element)`, and its
 `data-anchor`. Call `strip` again with the same list when they change; rows given again unchanged, as a list drawn
-again on each scroll gives them, are not measured again.
+again on each scroll gives them, are not measured again. The view checks count each row given with its ref as shown,
+since the list anchors a row once it draws it.
 
 The tracks show colors only on a list of the records the color marks, and only where they reflect the whole list:
 Color by's own `strip`, a list given `rows`, or another list whose elements are all of its records, which says so

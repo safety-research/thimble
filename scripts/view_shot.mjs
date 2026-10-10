@@ -216,8 +216,10 @@ async function paintedCount({ on, off, targets, tol }) {
 // What the page shows at the end, counted once per ref on the outermost visible element that carries it (not a canvas,
 // which takes no mark, and not one the bridge hid or dimmed for the filter): `records` and `units` anchored, `due` the
 // refs whose `marks` entry has a bar, other than those whose outermost element is data-anchor-unmarked (the page draws
-// the labels' colours on it itself), `drawn` those of them whose element carries the bridge's mark, and `unkept` the
-// records shown that the filter does not keep, other than those inside a unit it keeps. Runs in the frame.
+// the labels' colours on it itself), `drawn` those of them whose element carries the bridge's mark, `unkept` the
+// records shown that the filter does not keep, other than those inside a unit it keeps, and `held` the records the view
+// kit's lists that draw only the rows near their view hold, each row anchored as it is drawn (thimble.__held). Runs in
+// the frame.
 function shownCounts({ marks, record }) {
   const RECORD = new RegExp(record)
   const UNIT = /^view:[^/]+\/.+/
@@ -244,7 +246,7 @@ function shownCounts({ marks, record }) {
       own: (!was || was.own) && top.hasAttribute('data-anchor-unmarked'),
     })
   }
-  const out = { records: 0, units: 0, due: 0, drawn: 0, unkept: 0 }
+  const out = { records: 0, units: 0, due: 0, drawn: 0, unkept: 0, held: 0 }
   for (const [ref, { drawn, held, own }] of seen) {
     const record = RECORD.test(ref)
     if (record) out.records++
@@ -255,6 +257,11 @@ function shownCounts({ marks, record }) {
       if (drawn) out.drawn++
     }
     if (record && !held && !(m && m.keep)) out.unkept++
+  }
+  try {
+    out.held = window.thimble && typeof window.thimble.__held === 'function' ? Number(window.thimble.__held()) || 0 : 0
+  } catch {
+    out.held = 0
   }
   return out
 }

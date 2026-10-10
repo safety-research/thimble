@@ -4060,7 +4060,8 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
                    shots: list[dict[str, Any]], switch: bool = True) -> tuple[list[str], list[str]]:
     """(problems, notes) of labels in the page, from what each loaded state shows at its end (view_shot.mjs `shown`),
     for a view of files that split into records (lined). It fails when no record or unit is shown anchored; when fewer
-    than one in ANCHORED_SHARE of the records the reader answered are shown anchored and no unit is; when a record or
+    than one in ANCHORED_SHARE of the records the reader answered are shown anchored, or held by the view kit's lists
+    that draw only the rows near their view (view_shot.mjs `held`), and no unit is; when a record or
     unit the test label marks is shown without its mark; and when a picture of the page shows the label's colour on
     fewer of the marked records in view than it checked (view_shot.mjs `painted`), as when a box that hides overflow
     cuts the bar, or for an element with data-anchor-unmarked that draws no colour of its own. A corpus view, not a file
@@ -4084,7 +4085,10 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
         return [_hint("view-no-anchors", slug=view["slug"])], []
     fetched = max([int(s.get("fetched_records") or 0) for s in shots if s.get("state", "overview") in ("overview", "detail")]
                   or [0])
-    if not units and records < max(1, fetched // ANCHORED_SHARE):
+    # a list that draws only the rows near its view, such as the kit's table, anchors each row it draws: the rows it
+    # holds count as shown
+    held = max(int(x.get("held") or 0) for _, x in seen)
+    if not units and max(records, held) < max(1, fetched // ANCHORED_SHARE):
         problems.append(_hint("view-few-anchors", fetched=fetched, records=records))
     for name, x in seen:
         due, drawn = int(x.get("due") or 0), int(x.get("drawn") or 0)

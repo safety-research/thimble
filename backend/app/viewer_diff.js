@@ -9,11 +9,12 @@
 // green's with +, and in a changed line the words that changed in a stronger tint. Side by side (`mode: 'split'`) the
 // older version is on the left and the newer on the right, a changed line beside the line it became; inline
 // (`'inline'`) a changed line is the old line over the new one. `'auto'`, the default, is side by side in a mount at
-// least SPLIT_PX wide and inline in a narrower one, such as the side panel. Unchanged lines more than `context` lines
-// from a change fold to one line, "120 unchanged lines", with Show more, and Show less folds them again; the folded
-// lines stay in the page, hidden, so thimble.search finds them and opens their fold. Line numbers and signs are drawn
-// by the style alone, so they are neither found, copied nor quoted. `ref` is the newer version's record, the diff's
-// data-anchor: a label marks it, a ⌘-click asks about it and a citation's quote is found in it.
+// least SPLIT_PX wide and inline in a narrower one, such as the side panel, or where one version is empty. Unchanged
+// lines more than `context` lines from a change fold to one line, "120 unchanged lines", with Show more, and Show less
+// folds them again; the folded lines stay in the page, hidden, so thimble.search finds them and opens their fold. Line
+// numbers and signs are drawn by the style alone, so they are neither found, copied nor quoted. `ref` is the newer
+// version's record, the diff's data-anchor: a label marks it, a ⌘-click asks about it and a citation's quote is found
+// in it.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -277,9 +278,12 @@
     return out
   }
 
+  var HOSTED = typeof WeakMap === 'function' ? new WeakMap() : null // a mount -> the diff it holds, which a new one there retires
+
   function Diff(opts) {
     var self = this
     this.mount = ctl.el(opts.mount)
+    this.dead = false
     this.before = opts.before
     this.after = opts.after
     this.mode = opts.mode === 'split' || opts.mode === 'inline' ? opts.mode : 'auto'
@@ -288,31 +292,43 @@
     this.ref = opts.ref != null ? String(opts.ref) : null
     this.opened = {} // a fold's number -> true while it shows its lines
     if (!this.mount) return
+    // a diff made again on the same mount takes its place: the one before draws nothing more
+    var before = HOSTED && HOSTED.get(this.mount)
+    if (before) before.retire()
+    if (HOSTED) HOSTED.set(this.mount, this)
     this.mount.classList.add('thimble-diff-host')
     this.mount.addEventListener('click', function (e) {
       var b = e.target.closest && e.target.closest('[data-fold-button]')
-      if (b && self.mount.contains(b)) self.toggle(Number(b.getAttribute('data-fold-button')))
+      if (!self.dead && b && self.mount.contains(b)) self.toggle(Number(b.getAttribute('data-fold-button')))
     })
     // the search goes to a match in a fold: the fold opens
     this.mount.addEventListener('thimble-unfold', function (e) {
       var f = e.target && e.target.getAttribute ? e.target.getAttribute('data-fold') : null
-      if (f != null) self.toggle(Number(f), true)
+      if (!self.dead && f != null) self.toggle(Number(f), true)
     })
     if (typeof ResizeObserver === 'function') {
-      new ResizeObserver(function () {
-        if (self.mode === 'auto' && self.shown !== self.resolved()) self.draw()
-      }).observe(this.mount)
+      this.resized = new ResizeObserver(function () {
+        if (!self.dead && self.mount.isConnected && self.mode === 'auto' && self.shown !== self.resolved()) self.draw()
+      })
+      this.resized.observe(this.mount)
     }
     this.draw()
   }
-  // the mode drawn: `auto` side by side in a wide mount, inline in a narrow one
+  // the diff made again on its mount: it draws nothing more
+  Diff.prototype.retire = function () {
+    this.dead = true
+    if (this.resized) this.resized.disconnect()
+  }
+  // the mode drawn: `auto` side by side in a wide mount, inline in a narrow one or when one version is empty (a page
+  // created or deleted), which leaves one side nothing to show
   Diff.prototype.resolved = function () {
     if (this.mode !== 'auto') return this.mode
+    if (!linesOf(this.before).length || !linesOf(this.after).length) return 'inline'
     var w = this.mount.clientWidth
     return !w || w >= SPLIT_PX ? 'split' : 'inline'
   }
   Diff.prototype.draw = function () {
-    if (!this.mount) return
+    if (!this.mount || this.dead) return
     var got = rows(this.before, this.after)
     var list = got.rows
     var mode = this.resolved()

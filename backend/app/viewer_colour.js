@@ -3270,6 +3270,21 @@
       return out
     },
   })
+  // How many records the page's lists that draw only the rows near their view hold, for the view's checks
+  // (view_shot.mjs `held`): the refs of every row given to a strip with `rows` (colour.strip, the kit's table), each
+  // anchored once it is drawn
+  Object.defineProperty(thimble, '__held', {
+    value: function () {
+      var refs = new Set()
+      var all = allStrips()
+      for (var i = 0; i < all.length; i++) {
+        var s = all[i]
+        if (!s.rows || !s.refs || !s.el.isConnected) continue
+        for (var k = 0; k < s.refs.length; k++) if (s.refs[k] != null && s.refs[k] !== '') refs.add(String(s.refs[k]))
+      }
+      return refs.size
+    },
+  })
 
   /** Color by, in the view's top row (see the top of this file). Called again, it replaces the control. */
   thimble.colorBy = function (opts) {

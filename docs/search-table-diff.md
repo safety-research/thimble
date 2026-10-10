@@ -28,9 +28,11 @@ in the theme's tokens, light and dark. Their styles are the kit's (`thimble-sear
   empties it.
 - The list's strip (the kit's scrollbar, [color.md](color.md)) gets a lane of ticks at its left, one per match, in the
   ink as Files' find draws them, and a click on a tick goes to that match. The loupe marks the records that hold one.
-  Without Color by the list still gets the kit's strip, with that lane alone while something is found.
+  Without Color by the list gets the kit's strip all the same: a plain scrollbar, with that lane alone while something
+  is found.
 - It finds the text a record shows, through its inline elements (a phrase across a link or a bold word is one
-  match), and never in the kit's controls, the page's own wording around a record (`data-thimble-chrome`) or a button.
+  match), and never in the kit's controls, the page's own wording around a record (`data-thimble-chrome`) or an
+  action button (`.btn`).
 - Reset empties the box. The search hides nothing: a page that wants to keep only the matching records asks
   `search.has(text)`, or passes `search.text` with its fetch for its reader to filter by, in `onChange`.
 
@@ -52,7 +54,7 @@ const search = thimble.search({ mount: '#search', in: '#list', placeholder: 'Sea
 | member | what it gives |
 |---|---|
 | `text` | the text searched for, `''` for none |
-| `count`, `at` | how many matches there are, and the current one's place among them from 0 (-1 for none) |
+| `count`, `at` | how many matches there are (20,000 at most, the box then saying "+"), and the current one's place among them from 0 (-1 for none) |
 | `set(text)` | the box's text set from the page, as if typed |
 | `step(dir)`, `go(k)` | the next match (1) or the one before (-1), and match `k` |
 | `has(text)` | whether a text holds what is searched for, case ignored; `true` while the box is empty |
@@ -82,11 +84,12 @@ stays at the top and hairline rows, one line each with a cell's overflow cut by 
 
 - It draws only the rows near its view and keeps those it drew as it scrolls, so a table of 50,000 rows opens and
   sorts in a fraction of a second. `mount` scrolls; the page gives it a height (`flex: 1; min-height: 0` in a column).
-- A click on a column's head sorts by it: numbers and times the largest first, text from A; a second click the other
-  way. The head shows the sort with an arrow. Rows with no value come last either way, and ties keep the rows' order.
+- A click on a column's head (or Enter on it) sorts by it: numbers and times the largest first, text from A; a second
+  click the other way. The head shows the sort with an arrow. Rows with no value come last either way, and ties keep the rows' order.
   thimble keeps the sort per view, and Reset puts back the one it opens with.
 - Each row is a record: its `data-anchor` is the row's `ref`. A label marks it, a ⌘-click asks about it, and
-  `table.reveal(ref)` scrolls a cited row to the middle and highlights it for a moment.
+  `table.reveal(ref)` scrolls a cited row to the middle and highlights it for a moment. The view checks count every row
+  the table holds as shown, since it anchors each row it draws.
 - With the page's Color by, a row's value takes the bar on its left edge, the chips count every row (not only those
   drawn) while a field is the color, and the strip shows every row's color, scrolled to or not. The table draws its
   rows again when Color by changes.
@@ -147,9 +150,10 @@ against the one before or a memory file rewritten:
 - Side by side (`mode: 'split'`) the older version is on the left and the newer on the right, a changed line level
   with the line it became. Inline (`'inline'`) a changed line is the old line over the new one, each with both line
   numbers. `'auto'`, the default, is side by side in a mount 640 px wide or more, and inline in a narrower one such as
-  the side panel.
+  the side panel or when one version is empty, as for a page created.
 - Unchanged lines more than `context` lines from a change fold to one line, "120 unchanged lines", with Show more;
-  Show less folds them again. The folded lines stay in the page, so the search finds them and opens their fold.
+  Show less folds them again. A stretch of fewer than 4 lines shows. The folded lines stay in the page, so the search
+  finds them and opens their fold.
 - The line numbers and the signs are drawn by the style alone, so the search never finds them and a copy or a quote
   holds the text alone.
 - `ref` names the newer version's record, which the diff carries as its `data-anchor`: a label marks it, a ⌘-click

@@ -58,10 +58,10 @@ const CHAT = [
   { ref: 'chat.jsonl#L4', who: 'gale', text: 'lunch?' },
 ]
 const chatHtml = () =>
-  CHAT.map((m) => `<div class="msg" data-anchor="${m.ref}"><b data-thimble-chrome>${m.who}</b> <span>${m.text}</span><button>gale</button></div>`).join('')
+  CHAT.map((m) => `<div class="msg" data-anchor="${m.ref}"><b data-thimble-chrome>${m.who}</b> <span>${m.text}</span><button class="btn btn-ghost">gale</button></div>`).join('')
 
 describe('the search', () => {
-  test('alone on a list: finds the text case ignored, across inline elements, never in a head, a button or a control; steps and wraps', async () => {
+  test('alone on a list: finds the text case ignored, across inline elements, never in a head, an action button or a control; steps and wraps', async () => {
     await load(`<div class="top"><span id="search"></span></div><div id="list" style="overflow-y:auto">${chatHtml()}</div>`)
     const w = win()
     w.changes = []
@@ -73,7 +73,7 @@ describe('the search', () => {
     expect([...doc().querySelectorAll('.thimble-search-step')].every((b) => (b as HTMLButtonElement).hidden)).toBe(true)
     await type('gale')
     // "The gale" (its word in <i>), then "GALE" and "gale" in one message; not the speaker "gale" (the page's head) nor
-    // the button's text
+    // the action button's text
     expect(w.search.count).toBe(3)
     expect(w.search.at).toBe(0)
     expect(texts('.thimble-search-count')).toEqual(['1 of 3'])
@@ -225,6 +225,14 @@ describe('the table', () => {
     expect(first.hasAttribute('data-colour')).toBe(false)
     expect([...first.children].map((c) => c.textContent)).toEqual(['ana', 'Note 0', '0', '2026-04-01 09:00'])
     expect((doc().querySelector('.thimble-table-body') as HTMLElement).style.height).toBe(5000 * 28 + 'px')
+    // the view's checks count every row it holds as shown, since it anchors each one it draws
+    expect(w.thimble.__held()).toBe(5000)
+    // a table made again on the same mount takes its place; the one before draws nothing more there
+    const before = w.table
+    w.eval(`window.table = thimble.table({ mount: '#list', rows: window.MAIL.slice(0, 3), columns: ${JSON.stringify(COLUMNS)} })`)
+    before.set(w.MAIL)
+    expect(doc().querySelectorAll('.thimble-table-row')).toHaveLength(3)
+    w.table.set(w.MAIL)
     // numbers sort as numbers, the largest first; the row with no size last
     ;(doc().querySelector('[data-col="size"]') as HTMLElement).click()
     expect(w.table.sort).toEqual({ by: 'size', desc: true })
@@ -272,6 +280,7 @@ describe('the table', () => {
     await wait()
     expect(w.table.rows.length).toBe(3333)
     expect(w.table.rows.some((r: any) => r.from === 'bo')).toBe(false)
+    expect(w.thimble.__held()).toBe(3333)
     // a click opens a row in the side panel with its details; the page hears it
     row(1).click()
     expect(w.side.isOpen).toBe(true)
@@ -390,7 +399,10 @@ describe('the diff', () => {
     expect(rows.map((r) => [...r.querySelectorAll('.thimble-diff-no')].map((n) => n.getAttribute('data-n')))).toEqual([['1', '1'], ['2', '2'], ['3', null], [null, '3'], ['4', '4']])
     // one line of context: notes 1 to 19 fold
     expect(texts('.thimble-diff-gap .thimble-diff-n')).toEqual(['19 unchanged lines'])
-    // a page created: every line added; the same text: one fold of it all
+    // a page created: every line added, inline even where `auto` would set the versions side by side; the same text:
+    // one fold of it all
+    const created = w.thimble.diff({ mount: doc().createElement('div'), before: null, after: 'one' })
+    expect(created.mode).toBe('inline')
     w.diff.set({ before: null, after: 'one\ntwo\n' })
     expect(texts('.thimble-diff-ins')).toEqual(['one', 'two'])
     expect(w.diff.added).toBe(2)
@@ -400,6 +412,11 @@ describe('the diff', () => {
     expect(texts('.thimble-diff-gap .thimble-diff-n')).toEqual(['26 unchanged lines'])
     w.diff.set({ before: '', after: '' })
     expect(texts('.thimble-diff-empty')).toEqual(['Both versions are empty'])
+    // a diff made again on the same mount takes its place: the one before draws nothing more there
+    const again = w.thimble.diff({ mount: '#d', before: 'a', after: 'b', mode: 'inline' })
+    w.diff.set({ before: 'x', after: 'y' })
+    expect(texts('.thimble-diff-tx')).toEqual(['a', 'b'])
+    expect(again.removed).toBe(1)
   })
 
   test('long texts align quickly: a change in the middle of thousands of lines, and two texts with little in common', async () => {
