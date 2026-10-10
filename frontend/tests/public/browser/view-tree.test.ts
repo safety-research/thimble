@@ -123,7 +123,7 @@ tree.reveal('pkg0/mod0/a_module_whose_name_runs_on_far_past_the_width_of_the_tre
       [...document.querySelectorAll('.thimble-tree-row')].map((r) => {
         const box = (e: Element | null) => (e ? e.getBoundingClientRect() : null)
         const name = r.querySelector('.thimble-tree-name')!
-        return { name: box(name)!, cut: name.scrollWidth > name.clientWidth, n: box(r.querySelector('.thimble-tree-n')), end: box(r.querySelector('.thimble-tree-end')), row: box(r)!, text: name.textContent }
+        return { name: box(name)!, cut: name.scrollWidth > name.clientWidth, n: box(r.querySelector('.thimble-tree-n')), end: box(r.querySelector('.thimble-tree-end')), mix: box(r.querySelector('.thimble-mix')), row: box(r)!, text: name.textContent }
       }),
     )
     assert.ok(rows.length > 10)
@@ -134,6 +134,10 @@ tree.reveal('pkg0/mod0/a_module_whose_name_runs_on_far_past_the_width_of_the_tre
     }
     const long = rows.find((r) => r.text!.startsWith('a_module'))!
     assert.equal(long.cut, true, 'the long name is cut with an ellipsis')
+    // short of room, the name gives way down to its first letters, then the mix; the number stays whole
+    assert.ok(long.name.width >= 36, `the long name keeps its first letters: ${long.name.width} px`)
+    assert.ok(long.mix!.width < 32, `the mix gives way: ${long.mix!.width} px`)
+    assert.equal(rows.find((r) => r.text === 'file0.py')!.mix!.width, 32, 'a row with room has the whole mix')
     await frame().locator('.thimble-tree-row.active .thimble-tree-name').hover()
     await page.waitForTimeout(150)
     const tip = await frame().evaluate(() => (document.querySelector('.thimble-tip') as HTMLElement | null)?.textContent)
@@ -207,6 +211,13 @@ files.push({ key: 'pkg7/mod3/needle.py', n: 1 }, { key: 'pkg31/needle_two.py', n
 window.tree = thimble.tree({ mount: '#tree', split: '/', items: files, find: true, onPick: (n) => picks.push(n.key) })`)
     await frame().locator('.thimble-tree-input').fill('NEEDLE')
     await page.waitForTimeout(50)
+    // the focus ring, 1.5 px outside the box, is not cut by the edges the tree scrolls in
+    const room = await frame().evaluate(() => {
+      const b = document.querySelector('.thimble-tree-box')!.getBoundingClientRect()
+      const m = document.getElementById('tree')!.getBoundingClientRect()
+      return { left: b.left - m.left, top: b.top - m.top, right: m.right - b.right }
+    })
+    assert.ok(room.left >= 1.5 && room.top >= 1.5 && room.right >= 1.5, JSON.stringify(room))
     const rows = await drawn(frame)
     assert.deepEqual(rows.map((r) => r.name), ['pkg7', 'mod3', 'needle.py', 'pkg31', 'needle_two.py'])
     const marks = await frame().evaluate(() => [...document.querySelectorAll('.thimble-tree-hit')].map((m) => m.textContent))

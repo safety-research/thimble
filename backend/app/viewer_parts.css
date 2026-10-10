@@ -90,12 +90,13 @@
   color: var(--text-primary);
   font: 400 var(--text-sm) / 1.45 var(--font-body);
 }
-/* the find over the rows, which stays at the top as they scroll, as the kit's search box looks */
+/* the find over the rows, which stays at the top as they scroll, as the kit's search box looks; its padding keeps the
+   focus ring clear of the edges the tree scrolls in */
 .thimble-tree-find {
   position: sticky;
   top: 0;
   z-index: 2;
-  padding-bottom: 6px;
+  padding: 2px 2px 6px;
   background: var(--surface-card);
 }
 .thimble-tree-box {
@@ -213,9 +214,11 @@
 .thimble-tree-row[aria-expanded='true'] .thimble-tree-chev {
   transform: rotate(90deg);
 }
+/* in a row too narrow for all of it, the name gives way down to its first letters (its far larger shrink), then the
+   mix down to nothing, so that the number keeps its room */
 .thimble-tree-name {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 1000 auto;
+  min-width: 3em;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -228,16 +231,20 @@
 }
 .thimble-tree-end {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   margin-left: auto;
   padding-left: 4px;
 }
 .thimble-tree-end > .thimble-mix {
+  flex: 0 1 auto;
   width: 32px;
+  min-width: 0;
 }
 .thimble-tree-n {
+  flex: none;
   color: var(--text-tertiary);
   font: 400 var(--text-mono-sm) / 1 var(--font-mono);
   font-variant-numeric: tabular-nums;
