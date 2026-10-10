@@ -9,8 +9,11 @@
 // words that changed, folds the unchanged stretches with Show more and Show less, and draws side by side or inline; the
 // text (viewer_text.js, with the markdown parser of src/lib/kitMarkdown.ts) turns mentions into links that open their
 // record, shows raw HTML as text, takes every link's address off, and folds a long text with Show more.
+// The messages (viewer_messages.js) share a head between one author's messages that follow each other within five
+// minutes with the same parent on one day, and keep each message its own anchored element.
 // Layout (the highlights, the strip's ticks drawn, the table's rows as it scrolls, the diff's columns, the text's look
-// and its quotes) is tests/public/browser/view-data.test.ts and view-text.test.ts.
+// and its quotes) is tests/public/browser/view-data.test.ts and view-text.test.ts, and the messages' is
+// tests/public/browser/kit-messages.test.ts.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { build } from 'esbuild'
@@ -24,7 +27,7 @@ const script = (js: string) => `<script>${js.replace(/<\/script/gi, '<\\/script'
 const KIT =
   script(read('viewer_bridge.js')) +
   script(`window.__thimbleLabelOrder = ${read('label_order.json')}`) +
-  ['viewer_colour.js', 'viewer_controls.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_search.js', 'viewer_table.js', 'viewer_diff.js', 'viewer_record.js', 'viewer_range.js'].map((n) => script(read(n))).join('')
+  ['viewer_colour.js', 'viewer_controls.js', 'viewer_side.js', 'viewer_transcript.js', 'viewer_messages.js', 'viewer_search.js', 'viewer_table.js', 'viewer_diff.js', 'viewer_record.js', 'viewer_range.js'].map((n) => script(read(n))).join('')
 
 type Msg = { type: string; [k: string]: unknown }
 let dom: JSDOM
@@ -731,5 +734,214 @@ describe('the text', () => {
     const long = drawn(w.thimble.text.html(Array.from({ length: 300 }, (_, i) => `word${i}`).join(' '), { format: 'plain', fold: 2 }))
     expect(shown(long).length).toBeGreaterThan(150)
     expect(shown(long).length).toBeLessThan(260)
+  })
+})
+
+describe('the messages', () => {
+  // 23:30 on Thursday 27 August 2026, so that midnight comes half an hour in
+  const T = Date.UTC(2026, 7, 27, 23, 30) / 1000
+  const heads = () => [...doc().querySelectorAll('.thimble-msg')].map((e) => [e.getAttribute('data-anchor'), e.classList.contains('is-cont') ? 'same head' : 'head', e.classList.contains('is-reply') ? 'reply' : ''])
+
+  test('the grouping rule: one author, the same parent, within five minutes on one day share a head; anything else starts a new one', async () => {
+    await load('<div id="c"></div>')
+    const w = win()
+    w.eval('window.conv = thimble.messages({ mount: "#c" })')
+    w.conv.draw([
+      { ref: 'm#1', t: T, author: 'ana', text: 'one' },
+      { ref: 'm#2', t: T + 300, author: 'ana', text: 'five minutes on' },
+      { ref: 'm#3', t: T + 601, author: 'ana', text: 'five minutes and a second after the one before' },
+      { ref: 'm#4', t: T + 610, author: 'bo', text: 'another author' },
+      { ref: 'm#5', t: T + 620, author: 'bo', kind: 'event', icon: 'approve', said: 'approved it' },
+      { ref: 'm#6', t: T + 630, author: 'bo', text: 'after an event' },
+      { ref: 'm#7', t: T + 640, author: 'bo', parent: 'gone#1', text: 'another parent, which is not drawn' },
+      { ref: 'm#8', t: T + 650, author: 'bo', parent: 'gone#1', text: 'the same parent' },
+      { ref: 'm#9', t: T + 1790, author: 'cy', text: '23:59:50' },
+      { ref: 'm#10', t: T + 1810, author: 'cy', text: '00:00:10, another day' },
+      { ref: 'm#11', author: 'dee', text: 'no time' },
+      { ref: 'm#12', author: 'dee', text: 'no time either' },
+    ], { title: '# ferries' })
+    expect(heads()).toEqual([
+      ['m#1', 'head', ''], ['m#2', 'same head', ''], ['m#3', 'head', ''], ['m#4', 'head', ''], ['m#5', 'head', ''],
+      ['m#6', 'head', ''], ['m#7', 'head', ''], ['m#8', 'same head', ''], ['m#9', 'head', ''], ['m#10', 'head', ''],
+      ['m#11', 'head', ''], ['m#12', 'same head', ''],
+    ])
+    // a message under a shared head draws no head and no avatar, but stays its own record with its time
+    const second = doc().querySelector('[data-anchor="m#2"]')!
+    expect([second.querySelector('.thimble-msg-head'), second.querySelector('.avatar')]).toEqual([null, null])
+    expect(second.getAttribute('data-t')).toBe(String(T + 300))
+    expect(second.getAttribute('data-anchor-text')).toBe('five minutes on')
+    expect(texts('[data-anchor="m#1"] .thimble-msg-head')).toEqual(['ana23:30'])
+    expect(doc().querySelector('[data-anchor="m#1"] .thimble-msg-time')!.getAttribute('title')).toBe('2026-08-27 23:30:00')
+    // a date line opens each day; the header names the list and counts its messages and events
+    expect(texts('.thimble-msg-day')).toEqual(['Thu 27 Aug 2026', 'Fri 28 Aug 2026'])
+    expect(doc().querySelector('[data-anchor="m#10"]')!.previousElementSibling!.className).toBe('thimble-msg-day')
+    expect(texts('.thimble-msg-header')).toEqual(['# ferries11 messages · 1 event'])
+    expect([...doc().querySelectorAll('.thimble-msg-header, .thimble-msg-day, .thimble-msg-head')].every((e) => e.hasAttribute('data-thimble-chrome'))).toBe(true)
+  })
+
+  test("replies: under the group their parent's head starts, one level in however deep, sharing a head by the same rule", async () => {
+    await load('<div id="c"></div>')
+    const w = win()
+    w.eval('window.conv = thimble.messages({ mount: "#c" })')
+    w.conv.draw([
+      { ref: 'r#1', t: T, author: 'eve', text: 'a question' },
+      { ref: 'r#2', t: T + 20, author: 'eve', text: 'and its detail' },
+      { ref: 'r#3', t: T + 30, author: 'gus', text: 'something else' },
+      { ref: 'r#4', t: T + 40, author: 'fay', parent: 'r#1', text: 'an answer' },
+      { ref: 'r#5', t: T + 50, author: 'fay', parent: 'r#1', text: 'a second answer' },
+      { ref: 'r#6', t: T + 60, author: 'fay', parent: 'r#4', text: 'a reply to the answer' },
+      { ref: 'r#7', t: T + 70, author: 'hal', parent: 'r#3', text: 'a reply to gus' },
+    ])
+    expect(heads()).toEqual([
+      ['r#1', 'head', ''], ['r#2', 'same head', ''], ['r#4', 'head', 'reply'], ['r#5', 'same head', 'reply'],
+      ['r#6', 'head', 'reply'], ['r#3', 'head', ''], ['r#7', 'head', 'reply'],
+    ])
+    // the messages as given, whatever order they are drawn in
+    expect(w.conv.messages.map((m: { ref: string }) => m.ref)).toEqual(['r#1', 'r#2', 'r#3', 'r#4', 'r#5', 'r#6', 'r#7'])
+  })
+
+  test('folds: quoted mail behind "…", a long body behind Show more, their text kept hidden in the page; a pick, set and reveal', async () => {
+    await load('<div id="c"></div>')
+    const w = win()
+    w.picked = []
+    w.eval('window.conv = thimble.messages({ mount: "#c", format: "plain", onPick: (m) => window.picked.push(m.ref) })')
+    const long = Array.from({ length: 30 }, (_, i) => 'line ' + (i + 1)).join('\n')
+    w.conv.draw([
+      { ref: 'q#1', t: T, author: 'Ana Reyes', to: 'Gus Adeyemi', title: 'Re: crossing', text: 'Yes, by Thursday.\n\nOn Tue, Gus Adeyemi wrote:\n> Can you confirm?\n>\n> Thanks' },
+      { ref: 'q#2', t: T + 3600, author: 'Gus Adeyemi', text: '> a line quoted with no "wrote:" before it\nstays as it is' },
+      { ref: 'q#3', t: T + 7200, author: 'Gus Adeyemi', text: long },
+    ])
+    const fold = doc().querySelector('[data-anchor="q#1"] .thimble-msg-fold') as HTMLElement
+    expect([fold.hidden, fold.hasAttribute('data-thimble-fold'), fold.textContent]).toEqual([true, true, 'On Tue, Gus Adeyemi wrote:\n> Can you confirm?\n>\n> Thanks'])
+    expect(texts('[data-anchor="q#1"] .thimble-msg-body > .thimble-msg-text')).toEqual(['Yes, by Thursday.'])
+    expect(texts('[data-anchor="q#1"] .thimble-msg-to')).toEqual(['to Gus Adeyemi'])
+    expect(texts('[data-anchor="q#1"] .thimble-msg-subject')).toEqual(['Re: crossing'])
+    expect(doc().querySelector('[data-anchor="q#2"] .thimble-msg-fold')).toBeNull()
+    // the "…" opens the quote and folds it again; it is no pick
+    const dots = () => doc().querySelector('[data-anchor="q#1"] .thimble-msg-dots') as HTMLElement
+    dots().click()
+    expect([(doc().querySelector('[data-anchor="q#1"] .thimble-msg-fold') as HTMLElement).hidden, dots().getAttribute('aria-expanded')]).toEqual([false, 'true'])
+    dots().click()
+    expect((doc().querySelector('[data-anchor="q#1"] .thimble-msg-fold') as HTMLElement).hidden).toBe(true)
+    expect(w.picked).toEqual([])
+    // thirty lines: the first eight show, the rest hidden in a fold with Show more under it
+    const rest = () => doc().querySelector('[data-anchor="q#3"] .thimble-msg-rest') as HTMLElement | null
+    expect([rest()!.hidden, rest()!.hasAttribute('data-thimble-fold')]).toEqual([true, true])
+    expect(texts('[data-anchor="q#3"] .thimble-msg-body > .thimble-msg-text')[0].split(' line').length).toBe(8)
+    expect(rest()!.textContent).toContain('line 30')
+    const more = () => doc().querySelector('[data-anchor="q#3"] .thimble-msg-more') as HTMLElement
+    expect([more().textContent, more().getAttribute('aria-expanded')]).toEqual(['Show more', 'false'])
+    more().click()
+    expect([rest(), more().textContent]).toEqual([null, 'Show less'])
+    expect(texts('[data-anchor="q#3"] .thimble-msg-text')).toEqual([long.replace(/\n/g, ' ')])
+    more().click()
+    expect(rest()!.hidden).toBe(true)
+    // the search, or a citation, opens a fold with thimble-unfold
+    doc().querySelector('[data-anchor="q#1"] .thimble-msg-fold')!.dispatchEvent(new w.CustomEvent('thimble-unfold', { bubbles: true }))
+    expect((doc().querySelector('[data-anchor="q#1"] .thimble-msg-fold') as HTMLElement).hidden).toBe(false)
+    // a click on a message picks it, as Enter on it does
+    ;(doc().querySelector('[data-anchor="q#2"] .thimble-msg-text') as HTMLElement).click()
+    key(doc().querySelector('[data-anchor="q#1"]')!, 'Enter')
+    expect(w.picked).toEqual(['q#2', 'q#1'])
+    // reveal opens every fold of a message; set gives it its whole text
+    expect(w.conv.reveal('q#3')).toBe(true)
+    expect([rest(), doc().querySelector('[data-anchor="q#3"]')!.classList.contains('thimble-msg-hit')]).toEqual([null, true])
+    expect(w.conv.reveal('nope')).toBe(false)
+    w.conv.set('q#2', { text: 'the whole text' })
+    expect(texts('[data-anchor="q#2"] .thimble-msg-text')).toEqual(['the whole text'])
+  })
+
+  test('alone with no ref or time: drawn, a head shared, no anchor; nothing to draw says so; made again on its mount, the one before retires', async () => {
+    await load('<div id="c"></div>')
+    const w = win()
+    w.eval('window.conv = thimble.messages({ mount: "#c" })')
+    w.conv.draw([{ author: 'ana', text: 'hello' }, { author: 'ana', text: 'again' }, null, 'nonsense'])
+    expect(heads()).toEqual([[null, 'head', ''], [null, 'same head', '']])
+    expect(texts('.thimble-msg-day')).toEqual([])
+    w.conv.draw([], { empty: 'No posts in this thread' })
+    expect(texts('.thimble-msg-none')).toEqual(['No posts in this thread'])
+    w.eval('window.again = thimble.messages({ mount: "#c" })')
+    w.conv.draw([{ ref: 'a#1', author: 'old', text: 'from the one before' }])
+    expect(texts('.thimble-msg-none')).toEqual(['No posts in this thread'])
+    w.again.draw([{ ref: 'a#1', author: 'new', text: 'drawn' }])
+    expect(texts('.thimble-msg-author')).toEqual(['new'])
+  })
+
+  test('a loop of parents draws every message of it; an event with no author says what happened alone', async () => {
+    await load('<div id="c"></div>')
+    const w = win()
+    w.eval('window.conv = thimble.messages({ mount: "#c" })')
+    w.conv.draw([
+      { ref: 'l#1', t: T, author: 'ana', parent: 'l#2', text: 'a reply to the next' },
+      { ref: 'l#2', t: T + 60, author: 'bo', parent: 'l#1', text: 'a reply to the one before' },
+      { ref: 'l#3', t: T + 90, author: 'cy', parent: 'l#3', text: 'a reply to itself' },
+      { ref: 'l#4', t: T + 120, kind: 'event', icon: 'delete', said: 'Branch deleted' },
+    ])
+    // the loop's first message given stands as its root, the other under it
+    expect(heads()).toEqual([['l#1', 'head', ''], ['l#2', 'head', 'reply'], ['l#3', 'head', ''], ['l#4', 'head', '']])
+    expect(texts('[data-anchor="l#4"] .thimble-msg-said')).toEqual(['Branch deleted'])
+    expect(doc().querySelector('[data-anchor="l#4"]')!.getAttribute('data-anchor-text')).toBe('Branch deleted')
+  })
+
+  test('a pick marks the message chosen, kept when drawn again; ↑ and ↓ go to the message above or below; mentions reach thimble.text', async () => {
+    await load('<div id="c"></div>')
+    const w = win()
+    w.picked = []
+    w.given = []
+    // thimble.text is its own part: here a stand-in that keeps what it was given
+    w.eval('thimble.text = (el, text, o) => { window.given.push(o); el.textContent = text; return el }')
+    w.eval('window.conv = thimble.messages({ mount: "#c", mentions: [{ match: /#(\\d+)/g, ref: (m) => "view:forge/pull/" + m[1] }], onPick: (m) => window.picked.push(m.ref) })')
+    const list = [
+      { ref: 'k#1', t: T, author: 'ana', text: 'see #12' },
+      { ref: 'k#2', t: T + 600, author: 'bo', text: 'two' },
+      { ref: 'k#3', t: T + 1200, author: 'cy', text: 'three' },
+    ]
+    w.conv.draw(list)
+    expect(w.given.map((o: { format: string; mentions: unknown[] }) => [o.format, o.mentions.length])).toEqual([['markdown', 1], ['markdown', 1], ['markdown', 1]])
+    const at = (ref: string) => doc().querySelector(`[data-anchor="${ref}"]`) as HTMLElement
+    at('k#1').focus()
+    key(at('k#1'), 'ArrowDown')
+    expect(doc().activeElement!.getAttribute('data-anchor')).toBe('k#2')
+    key(at('k#2'), 'ArrowDown')
+    key(at('k#3'), 'ArrowDown')
+    expect(doc().activeElement!.getAttribute('data-anchor')).toBe('k#3')
+    key(at('k#3'), 'ArrowUp')
+    key(at('k#2'), ' ')
+    expect(w.picked).toEqual(['k#2'])
+    expect([...doc().querySelectorAll('.thimble-msg.active')].map((e) => e.getAttribute('data-anchor'))).toEqual(['k#2'])
+    w.conv.draw(list.slice().reverse())
+    expect([...doc().querySelectorAll('.thimble-msg.active')].map((e) => e.getAttribute('data-anchor'))).toEqual(['k#2'])
+  })
+
+  test('with the side panel: a pick opens it and marks the message; Reset closes it and leaves no message chosen', async () => {
+    await load('<div class="top"><span id="colour"></span></div><div id="body"><div id="c"></div></div>')
+    const w = win()
+    w.eval(`
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }] })
+      window.side = thimble.side({ mount: '#body' })
+      window.conv = thimble.messages({ mount: '#c', onPick: (m) => side.open({ title: m.author, ref: m.ref, html: m.text }) })
+    `)
+    w.conv.draw([{ ref: 'p#1', t: T, author: 'ana', text: 'one' }, { ref: 'p#2', t: T + 600, author: 'bo', text: 'two' }])
+    ;(doc().querySelector('[data-anchor="p#2"]') as HTMLElement).click()
+    expect([w.side.ref, [...doc().querySelectorAll('.thimble-msg.active')].map((e) => e.getAttribute('data-anchor'))]).toEqual(['p#2', ['p#2']])
+    await wait()
+    const reset = doc().querySelector('.thimble-reset') as HTMLButtonElement
+    expect(reset.hidden).toBe(false)
+    reset.click()
+    await wait()
+    expect([w.side.isOpen, doc().querySelector('.thimble-msg.active')]).toEqual([false, null])
+  })
+
+  test('set: a new `to` draws the message after it again, which then names its own', async () => {
+    await load('<div id="c"></div>')
+    const w = win()
+    w.eval('window.conv = thimble.messages({ mount: "#c", format: "plain" })')
+    w.conv.draw([
+      { ref: 's#1', t: T, author: 'ana', to: 'bo', text: 'one' },
+      { ref: 's#2', t: T + 30, author: 'ana', to: 'bo', text: 'two, to the same' },
+    ])
+    expect(texts('.thimble-msg-to')).toEqual(['to bo'])
+    w.conv.set('s#1', { to: 'cy' })
+    expect(texts('.thimble-msg-to')).toEqual(['to cy', 'to bo'])
   })
 })
