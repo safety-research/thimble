@@ -717,9 +717,24 @@
       else el.removeAttribute('aria-selected')
     })
   }
-  // row `r` scrolled into view: in the middle when `middle`, else just inside the edge, clear of the find field
+  // row `r` scrolled into view, clear of the find field: in the middle when `middle` and it was out of view, else just
+  // inside the edge. A tree that scrolls in its mount moves only the mount, never the page around it; a tree the page
+  // scrolls brings the row into the frame.
   Tree.prototype.scrollTo = function (r, middle) {
     if (r < 0 || r >= this.shown.length) return
+    var m = this.mount
+    var head = this.findEl ? this.findEl.offsetHeight : 0
+    if (m.scrollHeight > m.clientHeight + 1) {
+      var y = this.body.offsetTop + r * ROW
+      var top = m.scrollTop + head
+      var bottom = m.scrollTop + m.clientHeight
+      var out = y < top || y + ROW > bottom
+      if (out && middle) m.scrollTop = y - head - (m.clientHeight - head - ROW) / 2
+      else if (y < top) m.scrollTop = y - head
+      else if (y + ROW > bottom) m.scrollTop = y + ROW - m.clientHeight
+      this.window()
+      return
+    }
     this.window(r)
     var el = this.drawn.get(r)
     if (!el) return

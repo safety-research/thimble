@@ -300,6 +300,32 @@ window.search = thimble.search({ mount: '#colour' })`)
     await page.close()
   })
 
+  test('a tree that scrolls in its mount moves only the mount when it reveals a node or the keys move', async () => {
+    const { page, frame } = await framed(`
+// the tree stands low in a page that scrolls, all of it in view
+document.getElementById('tree').insertAdjacentHTML('beforebegin', '<div style="height:100px"></div>')
+document.body.insertAdjacentHTML('beforeend', '<div style="height:2000px"></div>')
+window.tree = thimble.tree({ mount: '#tree', items: Array.from({ length: 3000 }, (_, i) => ({ key: 'c' + i, n: i })) })`)
+    const at = () =>
+      frame().evaluate(() => {
+        const r = document.querySelector('.thimble-tree-row.active, .thimble-tree-row.is-cursor')!.getBoundingClientRect()
+        const m = document.getElementById('tree')!.getBoundingClientRect()
+        return { page: document.scrollingElement!.scrollTop, top: r.top - m.top, bottom: m.bottom - r.bottom, height: m.height }
+      })
+    await frame().evaluate(() => (window as any).tree.reveal('c2000'))
+    let got = await at()
+    assert.equal(got.page, 0, 'the page stays where it was')
+    assert.ok(Math.abs(got.top + 12 - got.height / 2) <= 12, `the node stands in the middle of the tree: ${JSON.stringify(got)}`)
+    // the keys walk past the tree's bottom edge: the tree follows, the page does not
+    await frame().locator('#tree .thimble-tree-body').focus()
+    for (let k = 0; k < 14; k++) await page.keyboard.press('ArrowDown')
+    await page.waitForTimeout(50)
+    got = await at()
+    assert.equal(got.page, 0)
+    assert.ok(got.bottom >= 0 && got.top >= 0, JSON.stringify(got))
+    await page.close()
+  })
+
   test("with Rows, the nodes are rows.groups's with their records counted, by a tree of fields and by another field", async () => {
     const { page, frame } = await framed(`
 const PARENT = { lead: null, explore: 'lead', grep: 'explore', test: 'lead', solo: null }
