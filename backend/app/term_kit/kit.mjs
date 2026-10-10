@@ -186,10 +186,16 @@ const two = (n) => String(n).padStart(2, '0')
  *  `May 16 04:31:07`. */
 export function when(t, step = 60) {
   const d = new Date(t * 1000)
-  const day = `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`
+  const day = monthDay(t)
   if (step >= 86400) return `${day}, ${d.getUTCFullYear()}`
   const hm = `${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`
   return step >= 60 ? `${day} ${hm}` : `${day} ${hm}:${two(d.getUTCSeconds())}`
+}
+
+// a day without its year, as an axis's tick names it: `May 16`, in UTC
+function monthDay(t) {
+  const d = new Date(t * 1000)
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`
 }
 
 /** The time of day, `04:31:07`, in UTC. */
@@ -2379,7 +2385,7 @@ function scaleOf(from, to, cols, unit, segs = null, fine = false) {
       let lastDay = ''
       for (let t = Math.ceil(from / tick) * tick; t <= to; t += tick) {
         const day = dayOf(t)
-        const label = tick >= 86400 ? when(t, 86400).split(' ').slice(0, 2).join(' ') : day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
+        const label = tick >= 86400 ? monthDay(t) : day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
         lastDay = day
         out.push({ t, x: x(t), label })
       }
@@ -2471,7 +2477,7 @@ function brokenScale(from, to, cols, unit, parts, fine = false) {
         let first = true
         for (let t = Math.ceil(g.a / tick) * tick; t <= g.b; t += tick) {
           const day = dayOf(t)
-          const label = tick >= 86400 ? when(t, 86400).split(' ').slice(0, 2).join(' ') : first || day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
+          const label = tick >= 86400 ? monthDay(t) : first || day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
           lastDay = day
           first = false
           out.push({ t, x: x(t), label, full: tick >= 86400 ? label : when(t, tick) })

@@ -656,6 +656,14 @@ describe('the time range', () => {
     expect(ticks.some((t: any) => /^May 17/.test(t.label))).toBe(true)
   })
 
+  test('over weeks, the ticks name the day alone, month first, with no year and no comma', () => {
+    const range = kit.timeRange({})
+    range.data({ times: Array.from({ length: 80 }, (_, i) => T0 + i * 6 * 3600) })
+    const labels = range.scale(100).ticks(12).map((t: any) => t.label)
+    expect(labels.length).toBeGreaterThan(1)
+    for (const l of labels) expect(l).toMatch(/^(May|Jun) \d{1,2}$/)
+  })
+
   test('with gap, an empty stretch longer than it is a break: each stretch takes its share of the cells, a break 4, drawn // on the strip and the axis', async () => {
     // three bursts of 40 minutes, the second 2 hours after the first and the third the next morning
     const burst = (t: number) => Array.from({ length: 41 }, (_, i) => t + i * 60)
