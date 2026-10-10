@@ -183,19 +183,28 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const two = (n) => String(n).padStart(2, '0')
 
 /** A time in seconds since 1970, in UTC, as precise as `step` seconds need: `May 16, 2026`, `May 16 04:31`,
- *  `May 16 04:31:07`. */
-export function when(t, step = 60) {
-  const d = new Date(t * 1000)
-  const day = monthDay(t)
-  if (step >= 86400) return `${day}, ${d.getUTCFullYear()}`
-  const hm = `${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`
-  return step >= 60 ? `${day} ${hm}` : `${day} ${hm}:${two(d.getUTCSeconds())}`
+ *  `May 16 04:31:07`; with `year`, the year at any step (`Dec 31, 2026 23:10`), as for a span that crosses one. */
+export function when(t, step = 60, year = step >= 86400) {
+  const day = year ? `${monthDay(t)}, ${yearOf(t)}` : monthDay(t)
+  return step >= 86400 ? day : `${day} ${clockOf(t, step)}`
 }
 
 // a day without its year, as an axis's tick names it: `May 16`, in UTC
 function monthDay(t) {
   const d = new Date(t * 1000)
   return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`
+}
+
+// the time of day as precise as `step` seconds need: `04:31`, `04:31:07`, in UTC
+function clockOf(t, step) {
+  const d = new Date(t * 1000)
+  const hm = `${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`
+  return step >= 60 ? hm : `${hm}:${two(d.getUTCSeconds())}`
+}
+
+// the year a time falls in, in UTC
+function yearOf(t) {
+  return new Date(t * 1000).getUTCFullYear()
 }
 
 /** The time of day, `04:31:07`, in UTC. */
@@ -2066,9 +2075,46 @@ const MARKS_BATCH = 2000
 // ------------------------------------------------------------------------------------------------ the time range
 
 const BARS = ' ▁▂▃▄▅▆▇█'
-const TICKS = [1, 5, 15, 30, 60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400, 2 * 86400, 7 * 86400, 30 * 86400]
+const TICKS = [1, 5, 15, 30, 60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400, 2 * 86400, 7 * 86400]
+// past a week the ticks step by the calendar, in months (a year is 12), as the browser's axis does (viewer_range.js CAL)
+const MONTH_TICKS = [1, 3, 6, 12, 24, 60, 120]
 const BREAK = 4 // the cells of a break on a broken scale, drawn ` // ` on the strip and the axis
 const MIN_SEG = 3 // the cells a stretch too short to see takes on a broken scale
+
+// the step of time ticks at least `gap` cells apart, a cell being `step` seconds: seconds (TICKS), else {months}
+function tickStep(step, gap) {
+  return TICKS.find((s) => s / step >= gap) || { months: MONTH_TICKS.find((m) => (m * 30.44 * 86400) / step >= gap) || MONTH_TICKS.at(-1) }
+}
+
+// the times of a tick step in [a, b], in seconds: the multiples of a step in seconds; the first of each month whose
+// number the step's months divide (January 1 for a year)
+function tickTimes(a, b, tick) {
+  const out = []
+  if (typeof tick !== 'object') {
+    for (let t = Math.ceil(a / tick) * tick; t <= b; t += tick) out.push(t)
+    return out
+  }
+  const start = (i) => Date.UTC(Math.floor(i / 12), i % 12, 1) / 1000
+  const d = new Date(a * 1000)
+  let i = d.getUTCFullYear() * 12 + d.getUTCMonth()
+  if (start(i) < a) i++
+  for (i = Math.ceil(i / tick.months) * tick.months; start(i) <= b && out.length < 5000; i += tick.months) out.push(start(i))
+  return out
+}
+
+// a time tick's label at its step: a month step's the month, or the year in January and at a step of a year or more
+// (`Oct`, `2027`), as the browser's axis names them; a day step's the day (`May 16`); a shorter step's the time, with
+// its date where `dated` (`May 16 04:31`); `year` adds the year to a day or a date (`Jan 3, 2027`), and `date` gives
+// the date alone (`May 16`, for an axis with no room for the time)
+function tickLabel(t, tick, dated, year, date = false) {
+  if (typeof tick === 'object') {
+    const mo = new Date(t * 1000).getUTCMonth()
+    return mo === 0 || tick.months >= 12 ? String(yearOf(t)) : MONTHS[mo]
+  }
+  const day = year ? `${monthDay(t)}, ${yearOf(t)}` : monthDay(t)
+  if (tick >= 86400 || date) return day
+  return dated ? `${day} ${clockOf(t, tick)}` : clockOf(t, tick)
+}
 
 // the stretches of time that hold data: the sorted times, split where two lie more than `gap` apart
 function stretches(sorted, gap) {
@@ -2202,18 +2248,20 @@ export function timeRange(opts = {}) {
     scale(cols) {
       return scaleOf(api.from, api.to, Math.max(1, cols | 0), unit, r.segs)
     },
-    /** A time in the readout's words, as precise as `step` needs. */
+    /** A time in the readout's words, as precise as `step` needs, with its year when the data's span crosses one. */
     format(t, step = (api.to - api.from) / 60) {
-      return unit === 'n' ? numAt(t, 1) : when(t, step)
+      return unit === 'n' ? numAt(t, 1) : when(t, step, step >= 86400 || yearOf(span()[0]) !== yearOf(span()[1]))
     },
-    /** The range's readout: start, end and length, `May 16 04:31 – 05:10 · 39m`. */
+    /** The range's readout: start, end and length, `May 16 04:31 – 05:10 · 39m`, each end with its year when the range
+     *  crosses one (`Dec 30, 2026 22:00 – Jan 2, 2027 06:00`). */
     readout() {
       const a = api.from
       const b = api.to
       if (unit === 'n') return `${numAt(a, 1)} – ${numAt(b, 1)} · ${num(b - a)}`
       const step = (b - a) / 60
-      const aa = when(a, step)
-      const bb = when(b, step)
+      const year = step >= 86400 || yearOf(a) !== yearOf(b)
+      const aa = when(a, step, year)
+      const bb = when(b, step, year)
       const sameDay = dayOf(a) === dayOf(b) && step < 86400
       return `${aa} – ${sameDay ? bb.split(' ').slice(2).join(' ') : bb} · ${dur(b - a)}`
     },
@@ -2370,7 +2418,8 @@ function scaleOf(from, to, cols, unit, segs = null, fine = false) {
     gaps: () => [],
     binOf: (t) => (t < from || t > to ? -1 : x(t)),
     /** Ticks at least `gap` cells apart: `[{t, x, label}]`, the label as precise as the tick step needs, the date on
-     *  the first tick and where the day changes. */
+     *  the first tick and where the day changes, and where the range crosses a year, the year on the first tick and
+     *  where it changes; past a week, by the calendar (`Oct`, `2027`). */
     ticks(gap = 14) {
       if (unit === 'n') {
         const raw = (gap * len) / cols
@@ -2380,14 +2429,16 @@ function scaleOf(from, to, cols, unit, segs = null, fine = false) {
         for (let k = Math.ceil(from / tick); k * tick <= to; k++) out.push({ t: k * tick, x: x(k * tick), label: numAt(k * tick, tick) })
         return out
       }
-      const tick = TICKS.find((s) => s / step >= gap) || TICKS.at(-1)
+      const tick = tickStep(step, gap)
+      const years = yearOf(from) !== yearOf(to)
       const out = []
       let lastDay = ''
-      for (let t = Math.ceil(from / tick) * tick; t <= to; t += tick) {
+      let lastYear = null
+      for (const t of tickTimes(from, to, tick)) {
         const day = dayOf(t)
-        const label = tick >= 86400 ? monthDay(t) : day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
+        out.push({ t, x: x(t), label: tickLabel(t, tick, day !== lastDay, years && yearOf(t) !== lastYear) })
         lastDay = day
-        out.push({ t, x: x(t), label })
+        lastYear = yearOf(t)
       }
       return out
     },
@@ -2457,8 +2508,9 @@ function brokenScale(from, to, cols, unit, parts, fine = false) {
     /** The breaks, as [first cell, cell after the last]. */
     gaps: () => segs.slice(1).map((g, i) => [segs[i].c1, g.c0]),
     binOf: (t) => (t < from || t > to ? -1 : x(t)),
-    /** Ticks at least `gap` cells apart in each stretch: `[{t, x, label}]`, the date on the first tick, the first after
-     *  a break and where the day changes. */
+    /** Ticks at least `gap` cells apart in each stretch: `[{t, x, label, full, date}]`, the date on the first tick, the
+     *  first after a break and where the day changes, and where the range crosses a year, the year on the first tick
+     *  and where it changes; `full` the label with its date, `date` the date alone. */
     ticks(gap = 14) {
       if (unit === 'n') {
         const raw = gap * step
@@ -2470,17 +2522,20 @@ function brokenScale(from, to, cols, unit, parts, fine = false) {
           return out
         })
       }
-      const tick = TICKS.find((s) => s / step >= gap) || TICKS.at(-1)
+      const tick = tickStep(step, gap)
+      const years = yearOf(from) !== yearOf(to)
       const out = []
       let lastDay = ''
+      let lastYear = null
       for (const g of segs) {
         let first = true
-        for (let t = Math.ceil(g.a / tick) * tick; t <= g.b; t += tick) {
-          const day = dayOf(t)
-          const label = tick >= 86400 ? monthDay(t) : first || day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
-          lastDay = day
+        for (const t of tickTimes(g.a, g.b, tick)) {
+          const year = years && yearOf(t) !== lastYear
+          const label = tickLabel(t, tick, first || dayOf(t) !== lastDay, year)
+          out.push({ t, x: x(t), label, full: tickLabel(t, tick, true, year), date: tickLabel(t, tick, true, year, true) })
+          lastDay = dayOf(t)
+          lastYear = yearOf(t)
           first = false
-          out.push({ t, x: x(t), label, full: tick >= 86400 ? label : when(t, tick) })
         }
       }
       return out
@@ -2528,7 +2583,7 @@ export function axis(d, scale, o = {}) {
   // a broken scale's breaks are `//` in the rule gray, and no label runs into one
   const gaps = scale.gaps ? scale.gaps() : []
   const items = [
-    ...scale.ticks(o.gap || 12).map((tk) => ({ x: tk.x, label: tk.label, full: tk.full, style: { d: true } })),
+    ...scale.ticks(o.gap || 12).map((tk) => ({ x: tk.x, label: tk.label, full: tk.full, date: tk.date, style: { d: true } })),
     ...gaps.map(([g0, g1]) => ({ x: g0 + 1, label: '//', style: { fg: COLORS.rule }, brk: g1 })),
   ].sort((a, b) => a.x - b.x || (a.brk ? -1 : 1))
   // the first label after a break gives the date, even when the stretch's first tick had no room
@@ -2542,7 +2597,7 @@ export function axis(d, scale, o = {}) {
     }
     // where the time with its date has no room, the date alone, as the browser's axis does
     const fits = (l) => tk.x >= end && tk.x + width(l) <= scale.cols && !gaps.some(([g0, g1]) => tk.x < g1 && tk.x + width(l) > g0)
-    const label = !dated && gaps.length && tk.full ? [tk.full, tk.full.split(' ').slice(0, 2).join(' ')].find(fits) : fits(tk.label) ? tk.label : null
+    const label = !dated && gaps.length && tk.full ? [tk.full, tk.date || tk.full.split(' ').slice(0, 2).join(' ')].find(fits) : fits(tk.label) ? tk.label : null
     if (!label) continue
     row.at(gutter + tk.x).add(label, tk.style)
     end = tk.x + width(label) + 2
@@ -2552,13 +2607,14 @@ export function axis(d, scale, o = {}) {
   const marks = (o.marks || []).filter((m) => m.t >= scale.from && m.t <= scale.to).sort((a, b) => a.t - b.t)
   if (!marks.length) return
   const mr = d.row().gap(gutter)
+  const years = yearOf(scale.from) !== yearOf(scale.to)
   end = 0
   for (const m of marks) {
     // a label that would run into the one before it stands just after it, near enough to its time, else is left out
     const x = Math.max(scale.x(m.t), end)
     const label = String(m.label)
     if (x - scale.x(m.t) > 12 || x + width(label) > scale.cols) continue
-    mr.at(gutter + x).add(label, o.onMark ? {} : { d: true }, o.onMark ? { on: () => o.onMark(m), tip: m.tip || `${label}: ${when(m.t, 60)}` } : { tip: m.tip || `${label}: ${when(m.t, 60)}` })
+    mr.at(gutter + x).add(label, o.onMark ? {} : { d: true }, o.onMark ? { on: () => o.onMark(m), tip: m.tip || `${label}: ${when(m.t, 60, years)}` } : { tip: m.tip || `${label}: ${when(m.t, 60, years)}` })
     end = x + width(label) + 2
   }
   mr.end()
@@ -4089,7 +4145,8 @@ export function timeline(opts = {}) {
       st.counts = { band: 0, problem: 0 }
       const groups = all.map((n) => n.items)
       const max = maxBin(scale, groups, time)
-      const whens = Array.from({ length: scale.cols }, (_, x) => (unit === 'n' ? numAt(scale.t(x), fine ? scale.step : 1) : when(scale.t(x), Math.max(1, scale.step))))
+      const years = unit !== 'n' && yearOf(scale.from) !== yearOf(scale.to)
+      const whens = Array.from({ length: scale.cols }, (_, x) => (unit === 'n' ? numAt(scale.t(x), fine ? scale.step : 1) : when(scale.t(x), Math.max(1, scale.step), years || scale.step >= 86400)))
       // the rows past the room wait behind `… N more`, which shows the next of them
       const fits = all.length <= room ? all.length : Math.max(1, room - 1)
       if (st.top >= all.length || all.length <= room) st.top = 0

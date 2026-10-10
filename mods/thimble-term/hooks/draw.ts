@@ -2,6 +2,7 @@
 // static drawing where no Client runs). Each layout takes the width it may use and the item under the pointer, and
 // returns its lines and a hit test from a cell to an item. The `note` and `text` kinds (noteLayout, textLayout) are the
 // cards drawn as their words.
+import { axisTicks, numberTicks, placeLabels, wallClock } from './axis'
 import { cut, cw, fmt, formatted, quoted, width } from './lib'
 import type { Run, TableRuns } from './lib'
 import { COLORS } from './paint'
@@ -229,15 +230,6 @@ export function bar(v: number, max: number, w: number): string {
   if (max <= 0 || w <= 0) return ''
   const n8 = Math.max(v !== 0 ? 1 : 0, Math.round((Math.abs(v) / max) * w * 8))
   return '█'.repeat(Math.floor(n8 / 8)) + EIGHTHS[n8 % 8]!
-}
-
-function compact(v: number): string {
-  const a = Math.abs(v)
-  if (a >= 1e9) return `${fmt(+(v / 1e9).toFixed(1))}B`
-  if (a >= 1e6) return `${fmt(+(v / 1e6).toFixed(1))}M`
-  if (a >= 1e5) return `${fmt(+(v / 1e3).toFixed(0))}k`
-  if (a >= 1e4) return `${fmt(+(v / 1e3).toFixed(1))}k`
-  return amount(+v.toPrecision(4))
 }
 
 /** A number as the mod draws a count: thousands separators from 1,000 on a whole number, else as written. */
@@ -519,9 +511,10 @@ const DOT = [
   [0x40, 0x80],
 ]
 
+// a time as its wall clock (axis.ts wallClock), so the ticks fall on the hours the data writes
 function xNumber(v: string | number, kind: 'num' | 'time' | 'cat', i: number): number {
   if (kind === 'num') return Number(v)
-  if (kind === 'time') return Date.parse(String(v).replace(' ', 'T'))
+  if (kind === 'time') return wallClock(String(v))
   return i
 }
 
@@ -531,7 +524,7 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   const xs = all.map(p => p[0])
   const kind: 'num' | 'time' | 'cat' = xs.every(x => typeof x === 'number' || (typeof x === 'string' && x.trim() !== '' && !Number.isNaN(Number(x))))
     ? 'num'
-    : xs.every(x => typeof x === 'string' && /^\d{4}-\d{2}(-\d{2})?([ T]\d{2}:\d{2}(:\d{2})?)?/.test(x) && !Number.isNaN(Date.parse(x.replace(' ', 'T'))))
+    : xs.every(x => typeof x === 'string' && !Number.isNaN(wallClock(x)))
       ? 'time'
       : 'cat'
   // categorical x: one position per distinct value, in first-seen order
@@ -553,15 +546,23 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
     y0 -= 1
     y1 += 1
   }
-  const labels = [compact(y1), compact((y0 + y1) / 2), compact(y0)]
-  const yW = Math.max(...labels.map(l => l.length)) + 1
+  const H = plotRows * 4
+  const py = (y: number) => Math.round(((y1 - y) / (y1 - y0)) * (H - 1))
+  // the y ticks at round steps, whole for whole data (axis.ts), each on the row its value's points are drawn on, with a
+  // blank row between two
+  const yTicks = new Map<number, string>()
+  const whole = yv.every(v => Number.isInteger(v))
+  for (let count = Math.max(2, Math.floor(plotRows / 3)); count >= 1 && !yTicks.size; count--) {
+    const t = numberTicks(y0, y1, count, whole)
+    const rows = t.at.map(v => py(v) >> 2)
+    if (rows.every((r, i) => i === 0 || Math.abs(r - rows[i - 1]!) >= 2)) rows.forEach((r, i) => yTicks.set(r, t.labels[i]!))
+  }
+  const yW = Math.max(1, ...[...yTicks.values()].map(l => width(l))) + 1
   const pw = Math.max(10, cols - yW - 1)
   const W = pw * 2
-  const H = plotRows * 4
   const bits: number[][] = Array.from({ length: plotRows }, () => new Array<number>(pw).fill(0))
   const owner: number[][] = Array.from({ length: plotRows }, () => new Array<number>(pw).fill(-1))
   const px = (x: number) => (x1 === x0 ? Math.floor(W / 2) : Math.round(((x - x0) / (x1 - x0)) * (W - 1)))
-  const py = (y: number) => Math.round(((y1 - y) / (y1 - y0)) * (H - 1))
   const plot = (dx: number, dy: number, s: number) => {
     if (dx < 0 || dy < 0 || dx >= W || dy >= H) return
     const cx = dx >> 1
@@ -609,8 +610,8 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   const seriesColour = (si: number) => classColour(card, series[si]?.name) ?? (series.length > 1 ? COLORS.series[si % COLORS.series.length]! : ONE)
   const lines: Line[] = []
   for (let r = 0; r < plotRows; r++) {
-    const yl = r === 0 ? labels[0]! : r === plotRows - 1 ? labels[2]! : r === Math.floor((plotRows - 1) / 2) ? labels[1]! : ''
-    const row: Line = [{ s: yl.padStart(yW - 1) + ' ', fg: COLORS.dim }, { s: '│', fg: COLORS.rule }]
+    const yl = yTicks.get(r)
+    const row: Line = [{ s: pad(yl ?? '', yW - 1, true) + ' ', fg: COLORS.dim }, { s: yl === undefined ? '│' : '┤', fg: COLORS.rule }]
     for (let c = 0; c < pw; c++) {
       const b = bits[r]![c]!
       const o = owner[r]![c]!
@@ -625,20 +626,32 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
     }
     lines.push(row)
   }
-  // the x labels, dim: the first and the last x, and the one nearest the middle where it fits between them with a
-  // gutter at each side
-  const xsAt = series.flatMap(s => s.points.map((p, i) => ({ label: xName(p[0]), x: px(xOf(p, i)) >> 1 })))
-  const ends = xsAt.reduce((m, q) => ({ lo: q.x < m.lo.x ? q : m.lo, hi: q.x > m.hi.x ? q : m.hi }), { lo: xsAt[0] ?? { label: '', x: 0 }, hi: xsAt[0] ?? { label: '', x: 0 } })
-  const first = kind === 'cat' ? cats[0] ?? '' : ends.lo.label
-  const last = kind === 'cat' ? cats.at(-1) ?? '' : ends.hi.label
-  const mid = xsAt.reduce<{ label: string; x: number } | null>((m, q) => (!m || Math.abs(q.x - pw / 2) < Math.abs(m.x - pw / 2) ? q : m), null)
-  const axis = ' '.repeat(yW) + '└' + '─'.repeat(pw)
-  lines.push([{ s: axis, fg: COLORS.rule }])
-  let xl = first.length + last.length + 2 <= pw ? first + ' '.repeat(pw - first.length - last.length) + last : first
-  if (mid && mid.label !== first && mid.label !== last && xl.length === pw) {
-    const m0 = Math.round(pw / 2 - width(mid.label) / 2)
-    if (m0 >= width(first) + 2 && m0 + width(mid.label) + 2 <= pw - width(last)) xl = xl.slice(0, m0) + mid.label + xl.slice(m0 + mid.label.length)
+  // the x labels, dim, each under a ┬ on the axis: numbers and times at round steps (axis.ts), as many as fit with 2
+  // cells between; one x alone named under its point; categories at the ends and the middle
+  const ticks: { cell: number; x: number; label: string }[] = []
+  if (kind !== 'cat' && x1 > x0) {
+    const t = axisTicks(kind, x0, x1, pw, v => px(v) >> 1, kind === 'num' && xv.every(v => Number.isInteger(v)))
+    t.at.forEach((_, i) => ticks.push({ cell: t.cells[i]!, x: t.x[i]!, label: t.labels[i]! }))
+  } else if (kind !== 'cat' && all.length) {
+    const label = xName(all[0]![0])
+    const at = placeLabels([px(x0) >> 1], [label], pw)
+    if (at) ticks.push({ cell: px(x0) >> 1, x: at[0]!, label })
   }
+  const rule = new Array<string>(pw).fill('─')
+  for (const t of ticks) rule[t.cell] = '┬'
+  lines.push([{ s: ' '.repeat(yW) + '└' + rule.join(''), fg: COLORS.rule }])
+  let xl = ''
+  if (kind === 'cat') {
+    const first = cats[0] ?? ''
+    const last = cats.at(-1) ?? ''
+    const xsAt = series.flatMap(s => s.points.map((p, i) => ({ label: xName(p[0]), x: px(xOf(p, i)) >> 1 })))
+    const mid = xsAt.reduce<{ label: string; x: number } | null>((m, q) => (!m || Math.abs(q.x - pw / 2) < Math.abs(m.x - pw / 2) ? q : m), null)
+    xl = first.length + last.length + 2 <= pw ? first + ' '.repeat(pw - first.length - last.length) + last : first
+    if (mid && mid.label !== first && mid.label !== last && xl.length === pw) {
+      const m0 = Math.round(pw / 2 - width(mid.label) / 2)
+      if (m0 >= width(first) + 2 && m0 + width(mid.label) + 2 <= pw - width(last)) xl = xl.slice(0, m0) + mid.label + xl.slice(m0 + mid.label.length)
+    }
+  } else for (const t of ticks) xl += ' '.repeat(Math.max(0, t.x - width(xl))) + t.label
   lines.push([{ s: ' '.repeat(yW + 1) + xl, fg: COLORS.dim }])
   if (series.length > 1) lines.push(...flow(series.map((s, si) => [{ s: '● ', fg: seriesColour(si) }, { s: s.name }]), cols))
   return { lines, items, hit: (x, y) => nearest(x, y) }

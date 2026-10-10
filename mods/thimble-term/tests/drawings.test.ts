@@ -309,8 +309,9 @@ test("a line chart over dates names its x in words, as a bar chart's labels read
   const lay = cardLayout(card, 70, -1)
   const rows = lay.lines.map(l => l.map(s => s.s).join(''))
   print('a line card of two accounts by week, 70 columns', rows)
+  // the axis ticks at a round step of the calendar, a week from each Sunday, as the browser's axis does (axes.test.ts)
   const axis = rows.find(r => r.includes('May'))!
-  expect(axis.trim().split(/\s{2,}/)).toEqual(['May 18', 'Jun 1', 'Jun 15'])
+  expect(axis.trim().split(/\s{2,}/)).toEqual(['May 24', 'May 31', 'Jun 7', 'Jun 14'])
   expect(rows.join('\n')).not.toContain('2026-')
   expect(lay.items[0]).toMatchObject({ label: 'May 18', value: 'AgentRelent 0', open: 'card:l1week00#AgentRelent/2026-05-18T00:00:00' })
 })
