@@ -249,6 +249,23 @@ Propose a view, a page that shows records in a form their files hide, or a viewe
 }
 ```
 
+## profile_data
+
+Describe the corpus's records in plain words, and get a simple profile of the files you name. thimble keeps your last description, with its profile, and gives both to the builder of each view you propose.
+
+The profile gives each file's fields, its number of records and each field's distinct values. On very large files it profiles a sample and says so.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "description": {"type": "string", "description": "The records in plain words: each kind of record and the files that hold it, what one record is, what its fields mean, how the kinds link, the labels that mark them, where the data is messy, and the fields a view could derive, each with how to compute it."},
+    "files": {"type": "array", "items": {"type": "string"}, "description": "Globs of the files to profile, such as runs/*/events.jsonl."}
+  },
+  "required": ["description", "files"]
+}
+```
+
 ## write_document
 
 Save a whole document as markdown in its type's form. To change one passage, use `edit_document`.
