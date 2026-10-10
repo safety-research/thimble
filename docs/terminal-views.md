@@ -12,22 +12,22 @@ and what its keys and clicks do.
 ```js
 import { colorBy, details, draw, fetch, list } from 'thimble-term'
 
-const colour = colorBy({ fields: [{ name: 'kind', title: 'Kind' }], onChange: load })
+const color = colorBy({ fields: [{ name: 'kind', title: 'Kind' }], onChange: load })
 const rows = list({ key: (m) => m.ref })
 let messages = []
 
 async function load() {
-  const data = await fetch({ op: 'board', colour: colour.query() }, { key: 'board' })
-  colour.counts(data.counts)
+  const data = await fetch({ op: 'board', color: color.query() }, { key: 'board' })
+  color.counts(data.counts)
   messages = data.messages
 }
 
 draw((d) => {
-  colour.draw(d)
+  color.draw(d)
   d.blank()
   rows.draw(d, {
     items: messages,
-    colour,
+    color,
     row: (m, r) => r.add(m.author, { d: true }).gap().add(m.text),
     detail: (m, dd) => details(dd, { text: m.text, place: m.ref, ask: { ref: m.ref, text: m.text } }),
     ask: (m) => ({ ref: m.ref, text: m.text }),
@@ -152,7 +152,7 @@ the hint row names it. A view that binds `?` itself keeps it, and the kit then b
 ## Color by
 
 `colorBy(opts)` is the one control for the view's color, as in the browser ([color.md](color.md)). Draw it in the top row
-with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) or `colour.add(r)`.
+with `color.draw(d, before)` (`before(r)` adds the row's other controls first) or `color.add(r)`.
 
 - The view opens colored by a label that is on in Files and marks its files (not one Rows groups by), as the browser's
   view does, else by its `initial` field; a label turned on while the view is away or open takes the color, the one turned on last.
@@ -181,7 +181,7 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
   Space turns it off, unless Filter by or Rows reads it. A choice the page makes itself (`choose`) turns no label on.
 - `+N` after the chips opens the values it stands for in the same frame, each with its dot in its hue, its count and,
   under the one at `❯`, what it means; Space or Enter turns it off or on, as a chip's click does.
-- A group's row (a page, an agent, a session) takes no color of its own: `colour.mix(counts, cells)` gives the runs of
+- A group's row (a page, an agent, a session) takes no color of its own: `color.mix(counts, cells)` gives the runs of
   a small bar of its records' share of each value in its hue, which the row adds; none with Off.
 - With a label chosen, its name in the top row is followed by `↗`, which opens the label's panel: its definition, its
   runs and its records are a step away in every view that uses it.
@@ -195,26 +195,26 @@ with `colour.draw(d, before)` (`before(r)` adds the row's other controls first) 
 | `fields` | `[{name, title, description?, values?, meanings?, value?(record)}]`, as the browser's |
 | `initial` | the field chosen first; the first field by default |
 | `chips` | does nothing: a value turned off keeps its records, dim (`'filter'` hid them once); `filterBy` hides records |
-| `onChange(colour)` | the choice changed, or a value was turned off or on: fetch and draw again |
+| `onChange(color)` | the choice changed, or a value was turned off or on: fetch and draw again |
 
 | member | what it gives |
 |---|---|
 | `query()` | `{field}`, `{label, name}` or null for Off: pass it with each fetch, as the browser's |
 | `counts(map)` | the reader's counts of the choice's values, `''` for no value |
-| `valueOf(record)`, `colourOf(value)`, `dot(value)` | a record's value, a value's hue (null when off), its `●` (dim when off) |
+| `valueOf(record)`, `colorOf(value)`, `dot(value)` | a record's value, a value's hue (null when off; `colourOf` is the same), its `●` (dim when off) |
 | `isOn(value)` | whether a value's hue is on |
 | `keeps(record)` | always true: Color by hides no record (`filterBy`'s `keeps` does) |
 | `tally(record)` | count a record's values of every field for the menu (a list hands over its records, which the menu counts when it opens) |
 | `by`, `field`, `label`, `off`, `values` | the choice and its chips |
 | `choose(field \| {label} \| null)`, `toggle(value)` | change it from the page |
 
-A query names the label colored by, so the reader's `thimble.colour_value` reads it even while it is not on in Files.
+A query names the label colored by, so the reader's `thimble.color_value` reads it even while it is not on in Files.
 
 ## Time
 
 `timeRange(opts)` is the one control for a view's time, as in the browser ([time-range.md](time-range.md)).
 
-- `range.draw(d, {gutter})` draws its readout (`16 May 04:31 – 05:10 · 39m`) and its overview strip: a cell per bin of
+- `range.draw(d, {gutter})` draws its readout (`May 16 04:31 – 05:10 · 39m`) and its overview strip: a cell per bin of
   the whole span, each the bar of its records (`▁` to `█`) in the Color by hue most of them take. Zoomed in, the window
   is on the selection background between its edges `[` `]`, the cells a drag moves them from, and the rest dim. It
   opens on the whole span. A chart over the range leaves out a lane with nothing in a range zoomed in. Under the
@@ -233,7 +233,7 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
   Color by's (`─ running  × failed`), and the marks' labels on a row of their own. `legend` is runs, or entries
   `{glyph, fg, name, on, toggle}`, each a control that hides or shows its series, dim while it is off, as `timeline`
   gives them (`legend()`); entries that do not all fit the gutter stand on a row of their own over the axis.
-- `strip(scale, items, {value, colour, max, guide})` is one row of a chart over time (a lane), `maxBin(scale,
+- `strip(scale, items, {value, color, max, guide})` is one row of a chart over time (a lane), `maxBin(scale,
   groups)` the height every lane shares, and `bar(n, max)` one cell's bar.
 
 ## Filter by and Rows
@@ -298,7 +298,7 @@ draw((d) => tl.draw(d, { items: commits }))
 
 - `❯` and the accent mark the chosen row, across its whole width, its dim columns too (a run in a color of its own, such
   as a value's hue, keeps it); ↑↓ choose and the chosen row stays in view; a heading item
-  (`{heading: 'Sat 16 May 2026'}`) is a bold row no key chooses.
+  (`{heading: 'Sat, May 16, 2026'}`) is a bold row no key chooses.
 - Enter, or a click on the row, opens its details in place under it, at A2 (`detail(item, dd)`), and closes them;
   `onOpen(item)` hears it, to fetch what they show. `a` asks a side thread about the chosen row (`ask(item)`).
 - Each row starts with its mark in its Color by hue, then a mark for each choice past the first (`●` in the hue of the
@@ -350,7 +350,7 @@ panel has no drag across its rows, so here the overview has the rows the view gi
 ## The transcript
 
 `transcript(opts)` draws a transcript's turns as thimble-term's file view draws a transcript: `tr.draw(d, {turns, title,
-count, colour, side, onOpen})`. Each turn has its clock dim in a column, `●` (in its Color by hue, with `colour`, and a mark
+count, color, side, onOpen})`. Each turn has its clock dim in a column, `●` (in its Color by hue, with `color`, and a mark
 for each choice past the first) and the speaker bold, and its words under the name, up to three rows; a tool call is one dim row, `⎿ Bash pytest -q`, a
 failed one (`error`) with `× Bash` in red as the lanes draw it; the day stands on a dim row of its own where it changes.
 It is a list: ↑↓ choose a turn, Enter opens it in place, or in the side pane with `side` (a turn's words whole; a tool
@@ -424,11 +424,11 @@ frame's rows as text in the kit itself.
 
 ```
   / search events  incident  all  Color by  Service  ● payments 79  ● web 45  ● passes 16  ● bookings-db 6  +1
-  16 May 01:14 – 19 May 14:25 · 3d 13h
+  May 16 01:14 – May 19 14:25 · 3d 13h
           ▂▂▃▁▁▁▁▂▄█▄▂▃▃▂▂▁                    ▁ ▁▁▂▁▁▁▂ ▂  ▁▁▁ ▁▁  ▁          ▂▄▂▂▁▂ ▁▂  ▂  ▁ ▁ ▁▁
   alert     ▄▂▂   ▄▅▂ ▃  ▃                         ▃        ▂▂                  ▃▃        ▃
   …
-  Sat 16 May 2026
+  Sat, May 16, 2026
 ❯ ● 01:40:12  chat    message     Oona                 Tonight's release train: web 2.31.0 and payments 4.12.0…
 ```
 

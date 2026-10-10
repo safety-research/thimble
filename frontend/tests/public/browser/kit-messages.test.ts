@@ -90,7 +90,7 @@ describe('the messages in a frame, with Color by and the search', () => {
     const { page: p, frame, errors } = await framed(CHAT)
     // drawn in this order: the first group, its replies one level in, the event, the date line, the next day's group
     const order = await frame().evaluate(() => [...document.querySelectorAll('.thimble-msg, .thimble-msg-day')].map((e) => e.getAttribute('data-anchor') || e.textContent))
-    assert.deepEqual(order, ['Thu 27 Aug 2026', 'b.jsonl#L1', 'b.jsonl#L2', 'b.jsonl#L3', 'b.jsonl#L4', 'b.jsonl#L5', 'Fri 28 Aug 2026', 'b.jsonl#L6', 'b.jsonl#L7'])
+    assert.deepEqual(order, ['Thu, Aug 27, 2026', 'b.jsonl#L1', 'b.jsonl#L2', 'b.jsonl#L3', 'b.jsonl#L4', 'b.jsonl#L5', 'Fri, Aug 28, 2026', 'b.jsonl#L6', 'b.jsonl#L7'])
     // the second message has no head or avatar of its own, its words at the first's left edge, right under them
     const has = (sel: string) => frame().evaluate((s) => document.querySelector(s) != null, sel)
     assert.deepEqual([await has(msg(2, '.thimble-msg-head')), await has(msg(2, '.avatar')), await has(msg(1, '.avatar'))], [false, false, true])
@@ -203,7 +203,7 @@ describe('the messages under the label filter and in a long list', () => {
     await filter(['b.jsonl#L1', 'b.jsonl#L6', 'b.jsonl#L7'])
     await p.waitForTimeout(400)
     assert.deepEqual(await shown(), [
-      'Thu 27 Aug 2026',
+      'Thu, Aug 27, 2026',
       ['b.jsonl#L2', 'agent-03', true],
       ['b.jsonl#L3', 'agent-08', true],
       ['b.jsonl#L4', 'agent-03', true],
@@ -213,8 +213,8 @@ describe('the messages under the label filter and in a long list', () => {
     await filter([])
     await p.waitForTimeout(400)
     const all = await shown()
-    assert.deepEqual(all.slice(0, 3), ['Thu 27 Aug 2026', ['b.jsonl#L1', 'agent-03', true], ['b.jsonl#L2', null, false]])
-    assert.deepEqual(all.slice(6), ['Fri 28 Aug 2026', ['b.jsonl#L6', 'agent-01', true], ['b.jsonl#L7', null, false]])
+    assert.deepEqual(all.slice(0, 3), ['Thu, Aug 27, 2026', ['b.jsonl#L1', 'agent-03', true], ['b.jsonl#L2', null, false]])
+    assert.deepEqual(all.slice(6), ['Fri, Aug 28, 2026', ['b.jsonl#L6', 'agent-01', true], ['b.jsonl#L7', null, false]])
     assert.deepEqual(errors, [])
     await p.close()
   })

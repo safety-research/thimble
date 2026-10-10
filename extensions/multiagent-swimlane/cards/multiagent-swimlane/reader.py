@@ -656,7 +656,7 @@ def resolve(index, locator):
     did = _did(index, r)
     lines = did["said"].splitlines() if did["said"].strip() else _text(index, ref).splitlines()
     when = datetime.fromtimestamp(r["t"], timezone.utc)
-    label = f"{r['account']} · {when.day} {MONTHS[when.month - 1]} {when:%H:%M}" if r["known"] else r["account"]
+    label = f"{r['account']} · {MONTHS[when.month - 1]} {when.day} {when:%H:%M}" if r["known"] else r["account"]
     return {"excerpt": _excerpt(lines) or r["account"], "label": label[:40], "refs": cited, "key": None,
             "target": {"ref": ref, "account": r["account"], "place": r["place"]}}
 

@@ -1291,7 +1291,7 @@ describe('the text', () => {
 })
 
 describe('times', () => {
-  // 09:00 on 16 May 2026 in UTC
+  // 09:00 on May 16, 2026 in UTC
   const T = Date.UTC(2026, 4, 16, 9) / 1000
   test("the messages and the timeline read a record's time as the transcript does: a number, its digits, an ISO time or a mail's date, one with no zone in UTC on a machine in any zone, and text with no date in it as no time", async () => {
     const zone = process.env.TZ
@@ -1354,7 +1354,7 @@ describe('the messages', () => {
     expect(texts('[data-anchor="m#1"] .thimble-msg-head')).toEqual(['ana23:30'])
     expect(doc().querySelector('[data-anchor="m#1"] .thimble-msg-time')!.getAttribute('title')).toBe('2026-08-27 23:30:00')
     // a date line opens each day; the header names the list and counts its messages and events
-    expect(texts('.thimble-msg-day')).toEqual(['Thu 27 Aug 2026', 'Fri 28 Aug 2026'])
+    expect(texts('.thimble-msg-day')).toEqual(['Thu, Aug 27, 2026', 'Fri, Aug 28, 2026'])
     expect(doc().querySelector('[data-anchor="m#10"]')!.previousElementSibling!.className).toBe('thimble-msg-day')
     expect(texts('.thimble-msg-header')).toEqual(['# ferries11 messages · 1 event'])
     expect([...doc().querySelectorAll('.thimble-msg-header, .thimble-msg-day, .thimble-msg-head')].every((e) => e.hasAttribute('data-thimble-chrome'))).toBe(true)

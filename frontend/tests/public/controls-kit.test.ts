@@ -404,7 +404,7 @@ describe('the timeline on its own', () => {
     expect(labels).toContain('09:30')
     // the tip's head is the time alone, as there is no lane to name; the record's words under it
     hover(doc().querySelector('#lanes .thimble-lane')!, xs[1] + 1)
-    expect(tipOf()).toEqual([expect.stringMatching(/^16 May 09:30:/), 'merged'])
+    expect(tipOf()).toEqual([expect.stringMatching(/^May 16 09:30:/), 'merged'])
   })
 
   test('a Color by the page made with colorOf, the American name, colors its marks; a key entry takes its color or colour', async () => {
@@ -438,7 +438,7 @@ describe('the timeline on its own', () => {
     expect(texts('#tl2 .thimble-lane-name')).toEqual(['ok', 'failed'])
     // a lane's name in its tip's head
     hover(doc().querySelector('#tl2 .thimble-lane')!, 300)
-    expect(tipOf()![0]).toMatch(/^ok · 16 May/)
+    expect(tipOf()![0]).toMatch(/^ok · May 16/)
   })
 
   test("on plain numbers (unit 'n'): the marks at their numbers, the axis and the tip in numbers; with a range of numbers it takes the range's unit and draws no axis of its own", async () => {
@@ -541,7 +541,7 @@ describe('the timeline on its own', () => {
     expect(texts('.thimble-key-chip')).toEqual(['failed1,500'])
   })
 
-  test("Density's tip gives a bin's day once: 16 May 09:00–09:01", async () => {
+  test("Density's tip gives a bin's day once: May 16 09:00–09:01", async () => {
     await load()
     const w = win()
     w.eval(`
@@ -551,7 +551,7 @@ describe('the timeline on its own', () => {
     await wait()
     const bar = doc().querySelector('#lanes .thimble-lane-bar')!
     hover(doc().querySelector('#lanes .thimble-lane')!, Number(bar.getAttribute('x')) + 1)
-    expect(tipOf()![0]).toMatch(/^16 May \d\d:\d\d(:\d\d)?–\d\d:\d\d(:\d\d)?$/)
+    expect(tipOf()![0]).toMatch(/^May 16 \d\d:\d\d(:\d\d)?–\d\d:\d\d(:\d\d)?$/)
   })
 
   test('a mark as wide as its record ran: the longest drawn first, so that it never hides a short one under it', async () => {

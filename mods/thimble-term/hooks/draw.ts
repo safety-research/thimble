@@ -391,7 +391,7 @@ export function barRows(card: CardData): { rows: BarRow[]; more: number } {
   return { rows: all.filter(r => keep.has(r.label)), more: labels.length - keep.size }
 }
 
-/** A bar's label as the browser's axis draws it: timestamps all in one form (`24 May`, the time only when one is not
+/** A bar's label as the browser's axis draws it: timestamps all in one form (`May 24`, the time only when one is not
  *  midnight, shortTimes); any other label as written. */
 function barNames(labels: readonly string[]): string[] {
   return labels.length && labels.every(l => STAMP.test(l.trim())) ? shortTimes(labels) : [...labels]
@@ -427,7 +427,7 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
   // where each label's bars stand on its row: [x0, x1) per row of the data, from the content's edge
   const spans: { x0: number; x1: number; i: number }[][] = []
   const items: Item[] = rows.map(r => {
-    // a stacked bar's readout names its group too (`24 May · page saved`)
+    // a stacked bar's readout names its group too (`May 24 · page saved`)
     const name = nameOf.get(r.label) ?? r.label
     const group = groups.length > 1 && r.group && r.group !== r.label ? ` · ${r.group}` : ''
     return {
@@ -648,7 +648,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const STAMP = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?\s*(?:Z|[+-]\d{2}(?::?\d{2})?)?$/
 
 /**
- * Timestamps as a timeline shows them, all in one form: "18 Jun 21:26", the year only when the events span more than
+ * Timestamps as a timeline shows them, all in one form: "Jun 18 21:26", the year only when the events span more than
  * one, the time only when one is not midnight, seconds only when two events share a minute. The clock reads as written
  * (no time zone conversion). Times that are not all ISO dates are kept as they are.
  */
@@ -661,7 +661,7 @@ export function shortTimes(times: readonly string[]): string[] {
   const minute = (p: RegExpExecArray) => `${p[1]}-${p[2]}-${p[3]} ${p[4] ?? '00'}:${p[5] ?? '00'}`
   const secs = ps.some(p => ps.some(q => minute(p) === minute(q) && (p[6] ?? '00') !== (q[6] ?? '00')))
   return ps.map(p => {
-    const day = `${Number(p[3])} ${MONTHS[Number(p[2]) - 1] ?? p[2]}${years.size > 1 ? ` ${p[1]}` : ''}`
+    const day = `${MONTHS[Number(p[2]) - 1] ?? p[2]} ${Number(p[3])}${years.size > 1 ? `, ${p[1]}` : ''}`
     if (!clock) return day
     return `${day} ${p[4] ?? '00'}:${p[5] ?? '00'}${secs ? `:${p[6] ?? '00'}` : ''}`
   })
@@ -669,7 +669,7 @@ export function shortTimes(times: readonly string[]): string[] {
 
 /**
  * Times of a transcript's turns as its time column shows them: the clock alone (`07:40:01`; seconds only when a time
- * has them), and the day (`18 Jun 2026`) on each turn where it changes, which the column shows on a row of its own. Times
+ * has them), and the day (`Jun 18, 2026`) on each turn where it changes, which the column shows on a row of its own. Times
  * that are not all ISO stamps stay as written, with no day. An empty time stays empty.
  */
 export function turnTimes(times: readonly string[]): { clock: string; day: string }[] {
@@ -680,7 +680,7 @@ export function turnTimes(times: readonly string[]): { clock: string; day: strin
   return parts.map(p => {
     if (!p) return { clock: '', day: '' }
     const key = `${p[1]}-${p[2]}-${p[3]}`
-    const day = key === last ? '' : `${Number(p[3])} ${MONTHS[Number(p[2]) - 1] ?? p[2]} ${p[1]}`
+    const day = key === last ? '' : `${MONTHS[Number(p[2]) - 1] ?? p[2]} ${Number(p[3])}, ${p[1]}`
     last = key
     const clock = p[4] === undefined ? '' : `${p[4]}:${p[5] ?? '00'}${secs ? `:${p[6] ?? '00'}` : ''}`
     return { clock, day }

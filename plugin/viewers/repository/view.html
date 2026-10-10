@@ -37,7 +37,7 @@
 
   .top { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 16px 8px; }
   #search { flex: 0 1 260px; min-width: 200px; }
-  #filter, #colour { min-width: 0; }
+  #filter, #color { min-width: 0; }
   #body { flex: 1; min-height: 0; border-top: 1px solid var(--border-subtle); }
   #list { flex: 1; min-width: 0; }
 
@@ -86,7 +86,7 @@
   <div class="top">
     <span id="search"></span>
     <span id="filter"></span>
-    <span id="colour"></span>
+    <span id="color"></span>
   </div>
   <div id="body"><div id="list"></div></div>
 </div>
@@ -116,7 +116,7 @@ const TABS = [
 ]
 const TAB_OF = { pull: 'pulls', issues: 'issues', discussions: 'discussions', agents: 'agents' } // a key's second part
 
-// line icons in the text colour: a state is a shape, never a colour, which is Color by's
+// line icons in the text color: a state is a shape, never a color, which is Color by's
 const ICONS = {
   repo: '<path d="M3.5 2.5h8.5v9.5H5a1.5 1.5 0 0 0-1.5 1.5zM3.5 13.5A1.5 1.5 0 0 0 5 15h7v-3"/><path d="M6 5h3.5"/>',
   chev: '<path d="M4.5 6.5L8 10l3.5-3.5"/>',
@@ -145,7 +145,7 @@ const VERDICT = { approved: ['approve', 'approved these changes'], 'changes requ
 const hm = (t) => new Date(t * 1000).toISOString().slice(11, 16)
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const day = (t) => { const d = new Date(t * 1000); return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}` }
+const day = (t) => { const d = new Date(t * 1000); return `${DAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}` }
 const tOf = (iso) => Date.parse(iso) / 1000
 function took(a, b) {
   const m = Math.round((b - a) / 60)
@@ -154,7 +154,7 @@ function took(a, b) {
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const cap = (s) => String(s || '').replace(/^./, (c) => c.toUpperCase())
 const firstLine = (s) => String(s || '').split('\n')[0]
-// an avatar's shade from its name, so people tell apart without a colour
+// an avatar's shade from its name, so people tell apart without a color
 function shade(name) {
   let h = 0
   for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) | 0
@@ -187,7 +187,7 @@ const FIELDS = [
 // the item's page beside them, and counts the items it keeps (draw)
 const search = thimble.search({ mount: '#search', in: '#body', placeholder: 'Search', onChange: draw })
 const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, onChange: load })
-const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, onChange: load })
+const color = thimble.colorBy({ mount: '#color', fields: FIELDS, onChange: load })
 const side = thimble.side({ mount: '#body', width: 0.45, onClose: () => { open = null } })
 // Reset puts back the run the view opens on, as it puts back the chips and empties the search, and the page draws again
 // with what they keep
@@ -200,7 +200,7 @@ const resetRun = thimble.onReset({
 async function load() {
   let got
   try {
-    got = await thimble.fetch({ op: 'view', run, tab, colour: colour.query(), filter: filter.query() }, { key: 'view' })
+    got = await thimble.fetch({ op: 'view', run, tab, color: color.query(), filter: filter.query() }, { key: 'view' })
   } catch (e) {
     if (e.name === 'AbortError') return
     throw e
@@ -208,7 +208,7 @@ async function load() {
   data = got
   run = got.run
   for (const it of got.items) it.ref = unit(it.key)
-  colour.counts(got.counts)
+  color.counts(got.counts)
   filter.counts(got.filtered)
   resetRun.check()
   units.clear()
@@ -322,18 +322,18 @@ const COLUMNS = {
 
 // The table of the tab's items: a row is an item, its ref the item's unit; under a field, its value's bar. A row that
 // stands for its records (every row under a label, which marks records, and an agent's under a field it does not carry)
-// takes none and no colour on the strip: its records' mix shows in the row (mix) and their own bars on its page. Made
+// takes none and no color on the strip: its records' mix shows in the row (mix) and their own bars on its page. Made
 // again when the tab changes or its rows come to stand for their records
 let table = null
 let tableFor = ''
 function list() {
-  const plain = !!colour.label || shown.some((it) => it.mix)
+  const plain = !!color.label || shown.some((it) => it.mix)
   if (table && tableFor === tab + plain) return table.draw(shown)
   tableFor = tab + plain
   table = thimble.table({
     mount: '#list', key: tab, columns: COLUMNS[tab], rows: shown, search, side,
-    colour: plain ? false : undefined,
-    attrs: (it) => (colour.label || it.mix ? { 'data-anchor-unmarked': true } : null),
+    color: plain ? false : undefined,
+    attrs: (it) => (color.label || it.mix ? { 'data-anchor-unmarked': true } : null),
     details: (it) => {
       if (!open || open.key !== it.key) open = { key: it.key, ref: null, part: 'conversation' }
       return { title: it.title, sub: subOf(it), render: (body) => fill(body, it.key) }
@@ -527,7 +527,7 @@ thimble.onLabels(() => load())
 // a label's values arrive while it runs, which the counts and the list follow while a label colors or filters
 let later = null
 thimble.onMarks(() => {
-  if (!colour.label && !filter.label) return
+  if (!color.label && !filter.label) return
   clearTimeout(later)
   later = setTimeout(load, 300)
 })

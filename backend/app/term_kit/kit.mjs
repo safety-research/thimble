@@ -182,12 +182,12 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const two = (n) => String(n).padStart(2, '0')
 
-/** A time in seconds since 1970, in UTC, as precise as `step` seconds need: `16 May 2026`, `16 May 04:31`,
- *  `16 May 04:31:07`. */
+/** A time in seconds since 1970, in UTC, as precise as `step` seconds need: `May 16, 2026`, `May 16 04:31`,
+ *  `May 16 04:31:07`. */
 export function when(t, step = 60) {
   const d = new Date(t * 1000)
-  const day = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`
-  if (step >= 86400) return `${day} ${d.getUTCFullYear()}`
+  const day = `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`
+  if (step >= 86400) return `${day}, ${d.getUTCFullYear()}`
   const hm = `${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`
   return step >= 60 ? `${day} ${hm}` : `${day} ${hm}:${two(d.getUTCSeconds())}`
 }
@@ -211,10 +211,10 @@ export function dayOf(t) {
 }
 const DAYS_SEEN = new Map()
 
-/** A day's heading, `Sat 16 May 2026`. */
+/** A day's heading, `Sat, May 16, 2026`. */
 export function dayName(t) {
   const d = new Date(t * 1000)
-  return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+  return `${DAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
 }
 
 // A time in seconds since 1970 as a record gives it, read as the browser kit reads it (viewer_colour.js secs): a number
@@ -2200,7 +2200,7 @@ export function timeRange(opts = {}) {
     format(t, step = (api.to - api.from) / 60) {
       return unit === 'n' ? numAt(t, 1) : when(t, step)
     },
-    /** The range's readout: start, end and length, `16 May 04:31 – 05:10 · 39m`. */
+    /** The range's readout: start, end and length, `May 16 04:31 – 05:10 · 39m`. */
     readout() {
       const a = api.from
       const b = api.to
@@ -4188,7 +4188,7 @@ export function transcript(opts = {}) {
     const s = secsOf(t)
     if (s === null) return ''
     const d = new Date(s * 1000)
-    return `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+    return `${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
   }
   const firstLine = (s) => oneLine(String(s ?? '').split('\n').find((l) => l.trim()) || '')
   const api = {
