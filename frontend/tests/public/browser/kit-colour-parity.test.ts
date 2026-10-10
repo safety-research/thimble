@@ -296,3 +296,72 @@ test('each part draws alone with no Color by, its records with no bar, and takes
   assert.deepEqual(await errors(page), [], 'the kit reported no error')
   await page.close()
 })
+
+// A page that makes its parts again in their elements, as a page that makes them in its draw() does, with Color by's
+// first choice Kind: two transcripts made again in #again (the last given `colour: false` in #quiet), turns whose
+// `kind` is the transcript's own and whose `record` holds the post's kind, and two tables of forty rows, one given
+// `colour: false`. `value()` counts what Color by reads of the turns' records.
+const again = `<!doctype html><html><head><style>${TOKENS} html,body{margin:0} body{font:12px sans-serif;background:#fffdf8}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 12px}</style>${KIT}</head><body>
+<div style="padding:8px"><span id="colour"></span></div>
+<div class="grid"><div id="again"></div><div id="quiet"></div><div id="t" style="height:160px"></div><div id="off-t" style="height:160px"></div></div>
+<script>
+const POSTS = Array.from({ length: 40 }, (_, i) => ({ n: i + 1, kind: ['review', 'claim'][i % 2], author: ['ana', 'bo', 'cy'][i % 3], text: 'Post ' + (i + 1) }))
+window.__reads = 0
+// a read of a turn's record, which the transcripts alone hand Color by (the tables' rows are copies)
+const count = (name) => (r) => (POSTS.includes(r) && window.__reads++, r[name])
+thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', value: count('kind') }, { name: 'author', title: 'Author', value: count('author') }], onChange: () => {} })
+const turns = (p) => POSTS.slice(0, 4).map((r) => ({ ref: p + '#L' + r.n, speaker: r.author, kind: 'text', text: r.text, record: r }))
+for (let k = 0; k < 20; k++) thimble.transcript({ mount: '#again' }).draw(turns('again'))
+thimble.transcript({ mount: '#quiet' }).draw(turns('quiet'))
+thimble.transcript({ mount: '#quiet', colour: false }).draw(turns('quiet'))
+thimble.table({ mount: '#t', rows: POSTS.map((r) => ({ ...r, ref: 't#L' + r.n })), columns: ['kind', 'author', 'text'] })
+thimble.table({ mount: '#off-t', rows: POSTS.map((r) => ({ ...r, ref: 'o#L' + r.n })), columns: ['kind', 'author', 'text'], colour: false })
+</script></body></html>`
+
+test("a part made again in its element takes the place of the one before; a turn's record is what Color by reads; a table given colour: false keeps a plain strip", async () => {
+  const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
+  await page.setContent('<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:960px;height:660px"></iframe></body></html>')
+  await page.evaluate((doc) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = doc), again)
+  await page.waitForTimeout(300)
+  const f = page.frames().find((x) => x !== page.mainFrame())!
+  await f.waitForSelector('.thimble-colour-chip', { state: 'attached' })
+  await settle(page)
+  const stamps = (sel: string) => f.evaluate((sel) => [...document.querySelectorAll(sel)].map((el) => el.getAttribute('data-colour')), sel)
+  assert.deepEqual(await stamps('#again > .thimble-turn'), ['review', 'claim', 'review', 'claim'], "each turn stamped with its record's kind, not its own")
+  assert.deepEqual(await stamps('#quiet > .thimble-turn'), [null, null, null, null], 'the transcript made again with colour: false shows no stamp')
+
+  // Author then Kind again: only the last transcript in #again stamps its turns, and none stamps #quiet's
+  for (const by of ['author', 'kind']) {
+    await f.evaluate(() => ((window as any).__reads = 0))
+    await menuClick(f, by)
+    await menuClick(f, by === 'author' ? 'kind' : 'author')
+    await page.keyboard.press('Escape')
+    await settle(page)
+    const reads = await f.evaluate(() => (window as any).__reads)
+    // a turn's two values at most for each of the two changes, of #again's four turns: the transcripts made there
+    // before the last, and #quiet's before the one given colour: false, stamp nothing
+    assert.ok(reads <= 16, `the transcripts read ${reads} values of their records for two changes`)
+  }
+  assert.deepEqual(await stamps('#again > .thimble-turn'), ['review', 'claim', 'review', 'claim'], 'stamped again from the records')
+  assert.deepEqual(await stamps('#quiet > .thimble-turn'), [null, null, null, null], 'the transcript before the one given colour: false stamps nothing')
+
+  // Kind and Author together: the table that follows Color by has a strip of both, the one given colour: false a plain one
+  await menuClick(f, 'author')
+  await page.keyboard.press('Escape')
+  await settle(page)
+  const strips = await f.evaluate(() =>
+    ['#t', '#off-t'].map((sel) => {
+      const box = document.querySelector(sel)!.getBoundingClientRect()
+      const strip = [...document.querySelectorAll('.thimble-colour-strip')].find((s) => {
+        const r = s.getBoundingClientRect()
+        return r.width > 0 && r.left < box.right + 4 && r.right > box.right - 40 && r.top < box.bottom && r.bottom > box.top
+      })
+      return strip ? { plain: strip.hasAttribute('data-plain'), width: Math.round(strip.getBoundingClientRect().width) } : null
+    }),
+  )
+  assert.equal(strips[0]?.plain, false, "the table that follows Color by colors its strip")
+  assert.equal(strips[1]?.plain, true, 'the table given colour: false has a plain strip, with no lane for the second choice')
+  assert.ok(strips[1]!.width < strips[0]!.width, 'the plain strip is narrower than the strip with a lane')
+  await page.close()
+})
