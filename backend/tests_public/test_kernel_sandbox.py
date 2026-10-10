@@ -218,6 +218,24 @@ def test_a_workspace_set_to_srt_never_runs_unwrapped(monkeypatch, workspaces_tmp
         notebook.sandboxed_argv(["python"], workspace="mini", corpus=config.corpus_dir("mini"))
 
 
+def test_the_kernel_s_command_leaves_srt_room_in_its_one_shell_argument(tmp_path):
+    """srt wraps the kernel's whole command in one shell argument of at most MAX_ARG_STRLEN bytes, its own words with
+    it (2026-10-10: 133,125 bytes of a 131,071 limit when the `thimble` module's source went as text, and every kernel
+    died before answering). The source goes compressed, and the quoted command takes at most half the argument."""
+    import shlex
+
+    argv = notebook.kernel_argv(tmp_path / "k.conn.json", tmp_path / "k.json", roots=(str(tmp_path),), workspace=tmp_path)
+    assert len(" ".join(shlex.quote(a) for a in argv)) < notebook.MAX_ARG_STRLEN // 2
+    # the compressed source installs the same module
+    line = next(a for a in argv if "types.ModuleType('thimble')" in a).split("=", 1)[1]
+    try:
+        exec(line, {})  # noqa: S102 — the kernel's own exec line
+        mod = sys.modules["thimble"]
+        assert mod.WS == str(tmp_path) and mod.CHARTS.keys() >= {"bar", "box", "area"}
+    finally:
+        sys.modules.pop("thimble", None)
+
+
 def test_the_start_up_sweep_leaves_a_sandboxed_kernel_s_processes_alone():
     """Under srt the kernel runs below the recorded launcher in a session of its own, so the sweep of unrecorded
     kernels counts every process below a claimed one as claimed."""
