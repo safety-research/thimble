@@ -180,6 +180,8 @@ scrollbar in one strip at its right edge, at every length:
   where the press was, scrubs the list. The wheel over the strip scrolls the list.
 - The strip moves in the browser's animation frames with transforms alone, so it follows a scroll or a drag frame by
   frame; once still, every edge goes onto the device's pixel grid.
+- The strip stands on the part of the list in view: when the page or a box around the list scrolls or changes size,
+  the strip and an open loupe go with the list, cut where the list is cut, and hide while the list is out of view.
 
 For a list that draws only the rows in view, give every row's value in order: `color.strip('#list', {rows: values})`,
 with `preview(i)` (what the loupe says of row `i`: a string, or `{when, text}`; without it, the text of the row's

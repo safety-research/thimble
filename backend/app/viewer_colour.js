@@ -1910,9 +1910,9 @@
     this.loupeBox.className = 'thimble-colour-loupe-box'
     this.loupeEl.appendChild(this.loupeBox)
     // the loupe: open, naming one record (`one`), the pointer in it (`frozen`), what it follows (`anchor`: 'pointer',
-    // 'view' or 'fixed'), the unit under the pointer and the first record shown, the row under the pointer in it, and
-    // what is written in each row, so that a draw writes only what changed
-    this.lp = { open: false, one: false, frozen: false, anchor: 'pointer', c: 0, start: 0, n: 0, timer: 0, lastY: null, hover: null, g: null, sigs: [], cls: [], kw: null, place: '', bracket: '' }
+    // 'view' or 'fixed'), the unit under the pointer and the first record shown, the row under the pointer in it, what
+    // is written in each row, so that a draw writes only what changed, and the y its middle was last placed at (`mid`)
+    this.lp = { open: false, one: false, frozen: false, anchor: 'pointer', c: 0, start: 0, n: 0, timer: 0, lastY: null, hover: null, g: null, sigs: [], cls: [], kw: null, place: '', bracket: '', mid: null }
     document.body.appendChild(this.el)
     document.body.appendChild(this.loupeEl)
     var pad = this.page ? document.body : this.box
@@ -1927,6 +1927,15 @@
       self.kick()
     }
     ;(this.page ? window : this.box).addEventListener('scroll', this.onScroll, { passive: true })
+    // The strip stands fixed in the frame's viewport, beside where its list is: a scroll of anything the list stands in
+    // (the page, or a box around the list), or a box around it that changes size, moves the list on the screen, and the
+    // strip and an open loupe are placed beside it again in the next frame
+    this.onMoved = function (e) {
+      var t = e && e.target
+      if (!t || t === self.box) return
+      if (t === document || t === document.documentElement || t === document.body || (t.nodeType === 1 && t.contains(self.box))) self.relayout()
+    }
+    if (!this.page) document.addEventListener('scroll', this.onMoved, { capture: true, passive: true })
     // a resize moves the records of a list of elements; a list given its rows keeps their places and is drawn again
     this.onResize = function () {
       if (self.rows) self.relayout()
@@ -1936,6 +1945,12 @@
     if (typeof ResizeObserver === 'function') {
       this.ro = new ResizeObserver(this.onResize)
       this.ro.observe(this.box)
+      if (!this.page) {
+        this.roAround = new ResizeObserver(function () {
+          self.relayout()
+        })
+        for (var up = this.box.parentElement; up; up = up.parentElement) this.roAround.observe(up)
+      }
     }
     this.drag = null
     this.el.addEventListener('pointerdown', function (e) {
@@ -2009,8 +2024,10 @@
     this.lpClose()
     clearTimeout(this.chosenTimer)
     ;(this.page ? window : this.box).removeEventListener('scroll', this.onScroll)
+    if (!this.page) document.removeEventListener('scroll', this.onMoved, { capture: true })
     window.removeEventListener('resize', this.onResize)
     if (this.ro) this.ro.disconnect()
+    if (this.roAround) this.roAround.disconnect()
     this.box.classList.remove('thimble-colour-scrolled')
     this.padded.style.paddingRight = this.padWas
     this.el.remove()
@@ -2133,6 +2150,27 @@
     if (this.page) return { left: 0, top: 0, right: document.documentElement.clientWidth, bottom: innerHeight, height: innerHeight }
     var r = this.box.getBoundingClientRect()
     return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, height: r.height }
+  }
+  // The part of the list's box the frame shows, in its viewport: the box `r` cut by the viewport and by every box
+  // around it that clips what overflows it, as the list itself is cut there; a fixed box around it ends the boxes that
+  // clip it
+  Strip.prototype.shown = function (r) {
+    var v = { left: Math.max(r.left, 0), top: Math.max(r.top, 0), right: Math.min(r.right, document.documentElement.clientWidth), bottom: Math.min(r.bottom, innerHeight) }
+    if (this.page) return v
+    for (var a = this.box.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+      var cs = getComputedStyle(a)
+      if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+        var q = a.getBoundingClientRect()
+        var x = q.left + a.clientLeft
+        var y = q.top + a.clientTop
+        v.left = Math.max(v.left, x)
+        v.right = Math.min(v.right, x + a.clientWidth)
+        v.top = Math.max(v.top, y)
+        v.bottom = Math.min(v.bottom, y + a.clientHeight)
+      }
+      if (cs.position === 'fixed') break
+    }
+    return v
   }
   // every record of the list: [top, bottom] as fractions of the list's height, its colour (the marks' grey for a record
   // that takes no value or a value turned off, as for every record with Color by Off), its element or its row
@@ -2302,8 +2340,12 @@
     var r = this.rect()
     var box = this.box
     var scrolls = box.scrollHeight > box.clientHeight + 1
-    this.el.style.display = scrolls ? '' : 'none'
-    if (!scrolls) {
+    // the strip stands on the part of the list the frame shows: a list out of view, or showing too little of itself
+    // to hold a thumb, or whose right edge is cut, hides it, as its own scrollbar would be hidden
+    var vis = scrolls ? this.shown(r) : null
+    var shows = scrolls && vis.bottom - vis.top >= THUMB_MIN + 2 * EDGE && r.right - EDGE <= vis.right + 0.5 && r.right - this.width - EDGE >= vis.left - 0.5
+    this.el.style.display = shows ? '' : 'none'
+    if (!shows) {
       this.lpClose()
       return
     }
@@ -2317,9 +2359,12 @@
     var snap = function (v) {
       return Math.round(v * dpr) / dpr
     }
-    var top = snap(Math.max(r.top, 0) + EDGE)
-    var h = Math.max(0, snap(Math.min(r.bottom, innerHeight) - EDGE) - top)
-    this.el.style.left = snap(r.right - this.width - EDGE) + 'px'
+    var top = snap(vis.top + EDGE)
+    var h = Math.max(0, snap(vis.bottom - EDGE) - top)
+    var left = snap(r.right - this.width - EDGE)
+    var was = this.placedAt
+    this.placedAt = [left, top]
+    this.el.style.left = left + 'px'
     this.el.style.top = top + 'px'
     this.el.style.height = h + 'px'
     this.h = h
@@ -2332,7 +2377,12 @@
     this.drawn = null
     this.place(typeof performance !== 'undefined' ? performance.now() : Date.now())
     this.kick()
-    if (this.lp.open) this.lpDraw(this.lpMeasure())
+    if (!this.lp.open) return
+    var g = this.lpMeasure()
+    // the strip moved on the screen with its list, as the page scrolled: the loupe goes with it, beside the same
+    // records (one that follows the thumb is placed by lpDraw)
+    if (was && was[1] !== top && this.lp.anchor !== 'view' && this.lp.mid != null) this.lpPlace(this.lp.mid + top - was[1], g)
+    this.lpDraw(g)
   }
   // the strip's canvas: the search's lane of ticks when it finds something, a lane for the Color by choice, then one for
   // each choice past the first, each on its stripe, in whole device pixels; each lane of colours keeps its rows'
@@ -2829,6 +2879,7 @@
     var H = loupeHeight(L.one ? 1 : L.n)
     var right = Math.max(0, document.documentElement.clientWidth - g.left)
     var top = Math.max(g.lo, Math.min(g.hi - H, y - H / 2))
+    L.mid = y
     var at = [right, top, w, L.one].join()
     if (at === L.place) return
     L.place = at
