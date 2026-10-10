@@ -70,7 +70,7 @@ def builder_definition(c: str) -> dict[str, Any]:
 
     with prompts.custom(userconf.prompt_files(c, "dev")):
         prompt = prompts.render_dev("dev-view", {"corpus": str(config.corpus_dir(c)), "examples": str(views.EXAMPLES_DIR),
-                                                 "docs": str(config.REPO_ROOT / "docs"),
+                                                 "docs": str(views.DOCS_DIR),
                                                  "attempts": str(dev.MAX_ATTEMPTS)})
     return {"description": BUILDER_DESCRIPTION, "prompt": prompt, "disallowedTools": tools.not_own(BUILDER_TOOLS)}
 

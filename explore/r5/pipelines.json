@@ -1,0 +1,32 @@
+{
+  "baseline": {
+    "tree": "/mnt/store/scratch/rel/views-r5/trees/baseline",
+    "diff": null,
+    "env": {},
+    "note": "thimble's prompts today: origin/main 63a8b849 (0.6.2), its worked example views in plugin/viewers"
+  },
+  "new": {
+    "tree": "/mnt/store/scratch/rel/views-r5/trees/mech",
+    "diff": "/mnt/store/scratch/rel/views-r5/prompts/new.diff",
+    "env": {},
+    "note": "principles, structure-task-interface examples, typed profile (profile_data), kit snippets; no worked examples"
+  },
+  "new-examples": {
+    "tree": "/mnt/store/scratch/rel/views-r5/trees/mech",
+    "diff": "/mnt/store/scratch/rel/views-r5/prompts/new-examples.diff",
+    "env": {"THIMBLE_VIEW_EXAMPLES_DIR": "/mnt/store/scratch/rel/views-r5/examples"},
+    "note": "new, with the worked example views back: the builder's {{examples}} is a copy of origin/main's plugin/viewers"
+  },
+  "new-description": {
+    "tree": "/mnt/store/scratch/rel/views-r5/trees/mech",
+    "diff": "/mnt/store/scratch/rel/views-r5/prompts/new-description.diff",
+    "env": {},
+    "note": "new, with a plain description and a simple per-file profile (profile_data's description and files) for types"
+  },
+  "new-many": {
+    "tree": "/mnt/store/scratch/rel/views-r5/trees/mech",
+    "diff": "/mnt/store/scratch/rel/views-r5/prompts/new-many.diff",
+    "env": {},
+    "note": "new, with about eight concepts and a picker that keeps two (pick_views); both views are built"
+  }
+}

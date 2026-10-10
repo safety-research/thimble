@@ -1,3 +1,0 @@
-{"monitor": "4.0.2", "started": 1779148800000, "rules": 38}
-{"id": "alr-74", "ts": 1779191120000, "state": "FIRING", "service": "payments", "severity": "warning", "incident": null, "summary": "payments: database connections at 142 of 150"}
-{"id": "alr-75", "ts": 1779191550000, "state": "RESOLVED", "service": "payments", "severity": "warning", "incident": null, "summary": "payments: database connections at 61 of 150", "resolves": "alr-74"}

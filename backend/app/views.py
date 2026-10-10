@@ -188,7 +188,12 @@ NODE_MIN = 20  # the Node major the checks need, as scripts/install.sh asks for 
 # plugin/viewers holds the worked examples a view ticket's session reads. They are examples for the dev agent only:
 # nothing registers, proposes or lists them as views, and their globs never run against a corpus.
 VIEWERS_DIR = config.REPO_ROOT / "plugin" / "viewers"
-EXAMPLES_DIR = VIEWERS_DIR
+# views round 5 (exploration): this branch has no worked examples in plugin/viewers, so a build finds none on disk; a
+# run that keeps them (pipeline 3) points THIMBLE_VIEW_EXAMPLES_DIR at a copy outside the tree, which its prompts'
+# `## Worked examples` names as {{examples}}. THIMBLE_VIEW_DOCS_DIR points the builder's {{docs}} at another copy of
+# docs/, such as one a run's prompts diff changed.
+EXAMPLES_DIR = Path(os.environ.get("THIMBLE_VIEW_EXAMPLES_DIR") or VIEWERS_DIR)
+DOCS_DIR = Path(os.environ.get("THIMBLE_VIEW_DOCS_DIR") or config.REPO_ROOT / "docs")
 BUILTIN_VIEWERS: tuple[str, ...] = ()  # file-type viewers thimble ships under the view contract
 BUILTIN_CACHE = ".builtin"  # under the workspace's views folder: a built-in viewer's index cache and check shots
 # Scripts and styles inline (the bridge, the vendored libraries, the view's own), images as data or blob URLs, workers

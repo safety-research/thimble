@@ -3079,10 +3079,31 @@ def build_task(c: str, prop: dict[str, Any], *, repair: str = "") -> str:
     more = [repair] if repair else []
     if prop.get("changed") or prop.get("change"):
         more.append(change_text(c, prop))
+    if data := data_text(c):
+        more.append(data)
     return prompts.render("dev-view-task", {
         "name": str(prop.get("name") or slug), "slug": slug, "folder": str(views.views_dir(c) / slug),
         "work": str(view_work_dir(c, slug)), "proposal": view_tools.fenced_proposal(prop),
         "more": "\n\n".join(more)})
+
+
+def data_text(c: str) -> str:
+    """Views round 5 (exploration): main's last description of the data (its TypeScript types, or its words) and the
+    profile code made of it with profile_data (profile_data.saved), each fenced as data, in prompts/dev-view-data.md;
+    '' where the prompts have no such file or main made none, and with THIMBLE_VIEW_DATA_BRIEF=off."""
+    from . import profile_data  # noqa: PLC0415
+
+    if os.environ.get("THIMBLE_VIEW_DATA_BRIEF", "on") == "off":
+        return ""
+    saved = profile_data.saved(c)
+    if saved is None:
+        return ""
+    data, profile = saved
+    try:
+        return prompts.render("dev-view-data", {"data": fenced("the description of the data", data),
+                                                "profile": fenced("the profile", profile)}).strip()
+    except prompts.PromptError:
+        return ""
 
 
 def repair_text(report: str, n: int) -> str:

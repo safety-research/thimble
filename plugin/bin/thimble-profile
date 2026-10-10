@@ -1,0 +1,23 @@
+#!/bin/sh
+''''exec "$(dirname "$0")/thimble-python" "$0" "$@" # '''
+"""thimble-profile: main's description of the data checked against the records, for proposing views (app/profile_types.py).
+
+    thimble-profile types [--out DIR] < types.ts       TypeScript types of the records, checked and profiled
+    thimble-profile files [GLOB ...] < description.md  a simple per-file profile, with no types
+
+Views round 5 (exploration): the profile_data tool runs the same engine in the card kernel's sandbox; this command
+runs it in the caller's shell, for tests and by hand, in the corpus folder. It reads the corpus, writes only the
+workspace's views-work/profile folder (or --out), and prints the profile. The first two lines make this file both a
+shell script and a Python program, as in bin/thimble-run.
+"""
+import os
+import sys
+from pathlib import Path
+
+REPO = Path(os.environ.get("THIMBLE_APP_DIR") or Path(__file__).resolve().parents[2])
+sys.path.insert(0, str(REPO / "backend"))
+
+from app import profile_types  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(profile_types.main(sys.argv[1:]))
