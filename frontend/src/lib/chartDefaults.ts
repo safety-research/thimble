@@ -6,8 +6,9 @@
 // overprint labels (Vega measures labels narrower than it draws them). Legends past FOLD_GROUPS colours fold the rest
 // into a grey "other (n)" without summing. Long bar categories turn horizontal; whole-number axes step by whole numbers;
 // discrete y axes get ROW_STEP per row, as do the ticks a continuous y axis names (a ridgeline's), and dots set side by
-// side by group get GROUP_STEP a group; panels one under another get PANEL_HEIGHT each unless the chart sizes them. A
-// colour channel over a label's classes takes the label's colours (labelColours).
+// side by group get GROUP_STEP a group, the groups folded into "other" on one line; panels one under another get
+// PANEL_HEIGHT each unless the chart sizes them. A colour channel over a label's classes takes the label's colours
+// (labelColours).
 
 type Spec = Record<string, unknown>
 const obj = (v: unknown): Spec | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Spec) : null)
@@ -279,12 +280,12 @@ const DOT_MARKS = new Set(['point', 'circle', 'square'])
 
 /** The dots of a view (a unit, or a layer at any depth) that set a discrete yOffset's groups side by side on the rows
  * of a discrete y axis (thimble.chart's dots with a group), with the rows they draw; null when it has none. */
-function sideBySide(s: Spec, root: Spec, inherited: unknown[] | null): { y: Spec; offset: Spec; rows: unknown[] | null } | null {
+function sideBySide(s: Spec, root: Spec, inherited: unknown[] | null): { unit: Spec; y: Spec; offset: Spec; rows: unknown[] | null } | null {
   const rows = rowsOf(s, root, inherited)
   const enc = obj(s.encoding)
   const y = obj(enc?.y)
   const offset = obj(enc?.yOffset)
-  if (DOT_MARKS.has(markType(s.mark)) && y && discrete(y) && y.axis !== null && offset && discrete(offset)) return { y, offset, rows }
+  if (DOT_MARKS.has(markType(s.mark)) && y && discrete(y) && y.axis !== null && offset && discrete(offset)) return { unit: s, y, offset, rows }
   for (const l of Array.isArray(s.layer) ? s.layer : []) {
     const found = obj(l) ? sideBySide(obj(l)!, root, rows) : null
     if (found) return found
@@ -304,23 +305,57 @@ function rowsParted(s: Spec, field: string, padding: number): Spec {
   return out
 }
 
+/** The groups foldGroups folded the dots' colour into, when the dots' yOffset sets the same field's groups side by side:
+ * the calculation that folds them and the folded groups, the grey "other (n)" last; null when the colour is not folded. */
+function foldedOffset(unit: Spec, offset: Spec): { calc: Spec; groups: unknown[] } | null {
+  const enc = obj(unit.encoding) ?? {}
+  const field = offset.field
+  if (typeof field !== 'string' || field === FOLD_FIELD || 'domain' in (obj(offset.scale) ?? {})) return null
+  const calc = (Array.isArray(unit.transform) ? unit.transform : []).map(obj).find((t) => t?.as === FOLD_FIELD && String(t.calculate).includes(`datum[${JSON.stringify(field)}]`))
+  for (const ch of COLOR_CHANNELS) {
+    const groups = obj(obj(enc[ch])?.scale)?.domain
+    if (calc && obj(enc[ch])?.field === FOLD_FIELD && Array.isArray(groups)) return { calc, groups }
+  }
+  return null
+}
+
+/** The view with every yOffset on `field`, at any depth of its layers (a dots chart's intervals), on the folded groups
+ * (foldedOffset), each such layer folding them as the dots do. */
+function offsetsFolded(s: Spec, field: string, folded: { calc: Spec; groups: unknown[] }): Spec {
+  const out: Spec = { ...s }
+  const enc = obj(s.encoding)
+  const offset = obj(enc?.yOffset)
+  if (enc && offset && offset.field === field) {
+    out.encoding = { ...enc, yOffset: { ...offset, field: FOLD_FIELD, sort: folded.groups } }
+    const own = Array.isArray(s.transform) ? s.transform : []
+    if (!own.some((t) => obj(t)?.as === FOLD_FIELD)) out.transform = [...own, folded.calc]
+  }
+  if (Array.isArray(s.layer)) out.layer = s.layer.map((l) => (obj(l) ? offsetsFolded(obj(l)!, field, folded) : l))
+  return out
+}
+
 /** A view whose rows set their groups' dots side by side (sideBySide) sized for them, or null for a view with no such
  * dots: a height of GROUP_STEP a group, more when a row needs it for its label (rowStep), where Vega-Lite's 20 px a group
  * (a step is the offset's when there is one) would make a row of three groups 60 px tall; and its rows parted by the room
- * of one group more, so a dot reads as its own row's. A height the view names stands while it gives each row that room. */
+ * of one group more, so a dot reads as its own row's. A height the view names stands while it gives each row that room.
+ * Groups whose colour folds into the grey "other (n)" (foldGroups) share one line, as they share the colour, so a row
+ * has FOLD_GROUPS + 1 lines at most. */
 function groupRows(s: Spec, root: Spec, inherited: unknown[] | null): Spec | null {
   const found = sideBySide(s, root, inherited)
   if (!found) return null
-  const { y, offset, rows } = found
+  const { unit, y, offset, rows } = found
   const distinct = (f: unknown) => (rows ? new Set(rows.map((r) => obj(r)?.[String(f)]).filter((v) => v != null)).size : 0)
-  const listed = Array.isArray(offset.sort) ? offset.sort : obj(offset.scale)?.domain
+  const folded = foldedOffset(unit, offset)
+  const view = folded ? offsetsFolded(s, String(offset.field), folded) : s
+  const listed = folded ? folded.groups : Array.isArray(offset.sort) ? offset.sort : obj(offset.scale)?.domain
   const n = Array.isArray(listed) ? listed.length : distinct(offset.field)
   if (!n) return null
-  if ('height' in s && typeof s.height !== 'number') return s
+  if ('height' in s && typeof s.height !== 'number') return view
   const step = Math.max(GROUP_STEP, Math.ceil(rowStep(y) / n))
-  // a row of n groups and the gap under it are n + 1 steps, the gap one of them
-  const parted = rowsParted(s, String(y.field), 1 / (n + 1))
-  return typeof s.height === 'number' && distinct(y.field) * (n + 1) * step <= s.height ? parted : { ...parted, height: { step } }
+  // a row of n groups and the gap under it are n + 1 steps, the gap one of them; a row of one group needs no gap
+  const lines = n > 1 ? n + 1 : 1
+  const parted = rowsParted(view, String(y.field), (lines - n) / lines)
+  return typeof s.height === 'number' && distinct(y.field) * lines * step <= s.height ? parted : { ...parted, height: { step } }
 }
 
 /** Whether the chart's config names the height of its views (Altair's theme does). */

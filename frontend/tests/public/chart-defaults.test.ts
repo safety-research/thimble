@@ -3,7 +3,7 @@
 // that names each of its ticks given the room its names need; a dots chart's groups side by side on a row's line in
 // rows a card can show; and layers that give their shared axis one format.
 import { expect, test } from 'vitest'
-import { chartDefaults, GROUP_STEP, PANEL_HEIGHT, ROW_STEP } from '../../src/lib/chartDefaults.ts'
+import { chartDefaults, FOLD_FIELD, FOLD_GROUPS, GROUP_STEP, PANEL_HEIGHT, ROW_STEP } from '../../src/lib/chartDefaults.ts'
 
 type Spec = Record<string, any>
 const VL = 'https://vega.github.io/schema/vega-lite/v6.json'
@@ -114,6 +114,37 @@ test("a dots chart's groups side by side on a row's line take GROUP_STEP a group
   expect(short.height).toEqual({ step: GROUP_STEP })
   const { yOffset: _yOffset, ...shared } = enc(['claim', 'review', 'merge'])
   expect((chartDefaults({ $schema: VL, data: { values: dots }, mark: 'point', encoding: shared }) as Spec).height).toBeUndefined()
+})
+
+test("a dots chart's groups past FOLD_GROUPS share the grey other's line, as they share its colour; one group needs no gap", () => {
+  const actions = Array.from({ length: 12 }, (_, i) => `cmd-${i}`)
+  const dots = actions.flatMap((action, i) => [
+    { t: i, agent: 'a1', action, lo: 0, hi: 12 },
+    { t: i, agent: 'a2', action, lo: 0, hi: 12 },
+  ])
+  const enc = {
+    x: { field: 't', type: 'quantitative' },
+    y: { field: 'agent', type: 'nominal', sort: ['a1', 'a2'] },
+    color: { field: 'action', type: 'nominal', sort: actions },
+    yOffset: { field: 'action', type: 'nominal', sort: actions },
+  }
+  const unit = chartDefaults({ $schema: VL, data: { values: dots }, mark: 'point', encoding: enc }) as Spec
+  const groups = unit.encoding.color.scale.domain
+  expect(groups).toHaveLength(FOLD_GROUPS + 1)
+  expect(unit.encoding.yOffset).toEqual({ field: FOLD_FIELD, type: 'nominal', sort: groups })
+  // a row of 8 lines, not 12, with one line's gap under it
+  expect(unit.height).toEqual({ step: GROUP_STEP })
+  expect(unit.encoding.y.scale.paddingInner).toBeCloseTo(1 / (FOLD_GROUPS + 2))
+  // with an interval, each interval stays on its dot's line: its layer folds the groups too
+  const rule = { mark: 'rule', encoding: { x: { field: 'lo', type: 'quantitative' }, x2: { field: 'hi' }, y: enc.y, yOffset: enc.yOffset } }
+  const layered = chartDefaults({ $schema: VL, data: { values: dots }, layer: [{ mark: 'point', encoding: enc }, rule] }) as Spec
+  const [point, line] = layered.layer
+  expect(line.encoding.yOffset).toEqual(point.encoding.yOffset)
+  expect(line.transform).toEqual(point.transform.filter((t: Spec) => t.as === FOLD_FIELD))
+  expect(layered.height).toEqual({ step: GROUP_STEP })
+  // one group: a row as tall as a row of names, with no gap a second group would need
+  const one = chartDefaults({ $schema: VL, data: { values: dots.slice(0, 2) }, mark: 'point', encoding: { ...enc, color: { ...enc.color, sort: ['cmd-0'] }, yOffset: { ...enc.yOffset, sort: ['cmd-0'] } } }) as Spec
+  expect([one.height, one.encoding.y.scale.paddingInner]).toEqual([{ step: ROW_STEP }, 0])
 })
 
 test('layers that share an axis give it one format: a layer that names its own labels it for all, a binned one stands over whole numbers', () => {
