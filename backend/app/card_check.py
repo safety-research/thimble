@@ -15,7 +15,8 @@ new change to the card cancels a running check and starts the next. At most READ
    and kept only when the code runs clean and the card draws, as one undo step with actor `check`. A card that fails no
    criterion stays as it is, unless its links check found a value its code types in and the replacement's code
    changes (_problems). New code runs on the card's kernel, and in terminal mode, where the check runs in the shim,
-   through `thimble-run trial` in main's sandbox, as a card run would (cardrun.trial).
+   through `thimble-run trial` in main's sandbox, as a card run would (cardrun.trial). A replacement that left all the
+   card shows as it was (checkstore.shows_same) is one more version in the card's history, and the check ends `ok`.
 A check past check_timeout(effort) ends `error`; waits for API capacity are left out of that time. A trial run on the
 kernel is always settled, even when the check is stopped mid-trial. Timings go to
 workspaces/<c>/card-checks/timings.jsonl and pictures under workspaces/<c>/card-checks/<card>/. A refused reading
@@ -848,9 +849,11 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
             _gone(run)  # changed since the check began, or no longer the model's to change
             return
         # the record says `fixed` in the same turn the fix lands, so a Stop during the settle below cannot mark a card
-        # that was revised as stopped
-        timing["replacement"] = "applied"
-        _end(run, "fixed")
+        # that was revised as stopped; a fix that left all the card shows as it was is a version in the card's history
+        # alone, and the record says `ok`, as for a card the check did not revise (checkstore.apply_fix)
+        same = applied.get("state") == checkstore.SAME
+        timing["replacement"] = "same outputs" if same else "applied"
+        _end(run, "ok" if same else "fixed")
         await _settle(c, cid, tid, keep=True)
     finally:
         if not settled and tid:  # stopped or past its time before the settle began
