@@ -4304,7 +4304,11 @@ export function frameText(f, o = {}) {
       if (rgb) codes.push(`38;2;${rgb.join(';')}`)
       else if (ANSI_FG[sg.fg]) codes.push(ANSI_FG[sg.fg])
     }
-    if (sg.bg && bgs[sg.bg]) codes.push(bgs[sg.bg])
+    if (sg.bg) {
+      const rgb = hexRgb(sg.bg)
+      if (rgb) codes.push(`48;2;${rgb.join(';')}`)
+      else if (bgs[sg.bg]) codes.push(bgs[sg.bg])
+    }
     return codes.length ? `\x1b[${codes.join(';')}m${sg.s}\x1b[0m` : sg.s
   }).join('').replace(/\s+$/, '')).join('\n')
 }

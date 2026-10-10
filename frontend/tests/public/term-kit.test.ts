@@ -1366,6 +1366,11 @@ describe('as text', () => {
     expect(kit.frameText(f, { ansi: true })).toBe('  \x1b[38;2;29;127;192m●\x1b[0m\x1b[2m fired\x1b[0m\x1b[48;5;238m x\x1b[0m')
   })
 
+  test('a background in a hex color, as a view in a design of its own draws one, keeps it as text', () => {
+    const f = { lines: [[{ s: '[05:27] ', fg: '#33ff33', bg: '#000000' }, { s: 'chosen', fg: '#000000', bg: '#33ff33' }]] }
+    expect(kit.frameText(f, { ansi: true })).toBe('\x1b[38;2;51;255;51;48;2;0;0;0m[05:27] \x1b[0m\x1b[38;2;0;0;0;48;2;51;255;51mchosen\x1b[0m')
+  })
+
   test("a diff's added and removed lines take Claude Code's diff colors, green and red as text", () => {
     expect([kit.COLORS.added, kit.COLORS.removed]).toEqual(['diffAddedWord', 'diffRemovedWord'])
     const f = { lines: [[{ s: '▆', fg: kit.COLORS.added }, { s: '▃', fg: kit.COLORS.removed }]] }
