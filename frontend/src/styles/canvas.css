@@ -2736,7 +2736,8 @@ button.bdetail-hist:hover {
   height: 8px;
   margin-top: 6px;
   border-radius: 50%;
-  background: var(--ink-900);
+  /* its lane's series color (DataViz laneColors) */
+  background: var(--viz-1);
   box-shadow: 0 0 0 2px var(--surface-card);
 }
 .canvas-tl-label {
@@ -2780,8 +2781,9 @@ button.bdetail-hist:hover {
   padding-top: 4px;
   font: var(--type-mono-sm);
 }
-/* a diagram, top to bottom (DataViz diagramLayout): hairline boxes with the name in mono and the detail under it,
-   lines at .3, short edge labels on a paper halo, long ones as a numbered ring with a note under the drawing */
+/* a diagram, top to bottom (DataViz diagramLayout): boxes in the first series color's faint step with its edge, the
+   name in mono and the detail under it, lines at .3, short edge labels on a paper halo, long ones as a numbered ring
+   with a note under the drawing */
 .canvas-diagram-wrap {
   min-width: 0;
 }
@@ -2807,8 +2809,9 @@ button.bdetail-hist:hover {
   font: 400 var(--text-mono-sm) var(--font-mono);
 }
 .canvas-diagram-node rect {
-  fill: var(--surface-card);
-  stroke: rgba(var(--ink-rgb), 0.3);
+  fill: var(--viz-seq-1);
+  stroke: var(--viz-1);
+  stroke-opacity: 0.6;
 }
 .canvas-diagram-name {
   fill: var(--text-primary);

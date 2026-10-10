@@ -69,14 +69,15 @@
 // of that row it would overlap. The part of a card no neighbouring column's card reaches, its band, carries the
 // vertical runs of its links, and each link runs horizontally in the gap between rows next to its target, so no link
 // crosses a card; a gap is as tall as the links it carries need, each on a track of its own with its label beside its
-// source. Link types take the viz colours in the order they first appear. Cards carry their record's ref as
-// data-anchor, so thimble marks them with the labels that are on; a label the call named colours a card's top edge.
+// source. Link types take the chart series colors (--viz-1 to --viz-7) in order, as they first appear. Cards carry
+// their record's ref as data-anchor, so thimble marks them with the labels that are on; a label the call named colors
+// a card's top edge.
 // A click on a card, or on a citation of its record, opens the record under the card (openRecord), with the page it was
 // on: the card and its links stay lit, and thimble scrolls them into view; hovering a citation lights its card. A
 // thread whose actions are all on one page links to it from the list above the chart.
 const NS = 'http://www.w3.org/2000/svg'
 const MON = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')
-const VIZ = ['--viz-1', '--viz-6', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-7']
+const VIZ = ['--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-6', '--viz-7']
 const HEAD_H = 76 // the column header
 const CW_MAX = 184 // a card's width at most
 const STEP_MIN = 72, STEP_MAX = 136 // a column, narrower to fit the frame's width down to STEP_MIN, past which the chart is zoomed

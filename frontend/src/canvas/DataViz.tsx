@@ -5,6 +5,7 @@ import { useTheme } from '../lib/theme'
 import type { GraphDataset, TimelineDataset } from '../lib/types'
 import { frameStyle, frameTokens, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { useVisibleSize } from '../lib/visibleSize'
+import { VIZ_SERIES } from '../lib/vizTheme'
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
@@ -187,13 +188,22 @@ export function timelineRows(events: TimelineDataset['events'], even = false): T
   }))
 }
 
+/** Each lane's dot color: the chart series (--viz-1 to --viz-7, lib/vizTheme) in the order the lanes first appear, the
+ * muted "other" past them, so a timeline of one lane, or of none, is in the first series color. Pure. */
+export function laneColors(lanes: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const lane of lanes) if (!out.has(lane)) out.set(lane, out.size < VIZ_SERIES.length ? `var(${VIZ_SERIES[out.size]})` : 'var(--viz-other)')
+  return out
+}
+
 /**
- * A timeline: the events down a time axis, one to a row, the time at the left, a dot on the axis, the label at the
- * right. A break is a short dashed stretch of the axis with the wait's length beside it.
+ * A timeline: the events down a time axis, one to a row, the time at the left, a dot on the axis in its lane's color
+ * (laneColors), the label at the right. A break is a short dashed stretch of the axis with the wait's length beside it.
  */
 export function Timeline({ dataset }: { dataset: TimelineDataset & { spacing?: 'even' }; fitWidth?: number }) {
   const even = dataset.spacing === 'even'
   const rows = useMemo(() => timelineRows(dataset.events, even), [dataset.events, even])
+  const dots = useMemo(() => laneColors(rows.map((r) => r.lane)), [rows])
   if (!rows.length) return null
   const timeW = Math.max(...rows.map((r) => Math.max(r.time.length + (r.end ? r.end.length + 1 : 0), r.brk.length)))
   return (
@@ -214,7 +224,7 @@ export function Timeline({ dataset }: { dataset: TimelineDataset & { spacing?: '
             style={rows[i + 1]?.gap && !rows[i + 1].brk ? { paddingBottom: rows[i + 1].gap } : undefined}
           >
             <span className="canvas-tl-time">{r.end ? `${r.time}–${r.end}` : r.time}</span>
-            <span className="canvas-tl-dot" aria-hidden="true" />
+            <span className="canvas-tl-dot" aria-hidden="true" style={{ background: dots.get(r.lane) }} />
             <span className="canvas-tl-label">
               {r.lane ? <span className="canvas-tl-lane">{r.lane}</span> : null}
               {r.label}

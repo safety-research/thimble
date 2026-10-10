@@ -1,11 +1,15 @@
 # thimble's defaults for a matplotlib figure on a card. notebook._launch points a kernel's MATPLOTLIBRC here (unless
 # the environment names one); a matplotlibrc in the corpus's root folder still wins.
 #
-# Figures follow the Vega chart theme (frontend/src/lib/vizTheme.ts): no figure or axes fill, the nominal palette in
-# order, label-grey chrome with hairline axes and a faint y grid. 7.2 in fills a card body at the default card width.
-# Text is written as SVG text in the page's faces (page_fonts.py), with matplotlib's defaults after them.
+# Figures follow the chart style (frontend/src/lib/vizTheme.ts, the --viz-* tokens of styles/tokens.css): no figure or
+# axes fill, the series in order, label-gray chrome with hairline axes and a faint y grid. The colors are the Warm
+# paper's with the default accent, and an inlined figure maps each back to its token (frontend/src/lib/svg.ts), so its
+# series follow the paper and the accent as a Vega chart's do. 7.2 in fills a card body at the default card width,
+# where a point is 4/3 px: text is 8.25 pt (--viz-size, 11 px), a title 9.75 pt (--viz-size-title, 13 px) and a line
+# 1.125 pt (--viz-line, 1.5 px). Text is written as SVG text in the page's faces (page_fonts.py), with matplotlib's
+# defaults after them.
 
-axes.prop_cycle: cycler('color', ['025ac3', 'd0750a', '08632f', '1392d4', '897301', '009c85', '844500'])
+axes.prop_cycle: cycler('color', ['5e4bd6', '018d82', 'e26101', '306602', '0471c8', 'c8367b', 'a08319'])
 image.cmap: cividis
 
 figure.figsize: 7.2, 4.0
@@ -14,14 +18,14 @@ axes.facecolor: none
 savefig.facecolor: none
 savefig.transparent: True
 
-font.size: 10
-axes.titlesize: 11
+font.size: 8.25
+axes.titlesize: 9.75
 axes.titleweight: normal
 axes.titlelocation: left
-axes.labelsize: 10
-xtick.labelsize: 9
-ytick.labelsize: 9
-legend.fontsize: 9
+axes.labelsize: 8.25
+xtick.labelsize: 8.25
+ytick.labelsize: 8.25
+legend.fontsize: 8.25
 legend.frameon: False
 
 text.color: 64625b
@@ -36,7 +40,7 @@ axes.grid: True
 axes.grid.axis: y
 grid.color: cfcbc2
 grid.linewidth: 0.6
-lines.linewidth: 1.5
+lines.linewidth: 1.125
 
 svg.fonttype: none
 font.family: sans-serif
