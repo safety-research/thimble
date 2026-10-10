@@ -83,7 +83,8 @@ export function commentsOf(doc: Obj, checks: readonly DocCheck[]): DocComment[] 
   for (const cm of Array.isArray(doc.comments) ? doc.comments : []) {
     if (!isObj(cm)) continue
     const sid = str(cm.sentence_id)
-    const text = plainCites(str(cm.text)).trim()
+    // the statement, then its details on the same lines: the panel has no fold to open them in
+    const text = plainCites([str(cm.text), str(cm.details)].filter(s => s.trim()).join(' ')).replace(/\s+/g, ' ').trim()
     if (!sid || !text || !rank.has(sid)) continue
     const check = cm.check ? str(cm.check) : null
     const open = (str(cm.status) || 'open') === 'open'

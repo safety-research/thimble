@@ -202,6 +202,12 @@ test('the comments a document shows: in reading order, a check that is off left 
   expect(p2[1]!.md).toBe('[[card:ff73e071]]\n*The export per wiki.*')
 })
 
+test('a comment shows its statement and then its details, the citations in both as chips', () => {
+  const doc = { ...COMMENTED, comments: [{ id: 'c6', sentence_id: 'x2', text: 'The count covers all four wikis.', details: '- The card counts [[4579|card:ff73e071#pages/TOTAL]] pages.\n- Say so.', check: 'judgment', status: 'open' }] }
+  const [c] = commentsOf(doc as never, checksOf(STATES.checks))
+  expect(c!.text).toBe('The count covers all four wikis. - The card counts 4579 pages. - Say so.')
+})
+
 test('a report as Markdown and back: headings, lists, figures as their card\'s line, citations as written; the title apart', () => {
   const doc = {
     title: 'Agents used the dse wiki',

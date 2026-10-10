@@ -8,7 +8,7 @@ import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { AnyDoc, DeckDoc, PageDoc, StoryDoc, VideoDoc, Writeup, WriteupComment } from '../lib/types'
 import { ReadProbe } from '../shell/dock'
-import { ChecksSidebar, SidebarShow, useChecks, useSidebar } from './Checks'
+import { CommentsSidebar, SidebarShow, useChecks, useSidebar } from './Checks'
 import { commentsApi } from './commentsApi'
 import { DeckSidebar, DeckView, type DeckHandle } from './Deck'
 import type { DocFilter } from './Editor'
@@ -108,7 +108,7 @@ function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved, wr
       ) : side.shown && renderer === 'story' ? (
         <StorySidebar ws={ws} doc={doc as StoryDoc | null} onInsert={(id) => story.current?.insertCard(id)} onHide={side.hide} over={side.over} slug={slug} checks={checks} comments={comments} />
       ) : side.shown ? (
-        <ChecksSidebar ws={ws} doc={slug} checks={checks} comments={comments} onHide={side.hide} over={side.over} />
+        <CommentsSidebar ws={ws} doc={slug} checks={checks} comments={comments} onHide={side.hide} over={side.over} />
       ) : (
         <SidebarShow onShow={side.show} />
       )}

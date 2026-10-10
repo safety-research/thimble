@@ -12,7 +12,8 @@ work folder of its own, check-work/<id>-<doc>/. Its task file there, task.md, ho
 (context.render) and then the document, the check's prompt and the passages it covers; its prompt names that file
 (`## check-task-file`). It comments with add_comment and hands back one line, its run's summary. At most MAX_SESSIONS
 run at once; the others wait queued. A run has no time limit, and the analyst's Stop ends it (through thimble's plugin
-module, subagents.stop).
+module, subagents.stop). A check made or changed (its name, prompt, colour, shown or covers) emits `checks` on the
+stream, so every Comments pane, the Report's and the canvas's in any tab, reads the checks again.
 
 How a run starts: a writer's end starts each shown check on its document, a follow-on start of the writer's own start
 (_writer_ended); Run on a check's row, or turning a check on, is the analyst's click; main's run_check gives main the
@@ -23,7 +24,18 @@ The analyst's own edits start nothing: each shown check's run records how many p
 The cache: a passage (paragraph, heading, slide, beat or free sentence) is fingerprinted by the sentence_key of its
 words. A run covers only passages whose fingerprint its check has not seen on that document; a run that ends `done`
 supersedes the check's earlier open comments on those passages and records their fingerprints in `seen`. Main hears
-`checked {check, doc, status, comments}` when a run run_check started ends.
+`checked {check, doc, status, comments}` when a run run_check started ends with no agent of main's, such as an
+extension's program; a run that ran as main's subagent says nothing more, since its hand-back already tells main, which
+answers it in one line.
+
+The cards. A check `covers` the documents, the cards or both (COVERS; the built-ins say so in their frontmatter, a new
+check covers the documents unless made for the cards). The cards are one more run target beside the documents' slugs,
+CANVAS (`@canvas`), whose passages are canvas_comments.passages: each card of the analyst's and the threads' groups and
+each step of a plan card. Its comments are canvas_comments' store, and Done or Know it resolves them; the statements
+marked Know it are listed in each run's task (`## check-known`), on a document as on the cards, so a run never raises
+them again. Main's turn end starts each shown check that covers the cards, a follow-on start (main_turn_ended), on the cards
+that changed since its last run there and that it has not seen; Run on its row in the canvas's Comments pane and main's
+run_check with `on: cards` start one too.
 """
 from __future__ import annotations
 
@@ -41,7 +53,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import config, investigation, prompts, tools, userconf, work_files
+from . import canvas_comments, config, investigation, prompts, tools, userconf, work_files
 from .kernel_thimble import LABEL_ORDER
 from .ledger import read_json, write_json, write_under
 
@@ -56,7 +68,12 @@ DIR = "checks"  # workspaces/<c>/checks/<id>.json
 WORK_DIR = "check-work"  # workspaces/<c>/check-work/<id>-<doc>/, a run's own folder, where its Bash may write
 TASK_FILE = "task.md"  # in a run's own folder: what its agent reads first
 OWN_TOOLS = ("read_ref", "list_cards", "add_comment")  # a check's thimble tools
-BUILTINS = ("unverified", "verified", "judgment")  # prompts/checks/<id>.md, listed first in this order
+BUILTINS = ("unverified", "verified", "judgment", "you-should-know")  # prompts/checks/<id>.md, listed first in this order
+CANVAS = canvas_comments.CANVAS  # the run target of a check over the cards, among `runs` beside the documents' slugs
+CANVAS_NAME = "cards"  # how a line, a chat and main's `checked` event name that target
+COVERS = ("documents", "cards")  # what a check comments on
+DEFAULT_COVERS = ("documents",)
+MAX_CARDS = 40  # the cards a run over the canvas covers at most, the ones that changed last
 COLOURS = tuple(range(1, 9))  # the label palette's places a check's color may take (kernel_thimble.LABEL_COLOURS)
 NEW_COLOURS = tuple(m for m in LABEL_ORDER if m in COLOURS)  # the order new checks take them, as new label values do
 CONTEXT_CHARS = 400_000  # of the context engine's part of a run's first message
@@ -96,8 +113,22 @@ def _path(c: str, cid: str) -> Path:
     return _dir(c) / f"{cid}.json"
 
 
+def covers_of(raw: Any) -> list[str]:
+    """What a check comments on, in COVERS' order, from a stored or a front matter's `covers`: the documents when it
+    names none."""
+    want = [raw] if isinstance(raw, str) else raw if isinstance(raw, (list, tuple)) else []
+    out = [k for k in COVERS if k in {str(x).strip().lower() for x in want}]
+    return out or list(DEFAULT_COVERS)
+
+
+def covers(check: dict[str, Any] | None, what: str) -> bool:
+    """Whether `check` comments on `what`, `documents` or `cards`."""
+    return bool(check) and what in covers_of(check.get("covers"))  # type: ignore[union-attr]
+
+
 def builtin(cid: str) -> dict[str, Any] | None:
-    """A built-in check as its prompt file defines it, off and never run; None for another id."""
+    """A built-in check as its prompt file defines it, never run, off unless its front matter says `shown: true`; None
+    for another id."""
     import yaml  # noqa: PLC0415 — only the check files need it
 
     if cid not in BUILTINS:
@@ -108,8 +139,8 @@ def builtin(cid: str) -> dict[str, Any] | None:
     front = front if isinstance(front, dict) else {}
     colour = front.get("colour")
     return {"id": cid, "name": _collapse(front.get("name") or cid), "prompt": body.strip(),
-            "colour": colour if colour in COLOURS else COLOURS[0], "shown": False, "builtin": True,
-            "created_by": "thimble", "ts": "", "version": 1, "runs": {}}
+            "colour": colour if colour in COLOURS else COLOURS[0], "shown": front.get("shown") is True, "builtin": True,
+            "covers": covers_of(front.get("covers")), "created_by": "thimble", "ts": "", "version": 1, "runs": {}}
 
 
 def from_extensions(c: str) -> dict[str, dict[str, Any]]:
@@ -135,7 +166,8 @@ def from_extensions(c: str) -> dict[str, dict[str, Any]]:
                 continue
             out[cid] = {"id": cid, "name": _collapse(raw.get("name") or slug)[:NAME_CHARS], "prompt": prompt,
                         "colour": colour if colour in COLOURS else NEW_COLOURS[len(out) % len(NEW_COLOURS)], "shown": False,
-                        "builtin": True, "created_by": str(e["name"]), "ts": "", "version": 1, "runs": {}}
+                        "builtin": True, "covers": covers_of(raw.get("covers")), "created_by": str(e["name"]), "ts": "",
+                        "version": 1, "runs": {}}
     return out
 
 
@@ -145,6 +177,9 @@ def read(c: str, cid: str) -> dict[str, Any] | None:
     stored = read_json(_path(c, cid), None)
     if isinstance(stored, dict):
         stored.setdefault("runs", {})
+        if "covers" not in stored:  # a check stored before checks covered the cards covers what its built-in says
+            stored["covers"] = (builtin(cid) or {}).get("covers") or list(DEFAULT_COVERS)
+        stored["covers"] = covers_of(stored["covers"])
         return stored
     return builtin(cid) or from_extensions(c).get(cid)
 
@@ -163,6 +198,7 @@ def list_checks(c: str) -> list[dict[str, Any]]:
         x = read_json(p, None)
         if isinstance(x, dict) and x.get("id") == p.stem:
             x.setdefault("runs", {})
+            x["covers"] = covers_of(x.get("covers"))
             others.append(x)
     return out + sorted(others, key=lambda x: str(x.get("ts") or ""))
 
@@ -187,6 +223,15 @@ def save(c: str, check: dict[str, Any]) -> dict[str, Any]:
     return check
 
 
+def _announce(c: str, cid: str) -> None:
+    """A check was made or changed (its name, prompt, colour, shown or covers): a `checks` record on the stream, so every
+    surface that lists the checks (the Report's and the canvas's Comments panes, in any tab) reads them again."""
+    try:
+        investigation.emit(c, investigation.MAIN, {"type": "checks", "id": cid})
+    except Exception:  # noqa: BLE001 — a surface reads the checks again on its next record
+        log.debug("%s: checks record not emitted for %s", c, cid, exc_info=True)
+
+
 def _new_id(c: str, name: str) -> str:
     base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "check"
     base = base if ID_RE.match(base) else "check"
@@ -203,22 +248,26 @@ def _free_colour(c: str) -> int:
     return next((k for k in NEW_COLOURS if k not in used), min(NEW_COLOURS, key=used.count))
 
 
-def create(c: str, name: str, prompt: str, *, created_by: str) -> dict[str, Any]:
-    """A new check, off; 409 when a check has that name, 400 for an empty name or prompt."""
+def create(c: str, name: str, prompt: str, *, created_by: str, covers: Any = None) -> dict[str, Any]:
+    """A new check, off, commenting on what `covers` names (the documents by default); 409 when a check has that name,
+    400 for an empty name or prompt."""
     name, prompt = _collapse(name)[:NAME_CHARS], str(prompt or "").strip()[:PROMPT_CHARS]
     if not name or not prompt:
         raise HTTPException(400, "a check needs a name and a prompt")
     if by_name(c, name) is not None:
         raise HTTPException(409, f"a check named {name!r} exists")
-    return save(c, {"id": _new_id(c, name), "name": name, "prompt": prompt, "colour": _free_colour(c), "shown": False,
-                    "builtin": False, "created_by": created_by, "ts": _now(), "version": 1, "runs": {}})
+    made = save(c, {"id": _new_id(c, name), "name": name, "prompt": prompt, "colour": _free_colour(c), "shown": False,
+                    "builtin": False, "covers": covers_of(covers), "created_by": created_by, "ts": _now(), "version": 1,
+                    "runs": {}})
+    _announce(c, str(made["id"]))
+    return made
 
 
 def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None, colour: int | None = None,
-         shown: bool | None = None) -> dict[str, Any]:
+         shown: bool | None = None, covers: Any = None) -> dict[str, Any]:
     """The check with the fields given changed and written; a new prompt bumps `version` and empties each document's `seen`
-    but for its locked blocks' fingerprints. 404, 409 for a name another check has, 400 for a colour outside 1 to 8 or an
-    empty name or prompt."""
+    but for its locked blocks' fingerprints (the cards' `seen` whole). 404, 409 for a name another check has, 400 for a
+    colour outside 1 to 8 or an empty name or prompt."""
     from . import investigation as inv, report_types  # noqa: PLC0415
 
     check = read(c, cid)
@@ -238,7 +287,7 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
             check["prompt"] = prompt
             check["version"] = int(check.get("version") or 1) + 1
             for doc, run in (check.get("runs") or {}).items():
-                d = report_types.read_doc(c, inv.MAIN, doc)
+                d = report_types.read_doc(c, inv.MAIN, doc) if doc != CANVAS else None
                 locked = {p["fp"] for p in passages(doc, d) if p["locked"]} if d else set()
                 run["seen"] = [fp for fp in run.get("seen") or [] if fp in locked]
     if colour is not None:
@@ -247,7 +296,11 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
         check["colour"] = colour
     if shown is not None:
         check["shown"] = bool(shown)
-    return save(c, check)
+    if covers is not None:
+        check["covers"] = covers_of(covers)
+    saved = save(c, check)
+    _announce(c, cid)
+    return saved
 
 
 # --------------------------------------------------------------------------- passages
@@ -337,6 +390,34 @@ def to_cover(check: dict[str, Any], slug: str, doc: dict[str, Any] | None, wante
     if force:
         return [p for p in ps if not (p["locked"] and p["fp"] in seen)]
     return [p for p in ps if p["fp"] not in seen]
+
+
+def passages_of(c: str, doc: str) -> list[dict[str, Any]]:
+    """The passages of a run target: a written document's (passages), or the cards' (canvas_comments.passages)."""
+    if doc == CANVAS:
+        return canvas_comments.passages(c)
+    return passages(doc, _doc(c, doc))
+
+
+def canvas_cover(c: str, check: dict[str, Any], wanted: list[str] | None = None, force: bool = False,
+                 since: str | None = None) -> list[dict[str, Any]]:
+    """The passages of the cards a run of `check` covers: the ones `wanted` names, else every one when `force`, else the
+    ones whose fingerprint the check has not seen, of the cards that changed at or after `since` when it is given. At
+    most the MAX_CARDS cards that changed last, each with the steps of it that are covered."""
+    ps = canvas_comments.passages(c, None if wanted or force else since)
+    if wanted:
+        refs = {p["ref"] for w in wanted if (p := canvas_comments.passage_of(c, w, ps)) is not None}
+        return [p for p in ps if p["ref"] in refs]
+    seen = set(((check.get("runs") or {}).get(CANVAS) or {}).get("seen") or [])
+    out = [p for p in ps if force or p["fp"] not in seen]
+    changed = {p["card"]: p["changed"] for p in out}
+    keep = set(sorted(changed, key=lambda k: canvas_comments._stamp(changed[k]), reverse=True)[:MAX_CARDS])
+    return [p for p in out if p["card"] in keep]
+
+
+def target_name(doc: str) -> str:
+    """How a line names a run target: `report:<slug>`, or the cards."""
+    return f"the {CANVAS_NAME}" if doc == CANVAS else f"report:{doc}"
 
 
 # --------------------------------------------------------------------------- runs
@@ -512,10 +593,36 @@ def _stream(c: str, cid: str, doc: str, status: str, run: str, chat: str, **extr
         log.debug("%s: check record not emitted for %s on %s", c, cid, doc, exc_info=True)
 
 
+def known_titles(c: str, cid: str) -> list[str]:
+    """What the analyst marked Know it among check `cid`'s comments, on the cards and in the documents, newest first,
+    each once: a comment's statement (canvas_comments.note_of)."""
+    from . import report_types  # noqa: PLC0415
+
+    found = [(str(x.get("resolved_ts") or x.get("ts") or ""), canvas_comments.note_of(x)["text"])
+             for x in canvas_comments._read(c) if x.get("check") == cid and x.get("resolution") == "known"]
+    for doc in _written(c):
+        d = report_types.read_doc(c, investigation.MAIN, doc) or {}
+        found += [(str(x.get("resolved_ts") or x.get("ts") or ""), canvas_comments.note_of(x)["text"])
+                  for x in d.get("comments") or [] if isinstance(x, dict) and x.get("check") == cid
+                  and x.get("resolution") == "known"]
+    found.sort(reverse=True)
+    return list(dict.fromkeys(_collapse(t) for _, t in found if _collapse(t)))[:canvas_comments.KNOWN_MAX]
+
+
+def _known_part(c: str, check: dict[str, Any]) -> str:
+    titles = known_titles(c, str(check["id"]))
+    return tools.hint("check-known", titles="\n".join(f"- {t}" for t in titles)) if titles else ""
+
+
 def task_text(c: str, check: dict[str, Any], doc: str, cover: list[dict[str, Any]]) -> str:
     """The task of a run's task file."""
     from . import investigation as inv, report_types  # noqa: PLC0415
 
+    if doc == CANVAS:
+        parts = [tools.hint("check-instructions", check=check["name"], prompt=str(check.get("prompt") or "").strip()),
+                 tools.hint("check-canvas", cards=canvas_comments.card_lines(c, [p["ref"] for p in cover])),
+                 _known_part(c, check)]
+        return "\n\n".join(p.strip() for p in parts if p.strip())
     t = report_types.read_type(c, doc)
     d = report_types.read_doc(c, inv.MAIN, doc) or {}
     every = {p["ref"] for p in cover} == {p["ref"] for p in passages(doc, d)}
@@ -529,6 +636,7 @@ def task_text(c: str, check: dict[str, Any], doc: str, cover: list[dict[str, Any
                 for x in report_types.all_sentences(d) if "unverified" in (x.get("tags") or []) and str(x.get("id")) in ids]
         if tags:
             parts.append(tools.hint("check-tags", tags="\n".join(tags)))
+    parts.append(_known_part(c, check))
     return "\n\n".join(p.strip() for p in parts if p.strip())
 
 
@@ -536,23 +644,30 @@ def first_message(c: str, check: dict[str, Any], doc: str, cover: list[dict[str,
     """A run's task file: the context engine's part (CONTEXT_CHARS), then the task (task_text)."""
     from . import context  # noqa: PLC0415 — context imports this module for the check names
 
-    return context.render(c, task_text(c, check, doc, cover), budget=CONTEXT_CHARS, focus=(f"report:{doc}",))
+    focus = tuple(dict.fromkeys(f"card:{p['card']}" for p in cover)) if doc == CANVAS else (f"report:{doc}",)
+    return context.render(c, task_text(c, check, doc, cover), budget=CONTEXT_CHARS, focus=focus)
 
 
 async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None = None, force: bool = False,
-                    notify: bool = False, route: str = "follow-on", call: str | None = None) -> dict[str, Any] | None:
-    """Start a run of check `cid` on the written document `doc` and return its record, or None when it has nothing to
-    cover or the document is not written. A running run of it on `doc` is stopped first. `notify` tells main when it
-    ends. Its agent starts as `route` says (subagents.start_job): a click (Run) or a follow-on start (a writer's end)
-    through main's module when a place is free (MAX_SESSIONS), queued otherwise; a typed start (main's run_check) at
-    once, as the exact Agent call main makes, which the record's `_answer` holds for the tool."""
+                    notify: bool = False, route: str = "follow-on", call: str | None = None,
+                    since: str | None = None) -> dict[str, Any] | None:
+    """Start a run of check `cid` on the written document `doc`, or on the cards (CANVAS, canvas_cover, of the cards that
+    changed since `since` when it is given), and return its record, or None when it has nothing to cover, the document
+    is not written or the check does not cover the cards. A running run of it on `doc` is stopped first. `notify` tells
+    main when it ends. Its agent starts as `route` says (subagents.start_job): a click (Run) or a follow-on start (a
+    writer's end, main's turn end) through main's module when a place is free (MAX_SESSIONS), queued otherwise; a typed
+    start (main's run_check) at once, as the exact Agent call main makes, which the record's `_answer` holds for the
+    tool."""
     from . import investigation as inv, report_types  # noqa: PLC0415
 
     check = read(c, cid)
     if check is None:
         raise ValueError(f"no check {cid!r}")
-    d = report_types.read_doc(c, inv.MAIN, doc)
-    cover = to_cover(check, doc, d, passages_, force) if d is not None else []
+    if doc == CANVAS:
+        cover = canvas_cover(c, check, passages_, force, since) if covers(check, "cards") else []
+    else:
+        d = report_types.read_doc(c, inv.MAIN, doc)
+        cover = to_cover(check, doc, d, passages_, force) if d is not None else []
     if not cover:
         return None
     old = _current(c, cid, doc)
@@ -563,6 +678,8 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
     rec = {"run": secrets.token_hex(4), "status": "running", "chat": "", "started": _now(), "ended": None,
            "covered": [p["ref"] for p in cover], "fps": [p["fp"] for p in cover], "seen": list(prev.get("seen") or []),
            "comments": 0, "summary": "", "stale": 0, "notify": notify or None, "agent_id": None, "refused": None}
+    if doc == CANVAS:
+        rec["since"] = since  # the time its cover looked from, which the next turn's run looks from if this one fails
     act = _Active(c, cid, doc, rec["run"], notify, rec["covered"], rec["fps"], route=route, call=call)
     _active[(c, cid, doc)] = act
     if route == TYPED:
@@ -678,7 +795,7 @@ async def _launch(act: _Active) -> None:
     if check is None:
         _finish(act, "failed", f"no check {act.check}")
         return
-    cover = [p for p in passages(act.doc, _doc(c, act.doc)) if p["ref"] in set(act.covered)]
+    cover = [p for p in passages_of(c, act.doc) if p["ref"] in set(act.covered)]
     text = await asyncio.to_thread(first_message, c, check, act.doc, cover)
     if act.ended:
         return
@@ -695,7 +812,8 @@ async def _launch(act: _Active) -> None:
         return
     ans = await subagents.start_job(
         c, ROLE, session_key(act.check, act.doc), tools.hint("check-task-file", path=str(path)),
-        subagents.values_for(c, ROLE), act.route, description=f"check: {check['name']} · {act.doc}",
+        subagents.values_for(c, ROLE), act.route,
+        description=f"check: {check['name']} · {CANVAS_NAME if act.doc == CANVAS else act.doc}",
         chat={"title": str(check["name"]), "check": act.check, "doc": act.doc, "run_id": act.run, "announce": False,
               "brief": tools.hint("check-instructions", check=check["name"],
                                   prompt=str(check.get("prompt") or "").strip())},
@@ -836,6 +954,8 @@ async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None, p
 def _doc(c: str, doc: str) -> dict[str, Any] | None:
     from . import report_types  # noqa: PLC0415
 
+    if doc == CANVAS:
+        return None
     return report_types.read_doc(c, investigation.MAIN, doc)
 
 
@@ -870,16 +990,21 @@ def _finish(act: _Active, status: str, summary: str) -> None:
         if check is None or rec is None or rec.get("run") != act.run:
             return  # a newer run took its place
         doc = _doc(c, act.doc)
-        # the run's comments as the document holds them: in terminal mode the shim takes them, in another process
-        act.comments = max(act.comments, sum(1 for cm in (doc or {}).get("comments") or []
-                                             if isinstance(cm, dict) and cm.get("check") == act.check
-                                             and cm.get("run") == act.run))
+        canvas = act.doc == CANVAS
+        # the run's comments as the document (or the cards' store) holds them: in terminal mode the shim takes them, in
+        # another process
+        act.comments = max(act.comments, canvas_comments.count(c, act.check, act.run) if canvas else
+                           sum(1 for cm in (doc or {}).get("comments") or []
+                               if isinstance(cm, dict) and cm.get("check") == act.check and cm.get("run") == act.run))
         rec.update(status=status, ended=_now(), summary=last[:SUMMARY_CHARS], comments=act.comments)
         rec.pop("waiting", None)
         if status == "done":
-            ps = passages(act.doc, doc)
+            ps = passages_of(c, act.doc)
             covered = set(act.covered)
-            if doc is not None:
+            if canvas:
+                canvas_comments.supersede(c, act.check, act.run,
+                                          {canvas_comments.key_of(p) for p in ps if p["ref"] in covered})
+            elif doc is not None:
                 gone = 0
                 for cm in doc.get("comments") or []:
                     if (isinstance(cm, dict) and cm.get("check") == act.check and cm.get("run") != act.run
@@ -897,10 +1022,11 @@ def _finish(act: _Active, status: str, summary: str) -> None:
         rec["stale"] = len(to_cover(check, act.doc, doc)) if doc is not None and check.get("shown") else 0
         save(c, check)
         _stream(c, act.check, act.doc, status, act.run, str(rec.get("chat") or ""), stale=rec["stale"])
-        if act.notify:
+        if act.notify and not act.agent:  # main's subagent hands back itself: one line in main's chat, not two
             try:
-                events.post(c, CHECKED_KIND, {"text": rec["summary"] or status, "check": act.check, "doc": act.doc,
-                                               "status": status, "comments": act.comments})
+                events.post(c, CHECKED_KIND, {"text": rec["summary"] or status, "check": act.check,
+                                               "doc": CANVAS_NAME if canvas else act.doc, "status": status,
+                                               "comments": act.comments})
             except HTTPException as e:
                 log.info("%s: main did not hear that check %s ended on %s (%s %s)", c, act.check, act.doc,
                          e.status_code, e.detail)
@@ -942,11 +1068,18 @@ def _written(c: str) -> list[str]:
     return [str(t["slug"]) for t in report_types.list_types(c) if report_types.read_doc(c, investigation.MAIN, t["slug"]) is not None]
 
 
+def targets_of(c: str, check: dict[str, Any] | None) -> list[str]:
+    """Where `check` runs: each written document when it covers the documents, then the cards when it covers them."""
+    if not check:
+        return []
+    return (_written(c) if covers(check, "documents") else []) + ([CANVAS] if covers(check, "cards") else [])
+
+
 async def refresh(c: str, cid: str, route: str = "click") -> list[dict[str, Any]]:
-    """Run check `cid` on every written document where it has passages to cover and no run running (a check turned on
-    in the browser, a click)."""
+    """Run check `cid` on every written document it covers, and on the cards when it covers them, where it has passages
+    to cover and no run running (a check turned on in the browser, a click)."""
     out = []
-    for doc in _written(c):
+    for doc in targets_of(c, read(c, cid)):
         if running(c, cid, doc):
             continue
         rec = await start_run(c, cid, doc, route=route)
@@ -970,7 +1103,7 @@ def _writer_ended(c: str, meta: dict[str, Any]) -> None:
     if meta.get("role") != WRITER_ROLE or meta.get("status") != "done" or not meta.get("doc"):
         return
     doc = str(meta["doc"])
-    shown = [x for x in list_checks(c) if x.get("shown")]
+    shown = [x for x in list_checks(c) if x.get("shown") and covers(x, "documents")]
     if not shown:
         return
     try:
@@ -1000,7 +1133,7 @@ def mark_stale(c: str, slug: str) -> None:
     if d is None:
         return
     for x in list_checks(c):
-        if not x.get("shown") or running(c, x["id"], slug):
+        if not x.get("shown") or not covers(x, "documents") or running(c, x["id"], slug):
             continue
         check = read(c, x["id"]) or x
         rec = (check.get("runs") or {}).get(slug)
@@ -1016,6 +1149,33 @@ def mark_stale(c: str, slug: str) -> None:
                                                   "comments": 0, "summary": "", "chat": ""}
         save(c, check)
         _stream(c, str(x["id"]), slug, "stale", str((check["runs"][slug]).get("run") or ""), "", stale=n)
+
+
+def main_turn_ended(c: str, since: str | None = None) -> None:
+    """Main's turn ended (session._end_turn): each shown check that covers the cards runs on them, a follow-on start,
+    covering the cards it has not seen that changed since its last run there began (since the time that run looked
+    from, when it did not end done), else since the turn began (`since`). A check whose run there goes is left to it."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    shown = [x for x in list_checks(c) if x.get("shown") and covers(x, "cards")]
+    if shown:
+        _spawn(c, _run_on_cards(c, [str(x["id"]) for x in shown], since))
+
+
+async def _run_on_cards(c: str, ids: list[str], since: str | None) -> None:
+    for cid in ids:
+        if running(c, cid, CANVAS):
+            continue
+        rec = ((read(c, cid) or {}).get("runs") or {}).get(CANVAS)
+        base = since
+        if isinstance(rec, dict) and rec.get("run"):
+            base = rec.get("started") if rec.get("status") == "done" else rec.get("since")
+        try:
+            await start_run(c, cid, CANVAS, route="follow-on", since=str(base) if base else None)
+        except Exception:  # noqa: BLE001 — one check's failure leaves the others to run
+            log.exception("%s: check %s did not run on the cards after main's turn", c, cid)
 
 
 def on_report(c: str, event: dict[str, Any]) -> None:
@@ -1048,8 +1208,11 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
     name = _collapse(args.get("name"))
     instructions = str(args.get("instructions") or "").strip()
     wanted = [str(x).strip().strip("[]").strip() for x in args.get("passages") or [] if str(x).strip()]
+    on = _collapse(args.get("on")).lower() or None
     if not name:
         return tools.err("run_check: `name` is required")
+    if on is not None and on not in COVERS:
+        return tools.err(f"run_check: `on` is one of {', '.join(COVERS)}")
     check = by_name(ctx.c, name)
     how = "rerun"
     try:
@@ -1057,9 +1220,11 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
             if not instructions:
                 return tools.err(tools.hint("run_check-no-instructions", check=name,
                                             names=", ".join(x["name"] for x in list_checks(ctx.c))))
-            check = create(ctx.c, name, instructions, created_by=ctx.cell_author)
+            check = create(ctx.c, name, instructions, created_by=ctx.cell_author, covers=[on] if on else None)
             how = "new"
-        check = edit(ctx.c, check["id"], prompt=instructions or None, shown=True)
+        # a check run on what it does not cover yet covers it from now on
+        more = [*covers_of(check.get("covers")), on] if on and not covers(check, on) else None
+        check = edit(ctx.c, check["id"], prompt=instructions or None, shown=True, covers=more)
     except HTTPException as e:
         return tools.err(f"run_check: {e.detail}")
     docs: dict[str, list[str] | None] = {}
@@ -1067,10 +1232,13 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
         m = _REF_RE.match(w)
         if m:
             docs.setdefault(m.group(1), []).append(w)  # type: ignore[union-attr]
+        elif canvas_comments.parse_ref(w) is not None and covers(check, "cards"):
+            docs.setdefault(CANVAS, []).append(w)  # type: ignore[union-attr]
     if wanted and not docs:
         return tools.err(tools.hint("run_check-no-passage", passages=", ".join(wanted)))
     written = _written(ctx.c)
-    targets = [d for d in (docs or dict.fromkeys(written)) if d in written]
+    places = [d for d in targets_of(ctx.c, check) if on is None or (d == CANVAS) == (on == "cards")]
+    targets = [d for d in (docs or dict.fromkeys(places)) if d in written or (d == CANVAS and covers(check, "cards"))]
     if targets and (before := subagents.refusal_before(ctx.c)) is not None:
         return tools.err(before.reason or f"run_check: {before.kind}")
     lines, refused = [], []
@@ -1085,11 +1253,11 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
             refused.append(getattr(ans, "reason", "") or str(rec.get("summary") or "") or "it did not start")
             continue
         if fork is not None:
-            res = await tools._ask_main(ctx, ans, what=f"a run of the check {check['name']} on report:{doc}",
+            res = await tools._ask_main(ctx, ans, what=f"a run of the check {check['name']} on {target_name(doc)}",
                                         thread=fork, agent="the check")
             (refused if res.is_error else lines).append(res.text)
             continue
-        lines.append(tools.hint("run_check-started", check=check["name"], how=how, doc=doc,
+        lines.append(tools.hint("run_check-started", check=check["name"], how=how, doc=target_name(doc),
                                 passages=_plural(len(rec["covered"]), "passage")))
         lines.append(tools.hint("start_job-subagent", input=json.dumps(ans["input"], ensure_ascii=False)))
     if lines:
@@ -1098,12 +1266,14 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
         return tools.err(f"run_check: {refused[0]}")
     if wanted:
         return tools.err(tools.hint("run_check-no-passage", passages=", ".join(wanted)))
+    if CANVAS in places:
+        return tools.ok(tools.hint("run_check-no-cards", check=check["name"]))
     return tools.ok(tools.hint("run_check-no-doc", check=check["name"]))
 
 
 async def tool_add_comment(ctx: Any, args: dict[str, Any]) -> Any:
     """The `add_comment` tool. From main's shim it is a note of main's (comments.tool_add_comment); in a check's session it is
-    a comment of the run beside a passage it covers, citations flattened for reading and kept as `evidence`. A paragraph's
+    a comment of the run beside a passage it covers: its statement `text` and its `details` (note_parts). A paragraph's
     comment goes on its first sentence, marked `paragraph`."""
     from . import report, report_types  # noqa: PLC0415
 
@@ -1114,6 +1284,8 @@ async def tool_add_comment(ctx: Any, args: dict[str, Any]) -> Any:
 
             return await comments.tool_add_comment(ctx, args)
         return tools.err(tools.hint("add_comment-not-check"))
+    if act.doc == CANVAS:
+        return _add_card_comment(ctx, act, args)
     ref = str(args.get("ref") or "").strip().strip("[]").strip()
     text = _collapse(args.get("text"))
     if not text:
@@ -1128,20 +1300,19 @@ async def tool_add_comment(ctx: Any, args: dict[str, Any]) -> Any:
     whole = m is not None and bool(m.group(2))  # a comment on a paragraph (`#p<id>`), which goes on its first sentence
     uid = p["anchor"] if m is None or whole else m.group(3)
     used = report_types._ids(doc)
-    from . import refs  # noqa: PLC0415
-
-    cited = list(dict.fromkeys(refs.extract_refs(text)))
-    shown = report_types.readable_ids(report.plain_text(text), cells=report_types.workspace_cell_ids(ctx.c), doc_ids=used)
+    shown, details, evidence = note_parts(ctx.c, text, args.get("details"), doc_ids=used)
     if not shown:
         return tools.err("add_comment: `text` holds nothing but citations")
     comments = doc.setdefault("comments", [])
     same = next((cm for cm in comments if isinstance(cm, dict) and cm.get("check") == act.check and cm.get("run") == act.run
                  and str(cm.get("sentence_id")) == uid and bool(cm.get("paragraph")) == whole
-                 and _collapse(cm.get("text")) == shown), None)
+                 and _collapse(cm.get("text")) == shown and canvas_comments.clean_details(cm.get("details")) == details),
+                None)
     if same is None:
         comments.append({"id": report._new_id(used), "sentence_id": uid, **({"paragraph": True} if whole else {}),
-                         "text": shown, "author": AUTHOR, "check": act.check, "run": act.run, "evidence": " ".join(cited),
-                         "ts": _now(), "status": "open", "generation": int(doc.get("generation") or 1)})
+                         "text": shown, "details": details, "author": AUTHOR, "check": act.check, "run": act.run,
+                         "evidence": evidence, "ts": _now(), "status": "open",
+                         "generation": int(doc.get("generation") or 1)})
         report_types.write_doc(ctx.c, investigation.MAIN, act.doc, doc)
         act.comments += 1
         check = read(ctx.c, act.check)
@@ -1153,12 +1324,57 @@ async def tool_add_comment(ctx: Any, args: dict[str, Any]) -> Any:
     return tools.ok(f"commented on report:{act.doc}#{uid}")
 
 
+def note_parts(c: str, text: str, details: Any = None, doc_ids: set[str] | None = None) -> tuple[str, str, str]:
+    """(the statement a reader sees, its details, the refs both cite) of a comment: the statement's [[…]] markup
+    flattened to the values, the details' kept for the chips they show, a card named by its id read as card:<id> in
+    both, a document's own ids (`doc_ids`) dropped, and every ref cited kept as evidence."""
+    from . import refs, report, report_types  # noqa: PLC0415
+
+    cells = report_types.workspace_cell_ids(c)
+    details = canvas_comments.clean_details(details)
+    cited = list(dict.fromkeys([*refs.extract_refs(text), *refs.extract_refs(details)]))
+    shown = report_types.readable_ids(report.plain_text(text), cells=cells, doc_ids=doc_ids)
+    more = report_types.readable_ids(details, cells=cells, doc_ids=doc_ids) if details else ""
+    return shown, more, " ".join(cited)
+
+
+def _add_card_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
+    """add_comment in a run over the cards: a comment beside a card or a step the run covers (a comment on a card whose
+    step alone is covered goes too), stored in the cards' comments (canvas_comments.add)."""
+    ref = str(args.get("ref") or "").strip().strip("[]").strip()
+    text = _collapse(args.get("text"))
+    if not text:
+        return tools.err("add_comment: `text` is empty")
+    ps = canvas_comments.passages(ctx.c)
+    p = canvas_comments.passage_of(ctx.c, ref, ps)
+    if p is None:
+        return tools.err(tools.hint("add_comment-no-card", ref=ref or "(no ref)"))
+    covered = set(act.covered)
+    if p["ref"] not in covered and not (p["kind"] == "card" and any(q["card"] == p["card"] and q["ref"] in covered
+                                                                     for q in ps)):
+        return tools.err(tools.hint("add_comment-uncovered", ref=ref))
+    shown, details, evidence = note_parts(ctx.c, text, args.get("details"))
+    if not shown:
+        return tools.err("add_comment: `text` holds nothing but citations")
+    _, new = canvas_comments.add(ctx.c, card=p["card"], step=p["step"], text=shown, details=details, author=AUTHOR,
+                                 check=act.check, run=act.run, evidence=evidence, fp=p["fp"])
+    if new:
+        act.comments += 1
+        check = read(ctx.c, act.check)
+        rec = ((check or {}).get("runs") or {}).get(act.doc)
+        if check is not None and rec is not None and rec.get("run") == act.run:
+            rec["comments"] = act.comments
+            save(ctx.c, check)
+    return tools.ok(f"commented on {p['ref']}")
+
+
 # --------------------------------------------------------------------------- routes
 
 
 class CheckBody(BaseModel):
     name: str = Field(max_length=200)
     prompt: str = Field(max_length=PROMPT_CHARS * 2)
+    covers: list[str] | None = None
 
 
 class CheckEdit(BaseModel):
@@ -1166,6 +1382,7 @@ class CheckEdit(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     prompt: str | None = Field(default=None, max_length=PROMPT_CHARS * 2)
     colour: int | None = None
+    covers: list[str] | None = None
 
 
 class RunBody(BaseModel):
@@ -1199,7 +1416,7 @@ async def create_route(c: str, body: CheckBody, request: Request) -> dict[str, A
     """A new check, made by the analyst and turned on, a click: it runs on every written document at once."""
     _click(request)
     _ws(c)
-    check = create(c, body.name, body.prompt, created_by="analyst")
+    check = create(c, body.name, body.prompt, created_by="analyst", covers=body.covers)
     check = edit(c, check["id"], shown=True)
     _spawn(c, refresh(c, check["id"]))
     return check
@@ -1213,14 +1430,15 @@ async def edit_route(c: str, cid: str, body: CheckEdit, request: Request) -> dic
     before = read(c, cid)
     if before is None:
         raise HTTPException(404, f"no check {cid!r}")
+    wider = body.covers is not None and bool(set(covers_of(body.covers)) - set(covers_of(before.get("covers"))))
     starts = body.shown is True or (body.prompt is not None and (before.get("shown") or body.shown)
-                                    and str(body.prompt).strip() != before.get("prompt"))
+                                    and str(body.prompt).strip() != before.get("prompt")) or (wider and before.get("shown"))
     if starts or (body.shown is False and any(k[0] == c and k[1] == cid for k in _active)):
         _click(request)
-    check = edit(c, cid, name=body.name, prompt=body.prompt, colour=body.colour, shown=body.shown)
+    check = edit(c, cid, name=body.name, prompt=body.prompt, colour=body.colour, shown=body.shown, covers=body.covers)
     if body.shown is False:
         await stop_check(c, cid)
-    elif check.get("shown") and (body.shown is True or check.get("version") != before.get("version")):
+    elif check.get("shown") and (body.shown is True or check.get("version") != before.get("version") or wider):
         _spawn(c, refresh(c, cid))
     return read(c, cid) or check
 
@@ -1232,11 +1450,13 @@ async def _run(c: str, cid: str, body: RunBody) -> dict[str, Any]:
     if read(c, cid) is None:
         raise HTTPException(404, f"no check {cid!r}")
     doc = str(body.doc or "").strip().lower().removeprefix("report:")
-    if not report_types.SLUG_RE.match(doc) or report_types.read_type(c, doc) is None:
+    if doc != CANVAS and (not report_types.SLUG_RE.match(doc) or report_types.read_type(c, doc) is None):
         raise HTTPException(404, f"no document {doc!r}")
+    if doc == CANVAS and not covers(read(c, cid), "cards"):
+        raise HTTPException(409, f"check {cid!r} does not cover the cards")
     rec = await start_run(c, cid, doc, passages_=body.passages or None, force=True, route="click")
     if rec is None:
-        raise HTTPException(409, f"report:{doc} has no passage to check")
+        raise HTTPException(409, "no card to check" if doc == CANVAS else f"report:{doc} has no passage to check")
     return rec
 
 

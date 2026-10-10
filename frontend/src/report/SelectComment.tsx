@@ -144,8 +144,9 @@ function SelectCard({ top, left, onSave, onCancel }: { top: number; left: number
     <div className="wu-selcard overlay" style={{ top, left }} onClick={(e) => e.stopPropagation()} aria-label="New comment">
       <div className="wu-cm-head">
         <span className="wu-cm-sq" style={{ background: NOTE_COLOR }} />
-        <span className="wu-cm-name">You</span>
-        <span className="wu-cm-meta">comment</span>
+        <span className="wu-cm-name" style={{ color: NOTE_COLOR }}>
+          You
+        </span>
       </div>
       <div className="wu-cm-reply">
         <TextArea

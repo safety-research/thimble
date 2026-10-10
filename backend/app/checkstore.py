@@ -340,8 +340,9 @@ def _before_path(c: str, cid: str, fix_id: str) -> Path:
 
 @_changes
 def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, reason: str) -> dict | None:
-    """Apply a kept fix to card `cid` in place as one undo step by `check`, appending it to the card's `fixes`. None, changing
-    nothing, when the check is stale, a field may not be fixed, or the code candidate did not run clean."""
+    """Apply a kept fix to card `cid` in place as one undo step by `check`, appending it to the card's `fixes`, and one
+    edit by `check` in the card's history (notebook.stamp_edit). None, changing nothing, when the check is stale, a
+    field may not be fixed, or the code candidate did not run clean."""
     from . import canvas_history, notebook  # noqa: PLC0415
 
     fields = _patch_fields(patch)
@@ -357,6 +358,7 @@ def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, r
     ws = config.workspace_dir(c)
     fix_id = _id("fix")
     before = {f: copy.deepcopy(cell.get(f)) for f in fields}
+    content, shown = notebook.content_of(cell), notebook.shown_of(cell)  # for the card's history (notebook.stamp_edit)
     if "code" in fields:
         _before_path(c, cid, fix_id).write_text(json.dumps({"outputs": cell.get("outputs") or [], "status": cell.get("status"),
                                                             "labels": cell.get("labels") or [],
@@ -379,6 +381,7 @@ def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, r
     fix = {"id": fix_id, "check": check_id, "ts": _now(), "by": ACTOR, "fields": fields, "before": before,
            "after": after, "reason": str(reason or "").strip(), "state": "applied"}
     cell.setdefault("fixes", []).append(fix)
+    notebook.stamp_edit(ws, cell, content, ACTOR, shown=shown)
     cell["ts"] = _now()
     rec["basis"] = basis(cell)
     with canvas_history.acting(ACTOR):  # one undo step by `check`, its outputs kept with its code (undo.RUN_FIELDS)
@@ -411,8 +414,8 @@ def _same(a: Any, b: Any) -> bool:
 
 @_changes
 def undo_fix(c: str, cid: str, fix_id: str) -> dict:
-    """Put back what fix `fix_id` changed, as the analyst's own step, and mark it `undone`. 404 for a card or fix that does
-    not exist, 409 for a fix that is not in effect."""
+    """Put back what fix `fix_id` changed, as the analyst's own step and edit in the card's history, and mark it
+    `undone`. 404 for a card or fix that does not exist, 409 for a fix that is not in effect."""
     from . import notebook  # noqa: PLC0415
 
     hit = _locate(c, cid)
@@ -428,6 +431,7 @@ def undo_fix(c: str, cid: str, fix_id: str) -> dict:
     if not all(_same(cell.get(f), (fix.get("after") or {}).get(f)) for f in fields):
         raise HTTPException(409, f"card {cid} changed since fix {fix_id}")
     before = fix.get("before") or {}
+    content, shown = notebook.content_of(cell), notebook.shown_of(cell)  # for the card's history (notebook.stamp_edit)
     if "code" in fields:
         try:
             run = json.loads(_before_path(c, cid, fix_id).read_text("utf-8"))
@@ -449,6 +453,7 @@ def undo_fix(c: str, cid: str, fix_id: str) -> dict:
         cell["takeaway"] = before.get("takeaway") or ""
     fix["state"] = "undone"
     fix["undone"] = _now()
+    notebook.stamp_edit(config.workspace_dir(c), cell, content, "user", shown=shown)
     cell["ts"] = _now()
     if notebook.runnable(cell) and cell.get("status") == "ok":
         notebook._verify_hook("ran" if "code" in fields else "takeaway", c, nb, cell)

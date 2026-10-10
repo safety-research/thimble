@@ -29,6 +29,7 @@ def doc(workspaces_tmp, monkeypatch):
     monkeypatch.setattr(config, "models_for", lambda c=None: {**real(c), **{k: dict(v) for k, v in rows.items()}})
     for cid in ("unverified", "judgment"):
         checks.edit(CORPUS, cid, shown=True)
+    checks.edit(CORPUS, "you-should-know", shown=False)  # the built-in thimble ships on: these two are the shown checks
 
 
 async def _write(text: str = TEXT) -> None:
@@ -165,6 +166,30 @@ async def test_a_run_s_end_supersedes_its_covered_comments_and_records_what_it_s
     d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
     [cm] = [c for c in d.get("comments") or [] if c.get("check") == "judgment"]
     assert cm["status"] != "open" and cm["superseded_by"] == second.run
+
+
+async def test_a_run_main_started_that_ran_as_its_subagent_ends_with_one_line_its_hand_back(doc, bridge, monkeypatch):
+    """Live check plan-cards: main wrote two lines for each check it started, one for thimble's `checked` event and one
+    for the check's hand-back. A run that ran as main's subagent posts no `checked`, since its hand-back reaches main
+    anyway; a run with no agent of main's, such as one whose start was refused, still posts one."""
+    from app import events
+
+    posted: list[tuple[str, dict]] = []
+    monkeypatch.setattr(events, "post", lambda c, kind, payload=None, **kw: posted.append((kind, dict(payload or {}))) or {})
+    await _write()
+    rec = await checks.start_run(CORPUS, "judgment", "report", force=True, notify=True, route="click")
+    assert rec is not None and rec["notify"]
+    act = checks._active[(CORPUS, "judgment", "report")]
+    await _until(lambda: act.agent or act.ended, "the run never started")
+    assert act.agent
+    subagents.run_ended(CORPUS, act.agent, "done", "Commented on 0 of 3 passages.", source="handback")
+    await _until(lambda: _run("judgment")["status"] == "done", "the run never ended")
+    assert [k for k, _ in posted if k == checks.CHECKED_KIND] == [], "the hand-back alone tells main"
+    bridge.answers.append({"deny": "PreToolUse:Agent hook error: refused"})
+    await checks.start_run(CORPUS, "unverified", "report", force=True, notify=True, route="click")
+    await _until(lambda: _run("unverified").get("status") == "failed", "the refused run never ended")
+    checked = [p for k, p in posted if k == checks.CHECKED_KIND]
+    assert len(checked) == 1 and checked[0]["check"] == "unverified" and checked[0]["status"] == "failed"
 
 
 async def test_a_run_main_s_plan_mode_held_at_its_end_fails_saying_why_and_supersedes_nothing(doc, bridge):

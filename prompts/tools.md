@@ -39,11 +39,13 @@ Add a card, with its question and its content in one call. {{if:browser}}thimble
   "type": "object",
   "properties": {
     "question": {"type": "string", "description": "The one question the card answers."},
-    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom"], "description": "table, code, diagram, plot and timeline run `code`, example shows `refs`, note `text`, custom `html`. Default code."},
+    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan"], "description": "table, code, diagram, plot and timeline run `code`, example shows `refs`, note `text`, custom `html`, plan `steps`. Default code."},
     "code": {"type": "string", "description": "Python run in the corpus root. A table ends in a DataFrame of a few short columns indexed by what names each row, a plot in an Altair or matplotlib chart, its colours left to thimble's theme, and after import thimble a diagram in thimble.diagram(nodes, edges), each edge a (source, target, label), and a timeline in thimble.timeline(events), each event a (time, label). Name nodes, edges and events in a few words, their numbers computed, as in f\"revisions.jsonl: {len(R):,} saves\"; an edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, colour a label's values with thimble.colours(label, values), a {value: colour} dict. A plot can also be a card type's graphic, thimble.card(type, labels=[...], **args), from the card types under Cards."},
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] }, "description": "The records an example card shows, usually about three, adding one only when it shows something the others don't. Each is a ref, a moment of a video as <path>#t=<m:ss>, or {ref, quote} to highlight one passage of a long record, quoted exactly."},
     "text": {"type": "string", "description": "The markdown a note card shows."},
     "html": {"type": "string", "description": "The page a custom card shows, for what no other kind can show. Scripts run, the network does not."},
+    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string", "description": "What happened in the step, in a line or two."}, "runs": {"type": "array", "items": {"type": "string"}, "description": "The description of each Agent call that runs the step, as you pass it to Agent. The card shows each one live."}, "details": {"type": "string", "description": "More about the step, such as how it works, which the analyst opens under it."} }, "required": ["text"] }, "description": "A plan card's steps in order, each one short line of what it does and the files or results it makes. A plan covers one phase, such as building and piloting, and its question names it, as in \"Plan: build the environment and pilot it\". A plan has no takeaway."},
+    "follows": {"type": "string", "description": "For a plan of the next phase, card:<id> of the plan it follows."},
     "group": {"type": "string", "description": "The group's title or id. A new title makes a group."},
     "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, each number the card shows links to where the card shows it. Wrap the whole quantity and cite where you read the value, as in `[[31|card:<id>#outcome/merged]] of [[40|card:<id>#outcome/all]] runs`. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right. The card's own id is written `card:<id>`, which thimble fills in."}
   },
@@ -61,11 +63,12 @@ Change a card in place and run it again, rather than adding a second card. It ta
   "properties": {
     "card": {"type": "string"},
     "question": {"type": "string"},
-    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom"]},
+    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan"]},
     "code": {"type": "string"},
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] } },
     "text": {"type": "string"},
     "html": {"type": "string"},
+    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string", "description": "What happened in the step, in a line or two."}, "runs": {"type": "array", "items": {"type": "string"}, "description": "The description of each Agent call that runs the step, as you pass it to Agent. The card shows each one live."}, "details": {"type": "string", "description": "More about the step, such as how it works, which the analyst opens under it."} }, "required": ["text"] }, "description": "A plan's steps in order. They replace its steps, so you can change a step's status, note, runs or details at any time."},
     "group": {"type": "string", "description": "The group to move the card to, its title or id. A new title makes a group."},
     "after": {"type": "string", "description": "The card to place it right after, card:<id>, or first."},
     "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, each number the card shows links to where the card shows it. Wrap the whole quantity and cite where you read the value, as in `[[31|card:<id>#outcome/merged]] of [[40|card:<id>#outcome/all]] runs`. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right."}
@@ -286,14 +289,15 @@ Replace one sentence, paragraph or heading of a written document, insert a passa
 
 ## add_comment
 
-Comment on one sentence, paragraph or heading of a written document, a note the analyst reads beside it. In a check's session, comment only on the document you are checking.
+Comment on one sentence, paragraph or heading of a written document, or on a card or a step of a plan, a note the analyst reads beside it. The analyst sees `text` first and opens `details` when they want more. In a check's session, comment only on what you are checking.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph."},
-    "text": {"type": "string"}
+    "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph, card:<id> of a card, card:<id>#step-<n> of a plan's step."},
+    "text": {"type": "string", "description": "The statement: one short, clear sentence of about 20 words."},
+    "details": {"type": "string", "description": "The evidence for the statement, with its citations, in plain sentences or a few bullets of about 120 words at most."}
   },
   "required": ["ref", "text"]
 }
@@ -301,13 +305,14 @@ Comment on one sentence, paragraph or heading of a written document, a note the 
 
 ## resolve_comment
 
-Resolve a comment on a document, as the analyst's ✓ beside it does, or open a resolved one again.
+Resolve a comment on a document or a card, as the analyst's ✓ beside it does, or open a resolved one again.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "comment": {"type": "string", "description": "The comment's id, as add_comment's result names it, or report:<doc>#<id> of a passage, which resolves every open comment on it."},
+    "comment": {"type": "string", "description": "The comment's id, as add_comment's result names it, or report:<doc>#<id> of a passage or card:<id> of a card, which resolves every open comment on it."},
+    "how": {"type": "string", "enum": ["done", "known"], "description": "known when the analyst says they know it, as Know it does, so the check does not raise it again. Default done."},
     "reopen": {"type": "boolean"}
   },
   "required": ["comment"]
@@ -468,7 +473,7 @@ Send the orientation a message, such as a question its analysis did not answer, 
 
 ## run_check
 
-Run a report check over the written documents, a question asked of every passage that leaves a comment beside each passage it applies to. A new name creates the check and a known one reruns it, and either way it is turned on. It runs again by itself after a writer saves a document, and after the analyst's own edits it shows the passages that changed until they run it. Its result is the exact Agent call that starts the check as a subagent of this session, which you then make. For one note on one passage, use `add_comment`.
+Run a report check over the written documents or the cards, a question asked of every passage that leaves a comment beside each passage it applies to. A new name creates the check and a known one reruns it, and either way it is turned on. It runs again by itself after a writer saves a document, and after the analyst's own edits it shows the passages that changed until they run it. Its result is the exact Agent call that starts the check as a subagent of this session, which you then make. For one note on one passage, use `add_comment`.
 
 ```json
 {
@@ -476,7 +481,8 @@ Run a report check over the written documents, a question asked of every passage
   "properties": {
     "name": {"type": "string", "description": "The check's name, such as Unverified, or a new one."},
     "instructions": {"type": "string", "description": "What to comment on, in the analyst's words. Needed for a new check, and it replaces the instructions of an existing one."},
-    "passages": {"type": "array", "items": {"type": "string"}, "description": "Passages to check again, report:<doc>#<id>. Default every passage but the locked ones already checked."}
+    "passages": {"type": "array", "items": {"type": "string"}, "description": "Passages to check again, report:<doc>#<id>. Default every passage but the locked ones already checked."},
+    "on": {"type": "string", "enum": ["documents", "cards"], "description": "Run it on the documents or on the cards alone. A new check then covers that alone. Default what the check covers."}
   },
   "required": ["name"]
 }
@@ -484,7 +490,7 @@ Run a report check over the written documents, a question asked of every passage
 
 ## stop_check
 
-Turn a report check off, {{if:browser}}as the switch in the Checks pane does, {{end}}which hides its {{if:browser}}tints and {{end}}comments and stops its runs. Its comments are kept, and `run_check` turns it on again.{{if:terminal}} The terminal has no switch for a check, so the analyst asks you to turn one on or off.{{end}}
+Turn a report check off, {{if:browser}}as the switch in the Comments pane does, {{end}}which hides its {{if:browser}}tints and {{end}}comments and stops its runs. Its comments are kept, and `run_check` turns it on again.{{if:terminal}} The terminal has no switch for a check, so the analyst asks you to turn one on or off.{{end}}
 
 ```json
 {
@@ -1285,11 +1291,15 @@ There is no document {doc}. The documents are {docs}. To make a new one, pass it
 
 ## run_check-started
 
-check {check} started ({how}) on report:{doc}, {passages}
+check {check} started ({how}) on {doc}, {passages}
 
 ## run_check-no-doc
 
 No document is written yet, so the check {check} has nothing to read. It is on, and it runs once a document is written.
+
+## run_check-no-cards
+
+The check {check} is on, and has no card to read yet.
 
 ## run_check-no-instructions
 
@@ -1322,6 +1332,22 @@ Only the analyst's session and a check's own session comment with `add_comment`.
 ## add_comment-added
 
 commented on report:{doc}#{sid}, comment {comment}
+
+## add_comment-no-card
+
+{ref} is no card, or no step of a plan card. A card is card:<id>, and a plan's step card:<id>#step-<n>.
+
+## check-canvas
+
+The cards to comment on, each with its ref, kind and question, then its takeaway and a plan's steps. Comment on a card by its ref, or on one step of a plan by card:<id>#step-<n>. `read_ref` on a card gives its code and outputs. The analyst reads all of a card's comments beside it at once, so leave only the few that matter most on any one card.
+
+{cards}
+
+## check-known
+
+The analyst said they know these. Do not raise them again.
+
+{titles}
 
 ## resolve_comment-done
 

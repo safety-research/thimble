@@ -28,7 +28,9 @@ import { callRef, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import { useTouring } from '../lib/touring'
-import type { ChatMeta, ChatRecord, MainEffort, ModelConf, Proposal, SessionAlert, StartAnswer, Ticket } from '../lib/types'
+import type { ChatMeta, ChatRecord, MainEffort, ModelConf, Proposal, SessionAlert, StartAnswer, ThreadComment, Ticket } from '../lib/types'
+import { colourVar } from '../files/labels'
+import { NOTE_COLOR } from '../report/checkComments'
 import { loadSettings, onSettingsChange } from '../lib/models'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
@@ -965,6 +967,7 @@ export function ThreadView({ ws, meta, chat, main, skip, branches, detached }: {
                 <RefChip key={`${a}:${i}`} ref={a} compact workspace={ws} />
               ))}
               {anchors.length > ANCHORS_SHOWN && <Chip kind="value">+{anchors.length - ANCHORS_SHOWN}</Chip>}
+              {meta.anchor_comment && <AnchorComment comment={meta.anchor_comment} />}
             </>
           }
         />
@@ -973,6 +976,21 @@ export function ThreadView({ ws, meta, chat, main, skip, branches, detached }: {
       {canAskAgain(chat.records, chat.running) && <AskAgain ws={ws} id={meta.id} detached={detached} onAsked={chat.reload} />}
       {!chat.running && <HandBack ws={ws} id={meta.id} state={meta.hand_back} detached={detached} onDone={chat.reload} />}
     </>
+  )
+}
+
+/** The comment a thread that its Ask opened is about, on the anchor line under its passage's or step's chip: its
+ * check's square and name in the check's color, then its statement. */
+function AnchorComment({ comment }: { comment: ThreadComment }) {
+  const colour = comment.check ? colourVar(comment.colour) : NOTE_COLOR
+  return (
+    <span className="chat-anchor-comment" data-comment={comment.id}>
+      <span className="wu-cm-sq" style={{ background: colour }} />
+      <span className="chat-anchor-comment-name" style={{ color: colour }}>
+        {comment.name}
+      </span>
+      <span className="chat-anchor-comment-text">{comment.text}</span>
+    </span>
   )
 }
 

@@ -33,6 +33,19 @@ export interface ChatMeta {
      * the analyst asked for; may be absent (write_session.start) */
   orient?: string | null
   orient_run?: number | null
+  /** a thread that a comment's Ask opened: the comment, which its anchor line names beside its passage or step
+   * (backend comments.thread_comment) */
+  anchor_comment?: ThreadComment | null
+}
+
+/** The comment a thread is about (backend comments.thread_comment): its check's id, name and label palette place
+ * (null for the analyst's own and Claude's notes, named You and Claude) and its statement. */
+export interface ThreadComment {
+  id: string
+  check: string | null
+  name: string
+  colour: number | null
+  text: string
 }
 
 export type ChipKind = 'say' | 'filter' | 'label' | 'ticket' | 'artifact' | 'view' | 'thread'
@@ -89,6 +102,8 @@ export interface NewThreadBody {
   /** the first question: sent as the thread's first event in the same request, which makes nothing when no session
    * listens */
   text?: string | null
+  /** the id of the comment whose Ask opened the thread, which its anchor line then names */
+  comment?: string | null
 }
 
 export interface ChatPatch {
@@ -111,6 +126,7 @@ export type WsEvent = { ts?: string; seq?: number } & (
   | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string; rows?: boolean }
   | { type: 'filter'; scope: FilterScope; concept?: string; value?: string }
   | { type: 'check'; id: string; doc: string; status: CheckRunStatus | string; run?: string; chat?: string }
+  | { type: 'checks'; id: string }
   | { type: 'job'; status: string }
   | { type: 'server'; status: string }
   | { type: string; [k: string]: unknown }
@@ -135,7 +151,7 @@ export interface Group {
   session?: string
 }
 
-export type CellKind = 'plot' | 'table' | 'code' | 'example' | 'note' | 'diagram' | 'timeline' | 'label' | 'custom'
+export type CellKind = 'plot' | 'table' | 'code' | 'example' | 'note' | 'diagram' | 'timeline' | 'label' | 'custom' | 'plan'
 
 export type MimeBundle = Record<string, any> & { _stream?: 'stdout' | 'stderr'; _out?: number; truncated?: OutputTruncation }
 
@@ -196,6 +212,36 @@ export interface Cell {
   check?: unknown
   /** the changes checks made to the card, oldest first (lib/cardCheck) */
   fixes?: unknown[]
+}
+
+/** A plan card's step status (backend notebook.PLAN_STATUSES). */
+export type PlanStatus = 'not started' | 'running' | 'done' | 'needs you'
+
+/** One step of a plan card's payload (backend notebook.plan_step_of): its id never changes, `makes` names what it makes,
+ * `details` what it shows under it on request, `runs` the Agent calls that do it, `time` a time the agent gave,
+ * `started`/`ended` thimble's stamps. */
+export interface PlanStep {
+  id: string
+  text: string
+  makes: string[]
+  status: PlanStatus
+  note: string
+  details: string
+  runs: string[]
+  time: string
+  started: string | null
+  ended: string | null
+}
+
+/** The live row of one run of a plan's step (backend plans.plan_runs): the subagent chat of that name, its state, its
+ * latest event and how long it has run. */
+export interface PlanRun {
+  step: number
+  name: string
+  chat: string | null
+  state: string
+  latest: string
+  elapsed: string
 }
 
 export interface CanvasResponse {
@@ -883,6 +929,33 @@ export interface WriteupComment {
   generation?: number | null
   section?: string | null
   proposal?: string | null
+  /** what supports the statement `text`, shown on request: markdown whose citations show as chips (backend
+   * canvas_comments.note_of; a comment stored before it is read as its first sentence and the rest) */
+  details?: string | null
+  /** why it is resolved: the analyst's Done or Know it, or superseded by a later run of its check */
+  resolution?: 'done' | 'known' | 'superseded' | string | null
+}
+
+/** A comment beside a card or a step of a plan card (`GET /ws/{c}/canvas/comments`, backend canvas_comments.py): a
+ * check's run over the cards left it (`check`), or main did (author `claude`). `ref` is `card:<id>`, or
+ * `card:<id>#step-<n>` with `n` the step's place. Only open comments on cards that are there are served. */
+export interface CanvasComment {
+  id: string
+  card: string
+  /** the step's stable id; null for a comment on the card */
+  step: string | null
+  n: number | null
+  ref: string
+  check: string | null
+  run: string | null
+  author: 'check' | 'claude' | string
+  /** the statement, shown first */
+  text: string
+  /** what supports it, shown on request: markdown whose citations show as chips */
+  details: string
+  evidence?: string | null
+  ts: string
+  status: 'open' | 'dismissed' | string
 }
 
 /** A written document, or (`frame: true`) the frame of pinned figures and bullets before any write. */
@@ -1000,7 +1073,12 @@ export interface Check {
   ts: string
   version: number
   runs: Record<string, CheckRun>
+  /** what it comments on: the documents, the cards (its runs on them are `runs['@canvas']`) or both */
+  covers?: CheckCover[]
 }
+
+/** What a check comments on (backend checks.COVERS). */
+export type CheckCover = 'documents' | 'cards'
 
 /** `PATCH /ws/{c}/checks/{id}`: what the sidebar changes. */
 export interface CheckPatch {
@@ -1008,6 +1086,7 @@ export interface CheckPatch {
   name?: string
   prompt?: string
   colour?: number
+  covers?: CheckCover[]
 }
 
 /** `GET /ws/{c}/card-checks` (backend card_check.status_route): whether the card check runs, whether it starts by
@@ -1512,8 +1591,29 @@ export interface Cell {
   /** the corpus files the last run read, and how many more it read than are listed */
   reads?: string[]
   reads_more?: number
-  /** who changed its code, payload or question, and when */
-  edited?: { by: string; ts: string }[]
+  /** who changed its question, code, payload or takeaway, and when, oldest first (backend notebook.stamp_edit) */
+  edited?: CellEdit[]
+}
+
+/** One edit of a card: who made it and when, the fields it changed, and `id`, by which the card as it was before it
+ * opens (CardVersion); an edit made before thimble kept what edits replaced has no id. */
+export interface CellEdit {
+  by: string
+  ts: string
+  id?: string
+  fields?: string[]
+}
+
+/** A card as it stood before one of its edits, to read (backend notebook.card_version_route): its question, code,
+ * payload, takeaway and outputs as stored then. */
+export interface CardVersion {
+  card: string
+  /** the edit it stood before */
+  before: string
+  by: string
+  ts: string
+  fields: string[]
+  version: Pick<Cell, 'id' | 'notebook' | 'kind' | 'title' | 'code' | 'payload' | 'takeaway' | 'outputs' | 'status' | 'text'>
 }
 
 export interface CellPatch {

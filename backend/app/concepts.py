@@ -1787,12 +1787,13 @@ def trial_groups(sources: list[dict], unit: str, limit: int) -> tuple[list[dict]
 
 
 def cell_text(cell: dict) -> str:
-    """What a card says, as text: its question, code, takeaway, note text and output text."""
+    """What a card says, as text: its question, code, takeaway, note text, a plan's steps and output text."""
     from . import notebook
 
     payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
     parts = [str(cell.get("title") or ""), str(cell.get("code") or ""), str(cell.get("takeaway") or ""),
-             str(payload.get("text") or cell.get("text") or ""), notebook.outputs_text(cell.get("outputs") or [])]
+             str(payload.get("text") or cell.get("text") or ""), "\n".join(notebook.plan_lines(cell)),
+             notebook.outputs_text(cell.get("outputs") or [])]
     return "\n\n".join(p for p in parts if p.strip())
 
 

@@ -1,10 +1,11 @@
-// The checks and comments of a document, pure: the checks the Checks pane lists with their colours, the open comments
-// a document carries, which passages they tint, the ruler's lanes, the margin's stacking so comment cards never
-// overlap, and the edits the pane makes to its list.
+// The checks and comments of a document, pure: the checks the Comments pane lists with their colours, the open
+// comments a document carries, which passages they tint, the ruler's lanes, the margin's stacking so comment cards
+// never overlap, and the edits the pane makes to its list. A check covers the documents, the cards or both; its runs on
+// the cards are `runs['@canvas']` (CANVAS).
 import { colourVar, LABEL_ORDER } from '../files/labels'
 import type { RulerColumn, RulerTick } from '../files/Ruler'
 import { hhmm } from '../lib/time'
-import type { Check, CheckRun, WriteupComment, WriteupSentence } from '../lib/types'
+import type { Check, CheckCover, CheckRun, WriteupComment, WriteupSentence } from '../lib/types'
 
 /** the analyst's own comments: the no-match grey, since they judge nothing */
 export const NOTE_COLOR = 'var(--label-none)'
@@ -14,6 +15,8 @@ export const UNVERIFIED = 'unverified'
 export const TAG_PREFIX = 'tag:'
 /** The author of a note main left with add_comment (backend comments.py), which no check owns. */
 export const CLAUDE_AUTHOR = 'claude'
+/** The cards as a check's run target, beside the documents' slugs (backend checks.CANVAS). */
+export const CANVAS = '@canvas'
 
 /** What the pane, the tints and the margin read of a check. */
 export type CheckInfo = Pick<Check, 'id' | 'name' | 'colour'>
@@ -36,6 +39,14 @@ export interface DocComment {
   evidence: string[]
   /** the citation check's tag, which is no comment: nothing to resolve */
   tag: boolean
+  /** what supports the statement (`text`), shown on request (backend canvas_comments.note_of) */
+  details?: string
+}
+
+/** The refs a comment cites that its details do not show as chips already, such as those its statement's citations,
+ * flattened for reading, left in its evidence. */
+export function extraEvidence(evidence: readonly string[], details: string): string[] {
+  return evidence.filter((r) => !details.includes(r))
 }
 
 /** The refs a check's comment rests on, from its `evidence` (refs joined by spaces), each once, without the punctuation
@@ -68,11 +79,11 @@ export function openComments(comments: readonly WriteupComment[] | undefined, se
     const check = commentCheck(cm)
     if (check === UNVERIFIED) marked.add(sid)
     const span = cm.paragraph ? [...(paragraphs.get(sid) ?? [sid])] : [sid]
-    out.push({ id: cm.id, sid, span, check, text, author: cm.author, evidence: evidenceRefs(cm.evidence), tag: false })
+    out.push({ id: cm.id, sid, span, check, text, author: cm.author, evidence: evidenceRefs(cm.evidence), tag: false, details: String(cm.details ?? '').trim() })
   }
   for (const s of sentences) {
     if (!(s.tags ?? []).includes('unverified') || marked.has(s.id)) continue
-    out.push({ id: TAG_PREFIX + s.id, sid: s.id, span: [s.id], check: UNVERIFIED, text: s.tag_notes?.unverified?.trim() || 'Not checked', author: 'check', evidence: [], tag: true })
+    out.push({ id: TAG_PREFIX + s.id, sid: s.id, span: [s.id], check: UNVERIFIED, text: s.tag_notes?.unverified?.trim() || 'Not checked', author: 'check', evidence: [], tag: true, details: '' })
   }
   if (!order.length) return out
   const rank = new Map(order.map((id, i) => [id, i]))
@@ -94,7 +105,7 @@ export function shownComments(comments: readonly DocComment[], on: ReadonlySet<s
 }
 
 /** The open comments per check, whether the check is on or off. */
-export function countsByCheck(comments: readonly DocComment[]): Map<string, number> {
+export function countsByCheck(comments: readonly { check: string | null }[]): Map<string, number> {
   const out = new Map<string, number>()
   for (const c of comments) if (c.check != null) out.set(c.check, (out.get(c.check) ?? 0) + 1)
   return out
@@ -188,8 +199,17 @@ export function checkColumns(shown: readonly DocComment[], on: ReadonlySet<strin
 /** The ids of the checks that are on. */
 export const shownIds = (checks: readonly Pick<Check, 'id' | 'shown'>[]): Set<string> => new Set(checks.filter((c) => c.shown).map((c) => c.id))
 
-/** A check's latest run on a document, or null. */
+/** A check's latest run on a document, or on the cards (CANVAS), or null. */
 export const runOf = (check: Pick<Check, 'runs'>, doc: string): CheckRun | null => check.runs?.[doc] ?? null
+
+/** What a check comments on: the documents unless the server says otherwise. */
+export const coversOf = (check: Pick<Check, 'covers'>): CheckCover[] => (check.covers?.length ? check.covers : ['documents'])
+
+/** Whether a check's rows belong to a surface: the cards (CANVAS), or a document. */
+export const coversSurface = (check: Pick<Check, 'covers'>, surface: string): boolean => coversOf(check).includes(surface === CANVAS ? 'cards' : 'documents')
+
+/** The checks a surface's Comments pane lists, in the server's order. */
+export const checksFor = <T extends Pick<Check, 'covers'>>(checks: readonly T[], surface: string): T[] => checks.filter((c) => coversSurface(c, surface))
 
 /** What a Checks pane row shows in its count's place: null while running or with no result, else the count. */
 export function rowCount(run: Pick<CheckRun, 'status'> | null, open: number): number | null {

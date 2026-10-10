@@ -2,7 +2,9 @@
 // the analyst does to it (drag, resize, marquee select, group, delete, rename, pan and zoom, teleports to a ref) and
 // writes every change through the notebook routes before re-reading. With no view kept it opens on the orientation's
 // deck; a switch to the tab while it has its dot lands by landing.ts. Every card carries `data-anchor`, so ⌘-click
-// reaches it.
+// reaches it. The comments the checks over the cards leave sit beside the cards (CommentLayer.tsx), and the top bar's
+// Comments lists those checks with their switches (Controls.tsx, report/Checks.tsx CheckRows). A plan card main adds
+// opens the frames it is in, so the next phase's plan shows below the finished one.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react'
 import { ChipContext } from '../chat/markdown'
 import { readSeen } from '../chat/seen'
@@ -25,7 +27,10 @@ import type { CanvasResponse, Cell, ChatMeta, Filters, Pos } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { anchorElement, capturePng, describeElement } from '../pointer/capture'
 import { NO_FILTER, activeParts, bothKeep, cardParts, keepShown, keptBy, readFilter, searchText, type CardFilter, type FilterCard, type FilterPart } from './cardFilter'
+import { useChecks } from '../report/Checks'
 import { CellCard, type CardAction, type CardField, type Edge } from './Cell'
+import { CommentLayer, shownCanvasComments, useCanvasComments } from './CommentLayer'
+import { newPlans } from './plan'
 import { conceptName, useConcepts } from './concepts'
 import { CanvasContext, type CanvasCtx } from './context'
 import { Controls, type CanvasLabel } from './Controls'
@@ -164,6 +169,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const [missing, setMissing] = useState(false)
   const openKey = storageKey(ws, 'canvas-open')
   const [open, setOpenState] = useState<ReadonlySet<string>>(() => new Set(readStorage<string[]>(openKey, [])))
+  // no frame kept open or shut yet in this browser: the analyst's own frame, Your work, opens on the first read
+  const firstOpen = useRef(readStorage<string[] | null>(openKey, null) == null)
   // the card filter as the analyst sets it, shown at once; the server's canvas filter holds it (filters, loadFilters)
   const [cardFilter, setCardFilterState] = useState<CardFilter>(NO_FILTER)
   const viewKey = storageKey(ws, 'canvas-view')
@@ -177,6 +184,11 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const [drag, setDrag] = useState<Drag | null>(null)
   const [marquee, setMarquee] = useState<Rect | null>(null)
   const [detail, setDetail] = useState<string | null>(null)
+  // the card whose History button was pressed, and how many times, so each press opens its history in the panel
+  const [historyOf, setHistoryOf] = useState<{ cell: string; seq: number } | null>(null)
+  useEffect(() => {
+    if (detail == null) setHistoryOf(null)
+  }, [detail])
   // the lines of a card's output a citation opened its details at, while those details are open
   const [cite, setCite] = useState<(OutputCite & { cell: string }) | null>(null)
   useEffect(() => {
@@ -192,9 +204,14 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   // the viewport has been measured (a hidden tab measures 0 wide), so a view can be placed in it
   const [vpReady, setVpReady] = useState(false)
   const concepts = useConcepts(ws)
+  const checks = useChecks(ws)
+  const notes = useCanvasComments(ws)
   const vp = useRef<HTMLDivElement>(null)
 
-  useEffect(() => setOpenState(new Set(readStorage<string[]>(openKey, []))), [openKey])
+  useEffect(() => {
+    setOpenState(new Set(readStorage<string[]>(openKey, [])))
+    firstOpen.current = readStorage<string[] | null>(openKey, null) == null
+  }, [openKey])
   useEffect(() => {
     const kept = readView(viewKey)
     placed.current = kept != null
@@ -374,7 +391,29 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     return { ...board, cells, cellById: new Map(cells.map((c) => [c.id, c] as const)) }
   }, [board, sizing])
   const lay = useMemo(() => (shownBoard ? layoutBoard(shownBoard, open, heights) : null), [shownBoard, open, heights])
-  const content = useMemo(() => (lay ? extentOf(lay.rects.values()) : null), [lay])
+  // a plan card main just added, such as the next phase's plan after a finished one, opens the frames it is in, so it
+  // shows below the cards before it rather than under the first card of a collapsed frame
+  const drawnCells = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    drawnCells.current = null
+  }, [ws])
+  useEffect(() => {
+    if (!data || !firstOpen.current) return
+    const own = analystGroup(data.groups)
+    if (!own) return
+    firstOpen.current = false
+    setOpen((cur) => (cur.has(own.id) ? cur : new Set([...cur, own.id])))
+  }, [data, setOpen])
+  useEffect(() => {
+    if (!data || !board) return
+    const fresh = newPlans(data.cells, drawnCells.current)
+    drawnCells.current = new Set(data.cells.map((c) => c.id))
+    const shut = [...new Set(fresh.flatMap((id) => framesAbove(board, id)))].filter((g) => !open.has(g))
+    if (shut.length) setOpen((cur) => new Set([...cur, ...shut]))
+  }, [data, board, open, setOpen])
+  // the box the comments beside the cards cover (CommentLayer), which Fit, the minimap and the Content pill take in
+  const [noteBox, setNoteBox] = useState<Rect | null>(null)
+  const content = useMemo(() => (lay ? extentOf([...lay.rects.values(), ...(noteBox ? [noteBox] : [])]) : null), [lay, noteBox])
 
   // the height of every card that has none of its own, measured as drawn (offsets ignore the zoom)
   const cardEls = useRef(new Map<string, HTMLElement>())
@@ -513,6 +552,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     }
   }
   const ctx: CanvasCtx = useMemo(() => ({ ws, filters, keep: kept, concepts, threadOf, unread, refresh, openThread }), [ws, filters, kept, concepts, threadOf, unread, refresh, openThread])
+  // the comments beside the cards: a check's while it is on, on a card that is drawn and that the filters keep
+  const shownNotes = useMemo(() => (lay ? shownCanvasComments(notes.comments, checks.on, (id) => lay.rects.has(id), kept) : []), [notes.comments, checks.on, lay, kept])
+  const cardEl = useCallback((id: string) => cardEls.current.get(id), [])
+  const titleOf = useCallback((id: string) => board?.cellById.get(id)?.cell.title ?? '', [board])
 
   // ---- pan and zoom ----
 
@@ -932,7 +975,15 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         track('card-code-toggle', { target: `cell:${id}`, detail: { open: detail !== id } })
         setSel([id])
         setLabelPanel(null)
+        setHistoryOf(null)
         setDetail((d) => (d === id ? null : id))
+        return
+      case 'history':
+        track('ui-click', { target: `cell:${id}`, detail: { action: 'history' } })
+        setSel([id])
+        setLabelPanel(null)
+        setDetail(id)
+        setHistoryOf((h) => ({ cell: id, seq: (h?.seq ?? 0) + 1 }))
         return
       case 'ask':
         if (el) bus.emit('askAbout', { el })
@@ -1451,6 +1502,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                       />
                     )
                   })}
+                  <CommentLayer ws={ws} board={board} lay={lay} comments={shownNotes} look={checks.look} cardEl={cardEl} onResolve={notes.resolve} titleOf={titleOf} onExtent={setNoteBox} />
                   {drag?.ins && <div className="board-ins" style={{ left: drag.ins.bar.x, top: drag.ins.bar.y, width: drag.ins.bar.w, height: drag.ins.bar.h }} />}
                   {tag && drag && (
                     <div className="board-tag" style={{ left: drag.x + 8, top: drag.y - 30 }}>
@@ -1489,8 +1541,11 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                 onLabel={(concept, value) => void setLabelFilter(concept, value)}
                 keep={kept}
                 filterReady={filters != null}
+                ws={ws}
+                checks={checks}
+                comments={notes.comments}
               />
-              {detailCell && <DetailPanel key={detailCell.id} cell={detailCell} cite={cite?.cell === detailCell.id ? cite : null} onClose={() => setDetail(null)} />}
+              {detailCell && <DetailPanel key={detailCell.id} cell={detailCell} cite={cite?.cell === detailCell.id ? cite : null} history={historyOf?.cell === detailCell.id ? historyOf.seq : 0} onClose={() => setDetail(null)} />}
               {labelPanel && !detailCell && <LabelPanel key={labelPanel} conceptId={labelPanel} onClose={() => setLabelPanel(null)} />}
               {focusCell && <Focus cell={focusCell} list={focusList} frame={(focusCell && board.group.get(board.cellById.get(focusCell.id)?.parent ?? '')?.name) || 'Canvas'} onPick={setFocus} onClose={() => setFocus(null)} onAskNew={(id, text) => void askNew(id, text)} />}
             </ChipContext.Provider>
