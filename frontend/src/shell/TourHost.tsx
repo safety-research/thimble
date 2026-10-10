@@ -8,6 +8,7 @@ import { useEffect } from 'react'
 import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
 import { hold } from '../lib/telemetry'
+import { refFromUrl } from '../lib/teleport'
 import { setTouring } from '../lib/touring'
 
 /** The chat column is open, not folded. */
@@ -67,10 +68,12 @@ export function TourHost() {
         console.warn('tour', e)
       }
     }
+    // the page the screenshot tool opens at a card (`?ref=`, lib/teleport refFromUrl) is not the analyst's: it offers no
+    // welcome, which would stand over the card in the picture
     api
       .tour()
       .then(({ seen }) => {
-        if (!seen && alive) void launch(true)
+        if (!seen && alive && !refFromUrl()) void launch(true)
       })
       .catch(() => undefined)
     const off = bus.on('tour', () => void launch(false))

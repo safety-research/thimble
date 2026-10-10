@@ -17,7 +17,7 @@ export function teleport(ref: string, opts: { browser?: boolean; focus?: boolean
 
 /** The element `?ref=<ref>` in the page's URL names, which the shell opens once it is mounted (Shell): the screenshot
  * tool loads the workspace at one card this way (backend tools._shot_card), to picture it as the analyst sees it, so
- * the card opens still, with no selection ring and no flash in the picture. */
+ * the card opens still, with no selection ring and no flash in the picture, and no tour welcome over it (TourHost). */
 export function refFromUrl(): string | null {
   if (typeof window === 'undefined') return null
   const v = new URLSearchParams(window.location.search).get('ref')?.trim() ?? ''
