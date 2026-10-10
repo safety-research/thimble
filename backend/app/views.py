@@ -3390,9 +3390,8 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
 
     async def answer(kind: str, i: int, msg: dict[str, Any]) -> dict[str, Any]:
         if kind == "fetch":
-            kit, data = kit_answer(c, msg.get("query"))
-            if kit:
-                return {"data": data}
+            if isinstance(msg.get("query"), dict) and KIT_QUERY in msg["query"]:  # the kit's own fetch, off the loop
+                return {"data": (await asyncio.to_thread(kit_answer, c, msg["query"]))[1]}
             try:
                 if prepared is not None:
                     data = await _call(c, {**prepared, "labels": _wire(ctxs[i])}, "records", msg.get("query"))
