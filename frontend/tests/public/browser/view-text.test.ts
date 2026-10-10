@@ -142,6 +142,41 @@ describe('the text', () => {
     })
   }
 
+  test("a table's cell keeps the text to one line and a card's preview leaves Show more out; a table keeps its words", async () => {
+    const TABLE = '| metric | before | after | notes |\n|---|--:|--:|---|\n| p50 latency | 120 ms | 80 ms | a long note about the measurement, which wraps in its own column rather than break the words of the others |'
+    const { page, frame } = await framed(doc(`<div id="tab" style="display:flex;flex-direction:column;width:720px;height:200px"></div><div id="cards" style="width:420px"></div><div id="pr"></div><script>
+const rows = [{ ref: 'mail.jsonl#L1', md: ${js(BODY)}, plain: ${js(MAIL)} }, { ref: 'mail.jsonl#L2', md: 'short', plain: 'short' }]
+thimble.table({ mount: '#tab', rows, columns: [{ name: 'md', html: (r) => thimble.text.html(r.md) }, { name: 'plain', html: (r) => thimble.text.html(r.plain, { format: 'plain' }) }] })
+document.getElementById('cards').innerHTML = thimble.recordCard({ ref: 'forge/prs.jsonl#L9', title: 'Log', body: { html: thimble.text.html(${js(LONG)}) } })
+thimble.text('#pr', ${js(TABLE)})</script>`))
+    const got = await frame().evaluate(() => {
+      const cells = [...document.querySelectorAll('#tab .thimble-table-td')] as HTMLElement[]
+      // each word of the table's cells on one line: a word broken in two would stand on two
+      const broken: string[] = []
+      for (const cell of document.querySelectorAll('#pr th, #pr td')) {
+        const t = cell.firstChild as Text
+        for (const m of t.data.matchAll(/\S+/g)) {
+          const r = document.createRange()
+          r.setStart(t, m.index!)
+          r.setEnd(t, m.index! + m[0].length)
+          if (new Set([...r.getClientRects()].map((b) => Math.round(b.top))).size > 1) broken.push(m[0])
+        }
+      }
+      const more = document.querySelector('#cards .thimble-text-more') as HTMLElement
+      return {
+        cells: cells.length,
+        // a line break of the text past the cell's one line would run it into the row below
+        overflow: cells.filter((td) => td.querySelector('.thimble-text') && td.scrollHeight > td.closest('.thimble-table-row')!.clientHeight + 1).length,
+        folded: !!document.querySelector('#cards [data-thimble-fold][hidden]'),
+        more: more && getComputedStyle(more).display,
+        broken,
+        wide: document.documentElement.scrollWidth <= innerWidth,
+      }
+    })
+    assert.deepEqual(got, { cells: 4, overflow: 0, folded: true, more: 'none', broken: [], wide: true })
+    await page.close()
+  })
+
   test('raw HTML shows as text and runs nothing, in markdown and in plain text', async () => {
     const raw = '<script>window.pwned = 1</script>\n\n<img src="x" onerror="window.pwned = 2">\n\nSee [this](javascript:window.pwned=3) and <b onclick="window.pwned=4">bold</b>.'
     const { page, frame } = await framed(doc(`<div id="a"></div><div id="b"></div><script>

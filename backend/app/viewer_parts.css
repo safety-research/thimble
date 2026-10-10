@@ -940,12 +940,14 @@ button.thimble-record-key:focus-visible {
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
+/* a cell breaks a word only where the word alone is wider than the column can be, so a narrow column keeps its words */
 .thimble-text th,
 .thimble-text td {
   padding: 5px 12px 5px 8px;
   border: 0;
   border-bottom: 1px solid var(--border-hairline);
   vertical-align: top;
+  overflow-wrap: break-word;
 }
 .thimble-text :is(th, td):first-child {
   padding-left: 0;
@@ -1022,19 +1024,32 @@ button.thimble-record-key:focus-visible {
   margin: 2px 0 0 -6px;
   color: var(--text-tertiary);
 }
-/* in a card's body, a preview, a heading is no larger than the text around it */
+/* in a card's body, a preview whose lines the card cuts, a heading is no larger than the text around it, and Show more,
+   which the cut would hide, is left out */
 .thimble-card-body .thimble-text :is(h1, h2, h3, h4, h5, h6) {
   margin-top: 0;
   font-size: 1em;
 }
-/* in a table's one-line cell the text runs on as one line, which the cell cuts */
+.thimble-card-body .thimble-text-more {
+  display: none;
+}
+/* in a table's one-line cell the text runs on as one line, its line breaks spaces, which the cell cuts */
 .thimble-table-td .thimble-text,
 .thimble-table-td .thimble-text :is(p, h1, h2, h3, h4, h5, h6, ul, ol, li, blockquote, pre, table, thead, tbody, tr, th, td, section) {
   display: inline;
   margin: 0;
   padding: 0;
+  border: 0;
   font-size: inherit;
+  line-height: inherit;
 }
-.thimble-table-td .thimble-text-more {
+.thimble-table-td .thimble-text,
+.thimble-table-td .thimble-text * {
+  white-space: nowrap;
+}
+.thimble-table-td .thimble-text li > input[type='checkbox']:first-child {
+  margin: 0 4px 0 0;
+}
+.thimble-table-td .thimble-text :is(hr, .thimble-text-more) {
   display: none;
 }
