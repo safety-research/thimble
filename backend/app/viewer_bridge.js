@@ -303,13 +303,13 @@
     if (Array.isArray(c.spans))
       c.spans = c.spans.map(function (s) {
         if (!s || typeof s !== 'object') return s
-        var sp = { text: s.text, colour: realColour(s.colour) }
+        var sp = { text: s.text, color: realColour(s.colour), colour: realColour(s.colour) }
         if (s.id != null) sp.id = String(s.id)
         return sp
       })
     if (Array.isArray(c.values))
       c.values = c.values.map(function (v) {
-        return v && typeof v === 'object' ? { id: v.id, label: v.label, value: v.value, colour: realColour(v.colour) } : v
+        return v && typeof v === 'object' ? { id: v.id, label: v.label, value: v.value, color: realColour(v.colour), colour: realColour(v.colour) } : v
       })
     return c
   }
@@ -361,12 +361,15 @@
       var c = {}
       for (var k in l) c[k] = l[k]
       if (typeof c.colour === 'string') c.colour = realColour(c.colour)
+      // `color`, the documented name, beside `colour`, its British spelling, which pages written before it read
+      if ('colour' in c) c.color = c.colour
       if (Array.isArray(c.values))
         c.values = c.values.map(function (v) {
           if (!v || typeof v !== 'object') return v
           var w = {}
           for (var j in v) w[j] = v[j]
           if (typeof w.colour === 'string') w.colour = realColour(w.colour)
+          if ('colour' in w) w.color = w.colour
           return w
         })
       return c
@@ -414,9 +417,13 @@
     setLabel: function (id, on) {
       return labelCall('on', { id: String(id), on: !!on })
     },
-    /** give a label's value one of the colours onLabels' palette holds; every view hears it through onLabels */
+    /** give a label's value one of the colors onLabels' palette holds; every view hears it through onLabels */
+    setLabelColor: function (id, value, color) {
+      return labelCall('colour', { id: String(id), value: String(value), colour: String(color) })
+    },
+    /** setLabelColor, by its British spelling, which pages written before it call */
     setLabelColour: function (id, value, colour) {
-      return labelCall('colour', { id: String(id), value: String(value), colour: String(colour) })
+      return window.thimble.setLabelColor(id, value, colour)
     },
     /** open thimble's label editor on the label with this id, or on a new label without one, in a popover over the page.
      *  opts.anchor, the element or rect {left, top, width, height} it stands beside (default: inside the page's top-left
@@ -627,7 +634,7 @@
     } else if (d.type === P + 'labels') {
       var marksChanged = takeMarks(d.marks)
       filter = d.filter && typeof d.filter === 'object' ? d.filter : null
-      if (filter && typeof filter.colour === 'string') filter = realLabelList([filter])[0]
+      if (filter && 'colour' in filter) filter = realLabelList([filter])[0]
       answered = typeof d.answered === 'number' ? d.answered : -1
       var state = { labels: Array.isArray(d.on) ? realLabelList(d.on) : [], filter: filter }
       if (Array.isArray(d.all)) state.all = realLabelList(d.all)
@@ -1166,7 +1173,7 @@
     return out.join(', ')
   }
   function tracksOf(el) {
-    var raw = el.getAttribute('data-colour-tracks')
+    var raw = el.getAttribute('data-color-tracks') || el.getAttribute('data-colour-tracks')
     if (!raw) return null
     try {
       var got = JSON.parse(raw)
@@ -1309,7 +1316,7 @@
     var todo = [] // [element, bar colour (null for bands), what it shows, 'label' or 'colour', mark, bands or null]
     var spanned = []
     if (hasMarks() || hook) {
-      var els = document.querySelectorAll(hook && hook.mode === 'field' ? '[data-anchor],[data-colour]' : '[data-anchor]')
+      var els = document.querySelectorAll(hook && hook.mode === 'field' ? '[data-anchor],[data-color],[data-colour]' : '[data-anchor]')
       for (var j = 0; j < els.length; j++) {
         var el = els[j]
         if (el.tagName === 'CANVAS') continue
@@ -1339,8 +1346,9 @@
           if (!hit && !bands) continue
           shows = bands ? namesOf(bands, hook, tracks) : hook.name
         } else {
-          var own = el.hasAttribute('data-colour')
-          var v = own ? el.getAttribute('data-colour') : null
+          // data-color, which the kit's attr writes, or data-colour, its British spelling, which a page may write
+          var own = el.hasAttribute('data-color') || el.hasAttribute('data-colour')
+          var v = own ? (el.hasAttribute('data-color') ? el.getAttribute('data-color') : el.getAttribute('data-colour')) : null
           if (v === '') v = null
           if (m && !unmarked && outermost(el, ref)) spanned.push([el, m])
           // the bar marks a record, the element the view anchors: a group's row (no anchor) takes none; a value turned
@@ -1748,7 +1756,7 @@
       for (var j = 0; j < r.addedNodes.length; j++) {
         var added = r.addedNodes[j]
         if (collect(added)) changed = true
-        else if (colourHook && added.nodeType === 1 && (added.hasAttribute('data-colour') || added.querySelector('[data-colour]'))) changed = true
+        else if (colourHook && added.nodeType === 1 && (added.hasAttribute('data-color') || added.hasAttribute('data-colour') || added.querySelector('[data-color],[data-colour]'))) changed = true
       }
       // the elements with highlighted texts around the change find their ranges again
       if (walked && !walked.has(r.target)) {
@@ -1763,7 +1771,7 @@
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
     else if (changed) seenSoon()
     if (changed && (hasMarks() || dropping() || colourHook)) paintSoon()
-  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'data-colour', 'data-colour-tracks', 'class'] })
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'data-color', 'data-color-tracks', 'data-colour', 'data-colour-tracks', 'class'] })
 
   // What the analyst is looking at, for a newer version of the view loaded in this page's place: `ref` the element they
   // last clicked or the record the side panel opened since the last `open`, else the ref that `open` named, and none

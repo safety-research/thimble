@@ -407,6 +407,19 @@ describe('the timeline on its own', () => {
     expect(tipOf()).toEqual([expect.stringMatching(/^16 May 09:30:/), 'merged'])
   })
 
+  test('a Color by the page made with colorOf, the American name, colors its marks; a key entry takes its color or colour', async () => {
+    await load()
+    const w = win()
+    w.eval(`
+      window.tl = thimble.timeline({ mount: '#lanes', color: { valueOf: (e) => e.kind, colorOf: (v) => (v === 'a' ? '#123456' : null) } })
+      window.tl.draw([{ ref: 'a#L1', t: ${T0}, kind: 'a' }, { ref: 'a#L2', t: ${T0 + 60}, kind: 'b' }])
+      thimble.key('#rows', [{ id: 'x', name: 'X', color: '#123456' }, { id: 'y', name: 'Y', colour: '#654321' }])
+    `)
+    await wait()
+    expect([...doc().querySelectorAll<HTMLElement>('#lanes .thimble-lane-mark[data-i]')].map((m) => m.style.fill)).toEqual(['rgb(18, 52, 86)', ''])
+    expect([...doc().querySelectorAll<HTMLElement>('#rows .thimble-key-sw')].map((e) => e.style.getPropertyValue('--c'))).toEqual(['#123456', '#654321'])
+  })
+
   test("its lanes from a field's name or a function of a record, with no Rows control: a lane per value as the records first take them, then the records with none", async () => {
     await load()
     const w = win()

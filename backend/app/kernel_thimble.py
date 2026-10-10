@@ -9,19 +9,19 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               `effective` is the analyst's verdict when there is one, else the classifier's label
     thimble.labels("<name>", negatives=True)
                               every labeled unit, the other values included
-    thimble.colours("<name>", values=None)
-                              {value: colour} in the colours the label's tags show; with `values`, other values get
-                              neutral inks (NEUTRAL_COLOURS)
+    thimble.colors("<name>", values=None)
+                              {value: color} in the colors the label's tags show; with `values`, other values get
+                              neutral inks (NEUTRAL_COLOURS); thimble.colours is the same function
     thimble.diagram(nodes, edges)
                               a node-link diagram the canvas lays out: nodes as names or {id, label, detail}, edges as
                               (source, target[, label]) or dicts. A node's first line is its label, the rest its
                               detail. Output is DIAGRAM_MIME with a text/plain listing the model reads and cites
     thimble.marked(ref)       in a view's reader: the marks of the labels that are on for one record, each
-                              {label, value, colour, id}, [] outside a view's call
-    thimble.colour_value(choice, ref=None, record=None)
-                              in a view's reader: the value a record takes under the page's Colour by (`choice`, the
-                              page's colour.query()), a label's value on `ref` or a field's in `record`; None for none
-    thimble.colour_on(choice, value)
+                              {label, value, color, id}, [] outside a view's call
+    thimble.color_value(choice, ref=None, record=None)
+                              in a view's reader: the value a record takes under the page's Color by (`choice`, the
+                              page's color.query()), a label's value on `ref` or a field's in `record`; None for none
+    thimble.color_on(choice, value)
                               in a view's reader: whether the analyst left that value's toggle on under Filter by
                               (`choice`, the page's filter.query()); True for every value of Color by's query
     thimble.kept(ref)         in a view's reader: whether the record passes the analyst's label filter (True with none)
@@ -29,7 +29,7 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               judged by its records in the files the filter's label ran over (True when it has records
                               and none is in such a file, False when it has no records)
     thimble.view_labels()     in a view's reader: {labels, filter}, the labels that are on with their highlighted values,
-                              and the filter {label, value, colour} or None
+                              and the filter {label, value, color} or None
     thimble.progress(done=None, total=None, note=None)
                               in a view's reader: how far the call has got, which the page can show while it waits;
                               nothing outside a view's call
@@ -52,6 +52,8 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               that mark the records, shown as CARD_MIME with the type's listing as text/plain
 
 Each list may also be a DataFrame or a dict of (key, value) pairs; anything else raises a TypeError naming the forms.
+The British spellings stay as aliases: colours, colour_value and colour_on, and a mark's or a label's "colour" beside
+its "color".
 
 Server-only helpers: `_frame()` returns a table card's final DataFrame as JSON (frames.CAPTURE); `_trial_begin/_end/
 _undo/_drop` let the card check run a fix's code and put names back if it is refused; `_labels_read()` reports the
@@ -75,8 +77,8 @@ from pathlib import Path
 
 WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.startup_lines)
 
-__all__ = ["labels", "colours", "marked", "kept", "view_labels", "colour_value", "colour_on", "progress", "diagram", "timeline",
-           "chart", "theme", "card"]
+__all__ = ["labels", "colors", "marked", "kept", "view_labels", "color_value", "color_on", "progress", "diagram", "timeline",
+           "chart", "theme", "card", "colours", "colour_value", "colour_on"]
 
 FRAME_ROWS = 500  # rows of a table card's DataFrame the card keeps and shows (frames.ROWS_MAX)
 
@@ -500,9 +502,9 @@ def _set_by_analyst(concept_id: str) -> int:
         return 0
 
 
-def colours(name, values=None):
-    """thimble.colours("<name>") maps each of the label's values to its colour, in the label's order; with `values`,
-    other values follow sorted, in the neutral inks."""
+def colors(name, values=None):
+    """thimble.colors("<name>") maps each of the label's values to its color, in the label's order; with `values`,
+    other values follow sorted, in the neutral inks. thimble.colours is the same function."""
     k = _find(name)
     if all(x["id"] != k["id"] for x in _LABELS_READ):
         _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
@@ -510,12 +512,15 @@ def colours(name, values=None):
     if values is None:
         return own
     if isinstance(values, (str, bytes)) or not hasattr(values, "__iter__"):
-        raise TypeError("thimble.colours takes the values as a list or a column, not a single value")
+        raise TypeError("thimble.colors takes the values as a list or a column, not a single value")
     given = {v for v in values if not _missing(v)}
     others = sorted((v for v in given if not (isinstance(v, str) and v in own)), key=str)
     out = {v: c for v, c in own.items() if v in given}
     out.update({v: NEUTRAL_COLOURS[i % len(NEUTRAL_COLOURS)] for i, v in enumerate(others)})
     return out
+
+
+colours = colors  # the British spelling, kept so that a card written with it still runs
 
 
 # A view's reader call sets _view_ctx (view_host) to the labels context views.labels_context builds: {"labels": [{id,
@@ -827,13 +832,13 @@ def _probed(ref: str, every) -> bool:
 
 def marked(ref):
     """The marks of the labels that are on for the record `ref` (`<path>#L<n>`, or the ref of a record of another reader
-    such as `<db>#<table>/<key>` or `<pdf>#p<n>`): each {label, value, colour, id} whose value
+    such as `<db>#<table>/<key>` or `<pdf>#p<n>`): each {label, value, color, id} (with "colour" the same) whose value
     the record takes and the analyst highlights, in the labels' order. [] outside a view's reader call."""
-    return _marked(_view_ctx, ref)
+    return [_both(m) for m in _marked(_view_ctx, ref)]
 
 
-def colour_value(choice, ref=None, record=None):
-    """The value a record takes under the view's Colour by, `choice` being what the page's colour.query() sent with its
+def color_value(choice, ref=None, record=None):
+    """The value a record takes under the view's Color by, `choice` being what the page's color.query() sent with its
     fetch (viewer_colour.js): for a label, {label: id, name}, the label's highlighted value on the record `ref`, else
     None; for a field of the view, {field}, record[field] (record a dict), else None. None for no choice."""
     if not isinstance(choice, dict):
@@ -851,14 +856,19 @@ def colour_value(choice, ref=None, record=None):
     return None if _missing(v) or v == "" else str(v)
 
 
-def colour_on(choice, value):
+def color_on(choice, value):
     """Whether the analyst left a value's toggle on under the view's Filter by (`choice`, the page's filter.query()),
     None standing for the records that take no value: True for every value with no choice, and for every value of Color
-    by's colour.query(), which names no value turned off since Color by hides no record."""
+    by's color.query(), which names no value turned off since Color by hides no record."""
     if not isinstance(choice, dict):
         return True
     off = choice.get("off") or []
     return (None if value is None or value == "" else str(value)) not in off
+
+
+# the British spellings, kept so that a reader written with them still runs
+colour_value = color_value
+colour_on = color_on
 
 
 def kept(ref):
@@ -901,8 +911,8 @@ def progress(done=None, total=None, note=None):
 
 
 def view_labels():
-    """{labels, filter}: the labels that are on, each {id, name, colour, values: [{name, colour}]} with its highlighted
-    values, and the filter {label, value, colour}, or None."""
+    """{labels, filter}: the labels that are on, each {id, name, color, values: [{name, color}]} with its highlighted
+    values, and the filter {label, value, color}, or None; each "colour" beside "color" is the same."""
     return _view_labels(_view_ctx)
 
 
@@ -921,6 +931,12 @@ def _marked(ctx, ref) -> list:
         if v in lit:
             out.append({"label": k.get("name"), "value": v, "colour": lit[v], "id": k.get("id")})
     return out
+
+
+def _both(d: dict) -> dict:
+    """A mark or a label as a reader gets it, its "colour" given again as "color" (the documented name), in place."""
+    d["color"] = d.get("colour")
+    return d
 
 
 def _label_lit(label: dict) -> dict:
@@ -976,18 +992,18 @@ def _kept_unit(ctx, refs) -> bool:
 def _view_labels(ctx) -> dict:
     ctx = ctx or {}
     if ctx.get("probe"):
-        probe = {"id": PROBE_ID, "name": PROBE_NAME, "colour": PROBE_COLOUR, "values": [{"name": PROBE_NAME, "colour": PROBE_COLOUR}]}
-        f = {"label": PROBE_NAME, "value": PROBE_NAME, "colour": PROBE_COLOUR} if ctx.get("filter") else None
+        probe = _both({"id": PROBE_ID, "name": PROBE_NAME, "colour": PROBE_COLOUR, "values": [_both({"name": PROBE_NAME, "colour": PROBE_COLOUR})]})
+        f = _both({"label": PROBE_NAME, "value": PROBE_NAME, "colour": PROBE_COLOUR}) if ctx.get("filter") else None
         return {"labels": [probe], "filter": f}
-    labels = [{"id": k.get("id"), "name": k.get("name"), "colour": k.get("colour"),
-               "values": [{"name": v.get("name"), "colour": v.get("colour")} for v in k.get("values") or [] if v.get("highlight")]}
+    labels = [_both({"id": k.get("id"), "name": k.get("name"), "colour": k.get("colour"),
+                     "values": [_both({"name": v.get("name"), "colour": v.get("colour")}) for v in k.get("values") or [] if v.get("highlight")]})
               for k in ctx.get("labels") or []]
     f = ctx.get("filter")
-    return {"labels": labels, "filter": {"label": f.get("label"), "value": f.get("value"), "colour": f.get("colour")} if f else None}
+    return {"labels": labels, "filter": _both({"label": f.get("label"), "value": f.get("value"), "colour": f.get("colour")}) if f else None}
 
 
 def _missing(v) -> bool:
-    """Whether a value is None or a missing number (NaN, pandas' NA), which no chart colours."""
+    """Whether a value is None or a missing number (NaN, pandas' NA), which no chart colors."""
     try:
         return v is None or bool(v != v)
     except (TypeError, ValueError):
@@ -2460,7 +2476,7 @@ def _card_label(k: dict) -> dict:
 
 
 def card(type, labels=None, **args):
-    """Show a card of the card type `type`, whose records `labels` (label names) mark and colour, with the type's own
+    """Show a card of the card type `type`, whose records `labels` (label names) mark and color, with the type's own
     keyword arguments. Returns nothing, so the card shows the graphic once. The labels context holds the named labels
     alone: labels turned on later and the Files filter mark and dim what the card drew, they choose nothing."""
     global _view_ctx

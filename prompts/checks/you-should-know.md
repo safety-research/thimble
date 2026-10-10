@@ -1,6 +1,6 @@
 ---
 name: You should know
-colour: 2
+color: 2
 covers: [documents, cards]
 shown: true
 ---

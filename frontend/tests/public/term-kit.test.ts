@@ -254,6 +254,20 @@ describe('Color by', () => {
     expect(sent.filter((m) => m.t === 'state').at(-1)!.state.colour).toEqual({ by: 'field:kind', picks: ['field:kind'], off: [], seen: [] })
   })
 
+  test('colorOf, a chip\'s color and a declared value\'s color beside their British names; a strip takes `color`, or a Color by of the program\'s own with colorOf', async () => {
+    const colour = kit.colorBy({ fields: [{ name: 'kind', title: 'Kind', values: [{ name: 'fired', color: 3 }, { name: 'resolved', colour: 4 }] }] })
+    kit.draw((d: any) => colour.draw(d))
+    colour.counts({ fired: 2, resolved: 1 })
+    await tick()
+    expect([colour.colorOf('fired'), colour.colorOf('resolved')]).toEqual([kit.SERIES[2], kit.SERIES[3]])
+    expect(colour.colourOf('fired')).toBe(colour.colorOf('fired'))
+    expect(colour.values.length && colour.values.every((v: any) => v.color === v.colour)).toBe(true)
+    const sc = { cols: 1, binOf: (t: number) => t, step: 1 }
+    const own = { colorOf: (v: string) => (v === 'x' ? kit.SERIES[5] : null) }
+    expect(kit.strip(sc, [{ t: 0, k: 'x' }], { value: (it: any) => it.k, color: own })[0]).toMatchObject({ fg: kit.SERIES[5] })
+    expect(kit.strip(sc, [{ t: 0, k: 'fired' }], { value: (it: any) => it.k, color: colour })[0]).toMatchObject({ fg: kit.SERIES[2] })
+  })
+
   test('a chip\'s tip says what its value means; values past six share one chip, `other`, with no hue of their own', async () => {
     const colour = kit.colorBy({ fields: FIELDS })
     kit.draw((d: any) => colour.draw(d))

@@ -255,6 +255,9 @@ describe('the time range selector', () => {
     win().thimble.timeAxis('#ax', r.scale(600), { marks: [{ t: T0 + 3 * H, label: 'r3' }, { t: T0 + 3 * H + 60, label: 'r4' }] })
     const flags = [...ax.querySelectorAll('.thimble-axis-flag')]
     expect(flags.map((f) => [f.textContent, f.getAttribute('title')])).toEqual([['r3', 'r3'], ['', 'r4']])
+    // a flag's color, by its American name or its British alias
+    win().thimble.timeAxis('#ax', r.scale(600), { marks: [{ t: T0 + 3 * H, label: 'a', color: '#123456' }, { t: T0 + 5 * H, label: 'b', colour: '#654321' }] })
+    expect([...ax.querySelectorAll<HTMLElement>('.thimble-axis-flag')].map((f) => f.style.getPropertyValue('--c'))).toEqual(['#123456', '#654321'])
   })
 
   test('a long range reads in months and years', async () => {

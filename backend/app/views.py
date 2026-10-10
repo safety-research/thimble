@@ -4153,7 +4153,7 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
 
 
 # the bridge's label calls by the op view_shot.mjs reports
-LABEL_CALLS = {"on": "thimble.setLabel", "colour": "thimble.setLabelColour", "edit": "thimble.editLabel",
+LABEL_CALLS = {"on": "thimble.setLabel", "colour": "thimble.setLabelColor", "edit": "thimble.editLabel",
                "mark": "thimble.mark", "filter": "thimble.setFilter"}
 
 

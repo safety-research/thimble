@@ -116,7 +116,7 @@ const errors = (page: Page) => page.evaluate(() => (window as unknown as { __err
 
 type Seen = { value: string | null; bar: string | null; tracks: string | null; edge: string | null }
 type Look = { seen: Record<string, Seen[]>; tl: (string | null)[]; offTl: (string | null)[]; ownTl: (string | null)[] }
-/** Each part's records as drawn: the value it stamped (data-colour), the bar the bridge drew (its colour as a color
+/** Each part's records as drawn: the value it stamped (data-color), the bar the bridge drew (its colour as a color
  *  property computes it, or null for none), its tracks' values and its edge; and the fill of each timeline mark, by
  *  its record's index (null for the gray of no colour). */
 const look = (frame: Frame): Promise<Look> =>
@@ -132,9 +132,9 @@ const look = (frame: Frame): Promise<Look> =>
     }
     const seen = (sel: string) =>
       [...document.querySelectorAll(sel)].map((el) => ({
-        value: el.getAttribute('data-colour'),
+        value: el.getAttribute('data-color'),
         bar: el.hasAttribute('data-thimble-bar') ? norm(getComputedStyle(el).getPropertyValue('--thimble-label').trim()) : null,
-        tracks: el.getAttribute('data-colour-tracks'),
+        tracks: el.getAttribute('data-color-tracks'),
         edge: el.getAttribute('data-thimble-edge'),
       }))
     const fills = (sel: string) => {
@@ -338,7 +338,7 @@ test("a part made again in its element takes the place of the one before; a turn
   const f = page.frames().find((x) => x !== page.mainFrame())!
   await f.waitForSelector('.thimble-colour-chip', { state: 'attached' })
   await settle(page)
-  const stamps = (sel: string) => f.evaluate((sel) => [...document.querySelectorAll(sel)].map((el) => el.getAttribute('data-colour')), sel)
+  const stamps = (sel: string) => f.evaluate((sel) => [...document.querySelectorAll(sel)].map((el) => el.getAttribute('data-color')), sel)
   assert.deepEqual(await stamps('#again > .thimble-turn'), ['review', 'claim', 'review', 'claim'], "each turn stamped with its record's kind, not its own")
   assert.deepEqual(await stamps('#quiet > .thimble-turn'), [null, null, null, null], 'the transcript made again with colour: false shows no stamp')
   assert.deepEqual(await stamps('#again-msg .thimble-msg'), ['review', 'claim', 'review', 'claim'], "each message stamped with its record's kind, not its own")
@@ -407,7 +407,7 @@ thimble.transcript({ mount: '#given', colour }).draw(turns('g'))
   const f = page.frames().find((x) => x !== page.mainFrame())!
   await f.waitForSelector('.thimble-colour-chip', { state: 'attached' })
   await settle(page)
-  const got = await f.evaluate(() => [...document.querySelectorAll('[data-anchor]')].map((e) => [e.getAttribute('data-anchor'), e.getAttribute('data-colour')]))
+  const got = await f.evaluate(() => [...document.querySelectorAll('[data-anchor]')].map((e) => [e.getAttribute('data-anchor'), e.getAttribute('data-color')]))
   assert.deepEqual(got, [['l#L1', 'a'], ['l#L2', 'b'], ['t#L1', null], ['t#L2', null], ['r#L1', null], ['c#L1', null], ['g#L1', null], ['g#L2', null]])
   const errs = await errors(page)
   assert.equal(errs.length, 2, `only the transcript given colour reports, once a turn: ${errs.join(' | ')}`)

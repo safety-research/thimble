@@ -893,7 +893,7 @@
       var m = this.marksIn[i]
       var x = sc.x(m.t)
       if (x < 0 || x > sc.width) continue
-      html += '<span class="thimble-range-flag" data-i="' + i + '" style="left:' + x.toFixed(1) + 'px' + (m.colour ? ';--c:' + esc(m.colour) : '') + '"></span>'
+      html += '<span class="thimble-range-flag" data-i="' + i + '" style="left:' + x.toFixed(1) + 'px' + (m.color || m.colour ? ';--c:' + esc(m.color || m.colour) : '') + '"></span>'
     }
     this.flagsEl.innerHTML = html
   }
@@ -1454,7 +1454,7 @@
         var lb = right ? [fx - lw, fx] : [fx, fx + lw]
         var clear = used.every(function (u2) { return lb[1] + 4 <= u2[0] || lb[0] >= u2[1] + 4 })
         if (clear) used.push(lb)
-        html += '<button type="button" class="thimble-axis-flag' + (right ? ' end' : '') + '" data-i="' + order[o][1] + '" title="' + esc(text) + '" style="left:' + fx.toFixed(1) + 'px' + (mk.colour ? ';--c:' + esc(mk.colour) : '') + '"><span class="thimble-axis-pin"></span>' + (clear ? '<span class="thimble-axis-fl">' + esc(text) + '</span>' : '') + '</button>'
+        html += '<button type="button" class="thimble-axis-flag' + (right ? ' end' : '') + '" data-i="' + order[o][1] + '" title="' + esc(text) + '" style="left:' + fx.toFixed(1) + 'px' + (mk.color || mk.colour ? ';--c:' + esc(mk.color || mk.colour) : '') + '"><span class="thimble-axis-pin"></span>' + (clear ? '<span class="thimble-axis-fl">' + esc(text) + '</span>' : '') + '</button>'
       }
       html += '</div>'
     }

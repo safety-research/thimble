@@ -4265,7 +4265,7 @@ def show_concept(c: str, id_or_name: str, on: bool | None, values: list[str] | N
                                  f"{', '.join(concept['labels'])}")
     nameless = [n for n in painted.values() if n not in COLOUR_NAMES]
     if nameless:
-        raise HTTPException(400, f"no label colour is named {', '.join(map(repr, nameless))}; the colours are {', '.join(COLOUR_NAMES)}")
+        raise HTTPException(400, f"no label color is named {', '.join(map(repr, nameless))}; the colors are {', '.join(COLOUR_NAMES)}")
     if on is not None:
         concept["shown"] = bool(on)
     if on and wanted:

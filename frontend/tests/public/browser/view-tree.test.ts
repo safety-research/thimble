@@ -360,7 +360,7 @@ window.tree = thimble.tree({ mount: '#tree', rows, items: calls, mix: true })`)
     // a group's mix: its records' Color by values, in the row; a group takes no color of its own
     const lead = await frame().evaluate(() => {
       const r = document.querySelector('.thimble-tree-row[data-key="lead"]')!
-      return { mix: r.querySelector('.thimble-mix')!.getAttribute('aria-label'), colour: r.getAttribute('data-colour') }
+      return { mix: r.querySelector('.thimble-mix')!.getAttribute('aria-label'), colour: r.getAttribute('data-color') }
     })
     assert.match(lead.mix!, /^Tool: /)
     assert.equal(lead.colour, null)

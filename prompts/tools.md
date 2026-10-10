@@ -136,7 +136,7 @@ Define a category, apply it to every unit of a scope, and get the counts per val
 
 ## show_label
 
-Turn a label over files on or off in Files and the views, where it marks the records that have the values it highlights, or give its values colours. It runs nothing, so a label is shown or hidden with it rather than with `apply_label`. The analyst turns labels on and off in Files too, so call it whenever they ask to show or hide one, or to colour a value.
+Turn a label over files on or off in Files and the views, where it marks the records that have the values it highlights, or give its values colors. It runs nothing, so a label is shown or hidden with it rather than with `apply_label`. The analyst turns labels on and off in Files too, so call it whenever they ask to show or hide one, or to color a value.
 
 ```json
 {
@@ -145,7 +145,7 @@ Turn a label over files on or off in Files and the views, where it marks the rec
     "name": {"type": "string", "description": "The label's name or id."},
     "on": {"type": "boolean", "description": "Left out, the label stays on or off as it is."},
     "values": {"type": "array", "items": {"type": "string"}, "description": "The values to highlight while it is on, when not the ones it highlights now."},
-    "colours": {"type": "object", "additionalProperties": {"type": "string", "enum": ["blue", "orange", "green", "sky blue", "olive", "teal", "brown", "navy", "grass green", "cerulean", "chestnut", "cyan", "red", "dark red", "purple", "dark purple", "pink", "dark pink"]}, "description": "A colour for each value named, which every card, view and Files show. A value that had the colour takes the one the other leaves."}
+    "colors": {"type": "object", "additionalProperties": {"type": "string", "enum": ["blue", "orange", "green", "sky blue", "olive", "teal", "brown", "navy", "grass green", "cerulean", "chestnut", "cyan", "red", "dark red", "purple", "dark purple", "pink", "dark pink"]}, "description": "A color for each value named, which every card, view and Files show. A value that had the color takes the one the other leaves."}
   },
   "required": ["name"]
 }

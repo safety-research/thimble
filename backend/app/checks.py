@@ -137,7 +137,7 @@ def builtin(cid: str) -> dict[str, Any] | None:
     head, sep, body = text.removeprefix("---\n").partition("\n---\n")
     front = yaml.safe_load(head) if sep else {}
     front = front if isinstance(front, dict) else {}
-    colour = front.get("colour")
+    colour = front.get("color", front.get("colour"))  # `colour`, the British spelling, is its alias
     return {"id": cid, "name": _collapse(front.get("name") or cid), "prompt": body.strip(),
             "colour": colour if colour in COLOURS else COLOURS[0], "shown": front.get("shown") is True, "builtin": True,
             "covers": covers_of(front.get("covers")), "created_by": "thimble", "ts": "", "version": 1, "runs": {}}
@@ -160,7 +160,7 @@ def from_extensions(c: str) -> dict[str, dict[str, Any]]:
                 prompt = ""
             raw = read_json(folder / "check.json", {})
             raw = raw if isinstance(raw, dict) else {}
-            colour = raw.get("colour")
+            colour = raw.get("color", raw.get("colour"))  # `colour`, the British spelling, is its alias
             colour = int(colour) if isinstance(colour, (int, str)) and str(colour).isdigit() else None
             if not slug or not prompt or not ID_RE.match(cid) or cid in BUILTINS:
                 continue
@@ -292,7 +292,7 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
                 run["seen"] = [fp for fp in run.get("seen") or [] if fp in locked]
     if colour is not None:
         if colour not in COLOURS:
-            raise HTTPException(400, f"a colour is one of {COLOURS[0]} to {COLOURS[-1]}")
+            raise HTTPException(400, f"a color is one of {COLOURS[0]} to {COLOURS[-1]}")
         check["colour"] = colour
     if shown is not None:
         check["shown"] = bool(shown)

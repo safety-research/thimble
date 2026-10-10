@@ -1,6 +1,6 @@
 // The view kit's record card (backend/app/viewer_colour.js thimble.recordCard), in a jsdom window of its own: the html
 // it writes for a record, its text escaped and the page's own markup kept where the page says so, its anchor, and its
-// colour, which only Color by gives it (data-colour while a field is the colour, nothing with Off), never a colour of
+// colour, which only Color by gives it (data-color while a field is the colour, nothing with Off), never a colour of
 // the card's own; with several Color by choices, a band per choice that the bridge draws in their order, empty where
 // the record has no value or its value's colour is turned off, and the room they take on the root
 // (--thimble-bands-w). How the card and its bars look is tests/public/browser/view-card.test.ts.
@@ -69,17 +69,17 @@ test('a card holds its parts in order, escapes text, keeps {html} and anchors it
 test("a card's colour comes from Color by: its field's value while a field is the colour, nothing with Off or with no control", async () => {
   await load()
   const pr = { number: 66599, claimant: 'agent-08' }
-  expect(card({ ref: 'forge.db#prs/66599', record: pr, title: 't' }).hasAttribute('data-colour')).toBe(false)
+  expect(card({ ref: 'forge.db#prs/66599', record: pr, title: 't' }).hasAttribute('data-color')).toBe(false)
   const colour = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'claimant', title: 'Claimant' }] })
   await wait()
-  expect(card({ ref: 'forge.db#prs/66599', record: pr, title: 't' }).getAttribute('data-colour')).toBe('agent-08')
-  expect(card({ ref: 'forge.db#prs/66191', record: { claimant: 'a "q" <b>' }, title: 't' }).getAttribute('data-colour')).toBe('a "q" <b>')
+  expect(card({ ref: 'forge.db#prs/66599', record: pr, title: 't' }).getAttribute('data-color')).toBe('agent-08')
+  expect(card({ ref: 'forge.db#prs/66191', record: { claimant: 'a "q" <b>' }, title: 't' }).getAttribute('data-color')).toBe('a "q" <b>')
   win().document.querySelector<HTMLElement>('.thimble-colour-by')!.click()
   await wait()
   win().document.querySelector<HTMLElement>('.thimble-colour-menu [data-by="off"]')!.click()
   await wait()
   expect(colour.off).toBe(true)
-  expect(card({ ref: 'forge.db#prs/66599', record: pr, title: 't' }).hasAttribute('data-colour')).toBe(false)
+  expect(card({ ref: 'forge.db#prs/66599', record: pr, title: 't' }).hasAttribute('data-color')).toBe(false)
 })
 
 describe('several Color by choices', () => {
@@ -132,11 +132,11 @@ describe('several Color by choices', () => {
     return colour
   }
 
-  test('one choice: the one bar, its value in data-colour and no track values; no room written', async () => {
+  test('one choice: the one bar, its value in data-color and no track values; no room written', async () => {
     const colour = await mountWith(['f:claimant'])
     expect(colour.picks.map((p: { title: string }) => p.title)).toEqual(['Claimant'])
     const cards = [...win().document.querySelectorAll('#col .thimble-card')]
-    expect(cards.map((c) => [c.getAttribute('data-colour'), c.hasAttribute('data-colour-tracks')])).toEqual([['agent-08', false], ['agent-21', false], ['', false]])
+    expect(cards.map((c) => [c.getAttribute('data-color'), c.hasAttribute('data-color-tracks')])).toEqual([['agent-08', false], ['agent-21', false], ['', false]])
     expect(edges()).toEqual({ 'forge.db#prs/1': { edge: 'in', bar: true }, 'forge.db#prs/2': { edge: 'in', bar: true }, 'forge.db#prs/3': null })
     expect(room()).toBeNull()
   })
@@ -144,8 +144,8 @@ describe('several Color by choices', () => {
   test("two and three choices: a band per choice in Color by's order, each in its value's colour of that choice, empty where the card has none", async () => {
     await mountWith(['f:claimant', 'f:state'])
     const first = win().document.querySelector('#col .thimble-card')!
-    expect(first.getAttribute('data-colour')).toBe('agent-08')
-    expect(JSON.parse(first.getAttribute('data-colour-tracks')!)).toEqual(['open'])
+    expect(first.getAttribute('data-color')).toBe('agent-08')
+    expect(JSON.parse(first.getAttribute('data-color-tracks')!)).toEqual(['open'])
     expect(edges()).toEqual({
       'forge.db#prs/1': { edge: 'bands', bands: [place(1), place(3)] },
       'forge.db#prs/2': { edge: 'bands', bands: [place(2), place(5)] },
@@ -155,7 +155,7 @@ describe('several Color by choices', () => {
     expect(room()).toBe(':root{--thimble-bands-w:7px}')
 
     await mountWith(['f:claimant', 'f:state', 'f:kind'])
-    expect(JSON.parse(win().document.querySelector('#col .thimble-card')!.getAttribute('data-colour-tracks')!)).toEqual(['open', 'doc'])
+    expect(JSON.parse(win().document.querySelector('#col .thimble-card')!.getAttribute('data-color-tracks')!)).toEqual(['open', 'doc'])
     expect(edges()).toEqual({
       'forge.db#prs/1': { edge: 'bands', bands: [place(1), place(3), place(7)] },
       'forge.db#prs/2': { edge: 'bands', bands: [place(2), place(5), place(8)] },

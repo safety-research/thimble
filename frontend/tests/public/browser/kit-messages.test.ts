@@ -145,7 +145,7 @@ describe('the messages in a frame, with Color by and the search', () => {
       frame().evaluate(() =>
         [...document.querySelectorAll('.thimble-msg')].map((e) => {
           const m = /rgb\([^)]*\)(?= 3px 0px 0px 0px inset)/.exec(getComputedStyle(e).boxShadow)
-          return [e.getAttribute('data-colour'), m ? m[0] : null]
+          return [e.getAttribute('data-color'), m ? m[0] : null]
         }),
       )
     const chip = (name: string) => frame().evaluate((n) => {
@@ -291,7 +291,7 @@ describe('the messages alone', () => {
   test('drawn with no other part: folds open and close, a long body behind Show more, a pick, reveal', async () => {
     const { page: p, frame, errors } = await framed(ALONE)
     assert.equal(await frame().evaluate(() => document.querySelectorAll('.thimble-msg').length), 8)
-    assert.equal(await frame().evaluate(() => document.querySelectorAll('[data-colour], [data-thimble-edge], .thimble-colour-strip').length), 0, 'no Color by, no bar')
+    assert.equal(await frame().evaluate(() => document.querySelectorAll('[data-color], [data-colour], [data-thimble-edge], .thimble-colour-strip').length), 0, 'no Color by, no bar')
     // the quote opens on its "…" and folds again
     const quote = () => frame().evaluate(() => (document.querySelector('[data-anchor="b.jsonl#L6"] .thimble-msg-fold') as HTMLElement).hidden)
     await frame().locator(msg(6, '.thimble-msg-dots')).click()
