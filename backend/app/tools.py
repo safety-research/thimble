@@ -158,7 +158,7 @@ class Spec:
     sessions: "tuple[str | None, ...]" = ()
     aliases: tuple[str, ...] = ()
     drop_stops: bool = False
-    optional: bool = False  # listed only when prompts/tools.md has its section (views round 5: profile_data)
+    optional: bool = False  # listed only when prompts/tools.md has its section (views round 5: profile_data, pick_views)
 
 
 _H = "app.tools:_h_"
@@ -186,9 +186,11 @@ REGISTRY: dict[str, Spec] = {
         # a card of a card type opened as its view in Files, as the card's Open as view does (cardtypes.py); main's
         Spec("open_view", (ANALYST,), "app.cardtypes:tool_open_view", sessions=MAIN_ONLY),
         Spec("propose_view", (ANALYST,), _H + "propose_view"),
-        # views round 5 (exploration), listed only where the prompts' tools.md gives it a section: main's description
-        # of the data checked against the records (profile_data.py)
+        # views round 5 (exploration), each listed only where the prompts' tools.md gives it a section: main's
+        # description of the data checked against the records (profile_data.py), and two of many concepts kept by a
+        # picker (view_pick.py)
         Spec("profile_data", (ANALYST,), "app.profile_data:tool_profile_data", sessions=MAIN_ONLY, optional=True),
+        Spec("pick_views", (ANALYST,), "app.view_pick:tool_pick_views", sessions=MAIN_ONLY, optional=True),
         Spec("write_document", (ANALYST,), "app.report_types:tool_write_document"),
         Spec("edit_document", (ANALYST,), "app.report_types:tool_edit_document"),
         # a comment beside a passage of a document: a check's, from the check's own session, or main's own note

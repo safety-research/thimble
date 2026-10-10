@@ -85,6 +85,7 @@ def _args(c: str, corpus: Path) -> dict[str, dict]:
         "propose_view": {"name": "Board", "why": "w", "claims": ["board.jsonl"], "unit": "a post", "overview": "o",
                          "zoom": "z", "filter": "f", "details": "d"},
         "profile_data": {},  # views round 5: an error before the engine runs
+        "pick_views": {"concepts": []},  # views round 5: an error before the picker runs
         "write_document": {"doc": "report", "text": "# Report\n\n## What this data is and what we analyzed\n\nPosts."},
         "edit_document": {"span": "report:report#nope", "text": "x"},
         "add_comment": {"ref": "report:report#nope", "text": "a note"},
