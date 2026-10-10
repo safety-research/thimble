@@ -2288,7 +2288,9 @@ def _heatmap_spec(df, opts: dict) -> dict:
     rows = _chart_rows(df, {c: "number" if kinds[c] == "number" else "text" for c in df.columns})
     enc: dict = {}
     for ch, c in (("x", x), ("y", y)):
-        more: dict = {}
+        # the x ticks stand between the columns, so names that read across close together (`Jun 17 Jun 18`) each
+        # stand between two ticks rather than over one at the space inside them
+        axis: dict = {"tickBand": "extent"} if ch == "x" else {}
         if kinds[c] == "time":  # times as the text of their cells' places, in time order
             ts = _times(df[c])
             fmt = _time_format(ts)
@@ -2296,14 +2298,15 @@ def _heatmap_spec(df, opts: dict) -> dict:
             for r, t in zip(rows, labels):
                 r[c] = t
             order = sorted(set(t for t in labels if t is not None))
-            # the axis names them as a date axis does ("Jun 18"), short enough that a few weeks of days read across
-            more["axis"] = {"labelExpr": f"datum.value == null ? '' : utcFormat(utcParse(datum.value, '{fmt}'), "
-                                         f"'{_time_label_format(ts)}')"}
+            # the axis names them as a date axis does ("Jun 18"), short enough that a few weeks of days read across;
+            # the one tick more that ticks between columns take has no value, and so no name
+            axis["labelExpr"] = (f"datum.value == null ? '' : utcFormat(utcParse(datum.value, '{fmt}'), "
+                                 f"'{_time_label_format(ts)}')")
         elif kinds[c] == "number":
             order = sorted(_distinct(df[c].tolist()))
         else:
             order = _ordered(kind, df[c], _ranked(df[c], df[val]))
-        enc[ch] = _enc(c, "nominal" if kinds[c] == "text" else "ordinal", sort=order, **more)
+        enc[ch] = _enc(c, "nominal" if kinds[c] == "text" else "ordinal", sort=order, **({"axis": axis} if axis else {}))
     enc["color"] = _enc(val, "quantitative", **({"scale": {"type": "symlog"}} if log else {}))
     enc["tooltip"] = [{"field": _field(c), "type": "quantitative" if c == val else "nominal", "title": c} for c in (x, y, val)]
     return _unit(rows, "rect", enc)

@@ -224,6 +224,7 @@ def test_a_heatmap_orders_its_names_by_total_its_numbers_ascending_and_takes_a_l
     spec = spec_of("heatmap", hm, log=True)
     assert spec["mark"] == "rect"
     assert spec["encoding"]["x"]["sort"] == [1, 3] and spec["encoding"]["y"]["sort"] == ["Kansas", "Navy"]
+    assert spec["encoding"]["x"]["axis"] == {"tickBand": "extent"} and "axis" not in spec["encoding"]["y"]
     assert spec["encoding"]["color"] == {"field": "captures", "type": "quantitative", "title": "captures",
                                          "scale": {"type": "symlog"}}
 
@@ -234,7 +235,9 @@ def test_a_heatmap_of_days_names_them_as_a_date_axis_does_and_its_rows_keep_the_
     spec = spec_of("heatmap", hm)
     x = spec["encoding"]["x"]
     assert x["sort"] == ["2026-05-24", "2026-06-18"] and spec["data"]["values"][0]["day"] == "2026-06-18"
-    assert x["axis"] == {"labelExpr": "datum.value == null ? '' : utcFormat(utcParse(datum.value, '%Y-%m-%d'), '%b %-d')"}
+    # its ticks between the columns, so days that read across close together each stand between two (chart-clean)
+    assert x["axis"] == {"tickBand": "extent",
+                         "labelExpr": "datum.value == null ? '' : utcFormat(utcParse(datum.value, '%Y-%m-%d'), '%b %-d')"}
     assert "axis" not in spec["encoding"]["y"]
     years = pd.DataFrame({"t": pd.to_datetime(["2025-12-31 23:00", "2026-01-01 01:30"]), "y": ["a", "a"], "n": [1, 2]})
     assert "'%Y-%m-%d %H:%M'), '%b %-d, %Y %H:%M')" in spec_of("heatmap", years)["encoding"]["x"]["axis"]["labelExpr"]

@@ -5,8 +5,8 @@
 // named every day while the dates had one digit and every other day after; a loop's numbered circle sat on a label.
 // Now every dot keeps its own color, the canvas logs nothing, a time axis names its days at one step and the circle
 // sits clear on its own edge. The second QA pass found a heatmap's 11 days (`Jun 18`) on end, 1 px short of reading
-// across a card; now they read across, and 20 stand on end with none over another. The charts are drawn in thimble's
-// own faces, whose widths the labels' room depends on.
+// across a card; now they read across, each between two ticks, and 20 stand on end with none over another. The charts
+// are drawn in thimble's own faces, whose widths the labels' room depends on.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, describe, test } from 'vitest'
@@ -57,8 +57,8 @@ const histogram = {
 // ten days, Aug 3 to Aug 12: one-digit dates, then two-digit ones that need more room
 const DAYS = Array.from({ length: 10 }, (_, i) => ({ day: `2026-08-${String(i + 3).padStart(2, '0')}T00:00:00`, opened: [3, 16, 8, 17, 7, 18, 4, 15, 5, 4][i] }))
 const days = { $schema: VL, data: { values: DAYS }, mark: { type: 'line', point: true }, encoding: { x: field('day', 'temporal'), y: field('opened', 'quantitative') } }
-// a heatmap of days as thimble.chart writes one: its days as text, named as a date axis names them, and the account
-// names down its y axis (the live QA's 15 busiest accounts)
+// a heatmap of days as thimble.chart writes one: its days as text, named as a date axis names them, its x ticks between
+// its columns, and the account names down its y axis (the live QA's 15 busiest accounts)
 const ACCOUNTS = ['AgentRelent', 'AgentMassPointer13', 'MapHelper', 'LinkHelper771', 'AgentTestLearnXYZ', 'ResearchHelper', 'ResearchReaderMN', 'OpenAIResearchSec2028', 'AgentMapCite8x', 'Agent0AddJS', 'OpenAIResearcher', 'OpenAIResearchSec2027', 'OurMassFinal', 'GuestResearch378611', 'OpenAIBot']
 const heatmap = (n: number) => {
   const days = Array.from({ length: n }, (_, i) => new Date(Date.UTC(2026, 5, 12 + i)).toISOString().slice(0, 10))
@@ -68,7 +68,7 @@ const heatmap = (n: number) => {
     $schema: VL,
     data: { values },
     mark: 'rect',
-    encoding: { x: field('day', 'ordinal', { sort: days, axis: { labelExpr: label } }), y: field('account', 'nominal', { sort: ACCOUNTS }), color: field('saves', 'quantitative') },
+    encoding: { x: field('day', 'ordinal', { sort: days, axis: { tickBand: 'extent', labelExpr: label } }), y: field('account', 'nominal', { sort: ACCOUNTS }), color: field('saves', 'quantitative') },
   }
 }
 // a pull request's life with a loop, its long label a numbered note
@@ -187,20 +187,33 @@ for (const paper of ['warm', 'dark'])
 
     test("a heatmap's days read across a card when their names fit their columns, and stand on end past that, none over another", async () => {
       // a card is 720 px wide, its body 692 px (canvas/layout CARD_W, Cell CARD_PAD_X)
+      const axisOf = (n: number) =>
+        page.evaluate((id) => {
+          const axis = Array.from(document.querySelectorAll(`#${id} g.role-axis`)).find((g) => (g.getAttribute('aria-label') ?? '').startsWith('X-axis'))!
+          const shown = Array.from(axis.querySelectorAll('g.role-axis-label text'))
+            .filter((t) => t.getAttribute('opacity') !== '0' && t.textContent)
+            .map((t) => ({ text: t.textContent ?? '', size: parseFloat(t.getAttribute('font-size') ?? ''), ...(t.getBoundingClientRect().toJSON() as DOMRect) }))
+            .sort((a, b) => a.left - b.left)
+          const ticks = Array.from(axis.querySelectorAll('g.role-axis-tick line')).map((l) => l.getBoundingClientRect()).map((r) => r.left + r.width / 2)
+          return { shown, ticks, svg: document.querySelector(`#${id} svg`)!.getBoundingClientRect().width }
+        }, `heat-${n}`)
       for (const [n, across] of [[11, true], [20, false]] as const) {
         await draw(`heat-${n}`, heatmap(n), 692)
-        const shown = await page.evaluate((id) => {
-          const axis = Array.from(document.querySelectorAll(`#${id} g.role-axis`)).find((g) => (g.getAttribute('aria-label') ?? '').startsWith('X-axis'))!
-          return Array.from(axis.querySelectorAll('g.role-axis-label text'))
-            .filter((t) => t.getAttribute('opacity') !== '0')
-            .map((t) => ({ text: t.textContent ?? '', ...(t.getBoundingClientRect().toJSON() as DOMRect) }))
-            .sort((a, b) => a.left - b.left)
-        }, `heat-${n}`)
+        const { shown, ticks } = await axisOf(n)
         assert.equal(shown.length, n, `${n} days name ${shown.map((t) => t.text).join(', ')}`)
         assert.ok(shown.every((t) => /^[A-Z][a-z]{2} \d{1,2}$/.test(t.text)), shown.map((t) => t.text).join(', '))
         for (const t of shown) assert.equal(t.width > t.height, across, `${n} days: "${t.text}" is ${t.width} by ${t.height} px`)
         for (let i = 1; i < shown.length; i++) assert.ok(shown[i].left >= shown[i - 1].right + 1, `${n} days: "${shown[i - 1].text}" runs into "${shown[i].text}"`)
+        // each name stands between two ticks, as the cell it names does, never over one at the space inside it
+        assert.equal(ticks.length, n + 1, `${n} days: ${ticks.length} ticks`)
+        for (const t of shown) assert.ok(!ticks.some((x) => x > t.left + 0.5 && x < t.right - 0.5), `${n} days: a tick stands on "${t.text}"`)
       }
+      // 40 days stand on end at their own size in a chart as wide as the card: the empty name of the tick the columns
+      // take beside their own is no column's, so it does not halve the room a name is measured to have
+      await draw('heat-40', heatmap(40), 692)
+      const { shown, svg } = await axisOf(40)
+      assert.equal(shown.length, 40)
+      assert.ok(shown.every((t) => t.size === 11 && t.height > t.width) && svg <= 692, `40 days: names at ${shown[0].size} px in ${svg} px`)
       assert.deepEqual(logged, [])
     })
 

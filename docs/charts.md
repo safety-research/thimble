@@ -145,7 +145,8 @@ and the card gives a label it read its colors. The inline rows are the chart's t
 output and a takeaway cites a value by column and row, as for any chart. Times without a zone show as they are, and
 times with a zone at their zone's clock time. A bar, line or area chart whose times lie more than a day apart, such as
 weeks, has a tick at each of them, up to 40, so the axis names the days its bars start on and its points stand on. A
-heatmap's times are named as a date axis names them (`Jun 18`), while its rows keep them whole (`2026-06-18`).
+heatmap's times are named as a date axis names them (`Jun 18`), while its rows keep them whole (`2026-06-18`). Its x
+ticks stand between its columns, so names that read across close together each stand between two.
 
 Panels one under another each get 150 px unless the chart sizes them, and a y axis that names each of its ticks (a
 ridgeline's) gets room for every name (`lib/chartDefaults.ts`). The terminal draws a one-layer bar, line, point or

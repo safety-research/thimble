@@ -510,7 +510,8 @@ export function hiddenXLabels(el: HTMLElement): HiddenX | null {
   for (const g of Array.from(svg.querySelectorAll('g.role-axis'))) {
     const aria = g.getAttribute('aria-label') ?? ''
     if (!aria.startsWith('X-axis') || !aria.includes('discrete scale')) continue
-    const texts = Array.from(g.querySelectorAll('g.role-axis-label text'))
+    // not the empty label of the one tick more an axis takes when its ticks stand between its columns (a heatmap's)
+    const texts = Array.from(g.querySelectorAll('g.role-axis-label text')).filter((t) => t.textContent)
     if (texts.length < 2 || !texts.some((t) => t.getAttribute('opacity') === '0')) continue
     const xs = texts.map((t) => t.getBoundingClientRect()).map((r) => (r.left + r.width / 2 - sr.left) / k).sort((a, b) => a - b)
     let pitch = Infinity
