@@ -84,8 +84,8 @@ def test_the_fence_keeps_the_corpus_read_only_and_lets_main_write_only_the_agent
 
 def test_the_fence_s_rules_follow_the_orientation_s_data_web_and_network_and_add_no_install_rule(corpus):
     """An edit of the corpus asks, is denied, or is left to the mode by `data`; an edit of thimble's config asks; the web
-    tools ask, are denied or allowed by `web`; `network` off denies every domain. No rule names an install, whatever an
-    earlier config's `installs` says."""
+    tools are left to the mode, denied or allowed by `web`; `network` off denies every domain. No rule names an
+    install, whatever an earlier config's `installs` says."""
     ws = config.WORKSPACES_DIR.resolve() / "logs"
     corpus_rule = f"Edit(/{corpus.resolve()}/**)"
     for data, web, network in (("ask", "ask", "on"), ("off", "off", "off"), ("allow", "allow", "on")):
@@ -96,8 +96,9 @@ def test_the_fence_s_rules_follow_the_orientation_s_data_web_and_network_and_add
             where = {k: [r for r in v if r == corpus_rule] for k, v in perms.items()}
             assert where == {**{k: [] for k in perms}, **({"ask": [corpus_rule]} if data == "ask" else
                                                          {"deny": [corpus_rule]} if data == "off" else {})}
-            web_in = {"ask": "ask", "off": "deny", "allow": "allow"}[web]
-            assert {"WebFetch", "WebSearch"} <= set(perms[web_in])
+            web_in = {k: [r for r in v if r in ("WebFetch", "WebSearch")] for k, v in perms.items()}
+            assert web_in == {**{k: [] for k in perms}, **({"deny": ["WebFetch", "WebSearch"]} if web == "off" else
+                                                          {"allow": ["WebFetch", "WebSearch"]} if web == "allow" else {})}
             assert (fence["sandbox"].get("network") == {"deniedDomains": ["*"]}) == (network == "off")
             assert {f"Edit(/{userconf.global_file()})", f"Edit(/{ws / 'config.json'})",
                     f"Edit(/{ws / 'settings.json'})"} <= set(perms["ask"])
@@ -106,6 +107,20 @@ def test_the_fence_s_rules_follow_the_orientation_s_data_web_and_network_and_add
     causes = {r.rule: r.cause for r in userconf.main_rules("logs")}
     assert causes[f"Edit(/{userconf.global_file()})"] == "config" and causes["WebFetch"] == "web"
     assert "installs" not in causes.values()
+
+
+def test_at_web_ask_the_fence_leaves_the_web_tools_to_claude_code_s_permission_mode(corpus):
+    """`web` "ask", the default, adds no rule for WebFetch or WebSearch to main's fence, so Manual asks for them as
+    Claude Code does and auto mode's classifier judges them: an `ask` rule would also ask in auto mode, for main and for
+    every agent under its fence (live check: the checks asked three times for the web in auto mode)."""
+    for conf in (None, {"agents": {"orientation": {"web": "ask"}}}):
+        if conf is None:
+            userconf.global_file().unlink(missing_ok=True)
+        else:
+            _conf(conf)
+        every = [r for rules in _rules(cli.main_fence(corpus)).values() for r in rules]
+        assert not any(r.split("(")[0] in ("WebFetch", "WebSearch") for r in every), (conf, every)
+        assert not [r for r in userconf.main_rules("logs") if r.cause == "web"], conf
 
 
 def test_a_development_install_denies_edits_of_the_code_tickets_records(corpus, tmp_path, monkeypatch):

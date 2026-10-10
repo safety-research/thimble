@@ -928,7 +928,7 @@ def _asking_chat(c: str, agent: str | None) -> str | None:
 
 def _asked_by(c: str, tool: str, tool_input: Any) -> str | None:
     """Which of the fence's ask rules sends a request of main's or its subagents' to the analyst (userconf.main_rules,
-    each rule with its cause: data, config or web), so the card can say why; None when none is known to."""
+    each rule with its cause: data or config), so the card can say why; None when none is known to."""
     import fnmatch  # noqa: PLC0415
 
     from . import userconf  # noqa: PLC0415
