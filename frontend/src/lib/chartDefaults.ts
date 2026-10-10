@@ -4,8 +4,9 @@
 // It fixes legends that squeeze the plot or repeat facet groups, rotated x labels, titles that repeat the card's
 // question, repeated facet y titles, merged layer axis titles, and y titles that overprint labels (Vega measures labels
 // narrower than it draws them). Legends past FOLD_GROUPS colours fold the rest into a grey "other (n)" without summing.
-// Long bar categories turn horizontal; whole-number axes step by whole numbers; discrete y axes get ROW_STEP per row.
-// A colour channel over a label's classes takes the label's colours (labelColours).
+// Long bar categories turn horizontal; whole-number axes step by whole numbers; discrete y axes get ROW_STEP per row, as
+// do the ticks a continuous y axis names (a ridgeline's); panels one under another get PANEL_HEIGHT each unless the
+// chart sizes them. A colour channel over a label's classes takes the label's colours (labelColours).
 
 type Spec = Record<string, unknown>
 const obj = (v: unknown): Spec | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Spec) : null)
@@ -24,6 +25,11 @@ export const FOLD_FIELD = '__thimble_group'
 export const ROW_STEP = 18
 const LABEL_PX = 11
 const LABEL_GAP = 6
+/** the height of each panel of a chart faceted by rows when neither the chart nor its config names one, px: Vega-Lite's
+ * 300 would make three panels taller than the card is wide */
+export const PANEL_HEIGHT = 150
+/** Vega-Lite's height for a view with a continuous y axis that names none */
+const VIEW_HEIGHT = 300
 /** the aggregates that keep whole numbers whole (a count is always whole) */
 const WHOLE_AGGREGATES = new Set(['count', 'distinct', 'valid', 'missing'])
 const KEEPS_WHOLE = new Set(['sum', 'min', 'max'])
@@ -207,12 +213,54 @@ function alignRows(before: unknown[], after: unknown[]): unknown[] {
   })
 }
 
+/** Whether the chart's config names the height of its views (Altair's theme does). */
+const configHeight = (root: Spec): boolean => {
+  const view = obj(obj(root.config)?.view)
+  return !!view && ('continuousHeight' in view || 'height' in view)
+}
+
+/** A panel of a chart faceted by rows (the facet's inner view, or a unit with its own row channel) at PANEL_HEIGHT when
+ * neither it nor the chart's config names a height and its y axis is continuous: a discrete one is sized by its rows. */
+function panelHeight(s: Spec, root: Spec): Spec {
+  const y = yOf(s)
+  return 'height' in s || configHeight(root) || (y && discrete(y)) ? s : { ...s, height: PANEL_HEIGHT }
+}
+
+/** A chart whose continuous y axis names each of its ticks (`axis.values` with their labels, thimble.chart's ridgeline)
+ * made tall enough for ROW_STEP a tick, the room a row of a discrete axis gets, when its height (its own, else its
+ * config's or Vega-Lite's) gives them less. */
+function namedTicksHeight(s: Spec, root: Spec): Spec {
+  const y = yOf(s)
+  const axis = obj(y?.axis)
+  if (!y || discrete(y) || !axis || !Array.isArray(axis.values) || axis.labels === false) return s
+  const view = obj(obj(root.config)?.view)
+  const have = typeof s.height === 'number' ? s.height : 'height' in s ? null : typeof view?.continuousHeight === 'number' ? view.continuousHeight : VIEW_HEIGHT
+  const need = (axis.values.length + 1) * rowStep(y)
+  return have != null && need > have ? { ...s, height: need } : s
+}
+
 /** A faceted chart's y title said once, as the rows' title at the left, instead of on every row's axis. */
 function yTitleOnce(facetRow: Spec, unitEnc: Spec | null): { row: Spec; enc: Spec | null } {
   const y = unitEnc ? obj(unitEnc.y) : null
   const t = titleOf(y)
   if (!y || !t) return { row: facetRow, enc: unitEnc }
   return { row: { ...facetRow, title: t }, enc: { ...unitEnc, y: { ...y, title: null } } }
+}
+
+/** yTitleOnce for a facet of layers: the first layer's y title as the rows' title, and no layer's y axis titled (layers
+ * inside layers included). */
+function yTitleOnceLayered(facetRow: Spec, inner: Spec): { row: Spec; spec: Spec } {
+  const first = (s: Spec): Spec | null => obj(obj(s.encoding)?.y) ?? (Array.isArray(s.layer) && obj(s.layer[0]) ? first(obj(s.layer[0])!) : null)
+  const t = titleOf(first(inner))
+  if (!t) return { row: facetRow, spec: inner }
+  const untitled = (s: Spec): Spec => {
+    const enc = obj(s.encoding)
+    const y = obj(enc?.y)
+    const out: Spec = enc && y && typeof y.field === 'string' ? { ...s, encoding: { ...enc, y: { ...y, title: null } } } : { ...s }
+    if (Array.isArray(s.layer)) out.layer = s.layer.map((l) => (obj(l) ? untitled(obj(l)!) : l))
+    return out
+  }
+  return { row: { ...facetRow, title: t }, spec: untitled(inner) }
 }
 
 /** In a grid of rows and columns a row's name stays at the left of its row, turned, rather than over each panel of it
@@ -400,10 +448,15 @@ function walk(s: Spec, root: Spec, facetFields: ReadonlySet<string>, inherited: 
     if (typeof facet.field === 'string') fields.add(facet.field)
     let spec = walk(inner, root, fields, rows, opts)
     let f: Spec = facet
+    if (obj(facet.row)) spec = panelHeight(spec, root)
     if (obj(facet.row) && obj(spec.encoding)) {
       const moved = yTitleOnce(obj(facet.row)!, obj(spec.encoding))
       f = { ...facet, row: obj(facet.column) ? besideRows(moved.row) : moved.row }
       spec = { ...spec, encoding: moved.enc }
+    } else if (obj(facet.row) && Array.isArray(spec.layer)) {
+      const moved = yTitleOnceLayered(obj(facet.row)!, spec)
+      f = { ...facet, row: obj(facet.column) ? besideRows(moved.row) : moved.row }
+      spec = moved.spec
     }
     out = { ...out, facet: f, spec }
   }
@@ -443,6 +496,7 @@ function walk(s: Spec, root: Spec, facetFields: ReadonlySet<string>, inherited: 
       fixed = { ...moved.enc!, row: obj(fixed.column) ? besideRows(moved.row) : moved.row }
     }
     out.encoding = fixed
+    if (row) out = panelHeight(out, root)
   }
   return rowsHeight(out, rows)
 }
@@ -495,7 +549,7 @@ export function chartDefaults(spec: unknown, opts: ChartOptions = {}): unknown {
     const { title: _title, ...rest } = s
     s = rest
   }
-  s = walk(s, s0, new Set(), null, opts)
+  s = namedTicksHeight(walk(s, s0, new Set(), null, opts), s0)
   const config = obj(s.config) ?? {}
   const legend = obj(config.legend) ?? {}
   if (opts.width && opts.width > 0 && opts.width < LEGEND_BOTTOM_BELOW && !('orient' in legend)) s = { ...s, config: { ...config, legend: { ...legend, orient: 'bottom' } } }

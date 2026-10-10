@@ -281,7 +281,10 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
   const color = spec.encoding?.color
   if (!x?.field || !y?.field || x.aggregate || y.aggregate) return null
   const rows = vegaRows(spec, spec)
-  if (!rows.length) return null
+  // an axis whose field the chart computes (a ridgeline's places) is in no row: the rows' table draws instead
+  const xf = x.field
+  const yf = y.field
+  if (!rows.some(r => xf in r && yf in r)) return null
   if (mark === 'bar') {
     // the quantitative axis is the value, the other the label
     const horizontal = x.type === 'quantitative' && y.type !== 'quantitative'

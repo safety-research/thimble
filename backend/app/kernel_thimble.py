@@ -40,7 +40,10 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
     thimble.chart(kind, data, **options)
                               a common chart (CHARTS) of a DataFrame whose columns come in the kind's order, such as
                               bar (category, value[, group]): VEGALITE_MIME with the rows inline and no color, font or
-                              size of its own, which the card draws in thimble's theme (docs/charts.md)
+                              size of its own, which the card draws in thimble's theme (docs/charts.md); with show=False
+                              the chart as an Altair chart, which the code can add layers of its own marks to
+    thimble.theme             the theme's colors by role for those marks (accent, ink, muted, pale, series), each a CSS
+                              variable the card reads, so they follow the accent and the paper
     thimble.card(type, labels=None, **args)
                               a card of a card type (the workspace's CARD_TYPES_FILE): the arguments checked against the
                               type's schema, the type's card.py run on its reader's index with `labels` as the labels
@@ -70,7 +73,7 @@ from pathlib import Path
 WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.kernel_argv)
 
 __all__ = ["labels", "colours", "marked", "kept", "view_labels", "colour_value", "colour_on", "progress", "diagram", "timeline",
-           "chart", "card"]
+           "chart", "theme", "card"]
 
 FRAME_ROWS = 500  # rows of a table card's DataFrame the card keeps and shows (frames.ROWS_MAX)
 
@@ -1165,27 +1168,43 @@ def timeline(events=(), spacing="time"):
 # the label's colors when the card read the label), and its rows are the table a takeaway cites (cite.chart_table).
 VEGALITE_MIME = "application/vnd.vegalite.v6.json"  # the mime Altair's mimetype renderer (notebook.SHELL_LINES) shows
 VEGALITE_SCHEMA = "https://vega.github.io/schema/vega-lite/v6.json"
-CHART_ROWS_MAX = 5000  # the rows a chart draws at most; a histogram bins any number of values
+CHART_ROWS_MAX = 5000  # the rows a chart draws at most; a histogram, a density and an ecdf take any number of values
 BINS = 20  # the most bins a histogram makes when it picks its own step
 BINS_MAX = 200  # the most bins a histogram's given step may make
 LINE_DOTS_MAX = 30  # a line marks each value with a dot while its longest series has at most this many
 STACK_FIELD = "__thimble_stack"  # a row's group's place, which a bar's segments or an area's series are stacked in
 BOX_MIN = 5  # a box plot draws a box for a group of at least this many values, and a group of fewer as a strip of them
 BOX_REACH = 1.5  # a box's whiskers reach the farthest values within this many box widths of it (Tukey's)
+DENSITY_POINTS = 100  # the points a density curve is drawn through
+DENSITY_BINS = 2048  # the values of a group of more than DENSITY_EXACT are counted in this many bins before smoothing
+DENSITY_EXACT = 20000
+RIDGE_FROM = 5  # a density chart of this many groups draws them one over another, each on its own baseline
+RIDGE_RISE = 1.5  # how many baselines the highest ridge rises
+RIDGE_BASE, RIDGE_TOP = "__thimble_base", "__thimble_top"  # a ridge's baseline and its curve, in baselines from the bottom
+ECDF_STEPS_MAX = 500  # a group's cumulative share is kept at this many of its values at most, evenly spread
+FITS = ("linear", "smooth")  # the trend lines a scatter fits: least squares, or a local regression (LOESS)
+SMOOTH_SPAN = 0.75  # the share of the points each point of a smooth fit is fitted to (R's loess and ggplot's default)
+SMOOTH_AT = 200  # a smooth fit is computed at this many x values at most and read between them
 # the marks a chart names by their job, which the theme draws (frontend lib/vizTheme vegaConfig's `style`): a box plot's
-# values faint behind its boxes, the boxes light enough to show them, its medians in ink; areas overlapping lightly
+# values faint behind its boxes, the boxes light enough to show them, its medians in ink; areas overlapping lightly; a
+# scatter's fitted line in ink; a range's before end, a ring
 FAINT_STYLE, BOX_STYLE, MEDIAN_STYLE, OVERLAP_STYLE = "thimble-faint", "thimble-box", "thimble-median", "thimble-overlap"
+FIT_STYLE, START_STYLE = "thimble-fit", "thimble-start"
 # each kind's columns in order, how many of them it needs, and its options
 CHARTS = {
-    "bar": (("category", "value", "group"), 2, ("sort", "stack", "label", "marks", "interval")),
+    "bar": (("category", "value", "group"), 2, ("sort", "stack", "label", "marks", "interval", "panels")),
     "line": (("x", "y", "series"), 2, ("label", "marks", "panels")),
-    "area": (("x", "y", "series"), 2, ("stack", "label", "marks")),
-    "scatter": (("x", "y", "group"), 2, ("label", "marks")),
-    "dots": (("x", "row", "group"), 2, ("sort", "label", "marks", "interval")),
+    "area": (("x", "y", "series"), 2, ("stack", "label", "marks", "panels")),
+    "scatter": (("x", "y", "group"), 2, ("label", "marks", "fit", "panels")),
+    "dots": (("x", "row", "group"), 2, ("sort", "label", "marks", "interval", "panels")),
     "box": (("value", "group"), 2, ("sort", "label")),
-    "histogram": (("value",), 1, ("step", "marks")),
+    "histogram": (("value", "group"), 1, ("step", "label", "marks", "panels")),
+    "density": (("value", "group"), 1, ("bandwidth", "sort", "label", "marks", "panels")),
+    "ecdf": (("value", "group"), 1, ("label", "marks")),
+    "range": (("item", "before", "after", "group"), 3, ("sort", "label", "marks")),
     "heatmap": (("x", "y", "value"), 3, ("log",)),
 }
+_VALUES = ("histogram", "density", "ecdf")  # the kinds that take any number of values, and a Series as its values alone
 _DEFAULT = object()  # an option left out
 # text a chart reads as times: an ISO date, a month ("2025-04") or a date and time, with or without its zone
 _ISO_TIME = re.compile(r"^\d{4}-\d{2}(-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?)?$")
@@ -1197,37 +1216,51 @@ def _shape(kind: str) -> str:
     return " or ".join("(" + ", ".join(cols[:n]) + ")" for n in range(need, len(cols) + 1))
 
 
-def chart(kind, data, **options):
+def chart(kind, data, *, show=True, **options):
     """Show a common chart of `data`, a DataFrame whose columns come in the kind's order and are named as the axes and
-    the legend read; a Series is its index, then its values (a histogram's, its values; a box plot's, its values, then
-    its index when that is named). Returns nothing, so the card shows the chart once.
+    the legend read; a Series is its index, then its values (a histogram's, a density's and an ecdf's, its values; a box
+    plot's, its values, then its index when that is named). Returns nothing, so the card shows the chart once; with
+    show=False it shows nothing and returns the chart as an Altair chart, for the card's code to add layers of its own
+    marks to (`theme` names the theme's colors for them).
 
-        bar        (category, value[, group])   sort, stack, label, marks, interval
-        line       (x, y[, series])             label, marks, panels
-        area       (x, y[, series])             stack, label, marks
-        scatter    (x, y[, group])              label, marks
-        dots       (x, row[, group])            sort, label, marks, interval
-        box        (value, group)               sort, label
-        histogram  (value)                      step, marks
-        heatmap    (x, y, value)                log
+        bar        (category, value[, group])        sort, stack, label, marks, interval, panels
+        line       (x, y[, series])                  label, marks, panels
+        area       (x, y[, series])                  stack, label, marks, panels
+        scatter    (x, y[, group])                   label, marks, fit, panels
+        dots       (x, row[, group])                 sort, label, marks, interval, panels
+        box        (value, group)                    sort, label
+        histogram  (value[, group])                  step, label, marks, panels
+        density    (value[, group])                  bandwidth, sort, label, marks, panels
+        ecdf       (value[, group])                  label, marks
+        range      (item, before, after[, group])    sort, label, marks
+        heatmap    (x, y, value)                     log
 
-    A value, y or histogram value is a number; a line's, an area's, a scatter's and a dots chart's x is numbers or times.
-    sort      a list of the categories (bar), rows (dots) or groups (box) in order, or None for the frame's order; by
-              default the largest first (bar), the earliest first (dots), the largest median first (box), a label's
-              values in the label's order (bar, dots)
+    A value or y is a number; a line's, an area's, a scatter's and a dots chart's x is numbers or times, as are a range's
+    before and after.
+    sort      a list of the categories (bar), rows (dots), groups (box, density) or items (range) in order, or None for
+              the frame's order; by default the largest first (bar), the earliest first (dots), the largest median first
+              (box, density), the largest after first, or with times the earliest before (range), a label's values in
+              the label's order (bar, dots, range)
     stack     with a group or series: True stacks them (the default), False sets bars side by side and overlaps areas
               lightly, "share" stacks each category or x to 100%
-    label     a label's name: the group or series column, else the category or row column, holds its values, drawn in
-              its colors and, but in a box plot, its order
+    label     a label's name: the group or series column, else the category, row or item column, holds its values,
+              drawn in its colors and, but in a box plot and a density chart, its order
     marks     {text: x}: a line across the chart at each x, with its text
     interval  (lo, hi): the names of two more columns of the frame, the low and high ends of an interval around each
               value or x, such as a Wilson interval's, drawn as a line in ink; a bar chart's groups go side by side
-    panels    True draws each series in a panel of its own, with its own y scale
+    panels    True draws each group or series in a panel of its own, one under another, the panels sharing their scales
+              but a line chart's, whose panels each have their own y scale
+    fit       "linear" or "smooth": a scatter's trend line for each group, fitted by least squares or by a local
+              regression (LOESS), its fitted values a column of the chart's rows
     step      the width of a histogram's bins; by default a round width that makes at most 20
+    bandwidth the width of a density's smoothing, in the value's units; by default each group's own (Silverman's rule)
     log       True colors a heatmap's values on a log scale"""
     if not isinstance(kind, str) or kind not in CHARTS:
         raise ValueError(f"thimble.chart: no chart kind {kind!r}; the kinds are "
                          + "; ".join(f"{k} {_shape(k)}" for k in CHARTS))
+    if show is not True and show is not False:
+        raise ValueError(f"thimble.chart({kind!r}): `show` is True, which shows the chart, or False, which returns it as "
+                         f"an Altair chart; not {show!r}")
     allowed = CHARTS[kind][2]
     for name in options:
         if name not in allowed:
@@ -1241,14 +1274,53 @@ def chart(kind, data, **options):
         options = {**options, "interval": iv}
     df = _chart_frame(kind, data, iv or ())
     spec = _CHART_SPECS[kind](df, options)
-    _show({VEGALITE_MIME: {"$schema": VEGALITE_SCHEMA, **spec},
-           "text/plain": f"thimble.chart({kind!r}): {len(df):,} rows"})
+    if not show:
+        return _altair(spec)
+    _show({VEGALITE_MIME: {"$schema": VEGALITE_SCHEMA, **spec}, "text/plain": f"thimble.chart({kind!r}): {len(df):,} rows"})
+
+
+def _altair(spec: dict):
+    """The chart as an Altair chart (a Chart, a LayerChart or a FacetChart) that draws as the spec does. Its rows go round
+    Altair's from_dict, which would make an object of every row (seconds for a few thousand): each inline `values` is
+    held out under a name while the rest is read, then put back. No $schema, which Altair writes when it shows the chart
+    and refuses in a layer."""
+    import altair as alt
+
+    held: list = []
+
+    def out(node):
+        if isinstance(node, dict):
+            if set(node) == {"values"} and isinstance(node["values"], list):
+                held.append(node["values"])
+                return {"name": f"{_HELD}{len(held) - 1}"}
+            return {k: out(v) for k, v in node.items()}
+        return [out(v) for v in node] if isinstance(node, list) else node
+
+    def back(obj):
+        if isinstance(obj, list):
+            for v in obj:
+                back(v)
+        elif isinstance(obj, alt.SchemaBase):
+            for k, v in list(obj._kwds.items()):
+                name = v.name if isinstance(v, alt.NamedData) else None
+                if isinstance(name, str) and name.startswith(_HELD):
+                    setattr(obj, k, alt.InlineData(values=held[int(name[len(_HELD):])]))
+                else:
+                    back(v)
+
+    chart = alt.Chart.from_dict(out(spec))
+    back(chart)
+    return chart
+
+
+_HELD = "__thimble_rows_"  # the name a chart's rows go by while Altair reads the rest of it (_altair)
 
 
 def _chart_frame(kind: str, data, extra=()):
-    """`data` as a DataFrame of named columns: a Series as its index and its values (a histogram's as its values, a box
-    plot's as its values and then its index when that is named), a named index as the first columns; the columns that
-    `extra` names (an interval's) after the kind's own. ValueError naming the kind's columns when their number is wrong."""
+    """`data` as a DataFrame of named columns: a Series as its index and its values (a histogram's, a density's and an
+    ecdf's as its values, a box plot's as its values and then its index when that is named), a named index as the first
+    columns; the columns that `extra` names (an interval's) after the kind's own. ValueError naming the kind's columns
+    when their number is wrong."""
     import pandas as pd
 
     if isinstance(data, pd.Series):
@@ -1258,7 +1330,7 @@ def _chart_frame(kind: str, data, extra=()):
             data = data.reset_index() if named else data.reset_index(drop=True)
             data = data[[data.columns[-1], *data.columns[:-1]]]
         else:
-            data = data.reset_index() if len(CHARTS[kind][0]) > 1 else data.reset_index(drop=True)
+            data = data.reset_index(drop=True) if kind in _VALUES else data.reset_index()
     elif isinstance(data, pd.DataFrame):
         if any(n is not None for n in data.index.names):
             data = data.reset_index()
@@ -1277,7 +1349,7 @@ def _chart_frame(kind: str, data, extra=()):
                          + (", ".join(own) or "none"))
     if len(set(names)) < len(names):
         raise ValueError(f"thimble.chart({kind!r}): each column needs a name of its own; got {got}")
-    if len(data) > CHART_ROWS_MAX and kind != "histogram":
+    if len(data) > CHART_ROWS_MAX and kind not in _VALUES:
         raise ValueError(f"thimble.chart({kind!r}): {len(data):,} rows, and a chart draws {CHART_ROWS_MAX:,} at most; count "
                          "or bin them first")
     data = data.copy()
@@ -1520,13 +1592,38 @@ def _with_interval(spec: dict, interval: tuple, title: str, ch: str, enc: dict, 
     return {"data": data, "layer": [spec, {"mark": "rule", "encoding": rule}]}
 
 
+def _panels_on(kind: str, opts: dict, grp) -> bool:
+    """Whether the chart draws its groups in panels (`panels` True), which needs the kind's group or series column."""
+    panels = opts.get("panels", False)
+    if (panels is not True and panels is not False) or (panels and grp is None):
+        raise ValueError(f"thimble.chart({kind!r}): `panels` is True or False and needs a {CHARTS[kind][0][-1]} column")
+    if panels and "stack" in opts:
+        raise ValueError(f"thimble.chart({kind!r}): `panels` put each {CHARTS[kind][0][-1]} in a panel of its own; leave "
+                         "out `stack`")
+    return panels
+
+
+def _with_panels(spec: dict, grp: str, groups: list, own_y: bool = False) -> dict:
+    """The chart with each group in a panel of its own, one under another: a single mark's own row channel, else the
+    layers inside a facet by rows, where a layer of rows of its own (a mark across the chart) repeats in every panel. The
+    panels share their scales, or with `own_y` each has its own y scale."""
+    row = {"field": _field(grp), "type": "nominal", "sort": groups, "title": None}
+    resolve = {"resolve": {"scale": {"y": "independent"}}} if own_y else {}
+    if "layer" not in spec:
+        spec["encoding"]["row"] = row
+        return {**spec, **resolve}
+    data = spec.pop("data")
+    return {"data": data, "facet": {"row": row}, "spec": spec, **resolve}
+
+
 def _bar_spec(df, opts: dict) -> dict:
     kind = "bar"
     iv = opts.get("interval")
     cols = [c for c in df.columns if c not in (iv or ())]
     cat, val, grp = cols[0], cols[1], cols[2] if len(cols) > 2 else None
     kinds = _chart_kinds(kind, df, number=(1,))
-    stack = opts.get("stack", not iv)
+    panels = _panels_on(kind, opts, grp)
+    stack = opts.get("stack", not iv and not panels)
     if not (stack is True or stack is False or stack == "share"):
         raise ValueError(f"thimble.chart({kind!r}): `stack` is True, False or \"share\", not {stack!r}")
     if "stack" in opts and grp is None:
@@ -1542,7 +1639,7 @@ def _bar_spec(df, opts: dict) -> dict:
         _check_interval(kind, df, iv, val, cat)
     if ck == "time" and "sort" in opts:
         raise ValueError(f"thimble.chart({kind!r}): `sort` orders text or number categories; times keep their order")
-    if ck == "time" and stack is False:
+    if ck == "time" and stack is False and not panels:
         raise ValueError(f"thimble.chart({kind!r}): stack=False sets groups side by side over text or number "
                          "categories; draw groups over time with \"line\"")
     if opts.get("marks") is not None and ck != "time":
@@ -1582,7 +1679,9 @@ def _bar_spec(df, opts: dict) -> dict:
             enc[value] = {**enc[value], "stack": "normalize", "axis": {"format": "%"}}
         groups = _ordered(kind, df[grp], _ranked(df[grp], df[val]), label=label)
         enc["color"] = _enc(grp, "nominal", sort=groups)
-        if stack is False:
+        if panels:
+            pass
+        elif stack is False:
             enc[offset] = {"field": _field(grp), "type": "nominal", "sort": groups}
         else:
             # Vega-Lite stacks a bar's segments by the group's name; this stacks them in the legend's order
@@ -1593,8 +1692,10 @@ def _bar_spec(df, opts: dict) -> dict:
     enc["tooltip"] = _tooltip(df, kinds)
     spec = _unit(rows, mark, enc, **more)
     if iv:
-        spec = _with_interval(spec, iv, val, value, enc, offset if grp else None)
-    return _with_marks(kind, spec, opts["marks"], cat, ck) if opts.get("marks") is not None else spec
+        spec = _with_interval(spec, iv, val, value, enc, offset if grp and not panels else None)
+    if opts.get("marks") is not None:
+        spec = _with_marks(kind, spec, opts["marks"], cat, ck)
+    return _with_panels(spec, grp, groups) if panels else spec
 
 
 def _xy_spec(kind: str, df, opts: dict) -> dict:
@@ -1612,11 +1713,10 @@ def _xy_spec(kind: str, df, opts: dict) -> dict:
     if opts.get("label") is not None and on is None:
         raise ValueError(f"thimble.chart({kind!r}): `label` colors the {CHARTS[kind][0][2]} column, which this frame lacks")
     label = _label_values(kind, opts["label"], df[on], on) if opts.get("label") is not None else None
-    panels = opts.get("panels", False)
-    if panels not in (True, False) or (panels and grp is None):
-        raise ValueError(f"thimble.chart({kind!r}): `panels` is True or False and needs a series column")
-    if panels and opts.get("marks") is not None:
-        raise ValueError(f"thimble.chart({kind!r}): `panels` take no `marks`")
+    panels = _panels_on(kind, opts, grp)
+    fit = opts.get("fit")
+    if fit is not None and fit not in FITS:
+        raise ValueError(f"thimble.chart({kind!r}): `fit` is \"linear\" or \"smooth\", not {fit!r}")
     rows = _chart_rows(df, kinds)
     at = _times(df[x]) if kinds[x] == "time" else df[x]
     enc: dict = {"x": _enc(x, "temporal" if kinds[x] == "time" else "quantitative")}
@@ -1630,11 +1730,8 @@ def _xy_spec(kind: str, df, opts: dict) -> dict:
         weights = df[y] if kind == "line" else df[grp].map(lambda _v: 1)
         groups = _ordered(kind, df[grp], _ranked(df[grp], weights), label=label)
         enc["color"] = _enc(grp, "nominal", sort=groups)
-        if iv:  # each row's groups side by side on its line, so their intervals do not overprint
+        if iv and not panels:  # each row's groups side by side on its line, so their intervals do not overprint
             enc["yOffset"] = {"field": _field(grp), "type": "nominal", "sort": groups}
-        if panels:
-            enc["row"] = {"field": _field(grp), "type": "nominal", "sort": groups, "title": None}
-            more["resolve"] = {"scale": {"y": "independent"}}
     elif label is not None:
         enc["color"] = _enc(y, "nominal", sort=enc["y"]["sort"], legend=None)
     enc["tooltip"] = _tooltip(df, kinds)
@@ -1643,10 +1740,86 @@ def _xy_spec(kind: str, df, opts: dict) -> dict:
         mark = {"type": "line", "point": True} if longest <= LINE_DOTS_MAX else "line"
     else:
         mark = "point"
-    spec = _unit(rows, mark, enc, **more)
+    if fit:
+        line = _fit_column(kind, fit, df, x, y, grp, kinds[x], rows)
+        enc["tooltip"] = [*enc["tooltip"], {"field": _field(line), "type": "quantitative", "title": line}]
+        fitted = {"x": enc["x"], "y": _enc(line, "quantitative", title=y), **({"color": enc["color"]} if "color" in enc else {}),
+                  "tooltip": enc["tooltip"]}
+        spec = {"data": {"values": rows}, "layer": [{"mark": mark, "encoding": enc},
+                                                    {"mark": {"type": "line", "style": FIT_STYLE}, "encoding": fitted}]}
+    else:
+        spec = _unit(rows, mark, enc, **more)
     if iv:
-        spec = _with_interval(spec, iv, x, "x", enc, "yOffset" if grp else None)
-    return _with_marks(kind, spec, opts["marks"], x, kinds[x]) if opts.get("marks") is not None else spec
+        spec = _with_interval(spec, iv, x, "x", enc, "yOffset" if grp and not panels else None)
+    if opts.get("marks") is not None:
+        spec = _with_marks(kind, spec, opts["marks"], x, kinds[x])
+    return _with_panels(spec, grp, groups, own_y=kind == "line") if panels else spec
+
+
+def _fit_column(kind: str, fit: str, df, x: str, y: str, grp, xkind: str, rows: list) -> str:
+    """Each row's fitted y, the trend of its group (`fit`, FITS), added to `rows` as a column of its own whose name is
+    returned: None where the row has no x, or its group too few distinct x values for the fit (2 for a line, 3 for a
+    smooth one). ValueError when no group has enough."""
+    import numpy as np
+
+    xs = _times(df[x]) if xkind == "time" else df[x]
+    xv = np.array([np.nan if _missing(v) else (v.value / 1e9 if xkind == "time" else float(v)) for v in xs.tolist()])
+    yv = np.array([np.nan if _missing(v) else float(v) for v in df[y].tolist()])
+    keys = [json.dumps(_json_value(g)) for g in df[grp].tolist()] if grp else ["" for _ in range(len(df))]
+    need = 2 if fit == "linear" else 3
+    out = np.full(len(df), np.nan)
+    for key in set(keys):
+        at = np.array([k == key for k in keys]) & np.isfinite(xv)
+        both = at & np.isfinite(yv)
+        if len(np.unique(xv[both])) < need:
+            continue
+        gx, gy = xv[both], yv[both]
+        if fit == "linear":
+            mx, my = gx.mean(), gy.mean()
+            slope = ((gx - mx) * (gy - my)).sum() / ((gx - mx) ** 2).sum()
+            out[at] = my + slope * (xv[at] - mx)
+        else:
+            grid = np.unique(gx)
+            if len(grid) > SMOOTH_AT:
+                grid = np.linspace(grid[0], grid[-1], SMOOTH_AT)
+            out[at] = np.interp(xv[at], grid, _loess(gx, gy, grid))
+    if not np.isfinite(out).any():
+        raise ValueError(f"thimble.chart({kind!r}): a {fit} fit needs {need} or more points with distinct x values in a "
+                         + ("group" if grp else "chart"))
+    name = _free(f"{y} fit", list(df.columns))
+    for r, v in zip(rows, out.tolist()):
+        r[name] = _num(float(f"{v:.6g}")) if math.isfinite(v) else None
+    return name
+
+
+def _loess(x, y, at):
+    """A local regression (LOESS, as R's loess and ggplot's smooth draw it) of y on x read at each of `at`: a quadratic
+    fitted to the SMOOTH_SPAN of the points nearest it, weighted by their distance (tricube), after two rounds that weigh
+    down the points far from the curve (bisquare), so an outlier barely moves it."""
+    import numpy as np
+
+    k = min(len(x), max(3, math.ceil(SMOOTH_SPAN * len(x))))
+
+    def fitted(points, robust):
+        out = np.empty(len(points))
+        for i, p in enumerate(points):
+            d = x - p
+            h = np.partition(np.abs(d), k - 1)[k - 1] or np.abs(d).max() or 1.0  # the nearest share's farthest point
+            w = np.clip(1 - np.abs(d / h) ** 3, 0, 1) ** 3 * robust
+            root = np.sqrt(w)
+            u = d / h
+            coef = np.linalg.lstsq(np.stack([root, root * u, root * u * u], axis=1), root * y, rcond=None)[0]
+            out[i] = coef[0] if w.sum() > 0 else np.nan
+        return out
+
+    robust = np.ones(len(x))
+    for _ in range(2):
+        resid = y - np.interp(x, at, fitted(at, robust))
+        s = np.median(np.abs(resid))
+        if not s > 0:
+            break
+        robust = np.clip(1 - (resid / (6 * s)) ** 2, 0, 1) ** 2
+    return fitted(at, robust)
 
 
 def _area_spec(df, opts: dict) -> dict:
@@ -1659,6 +1832,7 @@ def _area_spec(df, opts: dict) -> dict:
     stack = opts.get("stack", True)
     if not (stack is True or stack is False or stack == "share"):
         raise ValueError(f"thimble.chart({kind!r}): `stack` is True, False or \"share\", not {stack!r}")
+    panels = _panels_on(kind, opts, ser)
     if ser is None and ("stack" in opts or opts.get("label") is not None):
         raise ValueError(f"thimble.chart({kind!r}): `{'stack' if 'stack' in opts else 'label'}` takes the series of a "
                          "third column, which this frame lacks")
@@ -1670,7 +1844,9 @@ def _area_spec(df, opts: dict) -> dict:
     if ser:
         series = _ordered(kind, df[ser], _ranked(df[ser], df[y]), label=label)
         enc["color"] = _enc(ser, "nominal", sort=series)
-        if stack is False:
+        if panels:
+            pass
+        elif stack is False:
             enc["y"]["stack"] = None
             mark["style"] = OVERLAP_STYLE
         else:
@@ -1685,7 +1861,9 @@ def _area_spec(df, opts: dict) -> dict:
     if longest <= LINE_DOTS_MAX:
         mark["point"] = True
     spec = _unit(rows, mark if len(mark) > 1 else "area", enc, **more)
-    return _with_marks(kind, spec, opts["marks"], x, kinds[x]) if opts.get("marks") is not None else spec
+    if opts.get("marks") is not None:
+        spec = _with_marks(kind, spec, opts["marks"], x, kinds[x])
+    return _with_panels(spec, ser, series) if panels else spec
 
 
 def _num(v: float):
@@ -1753,15 +1931,47 @@ def _box_spec(df, opts: dict) -> dict:
     return {"data": {"values": rows}, "layer": layer}
 
 
-def _histogram_spec(df, opts: dict) -> dict:
-    kind = "histogram"
-    col = df.columns[0]
+def _value_groups(kind: str, df, opts: dict) -> tuple:
+    """A histogram's, a density's or an ecdf's values by group: (the value column, the group column or None, a label's
+    values or None, {key: (the group as the chart's rows hold it, its values as floats)}, the groups once each as a
+    column of the frame's, for _ordered), groups in the frame's order; a value with no group, or none of its own, is
+    left out. Any number of values, so pandas groups them."""
+    cols = list(df.columns)
+    val, grp = cols[0], cols[1] if len(cols) > 1 else None
     _chart_kinds(kind, df, number=(0,))
-    vals = [float(v) for v in df[col].tolist() if not _missing(v)]
-    if not vals:
-        raise ValueError(f"thimble.chart({kind!r}): `{col}` holds no numbers to bin")
-    lo, hi = min(vals), max(vals)
-    whole = all(v.is_integer() for v in vals)
+    if opts.get("label") is not None and grp is None:
+        raise ValueError(f"thimble.chart({kind!r}): `label` colors the group column, which this frame lacks")
+    label = _label_values(kind, opts["label"], df[grp], grp) if opts.get("label") is not None else None
+    vals = df[val].astype(float)
+    kept = vals.notna() & (df[grp].notna() if grp else True)
+    by: dict = {}
+    for g, part in (vals[kept].groupby(df[grp][kept], sort=False) if grp else [(None, vals[kept])]):
+        j = _json_value(g)
+        by.setdefault(json.dumps(j), (j, []))[1].extend(part.tolist())
+    if not by:
+        raise ValueError(f"thimble.chart({kind!r}): `{val}` holds no numbers to draw")
+    return val, grp, label, by, df[grp][kept].drop_duplicates() if grp else None
+
+
+def _by_median(by: dict, largest: bool = True) -> list:
+    """The groups of `by` (_value_groups) by their median, the largest first, or the least."""
+    import numpy as np
+
+    meds = {k: float(np.median(vs)) for k, (_g, vs) in by.items()}
+    return [by[k][0] for k in sorted(meds, key=lambda k: -meds[k] if largest else meds[k])]
+
+
+def _histogram_spec(df, opts: dict) -> dict:
+    """The values counted in bins of a round width; a group column's groups stacked in each bin in the legend's order, or
+    each in a panel of its own, all in the same bins."""
+    import numpy as np
+
+    kind = "histogram"
+    col, grp, label, by, firsts = _value_groups(kind, df, opts)
+    panels = _panels_on(kind, opts, grp)
+    vals = np.concatenate([np.asarray(vs) for _g, vs in by.values()])
+    lo, hi = float(vals.min()), float(vals.max())
+    whole = bool((vals == np.floor(vals)).all())
     step = opts.get("step")
     if step is None:
         raw = (hi - lo) / BINS or (abs(lo) / BINS if lo else 1.0)
@@ -1776,24 +1986,211 @@ def _histogram_spec(df, opts: dict) -> dict:
     if n > BINS_MAX:
         raise ValueError(f"thimble.chart({kind!r}): a step of {step:g} makes {n:,} bins, and a histogram takes {BINS_MAX} "
                          "at most")
-    counts = [0] * n
-    for v in vals:
-        counts[min(n - 1, int(math.floor((v - start) / step + 1e-9)))] += 1
+
+    def counted(vs) -> list:
+        at = np.minimum(n - 1, np.floor((np.asarray(vs) - start) / step + 1e-9).astype(int))
+        return np.bincount(at, minlength=n).tolist()
 
     def edge(i):
         v = round(start + i * step, 10)
         return int(v) if v.is_integer() else v
 
-    end = _free(f"{col} end", [col])
-    count = _free("count", [col, end])
-    rows = [{col: edge(i), end: edge(i + 1), count: c} for i, c in enumerate(counts)]
+    taken = [col, grp] if grp else [col]
+    end = _free(f"{col} end", taken)
+    count = _free("count", [*taken, end])
     # plain numbers on the axis (Vega-Lite labels bins of a round step as 1.2e+2 otherwise)
     enc = {"x": _enc(col, "quantitative", bin={"binned": True, "step": step}, axis={"format": ",~r"}),
            "x2": {"field": _field(end)},
            "y": _enc(count, "quantitative"),
            "tooltip": [{"field": _field(c), "type": "quantitative", "title": c} for c in (col, end, count)]}
-    spec = _unit(rows, "bar", enc)
-    return _with_marks(kind, spec, opts["marks"], col, "number") if opts.get("marks") is not None else spec
+    more: dict = {}
+    if grp is None:
+        rows = [{col: edge(i), end: edge(i + 1), count: c} for i, c in enumerate(counted(vals))]
+    else:
+        most = [by[k][0] for k in sorted(by, key=lambda k: -len(by[k][1]))]  # the most values first
+        groups = _ordered(kind, firsts, most, label=label)
+        rows = [{col: edge(i), end: edge(i + 1), count: c, grp: g}
+                for g in groups for i, c in enumerate(counted(by[json.dumps(g)][1]))]
+        enc["color"] = _enc(grp, "nominal", sort=groups)
+        enc["tooltip"].append({"field": _field(grp), "type": "nominal", "title": grp})
+        if not panels:  # stacked in the legend's order, as a bar chart's groups are
+            more["transform"] = [{"calculate": f"indexof({json.dumps(groups)}, datum[{json.dumps(grp)}])", "as": STACK_FIELD}]
+            enc["order"] = {"field": STACK_FIELD, "type": "quantitative"}
+    spec = _unit(rows, "bar", enc, **more)
+    if opts.get("marks") is not None:
+        spec = _with_marks(kind, spec, opts["marks"], col, "number")
+    return _with_panels(spec, grp, groups) if panels else spec
+
+
+def _bandwidth(vs: list) -> float:
+    """A density's smoothing width for the values `vs` by Silverman's rule: 0.9 times the lesser of their standard
+    deviation and their interquartile range over 1.34, times their count to the -1/5; for values that do not spread, a
+    tenth of their size, else 1."""
+    import numpy as np
+
+    a = np.asarray(vs, dtype=float)
+    sd = float(a.std(ddof=1)) if len(a) > 1 else 0.0
+    q1, q3 = np.percentile(a, [25, 75])
+    iqr = float(q3 - q1) / 1.34
+    spread = min(sd, iqr) if sd > 0 and iqr > 0 else sd or iqr or abs(float(a.mean())) / 10 or 1.0
+    return 0.9 * spread * len(a) ** -0.2
+
+
+def _kde(vs: list, h: float, xs):
+    """The density of the values `vs` at each of `xs`, smoothed by a Gaussian of width `h`, the curve's area 1. A group of
+    more than DENSITY_EXACT values is counted in DENSITY_BINS bins first, each bin's middle weighted by its count."""
+    import numpy as np
+
+    a = np.asarray(vs, dtype=float)
+    w = np.ones(len(a))
+    if len(a) > DENSITY_EXACT:
+        counts, edges = np.histogram(a, bins=DENSITY_BINS)
+        keep = counts > 0
+        a, w = ((edges[:-1] + edges[1:]) / 2)[keep], counts[keep].astype(float)
+    z = (xs[:, None] - a[None, :]) / h
+    return (np.exp(-0.5 * z * z) * w).sum(axis=1) / (w.sum() * h * math.sqrt(2 * math.pi))
+
+
+def _density_spec(df, opts: dict) -> dict:
+    """Each group's values as a smooth density curve (a Gaussian kernel's), its area 1, over a range the curves share
+    that stops at 0 when no value passes it: a few groups overlapping lightly, RIDGE_FROM or more each on a baseline of
+    its own one over another (a ridgeline, named on the y axis), or each in a panel of its own. The rows are the curves'
+    points; the ridges' places are laid out by the chart, not held in its rows."""
+    import numpy as np
+
+    kind = "density"
+    val, grp, label, by, firsts = _value_groups(kind, df, opts)
+    panels = _panels_on(kind, opts, grp)
+    bw = opts.get("bandwidth")
+    if bw is not None and (isinstance(bw, bool) or not isinstance(bw, numbers.Real) or not bw > 0):
+        raise ValueError(f"thimble.chart({kind!r}): `bandwidth` is the width of the smoothing in `{val}`'s units, a number "
+                         f"above 0, not {bw!r}")
+    widths = {k: float(bw) if bw is not None else _bandwidth(vs) for k, (_g, vs) in by.items()}
+    least = min(min(vs) for _g, vs in by.values())
+    most = max(max(vs) for _g, vs in by.values())
+    lo = min(min(vs) - 3 * widths[k] for k, (_g, vs) in by.items())
+    hi = max(max(vs) + 3 * widths[k] for k, (_g, vs) in by.items())
+    if least >= 0:
+        lo = max(lo, 0.0)
+    elif most <= 0:
+        hi = min(hi, 0.0)
+    xs = np.linspace(lo, hi, DENSITY_POINTS)
+    digits = max(0, 2 - math.floor(math.log10((hi - lo) / (DENSITY_POINTS - 1))))
+    density = _free("density", [val, grp] if grp else [val])
+    order = [None]
+    if grp:
+        order = _ordered(kind, firsts, _by_median(by), opts.get("sort", _DEFAULT), what="groups")
+    elif "sort" in opts:
+        raise ValueError(f"thimble.chart({kind!r}): `sort` orders the groups of a second column, which this frame lacks")
+    rows = []
+    for g in order:
+        key = json.dumps(g)
+        for x, d in zip(xs.tolist(), _kde(by[key][1], widths[key], xs).tolist()):
+            rows.append({val: _num(round(x, digits)), density: _num(float(f"{d:.4g}")), **({grp: g} if grp else {})})
+    enc: dict = {"x": _enc(val, "quantitative"), "y": _enc(density, "quantitative")}
+    tip = [{"field": _field(c), "type": "quantitative", "title": c} for c in (val, density)]
+    if grp:
+        tip.append({"field": _field(grp), "type": "nominal", "title": grp})
+    more: dict = {}
+    if grp and len(order) >= RIDGE_FROM and not panels:
+        # each ridge on its own baseline, the lowest group's at 0, the curves scaled alike so the highest rises RIDGE_RISE
+        # baselines; the axis names each baseline by its group
+        n, top = len(order), max(r[density] for r in rows) or 1
+        more["transform"] = [
+            {"calculate": f"{n - 1} - indexof({json.dumps(order)}, datum[{json.dumps(grp)}])", "as": RIDGE_BASE},
+            {"calculate": f"datum[{json.dumps(RIDGE_BASE)}] + datum[{json.dumps(density)}] / {top} * {RIDGE_RISE}",
+             "as": RIDGE_TOP}]
+        names = [_text(g) for g in reversed(order)]
+        enc["y"] = {"field": RIDGE_TOP, "type": "quantitative", "title": grp,
+                    "axis": {"values": list(range(n)), "labelExpr": f"{json.dumps(names)}[datum.value]"}}
+        enc["y2"] = {"field": RIDGE_BASE}
+        enc["detail"] = {"field": _field(grp), "type": "nominal"}
+        if label is not None:
+            enc["color"] = _enc(grp, "nominal", sort=order, legend=None)
+    elif grp:
+        enc["color"] = _enc(grp, "nominal", sort=order)
+        enc["y"]["stack"] = None  # the curves overlap; Vega-Lite would stack them
+    enc["tooltip"] = tip
+    spec = _unit(rows, {"type": "area", "line": True, "style": OVERLAP_STYLE}, enc, **more)
+    if opts.get("marks") is not None:
+        spec = _with_marks(kind, spec, opts["marks"], val, "number")
+    return _with_panels(spec, grp, order) if panels else spec
+
+
+def _ecdf_spec(df, opts: dict) -> dict:
+    """Each group's cumulative share: at each of its values, the share of its values at or below it, drawn as steps. The
+    rows are those shares, at ECDF_STEPS_MAX of a group's values at most; the legend lists the groups by their median,
+    the least first, as their curves stand from the top."""
+    import numpy as np
+
+    kind = "ecdf"
+    val, grp, label, by, firsts = _value_groups(kind, df, opts)
+    share = _free("share", [val, grp] if grp else [val])
+    order = [None]
+    if grp:
+        order = _ordered(kind, firsts, _by_median(by, largest=False), label=label)
+    rows, longest = [], 0
+    for g in order:
+        u, c = np.unique(np.asarray(by[json.dumps(g)][1]), return_counts=True)
+        p = np.cumsum(c) / c.sum()
+        if len(u) > ECDF_STEPS_MAX:
+            keep = np.unique(np.linspace(0, len(u) - 1, ECDF_STEPS_MAX).round().astype(int))
+            u, p = u[keep], p[keep]
+        longest = max(longest, len(u))
+        rows += [{val: _num(x), share: _num(round(s, 6)), **({grp: g} if grp else {})} for x, s in zip(u.tolist(), p.tolist())]
+    enc: dict = {"x": _enc(val, "quantitative"), "y": _enc(share, "quantitative", axis={"format": "%"})}
+    tip = [{"field": _field(val), "type": "quantitative", "title": val},
+           {"field": _field(share), "type": "quantitative", "title": share, "format": ".1%"}]
+    if grp:
+        enc["color"] = _enc(grp, "nominal", sort=order)
+        tip.append({"field": _field(grp), "type": "nominal", "title": grp})
+    enc["tooltip"] = tip
+    mark: dict = {"type": "line", "interpolate": "step-after"}
+    if longest <= LINE_DOTS_MAX:
+        mark["point"] = True
+    spec = _unit(rows, mark, enc)
+    return _with_marks(kind, spec, opts["marks"], val, "number") if opts.get("marks") is not None else spec
+
+
+def _range_spec(df, opts: dict) -> dict:
+    """A dumbbell per item lying down: a line from its before to its after, the before a ring and the after a dot, both
+    numbers or both times; the x axis titled "before → after" by the columns' names. Items by their after, the largest
+    first, or with times by their before, the earliest first; a group column's groups in color."""
+    kind = "range"
+    cols = list(df.columns)
+    item, before, after = cols[:3]
+    grp = cols[3] if len(cols) > 3 else None
+    kinds = _chart_kinds(kind, df, axis=(1, 2))
+    if kinds[before] != kinds[after]:
+        word = {"time": "times", "number": "numbers"}
+        raise ValueError(f"thimble.chart({kind!r}) takes {_shape(kind)} columns, the before and after both numbers or both "
+                         f"times; `{before}` holds {word[kinds[before]]} and `{after}` {word[kinds[after]]}")
+    xk = kinds[before]
+    on = grp or item  # the column a label colors
+    label = _label_values(kind, opts["label"], df[on], on) if opts.get("label") is not None else None
+    ranked = _ranked(df[item], _times(df[before]), earliest=True) if xk == "time" else \
+        _ranked(df[item], -df[after].astype(float), earliest=True)
+    order = _ordered(kind, df[item], ranked, opts.get("sort", _DEFAULT), None if grp else label, "items")
+    rows = _chart_rows(df, kinds)
+    xt, title = ("temporal" if xk == "time" else "quantitative"), f"{before} \u2192 {after}"
+    # the ends are places, not lengths from 0: the axis spans them
+    unzeroed = {"scale": {"zero": False}} if xk == "number" else {}
+    y = _enc(item, "nominal", sort=order)
+    color: dict = {}
+    if grp:
+        color["color"] = _enc(grp, "nominal", sort=_ordered(kind, df[grp], _ranked(df[grp], df[grp].map(lambda _v: 1)),
+                                                             label=label))
+    elif label is not None:
+        color["color"] = _enc(item, "nominal", sort=order, legend=None)
+    tip = _tooltip(df, kinds)
+    spec = {"data": {"values": rows}, "layer": [
+        {"mark": "rule", "encoding": {"x": _enc(before, xt, title=title, **unzeroed), "x2": {"field": _field(after)}, "y": y,
+                                      "tooltip": tip}},
+        {"mark": {"type": "point", "style": START_STYLE},
+         "encoding": {"x": _enc(before, xt, title=title, **unzeroed), "y": y, **color, "tooltip": tip}},
+        {"mark": "point", "encoding": {"x": _enc(after, xt, title=title, **unzeroed), "y": y, **color, "tooltip": tip}},
+    ]}
+    return _with_marks(kind, spec, opts["marks"], before, xk) if opts.get("marks") is not None else spec
 
 
 def _heatmap_spec(df, opts: dict) -> dict:
@@ -1824,7 +2221,30 @@ def _heatmap_spec(df, opts: dict) -> dict:
 
 _CHART_SPECS = {"bar": _bar_spec, "line": lambda df, o: _xy_spec("line", df, o), "area": _area_spec,
                 "scatter": lambda df, o: _xy_spec("scatter", df, o), "dots": lambda df, o: _xy_spec("dots", df, o),
-                "box": _box_spec, "histogram": _histogram_spec, "heatmap": _heatmap_spec}
+                "box": _box_spec, "histogram": _histogram_spec, "density": _density_spec, "ecdf": _ecdf_spec,
+                "range": _range_spec, "heatmap": _heatmap_spec}
+
+
+class _Theme:
+    """thimble.theme: the theme's colors by their role, for the marks a card's code adds to a chart (an Altair layer
+    over thimble.chart(..., show=False)), as in mark_text(color=thimble.theme.accent). Each is a CSS variable of the
+    theme's (frontend styles/tokens.css) that the card reads when it draws the chart (lib/vizTheme withTokens), so the
+    marks follow the accent and the paper, dark included. A mark given no color takes the theme's own: the first series
+    color, and for text and rules the annotation ink; every text mark takes the theme's face and size."""
+
+    __slots__ = ()
+    accent = "var(--viz-highlight)"  # one thing set against the rest; the first series color's family
+    ink = "var(--viz-ink-1)"  # the darkest ink, for text that leads
+    muted = "var(--viz-other)"  # the rest, set against the accent
+    pale = "var(--viz-ink-4)"  # quiet lines and shaded spans: a leader line, a span behind the marks
+    series = tuple(f"var(--viz-{i})" for i in range(1, 8))  # the series colors in order, as a chart's groups take them
+
+    def __repr__(self) -> str:
+        return "thimble.theme: " + ", ".join(f"{k} {getattr(self, k)!r}" for k in ("accent", "ink", "muted", "pale")) \
+            + f", series[0..6] {self.series[0]!r} to {self.series[-1]!r}"
+
+
+theme = _Theme()
 
 
 # Card types (backend cardtypes.py): a viewer folder whose view.json has a `card` block. The server writes the types a

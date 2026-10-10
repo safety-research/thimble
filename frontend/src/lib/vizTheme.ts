@@ -72,6 +72,32 @@ export const VIZ_INK = ['--viz-ink-1', '--viz-ink-2', '--viz-ink-3', '--viz-ink-
  * the ink ramp without its third step, which is the near twin of the label grey, --label-none */
 export const VIZ_NEUTRAL = ['--viz-ink-1', '--viz-ink-2', '--viz-ink-4']
 
+/** A chart token named by its CSS variable, as thimble.theme writes the theme's colors (backend kernel_thimble) */
+const TOKEN_REF = /^var\(\s*(--(?:viz|label)-[A-Za-z0-9-]+)\s*\)$/
+
+/** The spec with each string that names a chart token by its CSS variable (`var(--viz-highlight)`, TOKEN_REF) given the
+ * token's value now, read by `read`, so marks a card's code colors with thimble.theme follow the accent and the paper.
+ * Vega draws on a canvas, which reads no CSS variable. A name the theme lacks stays as it is; a part with none comes
+ * back as the same object. Pure over `read`. */
+export function withTokens<T>(spec: T, read: (name: string) => string = token): T {
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') {
+      const m = v.startsWith('var(') ? TOKEN_REF.exec(v) : null
+      return (m && read(m[1]!)) || v
+    }
+    if (!v || typeof v !== 'object') return v
+    let changed = false
+    const pick = (x: unknown): unknown => {
+      const y = walk(x)
+      if (y !== x) changed = true
+      return y
+    }
+    const out = Array.isArray(v) ? v.map(pick) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, pick(x)]))
+    return changed ? out : v
+  }
+  return walk(spec) as T
+}
+
 export function unquote(v: string): string {
   const m = /^(['"])(.*)\1$/.exec(v)
   return m && !m[2].includes(m[1]) ? m[2] : v
@@ -128,13 +154,16 @@ export function vegaConfig(): Record<string, unknown> {
     // notes and values on the marks: the annotation ink in the body face, which a dark paper lightens with the text
     text: { color: note, font, fontSize: size },
     // the marks thimble.chart names by their job (backend kernel_thimble FAINT_STYLE and on): a box plot's values faint
-    // behind its boxes, the boxes light enough to show them, its medians in ink; areas side by side overlapping lightly.
-    // Each keeps its series or label color but the median
+    // behind its boxes, the boxes light enough to show them, its medians in ink; areas side by side overlapping lightly;
+    // a scatter's fitted line in ink, or its group's color; a range's before end a ring, its after end the dot. Each
+    // keeps its series or label color but the median and a fitted line of one group
     style: {
       'thimble-faint': { opacity: 0.3 },
       'thimble-box': { opacity: 0.55 },
       'thimble-median': { color: ink, opacity: 1, thickness: 2 },
       'thimble-overlap': { opacity: 0.4 },
+      'thimble-fit': { color: ink, strokeWidth: px('--viz-line', 1.5) + 0.5 },
+      'thimble-start': { filled: false, strokeWidth: px('--viz-line', 1.5) },
     },
   }
 }

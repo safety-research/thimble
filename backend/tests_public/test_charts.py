@@ -70,6 +70,9 @@ def test_every_kind_draws_its_rows_inline_as_vega_lite_with_no_style_of_its_own(
         "heatmap": (pd.DataFrame({"tactic": ["probe", "trick"], "site": ["Navy", "Navy"], "captures": [5, 30]}),),
         "area": (pd.DataFrame({"time": t, "captures": [1, 3, 6, 9], "site": ["a", "a", "b", "b"]}),),
         "box": (pd.DataFrame({"turns": [3, 5, 8, 9, 12, 40, 2], "agent": ["a"] * 6 + ["b"]}),),
+        "density": (pd.DataFrame({"minutes": [3, 5, 8, 9, 12, 40, 2], "agent": ["a"] * 6 + ["b"]}),),
+        "ecdf": (pd.Series([3, 5, 8, 9, 12, 40, 2], name="minutes"),),
+        "range": (pd.DataFrame({"model": ["m1", "m2"], "base": [0.4, 0.6], "tuned": [0.5, 0.55]}),),
     }
     assert set(charts) == set(kt.CHARTS)
     for kind, args in charts.items():
@@ -364,8 +367,277 @@ def test_an_area_stacks_its_series_in_the_legend_s_order_overlaps_them_lightly_o
 
 
 def test_the_marks_a_chart_names_by_their_job_are_styled_by_the_theme():
-    """A faint dot, a box, a median and an overlapping area carry no style of their own: the theme's `style` config gives
+    """A faint dot, a box, a median, an overlapping area, a fitted line and a range's before end carry no style of their own: the theme's `style` config gives
     each its look (frontend lib/vizTheme vegaConfig)."""
     theme = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib" / "vizTheme.ts").read_text()
-    for name in (kt.FAINT_STYLE, kt.BOX_STYLE, kt.MEDIAN_STYLE, kt.OVERLAP_STYLE):
+    for name in (kt.FAINT_STYLE, kt.BOX_STYLE, kt.MEDIAN_STYLE, kt.OVERLAP_STYLE, kt.FIT_STYLE, kt.START_STYLE):
         assert f"'{name}':" in theme, name
+
+
+# ---------------------------------------------------------------------------------------------- density, ecdf, range
+# Matt (2026-10-10): density curves, a ridgeline when there are many groups; the cumulative share; a dumbbell per item,
+# before against after. Each computes its values in Python, so the spec carries plain rows the terminal and a takeaway
+# read.
+
+MERGE = pd.DataFrame({"minutes": [12, 15, 18, 20, 22, 30, 41, 55, 9, 14, 16, 25, 28, 33, 60, 75],
+                      "agent": ["a"] * 8 + ["b"] * 8})
+
+
+def test_a_density_is_a_smooth_curve_of_area_one_stopping_at_zero_when_no_value_is_below_it():
+    spec = spec_of("density", MERGE["minutes"])  # a Series is its values, as for a histogram
+    rows = spec["data"]["values"]
+    xs, ds = [r["minutes"] for r in rows], [r["density"] for r in rows]
+    assert len(rows) == kt.DENSITY_POINTS and set(rows[0]) == {"minutes", "density"}
+    assert xs == sorted(xs) and xs[0] >= 0 and xs[-1] > 75
+    area = sum((xs[i + 1] - xs[i]) * (ds[i] + ds[i + 1]) / 2 for i in range(len(xs) - 1))
+    assert 0.9 < area <= 1.001, "the curve's area is 1, less what falls below 0"
+    assert spec["mark"] == {"type": "area", "line": True, "style": kt.OVERLAP_STYLE}
+    # values on both sides of 0 keep the whole curve, its area 1
+    both = spec_of("density", pd.Series([-3.0, -1, 0, 1, 2, 4], name="delta"))["data"]["values"]
+    xs, ds = [r["delta"] for r in both], [r["density"] for r in both]
+    assert xs[0] < -3 and abs(sum((xs[i + 1] - xs[i]) * (ds[i] + ds[i + 1]) / 2 for i in range(len(xs) - 1)) - 1) < 0.01
+    # a wider bandwidth smooths more: a lower peak
+    assert max(r["density"] for r in spec_of("density", MERGE["minutes"], bandwidth=20)["data"]["values"]) < max(ds)
+    with pytest.raises(ValueError, match="`bandwidth` is the width of the smoothing in `minutes`'s units"):
+        kt.chart("density", MERGE["minutes"], bandwidth=0)
+
+
+def test_a_few_groups_overlap_lightly_and_many_stand_one_over_another_named_on_the_y_axis():
+    spec = spec_of("density", MERGE)
+    enc = spec["encoding"]
+    assert enc["color"]["field"] == "agent" and enc["color"]["sort"] == ["b", "a"], "the largest median first"
+    assert enc["y"]["stack"] is None, "the curves overlap rather than stack"
+    assert {r["agent"] for r in spec["data"]["values"]} == {"a", "b"}
+    agents = [f"agent-{i}" for i in range(kt.RIDGE_FROM)]
+    many = pd.DataFrame({"minutes": [v + 10 * i for i in range(len(agents)) for v in (1, 4, 6, 9)],
+                         "agent": [a for a in agents for _ in range(4)]})
+    ridge = spec_of("density", many)
+    enc = ridge["encoding"]
+    # the places of the ridges are laid out by the chart; the rows hold the curves alone
+    assert set(ridge["data"]["values"][0]) == {"minutes", "density", "agent"}
+    assert [t["as"] for t in ridge["transform"]] == [kt.RIDGE_BASE, kt.RIDGE_TOP]
+    assert (enc["y"]["field"], enc["y2"]["field"], enc["detail"]["field"]) == (kt.RIDGE_TOP, kt.RIDGE_BASE, "agent")
+    assert enc["y"]["title"] == "agent" and enc["y"]["axis"]["values"] == list(range(len(agents)))
+    # the largest median on top: the axis names the baselines from the bottom up
+    assert enc["y"]["axis"]["labelExpr"] == json.dumps(agents) + "[datum.value]" and "color" not in enc
+    assert styles(ridge) == []
+    assert "transform" not in spec_of("density", many, panels=True), "panels draw each group in its own panel instead"
+    assert spec_of("density", many, sort=None)["transform"][0]["calculate"].startswith(f"{len(agents) - 1} - indexof({json.dumps(agents)}")
+
+
+def test_an_ecdf_holds_the_share_of_values_at_or_below_each_value():
+    bundle = drawn("ecdf", pd.Series([3, 1, 2, 2], name="minutes"))
+    spec = bundle[kt.VEGALITE_MIME]
+    assert spec["data"]["values"] == [{"minutes": 1, "share": 0.25}, {"minutes": 2, "share": 0.75}, {"minutes": 3, "share": 1}]
+    assert spec["mark"] == {"type": "line", "interpolate": "step-after", "point": True}
+    assert spec["encoding"]["y"]["axis"] == {"format": "%"}
+    table = cite.chart_table(bundle)
+    assert table.label == "minutes" and table.cells[table.labels.index("2")] == ["0.75"], "a takeaway cites the share at a value"
+    # groups listed by their median, the least first, as their curves stand from the top
+    assert spec_of("ecdf", MERGE)["encoding"]["color"]["sort"] == ["a", "b"]
+    # many values are kept at ECDF_STEPS_MAX of them, the last share 1; a long curve has no dots
+    big = spec_of("ecdf", pd.Series(range(20000), name="tokens"))
+    assert len(big["data"]["values"]) == kt.ECDF_STEPS_MAX and big["data"]["values"][-1] == {"tokens": 19999, "share": 1}
+    assert big["mark"] == {"type": "line", "interpolate": "step-after"}
+    with pytest.raises(ValueError, match="`label` colors the group column, which this frame lacks"):
+        kt.chart("ecdf", MERGE["minutes"], label="activity type")
+
+
+EVAL2 = pd.DataFrame({"model": ["m1", "m2", "m3"], "base": [0.40, 0.55, 0.62], "tuned": [0.48, 0.81, 0.58],
+                      "family": ["open", "closed", "open"]})
+
+
+def test_a_range_draws_a_dumbbell_per_item_from_its_before_ring_to_its_after_dot():
+    bundle = drawn("range", EVAL2[["model", "base", "tuned"]])
+    spec = bundle[kt.VEGALITE_MIME]
+    rule, start, end = spec["layer"]
+    assert rule["mark"] == "rule" and (rule["encoding"]["x"]["field"], rule["encoding"]["x2"]) == ("base", {"field": "tuned"})
+    assert start["mark"] == {"type": "point", "style": kt.START_STYLE} and start["encoding"]["x"]["field"] == "base"
+    assert end["mark"] == "point" and end["encoding"]["x"]["field"] == "tuned"
+    assert all(l["encoding"]["x"]["title"] == "base \u2192 tuned" for l in spec["layer"])
+    assert all(l["encoding"]["x"]["scale"] == {"zero": False} for l in spec["layer"]), "the ends are places, not lengths"
+    assert start["encoding"]["y"]["sort"] == ["m2", "m3", "m1"], "the largest after first"
+    table = cite.chart_table(bundle)
+    assert table.label == "model" and table.cells[table.labels.index("m2")] == ["0.55", "0.81"]
+    grouped = spec_of("range", EVAL2)["layer"]
+    assert grouped[1]["encoding"]["color"]["field"] == "family" and "color" not in grouped[0]["encoding"]
+    # times: a span per item, the earliest first
+    spans = pd.DataFrame({"agent": ["a", "b"], "first": pd.to_datetime(["2026-08-02", "2026-08-01"]),
+                          "last": pd.to_datetime(["2026-08-09", "2026-08-03"])})
+    s = spec_of("range", spans, marks={"freeze": "2026-08-05"})
+    assert s["layer"][0]["layer"][1]["encoding"]["y"]["sort"] == ["b", "a"]
+    assert s["layer"][0]["layer"][1]["encoding"]["x"]["type"] == "temporal" and s["layer"][1]["mark"] == "rule"
+    with pytest.raises(ValueError, match="the before and after both numbers or both times; `first` holds times and `n` numbers"):
+        kt.chart("range", spans[["agent", "first"]].assign(n=[1, 2]))
+
+
+def test_a_scatter_fits_a_line_or_a_smooth_curve_per_group_its_fitted_values_a_column_of_its_rows():
+    line = pd.DataFrame({"tokens": [1, 2, 3, 4, 5], "cost": [3, 5, 7, 9, 11]})
+    bundle = drawn("scatter", line, fit="linear")
+    spec = bundle[kt.VEGALITE_MIME]
+    points, fitted = spec["layer"]
+    assert points["mark"] == "point" and fitted["mark"] == {"type": "line", "style": kt.FIT_STYLE}
+    assert fitted["encoding"]["y"] == {"field": "cost fit", "type": "quantitative", "title": "cost"}
+    assert [r["cost fit"] for r in spec["data"]["values"]] == [3, 5, 7, 9, 11]
+    assert "cost fit" in cite.chart_table(bundle).columns, "a takeaway cites a fitted value"
+    # each group its own line, in its color
+    two = pd.DataFrame({"x": [1, 2, 3, 1, 2, 3], "y": [1, 2, 3, 10, 8, 6], "model": ["a"] * 3 + ["b"] * 3})
+    s = spec_of("scatter", two, fit="linear")
+    assert [r["y fit"] for r in s["data"]["values"]] == [1, 2, 3, 10, 8, 6] and s["layer"][1]["encoding"]["color"]["field"] == "model"
+    # a smooth fit follows a curve a line cannot, and an outlier barely moves it
+    xs = list(range(40))
+    curve = pd.DataFrame({"x": xs, "y": [(x - 20) ** 2 / 10 for x in xs]})
+    curve.loc[25, "y"] = 500
+    got = [r["y fit"] for r in spec_of("scatter", curve, fit="smooth")["data"]["values"]]
+    assert max(abs(g - (x - 20) ** 2 / 10) for x, g in zip(xs, got) if x not in (24, 25, 26)) < 4
+    with pytest.raises(ValueError, match='`fit` is "linear" or "smooth", not \'loess\''):
+        kt.chart("scatter", line, fit="loess")
+    with pytest.raises(ValueError, match="a smooth fit needs 3 or more points with distinct x values in a chart"):
+        kt.chart("scatter", line.head(2), fit="smooth")
+
+
+def test_panels_put_each_group_in_a_panel_of_its_own_sharing_scales_and_marks_repeat_in_each():
+    t = pd.date_range("2026-08-01", periods=3, freq="D")
+    cases = {
+        "bar": pd.DataFrame({"agent": ["a", "b"] * 2, "calls": [1, 2, 3, 4], "run": ["r1", "r1", "r2", "r2"]}),
+        "area": pd.DataFrame({"day": list(t) * 2, "posts": [1, 2, 3, 4, 5, 6], "site": ["w"] * 3 + ["f"] * 3}),
+        "scatter": pd.DataFrame({"x": [1, 2, 3, 4], "y": [1, 2, 3, 4], "g": ["a", "a", "b", "b"]}),
+        "dots": pd.DataFrame({"time": list(t) + list(t), "agent": ["a", "b", "a"] * 2, "outcome": ["ok"] * 3 + ["no"] * 3}),
+        "histogram": MERGE,
+        "density": MERGE,
+    }
+    assert {k for k, (_c, _n, opts) in kt.CHARTS.items() if "panels" in opts} == {*cases, "line"}
+    for kind, df in cases.items():
+        spec = spec_of(kind, df, panels=True)
+        grp = df.columns[2] if len(df.columns) > 2 else df.columns[1]
+        assert spec["encoding"]["row"] == {"field": grp, "type": "nominal", "sort": spec["encoding"]["row"]["sort"],
+                                           "title": None}, kind
+        assert "resolve" not in spec and "transform" not in spec and "yOffset" not in spec["encoding"], kind
+        assert styles(spec) == [], kind
+    # a layered chart goes inside a facet by rows; a mark across the chart, rows of its own, repeats in every panel
+    faceted = spec_of("scatter", cases["scatter"], panels=True, fit="linear", marks={"launch": 2})
+    assert faceted["facet"] == {"row": {"field": "g", "type": "nominal", "sort": ["a", "b"], "title": None}}
+    inner = faceted["spec"]["layer"]
+    assert "data" not in inner[0] and inner[1]["data"]["values"] == [{"x": 2, "mark": "launch"}]
+    assert faceted["data"]["values"][0]["y fit"] == 1
+    # a line chart's panels each keep their own y scale, and now take marks too
+    series = pd.DataFrame({"month": ["2025-04", "2025-05"] * 2, "value": [1, 9, 4, 5], "measure": ["turns"] * 2 + ["agents"] * 2})
+    lines = spec_of("line", series, panels=True, marks={"v2": "2025-05-01"})
+    assert lines["facet"]["row"]["field"] == "measure" and lines["resolve"] == {"scale": {"y": "independent"}}
+    with pytest.raises(ValueError, match="`panels` put each group in a panel of its own; leave out `stack`"):
+        kt.chart("bar", cases["bar"], panels=True, stack=True)
+    with pytest.raises(ValueError, match="`panels` is True or False and needs a group column"):
+        kt.chart("histogram", MERGE["minutes"], panels=True)
+
+
+def test_a_histogram_s_groups_share_its_bins_stacked_in_the_legend_s_order():
+    spec = spec_of("histogram", MERGE, step=20)
+    rows = spec["data"]["values"]
+    assert {(r["minutes"], r["agent"]): r["count"] for r in rows} == {
+        (0, "a"): 3, (20, "a"): 3, (40, "a"): 2, (60, "a"): 0, (0, "b"): 3, (20, "b"): 3, (40, "b"): 0, (60, "b"): 2}
+    assert spec["encoding"]["color"]["sort"] == ["a", "b"] and spec["encoding"]["order"]["field"] == kt.STACK_FIELD
+    # a Series is its values alone, a named index (groupby's) included, as before
+    per_agent = MERGE.groupby("minutes").size().rename("PRs")
+    assert set(spec_of("histogram", per_agent)["data"]["values"][0]) == {"PRs", "PRs end", "count"}
+
+
+def test_new_kinds_fail_on_a_wrong_frame_with_one_line_that_names_the_columns_they_take():
+    cases = [
+        (("density", MERGE[["agent", "minutes"]]), "takes (value) or (value, group) columns, the value numbers; `agent` holds text"),
+        (("ecdf", MERGE.assign(x=1)), "takes (value) or (value, group) columns, in that order; got 3"),
+        (("range", EVAL2[["model", "base"]]), "takes (item, before, after) or (item, before, after, group) columns, in that "
+                                              "order; got 2: model, base"),
+        (("range", EVAL2[["model", "family", "tuned"]]), "the before numbers or times; `family` holds text"),
+        (("density", MERGE["minutes"]), None),
+    ]
+    for args, words in cases:
+        if words is None:
+            kt._show, real = (lambda _b: None), kt._show
+            try:
+                kt.chart(*args)
+            finally:
+                kt._show = real
+            continue
+        with pytest.raises((ValueError, TypeError)) as e:
+            kt.chart(*args)
+        assert words in str(e.value) and "\n" not in str(e.value), str(e.value)
+    # a density, an ecdf and a histogram take any number of values
+    assert len(spec_of("density", pd.Series(range(kt.CHART_ROWS_MAX + 1), name="n"))["data"]["values"]) == kt.DENSITY_POINTS
+
+
+# ------------------------------------------------------------------------------------- the agent's own marks on a chart
+# Matt (2026-10-10): "I just want generic ways for the agents to add custom markup". show=False returns the chart as an
+# Altair chart; thimble.theme names the theme's colors, which the card reads (frontend lib/vizTheme withTokens).
+
+
+def test_show_false_returns_an_altair_chart_to_layer_marks_on_and_shows_nothing():
+    import altair as alt
+
+    daily = pd.DataFrame({"day": pd.date_range("2026-08-01", periods=4, freq="D"), "merged": [3, 9, 4, 7]})
+    events = pd.DataFrame({"day": pd.to_datetime(["2026-08-02"]), "note": ["CI moved"]})
+    real, kt._show = kt._show, (lambda _b: pytest.fail("show=False shows nothing"))
+    try:
+        bars = kt.chart("bar", daily, show=False)
+    finally:
+        kt._show = real
+    assert isinstance(bars, alt.Chart)
+    ev = alt.Chart(events)
+    layered = (bars + ev.mark_rule(color=kt.theme.pale).encode(x="day:T")
+               + ev.mark_text(color=kt.theme.accent).encode(x="day:T", text="note:N")).to_dict()
+    assert [l["mark"]["color"] for l in layered["layer"][1:]] == ["var(--viz-ink-4)", "var(--viz-highlight)"]
+    # the chart's rows stay its table, which a takeaway cites
+    table = cite.chart_table({kt.VEGALITE_MIME: layered})
+    assert table.columns == ["merged", "day end"] and table.cells[1] == ["9", "2026-08-03T00:00:00"]
+    # every kind comes back as an Altair chart that draws what thimble.chart shows, its rows and all
+    def inline(node, sets):
+        if isinstance(node, dict):
+            if set(node) == {"name"} and node["name"] in sets:
+                return {"values": sets[node["name"]]}
+            return {k: inline(v, sets) for k, v in node.items() if k not in ("$schema", "config", "datasets")}
+        return [inline(v, sets) for v in node] if isinstance(node, list) else node
+
+    for kind, df, opts in [("bar", EVALS, {"interval": ("lo", "hi")}), ("dots", EVALS[["accuracy", "model", "lo", "hi"]],
+                                                                         {"interval": ("lo", "hi"), "marks": {"x": 0.5}}),
+                           ("box", TURNS, {}), ("density", MERGE, {}), ("ecdf", MERGE, {}), ("range", EVAL2, {}),
+                           ("histogram", MERGE, {"panels": True}), ("heatmap", LINKS[["site", "posted on", "link posts"]], {}),
+                           ("scatter", EVAL2[["base", "tuned", "family"]], {"fit": "linear", "panels": True}),
+                           ("line", EVAL2[["base", "tuned"]], {})]:
+        got = kt.chart(kind, df, show=False, **opts).to_dict()
+        assert got["$schema"].startswith("https://vega.github.io/schema/vega-lite/v6"), kind
+        shown = spec_of(kind, df, **opts)
+        del shown["$schema"]
+        assert inline(got, got.get("datasets", {})) == shown, kind
+    with pytest.raises(ValueError, match="`show` is True, which shows the chart, or False"):
+        kt.chart("bar", POSTS, show="no")
+
+
+def test_theme_names_the_theme_s_roles_as_the_css_variables_the_card_reads():
+    theme = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib" / "vizTheme.ts").read_text()
+    roles = [kt.theme.accent, kt.theme.ink, kt.theme.muted, kt.theme.pale, *kt.theme.series]
+    assert len(kt.theme.series) == 7 and kt.theme.series[0] == "var(--viz-1)"
+    for role in roles:
+        name = role.removeprefix("var(").removesuffix(")")
+        assert name.startswith("--viz-") and f"'{name}':" in theme, role
+    assert "theme" in kt.__all__ and "accent" in repr(kt.theme)
+    with pytest.raises(AttributeError):
+        kt.theme.accent = "#f00"
+
+
+def test_the_doc_s_example_of_events_called_out_above_a_daily_bar_chart_runs_as_written(monkeypatch):
+    """docs/charts.md's example of an agent's own marks, run as a card runs it."""
+    import ast
+    import re
+    import sys
+
+    doc = (Path(__file__).resolve().parents[2] / "docs" / "charts.md").read_text()
+    block = next(b for b in re.findall(r"```python\n(.*?)```", doc, re.S) if "show=False" in b)
+    monkeypatch.setitem(sys.modules, "thimble", kt)
+    tree = ast.parse(block)
+    last = tree.body.pop()
+    ns = {"daily": pd.DataFrame({"day": pd.date_range("2026-08-01", periods=10, freq="D"), "merged": range(10)}),
+          "events": pd.DataFrame({"day": pd.to_datetime(["2026-08-03", "2026-08-07"]), "note": ["CI moved", "freeze"]})}
+    exec(compile(tree, "charts.md", "exec"), ns)
+    chart = eval(compile(ast.Expression(last.value), "charts.md", "eval"), ns).to_dict()
+    marks = [(l["mark"]["type"], l["mark"].get("color")) for l in chart["layer"][1:]]
+    assert marks == [("rule", kt.theme.pale), ("text", kt.theme.accent), ("text", None)]
+    assert cite.chart_table({kt.VEGALITE_MIME: chart}).columns == ["merged", "day end"]

@@ -176,6 +176,28 @@ test("a bar card keeps the order its chart's label axis sorts: by the value with
   expect(sortedBars(stacked, { x: { field: 'wiki', sort: '-y' }, y: { field: 'n' } }, 'x', 'wiki').map(r => `${r.wiki}${r.kind}`)).toEqual(['ax', 'ay', 'bx'])
 })
 
+test("thimble.chart's density, ecdf, ridgeline and range draw from their rows: one-layer curves as lines, the others as the rows' table", () => {
+  const card = (spec: unknown) => cardOfCell({ id: 'k1', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
+  const curves = [{ minutes: 0, density: 0.01, agent: 'a' }, { minutes: 10, density: 0.04, agent: 'a' }, { minutes: 0, density: 0.02, agent: 'b' }, { minutes: 10, density: 0.03, agent: 'b' }]
+  const x = { field: 'minutes', type: 'quantitative' }
+  // a few groups' density curves, overlapping (backend kernel_thimble _density_spec)
+  const density = card({ data: { values: curves }, mark: { type: 'area', line: true, style: 'thimble-overlap' }, encoding: { x, y: { field: 'density', type: 'quantitative', stack: null }, color: { field: 'agent', type: 'nominal' } } })
+  expect(density.kind).toBe('line')
+  expect(density.series?.map(s => [s.name, s.points])).toEqual([['a', [[0, 0.01], [10, 0.04]]], ['b', [[0, 0.02], [10, 0.03]]]])
+  // the cumulative share, as steps
+  const shares = [{ minutes: 5, share: 0.5 }, { minutes: 9, share: 1 }]
+  const ecdf = card({ data: { values: shares }, mark: { type: 'line', interpolate: 'step-after', point: true }, encoding: { x, y: { field: 'share', type: 'quantitative', axis: { format: '%' } } } })
+  expect([ecdf.kind, ecdf.y, ecdf.series?.[0]?.points]).toEqual(['line', 'share', [[5, 0.5], [9, 1]]])
+  // a ridgeline's y is a place the chart computes, in no row: the rows' table rather than flat lines at 0
+  const ridge = card({ data: { values: curves }, transform: [{ calculate: '1 - indexof(["a", "b"], datum["agent"])', as: '__thimble_base' }, { calculate: 'datum["__thimble_base"] + datum["density"] / 0.04 * 1.5', as: '__thimble_top' }], mark: { type: 'area', line: true }, encoding: { x, y: { field: '__thimble_top', type: 'quantitative' }, y2: { field: '__thimble_base' }, detail: { field: 'agent', type: 'nominal' } } })
+  expect([ridge.kind, ridge.columns]).toEqual(['table', ['minutes', 'density', 'agent']])
+  // a range's dumbbells are layers: the rows' table
+  const ends = [{ model: 'm1', base: 0.4, tuned: 0.5 }]
+  const y = { field: 'model', type: 'nominal' }
+  const range = card({ data: { values: ends }, layer: [{ mark: 'rule', encoding: { x: { field: 'base', type: 'quantitative' }, x2: { field: 'tuned' }, y } }, { mark: { type: 'point', style: 'thimble-start' }, encoding: { x: { field: 'base', type: 'quantitative' }, y } }, { mark: 'point', encoding: { x: { field: 'tuned', type: 'quantitative' }, y } }] })
+  expect([range.kind, range.columns, range.rows]).toEqual(['table', ['model', 'base', 'tuned'], [['m1', 0.4, 0.5]]])
+})
+
 test('text cut short has no space before `…`; a question in a row is cut at a word; shares side by side read in whole percent', () => {
   expect(cut('removed in under an hour', 12)).toBe('removed in…')
   expect(clip('Two of the three card checks', 8)).toBe('Two of…')
