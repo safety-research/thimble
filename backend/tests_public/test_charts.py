@@ -383,23 +383,42 @@ MERGE = pd.DataFrame({"minutes": [12, 15, 18, 20, 22, 30, 41, 55, 9, 14, 16, 25,
                       "agent": ["a"] * 8 + ["b"] * 8})
 
 
+def _area(xs, ds) -> float:
+    return sum((xs[i + 1] - xs[i]) * (ds[i] + ds[i + 1]) / 2 for i in range(len(xs) - 1))
+
+
 def test_a_density_is_a_smooth_curve_of_area_one_stopping_at_zero_when_no_value_is_below_it():
     spec = spec_of("density", MERGE["minutes"])  # a Series is its values, as for a histogram
     rows = spec["data"]["values"]
     xs, ds = [r["minutes"] for r in rows], [r["density"] for r in rows]
     assert len(rows) == kt.DENSITY_POINTS and set(rows[0]) == {"minutes", "density"}
-    assert xs == sorted(xs) and xs[0] >= 0 and xs[-1] > 75
-    area = sum((xs[i + 1] - xs[i]) * (ds[i] + ds[i + 1]) / 2 for i in range(len(xs) - 1))
-    assert 0.9 < area <= 1.001, "the curve's area is 1, less what falls below 0"
-    assert spec["mark"] == {"type": "area", "line": True, "style": kt.OVERLAP_STYLE}
+    assert xs == sorted(xs) and xs[0] == 0 and xs[-1] > 75
+    assert abs(_area(xs, ds) - 1) < 0.005, "the smoothing past 0 is folded back inside, so the area stays 1"
+    assert spec["mark"] == {"type": "area", "line": True, "interpolate": "monotone", "style": kt.OVERLAP_STYLE}
+    # values crowding 0 keep their curve high at 0, rather than sinking toward it as a cut-off kernel would
+    crowd = [r["density"] for r in spec_of("density", pd.Series([0.1, 0.2, 0.3, 0.5, 0.8, 1.2, 2, 3], name="m"))["data"]["values"]]
+    assert crowd[0] == max(crowd)
     # values on both sides of 0 keep the whole curve, its area 1
     both = spec_of("density", pd.Series([-3.0, -1, 0, 1, 2, 4], name="delta"))["data"]["values"]
-    xs, ds = [r["delta"] for r in both], [r["density"] for r in both]
-    assert xs[0] < -3 and abs(sum((xs[i + 1] - xs[i]) * (ds[i] + ds[i + 1]) / 2 for i in range(len(xs) - 1)) - 1) < 0.01
+    assert both[0]["delta"] < -3 and abs(_area([r["delta"] for r in both], [r["density"] for r in both]) - 1) < 0.01
     # a wider bandwidth smooths more: a lower peak
     assert max(r["density"] for r in spec_of("density", MERGE["minutes"], bandwidth=20)["data"]["values"]) < max(ds)
     with pytest.raises(ValueError, match="`bandwidth` is the width of the smoothing in `minutes`'s units"):
         kt.chart("density", MERGE["minutes"], bandwidth=0)
+
+
+def test_a_narrow_curve_beside_a_wide_range_gets_the_points_its_bump_needs():
+    """A tight group in a range a spread group stretches is drawn through a point every half of its smoothing width, up
+    to DENSITY_POINTS_MAX, and many groups keep DENSITY_ROWS rows in all while each keeps DENSITY_POINTS."""
+    rng = __import__("numpy").random.default_rng(1)
+    wide = pd.DataFrame({"ms": [*rng.normal(10, 0.5, 50), *range(0, 1000, 20)], "path": ["cache"] * 50 + ["disk"] * 50})
+    rows = spec_of("density", wide)["data"]["values"]
+    cache = [r for r in rows if r["path"] == "cache"]
+    assert len(cache) == kt.DENSITY_POINTS_MAX and len(rows) == 2 * kt.DENSITY_POINTS_MAX
+    peak = max(cache, key=lambda r: r["density"])
+    assert 9 < peak["ms"] < 11 and peak["density"] > 0.5, "the tight group's peak is drawn, not stepped over"
+    many = pd.DataFrame({"ms": rng.normal(0, 1, 6000), "run": [f"r{i % 60}" for i in range(6000)]})
+    assert len(spec_of("density", many, panels=True)["data"]["values"]) == 60 * kt.DENSITY_POINTS
 
 
 def test_a_few_groups_overlap_lightly_and_many_stand_one_over_another_named_on_the_y_axis():
@@ -563,6 +582,23 @@ def test_new_kinds_fail_on_a_wrong_frame_with_one_line_that_names_the_columns_th
         assert words in str(e.value) and "\n" not in str(e.value), str(e.value)
     # a density, an ecdf and a histogram take any number of values
     assert len(spec_of("density", pd.Series(range(kt.CHART_ROWS_MAX + 1), name="n"))["data"]["values"]) == kt.DENSITY_POINTS
+
+
+def test_values_that_are_missing_or_infinite_are_left_out_and_none_left_fails_in_one_line():
+    """A histogram, a density and an ecdf draw the finite values; with none, the call fails with one line rather than
+    numpy's error."""
+    import numpy as np
+
+    for kind in kt._VALUES:
+        for empty in (pd.Series([], name="minutes", dtype=float), pd.Series([np.nan, np.inf, -np.inf], name="minutes")):
+            with pytest.raises(ValueError, match=r"^thimble\.chart\('\w+'\): `minutes` holds no numbers to draw$"):
+                kt.chart(kind, empty)
+    rows = spec_of("ecdf", pd.Series([3, np.inf, 1, np.nan], name="minutes"))["data"]["values"]
+    assert rows == [{"minutes": 1, "share": 0.5}, {"minutes": 3, "share": 1}]
+    assert sum(r["count"] for r in spec_of("histogram", pd.Series([1, 2, np.inf], name="minutes"))["data"]["values"]) == 2
+    # a group left with no values is left out, as a group with no name is
+    two = pd.DataFrame({"minutes": [1.0, 2, 3, np.inf], "agent": ["a", "a", "a", "b"]})
+    assert {r["agent"] for r in spec_of("density", two)["data"]["values"]} == {"a"}
 
 
 # ------------------------------------------------------------------------------------- the agent's own marks on a chart

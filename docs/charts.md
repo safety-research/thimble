@@ -31,7 +31,7 @@ is named (`df.set_index("model")["score"]`). A named index counts as the first c
 A value, a y and a histogram's, density's, ecdf's or box plot's value are numbers. A line's, an area's, a scatter's and
 a dots chart's x is numbers or times, as are a range's before and after (both numbers or both times). Text that is all
 ISO dates or months ("2026-06-18", "2025-04") reads as times. A histogram, a density and an ecdf take any number of
-values; the other kinds draw 5,000 rows at most.
+values and leave out missing and infinite ones; the other kinds draw 5,000 rows at most.
 
 ## Options
 
@@ -81,11 +81,12 @@ behind the boxes are in the dots' own rows.
 
 ## Density, ecdf and range
 
-A density computes each group's curve in Python (a Gaussian kernel's) at 100 points over a range the curves share, which
-stops at 0 when no value is below it. Each curve's area is 1, so the curves compare shapes, not counts. The chart's
-rows are those points: the value, `density` and the group. With 5 or more groups and no panels, the groups stand one
-over another, each curve on a baseline of its own named on the y axis, the curves scaled alike. The places of the ridges
-are laid out by the chart, not held in its rows.
+A density computes each group's curve in Python (a Gaussian kernel's) over a range the curves share, at 100 to 400
+points, enough that the narrowest curve shows its bumps. The range stops at 0 when no value is below it, and the
+smoothing that would pass 0 is folded back inside, so a curve of values crowding 0 stays high there. Each curve's area
+is 1, so the curves compare shapes, not counts. The chart's rows are those points: the value, `density` and the group.
+With 5 or more groups and no panels, the groups stand one over another, each curve on a baseline of its own named on the
+y axis, the curves scaled alike. The places of the ridges are laid out by the chart, not held in its rows.
 
 An ecdf's rows are each group's distinct values with `share`, the share of the group's values at or below it, drawn as
 steps; a group of more than 500 distinct values keeps 500 of them, evenly spread, the last at 100%. Its legend lists the

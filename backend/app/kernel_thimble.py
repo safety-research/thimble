@@ -1175,7 +1175,9 @@ LINE_DOTS_MAX = 30  # a line marks each value with a dot while its longest serie
 STACK_FIELD = "__thimble_stack"  # a row's group's place, which a bar's segments or an area's series are stacked in
 BOX_MIN = 5  # a box plot draws a box for a group of at least this many values, and a group of fewer as a strip of them
 BOX_REACH = 1.5  # a box's whiskers reach the farthest values within this many box widths of it (Tukey's)
-DENSITY_POINTS = 100  # the points a density curve is drawn through
+DENSITY_POINTS = 100  # the points a density curve is drawn through at least, and at most DENSITY_POINTS_MAX, enough
+DENSITY_POINTS_MAX = 400  # that the narrowest curve has a point every half of its smoothing width
+DENSITY_ROWS = CHART_ROWS_MAX  # a density chart's rows at most while each curve can keep DENSITY_POINTS
 DENSITY_BINS = 2048  # the values of a group of more than DENSITY_EXACT are counted in this many bins before smoothing
 DENSITY_EXACT = 20000
 RIDGE_FROM = 5  # a density chart of this many groups draws them one over another, each on its own baseline
@@ -1934,8 +1936,10 @@ def _box_spec(df, opts: dict) -> dict:
 def _value_groups(kind: str, df, opts: dict) -> tuple:
     """A histogram's, a density's or an ecdf's values by group: (the value column, the group column or None, a label's
     values or None, {key: (the group as the chart's rows hold it, its values as floats)}, the groups once each as a
-    column of the frame's, for _ordered), groups in the frame's order; a value with no group, or none of its own, is
-    left out. Any number of values, so pandas groups them."""
+    column of the frame's, for _ordered), groups in the frame's order; a value with no group, none of its own or an
+    infinite one is left out, and so is a group left with none. Any number of values, so pandas groups them."""
+    import numpy as np
+
     cols = list(df.columns)
     val, grp = cols[0], cols[1] if len(cols) > 1 else None
     _chart_kinds(kind, df, number=(0,))
@@ -1943,9 +1947,11 @@ def _value_groups(kind: str, df, opts: dict) -> tuple:
         raise ValueError(f"thimble.chart({kind!r}): `label` colors the group column, which this frame lacks")
     label = _label_values(kind, opts["label"], df[grp], grp) if opts.get("label") is not None else None
     vals = df[val].astype(float)
-    kept = vals.notna() & (df[grp].notna() if grp else True)
+    kept = np.isfinite(vals) & (df[grp].notna() if grp else True)
     by: dict = {}
     for g, part in (vals[kept].groupby(df[grp][kept], sort=False) if grp else [(None, vals[kept])]):
+        if not len(part):
+            continue
         j = _json_value(g)
         by.setdefault(json.dumps(j), (j, []))[1].extend(part.tolist())
     if not by:
@@ -2053,7 +2059,8 @@ def _kde(vs: list, h: float, xs):
 
 def _density_spec(df, opts: dict) -> dict:
     """Each group's values as a smooth density curve (a Gaussian kernel's), its area 1, over a range the curves share
-    that stops at 0 when no value passes it: a few groups overlapping lightly, RIDGE_FROM or more each on a baseline of
+    that stops at 0 when no value passes it (the smoothing past 0 folded back inside), drawn through enough points to
+    show the narrowest curve's bumps: a few groups overlapping lightly, RIDGE_FROM or more each on a baseline of
     its own one over another (a ridgeline, named on the y axis), or each in a panel of its own. The rows are the curves'
     points; the ridges' places are laid out by the chart, not held in its rows."""
     import numpy as np
@@ -2070,12 +2077,19 @@ def _density_spec(df, opts: dict) -> dict:
     most = max(max(vs) for _g, vs in by.values())
     lo = min(min(vs) - 3 * widths[k] for k, (_g, vs) in by.items())
     hi = max(max(vs) + 3 * widths[k] for k, (_g, vs) in by.items())
+    # a range that would pass 0 where no value does stops there, and the smoothing that would spill past 0 is folded
+    # back (each value counts again as its mirror image across 0), so the curve keeps its area and does not sink toward
+    # 0 where the values crowd it
+    fold = (least >= 0 > lo) or (most <= 0 < hi)
     if least >= 0:
         lo = max(lo, 0.0)
     elif most <= 0:
         hi = min(hi, 0.0)
-    xs = np.linspace(lo, hi, DENSITY_POINTS)
-    digits = max(0, 2 - math.floor(math.log10((hi - lo) / (DENSITY_POINTS - 1))))
+    # enough points that the narrowest curve's bumps are drawn, DENSITY_POINTS at least, and DENSITY_ROWS rows at most
+    points = min(DENSITY_POINTS_MAX, max(DENSITY_POINTS, math.ceil(2 * (hi - lo) / min(widths.values()))))
+    points = min(points, max(DENSITY_POINTS, DENSITY_ROWS // len(by)))
+    xs = np.linspace(lo, hi, points)
+    digits = max(0, 2 - math.floor(math.log10((hi - lo) / (points - 1))))
     density = _free("density", [val, grp] if grp else [val])
     order = [None]
     if grp:
@@ -2085,7 +2099,10 @@ def _density_spec(df, opts: dict) -> dict:
     rows = []
     for g in order:
         key = json.dumps(g)
-        for x, d in zip(xs.tolist(), _kde(by[key][1], widths[key], xs).tolist()):
+        curve = _kde(by[key][1], widths[key], xs)
+        if fold:
+            curve = curve + _kde(by[key][1], widths[key], -xs)
+        for x, d in zip(xs.tolist(), curve.tolist()):
             rows.append({val: _num(round(x, digits)), density: _num(float(f"{d:.4g}")), **({grp: g} if grp else {})})
     enc: dict = {"x": _enc(val, "quantitative"), "y": _enc(density, "quantitative")}
     tip = [{"field": _field(c), "type": "quantitative", "title": c} for c in (val, density)]
@@ -2111,7 +2128,8 @@ def _density_spec(df, opts: dict) -> dict:
         enc["color"] = _enc(grp, "nominal", sort=order)
         enc["y"]["stack"] = None  # the curves overlap; Vega-Lite would stack them
     enc["tooltip"] = tip
-    spec = _unit(rows, {"type": "area", "line": True, "style": OVERLAP_STYLE}, enc, **more)
+    # a smooth line through the points, which never overshoots them
+    spec = _unit(rows, {"type": "area", "line": True, "interpolate": "monotone", "style": OVERLAP_STYLE}, enc, **more)
     if opts.get("marks") is not None:
         spec = _with_marks(kind, spec, opts["marks"], val, "number")
     return _with_panels(spec, grp, order) if panels else spec
