@@ -621,6 +621,55 @@ describe('the messages', () => {
     expect(doc().querySelector('[data-anchor="l#4"]')!.getAttribute('data-anchor-text')).toBe('Branch deleted')
   })
 
+  test('a pick marks the message chosen, kept when drawn again; ↑ and ↓ go to the message above or below; mentions reach thimble.text', async () => {
+    await load('<div id="c"></div>')
+    const w = win()
+    w.picked = []
+    w.given = []
+    // thimble.text is its own part: here a stand-in that keeps what it was given
+    w.eval('thimble.text = (el, text, o) => { window.given.push(o); el.textContent = text; return el }')
+    w.eval('window.conv = thimble.messages({ mount: "#c", mentions: [{ match: /#(\\d+)/g, ref: (m) => "view:forge/pull/" + m[1] }], onPick: (m) => window.picked.push(m.ref) })')
+    const list = [
+      { ref: 'k#1', t: T, author: 'ana', text: 'see #12' },
+      { ref: 'k#2', t: T + 600, author: 'bo', text: 'two' },
+      { ref: 'k#3', t: T + 1200, author: 'cy', text: 'three' },
+    ]
+    w.conv.draw(list)
+    expect(w.given.map((o: { format: string; mentions: unknown[] }) => [o.format, o.mentions.length])).toEqual([['markdown', 1], ['markdown', 1], ['markdown', 1]])
+    const at = (ref: string) => doc().querySelector(`[data-anchor="${ref}"]`) as HTMLElement
+    at('k#1').focus()
+    key(at('k#1'), 'ArrowDown')
+    expect(doc().activeElement!.getAttribute('data-anchor')).toBe('k#2')
+    key(at('k#2'), 'ArrowDown')
+    key(at('k#3'), 'ArrowDown')
+    expect(doc().activeElement!.getAttribute('data-anchor')).toBe('k#3')
+    key(at('k#3'), 'ArrowUp')
+    key(at('k#2'), ' ')
+    expect(w.picked).toEqual(['k#2'])
+    expect([...doc().querySelectorAll('.thimble-msg.active')].map((e) => e.getAttribute('data-anchor'))).toEqual(['k#2'])
+    w.conv.draw(list.slice().reverse())
+    expect([...doc().querySelectorAll('.thimble-msg.active')].map((e) => e.getAttribute('data-anchor'))).toEqual(['k#2'])
+  })
+
+  test('with the side panel: a pick opens it and marks the message; Reset closes it and leaves no message chosen', async () => {
+    await load('<div class="top"><span id="colour"></span></div><div id="body"><div id="c"></div></div>')
+    const w = win()
+    w.eval(`
+      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }] })
+      window.side = thimble.side({ mount: '#body' })
+      window.conv = thimble.messages({ mount: '#c', onPick: (m) => side.open({ title: m.author, ref: m.ref, html: m.text }) })
+    `)
+    w.conv.draw([{ ref: 'p#1', t: T, author: 'ana', text: 'one' }, { ref: 'p#2', t: T + 600, author: 'bo', text: 'two' }])
+    ;(doc().querySelector('[data-anchor="p#2"]') as HTMLElement).click()
+    expect([w.side.ref, [...doc().querySelectorAll('.thimble-msg.active')].map((e) => e.getAttribute('data-anchor'))]).toEqual(['p#2', ['p#2']])
+    await wait()
+    const reset = doc().querySelector('.thimble-reset') as HTMLButtonElement
+    expect(reset.hidden).toBe(false)
+    reset.click()
+    await wait()
+    expect([w.side.isOpen, doc().querySelector('.thimble-msg.active')]).toEqual([false, null])
+  })
+
   test('set: a new `to` draws the message after it again, which then names its own', async () => {
     await load('<div id="c"></div>')
     const w = win()

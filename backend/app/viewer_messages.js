@@ -11,9 +11,10 @@
 // Show more and Show less; both keep their text in the page (data-thimble-fold), so thimble.search finds it and opens
 // the fold. Each message is anchored with its ref and carries data-t, so a label marks it, a ⌘-click asks about it, the
 // lanes follow it and Color by (the page's, or `colour`) draws its bar; when the label filter hides a message that
-// held its group's head, the next one shown takes the head.
+// held its group's head, the next one shown takes the head. A click, Enter or Space picks a message (onPick), marked
+// as the chosen one; ↑ and ↓ go to the message above or below.
 //
-//   const conv = thimble.messages({ mount: '#thread', format: 'plain', onPick: (m) => side.open({ ... }) })
+//   const conv = thimble.messages({ mount: '#thread', format: 'plain', mentions, onPick: (m) => side.open({ ... }) })
 //   conv.draw(messages, { title: '# backlog', sub, empty })   messages: [{ref, t, author, text, title, to, parent,
 //                                                             kind: 'message' | 'event', icon, said}]
 //   conv.reveal(ref)                                         a cited message: its folds opened, scrolled to the
@@ -247,10 +248,12 @@
     this.dead = false
     this.colour = opts.colour && typeof opts.colour.attr === 'function' ? opts.colour : null
     this.format = opts.format === 'plain' ? 'plain' : 'markdown'
+    this.mentions = Array.isArray(opts.mentions) ? opts.mentions : null // as thimble.text takes them, such as #123 or @agent-08
     this.onPick = typeof opts.onPick === 'function' ? opts.onPick : null
     this.list = [] // the messages as given
     this.rows = [] // as drawn: {m, key, s, cont, reply, day (its date differs from the line above it)}
     this.opened = {} // `${key}\n${fold}` -> true while a fold shows, `fold` "more" or "q<i>"
+    this.chosen = null // the key of the message picked last, marked as the open one is (.active)
     this.o = {}
     if (!this.mount) return
     var before = HOSTED && HOSTED.get(this.mount)
@@ -261,12 +264,20 @@
       click: function (e) {
         self.click(e)
       },
+      // Enter or Space on a message picks it; ↑ and ↓ go to the message above or below
       keydown: function (e) {
-        if (!self.onPick || (e.key !== 'Enter' && e.key !== ' ')) return
         var node = e.target
-        if (!node.classList || !node.classList.contains('thimble-msg') || !self.mount.contains(node)) return
-        e.preventDefault()
-        self.pick(node)
+        if (!self.onPick || !node.classList || !node.classList.contains('thimble-msg') || !self.mount.contains(node)) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          self.pick(node)
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          var next = self.step(node, e.key === 'ArrowDown' ? 1 : -1)
+          if (!next) return
+          e.preventDefault()
+          next.focus({ preventScroll: true })
+          if (typeof next.scrollIntoView === 'function') next.scrollIntoView({ block: 'nearest' })
+        }
       },
       // the search goes to a match in a fold: that fold opens, and the folds around it
       'thimble-unfold': function (e) {
@@ -289,6 +300,16 @@
       })
       this.watch.observe(this.mount, { subtree: true, attributes: true, attributeFilter: ['data-thimble-drop'] })
     }
+    // a chosen message is the view changed from how it opens, as the row opened is: Reset leaves none chosen
+    if (typeof shared.part === 'function')
+      this.checkReset = shared.part({
+        changed: function () {
+          return !self.dead && self.chosen != null
+        },
+        reset: function () {
+          if (!self.dead) self.choose(null)
+        },
+      })
     // with no Color by of the page's own given, the bars follow the page's Color by as it changes
     if (typeof shared.onColour === 'function')
       shared.onColour(function () {
@@ -330,6 +351,13 @@
       }
     }
     if (day) day.hidden = !dayShown
+  }
+  // the message `dir` (1 or -1) from `node` that the label filter leaves, or null
+  Messages.prototype.step = function (node, dir) {
+    var all = this.mount.querySelectorAll('.thimble-msg')
+    var at = Array.prototype.indexOf.call(all, node)
+    for (var i = at + dir; at >= 0 && i >= 0 && i < all.length; i += dir) if (!gone(all[i])) return all[i]
+    return null
   }
   Messages.prototype.colourAttr = function (m) {
     var c = this.colour || shared.colour()
@@ -485,7 +513,7 @@
   // messages fold the body themselves, across its quotes), or as plain lines on a page without it
   Messages.prototype.fill = function (root) {
     var slots = root.querySelectorAll('[data-msg-text]')
-    var opts = { format: this.format }
+    var opts = this.mentions ? { format: this.format, mentions: this.mentions } : { format: this.format }
     for (var i = 0; i < slots.length; i++) {
       var el = slots[i]
       var text = this.pending[Number(el.getAttribute('data-msg-text'))]
@@ -504,7 +532,8 @@
     var author = signed ? String(m.author) : '(unsigned)'
     // under a shared head, unless the label filter hid every message above it in its group (relead)
     var cont = row.cont && !row.lead
-    var cls = 'thimble-msg' + (ev ? ' thimble-msg-event' : '') + (cont ? ' is-cont' : '') + (row.reply ? ' is-reply' : '') + (this.onPick ? ' is-act' : '')
+    var cls = 'thimble-msg' + (ev ? ' thimble-msg-event' : '') + (cont ? ' is-cont' : '') + (row.reply ? ' is-reply' : '') +
+      (this.onPick ? ' is-act' : '') + (this.chosen != null && this.chosen === row.key ? ' active' : '')
     var said = ev ? plainOf(m.said) : ''
     var gist = ev ? (signed ? author + ' ' : '') + said + (textOf(m) ? ' ' + textOf(m) : '') : (m.title ? plainOf(m.title) + ' · ' : '') + textOf(m)
     var attrs =
@@ -592,9 +621,18 @@
     var row = this.rowOf(node)
     if (!row || !this.onPick) return
     var self = this
+    this.choose(row.key)
     ctl.safe(function () {
       self.onPick(row.m)
     })
+  }
+  // the message with this key marked as the chosen one, or none
+  Messages.prototype.choose = function (key) {
+    this.chosen = key
+    this.rows.forEach(function (r) {
+      if (r.node) r.node.classList.toggle('active', key != null && r.key === key)
+    })
+    if (this.checkReset) this.checkReset()
   }
   Messages.prototype.click = function (e) {
     var t = e.target
