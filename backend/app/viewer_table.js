@@ -785,7 +785,8 @@
     if (rows) this.window()
   }
   // the strip: every row's Color by value, ref and record, and what the loupe says of it: as metadata the first column
-  // of times and the first column of text past the main one, such as a sender, and as text the main column
+  // of times and the first column of text other than the main one, such as a sender, and as text the main column. The time
+  // is as its column writes it, or of a column of `days`, which writes a date only where it changes, its time of day
   Table.prototype.colourStrip = function () {
     var self = this
     var c = this.bars.colour()
@@ -796,6 +797,10 @@
       if (col.type === 'time' && !timeCol) timeCol = col
       else if (col.type === 'text' && col !== main && !metaCol) metaCol = col
     })
+    var whenOf = function (r) {
+      var s = self.text(timeCol, r)
+      return timeCol.days ? s.replace(/^\d{4}-\d\d-\d\d[T ]/, '') : s
+    }
     shared.strip(this.mount, {
       bare: this.bars.off,
       rows: this.shown.map(function (r) {
@@ -806,7 +811,7 @@
       preview: function (i) {
         var r = self.shown[i]
         return {
-          meta: [timeCol ? self.text(timeCol, r) : '', metaCol ? self.text(metaCol, r) : ''],
+          meta: [timeCol ? whenOf(r) : '', metaCol ? self.text(metaCol, r) : ''],
           text: main ? self.text(main, r) : '',
         }
       },
