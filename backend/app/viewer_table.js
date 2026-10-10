@@ -95,9 +95,11 @@
   function empty(v) {
     return v == null || v === '' || (typeof v === 'number' && !isFinite(v))
   }
-  // whether a column's name or title names an identifier (ID_WORDS), its words split at case, punctuation and space
+  // whether a column's name or title names an identifier (ID_WORDS), its words split at case (an acronym's end too, as
+  // in `PRNumber`), punctuation and space
   function idName(s) {
     var words = String(s == null ? '' : s)
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
       .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
       .toLowerCase()
       .split(/[^a-z0-9#]+|(?=#)/)
