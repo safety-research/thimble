@@ -223,17 +223,20 @@ window.side = thimble.side({ mount: '#body' })
 window.search = thimble.search({ mount: '#search' })
 window.table = thimble.table({ mount: '#list', rows: prs, side, search, sort: { by: 't', desc: true }, columns: ${JSON.stringify(columns)} })
 </script>`)
-/** the table's head titles, each cell's left and right edge in the head and the first row, the body's right edge, and the
- *  width and text of each cell of the first row by its column's title */
+/** the table's head titles, each cell's left and right edge in the head and the first row, the body's right edge, the
+ *  width and text of each cell of the first row by its column's title (as drawn: the parts of a time drawn 0 wide left
+ *  out), and the widest of those parts */
 const columnsOf = (frame: () => Frame) =>
   frame().evaluate(() => {
     const edges = (el: Element) => [...el.children].map((c) => [c.getBoundingClientRect().left, c.getBoundingClientRect().right])
     const head = document.querySelector('.thimble-table-head')!
     const row = document.querySelector('.thimble-table-row[data-thimble-row="0"]')!
     const titles = [...head.children].map((c) => c.textContent!)
+    const drawn = (c: Element) => [...c.childNodes].map((n) => ((n as Element).classList?.contains('thimble-table-cut') ? '' : n.textContent)).join('')
     const cells: Record<string, { w: number; text: string }> = {}
-    ;[...row.children].forEach((c, i) => (cells[titles[i]] = { w: c.getBoundingClientRect().width, text: c.textContent! }))
-    return { titles, head: edges(head), row: edges(row), body: document.querySelector('.thimble-table-body')!.getBoundingClientRect().right, cells }
+    ;[...row.children].forEach((c, i) => (cells[titles[i]] = { w: c.getBoundingClientRect().width, text: drawn(c) }))
+    const cut = Math.max(0, ...[...document.querySelectorAll('.thimble-table-cut')].map((e) => e.getBoundingClientRect().width))
+    return { titles, head: edges(head), row: edges(row), body: document.querySelector('.thimble-table-body')!.getBoundingClientRect().right, cells, cut }
   })
 type Columns = Awaited<ReturnType<typeof columnsOf>>
 /** no cell of the head or the row passes the body's right edge, so none is under the strip, and none is drawn over the next */
@@ -317,13 +320,31 @@ describe('the table beside the side panel', () => {
       [100, ['Title'], null],
       [1000, ['#', 'Title', 'Author', 'State', 'Opened'], '2026-04-01 00:00:00'],
     ]
+    const march = () => frame().evaluate(() => ((window as any).search.set('2026-03-31 2'), (window as any).search.count))
     for (const [width, titles, opened] of steps) {
       const got = await at(width)
       assert.deepEqual(got.titles, titles, `${width}px: ${JSON.stringify(got)}`)
       if (opened) assert.equal(got.cells.Opened.text, opened, `${width}px`)
+      assert.equal(got.cut, 0, `${width}px`)
       assert.ok(inside(got), `${width}px: ${JSON.stringify(got)}`)
       if (width > 200) assert.ok(got.cells.Title.w >= 120, `${width}px: ${JSON.stringify(got)}`)
+      // the search finds a time whole at every width, its year and seconds drawn or not: the three from 20:00 to 22:59
+      if (opened) assert.equal(await march(), 3, `${width}px`)
     }
+    // the current match is washed in the time it is in, where the time shows
+    const washed = await frame().evaluate(() => {
+      const w = window as any
+      ;(document.getElementById('body') as HTMLElement).style.width = '520px'
+      return new Promise<string>((done) =>
+        setTimeout(() => {
+          w.search.set('03-31 22:59')
+          const cur = [...(CSS as any).highlights.get('thimble-search-current')][0] as Range
+          done(cur.toString() + ' in ' + cur.startContainer.parentElement!.closest('.thimble-table-td')!.className)
+        }, 150),
+      )
+    })
+    assert.equal(washed, '03-31 22:59 in thimble-table-td thimble-table-time')
+    await frame().evaluate(() => (window as any).search.set(''))
     // times that span two years keep the year
     await frame().evaluate(() => {
       const w = window as any
@@ -334,6 +355,7 @@ describe('the table beside the side panel', () => {
     assert.ok(inside(years), JSON.stringify(years))
     await p.close()
   })
+
 })
 
 describe('the search alone', () => {

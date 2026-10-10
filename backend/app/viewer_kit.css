@@ -1660,6 +1660,13 @@ button.thimble-card {
 .thimble-table-td.thimble-table-number {
   text-align: right;
 }
+/* the year or the seconds a narrow column of times leaves out: still in the page, which the search finds, drawn 0 wide */
+.thimble-table-cut {
+  display: inline-block;
+  width: 0;
+  overflow: hidden;
+  vertical-align: top;
+}
 .thimble-table-none {
   padding: 24px 16px;
   color: var(--text-tertiary);

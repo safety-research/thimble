@@ -56,11 +56,11 @@
     return (n < 10 ? '0' : '') + n
   }
   // a time as the kit writes it: seconds since 1970 as YYYY-MM-DD HH:MM in UTC, with the seconds in a column whose times
-  // have them (`secs`), without the year in a narrow column whose times share one (`year` false); a string as written
-  function stamp(v, secs, year) {
+  // have them (`secs`); a string as written
+  function stamp(v, secs) {
     if (typeof v !== 'number' || !isFinite(v)) return v == null ? '' : String(v)
     var d = new Date(seconds(v) * 1000)
-    var s = (year === false ? '' : d.getUTCFullYear() + '-') + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()) + ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes())
+    var s = d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()) + ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes())
     return secs ? s + ':' + pad2(d.getUTCSeconds()) : s
   }
   // a time in seconds: one past MS_FROM is read as milliseconds, which no time in seconds reaches before the year 5000
@@ -283,18 +283,29 @@
         return (da != null && db - da) || b - a
       })
   }
-  // what a cell shows, as text; `drawn` as the table draws it, a time in the form its column's width leaves
-  Table.prototype.text = function (col, r, drawn) {
+  // what a cell shows, as text
+  Table.prototype.text = function (col, r) {
     if (col.html) return textOfHtml(ctl.safe(function () { return col.html(r) }, ''))
     var v = this.value(col, r)
     if (empty(v)) return ''
-    if (col.type === 'time') return drawn && col.form ? stamp(v, col.form.secs, col.form.year) : stamp(v, col.secs)
+    if (col.type === 'time') return stamp(v, col.secs)
     if (col.type === 'number' && typeof v === 'number') return num(v)
     return typeof v === 'object' ? JSON.stringify(v) : String(v)
   }
+  // a cell's markup. A time in a column too narrow for its whole stamp keeps the year and the seconds it leaves out in
+  // the page, drawn 0 wide (.thimble-table-cut), so that the search finds the same text at every width.
   Table.prototype.cell = function (col, r) {
     if (col.html) return String(ctl.safe(function () { return col.html(r) }, '') || '')
-    return esc(this.text(col, r, true))
+    var s = this.text(col, r)
+    var f = col.type === 'time' ? col.form : null
+    var v = f ? this.value(col, r) : null
+    if (!f || typeof v !== 'number' || !isFinite(v)) return esc(s)
+    var tail = col.secs ? 3 : 0 // :SS
+    var head = s.length - 11 - tail // YYYY-, before MM-DD HH:MM
+    var cut = function (t) {
+      return t ? '<span class="thimble-table-cut">' + t + '</span>' : ''
+    }
+    return cut(f.year ? '' : s.slice(0, head)) + s.slice(f.year ? 0 : head, s.length - (f.secs ? 0 : tail)) + cut(f.secs ? '' : s.slice(s.length - tail))
   }
   // The columns' widths: a column's own, else for numbers and times as wide as their widest value or title, else an
   // equal share of what is left; and what each keeps in a table too narrow for them (fit): a column of text its `min`,
@@ -536,25 +547,22 @@
     this.searchRows()
     this.window()
   }
-  // the search's rows: each row's columns drawn, as drawn, then those a narrow table dropped, which it still finds
+  // the search's rows: each row's columns drawn, then those a narrow table dropped, which it still finds
   Table.prototype.searchRows = function () {
     if (!this.search || typeof this.search.rows !== 'function') return
     var self = this
     var drawn = this.drawnCols
-    var dropped = this.columns.filter(function (c) {
-      return drawn.indexOf(c) < 0
-    })
+    var cols = drawn.concat(
+      this.columns.filter(function (c) {
+        return drawn.indexOf(c) < 0
+      }),
+    )
     this.search.rows({
       texts: this.shown.map(function (r) {
-        return drawn
+        return cols
           .map(function (col) {
-            return self.text(col, r, true)
+            return self.text(col, r)
           })
-          .concat(
-            dropped.map(function (col) {
-              return self.text(col, r)
-            }),
-          )
           .join('\n')
       }),
       refs: this.shown.map(this.refOf),
