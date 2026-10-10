@@ -23,8 +23,8 @@
 //             hears labelEditorClosed {id, focus} when it closes: the call's id, and whether the focus came back
 //   hidden    how many anchored refs the bridge hides for the label filter, which with what the reader left out for
 //             it (the records answers' `hidden`) is the count the view's head shows (onHidden)
-//   state     what the analyst is looking at (the element they picked, the record the side panel shows or that they
-//             closed it, scroll positions, fields), asked for through `handle` before a newer version replaces the
+//   state     what the analyst is looking at (the element they picked or the record the side panel shows, none once
+//             they closed it, scroll positions, fields), asked for through `handle` before a newer version replaces the
 //             page, and sent back as `restore` once that version is ready
 //   colour    the page's Colour by choice (backend/app/viewer_colour.js), kept in this browser per view and put in the
 //             page as window.__thimbleColour when it is built again
@@ -63,8 +63,6 @@ const PROGRESS_MS = 1000 // how often a running fetch's progress is asked for
  * of the page: `ref` is opened there, the rest restored as far as it fits. */
 export interface ViewState {
   ref: string | null
-  /** the analyst closed the record the side panel showed, so the newer version opens on none */
-  closed?: boolean
   scroll: { path: string; top: number; left: number }[]
   fields: { path: string; value?: string; checked?: boolean }[]
   segs: { path: string; text: string }[]
@@ -537,14 +535,15 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
     const withQuery = drawn.current ? open : { ...open, query: viewQuery.current ?? null }
     if (target.current === r) post({ type: P + 'open', open: withQuery, quote: q && q.record === r ? q : undefined })
   }
-  // A newer version's page opens where the analyst was, when this version knows that place; on no record when they
-  // closed the one the side panel showed; else where the ref it was given names. Then the rest of what they were
-  // looking at is put back.
+  // A newer version's page opens where the analyst was: at the record the page showed, when this version knows that
+  // place, else where the ref it was given names; and on no record when the page showed none, as once they closed the
+  // side panel, though the view was opened at a ref (a newer version opened that way says none in its turn). Then the
+  // rest of what they were looking at is put back.
   const reopen = async (st: ViewState) => {
     const at = st.ref && st.ref !== target.current ? await api.viewOpen(ws, slug, st.ref, version).catch(() => null) : null
     if (at && !at.error) post({ type: P + 'open', open: { ...at, query: viewQuery.current ?? null } })
-    else if (st.closed && !st.ref) post({ type: P + 'open', open: { ...bare(), query: viewQuery.current ?? null } })
-    else await sendOpen(target.current)
+    else if (st.ref) await sendOpen(target.current)
+    else post({ type: P + 'open', open: { ...bare(), query: viewQuery.current ?? null } })
     post({ type: P + 'restore', state: st })
   }
 

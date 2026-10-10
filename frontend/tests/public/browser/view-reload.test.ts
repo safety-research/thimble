@@ -81,14 +81,16 @@ test('Reload after the analyst closed the side panel opens the view on no record
   await frame().locator('.thimble-side-close').click()
   const closed = await page.evaluate(() => (window as any).__state())
   assert.equal(closed.ref, null, JSON.stringify(closed))
-  assert.equal(closed.closed, true)
   // the newer version opens with the panel closed, its `open` naming no record
   await mount(CITED, closed)
+  assert.deepEqual(await panel(), { open: false, ref: null, opens: [null] })
+  // and so does the one after it, though the view was opened at the citation and nothing was picked since
+  await mount(CITED, await page.evaluate(() => (window as any).__state()))
   assert.deepEqual(await panel(), { open: false, ref: null, opens: [null] })
   // a record picked in the list: Reload opens on it
   await frame().locator('.row').nth(6).click()
   const picked = await page.evaluate(() => (window as any).__state())
-  assert.deepEqual([picked.ref, picked.closed], ['notes.jsonl#L7', false])
+  assert.equal(picked.ref, 'notes.jsonl#L7')
   await mount(CITED, picked)
   assert.deepEqual(await panel(), { open: true, ref: 'notes.jsonl#L7', opens: ['notes.jsonl#L7'] })
   // closed with Escape in the panel this time, then built again: no record again
