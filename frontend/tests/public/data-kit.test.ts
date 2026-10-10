@@ -622,8 +622,8 @@ describe('the table', () => {
     await load(`<div class="top"><span id="search"></span></div><div id="body" style="height:300px"><div id="list"></div></div><div id="cards"></div><div id="rec"></div>`)
     const w = win()
     w.PRS = [
-      { ref: 'forge.db#prs/67028', number: 67028, title: 'Fix the parser', additions: 12345, year: 2024, line: 10234, review: 4501, ratio: 1234.5, parentPRNumber: 66990, lineCount: 23456 },
-      { ref: 'forge.db#prs/9001', number: 9001, title: 'Docs', additions: 7, year: 2023, line: 3, review: 900, ratio: 0.5, parentPRNumber: 8999, lineCount: 12 },
+      { ref: 'forge.db#prs/67028', number: 67028, title: 'Fix the parser', additions: 12345, year: 2024, line: 10234, review: 4501, ratio: 1234.5, parentPRNumber: 66990, lineCount: 23456, turn: 12001 },
+      { ref: 'forge.db#prs/9001', number: 9001, title: 'Docs', additions: 7, year: 2023, line: 3, review: 900, ratio: 0.5, parentPRNumber: 8999, lineCount: 12, turn: 3 },
     ]
     w.eval(`
       window.side = thimble.side({ mount: '#body' })
@@ -638,12 +638,14 @@ describe('the table', () => {
         { name: 'ratio', title: 'Ratio', type: 'number' },
         { name: 'parentPRNumber', type: 'number' },
         { name: 'lineCount', type: 'number' },
+        { name: 'turn', title: 'Turn', type: 'number' },
       ] })
       document.getElementById('cards').innerHTML = thimble.recordCard({ ref: PRS[0].ref, key: PRS[0].number, meta: PRS[0].year, title: PRS[0].title })
       thimble.record({ mount: '#rec', value: PRS[0], ref: PRS[0].ref })
     `)
-    // a name's last word tells, an acronym's end among its words: parentPRNumber names a pull request, lineCount counts
-    const first = ['67028', 'Fix the parser', '12,345', '2024', '10234', '4501', '1,234.5', '66990', '23,456']
+    // a name's last word tells, an acronym's end among its words: parentPRNumber names a pull request, lineCount counts,
+    // and a turn is written as the transcript writes its number
+    const first = ['67028', 'Fix the parser', '12,345', '2024', '10234', '4501', '1,234.5', '66990', '23,456', '12001']
     expect(texts('.thimble-table-row[data-thimble-row="0"] .thimble-table-td')).toEqual(first)
     // an identifier is laid out and sorted as a number
     expect(doc().querySelector('.thimble-table-row .thimble-table-td')!.classList.contains('thimble-table-number')).toBe(true)

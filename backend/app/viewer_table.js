@@ -55,7 +55,7 @@
   var FR = /^\d*\.?\d+fr$/ // a track that shares what is left
   // the last word of a column's name or title that makes its numbers identifiers: `pr_number`, `issueId`, `Year`,
   // `PR #`; a name that ends in another word, such as `lines_added` or `comment_count`, is of amounts
-  var ID_WORDS = /^(#|id|ids|uid|uuid|guid|key|pk|no|nr|num|number|pr|issue|ticket|line|lineno|row|page|port|index|idx|seq|rev|revision|version|build|pid|code|zip|year)$/
+  var ID_WORDS = /^(#|id|ids|uid|uuid|guid|key|pk|no|nr|num|number|pr|issue|ticket|line|lineno|row|turn|step|page|port|index|idx|seq|rev|revision|version|build|pid|code|zip|year)$/
   var collator = typeof Intl !== 'undefined' ? new Intl.Collator('en', { numeric: true, sensitivity: 'base' }) : null
   var ARROW = {
     up: '<svg class="thimble-colour-ico thimble-table-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
