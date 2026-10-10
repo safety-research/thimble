@@ -120,10 +120,12 @@ export function barList(list: readonly View[], all: readonly Proposal[]): { view
   return { views: built, proposals: proposals.filter((p) => !listed.includes(p) && p.status !== 'built' && p.status !== 'dropped' && p.status !== 'suggested' && !p.held) }
 }
 
-/** The views the bar lists and the proposals not yet built, read and kept fresh (barList). */
-export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[] } {
-  const proposals = useProposals(ws) ?? []
-  return barList(useViewList(ws) ?? [], proposals)
+/** The views the bar lists and the proposals not yet built, read and kept fresh (barList); `ready` once both lists
+ * have been read. */
+export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[]; ready: boolean } {
+  const proposals = useProposals(ws)
+  const list = useViewList(ws)
+  return { ...barList(list ?? [], proposals ?? []), ready: list != null && proposals != null }
 }
 
 /** The spinner's words for a proposal's build: queued, building, or waiting for permission while a request of its
