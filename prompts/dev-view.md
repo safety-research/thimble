@@ -6,9 +6,17 @@ The corpus folder is {{corpus}}. Leave its files unchanged, since every citation
 
 A proposal whose claim is one extension's glob, such as `**/*.vtt`, asks for a viewer of that file type, so its page lays out one file.
 
+## The data
+
+As your build starts, thimble can add context after your prompt, under the heading `## The data`: types that the analyst's session wrote for the corpus's records, across all the files, and a profile that code made of every field: its records, distinct values, ranges, top values and nulls, how well it fits, such as "ts parses for 97%", and how well each join holds. Read them before the files. A fit under 100% is how the data is: the reader handles the rest and reports it in `problems(index)`. When the page shows a derived field, compute it in the reader with the code its type gives, and list it in view.json's `records` as computed.
+
 ## A good view
 
-The analyst uses the view to understand records, often thousands of them, without reading every file. Build it to "overview first, zoom and filter, details on demand". The page opens on the whole of what it covers at a glance, with records in view, so the analyst sees the shape of the data before any detail. They narrow it to what they care about, and any one record opens in full beside the list while the rest stays where it was, so they keep their place.
+The analyst uses the view to understand records, often thousands of them, without reading every file. Build it on the guidelines below.
+
+{{include:view-guidelines.md}}
+
+The first screen shows only the form the proposal chose. The list of raw records sits behind a control and opens on demand. Use a time range only when the task is about time.
 
 The rest is your judgment. Aim for the page a demanding designer would ship, one that reads at once without instructions:
 
@@ -21,16 +29,13 @@ The rest is your judgment. Aim for the page a demanding designer would ship, one
 {{if:terminal}}
 - The layout is fluid. The panel is 120 columns wide in a laptop's terminal and 200 columns on a large screen.
 {{end}}
-- Records from a system the analyst knows, such as a code forge, a message board or a chat, can be drawn the way that system draws them, in thimble's parts and colors, as `repository` draws a forge's pull requests and a board's threads.
 - When the proposal asks for a visual design, such as a dense grid in the style of a spreadsheet, build that design in its own colors and type even where it breaks a point here, and keep its text legible in the dark theme.
 - The page explains nothing in words. The analyst learns it by using it, so a line that explains the page, a hint or a caption is clutter, even where the proposal asks for one.
-- The reviewer judges the page by established principles, so design with them from the start: zoom and filter by acting on the data's own marks and axes, details that open in a side panel, each control once in the top row, one visual channel for each attribute with color only for the one the analyst colors by, one scale and mark for each quantity in every part, keys that match the marks, no ink that shows no data, each encoding's meaning one click away, and thimble's own parts and readers.
 
 {{if:browser}}
 thimble's parts are in every page, so a view can look like the rest of thimble: `chip`, `btn` (`btn-secondary`, `btn-ghost`, `btn-sm`), `seg` with `seg-opt` (`active` on the chosen one), `field`, `table` and `list-row`.
-Draw a record as a card or a tile with the kit's `thimble.recordCard`. Its only color is the bar that Color by draws on its left edge, so give it no side stripe, colored edge or corners of your own.
 
-The view kit draws the controls every view shares, so use its parts rather than drawing your own. `thimble.colorBy({mount, fields, strip, onChange})` is the one color control, mounted once in the top row: its menu takes several choices among Off, the `fields` you give and every label, each with its definition: the first colors the records and each other one is a lane of the list's strip; its chips show the chosen field's values with their counts and turn each one's color off or on, and `strip` gives a long list of records a strip of its colors with a loupe. Anything on a time axis takes `thimble.timeRange` for its range and `thimble.timeAxis` for its chart's axis. `thimble.filterBy` sits beside Color by and picks the rows that show, by a field or a label, its values as toggles. `thimble.rows` picks what the lanes are grouped by, a field, a tree of fields or a label, and `thimble.timeline` draws them on the range's scale, times or numbers, with tree guides, a key whose entries are toggles and the list's rows in view. `thimble.tree` lists groups to navigate beside the records, such as channels, folders, files or pages, with their counts. `thimble.side` opens a record or a row's children in a wide side panel beside the list, never under the row. `thimble.divider` lets the analyst drag the line between the overview and the list, `thimble.transcript` draws an agent's turns as the File browser does, `thimble.messages` draws messages between people or agents as a chat app or a mail thread does, `thimble.record` draws a record's fields as a tree under its citation, such as in the side panel, and `thimble.chart` draws a card's `thimble.chart` charts in the canvas's style. `thimble.search` finds text in the records from the top row, folded text included, and marks the matches on the list's strip, `thimble.table` lists thousands of records in columns a click sorts and a narrow pane drops, `thimble.diff` shows two versions of a text, or a patch, side by side or inline, and `thimble.text` draws a record's markdown or plain text, such as a pull request's body or an email, with its links. `thimble.onReset` tells Reset the page's own state. Draw no color control, legend that restates the chips, label menu, zoom buttons, date presets or paging text of your own. `{{docs}}/color.md`, `{{docs}}/time-range.md`, `{{docs}}/rows-and-filters.md`, `{{docs}}/search-table-diff.md` and `{{docs}}/charts.md` give each call and the reader's side of it.
+{{include:view-kit.md}}
 {{end}}
 {{if:terminal}}
 The terminal view kit draws the parts every view shares, so use its parts rather than drawing your own: `colorBy`, the one color control, `filterBy` for the rows that show and `rows` for what the lanes group by, in the top row; `timeRange` and `axis` for anything on a time axis; `timeline` for the overview, lanes of times or numbers with tree guides and a key whose entries are toggles; `list` with `details` for records, which open in `side`, a pane beside the list; `divider` for the overview's rows; `transcript` for an agent's turns; `search` and `choice`. Draw no color control, legend that restates the Color by values, label menu, zoom keys or paging text of your own. `{{docs}}/terminal-views.md` gives each part, the keys a view may bind and how the program runs.
