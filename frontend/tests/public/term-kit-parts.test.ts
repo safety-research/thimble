@@ -391,6 +391,54 @@ describe('the timeline on its own', () => {
     expect(hit.tip).toBe('a click opens the record nearest there')
   })
 
+  test("a date given as text with no zone is read in UTC on a machine in any zone, as the browser kit reads it; text with no date in it is no place", async () => {
+    const zone = process.env.TZ
+    // a machine seven hours behind UTC in May, where Date.parse reads a date with no zone in its own
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      init({ cols: 80 })
+      const commits = [
+        { t: '2026-05-16T09:00:00', author: 'ana' },
+        { t: '2026-05-16 09:05:00', author: 'ana' },
+        { t: 'Sat, 16 May 2026 09:10:00', author: 'bo' },
+        { t: '2026/05/16 09:15:00', author: 'bo' },
+        { t: 'Sat, 16 May 2026 02:20:00 -0700', author: 'cy' },
+        { t: 'step 4', author: 'cy' },
+      ]
+      const tl = kit.timeline({ rows: 'author' })
+      kit.draw((d: any) => tl.draw(d, { items: commits }))
+      await tick()
+      expect(tl.lanes.map((l: any) => [l.name, l.items.length])).toEqual([['ana', 2], ['bo', 2], ['cy', 1]])
+      // the axis from the first record, 09:00 in UTC, to the last, 09:20, the records five minutes apart in their cells
+      expect(text()[3]).toMatch(/^ +16 May 09:00 +09:05 +09:10 +09:15$/)
+      const marks = (row: string) => [...row].map((ch, i) => (ch === ' ' ? -1 : i)).filter((i) => i >= 16)
+      const at = [...marks(text()[0]), ...marks(text()[1]), ...marks(text()[2])]
+      expect(at[0]).toBe(16)
+      expect(at.at(-1)).toBe(2 + 80 - 1)
+      expect(at.slice(1).map((x, i) => x - at[i]).every((g) => Math.abs(g - 16) <= 1)).toBe(true)
+      expect(last().hits.find((h: any) => h.cursor).tips[0]).toMatch(/^ana · 16 May 09:00:\d\d · 1 record$/)
+    } finally {
+      if (zone === undefined) delete process.env.TZ
+      else process.env.TZ = zone
+    }
+  })
+
+  test('on plain numbers such as years or identifiers: the axis, the tips and the time range write them as they are, without separators; a length keeps them', async () => {
+    init({ cols: 80 })
+    const releases = [2019, 2020, 2021, 2023, 2026].map((year) => ({ year }))
+    const tl = kit.timeline({ unit: 'n', time: (r: any) => r.year })
+    kit.draw((d: any) => tl.draw(d, { items: releases }))
+    await tick()
+    const ticks = text()[1].trim().split(/\s+/)
+    expect(ticks).toContain('2020')
+    expect(ticks.every((l: string) => /^\d{4}$/.test(l))).toBe(true)
+    expect(last().hits.find((h: any) => h.cursor).tips[0]).toBe('2019 · 1 record')
+    const range = kit.timeRange({ unit: 'n' })
+    range.data({ times: [67000, 69500] })
+    expect(range.readout()).toBe('67000 – 69500 · 2,500')
+    expect(range.format(68012)).toBe('68012')
+  })
+
   test("under the time range's scale of numbers, its unit: a time is no place there", async () => {
     init()
     const range = kit.timeRange({ unit: 'n' })
@@ -556,6 +604,38 @@ describe('the transcript', () => {
     expect(at).toBeGreaterThan(5)
     expect(runsAt(last(), at).find((r) => r.s.includes('FAILED'))!.fg).toBe(kit.COLORS.problem)
     expect(runsAt(last(), at - 1).find((r) => r.s.includes('pytest'))!.fg).toBe(kit.COLORS.code)
+  })
+
+  test("a turn's time given as text is read as the browser's transcript reads it: an ISO time, a mail's date, one with no zone in UTC on a machine in any zone, `time` when it has no `t`; text with no date in it has no clock", async () => {
+    const zone = process.env.TZ
+    // a machine seven hours behind UTC in May, where Date.parse reads a date with no zone in its own
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      init({ cols: 70 })
+      const at = (i: number, t: unknown, key = 't') => ({ ref: `s.jsonl#L${i}`, [key]: t, speaker: 'lead', kind: 'text', text: `turn ${i}` })
+      const turns = [
+        at(1, '2026-05-16T09:00:01Z'),
+        at(2, '2026-05-16T09:00:02'),
+        at(3, '2026-05-16 09:00:03'),
+        at(4, 'Sat, 16 May 2026 09:00:04'),
+        at(5, '2026-05-16T11:00:05+02:00'),
+        at(6, String(T0 + 6)),
+        at(7, '2026-05-17T09:00:07', 'time'),
+        at(8, 'step 4'),
+      ]
+      const tr = kit.transcript({})
+      kit.draw((d: any) => tr.draw(d, { turns }))
+      await tick()
+      const rows = text().filter((r: string) => r.includes('●'))
+      expect(rows.map((r: string) => r.slice(2, 10))).toEqual(['09:00:01', '09:00:02', '09:00:03', '09:00:04', '09:00:05', '09:00:06', '09:00:07', '        '])
+      expect(text().filter((r: string) => /^ {2}1[67] May 2026$/.test(r))).toEqual(['  16 May 2026', '  17 May 2026'])
+      // the turns in view give the lanes above the list their times in seconds, read the same way (`span`), a Date too
+      expect(tr.list.span()).toEqual([T0 + 1, T0 + 86400 + 7])
+      expect(tr.list.span((it: any) => (it.ref === 's.jsonl#L3' ? new Date((T0 + 3) * 1000) : null))).toEqual([T0 + 3, T0 + 3])
+    } finally {
+      if (zone === undefined) delete process.env.TZ
+      else process.env.TZ = zone
+    }
   })
 
   test("with two choices of Color by a turn's `●` is two, the second in its value's hue of the second choice, a space where it has none", async () => {

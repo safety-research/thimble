@@ -116,7 +116,7 @@ tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
 | `time(item)`, `end(item)` | a record's place on the axis (`item.t` by default), a number, or a Date or an ISO time on an axis of time, else the record is left out; and its end, for a mark as wide as the record ran |
 | `unit` | the axis's unit with no range, as the time range's: `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a turn, a line or a score |
 | `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band (the key's "running") |
-| `problem(item)` | whether a record failed: its mark is underlined in the problem red (the key's "failed") |
+| `problem(item)` | whether a record failed: its mark takes a ✕ in the problem red at its foot (the key's "failed") |
 | `words` | the key's words: `{band, problem}` |
 | `keyMount` | where the key goes; at the lanes' top by default, or with no range beside the axis, under it where it has no room there |
 | `follow` | the detail list, whose rows carry `data-t`, as the table's, the transcript's and the messages' do: the rows in view, from the earliest of their times to the latest, are a light tint across the lanes |
@@ -303,7 +303,10 @@ minutes, with the same parent, share one head, each still its own record; a date
 `parent` is drawn under its parent's group, one level in, and a reply to a reply at that level too, as boards and forges
 draw threads. `kind: 'event'` is one line, an icon in the ink, the author, what they did (`said`) and the time at the
 right, as a forge's timeline draws it; `icon` is one of `comment`, `commit`, `pull`, `issue`, `merge`, `close`,
-`reopen`, `approve`, `changes`, `edit`, `delete` and `mail`.
+`reopen`, `approve`, `changes`, `edit`, `delete` and `mail`. `box: true` draws a message in a box beside the author's
+avatar, as a forge draws a pull request's opening post or a comment and a mail app a message: the box's head names the
+author, what they did (`said`, such as "opened this pull request") and the time, over the `to`, the `title` and the
+words. A boxed message shares no head.
 
 ```js
 const side = thimble.side({ mount: '#body' })
@@ -311,8 +314,8 @@ const conv = thimble.messages({ mount: '#thread', onPick: (m) => side.open({ tit
 conv.draw(posts.filter((p) => p.thread === chosen).map((p) => ({ ref: p.ref, t: p.time, author: p.author, text: p.text, parent: p.reply_to })), { title: '# ' + names[chosen] })
 ```
 
-A message is `{ref, t, author, text, title, to, parent, kind, icon, said, record}`, `t` in seconds since 1970 (or a date
-such as an ISO time, one with no zone in UTC, as the transcript reads it).
+A message is `{ref, t, author, text, title, to, parent, kind, icon, said, box, record}`, `t` in seconds since 1970 (or a
+date such as an ISO time, one with no zone in UTC, as the transcript reads it).
 Quoted mail, a run of lines that start with `>` with the "On … wrote:" line before it, folds behind
 a `…` button, and a body longer than twelve lines shows its first lines with Show more and Show less; both keep their
 text in the page, hidden, so `thimble.search` finds it and opens the fold. Each message is anchored with its ref and
@@ -327,13 +330,14 @@ changes one, such as its whole text once the reader sent it; `messages` gives th
 
 ## The record
 
-`thimble.record({mount, value, ref, open, find, colour})` draws one record, a JSON value, in `mount` as a tree under
+`thimble.record({mount, value, ref, open, find, mono, colour})` draws one record, a JSON value, in `mount` as a tree under
 its citation: a row per field, its key in mono at the left and its value at the right, each level's values lined up;
 numbers, `true`, `false` and `null` in mono; a nested object or list folded to one line that names its size and its
 first fields, which a click on its key opens. The record's fields and the level under them show at first (`open`, 2);
 a string longer than six lines or 480 characters folds to six lines with Show more and Show less, and a list of more
 than 110 items shows its first 100 with Show N more. `value` may be JSON text, such as the record's line, which draws as
-the object it holds.
+the object it holds. `mono` names the fields whose strings, and those under them, are drawn in the mono face, such as a
+file's raw line or a command (`mono: ['line']`).
 
 ```js
 side.open({ title: 'Read · explorer', ref, render: (body) => thimble.record({ mount: body, value: rec, ref, find: q.value }) })

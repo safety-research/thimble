@@ -22,21 +22,25 @@ rule that does).
 
 `thimble.search({mount, in, placeholder, onChange})` puts a search box in `mount`, in the top row:
 
-- Typing finds the text, case ignored, in the records under `in`, and goes to the first match at or after the top of
-  what the list shows. Every match on the screen gets the find's wash and the current one a stronger one. The box says
-  "3 of 120", or "No results".
+- Typing finds the text, case ignored, in every part on the screen at once: the records under `in` and the rows of
+  each list that gives them, such as a table. A table and the messages beside it, such as those of the record open in
+  the side panel, are one search, their matches in the order they stand in the page. It goes to the first match at or
+  after the top of what the list shows, and so does a paste; a match the page draws only in reply to the text, such as
+  rows it fetches for it, is gone to once it is drawn. Every match on the screen gets the find's wash and the current
+  one a stronger one. The box says "3 of 120", or "No results".
 - Enter or ↓ goes to the next match, ⇧Enter or ↑ to the one before, and the box's arrows do the same; the steps wrap
   at the ends. The list scrolls the current match into view. ⌘F (Ctrl+F) puts the focus in the box, and Escape
   empties it.
-- The list's strip (the kit's scrollbar, [color.md](color.md)) gets a lane of ticks at its left, one per match, in the
-  ink as Files' find draws them, and a click on a tick goes to that match. The loupe marks the records that hold one.
-  Without Color by the list gets the kit's strip all the same: a plain scrollbar, with that lane alone while something
-  is found.
+- Each list's strip (the kit's scrollbar, [color.md](color.md)) gets a lane of ticks at its left, one per match in it,
+  in the ink as Files' find draws them, and a click on a tick goes to that match. The loupe marks the records that hold
+  one. Without Color by the list gets the kit's strip all the same: a plain scrollbar, with that lane alone while
+  something is found.
 - It finds the text a record shows, through its inline elements (a phrase across a link or a bold word is one
   match), and never in the kit's controls, the page's own wording around a record (`data-thimble-chrome`) or an
   action button (`.btn`).
 - Reset empties the box. The search hides nothing: a page that wants to keep only the matching records asks
-  `search.has(text)`, or passes `search.text` with its fetch for its reader to filter by, in `onChange`.
+  `search.has(text)`, or passes `search.text` with its fetch for its reader to filter by, in `onChange`, and says which
+  it kept with `search.kept(refs)` (below).
 
 ```html
 <div class="top"><span id="search"></span><span id="colour"></span></div>
@@ -49,18 +53,19 @@ const search = thimble.search({ mount: '#search', in: '#list', placeholder: 'Sea
 | option | what it is |
 |---|---|
 | `mount` | an element or a selector in the top row, which the box fills; the page sets its width |
-| `in` | the element whose records it searches, an element or a selector; the page by default. Its strip, or that of the box it scrolls in, gets the ticks |
+| `in` | the element whose records it searches, an element or a selector; the page by default. Give the element that holds the records and the side panel, so the page's tabs and headings are not searched. Its strip, or that of the box it scrolls in, gets the ticks, and a list in it with a strip of its own, such as the one Color by's `strip` names, those of the matches in it. A list that gives its rows is searched wherever it is |
 | `placeholder` | the box's words while it is empty, `Search` by default |
 | `onChange(search)` | the text changed, once typing pauses, or Reset emptied it |
 
 | member | what it gives |
 |---|---|
 | `text` | the text searched for, `''` for none |
-| `count`, `at` | how many matches there are (20,000 at most, the box then saying "+"), and the current one's place among them from 0 (-1 for none) |
+| `count`, `at` | how many results there are, each a match or a record the page kept (20,000 at most, the box then saying "+"), and the current one's place among them from 0 (-1 for none) |
 | `set(text)` | the box's text set from the page, as if typed |
-| `step(dir)`, `go(k)` | the next match (1) or the one before (-1), and match `k` |
+| `step(dir)`, `go(k)` | the next result (1) or the one before (-1), and result `k` |
 | `has(text)` | whether a text holds what is searched for, case ignored; `true` while the box is empty |
 | `rows({texts, refs, go, box})`, `rows(null)` | the rows of a list that draws only those in view (below) |
+| `kept(refs)`, `kept(null)` | the records the page keeps itself for the text, by ref, which the box counts and steps through (below); `null` counts the matches again |
 | `refresh()` | the matches found again, for a change the search cannot see; it finds them again by itself when the page draws anew |
 
 ### A list that draws only the rows in view
@@ -70,8 +75,29 @@ text: `search.rows({texts, refs, go, box})`, `texts` each row's text as it draws
 apart such as cells (a match never spans them), `refs` each row's ref, so the current match stays on its row when the
 rows are sorted again, `go(i)` to bring row `i` into view, and `box` the element that scrolls, whose strip gets the
 ticks. The rows on the page carry `data-thimble-row="<i>"`, so the matches in the rows drawn are washed. The kit's
-table does this itself when it is given the search. Lists in tabs, such as a table in each, each give their rows by
-their `box`: the search finds in the one that shows, and in the page's text while none does.
+table does this itself when it is given the search. Each list gives its rows by its `box`, whose text the search leaves
+to the list: it finds in every list that shows, such as the table of the tab in view, and in the page's text around
+them.
+
+### A page that keeps records itself
+
+A page that keeps only the matching records, by `has` or by its reader, may keep a record for words its rows do not
+draw, such as a pull request kept for a comment; the box would count only the matches drawn, "No results" or "1 of 1"
+while more records show. `search.kept(refs)` says which records the page kept, once it has drawn them: the box counts
+those records and steps through them, each once, in place of the matches in them, and a record whose words do not show
+is highlighted for a moment when gone to, as a cited record is. The page calls it each time it keeps records for a new
+text, in `onChange` or once its fetch returns; until it does, the box shows no count and its steps are off. A kept
+record counts once, as its row in a list, else as the first element with its `data-anchor`; shown again, such as in the
+side panel, it counts its matches.
+
+```js
+const search = thimble.search({ mount: '#search', in: '#body', onChange: draw })
+function draw() {
+  shown = items.filter((it) => search.has(it.words))   // words of its records the rows do not draw among them
+  table.draw(shown)
+  search.kept(shown.map((it) => it.ref))
+}
+```
 
 ### Text folded away
 
@@ -138,12 +164,12 @@ const table = thimble.table({
 | `attrs(row)` | more attributes of a row's element, `{name: value}`, as `thimble.recordCard` takes them, such as `data-anchor-unmarked` for a row that stands for records and draws their labels' colors itself (`thimble.mix` in a cell) |
 | `key` | the name thimble keeps the sort under, the mount's id by default; give each table of a page its own |
 
-A column is `{name, title, type, width, min, drop, value(row), html(row), sub(row), sort}`:
+A column is `{name, title, type, width, min, drop, value(row), html(row), sub(row), days, sort}`:
 
 | key | what it is |
 |---|---|
 | `name` | the field as the records hold it |
-| `title` | its head, the name by default. A head is never cut: a column takes its title on one line while the table has room, wraps it to two lines in a narrower table, and keeps its title's width on two lines before it drops |
+| `title` | its head, the name by default. A head is never cut: a column takes its title on one line while the table has room, wraps it to two lines in a narrower table, and keeps its title's width on two lines before it drops; in a table too narrow even for the columns that never drop, it takes more lines |
 | `type` | `'text'` (the default), `'number'` (right-aligned, in the mono face, with thousands separators: `12,345`), `'id'` (a number that names a record, such as a pull request's, an issue's or a line's, written as it is: `67028`; laid out and sorted as a number) or `'time'` (seconds since 1970, shown as `2026-04-01 09:30` in UTC, with the seconds when the column's times have them; a string as written). A column of numbers whose name or title ends in a word that names an identifier, such as `id`, `key`, `number`, `PR`, `issue`, `line`, `#` or `year`, is written as `'id'` is. A column too narrow for its times leaves out the seconds, then the year when every row has the same one |
 | `width` | px or a CSS track such as `'2fr'` (text shares what is left; numbers and times fit their widest value) |
 | `min` | the px a column of text keeps before columns drop: 120 for the main column, the first column of text without a `width` in px (else the first column of text), and 64 for the others by default, and never more than its `width` |
@@ -151,6 +177,7 @@ A column is `{name, title, type, width, min, drop, value(row), html(row), sub(ro
 | `value(row)` | the value it shows and sorts by when it is not `row[name]` |
 | `html(row)` | the cell's markup in place of its value as text |
 | `sub(row)` | a second line under the cell's value in the secondary ink, text or `{html}`, such as an email's first words under its subject or a pull request's number, author and time under its title; with one, every row is two lines tall. The search finds it and the default `details` show it |
+| `days` | `true` for a column of times that writes a row's date only where it differs from the row above's, and the time on every row, as a log does. The date a row shares with the row above stays in its place unseen, so the times stand in one column and the search still finds it |
 | `sort` | `false` for a column a click does not sort |
 
 | member | what it gives |

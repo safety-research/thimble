@@ -6,8 +6,10 @@
 // messages by one author, within five minutes and with the same parent, share one head; a date line opens each day; a
 // reply (`parent`) is drawn under its parent, one level in, deeper replies at that level too, as boards and forges draw
 // them; an event (`kind: 'event'`) is one line, an icon in the ink, the author in bold, what they did (`said`) and the
-// time at the right, as a forge's timeline draws it. Quoted mail (a run of lines that start with ">", with the "On …
-// wrote:" line before it) folds behind a "…" button, and a body longer than twelve lines shows its first lines with
+// time at the right, as a forge's timeline draws it; a boxed message (`box`), such as a pull request's opening post or a
+// mail, is a box beside the avatar, its head the author, what they did (`said`) and the time, over the words. Quoted
+// mail (a run of lines that start with ">", with the "On … wrote:" line before it) folds behind a "…" button, and a
+// body longer than twelve lines shows its first lines with
 // Show more and Show less; both keep their text in the page (data-thimble-fold), so thimble.search finds it and opens
 // the fold. Each message is anchored with its ref and carries data-t, so a label marks it, a ⌘-click asks about it, the
 // lanes follow it and Color by draws its bar. Its bars follow the page's Color by unless it is given `colour` (or
@@ -18,7 +20,7 @@
 //
 //   const conv = thimble.messages({ mount: '#thread', format: 'plain', mentions, onPick: (m) => side.open({ ... }) })
 //   conv.draw(messages, { title: '# backlog', sub, empty })   messages: [{ref, t, author, text, title, to, parent,
-//                                                             kind: 'message' | 'event', icon, said, record}]
+//                                                             kind: 'message' | 'event', icon, said, box, record}]
 //   conv.reveal(ref)                                         a cited message: its folds opened, scrolled to the
 //                                                             middle, its highlight fading
 //   conv.set(ref, patch)                                     a message changed, such as its whole text from the reader
@@ -230,6 +232,10 @@
   function isEvent(m) {
     return m.kind === 'event'
   }
+  // a message drawn in a box of its own, as a forge draws an opening post or a comment and a mail app a message
+  function isBoxed(m) {
+    return !!m.box && !isEvent(m)
+  }
   // a value given as text or as {html}, as thimble.recordCard takes its parts
   function words(v) {
     return v != null && typeof v === 'object' && v.html != null ? String(v.html) : esc(v == null ? '' : v)
@@ -380,7 +386,7 @@
   // whether message `b` shares the head of message `a` before it: both messages (no event), by one author, with the same
   // parent, within GROUP_S of each other on the same day, or both without a time
   function follows(a, b) {
-    if (!a || isEvent(a) || isEvent(b)) return false
+    if (!a || isEvent(a) || isEvent(b) || isBoxed(a) || isBoxed(b)) return false
     if (String(a.author == null ? '' : a.author) !== String(b.author == null ? '' : b.author)) return false
     if (String(a.parent == null ? '' : a.parent) !== String(b.parent == null ? '' : b.parent)) return false
     var x = secs(a.t)
@@ -521,7 +527,7 @@
     var author = signed ? String(m.author) : '(unsigned)'
     // under a shared head, unless the label filter hid every message above it in its group (relead)
     var cont = row.cont && !row.lead
-    var cls = 'thimble-msg' + (ev ? ' thimble-msg-event' : '') + (cont ? ' is-cont' : '') + (row.reply ? ' is-reply' : '') +
+    var cls = 'thimble-msg' + (ev ? ' thimble-msg-event' : '') + (isBoxed(m) ? ' is-boxed' : '') + (cont ? ' is-cont' : '') + (row.reply ? ' is-reply' : '') +
       (this.onPick ? ' is-act' : '') + (this.chosen != null && this.chosen === row.key ? ' active' : '')
     var said = ev ? plainOf(m.said) : ''
     var gist = ev ? (signed ? author + ' ' : '') + said + (textOf(m) ? ' ' + textOf(m) : '') : (m.title ? plainOf(m.title) + ' · ' : '') + textOf(m)
@@ -544,14 +550,26 @@
     }
     var prev = i > 0 ? this.rows[i - 1] : null
     var to = m.to != null && m.to !== '' && !(cont && prev && String(prev.m.to) === String(m.to)) ? '<div class="thimble-msg-to" data-thimble-chrome>to ' + words(m.to) + '</div>' : ''
+    var subject = m.title != null && m.title !== '' ? '<div class="thimble-msg-subject">' + words(m.title) + '</div>' : ''
+    if (isBoxed(m)) {
+      // a box beside the avatar: its head the author, what they did and the time, as an event's line, over the words
+      var inside = to + subject + body
+      return (
+        '<div class="' + cls + '"' + attrs + '>' +
+        '<div class="thimble-msg-rail" data-thimble-chrome>' + avatarHtml(m.author) + '</div>' +
+        '<div class="thimble-msg-main"><div class="thimble-msg-box">' +
+        '<div class="thimble-msg-line thimble-msg-boxhead" data-thimble-chrome><span class="thimble-msg-said"><b class="thimble-msg-author">' + esc(author) + '</b>' +
+        (m.said != null && m.said !== '' ? ' ' + words(m.said) : '') + '</span>' + timeHtml(row.s, 'thimble-msg-time', row.day) + '</div>' +
+        (inside ? '<div class="thimble-msg-boxbody">' + inside + '</div>' : '') +
+        '</div></div></div>'
+      )
+    }
     var head = cont ? '' : '<div class="thimble-msg-head" data-thimble-chrome><b class="thimble-msg-author">' + esc(author) + '</b>' + timeHtml(row.s, 'thimble-msg-time', row.day) + '</div>'
     var rail = cont ? timeHtml(row.s, 'thimble-msg-railtime', row.day) : avatarHtml(m.author)
     return (
       '<div class="' + cls + '"' + attrs + '>' +
       '<div class="thimble-msg-rail" data-thimble-chrome>' + rail + '</div>' +
-      '<div class="thimble-msg-main">' + head + to +
-      (m.title != null && m.title !== '' ? '<div class="thimble-msg-subject">' + words(m.title) + '</div>' : '') +
-      body + '</div></div>'
+      '<div class="thimble-msg-main">' + head + to + subject + body + '</div></div>'
     )
   }
   Messages.prototype.draw = function (messages, o) {
@@ -576,7 +594,7 @@
       if (row.line) out.push('<div class="thimble-msg-day" data-thimble-chrome><span>' + esc(row.line) + '</span></div>')
       out.push(self.rowHtml(row, i))
     })
-    if (!this.rows.length) out.push('<div class="thimble-msg-none">' + esc(o2.empty || 'No messages') + '</div>')
+    if (!this.rows.length) out.push('<div class="thimble-msg-none" data-thimble-chrome>' + esc(o2.empty || 'No messages') + '</div>')
     this.mount.classList.toggle('thimble-msg-headed', o2.title != null)
     this.mount.innerHTML = out.join('')
     this.bars.watch(this.mount, this.restampAll)
@@ -689,10 +707,10 @@
     if (!row || !patch || typeof patch !== 'object') return
     var same = true
     for (var k in patch) {
-      if (k === 'author' || k === 't' || k === 'parent' || k === 'kind' || k === 'ref' || k === 'to') same = same && patch[k] === row.m[k]
+      if (k === 'author' || k === 't' || k === 'parent' || k === 'kind' || k === 'ref' || k === 'to' || k === 'box') same = same && patch[k] === row.m[k]
       row.m[k] = patch[k]
     }
-    // what places it or the message after it (its author, time, parent, kind or `to`) draws them all again; anything
+    // what places it or the message after it (its author, time, parent, kind, `to` or box) draws them all again; anything
     // else draws it alone
     if (same) this.redraw(row)
     else this.draw(this.list, this.o)

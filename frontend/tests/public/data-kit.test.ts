@@ -384,6 +384,189 @@ describe('the search', () => {
     await type('gale f')
     expect(w.search.count).toBe(1)
   })
+
+  test("a page that keeps records itself, by words its rows do not draw, says which (kept): the box counts and steps through those records, each once, a row whose words do not show highlighted when gone to; until the page says, no count", async () => {
+    await load(`<div class="top"><span id="search"></span></div><div id="body" style="height:400px"><div id="list"></div></div>`)
+    const w = win()
+    // pull requests whose comments the table does not draw
+    w.PRS = [
+      { ref: 'forge.db#prs/1', title: 'Flaky test: the flaky clock', comments: 'fixed' },
+      { ref: 'forge.db#prs/2', title: 'Docs', comments: 'calm' },
+      { ref: 'forge.db#prs/3', title: 'Parser', comments: 'this was flaky' },
+      { ref: 'forge.db#prs/4', title: 'Speed up the build', comments: 'is the flaky test gone?' },
+    ]
+    w.eval(`
+      window.mode = 'now'
+      window.search = thimble.search({ mount: '#search', onChange: draw })
+      window.side = thimble.side({ mount: '#body' })
+      window.table = thimble.table({ mount: '#list', rows: PRS, search, side, columns: [{ name: 'title', title: 'Pull request' }],
+        details: (p) => ({ title: p.title, html: '<p class="comments">' + p.comments + '</p>' }) })
+      // the page keeps the pull requests whose title or comments hold the text, as a reader does, now or once its
+      // fetch returns, and says which
+      function draw() {
+        const shown = PRS.filter((p) => search.has(p.title + ' ' + p.comments))
+        const keep = () => {
+          table.draw(shown)
+          if (window.mode !== 'none') search.kept(shown.map((p) => p.ref))
+        }
+        if (window.mode === 'later') setTimeout(keep, 300)
+        else keep()
+      }
+    `)
+    const row = (ref: string) => doc().querySelector(`.thimble-table-row[data-anchor="${ref}"]`) as HTMLElement
+    await type('flaky')
+    // three kept: the first draws the word twice in its title and counts once; the other two hold it in their comments
+    expect(w.table.rows.map((p: any) => p.ref)).toEqual(['forge.db#prs/1', 'forge.db#prs/3', 'forge.db#prs/4'])
+    expect(w.search.count).toBe(3)
+    expect(w.search.at).toBe(0)
+    expect(texts('.thimble-search-count')).toEqual(['1 of 3'])
+    // a step goes to the next record, whose words do not show: its row is highlighted for a moment
+    w.search.step(1)
+    expect(texts('.thimble-search-count')).toEqual(['2 of 3'])
+    expect(row('forge.db#prs/3').hasAttribute('data-thimble-snap')).toBe(true)
+    // one at a time: the next step takes the highlight to its row
+    w.search.step(1)
+    expect(row('forge.db#prs/3').hasAttribute('data-thimble-snap')).toBe(false)
+    expect(row('forge.db#prs/4').hasAttribute('data-thimble-snap')).toBe(true)
+    w.search.step(1)
+    expect(w.search.at).toBe(0) // wrapped
+    // a record opened in the side panel beside the table: its comment's word counts as a match too, after the rows
+    w.table.open('forge.db#prs/3')
+    await wait()
+    expect(w.search.count).toBe(4)
+    w.search.go(3)
+    expect(w.getSelection()!.getRangeAt(0).startContainer.parentElement!.closest('.thimble-side-body .comments')).not.toBe(null)
+    w.side.close()
+    await wait()
+    expect(w.search.count).toBe(3)
+    // nothing kept: No results
+    await type('storm')
+    expect(texts('.thimble-search-count')).toEqual(['No results'])
+    // a page that says what it kept once its fetch returns: no count until then, then the first record gone to
+    await type('')
+    w.mode = 'later'
+    await type('flaky test')
+    expect(texts('.thimble-search-count')).toEqual([''])
+    // Enter or a step meanwhile goes nowhere, as the box's arrows are off, though the rows drawn before hold the words:
+    // the page's answer is not in yet
+    expect(w.search.count).toBe(1)
+    key(doc().querySelector('.thimble-search-input')!, 'Enter')
+    w.search.step(1)
+    expect(w.search.at).toBe(-1)
+    await wait(300)
+    expect(texts('.thimble-search-count')).toEqual(['1 of 2'])
+    expect(w.search.at).toBe(0)
+    // kept(null): the matches the rows draw are counted again, here only those in the first title
+    w.mode = 'none'
+    w.search.kept(null)
+    await type('flaky')
+    expect(w.table.rows.length).toBe(3)
+    expect(texts('.thimble-search-count')).toEqual(['1 of 2'])
+  })
+
+  test("kept records the page draws itself: each counts once, where it first shows, the matches in it its own; the same record shown again, as in a reading pane, counts its matches", async () => {
+    await load(`<div class="top"><span id="search"></span></div>
+<div id="cards"><div class="card" data-anchor="c#1"><b>Flaky clock</b> <span>flaky twice</span></div><div class="card" data-anchor="c#2"><b>Docs</b></div><div class="card" data-anchor="c#3"><b>Calm</b></div></div>
+<div id="pane"><div data-anchor="c#2"><p>it was flaky, then flaky again</p></div></div>`)
+    const w = win()
+    w.eval(`window.search = thimble.search({ mount: '#search' })`)
+    w.search.set('flaky')
+    expect(w.search.count).toBe(4)
+    // the second card held the word in text it does not draw: the page keeps it with the first
+    w.search.kept(['c#1', 'c#2'])
+    // the first card once (its three matches), the second card once, and the pane's two matches
+    expect(w.search.count).toBe(4)
+    expect(w.search.at).toBe(0)
+    w.search.step(1)
+    expect(doc().querySelector('#cards [data-anchor="c#2"]')!.hasAttribute('data-thimble-snap')).toBe(true)
+    w.search.step(1)
+    const sel = w.getSelection()!.getRangeAt(0)
+    expect([sel.toString(), !!sel.startContainer.parentElement!.closest('#pane')]).toEqual(['flaky', true])
+    // a card the page did not keep counts its matches as before
+    doc().querySelector('#cards [data-anchor="c#3"] b')!.textContent = 'Calm, not flaky'
+    await wait(60)
+    expect(w.search.count).toBe(5)
+  })
+
+  test("a page that fetches its rows for the text: a pasted word the rows shown just before did not hold goes to its first match once they come, as typing does", async () => {
+    await load(`<div class="top"><span id="search"></span><span id="own"></span></div><div id="list" style="height:300px"></div><div id="log"></div>`)
+    const w = win()
+    w.ALL = ['calm sea', 'a light wind', 'a gale at noon', 'the gale warning'].map((text, i) => ({ ref: `log.jsonl#L${i + 1}`, text }))
+    w.eval(`
+      // the reader's answer for the text, a moment later
+      const fetched = (s) => new Promise((r) => setTimeout(() => r(ALL.filter((x) => s.has(x.text))), 100))
+      window.search = thimble.search({ mount: '#search', onChange: async (s) => table.draw(await fetched(s)) })
+      window.table = thimble.table({ mount: '#list', rows: ALL.slice(0, 2), search, columns: [{ name: 'text', title: 'Event' }] })
+      // a page that draws its own records again in its reply
+      window.own = thimble.search({ mount: '#own', in: '#log', onChange: async (s) => {
+        document.getElementById('log').innerHTML = (await fetched(s)).map((x) => '<p data-anchor="' + x.ref + '">' + x.text + '</p>').join('')
+      } })
+      document.getElementById('log').innerHTML = '<p data-anchor="log.jsonl#L1">calm sea</p>'
+    `)
+    // pasted whole, as one input
+    await type('gale')
+    await wait(100)
+    expect(w.search.count).toBe(2)
+    expect(w.search.at).toBe(0)
+    expect(texts('#search .thimble-search-count')).toEqual(['1 of 2'])
+    // a step, then the page drawing the rows again: the current match stays where the analyst put it
+    w.search.step(1)
+    w.table.draw(w.table.rows.slice())
+    expect(w.search.at).toBe(1)
+    // the page's own records, drawn again in reply
+    await type('gale', '#own .thimble-search-input')
+    await wait(150)
+    expect(w.own.count).toBe(2)
+    expect(texts('#own .thimble-search-count')).toEqual(['1 of 2'])
+  })
+
+  test("every part on screen: a table's rows and the messages beside it, in the order they stand, the table's drawn rows counted once; a step goes from the table into the messages", async () => {
+    await load(`<div class="top"><span id="search"></span></div><div id="body"><div id="list" style="height:300px"></div><div id="thread"></div></div>`)
+    const w = win()
+    w.ROWS = [{ ref: 'mail.jsonl#L1', subject: 'gale at noon' }, { ref: 'mail.jsonl#L2', subject: 'calm' }, { ref: 'mail.jsonl#L3', subject: 'a gale' }]
+    w.MSGS = [
+      { ref: 'chat.jsonl#L1', author: 'ana', text: 'the gale is near', t: T0 },
+      { ref: 'chat.jsonl#L2', author: 'bo', text: 'ok', t: T0 + 60 },
+      { ref: 'chat.jsonl#L3', author: 'gale', text: 'gale force 8', t: T0 + 120 },
+    ]
+    w.eval(`
+      window.search = thimble.search({ mount: '#search' })
+      window.table = thimble.table({ mount: '#list', rows: ROWS, search, columns: [{ name: 'subject', title: 'Subject' }] })
+      thimble.messages({ mount: '#thread' }).draw(MSGS)
+    `)
+    await type('gale')
+    // two rows and two messages (not the author's name, the messages' own head)
+    expect(w.search.count).toBe(4)
+    expect(w.search.at).toBe(0)
+    w.search.go(1)
+    w.search.step(1)
+    expect(w.search.at).toBe(2)
+    const sel = w.getSelection()!.getRangeAt(0)
+    expect(sel.startContainer.parentElement!.closest('[data-anchor]')!.getAttribute('data-anchor')).toBe('chat.jsonl#L1')
+    // a word only the messages hold (each strip's ticks are tests/public/browser/view-data.test.ts)
+    await type('near')
+    expect([w.search.count, w.search.at]).toEqual([1, 0])
+    await type('gale')
+    // a new message is found too
+    w.eval(`thimble.messages({ mount: '#thread' }).draw(MSGS.concat([{ ref: 'chat.jsonl#L4', author: 'cy', text: 'gale gone', t: ${T0 + 180} }]))`)
+    await wait(60)
+    expect(w.search.count).toBe(5)
+  })
+
+  test("the line an empty transcript or thread shows is the part's own wording, which the search never finds", async () => {
+    await load(`<div class="top"><span id="search"></span></div><div id="body"><div id="turns"></div><div id="thread"></div></div>`)
+    const w = win()
+    w.eval(`
+      window.search = thimble.search({ mount: '#search', in: '#body' })
+      thimble.transcript({ mount: '#turns' }).draw([], { empty: 'No turn holds the search or passes the filters' })
+      thimble.messages({ mount: '#thread' }).draw([])
+    `)
+    expect(texts('#body > div')).toEqual(['No turn holds the search or passes the filters', 'No messages'])
+    await type('passes the filters')
+    expect(texts('.thimble-search-count')).toEqual(['No results'])
+    await type('no messages')
+    expect(texts('.thimble-search-count')).toEqual(['No results'])
+  })
 })
 
 const T0 = Date.UTC(2026, 3, 1, 9) / 1000
@@ -652,9 +835,10 @@ describe('the table', () => {
     expect(doc().querySelector('.thimble-table-row .thimble-table-td')!.classList.contains('thimble-table-number')).toBe(true)
     w.table.sortBy('review', false)
     expect(w.table.rows.map((r: any) => r.review)).toEqual([900, 4501])
-    // the search finds it as it is written
+    // the search finds it as it is written, in every part on screen: the table's row, the card's key, and the record
+    // viewer's number and its ref
     await type('67028')
-    expect(w.search.count).toBe(1)
+    expect(w.search.count).toBe(4)
     // the side panel's default details, a card and the record viewer write it alike
     w.table.open('forge.db#prs/67028')
     expect(texts('.thimble-table-fields dd')).toEqual(first)
@@ -678,6 +862,40 @@ describe('the table', () => {
     expect(rows[1].getAttribute('title')).toBe('Note 1')
     expect(rows[1].hasAttribute('onclick')).toBe(false)
     expect(rows[1].getAttribute('data-anchor')).toBe('mail.jsonl#L2')
+  })
+
+  test("a column of times with `days`: a row's date only where it differs from the row above's, the time on every row; the date kept in its place unseen, found by the search, and written again as a sort brings other days together", async () => {
+    await load(`<div class="top"><span id="search"></span></div><div id="list" style="height:400px"></div>`)
+    const w = win()
+    const DAY = 86400
+    // two events on 1 April, one at 23:59:30 and one past midnight on 2 April, and one on 2 April at 10:00
+    w.EVENTS = [
+      { ref: 'e#L1', t: T0, what: 'opened' },
+      { ref: 'e#L2', t: T0 + 3600, what: 'merged' },
+      { ref: 'e#L3', t: T0 + 15 * 3600 - 30, what: 'paged' },
+      { ref: 'e#L4', t: T0 + 15 * 3600 + 30, what: 'closed' },
+      { ref: 'e#L5', t: T0 + DAY + 3600, what: 'reopened' },
+    ]
+    w.eval(`
+      window.search = thimble.search({ mount: '#search', in: '#list' })
+      window.table = thimble.table({ mount: '#list', rows: window.EVENTS, search: window.search,
+        columns: [{ name: 't', title: 'Time', type: 'time', days: true }, { name: 'what', title: 'What' }] })`)
+    const cells = () => [...doc().querySelectorAll('.thimble-table-row')].map((r) => r.children[0] as HTMLElement)
+    const shown = (c: HTMLElement) => [...c.childNodes].filter((n) => !(n as Element).classList?.contains('thimble-table-day')).map((n) => n.textContent).join('')
+    // every cell holds its whole time; the dates a day's later rows share are unseen
+    expect(cells().map((c) => c.textContent)).toEqual(['2026-04-01 09:00:00', '2026-04-01 10:00:00', '2026-04-01 23:59:30', '2026-04-02 00:00:30', '2026-04-02 10:00:00'])
+    expect(cells().map(shown)).toEqual(['2026-04-01 09:00:00', '10:00:00', '23:59:30', '2026-04-02 00:00:30', '10:00:00'])
+    expect(cells().map((c) => c.querySelector('.thimble-table-day')?.textContent ?? null)).toEqual([null, '2026-04-01 ', '2026-04-01 ', null, '2026-04-02 '])
+    // the search finds a date on every row that has it, seen or not
+    await type('2026-04-01')
+    expect(w.search.count).toBe(3)
+    // sorted by what happened, the rows' days alternate, and each row whose day differs from the row above writes it
+    ;(doc().querySelector('[data-col="what"]') as HTMLElement).click()
+    expect(w.table.rows.map((r: any) => r.what)).toEqual(['closed', 'merged', 'opened', 'paged', 'reopened'])
+    expect(cells().map(shown)).toEqual(['2026-04-02 00:00:30', '2026-04-01 10:00:00', '09:00:00', '23:59:30', '2026-04-02 10:00:00'])
+    // a column without `days` writes the date on every row
+    w.eval(`window.table = thimble.table({ mount: '#list', rows: window.EVENTS, columns: [{ name: 't', type: 'time' }, 'what'] })`)
+    expect(doc().querySelectorAll('.thimble-table-day')).toHaveLength(0)
   })
 
   test("a column's second line (sub): under the value in each row, which is two lines tall, found by the search and shown by the default details", async () => {
@@ -1228,6 +1446,43 @@ describe('the messages', () => {
     expect(texts('.thimble-msg-none')).toEqual(['No posts in this thread'])
     w.again.draw([{ ref: 'a#1', author: 'new', text: 'drawn' }])
     expect(texts('.thimble-msg-author')).toEqual(['new'])
+  })
+
+  test("a boxed message: a box beside its avatar, its head the author, what they did and the time over its subject, `to` and words; it shares no head; one with no words is its head alone; an event is never boxed", async () => {
+    await load('<span id="colour"></span><div id="c"></div>')
+    const w = win()
+    w.eval(`thimble.colorBy({ mount: '#colour', fields: [{ name: 'author', title: 'Author' }] })
+      window.conv = thimble.messages({ mount: '#c' })`)
+    w.conv.draw([
+      { ref: 'pr#1', t: T, author: 'ana', box: true, said: 'opened this pull request', text: 'Fixes the **parser**.' },
+      { ref: 'pr#2', t: T + 60, author: 'ana', text: 'A first comment, a minute on' },
+      { ref: 'pr#3', t: T + 90, author: 'ana', text: 'A second comment' },
+      { ref: 'pr#4', t: T + 120, author: 'bo', box: true, said: { html: 'wrote to <b>ops</b>' }, title: 'Gale warning', to: 'ops', text: '' },
+      { ref: 'pr#5', t: T + 130, author: 'bo', box: true, text: '' },
+      { ref: 'pr#6', t: T + 140, author: 'cy', kind: 'event', icon: 'merge', said: 'merged this', box: true },
+    ])
+    const m = (n: number) => doc().querySelector(`[data-anchor="pr#${n}"]`)!
+    // the opening: its avatar in the rail, its box's head and its words drawn by thimble.text inside the box
+    expect(m(1).classList.contains('is-boxed')).toBe(true)
+    expect(m(1).querySelector(':scope > .thimble-msg-rail .avatar')!.textContent).toBe('a')
+    const head = m(1).querySelector('.thimble-msg-box > .thimble-msg-boxhead')!
+    expect(head.hasAttribute('data-thimble-chrome')).toBe(true)
+    expect(head.querySelector('.thimble-msg-said')!.textContent).toBe('ana opened this pull request')
+    expect(head.querySelector('.thimble-msg-time')!.getAttribute('title')).toBe('2026-08-27 23:30:00')
+    expect(texts('[data-anchor="pr#1"] .thimble-msg-box > .thimble-msg-boxbody .thimble-msg-text')).toEqual([expect.stringContaining('parser')])
+    expect(m(1).getAttribute('data-colour')).toBe('ana')
+    // the comments by the same author a minute later share no head with it, and share one with each other
+    expect(heads().slice(0, 3)).toEqual([['pr#1', 'head', ''], ['pr#2', 'head', ''], ['pr#3', 'same head', '']])
+    // a mail in a box: what they did as html, its `to` and subject in the box over no words
+    expect(m(4).querySelector('.thimble-msg-said')!.innerHTML).toBe('<b class="thimble-msg-author">bo</b> wrote to <b>ops</b>')
+    expect(texts('[data-anchor="pr#4"] .thimble-msg-boxbody > *')).toEqual(['to ops', 'Gale warning'])
+    expect(m(4).querySelector('.thimble-msg-body')).toBe(null)
+    // no words, subject or `to`: the head alone, the author alone in it
+    expect(m(5).querySelector('.thimble-msg-boxbody')).toBe(null)
+    expect(m(5).querySelector('.thimble-msg-said')!.textContent).toBe('bo')
+    expect(heads()[4]).toEqual(['pr#5', 'head', ''])
+    // an event stays one line
+    expect([m(6).classList.contains('is-boxed'), m(6).querySelector('.thimble-msg-box')]).toEqual([false, null])
   })
 
   test('a loop of parents draws every message of it; an event with no author says what happened alone', async () => {

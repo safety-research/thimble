@@ -190,7 +190,7 @@
       if (t.session != null) prev = t.session
       out.push(self.turnHtml(t, i))
     })
-    if (!this.turns.length) out.push('<div class="thimble-turn-empty thimble-transcript-none">' + esc(o.empty || 'No turn') + '</div>')
+    if (!this.turns.length) out.push('<div class="thimble-turn-empty thimble-transcript-none" data-thimble-chrome>' + esc(o.empty || 'No turn') + '</div>')
     this.mount.innerHTML = out.join('')
     this.bars.watch(this.mount, this.restampAll)
   }
