@@ -443,9 +443,16 @@ describe('the search', () => {
     await type('storm')
     expect(texts('.thimble-search-count')).toEqual(['No results'])
     // a page that says what it kept once its fetch returns: no count until then, then the first record gone to
+    await type('')
     w.mode = 'later'
     await type('flaky test')
     expect(texts('.thimble-search-count')).toEqual([''])
+    // Enter or a step meanwhile goes nowhere, as the box's arrows are off, though the rows drawn before hold the words:
+    // the page's answer is not in yet
+    expect(w.search.count).toBe(1)
+    key(doc().querySelector('.thimble-search-input')!, 'Enter')
+    w.search.step(1)
+    expect(w.search.at).toBe(-1)
     await wait(300)
     expect(texts('.thimble-search-count')).toEqual(['1 of 2'])
     expect(w.search.at).toBe(0)

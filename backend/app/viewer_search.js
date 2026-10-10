@@ -1158,10 +1158,11 @@
     }
     this.clearEl.hidden = !typed
   }
-  // the next result (dir 1) or the one before (-1), wrapping at the ends
+  // the next result (dir 1) or the one before (-1), wrapping at the ends; none while the page has not said what it kept
+  // for the text, whose first record it goes to once it does
   Search.prototype.step = function (dir) {
     var n = this.matches.length
-    if (!n) return
+    if (!n || this.pending()) return
     var k = this.at < 0 ? (dir > 0 ? this.firstFrom(this.ticks()) : n - 1) : (((this.at + dir) % n) + n) % n
     this.go(k)
   }
