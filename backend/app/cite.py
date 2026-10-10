@@ -562,10 +562,11 @@ def _datasets(spec: dict, datasets: dict | None) -> dict:
 def _main_part(spec: dict, datasets: dict | None = None) -> tuple[dict, list] | None:
     """(part, rows) of the part of a chart whose rows are its table (chart_table): a Vega spec's first `data` entry with
     values; a part's own rows; in a spec with no data of its own, thimble.chart's own part wherever it stands
-    (_chart_part), so the code's own marks may come before it; else of its layers' main rows the most, the first of them
-    on a tie, since the marks a chart's code layers on (a shaded span, a rule, a note) take a row or a few and the data
-    they mark many; else its first concatenated chart's or its inner spec's. A spec with no such part whose only inline
-    data is one dataset gives that. None when no rows are in the spec (a URL, a generator, no data at all)."""
+    (_chart_part), so the code's own marks may come before it; else of its layers' or concatenated charts' main rows the
+    most, the first of them on a tie, since the marks a chart's code layers on (a shaded span, a rule, a note) and a
+    panel of text set beside the chart (a header) take a row or a few and the data many; else its inner spec's. A spec
+    with no such part whose only inline data is one dataset gives that. None when no rows are in the spec (a URL, a
+    generator, no data at all)."""
     datasets = _datasets(spec, datasets)
     data = spec.get("data")
     if isinstance(data, list):
@@ -576,12 +577,9 @@ def _main_part(spec: dict, datasets: dict | None = None) -> tuple[dict, list] | 
         return None if rows is None else (spec, rows)
     if (part := _chart_part(spec)) is not None:
         return part, part["data"]["values"]
-    layers = spec.get("layer") if isinstance(spec.get("layer"), list) else []
-    found = [m for p in layers if isinstance(p, dict) and (m := _main_part(p, datasets)) is not None]
+    found = [m for p in _subparts(spec) if (m := _main_part(p, datasets)) is not None]
     if found:
         return max(found, key=lambda m: len(m[1]))
-    if (first := next((m for p in _subparts(spec) if (m := _main_part(p, datasets)) is not None), None)) is not None:
-        return first
     if len(datasets) == 1 and isinstance(rows := next(iter(datasets.values())), list):
         return spec, rows
     return None
@@ -646,9 +644,9 @@ def _label_text(v: Any) -> str:
 def chart_table(bundle: Any) -> ChartTable | None:
     """The table of a chart bundle's inline rows (ChartTable), the first CHART_ROWS_MAX of them; None when the bundle is no
     chart or draws no inline rows. The rows and axes are those of its main part (_main_part): thimble.chart's own
-    wherever it stands among a chart's layers, else the part with the most rows. The row label is the first column whose
-    values are all distinct, non-empty text, else the x (then y) axis field when its values are distinct and not a
-    numeric y measure, else the row's position from 0."""
+    wherever it stands among a chart's layers or panels, else the layer or panel with the most rows. The row label is
+    the first column whose values are all distinct, non-empty text, else the x (then y) axis field when its values are
+    distinct and not a numeric y measure, else the row's position from 0."""
     spec = chart_spec(bundle)
     main = _main_part(spec) if spec is not None else None
     return _rows_table(*main) if main is not None else None

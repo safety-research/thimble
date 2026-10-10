@@ -231,9 +231,18 @@ test('a chart layered in plain Altair shows the rows of its layer with the most 
   const datasets = { 'data-1': [{ a: '2026-06-16', b: '2026-06-20' }], 'data-2': [{ day: '2026-06-15', saves: 2610 }, { day: '2026-06-16', saves: 6543 }], 'data-3': [{ day: '2026-06-16', t: 'peak' }] }
   const drawn = card({ layer: [span, bars, note], datasets })
   expect([drawn.kind, drawn.columns, drawn.rows]).toEqual(['table', ['day', 'saves'], [['2026-06-15', 2610], ['2026-06-16', 6543]]])
-  // a panel of a concatenated chart the same way, the first panel first
+  // a panel of a concatenated chart the same way
   const side = card({ hconcat: [{ layer: [span, bars, note] }, { data: { name: 'data-1' }, mark: 'rect' }], datasets })
   expect(side.columns).toEqual(['day', 'saves'])
+})
+
+test('a concatenated chart shows the rows of its panel with the most rows, not a header set first', () => {
+  // the live QA of 0.7.0: a panel of text set over the chart as its header, with one row of its own
+  const card = (spec: unknown) => cardOfCell({ id: 'k3', kind: 'plot', title: 'q', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell).card
+  const head = { data: { name: 'data-1' }, mark: { type: 'text', size: 14 }, encoding: { text: { field: 't', type: 'nominal' } } }
+  const bars = { data: { name: 'data-2' }, mark: 'bar', encoding: { x: { field: 'day', type: 'temporal' }, y: { field: 'saves', type: 'quantitative' } } }
+  const datasets = { 'data-1': [{ t: 'Saves per day' }], 'data-2': [{ day: '2026-06-15', saves: 2610 }, { day: '2026-06-16', saves: 6543 }] }
+  for (const key of ['vconcat', 'hconcat', 'concat']) expect(card({ [key]: [head, bars], datasets }).columns, key).toEqual(['day', 'saves'])
 })
 
 test('text cut short has no space before `…`; a question in a row is cut at a word; shares side by side read in whole percent', () => {
