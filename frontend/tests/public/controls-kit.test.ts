@@ -534,6 +534,36 @@ describe('the side panel and the transcript', () => {
     expect(w.side.isOpen).toBe(false)
   })
 
+  test("what Reload opens on follows the side panel: the record it opened, by a click or not, and none once it closed, by hand or by the page", async () => {
+    await load()
+    const w = win()
+    w.eval(`window.side = thimble.side({ mount: '#body' })`)
+    const state = async () => {
+      fromPage({ type: 'thimble:state', id: of('state').length + 1 })
+      await wait(10)
+      const st = of('state').at(-1)!.state as { ref: string | null; closed: boolean }
+      return [st.ref, st.closed]
+    }
+    // thimble opens the view at a citation, which the page shows in the panel
+    fromPage({ type: 'thimble:open', open: { ref: 'r1/lead.jsonl#L3' } })
+    w.side.open({ title: 'Task', ref: 'r1/lead.jsonl#L3', html: '' })
+    expect(await state()).toEqual(['r1/lead.jsonl#L3', false])
+    // the page opens another record with no click, as ↑ and ↓ in a table do
+    w.side.open({ title: 'Grep', ref: 'r1/explore.jsonl#L2', html: '' })
+    expect(await state()).toEqual(['r1/explore.jsonl#L2', false])
+    // the page closes the panel itself, as a second click on the open row does
+    w.side.close()
+    expect(await state()).toEqual([null, true])
+    // a click on a record names it again
+    doc().getElementById('list')!.innerHTML = '<div class="row" data-anchor="r1/test.jsonl#L2">Bash</div>'
+    ;(doc().querySelector('.row') as HTMLElement).click()
+    expect(await state()).toEqual(['r1/test.jsonl#L2', false])
+    // a new citation starts afresh
+    w.side.close()
+    fromPage({ type: 'thimble:open', open: { ref: 'r1/grep.jsonl#L2' } })
+    expect(await state()).toEqual(['r1/grep.jsonl#L2', false])
+  })
+
   test("a transcript: speaker, tool and time in the head, a failed call's ✕ before its tool; a tool call folded to one line until opened, its head's chevron opening and folding it; a long result folded to six lines, Show more and Show less in one place under it; a cited turn opened", async () => {
     await load()
     const w = win()
