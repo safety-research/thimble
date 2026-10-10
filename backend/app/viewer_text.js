@@ -57,7 +57,8 @@
       return s
     }
   }
-  // a relative link's corpus path, read from the folder of `base` (a file's ref) as a browser reads it; a path from /
+  // a relative link's corpus path, read from the folder of `base` (a file's ref) as a browser reads it, each part
+  // decoded before a `..` is taken, so an encoded one (%2E%2E) goes up too and never stays in the path; a path from /
   // is from the corpus folder
   function corpusPath(href, base) {
     var hash = href.indexOf('#')
@@ -66,10 +67,11 @@
     if (!path) return null
     var parts = path[0] === '/' || !base ? [] : base.split('#')[0].split('/').slice(0, -1)
     path.split('/').forEach(function (p) {
+      p = tryDecode(p)
       if (p === '..') parts.pop()
       else if (p && p !== '.') parts.push(p)
     })
-    return parts.length ? tryDecode(parts.join('/')) + tryDecode(frag) : null
+    return parts.length ? parts.join('/') + tryDecode(frag) : null
   }
   // a link that opens a ref in thimble, or goes to a place in the text: an <a> without an address, so a link to a
   // keyboard and a screen reader by its role and tabindex

@@ -580,6 +580,12 @@ describe('the text', () => {
     expect(of('navigate')).toEqual([])
     // the footnote's mark goes to its note, in the text
     expect(root.querySelector('[data-thimble-jump]')!.textContent).toBe('1')
+    // a part of a path is decoded before its `..` is taken: an encoded `..` goes up, never past the corpus folder
+    const up = drawn(w.thimble.text.html('[esc](%2E%2E/%2E%2E/%2E%2E/x.md) [deep](a/%2e%2e/b%20c.md#L2)', { ref: 'runs/r1/log.jsonl#L5' }))
+    expect(links(up)).toEqual([
+      ['esc', 'x.md', 'thimble-text-ref'],
+      ['deep', 'runs/r1/b c.md#L2', 'thimble-text-ref'],
+    ])
   })
 
   test('the fold: html() folds a text past 12 lines, a mount draws it whole; Show more, the search and a quote open it', async () => {
