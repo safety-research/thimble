@@ -5,6 +5,7 @@
 // libraries the card names (useCardLibs).
 import { useEffect, useState } from 'react'
 import { api } from './api'
+import { barEnds } from './barEnds'
 import type { Resolved } from './theme'
 import { token, vegaConfig, VIZ_DIV, VIZ_INK, VIZ_SEQ, VIZ_SERIES } from './vizTheme'
 
@@ -34,8 +35,9 @@ export function withFrameStyle(html: string, style: string): string {
 }
 
 /** The chart style (tokens.css, lib/vizTheme) a frame's html can draw a chart in: the series in order, the sequential and
- * diverging ramps, the muted "other" and the highlight, the inks, the chrome, the faces and sizes, and a label's
- * colors for a chart colored by a label. A custom card's scripts also get the colors as thimble.colors (chartScript). */
+ * diverging ramps, the muted "other" and the highlight, the inks, the chrome, the faces and sizes, a bar's round end,
+ * and a label's colors for a chart colored by a label. A custom card's scripts also get the colors as thimble.colors
+ * (chartScript). */
 export const CHART_TOKENS = [
   ...VIZ_SERIES,
   ...VIZ_SEQ,
@@ -52,6 +54,7 @@ export const CHART_TOKENS = [
   '--viz-size',
   '--viz-size-title',
   '--viz-line',
+  '--viz-bar-radius',
   ...Array.from({ length: 18 }, (_, i) => `--label-${i + 1}`),
   '--label-none',
 ]
@@ -203,14 +206,27 @@ export function useFrameFonts(): string | null {
 /** Text for an inline <script> or JSON in one: a `<` can end no element. */
 const scriptSafe = (text: string) => text.replace(/</g, '\\u003c')
 
+/** Wraps the frame's vegaEmbed once its library sets it, so a chart it draws with thimble.vegaConfig has its bars'
+ * ends mended as the canvas's charts do (lib/barEnds), after a patch function of the card's own. vegaEmbed(el, spec,
+ * opts) and vegaEmbed.embed are wrapped; vegaEmbed(spec) still makes a container. barEnds' source holds no `</`. */
+const EMBED_BAR_ENDS = `(function(){
+var fix=${barEnds.toString()},embed;
+function patched(opts){var p=opts&&opts.patch;return Object.assign({},opts,{patch:typeof p==='function'?function(vg){return fix(p(vg))}:p||fix})}
+function wrap(f){
+  var g=Object.assign(function(el,spec,opts){return typeof el==='string'||el instanceof HTMLElement?f(el,spec,patched(opts)):f.apply(this,arguments)},f);
+  if(typeof f.embed==='function')g.embed=g.default=function(el,spec,opts){return f.embed(el,spec,patched(opts))};
+  return g}
+Object.defineProperty(window,'vegaEmbed',{configurable:true,enumerable:true,get:function(){return embed},set:function(f){embed=typeof f==='function'?wrap(f):f}})
+})()`
+
 /** thimble's chart style for a custom card's scripts, read from the document as the tokens are: `thimble.colors`, the
  * series in order (series), the sequential and diverging ramps (seq, div), the muted other and the highlight, and the
  * ink ramp (ink), and `thimble.vegaConfig`, the config of the canvas's own Vega-Lite charts (vizTheme vegaConfig), for
- * vega-embed. */
+ * vega-embed, whose bars the frame's vegaEmbed draws as the canvas does (EMBED_BAR_ENDS). */
 export function chartScript(): string {
   const colors = { series: VIZ_SERIES.map(token), seq: VIZ_SEQ.map(token), div: VIZ_DIV.map(token), other: token('--viz-other'), highlight: token('--viz-highlight'), ink: VIZ_INK.map(token) }
   const style = { colors, vegaConfig: vegaConfig() }
-  return `<script>window.thimble=Object.assign(window.thimble||{},${scriptSafe(JSON.stringify(style))})</script>`
+  return `<script>${EMBED_BAR_ENDS}</script><script>window.thimble=Object.assign(window.thimble||{},${scriptSafe(JSON.stringify(style))})</script>`
 }
 
 const cardLibs = new Map<string, Promise<string>>()

@@ -447,12 +447,14 @@
   --viz-label: var(--ink-500);
   --viz-annotation: var(--viz-ink-2);
   /* the chart's faces and sizes: axis and legend labels in mono, titles and text marks in the body face, all at 11 px;
-     a chart's own title at 13 px; a line 1.5 px (backend/app/matplotlibrc holds the same in points) */
+     a chart's own title at 13 px; a line 1.5 px (backend/app/matplotlibrc holds the same in points); a bar's end, away
+     from its baseline, round at 2 px (a stacked bar's whole stack) */
   --viz-font: var(--font-body);
   --viz-font-label: var(--font-mono);
   --viz-size: var(--text-2xs);
   --viz-size-title: var(--text-sm);
   --viz-line: 1.5px;
+  --viz-bar-radius: 2px;
 
   /* type: Hanken Grotesk for text, Geist Mono for anything the data named (a file, a thread, a label, a key, a time).
      400 and 500; 600 only for the report's H1 and H2. Numbers tabular everywhere. */

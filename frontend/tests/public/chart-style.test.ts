@@ -49,6 +49,11 @@ describe('the Vega-Lite theme', () => {
     expect(s['thimble-start']).toMatchObject({ filled: false })
     expect(s['thimble-start'].color).toBeUndefined()
   })
+
+  test("rounds a bar's end by --viz-bar-radius, and leaves a box plot's box square", () => {
+    expect(c.bar).toEqual({ cornerRadiusEnd: 2 })
+    expect((c.style as Record<string, Record<string, unknown>>)['thimble-box'].cornerRadiusEnd).toBe(0)
+  })
 })
 
 test("a mark a card's code colors with thimble.theme takes the theme's color now, so it follows the accent and the paper", () => {
@@ -79,7 +84,7 @@ test("a timeline's lanes take the series in the order they first appear, and the
 })
 
 test("a custom card's frame and a card type's or view's page get the chart style as CSS variables", () => {
-  for (const name of [...VIZ_SERIES, ...VIZ_SEQ, ...VIZ_DIV, '--viz-other', '--viz-highlight', '--viz-font', '--viz-font-label', '--viz-size', '--label-1', '--label-none']) expect(CHART_TOKENS).toContain(name)
+  for (const name of [...VIZ_SERIES, ...VIZ_SEQ, ...VIZ_DIV, '--viz-other', '--viz-highlight', '--viz-font', '--viz-font-label', '--viz-size', '--viz-bar-radius', '--label-1', '--label-none']) expect(CHART_TOKENS).toContain(name)
   for (const name of CHART_TOKENS) {
     expect(FRAME_TOKENS, name).toContain(name)
     expect(VIEW_TOKENS, name).toContain(name)

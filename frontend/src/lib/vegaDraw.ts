@@ -2,9 +2,11 @@
 // (components/Outputs Vega) and a view's charts (lib/kitChart, which vite build writes as the script a view's page
 // inlines for the view kit's thimble.chart, backend/app/viewer_chart.js). drawChart gives the spec a card's defaults
 // (lib/chartDefaults), fits it to its box (responsive, fitComposite, fitAfterCompile), puts it on the paper (onPaper),
-// embeds it in the chart style (lib/vizTheme vegaConfig) with no URL loaded but a data: one (lib/vegaLoader), and once
-// drawn measures it against its box and embeds it again to fit: wide legends wrap into columns, wide composites narrow,
-// squeezed plots get shorter labels, dense x axes get labels on end (xLabelsFit), and overflowing labels get padding.
+// embeds it in the chart style (lib/vizTheme vegaConfig, its bars' ends mended by lib/barEnds) with no URL loaded but a
+// data: one (lib/vegaLoader), and once drawn measures it against its box and embeds it again to fit: wide legends wrap
+// into columns, wide composites narrow, squeezed plots get shorter labels, dense x axes get labels on end (xLabelsFit),
+// and overflowing labels get padding.
+import { barEnds } from './barEnds'
 import { chartDefaults, legendAtRight, type LabelClassColour } from './chartDefaults'
 import { dataOnly, withoutEmbedOptions } from './vegaLoader'
 import { token, vegaConfig, VIZ_NEUTRAL, VIZ_SERIES, withTokens } from './vizTheme'
@@ -680,7 +682,7 @@ export async function drawChart(el: HTMLElement, spec: Spec, load: () => Promise
     current = null
     // the spec's embed options are dropped and Vega fetches no URL but a data: one (lib/vegaLoader)
     const compiled = fitAfterCompile(withoutEmbedOptions(sized))
-    const patch = (vg: Spec) => labelTooltips(compiled.patch(vg))
+    const patch = (vg: Spec) => barEnds(labelTooltips(compiled.patch(vg)))
     const r = await m.default(el, compiled.spec as any, { actions: false, config: vegaConfig() as any, patch, loader: dataOnly(m.vega.loader()) })
     if (!alive()) return r.finalize()
     const container = usesContainerWidth(sized)
