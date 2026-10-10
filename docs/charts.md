@@ -133,14 +133,14 @@ ev = alt.Chart(events.merge(daily, on="day").assign(  # events: day, note
 `thimble.chart` shows a Vega-Lite chart (`application/vnd.vegalite.v6.json`, as Altair does) with its rows inline and no
 color, font or size of its own. The card draws it in thimble's theme, as it draws every chart (frontend
 `lib/vizTheme.ts` and `lib/chartDefaults.ts`), so these charts change with the theme and look alike. A mark that only a
-job sets apart names that job as a Vega-Lite style, and the theme's `style` config gives it its look: `thimble-faint`
-(a box plot's values), `thimble-box` (its boxes), `thimble-median` (its medians, in ink), `thimble-overlap` (areas side
-by side, and density curves), `thimble-fit` (a scatter's fitted line, in ink unless its group colors it) and
-`thimble-start` (a range's before end, a ring). An interval is a rule, which the theme draws in its annotation ink. A chart colored by
-a label takes the label's colors because the call notes the label as read (as `thimble.labels` does), and the card gives
-a label it read its colors. The inline rows are the chart's table: the model reads them in the card's output and a
-takeaway cites a value by column and row, as for any chart. Times without a zone show as they are, and times with a zone
-at their zone's clock time.
+job sets apart names that job as a Vega-Lite style, and the theme's `style` config gives it its look: `thimble-faint` (a
+box plot's values), `thimble-box` (its boxes), `thimble-median` (its medians, in ink), `thimble-overlap` (areas side by
+side, and density curves), `thimble-fit` (a scatter's fitted line, in ink unless its group colors it) and
+`thimble-start` (a range's before end, a ring). An interval is a rule, which the theme draws in its annotation ink. A
+chart colored by a label takes the label's colors because the call notes the label as read (as `thimble.labels` does),
+and the card gives a label it read its colors. The inline rows are the chart's table: the model reads them in the card's
+output and a takeaway cites a value by column and row, as for any chart. Times without a zone show as they are, and
+times with a zone at their zone's clock time.
 
 Panels one under another each get 150 px unless the chart sizes them, and a y axis that names each of its ticks (a
 ridgeline's) gets room for every name (`lib/chartDefaults.ts`). The terminal draws a one-layer bar, line, point or

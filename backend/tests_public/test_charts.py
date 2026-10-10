@@ -367,8 +367,8 @@ def test_an_area_stacks_its_series_in_the_legend_s_order_overlaps_them_lightly_o
 
 
 def test_the_marks_a_chart_names_by_their_job_are_styled_by_the_theme():
-    """A faint dot, a box, a median, an overlapping area, a fitted line and a range's before end carry no style of their own: the theme's `style` config gives
-    each its look (frontend lib/vizTheme vegaConfig)."""
+    """A faint dot, a box, a median, an overlapping area, a fitted line and a range's before end carry no style of their
+    own: the theme's `style` config gives each its look (frontend lib/vizTheme vegaConfig)."""
     theme = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib" / "vizTheme.ts").read_text()
     for name in (kt.FAINT_STYLE, kt.BOX_STYLE, kt.MEDIAN_STYLE, kt.OVERLAP_STYLE, kt.FIT_STYLE, kt.START_STYLE):
         assert f"'{name}':" in theme, name
