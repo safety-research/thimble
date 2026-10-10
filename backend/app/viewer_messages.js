@@ -546,6 +546,8 @@
     var attrs =
       ' data-msg="' + i + '"' +
       (row.key.charAt(0) !== '#' ? ' data-anchor="' + esc(row.key) + '" data-anchor-text="' + esc(gist.replace(/\s+/g, ' ').trim().slice(0, 300)) + '"' : '') +
+      // the author beside the time in a strip's loupe, in its gray (viewer_colour textOf)
+      (signed ? ' data-preview-meta="' + esc(author) + '"' : '') +
       (row.s != null ? ' data-t="' + row.s + '"' : '') +
       this.colourAttr(m) +
       (this.onPick ? ' tabindex="0"' : '')

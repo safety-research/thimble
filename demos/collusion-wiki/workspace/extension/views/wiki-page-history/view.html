@@ -1668,7 +1668,7 @@ function slicePreview(j) {
   const pos = M.pos[k], st = PG.strip, i = LP[pos], b = got.get(pos), t = O.t0 + st.t[i]
   const u = st.u[i] >= 0 ? O.users[st.u[i]] || 'anonymous' : ''
   const what = st.k[i] === 'd' ? 'deleted the page' : st.k[i] === 'q' ? 'request' : b ? (b.change_summary || (b.message || '').split('\n').find((x) => x.trim()) || `+${b.add} −${b.rem}`) : `r${st.s[i]} +${st.a[i]} −${st.r[i]}`
-  return { when: `${dm(t)} ${hm(t)}`, text: `${u ? `${u}: ` : ''}${what}` }
+  return { meta: [`${dm(t)} ${hm(t)}`, u], text: what }
 }
 colour.strip('#blocks', { rows: [], refs: [], preview: slicePreview })
 // the list of pages holds groups, which take no colour: the kit's plain track

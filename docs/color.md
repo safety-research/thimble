@@ -190,10 +190,12 @@ with `preview(i)` (what the loupe says of row `i`: its text as a string, or `{me
 of the fields that tell records apart at a glance, such as `[time, agent]`, and `text` its words; without it, the text
 of the row's element where the page draws it), `refs` (each row's ref, which the labels' lanes read and whose line,
 `#L12`, or key the loupe's line starts with) and `records` (each row's record, which the lanes of fields past the
-first choice read). For a list of elements the loupe reads each record's `<time>` as its metadata and the rest of its
-text, or `preview(element)`, and its `data-anchor`. Call `strip` again with the same list when they change; rows given
-again unchanged, as a list drawn again on each scroll gives them, are not measured again. The view checks count each
-row given with its ref as shown, once the rows the list draws carry those refs as their `data-anchor`.
+first choice read). For a list of elements the loupe reads each record's `<time>` (or `data-time`) and its
+`data-preview-meta` (another field, such as its author) as its metadata and the rest of its text, or
+`preview(element)`, and its `data-anchor`; the kit's messages and transcript give their author or speaker so. Call
+`strip` again with the same list when they change; rows given again unchanged, as a list drawn again on each scroll
+gives them, are not measured again. The view checks count each row given with its ref as shown, once the rows the
+list draws carry those refs as their `data-anchor`.
 
 The tracks show colors only on a list of the records the color marks, and only where they reflect the whole list:
 Color by's own `strip`, a list given `rows`, or another list whose elements are all of its records, which says so

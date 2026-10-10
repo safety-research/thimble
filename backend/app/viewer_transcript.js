@@ -165,8 +165,11 @@
     var colour = this.bars.attr(recordOf(turn))
     var no = turn.line != null ? turn.line : i + 1
     var at = placeOf(turn)
+    // the time of day and the speaker, a strip's loupe's metadata in its gray (viewer_colour textOf), as Files' loupe
+    var meta = (/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(when) ? ' data-time="' + when.slice(11) + '"' : when ? ' data-time="' + esc(when) + '"' : '') +
+      (turn.speaker ? ' data-preview-meta="' + esc(turn.speaker) + '"' : '')
     return (
-      '<div class="thimble-turn thimble-turn-k-' + esc(kind) + '" data-anchor="' + esc(turn.ref) + '" data-anchor-text="' + esc(summary(turn).slice(0, 300)) + '"' + (at != null ? ' data-t="' + at + '"' : '') + colour + '>' +
+      '<div class="thimble-turn thimble-turn-k-' + esc(kind) + '" data-anchor="' + esc(turn.ref) + '" data-anchor-text="' + esc(summary(turn).slice(0, 300)) + '"' + meta + (at != null ? ' data-t="' + at + '"' : '') + colour + '>' +
       '<button type="button" class="thimble-turn-no" data-place="' + esc(turn.ref) + '" title="Open its lines in the File browser" data-thimble-chrome>' + esc(no) + '</button>' +
       '<div class="thimble-turn-main">' +
       (folds ? '<button type="button" class="thimble-turn-head thimble-turn-toggle" data-toggle="' + esc(turn.ref) + '" aria-expanded="' + (open ? 'true' : 'false') + '" data-thimble-chrome>' + CARET + head + '</button>' : '<div class="thimble-turn-head" data-thimble-chrome>' + head + '</div>') +

@@ -1741,9 +1741,9 @@
   // What the loupe says of a record comes from what the page gives the strip: for a list given its rows, `preview(i)`
   // (a string, or `{meta, text}`: `meta` a string or a list of them, such as the record's time and agent; `when` is
   // taken as `meta`, as pages written before it give it), else the row's element where the page draws it; for a list
-  // of elements, `preview(el)`, else the element's `<time>` (or data-time) as its metadata and the rest of its text. Its
-  // first column is the line its ref names (`refs`, or its data-anchor: `#L12` is 12), else the key after the ref's `#`
-  // or its last `/`, else the row's place.
+  // of elements, `preview(el)`, else the element's `<time>` (or data-time) and its data-preview-meta as its metadata
+  // and the rest of its text. Its first column is the line its ref names (`refs`, or its data-anchor: `#L12` is 12),
+  // else the key after the ref's `#` or its last `/`, else the row's place.
   var PLAIN_W = 10 // px: the strip with no lane, a plain scrollbar
   var LANE_W = 7 // px: a lane of the strip, 2 px from the next, 3 px in from the strip's edges (Files' TRACK_LANES)
   var LANE_GAP = 2
@@ -2844,7 +2844,8 @@
     return (this.page ? document : this.box).querySelector('[data-anchor="' + String(ref).replace(/["\\]/g, '\\$&') + '"]')
   }
   // what the loupe says of a record (a row, or an element): the page's preview, its metadata (`meta`, or `when` as
-  // pages written before it give it) and its text; else the element's time as its metadata and the rest of its text
+  // pages written before it give it) and its text; else the element's time and its data-preview-meta (another field,
+  // such as its author) as its metadata and the rest of its text
   Strip.prototype.textOf = function (t) {
     var self = this
     var got = this.preview ? safe(function () { return self.preview(t) }, null) : null
@@ -2854,13 +2855,16 @@
     if (!e || !e.getAttribute) return { meta: [], text: '' }
     var time = e.querySelector && e.querySelector('time')
     var when = (e.getAttribute('data-time') || (time ? time.textContent : '') || '').replace(/\s+/g, ' ').trim()
+    var more = (e.getAttribute('data-preview-meta') || '').replace(/\s+/g, ' ').trim()
     var own = e.getAttribute('data-preview') || e.getAttribute('data-anchor-text')
     var text = (own || e.textContent || '').replace(/\s+/g, ' ').trim()
     // the time once, as metadata: out of the element's text wherever it stands (a row may name its author first), out
     // of the words the page gave only where they start with it
     var at = when ? text.indexOf(when) : -1
     if (at === 0 || (at > 0 && !own)) text = (text.slice(0, at) + ' ' + text.slice(at + when.length)).replace(/\s+/g, ' ').trim()
-    return { meta: metaList(when), text: text }
+    // the other field once too, out of the start of the text, where a row writes its author before its words
+    if (more && text.indexOf(more) === 0) text = text.slice(more.length).trim()
+    return { meta: metaList([when, more]), text: text }
   }
   // a record's ref: the row's in `refs`, or the element's data-anchor
   Strip.prototype.refOf = function (t) {

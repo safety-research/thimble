@@ -65,6 +65,11 @@ const focused = () => frame().evaluate(() => {
   return { cls: e.className, text: e.textContent, ring: getComputedStyle(e).boxShadow !== 'none' }
 })
 
+test("each turn gives a strip's loupe its time of day and its speaker as metadata", async () => {
+  const got = await frame().evaluate(() => [...document.querySelectorAll('.thimble-turn')].map((e) => [e.getAttribute('data-time'), e.getAttribute('data-preview-meta')]))
+  assert.deepEqual(got, [['09:00:00', 'user'], ['09:00:05', 'lead'], ['09:00:09', 'lead']])
+})
+
 test('the chevron at the start of a tool call\'s head opens it and folds it again, turned, where it was', async () => {
   assert.equal(await isOpen(), false)
   const caret = `${TURN} .thimble-turn-caret`
