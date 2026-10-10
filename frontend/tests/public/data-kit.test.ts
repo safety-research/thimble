@@ -535,9 +535,13 @@ describe('the text', () => {
     ;(md.querySelector('a') as HTMLElement).click()
     expect(of('navigate').map((m) => m.ref)).toEqual(['view:forge/pull/12'])
     expect(cardClicks).toBe(0)
-    // Enter on a link opens it too
+    // Enter on a link opens it too, a link to a keyboard and a screen reader, and the card does not take the key
+    let cardKeys = 0
+    doc().getElementById('t')!.addEventListener('keydown', () => cardKeys++)
+    expect([...md.querySelectorAll('a')].map((a) => [a.getAttribute('role'), a.getAttribute('tabindex')])).toEqual(Array(4).fill(['link', '0']))
     md.querySelectorAll('a')[2].dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     expect(of('navigate').map((m) => m.ref)).toEqual(['view:forge/pull/12', 'view:board/agent-08'])
+    expect(cardKeys).toBe(0)
     // plain text: the same links, the backticks as written
     const plain = drawn(w.thimble.text.html(text, { format: 'plain', mentions: w.mentions }))
     expect(links(plain).map((l) => l[0])).toEqual(['#12', '#14', '#15', '@agent-08', '#16'])

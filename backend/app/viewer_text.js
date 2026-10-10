@@ -71,11 +71,13 @@
     })
     return parts.length ? tryDecode(parts.join('/')) + tryDecode(frag) : null
   }
-  // a link that opens a ref in thimble
+  // a link that opens a ref in thimble, or goes to a place in the text: an <a> without an address, so a link to a
+  // keyboard and a screen reader by its role and tabindex
   function refLink(a, ref) {
     a.className = 'thimble-text-ref'
     a.setAttribute('data-thimble-ref', ref)
     a.setAttribute('title', ref)
+    a.setAttribute('role', 'link')
     a.setAttribute('tabindex', '0')
     return a
   }
@@ -135,6 +137,7 @@
       if (href[0] === '#') {
         a[i].className = 'thimble-text-ref'
         a[i].setAttribute('data-thimble-jump', tryDecode(href.slice(1)))
+        a[i].setAttribute('role', 'link')
         a[i].setAttribute('tabindex', '0')
       } else if (/^view:/i.test(href)) refLink(a[i], tryDecode(href))
       else if (SCHEME.test(href) || href.slice(0, 2) === '//') urlLink(a[i], href)
@@ -330,12 +333,22 @@
     },
     true,
   )
-  document.addEventListener('keydown', function (e) {
-    var link = e.key === 'Enter' && e.target && e.target.closest ? e.target.closest('.thimble-text-ref') : null
-    if (!link || !link.closest('.thimble-text')) return
-    e.preventDefault()
-    go(link)
-  })
+  // Enter on a link opens it as a click does, and Enter or Space on Show more is the button's own click; each stops
+  // there too, so a card the text is in does not take the key as well
+  document.addEventListener(
+    'keydown',
+    function (e) {
+      if (!e.target || !e.target.closest || !e.target.closest('.thimble-text')) return
+      var link = e.key === 'Enter' ? e.target.closest('.thimble-text-ref') : null
+      var more = e.key === 'Enter' || e.key === ' ' ? e.target.closest('.thimble-text-more') : null
+      if (link) {
+        e.preventDefault()
+        go(link)
+      } else if (!more) return
+      e.stopPropagation()
+    },
+    true,
+  )
   function go(link) {
     var ref = link.getAttribute('data-thimble-ref')
     if (ref) return thimble.navigate(ref)
