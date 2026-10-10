@@ -447,6 +447,22 @@ async function transcript() {
   if (sig === drawn) return
   drawn = sig
   tr.draw(turns, { title, sub, empty: range.full ? 'No turn holds the search or passes the filters' : 'No turn in this time range' })
+  if (search.text.trim()) wholeFor(turns)
+}
+
+// The reader keeps the turns whose words hold the search, a call's whole input and what came back among them, while a
+// call shows only its input's first line until it opens: those calls fetched whole, so the search finds the words in
+// them and opens the call it goes to
+const WHOLE_MOST = 40 // calls fetched whole for one search at most
+async function wholeFor(turns) {
+  const q = search.text.trim().toLowerCase()
+  const want = turns.filter((t) => t.kind === 'tool' && !whole.has(t.ref) && !`${t.input}\n${t.output || ''}`.toLowerCase().includes(q)).slice(0, WHOLE_MOST)
+  const got = await Promise.all(want.map((t) => thimble.fetch({ op: 'record', ref: t.ref }).catch(() => null)))
+  want.forEach((t, i) => {
+    if (!got[i] || whole.has(t.ref)) return
+    whole.set(t.ref, got[i])
+    for (const x of [tr, sideTr]) if (x) x.set(t.ref, { input: inputOf(t, got[i]), output: got[i].output })
+  })
 }
 
 // what links the session read to the others: the session that started it and when, when its result came back, and
