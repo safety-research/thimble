@@ -1212,6 +1212,8 @@
     return out
   }
   var PAD = 6 // px left either side of the records' span on an axis of the timeline's own, so no mark sits on its edge
+  var NAMES = 200 // px, the names' column by default, and the most a column fitted to its names takes
+  var KEY_PAD = 8 // px, the key's inset where it stands in the names' column (viewer_parts.css .thimble-lanes-key)
   function Lanes(opts) {
     var self = this
     this.opts = opts
@@ -1236,9 +1238,12 @@
       : null
     this.band = typeof opts.band === 'function' ? opts.band : null
     this.problem = typeof opts.problem === 'function' ? opts.problem : null
-    // with nothing to tell lanes apart, one lane and no column of names
+    // with nothing to tell lanes apart, one lane and no column of names; with no range to line up with and no `names`,
+    // a column as wide as the longest name (fitNames)
     this.bare = !this.rows && !this.rowOf && typeof opts.groups !== 'function'
-    this.namesW = opts.names != null && Number(opts.names) >= 0 ? Number(opts.names) : this.bare ? 0 : 200
+    var named = opts.names != null && Number(opts.names) >= 0
+    this.namesW = named ? Number(opts.names) : this.bare ? 0 : NAMES
+    this.fitsNames = !named && !this.bare && !this.range
     this.name = 'lanes:' + (opts.key || (this.mount && this.mount.id) || 'lanes')
     this.items = []
     this.nodes = []
@@ -1251,10 +1256,10 @@
     this.mount.classList.toggle('is-nameless', !this.namesW)
     this.mount.style.setProperty('--thimble-names', this.namesW + 'px')
     // with no range, the axis of the records' own span under the lanes, as wide as their tracks, and the key beside it
-    // where the names stand
+    // where the names stand, or under it where they leave it no room (paint)
     var foot = null
     if (!this.range) {
-      foot = document.createElement('div')
+      foot = this.foot = document.createElement('div')
       foot.className = 'thimble-lanes-foot'
       this.axisEl = document.createElement('div')
       this.axisEl.className = 'thimble-lanes-axis'
@@ -1264,7 +1269,7 @@
     if (!this.keyEl) {
       this.keyEl = document.createElement('div')
       this.keyEl.className = 'thimble-lanes-key'
-      if (foot && this.namesW) foot.insertBefore(this.keyEl, this.axisEl)
+      if (foot) foot.insertBefore(this.keyEl, this.axisEl)
       else this.mount.appendChild(this.keyEl)
     }
     this.key = thimble.key(this.keyEl, [], {
@@ -1310,6 +1315,27 @@
   Lanes.prototype.folded = function () {
     var f = kept(this.name).folded
     return Array.isArray(f) ? f : []
+  }
+  // the names' column as wide as the longest name with its guide, up to NAMES px and a third of the width, so the
+  // tracks keep the room; as it was where nothing is laid out to measure
+  Lanes.prototype.fitNames = function () {
+    var probe = document.createElement('div')
+    probe.className = 'thimble-lanes-probe' + (this.nodes.some(function (n) { return n.children > 0 || n.depth > 0 }) ? ' has-tree' : '')
+    probe.setAttribute('aria-hidden', 'true')
+    probe.innerHTML = this.nodes
+      .map(function (n) {
+        return '<div class="thimble-lane-name">' + guideHtml(n.guide) + (n.children ? '<span class="thimble-lane-fold">▾</span>' : '<span class="thimble-lane-fold-gap"></span>') + '<span class="thimble-lane-nm">' + esc(n.name) + '</span></div>'
+      })
+      .join('')
+    this.mount.appendChild(probe)
+    // a couple of px over, for a chosen lane's name in the heavier weight
+    var w = Math.ceil(probe.getBoundingClientRect().width) + 2
+    probe.remove()
+    if (w <= 2) return
+    w = Math.min(w, NAMES, Math.max(48, Math.floor(this.mount.clientWidth / 3)))
+    if (w === this.namesW) return
+    this.namesW = w
+    this.mount.style.setProperty('--thimble-names', w + 'px')
   }
   Lanes.prototype.trackW = function () {
     return Math.max(10, this.body.clientWidth - this.namesW)
@@ -1470,6 +1496,7 @@
   Lanes.prototype.paint = function () {
     if (!this.mount || !this.nodes) return
     var self = this
+    if (this.fitsNames) this.fitNames()
     var sc = this.scale()
     this.sc = sc
     var W = sc.width
@@ -1571,6 +1598,13 @@
         this.keySig = sig
         this.key.set(entries)
       }
+    }
+    // a key with no room beside the axis goes under it: its entries measured there, at their own width
+    if (this.foot && this.keyEl.parentNode === this.foot) {
+      this.foot.classList.add('is-key-under')
+      var last = this.keyEl.lastElementChild
+      var need = last ? last.getBoundingClientRect().right - this.keyEl.getBoundingClientRect().left + KEY_PAD : 0
+      this.foot.classList.toggle('is-key-under', need > this.namesW)
     }
     this.placeSpan()
   }

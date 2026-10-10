@@ -282,3 +282,53 @@ describe('the timeline alone in a frame', () => {
     await page.close()
   })
 })
+
+// timelines with no range: runs by author, some failed, so the key shows (#runs); a lane per agent whose first name is
+// too long to show whole (#long)
+const fitted = () => `<!doctype html><html><head><style>${TOKENS} html,body{margin:0} body{font:12px sans-serif;background:#fffdf8;padding:12px}
+section{margin-bottom:16px}</style>${KIT}</head><body>
+<section id="runs"></section><section id="long"></section>
+<script>
+const authors = ['ana', 'bo', 'cy']
+window.runs = thimble.timeline({ mount: '#runs', rows: 'author', problem: (r) => r.failed })
+runs.draw(Array.from({ length: 30 }, (_, i) => ({ t: ${T0} + i * 120, author: authors[i % 3], failed: i % 7 === 3 })))
+window.long = thimble.timeline({ mount: '#long', rows: 'agent' })
+long.draw(Array.from({ length: 30 }, (_, i) => ({ t: ${T0} + i * 120, agent: i % 2 ? 'sub' : 'a-lead-agent-whose-name-runs-on-past-any-column-of-names' })))
+</script></body></html>`
+
+describe('a timeline with no range fits its names', () => {
+  test("the names' column as wide as the longest name, at most 200 px and a third of the width; a key with no room beside the axis stands under it, from the tracks' left edge", async () => {
+    const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
+    await page.setContent(`<!doctype html><html><body style="margin:0"><iframe id="f" sandbox="allow-scripts" style="border:0;width:900px;height:640px"></iframe></body></html>`)
+    const frame = () => page.frames().find((f) => f !== page.mainFrame())!
+    const measure = () =>
+      frame().evaluate(() => {
+        const box = (s: string) => document.querySelector(s)!.getBoundingClientRect()
+        const nm = [...document.querySelectorAll('#runs .thimble-lane-nm')].map((n) => n.getBoundingClientRect().right)
+        return {
+          runs: { track: box('#runs .thimble-lane-track').left, mount: box('#runs').left, widest: Math.max(...nm), axis: box('#runs .thimble-lanes-axis'), key: box('#runs .thimble-lanes-key') },
+          long: { track: box('#long .thimble-lane-track').left, mount: box('#long').left, width: box('#long').width, clipped: [...document.querySelectorAll('#long .thimble-lane-nm')].map((n) => n.scrollWidth > n.clientWidth) },
+          wide: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        }
+      })
+    await page.evaluate((doc) => ((document.getElementById('f') as HTMLIFrameElement).srcdoc = doc), fitted())
+    await page.waitForTimeout(300)
+    await frame().waitForSelector('#long .thimble-lane-track', { state: 'attached' })
+    let got = await measure()
+    // three short names: a column just past the widest of them, far under 200 px
+    assert.ok(got.runs.track - got.runs.mount < 70 && got.runs.track >= got.runs.widest, `the column fits ana, bo and cy: ${JSON.stringify(got.runs)}`)
+    // the key, too wide for that column, under the axis and lined up with the tracks
+    assert.ok(got.runs.key.top >= got.runs.axis.bottom - 1 && Math.abs(got.runs.key.left - got.runs.track) <= 1, `the key under the axis: ${JSON.stringify(got.runs)}`)
+    // a name too long for 200 px: the column stops there, the name cut short
+    assert.equal(Math.round(got.long.track - got.long.mount), 200)
+    assert.deepEqual(got.long.clipped, [true, false])
+    assert.equal(got.wide, 0)
+    // in a narrow frame the column takes a third of the width at most, so the tracks keep the rest
+    await page.evaluate(() => ((document.getElementById('f') as HTMLIFrameElement).style.width = '360px'))
+    await page.waitForTimeout(300)
+    got = await measure()
+    assert.ok(got.long.track - got.long.mount <= got.long.width / 3 + 1, `a third at most: ${JSON.stringify(got.long)}`)
+    assert.equal(got.wide, 0)
+    await page.close()
+  })
+})

@@ -123,10 +123,29 @@
 }
 .thimble-lanes-foot > .thimble-lanes-key {
   grid-column: 1;
+  grid-row: 1;
   padding-top: 0;
+}
+.thimble-lanes-foot.is-key-under > .thimble-lanes-key {
+  grid-column: 2;
+  grid-row: 2;
+  padding: 4px 0 0;
 }
 .thimble-lanes-axis {
   grid-column: 2;
+  grid-row: 1;
+}
+/* the names measured for a column fitted to them (thimble.timeline with no range) */
+.thimble-lanes-probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+}
+.thimble-lanes-probe:not(.has-tree) .thimble-lane-fold-gap {
+  display: none;
 }
 .thimble-lanes-axis:empty {
   display: none;

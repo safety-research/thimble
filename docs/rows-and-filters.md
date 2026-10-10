@@ -143,11 +143,12 @@ not anchor every record.
 ## The timeline
 
 `thimble.timeline(opts)` draws the overview in `mount` as lanes on one axis of times or numbers: a lane per group of
-`rows` (or of `groups(items)`), its name in a column `names` px wide (200 by default) with its tree guide, and its
-records as marks in the Color by colors, gray with Off. It needs no other part: with no `range` it lays out its
-records' whole span and draws its own axis under the lanes, with no `rows` it draws one lane and no names, and with no
-Color by its marks are gray. With a range, lay the range and its axis out over the lanes with the same names column, so
-the lanes stand under them. `thimble.lanes` is its old name.
+`rows` (or of `groups(items)`), its name in a column `names` px wide (200 by default; with no range, as wide as its
+longest name, up to 200 and a third of the width) with its tree guide, and its records as marks in the Color by colors,
+gray with Off. It needs no other part: with no `range` it lays out its records' whole span and draws its own axis under
+the lanes, with no `rows` it draws one lane and no names, and with no Color by its marks are gray. With a range, lay the
+range and its axis out over the lanes with the same names column, so the lanes stand under them. `thimble.lanes` is its
+old name.
 
 ```js
 const tl = thimble.timeline({ mount: '#timeline', rows: 'author', onMark: (c) => show(c) })
@@ -162,7 +163,7 @@ tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
 | `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band (the key's "running") |
 | `problem(item)` | whether a record failed: its mark is underlined in the problem red (the key's "failed") |
 | `words` | the key's words: `{band, problem}` |
-| `keyMount` | where the key goes; at the lanes' top by default |
+| `keyMount` | where the key goes; at the lanes' top by default, or with no range beside the axis, under it where it has no room there |
 | `follow` | the detail list, whose rows carry `data-t`: the rows in view are a light tint across the lanes |
 | `density` | a flag, or a function the page answers at each draw: each lane as bars on the scale's bins in place of marks (an Events \| Density choice) |
 | `anchor(lane)` | a lane's `data-anchor`, such as a session's unit |
