@@ -161,7 +161,7 @@ tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
 
 | option | what it is |
 |---|---|
-| `rows`, `range`, `colour` | the lanes: the Rows control, a field's name or a function of a record; the time range (its `scale(width)`); and Color by (the page's by default) |
+| `rows`, `range`, `colour` | the lanes: the Rows control, a field's name or a function of a record; the time range (its `scale(width)`); and Color by (`colour` or `color`: the page's by default, `false` for gray marks) |
 | `time(item)`, `end(item)` | a record's place on the axis (`item.t` by default), a number, or a Date or an ISO time on an axis of time, else the record is left out; and its end, for a mark as wide as the record ran |
 | `unit` | the axis's unit with no range, as the time range's: `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a turn, a line or a score |
 | `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band (the key's "running") |
@@ -288,7 +288,8 @@ Each part is text, which `recordCard` escapes, or `{html}`. `act: false` gives a
 `attrs` (`{name: value}`) more attributes, such as a key the page's click reads or a `class` of the page's, which joins
 the card's own. `.thimble-cards` stacks cards in a column with a gap between them, and `.thimble-cards-grid` lays them
 out as tiles at least `--thimble-tile-w` (220 px) wide. A list of records with no box is the kit's `.list-row` or
-`.table`.
+`.table`. A card keeps its bars as Color by changes, so the page need not draw it again; `colour: false`
+(or `color: false`) gives it none.
 
 ## The side panel
 
@@ -320,19 +321,23 @@ to one line until opened, a chevron at the start of its head that opens and fold
 longer than six lines folded with Show more under it, Show less in the same place once open; a thought quiet; an error
 in the problem red, a failed tool call's head with `✕` before its tool (`error` true, or the failure's word, which its
 hover gives); a line between sessions. Each turn is anchored with its ref and carries `data-t`, so a label marks it, a
-⌘-click asks about it, Color by draws its bar and the lanes follow it.
+⌘-click asks about it, Color by draws its bar and the lanes follow it. Its bars are the page's Color by's, and it
+stamps them again when the choices change, its folds and scroll as they are. `colour` is optional: give it (or
+`color`, the same option) for another Color by, or `false` for no bars.
 
 ```js
-const tr = thimble.transcript({ mount: '#list', colour, onOpen: async (turn) => tr.set(turn.ref, await thimble.fetch({ op: 'turn', ref: turn.ref })) })
+const tr = thimble.transcript({ mount: '#list', onOpen: async (turn) => tr.set(turn.ref, await thimble.fetch({ op: 'turn', ref: turn.ref })) })
 tr.draw(turns.filter((t) => t.session === session), { title: `${names[session]} · ${runName}` })
 ```
 
-A turn is `{ref, t, speaker, kind, tool, text, input, output, error, session, sessionName, line}`, `kind` one of
-`text`, `prompt`, `tool`, `thinking` and `system`. `draw(turns, {title, sub, empty})` draws them, with a header that
-names what the list shows (the run, the session or the selection) and how many turns; `reveal(ref)` opens a cited turn
-and scrolls it to the middle, its highlight fading as Files' does; `open(ref, on)` folds or opens one; `set(ref, patch)`
-gives a turn its words once the reader sent them whole. The search (`thimble.search`) finds the words a folded turn or a
-long block hides and opens them, as a click does, so `onOpen` hears of a turn it opens.
+A turn is `{ref, t, speaker, kind, tool, text, input, output, error, session, sessionName, line, record}`, `kind` one of
+`text`, `prompt`, `tool`, `thinking` and `system`. Color by reads `record`, the record the turn shows, when it is given,
+so a field named as a turn's own, such as `kind`, colors it; else the turn. `draw(turns, {title, sub, empty})` draws
+them, with a header that names what the list shows (the run, the session or the selection) and how many turns;
+`reveal(ref)` opens a cited turn and scrolls it to the middle, its highlight fading as Files' does; `open(ref, on)`
+folds or opens one; `set(ref, patch)` gives a turn its words once the reader sent them whole. The search
+(`thimble.search`) finds the words a folded turn or a long block hides and opens them, as a click does, so `onOpen`
+hears of a turn it opens.
 
 ## The messages
 
@@ -379,9 +384,10 @@ side.open({ title: 'Read · explorer', ref, render: (body) => thimble.record({ m
 ```
 
 The record is anchored with `ref`, so a label marks it and a ⌘-click asks about it, and its citation opens it in the
-File browser. `find`, such as the search field's words, highlights their matches and opens what holds them; `colour`,
-Color by, gives the record its bar. Called again on the same mount with the same ref, it keeps what the analyst opened
-and folded, and with another ref it starts as it opens. It returns `{hits}`, how many places match `find`. The search
+File browser. `find`, such as the search field's words, highlights their matches and opens what holds them. Its bar is
+the page's Color by's and follows the choices as they change. `colour` is optional: give it (or `color`) for another
+Color by, or `false` for no bar. Called again on the same mount with the same ref, it keeps what the analyst opened and
+folded, and with another ref it starts as it opens. It returns `{hits}`, how many places match `find`. The search
 (`thimble.search`) finds the words its folds hide and opens what holds them; a record keeps 200,000 characters of folded
 values and items in the page for it, and a word past them is found once its fold is opened by hand.
 

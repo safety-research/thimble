@@ -14,6 +14,8 @@
 //     sort: { by: 't', desc: true },        how it opens; a click on a column's head sorts by it, again the other way
 //     side, details: (m) => ({ title: m.subject, sub: m.from, html: body(m) }),   a row opens in thimble.side
 //     search, filter,                       a thimble.search finds in its rows, a thimble.filterBy hides rows
+//     colour,                               the Color by of its bars and strip (or `color`), the page's by default;
+//                                           false for none
 //   })
 //   table.draw(rows)                        new rows, such as after a fetch; table.draw() after Filter by changed
 //
@@ -134,6 +136,7 @@
     this.details = typeof opts.details === 'function' ? opts.details : null
     this.search = opts.search || null
     this.filter = opts.filter || null
+    this.bars = shared.bars(opts)
     this.onOpen = typeof opts.onOpen === 'function' ? opts.onOpen : null
     this.refOf = function (r) {
       return r && r.ref != null ? String(r.ref) : null
@@ -223,7 +226,7 @@
     // a label colored by reaches the rows as they come into view: the strip's colours follow
     var marksFrame = null
     thimble.onMarks(function () {
-      var c = shared.colour()
+      var c = self.bars.colour()
       if (self.dead || !c || !c.label || marksFrame != null) return
       marksFrame = requestAnimationFrame(function () {
         marksFrame = null
@@ -555,9 +558,9 @@
   }
   // what Color by draws, but not how many each value has: the rows are drawn again only when it changes
   Table.prototype.colourSig = function () {
-    var c = shared.colour()
+    var c = this.bars.colour()
     if (!c) return ''
-    return JSON.stringify([c.picks, c.values.map(function (v) { return [v.value, v.colour, v.on] })])
+    return JSON.stringify([c.picks, (c.values || []).map(function (v) { return [v.value, v.colour, v.on] })])
   }
   // Everything drawn again: the head, the rows that show and those near the view, the chips' counts, the strip and the
   // search's rows
@@ -601,7 +604,7 @@
   // What Color by draws, drawn again: the chips count the rows while a field is the colour (a label's values reach only
   // the rows drawn), the strip shows every row's colour, and the rows near the view are drawn anew with their bars
   Table.prototype.recolour = function (rows) {
-    var c = shared.colour()
+    var c = this.bars.colour()
     this.colourKey = this.colourSig()
     if (c && c.field) {
       var counts = {}
@@ -622,7 +625,7 @@
   // the strip: every row's Color by value, ref and record, and what the loupe says of it
   Table.prototype.colourStrip = function () {
     var self = this
-    var c = shared.colour()
+    var c = this.bars.colour()
     var timeCol = null
     var textCols = []
     this.columns.forEach(function (col) {
@@ -630,6 +633,7 @@
       else if (col.type === 'text' && textCols.length < 2) textCols.push(col)
     })
     shared.strip(this.mount, {
+      bare: this.bars.off,
       rows: this.shown.map(function (r) {
         return c ? c.valueOf(r) : null
       }),
@@ -682,11 +686,10 @@
   Table.prototype.rowHtml = function (i) {
     var r = this.shown[i]
     var ref = this.refOf(r)
-    var c = shared.colour()
     var self = this
     return (
       '<div class="thimble-table-row' + (this.same(r, this.chosen) ? ' active' : '') + '" role="row" data-thimble-row="' + i + '"' +
-      (ref != null ? ' data-anchor="' + esc(ref) + '"' : '') + (c ? c.attr(r) : '') + ' style="top:' + i * this.rowH + 'px">' +
+      (ref != null ? ' data-anchor="' + esc(ref) + '"' : '') + this.bars.attr(r) + ' style="top:' + i * this.rowH + 'px">' +
       this.drawnCols
         .map(function (col) {
           return '<div class="thimble-table-td thimble-table-' + col.type + '" role="gridcell">' + self.cell(col, r) + '</div>'

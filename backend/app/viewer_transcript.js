@@ -6,14 +6,17 @@
 // the start of its head that opens and folds it and turns as it does; a long block folded to six lines with Show more
 // under it, Show less in the same place once open; a thought quiet; an error in the problem red, a failed call's head
 // with ✕ before its tool; a line between sessions. Each turn is anchored with its ref, so a label marks it, a ⌘-click
-// asks about it and Color by draws its bar, and its number opens its lines in the File browser. What a fold hides stays
-// in the page, hidden, in an element with data-thimble-fold, so thimble.search finds it and opens its fold with the
-// `thimble-unfold` event: a folded turn's words, and a long block's lines past the sixth.
+// asks about it and Color by draws its bar, and its number opens its lines in the File browser. Its bars follow the
+// page's Color by unless it is given `colour` (or `color`; false for none), and it keeps them as Color by changes,
+// stamping each turn again from its turn, its folds and the scroll as they were. Color by reads a turn's `record` when
+// it has one, as a card's, so a field of the record named as a turn's own, such as `kind`, colors it; else the turn.
+// What a fold hides stays in the page, hidden, in an element with data-thimble-fold, so thimble.search finds it and
+// opens its fold with the `thimble-unfold` event: a folded turn's words, and a long block's lines past the sixth.
 //
-//   const tr = thimble.transcript({ mount: '#turns', colour, onOpen: (turn) => fetchWhole(turn) })
+//   const tr = thimble.transcript({ mount: '#turns', onOpen: (turn) => fetchWhole(turn) })
 //   tr.draw(turns, { title: 'explorer · Run 2' })   turns: [{ref, t, speaker, kind, tool, text, input, output, error,
-//                                                    session, line}], kind text | prompt | tool | thinking | system,
-//                                                    error true or the failure's word (✕'s hover gives it)
+//                                                    session, line, record}], kind text | prompt | tool | thinking |
+//                                                    system, error true or the failure's word (✕'s hover gives it)
 //   tr.reveal(ref)                                  a cited turn: opened, scrolled to the middle, its highlight fading
 //   tr.set(ref, {text, input, output})              a turn's words once the reader sent them whole
 ;(function () {
@@ -72,10 +75,18 @@
     return firstLine(turn.text) || '(empty)'
   }
 
+  // what Color by reads of a turn: its record, else the turn
+  function recordOf(turn) {
+    return turn.record != null ? turn.record : turn
+  }
+
   function Transcript(opts) {
     var self = this
     this.mount = ctl.el(opts.mount)
-    this.colour = opts.colour || null
+    this.bars = shared.bars(opts)
+    this.restampAll = function () {
+      self.restamp()
+    }
     this.onOpen = typeof opts.onOpen === 'function' ? opts.onOpen : null
     this.fold = typeof opts.fold === 'function' ? opts.fold : function (turn) { return !!FOLDED[turn.kind] }
     this.turns = []
@@ -140,7 +151,7 @@
       for (var j = 0; j < bs.length; j++) body += this.block(turn, bs[j][0], bs[j][1], bs[j][2], bs[j][3])
       if (!body) body = '<div class="thimble-turn-empty" data-thimble-chrome>(empty)</div>'
     }
-    var colour = this.colour && typeof this.colour.attr === 'function' ? this.colour.attr(turn) : ''
+    var colour = this.bars.attr(recordOf(turn))
     var no = turn.line != null ? turn.line : i + 1
     return (
       '<div class="thimble-turn thimble-turn-k-' + esc(kind) + '" data-anchor="' + esc(turn.ref) + '" data-anchor-text="' + esc(summary(turn).slice(0, 300)) + '"' + (typeof turn.t === 'number' ? ' data-t="' + turn.t + '"' : '') + colour + '>' +
@@ -169,6 +180,15 @@
     })
     if (!this.turns.length) out.push('<div class="thimble-turn-empty thimble-transcript-none">' + esc(o.empty || 'No turn') + '</div>')
     this.mount.innerHTML = out.join('')
+    this.bars.watch(this.mount, this.restampAll)
+  }
+  // Color by's choices changed: each turn's bar stamped again from its turn, nothing drawn again
+  Transcript.prototype.restamp = function () {
+    var all = this.mount.querySelectorAll(':scope > .thimble-turn')
+    for (var i = 0; i < all.length; i++) {
+      var turn = this.byRef[all[i].getAttribute('data-anchor')]
+      if (turn) this.bars.stamp(all[i], recordOf(turn))
+    }
   }
   // one turn drawn again in its place; a control of it that had the focus keeps it, the chevron for the line that opened it
   Transcript.prototype.redrawTurn = function (ref) {

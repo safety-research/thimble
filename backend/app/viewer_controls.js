@@ -1147,7 +1147,8 @@
   // by), as wide as each ran (`end`), a band where the group ran (`band`), and a record that failed (`problem`)
   // underlined in the problem red. The axis is the time range's scale (`range`), else the records' own span in `unit`,
   // with an axis of its own under the lanes; with no `rows`, one lane with no name. It needs no other part of the kit,
-  // and with no `colour` of the page's own it follows the page's Color by as it changes.
+  // and it follows the page's Color by as it changes, or the `colour` (or `color`) it is given; `colour: false` draws
+  // its marks gray.
   // Hovering a lane draws a thin cursor line across the lanes and a tip of the time and the record there;
   // never an inverted band. A click on a mark is onMark(record), on a lane's name onPick(group), which marks the lane
   // chosen; ▾ folds a parent's lanes into its own. The detail list's rows in view (`follow`, rows with data-t) are a
@@ -1223,7 +1224,7 @@
     this.rowOf = typeof by === 'function' ? by : typeof by === 'string' && by ? function (it) { return it && typeof it === 'object' ? it[by] : null } : null
     this.rowWord = typeof by === 'string' ? by : ''
     this.range = opts.range || null
-    this.colour = opts.colour || null
+    this.bars = shared.bars(opts)
     this.unitOpt = opts.unit === 'ms' || opts.unit === 'n' ? opts.unit : 's'
     this.unit = this.unitOpt
     var at = typeof opts.time === 'function' ? opts.time : function (it) { return it.t != null ? it.t : it.time }
@@ -1282,8 +1283,8 @@
     this.body.className = 'thimble-lanes-body'
     this.mount.appendChild(this.body)
     if (foot) this.mount.appendChild(foot)
-    // with no Color by of the page's own given (`colour`), the marks follow the page's Color by as it changes
-    if (!this.colour && typeof shared.onColour === 'function')
+    // the marks follow Color by as it changes, unless the lanes are given `colour: false`
+    if (!this.bars.off)
       shared.onColour(function () {
         if (self.nodes.length && self.mount.isConnected) self.paint()
       })
@@ -1500,7 +1501,7 @@
     var sc = this.scale()
     this.sc = sc
     var W = sc.width
-    var colour = this.colour || (shared.colour && shared.colour())
+    var colour = this.bars.colour()
     var problems = 0
     var bands = 0
     var dense = this.dense()

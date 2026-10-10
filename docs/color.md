@@ -122,6 +122,10 @@ load()
   or no bar. While a field is one of the choices past the first, `attr` writes its value in `data-colour-tracks` too,
   which its lane of the tracks reads. When the choices change, the control takes every `data-colour` (and
   `data-colour-tracks`) off the page until the page draws again in `onChange`.
+- The kit's parts keep their own bars: the table, the transcript, the record, the cards and the timeline color their
+  records by the page's Color by, mounted before or after them, and stamp them again when the choices change, so
+  `onChange` draws again only the page's own markup. A part takes `colour` (or `color`, the same option) for another
+  Color by, and `colour: false` for no bars.
 - Draw a group's row (a page, an agent, a session) with no `data-colour` and no color of its own. To show the mix of
   its records' values, put `thimble.mix(counts)` in it, `{value: n}` with `''` for the records with no value: a small
   bar, 48 px wide, each value's share in its color in the chips' order, a value turned off in gray, the records with
