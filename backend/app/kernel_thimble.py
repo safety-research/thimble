@@ -1,6 +1,6 @@
 """`thimble`, the module a card's code imports for thimble's data and for the drawings the canvas makes.
 
-Runs inside a workspace kernel: notebook.kernel_argv hands this file's source to the kernel, which builds a module from
+Runs inside a workspace kernel: the kernel reads this file at its start (notebook.startup_lines), builds a module from
 it with `WS` (the workspace directory) set and registers it as `thimble`.
 
     thimble.labels()          the labels defined in this workspace: name, id, kind, unit, values, n_labeled
@@ -73,7 +73,7 @@ import threading
 import zlib
 from pathlib import Path
 
-WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.kernel_argv)
+WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.startup_lines)
 
 __all__ = ["labels", "colours", "marked", "kept", "view_labels", "colour_value", "colour_on", "progress", "diagram", "timeline",
            "chart", "theme", "card"]
