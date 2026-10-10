@@ -260,6 +260,7 @@ test("the chart fallbacks, which a chart built with no document reads, are the W
   expect(parseFloat(token('--viz-size'))).toBe(px('--viz-size'))
   expect(parseFloat(token('--viz-size-title'))).toBe(px('--viz-size-title'))
   expect(parseFloat(token('--viz-line'))).toBe(px('--viz-line'))
+  expect(parseFloat(token('--viz-bar-radius'))).toBe(px('--viz-bar-radius'))
 })
 
 const LABELS = Array.from({ length: 12 }, (_, i) => `--label-${i + 1}`)

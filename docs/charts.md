@@ -140,6 +140,8 @@ job sets apart names that job as a Vega-Lite style, and the theme's `style` conf
 box plot's values), `thimble-box` (its boxes), `thimble-median` (its medians, in ink), `thimble-overlap` (areas side by
 side, and density curves), `thimble-fit` (a scatter's fitted line, in ink unless its group colors it) and
 `thimble-start` (a range's before end, a ring). An interval is a rule, which the theme draws in its annotation ink. A
+bar is round at its end, away from its baseline, by 2 px (`--viz-bar-radius`), and a stacked bar at the end of its whole
+stack; a box plot's box is square. A
 chart colored by a label takes the label's colors because the call notes the label as read (as `thimble.labels` does),
 and the card gives a label it read its colors. The inline rows are the chart's table: the model reads them in the card's
 output and a takeaway cites a value by column and row, as for any chart. Times without a zone show as they are, and

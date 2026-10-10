@@ -9,7 +9,8 @@
 // --viz-seq-1 to -5, faint to strong; an amount either side of a midpoint takes the diverging --viz-div-1 to -5; one
 // thing set against the rest takes --viz-highlight against --viz-other. The series and the ramps follow the accent
 // (tokens.css). Rules and text marks (notes, values) are --viz-annotation, an ink. Axis and legend labels are mono,
-// titles and text marks the body face, all at --viz-size; a chart's own title at --viz-size-title.
+// titles and text marks the body face, all at --viz-size; a chart's own title at --viz-size-title. A bar's end, away
+// from its baseline, is round by --viz-bar-radius (lib/barEnds mends what Vega-Lite draws wrong).
 const FALLBACK: Record<string, string> = {
   '--viz-annotation': '#6b675f',
   '--viz-axis': 'rgba(27, 26, 24, 0.28)',
@@ -22,6 +23,7 @@ const FALLBACK: Record<string, string> = {
   '--viz-size': '11px',
   '--viz-size-title': '13px',
   '--viz-line': '1.5px',
+  '--viz-bar-radius': '2px',
   '--viz-ink-1': '#1b1a18',
   '--viz-ink-2': '#6b675f',
   '--viz-ink-3': '#a19d94',
@@ -153,18 +155,20 @@ export function vegaConfig(): Record<string, unknown> {
     range: { category: VIZ_SERIES.map(token), ordinal: { scheme: seq.slice(1) }, ramp: { scheme: seq }, heatmap: { scheme: seq }, diverging: { scheme: VIZ_DIV.map(token) } },
     // one series: the first series color, never ink
     mark: { color: token(VIZ_SERIES[0]) },
+    // a bar round at its end, a stacked bar at its whole stack's end (lib/barEnds)
+    bar: { cornerRadiusEnd: px('--viz-bar-radius', 2) },
     line: { strokeWidth: px('--viz-line', 1.5) },
     point: { filled: true },
     rule: { color: note },
     // notes and values on the marks: the annotation ink in the body face, which a dark paper lightens with the text
     text: { color: note, font, fontSize: size },
     // the marks thimble.chart names by their job (backend kernel_thimble FAINT_STYLE and on): a box plot's values faint
-    // behind its boxes, the boxes light enough to show them, its medians in ink; areas side by side overlapping lightly;
-    // a scatter's fitted line in ink, or its group's color; a range's before end a ring, its after end the dot. Each
-    // keeps its series or label color but the median and a fitted line of one group
+    // behind its boxes, the boxes light enough to show them and square, its medians in ink; areas side by side
+    // overlapping lightly; a scatter's fitted line in ink, or its group's color; a range's before end a ring, its after
+    // end the dot. Each keeps its series or label color but the median and a fitted line of one group
     style: {
       'thimble-faint': { opacity: 0.3 },
-      'thimble-box': { opacity: 0.55 },
+      'thimble-box': { opacity: 0.55, cornerRadiusEnd: 0 },
       'thimble-median': { color: ink, opacity: 1, thickness: 2 },
       'thimble-overlap': { opacity: 0.4 },
       'thimble-fit': { color: ink, strokeWidth: px('--viz-line', 1.5) + 0.5 },
