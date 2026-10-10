@@ -121,6 +121,28 @@ def test_the_tail_translates_a_turn_and_skips_every_other_record(cwd, tmp_path):
     assert len(_log(agents.MAIN_ID)) == n  # nothing new
 
 
+def test_a_feedback_draft_for_claude_code_writes_nothing_and_another_tool_of_its_writes_its_call(cwd, tmp_path):
+    """Live QA 2: main drafted a Claude Code feedback report, and thimble's chat showed the call as `SendFeedback
+    {"type":"bug",…`. Claude Code draws no row for that call, so neither does any chat of thimble's; a call of another of
+    Claude Code's tools thimble does not know is mirrored with its result, as any call is."""
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = _attach(cwd, p)
+    session.tail_once(lv)
+    _append(p, lv, [
+        _human("Make the view of the wiki's pages, drawn the way the wiki drew it."),
+        _assistant(_use("toolu_fb", "SendFeedback", {"type": "bug", "title": "The hook says to end the turn silently",
+                                                     "details": "- **What happened:** …"})),
+        _result("toolu_fb", "Feedback draft queued locally (max 10 kept)."),
+        _assistant(_use("toolu_cl", "CronList", {})),
+        _result("toolu_cl", "No scheduled jobs."),
+        _assistant(_say("The corpus holds only the wiki's markup, so the view draws the pages from it.")),
+        END,
+    ])
+    recs = _mirror()
+    assert [r["type"] for r in recs] == ["user", "tool_use", "tool_result", "text", "done"], recs
+    assert recs[1]["name"] == "CronList" and recs[2]["summary"] == "No scheduled jobs."
+    assert "SendFeedback" not in json.dumps(_log(agents.MAIN_ID))
 
 
 # ----------------------------------------------------------------------------- a session that continues in a job
