@@ -37,7 +37,7 @@ const search = thimble.search({ mount: '#search', in: '#body', onChange: draw })
 search.kept(shown.map((r) => r.ref))                       // after drawing the records kept for search.text
 ```
 
-The time range, for a chart on a time axis, and that chart's axis:
+The time range, when the task is about time, and its chart's axis:
 
 ```js
 const range = thimble.timeRange({ mount: '#range', times: recs.map((r) => r.t), onChange: draw })
