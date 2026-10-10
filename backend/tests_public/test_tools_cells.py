@@ -102,6 +102,32 @@ async def test_a_question_s_escaped_quotation_marks_are_stored_as_marks(group):
     assert notebook.get_cell(CORPUS, cid)["title"] == 'Which pages have "July" in their name?'
 
 
+async def test_an_edit_that_left_the_outputs_as_they_were_says_so_and_read_ref_says_the_code_ran(group):
+    """Live QA 2: a fix turned a chart's weeks into text for its ticks, thimble.chart read the text as times again, and
+    the card came out as before with nothing to say so; main then read the card and told the analyst that it had not
+    run since the edit. edit_card now says when new code left all that the card shows as it was, and read_ref says
+    that the outputs come from running the code it shows."""
+    table = "import pandas as pd\npd.DataFrame({{'posts': [{n}]}})"
+    cid = _cid(await call("add_card", group, kind="table", question="How many?", code=table.format(n="8")))
+    same = tools.hint("edit_card-same-outputs", cid=cid)
+    assert same in (await call("edit_card", group, cell=cid, code=table.format(n="4 + 4"))).text
+    # new code with other outputs, and the same code run again with a new question, say nothing of the kind
+    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="9"))).text
+    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="9"), question="How many now?")).text
+    read = (await call("read_ref", group, ref=f"card:{cid}")).text
+    assert "[9]" in read and "from running the code above" in read and "has not run" not in read
+    # nor does new code that leaves the outputs as they were in an edit that changes something else the card shows: its
+    # question, its takeaway, or its kind, here to a code card, which shows its code, as is any edit of a code card's code
+    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="4 + 5"), question="Posts?")).text
+    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="5 + 4"), takeaway="Nine.")).text
+    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="3 * 3"), kind="code")).text
+    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="10 - 1"))).text
+    # a card whose run goes on shows the outputs of an earlier run, or none on its first run
+    shown = notebook.get_cell(CORPUS, cid)
+    assert tools._outputs_lines({**shown, "status": "running"}, "9")[0] == "outputs, from an earlier run, while the code above runs now:"
+    assert tools._outputs_lines({**shown, "status": "running", "outputs": []}, "") == ["outputs: none yet, since the code above runs now"]
+
+
 async def test_an_agent_s_card_code_may_not_install(group, tmp_path, monkeypatch):
     """Card code runs in the kernel, where neither a prompt nor Claude Code's permission mode reaches it, so an agent's
     card that installs or downloads is refused, also where an earlier config set `installs` to "allow" (read and

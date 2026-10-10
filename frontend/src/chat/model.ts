@@ -351,6 +351,10 @@ export function workflowTitle(inp: Record<string, unknown>): string {
   return oneLine(meta.description ?? meta.name ?? str(inp.name))
 }
 
+/** The input fields that name what a call of a tool the chat has no words for is about, in the order toolSummary looks
+ * for one; else it takes the input's first field of text. */
+const TARGET_KEYS: readonly string[] = ['description', 'title', 'name', 'query', 'url', 'file_path', 'path', 'pattern', 'prompt', 'message', 'command']
+
 /** One line for a tool call's input; a Bash command has paths under workspace `ws`'s folder made relative before the
  * line is cut to length. */
 export function toolSummary(name: string, input: unknown, ws = ''): string {
@@ -438,12 +442,11 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
     case 'WebSearch':
       return str(inp.url ?? inp.query)
     default: {
-      if (!Object.keys(inp).length) return ''
-      try {
-        return JSON.stringify(input).slice(0, 120)
-      } catch {
-        return ''
-      }
+      // a tool the chat has no words for: the field of its input that names what the call is about, never the input
+      // as JSON (live QA 2: `SendFeedback {"type":"bug",…`)
+      const named = (k: string) => typeof inp[k] === 'string' && str(inp[k]).trim() !== ''
+      const key = TARGET_KEYS.find(named) ?? Object.keys(inp).find(named)
+      return key ? oneLine(str(inp[key])) : ''
     }
   }
 }
@@ -569,9 +572,16 @@ export function groupTools(rows: readonly Row[]): (Exclude<Row, ToolRow> | ToolG
  * the files, running a shell command. Only a subagent or a workflow agent is a step of its own; these are not. */
 export const RAW_TOOLS: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'Bash'])
 
-/** Whether a call is a raw call (RAW_TOOLS), by its wire name. Pure. */
+/** Claude Code's tools the chat shows in a form of its own, beside those it has words for (TOOL_WORDS, TOOL_GROUPS). */
+const SHOWN_TOOLS: ReadonlySet<string> = new Set(['Workflow', 'Skill', 'SubagentHandback', 'StructuredOutput'])
+
+/** Whether a call is a raw call, by its wire name: one of RAW_TOOLS, or a call of a tool thimble does not know, such as
+ * one of Claude Code's own (live QA 2: SendFeedback was a card of its own, its input as JSON). thimble's own tools are
+ * never raw. Pure. */
 export function isRawCall(name: string): boolean {
-  return RAW_TOOLS.has(toolDisplayName(name))
+  const n = toolDisplayName(name)
+  if (RAW_TOOLS.has(n)) return true
+  return !MCP_PREFIXES.some((p) => name.startsWith(p)) && !Object.hasOwn(TOOL_WORDS, n) && !Object.hasOwn(TOOL_GROUPS, n) && !SHOWN_TOOLS.has(n)
 }
 
 /** A piece of a run of calls as the transcript shows it: two or more calls in a row fold into one chip (`run`); a call

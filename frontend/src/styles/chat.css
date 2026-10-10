@@ -473,16 +473,19 @@ button.chat-call-chip:hover,
   flex: none;
   max-width: 100%;
 }
+/* one line of words that ends in … where the chat is too narrow for every tool's name, the chevron kept */
 .chat-callrun-tools {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.chat-callrun-tool {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.chat-callrun-tool + .chat-callrun-tool,
+.chat-callrun-more {
+  margin-left: 6px;
+}
+.chat-callrun-tool > * + * {
+  margin-left: 4px;
 }
 .chat-callrun-name {
   color: var(--text-primary);

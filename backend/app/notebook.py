@@ -973,6 +973,14 @@ def hydrate_outputs(ws: Path, outputs: list | None) -> list:
     return out
 
 
+def outputs_key(ws: Path, outputs: list | None) -> str:
+    """A digest of all that a card's outputs show, to tell whether a run changed them: every bundle whole, a bounded
+    stream with its complete text (hydrate_outputs), and without its `_out` index, which only numbers it."""
+    shown = [{k: v for k, v in b.items() if k != cite.OUT_KEY} for b in hydrate_outputs(ws, outputs) if isinstance(b, dict)]
+    return hashlib.sha1(json.dumps(shown, sort_keys=True, ensure_ascii=False, default=str)
+                        .encode("utf-8", "surrogatepass")).hexdigest()
+
+
 # --- the store's lock ---
 
 

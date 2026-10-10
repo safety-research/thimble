@@ -85,8 +85,10 @@ END_TOKEN = "(shown in the dashboard)"
 TERMINAL_ONLY = "↳"  # opens a line of main's or a fork's that only the terminal shows (prompts/main.md)
 # the token at the end of a text, with the variants the model writes: any case, a trailing period, `*` or `_` emphasis
 END_RE = re.compile(r"[ \t]*[*_]*" + re.escape(END_TOKEN) + r"\.?[*_]*\.?\s*\Z", re.I)
-# Claude Code loading a deferred tool's schema before its first call: nothing the analyst reads, so no row in any chat
-PLUMBING_TOOLS = frozenset({"ToolSearch"})
+# Claude Code's calls that are nothing the analyst reads, so no row in any chat: loading a deferred tool's schema before
+# its first call, and a feedback report the model drafts for Claude Code, which Claude Code's own terminal draws no row
+# for either (live QA 2: main's draft about a hook showed in thimble's chat as `SendFeedback {"type":"bug",…`)
+PLUMBING_TOOLS = frozenset({"ToolSearch", "SendFeedback"})
 HANDBACK_TOOL = "SubagentHandback"  # a foreground subagent's report to its caller: its message is the agent's result
 SUBAGENT_ROLE = "subagent"
 SUBAGENT_TITLE = "subagent"  # when neither the Agent call nor the meta json names one
