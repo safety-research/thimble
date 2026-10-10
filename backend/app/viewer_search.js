@@ -402,7 +402,7 @@
   Search.prototype.rectOf = function (m) {
     if (m.fold && m.fold.hidden) {
       var at = m.fold
-      while (at && !(at.getClientRects().length && !at.hidden)) at = at.previousElementSibling || at.parentElement
+      while (at && (at.hidden || !at.getClientRects().length)) at = at.previousElementSibling || at.parentElement
       return at ? at.getBoundingClientRect() : null
     }
     if (m.range === undefined) m.range = m.run ? rangeIn(m.run, m.a, m.b) : null
