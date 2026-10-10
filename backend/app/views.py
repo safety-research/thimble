@@ -174,6 +174,8 @@ TRANSCRIPT_JS = Path(__file__).with_name("viewer_transcript.js")
 # before the record viewer; viewer_kit.css styles them
 SEARCH_JS = Path(__file__).with_name("viewer_search.js")
 TABLE_JS = Path(__file__).with_name("viewer_table.js")
+# the view kit's tree (thimble.tree), a list of groups to navigate, loaded after the table; viewer_parts.css styles it
+TREE_JS = Path(__file__).with_name("viewer_tree.js")
 DIFF_JS = Path(__file__).with_name("viewer_diff.js")
 RECORD_JS = Path(__file__).with_name("viewer_record.js")
 CHART_JS = Path(__file__).with_name("viewer_chart.js")
@@ -3231,9 +3233,9 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
     (viewer_bridge.js), the order new values take the label palette (label_order.json, for Color by), the kit's Color by
     control (viewer_colour.js), its row controls, side panel and transcript (viewer_controls.js, viewer_side.js,
-    viewer_transcript.js), its search, table and diff (viewer_search.js, viewer_table.js, viewer_diff.js), its record
-    viewer and charts (viewer_record.js, viewer_chart.js, with the canvas's chart drawing, KIT_CHART_JS) and its time
-    range selector (viewer_range.js),
+    viewer_transcript.js), its search, table, tree and diff (viewer_search.js, viewer_table.js, viewer_tree.js,
+    viewer_diff.js), its record viewer and charts (viewer_record.js, viewer_chart.js, with the canvas's chart drawing,
+    KIT_CHART_JS) and its time range selector (viewer_range.js),
     thimble's parts (viewer_kit.css, viewer_parts.css), the vendored
     libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
@@ -3264,6 +3266,7 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
             f"<script>{_script_text(TRANSCRIPT_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(SEARCH_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(TABLE_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(TREE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(DIFF_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(RECORD_JS.read_text('utf-8'))}</script>",
             *([f"<script>{_script_text(drawing)}</script>"] if (drawing := _kit_chart()) else []),
@@ -4579,7 +4582,7 @@ def purple_note(html: str) -> str:
 _STYLE_RE = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.S | re.I)
 _CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
 _KIT_PART_RE = re.compile(r"\.(?:chip|btn|seg|field|thimble-(?:colour|range|axis|def|peek|reset|tip|filter|rows|ctl|key|lanes?|"
-                          r"divider|side|transcript|turn|card|search|table|diff|record|chart))(?:-[\w-]+)?(?![\w-])")
+                          r"divider|side|transcript|turn|card|search|table|tree|diff|record|chart))(?:-[\w-]+)?(?![\w-])")
 _CLASS_RE = re.compile(r"\.(-?[_a-zA-Z][\w-]*)")
 # what a part looks like, which the kit sets: its edge, fill, corners, colours, type and height. Its width, margins,
 # padding, flex and place are the page's layout.
