@@ -91,9 +91,13 @@ const RUN_RE = /(?:^|[\s/'"])thimble-run['"]?\s+(card|label|stale)\b\s*['"]?([A-
 export function cardsOfCall(tool: string, input: unknown, text: string): string[] {
   const inp = isObj(input) ? input : {}
   if (CARD_TOOLS.test(tool)) {
-    const own = /^card:([A-Za-z0-9_-]+)\s*$/m.exec(text)?.[1] ?? /\bcard:([A-Za-z0-9_-]+)/.exec(text)?.[1]
+    // the card on a line of its own, else the card the call names, else the first the result names whole: never one in
+    // the result's `$ edit_card …` line, which echoes the call cut short (`[[5,884|card:e157e5…`, live QA on 0.7.0)
+    const own = /^card:([A-Za-z0-9_-]+)\s*$/m.exec(text)?.[1]
     const named = str(inp.card).replace(/^(?:card|cell):/, '')
-    return [...new Set([own, named].filter((x): x is string => Boolean(x)))].slice(0, 1)
+    const said = /\bcard:([A-Za-z0-9_-]+)(?![A-Za-z0-9_…-])/.exec(text.split('\n').filter(l => !l.startsWith('$ ')).join('\n'))?.[1]
+    const id = own || named || said
+    return id ? [id] : []
   }
   if (LABEL_TOOL.test(tool)) {
     const card = /The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]/.exec(text)?.[1]

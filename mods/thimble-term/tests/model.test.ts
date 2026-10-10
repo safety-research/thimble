@@ -187,6 +187,11 @@ test('the cards a call of main names: add_card, edit_card, apply_label, and a ca
   const add = 'mcp__plugin_thimble_thimble__add_card'
   expect(cardsOfCall(add, { question: 'q' }, 'card:8c2264f4, your last card, still has no takeaway.\n\ncard:69d6b48a\n[out0: ...]')).toEqual(['69d6b48a'])
   expect(cardsOfCall('mcp__plugin_thimble_thimble__edit_card', { card: 'card:8c2264f4' }, 'takeaway noted')).toEqual(['8c2264f4'])
+  // the result's first line echoes the call cut short: a card id cut there is no card (live QA on 0.7.0: `× card 2
+  // cannot be drawn` under the reply, for `card:e157e5…`)
+  const echo = '$ edit_card card="e157e542" takeaway="One day stands out. On Jun 18 the dse wiki got [[5,884|card:e157e5\u2026"\ntakeaway noted on card:e157e542 (linked 5,884)'
+  expect(cardsOfCall('mcp__plugin_thimble_thimble__edit_card', { card: 'e157e542', takeaway: 'x' }, echo)).toEqual(['e157e542'])
+  expect(cardsOfCall('mcp__plugin_thimble_thimble__edit_card', {}, echo)).toEqual(['e157e542'])
   expect(cardsOfCall('mcp__plugin_thimble_thimble__apply_label', {}, "applied label x [[concept:e7]] over 3 record(s): yes 1. The label's card is [[card:01fee4d5]].")).toEqual(['01fee4d5'])
   expect(cardsOfCall('Bash', { command: '/tree/plugin/bin/thimble-run card 69d6b48a' }, 'card:69d6b48a\n...')).toEqual(['69d6b48a'])
   expect(cardsOfCall('Bash', { command: 'ls -la' }, '')).toEqual([])
