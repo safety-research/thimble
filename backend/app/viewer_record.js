@@ -8,9 +8,11 @@
 //
 //   side.open({ title, ref, render: (body) => thimble.record({ mount: body, value: rec, ref }) })
 //
-//   thimble.record({ mount, value, ref, open, find, colour })   value: an object, a list, a plain value, or JSON text;
-//                                                              open: the levels of nested values open at first (2);
-//                                                              find: words whose matches are highlighted and opened;
+//   thimble.record({ mount, value, ref, open, find, mono, colour })   value: an object, a list, a plain value, or JSON
+//                                                              text; open: the levels of nested values open at first
+//                                                              (2); find: words whose matches are highlighted and
+//                                                              opened; mono: the fields whose strings are drawn in the
+//                                                              mono face, such as a file's raw line (['line']);
 //                                                              colour (or color): the Color by whose bar the record
 //                                                              takes, the page's by default; false for none
 //
@@ -150,6 +152,7 @@
     this.longs = {} // path -> true while a long string is open
     this.more = {} // path -> true once all its items show
     this.q = ''
+    this.mono = {} // the fields whose strings are drawn in the mono face
     this.args = null
     this.hits = 0
     this.bars = null
@@ -220,17 +223,19 @@
     if (!named.length) return size
     return size + ': ' + named.slice(0, PREVIEW).join(', ') + (named.length > PREVIEW ? ', …' : '')
   }
-  Record.prototype.value = function (v, path) {
+  // a value's markup; a string in the mono face with `mono`
+  Record.prototype.value = function (v, path, mono) {
     if (typeof v === 'string') {
       if (v === '') return '<span class="thimble-record-val is-empty">""</span>'
-      if (!isLong(v)) return '<span class="thimble-record-val is-str">' + this.marked(v) + '</span>'
+      var str = 'thimble-record-val is-str' + (mono ? ' is-mono' : '')
+      if (!isLong(v)) return '<span class="' + str + '">' + this.marked(v) + '</span>'
       var hits = this.hits
       var parts = cutLong(v, this.q)
       var text = this.marked(parts[0])
       var rest = this.marked(parts[1])
       var open = this.longs[path] !== undefined ? this.longs[path] : this.hits > hits
       return (
-        '<span class="thimble-record-val is-str is-long"><span class="thimble-record-text' + (open ? '' : ' is-folded') + '">' + text +
+        '<span class="' + str + ' is-long"><span class="thimble-record-text' + (open ? '' : ' is-folded') + '">' + text +
         '<span data-thimble-fold data-fold-long="' + esc(path) + '"' + (open ? '' : ' hidden') + '>' + rest + '</span></span>' +
         '<button type="button" class="btn btn-ghost btn-sm thimble-record-more" data-long="' + esc(path) + '" aria-expanded="' + open + '" data-thimble-chrome>' +
         (open ? 'Show less' : 'Show more<span class="thimble-record-dim">' + folded(v) + '</span>') +
@@ -240,8 +245,9 @@
     var kind = typeof v === 'number' ? 'num' : typeof v === 'boolean' ? 'bool' : 'null'
     return '<span class="thimble-record-val is-' + kind + '">' + this.marked(plain(v)) + '</span>'
   }
-  // the rows of a value's fields or items, in a grid of their own, so each level lines its values up
-  Record.prototype.rows = function (v, path, depth) {
+  // the rows of a value's fields or items, in a grid of their own, so each level lines its values up; `mono` while they
+  // are under a field the page names in `mono`
+  Record.prototype.rows = function (v, path, depth, mono) {
     var es = entries(v)
     var all = this.more[path] || es.length <= MANY + 10
     var shown = all ? es : es.slice(0, MANY)
@@ -251,6 +257,7 @@
       var x = shown[i][1]
       var at = step(path, key)
       var name = Array.isArray(v) ? esc(key) : this.marked(key)
+      var inMono = mono || (!Array.isArray(v) && Object.prototype.hasOwnProperty.call(this.mono, key))
       if (isBranch(x) && entries(x).length) {
         var open = this.isOpen(at, depth + 1)
         out.push(
@@ -259,12 +266,12 @@
             '<span class="thimble-record-sum" data-thimble-chrome>' + esc(open ? summary(x).replace(/:.*$/, '') : summary(x)) + '</span>' +
             (open ? '' : this.folded([x], 'data-fold-path', at)) +
           '</div>' +
-          (open ? '<div class="thimble-record-kids">' + this.rows(x, at, depth + 1) + '</div>' : '')
+          (open ? '<div class="thimble-record-kids">' + this.rows(x, at, depth + 1, inMono) + '</div>' : '')
         )
       } else {
         out.push(
           '<div class="thimble-record-row"><span class="thimble-record-key" data-thimble-chrome><i class="thimble-record-gap"></i><span>' + name + '</span></span>' +
-            (isBranch(x) ? '<span class="thimble-record-val is-empty">' + (Array.isArray(x) ? '[]' : '{}') + '</span>' : this.value(x, at)) +
+            (isBranch(x) ? '<span class="thimble-record-val is-empty">' + (Array.isArray(x) ? '[]' : '{}') + '</span>' : this.value(x, at, inMono)) +
           '</div>'
         )
       }
@@ -318,6 +325,8 @@
       this.more = {}
     }
     this.open = Number(args.open) >= 0 ? Number(args.open) : OPEN
+    this.mono = {}
+    if (Array.isArray(args.mono)) for (var m = 0; m < args.mono.length; m++) this.mono[String(args.mono[m])] = true
     var q = typeof args.find === 'string' ? args.find.trim().toLowerCase() : ''
     fresh = fresh || q !== this.q
     this.q = q

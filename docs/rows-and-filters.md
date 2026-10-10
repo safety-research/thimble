@@ -376,13 +376,14 @@ changes one, such as its whole text once the reader sent it; `messages` gives th
 
 ## The record
 
-`thimble.record({mount, value, ref, open, find, colour})` draws one record, a JSON value, in `mount` as a tree under
+`thimble.record({mount, value, ref, open, find, mono, colour})` draws one record, a JSON value, in `mount` as a tree under
 its citation: a row per field, its key in mono at the left and its value at the right, each level's values lined up;
 numbers, `true`, `false` and `null` in mono; a nested object or list folded to one line that names its size and its
 first fields, which a click on its key opens. The record's fields and the level under them show at first (`open`, 2);
 a string longer than six lines or 480 characters folds to six lines with Show more and Show less, and a list of more
 than 110 items shows its first 100 with Show N more. `value` may be JSON text, such as the record's line, which draws as
-the object it holds.
+the object it holds. `mono` names the fields whose strings, and those under them, are drawn in the mono face, such as a
+file's raw line or a command (`mono: ['line']`).
 
 ```js
 side.open({ title: 'Read · explorer', ref, render: (body) => thimble.record({ mount: body, value: rec, ref, find: q.value }) })

@@ -249,7 +249,8 @@ async function show(r, keys) {
 }
 
 // an event's details, once the reader sends it whole: its words, the event it answers and those that answer it, each a
-// link that opens it, and its record, its fields and its lines as the file holds them under its citation
+// link that opens it, and its record under its citation: its fields but those the panel's title and sub give (the
+// source, the kind, the service, the time and the actor), and its lines as the file holds them, in mono
 async function details(body, e) {
   body.innerHTML = '<div class="event"></div>'
   let d
@@ -260,15 +261,16 @@ async function details(body, e) {
     throw err
   }
   if (open !== e.r || !d || !body.isConnected) return
-  const { text, ...fields } = d.record
+  const { text, source, kind, service, time, actor, ...fields } = d.record
   const link = (b) => `<div class="list-row" data-go="${b.r}" data-anchor="${esc(b.ref)}"><time>${range.format(b.t, 1)}</time><span class="what">${esc(b.source)} ${esc(b.kind)} · ${esc(b.actor)}</span><span class="text">${esc(b.text)}</span></div>`
   const box = body.firstElementChild
   box.innerHTML = '<div class="words"></div>' +
     (d.answers ? `<h4 title="The event this one follows: the alert it resolves, the message its thread starts with, the ticket's first message, the deploy's start, or what set the agent off">Response to<span>${dur(fields.took)} earlier</span></h4>${link(d.answers)}` : '') +
     (d.answered.length ? `<h4 title="The events that follow this one: the alert that resolves it, its thread's replies, the ticket's later messages, the deploy's later steps, the agents' actions it set off">Responses<span>${d.answered.length}</span></h4>${d.answered.map(link).join('')}` : '') +
     '<div class="rec"></div>'
-  thimble.text(box.querySelector('.words'), text || fields.kind, { format: 'plain' })
-  thimble.record({ mount: box.querySelector('.rec'), value: { ...fields, [d.raw.length > 1 ? 'lines' : 'line']: d.raw.map(([, s]) => s).join('\n') }, ref: d.ref })
+  thimble.text(box.querySelector('.words'), text || kind, { format: 'plain' })
+  // its bar the event's Color by value, which its fields may leave out
+  thimble.record({ mount: box.querySelector('.rec'), value: { ...fields, [d.raw.length > 1 ? 'lines' : 'line']: d.raw.map(([, s]) => s).join('\n') }, ref: d.ref, mono: ['line', 'lines'], colour: { attr: () => painted.attr(e) } })
 }
 $('body').addEventListener('click', (ev) => {
   const go = ev.target.closest('[data-go]')

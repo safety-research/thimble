@@ -1177,6 +1177,10 @@ button.thimble-record-key:focus-visible {
 .thimble-record-val.is-bool {
   color: var(--text-secondary);
 }
+/* a string under a field the page names in `mono`, such as a file's raw line or a command */
+.thimble-record-val.is-mono {
+  font: 400 var(--text-mono-sm) / 1.55 var(--font-mono);
+}
 .thimble-record-val.is-null,
 .thimble-record-val.is-empty {
   color: var(--text-tertiary);
