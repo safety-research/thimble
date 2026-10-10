@@ -2340,10 +2340,11 @@
     var r = this.rect()
     var box = this.box
     var scrolls = box.scrollHeight > box.clientHeight + 1
-    // the strip stands on the part of the list the frame shows: a list out of view, or showing too little of itself
-    // to hold a thumb, or whose right edge is cut, hides it, as its own scrollbar would be hidden
+    // the strip stands beside the list's whole height, as its own scrollbar would, and is cut where the frame or a box
+    // around the list cuts the list, so it moves with the list as one: a list out of view, or whose right edge is cut,
+    // hides it
     var vis = scrolls ? this.shown(r) : null
-    var shows = scrolls && vis.bottom - vis.top >= THUMB_MIN + 2 * EDGE && r.right - EDGE <= vis.right + 0.5 && r.right - this.width - EDGE >= vis.left - 0.5
+    var shows = scrolls && Math.min(vis.bottom, r.bottom - EDGE) - Math.max(vis.top, r.top + EDGE) >= 1 && r.right - EDGE <= vis.right + 0.5 && r.right - this.width - EDGE >= vis.left - 0.5
     this.el.style.display = shows ? '' : 'none'
     if (!shows) {
       this.lpClose()
@@ -2359,8 +2360,8 @@
     var snap = function (v) {
       return Math.round(v * dpr) / dpr
     }
-    var top = snap(vis.top + EDGE)
-    var h = Math.max(0, snap(vis.bottom - EDGE) - top)
+    var top = snap(r.top + EDGE)
+    var h = Math.max(0, snap(r.bottom - EDGE) - top)
     var left = snap(r.right - this.width - EDGE)
     var was = this.placedAt
     this.placedAt = [left, top]
@@ -2368,6 +2369,13 @@
     this.el.style.top = top + 'px'
     this.el.style.height = h + 'px'
     this.h = h
+    // the part cut off above and below; the bracket at the strip's left is kept across
+    var above = Math.max(0, snap(vis.top) - top)
+    var below = Math.max(0, top + h - snap(vis.bottom))
+    this.cut = { top: top + above, bottom: top + h - below }
+    var side = '-' + (BRACKET_PX + 2) + 'px'
+    var clip = above || below ? 'inset(' + above + 'px ' + side + ' ' + below + 'px ' + side + ')' : ''
+    if (clip !== this.clipped) this.el.style.clipPath = this.clipped = clip
     // the canvas drawn again only for records measured again or a strip of another size
     var painted = [h, dpr, this.width, this.measured, this.findVer].join()
     if (painted !== this.painted) {
@@ -2866,7 +2874,9 @@
   // where the strip stands, read before anything is written
   Strip.prototype.lpMeasure = function () {
     var r = this.track.getBoundingClientRect()
-    var g = { left: r.left, top: r.top, lo: r.top + LOUPE_INSET, hi: r.bottom - LOUPE_INSET, h: this.h || r.height, room: r.left - LOUPE_OFF_PX - LOUPE_INSET }
+    // the loupe stays beside the part of the strip that is not cut off
+    var c = this.cut || r
+    var g = { left: r.left, top: r.top, lo: Math.max(r.top, c.top) + LOUPE_INSET, hi: Math.min(r.bottom, c.bottom) - LOUPE_INSET, h: this.h || r.height, room: r.left - LOUPE_OFF_PX - LOUPE_INSET }
     this.lp.g = g
     return g
   }

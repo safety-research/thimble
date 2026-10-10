@@ -1,8 +1,9 @@
 // The strip the view kit draws beside a list (backend/app/viewer_colour.js: Color by's strip, its loupe, and the plain
 // track the tree, the table and the search give a list) stands fixed in the frame's viewport, so it follows its list
 // when anything the list stands in moves it: on a page that scrolls, as a gallery or a long view does, the strip and an
-// open loupe go with the list as the page scrolls, are cut where the page or a box around the list cuts the list, and
-// hide when the list is out of view; a box above the list that grows moves them with it. In a view whose page never
+// open loupe go with the list as the page scrolls, the strip and its thumb as one with the list, as the list's own
+// scrollbar would, cut where the page or a box around the list cuts the list (an open loupe stays beside the part not
+// cut), and hide when the list is out of view; a box above the list that grows moves them with it. In a view whose page never
 // scrolls the list's own scroll is tests/public/browser/view-colour.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -50,6 +51,8 @@ named('#inner')
 </script></body></html>`
 
 type Box = { left: number; top: number; right: number; bottom: number; height: number; shown: boolean }
+/** A strip: its box, the part of it that shows (where a pointer finds it, as it is cut), and its thumb's box. */
+type StripBox = Box & { seen: { top: number; bottom: number } | null; thumb: { top: number; bottom: number } }
 
 let browser: Browser
 beforeAll(async () => {
@@ -83,33 +86,60 @@ const box = (f: Frame, sel: string) =>
     const r = e.getBoundingClientRect()
     return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, height: r.height, shown: getComputedStyle(e).display !== 'none' && r.height > 0 }
   }, sel)
-/** The strip of the list `sel`, named as the page made it. */
-const stripOf = (f: Frame, sel: string): Promise<Box> => box(f, `.thimble-colour-strip[data-test-list="${sel}"]`)
-/** Whether the strip stands beside its list, inside the list's box and the part of it `cut` leaves (the viewport by
- * default), its right edge 2 px in from the list's. */
-function beside(s: Box, list: Box, cut = { top: 0, bottom: 600 }, what = '') {
-  assert.ok(s.shown, `${what}: the strip shows`)
+/** The strip of the list `sel`, named as the page made it: its box, the part of it a pointer finds down its middle,
+ * and its thumb. */
+const stripOf = (f: Frame, sel: string): Promise<StripBox> =>
+  f.evaluate((s) => {
+    const e = document.querySelector(`.thimble-colour-strip[data-test-list="${s}"]`) as HTMLElement
+    const r = e.getBoundingClientRect()
+    const t = (e.querySelector('.thimble-colour-thumb') as HTMLElement).getBoundingClientRect()
+    let seen: { top: number; bottom: number } | null = null
+    const x = r.left + r.width / 2
+    for (let y = Math.max(0, Math.floor(r.top)); y < Math.min(innerHeight, r.bottom); y++) {
+      const hit = document.elementFromPoint(x, y + 0.5)
+      if (!hit || !e.contains(hit)) continue
+      if (!seen) seen = { top: y, bottom: y + 1 }
+      else seen.bottom = y + 1
+    }
+    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, height: r.height, shown: getComputedStyle(e).display !== 'none' && r.height > 0, seen, thumb: { top: t.top, bottom: t.bottom } }
+  }, sel)
+/** Whether the strip stands beside its list as its own scrollbar would: its box the list's 2 px in, its right edge 2 px
+ * in from the list's, and the part of it that shows the part of that box `cut` leaves (the viewport by default). */
+function beside(s: StripBox, list: Box, cut = { top: 0, bottom: 600 }, what = '') {
+  assert.ok(s.shown && s.seen, `${what}: the strip shows`)
   assert.ok(Math.abs(s.right - (list.right - 2)) < 1, `${what}: the strip's right edge stands 2 px in from the list's: ${JSON.stringify([s, list])}`)
-  assert.ok(s.top >= Math.max(list.top, cut.top) - 0.5 && s.bottom <= Math.min(list.bottom, cut.bottom) + 0.5, `${what}: the strip stays inside the list's box and what is cut of it: ${JSON.stringify([s, list, cut])}`)
+  assert.ok(Math.abs(s.top - (list.top + 2)) < 1 && Math.abs(s.bottom - (list.bottom - 2)) < 1, `${what}: the strip is the list's height, 2 px in: ${JSON.stringify([s, list])}`)
+  const want = { top: Math.max(list.top + 2, cut.top), bottom: Math.min(list.bottom - 2, cut.bottom) }
+  assert.ok(Math.abs(s.seen!.top - want.top) <= 1 && Math.abs(s.seen!.bottom - want.bottom) <= 1, `${what}: the strip shows only where the list shows: ${JSON.stringify([s, list, cut])}`)
+}
+/** Whether the thumb stands where it stood on its list, as the list's own scrollbar's would. */
+function moved(s: StripBox, list: Box, s0: StripBox, list0: Box, what = '') {
+  assert.ok(Math.abs(s.thumb.top - list.top - (s0.thumb.top - list0.top)) < 1 && Math.abs(s.thumb.bottom - s.thumb.top - (s0.thumb.bottom - s0.thumb.top)) < 1, `${what}: the thumb goes with the list, as tall: ${JSON.stringify([s0.thumb, list0, s.thumb, list])}`)
 }
 
 describe('the strip on a page that scrolls', () => {
   test("the tree's track goes with the tree as the page scrolls, is cut at the top of the frame, and hides once the tree is out of view", async () => {
     const { page, frame, errors } = await framed()
     const f = frame()
-    beside(await stripOf(f, '#tree'), await box(f, '#tree'), undefined, 'at first')
+    const tree0 = await box(f, '#tree')
+    const s0 = await stripOf(f, '#tree')
+    beside(s0, tree0, undefined, 'at first')
     // the page scrolls 200 px: the track moves up with the tree, never staying over the section under it
     await f.evaluate(() => window.scrollBy(0, 200))
     await settle(f)
     const tree = await box(f, '#tree')
     const s = await stripOf(f, '#tree')
     beside(s, tree, undefined, 'scrolled 200 px')
+    moved(s, tree, s0, tree0, 'scrolled 200 px')
     // the tree's top above the frame: the track is the part of it in view
     await f.evaluate(() => window.scrollTo(0, (document.getElementById('tree') as HTMLElement).getBoundingClientRect().top + window.scrollY + 120))
     await settle(f)
     const half = await box(f, '#tree')
     assert.ok(half.top < 0 && half.bottom > 0, JSON.stringify(half))
-    beside(await stripOf(f, '#tree'), half, undefined, 'the tree half out of view')
+    const sHalf = await stripOf(f, '#tree')
+    beside(sHalf, half, undefined, 'the tree half out of view')
+    // cut, not squeezed: the thumb stands where it stood on the tree, as tall
+    moved(sHalf, half, s0, tree0, 'the tree half out of view')
     // the tree out of view: no track of it anywhere in the frame
     await f.evaluate(() => window.scrollBy(0, 400))
     await settle(f)
@@ -151,6 +181,18 @@ describe('the strip on a page that scrolls', () => {
     assert.ok(l1.shown && Math.abs(s1.left - l1.right - (s0.left - l0.right)) < 1, `the loupe stays at the strip's left: ${JSON.stringify([s0, l0, s1, l1])}`)
     assert.ok(l1.top >= s1.top - 0.5 && l1.top < s1.bottom, `the loupe stands beside the strip, never above it: ${JSON.stringify([s1, l1])}`)
     assert.ok(Math.abs(l1.top - s1.top - (l0.top - s0.top)) < 1, `the loupe moved with the strip: ${JSON.stringify([s0, l0, s1, l1])}`)
+    // the page scrolls the list's top half out of the frame, and the pointer rests at the top of the part of the strip
+    // that shows: the loupe opens beside that part, never above the frame where the strip is cut off
+    await f.evaluate(() => window.scrollBy(0, (document.getElementById('list') as HTMLElement).getBoundingClientRect().top + 110))
+    await settle(f)
+    const list2 = await box(f, '#list')
+    const s2 = await stripOf(f, '#list')
+    beside(s2, list2, undefined, 'the list half out of view')
+    await page.mouse.move(s2.left + 5, p + s2.seen!.top + 3)
+    await page.waitForTimeout(450)
+    await f.waitForSelector('.thimble-colour-loupe[data-open]', { state: 'visible' })
+    const l2 = await box(f, '.thimble-colour-loupe')
+    assert.ok(l2.top >= s2.seen!.top && l2.top < s2.seen!.bottom, `the loupe stands beside the part of the strip that shows: ${JSON.stringify([s2, l2])}`)
     assert.deepEqual(errors, [])
     await page.close()
   })
@@ -165,7 +207,9 @@ describe('the strip on a page that scrolls', () => {
       const r = e.getBoundingClientRect()
       return { top: r.top + e.clientTop, bottom: r.top + e.clientTop + e.clientHeight }
     })
-    beside(await stripOf(f, '#inner'), await box(f, '#inner'), pane, 'the pane at its top')
+    const inner0 = await box(f, '#inner')
+    const s0 = await stripOf(f, '#inner')
+    beside(s0, inner0, pane, 'the pane at its top')
     // the pane scrolls 60 px: the strip goes up with the list
     await f.evaluate(() => ((document.getElementById('pane') as HTMLElement).scrollTop = 60))
     await settle(f)
@@ -175,7 +219,9 @@ describe('the strip on a page that scrolls', () => {
     await settle(f)
     const half = await box(f, '#inner')
     assert.ok(half.top < pane.top && half.bottom > pane.top, JSON.stringify([half, pane]))
-    beside(await stripOf(f, '#inner'), half, pane, 'the list half under the pane\'s top')
+    const sHalf = await stripOf(f, '#inner')
+    beside(sHalf, half, pane, 'the list half under the pane\'s top')
+    moved(sHalf, half, s0, inner0, 'the list half under the pane\'s top')
     // the list scrolled out of the pane: its strip hides
     await f.evaluate(() => ((document.getElementById('pane') as HTMLElement).scrollTop = 400))
     await settle(f)
