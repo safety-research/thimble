@@ -1751,9 +1751,13 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     code = str(raw) if raw is not None and str(raw).strip() else str(cell.get("code") or "")
     if not code.strip():
         return err("edit_card: the card has no code, so pass `code`")
+    # what the card shows before new code replaces it, to tell the caller when the new code changed none of it
+    was = notebook.outputs_key(ctx.ws, cell.get("outputs")) if code != cell.get("code") else ""
     if cardrun.defers(ctx.c):  # terminal mode: the code runs through `thimble-run` in the caller's Bash
         await cardrun.ready_types(ctx.c, code)
         run = cardrun.run_record(cid, takeaway=takeaway, default_timeout_s=_default_timeout(ctx), session=ctx.session)
+        if was:
+            run["was"] = was  # thimble-run compares the run's outputs with it (cardrun.run_card)
         cell = notebook.stage_edit(ctx.c, nb_id, cid, code, run, by=ctx.cell_author, title=title, kind=kind,
                                    from_dataset=from_dataset)
         _remember_cell(ctx, nb_id, cid)
@@ -1764,6 +1768,7 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     _remember_cell(ctx, nb_id, cid)
     text = _format_cell_result(cell, lines=result_lines(ctx.c))
     text += _run_hint(cell, str(cell.get("kind") or notebook.DEFAULT_KIND))
+    text += _same_outputs(ctx.ws, cid, was, cell.get("outputs"))
     for line in lines:
         text += f"\n\n{line}"
     line, noted = _takeaway_after(ctx, cid, takeaway, cell)
@@ -1772,6 +1777,18 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if not noted:
         text += _takeaway_missing(ctx, nb_id, cell)
     return ok(text)
+
+
+def _same_outputs(ws: Path, cid: str, was: str, outputs: Any) -> str:
+    """`## edit_card-same-outputs` after an edit whose new code ran and shows all that the card showed before (`was`,
+    notebook.outputs_key of the outputs before the edit), so that its author knows the edit changed nothing; '' for any
+    other run. Live QA 2: a fix that turned a chart's weeks into text for its ticks left the card as it was, since
+    thimble.chart read the text as times again, and nothing said so."""
+    from . import notebook  # noqa: PLC0415
+
+    if not was or was != notebook.outputs_key(ws, outputs):
+        return ""
+    return "\n\n" + hint("edit_card-same-outputs", cid=cid)
 
 
 def _same_part(field: str, a: Any, b: Any) -> bool:
@@ -2009,6 +2026,19 @@ async def _h_read_ref(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     return await _read_excerpt(ctx, ref)
 
 
+def _outputs_head(cell: dict) -> str:
+    """read_ref's line over a card's outputs, which says plainly whether the code it shows made them: a card whose edit
+    waits for `thimble-run` (terminal mode), or whose run goes on, still shows what it showed before. Live QA 2: main
+    read a card the card check had changed and run, whose outputs came out as before, and told the analyst that the
+    card had not run since the edit."""
+    from . import notebook  # noqa: PLC0415
+
+    run = cell.get(notebook.RUN_KEY) if isinstance(cell.get(notebook.RUN_KEY), dict) else {}
+    if cell.get("status") in ("idle", "running") or run.get("state") in (cardrun.WAITING, cardrun.RUNNING):
+        return "outputs, from before the code above, which has not run yet:"
+    return "outputs, from running the code above:"
+
+
 def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
     """A card whole: its group, kind, status, question, code, every addressed output up to CELL_READ_LIMIT chars (or a
     data
@@ -2031,7 +2061,7 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
         body = "\n".join(t for t in texts if t)
         if len(body) > CELL_READ_LIMIT:
             body = body[:CELL_READ_LIMIT] + f"\n... [truncated, {len(body) - CELL_READ_LIMIT} more chars]"
-        lines += ["outputs:", body or "(no text output)"]
+        lines += [_outputs_head(cell), body or "(no text output)"]
         if extras:
             lines.append(f"({', '.join(sorted(extras))} output rendered; thimble shows it)")
     else:

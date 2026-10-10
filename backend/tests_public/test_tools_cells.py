@@ -102,6 +102,21 @@ async def test_a_question_s_escaped_quotation_marks_are_stored_as_marks(group):
     assert notebook.get_cell(CORPUS, cid)["title"] == 'Which pages have "July" in their name?'
 
 
+async def test_an_edit_that_left_the_outputs_as_they_were_says_so_and_read_ref_says_the_code_ran(group):
+    """Live QA 2: a fix turned a chart's weeks into text for its ticks, thimble.chart read the text as times again, and
+    the card came out as before with nothing to say so; main then read the card and told the analyst that it had not
+    run since the edit. edit_card now says when new code left all that the card shows as it was, and read_ref says
+    that the outputs come from running the code it shows."""
+    cid = _cid(await call("add_card", group, kind="code", question="How many?", code="print(8)"))
+    same = tools.hint("edit_card-same-outputs", cid=cid)
+    assert same in (await call("edit_card", group, cell=cid, code="print(4 + 4)")).text
+    # new code with other outputs, and the same code run again with a new question, say nothing of the kind
+    assert same not in (await call("edit_card", group, cell=cid, code="print(9)")).text
+    assert same not in (await call("edit_card", group, cell=cid, code="print(9)", question="How many now?")).text
+    read = (await call("read_ref", group, ref=f"card:{cid}")).text
+    assert "print(9)" in read and "from running the code above" in read and "has not run" not in read
+
+
 async def test_an_agent_s_card_code_may_not_install(group, tmp_path, monkeypatch):
     """Card code runs in the kernel, where neither a prompt nor Claude Code's permission mode reaches it, so an agent's
     card that installs or downloads is refused, also where an earlier config set `installs` to "allow" (read and

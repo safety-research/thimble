@@ -188,6 +188,29 @@ async def test_an_edit_waits_too_and_a_kept_takeaway_goes_stale_when_the_outputs
     assert notebook.get_cell(CORPUS, cid)["takeaway"] == ""
 
 
+async def test_the_run_of_an_edit_that_left_the_outputs_as_they_were_says_so_and_read_ref_says_whether_it_ran(term):
+    """Live QA 2, terminal mode: a fix turned a chart's weeks into text for its ticks, thimble.chart read the text as
+    times again, and the card came out as before with nothing to say so; main then read the card and told the analyst
+    that it had not run since the edit. The run of an edit says when the new code left all that the card shows as it
+    was, and read_ref says whether the outputs come from running the code it shows."""
+    cid = card_id(await call(term, "add_card", kind="code", question="Posts?", code="print(8)"))
+    assert "has not run yet" in text(await call(term, "read_ref", ref=f"card:{cid}"))
+    assert run(term, "card", cid).returncode == 0
+    await call(term, "edit_card", card=cid, code="print(4 + 4)")
+    staged = text(await call(term, "read_ref", ref=f"card:{cid}"))
+    assert "print(4 + 4)" in staged and "has not run yet" in staged, "the outputs are still those of print(8)"
+    same = tools.hint("edit_card-same-outputs", cid=cid)
+    done = run(term, "card", cid)
+    assert done.returncode == 0 and same in done.stdout
+    ran = text(await call(term, "read_ref", ref=f"card:{cid}"))
+    assert "from running the code above" in ran and "has not run" not in ran
+    assert "was" not in notebook.get_cell(CORPUS, cid)["run"]
+    # the card run again, and an edit whose new code shows something else, say nothing of the kind
+    assert same not in run(term, "card", cid).stdout
+    await call(term, "edit_card", card=cid, code="print(9)")
+    assert same not in run(term, "card", cid).stdout
+
+
 async def test_a_run_past_its_limit_is_interrupted_and_errors(term, monkeypatch):
     monkeypatch.setattr(notebook, "CHAT_EXEC_TIMEOUT", 1.0)
     cid = card_id(await call(term, "add_card", kind="code", question="Slow", code="import time\ntime.sleep(30)"))
