@@ -209,8 +209,9 @@ details.
   citation's quote does. Opened, the text shows as it was drawn, a list's numbers and a table's columns kept.
 - `ref` is the text's record, its `data-anchor`: a label marks it, a ⌘-click asks about it, and a citation that quotes
   the record's source word for word, its `**`, backticks and list markers included, is found in the rendered text.
-- A click on a link or on Show more does only that, so a card the text is in does not open as well. In a table's cell
-  the text runs on as one line.
+- A click on a link or on Show more, or Enter on it, does only that, so a card the text is in does not open as well.
+  In a table's cell the text runs on as one line, and in a card's body, which shows its first lines, it has no Show
+  more.
 
 ```js
 const mentions = [{ match: /#(\d+)/g, ref: (m) => 'view:forge/pull/' + m[1] }]
