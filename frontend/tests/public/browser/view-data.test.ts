@@ -605,6 +605,7 @@ window.table = thimble.table({ mount: '#list',
             cut: t.scrollWidth > t.clientWidth + 0.5 || t.scrollHeight > t.clientHeight + 0.5 || t.getBoundingClientRect().right > th.getBoundingClientRect().right + 0.5,
             over: th.getBoundingClientRect().right > next + 0.5,
             broken,
+            width: th.getBoundingClientRect().width,
           }
         })
       })
@@ -617,10 +618,54 @@ window.table = thimble.table({ mount: '#list',
     await p.waitForTimeout(150)
     const at200 = await heads()
     for (const h of at200) assert.ok(!h.cut && !h.over, `200px: ${JSON.stringify(at200)}`)
+    // never so narrow that a title stands a letter a line: no column under 56 px (MIN_W)
+    for (const h of at200) assert.ok(h.width >= 55.5 && h.lines <= 6, `200px: ${JSON.stringify(at200)}`)
     // and wide again, each title on one line
     await frame().evaluate(() => ((document.getElementById('pane') as HTMLElement).style.width = '900px'))
     await p.waitForTimeout(150)
     assert.deepEqual((await heads()).map((h) => h.lines), [1, 1, 1])
+    await p.close()
+  })
+
+  test('a column of numbers takes its title on one line while the table has room and on two in a narrower one before a column drops, and more in a table too narrow even for the columns that never drop', async () => {
+    const doc = page(`<div id="pane" style="width:900px;height:300px;display:flex"><div id="list" style="flex:1;min-height:0"></div></div>
+<script>
+window.table = thimble.table({ mount: '#list',
+  rows: Array.from({ length: 20 }, (_, i) => ({ ref: 'runs.jsonl#L' + (i + 1), run: 'run ' + i, agent: 'agent-' + (i % 5), failed: i * 3 })),
+  columns: [{ name: 'run', title: 'Run' }, { name: 'agent', title: 'Agent', width: 100 }, { name: 'failed', title: 'Number of failed tool calls', type: 'number', drop: false }] })
+</script>`)
+    const { page: p, frame } = await framed(doc)
+    /** each head drawn: its title, how many lines it takes, its width, and whether it is cut or passes the table's edge */
+    const heads = () =>
+      frame().evaluate(() => {
+        const edge = document.getElementById('list')!.getBoundingClientRect().right
+        const line = parseFloat(getComputedStyle(document.querySelector('.thimble-table-title')!).lineHeight)
+        return [...document.querySelectorAll('.thimble-table-th')].map((th) => {
+          const t = th.querySelector('.thimble-table-title') as HTMLElement
+          const b = th.getBoundingClientRect()
+          return {
+            title: t.textContent!,
+            lines: Math.round(t.getBoundingClientRect().height / line),
+            width: Math.round(b.width),
+            cut: t.scrollWidth > t.clientWidth + 0.5 || t.scrollHeight > t.clientHeight + 0.5 || b.right > edge + 0.5,
+          }
+        })
+      })
+    const seen: string[] = []
+    for (const width of [900, 600, 480, 420, 380, 340, 300, 160]) {
+      await frame().evaluate((w) => ((document.getElementById('pane') as HTMLElement).style.width = w + 'px'), width)
+      await p.waitForTimeout(150)
+      const hs = await heads()
+      for (const h of hs) assert.ok(!h.cut, `${width}px: ${JSON.stringify(hs)}`)
+      const failed = hs.find((h) => h.title === 'Number of failed tool calls')!
+      assert.ok(failed, `${width}px: the column of numbers never drops ${JSON.stringify(hs)}`)
+      if (width === 900) assert.deepEqual(hs.map((h) => h.lines), [1, 1, 1])
+      if (failed.lines === 2 && hs.some((h) => h.title === 'Agent')) seen.push(`${width}px`)
+      // narrower than the room every whole word needs: the title takes more lines, the column still as wide as its
+      // longest word and its widest number
+      if (width === 160) assert.ok(failed.lines > 2 && failed.width >= 56, `${width}px: ${JSON.stringify(hs)}`)
+    }
+    assert.ok(seen.length > 0, 'the title of the column of numbers takes two lines while the column of text beside it still shows')
     await p.close()
   })
 })
