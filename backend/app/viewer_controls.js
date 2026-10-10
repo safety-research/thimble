@@ -14,7 +14,7 @@
 //                                                        range's scale, else the records' own span with an axis of its
 //                                                        own): a lane per group of Rows, a field or a function, the marks
 //                                                        in the Color by colours (or with `density` bars of the records
-//                                                        per bin), a failure underlined in the problem red, a quiet
+//                                                        per bin), a failure a ✕ in the problem red, a quiet
 //                                                        cursor line on hover, the detail list's rows in view marked as a
 //                                                        tint, and the key's entries as toggles; thimble.lanes, its old
 //                                                        name, is the same call
@@ -44,6 +44,7 @@
   var DENSE_H = 36 // px, a lane's height while the lanes draw density, so that the bars read
   var DENSE_BIN = 4 // px, a density bar's least width
   var MARK_MIN = 2 // px, a mark's least width
+  var BAD_X = 3 // px, half a failure's ✕, centered on the foot of its mark or bar
   var HIT = 4 // px either side of a mark within which a click or the tip finds it
   var ICON = {
     down: 'M6 9l6 6 6-6',
@@ -1044,8 +1045,8 @@
   }
 
   // ---------------------------------------------------------------- a key whose entries are toggles
-  // Each entry is a chip with a swatch drawn as its series is drawn (a band, a mark, an underline in the problem red, a
-  // line), its name and its count; a click hides or shows the series, an entry whose series never appears is left out.
+  // Each entry is a chip with a swatch drawn as its series is drawn (a band, a mark, a ✕ in the problem red, a line),
+  // its name and its count; a click hides or shows the series, an entry whose series never appears is left out.
   // entries: [{id, name, mark: 'band' | 'mark' | 'problem' | 'line', colour?, n?, count?}]: `n` the series' records (an
   // entry with none is left out), shown after the name unless `count` is false
   function Key(mount, entries, opts) {
@@ -1097,7 +1098,9 @@
       .map(function (e) {
         var on = self.isOn(e.id)
         var mark = e.mark || 'mark'
-        return '<button type="button" class="chip chip-key chip-act thimble-key-chip" data-id="' + esc(e.id) + '" aria-pressed="' + on + '"' + (e.about ? ' title="' + esc(e.about) + '"' : '') + '><span class="thimble-key-sw thimble-key-' + esc(mark) + '"' + (e.colour ? ' style="--c:' + esc(e.colour) + '"' : '') + '></span><span class="chip-text">' + esc(e.name) + '</span>' + (typeof e.n === 'number' && e.count !== false ? '<span class="chip-count">' + num(e.n) + '</span>' : '') + '</button>'
+        // a failure's swatch is its ✕, as the lanes draw it
+        var x = mark === 'problem' ? '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2.25 2.25l5.5 5.5M7.75 2.25l-5.5 5.5"/></svg>' : ''
+        return '<button type="button" class="chip chip-key chip-act thimble-key-chip" data-id="' + esc(e.id) + '" aria-pressed="' + on + '"' + (e.about ? ' title="' + esc(e.about) + '"' : '') + '><span class="thimble-key-sw thimble-key-' + esc(mark) + '"' + (e.colour ? ' style="--c:' + esc(e.colour) + '"' : '') + '>' + x + '</span><span class="chip-text">' + esc(e.name) + '</span>' + (typeof e.n === 'number' && e.count !== false ? '<span class="chip-count">' + num(e.n) + '</span>' : '') + '</button>'
       })
       .join('')
   }
@@ -1145,7 +1148,7 @@
   // group of `rows` (the Rows control, a field's name or a function of a record) or of `groups(items)`, its name in a
   // column at the left with its tree guide, its records as marks in the Color by colours (grey with Off or with no Color
   // by), as wide as each ran (`end`), a band where the group ran (`band`), and a record that failed (`problem`)
-  // underlined in the problem red. The axis is the time range's scale (`range`), else the records' own span in `unit`,
+  // a ✕ in the problem red. The axis is the time range's scale (`range`), else the records' own span in `unit`,
   // with an axis of its own under the lanes; with no `rows`, one lane with no name. It needs no other part of the kit,
   // and it follows the page's Color by as it changes, or the `colour` (or `color`) it is given; `colour: false` draws
   // its marks gray.
@@ -1524,10 +1527,13 @@
           }
         }
         var its = n.items || []
+        var bad = ''
         if (self.dens) {
-          // Density: a bar per bin, its values stacked in the chips' order, a bin with a failure underlined in red
+          // Density: a bar per bin, its values stacked in the chips' order, a bin with a failure a ✕ in red at its foot,
+          // unless the ✕ of a bin just before stands there already, so that a run of failing bins reads as ✕s, not a scrawl
           var d = self.dens
           var room = H - 6
+          var lastX = -Infinity
           d.per[ni].forEach(function (bin, bi) {
             var bx0 = Math.max(0, sc.x(d.bins[bi][0]))
             var bx1 = Math.min(W, sc.x(d.bins[bi][1]))
@@ -1543,7 +1549,11 @@
             }
             if (bin.bad) {
               problems += bin.bad
-              if (self.on('problem')) svg += '<rect class="thimble-lane-bad" x="' + bx0.toFixed(2) + '" y="' + (H - 2) + '" width="' + Math.max(2, bw).toFixed(2) + '" height="2"/>'
+              var cx = bx0 + bw / 2
+              if (self.on('problem') && cx - lastX > 2 * BAD_X) {
+                bad += badX(cx, Math.min(H - 2, H - BAD_X))
+                lastX = cx
+              }
             }
           })
           its = []
@@ -1568,9 +1578,11 @@
           svg += '<rect class="thimble-lane-mark" data-i="' + mk.i + '" x="' + mk.x.toFixed(1) + '" y="3" width="' + mk.w.toFixed(1) + '" height="' + (LANE_H - 6) + '"' + (c ? ' style="fill:' + esc(c) + '"' : '') + '/>'
           if (self.problem && safe(function () { return self.problem(mk.it) }, false)) {
             problems++
-            if (self.on('problem')) svg += '<rect class="thimble-lane-bad" x="' + mk.x.toFixed(1) + '" y="' + (LANE_H - 2) + '" width="' + Math.max(4, mk.w).toFixed(1) + '" height="2"/>'
+            if (self.on('problem')) bad += badX(mk.x + mk.w / 2, LANE_H - 3)
           }
         }
+        // the failures' ✕ over every mark, so no mark drawn later hides one
+        svg += bad
         var anchor = typeof self.opts.anchor === 'function' ? safe(function () { return self.opts.anchor(n) }, null) : null
         var fold = n.children ? '<button type="button" class="thimble-lane-fold" data-fold="' + esc(n.key) + '" aria-expanded="' + !n.folded + '" aria-label="' + esc((n.folded ? 'Show the lanes under ' : 'Fold the lanes under ') + n.name) + '">' + (n.folded ? '▸' : '▾') + '</button>' : '<span class="thimble-lane-fold-gap"></span>'
         return (
@@ -1609,6 +1621,12 @@
       this.foot.classList.toggle('is-key-under', need > this.namesW)
     }
     this.placeSpan()
+  }
+  // a failure's ✕ centered on (x, y), the foot of its mark, a thin halo of the paper under its red strokes: its arms
+  // stand out over the mark and the paper below it, and a narrow mark keeps most of its colour above it
+  function badX(x, y) {
+    var d = 'M' + (x - BAD_X).toFixed(2) + ' ' + (y - BAD_X).toFixed(2) + 'l' + 2 * BAD_X + ' ' + 2 * BAD_X + 'M' + (x + BAD_X).toFixed(2) + ' ' + (y - BAD_X).toFixed(2) + 'l' + -2 * BAD_X + ' ' + 2 * BAD_X
+    return '<g class="thimble-lane-bad"><path class="thimble-lane-bad-halo" d="' + d + '"/><path class="thimble-lane-bad-x" d="' + d + '"/></g>'
   }
   // the detail list's rows in view, as a tint across the lanes, and on the range's overview where it marks them
   Lanes.prototype.visible = function (t0, t1) {
@@ -1742,7 +1760,7 @@
     if (step == null && sc) step = ((sc.to - sc.from) / Math.max(1, sc.width)) * 4
     if (sc && typeof sc.format === 'function') return sc.format(t, step)
     if (this.range && typeof this.range.format === 'function') return this.range.format(t, step)
-    return this.unit === 'n' ? num(t) : new Date(this.unit === 'ms' ? t : t * 1000).toISOString().slice(11, 19)
+    return this.unit === 'n' ? String(Math.round(t * 1000) / 1000) : new Date(this.unit === 'ms' ? t : t * 1000).toISOString().slice(11, 19)
   }
   // a bin's span in words, the day said once where both ends fall on it: 16 May 09:03–09:04
   Lanes.prototype.between = function (t0, t1) {
