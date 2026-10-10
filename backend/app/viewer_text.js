@@ -34,7 +34,7 @@
   var BLOCK = { P: 1, LI: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1, PRE: 1, TR: 1, HR: 1, BLOCKQUOTE: 1, SECTION: 1, DIV: 1, DT: 1, DD: 1 }
   var HOLDS = { DIV: 1, UL: 1, OL: 1, TABLE: 1, THEAD: 1, TBODY: 1, TR: 1, BLOCKQUOTE: 1, SECTION: 1, DL: 1 }
   var NO_LINK = 'a,code,pre,button' // where a mention or a URL is never found
-  var KEEPS_SPACE = 'pre,.thimble-text-plain' // where the text keeps its line breaks and spaces
+  var AS_WRITTEN = 'pre,.thimble-text-plain' // where the text keeps its line breaks and spaces
   var URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"'`]+/gi
   var SCHEME = /^[a-z][a-z0-9+.-]*:/i
   var KEPT = 500 // markdown texts whose html is kept, so a list drawn again parses none of them again
@@ -188,7 +188,7 @@
           walk(n)
         } else if (n.nodeType === 3) {
           var s = n.data
-          var keeps = !!n.parentElement.closest(KEEPS_SPACE)
+          var keeps = !!n.parentElement.closest(AS_WRITTEN)
           if (!keeps && !/\S/.test(s) && (node === root || HOLDS[node.tagName])) continue
           for (var i = 0; i < s.length; i++) {
             var c = s[i]
@@ -218,7 +218,7 @@
   function hidePart(n) {
     if (n.nodeType === 1) return hide(n)
     if (n.nodeType !== 3 || !n.data) return
-    if (!/\S/.test(n.data) && !n.parentElement.closest(KEEPS_SPACE)) return
+    if (!/\S/.test(n.data) && !n.parentElement.closest(AS_WRITTEN)) return
     var s = make('span')
     n.parentNode.insertBefore(s, n)
     s.appendChild(n)
