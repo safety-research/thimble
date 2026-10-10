@@ -3145,11 +3145,15 @@
   // (bars.watch), so the page draws again only its own markup, and a part's folds and scroll stay. A value turned off
   // or recolored changes no attribute: the bridge draws the bars again from the hook.
   var stampers = [] // [element, fn]: a part's element in the page and how it stamps its records again
+  var STAMPERS_ROOM = 64 // parts watched past which those whose element has left the page are let go at the next watch
   function stampParts() {
     stampers = stampers.filter(function (s) {
       return s[0].isConnected
     })
     for (var i = 0; i < stampers.length; i++) safe(stampers[i][1])
+    safe(function () {
+      sweepCards(true)
+    })
   }
   var STAMP = /\s(data-colour(?:-tracks)?)="([^"]*)"/g
   var UNESC = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" }
@@ -3190,10 +3194,15 @@
       stamp: function (node, record) {
         stampAs(node, b.attr(record))
       },
+      // one part an element: a part made again in an element takes the place of the one before, and leaves none
+      // there with `colour: false`, so the one before never stamps its records again
       watch: function (node, fn) {
-        if (b.off || !node) return
-        for (var i = 0; i < stampers.length; i++) if (stampers[i][1] === fn) return
-        stampers.push([node, fn])
+        if (!node) return
+        var many = stampers.length >= STAMPERS_ROOM
+        stampers = stampers.filter(function (s) {
+          return s[0] !== node && (!many || s[0].isConnected)
+        })
+        if (!b.off) stampers.push([node, fn])
       },
     }
     return b
@@ -3472,9 +3481,6 @@
     cardsSwept = cardN
     cardsRoom = Math.max(CARDS_ROOM, cards.size * 2)
   }
-  stampers.push([document.documentElement, function () {
-    sweepCards(true)
-  }])
   /** a record as a card (above): thimble.recordCard({ref, record, key, title, meta, chips, body, foot, active, act,
    *  attrs, colour}) gives its html */
   thimble.recordCard = function (o) {
