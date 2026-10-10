@@ -27,7 +27,12 @@
                        two tracks with their preview; .thimble-reset its Reset; .thimble-tip the kit's tip
      .thimble-range-*  the time range selector (viewer_range.js, thimble.timeRange): the overview, its viewfinder and
                        the readout; .thimble-axis-* the axis thimble.timeAxis draws under a chart of the range
-     .thimble-details  a row's details opened in place (thimble.expand) */
+     .thimble-details  a row's details opened in place (thimble.expand)
+     .thimble-search-* the search in the top row (viewer_search.js, thimble.search): the box, its count and steps, and
+                       the find's wash on the matches (::highlight(thimble-search), the current one's stronger)
+     .thimble-table-*  a table of records with sortable columns that draws only the rows near its view
+                       (viewer_table.js, thimble.table)
+     .thimble-diff-*   two versions of a text side by side or inline (viewer_diff.js, thimble.diff) */
 
 body {
   font: 400 var(--text-sm) / 1.45 var(--font-body);
@@ -1468,4 +1473,350 @@ button.thimble-card {
 /* a row's details, opened in place under its line (thimble.expand) */
 .thimble-details {
   overflow: hidden;
+}
+
+/* -------- the search (viewer_search.js): a box drawn as a field, its glyph, the text, the count ("3 of 120") and the
+   steps; the find's wash on every match on screen and a stronger one on the current match, as Files' find
+   (files.css ::highlight(reader-find)). The page sets the box's width as its layout. -------- */
+.thimble-search-mount {
+  display: inline-flex;
+  min-width: 0;
+}
+.thimble-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  box-sizing: border-box;
+  width: 260px;
+  max-width: 100%;
+  min-width: 0;
+  height: var(--h-control);
+  padding: 0 2px 0 7px;
+  border: 1px solid rgba(var(--ink-rgb), 0.14);
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  color: var(--text-primary);
+}
+.thimble-search-mount .thimble-search {
+  width: 100%;
+}
+.thimble-search:hover {
+  border-color: rgba(var(--ink-rgb), 0.28);
+}
+.thimble-search:focus-within {
+  border-color: transparent;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.thimble-search .thimble-search-glyph {
+  width: 13px;
+  height: 13px;
+  color: var(--text-tertiary);
+}
+.thimble-search-input {
+  flex: 1 1 auto;
+  min-width: 48px;
+  height: 100%;
+  margin: 0;
+  padding: 0 4px 0 5px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: 400 var(--text-ui-sm) / 22px var(--font-body);
+}
+.thimble-search-input::placeholder {
+  color: var(--text-placeholder);
+  opacity: 1;
+}
+.thimble-search-count {
+  flex: none;
+  padding: 0 4px;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.thimble-search-count:empty {
+  display: none;
+}
+.thimble-search .btn-sm.btn-square {
+  width: 20px;
+  height: 20px;
+}
+.thimble-search .btn .thimble-colour-ico {
+  width: 13px;
+  height: 13px;
+}
+.thimble-search .btn[hidden] {
+  display: none;
+}
+::highlight(thimble-search) {
+  background-color: var(--hl-bg);
+}
+::highlight(thimble-search-current) {
+  background-color: var(--hl-bg-strong);
+}
+
+/* -------- the table (viewer_table.js): the kit's .table as a list that draws only the rows near its view, each row
+   absolutely placed at its line, all one height, a cell cut with an ellipsis; a caps head that stays at the top, its
+   columns a click sorts by. A row's only colour is Color by's bar, which the bridge draws on its left edge. -------- */
+.thimble-table-host {
+  position: relative;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  outline: none;
+}
+.thimble-table-host:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.thimble-table {
+  min-width: 0;
+  color: var(--text-primary);
+  font: 400 var(--text-ui-sm) / 1.4 var(--font-body);
+}
+.thimble-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: var(--thimble-table-cols);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+}
+.thimble-table-th {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--text-tertiary);
+  font: 400 10.5px / 1.2 var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  user-select: none;
+}
+.thimble-table-th[data-col] {
+  cursor: pointer;
+}
+.thimble-table-th[data-col]:hover,
+.thimble-table-th.active {
+  color: var(--text-primary);
+}
+.thimble-table-th.thimble-table-number {
+  justify-content: flex-end;
+}
+.thimble-table-th:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.thimble-table-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thimble-table-th .thimble-table-arrow {
+  width: 11px;
+  height: 11px;
+}
+.thimble-table-body {
+  position: relative;
+}
+.thimble-table-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: var(--thimble-table-cols);
+  align-items: center;
+  height: var(--thimble-table-row, 28px);
+  border-bottom: 1px solid var(--border-hairline);
+  cursor: pointer;
+}
+.thimble-table-row:hover {
+  background: rgba(var(--ink-rgb), 0.04);
+}
+.thimble-table-row.active,
+.thimble-table-row.active:hover {
+  background: var(--surface-selected);
+}
+.thimble-table-td {
+  min-width: 0;
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thimble-table-td.thimble-table-number,
+.thimble-table-td.thimble-table-time,
+.thimble-table-fields .thimble-table-number,
+.thimble-table-fields .thimble-table-time {
+  color: var(--text-secondary);
+  font: 400 var(--text-mono-sm) / 1.4 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.thimble-table-td.thimble-table-number {
+  text-align: right;
+}
+.thimble-table-none {
+  padding: 24px 16px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+.thimble-table-probe {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+}
+/* a row's columns in the side panel, each value whole */
+.thimble-table-fields {
+  display: grid;
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+  gap: 5px 14px;
+  margin: 0;
+}
+.thimble-table-fields dt {
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1.5 var(--font-body);
+}
+.thimble-table-fields dd {
+  min-width: 0;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.thimble-table-dim {
+  color: var(--text-tertiary);
+}
+
+/* -------- the diff (viewer_diff.js): a row per line, the line numbers and the signs drawn by the style alone; a line
+   removed in the problem red's tint with −, one added in the positive green's with +, the words that changed in a
+   stronger tint; unchanged stretches folded under a quiet bar with Show more. -------- */
+.thimble-diff-host {
+  min-width: 0;
+}
+.thimble-diff {
+  --thimble-diff-no: calc(var(--thimble-diff-digits, 3) * 1ch + 14px);
+  --thimble-diff-rem: color-mix(in oklab, var(--status-negative) 11%, transparent);
+  --thimble-diff-add: color-mix(in oklab, var(--status-positive) 12%, transparent);
+  --thimble-diff-rem-w: color-mix(in oklab, var(--status-negative) 30%, transparent);
+  --thimble-diff-add-w: color-mix(in oklab, var(--status-positive) 32%, transparent);
+  min-width: 0;
+  color: var(--text-primary);
+  font: 400 var(--text-mono-sm) / 1.6 var(--font-mono);
+  tab-size: 4;
+}
+.thimble-diff-row {
+  display: grid;
+}
+.thimble-diff-split .thimble-diff-row {
+  grid-template-columns: var(--thimble-diff-no) minmax(0, 1fr) var(--thimble-diff-no) minmax(0, 1fr);
+}
+.thimble-diff-inline .thimble-diff-row {
+  grid-template-columns: var(--thimble-diff-no) var(--thimble-diff-no) minmax(0, 1fr);
+}
+.thimble-diff-no {
+  box-sizing: border-box;
+  padding: 0 6px 0 4px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+.thimble-diff-no::before {
+  content: attr(data-n);
+}
+/* the two sides apart, by a hairline */
+.thimble-diff-split .thimble-diff-row > :nth-child(3) {
+  box-shadow: inset 1px 0 0 var(--border-hairline);
+}
+.thimble-diff-tx {
+  position: relative;
+  min-width: 0;
+  padding: 0 12px 0 2.2ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.thimble-diff-tx::before {
+  position: absolute;
+  left: 0.6ch;
+  font-weight: 600;
+  user-select: none;
+}
+/* an empty line keeps a line's height, with no character of its own */
+.thimble-diff-tx:empty::after {
+  content: '\200b';
+}
+.thimble-diff-same {
+  color: var(--text-secondary);
+}
+.thimble-diff-del {
+  background: var(--thimble-diff-rem);
+}
+.thimble-diff-del::before {
+  content: '\2212';
+  color: var(--status-negative);
+}
+.thimble-diff-ins {
+  background: var(--thimble-diff-add);
+}
+.thimble-diff-ins::before {
+  content: '+';
+  color: var(--status-positive);
+}
+/* the side of a row a line was only added to or removed from */
+.thimble-diff-none {
+  background: rgba(var(--ink-rgb), 0.03);
+}
+.thimble-diff-w {
+  border-radius: var(--radius-hl);
+  color: inherit;
+  text-decoration: none;
+}
+del.thimble-diff-w {
+  background: var(--thimble-diff-rem-w);
+}
+ins.thimble-diff-w {
+  background: var(--thimble-diff-add-w);
+}
+.thimble-diff-gap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 1px 8px 1px calc(var(--thimble-diff-no) + 2.2ch);
+  background: rgba(var(--ink-rgb), 0.035);
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1.4 var(--font-body);
+}
+.thimble-diff-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  border-bottom: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  font: 500 var(--text-xs) / 1.4 var(--font-body);
+}
+.thimble-diff-split .thimble-diff-head {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.thimble-diff-head > span {
+  min-width: 0;
+  padding: 6px 12px 6px calc(var(--thimble-diff-no) + 2.2ch);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thimble-diff-split .thimble-diff-head > span + span {
+  box-shadow: inset 1px 0 0 var(--border-hairline);
+}
+.thimble-diff-inline .thimble-diff-head > span {
+  padding-left: calc(2 * var(--thimble-diff-no) + 2.2ch);
+}
+.thimble-diff-empty {
+  padding: 12px 16px;
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1.4 var(--font-body);
 }

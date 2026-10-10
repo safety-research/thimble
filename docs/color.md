@@ -156,6 +156,8 @@ scrollbar in one strip at its right edge, at every length:
   lane and two are two; a label that is on but no choice has no lane. Each lane names its choice on hover; each is 7
   px wide, 2 px from the next. Only the first choice colors the records' bars. A thumb as wide as the strip frames the
   part in view; drag it to move the view.
+- While the view's search finds something ([search-table-diff.md](search-table-diff.md)), a lane of ticks in the ink,
+  one per match, stands at the strip's left, before Color by's lanes; a click on a tick goes to that match.
 - Where the strip draws a record shorter than 3 px, resting on it for 250 ms opens the loupe beside it: a short list,
   a line per record around the pointer, each its line or key, a cell per lane in the record's color (an empty cell for
   none) and the start of its text; the record under the pointer darker, those in view tinted, and a bracket beside the
@@ -178,7 +180,8 @@ element where the page draws it), `refs` (each row's ref, which the labels' lane
 the loupe's line starts with) and `records` (each row's record, which the lanes of fields past the first choice read).
 For a list of elements the loupe reads each record's `<time>` and its text, or `preview(element)`, and its
 `data-anchor`. Call `strip` again with the same list when they change; rows given again unchanged, as a list drawn
-again on each scroll gives them, are not measured again.
+again on each scroll gives them, are not measured again. The view checks count each row given with its ref as shown,
+once the rows the list draws carry those refs as their `data-anchor`.
 
 The tracks show colors only on a list of the records the color marks, and only where they reflect the whole list:
 Color by's own `strip`, a list given `rows`, or another list whose elements are all of its records, which says so

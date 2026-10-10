@@ -74,6 +74,17 @@ def test_the_record_card_is_one_of_thimble_s_parts():
     ]
 
 
+def test_the_search_table_and_diff_are_thimble_s_parts_too():
+    """A page sets the search's width and the table's and the diff's place, but does not change how they look."""
+    css = ("<style>#search .thimble-search { width: 320px } .thimble-table-host { flex: 1 } .thimble-diff-host { margin: 8px }"
+           " .thimble-table-row { background: #fafafa } .thimble-diff-ins { color: green } .thimble-search { border-radius: 999px }</style>")
+    assert views.own_parts(css) == [
+        "`.thimble-table-row` sets background",
+        "`.thimble-diff-ins` sets color",
+        "`.thimble-search` sets border-radius",
+    ]
+
+
 def test_the_note_names_them_and_the_worked_examples_get_none():
     note = views.own_parts_note(PAGE)
     assert "`.chip` sets border-radius" in note and "and 2 more" in note and "chip-key" in note

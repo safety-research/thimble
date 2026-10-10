@@ -640,6 +640,10 @@ def test_the_checks_fail_a_page_whose_records_do_not_show_the_test_label():
     assert "no element" in run(_shot("overview", records=0, units=0, fetched=40))[0][0]
     assert "only 2 shown elements" in run(_shot("overview", records=2, units=0, due=0, fetched=400))[0][0]
     assert run(_shot("overview", records=2, units=3, fetched=400)) == ([], []), "a view may anchor units instead"
+    # a list that draws only the rows near its view, such as the kit's table, anchors each row it draws: the rows it
+    # holds count, the few it drew do not fail it
+    assert run(_shot("overview", records=34, units=0, held=400, fetched=400)) == ([], [])
+    assert "only 34 shown elements" in run(_shot("overview", records=34, units=0, held=34, fetched=400))[0][0]
     assert "3 of the 6" in run(_shot("overview", records=40, due=6, drawn=3, fetched=40))[0][0]
     problems, notes = run(good[0], _shot("filtered", records=10, unkept=8), good[2])
     assert not problems and "anchors 8 of them" in notes[0] and "shows 10 records" in notes[0]
@@ -800,9 +804,9 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
     v = dict(views.read_view(CORPUS, "threads"), libs=views._libs(["vega-embed"]))
     with_libs = views.frame_document(v)
     if views.LIBS["vega"].is_file():
-        assert with_libs.count("<script>") == 11, \
-            "the view's name, the bridge, the kit's Color by, row controls, side panel, transcript and time range, vega, " \
-            "vega-lite, vega-embed and the view's own"
+        assert with_libs.count("<script>") == 14, \
+            "the view's name, the bridge, the kit's Color by, row controls, side panel, transcript, search, table, diff " \
+            "and time range, vega, vega-lite, vega-embed and the view's own"
     assert views._script_text("a</script>b") == "a<\\/script>b"
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
 
