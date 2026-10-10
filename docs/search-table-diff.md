@@ -74,16 +74,16 @@ table does this itself when it is given the search.
 
 ### Text folded away
 
-A part that folds text away keeps it in the page in an element with `data-thimble-fold` and the `hidden` attribute:
-the diff's unchanged lines, the transcript's folded turns and a long block's lines past the sixth
+A part that folds text away keeps it in the page in an element with `data-thimble-fold` and the `hidden` attribute: the
+diff's unchanged lines, the transcript's folded turns and a long block's lines past the sixth
 ([rows-and-filters.md](rows-and-filters.md)), the record's folded values, a long string's lines past the sixth and a
-long list's items past the first 100, and the rest of a long text. The search counts what it holds, ticks it where the
-fold stands, and sends the element a `thimble-unfold` event when it goes to a match inside it; the part opens the fold
-there, and the match shows. A fold may hold another: the event goes to the innermost fold around the match, and again
-while the match stays folded, so a part may open one level at a time, such as a folded tool call whose output is long.
-A match that a box cuts from view by its size, such as a long block whose height is cut to six lines (its overflow
-hidden), sends that box the same event. A citation's quote in folded or cut text opens its fold the same way. A hidden
-element without `data-thimble-fold` is not searched.
+long list's items past the first 100, the rest of a long text, and a message's quoted mail and the rest of a long
+message. The search counts what it holds, ticks it where the fold stands, and sends the element a `thimble-unfold` event
+when it goes to a match inside it; the part opens the fold there, and the match shows. A fold may hold another: the
+event goes to the innermost fold around the match, and again while the match stays folded, so a part may open one level
+at a time, such as a folded tool call whose output is long. A match that a box cuts from view by its size, such as a
+long block whose height is cut to six lines (its overflow hidden), sends that box the same event. A citation's quote in
+folded or cut text opens its fold the same way. A hidden element without `data-thimble-fold` is not searched.
 
 ## The table
 
