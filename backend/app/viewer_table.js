@@ -16,6 +16,7 @@
 //     search, filter,                       a thimble.search finds in its rows, a thimble.filterBy hides rows
 //     colour,                               the Color by of its bars and strip (or `color`), the page's by default;
 //                                           false for none
+//     attrs: (r) => ({ 'data-anchor-unmarked': !!r.mix }),   more attributes of a row, as thimble.recordCard takes them
 //   })
 //   table.draw(rows)                        new rows, such as after a fetch; table.draw() after Filter by changed
 //
@@ -141,6 +142,7 @@
     this.filter = opts.filter || null
     this.bars = shared.bars(opts)
     this.onOpen = typeof opts.onOpen === 'function' ? opts.onOpen : null
+    this.attrs = typeof opts.attrs === 'function' ? opts.attrs : null
     this.refOf = function (r) {
       return r && r.ref != null ? String(r.ref) : null
     }
@@ -703,10 +705,22 @@
     var self = this
     // its time, from the first column of times, so the lanes tint the rows in view (`follow`)
     var t = this.timeCol ? this.value(this.timeCol, r) : null
+    // the page's attributes of the row, as a card takes them (thimble.recordCard's attrs): a class joins the row's own
+    var cls = 'thimble-table-row' + (this.same(r, this.chosen) ? ' active' : '')
+    var more = ''
+    var extra = this.attrs ? ctl.safe(function () { return self.attrs(r) }, null) : null
+    if (extra && typeof extra === 'object')
+      for (var name in extra) {
+        // a name an attribute can have, never an event handler's nor one the table writes itself
+        if (!/^[a-zA-Z_:][\w:.-]*$/.test(name) || /^on/i.test(name) || /^(role|style|data-anchor|data-thimble-row|data-t)$/i.test(name)) continue
+        if (extra[name] == null || extra[name] === false) continue
+        if (name.toLowerCase() === 'class') cls += extra[name] === true ? '' : ' ' + String(extra[name])
+        else more += ' ' + name + '="' + esc(extra[name] === true ? '' : extra[name]) + '"'
+      }
     return (
-      '<div class="thimble-table-row' + (this.same(r, this.chosen) ? ' active' : '') + '" role="row" data-thimble-row="' + i + '"' +
+      '<div class="' + esc(cls) + '" role="row" data-thimble-row="' + i + '"' +
       (ref != null ? ' data-anchor="' + esc(ref) + '"' : '') + (typeof t === 'number' && isFinite(t) ? ' data-t="' + seconds(t) + '"' : '') +
-      this.bars.attr(r) + ' style="top:' + i * this.rowH + 'px">' +
+      this.bars.attr(r) + more + ' style="top:' + i * this.rowH + 'px">' +
       this.drawnCols
         .map(function (col) {
           return '<div class="thimble-table-td thimble-table-' + col.type + '" role="gridcell">' + self.cell(col, r) + '</div>'

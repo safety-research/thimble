@@ -487,6 +487,22 @@ describe('the table', () => {
     doc().getElementById('other')!.innerHTML = '<p data-anchor="b#L2">y</p>'
     expect(w.thimble.__held()).toBe(5)
   })
+
+  test("a row's time is its data-t, and the page's attributes join its own, never an event handler's or the table's own", async () => {
+    await load(`<div id="list" style="height:400px"></div>`)
+    const w = win()
+    w.MAIL = MAIL
+    w.eval(`window.table = thimble.table({ mount: '#list', rows: window.MAIL, columns: ${JSON.stringify(COLUMNS)},
+      attrs: (m) => m.folder === 'Ops' ? { 'data-anchor-unmarked': true, class: 'mine', onclick: 'x()', 'data-anchor': 'other#L1', title: m.subject } : null })`)
+    const rows = [...doc().querySelectorAll('.thimble-table-row')] as HTMLElement[]
+    expect(rows[0].getAttribute('data-t')).toBe(String(T0))
+    expect(rows[0].hasAttribute('data-anchor-unmarked')).toBe(false)
+    expect(rows[1].hasAttribute('data-anchor-unmarked')).toBe(true)
+    expect(rows[1].className).toBe('thimble-table-row mine')
+    expect(rows[1].getAttribute('title')).toBe('Note 1')
+    expect(rows[1].hasAttribute('onclick')).toBe(false)
+    expect(rows[1].getAttribute('data-anchor')).toBe('mail.jsonl#L2')
+  })
 })
 
 const BEFORE = ['# Memory', '', '- Ana runs the timetable.', '- Bo handles billing.', ...Array.from({ length: 20 }, (_, i) => `- note ${i + 1}`), '- Cy is the harbor master.', '- Old line to drop.'].join('\n')

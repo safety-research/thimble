@@ -133,6 +133,7 @@ const table = thimble.table({
 | `search`, `filter` | a `thimble.search` that finds in every row, a `thimble.filterBy` whose kept rows show |
 | `colour` | the Color by of its bars and strip (or `color`, the same option): the page's by default, `false` for none |
 | `onOpen(row)` | a row opened, by a click or Enter |
+| `attrs(row)` | more attributes of a row's element, `{name: value}`, as `thimble.recordCard` takes them, such as `data-anchor-unmarked` for a row that stands for records and draws their labels' colors itself (`thimble.mix` in a cell) |
 | `key` | the name thimble keeps the sort under, the mount's id by default; give each table of a page its own |
 
 A column is `{name, title, type, width, min, drop, value(row), html(row), sort}`:
