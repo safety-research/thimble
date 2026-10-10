@@ -1763,7 +1763,7 @@ def _xy_spec(kind: str, df, opts: dict) -> dict:
         weights = df[y] if kind == "line" else df[grp].map(lambda _v: 1)
         groups = _ordered(kind, df[grp], _ranked(df[grp], weights), label=label)
         enc["color"] = _enc(grp, "nominal", sort=groups)
-        if iv and not panels:  # each row's groups side by side on its line, so their intervals do not overprint
+        if kind == "dots" and not panels:  # each row's groups side by side on its line, so no dot covers another's
             enc["yOffset"] = {"field": _field(grp), "type": "nominal", "sort": groups}
     elif label is not None:
         enc["color"] = _enc(y, "nominal", sort=enc["y"]["sort"], legend=None)

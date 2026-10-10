@@ -311,7 +311,8 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
     if (bars.some(b => !Number.isFinite(b.value))) return null
     return { ...blank(cell, 'bar'), x: lab, y: val, rows: bars }
   }
-  if (mark === 'line' || mark === 'point' || mark === 'area' || mark === 'circle') {
+  // a dots chart's rows are names down its y axis, which no line card draws: its rows' table instead
+  if ((mark === 'line' || mark === 'point' || mark === 'area' || mark === 'circle') && y.type !== 'nominal' && y.type !== 'ordinal') {
     const by = new Map<string, [string | number, number][]>()
     for (const r of rows) {
       const s = color?.field ? String(r[color.field] ?? '') : y.field
