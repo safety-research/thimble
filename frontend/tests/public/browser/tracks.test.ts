@@ -28,8 +28,9 @@ let page: Page
 /** the bundle's folder, which a page at another pixel ratio loads from too */
 let dir = ''
 
-/** A page of the bundle at a device pixel ratio, the strip mounted over a file of `total` records. */
-async function open(dpr: number, total = 10_000): Promise<Page> {
+/** A page of the bundle at a device pixel ratio, the strip mounted over a file of `total` records (`long`, each with
+ * a time and a text far longer than the loupe). */
+async function open(dpr: number, total = 10_000, long = false): Promise<Page> {
   const page = await browser.newPage({ viewport: { width: 1000, height: 640 }, deviceScaleFactor: dpr })
   await page.route('**/*', (route) => {
     const p = new URL(route.request().url()).pathname
@@ -48,7 +49,7 @@ async function open(dpr: number, total = 10_000): Promise<Page> {
       })
     return route.fulfill({ status: 404, body: '' })
   })
-  await page.goto(`${ORIGIN}/?total=${total}`)
+  await page.goto(`${ORIGIN}/?total=${total}${long ? '&long=1' : ''}`)
   await page.waitForSelector('.track-frame-over')
   await page.waitForTimeout(250)
   return page
@@ -68,6 +69,7 @@ beforeAll(async () => {
       `const w = window as any`,
       `w.__theme = { setAccent, setPaper }`,
       `const TOTAL = Number(new URLSearchParams(location.search).get('total') || 10000)`,
+      `const LONG = new URLSearchParams(location.search).get('long') === '1'`,
       `Object.assign(w, { __seeks: [], __asked: [], __scrolled: [], __lines: [], __marks: [] })`,
       `const root = createRoot(document.getElementById('root')!)`,
       // two values over 100 bins: the first two thirds mostly the first value, the last third the second
@@ -76,7 +78,7 @@ beforeAll(async () => {
       `w.__feed = feed`,
       `const markers = [{ id: 'find', name: '"county"', total: TOTAL, ticks: [{ from: Math.round(TOTAL * 0.4), to: Math.round(TOTAL * 0.42), colour: 'var(--text-primary)' }] }]`,
       // every 7th record of the first value (blue), every 11th of the second (orange), read after a moment
-      `const records = (from, to) => { w.__asked.push([from, to]); const out = []; for (let l = from; l <= to; l++) out.push({ line: l, lanes: [l % 7 === 0 ? 'var(--label-1)' : l % 11 === 0 ? 'var(--label-2)' : null], who: 'AgentRelent', text: 'message ' + l + ' about the county' }); return new Promise((r) => setTimeout(() => r(out), 30)) }`,
+      `const records = (from, to) => { w.__asked.push([from, to]); const out = []; for (let l = from; l <= to; l++) out.push({ line: l, lanes: [l % 7 === 0 ? 'var(--label-1)' : l % 11 === 0 ? 'var(--label-2)' : null], meta: LONG ? ['20:' + String(l % 60).padStart(2, '0') + ':07', 'AgentRelent'] : ['AgentRelent'], text: 'message ' + l + ' about the county' + (LONG ? ' and the gale'.repeat(20) : '') }); return new Promise((r) => setTimeout(() => r(out), 30)) }`,
       // the reader in the middle of the file, showing 25 records of it, as it publishes its place
       `const place = (top) => ({ top, height: 25 / TOTAL, scroll: top * TOTAL * 28, h: 600, content: TOTAL * 28, start: false, end: false })`,
       `root.render(<div style={{ height: 600, display: 'flex', justifyContent: 'flex-end' }}><ReaderTracks total={TOTAL} feed={feed} paint={{ kind: 'counts', counts, colors: ['var(--label-1)', 'var(--label-2)'], off: [false, false] }} markers={markers} onSeek={(f, held) => w.__seeks.push([f, held])} onScrollBy={(px) => { w.__scrolled.push(px); const p = feed.place; flushSync(() => feed.set(place(Math.max(0, Math.min(1, p.top + px / (TOTAL * 28)))))); return px }} onMark={(c, t) => w.__marks.push([c, t.from])} onLine={(l) => { w.__lines.push(l); flushSync(() => feed.set(place(Math.max(0, (l - 13) / TOTAL)))) }} records={records} /></div>)`,
@@ -269,7 +271,7 @@ test('resting on the strip opens the loupe beside it, not before: a line per rec
   // beside the strip, its middle at the pointer
   assert.ok(g.loupe!.right <= g.over.left && g.loupe!.right > g.over.left - 16, JSON.stringify([g.loupe, g.over]))
   assert.ok(near((g.loupe!.top + g.loupe!.bottom) / 2, y, 2), `the loupe's middle ${(g.loupe!.top + g.loupe!.bottom) / 2}, the pointer ${y}`)
-  assert.ok(g.loupe!.width >= 200 && g.loupe!.width <= 360, `as wide as the room leaves, 200 to 360 px: ${g.loupe!.width}`)
+  assert.ok(g.loupe!.width >= 200 && g.loupe!.width <= 320, `as wide as the room leaves, 200 to 320 px: ${g.loupe!.width}`)
   // the bracket beside the strip, on the loupe's side, over the records it shows
   assert.equal(g.bracketOpen, true)
   assert.ok(g.bracket!.right <= g.over.left && g.bracket!.right >= g.over.left - 2 && g.bracket!.left > g.loupe!.right - 1, JSON.stringify([g.bracket, g.over, g.loupe]))
@@ -297,6 +299,61 @@ test('resting on the strip opens the loupe beside it, not before: a line per rec
   }
   assert.ok(h.rows.some((r) => r.cells[1] === 'var(--label-1)'))
   assert.equal(h.tips, 0, 'no tooltip beside the loupe')
+})
+
+test("a file of twelve million records whose texts are long: each line its whole number and every cell, its time and who said it in the quiet gray, its text in the ink, which alone gives up room", async () => {
+  const pg = await open(1, 12_000_000, true)
+  await rest(0.3, pg)
+  await pg.waitForTimeout(200)
+  const got = await pg.evaluate(() => {
+    const probe = document.createElement('span')
+    document.body.appendChild(probe)
+    probe.style.color = 'var(--text-tertiary)'
+    const gray = getComputedStyle(probe).color
+    probe.style.color = 'var(--text-primary)'
+    const ink = getComputedStyle(probe).color
+    probe.remove()
+    const box = document.querySelector('.loupe-box')!.getBoundingClientRect()
+    return {
+      gray,
+      ink,
+      box: { left: box.left, right: box.right },
+      rows: [...document.querySelectorAll('.loupe[data-open] .loupe-row')].map((r) => {
+        const n = r.querySelector('.loupe-n')!
+        const range = document.createRange()
+        range.selectNodeContents(n)
+        const nb = range.getBoundingClientRect()
+        const cells = [...r.querySelectorAll('.loupe-cell')].map((i) => i.getBoundingClientRect())
+        const t = r.querySelector('.loupe-t') as HTMLElement
+        const meta = [...t.querySelectorAll('.loupe-m')]
+        return {
+          n: n.textContent ?? '',
+          nLeft: nb.left,
+          nRight: nb.right,
+          cells: cells.map((c) => c.width),
+          cellsLeft: cells[0].left,
+          cellsRight: cells[cells.length - 1].right,
+          meta: meta.map((m) => m.textContent ?? ''),
+          metaInk: meta.map((m) => getComputedStyle(m).color),
+          textInk: getComputedStyle(t).color,
+          textLeft: t.getBoundingClientRect().left,
+          cut: t.scrollWidth > t.clientWidth,
+        }
+      }),
+    }
+  })
+  assert.equal(got.rows.length, 17)
+  assert.notEqual(got.gray, got.ink)
+  for (const r of got.rows) {
+    const n = Number(r.n)
+    assert.ok(/^\d{7}$/.test(r.n) && r.nLeft >= got.box.left && r.nRight <= r.cellsLeft, `the whole number, inside the loupe: ${JSON.stringify([r, got.box])}`)
+    assert.deepEqual(r.cells, [4, 4], 'the find\'s cell and the color lane\'s, each whole')
+    assert.deepEqual(r.meta, ['20:' + String(n % 60).padStart(2, '0') + ':07', 'AgentRelent'])
+    assert.deepEqual(r.metaInk, [got.gray, got.gray], 'its time and who said it in the quiet gray')
+    assert.equal(r.textInk, got.ink, 'its text in the ink')
+    assert.ok(r.cut && r.textLeft >= r.cellsRight, `the text alone cut: ${JSON.stringify(r)}`)
+  }
+  await pg.close()
 })
 
 test('the loupe follows the pointer along the strip and never jumps to the thumb as the reader moves under it; the wheel moves it to the thumb', async () => {
@@ -468,6 +525,42 @@ test('a strip that tells every record apart opens no loupe, and names the record
   const cells = await pg.evaluate(() => [...document.querySelectorAll('.reader-ruler-tip .tip-c i')].map((i) => (i as HTMLElement).style.background))
   assert.match((await layout(pg)).rulerTip ?? '', /^70Agent/)
   assert.deepEqual(cells, ['var(--label-1)'])
+  await pg.close()
+})
+
+test("the one line of a record whose text is long: no wider than the loupe, its whole number and its cell, its time and who said it in the quiet gray, its text alone cut", async () => {
+  const pg = await open(1, 150, true)
+  const over = (await pg.locator('.track-over').boundingBox())!
+  await pg.mouse.move(over.x + over.width / 2, over.y + (over.height * 69.5) / 150)
+  await pg.waitForTimeout(500)
+  const tip = await pg.evaluate(() => {
+    const el = document.querySelector('.reader-ruler-tip') as HTMLElement
+    const probe = document.createElement('span')
+    document.body.appendChild(probe)
+    probe.style.color = 'var(--text-tertiary)'
+    const gray = getComputedStyle(probe).color
+    probe.remove()
+    const n = el.querySelector('.tip-n') as HTMLElement
+    const t = el.querySelector('.tip-t') as HTMLElement
+    const meta = [...t.querySelectorAll('.tip-m')]
+    return {
+      width: el.getBoundingClientRect().width,
+      n: n.textContent,
+      nWhole: n.scrollWidth <= n.clientWidth,
+      cells: [...el.querySelectorAll('.tip-c i')].map((i) => i.getBoundingClientRect().width),
+      meta: meta.map((m) => m.textContent),
+      metaInk: meta.map((m) => getComputedStyle(m).color),
+      gray,
+      cut: t.scrollWidth > t.clientWidth,
+    }
+  })
+  assert.ok(tip.width <= 320, `as wide as the loupe at most: ${tip.width}`)
+  assert.equal(tip.n, '70')
+  assert.ok(tip.nWhole)
+  assert.deepEqual(tip.cells, [6])
+  assert.deepEqual(tip.meta, ['20:10:07', 'AgentRelent'])
+  assert.deepEqual(tip.metaInk, [tip.gray, tip.gray])
+  assert.ok(tip.cut, 'the text cut with an ellipsis')
   await pg.close()
 })
 

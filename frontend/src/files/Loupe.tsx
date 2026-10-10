@@ -2,8 +2,9 @@
 //
 // The strip draws the whole file in the scrollbar's track at every length, with a thumb over what is on screen. Where it
 // can no longer tell the records apart, resting the pointer on it for LOUPE_REST_MS opens the loupe beside it: a short
-// list, a line per record (a file's record, a report's passage), each its number, a small cell per lane of the strip in
-// the record's color, and the start of its text; the record under the pointer darker, those on screen lightly tinted;
+// list, a line per record (a file's record, a report's passage), each its whole number, a small cell per lane of the
+// strip in the record's color, its metadata (such as its time and who said it) in the quiet gray and the start of its
+// text in the ink, the text alone giving up room; the record under the pointer darker, those on screen lightly tinted;
 // and beside the strip a bracket over the stretch the list shows.
 //
 // What the list shows follows one of three anchors (anchorAfter): 'pointer', the records around the pointer while it
@@ -33,7 +34,7 @@ export const LOUPE_OFF_PX = 8
 export const TELL_APART_PX = 3
 /** px: the loupe's width at the least and at the most, and the room it leaves beside it */
 const MIN_W = 200
-const MAX_W = 360
+const MAX_W = 320
 const ROOM_PX = 24
 /** px the loupe stays inside the box it opens over */
 const INSET_PX = 4
@@ -41,6 +42,8 @@ const INSET_PX = 4
 const BRACKET_PX = 4
 /** the characters of a record's text the loupe writes; its row cuts the rest with an ellipsis */
 const TEXT_CHARS = 200
+/** the characters of each of a record's metadata the loupe writes, cut with an ellipsis */
+const META_CHARS = 32
 
 /** A cell of a row: a lane's color for the record; `faded` while only the strip's color for its stretch is known. */
 export interface LoupeCell {
@@ -49,11 +52,12 @@ export interface LoupeCell {
 }
 
 /** A record as a row of the loupe and a one-line tooltip show it: its number (none in the report), a cell per lane of
- * the strip (null for none), who said it (bold, before the text) and the start of its text. */
+ * the strip (null for none), its metadata (such as its time and who said it, in the quiet gray before the text) and
+ * the start of its text. */
 export interface LoupeRow {
   num: string | null
   cells: readonly (LoupeCell | null)[]
-  who: string | null
+  meta: readonly string[]
   text: string
   /** a heading of the report, its text in the heavier weight */
   heading?: boolean
@@ -144,7 +148,7 @@ export function oneLine(text: string, max = TEXT_CHARS): string {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t
 }
 
-/** A record as a one-line tooltip shows it: its number, a cell per lane that colors it, who said it and the start of
+/** A record as a one-line tooltip shows it: its number, a cell per lane that colors it, its metadata and the start of
  * its text (components/Tooltip Tip's content, in `.tip-one`). */
 export function RowLine({ row }: { row: LoupeRow }) {
   const cells = row.cells.filter((c): c is LoupeCell => !!c)
@@ -159,7 +163,11 @@ export function RowLine({ row }: { row: LoupeRow }) {
         </span>
       )}
       <span className={'tip-t' + (row.heading ? ' heading' : '')}>
-        {row.who && <b>{row.who}</b>}
+        {row.meta.map((m, i) => (
+          <span key={i} className="tip-m">
+            {oneLine(m, META_CHARS)}
+          </span>
+        ))}
         {oneLine(row.text)}
       </span>
     </>
@@ -167,7 +175,7 @@ export function RowLine({ row }: { row: LoupeRow }) {
 }
 
 /** What a one-line tooltip says, as text: what keys its layout. Pure. */
-export const rowKey = (row: LoupeRow): string => [row.num, row.cells.map((c) => (c ? c.colour + (c.faded ? '~' : '') : '')).join(','), row.who, oneLine(row.text)].join('|')
+export const rowKey = (row: LoupeRow): string => [row.num, row.cells.map((c) => (c ? c.colour + (c.faded ? '~' : '') : '')).join(','), row.meta.join('\u0001'), oneLine(row.text)].join('|')
 
 interface State {
   open: boolean
@@ -225,7 +233,7 @@ export interface Loupe {
 const fmt = (n: number) => String(Math.round(n))
 const CELL_CLASS = 'loupe-cell'
 
-/** One row's element: its number, its cells and its text, in that order. */
+/** One row's element: its number, its cells, and its metadata and text, in that order. */
 function rowEl(k: number): HTMLDivElement {
   const el = document.createElement('div')
   el.className = 'loupe-row'
@@ -253,12 +261,12 @@ function writeRow(el: HTMLElement, row: LoupeRow) {
     i.style.background = cell ? cell.colour : ''
     i.classList.toggle('faded', !!cell?.faded)
   })
-  const parts: (Node | string)[] = []
-  if (row.who) {
-    const b = document.createElement('b')
-    b.textContent = row.who
-    parts.push(b)
-  }
+  const parts: (Node | string)[] = row.meta.map((m) => {
+    const s = document.createElement('span')
+    s.className = 'loupe-m'
+    s.textContent = oneLine(m, META_CHARS)
+    return s
+  })
   parts.push(oneLine(row.text))
   t.replaceChildren(...parts)
   el.classList.toggle('heading', !!row.heading)
@@ -359,7 +367,7 @@ export function useLoupe(source: LoupeSource): Loupe {
       const sig = row ? sigOf(row) : ''
       if (sig !== was.sig) {
         if (row) writeRow(rel, row)
-        else writeRow(rel, { num: null, cells: [], who: null, text: '' })
+        else writeRow(rel, { num: null, cells: [], meta: [], text: '' })
       }
       const seen = onScreen(i, view)
       const cls = `${seen ? 's' : ''}${i === at ? 'a' : ''}`

@@ -191,6 +191,79 @@ describe('the table, with Color by and the search', () => {
     assert.equal(await frame().evaluate(() => (window as any).search.at), 11)
     await p.close()
   })
+
+  test("the strip's loupe: a row's time and its first other column of text in the quiet gray, its main column in the ink", async () => {
+    const { page: p, frame } = await framed(INBOX)
+    const box = await frame().evaluate(() => {
+      const r = document.querySelector('.thimble-colour-strip .thimble-colour-track')!.getBoundingClientRect()
+      return { x: r.left, y: r.top, w: r.width, h: r.height }
+    })
+    const frameBox = (await p.locator('#f').boundingBox())!
+    await p.mouse.move(frameBox.x + box.x + box.w / 2, frameBox.y + box.y + box.h * 0.5)
+    await p.waitForTimeout(450)
+    const got = await frame().evaluate(() => {
+      const el = [...document.querySelectorAll('.thimble-colour-loupe')].find((e) => e.hasAttribute('data-open'))!
+      const probe = document.createElement('span')
+      document.body.appendChild(probe)
+      probe.style.color = 'var(--text-tertiary)'
+      const gray = getComputedStyle(probe).color
+      probe.remove()
+      return {
+        gray,
+        rows: [...el.querySelectorAll('.thimble-colour-loupe-row')].map((r) => {
+          const t = r.querySelector('.thimble-colour-loupe-t') as HTMLElement
+          const meta = [...t.querySelectorAll('.thimble-colour-loupe-m')]
+          return {
+            n: r.querySelector('.thimble-colour-loupe-n')!.textContent,
+            meta: meta.map((m) => m.textContent),
+            metaInk: meta.map((m) => getComputedStyle(m).color),
+            text: [...t.childNodes].filter((c) => c.nodeType === 3).map((c) => c.textContent).join(''),
+            textInk: getComputedStyle(t).color,
+          }
+        }),
+      }
+    })
+    assert.equal(got.rows.length, 17)
+    for (const r of got.rows) {
+      // the mail on the line its ref names: from, subject and time as the table writes them
+      const i = Number(r.n) - 1
+      assert.equal(r.text, (i % 997 === 5 ? 'Gale warning ' : 'Note ') + i, JSON.stringify(r))
+      assert.equal(r.meta.length, 2, JSON.stringify(r))
+      assert.equal(r.meta[0], new Date((Date.UTC(2026, 3, 1) / 1000 + i * 60) * 1000).toISOString().slice(0, 16).replace('T', ' '), 'its time, as its column writes it')
+      assert.equal(r.meta[1], ['ana', 'bo', 'cy', 'dee'][i % 4], 'its sender')
+      assert.deepEqual(r.metaInk, [got.gray, got.gray])
+      assert.notEqual(r.textInk, got.gray)
+    }
+    await p.close()
+  })
+
+  test("the loupe of a log whose time column writes a date only where it changes (days): each row's time of day", async () => {
+    const LOG = page(`<div class="top"><span id="colour"></span></div><div id="body"><div id="list"></div></div>
+<script>
+const T0 = Date.UTC(2026, 3, 1, 23) / 1000
+window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'agent', title: 'Agent' }] })
+window.side = thimble.side({ mount: '#body' })
+window.table = thimble.table({ mount: '#list', side, rows: Array.from({ length: 5000 }, (_, i) => ({ ref: 'log.jsonl#L' + (i + 1), t: T0 + i * 7, agent: 'agent-0' + (i % 6), text: 'step ' + i })),
+  columns: [{ name: 't', title: 'Time', type: 'time', days: true }, { name: 'agent', title: 'Agent', width: 90 }, { name: 'text', title: 'What it did' }] })
+</script>`)
+    const { page: p, frame } = await framed(LOG)
+    const box = await frame().evaluate(() => {
+      const r = document.querySelector('.thimble-colour-strip .thimble-colour-track')!.getBoundingClientRect()
+      return { x: r.left, y: r.top, w: r.width, h: r.height }
+    })
+    const frameBox = (await p.locator('#f').boundingBox())!
+    await p.mouse.move(frameBox.x + box.x + box.w / 2, frameBox.y + box.y + box.h * 0.5)
+    await p.waitForTimeout(450)
+    const rows = await frame().evaluate(() =>
+      [...document.querySelectorAll('.thimble-colour-loupe[data-open] .thimble-colour-loupe-row')].map((r) => ({
+        n: Number(r.querySelector('.thimble-colour-loupe-n')!.textContent),
+        meta: [...r.querySelectorAll('.thimble-colour-loupe-m')].map((m) => m.textContent),
+      })),
+    )
+    assert.equal(rows.length, 17)
+    for (const r of rows) assert.deepEqual(r.meta, [new Date((Date.UTC(2026, 3, 1, 23) / 1000 + (r.n - 1) * 7) * 1000).toISOString().slice(11, 19), 'agent-0' + ((r.n - 1) % 6)], JSON.stringify(r))
+    await p.close()
+  })
 })
 
 describe('the table in a narrow pane', () => {

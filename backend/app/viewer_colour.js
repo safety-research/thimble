@@ -1728,8 +1728,9 @@
   // goes onto the device's pixel grid once still.
   //
   // Where the strip draws a record shorter than TELL_APART_PX, resting on it LOUPE_REST_MS opens the loupe beside it: a
-  // short list, a line per record around the pointer, each its line or key, a cell per lane of the strip in the
-  // record's colour, and the start of its text; the record under the pointer darker, those in view tinted, and a bracket
+  // short list, a line per record around the pointer, each its whole line or key, a cell per lane of the strip in the
+  // record's color, its metadata in the quiet gray and the start of its text in the ink, the text taking only the room
+  // the others leave; the record under the pointer darker, those in view tinted, and a bracket
   // beside the strip over the stretch it shows. It follows the pointer along the strip, and the records around the thumb
   // only after a real scroll (the wheel over the strip or the loupe, a drag of the thumb): the list's place changing
   // never moves it, so it never tells a scroll from scroll positions. Once the pointer is in it, it holds still: a click
@@ -1738,9 +1739,11 @@
   // record apart names the record under the pointer on rest instead, on one line.
   //
   // What the loupe says of a record comes from what the page gives the strip: for a list given its rows, `preview(i)`
-  // (a string, or `{when, text}`), else the row's element where the page draws it; for a list of elements,
-  // `preview(el)`, else the element's `<time>` (or data-time) and its text. Its first column is the line its ref names
-  // (`refs`, or its data-anchor: `#L12` is 12), else the key after the ref's `#` or its last `/`, else the row's place.
+  // (a string, or `{meta, text}`: `meta` a string or a list of them, such as the record's time and agent; `when` is
+  // taken as `meta`, as pages written before it give it), else the row's element where the page draws it; for a list
+  // of elements, `preview(el)`, else the element's `<time>` (or data-time) as its metadata and the rest of its text. Its
+  // first column is the line its ref names (`refs`, or its data-anchor: `#L12` is 12), else the key after the ref's `#`
+  // or its last `/`, else the row's place.
   var PLAIN_W = 10 // px: the strip with no lane, a plain scrollbar
   var LANE_W = 7 // px: a lane of the strip, 2 px from the next, 3 px in from the strip's edges (Files' TRACK_LANES)
   var LANE_GAP = 2
@@ -1763,11 +1766,12 @@
   var LOUPE_OFF_PX = 8 // px between the loupe and the strip, which the pointer crosses into it
   var TELL_APART_PX = 3 // px a record takes on the strip below which the strip cannot tell the records apart
   var LOUPE_MIN_W = 200 // px, the loupe's width at the least and at the most
-  var LOUPE_MAX_W = 360
+  var LOUPE_MAX_W = 320
   var LOUPE_INSET = 4 // px the loupe stays inside the strip's height
   var BRACKET_PX = 4 // px, the bracket's width beside the strip
   var TEXT_CHARS = 200 // the characters of a record's text the loupe writes; its row cuts the rest with an ellipsis
-  var KEY_CHARS = 12 // the characters of a record's line or key its first column holds at most
+  var META_CHARS = 32 // the characters of each of a record's metadata the loupe writes, cut with an ellipsis
+  var KEY_CHARS = 12 // the characters of a record's key its first column holds at most; a line number it holds whole
   // The search's matches (viewer_search.js) are a lane of their own at the strip's left, as Files' find: a tick in the
   // accent as text per match, like a cue point on a timeline, never a label's colour, and a click within TICK_HIT_PX of
   // one goes to that match. With Color by Off the strip is that lane alone; with no search and Off, a plain scrollbar.
@@ -1794,10 +1798,21 @@
   function grey() {
     return kit.realColour('rgba(var(--ink-rgb), 0.34)')
   }
-  // a record's text on one line: its spaces as one, cut to TEXT_CHARS with an ellipsis
-  function oneLine(text) {
+  // a record's text on one line: its spaces as one, cut to `max` characters (TEXT_CHARS) with an ellipsis
+  function oneLine(text, max) {
     var t = String(text == null ? '' : text).replace(/\s+/g, ' ').trim()
-    return t.length > TEXT_CHARS ? t.slice(0, TEXT_CHARS - 1) + '\u2026' : t
+    max = max || TEXT_CHARS
+    return t.length > max ? t.slice(0, max - 1) + '\u2026' : t
+  }
+  // a record's metadata as the loupe writes it: a string or a list of them, each on one line, the empty ones dropped
+  function metaList(m) {
+    var list = Array.isArray(m) ? m : m == null ? [] : [m]
+    var out = []
+    for (var i = 0; i < list.length; i++) {
+      var t = list[i] == null || typeof list[i] === 'object' ? '' : oneLine(list[i], META_CHARS)
+      if (t) out.push(t)
+    }
+    return out
   }
   // a record's first column in the loupe: the line its ref names, else the key after its `#` or its last `/`, else the
   // row's place (`at`, from 0), else nothing
@@ -1828,7 +1843,7 @@
   function wheelPx(e, page) {
     return e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * page : e.deltaY
   }
-  // a row of the loupe: its line or key, its cells, its text
+  // a row of the loupe: its line or key, its cells, its metadata and text
   function loupeRowEl(k) {
     var el = document.createElement('div')
     el.className = 'thimble-colour-loupe-row'
@@ -1850,10 +1865,11 @@
     while (c.children.length > row.cells.length) c.lastChild.remove()
     for (var j = 0; j < row.cells.length; j++) c.children[j].style.background = row.cells[j] || ''
     t.textContent = ''
-    if (row.who) {
-      var b = document.createElement('b')
-      b.textContent = row.who
-      t.appendChild(b)
+    for (var m = 0; m < row.meta.length; m++) {
+      var s = document.createElement('span')
+      s.className = 'thimble-colour-loupe-m'
+      s.textContent = row.meta[m]
+      t.appendChild(s)
     }
     t.appendChild(document.createTextNode(row.text))
   }
@@ -2827,19 +2843,24 @@
     if (ref == null) return null
     return (this.page ? document : this.box).querySelector('[data-anchor="' + String(ref).replace(/["\\]/g, '\\$&') + '"]')
   }
-  // what the loupe says of a record (a row, or an element): the page's preview, else the element's time and text
+  // what the loupe says of a record (a row, or an element): the page's preview, its metadata (`meta`, or `when` as
+  // pages written before it give it) and its text; else the element's time as its metadata and the rest of its text
   Strip.prototype.textOf = function (t) {
     var self = this
     var got = this.preview ? safe(function () { return self.preview(t) }, null) : null
     if (got != null && typeof got !== 'object') got = { text: String(got) }
-    if (got) return { when: String(got.when || got.time || ''), text: String(got.text || '') }
+    if (got) return { meta: metaList(got.meta != null ? got.meta : got.when || got.time), text: String(got.text == null ? '' : got.text) }
     var e = typeof t === 'number' ? this.rowEl(t) : t
-    if (!e || !e.getAttribute) return { when: '', text: '' }
+    if (!e || !e.getAttribute) return { meta: [], text: '' }
     var time = e.querySelector && e.querySelector('time')
-    var when = (e.getAttribute('data-time') || (time ? time.textContent : '') || '').trim()
-    var text = (e.getAttribute('data-preview') || e.getAttribute('data-anchor-text') || e.textContent || '').replace(/\s+/g, ' ').trim()
-    if (when && text.indexOf(when) === 0) text = text.slice(when.length).trim()
-    return { when: when, text: text }
+    var when = (e.getAttribute('data-time') || (time ? time.textContent : '') || '').replace(/\s+/g, ' ').trim()
+    var own = e.getAttribute('data-preview') || e.getAttribute('data-anchor-text')
+    var text = (own || e.textContent || '').replace(/\s+/g, ' ').trim()
+    // the time once, as metadata: out of the element's text wherever it stands (a row may name its author first), out
+    // of the words the page gave only where they start with it
+    var at = when ? text.indexOf(when) : -1
+    if (at === 0 || (at > 0 && !own)) text = (text.slice(0, at) + ' ' + text.slice(at + when.length)).replace(/\s+/g, ' ').trim()
+    return { meta: metaList(when), text: text }
   }
   // a record's ref: the row's in `refs`, or the element's data-anchor
   Strip.prototype.refOf = function (t) {
@@ -2847,7 +2868,7 @@
     return t && t.getAttribute ? t.getAttribute('data-anchor') : null
   }
   // record `i` as a row of the loupe: its line or key, a cell per lane of the strip in the record's colour (none for no
-  // value), when it was and the start of its text
+  // value), its metadata and the start of its text
   Strip.prototype.lpRow = function (i) {
     var rec = this.recs[i]
     var t = rec[3]
@@ -2859,17 +2880,21 @@
       for (var l = 0; l < this.lanes.length; l++) cells.push(this.lanes[l].by.get(t) || null)
     }
     var w = this.textOf(t)
-    return { num: refKey(this.refOf(t), t), cells: cells, who: oneLine(w.when), text: oneLine(w.text) }
+    return { num: refKey(this.refOf(t), t), cells: cells, meta: w.meta, text: oneLine(w.text) }
   }
-  // the characters of the widest line or key of the list, KEY_CHARS at most, read once per measure
+  // the characters of the widest line or key of the list, read once per measure: a line number whole, another key
+  // KEY_CHARS at most
   Strip.prototype.keyChars = function () {
     var ver = this.measured + ':' + this.dataVer
     if (this.kwVer === ver) return this.kw
     var most = 1
     var recs = this.recs || []
-    for (var i = 0; i < recs.length && most < KEY_CHARS; i++) most = Math.max(most, refKey(this.refOf(recs[i][3]), recs[i][3]).length)
+    for (var i = 0; i < recs.length; i++) {
+      var k = refKey(this.refOf(recs[i][3]), recs[i][3])
+      most = Math.max(most, /^\d+$/.test(k) ? k.length : Math.min(KEY_CHARS, k.length))
+    }
     this.kwVer = ver
-    this.kw = Math.min(KEY_CHARS, most)
+    this.kw = most
     return this.kw
   }
   // where the strip stands, read before anything is written
@@ -2956,7 +2981,7 @@
       var el = box.children[k]
       if (i >= total) continue
       var row = this.lpRow(i)
-      var sig = [row.num, row.cells.join(','), row.who, row.text].join('\u0000')
+      var sig = [row.num, row.cells.join(','), row.meta.join('\u0001'), row.text].join('\u0000')
       if (sig !== L.sigs[k]) {
         writeLoupeRow(el, row)
         L.sigs[k] = sig
@@ -3539,8 +3564,8 @@
       },
       /** the colored tracks on a list (an element or a selector, or true for the page); `opts.rows` gives every row's
        *  value in order for a list that draws only the rows in view, `opts.refs` every row's record, `opts.preview(i or
-       *  element)` what the hover preview says of a record ({when, text} or a string); a later call with the same list
-       *  updates them */
+       *  element)` what the loupe says of a record ({meta, text}, meta a string or a list such as its time and agent,
+       *  or a string); a later call with the same list updates them */
       strip: function (target, opts) {
         c.strip(target, opts)
         return out
