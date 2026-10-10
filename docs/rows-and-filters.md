@@ -363,8 +363,8 @@ const conv = thimble.messages({ mount: '#thread', onPick: (m) => side.open({ tit
 conv.draw(posts.filter((p) => p.thread === chosen).map((p) => ({ ref: p.ref, t: p.time, author: p.author, text: p.text, parent: p.reply_to })), { title: '# ' + names[chosen] })
 ```
 
-A message is `{ref, t, author, text, title, to, parent, kind, icon, said, box, record}`, `t` in seconds since 1970 (or a date
-such as an ISO time, one with no zone in UTC, as the transcript reads it).
+A message is `{ref, t, author, text, title, to, parent, kind, icon, said, box, record}`, `t` in seconds since 1970 (or a
+date such as an ISO time, one with no zone in UTC, as the transcript reads it).
 Quoted mail, a run of lines that start with `>` with the "On … wrote:" line before it, folds behind
 a `…` button, and a body longer than twelve lines shows its first lines with Show more and Show less; both keep their
 text in the page, hidden, so `thimble.search` finds it and opens the fold. Each message is anchored with its ref and
