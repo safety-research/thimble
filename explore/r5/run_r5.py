@@ -116,6 +116,9 @@ MENU_CHOICE = re.compile(r"^\s*❯?\s*\d\.\s+(Yes|No)\b", re.M)
 SAFETY_WORDS = ("safety check", "Claude's safety")
 SWITCH_LINE = re.compile(r"^\s*❯?\s*\d\.\s.*\bswitch", re.I | re.M)
 SANDBOX_FAIL = "Sandbox is required but failed to initialize"  # Bash unusable in main or an agent (see Slot.tmp)
+# Claude Code's words to an agent whose response a safety classifier stopped; the agent is told not to write it again,
+# and a builder then gives up its view (round 5's smoke run of p4 on rosetta lost both views so)
+CLASSIFIER_STOP = "Your response above was stopped by a safety classifier"
 VIEW_SKIP = shutil.ignore_patterns("__pycache__", "cache", "*.lock")
 
 
@@ -1144,6 +1147,16 @@ class Run:
             cl["result"] = results.get(str(cl["id"]))
         self.rec["sandbox_failures"] = sum(p.read_text("utf-8", errors="replace").count(SANDBOX_FAIL)
                                            for p in [*mains, *subs])
+        stops = {}
+        for p in [*mains, *subs]:
+            n = sum(1 for line in p.read_text("utf-8", errors="replace").splitlines()
+                    if CLASSIFIER_STOP in line and '"type":"user"' in line.replace(" ", ""))
+            if n:
+                kind = (read(p.with_suffix(".meta.json")) or {}).get("agentType") or "main"
+                stops[f"{kind} {p.stem}"] = n
+        self.rec["classifier_stops"] = stops
+        if stops:
+            self.note("classifier-stops", stops=stops)
         if self.rec["sandbox_failures"]:
             self.note("sandbox-failures", count=self.rec["sandbox_failures"])
         for p in mains:
@@ -1591,6 +1604,7 @@ def describe_run(out: Path, rec: dict[str, Any], views: list[dict[str, Any]], no
                    "kept": [{"n": k.get("n"), "name": k.get("name"), "why": k.get("why")} for k in p.get("kept") or []]}
                   for p in picks],
         "main_calls": rec.get("main_calls"),
+        "classifier_stops": rec.get("classifier_stops") or {},
         "minutes": {k: round(v / 60, 1) if isinstance(v, (int, float)) else None for k, v in d.items()},
         "cost_usd": round(rec["cost_usd"], 2) if isinstance(rec.get("cost_usd"), (int, float)) else None,
     }
