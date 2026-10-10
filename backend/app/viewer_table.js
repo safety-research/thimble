@@ -23,8 +23,8 @@
 // side panel (`details`, by default its columns), ↑ and ↓ move the chosen row, which an open side panel follows.
 // thimble keeps the sort per view, and Reset puts back the one it opens with. A table too narrow for its columns, such
 // as one beside the side panel, first writes its times shorter, then narrows its columns of text to their `min`, then
-// drops columns in `drop` order (with none, the rightmost first but never the main column, the first column of text that
-// takes the width left), and draws them again when the room comes back.
+// drops columns in `drop` order (with none, the rightmost first, the one the rows are sorted by last, and never the main
+// column, the first column of text that takes the width left), and draws them again when the room comes back.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -123,7 +123,6 @@
       if (!(typeof cc.width === 'number' && cc.width > 0)) this.main = ci
     }
     if (this.main < 0) this.main = firstText
-    this.dropping = this.dropOrder()
     this.drawnCols = this.columns // the columns drawn, those that fit the table's width
     this.all = Array.isArray(opts.rows) ? opts.rows : []
     this.initial = this.sortOf(opts.sort)
@@ -274,10 +273,12 @@
     return v
   }
   // the order the columns drop in, in a table too narrow for them: those with a `drop` the highest first, then the others
-  // the rightmost first; never one with `drop: false`, nor the main column unless it has a `drop`
+  // the rightmost first but the one the rows are sorted by last, so that the sort shows; never one with `drop: false`,
+  // nor the main column unless it has a `drop`
   Table.prototype.dropOrder = function () {
     var cols = this.columns
     var main = this.main
+    var by = this.sort ? this.sort.by : null
     return cols
       .map(function (c, i) {
         return i
@@ -289,6 +290,7 @@
         var da = cols[a].drop
         var db = cols[b].drop
         if ((da == null) !== (db == null)) return da == null ? 1 : -1
+        if (da == null && (cols[a].name === by) !== (cols[b].name === by)) return cols[a].name === by ? 1 : -1
         return (da != null && db - da) || b - a
       })
   }
@@ -408,7 +410,8 @@
       return s
     }
     if (room > 0) {
-      for (var d = 0, left = cols.length; d < this.dropping.length && left > 1 && need() > room; d++, left--) on[this.dropping[d]] = false
+      var order = this.dropOrder()
+      for (var d = 0, left = cols.length; d < order.length && left > 1 && need() > room; d++, left--) on[order[d]] = false
       // the columns that never drop, still too wide: their text shares what the others leave
       var lack = need() - room
       var textLeast = 0

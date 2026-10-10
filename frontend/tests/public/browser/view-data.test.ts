@@ -294,7 +294,7 @@ describe('the table beside the side panel', () => {
     await p.close()
   })
 
-  test('with no drop given, a narrowing table writes its times shorter, then drops the rightmost columns, never the first column of text', async () => {
+  test('with no drop given, a narrowing table writes its times shorter, then drops the rightmost columns, the one the rows are sorted by last, never the main column', async () => {
     const doc = PULLS(
       [
         { name: 'number', title: '#', type: 'number' },
@@ -315,8 +315,9 @@ describe('the table beside the side panel', () => {
       [1000, ['#', 'Title', 'Author', 'State', 'Opened'], '2026-04-01 00:00:00'],
       // without the seconds, then without the year, which every row shares
       [520, ['#', 'Title', 'Author', 'State', 'Opened'], '04-01 00:00'],
-      [380, ['#', 'Title', 'Author', 'State'], null],
-      [220, ['#', 'Title'], null],
+      // the rows are sorted by Opened, which drops after the others and keeps its arrow
+      [380, ['#', 'Title', 'Author', 'Opened'], '04-01 00:00'],
+      [250, ['Title', 'Opened'], '04-01 00:00'],
       [100, ['Title'], null],
       [1000, ['#', 'Title', 'Author', 'State', 'Opened'], '2026-04-01 00:00:00'],
     ]
@@ -330,7 +331,16 @@ describe('the table beside the side panel', () => {
       if (width > 200) assert.ok(got.cells.Title.w >= 120, `${width}px: ${JSON.stringify(got)}`)
       // the search finds a time whole at every width, its year and seconds drawn or not: the three from 20:00 to 22:59
       if (opened) assert.equal(await march(), 3, `${width}px`)
+      if (titles.includes('Opened')) assert.equal(await frame().evaluate(() => document.querySelector('.thimble-table-th.active')?.textContent), 'Opened', `${width}px`)
     }
+    // a click on Author's head sorts by it: Opened drops now, as the rightmost, and State is drawn again
+    await at(380)
+    await frame().evaluate(() => (document.querySelector('.thimble-table-th[data-col="author"]') as HTMLElement).click())
+    const byAuthor = await columnsOf(frame)
+    assert.deepEqual(byAuthor.titles, ['#', 'Title', 'Author', 'State'], JSON.stringify(byAuthor))
+    assert.ok(inside(byAuthor), JSON.stringify(byAuthor))
+    assert.equal(await frame().evaluate(() => document.querySelector('.thimble-table-th.active')!.textContent), 'Author')
+    await frame().evaluate(() => (window as any).table.sortBy('t', true))
     // the current match is washed in the time it is in, where the time shows
     const washed = await frame().evaluate(() => {
       const w = window as any
@@ -368,7 +378,8 @@ window.table = thimble.table({ mount: '#list', sort: { by: 't', desc: true },
     const steps: [number, string[]][] = [
       [1000, ['From', 'Subject', 'Date']],
       [380, ['From', 'Subject', 'Date']],
-      [220, ['From', 'Subject']],
+      // the rows are sorted by Date, which drops after From
+      [260, ['Subject', 'Date']],
       [150, ['Subject']],
       [1000, ['From', 'Subject', 'Date']],
     ]
