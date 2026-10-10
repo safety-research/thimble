@@ -30,7 +30,7 @@ import { chipState, claimsIn, streamLink, streamStep, streaming } from './cite'
 import type { StreamLook, Streaming } from './cite'
 import type { CardData } from './draw'
 import { bareCard, cardWords, cid, citeSpans, citations, clip, cut, embeddedCards, labelRef, needsDrawing, quoted } from './lib'
-import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThreads, runIds, runShown, saysWriter, threadOf, withoutEnd, withoutNotes, withoutToldThreads, withoutWriterLines } from './model'
+import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThreads, noteLines, reportOf, runIds, runShown, saysWriter, threadOf, withoutEnd, withoutLines, withoutNotes, withoutToldThreads, withoutWriterLines } from './model'
 import { HOME_UI_EMPTY } from './home'
 import { keepLast, keepRow, loadKept, resetKept } from './kept'
 import { linesMessage, onListClick } from './lines'
@@ -489,6 +489,47 @@ async function withoutSaidWriter(cx: Ctx, row: string, text: string): Promise<st
   return rt.writerSaid.get(chat) === row || !rt.writerSaid.has(chat) ? text : withoutWriterLines(text)
 }
 
+/** A prompt of main's: when it reports on a subagent run (model.ts reportOf), one of the reports main answers next, and
+ *  whether it is the run's second report after a first that main answered with a `↳` line. Reports that come before
+ *  main's next text row are answered together, also when another prompt comes between: a task notification that comes
+ *  right after main answered the run's hand-back may start no turn of its own, and main then answers it atop its reply
+ *  to the analyst's next prompt (live check on 0.7.0). */
+function heard(text: string): void {
+  const r = reportOf(text)
+  if (!r) return
+  rt.answering ??= { reports: [] }
+  const first = rt.reports.get(r.agent)
+  let again = false
+  if (first && first.kind !== r.kind && !first.paired) {
+    first.paired = true
+    again = first.said
+  } else rt.reports.set(r.agent, { kind: r.kind, said: false, paired: false })
+  rt.answering.reports.push({ agent: r.agent, again })
+}
+
+/** Main's first text row after reports, which answers them: which of its `↳` lines are said and which repeat a run's
+ *  end said already (live QA on 0.7.0: `↳ The view builder finished` once for its hand-back and again for Claude Code's
+ *  task notification, which the browser's chat hides). For one report its lines answer it; for several, main writes a
+ *  line for each in their order, so where the row has one line per report each line answers its report; where that is
+ *  unclear, no line is hidden. Later rows answer something else, such as a fork that returned. */
+async function noteAnswer(cx: Ctx, row: string, text: string): Promise<void> {
+  const a = rt.answering
+  if (!a) return
+  rt.answering = null
+  const lines = noteLines(text)
+  const one = a.reports.length === 1
+  const mapped = !one && lines.length === a.reports.length
+  if (!lines.length) return
+  a.reports.forEach(r => {
+    const first = rt.reports.get(r.agent)
+    if (!r.again && (one || mapped) && first && !first.paired) first.said = true
+  })
+  const hide = one ? (a.reports[0]!.again ? lines : []) : mapped ? lines.filter((_, i) => a.reports[i]!.again) : []
+  if (!hide.length) return
+  rt.repeats.set(row, [...new Set([...(rt.repeats.get(row) ?? []), ...hide])])
+  if (rt.sc) await keepRow(cx, rt.sc.ws, row, { repeat: rt.repeats.get(row)! })
+}
+
 /** A row of main's chat with what thimble-term draws under it: the turn's cards (when no reply row carries them) and
  *  the side threads' rows. */
 async function underRow(cx: Ctx, e: ResolveInput & { requestId: string; viewport?: { columns: number } }, next: () => Promise<RenderElement>): Promise<RenderElement> {
@@ -524,6 +565,7 @@ async function restoreKept($: Dollar, cx: Ctx): Promise<void> {
     for (const id of [...(r.cards ?? []), ...(r.answer?.cards ?? []), ...embeddedCards(r.answer?.text ?? '')]) ids.add(id)
     for (const v of r.views ?? []) rt.viewsTold.add(v)
     for (const t of r.threads ?? []) rt.told.add(t.thread)
+    if (r.repeat?.length) rt.repeats.set(row, r.repeat)
     if (r.writer) {
       if (!rt.writerOf.has(row)) rt.writerOf.set(row, r.writer.chat)
       if (r.writer.first && !rt.writerSaid.has(r.writer.chat)) rt.writerSaid.set(r.writer.chat, row)
@@ -705,6 +747,7 @@ export const register: Register = on => {
     let msg = e.message
     try {
       if (rt.sc && e.agentId === undefined) {
+        if (msg.type === 'user' && (e.door === 'prompt' || e.door === 'delivery')) heard(resultText(msg.content))
         if (e.door === 'response' && Array.isArray(msg.content)) {
           const shown = msg.content as { type?: string; text?: string }[]
           const blocks = shown.map(b => (b.type === 'text' && typeof b.text === 'string' && asWritten.has(b.text) ? { ...b, text: asWritten.get(b.text)! } : b))
@@ -714,6 +757,7 @@ export const register: Register = on => {
             if (texts.length) rt.turn.parts.at(-1)!.push({ uuid: e.uuid, text: texts.join('\n\n') })
             if (blocks.some(b => b.type === 'tool_use')) rt.turn.parts.push([])
           }
+          if (rt.answering && texts.length) await noteAnswer(cxOf($), e.uuid, texts.join('\n'))
           // the cards a reply embeds, read so they draw
           const embeds = texts.flatMap(t => embeddedCards(t))
           if (embeds.length) void loadCards(cxOf($), embeds)
@@ -777,7 +821,9 @@ export const register: Register = on => {
     // Claude Code's own stand-in for a reply that never came (its `<synthetic>` text, as after a quit stopped a thread),
     // which main never wrote: not drawn (live check term-fix9, quirk 13)
     const said = SYNTHETIC_RE.test(e.props.text) ? '' : e.props.text
-    const text = await withoutSaidWriter(cx, e.requestId, namedThreads(withoutToldThreads(withoutEnd(said), rows, rt.told), rows))
+    // and none of main's `↳` lines that answer a subagent run's second report, whose first an earlier row answered
+    const repeats = rt.repeats.get(e.requestId)
+    const text = await withoutSaidWriter(cx, e.requestId, namedThreads(withoutToldThreads(withoutEnd(repeats ? withoutLines(said, repeats) : said), rows, rt.told), rows))
     const live = e.surface === 'terminal' || e.surface === 'desktop'
     if (!ids.length && !told && !views && !footer && text === e.props.text && !live && !needsDrawing(text)) return next(e)
     const { Box } = $.ui.resolve(e)

@@ -436,7 +436,12 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   the launcher puts the plugin copy's bin/ first on the session's PATH. thimble's tool results keep their card ids:
   main cites cards by them. Main's own `↳ thread <name>:` line names the thread by its first question in quotation
   marks, never its fork's slug, and is not drawn for a thread whose `↳` row thimble-term drew, which says the same
-  (ctrl+o's view still draws the reply's time and model over the hidden line: no hook reaches that header).
+  (ctrl+o's view still draws the reply's time and model over the hidden line: no hook reaches that header). A run of
+  one of thimble's agents reaches main twice, as its hand-back and as Claude Code's task notification, and main answers
+  each with a `↳` line (prompts/main.md); its line answering the second, after a row that said the first, is not drawn,
+  also atop main's reply to the analyst's next prompt when the notification started no turn of its own (in a reply to
+  several reports, a line each in their order, only that report's line), so `↳ The view builder finished; …` shows
+  once, as the browser shows neither.
 - Claude Code draws a hook's `systemMessage` as its own row under the hook's name (`⎿ UserPromptSubmit says: …`), which
   no render hook reaches. thimble's held hook prints there the lines of the events that reached main, so in terminal
   mode it shortens or leaves out those the chat's own rows already say: a thread's question (its fork's row and its `↳`
@@ -488,9 +493,15 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   the part under the pointer and its series (`May 24 · page deleted  14 events`). Labels that are timestamps read as the
   browser's date axis writes them, all in one form: `May 24`, the time only when one is not midnight (`May 24 12:30`),
   the year only when they span more than one, never an ISO stamp.
-- A line chart: y labels right-aligned in a column, axes in the rule gray, x labels dim at the ends and the middle
-  (timestamps in the bars' one form, `May 18`, never an ISO stamp), a legend row of `● series` entries; the pointer's
-  column `┊` with its readout on the readout row.
+- A line chart (an area and a scatter too): axes in the rule gray, with a `┤` or `┬` at each tick and its label dim
+  beside or under it. Numbers tick at round steps, whole for whole data (`0 100 200 300 400`, never `209.5`), the y
+  labels right-aligned in a column and the x labels as many as fit with 2 cells between (`0 1 2 … 8`, never `4.024`),
+  without separators (`2019`, never `2,019`). Times tick as the browser's date axis names their span: `09:00` within a
+  day, `Aug 28 12:00` within three days, `May 24` within 540 days, else `Oct 2019`; seconds only over a few minutes;
+  where the span crosses a year, the first tick and the first of each new year name it (`Dec 1, 2019 … Jan 1, 2020 …
+  Feb 1`). An axis that names its own values (Vega-Lite's `axis.values`, as thimble.chart's weekly and monthly lines
+  do) ticks at those, as the browser's does, every second or third where they do not all fit. Categories stand at the
+  ends and the middle. A legend row of `● series` entries; the pointer's column `┊` with its readout on the readout row.
 - A table: the column names bold, a `─` rule under each name as wide as its column, the rows right under it; numbers
   right-aligned in the card's column formats, as the browser's table writes them (`1,446`). Markdown tables in a reply take the same header.
 - A timeline: the axis across the content with its `●` marks in hue on a rule-gray line, its two end times dim under

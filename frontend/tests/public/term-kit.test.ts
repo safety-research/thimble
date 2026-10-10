@@ -664,6 +664,36 @@ describe('the time range', () => {
     for (const l of labels) expect(l).toMatch(/^(May|Jun) \d{1,2}$/)
   })
 
+  test('over years, the ticks step by the calendar and name the year, as the browser\'s axis does: `2020`, `Jul`, never a day of no year', async () => {
+    // live QA on 0.7.0 (10-10): a span of years ticked every 30 days from 1970, named `Oct 20 … Dec 19`, with no year
+    const S = Date.UTC(2019, 9, 20) / 1000
+    const range = kit.timeRange({})
+    range.data({ times: Array.from({ length: 200 }, (_, i) => S + i * 4 * 86400) })
+    const ticks = range.scale(100).ticks(12)
+    expect(ticks.map((t: any) => t.label)).toEqual(['2020', 'Jul', '2021', 'Jul'])
+    // each on the first of its month
+    expect(ticks.map((t: any) => new Date(t.t * 1000).toISOString().slice(0, 10))).toEqual(['2020-01-01', '2020-07-01', '2021-01-01', '2021-07-01'])
+    expect(range.readout()).toBe('Oct 20, 2019 – Dec 24, 2021 · 796d')
+    init({ cols: 102 })
+    kit.draw((d: any) => kit.axis(d, range.scale(d.cols), { gap: 12 }))
+    await tick()
+    expect(text()[0].trim().split(/\s+/)).toEqual(['2020', 'Jul', '2021', 'Jul'])
+  })
+
+  test('over weeks that cross a year, the first tick and the first of the new year name it; so do the readout and the tips', () => {
+    const S = Date.UTC(2019, 11, 10) / 1000
+    const range = kit.timeRange({})
+    range.data({ times: Array.from({ length: 30 }, (_, i) => S + i * 86400) })
+    expect(range.scale(100).ticks(12).map((t: any) => t.label)).toEqual(['Dec 12, 2019', 'Dec 19', 'Dec 26', 'Jan 2, 2020'])
+    expect(range.readout()).toBe('Dec 10, 2019 00:00 – Jan 8, 2020 00:00 · 29d')
+    expect(range.format(S + 86400, 3600)).toBe('Dec 11, 2019 00:00')
+    // hours across the new year's midnight: the date with its year on the first tick and where the year changes
+    const night = kit.timeRange({})
+    const N = Date.UTC(2019, 11, 31, 18) / 1000
+    night.data({ times: Array.from({ length: 13 }, (_, i) => N + i * 3600) })
+    expect(night.scale(60).ticks(10).map((t: any) => t.label)).toEqual(['Dec 31, 2019 18:00', '21:00', 'Jan 1, 2020 00:00', '03:00', '06:00'])
+  })
+
   test('with gap, an empty stretch longer than it is a break: each stretch takes its share of the cells, a break 4, drawn // on the strip and the axis', async () => {
     // three bursts of 40 minutes, the second 2 hours after the first and the third the next morning
     const burst = (t: number) => Array.from({ length: 41 }, (_, i) => t + i * 60)
