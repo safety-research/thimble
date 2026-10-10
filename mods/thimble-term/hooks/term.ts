@@ -127,11 +127,11 @@ export const rt = {
   writerSaid: new Map<string, string>(),
   // the first report of each subagent run main was told of (model.ts reportOf: a hand-back or a task notification), by
   // the agent's id: its kind, whether main's answer to it said a `↳` line, and whether the run's other report came since;
-  // the reports main answers next, in order, each with whether it is a run's second after a first main answered with a
-  // `↳` line, and whether main replied to them yet; and, by row, main's `↳` lines that answer such a second report,
-  // which are hidden, as the browser hides them
+  // the reports main's next text row answers, in order, each with whether it is a run's second after a first main
+  // answered with a `↳` line; and, by row, main's `↳` lines that answer such a second report, which are hidden, as the
+  // browser hides them
   reports: new Map<string, { kind: string; said: boolean; paired: boolean }>(),
-  answering: null as { reports: { agent: string; again: boolean }[]; replied: boolean } | null,
+  answering: null as { reports: { agent: string; again: boolean }[] } | null,
   repeats: new Map<string, string[]>(),
   // the cards read only for their questions (nameCards), each once
   named: new Set<string>(),

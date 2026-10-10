@@ -438,9 +438,10 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   marks, never its fork's slug, and is not drawn for a thread whose `↳` row thimble-term drew, which says the same
   (ctrl+o's view still draws the reply's time and model over the hidden line: no hook reaches that header). A run of
   one of thimble's agents reaches main twice, as its hand-back and as Claude Code's task notification, and main answers
-  each with a `↳` line (prompts/main.md); its line answering the second, after a row that said the first, is not drawn
-  (in a reply to several reports, a line each in their order, only that report's line), so `↳ The view builder
-  finished; …` shows once, as the browser shows neither.
+  each with a `↳` line (prompts/main.md); its line answering the second, after a row that said the first, is not drawn,
+  also atop main's reply to the analyst's next prompt when the notification started no turn of its own (in a reply to
+  several reports, a line each in their order, only that report's line), so `↳ The view builder finished; …` shows
+  once, as the browser shows neither.
 - Claude Code draws a hook's `systemMessage` as its own row under the hook's name (`⎿ UserPromptSubmit says: …`), which
   no render hook reaches. thimble's held hook prints there the lines of the events that reached main, so in terminal
   mode it shortens or leaves out those the chat's own rows already say: a thread's question (its fork's row and its `↳`

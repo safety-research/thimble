@@ -491,14 +491,13 @@ async function withoutSaidWriter(cx: Ctx, row: string, text: string): Promise<st
 
 /** A prompt of main's: when it reports on a subagent run (model.ts reportOf), one of the reports main answers next, and
  *  whether it is the run's second report after a first that main answered with a `↳` line. Reports that come before
- *  main replies are answered together; a prompt the analyst or an event gave (not a note of thimble's) answers none. */
-function heard(text: string, door: string, meta: boolean): void {
+ *  main's next text row are answered together, also when another prompt comes between: a task notification that comes
+ *  right after main answered the run's hand-back may start no turn of its own, and main then answers it atop its reply
+ *  to the analyst's next prompt (live check on 0.7.0). */
+function heard(text: string): void {
   const r = reportOf(text)
-  if (!r) {
-    if (door === 'prompt' && !meta) rt.answering = null
-    return
-  }
-  if (!rt.answering || rt.answering.replied) rt.answering = { reports: [], replied: false }
+  if (!r) return
+  rt.answering ??= { reports: [] }
   const first = rt.reports.get(r.agent)
   let again = false
   if (first && first.kind !== r.kind && !first.paired) {
@@ -508,18 +507,18 @@ function heard(text: string, door: string, meta: boolean): void {
   rt.answering.reports.push({ agent: r.agent, again })
 }
 
-/** A text row of main's answering reports: which of its `↳` lines are said and which repeat a run's end said already
- *  (live QA on 0.7.0: `↳ The view builder finished` once for its hand-back and again for Claude Code's task
- *  notification, which the browser's chat hides). For one report its lines answer it; for several, main writes a line
- *  for each in their order, so where the turn's first text row has one line per report each line answers its report;
- *  where that is unclear, no line is hidden. */
+/** Main's first text row after reports, which answers them: which of its `↳` lines are said and which repeat a run's
+ *  end said already (live QA on 0.7.0: `↳ The view builder finished` once for its hand-back and again for Claude Code's
+ *  task notification, which the browser's chat hides). For one report its lines answer it; for several, main writes a
+ *  line for each in their order, so where the row has one line per report each line answers its report; where that is
+ *  unclear, no line is hidden. Later rows answer something else, such as a fork that returned. */
 async function noteAnswer(cx: Ctx, row: string, text: string): Promise<void> {
   const a = rt.answering
   if (!a) return
+  rt.answering = null
   const lines = noteLines(text)
   const one = a.reports.length === 1
-  const mapped = !one && !a.replied && lines.length === a.reports.length
-  a.replied = true
+  const mapped = !one && lines.length === a.reports.length
   if (!lines.length) return
   a.reports.forEach(r => {
     const first = rt.reports.get(r.agent)
@@ -748,7 +747,7 @@ export const register: Register = on => {
     let msg = e.message
     try {
       if (rt.sc && e.agentId === undefined) {
-        if (msg.type === 'user' && (e.door === 'prompt' || e.door === 'delivery')) heard(resultText(msg.content), e.door, Boolean(msg.isMeta))
+        if (msg.type === 'user' && (e.door === 'prompt' || e.door === 'delivery')) heard(resultText(msg.content))
         if (e.door === 'response' && Array.isArray(msg.content)) {
           const shown = msg.content as { type?: string; text?: string }[]
           const blocks = shown.map(b => (b.type === 'text' && typeof b.text === 'string' && asWritten.has(b.text) ? { ...b, text: asWritten.get(b.text)! } : b))

@@ -614,11 +614,22 @@ test("main's `↳` line for one of thimble's agents is said once a run: not agai
   await handBack('e1e1e1e1')
   await append($, 'h8', [{ type: 'text', text: '↳ The writer and the check both finished; thimble shows them.' }])
   expect(await draw('h8', '↳ The writer and the check both finished; thimble shows them.')).toContain('both finished')
-  // the analyst's own prompt after a report answers none
+  // the live check on 0.7.0: a notification that came right after main answered the run's hand-back started no turn,
+  // and main said its line again atop its reply to the analyst's next prompt; only that line is left out
+  await handBack('f00df00d')
+  const checked = '↳ The Numbers check finished and left six comments on the report.'
+  await append($, 'h9', [{ type: 'text', text: checked }])
   await notice('f00df00d')
-  await prompt('p9', 'composer', 'What else?')
-  await append($, 'h9', [{ type: 'text', text: '↳ thread label-fields: answered what each field means' }])
-  expect(await draw('h9', '↳ thread label-fields: answered what each field means')).toContain('answered what each field means')
+  await prompt('p10', 'human', 'How many PRs did the managed runs merge in total?')
+  const reply = '↳ The Numbers check has finished. Thimble shows its six comments on the report.\n\nThe two managed runs merged 6 PRs in total.'
+  await append($, 'h10', [{ type: 'text', text: reply }])
+  expect(await draw('h9', checked)).toContain('The Numbers check finished')
+  const answered = await draw('h10', reply)
+  expect(answered).not.toContain('has finished')
+  expect(answered).toContain('merged 6 PRs in total')
+  // the turn's later rows answer something else, such as a fork that returned
+  await append($, 'h11', [{ type: 'text', text: '↳ thread label-fields: answered what each field means' }])
+  expect(await draw('h11', '↳ thread label-fields: answered what each field means')).toContain('answered what each field means')
 })
 
 test("a passage whose citation a side thread was asked about keeps a blue ↳ beside it, which opens that thread", async ($, on) => {
