@@ -26,7 +26,10 @@
 // thimble keeps the sort per view, and Reset puts back the one it opens with. A table too narrow for its columns, such
 // as one beside the side panel, first writes its times shorter, then narrows its columns of text to their `min`, then
 // drops columns in `drop` order (with none, the rightmost first, the one the rows are sorted by last, and never the main
-// column, the first column of text that takes the width left), and draws them again when the room comes back.
+// column, the first column of text that takes the width left), and draws them again when the room comes back. A head
+// never cuts its title: a column of text with a `width` narrower than its title widens to the title while the table has
+// room; in a column narrower than the title it wraps to two lines, and a column keeps the width of its title on two
+// lines, with room for the sort's arrow, before it drops.
 ;(function () {
   'use strict'
   var kit = window.__thimbleKit
@@ -79,6 +82,23 @@
       .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, function (m, e) {
         return { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", nbsp: ' ' }[e]
       })
+  }
+  // the two lines a head's title can wrap to: after a space, or after a slash or a hyphen inside a word, [first, second]
+  function twoLines(t) {
+    var out = []
+    for (var i = 1; i < t.length - 1; i++) {
+      var ch = t.charAt(i)
+      var at = ch === ' ' ? i : (ch === '/' || ch === '-') && t.charAt(i + 1) !== ' ' ? i + 1 : -1
+      if (at < 0) continue
+      var a = t.slice(0, at).trim()
+      var b = t.slice(at).trim()
+      if (a && b) out.push([a, b])
+    }
+    return out
+  }
+  // a head's title as markup, free to wrap after a slash or a hyphen inside a word as after a space (twoLines)
+  function titleHtml(t) {
+    return esc(t).replace(/([/-])(?=\S)/g, '$1<wbr>')
   }
   function cmp(a, b) {
     if (typeof a === 'number' && typeof b === 'number') return a - b
@@ -329,7 +349,35 @@
   Table.prototype.layout = function () {
     var self = this
     var charW = measureChar(this.mount) || CHAR
-    var heads = measureHeads(this.mount, this.columns)
+    // each title's width on one line, and the least width it takes on two (headLeast): the longer of its two lines
+    // where it wraps the most evenly, after a space, a slash or a hyphen, as the head draws it
+    var splits = this.columns.map(function (c) {
+      return twoLines(c.title)
+    })
+    var titles = this.columns.map(function (c) {
+      return c.title
+    })
+    splits.forEach(function (ls) {
+      ls.forEach(function (l) {
+        titles.push(l[0], l[1])
+      })
+    })
+    var widths = measureHeads(this.mount, titles)
+    var wide = function (k) {
+      return widths[k] || titles[k].length * charW
+    }
+    var heads = []
+    var headLeast = [] // px a column keeps so that its head shows its whole title, with the cell's padding and the arrow
+    var k = this.columns.length
+    this.columns.forEach(function (c, i) {
+      heads[i] = wide(i)
+      var two = heads[i]
+      splits[i].forEach(function () {
+        two = Math.min(two, Math.max(wide(k), wide(k + 1)))
+        k += 2
+      })
+      headLeast[i] = Math.ceil(two) + PAD + (c.sorts ? SORT_ROOM : 0)
+    })
     var sample = this.all.length > SAMPLE ? this.all.slice(0, SAMPLE) : this.all
     var fitW = function (w) {
       return Math.round(Math.max(MIN_W, Math.min(MAX_W, w)))
@@ -362,7 +410,10 @@
       var w = (typeof c.width === 'number' && c.width > 0) || (typeof c.width === 'string' && c.width) ? c.width : null
       self.forms[i] = null
       if (c.type === 'text') {
-        var keeps = c.min || (i === self.main ? MIN_MAIN : MIN_TEXT)
+        var keeps = Math.max(c.min || (i === self.main ? MIN_MAIN : MIN_TEXT), headLeast[i])
+        // a width in px narrower than the title takes the title on one line while the table has room, and gives that up
+        // with the other columns of text in a narrow table, its title wrapping to two lines
+        if (typeof w === 'number') w = Math.max(w, Math.ceil(heads[i]) + PAD + (c.sorts ? SORT_ROOM : 0))
         self.want[i] = w
         self.least[i] = typeof w === 'number' ? Math.min(w, keeps) : keeps
         self.ease[i] = i === self.main ? Math.max(keeps, EASE_MAIN) : keeps
@@ -370,7 +421,7 @@
       }
       if (typeof w === 'string') {
         self.want[i] = w
-        self.least[i] = self.ease[i] = MIN_W
+        self.least[i] = self.ease[i] = Math.max(MIN_W, headLeast[i])
         return
       }
       var most = 0
@@ -380,7 +431,8 @@
         most = Math.max(most, t.length)
         if (c.type === 'time' && t && typeof self.value(c, sample[k]) !== 'number') asWritten = Math.max(asWritten, t.length)
       }
-      if (w == null) w = fitW(Math.max(most * charW + PAD, (heads[i] || c.title.length * charW) + PAD + SORT_ROOM))
+      if (w == null) w = fitW(Math.max(most * charW + PAD, heads[i] + PAD + SORT_ROOM))
+      w = Math.max(w, headLeast[i])
       self.want[i] = w
       self.least[i] = w
       if (c.type !== 'time') return
@@ -389,7 +441,7 @@
       var forms = [{ secs: c.secs, year: true }, { secs: false, year: true }, { secs: false, year: c.years }]
       var steps = []
       forms.forEach(function (f, j) {
-        var fw = fitW(Math.max(asWritten, STAMP + (f.secs ? 3 : 0) - (f.year ? 0 : 5)) * charW + PAD)
+        var fw = Math.max(fitW(Math.max(asWritten, STAMP + (f.secs ? 3 : 0) - (f.year ? 0 : 5)) * charW + PAD), headLeast[i])
         if (!steps.length) {
           if (fw <= w || j === forms.length - 1) steps.push({ secs: f.secs, year: f.year, w: w })
         } else if (fw < steps[steps.length - 1].w) steps.push({ secs: f.secs, year: f.year, w: fw })
@@ -514,7 +566,7 @@
         return (
           '<div class="thimble-table-th thimble-table-' + c.type + (on ? ' active' : '') + '" role="columnheader" aria-sort="' + sort + '"' +
           (c.sorts ? ' data-col="' + esc(c.name) + '" tabindex="0" title="Sort by ' + esc(c.title) + '"' : '') + '>' +
-          '<span class="thimble-table-title">' + esc(c.title) + '</span>' + (on ? (s.desc ? ARROW.down : ARROW.up) : '') + '</div>'
+          '<span class="thimble-table-title">' + titleHtml(c.title) + '</span>' + (on ? (s.desc ? ARROW.down : ARROW.up) : '') + '</div>'
         )
       })
       .join('')
@@ -803,14 +855,14 @@
     return w
   }
 
-  // each column's title as wide as its head draws it, in capitals and spaced out, which a count of the cells'
+  // each of `titles` as wide as a head draws it on one line, in capitals and spaced out, which a count of the cells'
   // characters underrates (Comments lost its last letters beside the sort's arrow); 0 where nothing lays out
-  function measureHeads(at, columns) {
+  function measureHeads(at, titles) {
     var box = document.createElement('div')
     box.className = 'thimble-table-probe-heads'
-    box.innerHTML = columns
-      .map(function (c) {
-        return '<div class="thimble-table-th"><span class="thimble-table-title">' + esc(c.title) + '</span></div>'
+    box.innerHTML = titles
+      .map(function (t) {
+        return '<div class="thimble-table-th"><span class="thimble-table-title">' + esc(t) + '</span></div>'
       })
       .join('')
     at.appendChild(box)

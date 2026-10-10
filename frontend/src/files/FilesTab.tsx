@@ -1,7 +1,8 @@
 // The Files pane: the views bar across the top (File browser first), under it the sidebar (the files tree with the
 // Labels pane pinned to its bottom) and the reader for the open tab, or a picked view with a Labels-only sidebar; the
 // status strip along the bottom. Open files are tabs kept per workspace in browser storage; a workspace with none opens
-// its README, with its largest data file in the tab beside it (Tree.defaultTabs). A ref opens where it belongs: in the view it names, else in
+// its README, with its largest data file in the tab beside it (Tree.defaultTabs). The view shown is kept there too, so
+// a reload opens on it again while the views bar still lists it (keptView). A ref opens where it belongs: in the view it names, else in
 // the view the analyst last used for its file (kept per workspace), else in the File browser; Open in on the file's
 // panel lists the other views that claim it. Tree folders are fetched one at a time (Tree.useFolderStore). While the pane has the
 // focus, ⌘P focuses the search, ⌘F opens the find bar and Ctrl+G go to line (find.ts findKey).
@@ -66,6 +67,19 @@ function readTabs(key: string): KeptTabs {
   const tabs = Array.isArray(got?.tabs) ? [...new Set(got.tabs.filter((p): p is string => typeof p === 'string' && !!p))] : []
   const current = typeof got?.current === 'string' && tabs.includes(got.current) ? got.current : tabs[0] ?? null
   return { tabs, current }
+}
+
+/** The view Files showed before a reload, kept per workspace (its slug, null for the File browser): what the views bar
+ * opens on, once the views are read, while it still lists that view. */
+function readView(key: string): string | null {
+  const got = readStorage<unknown>(key, null)
+  return typeof got === 'string' && got ? got : null
+}
+
+/** What Files shows after a reload that kept the view `kept`: that view while the bar lists it (`views`), the File
+ * browser once the views are read and it is gone, and the view still, to wait for them, until then. Pure. */
+export function keptView(kept: string | null, views: readonly { slug: string }[], ready: boolean): string {
+  return kept && (!ready || views.some((v) => v.slug === kept)) ? viewKey(kept) : BROWSER
 }
 
 const NO_DOTS: readonly Presence[] = []
@@ -281,8 +295,9 @@ async function missingView(ws: string, slug: string): Promise<string> {
 export function FilesTab({ ws, active, focused = active }: { ws: string; active: boolean; focused?: boolean }) {
   const folders = useFolderStore(ws)
   const labels = useFilesLabels(ws)
-  const { views, proposals } = useViews(ws)
-  const [bar, setBar] = useState<string>(BROWSER)
+  const { views, proposals, ready: viewsReady } = useViews(ws)
+  const viewKeyName = storageKey(ws, 'filesView')
+  const [bar, setBar] = useState<string>(() => keptView(readView(viewKeyName), [], false))
   const [viewAt, setViewAt] = useState<Open | null>(null)
   const tabsKey = storageKey(ws, 'filesTabs')
   const [kept] = useState(() => readTabs(tabsKey))
@@ -320,6 +335,9 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   // dock.
   const dock = useDock(sideWidth)
   const shownView = slugOfKey(bar) ? views.find((v) => v.slug === slugOfKey(bar)) ?? null : null
+  // a view named before the views are read, such as the one kept from before a reload: the body waits for them rather
+  // than show the File browser for a moment
+  const waitingView = !viewsReady && !!slugOfKey(bar) && !shownView
   const fallbackSide = !!shownView && !shownView.label_controls
   const viewSideChoice = fallbackSide ? fallbackSideChoice : ownSideChoice
   const setViewSideChoice = fallbackSide ? setFallbackSideChoice : setOwnSideChoice
@@ -403,6 +421,16 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     [tabs, current],
   )
   useEffect(() => writeStorage(tabsKey, { tabs: tabs.map((t) => t.path), current } satisfies KeptTabs), [tabsKey, tabs, current])
+  useEffect(() => writeStorage(viewKeyName, slugOfKey(bar)), [viewKeyName, bar])
+  // the view kept from before a reload, once the views are read: the File browser in its place when it is gone
+  const keptSlug = useRef(slugOfKey(bar))
+  useEffect(() => {
+    const slug = keptSlug.current
+    if (!slug || !viewsReady) return
+    keptSlug.current = null
+    const next = keptView(slug, views, true)
+    setBar((b) => (b === viewKey(slug) ? next : b))
+  }, [viewsReady, views])
   // which file is in front, for the telemetry: a click on a file's tab names no file (its label is a file name)
   useEffect(() => {
     if (current) track('tab-activate', { target: current, detail: { panel: 'files' } })
@@ -667,7 +695,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     () => (openPath ? <OpenIn ws={ws} path={openPath} current={null} onOpen={(slug) => openIn(openPath, openRefAt, slug)} /> : null),
     [ws, openPath, openRefAt, openIn],
   )
-  const viewsBar = (compact: boolean) => <ViewsBar ws={ws} value={shownView ? bar : BROWSER} onChange={pickBar} views={views} proposals={proposals} compact={compact} />
+  const viewsBar = (compact: boolean) => <ViewsBar ws={ws} value={shownView || waitingView ? bar : BROWSER} onChange={pickBar} views={views} proposals={proposals} compact={compact} />
   return (
     <div className="files-tab" data-panel="files" ref={rootRef}>
       {viewsSlot ? createPortal(viewsBar(true), viewsSlot) : viewsBar(false)}
@@ -698,6 +726,8 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
           />
           {viewSideOpen && labelCard}
         </div>
+      ) : waitingView ? (
+        <div className="files-body is-view" />
       ) : (
         <div className="files-body" ref={dock.row}>
           <ReadProbe probe={dock.probe} />
@@ -737,7 +767,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
           {side.shown && labelCard}
         </div>
       )}
-      <PaneStatus name="Files" meta={shownView ? `view · ${shownView.name}${mode === 'Raw' ? ' · Raw' : ''}` : open ? [baseName(open.path), openIsDir ? '' : mode].filter(Boolean).join(' · ') : ''} totals={totals} />
+      <PaneStatus name="Files" meta={shownView ? `view · ${shownView.name}${mode === 'Raw' ? ' · Raw' : ''}` : open && !waitingView ? [baseName(open.path), openIsDir ? '' : mode].filter(Boolean).join(' · ') : ''} totals={totals} />
     </div>
   )
 }

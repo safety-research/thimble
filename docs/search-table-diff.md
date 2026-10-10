@@ -139,7 +139,7 @@ A column is `{name, title, type, width, min, drop, value(row), html(row), sort}`
 | key | what it is |
 |---|---|
 | `name` | the field as the records hold it |
-| `title` | its head, the name by default |
+| `title` | its head, the name by default. A head is never cut: a column takes its title on one line while the table has room, wraps it to two lines in a narrower table, and keeps its title's width on two lines before it drops |
 | `type` | `'text'` (the default), `'number'` (right-aligned, in the mono face) or `'time'` (seconds since 1970, shown as `2026-04-01 09:30` in UTC, with the seconds when the column's times have them; a string as written). A column too narrow for its times leaves out the seconds, then the year when every row has the same one |
 | `width` | px or a CSS track such as `'2fr'` (text shares what is left; numbers and times fit their widest value) |
 | `min` | the px a column of text keeps before columns drop: 120 for the main column, the first column of text without a `width` in px (else the first column of text), and 64 for the others by default, and never more than its `width` |

@@ -152,6 +152,8 @@ describe('the loupe shows each record in its own color', () => {
     expect(recordRow(150, 400, undefined, [null], paints)).toEqual({ num: '150', cells: [null, { colour: 'blue', faded: true }, null], who: null, text: '' })
     // read and found to have none: no cell
     expect(recordRow(150, 400, null, [], paints)).toEqual({ num: '150', cells: [null, null], who: null, text: '' })
-    expect(recordRow(3998, 10_000, { ...rec, line: 3998 }, [], paints).num).toBe('3,998')
+    // a line number is plain, as the reader writes it, never with a thousands separator
+    expect(recordRow(3998, 10_000, { ...rec, line: 3998 }, [], paints).num).toBe('3998')
+    expect(recordRow(12_150, 20_000, null, [], paints).num).toBe('12150')
   })
 })

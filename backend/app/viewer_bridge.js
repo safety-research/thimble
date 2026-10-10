@@ -106,7 +106,10 @@
   var openers = []
   var last = null
   var pointed = null
-  var picked = null // the data-anchor of the element the analyst last clicked since the last `open`
+  // the data-anchor of the element the analyst last clicked, or the ref the kit's side panel opened, since the last
+  // `open`; and whether the side panel closed since then with nothing picked after, so a newer version opens on none
+  var picked = null
+  var sideClosed = false
   var cardMode = !!(window.__thimbleView && window.__thimbleView.card)
   var init = null
   var initFns = []
@@ -580,6 +583,7 @@
     } else if (d.type === P + 'open') {
       last = d.open || {}
       picked = null
+      sideClosed = false
       for (var i = 0; i < openers.length; i++) {
         try {
           openers[i](last)
@@ -765,7 +769,10 @@
         return
       }
       var own = e.target && e.target.closest ? e.target.closest('[data-anchor]') : null
-      if (own) picked = own.getAttribute('data-anchor')
+      if (own) {
+        picked = own.getAttribute('data-anchor')
+        sideClosed = false
+      }
       // a link never takes the frame anywhere: the frame has no network, and a view moves with thimble.navigate
       var a = e.target && e.target.closest ? e.target.closest('a[href]') : null
       if (a) e.preventDefault()
@@ -1759,9 +1766,11 @@
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'data-colour', 'data-colour-tracks', 'class'] })
 
   // What the analyst is looking at, for a newer version of the view loaded in this page's place: `ref` the element they
-  // last clicked since the last `open`, `scroll` the scroll positions of the page and of each box scrolled, `fields`
-  // the values typed or picked in its inputs, and `segs` the chosen option of each segmented control, by its text. An
-  // element is named by its id, else by its path of child positions from the body.
+  // last clicked or the record the side panel opened since the last `open`, else the ref that `open` named, and none
+  // once they closed the side panel with nothing picked after, so that the newer version opens on no record; `scroll`
+  // the scroll positions of the page and of each box scrolled, `fields` the values typed or picked in its inputs, and
+  // `segs` the chosen option of each segmented control, by its text. An element is named by its id, else by its path
+  // of child positions from the body.
   var SCAN_MAX = 5000
   function pathOf(el) {
     if (el === document.scrollingElement || el === document.documentElement || el === document.body) return ''
@@ -1803,7 +1812,7 @@
     var segs = []
     var chosen = document.querySelectorAll('.seg .seg-opt.active')
     for (var k = 0; k < chosen.length; k++) segs.push({ path: pathOf(chosen[k].closest('.seg')), text: chosen[k].textContent.trim() })
-    return { ref: picked || (last && last.ref) || null, scroll: scroll, fields: fields, segs: segs }
+    return { ref: picked || (sideClosed ? null : last && last.ref) || null, scroll: scroll, fields: fields, segs: segs }
   }
   // The state put back, again after each change of the page, until it has been quiet for QUOTE_QUIET ms with no fetch
   // pending or RESTORE_MAX ms pass, or the analyst scrolls, clicks or types: each field and segmented control once it is
@@ -1872,8 +1881,8 @@
 
   // What the view kit's own controls (viewer_colour.js and viewer_range.js, loaded right after this bridge) need of it,
   // handed over once (the last of them takes it away): they hear the labels and marks without registering the page's
-  // onLabels, set the Color by choice the marks are drawn by, have the page drawn again, and keep the choice and the
-  // time ranges with thimble.
+  // onLabels, set the Color by choice the marks are drawn by, have the page drawn again, keep the choice and the time
+  // ranges with thimble, and say what the side panel shows (viewer_side.js), which a newer version opens on.
   window.__thimbleKit = {
     labels: function (fn) {
       kitFns.push(fn)
@@ -1886,6 +1895,11 @@
     paint: paintSoon,
     save: function (state) {
       post({ type: P + 'colour', state: state })
+    },
+    // the side panel opened the record `ref`, or closed (null)
+    shows: function (ref) {
+      picked = ref == null ? null : String(ref)
+      sideClosed = ref == null
     },
     gesture: gesture,
     report: report,

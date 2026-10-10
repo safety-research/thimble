@@ -23,8 +23,9 @@
 //             hears labelEditorClosed {id, focus} when it closes: the call's id, and whether the focus came back
 //   hidden    how many anchored refs the bridge hides for the label filter, which with what the reader left out for
 //             it (the records answers' `hidden`) is the count the view's head shows (onHidden)
-//   state     what the analyst is looking at (the element they picked, scroll positions, fields), asked for through
-//             `handle` before a newer version replaces the page, and sent back as `restore` once that version is ready
+//   state     what the analyst is looking at (the element they picked or the record the side panel shows, none once
+//             they closed it, scroll positions, fields), asked for through `handle` before a newer version replaces the
+//             page, and sent back as `restore` once that version is ready
 //   colour    the page's Colour by choice (backend/app/viewer_colour.js), kept in this browser per view and put in the
 //             page as window.__thimbleColour when it is built again
 // plus ready, error, point and cmd (for the ⌘ pointer). A new ref is sent as a new `open` without reloading the page.
@@ -517,9 +518,11 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
     const c = drawn.current
     if (c) post({ type: P + 'init', mode: c.mode, data: c.data, args: c.args, width: c.width, card: c.id, key: c.key })
   }
+  // the page with no record named: the file the view was opened on, else its own start
+  const bare = (): ViewOpen => (path && !drawn.current ? { ref: null, path, ...(pathPicked ? { picked: true } : {}) } : { ref: null })
   const sendOpen = async (r: string | undefined) => {
-    let open: ViewOpen = path ? { ref: null, path, ...(pathPicked ? { picked: true } : {}) } : { ref: null }
-    if (drawn.current) open = r ? ({ ref: r, target: { ref: r, pick: !!pick.current } } as ViewOpen) : { ref: null }
+    let open = bare()
+    if (drawn.current && r) open = { ref: r, target: { ref: r, pick: !!pick.current } } as ViewOpen
     else if (r) {
       try {
         open = await api.viewOpen(ws, slug, r, version)
@@ -532,12 +535,15 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
     const withQuery = drawn.current ? open : { ...open, query: viewQuery.current ?? null }
     if (target.current === r) post({ type: P + 'open', open: withQuery, quote: q && q.record === r ? q : undefined })
   }
-  // A newer version's page opens where the analyst was, when this version knows that place, else where the ref it was
-  // given names; then the rest of what they were looking at is put back.
+  // A newer version's page opens where the analyst was: at the record the page showed, when this version knows that
+  // place, else where the ref it was given names; and on no record when the page showed none, as once they closed the
+  // side panel, though the view was opened at a ref (a newer version opened that way says none in its turn). Then the
+  // rest of what they were looking at is put back.
   const reopen = async (st: ViewState) => {
     const at = st.ref && st.ref !== target.current ? await api.viewOpen(ws, slug, st.ref, version).catch(() => null) : null
     if (at && !at.error) post({ type: P + 'open', open: { ...at, query: viewQuery.current ?? null } })
-    else await sendOpen(target.current)
+    else if (st.ref) await sendOpen(target.current)
+    else post({ type: P + 'open', open: { ...bare(), query: viewQuery.current ?? null } })
     post({ type: P + 'restore', state: st })
   }
 
