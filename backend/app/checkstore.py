@@ -363,11 +363,11 @@ def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, r
     fix_id = _id("fix")
     before = {f: copy.deepcopy(cell.get(f)) for f in fields}
     content, shown = notebook.content_of(cell), notebook.shown_of(cell)  # for the card's history (notebook.stamp_edit)
-    ran, was = None, ""  # the run the new code replaces, and a digest of all that its outputs show (notebook.outputs_key)
+    ran, was = None, ""  # the run the new code replaces, and a digest of all that it shows (_shown_key)
     if "code" in fields:
         ran = {"outputs": cell.get("outputs") or [], "status": cell.get("status"), "labels": cell.get("labels") or [],
                "label_revs": cell.get("label_revs") or {}}
-        was = notebook.outputs_key(ws, cell.get("outputs"))
+        was = _shown_key(ws, cell)
         notebook.land_run(c, nb, cell, str(patch["code"]), copy.deepcopy(cand["outputs"]), "ok", by=ACTOR,
                           labels=cand.get("labels"), label_revs=cand.get("label_revs"))
     if "title" in fields:
@@ -400,17 +400,26 @@ def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, r
     return copy.deepcopy(fix)
 
 
+def _shown_key(ws: Path, cell: dict) -> str:
+    """A digest of all that a card's run shows: its outputs (notebook.outputs_key) and the labels it read, at the
+    revisions it read them, which color its marks and say when a label changed since the run."""
+    from . import notebook  # noqa: PLC0415
+
+    read = json.dumps([list(cell.get("labels") or []), cell.get("label_revs") or {}], sort_keys=True, default=str)
+    return f"{notebook.outputs_key(ws, cell.get('outputs'))} {read}"
+
+
 def shows_same(ws: Path, cell: dict, rec: dict, fields: list[str], was: str) -> bool:
     """Whether a fix left all that card `cell` shows as it was, as edit_card's `## edit_card-same-outputs` tells an
     author: it changed the code alone, of a card that does not show its code (a code card does), the new code gave the
-    outputs the card showed before (`was`, notebook.outputs_key of them), and the check `rec` found no numbers typed into
-    the code, whose red ✕ a fix of the code takes away."""
+    outputs the card showed before and read the same labels (`was`, _shown_key of the card before), and the check `rec`
+    found no numbers typed into the code, whose red ✕ a fix of the code takes away."""
     from . import notebook  # noqa: PLC0415
 
     render = (rec.get("stages") or {}).get("render")
     typed = render.get("typed") if isinstance(render, dict) else None
     return (fields == ["code"] and bool(was) and str(cell.get("kind") or notebook.DEFAULT_KIND) != "code" and not typed
-            and was == notebook.outputs_key(ws, cell.get("outputs")))
+            and was == _shown_key(ws, cell))
 
 
 @_changes

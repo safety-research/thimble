@@ -266,21 +266,24 @@ async def test_a_card_checks_fix_that_shows_the_same_outputs_is_a_version_in_the
 
 
 async def test_a_fix_with_the_same_outputs_is_a_fix_on_a_card_that_shows_its_code_or_its_typed_numbers(group, ran):
-    """A fix whose new code shows the same outputs still changes what a code card shows, its code, and takes the red ✕
-    for numbers typed into the code off a card: both are fixes, marked fixed as before."""
+    """A fix whose new code shows the same outputs still changes what a code card shows, its code, takes the red ✕
+    for numbers typed into the code off a card, and changes the labels a card's marks are colored by when its code reads
+    other labels: all are fixes, marked fixed as before."""
     same = {"status": "ok", "code": "print( 1)", "outputs": [{"text/plain": "out: print(1)"}], "labels": [], "label_revs": {}}
     shown = _cid(await call("add_card", group, kind="code", question="How many?", code="print(1)", takeaway="One."))
     typed = _cid(await call("add_card", group, kind="table", question="How many?", code="print(1)", takeaway="One."))
+    relabeled = _cid(await call("add_card", group, kind="table", question="How many?", code="print(1)", takeaway="One."))
     plain = _cid(await call("add_card", group, kind="table", question="How many?", code="print(1)", takeaway="One."))
     got = {}
-    for cid in (shown, typed, plain):
+    for cid in (shown, typed, relabeled, plain):
         chk = checkstore.begin(CORPUS, cid)
         if cid == typed:
             assert checkstore.stage(CORPUS, cid, chk, "render", {"status": "ok", "typed": ["4", "5", "6"]})
-        got[cid] = checkstore.apply_fix(CORPUS, cid, chk, {"code": "print( 1)"}, same, "the question was vague")["state"]
-    assert got == {shown: "applied", typed: "applied", plain: checkstore.SAME}
-    assert [len(_cell(cid).get("fixes") or []) for cid in (shown, typed, plain)] == [1, 1, 0]
-    assert all(_edits(cid)[-1]["by"] == checkstore.ACTOR for cid in (shown, typed, plain))
+        cand = {**same, "labels": ["outcome"], "label_revs": {"outcome": 2}} if cid == relabeled else same
+        got[cid] = checkstore.apply_fix(CORPUS, cid, chk, {"code": "print( 1)"}, cand, "the question was vague")["state"]
+    assert got == {shown: "applied", typed: "applied", relabeled: "applied", plain: checkstore.SAME}
+    assert [len(_cell(cid).get("fixes") or []) for cid in (shown, typed, relabeled, plain)] == [1, 1, 1, 0]
+    assert all(_edits(cid)[-1]["by"] == checkstore.ACTOR for cid in (shown, typed, relabeled, plain))
 
 
 async def test_a_takeaway_written_over_another_is_an_entry_and_a_late_first_one_too(group, monkeypatch):
