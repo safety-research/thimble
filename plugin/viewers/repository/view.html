@@ -2,8 +2,8 @@
 <html>
 <head>
 <style>
-  /* thimble's parts (.chip, .btn, .seg, .field, .avatar), its Color by and Filter by and its side panel come with the
-     frame; this page draws a code forge's repository pages in thimble's tokens */
+  /* thimble's parts (.chip, .btn, .seg, .avatar), its search, Filter by, Color by, table, side panel, messages, diff and
+     text come with the frame; this page lays out a code forge's repository pages in thimble's tokens */
   html, body { margin: 0; height: 100%; }
   body { background: var(--surface-card); overflow: hidden; }
   * { box-sizing: border-box; }
@@ -36,42 +36,24 @@
   .count { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: var(--radius-chip); background: rgba(var(--ink-rgb), 0.07); color: var(--text-secondary); text-align: center; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
 
   .top { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 16px 8px; }
-  .search { flex: 0 1 170px; min-width: 80px; }
+  #search { flex: 0 1 260px; min-width: 200px; }
   #filter, #colour { min-width: 0; }
   #body { flex: 1; min-height: 0; border-top: 1px solid var(--border-subtle); }
-  #list { overflow: auto; padding: 12px 16px 24px; container-type: inline-size; }
+  #list { flex: 1; min-width: 0; }
 
-  .ico { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+  .ico { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
   .ico .fill { fill: currentColor; stroke: none; }
   .dim { color: var(--text-tertiary); }
-  .mono { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
 
-  /* the list: one box, the names of its numbers over its rows, the rows on hairlines */
-  .box { margin: 0 0 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--surface-card); }
-  .box-head, .item { display: grid; grid-template-columns: 22px minmax(0, 1fr) var(--cols); align-items: center; gap: 0 12px; }
-  .box-head { padding: 8px 14px 8px 12px; border-bottom: 1px solid var(--border-subtle); border-radius: var(--radius-card) var(--radius-card) 0 0; background: rgba(var(--ink-rgb), 0.03); color: var(--text-secondary); font: 400 var(--text-ui-sm) / 1.3 var(--font-body); }
-  .heads { display: contents; }
-  .heads span, .num { text-align: right; white-space: nowrap; }
-  .item { padding: 9px 14px 9px 12px; border-top: 1px solid var(--border-hairline); cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 58px; }
-  .box-head + .item { border-top: 0; }
-  .item:hover { background: var(--surface-hover); }
-  .item.active { background: var(--surface-selected); }
-  .item:last-child { border-radius: 0 0 var(--radius-card) var(--radius-card); }
-  /* under Color by's bar (the bridge's data-thimble-edge) the last row's corner and the box's go square, so the bar stays straight */
-  .item:last-child[data-thimble-edge], .box:has(> .item:last-child[data-thimble-edge]) { border-bottom-left-radius: 0; }
-  .state { color: var(--text-secondary); align-self: start; padding-top: 2px; }
-  .main { min-width: 0; }
+  /* a row's cells: the state's icon or the author's avatar; the title in the forge's weight, cut before the records' mix
+     and the area, a label as the forge's, in words; the counts with their icons; who replied, their avatars overlapping */
+  .state { color: var(--text-secondary); }
   .line1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 var(--text-sm) / 1.4 var(--font-body); }
-  .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font: 400 var(--text-ui-sm) / 1.5 var(--font-body); }
-  .lead { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-secondary); }
-  .num { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
-  .num .ico { width: 14px; height: 14px; }
-  .people { display: inline-flex; margin-right: 4px; vertical-align: middle; }
+  .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .line1 .chip, .line1 .thimble-mix { flex: none; }
+  .num .ico { width: 13px; height: 13px; margin-right: 2px; }
+  .people { display: inline-flex; margin-right: 6px; vertical-align: middle; }
   .people .avatar { width: 18px; height: 18px; margin-right: -4px; font-size: 9px; box-shadow: 0 0 0 1.5px var(--surface-card); }
-  .empty { padding: 28px 4px; color: var(--text-tertiary); }
-  /* the list's numbers give way to the titles in a narrow list */
-  @container (max-width: 560px) { .box-head, .item { grid-template-columns: 22px minmax(0, 1fr); } .heads, .num { display: none; } .box-head { display: none; } }
 
   /* an item's page in the side panel: its state and facts, the links to its issue or pull requests, then its parts */
   .page-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 2px 0 10px; color: var(--text-secondary); }
@@ -82,62 +64,17 @@
   .go { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--text-primary); cursor: pointer; text-align: left; }
   .go:hover { text-decoration: underline; }
   .go .ico { width: 14px; height: 14px; color: var(--text-secondary); }
-  .parts { margin: 4px 0 12px; }
-
-  /* a conversation: the forge's timeline, each event on a line with its icon and comments in boxes */
-  .tl { position: relative; padding: 2px 0 6px; }
-  .ev { position: relative; display: flex; align-items: flex-start; gap: 8px; padding: 5px 4px 5px 8px; color: var(--text-secondary); }
-  .badge { display: grid; place-items: center; flex: none; width: 16px; height: 18px; background: var(--surface-card); }
-  .ev-words { flex: 1; min-width: 0; padding-top: 1px; overflow-wrap: anywhere; }
-  .ev-words b { color: var(--text-primary); font-weight: 600; }
-  .ev time, .card-head time { flex: none; padding-top: 1px; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
-  .card { position: relative; margin: 6px 0 8px; padding-left: 8px; }
-  .card-box { border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--surface-card); }
-  .card-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); border-radius: var(--radius-card) var(--radius-card) 0 0; background: rgba(var(--ink-rgb), 0.03); color: var(--text-secondary); }
-  .card-head .said { flex: 1; min-width: 0; }
-  .card-head b { color: var(--text-primary); font-weight: 600; }
-  .text { padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .ev .text { padding: 4px 0 0; color: var(--text-primary); }
-  .focus { background: var(--surface-selected); }
-  .card.focus { background: none; }
-  .card.focus .card-box { background: var(--surface-selected); }
-  .ref { padding: 0; border: 0; background: none; color: var(--text-accent); cursor: pointer; }
-  .ref:hover { text-decoration: underline; }
-  code { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-secondary); }
-
-  /* commits, and the changed files as the commits' diffs by file, the signs in a gutter */
-  .commit { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 0 8px; align-items: start; padding: 7px 8px; border-top: 1px solid var(--border-hairline); }
-  .commit:first-child { border-top: 0; }
-  .commit b { font-weight: 500; }
-  .file { margin: 0 0 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); overflow: hidden; }
-  .file-head { display: flex; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); background: rgba(var(--ink-rgb), 0.03); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
-  .file-head span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-  .hunk { padding: 0 0 4px 6px; }
-  .hunk-head { padding: 4px 4px 2px; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
-  /* a long line wraps in place, so the panel never scrolls sideways */
-  .diff { margin: 0; font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
-  .diff div { display: grid; grid-template-columns: 16px minmax(0, 1fr); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); }
-  .diff div::before { content: attr(data-s); color: var(--text-tertiary); text-align: center; }
-  .diff .add { color: var(--text-primary); background: rgba(var(--ink-rgb), 0.05); }
-  .diff .del { color: var(--text-tertiary); background: rgba(var(--ink-rgb), 0.025); }
-
-  /* a thread as a social board draws it: the first post, the replies indented under it, each with its author's avatar,
-     time and words */
-  .post { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 0 10px; padding: 8px; }
-  .post:not(.op) { margin-left: 24px; }
-  .rail { display: flex; justify-content: center; }
-  .rail .avatar { width: 32px; height: 32px; font-size: 13px; }
-  .post-head { display: flex; align-items: baseline; gap: 8px; }
-  .post-head b { font-weight: 600; }
-  .post .text { padding: 2px 0 0; }
-  .post.op .text { font-size: var(--text-lg, 15px); line-height: 1.45; }
-  .feed .item { align-items: start; }
+  .parts { flex-wrap: wrap; margin: 4px 0 12px; }
+  /* the changed files: each commit's patch under its sha and message */
+  .change { margin: 0 0 16px; }
+  .change-head { display: flex; gap: 8px; align-items: baseline; margin: 0 0 6px; color: var(--text-secondary); }
+  .change-head code { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
 
   /* an agent's profile */
   .who { display: flex; align-items: center; gap: 12px; margin: 4px 0 12px; }
   .who .avatar { width: 44px; height: 44px; font-size: 18px; }
   .who b { display: block; font: 600 var(--text-lg, 15px) / 1.3 var(--font-body); }
-  .note { margin: 0 0 12px; padding: 8px 10px; border-left: 3px solid var(--border-strong); color: var(--text-secondary); }
+  .note { margin: 0 0 12px; color: var(--text-secondary); }
   .did { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 12px; color: var(--text-secondary); }
   .did b { color: var(--text-primary); font-weight: 600; }
 </style>
@@ -147,7 +84,7 @@
   <header class="repo" id="repo"></header>
   <nav class="tabs" id="tabs" aria-label="Kind of item"></nav>
   <div class="top">
-    <input class="field search" id="q" type="search" placeholder="Search" aria-label="Search">
+    <span id="search"></span>
     <span id="filter"></span>
     <span id="colour"></span>
   </div>
@@ -156,24 +93,26 @@
 <script>
 // Several agent runs on one library, each run its own repository on a code forge, drawn the way the forge draws one
 // repository. Overview: the repository's head, whose switcher chooses the run (one run at a time, the others a click
-// away), the forge's tabs with their counts, and the chosen tab's items as the forge lists them: pull requests and
-// issues with their states, reviews and comments, threads as a board's feed, agents as people. Zoom and filter: Filter
-// by any field or label, and the search the items whose words hold it; Color by's chips only color. Details on
-// demand: an item opens as its page in the side panel: a pull request's conversation, commits and changed files, an
-// issue's timeline, a thread's posts, an agent's profile. Color marks the unit its value belongs to: a field of the
-// items colors their rows and the scrollbar beside them, an agent's row under Author by its own name; a label marks
-// records, so it colors the records on an item's page, and a row, which stands for its records, shows only their mix,
-// as an agent's row does under a field of the items it worked on (state, area).
+// away), the forge's tabs with their counts, and the chosen tab's items in a table with the forge's columns: pull
+// requests and issues with their states, reviews and comments, threads with their posts, agents with what they did.
+// Zoom and filter: Filter by any field or label, the search the items whose words hold it, and a click on a column's
+// head sorts; Color by's chips only color. Details on demand: an item opens as its page in the side panel: a pull
+// request's conversation, commits and changed files, an issue's timeline, a thread's posts, an agent's profile. Color
+// marks the unit its value belongs to: a field of the items colors their rows and the scrollbar beside them, an agent's
+// row under Author by its own name; a label marks records, so it colors the records on an item's page, and a row, which
+// stands for its records, shows only their mix, as an agent's row does under a field of the items it worked on (state,
+// area).
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 const $ = (id) => document.getElementById(id)
 const slug = (thimble.view && thimble.view.slug) || 'repository'
+const unit = (key) => `view:${slug}/${key}` // an item's ref, its row's data-anchor
 
-// the forge's tabs: what each lists, and the headings of its list's numbers with their widths
+// the forge's tabs and what each lists
 const TABS = [
-  { tab: 'pulls', name: 'Pull requests', icon: 'pr', heads: ['Reviews', 'Comments', 'Lines'], cols: '76px 72px 84px' },
-  { tab: 'issues', name: 'Issues', icon: 'issue', heads: ['Fixed by', 'Comments'], cols: '76px 72px' },
-  { tab: 'discussions', name: 'Discussions', icon: 'talk', heads: ['Posts', 'Last post'], cols: '52px 68px' },
-  { tab: 'agents', name: 'Agents', icon: 'person', heads: ['Pull requests', 'Reviews', 'Merges', 'Comments'], cols: '92px 62px 58px 72px' },
+  { tab: 'pulls', name: 'Pull requests', icon: 'pr' },
+  { tab: 'issues', name: 'Issues', icon: 'issue' },
+  { tab: 'discussions', name: 'Discussions', icon: 'talk' },
+  { tab: 'agents', name: 'Agents', icon: 'person' },
 ]
 const TAB_OF = { pull: 'pulls', issues: 'issues', discussions: 'discussions', agents: 'agents' } // a key's second part
 
@@ -191,13 +130,8 @@ const ICONS = {
   talk: '<path d="M2.5 3h8v5.5H6l-2.5 2v-2h-1z"/><path d="M12.5 6.5h1V12h-1v2L10 12H6.5"/>',
   person: '<circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c.8-2.4 2.7-3.7 5-3.7s4.2 1.3 5 3.7"/>',
   comment: '<path d="M2.5 3h11v7.5H7l-3 2.5v-2.5H2.5z"/>',
-  commit: '<circle cx="8" cy="8" r="2.5"/><path d="M1 8h4.5M10.5 8H15"/>',
   approved: '<path d="M3.5 8.5l3 3 6-6.5"/>',
   changes: '<path d="M8 2.5v6M5 5.5h6M5 12.5h6"/>',
-  reviewed: '<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="1.8"/>',
-  reopened: '<path d="M12.6 7.2A4.7 4.7 0 1 0 11.4 11"/><path d="M13 3.5v3.7H9.3"/>',
-  x: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
-  flag: '<path d="M4 14V2.5M4 3h7.5l-1.8 2.8 1.8 2.7H4"/>',
 }
 const ico = (name) => `<svg class="ico" viewBox="0 0 16 16" aria-hidden="true">${ICONS[name]}</svg>`
 // a state's icon and word, by tab
@@ -205,9 +139,8 @@ const STATE = {
   pulls: { open: ['pr', 'Open'], merged: ['merged', 'Merged'], closed: ['prclosed', 'Closed'] },
   issues: { open: ['issue', 'Open'], fixed: ['fixed', 'Fixed'], closed: ['closed', 'Closed'] },
 }
-// a record's icon on a timeline, by its kind; a review's by its verdict, with what its line says
-const EVENT = { commit: 'commit', merge: 'merged', close: 'x', reopen: 'reopened', pr: 'pr', issue: 'issue', comment: 'comment', post: 'comment', agent: 'flag' }
-const VERDICT = { approved: ['approved', 'approved these changes'], 'changes requested': ['changes', 'requested changes'], commented: ['reviewed', 'reviewed'] }
+// a review's icon on a timeline (thimble.messages' own), and what its line says
+const VERDICT = { approved: ['approve', 'approved these changes'], 'changes requested': ['changes', 'requested changes'], commented: ['comment', 'reviewed'] }
 
 const hm = (t) => new Date(t * 1000).toISOString().slice(11, 16)
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -220,6 +153,7 @@ function took(a, b) {
 }
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const cap = (s) => String(s || '').replace(/^./, (c) => c.toUpperCase())
+const firstLine = (s) => String(s || '').split('\n')[0]
 // an avatar's shade from its name, so people tell apart without a colour
 function shade(name) {
   let h = 0
@@ -231,6 +165,7 @@ const avatar = (name) => `<span class="avatar" style="--a:${shade(name)}" title=
 let tab = 'pulls'
 let run = null // the run whose repository shows, the reader's first until one is chosen
 let data = null // the reader's answer for the run's tab (reader.py _view)
+let shown = [] // the tab's items the search keeps
 let open = null // the item in the side panel: {key, ref (the record a citation opened), part (a pull request's tab)}
 let want = null // a place thimble asked for before the items arrived
 const units = new Map() // each opened item's page (reader.py _detail)
@@ -248,14 +183,17 @@ const FIELDS = [
   { name: 'area', title: 'Area', description: 'The part of the library: the first label, else the area of the issue it fixes' },
   { name: 'author', title: 'Author', description: 'Who opened the pull request or the issue, or started the thread' },
 ]
+// the search keeps the items whose words hold it, their records' words among them, and marks the words in the rows
+const search = thimble.search({ mount: '#search', placeholder: 'Search', onChange: draw })
 const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, onChange: load })
 const colour = thimble.colorBy({ mount: '#colour', fields: FIELDS, onChange: load })
-const side = thimble.side({ mount: '#body', width: 0.45, onClose: () => { open = null; draw() } })
-// Reset puts back the run the view opens on, as it puts back the chips
+const side = thimble.side({ mount: '#body', width: 0.45, onClose: () => { open = null } })
+// Reset puts back the run the view opens on, as it puts back the chips and empties the search, and the page draws again
+// with what they keep
 const first = () => (data && data.runs.length ? data.runs[0].run : null)
 const resetRun = thimble.onReset({
   changed: () => !!data && run !== first(),
-  reset: () => { if (run !== first()) choose(first()) },
+  reset: () => (run !== first() ? choose(first()) : load()),
 })
 
 async function load() {
@@ -268,13 +206,15 @@ async function load() {
   }
   data = got
   run = got.run
+  for (const it of got.items) it.ref = unit(it.key)
   colour.counts(got.counts)
   filter.counts(got.filtered)
   resetRun.check()
   units.clear()
-  if (open && got.items.some((it) => it.key === open.key)) await page(open.key, open.ref, open.part)
-  else if (open) side.close()
   draw()
+  // the page open is drawn again with the records the filters keep now, or closes with its item
+  if (open && got.items.some((it) => it.key === open.key)) fill(side.body, open.key)
+  else if (open) side.close()
   if (want) go()
 }
 
@@ -319,205 +259,200 @@ async function choose(r) {
   if (!r || r === run) return
   run = r
   side.close()
-  open = null
   $('list').scrollTop = 0
   await load()
 }
 
 // ------------------------------------------------------------------------------------------------ the list
 
-function draw() {
-  head()
-  $('tabs').innerHTML = TABS.map((t) => `<button type="button" class="tab${t.tab === tab ? ' on' : ''}" data-tab="${t.tab}">${ico(t.icon)}<span class="tab-name">${t.name}</span>` +
-    `<span class="count">${data ? data.tabs[t.tab] : ''}</span></button>`).join('')
-  if (!data) return
-  const q = $('q').value.trim().toLowerCase()
-  const shown = data.items.filter((it) => !q || it.search.includes(q))
-  const T = TABS.find((t) => t.tab === tab)
-  $('list').classList.toggle('feed', tab === 'discussions')
-  $('list').innerHTML = shown.length
-    ? `<section class="box" style="--cols:${T.cols}"><div class="box-head"><span></span><span></span><span class="heads">${T.heads.map((h) => `<span>${h}</span>`).join('')}</span></div>` +
-      shown.map(ROW[tab]).join('') + '</section>'
-    : `<div class="empty">No ${T.name.toLowerCase()}</div>`
-  // the colored scrollbar only on a list of what is colored: the rows while a field colors them; the kit's plain track
-  // while the rows stand for the records a label or a field colors (they show their mix), or Color by is Off
-  colour.strip('#list', { whole: !!colour.field && !shown.some((it) => it.mix) })
-}
-
-// a row: under a field, the bar of its value; a row that stands for its records (any under a label, which marks
-// records, and an agent's under a field it does not carry) none, its records' mix shown in the row (mix) and their own
-// bars on its page
-const rowOpen = (it) => `<div class="item${open && open.key === it.key ? ' active' : ''}" data-key="${esc(it.key)}" data-anchor="view:${slug}/${esc(it.key)}"` +
-  `${colour.label || it.mix ? ' data-anchor-unmarked' : colour.attr(it)}>`
 // the records' mix of the values ([[value, n]]) as the kit's proportion bar, where any of them takes a value
 const mix = (it) => (it.mix && it.mix.some(([v]) => v != null) ? thimble.mix(it.mix) : '')
 // the area as the forge's label, in words: only Color by colors
 const areaChip = (it) => (!it.area ? '' : `<span class="chip chip-sans chip-tone-neutral"><span class="chip-text">${esc(it.area)}</span></span>`)
 const stateIcon = (t, it) => { const [i, w] = STATE[t][it.state] || STATE[t].open; return `<span class="state" title="${w}">${ico(i)}</span>` }
+// a row's first line: the title in the forge's weight, cut first, then the records' mix and the area
+const titleLine = (it) => `<span class="line1"><span class="title">${esc(it.title)}</span>${mix(it)}${areaChip(it)}</span>`
+// a row's second line, what the forge writes under the title: its facts joined by ·, whole on hover
+const metaLine = (parts) => { const s = parts.filter(Boolean).join(' · '); return { html: `<span title="${esc(s)}">${esc(s)}</span>` } }
+const counted = (icon, n) => `<span class="num">${ico(icon)}${n}</span>`
+const changes = (it) => it.reviewers.filter(([, v]) => v === 'changes requested').length
+// the state's icon, or the author's avatar, in a narrow column of its own at the row's left
+const stateCol = (t) => ({ name: 'state', title: '', width: 32, drop: false, html: (it) => stateIcon(t, it) })
+const avatarCol = (name) => ({ name, title: '', width: 40, drop: false, html: (it) => avatar(it[name]) })
 
-const ROW = {
-  pulls: (it) => {
-    const meta = [`#${it.number} opened ${hm(it.opened)} by ${it.author}`, it.closes != null && `fixes #${it.closes}`, cap(it.review),
-      it.state === 'merged' && !it.flags.includes('merged by its author') && `merged by ${it.merged_by}`,
-      it.state === 'closed' && `closed by ${it.closed_by}${it.reason ? ` as ${it.reason}` : ''}`, ...it.flags].filter(Boolean).join(' · ')
-    return rowOpen(it) + stateIcon('pulls', it) +
-      `<div class="main"><div class="line1"><span class="title">${esc(it.title)}</span>${mix(it)}${areaChip(it)}</div><div class="meta" title="${esc(meta)}">${esc(meta)}</div></div>` +
-      `<span class="num" title="Approvals and change requests, each reviewer's latest">${ico('approved')}${it.approvals}${it.changes ? ` ${ico('changes')}${it.changes}` : ''}</span>` +
-      `<span class="num">${ico('comment')}${it.comments}</span><span class="num">+${it.plus} −${it.minus}</span></div>`
-  },
-  issues: (it) => {
-    const meta = [`#${it.number} opened ${hm(it.opened)} by ${it.author}`, it.origin === 'backlog' ? 'from the backlog' : it.origin,
-      it.state === 'fixed' && `fixed after ${took(it.opened, it.ended)}`].filter(Boolean).join(' · ')
-    return rowOpen(it) + stateIcon('issues', it) +
-      `<div class="main"><div class="line1"><span class="title">${esc(it.title)}</span>${mix(it)}${areaChip(it)}</div><div class="meta">${esc(meta)}</div></div>` +
-      `<span class="num">${it.prs.length ? `${ico('pr')}${it.prs.map((n) => `#${n}`).join(' ')}` : ''}</span><span class="num">${ico('comment')}${it.comments}</span></div>`
-  },
-  discussions: (it) => {
-    const others = it.posters.filter((p) => p !== it.author)
-    return rowOpen(it) + avatar(it.author) +
-      `<div class="main"><div class="meta"><b>${esc(it.author)}</b> · ${hm(it.opened)}</div><div class="line1"><span class="title">${esc(it.title)}</span>${mix(it)}</div>` +
-      `<div class="lead">${esc(it.lead)}</div>${others.length ? `<div class="meta"><span class="people">${others.map(avatar).join('')}</span> ${esc(others.join(', '))} replied</div>` : ''}</div>` +
-      `<span class="num">${ico('comment')}${it.posts}</span><span class="num">${it.last ? hm(it.last) : ''}</span></div>`
-  },
-  agents: (it) => rowOpen(it) + avatar(it.title) +
-    `<div class="main"><div class="line1"><span class="title">${esc(it.title)}</span>${mix(it)}</div><div class="meta">${it.note ? `“${esc(it.note)}”` : 'left no transcript'}</div></div>` +
-    ['pull requests', 'reviews', 'merges', 'comments'].map((k) => `<span class="num">${it.did[k] || 0}</span>`).join('') + '</div>',
+// each tab's columns, as the forge lists its items: the title over a line of its facts, then its numbers
+const COLUMNS = {
+  pulls: [
+    stateCol('pulls'),
+    {
+      name: 'title', title: 'Pull request', html: titleLine,
+      sub: (it) => metaLine([`#${it.number} opened ${hm(it.opened)} by ${it.author}`, it.closes != null && `fixes #${it.closes}`, cap(it.review),
+        it.state === 'merged' && !it.flags.includes('merged by its author') && `merged by ${it.merged_by}`,
+        it.state === 'closed' && `closed by ${it.closed_by}${it.reason ? ` as ${it.reason}` : ''}`, ...it.flags]),
+    },
+    { name: 'approvals', title: 'Reviews', type: 'number', html: (it) => counted('approved', it.approvals) + (changes(it) ? ' ' + counted('changes', changes(it)) : '') },
+    { name: 'comments', title: 'Comments', type: 'number', html: (it) => counted('comment', it.comments) },
+    { name: 'lines', title: 'Lines', type: 'number', value: (it) => it.plus + it.minus, html: (it) => `+${it.plus} −${it.minus}` },
+  ],
+  issues: [
+    stateCol('issues'),
+    {
+      name: 'title', title: 'Issue', html: titleLine,
+      sub: (it) => metaLine([`#${it.number} opened ${hm(it.opened)} by ${it.author}`, it.origin === 'backlog' ? 'from the backlog' : it.origin,
+        it.state === 'fixed' && `fixed after ${took(it.opened, it.ended)}`]),
+    },
+    { name: 'prs', title: 'Fixed by', type: 'number', width: 96, value: (it) => it.prs[0] ?? null, html: (it) => (it.prs.length ? `<span class="num">${ico('pr')}${it.prs.map((n) => `#${n}`).join(' ')}</span>` : '') },
+    { name: 'comments', title: 'Comments', type: 'number', html: (it) => counted('comment', it.comments) },
+  ],
+  discussions: [
+    avatarCol('author'),
+    { name: 'title', title: 'Thread', html: titleLine, sub: (it) => `${it.author} · ${hm(it.opened)} · ${it.lead}` },
+    { name: 'replied', title: 'Replied', width: 150, drop: 1, value: (it) => it.posters.filter((p) => p !== it.author).join(', '),
+      html: (it) => { const others = it.posters.filter((p) => p !== it.author); return `<span class="people">${others.map(avatar).join('')}</span>${esc(others.join(', '))}` } },
+    { name: 'posts', title: 'Posts', type: 'number', html: (it) => counted('comment', it.posts) },
+    { name: 'last', title: 'Last post', type: 'time', html: (it) => (it.last ? hm(it.last) : '') },
+  ],
+  agents: [
+    avatarCol('title'),
+    { name: 'title', title: 'Agent', html: titleLine, sub: (it) => (it.note ? `“${it.note}”` : 'left no transcript') },
+    ...['pull requests', 'reviews', 'merges', 'comments'].map((k) => ({ name: k, title: cap(k), type: 'number', value: (it) => it.did[k] || 0 })),
+  ],
+}
+
+// The table of the tab's items: a row is an item, its ref the item's unit; under a field, its value's bar. A row that
+// stands for its records (every row under a label, which marks records, and an agent's under a field it does not carry)
+// takes none and no colour on the strip: its records' mix shows in the row (mix) and their own bars on its page. Made
+// again when the tab changes or its rows come to stand for their records
+let table = null
+let tableFor = ''
+function list() {
+  const plain = !!colour.label || shown.some((it) => it.mix)
+  if (table && tableFor === tab + plain) return table.draw(shown)
+  tableFor = tab + plain
+  table = thimble.table({
+    mount: '#list', key: tab, columns: COLUMNS[tab], rows: shown, search, side,
+    colour: plain ? false : undefined,
+    attrs: (it) => (colour.label || it.mix ? { 'data-anchor-unmarked': true } : null),
+    details: (it) => {
+      if (!open || open.key !== it.key) open = { key: it.key, ref: null, part: 'conversation' }
+      return { title: it.title, sub: subOf(it), render: (body) => fill(body, it.key) }
+    },
+  })
+}
+
+function draw() {
+  head()
+  $('tabs').innerHTML = TABS.map((t) => `<button type="button" class="tab${t.tab === tab ? ' on' : ''}" data-tab="${t.tab}">${ico(t.icon)}<span class="tab-name">${t.name}</span>` +
+    `<span class="count">${data ? data.tabs[t.tab] : ''}</span></button>`).join('')
+  if (!data) return
+  shown = data.items.filter((it) => search.has(it.search))
+  list()
 }
 
 // ------------------------------------------------------------------------------------------------ an item's page
 
-// an item's page in the side panel, with the record `ref` marked and in view; `part` a pull request's tab
-async function page(key, ref = null, part = null) {
-  const d = await fetchUnit(key)
-  if (!d) return
-  open = { key, ref, part: part || 'conversation' }
-  const f = d.facts
-  const t = TAB_OF[key.split('/')[1]]
-  const sub = t === 'agents' ? `${f.run} · agent` : t === 'discussions' ? `${f.run} · thread ${f.number}` : `${f.run} #${f.number}`
-  side.open({ title: f.title, sub, ref: `view:${slug}/${key}`, html: PAGE[t](d) })
-  const el = ref && side.body.querySelector(`[data-anchor="${CSS.escape(ref)}"]`)
-  if (el) el.scrollIntoView({ block: 'center' })
+const subOf = (it) => {
+  const t = TAB_OF[it.key.split('/')[1]]
+  return t === 'agents' ? `${it.run} · agent` : t === 'discussions' ? `${it.run} · thread ${it.number}` : `${it.run} #${it.number}`
 }
-
-// a record's words with each #<n> a link to the pull request or issue it names
-const linked = (text, d) => esc(text).replace(/#(\d+)\b/g, (m, n) => (d.mentions[n] ? `<button type="button" class="ref" data-go="${esc(d.mentions[n].key)}" title="${esc(d.mentions[n].title)}">${m}</button>` : m))
-const words = (r, d) => (r.text ? `<div class="text">${linked(r.text, d)}</div>` : '')
-const focus = (r) => (open && r.ref === open.ref ? ' focus' : '')
+// every #<n> its records name opens that pull request or issue
+const mentionsOf = (d) => [{ match: /#(\d+)\b/g, ref: (m) => (d.mentions[m[1]] ? unit(d.mentions[m[1]].key) : null) }]
 const goTo = (b, what) => `<button type="button" class="go" data-go="${esc(b.key)}">${ico((STATE[TAB_OF[b.key.split('/')[1]]][b.state] || ['pr'])[0])}${what}</button>`
 const badge = (state, t) => { const [i, w] = STATE[t][state] || STATE[t].open; return `<span class="chip chip-sans chip-tone-neutral">${ico(i)}<span class="chip-text">${w}</span></span>` }
-
-// one record on a conversation's timeline: an opening or a comment in a box, any other record on a line
-function entry(r, d) {
-  const own = d.facts.number
-  const at = `<time>${hm(tOf(r.at))}</time>`
-  if (r.kind === 'comment' || (['pr', 'issue'].includes(r.kind) && r.number === own)) {
-    const what = r.kind === 'comment' ? 'commented' : r.kind === 'pr' ? 'opened this pull request' : 'opened this issue'
-    return `<div class="card${focus(r)}" data-anchor="${esc(r.ref)}"><div class="card-box"><div class="card-head">${avatar(r.author)}<span class="said"><b>${esc(r.author)}</b> ${what}</span>${at}</div>` +
-      (r.text ? words(r, d) : '<div class="text dim">No description.</div>') + '</div></div>'
-  }
-  let icon = EVENT[r.kind] || 'comment'
-  let said = ''
-  if (r.kind === 'commit') said = `${r.forced ? `force-pushed <code>${esc(r.sha)}</code> over <code>${esc(r.before)}</code>` : `pushed <code>${esc(r.sha)}</code>`} ${esc((r.text || '').split('\n')[0])}`
-  else if (r.kind === 'review') [icon, said] = VERDICT[r.verdict] || VERDICT.commented
-  else if (r.kind === 'merge') said = r.number === own ? 'merged this' : `merged ${linked(`#${r.number}`, d)}, which fixed this`
-  else if (r.kind === 'close') said = `closed this${r.reason ? ` as ${esc(r.reason)}` : ''}`
-  else if (r.kind === 'reopen') said = 'reopened this'
-  else if (r.kind === 'pr') said = `opened ${linked(`#${r.number}`, d)} ${esc(r.title || '')}, which fixes this`
-  const body = r.kind !== 'commit' && r.kind !== 'pr' && r.text ? `<div class="text">${linked(r.text, d)}</div>` : ''
-  return `<div class="ev${focus(r)}" data-anchor="${esc(r.ref)}"><span class="badge">${ico(icon)}</span><div class="ev-words"><b>${esc(r.author)}</b> ${said}${body}</div>${at}</div>`
-}
-
-// the same issue in the other runs, each a link to it
 const elsewhere = (d) => (d.elsewhere || []).filter((x) => x.run !== d.facts.run).map((x) => goTo(x, `${esc(x.run)} #${esc(x.key.split('/')[2])} ${esc(x.state)}`)).join('')
 const dl = (rows) => `<dl class="facts">${rows.filter((r) => r[1]).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`
 
-const PAGE = {
-  pulls: (d) => {
-    const f = d.facts
+// One record on a conversation's timeline as thimble.messages takes it: an opening or a comment a message, any other
+// record an event on one line, its words under it
+function message(r, d) {
+  const own = d.facts.number
+  const base = { ref: r.ref, t: tOf(r.at), author: r.author }
+  if (r.kind === 'comment' || r.kind === 'post' || (['pr', 'issue'].includes(r.kind) && r.number === own)) return { ...base, text: r.text || '' }
+  const ev = { ...base, kind: 'event', text: r.text || '' }
+  if (r.kind === 'commit') {
+    const what = r.forced ? `force-pushed <code>${esc(r.sha)}</code> over <code>${esc(r.before)}</code>` : `pushed <code>${esc(r.sha)}</code>`
+    return { ...ev, icon: 'commit', said: { html: `${what} ${esc(firstLine(r.text))}` }, text: '' }
+  }
+  if (r.kind === 'review') { const [icon, said] = VERDICT[r.verdict] || VERDICT.commented; return { ...ev, icon, said } }
+  if (r.kind === 'merge') return r.number === own ? { ...ev, icon: 'merge', said: 'merged this' } : { ...ev, icon: 'merge', said: 'merged', text: `#${r.number}, which fixed this` }
+  if (r.kind === 'close') return { ...ev, icon: 'close', said: `closed this${r.reason ? ` as ${r.reason}` : ''}` }
+  if (r.kind === 'reopen') return { ...ev, icon: 'reopen', said: 'reopened this' }
+  if (r.kind === 'pr') return { ...ev, icon: 'pull', said: 'opened', text: `#${r.number} ${r.title || ''}, which fixes this` }
+  return { ...ev, icon: 'comment', said: r.action || r.kind }
+}
+
+// One record of an agent's activity: what it did, to which item, its words under it; its author is the agent, whom the
+// page names, so the line says what happened alone
+function activity(r) {
+  const on = r.number != null ? ` #${r.number}` : ''
+  const ev = { ref: r.ref, t: tOf(r.at), kind: 'event', record: r, text: r.title || r.text || '' }
+  if (r.kind === 'review') { const [icon, said] = VERDICT[r.verdict] || VERDICT.commented; return { ...ev, icon, said: said.replace(' these changes', '') + on, text: r.text || '' } }
+  if (r.kind === 'commit') return { ...ev, icon: 'commit', said: { html: `pushed <code>${esc(r.sha)}</code> to${esc(on)}` }, text: firstLine(r.text) }
+  if (r.kind === 'post') return { ...ev, icon: 'comment', said: 'posted in a thread', text: r.text || '' }
+  if (r.kind === 'comment') return { ...ev, icon: 'comment', said: `commented on${on}`, text: r.text || '' }
+  const icon = { merge: 'merge', close: 'close', reopen: 'reopen', pr: 'pull', issue: 'issue' }[r.kind]
+  return { ...ev, icon, said: `${r.action}${on}` }
+}
+
+// an item's page, drawn in the side panel's body once the reader sends it, with the record `open.ref` revealed: its head
+// and facts, then its conversation, commits or changed files (a pull request's part), its timeline, its posts or its
+// activity, each by the kit
+async function fill(body, key) {
+  const d = await fetchUnit(key)
+  if (!d || !open || open.key !== key || !body.isConnected) return
+  const f = d.facts
+  const t = TAB_OF[key.split('/')[1]]
+  const mentions = mentionsOf(d)
+  let conv = null
+  const thread = (sel, msgs, o = {}) => {
+    conv = thimble.messages({ mount: body.querySelector(sel), mentions, onPick: o.onPick })
+    conv.draw(msgs, { empty: o.empty })
+  }
+  if (t === 'pulls') {
     const commits = d.records.filter((r) => r.kind === 'commit')
-    const files = changed(commits)
     const end = f.state === 'merged' ? `${esc(f.merged_by)} merged it at ${hm(f.ended)}, ${took(f.opened, f.ended)} after it opened`
       : f.state === 'closed' ? `${esc(f.closed_by)} closed it at ${hm(f.ended)}${f.reason ? ` as ${esc(f.reason)}` : ''}` : 'still open'
-    const head = `<div class="page-head">${badge(f.state, 'pulls')}<span><b>${esc(f.author)}</b> opened it at ${hm(f.opened)} · ${end}</span></div>` +
+    const parts = [['conversation', 'Conversation', d.records.length], ['commits', 'Commits', commits.length], ['files', 'Files changed', f.files]]
+    body.innerHTML = `<div class="page-head">${badge(f.state, 'pulls')}<span><b>${esc(f.author)}</b> opened it at ${hm(f.opened)} · ${end}</span></div>` +
       dl([['Fixes', d.fixes && goTo(d.fixes, `#${d.fixes.number} ${esc(d.fixes.title)}`)], ['In the other runs', elsewhere(d)],
         ['Reviews', `${esc(cap(f.review))} · ${f.approvals} of ${plural(f.need, 'approval')}${f.reviewers.length ? ` · ${f.reviewers.map(([w, v]) => `${esc(w)} ${esc((VERDICT[v] || VERDICT.commented)[1].replace(' these changes', ''))}`).join(', ')}` : ''}`],
-        ['Flags', f.flags.map(esc).join(' · ')]])
-    const parts = [['conversation', 'Conversation', d.records.length], ['commits', 'Commits', commits.length], ['files', 'Files changed', files.length]]
-    const seg = `<div class="seg parts">${parts.map(([k, w, n]) => `<button type="button" class="seg-opt${open.part === k ? ' active' : ''}" data-part="${k}">${w} <span class="count">${n}</span></button>`).join('')}</div>`
-    const body = open.part === 'commits' ? `<div class="card-box">${commits.map(commitRow).join('') || '<div class="text dim">No commits.</div>'}</div>`
-      : open.part === 'files' ? files.map(fileBox).join('') || '<div class="dim">No changes.</div>'
-      : `<div class="tl">${d.records.map((r) => entry(r, d)).join('')}</div>`
-    return head + seg + body
-  },
-  issues: (d) => {
-    const f = d.facts
+        ['Flags', f.flags.map(esc).join(' · ')]]) +
+      `<div class="seg parts">${parts.map(([k, w, n]) => `<button type="button" class="seg-opt${open.part === k ? ' active' : ''}" data-part="${k}">${w} <span class="count">${n}</span></button>`).join('')}</div>` +
+      '<div class="part"></div>'
+    if (open.part === 'files') {
+      // each commit's patch, under its sha and message: the forge's diff of the files it changed
+      const box = body.querySelector('.part')
+      box.innerHTML = commits.filter((c) => c.diff).map((c, i) => `<div class="change"><div class="change-head"><code>${esc(c.sha || '')}</code><span>${esc(firstLine(c.text))}</span></div><div data-i="${i}"></div></div>`).join('') || '<div class="dim">No changes.</div>'
+      commits.filter((c) => c.diff).forEach((c, i) => thimble.diff({ mount: box.querySelector(`[data-i="${i}"]`), patch: c.diff, ref: c.ref }))
+    } else thread('.part', (open.part === 'commits' ? commits : d.records).map((r) => message(r, d)), { empty: open.part === 'commits' ? 'No commits' : 'No records' })
+  } else if (t === 'issues') {
     const end = f.state === 'fixed' ? `fixed at ${hm(f.ended)}, ${took(f.opened, f.ended)} after it opened` : f.state === 'closed' ? `closed at ${hm(f.ended)}` : 'still open'
-    return `<div class="page-head">${badge(f.state, 'issues')}<span><b>${esc(f.author)}</b> opened it at ${hm(f.opened)} · ${f.origin === 'backlog' ? 'from the backlog' : esc(f.origin)} · ${end}</span></div>` +
+    body.innerHTML = `<div class="page-head">${badge(f.state, 'issues')}<span><b>${esc(f.author)}</b> opened it at ${hm(f.opened)} · ${f.origin === 'backlog' ? 'from the backlog' : esc(f.origin)} · ${end}</span></div>` +
       dl([['Pull requests', (d.prs || []).map((p) => goTo(p, `#${p.number} ${esc(p.title)}`)).join('')], ['In the other runs', elsewhere(d)]]) +
-      `<div class="tl">${d.records.map((r) => entry(r, d)).join('')}</div>`
-  },
-  discussions: (d) => {
-    const f = d.facts
-    return `<div class="page-head"><span>${plural(f.posts, 'post')} · ${plural(f.posters.length, 'person', 'people')} · ${hm(f.opened)}–${hm(f.last)}</span></div>` +
-      d.records.map((r, i) => `<div class="post${i ? '' : ' op'}${focus(r)}" data-anchor="${esc(r.ref)}"><div class="rail">${avatar(r.author)}</div>` +
-        `<div><div class="post-head"><b>${esc(r.author)}</b><span class="dim mono">${hm(tOf(r.at))}</span></div>${words(r, d)}</div></div>`).join('')
-  },
-  agents: (d) => {
-    const f = d.facts
+      '<div class="part"></div>'
+    thread('.part', d.records.map((r) => message(r, d)))
+  } else if (t === 'discussions') {
+    // a board's thread: the first post, the replies under it
+    body.innerHTML = `<div class="page-head"><span>${plural(f.posts, 'post')} · ${plural(f.posters.length, 'person', 'people')} · ${hm(f.opened)}–${hm(f.last)}</span></div><div class="part"></div>`
+    thread('.part', d.records.map((r, i) => ({ ref: r.ref, t: tOf(r.at), author: r.author, text: r.text || '', parent: i ? d.records[0].ref : null })))
+  } else {
     const note = d.records.find((r) => r.kind === 'agent')
     const did = Object.entries(f.did).map(([k, n]) => `<span><b>${n}</b> ${k}</span>`).join('')
-    return `<div class="who">${avatar(f.title)}<div><b>${esc(f.title)}</b><span class="dim">${esc(f.run)}</span></div></div>` +
-      (note ? `<div class="note${focus(note)}" data-anchor="${esc(note.ref)}">“${linked(note.text, d)}”</div>` : '') +
-      `<div class="did">${did}</div><div class="tl">${d.records.filter((r) => r.kind !== 'agent').map((r) => activity(r, d)).join('')}</div>`
-  },
-}
-
-// an agent's record in its activity: what it did, to which item, and its words
-function activity(r, d) {
-  const [icon, said] = r.kind === 'review' ? VERDICT[r.verdict] || VERDICT.commented : [EVENT[r.kind] || 'comment', '']
-  const what = r.kind === 'review' ? said.replace(' these changes', '') : r.kind === 'commit' ? `pushed <code>${esc(r.sha)}</code> to` : r.kind === 'post' ? 'posted in a thread' : esc(r.action)
-  const on = r.number != null ? ` ${linked(`#${r.number}`, d)}` : ''
-  const text = r.kind === 'commit' ? (r.text || '').split('\n')[0] : r.title || r.text || ''
-  return `<div class="ev${focus(r)}" data-anchor="${esc(r.ref)}"><span class="badge">${ico(icon)}</span><div class="ev-words"><b>${what}</b>${on}` +
-    `${text ? `<div class="text">${linked(text, d)}</div>` : ''}</div><time>${hm(tOf(r.at))}</time></div>`
-}
-
-const commitRow = (r) => `<div class="commit${focus(r)}" data-anchor="${esc(r.ref)}">${ico('commit')}<div><b>${esc((r.text || '').split('\n')[0])}</b>` +
-  `<div class="meta">${esc(r.author)} ${r.forced ? `force-pushed over ${esc(r.before)}` : 'committed'} ${hm(tOf(r.at))}</div></div><code>${esc(r.sha || '')}</code></div>`
-
-// the commits' diffs by the file they change, each hunk under its commit: [{path, plus, minus, hunks: [{ref, sha,
-// head, lines}]}]
-function changed(commits) {
-  const files = new Map()
-  for (const c of commits) {
-    let file = null
-    let hunk = null
-    for (const line of String(c.diff || '').replace(/\n$/, '').split('\n')) {
-      if (line.startsWith('--- ')) continue
-      if (line.startsWith('+++ ')) {
-        const path = line.slice(4).replace(/^b\//, '')
-        file = files.get(path) || { path, plus: 0, minus: 0, hunks: [] }
-        files.set(path, file)
-        hunk = null
-      } else if (file && line.startsWith('@@')) {
-        hunk = { ref: c.ref, sha: c.sha, head: line, lines: [] }
-        file.hunks.push(hunk)
-      } else if (hunk) {
-        hunk.lines.push(line)
-        if (line[0] === '+') file.plus++
-        else if (line[0] === '-') file.minus++
-      }
-    }
+    body.innerHTML = `<div class="who">${avatar(f.title)}<div><b>${esc(f.title)}</b><span class="dim">${esc(f.run)}</span></div></div>` +
+      (note ? '<div class="note"></div>' : '') + `<div class="did">${did}</div><div class="part"></div>`
+    if (note) thimble.text(body.querySelector('.note'), `“${note.text}”`, { format: 'plain', ref: note.ref, mentions })
+    // a record of its activity opens the item it is about, the record revealed there
+    const itemOf = (r) => (r.kind === 'post' ? `${f.run}/discussions/${r.thread}` : r.number != null && d.mentions[r.number] ? d.mentions[r.number].key : null)
+    thread('.part', d.records.filter((r) => r.kind !== 'agent').map(activity), { onPick: (m) => { const k = itemOf(m.record); if (k) show(k, m.ref) } })
   }
-  return [...files.values()]
+  // the record a citation opened, in view
+  const ref = open.ref
+  if (ref && !(conv && conv.reveal(ref))) body.querySelector(`[data-anchor="${CSS.escape(ref)}"]`)?.scrollIntoView({ block: 'center' })
 }
-const fileBox = (f) => `<div class="file"><div class="file-head"><span>${esc(f.path)}</span><span class="dim">+${f.plus} −${f.minus}</span></div>` +
-  f.hunks.map((h) => `<div class="hunk${open && h.ref === open.ref ? ' focus' : ''}" data-anchor="${esc(h.ref)}"><div class="hunk-head">${esc(h.sha || '')} ${esc(h.head)}</div><div class="diff">` +
-    h.lines.map((l) => `<div class="${l[0] === '+' ? 'add' : l[0] === '-' ? 'del' : ''}" data-s="${l[0] === '+' || l[0] === '-' ? l[0] : ''}">${esc(l.slice(1)) || ' '}</div>`).join('') + '</div></div>').join('') + '</div>'
 
 // ------------------------------------------------------------------------------------------------ places and clicks
 
-// open an item's page, on its tab, with the record `ref` marked: a citation, a link and another run's issue come here
+// open an item's page, on its tab, with the record `ref` revealed: a citation, a link and another run's issue come here
 async function show(key, ref = null) {
   const t = TAB_OF[key.split('/')[1]]
   if (!t) return
@@ -526,14 +461,15 @@ async function show(key, ref = null) {
     tab = t
     run = r
     side.close()
-    open = null
     await load()
   }
   const it = data && data.items.find((i) => i.key === key)
-  if (it && !it.search.includes($('q').value.trim().toLowerCase())) $('q').value = ''
-  await page(key, ref)
-  draw()
-  document.querySelector(`#list [data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'nearest' })
+  if (it && !search.has(it.search)) search.set('') // its onChange draws the list again, with the item
+  open = { key, ref, part: 'conversation' }
+  // the table opens its row, chosen and in view; an item Filter by hides opens alone
+  if (table && it && table.open(it.ref)) return
+  const d = await fetchUnit(key)
+  if (d) side.open({ title: d.facts.title, sub: subOf({ key, run: d.facts.run, number: d.facts.number }), ref: unit(key), render: (body) => fill(body, key) })
 }
 
 // a run's citation opens its repository; any other opens its item
@@ -571,21 +507,17 @@ $('tabs').addEventListener('click', (e) => {
   if (!b || b.dataset.tab === tab) return
   tab = b.dataset.tab
   side.close()
-  open = null
   load()
 })
-$('q').addEventListener('input', draw)
-$('body').addEventListener('click', async (e) => {
+$('body').addEventListener('click', (e) => {
   if (e.metaKey || e.ctrlKey) return // a ⌘-click asks about the element
   const link = e.target.closest('[data-go]')
   if (link) return show(link.dataset.go)
   const part = e.target.closest('[data-part]')
-  if (part && open) return page(open.key, null, part.dataset.part)
-  const row = e.target.closest('#list .item')
-  if (!row) return
-  if (open && open.key === row.dataset.key) side.close()
-  else await page(row.dataset.key)
-  draw()
+  if (part && open) {
+    open = { ...open, ref: null, part: part.dataset.part }
+    fill(side.body, open.key)
+  }
 })
 thimble.onLabels(() => load())
 // a label's values arrive while it runs, which the counts and the list follow while a label colors or filters

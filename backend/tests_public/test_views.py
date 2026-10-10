@@ -1105,6 +1105,8 @@ FIT_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin
 <div style="position:relative;height:40px"><span style="position:absolute;left:0;top:0">Overlapping label one</span>
 <span style="position:absolute;left:12px;top:2px">Second label here</span></div>
 <div style="width:60px;overflow:hidden;white-space:nowrap">A text far too long for its box</div>
+<div>2026-04-01 <span class="thimble-table-cut" style="display:inline-block;width:0;overflow:hidden;vertical-align:top">09:30:15</span></div>
+<div style="display:flex;width:100px"><span style="flex:none;width:100px">Label</span><span style="min-width:0;overflow:hidden;white-space:nowrap">Squeezed away</span></div>
 <div style="width:300px">Narrow column</div>
 <div style="width:120px;overflow-x:auto;white-space:nowrap">Lanes that run on past their box</div>
 <button id="more">Show more</button><div id="extra" hidden data-anchor="board.jsonl#L2">bo: Anyone have the build number?</div>
@@ -1116,8 +1118,10 @@ thimble.onOpen(() => {})
 
 
 async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control_a_state_names(ws, inproc, bound):
-    """The checks' page reports text drawn over other text, text its box cuts off and how much of a wide pane the page
-    uses, lists its controls by their text, and a state's actions click a control by its text before it is measured."""
+    """The checks' page reports text drawn over other text, text its box cuts off (a box squeezed to nothing among them,
+    but not the kit's table's 0-wide year or seconds, which a narrow column of times leaves out on purpose) and how much
+    of a wide pane the page uses, lists its controls by their text, and a state's actions click a control by its text
+    before it is measured."""
     if why := views.build_problem():
         if os.environ.get("CI") == "true":
             pytest.fail(why)
@@ -1128,7 +1132,7 @@ async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control
     assert plain["ok"] and clicked["ok"], (plain["errors"], clicked["errors"])
     lay = plain["layout"]
     assert lay["overlaps"] == 1 and lay["pairs"][0] == ["Overlapping label one", "Second label here"], lay
-    assert lay["cut"] == 1 and lay["cuts"] == ["A text far too long for its box"], lay
+    assert lay["cut"] == 2 and lay["cuts"] == ["A text far too long for its box", "Squeezed away"], lay
     assert lay["width"] == views.PANE_WIDE[0] and lay["used"] < views.WIDE_USED * lay["width"] and not lay["overflow"]
     assert lay["sideways"] == 1 and lay["wide"] == ["Lanes that run on past their box"], lay
     assert (lay["anchored"], lay["outside"]) == (1, 1), "the record far below the pane is out of view"

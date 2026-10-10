@@ -8,8 +8,9 @@
 // viewer_record.js), ticks them where they stand, and going to one opens its fold so the match shows; a table beside the
 // side panel keeps its main column of text, drops columns in their order rather than draw a cell under the strip, and
 // draws them again when the panel closes; the diff sets the two versions side by side, a changed line level with the line
-// it became, inline in a narrow mount, and its tints follow the paper. What the parts decide without layout is
-// tests/public/data-kit.test.ts.
+// it became, inline in a narrow mount, and its tints follow the paper; a patch's file head and hunk lines span both
+// sides; a table column's second line (sub) stands under its value inside the row. What the parts decide without layout
+// is tests/public/data-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -64,6 +65,15 @@ window.wide = thimble.diff({ mount: '#wide', before: ${JSON.stringify(BEFORE)}, 
 window.narrow = thimble.diff({ mount: '#narrow', before: ${JSON.stringify(BEFORE)}, after: ${JSON.stringify(AFTER)} })
 window.padded = thimble.diff({ mount: '#padded', before: ${JSON.stringify(BEFORE)}, after: ${JSON.stringify(AFTER)} })
 </script>`, dark)
+// a commit's patch of one file in two hunks, as a forge stores it
+const PATCH = ['--- a/brindle/schedules.py', '+++ b/brindle/schedules.py', '@@ -112,3 +112,4 @@ class Schedule:', '     def _occurrence(self, n):',
+  '-        at = self.anchor + n * self.period', '+        local = self.anchor.replace(tzinfo=None)', '+        at = local + n * self.period', '         return at',
+  '@@ -140,2 +141,2 @@ class Schedule:', '-        return None', '+        return self.anchor', '     # end'].join('\n')
+const PATCHED = page(`<div id="wide" style="width:900px"></div><div id="narrow" style="width:360px"></div>
+<script>
+window.wide = thimble.diff({ mount: '#wide', patch: ${JSON.stringify(PATCH)} })
+window.narrow = thimble.diff({ mount: '#narrow', patch: ${JSON.stringify(PATCH)} })
+</script>`)
 
 let browser: Browser
 
@@ -210,6 +220,99 @@ window.table = thimble.table({ mount: '#list', rows: Array.from({ length: 200 },
     const wide = await cells()
     assert.ok(fits(wide), JSON.stringify(wide))
     assert.equal(wide[0][1] - wide[0][0], 220)
+    await p.close()
+  })
+})
+
+describe('the table with a second line', () => {
+  test("a column's sub: under its value, both lines inside the row's height and cut with an ellipsis, light and dark", async () => {
+    for (const dark of [false, true]) {
+      const doc = page(`<div id="pane" style="width:600px;height:400px;display:flex"><div id="list" style="flex:1;min-height:0"></div></div>
+<script>
+window.table = thimble.table({ mount: '#list', rows: Array.from({ length: 50 }, (_, i) => ({ ref: 'pr#' + (i + 1), title: 'A pull request whose title runs on and on past its column, as a long title does in a narrow pane ' + i, n: i, by: 'ash' })),
+  columns: [{ name: 'title', title: 'Pull request', sub: (r) => '#' + r.n + ' opened 09:24 by ' + r.by + ' · fixes #1 · approved · merged by its author · merged over a change request' },
+    { name: 'n', title: 'Comments', type: 'number' }] })
+</script>`, dark)
+      const { page: p, frame } = await framed(doc)
+      const got = await frame().evaluate(() => {
+        const row = document.querySelector('.thimble-table-row') as HTMLElement
+        const box = (sel: string) => row.querySelector(sel)!.getBoundingClientRect()
+        const rr = row.getBoundingClientRect()
+        const line = row.querySelector('.thimble-table-line') as HTMLElement
+        const sub = row.querySelector('.thimble-table-sub') as HTMLElement
+        return {
+          row: [rr.top, rr.bottom], line: [box('.thimble-table-line').top, box('.thimble-table-line').bottom], sub: [box('.thimble-table-sub').top, box('.thimble-table-sub').bottom],
+          cut: [line.scrollWidth > line.clientWidth, sub.scrollWidth > sub.clientWidth], ellipsis: getComputedStyle(sub).textOverflow,
+          inks: [getComputedStyle(line).color, getComputedStyle(sub).color],
+          next: (document.querySelectorAll('.thimble-table-row')[1] as HTMLElement).getBoundingClientRect().top,
+        }
+      })
+      // both lines inside the row, the second under the first, and the next row below it
+      assert.ok(got.line[0] >= got.row[0] && got.sub[0] >= got.line[1] - 1 && got.sub[1] <= got.row[1], JSON.stringify(got))
+      assert.ok(got.next >= got.row[1] - 1, JSON.stringify(got))
+      // each cut at the column's edge with an ellipsis, the second line in a quieter ink than the first
+      assert.deepEqual(got.cut, [true, true])
+      assert.equal(got.ellipsis, 'ellipsis')
+      assert.notEqual(got.inks[0], got.inks[1])
+      await p.close()
+    }
+  })
+})
+
+describe('the table under the lanes', () => {
+  test('its rows carry their times in the order they stand, so the lanes tint the rows in view as it scrolls, sorted by time or not', async () => {
+    const doc = page(`<div id="lanes" style="width:800px"></div><div id="list" style="height:300px"></div>
+<script>
+const T0 = Date.UTC(2026, 4, 16) / 1000
+window.events = Array.from({ length: 2000 }, (_, i) => ({ ref: 'e.jsonl#L' + (i + 1), t: T0 + i * 60, source: ['alert', 'chat', 'deploy'][i % 3], text: 'event ' + i }))
+window.lanes = thimble.timeline({ mount: '#lanes', rows: 'source', follow: '#list' })
+window.lanes.draw(events)
+window.table = thimble.table({ mount: '#list', rows: events, sort: { by: 't', desc: true },
+  columns: [{ name: 't', title: 'Time', type: 'time' }, { name: 'source', title: 'Source', width: 90 }, { name: 'text', title: 'Text' }] })
+</script>`)
+    const { page: p, frame } = await framed(doc)
+    // the rows drawn, in the page's order: their places among the rows and their times; and the times of those in view
+    const state = () =>
+      frame().evaluate(() => {
+        const box = document.getElementById('list')!.getBoundingClientRect()
+        const rows = [...document.querySelectorAll('#list .thimble-table-row')] as HTMLElement[]
+        const seen = rows.filter((r) => r.getBoundingClientRect().bottom > box.top && r.getBoundingClientRect().top < box.bottom).map((r) => +r.dataset.t!)
+        const span = document.querySelector('.thimble-lanes-span') as HTMLElement
+        const sc = (window as any).lanes.scale
+        return {
+          order: rows.map((r) => +r.dataset.thimbleRow!),
+          timed: rows.every((r) => r.dataset.t === String((window as any).table.rows[+r.dataset.thimbleRow!].t)),
+          shown: span.style.display,
+          span: [parseFloat(span.style.left), parseFloat(span.style.left) + parseFloat(span.style.width)],
+          want: [sc.x(Math.min(...seen)), sc.x(Math.max(...seen))],
+          names: parseFloat(getComputedStyle(document.getElementById('lanes')!).getPropertyValue('--thimble-names')) || 0,
+        }
+      })
+    const tinted = (s: Awaited<ReturnType<typeof state>>) => Math.abs(s.span[0] - s.names - s.want[0]) <= 2.5 && Math.abs(s.span[1] - s.names - s.want[1]) <= 2.5
+    const ordered = (s: Awaited<ReturnType<typeof state>>) => s.order.every((k, i) => !i || k > s.order[i - 1])
+    let s = await state()
+    assert.equal(s.timed, true)
+    assert.equal(s.shown, 'block')
+    assert.ok(tinted(s), JSON.stringify(s))
+    // to the middle, then back up a little, which draws rows above those kept: still in the order they stand
+    await frame().evaluate(async () => {
+      const list = document.getElementById('list')!
+      list.scrollTop = 28 * 1000
+      await new Promise((r) => setTimeout(r, 120))
+      list.scrollTop -= 28 * 20
+      await new Promise((r) => setTimeout(r, 120))
+    })
+    s = await state()
+    assert.ok(ordered(s), JSON.stringify(s.order))
+    assert.ok(tinted(s), JSON.stringify(s))
+    // sorted by the source: the tint spans the earliest and the latest of the rows in view
+    await frame().evaluate(async () => {
+      ;(document.querySelector('[data-col="source"]') as HTMLElement).click()
+      await new Promise((r) => setTimeout(r, 120))
+    })
+    s = await state()
+    assert.ok(ordered(s), JSON.stringify(s.order))
+    assert.ok(tinted(s), JSON.stringify(s))
     await p.close()
   })
 })
@@ -861,4 +964,28 @@ describe('the diff', () => {
       assert.equal(got.folded, 1)
       await p.close()
     })
+
+  test("a patch: its file's head and each hunk's line across both sides, its lines numbered from the hunk's line", async () => {
+    const { page: p, frame } = await framed(PATCHED)
+    const got = await frame().evaluate(() => {
+      const w = window as any
+      const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect()
+      const diff = box('#wide .thimble-diff')
+      const hunks = [...document.querySelectorAll('#wide .thimble-diff-hunk')].map((h) => h.getBoundingClientRect())
+      const first = document.querySelector('#wide .thimble-diff-row')!
+      return {
+        modes: [w.wide.mode, w.narrow.mode],
+        head: [box('#wide .thimble-diff-file').width, diff.width],
+        hunks: hunks.map((h) => Math.round(h.width) === Math.round(diff.width)),
+        numbers: [...first.querySelectorAll('.thimble-diff-no')].map((n) => getComputedStyle(n, '::before').content),
+        tint: getComputedStyle(document.querySelector('#wide .thimble-diff-hunk')!).backgroundColor,
+      }
+    })
+    assert.deepEqual(got.modes, ['split', 'inline'])
+    assert.equal(Math.round(got.head[0]), Math.round(got.head[1]))
+    assert.deepEqual(got.hunks, [true, true])
+    assert.deepEqual(got.numbers, ['"112"', '"112"'])
+    assert.notEqual(got.tint, 'rgba(0, 0, 0, 0)')
+    await p.close()
+  })
 })

@@ -7,7 +7,7 @@
 // that started it, when its result came back, the subagents it started), then its transcript, a turn's whole words and
 // a call's input and output opening in the side pane. One fetch gives what the search and the controls keep; a
 // session's turns come when it is read, a call's whole input when it opens.
-import { axis, colorBy, divider, draw, fetch, filterBy, hms, lanes, onLabels, onOpen, plural, rows, search, side, timeRange, transcript, width, COLORS } from 'thimble-term'
+import { axis, colorBy, divider, draw, fetch, filterBy, hms, onLabels, onOpen, plural, rows, search, side, timeline, timeRange, transcript, width, COLORS } from 'thimble-term'
 
 const KIND = { prompt: 'prompt', text: 'text', result: 'result', call: 'tool call' }
 const GAP = 1200 // seconds with no turn that the time range draws as a break: the runs lie hours apart
@@ -98,7 +98,7 @@ const laneColour = { keeps: () => true, valueOf, colourOf: (v) => colour.colourO
 // the lanes: each turn's bar in its hue, a call that ran past its cell (a Task call while its subagent ran) a line in its
 // hue, a cell where most calls failed a red ×, always shown, as the transcript gives `× Bash`; the transcript's turns
 // in view on the selection background
-const overview = lanes({
+const overview = timeline({
   rows: ln,
   colour: laneColour,
   time: (it) => it.time,

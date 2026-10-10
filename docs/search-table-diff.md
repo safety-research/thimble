@@ -7,7 +7,7 @@ code forge's commit, a wiki page's history) in thimble's parts rather than parts
 |---|---|---|
 | the search | `thimble.search` | a box in the top row that finds text in the records, as Files' find does |
 | the table | `thimble.table` | records in columns a click sorts by, for thousands of rows |
-| the diff | `thimble.diff` | two versions of a text side by side or inline, the words that changed marked |
+| the diff | `thimble.diff` | two versions of a text, or a patch, side by side or inline, the words that changed marked |
 | the text | `thimble.text` | a record's text, such as a pull request's body or an email, as markdown or plain text |
 
 Each works alone on any element with plain records: none needs Color by, a time range or the side panel. Each works
@@ -89,7 +89,8 @@ folded or cut text opens its fold the same way. A hidden element without `data-t
 ## The table
 
 `thimble.table({mount, columns, rows, ...})` draws records in `mount` as the kit's `.table` looks, a caps head that
-stays at the top and hairline rows, one line each with a cell's overflow cut by an ellipsis:
+stays at the top and hairline rows, one line each with a cell's overflow cut by an ellipsis, or two where a column has a
+second line (`sub`), as an inbox draws a message's first words under its subject:
 
 - It draws only the rows near its view and keeps those it drew as it scrolls, so a table of 50,000 rows opens and
   sorts in a fraction of a second. `mount` scrolls; the page gives it a height (`flex: 1; min-height: 0` in a column).
@@ -98,7 +99,8 @@ stays at the top and hairline rows, one line each with a cell's overflow cut by 
   thimble keeps the sort per view, and Reset puts back the one it opens with.
 - Each row is a record: its `data-anchor` is the row's `ref`. A label marks it, a ⌘-click asks about it, and
   `table.reveal(ref)` scrolls a cited row to the middle and highlights it for a moment. The view checks count every row
-  the table holds as shown, since it anchors each row it draws.
+  the table holds as shown, since it anchors each row it draws. Its time in the first column of times is its `data-t`,
+  so a timeline over the table that `follow`s it tints the rows in view ([rows-and-filters.md](rows-and-filters.md)).
 - With the page's Color by, a row's value takes the bar on its left edge, the chips count every row (not only those
   drawn) while a field is the color, and the strip shows every row's color, scrolled to or not. The table draws its
   rows again when Color by changes. `colour: false` gives it no bars and a plain strip.
@@ -133,9 +135,10 @@ const table = thimble.table({
 | `search`, `filter` | a `thimble.search` that finds in every row, a `thimble.filterBy` whose kept rows show |
 | `colour` | the Color by of its bars and strip (or `color`, the same option): the page's by default, `false` for none |
 | `onOpen(row)` | a row opened, by a click or Enter |
+| `attrs(row)` | more attributes of a row's element, `{name: value}`, as `thimble.recordCard` takes them, such as `data-anchor-unmarked` for a row that stands for records and draws their labels' colors itself (`thimble.mix` in a cell) |
 | `key` | the name thimble keeps the sort under, the mount's id by default; give each table of a page its own |
 
-A column is `{name, title, type, width, min, drop, value(row), html(row), sort}`:
+A column is `{name, title, type, width, min, drop, value(row), html(row), sub(row), sort}`:
 
 | key | what it is |
 |---|---|
@@ -147,6 +150,7 @@ A column is `{name, title, type, width, min, drop, value(row), html(row), sort}`
 | `drop` | in a table too narrow for its columns, such as one beside the side panel, the order they drop in until the rest fit, the highest first; `false` for one that never drops. A column without one drops after those with one, the rightmost first but the one the rows are sorted by last, and the main column never does. A dropped column comes back when the table widens, and the search and the default `details` still hold it |
 | `value(row)` | the value it shows and sorts by when it is not `row[name]` |
 | `html(row)` | the cell's markup in place of its value as text |
+| `sub(row)` | a second line under the cell's value in the secondary ink, text or `{html}`, such as an email's first words under its subject or a pull request's number, author and time under its title; with one, every row is two lines tall. The search finds it and the default `details` show it |
 | `sort` | `false` for a column a click does not sort |
 
 | member | what it gives |
@@ -180,10 +184,26 @@ const diff = thimble.diff({ mount: '#diff', before: older.text, after: newer.tex
 diff.set({ before: newer.text, after: next.text, ref: next.ref })   // the next pair
 ```
 
+A code forge and git store a change as a unified patch, the lines it changed with a few lines around them, not the two
+versions. `patch` takes one in place of `before` and `after`, such as a commit's:
+
+```js
+thimble.diff({ mount: box, patch: commit.diff, ref: commit.ref })
+```
+
+- Each file the patch names (`diff --git`, or `---` over `+++`) is under a head with its path, `old → new` when it was
+  renamed, and its lines added and removed. A patch of hunks alone, as a forge gives one file's, has no head.
+- Each hunk is under its `@@ -88,3 +88,4 @@` line and the function it is in, its lines numbered from that line. The
+  lines between two hunks are not in the patch, so they do not show.
+- A binary file is its head and "Binary file, not shown". What is not a file's header or a hunk, such as `index` lines
+  or a mail's signature, is left out.
+- A patch that only adds or only removes lines, such as a file created, is inline in any mount.
+
 | option | what it is |
 |---|---|
 | `mount` | the element the diff fills |
 | `before`, `after` | the two texts; `null` or `''` for none, as for a page created or deleted |
+| `patch` | a unified diff, in place of `before` and `after` |
 | `mode` | `'auto'` (the default), `'split'` or `'inline'` |
 | `context` | the unchanged lines kept beside a change, 3 by default |
 | `titles` | `[older, newer]`, the two versions' names over their columns (inline, on one line) |
@@ -191,7 +211,7 @@ diff.set({ before: newer.text, after: next.text, ref: next.ref })   // the next 
 
 | member | what it gives |
 |---|---|
-| `set({before, after, mode, context, titles, ref})` | any of them changed and drawn at once; a new pair folds its stretches again |
+| `set({before, after, patch, mode, context, titles, ref})` | any of them changed and drawn at once; a new pair or patch folds its stretches again, and two texts draw in place of a patch |
 | `expand(on)` | every fold opened, or with `false` folded again |
 | `mode` | the mode drawn, `'split'` or `'inline'` |
 | `added`, `removed`, `changes` | the lines added and removed (a changed line counts in both) and the stretches of changes, for the page's own header such as "+12 −3" |

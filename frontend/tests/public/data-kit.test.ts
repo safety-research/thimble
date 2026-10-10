@@ -6,7 +6,8 @@
 // strip, and Reset empties it; the table draws only the rows near its view, sorts by a
 // click on a column's head with the rows with no value last, hides what Filter by does not keep, gives Color by its bars
 // and the counts of every row, opens a row in the side panel and keeps its sort; the diff aligns the lines, marks the
-// words that changed, folds the unchanged stretches with Show more and Show less, and draws side by side or inline; the
+// words that changed, folds the unchanged stretches with Show more and Show less, and draws side by side or inline, and
+// draws a patch, each file under its head and each hunk numbered from its @@ line; the
 // text (viewer_text.js, with the markdown parser of src/lib/kitMarkdown.ts) turns mentions into links that open their
 // record, shows raw HTML as text, takes every link's address off, and folds a long text with Show more.
 // The messages (viewer_messages.js) share a head between one author's messages that follow each other within five
@@ -662,6 +663,53 @@ describe('the table', () => {
     // the record viewer writes each value as the record holds it
     expect(texts('#rec .thimble-record-val')).toEqual(expect.arrayContaining(['67028', '12345', '2024', '1234.5']))
   })
+
+  test("a row's time is its data-t, and the page's attributes join its own, never an event handler's or the table's own", async () => {
+    await load(`<div id="list" style="height:400px"></div>`)
+    const w = win()
+    w.MAIL = MAIL
+    w.eval(`window.table = thimble.table({ mount: '#list', rows: window.MAIL, columns: ${JSON.stringify(COLUMNS)},
+      attrs: (m) => m.folder === 'Ops' ? { 'data-anchor-unmarked': true, class: 'mine', onclick: 'x()', 'data-anchor': 'other#L1', title: m.subject } : null })`)
+    const rows = [...doc().querySelectorAll('.thimble-table-row')] as HTMLElement[]
+    expect(rows[0].getAttribute('data-t')).toBe(String(T0))
+    expect(rows[0].hasAttribute('data-anchor-unmarked')).toBe(false)
+    expect(rows[1].hasAttribute('data-anchor-unmarked')).toBe(true)
+    expect(rows[1].className).toBe('thimble-table-row mine')
+    expect(rows[1].getAttribute('title')).toBe('Note 1')
+    expect(rows[1].hasAttribute('onclick')).toBe(false)
+    expect(rows[1].getAttribute('data-anchor')).toBe('mail.jsonl#L2')
+  })
+
+  test("a column's second line (sub): under the value in each row, which is two lines tall, found by the search and shown by the default details", async () => {
+    await load(`<div class="top"><span id="search"></span></div><div id="body"><div id="list" style="height:400px"></div></div>`)
+    const w = win()
+    w.MAIL = MAIL
+    const cols = COLUMNS.map((c) => (c.name === 'subject' ? { ...c, sub: '§' } : c))
+    w.eval(`
+      window.search = thimble.search({ mount: '#search', in: '#list' })
+      window.side = thimble.side({ mount: '#body' })
+      const cols = ${JSON.stringify(cols)}.map((c) => c.sub ? { ...c, sub: (m) => m.from === 'cy' ? { html: '<b>by</b> ' + m.from } : m.from === 'bo' ? '' : 'from <' + m.from + '>' } : c)
+      window.table = thimble.table({ mount: '#list', rows: window.MAIL, columns: cols, search: window.search, side: window.side })`)
+    const rows = [...doc().querySelectorAll('.thimble-table-row')] as HTMLElement[]
+    // the value on its line, the second line under it: text escaped, {html} as given, none where it gives none
+    const cell = (r: HTMLElement) => r.children[1]
+    expect(cell(rows[0]).querySelector('.thimble-table-line')!.textContent).toBe('Note 0')
+    expect(cell(rows[0]).querySelector('.thimble-table-sub')!.textContent).toBe('from <ana>')
+    expect(cell(rows[1]).querySelector('.thimble-table-sub')).toBe(null)
+    expect(cell(rows[2]).querySelector('.thimble-table-sub b')!.textContent).toBe('by')
+    // only the column with a second line holds one; every row is two lines tall
+    expect(rows[0].children[0].querySelector('.thimble-table-line')).toBe(null)
+    expect((doc().querySelector('.thimble-table-body') as HTMLElement).style.height).toBe(5000 * 48 + 'px')
+    expect(rows[1].style.top).toBe('48px')
+    // the search finds the second line in every row, drawn or not
+    await type('from <ana>')
+    expect(w.search.count).toBe(Math.ceil(5000 / 3))
+    await type('by cy')
+    expect(w.search.count).toBe(Math.floor(5000 / 3))
+    // the default details show it under the value
+    rows[0].click()
+    expect(texts('.thimble-side-body .thimble-table-fields dd .thimble-table-sub')).toEqual(['from <ana>'])
+  })
 })
 
 const BEFORE = ['# Memory', '', '- Ana runs the timetable.', '- Bo handles billing.', ...Array.from({ length: 20 }, (_, i) => `- note ${i + 1}`), '- Cy is the harbor master.', '- Old line to drop.'].join('\n')
@@ -761,6 +809,117 @@ describe('the diff', () => {
     w.diff.set({ before: c.join('\n'), after: d.join('\n') })
     expect(w.diff.added).toBeGreaterThan(0)
     expect(Date.now() - t0).toBeLessThan(8000)
+  })
+})
+
+// a change as git writes it: a file changed in two hunks (a removed line that starts with `--` among its lines, the
+// last line without a newline), a file renamed with a line changed, a file created, a binary file, and a signature after
+// the last hunk, as git format-patch ends a mail
+const PATCH = [
+  'diff --git a/brindle/parse.py b/brindle/parse.py',
+  'index 1a2b3c4..5d6e7f8 100644',
+  '--- a/brindle/parse.py',
+  '+++ b/brindle/parse.py',
+  '@@ -88,4 +88,4 @@ def next_weekday(start, weekday):',
+  '     """The first `weekday` after `start`."""',
+  '-    days = (weekday - start.weekday()) % 7',
+  '+    days = (weekday - start.weekday() - 1) % 7 + 1',
+  '-- a line that starts with two dashes',
+  '     return start + timedelta(days=days)',
+  '@@ -120,2 +120,3 @@ class Parser:',
+  '     def close(self):',
+  '-        pass',
+  '\\ No newline at end of file',
+  '+        self.done = True',
+  '+        return self',
+  '\\ No newline at end of file',
+  'diff --git a/docs/old.md b/docs/new.md',
+  'similarity index 90%',
+  'rename from docs/old.md',
+  'rename to docs/new.md',
+  '--- a/docs/old.md',
+  '+++ b/docs/new.md',
+  '@@ -1 +1 @@',
+  '-# Old title',
+  '+# New title',
+  'diff --git a/tests/test_parse.py b/tests/test_parse.py',
+  'new file mode 100644',
+  '--- /dev/null',
+  '+++ b/tests/test_parse.py',
+  '@@ -0,0 +1,2 @@',
+  '+def test_next_weekday():',
+  '+    assert True',
+  'diff --git a/logo.png b/logo.png',
+  'Binary files a/logo.png and b/logo.png differ',
+  '-- ',
+  '2.44.0',
+].join('\n')
+
+describe('the diff of a patch', () => {
+  test('each file it names under its head, each hunk under its @@ line, its lines numbered from it; what follows the last hunk left out', async () => {
+    await load(`<div id="d"></div>`)
+    const w = win()
+    w.eval(`window.diff = thimble.diff({ mount: '#d', patch: ${JSON.stringify(PATCH)}, mode: 'inline', ref: 'runs/r1/events.jsonl#L12' })`)
+    expect(doc().querySelector('.thimble-diff')!.getAttribute('data-anchor')).toBe('runs/r1/events.jsonl#L12')
+    expect(texts('.thimble-diff-path')).toEqual(['brindle/parse.py', 'docs/old.md → docs/new.md', 'tests/test_parse.py', 'logo.png'])
+    expect(texts('.thimble-diff-count')).toEqual(['+3 −3', '+1 −1', '+2 −0'])
+    expect(texts('.thimble-diff-empty')).toEqual(['Binary file, not shown'])
+    // each hunk's line: its range the diff's own wording, its heading the file's text
+    expect(texts('.thimble-diff-hunk')).toEqual(['@@ -88,4 +88,4 @@ def next_weekday(start, weekday):', '@@ -120,2 +120,3 @@ class Parser:', '@@ -1 +1 @@', '@@ -0,0 +1,2 @@'])
+    expect([...doc().querySelectorAll('.thimble-diff-range')].every((e) => e.hasAttribute('data-thimble-chrome'))).toBe(true)
+    expect(doc().querySelector('.thimble-diff-heading')!.hasAttribute('data-thimble-chrome')).toBe(false)
+    // the first hunk: numbered from 88 on both sides, the changed line marked word by word, the line that starts with
+    // `--` a removed line of its own
+    const rows = [...doc().querySelectorAll('.thimble-diff-row')]
+    const line = (r: Element) => {
+      const tx = r.querySelector('.thimble-diff-tx')!
+      return [...r.querySelectorAll('.thimble-diff-no')].map((n) => n.getAttribute('data-n')).concat(tx.className.replace('thimble-diff-tx thimble-diff-', '') + ':' + tx.textContent)
+    }
+    expect(rows.slice(0, 5).map(line)).toEqual([
+      ['88', '88', 'same:    """The first `weekday` after `start`."""'],
+      ['89', null, 'del:    days = (weekday - start.weekday()) % 7'],
+      [null, '89', 'ins:    days = (weekday - start.weekday() - 1) % 7 + 1'],
+      ['90', null, 'del:- a line that starts with two dashes'],
+      ['91', '90', 'same:    return start + timedelta(days=days)'],
+    ])
+    expect(texts('#d ins.thimble-diff-w')[0]).toBe('- 1')
+    // the second hunk from 120, its lines without a newline at the end read as lines
+    expect(rows.slice(5, 9).map(line)).toEqual([
+      ['120', '120', 'same:    def close(self):'],
+      ['121', null, 'del:        pass'],
+      [null, '121', 'ins:        self.done = True'],
+      [null, '122', 'ins:        return self'],
+    ])
+    // a file created: its lines from 1; the signature is no line of the diff
+    expect(rows.slice(-2).map(line)).toEqual([[null, '1', 'ins:def test_next_weekday():'], [null, '2', 'ins:    assert True']])
+    expect(doc().querySelector('#d')!.textContent).not.toContain('2.44.0')
+    expect([w.diff.added, w.diff.removed, w.diff.changes]).toEqual([6, 4, 4])
+  })
+
+  test("hunks alone, as a forge gives one file's patch: no head; a long hunk folds its unchanged stretch; set() turns between a patch and two texts", async () => {
+    await load(`<div id="d"></div>`)
+    const w = win()
+    const hunk = ['@@ -10,12 +10,12 @@ def run():', '     a = 1', ...Array.from({ length: 9 }, (_, i) => `     x${i} = ${i}`), '-    return a', '+    return a + 1', '     # end'].join('\n')
+    w.eval(`window.diff = thimble.diff({ mount: '#d', patch: ${JSON.stringify(hunk)} })`)
+    expect(doc().querySelectorAll('.thimble-diff-file')).toHaveLength(0)
+    expect(texts('.thimble-diff-hunk')).toEqual(['@@ -10,12 +10,12 @@ def run():'])
+    // the 7 lines more than 3 from the change fold, numbered from the hunk's line
+    expect(texts('.thimble-diff-gap .thimble-diff-n')).toEqual(['7 unchanged lines'])
+    const fold = doc().querySelector('[data-thimble-fold]') as HTMLElement
+    expect(fold.hidden).toBe(true)
+    expect(fold.querySelector('.thimble-diff-no')!.getAttribute('data-n')).toBe('10')
+    fold.dispatchEvent(new dom.window.CustomEvent('thimble-unfold', { bubbles: true }))
+    expect(fold.hidden).toBe(false)
+    // a patch that only adds lines is inline wherever it is
+    w.diff.set({ patch: '@@ -0,0 +1 @@\n+only' })
+    expect(w.diff.mode).toBe('inline')
+    expect([w.diff.added, w.diff.removed]).toEqual([1, 0])
+    // two texts in place of the patch, and a patch with no hunk
+    w.diff.set({ before: 'a', after: 'b' })
+    expect(doc().querySelectorAll('.thimble-diff-hunk')).toHaveLength(0)
+    expect([w.diff.added, w.diff.removed]).toEqual([1, 1])
+    w.diff.set({ patch: 'not a patch' })
+    expect(texts('.thimble-diff-empty')).toEqual(['No changes in the patch'])
   })
 })
 
@@ -1085,6 +1244,17 @@ describe('the messages', () => {
     expect(heads()).toEqual([['l#1', 'head', ''], ['l#2', 'head', 'reply'], ['l#3', 'head', ''], ['l#4', 'head', '']])
     expect(texts('[data-anchor="l#4"] .thimble-msg-said')).toEqual(['Branch deleted'])
     expect(doc().querySelector('[data-anchor="l#4"]')!.getAttribute('data-anchor-text')).toBe('Branch deleted')
+  })
+
+  test("an event's icon: a forge's pull request and issue opened each its own drawing, an icon the kit lacks a dot", async () => {
+    await load('<div id="c"></div>')
+    const w = win()
+    w.eval('window.conv = thimble.messages({ mount: "#c" })')
+    w.conv.draw(['pull', 'issue', 'commit', 'nonesuch'].map((icon, i) => ({ ref: 'e#' + i, t: T + i * 600, author: 'ana', kind: 'event', icon, said: 'did ' + icon })))
+    const drawing = (i: number) => doc().querySelector(`[data-anchor="e#${i}"] .thimble-msg-ico`)!.innerHTML
+    const all = [0, 1, 2, 3].map(drawing)
+    expect(new Set(all).size).toBe(4)
+    expect(all[3]).toBe('<circle cx="8" cy="8" r="2" fill="currentColor" stroke="none"></circle>')
   })
 
   test('a pick marks the message chosen, kept when drawn again; ↑ and ↓ go to the message above or below; mentions reach thimble.text', async () => {

@@ -32,7 +32,7 @@
                        the find's wash on the matches (::highlight(thimble-search), the current one's stronger)
      .thimble-table-*  a table of records with sortable columns that draws only the rows near its view
                        (viewer_table.js, thimble.table)
-     .thimble-diff-*   two versions of a text side by side or inline (viewer_diff.js, thimble.diff) */
+     .thimble-diff-*   two versions of a text, or a patch, side by side or inline (viewer_diff.js, thimble.diff) */
 
 body {
   font: 400 var(--text-sm) / 1.45 var(--font-body);
@@ -1670,6 +1670,21 @@ button.thimble-card {
 .thimble-table-td.thimble-table-number {
   text-align: right;
 }
+/* a cell with a second line (`sub`): its value on the first, the second quiet under it, each cut with an ellipsis */
+.thimble-table-line,
+.thimble-table-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thimble-table-sub {
+  margin-top: 1px;
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1.4 var(--font-body);
+}
+.thimble-table-fields .thimble-table-sub {
+  white-space: pre-wrap;
+}
 /* the year or the seconds a narrow column of times leaves out: still in the page, which the search finds, drawn 0 wide */
 .thimble-table-cut {
   display: inline-block;
@@ -1844,4 +1859,42 @@ ins.thimble-diff-w {
   padding: 12px 16px;
   color: var(--text-tertiary);
   font: 400 var(--text-xs) / 1.4 var(--font-body);
+}
+/* a patch: each file it names under a head (its path, its lines added and removed at the right), each hunk under its
+   @@ line on the gap's tint, the range quiet and the heading (the function the hunk is in) in the secondary ink */
+.thimble-diff-file {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-hairline);
+  color: var(--text-primary);
+  font: 500 var(--text-mono-sm) / 1.4 var(--font-mono);
+}
+.thimble-diff-file:not(:first-child) {
+  margin-top: 12px;
+  border-top: 1px solid var(--border-hairline);
+}
+.thimble-diff-path {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.thimble-diff-count {
+  flex: none;
+  color: var(--text-tertiary);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.thimble-diff-hunk {
+  padding: 3px 12px 3px calc(var(--thimble-diff-no) + 2.2ch);
+  background: rgba(var(--ink-rgb), 0.035);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.thimble-diff-inline .thimble-diff-hunk {
+  padding-left: calc(2 * var(--thimble-diff-no) + 2.2ch);
+}
+.thimble-diff-range {
+  color: var(--text-tertiary);
 }

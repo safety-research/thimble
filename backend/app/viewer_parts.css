@@ -1073,6 +1073,10 @@
   font: 600 var(--text-ui-sm) / 1.5 var(--font-body);
   white-space: normal;
 }
+/* a commit's sha or a file's path in what an event says ({html}), in the mono face as the forge writes it */
+.thimble-msg-said code {
+  font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
+}
 .thimble-msg-event .thimble-msg-body {
   margin-top: 2px;
 }
