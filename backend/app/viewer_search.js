@@ -229,6 +229,10 @@
     while (e && e !== root && INLINE[e.tagName]) e = e.parentElement
     return e
   }
+  // whether a node is text, or an inline element, that runs on with the text beside it
+  function runsOn(n) {
+    return !!n && (n.nodeType === 3 ? /\S/.test(n.nodeValue) : n.nodeType === 1 && !!INLINE[n.tagName])
+  }
   // the runs under `root`, read at once
   function runs(root) {
     var x = new Index(root)
@@ -484,8 +488,9 @@
       for (var d = 0; d < r.removedNodes.length; d++)
         if (r.removedNodes[d].nodeType !== 1 || INLINE[r.removedNodes[d].tagName]) inline = true
         else this.gone = true
-      // text that runs on in the element the change is in: that element read again
-      if (inline) add.push(unitOf(r.target, root))
+      // text that runs on in the element the change is in, or a block put in or taken out beside such text, which
+      // splits its run or joins two: that element read again
+      if (inline || runsOn(r.previousSibling) || runsOn(r.nextSibling)) add.push(unitOf(r.target, root))
     } else add.push(unitOf(r.target, root))
     for (var k = 0; k < add.length; k++) {
       if (!add[k] || add[k] === root) {

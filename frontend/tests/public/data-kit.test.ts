@@ -368,6 +368,12 @@ describe('the search', () => {
     // a phrase across an inline element added in the text
     at(4).querySelector('span')!.innerHTML = 'a <i>gale</i> warning'
     expect(find('gale warning')).toEqual({ count: 1, read: ['log.jsonl#L4'], whole: 1 })
+    // a block put in between the words splits the phrase, and taken out joins it again: the record they run in read
+    const span = at(4).querySelector('span')!
+    const block = span.insertBefore(Object.assign(doc().createElement('div'), { textContent: 'storm' }), span.lastChild)
+    expect(find('gale warning')).toEqual({ count: 0, read: ['log.jsonl#L4'], whole: 0 })
+    block.remove()
+    expect(find('gale warning')).toEqual({ count: 1, read: ['log.jsonl#L4'], whole: 1 })
     // the list drawn again whole: the page read again whole
     list.innerHTML = Array.from({ length: 80 }, (_, i) => rec(i + 1, i % 4 ? 'calm' : 'a gale')).join('')
     expect(find('gale')).toEqual({ count: 20, read: ['list'], whole: 20 })
