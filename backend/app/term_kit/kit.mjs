@@ -166,6 +166,12 @@ export function num(n) {
   return r > -1000 && r < 1000 ? String(r) : String(r).replace(/\B(?=(\d{3})+$)/g, ',')
 }
 
+// a plain number as precise as `step` needs: 0.25 to a step of 0.05, 12 to a step of 1
+function numTo(n, step) {
+  const d = step > 0 && step < 1 ? Math.min(6, Math.ceil(-Math.log10(step) - 1e-9)) : 0
+  return d ? Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: d }) : num(n)
+}
+
 /** `n word` or `n words`. */
 export function plural(n, word, many = `${word}s`) {
   return `${num(n)} ${n === 1 ? word : many}`
@@ -2271,7 +2277,8 @@ function breakGlyphs(sc) {
   return out
 }
 
-function scaleOf(from, to, cols, unit, segs = null) {
+// `fine`: plain numbers that are not all whole, such as scores, whose ticks may step by less than one
+function scaleOf(from, to, cols, unit, segs = null, fine = false) {
   // the stretches that hold data within the range; a stretch that only touches an end of the range is none
   const parts = []
   for (const [a0, b0] of segs || []) {
@@ -2279,7 +2286,7 @@ function scaleOf(from, to, cols, unit, segs = null) {
     const b = Math.min(to, b0)
     if (b > a || (b === a && a !== from && b !== to)) parts.push([a, b])
   }
-  if (parts.length > 1 && cols >= parts.length * (MIN_SEG + BREAK)) return brokenScale(from, to, cols, unit, parts)
+  if (parts.length > 1 && cols >= parts.length * (MIN_SEG + BREAK)) return brokenScale(from, to, cols, unit, parts, fine)
   const len = Math.max(1e-9, to - from)
   const step = len / cols
   const x = (t) => Math.min(cols - 1, Math.max(0, Math.floor(((t - from) / len) * cols)))
@@ -2303,9 +2310,9 @@ function scaleOf(from, to, cols, unit, segs = null) {
       if (unit === 'n') {
         const raw = (gap * len) / cols
         const p = 10 ** Math.floor(Math.log10(raw))
-        const tick = [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p
+        const tick = Math.max(fine ? 0 : 1, [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p)
         const out = []
-        for (let t = Math.ceil(from / tick) * tick; t <= to; t += tick) out.push({ t, x: x(t), label: num(t) })
+        for (let k = Math.ceil(from / tick); k * tick <= to; k++) out.push({ t: k * tick, x: x(k * tick), label: numTo(k * tick, tick) })
         return out
       }
       const tick = TICKS.find((s) => s / step >= gap) || TICKS.at(-1)
@@ -2324,7 +2331,7 @@ function scaleOf(from, to, cols, unit, segs = null) {
 
 // a scale with breaks: each stretch its share of the cells by its length (at least MIN_SEG), the empty time between
 // two stretches BREAK cells, as the browser's broken scale lays them out
-function brokenScale(from, to, cols, unit, parts) {
+function brokenScale(from, to, cols, unit, parts, fine = false) {
   const room = cols - BREAK * (parts.length - 1)
   const total = parts.reduce((n, [a, b]) => n + (b - a), 0)
   let ws = parts.map(([a, b]) => (total > 0 ? ((b - a) / total) * room : room / parts.length))
@@ -2391,10 +2398,10 @@ function brokenScale(from, to, cols, unit, parts) {
       if (unit === 'n') {
         const raw = gap * step
         const p = 10 ** Math.floor(Math.log10(raw))
-        const tick = [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p
+        const tick = Math.max(fine ? 0 : 1, [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p)
         return segs.flatMap((g) => {
           const out = []
-          for (let t = Math.ceil(g.a / tick) * tick; t <= g.b; t += tick) out.push({ t, x: x(t), label: num(t) })
+          for (let k = Math.ceil(g.a / tick); k * tick <= g.b; k++) out.push({ t: k * tick, x: x(k * tick), label: numTo(k * tick, tick) })
           return out
         })
       }
@@ -3999,12 +4006,16 @@ export function timeline(opts = {}) {
       else if (!o.scale) unit = opts.unit === 'n' ? 'n' : 's'
       const placed = (it) => it !== null && it !== undefined && time(it) !== null
       const items = (o.items || []).every(placed) ? o.items || [] : o.items.filter(placed)
+      // plain numbers not all whole, such as scores: their ticks and tips keep the decimals a cell needs
+      const fine = unit === 'n' && items.some((it) => time(it) % 1 || endOf(it, time(it)) % 1)
       const gutter = o.gutter || (bare ? 0 : 14)
-      // an axis of its own takes a row under the lanes, and one more where its key has no room in the gutter
+      // an axis of its own takes a row under the lanes, and one more where its key has no room in the gutter; none
+      // with no records to place
       const keyW = [typeof opts.band === 'function' && `─ ${words.band}`, typeof opts.problem === 'function' && `× ${words.problem}`].filter(Boolean).reduce((w, s, i) => w + (i ? 2 : 0) + width(s), 0)
-      const axisRows = o.scale ? 0 : keyW && keyW > gutter - 2 ? 2 : 1
+      const ownAxis = !o.scale && items.length > 0
+      const axisRows = ownAxis ? (keyW && keyW > gutter - 2 ? 2 : 1) : 0
       const room = Math.max(1, Math.min(o.room ?? d.left, d.left) - axisRows)
-      const scale = o.scale || ownScale(items, Math.max(10, d.cols - gutter))
+      const scale = o.scale || ownScale(items, Math.max(10, d.cols - gutter), fine)
       const colour = opts.colour || state.colour
       const span = o.span && typeof o.span.span === 'function' ? o.span.span(time) : Array.isArray(o.span) ? o.span : null
       const dense = o.density !== false
@@ -4012,7 +4023,7 @@ export function timeline(opts = {}) {
       st.counts = { band: 0, problem: 0 }
       const groups = all.map((n) => n.items)
       const max = maxBin(scale, groups, time)
-      const whens = Array.from({ length: scale.cols }, (_, x) => (unit === 'n' ? num(scale.t(x)) : when(scale.t(x), Math.max(1, scale.step))))
+      const whens = Array.from({ length: scale.cols }, (_, x) => (unit === 'n' ? (fine ? numTo(scale.t(x), scale.step) : num(scale.t(x))) : when(scale.t(x), Math.max(1, scale.step))))
       // the rows past the room wait behind `… N more`, which shows the next of them
       const fits = all.length <= room ? all.length : Math.max(1, room - 1)
       if (st.top >= all.length || all.length <= room) st.top = 0
@@ -4062,12 +4073,12 @@ export function timeline(opts = {}) {
         const words2 = left > 0 ? `… ${num(left)} more` : '… back to the first'
         d.row().gap(2).add(words2, { d: true }, { on: () => { st.top = left > 0 ? st.top + fits : 0; redraw() }, tip: left > 0 ? 'show the next lanes' : 'show the first lanes' }).end()
       }
-      if (!o.scale) axis(d, scale, { gutter, legend: api.legend() })
+      if (ownAxis) axis(d, scale, { gutter, legend: api.legend() })
     },
   }
   // without a scale from the page: the records' whole span across `cols` cells; one record's moment, or none, in the
   // middle of a minute (of one unit for plain numbers)
-  function ownScale(items, cols) {
+  function ownScale(items, cols, fine) {
     let a = Infinity
     let b = -Infinity
     for (const it of items) {
@@ -4082,7 +4093,7 @@ export function timeline(opts = {}) {
       a -= half
       b += half
     }
-    return scaleOf(a, b, cols, unit)
+    return scaleOf(a, b, cols, unit, null, fine)
   }
   state.resets.push({ changed: () => st.off.size > 0, reset: () => { st.off.clear(); save() } })
   return api

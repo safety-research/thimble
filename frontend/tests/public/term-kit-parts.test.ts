@@ -402,6 +402,29 @@ describe('the timeline on its own', () => {
     const hit = last().hits.find((h: any) => h.cursor)
     expect(hit.tips[0]).toBe('lead · 0 · 1 record')
   })
+
+  test('on plain numbers not all whole, such as scores: the ticks and the tips in decimals, each tick once; whole numbers never step under one; no records, no axis', async () => {
+    init({ cols: 80 })
+    const runs = [0.05, 0.31, 0.5, 0.72, 0.95].map((score) => ({ score }))
+    const tl = kit.timeline({ unit: 'n', time: (r: any) => r.score })
+    kit.draw((d: any) => tl.draw(d, { items: runs }))
+    await tick()
+    const ticks = text()[1].trim().split(/\s+/)
+    expect(ticks).toEqual(expect.arrayContaining(['0.2', '0.4']))
+    expect(new Set(ticks).size).toBe(ticks.length)
+    // the first cell's middle, to the hundredth a cell spans
+    expect(last().hits.find((h: any) => h.cursor).tips[0]).toMatch(/^0\.0\d · 1 record$/)
+    // turns 0 to 3: a tick at each whole turn, never 0.5
+    const turns = kit.timeline({ unit: 'n', time: (r: any) => r.turn })
+    kit.draw((d: any) => turns.draw(d, { items: [0, 1, 2, 3].map((turn) => ({ turn })) }))
+    await tick()
+    expect(text()[1].trim().split(/\s+/)).toEqual(['0', '1', '2', '3'])
+    // nothing to place: no axis of 1970 under no lanes
+    const none = kit.timeline({ rows: 'author' })
+    kit.draw((d: any) => none.draw(d, { items: [] }))
+    await tick()
+    expect(text().filter(Boolean)).toEqual([])
+  })
 })
 
 describe('a page\'s own chart', () => {

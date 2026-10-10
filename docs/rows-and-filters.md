@@ -158,7 +158,7 @@ tl.draw(commits) // [{t: 1778922000, author: 'ana', text: 'Fix the parser'}]
 |---|---|
 | `rows`, `range`, `colour` | the lanes: the Rows control, a field's name or a function of a record; the time range (its `scale(width)`); and Color by (the page's by default) |
 | `time(item)`, `end(item)` | a record's place on the axis (`item.t` by default), a number, or a Date or an ISO time on an axis of time, else the record is left out; and its end, for a mark as wide as the record ran |
-| `unit` | the axis's unit with no range, as the time range's: `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a turn or a line |
+| `unit` | the axis's unit with no range, as the time range's: `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a turn, a line or a score |
 | `band(lane)` | the spans the lane ran, `[[start, end]]`, drawn as a light band (the key's "running") |
 | `problem(item)` | whether a record failed: its mark is underlined in the problem red (the key's "failed") |
 | `words` | the key's words: `{band, problem}` |

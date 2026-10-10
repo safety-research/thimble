@@ -449,6 +449,25 @@ describe('the timeline on its own', () => {
     expect(w.ranged.scale.unit).toBe('n')
   })
 
+  test("on plain numbers not all whole, such as scores: the axis in decimals and the tips as precise as four px; whole numbers never step under one", async () => {
+    await load()
+    const w = win()
+    w.RUNS = [0.05, 0.31, 0.5, 0.72, 0.95].map((score, i) => ({ score, model: i % 2 ? 'b' : 'a', text: 'run ' + i }))
+    w.eval(`window.tl = thimble.timeline({ mount: '#lanes', rows: 'model', unit: 'n', time: (r) => r.score }); window.tl.draw(window.RUNS)`)
+    await wait()
+    const labels = texts('#lanes .thimble-lanes-axis .thimble-axis-lab')
+    expect(labels).toEqual(expect.arrayContaining(['0.2', '0.4', '0.6', '0.8']))
+    expect(new Set(labels).size).toBe(labels.length)
+    const lane = doc().querySelectorAll('#lanes .thimble-lane')[1]
+    hover(lane, 200 + Number(lane.querySelector('.thimble-lane-mark')!.getAttribute('x')) + 1)
+    expect(tipOf()).toEqual([expect.stringMatching(/^b · 0\.31\d$/), 'run 1'])
+    // turns 0 to 3 across the width: a tick at each whole turn, each once
+    mount('tl2')
+    w.eval(`thimble.timeline({ mount: '#tl2', unit: 'n', time: (r) => r.turn }).draw([0, 1, 2, 3].map((turn) => ({ turn })))`)
+    await wait()
+    expect(texts('#tl2 .thimble-axis-lab')).toEqual(['0', '1', '2', '3'])
+  })
+
   test('a mark as wide as its record ran: the longest drawn first, so that it never hides a short one under it', async () => {
     await load()
     const w = win()

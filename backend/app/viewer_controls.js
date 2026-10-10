@@ -1325,14 +1325,16 @@
     var w = this.trackW()
     if (this.range && typeof this.range.scale === 'function') return this.range.scale(w)
     // without a range: the records' whole span, PAD px in from each edge, on a scale of its own; one record's moment,
-    // or none, in the middle of a minute (of one unit for plain numbers)
+    // or none, in the middle of a minute (of one unit for plain numbers); plain numbers not all whole step finer
     var a = Infinity
     var b = -Infinity
+    var fine = false
     for (var i = 0; i < this.items.length; i++) {
       var t = this.time(this.items[i])
       var e = this.endOf(this.items[i], t)
       if (t < a) a = t
       if (e > b) b = e
+      if (!fine && this.unit === 'n' && (t % 1 || e % 1)) fine = true
     }
     if (!isFinite(a)) a = b = 0
     if (b <= a) {
@@ -1343,7 +1345,7 @@
     var pad = ((b - a) * PAD) / Math.max(1, w - 2 * PAD)
     a -= pad
     b += pad
-    if (typeof shared.scale === 'function') return shared.scale(this.unit, a, b, w)
+    if (typeof shared.scale === 'function') return shared.scale(this.unit, a, b, w, fine)
     return { from: a, to: b, width: w, x: function (t) { return ((t - a) / (b - a)) * w }, t: function (x) { return a + (x / w) * (b - a) } }
   }
   // the lanes: the groups of Rows, a field or a function (or `groups(items)`), a parent folded taking its descendants'

@@ -68,6 +68,11 @@
   function num(n) {
     return Number(n || 0).toLocaleString('en-US')
   }
+  // a plain number as precise as `step` needs: 0.25 to a step of 0.05, 12 to a step of 1
+  function numTo(n, step) {
+    var d = step > 0 && step < 1 ? Math.min(6, Math.ceil(-Math.log(step) / Math.LN10 - 1e-9)) : 0
+    return Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: d })
+  }
   function el(target) {
     if (typeof target === 'string') return document.querySelector(target)
     return target && target.nodeType === 1 ? target : null
@@ -111,11 +116,13 @@
 
   // ---------------------------------------------------------------- time in words
   // A unit: 's' seconds since 1970, 'ms' milliseconds, 'n' a plain number such as a row or a turn. `utc` shows times in
-  // UTC, else in the browser's zone.
-  function Units(unit, utc) {
+  // UTC, else in the browser's zone. `fine`: plain numbers that are not all whole, such as scores, whose axis may step
+  // by less than one and whose words keep the decimals the step needs.
+  function Units(unit, utc, fine) {
     this.unit = unit === 'ms' || unit === 'n' ? unit : 's'
     this.utc = utc !== false
     this.time = this.unit !== 'n'
+    this.fine = !this.time && !!fine
     this.k = this.unit === 's' ? SEC : 1
   }
   Units.prototype.ms = function (t) {
@@ -182,7 +189,7 @@
   }
   // a moment, as precise as `step` (in the units) needs
   Units.prototype.at = function (t, step, years) {
-    if (!this.time) return num(Math.round(t))
+    if (!this.time) return this.fine ? numTo(t, step) : num(Math.round(t))
     var ms = this.ms(step || 0)
     if (ms >= DAY) return this.dm(t, years)
     return this.dm(t, years) + ' ' + this.hm(t, ms < MIN)
@@ -270,7 +277,7 @@
     if (!u.time) {
       var p = Math.pow(10, Math.floor(Math.log(Math.max(want, 1e-9)) / Math.LN10))
       var m = [1, 2, 5, 10]
-      for (var i = 0; i < m.length; i++) if (m[i] * p >= want) return Math.max(1, m[i] * p)
+      for (var i = 0; i < m.length; i++) if (m[i] * p >= want) return Math.max(u.fine ? 0 : 1, m[i] * p)
       return 10 * p
     }
     var ms = u.ms(want)
@@ -311,7 +318,7 @@
     var years = opts.years != null ? opts.years : u.time && u.parts(this.from).y !== u.parts(this.to).y
     var ms = typeof step === 'object' ? step.months * 30 * DAY : u.ms(step)
     var label = function (t) {
-      if (!u.time) return num(t)
+      if (!u.time) return numTo(t, step)
       var p = u.parts(t)
       if (typeof step === 'object') return p.mo === 0 || step.months >= 12 ? String(p.y) : MONTH[p.mo] + (years && p.mo === 0 ? ' ' + p.y : '')
       if (ms >= DAY) return p.d === 1 && ms <= 7 * DAY ? u.dm(t) : u.dm(t)
@@ -459,10 +466,11 @@
     }
   }
   // a scale of a span the page gives, for a part drawn without a range (viewer_controls.js thimble.timeline): `from`
-  // to `to` across `width` px in `unit` ('s', 'ms' or 'n'), with format(t, step) as a range words a time
+  // to `to` across `width` px in `unit` ('s', 'ms' or 'n'), with format(t, step) as a range words a time; `fine` for
+  // plain numbers that are not all whole (Units)
   if (shared)
-    shared.scale = function (unit, from, to, width) {
-      var u = new Units(unit)
+    shared.scale = function (unit, from, to, width, fine) {
+      var u = new Units(unit, true, fine)
       var sc = scaleApi(new Scale(u, from, to, width))
       var years = u.time && u.parts(from).y !== u.parts(to).y
       sc.format = function (t, step) {
